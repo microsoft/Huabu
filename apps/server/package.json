@@ -17,7 +17,8 @@
     "eval": "tsx evals/cli.ts run",
     "eval:list": "tsx evals/cli.ts list",
     "eval:baseline": "tsx evals/cli.ts baseline",
-    "eval:diff": "tsx evals/cli.ts diff"
+    "eval:diff": "tsx evals/cli.ts diff",
+    "test:storage": "vitest run --config vitest.storage.config.ts"
   },
   "dependencies": {
     "@agenetes/acp-driver": "workspace:*",
@@ -59,12 +60,14 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@testcontainers/postgresql": "^12.1.0",
     "@types/archiver": "^7.0.0",
     "@types/node": "^22.15.0",
     "@types/pg": "^8.23.1",
     "@types/sanitize-html": "^2.16.0",
     "@types/turndown": "^5.0.6",
     "@types/yauzl": "^2.10.3",
+    "testcontainers": "^12.1.0",
     "tsup": "^8.5.1",
     "tsx": "^4.0.0",
     "typescript": "^6.0.3",

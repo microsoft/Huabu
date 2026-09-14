@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { PostgresStoreContext } from './database.js';
+import { PostgresStructuredStore } from './structured-store.js';
 import { openPostgresTestStore } from './test-support.js';
 import { PostgresWorkspaceRepository } from './workspace-repository.js';
 import { describeSpaceExtensionContract } from '../../ports/contracts/space-extension.contract.js';
@@ -22,7 +24,28 @@ async function ordinary() {
   const harness = await openPostgresTestStore();
   const canvasId = 'contract-space';
   await harness.store.spaces().create({ canvasId, title: 'Contract Space' });
-  return { ...harness, canvasId, space: harness.store.space(canvasId) };
+  const peer = new PostgresStoreContext(harness.config);
+  try {
+    await peer.init();
+    peer.useWorkspace(harness.workspaceId);
+    return {
+      ...harness,
+      canvasId,
+      space: harness.store.space(canvasId),
+      concurrent: new PostgresStructuredStore(peer).space(canvasId),
+      cleanup: async () => {
+        try {
+          await peer.close();
+        } finally {
+          await harness.cleanup();
+        }
+      },
+    };
+  } catch (error) {
+    await peer.close();
+    await harness.cleanup();
+    throw error;
+  }
 }
 
 describeStructuredStoreContract('Postgres', async () => {
@@ -81,7 +104,7 @@ describeSpaceWriteContract('Postgres', async () => {
   });
   return {
     space: h.space,
-    concurrent: h.store.space(h.canvasId),
+    concurrent: h.concurrent,
     missing: h.store.space('missing'),
     existingNode,
     newNode: note('contract-new-node', 'New contract node', 'after'),
@@ -113,7 +136,7 @@ describeSpaceWriteContract('Postgres', async () => {
 
 describeSpaceLogsContract('Postgres', async () => {
   const h = await ordinary();
-  const concurrent = h.store.space(h.canvasId);
+  const concurrent = h.concurrent;
   return {
     events: h.space.events,
     changes: h.space.changes,
@@ -126,7 +149,7 @@ describeSpaceTasksContract('Postgres', async () => {
   const h = await ordinary();
   return {
     tasks: h.space.tasks,
-    concurrent: h.store.space(h.canvasId).tasks,
+    concurrent: h.concurrent.tasks,
     canvasId: h.canvasId,
     missing: h.store.space('missing').tasks,
     missingCanvasId: 'missing',

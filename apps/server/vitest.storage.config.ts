@@ -11,6 +11,7 @@ export default defineConfig({
     ...base.test,
     include: ['src/modules/storage/**/*.remote.test.ts'],
     exclude: [],
+    globalSetup: ['./src/test-support/storage-containers.ts'],
     maxWorkers: 2,
     hookTimeout: 30_000,
     testTimeout: 30_000,

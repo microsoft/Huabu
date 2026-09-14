@@ -6,6 +6,7 @@ import { Readable } from 'node:stream';
 
 import { afterEach, expect, it } from 'vitest';
 
+import { AzureBlobStore } from './blob-store.js';
 import { openAzureTestStore } from './test-support.js';
 
 let harness: Awaited<ReturnType<typeof openAzureTestStore>> | undefined;
@@ -134,4 +135,56 @@ it('serializes staged replacements across separately resolved scopes and recover
   expect(await firstScope.read('same-key')).toEqual(
     Buffer.from('second writer'),
   );
+});
+
+it('reopens committed blobs and keeps configured prefixes isolated in one container', async () => {
+  const h = await open();
+  const scope = h.store.space('space').artifacts;
+  await scope.put('你好.txt', Buffer.from('persistent bytes'));
+  await h.store.close();
+  const reopened = new AzureBlobStore(h.container, () => h.workspace.id);
+  const isolated = new AzureBlobStore(
+    h.container,
+    () => h.workspace.id,
+    'other-prefix',
+  );
+  try {
+    await reopened.init();
+    await isolated.init();
+    expect(await reopened.space('space').artifacts.read('你好.txt')).toEqual(
+      Buffer.from('persistent bytes'),
+    );
+    expect(await isolated.space('space').artifacts.read('你好.txt')).toBeNull();
+    await isolated
+      .space('space')
+      .artifacts.put('你好.txt', Buffer.from('other bytes'));
+    await isolated.space('space').artifacts.deleteAll();
+    expect(await reopened.space('space').artifacts.read('你好.txt')).toEqual(
+      Buffer.from('persistent bytes'),
+    );
+    expect(await h.container.exists()).toBe(true);
+  } finally {
+    await reopened.close();
+    await isolated.close();
+  }
+});
+
+it('handles hasMany batches and deletes snapshot-bearing blobs without touching other areas', async () => {
+  const h = await open();
+  const areas = h.store.space('space');
+  const names = Array.from({ length: 35 }, (_, i) => `file-${i}`);
+  await Promise.all(
+    names.map((name) => areas.artifacts.put(name, Buffer.from(name))),
+  );
+  await areas.uploads.put('file-0', Buffer.from('upload'));
+  expect(
+    await areas.artifacts.hasMany([...names, ...names, 'missing']),
+  ).toEqual(new Set(names));
+  const client = h.container.getBlobClient(
+    `huabu/${h.workspace.id}/space/artifacts/file-0`,
+  );
+  await client.createSnapshot();
+  await areas.artifacts.deleteAll();
+  expect(await areas.artifacts.list()).toEqual([]);
+  expect(await areas.uploads.read('file-0')).toEqual(Buffer.from('upload'));
 });

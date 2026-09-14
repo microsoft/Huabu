@@ -4,27 +4,51 @@
 import { randomUUID } from 'node:crypto';
 
 import { Pool } from 'pg';
+import { inject } from 'vitest';
 
 import { PostgresStoreContext } from './database.js';
 import { PostgresStructuredStore } from './structured-store.js';
 import { PostgresWorkspaceRepository } from './workspace-repository.js';
 
-/** One disposable schema per case, created only on the explicit test database. */
-export async function openPostgresTestStore(withWorld = true) {
-  const connectionString = process.env['HUABU_TEST_POSTGRES_URL'];
+import type {} from '../../../../test-support/storage-containers.js';
+
+/** One disposable schema per case, always on the Testcontainers database. */
+export async function openPostgresTestDatabase() {
+  const connectionString = inject('postgresUrl');
   if (!connectionString)
     throw new Error(
       'Run pnpm test:storage-backends to provision PostgreSQL and Azurite',
     );
   const schema = `huabu_test_${randomUUID().split('-').join('')}`;
   const admin = new Pool({ connectionString, max: 1 });
-  await admin.query(`CREATE SCHEMA ${schema}`);
-  const config = {
-    connectionString,
-    options: `-c search_path=${schema}`,
-    max: 4,
+  try {
+    await admin.query(`CREATE SCHEMA ${schema}`);
+  } catch (error) {
+    await admin.end();
+    throw error;
+  }
+  return {
+    config: { connectionString, options: `-c search_path=${schema}`, max: 4 },
+    cleanup: async () => {
+      try {
+        await admin.query(`DROP SCHEMA ${schema} CASCADE`);
+      } finally {
+        await admin.end();
+      }
+    },
   };
-  const context = new PostgresStoreContext(config);
+}
+
+export async function openPostgresTestStore(withWorld = true) {
+  const database = await openPostgresTestDatabase();
+  const context = new PostgresStoreContext(database.config);
+  const cleanup = async () => {
+    try {
+      await context.close();
+    } finally {
+      await database.cleanup();
+    }
+  };
   try {
     await context.init();
     const repository = new PostgresWorkspaceRepository(context);
@@ -35,19 +59,13 @@ export async function openPostgresTestStore(withWorld = true) {
     return {
       store,
       context,
-      config,
+      config: database.config,
       workspaceId: workspace.workspaceId,
       worldId,
-      cleanup: async () => {
-        await context.close();
-        await admin.query(`DROP SCHEMA ${schema} CASCADE`);
-        await admin.end();
-      },
+      cleanup,
     };
   } catch (error) {
-    await context.close();
-    await admin.query(`DROP SCHEMA ${schema} CASCADE`);
-    await admin.end();
+    await cleanup();
     throw error;
   }
 }

@@ -4,11 +4,14 @@
 import { randomUUID } from 'node:crypto';
 
 import { BlobServiceClient } from '@azure/storage-blob';
+import { inject } from 'vitest';
 
 import { AzureBlobStore } from './blob-store.js';
 
+import type {} from '../../../../test-support/storage-containers.js';
+
 export async function openAzureTestStore() {
-  const connection = process.env['HUABU_TEST_AZURE_CONNECTION_STRING'];
+  const connection = inject('azureConnectionString');
   if (!connection)
     throw new Error(
       'Run pnpm test:storage-backends to provision PostgreSQL and Azurite',
@@ -38,8 +41,9 @@ export async function prepareAzureTestEnvironment() {
     process.env['HUABU_AZURE_STORAGE_CONNECTION_STRING'];
   const previousContainer = process.env['HUABU_AZURE_BLOB_CONTAINER'];
   const previousPrefix = process.env['HUABU_AZURE_BLOB_PREFIX'];
-  process.env['HUABU_AZURE_STORAGE_CONNECTION_STRING'] =
-    process.env['HUABU_TEST_AZURE_CONNECTION_STRING'];
+  process.env['HUABU_AZURE_STORAGE_CONNECTION_STRING'] = inject(
+    'azureConnectionString',
+  );
   process.env['HUABU_AZURE_BLOB_CONTAINER'] = h.container.containerName;
   process.env['HUABU_AZURE_BLOB_PREFIX'] = 'test';
   return async () => {
