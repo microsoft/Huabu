@@ -19,6 +19,8 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./vitest.setup.ts'],
     include: ['src/**/*.test.ts', 'evals/**/*.test.ts'],
+    // Real remote-backend suites have a required service lifecycle; CI runs them separately.
+    exclude: ['src/**/*.remote.test.ts'],
     // Many suites drive real filesystem work through temp workspaces, which
     // overruns the 5s default once the whole repo runs in parallel.
     testTimeout: 20_000,

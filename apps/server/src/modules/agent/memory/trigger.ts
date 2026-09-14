@@ -78,7 +78,7 @@ const EMPTY_STATE: MemoryState = {
 export async function readMemoryState(canvasId: string): Promise<MemoryState> {
   const substrate = await space(canvasId).extension(MEMORY_NAMESPACE);
   if (!substrate) return { ...EMPTY_STATE };
-  const raw = readSubstrateDocument<Partial<MemoryState>>(
+  const raw = await readSubstrateDocument<Partial<MemoryState>>(
     substrate,
     STATE_DOCUMENT,
   );
@@ -111,7 +111,7 @@ export async function writeMemoryState(
 ): Promise<void> {
   const substrate = await space(canvasId).extension(MEMORY_NAMESPACE);
   if (!substrate) return;
-  writeSubstrateDocument(substrate, STATE_DOCUMENT, state);
+  await writeSubstrateDocument(substrate, STATE_DOCUMENT, state);
 }
 
 /**

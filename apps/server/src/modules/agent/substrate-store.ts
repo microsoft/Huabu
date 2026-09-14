@@ -26,6 +26,7 @@ import { atomicWriteJson, readJson, sanitizeId } from '../../utils/fs.js';
 
 import type { SpaceSubstrate } from '../storage/index.js';
 import type { DatabaseSync } from 'node:sqlite';
+import type { Pool } from 'pg';
 
 /** Tables created on demand, once per connection. */
 const prepared = new WeakSet<DatabaseSync>();
@@ -54,13 +55,28 @@ function ensureTables(database: DatabaseSync): void {
  * missing document as "start from nothing", and a bookkeeping file a user can
  * corrupt by hand must not be able to fail a request.
  */
-export function readSubstrateDocument<T>(
+export async function readSubstrateDocument<T>(
   substrate: SpaceSubstrate,
   name: string,
-): T | null {
+): Promise<T | null> {
   const safe = sanitizeId(name, 'document name');
   if (substrate.kind === 'disk') {
     return readJson<T>(path.join(substrate.directory, `${safe}.json`));
+  }
+  if (substrate.kind === 'postgres') {
+    await ensurePostgresTables(substrate.database);
+    const row = (
+      await substrate.database.query(
+        'SELECT body FROM extension_documents WHERE extension_id=$1 AND name=$2',
+        [substrate.extensionId, safe],
+      )
+    ).rows[0];
+    if (!row) return null;
+    try {
+      return JSON.parse(row.body) as T;
+    } catch {
+      return null;
+    }
   }
   ensureTables(substrate.database);
   const row = substrate.database
@@ -78,14 +94,26 @@ export function readSubstrateDocument<T>(
 }
 
 /** Replace one JSON document in a namespace. */
-export function writeSubstrateDocument(
+export async function writeSubstrateDocument(
   substrate: SpaceSubstrate,
   name: string,
   value: unknown,
-): void {
+): Promise<void> {
   const safe = sanitizeId(name, 'document name');
   if (substrate.kind === 'disk') {
     atomicWriteJson(path.join(substrate.directory, `${safe}.json`), value);
+    return;
+  }
+  if (substrate.kind === 'postgres') {
+    await ensurePostgresTables(substrate.database);
+    const body = JSON.stringify(value);
+    if (body === undefined)
+      throw new TypeError(`Document ${safe} is not representable as JSON`);
+    await substrate.database.query(
+      `INSERT INTO extension_documents (extension_id,name,body) VALUES ($1,$2,$3)
+      ON CONFLICT(extension_id,name) DO UPDATE SET body=excluded.body`,
+      [substrate.extensionId, safe, body],
+    );
     return;
   }
   ensureTables(substrate.database);
@@ -109,12 +137,12 @@ export function writeSubstrateDocument(
  * developer tails it. Elsewhere it is a row that grows, which keeps the same
  * feature working without pretending there is a file to tail.
  */
-export function appendSubstrateLog(
+export async function appendSubstrateLog(
   substrate: SpaceSubstrate,
   name: string,
   suffix: string,
   block: string,
-): void {
+): Promise<void> {
   const safe = sanitizeId(name, 'log name');
   if (substrate.kind === 'disk') {
     mkdirSync(substrate.directory, { recursive: true });
@@ -122,6 +150,15 @@ export function appendSubstrateLog(
       path.join(substrate.directory, `${safe}${suffix}`),
       block,
       'utf8',
+    );
+    return;
+  }
+  if (substrate.kind === 'postgres') {
+    await ensurePostgresTables(substrate.database);
+    await substrate.database.query(
+      `INSERT INTO extension_documents (extension_id,name,body) VALUES ($1,$2,$3)
+      ON CONFLICT(extension_id,name) DO UPDATE SET body=extension_documents.body || excluded.body`,
+      [substrate.extensionId, `${safe}${suffix}`, block],
     );
     return;
   }
@@ -134,4 +171,34 @@ export function appendSubstrateLog(
          body = extension_documents.body || excluded.body`,
     )
     .run(substrate.extensionId, `${safe}${suffix}`, block);
+}
+
+const postgresPrepared = new WeakMap<Pool, Promise<void>>();
+async function ensurePostgresTables(database: Pool): Promise<void> {
+  let pending = postgresPrepared.get(database);
+  if (!pending) {
+    pending = (async () => {
+      const client = await database.connect();
+      let broken = false;
+      try {
+        await client.query('BEGIN');
+        await client.query("SET LOCAL lock_timeout = '5s'");
+        await client.query('SELECT pg_advisory_xact_lock(184202608)');
+        await client.query(SCHEMA.replace(') STRICT;', ');'));
+        await client.query('COMMIT');
+      } catch (error) {
+        try {
+          await client.query('ROLLBACK');
+        } catch {
+          broken = true;
+        }
+        throw error;
+      } finally {
+        client.release(broken);
+      }
+    })();
+    postgresPrepared.set(database, pending);
+    void pending.catch(() => postgresPrepared.delete(database));
+  }
+  await pending;
 }

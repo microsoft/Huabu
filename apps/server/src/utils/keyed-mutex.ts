@@ -32,12 +32,13 @@ export function createKeyedMutex<K = string>() {
       () => fn(),
       () => fn(),
     );
-    // Store a swallowed version as the new tail so an unobserved
-    // rejection here doesn't trigger Node's unhandledRejection.
-    tails.set(
-      key,
-      next.catch(() => undefined),
-    );
+    // Release settled keys as well as superseded tails. Blob names are
+    // unbounded, so a completed upload must not leave a permanent map entry.
+    const clear = () => {
+      if (tails.get(key) === tail) tails.delete(key);
+    };
+    const tail = next.then(clear, clear);
+    tails.set(key, tail);
     return next;
   };
 }
