@@ -140,7 +140,10 @@ describe('ACP durable history recovery', () => {
       .mockResolvedValueOnce(entry);
 
     const handle = new AcpAgentHandle(
-      spec,
+      {
+        ...spec,
+        spec: { ...spec.spec, initialPreamble: ['SYSTEM'] },
+      },
       durableContext(authorizeHistoryLoad),
     );
     for await (const _event of handle.run(submission, {
@@ -182,13 +185,14 @@ describe('ACP durable history recovery', () => {
       ],
     });
     expect(prompt.mock.calls[0]?.[1]).toEqual([
+      { type: 'text', text: 'current request' },
+      { type: 'text', text: 'SYSTEM' },
       expect.objectContaining({
         type: 'text',
         text: expect.stringContaining(
           '"rendered":[{"type":"text","text":"earlier question"}]',
         ),
       }),
-      { type: 'text', text: 'current request' },
     ]);
   });
 
@@ -241,7 +245,7 @@ describe('ACP durable history recovery', () => {
     expect(authorized).not.toContain(imageData);
     expect(authorized).toContain('image omitted from text-only history replay');
 
-    const historyBlock = prompt.mock.calls[0]?.[1]?.[0] as { text: string };
+    const historyBlock = prompt.mock.calls[0]?.[1]?.at(-1) as { text: string };
     expect(historyBlock.text).not.toContain(imageData);
     expect(historyBlock.text).toContain('inspect this image');
     expect(historyBlock.text).toContain(
@@ -424,8 +428,8 @@ describe('ACP durable history recovery', () => {
     }
 
     expect(prompt.mock.calls[1]?.[1]).toEqual([
-      { type: 'text', text: 'SYSTEM' },
       { type: 'text', text: 'hello' },
+      { type: 'text', text: 'SYSTEM' },
     ]);
     expect(entry.initialPreambleDelivered).toBe(true);
     expect(sessionMocks.reportEntryState).toHaveBeenCalledTimes(4);
