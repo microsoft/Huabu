@@ -244,16 +244,16 @@ function buildThreadHaystack(turns: readonly AgentTurn[]): string {
  * limit before invoking. No-op when the node owns no thread or the
  * thread is empty.
  */
-function scanNodeConversation(
+async function scanNodeConversation(
   node: SearchableNode,
   canvasId: string,
   label: string | null,
   needleLower: string,
   needleLen: number,
   tryEmit: (match: CanvasSearchMatch) => boolean,
-): void {
+): Promise<void> {
   if (!node.threadId) return;
-  const { turns } = agenetes.history(
+  const { turns } = await agenetes.history(
     canvasAcpNamespace(canvasId),
     node.threadId,
   );
@@ -684,7 +684,7 @@ export async function searchCanvas(
       }
       const content = contentByNodeId.get(node.id);
       const label = content?.label ?? null;
-      scanNodeConversation(
+      await scanNodeConversation(
         node,
         handle.canvasId,
         label,

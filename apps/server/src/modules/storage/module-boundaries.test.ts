@@ -226,7 +226,9 @@ describe('storage dependency direction', () => {
       // Tests construct adapters directly — that is how an adapter gets
       // exercised. The rule is about production source: one place decides
       // which backend the process runs.
-      .filter((f) => !f.endsWith('.test.ts'))
+      .filter(
+        (f) => !f.endsWith('.test.ts') && f !== 'modules/storage/testing.ts',
+      )
       .filter((file) =>
         specifiersOf(file).some((spec) => {
           const target = resolveSpecifier(file, spec);

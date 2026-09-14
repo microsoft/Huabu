@@ -31,6 +31,7 @@ import {
   getWorkspaceHandle,
   getWorkspaceKey,
 } from '../workspace.js';
+import { AzureBlobStore } from './backends/azure/blob-store.js';
 import { DiskBlobStore } from './backends/disk/blob-store.js';
 import { getWorldCanvasId as diskWorldCanvasId } from './backends/disk/canvas-dirs.js';
 import {
@@ -42,6 +43,9 @@ import { stageDiskSpaceImport } from './backends/disk/space-import.js';
 import { diskSpaceTree } from './backends/disk/space-tree.js';
 import { DiskStructuredStore } from './backends/disk/structured-store.js';
 import { DiskWorkspaceRepository } from './backends/disk/workspace-repository.js';
+import { PostgresStoreContext } from './backends/postgres/database.js';
+import { PostgresStructuredStore } from './backends/postgres/structured-store.js';
+import { PostgresWorkspaceRepository } from './backends/postgres/workspace-repository.js';
 import {
   SqliteStoreContext,
   sqliteDatabasePath,
@@ -284,6 +288,7 @@ function composeSpace(storage: Storage, canvasId: string): Space {
  * (see `capabilities.ts`).
  */
 function buildBlobStore(profile: StorageProfile): BlobStore {
+  if (profile.blobs.kind === 'azure') return AzureBlobStore.fromEnvironment();
   if (profile.blobs.kind !== 'disk') {
     // Unreachable: validateStorageProfile rejects unimplemented kinds.
     throw new Error(`Unsupported blob backend: ${profile.blobs.kind}`);
@@ -299,6 +304,8 @@ function buildStructuredStore(profile: StorageProfile): StructuredStore {
       return new DiskStructuredStore();
     case 'sqlite':
       return new SqliteStructuredStore(sqliteConnection());
+    case 'postgres':
+      return new PostgresStructuredStore(postgresConnection());
     default:
       throw new Error(
         `Unsupported structured backend: ${profile.structured.kind}`,
@@ -349,6 +356,7 @@ export function createStorage(profile: StorageProfile): Storage {
 let current: Storage | null = null;
 let workspaces: WorkspaceRepository | null = null;
 let sqlite: SqliteStoreContext | null = null;
+let postgres: PostgresStoreContext | null = null;
 let activeWorldCanvasId: string | null = null;
 let spaceCreateTail: Promise<void> = Promise.resolve();
 
@@ -360,6 +368,15 @@ let spaceCreateTail: Promise<void> = Promise.resolve();
  * Workspace repository both borrow it, because they are one database file and
  * a second connection would be a second writer.
  */
+function postgresConnection(): PostgresStoreContext {
+  if (postgres) return postgres;
+  const connectionString = process.env['HUABU_POSTGRES_URL'];
+  if (!connectionString)
+    throw new StorageProfileError('Postgres requires HUABU_POSTGRES_URL');
+  postgres = new PostgresStoreContext({ connectionString });
+  return postgres;
+}
+
 function sqliteConnection(): SqliteStoreContext {
   if (sqlite) return sqlite;
   const context = new SqliteStoreContext(sqliteDatabasePath());
@@ -390,9 +407,11 @@ export function getWorkspaceRepository(): WorkspaceRepository {
   if (workspaces) return workspaces;
   const profile = activeProfile();
   workspaces =
-    profile.structured.kind === 'sqlite'
-      ? new SqliteWorkspaceRepository(sqliteConnection())
-      : new DiskWorkspaceRepository(workspaceRegistryPath());
+    profile.structured.kind === 'postgres'
+      ? new PostgresWorkspaceRepository(postgresConnection())
+      : profile.structured.kind === 'sqlite'
+        ? new SqliteWorkspaceRepository(sqliteConnection())
+        : new DiskWorkspaceRepository(workspaceRegistryPath());
   return workspaces;
 }
 
@@ -500,7 +519,10 @@ export function adoptWorkspaceDirectory(
  */
 export function createNamedWorkspace(name: string): Promise<WorkspaceHandle> {
   const repository = getWorkspaceRepository();
-  if (!(repository instanceof SqliteWorkspaceRepository)) {
+  if (
+    !(repository instanceof SqliteWorkspaceRepository) &&
+    !(repository instanceof PostgresWorkspaceRepository)
+  ) {
     throw new StorageProfileError(
       `The "${activeProfile().structured.kind}" structured backend keeps ` +
         'Workspaces as directories, so a Workspace is created by adopting a ' +
@@ -583,11 +605,21 @@ export async function initStorage(
   // memoized from the environment before an explicit profile was chosen would
   // answer for the wrong backend.
   workspaces = null;
-  const storage = createStorage(profile);
-  await Promise.all([storage.structured.init(), storage.blobs.init()]);
-  current = storage;
-  await ensureActiveWorkspace(profile);
-  return storage;
+  try {
+    const storage = createStorage(profile);
+    current = storage;
+    const initialized = await Promise.allSettled([
+      storage.structured.init(),
+      storage.blobs.init(),
+    ]);
+    const failure = initialized.find((result) => result.status === 'rejected');
+    if (failure?.status === 'rejected') throw failure.reason;
+    await ensureActiveWorkspace(profile);
+    return storage;
+  } catch (error) {
+    await closeStorage();
+    throw error;
+  }
 }
 
 /**
@@ -600,13 +632,21 @@ export async function initStorage(
  * by a previous call — is left alone.
  */
 async function ensureActiveWorkspace(profile: StorageProfile): Promise<void> {
-  if (profile.structured.kind !== 'sqlite') return;
+  if (profile.structured.kind === 'disk') return;
   const repository = getWorkspaceRepository();
-  if (!(repository instanceof SqliteWorkspaceRepository)) return;
+  if (
+    !(repository instanceof SqliteWorkspaceRepository) &&
+    !(repository instanceof PostgresWorkspaceRepository)
+  )
+    return;
   // The question is whether *this connection* is pointed at a Workspace, not
   // whether the process remembers one. A handle left over from a previous
   // profile is a name without a namespace behind it.
-  if (sqliteConnection().activeWorkspaceId() !== null) return;
+  const context =
+    profile.structured.kind === 'postgres'
+      ? postgresConnection()
+      : sqliteConnection();
+  if (context.activeWorkspaceId() !== null) return;
   const workspace = await repository.ensureDefault(DEFAULT_WORKSPACE_NAME);
   await activateWorkspace(workspace);
 }
@@ -629,9 +669,13 @@ export async function activateWorkspace(
   // or the SQLite connection moves away from the current Workspace.
   commitWorkspaceIdentity(workspace);
   if (sqlite) sqlite.useWorkspace(workspace.workspaceId);
+  if (postgres) postgres.useWorkspace(workspace.workspaceId);
   activeWorldCanvasId = null;
-  if (workspaces instanceof SqliteWorkspaceRepository) {
-    workspaces.markOpened(workspace.workspaceId);
+  if (
+    workspaces instanceof SqliteWorkspaceRepository ||
+    workspaces instanceof PostgresWorkspaceRepository
+  ) {
+    await workspaces.markOpened(workspace.workspaceId);
   }
   // A Workspace with no World has no Portal target and no home view. On Disk
   // the World is written by workspace preparation; here the same step belongs
@@ -684,16 +728,29 @@ export function getStorage(): Storage {
 export async function closeStorage(): Promise<void> {
   const storage = current;
   const connection = sqlite;
+  const postgresContext = postgres;
   current = null;
   workspaces = null;
   sqlite = null;
+  postgres = null;
   activeWorldCanvasId = null;
-  if (storage) {
-    await Promise.all([storage.structured.close(), storage.blobs.close()]);
+  try {
+    if (storage) {
+      const results = await Promise.allSettled([
+        storage.structured.close(),
+        storage.blobs.close(),
+      ]);
+      const failure = results.find((result) => result.status === 'rejected');
+      if (failure?.status === 'rejected') throw failure.reason;
+    }
+  } finally {
+    // Composition owns shared connections, including failed initialization.
+    try {
+      connection?.close();
+    } finally {
+      await postgresContext?.close();
+    }
   }
-  // The shared connection outlives either store, so closing it is this
-  // module's job rather than whichever adapter happens to hold it.
-  connection?.close();
 }
 
 export function getBlobStore(): BlobStore {
@@ -766,7 +823,10 @@ export async function deleteSpace(
       // directory those areas sat in. Sweeping the areas is the port's
       // contract; removing what composition placed them under is this
       // module's, and it is what stops a deleted Space leaving a husk behind.
-      if (storage.profile.structured.kind !== 'disk') {
+      if (
+        storage.profile.structured.kind !== 'disk' &&
+        storage.profile.blobs.kind === 'disk'
+      ) {
         await rm(detachedSpaceRoot(canvasId), {
           recursive: true,
           force: true,

@@ -84,7 +84,7 @@ function mount() {
 }
 
 describe('mounted Agenetes instance (M5 INST skeleton)', () => {
-  it('create() get-or-creates by threadId and reuse ignores spec (I9.3)', () => {
+  it('create() get-or-creates by threadId and reuse ignores spec (I9.3)', async () => {
     const inst = mount();
     const spec: StubSpec = {
       threadId: 'thr_1',
@@ -93,17 +93,17 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
       namespace: ns('canvas_1', '/data/c1'),
       spec: { note: 'first' },
     };
-    const h1 = inst.create(spec) as unknown as StubHandle;
-    const h2 = inst.create({
+    const h1 = (await inst.create(spec)) as unknown as StubHandle;
+    const h2 = (await inst.create({
       ...spec,
       spec: { note: 'second' },
-    }) as unknown as StubHandle;
+    })) as unknown as StubHandle;
     expect(h2).toBe(h1);
     // reuse-ignores-spec: the live handle keeps its original spec
     expect(h1.spec.spec.note).toBe('first');
   });
 
-  it('restart recovery keeps the persisted spec authoritative', () => {
+  it('restart recovery keeps the persisted spec authoritative', async () => {
     const inst = mount();
     const spec: StubSpec = {
       threadId: 'thr_1',
@@ -112,22 +112,24 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
       namespace: ns('canvas_1', '/data/c1'),
       spec: { note: 'persisted' },
     };
-    inst.create(spec);
-    inst.close(spec.threadId);
+    await inst.create(spec);
+    await inst.close(spec.threadId);
 
-    const recovered = inst.create({
+    const recovered = (await inst.create({
       ...spec,
       spec: { note: 'drifted' },
-    }) as unknown as StubHandle;
+    })) as unknown as StubHandle;
     expect(recovered.spec.spec.note).toBe('persisted');
-    expect(inst.record(spec.namespace, spec.threadId)?.spec.spec).toEqual(
+    expect(
+      (await inst.record(spec.namespace, spec.threadId))?.spec.spec,
+    ).toEqual(
       expect.objectContaining({
         note: 'persisted',
       }),
     );
   });
 
-  it('rejects changing the driver kind of a persisted thread', () => {
+  it('rejects changing the driver kind of a persisted thread', async () => {
     const store = new InMemoryThreadStore();
     const first = mountAgenetes({
       drivers: { external: stubDriver(), internal: stubDriver() },
@@ -140,19 +142,19 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
       namespace: ns('canvas_1'),
       spec: {},
     };
-    first.create(spec);
-    first.close(spec.threadId);
+    await first.create(spec);
+    await first.close(spec.threadId);
 
     const restarted = mountAgenetes({
       drivers: { external: stubDriver(), internal: stubDriver() },
       threadStore: store,
     });
-    expect(() => restarted.create({ ...spec, kind: 'internal' })).toThrow(
-      /cannot change driver kind/,
-    );
+    await expect(
+      async () => await restarted.create({ ...spec, kind: 'internal' }),
+    ).rejects.toThrow(/cannot change driver kind/);
   });
 
-  it('fork() realizes a fresh target from source durable input', () => {
+  it('fork() realizes a fresh target from source durable input', async () => {
     const store = new InMemoryThreadStore();
     const eventLogStore = new InMemoryEventLogStore();
     const turnStore = new InMemoryTurnStore();
@@ -212,10 +214,10 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
       spec: { note: 'complete target' },
     };
 
-    const handle = inst.fork(
+    const handle = (await inst.fork(
       { namespace: sourceNamespace, threadId: sourceSpec.threadId },
       targetSpec,
-    ) as unknown as StubHandle;
+    )) as unknown as StubHandle;
 
     expect(handle.spec).toEqual(targetSpec);
     expect(handle.createContext.recoveryInput).toBeUndefined();
@@ -233,20 +235,20 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
         },
       ],
     });
-    expect(inst.record(targetNamespace, targetSpec.threadId)).toEqual({
+    expect(await inst.record(targetNamespace, targetSpec.threadId)).toEqual({
       driverSchemaVersion: 1,
       spec: targetSpec,
       state: { driverState: {} },
     });
-    expect(inst.history(targetNamespace, targetSpec.threadId).turns).toEqual(
-      [],
-    );
-    expect(inst.record(sourceNamespace, sourceSpec.threadId)?.state).toEqual(
-      sourceState,
-    );
+    expect(
+      (await inst.history(targetNamespace, targetSpec.threadId)).turns,
+    ).toEqual([]);
+    expect(
+      (await inst.record(sourceNamespace, sourceSpec.threadId))?.state,
+    ).toEqual(sourceState);
   });
 
-  it('fork() rejects a missing source and non-fresh target', () => {
+  it('fork() rejects a missing source and non-fresh target', async () => {
     const inst = mount();
     const namespace = ns('canvas_1');
     const targetSpec: StubSpec = {
@@ -256,27 +258,30 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
       namespace,
       spec: {},
     };
-    expect(() =>
-      inst.fork({ namespace, threadId: 'missing' }, targetSpec),
-    ).toThrow(/missing source thread/);
+    await expect(
+      async () =>
+        await inst.fork({ namespace, threadId: 'missing' }, targetSpec),
+    ).rejects.toThrow(/missing source thread/);
 
-    inst.create({
+    await inst.create({
       ...targetSpec,
       threadId: 'source_thread',
     });
-    expect(() =>
-      inst.fork(
-        { namespace, threadId: 'source_thread' },
-        { ...targetSpec, threadId: 'source_thread' },
-      ),
-    ).toThrow(/target threadId must differ/);
-    inst.create(targetSpec);
-    expect(() =>
-      inst.fork({ namespace, threadId: 'source_thread' }, targetSpec),
-    ).toThrow(/target thread already exists/);
+    await expect(
+      async () =>
+        await inst.fork(
+          { namespace, threadId: 'source_thread' },
+          { ...targetSpec, threadId: 'source_thread' },
+        ),
+    ).rejects.toThrow(/target threadId must differ/);
+    await inst.create(targetSpec);
+    await expect(
+      async () =>
+        await inst.fork({ namespace, threadId: 'source_thread' }, targetSpec),
+    ).rejects.toThrow(/target thread already exists/);
   });
 
-  it('get() is a pure lookup that never spawns (I9.3)', () => {
+  it('get() is a pure lookup that never spawns (I9.3)', async () => {
     const inst = mount();
     expect(inst.get('missing')).toBeUndefined();
     const spec: StubSpec = {
@@ -286,25 +291,25 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
       namespace: ns('canvas_1'),
       spec: {},
     };
-    const created = inst.create(spec);
+    const created = await inst.create(spec);
     expect(inst.get('thr_1')).toBe(created);
   });
 
-  it('close() tears the handle down and evicts it (I9.3)', () => {
+  it('close() tears the handle down and evicts it (I9.3)', async () => {
     const inst = mount();
-    const handle = inst.create({
+    const handle = (await inst.create({
       threadId: 'thr_1',
       kind: 'external',
       workloadType: 'Deployment',
       namespace: ns('canvas_1'),
       spec: {},
-    }) as unknown as StubHandle;
-    inst.close('thr_1');
+    })) as unknown as StubHandle;
+    await inst.close('thr_1');
     expect(handle.closed).toBe(true);
     expect(inst.get('thr_1')).toBeUndefined();
   });
 
-  it('a Job is minted fresh each turn and never enters the live table (I3.2/I9.3)', () => {
+  it('a Job is minted fresh each turn and never enters the live table (I3.2/I9.3)', async () => {
     const inst = mount();
     const spec: StubSpec = {
       threadId: 'thr_job',
@@ -313,11 +318,11 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
       namespace: ns('canvas_1', '/data/c1'),
       spec: { note: 'first' },
     };
-    const h1 = inst.create(spec) as unknown as StubHandle;
-    const h2 = inst.create({
+    const h1 = (await inst.create(spec)) as unknown as StubHandle;
+    const h2 = (await inst.create({
       ...spec,
       spec: { note: 'second' },
-    }) as unknown as StubHandle;
+    })) as unknown as StubHandle;
     // distinct handles — a Job is not cached / reused
     expect(h2).not.toBe(h1);
     expect(h1.spec.spec.note).toBe('first');
@@ -325,12 +330,12 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
     // and it never registers in the live-handle table
     expect(inst.get('thr_job')).toBeUndefined();
     // but the durable record is still upserted (query surface, I9.4)
-    expect(inst.record(spec.namespace, 'thr_job')?.spec.spec).toEqual(
+    expect((await inst.record(spec.namespace, 'thr_job'))?.spec.spec).toEqual(
       expect.objectContaining({ note: 'second' }),
     );
   });
 
-  it('a transient Job (empty threadId) upserts no durable record (I9.4)', () => {
+  it('a transient Job (empty threadId) upserts no durable record (I9.4)', async () => {
     const inst = mount();
     const namespace = ns('canvas_1', '/data/c1');
     const spec: StubSpec = {
@@ -341,28 +346,29 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
       spec: { note: 'stateless' },
     };
     // it still runs and returns a fresh handle …
-    const handle = inst.create(spec) as unknown as StubHandle;
+    const handle = (await inst.create(spec)) as unknown as StubHandle;
     expect(handle.spec.spec.note).toBe('stateless');
     // … but leaves no durable footprint: an empty key would collide across
     // every transient Job in the namespace and accumulate junk records.
-    expect(inst.record(namespace, '')).toBeUndefined();
-    expect(inst.records(namespace)).toEqual([]);
+    expect(await inst.record(namespace, '')).toBeUndefined();
+    expect(await inst.records(namespace)).toEqual([]);
   });
 
-  it('create() dispatches on spec.kind; unknown kind throws', () => {
+  it('create() dispatches on spec.kind; unknown kind throws', async () => {
     const inst = mount();
-    expect(() =>
-      inst.create({
-        threadId: 'thr_x',
-        kind: 'nope',
-        workloadType: 'Deployment',
-        namespace: ns('canvas_1'),
-        spec: {},
-      }),
-    ).toThrow(/no agent driver mounted for kind 'nope'/);
+    await expect(
+      async () =>
+        await inst.create({
+          threadId: 'thr_x',
+          kind: 'nope',
+          workloadType: 'Deployment',
+          namespace: ns('canvas_1'),
+          spec: {},
+        }),
+    ).rejects.toThrow(/no agent driver mounted for kind 'nope'/);
   });
 
-  it('query surface reads durable records, orthogonal to liveness (I9.4)', () => {
+  it('query surface reads durable records, orthogonal to liveness (I9.4)', async () => {
     const inst = mount();
     const namespace = ns('canvas_1', '/data/c1');
     const spec: StubSpec = {
@@ -372,31 +378,31 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
       namespace,
       spec: {},
     };
-    inst.create(spec);
+    await inst.create(spec);
 
-    const rec = inst.record(namespace, 'thr_1');
+    const rec = await inst.record(namespace, 'thr_1');
     expect(rec?.spec).toEqual(spec);
     expect(rec?.driverSchemaVersion).toBe(1);
     expect(rec?.state).toEqual({ driverState: {} });
 
     // closing the live handle does NOT drop the durable record
-    inst.close('thr_1');
+    await inst.close('thr_1');
     expect(inst.get('thr_1')).toBeUndefined();
-    expect(inst.record(namespace, 'thr_1')?.spec).toEqual(spec);
+    expect((await inst.record(namespace, 'thr_1'))?.spec).toEqual(spec);
   });
 
-  it('durable records are isolated per namespace (I4.1 / I9.4)', () => {
+  it('durable records are isolated per namespace (I4.1 / I9.4)', async () => {
     const inst = mount();
     const nsA = ns('canvas_A', '/data/a');
     const nsB = ns('canvas_B', '/data/b');
-    inst.create({
+    await inst.create({
       threadId: 'thr_a',
       kind: 'external',
       workloadType: 'Deployment',
       namespace: nsA,
       spec: {},
     });
-    inst.create({
+    await inst.create({
       threadId: 'thr_b',
       kind: 'external',
       workloadType: 'Deployment',
@@ -404,12 +410,16 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
       spec: {},
     });
 
-    expect(inst.records(nsA).map((r) => r.spec.threadId)).toEqual(['thr_a']);
-    expect(inst.records(nsB).map((r) => r.spec.threadId)).toEqual(['thr_b']);
-    expect(inst.record(nsA, 'thr_b')).toBeUndefined();
+    expect((await inst.records(nsA)).map((r) => r.spec.threadId)).toEqual([
+      'thr_a',
+    ]);
+    expect((await inst.records(nsB)).map((r) => r.spec.threadId)).toEqual([
+      'thr_b',
+    ]);
+    expect(await inst.record(nsA, 'thr_b')).toBeUndefined();
   });
 
-  it('down-feeds the durable snapshot into driver.create and preserves it on reuse (I9.7)', () => {
+  it('down-feeds the durable snapshot into driver.create and preserves it on reuse (I9.7)', async () => {
     const store = new InMemoryThreadStore();
     const turnStore = new InMemoryTurnStore();
     const namespace = ns('canvas_1', '/data/c1');
@@ -452,33 +462,34 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
       spec: {},
     };
     // Down-feed: the driver receives the durable record at create time.
-    const handle = inst.create(spec) as unknown as StubHandle;
+    const handle = (await inst.create(spec)) as unknown as StubHandle;
     expect(handle.createContext.forkInput).toBeUndefined();
     expect(handle.createContext.recoveryInput?.state).toEqual(prior);
     expect(handle.createContext.recoveryInput?.turns).toEqual([foldedTurn]);
 
     // The state-preserving upsert must NOT clobber the persisted snapshot
     // back to `{}` — a returning thread keeps its resume token + metadata.
-    expect(inst.record(namespace, 'thr_1')?.state).toEqual(prior);
+    expect((await inst.record(namespace, 'thr_1'))?.state).toEqual(prior);
 
     // Reuse (get-or-create) also leaves the durable state intact.
-    inst.create(spec);
-    expect(inst.record(namespace, 'thr_1')?.state).toEqual(prior);
+    await inst.create(spec);
+    expect((await inst.record(namespace, 'thr_1'))?.state).toEqual(prior);
   });
 
-  it('create() throws when no driver is mounted for the requested kind', () => {
-    expect(() =>
-      mountAgenetes({ drivers: {} }).create({
-        threadId: 'thr_1',
-        kind: 'external',
-        workloadType: 'Deployment',
-        namespace: ns('canvas_1'),
-        spec: {},
-      }),
-    ).toThrow(/no agent driver mounted for kind 'external'/);
+  it('create() throws when no driver is mounted for the requested kind', async () => {
+    await expect(
+      async () =>
+        await mountAgenetes({ drivers: {} }).create({
+          threadId: 'thr_1',
+          kind: 'external',
+          workloadType: 'Deployment',
+          namespace: ns('canvas_1'),
+          spec: {},
+        }),
+    ).rejects.toThrow(/no agent driver mounted for kind 'external'/);
   });
 
-  it('injected ThreadStore backs the query surface (I9.4 port)', () => {
+  it('injected ThreadStore backs the query surface (I9.4 port)', async () => {
     const upsert = vi.fn();
     const list = vi.fn().mockReturnValue([]);
     const inst = mountAgenetes({
@@ -492,7 +503,7 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
     });
 
     const namespace = ns('canvas_1');
-    inst.create({
+    await inst.create({
       threadId: 'thr_1',
       kind: 'external',
       workloadType: 'Deployment',
@@ -500,7 +511,7 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
       spec: {},
     });
     expect(upsert).toHaveBeenCalledTimes(1);
-    inst.records(namespace);
+    await inst.records(namespace);
     expect(list).toHaveBeenCalledWith(namespace);
   });
 });

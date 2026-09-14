@@ -30,20 +30,23 @@ import {
 } from '@agenetes/agenetes';
 
 import {
-  conversationTables,
+  PostgresThreadStore,
+  PostgresEventLogStore,
+  PostgresTurnStore,
+} from './postgres-stores.js';
+import {
   SqliteEventLogStore,
   SqliteThreadStore,
   SqliteTurnStore,
 } from './sqlite-stores.js';
+import { getStructuredStore } from '../../storage/index.js';
 
 import type {
-  EventLogEntry,
   EventLogRecord,
   EventLogStore,
   PersistedTurn,
   ThreadRecord,
   ThreadStore,
-  TurnStartLogEntry,
   TurnStore,
 } from '@agenetes/agenetes';
 import type { AgentSubmission, Namespace } from '@agenetes/protocol';
@@ -58,6 +61,12 @@ const file: Backing = {
   threads: new FileThreadStore(),
   events: new FileEventLogStore(),
   turns: new FileTurnStore(),
+};
+
+const postgres: Backing = {
+  threads: new PostgresThreadStore(),
+  events: new PostgresEventLogStore(),
+  turns: new PostgresTurnStore(),
 };
 
 const sqlite: Backing = {
@@ -81,8 +90,11 @@ function backingFor(namespace: Namespace): Backing {
   // A directory to write into settles it: that is the Disk profile, and the
   // file stores are what wrote whatever is already there.
   if (namespace.storage?.root) return file;
-  if (namespace.name && conversationTables(namespace) !== null) return sqlite;
-  return memory;
+  if (!namespace.name) return memory;
+  const kind = getStructuredStore().kind;
+  if (kind === 'postgres') return postgres;
+  if (kind === 'sqlite') return sqlite;
+  throw new Error('A named Disk conversation requires a storage root');
 }
 
 export const conversationThreadStore: ThreadStore = {
@@ -96,13 +108,9 @@ export const conversationThreadStore: ThreadStore = {
 };
 
 export const conversationEventLogStore: EventLogStore = {
-  appendTurnStart: (
-    namespace,
-    threadId,
-    request: AgentSubmission | null,
-  ): TurnStartLogEntry =>
+  appendTurnStart: (namespace, threadId, request: AgentSubmission | null) =>
     backingFor(namespace).events.appendTurnStart(namespace, threadId, request),
-  append: (namespace, threadId, event): EventLogEntry =>
+  append: (namespace, threadId, event) =>
     backingFor(namespace).events.append(namespace, threadId, event),
   read: (namespace, threadId, sinceSeq) =>
     backingFor(namespace).events.read(namespace, threadId, sinceSeq),

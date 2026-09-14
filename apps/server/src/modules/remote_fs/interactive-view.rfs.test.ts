@@ -33,7 +33,7 @@ async function buildApp() {
   return app;
 }
 
-function seedCanvas() {
+async function seedCanvas() {
   getCanvasStore('c1').write({
     canvasId: 'c1',
     title: null,
@@ -67,7 +67,7 @@ function seedCanvas() {
       recipe: null,
     },
   };
-  agenetes.create(ownerSpec);
+  await agenetes.create(ownerSpec);
 }
 
 const state = {
@@ -83,15 +83,15 @@ const state = {
   value: { codebasePath: '', worktreeRoot: '' },
 } as const;
 
-beforeEach(() => {
+beforeEach(async () => {
   workspace = mkdtempSync(join(tmpdir(), 'huabu-interactive-view-'));
   resetStorageCache();
   setWorkspacePath(workspace);
-  seedCanvas();
+  await seedCanvas();
 });
 
-afterEach(() => {
-  agenetes.close('thread-owner');
+afterEach(async () => {
+  await agenetes.close('thread-owner');
   resetStorageCache();
   rmSync(workspace, { recursive: true, force: true });
 });

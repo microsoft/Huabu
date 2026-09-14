@@ -8,7 +8,7 @@
 import { defineDriver } from '@agenetes/runtime';
 import { describe, expect, it } from 'vitest';
 
-import { mountAgenetes } from './index.js';
+import { InMemoryTurnStore, type TurnStore, mountAgenetes } from './index.js';
 
 import type {
   AgentCapabilities,
@@ -109,7 +109,7 @@ async function drain(handle: AgentHandle, request: unknown): Promise<void> {
 describe('Agenetes two-tier conversation log (M5.6/C3)', () => {
   it('folds a completed Deployment run into a Tier-2 AgentTurn (history)', async () => {
     const inst = mount();
-    const handle = inst.create(deployment);
+    const handle = await inst.create(deployment);
     raw!.scripts.push({
       events: [text('hi'), done('hi'), end()],
       result: [{ type: 'text', data: { content: 'hi' } }],
@@ -117,14 +117,14 @@ describe('Agenetes two-tier conversation log (M5.6/C3)', () => {
 
     await drain(handle, { type: 'user_text', content: 'hello' });
 
-    const { turns } = inst.history(ns, threadId);
+    const { turns } = await inst.history(ns, threadId);
     expect(turns).toHaveLength(1);
     expect(turns[0]!.request).toEqual({ type: 'user_text', content: 'hello' });
     expect(turns[0]!.transcript).toEqual([
       { type: 'text', data: { content: 'hi' } },
     ]);
     expect(turns[0]!.meta).toEqual({ stopReason: 'end_turn' });
-    expect(inst.logMetadata(ns, threadId)).toEqual({
+    expect(await inst.logMetadata(ns, threadId)).toEqual({
       eventCount: 4,
       turnCount: 1,
     });
@@ -132,7 +132,7 @@ describe('Agenetes two-tier conversation log (M5.6/C3)', () => {
 
   it('get(threadId) returns the same logging handle, so later turns fold too', async () => {
     const inst = mount();
-    inst.create(deployment);
+    await inst.create(deployment);
     raw!.scripts.push({
       events: [text('one'), end()],
       result: [{ type: 'text', data: { content: 'one' } }],
@@ -145,7 +145,7 @@ describe('Agenetes two-tier conversation log (M5.6/C3)', () => {
     await drain(inst.get(threadId)!, { type: 'user_text', content: 'a' });
     await drain(inst.get(threadId)!, { type: 'user_text', content: 'b' });
 
-    const { turns } = inst.history(ns, threadId);
+    const { turns } = await inst.history(ns, threadId);
     expect(turns.map((t) => t.transcript[0]!.data)).toEqual([
       { content: 'one' },
       { content: 'two' },
@@ -154,7 +154,7 @@ describe('Agenetes two-tier conversation log (M5.6/C3)', () => {
 
   it('history({ withTail }) projects the in-flight turn, no seq leaked', async () => {
     const inst = mount();
-    const handle = inst.create(deployment);
+    const handle = await inst.create(deployment);
     // Turn 1 completes → folded (fence at its last seq).
     raw!.scripts.push({
       events: [text('committed'), end()],
@@ -172,7 +172,9 @@ describe('Agenetes two-tier conversation log (M5.6/C3)', () => {
       { type: 'user_text', content: 'q2' } as never,
       {} as never,
     );
-    expect(inst.history(ns, threadId, { withTail: true }).turns[1]).toEqual({
+    expect(
+      (await inst.history(ns, threadId, { withTail: true })).turns[1],
+    ).toEqual({
       request: { type: 'user_text', content: 'q2' },
       transcript: [],
       isIncomplete: true,
@@ -180,12 +182,12 @@ describe('Agenetes two-tier conversation log (M5.6/C3)', () => {
     await gen.next(); // yields live-a  → Tier-1 append
     await gen.next(); // yields live-b  → Tier-1 append
 
-    expect(inst.logMetadata(ns, threadId)).toEqual({
+    expect(await inst.logMetadata(ns, threadId)).toEqual({
       eventCount: 6,
       turnCount: 1,
     });
 
-    const { turns } = inst.history(ns, threadId, { withTail: true });
+    const { turns } = await inst.history(ns, threadId, { withTail: true });
     expect(turns).toHaveLength(2);
     expect(turns[1]).toEqual({
       request: { type: 'user_text', content: 'q2' },
@@ -203,7 +205,7 @@ describe('Agenetes two-tier conversation log (M5.6/C3)', () => {
 
   it('tail() ends when a terminal (end) frame is observed', async () => {
     const inst = mount();
-    const handle = inst.create(deployment);
+    const handle = await inst.create(deployment);
     raw!.scripts.push({
       events: [text('c'), end()],
       result: [{ type: 'text', data: { content: 'c' } }],
@@ -231,7 +233,7 @@ describe('Agenetes two-tier conversation log (M5.6/C3)', () => {
 
   it('a live tail delivers events appended after it subscribes', async () => {
     const inst = mount();
-    const handle = inst.create(deployment);
+    const handle = await inst.create(deployment);
 
     // Open the tail on a fresh thread (fence 0, empty backfill), then drive
     // a run so its frames arrive live.
@@ -263,14 +265,14 @@ describe('Agenetes two-tier conversation log (M5.6/C3)', () => {
       namespace: ns,
       spec: {},
     };
-    const handle = inst.create(jobSpec);
+    const handle = await inst.create(jobSpec);
     raw!.scripts.push({
       events: [text('job'), end()],
       result: [],
     });
     await drain(handle, { type: 'user_text', content: 'go' });
 
-    expect(inst.history(ns, 'thr_job').turns).toEqual([
+    expect((await inst.history(ns, 'thr_job')).turns).toEqual([
       {
         request: { type: 'user_text', content: 'go' },
         transcript: [{ type: 'text', data: { content: 'job' } }],
@@ -287,13 +289,50 @@ describe('Agenetes two-tier conversation log (M5.6/C3)', () => {
       namespace: ns,
       spec: {},
     };
-    const handle = inst.create(jobSpec);
+    const handle = await inst.create(jobSpec);
     raw!.scripts.push({
       events: [text('transient'), end()],
       result: [],
     });
     await drain(handle, { type: 'user_text', content: 'go' });
 
-    expect(inst.history(ns, '').turns).toEqual([]);
+    expect((await inst.history(ns, '')).turns).toEqual([]);
   });
+});
+
+it('keeps live frames when a remote fence read completes after the turn is folded', async () => {
+  const turns = new InMemoryTurnStore();
+  const gate = Promise.withResolvers<void>();
+  const entered = Promise.withResolvers<void>();
+  const turnStore: TurnStore = new Proxy(turns, {
+    get(target, key) {
+      if (key === 'fence')
+        return async (...args: Parameters<typeof target.fence>) => {
+          entered.resolve();
+          await gate.promise;
+          return target.fence(...args);
+        };
+      const value = Reflect.get(target, key);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  const inst = mountAgenetes({
+    drivers: { external: scriptedDriver() },
+    turnStore,
+  });
+  const handle = await inst.create(deployment);
+  const tail = inst.tail(ns, threadId)[Symbol.asyncIterator]();
+  const first = tail.next();
+  await entered.promise;
+  raw!.scripts.push({
+    events: [text('while reading fence'), end()],
+    result: [],
+  });
+  await drain(handle, { type: 'user_text', content: 'question' });
+  expect(turns.fence(ns, threadId)).toBeGreaterThan(0);
+  gate.resolve();
+  expect((await first).value).toEqual(text('while reading fence'));
+  expect((await tail.next()).value).toEqual(end());
+  expect((await tail.next()).done).toBe(true);
+  await inst.close(threadId);
 });
