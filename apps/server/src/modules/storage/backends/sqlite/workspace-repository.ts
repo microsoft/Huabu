@@ -21,6 +21,11 @@
 import { randomUUID } from 'node:crypto';
 
 import { withImmediateTransaction } from './database.js';
+import {
+  WORKSPACE_COLUMNS,
+  decodeWorkspaceRow,
+  requireName,
+} from '../sql/workspace-rules.js';
 
 import type { SqliteStoreContext } from './database.js';
 import type {
@@ -28,35 +33,6 @@ import type {
   WorkspaceRepository,
 } from '../../ports/workspace.js';
 import type { DatabaseSync } from 'node:sqlite';
-
-const WORKSPACE_COLUMNS = 'workspace_id, name, created_at, last_opened_at';
-
-function decodeWorkspaceRow(value: unknown): WorkspaceHandle {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new SyntaxError('Malformed persisted SQLite Workspace row');
-  }
-  const row = value as Record<string, unknown>;
-  const workspaceId = row['workspace_id'];
-  const name = row['name'];
-  if (typeof workspaceId !== 'string' || workspaceId.length === 0) {
-    throw new SyntaxError('Invalid workspace_id in persisted SQLite Workspace');
-  }
-  if (typeof name !== 'string') {
-    throw new SyntaxError('Invalid name in persisted SQLite Workspace');
-  }
-  return { workspaceId, name };
-}
-
-function requireName(name: unknown): string {
-  if (typeof name !== 'string') {
-    throw new TypeError('Workspace name must be a string');
-  }
-  const trimmed = name.trim();
-  if (trimmed.length === 0) {
-    throw new TypeError('Workspace name must not be empty');
-  }
-  return trimmed;
-}
 
 function readWorkspaceRow(
   database: DatabaseSync,

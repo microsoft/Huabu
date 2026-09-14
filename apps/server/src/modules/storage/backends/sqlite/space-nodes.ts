@@ -5,14 +5,14 @@ import { randomUUID } from 'node:crypto';
 
 import { withImmediateTransaction } from './database.js';
 import { allocateNodeIdentity } from './identity.js';
-import {
-  decodeNodeRecord,
-  requireRevision,
-  spaceRowExists,
-  stringifyJson,
-  validateNodeContent,
-} from './rows.js';
+import { decodeNodeRecord, spaceRowExists, stringifyJson } from './rows.js';
 import { sanitizeId } from '../../../../utils/fs.js';
+import {
+  collectNodeRow,
+  decodeIdentifiedNodeRow,
+  decodeNodeRow,
+  validatePut,
+} from '../sql/node-rules.js';
 
 import type { SqliteStoreContext } from './database.js';
 import type {
@@ -23,31 +23,8 @@ import type {
   NodeStreamOptions,
   SpaceNodes,
 } from '../../ports/structured.js';
+import type { NodeRow } from '../sql/node-rules.js';
 import type { DatabaseSync } from 'node:sqlite';
-
-interface NodeRow {
-  readonly record: NodeSnapshot['record'];
-  readonly revision: string;
-  readonly collisionKey: string;
-}
-
-function decodeNodeRow(value: unknown, nodeId: string): NodeRow {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new SyntaxError(`Malformed persisted Node ${JSON.stringify(nodeId)}`);
-  }
-  const row = value as Record<string, unknown>;
-  const collisionKey = row['label_collision_key'];
-  if (typeof collisionKey !== 'string') {
-    throw new SyntaxError(
-      `Invalid collision key for Node ${JSON.stringify(nodeId)}`,
-    );
-  }
-  return {
-    record: decodeNodeRecord(row['record_json'], nodeId),
-    revision: requireRevision(row['revision'], nodeId),
-    collisionKey,
-  };
-}
 
 function readNodeRow(
   database: DatabaseSync,
@@ -71,37 +48,6 @@ function readNodeRow(
  * `canvas_id` bind, so a caller never has to know the limit exists.
  */
 const READ_MANY_CHUNK = 500;
-
-/** Decode one scanned row into the id the port keys collections by. */
-function decodeIdentifiedNodeRow(value: unknown): [string, NodeSnapshot] {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new SyntaxError('Malformed persisted SQLite Node row');
-  }
-  const nodeId = (value as Record<string, unknown>)['node_id'];
-  if (typeof nodeId !== 'string') {
-    throw new SyntaxError('Invalid node_id in persisted SQLite Node');
-  }
-  const row = decodeNodeRow(value, nodeId);
-  return [nodeId, { record: row.record, revision: row.revision }];
-}
-
-function collectNodeRow(value: unknown, into: Map<string, NodeSnapshot>): void {
-  const [nodeId, snapshot] = decodeIdentifiedNodeRow(value);
-  into.set(nodeId, snapshot);
-}
-
-function validatePut(input: NodePutInput): string {
-  const nodeId = sanitizeId(input.nodeId, 'nodeId');
-  validateNodeContent(input.record, nodeId);
-  if (
-    input.expectedRevision !== undefined &&
-    input.expectedRevision !== null &&
-    typeof input.expectedRevision !== 'string'
-  ) {
-    throw new TypeError('expectedRevision must be a string, null, or omitted');
-  }
-  return nodeId;
-}
 
 /** Apply one node put inside the caller's active transaction. */
 export function putSqliteNodeInTransaction(
