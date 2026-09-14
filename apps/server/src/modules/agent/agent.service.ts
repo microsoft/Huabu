@@ -262,7 +262,7 @@ export async function* runAgent(
       : undefined;
   const durableRecord =
     workloadType === 'Deployment'
-      ? agenetes.record(namespace, deploymentThreadId)
+      ? await agenetes.record(namespace, deploymentThreadId)
       : undefined;
   const spec: BuiltinWorkloadSpec = buildHuabuPiWorkloadSpec({
     kind: INTERNAL_DRIVER_KIND,
@@ -284,7 +284,7 @@ export async function* runAgent(
   // Static DriverMap construction guarantees that `internal` is the
   // pi-backed handle. Deployments get-or-create by `threadId`; Jobs mint a
   // fresh handle.
-  const handle = agenetes.create(spec) as BuiltinHandle;
+  const handle = (await agenetes.create(spec)) as BuiltinHandle;
 
   // Apply any per-thread capability selection carried with this turn — a
   // model / reasoning effort the client picked (e.g. before the thread's

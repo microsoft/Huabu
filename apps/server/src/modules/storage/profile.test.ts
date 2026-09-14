@@ -58,13 +58,13 @@ describe('validateStorageProfile', () => {
 
   // A kind can be a known member of the target family while having no
   // adapter yet. That must fail at startup, not on first use.
-  it('rejects a known but unimplemented structured backend', () => {
+  it('accepts Postgres records beside disk blobs', () => {
     expect(() =>
       validateStorageProfile({
         structured: { kind: 'postgres' },
         blobs: { kind: 'disk' },
       }),
-    ).toThrow(/not implemented yet.*disk, sqlite/s);
+    ).not.toThrow();
   });
 
   // Fewer features is a stated limitation, not a misconfiguration: a profile
@@ -80,13 +80,13 @@ describe('validateStorageProfile', () => {
     ).not.toThrow();
   });
 
-  it('rejects a known but unimplemented blob backend', () => {
+  it('accepts Azure blobs with Disk records', () => {
     expect(() =>
       validateStorageProfile({
         structured: { kind: 'disk' },
         blobs: { kind: 'azure' },
       }),
-    ).toThrow(/not implemented yet.*disk/s);
+    ).not.toThrow();
   });
 });
 
@@ -106,6 +106,7 @@ describe('requiresExplicitInit', () => {
 
   it.each([
     { structured: { kind: 'postgres' }, blobs: { kind: 'disk' } },
+    { structured: { kind: 'disk' }, blobs: { kind: 'azure' } },
     { structured: { kind: 'sqlite' }, blobs: { kind: 'disk' } },
   ] as const)('requires an awaited init for %j', (profile) => {
     expect(requiresExplicitInit(profile)).toBe(true);

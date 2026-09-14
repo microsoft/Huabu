@@ -26,10 +26,17 @@ interface ThreadStoreFile {
 }
 
 export interface ThreadStore {
-  upsert(namespace: Namespace, threadId: string, record: ThreadRecord): void;
-  get(namespace: Namespace, threadId: string): ThreadRecord | undefined;
-  list(namespace: Namespace): ThreadRecord[];
-  delete(namespace: Namespace, threadId: string): void;
+  upsert(
+    namespace: Namespace,
+    threadId: string,
+    record: ThreadRecord,
+  ): void | Promise<void>;
+  get(
+    namespace: Namespace,
+    threadId: string,
+  ): ThreadRecord | undefined | Promise<ThreadRecord | undefined>;
+  list(namespace: Namespace): ThreadRecord[] | Promise<ThreadRecord[]>;
+  delete(namespace: Namespace, threadId: string): void | Promise<void>;
 }
 
 export class InMemoryThreadStore implements ThreadStore {

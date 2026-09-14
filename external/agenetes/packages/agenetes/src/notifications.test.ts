@@ -9,7 +9,11 @@
 import { defineDriver } from '@agenetes/runtime';
 import { describe, expect, it } from 'vitest';
 
-import { mountAgenetes } from './index.js';
+import {
+  mountAgenetes,
+  InMemoryThreadStore,
+  type ThreadStore,
+} from './index.js';
 
 import type {
   AgentSpec,
@@ -113,14 +117,14 @@ describe('notification surface (M5.5/A3.0, I9.7)', () => {
   it('persists the up-reported snapshot then re-emits its metadata', async () => {
     const inst = mount((spec) => new ReportingHandle(spec));
     const spec = deployment('thr_1');
-    const handle = inst.create(spec) as unknown as ReportingHandle;
+    const handle = (await inst.create(spec)) as unknown as ReportingHandle;
 
     const collected = take(inst.notifications('thr_1'), 1);
     handle.emit({ driverState: { sessionId: 'sess-1' }, metadata: meta });
 
     expect(await collected).toEqual([meta]);
     // persist-then-notify: the record already carries the full snapshot.
-    const rec = inst.record(spec.namespace, 'thr_1');
+    const rec = await inst.record(spec.namespace, 'thr_1');
     expect(rec).toMatchObject({
       driverSchemaVersion: 1,
       state: { driverState: { sessionId: 'sess-1' }, metadata: meta },
@@ -130,7 +134,7 @@ describe('notification surface (M5.5/A3.0, I9.7)', () => {
   it('persists a driver-state-only snapshot without emitting to L1', async () => {
     const inst = mount((spec) => new ReportingHandle(spec));
     const spec = deployment('thr_1');
-    const handle = inst.create(spec) as unknown as ReportingHandle;
+    const handle = (await inst.create(spec)) as unknown as ReportingHandle;
 
     const collected = take(inst.notifications('thr_1'), 1);
     handle.emit({ driverState: { sessionId: 'sess-1' } });
@@ -140,46 +144,141 @@ describe('notification surface (M5.5/A3.0, I9.7)', () => {
     expect(await collected).toEqual([meta]);
     expect(
       (
-        inst.record(spec.namespace, 'thr_1')?.state
+        (await inst.record(spec.namespace, 'thr_1'))?.state
           .driverState as StubDriverState
       ).sessionId,
     ).toBe('sess-1');
   });
 
-  it('wires the listener exactly once across get-or-create reuse', () => {
+  it('wires the listener exactly once across get-or-create reuse', async () => {
     const inst = mount((spec) => new ReportingHandle(spec));
     const spec = deployment('thr_1');
-    const h1 = inst.create(spec) as unknown as ReportingHandle;
-    const h2 = inst.create(spec) as unknown as ReportingHandle;
+    const h1 = (await inst.create(spec)) as unknown as ReportingHandle;
+    const h2 = (await inst.create(spec)) as unknown as ReportingHandle;
     expect(h1).toBe(h2); // reuse returns the same handle
     expect(h1.wired).toBe(true);
   });
 
   it('close() ends every open notification stream', async () => {
     const inst = mount((spec) => new ReportingHandle(spec));
-    inst.create(deployment('thr_1'));
+    await inst.create(deployment('thr_1'));
 
     const drained: AgentMetadata[] = [];
     const loop = (async () => {
       for await (const m of inst.notifications('thr_1')) drained.push(m);
     })();
 
-    inst.close('thr_1');
+    await inst.close('thr_1');
     await loop; // returns because the stream ended
     expect(drained).toEqual([]);
   });
 
   it('a handle with no onState leaves the notification stream empty', async () => {
     const inst = mount((spec) => new SilentHandle(spec));
-    inst.create(deployment('thr_1'));
+    await inst.create(deployment('thr_1'));
 
     const drained: AgentMetadata[] = [];
     const loop = (async () => {
       for await (const m of inst.notifications('thr_1')) drained.push(m);
     })();
 
-    inst.close('thr_1'); // nothing was ever published
+    await inst.close('thr_1'); // nothing was ever published
     await loop;
     expect(drained).toEqual([]);
   });
+});
+
+describe('asynchronous thread persistence', () => {
+  it('waits for initial persistence before exposing a live handle', async () => {
+    const backing = new InMemoryThreadStore();
+    const gate = Promise.withResolvers<void>();
+    const entered = Promise.withResolvers<void>();
+    const store: ThreadStore = new Proxy(backing, {
+      get(target, key) {
+        if (key === 'upsert')
+          return async (...args: Parameters<typeof target.upsert>) => {
+            entered.resolve();
+            await gate.promise;
+            target.upsert(...args);
+          };
+        const value = Reflect.get(target, key);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    let created = 0;
+    const inst = mountAgenetes({
+      drivers: {
+        external: driver((spec) => {
+          created++;
+          return new ReportingHandle(spec);
+        }),
+      },
+      threadStore: store,
+    });
+    const pending = inst.create(deployment('delayed'));
+    await entered.promise;
+    expect(created).toBe(0);
+    expect(inst.get('delayed')).toBeUndefined();
+    gate.resolve();
+    const handle = await pending;
+    expect(inst.get('delayed')).toBe(handle);
+    expect(created).toBe(1);
+    await inst.close('delayed');
+  });
+
+  it.each([false, true])(
+    'drains state writes on close and surfaces failure=%s',
+    async (fail) => {
+      const backing = new InMemoryThreadStore();
+      const gate = Promise.withResolvers<void>();
+      const entered = Promise.withResolvers<void>();
+      let reports = false;
+      const store: ThreadStore = new Proxy(backing, {
+        get(target, key) {
+          if (key === 'upsert')
+            return async (...args: Parameters<typeof target.upsert>) => {
+              if (reports) {
+                entered.resolve();
+                await gate.promise;
+                if (fail) throw new Error('state write failed');
+              }
+              target.upsert(...args);
+            };
+          const value = Reflect.get(target, key);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+      const inst = mountAgenetes({
+        drivers: { external: driver((spec) => new ReportingHandle(spec)) },
+        threadStore: store,
+      });
+      const spec = deployment('reported');
+      const handle = (await inst.create(spec)) as unknown as ReportingHandle;
+      reports = true;
+      const seen: AgentMetadata[] = [];
+      const reading = (async () => {
+        for await (const value of inst.notifications('reported'))
+          seen.push(value);
+      })();
+      handle.emit({ driverState: { sessionId: 'saved' }, metadata: meta });
+      await entered.promise;
+      expect(seen).toEqual([]);
+      expect(
+        backing.get(spec.namespace, spec.threadId)?.state.driverState,
+      ).toEqual({});
+      const closing = inst.close('reported');
+      expect(handle.closed).toBe(false);
+      const checked = fail
+        ? expect(closing).rejects.toThrow('state write failed')
+        : closing;
+      gate.resolve();
+      await checked;
+      await reading;
+      expect(handle.closed).toBe(true);
+      expect(seen).toEqual(fail ? [] : [meta]);
+      expect(
+        backing.get(spec.namespace, spec.threadId)?.state.driverState,
+      ).toEqual(fail ? {} : { sessionId: 'saved' });
+    },
+  );
 });

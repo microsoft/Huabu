@@ -33,14 +33,15 @@ const driver = defineDriver({
 describe('mountAgenetes static driver map', () => {
   it('mounts a complete host-constructed driver map', () => {
     const instance = mountAgenetes({ drivers: { external: driver } });
-    expect(() =>
-      instance.create({
-        kind: 'external',
-        workloadType: 'Deployment',
-        namespace: { name: 'canvas-1' },
-        threadId: 'thread-1',
-        spec: {},
-      }),
+    expect(
+      async () =>
+        await instance.create({
+          kind: 'external',
+          workloadType: 'Deployment',
+          namespace: { name: 'canvas-1' },
+          threadId: 'thread-1',
+          spec: {},
+        }),
     ).not.toThrow();
   });
 

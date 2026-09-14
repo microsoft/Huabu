@@ -306,7 +306,7 @@ export async function moveCanvasSelection(
               );
             }
             const namespace = canvasAcpNamespace(sourceCanvasId);
-            const record = agenetes.record(namespace, threadId);
+            const record = await agenetes.record(namespace, threadId);
             if (!record) {
               throw new SpaceMoveError(
                 'MOVE_AGENT_HISTORY_INVALID',
@@ -362,7 +362,7 @@ export async function moveCanvasSelection(
           let sourceWrite: ExecuteOnServerOutput | undefined;
           try {
             for (const move of threadMoves) {
-              agenetes.rehome(
+              await agenetes.rehome(
                 {
                   namespace: canvasAcpNamespace(sourceCanvasId),
                   threadId: move.threadId,
@@ -448,7 +448,7 @@ export async function moveCanvasSelection(
                 });
               }
               for (const move of completedThreads.reverse()) {
-                agenetes.rehome(
+                await agenetes.rehome(
                   {
                     namespace: canvasAcpNamespace(destinationCanvasId),
                     threadId: move.threadId,

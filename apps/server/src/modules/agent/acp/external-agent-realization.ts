@@ -78,8 +78,10 @@ interface RealizationDependencies {
   readRecord: (
     namespace: Namespace,
     threadId: string,
-  ) => ReturnType<typeof agenetes.record>;
-  createHandle: (spec: AcpWorkloadSpec) => AcpHandle;
+  ) =>
+    | ReturnType<typeof agenetes.record>
+    | Awaited<ReturnType<typeof agenetes.record>>;
+  createHandle: (spec: AcpWorkloadSpec) => AcpHandle | Promise<AcpHandle>;
   buildSpec: typeof buildAcpWorkloadSpec;
   subscribeProfileCache: typeof ensureProfileCacheSubscription;
   ensureSession: (
@@ -107,7 +109,7 @@ async function ensureSessionFromCanonicalSpec(
     resolvedEnvironment || spec.spec.env
       ? { ...resolvedEnvironment, ...spec.spec.env }
       : undefined;
-  const record = agenetes.record(spec.namespace, spec.threadId);
+  const record = await agenetes.record(spec.namespace, spec.threadId);
   return ensureAcpSession({
     agentletId: resolveAcpAgentletId(spec),
     threadId: spec.threadId,
@@ -135,8 +137,9 @@ const DEFAULT_DEPENDENCIES: RealizationDependencies = {
   resolveFixedAgentNode: (canvasId, threadId) =>
     agentThreadResolver.resolveFixedAgentNode(canvasId, threadId),
   collectSpacePrompt: resolveSpacePrompt,
-  readRecord: (namespace, threadId) => agenetes.record(namespace, threadId),
-  createHandle: (spec) => agenetes.create(spec) as AcpHandle,
+  readRecord: async (namespace, threadId) =>
+    await agenetes.record(namespace, threadId),
+  createHandle: async (spec) => (await agenetes.create(spec)) as AcpHandle,
   buildSpec: buildAcpWorkloadSpec,
   subscribeProfileCache: ensureProfileCacheSubscription,
   ensureSession: ensureSessionFromCanonicalSpec,
@@ -201,7 +204,10 @@ export class ExternalAgentRealizationService {
               )
             : null))
         : options.agentTarget;
-    const record = this.dependencies.readRecord(namespace, options.threadId);
+    const record = await this.dependencies.readRecord(
+      namespace,
+      options.threadId,
+    );
 
     if (record) {
       if (record.spec.kind !== EXTERNAL_DRIVER_KIND) {
@@ -216,7 +222,7 @@ export class ExternalAgentRealizationService {
         binding,
         fixedTarget,
         spec,
-        handle: this.dependencies.createHandle(spec),
+        handle: await this.dependencies.createHandle(spec),
       };
       this.dependencies.subscribeProfileCache(
         options.threadId,
@@ -293,7 +299,7 @@ export class ExternalAgentRealizationService {
       binding,
       fixedTarget,
       spec,
-      handle: this.dependencies.createHandle(spec),
+      handle: await this.dependencies.createHandle(spec),
     };
     this.dependencies.subscribeProfileCache(
       options.threadId,

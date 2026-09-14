@@ -82,9 +82,15 @@ async function realizeControlThread(
   }
 }
 
-function resolveThreadAgentletId(threadId: string, canvasId?: string): string {
+async function resolveThreadAgentletId(
+  threadId: string,
+  canvasId?: string,
+): Promise<string> {
   if (canvasId) {
-    const record = agenetes.record(canvasAcpNamespace(canvasId), threadId);
+    const record = await agenetes.record(
+      canvasAcpNamespace(canvasId),
+      threadId,
+    );
     const driverSpec = record?.spec.spec;
     if (
       driverSpec &&
@@ -223,7 +229,7 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
       });
     }
     const { canvasId, profileId } = parsed.data;
-    const agentletId = resolveThreadAgentletId(threadId, canvasId);
+    const agentletId = await resolveThreadAgentletId(threadId, canvasId);
     const live = acpSessionRegistry.get(agentletId, threadId);
     if (live) {
       return {
@@ -234,7 +240,10 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
       };
     }
     if (canvasId) {
-      const record = agenetes.record(canvasAcpNamespace(canvasId), threadId);
+      const record = await agenetes.record(
+        canvasAcpNamespace(canvasId),
+        threadId,
+      );
       const persistedMeta = record?.state?.metadata;
       if (persistedMeta) {
         return {

@@ -15,8 +15,7 @@
 /**
  * Structured backend families a profile may name.
  *
- * Wider than the port's `StructuredBackendKind`, which names only what an
- * adapter exists for. Keeping the two apart is what lets a
+ * Kept distinct from the port's `StructuredBackendKind` so a future
  * configured-but-unwritten backend fail with "not implemented yet" instead of
  * "not a known backend", without the port advertising adapters that do not
  * exist.
@@ -26,8 +25,8 @@ export type RequestedStructuredKind = 'disk' | 'sqlite' | 'postgres';
 /**
  * Blob backend families a profile may name.
  *
- * Wider than the port's {@link BlobBackendKind} for the same reason
- * {@link RequestedStructuredKind} is wider than the structured one.
+ * Kept distinct from the port's {@link BlobBackendKind} for the same reason
+ * {@link RequestedStructuredKind} is separate from the structured one.
  *
  * Every member is a file system. Bytes are files wherever they live — a local
  * directory today, an object store later — and never rows in the structured
@@ -53,8 +52,9 @@ export interface StorageProfile {
 const AVAILABLE_STRUCTURED: readonly RequestedStructuredKind[] = [
   'disk',
   'sqlite',
+  'postgres',
 ];
-const AVAILABLE_BLOBS: readonly RequestedBlobKind[] = ['disk'];
+const AVAILABLE_BLOBS: readonly RequestedBlobKind[] = ['disk', 'azure'];
 
 const STRUCTURED_KINDS: readonly RequestedStructuredKind[] = [
   'disk',
@@ -144,12 +144,14 @@ export function validateStorageProfile(profile: StorageProfile): void {
  * callers unopened. Keeping the list here, next to the other backend facts,
  * means adding an adapter forces a decision about it.
  *
- * Only the structured axis appears: every blob backend is a file system, and
- * a file system has no connection to open.
+ * Azure additionally requires awaited container validation before scopes are used.
  */
 const LAZY_SAFE_STRUCTURED: readonly RequestedStructuredKind[] = ['disk'];
 
 /** Whether this profile may only be built through an awaited `initStorage()`. */
 export function requiresExplicitInit(profile: StorageProfile): boolean {
-  return !LAZY_SAFE_STRUCTURED.includes(profile.structured.kind);
+  return (
+    !LAZY_SAFE_STRUCTURED.includes(profile.structured.kind) ||
+    profile.blobs.kind !== 'disk'
+  );
 }

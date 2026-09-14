@@ -50,11 +50,16 @@ interface AgentThreadServiceDependencies {
   resolvePersistedExternalBinding: (
     canvasId: string,
     threadId: string,
-  ) => Extract<AgentBinding, { kind: 'external' }> | null;
+  ) =>
+    | Extract<AgentBinding, { kind: 'external' }>
+    | null
+    | Promise<Extract<AgentBinding, { kind: 'external' }> | null>;
   resolvePersistedSpacePrompt: (
     canvasId: string,
     threadId: string,
-  ) => { realised: boolean; markdown?: string };
+  ) =>
+    | { realised: boolean; markdown?: string }
+    | Promise<{ realised: boolean; markdown?: string }>;
   collectSpacePrompt: (
     canvasId: string,
     targetAgentNodeId: string,
@@ -69,7 +74,7 @@ interface AgentThreadServiceDependencies {
   failLifecycle: typeof agentNodeLifecycle.error;
   runExternal: typeof runAcpAgent;
   runInternal: typeof runAgent;
-  closeHandle: (threadId: string) => void;
+  closeHandle: (threadId: string) => void | Promise<void>;
 }
 
 export function externalBindingFromWorkloadSpec(
@@ -101,13 +106,19 @@ const DEFAULT_DEPENDENCIES: AgentThreadServiceDependencies = {
     agentThreadResolver.resolveAgentNode(canvasId, threadId),
   resolveFixedAgentNode: (canvasId, threadId) =>
     agentThreadResolver.resolveFixedAgentNode(canvasId, threadId),
-  resolvePersistedExternalBinding: (canvasId, threadId) => {
-    const record = agenetes.record(canvasAcpNamespace(canvasId), threadId);
+  resolvePersistedExternalBinding: async (canvasId, threadId) => {
+    const record = await agenetes.record(
+      canvasAcpNamespace(canvasId),
+      threadId,
+    );
     if (!record || record.spec.kind !== EXTERNAL_DRIVER_KIND) return null;
     return externalBindingFromWorkloadSpec(record.spec.spec);
   },
-  resolvePersistedSpacePrompt: (canvasId, threadId) => {
-    const record = agenetes.record(canvasAcpNamespace(canvasId), threadId);
+  resolvePersistedSpacePrompt: async (canvasId, threadId) => {
+    const record = await agenetes.record(
+      canvasAcpNamespace(canvasId),
+      threadId,
+    );
     if (!record) return { realised: false };
     const markdown = spacePromptFromWorkloadSpec(record.spec.spec);
     return markdown ? { realised: true, markdown } : { realised: true };
@@ -121,7 +132,7 @@ const DEFAULT_DEPENDENCIES: AgentThreadServiceDependencies = {
   failLifecycle: agentNodeLifecycle.error.bind(agentNodeLifecycle),
   runExternal: runAcpAgent,
   runInternal: runAgent,
-  closeHandle: (threadId) => agenetes.close(threadId),
+  closeHandle: async (threadId) => await agenetes.close(threadId),
 };
 
 export class AgentThreadBusyError extends Error {
@@ -229,7 +240,7 @@ export class AgentThreadService {
         ? { binding: fixedTarget.agentBinding, fixedTarget }
         : null;
     }
-    const binding = this.dependencies.resolvePersistedExternalBinding(
+    const binding = await this.dependencies.resolvePersistedExternalBinding(
       canvasId,
       threadId,
     );
@@ -261,7 +272,7 @@ export class AgentThreadService {
         : options.agentTarget;
     const persistedExternalBinding =
       !fixedTarget && options.canvasId
-        ? this.dependencies.resolvePersistedExternalBinding(
+        ? await this.dependencies.resolvePersistedExternalBinding(
             options.canvasId,
             options.threadId,
           )
@@ -308,7 +319,7 @@ export class AgentThreadService {
     let spacePrompt: string | undefined;
     try {
       if (agentTarget && options.canvasId && binding.kind !== 'external') {
-        const persisted = this.dependencies.resolvePersistedSpacePrompt(
+        const persisted = await this.dependencies.resolvePersistedSpacePrompt(
           options.canvasId,
           options.threadId,
         );
@@ -471,7 +482,7 @@ export class AgentThreadService {
     }
   }
 
-  private createDispatchStream(
+  private async *createDispatchStream(
     options: EffectiveAgentThreadInvocationOptions,
     binding: AgentBinding,
     fixedTarget: FixedAgentNodeTarget | null,
@@ -483,7 +494,7 @@ export class AgentThreadService {
           `External thread ${options.threadId} was not canonically realized`,
         );
       }
-      return this.dependencies.runExternal({
+      return yield* this.dependencies.runExternal({
         handle: options.externalRealization.handle,
         binding,
         threadId: options.threadId,
@@ -500,10 +511,10 @@ export class AgentThreadService {
 
     const skillDispatch = planSkillDispatch(options.envelope.skills.resolved);
     if (skillDispatch.closeLiveHandle) {
-      this.dependencies.closeHandle(options.threadId);
+      await this.dependencies.closeHandle(options.threadId);
     }
     const runsSkillAuthoring = skillDispatch.closeLiveHandle;
-    return this.dependencies.runInternal({
+    return yield* this.dependencies.runInternal({
       scope: options.mode,
       workloadType: skillDispatch.workloadType,
       modelRole: skillDispatch.modelRole,

@@ -85,7 +85,7 @@ export interface EventLogStore {
     namespace: Namespace,
     threadId: string,
     request: AgentSubmission | null,
-  ): TurnStartLogEntry;
+  ): TurnStartLogEntry | Promise<TurnStartLogEntry>;
   /**
    * Append `event` to the thread's log, assigning the next `seq`
    * (`maxSeq + 1`). Returns the durable entry, whose `seq` is the fence for
@@ -95,7 +95,7 @@ export interface EventLogStore {
     namespace: Namespace,
     threadId: string,
     event: AgentStreamEvent,
-  ): EventLogEntry;
+  ): EventLogEntry | Promise<EventLogEntry>;
   /**
    * Read the log for a thread. With `sinceSeq` set, returns only entries
    * with `seq > sinceSeq` (the fence read that powers `tail` reconnect);
@@ -105,15 +105,15 @@ export interface EventLogStore {
     namespace: Namespace,
     threadId: string,
     sinceSeq?: number,
-  ): EventLogEntry[];
+  ): EventLogEntry[] | Promise<EventLogEntry[]>;
   /** Read both internal turn boundaries and streamed event entries. */
   readRecords(
     namespace: Namespace,
     threadId: string,
     sinceSeq?: number,
-  ): EventLogRecord[];
+  ): EventLogRecord[] | Promise<EventLogRecord[]>;
   /** The highest `seq` persisted for a thread, or `0` when the log is empty. */
-  maxSeq(namespace: Namespace, threadId: string): number;
+  maxSeq(namespace: Namespace, threadId: string): number | Promise<number>;
   /**
    * Overwrite a thread's ENTIRE Tier-1 log with `records` (already-sequenced,
    * in original order), replacing whatever the target held before. A narrow
@@ -125,13 +125,13 @@ export interface EventLogStore {
     namespace: Namespace,
     threadId: string,
     records: readonly EventLogRecord[],
-  ): void;
+  ): void | Promise<void>;
   /**
    * Remove a thread's Tier-1 log entirely (idempotent). Reserved for the
    * `rehome()` primitive: dropping the source log after its target twin is
    * durable, or compensating a target log written during a failed rehome.
    */
-  delete(namespace: Namespace, threadId: string): void;
+  delete(namespace: Namespace, threadId: string): void | Promise<void>;
 }
 
 /** Defensive shape-check for a persisted entry read back from disk. */
@@ -389,6 +389,20 @@ export class EventLog {
   readonly #store: EventLogStore;
   readonly #listeners = new Map<string, Set<EventLogListener>>();
 
+  readonly #pending = new Map<string, Promise<unknown>>();
+  #serialize<T>(threadId: string, operation: () => Promise<T>): Promise<T> {
+    const result = (this.#pending.get(threadId) ?? Promise.resolve())
+      .catch(() => {})
+      .then(operation);
+    this.#pending.set(threadId, result);
+    const clear = () => {
+      if (this.#pending.get(threadId) === result)
+        this.#pending.delete(threadId);
+    };
+    void result.then(clear, clear);
+    return result;
+  }
+
   constructor(store: EventLogStore) {
     this.#store = store;
   }
@@ -397,50 +411,59 @@ export class EventLog {
    * Persist a turn boundary without publishing it to live event
    * subscribers. Public tail consumers observe only AgentStreamEvents.
    */
-  beginTurn(
+  async beginTurn(
     namespace: Namespace,
     threadId: string,
     request: AgentSubmission | null,
-  ): TurnStartLogEntry {
-    return this.#store.appendTurnStart(namespace, threadId, request);
+  ): Promise<TurnStartLogEntry> {
+    return this.#serialize(
+      threadId,
+      async () =>
+        await this.#store.appendTurnStart(namespace, threadId, request),
+    );
   }
 
   /** Append + persist an event, then notify live subscribers of the thread. */
-  append(
+  async append(
     namespace: Namespace,
     threadId: string,
     event: AgentStreamEvent,
-  ): EventLogEntry {
-    const entry = this.#store.append(namespace, threadId, event);
-    const set = this.#listeners.get(threadId);
-    if (set) {
-      // Snapshot so a listener that unsubscribes during dispatch is safe.
-      for (const listener of [...set]) listener(entry);
-    }
-    return entry;
+  ): Promise<EventLogEntry> {
+    return this.#serialize(threadId, async () => {
+      const entry = await this.#store.append(namespace, threadId, event);
+      const set = this.#listeners.get(threadId);
+      if (set) {
+        // Snapshot so a listener that unsubscribes during dispatch is safe.
+        for (const listener of [...set]) listener(entry);
+      }
+      return entry;
+    });
   }
 
   /** Durable read (fence read when `sinceSeq` is set); see {@link EventLogStore.read}. */
-  read(
+  async read(
     namespace: Namespace,
     threadId: string,
     sinceSeq?: number,
-  ): EventLogEntry[] {
-    return this.#store.read(namespace, threadId, sinceSeq);
+  ): Promise<EventLogEntry[]> {
+    await this.#pending.get(threadId);
+    return await this.#store.read(namespace, threadId, sinceSeq);
   }
 
   /** Durable read of all Tier-1 records for history materialization. */
-  readRecords(
+  async readRecords(
     namespace: Namespace,
     threadId: string,
     sinceSeq?: number,
-  ): EventLogRecord[] {
-    return this.#store.readRecords(namespace, threadId, sinceSeq);
+  ): Promise<EventLogRecord[]> {
+    await this.#pending.get(threadId);
+    return await this.#store.readRecords(namespace, threadId, sinceSeq);
   }
 
   /** The highest persisted `seq` for a thread (the fence), or `0` when empty. */
-  maxSeq(namespace: Namespace, threadId: string): number {
-    return this.#store.maxSeq(namespace, threadId);
+  async maxSeq(namespace: Namespace, threadId: string): Promise<number> {
+    await this.#pending.get(threadId);
+    return await this.#store.maxSeq(namespace, threadId);
   }
 
   /**
@@ -449,20 +472,20 @@ export class EventLog {
    * write — it carries no live fan-out because a rehome target never has
    * subscribers yet (its thread does not exist before the move).
    */
-  replace(
+  async replace(
     namespace: Namespace,
     threadId: string,
     records: readonly EventLogRecord[],
-  ): void {
-    this.#store.replace(namespace, threadId, records);
+  ): Promise<void> {
+    await this.#store.replace(namespace, threadId, records);
   }
 
   /**
    * Remove a thread's Tier-1 log entirely; see {@link EventLogStore.delete}.
    * Reserved for `rehome()`'s source cleanup / target compensation.
    */
-  delete(namespace: Namespace, threadId: string): void {
-    this.#store.delete(namespace, threadId);
+  async delete(namespace: Namespace, threadId: string): Promise<void> {
+    await this.#store.delete(namespace, threadId);
   }
 
   /**
