@@ -48,29 +48,48 @@ Each surface has an in-process programmatic form today, used when Agenetes is mo
 
 每个 surface 当前都有一种进程内的程序调用形态，用于 Agenetes 被直接 mount 进 host application 的场景。下表中的 API-shaped forms 是未来跨进程或网络边界时的投影建议；它们描述的是预期的 REST/SSE 形态，而不是最终 HTTP contract。
 
-| Surface             | Current in-process API                                                          | Suggested API-shaped form _(planned)_                           | Meaning                                                                                                        |
-| ------------------- | ------------------------------------------------------------------------------- | --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| Instance            | `Agenetes.create(spec) -> AgentHandle`                                          | `POST /workloads`                                               | Realize a `WorkloadSpec`: Jobs mint a fresh handle; Deployments get-or-create the live handle by `threadId`.   |
-| Instance            | `Agenetes.get(threadId) -> AgentHandle \| undefined`                            | `GET /workloads/:threadId/live`                                 | Return the live Deployment handle when one is already running; never spawns.                                   |
-| Instance            | `Agenetes.close(threadId) -> void`                                              | `DELETE /workloads/:threadId/live`                              | Close and evict the live handle for a thread.                                                                  |
-| Agent Handle        | `AgentHandle.run(submission, ctx) -> AsyncGenerator<AgentStreamEvent, TResult>` | `POST /workloads/:threadId/runs` + stream                       | Run one turn, stream `AgentStreamEvent`s, and return the driver's per-turn result.                             |
-| Agent Handle        | `AgentHandle.control(msg) -> Promise<ControlAck>`                               | `POST /workloads/:threadId/control`                             | Send an out-of-turn `ControlMsg` and receive a `ControlAck`.                                                   |
-| Agent Handle        | `AgentHandle.close() -> void`                                                   | `DELETE /workloads/:threadId/live`                              | Release this workload through the handle surface.                                                              |
-| Agent Handle        | `AgentHandle.capabilities -> AgentCapabilities`                                 | `GET /workloads/:threadId/capabilities`                         | Read the operations and features this handle advertises.                                                       |
-| Persistent Querying | `Agenetes.record(namespace, threadId) -> ThreadRecord \| undefined`             | `GET /namespaces/:namespace/workloads/:threadId`                | Read one durable thread record independent of handle liveness.                                                 |
-| Persistent Querying | `Agenetes.records(namespace) -> ThreadRecord[]`                                 | `GET /namespaces/:namespace/workloads`                          | Enumerate persisted thread records in one namespace.                                                           |
-| Persistent Querying | `Agenetes.notifications(threadId) -> AsyncIterable<AgentMetadata>`              | `GET /workloads/:threadId/notifications`                        | Subscribe to persisted AgentMetadata updates.                                                                  |
-| Persistent Querying | `Agenetes.logMetadata(namespace, threadId) -> ThreadLogMetadata`                | `GET /namespaces/:namespace/workloads/:threadId/log-metadata`   | Read Tier-1 event and Tier-2 folded-turn counts without loading either log.                                    |
-| Persistent Querying | `Agenetes.history(namespace, threadId, { withTail? }) -> ThreadHistory`         | `GET /namespaces/:namespace/workloads/:threadId/history?tail=1` | Read folded turns, optionally projecting the current Tier-1 tail as an incomplete turn snapshot.               |
-| Persistent Querying | `Agenetes.tail(namespace, threadId) -> AsyncIterable<AgentStreamEvent>`         | `GET /namespaces/:namespace/workloads/:threadId/events`         | Follow the live Tier-1 event tail after the latest folded turn.                                                |
-| Configuration       | `defineDriver(definition) -> MountedAgentDriver`                                | deployment / configuration API                                  | Bind one driver's schema version, workload types, spec/state schemas, initial state, and typed implementation. |
-| Configuration       | `mountAgenetes({ drivers, ...stores }) -> Agenetes`                             | deployment / configuration API                                  | Mount a complete static `kind → driver` map with instance-level persistence and recovery policy.               |
+| Surface             | Current in-process API                                                           | Suggested API-shaped form _(planned)_                           | Meaning                                                                                                        |
+| ------------------- | -------------------------------------------------------------------------------- | --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Instance            | `Agenetes.create(spec) -> Promise<AgentHandle>`                                  | `POST /workloads`                                               | Realize a `WorkloadSpec`: Jobs mint a fresh handle; Deployments get-or-create the live handle by `threadId`.   |
+| Instance            | `Agenetes.get(threadId) -> AgentHandle \| undefined`                             | `GET /workloads/:threadId/live`                                 | Return the live Deployment handle when one is already running; never spawns.                                   |
+| Instance            | `Agenetes.close(threadId) -> Promise<void>`                                      | `DELETE /workloads/:threadId/live`                              | Close and evict the live handle for a thread.                                                                  |
+| Agent Handle        | `AgentHandle.run(submission, ctx) -> AsyncGenerator<AgentStreamEvent, TResult>`  | `POST /workloads/:threadId/runs` + stream                       | Run one turn, stream `AgentStreamEvent`s, and return the driver's per-turn result.                             |
+| Agent Handle        | `AgentHandle.control(msg) -> Promise<ControlAck>`                                | `POST /workloads/:threadId/control`                             | Send an out-of-turn `ControlMsg` and receive a `ControlAck`.                                                   |
+| Agent Handle        | `AgentHandle.close() -> void`                                                    | `DELETE /workloads/:threadId/live`                              | Release this workload through the handle surface.                                                              |
+| Agent Handle        | `AgentHandle.capabilities -> AgentCapabilities`                                  | `GET /workloads/:threadId/capabilities`                         | Read the operations and features this handle advertises.                                                       |
+| Persistent Querying | `Agenetes.record(namespace, threadId) -> Promise<ThreadRecord \| undefined>`     | `GET /namespaces/:namespace/workloads/:threadId`                | Read one durable thread record independent of handle liveness.                                                 |
+| Persistent Querying | `Agenetes.records(namespace) -> Promise<ThreadRecord[]>`                         | `GET /namespaces/:namespace/workloads`                          | Enumerate persisted thread records in one namespace.                                                           |
+| Persistent Querying | `Agenetes.notifications(threadId) -> AsyncIterable<AgentMetadata>`               | `GET /workloads/:threadId/notifications`                        | Subscribe to persisted AgentMetadata updates.                                                                  |
+| Persistent Querying | `Agenetes.logMetadata(namespace, threadId) -> Promise<ThreadLogMetadata>`        | `GET /namespaces/:namespace/workloads/:threadId/log-metadata`   | Read Tier-1 event and Tier-2 folded-turn counts without loading either log.                                    |
+| Persistent Querying | `Agenetes.history(namespace, threadId, { withTail? }) -> Promise<ThreadHistory>` | `GET /namespaces/:namespace/workloads/:threadId/history?tail=1` | Read folded turns, optionally projecting the current Tier-1 tail as an incomplete turn snapshot.               |
+| Persistent Querying | `Agenetes.tail(namespace, threadId) -> AsyncIterable<AgentStreamEvent>`          | `GET /namespaces/:namespace/workloads/:threadId/events`         | Follow the live Tier-1 event tail after the latest folded turn.                                                |
+| Configuration       | `defineDriver(definition) -> MountedAgentDriver`                                 | deployment / configuration API                                  | Bind one driver's schema version, workload types, spec/state schemas, initial state, and typed implementation. |
+| Configuration       | `mountAgenetes({ drivers, ...stores }) -> Agenetes`                              | deployment / configuration API                                  | Mount a complete static `kind → driver` map with instance-level persistence and recovery policy.               |
 
 ## The Name: Agenetes / 名称：Agenetes
 
 The name is coined in the shape of its model, Kubernetes. Ancient Greek κυβερνήτης (_kubernḗtēs_, "helmsman/governor") is built from the root _kubern-_ plus the agentive suffix **-ήτης (_-ētēs_)**, "the one who does." Agenetes keeps **ag- / agen-** legible as "agent" while pointing back to the older "act / drive / lead" family behind Greek ἄγω and Latin _agō_ → _agent_; it then mirrors the same **-ētēs** agentive ending. The result suggests "the one who drives agents / sets agent workloads in motion" — precisely a control plane's job. It scans like its model: Ku-ber-NÉ-tēs ⟷ A-ge-NÉ-tēs.
 
 这个名字是按 Kubernetes 的构词方式造出的。古希腊语 κυβερνήτης（_kubernḗtēs_，“舵手 / 治理者”）由词根 _kubern-_ 加施事后缀 **-ήτης (_-ētēs_)** 构成，意为“那个去做……的人”。Agenetes 中的 **ag- / agen-** 既保留了 “agent” 的可辨识性，也指向希腊语 ἄγω 与拉丁语 _agō_ → _agent_ 背后的“行动 / 驱动 / 引导”语义；结尾则对应同一个 **-ētēs** 施事后缀。因此它表达的不是简单的 `agen + netes` 切分，而是“驱动 agent / 使 agent workload 运转起来的人”——这正是 control plane 的工作。它的重音节奏也与其模型对应：Ku-ber-NÉ-tēs ⟷ A-ge-NÉ-tēs。
+
+## Asynchronous persistence
+
+ThreadStore, EventLogStore, and TurnStore implementations may return values or
+promises. Agenetes awaits them. Callers must await `create`, `fork`, `rehome`,
+`close`, `record`, `records`, `history`, and `logMetadata`; `get` remains a live
+handle lookup, and `tail` and `notifications` remain async iterables. File and
+in-memory stores retain their synchronous implementations.
+
+Writes complete before event publication and state notifications. Per-thread
+state reports are queued, and `close` drains them. A state-persistence failure
+is surfaced by subsequent record/run/close operations. Lifecycle operations
+serialize across asynchronous rehome writes and compensation. Hosts must still
+coordinate running turns and namespace changes; this is process-local ordering,
+not a distributed transaction across stores.
+
+ThreadStore、EventLogStore、TurnStore 可以返回值或 Promise；Agenetes 会等待持久化完成。
+调用方须等待上述生命周期与持久化读取方法。事件与状态通知只在写入成功后发布，
+`close` 会等待排队中的状态写入；这些保证仅限进程内，不构成跨存储的分布式事务。
 
 ## Core invariants (the design consensus) / 核心不变量（设计共识）
 
