@@ -1,7 +1,7 @@
 # Server-Owned Agent Node State Machine
 
 Status: Proposed
-Last updated: 2026-09-13
+Last updated: 2026-09-14
 Issue: [#163](https://github.com/microsoft/Huabu/issues/163)
 
 ## Context and scope
@@ -14,14 +14,14 @@ Reuse `AgentThreadService`, canonical realization, `AgentNodeLifecycle`, and exi
 
 ## Terminology and ownership
 
-| Concept                     | Meaning                                                                                      | Authority                                  |
-| --------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------ |
-| Execution-preparation draft | Selected Profile and explicit launch overrides saved before execution binding is established | Huabu Canvas Node                          |
-| Execution binding           | The thread's established Agent identity, as resolved from its canonical execution record     | Huabu interprets existing Agenetes records |
-| Prompt invocation           | One admitted prompt, from preparation through settlement                                     | Huabu `AgentThreadService`                 |
-| Execution facts             | Workload realization, run events/results, control acknowledgements and existing history      | Agenetes, interpreted by Huabu             |
-| Browser-local state         | Unsent input, pending edits, saving, request progress and connection indicators              | Browser                                    |
-| Result attention            | Whether the user has viewed the current terminal result                                      | User acknowledgement, validated by Huabu   |
+| Concept                     | Meaning                                                                                                       | Authority                                                                 |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Execution-preparation draft | Selected Profile and explicit launch overrides saved before execution binding is established                  | Huabu Canvas Node                                                         |
+| Execution binding           | Monotonic Editing-to-Bound business state persisted on the node after confirming a canonical execution record | Huabu owns the node state; Agenetes ThreadStore supplies the binding fact |
+| Prompt invocation           | One admitted prompt, from preparation through settlement                                                      | Huabu `AgentThreadService`                                                |
+| Execution facts             | Workload realization, run events/results, control acknowledgements and existing history                       | Agenetes, interpreted by Huabu                                            |
+| Browser-local state         | Unsent input, pending edits, saving, request progress and connection indicators                               | Browser                                                                   |
+| Result attention            | Whether the user has viewed the current terminal result                                                       | User acknowledgement, validated by Huabu                                  |
 
 A node may already have a `threadId` without an execution binding. Conversely, an established binding does not mean a process is resident or a prompt is running. Avoid the term "configuration identity": configuration is data; execution binding is the relationship established from it.
 
@@ -30,24 +30,67 @@ A node may already have a `threadId` without an execution binding. Conversely, a
 ```mermaid
 stateDiagram-v2
     direction LR
-    state "Draft: no established execution binding" as Draft
-    state "Bound: canonical execution identity established" as Bound
+    state "Editing: execution-preparation draft" as Editing
+    state "Bound: confirmed execution binding" as Bound
 
-    [*] --> Draft: Create a new thread-backed node
-    Draft --> Draft: Save Profile or launch overrides
-    Draft --> Draft: Open panel or read capabilities
-    Draft --> Draft: Preparation fails before commitment
-    Draft --> Bound: First prompt or external control commits realization
+    [*] --> Editing: Create a new thread-backed node
+    Editing --> Editing: Save draft after confirming no existing binding
+    Editing --> Editing: Open panel or read capabilities
+    Editing --> Editing: Preparation fails before commitment
+    Editing --> Bound: Confirm persisted ThreadRecord / save bindingState
     Bound --> Bound: Later prompt or supported control
     Bound --> Bound: Prompt completes, fails, or stops
     Bound --> Bound: Runtime session closes
 ```
 
-This diagram describes a new node. Loading an existing node resolves its actual execution binding; it does not recreate a draft. Missing records with existing execution history are inconsistent evidence, not permission to silently bind a different Agent.
+This diagram describes a new node. A persisted Bound node stays Bound when loaded; it does not recreate a draft. An Editing or legacy node may already have a canonical execution record and must confirm that fact before accepting a configuration change or first interaction. Missing records with existing execution history are inconsistent evidence, not permission to silently bind a different Agent.
 
-The transition to Bound occurs when realization actually establishes the canonical execution record, not when the browser sends a request or when the first token arrives. If realization succeeds but session startup or control later fails, the binding remains established.
+The source of truth for establishing Bound is a validated, persisted Agenetes ThreadRecord for the node's namespace and thread. Huabu records that confirmed fact as `bindingState: bound` on the node. Neither sending a browser request, allocating a thread ID, receiving the first token, nor obtaining a native Session ID is the binding criterion. If realization succeeds but session startup or control later fails, the binding remains established.
 
-There is no automatic Bound-to-Draft transition. Supported runtime settings may still change through existing controls; this does not mean every setting is frozen. Internal thread-associated Jobs retain their existing execution strategy and do not become a separate Agent Node type. Do not assume every workload is an immutable Deployment.
+There is no Bound-to-Editing transition for the same execution binding. Supported runtime settings may still change through existing controls; this does not mean every setting is frozen. Internal thread-associated Jobs retain their existing execution strategy and do not become a separate Agent Node type. Do not assume every workload is an immutable Deployment.
+
+### Binding authority, query and persistence
+
+Use the existing public Agenetes interface:
+
+```typescript
+agenetes.record(namespace, threadId): ThreadRecord | undefined
+```
+
+This is an in-process library call, not an HTTP/ACP request to the Agent. It delegates to `threadStore.get(namespace, threadId)` and validates an existing record before returning it. It is independent of a live handle and does not create a session or send a prompt/control. The existing external realization path already uses this interface.
+
+The binding coordinator confirms that the returned record belongs to the intended thread/namespace and carries a supported canonical execution identity. Record presence must not bypass existing driver/binding validation. A native Session ID is neither persisted into the node for this purpose nor exposed as its state criterion.
+
+| Data                                                                 | Persistence on the current Disk backend                | Role                                                                          |
+| -------------------------------------------------------------------- | ------------------------------------------------------ | ----------------------------------------------------------------------------- |
+| `bindingState: editing \| bound` (proposed)                          | `space.json`, in the corresponding node's `data`       | Huabu's durable, monotonic acknowledgement of binding                         |
+| `threadId`, selected `agentBinding`, explicit `agentLaunchOverrides` | `space.json`, in node `data`                           | Node association and execution-preparation configuration                      |
+| Canonical ThreadRecord / WorkloadSpec                                | `.history/threads.json`, owned by Agenetes ThreadStore | Source of truth for confirming binding and for actual execution configuration |
+| Node text and content metadata                                       | `nodes/<label>.md` body and frontmatter                | Authored content, not binding-state persistence                               |
+
+There is one `space.json` per Space, not one `canvas.json` per Agent Node. Application modules use existing Canvas/storage and Agenetes interfaces rather than reading or editing these files directly.
+
+`bindingState` is separate from the prompt result's `status`. Bound is a persisted acknowledgement of an established fact, not a second editable copy of WorkloadSpec and not a continuously refreshed runtime-presence cache. Ordinary editability checks use the node's state; they do not query Agenetes again for a Bound node. Runtime dispatch still uses Agenetes execution records normally.
+
+| Boundary                                                                          | Query and write behavior                                                                              |
+| --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Load or display an already Bound node                                             | Read node metadata; no additional ThreadStore lookup solely to determine editability                  |
+| Accept a draft configuration edit or first interaction for an Editing/legacy node | Query the canonical record through the binding coordinator; reuse the result within this operation    |
+| Existing valid record found                                                       | Persist Bound and use canonical execution identity; reject a requested incompatible draft edit        |
+| No record and no conflicting execution evidence                                   | Allow draft editing, or realize on actual interaction; confirm the resulting record and persist Bound |
+| Token event, browser render or layout operation                                   | No binding-state lookup or transition                                                                 |
+
+An absent legacy field is unconfirmed, not proof of a genuinely fresh thread. Existing records are recognized lazily at the relevant operation boundary; no whole-Space migration scan or polling loop is required.
+
+### Ordering and the small partial-write case
+
+The ordering is canonical ThreadRecord persistence, confirmation through the existing record interface, then the Canvas write of Bound. A failed Bound write must be surfaced and must not be treated as a successful transition by the caller. It cannot roll back the canonical binding.
+
+If the record exists but the node still says Editing because the Canvas write failed or the process stopped, the next guarded edit/interaction recognizes the record and completes the one-way promotion before proceeding. Do this on an explicit operation path, not as an incidental GET side effect. This is bounded completion of one business transition, not an automatic turn-recovery system.
+
+Keep draft-edit acceptance and first binding ordered through the same local coordination boundary so an edit cannot pass its check and overwrite preparation configuration while realization commits. Reuse existing process-local coordination and keep this critical section focused; no cross-store transaction or distributed lock is proposed.
+
+Once Bound is persisted, a missing or invalid ThreadRecord produces an explicit execution-record error; it never resets the node to Editing. Ordinary Canvas saves and undo cannot demote Bound or modify the established execution-preparation configuration. Supported runtime controls remain separate. This supersedes the earlier decision to defer all post-binding configuration-write restrictions, but does not imply a general authored-content or Canvas write firewall.
 
 ## 2. Prompt-invocation FSM
 
@@ -79,15 +122,15 @@ A stop acknowledgement means cancellation was requested, not that execution ende
 
 ### How the two diagrams relate
 
-| Operation                           | Execution binding                   | Prompt invocation                          |
-| ----------------------------------- | ----------------------------------- | ------------------------------------------ |
-| Save draft / open panel             | Remains Draft                       | No change                                  |
-| First prompt                        | May become Bound during preparation | Preparing -> Executing -> Settled          |
-| First external control              | May become Bound                    | No change; no prompt is invented           |
-| Control fails after commitment      | Remains Bound                       | No change to the previous prompt's outcome |
-| Preparation fails before commitment | Remains Draft                       | Settled with failure                       |
-| Preparation fails after commitment  | Remains Bound                       | Settled with failure                       |
-| Follow-up prompt                    | Remains Bound                       | New invocation                             |
+| Operation                           | Execution binding                                           | Prompt invocation                          |
+| ----------------------------------- | ----------------------------------------------------------- | ------------------------------------------ |
+| Save valid draft / open panel       | Editing stays Editing; opening a Bound node leaves it Bound | No change                                  |
+| First prompt                        | May become Bound during preparation                         | Preparing -> Executing -> Settled          |
+| First external control              | May become Bound                                            | No change; no prompt is invented           |
+| Control fails after commitment      | Remains Bound                                               | No change to the previous prompt's outcome |
+| Preparation fails before commitment | Remains Editing                                             | Settled with failure                       |
+| Preparation fails after commitment  | Remains Bound                                               | Settled with failure                       |
+| Follow-up prompt                    | Remains Bound                                               | New invocation                             |
 
 Controls retain their existing driver semantics; the diagrams do not impose blanket mutual exclusion between all controls and prompts. First-interaction realization must still use the existing canonical coordination rather than creating competing execution identities.
 
@@ -107,7 +150,7 @@ The live phase, cancellation controller and settlement guard stay in the existin
 
 Propose one server-authored current-invocation token on the node. Replace it at admission and retain it with the result. Check it at the serialized write boundary to prevent an old completion from modifying a newer invocation, and use it to validate viewed acknowledgements. It is not a durable Agenetes turn identifier or a restart-recovery log; exact field/API names remain an implementation detail.
 
-Persist `status`, `errorMessage`, the token and result attention through the existing Canvas writer. Ordinary browser structure saves and inverse operations must preserve server-owned lifecycle metadata rather than restore stale snapshots. Scope this protection to lifecycle metadata; do not redesign general Canvas editing or impose a blanket authored-content/configuration firewall.
+Persist `status`, `errorMessage`, the token and result attention through the existing Canvas writer, alongside the separate monotonic `bindingState`. Ordinary browser structure saves and inverse operations must preserve server-owned lifecycle metadata rather than restore stale snapshots or demote Bound. Enforce the binding-specific configuration rule above without redesigning general Canvas or authored-content editing.
 
 ## 4. Commands and effects
 
@@ -139,19 +182,21 @@ Automatic reattachment, guaranteed crash recovery, durable invocation-to-turn co
 
 ## 6. Implementation boundary and open details
 
-| Area                   | Focused change                                                                                                                                |
-| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| Server coordinator     | Use one lifecycle owner for node-backed Web/direct RFS prompts regardless of policy; include cancellable preparation in the admitted lifetime |
-| Resolver / realization | Reuse generic node identity resolution and existing rich validation; read draft before commitment and canonical execution identity afterwards |
-| Canvas projection      | Extend the existing lifecycle writer with current-invocation guards and narrowly protected fields                                             |
-| Browser                | Persist draft selection through existing APIs; remove policy-dependent lifecycle/rescue writes on migrated paths                              |
-| Contracts / docs       | Define changed HTTP/SSE fields in shared schemas and update architecture with eventual implementation                                         |
+| Area                   | Focused change                                                                                                                                                                        |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Server coordinator     | Use one lifecycle owner for node-backed Web/direct RFS prompts regardless of policy; include cancellable preparation in the admitted lifetime                                         |
+| Resolver / realization | Reuse generic node identity resolution and existing validation; confirm ThreadRecord through `agenetes.record`, persist Bound once, and use canonical execution identity for dispatch |
+| Canvas projection      | Extend the existing lifecycle writer with current-invocation guards and narrowly protected fields                                                                                     |
+| Browser                | Persist draft selection through existing APIs; remove policy-dependent lifecycle/rescue writes on migrated paths                                                                      |
+| Contracts / docs       | Define changed HTTP/SSE fields in shared schemas and update architecture with eventual implementation                                                                                 |
 
 Task/Run/Interactive View redesign and owner-eligibility changes remain excluded. Preserve their caller contracts where they share services; bring any necessary semantic change back for an explicit scope decision. Node-less chat behavior is not converted into an Agent Node FSM.
 
 Global deletion of `agentBindingPolicy`, Profile lock indicators, new FSM dependencies, distributed locks, cross-store transactions and general autosave/undo redesign are not required.
 
-Before implementation approval, settle the token/read/acknowledgement API shape, concrete field-preservation points, first-submission detection for legacy empty nodes, driver terminal-event compatibility, and compatibility wiring for excluded callers. This proposal does not claim those integration details are implemented.
+The binding coordinator belongs to Huabu Server's Agent Node business layer under `modules/agent/`; its exact name is not decided. It owns binding reads, guarded draft edits and first-binding orchestration through existing resolver/realization/Canvas interfaces. `AgentThreadService` owns each live prompt invocation and calls this coordinator during preparation; the external control path uses the same binding entry without creating a prompt invocation. `AgentNodeLifecycle` remains a projection writer, not a third independent state machine. No event bus or bidirectional FSM synchronization is needed.
+
+Before implementation approval, settle the binding-state and invocation-token wire schemas, concrete field-preservation/ordering points, first-submission detection for legacy empty nodes, driver terminal-event compatibility, and compatibility wiring for excluded callers. This proposal does not claim those integration details are implemented.
 
 ## 7. Acceptance scenarios
 
@@ -164,6 +209,9 @@ Before implementation approval, settle the token/read/acknowledgement API shape,
 - Old completion, browser snapshots and viewed acknowledgements cannot overwrite a newer invocation/result.
 - Refresh observes server state; restart uncertainty does not fabricate a result or trigger replay.
 - Existing Job behavior and excluded callers retain their contracts.
+- A validated ThreadRecord promotes Editing/legacy state to persisted Bound; subsequent editability checks on Bound do not query Agenetes.
+- A failure between ThreadRecord persistence and the Bound write cannot permit rebinding; the next guarded operation completes promotion.
+- Missing records, session closure, old snapshots and undo never demote a Bound node to Editing.
 
 ## Code and design references
 
