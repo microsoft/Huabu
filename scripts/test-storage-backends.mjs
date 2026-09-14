@@ -104,7 +104,7 @@ try {
   }, 'Azurite');
   if (!stopping) {
     console.log(
-      'Running adapter, conversation, and product contracts across all six profiles...',
+      'Running the backend storage contracts included in this checkout...',
     );
     child = spawn(
       'pnpm',

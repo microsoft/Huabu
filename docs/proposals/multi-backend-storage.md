@@ -1,7 +1,7 @@
 # Multi-Backend Storage
 
-Status: Phases 1–5 implemented; SQLite is a selectable profile
-Last updated: 2026-09-04
+Status: Phases 1–5 implemented; Phase 6 adapter foundation implemented; activation follows
+Last updated: 2026-09-14
 
 > **Scope and decision confidence.** This proposal records the two-port
 > `StructuredStore` / `BlobStore` split and their target backend families as
@@ -2756,7 +2756,24 @@ across a switch, and forget-without-delete. The Agenetes conversation stores
 have their own suite against a mounted profile, covering round-trip,
 isolation, restart, and destruction with the Space.
 
-### 12.10 Later phases — provisional
+### 12.10 Phase 6 — adapter foundation and application activation
+
+Phase 6 is split into two reviewable steps. This foundation implements native
+Postgres structured repositories and Azure Blob storage, shared SQL codecs,
+validation, name allocation, and Task/Run rules, plus async extension-document
+helpers. Existing Disk and SQLite behavior remains covered by its tests.
+`pnpm test:storage-backends` provisions disposable PostgreSQL and Azurite
+services and runs the adapter contracts, including rollback, independent
+connection CAS, Workspace isolation, staged-upload failure, and same-key
+upload serialization. CI runs the same command.
+
+This foundation does not select the new adapters for the application. The
+stacked follow-up migrates Agenetes persistence and its callers to async,
+activates all six structured/blob pairings, and adds conversation and product
+coverage to the same harness. The earlier phase sections below and above
+record their original scope; this section defines the current Phase 6 split.
+
+### 12.11 Later phases — provisional
 
 6. Migrate the currently synchronous Agenetes persistence ports without
    changing their persist-before-notify, sequence, and fencing semantics.
