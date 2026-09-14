@@ -31,7 +31,8 @@ it('keeps zero-byte and multi-block payloads intact, including inclusive ranges'
     'large.bin',
     Readable.from([data.subarray(0, 33), data.subarray(33)]),
   );
-  expect(await scope.read('large.bin')).toEqual(data);
+  // Native byte equality avoids enumerating millions of Buffer properties.
+  expect((await scope.read('large.bin'))?.equals(data)).toBe(true);
   const range = await scope.open('large.bin', {
     start: 4 * 1024 * 1024 - 3,
     end: 4 * 1024 * 1024 + 3,
