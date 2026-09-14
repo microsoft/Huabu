@@ -7,21 +7,21 @@ import {
   type AcpCreateSpec,
   type AcpTurnCtx,
 } from '@agenetes/acp-driver';
-import {
-  FileEventLogStore,
-  FileThreadStore,
-  FileTurnStore,
-  mountAgenetes,
-} from '@agenetes/agenetes';
+import { mountAgenetes } from '@agenetes/agenetes';
 import { getAgentTeamRegistry } from '@agenetes/agentlet-host';
 import { piDriverFactory, type PiTurnCtx } from '@agenetes/pi-driver';
 
+import {
+  conversationEventLogStore,
+  conversationThreadStore,
+  conversationTurnStore,
+} from './conversation-stores.js';
 import { type AgentHandle } from './handle.js';
 import { HISTORY_LOAD_SANITY_LIMIT } from './history-replay.js';
 import { huabuPiDriverPorts } from './pi-driver.js';
 import { getExternalAgentRuntimeConfig } from '../acp/runtime-config.js';
 
-import type { AcpSpec } from '@agenetes/acp-driver';
+import type { AcpRuntimePolicy, AcpSpec } from '@agenetes/acp-driver';
 import type { Agenetes } from '@agenetes/agenetes';
 import type { PiWorkloadSpec } from '@agenetes/pi-driver';
 import type { AgentHandle as RuntimeAgentHandle } from '@agenetes/runtime';
@@ -36,7 +36,7 @@ export type AcpHandle = AgentHandle<void, AcpTurnCtx>;
 export type BuiltinHandle = AgentHandle<Message[], PiTurnCtx>;
 export type AgenetesHandle = RuntimeAgentHandle;
 
-const externalDriver = acpDriverFactory({
+export const acpRuntimePolicy: AcpRuntimePolicy = {
   getIdleTimeoutSecs: () => getExternalAgentRuntimeConfig().idleTimeoutSecs,
   resolveRuntimeEnvironment: async (spec: AcpSpec) => {
     const agentTeam = spec.recipe?.agentTeam;
@@ -55,16 +55,20 @@ const externalDriver = acpDriverFactory({
     });
     return runtime.environment;
   },
-});
+};
+
+const externalDriver = acpDriverFactory(acpRuntimePolicy);
 
 export const agenetes: Agenetes = mountAgenetes({
   drivers: {
     [INTERNAL_DRIVER_KIND]: piDriverFactory({ ports: huabuPiDriverPorts }),
     [EXTERNAL_DRIVER_KIND]: externalDriver,
   },
-  threadStore: new FileThreadStore(),
-  eventLogStore: new FileEventLogStore(),
-  turnStore: new FileTurnStore(),
+  // Dispatchers, not one backing: which store owns a conversation depends on
+  // where its Space lives, and that is a runtime fact (`conversation-stores`).
+  threadStore: conversationThreadStore,
+  eventLogStore: conversationEventLogStore,
+  turnStore: conversationTurnStore,
   // Corruption guard, not a context budget: replay restores whatever the
   // live handle would still be holding, and trimming that is the
   // conversation's problem, not recovery's.

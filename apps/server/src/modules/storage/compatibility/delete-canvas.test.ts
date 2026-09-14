@@ -16,10 +16,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { executeOnServer } from '../../canvas/canvas-executor.js';
 import { DiskBlobStore } from '../backends/disk/blob-store.js';
 import { refreshCanvasDirIndex } from '../backends/disk/canvas-dirs.js';
-import { artifactPath, canvasJsonPath } from '../backends/disk/layout.js';
+import {
+  artifactPath,
+  canvasJsonPath,
+  canvasRoot,
+} from '../backends/disk/layout.js';
 import { resetStorageCache } from '../backends/disk/legacy/canvas-store-cache.js';
 import { DiskStructuredStore } from '../backends/disk/structured-store.js';
 import { getCanvasStore } from '../index.js';
+import { spaceBlobAreas } from '../ports/blob.js';
 import {
   composeStorage,
   space,
@@ -32,8 +37,8 @@ import type {
   BlobRange,
   BlobRead,
   BlobScope,
-  BlobScopeRef,
   BlobStore,
+  SpaceBlobs,
 } from '../ports/blob.js';
 import type { Readable } from 'node:stream';
 
@@ -41,12 +46,13 @@ const workspaceState = vi.hoisted(() => ({ path: '', leaseCount: 0 }));
 
 vi.mock('../../workspace.js', () => ({
   getWorkspacePath: () => workspaceState.path,
+  getWorkspaceKey: () => workspaceState.path,
   acquireWorkspaceOperationLease: () => {
-    const workspacePath = workspaceState.path;
+    const workspaceKey = workspaceState.path;
     workspaceState.leaseCount += 1;
     let released = false;
     return Object.freeze({
-      workspacePath,
+      workspaceKey,
       release: () => {
         if (released) return;
         released = true;
@@ -55,6 +61,24 @@ vi.mock('../../workspace.js', () => ({
     });
   },
 }));
+
+/** Every area of one Space, each wrapped the same way. */
+function wrapAreas(
+  blobs: SpaceBlobs,
+  wrap: (scope: BlobScope) => BlobScope,
+): SpaceBlobs {
+  return {
+    artifacts: wrap(blobs.artifacts),
+    guide: wrap(blobs.guide),
+    memory: wrap(blobs.memory),
+    uploads: wrap(blobs.uploads),
+  };
+}
+
+/** How many sweeps one Space deletion must perform. */
+const SPACE_AREA_COUNT = spaceBlobAreas(
+  new DiskBlobStore(canvasRoot).space('probe'),
+).length;
 
 function writeCanvas(directory: string, canvasId: string, title: string): void {
   const root = path.join(workspaceState.path, directory);
@@ -86,7 +110,7 @@ class OrderRecordingBlobStore implements BlobStore {
   readonly kind = 'disk' as const;
   readonly recordPresentAtSweep: boolean[] = [];
 
-  private readonly inner = new DiskBlobStore();
+  private readonly inner = new DiskBlobStore(canvasRoot);
 
   init(): Promise<void> {
     return this.inner.init();
@@ -100,10 +124,9 @@ class OrderRecordingBlobStore implements BlobStore {
     return this.inner.close();
   }
 
-  scope(ref: BlobScopeRef): BlobScope {
-    const scope = this.inner.scope(ref);
+  space(canvasId: string): SpaceBlobs {
     const seen = this.recordPresentAtSweep;
-    return {
+    return wrapAreas(this.inner.space(canvasId), (scope) => ({
       put: (name: string, body: Readable | Buffer): Promise<BlobInfo> =>
         scope.put(name, body),
       head: (name: string): Promise<BlobInfo | null> => scope.head(name),
@@ -115,10 +138,10 @@ class OrderRecordingBlobStore implements BlobStore {
       list: (): Promise<BlobInfo[]> => scope.list(),
       materialize: (name: string) => scope.materialize(name),
       deleteAll: async (): Promise<void> => {
-        seen.push(existsSync(canvasJsonPath(ref.canvasId)));
+        seen.push(existsSync(canvasJsonPath(canvasId)));
         await scope.deleteAll();
       },
-    };
+    }));
   }
 }
 
@@ -136,7 +159,7 @@ class ControllableBlobStore implements BlobStore {
   readonly deleteStarted = deferred();
   readonly #putsReleased = deferred();
   readonly #deletesReleased = deferred();
-  readonly #inner = new DiskBlobStore();
+  readonly #inner = new DiskBlobStore(canvasRoot);
 
   blockPuts = false;
   blockDeletes = false;
@@ -163,9 +186,8 @@ class ControllableBlobStore implements BlobStore {
     return this.#inner.close();
   }
 
-  scope(ref: BlobScopeRef): BlobScope {
-    const scope = this.#inner.scope(ref);
-    return {
+  space(canvasId: string): SpaceBlobs {
+    return wrapAreas(this.#inner.space(canvasId), (scope) => ({
       put: async (name: string, body: Readable | Buffer): Promise<BlobInfo> => {
         this.putCalls += 1;
         this.putStarted.resolve();
@@ -186,7 +208,7 @@ class ControllableBlobStore implements BlobStore {
         if (this.blockDeletes) await this.#deletesReleased.promise;
         await scope.deleteAll();
       },
-    };
+    }));
   }
 }
 
@@ -243,7 +265,12 @@ describe('deleteSpace composition', () => {
 
     // Blobs first: after the structured record is gone nothing names them,
     // so a failed sweep on a remote backend would strand them permanently.
-    expect(blobs.recordPresentAtSweep).toEqual([true]);
+    // One sweep per user-visible area — a Space's bytes are spread across an
+    // area each, and an unswept one is an orphan on a backend where dropping
+    // the record does not remove the place they sit in.
+    expect(blobs.recordPresentAtSweep).toEqual(
+      Array.from({ length: SPACE_AREA_COUNT }, () => true),
+    );
     expect(existsSync(artifactPath('canvas-a', 'art_1.png'))).toBe(false);
     expect(existsSync(canvasJsonPath('canvas-a'))).toBe(false);
   });
@@ -313,7 +340,7 @@ describe('deleteSpace composition', () => {
     controlled.blockPuts = true;
     installBlobStore(controlled);
 
-    const putting = space('canvas-a').blobs.put(
+    const putting = space('canvas-a').artifacts.put(
       'in-flight.bin',
       Buffer.from('bytes'),
     );
@@ -340,7 +367,7 @@ describe('deleteSpace composition', () => {
     await putting;
     await expect(deleting).resolves.toEqual({ ok: true, reason: 'deleted' });
 
-    expect(controlled.deleteCalls).toBe(1);
+    expect(controlled.deleteCalls).toBe(SPACE_AREA_COUNT);
     expect(existsSync(canvasJsonPath('canvas-a'))).toBe(false);
     expect(existsSync(artifactPath('canvas-a', 'in-flight.bin'))).toBe(false);
   });
@@ -353,7 +380,7 @@ describe('deleteSpace composition', () => {
     const deleting = deleteSpace('canvas-a');
     await controlled.deleteStarted.promise;
     expect(workspaceState.leaseCount).toBe(1);
-    const putting = space('canvas-a').blobs.put(
+    const putting = space('canvas-a').artifacts.put(
       'too-late.bin',
       Buffer.from('orphan'),
     );
@@ -466,8 +493,14 @@ describe('deleteSpace composition', () => {
     controlled.blockPuts = true;
     installBlobStore(controlled);
 
-    const first = space('canvas-a').blobs.put('first.bin', Buffer.from('1'));
-    const second = space('canvas-a').blobs.put('second.bin', Buffer.from('2'));
+    const first = space('canvas-a').artifacts.put(
+      'first.bin',
+      Buffer.from('1'),
+    );
+    const second = space('canvas-a').artifacts.put(
+      'second.bin',
+      Buffer.from('2'),
+    );
 
     await vi.waitFor(() => expect(controlled.putCalls).toBe(2));
     controlled.releasePuts();
@@ -488,7 +521,7 @@ describe('deleteSpace composition', () => {
     await controlled.deleteStarted.promise;
 
     await expect(
-      space('canvas-b').blobs.put('independent.bin', Buffer.from('free')),
+      space('canvas-b').artifacts.put('independent.bin', Buffer.from('free')),
     ).resolves.toMatchObject({ name: 'independent.bin' });
     expect(existsSync(artifactPath('canvas-b', 'independent.bin'))).toBe(true);
 

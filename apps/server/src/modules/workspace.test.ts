@@ -38,8 +38,8 @@ describe('workspace operation leases', () => {
 
     const first = acquireWorkspaceOperationLease();
     const second = acquireWorkspaceOperationLease();
-    expect(first.workspacePath).toBe(path.resolve(current));
-    expect(second.workspacePath).toBe(path.resolve(current));
+    expect(first.workspaceKey).toBe(path.resolve(current));
+    expect(second.workspaceKey).toBe(path.resolve(current));
 
     expect(() => commitWorkspacePath(path.resolve(next))).toThrow(
       WorkspaceOperationInProgressError,

@@ -216,7 +216,7 @@ describe('Interactive View RFS resources', () => {
         code: 'renderer_not_found',
       });
 
-      await space('c1').blobs.put('view.html', Buffer.from('<p>view</p>'));
+      await space('c1').artifacts.put('view.html', Buffer.from('<p>view</p>'));
       const invalidState = await app.inject({
         method: 'POST',
         url: '/rfs/c1/interactive-views',

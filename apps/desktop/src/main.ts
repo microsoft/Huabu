@@ -1086,7 +1086,15 @@ function createWindow(port: number): void {
     }
   });
 
-  if (IS_DEV) {
+  // Auto-open DevTools only for real UI development (Vite HMR via
+  // dev:desktop) or when explicitly requested with HUABU_DEVTOOLS=1.
+  // Other unpacked runs (e.g. `start:desktop`, or an unpacked production
+  // build run straight from source) behave like production. F12 /
+  // Ctrl+Shift+I still toggle them at any time (see above).
+  if (
+    IS_DEV &&
+    (process.env.WEB_DEV_SERVER_URL || process.env.HUABU_DEVTOOLS === '1')
+  ) {
     mainWindow.webContents.openDevTools();
   }
 

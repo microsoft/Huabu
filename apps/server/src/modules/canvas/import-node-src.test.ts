@@ -139,7 +139,7 @@ describe('importForeignNodeSources — web nodes', () => {
     // …whose file exists in the artifact store…
     expect(src).toBeDefined();
     if (src === undefined) throw new Error('Expected a rewritten web src');
-    expect(await space(canvasId).blobs.head(src)).not.toBeNull();
+    expect(await space(canvasId).artifacts.head(src)).not.toBeNull();
     // …and the staging upload was reclaimed (move semantics).
     expect(existsSync(uploadAbs)).toBe(false);
   });
@@ -231,7 +231,7 @@ describe('importForeignNodeSources — web nodes', () => {
     expect(src).toMatch(/^artifact-[^/]+\.html$/);
     expect(src).toBeDefined();
     if (src === undefined) throw new Error('Expected a rewritten web src');
-    expect(await space(canvasId).blobs.head(src)).not.toBeNull();
+    expect(await space(canvasId).artifacts.head(src)).not.toBeNull();
     expect(existsSync(uploadAbs)).toBe(false);
   });
 
@@ -309,7 +309,7 @@ describe('importForeignNodeSources — media nodes (regression)', () => {
     expect(src).toMatch(/^artifact-[^/]+\.png$/);
     expect(src).toBeDefined();
     if (src === undefined) throw new Error('Expected a rewritten image src');
-    expect(await space(canvasId).blobs.head(src)).not.toBeNull();
+    expect(await space(canvasId).artifacts.head(src)).not.toBeNull();
   });
 
   it('canonicalizes an artifact path that leaves and re-enters the Space', async () => {

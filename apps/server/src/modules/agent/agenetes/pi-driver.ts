@@ -42,6 +42,7 @@ interface HuabuPiHostContext {
   readonly origin?: NodeOrigin;
   readonly modelRole?: ModelRole;
   readonly hasImage?: boolean;
+  readonly spacePrompt?: string;
 }
 
 interface BuildHuabuPiWorkloadSpecOptions {
@@ -58,6 +59,7 @@ interface BuildHuabuPiWorkloadSpecOptions {
   readonly origin?: NodeOrigin;
   readonly modelRole?: ModelRole;
   readonly hasImage?: boolean;
+  readonly spacePrompt?: string;
 }
 
 function getHuabuHostContext(
@@ -80,6 +82,8 @@ function getHuabuHostContext(
         ? (obj.modelRole as ModelRole)
         : undefined,
     hasImage: typeof obj.hasImage === 'boolean' ? obj.hasImage : undefined,
+    spacePrompt:
+      typeof obj.spacePrompt === 'string' ? obj.spacePrompt : undefined,
   };
 }
 
@@ -174,6 +178,7 @@ export function buildHuabuPiWorkloadSpec(
         ...(options.hasImage !== undefined
           ? { hasImage: options.hasImage }
           : {}),
+        ...(options.spacePrompt ? { spacePrompt: options.spacePrompt } : {}),
       },
     },
   };

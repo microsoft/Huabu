@@ -23,6 +23,7 @@ const workspaceState = vi.hoisted(() => ({ path: '' }));
 
 vi.mock('../../../workspace.js', () => ({
   getWorkspacePath: () => workspaceState.path,
+  getWorkspaceKey: () => workspaceState.path,
 }));
 
 import { refreshCanvasDirIndex } from './canvas-dirs.js';
@@ -464,7 +465,7 @@ describe('Space lifecycle guards and reopen', () => {
       handle.changes.append('thread-1', [change('n1')]),
     ).rejects.toThrow(/missing Space/);
     await expect(
-      space('missing-space').blobs.put('x.bin', rejectedBuffer),
+      space('missing-space').artifacts.put('x.bin', rejectedBuffer),
     ).rejects.toThrow(/missing Space/);
 
     expect(rejectedBuffer.toString()).toBe('x');
@@ -476,7 +477,7 @@ describe('Space lifecycle guards and reopen', () => {
     const ended = once(body, 'end');
 
     await expect(
-      space('missing-stream-space').blobs.put('x.bin', body),
+      space('missing-stream-space').artifacts.put('x.bin', body),
     ).rejects.toThrow(/missing Space/);
     await ended;
 
@@ -501,7 +502,10 @@ describe('Space lifecycle guards and reopen', () => {
     const storedChanges = await first.changes.append('thread-1', [
       change('n1'),
     ]);
-    await space('reopen').blobs.put('payload.bin', Buffer.from('persisted'));
+    await space('reopen').artifacts.put(
+      'payload.bin',
+      Buffer.from('persisted'),
+    );
 
     resetStorageCache();
     const reopened = new DiskStructuredStore().space('reopen');
@@ -512,8 +516,8 @@ describe('Space lifecycle guards and reopen', () => {
       7,
     ]);
     expect(await reopened.changes.read('thread-1')).toEqual(storedChanges);
-    expect((await space('reopen').blobs.read('payload.bin'))?.toString()).toBe(
-      'persisted',
-    );
+    expect(
+      (await space('reopen').artifacts.read('payload.bin'))?.toString(),
+    ).toBe('persisted');
   });
 });

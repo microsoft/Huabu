@@ -39,7 +39,7 @@ const log = getLogger('preprocessing.pipeline');
 /** Dependencies injected into the pipeline runner. */
 export interface PipelineDeps {
   nodes: SpaceNodes;
-  blobs: BlobScope;
+  artifacts: BlobScope;
   provider: ProviderManager;
 }
 
@@ -106,7 +106,7 @@ async function runPipelineStages(
       // other blob reader takes bytes.
       const artifactName = ctx.resolved.artifactName;
       if (artifactName) {
-        const lease = await deps.blobs.materialize(artifactName);
+        const lease = await deps.artifacts.materialize(artifactName);
         if (lease) {
           leases.push(lease);
           ctx.resolved.filePath = lease.path;
@@ -176,7 +176,10 @@ async function runPipelineStages(
       ) {
         try {
           const artifactName = `${createId('artifact')}.pdf`;
-          const info = await deps.blobs.put(artifactName, ctx.extracted.rawPdf);
+          const info = await deps.artifacts.put(
+            artifactName,
+            ctx.extracted.rawPdf,
+          );
           ctx.resolved.artifactUri = info.name;
           ctx.resolved.artifactName = info.name;
         } catch (snapshotError) {
@@ -213,7 +216,7 @@ async function runPipelineStages(
               ? ctx.extracted.title
               : ctx.resolved.normalizedUri,
           );
-          await deps.blobs.put(artifactName, buffer);
+          await deps.artifacts.put(artifactName, buffer);
           // Inject the artifact key into metadata so the Normalize →
           // Persist chain writes it as a top-level YAML field on the
           // node sidecar. The web route reads `mhtmlArtifact` directly

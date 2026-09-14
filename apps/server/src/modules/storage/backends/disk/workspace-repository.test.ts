@@ -13,10 +13,10 @@ import {
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
+import { workspaceRegistryPath as registryPath } from './data-dir.js';
 import {
   DiskWorkspaceRepository,
   WORKSPACE_MANIFEST_FILENAME,
-  WORKSPACE_REGISTRY_FILENAME,
 } from './workspace-repository.js';
 import { describeWorkspaceRepositoryContract } from '../../ports/contracts/workspace-repository.contract.js';
 import { adoptWorkspaceDirectory } from '../../storage.js';
@@ -32,10 +32,6 @@ describe('DiskWorkspaceRepository', () => {
 
   function manifestPath(root: string): string {
     return path.join(root, WORKSPACE_MANIFEST_FILENAME);
-  }
-
-  function registryPath(dataDir: string): string {
-    return path.join(dataDir, 'storage', 'disk', WORKSPACE_REGISTRY_FILENAME);
   }
 
   afterAll(() => {

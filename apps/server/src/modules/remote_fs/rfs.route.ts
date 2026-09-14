@@ -113,6 +113,10 @@ import {
   interactiveViewService,
 } from '../interactive-view/interactive-view.service.js';
 import {
+  storageServes,
+  unavailableCapabilityMessage,
+} from '../storage/index.js';
+import {
   RunCompletionError,
   runCompletionService,
 } from '../task/run-completion.service.js';
@@ -255,6 +259,18 @@ function logReachbackEvent(
 // ── Route plugin ──
 
 const rfsRoutes: FastifyPluginAsync = async (app) => {
+  // RFS is the Space *as files*. A backend that keeps Spaces in tables has no
+  // tree to project, and the honest answer is the declared refusal rather
+  // than a partial projection assembled from records — see the
+  // `space-file-plane` capability. One hook, because every route below
+  // resolves a real path sooner or later.
+  app.addHook('onRequest', async (_request, reply) => {
+    if (storageServes('space-file-plane')) return;
+    return reply
+      .code(409)
+      .send(rfsError(unavailableCapabilityMessage('space-file-plane')));
+  });
+
   // Consume every request body as raw bytes within this plugin: uploads are
   // arbitrary binary, and the `agent` endpoint accepts either a JSON body or a
   // raw text prompt. Handlers interpret the Buffer per Content-Type.
@@ -270,7 +286,7 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
       const { canvasId } = request.params;
       try {
         const guide = request.headers.authorization
-          ? resolveCanvasSkill(canvasId)
+          ? await resolveCanvasSkill(canvasId)
           : resolveBundledRootSkill();
         return reply
           .header('Content-Type', 'text/markdown; charset=utf-8')

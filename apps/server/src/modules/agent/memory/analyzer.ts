@@ -34,10 +34,11 @@ import {
   type SpaceHandle,
 } from '../../storage/index.js';
 import {
-  canvasMemoryPath,
+  hasWorkspaceSettingDirectory,
   workspaceMemoryPath,
 } from '../../workspace/paths.js';
 import { runAgent } from '../agent.service.js';
+import { readCanvasMemory } from './read.js';
 
 import type { MemoryLogger } from './index.js';
 import type { WriteResult } from './writers.js';
@@ -197,7 +198,7 @@ async function assembleContext(
     parts.push(`${events.count} ops`);
   }
 
-  const memorySnapshot = readMemorySnapshot(canvasId);
+  const memorySnapshot = await readMemorySnapshot(canvasId);
   messages.push({
     role: 'user',
     content: `[SYSTEM Current memory]\n${memorySnapshot}`,
@@ -279,14 +280,19 @@ function readEventsDigest(events: readonly CanvasEvent[]): EventsDigest | null {
   return { text: summaries.join('\n'), count: events.length };
 }
 
-function readMemorySnapshot(canvasId: string): string {
+async function readMemorySnapshot(canvasId: string): Promise<string> {
   const parts: string[] = [];
 
-  const longTerm = readFileSafe(workspaceMemoryPath());
+  // Empty rather than missing on a backend with no Workspace folder: the
+  // curator's prompt keeps its shape, and the tier it cannot write to simply
+  // reads as empty (`workspace-user-memory` capability).
+  const longTerm = hasWorkspaceSettingDirectory()
+    ? readFileSafe(workspaceMemoryPath())
+    : '';
   parts.push('## Long-term memory');
   parts.push(longTerm.trim().length > 0 ? longTerm.trim() : '(empty)');
 
-  const canvas = readFileSafe(canvasMemoryPath(canvasId));
+  const canvas = (await readCanvasMemory(canvasId)) ?? '';
   parts.push('');
   parts.push('## Canvas memory');
   parts.push(canvas.trim().length > 0 ? canvas.trim() : '(empty)');

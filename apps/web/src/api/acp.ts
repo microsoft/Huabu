@@ -9,7 +9,7 @@
  * — instead they author **profiles** ({@link AcpAgentProfile}) which
  * describe how to spawn one external agent CLI on demand. This module
  * wraps the loopback-only profile/daemon endpoints plus the existing
- * thread-scoped session / commands routes.
+ * thread-scoped cached capability and control routes.
  *
  * Endpoint surface:
  *  - `GET /api/acp/agent-cli` — probe the trusted built-in agent catalogue
@@ -18,11 +18,11 @@
  *     recipes. Always returns the runtime status (spawned/pid/etc.)
  *     alongside each profile.
  *  - `GET/POST /api/acp/daemon` — daemon liveness + manual restart.
- *  - `POST /api/acp/threads/:threadId/session` etc. — thread-scoped
- *     session lifecycle and per-session config knobs.
+ *  - `GET /api/acp/threads/:threadId/cached-meta` — cached capabilities.
+ *  - thread control POSTs — canonical realization plus per-session knobs.
  */
 
-import { ApiError, apiFetch } from './_client';
+import { apiFetch } from './_client';
 import { routes } from './_routes';
 
 import type {
@@ -36,9 +36,6 @@ import type {
   CreateAcpCommandProfileBody,
   PatchAgentProfileBody,
   AcpThreadCachedMetaResponse,
-  AcpThreadCommandsResponse,
-  EnsureAcpSessionRequest,
-  EnsureAcpSessionResponse,
   SetAcpSessionConfigOptionRequest,
   SetAcpSessionConfigOptionResponse,
   SetAcpSessionModelRequest,
@@ -64,10 +61,7 @@ export type {
   AcpSessionMetaSnapshot,
   AcpSessionMode,
   AcpThreadCachedMetaResponse,
-  AcpThreadCommandsResponse,
   AvailableCommand,
-  EnsureAcpSessionRequest,
-  EnsureAcpSessionResponse,
   SetAcpSessionConfigOptionRequest,
   SetAcpSessionConfigOptionResponse,
   SetAcpSessionModelRequest,
@@ -184,60 +178,9 @@ export async function updateExternalAgentRuntimeConfig(
   });
 }
 
-// ── Per-thread session lifecycle ─────────────────────────────────────
-
 /**
- * Eagerly open (or reuse) the per-thread ACP session so the slash-command
- * typeahead can pull commands BEFORE the user submits their first prompt.
- * Idempotent: calling repeatedly with the same `{threadId, profileId,
- * canvasId}` triple is a no-op server-side.
- *
- * Response always carries the latest `availableCommands`; an empty array
- * means the agent has not yet pushed its list — callers should follow up
- * with {@link getAcpThreadCommands} after a short delay to catch late pushes.
- */
-export async function ensureAcpSession(
-  threadId: string,
-  payload: EnsureAcpSessionRequest,
-): Promise<EnsureAcpSessionResponse> {
-  return apiFetch<EnsureAcpSessionResponse>(routes.acpThreadSession(threadId), {
-    method: 'POST',
-    json: payload,
-    fallbackMessage: 'Failed to open ACP session',
-  });
-}
-
-/**
- * Read the cached slash-command snapshot for an existing session.
- * Returns `null` when the server has no session for this thread yet
- * (404) so callers can ignore the missing-session case without
- * branching on `ApiError.status`.
- */
-export async function getAcpThreadCommands(
-  threadId: string,
-  canvasId?: string,
-): Promise<AcpThreadCommandsResponse | null> {
-  try {
-    return await apiFetch<AcpThreadCommandsResponse>(
-      routes.acpThreadCommands(threadId, canvasId),
-      { fallbackMessage: 'Failed to fetch ACP slash commands' },
-    );
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 404) return null;
-    throw err;
-  }
-}
-
-/**
- * Fetch the server-cached session-meta snapshot WITHOUT spawning the
- * agentlet. Always resolves to a snapshot (possibly the empty
- * `updatedAt === 0` form) — the server returns 200 even on cache
- * miss so the UI can render an optimistic neutral state.
- *
- * Used by `useAcpSessionMeta` on mount to populate selector dropdowns
- * (model / mode / config options) from the last-known state of the
- * thread, so the user can pre-select a model before sending the first
- * message without paying the cold-start tax of `ensureAcpSession`.
+ * Fetch the GET-only capability observation for a thread and its Profile.
+ * This never creates a workload or starts an ACP process.
  */
 export async function getAcpThreadCachedMeta(
   threadId: string,

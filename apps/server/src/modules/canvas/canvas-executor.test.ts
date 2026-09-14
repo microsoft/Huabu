@@ -29,6 +29,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
 import { applyDeltasOnServer, executeOnServer } from './canvas-executor.js';
+import { setAgentChangeReviewConfig } from '../agent/change-review-config.js';
 import {
   space,
   getCanvasStore,
@@ -40,13 +41,20 @@ import { setWorkspacePath } from '../workspace.js';
 import type { CanvasCommand, ExecuteOriginator } from '@huabu/shared';
 
 let tmp: string;
+const originalDataDir = process.env.HUABU_DATA_DIR;
 
 beforeEach(() => {
   tmp = mkdtempSync(join(tmpdir(), 'huabu-cas-'));
+  process.env.HUABU_DATA_DIR = tmp;
   setWorkspacePath(tmp);
 });
 
 afterEach(() => {
+  if (originalDataDir === undefined) {
+    delete process.env.HUABU_DATA_DIR;
+  } else {
+    process.env.HUABU_DATA_DIR = originalDataDir;
+  }
   rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -113,6 +121,49 @@ function mergeContent(
 
 const AGENT: ExecuteOriginator = { source: 'agent' };
 const UI: ExecuteOriginator = { source: 'ui' };
+
+describe('executeOnServer — Agent change review policy', () => {
+  it('persists review records when automatic acceptance is disabled', async () => {
+    seedNote('c1', 'n1', 'hello');
+
+    const out = await executeOnServer({
+      canvasId: 'c1',
+      commands: [mergeContent('n1', 'world', currentRev('c1', 'n1'))],
+      originator: { source: 'agent', threadId: 'thread-1' },
+      computeChanges: true,
+      publish: false,
+    });
+
+    expect(out.changes).toHaveLength(1);
+    expect(await space('c1').changes.read('thread-1')).toHaveLength(1);
+  });
+
+  it('auto-accepts new changes without deleting existing review records', async () => {
+    seedNote('c1', 'n1', 'hello');
+    await executeOnServer({
+      canvasId: 'c1',
+      commands: [mergeContent('n1', 'first', currentRev('c1', 'n1'))],
+      originator: { source: 'agent', threadId: 'thread-1' },
+      computeChanges: true,
+      publish: false,
+    });
+    const existing = await space('c1').changes.read('thread-1');
+    expect(existing).toHaveLength(1);
+
+    setAgentChangeReviewConfig({ autoAcceptSpaceChanges: true });
+    const out = await executeOnServer({
+      canvasId: 'c1',
+      commands: [mergeContent('n1', 'second', currentRev('c1', 'n1'))],
+      originator: { source: 'agent', threadId: 'thread-1' },
+      computeChanges: true,
+      publish: false,
+    });
+
+    expect(out.changes).toBeUndefined();
+    expect(bodyOf('c1', 'n1')).toBe('second');
+    expect(await space('c1').changes.read('thread-1')).toEqual(existing);
+  });
+});
 
 describe('executeOnServer — MERGE_NODE_DATA CAS', () => {
   it('applies an agent write whose expectRev matches the current rev', async () => {
@@ -273,7 +324,7 @@ describe('executeOnServer — MERGE_NODE_DATA CAS', () => {
       src: 'old.svg',
       content: '',
     });
-    await space('c1').blobs.put(
+    await space('c1').artifacts.put(
       'new.svg',
       Buffer.from(
         '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"></svg>',
@@ -329,7 +380,7 @@ describe('executeOnServer — MERGE_NODE_DATA CAS', () => {
       src: 'pic.svg',
       content: '',
     });
-    await space('c1').blobs.put(
+    await space('c1').artifacts.put(
       'pic.svg',
       Buffer.from(
         '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"></svg>',

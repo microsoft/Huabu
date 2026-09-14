@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { useMemo } from 'react';
+import { memo, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
@@ -30,13 +30,13 @@ interface UserMessageProps {
   invokedSkills?: string[];
 }
 
-export const UserMessage = ({
+export const UserMessage = memo(function UserMessage({
   content,
   attachments,
   selectedNodeIds,
   selectedStrokeIds,
   invokedSkills,
-}: UserMessageProps) => {
+}: UserMessageProps) {
   const { t } = useTranslation();
   const setStrokeHighlight = useGesturePreviewStore(
     (s) => s.setSketchStrokeHighlight,
@@ -102,4 +102,4 @@ export const UserMessage = ({
       )}
     </div>
   );
-};
+});

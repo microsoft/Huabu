@@ -39,7 +39,7 @@ import path from 'node:path';
 import fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { workspaceRegistryPath } from './storage/backends/disk/workspace-repository.js';
+import { workspaceRegistryPath } from './storage/backends/disk/data-dir.js';
 import { resetStorageCache } from './storage/index.js';
 import { setWorkspacePath } from './workspace.js';
 import workspaceRoutes from './workspace.route.js';

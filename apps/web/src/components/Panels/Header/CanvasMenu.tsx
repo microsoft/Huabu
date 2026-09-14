@@ -6,6 +6,7 @@ import { ChevronDown } from 'lucide-react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { ApiError } from '../../../api/_client';
 import { exportCanvas } from '../../../api/canvas.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
 import { useWorkspaceStore } from '../../../store/workspaceStore.ts';
@@ -82,9 +83,14 @@ export const CanvasMenu: React.FC<CanvasMenuProps> = ({ onOpenShortcuts }) => {
       await exportCanvas(canvasId);
       toast(t('canvasList.exportStarted'), { tone: 'success' });
     } catch (err) {
-      toast(err instanceof Error ? err.message : t('canvasList.exportFailed'), {
-        tone: 'danger',
-      });
+      toast(
+        err instanceof ApiError && err.code === 'STORAGE_CAPABILITY_UNAVAILABLE'
+          ? t('canvasList.exportUnavailable')
+          : err instanceof Error
+            ? err.message
+            : t('canvasList.exportFailed'),
+        { tone: 'danger' },
+      );
     }
   }, [canvasId, t]);
 

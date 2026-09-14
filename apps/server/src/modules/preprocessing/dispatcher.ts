@@ -166,7 +166,7 @@ export class PreprocessDispatcher {
 
     const deps: PipelineDeps = {
       nodes: getStructuredStore().space(request.canvasId).nodes,
-      blobs: space(request.canvasId).blobs,
+      artifacts: space(request.canvasId).artifacts,
       provider: this.provider,
     };
 

@@ -168,7 +168,7 @@ idle ──double-click──▶ compose (no status change)
 
 Conversation replay: `openPreviewNode` activates the Question's semantic target, and [`PreviewRenderer.tsx`](../../apps/web/src/components/Panels/PreviewWorkspace/PreviewRenderer.tsx) resolves the live node into a required `ChatSession`. The node is the single source of truth for agent mode. An unresolved permission renders one actionable tray above ChatInput while its original MessageList position remains a passive history record. Messages, loading, drafts, binding, settings, and pending attachments are keyed by the session's thread, so two Question tabs can remain mounted without sharing presentation state.
 
-Before the first send, the thread's binding, mode, and built-in settings remain in the persisted Chat compose cache so an idle Question survives reload. Once the first send locks binding and mode onto the Question node, their cached mirrors are removed; built-in settings remain cached until the first server event confirms that the durable thread now owns them. Conversation history and built-in settings for an established thread remain server-owned.
+Before the first send, the thread's binding, mode, and built-in settings remain in the persisted Chat compose cache so an idle Question survives reload. Once the first send locks binding and mode onto the Question node, their cached mirrors are removed; on replay and after refresh, the Chat panel synchronously restores the binding from the conversation owner before rendering agent settings or dispatching a follow-up turn. Built-in settings remain cached until the first server event confirms that the durable thread now owns them. Conversation history and settings for an established thread remain server-owned.
 
 ### 5.5 World presentation
 

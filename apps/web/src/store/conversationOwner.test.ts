@@ -20,6 +20,7 @@ import {
   conversationViewFromWorldReference,
   filterClientOwnedQuestionPatch,
   patchConversationOwnerNode,
+  resolveConversationAgentBinding,
   shouldComposeConversationOwner,
   validateConversationView,
 } from './conversationOwner';
@@ -83,6 +84,24 @@ beforeEach(() => {
 });
 
 describe('conversation owner routing', () => {
+  it('uses the durable owner binding when a refreshed send still has the cache default', () => {
+    const externalBinding = {
+      kind: 'external' as const,
+      alias: 'Copilot',
+      profileId: 'profile-copilot',
+    };
+
+    expect(
+      resolveConversationAgentBinding(
+        { agentBinding: externalBinding },
+        { kind: 'internal' },
+      ),
+    ).toEqual(externalBinding);
+    expect(
+      resolveConversationAgentBinding(undefined, { kind: 'internal' }),
+    ).toEqual({ kind: 'internal' });
+  });
+
   it('limits fixed Agent Node client patches to viewed state', () => {
     expect(
       filterClientOwnedQuestionPatch(

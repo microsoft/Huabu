@@ -64,6 +64,12 @@ describe('KNOWN_CLIS', () => {
         acpArgs: ['acp'],
       },
       {
+        id: 'codebuddy',
+        displayName: 'CodeBuddy',
+        binary: 'codebuddy',
+        acpArgs: ['--acp'],
+      },
+      {
         id: 'hermes',
         displayName: 'Hermes Agent',
         binary: 'hermes',
@@ -110,6 +116,7 @@ describe('KNOWN_CLIS', () => {
         args: ['--yolo'],
         position: 'before-acp',
       },
+      codebuddy: null,
       hermes: null,
     });
 

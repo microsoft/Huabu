@@ -3,17 +3,15 @@
 
 import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AppMenu } from './AppMenu';
 
+import type * as DropdownMenuExports from '../../Common/DropdownMenu';
+
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
-}));
-
-vi.mock('react-router-dom', () => ({
-  useLocation: () => ({ pathname: '/canvas/c1' }),
-  useNavigate: () => vi.fn(),
 }));
 
 vi.mock('../../../config/handbook', () => ({ openUserHandbook: vi.fn() }));
@@ -65,11 +63,29 @@ vi.mock('../../../store/workspaceStore', () => ({
       worldEnabled: false,
     }),
 }));
-vi.mock('../../Common/DropdownMenu', () => ({
-  DropdownMenu: ({ trigger }: { trigger: ReactNode }) => trigger,
-  DropdownMenuItem: () => null,
-  DropdownMenuSubmenu: () => null,
-}));
+vi.mock('../../Common/DropdownMenu', async (importOriginal) => {
+  const actual = await importOriginal<typeof DropdownMenuExports>();
+  return {
+    ...actual,
+    DropdownMenu: ({
+      trigger,
+      children,
+    }: {
+      trigger: ReactNode;
+      children: ReactNode;
+    }) => (
+      <>
+        {trigger}
+        {children}
+      </>
+    ),
+    DropdownMenuSubmenu: () => null,
+  };
+});
+
+(
+  globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
+).IS_REACT_ACT_ENVIRONMENT = true;
 
 let root: Root | undefined;
 let container: HTMLDivElement | undefined;
@@ -87,10 +103,37 @@ describe('AppMenu', () => {
     document.body.appendChild(container);
     root = createRoot(container);
 
-    act(() => root?.render(<AppMenu />));
+    act(() =>
+      root?.render(
+        <MemoryRouter initialEntries={['/canvas/c1']}>
+          <AppMenu />
+        </MemoryRouter>,
+      ),
+    );
 
     const fileInput =
       container.querySelector<HTMLInputElement>('input[type="file"]');
     expect(fileInput?.name).toBe('space-import-archive');
+  });
+
+  it('renders Back to Space list as a native router link', () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    act(() =>
+      root?.render(
+        <MemoryRouter initialEntries={['/canvas/c1']}>
+          <AppMenu />
+        </MemoryRouter>,
+      ),
+    );
+
+    const link = Array.from(
+      container.querySelectorAll<HTMLAnchorElement>('a[role="menuitem"]'),
+    ).find((candidate) =>
+      candidate.textContent?.includes('canvasPage.backToList'),
+    );
+    expect(link?.getAttribute('href')).toBe('/spaces');
   });
 });

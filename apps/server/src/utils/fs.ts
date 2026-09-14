@@ -63,6 +63,31 @@ export function safeJoin(base: string, ...segments: string[]): string {
   return joined;
 }
 
+/**
+ * Resolve one direct child of a root directory.
+ *
+ * The containment check intentionally uses the path.resolve + startsWith
+ * pattern recognized by CodeQL's js/path-injection query.
+ */
+export function resolveDirectChildPath(
+  base: string,
+  childName: string,
+): string {
+  const baseResolved = path.resolve(base);
+  const resolved = path.resolve(baseResolved, childName);
+  if (!resolved.startsWith(`${baseResolved}${path.sep}`)) {
+    throw new Error('Path must remain within its root directory');
+  }
+  if (
+    childName.includes('/') ||
+    childName.includes('\\') ||
+    path.dirname(resolved) !== baseResolved
+  ) {
+    throw new Error('Path must be a direct child of its root directory');
+  }
+  return resolved;
+}
+
 /** Create a directory recursively (no-op if it already exists). */
 export function mkdirp(dir: string): void {
   mkdirSync(dir, { recursive: true });

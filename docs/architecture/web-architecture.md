@@ -117,9 +117,15 @@ Artifacts are canvas-owned, so a paste into a different Canvas than the one the 
 
 The Markdown walk is what keeps images inside a `note` alive across Canvases — they live in the body string, not in `data.src`. It is scoped by node type (`markdownArtifactFields`) because `content` also exists on `text` and `question` nodes, whose bodies are plain prose that must not be rewritten. `parseArtifactRef` decides what is cloneable: bare keys and legacy canvas-scoped URLs are, while `data:`, `blob:`, and external `http(s)` sources are left verbatim. Clones are deduplicated per `(source canvas, key)` for the whole paste, and a failed clone falls back to the original key so the node renders the server's missing-artifact placeholder instead of blocking the paste. Because the clone round-trips are async, the result is dropped if the user has navigated to a different Canvas by the time they settle. Same-canvas pastes keep sharing the original artifact and stay on the synchronous fast path.
 
+### Moving a selection between Spaces
+
+Move is an explicit server-coordinated action rather than a clipboard operation. The single-node and multi-selection floating toolbars open one Canvas-level `MoveSelectionModal`, which lets the user choose an existing ordinary Space or enter the name of a new Space, and provides a default-enabled checkbox for leaving a source `spacePreview` breadcrumb. The modal resets that choice to enabled each time it opens, drains pending Canvas saves, and submits the selected node ids, Preview choice, and current source version to `POST /api/canvas/:canvasId/move-selection`. A successful toast reports the durable outcome and links to the destination; typed server failures are shown without applying optimistic local mutations. Managed reference nodes do not expose the action.
+
 ## Workspace routes and World
 
 `/` is the workspace landing redirect. When the persisted World setting is enabled it redirects to the hidden World through `/canvas/:worldCanvasId`; otherwise it redirects to `/spaces`. The ordinary Space List remains a sibling page at `/spaces`, and every Canvas scope, including World, continues to use the existing `CanvasPage` and `/canvas/:canvasId` route.
+
+Primary navigation between the Space List and an ordinary Space uses React Router links rather than button-owned `navigate(...)` calls. An ordinary click therefore stays within the current tab and passes through the router's pending-save blocker, while Ctrl/Cmd-click, middle-click, keyboard activation, assistive-technology link discovery, and browser context-menu actions retain native anchor behavior. The Space Preview and legacy Portal interaction model is intentionally separate from this list-to-Space contract.
 
 The World setting defaults to disabled. Enabling it exposes the World navigation entry and changes subsequent workspace landing to World without deleting or resetting `.world`.
 
@@ -248,6 +254,8 @@ The handbook is owned, built, and deployed from the public [microsoft/Huabu repo
 `pnpm start:web` serves the compiled SPA and API from one production-style Fastify process. Before importing the Server bundle, its launcher selects the first available port at or above `SERVER_PORT`/`PORT` (default 3001) and writes the resolved value to `SERVER_PORT`; the shared port probe also protects `dev` and `dev:desktop` from loopback-versus-wildcard binding conflicts.
 
 Network deployment follows the single-owner boundary in [`deployment-security.md`](./deployment-security.md). Non-loopback `start:web` binds fail closed unless allowed hosts and complete Basic Auth are configured. Vite keeps zero-configuration loopback development but rejects non-loopback clients before serving assets or proxying APIs unless they pass the same Basic Auth gate. Settings reads the redacted deployment readiness endpoint and disables credential mutations when the standalone secret store is read-only.
+
+Settings → General also owns the server-persisted **Automatically accept Agent Space changes** preference. [`GeneralSettings.tsx`](../../apps/web/src/components/Settings/sections/GeneralSettings.tsx) loads and updates it through the owner-only Agent Change Review API, optimistically reflects a toggle, and restores the last confirmed value on write failure. The preference is application-global: it suppresses future pending Keep/Revert records but does not delete existing records or convert current-session Canvas undo into durable Revert.
 
 ## 9. Desktop troubleshooting actions
 

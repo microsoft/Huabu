@@ -21,6 +21,8 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
+import { STORAGE_CAPABILITIES } from './capabilities.js';
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const STORAGE_DIR = HERE;
 const SRC_DIR = path.resolve(HERE, '../..');
@@ -85,13 +87,19 @@ describe('storage module tree', () => {
 
     expect(rootFiles.sort()).toEqual([
       'canvas-dirs.ts',
+      'capabilities.test.ts',
+      'capabilities.ts',
+      'detached-blobs.test.ts',
       'index.ts',
       'module-boundaries.test.ts',
       'paths.ts',
+      'product-boundary.test.ts',
       'profile.test.ts',
       'profile.ts',
       'space-lifecycle-admission.ts',
       'storage.ts',
+      'testing.ts',
+      'workspace-activation.test.ts',
     ]);
   });
 
@@ -168,6 +176,49 @@ describe('storage dependency direction', () => {
       }
     }
     expect(violations).toEqual([]);
+  });
+
+  /**
+   * A declared capability is refused somewhere, or it is not a capability.
+   *
+   * `capabilities.ts` promises that every row also refuses at its own call
+   * site, "because a matrix nobody consults at runtime is documentation". This
+   * is that promise, checked. It catches the two ways it rots: a row added for
+   * an operator's benefit that no feature ever asks about, and a refusal
+   * deleted while its row stays behind, still printed at boot.
+   */
+  it('refuses every capability it declares, outside the storage module', () => {
+    const consumers = sourceFiles
+      .filter((f) => !f.startsWith('modules/storage/'))
+      .filter((f) => !f.endsWith('.test.ts'))
+      .map((f) => read(f));
+
+    const unenforced = STORAGE_CAPABILITIES.filter(
+      (capability) =>
+        !consumers.some((source) => source.includes(`'${capability.id}'`)),
+    ).map((capability) => capability.id);
+
+    expect(unenforced).toEqual([]);
+  });
+
+  /**
+   * Each backend owns its own area of the Server data directory.
+   *
+   * `storage/disk/` and `storage/sqlite/` are backend-shaped names, so the
+   * only files allowed to build them are those backends'. The composition root
+   * asks; it does not know. Two adapters share `storage/disk/` — the
+   * structured store's Workspace registry and the blob store's Space byte
+   * roots — and one file deciding both is what keeps them from overlapping.
+   */
+  it('lets each backend own its area of the data directory', () => {
+    const owners = sourceFiles
+      .filter((f) => !f.endsWith('.test.ts'))
+      .filter((f) => /'storage',\s*'(disk|sqlite)'/.test(read(f)));
+
+    expect(owners.sort()).toEqual([
+      'modules/storage/backends/disk/data-dir.ts',
+      'modules/storage/backends/sqlite/database.ts',
+    ]);
   });
 
   it('selects a backend only in the composition root', () => {
@@ -296,22 +347,44 @@ describe('workspace module names no backend', () => {
  */
 describe('Disk Space tree capability', () => {
   const EXPECTED_CONSUMERS = [
+    // A — external-note discovery. The watcher asks whether this Space has a
+    // directory to watch at all; `null` is the whole of its behaviour off
+    // Disk.
+    'modules/canvas/external-watcher.ts',
     // A — the built-in file tools' sandbox root.
     'modules/agent/tools/handlers/fs-sandbox.ts',
     // A — bundle export.
     'modules/canvas/canvas.route.ts',
     // A — external-note claim.
     'modules/canvas/external.route.ts',
-    // C — the resurrection guard, which disappears with the substrate.
-    'modules/agent/memory/trigger.ts',
     // B, deferred — RFS's sidecar-to-record mapping. Portable in principle,
     // Disk's in practice until a second backend has a file plane at all.
     'modules/remote_fs/node-meta.ts',
-    // D — the per-Space RFS access guide, headed for a blob.
-    'modules/remote_fs/skill.ts',
-    // C and D — memory files, the debug prompt log, ACP session state.
+    // C — ACP session state, which leaves with phase 6's `Namespace` change.
+    // Everything else this module addressed has already left: the memory
+    // bookkeeping and debug prompt log onto the extension substrate, the
+    // memory body and the RFS access guide into blob scopes.
     'modules/workspace/paths.ts',
   ].sort();
+
+  /**
+   * `sqliteTree` is the same kind of thing as `diskTree` and gets the same
+   * fence. It is narrower on purpose: the *only* reason it exists rather than
+   * the port's async `extension()` is that Agenetes's storage ports are
+   * synchronous, so exactly one owner should ever appear here.
+   */
+  const EXPECTED_SQLITE_CONSUMERS = [
+    'modules/agent/agenetes/sqlite-stores.ts',
+  ].sort();
+
+  it('keeps the exact synchronous SQLite substrate census', () => {
+    const consumers = sourceFiles
+      .filter((file) => !file.startsWith('modules/storage/'))
+      .filter((file) => !file.endsWith('.test.ts'))
+      .filter((file) => /\bsqliteTree\b/.test(read(file)));
+
+    expect(consumers.sort()).toEqual(EXPECTED_SQLITE_CONSUMERS);
+  });
 
   it('keeps the exact production consumer census', () => {
     // Matched as a bare word, not as `.diskTree`: destructuring the member
@@ -472,6 +545,62 @@ describe('no production module outside storage names a Disk layout', () => {
   });
 });
 
+/**
+ * The product suite proves the exit criterion only while it stays ignorant of
+ * the backend (proposal §12.8).
+ *
+ * A case that reaches for a directory or a filename has stopped being
+ * evidence that anything is portable — it would keep passing for Disk and
+ * fail for the first backend that has neither, which is exactly backwards
+ * from what the suite is for. Enforced by reading the source, because the
+ * failure mode is a helpful-looking assertion someone adds later.
+ */
+describe('product boundary suite stays backend-blind', () => {
+  const SUITE = 'modules/storage/product-boundary.test.ts';
+
+  it('names no Disk record, blob, or directory vocabulary', () => {
+    // Quoted forms for the hidden tiers, so a scope *member* named `memory`
+    // — which is portable vocabulary — is not confused for the directory
+    // `.memory/`, which is not.
+    const DISK_VOCABULARY = [
+      "'space.json'",
+      "'.artifacts",
+      "'.history",
+      "'.memory",
+      "'.upload",
+      "'.world",
+      'diskTree',
+      'canvasRoot',
+      'nodesDir',
+      'readFileSync',
+      'existsSync',
+      'mkdirSync',
+    ];
+    const source = read(SUITE);
+    const found = DISK_VOCABULARY.filter((token) => source.includes(token));
+
+    expect(found).toEqual([]);
+  });
+
+  it('reaches storage only through the portable surface and the harness', () => {
+    const allowed = new Set([
+      'modules/storage/storage',
+      'modules/storage/testing',
+      'modules/storage/profile',
+      'modules/storage/ports/blob',
+      'modules/canvas/persistence-types',
+    ]);
+    const violations = specifiersOf(SUITE)
+      .map((spec) => resolveSpecifier(SUITE, spec))
+      .filter((target): target is string => target !== null)
+      .filter((target) => !allowed.has(target));
+
+    // A backend import would let a case assert against an adapter directly,
+    // which is what the per-adapter suites are for.
+    expect(violations).toEqual([]);
+  });
+});
+
 describe('structured write authority', () => {
   it('does not expose compatibility create/delete writers from the public barrel', () => {
     expect(read('modules/storage/index.ts')).not.toMatch(
@@ -547,10 +676,7 @@ describe('root forwarding shims', () => {
     'storage/canvas-dirs.js': [
       'modules/agent/tools/world-target-read.test.ts',
       'modules/canvas/canvas-command-router.test.ts',
-      'modules/canvas/canvas.route.ts',
       'modules/canvas/external-watcher.test.ts',
-      'modules/canvas/external-watcher.ts',
-      'modules/canvas/world-portal-policy.ts',
       'modules/canvas/world-portals.test.ts',
       'modules/canvas/world-reference-resolver.test.ts',
       'modules/workspace.ts',

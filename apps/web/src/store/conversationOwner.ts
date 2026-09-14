@@ -119,6 +119,14 @@ export function shouldComposeConversationOwner(
   return getQuestionNodeStatus(source) === 'idle' && !hasAuthoredContent;
 }
 
+/** Prefer the conversation owner's durable binding over an ephemeral cache. */
+export function resolveConversationAgentBinding(
+  source: ConversationOwnerSource | undefined,
+  cachedBinding: AgentBinding,
+): AgentBinding {
+  return source?.agentBinding ?? cachedBinding;
+}
+
 /** Keep client writes to fixed Agent Nodes limited to presentation state. */
 export function filterClientOwnedQuestionPatch(
   source: ConversationOwnerSource | undefined,

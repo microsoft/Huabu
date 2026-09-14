@@ -21,6 +21,7 @@ import {
   readJsonLines,
   readJsonLinesStrict,
   readJsonStrict,
+  resolveDirectChildPath,
 } from './fs.js';
 
 let root = '';
@@ -57,6 +58,26 @@ describe('readJsonStrict', () => {
     writeFileSync(file, 'null', 'utf8');
 
     expect(() => readJsonStrict(file)).toThrow(SyntaxError);
+  });
+});
+
+describe('resolveDirectChildPath', () => {
+  it('resolves a direct child beneath the root', () => {
+    expect(resolveDirectChildPath(root, 'Space name')).toBe(
+      path.join(root, 'Space name'),
+    );
+  });
+
+  it.each([
+    '',
+    '.',
+    '..',
+    '../escaped',
+    'nested/escaped',
+    'nested\\escaped',
+    path.resolve(root, '..', 'escaped'),
+  ])('rejects a non-child path: %s', (childName) => {
+    expect(() => resolveDirectChildPath(root, childName)).toThrow();
   });
 });
 

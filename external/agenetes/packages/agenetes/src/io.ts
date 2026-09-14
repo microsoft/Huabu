@@ -10,6 +10,7 @@ import {
   mkdirSync,
   readFileSync,
   renameSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
@@ -98,6 +99,35 @@ export function atomicWriteJson(filePath: string, data: unknown): void {
 export function appendJsonLine(filePath: string, data: unknown): void {
   mkdirSync(path.dirname(filePath), { recursive: true });
   appendFileSync(filePath, `${JSON.stringify(data)}\n`, 'utf-8');
+}
+
+/**
+ * Atomically OVERWRITE a JSONL file with exactly `items`, one per line
+ * (write to a `.tmp` sibling, then rename), replacing any prior content.
+ * Unlike {@link appendJsonLine} this is O(whole file) and is reserved for
+ * whole-log replacement (the `rehome()` durable-move primitive), never for
+ * per-event streaming appends. An empty `items` still creates the file so a
+ * subsequent read observes a present-but-empty log rather than a missing one.
+ */
+export function writeJsonLines(
+  filePath: string,
+  items: readonly unknown[],
+): void {
+  mkdirSync(path.dirname(filePath), { recursive: true });
+  const tmp = `${filePath}.tmp`;
+  const content = items.map((item) => `${JSON.stringify(item)}\n`).join('');
+  writeFileSync(tmp, content, 'utf-8');
+  renameOverWithRetry(tmp, filePath);
+}
+
+/**
+ * Remove a file if present; a no-op when it is already missing (mirrors the
+ * idempotent `delete()` semantics of {@link FileThreadStore}). Used to
+ * physically drop a thread's Tier-1/Tier-2 log file once it has been
+ * relocated (or to compensate a failed `rehome()`).
+ */
+export function removeFileIfExists(filePath: string): void {
+  if (existsSync(filePath)) unlinkSync(filePath);
 }
 
 /**

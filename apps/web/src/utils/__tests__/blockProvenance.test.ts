@@ -162,6 +162,117 @@ describe('stampAiEdit', () => {
     expect(after.blocks.find((b) => b.key === 'Y')).toBeTruthy();
   });
 
+  it('keeps the original human baseline across sequential AI modifications', () => {
+    const first = stampAiEdit(undefined, {
+      oldKeys: ['H'],
+      newKeys: ['A1'],
+      oldMarkdownByKey: new Map([['H', 'Human text']]),
+      at: T0,
+    });
+    const second = stampAiEdit(first, {
+      oldKeys: ['A1'],
+      newKeys: ['A2'],
+      oldMarkdownByKey: new Map([['A1', 'First AI text']]),
+      at: '2025-01-02T00:00:00.000Z',
+    });
+
+    expect(second.blocks).toEqual([
+      {
+        key: 'A2',
+        kind: 'modified',
+        baselineMarkdown: 'Human text',
+        baselineKey: 'H',
+        at: T0,
+      },
+    ]);
+  });
+
+  it('keeps a sequentially rewritten AI insertion classified as inserted', () => {
+    const first = stampAiEdit(undefined, {
+      oldKeys: [],
+      newKeys: ['A1'],
+      oldMarkdownByKey: new Map(),
+      at: T0,
+    });
+    const second = stampAiEdit(first, {
+      oldKeys: ['A1'],
+      newKeys: ['A2'],
+      oldMarkdownByKey: new Map([['A1', 'First AI text']]),
+      at: '2025-01-02T00:00:00.000Z',
+    });
+
+    expect(second.blocks).toEqual([
+      { key: 'A2', kind: 'inserted', baselineMarkdown: '', at: T0 },
+    ]);
+  });
+
+  it('uses the original human baseline when AI later deletes a modified block', () => {
+    const first = stampAiEdit(undefined, {
+      oldKeys: ['H'],
+      newKeys: ['A1'],
+      oldMarkdownByKey: new Map([['H', 'Human text']]),
+      at: T0,
+    });
+    const second = stampAiEdit(first, {
+      oldKeys: ['A1'],
+      newKeys: [],
+      oldMarkdownByKey: new Map([['A1', 'First AI text']]),
+      at: '2025-01-02T00:00:00.000Z',
+    });
+
+    expect(second.blocks).toEqual([]);
+    expect(second.deletedBlocks).toEqual([
+      {
+        key: 'A1',
+        baselineMarkdown: 'Human text',
+        anchorKey: null,
+        at: T0,
+      },
+    ]);
+  });
+
+  it('cancels provenance when AI later deletes its own insertion', () => {
+    const first = stampAiEdit(undefined, {
+      oldKeys: [],
+      newKeys: ['A1'],
+      oldMarkdownByKey: new Map(),
+      at: T0,
+    });
+    const second = stampAiEdit(first, {
+      oldKeys: ['A1'],
+      newKeys: [],
+      oldMarkdownByKey: new Map([['A1', 'AI-only text']]),
+      at: '2025-01-02T00:00:00.000Z',
+    });
+
+    expect(second.blocks).toEqual([]);
+    expect(second.deletedBlocks).toEqual([]);
+  });
+
+  it('moves an existing tombstone to a sequentially rewritten anchor', () => {
+    const seed = stampAiEdit(undefined, {
+      oldKeys: ['H', 'D'],
+      newKeys: ['H'],
+      oldMarkdownByKey: new Map([['D', 'Deleted text']]),
+      at: T0,
+    });
+    const next = stampAiEdit(seed, {
+      oldKeys: ['H'],
+      newKeys: ['A1'],
+      oldMarkdownByKey: new Map([['H', 'Human anchor']]),
+      at: '2025-01-02T00:00:00.000Z',
+    });
+
+    expect(next.deletedBlocks).toEqual([
+      {
+        key: 'D',
+        baselineMarkdown: 'Deleted text',
+        anchorKey: 'A1',
+        at: T0,
+      },
+    ]);
+  });
+
   it('drops tombstones whose anchor was deleted in the same edit', () => {
     const seed = stampAiEdit(undefined, {
       oldKeys: ['A', 'B', 'C'],
@@ -199,7 +310,13 @@ describe('stampAiEdit', () => {
     // No tombstone — the remove was paired up.
     expect(prov.deletedBlocks).toEqual([]);
     expect(prov.blocks).toEqual([
-      { key: 'B-prime', kind: 'modified', baselineMarkdown: 'old B', at: T0 },
+      {
+        key: 'B-prime',
+        kind: 'modified',
+        baselineMarkdown: 'old B',
+        baselineKey: 'B',
+        at: T0,
+      },
     ]);
   });
 
@@ -216,7 +333,13 @@ describe('stampAiEdit', () => {
       at: T0,
     });
     expect(prov.blocks).toEqual([
-      { key: 'B-prime', kind: 'modified', baselineMarkdown: 'old B', at: T0 },
+      {
+        key: 'B-prime',
+        kind: 'modified',
+        baselineMarkdown: 'old B',
+        baselineKey: 'B',
+        at: T0,
+      },
     ]);
     expect(prov.deletedBlocks).toEqual([
       { key: 'C', baselineMarkdown: 'old C', anchorKey: 'A', at: T0 },
@@ -233,7 +356,13 @@ describe('stampAiEdit', () => {
       at: T0,
     });
     expect(prov.blocks).toEqual([
-      { key: 'B-prime', kind: 'modified', baselineMarkdown: 'old B', at: T0 },
+      {
+        key: 'B-prime',
+        kind: 'modified',
+        baselineMarkdown: 'old B',
+        baselineKey: 'B',
+        at: T0,
+      },
       { key: 'B-extra', kind: 'inserted', baselineMarkdown: '', at: T0 },
     ]);
     expect(prov.deletedBlocks).toEqual([]);

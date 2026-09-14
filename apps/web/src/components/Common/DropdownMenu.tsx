@@ -11,12 +11,14 @@ import {
   type ReactElement,
   type ReactNode,
 } from 'react';
+import { Link } from 'react-router-dom';
 
 import { Button } from './Button';
 import { cn } from './cn';
 import { Popover } from './Popover';
 
 import type { ButtonHTMLAttributes } from 'react';
+import type { LinkProps } from 'react-router-dom';
 
 // ─── DropdownMenuItem ─────────────────────────────────────────────────────────
 
@@ -32,6 +34,27 @@ type DropdownMenuItemProps = {
   ButtonHTMLAttributes<HTMLButtonElement>,
   'children' | 'className' | 'role'
 >;
+
+type DropdownMenuItemContentProps = Pick<
+  DropdownMenuItemProps,
+  'icon' | 'children' | 'shortcut' | 'trailing'
+>;
+
+const DropdownMenuItemContent: React.FC<DropdownMenuItemContentProps> = ({
+  icon,
+  children,
+  shortcut,
+  trailing,
+}) => (
+  <>
+    {icon && <span className="text-fg-subtle shrink-0">{icon}</span>}
+    <span className="flex-1 text-left">{children}</span>
+    {shortcut && (
+      <span className="text-fg-subtle ml-4 shrink-0 text-xs">{shortcut}</span>
+    )}
+    {trailing}
+  </>
+);
 
 /**
  * A single item inside a `DropdownMenu`. Uses `Button` with ghost variant as its base.
@@ -54,13 +77,50 @@ export const DropdownMenuItem: React.FC<DropdownMenuItemProps> = ({
     )}
     {...props}
   >
-    {icon && <span className="text-fg-subtle shrink-0">{icon}</span>}
-    <span className="flex-1 text-left">{children}</span>
-    {shortcut && (
-      <span className="text-fg-subtle ml-4 shrink-0 text-xs">{shortcut}</span>
-    )}
-    {trailing}
+    <DropdownMenuItemContent
+      icon={icon}
+      shortcut={shortcut}
+      trailing={trailing}
+    >
+      {children}
+    </DropdownMenuItemContent>
   </Button>
+);
+
+type DropdownMenuLinkProps = DropdownMenuItemContentProps &
+  Omit<LinkProps, 'children' | 'className' | 'role'> & {
+    className?: string;
+  };
+
+/**
+ * A router link presented as a menu item. Native anchor semantics preserve
+ * browser new-tab gestures while React Router handles an ordinary click.
+ */
+export const DropdownMenuLink: React.FC<DropdownMenuLinkProps> = ({
+  icon,
+  children,
+  shortcut,
+  trailing,
+  className,
+  ...props
+}) => (
+  <Link
+    role="menuitem"
+    className={cn(
+      'text-fg-muted hover:bg-hover flex w-full cursor-pointer items-center justify-start gap-2 rounded-none border-none bg-transparent px-3 py-1.5 text-xs transition-colors',
+      '[&_svg]:shrink-0',
+      className,
+    )}
+    {...props}
+  >
+    <DropdownMenuItemContent
+      icon={icon}
+      shortcut={shortcut}
+      trailing={trailing}
+    >
+      {children}
+    </DropdownMenuItemContent>
+  </Link>
 );
 
 // ─── DropdownMenu (container) ─────────────────────────────────────────────────

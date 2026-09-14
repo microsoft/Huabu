@@ -2,7 +2,7 @@
 // Licensed under the MIT license.
 
 import { useInternalNode } from '@xyflow/react';
-import { Trash2 } from 'lucide-react';
+import { MoveRight, Trash2 } from 'lucide-react';
 import { memo, useCallback, useMemo, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -99,6 +99,9 @@ export const NodeFloatingToolbar = memo(
     const updateNodeData = useCanvasStore((s) => s.updateNodeData);
     const convertNodeType = useCanvasStore((s) => s.convertNodeType);
     const deleteNodes = useCanvasStore((s) => s.deleteNodes);
+    const setMoveSelectionDialogOpen = useCanvasStore(
+      (s) => s.setMoveSelectionDialogOpen,
+    );
     const setNodeGeometry = useCanvasStore((s) => s.setNodeGeometry);
     const setNoteHeightMode = useCanvasStore((s) => s.setNoteHeightMode);
     const isOpenInPreview = usePreviewWorkspaceStore((s) =>
@@ -381,6 +384,20 @@ export const NodeFloatingToolbar = memo(
           <>
             <FloatingToolbar.Divider />
             {actions}
+          </>
+        )}
+
+        {!['spacePreview', 'canvasRef', 'frameRef', 'nodeRef'].includes(
+          type,
+        ) && (
+          <>
+            <FloatingToolbar.Divider />
+            <FloatingToolbar.ActionButton
+              title={t('moveSelection.action')}
+              onClick={() => setMoveSelectionDialogOpen(true)}
+            >
+              <MoveRight />
+            </FloatingToolbar.ActionButton>
           </>
         )}
 

@@ -104,6 +104,24 @@ describe('World canvas directory indexing', () => {
     expect(persisted.title).toBe('World');
   });
 
+  it.each(['../escaped', 'nested/escaped', '/tmp/escaped'])(
+    'rejects a rename outside the Workspace root: %s',
+    (newDirName) => {
+      expect(renameCanvasDirOnDisk('canvas-a', newDirName)).toEqual({
+        ok: false,
+        reason: 'fs-error',
+        message: 'Space directory rename must remain within the Workspace root',
+      });
+      expect(canvasDirName('canvas-a')).toBe('Project A');
+      expect(
+        readFileSync(
+          path.join(workspaceState.path, 'Project A', 'space.json'),
+          'utf8',
+        ),
+      ).toContain('"canvasId":"canvas-a"');
+    },
+  );
+
   it('rejects malformed World topology during a runtime rescan', () => {
     writeFileSync(
       path.join(workspaceState.path, '.world', 'space.json'),

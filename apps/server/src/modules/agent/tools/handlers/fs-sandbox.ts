@@ -30,7 +30,11 @@ import { readFileSync, readdirSync, statSync, type Dirent } from 'node:fs';
 import path from 'node:path';
 
 import { parseFrontmatter } from '../../../../utils/markdown-frontmatter.js';
-import { space } from '../../../storage/index.js';
+import {
+  space,
+  storageServes,
+  unavailableCapabilityMessage,
+} from '../../../storage/index.js';
 
 // ─── Always-skipped directory names ─────────────────────────────────────────
 
@@ -143,17 +147,18 @@ export function safeResolve(canvasId: string, rel: string): string {
   ) {
     throw new Error(`Invalid canvasId: ${canvasId}`);
   }
-  // The built-in file tools are Disk-only and stated as such (proposal
-  // §6.4.3, disposition A): off Disk the first-party agent reaches a Space
-  // over RFS/HTTP, which is what external agents already use. Refusing here
-  // is the backstop behind the capability matrix, not the primary check.
-  const tree = space(canvasId).diskTree;
-  if (!tree) {
-    throw new Error(
-      'Built-in file tools need a Space directory, which the active ' +
-        'structured backend does not provide.',
-    );
-  }
+  // Disk-only, and declared as such: `builtin-file-tools` is a
+  // capability-matrix entry, so an operator learns this when they select a
+  // profile rather than when an agent calls a tool. Refusing here is the
+  // backstop behind that declaration, phrased the same way.
+  // The matrix decides; `diskTree` supplies the root. These tools address the
+  // byte areas through `upload/` and `artifacts/` aliases as well as `nodes/`,
+  // so the requirement spans both axes and must not be re-derived here.
+  const tree = storageServes('builtin-file-tools')
+    ? space(canvasId).diskTree
+    : null;
+  if (!tree)
+    throw new Error(unavailableCapabilityMessage('builtin-file-tools'));
   const root = tree.directory();
   // Accept the clean virtual prefixes (`upload/`, `artifacts/`) as aliases
   // for their hidden on-disk dirs so agents can reference either form.

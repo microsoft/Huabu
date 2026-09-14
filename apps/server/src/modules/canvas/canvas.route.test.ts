@@ -3,7 +3,14 @@
 
 /** Route coverage for repository-backed storage consumers and lifecycle. */
 
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { request as httpRequest, type ClientRequest } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -40,9 +47,13 @@ import { withSpaceDirHandlesReleased } from '../storage/backends/disk/space-dir-
 import { createCanvas, deleteCanvas } from '../storage/compatibility/canvas.js';
 import {
   space,
+  composeStorage,
   getCanvasStore,
+  getStorage,
   getStructuredStore,
   resetStorageCache,
+  setStorageForTesting,
+  unavailableCapabilityMessage,
 } from '../storage/index.js';
 import { changesPath } from '../storage/paths.js';
 import { setWorkspacePath } from '../workspace.js';
@@ -682,7 +693,262 @@ describe('GET /api/canvas/:canvasId/threads/:threadId/changes', () => {
   });
 });
 
+/**
+ * Serve the real Disk stores under a profile that claims to keep Spaces in
+ * tables, so `diskTree` is absent while every record still reads back.
+ *
+ * The alternative — waiting for a second adapter — would leave the declared
+ * refusals unexercised on the only profile that exists.
+ */
+function useTablesProfile(): () => void {
+  const real = getStorage();
+  return setStorageForTesting(
+    composeStorage(
+      { ...real.profile, structured: { kind: 'sqlite' } },
+      real.structured,
+      real.blobs,
+    ),
+  );
+}
+
+describe('Disk-only capability refusals', () => {
+  it.each(['headers only', 'partial file'] as const)(
+    'rejects an unsupported import with %s without waiting for the upload to finish',
+    async (uploadState) => {
+      const restore = useTablesProfile();
+      const app = await buildApp();
+      let upload: ClientRequest | undefined;
+      try {
+        const address = await app.listen({ port: 0, host: '127.0.0.1' });
+        const body = await new Promise<string>((resolve, reject) => {
+          upload = httpRequest(
+            `${address}/canvas/import`,
+            {
+              method: 'POST',
+              headers: {
+                'content-type':
+                  'multipart/form-data; boundary=unfinished-upload',
+                'transfer-encoding': 'chunked',
+              },
+            },
+            (response) => {
+              let body = '';
+              response.setEncoding('utf8');
+              response.on('data', (chunk: string) => {
+                body += chunk;
+              });
+              response.on('error', reject);
+              response.on('end', () => {
+                if (response.statusCode !== 400) {
+                  reject(new Error(`Unexpected status ${response.statusCode}`));
+                } else resolve(body);
+              });
+            },
+          );
+          upload.on('error', reject);
+          upload.setTimeout(2_000, () => {
+            upload?.destroy(
+              new Error('Import waited for unsupported upload data'),
+            );
+          });
+          // Leave the request open: neither a client that has not sent a file
+          // nor one stalled partway through a file should delay this refusal.
+          upload.flushHeaders();
+          if (uploadState === 'partial file') {
+            upload.write(
+              '--unfinished-upload\r\n' +
+                'Content-Disposition: form-data; name="file"; filename="space.zip"\r\n' +
+                'Content-Type: application/zip\r\n\r\n',
+            );
+            upload.write(Buffer.alloc(64 * 1024));
+          }
+        });
+        expect(JSON.parse(body)).toEqual({
+          code: 'STORAGE_CAPABILITY_UNAVAILABLE',
+          message: unavailableCapabilityMessage('space-bundle-import'),
+        });
+      } finally {
+        upload?.destroy();
+        await app.close();
+        restore();
+      }
+    },
+  );
+
+  it('preflights Disk export without sending an archive, then still downloads it', async () => {
+    createCanvas('c1', 'Disk Space');
+    const app = await buildApp();
+    try {
+      const checked = await app.inject({
+        method: 'GET',
+        url: '/canvas/c1/export?check=true',
+      });
+      expect(checked.statusCode).toBe(204);
+      expect(checked.body).toBe('');
+      expect(checked.headers['content-disposition']).toBeUndefined();
+      const download = await app.inject({
+        method: 'GET',
+        url: '/canvas/c1/export',
+      });
+      expect(download.statusCode).toBe(200);
+      expect(download.headers['content-type']).toBe('application/zip');
+      expect(download.rawPayload.subarray(0, 2).toString()).toBe('PK');
+      const missing = await app.inject({
+        method: 'GET',
+        url: '/canvas/missing/export?check=true',
+      });
+      expect(missing.statusCode).toBe(404);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('refuses an unsupported export during preflight using the same policy as download', async () => {
+    createCanvas('c1', 'Tables Space');
+    const restore = useTablesProfile();
+    const app = await buildApp();
+    try {
+      const checked = await app.inject({
+        method: 'GET',
+        url: '/canvas/c1/export?check=true',
+      });
+      expect(checked.statusCode).toBe(400);
+      expect(checked.json()).toEqual({
+        code: 'STORAGE_CAPABILITY_UNAVAILABLE',
+        message: unavailableCapabilityMessage('space-bundle-export'),
+      });
+      const body = multipartBody(
+        'space.zip',
+        'application/zip',
+        Buffer.from('zip'),
+      );
+      const imported = await app.inject({
+        method: 'POST',
+        url: '/canvas/import',
+        ...body,
+      });
+      expect(imported.statusCode).toBe(400);
+      expect(imported.json()).toEqual({
+        code: 'STORAGE_CAPABILITY_UNAVAILABLE',
+        message: unavailableCapabilityMessage('space-bundle-import'),
+      });
+    } finally {
+      await app.close();
+      restore();
+    }
+  });
+
+  it('refuses in the same words the profile declared at startup', async () => {
+    createCanvas('c1', 'Tables Space');
+    const restore = useTablesProfile();
+    const app = await buildApp();
+    try {
+      const exported = await app.inject({
+        method: 'GET',
+        url: '/canvas/c1/export',
+      });
+      expect(exported.statusCode).toBe(400);
+      expect((exported.json() as { message: string }).message).toBe(
+        unavailableCapabilityMessage('space-bundle-export'),
+      );
+
+      const revealed = await app.inject({
+        method: 'POST',
+        url: '/canvas/c1/reveal-nodes',
+      });
+      expect(revealed.statusCode).toBe(400);
+      expect((revealed.json() as { message: string }).message).toBe(
+        unavailableCapabilityMessage('reveal-space-folder'),
+      );
+    } finally {
+      await app.close();
+      restore();
+    }
+  });
+
+  it('still reports a missing folder as missing on Disk', async () => {
+    // The refusal above must not swallow the other failure: on Disk the
+    // capability is present, so a Space whose directory is gone is data
+    // trouble, not a profile limitation.
+    createCanvas('c2', 'Vanished Space');
+    const tree = space('c2').diskTree;
+    if (!tree) throw new Error('Expected the Disk backend in this test');
+    rmSync(tree.directory(), { recursive: true, force: true });
+
+    const app = await buildApp();
+    try {
+      const exported = await app.inject({
+        method: 'GET',
+        url: '/canvas/c2/export',
+      });
+      expect(exported.statusCode).toBe(404);
+      expect((exported.json() as { message: string }).message).toMatch(
+        /not found/i,
+      );
+    } finally {
+      await app.close();
+    }
+  });
+});
+
 describe('Space export/import persistence', () => {
+  it('omits prompt logs but preserves other extension state without history', async () => {
+    createCanvas('c1', 'Private Export');
+    const promptStore = await space('c1').extension('huabu.prompt.log');
+    const memoryStore = await space('c1').extension('huabu.memory');
+    if (promptStore?.kind !== 'disk' || memoryStore?.kind !== 'disk') {
+      throw new Error('Expected Disk stores');
+    }
+    writeFileSync(
+      join(promptStore.directory, 'thread.prompt.log'),
+      'private system and user prompt',
+      'utf8',
+    );
+    writeFileSync(
+      join(memoryStore.directory, 'state.json'),
+      JSON.stringify({ counter: 17 }),
+      'utf8',
+    );
+
+    const app = await buildApp();
+    try {
+      const exported = await app.inject({
+        method: 'GET',
+        url: '/canvas/c1/export?includeHistory=false',
+      });
+      expect(exported.statusCode).toBe(200);
+
+      const upload = multipartBody(
+        'private-export.huabu.zip',
+        'application/zip',
+        exported.rawPayload,
+      );
+      const imported = await app.inject({
+        method: 'POST',
+        url: '/canvas/import',
+        payload: upload.payload,
+        headers: upload.headers,
+      });
+      expect(imported.statusCode).toBe(200);
+      const importedId = (imported.json() as { canvasId: string }).canvasId;
+
+      const importedPrompt =
+        await space(importedId).extension('huabu.prompt.log');
+      const importedMemory = await space(importedId).extension('huabu.memory');
+      if (importedPrompt?.kind !== 'disk' || importedMemory?.kind !== 'disk') {
+        throw new Error('Expected imported Disk stores');
+      }
+      expect(
+        existsSync(join(importedPrompt.directory, 'thread.prompt.log')),
+      ).toBe(false);
+      expect(
+        readFileSync(join(importedMemory.directory, 'state.json'), 'utf8'),
+      ).toContain('17');
+    } finally {
+      await app.close();
+    }
+  });
+
   it('round-trips topology, sidecars, history, and blobs after a cache reopen', async () => {
     createCanvas('c1', 'Round Trip');
     const store = getCanvasStore('c1');
@@ -738,7 +1004,7 @@ describe('Space export/import persistence', () => {
       change,
     ]);
     const blob = Buffer.from([0, 1, 2, 3, 255]);
-    await space('c1').blobs.put('asset.bin', blob);
+    await space('c1').artifacts.put('asset.bin', blob);
 
     const app = await buildApp();
     try {
@@ -790,7 +1056,7 @@ describe('Space export/import persistence', () => {
       expect(await importedSpace.changes.read('thread-export')).toEqual(
         storedChanges,
       );
-      expect(await space(importedId).blobs.read('asset.bin')).toEqual(blob);
+      expect(await space(importedId).artifacts.read('asset.bin')).toEqual(blob);
     } finally {
       await app.close();
     }

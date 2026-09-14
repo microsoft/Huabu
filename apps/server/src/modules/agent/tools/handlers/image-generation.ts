@@ -131,7 +131,7 @@ export async function handleGenerateImage(
   // ── Load reference artifacts upfront ──────────────────────────────────
   // Any missing/invalid ref is an early hard error — better than sending
   // a partial set to Azure and getting cryptic results.
-  const blobs = space(args.canvasId).blobs;
+  const artifacts = space(args.canvasId).artifacts;
   const refImages: Array<{ key: string; bytes: Buffer }> = [];
   for (const key of refs) {
     if (typeof key !== 'string' || !key.trim()) {
@@ -139,7 +139,7 @@ export async function handleGenerateImage(
         `Invalid reference artifact key: ${JSON.stringify(key)}. Use the bare \`src\` string returned by snapshot_nodes.`,
       );
     }
-    const bytes = await blobs.read(key);
+    const bytes = await artifacts.read(key);
     if (!bytes) {
       throw new Error(
         `Reference artifact "${key}" not found on canvas ${args.canvasId}. It may have been deleted.`,
@@ -272,7 +272,7 @@ export async function handleGenerateImage(
   // `canvas_commands` insert or embeds them in a note body — from
   // user-uploaded artifacts that should never be auto-collected.
   const name = `${createId('gen')}.png`;
-  await blobs.put(name, png);
+  await artifacts.put(name, png);
 
   // The requested size string ("auto" included) drives what we
   // report back; gpt-image-* generally honours the request size, and

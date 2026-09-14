@@ -3,7 +3,7 @@
 
 // @vitest-environment happy-dom
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { isMac } from '@/utils/platform';
 
@@ -11,6 +11,10 @@ import { createMilkdown, type MilkdownInstance } from '../createMilkdown';
 
 let instances: MilkdownInstance[] = [];
 let roots: HTMLElement[] = [];
+
+beforeEach(() => {
+  vi.useFakeTimers();
+});
 
 async function mount(
   markdown: string,
@@ -32,6 +36,8 @@ async function mount(
 afterEach(async () => {
   await Promise.all(instances.map((instance) => instance.destroy()));
   for (const root of roots) root.remove();
+  vi.runOnlyPendingTimers();
+  vi.useRealTimers();
   instances = [];
   roots = [];
   vi.restoreAllMocks();

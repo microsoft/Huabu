@@ -19,6 +19,7 @@ import {
   detectNodeTypeFromMime,
   detectOfficeFormat,
   getImageDimensionsFromBlob,
+  getVideoDimensionsFromBlob,
   normalizeUrl,
 } from '../../utils/io/media';
 
@@ -57,11 +58,17 @@ export async function uploadFileToNodeInput(
     }
 
     if (type === 'video') {
-      const src = await uploadVideo(file, canvasId);
+      const [src, naturalDimensions] = await Promise.all([
+        uploadVideo(file, canvasId),
+        // A codec the browser cannot decode still deserves a node — it just
+        // falls back to the default size instead of the real aspect ratio.
+        getVideoDimensionsFromBlob(file).catch(() => undefined),
+      ]);
       return {
         nodeType: 'video',
         placementPoint,
         data: { src, label: file.name, origin },
+        naturalDimensions,
       };
     }
 

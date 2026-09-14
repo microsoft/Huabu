@@ -127,7 +127,10 @@ export interface StampInput {
  * in the SAME slot (same surrounding surviving blocks) is a
  * **modification**, not delete+insert. Unpaired leftovers become
  * inserts (`kind: 'inserted'`) or tombstones. Existing entries whose key
- * still appears are kept untouched.
+ * still appears are kept untouched. When an AI-edited block is edited again,
+ * its original user-owned baseline and first-edit timestamp move to the new
+ * key so sequential AI edits remain one cumulative pending diff. A rewrite
+ * back to that normalized baseline clears the pending modification.
  */
 export function stampAiEdit(
   prov: MarkdownProvenance | undefined,
@@ -141,6 +144,10 @@ export function stampAiEdit(
     input.oldKeys,
     input.newKeys,
   );
+  const existingBlocksByKey = new Map(base.blocks.map((b) => [b.key, b]));
+  const replacementKeyByOldKey = new Map(
+    modifications.map((m) => [m.removedKey, m.addedKey]),
+  );
 
   const keptBlocks: BlockProvenance[] = base.blocks.filter((b) =>
     newKeySet.has(b.key),
@@ -151,12 +158,36 @@ export function stampAiEdit(
 
   for (const m of modifications) {
     if (keptKeySet.has(m.addedKey)) continue;
+    const existing = existingBlocksByKey.get(m.removedKey);
+    // Capture the full-document fingerprint before the first AI edit loses
+    // reference definitions. Never substitute an intermediate AI key for a
+    // legacy record's missing original baseline key.
+    const baselineKey = existing
+      ? existing.baselineKey
+      : m.removedKey.split('#')[0];
+    if (existing && existing.kind !== 'inserted') {
+      let comparisonKey = baselineKey;
+      if (comparisonKey === undefined) {
+        // Best-effort compatibility for old records; definitions omitted from
+        // a legacy baseline fragment cannot be recovered from the current doc.
+        const baselineBlocks = fingerprintMarkdownBlocks(
+          existing.baselineMarkdown,
+        );
+        if (baselineBlocks.length === 1) comparisonKey = baselineBlocks[0].key;
+      }
+      // Occurrence suffixes identify duplicate positions, not block content.
+      // Only a return to the original normalized block cancels a modification.
+      if (comparisonKey === m.addedKey.split('#')[0]) {
+        continue;
+      }
+    }
     const baselineMarkdown = input.oldMarkdownByKey.get(m.removedKey) ?? '';
     newBlocks.push({
       key: m.addedKey,
-      kind: 'modified',
-      baselineMarkdown,
-      at,
+      kind: existing?.kind ?? 'modified',
+      baselineMarkdown: existing?.baselineMarkdown ?? baselineMarkdown,
+      ...(baselineKey !== undefined ? { baselineKey } : {}),
+      at: existing?.at ?? at,
     });
   }
 
@@ -166,17 +197,31 @@ export function stampAiEdit(
   }
 
   const liveAnchorSet = newKeySet;
-  const keptTombstones: DeletedBlockInfo[] = base.deletedBlocks.filter(
-    (t) => t.anchorKey === null || liveAnchorSet.has(t.anchorKey),
-  );
+  const keptTombstones: DeletedBlockInfo[] = base.deletedBlocks.flatMap((t) => {
+    if (t.anchorKey === null || liveAnchorSet.has(t.anchorKey)) return [t];
+    const replacementAnchor = replacementKeyByOldKey.get(t.anchorKey);
+    return replacementAnchor && liveAnchorSet.has(replacementAnchor)
+      ? [{ ...t, anchorKey: replacementAnchor }]
+      : [];
+  });
   const keptTombKeys = new Set(keptTombstones.map((t) => t.key));
 
   const newTombstones: DeletedBlockInfo[] = [];
   for (const { key, anchorKey } of pureRemoves) {
     if (keptTombKeys.has(key)) continue;
-    const baselineMarkdown = input.oldMarkdownByKey.get(key) ?? '';
+    const existing = existingBlocksByKey.get(key);
+    // An AI-only insertion that a later AI edit removes has no net change
+    // relative to the last user-owned document, so there is nothing to review.
+    if (existing?.kind === 'inserted') continue;
+    const baselineMarkdown =
+      existing?.baselineMarkdown ?? input.oldMarkdownByKey.get(key) ?? '';
     if (anchorKey !== null && !liveAnchorSet.has(anchorKey)) continue;
-    newTombstones.push({ key, baselineMarkdown, anchorKey, at });
+    newTombstones.push({
+      key,
+      baselineMarkdown,
+      anchorKey,
+      at: existing?.at ?? at,
+    });
   }
 
   return {

@@ -5,6 +5,8 @@
  * Milkdown-backed renderer for AI chat messages.
  */
 
+import { memo } from 'react';
+
 import { parseArtifactUrl } from '@huabu/shared';
 
 import { MilkdownPreview } from '@/components/Milkdown';
@@ -13,7 +15,6 @@ import { setDragPayload } from '@/utils/io/dragDrop';
 
 import type { ImageDragPayload, NoteDragPayload } from '@/utils/io/dragDrop';
 import type { NodeOrigin } from '@huabu/shared';
-import type { FC } from 'react';
 
 interface MilkdownMessageCardProps {
   content: string;
@@ -87,10 +88,10 @@ export function buildImageDragPayload(
   };
 }
 
-export const MilkdownMessageCard: FC<MilkdownMessageCardProps> = ({
+export const MilkdownMessageCard = memo(function MilkdownMessageCard({
   content,
   threadId,
-}) => {
+}: MilkdownMessageCardProps) {
   const canvasId = useCanvasStore((s) => s.canvasId);
 
   return (
@@ -111,4 +112,4 @@ export const MilkdownMessageCard: FC<MilkdownMessageCardProps> = ({
       }}
     />
   );
-};
+});

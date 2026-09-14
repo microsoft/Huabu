@@ -55,8 +55,16 @@ export const workspaceDescriptorSchema = z.object({
 export type WorkspaceDescriptor = z.infer<typeof workspaceDescriptorSchema>;
 
 /** Body for `POST /api/workspaces`. */
+/**
+ * Body for `POST /api/workspaces`.
+ *
+ * `path` is the folder to adopt, and is how a Workspace is created where a
+ * Workspace *is* a folder. Where it is a row in a database there is nothing to
+ * adopt, so `name` alone creates one. Which form is required is the Server's
+ * answer, because the configured backend is the only thing that knows.
+ */
 export const workspaceCreateSchema = z.object({
-  path: z.string().min(1, 'Workspace path is required'),
+  path: z.string().min(1, 'Workspace path is required').optional(),
   name: z.string().trim().min(1, 'Workspace name is required').optional(),
 });
 export type WorkspaceCreateRequest = z.infer<typeof workspaceCreateSchema>;

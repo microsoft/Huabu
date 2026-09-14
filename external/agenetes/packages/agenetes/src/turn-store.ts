@@ -20,7 +20,13 @@
 // on-disk backing, one JSONL file per thread under the namespace's
 // `chat_v2/` sub-dir, the folded twin of the Tier-1 `.events.jsonl`).
 
-import { appendJsonLine, readJsonLines, sanitizeId } from './io.js';
+import {
+  appendJsonLine,
+  readJsonLines,
+  removeFileIfExists,
+  sanitizeId,
+  writeJsonLines,
+} from './io.js';
 
 import type { AgentTurn, Namespace } from '@agenetes/protocol';
 
@@ -64,6 +70,24 @@ export interface TurnStore {
    * the very first event).
    */
   fence(namespace: Namespace, threadId: string): number;
+  /**
+   * Overwrite a thread's ENTIRE Tier-2 log with `persisted` (already in fold
+   * order), replacing whatever the target held before. A narrow capability
+   * reserved for the `rehome()` durable-move primitive — it writes the
+   * destination turn log wholesale from a source snapshot, never for
+   * incremental folds (those stay on `append`).
+   */
+  replace(
+    namespace: Namespace,
+    threadId: string,
+    persisted: readonly PersistedTurn[],
+  ): void;
+  /**
+   * Remove a thread's Tier-2 log entirely (idempotent). Reserved for the
+   * `rehome()` primitive: dropping the source log after its target twin is
+   * durable, or compensating a target log written during a failed rehome.
+   */
+  delete(namespace: Namespace, threadId: string): void;
 }
 
 /** Defensive shape-check for a persisted record read back from disk. */
@@ -88,12 +112,17 @@ function isPersistedTurn(value: unknown): value is PersistedTurn {
 export class InMemoryTurnStore implements TurnStore {
   readonly #byNamespace = new Map<string, Map<string, PersistedTurn[]>>();
 
-  #log(namespace: Namespace, threadId: string): PersistedTurn[] {
+  #scope(namespace: Namespace): Map<string, PersistedTurn[]> {
     let scope = this.#byNamespace.get(namespace.name);
     if (!scope) {
       scope = new Map();
       this.#byNamespace.set(namespace.name, scope);
     }
+    return scope;
+  }
+
+  #log(namespace: Namespace, threadId: string): PersistedTurn[] {
+    const scope = this.#scope(namespace);
     let log = scope.get(threadId);
     if (!log) {
       log = [];
@@ -122,6 +151,18 @@ export class InMemoryTurnStore implements TurnStore {
   fence(namespace: Namespace, threadId: string): number {
     const log = this.#byNamespace.get(namespace.name)?.get(threadId);
     return log && log.length > 0 ? log[log.length - 1]!.seqEnd : 0;
+  }
+
+  replace(
+    namespace: Namespace,
+    threadId: string,
+    persisted: readonly PersistedTurn[],
+  ): void {
+    this.#scope(namespace).set(threadId, [...persisted]);
+  }
+
+  delete(namespace: Namespace, threadId: string): void {
+    this.#byNamespace.get(namespace.name)?.delete(threadId);
   }
 }
 
@@ -185,6 +226,22 @@ export class FileTurnStore implements TurnStore {
 
   fence(namespace: Namespace, threadId: string): number {
     return this.#metadata(this.#path(namespace, threadId)).fence;
+  }
+
+  replace(
+    namespace: Namespace,
+    threadId: string,
+    persisted: readonly PersistedTurn[],
+  ): void {
+    const filePath = this.#path(namespace, threadId);
+    writeJsonLines(filePath, persisted);
+    this.#metadataByPath.set(filePath, this.#metadataFor(persisted));
+  }
+
+  delete(namespace: Namespace, threadId: string): void {
+    const filePath = this.#path(namespace, threadId);
+    removeFileIfExists(filePath);
+    this.#metadataByPath.delete(filePath);
   }
 
   #read(filePath: string): PersistedTurn[] {

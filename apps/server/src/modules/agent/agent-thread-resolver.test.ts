@@ -41,6 +41,34 @@ const FIXED_NODE = {
 };
 
 describe('AgentThreadResolver', () => {
+  it('resolves selectable and fixed Agent Nodes without applying binding policy', async () => {
+    const selectable = {
+      ...FIXED_NODE,
+      data: { ...FIXED_NODE.data, agentBindingPolicy: 'selectable' },
+    };
+
+    await expect(
+      createResolver([selectable], 'Selectable prompt').resolveAgentNode(
+        'canvas-a',
+        'thread-a',
+      ),
+    ).resolves.toEqual({
+      canvasId: 'canvas-a',
+      nodeId: 'node-agent',
+      threadId: 'thread-a',
+    });
+    await expect(
+      createResolver([FIXED_NODE], 'Fixed prompt').resolveAgentNode(
+        'canvas-a',
+        'thread-a',
+      ),
+    ).resolves.toEqual({
+      canvasId: 'canvas-a',
+      nodeId: 'node-agent',
+      threadId: 'thread-a',
+    });
+  });
+
   it('resolves a fixed external Agent Node from Canvas storage', async () => {
     const target = await createResolver(
       [FIXED_NODE],

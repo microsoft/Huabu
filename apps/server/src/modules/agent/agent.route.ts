@@ -22,8 +22,8 @@ import {
   setChatThreadReasoningEffortRequestSchema,
 } from '@huabu/shared';
 
-import { agenetes } from '../agent/agenetes/drivers.js';
-import { INTERNAL_DRIVER_KIND } from '../agent/agenetes/drivers.js';
+import { ExternalAgentRealizationError } from '../agent/acp/external-agent-realization.js';
+import { agenetes, INTERNAL_DRIVER_KIND } from '../agent/agenetes/drivers.js';
 import {
   AgentThreadBusyError,
   agentThreadService,
@@ -619,6 +619,12 @@ const agentRoutes: FastifyPluginAsync = async (
         return reply.code(409).send({
           message: 'Another turn is already running for this thread.',
           code: 'thread_busy',
+        });
+      }
+      if (error instanceof ExternalAgentRealizationError) {
+        return reply.code(409).send({
+          message: error.message,
+          code: error.code,
         });
       }
       throw error;

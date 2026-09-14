@@ -61,7 +61,7 @@ const artifactRoute: FastifyPluginAsync = async (fastify) => {
     const name = `${id}${ext}`;
 
     try {
-      await space(canvasId).blobs.put(name, data.file);
+      await space(canvasId).artifacts.put(name, data.file);
     } catch (error) {
       request.log.error({ err: error }, 'Failed to stream artifact to storage');
       return reply.code(500).send({ message: 'Failed to save file' });
@@ -82,7 +82,7 @@ const artifactRoute: FastifyPluginAsync = async (fastify) => {
     '/:canvasId/artifact/:filename',
     async (request, reply) => {
       const { canvasId, filename } = request.params;
-      const blobs = space(canvasId).blobs;
+      const artifacts = space(canvasId).artifacts;
       const safeName = path.basename(filename);
 
       // `.mhtml` snapshots are stored as proper multipart/related MHTML
@@ -91,7 +91,7 @@ const artifactRoute: FastifyPluginAsync = async (fastify) => {
       // we strip the wrapper on the fly and serve the inner HTML as
       // `text/html` so no browser-side MHTML handler is required.
       if (safeName.toLowerCase().endsWith('.mhtml')) {
-        const buffer = await blobs.read(safeName);
+        const buffer = await artifacts.read(safeName);
         if (!buffer) {
           return reply.code(404).send({ message: 'Artifact not found' });
         }
@@ -115,7 +115,7 @@ const artifactRoute: FastifyPluginAsync = async (fastify) => {
         );
       }
 
-      const served = await sendBlob(request, reply, blobs, safeName);
+      const served = await sendBlob(request, reply, artifacts, safeName);
       if (!served) {
         return reply.code(404).send({ message: 'Artifact not found' });
       }
@@ -151,7 +151,7 @@ const artifactRoute: FastifyPluginAsync = async (fastify) => {
 
     let buffer: Buffer | null;
     try {
-      buffer = await space(srcCanvasId).blobs.read(srcKey);
+      buffer = await space(srcCanvasId).artifacts.read(srcKey);
     } catch (err) {
       request.log.error({ err }, 'Failed to read source artifact for clone');
       return reply
@@ -167,7 +167,7 @@ const artifactRoute: FastifyPluginAsync = async (fastify) => {
     const name = `${id}${ext}`;
 
     try {
-      await space(dstCanvasId).blobs.put(name, buffer);
+      await space(dstCanvasId).artifacts.put(name, buffer);
     } catch (err) {
       request.log.error({ err }, 'Failed to clone artifact');
       return reply

@@ -83,6 +83,40 @@ export interface Agenetes {
    */
   fork(source: ThreadIdentity, targetSpec: WorkloadSpec): AgentHandle;
   /**
+   * The destructive counterpart to {@link Agenetes.fork}: relocate a
+   * durable thread's complete conversation ownership — its thread record,
+   * Tier-1 event log, and Tier-2 turn log — from `source` to the namespace
+   * and host-owned spec context in `targetSpec`, preserving `threadId`,
+   * driver kind, workload type, and driver state unchanged (I9.4 / I9.8).
+   * Unlike `fork`, this MUTATES the source: on success the source record
+   * and both source logs no longer exist and the target is the sole
+   * durable owner of the thread's history.
+   *
+   * Preconditions (both checked before any write): `source` has no live
+   * handle (the host must have closed/never spawned it), and the target
+   * `(namespace, threadId)` holds no thread record and no Tier-1/Tier-2 log
+   * — a rehome never overwrites an existing target.
+   *
+   * Durable ordering: the target Tier-1 log, then the target Tier-2 log,
+   * then the target thread record are written FIRST — the target record
+   * write is the destination visibility point, the first moment `record` /
+   * `records` observe the thread under `targetSpec.namespace`. Only once
+   * the target is completely durable are the source record and then the
+   * source logs removed, so a reader never observes the thread missing
+   * from both sides at once.
+   *
+   * On a determinate failure at any step, `rehome` restores the source to
+   * its pre-call snapshot and removes every target record/log it wrote,
+   * then re-throws the original error — the source is left unchanged
+   * from the caller's perspective. If that restoration itself fails, the
+   * unresolved outcome is reported as a distinct
+   * `rehome_unknown_outcome` {@link AgenetesError}, which wraps the
+   * original failure and the rollback failure; a caller must treat this as
+   * "unknown, do not assume the source is intact" rather than a normal
+   * determinate failure.
+   */
+  rehome(source: ThreadIdentity, targetSpec: WorkloadSpec): void;
+  /**
    * Pure lookup of the live handle for `threadId` — **never spawns**
    * (I9.3). A missing handle is a precondition failure (e.g. a control
    * write on a dead thread), not a lazy spawn.
@@ -602,6 +636,160 @@ export function createAgenetesInstance(
         },
         { driverState: target.driver.initialState() },
       );
+    },
+    rehome(source: ThreadIdentity, rawTargetSpec: WorkloadSpec): void {
+      if (runtime.get(source.threadId) !== undefined) {
+        throw new AgenetesError(
+          'rehome_conflict',
+          `cannot rehome thread '${source.namespace.name}/${source.threadId}' with a live handle`,
+        );
+      }
+      const sourceRecord = threadStore.get(source.namespace, source.threadId);
+      if (!sourceRecord) {
+        throw new AgenetesError(
+          'invalid_workload',
+          `cannot rehome missing source thread '${source.namespace.name}/${source.threadId}'`,
+        );
+      }
+      const validatedSource = validateRecord(sourceRecord);
+      const target = validateSpec(rawTargetSpec);
+      const targetSpec = target.spec;
+      if (targetSpec.threadId !== source.threadId) {
+        throw new AgenetesError(
+          'invalid_workload',
+          'rehome target threadId must equal source threadId',
+        );
+      }
+      if (targetSpec.namespace.name === source.namespace.name) {
+        throw new AgenetesError(
+          'invalid_workload',
+          'rehome target namespace must differ from source',
+        );
+      }
+      if (targetSpec.kind !== validatedSource.spec.kind) {
+        throw new AgenetesError(
+          'invalid_workload',
+          `rehome target driver kind must match source '${validatedSource.spec.kind}'`,
+        );
+      }
+      if (targetSpec.workloadType !== validatedSource.spec.workloadType) {
+        throw new AgenetesError(
+          'invalid_workload',
+          `rehome target workload type must match source '${validatedSource.spec.workloadType}'`,
+        );
+      }
+      const targetHasRecord =
+        threadStore.get(targetSpec.namespace, targetSpec.threadId) !==
+        undefined;
+      const targetHasTurns =
+        turnStore.list(targetSpec.namespace, targetSpec.threadId).length > 0;
+      const targetHasEvents =
+        eventLog.readRecords(targetSpec.namespace, targetSpec.threadId).length >
+        0;
+      if (targetHasRecord || targetHasTurns || targetHasEvents) {
+        throw new AgenetesError(
+          'rehome_conflict',
+          `rehome target thread already exists '${targetSpec.namespace.name}/${targetSpec.threadId}'`,
+        );
+      }
+
+      // Snapshot the complete source BEFORE any write, so a determinate
+      // failure at any later step can restore it byte-for-byte regardless
+      // of which step failed.
+      const sourceEvents = eventLog.readRecords(
+        source.namespace,
+        source.threadId,
+      );
+      const sourceTurns = turnStore.list(source.namespace, source.threadId);
+      const targetRecord: ThreadRecord = {
+        driverSchemaVersion: validatedSource.driverSchemaVersion,
+        spec: targetSpec,
+        state: validatedSource.state,
+      };
+
+      // Each step's compensation is pushed ONLY once the step itself
+      // durably succeeds, so a mid-sequence failure unwinds exactly the
+      // completed prefix — never more, never less.
+      const undo: Array<() => void> = [];
+      const step = (write: () => void, compensate: () => void): void => {
+        write();
+        undo.push(compensate);
+      };
+
+      try {
+        // Target Tier-1 log, then target Tier-2 log, then the target
+        // thread record LAST — the record write is the destination
+        // visibility point (I9.4): the first moment a reader can observe
+        // the thread under `targetSpec.namespace`.
+        step(
+          () =>
+            eventLog.replace(
+              targetSpec.namespace,
+              targetSpec.threadId,
+              sourceEvents,
+            ),
+          () => eventLog.delete(targetSpec.namespace, targetSpec.threadId),
+        );
+        step(
+          () =>
+            turnStore.replace(
+              targetSpec.namespace,
+              targetSpec.threadId,
+              sourceTurns,
+            ),
+          () => turnStore.delete(targetSpec.namespace, targetSpec.threadId),
+        );
+        step(
+          () =>
+            threadStore.upsert(
+              targetSpec.namespace,
+              targetSpec.threadId,
+              targetRecord,
+            ),
+          () => threadStore.delete(targetSpec.namespace, targetSpec.threadId),
+        );
+        // Only once the target is completely durable: remove the source
+        // record (its own visibility point) before its now-orphaned logs.
+        step(
+          () => threadStore.delete(source.namespace, source.threadId),
+          () =>
+            threadStore.upsert(source.namespace, source.threadId, sourceRecord),
+        );
+        step(
+          () => eventLog.delete(source.namespace, source.threadId),
+          () =>
+            eventLog.replace(source.namespace, source.threadId, sourceEvents),
+        );
+        step(
+          () => turnStore.delete(source.namespace, source.threadId),
+          () =>
+            turnStore.replace(source.namespace, source.threadId, sourceTurns),
+        );
+      } catch (error) {
+        // Unwind the completed prefix in reverse (LIFO) order, restoring
+        // the source snapshot and removing every target record/log this
+        // call wrote. Each store primitive either durably succeeds or
+        // throws with no partial effect, so a compensation failure here
+        // means the true state is genuinely unknown, not just "source
+        // unchanged" — that becomes its own distinct error rather than a
+        // silently swallowed best-effort cleanup.
+        const rollbackErrors: unknown[] = [];
+        for (const compensate of undo.reverse()) {
+          try {
+            compensate();
+          } catch (rollbackError) {
+            rollbackErrors.push(rollbackError);
+          }
+        }
+        if (rollbackErrors.length > 0) {
+          throw new AgenetesError(
+            'rehome_unknown_outcome',
+            `rehome for '${source.namespace.name}/${source.threadId}' failed and rollback could not fully restore the source; the outcome is unknown and requires manual recovery`,
+            { cause: error, rollbackErrors },
+          );
+        }
+        throw error;
+      }
     },
     get(threadId: string): AgentHandle | undefined {
       return runtime.get(threadId);

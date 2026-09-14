@@ -1,61 +1,28 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-/**
- * `POST /api/acp/threads/:threadId/session` — eagerly open (or reuse) the
- * per-thread ACP session so the web client can pull slash commands BEFORE
- * the user submits their first prompt.
- *
- * `GET  /api/acp/threads/:threadId/commands` — return the cached
- * `available_commands_update` snapshot for an existing session (404 if
- * no session has been opened for this thread yet).
- *
- * Why a dedicated route family (instead of widening `agents.route.ts`):
- *  - These endpoints are thread-scoped, not agent-scoped.
- *  - They mutate (or read) per-thread session state that lives in
- *    `acpSessionRegistry`. Keeping that surface separate makes the
- *    read-only `agents` list easier to reason about.
- *
- * Wire contracts (`EnsureAcpSessionRequest` / `EnsureAcpSessionResponse`
- * / `AcpThreadCommandsResponse`) live in `@huabu/shared`; this route
- * validates every body with `safeParse` per docs/architecture/api-design.md.
- *
- * Auth: relies on the global Basic-Auth gate (app.ts). No additional
- * per-route check — the agentlet bridge itself is gated by
- * `token-store.ts`.
- */
-
 import { acpSessionRegistry } from '@agenetes/acp-driver';
-import { AcpServiceError } from '@agenetes/acp-driver';
-import { ensureAcpSession } from '@agenetes/acp-driver';
 import { getSupervisedAgentletId } from '@agenetes/agentlet-host';
 
 import {
   acpPermissionDecisionSchema,
-  acpThreadCommandsQuerySchema,
-  ensureAcpSessionRequestSchema,
+  acpThreadCachedMetaQuerySchema,
   setAcpSessionConfigOptionRequestSchema,
   setAcpSessionModeRequestSchema,
   setAcpSessionModelRequestSchema,
 } from '@huabu/shared';
 
-import { ensureProfileCacheSubscription } from './profile-cache-port.js';
+import {
+  externalAgentRealization,
+  realizationHttpError,
+} from './external-agent-realization.js';
 import { getProfileSchemaCache } from './profile-schema-cache.js';
 import {
-  getProfileSessionPreferences,
   rememberProfileConfigPreference,
   rememberProfileSessionPreference,
 } from './profile-session-preferences.js';
-import { buildReachbackEnv } from './reachback-env.js';
-import { getExternalAgentRuntimeConfig } from './runtime-config.js';
-import { resolveBindingRecipe } from './service.js';
-import { renderExternalAgentSystemPreamble } from '../../../prompt/external-agent/system-preamble.js';
 import { canvasAcpNamespace } from '../../workspace/paths.js';
-import {
-  agenetes,
-  EXTERNAL_DRIVER_KIND,
-  type AcpWorkloadSpec,
-} from '../agenetes/index.js';
+import { agenetes } from '../agenetes/index.js';
 
 import type { AcpProfileSchemaCacheEntry } from './profile-schema-cache.js';
 import type { AcpSessionEntry } from '@agenetes/acp-driver';
@@ -63,10 +30,8 @@ import type { AgentMetadata } from '@agenetes/protocol';
 import type {
   AcpPermissionDecisionResponse,
   AcpSessionMetaSnapshot,
-  AcpThreadCommandsQuery,
+  AcpThreadCachedMetaQuery,
   AcpThreadCachedMetaResponse,
-  AcpThreadCommandsResponse,
-  EnsureAcpSessionResponse,
   SetAcpSessionConfigOptionResponse,
   SetAcpSessionModelResponse,
   SetAcpSessionModeResponse,
@@ -85,6 +50,38 @@ function controlFailureCode(operation: string, code?: string): string {
   return code === 'session_suspended' ? code : `acp_${operation}_failed`;
 }
 
+async function realizeControlThread(
+  threadId: string,
+  target: {
+    binding: { kind: 'external'; alias: string; profileId: string };
+    canvasId?: string;
+    cwd?: string;
+  },
+  logger: FastifyBaseLogger,
+) {
+  try {
+    const realized = await externalAgentRealization.realize({
+      threadId,
+      canvasId: target.canvasId,
+      requestedBinding: target.binding,
+      requestedCwd: target.cwd,
+      logger,
+    });
+    const entry = await externalAgentRealization.ensureSession(
+      realized,
+      logger,
+    );
+    return { ok: true as const, realized, entry };
+  } catch (error) {
+    const failure = realizationHttpError(error);
+    logger.warn(
+      { threadId, code: failure.body.code, err: failure.body.message },
+      '[acp/threads] canonical realization for set-RPC failed',
+    );
+    return { ok: false as const, ...failure };
+  }
+}
+
 function resolveThreadAgentletId(threadId: string, canvasId?: string): string {
   if (canvasId) {
     const record = agenetes.record(canvasAcpNamespace(canvasId), threadId);
@@ -98,111 +95,6 @@ function resolveThreadAgentletId(threadId: string, canvasId?: string): string {
     }
   }
   return getSupervisedAgentletId();
-}
-
-/**
- * Resolve the live session entry for a set-RPC (mode / model / config
- * option), opening it on-demand when none exists yet.
- *
- * The selector dropdowns are seeded from the no-spawn `/cached-meta`
- * snapshot, so the user can switch a value BEFORE the session has ever
- * been spawned. Per the `/cached-meta` contract a real ensure-session
- * is expected on "any set-RPC" — so rather than 404 when the registry
- * is cold, we spawn (or reuse) the session using the `profileId` the
- * client supplies, then let the caller apply the actual switch.
- *
- * Returns either the resolved entry or a ready-to-send error envelope:
- *   • 404 `session_not_found` — no live session AND no `profileId` to
- *     spawn with (legacy callers that didn't send spawn context).
- *   • 503 — the on-demand spawn failed; `code` mirrors the ensure
- *     route's `AcpEnsureErrorCode`.
- */
-async function resolveSetRpcEntry(
-  threadId: string,
-  ctx: { profileId?: string; canvasId?: string; cwd?: string },
-  logger: FastifyBaseLogger,
-): Promise<
-  | { ok: true; entry: AcpSessionEntry; spec: AcpWorkloadSpec }
-  | { ok: false; status: number; body: { message: string; code: string } }
-> {
-  const agentletId = resolveThreadAgentletId(threadId, ctx.canvasId);
-  const existing = acpSessionRegistry.get(agentletId, threadId);
-  if (!ctx.profileId) {
-    if (existing) {
-      ensureProfileCacheSubscription(threadId, existing.profileId);
-      return {
-        ok: true,
-        entry: existing,
-        // A live session with no profileId in the request: rebuild the
-        // spec from the entry so the handle can be (re)created for the
-        // control op. `binding.alias` falls back to the profileId.
-        spec: {
-          threadId,
-          kind: EXTERNAL_DRIVER_KIND,
-          workloadType: 'Deployment',
-          namespace: existing.namespace,
-          spec: {
-            initialPreamble: [renderExternalAgentSystemPreamble()],
-            agentletId: existing.agentletId,
-            binding: {
-              alias: existing.profileId,
-              profileId: existing.profileId,
-            },
-            cwd: existing.cwd,
-            recipe: existing.bindingRecipe,
-          },
-        },
-      };
-    }
-    return {
-      ok: false,
-      status: 404,
-      body: {
-        message: 'No ACP session for this thread',
-        code: 'session_not_found',
-      },
-    };
-  }
-  const spec: AcpWorkloadSpec = {
-    threadId,
-    kind: EXTERNAL_DRIVER_KIND,
-    workloadType: 'Deployment',
-    namespace: canvasAcpNamespace(ctx.canvasId ?? ''),
-    spec: {
-      initialPreamble: [renderExternalAgentSystemPreamble()],
-      initialPreferences: getProfileSessionPreferences(ctx.profileId),
-      agentletId,
-      binding: { alias: ctx.profileId, profileId: ctx.profileId },
-      env: buildReachbackEnv(threadId, ctx.canvasId ?? ''),
-      ...(ctx.cwd !== undefined && { cwd: ctx.cwd }),
-      recipe: resolveBindingRecipe(ctx.profileId),
-    },
-  };
-  ensureProfileCacheSubscription(threadId, ctx.profileId);
-  if (existing) return { ok: true, entry: existing, spec };
-  try {
-    const entry = await ensureAcpSession({
-      agentletId,
-      threadId: spec.threadId,
-      binding: spec.spec.binding,
-      namespace: spec.namespace,
-      env: spec.spec.env,
-      ...(spec.spec.cwd !== undefined && { cwd: spec.spec.cwd }),
-      recipe: spec.spec.recipe,
-      initialPreferences: spec.spec.initialPreferences,
-      idleTimeoutSecs: getExternalAgentRuntimeConfig().idleTimeoutSecs,
-      logger,
-    });
-    return { ok: true, entry, spec };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    const code = err instanceof AcpServiceError ? err.code : 'internal';
-    logger.warn(
-      { threadId, code, err: message },
-      '[acp/threads] on-demand ensureAcpSession for set-RPC failed',
-    );
-    return { ok: false, status: 503, body: { message, code } };
-  }
 }
 
 /**
@@ -290,134 +182,14 @@ function snapshotMetaFromProfileCache(
 
 const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
   /**
-   * Open (or reuse) the per-thread ACP session. Idempotent: repeated
-   * calls with the same `{threadId, profileId, canvasId}` triple
-   * return the same session id. Response always includes the latest
-   * cached `availableCommands`; an empty array means the agent has
-   * not yet pushed its list (caller should poll
-   * `/threads/:threadId/commands` after a short delay).
-   */
-  app.post<{
-    Params: ThreadParams;
-    Reply: EnsureAcpSessionResponse | { message: string; code?: string };
-  }>('/threads/:threadId/session', async (request, reply) => {
-    const { threadId } = request.params;
-    if (!threadId || threadId.length === 0) {
-      return reply
-        .status(400)
-        .send({ message: 'threadId is required', code: 'bad_request' });
-    }
-
-    const parsed = ensureAcpSessionRequestSchema.safeParse(request.body);
-    if (!parsed.success) {
-      request.log.warn(
-        { threadId, issues: parsed.error.issues },
-        '[acp/threads] invalid session request body',
-      );
-      return reply.status(400).send({
-        message: 'Invalid request body',
-        code: 'validation_failed',
-      });
-    }
-
-    try {
-      const agentletId = resolveThreadAgentletId(
-        threadId,
-        parsed.data.canvasId,
-      );
-      const entry = await ensureAcpSession({
-        agentletId,
-        threadId,
-        binding: {
-          // Alias is purely a display hint at this stage \u2014 there's no
-          // wire field for it on EnsureAcpSessionRequest, so we fall
-          // back to the profileId itself. Real callers (chat panel)
-          // also fetch the profile to render the picker label.
-          alias: parsed.data.profileId,
-          profileId: parsed.data.profileId,
-        },
-        namespace: canvasAcpNamespace(parsed.data.canvasId ?? ''),
-        env: buildReachbackEnv(threadId, parsed.data.canvasId ?? ''),
-        cwd: parsed.data.cwd,
-        recipe: resolveBindingRecipe(parsed.data.profileId),
-        initialPreferences: getProfileSessionPreferences(parsed.data.profileId),
-        idleTimeoutSecs: getExternalAgentRuntimeConfig().idleTimeoutSecs,
-        logger: request.log,
-      });
-      return {
-        sessionId: entry.sessionId,
-        availableCommands: entry.availableCommands,
-        updatedAt: entry.commandsUpdatedAt,
-        sessionMeta: snapshotSessionMeta(entry),
-      };
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      // Surface the categorical code when the service layer threw an
-      // `AcpServiceError` — the web client switches on it to render
-      // a remediation-specific tooltip / CTA. Unrecognised throws
-      // collapse to `'internal'` so the client can still tell them
-      // apart from the categorised failures.
-      const code = err instanceof AcpServiceError ? err.code : 'internal';
-      request.log.warn(
-        { threadId, code, err: message },
-        '[acp/threads] ensureAcpSession failed',
-      );
-      return reply.status(503).send({ message, code });
-    }
-  });
-
-  /**
-   * Read the cached slash-command snapshot for an existing session.
-   * Returns 404 when no session has been opened for `threadId` yet —
-   * the caller should POST `/threads/:threadId/session` first.
-   *
-   * `updatedAt` is `0` when the session exists but the agent has not
-   * pushed `available_commands_update` yet. The web client uses this
-   * to decide whether to schedule a delayed re-fetch.
-   */
-  app.get<{
-    Params: ThreadParams;
-    Querystring: AcpThreadCommandsQuery;
-    Reply: AcpThreadCommandsResponse | { message: string; code?: string };
-  }>('/threads/:threadId/commands', async (request, reply) => {
-    const { threadId } = request.params;
-    const parsed = acpThreadCommandsQuerySchema.safeParse(request.query);
-    if (!parsed.success) {
-      request.log.warn(
-        { threadId, issues: parsed.error.issues },
-        '[acp/threads] invalid commands query',
-      );
-      return reply.status(400).send({
-        message: 'Invalid query',
-        code: 'validation_failed',
-      });
-    }
-    const agentletId = resolveThreadAgentletId(threadId, parsed.data.canvasId);
-    const entry = acpSessionRegistry.get(agentletId, threadId);
-    if (!entry) {
-      return reply.status(404).send({
-        message: 'No ACP session for this thread',
-        code: 'session_not_found',
-      });
-    }
-    return {
-      sessionId: entry.sessionId,
-      availableCommands: entry.availableCommands,
-      updatedAt: entry.commandsUpdatedAt,
-      sessionMeta: snapshotSessionMeta(entry),
-    };
-  });
-
-  /**
    * Read-only **no-spawn** meta snapshot for a thread.
    *
-   * Unlike `POST /threads/:threadId/session`, this route NEVER
-   * contacts the agentlet — it returns whatever the server already
-   * has cached, in priority order:
+   * This route never contacts the agentlet. It returns cached commands and
+   * selector metadata in priority order:
    *
    *   1. Live entry in `acpSessionRegistry` (some prior call already
    *      opened the session this lifetime) → freshest state.
-   *   2. Per-thread persisted record (`session-store`) → last known
+   *   2. Per-thread Agenetes record → last known
    *      state of THIS thread (includes per-thread `current*` choices
    *      and per-session `sessionInfo` / `usage`).
    *   3. Per-profile schema cache (`profile-schema-cache`) → schema
@@ -430,23 +202,36 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
    *
    * Designed for the web's `useAcpSessionMeta` hydrate-on-mount path:
    * opening an existing thread can populate dropdowns from its own cache
-   * without paying the agentlet cold-start tax. A profile-only hit is not
-   * presented as current state: command Profiles ensure immediately, while
-   * manifest Profiles wait for their first unified turn.
+   * without paying the agentlet cold-start tax. A profile-only hit is
+   * observational: mode/model may be displayed as last observed, while
+   * generic config values remain unconfirmed until this thread reports or
+   * records an explicit selection.
    *
    * Always responds 200 — absence of cache is a normal state.
    */
   app.get<{
     Params: ThreadParams;
-    Querystring: { canvasId?: string; profileId?: string };
-    Reply: AcpThreadCachedMetaResponse;
-  }>('/threads/:threadId/cached-meta', async (request) => {
+    Querystring: AcpThreadCachedMetaQuery;
+    Reply: AcpThreadCachedMetaResponse | { message: string; code?: string };
+  }>('/threads/:threadId/cached-meta', async (request, reply) => {
     const { threadId } = request.params;
-    const { canvasId, profileId } = request.query;
+    const parsed = acpThreadCachedMetaQuerySchema.safeParse(request.query);
+    if (!parsed.success) {
+      return reply.status(400).send({
+        message: 'Invalid query',
+        code: 'validation_failed',
+      });
+    }
+    const { canvasId, profileId } = parsed.data;
     const agentletId = resolveThreadAgentletId(threadId, canvasId);
     const live = acpSessionRegistry.get(agentletId, threadId);
     if (live) {
-      return { source: 'thread', sessionMeta: snapshotSessionMeta(live) };
+      return {
+        source: 'thread',
+        availableCommands: live.availableCommands,
+        commandsUpdatedAt: live.commandsUpdatedAt,
+        sessionMeta: snapshotSessionMeta(live),
+      };
     }
     if (canvasId) {
       const record = agenetes.record(canvasAcpNamespace(canvasId), threadId);
@@ -454,20 +239,33 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
       if (persistedMeta) {
         return {
           source: 'thread',
+          availableCommands: persistedMeta.availableCommands ?? [],
+          commandsUpdatedAt: persistedMeta.commandsUpdatedAt ?? 0,
           sessionMeta: snapshotMetaFromPersisted(persistedMeta),
         };
       }
     }
     if (profileId) {
       const profileCache = getProfileSchemaCache(profileId);
-      if (profileCache && (profileCache.metaUpdatedAt ?? 0) > 0) {
+      if (
+        profileCache &&
+        ((profileCache.metaUpdatedAt ?? 0) > 0 ||
+          (profileCache.commandsUpdatedAt ?? 0) > 0)
+      ) {
         return {
           source: 'profile',
+          availableCommands: profileCache.availableCommands ?? [],
+          commandsUpdatedAt: profileCache.commandsUpdatedAt ?? 0,
           sessionMeta: snapshotMetaFromProfileCache(profileCache),
         };
       }
     }
-    return { source: 'none', sessionMeta: emptySessionMetaSnapshot() };
+    return {
+      source: 'none',
+      availableCommands: [],
+      commandsUpdatedAt: 0,
+      sessionMeta: emptySessionMetaSnapshot(),
+    };
   });
 
   /**
@@ -535,10 +333,14 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
   // response is therefore best treated as "request accepted" — the
   // authoritative state is the one carried by the next SSE event.
   //
+  // The first request realizes the complete canonical workload, ensures its
+  // ACP session from that same spec, and then applies the control. Later
+  // requests reuse the persisted workload.
+  //
   // Failure modes:
-  //   • 404 — no session for this thread (caller must POST `/session`
-  //     first).
   //   • 400 — body failed `safeParse`.
+  //   • 409 — requested binding/cwd conflicts with the canonical thread.
+  //   • 503 — workload realization or session creation failed.
   //   • 502 — agent rejected the RPC (unknown id, capability missing,
   //     transport error). The user-visible message comes from the
   //     agent's rejection.
@@ -559,23 +361,15 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
         code: 'validation_failed',
       });
     }
-    const resolved = await resolveSetRpcEntry(
+    const resolved = await realizeControlThread(
       threadId,
-      {
-        profileId: parsed.data.profileId,
-        canvasId: parsed.data.canvasId,
-        cwd: parsed.data.cwd,
-      },
+      parsed.data,
       request.log,
     );
     if (!resolved.ok) {
       return reply.status(resolved.status).send(resolved.body);
     }
-    // Fold onto the long-lived handle's control plane (M3). L1 keeps the
-    // spawn orchestration (resolveSetRpcEntry get-or-create with spec); the
-    // set-RPC goes through `handle.control()`, which resolves the same entry
-    // by threadId and records the selection on it before returning.
-    const ack = await agenetes.create(resolved.spec).control({
+    const ack = await resolved.realized.handle.control({
       type: 'set_mode',
       data: { modeId: parsed.data.modeId },
     });
@@ -608,19 +402,15 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
         code: 'validation_failed',
       });
     }
-    const resolved = await resolveSetRpcEntry(
+    const resolved = await realizeControlThread(
       threadId,
-      {
-        profileId: parsed.data.profileId,
-        canvasId: parsed.data.canvasId,
-        cwd: parsed.data.cwd,
-      },
+      parsed.data,
       request.log,
     );
     if (!resolved.ok) {
       return reply.status(resolved.status).send(resolved.body);
     }
-    const ack = await agenetes.create(resolved.spec).control({
+    const ack = await resolved.realized.handle.control({
       type: 'set_model',
       data: { modelId: parsed.data.modelId },
     });
@@ -662,19 +452,15 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
         code: 'validation_failed',
       });
     }
-    const resolved = await resolveSetRpcEntry(
+    const resolved = await realizeControlThread(
       threadId,
-      {
-        profileId: parsed.data.profileId,
-        canvasId: parsed.data.canvasId,
-        cwd: parsed.data.cwd,
-      },
+      parsed.data,
       request.log,
     );
     if (!resolved.ok) {
       return reply.status(resolved.status).send(resolved.body);
     }
-    const ack = await agenetes.create(resolved.spec).control({
+    const ack = await resolved.realized.handle.control({
       type: 'set_config_option',
       data: {
         optionId: parsed.data.configOptionId,

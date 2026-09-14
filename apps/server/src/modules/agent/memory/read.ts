@@ -15,9 +15,10 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 
+import { space, SPACE_MEMORY_BLOB_NAME } from '../../storage/index.js';
 import {
+  hasWorkspaceSettingDirectory,
   workspaceMemoryPath,
-  canvasMemoryPath,
 } from '../../workspace/paths.js';
 
 /**
@@ -30,16 +31,34 @@ import {
  * zero-information `(empty)` line.
  */
 export function readWorkspaceMemory(): string | null {
+  // A backend with no Workspace folder has no user memory document. Absence,
+  // not failure: the preamble is optional context either way, and the
+  // limitation is stated up front as the `workspace-user-memory` capability.
+  if (!hasWorkspaceSettingDirectory()) return null;
   return readNonEmpty(workspaceMemoryPath());
 }
 
 /**
- * Read the per-canvas canvas memory body.
+ * Read the per-Space memory body.
  *
- * Same null-on-empty contract as {@link readWorkspaceMemory}.
+ * Same null-on-empty contract as {@link readWorkspaceMemory}. A blob under the
+ * Space's own memory scope (proposal §6.4.3, disposition D) — unlike the
+ * Workspace memory above, which is not scoped to a Space and stays a file.
  */
-export function readCanvasMemory(canvasId: string): string | null {
-  return readNonEmpty(canvasMemoryPath(canvasId));
+export async function readCanvasMemory(
+  canvasId: string,
+): Promise<string | null> {
+  const memory = space(canvasId).memory;
+  try {
+    const bytes = await memory.read(SPACE_MEMORY_BLOB_NAME);
+    if (bytes === null) return null;
+    const raw = bytes.toString('utf8');
+    return raw.trim().length === 0 ? null : raw;
+  } catch {
+    // Memory is optional context. Preserve the pre-blob behavior: an
+    // unreadable document is absence, not a reason to fail the agent turn.
+    return null;
+  }
 }
 
 function readNonEmpty(file: string): string | null {

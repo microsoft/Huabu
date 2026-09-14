@@ -118,4 +118,30 @@ describe('buildAcpWorkloadSpec', () => {
       },
     });
   });
+
+  it('places Space instructions between bootstrap and node constraints', () => {
+    mocks.profile = {
+      id: 'profile-a',
+      alias: 'Researcher',
+      agentletId: 'agentlet-a',
+      workingDirPath: '/profile/work',
+      launch: { kind: 'acp-command', command: 'copilot --acp' },
+    };
+
+    const workload = buildAcpWorkloadSpec({
+      binding: { profileId: 'profile-a', alias: 'Researcher' },
+      threadId: 'thread-a',
+      canvasId: 'canvas-a',
+      spacePrompt: '<space_prompt>Space rules</space_prompt>',
+      launchOverrides: {
+        additionalInitialPreamble: 'Node constraints',
+      },
+    });
+
+    expect(workload.spec.initialPreamble).toEqual([
+      'Mandatory preamble',
+      '<space_prompt>Space rules</space_prompt>',
+      'Node constraints',
+    ]);
+  });
 });

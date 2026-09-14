@@ -158,6 +158,22 @@ export const KNOWN_CLIS: readonly KnownCli[] = [
     installHint: 'Install from https://cursor.com/docs/cli/installation',
   },
   {
+    id: 'codebuddy',
+    displayName: 'CodeBuddy',
+    // Tencent Cloud's CodeBuddy Code CLI is built on the same
+    // architecture as Claude Code (same slash-command surface: /agents,
+    // /bashes, /compact, …) and speaks ACP natively via `--acp`, so no
+    // separate adapter binary is needed.
+    binary: 'codebuddy',
+    acpArgs: ['--acp'],
+    // Like Claude Code (which it is architecturally derived from),
+    // CodeBuddy delegates tool permission decisions to ACP requests
+    // rather than exposing a documented blanket auto-approve flag for
+    // `--acp` mode, so there is no official argument-based recipe.
+    autoApprove: null,
+    installHint: 'npm install -g @tencent-ai/codebuddy-code',
+  },
+  {
     id: 'hermes',
     displayName: 'Hermes Agent',
     // Hermes ships a native stdio ACP server reached via the `acp`

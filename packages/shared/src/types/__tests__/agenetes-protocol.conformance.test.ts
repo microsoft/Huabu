@@ -216,12 +216,25 @@ const toAnswerPermission = (req: AcpPermissionDecisionRequest): ControlMsg => ({
 
 describe('ControlMsg conformance', () => {
   it('maps every current control-route body onto a valid ControlMsg', () => {
+    const binding = {
+      kind: 'external' as const,
+      alias: 'Profile',
+      profileId: 'p1',
+    };
     const msgs: ControlMsg[] = [
       toCancel(),
-      toSetMode({ modeId: 'agent', profileId: 'p1', canvasId: 'c1' }),
-      toSetModel({ modelId: 'gpt-5', cwd: '/repo' }),
-      toSetConfigOption({ configOptionId: 'auto-approve', value: true }),
-      toSetConfigOption({ configOptionId: 'thought-level', value: 'high' }),
+      toSetMode({ modeId: 'agent', binding, canvasId: 'c1' }),
+      toSetModel({ modelId: 'gpt-5', binding, cwd: '/repo' }),
+      toSetConfigOption({
+        configOptionId: 'auto-approve',
+        value: true,
+        binding,
+      }),
+      toSetConfigOption({
+        configOptionId: 'thought-level',
+        value: 'high',
+        binding,
+      }),
       toAnswerPermission({ requestId: 'r1', optionId: 'allow' }),
       toAnswerPermission({ requestId: 'r2', cancelled: true }),
     ];

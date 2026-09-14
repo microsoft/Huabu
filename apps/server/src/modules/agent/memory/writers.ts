@@ -12,18 +12,23 @@
  *                                          unique substring (Claude
  *                                          Code style edit).
  *
- * Both take an already-sandbox-resolved absolute path; callers
- * (currently `tools/handlers/fs-write.ts`) own the path → tier
- * mapping. The `tier` knob here is purely for behaviour that varies
- * by destination:
+ * Both take a {@link MemoryDocument} — where the bytes live, resolved by the
+ * caller (currently `tools/handlers/fs-write.ts`), which owns the tier
+ * mapping. The indirection exists because the tiers no longer share a
+ * substrate: the Workspace-scoped ones are files, while a Space's memory body
+ * is a blob under its own scope (proposal §6.4.3, disposition D). Everything
+ * below is rules about the *content*, so none of it should know which.
+ *
+ * The `tier` knob is purely for behaviour that varies by destination:
  *
  *   - cap enforcement (workspace + canvas only — skill bodies are
  *     allowed to grow larger)
- *   - write serialisation (workspace memory is one shared file,
- *     touched by every canvas + chat agent, so we funnel through a
- *     keyed mutex)
  *   - post-write cache invalidation (user skill loader caches
  *     SKILL.md by id and needs to drop the entry after a write)
+ *
+ * Write serialisation is deliberately *not* one of them. Every writer below
+ * is a read-modify-write whose halves are both awaited, so what has to be
+ * serialised is one document against itself — see {@link MemoryDocument.key}.
  *
  * Failures never throw past this boundary — each writer returns a
  * structured {@link WriteResult} so the sub-agent (and the worker's
@@ -38,15 +43,82 @@ import { atomicWriteText, mkdirp } from '../../../utils/fs.js';
 import { createKeyedMutex } from '../../../utils/keyed-mutex.js';
 
 import type { MemoryLogger } from './index.js';
+import type { BlobScope } from '../../storage/index.js';
+
+// ─── Where a document lives ────────────────────────────────────────────────
+
+/**
+ * One memory document, addressed however its tier stores it.
+ *
+ * `target` is what a {@link WriteResult} names, so it is the caller's own
+ * vocabulary rather than a physical location — an agent that reads
+ * `memory/space.md` should see that spelling back, not wherever the bytes
+ * happen to sit.
+ */
+export interface MemoryDocument {
+  readonly target: string;
+  /**
+   * Stable identity of the bytes, for write serialisation.
+   *
+   * Deliberately not `target`: that is the caller's vocabulary, and every
+   * Space calls its body `memory/space.md`. Serialising on it would make
+   * unrelated Spaces wait on each other and still not tell two of them apart.
+   */
+  readonly key: string;
+  read(): Promise<string | null>;
+  write(body: string): Promise<void>;
+}
+
+/** A document that is a real file — the Workspace-scoped tiers. */
+export function fileDocument(
+  absPath: string,
+  parentDir: string,
+): MemoryDocument {
+  return {
+    target: absPath,
+    key: absPath,
+    async read(): Promise<string | null> {
+      return existsSync(absPath) ? readFileSync(absPath, 'utf8') : null;
+    },
+    async write(body: string): Promise<void> {
+      mkdirp(parentDir);
+      atomicWriteText(absPath, body);
+    },
+  };
+}
+
+/** A document that is a blob — a Space's memory body. */
+export function blobDocument(
+  scope: BlobScope,
+  name: string,
+  target: string,
+  /** The Space that owns `scope`; its identity, not its display name. */
+  canvasId: string,
+): MemoryDocument {
+  return {
+    target,
+    key: `space:${canvasId}/${name}`,
+    async read(): Promise<string | null> {
+      const bytes = await scope.read(name);
+      return bytes === null ? null : bytes.toString('utf8');
+    },
+    async write(body: string): Promise<void> {
+      await scope.put(name, Buffer.from(body, 'utf8'));
+    },
+  };
+}
 
 // ─── Concurrency guards ────────────────────────────────────────────────────
 //
-// The workspace memory file is a single document shared by curators
-// from every canvas AND by the ask / operate chat agents. Without a
-// lock, two concurrent read-modify-write cycles can silently drop
-// each other's edits. We funnel every workspace-memory write through
-// this mutex. One slot is enough — there is exactly one file.
-const workspaceMemoryLock = createKeyedMutex<'workspace'>();
+// Both writers read a document, compute a new body, and write it back, and
+// every step is awaited. Two concurrent edits therefore interleave: each
+// reads the same body, and the later write silently discards the earlier
+// one while both report success. The workspace body is shared by curators
+// from every Space and by the ask / operate chat agents; a Space's body is
+// reachable by two of its own agent turns at once. Neither is a tier
+// property, so the lock is keyed by the document rather than the tier —
+// unrelated documents never wait on each other.
+const memoryDocumentLock = createKeyedMutex();
 
 export interface WriteResult {
   ok: boolean;
@@ -71,10 +143,8 @@ export const SKILL_CREATE_RATIONALE_MIN = 20;
 
 interface CommonArgs {
   tier: MemoryTier;
-  /** Absolute path, already sandbox-validated by the caller. */
-  absPath: string;
-  /** Directory to `mkdirp` before writing. */
-  parentDir: string;
+  /** Where the bytes live, already sandbox-validated by the caller. */
+  document: MemoryDocument;
   /**
    * Required when `tier === 'skill'` — used to invalidate the user
    * skill loader cache after a successful write. Ignored otherwise.
@@ -93,33 +163,32 @@ export interface OverwriteArgs extends CommonArgs {
 /**
  * Write `body` to `absPath`, creating the file (and `parentDir`) if
  * needed. Cap-enforced for workspace + canvas; skill writes are
- * uncapped. Workspace writes are serialised through the shared
- * workspace mutex.
+ * uncapped. Serialised against concurrent writes to the same document.
  */
 export async function overwriteMemoryFile(
   args: OverwriteArgs,
 ): Promise<WriteResult> {
-  return runForTier(args.tier, () => doOverwrite(args));
+  return runForDocument(args.document, () => doOverwrite(args));
 }
 
-function doOverwrite(args: OverwriteArgs): WriteResult {
+async function doOverwrite(args: OverwriteArgs): Promise<WriteResult> {
+  const { target } = args.document;
   try {
     const body = ensureTrailingNewline(args.body);
     if (args.tier !== 'skill') {
       const capCheck = checkCap(body);
-      if (!capCheck.ok) return reject(args.absPath, capCheck.reason);
+      if (!capCheck.ok) return reject(target, capCheck.reason);
     }
-    mkdirp(args.parentDir);
-    atomicWriteText(args.absPath, body);
+    await args.document.write(body);
     if (args.tier === 'skill' && args.skillId) {
       invalidateUserSkill(args.skillId);
     }
     args.logger?.info(
-      `[memory] ${args.tier} overwritten at ${args.absPath} (${body.length} bytes)`,
+      `[memory] ${args.tier} overwritten at ${target} (${body.length} bytes)`,
     );
-    return { ok: true, target: args.absPath, reason: 'overwritten' };
+    return { ok: true, target, reason: 'overwritten' };
   } catch (err) {
-    return rejectFromError(err, args.absPath);
+    return rejectFromError(err, target);
   }
 }
 
@@ -144,37 +213,35 @@ export interface ReplaceStringArgs extends CommonArgs {
 export async function replaceStringInMemoryFile(
   args: ReplaceStringArgs,
 ): Promise<WriteResult> {
-  return runForTier(args.tier, () => doReplaceString(args));
+  return runForDocument(args.document, () => doReplaceString(args));
 }
 
-function doReplaceString(args: ReplaceStringArgs): WriteResult {
+async function doReplaceString(args: ReplaceStringArgs): Promise<WriteResult> {
+  const { target } = args.document;
   try {
     if (typeof args.oldString !== 'string' || args.oldString.length === 0) {
-      return reject(args.absPath, 'oldString is required and non-empty');
+      return reject(target, 'oldString is required and non-empty');
     }
     if (typeof args.newString !== 'string') {
-      return reject(args.absPath, 'newString is required (use "" to delete)');
+      return reject(target, 'newString is required (use "" to delete)');
     }
     if (args.oldString === args.newString) {
-      return reject(args.absPath, 'oldString and newString are identical');
+      return reject(target, 'oldString and newString are identical');
     }
-    if (!existsSync(args.absPath)) {
+    const before = await args.document.read();
+    if (before === null) {
       return reject(
-        args.absPath,
+        target,
         `file does not exist — use mode="overwrite" to create it`,
       );
     }
-    const before = readFileSync(args.absPath, 'utf8');
     const idx = before.indexOf(args.oldString);
     if (idx === -1) {
-      return reject(
-        args.absPath,
-        'oldString not found in file — no edit applied',
-      );
+      return reject(target, 'oldString not found in file — no edit applied');
     }
     if (before.indexOf(args.oldString, idx + 1) !== -1) {
       return reject(
-        args.absPath,
+        target,
         'oldString matches multiple times — add more surrounding context to make it unique',
       );
     }
@@ -185,34 +252,32 @@ function doReplaceString(args: ReplaceStringArgs): WriteResult {
     );
     if (args.tier !== 'skill') {
       const capCheck = checkCap(after);
-      if (!capCheck.ok) return reject(args.absPath, capCheck.reason);
+      if (!capCheck.ok) return reject(target, capCheck.reason);
     }
-    mkdirp(args.parentDir);
-    atomicWriteText(args.absPath, after);
+    await args.document.write(after);
     if (args.tier === 'skill' && args.skillId) {
       invalidateUserSkill(args.skillId);
     }
     args.logger?.info(
-      `[memory] ${args.tier} edited at ${args.absPath} (${after.length} bytes)`,
+      `[memory] ${args.tier} edited at ${target} (${after.length} bytes)`,
     );
-    return { ok: true, target: args.absPath, reason: 'edited' };
+    return { ok: true, target, reason: 'edited' };
   } catch (err) {
-    return rejectFromError(err, args.absPath);
+    return rejectFromError(err, target);
   }
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
 /**
- * Serialise workspace-tier writes through the shared mutex; other
- * tiers run inline. Returns a Promise either way so callers can
- * `await` uniformly.
+ * Serialise a write against other writes to the same document. Returns a
+ * Promise either way so callers can `await` uniformly.
  */
-function runForTier<T>(tier: MemoryTier, fn: () => T | Promise<T>): Promise<T> {
-  if (tier === 'workspace') {
-    return workspaceMemoryLock('workspace', fn);
-  }
-  return Promise.resolve(fn());
+function runForDocument<T>(
+  document: MemoryDocument,
+  fn: () => T | Promise<T>,
+): Promise<T> {
+  return memoryDocumentLock(document.key, fn);
 }
 
 function ensureTrailingNewline(s: string): string {
