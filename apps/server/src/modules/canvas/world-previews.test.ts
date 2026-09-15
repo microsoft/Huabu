@@ -27,6 +27,7 @@ vi.mock('../workspace.js', () => ({
   getWorkspaceKey: () => workspaceState.path,
 }));
 
+import * as canvasExecutor from './canvas-executor.js';
 import { applyDeltasOnServer, executeOnServer } from './canvas-executor.js';
 import canvasRoutes from './canvas.route.js';
 import {
@@ -385,6 +386,75 @@ describe('Rejected public reverts retain review records', () => {
 });
 
 describe('World preview reconciliation', () => {
+  it('accepts a stale-preview DELETE already completed between planning and execution', async () => {
+    await reconcileWorldPreviews();
+    rmSync(path.join(workspaceState.path, 'Project B'), { recursive: true });
+    refreshCanvasDirIndex();
+    const execute = canvasExecutor.executeOnServer;
+    const spy = vi
+      .spyOn(canvasExecutor, 'executeOnServer')
+      .mockImplementationOnce(async (input) => {
+        expect(input.commands).toEqual([
+          { type: 'DELETE_NODES', nodeIds: [expect.any(String)] },
+        ]);
+        // A concurrent writer wins the deletion; the original batch now no-ops.
+        await execute(input);
+        const result = await execute(input);
+        expect(result.results.some((entry) => !entry.applied)).toBe(true);
+        return result;
+      });
+    try {
+      await expect(reconcileWorldPreviews()).resolves.toBeUndefined();
+      expect(
+        (await previews()).map((node) => node.data.targetCanvasId),
+      ).toEqual(['canvas-a']);
+      expect(spy).toHaveBeenCalledOnce();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('still rejects unapplied work when the fresh state needs reconciliation', async () => {
+    const execute = canvasExecutor.executeOnServer;
+    const spy = vi
+      .spyOn(canvasExecutor, 'executeOnServer')
+      .mockImplementationOnce(async (input) => {
+        const result = await execute({ ...input, commands: [] });
+        return {
+          ...result,
+          results: input.commands.map((command) => ({
+            command,
+            applied: false,
+          })),
+        };
+      });
+    try {
+      await expect(reconcileWorldPreviews()).rejects.toBeInstanceOf(
+        WorldPreviewIntegrityError,
+      );
+      expect(await previews()).toEqual([]);
+      expect(spy).toHaveBeenCalledOnce();
+    } finally {
+      spy.mockRestore();
+    }
+    // A failed attempt does not poison the existing reconciliation queue.
+    await expect(reconcileWorldPreviews()).resolves.toBeUndefined();
+    expect(await previews()).toHaveLength(2);
+  });
+
+  it('does not swallow an executor exception', async () => {
+    const spy = vi
+      .spyOn(canvasExecutor, 'executeOnServer')
+      .mockRejectedValueOnce(new Error('Storage unavailable'));
+    try {
+      await expect(reconcileWorldPreviews()).rejects.toThrow(
+        'Storage unavailable',
+      );
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it('creates one deterministic preview per live Space and is idempotent', async () => {
     await reconcileWorldPreviews();
     expect(

@@ -212,6 +212,16 @@ async function reconcileWorldPreviewsOnce(): Promise<void> {
     originator: { source: 'system' },
   });
   if (result.results.some((commandResult) => !commandResult.applied)) {
+    // Another writer may have satisfied the plan before execution (for
+    // example, deleting an already-stale preview). Accept only a freshly
+    // verified complete state, never a blanket suppression of rejected work.
+    const remaining = await planWorldPreviewReconciliation();
+    if (
+      remaining.worldCanvasId === worldCanvasId &&
+      remaining.inputs.length === 0 &&
+      remaining.deleteNodeIds.length === 0
+    )
+      return;
     throw new WorldPreviewIntegrityError(
       'Failed to reconcile canonical Space previews',
     );
