@@ -322,7 +322,14 @@ function showVersionConflictToast(): void {
       duration: 0,
       action: {
         label: 'Reload',
-        onClick: () => window.location.reload(),
+        onClick: () => {
+          if (!nodeContentQueue.hasPendingRestoredContent())
+            window.location.reload();
+          else
+            nodeContentQueue.reportRestoreFailure(
+              useCanvasStore.getState().canvasId,
+            );
+        },
       },
     },
   );
@@ -927,6 +934,7 @@ const canvasEvents = createCanvasEventBuffer();
 const preprocessQueue = createPreprocessQueue({
   delayMs: PREPROCESS_DEBOUNCE_MS,
   getState: () => useCanvasStore.getState(),
+  isBlocked: (nodeId) => nodeContentQueue.hasRestore(nodeId),
 });
 
 /**
@@ -937,7 +945,16 @@ const preprocessQueue = createPreprocessQueue({
 const nodeContentQueue = createNodeContentQueue({
   delayMs: NODE_CONTENT_DEBOUNCE_MS,
   getState: () => useCanvasStore.getState(),
+  retryStructure: () => useCanvasStore.getState().saveCanvas(),
 });
+
+/** Drain issued sidecar writers without promoting held/debounced writes. */
+async function waitForSidecarWrites(): Promise<void> {
+  await Promise.all([
+    nodeContentQueue.waitForIdle(),
+    preprocessQueue.waitForIdle(),
+  ]);
+}
 
 /**
  * Promote every pending canvas-level structure save AND every pending
@@ -950,16 +967,13 @@ const nodeContentQueue = createNodeContentQueue({
  * and its response received. Without this, trailing edits would fire
  * later under a stale captured `canvasId` — by which time the user
  * has moved on and there's nothing left in the store to revert if the
- * PUT fails. Failures inside the drain are surfaced through each
- * queue's own `handleSaveFailure` (toast + console.error) and do NOT
- * reject this promise — the navigation should always proceed even if
- * a save failed, because keeping the user trapped on the canvas
- * doesn't help.
+ * PUT fails. Ordinary failures retain the existing non-blocking behavior.
+ * A failed resurrection rejects: the current Canvas owns the only restored
+ * body, so navigation must retain it until Retry or explicit deletion.
  *
  * Order mirrors {@link switchCanvas}: structure first (canvas-level
- * version PUT), then per-node content. The two queues touch disjoint
- * server resources, so the order is purely for consistency with the
- * canvas-switch path.
+ * version PUT), then per-node content. Resurrection makes this ordering a
+ * dependency: topology must admit the restored sidecar before its PUT.
  */
 export async function drainPendingSaves(): Promise<void> {
   await structureScheduler.flushAsync();
@@ -977,6 +991,12 @@ export async function drainPendingSaves(): Promise<void> {
     });
   }
   await nodeContentQueue.flushAll();
+  await canvasHistoryManager.waitForDeletes(useCanvasStore.getState().canvasId);
+  if (nodeContentQueue.hasPendingRestoredContent()) {
+    throw new Error(
+      'Restored node content is waiting for a successful structure save. Retry before leaving this Canvas.',
+    );
+  }
 }
 
 /**
@@ -1096,6 +1116,10 @@ const autoSaveMiddleware =
         // on their own (faster) debounce and never participate in the
         // canvas-level `version` counter.
         if (prev.nodes !== next.nodes) {
+          const nextIds = new Set(next.nodes.map((node) => node.id));
+          for (const node of prev.nodes) {
+            if (!nextIds.has(node.id)) nodeContentQueue.forgetNode(node.id);
+          }
           nodeContentQueue.scheduleChanges(
             next.canvasId,
             prev.nodes,
@@ -1388,6 +1412,7 @@ const useCanvasStore = create<RFState>()(
         setNodes: (nodes) => set({ nodes }),
         triggerPreprocessing: preprocessQueue.schedule,
         forgetNodeContent: nodeContentQueue.forgetNode,
+        waitForNodeContent: waitForSidecarWrites,
         validatePreviewNodes: (liveNodeIds) =>
           usePreviewWorkspaceStore.getState().validate(liveNodeIds),
       });
@@ -1583,6 +1608,7 @@ const useCanvasStore = create<RFState>()(
         setNodes: (nodes) => get()._setStateNoAutosave({ nodes }),
         triggerPreprocessing: preprocessQueue.schedule,
         forgetNodeContent: nodeContentQueue.forgetNode,
+        waitForNodeContent: waitForSidecarWrites,
         validatePreviewNodes: (liveNodeIds) =>
           usePreviewWorkspaceStore.getState().validate(liveNodeIds),
       });
@@ -1724,6 +1750,10 @@ const useCanvasStore = create<RFState>()(
     },
 
     loadCanvas: async (canvasId, options) => {
+      // Explicit reloads must not discard the only copy of a restored body.
+      // SSE gap reloads already skip dirty nodes; this also covers manual load.
+      if (nodeContentQueue.hasPendingRestoredContent())
+        await drainPendingSaves();
       set({
         isLoading: true,
         canvasNotFound: false,
@@ -1898,19 +1928,17 @@ const useCanvasStore = create<RFState>()(
       set({
         isLoading: true,
         canvasNotFound: false,
-        versionConflict: false,
-        versionConflictServerVersion: null,
       });
-      // Same rationale as `loadCanvas`: the persistent conflict toast
-      // is bound to the outgoing canvas; clear it so it doesn't bleed
-      // into the new one (which has its own fresh version baseline).
-      dismissVersionConflictToast();
+      // Retain the outgoing conflict gate until its drain succeeds.
+      // loadCanvas clears it when the new authoritative state is requested.
 
       // Flush any pending save for the current canvas before switching
-      await structureScheduler.flushAsync();
-      // Also drain any pending per-node content PUTs so editor edits
-      // made on the outgoing canvas land before we tear its state down.
-      await nodeContentQueue.flushAll();
+      try {
+        await drainPendingSaves();
+      } catch (error) {
+        set({ isLoading: false });
+        throw error;
+      }
 
       // Cancel all pending preprocessing timers
       preprocessQueue.cancelAll();
@@ -1960,9 +1988,18 @@ const useCanvasStore = create<RFState>()(
       }
 
       set({ isSaving: true });
+      const savingCanvasId = get().canvasId;
       let saveSucceeded = false;
       try {
+        // DELETE is not cancellable once admitted server-side. Wait for its
+        // actual completion, then read the latest topology (undo/redo may have
+        // changed again while waiting). No content flush is started here.
+        if (canvasHistoryManager.hasPendingDeletes(savingCanvasId)) {
+          await canvasHistoryManager.waitForDeletes(savingCanvasId);
+        }
+        if (get().canvasId !== savingCanvasId) return;
         const { nodes, edges, version, canvasId, canvasTitle } = get();
+        const restoreTokens = nodeContentQueue.restoreTokens();
         // Strip every per-node content / label / src / summary / etc.
         // field from the body. Those live in `nodes/<safe(label)>.md`
         // now and ride the per-node content PUT, so the structure PUT
@@ -1979,6 +2016,8 @@ const useCanvasStore = create<RFState>()(
           },
           { keepalive: options?.keepalive },
         );
+        if (get().canvasId !== canvasId) return;
+        nodeContentQueue.acknowledgeRestores(canvasId, restoreTokens);
         const reconciled = reconcileCanvasVersion(
           get().version,
           response.version,
@@ -1998,6 +2037,8 @@ const useCanvasStore = create<RFState>()(
         }
         saveSucceeded = true;
       } catch (error) {
+        if (get().canvasId !== savingCanvasId) return;
+        nodeContentQueue.reportRestoreFailure(savingCanvasId);
         if (error instanceof CanvasConflictError) {
           if (error.code === 'CANVAS_VERSION_CONFLICT') {
             if (
@@ -2031,10 +2072,10 @@ const useCanvasStore = create<RFState>()(
         }
         console.error('Failed to save canvas:', error);
       } finally {
-        set({ isSaving: false });
+        if (get().canvasId === savingCanvasId) set({ isSaving: false });
 
         const { pendingSave } = get();
-        if (pendingSave) {
+        if (pendingSave && get().canvasId === savingCanvasId) {
           set({ pendingSave: false });
           // Fire-and-forget: re-save the latest state after the in-flight save completes.
           // Conflict errors are surfaced via tryRename; ignore them here so
@@ -3769,6 +3810,8 @@ const useCanvasStore = create<RFState>()(
       const { nodes, edges, canvasId } = get();
       const snapshot = canvasHistoryManager.undo(nodes, edges);
       if (!snapshot) return;
+      // A completed restore must not accept projections from its old snapshot.
+      preprocessQueue.cancelAll();
 
       // Undo swaps in authoritative geometry, so any retained stroke
       // selection / polygon may no longer describe it (e.g. the classic
@@ -3780,6 +3823,12 @@ const useCanvasStore = create<RFState>()(
       useGesturePreviewStore.getState().resetCanvasScopedTransients();
 
       const action: RecentAction = { action: 'canvas_undone' };
+      nodeContentQueue.holdRestoredNodes(
+        canvasId,
+        snapshot.nodes.filter(
+          (node) => !nodes.some((before) => before.id === node.id),
+        ),
+      );
       set({
         nodes: snapshot.nodes,
         edges: snapshot.edges,
@@ -3790,7 +3839,7 @@ const useCanvasStore = create<RFState>()(
         canvasId,
         nodes,
         snapshot.nodes,
-        preprocessQueue.schedule,
+        waitForSidecarWrites,
       );
     },
 
@@ -3798,12 +3847,19 @@ const useCanvasStore = create<RFState>()(
       const { nodes, edges, canvasId } = get();
       const snapshot = canvasHistoryManager.redo(nodes, edges);
       if (!snapshot) return;
+      preprocessQueue.cancelAll();
 
       // See `undo`: a redo is the same authoritative geometry swap, so
       // discard the floating stroke selection for the same reason.
       useGesturePreviewStore.getState().resetCanvasScopedTransients();
 
       const action: RecentAction = { action: 'canvas_redone' };
+      nodeContentQueue.holdRestoredNodes(
+        canvasId,
+        snapshot.nodes.filter(
+          (node) => !nodes.some((before) => before.id === node.id),
+        ),
+      );
       set({
         nodes: snapshot.nodes,
         edges: snapshot.edges,
@@ -3814,7 +3870,7 @@ const useCanvasStore = create<RFState>()(
         canvasId,
         nodes,
         snapshot.nodes,
-        preprocessQueue.schedule,
+        waitForSidecarWrites,
       );
     },
   })),
