@@ -27,6 +27,7 @@ import {
   type TurnStartLogEntry,
 } from './event-log.js';
 import { createTranscriptFolder } from './fold.js';
+import { copyHostMetadata } from './host-metadata.js';
 import { materializeHistory } from './materialize-history.js';
 import { ThreadNotificationBus } from './notifications.js';
 import {
@@ -75,12 +76,7 @@ export interface Agenetes {
    * can read it independent of handle liveness (I9.4).
    */
   create(spec: WorkloadSpec): AgentHandle;
-  /**
-   * Realise a fresh target thread from a durable source thread. The host
-   * supplies the complete target spec; Agenetes performs no field-level
-   * merge. The target receives the source record and folded turns but
-   * starts with an empty target state.
-   */
+  /** Fork source turns with fresh driver state and deep-copied host metadata. */
   fork(source: ThreadIdentity, targetSpec: WorkloadSpec): AgentHandle;
   /**
    * The destructive counterpart to {@link Agenetes.fork}: relocate a
@@ -132,14 +128,30 @@ export interface Agenetes {
   /** Enumerate a namespace's persisted thread records (I9.4). */
   records(namespace: Namespace): ThreadRecord[];
   /**
+   * Synchronously shallow-merge host metadata keys into an existing record,
+   * without spawning or changing spec/state. Values must be JSON-compatible;
+   * null is a stored value, not deletion. Throws `thread_not_found` when absent
+   * or `invalid_host_metadata` for a non-JSON patch. Does not emit driver metadata.
+   */
+  updateHostMetadata(
+    namespace: Namespace,
+    threadId: string,
+    patch: Record<string, unknown>,
+  ): ThreadRecord;
+  /**
    * The notification surface (I9.7): subscribe to a thread's driver-agnostic
    * `AgentMetadata` as it changes. The instance persists each up-reported
    * snapshot into the {@link ThreadStore} FIRST, then re-emits its
    * `metadata` here (persist-then-notify), so a `record` read after a
-   * notification always observes the latest state. The stream ends when the
-   * thread's handle is `close`d or the consumer breaks out of the loop.
+   * notification always observes the latest state. With a namespace, only
+   * that namespace's reports are delivered (identity is namespace.name).
+   * Omitting it retains the global per-thread stream. The stream ends when
+   * its matching handle is `close`d or the consumer breaks out of the loop.
    */
-  notifications(threadId: string): AsyncIterable<AgentMetadata>;
+  notifications(
+    threadId: string,
+    namespace?: Namespace,
+  ): AsyncIterable<AgentMetadata>;
   /**
    * Read lightweight metadata about the two-tier conversation log without
    * loading its events or folded turns.
@@ -156,6 +168,12 @@ export interface Agenetes {
     threadId: string,
     options?: HistoryOptions,
   ): ThreadHistory;
+  /** Read a bounded page of display-turn groups without loading full history. */
+  historyPage(
+    namespace: Namespace,
+    threadId: string,
+    options: HistoryPageOptions,
+  ): ThreadHistoryPage;
   /**
    * Follow a thread's LIVE tail: the Tier-1 events appended after the last
    * folded turn (the uncommitted in-flight turn, replayed on connect) plus
@@ -179,6 +197,27 @@ export interface HistoryOptions {
 export interface ThreadHistory {
   /** Completed turns plus the optional read-time incomplete projection. */
   readonly turns: ObservedAgentTurn[];
+}
+
+export interface HistoryPageOptions {
+  readonly limit: number;
+  readonly before?: string;
+  /** Only applies to the newest page; older pages never include the tail. */
+  readonly withTail?: boolean;
+}
+
+export interface ThreadHistoryGroup {
+  readonly id: string;
+  readonly turns: ObservedAgentTurn[];
+  readonly isActive?: true;
+  /** Index of the first Tier-1 turn within an active display group. */
+  readonly activeTurnIndex?: number;
+}
+
+export interface ThreadHistoryPage {
+  readonly groups: ThreadHistoryGroup[];
+  readonly before?: string;
+  readonly hasMore: boolean;
 }
 
 /** Lightweight counts for one thread's two-tier conversation log. */
@@ -386,6 +425,14 @@ export function createAgenetesInstance(
         ...record.state,
         driverState: driver.validateState(record.state.driverState),
       },
+      ...(record.hostMetadata !== undefined
+        ? {
+            hostMetadata: copyHostMetadata(
+              record.hostMetadata,
+              'invalid_persisted_record',
+            ),
+          }
+        : {}),
     };
   };
 
@@ -414,15 +461,21 @@ export function createAgenetesInstance(
   ): void => {
     const unsub = handle.onState?.((snapshot: AgentStateSnapshot) => {
       threadStore.upsert(spec.namespace, spec.threadId, {
+        ...threadStore.get(spec.namespace, spec.threadId),
         driverSchemaVersion: driver.schemaVersion,
         spec,
         state: snapshot,
       });
       if (snapshot.metadata !== undefined) {
+        bus.publish(spec.threadId, snapshot.metadata, spec.namespace.name);
         bus.publish(spec.threadId, snapshot.metadata);
       }
     });
-    if (unsub) unsubscribers.set(spec.threadId, unsub);
+    // Register cleanup even for silent handles, whose scoped streams must end.
+    unsubscribers.set(spec.threadId, () => {
+      unsub?.();
+      bus.closeThread(spec.threadId, spec.namespace.name);
+    });
   };
 
   // Wrap a handle so every `run()` transparently feeds the two-tier
@@ -515,8 +568,10 @@ export function createAgenetesInstance(
     driver: MountedAgentDriver,
     context: AgentCreateContext,
     initialState: AgentStateSnapshot,
+    hostMetadata?: Record<string, unknown>,
   ): AgentHandle => {
     let handle: AgentHandle;
+    let needsUpReport = false;
     if (targetSpec.workloadType === 'Job') {
       const raw = driver.create(targetSpec, context);
       handle =
@@ -532,18 +587,24 @@ export function createAgenetesInstance(
           targetSpec.threadId,
         ),
       );
-      if (!wasLive) wireUpReport(targetSpec, driver, handle);
+      needsUpReport = !wasLive;
     }
 
     const isTransientJob =
       targetSpec.workloadType === 'Job' && !targetSpec.threadId;
     if (!isTransientJob) {
+      const latest = threadStore.get(targetSpec.namespace, targetSpec.threadId);
       threadStore.upsert(targetSpec.namespace, targetSpec.threadId, {
+        ...(hostMetadata !== undefined ? { hostMetadata } : {}),
+        ...latest,
         driverSchemaVersion: driver.schemaVersion,
         spec: targetSpec,
-        state: initialState,
+        state: latest?.state ?? initialState,
       });
     }
+    // Persist the initial record before subscribing: onState may immediately
+    // report a newer snapshot, which must not be overwritten by initialization.
+    if (needsUpReport) wireUpReport(targetSpec, driver, handle);
     return handle;
   };
 
@@ -635,6 +696,12 @@ export function createAgenetesInstance(
           },
         },
         { driverState: target.driver.initialState() },
+        sourceRecord.hostMetadata !== undefined
+          ? copyHostMetadata(
+              sourceRecord.hostMetadata,
+              'invalid_persisted_record',
+            )
+          : undefined,
       );
     },
     rehome(source: ThreadIdentity, rawTargetSpec: WorkloadSpec): void {
@@ -702,9 +769,8 @@ export function createAgenetesInstance(
       );
       const sourceTurns = turnStore.list(source.namespace, source.threadId);
       const targetRecord: ThreadRecord = {
-        driverSchemaVersion: validatedSource.driverSchemaVersion,
+        ...validatedSource,
         spec: targetSpec,
-        state: validatedSource.state,
       };
 
       // Each step's compensation is pushed ONLY once the step itself
@@ -812,8 +878,35 @@ export function createAgenetesInstance(
     records(namespace: Namespace): ThreadRecord[] {
       return threadStore.list(namespace).map(validateRecord);
     },
-    notifications(threadId: string): AsyncIterable<AgentMetadata> {
-      return bus.subscribe(threadId);
+    updateHostMetadata(namespace, threadId, patch): ThreadRecord {
+      const record = threadStore.get(namespace, threadId);
+      if (!record) {
+        throw new AgenetesError(
+          'thread_not_found',
+          `cannot update host metadata for missing thread '${namespace.name}/${threadId}'`,
+          { namespace: namespace.name, threadId },
+        );
+      }
+      const hostMetadata = copyHostMetadata(
+        {
+          ...record.hostMetadata,
+          ...copyHostMetadata(patch, 'invalid_host_metadata'),
+        },
+        'invalid_host_metadata',
+      );
+      const updated = { ...record, hostMetadata };
+      // Both writers read/merge/write synchronously; no async mutex is needed.
+      threadStore.upsert(namespace, threadId, updated);
+      return {
+        ...updated,
+        hostMetadata: copyHostMetadata(hostMetadata, 'invalid_host_metadata'),
+      };
+    },
+    notifications(
+      threadId: string,
+      namespace?: Namespace,
+    ): AsyncIterable<AgentMetadata> {
+      return bus.subscribe(threadId, namespace?.name);
     },
     logMetadata(namespace: Namespace, threadId: string): ThreadLogMetadata {
       return {
@@ -828,6 +921,77 @@ export function createAgenetesInstance(
     ): ThreadHistory {
       return {
         turns: readHistory(namespace, threadId, options?.withTail === true),
+      };
+    },
+    historyPage(
+      namespace: Namespace,
+      threadId: string,
+      options: HistoryPageOptions,
+    ): ThreadHistoryPage {
+      const includeTail =
+        options.before === undefined && options.withTail === true;
+      const fence = turnStore.fence(namespace, threadId);
+      const tail = includeTail
+        ? materializeHistory(
+            [],
+            eventLog.readRecords(namespace, threadId, fence),
+          )[0]
+        : undefined;
+      const tailStartsGroup = tail !== undefined && tail.request !== null;
+      const persistedLimit =
+        tailStartsGroup === true
+          ? Math.max(1, options.limit - 1)
+          : options.limit;
+      const page = turnStore.page(namespace, threadId, {
+        limit: persistedLimit,
+        ...(options.before ? { before: options.before } : {}),
+      });
+      let groups: ThreadHistoryGroup[] = page.groups.map((group) => ({
+        id: group.id,
+        turns: group.turns.map(({ turn }) => turn),
+      }));
+      let before = page.before;
+      let hasMore = page.hasMore;
+
+      if (tail) {
+        if (tailStartsGroup) {
+          if (options.limit === 1) {
+            hasMore = page.groups.length > 0;
+            before = hasMore ? page.next : undefined;
+            groups = [];
+          } else {
+            groups = groups.slice(-(options.limit - 1));
+          }
+          groups.push({
+            id: page.next,
+            turns: [tail],
+            isActive: true,
+            activeTurnIndex: 0,
+          });
+        } else if (groups.length > 0) {
+          const latest = groups[groups.length - 1]!;
+          groups[groups.length - 1] = {
+            ...latest,
+            turns: [...latest.turns, tail],
+            isActive: true,
+            activeTurnIndex: latest.turns.length,
+          };
+        } else {
+          groups = [
+            {
+              id: page.next,
+              turns: [tail],
+              isActive: true,
+              activeTurnIndex: 0,
+            },
+          ];
+        }
+      }
+
+      return {
+        groups,
+        ...(before ? { before } : {}),
+        hasMore,
       };
     },
     tail(

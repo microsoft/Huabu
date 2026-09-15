@@ -74,6 +74,19 @@ async function openFixture(page: Page, messageCount: number) {
   await page.waitForTimeout(500);
 }
 
+test('recent-turn window keeps the initial DOM bounded', async ({ page }) => {
+  await page.goto(
+    '/playground/chat-performance?messages=200&visibleMessages=6',
+  );
+  await expect(
+    page.locator('[data-chat-performance-fixture="200"]'),
+  ).toHaveAttribute('data-chat-visible-messages', '6');
+  await expect(page.locator('[data-chat-user-message]')).toHaveCount(3);
+  await expect(
+    page.locator('[data-chat-message-id^="assistant-"]'),
+  ).toHaveCount(3);
+});
+
 test('input-to-paint remains stable with 200 historical messages', async ({
   page,
 }) => {

@@ -61,9 +61,13 @@ Question nodes are content nodes: their `content` runs through preprocessing's
 visible to agents (`type: 'question'` in `get_space_outline`). See
 [node-preprocessing.md](./node-preprocessing.md) for the profile.
 
+Question naming is owned by the canonical node label. The Canvas node, its Preview tab, and its chat header all read that label; existing visual overflow handling is unchanged. Ordinary `generate_label` preprocessing can name an unprotected Question from its content but cannot overwrite a non-empty `user` or `agent` label. Chat titles are independent host metadata (`ThreadRecord.hostMetadata.huabuConversationTitle`, written through `Agenetes.updateHostMetadata`), not a continuing source for Question labels. Late Chat title generation, ACP updates, and panel renames never rename a Question or change its first prompt, status, or transcript. Panel-only conversations persist names on the thread instead of creating hidden nodes; see [Preview Workspace](./preview-workspace.md#2-persisted-model).
+
 ---
 
 ## 3. Node lifecycle
+
+Saving a panel Chat as a Question uses [saveChatAsQuestion](../../apps/web/src/components/Panels/ChatPanel/saveChatAsQuestion.ts) to copy the current title once into `data.label` through canonical node creation. A current manual title (`source: 'user'`) becomes `labelSource: 'user'`; any nonmanual copied title, including an ACP, generated, or fallback title, becomes `labelSource: 'agent'`, not `auto`, so ordinary preprocessing cannot replace it. Without a current title, the helper preserves the supplied node data and existing node-creation fallback; it invents no title. Conversion stores no separate title-source field and does not recover a hidden automatic title after manual naming. Thereafter naming uses only the node label and the normal node rename path, with no ongoing Chat-title-to-Question synchronization.
 
 Created like any node via `CREATE_NODES` ([resolveAddNodes.ts](../../apps/web/src/handler/canvasCommand/resolvers/resolveAddNodes.ts)) with `nodeType: 'question'` and empty `content`. Missing `status` is the idle state, and nothing fires automatically. From there:
 

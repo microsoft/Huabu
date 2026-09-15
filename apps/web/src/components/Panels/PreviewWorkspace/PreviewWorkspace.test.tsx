@@ -63,6 +63,11 @@ vi.hoisted(() => {
 
 // The Chat panel pulls in the whole agent stack; the workspace only needs to
 // know it dispatched to it.
+vi.mock('@/api/conversationTitles', () => ({
+  queryConversationTitles: async () => ({ titles: {} }),
+  setConversationTitle: vi.fn(),
+}));
+
 vi.mock('../ChatPanel', () => ({
   ChatPanel: ({
     session,
@@ -215,6 +220,14 @@ describe('tab strip', () => {
     );
     expect(overlay?.textContent).toContain('Alpha');
     expect(overlay?.classList.contains('shadow-md')).toBe(true);
+    expect(overlay?.classList.contains('max-w-48')).toBe(true);
+    const text = overlay?.querySelector('span');
+    expect(text?.classList.contains('truncate')).toBe(true);
+    expect(text?.classList.contains('min-w-0')).toBe(true);
+    expect(text?.classList.contains('shrink')).toBe(true);
+    expect(
+      overlay?.querySelector('svg:last-child')?.classList.contains('shrink-0'),
+    ).toBe(true);
   });
 
   it('hosts the drag overlay portal outside Preview layout transforms', () => {
@@ -259,6 +272,13 @@ describe('tab strip', () => {
     expect(inactiveTab.classList.contains('flex-none')).toBe(true);
     expect(inactiveTab.classList.contains('flex-[0_1_auto]')).toBe(false);
     for (const tab of [inactiveTab, activeTab]) {
+      expect(tab.classList.contains('max-w-48')).toBe(true);
+      const title = tab.querySelector('[data-testid="preview-tab-title"]');
+      expect(title?.classList.contains('truncate')).toBe(true);
+      expect(title?.classList.contains('min-w-0')).toBe(true);
+      expect(title?.parentElement?.classList.contains('min-w-0')).toBe(true);
+      expect(title?.parentElement?.classList.contains('max-w-full')).toBe(true);
+      expect(title?.parentElement?.classList.contains('flex-1')).toBe(true);
       const actionRail = tab.querySelector<HTMLElement>(
         '[data-testid="preview-tab-actions"]',
       );
@@ -342,7 +362,7 @@ describe('tab strip', () => {
     act(() => newChatButton?.click());
 
     expect(tabs()).toHaveLength(2);
-    expect(activeTabName()).toBe('Chat');
+    expect(activeTabName()).toBe('New conversation');
     expect(
       Object.values(store().workspace.tabs).some(
         (tab) => tab.target.kind === 'node' && tab.target.nodeId === 'a',

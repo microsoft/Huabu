@@ -47,6 +47,10 @@ export function assistantMessageText(segments: AssistantSegment[]): string {
 export type ChatMessage =
   | {
       id: string;
+      /** Stable server display-turn identity for paged history messages. */
+      historyTurnId?: string;
+      /** Whether this message belongs to the currently active server turn. */
+      historyTurnActive?: boolean;
       role: 'user';
       content: string;
       /** Image/file attachments included with this message. */
@@ -70,6 +74,10 @@ export type ChatMessage =
     }
   | {
       id: string;
+      /** Stable server display-turn identity for paged history messages. */
+      historyTurnId?: string;
+      /** Whether this message belongs to the currently active server turn. */
+      historyTurnActive?: boolean;
       role: 'assistant';
       segments: AssistantSegment[];
       /** Image/file attachments included with this message. */
@@ -79,6 +87,10 @@ export type ChatMessage =
     }
   | {
       id: string;
+      /** Stable server display-turn identity for paged history messages. */
+      historyTurnId?: string;
+      /** Whether this message belongs to the currently active server turn. */
+      historyTurnActive?: boolean;
       role: 'status';
       status: 'interrupted' | 'error';
       detail?: string;

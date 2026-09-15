@@ -48,6 +48,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 
 import multipart from '@fastify/multipart';
 import fastify from 'fastify';
@@ -516,19 +517,18 @@ describe('activating a legacy workspace on the new storage boundary', () => {
       expect((await historyTexts(app2, PLAIN_THREAD)).join('\n')).toContain(
         'what changed here',
       );
-      const foldedLines = readFileSync(
-        join(
-          tmp,
-          SPACE_DIR,
-          '.history',
-          'chat_v2',
-          `${PLAIN_THREAD}.turns.jsonl`,
-        ),
-        'utf8',
-      )
-        .split('\n')
-        .filter(Boolean);
-      expect(foldedLines).toHaveLength(1);
+      const turnsDatabase = new DatabaseSync(
+        join(tmp, SPACE_DIR, '.history', 'chat_v2', 'turns.sqlite'),
+        { readOnly: true },
+      );
+      try {
+        const foldedCount = turnsDatabase
+          .prepare('SELECT COUNT(*) AS count FROM turns WHERE thread_id = ?')
+          .get(PLAIN_THREAD)?.['count'];
+        expect(foldedCount).toBe(1);
+      } finally {
+        turnsDatabase.close();
+      }
     } finally {
       await app2.close();
     }

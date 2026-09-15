@@ -3,7 +3,15 @@
 
 import type { PreviewTarget } from './model';
 
-const scrollTopByViewKey = new Map<string, number>();
+interface PreviewScrollPosition {
+  scrollTop: number;
+  messageAnchor?: {
+    messageId: string;
+    offsetTop: number;
+  };
+}
+
+const scrollPositionByViewKey = new Map<string, PreviewScrollPosition>();
 const registrationByTarget = new Map<
   string,
   { canvasId: string; viewKey: string }
@@ -32,7 +40,7 @@ function removeReference(viewKey: string): void {
     return;
   }
   referenceCountByViewKey.delete(viewKey);
-  scrollTopByViewKey.delete(viewKey);
+  scrollPositionByViewKey.delete(viewKey);
 }
 
 export function messageListViewKey(
@@ -49,7 +57,7 @@ export function nodePreviewViewKey(canvasId: string, nodeId: string): string {
 export function readPreviewScrollPosition(
   viewKey: string | undefined,
 ): number | undefined {
-  return viewKey ? scrollTopByViewKey.get(viewKey) : undefined;
+  return viewKey ? scrollPositionByViewKey.get(viewKey)?.scrollTop : undefined;
 }
 
 export function rememberPreviewScrollPosition(
@@ -57,7 +65,34 @@ export function rememberPreviewScrollPosition(
   scrollTop: number,
 ): void {
   if (!viewKey || !Number.isFinite(scrollTop)) return;
-  scrollTopByViewKey.set(viewKey, Math.max(0, scrollTop));
+  const previous = scrollPositionByViewKey.get(viewKey);
+  scrollPositionByViewKey.set(viewKey, {
+    ...previous,
+    scrollTop: Math.max(0, scrollTop),
+  });
+}
+
+export function rememberMessageListScrollAnchor(
+  container: HTMLElement,
+  viewKey: string | undefined,
+): void {
+  if (!viewKey) return;
+  const containerTop = container.getBoundingClientRect().top;
+  const anchor = Array.from(
+    container.querySelectorAll<HTMLElement>('[data-chat-message-id]'),
+  ).find((element) => element.getBoundingClientRect().bottom > containerTop);
+  const messageId = anchor?.dataset.chatMessageId;
+  scrollPositionByViewKey.set(viewKey, {
+    scrollTop: Math.max(0, container.scrollTop),
+    ...(anchor && messageId
+      ? {
+          messageAnchor: {
+            messageId,
+            offsetTop: anchor.getBoundingClientRect().top - containerTop,
+          },
+        }
+      : {}),
+  });
 }
 
 export function restorePreviewScrollPosition(
@@ -65,9 +100,27 @@ export function restorePreviewScrollPosition(
   viewKey: string | undefined,
 ): boolean {
   if (!viewKey) return false;
-  const scrollTop = scrollTopByViewKey.get(viewKey);
-  if (scrollTop === undefined) return false;
-  container.scrollTop = scrollTop;
+  const position = scrollPositionByViewKey.get(viewKey);
+  if (!position) return false;
+  if (position.messageAnchor) {
+    const anchor = Array.from(
+      container.querySelectorAll<HTMLElement>('[data-chat-message-id]'),
+    ).find(
+      (element) =>
+        element.dataset.chatMessageId === position.messageAnchor?.messageId,
+    );
+    if (!anchor) {
+      scrollPositionByViewKey.delete(viewKey);
+      return false;
+    }
+    const containerTop = container.getBoundingClientRect().top;
+    container.scrollTop +=
+      anchor.getBoundingClientRect().top -
+      containerTop -
+      position.messageAnchor.offsetTop;
+    return true;
+  }
+  container.scrollTop = position.scrollTop;
   return true;
 }
 
@@ -115,7 +168,7 @@ export function forgetPreviewScrollPosition(viewKey: string | undefined): void {
     registrationByTarget.delete(key);
     removeReference(viewKey);
   }
-  scrollTopByViewKey.delete(viewKey);
+  scrollPositionByViewKey.delete(viewKey);
 }
 
 export function forgetPreviewScrollTarget(target: PreviewTarget): void {
@@ -158,14 +211,14 @@ export function forgetPreviewScrollCanvas(canvasId: string): void {
   }
 
   const viewKeyPrefixes = [`chat:${canvasId}:`, `node:${canvasId}:`];
-  for (const viewKey of scrollTopByViewKey.keys()) {
+  for (const viewKey of scrollPositionByViewKey.keys()) {
     if (viewKeyPrefixes.some((prefix) => viewKey.startsWith(prefix))) {
       removedViewKeys.add(viewKey);
     }
   }
   for (const viewKey of removedViewKeys) {
     if (!referenceCountByViewKey.has(viewKey))
-      scrollTopByViewKey.delete(viewKey);
+      scrollPositionByViewKey.delete(viewKey);
   }
 }
 

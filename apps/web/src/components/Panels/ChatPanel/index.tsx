@@ -6,6 +6,7 @@ import { Bookmark, ListIndentIncrease, PanelRightOpen } from 'lucide-react';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
+import { useShallow } from 'zustand/react/shallow';
 
 import {
   createId,
@@ -20,7 +21,7 @@ import {
   setAcpSessionModel,
 } from '@/api/acp';
 import { Button } from '@/components/Common/Button';
-import { Input } from '@/components/Common/Input';
+import { TextInput } from '@/components/Common/TextInput';
 import { toast } from '@/components/Common/Toast';
 import { PermissionTray } from '@/components/Messages/AIMessage/PermissionCard';
 import { useAcpProfiles } from '@/hooks/useAcpProfiles';
@@ -33,9 +34,11 @@ import { useInternalSlashCommands } from '@/hooks/useInternalSlashCommands';
 import { useAcpProfilesStore } from '@/store/acpProfilesStore';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import useCanvasStore from '@/store/canvasStore';
+import { useChatPreferencesStore } from '@/store/chatPreferencesStore';
 import {
   selectThreadBinding,
   selectThreadHistoryLoaded,
+  selectThreadHistoryPageState,
   selectThreadLastAction,
   selectThreadMessages,
   useChatStore,
@@ -49,6 +52,14 @@ import {
   resolveConversationAgentBinding,
   resolveConversationOwnerSource,
 } from '@/store/conversationOwner';
+import {
+  conversationTitleKey,
+  clearPendingConversationTitle,
+  getConversationTitle,
+  retryConversationTitle,
+  renameConversationTitle,
+  useConversationTitleStore,
+} from '@/store/conversationTitleStore';
 import { useLLMStore } from '@/store/llmStore';
 import { messageListViewKey } from '@/store/previewWorkspace/scrollMemory';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
@@ -201,21 +212,49 @@ export const ChatPanel = ({
     ? !!viewingQuestionLabel
     : conversationOwnerSource?.labelSource === 'user';
   const tryRename = useCanvasStore((s) => s.tryRename);
-  const canRenameQuestion = !!viewingQuestionNodeId && !headlessConversation;
+  const canRenameQuestion = !headlessConversation;
+  const titleKey = conversationTitleKey(ownerCanvasId, threadId);
+  const cachedTitle = useConversationTitleStore(
+    (state) => getConversationTitle(ownerCanvasId, threadId, state).title,
+  );
+  const titleError = useConversationTitleStore(
+    (state) => state.entries[titleKey]?.error,
+  );
+  const editableTitle = viewingQuestionNodeId
+    ? viewingQuestionLabel
+    : cachedTitle;
+  const renameTitleLabel = t(
+    viewingQuestionNodeId ? 'node.rename' : 'chat.renameTitle',
+  );
   const [isEditingQuestionTitle, setIsEditingQuestionTitle] = useState(false);
   const [draftQuestionTitle, setDraftQuestionTitle] = useState(
-    viewingQuestionLabel ?? '',
+    editableTitle ?? '',
   );
   const questionTitleInputRef = useRef<HTMLInputElement>(null);
+  const titleEditActive = useRef(false);
+  const titleIdentity = `${titleKey}:${viewingQuestionNodeId ?? ''}`;
+  const currentTitleIdentity = useRef(titleIdentity);
+  currentTitleIdentity.current = titleIdentity;
+  const [savingTitleIdentity, setSavingTitleIdentity] = useState<string | null>(
+    null,
+  );
+  const isSavingTitle = savingTitleIdentity === titleIdentity;
 
   useEffect(() => {
     if (isEditingQuestionTitle) return;
-    setDraftQuestionTitle(viewingQuestionLabel ?? '');
-  }, [isEditingQuestionTitle, viewingQuestionLabel]);
+    setDraftQuestionTitle(editableTitle ?? '');
+  }, [isEditingQuestionTitle, editableTitle]);
 
   useEffect(() => {
     setIsEditingQuestionTitle(false);
-  }, [viewingQuestionNodeId]);
+    titleEditActive.current = false;
+    currentTitleIdentity.current = titleIdentity;
+    return () => {
+      if (currentTitleIdentity.current === titleIdentity) {
+        currentTitleIdentity.current = '';
+      }
+    };
+  }, [titleIdentity]);
 
   useEffect(() => {
     if (!isEditingQuestionTitle) return;
@@ -235,7 +274,11 @@ export const ChatPanel = ({
   );
 
   // Chat history hook — loads history and handles reconnection
-  useChatHistory(session, setIsLoading, previewTabId);
+  const loadOlderHistory = useChatHistory(
+    session,
+    setIsLoading,
+    previewTabId,
+  )?.loadOlderHistory;
 
   // Persistent chat state. Messages are per-thread (see chatStore.ts);
   // every read names this session's thread, so a stream running in another
@@ -249,6 +292,12 @@ export const ChatPanel = ({
   );
   const isHistoryLoaded = useChatStore((state) =>
     selectThreadHistoryLoaded(state, threadId),
+  );
+  const historyPage = useChatStore(
+    useShallow((state) => selectThreadHistoryPageState(state, threadId)),
+  );
+  const recentTurnCount = useChatPreferencesStore(
+    (state) => state.recentTurnCount,
   );
   const addNode = useCanvasStore((state) => state.addNode);
   const llmConfig = useLLMStore((state) => state.config);
@@ -654,23 +703,14 @@ export const ChatPanel = ({
 
   const panelTitle = useMemo(() => {
     if (activeConversationView) {
-      // Composing a fresh node: it has no real label yet, so show a
-      // neutral title instead of the auto-generated "Question N". A
-      // manual sidebar rename is real authored identity and stays visible.
       if (isComposingQuestion && !isViewingUserNamedQuestion) {
         return t('chat.newQuestion');
       }
       return viewingQuestionLabel ?? t('chat.question');
     }
-    // When the thread is delegated to an external ACP agent, the
-    // built-in model name is irrelevant — surface the agent alias
-    // instead so the header reflects who's actually answering.
-    if (agentBinding.kind === 'external') {
-      return t('chat.chatWith', { name: agentBinding.alias });
-    }
-    return t('chat.title');
+    return cachedTitle || t('chat.newConversation');
   }, [
-    agentBinding,
+    cachedTitle,
     t,
     activeConversationView,
     isComposingQuestion,
@@ -679,27 +719,58 @@ export const ChatPanel = ({
   ]);
 
   const commitQuestionTitle = useCallback(() => {
-    if (!viewingQuestionNodeId) {
-      setIsEditingQuestionTitle(false);
-      setDraftQuestionTitle(viewingQuestionLabel ?? '');
-      return;
-    }
+    // Enter unmounts the field and may also deliver blur before React commits.
+    if (!titleEditActive.current) return;
+    titleEditActive.current = false;
     const next = draftQuestionTitle.trim();
-    if (!next || next === (viewingQuestionLabel ?? '').trim()) {
-      setIsEditingQuestionTitle(false);
-      setDraftQuestionTitle(viewingQuestionLabel ?? '');
+    setIsEditingQuestionTitle(false);
+    if (!next || next === (editableTitle ?? '').trim()) {
+      setDraftQuestionTitle(editableTitle ?? '');
       return;
     }
-    setIsEditingQuestionTitle(false);
-    void tryRename('node', viewingQuestionNodeId, next).then((accepted) => {
-      if (accepted) onCommit?.();
-      else setDraftQuestionTitle(viewingQuestionLabel ?? '');
-    });
+    if (next.length > 120) return;
+    setSavingTitleIdentity(titleIdentity);
+    const save = viewingQuestionNodeId
+      ? tryRename('node', viewingQuestionNodeId, next)
+      : renameConversationTitle(
+          ownerCanvasId,
+          threadId,
+          next,
+          isHistoryLoaded &&
+            !isLoading &&
+            !messages.some((message) => message.role === 'user'),
+        ).then(() => true);
+    void save
+      .then((accepted) => {
+        if (currentTitleIdentity.current !== titleIdentity) return;
+        if (accepted) onCommit?.();
+        else setDraftQuestionTitle(editableTitle ?? '');
+      })
+      .catch((error: unknown) => {
+        if (currentTitleIdentity.current !== titleIdentity) return;
+        setDraftQuestionTitle(editableTitle ?? '');
+        toast(
+          error instanceof Error ? error.message : t('chat.titleSaveFailed'),
+          { tone: 'danger' },
+        );
+      })
+      .finally(() => {
+        setSavingTitleIdentity((current) =>
+          current === titleIdentity ? null : current,
+        );
+      });
   }, [
     draftQuestionTitle,
+    editableTitle,
+    titleIdentity,
+    ownerCanvasId,
+    threadId,
+    isHistoryLoaded,
+    isLoading,
+    messages,
+    t,
     onCommit,
     tryRename,
-    viewingQuestionLabel,
     viewingQuestionNodeId,
   ]);
 
@@ -835,7 +906,7 @@ export const ChatPanel = ({
     if (!content) return;
 
     const questionNodeId = createId('node') as CanvasNodeId;
-    saveChatAsQuestion(
+    const saved = saveChatAsQuestion(
       {
         id: questionNodeId,
         nodeType: 'question',
@@ -854,6 +925,7 @@ export const ChatPanel = ({
       {
         canvasId,
         previewTabId,
+        conversationTitle: getConversationTitle(ownerCanvasId, threadId),
         addNode,
         nodeExists: (nodeId) =>
           useCanvasStore.getState().nodes.some((node) => node.id === nodeId),
@@ -861,6 +933,7 @@ export const ChatPanel = ({
           usePreviewWorkspaceStore.getState().replaceTabTarget(tabId, target),
       },
     );
+    if (saved) clearPendingConversationTitle(ownerCanvasId, threadId);
   }, [
     isLoading,
     messages,
@@ -870,6 +943,7 @@ export const ChatPanel = ({
     canvasId,
     addNode,
     previewTabId,
+    ownerCanvasId,
   ]);
 
   return (
@@ -877,25 +951,28 @@ export const ChatPanel = ({
       <SidebarPanel
         title={panelTitle}
         tabs={
-          <span className="flex min-w-0 flex-1 items-center gap-1">
+          <span className="flex max-w-full min-w-0 flex-1 items-center gap-1">
             {canRenameQuestion && isEditingQuestionTitle ? (
-              <Input
+              <TextInput
                 ref={questionTitleInputRef}
                 value={draftQuestionTitle}
-                aria-label={t('node.rename')}
+                maxLength={120}
+                aria-label={renameTitleLabel}
                 placeholder={t('node.untitled')}
-                className="text-fg-default bg-bg-default border-edge-default w-64 max-w-full min-w-0 truncate rounded border px-1 py-0.5 text-sm font-semibold outline-none"
+                className="text-fg-default bg-bg-default border-edge-default w-64 max-w-full min-w-0 shrink basis-auto truncate rounded border px-1 py-0.5 text-sm font-semibold outline-none"
                 onChange={(event) => setDraftQuestionTitle(event.target.value)}
                 onBlur={commitQuestionTitle}
                 onKeyDown={(event) => {
                   event.stopPropagation();
                   if (event.key === 'Enter') {
+                    if (event.nativeEvent.isComposing) return;
                     event.preventDefault();
                     commitQuestionTitle();
                   }
                   if (event.key === 'Escape') {
                     event.preventDefault();
-                    setDraftQuestionTitle(viewingQuestionLabel ?? '');
+                    titleEditActive.current = false;
+                    setDraftQuestionTitle(editableTitle ?? '');
                     setIsEditingQuestionTitle(false);
                   }
                 }}
@@ -904,18 +981,30 @@ export const ChatPanel = ({
               <Button
                 variant="ghost"
                 size="sm"
-                title={t('node.rename')}
-                aria-label={t('node.rename')}
+                title={panelTitle}
+                aria-label={renameTitleLabel}
                 tooltipPlacement="bottom"
+                tooltipWrapperClassName="inline-flex max-w-full min-w-0 shrink basis-auto"
                 className={clsx(
-                  'hover:text-fg-default min-w-0 cursor-text justify-start truncate rounded border border-transparent px-1 py-0.5 text-sm font-semibold',
+                  'hover:text-fg-default max-w-full min-w-0 shrink cursor-text justify-start rounded border border-transparent px-1 py-0.5 text-sm font-semibold',
                 )}
-                onClick={() => setIsEditingQuestionTitle(true)}
+                disabled={isSavingTitle || !isHistoryLoaded}
+                onClick={() => {
+                  titleEditActive.current = true;
+                  setIsEditingQuestionTitle(true);
+                }}
               >
-                {panelTitle}
+                <span className="max-w-full min-w-0 truncate">
+                  {panelTitle}
+                </span>
               </Button>
             ) : (
-              <span className="min-w-0 truncate px-1 py-0.5">{panelTitle}</span>
+              <span
+                className="max-w-full min-w-0 shrink truncate px-1 py-0.5"
+                title={panelTitle}
+              >
+                {panelTitle}
+              </span>
             )}
             {acpConnectionStatus && agentBinding.kind === 'external' && (
               <AcpConnectionBadge
@@ -931,7 +1020,6 @@ export const ChatPanel = ({
         iconCollapsed={<PanelRightOpen size={16} />}
         iconExpanded={<ListIndentIncrease size={16} />}
         compactHeader
-        hideTitle={!activeConversationView}
         tools={
           activeConversationView ? null : (
             <Button
@@ -940,7 +1028,9 @@ export const ChatPanel = ({
               size="md"
               iconOnly
               onClick={handleSaveChat}
-              disabled={!isHistoryLoaded || isLoading || !canSave}
+              disabled={
+                !isHistoryLoaded || isLoading || isSavingTitle || !canSave
+              }
               title={t('chat.saveAsQuestion')}
               tooltipPlacement="bottom"
             >
@@ -950,10 +1040,34 @@ export const ChatPanel = ({
         }
       >
         <div className="flex h-full flex-col gap-2 overflow-visible pt-3">
+          {!activeConversationView && titleError && (
+            <div
+              role="alert"
+              className="text-danger flex items-center gap-2 px-3 text-xs"
+            >
+              <span>
+                {t('chat.titleSaveFailed')}: {titleError}
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  void retryConversationTitle(ownerCanvasId, threadId);
+                }}
+              >
+                {t('messages.retry')}
+              </Button>
+            </div>
+          )}
           <MessageList
             messages={messages}
             isLoading={isLoading}
             isHistoryLoading={!isHistoryLoaded}
+            hasOlderHistory={historyPage.hasOlderHistory}
+            olderTurnBatchSize={recentTurnCount}
+            isLoadingOlderHistory={historyPage.isLoadingOlderHistory}
+            olderHistoryError={historyPage.olderHistoryError ?? undefined}
+            onLoadOlderHistory={loadOlderHistory}
             viewKey={messageListViewKey(ownerCanvasId, threadId)}
             isActive={!isCollapsed}
             openPosition={

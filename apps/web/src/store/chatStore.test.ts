@@ -32,6 +32,116 @@ describe('chatStore composer drafts', () => {
     });
   });
 
+  describe('chatStore paged history', () => {
+    beforeEach(() => {
+      useChatStore.setState({ threadsById: {} });
+    });
+
+    it('prepends older messages without duplicating an overlapping page', () => {
+      const store = useChatStore.getState();
+      store.setMessages('thread-a', [
+        {
+          id: 'turn-2:0',
+          historyTurnId: 'turn-2',
+          role: 'user',
+          content: 'newer',
+        },
+      ]);
+
+      store.prependHistoryMessages('thread-a', [
+        {
+          id: 'turn-1:0',
+          historyTurnId: 'turn-1',
+          role: 'user',
+          content: 'older',
+        },
+        {
+          id: 'turn-2:0',
+          historyTurnId: 'turn-2',
+          role: 'user',
+          content: 'newer',
+        },
+      ]);
+
+      expect(
+        useChatStore
+          .getState()
+          .threadsById['thread-a']?.messages.map((message) => message.id),
+      ).toEqual(['turn-1:0', 'turn-2:0']);
+    });
+
+    it('replaces the overlapping newest suffix while preserving older pages', () => {
+      const store = useChatStore.getState();
+      store.setMessages('thread-a', [
+        {
+          id: 'turn-1:0',
+          historyTurnId: 'turn-1',
+          role: 'user',
+          content: 'older',
+        },
+        {
+          id: 'turn-2:0',
+          historyTurnId: 'turn-2',
+          role: 'user',
+          content: 'pending',
+        },
+      ]);
+
+      store.mergeLatestHistoryMessages('thread-a', [
+        {
+          id: 'turn-2:0',
+          historyTurnId: 'turn-2',
+          role: 'user',
+          content: 'complete',
+        },
+        {
+          id: 'turn-2:1',
+          historyTurnId: 'turn-2',
+          role: 'assistant',
+          segments: [{ kind: 'text', text: 'answer' }],
+        },
+      ]);
+
+      expect(
+        useChatStore
+          .getState()
+          .threadsById['thread-a']?.messages.map((message) => message.id),
+      ).toEqual(['turn-1:0', 'turn-2:0', 'turn-2:1']);
+    });
+
+    it('appends a non-overlapping newest turn without dropping older pages', () => {
+      const store = useChatStore.getState();
+      store.setMessages('thread-a', [
+        {
+          id: 'turn-1:0',
+          historyTurnId: 'turn-1',
+          role: 'user',
+          content: 'older',
+        },
+        {
+          id: 'live-user',
+          role: 'user',
+          content: 'pending',
+        },
+      ]);
+
+      store.mergeLatestHistoryMessages('thread-a', [
+        {
+          id: 'turn-2:0',
+          historyTurnId: 'turn-2',
+          role: 'user',
+          content: 'newest',
+        },
+      ]);
+
+      expect(
+        useChatStore
+          .getState()
+          .threadsById['thread-a']?.messages.map((message) => message.id),
+      ).toEqual(['turn-1:0', 'turn-2:0']);
+    });
+  });
+
   it('isolates drafts by thread and removes cleared entries', () => {
     const { setDraft } = useChatStore.getState();
 

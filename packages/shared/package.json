@@ -13,6 +13,10 @@
     "./canvas-engine": {
       "types": "./src/canvas-engine/index.ts",
       "import": "./src/canvas-engine/index.ts"
+    },
+    "./conversation-title": {
+      "types": "./src/utils/conversation-title.ts",
+      "import": "./src/utils/conversation-title.ts"
     }
   },
   "files": [

@@ -9,6 +9,8 @@
 import { defineDriver } from '@agenetes/runtime';
 import { describe, expect, it } from 'vitest';
 
+import { ThreadNotificationBus } from './notifications.js';
+
 import { mountAgenetes } from './index.js';
 
 import type {
@@ -110,6 +112,155 @@ async function take<T>(it: AsyncIterable<T>, n: number): Promise<T[]> {
 }
 
 describe('notification surface (M5.5/A3.0, I9.7)', () => {
+  it('isolates namespaces with historical duplicate IDs while retaining legacy delivery and closing only the live scope', async () => {
+    const inst = mount((spec) => new ReportingHandle(spec));
+    const a = deployment('shared');
+    const b = { ...a, namespace: ns('canvas_2') };
+    inst.create(b);
+    inst.close(b.threadId);
+    const handle = inst.create(a) as unknown as ReportingHandle;
+    const scopedA = inst
+      .notifications(a.threadId, ns(a.namespace.name))
+      [Symbol.asyncIterator]();
+    const scopedB = inst
+      .notifications(b.threadId, b.namespace)
+      [Symbol.asyncIterator]();
+    const legacy = inst.notifications(a.threadId)[Symbol.asyncIterator]();
+    const pendingB = scopedB.next();
+
+    handle.emit({ driverState: {}, metadata: meta });
+    expect(await scopedA.next()).toEqual({ value: meta, done: false });
+    expect(await legacy.next()).toEqual({ value: meta, done: false });
+    expect(inst.record(a.namespace, a.threadId)?.state.metadata).toEqual(meta);
+    expect(
+      inst.record(b.namespace, b.threadId)?.state.metadata,
+    ).toBeUndefined();
+    const endedA = scopedA.next();
+    const endedLegacy = legacy.next();
+    inst.close(a.threadId);
+    expect(await endedA).toEqual({ value: undefined, done: true });
+    expect(await endedLegacy).toEqual({ value: undefined, done: true });
+
+    // A different namespace's parked subscriber survives the first close.
+    const handleB = inst.create(b) as unknown as ReportingHandle;
+    const second = { ...meta, metaUpdatedAt: 2 };
+    handleB.emit({ driverState: {}, metadata: second });
+    expect(await pendingB).toEqual({ value: second, done: false });
+    const endedB = scopedB.next();
+    inst.close(b.threadId);
+    expect(await endedB).toEqual({ value: undefined, done: true });
+  });
+
+  it('ends scoped streams for silent handles and allows subscribing after recreation', async () => {
+    const inst = mount((spec) => new SilentHandle(spec));
+    const spec = deployment('silent');
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const iterator = inst
+        .notifications(spec.threadId, spec.namespace)
+        [Symbol.asyncIterator]();
+      inst.create(spec);
+      const pending = iterator.next();
+      inst.close(spec.threadId);
+      expect(await pending).toEqual({ value: undefined, done: true });
+    }
+  });
+
+  it('keeps tuple-like legacy IDs and separator-bearing scoped IDs distinct', async () => {
+    const bus = new ThreadNotificationBus();
+    const channels = [
+      { thread: 'b\0c', scope: 'a' },
+      { thread: 'c', scope: 'a\0b' },
+      { thread: JSON.stringify(['a', 'b\0c']), scope: undefined },
+      { thread: 'b\0c', scope: undefined },
+    ];
+    const iterators = channels.map(({ thread, scope }) =>
+      bus.subscribe(thread, scope)[Symbol.asyncIterator](),
+    );
+    channels.forEach(({ thread, scope }, index) => {
+      bus.publish(thread, { metaUpdatedAt: index }, scope);
+      bus.closeThread(thread, scope);
+    });
+    for (const [index, iterator] of iterators.entries()) {
+      expect(await iterator.next()).toEqual({
+        value: { metaUpdatedAt: index },
+        done: false,
+      });
+      expect(await iterator.next()).toEqual({ value: undefined, done: true });
+    }
+  });
+
+  it('preserves host metadata before and after wholesale state reports and live reuse', async () => {
+    const inst = mount((spec) => new ReportingHandle(spec));
+    const spec = deployment('thr_1');
+    const handle = inst.create(spec) as unknown as ReportingHandle;
+    const collected = take(inst.notifications(spec.threadId), 2);
+    const first = { driverState: { sessionId: 'first' }, metadata: meta };
+    const second = { driverState: { sessionId: 'second' } };
+    const hostMetadata = { label: 'host label', details: { owner: 'host' } };
+    inst.updateHostMetadata(spec.namespace, spec.threadId, hostMetadata);
+    handle.emit(first);
+    expect(inst.record(spec.namespace, spec.threadId)?.hostMetadata).toEqual(
+      hostMetadata,
+    );
+    expect(
+      inst.updateHostMetadata(spec.namespace, spec.threadId, {
+        label: 'updated',
+      }).state,
+    ).toEqual(first);
+    handle.emit(second);
+    expect(inst.record(spec.namespace, spec.threadId)).toMatchObject({
+      hostMetadata: { ...hostMetadata, label: 'updated' },
+      state: second,
+    });
+    expect(
+      inst.record(spec.namespace, spec.threadId)?.state,
+    ).not.toHaveProperty('metadata');
+    expect(inst.create(spec)).toBe(handle);
+    expect(inst.record(spec.namespace, spec.threadId)?.state).toEqual(second);
+    const last = { driverState: {}, metadata: { ...meta, metaUpdatedAt: 2 } };
+    handle.emit(last);
+    expect(await collected).toEqual([meta, last.metadata]);
+    expect(inst.record(spec.namespace, spec.threadId)?.hostMetadata).toEqual({
+      ...hostMetadata,
+      label: 'updated',
+    });
+    inst.close(spec.threadId);
+    inst.create(spec);
+    expect(inst.record(spec.namespace, spec.threadId)?.hostMetadata).toEqual({
+      ...hostMetadata,
+      label: 'updated',
+    });
+    inst.close(spec.threadId);
+  });
+
+  it('does not overwrite a synchronous subscription up-report with initial state', () => {
+    const snapshot = {
+      driverState: { sessionId: 'immediate' },
+      metadata: meta,
+    };
+    class ImmediateHandle extends ReportingHandle {
+      override onState(
+        listener: (s: AgentStateSnapshot<StubDriverState>) => void,
+      ): () => void {
+        const unsubscribe = super.onState(listener);
+        this.emit(snapshot);
+        return unsubscribe;
+      }
+    }
+    const inst = mount((spec) => new ImmediateHandle(spec));
+    const spec = deployment('thr_1');
+    inst.create(spec);
+    expect(inst.record(spec.namespace, spec.threadId)?.state).toEqual(snapshot);
+    inst.updateHostMetadata(spec.namespace, spec.threadId, { label: 'host' });
+    inst.close(spec.threadId);
+    inst.create(spec);
+    expect(inst.record(spec.namespace, spec.threadId)).toMatchObject({
+      state: snapshot,
+      hostMetadata: { label: 'host' },
+    });
+    inst.close(spec.threadId);
+  });
+
   it('persists the up-reported snapshot then re-emits its metadata', async () => {
     const inst = mount((spec) => new ReportingHandle(spec));
     const spec = deployment('thr_1');

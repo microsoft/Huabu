@@ -81,6 +81,77 @@ const writeStore = (namespace: Namespace, value: unknown): void => {
 };
 
 describe('FileThreadStore agenetes-v2 durable backing', () => {
+  it.each(['constructor', '__proto__', 'toString'])(
+    'treats prototype-like thread ID %s as an ordinary stored record',
+    (threadId) => {
+      const namespace = ns('canvas-1');
+      const store = new FileThreadStore();
+      expect(store.get(namespace, threadId)).toBeUndefined();
+      const saved = {
+        ...record(threadId, 'session', meta),
+        hostMetadata: JSON.parse(
+          '{"constructor":{"title":"saved"},"__proto__":{"safe":true}}',
+        ),
+      };
+      store.upsert(namespace, threadId, saved);
+      const restarted = new FileThreadStore();
+      expect(restarted.get(namespace, threadId)).toEqual(saved);
+      expect(restarted.list(namespace)).toEqual([saved]);
+      restarted.delete(namespace, threadId);
+      expect(restarted.get(namespace, threadId)).toBeUndefined();
+      expect(restarted.list(namespace)).toEqual([]);
+    },
+  );
+
+  it('preserves optional host metadata across writes, listing, and restart', () => {
+    const namespace = ns('canvas-1');
+    const withHostMetadata: ThreadRecord = {
+      ...record('t1', 'session', meta),
+      hostMetadata: {
+        label: 'Host label',
+        details: { source: 'host', version: 2 },
+        values: [null, false, 0, '', { nested: ['value'] }],
+        ...JSON.parse('{"__proto__":{"safe":true}}'),
+      },
+    };
+    const store = new FileThreadStore();
+    store.upsert(namespace, 't1', withHostMetadata);
+    store.upsert(namespace, 'legacy', record('legacy'));
+    store.upsert(namespace, 'empty', { ...record('empty'), hostMetadata: {} });
+
+    const restarted = new FileThreadStore();
+    expect(restarted.get(namespace, 't1')).toEqual(withHostMetadata);
+    expect(restarted.list(namespace)).toEqual([
+      withHostMetadata,
+      record('legacy'),
+      { ...record('empty'), hostMetadata: {} },
+    ]);
+    expect(restarted.get(namespace, 'legacy')).not.toHaveProperty(
+      'hostMetadata',
+    );
+    restarted.delete(namespace, 'empty');
+    expect(new FileThreadStore().get(namespace, 't1')).toEqual(
+      withHostMetadata,
+    );
+  });
+
+  it.each([null, [], 'label', 42, true])(
+    'rejects malformed persisted host metadata: %j',
+    (hostMetadata) => {
+      const namespace = ns('canvas-1');
+      writeStore(namespace, {
+        schemaVersion: THREAD_STORE_SCHEMA_VERSION,
+        records: { t1: { ...record('t1'), hostMetadata } },
+      });
+      expect(() => new FileThreadStore().get(namespace, 't1')).toThrow(
+        expect.objectContaining({ code: 'invalid_persisted_record' }),
+      );
+      expect(() => new FileThreadStore().list(namespace)).toThrow(
+        /hostMetadata must be an object of JSON values/,
+      );
+    },
+  );
+
   it('round-trips the strict versioned record envelope', () => {
     const store = new FileThreadStore();
     const namespace = ns('canvas-1');

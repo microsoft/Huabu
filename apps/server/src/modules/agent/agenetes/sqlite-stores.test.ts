@@ -27,6 +27,7 @@ import {
   type MountedTestStorage,
 } from '../../storage/testing.js';
 import { canvasAcpNamespace } from '../../workspace/paths.js';
+import { effectiveConversationTitle } from '../conversation-title.service.js';
 
 import type { StorageProfile } from '../../storage/profile.js';
 import type {
@@ -35,6 +36,7 @@ import type {
   ThreadRecord,
 } from '@agenetes/agenetes';
 import type { AgentStateSnapshot, WorkloadSpec } from '@agenetes/protocol';
+import type { AgentHandle } from '@agenetes/runtime';
 
 const SQLITE: StorageProfile = {
   structured: { kind: 'sqlite' },
@@ -75,6 +77,86 @@ function threadRecord(threadId = THREAD_ID): ThreadRecord {
 }
 
 describe('Agenetes conversation stores on SQLite', () => {
+  it('preserves host title metadata through driver snapshots, restart, and rehome on SQLite', async () => {
+    const opened = await openWithSpace();
+    const namespace = canvasAcpNamespace(CANVAS_ID);
+    let report!: (snapshot: AgentStateSnapshot) => void;
+    const driver = defineDriver({
+      schemaVersion: 1,
+      workloadTypes: ['Deployment'],
+      specSchema: z.object({}),
+      stateSchema: z.object({}),
+      initialState: () => ({}),
+      create: () =>
+        ({
+          close() {},
+          onState(listener: typeof report) {
+            report = listener;
+            return () => {};
+          },
+        }) as unknown as AgentHandle,
+    });
+    const mount = () =>
+      mountAgenetes({
+        drivers: { test: driver },
+        threadStore: conversationThreadStore,
+        eventLogStore: conversationEventLogStore,
+        turnStore: conversationTurnStore,
+      });
+    const instance = mount();
+    instance.create({
+      kind: 'test',
+      workloadType: 'Deployment',
+      namespace,
+      threadId: THREAD_ID,
+      spec: {},
+    });
+    instance.updateHostMetadata(namespace, THREAD_ID, {
+      otherFeature: { kept: true },
+      huabuConversationTitle: {
+        title: 'Durable panel title',
+        source: 'user',
+      },
+    });
+    report({
+      driverState: {},
+      metadata: { sessionInfo: { title: '', updatedAt: null } },
+    });
+    const before = instance.record(namespace, THREAD_ID)!;
+    expect(effectiveConversationTitle(before)).toEqual({
+      title: 'Durable panel title',
+      source: 'user',
+    });
+    instance.close(THREAD_ID);
+    const reopenedStorage = await opened.reopen();
+    const restarted = mount();
+    expect(restarted.record(namespace, THREAD_ID)?.hostMetadata).toEqual(
+      before.hostMetadata,
+    );
+    expect(restarted.get(THREAD_ID)).toBeUndefined();
+    const targetId = 'canvas-title-target';
+    expect(
+      (
+        await reopenedStorage.structured
+          .spaces()
+          .create({ canvasId: targetId, title: 'Target' })
+      ).ok,
+    ).toBe(true);
+    const target = canvasAcpNamespace(targetId);
+    restarted.rehome(
+      { namespace, threadId: THREAD_ID },
+      { ...before.spec, namespace: target },
+    );
+    expect(restarted.record(namespace, THREAD_ID)).toBeUndefined();
+    const moved = restarted.record(target, THREAD_ID)!;
+    expect(moved.hostMetadata).toEqual(before.hostMetadata);
+    expect(effectiveConversationTitle(moved)).toEqual({
+      title: 'Durable panel title',
+      source: 'user',
+    });
+    expect(moved.state?.metadata?.sessionInfo?.title).toBe('');
+  });
+
   for (const kind of ['events', 'turns'] as const) {
     describe(`${kind} replacement`, () => {
       async function setupReplacement() {
@@ -370,6 +452,95 @@ describe('Agenetes conversation stores on SQLite', () => {
     expect(conversationTurnStore.list(namespace, THREAD_ID)).toEqual([
       { turn: { id: 'turn-1' }, seqStart: 1, seqEnd: 2 },
     ]);
+  });
+
+  it('pages SQLite display-turn ranges without splitting null-request continuations', async () => {
+    await openWithSpace();
+    const namespace = canvasAcpNamespace(CANVAS_ID);
+    const values = [
+      { request: null, content: 'orphan' },
+      { request: 'a', content: 'a' },
+      { request: 'b', content: 'b' },
+      { request: null, content: 'resume-b' },
+      { request: 'c', content: 'c' },
+    ] as const;
+    values.forEach((value, index) => {
+      conversationTurnStore.append(namespace, THREAD_ID, {
+        turn: {
+          request:
+            value.request === null
+              ? null
+              : { type: 'user_text', content: value.request },
+          transcript: [{ type: 'text', data: { content: value.content } }],
+        },
+        seqStart: index + 1,
+        seqEnd: index + 1,
+      });
+    });
+
+    const newest = conversationTurnStore.page(namespace, THREAD_ID, {
+      limit: 2,
+    });
+    expect(
+      newest.groups.map((group) =>
+        group.turns.map((record) => record.turn.transcript[0]!.data),
+      ),
+    ).toEqual([
+      [{ content: 'b' }, { content: 'resume-b' }],
+      [{ content: 'c' }],
+    ]);
+    expect(newest.hasMore).toBe(true);
+
+    const older = conversationTurnStore.page(namespace, THREAD_ID, {
+      limit: 2,
+      before: newest.before!,
+    });
+    expect(
+      older.groups.map((group) =>
+        group.turns.map((record) => record.turn.transcript[0]!.data),
+      ),
+    ).toEqual([[{ content: 'orphan' }], [{ content: 'a' }]]);
+    expect(older.hasMore).toBe(false);
+  });
+
+  it('keeps a SQLite cursor stable across append and rejects it after replace', async () => {
+    await openWithSpace();
+    const namespace = canvasAcpNamespace(CANVAS_ID);
+    for (let seq = 1; seq <= 2; seq += 1) {
+      conversationTurnStore.append(namespace, THREAD_ID, {
+        turn: {
+          request: { type: 'user_text', content: `q${seq}` },
+          transcript: [],
+        },
+        seqStart: seq,
+        seqEnd: seq,
+      });
+    }
+    const cursor = conversationTurnStore.page(namespace, THREAD_ID, {
+      limit: 1,
+    }).before!;
+    conversationTurnStore.append(namespace, THREAD_ID, {
+      turn: {
+        request: { type: 'user_text', content: 'q3' },
+        transcript: [],
+      },
+      seqStart: 3,
+      seqEnd: 3,
+    });
+    expect(
+      conversationTurnStore.page(namespace, THREAD_ID, {
+        limit: 1,
+        before: cursor,
+      }).groups[0]!.turns[0]!.turn.request,
+    ).toMatchObject({ content: 'q1' });
+
+    conversationTurnStore.replace(namespace, THREAD_ID, []);
+    expect(() =>
+      conversationTurnStore.page(namespace, THREAD_ID, {
+        limit: 1,
+        before: cursor,
+      }),
+    ).toThrow('stale');
   });
 
   it('isolates one Space from another', async () => {

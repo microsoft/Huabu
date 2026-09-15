@@ -1,15 +1,18 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { useEffect } from 'react';
+import { useCallback, useEffect } from 'react';
 
 import { createId } from '@huabu/shared';
 
+import { ApiError } from '@/api/_client';
 import { agentApi } from '@/api/agent';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import useCanvasStore from '@/store/canvasStore';
+import { useChatPreferencesStore } from '@/store/chatPreferencesStore';
 import {
   selectThreadHistoryLoaded,
+  selectThreadHistoryPageState,
   selectThreadLastAction,
   selectThreadMessages,
   useChatStore,
@@ -19,6 +22,10 @@ import {
   refreshConversationPresentation,
   validateConversationView,
 } from '@/store/conversationOwner';
+import {
+  refreshConversationTitleAfterStream,
+  seedConversationTitle,
+} from '@/store/conversationTitleStore';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 
 import { claimAgentStream } from './agentStreamCoordinator';
@@ -26,7 +33,12 @@ import { handleStreamEvent } from './useAgentStream';
 
 import type { ChatSession } from './useChatSession';
 import type { ChatMessage } from '../store/chatTypes';
-import type { AgentStreamEvent, ChatHistoryResponse } from '@huabu/shared';
+import type {
+  AgentHistoryDisplayTurn,
+  AgentHistoryPageResponse,
+  AgentStreamEvent,
+  ChatHistoryItem,
+} from '@huabu/shared';
 
 /**
  * Roles the transcript renderer still understands. Anything else in a
@@ -52,17 +64,23 @@ function waitForRetry(delayMs: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-function historyResponseToMessages(
-  response: ChatHistoryResponse,
+function historyItemsToMessages(
+  turnId: string,
+  messages: ChatHistoryItem[],
+  activeMessageStart: number | undefined,
 ): ChatMessage[] {
-  return response.messages.flatMap((message, index): ChatMessage[] => {
-    const id = `history-${index}`;
+  return messages.flatMap((message, index): ChatMessage[] => {
+    const id = `${turnId}:${index}`;
+    const historyTurnActive =
+      activeMessageStart !== undefined && index >= activeMessageStart;
     if (!KNOWN_HISTORY_ROLES.has(message.role)) return [];
 
     if (message.role === 'status') {
       return [
         {
           id,
+          historyTurnId: turnId,
+          historyTurnActive,
           role: 'status',
           status: message.status,
           detail: message.detail,
@@ -83,6 +101,8 @@ function historyResponseToMessages(
       return [
         {
           id,
+          historyTurnId: turnId,
+          historyTurnActive,
           role: 'assistant',
           segments: message.parts,
           ...attachments,
@@ -94,6 +114,8 @@ function historyResponseToMessages(
     return [
       {
         id,
+        historyTurnId: turnId,
+        historyTurnActive,
         role: 'user',
         content: message.content || '',
         ...attachments,
@@ -107,6 +129,90 @@ function historyResponseToMessages(
       },
     ];
   });
+}
+
+function historyTurnsToMessages(
+  turns: AgentHistoryDisplayTurn[],
+): ChatMessage[] {
+  return turns.flatMap((turn) =>
+    historyItemsToMessages(
+      turn.id,
+      turn.messages,
+      turn.active === true ? (turn.activeMessageStart ?? 0) : undefined,
+    ),
+  );
+}
+
+function applyInitialHistoryPage(response: AgentHistoryPageResponse): void {
+  const state = useChatStore.getState();
+  state.setMessages(response.threadId, historyTurnsToMessages(response.turns));
+  state.setHistoryPageState(response.threadId, {
+    before: response.before ?? null,
+    hasOlder: response.hasMore,
+    loadingOlder: false,
+    error: null,
+  });
+  state.setHistoryLoaded(response.threadId, true);
+}
+
+interface LatestHistoryWindow {
+  response: AgentHistoryPageResponse;
+  hadCachedHistory: boolean;
+  overlapsCache: boolean;
+}
+
+async function fetchLatestHistoryWindow(
+  threadId: string,
+  canvasId: string,
+  limit: number,
+): Promise<LatestHistoryWindow> {
+  const cachedTurnIds = new Set(
+    selectThreadMessages(useChatStore.getState(), threadId).flatMap(
+      (message) => (message.historyTurnId ? [message.historyTurnId] : []),
+    ),
+  );
+  const hadCachedHistory = cachedTurnIds.size > 0;
+  const latest = await agentApi.fetchHistoryPage(threadId, canvasId, limit);
+  let turns = latest.turns;
+  let before = latest.before;
+  let hasMore = latest.hasMore;
+  let overlapsCache = turns.some((turn) => cachedTurnIds.has(turn.id));
+
+  while (hadCachedHistory && !overlapsCache && hasMore && before) {
+    const older = await agentApi.fetchHistoryPage(
+      threadId,
+      canvasId,
+      limit,
+      before,
+    );
+    turns = [...older.turns, ...turns];
+    before = older.before;
+    hasMore = older.hasMore;
+    overlapsCache = older.turns.some((turn) => cachedTurnIds.has(turn.id));
+  }
+
+  return {
+    response: { ...latest, turns, before, hasMore },
+    hadCachedHistory,
+    overlapsCache,
+  };
+}
+
+function applyLatestHistoryWindow(window: LatestHistoryWindow): void {
+  if (window.hadCachedHistory && window.overlapsCache) {
+    const state = useChatStore.getState();
+    state.mergeLatestHistoryMessages(
+      window.response.threadId,
+      historyTurnsToMessages(window.response.turns),
+    );
+    state.setHistoryLoaded(window.response.threadId, true);
+    return;
+  }
+  applyInitialHistoryPage(window.response);
+}
+
+export interface ChatHistoryWindow {
+  loadOlderHistory: () => void;
 }
 
 /**
@@ -124,12 +230,15 @@ export function useChatHistory(
   session: ChatSession,
   setIsLoading: (threadId: string, loading: boolean) => void,
   previewTabId?: string,
-): void {
+): ChatHistoryWindow {
   const { threadId, canvasId } = session;
   const isHistoryLoaded = useChatStore((state) =>
     selectThreadHistoryLoaded(state, threadId),
   );
   const addMessage = useChatStore((state) => state.addMessage);
+  const recentTurnCount = useChatPreferencesStore(
+    (state) => state.recentTurnCount,
+  );
   const effectiveConversationView = session.conversationView;
   const ownerCanvasId =
     effectiveConversationView?.conversationOwner.canvasId || canvasId;
@@ -156,7 +265,7 @@ export function useChatHistory(
 
     const currentState = useChatStore.getState();
     const action = selectThreadLastAction(currentState, tid);
-    const { setMessages: set, setHistoryLoaded: setLoaded } = currentState;
+    const { setHistoryLoaded: setLoaded } = currentState;
 
     const fetchValidatedHistory = async () => {
       if (effectiveConversationView) {
@@ -173,7 +282,7 @@ export function useChatHistory(
         }
       }
       if (cancelled) return;
-      return agentApi.fetchHistory(tid, ownerCanvasId);
+      return agentApi.fetchHistoryPage(tid, ownerCanvasId, recentTurnCount);
     };
 
     fetchValidatedHistory()
@@ -199,9 +308,15 @@ export function useChatHistory(
           }));
         }
 
-        const serverMessages = historyResponseToMessages(res);
-        set(finalTid, serverMessages);
-        setLoaded(finalTid, true);
+        const serverMessages = historyTurnsToMessages(res.turns);
+        if (!effectiveConversationView) {
+          const firstUser = serverMessages.find(
+            (message) => message.role === 'user',
+          );
+          if (firstUser?.role === 'user')
+            seedConversationTitle(ownerCanvasId, finalTid, firstUser.content);
+        }
+        applyInitialHistoryPage({ ...res, threadId: finalTid });
       })
       .catch((err: unknown) => {
         if (cancelled) return;
@@ -218,7 +333,84 @@ export function useChatHistory(
     effectiveConversationView,
     previewTabId,
     canvasId,
+    recentTurnCount,
   ]);
+
+  const loadOlderHistory = useCallback(() => {
+    if (!ownerCanvasId) return;
+    const pageState = selectThreadHistoryPageState(
+      useChatStore.getState(),
+      threadId,
+    );
+    if (
+      pageState.isLoadingOlderHistory ||
+      !pageState.hasOlderHistory ||
+      !pageState.historyBefore
+    ) {
+      return;
+    }
+    const requestedBefore = pageState.historyBefore;
+    useChatStore.getState().setHistoryPageState(threadId, {
+      before: requestedBefore,
+      hasOlder: true,
+      loadingOlder: true,
+      error: null,
+    });
+    void agentApi
+      .fetchHistoryPage(
+        threadId,
+        ownerCanvasId,
+        recentTurnCount,
+        requestedBefore,
+      )
+      .then((response) => {
+        const current = selectThreadHistoryPageState(
+          useChatStore.getState(),
+          threadId,
+        );
+        if (current.historyBefore !== requestedBefore) return;
+        const state = useChatStore.getState();
+        state.prependHistoryMessages(
+          threadId,
+          historyTurnsToMessages(response.turns),
+        );
+        state.setHistoryPageState(threadId, {
+          before: response.before ?? null,
+          hasOlder: response.hasMore,
+          loadingOlder: false,
+          error: null,
+        });
+      })
+      .catch(async (error: unknown) => {
+        const current = selectThreadHistoryPageState(
+          useChatStore.getState(),
+          threadId,
+        );
+        if (current.historyBefore !== requestedBefore) return;
+        if (error instanceof ApiError && error.status === 409) {
+          try {
+            const response = await agentApi.fetchHistoryPage(
+              threadId,
+              ownerCanvasId,
+              recentTurnCount,
+            );
+            applyInitialHistoryPage(response);
+            return;
+          } catch (refreshError: unknown) {
+            error = refreshError;
+          }
+        }
+        useChatStore.getState().setHistoryPageState(threadId, {
+          before: requestedBefore,
+          hasOlder: true,
+          loadingOlder: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : 'Failed to load earlier turns',
+        });
+      });
+  }, [ownerCanvasId, recentTurnCount, threadId]);
 
   // Try to reconnect to an active server-side run after history is loaded.
   // This handles the page-refresh case: events buffered during the refresh
@@ -227,8 +419,9 @@ export function useChatHistory(
     if (!isHistoryLoaded || !threadId || !ownerCanvasId) return;
 
     const msgs = selectThreadMessages(useChatStore.getState(), threadId);
+    const lastMessage = msgs[msgs.length - 1];
     const historyLooksIncomplete =
-      msgs.length > 0 && msgs[msgs.length - 1]?.role === 'user';
+      lastMessage?.role === 'user' || lastMessage?.historyTurnActive === true;
     if (ownerStatus !== 'running' && !historyLooksIncomplete) return;
 
     let cancelled = false;
@@ -253,15 +446,13 @@ export function useChatHistory(
       }
       if (cancelled) return;
 
-      const refreshed = await agentApi.fetchHistory(
+      const refreshed = await fetchLatestHistoryWindow(
         ownerThreadId,
         ownerCanvasId,
+        recentTurnCount,
       );
       if (cancelled) return;
-      useChatStore
-        .getState()
-        .setMessages(ownerThreadId, historyResponseToMessages(refreshed));
-      useChatStore.getState().setHistoryLoaded(ownerThreadId, true);
+      applyLatestHistoryWindow(refreshed);
 
       const assistantId = createId('message');
       // Flag set to true once we know the server has an active run
@@ -278,26 +469,20 @@ export function useChatHistory(
         );
       };
 
-      // Clear assistant / status messages loaded from history for the
-      // current run — the reconnect event buffer replays them fully.
-      // Keep only messages up to and including the last user message.
+      // The reconnect event buffer replays the active Tier-1 projection.
+      // Keep the active request and every persisted part of its display group.
       const clearStaleMessages = () => {
         const current = selectThreadMessages(
           useChatStore.getState(),
           ownerThreadId,
         );
-        let lastUserIdx = -1;
-        for (let i = current.length - 1; i >= 0; i--) {
-          if (current[i].role === 'user') {
-            lastUserIdx = i;
-            break;
-          }
-        }
-        if (lastUserIdx >= 0) {
-          useChatStore
-            .getState()
-            .setMessages(ownerThreadId, current.slice(0, lastUserIdx + 1));
-        }
+        useChatStore.getState().setMessages(
+          ownerThreadId,
+          current.filter(
+            (message) =>
+              message.historyTurnActive !== true || message.role === 'user',
+          ),
+        );
       };
 
       const result = await agentApi.reconnectStream(
@@ -308,10 +493,21 @@ export function useChatHistory(
             if (cancelled) return;
             if (!streaming) {
               streaming = true;
+              if (!effectiveConversationView)
+                refreshConversationTitleAfterStream(
+                  ownerCanvasId,
+                  ownerThreadId,
+                );
               setIsLoading(ownerThreadId, true);
               clearStaleMessages();
             }
-            handleStreamEvent(event, { threadId: ownerThreadId, assistantId });
+            handleStreamEvent(event, {
+              threadId: ownerThreadId,
+              assistantId,
+              titleCanvasId: effectiveConversationView
+                ? undefined
+                : ownerCanvasId,
+            });
           },
           onError: (err) => {
             if (cancelled) return;
@@ -326,6 +522,8 @@ export function useChatHistory(
           },
           onComplete: () => {
             if (cancelled) return;
+            if (!effectiveConversationView)
+              refreshConversationTitleAfterStream(ownerCanvasId, ownerThreadId);
             setIsLoading(ownerThreadId, false);
             refreshObservation();
           },
@@ -333,19 +531,14 @@ export function useChatHistory(
         claim.signal,
       );
 
-      if (result.status === 'inactive' && !cancelled) {
-        const finalHistory = await agentApi.fetchHistory(
+      if (result.status !== 'aborted' && !cancelled) {
+        const finalHistory = await fetchLatestHistoryWindow(
           ownerThreadId,
           ownerCanvasId,
+          recentTurnCount,
         );
         if (!cancelled) {
-          useChatStore
-            .getState()
-            .setMessages(
-              ownerThreadId,
-              historyResponseToMessages(finalHistory),
-            );
-          useChatStore.getState().setHistoryLoaded(ownerThreadId, true);
+          applyLatestHistoryWindow(finalHistory);
           setIsLoading(ownerThreadId, false);
         }
       }
@@ -397,5 +590,8 @@ export function useChatHistory(
     previewTabId,
     addMessage,
     setIsLoading,
+    recentTurnCount,
   ]);
+
+  return { loadOlderHistory };
 }

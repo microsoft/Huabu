@@ -39,19 +39,31 @@ function buildMessages(count: number): ChatMessage[] {
 }
 
 export default function ChatPerformancePlaygroundPage() {
+  const params = new URLSearchParams(window.location.search);
   const messageCount = Math.max(
     0,
+    Number.parseInt(params.get('messages') ?? '0', 10) || 0,
+  );
+  const visibleMessageCount = Math.max(
+    0,
     Number.parseInt(
-      new URLSearchParams(window.location.search).get('messages') ?? '0',
+      params.get('visibleMessages') ?? String(messageCount),
       10,
     ) || 0,
   );
-  const messages = useMemo(() => buildMessages(messageCount), [messageCount]);
+  const messages = useMemo(
+    () =>
+      visibleMessageCount === 0
+        ? []
+        : buildMessages(messageCount).slice(-visibleMessageCount),
+    [messageCount, visibleMessageCount],
+  );
 
   return (
     <ChatSessionProvider value={SESSION}>
       <main
         data-chat-performance-fixture={messageCount}
+        data-chat-visible-messages={messages.length}
         className="bg-bg-default mx-auto flex h-full w-full max-w-3xl flex-col p-4"
       >
         <MessageList messages={messages} isLoading={false} />

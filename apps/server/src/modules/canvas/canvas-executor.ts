@@ -74,6 +74,7 @@ import {
 } from './world-portal-policy.js';
 import { getLogger } from '../../utils/logger.js';
 import { getAgentChangeReviewConfig } from '../agent/change-review-config.js';
+import { isLabelProtected } from '../preprocessing/label-policy.js';
 import {
   isWorldCanvasId,
   space,
@@ -821,6 +822,33 @@ async function executePreparedOnServerAlreadyLocked(
   const { handle, canvas, prestateNodes, prestateEdges } = prepared;
   let commands = prepared.commands;
   const fromVersion = canvas.version;
+
+  // Automatic preprocessing can arrive after an agent or user rename.
+  // Filter only its label fields at the actual commit, not at request time.
+  commands = commands.map((command) =>
+    command.type !== 'MERGE_NODE_DATA'
+      ? command
+      : {
+          ...command,
+          patches: command.patches.map((entry) => {
+            const node = prestateNodes.find(
+              (candidate) => candidate.id === entry.nodeId,
+            );
+            if (
+              entry.patch.labelSource !== 'auto' ||
+              !isLabelProtected(node?.data.labelSource, node?.data.label)
+            )
+              return entry;
+            const {
+              label: _label,
+              labelSource: _source,
+              ...patch
+            } = entry.patch;
+            return { ...entry, patch };
+          }),
+        },
+  );
+
   // Only the World's rules consult it, and only the World can hold Portals,
   // so an ordinary Space never pays for the catalogue read.
   const liveCanvasIds = isWorldCanvasId(canvasId)

@@ -37,6 +37,7 @@ import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { useShallow } from 'zustand/react/shallow';
 
+import { useConversationTitles } from '@/hooks/useConversationTitles';
 import useCanvasStore, { settleNodePreprocess } from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 import { conversationViewForNode } from '@/store/conversationOwner';
@@ -175,6 +176,7 @@ export function PreviewWorkspace({
 } = {}) {
   const { t } = useTranslation();
   const workspace = usePreviewWorkspaceStore(selectWorkspace);
+  useConversationTitles(workspace);
   const canvasId = usePreviewWorkspaceStore((s) => s.canvasId);
   const nodeFocusRequest = usePreviewWorkspaceStore((s) => s.nodeFocusRequest);
   const chatOpenRequest = usePreviewWorkspaceStore((s) => s.chatOpenRequest);

@@ -624,6 +624,7 @@ export class AgentThreadService {
         binding,
         threadId: options.threadId,
         canvasId: options.canvasId,
+        questionOwned: Boolean(fixedTarget || options.agentTarget),
         envelope: options.envelope,
         submission: options.submission,
         overlay: emptyAcpOverlay(),
@@ -648,6 +649,7 @@ export class AgentThreadService {
         : undefined,
       threadId: options.threadId,
       canvasId: options.canvasId,
+      questionOwned: Boolean(fixedTarget || options.agentTarget),
       envelope: options.envelope,
       submission: options.submission,
       context: {

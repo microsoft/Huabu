@@ -5,11 +5,14 @@
 // runtime surface get-or-creates / looks up / closes live handles; and the
 // I9.4 query surface reads durable records independently from handle liveness.
 
-import { defineDriver } from '@agenetes/runtime';
+import { mkdtempSync, rmSync } from 'node:fs';
+import path from 'node:path';
+
+import { AgenetesError, defineDriver } from '@agenetes/runtime';
 import { describe, expect, it, vi } from 'vitest';
 
 import { InMemoryEventLogStore } from './event-log.js';
-import { InMemoryThreadStore } from './thread-store.js';
+import { FileThreadStore, InMemoryThreadStore } from './thread-store.js';
 import { InMemoryTurnStore } from './turn-store.js';
 
 import { mountAgenetes } from './index.js';
@@ -84,6 +87,245 @@ function mount() {
 }
 
 describe('mounted Agenetes instance (M5 INST skeleton)', () => {
+  it('updates host metadata synchronously without spawning or changing spec/state', () => {
+    const threadStore = new InMemoryThreadStore();
+    const driver = stubDriver();
+    const create = vi.spyOn(driver, 'create');
+    const inst = mountAgenetes({ drivers: { external: driver }, threadStore });
+    const namespace = ns('host-metadata');
+    const record = {
+      driverSchemaVersion: 1,
+      spec: {
+        threadId: 'thread',
+        kind: 'external',
+        workloadType: 'Deployment' as const,
+        namespace,
+        spec: { note: 'original' },
+      },
+      state: { driverState: { sessionId: 'session' } },
+      hostMetadata: { untouched: ['keep'], details: { old: true } },
+    };
+    threadStore.upsert(namespace, 'thread', record);
+    const patch = {
+      label: 'host label',
+      details: { replacement: true },
+      nullable: null,
+    };
+    const updated = inst.updateHostMetadata(namespace, 'thread', patch);
+    expect(updated).not.toBeInstanceOf(Promise);
+    expect(updated.spec).toBe(record.spec);
+    expect(updated.state).toBe(record.state);
+    expect(updated.hostMetadata).toEqual({ untouched: ['keep'], ...patch });
+    expect(record.hostMetadata).toEqual({
+      untouched: ['keep'],
+      details: { old: true },
+    });
+    patch.details.replacement = false;
+    (updated.hostMetadata!.details as { replacement: boolean }).replacement =
+      false;
+    expect(inst.record(namespace, 'thread')?.hostMetadata?.details).toEqual({
+      replacement: true,
+    });
+    expect(inst.records(namespace)[0]?.hostMetadata).toEqual({
+      untouched: ['keep'],
+      label: 'host label',
+      details: { replacement: true },
+      nullable: null,
+    });
+    expect(
+      inst.updateHostMetadata(namespace, 'thread', {}).hostMetadata,
+    ).toEqual(inst.record(namespace, 'thread')?.hostMetadata);
+    expect(create).not.toHaveBeenCalled();
+    expect(inst.get('thread')).toBeUndefined();
+  });
+
+  it('throws a typed missing-thread error without creating a record or handle', () => {
+    const inst = mount();
+    const namespace = ns('host-metadata');
+    for (const threadId of ['missing', '']) {
+      expect(() =>
+        inst.updateHostMetadata(namespace, threadId, { label: 'host' }),
+      ).toThrow(AgenetesError);
+      expect(() => inst.updateHostMetadata(namespace, threadId, {})).toThrow(
+        expect.objectContaining({
+          code: 'thread_not_found',
+          details: { namespace: namespace.name, threadId },
+        }),
+      );
+      expect(inst.get(threadId)).toBeUndefined();
+    }
+    expect(inst.records(namespace)).toEqual([]);
+  });
+
+  it('rejects non-JSON patches without changing the durable record', () => {
+    const inst = mount();
+    const namespace = ns('host-metadata');
+    inst.create({
+      threadId: 'thread',
+      kind: 'external',
+      workloadType: 'Deployment',
+      namespace,
+      spec: {},
+    });
+    inst.updateHostMetadata(namespace, 'thread', { keep: true });
+    const before = inst.record(namespace, 'thread');
+    const cycle: Record<string, unknown> = {};
+    cycle.self = cycle;
+    for (const patch of [
+      null,
+      [],
+      'bad',
+      { value: undefined },
+      { value: NaN },
+      { value: Infinity },
+      { value: 1n },
+      { value: () => {} },
+      { value: Symbol() },
+      { value: new Date() },
+      cycle,
+    ]) {
+      expect(() =>
+        inst.updateHostMetadata(
+          namespace,
+          'thread',
+          patch as Record<string, unknown>,
+        ),
+      ).toThrow(expect.objectContaining({ code: 'invalid_host_metadata' }));
+      expect(inst.record(namespace, 'thread')).toEqual(before);
+    }
+    inst.close('thread');
+  });
+
+  it.each(['Deployment', 'Job'] as const)(
+    'preserves host metadata through file-backed restart, %s realization, and rehome',
+    (workloadType) => {
+      const scratch = mkdtempSync(
+        path.join(process.cwd(), '.agenetes-host-metadata-'),
+      );
+      try {
+        const namespace = ns('source', path.join(scratch, 'source'));
+        const targetNamespace = ns('target', path.join(scratch, 'target'));
+        const spec: StubSpec = {
+          threadId: 'thread',
+          kind: 'external',
+          workloadType,
+          namespace,
+          spec: { note: 'source' },
+        };
+        const threadStore = new FileThreadStore();
+        const state = { driverState: { sessionId: 'durable-session' } };
+        threadStore.upsert(namespace, spec.threadId, {
+          driverSchemaVersion: 1,
+          spec,
+          state,
+        });
+        const first = mountAgenetes({
+          drivers: { external: stubDriver() },
+          threadStore,
+        });
+        const hostMetadata = {
+          label: 'host label',
+          details: { origin: 'host' },
+        };
+        first.updateHostMetadata(namespace, spec.threadId, hostMetadata);
+        expect(first.get(spec.threadId)).toBeUndefined();
+
+        const restarted = mountAgenetes({
+          drivers: { external: stubDriver() },
+          threadStore: new FileThreadStore(),
+        });
+        expect(restarted.records(namespace)[0]?.hostMetadata).toEqual(
+          hostMetadata,
+        );
+        const recovered = restarted.create(spec) as unknown as StubHandle;
+        expect(recovered.createContext.recoveryInput?.state).toEqual(state);
+        expect(recovered.createContext.recoveryInput).not.toHaveProperty(
+          'hostMetadata',
+        );
+        expect(
+          restarted.record(namespace, spec.threadId)?.hostMetadata,
+        ).toEqual(hostMetadata);
+        restarted.close(spec.threadId);
+        const targetSpec = {
+          ...spec,
+          namespace: targetNamespace,
+          spec: { note: 'target' },
+        };
+        restarted.rehome({ namespace, threadId: spec.threadId }, targetSpec);
+        expect(restarted.record(namespace, spec.threadId)).toBeUndefined();
+
+        const afterMove = mountAgenetes({
+          drivers: { external: stubDriver() },
+          threadStore: new FileThreadStore(),
+        });
+        const moved = afterMove.create(targetSpec) as unknown as StubHandle;
+        expect(moved.createContext.recoveryInput?.state).toEqual(state);
+        expect(afterMove.record(targetNamespace, spec.threadId)).toEqual({
+          driverSchemaVersion: 1,
+          spec: targetSpec,
+          state,
+          hostMetadata,
+        });
+        expect(() =>
+          afterMove.updateHostMetadata(namespace, spec.threadId, {}),
+        ).toThrow(expect.objectContaining({ code: 'thread_not_found' }));
+        afterMove.close(spec.threadId);
+      } finally {
+        rmSync(scratch, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it('fork deep-copies host metadata while resetting driver state', () => {
+    const threadStore = new InMemoryThreadStore();
+    const inst = mountAgenetes({
+      drivers: { external: stubDriver() },
+      threadStore,
+    });
+    const namespace = ns('host-metadata');
+    const spec: StubSpec = {
+      threadId: 'source',
+      kind: 'external',
+      workloadType: 'Deployment',
+      namespace,
+      spec: {},
+    };
+    inst.create(spec);
+    const hostMetadata = {
+      label: 'source label',
+      details: { tags: ['source'] },
+    };
+    inst.updateHostMetadata(namespace, spec.threadId, hostMetadata);
+    inst.fork(
+      { namespace, threadId: spec.threadId },
+      { ...spec, threadId: 'target' },
+    );
+    expect(inst.record(namespace, 'target')?.hostMetadata).toEqual(
+      hostMetadata,
+    );
+    expect(
+      threadStore.get(namespace, 'target')?.hostMetadata?.details,
+    ).not.toBe(threadStore.get(namespace, 'source')?.hostMetadata?.details);
+    inst.updateHostMetadata(namespace, 'target', {
+      label: 'target label',
+      details: { tags: ['target'] },
+    });
+    inst.updateHostMetadata(namespace, 'source', { other: true });
+    expect(inst.record(namespace, 'source')?.hostMetadata).toEqual({
+      ...hostMetadata,
+      other: true,
+    });
+    expect(inst.record(namespace, 'target')?.hostMetadata).toEqual({
+      label: 'target label',
+      details: { tags: ['target'] },
+    });
+    expect(inst.record(namespace, 'target')?.state).toEqual({
+      driverState: {},
+    });
+    inst.close('source');
+    inst.close('target');
+  });
+
   it('create() get-or-creates by threadId and reuse ignores spec (I9.3)', () => {
     const inst = mount();
     const spec: StubSpec = {

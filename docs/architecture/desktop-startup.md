@@ -10,14 +10,20 @@
 ```
 app.whenReady()
   ├─ splash window opens                 ← first thing on screen
-  ├─ shell-PATH probe, port allocation
-  ├─ server fork + TCP readiness wait
-  ├─ main window created (show: false), loadURL(http://127.0.0.1:<port>)
+  ├─ local: shell-PATH probe, port allocation, server fork + TCP readiness
+  ├─ remote: validate --server + probe /api/deployment/readiness
+  ├─ main window created (show: false), loadURL(selected server origin)
   ├─ renderer parses the entry graph     ← nothing paints during this
   ├─ 'ready-to-show'  → main window shown, splash closed
   └─ renderer: init() → GET /api/workspace → PUT /api/workspace (activation)
                                            ← WorkspaceLoadingScreen covers this
 ```
+
+`pnpm start:desktop --server <URL>` selects a remote Huabu Server for the unpackaged production-bundle smoke test; packaged executables accept the same Electron process argument. The launcher forwards both `--server <URL>` and `--server=<URL>` to the main process, which accepts one credential-free HTTP or HTTPS origin and canonicalizes hostname case, default ports, and the trailing root slash. Query strings, fragments, repeated options, and path prefixes are rejected because the shipped SPA, `/api` routes, assets, SSE streams, and deep-link fallback share one root origin.
+
+When `--server` is omitted, startup retains the local utility-process Server, Electron `safeStorage` secret bridge, port retries, native local-folder picker, and graceful shutdown lifecycle. Remote mode starts or exposes none of those local-Server resources: the remote deployment owns its data, workspace paths, and credentials, while Electron loads its SPA so existing same-origin-relative API, streaming, and artifact URLs require no renderer configuration bridge. The preload marks this mode explicitly so the renderer never falls back to a Server-side native picker and instead accepts paths meaningful on the remote host. Startup probes `/api/deployment/readiness`; `401` with a Basic challenge means the Server is reachable and the subsequent navigation may request credentials, while network, TLS, Host-guard, incompatible authentication/response, and other HTTP failures stop startup without falling back locally.
+
+Electron handles remote Basic Auth in the main process. After the unauthenticated readiness probe returns a Basic challenge, a sandboxed credential window collects the username and password and the main process repeats the readiness request with those credentials; only a valid Huabu response may proceed to SPA navigation. The validated credentials satisfy Chromium's first exact-origin challenge and remain only in the current network session. URL-embedded credentials are rejected, the renderer never receives the username or password, and later challenges must be non-proxy Basic challenges from the same parsed origin. The response-header exemption and top-level navigation guard use the same exact-origin comparison rather than a string prefix.
 
 When no remembered workspace can be activated, the workspace guard redirects to the stable `/setup` route instead of rendering the setup page inside the guard. This keeps the route that owns the post-activation navigation mounted while `selectWorkspace()` publishes `isReady`; after activation it navigates through `/` to `/spaces` (or World when enabled).
 
@@ -53,6 +59,10 @@ Verify after touching any of this by building and reading the emitted `dist/inde
 | File/dir                                                                                                 | Responsibility                                                                         |
 | -------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
 | [apps/desktop/src/main.ts](../../apps/desktop/src/main.ts)                                               | `createSplashWindow` / `closeSplashWindow`, the `show: false` + `ready-to-show` reveal |
+| [apps/desktop/src/server-target.ts](../../apps/desktop/src/server-target.ts)                             | Parse and normalize `--server`, probe remote readiness, and compare exact origins.     |
+| [apps/desktop/src/remote-basic-auth.ts](../../apps/desktop/src/remote-basic-auth.ts)                     | Scope Basic Auth challenges and own the sandboxed credential prompt.                   |
+| [apps/desktop/src/auth-preload.ts](../../apps/desktop/src/auth-preload.ts)                               | Narrow submit/cancel bridge for the credential prompt.                                 |
+| [apps/desktop/scripts/dev.mjs](../../apps/desktop/scripts/dev.mjs)                                       | Forward production-smoke-test CLI arguments into Electron.                             |
 | [apps/desktop/scripts/build-splash.mjs](../../apps/desktop/scripts/build-splash.mjs)                     | Generates the self-contained `dist/splash.html`                                        |
 | [apps/web/vite.config.ts](../../apps/web/vite.config.ts)                                                 | `manualChunks` — the vendor chunk boundaries described above                           |
 | [apps/web/src/App.tsx](../../apps/web/src/App.tsx)                                                       | Lazy canvas route; workspace bootstrap that drives `WorkspaceLoadingScreen`            |

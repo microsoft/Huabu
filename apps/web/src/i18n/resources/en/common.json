@@ -257,6 +257,8 @@
     "inputMode_pen": "Pen",
     "inputMode_finger": "Finger",
     "automaticResolved": "Auto ({{mode}})",
+    "recentChatTurns": "Recent chat turns",
+    "recentChatTurnsDescription": "Initially load this many complete conversation turns. Earlier turns remain available on demand (1–20).",
     "externalAgentIdleTimeout": "External agent idle timeout",
     "externalAgentIdleTimeoutDescription": "Suspend inactive external-agent processes after this duration. Changes apply to newly started or resumed processes.",
     "externalAgentIdleTimeoutSaved": "External agent idle timeout updated",
@@ -630,6 +632,8 @@
     }
   },
   "chat": {
+    "showEarlierTurns": "Show {{count}} earlier turns",
+    "loadingEarlierTurns": "Loading earlier turns…",
     "open": "Open Chat",
     "close": "Close Chat",
     "openPanel": "Open chat panel",
@@ -655,6 +659,8 @@
     "agentHeading": "Agent",
     "currentAgentThread": "Current agent for this conversation",
     "newConversation": "New conversation",
+    "titleSaveFailed": "Could not sync conversation title",
+    "renameTitle": "Rename conversation",
     "newChatWith": "New chat with {{name}}",
     "saveAsQuestion": "Save chat as Agent Node",
     "startChatWith": "Start chat with…",

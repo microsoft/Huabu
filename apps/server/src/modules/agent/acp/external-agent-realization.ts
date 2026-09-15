@@ -24,6 +24,7 @@ import {
   type AgentNodeTarget,
   type FixedAgentNodeTarget,
 } from '../agent-thread-resolver.js';
+import { conversationTitleService } from '../conversation-title.service.js';
 import { resolveSpacePrompt } from '../space-instruction-frames.js';
 import { acquireAgentTurn } from '../turn-lease.js';
 import { ensureProfileCacheSubscription } from './profile-cache-port.js';
@@ -91,6 +92,7 @@ interface RealizationDependencies {
   createHandle: (spec: AcpWorkloadSpec) => AcpHandle;
   buildSpec: typeof buildAcpWorkloadSpec;
   subscribeProfileCache: typeof ensureProfileCacheSubscription;
+  subscribeTitles?: (canvasId: string, threadId: string) => void;
   ensureSession: (
     realized: RealizedExternalAgentThread,
     logger: FastifyBaseLogger,
@@ -150,6 +152,8 @@ const DEFAULT_DEPENDENCIES: RealizationDependencies = {
   createHandle: (spec) => agenetes.create(spec) as AcpHandle,
   buildSpec: buildAcpWorkloadSpec,
   subscribeProfileCache: ensureProfileCacheSubscription,
+  subscribeTitles: (canvasId, threadId) =>
+    conversationTitleService.subscribe(canvasId, threadId),
   ensureSession: ensureSessionFromCanonicalSpec,
   confirmBinding: (...args) => agentNodeBinding.confirm(...args),
   acquireTurn: acquireAgentTurn,
@@ -262,6 +266,12 @@ export class ExternalAgentRealizationService {
         options.threadId,
         binding.profileId,
       );
+      if (!agentTarget && !fixedTarget) {
+        this.dependencies.subscribeTitles?.(
+          options.canvasId ?? '',
+          options.threadId,
+        );
+      }
       return realized;
     }
 
@@ -350,6 +360,12 @@ export class ExternalAgentRealizationService {
       options.threadId,
       binding.profileId,
     );
+    if (!agentTarget && !fixedTarget) {
+      this.dependencies.subscribeTitles?.(
+        options.canvasId ?? '',
+        options.threadId,
+      );
+    }
     return realized;
   }
 

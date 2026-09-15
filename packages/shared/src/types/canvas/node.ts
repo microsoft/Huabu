@@ -318,6 +318,7 @@ export interface BaseNodeData {
    * Who last set the label.
    * - 'auto': derived from content (H1 / first line). May be overwritten automatically.
    * - 'user': manually set by the user. Auto-title will not overwrite this.
+   * - 'agent': agent-authored or copied from a nonmanual Chat title. Auto-title will not overwrite this.
    * Absent means the label was generated at node creation time (treated like 'auto').
    */
   labelSource?: LabelSource;

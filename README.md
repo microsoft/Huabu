@@ -65,6 +65,20 @@ pnpm run dev:desktop
 
 This launches the desktop app (recommended), starting the server, the web client, and the shared package in watch mode, then opening Huabu in its own desktop window.
 
+To smoke-test the production bundles with Electron and its default local Server, run:
+
+```bash
+pnpm start:desktop
+```
+
+To connect that Electron client to an existing remote Huabu Server instead, pass its HTTP or HTTPS origin:
+
+```bash
+pnpm start:desktop --server https://huabu.example.com:8443
+```
+
+The remote address must be an origin without credentials, a query, fragment, or path prefix. Remote mode does not start a local Server; when the remote deployment uses HTTP Basic Auth, Electron prompts for the username and password for the current session.
+
 ### Standalone web access
 
 `pnpm start:web` serves the compiled web application and API from one Fastify process. It remains loopback-only by default. To make the single-owner application reachable on a network, configure the bind address, every hostname or IP used in the browser, and complete Basic Auth:

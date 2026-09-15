@@ -54,7 +54,11 @@ export const AcpConnectionBadge: FC<AcpConnectionBadgeProps> = ({
   const { t } = useTranslation();
   if (status === 'connecting') {
     return (
-      <Tooltip content={t('chat.connecting')} placement="bottom">
+      <Tooltip
+        content={t('chat.connecting')}
+        placement="bottom"
+        wrapperClassName="inline-flex shrink-0"
+      >
         <span
           className="inline-flex shrink-0 items-center gap-1 px-0.5 py-0.5"
           aria-label={t('chat.connecting')}
@@ -70,7 +74,11 @@ export const AcpConnectionBadge: FC<AcpConnectionBadgeProps> = ({
 
   if (status === 'connected') {
     return (
-      <Tooltip content={t('chat.connected')} placement="bottom">
+      <Tooltip
+        content={t('chat.connected')}
+        placement="bottom"
+        wrapperClassName="inline-flex shrink-0"
+      >
         <span
           className="inline-flex shrink-0 items-center gap-1 px-0.5 py-0.5"
           aria-label={t('chat.connected')}
@@ -98,6 +106,7 @@ export const AcpConnectionBadge: FC<AcpConnectionBadgeProps> = ({
     <Tooltip
       content={tooltipText}
       placement="bottom"
+      wrapperClassName="inline-flex shrink-0"
       contentClassName="whitespace-pre-line"
     >
       <span

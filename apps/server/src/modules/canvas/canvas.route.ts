@@ -72,6 +72,7 @@ import { MAX_UPLOAD_BYTES } from '../../upload-limits.js';
 import { AgentNodeBindingError } from '../agent/agent-node-binding.js';
 import { ARTIFACT_URL_REGEX } from '../artifact/utils.js';
 import { getPreprocessDispatcher, getProfile } from '../preprocessing/index.js';
+import { isLabelProtected } from '../preprocessing/label-policy.js';
 import { stripOfficeparserPreamble } from '../preprocessing/loaders/office-strip.js';
 import {
   space,
@@ -751,9 +752,12 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         typeof existing?.content === 'string' &&
         existing.content.length > 0;
       const safeBody = wouldClobber ? existing!.content : body;
+      const protectAutomaticLabel =
+        labelSource === 'auto' &&
+        isLabelProtected(existing?.['labelSource'], existing?.label);
       // Label resolution: explicit `null` clears; absent leaves it untouched.
       const resolvedLabel =
-        incomingLabel === undefined
+        protectAutomaticLabel || incomingLabel === undefined
           ? (existing?.label ?? null)
           : (incomingLabel ?? null);
 
@@ -771,7 +775,8 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
             : {}),
         content: safeBody,
       };
-      if (labelSource !== undefined) nodeContent['labelSource'] = labelSource;
+      if (labelSource !== undefined && !protectAutomaticLabel)
+        nodeContent['labelSource'] = labelSource;
       if (summary !== undefined) nodeContent['summary'] = summary;
       if (keywords !== undefined) nodeContent['keywords'] = keywords;
       if (provenance !== undefined) nodeContent['provenance'] = provenance;

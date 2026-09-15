@@ -23,6 +23,11 @@ import { getElectronBridge } from '@/hooks/useElectron';
 import { useEffectiveInputMode } from '@/hooks/useInputMode';
 import { supportedLngs, type SupportedLanguage } from '@/i18n';
 import useCanvasStore from '@/store/canvasStore';
+import {
+  MAX_RECENT_CHAT_TURNS,
+  MIN_RECENT_CHAT_TURNS,
+  useChatPreferencesStore,
+} from '@/store/chatPreferencesStore';
 import { useToolStore, type InputModePreference } from '@/store/toolStore';
 import { useWorkspaceStore } from '@/store/workspaceStore';
 
@@ -38,6 +43,13 @@ const LANGUAGE_OPTIONS = supportedLngs.map((lng) => ({
 }));
 
 const IDLE_TIMEOUT_PRESETS = new Set(['0', '300', '600', '1800', '3600']);
+const RECENT_TURN_OPTIONS = Array.from(
+  { length: MAX_RECENT_CHAT_TURNS - MIN_RECENT_CHAT_TURNS + 1 },
+  (_, index) => {
+    const value = String(index + MIN_RECENT_CHAT_TURNS);
+    return { value, label: value };
+  },
+);
 
 /**
  * General application settings. Language changes persist to `localStorage`
@@ -59,6 +71,12 @@ export const GeneralSettings: React.FC = () => {
   );
   const setInputModePreference = useToolStore(
     (state) => state.setInputModePreference,
+  );
+  const recentTurnCount = useChatPreferencesStore(
+    (state) => state.recentTurnCount,
+  );
+  const setRecentTurnCount = useChatPreferencesStore(
+    (state) => state.setRecentTurnCount,
   );
   const effectiveInputMode = useEffectiveInputMode();
   const [idleTimeoutSecs, setIdleTimeoutSecs] = useState(600);
@@ -302,6 +320,18 @@ export const GeneralSettings: React.FC = () => {
           onChange={setInputModePreference}
           title={t('settings.inputMode')}
           ariaLabel={t('settings.inputMode')}
+        />
+      </SettingRow>
+      <SettingRow
+        title={t('settings.recentChatTurns')}
+        description={t('settings.recentChatTurnsDescription')}
+      >
+        <Select
+          options={RECENT_TURN_OPTIONS}
+          value={String(recentTurnCount)}
+          onChange={(value) => setRecentTurnCount(Number(value))}
+          title={t('settings.recentChatTurns')}
+          ariaLabel={t('settings.recentChatTurns')}
         />
       </SettingRow>
       <SettingRow

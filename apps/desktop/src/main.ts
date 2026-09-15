@@ -36,7 +36,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
-import net from 'node:net';
+import nodeNet from 'node:net';
 import { release as getOsRelease } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 
@@ -45,6 +45,7 @@ import {
   BrowserWindow,
   dialog,
   ipcMain,
+  net as electronNet,
   safeStorage,
   session,
   shell,
@@ -53,9 +54,19 @@ import { utilityProcess, type UtilityProcess } from 'electron';
 
 import { applyApplicationMenu, registerMenuIpc } from './mac-menu.js';
 import {
+  promptForRemoteBasicAuth,
+  registerRemoteBasicAuth,
+} from './remote-basic-auth.js';
+import {
   DesktopSecureSecretStore,
   isDesktopSecretId,
 } from './secure-secrets.js';
+import {
+  isSameOrigin,
+  parseServerOption,
+  probeRemoteServer,
+  type BasicAuthCredentials,
+} from './server-target.js';
 import { TITLE_BAR_HEIGHT } from './title-bar.js';
 import { registerUpdaterIpc, startAutoUpdateChecks } from './updater.js';
 
@@ -296,6 +307,8 @@ async function ensureShellPath(): Promise<void> {
 
 let serverProcess: UtilityProcess | null = null;
 let serverPort = 0;
+let applicationUrl: string | null = null;
+let remoteServerOrigin: string | null = null;
 let secureSecretStore: DesktopSecureSecretStore | null = null;
 /**
  * Ring buffer of the server child's most recent stderr output. Reset on
@@ -672,7 +685,7 @@ function waitForPort(
 
     function attempt() {
       if (settled) return;
-      const socket = net.connect(port, '127.0.0.1', () => {
+      const socket = nodeNet.connect(port, '127.0.0.1', () => {
         socket.destroy();
         finishOk();
       });
@@ -708,7 +721,10 @@ function registerDiagnosticsIpc(): void {
     'diagnostics:open-server-log',
     async (): Promise<{ ok: true } | { ok: false; error: string }> => {
       const configuredDataDir = process.env.HUABU_DATA_DIR?.trim();
-      if (getExternalServerUrl() && !configuredDataDir) {
+      if (
+        (getExternalServerUrl() || remoteServerOrigin) &&
+        !configuredDataDir
+      ) {
         return {
           ok: false,
           error:
@@ -909,7 +925,7 @@ function configureWebSession(serverOrigin: string): void {
       // Leave our own origin alone — stripping CSP from our SPA would be
       // a self-inflicted XSS expansion. Match the runtime origin so HMR
       // dev servers and the loopback server are both covered.
-      if (details.url.startsWith(serverOrigin)) {
+      if (isSameOrigin(details.url, serverOrigin)) {
         callback({});
         return;
       }
@@ -935,7 +951,7 @@ function configureWebSession(serverOrigin: string): void {
   );
 }
 
-function createWindow(port: number): void {
+function createWindow(url: string): void {
   // Per-platform title bar setup. The Huabu renderer always paints
   // its own 36px tall `WindowChrome` strip; what differs across OSes is
   // *who* draws the caption buttons (min/max/close):
@@ -988,6 +1004,7 @@ function createWindow(port: number): void {
     ...platformChrome,
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
+      additionalArguments: remoteServerOrigin ? ['--huabu-remote-server'] : [],
       contextIsolation: true,
       nodeIntegration: false,
       // The preload script only touches `contextBridge`, `process.versions`
@@ -1018,11 +1035,6 @@ function createWindow(port: number): void {
   win.webContents.on('did-fail-load', () => reveal());
   win.once('closed', () => clearTimeout(revealTimer));
 
-  // In dev, allow loading the Vite dev server for hot-reloadable web work.
-  const devServerUrl = process.env.WEB_DEV_SERVER_URL;
-  const url =
-    IS_DEV && devServerUrl ? devServerUrl : `http://127.0.0.1:${port}`;
-
   void mainWindow.loadURL(url);
 
   // Open external links in the user's default browser, not inside Electron.
@@ -1044,7 +1056,7 @@ function createWindow(port: number): void {
   // could redirect the renderer at `file://` or an attacker-controlled
   // HTTP origin while keeping the Electron preload context alive.
   mainWindow.webContents.on('will-navigate', (event, targetUrl) => {
-    if (targetUrl.startsWith(url)) return;
+    if (isSameOrigin(targetUrl, new URL(url).origin)) return;
     event.preventDefault();
     if (/^https?:/i.test(targetUrl)) {
       void shell.openExternal(targetUrl);
@@ -1122,6 +1134,16 @@ app.whenReady().then(async () => {
     return;
   }
 
+  let requestedRemoteOrigin: string | undefined;
+  try {
+    requestedRemoteOrigin = parseServerOption(process.argv);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    dialog.showErrorBox('Invalid Huabu Server address', message);
+    app.quit();
+    return;
+  }
+
   // First thing on screen. Everything below — the shell-PATH probe, port
   // allocation, the server fork and its readiness wait — happens before a
   // window can even be created, and the renderer then needs to parse its
@@ -1145,7 +1167,9 @@ app.whenReady().then(async () => {
   // bridge is ready on the first render.
   registerWindowIpc();
   registerDiagnosticsIpc();
-  registerDialogIpc();
+  if (!requestedRemoteOrigin) {
+    registerDialogIpc();
+  }
   registerMenuIpc(() => mainWindow);
   // Auto-update IPC must exist before the first render so the preload
   // bridge's `update:get-state` / `update:check` calls always resolve.
@@ -1164,7 +1188,13 @@ app.whenReady().then(async () => {
 
   try {
     const external = getExternalServerUrl();
-    if (!external) {
+    let remoteCredentials: BasicAuthCredentials | undefined;
+    if (requestedRemoteOrigin && external) {
+      throw new Error(
+        'The --server option cannot be combined with the internal EXTERNAL_SERVER_URL development configuration.',
+      );
+    }
+    if (!external && !requestedRemoteOrigin) {
       if (!safeStorage.isEncryptionAvailable()) {
         throw new Error(
           'Operating-system credential encryption is unavailable.',
@@ -1194,9 +1224,45 @@ app.whenReady().then(async () => {
     // server so host-CLI detection (`which copilot` / `claude` /
     // `gemini`) sees the same entries the user has in their Terminal.
     // See `ensureShellPath` for rationale.
-    await ensureShellPath();
+    if (!requestedRemoteOrigin) {
+      await ensureShellPath();
+    }
 
-    if (external) {
+    if (requestedRemoteOrigin) {
+      remoteServerOrigin = requestedRemoteOrigin;
+      console.log(
+        `[desktop] Using remote server at ${requestedRemoteOrigin} (skipping in-process fork)`,
+      );
+      let probe = await probeRemoteServer(
+        requestedRemoteOrigin,
+        (input, init) => electronNet.fetch(input.toString(), init),
+      );
+      let isRetry = false;
+      while (probe.authenticationRequired) {
+        console.log(
+          `[desktop] Remote server at ${requestedRemoteOrigin} requires Basic Auth`,
+        );
+        const credentials = await promptForRemoteBasicAuth(
+          requestedRemoteOrigin,
+          probe.realm ?? 'Huabu',
+          null,
+          isRetry,
+        );
+        if (!credentials) {
+          throw new Error(
+            `Authentication is required to connect to ${requestedRemoteOrigin}.`,
+          );
+        }
+        remoteCredentials = credentials;
+        probe = await probeRemoteServer(
+          requestedRemoteOrigin,
+          (input, init) => electronNet.fetch(input.toString(), init),
+          10_000,
+          credentials,
+        );
+        isRetry = true;
+      }
+    } else if (external) {
       // External dev server: don't fork our own, just point at the
       // already-running one. We still wait for the port so the window
       // doesn't load before the server can answer `/api/*`.
@@ -1258,10 +1324,28 @@ app.whenReady().then(async () => {
       if (lastErr) throw lastErr;
     }
     const devServerUrl = process.env.WEB_DEV_SERVER_URL;
-    const serverOrigin =
-      IS_DEV && devServerUrl ? devServerUrl : `http://127.0.0.1:${serverPort}`;
+    applicationUrl = requestedRemoteOrigin
+      ? requestedRemoteOrigin
+      : IS_DEV && devServerUrl
+        ? devServerUrl
+        : `http://127.0.0.1:${serverPort}`;
+    const serverOrigin = new URL(applicationUrl).origin;
     configureWebSession(serverOrigin);
-    createWindow(serverPort);
+    if (requestedRemoteOrigin) {
+      registerRemoteBasicAuth(
+        requestedRemoteOrigin,
+        () => mainWindow,
+        () => {
+          dialog.showErrorBox(
+            'Remote Huabu Server authentication cancelled',
+            `Authentication is required to connect to ${requestedRemoteOrigin}.`,
+          );
+          app.quit();
+        },
+        remoteCredentials,
+      );
+    }
+    createWindow(applicationUrl);
     // Begin background update checks now that a window exists to receive
     // status events. No-op unless the app is packaged.
     startAutoUpdateChecks();
@@ -1277,8 +1361,8 @@ app.whenReady().then(async () => {
 
 // macOS: re-create window when dock icon is clicked and no windows are open.
 app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0 && serverPort > 0) {
-    createWindow(serverPort);
+  if (BrowserWindow.getAllWindows().length === 0 && applicationUrl) {
+    createWindow(applicationUrl);
   }
 });
 
@@ -1293,10 +1377,10 @@ app.on('second-instance', () => {
     if (win.isMinimized()) win.restore();
     win.show();
     win.focus();
-  } else if (serverPort > 0) {
+  } else if (applicationUrl) {
     // Window was closed (Windows/Linux keep the app alive only while a
     // window exists, but a race is possible) — recreate it.
-    createWindow(serverPort);
+    createWindow(applicationUrl);
   }
 });
 

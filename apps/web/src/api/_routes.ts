@@ -117,9 +117,25 @@ export const routes = {
 
   // ── Agent ─────────────────────────────────────────────────────────
   agent: '/agent',
+  conversationTitles: '/agent/threads/titles/query',
+  conversationTitle: (threadId: string, canvasId: string) =>
+    `/agent/threads/${enc(threadId)}/title?canvasId=${enc(canvasId)}`,
   agentHistory: (threadId: string, canvasId?: string) => {
     const params = canvasId ? `?canvasId=${enc(canvasId)}` : '';
     return `/agent/history/${enc(threadId)}${params}`;
+  },
+  agentHistoryPage: (
+    threadId: string,
+    canvasId: string,
+    limit: number,
+    before?: string,
+  ) => {
+    const params = new URLSearchParams({
+      canvasId,
+      limit: String(limit),
+    });
+    if (before) params.set('before', before);
+    return `/agent/history/${enc(threadId)}/page?${params.toString()}`;
   },
   agentHistoryFork: (threadId: string, canvasId?: string) => {
     const params = canvasId ? `?canvasId=${enc(canvasId)}` : '';
