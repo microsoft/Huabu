@@ -16,11 +16,15 @@ import { openNewCanvas, paneCenter } from './helpers';
 // synthetic. Never import the store or invoke lifecycle methods from the page.
 const writes = new WeakMap<Page, { pending: Set<Request>; last: number }>();
 const errors = new WeakMap<Page, string[]>();
+const injectedFailures = new WeakMap<Page, Set<Request>>();
+const expectedDiagnostics = new WeakMap<Page, string[]>();
 
 test.beforeEach(async ({ page, context }, testInfo) => {
   const state = { pending: new Set<Request>(), last: Date.now() };
   writes.set(page, state);
   errors.set(page, []);
+  injectedFailures.set(page, new Set());
+  expectedDiagnostics.set(page, []);
   page.on('request', (request) => {
     if (/^(POST|PUT|PATCH|DELETE)$/.test(request.method())) {
       state.pending.add(request);
@@ -34,9 +38,45 @@ test.beforeEach(async ({ page, context }, testInfo) => {
   page.on('requestfailed', finished);
   page.on('pageerror', (error) => errors.get(page)?.push(error.message));
   page.on('console', (message) => {
-    if (message.type() === 'error') errors.get(page)?.push(message.text());
+    if (message.type() !== 'error') return;
+    const injected = [...(injectedFailures.get(page) ?? [])].some(
+      (request) => request.url() === message.location().url,
+    );
+    const injectedSaveFailure = [...(injectedFailures.get(page) ?? [])].some(
+      (request) => {
+        const nodeId = new URL(request.url()).pathname
+          .split('/nodes/')[1]
+          ?.split('/')[0];
+        return (
+          !!nodeId &&
+          message
+            .text()
+            .startsWith(
+              `Node content save failed: ${nodeId} ApiError: Failed to save node content`,
+            ) &&
+          message
+            .location()
+            .url.includes('/store/canvasStore/save/nodeContentQueue.ts')
+        );
+      },
+    );
+    if (
+      injectedSaveFailure ||
+      (injected &&
+        message.text() ===
+          'Failed to load resource: the server responded with a status of 503 (Service Unavailable)')
+    ) {
+      expectedDiagnostics.get(page)?.push(message.text());
+    } else errors.get(page)?.push(message.text());
   });
   page.on('response', (response) => {
+    if (
+      response.status() === 503 &&
+      injectedFailures.get(page)?.has(response.request())
+    ) {
+      expectedDiagnostics.get(page)?.push(`Injected 503 PUT ${response.url()}`);
+      return;
+    }
     if (response.status() >= 400)
       errors.get(page)?.push(`${response.status()} ${response.url()}`);
   });
@@ -67,6 +107,10 @@ test.beforeEach(async ({ page, context }, testInfo) => {
 test.afterEach(async ({ page }, testInfo) => {
   await testInfo.attach('browser-errors', {
     body: JSON.stringify(errors.get(page)),
+    contentType: 'application/json',
+  });
+  await testInfo.attach('expected-fault-diagnostics', {
+    body: JSON.stringify(expectedDiagnostics.get(page)),
     contentType: 'application/json',
   });
   expect(errors.get(page)).toEqual([]);
@@ -243,6 +287,75 @@ test('new Note settle during restored content PUT waits and resumes with latest 
   await page.reload();
   await expect(page.locator(`[data-id="${nodeId}"]`)).toContainText(
     'Edited while restore is saving',
+  );
+});
+
+test('failed restored PUT retains fresh work until the user clicks Retry', async ({
+  page,
+}, testInfo) => {
+  const { note, nodeId } = await noteFixture(page);
+  await remove(page, note);
+  await quiet(page);
+  let failWrites = true;
+  let failedWrites = 0;
+  let successfulWrites = 0;
+  await page.route(`**/nodes/${nodeId}/content`, async (route) => {
+    if (route.request().method() !== 'PUT') {
+      await route.continue();
+      return;
+    }
+    if (failWrites) {
+      injectedFailures.get(page)?.add(route.request());
+      failedWrites += 1;
+      await route.fulfill({
+        status: 503,
+        json: { error: 'Acceptance: restored content temporarily unavailable' },
+      });
+    } else {
+      const response = await route.fetch();
+      expect(response.ok()).toBe(true);
+      successfulWrites += 1;
+      await route.fulfill({ response });
+    }
+  });
+  const held = await holdPreprocessing(page, nodeId);
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect(note).toBeVisible();
+  await expect.poll(() => failedWrites).toBeGreaterThan(0);
+  const retry = page.getByRole('button', { name: 'Retry', exact: true });
+  await expect(retry).toBeVisible();
+  await editNote(page, note, 'Latest body retained through save failure');
+  await quiet(page);
+  await expect(pending(note)).toBeVisible();
+  expect(held).toHaveLength(0);
+  expect(successfulWrites).toBe(0);
+  await page.screenshot({
+    path: testInfo.outputPath('blocked-before-retry.png'),
+  });
+  failWrites = false;
+  // Removing the fault alone must not release demand; success is required.
+  await observeNoNewRequests(() => held.length, 0);
+  expect(successfulWrites).toBe(0);
+  await retry.click();
+  await expect.poll(() => successfulWrites).toBeGreaterThan(0);
+  await expect.poll(() => held.length).toBe(1);
+  expect(held[0].request().postDataJSON().snapshot.content).toContain(
+    'Latest body retained through save failure',
+  );
+  await succeed(held[0], 'Retry recovered result');
+  await expect(pending(note)).toHaveCount(0);
+  await expect(retry).toHaveCount(0);
+  await quiet(page);
+  expect(held).toHaveLength(1);
+  expect(await body(page, nodeId)).toContain(
+    'Latest body retained through save failure',
+  );
+  await page.reload();
+  await expect(page.locator(`[data-id="${nodeId}"]`)).toContainText(
+    'Latest body retained through save failure',
+  );
+  expect(await body(page, nodeId)).toContain(
+    'Latest body retained through save failure',
   );
 });
 
