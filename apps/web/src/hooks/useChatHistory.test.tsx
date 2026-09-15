@@ -57,6 +57,10 @@ vi.mock('@/store/canvasStore', () => {
 });
 
 vi.mock('./useAgentStream', () => ({ handleStreamEvent: vi.fn() }));
+vi.mock('@/api/conversationTitles', () => ({
+  queryConversationTitles: async () => ({ titles: {} }),
+  setConversationTitle: vi.fn(),
+}));
 
 vi.mock('@/store/conversationOwner', () => ({
   ConversationIntegrityError: class ConversationIntegrityError extends Error {},

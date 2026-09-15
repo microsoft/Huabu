@@ -27,6 +27,7 @@ import {
   type MountedTestStorage,
 } from '../../storage/testing.js';
 import { canvasAcpNamespace } from '../../workspace/paths.js';
+import { effectiveConversationTitle } from '../conversation-title.service.js';
 
 import type { StorageProfile } from '../../storage/profile.js';
 import type {
@@ -35,6 +36,7 @@ import type {
   ThreadRecord,
 } from '@agenetes/agenetes';
 import type { AgentStateSnapshot, WorkloadSpec } from '@agenetes/protocol';
+import type { AgentHandle } from '@agenetes/runtime';
 
 const SQLITE: StorageProfile = {
   structured: { kind: 'sqlite' },
@@ -75,6 +77,86 @@ function threadRecord(threadId = THREAD_ID): ThreadRecord {
 }
 
 describe('Agenetes conversation stores on SQLite', () => {
+  it('preserves host title metadata through driver snapshots, restart, and rehome on SQLite', async () => {
+    const opened = await openWithSpace();
+    const namespace = canvasAcpNamespace(CANVAS_ID);
+    let report!: (snapshot: AgentStateSnapshot) => void;
+    const driver = defineDriver({
+      schemaVersion: 1,
+      workloadTypes: ['Deployment'],
+      specSchema: z.object({}),
+      stateSchema: z.object({}),
+      initialState: () => ({}),
+      create: () =>
+        ({
+          close() {},
+          onState(listener: typeof report) {
+            report = listener;
+            return () => {};
+          },
+        }) as unknown as AgentHandle,
+    });
+    const mount = () =>
+      mountAgenetes({
+        drivers: { test: driver },
+        threadStore: conversationThreadStore,
+        eventLogStore: conversationEventLogStore,
+        turnStore: conversationTurnStore,
+      });
+    const instance = mount();
+    instance.create({
+      kind: 'test',
+      workloadType: 'Deployment',
+      namespace,
+      threadId: THREAD_ID,
+      spec: {},
+    });
+    instance.updateHostMetadata(namespace, THREAD_ID, {
+      otherFeature: { kept: true },
+      huabuConversationTitle: {
+        title: 'Durable panel title',
+        source: 'user',
+      },
+    });
+    report({
+      driverState: {},
+      metadata: { sessionInfo: { title: '', updatedAt: null } },
+    });
+    const before = instance.record(namespace, THREAD_ID)!;
+    expect(effectiveConversationTitle(before)).toEqual({
+      title: 'Durable panel title',
+      source: 'user',
+    });
+    instance.close(THREAD_ID);
+    const reopenedStorage = await opened.reopen();
+    const restarted = mount();
+    expect(restarted.record(namespace, THREAD_ID)?.hostMetadata).toEqual(
+      before.hostMetadata,
+    );
+    expect(restarted.get(THREAD_ID)).toBeUndefined();
+    const targetId = 'canvas-title-target';
+    expect(
+      (
+        await reopenedStorage.structured
+          .spaces()
+          .create({ canvasId: targetId, title: 'Target' })
+      ).ok,
+    ).toBe(true);
+    const target = canvasAcpNamespace(targetId);
+    restarted.rehome(
+      { namespace, threadId: THREAD_ID },
+      { ...before.spec, namespace: target },
+    );
+    expect(restarted.record(namespace, THREAD_ID)).toBeUndefined();
+    const moved = restarted.record(target, THREAD_ID)!;
+    expect(moved.hostMetadata).toEqual(before.hostMetadata);
+    expect(effectiveConversationTitle(moved)).toEqual({
+      title: 'Durable panel title',
+      source: 'user',
+    });
+    expect(moved.state?.metadata?.sessionInfo?.title).toBe('');
+  });
+
   for (const kind of ['events', 'turns'] as const) {
     describe(`${kind} replacement`, () => {
       async function setupReplacement() {

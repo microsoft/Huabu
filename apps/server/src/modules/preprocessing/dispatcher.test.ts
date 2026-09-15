@@ -39,6 +39,50 @@ function planFor(request: PreprocessNodeRequest): string[] {
   return buildPlan(profile, request);
 }
 
+describe('buildPlan — question label gating', () => {
+  it('runs generate_label for an automatic question label', () => {
+    expect(
+      planFor(
+        req('question', {
+          content: 'First prompt',
+          title: 'Existing automatic label',
+          labelSource: 'auto',
+        }),
+      ),
+    ).toContain('generate_label');
+  });
+
+  it.each(['user', 'agent'])(
+    'protects every non-empty %s question label',
+    (labelSource) => {
+      expect(
+        planFor(
+          req('question', {
+            content: 'First prompt',
+            title: 'Authored',
+            labelSource,
+          }),
+        ),
+      ).not.toContain('generate_label');
+    },
+  );
+
+  it.each(['user', 'agent'])(
+    'allows generation when a %s question label is empty',
+    (labelSource) => {
+      expect(
+        planFor(
+          req('question', {
+            content: 'First prompt',
+            title: '',
+            labelSource,
+          }),
+        ),
+      ).toContain('generate_label');
+    },
+  );
+});
+
 describe('buildPlan — image label gating', () => {
   it('skips generate_label when a new image already has an agent label', () => {
     const plan = planFor(

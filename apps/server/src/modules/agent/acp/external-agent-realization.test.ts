@@ -74,6 +74,7 @@ function createHarness(options?: {
     control: vi.fn().mockResolvedValue({ ok: true }),
   } as unknown as AcpHandle;
   const createHandle = vi.fn(() => handle);
+  const subscribeTitles = vi.fn();
   const buildSpec = vi.fn(
     ({
       binding,
@@ -148,12 +149,14 @@ function createHarness(options?: {
     createHandle,
     buildSpec,
     subscribeProfileCache: vi.fn(),
+    subscribeTitles,
     ensureSession,
   });
   return {
     service,
     handle,
     createHandle,
+    subscribeTitles,
     buildSpec,
     collectSpacePrompt,
     ensureSession,
@@ -172,6 +175,7 @@ describe('ExternalAgentRealizationService', () => {
     });
 
     await harness.service.ensureSession(realized, logger);
+    expect(harness.subscribeTitles).not.toHaveBeenCalled();
     await realized.handle.control({
       type: 'set_mode',
       data: { modeId: 'plan' },
@@ -215,6 +219,7 @@ describe('ExternalAgentRealizationService', () => {
       'Huabu bootstrap',
       '<space_prompt>Space rules</space_prompt>',
     ]);
+    expect(harness.subscribeTitles).not.toHaveBeenCalled();
   });
 
   it('does not capture a Space Prompt for a node-less external thread', async () => {
@@ -233,6 +238,22 @@ describe('ExternalAgentRealizationService', () => {
 
     expect(harness.collectSpacePrompt).not.toHaveBeenCalled();
     expect(realized.spec.spec.initialPreamble).toEqual(['Huabu bootstrap']);
+    await harness.service.ensureSession(realized, logger);
+    await realized.handle.control({
+      type: 'set_mode',
+      data: { modeId: 'plan' },
+    });
+    expect(harness.subscribeTitles).toHaveBeenCalledWith(
+      'canvas-1',
+      'thread-1',
+    );
+    expect(harness.createHandle.mock.invocationCallOrder[0]).toBeLessThan(
+      harness.subscribeTitles.mock.invocationCallOrder[0],
+    );
+    expect(harness.subscribeTitles.mock.invocationCallOrder[0]).toBeLessThan(
+      harness.ensureSession.mock.invocationCallOrder[0],
+    );
+    expect(harness.handle.control).toHaveBeenCalledOnce();
   });
 
   it('rejects a fixed Profile mismatch before creating a workload', async () => {
@@ -315,7 +336,43 @@ describe('ExternalAgentRealizationService', () => {
     expect(realized.spec).toBe(persisted);
     expect(harness.buildSpec).not.toHaveBeenCalled();
     expect(harness.collectSpacePrompt).not.toHaveBeenCalled();
+    expect(harness.subscribeTitles).not.toHaveBeenCalled();
   });
+
+  it.each([false, true])(
+    'gates persisted-thread subscriptions by current selectable ownership (%s)',
+    async (questionOwned) => {
+      const initial = createHarness({ agentTarget: null });
+      const { spec } = await initial.service.realize({
+        threadId: 'thread-1',
+        canvasId: 'canvas-1',
+        requestedBinding: targetBinding,
+        fixedTarget: null,
+        logger,
+      });
+      const harness = createHarness({
+        agentTarget: questionOwned ? selectableTarget : null,
+        record: {
+          driverSchemaVersion: 1,
+          spec,
+          state: { driverState: { initialPreambleDelivered: false } },
+        },
+      });
+      const realized = await harness.service.realize({
+        threadId: 'thread-1',
+        canvasId: 'canvas-1',
+        fixedTarget: null,
+        logger,
+      });
+
+      await harness.service.ensureSession(realized, logger);
+      expect(harness.subscribeTitles).toHaveBeenCalledTimes(
+        questionOwned ? 0 : 1,
+      );
+      expect(harness.buildSpec).not.toHaveBeenCalled();
+      expect(harness.collectSpacePrompt).not.toHaveBeenCalled();
+    },
+  );
 
   it('single-flights simultaneous first interactions', async () => {
     let releaseCollection!: () => void;

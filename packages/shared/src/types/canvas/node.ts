@@ -256,10 +256,16 @@ export interface BlockProvenance {
    */
   kind?: 'modified' | 'inserted';
   /**
-   * Markdown of the block as it was right before the AI edit. Empty
-   * string for `kind === 'inserted'`.
+   * Markdown of the block at its last user-owned state. Sequential AI edits
+   * preserve this original baseline. Empty string for `kind === 'inserted'`.
    */
   baselineMarkdown: string;
+  /**
+   * Original normalized block fingerprint, without a duplicate occurrence
+   * suffix, captured with the full document's reference definitions.
+   * Preserved across AI rewrites; absent for insertions and legacy records.
+   */
+  baselineKey?: string;
   /** ISO timestamp when the AI edit was stamped. */
   at: string;
 }
@@ -271,7 +277,7 @@ export interface BlockProvenance {
 export interface DeletedBlockInfo {
   /** Fingerprint the deleted block had at the time of deletion. */
   key: string;
-  /** Markdown of the block before deletion. */
+  /** Markdown of the block at its last user-owned state. */
   baselineMarkdown: string;
   /**
    * Fingerprint of the surviving block this tombstone hangs after.
@@ -308,6 +314,7 @@ export interface BaseNodeData {
    * Who last set the label.
    * - 'auto': derived from content (H1 / first line). May be overwritten automatically.
    * - 'user': manually set by the user. Auto-title will not overwrite this.
+   * - 'agent': agent-authored or copied from a nonmanual Chat title. Auto-title will not overwrite this.
    * Absent means the label was generated at node creation time (treated like 'auto').
    */
   labelSource?: LabelSource;

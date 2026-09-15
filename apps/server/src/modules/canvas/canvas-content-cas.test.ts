@@ -87,6 +87,38 @@ afterEach(() => {
 });
 
 describe('PUT /nodes/:nodeId/content — content CAS', () => {
+  it.each(['user', 'agent'])(
+    'preserves a current %s Question label against a late preprocessing save',
+    async (labelSource) => {
+      const app = await buildApp();
+      try {
+        seedCanvas('c1', 'n1', 'Question');
+        await putContent(app, 'c1', 'n1', {
+          nodeType: 'question',
+          label: 'Protected',
+          labelSource,
+          content: 'Prompt',
+        });
+        const response = await putContent(app, 'c1', 'n1', {
+          nodeType: 'question',
+          label: 'Late automatic',
+          labelSource: 'auto',
+          summary: 'Independent summary',
+        });
+        expect(response.statusCode).toBe(200);
+        expect(response.json().label).toBe('Protected');
+        expect(getCanvasStore('c1').readNode('n1')).toMatchObject({
+          label: 'Protected',
+          labelSource,
+          content: 'Prompt',
+          summary: 'Independent summary',
+        });
+      } finally {
+        await app.close();
+      }
+    },
+  );
+
   it('creates a brand-new node when expectRev is the empty-content rev', async () => {
     const app = await buildApp();
     try {

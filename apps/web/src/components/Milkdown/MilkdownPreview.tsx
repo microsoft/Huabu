@@ -20,6 +20,7 @@
  * with `MilkdownEditor`); see `blockDrag.ts` for design notes.
  */
 
+import clsx from 'clsx';
 import { useCallback, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -265,7 +266,7 @@ export function MilkdownPreview(
   return (
     <div
       ref={containerRef}
-      className={className}
+      className={clsx('[&_a]:pointer-events-auto', className)}
       // Surface the read-only nature to assistive tech. In drag mode
       // we still keep the inner ProseMirror `contenteditable=true` so
       // the block-drag handle remains hit-testable, but we capture &

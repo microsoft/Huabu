@@ -26,6 +26,10 @@ import {
   resolveConversationOwnerSource,
   validateConversationView,
 } from '@/store/conversationOwner';
+import {
+  refreshConversationTitleAfterStream,
+  seedConversationTitle,
+} from '@/store/conversationTitleStore';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 
 import { claimAgentStream } from './agentStreamCoordinator';
@@ -308,6 +312,14 @@ export function useChatHistory(
           }));
         }
 
+        const serverMessages = historyTurnsToMessages(res.turns);
+        if (!effectiveConversationView) {
+          const firstUser = serverMessages.find(
+            (message) => message.role === 'user',
+          );
+          if (firstUser?.role === 'user')
+            seedConversationTitle(ownerCanvasId, finalTid, firstUser.content);
+        }
         applyInitialHistoryPage({ ...res, threadId: finalTid });
       })
       .catch((err: unknown) => {
@@ -556,10 +568,21 @@ export function useChatHistory(
             if (event.type === 'done') sawDone = true;
             if (!streaming) {
               streaming = true;
+              if (!effectiveConversationView)
+                refreshConversationTitleAfterStream(
+                  ownerCanvasId,
+                  ownerThreadId,
+                );
               setIsLoading(ownerThreadId, true);
               clearStaleMessages();
             }
-            handleStreamEvent(event, { threadId: ownerThreadId, assistantId });
+            handleStreamEvent(event, {
+              threadId: ownerThreadId,
+              assistantId,
+              titleCanvasId: effectiveConversationView
+                ? undefined
+                : ownerCanvasId,
+            });
           },
           onError: (err) => {
             if (cancelled) return;
@@ -581,6 +604,8 @@ export function useChatHistory(
           },
           onComplete: () => {
             if (cancelled) return;
+            if (!effectiveConversationView)
+              refreshConversationTitleAfterStream(ownerCanvasId, ownerThreadId);
             setIsLoading(ownerThreadId, false);
             // When the reconnect stream is the consumer that sees the run
             // finish, the originating `useQuestionRunner` callback may

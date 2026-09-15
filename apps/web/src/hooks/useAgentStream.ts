@@ -36,10 +36,16 @@ import {
   isHeadlessConversation,
   patchConversationOwnerNode,
   refreshConversationPresentation,
+  resolveConversationAgentBinding,
   resolveConversationOwnerSource,
   shouldComposeConversationOwner,
   validateConversationView,
 } from '@/store/conversationOwner';
+import {
+  receiveAcpConversationTitle,
+  refreshConversationTitleAfterStream,
+  seedConversationTitle,
+} from '@/store/conversationTitleStore';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 import { snapshotAgentIcon } from '@/utils/agentIcon';
@@ -139,6 +145,8 @@ interface StreamEventContext {
    */
   threadId: string;
   assistantId: string;
+  /** Only unbound chats mirror ACP title metadata; Questions use node labels. */
+  titleCanvasId?: string;
 }
 
 /**
@@ -602,6 +610,13 @@ export function handleStreamEvent(
     // the owning ChatPanel's mode/model/config selector dropdowns. If
     // that thread has no mounted panel (e.g. headless reconnect), drop.
     acpSessionMetaSinks.get(ctx.threadId)?.(event);
+    if (event.type === 'session_info_update' && ctx.titleCanvasId) {
+      receiveAcpConversationTitle(
+        ctx.titleCanvasId,
+        ctx.threadId,
+        event.data.title,
+      );
+    }
   }
 }
 
@@ -719,6 +734,8 @@ export function useAgentStream(
       }
 
       setThreadLastAction(threadId, agentMode);
+      if (!conversationView) seedConversationTitle(canvasId, threadId, prompt);
+      let titleCreationConfirmed = false;
 
       // Merge pending attachments + selection attachment into a single array.
       // Sketch-rasterization is now performed server-side in `agent.route.ts`
@@ -857,6 +874,15 @@ export function useAgentStream(
       let serverOwnsQuestionLifecycle = false;
       let isComposingQuestion = false;
       let serverSettingsConfirmed = false;
+      const canvasState = useCanvasStore.getState();
+      const ownerSource = conversationView
+        ? resolveConversationOwnerSource(
+            canvasState.canvasId,
+            canvasState.nodes,
+            canvasState.worldReferences,
+            conversationView,
+          )
+        : undefined;
 
       if (questionNodeId && conversationView) {
         // First send of a freshly-composed question node ⇔ the node is still
@@ -865,13 +891,6 @@ export function useAgentStream(
         // send we author the node's `content` and lock in the agent the user
         // picked in the inline selector (binding + built-in mode); follow-up
         // turns skip both.
-        const canvasState = useCanvasStore.getState();
-        const ownerSource = resolveConversationOwnerSource(
-          canvasState.canvasId,
-          canvasState.nodes,
-          canvasState.worldReferences,
-          conversationView,
-        );
         const isCompose = shouldComposeConversationOwner(ownerSource, headless);
         isComposingQuestion = isCompose;
         serverOwnsQuestionLifecycle =
@@ -884,9 +903,9 @@ export function useAgentStream(
             .getState()
             .updateNodeData(questionNodeId, { content: prompt });
         }
-        const selectedBinding = selectThreadBinding(
-          useChatStore.getState(),
-          threadId,
+        const selectedBinding = resolveConversationAgentBinding(
+          ownerSource,
+          selectThreadBinding(useChatStore.getState(), threadId),
         );
         const selectedProfile =
           selectedBinding.kind === 'external'
@@ -955,9 +974,9 @@ export function useAgentStream(
       // Snapshot the current thread's picker binding at send time. The server
       // uses it for selectable threads but replaces it with the persisted
       // binding when the thread resolves to a fixed Agent Node.
-      const agentBinding = selectThreadBinding(
-        useChatStore.getState(),
-        threadId,
+      const agentBinding = resolveConversationAgentBinding(
+        ownerSource,
+        selectThreadBinding(useChatStore.getState(), threadId),
       );
 
       // Build the canvas context, dropping the anchored question node
@@ -983,6 +1002,10 @@ export function useAgentStream(
           agentMode,
           {
             onEvent: (event: AgentStreamEvent) => {
+              if (!conversationView && !titleCreationConfirmed) {
+                titleCreationConfirmed = true;
+                refreshConversationTitleAfterStream(canvasId, threadId);
+              }
               if (isComposingQuestion && !serverSettingsConfirmed) {
                 serverSettingsConfirmed = true;
                 useChatStore.getState().makeThreadMetadataEphemeral(threadId);
@@ -991,6 +1014,7 @@ export function useAgentStream(
               handleStreamEvent(event, {
                 threadId,
                 assistantId,
+                titleCanvasId: conversationView ? undefined : canvasId,
               });
             },
             onError: (err) => {
@@ -1186,6 +1210,9 @@ export function useAgentStream(
           status: 'error',
           detail: err instanceof Error ? err.message : 'Unknown error',
         });
+      } finally {
+        if (!conversationView)
+          refreshConversationTitleAfterStream(canvasId, threadId);
       }
     },
     [

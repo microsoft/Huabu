@@ -38,6 +38,7 @@ import { contextBridge, ipcRenderer } from 'electron';
  * `TITLE_BAR_HEIGHT` in `./title-bar.ts` — see header comment.
  */
 const TITLE_BAR_HEIGHT = 36;
+const isRemoteServer = process.argv.includes('--huabu-remote-server');
 
 contextBridge.exposeInMainWorld('electronBridge', {
   versions: {
@@ -47,6 +48,8 @@ contextBridge.exposeInMainWorld('electronBridge', {
   },
   /** Flag for the web app to detect it is running inside Electron. */
   isElectron: true,
+  /** Remote mode must not expose client-machine filesystem affordances. */
+  isRemoteServer,
   /**
    * `process.platform` value forwarded to the renderer. Used by the
    * custom title bar (`WindowChrome`) to leave a left-side gutter on
@@ -131,16 +134,20 @@ contextBridge.exposeInMainWorld('electronBridge', {
    * `FolderBrowserDialog` for Electron's modern `openDirectory`
    * dialog (IFileOpenDialog on Windows, NSOpenPanel on macOS).
    */
-  dialog: {
-    pickFolder: (
-      title?: string,
-    ): Promise<
-      { ok: true; path: string } | { ok: false; reason: 'cancelled' }
-    > =>
-      ipcRenderer.invoke('dialog:pick-folder', title) as Promise<
-        { ok: true; path: string } | { ok: false; reason: 'cancelled' }
-      >,
-  },
+  ...(isRemoteServer
+    ? {}
+    : {
+        dialog: {
+          pickFolder: (
+            title?: string,
+          ): Promise<
+            { ok: true; path: string } | { ok: false; reason: 'cancelled' }
+          > =>
+            ipcRenderer.invoke('dialog:pick-folder', title) as Promise<
+              { ok: true; path: string } | { ok: false; reason: 'cancelled' }
+            >,
+        },
+      }),
 
   /**
    * Auto-update bridge (electron-updater). Real update operations only

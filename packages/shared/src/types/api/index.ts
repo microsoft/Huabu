@@ -21,6 +21,7 @@ export * from './integrations.js';
 export * from './preprocessing.js';
 export * from './agent.js';
 export * from './agent-history.js';
+export * from './conversation-title.js';
 export * from './agent-change-review.js';
 export * from './artifact.js';
 export * from './acp.js';

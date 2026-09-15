@@ -113,6 +113,9 @@ export const routes = {
 
   // ── Agent ─────────────────────────────────────────────────────────
   agent: '/agent',
+  conversationTitles: '/agent/threads/titles/query',
+  conversationTitle: (threadId: string, canvasId: string) =>
+    `/agent/threads/${enc(threadId)}/title?canvasId=${enc(canvasId)}`,
   agentHistory: (threadId: string, canvasId?: string) => {
     const params = canvasId ? `?canvasId=${enc(canvasId)}` : '';
     return `/agent/history/${enc(threadId)}${params}`;

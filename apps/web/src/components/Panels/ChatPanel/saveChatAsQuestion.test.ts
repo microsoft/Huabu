@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { saveChatAsQuestion } from './saveChatAsQuestion';
 
 import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
-import type { CanvasNodeId } from '@huabu/shared';
+import type { CanvasNodeId, ConversationTitle } from '@huabu/shared';
 
 const input: AddNodeInput & { id: CanvasNodeId } = {
   id: 'node-question-1',
@@ -15,18 +15,109 @@ const input: AddNodeInput & { id: CanvasNodeId } = {
 };
 
 describe('saveChatAsQuestion', () => {
+  it.each([
+    ['user', 'user'],
+    ['acp', 'agent'],
+    ['generated', 'agent'],
+    ['fallback', 'agent'],
+    [null, 'agent'],
+  ] as const)(
+    'copies the current %s title once with protected labelSource %s',
+    (source, labelSource) => {
+      const addNode = vi.fn();
+      saveChatAsQuestion(input, {
+        canvasId: 'canvas-1',
+        previewTabId: 'tab-1',
+        addNode,
+        nodeExists: () => true,
+        replaceTabTarget: vi.fn(),
+        conversationTitle: { title: 'Retained conversation name', source },
+      });
+      expect(addNode).toHaveBeenCalledWith({
+        ...input,
+        data: {
+          ...input.data,
+          label: 'Retained conversation name',
+          labelSource,
+        },
+      });
+    },
+  );
+
+  it.each<ConversationTitle | undefined>([
+    undefined,
+    { title: null, source: null },
+    { title: '', source: 'fallback' },
+  ])(
+    'preserves existing fallback input when no title is available (%j)',
+    (conversationTitle) => {
+      const addNode = vi.fn();
+      const fallbackInput = {
+        ...input,
+        data: {
+          ...input.data,
+          content: 'Existing first user prompt',
+          label: 'Existing fallback label',
+          labelSource: 'auto' as const,
+        },
+      };
+
+      saveChatAsQuestion(fallbackInput, {
+        canvasId: 'canvas-1',
+        previewTabId: 'tab-1',
+        conversationTitle,
+        addNode,
+        nodeExists: () => true,
+        replaceTabTarget: vi.fn(),
+      });
+
+      expect(addNode).toHaveBeenCalledWith(fallbackInput);
+    },
+  );
+
+  it('does not retain a live reference to the Chat title', () => {
+    const addNode = vi.fn();
+    const conversationTitle: ConversationTitle = {
+      title: 'Title at conversion',
+      source: 'acp',
+    };
+
+    saveChatAsQuestion(input, {
+      canvasId: 'canvas-1',
+      previewTabId: 'tab-1',
+      conversationTitle,
+      addNode,
+      nodeExists: () => true,
+      replaceTabTarget: vi.fn(),
+    });
+    conversationTitle.title = 'Later generated title';
+    conversationTitle.source = 'generated';
+
+    expect(addNode).toHaveBeenCalledTimes(1);
+    expect(addNode).toHaveBeenCalledWith({
+      ...input,
+      data: {
+        ...input.data,
+        label: 'Title at conversion',
+        labelSource: 'agent',
+      },
+    });
+  });
+
   it('replaces the workspace tab after node creation succeeds', () => {
     const replaceTabTarget = vi.fn();
+    const addNode = vi.fn();
 
     const saved = saveChatAsQuestion(input, {
       canvasId: 'canvas-1',
       previewTabId: 'tab-1',
-      addNode: vi.fn(),
+      addNode,
       nodeExists: () => true,
       replaceTabTarget,
     });
 
     expect(saved).toBe(true);
+    expect(addNode).toHaveBeenCalledWith(input);
     expect(replaceTabTarget).toHaveBeenCalledWith('tab-1', {
       kind: 'node',
       canvasId: 'canvas-1',

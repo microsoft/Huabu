@@ -659,6 +659,8 @@
     "agentHeading": "Agent",
     "currentAgentThread": "当前对话使用的 Agent",
     "newConversation": "新对话",
+    "titleSaveFailed": "无法同步对话标题",
+    "renameTitle": "重命名对话",
     "newChatWith": "使用 {{name}} 新建聊天",
     "saveAsQuestion": "将聊天保存为 Agent 节点",
     "startChatWith": "选择聊天对象…",

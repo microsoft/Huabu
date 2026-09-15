@@ -20,6 +20,10 @@ import { useTranslation } from 'react-i18next';
 
 import { getNodeIcon } from '@/config/nodeIcons';
 import useCanvasStore from '@/store/canvasStore';
+import {
+  getConversationTitle,
+  useConversationTitleStore,
+} from '@/store/conversationTitleStore';
 
 import { Button } from '../../Common/Button';
 import { cn } from '../../Common/cn';
@@ -62,13 +66,17 @@ function usePreviewTabPresentation(
       : undefined,
   );
   const isNode = target.kind === 'node';
+  const chatTitle = useConversationTitleStore((state) => {
+    if (target.kind !== 'chat') return undefined;
+    return getConversationTitle(target.canvasId, target.threadId, state).title;
+  });
   const label =
     isNode && typeof node?.data.label === 'string' ? node.data.label : '';
-  const title = isNode ? label || t('node.untitled') : t('preview.chatTab');
+  const title = isNode
+    ? label || t('node.untitled')
+    : chatTitle || t('chat.newConversation');
   const Icon = isNode ? getNodeIcon(node?.type, node?.data) : MessageSquare;
-  const accessibleName = isNode
-    ? `${title} (${node?.type ?? 'node'})`
-    : t('preview.chatTab');
+  const accessibleName = isNode ? `${title} (${node?.type ?? 'node'})` : title;
 
   return {
     title,
@@ -92,7 +100,7 @@ export function PreviewTabDragOverlay({ tab }: { tab: PreviewTabModel }) {
       )}
     >
       {Icon && <Icon size={14} className="shrink-0" />}
-      <span className="min-w-0 truncate">{title}</span>
+      <span className="max-w-full min-w-0 shrink truncate">{title}</span>
       <X size={13} className="ml-auto shrink-0" aria-hidden="true" />
     </div>
   );
@@ -186,11 +194,11 @@ export function PreviewTab({
       <Tooltip
         content={tabDescription}
         placement="bottom"
-        wrapperClassName="inline-flex min-w-0 flex-1"
+        wrapperClassName="inline-flex max-w-full min-w-0 flex-1"
       >
         <span
           data-testid="preview-tab-title"
-          className="group-hover:text-fg-subtle min-w-0 truncate transition-colors"
+          className="group-hover:text-fg-subtle max-w-full min-w-0 shrink truncate transition-colors"
         >
           {title}
         </span>

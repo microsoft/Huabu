@@ -27,13 +27,13 @@
     "@agentlet/protocol": "workspace:*"
   },
   "peerDependencies": {
-    "fastify": "^5.2.0"
+    "fastify": "^5.12.1"
   },
   "devDependencies": {
     "@types/ws": "^8.5.0",
-    "fastify": "^5.2.0",
+    "fastify": "^5.12.1",
     "typescript": "^5.9.0",
-    "vitest": "^4.0.18",
+    "vitest": "^4.1.11",
     "ws": "^8.18.0"
   }
 }

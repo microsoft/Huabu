@@ -9,6 +9,7 @@ import {
 } from '@agenetes/protocol';
 import { AgenetesError } from '@agenetes/runtime';
 
+import { copyHostMetadata } from './host-metadata.js';
 import { atomicWriteJson, sanitizeId } from './io.js';
 
 export const THREAD_STORE_SCHEMA_VERSION = 'agenetes-v2';
@@ -18,6 +19,8 @@ export interface ThreadRecord {
   readonly driverSchemaVersion: number;
   readonly spec: WorkloadSpec;
   readonly state: AgentStateSnapshot;
+  /** Host-owned JSON values, independent of wholesale driver snapshots. */
+  readonly hostMetadata?: Record<string, unknown>;
 }
 
 interface ThreadStoreFile {
@@ -121,6 +124,14 @@ export class FileThreadStore implements ThreadStore {
         },
       },
       state: parsedState.data,
+      ...(value.hostMetadata !== undefined
+        ? {
+            hostMetadata: copyHostMetadata(
+              value.hostMetadata,
+              'invalid_persisted_record',
+            ),
+          }
+        : {}),
     };
   }
 
@@ -143,7 +154,10 @@ export class FileThreadStore implements ThreadStore {
   #readFile(namespace: Namespace): ThreadStoreFile {
     const filePath = this.#path(namespace);
     if (!existsSync(filePath)) {
-      return { schemaVersion: THREAD_STORE_SCHEMA_VERSION, records: {} };
+      return {
+        schemaVersion: THREAD_STORE_SCHEMA_VERSION,
+        records: Object.create(null) as Record<string, ThreadRecord>,
+      };
     }
 
     let raw: unknown;
@@ -165,7 +179,7 @@ export class FileThreadStore implements ThreadStore {
       return this.#invalid(`invalid thread records in '${filePath}'`);
     }
 
-    const records: Record<string, ThreadRecord> = {};
+    const records = Object.create(null) as Record<string, ThreadRecord>;
     for (const [threadId, record] of Object.entries(
       value.records as Record<string, unknown>,
     )) {

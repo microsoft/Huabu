@@ -1,6 +1,6 @@
 // The instance's notification surface backing (README I9.7) — a per-thread
 // fan-out bus that turns the handle's push up-report into the L1-facing
-// `notifications(threadId): AsyncIterable<AgentMetadata>` pull view.
+// `notifications(threadId, namespace?): AsyncIterable<AgentMetadata>` pull view.
 //
 // Write side (push): the instance, as the sole ThreadStore writer, persists
 // each up-reported snapshot FIRST and THEN calls `publish(threadId, meta)`
@@ -26,19 +26,25 @@ interface Subscriber {
 }
 
 /**
- * A per-`threadId` publish/subscribe fan-out over `AgentMetadata`. The
- * instance owns one; it publishes on each up-report and hands `subscribe`'s
- * AsyncIterable back to L1 through `notifications(threadId)`.
+ * A publish/subscribe fan-out over `AgentMetadata`, keyed by optional scope
+ * and thread ID. The instance publishes to both the scoped and legacy channels
+ * on each up-report and hands `subscribe`'s AsyncIterable back to L1.
  */
 export class ThreadNotificationBus {
   readonly #byThread = new Map<string, Set<Subscriber>>();
 
+  // Tuple encoding keeps legacy and scoped channels distinct even when IDs
+  // contain separators or resemble serialized keys.
+  #key(threadId: string, scope?: string): string {
+    return JSON.stringify([scope ?? null, threadId]);
+  }
+
   /**
-   * Push a metadata snapshot to every live subscriber of `threadId`. A
+   * Push a metadata snapshot to every live subscriber of the exact channel. A
    * no-op when nobody is listening (L1 has not opened the stream yet).
    */
-  publish(threadId: string, metadata: AgentMetadata): void {
-    const subs = this.#byThread.get(threadId);
+  publish(threadId: string, metadata: AgentMetadata, scope?: string): void {
+    const subs = this.#byThread.get(this.#key(threadId, scope));
     if (!subs) return;
     for (const sub of subs) {
       if (sub.done) continue;
@@ -53,24 +59,28 @@ export class ThreadNotificationBus {
   }
 
   /**
-   * Open a metadata stream for `threadId`. The returned AsyncIterable
+   * Open a metadata stream for `threadId` in the optional scope. The returned AsyncIterable
    * yields each published snapshot in order and returns (ends the `for
    * await`) when the thread is closed via {@link closeThread} or the
    * consumer breaks out of the loop.
    */
-  subscribe(threadId: string): AsyncIterable<AgentMetadata> {
+  subscribe(
+    threadId: string,
+    namespace?: string,
+  ): AsyncIterable<AgentMetadata> {
+    const key = this.#key(threadId, namespace);
     const sub: Subscriber = { queue: [], resolve: undefined, done: false };
-    let scope = this.#byThread.get(threadId);
+    let scope = this.#byThread.get(key);
     if (!scope) {
       scope = new Set();
-      this.#byThread.set(threadId, scope);
+      this.#byThread.set(key, scope);
     }
     scope.add(sub);
 
     const remove = (): void => {
-      const set = this.#byThread.get(threadId);
+      const set = this.#byThread.get(key);
       set?.delete(sub);
-      if (set && set.size === 0) this.#byThread.delete(threadId);
+      if (set && set.size === 0) this.#byThread.delete(key);
     };
 
     const iterator: AsyncIterator<AgentMetadata> = {
@@ -102,11 +112,12 @@ export class ThreadNotificationBus {
   }
 
   /**
-   * End every live subscriber for `threadId` (each `for await` returns),
+   * End every live subscriber for the exact channel (each `for await` returns),
    * called when the thread's handle is closed. Idempotent.
    */
-  closeThread(threadId: string): void {
-    const subs = this.#byThread.get(threadId);
+  closeThread(threadId: string, scope?: string): void {
+    const key = this.#key(threadId, scope);
+    const subs = this.#byThread.get(key);
     if (!subs) return;
     for (const sub of subs) {
       sub.done = true;
@@ -116,6 +127,6 @@ export class ThreadNotificationBus {
         resolve({ value: undefined, done: true });
       }
     }
-    this.#byThread.delete(threadId);
+    this.#byThread.delete(key);
   }
 }

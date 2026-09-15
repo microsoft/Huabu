@@ -30,6 +30,7 @@ import { loadAgent, type AgentId } from '../../prompt/index.js';
 import { canvasAcpNamespace } from '../workspace/paths.js';
 import { renderInternalAgentInputs } from './conversation/prompt/build-prompt.js';
 import { dumpAssembledPrompt } from './conversation/prompt/debug-prompt.js';
+import { conversationTitleService } from './conversation-title.service.js';
 import { type ToolScope } from './tools/index.js';
 
 import type { HuabuSubmission } from './agenetes/handle.js';
@@ -93,6 +94,8 @@ export interface AgentRunOptions {
   threadId?: string;
   /** Current canvas ID available as implicit context for canvas-aware tools. */
   canvasId?: string;
+  /** Trusted upstream Question ownership; node labels are not Chat titles. */
+  questionOwned?: boolean;
   /**
    * This turn's structured input. When provided (the chat route), it is
    * rendered into the per-turn user message internally — symmetric with
@@ -285,6 +288,19 @@ export async function* runAgent(
   // pi-backed handle. Deployments get-or-create by `threadId`; Jobs mint a
   // fresh handle.
   const handle = agenetes.create(spec) as BuiltinHandle;
+  if (
+    workloadType === 'Deployment' &&
+    canvasId &&
+    deploymentThreadId &&
+    envelope &&
+    !options.questionOwned
+  ) {
+    void conversationTitleService.initialize(
+      canvasId,
+      deploymentThreadId,
+      envelope.user.text,
+    );
+  }
 
   // Apply any per-thread capability selection carried with this turn — a
   // model / reasoning effort the client picked (e.g. before the thread's

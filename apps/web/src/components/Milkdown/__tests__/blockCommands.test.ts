@@ -3,7 +3,7 @@
 
 // @vitest-environment happy-dom
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { isMac } from '@/utils/platform';
 
@@ -12,9 +12,13 @@ import { createMilkdown, type MilkdownInstance } from '../createMilkdown';
 let instances: MilkdownInstance[] = [];
 let roots: HTMLElement[] = [];
 
+beforeEach(() => {
+  vi.useFakeTimers();
+});
+
 async function mount(
   markdown: string,
-  overrides?: { editable?: boolean },
+  overrides?: { editable?: boolean; previewMode?: boolean },
 ): Promise<MilkdownInstance> {
   const root = document.createElement('div');
   document.body.appendChild(root);
@@ -32,6 +36,8 @@ async function mount(
 afterEach(async () => {
   await Promise.all(instances.map((instance) => instance.destroy()));
   for (const root of roots) root.remove();
+  vi.runOnlyPendingTimers();
+  vi.useRealTimers();
   instances = [];
   roots = [];
   vi.restoreAllMocks();
@@ -491,11 +497,28 @@ describe('Milkdown block commands', () => {
     expect(open).not.toHaveBeenCalled();
   });
 
-  it('opens a link on modifier-click in a read-only surface', async () => {
+  it('opens a link on plain click in a read-only surface', async () => {
     const open = vi.spyOn(window, 'open').mockReturnValue(null);
     await mount('see [docs](https://example.com) here', { editable: false });
 
-    clickLink({ modifier: true });
+    const event = clickLink({ modifier: false });
+
+    expect(open).toHaveBeenCalledWith(
+      'https://example.com',
+      '_blank',
+      'noopener,noreferrer',
+    );
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it('opens a link on plain click in a drag-only preview', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    await mount('see [docs](https://example.com) here', {
+      editable: true,
+      previewMode: true,
+    });
+
+    clickLink({ modifier: false });
 
     expect(open).toHaveBeenCalledWith(
       'https://example.com',

@@ -68,28 +68,37 @@ export const SidebarPanel = ({
   }
 
   return (
-    <div className={clsx('bg-surface flex h-full flex-col', className)}>
+    <div
+      className={clsx(
+        'bg-surface flex h-full max-w-full min-w-0 flex-col',
+        className,
+      )}
+    >
       {/* header */}
       {!hideHeader && (
         <div
           className={clsx(
-            'flex shrink-0 items-center justify-between',
+            'flex max-w-full min-w-0 shrink-0 items-center justify-between',
             !compactHeader && 'border-edge-default border-b',
             compactHeader ? 'h-9 px-2' : 'h-12 px-3',
           )}
         >
-          <div className="text-fg-muted flex min-w-0 flex-1 items-center text-sm font-semibold">
+          <div className="text-fg-muted flex max-w-full min-w-0 flex-1 items-center text-sm font-semibold">
             {hideTitle ? (
               <span className="sr-only">{title}</span>
             ) : tabs ? (
               tabs
             ) : (
-              title
+              <span className="min-w-0 truncate" title={title}>
+                {title}
+              </span>
             )}
           </div>
           <div className="flex shrink-0 items-center gap-1">
             {tools && (
-              <div className="text-fg-muted flex items-center">{tools}</div>
+              <div className="text-fg-muted flex shrink-0 items-center">
+                {tools}
+              </div>
             )}
             {tools && onToggle && (
               <span

@@ -23,6 +23,45 @@ afterEach(() => {
 });
 
 describe('MilkdownPreview accessibility', () => {
+  it('keeps links hit-testable when the preview host is not', async () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    act(() => {
+      root?.render(
+        <MilkdownPreview
+          markdown="[docs](https://example.com)"
+          className="pointer-events-none"
+        />,
+      );
+    });
+
+    await vi.waitFor(() => {
+      const anchor = container?.querySelector('a[href="https://example.com"]');
+      expect(anchor).not.toBeNull();
+      expect(anchor?.classList).toContain('nodrag');
+    });
+    expect(container.firstElementChild?.classList).toContain(
+      '[&_a]:pointer-events-auto',
+    );
+
+    act(() => {
+      root?.render(
+        <MilkdownPreview
+          markdown="[updated](https://example.org)"
+          className="pointer-events-none"
+        />,
+      );
+    });
+
+    await vi.waitFor(() => {
+      const anchor = container?.querySelector('a[href="https://example.org"]');
+      expect(anchor).not.toBeNull();
+      expect(anchor?.classList).toContain('nodrag');
+    });
+  });
+
   it('names the textbox through StrictMode replacement and updates an override', async () => {
     container = document.createElement('div');
     document.body.appendChild(container);

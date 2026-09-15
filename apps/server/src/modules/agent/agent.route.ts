@@ -29,6 +29,7 @@ import {
   setChatThreadReasoningEffortRequestSchema,
 } from '@huabu/shared';
 
+import conversationTitleRoutes from './conversation-title.route.js';
 import { ExternalAgentRealizationError } from '../agent/acp/external-agent-realization.js';
 import { agenetes, INTERNAL_DRIVER_KIND } from '../agent/agenetes/drivers.js';
 import {
@@ -142,6 +143,8 @@ const agentRoutes: FastifyPluginAsync = async (
   fastify,
   _opts,
 ): Promise<void> => {
+  await fastify.register(conversationTitleRoutes);
+
   fastify.get<{
     Params: AgentHistoryPageParams;
     Querystring: AgentHistoryPageQuery;
@@ -221,7 +224,6 @@ const agentRoutes: FastifyPluginAsync = async (
       throw error;
     }
   });
-
   /**
    * GET /agent/history/:threadId
    * Reconstructs the UI message list from L2's folded Tier-2 turn log

@@ -28,6 +28,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
+import { executeCanvasCommandsOnHost } from './canvas-command-router.js';
 import { applyDeltasOnServer, executeOnServer } from './canvas-executor.js';
 import { setAgentChangeReviewConfig } from '../agent/change-review-config.js';
 import {
@@ -35,6 +36,7 @@ import {
   getCanvasStore,
   getStructuredStore,
   updateNode,
+  withCanvasMutex,
 } from '../storage/index.js';
 import { setWorkspacePath } from '../workspace.js';
 
@@ -59,22 +61,25 @@ afterEach(() => {
 });
 
 /** Seed a Space with one note (topology entry + `.md` body). */
-function seedNote(canvasId: string, id: string, content: string): void {
+function seedNote(
+  canvasId: string,
+  id: string,
+  content: string,
+  type = 'note',
+): void {
   const store = getCanvasStore(canvasId);
   store.write({
     canvasId,
     title: null,
     version: 1,
     state: {
-      nodes: [
-        { id, type: 'note', position: { x: 0, y: 0 }, data: { label: 'A' } },
-      ],
+      nodes: [{ id, type, position: { x: 0, y: 0 }, data: { label: 'A' } }],
       edges: [],
     },
     createdAt: Date.now(),
     updatedAt: Date.now(),
   });
-  store.writeNode(id, { nodeId: id, type: 'note', label: 'A', content });
+  store.writeNode(id, { nodeId: id, type, label: 'A', content });
 }
 
 /** Current authored-content rev, computed exactly as the executor does. */
@@ -89,6 +94,110 @@ function currentRev(canvasId: string, id: string): string {
 function bodyOf(canvasId: string, id: string): string | undefined {
   return getCanvasStore(canvasId).readNode(id)?.content ?? undefined;
 }
+
+describe('atomic automatic label commits', () => {
+  it('protects a queued user rename from automatic preprocessing under the Canvas mutex', async () => {
+    seedNote('canvas-title', 'node-q', 'Body must survive', 'question');
+    let release!: () => void;
+    let entered!: () => void;
+    const locked = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const hold = withCanvasMutex('canvas-title', async () => {
+      entered();
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    });
+    await locked;
+    const manual = executeCanvasCommandsOnHost({
+      canvasId: 'canvas-title',
+      originator: { source: 'ui' },
+      commands: [
+        {
+          type: 'MERGE_NODE_DATA',
+          patches: [
+            {
+              nodeId: 'node-q' as never,
+              patch: { label: 'User name', labelSource: 'user' },
+            },
+          ],
+        },
+      ],
+    });
+    const automatic = executeCanvasCommandsOnHost({
+      canvasId: 'canvas-title',
+      originator: { source: 'system' },
+      commands: [
+        {
+          type: 'MERGE_NODE_DATA',
+          patches: [
+            {
+              nodeId: 'node-q' as never,
+              patch: { label: 'Late preprocess', labelSource: 'auto' },
+            },
+          ],
+        },
+      ],
+    });
+    release();
+    await hold;
+    await manual;
+    await automatic;
+    expect(getCanvasStore('canvas-title').readNode('node-q')).toMatchObject({
+      label: 'User name',
+      labelSource: 'user',
+      content: 'Body must survive',
+    });
+  });
+
+  it.each(['user', 'agent'])(
+    'drops only late auto-label fields over a protected %s label',
+    async (source) => {
+      seedNote('canvas-title', 'node-q', 'Body must survive', 'question');
+      await executeOnServer({
+        canvasId: 'canvas-title',
+        originator: { source: 'system' },
+        commands: [
+          {
+            type: 'MERGE_NODE_DATA',
+            patches: [
+              {
+                nodeId: 'node-q' as never,
+                patch: { label: 'Protected', labelSource: source },
+              },
+            ],
+          },
+        ],
+      });
+      await executeOnServer({
+        canvasId: 'canvas-title',
+        originator: { source: 'system' },
+        commands: [
+          {
+            type: 'MERGE_NODE_DATA',
+            patches: [
+              {
+                nodeId: 'node-q' as never,
+                patch: {
+                  label: 'Late preprocess',
+                  labelSource: 'auto',
+                  summary: 'New summary',
+                },
+              },
+            ],
+          },
+        ],
+      });
+      expect(getCanvasStore('canvas-title').readNode('node-q')).toMatchObject({
+        label: 'Protected',
+        labelSource: source,
+        content: 'Body must survive',
+        summary: 'New summary',
+      });
+    },
+  );
+});
 
 function imageStyleOf(
   canvasId: string,

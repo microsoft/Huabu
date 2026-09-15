@@ -3,7 +3,10 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { useWorkspaceStore } from './workspaceStore';
+import {
+  resolveFolderPickerSupported,
+  useWorkspaceStore,
+} from './workspaceStore';
 
 import type { WorkspaceDescriptor, WorkspaceInfo } from '../api/workspace';
 
@@ -84,6 +87,27 @@ function descriptors(): WorkspaceDescriptor[] {
     },
   ];
 }
+
+describe('workspace folder picker support', () => {
+  it('never offers a client-machine picker in remote Electron mode', () => {
+    expect(
+      resolveFolderPickerSupported(true, {
+        isRemoteServer: true,
+      }),
+    ).toBe(false);
+  });
+
+  it('uses the local Electron bridge or the browser Server capability', () => {
+    expect(
+      resolveFolderPickerSupported(false, {
+        isRemoteServer: false,
+        dialog: {},
+      }),
+    ).toBe(true);
+    expect(resolveFolderPickerSupported(true, null)).toBe(true);
+    expect(resolveFolderPickerSupported(false, null)).toBe(false);
+  });
+});
 
 describe('workspaceStore registry persistence', () => {
   beforeEach(() => {
