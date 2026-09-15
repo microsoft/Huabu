@@ -21,6 +21,7 @@
 
 import path from 'node:path';
 
+import { listAllCanvasDirEntries } from './canvas-dirs.js';
 import { canvasRoot, nodesDir } from './layout.js';
 import { getCanvasStore } from './legacy/canvas-store-cache.js';
 import { getWorkspacePath } from '../../../workspace.js';
@@ -49,6 +50,8 @@ export interface DiskSpaceTree {
    * handle instead.
    */
   directory(): string;
+  /** Directory of a known Space, or null when the directory index has no such id. */
+  existingDirectory(): string | null;
   /**
    * Which node record the materialized file at `relativePath` carries.
    *
@@ -109,6 +112,15 @@ export function diskSpaceTree(canvasId: string): DiskSpaceTree {
     directory: () => {
       assertActiveWorkspace();
       return canvasRoot(canvasId);
+    },
+    existingDirectory: () => {
+      assertActiveWorkspace();
+      // Resolve through the same fenced locator, but never treat its fallback
+      // path as evidence that a Space exists.
+      const directory = canvasRoot(canvasId);
+      return listAllCanvasDirEntries().some((entry) => entry.id === canvasId)
+        ? directory
+        : null;
     },
     nodesDirectory: () => {
       assertActiveWorkspace();

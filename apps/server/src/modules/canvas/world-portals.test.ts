@@ -13,6 +13,7 @@ const workspaceState = vi.hoisted(() => ({ path: '' }));
 
 vi.mock('../workspace.js', () => ({
   getWorkspacePath: () => workspaceState.path,
+  getWorkspaceKey: () => workspaceState.path,
 }));
 
 import { executeOnServer } from './canvas-executor.js';
@@ -50,6 +51,19 @@ function writeCanvas(
     }),
     'utf8',
   );
+}
+
+/**
+ * The live Spaces the World's rules are checked against.
+ *
+ * Passed in rather than read from a backend, because the rules are pure: what
+ * they need to know is which Portal targets still exist, and a test says so
+ * directly instead of standing up a catalogue to be asked.
+ */
+function liveSpaceIds(
+  ids: readonly string[] = ['canvas-a', 'canvas-b'],
+): ReadonlySet<string> {
+  return new Set(ids);
 }
 
 function portals(): Array<{
@@ -237,7 +251,12 @@ describe('World Space preview reconciliation', () => {
     if (!previous) throw new Error('Missing World topology');
 
     expect(() =>
-      assertWorldPortalTopologyAllowed('canvas-world', previous, []),
+      assertWorldPortalTopologyAllowed(
+        'canvas-world',
+        previous,
+        [],
+        liveSpaceIds(),
+      ),
     ).toThrow(WorldPortalMutationError);
 
     const moved = structuredClone(previous) as Array<{
@@ -248,7 +267,12 @@ describe('World Space preview reconciliation', () => {
     if (!portal) throw new Error('Missing Space preview');
     portal.position = { x: 999, y: 999 };
     expect(() =>
-      assertWorldPortalTopologyAllowed('canvas-world', previous, moved),
+      assertWorldPortalTopologyAllowed(
+        'canvas-world',
+        previous,
+        moved,
+        liveSpaceIds(),
+      ),
     ).not.toThrow();
 
     expect(() =>
@@ -263,6 +287,7 @@ describe('World Space preview reconciliation', () => {
             data: { targetCanvasId: 'canvas-b' },
           },
         ],
+        liveSpaceIds(),
       ),
     ).toThrow(WorldPortalMutationError);
   });
@@ -308,8 +333,15 @@ describe('World Space preview reconciliation', () => {
     });
     refreshCanvasDirIndex();
 
+    // `canvas-a` is gone, so its Portal is broken and the subtree under it may
+    // be removed.
     expect(() =>
-      assertWorldPortalTopologyAllowed('canvas-world', previous, []),
+      assertWorldPortalTopologyAllowed(
+        'canvas-world',
+        previous,
+        [],
+        liveSpaceIds(['canvas-b']),
+      ),
     ).not.toThrow();
   });
 
@@ -354,6 +386,7 @@ describe('World Space preview reconciliation', () => {
         'canvas-world',
         canonical,
         structuredClone(canonical),
+        liveSpaceIds(),
       ),
     ).not.toThrow();
 
@@ -375,6 +408,7 @@ describe('World Space preview reconciliation', () => {
         'canvas-world',
         canonical,
         apparentlyFitted,
+        liveSpaceIds(),
       ),
     ).toThrow('Frame reference size is managed by its contents');
   });
@@ -417,6 +451,7 @@ describe('World Space preview reconciliation', () => {
         'canvas-world',
         canonical,
         apparentlyFitted,
+        liveSpaceIds(),
       ),
     ).toThrow('Frame reference size is managed by its contents');
   });
@@ -460,6 +495,7 @@ describe('World Space preview reconciliation', () => {
         'canvas-world',
         cyclic,
         structuredClone(cyclic),
+        liveSpaceIds(),
       ),
     ).toThrow('World reference hierarchy is cyclic');
   });

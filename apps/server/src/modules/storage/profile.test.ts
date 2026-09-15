@@ -64,7 +64,20 @@ describe('validateStorageProfile', () => {
         structured: { kind: 'postgres' },
         blobs: { kind: 'disk' },
       }),
-    ).toThrow(/not implemented yet.*disk/s);
+    ).toThrow(/not implemented yet.*disk, sqlite/s);
+  });
+
+  // Fewer features is a stated limitation, not a misconfiguration: a profile
+  // may lose capabilities as long as the matrix declares them. Only an
+  // unimplemented backend fails here — the axes share nothing, so every
+  // pairing of implemented backends is a valid deployment.
+  it('accepts sqlite records beside disk blobs', () => {
+    expect(() =>
+      validateStorageProfile({
+        structured: { kind: 'sqlite' },
+        blobs: { kind: 'disk' },
+      }),
+    ).not.toThrow();
   });
 
   it('rejects a known but unimplemented blob backend', () => {
@@ -94,7 +107,6 @@ describe('requiresExplicitInit', () => {
   it.each([
     { structured: { kind: 'postgres' }, blobs: { kind: 'disk' } },
     { structured: { kind: 'sqlite' }, blobs: { kind: 'disk' } },
-    { structured: { kind: 'disk' }, blobs: { kind: 'azure' } },
   ] as const)('requires an awaited init for %j', (profile) => {
     expect(requiresExplicitInit(profile)).toBe(true);
   });

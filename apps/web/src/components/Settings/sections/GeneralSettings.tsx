@@ -8,6 +8,10 @@ import {
   getExternalAgentRuntimeConfig,
   updateExternalAgentRuntimeConfig,
 } from '@/api/acp';
+import {
+  getAgentChangeReviewConfig,
+  updateAgentChangeReviewConfig,
+} from '@/api/agentChangeReview';
 import { Button } from '@/components/Common/Button';
 import { Input } from '@/components/Common/Input';
 import { Select } from '@/components/Common/Select';
@@ -62,6 +66,9 @@ export const GeneralSettings: React.FC = () => {
   const [customMinutes, setCustomMinutes] = useState('10');
   const [idleTimeoutLoading, setIdleTimeoutLoading] = useState(true);
   const [idleTimeoutSaving, setIdleTimeoutSaving] = useState(false);
+  const [autoAcceptSpaceChanges, setAutoAcceptSpaceChanges] = useState(false);
+  const [autoAcceptLoading, setAutoAcceptLoading] = useState(true);
+  const [autoAcceptSaving, setAutoAcceptSaving] = useState(false);
   const { status: updateStatus, check: checkForUpdates } = useAppUpdate();
   const updaterAvailable = !!getElectronBridge()?.updater;
 
@@ -104,6 +111,54 @@ export const GeneralSettings: React.FC = () => {
       active = false;
     };
   }, [t]);
+
+  useEffect(() => {
+    let active = true;
+    void getAgentChangeReviewConfig()
+      .then((config) => {
+        if (active) setAutoAcceptSpaceChanges(config.autoAcceptSpaceChanges);
+      })
+      .catch((error) => {
+        if (!active) return;
+        toast(
+          error instanceof Error
+            ? error.message
+            : t('settings.autoAcceptAgentChangesLoadFailed'),
+          { tone: 'danger' },
+        );
+      })
+      .finally(() => {
+        if (active) setAutoAcceptLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [t]);
+
+  const saveAutoAccept = useCallback(
+    async (enabled: boolean) => {
+      const previous = autoAcceptSpaceChanges;
+      setAutoAcceptSpaceChanges(enabled);
+      setAutoAcceptSaving(true);
+      try {
+        const saved = await updateAgentChangeReviewConfig({
+          autoAcceptSpaceChanges: enabled,
+        });
+        setAutoAcceptSpaceChanges(saved.autoAcceptSpaceChanges);
+      } catch (error) {
+        setAutoAcceptSpaceChanges(previous);
+        toast(
+          error instanceof Error
+            ? error.message
+            : t('settings.autoAcceptAgentChangesSaveFailed'),
+          { tone: 'danger' },
+        );
+      } finally {
+        setAutoAcceptSaving(false);
+      }
+    },
+    [autoAcceptSpaceChanges, t],
+  );
 
   const saveIdleTimeout = useCallback(
     async (nextIdleTimeoutSecs: number) => {
@@ -192,6 +247,17 @@ export const GeneralSettings: React.FC = () => {
               ? t('settings.hideWorldCanvas')
               : t('settings.showWorldCanvas')
           }
+        />
+      </SettingRow>
+      <SettingRow
+        title={t('settings.autoAcceptAgentChanges')}
+        description={t('settings.autoAcceptAgentChangesDescription')}
+      >
+        <Toggle
+          checked={autoAcceptSpaceChanges}
+          onChange={(enabled) => void saveAutoAccept(enabled)}
+          disabled={autoAcceptLoading || autoAcceptSaving}
+          label={t('settings.autoAcceptAgentChanges')}
         />
       </SettingRow>
       {updaterAvailable && (

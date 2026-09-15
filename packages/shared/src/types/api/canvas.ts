@@ -327,6 +327,8 @@ export interface UpdateCanvasStateResult {
  * omitted, mirroring the pre-schema behaviour.
  */
 export const exportCanvasQuerySchema = z.object({
+  /** Validate export eligibility without building or downloading the archive. */
+  check: z.enum(['true', 'false']).optional(),
   includeHistory: z.enum(['true', 'false']).optional(),
 });
 export type ExportCanvasQuery = z.infer<typeof exportCanvasQuerySchema>;

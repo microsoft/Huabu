@@ -347,6 +347,43 @@ forEachProductProfile((profile: StorageProfile, label: string) => {
       await expect(m.storage.structured.spaces().list()).resolves.toEqual([]);
     });
 
+    it('serves the same Space after a restart', async () => {
+      const canvasId = 'space-product-restart';
+      const m = await seedSpace(canvasId);
+      const before = m.storage.space(canvasId);
+      await before.artifacts.put('kept.bin', Buffer.from('durable bytes'));
+      await before.events.append([
+        { payload: { action: 'node_created', nodes: [] }, ts: 7 },
+      ]);
+      const record = await before.read();
+      const nodes = await before.nodes.list();
+      const worldId = await m.storage.structured.spaces().worldId();
+
+      // The restart is the point. Everything above is in whatever the backend
+      // calls durable; nothing about this case says which.
+      const storage = await m.reopen();
+
+      await expect(storage.structured.spaces().worldId()).resolves.toBe(
+        worldId,
+      );
+      const after = storage.space(canvasId);
+      await expect(after.read()).resolves.toEqual(record);
+      // Revisions are opaque tokens, so the records are compared rather than
+      // the snapshots: a backend may mint a new token for the same content.
+      expect(
+        [...(await after.nodes.list())].map(([id, snapshot]) => [
+          id,
+          snapshot.record,
+        ]),
+      ).toEqual([...nodes].map(([id, snapshot]) => [id, snapshot.record]));
+      expect(await after.artifacts.read('kept.bin')).toEqual(
+        Buffer.from('durable bytes'),
+      );
+      await expect(after.events.read()).resolves.toEqual([
+        { payload: { action: 'node_created', nodes: [] }, ts: 7 },
+      ]);
+    });
+
     it('refuses to delete the World', async () => {
       const m = await open();
       const spaces = m.storage.structured.spaces();

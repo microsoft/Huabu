@@ -141,9 +141,12 @@ describeSpaceExtensionContract('Disk', () => {
     // An owner of a Disk namespace writes files into its directory; nothing
     // about the shape is storage's business, so the suite borrows the
     // simplest one an owner could pick.
-    write: (substrate, value) =>
-      writeFileSync(path.join(substrate.directory, 'value'), value, 'utf8'),
+    write: (substrate, value) => {
+      if (substrate.kind !== 'disk') throw new Error('Expected Disk substrate');
+      writeFileSync(path.join(substrate.directory, 'value'), value, 'utf8');
+    },
     read: (substrate) => {
+      if (substrate.kind !== 'disk') throw new Error('Expected Disk substrate');
       const file = path.join(substrate.directory, 'value');
       return existsSync(file) ? readFileSync(file, 'utf8') : null;
     },

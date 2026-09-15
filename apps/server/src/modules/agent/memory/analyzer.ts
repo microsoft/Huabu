@@ -33,7 +33,10 @@ import {
   type CanvasFile,
   type SpaceHandle,
 } from '../../storage/index.js';
-import { workspaceMemoryPath } from '../../workspace/paths.js';
+import {
+  hasWorkspaceSettingDirectory,
+  workspaceMemoryPath,
+} from '../../workspace/paths.js';
 import { runAgent } from '../agent.service.js';
 import { readCanvasMemory } from './read.js';
 
@@ -280,7 +283,12 @@ function readEventsDigest(events: readonly CanvasEvent[]): EventsDigest | null {
 async function readMemorySnapshot(canvasId: string): Promise<string> {
   const parts: string[] = [];
 
-  const longTerm = readFileSafe(workspaceMemoryPath());
+  // Empty rather than missing on a backend with no Workspace folder: the
+  // curator's prompt keeps its shape, and the tier it cannot write to simply
+  // reads as empty (`workspace-user-memory` capability).
+  const longTerm = hasWorkspaceSettingDirectory()
+    ? readFileSafe(workspaceMemoryPath())
+    : '';
   parts.push('## Long-term memory');
   parts.push(longTerm.trim().length > 0 ? longTerm.trim() : '(empty)');
 

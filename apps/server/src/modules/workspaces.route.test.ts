@@ -35,6 +35,8 @@ function handleOf({ workspaceId, name }: TestMember): TestHandle {
 
 const testState = vi.hoisted(() => ({
   managed: false,
+  /** Whether the configured structured backend files Workspaces as folders. */
+  materializes: true,
   active: null as TestHandle | null,
   activePath: null as string | null,
   members: [] as TestMember[],
@@ -44,6 +46,11 @@ const testState = vi.hoisted(() => ({
 
 const storageMocks = vi.hoisted(() => ({
   resetStorageCache: vi.fn(),
+  activateWorkspace: vi.fn(async () => {}),
+  createNamedWorkspace: vi.fn(async (name: string) => ({
+    workspaceId: NEW_ID,
+    name,
+  })),
 }));
 
 const activationMocks = vi.hoisted(() => ({
@@ -141,9 +148,16 @@ const locatorMocks = vi.hoisted(() => ({
 }));
 
 vi.mock('./storage/index.js', () => ({
+  activateWorkspace: storageMocks.activateWorkspace,
   getWorkspaceRepository: () => repository,
   hasWorkspaceRegistry: () => testState.registryInitialized,
+  // These routes are mostly the directory-shaped Workspace API, so the default
+  // profile under test is the one that has directories; a case that is about
+  // the other kind flips `materializes`.
+  materializesWorkspaces: () => testState.materializes,
+  createNamedWorkspace: storageMocks.createNamedWorkspace,
   resetStorageCache: storageMocks.resetStorageCache,
+  unavailableCapabilityMessage: (id: string) => `capability ${id}`,
   adoptWorkspaceDirectory: locatorMocks.adoptWorkspaceDirectory,
   ensureWorkspaceManifestOnDisk: locatorMocks.ensureWorkspaceManifestOnDisk,
   workspaceAtDirectory: locatorMocks.workspaceAtDirectory,
@@ -156,6 +170,7 @@ vi.mock('./workspace.js', () => ({
     testState.active = locatorMocks.adoptWorkspaceDirectory(workspacePath);
     testState.activePath = workspacePath;
   },
+  getWorkspaceDirectory: () => testState.activePath,
   getWorkspaceHandle: () => testState.active,
   getWorkspacePath: () => {
     if (!testState.activePath) throw new Error('No active Workspace path');
@@ -196,6 +211,7 @@ async function buildApp() {
 
 beforeEach(() => {
   testState.managed = false;
+  testState.materializes = true;
   testState.registryInitialized = true;
   testState.members = [
     {
@@ -537,6 +553,59 @@ describe('plural Workspace management routes', () => {
         url: '/workspaces/00000000-0000-4000-8000-000000000099',
       });
       expect(missing.statusCode).toBe(404);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+/**
+ * A deployment whose Workspaces are rows still holds more than one.
+ *
+ * Everything else the collection needs — list, activate, rename, forget — is
+ * already on the port and backend-neutral. Creation is the one operation the
+ * folder API could not express, because there is no folder to name.
+ */
+describe('Workspace collection on a backend with no folders', () => {
+  beforeEach(() => {
+    testState.materializes = false;
+  });
+
+  it('creates a Workspace from a name alone', async () => {
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/workspaces',
+        payload: { name: 'Second' },
+      });
+
+      expect(response.statusCode).toBe(201);
+      expect(storageMocks.createNamedWorkspace).toHaveBeenCalledWith('Second');
+      expect(response.json()).toEqual({
+        workspaceId: NEW_ID,
+        name: 'Second',
+        // No folder to report, and not the active one.
+        path: null,
+        active: false,
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('asks for the name it can actually use', async () => {
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/workspaces',
+        payload: { path: '/tmp/somewhere' },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json().message).toMatch(/name is required/i);
+      expect(storageMocks.createNamedWorkspace).not.toHaveBeenCalled();
     } finally {
       await app.close();
     }

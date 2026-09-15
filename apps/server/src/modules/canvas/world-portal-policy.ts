@@ -3,10 +3,7 @@
 
 import { fitPortals, getDescendantIds } from '@huabu/shared/canvas-engine';
 
-import {
-  isWorldCanvasId,
-  listCanvasDirEntries,
-} from '../storage/canvas-dirs.js';
+import { getStructuredStore, isWorldCanvasId } from '../storage/index.js';
 
 import type { CanvasCommand } from '@huabu/shared';
 import type { NestableNode } from '@huabu/shared/canvas-engine';
@@ -22,6 +19,22 @@ function storedNodes(nodes: readonly unknown[]): StoredNode[] {
   return nodes.filter(
     (node): node is StoredNode => typeof node === 'object' && node !== null,
   );
+}
+
+/**
+ * Every ordinary Space in the active Workspace, by id.
+ *
+ * The World's Portals point at Spaces, so the rules below need to know which
+ * of those targets still exist. Read through the catalogue rather than a
+ * directory listing: the answer is the same on every backend, and the World is
+ * the one place in the product that asks it.
+ *
+ * The checks that consume this set take it as an argument, so the rules
+ * themselves stay pure and testable without a live backend.
+ */
+export async function readLiveSpaceIds(): Promise<ReadonlySet<string>> {
+  const summaries = await getStructuredStore().spaces().list();
+  return new Set(summaries.map((summary) => summary.canvasId));
 }
 
 export class WorldPortalMutationError extends Error {
@@ -130,6 +143,7 @@ export function assertWorldPortalTopologyAllowed(
   canvasId: string,
   previousNodesInput: readonly unknown[],
   nextNodesInput: readonly unknown[],
+  liveCanvasIds: ReadonlySet<string>,
 ): void {
   const previousNodes = storedNodes(previousNodesInput);
   const nextNodes = storedNodes(nextNodesInput);
@@ -308,9 +322,6 @@ export function assertWorldPortalTopologyAllowed(
     }
   }
 
-  const liveCanvasIds = new Set(
-    listCanvasDirEntries().map((entry) => entry.id),
-  );
   for (const previous of previousNodes) {
     const previousNodeRef = nodeRefTarget(previous);
     if (previousNodeRef) {
@@ -372,12 +383,10 @@ export function assertWorldPortalResultAllowed(
   canvasId: string,
   previousNodesInput: readonly unknown[],
   nextNodesInput: readonly unknown[],
+  liveCanvasIds: ReadonlySet<string>,
 ): void {
   if (!isWorldCanvasId(canvasId)) return;
 
-  const liveCanvasIds = new Set(
-    listCanvasDirEntries().map((entry) => entry.id),
-  );
   const nextById = new Map(
     storedNodes(nextNodesInput).map((node) => [node.id, node]),
   );
@@ -418,6 +427,7 @@ export function assertWorldPortalMutationsAllowed(
   commands: readonly CanvasCommand[],
   nodes: readonly StoredNode[],
   source: 'ui' | 'agent' | 'system',
+  liveCanvasIds: ReadonlySet<string>,
 ): void {
   if (source === 'system') return;
 
@@ -439,9 +449,6 @@ export function assertWorldPortalMutationsAllowed(
 
   if (!isWorldCanvasId(canvasId)) return;
 
-  const liveCanvasIds = new Set(
-    listCanvasDirEntries().map((entry) => entry.id),
-  );
   const byId = new Map(nodes.map((node) => [node.id, node]));
 
   for (const command of commands) {

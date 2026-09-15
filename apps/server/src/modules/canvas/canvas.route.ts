@@ -41,6 +41,7 @@ import {
 } from './space-preview-scene.js';
 import {
   assertWorldPortalTopologyAllowed,
+  readLiveSpaceIds,
   WorldPortalMutationError,
 } from './world-portal-policy.js';
 import { reconcileWorldPortals } from './world-portals.js';
@@ -52,12 +53,13 @@ import { MAX_UPLOAD_BYTES } from '../../upload-limits.js';
 import { ARTIFACT_URL_REGEX } from '../artifact/utils.js';
 import { getPreprocessDispatcher, getProfile } from '../preprocessing/index.js';
 import { stripOfficeparserPreamble } from '../preprocessing/loaders/office-strip.js';
-import { isWorldCanvasId } from '../storage/canvas-dirs.js';
 import {
   space,
   createSpace,
   deleteSpace,
+  isWorldCanvasId,
   stageSpaceImport,
+  storageServes,
   unavailableCapabilityMessage,
   getStructuredStore,
   type CanvasFile,
@@ -1184,6 +1186,9 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         canvasId,
         (existing?.state.nodes ?? []) as NodeLike[],
         incomingState.nodes ?? [],
+        isWorldCanvasId(canvasId)
+          ? await readLiveSpaceIds()
+          : new Set<string>(),
       );
     } catch (error) {
       if (error instanceof WorldPortalMutationError) {
@@ -1611,13 +1616,17 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     if (!(await handle.read())) {
       return reply.code(404).send({ message: 'Canvas not found' });
     }
-    // Disk-only, declared as `reveal-space-folder`: the feature *is* "show me
-    // this in Finder", so a backend without a folder has nothing to show.
+    // Declared as `reveal-space-folder`: what this opens is the `nodes/`
+    // folder, and off Disk a node is a row, so there is no folder of node
+    // documents to open and no hand-editable collision to resolve in one.
+    // The matrix decides and `diskTree` only supplies the path — asking
+    // `diskTree` directly would re-derive the requirement here.
+    //
     // A profile that cannot serve the feature and a Space whose folder is
     // missing are different problems with different remedies, so they get
     // different answers — the first repeats the matrix sentence the operator
     // read when they chose the profile.
-    const tree = handle.diskTree;
+    const tree = storageServes('reveal-space-folder') ? handle.diskTree : null;
     if (!tree) {
       return reply.code(400).send({
         message: unavailableCapabilityMessage('reveal-space-folder'),
@@ -1638,11 +1647,12 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get<{
     Params: { canvasId: string };
     Querystring: ExportCanvasQuery;
-    // Success path streams a zip archive (Readable). Failure path is the
+    // Success streams a ZIP archive or returns 204 after an eligibility check.
+    // Failure is the
     // canonical ApiErrorBody — declared here so the 400/404 branches
     // type-check via the same `reply.send(...)` machinery the JSON
     // routes use.
-    Reply: ApiResult<NodeJS.ReadableStream>;
+    Reply: ApiResult<NodeJS.ReadableStream | undefined>;
   }>('/:canvasId/export', async function (request, reply) {
     const { canvasId } = request.params;
     const parsedQuery = exportCanvasQuerySchema.safeParse(request.query);
@@ -1659,19 +1669,29 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.code(404).send({ message: 'Canvas not found' });
     }
 
-    // Disk-only, declared as `space-bundle-export` in the capability matrix;
-    // a portable export generated from records plus reachable blob references
-    // is a separate later design. Refuse in the matrix's own words, and keep
-    // that distinct from a Space whose directory has gone missing.
-    const tree = handle.diskTree;
+    // Declared as `space-bundle-export`; a portable export generated from
+    // records plus reachable blob references is a separate later design. The
+    // matrix decides and `diskTree` only supplies the path: this requirement
+    // spans both axes — the bundle is the Space folder archived, so it needs
+    // the bytes in it — and asking `diskTree` would re-derive only half.
+    // Refuse in the matrix's own words, and keep that distinct from a Space
+    // whose directory has gone missing.
+    const tree = storageServes('space-bundle-export') ? handle.diskTree : null;
     if (!tree) {
       return reply.code(400).send({
+        code: 'STORAGE_CAPABILITY_UNAVAILABLE',
         message: unavailableCapabilityMessage('space-bundle-export'),
       });
     }
     const canvasDir = tree.directory();
     if (!existsSync(canvasDir)) {
       return reply.code(404).send({ message: 'Canvas directory not found' });
+    }
+
+    // The browser checks eligibility before following the native download link.
+    // Keep the checks above shared so preflight uses the same storage policy.
+    if (parsedQuery.data.check === 'true') {
+      return reply.code(204).send(undefined);
     }
 
     const manifest = {
@@ -1723,24 +1743,31 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.post<{ Reply: ApiResult<ImportCanvasResponse> }>(
     '/import',
     async function (request, reply) {
-      const file = await request.file();
-      if (!file) {
-        return reply.code(400).send({ message: 'No file provided' });
-      }
-
-      // Stream the upload to a temp zip file
-      const tmpZip = path.join(tmpdir(), `${createId('import')}.zip`);
       const targetCanvasId = createId('canvas');
       // Where an imported Space lands is the backend's business — the
       // staging location, the title-derived directory, the record filename,
       // and the index entry are all layout. This route owns the `.huabu.zip`
       // format and nothing else (proposal §12.6.2).
-      const staged = stageSpaceImport(targetCanvasId);
+      // Same rule as export: the matrix decides, and staging only supplies
+      // the place. Import needs the bytes to land in the folder too, so the
+      // requirement spans both axes and re-deriving it here would miss that.
+      const staged = storageServes('space-bundle-import')
+        ? stageSpaceImport(targetCanvasId)
+        : null;
       if (!staged) {
         return reply.code(400).send({
+          code: 'STORAGE_CAPABILITY_UNAVAILABLE',
           message: unavailableCapabilityMessage('space-bundle-import'),
         });
       }
+      // Refuse unsupported imports before opening a paused multipart stream.
+      const file = await request.file();
+      if (!file) {
+        return reply.code(400).send({ message: 'No file provided' });
+      }
+
+      // Stream the upload to a temp zip file.
+      const tmpZip = path.join(tmpdir(), `${createId('import')}.zip`);
       const stagingDir = staged.stagingDirectory;
       let stagingCleanedUp = false;
       try {

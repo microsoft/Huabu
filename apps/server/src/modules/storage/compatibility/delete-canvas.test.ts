@@ -16,7 +16,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { executeOnServer } from '../../canvas/canvas-executor.js';
 import { DiskBlobStore } from '../backends/disk/blob-store.js';
 import { refreshCanvasDirIndex } from '../backends/disk/canvas-dirs.js';
-import { artifactPath, canvasJsonPath } from '../backends/disk/layout.js';
+import {
+  artifactPath,
+  canvasJsonPath,
+  canvasRoot,
+} from '../backends/disk/layout.js';
 import { resetStorageCache } from '../backends/disk/legacy/canvas-store-cache.js';
 import { DiskStructuredStore } from '../backends/disk/structured-store.js';
 import { getCanvasStore } from '../index.js';
@@ -42,12 +46,13 @@ const workspaceState = vi.hoisted(() => ({ path: '', leaseCount: 0 }));
 
 vi.mock('../../workspace.js', () => ({
   getWorkspacePath: () => workspaceState.path,
+  getWorkspaceKey: () => workspaceState.path,
   acquireWorkspaceOperationLease: () => {
-    const workspacePath = workspaceState.path;
+    const workspaceKey = workspaceState.path;
     workspaceState.leaseCount += 1;
     let released = false;
     return Object.freeze({
-      workspacePath,
+      workspaceKey,
       release: () => {
         if (released) return;
         released = true;
@@ -72,7 +77,7 @@ function wrapAreas(
 
 /** How many sweeps one Space deletion must perform. */
 const SPACE_AREA_COUNT = spaceBlobAreas(
-  new DiskBlobStore().space('probe'),
+  new DiskBlobStore(canvasRoot).space('probe'),
 ).length;
 
 function writeCanvas(directory: string, canvasId: string, title: string): void {
@@ -105,7 +110,7 @@ class OrderRecordingBlobStore implements BlobStore {
   readonly kind = 'disk' as const;
   readonly recordPresentAtSweep: boolean[] = [];
 
-  private readonly inner = new DiskBlobStore();
+  private readonly inner = new DiskBlobStore(canvasRoot);
 
   init(): Promise<void> {
     return this.inner.init();
@@ -154,7 +159,7 @@ class ControllableBlobStore implements BlobStore {
   readonly deleteStarted = deferred();
   readonly #putsReleased = deferred();
   readonly #deletesReleased = deferred();
-  readonly #inner = new DiskBlobStore();
+  readonly #inner = new DiskBlobStore(canvasRoot);
 
   blockPuts = false;
   blockDeletes = false;

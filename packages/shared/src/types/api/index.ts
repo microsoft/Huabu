@@ -20,6 +20,7 @@ export * from './llm.js';
 export * from './integrations.js';
 export * from './preprocessing.js';
 export * from './agent.js';
+export * from './agent-change-review.js';
 export * from './artifact.js';
 export * from './acp.js';
 export * from './acp-tool.js';

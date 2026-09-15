@@ -41,7 +41,10 @@ import path from 'node:path';
 
 import { resetExternalNoteSessions } from './canvas/external-watcher.js';
 import { refreshCanvasDirIndex } from './storage/canvas-dirs.js';
-import { adoptWorkspaceDirectory } from './storage/index.js';
+import {
+  adoptWorkspaceDirectory,
+  materializesWorkspaces,
+} from './storage/index.js';
 import { prepareWorkspaceOnDisk } from './workspace-prepare.js';
 import { invalidateUserSkill } from '../prompt/index.js';
 
@@ -56,7 +59,7 @@ const ENV_KEY = 'HUABU_WORKSPACE';
 let _workspaceHandle: WorkspaceHandle | null = null;
 let _workspacePath: string | null = null;
 let _managed = false;
-let _leasedWorkspacePath: string | null = null;
+let _leasedWorkspaceKey: string | null = null;
 let _workspaceOperationLeaseCount = 0;
 let _activatingWorkspacePath: string | null = null;
 
@@ -68,7 +71,7 @@ let _activatingWorkspacePath: string | null = null;
  * original result.
  */
 export interface WorkspaceOperationLease {
-  readonly workspacePath: string;
+  readonly workspaceKey: string;
   release(): void;
 }
 
@@ -130,6 +133,17 @@ export function initWorkspaceFromEnv(): void {
       `${ENV_KEY} must be an absolute path, got: ${JSON.stringify(fromEnv)}`,
     );
   }
+  if (!materializesWorkspaces()) {
+    // `HUABU_WORKSPACE` names a folder, and this backend has none. Refusing
+    // here rather than half-way through preparation, because the operator's
+    // next move is a configuration change either way — and because a SQL
+    // profile is already "locked at startup" without being told a path.
+    throw new Error(
+      `${ENV_KEY} names a Workspace folder, which the configured structured ` +
+        'backend does not use. Unset it (the backend opens its own ' +
+        'Workspace), or select the disk structured backend.',
+    );
+  }
   const resolvedPath = path.resolve(fromEnv);
   _managed = true;
   prepareWorkspaceOnDisk(resolvedPath);
@@ -155,6 +169,34 @@ export function getWorkspacePath(): string {
   return _workspacePath;
 }
 
+/**
+ * The active Workspace's directory, or `null` when the backend has none.
+ *
+ * The honest form of {@link getWorkspacePath} for code that can cope with a
+ * Workspace that is a row rather than a folder. Anything that genuinely needs
+ * a directory should keep calling {@link getWorkspacePath} and let it refuse.
+ */
+export function getWorkspaceDirectory(): string | null {
+  return _workspacePath;
+}
+
+/**
+ * A stable process-local key for the active Workspace.
+ *
+ * Leases, admission gates, and scope bindings need to say "the same Workspace
+ * as before" without needing it to be a place. On Disk that is still the
+ * resolved path, so nothing about the existing behaviour changes; elsewhere it
+ * is the Workspace identity.
+ */
+export function getWorkspaceKey(): string {
+  if (_workspacePath) return _workspacePath;
+  if (_workspaceHandle) return `workspace:${_workspaceHandle.workspaceId}`;
+  throw new Error(
+    'Workspace has not been configured. Activate a workspace first ' +
+      `(PUT /api/workspace) or set ${ENV_KEY} in the environment.`,
+  );
+}
+
 /** The active immutable Workspace identity, or null before configuration. */
 export function getWorkspaceHandle(): WorkspaceHandle | null {
   return _workspaceHandle;
@@ -165,37 +207,37 @@ export function getWorkspaceHandle(): WorkspaceHandle | null {
  *
  * Multiple operations may hold leases concurrently. Switching to another
  * workspace is rejected until every lease has been released; recommitting the
- * same path remains allowed.
+ * same Workspace remains allowed.
  */
 export function acquireWorkspaceOperationLease(): WorkspaceOperationLease {
-  const workspacePath = getWorkspacePath();
+  const workspaceKey = getWorkspaceKey();
 
   if (
     _activatingWorkspacePath !== null &&
-    _activatingWorkspacePath !== workspacePath
+    _activatingWorkspacePath !== workspaceKey
   ) {
     throw new WorkspaceActivationInProgressError();
   }
 
   if (
     _workspaceOperationLeaseCount > 0 &&
-    _leasedWorkspacePath !== workspacePath
+    _leasedWorkspaceKey !== workspaceKey
   ) {
     throw new Error('Workspace operation lease invariant violated');
   }
 
-  _leasedWorkspacePath = workspacePath;
+  _leasedWorkspaceKey = workspaceKey;
   _workspaceOperationLeaseCount += 1;
 
   let released = false;
   return Object.freeze({
-    workspacePath,
+    workspaceKey,
     release(): void {
       if (released) return;
       released = true;
       _workspaceOperationLeaseCount -= 1;
       if (_workspaceOperationLeaseCount === 0) {
-        _leasedWorkspacePath = null;
+        _leasedWorkspaceKey = null;
       }
     },
   });
@@ -302,6 +344,32 @@ function commitResolvedWorkspacePath(resolvedPath: string): void {
   resetExternalNoteSessions();
 }
 
+/**
+ * Activate a Workspace that has no directory.
+ *
+ * The counterpart to {@link commitWorkspacePath} for a backend where a
+ * Workspace is a row: same in-process effects — identity, cache invalidation,
+ * watcher reset — with nothing to resolve on the filesystem. Kept separate
+ * rather than making the path optional, so no caller can commit "a Workspace
+ * somewhere" by accident.
+ */
+export function commitWorkspaceIdentity(workspace: WorkspaceHandle): void {
+  assertNoWorkspaceActivationInProgress();
+  const key = `workspace:${workspace.workspaceId}`;
+  if (
+    _workspaceOperationLeaseCount > 0 &&
+    _leasedWorkspaceKey !== null &&
+    _leasedWorkspaceKey !== key
+  ) {
+    throw new WorkspaceOperationInProgressError();
+  }
+  _workspaceHandle = workspace;
+  _workspacePath = null;
+  refreshCanvasDirIndex();
+  invalidateUserSkill();
+  resetExternalNoteSessions();
+}
+
 /** Refresh metadata for the active Workspace without switching namespaces. */
 export function updateActiveWorkspaceHandle(
   workspace: WorkspaceHandle,
@@ -334,8 +402,8 @@ function validateAbsolutePath(p: string): void {
 function assertWorkspacePathChangeAllowed(resolvedPath: string): void {
   if (
     _workspaceOperationLeaseCount > 0 &&
-    _leasedWorkspacePath !== null &&
-    _leasedWorkspacePath !== resolvedPath
+    _leasedWorkspaceKey !== null &&
+    _leasedWorkspaceKey !== resolvedPath
   ) {
     throw new WorkspaceOperationInProgressError();
   }

@@ -11,6 +11,38 @@
  * mocks) below.
  */
 
+import { PropertySymbol, type Window as HappyWindow } from 'happy-dom';
+import { afterAll } from 'vitest';
+
+if (typeof document !== 'undefined') {
+  // Vitest aliases `window` and `document.defaultView` to Node's global, whose
+  // timers outlive the DOM. Use the actual Happy DOM window so its teardown
+  // owns browser callbacks, including Milkdown's resolved readiness timers.
+  const browserWindow = (
+    document as unknown as {
+      [PropertySymbol.window]: HappyWindow;
+    }
+  )[PropertySymbol.window];
+  const originalTimers = {
+    setTimeout,
+    clearTimeout,
+    setInterval,
+    clearInterval,
+  };
+  globalThis.setTimeout = browserWindow.setTimeout.bind(
+    browserWindow,
+  ) as typeof setTimeout;
+  globalThis.clearTimeout = browserWindow.clearTimeout.bind(browserWindow);
+  globalThis.setInterval = browserWindow.setInterval.bind(
+    browserWindow,
+  ) as typeof setInterval;
+  globalThis.clearInterval = browserWindow.clearInterval.bind(browserWindow);
+  afterAll(async () => {
+    await browserWindow.happyDOM.abort();
+    Object.assign(globalThis, originalTimers);
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Canvas 2D text-metrics stub.
 //

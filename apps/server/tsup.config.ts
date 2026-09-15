@@ -49,6 +49,8 @@ export default defineConfig([
     // reached at runtime, so no extra packaging of the .node files is needed.
     noExternal: [/.*/],
     external: [/@napi-rs\/.*/],
+    // Prefix-only built-ins such as node:sqlite cannot resolve without node:.
+    removeNodeProtocol: false,
     splitting: false,
     sourcemap: false,
     // `prebundle` removes the shared output root once before tsup starts.
@@ -124,6 +126,7 @@ export default defineConfig([
     outDir: 'dist-bundle/agentlet',
     bundle: true,
     noExternal: [/.*/],
+    removeNodeProtocol: false,
     splitting: false,
     sourcemap: false,
     clean: false,

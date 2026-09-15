@@ -1,9 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { existsSync } from 'node:fs';
-import path from 'node:path';
-
 import {
   createId,
   interactiveViewDefinitionV1Schema,
@@ -27,7 +24,6 @@ import {
   agentThreadService,
   type ExternalAgentThreadTarget,
 } from '../agent/agent-thread.service.js';
-import { safeResolve } from '../agent/tools/handlers/fs-sandbox.js';
 import {
   executeOnServer,
   type InteractiveViewConflict,
@@ -88,17 +84,21 @@ async function resolveOwnerThread(
   }
 }
 
-function stagedRendererPath(
+/**
+ * Whether a `upload/<name>` renderer has actually been staged.
+ *
+ * Asked of the Space's uploads scope rather than of a directory: the scratch
+ * an upload lands in is a blob area on every backend, and it is the same place
+ * on Disk that this used to resolve by hand.
+ */
+async function stagedRendererExists(
   canvasId: string,
   rendererArtifact: string,
-): string | null {
+): Promise<boolean> {
   const match = STAGED_RENDERER_ARTIFACT_RE.exec(rendererArtifact);
   const filename = match?.[1];
-  if (!filename) return null;
-  const uploadRoot = safeResolve(canvasId, '.upload');
-  const candidate = path.resolve(uploadRoot, filename);
-  if (!candidate.startsWith(uploadRoot + path.sep)) return null;
-  return candidate;
+  if (!filename) return false;
+  return (await space(canvasId).uploads.head(filename)) !== null;
 }
 
 function validateDefinition(definition: InteractiveViewDefinitionV1): void {
@@ -358,11 +358,8 @@ export class InteractiveViewService {
         `Owner thread ${request.ownerThreadId} is not an external Agent thread in this Canvas`,
       );
     }
-    const stagedPath = request.rendererArtifact.startsWith('upload/')
-      ? stagedRendererPath(canvasId, request.rendererArtifact)
-      : null;
     const rendererExists = request.rendererArtifact.startsWith('upload/')
-      ? stagedPath !== null && existsSync(stagedPath)
+      ? await stagedRendererExists(canvasId, request.rendererArtifact)
       : Boolean(await space(canvasId).artifacts.head(request.rendererArtifact));
     if (!rendererExists) {
       throw new InteractiveViewServiceError(

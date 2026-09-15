@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 
+import { ApiError } from '../api/_client';
 import { listCanvases, exportCanvas, deleteCanvasById } from '../api/canvas';
 import { Button } from '../components/Common/Button';
 import { EmptyState } from '../components/Common/EmptyState';
@@ -84,7 +85,12 @@ export default function CanvasListPage() {
       toast(t('canvasList.exportStarted'), { tone: 'success' });
     } catch (error) {
       toast(
-        error instanceof Error ? error.message : t('canvasList.exportFailed'),
+        error instanceof ApiError &&
+          error.code === 'STORAGE_CAPABILITY_UNAVAILABLE'
+          ? t('canvasList.exportUnavailable')
+          : error instanceof Error
+            ? error.message
+            : t('canvasList.exportFailed'),
         {
           tone: 'danger',
         },

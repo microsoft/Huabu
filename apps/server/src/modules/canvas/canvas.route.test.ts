@@ -10,6 +10,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
+import { request as httpRequest, type ClientRequest } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -711,6 +712,132 @@ function useTablesProfile(): () => void {
 }
 
 describe('Disk-only capability refusals', () => {
+  it.each(['headers only', 'partial file'] as const)(
+    'rejects an unsupported import with %s without waiting for the upload to finish',
+    async (uploadState) => {
+      const restore = useTablesProfile();
+      const app = await buildApp();
+      let upload: ClientRequest | undefined;
+      try {
+        const address = await app.listen({ port: 0, host: '127.0.0.1' });
+        const body = await new Promise<string>((resolve, reject) => {
+          upload = httpRequest(
+            `${address}/canvas/import`,
+            {
+              method: 'POST',
+              headers: {
+                'content-type':
+                  'multipart/form-data; boundary=unfinished-upload',
+                'transfer-encoding': 'chunked',
+              },
+            },
+            (response) => {
+              let body = '';
+              response.setEncoding('utf8');
+              response.on('data', (chunk: string) => {
+                body += chunk;
+              });
+              response.on('error', reject);
+              response.on('end', () => {
+                if (response.statusCode !== 400) {
+                  reject(new Error(`Unexpected status ${response.statusCode}`));
+                } else resolve(body);
+              });
+            },
+          );
+          upload.on('error', reject);
+          upload.setTimeout(2_000, () => {
+            upload?.destroy(
+              new Error('Import waited for unsupported upload data'),
+            );
+          });
+          // Leave the request open: neither a client that has not sent a file
+          // nor one stalled partway through a file should delay this refusal.
+          upload.flushHeaders();
+          if (uploadState === 'partial file') {
+            upload.write(
+              '--unfinished-upload\r\n' +
+                'Content-Disposition: form-data; name="file"; filename="space.zip"\r\n' +
+                'Content-Type: application/zip\r\n\r\n',
+            );
+            upload.write(Buffer.alloc(64 * 1024));
+          }
+        });
+        expect(JSON.parse(body)).toEqual({
+          code: 'STORAGE_CAPABILITY_UNAVAILABLE',
+          message: unavailableCapabilityMessage('space-bundle-import'),
+        });
+      } finally {
+        upload?.destroy();
+        await app.close();
+        restore();
+      }
+    },
+  );
+
+  it('preflights Disk export without sending an archive, then still downloads it', async () => {
+    createCanvas('c1', 'Disk Space');
+    const app = await buildApp();
+    try {
+      const checked = await app.inject({
+        method: 'GET',
+        url: '/canvas/c1/export?check=true',
+      });
+      expect(checked.statusCode).toBe(204);
+      expect(checked.body).toBe('');
+      expect(checked.headers['content-disposition']).toBeUndefined();
+      const download = await app.inject({
+        method: 'GET',
+        url: '/canvas/c1/export',
+      });
+      expect(download.statusCode).toBe(200);
+      expect(download.headers['content-type']).toBe('application/zip');
+      expect(download.rawPayload.subarray(0, 2).toString()).toBe('PK');
+      const missing = await app.inject({
+        method: 'GET',
+        url: '/canvas/missing/export?check=true',
+      });
+      expect(missing.statusCode).toBe(404);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('refuses an unsupported export during preflight using the same policy as download', async () => {
+    createCanvas('c1', 'Tables Space');
+    const restore = useTablesProfile();
+    const app = await buildApp();
+    try {
+      const checked = await app.inject({
+        method: 'GET',
+        url: '/canvas/c1/export?check=true',
+      });
+      expect(checked.statusCode).toBe(400);
+      expect(checked.json()).toEqual({
+        code: 'STORAGE_CAPABILITY_UNAVAILABLE',
+        message: unavailableCapabilityMessage('space-bundle-export'),
+      });
+      const body = multipartBody(
+        'space.zip',
+        'application/zip',
+        Buffer.from('zip'),
+      );
+      const imported = await app.inject({
+        method: 'POST',
+        url: '/canvas/import',
+        ...body,
+      });
+      expect(imported.statusCode).toBe(400);
+      expect(imported.json()).toEqual({
+        code: 'STORAGE_CAPABILITY_UNAVAILABLE',
+        message: unavailableCapabilityMessage('space-bundle-import'),
+      });
+    } finally {
+      await app.close();
+      restore();
+    }
+  });
+
   it('refuses in the same words the profile declared at startup', async () => {
     createCanvas('c1', 'Tables Space');
     const restore = useTablesProfile();
@@ -769,7 +896,9 @@ describe('Space export/import persistence', () => {
     createCanvas('c1', 'Private Export');
     const promptStore = await space('c1').extension('huabu.prompt.log');
     const memoryStore = await space('c1').extension('huabu.memory');
-    if (!promptStore || !memoryStore) throw new Error('Expected Disk stores');
+    if (promptStore?.kind !== 'disk' || memoryStore?.kind !== 'disk') {
+      throw new Error('Expected Disk stores');
+    }
     writeFileSync(
       join(promptStore.directory, 'thread.prompt.log'),
       'private system and user prompt',
@@ -806,7 +935,7 @@ describe('Space export/import persistence', () => {
       const importedPrompt =
         await space(importedId).extension('huabu.prompt.log');
       const importedMemory = await space(importedId).extension('huabu.memory');
-      if (!importedPrompt || !importedMemory) {
+      if (importedPrompt?.kind !== 'disk' || importedMemory?.kind !== 'disk') {
         throw new Error('Expected imported Disk stores');
       }
       expect(

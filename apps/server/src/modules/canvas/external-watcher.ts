@@ -32,10 +32,8 @@ import path from 'node:path';
 
 import { getLogger } from '../../utils/logger.js';
 import { parseFrontmatter } from '../../utils/markdown-frontmatter.js';
-import { listAllCanvasDirEntries } from '../storage/canvas-dirs.js';
-import { space } from '../storage/index.js';
-import { registerSpaceDirHandleOwner } from '../storage/index.js';
-import { getWorkspacePath, isWorkspaceConfigured } from '../workspace.js';
+import { registerSpaceDirHandleOwner, space } from '../storage/index.js';
+import { isWorkspaceConfigured } from '../workspace.js';
 
 import type { CanvasFile } from '../storage/index.js';
 import type { ExternalNoteEvent, ExternalNoteItem } from '@huabu/shared';
@@ -112,11 +110,13 @@ function isSessionCurrent(session: ActiveSpaceWatch, stamp?: string): boolean {
 
 function nodesPathFor(canvasId: string): string | null {
   if (!isWorkspaceConfigured()) return null;
-  const entry = listAllCanvasDirEntries().find(
-    (candidate) => candidate.id === canvasId,
-  );
-  if (!entry) return null;
-  return path.join(getWorkspacePath(), entry.filename, 'nodes');
+  // `null` when the Space has no directory to watch, which covers both an
+  // unknown id and a backend that keeps Spaces in tables. Watching for
+  // documents that arrived without going through the application is the
+  // declared `external-note-discovery` capability, and this is where its
+  // absence becomes "there is nothing to watch".
+  const directory = space(canvasId).diskTree?.existingDirectory() ?? null;
+  return directory === null ? null : path.join(directory, 'nodes');
 }
 
 function noteIdsFromCanvas(canvas: CanvasFile | null): Set<string> {

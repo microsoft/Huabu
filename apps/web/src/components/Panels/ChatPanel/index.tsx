@@ -42,6 +42,7 @@ import {
 import { findPendingPermissionRequest } from '@/store/chatTypes';
 import {
   isHeadlessConversation,
+  resolveConversationAgentBinding,
   resolveConversationOwnerSource,
 } from '@/store/conversationOwner';
 import { useLLMStore } from '@/store/llmStore';
@@ -228,13 +229,21 @@ export const ChatPanel = ({
 
   // Thread → agent binding. The binding is locked for the lifetime of
   // a thread; the only way to change it is to open a new workspace Chat.
-  const agentBinding = useChatStore((state) =>
+  const cachedAgentBinding = useChatStore((state) =>
     selectThreadBinding(state, threadId),
   );
+  // Established Question conversations keep binding identity on their owner
+  // node, while the thread cache deliberately stops persisting that mirror.
+  // Resolve the owner synchronously so refresh never renders or dispatches a
+  // follow-up through the built-in fallback before the cache is rehydrated.
+  const agentBinding = resolveConversationAgentBinding(
+    conversationOwnerSource,
+    cachedAgentBinding,
+  );
   const setAgentBinding = useChatStore((state) => state.setAgentBinding);
-  const fixedAgentBinding = viewingQuestionBindingIsFixed
-    ? conversationOwnerSource?.agentBinding
-    : undefined;
+  const makeThreadMetadataEphemeral = useChatStore(
+    (state) => state.makeThreadMetadataEphemeral,
+  );
   const {
     profiles: acpProfiles,
     refresh: refreshAcpProfiles,
@@ -242,11 +251,18 @@ export const ChatPanel = ({
   } = useAcpProfiles();
 
   useEffect(() => {
-    if (!fixedAgentBinding || bindingsEqual(agentBinding, fixedAgentBinding)) {
+    if (bindingsEqual(cachedAgentBinding, agentBinding)) {
       return;
     }
-    setAgentBinding(threadId, fixedAgentBinding);
-  }, [agentBinding, fixedAgentBinding, setAgentBinding, threadId]);
+    makeThreadMetadataEphemeral(threadId);
+    setAgentBinding(threadId, agentBinding);
+  }, [
+    agentBinding,
+    cachedAgentBinding,
+    makeThreadMetadataEphemeral,
+    setAgentBinding,
+    threadId,
+  ]);
 
   // Auto-reset a stale external binding on an *empty* thread: the
   // persisted binding refers to a profile that no longer exists

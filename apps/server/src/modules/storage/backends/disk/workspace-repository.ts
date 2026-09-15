@@ -12,6 +12,7 @@
  *
  * The Server data directory holds a separate discovery index containing
  * `workspaceId -> workspacePath` plus the last time that Workspace was opened.
+ * Where that file sits is `data-dir.ts`'s to say, not this adapter's.
  * Array order has no meaning: listings sort by the explicit timestamp, and
  * adopting/activating a Workspace updates its timestamp in place. That
  * deliberate duplication is the minimum needed to recognize an externally
@@ -48,7 +49,6 @@ import type {
 } from '../../ports/workspace.js';
 
 export const WORKSPACE_MANIFEST_FILENAME = '.workspace.json';
-export const WORKSPACE_REGISTRY_FILENAME = 'workspaces.json';
 const WORKSPACE_MANIFEST_SCHEMA_VERSION = 1;
 const WORKSPACE_REGISTRY_SCHEMA_VERSION = 1;
 
@@ -84,11 +84,6 @@ export type WorkspaceManifest = z.infer<typeof workspaceManifestSchema>;
 type WorkspaceRegistryEntry = z.infer<
   typeof workspaceRegistrySchema
 >['workspaces'][number];
-
-/** Where the Disk backend keeps its discovery index inside the data dir. */
-export function workspaceRegistryPath(dataDir: string): string {
-  return path.join(dataDir, 'storage', 'disk', WORKSPACE_REGISTRY_FILENAME);
-}
 
 function manifestPath(workspacePath: string): string {
   return path.join(workspacePath, WORKSPACE_MANIFEST_FILENAME);

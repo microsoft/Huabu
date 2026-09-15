@@ -18,16 +18,18 @@ const workspaceState = vi.hoisted(() => ({ path: '' }));
 
 vi.mock('../../../workspace.js', () => ({
   getWorkspacePath: () => workspaceState.path,
+  getWorkspaceKey: () => workspaceState.path,
 }));
 
 import { DiskBlobStore } from './blob-store.js';
+import { canvasRoot } from './layout.js';
 import { describeBlobStoreContract } from '../../ports/contracts/blob-store.contract.js';
 
 describeBlobStoreContract('DiskBlobStore', () => {
   const root = mkdtempSync(path.join(tmpdir(), 'huabu-blob-'));
   workspaceState.path = root;
   return {
-    store: new DiskBlobStore(),
+    store: new DiskBlobStore(canvasRoot),
     canvasId: 'canvas-under-test',
     cleanup: () => rmSync(root, { recursive: true, force: true }),
   };
@@ -54,7 +56,7 @@ describe('DiskBlobStore temp file hygiene', () => {
   });
 
   it('cleans up after both successful and failed writes', async () => {
-    const scope = new DiskBlobStore().space(canvasId).artifacts;
+    const scope = new DiskBlobStore(canvasRoot).space(canvasId).artifacts;
 
     await scope.put('kept.bin', Buffer.from('fine'));
     await scope.put('streamed.bin', Readable.from([Buffer.from('also fine')]));
@@ -77,7 +79,9 @@ describe('DiskBlobStore temp file hygiene', () => {
   });
 
   it('cleans up siblings from concurrent writers to one key', async () => {
-    const scope = new DiskBlobStore().space('concurrent-canvas').artifacts;
+    const scope = new DiskBlobStore(canvasRoot).space(
+      'concurrent-canvas',
+    ).artifacts;
 
     await Promise.all(
       Array.from({ length: 8 }, (_, i) =>
@@ -92,7 +96,7 @@ describe('DiskBlobStore temp file hygiene', () => {
 
   it('binds in-flight paths to their original workspace and rejects a held scope after activation', async () => {
     const otherRoot = mkdtempSync(path.join(tmpdir(), 'huabu-blob-switched-'));
-    const scope = new DiskBlobStore().space(canvasId).artifacts;
+    const scope = new DiskBlobStore(canvasRoot).space(canvasId).artifacts;
     let signalStarted = (): void => {};
     const started = new Promise<void>((resolve) => {
       signalStarted = resolve;

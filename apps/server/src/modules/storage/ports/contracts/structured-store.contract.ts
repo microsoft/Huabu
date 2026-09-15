@@ -67,6 +67,7 @@ export function describeStructuredStoreContract(
       for (const method of [
         'list',
         'worldId',
+        'ensureWorld',
         'create',
         'beginDelete',
         'rename',

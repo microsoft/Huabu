@@ -160,7 +160,7 @@ describe('workspace activation isolation', () => {
     );
 
     const lease = acquireWorkspaceOperationLease();
-    expect(lease.workspacePath).toBe(path.resolve(previous));
+    expect(lease.workspaceKey).toBe(path.resolve(previous));
     lease.release();
   });
 });

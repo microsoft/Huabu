@@ -24,11 +24,18 @@ export {
 } from './compatibility/canvas.js';
 export type { RenameResult, RenameSelfResult } from './compatibility/canvas.js';
 
+/**
+ * World identity, answered for whichever backend is configured.
+ *
+ * These used to come straight from the Disk directory index. They are on the
+ * composition root now because the World is a Space like any other and every
+ * backend has one — the index is just how Disk finds it.
+ */
 export {
   getWorldCanvasId,
   isWorldCanvasId,
   requireWorldCanvasId,
-} from './backends/disk/canvas-dirs.js';
+} from './storage.js';
 
 /**
  * Materialization-tier capabilities, re-exported so consumers that need a
@@ -71,9 +78,11 @@ export type {
 // ─── Storage ports and composition ─────────────────────────────────────────
 
 export {
+  activateWorkspace,
   adoptWorkspaceDirectory,
   closeStorage,
   composeStorage,
+  createNamedWorkspace,
   createSpace,
   createStorage,
   deleteSpace,
@@ -83,6 +92,7 @@ export {
   getWorkspaceRepository,
   hasWorkspaceRegistry,
   initStorage,
+  materializesWorkspaces,
   setStorageForTesting,
   space,
   stageSpaceImport,
@@ -90,7 +100,13 @@ export {
   workspaceAtDirectory,
   workspaceDirectory,
 } from './storage.js';
-export type { Space, SpaceDeleteOutcome, Storage } from './storage.js';
+export type {
+  Space,
+  SpaceDeleteOutcome,
+  SqliteSpaceTree,
+  Storage,
+} from './storage.js';
+export type { SqliteSpaceSubstrate } from './backends/sqlite/space-extension.js';
 export type { DiskSpaceTree } from './backends/disk/space-tree.js';
 export type { DiskSpaceImport } from './backends/disk/space-import.js';
 export {
@@ -100,11 +116,16 @@ export {
 } from './profile.js';
 export {
   describeUnavailableCapabilities,
-  hasStorageCapability,
   STORAGE_CAPABILITIES,
   unavailableCapabilities,
   unavailableCapabilityMessage,
 } from './capabilities.js';
+/**
+ * Capability questions are asked of the profile in force, never of one the
+ * caller assembled — so the bound accessor is what leaves the module and
+ * `hasStorageCapability` stays inside it.
+ */
+export { storageServes } from './storage.js';
 export type { StorageCapability } from './capabilities.js';
 export type { StorageProfile } from './profile.js';
 export {

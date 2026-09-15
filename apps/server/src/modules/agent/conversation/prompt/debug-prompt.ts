@@ -14,11 +14,8 @@
  * Gated and fully wrapped in try/catch so it can never affect a request.
  */
 
-import { appendFileSync } from 'node:fs';
-import path from 'node:path';
-
-import { sanitizeId } from '../../../../utils/fs.js';
 import { space } from '../../../storage/index.js';
+import { appendSubstrateLog } from '../../substrate-store.js';
 
 import type { SpaceSubstrate } from '../../../storage/index.js';
 import type { Context } from '@earendil-works/pi-ai';
@@ -151,13 +148,8 @@ type SubstrateResolution =
   | { readonly ok: true; readonly substrate: SpaceSubstrate | null }
   | { readonly ok: false; readonly error: unknown };
 
-/** Where this module keeps one log per thread on a Disk substrate. */
-function diskLogPath(substrate: SpaceSubstrate, threadId: string): string {
-  return path.join(
-    substrate.directory,
-    `${sanitizeId(threadId, 'threadId')}.prompt.log`,
-  );
-}
+/** The suffix one thread's log carries, whatever the substrate stores it in. */
+const LOG_SUFFIX = '.prompt.log';
 
 /**
  * Append a readable dump of the assembled prompt for one turn. No-op
@@ -212,7 +204,7 @@ export function dumpAssembledPrompt(params: DumpPromptParams): void {
         if (!resolved.ok) throw resolved.error;
         const { substrate } = resolved;
         if (!substrate) return;
-        appendFileSync(diskLogPath(substrate, params.threadId), block, 'utf-8');
+        appendSubstrateLog(substrate, params.threadId, LOG_SUFFIX, block);
       })
       .catch((err: unknown) => {
         params.logger.warn(

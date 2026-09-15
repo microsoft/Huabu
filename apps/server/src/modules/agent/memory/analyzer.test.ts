@@ -33,6 +33,7 @@ vi.mock('../../storage/index.js', () => ({
   SPACE_MEMORY_BLOB_NAME: 'space.md',
 }));
 vi.mock('../../workspace/paths.js', () => ({
+  hasWorkspaceSettingDirectory: () => true,
   workspaceMemoryPath: () => `${physicalState.root}/setting/user.md`,
 }));
 

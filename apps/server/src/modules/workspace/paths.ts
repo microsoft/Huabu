@@ -38,7 +38,7 @@
 
 import path from 'node:path';
 
-import { space } from '../storage/index.js';
+import { materializesWorkspaces, space } from '../storage/index.js';
 import { getWorkspacePath } from '../workspace.js';
 
 import type { Namespace } from '@agenetes/protocol';
@@ -60,14 +60,19 @@ const LEGACY_HISTORY_DIR_NAME = '.history';
  * these paths exist only where the backend has a tree.
  */
 function spaceRoot(canvasId: string): string {
-  const tree = space(canvasId).diskTree;
-  if (!tree) {
+  const directory = optionalSpaceRoot(canvasId);
+  if (!directory) {
     throw new Error(
       `Per-Space files for "${canvasId}" need a Space directory, which the ` +
         'active structured backend does not provide.',
     );
   }
-  return tree.directory();
+  return directory;
+}
+
+/** The Space's directory, or `null` where the backend has no tree. */
+function optionalSpaceRoot(canvasId: string): string | null {
+  return space(canvasId).diskTree?.directory() ?? null;
 }
 
 function legacyHistoryDir(canvasId: string): string {
@@ -83,6 +88,20 @@ function legacyHistoryDir(canvasId: string): string {
 /** Workspace memory — cross-canvas user preferences: `<workspace>/setting/user.md`. */
 export function workspaceMemoryPath(): string {
   return path.join(settingDir(), 'user.md');
+}
+
+/**
+ * Whether the Workspace-level `setting/` tier exists on this backend at all.
+ *
+ * `setting/` is a folder the user edits by hand — the memory document and the
+ * skills they author. A Workspace that is a row has nowhere to put it, and
+ * that is declared as the `workspace-user-memory` and `workspace-user-skills`
+ * capabilities rather than emulated. Callers that merely *read* the tier ask
+ * here and degrade to absence; callers that write refuse with the declared
+ * message.
+ */
+export function hasWorkspaceSettingDirectory(): boolean {
+  return materializesWorkspaces();
 }
 
 // ─── Workspace-level setting / user skills ─────────────────────────────────
@@ -130,8 +149,16 @@ export function acpSessionsPath(canvasId: string): string {
  * empty-canvasId no-op). See docs/proposals/layered-architecture.md §7 M5.0.
  */
 export function canvasAcpNamespace(canvasId: string): Namespace {
-  return {
-    name: canvasId,
-    storage: canvasId ? { root: legacyHistoryDir(canvasId) } : undefined,
-  };
+  if (!canvasId) return { name: canvasId };
+  // `storage.root` is a *directory*, so it is present exactly when the Space
+  // has one. Omitting it is not a degraded namespace: it is how the
+  // conversation stores learn that this Space keeps its threads somewhere
+  // other than a folder (`agent/agenetes/conversation-stores.ts`).
+  const root = optionalSpaceRoot(canvasId);
+  return root === null
+    ? { name: canvasId }
+    : {
+        name: canvasId,
+        storage: { root: path.join(root, LEGACY_HISTORY_DIR_NAME) },
+      };
 }

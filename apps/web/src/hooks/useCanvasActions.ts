@@ -2,10 +2,13 @@
 // Licensed under the MIT license.
 
 import { useCallback, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 
 import { useEffectiveInputMode } from './useInputMode';
+import { ApiError } from '../api/_client';
 import { createCanvas, importCanvas } from '../api/canvas';
+import { toast } from '../components/Common/Toast';
 
 /**
  * Shared "create / import canvas" actions.
@@ -29,6 +32,7 @@ export interface UseCanvasActionsResult {
 
 export function useCanvasActions(): UseCanvasActionsResult {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const inputMode = useEffectiveInputMode();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isCreating, setIsCreating] = useState(false);
@@ -70,12 +74,20 @@ export function useCanvasActions(): UseCanvasActionsResult {
         const result = await importCanvas(file);
         navigate(`/canvas/${result.canvasId}`);
       } catch (err) {
-        console.error('Failed to import canvas:', err);
+        toast(
+          err instanceof ApiError &&
+            err.code === 'STORAGE_CAPABILITY_UNAVAILABLE'
+            ? t('canvasList.importUnavailable')
+            : err instanceof Error
+              ? err.message
+              : t('canvasList.importFailed'),
+          { tone: 'danger' },
+        );
       } finally {
         setIsImporting(false);
       }
     },
-    [navigate],
+    [navigate, t],
   );
 
   return {

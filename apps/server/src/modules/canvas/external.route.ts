@@ -17,7 +17,11 @@ import {
   takeExternalNote,
 } from './external-watcher.js';
 import { parseFrontmatter } from '../../utils/markdown-frontmatter.js';
-import { space, unavailableCapabilityMessage } from '../storage/index.js';
+import {
+  space,
+  storageServes,
+  unavailableCapabilityMessage,
+} from '../storage/index.js';
 
 import type { FastifyPluginAsync } from 'fastify';
 
@@ -98,7 +102,9 @@ const externalRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     // Disk-only, declared as `external-note-discovery` in the capability
     // matrix: it adopts documents that arrived without going through the
     // application, and no database backend has such an arrival path.
-    const tree = space(canvasId).diskTree;
+    const tree = storageServes('external-note-discovery')
+      ? space(canvasId).diskTree
+      : null;
     if (!tree) {
       return reply.code(400).send({
         message: unavailableCapabilityMessage('external-note-discovery'),

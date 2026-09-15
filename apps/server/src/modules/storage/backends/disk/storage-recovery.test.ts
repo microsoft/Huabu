@@ -23,6 +23,7 @@ const workspaceState = vi.hoisted(() => ({ path: '' }));
 
 vi.mock('../../../workspace.js', () => ({
   getWorkspacePath: () => workspaceState.path,
+  getWorkspaceKey: () => workspaceState.path,
 }));
 
 import { refreshCanvasDirIndex } from './canvas-dirs.js';

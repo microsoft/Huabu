@@ -24,13 +24,12 @@
  * one analysis pass, which is harmless.
  */
 
-import path from 'node:path';
-
-import { atomicWriteJson, readJson } from '../../../utils/fs.js';
 import { createKeyedMutex } from '../../../utils/keyed-mutex.js';
 import { space } from '../../storage/index.js';
-
-import type { SpaceSubstrate } from '../../storage/index.js';
+import {
+  readSubstrateDocument,
+  writeSubstrateDocument,
+} from '../substrate-store.js';
 
 /** This module's namespace on the substrate. */
 const MEMORY_NAMESPACE = 'huabu.memory';
@@ -44,9 +43,7 @@ const MEMORY_NAMESPACE = 'huabu.memory';
  * (§6.4.4). An owner that later wants the same shape extracts a helper *over*
  * the substrate, never a port member.
  */
-function diskStatePath(substrate: SpaceSubstrate): string {
-  return path.join(substrate.directory, 'state.json');
-}
+const STATE_DOCUMENT = 'state';
 
 /** Op-count threshold that triggers a memory analysis pass. */
 export const OP_THRESHOLD = 50;
@@ -81,7 +78,10 @@ const EMPTY_STATE: MemoryState = {
 export async function readMemoryState(canvasId: string): Promise<MemoryState> {
   const substrate = await space(canvasId).extension(MEMORY_NAMESPACE);
   if (!substrate) return { ...EMPTY_STATE };
-  const raw = readJson<Partial<MemoryState>>(diskStatePath(substrate));
+  const raw = readSubstrateDocument<Partial<MemoryState>>(
+    substrate,
+    STATE_DOCUMENT,
+  );
   if (!raw || typeof raw !== 'object') return { ...EMPTY_STATE };
   return {
     counter: typeof raw.counter === 'number' ? raw.counter : 0,
@@ -111,7 +111,7 @@ export async function writeMemoryState(
 ): Promise<void> {
   const substrate = await space(canvasId).extension(MEMORY_NAMESPACE);
   if (!substrate) return;
-  atomicWriteJson(diskStatePath(substrate), state);
+  writeSubstrateDocument(substrate, STATE_DOCUMENT, state);
 }
 
 /**

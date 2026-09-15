@@ -26,8 +26,8 @@
     "electron-builder": "^26.0.0",
     "lottie-web": "^5.13.0",
     "png2icons": "^2.0.1",
-    "sharp": "^0.34.5",
+    "sharp": "^0.35.4",
     "typescript": "^6.0.3",
-    "vitest": "^4.0.18"
+    "vitest": "^4.1.11"
   }
 }

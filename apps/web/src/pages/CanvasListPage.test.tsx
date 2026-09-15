@@ -7,6 +7,9 @@ import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import CanvasListPage from './CanvasListPage';
+import { ApiError } from '../api/_client';
+import { exportCanvas } from '../api/canvas';
+import { toast } from '../components/Common/Toast';
 
 import type { ReactNode } from 'react';
 
@@ -34,6 +37,8 @@ vi.mock('../api/canvas', () => ({
     ],
   }),
 }));
+
+vi.mock('../components/Common/Toast', () => ({ toast: vi.fn() }));
 
 vi.mock('../components/Common/Modal', () => ({
   Modal: () => null,
@@ -129,6 +134,31 @@ async function renderPage() {
 }
 
 describe('CanvasListPage navigation', () => {
+  it('shows the export refusal without leaving the Spaces list or reporting success', async () => {
+    vi.mocked(exportCanvas).mockRejectedValueOnce(
+      new ApiError(
+        400,
+        {
+          code: 'STORAGE_CAPABILITY_UNAVAILABLE',
+          message: 'Technical storage detail',
+        },
+        'Export failed',
+      ),
+    );
+    const { router } = await renderPage();
+    const button = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="canvasList.exportCanvas"]',
+    );
+    if (!button) throw new Error('Export control was not rendered');
+    await act(async () => button.click());
+    expect(router.state.location.pathname).toBe('/spaces');
+    expect(toast).toHaveBeenCalledExactlyOnceWith(
+      'canvasList.exportUnavailable',
+      { tone: 'danger' },
+    );
+    expect(button.disabled).toBe(false);
+  });
+
   it('renders each Space card as a link and uses in-tab routing for a plain click', async () => {
     const { link, router } = await renderPage();
 

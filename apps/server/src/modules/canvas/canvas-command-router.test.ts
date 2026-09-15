@@ -39,6 +39,16 @@ interface TestStoredNode {
   data?: Record<string, unknown>;
 }
 
+/**
+ * The live Spaces the World's rules are checked against.
+ *
+ * The rules are pure: they need to know which Portal targets still exist,
+ * and a test says so directly rather than standing up a catalogue.
+ */
+function liveSpaceIds(): ReadonlySet<string> {
+  return new Set(['canvas-a', 'canvas-b']);
+}
+
 function writeCanvas(
   directory: string,
   canvasId: string,
@@ -681,6 +691,7 @@ describe.skip('legacy World Portal pin command routing', () => {
         'canvas-world',
         brokenTopology,
         convertedDescendant,
+        liveSpaceIds(),
       ),
     ).toThrow('A node reference cannot change node type');
 
@@ -804,6 +815,7 @@ describe.skip('legacy World Portal pin command routing', () => {
         'canvas-world',
         directlyLocked,
         directlyLocked,
+        liveSpaceIds(),
       ),
     ).not.toThrow();
 
@@ -833,6 +845,7 @@ describe.skip('legacy World Portal pin command routing', () => {
         'canvas-world',
         portalLocked,
         portalLocked,
+        liveSpaceIds(),
       ),
     ).not.toThrow();
 
@@ -892,6 +905,7 @@ describe.skip('legacy World Portal pin command routing', () => {
         'canvas-world',
         styled ?? [],
         copiedTarget,
+        liveSpaceIds(),
       ),
     ).toThrow('contains unsupported source-owned data');
 
@@ -933,7 +947,12 @@ describe.skip('legacy World Portal pin command routing', () => {
     if (!previous) throw new Error('Missing World state');
     const canonical = structuredClone(previous);
     expect(() =>
-      assertWorldPortalTopologyAllowed('canvas-world', previous, canonical),
+      assertWorldPortalTopologyAllowed(
+        'canvas-world',
+        previous,
+        canonical,
+        liveSpaceIds(),
+      ),
     ).not.toThrow();
 
     const resized = structuredClone(previous) as Array<{
@@ -944,7 +963,12 @@ describe.skip('legacy World Portal pin command routing', () => {
     if (!portal?.style) throw new Error('Missing Portal');
     portal.style.width = (portal.style.width ?? 0) + 100;
     expect(() =>
-      assertWorldPortalTopologyAllowed('canvas-world', previous, resized),
+      assertWorldPortalTopologyAllowed(
+        'canvas-world',
+        previous,
+        resized,
+        liveSpaceIds(),
+      ),
     ).toThrow(WorldPortalMutationError);
 
     const withoutNodeRef = (
@@ -955,6 +979,7 @@ describe.skip('legacy World Portal pin command routing', () => {
         'canvas-world',
         previous,
         withoutNodeRef,
+        liveSpaceIds(),
       ),
     ).toThrow('Node references must be removed with SET_PORTAL_NODE_PINS');
   });

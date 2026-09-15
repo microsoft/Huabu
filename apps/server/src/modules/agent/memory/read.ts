@@ -16,7 +16,10 @@
 import { existsSync, readFileSync } from 'node:fs';
 
 import { space, SPACE_MEMORY_BLOB_NAME } from '../../storage/index.js';
-import { workspaceMemoryPath } from '../../workspace/paths.js';
+import {
+  hasWorkspaceSettingDirectory,
+  workspaceMemoryPath,
+} from '../../workspace/paths.js';
 
 /**
  * Read the user memory body.
@@ -28,6 +31,10 @@ import { workspaceMemoryPath } from '../../workspace/paths.js';
  * zero-information `(empty)` line.
  */
 export function readWorkspaceMemory(): string | null {
+  // A backend with no Workspace folder has no user memory document. Absence,
+  // not failure: the preamble is optional context either way, and the
+  // limitation is stated up front as the `workspace-user-memory` capability.
+  if (!hasWorkspaceSettingDirectory()) return null;
   return readNonEmpty(workspaceMemoryPath());
 }
 

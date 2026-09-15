@@ -40,6 +40,7 @@ describe('diskSpaceTree', () => {
 
     expect(tree.canvasId).toBe('space-a');
     expect(tree.directory()).toBe(path.join(workspace, 'space-a'));
+    expect(tree.existingDirectory()).toBeNull();
   });
 
   it('rejects a retained tree instead of following a Workspace switch', () => {
@@ -52,6 +53,7 @@ describe('diskSpaceTree', () => {
     // *other* Workspace's files under the id it asked about — the file tools'
     // sandbox root and bundle export both resolve real paths from it.
     expect(() => retained.directory()).toThrow(/inactive workspace/);
+    expect(() => retained.existingDirectory()).toThrow(/inactive workspace/);
     expect(() => retained.nodeIdForPath('nodes/Note.md')).toThrow(
       /inactive workspace/,
     );

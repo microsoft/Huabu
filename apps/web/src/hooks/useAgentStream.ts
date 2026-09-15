@@ -36,6 +36,7 @@ import {
   isHeadlessConversation,
   patchConversationOwnerNode,
   refreshConversationPresentation,
+  resolveConversationAgentBinding,
   resolveConversationOwnerSource,
   shouldComposeConversationOwner,
   validateConversationView,
@@ -857,6 +858,15 @@ export function useAgentStream(
       let serverOwnsQuestionLifecycle = false;
       let isComposingQuestion = false;
       let serverSettingsConfirmed = false;
+      const canvasState = useCanvasStore.getState();
+      const ownerSource = conversationView
+        ? resolveConversationOwnerSource(
+            canvasState.canvasId,
+            canvasState.nodes,
+            canvasState.worldReferences,
+            conversationView,
+          )
+        : undefined;
 
       if (questionNodeId && conversationView) {
         // First send of a freshly-composed question node ⇔ the node is still
@@ -865,13 +875,6 @@ export function useAgentStream(
         // send we author the node's `content` and lock in the agent the user
         // picked in the inline selector (binding + built-in mode); follow-up
         // turns skip both.
-        const canvasState = useCanvasStore.getState();
-        const ownerSource = resolveConversationOwnerSource(
-          canvasState.canvasId,
-          canvasState.nodes,
-          canvasState.worldReferences,
-          conversationView,
-        );
         const isCompose = shouldComposeConversationOwner(ownerSource, headless);
         isComposingQuestion = isCompose;
         serverOwnsQuestionLifecycle =
@@ -884,9 +887,9 @@ export function useAgentStream(
             .getState()
             .updateNodeData(questionNodeId, { content: prompt });
         }
-        const selectedBinding = selectThreadBinding(
-          useChatStore.getState(),
-          threadId,
+        const selectedBinding = resolveConversationAgentBinding(
+          ownerSource,
+          selectThreadBinding(useChatStore.getState(), threadId),
         );
         const selectedProfile =
           selectedBinding.kind === 'external'
@@ -955,9 +958,9 @@ export function useAgentStream(
       // Snapshot the current thread's picker binding at send time. The server
       // uses it for selectable threads but replaces it with the persisted
       // binding when the thread resolves to a fixed Agent Node.
-      const agentBinding = selectThreadBinding(
-        useChatStore.getState(),
-        threadId,
+      const agentBinding = resolveConversationAgentBinding(
+        ownerSource,
+        selectThreadBinding(useChatStore.getState(), threadId),
       );
 
       // Build the canvas context, dropping the anchored question node

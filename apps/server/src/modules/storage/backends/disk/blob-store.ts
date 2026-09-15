@@ -4,13 +4,19 @@
 /**
  * Disk implementation of the blob port.
  *
- * Maps each area of a Space to a directory under its Space folder, preserving
+ * Maps each area of a Space to a directory under that Space's root, preserving
  * the layout the workspace format has always used: one file per blob, named by
  * the URL key, no manifest indirection.
  *
+ * The root is a constructor argument, because this adapter does not know where
+ * a Space is. `blobs=disk` names a *medium* — bytes are local files — and
+ * composition names the place (`storage.ts::buildBlobStore`, which carries the
+ * rule and the reason). Everything below the root is identical whichever place
+ * that turns out to be.
+ *
  * Each scope is bound to the workspace active when it is created. A fresh
- * scope follows a free-mode workspace switch; a retained scope rejects the
- * next operation instead of silently redirecting it into the new workspace.
+ * scope follows a workspace switch; a retained scope rejects the next
+ * operation instead of silently redirecting it into the new workspace.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -27,13 +33,12 @@ import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 
 import {
-  artifactsDir,
-  canvasRoot,
-  spaceMemoryDir,
-  spaceUploadDir,
+  ARTIFACTS_DIR_NAME,
+  MEMORY_DIR_NAME,
+  UPLOAD_DIR_NAME,
 } from './layout.js';
 import { renameOverWithRetry } from '../../../../utils/fs.js';
-import { getWorkspacePath } from '../../../workspace.js';
+import { getWorkspaceKey } from '../../../workspace.js';
 import {
   BlobNameError,
   createBlobLease,
@@ -70,6 +75,17 @@ function isTempEntry(entry: string): boolean {
 type SpaceBlobArea = keyof SpaceBlobs;
 
 /**
+ * Where this Space keeps its bytes.
+ *
+ * Supplied, never defaulted. Which directory a Space's bytes belong in is a
+ * fact about the whole deployment — it depends on whether the *structured*
+ * backend gives that Space a directory of its own — and this adapter is not
+ * the layer that knows. A default here would be that cross-axis decision made
+ * silently, by whichever caller forgot to pass one.
+ */
+export type SpaceBlobRoot = (canvasId: string) => string;
+
+/**
  * Where one area's bytes sit, and which names it owns there.
  *
  * `members: null` means the directory *is* the area — everything in it
@@ -81,21 +97,18 @@ interface ScopePlacement {
   readonly members: readonly string[] | null;
 }
 
-function scopePlacement(area: SpaceBlobArea, canvasId: string): ScopePlacement {
+function scopePlacement(area: SpaceBlobArea, root: string): ScopePlacement {
   switch (area) {
     case 'artifacts':
-      return { directory: artifactsDir(canvasId), members: null };
+      return { directory: path.join(root, ARTIFACTS_DIR_NAME), members: null };
     case 'memory':
-      return { directory: spaceMemoryDir(canvasId), members: null };
+      return { directory: path.join(root, MEMORY_DIR_NAME), members: null };
     case 'uploads':
-      return { directory: spaceUploadDir(canvasId), members: null };
+      return { directory: path.join(root, UPLOAD_DIR_NAME), members: null };
     case 'guide':
-      // The Space root, which also holds `space.json` and every node
-      // directory — so this area is the guide names, not the folder.
-      return {
-        directory: canvasRoot(canvasId),
-        members: SPACE_GUIDE_BLOB_NAMES,
-      };
+      // The Space root itself, which on Disk also holds `space.json` and every
+      // node directory — so this area is the guide names, not the folder.
+      return { directory: root, members: SPACE_GUIDE_BLOB_NAMES };
   }
 }
 
@@ -112,17 +125,21 @@ function isMissing(err: unknown): boolean {
 class DiskBlobScope implements BlobScope {
   readonly #area: SpaceBlobArea;
   readonly #canvasId: string;
-  readonly #workspacePath: string;
+  readonly #root: SpaceBlobRoot;
+  readonly #workspaceKey: string;
 
-  constructor(area: SpaceBlobArea, canvasId: string) {
+  constructor(area: SpaceBlobArea, canvasId: string, root: SpaceBlobRoot) {
     this.#area = area;
     this.#canvasId = canvasId;
-    this.#workspacePath = path.resolve(getWorkspacePath());
+    this.#root = root;
+    // The Workspace as an identity rather than a location: a Workspace that is
+    // a row has no path to compare, and the binding means the same thing
+    // either way.
+    this.#workspaceKey = getWorkspaceKey();
   }
 
   #placement(): ScopePlacement {
-    const active = path.resolve(getWorkspacePath());
-    if (active !== this.#workspacePath) {
+    if (getWorkspaceKey() !== this.#workspaceKey) {
       throw new Error(
         `DiskBlobScope(${this.#canvasId}) belongs to an inactive workspace. ` +
           `Resolve a fresh scope after workspace activation.`,
@@ -131,7 +148,7 @@ class DiskBlobScope implements BlobScope {
     // Resolve once per operation, before its first await. Every later path in
     // that operation is derived from this absolute directory, so a workspace
     // switch cannot combine a temp in A with a destination in B.
-    return scopePlacement(this.#area, this.#canvasId);
+    return scopePlacement(this.#area, this.#root(this.#canvasId));
   }
 
   /** Names this scope owns in `dir`, given what is actually there. */
@@ -312,6 +329,12 @@ class DiskBlobScope implements BlobScope {
 export class DiskBlobStore implements BlobStore {
   readonly kind = 'disk' as const;
 
+  readonly #root: SpaceBlobRoot;
+
+  constructor(root: SpaceBlobRoot) {
+    this.#root = root;
+  }
+
   async init(): Promise<void> {
     // Area directories are created on first write; nothing to prepare.
   }
@@ -323,11 +346,13 @@ export class DiskBlobStore implements BlobStore {
   async close(): Promise<void> {}
 
   space(canvasId: string): SpaceBlobs {
+    const scope = (area: SpaceBlobArea): BlobScope =>
+      new DiskBlobScope(area, canvasId, this.#root);
     return {
-      artifacts: new DiskBlobScope('artifacts', canvasId),
-      guide: new DiskBlobScope('guide', canvasId),
-      memory: new DiskBlobScope('memory', canvasId),
-      uploads: new DiskBlobScope('uploads', canvasId),
+      artifacts: scope('artifacts'),
+      guide: scope('guide'),
+      memory: scope('memory'),
+      uploads: scope('uploads'),
     };
   }
 }
