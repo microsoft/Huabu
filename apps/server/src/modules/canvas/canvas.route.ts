@@ -22,16 +22,15 @@ import {
   preprocessNodeBodySchema,
   putCanvasBodySchema,
   putNodeContentBodySchema,
-  setPortalNodePinsCommandSchema,
+  stripLegacyPortalTopology,
 } from '@huabu/shared';
 import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
 import {
-  CanvasCommandRoutingError,
-  executeCanvasCommandsOnHost,
-  MissingWorldPortalError,
-} from './canvas-command-router.js';
-import { CanvasNotFoundError, applyDeltasOnServer } from './canvas-executor.js';
+  CanvasNotFoundError,
+  applyDeltasOnServer,
+  executeOnServer,
+} from './canvas-executor.js';
 import { searchCanvas } from './canvas-search.js';
 import { publishCanvasUpdate } from './canvas-sync.js';
 import { moveCanvasSelection, SpaceMoveError } from './space-move.service.js';
@@ -40,15 +39,12 @@ import {
   SpacePreviewSceneError,
 } from './space-preview-scene.js';
 import {
-  assertWorldPortalTopologyAllowed,
+  assertCurrentCanvasCommands,
+  assertWorldPreviewTopologyAllowed,
   readLiveSpaceIds,
-  WorldPortalMutationError,
-} from './world-portal-policy.js';
-import { reconcileWorldPortals } from './world-portals.js';
-import {
-  resolveWorldReferences,
-  WorldReferenceResolutionError,
-} from './world-reference-resolver.js';
+  WorldPreviewMutationError,
+} from './world-preview-policy.js';
+import { reconcileWorldPreviews } from './world-previews.js';
 import { MAX_UPLOAD_BYTES } from '../../upload-limits.js';
 import { ARTIFACT_URL_REGEX } from '../artifact/utils.js';
 import { getPreprocessDispatcher, getProfile } from '../preprocessing/index.js';
@@ -86,7 +82,6 @@ import type {
   GetCanvasResponse,
   GetNodeContentResponse,
   GetSpacePreviewSceneResponse,
-  GetWorldReferencesResponse,
   GetThreadChangesResponse,
   ImportCanvasResponse,
   ListCanvasesResponse,
@@ -1095,7 +1090,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
   }>('/:canvasId', async function (request, reply) {
     const { canvasId } = request.params;
     if (isWorldCanvasId(canvasId)) {
-      await reconcileWorldPortals();
+      await reconcileWorldPreviews();
     }
     const handle = space(canvasId);
     const canvas = await handle.read();
@@ -1118,20 +1113,6 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         nodes: hydratedNodes,
       },
     });
-  });
-
-  fastify.get<{
-    Params: { canvasId: string };
-    Reply: ApiResult<GetWorldReferencesResponse>;
-  }>('/:canvasId/references', async function (request, reply) {
-    try {
-      return reply.send(await resolveWorldReferences(request.params.canvasId));
-    } catch (error) {
-      if (error instanceof WorldReferenceResolutionError) {
-        return reply.code(400).send({ message: error.message });
-      }
-      throw error;
-    }
   });
 
   fastify.get<{
@@ -1170,7 +1151,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
 
     const structured = getStructuredStore();
     const spaces = structured.spaces();
-    const handle = structured.space(canvasId);
+    const handle = space(canvasId);
     const existing = await handle.read();
     const serverVersion = existing?.version ?? 0;
     if (clientVersion !== serverVersion) {
@@ -1182,7 +1163,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     try {
-      assertWorldPortalTopologyAllowed(
+      assertWorldPreviewTopologyAllowed(
         canvasId,
         (existing?.state.nodes ?? []) as NodeLike[],
         incomingState.nodes ?? [],
@@ -1191,7 +1172,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           : new Set<string>(),
       );
     } catch (error) {
-      if (error instanceof WorldPortalMutationError) {
+      if (error instanceof WorldPreviewMutationError) {
         return reply.code(409).send({ message: error.message });
       }
       throw error;
@@ -1342,32 +1323,19 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       });
     }
     const { commands, originator, runId } = parsed.data;
-    const validatedCommands: CanvasCommand[] = [];
-    for (const command of commands) {
-      if (
-        typeof command === 'object' &&
-        command !== null &&
-        'type' in command &&
-        command.type === 'SET_PORTAL_NODE_PINS'
-      ) {
-        const parsedCommand = setPortalNodePinsCommandSchema.safeParse(command);
-        if (!parsedCommand.success) {
-          return reply.code(400).send({
-            message:
-              parsedCommand.error.issues[0]?.message ??
-              'Invalid Portal Pin command',
-          });
-        }
-        validatedCommands.push(parsedCommand.data as CanvasCommand);
-      } else {
-        validatedCommands.push(command as CanvasCommand);
+    try {
+      assertCurrentCanvasCommands(commands);
+    } catch (error) {
+      if (error instanceof WorldPreviewMutationError) {
+        return reply.code(400).send({ message: error.message });
       }
+      throw error;
     }
 
     try {
-      const out = await executeCanvasCommandsOnHost({
+      const out = await executeOnServer({
         canvasId,
-        commands: validatedCommands,
+        commands: commands as CanvasCommand[],
         originator,
         ...(runId ? { runId } : {}),
         // Derive review records only for thread-attributed (ACP) batches —
@@ -1395,15 +1363,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       if (err instanceof CanvasNotFoundError) {
         return reply.code(404).send({ message: 'Canvas not found' });
       }
-      if (err instanceof WorldPortalMutationError) {
-        return reply.code(409).send({ message: err.message });
-      }
-      if (err instanceof MissingWorldPortalError) {
-        return reply
-          .code(409)
-          .send({ code: 'WORLD_PORTAL_MISSING', message: err.message });
-      }
-      if (err instanceof CanvasCommandRoutingError) {
+      if (err instanceof WorldPreviewMutationError) {
         return reply.code(409).send({ message: err.message });
       }
       request.log.error({ canvasId, err }, 'Failed to execute canvas commands');
@@ -1486,6 +1446,9 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       } catch (err) {
         if (err instanceof CanvasNotFoundError) {
           return reply.code(404).send({ message: 'Canvas not found' });
+        }
+        if (err instanceof WorldPreviewMutationError) {
+          return reply.code(409).send({ message: err.message });
         }
         request.log.error(
           { canvasId, changeId, err },
@@ -1846,6 +1809,14 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         const importedManifest = manifest as ImportManifest | null;
         const targetTitle =
           importedManifest?.title ?? parsed.title ?? 'Imported canvas';
+        const topology = stripLegacyPortalTopology(
+          (parsed.state.nodes ?? []) as Parameters<
+            typeof stripLegacyPortalTopology
+          >[0],
+          (parsed.state.edges ?? []) as Parameters<
+            typeof stripLegacyPortalTopology
+          >[1],
+        );
 
         // Artifact URLs are the bundle's own vocabulary, so they are rewritten
         // here; where the result is filed is not, so `publish` decides that —
@@ -1855,7 +1826,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           canvasId: targetCanvasId,
           title: targetTitle,
           state: rewriteCanvasArtifactUrls(
-            parsed.state,
+            { ...parsed.state, ...topology },
             sourceCanvasId,
             targetCanvasId,
           ),

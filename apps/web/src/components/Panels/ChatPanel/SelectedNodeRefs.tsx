@@ -7,7 +7,6 @@ import { useTranslation } from 'react-i18next';
 import { Tooltip } from '@/components/Common/Tooltip';
 import { useChatSession } from '@/hooks/useChatSession';
 import useCanvasStore from '@/store/canvasStore';
-import { isHeadlessConversation } from '@/store/conversationOwner';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 
 /**
@@ -31,10 +30,8 @@ export const SourceCount = () => {
   const session = useChatSession();
   const viewingQuestionNodeId =
     session.conversationView?.conversationOwner.nodeId;
-  const headlessConversation = isHeadlessConversation(session.conversationView);
 
   const selectedNodes = useMemo(() => {
-    if (headlessConversation) return [];
     const nodeSelected = nodes.filter(
       (n) => n.selected && n.id !== viewingQuestionNodeId,
     );
@@ -51,7 +48,7 @@ export const SourceCount = () => {
       }
     }
     return result;
-  }, [headlessConversation, nodes, strokeSelection, viewingQuestionNodeId]);
+  }, [nodes, strokeSelection, viewingQuestionNodeId]);
 
   const count = selectedNodes.length;
 

@@ -5,7 +5,6 @@ import clsx from 'clsx';
 import { Bookmark, ListIndentIncrease, PanelRightOpen } from 'lucide-react';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
 
 import {
   createId,
@@ -41,7 +40,6 @@ import {
 } from '@/store/chatStore';
 import { findPendingPermissionRequest } from '@/store/chatTypes';
 import {
-  isHeadlessConversation,
   resolveConversationAgentBinding,
   resolveConversationOwnerSource,
 } from '@/store/conversationOwner';
@@ -99,7 +97,6 @@ export const ChatPanel = ({
   onOpenPositionHandled,
 }: ChatPanelProps) => {
   const { t } = useTranslation();
-  const navigate = useNavigate();
   const canvasId = useCanvasStore((state) => state.canvasId);
 
   // When the panel is replaying a question node's thread, the mode is a
@@ -122,17 +119,15 @@ export const ChatPanel = ({
 
   const viewingQuestionNodeId =
     activeConversationView?.conversationOwner.nodeId;
-  const headlessConversation = isHeadlessConversation(activeConversationView);
   const conversationOwnerSource = useCanvasStore((state) =>
     resolveConversationOwnerSource(
       state.canvasId,
       state.nodes,
-      state.worldReferences,
       activeConversationView,
     ),
   );
   const ownerScopeReady =
-    !headlessConversation || conversationOwnerSource !== undefined;
+    !activeConversationView || conversationOwnerSource !== undefined;
   // "Composing" = the viewed question node has never been authored/run yet
   // (its status is still `idle`). Its binding remains mutable unless creation
   // explicitly fixed it; the mode follows this thread's inline pick rather
@@ -141,7 +136,6 @@ export const ChatPanel = ({
   // source of truth — rather than a stored `compose` flag. Replay (already-run
   // node) keeps deriving from the node.
   const isComposingQuestion =
-    !headlessConversation &&
     !!viewingQuestionNodeId &&
     getQuestionNodeStatus(conversationOwnerSource) === 'idle';
   const questionReplayMode = (() => {
@@ -169,11 +163,10 @@ export const ChatPanel = ({
     typeof conversationOwnerSource?.label === 'string'
       ? conversationOwnerSource.label.trim() || undefined
       : undefined;
-  const isViewingUserNamedQuestion = headlessConversation
-    ? !!viewingQuestionLabel
-    : conversationOwnerSource?.labelSource === 'user';
+  const isViewingUserNamedQuestion =
+    conversationOwnerSource?.labelSource === 'user';
   const tryRename = useCanvasStore((s) => s.tryRename);
-  const canRenameQuestion = !!viewingQuestionNodeId && !headlessConversation;
+  const canRenameQuestion = !!viewingQuestionNodeId;
   const [isEditingQuestionTitle, setIsEditingQuestionTitle] = useState(false);
   const [draftQuestionTitle, setDraftQuestionTitle] = useState(
     viewingQuestionLabel ?? '',
@@ -272,7 +265,6 @@ export const ChatPanel = ({
   // <alias>" — the user can recreate the profile in Settings to
   // bring the binding back to life.
   useEffect(() => {
-    if (headlessConversation) return;
     if (viewingQuestionBindingIsFixed) return;
     if (!isHistoryLoaded) return;
     if (messages.length > 0) return;
@@ -290,7 +282,6 @@ export const ChatPanel = ({
     agentBinding,
     acpProfiles,
     canvasId,
-    headlessConversation,
     viewingQuestionBindingIsFixed,
     setAgentBinding,
     threadId,
@@ -593,17 +584,6 @@ export const ChatPanel = ({
     ],
   );
 
-  // Question thread replay mode
-  const openOwnerSpaceForReview = useCallback(() => {
-    if (!activeConversationView || !headlessConversation) return;
-    const owner = activeConversationView.conversationOwner;
-    navigate(`/canvas/${owner.canvasId}`, {
-      state: {
-        previewNode: { canvasId: owner.canvasId, nodeId: owner.nodeId },
-      },
-    });
-  }, [headlessConversation, navigate, activeConversationView]);
-
   useEffect(() => {
     if (!llmConfig && !llmLoading) {
       void llmInit();
@@ -723,10 +703,7 @@ export const ChatPanel = ({
   // place; it never mints a new thread.
   const threadHasUserMessage = messages.some((m) => m.role === 'user');
   const agentSelectorEditable =
-    !headlessConversation &&
-    !viewingQuestionBindingIsFixed &&
-    !threadHasUserMessage &&
-    !isLoading;
+    !viewingQuestionBindingIsFixed && !threadHasUserMessage && !isLoading;
   const handleSelectAgent = useCallback(
     (choice: AgentChoice) => {
       // Agent binding is immutable once a turn starts (1 thread = 1 binding).
@@ -905,22 +882,8 @@ export const ChatPanel = ({
                 />
               </div>
             ) : null}
-            {ownerCanvasId && threadId && !headlessConversation ? (
+            {ownerCanvasId && threadId ? (
               <ChangeReviewCard canvasId={ownerCanvasId} threadId={threadId} />
-            ) : null}
-            {headlessConversation && hasThreadChanges ? (
-              <div className="border-edge-default bg-surface -mb-px flex items-center justify-between gap-3 rounded-t-2xl border border-b-0 px-3 py-2 text-xs">
-                <span className="text-fg-muted">
-                  {t('world.sourceChangesAvailable')}
-                </span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={openOwnerSpaceForReview}
-                >
-                  {t('world.openSpaceForReview')}
-                </Button>
-              </div>
             ) : null}
             <ThreadChatInput
               onSubmit={handleSubmit}

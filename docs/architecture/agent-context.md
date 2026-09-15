@@ -92,13 +92,13 @@ The envelope splits "where the user pointed this turn" into orthogonal parts ([e
 
 Key differences: **selection / anchor point at existing canvas nodes** (enriched with a `preview` via node-ref; content via tools); **attachment is a one-off off-canvas asset** (content inlined directly). Anchor is "a single focus point + neighbourhood"; selection is "a set of node metadata".
 
-### 4.1 Cross-Canvas conversation ownership
+### 4.1 Anchored conversation ownership
 
-The web models an open anchored conversation with `AgentConversationView`, which separates a `presentationAnchor` from a `conversationOwner`. Ordinary question nodes use the same Canvas/node for both addresses. A World `nodeRef` uses the World reference as its presentation anchor and the source question's `{ canvasId, nodeId, threadId }` as its owner.
+The web retains `AgentConversationView` for anchored Question conversations. Its `presentationAnchor` and `conversationOwner` identify the same Canvas and node, with the owner also carrying `threadId`. Validation requires that Canvas to be active and the live Question's thread to match. Legacy World `nodeRef` presentation and its source-reference resolver are removed; a Space Preview cannot open a source-owned conversation in the host Canvas.
 
-History, reconnect, `/api/agent`, tools, lifecycle writes, binding/mode, and change records use the conversation owner's Canvas. A World-owned selection is not meaningful in the source Canvas, so a headless turn sends the source question as `anchorNodeId` and sends `selectedNodes: []`.
+History, reconnect, `/api/agent`, tools, lifecycle writes, binding/mode, and change records use the conversation owner's Canvas. The Question is sent as `anchorNodeId`; Canvas selection is included only when it belongs to that same Canvas. Unbound Chat has no anchored conversation view and uses its session Canvas.
 
-The World reference resolver also exposes whether the source question has authored sidecar content. Headless first-turn composition requires both `status: idle` and no authored content, preventing stale topology status from overwriting an existing question.
+First-turn composition requires `status: idle` and no non-empty authored `content` on the ordinary Question. No separately resolved World-reference content flag participates in this decision.
 
 For both selection and anchor, the server enriches each node into an agent-facing object via the shared `describeNode` assembler (see §5) — `filename` (`nodes/<safeLabel>.md`) + `preview` (ladder `summary > content[:120] > src`) + `rev`, plus the parent label for frames. **No content / geometry sent** — content via `read("nodes/<id>.md")`, layout/style via `inspect_nodes`.
 

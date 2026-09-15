@@ -215,8 +215,6 @@ export const NodeFloatingToolbar = memo(
     // controls.
     const dispatchUiIntent = useCanvasStore((s) => s.dispatchUiIntent);
     const isFrame = type === 'frame';
-    const isCanvasRef = type === 'canvasRef';
-    const isFrameRef = type === 'frameRef';
     const frameData = isFrame ? (data as FrameNodeData) : null;
     const frameSizing = frameData?.sizing ?? 'hug';
     const frameLayoutMode = frameData?.layoutMode ?? 'free';
@@ -282,7 +280,7 @@ export const NodeFloatingToolbar = memo(
         <div className="bg-edge-default mx-0.5 h-4 w-px" />
 
         {/* ── Group 2: Style — color + size ── */}
-        {type !== 'question' && type !== 'sketch' && !isCanvasRef && (
+        {type !== 'question' && type !== 'sketch' && (
           <FloatingToolbar.ColorPicker
             colors={accentPickerOptions}
             value={data.style?.accent ?? ACCENT_NONE}
@@ -298,63 +296,60 @@ export const NodeFloatingToolbar = memo(
           />
         )}
 
-        {!isCanvasRef && !isFrameRef && (
-          <FloatingToolbar.SizePicker
-            width={currentWidth}
-            height={isTextFlowNode ? null : currentHeight}
-            showHeight={!isTextFlowNode}
-            onApply={({ width, height }) => {
-              if (!internalNode) return;
-              const resolved = resolveGeometryEdit(internalNode, {
-                width,
-                height,
+        <FloatingToolbar.SizePicker
+          width={currentWidth}
+          height={isTextFlowNode ? null : currentHeight}
+          showHeight={!isTextFlowNode}
+          onApply={({ width, height }) => {
+            if (!internalNode) return;
+            const resolved = resolveGeometryEdit(internalNode, {
+              width,
+              height,
+            });
+            if (!resolved) return;
+            beginGesture('SET_NODE_GEOMETRY');
+            // Frame in hug mode: typing an explicit W or H is a
+            // direct-manipulation signal to switch the frame's sizing
+            // policy to manual. Dispatch the policy change first
+            // (inside the same gesture) so both intents fold into one
+            // undo entry and the geometry write isn't reverted by the
+            // engine's end-of-batch refit pass.
+            if (isFrameHug) {
+              dispatchUiIntent({
+                type: 'SET_FRAME_LAYOUT_MODE',
+                frameId: id,
+                mode: frameLayoutMode,
+                sizing: 'manual',
               });
-              if (!resolved) return;
-              beginGesture('SET_NODE_GEOMETRY');
-              // Frame in hug mode: typing an explicit W or H is a
-              // direct-manipulation signal to switch the frame's sizing
-              // policy to manual. Dispatch the policy change first
-              // (inside the same gesture) so both intents fold into one
-              // undo entry and the geometry write isn't reverted by the
-              // engine's end-of-batch refit pass.
-              if (isFrameHug) {
-                dispatchUiIntent({
-                  type: 'SET_FRAME_LAYOUT_MODE',
-                  frameId: id,
-                  mode: frameLayoutMode,
-                  sizing: 'manual',
-                });
-              }
-              setNodeGeometry([
-                {
-                  nodeId: id,
-                  size: {
-                    width: resolved.width,
-                    height: resolved.height,
-                  },
+            }
+            setNodeGeometry([
+              {
+                nodeId: id,
+                size: {
+                  width: resolved.width,
+                  height: resolved.height,
                 },
-              ]);
-            }}
-            autoSize={
-              isFrame
-                ? {
-                    dimensions: 'both',
-                    active: isFrameHug,
-                    onToggle: toggleFrameSizing,
-                  }
-                : undefined
-            }
-            heightAuto={
-              type === 'note'
-                ? {
-                    active: isNoteAutoHeight,
-                    onToggle: toggleNoteAutoHeight,
-                  }
-                : undefined
-            }
-          />
-        )}
-
+              },
+            ]);
+          }}
+          autoSize={
+            isFrame
+              ? {
+                  dimensions: 'both',
+                  active: isFrameHug,
+                  onToggle: toggleFrameSizing,
+                }
+              : undefined
+          }
+          heightAuto={
+            type === 'note'
+              ? {
+                  active: isNoteAutoHeight,
+                  onToggle: toggleNoteAutoHeight,
+                }
+              : undefined
+          }
+        />
         {isTextFlowNode && (
           <FloatingToolbar.NumberInput
             label="Font"
@@ -387,9 +382,7 @@ export const NodeFloatingToolbar = memo(
           </>
         )}
 
-        {!['spacePreview', 'canvasRef', 'frameRef', 'nodeRef'].includes(
-          type,
-        ) && (
+        {type !== 'spacePreview' && (
           <>
             <FloatingToolbar.Divider />
             <FloatingToolbar.ActionButton

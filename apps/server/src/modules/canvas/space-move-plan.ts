@@ -25,13 +25,7 @@ const PREVIEW_MIN_HEIGHT = 320;
 const PREVIEW_MAX_WIDTH = 2400;
 const PREVIEW_MAX_HEIGHT = 1600;
 const MOVABLE_TYPES = new Set<CanvasNodeType>(
-  CANVAS_NODE_TYPES.filter(
-    (type) =>
-      type !== 'spacePreview' &&
-      type !== 'canvasRef' &&
-      type !== 'frameRef' &&
-      type !== 'nodeRef',
-  ),
+  CANVAS_NODE_TYPES.filter((type) => type !== 'spacePreview'),
 );
 
 export class SpaceMovePlanError extends Error {

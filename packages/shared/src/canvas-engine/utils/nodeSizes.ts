@@ -42,9 +42,6 @@ const DEFAULT_SIZES: Record<string, NodeSize> = {
   audio: { width: 200, height: 56 },
   frame: { width: 400, height: 300 },
   spacePreview: { width: 480, height: 320 },
-  canvasRef: { width: 360, height: 240 },
-  frameRef: { width: 400, height: 300 },
-  nodeRef: { width: 180, height: 96 },
   // Question nodes auto-size to content (height-driven by text), matching
   // the behaviour of text/note nodes. The width sets the wrap width when
   // a question is created with content. Use 80px as a nominal default for

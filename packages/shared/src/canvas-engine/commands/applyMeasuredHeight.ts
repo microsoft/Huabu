@@ -49,7 +49,6 @@ const applyMeasuredHeight: CommandDefinition<Cmd> = {
       cmd.items.map((item) => [item.nodeId as string, item]),
     );
     const affectedFrameIds = new Set<string>();
-    const affectedPortalIds = new Set<string>();
 
     let changed = false;
     const nextNodes = state.nodes.map((node) => {
@@ -97,7 +96,7 @@ const applyMeasuredHeight: CommandDefinition<Cmd> = {
       }
 
       changed = true;
-      trackParent(node, state.nodes, affectedFrameIds, affectedPortalIds);
+      if (node.parentId) affectedFrameIds.add(node.parentId);
 
       return {
         ...node,
@@ -120,9 +119,6 @@ const applyMeasuredHeight: CommandDefinition<Cmd> = {
       ...(affectedFrameIds.size > 0
         ? { affectedFrameIds: Array.from(affectedFrameIds) }
         : {}),
-      ...(affectedPortalIds.size > 0
-        ? { affectedPortalIds: Array.from(affectedPortalIds) }
-        : {}),
     };
   },
 };
@@ -135,21 +131,6 @@ function isSameHint(node: Node, hint: AutoHeightHint): boolean {
     stored?.measuredFor === hint.measuredFor &&
     Boolean(stored?.provisional) === Boolean(hint.provisional)
   );
-}
-
-function trackParent(
-  node: Node,
-  nodes: readonly Node[],
-  frameIds: Set<string>,
-  portalIds: Set<string>,
-): void {
-  if (!node.parentId) return;
-  const parent = nodes.find((candidate) => candidate.id === node.parentId);
-  if (parent?.type === 'canvasRef' || parent?.type === 'frameRef') {
-    portalIds.add(parent.id);
-  } else {
-    frameIds.add(node.parentId);
-  }
 }
 
 export default applyMeasuredHeight;

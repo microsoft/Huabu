@@ -24,7 +24,6 @@ import { ExpandedNodePanel } from '../ExpandedNodePanel/ExpandedNodePanel';
 
 import type { ChatSession } from '@/hooks/useChatSession';
 import type { PreviewTarget } from '@/store/previewWorkspace/model';
-import type { ResolvedWorldReference } from '@huabu/shared';
 import type { Node } from '@xyflow/react';
 
 /**
@@ -32,12 +31,8 @@ import type { Node } from '@xyflow/react';
  * yet — a node mints its thread on first open, so there is nothing to show
  * before that.
  */
-function questionSession(
-  node: Node,
-  canvasId: string,
-  reference: ResolvedWorldReference | undefined,
-): ChatSession | null {
-  const conversationView = conversationViewForNode(node, canvasId, reference);
+function questionSession(node: Node, canvasId: string): ChatSession | null {
+  const conversationView = conversationViewForNode(node, canvasId);
   if (!conversationView) return null;
 
   return {
@@ -85,26 +80,14 @@ export function PreviewRenderer({
       ? s.nodes.find((n) => n.id === target.nodeId)
       : undefined,
   );
-  const reference = useCanvasStore((s) =>
-    target.kind === 'node' ? s.worldReferences[target.nodeId] : undefined,
-  );
   const adjacentNode = useCanvasStore((s) =>
     adjacentNodeTarget
       ? s.nodes.find((candidate) => candidate.id === adjacentNodeTarget.nodeId)
       : undefined,
   );
-  const adjacentReference = useCanvasStore((s) =>
-    adjacentNodeTarget
-      ? s.worldReferences[adjacentNodeTarget.nodeId]
-      : undefined,
-  );
   const adjacentNodeSourceId =
     adjacentNode &&
-    !conversationViewForNode(
-      adjacentNode,
-      adjacentNodeTarget?.canvasId ?? '',
-      adjacentReference,
-    )
+    !conversationViewForNode(adjacentNode, adjacentNodeTarget?.canvasId ?? '')
       ? adjacentNode.id
       : undefined;
 
@@ -117,8 +100,8 @@ export function PreviewRenderer({
         conversationView: null,
       };
     }
-    return node ? questionSession(node, target.canvasId, reference) : null;
-  }, [target, node, reference]);
+    return node ? questionSession(node, target.canvasId) : null;
+  }, [target, node]);
 
   if (session) {
     return (

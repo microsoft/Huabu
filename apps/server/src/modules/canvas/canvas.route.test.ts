@@ -892,6 +892,139 @@ describe('Disk-only capability refusals', () => {
 });
 
 describe('Space export/import persistence', () => {
+  it('strips legacy topology before publishing while preserving children, content, and artifacts', async () => {
+    createCanvas('c1', 'Legacy Import');
+    const store = getCanvasStore('c1');
+    const current = store.read()!;
+    const sourceState = {
+      viewport: { x: 12, y: 34, zoom: 0.5 },
+      nodes: [
+        {
+          id: 'portal',
+          type: 'canvasRef',
+          position: { x: 100, y: 200 },
+          data: {},
+        },
+        {
+          id: 'pin',
+          type: 'frameRef',
+          parentId: 'portal',
+          position: { x: 10, y: 20 },
+          data: {},
+        },
+        { id: 'ref', type: 'nodeRef', position: { x: 0, y: 0 }, data: {} },
+        {
+          id: 'frame',
+          type: 'frame',
+          parentId: 'pin',
+          extent: 'parent',
+          position: { x: 3, y: 4 },
+          data: {},
+        },
+        {
+          id: 'note',
+          type: 'note',
+          parentId: 'frame',
+          position: { x: 5, y: 6 },
+          data: { label: 'Note', src: '/api/canvas/c1/artifact/asset.bin' },
+        },
+        {
+          id: 'preview',
+          type: 'spacePreview',
+          position: { x: 700, y: 0 },
+          data: { targetCanvasId: 'c1' },
+        },
+      ],
+      edges: [
+        { id: 'portal-edge', source: 'portal', target: 'note' },
+        { id: 'pin-edge', source: 'note', target: 'pin' },
+        { id: 'ref-edge', source: 'ref', target: 'note' },
+        { id: 'ordinary-edge', source: 'frame', target: 'note' },
+        { id: 'dangling-edge', source: 'missing', target: 'note' },
+      ],
+    };
+    store.write({ ...current, version: 1, state: sourceState });
+    store.writeNode('note', {
+      nodeId: 'note',
+      type: 'note',
+      label: 'Note',
+      content: 'Keep the source content',
+    });
+    store.writeNode('portal', {
+      nodeId: 'portal',
+      type: 'canvasRef',
+      label: 'Historical portal',
+      content: 'Keep the historical sidecar',
+    });
+    const blob = Buffer.from([0, 1, 2, 255]);
+    await space('c1').artifacts.put('asset.bin', blob);
+    const sourceBefore = store.read();
+    const app = await buildApp();
+    try {
+      const exported = await app.inject({
+        method: 'GET',
+        url: '/canvas/c1/export',
+      });
+      expect(exported.statusCode).toBe(200);
+      const upload = multipartBody(
+        'legacy.huabu.zip',
+        'application/zip',
+        exported.rawPayload,
+      );
+      const imported = await app.inject({
+        method: 'POST',
+        url: '/canvas/import',
+        ...upload,
+      });
+      expect(imported.statusCode).toBe(200);
+      const importedId = imported.json<{ canvasId: string }>().canvasId;
+      resetStorageCache();
+
+      // Inspect the unfiltered repository record: composed reads alone would
+      // hide a regression that still persisted the imported legacy nodes.
+      const record = await getStructuredStore().space(importedId).read();
+      expect(record).toMatchObject({
+        canvasId: importedId,
+        version: 1,
+        state: {
+          viewport: sourceState.viewport,
+          nodes: [
+            {
+              id: 'frame',
+              type: 'frame',
+              position: { x: 113, y: 224 },
+              data: {},
+            },
+            {
+              ...sourceState.nodes[4],
+              data: {
+                label: 'Note',
+                src: `/api/canvas/${importedId}/artifact/asset.bin`,
+              },
+            },
+            sourceState.nodes[5],
+          ],
+          edges: sourceState.edges.slice(3),
+        },
+      });
+      const frame = (record?.state.nodes as Array<Record<string, unknown>>)[0];
+      expect(frame).not.toHaveProperty('parentId');
+      expect(frame).not.toHaveProperty('extent');
+      const reopened = getCanvasStore(importedId);
+      expect(reopened.readNode('note')?.content).toBe(
+        'Keep the source content',
+      );
+      expect(reopened.readNode('portal')?.content).toBe(
+        'Keep the historical sidecar',
+      );
+      expect(await space(importedId).artifacts.read('asset.bin')).toEqual(blob);
+      expect(getCanvasStore('c1').read()).toEqual(sourceBefore);
+      expect(await space('c1').artifacts.read('asset.bin')).toEqual(blob);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('omits prompt logs but preserves other extension state without history', async () => {
     createCanvas('c1', 'Private Export');
     const promptStore = await space('c1').extension('huabu.prompt.log');

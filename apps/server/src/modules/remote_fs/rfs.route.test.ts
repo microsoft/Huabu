@@ -908,27 +908,16 @@ describe('POST /api/rfs/:canvasId/execute', () => {
         payload: pinPayload('canvas-source', 'node-source'),
       });
 
-      expect(response.statusCode).toBe(409);
-
-      const worldNodes = getCanvasStore('canvas-world').read()?.state.nodes as
-        | { type?: string; data?: { targetCanvasId?: string } }[]
-        | undefined;
-      expect(
-        worldNodes?.some(
-          (node) =>
-            node.type === 'spacePreview' &&
-            node.data?.targetCanvasId === 'canvas-source',
-        ),
-      ).toBe(true);
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toMatchObject({ code: 'validation_failed' });
+      expect(getCanvasStore('canvas-world').read()?.state.nodes).toEqual([]);
+      expect(getCanvasStore('canvas-world').read()?.version).toBe(0);
     } finally {
       await app.close();
     }
   });
 
-  // Reconciliation only mints Portals for live Spaces, so a pin naming a
-  // Space that is not one cannot be satisfied. That is the case the route's
-  // 409 branch exists for.
-  it('answers 409 when the pinned source Space owns no Portal', async () => {
+  it('rejects retired Pin commands before resolving their source', async () => {
     writeWorldFixture('.world', 'canvas-world', []);
     writeWorldFixture('Project', 'canvas-source', [
       {
@@ -949,11 +938,11 @@ describe('POST /api/rfs/:canvasId/execute', () => {
         payload: pinPayload('canvas-ghost', 'node-ghost'),
       });
 
-      expect(response.statusCode).toBe(409);
+      expect(response.statusCode).toBe(400);
       expect(response.json()).toMatchObject({
-        code: 'WORLD_PORTAL_MISSING',
+        code: 'validation_failed',
       });
-      expect(response.json().message).toMatch(/not a live Space/i);
+      expect(getCanvasStore('canvas-world').read()?.state.nodes).toEqual([]);
     } finally {
       await app.close();
     }

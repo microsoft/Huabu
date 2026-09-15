@@ -35,6 +35,7 @@ import {
   type CanvasNodeCreateInput,
 } from '@huabu/shared';
 
+import { assertCurrentCanvasNodeTypes } from './world-preview-policy.js';
 import { getLogger } from '../../utils/logger.js';
 import {
   safeResolve,
@@ -138,6 +139,14 @@ export async function importForeignNodeSources(
   canvasId: string,
   commands: readonly CanvasCommand[],
 ): Promise<CanvasCommand[]> {
+  // Validate all creates before importing any bytes from the batch.
+  assertCurrentCanvasNodeTypes(
+    commands.flatMap((cmd) =>
+      cmd.type === 'CREATE_NODES'
+        ? cmd.nodes.map((node) => ({ type: node.nodeType, data: node.data }))
+        : [],
+    ),
+  );
   // Lazily built nodeId → nodeType map, needed only to gate MERGE_NODE_DATA
   // patches (CREATE_NODES carries `nodeType` inline). Node type is immutable,
   // so reading the pre-batch snapshot here is race-free.

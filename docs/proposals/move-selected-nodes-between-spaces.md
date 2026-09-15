@@ -2,9 +2,11 @@
 
 Status: Implemented
 
-Last updated: 2026-09-01
+Last updated: 2026-09-14
 
 Tracking issue: [#142](https://github.com/microsoft/Huabu/issues/142)
+
+> **Historical exclusion update.** The legacy `canvasRef`, `frameRef`, and `nodeRef` exclusions below describe retired node types, not supported move operands or a migration path. Current move planning excludes `spacePreview` nodes and reads topology with legacy entries ignored; see [Space Preview](../architecture/space-preview.md) and [Canvas storage](../architecture/canvas-storage.md#retired-portalpin-topology-on-load). The original move design remains below.
 
 > **Scope.** This proposal adds the smallest complete user-facing operation for moving selected Canvas nodes and Frame subtrees between existing or newly created ordinary Spaces in the active Workspace, with an optional source `spacePreview` breadcrumb. It includes moving an eligible Agent Node's existing conversation identity instead of resetting or copying it. It deliberately does not introduce a general multi-Space transaction API, filesystem WAL, crash recovery, Blob reference counting, garbage collection, or multi-backend transaction protocol.
 

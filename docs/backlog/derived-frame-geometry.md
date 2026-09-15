@@ -1,7 +1,9 @@
 # Derived Frame Geometry
 
 Status: Backlog
-Last reviewed: 2026-07-27
+Last reviewed: 2026-09-14
+
+> **Superseded Portal assumptions.** The Portal mirroring and World/Portal audit references below are historical and no longer implementation requirements: `canvasRef` and `frameRef` have been retired. Current [Space Previews](../architecture/space-preview.md) are view-only scene projections, not persistent child Containers. This backlog remains an unapproved Frame-geometry idea; the original discussion is preserved below.
 
 > Spun out of [node-height-ownership-model.md](../proposals/node-height-ownership-model.md), which resolves the same distinction for node height but deliberately stops at the frame boundary. Read D9 there first — this document assumes its vocabulary (`authored` vs `derived` geometry, materialization, the per-batch derived marker).
 

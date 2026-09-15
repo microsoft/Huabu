@@ -18,16 +18,16 @@ export class WorldTargetAccessError extends Error {
 }
 
 /**
- * Read the Space records a World reference addresses, strictly.
+ * Read the Space records a World preview addresses, strictly.
  *
  * "Strictly" means an unreadable or malformed record raises rather than
- * resolving to a broken reference: a World Portal that silently rendered as
+ * resolving to a broken preview: a World preview that silently rendered as
  * "missing" because a record could not be parsed would hide an integrity
  * problem behind an ordinary-looking empty state.
  *
  * Every requested id appears in the result; one that has no Space maps to
  * `null`. This used to walk the Workspace directory reading `space.json`
- * files itself, which made a reference resolver a consumer of the Disk record
+ * files itself, which made authorization a consumer of the Disk record
  * layout, and made the read cost the whole Workspace rather than the ids
  * asked for.
  */
@@ -55,7 +55,7 @@ export async function readWorldTargetCanvasesStrict(
 /**
  * Resolve an optional read target without extending write authority.
  * Explicit cross-Canvas reads are available only from World and only through
- * one canonical Portal in the current World topology.
+ * one canonical preview in the current World topology.
  */
 export async function resolveWorldReadCanvasId(
   ownerCanvasId: string,
@@ -77,15 +77,28 @@ export async function resolveWorldReadCanvasId(
 
   const matches = (world.state.nodes as StoredNode[]).filter(
     (node) =>
-      node.type === 'canvasRef' && node.data?.targetCanvasId === targetCanvasId,
+      node.type === 'spacePreview' &&
+      node.data?.targetCanvasId === targetCanvasId,
   );
   if (matches.length !== 1) {
     throw new WorldTargetAccessError(
-      `Canvas ${targetCanvasId} is not addressed by one canonical World Portal`,
+      `Canvas ${targetCanvasId} is not addressed by one canonical World preview`,
     );
   }
-  // The Portal names it; confirm the Space itself is readable before handing
+  if (
+    !(await spaces.list()).some((entry) => entry.canvasId === targetCanvasId)
+  ) {
+    throw new WorldTargetAccessError(
+      'The preview target is not a live ordinary Space',
+    );
+  }
+  // The preview names it; confirm the Space itself is readable before handing
   // the id to a tool that will read from it.
-  await readWorldTargetCanvasesStrict(new Set([targetCanvasId]));
+  const targets = await readWorldTargetCanvasesStrict(
+    new Set([targetCanvasId]),
+  );
+  if (!targets.get(targetCanvasId)) {
+    throw new WorldTargetAccessError('The preview target is not readable');
+  }
   return targetCanvasId;
 }

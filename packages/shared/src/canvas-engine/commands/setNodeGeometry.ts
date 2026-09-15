@@ -39,7 +39,6 @@ const setNodeGeometry: CommandDefinition<Cmd> = {
       cmd.items.map((item) => [item.nodeId as string, item]),
     );
     const affectedFrameIds = new Set<string>();
-    const affectedPortalIds = new Set<string>();
     // Parent frames whose child just had its explicit height cleared
     // (revert to content-driven sizing). The new content height is
     // unknown until the inline editor reflows + RF re-measures, so we
@@ -163,12 +162,7 @@ const setNodeGeometry: CommandDefinition<Cmd> = {
         }
       }
       if (updated.parentId && !resizedFrameIds.has(updated.parentId)) {
-        const parent = state.nodes.find((node) => node.id === updated.parentId);
-        if (parent?.type === 'canvasRef' || parent?.type === 'frameRef') {
-          affectedPortalIds.add(parent.id);
-        } else {
-          affectedFrameIds.add(updated.parentId);
-        }
+        affectedFrameIds.add(updated.parentId);
       }
       // Structured (`column` / `row` / `grid`) frames that were themselves
       // resized must be passed through the end-of-batch grid solver
@@ -196,9 +190,6 @@ const setNodeGeometry: CommandDefinition<Cmd> = {
       edges: state.edges,
       ...(affectedFrameIds.size > 0
         ? { affectedFrameIds: Array.from(affectedFrameIds) }
-        : {}),
-      ...(affectedPortalIds.size > 0
-        ? { affectedPortalIds: Array.from(affectedPortalIds) }
         : {}),
       ...(deferredFitFrameIds.size > 0
         ? { deferredFitFrameIds: Array.from(deferredFitFrameIds) }

@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { stripLegacyPortalTopology } from '@huabu/shared';
 import {
   stripTransientNodeFields,
   stripTransientEdgeFields,
@@ -31,12 +32,6 @@ export type CanvasSnapshot = {
 export type CanvasPreviewSnapshot = CanvasSnapshot & {
   actionHistory: RecentAction[];
 };
-
-/**
- * Callback the store provides so the history manager can trigger
- * preprocessing for nodes that reappear after undo/redo.
- */
-export type TriggerPreprocessingFn = (node: Node) => void;
 
 // ---------------------------------------------------------------------------
 // Error message mapping
@@ -170,7 +165,7 @@ function preserveLiveTransient(
  * Self-contained undo/redo history manager for the canvas.
  *
  * All snapshot stacks, dedup logic, resize debounce timers, and server-side
- * sync (in-flight DELETE abort / re-ingestion) live here — keeping the
+ * sync (in-flight DELETE completion tracking) live here — keeping the
  * canvas store focused on CRUD.
  *
  * Usage from canvasStore:
@@ -183,8 +178,8 @@ class CanvasHistoryManager {
   private undoStack: CanvasSnapshot[] = [];
   private redoStack: CanvasSnapshot[] = [];
 
-  // ---- In-flight DELETE requests (abortable on undo) ----
-  private inflightDeletes = new Map<string, AbortController>();
+  // A fetch abort is not a server-side cancellation. Keep completion fences.
+  private inflightDeletes = new Map<string, Promise<void>>();
 
   // ---- Gesture snapshot tracking ----
   /** True when `beginGesture` has been called but the resulting command
@@ -280,10 +275,11 @@ class CanvasHistoryManager {
     if (!snapshot) return null;
 
     this.redoStack.push(createSnapshot(currentNodes, currentEdges));
+    const topology = stripLegacyPortalTopology(snapshot.nodes, snapshot.edges);
     return {
-      ...snapshot,
+      ...topology,
       nodes: preserveLiveTransient(
-        preserveLiveQuestionData(snapshot.nodes, currentNodes),
+        preserveLiveQuestionData(topology.nodes, currentNodes),
         currentNodes,
       ),
     };
@@ -299,10 +295,11 @@ class CanvasHistoryManager {
     if (!snapshot) return null;
 
     this.undoStack.push(createSnapshot(currentNodes, currentEdges));
+    const topology = stripLegacyPortalTopology(snapshot.nodes, snapshot.edges);
     return {
-      ...snapshot,
+      ...topology,
       nodes: preserveLiveTransient(
-        preserveLiveQuestionData(snapshot.nodes, currentNodes),
+        preserveLiveQuestionData(topology.nodes, currentNodes),
         currentNodes,
       ),
     };
@@ -314,11 +311,7 @@ class CanvasHistoryManager {
     this.undoStack.length = 0;
     this.redoStack.length = 0;
 
-    // Abort any in-flight delete requests and clear the tracking map.
-    for (const controller of this.inflightDeletes.values()) {
-      controller.abort();
-    }
-    this.inflightDeletes.clear();
+    // History reset does not cancel persistence already admitted by the server.
   }
 
   // ---------- Server-side sync after undo/redo ----------
@@ -326,55 +319,21 @@ class CanvasHistoryManager {
   /**
    * After an undo/redo restores a snapshot, synchronise the server-side
    * state:
-   * - Nodes that reappear → abort any in-flight DELETE, then re-ingest.
-   * - Nodes that disappear → fire a DELETE (tracked with AbortController
-   *   so a subsequent redo can cancel it).
+   * Reappearing nodes are held by the content queue until structure commits.
+   * Disappearing nodes use the same completion-tracked DELETE as commands.
    */
   syncServerAfterRestore(
     canvasId: string,
     prevNodes: Node[],
     restoredNodes: Node[],
-    triggerPreprocessing: TriggerPreprocessingFn,
+    beforeDelete: () => Promise<void>,
   ): void {
-    const prevIds = new Set(prevNodes.map((n) => n.id));
     const restoredIds = new Set(restoredNodes.map((n) => n.id));
-
-    // Nodes that reappear after undo/redo
-    for (const node of restoredNodes) {
-      if (!prevIds.has(node.id)) {
-        const controller = this.inflightDeletes.get(node.id);
-        if (controller) {
-          controller.abort();
-          this.inflightDeletes.delete(node.id);
-        }
-        triggerPreprocessing(node);
-      }
-    }
 
     // Nodes that disappear after undo/redo
     for (const node of prevNodes) {
       if (!restoredIds.has(node.id)) {
-        this.inflightDeletes.get(node.id)?.abort();
-
-        const controller = new AbortController();
-        this.inflightDeletes.set(node.id, controller);
-
-        void deleteNode(canvasId, node.id, { signal: controller.signal })
-          .catch((error) => {
-            if (error instanceof DOMException && error.name === 'AbortError')
-              return;
-            console.error(
-              'Failed to delete node after undo/redo:',
-              node.id,
-              error,
-            );
-            toast(describeDeleteFailure(error), { tone: 'danger' });
-          })
-          .finally(() => {
-            if (this.inflightDeletes.get(node.id) === controller) {
-              this.inflightDeletes.delete(node.id);
-            }
-          });
+        this.trackDelete(canvasId, node.id, beforeDelete());
       }
     }
   }
@@ -382,30 +341,39 @@ class CanvasHistoryManager {
   // ---------- In-flight delete management (used by onNodesChange) ----------
 
   /**
-   * Track a node deletion with an AbortController so it can be cancelled
-   * by a subsequent undo.  Aborts any previous in-flight delete for the
-   * same nodeId.  Returns the new AbortController.
+   * Serialize repeated deletions and await already-issued content before unlink.
    */
-  trackDelete(canvasId: string, nodeId: string): AbortController {
-    this.inflightDeletes.get(nodeId)?.abort();
-
-    const controller = new AbortController();
-    this.inflightDeletes.set(nodeId, controller);
-
-    void deleteNode(canvasId, nodeId, { signal: controller.signal })
+  trackDelete(
+    canvasId: string,
+    nodeId: string,
+    beforeDelete = Promise.resolve(),
+  ): void {
+    const previous = this.inflightDeletes.get(nodeId);
+    const pending = Promise.all([previous, beforeDelete])
+      .then(async () => {
+        await deleteNode(canvasId, nodeId);
+      })
       .catch((error) => {
-        if (error instanceof DOMException && error.name === 'AbortError')
-          return;
         console.error('Failed to delete node:', nodeId, error);
         toast(describeDeleteFailure(error), { tone: 'danger' });
       })
       .finally(() => {
-        if (this.inflightDeletes.get(nodeId) === controller) {
+        if (this.inflightDeletes.get(nodeId) === pending) {
           this.inflightDeletes.delete(nodeId);
         }
       });
 
-    return controller;
+    this.inflightDeletes.set(nodeId, pending);
+  }
+
+  async waitForDeletes(): Promise<void> {
+    while (this.inflightDeletes.size) {
+      await Promise.all(this.inflightDeletes.values());
+    }
+  }
+
+  get hasPendingDeletes(): boolean {
+    return this.inflightDeletes.size > 0;
   }
 }
 
@@ -483,18 +451,30 @@ export class CanvasHistoryRegistry {
     canvasId: string,
     prevNodes: Node[],
     restoredNodes: Node[],
-    triggerPreprocessing: TriggerPreprocessingFn,
+    beforeDelete: () => Promise<void>,
   ): void {
     this.active.syncServerAfterRestore(
       canvasId,
       prevNodes,
       restoredNodes,
-      triggerPreprocessing,
+      beforeDelete,
     );
   }
 
-  trackDelete(canvasId: string, nodeId: string): AbortController {
-    return this.active.trackDelete(canvasId, nodeId);
+  trackDelete(
+    canvasId: string,
+    nodeId: string,
+    beforeDelete?: Promise<void>,
+  ): void {
+    this.active.trackDelete(canvasId, nodeId, beforeDelete);
+  }
+
+  async waitForDeletes(canvasId: string): Promise<void> {
+    await this.managers.get(canvasId)?.waitForDeletes();
+  }
+
+  hasPendingDeletes(canvasId: string): boolean {
+    return this.managers.get(canvasId)?.hasPendingDeletes ?? false;
   }
 }
 

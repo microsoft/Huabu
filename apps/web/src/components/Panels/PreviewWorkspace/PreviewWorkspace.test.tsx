@@ -153,7 +153,7 @@ afterEach(() => {
   container?.remove();
   root = null;
   container = null;
-  useCanvasStore.setState({ nodes: [], canvasId: '', worldReferences: {} });
+  useCanvasStore.setState({ nodes: [], canvasId: '' });
 });
 
 describe('tab strip', () => {
@@ -300,35 +300,6 @@ describe('tab strip', () => {
         ?.querySelector('[data-testid="chat-panel"]')
         ?.getAttribute('data-thread-id'),
     ).toBe('thread-question-1');
-  });
-
-  it('renders a World Question reference through its source session', () => {
-    openNode('question-ref');
-    useCanvasStore.setState({
-      worldReferences: {
-        'question-ref': {
-          kind: 'nodeRef',
-          referenceNodeId: 'question-ref',
-          target: { canvasId: 'source-canvas', nodeId: 'source-question' },
-          status: 'ok',
-          source: {
-            type: 'question',
-            threadId: 'source-thread',
-            status: 'done',
-            viewed: true,
-            agentMode: 'ask',
-            agentBinding: { kind: 'internal' },
-          },
-        },
-      },
-    });
-    render([canvasNode('question-ref', 'Pinned question', 'nodeRef')]);
-
-    expect(
-      container
-        ?.querySelector('[data-testid="chat-panel"]')
-        ?.getAttribute('data-thread-id'),
-    ).toBe('source-thread');
   });
 
   it('creates a Chat tab from the workspace toolbar while a node is active', () => {

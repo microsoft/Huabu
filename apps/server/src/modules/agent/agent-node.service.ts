@@ -23,7 +23,7 @@ import {
   type SelectableAgentProfile,
 } from './selectable-agent-profile.js';
 import { getLogger } from '../../utils/logger.js';
-import { executeCanvasCommandsOnHost } from '../canvas/canvas-command-router.js';
+import { executeOnServer } from '../canvas/canvas-executor.js';
 import { buildSpatialBundle } from '../canvas/canvas-spatial.js';
 import { space } from '../storage/index.js';
 
@@ -106,7 +106,7 @@ async function defaultReadCanvasNodes(
 const DEFAULT_DEPENDENCIES: AgentNodeServiceDependencies = {
   getProfileRegistry: () => null,
   readCanvasNodes: defaultReadCanvasNodes,
-  execute: executeCanvasCommandsOnHost,
+  execute: executeOnServer,
 };
 
 function validatePosition(position: Point): void {

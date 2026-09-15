@@ -1,17 +1,17 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { executeCanvasCommandsOnHost } from '../canvas/canvas-command-router.js';
+import { executeOnServer } from '../canvas/canvas-executor.js';
 
 import type { FixedAgentNodeTarget } from './agent-thread-resolver.js';
 import type { CanvasCommand } from '@huabu/shared';
 
 interface LifecycleDependencies {
-  execute: typeof executeCanvasCommandsOnHost;
+  execute: typeof executeOnServer;
 }
 
 const DEFAULT_DEPENDENCIES: LifecycleDependencies = {
-  execute: executeCanvasCommandsOnHost,
+  execute: executeOnServer,
 };
 
 const patchChains = new Map<string, Promise<void>>();

@@ -18,6 +18,8 @@ Two channels cooperate:
 
 Space Preview does not open a target Canvas sync stream. It reads bounded snapshots through `GET /:canvasId/preview-scene`, shares them by target in a tab-local cache, and revalidates on a ten-second freshness interval and window focus. A target mutation therefore appears after revalidation rather than through the host Canvas SSE channel; see [space-preview.md](./space-preview.md).
 
+World preview reconciliation is a system-originated command batch against World and publishes through World's existing delta stream when topology changes. Portal Pin routing, batched source-reference refreshes, and World `nodeRef` conversation presentation are retired; previews add no cross-Space sync channel or source-conversation subscription.
+
 `version` (monotonic per canvas) is the concurrency primitive; a **dirty-node**
 filter guarantees an incoming agent write never clobbers a node the user is
 mid-editing.
@@ -195,8 +197,11 @@ is deferred — see the plan.
 
 ## Undo interaction
 
-Broadcast applies take **one** undo snapshot per batch (via
-`applyDeltasFromAgent`). Two host-side refinements keep undo coherent with sync:
+**Restore persistence is ordered, not delay-dependent.** Before undo/redo publishes reappearing nodes, the existing `nodeContentQueue` holds their sidecar writes behind generation tokens. Deleted-node bookkeeping is forgotten immediately, but already-issued content and preprocessing requests settle before the history manager sends DELETE; DELETE promises are tracked to completion rather than aborted, because aborting fetch does not cancel an admitted server mutation. `saveCanvas` waits for outstanding deletes, reads the latest topology, and releases only tokens captured by that successfully acknowledged structure PUT. A later undo/redo invalidates earlier tokens, so neither an old acknowledgement nor a queued body resurrects a node removed again. Ordinary content edits retain their independent debounce and revision baseline; only an acknowledged resurrection starts with the absent-sidecar revision, still subject to the existing content CAS.
+
+Structure failures and unresolved version conflicts leave restored bodies held and dirty; ordinary autosave, the existing save-error Retry action, and SSE version reconciliation all reuse `saveCanvas`. A released body's content failure or content conflict also stays dirty until saved or explicitly resolved. Route navigation, `switchCanvas`, and explicit Canvas loads drain the same queues and refuse to discard an unresolved restored body; Retry or explicitly removing the node lets the user continue. Delayed callbacks check the captured Canvas and restore generation before applying acknowledgements. A snapshot with `contentMissing` or without a text-bearing node's string body never invents an empty sidecar; it remains a missing-file placeholder. Unload remains best-effort: it cannot guarantee a multi-request restore after the browser terminates, and it never bypasses the restore hold to write content early. Backend tombstones, version checks, endpoints, and debounce delays are unchanged.
+
+Broadcast applies take **one** undo snapshot per batch (via `applyDeltasFromAgent`). Host-side refinements keep undo coherent with sync:
 
 - **Transient-field parity.** `diff.ts` and the web snapshotter share one
   canonical `TRANSIENT_NODE_FIELDS` / `TRANSIENT_EDGE_FIELDS` list
@@ -206,6 +211,7 @@ Broadcast applies take **one** undo snapshot per batch (via
 - **Question-node data preservation.** Undo/redo restores a question node's
   geometry but keeps its **live** `data` (thread binding, answer) — that payload
   is system-driven, so rewinding a move must not wipe it.
+- **Retired topology filtering.** Undo/redo applies the shared `stripLegacyPortalTopology()` helper before restoring a snapshot, so old Portal/Pin nodes and their incident edges cannot reappear and ordinary children retain rebased positions. The former Portal-specific history invalidation path is removed; this filtering does not migrate or clean up stored files.
 
 ## Stream reliability
 

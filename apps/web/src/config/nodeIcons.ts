@@ -25,7 +25,6 @@ import {
   Mic,
   MessageCircleQuestionMark,
   PanelsTopLeft,
-  Pin,
 } from 'lucide-react';
 
 import type { CanvasNodeType, OfficeFormat } from '@huabu/shared';
@@ -59,9 +58,6 @@ export const NODE_ICON: Record<CanvasNodeType, LucideIcon> = {
   web: Globe,
   frame: Frame,
   spacePreview: PanelsTopLeft,
-  canvasRef: PanelsTopLeft,
-  frameRef: Frame,
-  nodeRef: Pin,
   sketch: Pencil,
   question: MessageCircleQuestionMark,
 };
@@ -96,9 +92,6 @@ export const NODE_TYPE_LABEL: Record<CanvasNodeType, string> = {
   web: 'Website',
   frame: 'Frame',
   spacePreview: 'Space Preview',
-  canvasRef: 'Portal',
-  frameRef: 'Pinned frame',
-  nodeRef: 'Pinned reference',
   sketch: 'Sketch',
   question: 'Agent Node',
 };

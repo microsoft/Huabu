@@ -1,9 +1,11 @@
 # Unified Preview Workspace
 
 Status: Shipped
-Last updated: 2026-08-20
+Last updated: 2026-09-14
 
 The shipped system is documented in [`docs/architecture/preview-workspace.md`](../architecture/preview-workspace.md). This proposal is retained as design and migration history and is not authoritative for current behavior.
+
+> **Retired World integration.** The World `nodeRef` presentation described below is historical and no longer supported. Ordinary Question sessions still use `AgentConversationView`, but presentation and owner identify the same active Canvas/node. [Space Preview](../architecture/space-preview.md) does not mount source conversations. Preview tab Pin actions remain ordinary transient-to-permanent promotion and are unrelated to the retired World Pin command.
 
 ## 1. Summary
 

@@ -18,14 +18,13 @@ export function moveNodeIntoContainer(
   nodes: NestableNode[],
   nodeId: string,
   containerId: string,
-  options: { ignoreContainerLock?: boolean } = {},
 ): NestableNode[] {
   const byId = indexById(nodes);
   const node = byId.get(nodeId);
   const container = byId.get(containerId);
 
   if (!canParentNode(container, node)) return nodes;
-  if (container?.data?.locked && !options.ignoreContainerLock) return nodes;
+  if (container?.data?.locked) return nodes;
   if (node?.parentId === containerId) return nodes;
 
   const descendants = new Set(getDescendantIds(nodes, nodeId));

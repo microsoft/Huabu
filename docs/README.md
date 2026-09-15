@@ -77,47 +77,52 @@ docs/
 
 ### Active
 
-| Doc                                                                                                                  | Status         | Summary                                                                                |
-| -------------------------------------------------------------------------------------------------------------------- | -------------- | -------------------------------------------------------------------------------------- |
-| [active-space-external-note-watcher.md](./proposals/active-space-external-note-watcher.md)                           | Proposed       | Scope external-note watchers to Spaces with active SSE subscribers.                    |
-| [agent-node-freshness-cas-plan.md](./proposals/agent-node-freshness-cas-plan.md)                                     | In-Progress    | Read/write revision freshness across agent and web paths.                              |
-| [agent-space-change-auto-accept.md](./proposals/agent-space-change-auto-accept.md)                                   | Proposed       | Global General setting to suppress routine Agent Space Change Review records.          |
-| [agent-turn-realtime-sync.md](./proposals/agent-turn-realtime-sync.md)                                               | Proposed       | Live attachment and durable event replay for UI, RFS, and Headless turns.              |
-| [canvas-checkpoint-plan.md](./proposals/canvas-checkpoint-plan.md)                                                   | Proposed       | Canvas checkpoint and restoration design.                                              |
-| [canvas-realtime-sync-plan.md](./proposals/canvas-realtime-sync-plan.md)                                             | In-Progress    | Roadmap from multi-agent sync to multi-user co-editing.                                |
-| [content-before-ai-design.md](./proposals/content-before-ai-design.md)                                               | Needs review   | Block-level and inline authorship provenance.                                          |
-| [credential-storage-hardening-followups.md](./proposals/credential-storage-hardening-followups.md)                   | Draft          | Follow-up credential storage hardening.                                                |
-| [direct-space-operations.md](./proposals/direct-space-operations.md)                                                 | In-Progress    | #348 deterministic RFS query and mutation operations for external agents.              |
-| [external-agent-capability-cache-and-realization.md](./proposals/external-agent-capability-cache-and-realization.md) | Accepted       | #160/#162 GET-only capability discovery and canonical first-interaction realization.   |
-| [headless-executor-plan.md](./proposals/headless-executor-plan.md)                                                   | Partly shipped | Server-side headless canvas executor and structure/content sync.                       |
-| [interactive-agent-views.md](./proposals/interactive-agent-views.md)                                                 | In-Progress    | Capability-bound HTML views for persistent external-Agent interaction.                 |
-| [long-horizon-tasks.md](./proposals/long-horizon-tasks.md)                                                           | Partly shipped | Canvas-scoped recursive Agent creation, invocation, and handoff pipeline.              |
-| [managed-acp-harness.md](./proposals/managed-acp-harness.md)                                                         | Draft          | Resource-first Agent Team Profile compilation.                                         |
-| [managed-agent-teams.md](./proposals/managed-agent-teams.md)                                                         | In-Progress    | Huabu-managed discovery, configuration, preparation, and runtime.                      |
-| [milkdown-custom-toolbar-plan.md](./proposals/milkdown-custom-toolbar-plan.md)                                       | In-Progress    | Huabu-owned Milkdown toolbar and semantic editor commands.                             |
-| [model-role-routing.md](./proposals/model-role-routing.md)                                                           | Proposed       | Model selection by runtime role.                                                       |
-| [move-selected-nodes-between-spaces.md](./proposals/move-selected-nodes-between-spaces.md)                           | Proposed       | #142 selected-node and Frame-subtree moves between Spaces with bounded compensation.   |
-| [multi-backend-storage.md](./proposals/multi-backend-storage.md)                                                     | Partly shipped | Phases 1–3: Blob, structured repositories, catalogue, and bounded reads.               |
-| [note-auto-height-stable-geometry.md](./proposals/note-auto-height-stable-geometry.md)                               | Proposed       | Revision-aware offscreen Note measurement and stable auto-height geometry.             |
-| [space-preview-and-world-redesign.md](./proposals/space-preview-and-world-redesign.md)                               | In-Progress    | View-only Space previews, a preview-based World, and deferred zoom-through navigation. |
-| [space-prompt-topology-scoping.md](./proposals/space-prompt-topology-scoping.md)                                     | Shipped        | Topology-derived global/direct-Agent targeting for Prompt Frames.                      |
+| Doc                                                                                                                  | Status         | Summary                                                                              |
+| -------------------------------------------------------------------------------------------------------------------- | -------------- | ------------------------------------------------------------------------------------ |
+| [active-space-external-note-watcher.md](./proposals/active-space-external-note-watcher.md)                           | Proposed       | Scope external-note watchers to Spaces with active SSE subscribers.                  |
+| [agent-node-freshness-cas-plan.md](./proposals/agent-node-freshness-cas-plan.md)                                     | In-Progress    | Read/write revision freshness across agent and web paths.                            |
+| [agent-space-change-auto-accept.md](./proposals/agent-space-change-auto-accept.md)                                   | Proposed       | Global General setting to suppress routine Agent Space Change Review records.        |
+| [agent-turn-realtime-sync.md](./proposals/agent-turn-realtime-sync.md)                                               | Proposed       | Live attachment and durable event replay for UI, RFS, and Headless turns.            |
+| [canvas-checkpoint-plan.md](./proposals/canvas-checkpoint-plan.md)                                                   | Proposed       | Canvas checkpoint and restoration design.                                            |
+| [canvas-realtime-sync-plan.md](./proposals/canvas-realtime-sync-plan.md)                                             | In-Progress    | Roadmap from multi-agent sync to multi-user co-editing.                              |
+| [content-before-ai-design.md](./proposals/content-before-ai-design.md)                                               | Needs review   | Block-level and inline authorship provenance.                                        |
+| [credential-storage-hardening-followups.md](./proposals/credential-storage-hardening-followups.md)                   | Draft          | Follow-up credential storage hardening.                                              |
+| [direct-space-operations.md](./proposals/direct-space-operations.md)                                                 | In-Progress    | #348 deterministic RFS query and mutation operations for external agents.            |
+| [external-agent-capability-cache-and-realization.md](./proposals/external-agent-capability-cache-and-realization.md) | Accepted       | #160/#162 GET-only capability discovery and canonical first-interaction realization. |
+| [headless-executor-plan.md](./proposals/headless-executor-plan.md)                                                   | Partly shipped | Server-side headless canvas executor and structure/content sync.                     |
+| [interactive-agent-views.md](./proposals/interactive-agent-views.md)                                                 | In-Progress    | Capability-bound HTML views for persistent external-Agent interaction.               |
+| [long-horizon-tasks.md](./proposals/long-horizon-tasks.md)                                                           | Partly shipped | Canvas-scoped recursive Agent creation, invocation, and handoff pipeline.            |
+| [managed-acp-harness.md](./proposals/managed-acp-harness.md)                                                         | Draft          | Resource-first Agent Team Profile compilation.                                       |
+| [managed-agent-teams.md](./proposals/managed-agent-teams.md)                                                         | In-Progress    | Huabu-managed discovery, configuration, preparation, and runtime.                    |
+| [milkdown-custom-toolbar-plan.md](./proposals/milkdown-custom-toolbar-plan.md)                                       | In-Progress    | Huabu-owned Milkdown toolbar and semantic editor commands.                           |
+| [model-role-routing.md](./proposals/model-role-routing.md)                                                           | Proposed       | Model selection by runtime role.                                                     |
+| [move-selected-nodes-between-spaces.md](./proposals/move-selected-nodes-between-spaces.md)                           | Proposed       | #142 selected-node and Frame-subtree moves between Spaces with bounded compensation. |
+| [multi-backend-storage.md](./proposals/multi-backend-storage.md)                                                     | Partly shipped | Phases 1–3: Blob, structured repositories, catalogue, and bounded reads.             |
+| [note-auto-height-stable-geometry.md](./proposals/note-auto-height-stable-geometry.md)                               | Proposed       | Revision-aware offscreen Note measurement and stable auto-height geometry.           |
+| [space-prompt-topology-scoping.md](./proposals/space-prompt-topology-scoping.md)                                     | Shipped        | Topology-derived global/direct-Agent targeting for Prompt Frames.                    |
 
 ### Shipped
 
-| Doc                                                                                                  | Summary                                                                                              |
-| ---------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| [agent-reachback-rfs.md](./proposals/agent-reachback-rfs.md)                                         | Canvas-scoped RFS file plane, ask-agent control plane, and skill bootstrap.                          |
-| [agenetes-agentlet-gateway-consolidation.md](./proposals/agenetes-agentlet-gateway-consolidation.md) | Agenetes-owned stateless Agentlet Gateway and ACP placement.                                         |
-| [agenetes-thread-rehydration-and-forking.md](./proposals/agenetes-thread-rehydration-and-forking.md) | Durable-thread recovery and driver-owned rehydration.                                                |
-| [agent-request-render-resolution.md](./proposals/agent-request-render-resolution.md)                 | Generic agent submission and input boundary.                                                         |
-| [canvas-pointer-router.md](./proposals/canvas-pointer-router.md)                                     | Unified pointer routing and recognizer takeover priority.                                            |
-| [layered-architecture.md](./proposals/layered-architecture.md)                                       | Interaction-, protocol-, and task-driven architecture layers.                                        |
-| [node-write-unification-plan.md](./proposals/node-write-unification-plan.md)                         | Unified authored-content persistence and revision handling.                                          |
-| [world-canvas.md](./proposals/world-canvas.md)                                                       | Workspace-level World Canvas, project Portals, pinned references, and headless source conversations. |
-| [pi-harness-driver-refactor-plan.md](./proposals/pi-harness-driver-refactor-plan.md)                 | Agenetes harness driver boundary.                                                                    |
-| [question-node-zoom-lod-avatar.md](./proposals/question-node-zoom-lod-avatar.md)                     | Continuous zoom takeover: question node's agent mark stands in at deep zoom.                         |
-| [unified-external-agent-settings.md](./proposals/unified-external-agent-settings.md)                 | Unified command-backed and manifest-backed Agent Profiles.                                           |
-| [unified-preview-workspace.md](./proposals/unified-preview-workspace.md)                             | Default tabbed and split workspace for node previews and unbound chats.                              |
+| Doc                                                                                                  | Summary                                                                                                           |
+| ---------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| [agent-reachback-rfs.md](./proposals/agent-reachback-rfs.md)                                         | Canvas-scoped RFS file plane, ask-agent control plane, and skill bootstrap.                                       |
+| [agenetes-agentlet-gateway-consolidation.md](./proposals/agenetes-agentlet-gateway-consolidation.md) | Agenetes-owned stateless Agentlet Gateway and ACP placement.                                                      |
+| [agenetes-thread-rehydration-and-forking.md](./proposals/agenetes-thread-rehydration-and-forking.md) | Durable-thread recovery and driver-owned rehydration.                                                             |
+| [agent-request-render-resolution.md](./proposals/agent-request-render-resolution.md)                 | Generic agent submission and input boundary.                                                                      |
+| [canvas-pointer-router.md](./proposals/canvas-pointer-router.md)                                     | Unified pointer routing and recognizer takeover priority.                                                         |
+| [layered-architecture.md](./proposals/layered-architecture.md)                                       | Interaction-, protocol-, and task-driven architecture layers.                                                     |
+| [node-write-unification-plan.md](./proposals/node-write-unification-plan.md)                         | Unified authored-content persistence and revision handling.                                                       |
+| [space-preview-and-world-redesign.md](./proposals/space-preview-and-world-redesign.md)               | View-only Space previews and preview-based World; legacy compatibility clauses superseded, zoom-through deferred. |
+| [pi-harness-driver-refactor-plan.md](./proposals/pi-harness-driver-refactor-plan.md)                 | Agenetes harness driver boundary.                                                                                 |
+| [question-node-zoom-lod-avatar.md](./proposals/question-node-zoom-lod-avatar.md)                     | Continuous zoom takeover: question node's agent mark stands in at deep zoom.                                      |
+| [unified-external-agent-settings.md](./proposals/unified-external-agent-settings.md)                 | Unified command-backed and manifest-backed Agent Profiles.                                                        |
+| [unified-preview-workspace.md](./proposals/unified-preview-workspace.md)                             | Default tabbed and split workspace for node previews and unbound chats.                                           |
+
+### Retired records retained at stable paths
+
+| Doc                                            | Status               | Replacement                                                                                                                            |
+| ---------------------------------------------- | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| [world-canvas.md](./proposals/world-canvas.md) | Retired / Superseded | [Space Preview and World](./architecture/space-preview.md); the original Portal/Pin and source-conversation design is historical only. |
 
 When a proposal ships, set `Status: Shipped`, record the merge PR or commit, update the corresponding architecture document, and retain the proposal's stable path.
 

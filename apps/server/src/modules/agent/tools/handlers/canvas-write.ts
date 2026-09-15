@@ -28,7 +28,7 @@ import { createId } from '@huabu/shared';
 
 import { getLogger } from '../../../../utils/logger.js';
 import { prepareAgentCanvasCommands } from '../../../canvas/agent-command-preparation.js';
-import { executeCanvasCommandsOnHost } from '../../../canvas/canvas-command-router.js';
+import { executeOnServer } from '../../../canvas/canvas-executor.js';
 import { CanvasNotFoundError } from '../../../canvas/canvas-executor.js';
 
 import type {
@@ -105,7 +105,7 @@ export async function handleCanvasCommands(
   const runId = createId('run');
 
   try {
-    const result = await executeCanvasCommandsOnHost({
+    const result = await executeOnServer({
       canvasId: args.canvasId,
       commands: annotated,
       originator: {
