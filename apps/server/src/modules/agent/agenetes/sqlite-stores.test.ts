@@ -372,6 +372,95 @@ describe('Agenetes conversation stores on SQLite', () => {
     ]);
   });
 
+  it('pages SQLite display-turn ranges without splitting null-request continuations', async () => {
+    await openWithSpace();
+    const namespace = canvasAcpNamespace(CANVAS_ID);
+    const values = [
+      { request: null, content: 'orphan' },
+      { request: 'a', content: 'a' },
+      { request: 'b', content: 'b' },
+      { request: null, content: 'resume-b' },
+      { request: 'c', content: 'c' },
+    ] as const;
+    values.forEach((value, index) => {
+      conversationTurnStore.append(namespace, THREAD_ID, {
+        turn: {
+          request:
+            value.request === null
+              ? null
+              : { type: 'user_text', content: value.request },
+          transcript: [{ type: 'text', data: { content: value.content } }],
+        },
+        seqStart: index + 1,
+        seqEnd: index + 1,
+      });
+    });
+
+    const newest = conversationTurnStore.page(namespace, THREAD_ID, {
+      limit: 2,
+    });
+    expect(
+      newest.groups.map((group) =>
+        group.turns.map((record) => record.turn.transcript[0]!.data),
+      ),
+    ).toEqual([
+      [{ content: 'b' }, { content: 'resume-b' }],
+      [{ content: 'c' }],
+    ]);
+    expect(newest.hasMore).toBe(true);
+
+    const older = conversationTurnStore.page(namespace, THREAD_ID, {
+      limit: 2,
+      before: newest.before!,
+    });
+    expect(
+      older.groups.map((group) =>
+        group.turns.map((record) => record.turn.transcript[0]!.data),
+      ),
+    ).toEqual([[{ content: 'orphan' }], [{ content: 'a' }]]);
+    expect(older.hasMore).toBe(false);
+  });
+
+  it('keeps a SQLite cursor stable across append and rejects it after replace', async () => {
+    await openWithSpace();
+    const namespace = canvasAcpNamespace(CANVAS_ID);
+    for (let seq = 1; seq <= 2; seq += 1) {
+      conversationTurnStore.append(namespace, THREAD_ID, {
+        turn: {
+          request: { type: 'user_text', content: `q${seq}` },
+          transcript: [],
+        },
+        seqStart: seq,
+        seqEnd: seq,
+      });
+    }
+    const cursor = conversationTurnStore.page(namespace, THREAD_ID, {
+      limit: 1,
+    }).before!;
+    conversationTurnStore.append(namespace, THREAD_ID, {
+      turn: {
+        request: { type: 'user_text', content: 'q3' },
+        transcript: [],
+      },
+      seqStart: 3,
+      seqEnd: 3,
+    });
+    expect(
+      conversationTurnStore.page(namespace, THREAD_ID, {
+        limit: 1,
+        before: cursor,
+      }).groups[0]!.turns[0]!.turn.request,
+    ).toMatchObject({ content: 'q1' });
+
+    conversationTurnStore.replace(namespace, THREAD_ID, []);
+    expect(() =>
+      conversationTurnStore.page(namespace, THREAD_ID, {
+        limit: 1,
+        before: cursor,
+      }),
+    ).toThrow('stale');
+  });
+
   it('isolates one Space from another', async () => {
     const opened = await openWithSpace();
     const other = 'canvas-conversation-other';

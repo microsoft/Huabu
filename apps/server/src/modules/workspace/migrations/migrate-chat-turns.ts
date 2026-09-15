@@ -38,7 +38,7 @@ import { FileTurnStore } from '@agenetes/agenetes';
 
 import { isLegacyChatTurnRecord } from './legacy/chat-turn-record.js';
 import { legacyChatTurnToAgentTurn } from './legacy/fold-legacy-turn.js';
-import { readJsonLines } from '../../../utils/fs.js';
+import { atomicWriteText, readJsonLines } from '../../../utils/fs.js';
 
 import type { PersistedTurn } from '@agenetes/agenetes';
 import type { Namespace } from '@agenetes/protocol';
@@ -51,7 +51,7 @@ const LEGACY_SUFFIX = '.turns.jsonl';
  * target already exists or the source has no valid turns.
  */
 export function migrateLegacyTurnFile(
-  turnStore: FileTurnStore,
+  _turnStore: FileTurnStore,
   namespace: Namespace,
   threadId: string,
   legacyPath: string,
@@ -72,15 +72,18 @@ export function migrateLegacyTurnFile(
     return false;
   }
 
-  for (const record of records) {
-    const persisted: PersistedTurn = {
+  const persisted = records.map((record): PersistedTurn => {
+    return {
       turn: legacyChatTurnToAgentTurn(record),
       // Empty Tier-1 range: a migrated turn folded no live events.
       seqStart: 1,
       seqEnd: 0,
     };
-    turnStore.append(namespace, threadId, persisted);
-  }
+  });
+  atomicWriteText(
+    target,
+    `${persisted.map((record) => JSON.stringify(record)).join('\n')}\n`,
+  );
   renameSync(legacyPath, `${legacyPath}.bak`);
   return true;
 }

@@ -39,6 +39,14 @@ export interface ChatThreadState {
   draft: string;
   /** Whether history has been fetched from the server at least once. */
   historyLoaded: boolean;
+  /** Exclusive cursor for the next older server history page. */
+  historyBefore: string | null;
+  /** Whether complete display turns exist before the loaded window. */
+  hasOlderHistory: boolean;
+  /** Whether an older page is currently being fetched. */
+  isLoadingOlderHistory: boolean;
+  /** Recoverable older-page error; loaded messages stay usable. */
+  olderHistoryError: string | null;
   /** Whether an agent run is streaming into this thread right now. */
   isStreaming: boolean;
   /** Last compose mode selected for this thread. */
@@ -138,8 +146,24 @@ export interface ChatState {
   ) => void;
   /** Replace the entire message list for a thread. */
   setMessages: (threadId: string, messages: ChatMessage[]) => void;
+  /** Prepend a page while deduplicating stable server message IDs. */
+  prependHistoryMessages: (threadId: string, messages: ChatMessage[]) => void;
+  /** Replace the overlapping newest history suffix and preserve older pages. */
+  mergeLatestHistoryMessages: (
+    threadId: string,
+    messages: ChatMessage[],
+  ) => void;
   /** Mark a thread as history-loaded so `useChatHistory` skips it. */
   setHistoryLoaded: (threadId: string, loaded: boolean) => void;
+  setHistoryPageState: (
+    threadId: string,
+    state: {
+      before: string | null;
+      hasOlder: boolean;
+      loadingOlder?: boolean;
+      error?: string | null;
+    },
+  ) => void;
   setThreadLastAction: (threadId: string, action: AgentMode) => void;
   /**
    * Create an empty loaded thread without changing the active-canvas pointer.
@@ -223,6 +247,10 @@ const EMPTY_THREAD: ChatThreadState = {
   messages: EMPTY_MESSAGES,
   draft: '',
   historyLoaded: false,
+  historyBefore: null,
+  hasOlderHistory: false,
+  isLoadingOlderHistory: false,
+  olderHistoryError: null,
   isStreaming: false,
   lastAction: DEFAULT_ACTION,
   binding: DEFAULT_BINDING,
@@ -349,11 +377,77 @@ export const useChatStore = create<ChatState>()(
       setMessages: (threadId, messages) =>
         set((state) => patchThread(state, threadId, { messages })),
 
+      prependHistoryMessages: (threadId, messages) =>
+        set((state) => {
+          const current = threadOf(state, threadId).messages;
+          const currentIds = new Set(current.map((message) => message.id));
+          return patchThread(state, threadId, {
+            messages: [
+              ...messages.filter((message) => !currentIds.has(message.id)),
+              ...current,
+            ],
+          });
+        }),
+
+      mergeLatestHistoryMessages: (threadId, messages) =>
+        set((state) => {
+          const current = threadOf(state, threadId).messages;
+          const incomingTurnIds = new Set(
+            messages.flatMap((message) =>
+              message.historyTurnId ? [message.historyTurnId] : [],
+            ),
+          );
+          const overlap = current.findIndex(
+            (message) =>
+              message.historyTurnId !== undefined &&
+              incomingTurnIds.has(message.historyTurnId),
+          );
+          let lastServerMessage = -1;
+          for (let index = current.length - 1; index >= 0; index -= 1) {
+            if (current[index]?.historyTurnId !== undefined) {
+              lastServerMessage = index;
+              break;
+            }
+          }
+          const preservedPrefix =
+            lastServerMessage >= 0
+              ? current.slice(0, lastServerMessage + 1)
+              : [];
+          const preservedIds = new Set(
+            preservedPrefix.map((message) => message.id),
+          );
+          return patchThread(state, threadId, {
+            messages:
+              overlap >= 0
+                ? [...current.slice(0, overlap), ...messages]
+                : [
+                    ...preservedPrefix,
+                    ...messages.filter(
+                      (message) => !preservedIds.has(message.id),
+                    ),
+                  ],
+          });
+        }),
+
       setHistoryLoaded: (threadId, loaded) =>
         set((state) => {
           if (threadOf(state, threadId).historyLoaded === loaded) return {};
           return patchThread(state, threadId, { historyLoaded: loaded });
         }),
+
+      setHistoryPageState: (threadId, page) =>
+        set((state) =>
+          patchThread(state, threadId, {
+            historyBefore: page.before,
+            hasOlderHistory: page.hasOlder,
+            ...(page.loadingOlder !== undefined
+              ? { isLoadingOlderHistory: page.loadingOlder }
+              : {}),
+            ...(page.error !== undefined
+              ? { olderHistoryError: page.error }
+              : {}),
+          }),
+        ),
 
       setThreadLastAction: (threadId, action) =>
         set((state) => ({
@@ -372,6 +466,10 @@ export const useChatStore = create<ChatState>()(
           ...patchThread(state, threadId, {
             messages: [],
             historyLoaded: true,
+            historyBefore: null,
+            hasOlderHistory: false,
+            isLoadingOlderHistory: false,
+            olderHistoryError: null,
             binding,
             lastAction,
           }),
@@ -594,6 +692,25 @@ export const selectThreadHistoryLoaded = (
   state: ChatState,
   threadId: string,
 ): boolean => threadOf(state, threadId).historyLoaded;
+
+export const selectThreadHistoryPageState = (
+  state: ChatState,
+  threadId: string,
+): Pick<
+  ChatThreadState,
+  | 'historyBefore'
+  | 'hasOlderHistory'
+  | 'isLoadingOlderHistory'
+  | 'olderHistoryError'
+> => {
+  const thread = threadOf(state, threadId);
+  return {
+    historyBefore: thread.historyBefore,
+    hasOlderHistory: thread.hasOlderHistory,
+    isLoadingOlderHistory: thread.isLoadingOlderHistory,
+    olderHistoryError: thread.olderHistoryError,
+  };
+};
 
 /** True if a thread has an active streaming run. */
 export const selectThreadIsLoading = (

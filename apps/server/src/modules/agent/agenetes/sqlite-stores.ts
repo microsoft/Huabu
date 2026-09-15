@@ -23,6 +23,14 @@
  * so nothing is lost by saying so.
  */
 
+import {
+  decodeTurnCursor,
+  encodeTurnCursor,
+  groupPersistedTurns,
+  requireTurnPageLimit,
+  StaleTurnCursorError,
+} from '@agenetes/agenetes';
+
 import { space } from '../../storage/index.js';
 
 import type { SqliteSpaceSubstrate } from '../../storage/index.js';
@@ -35,6 +43,8 @@ import type {
   ThreadStore,
   TurnStartLogEntry,
   TurnStore,
+  TurnStorePage,
+  TurnStorePageOptions,
 } from '@agenetes/agenetes';
 import type { AgentSubmission, Namespace } from '@agenetes/protocol';
 import type { DatabaseSync } from 'node:sqlite';
@@ -76,6 +86,15 @@ const SCHEMA = `
     seq_end INTEGER NOT NULL,
     turn_json TEXT NOT NULL CHECK (json_valid(turn_json)),
     PRIMARY KEY (extension_id, thread_id, ordinal),
+    FOREIGN KEY (extension_id) REFERENCES space_extensions(extension_id)
+      ON DELETE CASCADE
+  ) STRICT;
+
+  CREATE TABLE IF NOT EXISTS agenetes_turn_generations (
+    extension_id INTEGER NOT NULL,
+    thread_id TEXT NOT NULL,
+    generation INTEGER NOT NULL,
+    PRIMARY KEY (extension_id, thread_id),
     FOREIGN KEY (extension_id) REFERENCES space_extensions(extension_id)
       ON DELETE CASCADE
   ) STRICT;
@@ -336,12 +355,34 @@ export class SqliteEventLogStore implements EventLogStore {
 }
 
 export class SqliteTurnStore implements TurnStore {
+  #generation(
+    database: DatabaseSync,
+    extensionId: number,
+    threadId: string,
+  ): number {
+    database
+      .prepare(
+        `INSERT OR IGNORE INTO agenetes_turn_generations
+           (extension_id, thread_id, generation) VALUES (?, ?, 1)`,
+      )
+      .run(extensionId, threadId);
+    return Number(
+      database
+        .prepare(
+          `SELECT generation FROM agenetes_turn_generations
+           WHERE extension_id = ? AND thread_id = ?`,
+        )
+        .get(extensionId, threadId)?.['generation'],
+    );
+  }
+
   append(
     namespace: Namespace,
     threadId: string,
     persisted: PersistedTurn,
   ): void {
     const { database, extensionId } = requireSubstrate(namespace);
+    this.#generation(database, extensionId, threadId);
     const ordinal = this.count(namespace, threadId) + 1;
     database
       .prepare(
@@ -377,6 +418,123 @@ export class SqliteTurnStore implements TurnStore {
         seqStart: Number(row['seq_start']),
         seqEnd: Number(row['seq_end']),
       }));
+  }
+
+  page(
+    namespace: Namespace,
+    threadId: string,
+    options: TurnStorePageOptions,
+  ): TurnStorePage {
+    requireTurnPageLimit(options.limit);
+    const substrate = conversationTables(namespace);
+    if (!substrate) {
+      return {
+        groups: [],
+        next: encodeTurnCursor({
+          version: 1,
+          threadId,
+          generation: 1,
+          ordinal: 1,
+        }),
+        hasMore: false,
+      };
+    }
+    const { database, extensionId } = substrate;
+    const generation = this.#generation(database, extensionId, threadId);
+    const cursor = options.before
+      ? decodeTurnCursor(options.before, threadId)
+      : undefined;
+    if (cursor && cursor.generation !== generation) {
+      throw new StaleTurnCursorError('History cursor is stale');
+    }
+    const end =
+      cursor?.ordinal ??
+      Number(
+        database
+          .prepare(
+            `SELECT COALESCE(MAX(ordinal), 0) + 1 AS ordinal
+             FROM agenetes_turns
+             WHERE extension_id = ? AND thread_id = ?`,
+          )
+          .get(extensionId, threadId)?.['ordinal'],
+      );
+    const starts = database
+      .prepare(
+        `SELECT ordinal FROM agenetes_turns
+         WHERE extension_id = ? AND thread_id = ? AND ordinal < ?
+           AND json_type(turn_json, '$.request') != 'null'
+         ORDER BY ordinal DESC LIMIT ?`,
+      )
+      .all(extensionId, threadId, end, options.limit + 1)
+      .map((row) => Number(row['ordinal']));
+    const first = database
+      .prepare(
+        `SELECT ordinal, json_type(turn_json, '$.request') AS request_type
+         FROM agenetes_turns
+         WHERE extension_id = ? AND thread_id = ? AND ordinal < ?
+         ORDER BY ordinal LIMIT 1`,
+      )
+      .get(extensionId, threadId, end);
+    if (
+      first &&
+      first['request_type'] === 'null' &&
+      starts.length <= options.limit
+    ) {
+      starts.push(Number(first['ordinal']));
+    }
+    starts.sort((a, b) => b - a);
+    const selectedStarts = starts.slice(0, options.limit);
+    const hasMore = starts.length > options.limit;
+    if (selectedStarts.length === 0) {
+      return {
+        groups: [],
+        next: encodeTurnCursor({
+          version: 1,
+          threadId,
+          generation,
+          ordinal: end,
+        }),
+        hasMore: false,
+      };
+    }
+    const lower = selectedStarts[selectedStarts.length - 1]!;
+    const rows = database
+      .prepare(
+        `SELECT seq_start, seq_end, turn_json FROM agenetes_turns
+         WHERE extension_id = ? AND thread_id = ?
+           AND ordinal >= ? AND ordinal < ?
+         ORDER BY ordinal`,
+      )
+      .all(extensionId, threadId, lower, end);
+    const persisted = rows.map((row) => ({
+      turn: decode<PersistedTurn['turn']>(
+        row['turn_json'],
+        `Turn for thread ${threadId}`,
+      ),
+      seqStart: Number(row['seq_start']),
+      seqEnd: Number(row['seq_end']),
+    }));
+    const groups = groupPersistedTurns(threadId, generation, persisted, lower);
+    return {
+      groups,
+      next: encodeTurnCursor({
+        version: 1,
+        threadId,
+        generation,
+        ordinal: end,
+      }),
+      ...(hasMore
+        ? {
+            before: encodeTurnCursor({
+              version: 1,
+              threadId,
+              generation,
+              ordinal: lower,
+            }),
+          }
+        : {}),
+      hasMore,
+    };
   }
 
   count(namespace: Namespace, threadId: string): number {
@@ -422,6 +580,14 @@ export class SqliteTurnStore implements TurnStore {
           'DELETE FROM agenetes_turns WHERE extension_id = ? AND thread_id = ?',
         )
         .run(extensionId, threadId);
+      database
+        .prepare(
+          `INSERT INTO agenetes_turn_generations
+             (extension_id, thread_id, generation) VALUES (?, ?, 2)
+           ON CONFLICT(extension_id, thread_id) DO UPDATE SET
+             generation = generation + 1`,
+        )
+        .run(extensionId, threadId);
       const insert = database.prepare(
         `INSERT INTO agenetes_turns (
            extension_id, thread_id, ordinal, seq_start, seq_end, turn_json
@@ -443,10 +609,20 @@ export class SqliteTurnStore implements TurnStore {
   delete(namespace: Namespace, threadId: string): void {
     const substrate = conversationTables(namespace);
     if (!substrate) return;
-    substrate.database
-      .prepare(
-        'DELETE FROM agenetes_turns WHERE extension_id = ? AND thread_id = ?',
-      )
-      .run(substrate.extensionId, threadId);
+    replaceLogAtomically(substrate.database, () => {
+      substrate.database
+        .prepare(
+          'DELETE FROM agenetes_turns WHERE extension_id = ? AND thread_id = ?',
+        )
+        .run(substrate.extensionId, threadId);
+      substrate.database
+        .prepare(
+          `INSERT INTO agenetes_turn_generations
+             (extension_id, thread_id, generation) VALUES (?, ?, 2)
+           ON CONFLICT(extension_id, thread_id) DO UPDATE SET
+             generation = generation + 1`,
+        )
+        .run(substrate.extensionId, threadId);
+    });
   }
 }

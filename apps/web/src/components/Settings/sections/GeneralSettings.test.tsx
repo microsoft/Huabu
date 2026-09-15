@@ -68,6 +68,15 @@ vi.mock('@/store/toolStore', () => ({
       setInputModePreference: vi.fn(),
     }),
 }));
+vi.mock('@/store/chatPreferencesStore', () => ({
+  MAX_RECENT_CHAT_TURNS: 20,
+  MIN_RECENT_CHAT_TURNS: 1,
+  useChatPreferencesStore: (selector: (state: object) => unknown) =>
+    selector({
+      recentTurnCount: 3,
+      setRecentTurnCount: vi.fn(),
+    }),
+}));
 vi.mock('@/store/workspaceStore', () => ({
   useWorkspaceStore: (selector: (state: object) => unknown) =>
     selector({ worldEnabled: true, setWorldEnabled: vi.fn() }),

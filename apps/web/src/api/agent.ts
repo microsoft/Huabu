@@ -20,6 +20,7 @@ import type {
   AgentRequest,
   AgentStreamEvent,
   AgentChatContext,
+  AgentHistoryPageResponse,
   ChatAttachment,
   ChatHistoryResponse,
   ContextTokensResponse,
@@ -112,6 +113,22 @@ export const agentApi = {
       }
       throw err;
     }
+  },
+
+  /**
+   * Fetch a bounded page of complete display turns. Omitting `before` reads
+   * the newest page and may include the active Tier-1 tail.
+   */
+  fetchHistoryPage: async (
+    threadId: string,
+    canvasId: string,
+    limit: number,
+    before?: string,
+  ): Promise<AgentHistoryPageResponse> => {
+    return apiFetch<AgentHistoryPageResponse>(
+      routes.agentHistoryPage(threadId, canvasId, limit, before),
+      { fallbackMessage: 'Failed to load history' },
+    );
   },
 
   /**

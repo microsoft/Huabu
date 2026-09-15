@@ -10,10 +10,12 @@ import {
   useRef,
   useState,
 } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { AIMessage } from './AIMessage';
 import {
   positionMessageListOnOpen,
+  rememberMessageListScrollAnchor,
   rememberMessageListScrollPosition,
   restoreMessageListScrollPosition,
 } from './messageListScroll';
@@ -39,6 +41,16 @@ interface MessageListProps {
   hideAIActions?: boolean;
   /** Called when the user clicks retry on an interrupted status message. */
   onRetry?: () => void;
+  /** Whether the server has complete display turns older than this window. */
+  hasOlderHistory?: boolean;
+  /** Number of turns the next expansion will request. */
+  olderTurnBatchSize?: number;
+  /** True while an older page is being prepended. */
+  isLoadingOlderHistory?: boolean;
+  /** A recoverable older-page error; current messages remain visible. */
+  olderHistoryError?: string;
+  /** Fetch and prepend the next older page. */
+  onLoadOlderHistory?: () => void;
   /** Stable identity for the conversation currently rendered by the list. */
   viewKey?: string;
   /** Whether the containing panel is expanded and visible. */
@@ -56,21 +68,54 @@ export const MessageList = memo(function MessageList({
   isHistoryLoading,
   hideAIActions,
   onRetry,
+  hasOlderHistory,
+  olderTurnBatchSize,
+  isLoadingOlderHistory,
+  olderHistoryError,
+  onLoadOlderHistory,
   viewKey,
   isActive = true,
   openPosition = 'bottom',
   openPositionRequestNonce,
   onOpenPositionHandled,
 }: MessageListProps) {
+  const { t } = useTranslation();
   const [hasNewMessage, setHasNewMessage] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef(true);
   const prevMessageCountRef = useRef(messages.length);
   const currentMessageCountRef = useRef(messages.length);
   const positionedViewKeyRef = useRef<string | undefined>(undefined);
   const hasPositionedViewRef = useRef(false);
   const handledOpenRequestRef = useRef<number | undefined>(undefined);
+  const prependAnchorRef = useRef<{
+    messageId: string;
+    viewportTop: number;
+  } | null>(null);
+  const prependObserverRef = useRef<ResizeObserver | null>(null);
+  const prependSettleTimerRef = useRef<number | undefined>(undefined);
   currentMessageCountRef.current = messages.length;
+
+  const finishPrependAnchoring = useCallback(() => {
+    prependAnchorRef.current = null;
+    prependObserverRef.current?.disconnect();
+    prependObserverRef.current = null;
+    if (prependSettleTimerRef.current !== undefined) {
+      window.clearTimeout(prependSettleTimerRef.current);
+      prependSettleTimerRef.current = undefined;
+    }
+  }, []);
+
+  const schedulePrependAnchorSettlement = useCallback(() => {
+    if (prependSettleTimerRef.current !== undefined) {
+      window.clearTimeout(prependSettleTimerRef.current);
+    }
+    prependSettleTimerRef.current = window.setTimeout(
+      finishPrependAnchoring,
+      500,
+    );
+  }, [finishPrependAnchoring]);
 
   // Opening a conversation is a deliberate navigation action. Position the
   // list before paint at the final user message (unread) or end (read / blocked).
@@ -85,6 +130,7 @@ export const MessageList = memo(function MessageList({
       openPositionRequestNonce !== undefined &&
       handledOpenRequestRef.current !== openPositionRequestNonce;
     if (!viewChanged && !hasNewRequest) return;
+    finishPrependAnchoring();
 
     const restored = restoreMessageListScrollPosition(container, viewKey);
     const restoredAtBottom =
@@ -127,6 +173,45 @@ export const MessageList = memo(function MessageList({
     openPosition,
     openPositionRequestNonce,
     onOpenPositionHandled,
+    finishPrependAnchoring,
+  ]);
+
+  useLayoutEffect(() => {
+    const pending = prependAnchorRef.current;
+    const container = containerRef.current;
+    const content = contentRef.current;
+    if (!pending || !container || !content) return;
+
+    const restoreAnchor = () => {
+      const anchor = Array.from(
+        content.querySelectorAll<HTMLElement>('[data-chat-message-id]'),
+      ).find((element) => element.dataset.chatMessageId === pending.messageId);
+      if (!anchor) {
+        finishPrependAnchoring();
+        return;
+      }
+      const delta = anchor.getBoundingClientRect().top - pending.viewportTop;
+      if (delta !== 0) {
+        container.scrollTop += delta;
+        rememberMessageListScrollPosition(viewKey, container.scrollTop);
+      }
+      schedulePrependAnchorSettlement();
+    };
+
+    restoreAnchor();
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(restoreAnchor);
+      observer.observe(content);
+      prependObserverRef.current?.disconnect();
+      prependObserverRef.current = observer;
+    }
+    const frame = requestAnimationFrame(restoreAnchor);
+    return () => cancelAnimationFrame(frame);
+  }, [
+    messages,
+    viewKey,
+    finishPrependAnchoring,
+    schedulePrependAnchorSettlement,
   ]);
 
   // Find the in-flight assistant message for the *current* turn.
@@ -155,13 +240,35 @@ export const MessageList = memo(function MessageList({
   const handleScroll = useCallback(() => {
     const el = containerRef.current;
     if (!el) return;
-    rememberMessageListScrollPosition(viewKey, el.scrollTop);
+    rememberMessageListScrollAnchor(el, viewKey);
     const threshold = 50;
     const atBottom =
       el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
     isAtBottomRef.current = atBottom;
     if (atBottom) setHasNewMessage(false);
   }, [viewKey]);
+
+  const loadOlderHistory = useCallback(() => {
+    const container = containerRef.current;
+    if (!container || !onLoadOlderHistory || isLoadingOlderHistory) return;
+    const containerTop = container.getBoundingClientRect().top;
+    const anchor = Array.from(
+      container.querySelectorAll<HTMLElement>('[data-chat-message-id]'),
+    ).find((element) => element.getBoundingClientRect().bottom > containerTop);
+    if (anchor?.dataset.chatMessageId) {
+      prependAnchorRef.current = {
+        messageId: anchor.dataset.chatMessageId,
+        viewportTop: anchor.getBoundingClientRect().top,
+      };
+    }
+    onLoadOlderHistory();
+  }, [isLoadingOlderHistory, onLoadOlderHistory]);
+
+  useEffect(() => {
+    if (!isLoadingOlderHistory && olderHistoryError) {
+      finishPrependAnchoring();
+    }
+  }, [finishPrependAnchoring, isLoadingOlderHistory, olderHistoryError]);
 
   // Scroll the thread's own container rather than `scrollIntoView` on a
   // sentinel: that walks up every scrollable ancestor, and the app root is
@@ -175,7 +282,7 @@ export const MessageList = memo(function MessageList({
 
   // Auto-scroll when at bottom and content changes (including streaming tokens)
   useEffect(() => {
-    if (isAtBottomRef.current) {
+    if (isAtBottomRef.current && !prependAnchorRef.current) {
       scrollThreadToBottom('smooth');
     }
   }, [messages, isLoading, scrollThreadToBottom]);
@@ -184,7 +291,8 @@ export const MessageList = memo(function MessageList({
   useEffect(() => {
     if (
       messages.length > prevMessageCountRef.current &&
-      !isAtBottomRef.current
+      !isAtBottomRef.current &&
+      !prependAnchorRef.current
     ) {
       setHasNewMessage(true);
     }
@@ -192,84 +300,132 @@ export const MessageList = memo(function MessageList({
   }, [messages.length]);
 
   const scrollToBottom = useCallback(() => {
+    finishPrependAnchoring();
     scrollThreadToBottom('smooth');
     setHasNewMessage(false);
-  }, [scrollThreadToBottom]);
+  }, [finishPrependAnchoring, scrollThreadToBottom]);
+
+  useEffect(() => finishPrependAnchoring, [finishPrependAnchoring]);
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
       <div
         ref={containerRef}
         onScroll={handleScroll}
-        data-chat-thread-root
-        className="flex-1 space-y-1 overflow-x-visible overflow-y-auto px-3"
-      >
-        {(() => {
-          const elements: React.ReactNode[] = [];
-          let i = 0;
-          while (i < messages.length) {
-            const msg = messages[i]!;
-
-            if (msg.role === 'user') {
-              elements.push(
-                <UserMessage
-                  key={msg.id}
-                  content={msg.content}
-                  attachments={msg.attachments}
-                  selectedNodeIds={msg.selectedNodeIds}
-                  selectedStrokeIds={msg.selectedStrokeIds}
-                  invokedSkills={msg.invokedSkills}
-                />,
-              );
-              i++;
-              continue;
-            }
-
-            if (msg.role === 'assistant') {
-              elements.push(
-                <AIMessage
-                  key={msg.id}
-                  messageId={msg.id}
-                  segments={msg.segments}
-                  isStreaming={msg.id === streamingAssistantId}
-                  hideActions={hideAIActions}
-                />,
-              );
-              i++;
-              continue;
-            }
-
-            if (msg.role === 'status') {
-              elements.push(
-                <StatusMessage
-                  key={msg.id}
-                  status={msg.status}
-                  detail={msg.detail}
-                  onRetry={onRetry}
-                />,
-              );
-              i++;
-              continue;
-            }
-
-            i++;
+        onWheelCapture={finishPrependAnchoring}
+        onPointerDownCapture={finishPrependAnchoring}
+        onKeyDownCapture={(event) => {
+          if (
+            [
+              'ArrowDown',
+              'ArrowUp',
+              'End',
+              'Home',
+              'PageDown',
+              'PageUp',
+              ' ',
+            ].includes(event.key)
+          ) {
+            finishPrependAnchoring();
           }
-          return elements;
-        })()}
-
-        {isLoading && !streamingAssistantId && (
-          <div className="flex justify-start">
-            <div className="px-3 py-2">
-              <ThinkingIndicator />
+        }}
+        data-chat-thread-root
+        className="flex-1 overflow-x-visible overflow-y-auto px-3"
+      >
+        <div ref={contentRef} className="space-y-1">
+          {hasOlderHistory || olderHistoryError ? (
+            <div className="flex flex-col items-center gap-1 py-2">
+              <Button
+                variant="ghost"
+                tone={olderHistoryError ? 'danger' : 'neutral'}
+                size="sm"
+                onClick={loadOlderHistory}
+                disabled={isLoadingOlderHistory}
+                aria-busy={isLoadingOlderHistory}
+              >
+                {isLoadingOlderHistory
+                  ? t('chat.loadingEarlierTurns')
+                  : t('chat.showEarlierTurns', {
+                      count: olderTurnBatchSize ?? 3,
+                    })}
+              </Button>
+              {olderHistoryError ? (
+                <span role="alert" className="text-danger text-xs">
+                  {olderHistoryError}
+                </span>
+              ) : null}
             </div>
-          </div>
-        )}
+          ) : null}
+          {(() => {
+            const elements: React.ReactNode[] = [];
+            let i = 0;
+            while (i < messages.length) {
+              const msg = messages[i]!;
 
-        {isHistoryLoading && messages.length === 0 && (
-          <div className="px-3 py-2">
-            <Loading variant="skeleton" layout="bare" />
-          </div>
-        )}
+              if (msg.role === 'user') {
+                elements.push(
+                  <div key={msg.id} data-chat-message-id={msg.id}>
+                    <UserMessage
+                      content={msg.content}
+                      attachments={msg.attachments}
+                      selectedNodeIds={msg.selectedNodeIds}
+                      selectedStrokeIds={msg.selectedStrokeIds}
+                      invokedSkills={msg.invokedSkills}
+                    />
+                  </div>,
+                );
+                i++;
+                continue;
+              }
+
+              if (msg.role === 'assistant') {
+                elements.push(
+                  <div key={msg.id} data-chat-message-id={msg.id}>
+                    <AIMessage
+                      messageId={msg.id}
+                      segments={msg.segments}
+                      isStreaming={msg.id === streamingAssistantId}
+                      hideActions={hideAIActions}
+                    />
+                  </div>,
+                );
+                i++;
+                continue;
+              }
+
+              if (msg.role === 'status') {
+                elements.push(
+                  <div key={msg.id} data-chat-message-id={msg.id}>
+                    <StatusMessage
+                      status={msg.status}
+                      detail={msg.detail}
+                      onRetry={onRetry}
+                    />
+                  </div>,
+                );
+                i++;
+                continue;
+              }
+
+              i++;
+            }
+            return elements;
+          })()}
+
+          {isLoading && !streamingAssistantId && (
+            <div className="flex justify-start">
+              <div className="px-3 py-2">
+                <ThinkingIndicator />
+              </div>
+            </div>
+          )}
+
+          {isHistoryLoading && messages.length === 0 && (
+            <div className="px-3 py-2">
+              <Loading variant="skeleton" layout="bare" />
+            </div>
+          )}
+        </div>
       </div>
 
       {hasNewMessage && (

@@ -1,6 +1,6 @@
 # API Design Spec
 
-> Authoritative · Last updated 2026-05-08
+> Authoritative · Last updated 2026-09-14
 
 How every HTTP / SSE endpoint is defined and consumed across `apps/server`
 and `apps/web`. Deviations require updating this file in the same PR.
@@ -111,6 +111,14 @@ export async function postEcho(body: EchoBody): Promise<EchoResponse> {
   a final `End` or `Error` event before `reply.raw.end()`.
 - **Error message**: take from the first zod issue, fall back to a
   fixed string. Never ship `error.format()` — it leaks zod internals.
+
+## Agent history paging
+
+`GET /api/agent/history/:threadId/page` is the bounded display-history endpoint. Its canonical contract is [`agent-history.ts`](../../packages/shared/src/types/api/agent-history.ts): `threadId` and required `canvasId` are non-empty, `limit` is an integer from 1 through 20, and optional `before` is an opaque exclusive cursor. The server validates params and query with `safeParse` before resolving a namespace.
+
+Success returns `{ threadId, turns, before?, hasMore }`. Each `turns[]` entry is `{ id, messages, active?, activeMessageStart? }`: `id` is the stable display-group identity used to prepend/deduplicate and replace a completed active projection, `messages` are chronological `ChatHistoryItem`s for the whole group, and `active: true` marks a group containing the read-time incomplete Tier-1 projection. `activeMessageStart` identifies the first message from that projection when a continuation shares a group with persisted messages, allowing reconnect replay to replace only the active suffix. `before` addresses the page immediately older than the oldest returned group; older-page requests never include an active tail.
+
+Malformed request fields and malformed cursors return HTTP 400 with `code: "malformed_history_request"` or `code: "malformed_history_cursor"`. A cursor whose thread generation was replaced or rehomed returns HTTP 409 with `code: "stale_history_cursor"`. The existing `GET /api/agent/history/:threadId` remains the unbounded compatibility endpoint for current consumers; pagination is not applied implicitly to model recovery or complete-history callers.
 
 ## Anti-patterns
 

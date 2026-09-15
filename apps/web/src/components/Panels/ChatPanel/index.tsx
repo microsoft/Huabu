@@ -32,9 +32,11 @@ import { useInternalSlashCommands } from '@/hooks/useInternalSlashCommands';
 import { useAcpProfilesStore } from '@/store/acpProfilesStore';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import useCanvasStore from '@/store/canvasStore';
+import { useChatPreferencesStore } from '@/store/chatPreferencesStore';
 import {
   selectThreadBinding,
   selectThreadHistoryLoaded,
+  selectThreadHistoryPageState,
   selectThreadLastAction,
   selectThreadMessages,
   useChatStore,
@@ -206,7 +208,11 @@ export const ChatPanel = ({
   );
 
   // Chat history hook — loads history and handles reconnection
-  useChatHistory(session, setIsLoading, previewTabId);
+  const { loadOlderHistory } = useChatHistory(
+    session,
+    setIsLoading,
+    previewTabId,
+  );
 
   // Persistent chat state. Messages are per-thread (see chatStore.ts);
   // every read names this session's thread, so a stream running in another
@@ -220,6 +226,12 @@ export const ChatPanel = ({
   );
   const isHistoryLoaded = useChatStore((state) =>
     selectThreadHistoryLoaded(state, threadId),
+  );
+  const historyPage = useChatStore((state) =>
+    selectThreadHistoryPageState(state, threadId),
+  );
+  const recentTurnCount = useChatPreferencesStore(
+    (state) => state.recentTurnCount,
   );
   const addNode = useCanvasStore((state) => state.addNode);
   const llmConfig = useLLMStore((state) => state.config);
@@ -867,6 +879,11 @@ export const ChatPanel = ({
             messages={messages}
             isLoading={isLoading}
             isHistoryLoading={!isHistoryLoaded}
+            hasOlderHistory={historyPage.hasOlderHistory}
+            olderTurnBatchSize={recentTurnCount}
+            isLoadingOlderHistory={historyPage.isLoadingOlderHistory}
+            olderHistoryError={historyPage.olderHistoryError ?? undefined}
+            onLoadOlderHistory={loadOlderHistory}
             viewKey={messageListViewKey(ownerCanvasId, threadId)}
             isActive={!isCollapsed}
             openPosition={

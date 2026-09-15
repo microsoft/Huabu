@@ -35,6 +35,7 @@ import {
   SqliteThreadStore,
   SqliteTurnStore,
 } from './sqlite-stores.js';
+import { registerSpaceDirHandleOwner } from '../../storage/backends/disk/space-dir-handles.js';
 
 import type {
   EventLogEntry,
@@ -45,6 +46,7 @@ import type {
   ThreadStore,
   TurnStartLogEntry,
   TurnStore,
+  TurnStorePageOptions,
 } from '@agenetes/agenetes';
 import type { AgentSubmission, Namespace } from '@agenetes/protocol';
 
@@ -54,11 +56,27 @@ interface Backing {
   readonly turns: TurnStore;
 }
 
+const fileTurns = new FileTurnStore();
 const file: Backing = {
   threads: new FileThreadStore(),
   events: new FileEventLogStore(),
-  turns: new FileTurnStore(),
+  turns: fileTurns,
 };
+const fileTurnOwners = new Map<string, { namespace: Namespace }>();
+
+function registerFileTurnOwner(namespace: Namespace): void {
+  const existing = fileTurnOwners.get(namespace.name);
+  if (existing) {
+    existing.namespace = namespace;
+    return;
+  }
+  const owner = { namespace };
+  fileTurnOwners.set(namespace.name, owner);
+  registerSpaceDirHandleOwner(namespace.name, {
+    release: () => fileTurns.close(owner.namespace),
+    reacquire: () => undefined,
+  });
+}
 
 const sqlite: Backing = {
   threads: new SqliteThreadStore(),
@@ -78,9 +96,12 @@ const memory: Backing = {
 
 /** The stores that own this namespace's durable conversation state. */
 function backingFor(namespace: Namespace): Backing {
-  // A directory to write into settles it: that is the Disk profile, and the
-  // file stores are what wrote whatever is already there.
-  if (namespace.storage?.root) return file;
+  // A directory to write into settles it: that is the Disk profile. Tier 1
+  // and thread metadata remain files; Tier 2 is the Space-owned SQLite store.
+  if (namespace.storage?.root) {
+    registerFileTurnOwner(namespace);
+    return file;
+  }
   if (namespace.name && conversationTables(namespace) !== null) return sqlite;
   return memory;
 }
@@ -121,6 +142,8 @@ export const conversationTurnStore: TurnStore = {
     backingFor(namespace).turns.append(namespace, threadId, persisted),
   list: (namespace, threadId) =>
     backingFor(namespace).turns.list(namespace, threadId),
+  page: (namespace, threadId, options: TurnStorePageOptions) =>
+    backingFor(namespace).turns.page(namespace, threadId, options),
   count: (namespace, threadId) =>
     backingFor(namespace).turns.count(namespace, threadId),
   fence: (namespace, threadId) =>

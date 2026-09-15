@@ -257,6 +257,8 @@
     "inputMode_pen": "手写笔",
     "inputMode_finger": "手指",
     "automaticResolved": "自动（{{mode}}）",
+    "recentChatTurns": "近期聊天轮次",
+    "recentChatTurnsDescription": "初始加载此数量的完整对话轮次，更早的轮次仍可按需加载（1–20）。",
     "externalAgentIdleTimeout": "外部 Agent 空闲超时",
     "externalAgentIdleTimeoutDescription": "外部 Agent 进程持续空闲达到该时长后自动挂起。修改仅对之后新启动或恢复的进程生效。",
     "externalAgentIdleTimeoutSaved": "已更新外部 Agent 空闲超时",
@@ -630,6 +632,8 @@
     }
   },
   "chat": {
+    "showEarlierTurns": "显示更早的 {{count}} 个轮次",
+    "loadingEarlierTurns": "正在加载更早的轮次…",
     "open": "打开聊天",
     "close": "关闭聊天",
     "openPanel": "打开聊天面板",

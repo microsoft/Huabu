@@ -6,6 +6,7 @@ export type MessageListPreferredPosition = 'last-user' | 'bottom';
 
 export {
   forgetMessageListScrollPosition,
+  rememberMessageListScrollAnchor,
   rememberMessageListScrollPosition,
   restoreMessageListScrollPosition,
 } from '@/store/previewWorkspace/scrollMemory';

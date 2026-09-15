@@ -13,8 +13,15 @@
  */
 
 import {
+  MalformedTurnCursorError,
+  StaleTurnCursorError,
+} from '@agenetes/agenetes';
+
+import {
   AGENT_SSE_EVENTS,
   agentCanvasIdQuerySchema,
+  agentHistoryPageParamsSchema,
+  agentHistoryPageQuerySchema,
   agentRequestSchema,
   createId,
   forkThreadBodySchema,
@@ -36,6 +43,9 @@ import { canvasAcpNamespace } from '../workspace/paths.js';
 import type { ControlMsg, Namespace } from '@agenetes/protocol';
 import type {
   AgentCanvasIdQuery,
+  AgentHistoryPageParams,
+  AgentHistoryPageQuery,
+  AgentHistoryPageResponse,
   AgentRequest,
   AgentStreamEvent,
   ApiResult,
@@ -132,6 +142,86 @@ const agentRoutes: FastifyPluginAsync = async (
   fastify,
   _opts,
 ): Promise<void> => {
+  fastify.get<{
+    Params: AgentHistoryPageParams;
+    Querystring: AgentHistoryPageQuery;
+    Reply: ApiResult<AgentHistoryPageResponse>;
+  }>('/history/:threadId/page', async function (request, reply) {
+    const parsedParams = agentHistoryPageParamsSchema.safeParse(request.params);
+    if (!parsedParams.success) {
+      return reply.code(400).send({
+        message: parsedParams.error.issues[0]?.message ?? 'Invalid parameters',
+        code: 'malformed_history_request',
+      });
+    }
+    const parsedQuery = agentHistoryPageQuerySchema.safeParse(request.query);
+    if (!parsedQuery.success) {
+      return reply.code(400).send({
+        message: parsedQuery.error.issues[0]?.message ?? 'Invalid query',
+        code: 'malformed_history_request',
+      });
+    }
+
+    const { threadId } = parsedParams.data;
+    const { canvasId, limit, before } = parsedQuery.data;
+    const namespace = canvasAcpNamespace(canvasId);
+    if (
+      before === undefined &&
+      agentThreadService.isActive(threadId, canvasId)
+    ) {
+      await agentThreadService.waitForTurnStart(threadId, canvasId);
+    }
+
+    try {
+      const page = agenetes.historyPage(namespace, threadId, {
+        limit,
+        ...(before ? { before } : {}),
+        withTail: before === undefined,
+      });
+      const record = agenetes.record(namespace, threadId);
+      const recoverInternalToolNames =
+        (record?.spec as { kind?: unknown } | undefined)?.kind === 'internal';
+      const turns = page.groups.map((group) => {
+        const messages: ChatHistoryItem[] = [];
+        let activeMessageStart: number | undefined;
+        group.turns.forEach((turn, index) => {
+          if (index === group.activeTurnIndex) {
+            activeMessageStart = messages.length;
+          }
+          buildHistoryFromTurns([turn], messages, {
+            recoverInternalToolNames,
+          });
+        });
+        return {
+          id: group.id,
+          messages,
+          ...(group.isActive ? { active: true as const } : {}),
+          ...(activeMessageStart !== undefined ? { activeMessageStart } : {}),
+        };
+      });
+      return reply.send({
+        threadId,
+        turns,
+        ...(page.before ? { before: page.before } : {}),
+        hasMore: page.hasMore,
+      });
+    } catch (error) {
+      if (error instanceof MalformedTurnCursorError) {
+        return reply.code(400).send({
+          message: error.message,
+          code: 'malformed_history_cursor',
+        });
+      }
+      if (error instanceof StaleTurnCursorError) {
+        return reply.code(409).send({
+          message: error.message,
+          code: 'stale_history_cursor',
+        });
+      }
+      throw error;
+    }
+  });
+
   /**
    * GET /agent/history/:threadId
    * Reconstructs the UI message list from L2's folded Tier-2 turn log

@@ -117,6 +117,19 @@ export const routes = {
     const params = canvasId ? `?canvasId=${enc(canvasId)}` : '';
     return `/agent/history/${enc(threadId)}${params}`;
   },
+  agentHistoryPage: (
+    threadId: string,
+    canvasId: string,
+    limit: number,
+    before?: string,
+  ) => {
+    const params = new URLSearchParams({
+      canvasId,
+      limit: String(limit),
+    });
+    if (before) params.set('before', before);
+    return `/agent/history/${enc(threadId)}/page?${params.toString()}`;
+  },
   agentHistoryFork: (threadId: string, canvasId?: string) => {
     const params = canvasId ? `?canvasId=${enc(canvasId)}` : '';
     return `/agent/history/${enc(threadId)}/fork${params}`;
