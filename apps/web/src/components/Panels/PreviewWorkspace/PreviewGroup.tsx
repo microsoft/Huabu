@@ -92,6 +92,7 @@ export function PreviewGroup({
         const tab = workspace.tabs[tabId];
         if (!tab) return [];
         if (tab.target.kind === 'chat') return [tabId];
+        if (tab.target.kind === 'url') return [];
         const nodeId = tab.target.nodeId;
         const node = state.nodes.find((candidate) => candidate.id === nodeId);
         return node &&

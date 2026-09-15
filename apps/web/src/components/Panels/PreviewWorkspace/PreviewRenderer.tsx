@@ -20,6 +20,7 @@ import useCanvasStore from '@/store/canvasStore';
 import { conversationViewForNode } from '@/store/conversationOwner';
 
 import { ChatPanel } from '../ChatPanel';
+import { UrlPreview } from './UrlPreview';
 import { ExpandedNodePanel } from '../ExpandedNodePanel/ExpandedNodePanel';
 
 import type { ChatSession } from '@/hooks/useChatSession';
@@ -119,6 +120,8 @@ export function PreviewRenderer({
     }
     return node ? questionSession(node, target.canvasId, reference) : null;
   }, [target, node, reference]);
+
+  if (target.kind === 'url') return <UrlPreview url={target.url} />;
 
   if (session) {
     return (

@@ -57,6 +57,7 @@ import {
   readHuabuClipboardPayload,
 } from '@/utils/io/clipboard';
 import { isMac } from '@/utils/platform';
+import { normalizeSafeLinkHref } from '@/utils/safeLink';
 
 import { normalizeMathDelimiters } from './markdownUtils';
 
@@ -222,6 +223,8 @@ export interface MilkdownFactoryOptions {
    * read-only while keeping the drag grip live.
    */
   previewMode?: boolean;
+  /** Opt in to host-owned plain-click navigation; modifiers stay external. */
+  onLinkClick?: (href: string) => void;
 }
 
 /** Range of a drag, expressed in ProseMirror doc positions. */
@@ -543,19 +546,6 @@ function colorCssForAccent(
   const accent = resolveAccent(token) ?? token;
   const tokens = getAccentTokens(accent);
   return kind === 'text' ? tokens.fg : tokens.highlightBg;
-}
-
-function normalizeSafeLinkHref(href: string | null | undefined): string | null {
-  const trimmed = href?.trim();
-  if (!trimmed) return null;
-  try {
-    const url = new URL(trimmed);
-    return url.protocol === 'http:' || url.protocol === 'https:'
-      ? trimmed
-      : null;
-  } catch {
-    return null;
-  }
 }
 
 function parseOpeningColorSpanHtml(value: unknown): Array<{
@@ -1615,9 +1605,22 @@ function runBlockTypeCommand(ctx: Ctx, key: MilkdownBlockType): void {
  * activated (a click), so an unsafe href has its default suppressed while the
  * event keeps flowing to ProseMirror's own selection handling.
  */
-function createLinkClickHandler(allowPlainClick: boolean) {
-  return (view: EditorView, event: Event): boolean => {
+function createLinkClickHandler(
+  allowPlainClick: boolean,
+  onLinkClick?: (href: string) => void,
+) {
+  let gesture: { x: number; y: number; moved: boolean } | null = null;
+  const movedFromStart = (event: MouseEvent): boolean =>
+    gesture !== null &&
+    Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) > 4;
+
+  const click = (view: EditorView, event: Event): boolean => {
     const mouseEvent = event as MouseEvent;
+    const selecting =
+      mouseEvent.detail > 1 ||
+      (mouseEvent.detail !== 0 &&
+        (gesture?.moved === true || movedFromStart(mouseEvent)));
+    gesture = null;
     const target = mouseEvent.target;
     if (!(target instanceof Element)) return false;
     const anchor = target.closest('a[href]');
@@ -1631,10 +1634,46 @@ function createLinkClickHandler(allowPlainClick: boolean) {
 
     if (mouseEvent.button !== 0) return false;
     const hasFollowModifier = isMac ? mouseEvent.metaKey : mouseEvent.ctrlKey;
+    const isPlainClick =
+      !mouseEvent.metaKey &&
+      !mouseEvent.ctrlKey &&
+      !mouseEvent.shiftKey &&
+      !mouseEvent.altKey;
+    if (onLinkClick && isPlainClick) {
+      mouseEvent.preventDefault();
+      // Only the current gesture matters; an older selection must not block a click.
+      if (selecting) return false;
+      onLinkClick(href);
+      return true;
+    }
     if (!allowPlainClick && !hasFollowModifier) return false;
     mouseEvent.preventDefault();
     window.open(href, '_blank', 'noopener,noreferrer');
     return true;
+  };
+
+  if (!onLinkClick) return { click, auxclick: click };
+
+  return {
+    pointerdown: (_view: EditorView, event: PointerEvent): boolean => {
+      gesture =
+        event.button === 0
+          ? { x: event.clientX, y: event.clientY, moved: false }
+          : null;
+      return false;
+    },
+    pointermove: (_view: EditorView, event: PointerEvent): boolean => {
+      // A release outside the editor may have no local pointerup or click.
+      if (!(event.buttons & 1)) gesture = null;
+      else if (gesture && movedFromStart(event)) gesture.moved = true;
+      return false;
+    },
+    pointercancel: (): boolean => {
+      gesture = null;
+      return false;
+    },
+    click,
+    auxclick: click,
   };
 }
 
@@ -1773,7 +1812,10 @@ export async function createMilkdown(
   } = options;
   const resolveImageSrc = options.resolveImageSrc ?? ((src: string) => src);
   const useReactToolbar = !previewMode && toolbarMode === 'huabu';
-  const handleLinkClick = createLinkClickHandler(previewMode || !editable);
+  const handleLinkClick = createLinkClickHandler(
+    previewMode || !editable,
+    options.onLinkClick,
+  );
   let ariaLabel = initialAriaLabel;
 
   // Normalize LaTeX-style math delimiters (`\[…\]`, `\(…\)`)
@@ -1882,10 +1924,7 @@ export async function createMilkdown(
       () =>
         new Plugin({
           props: {
-            handleDOMEvents: {
-              click: handleLinkClick,
-              auxclick: handleLinkClick,
-            },
+            handleDOMEvents: handleLinkClick,
           },
         }),
     ),

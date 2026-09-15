@@ -3,6 +3,7 @@
 
 // @vitest-environment happy-dom
 
+import { EditorView } from '@milkdown/prose/view';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { isMac } from '@/utils/platform';
@@ -18,7 +19,11 @@ beforeEach(() => {
 
 async function mount(
   markdown: string,
-  overrides?: { editable?: boolean; previewMode?: boolean },
+  overrides?: {
+    editable?: boolean;
+    previewMode?: boolean;
+    onLinkClick?: (href: string) => void;
+  },
 ): Promise<MilkdownInstance> {
   const root = document.createElement('div');
   document.body.appendChild(root);
@@ -117,7 +122,13 @@ function bottomOf(selector: string, index = 0): number {
 
 const NESTED_LIST = '- a\n  - b\n  - c\n- d\n\ntail';
 
-function clickLink(options: { modifier: boolean; href?: string }): MouseEvent {
+function clickLink(options: {
+  modifier: boolean;
+  href?: string;
+  clientX?: number;
+  clientY?: number;
+  detail?: number;
+}): MouseEvent {
   const anchor = document.querySelector('.milkdown a[href]');
   if (!anchor) throw new Error('Expected a rendered link');
   if (options.href !== undefined) anchor.setAttribute('href', options.href);
@@ -125,6 +136,9 @@ function clickLink(options: { modifier: boolean; href?: string }): MouseEvent {
     bubbles: true,
     cancelable: true,
     button: 0,
+    detail: options.detail ?? 1,
+    clientX: options.clientX ?? 0,
+    clientY: options.clientY ?? 0,
     ...(options.modifier
       ? isMac
         ? { metaKey: true }
@@ -133,6 +147,19 @@ function clickLink(options: { modifier: boolean; href?: string }): MouseEvent {
   });
   anchor.dispatchEvent(event);
   return event;
+}
+
+function pointAtLink(type: string, options: PointerEventInit = {}): void {
+  const anchor = document.querySelector('.milkdown a[href]');
+  if (!anchor) throw new Error('Expected a rendered link');
+  anchor.dispatchEvent(
+    new PointerEvent(type, {
+      bubbles: true,
+      button: 0,
+      buttons: 1,
+      ...options,
+    }),
+  );
 }
 
 describe('Milkdown block commands', () => {
@@ -474,6 +501,79 @@ describe('Milkdown block commands', () => {
     expect(instance.getMarkdown()).toContain('  * second');
   });
 
+  it.each([
+    { editable: true },
+    { editable: false },
+    { editable: true, previewMode: true },
+  ])(
+    'does not install pointer gesture handlers without opt-in: %j',
+    async (options) => {
+      const updates = vi.spyOn(EditorView.prototype, 'updateState');
+      const open = vi.spyOn(window, 'open').mockReturnValue(null);
+      const instance = await mount('[docs](https://example.com)', options);
+      instance.__setCursorAfterTextForTest?.('docs');
+      const surface = editorSurface();
+      const view = updates.mock.contexts.find(
+        (candidate): candidate is EditorView =>
+          candidate instanceof EditorView && candidate.dom === surface,
+      );
+      const handlers = view?.state.plugins
+        .map((plugin) => plugin.spec.props?.handleDOMEvents)
+        .find((events) => events?.click && events.click === events.auxclick);
+      expect(handlers?.click).toBeTypeOf('function');
+      expect(handlers?.auxclick).toBe(handlers?.click);
+      for (const type of ['pointerdown', 'pointermove', 'pointercancel']) {
+        expect(handlers).not.toHaveProperty(type);
+      }
+
+      pointAtLink('pointerdown');
+      pointAtLink('pointermove', { clientX: 30 });
+      const plain = clickLink({ modifier: false, clientX: 30 });
+      if (!options.editable || options.previewMode) {
+        expect(open).toHaveBeenCalledExactlyOnceWith(
+          'https://example.com',
+          '_blank',
+          'noopener,noreferrer',
+        );
+        expect(plain.defaultPrevented).toBe(true);
+      } else {
+        expect(open).not.toHaveBeenCalled();
+      }
+      open.mockClear();
+      clickLink({ modifier: true });
+      expect(open).toHaveBeenCalledExactlyOnceWith(
+        'https://example.com',
+        '_blank',
+        'noopener,noreferrer',
+      );
+    },
+  );
+
+  it('installs pointer gesture handlers for an opted-in editor', async () => {
+    const updates = vi.spyOn(EditorView.prototype, 'updateState');
+    const instance = await mount('[docs](https://example.com)', {
+      onLinkClick: vi.fn(),
+    });
+    instance.__setCursorAfterTextForTest?.('docs');
+    const surface = editorSurface();
+    const view = updates.mock.contexts.find(
+      (candidate): candidate is EditorView =>
+        candidate instanceof EditorView && candidate.dom === surface,
+    );
+    const handlers = view?.state.plugins
+      .map((plugin) => plugin.spec.props?.handleDOMEvents)
+      .find((events) => events?.click && events.click === events.auxclick);
+    for (const type of [
+      'click',
+      'auxclick',
+      'pointerdown',
+      'pointermove',
+      'pointercancel',
+    ]) {
+      expect(handlers).toHaveProperty(type, expect.any(Function));
+    }
+  });
+
   it('opens a link in a new tab on modifier-click', async () => {
     const open = vi.spyOn(window, 'open').mockReturnValue(null);
     await mount('see [docs](https://example.com) here');
@@ -487,6 +587,183 @@ describe('Milkdown block commands', () => {
     );
     expect(event.defaultPrevented).toBe(true);
   });
+
+  it('routes an opted-in plain click to the host rather than the browser', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    const onLinkClick = vi.fn();
+    await mount('see [docs](https://example.com) here', { onLinkClick });
+    const event = clickLink({ modifier: false });
+    expect(onLinkClick).toHaveBeenCalledExactlyOnceWith('https://example.com');
+    expect(open).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it('keeps modifier-click external when a host callback is installed', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    const onLinkClick = vi.fn();
+    await mount('[docs](https://example.com)', { onLinkClick });
+    clickLink({ modifier: true });
+    expect(onLinkClick).not.toHaveBeenCalled();
+    expect(open).toHaveBeenCalledExactlyOnceWith(
+      'https://example.com',
+      '_blank',
+      'noopener,noreferrer',
+    );
+  });
+
+  it.each([
+    'javascript:alert(1)',
+    'data:text/html,hello',
+    'file:///tmp/a',
+    '/relative',
+    'mailto:a@example.com',
+    'not a url',
+  ])('blocks unsafe host navigation: %s', async (href) => {
+    const onLinkClick = vi.fn();
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    await mount('[docs](https://example.com)', { onLinkClick });
+    expect(clickLink({ modifier: false, href }).defaultPrevented).toBe(true);
+    expect(onLinkClick).not.toHaveBeenCalled();
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it('follows a fresh stationary click despite an existing ProseMirror selection', async () => {
+    const onLinkClick = vi.fn();
+    const instance = await mount('before [docs](https://example.com) after', {
+      onLinkClick,
+    });
+    instance.__selectTextBetweenForTest?.('before', 'docs');
+    expect(instance.getSelectionRange()).not.toBeNull();
+    pointAtLink('pointerdown');
+    pointAtLink('pointerup', { buttons: 0 });
+    const event = clickLink({ modifier: false });
+    expect(onLinkClick).toHaveBeenCalledExactlyOnceWith('https://example.com');
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it('follows a fresh stationary click despite an existing native selection', async () => {
+    const onLinkClick = vi.fn();
+    await mount('[docs](https://example.com)', {
+      onLinkClick,
+      editable: false,
+    });
+    const range = document.createRange();
+    const anchor = document.querySelector('.milkdown a');
+    const selection = document.getSelection();
+    if (!anchor || !selection) throw new Error('Expected a selectable link');
+    range.selectNodeContents(anchor);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    try {
+      pointAtLink('pointerdown');
+      pointAtLink('pointerup', { buttons: 0 });
+      expect(clickLink({ modifier: false }).defaultPrevented).toBe(true);
+      expect(onLinkClick).toHaveBeenCalledExactlyOnceWith(
+        'https://example.com',
+      );
+      expect(selection.toString()).toBe('docs');
+    } finally {
+      selection.removeAllRanges();
+    }
+  });
+
+  it.each(['endpoint', 'out-and-back'])(
+    'preserves a real drag selection (%s), then follows the next stationary click',
+    async (path) => {
+      const onLinkClick = vi.fn();
+      const open = vi.spyOn(window, 'open').mockReturnValue(null);
+      const instance = await mount('before [docs](https://example.com) after', {
+        onLinkClick,
+      });
+      pointAtLink('pointerdown');
+      if (path === 'out-and-back') {
+        pointAtLink('pointermove', { clientX: 30 });
+        pointAtLink('pointermove');
+      }
+      const clientX = path === 'endpoint' ? 30 : 0;
+      pointAtLink('pointerup', { clientX, buttons: 0 });
+      instance.__selectTextBetweenForTest?.('before', 'docs');
+      const selected = instance.getSelectionRange();
+      expect(clickLink({ modifier: false, clientX }).defaultPrevented).toBe(
+        true,
+      );
+      expect(onLinkClick).not.toHaveBeenCalled();
+      expect(open).not.toHaveBeenCalled();
+      expect(instance.getSelectionRange()).toEqual(selected);
+
+      pointAtLink('pointerdown');
+      pointAtLink('pointerup', { buttons: 0 });
+      clickLink({ modifier: false });
+      expect(onLinkClick).toHaveBeenCalledExactlyOnceWith(
+        'https://example.com',
+      );
+    },
+  );
+
+  it.each([2, 3])(
+    'does not follow a selection click with detail %s',
+    async (detail) => {
+      const onLinkClick = vi.fn();
+      await mount('[docs](https://example.com)', { onLinkClick });
+      pointAtLink('pointerdown', { detail });
+      pointAtLink('pointerup', { buttons: 0, detail });
+      expect(clickLink({ modifier: false, detail }).defaultPrevented).toBe(
+        true,
+      );
+      expect(onLinkClick).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['fresh-down', 'hover', 'cancel', 'keyboard'])(
+    'does not retain an abandoned drag after %s',
+    async (recovery) => {
+      const onLinkClick = vi.fn();
+      await mount('[docs](https://example.com)', { onLinkClick });
+      pointAtLink('pointerdown');
+      pointAtLink('pointermove', { clientX: 30 });
+      document.body.dispatchEvent(
+        new PointerEvent('pointerup', { buttons: 0 }),
+      );
+      if (recovery === 'fresh-down') {
+        pointAtLink('pointerdown');
+        pointAtLink('pointerup', { buttons: 0 });
+      } else if (recovery === 'hover') {
+        pointAtLink('pointermove', { buttons: 0 });
+      } else if (recovery === 'cancel') {
+        pointAtLink('pointercancel');
+      }
+      clickLink({ modifier: false, detail: recovery === 'keyboard' ? 0 : 1 });
+      expect(onLinkClick).toHaveBeenCalledExactlyOnceWith(
+        'https://example.com',
+      );
+    },
+  );
+
+  it('allows small pointer jitter during a stationary click', async () => {
+    const onLinkClick = vi.fn();
+    await mount('[docs](https://example.com)', { onLinkClick });
+    pointAtLink('pointerdown', { clientX: 10, clientY: 20 });
+    pointAtLink('pointermove', { clientX: 12, clientY: 21 });
+    pointAtLink('pointerup', { clientX: 12, clientY: 21, buttons: 0 });
+    clickLink({ modifier: false, clientX: 12, clientY: 21 });
+    expect(onLinkClick).toHaveBeenCalledExactlyOnceWith('https://example.com');
+  });
+
+  it.each([{ shiftKey: true }, { altKey: true }, { button: 1 }, { button: 2 }])(
+    'does not route a modified or secondary click to the host: %j',
+    async (options) => {
+      const onLinkClick = vi.fn();
+      await mount('[docs](https://example.com)', { onLinkClick });
+      document.querySelector('.milkdown a')?.dispatchEvent(
+        new MouseEvent('click', {
+          bubbles: true,
+          cancelable: true,
+          ...options,
+        }),
+      );
+      expect(onLinkClick).not.toHaveBeenCalled();
+    },
+  );
 
   it('leaves a plain click on a link to the caret', async () => {
     const open = vi.spyOn(window, 'open').mockReturnValue(null);

@@ -86,18 +86,23 @@ In `MilkdownPreview`, `Tab` is deliberately _not_ in the swallowed-key set: its 
 
 ## 6. Link activation
 
-In an editable note, `Ctrl`-click (`Cmd` on macOS, where `Ctrl`-click is the secondary-click gesture) opens the link under the pointer. A plain click is reserved for placing the caret, which keeps link text editable, following the same convention as VS Code, Word and Obsidian. In either read-only preview mode, a plain primary click opens the link because there is no caret-editing conflict; only the primary button counts. Preview anchors carry React Flow's `nodrag` class, so pointer movement on a link cannot turn link activation into a node drag while the rest of the note remains draggable.
+In the expanded `NotePreview`, links show a pointer cursor. An unmodified primary click opens a new browser tab in the web app, without changing the Preview Workspace. In the Electron desktop app, the same click opens a permanent URL tab in the existing [Preview Workspace](./preview-workspace.md), shared with Chat. The existing `isElectron()` helper selects the destination. `openPreviewUrl` settles and promotes the source Note before desktop navigation, so following a link never consumes or later loses a temporary Note tab. Reopening the same normalized URL activates its existing tab, including across groups. `Ctrl`-click (`Cmd` on macOS, where `Ctrl`-click is the secondary-click gesture) still opens externally; the URL renderer also keeps an external-open button visible independently of iframe loading.
+
+This is an explicit `onLinkClick` callback passed from `NotePreview` through `MilkdownEditor` to the shared factory, not a global editor behavior change. Other editable Milkdown surfaces reserve plain click for caret placement and use Ctrl/Cmd-click to open externally. Read-only and drag-only `MilkdownPreview` surfaces retain their plain-click external behavior and `nodrag` anchors. The link plugin installs pointer gesture handlers only when `onLinkClick` is supplied. In the opted-in Note, movement during the current pointer gesture and repeated selection clicks suppress navigation; an older text selection does not block a fresh stationary click. Modifier/secondary clicks do not invoke the Note callback. The pointer CSS is scoped to `.milkdown-note-preview .ProseMirror a[href]`.
 
 ```
-read-only primary click OR editable Ctrl/Cmd + primary click on <a href>
+eligible primary click on <a href>
   → handleLinkClick  (ProseMirror handleDOMEvents: click / auxclick)
   → normalizeSafeLinkHref  ── unsafe ─→ preventDefault, no navigation
-  → window.open(href, '_blank', 'noopener,noreferrer')
+    → Note plain click without selection gesture → onLinkClick
+      web      → window.open → new browser tab
+      desktop  → openPreviewUrl → in-app URL tab
+  → otherwise → window.open(href, '_blank', 'noopener,noreferrer')
         web      → new browser tab
         desktop  → setWindowOpenHandler denies the window, shell.openExternal
 ```
 
-No preload API or IPC is involved: the desktop main process already routes `window.open` for `http(s)` targets to the OS browser.
+No preload API or IPC is involved in external opening: the desktop main process already routes `window.open` for `http(s)` targets to the OS browser. The expanded Note's callback is the explicit exception to the default editable-surface behavior in §4; raw Markdown mode remains a source editor.
 
 ### Why the href is re-validated at click time
 
@@ -105,7 +110,7 @@ Only `setLink` screens what the _user_ types. Markdown parsed from an agent repl
 
 An anchor's `javascript:` URL can only be activated by a click — browsers refuse it for middle-click and for the context menu's "open link" entries — so the click handler is the closing point. An unsafe href has its default suppressed but the handler returns `false`, so ProseMirror still places the caret and the text stays editable.
 
-`normalizeSafeLinkHref` admits `http:` and `https:` only; everything else, including relative and `mailto:` targets, is treated as unsafe.
+`normalizeSafeLinkHref` in `utils/safeLink.ts` admits `http:` and `https:` only; everything else, including relative and `mailto:` targets, is treated as unsafe. It preserves the trimmed original href for link invocation; the URL target model uses the same `parseSafeLinkUrl` validator's parsed `URL.href` for canonical identity without reparsing it. Milkdown, the URL target model, and the URL renderer reuse this validator without importing the editor into tab infrastructure.
 
 ---
 
@@ -128,15 +133,16 @@ When a later agent rewrite restores a modified block to its original user-owned 
 
 ## Code entry points
 
-| File                                                                                              | Responsibility                                                                                                                           |
-| ------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| [`createMilkdown.ts`](../../apps/web/src/components/Milkdown/createMilkdown.ts)                   | Sole owner of Crepe/ProseMirror wiring: `tabContext`, `indentSelection`, `outdentSelection`, `handleLinkClick`, `normalizeSafeLinkHref`. |
-| [`node.ts`](../../packages/shared/src/types/canvas/node.ts)                                       | `NoteNodeData` and the `isNoteNode` guard.                                                                                               |
-| [`NoteNode.tsx`](../../apps/web/src/components/Nodes/note/NoteNode.tsx)                           | Canvas card: layout shell, height-mode toggle, drop handling.                                                                            |
-| [`NotePreview.tsx`](../../apps/web/src/components/Nodes/note/NotePreview.tsx)                     | Expanded surface: `MilkdownEditor`, WYSIWYG/raw toggle, provenance overlay, write-through to `updateNodeData`.                           |
-| [`blockProvenance.ts`](../../apps/web/src/utils/blockProvenance.ts)                               | Block keys and provenance realignment.                                                                                                   |
-| [`MilkdownEditor.tsx`](../../apps/web/src/components/Milkdown/MilkdownEditor.tsx)                 | Editable surface; reconciles the `editable` toggle onto a mounted instance.                                                              |
-| [`MilkdownPreview.tsx`](../../apps/web/src/components/Milkdown/MilkdownPreview.tsx)               | Read-only surface; capture-phase key/paste/cut/drop suppression and the `Tab` focus exemption.                                           |
-| [`platform.ts`](../../apps/web/src/utils/platform.ts)                                             | `isMac`, which selects the follow modifier.                                                                                              |
-| [`main.ts`](../../apps/desktop/src/main.ts)                                                       | `setWindowOpenHandler` / `will-navigate` guards that turn `window.open` into `shell.openExternal`.                                       |
-| [`blockCommands.test.ts`](../../apps/web/src/components/Milkdown/__tests__/blockCommands.test.ts) | Coverage for indent/outdent and for link activation, including the unsafe-scheme block.                                                  |
+| File                                                                                              | Responsibility                                                                                                                                   |
+| ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| [`createMilkdown.ts`](../../apps/web/src/components/Milkdown/createMilkdown.ts)                   | Sole owner of Crepe/ProseMirror wiring: `tabContext`, `indentSelection`, `outdentSelection`, and link activation with an optional host callback. |
+| [`safeLink.ts`](../../apps/web/src/utils/safeLink.ts)                                             | Shared HTTP(S)-only link validation for Milkdown and URL preview targets.                                                                        |
+| [`node.ts`](../../packages/shared/src/types/canvas/node.ts)                                       | `NoteNodeData` and the `isNoteNode` guard.                                                                                                       |
+| [`NoteNode.tsx`](../../apps/web/src/components/Nodes/note/NoteNode.tsx)                           | Canvas card: layout shell, height-mode toggle, drop handling.                                                                                    |
+| [`NotePreview.tsx`](../../apps/web/src/components/Nodes/note/NotePreview.tsx)                     | Expanded surface: `MilkdownEditor`, WYSIWYG/raw toggle, provenance overlay, write-through to `updateNodeData`.                                   |
+| [`blockProvenance.ts`](../../apps/web/src/utils/blockProvenance.ts)                               | Block keys and provenance realignment.                                                                                                           |
+| [`MilkdownEditor.tsx`](../../apps/web/src/components/Milkdown/MilkdownEditor.tsx)                 | Editable surface; reconciles the `editable` toggle onto a mounted instance.                                                                      |
+| [`MilkdownPreview.tsx`](../../apps/web/src/components/Milkdown/MilkdownPreview.tsx)               | Read-only surface; capture-phase key/paste/cut/drop suppression and the `Tab` focus exemption.                                                   |
+| [`platform.ts`](../../apps/web/src/utils/platform.ts)                                             | `isMac`, which selects the follow modifier.                                                                                                      |
+| [`main.ts`](../../apps/desktop/src/main.ts)                                                       | `setWindowOpenHandler` / `will-navigate` guards that turn `window.open` into `shell.openExternal`.                                               |
+| [`blockCommands.test.ts`](../../apps/web/src/components/Milkdown/__tests__/blockCommands.test.ts) | Coverage for indent/outdent and for link activation, including the unsafe-scheme block.                                                          |

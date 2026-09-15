@@ -16,10 +16,22 @@
 
 import { createId } from '@huabu/shared';
 
+import { parseSafeLinkUrl } from '@/utils/safeLink';
+
 /** The business resource a tab renders. */
 export type PreviewTarget =
   | { kind: 'node'; canvasId: string; nodeId: string }
-  | { kind: 'chat'; canvasId: string; threadId: string };
+  | { kind: 'chat'; canvasId: string; threadId: string }
+  | { kind: 'url'; canvasId: string; url: string };
+
+/** Validate raw targets and canonicalize URLs at open, replacement, and restore. */
+export function normalizePreviewTarget(
+  target: PreviewTarget,
+): PreviewTarget | null {
+  if (target.kind !== 'url') return target;
+  const url = parseSafeLinkUrl(target.url);
+  return url ? { kind: 'url', canvasId: target.canvasId, url: url.href } : null;
+}
 
 export type PreviewTab = {
   id: string;
@@ -86,6 +98,14 @@ export function isSamePreviewTarget(
     return left.nodeId === right.nodeId;
   }
 
+  if (left.kind === 'url' && right.kind === 'url') {
+    const a = normalizePreviewTarget(left);
+    // Canonical internal targets usually match verbatim; still validate raw callers.
+    if (left.url === right.url) return a !== null;
+    const b = normalizePreviewTarget(right);
+    return a?.kind === 'url' && b?.kind === 'url' && a.url === b.url;
+  }
+
   return (
     left.kind === 'chat' &&
     right.kind === 'chat' &&
@@ -149,7 +169,9 @@ export function conversationInOtherGroup(
   const threadId =
     tab.target.kind === 'chat'
       ? tab.target.threadId
-      : threadIdForNode(tab.target.nodeId);
+      : tab.target.kind === 'node'
+        ? threadIdForNode(tab.target.nodeId)
+        : undefined;
   return threadId ? { tabId: tab.id, threadId } : null;
 }
 
@@ -280,6 +302,9 @@ export function openTarget(
   options: OpenPreviewTargetOptions = {},
   newIds: { tabId?: string; groupId?: string } = {},
 ): { workspace: CanvasPreviewWorkspace; tabId: string } {
+  const normalized = normalizePreviewTarget(target);
+  if (!normalized) return { workspace, tabId: '' };
+  target = normalized;
   const requestedGroupId = options.groupId ?? workspace.activeGroupId;
   const baseGroupId = workspace.groups.some((g) => g.id === requestedGroupId)
     ? requestedGroupId
@@ -364,6 +389,9 @@ export function replaceTabTarget(
   tabId: string,
   target: PreviewTarget,
 ): CanvasPreviewWorkspace {
+  const normalized = normalizePreviewTarget(target);
+  if (!normalized) return workspace;
+  target = normalized;
   const tab = workspace.tabs[tabId];
   if (!tab) return workspace;
 
@@ -516,8 +544,7 @@ export function setSplitRatio(
 
 /**
  * Drops tabs whose node no longer exists in the Canvas and repairs any
- * dangling active ids. `chat` targets are not validated here: an unbound
- * thread has no Canvas node to check against.
+ * dangling active ids. Chat and URL targets have no Canvas node to check.
  */
 export function validateWorkspace(
   workspace: CanvasPreviewWorkspace,

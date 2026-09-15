@@ -10,6 +10,7 @@
  * ARIA tabs pattern.
  */
 
+import { PropertySymbol, type Window as HappyWindow } from 'happy-dom';
 import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -20,6 +21,7 @@ import {
 } from '@/components/Messages/messageListScroll';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
+import { openPreviewUrl } from '@/store/previewWorkspace/actions';
 import { createEmptyWorkspace } from '@/store/previewWorkspace/model';
 import { messageListViewKey } from '@/store/previewWorkspace/scrollMemory';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
@@ -145,6 +147,10 @@ const mountedNodeId = () =>
     ?.getAttribute('data-preview-node-id');
 
 beforeEach(() => {
+  // Render the real frame without performing remote network requests in unit tests.
+  (document as unknown as { [PropertySymbol.window]: HappyWindow })[
+    PropertySymbol.window
+  ].happyDOM.settings.disableIframePageLoading = true;
   usePreviewWorkspaceStore.setState({
     canvasId: CANVAS_ID,
     workspace: createEmptyWorkspace('g1'),
@@ -162,6 +168,66 @@ afterEach(() => {
 });
 
 describe('tab strip', () => {
+  it('opens a Note URL in the canonical workspace, retains the source, and keeps external opening available', async () => {
+    const sourceId = openNode('a', true);
+    render([canvasNode('a', 'Alpha')]);
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    let urlTabId = '';
+    act(() => {
+      urlTabId = openPreviewUrl('https://example.com/path', 'a');
+    });
+    expect(store().workspace.tabs[sourceId].transient).toBe(false);
+    expect(store().workspace.tabs[urlTabId].transient).toBe(false);
+    expect(tabs()).toHaveLength(2);
+    expect(activeTabName()).toBe('https://example.com/path');
+    expect(
+      container?.querySelector('[aria-selected="true"]')?.textContent,
+    ).toContain('example.com');
+    const iframe = container?.querySelector('iframe');
+    if (!iframe) throw new Error('Expected URL iframe');
+    expect(iframe.src).toBe('https://example.com/path');
+    expect(iframe.getAttribute('sandbox')).toBe('allow-scripts allow-forms');
+    expect(iframe.getAttribute('referrerpolicy')).toBe('no-referrer');
+    expect(iframe.hasAttribute('srcdoc')).toBe(false);
+    const external = container?.querySelector<HTMLButtonElement>(
+      '[aria-label="Open page in external browser"]',
+    );
+    if (!external) throw new Error('Expected external-open button');
+    expect(external.textContent).toBe('');
+    const address = container?.querySelector(
+      'div[title="https://example.com/path"]',
+    );
+    expect(address?.textContent).toBe('example.com/path');
+    act(() => external.click());
+    expect(open).toHaveBeenCalledExactlyOnceWith(
+      'https://example.com/path',
+      '_blank',
+      'noopener,noreferrer',
+    );
+    act(() => iframe.dispatchEvent(new Event('load')));
+    expect(external.disabled).toBe(false);
+    act(() => {
+      expect(openPreviewUrl('https://EXAMPLE.com:443/path', 'a')).toBe(
+        urlTabId,
+      );
+    });
+    expect(tabs()).toHaveLength(2);
+    act(() => store().activateTab(sourceId));
+    await flushActivityWork();
+    expect(container?.querySelector('iframe')).toBeNull();
+    expect(mountedNodeId()).toBe('a');
+    act(() => store().closeTab(urlTabId));
+    expect(tabs()).toHaveLength(1);
+    open.mockRestore();
+  });
+
+  it('does not promote a source or change topology for an unsafe URL', () => {
+    const sourceId = openNode('a', true);
+    const before = store().workspace;
+    expect(openPreviewUrl('javascript:alert(1)', 'a')).toBe('');
+    expect(store().workspace).toBe(before);
+    expect(store().workspace.tabs[sourceId].transient).toBe(true);
+  });
   it('forgets a Chat scroll position when its tab is explicitly closed', () => {
     const threadId = 'thread-close-scroll';
     const viewKey = messageListViewKey(CANVAS_ID, threadId);

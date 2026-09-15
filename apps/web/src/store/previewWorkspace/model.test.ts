@@ -49,6 +49,94 @@ function emptyWorkspace() {
   return createEmptyWorkspace('g1');
 }
 
+describe('URL targets', () => {
+  const url = (value = 'https://example.com/'): PreviewTarget => ({
+    kind: 'url',
+    canvasId: CANVAS,
+    url: value,
+  });
+
+  it('uses canonical URL plus Canvas identity without conflating paths or fragments', () => {
+    expect(isSamePreviewTarget(url(), url())).toBe(true);
+    expect(isSamePreviewTarget(url(' HTTPS://EXAMPLE.COM:443 '), url())).toBe(
+      true,
+    );
+    expect(isSamePreviewTarget(url(), url('HTTPS://EXAMPLE.COM:443'))).toBe(
+      true,
+    );
+    expect(isSamePreviewTarget(url(), url('https://example.com/other'))).toBe(
+      false,
+    );
+    expect(
+      isSamePreviewTarget(url(), url('https://example.com/#section')),
+    ).toBe(false);
+    expect(isSamePreviewTarget(url(), { ...url(), canvasId: 'other' })).toBe(
+      false,
+    );
+    expect(isSamePreviewTarget(url(), chat('https://example.com/'))).toBe(
+      false,
+    );
+  });
+
+  it.each([
+    'javascript:alert(1)',
+    'data:text/html,hi',
+    '/relative',
+    '',
+    'broken',
+  ])('does not equate identical unsafe URL inputs: %s', (value) => {
+    expect(isSamePreviewTarget(url(value), url(value))).toBe(false);
+  });
+
+  it('finds canonical tabs from equivalent raw URLs and canonicalizes replacements', () => {
+    let ws = open(emptyWorkspace(), url(), 'url').workspace;
+    expect(findTabByTarget(ws, url(' HTTPS://EXAMPLE.COM:443 '))?.id).toBe(
+      'url',
+    );
+    ws = replaceTabTarget(ws, 'url', url(' HTTPS://OTHER.COM:443 '));
+    expect(ws.tabs.url.target).toEqual(url('https://other.com/'));
+    expect(findTabByTarget(ws, url('https://OTHER.com'))?.id).toBe('url');
+  });
+
+  it('supports side opening, cross-group dedupe, moving, merging, validation and close', () => {
+    let ws = open(emptyWorkspace(), node('note'), 'note').workspace;
+    ws = open(ws, chat('thread'), 'chat').workspace;
+    ws = open(ws, url(), 'url', { openToSide: true }, 'g2').workspace;
+    const again = open(ws, url('https://EXAMPLE.com:443'), 'duplicate', {
+      groupId: 'g1',
+    });
+    expect(again.tabId).toBe('url');
+    expect(again.workspace.activeGroupId).toBe('g2');
+    expect(Object.keys(again.workspace.tabs)).toHaveLength(3);
+    expect(
+      conversationInOtherGroup(ws, node('note'), () => {
+        throw new Error('URL treated as node');
+      }),
+    ).toBeNull();
+    ws = validateWorkspace(again.workspace, CANVAS, new Set());
+    expect(Object.keys(ws.tabs)).toEqual(['chat', 'url']);
+    ws = moveTab(ws, 'url', { groupId: 'g1', index: 0 });
+    expect(ws.groups).toHaveLength(1);
+    expect(ws.groups[0].tabIds).toEqual(['url', 'chat']);
+    ws = open(ws, url('https://other.com'), 'other', {
+      openToSide: true,
+    }).workspace;
+    ws = mergeGroups(ws);
+    expect(ws.groups[0].tabIds).toEqual(['url', 'chat', 'other']);
+    ws = closeTab(activateTab(ws, 'url'), 'url');
+    expect(ws.groups[0].activeTabId).toBe('chat');
+    expect(ws.tabs.chat.target).toEqual(chat('thread'));
+  });
+
+  it('rejects unsafe targets before open or replacement mutates topology', () => {
+    const ws = open(emptyWorkspace(), node('note'), 'note').workspace;
+    expect(
+      openTarget(ws, url('javascript:alert(1)'), { openToSide: true }),
+    ).toEqual({ workspace: ws, tabId: '' });
+    expect(replaceTabTarget(ws, 'note', url('/relative'))).toBe(ws);
+  });
+});
+
 describe('conversationInOtherGroup', () => {
   it('returns the unbound Chat visible beside the source node', () => {
     const source = open(emptyWorkspace(), node('pdf'), 'pdf').workspace;

@@ -56,6 +56,35 @@ beforeEach(() => {
 });
 
 describe('workspace round trip', () => {
+  it('restores canonical URL tabs alongside Notes and Chat and deduplicates reopened URLs', () => {
+    let ws = sampleWorkspace();
+    ws = openTarget(ws, {
+      kind: 'chat',
+      canvasId: CANVAS,
+      threadId: 'thread',
+    }).workspace;
+    const url = {
+      kind: 'url',
+      canvasId: CANVAS,
+      url: ' HTTPS://Example.COM:443 ',
+    } as const;
+    const opened = openTarget(ws, url, { openToSide: true });
+    writeWorkspace(CANVAS, opened.workspace);
+    const restored = readWorkspace(CANVAS);
+    if (!restored) throw new Error('Expected restored workspace');
+    expect(restored).toEqual(opened.workspace);
+    expect(restored.tabs[opened.tabId].target).toEqual({
+      kind: 'url',
+      canvasId: CANVAS,
+      url: 'https://example.com/',
+    });
+    const reopened = openTarget(restored, {
+      ...url,
+      url: 'https://example.com/',
+    });
+    expect(reopened.tabId).toBe(opened.tabId);
+    expect(Object.keys(reopened.workspace.tabs)).toHaveLength(4);
+  });
   it('restores tabs, groups, focus, and split ratio', () => {
     const ws = sampleWorkspace();
     writeWorkspace(CANVAS, ws);
@@ -87,6 +116,43 @@ describe('workspace round trip', () => {
 });
 
 describe('defensive parsing', () => {
+  it('repairs unsafe, malformed, and cross-Canvas URL targets', () => {
+    const targets = [
+      { kind: 'url', canvasId: CANVAS, url: 'https://example.com' },
+      ...[
+        'javascript:alert(1)',
+        'data:text/html,hi',
+        '/relative',
+        '',
+        'broken',
+      ].map((url) => ({ kind: 'url', canvasId: CANVAS, url })),
+      { kind: 'url', canvasId: 'other', url: 'https://other.com' },
+      { kind: 'url', canvasId: CANVAS, url: 42 },
+    ];
+    const tabIds = targets.map((_, i) => `url-${i}`);
+    testStorage.storage.setItem(
+      KEY,
+      JSON.stringify({
+        version: 1,
+        workspace: {
+          tabs: Object.fromEntries(
+            targets.map((target, i) => [tabIds[i], { target }]),
+          ),
+          groups: [{ id: 'g1', tabIds, activeTabId: 'url-0' }],
+          activeGroupId: 'g1',
+        },
+      }),
+    );
+    const restored = readWorkspace(CANVAS);
+    if (!restored) throw new Error('Expected restored workspace');
+    expect(Object.keys(restored.tabs)).toEqual(['url-0']);
+    expect(restored.tabs['url-0'].target).toEqual({
+      kind: 'url',
+      canvasId: CANVAS,
+      url: 'https://example.com/',
+    });
+    expect(restored.groups[0].activeTabId).toBe('url-0');
+  });
   it('treats unparseable payloads as missing layout', () => {
     testStorage.storage.setItem(KEY, 'not json');
     expect(readWorkspace(CANVAS)).toBeNull();

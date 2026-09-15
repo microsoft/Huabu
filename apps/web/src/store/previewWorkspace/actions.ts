@@ -4,6 +4,7 @@
 import useCanvasStore, { settleNodePreprocess } from '../canvasStore';
 import { useChatStore } from '../chatStore';
 import { usePanelStore } from '../panelStore';
+import { findTabByTarget, groupOfTab, normalizePreviewTarget } from './model';
 import {
   selectActiveNodeId,
   selectActiveTab,
@@ -59,6 +60,31 @@ export function openChat(): string {
   const tabId = preview.openPreviewTarget({ kind: 'chat', canvasId, threadId });
   usePanelStore.getState().requestFocusChatInput(threadId);
   return tabId;
+}
+
+/** Follow a Note link without consuming its temporary inspection tab. */
+export function openPreviewUrl(href: string, sourceNodeId?: string): string {
+  const preview = usePreviewWorkspaceStore.getState();
+  const canvasId = preview.canvasId;
+  if (!canvasId) return '';
+  const target = normalizePreviewTarget({ kind: 'url', canvasId, url: href });
+  if (!target) return '';
+  const source = sourceNodeId
+    ? findTabByTarget(preview.workspace, {
+        kind: 'node',
+        canvasId,
+        nodeId: sourceNodeId,
+      })
+    : null;
+  const groupId = source
+    ? groupOfTab(preview.workspace, source.id)?.id
+    : undefined;
+  if (source && sourceNodeId) {
+    settleNodePreprocess(sourceNodeId);
+    preview.promoteTab(source.id);
+  }
+  usePanelStore.getState().requestOpenRightPanel();
+  return preview.openPreviewTarget(target, { groupId });
 }
 
 export function closeActivePreviewNode(): void {
