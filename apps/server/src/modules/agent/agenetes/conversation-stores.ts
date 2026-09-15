@@ -35,7 +35,7 @@ import {
   SqliteThreadStore,
   SqliteTurnStore,
 } from './sqlite-stores.js';
-import { registerSpaceDirHandleOwner } from '../../storage/backends/disk/space-dir-handles.js';
+import { registerSpaceDirHandleOwner } from '../../storage/index.js';
 
 import type {
   EventLogEntry,
