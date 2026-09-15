@@ -207,6 +207,116 @@ async function tick() {
 }
 
 describe('undo/redo persistence ordering', () => {
+  it.each([false, true])(
+    'preserves preprocessing across an unrelated history change (issued=%s)',
+    async (issued) => {
+      const other: Node = {
+        ...note,
+        id: 'node-other',
+        position: { x: 100, y: 0 },
+      };
+      state()._setStateNoAutosave({
+        nodes: [note, other],
+        ingestionByNodeId: {},
+      });
+      canvasHistoryManager.takeSnapshot([note, other], []);
+      state()._setStateNoAutosave({
+        nodes: [note, { ...other, position: { x: 200, y: 0 } }],
+      });
+      const gate = deferred();
+      api.preprocessNode.mockImplementationOnce(async () => {
+        await gate.promise;
+        return { success: true, summary: 'Useful result' };
+      });
+      settleNodePreprocess(note.id);
+      if (issued) await vi.advanceTimersByTimeAsync(2_000);
+      state().undo();
+      expect(state().ingestionByNodeId[note.id]?.status).toBe('pending');
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(api.preprocessNode).toHaveBeenCalledOnce();
+      gate.resolve();
+      await tick();
+      expect(state().nodes[0].data.summary).toBe('Useful result');
+      expect(state().ingestionByNodeId[note.id]).toBeUndefined();
+      await drainPendingSaves();
+    },
+  );
+
+  it.each([false, true])(
+    'resumes unfinished preprocessing after resurrected content commits (issued=%s)',
+    async (issued) => {
+      const old = deferred();
+      if (issued)
+        api.preprocessNode.mockImplementationOnce(async () => {
+          await old.promise;
+          return { success: true, summary: 'Obsolete result' };
+        });
+      settleNodePreprocess(note.id);
+      if (issued) await vi.advanceTimersByTimeAsync(2_000);
+      remove();
+      expect(state().ingestionByNodeId[note.id]).toBeUndefined();
+      state().undo();
+      const write = (contentGate = deferred());
+      const draining = drainPendingSaves();
+      old.resolve();
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(api.preprocessNode).toHaveBeenCalledTimes(issued ? 1 : 0);
+      expect(state().nodes[0].data.summary).toBeUndefined();
+      expect(state().pendingContentNodeIds()).toContain(note.id);
+      write.resolve();
+      await draining;
+      api.preprocessNode.mockResolvedValueOnce({
+        success: true,
+        summary: 'Resumed result',
+      });
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(api.preprocessNode).toHaveBeenCalledTimes(issued ? 2 : 1);
+      expect(state().nodes[0].data.summary).toBe('Resumed result');
+      expect(state().ingestionByNodeId[note.id]).toBeUndefined();
+      await drainPendingSaves();
+    },
+  );
+
+  it('does not resume preprocessing until a failed restored content save succeeds on Retry', async () => {
+    settleNodePreprocess(note.id);
+    await deleted();
+    api.putNodeContent.mockRejectedValueOnce(new Error('Disk unavailable'));
+    state().undo();
+    await expect(drainPendingSaves()).rejects.toThrow('Restored node content');
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(api.preprocessNode).not.toHaveBeenCalled();
+    const retry = vi
+      .mocked(toast)
+      .mock.calls.find(
+        ([, options]) => options?.action?.label === 'Retry',
+      )?.[1]?.action;
+    expect(retry).toBeDefined();
+    retry?.onClick();
+    await tick();
+    await drainPendingSaves();
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(api.preprocessNode).toHaveBeenCalledOnce();
+  });
+
+  it('retains unfinished work through rapid undo/redo without starting it for an absent node', async () => {
+    settleNodePreprocess(note.id);
+    await deleted();
+    const gate = (structureGate = deferred());
+    state().undo();
+    const saving = state().saveCanvas();
+    await tick();
+    state().redo();
+    gate.resolve();
+    await saving;
+    await drainPendingSaves();
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(api.preprocessNode).not.toHaveBeenCalled();
+    state().undo();
+    await drainPendingSaves();
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(api.preprocessNode).toHaveBeenCalledOnce();
+  });
+
   it('holds content until structure commits, then survives authoritative reload', async () => {
     await deleted();
     const gate = (structureGate = deferred());

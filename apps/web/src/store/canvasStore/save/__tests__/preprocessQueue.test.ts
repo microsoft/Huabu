@@ -295,6 +295,37 @@ describe('preprocessQueue', () => {
     expect(preprocessNodeIfNeeded).not.toHaveBeenCalled();
   });
 
+  it('surfaces unexpected helper rejection without leaving a rejected cleanup promise', async () => {
+    const node: Node = {
+      id: 'unexpected-failure',
+      type: 'web',
+      position: { x: 0, y: 0 },
+      data: { src: 'https://example.com' },
+    };
+    const setNodeIngestion = vi.fn();
+    const queue = createPreprocessQueue({
+      delayMs: 1_000,
+      getState: () => ({
+        canvasId: 'canvas-1',
+        nodes: [node],
+        setNodeIngestion,
+        clearNodeIngestion: vi.fn(),
+        patchNodeSilent: vi.fn(),
+      }),
+    });
+    preprocessNodeIfNeeded.mockRejectedValueOnce(
+      new Error('Unexpected helper error'),
+    );
+    queue.schedule(node);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await expect(queue.waitForIdle()).resolves.toBeUndefined();
+    expect(setNodeIngestion).toHaveBeenLastCalledWith(node.id, {
+      status: 'error',
+      updatedAt: expect.any(Number),
+      error: 'Unexpected helper error',
+    });
+  });
+
   it('cancels a pending preprocess when the sidecar becomes missing', async () => {
     const node: Node = {
       id: 'note-removed-during-debounce',
@@ -303,13 +334,14 @@ describe('preprocessQueue', () => {
       data: {},
     };
     let nodes: Node[] = [node];
+    const clearNodeIngestion = vi.fn();
     const queue = createPreprocessQueue({
       delayMs: 1_000,
       getState: () => ({
         canvasId: 'canvas-1',
         nodes,
         setNodeIngestion: vi.fn(),
-        clearNodeIngestion: vi.fn(),
+        clearNodeIngestion,
         patchNodeSilent: vi.fn(),
       }),
     });
@@ -319,5 +351,6 @@ describe('preprocessQueue', () => {
     await vi.advanceTimersByTimeAsync(1_000);
 
     expect(preprocessNodeIfNeeded).not.toHaveBeenCalled();
+    expect(clearNodeIngestion).toHaveBeenCalledWith(node.id);
   });
 });

@@ -204,6 +204,8 @@ A completed Run stores immutable `completion.completedAt` and an optional trimme
 
 Web undo/redo resurrection must acknowledge the restored topology before writing its sidecar: a tombstoned, structurally absent node correctly suppresses late content writes with a benign response. The web uses its existing structure save and content queue, holds restored bodies until the matching structure acknowledgement, and waits for actual in-flight DELETE completion instead of treating fetch abort as cancellation. Only restored nodes receive the absent-sidecar content revision baseline; normal content CAS remains unchanged. Failed restores retain their in-memory bodies and expose Retry rather than permitting navigation to discard them. See [Undo interaction](./canvas-realtime-sync.md#undo-interaction) for generation, failure, and unload guarantees.
 
+If deletion interrupted preprocessing, the content queue's generation-checked restored-content success callback resumes that work through the existing preprocessing queue. Structure acknowledgement alone is not sufficient: preprocessing remains blocked during the restored content PUT and after a failed write until Retry succeeds. Nodes whose work had already completed are restored without automatically repeating preprocessing. See [Node preprocessing](./node-preprocessing.md#4-triggers--state) for selective history reconciliation and task-owned UI state.
+
 Standalone content PUT and preprocessing persist call
 `updateNode(SpaceNodes, ...)`. The Canvas-domain promise-chain mutex remains
 per Space and stays held across the repository's asynchronous read and CAS put.

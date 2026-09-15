@@ -88,7 +88,7 @@ export type NodeContentQueue = {
     tokens: ReadonlyMap<string, object>,
   ): void;
   hasRestore(nodeId: string): boolean;
-  hasPendingRestoredContent(): boolean;
+  hasPendingRestoredContent(nodeId?: string): boolean;
   reportRestoreFailure(canvasId: string): void;
   waitForIdle(): Promise<void>;
   /**
@@ -202,6 +202,7 @@ export function createNodeContentQueue(opts: {
   delayMs: number;
   getState: () => NodeContentQueueState;
   retryStructure?: () => Promise<void>;
+  onRestoredContentPersisted?: (canvasId: string, nodeId: string) => void;
 }): NodeContentQueue {
   const debouncer = createPerKeyDebouncer<string>(opts.delayMs);
   const inflight = new Map<string, Promise<void>>();
@@ -379,7 +380,7 @@ export function createNodeContentQueue(opts: {
     // write). Also clear any content-conflict toast guard — a success
     // means the node is no longer blocked.
     baselineRev.set(nodeId, response.rev);
-    restoredContent.delete(nodeId);
+    const completedRestore = restoredContent.delete(nodeId);
     contentConflictToasted.delete(nodeId);
     saveErrorToasted.delete(nodeId);
     // A write that succeeded means any prior duplicate has been
@@ -424,6 +425,7 @@ export function createNodeContentQueue(opts: {
         ),
       });
     }
+    if (completedRestore) opts.onRestoredContentPersisted?.(canvasId, nodeId);
   }
 
   /**
@@ -879,8 +881,10 @@ export function createNodeContentQueue(opts: {
     },
 
     hasRestore: (nodeId) => restores.has(nodeId),
-    hasPendingRestoredContent: () =>
-      [...restoredContent.values()].includes(opts.getState().canvasId),
+    hasPendingRestoredContent: (nodeId) =>
+      nodeId === undefined
+        ? [...restoredContent.values()].includes(opts.getState().canvasId)
+        : restoredContent.get(nodeId) === opts.getState().canvasId,
 
     reportRestoreFailure(canvasId) {
       for (const [id, entry] of restores) {

@@ -14,14 +14,16 @@
  * Unlike {@link ../save/nodeContentQueue} this queue does NOT serialize
  * per-node requests. Label projection re-checks the latest node ownership
  * before applying a response so stale auto labels cannot replace user/agent
- * names. Other derived metadata remains last-response-wins within a canvas
- * projection generation; cancellation invalidates older projections.
+ * names. Each scheduled task owns its projections and ingestion status;
+ * superseded tasks remain tracked for DELETE ordering, but cannot update UI.
  *
  * The keepalive path used at page unload bypasses
  * `preprocessNodeIfNeeded` (which mutates ingestion state that won't
  * render anyway) and fires `preprocessNode` directly with a
  * server-recognized `trigger: 'flush'` snapshot.
  */
+
+import deepEqual from 'fast-deep-equal';
 
 import { preprocessNode } from '@/api';
 import {
@@ -66,6 +68,12 @@ export type PreprocessQueueState = {
  */
 export type PreprocessQueue = {
   waitForIdle(): Promise<void>;
+  /** Retain unfinished work for a possible history resurrection. */
+  forgetNode(nodeId: string): void;
+  /** Reconcile only tasks whose request inputs changed in history. */
+  reconcileHistory(previousNodes: readonly Node[]): void;
+  /** Resume interrupted work after the restored sidecar has committed. */
+  resumeRestored(canvasId: string, nodeId: string): void;
   /**
    * Schedule (or reschedule) a debounced preprocess for `node`. The
    * latest store state is re-read at fire time so trailing edits
@@ -75,7 +83,7 @@ export type PreprocessQueue = {
 
   /**
    * Cancel every pending preprocess timer without firing and invalidate
-   * in-flight projections. Used by canvas switches and history restores.
+   * in-flight projections. Used by canvas switches, not history restores.
    * Issued requests remain completion-tracked for DELETE ordering.
    */
   cancelAll(): void;
@@ -106,11 +114,74 @@ export function createPreprocessQueue(opts: {
 }): PreprocessQueue {
   const debouncer = createPerKeyDebouncer<string>(opts.delayMs);
   const inflight = new Set<Promise<void>>();
-  let projectionGeneration = 0;
+  const tasks = new Map<string, { canvasId: string }>();
+  const interrupted = new Map<string, Set<string>>();
 
-  return {
+  function invalidate(nodeId: string): void {
+    const task = tasks.get(nodeId);
+    tasks.delete(nodeId);
+    debouncer.cancel(nodeId);
+    if (task?.canvasId === opts.getState().canvasId) {
+      opts.getState().clearNodeIngestion(nodeId);
+    }
+  }
+
+  function requestInput(node: Node, nodes: readonly Node[]) {
+    return {
+      nodeType: node.type,
+      snapshot: buildPreprocessSnapshot(node, (id) =>
+        nodes.filter((child) => child.parentId === id),
+      ),
+    };
+  }
+
+  const queue: PreprocessQueue = {
     async waitForIdle() {
       await Promise.all(inflight);
+    },
+
+    forgetNode(nodeId) {
+      const task = tasks.get(nodeId);
+      if (task) {
+        const ids = interrupted.get(task.canvasId) ?? new Set<string>();
+        ids.add(nodeId);
+        interrupted.set(task.canvasId, ids);
+      }
+      invalidate(nodeId);
+    },
+
+    reconcileHistory(previousNodes) {
+      const state = opts.getState();
+      const previous = new Map(previousNodes.map((node) => [node.id, node]));
+      for (const node of state.nodes) {
+        const before = previous.get(node.id);
+        if (!before) {
+          queue.resumeRestored(state.canvasId, node.id);
+        } else if (
+          tasks.has(node.id) &&
+          !deepEqual(
+            requestInput(before, previousNodes),
+            requestInput(node, state.nodes),
+          )
+        ) {
+          invalidate(node.id);
+          queue.schedule(node);
+        }
+      }
+    },
+
+    resumeRestored(canvasId, nodeId) {
+      if (opts.getState().canvasId !== canvasId || opts.isBlocked?.(nodeId))
+        return;
+      const ids = interrupted.get(canvasId);
+      if (!ids?.has(nodeId)) return;
+      const node = opts
+        .getState()
+        .nodes.find((candidate) => candidate.id === nodeId);
+      if (!node) return;
+      ids.delete(nodeId);
+      if (!ids.size) interrupted.delete(canvasId);
+      queue.schedule(node);
     },
 
     schedule(node) {
@@ -120,51 +191,76 @@ export function createPreprocessQueue(opts: {
       const scheduledState = opts.getState();
       if (!scheduledState.canvasId) return;
       const nodeId = node.id;
+      const task = { canvasId: scheduledState.canvasId };
+      tasks.set(nodeId, task);
       scheduledState.setNodeIngestion(nodeId, {
         status: 'pending',
         updatedAt: Date.now(),
       });
       debouncer.schedule(nodeId, () => {
         const state = opts.getState();
-        if (!state.canvasId || state.canvasId !== scheduledState.canvasId)
-          return;
-        // Re-fetch the latest node so we send the most up-to-date content.
-        const latestNode = state.nodes.find((n) => n.id === nodeId);
-        if (!latestNode || opts.isBlocked?.(nodeId)) return;
-        if (isExcludedFromPreprocessing(latestNode)) {
-          state.clearNodeIngestion(nodeId);
+        if (tasks.get(nodeId) !== task) return;
+        if (!state.canvasId || state.canvasId !== task.canvasId) {
+          invalidate(nodeId);
           return;
         }
-        if (hasMissingContent(latestNode)) return;
-        const generation = projectionGeneration;
+        // Re-fetch the latest node so we send the most up-to-date content.
+        const latestNode = state.nodes.find((n) => n.id === nodeId);
+        if (!latestNode) {
+          queue.forgetNode(nodeId);
+          return;
+        }
+        if (
+          opts.isBlocked?.(nodeId) ||
+          isExcludedFromPreprocessing(latestNode) ||
+          hasMissingContent(latestNode)
+        ) {
+          invalidate(nodeId);
+          return;
+        }
+        const isCurrent = () =>
+          tasks.get(nodeId) === task &&
+          opts.getState().canvasId === task.canvasId &&
+          opts.getState().nodes.some((candidate) => candidate.id === nodeId) &&
+          !opts.isBlocked?.(nodeId);
         const pending = preprocessNodeIfNeeded({
           canvasId: state.canvasId,
           node: latestNode,
-          setNodeIngestion: state.setNodeIngestion,
-          clearNodeIngestion: state.clearNodeIngestion,
+          setNodeIngestion: (id, info) => {
+            if (isCurrent()) state.setNodeIngestion(id, info);
+          },
+          clearNodeIngestion: (id) => {
+            if (isCurrent()) state.clearNodeIngestion(id);
+          },
           getChildNodes: (frameId) =>
             state.nodes.filter((n) => n.parentId === frameId),
           getNode: (id) =>
             opts.getState().nodes.find((candidate) => candidate.id === id),
           patchNodeSilent: (id, patch) => {
-            if (
-              generation === projectionGeneration &&
-              opts.getState().canvasId === state.canvasId &&
-              opts.getState().nodes.some((node) => node.id === id) &&
-              !opts.isBlocked?.(id)
-            ) {
+            if (isCurrent()) {
               state.patchNodeSilent(id, patch);
             }
           },
+        }).catch((error: unknown) => {
+          if (isCurrent())
+            state.setNodeIngestion(nodeId, {
+              status: 'error',
+              updatedAt: Date.now(),
+              error: error instanceof Error ? error.message : String(error),
+            });
         });
         inflight.add(pending);
-        void pending.finally(() => inflight.delete(pending));
+        void pending
+          .finally(() => {
+            inflight.delete(pending);
+            if (tasks.get(nodeId) === task) tasks.delete(nodeId);
+          })
+          .catch(() => undefined);
       });
     },
 
     cancelAll() {
-      debouncer.cancelAll();
-      projectionGeneration++;
+      for (const id of tasks.keys()) invalidate(id);
     },
 
     flushKeepalive() {
@@ -176,6 +272,7 @@ export function createPreprocessQueue(opts: {
       if (!canvasId) return;
 
       for (const nodeId of pendingIds) {
+        invalidate(nodeId);
         const node = nodes.find((n) => n.id === nodeId);
         if (
           !node ||
@@ -196,4 +293,5 @@ export function createPreprocessQueue(opts: {
       }
     },
   };
+  return queue;
 }

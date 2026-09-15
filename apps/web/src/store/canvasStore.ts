@@ -934,7 +934,7 @@ const canvasEvents = createCanvasEventBuffer();
 const preprocessQueue = createPreprocessQueue({
   delayMs: PREPROCESS_DEBOUNCE_MS,
   getState: () => useCanvasStore.getState(),
-  isBlocked: (nodeId) => nodeContentQueue.hasRestore(nodeId),
+  isBlocked: (nodeId) => nodeContentQueue.hasPendingRestoredContent(nodeId),
 });
 
 /**
@@ -946,6 +946,8 @@ const nodeContentQueue = createNodeContentQueue({
   delayMs: NODE_CONTENT_DEBOUNCE_MS,
   getState: () => useCanvasStore.getState(),
   retryStructure: () => useCanvasStore.getState().saveCanvas(),
+  onRestoredContentPersisted: (canvasId, nodeId) =>
+    preprocessQueue.resumeRestored(canvasId, nodeId),
 });
 
 /** Drain issued sidecar writers without promoting held/debounced writes. */
@@ -1118,7 +1120,10 @@ const autoSaveMiddleware =
         if (prev.nodes !== next.nodes) {
           const nextIds = new Set(next.nodes.map((node) => node.id));
           for (const node of prev.nodes) {
-            if (!nextIds.has(node.id)) nodeContentQueue.forgetNode(node.id);
+            if (!nextIds.has(node.id)) {
+              nodeContentQueue.forgetNode(node.id);
+              preprocessQueue.forgetNode(node.id);
+            }
           }
           nodeContentQueue.scheduleChanges(
             next.canvasId,
@@ -3810,9 +3815,6 @@ const useCanvasStore = create<RFState>()(
       const { nodes, edges, canvasId } = get();
       const snapshot = canvasHistoryManager.undo(nodes, edges);
       if (!snapshot) return;
-      // A completed restore must not accept projections from its old snapshot.
-      preprocessQueue.cancelAll();
-
       // Undo swaps in authoritative geometry, so any retained stroke
       // selection / polygon may no longer describe it (e.g. the classic
       // "move strokes then undo" strands the dashed region at the moved
@@ -3833,6 +3835,7 @@ const useCanvasStore = create<RFState>()(
         nodes: snapshot.nodes,
         edges: snapshot.edges,
       });
+      preprocessQueue.reconcileHistory(nodes);
       canvasEvents.buffer(canvasId, action);
 
       canvasHistoryManager.syncServerAfterRestore(
@@ -3847,7 +3850,6 @@ const useCanvasStore = create<RFState>()(
       const { nodes, edges, canvasId } = get();
       const snapshot = canvasHistoryManager.redo(nodes, edges);
       if (!snapshot) return;
-      preprocessQueue.cancelAll();
 
       // See `undo`: a redo is the same authoritative geometry swap, so
       // discard the floating stroke selection for the same reason.
@@ -3864,6 +3866,7 @@ const useCanvasStore = create<RFState>()(
         nodes: snapshot.nodes,
         edges: snapshot.edges,
       });
+      preprocessQueue.reconcileHistory(nodes);
       canvasEvents.buffer(canvasId, action);
 
       canvasHistoryManager.syncServerAfterRestore(
