@@ -72,7 +72,7 @@ export type PreprocessQueue = {
   forgetNode(nodeId: string): void;
   /** Reconcile only tasks whose request inputs changed in history. */
   reconcileHistory(previousNodes: readonly Node[]): void;
-  /** Resume interrupted work after the restored sidecar has committed. */
+  /** Reconsider waiting work after the restored sidecar has committed. */
   resumeRestored(canvasId: string, nodeId: string): void;
   /**
    * Schedule (or reschedule) a debounced preprocess for `node`. The
@@ -114,8 +114,14 @@ export function createPreprocessQueue(opts: {
 }): PreprocessQueue {
   const debouncer = createPerKeyDebouncer<string>(opts.delayMs);
   const inflight = new Set<Promise<void>>();
-  const tasks = new Map<string, { canvasId: string }>();
-  const interrupted = new Map<string, Set<string>>();
+  type Task = {
+    canvasId: string;
+    phase: 'queued' | 'blocked' | 'running' | 'deleted';
+    input?: ReturnType<typeof requestInput>;
+  };
+  // One record owns demand, readiness and response validity. Issued promises
+  // are tracked separately only because DELETE must drain superseded work too.
+  const tasks = new Map<string, Task>();
 
   function invalidate(nodeId: string): void {
     const task = tasks.get(nodeId);
@@ -135,6 +141,111 @@ export function createPreprocessQueue(opts: {
     };
   }
 
+  function canProcess(node: Node): boolean {
+    return !isExcludedFromPreprocessing(node) && !hasMissingContent(node);
+  }
+
+  function ownsTask(nodeId: string, task: Task): boolean {
+    return (
+      tasks.get(nodeId) === task && opts.getState().canvasId === task.canvasId
+    );
+  }
+
+  function canProject(nodeId: string, task: Task): boolean {
+    const state = opts.getState();
+    const node = state.nodes.find((candidate) => candidate.id === nodeId);
+    if (
+      !ownsTask(nodeId, task) ||
+      task.phase !== 'running' ||
+      !node ||
+      !canProcess(node) ||
+      opts.isBlocked?.(nodeId)
+    )
+      return false;
+    const current = requestInput(node, state.nodes);
+    // The helper already suppresses automatic labels after a protected rename.
+    // Preserve useful extracted content when only that ownership changed.
+    if (
+      typeof node.data.label === 'string' &&
+      node.data.label.trim() &&
+      (node.data.labelSource === 'user' || node.data.labelSource === 'agent') &&
+      task.input
+    ) {
+      current.snapshot.title = task.input.snapshot.title;
+      current.snapshot.labelSource = task.input.snapshot.labelSource;
+    }
+    return deepEqual(task.input, current);
+  }
+
+  function markPending(nodeId: string): void {
+    opts
+      .getState()
+      .setNodeIngestion(nodeId, { status: 'pending', updatedAt: Date.now() });
+  }
+
+  function start(nodeId: string, task: Task): void {
+    if (!ownsTask(nodeId, task)) return;
+    const state = opts.getState();
+    const node = state.nodes.find((candidate) => candidate.id === nodeId);
+    if (!node) {
+      queue.forgetNode(nodeId);
+      return;
+    }
+    if (!canProcess(node)) {
+      invalidate(nodeId);
+      return;
+    }
+    if (opts.isBlocked?.(nodeId)) {
+      task.phase = 'blocked';
+      return;
+    }
+    task.phase = 'running';
+    task.input = requestInput(node, state.nodes);
+    const pending = preprocessNodeIfNeeded({
+      canvasId: task.canvasId,
+      node,
+      setNodeIngestion: (id, info) => {
+        if (canProject(nodeId, task)) state.setNodeIngestion(id, info);
+      },
+      clearNodeIngestion: (id) => {
+        if (canProject(nodeId, task)) state.clearNodeIngestion(id);
+      },
+      getChildNodes: (id) =>
+        state.nodes.filter((child) => child.parentId === id),
+      getNode: (id) =>
+        opts.getState().nodes.find((candidate) => candidate.id === id),
+      patchNodeSilent: (id, patch) => {
+        if (!canProject(nodeId, task)) return;
+        state.patchNodeSilent(id, patch);
+        // The accepted result may canonicalize src/content/label. Its own
+        // projection must not invalidate the terminal ingestion callback.
+        const latest = opts.getState();
+        const projected = latest.nodes.find((candidate) => candidate.id === id);
+        if (ownsTask(nodeId, task) && projected)
+          task.input = requestInput(projected, latest.nodes);
+      },
+    }).catch((error: unknown) => {
+      if (canProject(nodeId, task))
+        state.setNodeIngestion(nodeId, {
+          status: 'error',
+          updatedAt: Date.now(),
+          error: error instanceof Error ? error.message : String(error),
+        });
+    });
+    inflight.add(pending);
+    void pending
+      .finally(() => {
+        inflight.delete(pending);
+        if (tasks.get(nodeId) !== task) return;
+        // A stale response ends only its own spinner. Input edits alone do not
+        // trigger another request: Note/Text still wait for explicit edit-settle.
+        if (ownsTask(nodeId, task) && !canProject(nodeId, task))
+          state.clearNodeIngestion(nodeId);
+        tasks.delete(nodeId);
+      })
+      .catch(() => undefined);
+  }
+
   const queue: PreprocessQueue = {
     async waitForIdle() {
       await Promise.all(inflight);
@@ -142,25 +253,29 @@ export function createPreprocessQueue(opts: {
 
     forgetNode(nodeId) {
       const task = tasks.get(nodeId);
-      if (task) {
-        const ids = interrupted.get(task.canvasId) ?? new Set<string>();
-        ids.add(nodeId);
-        interrupted.set(task.canvasId, ids);
-      }
+      if (!task || task.phase === 'deleted') return;
       invalidate(nodeId);
+      tasks.set(nodeId, { canvasId: task.canvasId, phase: 'deleted' });
     },
 
     reconcileHistory(previousNodes) {
       const state = opts.getState();
       const previous = new Map(previousNodes.map((node) => [node.id, node]));
+      for (const before of previousNodes) {
+        if (!state.nodes.some((node) => node.id === before.id))
+          queue.forgetNode(before.id);
+      }
       for (const node of state.nodes) {
         const before = previous.get(node.id);
+        const task = tasks.get(node.id);
         if (!before) {
           queue.resumeRestored(state.canvasId, node.id);
         } else if (
-          tasks.has(node.id) &&
+          task?.canvasId === state.canvasId &&
           !deepEqual(
-            requestInput(before, previousNodes),
+            task.phase === 'running'
+              ? task.input
+              : requestInput(before, previousNodes),
             requestInput(node, state.nodes),
           )
         ) {
@@ -171,96 +286,43 @@ export function createPreprocessQueue(opts: {
     },
 
     resumeRestored(canvasId, nodeId) {
-      if (opts.getState().canvasId !== canvasId || opts.isBlocked?.(nodeId))
+      const task = tasks.get(nodeId);
+      if (
+        opts.getState().canvasId !== canvasId ||
+        task?.canvasId !== canvasId ||
+        (task.phase !== 'deleted' && task.phase !== 'blocked')
+      )
         return;
-      const ids = interrupted.get(canvasId);
-      if (!ids?.has(nodeId)) return;
       const node = opts
         .getState()
         .nodes.find((candidate) => candidate.id === nodeId);
       if (!node) return;
-      ids.delete(nodeId);
-      if (!ids.size) interrupted.delete(canvasId);
       queue.schedule(node);
     },
 
     schedule(node) {
-      if (isExcludedFromPreprocessing(node)) return;
-      if (hasMissingContent(node)) return;
-      if (opts.isBlocked?.(node.id)) return;
       const scheduledState = opts.getState();
       if (!scheduledState.canvasId) return;
       const nodeId = node.id;
-      const task = { canvasId: scheduledState.canvasId };
+      if (!canProcess(node)) {
+        invalidate(nodeId);
+        return;
+      }
+      debouncer.cancel(nodeId);
+      const task: Task = {
+        canvasId: scheduledState.canvasId,
+        phase: opts.isBlocked?.(nodeId) ? 'blocked' : 'queued',
+      };
       tasks.set(nodeId, task);
-      scheduledState.setNodeIngestion(nodeId, {
-        status: 'pending',
-        updatedAt: Date.now(),
-      });
-      debouncer.schedule(nodeId, () => {
-        const state = opts.getState();
-        if (tasks.get(nodeId) !== task) return;
-        if (!state.canvasId || state.canvasId !== task.canvasId) {
-          invalidate(nodeId);
-          return;
-        }
-        // Re-fetch the latest node so we send the most up-to-date content.
-        const latestNode = state.nodes.find((n) => n.id === nodeId);
-        if (!latestNode) {
-          queue.forgetNode(nodeId);
-          return;
-        }
-        if (
-          opts.isBlocked?.(nodeId) ||
-          isExcludedFromPreprocessing(latestNode) ||
-          hasMissingContent(latestNode)
-        ) {
-          invalidate(nodeId);
-          return;
-        }
-        const isCurrent = () =>
-          tasks.get(nodeId) === task &&
-          opts.getState().canvasId === task.canvasId &&
-          opts.getState().nodes.some((candidate) => candidate.id === nodeId) &&
-          !opts.isBlocked?.(nodeId);
-        const pending = preprocessNodeIfNeeded({
-          canvasId: state.canvasId,
-          node: latestNode,
-          setNodeIngestion: (id, info) => {
-            if (isCurrent()) state.setNodeIngestion(id, info);
-          },
-          clearNodeIngestion: (id) => {
-            if (isCurrent()) state.clearNodeIngestion(id);
-          },
-          getChildNodes: (frameId) =>
-            state.nodes.filter((n) => n.parentId === frameId),
-          getNode: (id) =>
-            opts.getState().nodes.find((candidate) => candidate.id === id),
-          patchNodeSilent: (id, patch) => {
-            if (isCurrent()) {
-              state.patchNodeSilent(id, patch);
-            }
-          },
-        }).catch((error: unknown) => {
-          if (isCurrent())
-            state.setNodeIngestion(nodeId, {
-              status: 'error',
-              updatedAt: Date.now(),
-              error: error instanceof Error ? error.message : String(error),
-            });
-        });
-        inflight.add(pending);
-        void pending
-          .finally(() => {
-            inflight.delete(pending);
-            if (tasks.get(nodeId) === task) tasks.delete(nodeId);
-          })
-          .catch(() => undefined);
-      });
+      markPending(nodeId);
+      if (task.phase === 'queued')
+        debouncer.schedule(nodeId, () => start(nodeId, task));
     },
 
     cancelAll() {
-      for (const id of tasks.keys()) invalidate(id);
+      for (const [id, task] of tasks) {
+        if (task.phase !== 'deleted') invalidate(id);
+      }
     },
 
     flushKeepalive() {

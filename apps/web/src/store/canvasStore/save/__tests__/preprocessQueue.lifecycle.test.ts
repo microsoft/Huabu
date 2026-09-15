@@ -65,6 +65,150 @@ afterEach(() => {
 });
 
 describe('preprocessing task lifecycle', () => {
+  it('preserves a protected rename while accepting otherwise current extraction', async () => {
+    const { state, queue, ingestion } = setup();
+    const result = deferred<{
+      success: boolean;
+      content: string;
+      suggestedLabel: string;
+    }>();
+    preprocessNode.mockReturnValueOnce(result.promise);
+    queue.schedule(node);
+    await vi.advanceTimersByTimeAsync(100);
+    state.nodes = [
+      { ...node, data: { ...node.data, label: 'Manual', labelSource: 'user' } },
+    ];
+    result.resolve({
+      success: true,
+      content: 'Extracted body',
+      suggestedLabel: 'Automatic',
+    });
+    await queue.waitForIdle();
+    expect(state.nodes[0].data).toMatchObject({
+      content: 'Extracted body',
+      label: 'Manual',
+      labelSource: 'user',
+    });
+    expect(ingestion[node.id]).toBeUndefined();
+  });
+
+  it('compares an issued input with restored state even when adjacent history inputs match', async () => {
+    const note = { ...node, type: 'note', data: { content: '# A' } };
+    const { state, queue, ingestion } = setup([note]);
+    const old = deferred<{ success: boolean; suggestedLabel: string }>();
+    preprocessNode.mockReturnValueOnce(old.promise);
+    queue.schedule(note);
+    await vi.advanceTimersByTimeAsync(100);
+    // Typing does not issue another request until edit-settle.
+    state.nodes = [{ ...note, data: { content: '# B' } }];
+    const before = state.nodes;
+    state.nodes = [{ ...state.nodes[0], position: { x: 20, y: 0 } }];
+    queue.reconcileHistory(before);
+    old.resolve({ success: true, suggestedLabel: 'A' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(state.patchNodeSilent).not.toHaveBeenCalled();
+    expect(ingestion[node.id]?.status).toBe('pending');
+    await vi.advanceTimersByTimeAsync(100);
+    expect(preprocessNode).toHaveBeenCalledTimes(2);
+    expect(preprocessNode.mock.calls[1][2].snapshot.content).toBe('# B');
+    expect(ingestion[node.id]).toBeUndefined();
+  });
+
+  it.each(['success', 'error'])(
+    'rejects stale %s without history and waits for explicit settle',
+    async (outcome) => {
+      const note = { ...node, type: 'note', data: { content: '# A' } };
+      const { state, queue, ingestion } = setup([note]);
+      const old = deferred<{ success: boolean; suggestedLabel: string }>();
+      preprocessNode.mockReturnValueOnce(old.promise);
+      queue.schedule(note);
+      await vi.advanceTimersByTimeAsync(100);
+      state.nodes = [{ ...note, data: { content: '# B' } }];
+      if (outcome === 'success')
+        old.resolve({ success: true, suggestedLabel: 'A' });
+      else old.reject(new Error('Obsolete failure'));
+      await queue.waitForIdle();
+      expect(state.patchNodeSilent).not.toHaveBeenCalled();
+      expect(ingestion[node.id]).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(preprocessNode).toHaveBeenCalledOnce();
+      queue.schedule(state.nodes[0]);
+      await vi.advanceTimersByTimeAsync(100);
+      expect(preprocessNode).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it.each([false, true])(
+    'retains demand when blocked at schedule or fire time (late=%s)',
+    async (late) => {
+      const { state, queue, blocked, ingestion } = setup();
+      if (!late) blocked.add(node.id);
+      queue.schedule(node);
+      blocked.add(node.id);
+      await vi.advanceTimersByTimeAsync(500);
+      expect(preprocessNode).not.toHaveBeenCalled();
+      state.nodes = [{ ...node, data: { src: 'https://example.com/latest' } }];
+      queue.schedule(state.nodes[0]);
+      queue.resumeRestored(state.canvasId, node.id);
+      await vi.advanceTimersByTimeAsync(100);
+      expect(preprocessNode).not.toHaveBeenCalled();
+      expect(ingestion[node.id]?.status).toBe('pending');
+      blocked.delete(node.id);
+      queue.resumeRestored(state.canvasId, node.id);
+      queue.resumeRestored(state.canvasId, node.id);
+      await vi.advanceTimersByTimeAsync(100);
+      expect(preprocessNode).toHaveBeenCalledOnce();
+      expect(preprocessNode.mock.calls[0][2].snapshot.src).toBe(
+        'https://example.com/latest',
+      );
+      expect(ingestion[node.id]).toBeUndefined();
+    },
+  );
+
+  it('keeps blocked demand across delete/restore but never sends it while absent', async () => {
+    const { state, queue, blocked } = setup();
+    blocked.add(node.id);
+    queue.schedule(node);
+    state.nodes = [];
+    queue.forgetNode(node.id);
+    blocked.delete(node.id);
+    queue.resumeRestored(state.canvasId, node.id);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(preprocessNode).not.toHaveBeenCalled();
+    state.nodes = [node];
+    queue.reconcileHistory([]);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(preprocessNode).toHaveBeenCalledOnce();
+  });
+
+  it('cancels blocked demand on Canvas switch and ignores its late persistence callback', async () => {
+    const { state, queue, blocked, ingestion } = setup();
+    blocked.add(node.id);
+    queue.schedule(node);
+    queue.cancelAll();
+    expect(ingestion[node.id]).toBeUndefined();
+    state.canvasId = 'canvas-b';
+    blocked.delete(node.id);
+    queue.resumeRestored('canvas-a', node.id);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(preprocessNode).not.toHaveBeenCalled();
+  });
+
+  it('lets an accepted canonical src/body/label update finish its own ingestion state', async () => {
+    const { state, queue, ingestion } = setup();
+    preprocessNode.mockResolvedValueOnce({
+      success: true,
+      src: 'artifact-canonical',
+      content: 'Canonical body',
+      suggestedLabel: 'Canonical label',
+    });
+    queue.schedule(node);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(state.nodes[0].data.src).toBe('artifact-canonical');
+    expect(state.nodes[0].data.label).toBe('Canonical label');
+    expect(ingestion[node.id]).toBeUndefined();
+  });
+
   it.each([false, true])(
     'preserves unrelated and geometry-only undo (issued=%s)',
     async (issued) => {

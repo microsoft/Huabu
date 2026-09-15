@@ -207,6 +207,39 @@ async function tick() {
 }
 
 describe('undo/redo persistence ordering', () => {
+  it('retains a new edit-settle during restored content PUT even without interrupted work', async () => {
+    await deleted();
+    const gate = (contentGate = deferred());
+    state().undo();
+    const draining = drainPendingSaves();
+    await tick();
+    expect(calls).toContain('content:start');
+    useCanvasStore.setState({
+      nodes: [
+        {
+          ...state().nodes[0],
+          data: {
+            ...state().nodes[0].data,
+            content: '# Edited during restore',
+          },
+        },
+      ],
+    });
+    settleNodePreprocess(note.id);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(api.preprocessNode).not.toHaveBeenCalled();
+    gate.resolve();
+    await draining;
+    await drainPendingSaves();
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(api.preprocessNode).toHaveBeenCalledOnce();
+    expect(api.preprocessNode.mock.calls[0][2].snapshot.content).toBe(
+      '# Edited during restore',
+    );
+    expect(body).toBe('# Edited during restore');
+    expect(state().ingestionByNodeId[note.id]).toBeUndefined();
+  });
+
   it.each([false, true])(
     'preserves preprocessing across an unrelated history change (issued=%s)',
     async (issued) => {
