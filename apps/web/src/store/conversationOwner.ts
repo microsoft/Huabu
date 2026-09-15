@@ -2,9 +2,10 @@
 // Licensed under the MIT license.
 
 import { getQuestionNodeStatus } from '@huabu/shared';
+import { projectAgentNodeEditableData } from '@huabu/shared/canvas-engine';
 
-import { postCanvasExecute } from '@/api/canvas';
-import useCanvasStore from '@/store/canvasStore';
+import { acknowledgeAgentNodeResult, postCanvasExecute } from '@/api/canvas';
+import useCanvasStore, { awaitQuestionCreation } from '@/store/canvasStore';
 
 import type {
   AgentBinding,
@@ -23,6 +24,8 @@ export type ConversationOwnerSource = {
   agentMode?: 'ask' | 'operate';
   agentBinding?: AgentBinding;
   agentBindingPolicy?: 'selectable' | 'fixed';
+  bindingState?: 'editing' | 'bound';
+  invocationToken?: string;
   content?: unknown;
   hasAuthoredContent?: boolean;
 };
@@ -127,13 +130,13 @@ export function resolveConversationAgentBinding(
   return source?.agentBinding ?? cachedBinding;
 }
 
-/** Keep client writes to fixed Agent Nodes limited to presentation state. */
+/** Lifecycle and association are never ordinary browser edits. */
 export function filterClientOwnedQuestionPatch(
-  source: ConversationOwnerSource | undefined,
+  _source: ConversationOwnerSource | undefined,
   patch: Record<string, unknown>,
 ): Record<string, unknown> | null {
-  if (source?.agentBindingPolicy !== 'fixed') return patch;
-  return typeof patch.viewed === 'boolean' ? { viewed: patch.viewed } : null;
+  const editable = projectAgentNodeEditableData(patch);
+  return Object.keys(editable).length > 0 ? editable : null;
 }
 
 export async function validateConversationView(
@@ -201,22 +204,13 @@ async function applyConversationOwnerPatch(
   patch: Record<string, unknown>,
 ): Promise<void> {
   const owner = view.conversationOwner;
-  const active = useCanvasStore.getState();
-  const ownerIsActive =
-    active.canvasId === owner.canvasId &&
-    active.nodes.some((node) => node.id === owner.nodeId);
-  if (ownerIsActive) {
-    // Reflect lifecycle changes immediately, but still persist them through
-    // the canonical executor below. A local-only status disappears on reload;
-    // load-time code cannot safely infer success from conversation existence.
-    active.patchNodeSilent(owner.nodeId, patch);
+  await awaitQuestionCreation(owner.canvasId, owner.nodeId);
+  const editable = filterClientOwnedQuestionPatch(undefined, patch);
+  if (!editable || Object.keys(editable).length !== Object.keys(patch).length) {
+    throw new Error('Agent Node lifecycle and association are server-owned');
   }
-
   const wirePatch = Object.fromEntries(
-    Object.entries(patch).map(([key, value]) => [
-      key,
-      value === undefined ? '' : value,
-    ]),
+    Object.entries(editable).filter(([, value]) => value !== undefined),
   );
   const response = await postCanvasExecute(owner.canvasId, {
     commands: [
@@ -243,12 +237,80 @@ async function applyConversationOwnerPatch(
         typeof current.applyDeltasFromAgent
       >[2],
     );
-  } else if (ownerIsActive && current.canvasId === owner.canvasId) {
-    // A Canvas-sync broadcast may have advanced the version before this
-    // response returned. The optimistic patch is already visible; the server
-    // command above is the durable source of truth.
-    current.patchNodeSilent(owner.nodeId, patch);
   }
+}
+
+const draftSaves = new Map<string, Promise<void>>();
+
+function draftKey(view: AgentConversationView): string {
+  return `${view.conversationOwner.canvasId}\0${view.conversationOwner.nodeId}`;
+}
+
+export function saveConversationDraft(
+  view: AgentConversationView,
+  patch: {
+    agentBinding: AgentBinding;
+    agentMode: 'ask' | 'operate';
+    agentIcon?: unknown;
+  },
+): Promise<void> {
+  const save = patchConversationOwnerNode(view, patch).then(async () => {
+    await refreshConversationPresentation(view);
+    if (draftSaves.get(draftKey(view)) !== save) return;
+    const state = useCanvasStore.getState();
+    const source = resolveConversationOwnerSource(
+      state.canvasId,
+      state.nodes,
+      state.worldReferences,
+      view,
+    );
+    const actual = source?.agentBinding;
+    if (!source && state.canvasId !== view.conversationOwner.canvasId) return;
+    if (
+      !actual ||
+      actual.kind !== patch.agentBinding.kind ||
+      (actual.kind === 'external' &&
+        patch.agentBinding.kind === 'external' &&
+        actual.profileId !== patch.agentBinding.profileId) ||
+      source?.agentMode !== patch.agentMode
+    ) {
+      throw new ConversationIntegrityError(
+        'Agent selection changed before the draft was acknowledged',
+      );
+    }
+  });
+  draftSaves.set(draftKey(view), save);
+  // Keep a rejected save available to the send guard until an explicit retry.
+  void save.catch(() => undefined);
+  return save;
+}
+
+export async function awaitConversationDraft(
+  view: AgentConversationView,
+): Promise<void> {
+  await awaitQuestionCreation(
+    view.conversationOwner.canvasId,
+    view.conversationOwner.nodeId,
+  );
+  await draftSaves.get(draftKey(view));
+}
+
+export async function acknowledgeConversationResult(
+  view: AgentConversationView,
+  source: ConversationOwnerSource | undefined,
+): Promise<void> {
+  if (
+    !source ||
+    source.viewed ||
+    (source.status !== 'done' && source.status !== 'error')
+  )
+    return;
+  await acknowledgeAgentNodeResult(
+    view.conversationOwner.canvasId,
+    view.conversationOwner.nodeId,
+    { invocationToken: source.invocationToken ?? null },
+  );
+  await refreshConversationPresentation(view);
 }
 
 export function patchConversationOwnerNode(

@@ -97,6 +97,7 @@ vi.mock('./conversation/prompt/build-prompt.js', () => ({
   ]),
 }));
 
+import { agenetes } from './agenetes/drivers.js';
 import { runAgent, syncDeploymentSystemPrompt } from './agent.service.js';
 
 import type { BuiltinHandle } from './agenetes/drivers.js';
@@ -141,6 +142,102 @@ beforeEach(() => {
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 describe('runAgent output delta', () => {
+  it.each(['Job', 'Deployment'] as const)(
+    'awaits the %s binding confirmation before controls or run',
+    async (workloadType) => {
+      const order: string[] = [];
+      let release!: () => void;
+      const ready = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let entered!: () => void;
+      const enteredConfirmation = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const control = vi.fn(async () => {
+        order.push('control');
+        return { ok: true };
+      });
+      const run = vi.fn(() => {
+        order.push('run');
+        return (async function* () {
+          yield* [];
+          return [];
+        })();
+      });
+      const create = vi.spyOn(agenetes, 'create').mockImplementation(() => {
+        order.push('create');
+        return { control, run } as unknown as ReturnType<
+          typeof agenetes.create
+        >;
+      });
+      try {
+        const pending = drain(
+          runAgent({
+            scope: 'ask',
+            context: priorContext([]),
+            threadId: `binding-seam-${workloadType}`,
+            workloadType,
+            modelId: 'chosen-model',
+            onExecutionCreated: async () => {
+              order.push('confirm');
+              entered();
+              await ready;
+              order.push('bound');
+            },
+          }),
+        );
+        await enteredConfirmation;
+        expect(order).toEqual(['create', 'confirm']);
+        expect(control).not.toHaveBeenCalled();
+        expect(run).not.toHaveBeenCalled();
+        release();
+        await pending;
+        expect(order).toEqual(
+          workloadType === 'Job'
+            ? ['create', 'confirm', 'bound', 'run']
+            : ['create', 'confirm', 'bound', 'control', 'run'],
+        );
+      } finally {
+        create.mockRestore();
+      }
+    },
+  );
+
+  it('does not dispatch when cancellation arrives during binding confirmation', async () => {
+    const controller = new AbortController();
+    const onTurnStarted = vi.fn();
+    await drain(
+      runAgent({
+        scope: 'ask',
+        context: priorContext([]),
+        signal: controller.signal,
+        onTurnStarted,
+        onExecutionCreated: async () => {
+          controller.abort();
+        },
+      }),
+    );
+    expect(onTurnStarted).not.toHaveBeenCalled();
+  });
+
+  it('surfaces binding projection failure before prompt dispatch', async () => {
+    const onTurnStarted = vi.fn();
+    await expect(
+      drain(
+        runAgent({
+          scope: 'ask',
+          context: priorContext([]),
+          onTurnStarted,
+          onExecutionCreated: async () => {
+            throw new Error('Bound write failed');
+          },
+        }),
+      ),
+    ).rejects.toThrow('Bound write failed');
+    expect(onTurnStarted).not.toHaveBeenCalled();
+  });
+
   it('with an envelope: returns only the output delta, excluding the rendered user message', async () => {
     const prior = [
       { role: 'user', content: 'earlier question', timestamp: 0 },

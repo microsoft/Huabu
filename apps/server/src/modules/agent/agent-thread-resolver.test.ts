@@ -56,6 +56,8 @@ describe('AgentThreadResolver', () => {
       canvasId: 'canvas-a',
       nodeId: 'node-agent',
       threadId: 'thread-a',
+      agentBinding: FIXED_NODE.data.agentBinding,
+      launchOverrides: FIXED_NODE.data.agentLaunchOverrides,
     });
     await expect(
       createResolver([FIXED_NODE], 'Fixed prompt').resolveAgentNode(
@@ -66,6 +68,8 @@ describe('AgentThreadResolver', () => {
       canvasId: 'canvas-a',
       nodeId: 'node-agent',
       threadId: 'thread-a',
+      agentBinding: FIXED_NODE.data.agentBinding,
+      launchOverrides: FIXED_NODE.data.agentLaunchOverrides,
     });
   });
 

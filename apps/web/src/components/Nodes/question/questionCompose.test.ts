@@ -1,7 +1,18 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const saveDraft = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+const associateNode = vi.hoisted(() => vi.fn());
+vi.mock('@/api/canvas', async (importOriginal) => ({
+  ...(await importOriginal<typeof CanvasApi>()),
+  associateAgentNode: associateNode,
+}));
+vi.mock('@/store/conversationOwner', async (importOriginal) => ({
+  ...(await importOriginal<typeof ConversationOwner>()),
+  saveConversationDraft: saveDraft,
+}));
 
 import useCanvasStore from '@/store/canvasStore';
 import {
@@ -19,7 +30,11 @@ import {
 import {
   enterQuestionCompose,
   enterQuestionConversation,
+  ensureQuestionThread,
 } from './questionCompose';
+
+import type * as CanvasApi from '@/api/canvas';
+import type * as ConversationOwner from '@/store/conversationOwner';
 
 const view = {
   presentationAnchor: { canvasId: 'canvas-1', nodeId: 'question-1' },
@@ -31,6 +46,8 @@ const view = {
 };
 
 beforeEach(() => {
+  saveDraft.mockClear();
+  associateNode.mockReset();
   useCanvasStore.getState()._setStateNoAutosave({
     canvasId: 'canvas-1',
     nodes: [],
@@ -49,6 +66,62 @@ beforeEach(() => {
 });
 
 describe('Question conversation presentation', () => {
+  it('keeps legacy compose by awaiting a server-minted identity', async () => {
+    useCanvasStore.getState()._setStateNoAutosave({
+      version: 1,
+      nodes: [
+        {
+          id: 'question-1',
+          type: 'question',
+          position: { x: 0, y: 0 },
+          data: { content: '' },
+        },
+      ],
+    });
+    associateNode.mockResolvedValue({
+      fromVersion: 1,
+      toVersion: 2,
+      node: {
+        id: 'question-1',
+        type: 'question',
+        position: { x: 0, y: 0 },
+        data: { threadId: 'thread-legacy', bindingState: 'editing' },
+      },
+    });
+    expect(await ensureQuestionThread('canvas-1', 'question-1')).toBe(
+      'thread-legacy',
+    );
+    expect(associateNode).toHaveBeenCalledWith('canvas-1', 'question-1', {
+      kind: 'initialize',
+    });
+    expect(useCanvasStore.getState().nodes[0].data).toMatchObject({
+      threadId: 'thread-legacy',
+      bindingState: 'editing',
+    });
+    expect(await ensureQuestionThread('canvas-1', 'question-1')).toBe(
+      'thread-legacy',
+    );
+    expect(associateNode).toHaveBeenCalledOnce();
+  });
+
+  it('does not invent an identity when the association is rejected', async () => {
+    useCanvasStore.getState()._setStateNoAutosave({
+      nodes: [
+        {
+          id: 'question-1',
+          type: 'question',
+          position: { x: 0, y: 0 },
+          data: {},
+        },
+      ],
+    });
+    associateNode.mockRejectedValue(new Error('Identity is missing'));
+    await expect(
+      ensureQuestionThread('canvas-1', 'question-1'),
+    ).rejects.toThrow('Identity is missing');
+    expect(useCanvasStore.getState().nodes[0].data.threadId).toBeUndefined();
+  });
+
   it('opens an authored Question as a workspace node tab', () => {
     enterQuestionConversation(view, undefined, 'canvas-1', 'bottom');
 
@@ -108,5 +181,10 @@ describe('Question conversation presentation', () => {
     expect(selectThreadBinding(useChatStore.getState(), 'thread-1')).toEqual(
       binding,
     );
+    expect(saveDraft).toHaveBeenCalledWith(view, {
+      agentBinding: binding,
+      agentMode: 'ask',
+      agentIcon: expect.objectContaining({ shape: expect.any(String) }),
+    });
   });
 });

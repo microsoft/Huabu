@@ -27,6 +27,9 @@ import {
 } from '@huabu/shared';
 import {
   COMMAND_META,
+  preserveAgentNodeOwnedData,
+  projectAgentNodeEditableData,
+  stripTransientNodeFields,
   applyDeltas,
   applySharedPostEffectsFromWriteResult,
   executeCanvasCommands,
@@ -85,12 +88,16 @@ import {
 } from '@/handler/snap/snapSession';
 import { i18n } from '@/i18n';
 
-import { canvasHistoryManager } from './canvasHistoryManager';
+import {
+  canvasHistoryManager,
+  preserveLiveQuestionData,
+} from './canvasHistoryManager';
 import {
   ApiError,
   getCanvas,
   getWorldReferences,
   postCanvasExecute,
+  associateAgentNode,
   putCanvas,
 } from '../api';
 import { agentApi } from '../api/agent';
@@ -408,7 +415,10 @@ export function dismissVersionConflictToast(): void {
  */
 function stripNodeContentForStructurePut(nodes: readonly Node[]): Node[] {
   return nodes.map((node) => {
-    const data = node.data;
+    const data =
+      node.type === 'question'
+        ? projectAgentNodeEditableData(node.data)
+        : node.data;
     if (!data) return node;
     let mutated = false;
     const slim: Record<string, unknown> = {};
@@ -419,7 +429,7 @@ function stripNodeContentForStructurePut(nodes: readonly Node[]): Node[] {
       }
       slim[k] = v;
     }
-    return mutated ? { ...node, data: slim } : node;
+    return mutated || data !== node.data ? { ...node, data: slim } : node;
   });
 }
 
@@ -907,6 +917,7 @@ type RFState = {
       contentEditedNodeIds: string[];
       deferredFitFrameIds: string[];
     },
+    agentNodeProjection?: boolean,
   ) => string[];
   /**
    * Ids of nodes with un-persisted local content edits (pending debounced
@@ -1274,6 +1285,120 @@ function makeBuildSelectedDetail(
   return build;
 }
 
+const questionCreations = new Map<
+  string,
+  { promise: Promise<void>; toVersion?: number }
+>();
+const questionForks = new Map<string, Promise<unknown>>();
+
+export async function awaitQuestionCreation(
+  canvasId: string,
+  nodeId: string,
+): Promise<void> {
+  await questionCreations.get(`${canvasId}\0${nodeId}`)?.promise;
+}
+
+function scheduleAcknowledgedNodePreprocessing(node: Node): void {
+  const { canvasId } = useCanvasStore.getState();
+  const creation = questionCreations.get(`${canvasId}\0${node.id}`)?.promise;
+  if (!creation) {
+    preprocessQueue.schedule(node);
+    return;
+  }
+  void creation.then(
+    () => {
+      const current = useCanvasStore.getState();
+      if (current.canvasId !== canvasId) return;
+      const live = current.nodes.find((candidate) => candidate.id === node.id);
+      if (live) preprocessQueue.schedule(live);
+    },
+    () => {},
+  );
+}
+
+function rollbackFailedQuestions(canvasId: string, nodes: Node[]): void {
+  const failedIds = new Set(nodes.map((node) => node.id));
+  canvasHistoryManager.discardNodes(canvasId, failedIds);
+  const current = useCanvasStore.getState();
+  if (current.canvasId !== canvasId) return;
+  for (const id of failedIds) nodeContentQueue.forgetNode(id);
+  useCanvasStore.setState({
+    nodes: current.nodes.filter((node) => !failedIds.has(node.id)),
+    edges: current.edges.filter(
+      (edge) => !failedIds.has(edge.source) && !failedIds.has(edge.target),
+    ),
+  });
+  usePreviewWorkspaceStore
+    .getState()
+    .validate(new Set(useCanvasStore.getState().nodes.map((node) => node.id)));
+}
+
+/** Reinsertion must establish its identity before ordinary autosave can omit it. */
+function restoreQuestionAssociations(
+  canvasId: string,
+  previous: Node[],
+  restored: Node[],
+): void {
+  const previousIds = new Set(previous.map((node) => node.id));
+  for (const node of restored) {
+    if (node.type !== 'question' || previousIds.has(node.id)) continue;
+    const creation = canvasHistoryManager
+      .waitForDeletion(node.id)
+      .then(async () => {
+        const response = await associateAgentNode(canvasId, node.id, {
+          kind: 'restore',
+          node: {
+            ...stripTransientNodeFields(node),
+            type: 'question',
+            data: projectAgentNodeEditableData(node.data),
+          },
+          threadId:
+            typeof node.data.threadId === 'string'
+              ? node.data.threadId
+              : undefined,
+          requireBinding: node.data.bindingState === 'bound',
+        });
+        const pending = questionCreations.get(`${canvasId}\0${node.id}`);
+        if (pending?.promise === creation)
+          pending.toVersion = response.toVersion;
+        const current = useCanvasStore.getState();
+        if (current.canvasId !== canvasId) return;
+        const confirmed = response.node as Node;
+        current._setStateNoAutosave({
+          nodes: current.nodes.map((live) =>
+            live.id === node.id && current.version <= response.toVersion
+              ? {
+                  ...live,
+                  data: {
+                    ...preserveAgentNodeOwnedData(live.data, confirmed.data),
+                    agentBinding:
+                      confirmed.data.agentBinding ?? live.data.agentBinding,
+                  },
+                }
+              : live,
+          ),
+          ...(current.version === response.fromVersion
+            ? { version: response.toVersion }
+            : {}),
+        });
+        const live = useCanvasStore
+          .getState()
+          .nodes.find((item) => item.id === node.id);
+        if (live) preprocessQueue.schedule(live);
+      });
+    questionCreations.set(`${canvasId}\0${node.id}`, { promise: creation });
+    void creation.catch((error) => {
+      rollbackFailedQuestions(canvasId, [node]);
+      toast(
+        error instanceof Error
+          ? error.message
+          : 'Failed to restore Agent conversation',
+        { tone: 'danger' },
+      );
+    });
+  }
+}
+
 const useCanvasStore = create<RFState>()(
   autoSaveMiddleware((set, get) => ({
     nodes: [],
@@ -1471,6 +1596,73 @@ const useCanvasStore = create<RFState>()(
       // Only commit if at least one command was applied.
       if (!commandResults.some((r) => r.applied)) return;
 
+      const createdQuestions = writeResult.nodes.filter(
+        (node) =>
+          node.type === 'question' &&
+          !state.nodes.some((old) => old.id === node.id),
+      );
+      if (createdQuestions.length > 0 && resolvedSource === 'ui') {
+        const creation = Promise.all(
+          createdQuestions.map((node) =>
+            questionForks.get(`${state.canvasId}\0${node.data.threadId}`),
+          ),
+        )
+          .then(() =>
+            postCanvasExecute(state.canvasId, {
+              commands,
+              originator: { source: 'ui' },
+            }),
+          )
+          .then((response) => {
+            for (const node of createdQuestions) {
+              const pending = questionCreations.get(
+                `${state.canvasId}\0${node.id}`,
+              );
+              if (pending?.promise === creation)
+                pending.toVersion = response.toVersion;
+            }
+            for (const node of createdQuestions) {
+              const index = commands.findIndex(
+                (command) =>
+                  command.type === 'CREATE_NODES' &&
+                  command.nodes.some((entry) => entry.id === node.id),
+              );
+              if (index < 0 || !response.results[index]?.applied) {
+                throw new Error('Question creation was not acknowledged');
+              }
+            }
+            const current = get();
+            if (
+              current.canvasId === response.canvasId &&
+              current.version === response.fromVersion
+            ) {
+              current.applyDeltasFromAgent(
+                response.deltas as Delta[],
+                response.toVersion,
+                response.pendingEffects as Parameters<
+                  typeof current.applyDeltasFromAgent
+                >[2],
+              );
+            }
+          });
+        for (const node of createdQuestions) {
+          questionCreations.set(`${state.canvasId}\0${node.id}`, {
+            promise: creation,
+          });
+        }
+        void creation.catch((error) => {
+          // A failed fork/creation is not a fresh conversation. Remove only
+          // its optimistic Questions, including copies in later undo entries.
+          rollbackFailedQuestions(state.canvasId, createdQuestions);
+          toast(
+            error instanceof Error
+              ? error.message
+              : 'Failed to create Question',
+            { tone: 'danger' },
+          );
+        });
+      }
+
       // Guard: verify that 'caller' snapshot commands were preceded by beginGesture.
       // Skip for agent-originated commands (no UI gesture involved).
       const hasCallerSnapshot = commands.some(
@@ -1521,8 +1713,10 @@ const useCanvasStore = create<RFState>()(
         getNodes: () => get().nodes,
         getEdges: () => get().edges,
         setNodes: (nodes) => set({ nodes }),
-        triggerPreprocessing: preprocessQueue.schedule,
+        triggerPreprocessing: scheduleAcknowledgedNodePreprocessing,
         forgetNodeContent: nodeContentQueue.forgetNode,
+        getPendingCreation: (nodeId) =>
+          questionCreations.get(`${state.canvasId}\0${nodeId}`)?.promise,
         validatePreviewNodes: (liveNodeIds) =>
           usePreviewWorkspaceStore.getState().validate(liveNodeIds),
       });
@@ -1542,7 +1736,12 @@ const useCanvasStore = create<RFState>()(
      *      history because protected reference topology cannot be restored by
      *      the legacy full-state snapshot boundary.
      */
-    applyDeltasFromAgent: (deltas, toVersion, pendingEffects) => {
+    applyDeltasFromAgent: (
+      deltas,
+      toVersion,
+      pendingEffects,
+      agentNodeProjection = false,
+    ) => {
       const reconcileIncomingVersion = (): void => {
         const current = get();
         const reconciled = reconcileCanvasVersion(
@@ -1564,6 +1763,37 @@ const useCanvasStore = create<RFState>()(
           structureScheduler.schedule();
         }
       };
+
+      // A locally removed optimistic Question must not reappear when its
+      // delayed creation arrives over HTTP or SSE. Its tracked DELETE waits
+      // for that same creation, so the server converges to the removal too.
+      const removedQuestionIds = new Set(
+        deltas.flatMap((delta) => {
+          if (delta.type !== 'INSERT_NODE' || delta.node.type !== 'question')
+            return [];
+          const creation = questionCreations.get(
+            `${get().canvasId}\0${delta.node.id}`,
+          );
+          return creation &&
+            (creation.toVersion === undefined ||
+              toVersion <= creation.toVersion) &&
+            !get().nodes.some((node) => node.id === delta.node.id)
+            ? [delta.node.id]
+            : [];
+        }),
+      );
+      deltas = deltas.filter(
+        (delta) =>
+          !(
+            delta.type === 'INSERT_NODE' &&
+            removedQuestionIds.has(delta.node.id)
+          ) &&
+          !(
+            delta.type === 'INSERT_EDGE' &&
+            (removedQuestionIds.has(delta.edge.source) ||
+              removedQuestionIds.has(delta.edge.target))
+          ),
+      );
 
       // Never let an incoming agent write clobber a
       // node the user is mid-editing. Skip REPLACE/DELETE deltas that
@@ -1610,6 +1840,7 @@ const useCanvasStore = create<RFState>()(
                     return [
                       {
                         ...d,
+                        prev: local,
                         next: { ...d.next, data: mergedData },
                       },
                     ];
@@ -1617,6 +1848,20 @@ const useCanvasStore = create<RFState>()(
                 }
                 skippedNodeIds.push(d.next.id);
                 skippedRemoteNodes.push(d.next as unknown as Node);
+                const local = localNodesById.get(d.next.id);
+                if (local?.type === 'question') {
+                  preservedPendingNodeIds.add(d.next.id);
+                  return [
+                    {
+                      ...d,
+                      prev: local,
+                      next: {
+                        ...local,
+                        data: preserveAgentNodeOwnedData(local.data, nextData),
+                      },
+                    },
+                  ];
+                }
                 return [];
               }
               if (d.type === 'DELETE_NODE' && dirty.has(d.node.id)) {
@@ -1659,7 +1904,38 @@ const useCanvasStore = create<RFState>()(
       );
       if (isPortalPinMutation) {
         canvasHistoryManager.clear();
-      } else {
+      } else if (agentNodeProjection) {
+        canvasHistoryManager.rebaseAgentInitialContent(safeDeltas);
+      } else if (
+        safeDeltas.some((delta) => {
+          if (delta.type === 'INSERT_NODE' && delta.node.type === 'question') {
+            const live = prevNodes.find((node) => node.id === delta.node.id);
+            if (!live) return true;
+            return !deepEqual(
+              {
+                ...stripTransientNodeFields(live),
+                data: projectAgentNodeEditableData(live.data),
+              },
+              {
+                ...stripTransientNodeFields(delta.node),
+                data: projectAgentNodeEditableData(delta.node.data ?? {}),
+              },
+            );
+          }
+          if (delta.type !== 'REPLACE_NODE' || delta.next.type !== 'question')
+            return true;
+          return !deepEqual(
+            {
+              ...delta.prev,
+              data: projectAgentNodeEditableData(delta.prev.data ?? {}),
+            },
+            {
+              ...delta.next,
+              data: projectAgentNodeEditableData(delta.next.data ?? {}),
+            },
+          );
+        })
+      ) {
         canvasHistoryManager.takeSnapshot(prevNodes, prevEdges);
       }
 
@@ -1712,7 +1988,7 @@ const useCanvasStore = create<RFState>()(
       // Post-effects must not run for nodes whose delta we skipped — they
       // were not actually mutated locally, so preprocessing / fit them is
       // wrong.
-      const skipped = new Set(skippedNodeIds);
+      const skipped = new Set([...skippedNodeIds, ...removedQuestionIds]);
       runWebPostEffects({
         effects: {
           mutatedNodes:
@@ -1735,8 +2011,10 @@ const useCanvasStore = create<RFState>()(
         getNodes: () => get().nodes,
         getEdges: () => get().edges,
         setNodes: (nodes) => get()._setStateNoAutosave({ nodes }),
-        triggerPreprocessing: preprocessQueue.schedule,
+        triggerPreprocessing: scheduleAcknowledgedNodePreprocessing,
         forgetNodeContent: nodeContentQueue.forgetNode,
+        getPendingCreation: (nodeId) =>
+          questionCreations.get(`${canvasId}\0${nodeId}`)?.promise,
         validatePreviewNodes: (liveNodeIds) =>
           usePreviewWorkspaceStore.getState().validate(liveNodeIds),
       });
@@ -2171,6 +2449,18 @@ const useCanvasStore = create<RFState>()(
       set({ isSaving: true });
       let saveSucceeded = false;
       try {
+        const before = get();
+        const creating = before.nodes.flatMap((node) => {
+          const creation = questionCreations.get(
+            `${before.canvasId}\0${node.id}`,
+          );
+          return creation ? [creation.promise] : [];
+        });
+        // DELETE removes the sidecar, not Canvas topology. Wait even for
+        // locally absent Questions so this PUT follows their delayed create.
+        const deleting = canvasHistoryManager.waitForDeletions(before.canvasId);
+        if (deleting) creating.push(deleting);
+        if (creating.length > 0) await Promise.all(creating);
         const { nodes, edges, version, canvasId, canvasTitle } = get();
         // Strip every per-node content / label / src / summary / etc.
         // field from the body. Those live in `nodes/<safe(label)>.md`
@@ -3811,7 +4101,10 @@ const useCanvasStore = create<RFState>()(
         const hasConversation =
           isQuestion &&
           !!threadId &&
-          (status === 'done' || status === 'error' || status === 'running');
+          (data.bindingState === 'bound' ||
+            status === 'done' ||
+            status === 'error' ||
+            status === 'running');
         if (hasConversation) {
           const dstThreadId = createId('thread');
           forkTasks.push({ srcThreadId: threadId, dstThreadId });
@@ -3820,8 +4113,11 @@ const useCanvasStore = create<RFState>()(
             data: {
               ...data,
               threadId: dstThreadId,
-              status: 'done',
+              status: undefined,
               errorMessage: undefined,
+              bindingState: undefined,
+              invocationToken: undefined,
+              viewed: undefined,
               __forkConversation: true,
             },
           });
@@ -3857,25 +4153,23 @@ const useCanvasStore = create<RFState>()(
           set({ pendingForkThreadIds: next });
         };
 
-        void Promise.all(
-          forkTasks.map((t) =>
-            agentApi
-              .forkThread(
-                t.srcThreadId,
-                t.dstThreadId,
-                sourceCanvasId,
-                dstCanvasId,
-              )
-              .catch((err) => {
-                console.warn(
-                  '[paste] Failed to fork question conversation',
-                  err,
-                );
-                toast('Failed to copy a conversation', { tone: 'danger' });
-              })
-              .finally(() => clearPending(t.dstThreadId)),
-          ),
-        );
+        for (const t of forkTasks) {
+          const fork = agentApi
+            .forkThread(
+              t.srcThreadId,
+              t.dstThreadId,
+              sourceCanvasId,
+              dstCanvasId,
+            )
+            .catch((err) => {
+              console.warn('[paste] Failed to fork question conversation', err);
+              toast('Failed to copy a conversation', { tone: 'danger' });
+              throw err;
+            })
+            .finally(() => clearPending(t.dstThreadId));
+          questionForks.set(`${dstCanvasId}\0${t.dstThreadId}`, fork);
+          void fork.catch(() => undefined);
+        }
       };
 
       // Same-canvas pastes leave artifact keys as-is (the artifact is
@@ -3922,8 +4216,8 @@ const useCanvasStore = create<RFState>()(
       // Fast path: nothing to clone — preserve the prior synchronous
       // behaviour so simple intra-canvas pastes feel instant.
       if (!needsClone || !srcCanvasId) {
-        dispatch(clipboardNodes);
         runForks();
+        dispatch(clipboardNodes);
         return;
       }
 
@@ -4010,18 +4304,29 @@ const useCanvasStore = create<RFState>()(
         // for the user to switch Spaces — dropping the paste beats
         // landing it on the wrong canvas.
         if (get().canvasId !== dstCanvasId) return;
-        dispatch(remapped);
         runForks();
+        dispatch(remapped);
       })();
     },
 
     canUndo: false,
     canRedo: false,
 
-    undo: () => {
+    undo: async () => {
       const { nodes, edges, canvasId } = get();
       const snapshot = canvasHistoryManager.undo(nodes, edges);
       if (!snapshot) return;
+      if (
+        snapshot.nodes.some(
+          (node) =>
+            node.type === 'question' &&
+            !nodes.some((live) => live.id === node.id),
+        )
+      ) {
+        await drainPendingSaves();
+        if (get().canvasId !== canvasId) return;
+        snapshot.nodes = preserveLiveQuestionData(snapshot.nodes, get().nodes);
+      }
 
       // Undo swaps in authoritative geometry, so any retained stroke
       // selection / polygon may no longer describe it (e.g. the classic
@@ -4033,6 +4338,7 @@ const useCanvasStore = create<RFState>()(
       useGesturePreviewStore.getState().resetCanvasScopedTransients();
 
       const action: RecentAction = { action: 'canvas_undone' };
+      restoreQuestionAssociations(canvasId, nodes, snapshot.nodes);
       set({
         nodes: snapshot.nodes,
         edges: snapshot.edges,
@@ -4044,19 +4350,32 @@ const useCanvasStore = create<RFState>()(
         nodes,
         snapshot.nodes,
         preprocessQueue.schedule,
+        (nodeId) => questionCreations.get(`${canvasId}\0${nodeId}`)?.promise,
       );
     },
 
-    redo: () => {
+    redo: async () => {
       const { nodes, edges, canvasId } = get();
       const snapshot = canvasHistoryManager.redo(nodes, edges);
       if (!snapshot) return;
+      if (
+        snapshot.nodes.some(
+          (node) =>
+            node.type === 'question' &&
+            !nodes.some((live) => live.id === node.id),
+        )
+      ) {
+        await drainPendingSaves();
+        if (get().canvasId !== canvasId) return;
+        snapshot.nodes = preserveLiveQuestionData(snapshot.nodes, get().nodes);
+      }
 
       // See `undo`: a redo is the same authoritative geometry swap, so
       // discard the floating stroke selection for the same reason.
       useGesturePreviewStore.getState().resetCanvasScopedTransients();
 
       const action: RecentAction = { action: 'canvas_redone' };
+      restoreQuestionAssociations(canvasId, nodes, snapshot.nodes);
       set({
         nodes: snapshot.nodes,
         edges: snapshot.edges,
@@ -4068,6 +4387,7 @@ const useCanvasStore = create<RFState>()(
         nodes,
         snapshot.nodes,
         preprocessQueue.schedule,
+        (nodeId) => questionCreations.get(`${canvasId}\0${nodeId}`)?.promise,
       );
     },
   })),

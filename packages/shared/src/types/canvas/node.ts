@@ -9,6 +9,10 @@
 import type { AccentToken } from './color.js';
 import type { AgentMode } from '../agent/agent.js';
 import type { AgentBinding } from '../api/acp.js';
+import type {
+  AgentNodeBindingState,
+  AgentNodeLaunchOverrides,
+} from '../api/agent-node.js';
 import type { AgentIcon } from '../api/agent-profile.js';
 import type { InteractiveViewDefinitionV1 } from '../api/interactive-view.js';
 
@@ -767,10 +771,7 @@ export type QuestionNodeStatus = 'idle' | 'running' | 'done' | 'error';
 export type AgentBindingPolicy = 'selectable' | 'fixed';
 
 /** Bounded per-thread overrides applied when an external Agent is realized. */
-export interface AgentLaunchOverrides {
-  workingDirPath?: string;
-  additionalInitialPreamble?: string;
-}
+export type AgentLaunchOverrides = AgentNodeLaunchOverrides;
 
 /** Resolve the sparse persisted question status; absent means idle. */
 export function getQuestionNodeStatus(data: unknown): QuestionNodeStatus {
@@ -786,6 +787,10 @@ export function getQuestionNodeStatus(data: unknown): QuestionNodeStatus {
 /** Question node: AI interaction medium embedded on canvas. */
 export interface QuestionNodeData extends BaseNodeData {
   type: 'question';
+  /** Server acknowledgement of a canonical execution record; never demoted. */
+  bindingState?: AgentNodeBindingState;
+  /** Server-owned identity of the current or most recent admitted prompt. */
+  invocationToken?: string;
   /**
    * The user's prompt. Persisted into the markdown sidecar body just
    * like text/note/web bodies (see `TEXT_BEARING_NODE_TYPES`) so a

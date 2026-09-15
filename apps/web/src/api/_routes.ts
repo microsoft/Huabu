@@ -64,6 +64,10 @@ export const routes = {
     `/canvas/${enc(canvasId)}/nodes/${enc(nodeId)}`,
   canvasNodeContent: (canvasId: string, nodeId: string) =>
     `/canvas/${enc(canvasId)}/nodes/${enc(nodeId)}/content`,
+  agentNodeResultViewed: (canvasId: string, nodeId: string) =>
+    `/canvas/${enc(canvasId)}/nodes/${enc(nodeId)}/viewed`,
+  agentNodeAssociation: (canvasId: string, nodeId: string) =>
+    `/canvas/${enc(canvasId)}/nodes/${enc(nodeId)}/association`,
   canvasNodePreprocess: (canvasId: string, nodeId: string) =>
     `/canvas/${enc(canvasId)}/nodes/${enc(nodeId)}/preprocess`,
   canvasRevealNodes: (canvasId: string) =>

@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { executeOnServer } from './canvas-executor.js';
 import { moveCanvasSelection } from './space-move.service.js';
+import { acquireAgentTurn } from '../agent/turn-lease.js';
 import { createCanvas } from '../storage/compatibility/canvas.js';
 import { resetStorageCache, space } from '../storage/index.js';
 import { getStructuredStore } from '../storage/index.js';
@@ -78,6 +79,94 @@ async function seedSource() {
 }
 
 describe('moveCanvasSelection', () => {
+  it('moves an unbound draft without manufacturing an execution record', async () => {
+    createCanvas('source', 'Source');
+    createCanvas('destination', 'Destination');
+    const seeded = await executeOnServer({
+      canvasId: 'source',
+      originator: { source: 'ui' },
+      commands: [
+        {
+          type: 'CREATE_NODES',
+          nodes: [
+            {
+              id: 'node-draft',
+              nodeType: 'question',
+              position: { x: 0, y: 0 },
+              data: {
+                threadId: 'thread-draft',
+                content: 'Draft',
+                agentBinding: { kind: 'internal' },
+              },
+            },
+          ],
+        },
+      ],
+    });
+    const result = await moveCanvasSelection('source', {
+      selectedNodeIds: ['node-draft'],
+      destination: { kind: 'existing', canvasId: 'destination' },
+      createSourcePreview: false,
+      expectedSourceVersion: seeded.toVersion,
+    });
+    const moved = (await space('destination').read())?.state.nodes[0] as {
+      data: Record<string, unknown>;
+    };
+    expect(moved.data).toMatchObject({
+      bindingState: 'editing',
+      threadId: 'thread-draft',
+    });
+    expect(moved.data).not.toHaveProperty('invocationToken');
+    expect(result.movedNodeCount).toBe(1);
+  });
+
+  it('does not wait for turn admission while holding both Canvas locks', async () => {
+    createCanvas('source', 'Source');
+    createCanvas('destination', 'Destination');
+    const seeded = await executeOnServer({
+      canvasId: 'source',
+      originator: { source: 'ui' },
+      commands: [
+        {
+          type: 'CREATE_NODES',
+          nodes: [
+            {
+              id: 'node-busy',
+              nodeType: 'question',
+              position: { x: 0, y: 0 },
+              data: { threadId: 'thread-busy', content: '' },
+            },
+          ],
+        },
+      ],
+    });
+    const release = acquireAgentTurn('thread-busy');
+    expect(release).not.toBeNull();
+    try {
+      await expect(
+        moveCanvasSelection('source', {
+          selectedNodeIds: ['node-busy'],
+          destination: { kind: 'existing', canvasId: 'destination' },
+          createSourcePreview: false,
+          expectedSourceVersion: seeded.toVersion,
+        }),
+      ).rejects.toMatchObject({ code: 'MOVE_AGENT_RUNNING' });
+      const edited = await executeOnServer({
+        canvasId: 'source',
+        originator: { source: 'ui' },
+        commands: [
+          {
+            type: 'SET_NODE_GEOMETRY',
+            items: [{ nodeId: 'node-busy', position: { x: 20, y: 20 } }],
+          },
+        ],
+      });
+      expect(edited.results[0]?.applied).toBe(true);
+    } finally {
+      release?.();
+    }
+  });
+
   it('moves a Frame subtree and reports omitted boundary edges', async () => {
     const seeded = await seedSource();
     const sourceBefore = await space('source').read();

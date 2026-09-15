@@ -2,6 +2,10 @@
 // Licensed under the MIT license.
 
 import { noop, type CommandDefinition } from './types.js';
+import {
+  hasAgentNodeOwnedData,
+  changesAgentNodePreparation,
+} from '../agentNodeOwnership.js';
 
 import type { CanvasCommand } from '../../index.js';
 import type { Node } from '@xyflow/react';
@@ -16,6 +20,19 @@ const mergeNodeData: CommandDefinition<Cmd> = {
 
   handler(cmd, state) {
     if (cmd.patches.length === 0) return noop(state);
+    for (const entry of cmd.patches) {
+      const node = state.nodes.find(
+        (candidate) => candidate.id === entry.nodeId,
+      );
+      if (node?.type === 'question' && hasAgentNodeOwnedData(entry.patch))
+        return noop(state, 'invalid-target');
+      if (
+        node?.type === 'question' &&
+        node.data.bindingState === 'bound' &&
+        changesAgentNodePreparation(node.data, entry.patch)
+      )
+        return noop(state, 'invalid-target');
+    }
 
     const patchMap = new Map(
       cmd.patches.map((p) => [p.nodeId as string, p.patch]),
@@ -46,12 +63,20 @@ const mergeNodeData: CommandDefinition<Cmd> = {
       // 2026-06-17 when an AI accent patch was erasing user-set font
       // sizes). Deep-merging at this single key keeps the predictable
       // shallow-merge contract everywhere else while plugging that
-      // footgun. Pass `style: undefined` (or `null`) to clear the whole
-      // bag explicitly.
+      // footgun. Pass `style: null` to clear the whole bag explicitly.
+      // Question patches omit undefined; other nodes also allow it to clear.
       const mergedData: Record<string, unknown> = {
         ...dataRec,
-        ...patchRec,
+        ...(n.type === 'question'
+          ? Object.fromEntries(
+              Object.entries(patchRec).filter(
+                ([, value]) => value !== undefined,
+              ),
+            )
+          : patchRec),
       };
+      if (n.type === 'question' && patchRec.agentLaunchOverrides === null)
+        delete mergedData.agentLaunchOverrides;
       if ('style' in patchRec) {
         const incomingStyle = patchRec.style;
         if (incomingStyle && typeof incomingStyle === 'object') {
@@ -64,7 +89,7 @@ const mergeNodeData: CommandDefinition<Cmd> = {
             ...(incomingStyle as Record<string, unknown>),
           };
         }
-        // `null` / `undefined` flow through unchanged as a clear-all signal.
+        // `null` is the explicit clear-all signal.
       }
 
       const updated: Node = {

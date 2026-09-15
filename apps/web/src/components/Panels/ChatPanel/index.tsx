@@ -26,6 +26,7 @@ import { PermissionTray } from '@/components/Messages/AIMessage/PermissionCard';
 import { useAcpProfiles } from '@/hooks/useAcpProfiles';
 import { useAcpSessionMeta } from '@/hooks/useAcpSessionMeta';
 import { useAcpSlashCommands } from '@/hooks/useAcpSlashCommands';
+import { useActivelyViewingQuestionNode } from '@/hooks/useActivelyViewingQuestion';
 import { useBuiltinThreadSettings } from '@/hooks/useBuiltinThreadSettings';
 import { ChatSessionProvider, type ChatSession } from '@/hooks/useChatSession';
 import { useInternalSlashCommands } from '@/hooks/useInternalSlashCommands';
@@ -42,6 +43,9 @@ import {
 import { findPendingPermissionRequest } from '@/store/chatTypes';
 import {
   isHeadlessConversation,
+  acknowledgeConversationResult,
+  awaitConversationDraft,
+  saveConversationDraft,
   resolveConversationAgentBinding,
   resolveConversationOwnerSource,
 } from '@/store/conversationOwner';
@@ -150,7 +154,31 @@ export const ChatPanel = ({
     return d.agentBinding?.kind === 'external' ? 'ask' : (d.agentMode ?? 'ask');
   })();
   const viewingQuestionBindingIsFixed =
-    conversationOwnerSource?.agentBindingPolicy === 'fixed';
+    conversationOwnerSource?.agentBindingPolicy === 'fixed' ||
+    conversationOwnerSource?.bindingState === 'bound';
+  const [savingAgentDraft, setSavingAgentDraft] = useState(false);
+  const activelyViewingOwner = useActivelyViewingQuestionNode(
+    activeConversationView?.presentationAnchor.nodeId ?? '',
+  );
+  const observedToken = conversationOwnerSource?.invocationToken;
+  const observedStatus = conversationOwnerSource?.status;
+  const observedViewed = conversationOwnerSource?.viewed;
+  useEffect(() => {
+    if (!activeConversationView || !activelyViewingOwner) return;
+    void acknowledgeConversationResult(activeConversationView, {
+      invocationToken: observedToken,
+      status: observedStatus,
+      viewed: observedViewed,
+    }).catch((error) =>
+      console.error('Failed to acknowledge Agent result', error),
+    );
+  }, [
+    activeConversationView,
+    activelyViewingOwner,
+    observedToken,
+    observedStatus,
+    observedViewed,
+  ]);
   // Bind-time avatar snapshot of the viewing question node, used as the
   // fallback icon in the agent chip when the bound external Profile no
   // longer exists — mirrors how the canvas node preserves its identity.
@@ -275,7 +303,9 @@ export const ChatPanel = ({
     if (headlessConversation) return;
     if (viewingQuestionBindingIsFixed) return;
     if (!isHistoryLoaded) return;
-    if (messages.length > 0) return;
+    // Node-backed selection is never silently rebound after a Profile vanishes.
+    // An Editing node can have failed preparation text, and Bound can be empty.
+    if (activeConversationView || messages.length > 0) return;
     if (!acpProfilesLoaded) return;
     if (agentBinding.kind !== 'external') return;
     const profileExists = acpProfiles.some(
@@ -285,6 +315,7 @@ export const ChatPanel = ({
     setAgentBinding(threadId, { kind: 'internal' }, canvasId || undefined);
   }, [
     isHistoryLoaded,
+    activeConversationView,
     messages.length,
     acpProfilesLoaded,
     agentBinding,
@@ -412,7 +443,9 @@ export const ChatPanel = ({
     provider: llmConfig?.provider,
     defaultModelId: llmConfig?.model,
     enabled: ownerScopeReady && agentBinding.kind !== 'external',
-    threadHasMessages: messages.length > 0,
+    threadHasMessages: activeConversationView
+      ? conversationOwnerSource?.bindingState === 'bound'
+      : messages.length > 0,
   });
 
   // Three-state connection summary for the header badge, derived from
@@ -485,6 +518,8 @@ export const ChatPanel = ({
         selection: { id: MODE_SELECTION_ID, value: modeId },
       });
       try {
+        if (activeConversationView)
+          await awaitConversationDraft(activeConversationView);
         if (!acpControlTarget.binding) return;
         await setAcpSessionMode(threadId, {
           modeId,
@@ -509,6 +544,7 @@ export const ChatPanel = ({
       threadId,
       applyAcpSessionMetaOptimistic,
       acpControlTarget,
+      activeConversationView,
       refreshAcpSessionMeta,
       onCommit,
       t,
@@ -524,6 +560,8 @@ export const ChatPanel = ({
         selection: { id: MODEL_SELECTION_ID, value: modelId },
       });
       try {
+        if (activeConversationView)
+          await awaitConversationDraft(activeConversationView);
         if (!acpControlTarget.binding) return;
         await setAcpSessionModel(threadId, {
           modelId,
@@ -548,6 +586,7 @@ export const ChatPanel = ({
       threadId,
       applyAcpSessionMetaOptimistic,
       acpControlTarget,
+      activeConversationView,
       refreshAcpSessionMeta,
       onCommit,
       t,
@@ -562,6 +601,8 @@ export const ChatPanel = ({
         selection: { id: optionId, value },
       });
       try {
+        if (activeConversationView)
+          await awaitConversationDraft(activeConversationView);
         if (!acpControlTarget.binding) return;
         await setAcpSessionConfigOption(threadId, {
           configOptionId: optionId,
@@ -587,6 +628,7 @@ export const ChatPanel = ({
       threadId,
       applyAcpSessionMetaOptimistic,
       acpControlTarget,
+      activeConversationView,
       refreshAcpSessionMeta,
       onCommit,
       t,
@@ -725,20 +767,51 @@ export const ChatPanel = ({
   const agentSelectorEditable =
     !headlessConversation &&
     !viewingQuestionBindingIsFixed &&
-    !threadHasUserMessage &&
+    (activeConversationView
+      ? conversationOwnerSource?.bindingState !== 'bound'
+      : !threadHasUserMessage) &&
+    !savingAgentDraft &&
     !isLoading;
   const handleSelectAgent = useCallback(
-    (choice: AgentChoice) => {
+    async (choice: AgentChoice) => {
       // Agent binding is immutable once a turn starts (1 thread = 1 binding).
       // The selector is already read-only then; keep this guard as defense in
       // depth in case a stale menu event arrives during the transition.
-      if (isLoading || viewingQuestionBindingIsFixed) return;
+      if (isLoading || savingAgentDraft || viewingQuestionBindingIsFixed)
+        return;
+      if (activeConversationView) {
+        setSavingAgentDraft(true);
+        try {
+          await saveConversationDraft(activeConversationView, {
+            agentBinding: choice.binding,
+            agentMode: choice.mode,
+            agentIcon: snapshotAgentIcon(
+              choice.binding,
+              useAcpProfilesStore.getState().profiles,
+            ),
+          });
+          makeThreadMetadataEphemeral(threadId, { preserveSettings: true });
+        } catch (error) {
+          toast(
+            error instanceof Error
+              ? error.message
+              : 'Failed to save Agent selection',
+            { tone: 'danger' },
+          );
+          return;
+        } finally {
+          setSavingAgentDraft(false);
+        }
+      }
       setAgentBinding(threadId, choice.binding, canvasId || undefined);
       setThreadLastAction(threadId, choice.mode);
       onCommit?.();
     },
     [
       isLoading,
+      savingAgentDraft,
+      activeConversationView,
+      makeThreadMetadataEphemeral,
       onCommit,
       viewingQuestionBindingIsFixed,
       setAgentBinding,
@@ -769,8 +842,6 @@ export const ChatPanel = ({
         data: {
           type: 'question',
           content,
-          status: 'done',
-          viewed: true,
           threadId,
           agentBinding,
           agentIcon: snapshotAgentIcon(

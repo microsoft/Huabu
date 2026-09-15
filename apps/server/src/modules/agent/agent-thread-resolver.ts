@@ -31,6 +31,11 @@ export interface AgentNodeTarget {
   canvasId: string;
   nodeId: CanvasNodeId;
   threadId: string;
+  agentBinding?: AgentBinding;
+  launchOverrides?: AgentLaunchOverrides;
+  agentMode?: 'ask' | 'operate';
+  bindingState?: 'editing' | 'bound';
+  invocationToken?: string;
 }
 
 export interface FixedAgentNodeTarget extends AgentNodeTarget {
@@ -124,7 +129,38 @@ export class AgentThreadResolver {
       canvasId,
       nodeId: node.id as CanvasNodeId,
       threadId,
+      agentBinding: this.parseBinding(node),
+      ...(node.data?.agentLaunchOverrides
+        ? {
+            launchOverrides: parseAgentLaunchOverrides(
+              node.data.agentLaunchOverrides,
+            ),
+          }
+        : {}),
+      ...(node.data?.agentMode === 'ask' || node.data?.agentMode === 'operate'
+        ? { agentMode: node.data.agentMode }
+        : {}),
+      ...(node.data?.bindingState === 'bound' ||
+      node.data?.bindingState === 'editing'
+        ? { bindingState: node.data.bindingState }
+        : {}),
+      ...(typeof node.data?.invocationToken === 'string'
+        ? { invocationToken: node.data.invocationToken }
+        : {}),
     };
+  }
+
+  private parseBinding(node: StoredNode): AgentBinding {
+    const parsed = agentBindingSchema.safeParse(
+      node.data?.agentBinding ?? { kind: 'internal' },
+    );
+    if (!parsed.success) {
+      throw new AgentThreadResolutionError(
+        'invalid_binding',
+        `Agent Node ${node.id} has an invalid binding`,
+      );
+    }
+    return parsed.data;
   }
 
   async resolveFixedAgentNode(
@@ -195,6 +231,16 @@ export class AgentThreadResolver {
       ...(launchOverrides ? { launchOverrides } : {}),
       status: getQuestionNodeStatus(node.data),
       content,
+      ...(node.data?.agentMode === 'ask' || node.data?.agentMode === 'operate'
+        ? { agentMode: node.data.agentMode }
+        : {}),
+      ...(node.data?.bindingState === 'bound' ||
+      node.data?.bindingState === 'editing'
+        ? { bindingState: node.data.bindingState }
+        : {}),
+      ...(typeof node.data?.invocationToken === 'string'
+        ? { invocationToken: node.data.invocationToken }
+        : {}),
     };
   }
 }

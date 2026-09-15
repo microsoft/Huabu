@@ -39,6 +39,8 @@ import {
   EXTERNAL_DRIVER_KIND,
   INTERNAL_DRIVER_KIND,
 } from '../agent/agenetes/drivers.js';
+import { agentNodeBinding } from '../agent/agent-node-binding.js';
+import { agentThreadResolver } from '../agent/agent-thread-resolver.js';
 import { agentThreadService } from '../agent/agent-thread.service.js';
 import { acquireAgentTurn } from '../agent/turn-lease.js';
 import {
@@ -308,11 +310,36 @@ export async function moveCanvasSelection(
             const namespace = canvasAcpNamespace(sourceCanvasId);
             const record = agenetes.record(namespace, threadId);
             if (!record) {
+              const target = await agentThreadResolver.resolveAgentNode(
+                sourceCanvasId,
+                threadId,
+              );
+              if (!target)
+                throw new SpaceMoveError(
+                  'MOVE_AGENT_HISTORY_INVALID',
+                  'Agent Node is missing',
+                );
+              await agentNodeBinding.confirm(target, { alreadyLocked: true });
+              continue;
+            }
+            const target = await agentThreadResolver.resolveAgentNode(
+              sourceCanvasId,
+              threadId,
+            );
+            if (!target)
               throw new SpaceMoveError(
                 'MOVE_AGENT_HISTORY_INVALID',
-                `Agent conversation ${threadId} has no durable record`,
+                'Agent Node is missing',
               );
-            }
+            await agentNodeBinding.confirm(
+              { ...target, bindingState: 'bound' },
+              { required: true, alreadyLocked: true },
+            );
+            const movedNode = hydratedSource.find(
+              (node) => node.data.threadId === threadId,
+            );
+            if (movedNode)
+              movedNode.data = { ...movedNode.data, bindingState: 'bound' };
             threadMoves.push({
               threadId,
               sourceSpec: record.spec,
@@ -347,6 +374,19 @@ export async function moveCanvasSelection(
             commands: plan.commands,
             originator: { source: 'system' },
             publish: false,
+            agentNodeMoveState: new Map(
+              rewrittenNodes
+                .filter((node) => node.type === 'question')
+                .map((node) => {
+                  const destinationId = plan.nodeIdMap.get(node.id);
+                  if (!destinationId)
+                    throw new SpaceMoveError(
+                      'MOVE_AGENT_HISTORY_INVALID',
+                      'Moved Agent Node identity is missing',
+                    );
+                  return [destinationId, node.data] as const;
+                }),
+            ),
           });
           if (
             destinationWrite.results.some((result) => !result.applied) ||

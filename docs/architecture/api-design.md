@@ -1,6 +1,6 @@
 # API Design Spec
 
-> Authoritative · Last updated 2026-05-08
+> Authoritative · Last updated 2026-09-15
 
 How every HTTP / SSE endpoint is defined and consumed across `apps/server`
 and `apps/web`. Deviations require updating this file in the same PR.
@@ -112,6 +112,12 @@ export async function postEcho(body: EchoBody): Promise<EchoResponse> {
 - **Error message**: take from the first zod issue, fall back to a
   fixed string. Never ship `error.format()` — it leaks zod internals.
 
+## Agent Node owner-specific writes
+
+[`agent-node.ts`](../../packages/shared/src/types/api/agent-node.ts) defines the bounded editable node schema, launch overrides, association bodies, result acknowledgements, and internal projection shape. `PUT /api/canvas/:canvasId` accepts editable fields, not a complete replacement read model: omitted fields remain unchanged, Question FSM fields cannot be submitted, and the server composes from current state under the Canvas mutex. The same ownership guard applies to ordinary `MERGE_NODE_DATA`, regardless of the submitted originator. It does not reserve unrelated node types' `status` or thread-reference metadata.
+
+`POST /api/canvas/:canvasId/nodes/:nodeId/association` initializes a legacy Question or validates undo reinsertion; it cannot replace an existing thread association. `POST /api/canvas/:canvasId/nodes/:nodeId/viewed` accepts `{ invocationToken }` and returns `{ acknowledged }`, where false means the observed token is no longer the current terminal result. A null acknowledgement token is the bounded legacy case: it succeeds only for a terminal node whose token is still absent, and cannot acknowledge any newly admitted result. Both use shared schemas and `safeParse`. Trusted FSM projection is an in-process business writer, not an HTTP endpoint or client-controlled originator privilege. Canvas Sync may emit `agentNodeProjection` to keep these server effects out of editable undo.
+
 ## Anti-patterns
 
 | Don't                                               | Do                                              |
@@ -131,3 +137,12 @@ grep -l 'ZodObject\|safeParse' dist/assets/*.js && echo LEAK || echo OK
 ```
 
 `OK` is the only acceptable output.
+
+## Code entry points
+
+| File                                                                    | Responsibility                                                                       |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| [types/api/](../../packages/shared/src/types/api)                       | Canonical wire schemas and inferred types                                            |
+| [agent-node.ts](../../packages/shared/src/types/api/agent-node.ts)      | Bounded Question edit, association, result-acknowledgement, and projection contracts |
+| [canvas.route.ts](../../apps/server/src/modules/canvas/canvas.route.ts) | Runtime input validation and owner-specific Canvas operations                        |
+| [canvas.ts](../../apps/web/src/api/canvas.ts)                           | Type-only web contract imports and Canvas HTTP helpers                               |

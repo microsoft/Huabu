@@ -12,7 +12,7 @@ import useCanvasStore from '@/store/canvasStore';
 import {
   ConversationIntegrityError,
   conversationViewFromWorldReference,
-  patchConversationOwnerNode,
+  acknowledgeConversationResult,
   refreshConversationPresentation,
 } from '@/store/conversationOwner';
 import { openPreviewNode } from '@/store/previewWorkspace/actions';
@@ -79,7 +79,7 @@ export const NodeRefNode = memo(
         !latest.source.viewed
       ) {
         try {
-          await patchConversationOwnerNode(view, { viewed: true });
+          await acknowledgeConversationResult(view, latest.source);
           await refreshConversationPresentation(view);
         } catch (error) {
           console.error(

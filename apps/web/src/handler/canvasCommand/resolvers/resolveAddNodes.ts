@@ -163,7 +163,12 @@ function materializeAddNode(
     node: {
       id: nodeId,
       nodeType: input.nodeType,
-      data: input.data as never,
+      data: (input.nodeType === 'question'
+        ? {
+            ...input.data,
+            threadId: input.data?.threadId ?? createId('thread'),
+          }
+        : input.data) as never,
       position,
       ...(size && { size }),
       ...(parentId && { parentId }),

@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { randomUUID } from 'node:crypto';
+
 import { emptyAcpOverlay } from '@agenetes/acp-driver';
 
 import { AGENT_SSE_EVENTS, agentBindingSchema } from '@huabu/shared';
@@ -8,6 +10,7 @@ import { AGENT_SSE_EVENTS, agentBindingSchema } from '@huabu/shared';
 import { externalAgentRealization } from './acp/external-agent-realization.js';
 import { runAcpAgent } from './acp/service.js';
 import { agenetes, EXTERNAL_DRIVER_KIND } from './agenetes/drivers.js';
+import { agentNodeBinding } from './agent-node-binding.js';
 import { agentNodeLifecycle } from './agent-node-lifecycle.js';
 import {
   agentThreadResolver,
@@ -54,7 +57,11 @@ interface AgentThreadServiceDependencies {
   resolvePersistedSpacePrompt: (
     canvasId: string,
     threadId: string,
-  ) => { realised: boolean; markdown?: string };
+  ) => {
+    realised: boolean;
+    markdown?: string;
+    record?: ReturnType<typeof agenetes.record> | null;
+  };
   collectSpacePrompt: (
     canvasId: string,
     targetAgentNodeId: string,
@@ -70,6 +77,7 @@ interface AgentThreadServiceDependencies {
   runExternal: typeof runAcpAgent;
   runInternal: typeof runAgent;
   closeHandle: (threadId: string) => void;
+  confirmBinding?: typeof agentNodeBinding.confirm;
 }
 
 export function externalBindingFromWorkloadSpec(
@@ -108,20 +116,23 @@ const DEFAULT_DEPENDENCIES: AgentThreadServiceDependencies = {
   },
   resolvePersistedSpacePrompt: (canvasId, threadId) => {
     const record = agenetes.record(canvasAcpNamespace(canvasId), threadId);
-    if (!record) return { realised: false };
+    if (!record) return { realised: false, record: null };
     const markdown = spacePromptFromWorkloadSpec(record.spec.spec);
-    return markdown ? { realised: true, markdown } : { realised: true };
+    return markdown
+      ? { realised: true, markdown, record }
+      : { realised: true, record };
   },
   collectSpacePrompt: resolveSpacePrompt,
   realizeExternal: (options) => externalAgentRealization.realize(options),
   waitForTurnRelease: waitForAgentTurnRelease,
   acquireTurn: acquireAgentTurn,
-  startLifecycle: agentNodeLifecycle.start.bind(agentNodeLifecycle),
-  finishLifecycle: agentNodeLifecycle.done.bind(agentNodeLifecycle),
-  failLifecycle: agentNodeLifecycle.error.bind(agentNodeLifecycle),
+  startLifecycle: (...args) => agentNodeLifecycle.start(...args),
+  finishLifecycle: (...args) => agentNodeLifecycle.done(...args),
+  failLifecycle: (...args) => agentNodeLifecycle.error(...args),
   runExternal: runAcpAgent,
   runInternal: runAgent,
   closeHandle: (threadId) => agenetes.close(threadId),
+  confirmBinding: (...args) => agentNodeBinding.confirm(...args),
 };
 
 export class AgentThreadBusyError extends Error {
@@ -136,7 +147,8 @@ export interface AgentThreadInvocationOptions {
   canvasId?: string;
   content: string;
   mode: AgentMode;
-  envelope: ChatEnvelope;
+  /** Expensive context gathering runs after admission and cancellation tracking. */
+  envelope: ChatEnvelope | (() => Promise<ChatEnvelope>);
   /** Canonical durable submission; ordinary chat callers omit it. */
   submission?: HuabuSubmission;
   requestBinding?: AgentBinding;
@@ -156,11 +168,13 @@ export interface AgentThreadInvocationOptions {
 
 type EffectiveAgentThreadInvocationOptions = Omit<
   AgentThreadInvocationOptions,
-  'signal'
+  'signal' | 'envelope'
 > & {
   signal: AbortSignal;
+  envelope?: ChatEnvelope;
   spacePrompt?: string;
   externalRealization?: RealizedExternalAgentThread;
+  onExecutionCreated?: () => Promise<void>;
 };
 
 export interface AgentThreadInvocation {
@@ -181,6 +195,9 @@ interface ActiveAgentInvocation {
   abortController: AbortController;
   turnStarted: Promise<boolean>;
   resolveTurnStarted: (started: boolean) => void;
+  phase: 'preparing' | 'executing' | 'stopping' | 'settled';
+  outcome?: 'done' | 'error';
+  errorMessage?: string;
 }
 
 function buildAgentSystemPrompt(params: {
@@ -229,6 +246,10 @@ export class AgentThreadService {
         ? { binding: fixedTarget.agentBinding, fixedTarget }
         : null;
     }
+    const target = await this.dependencies.resolveAgentNode(canvasId, threadId);
+    if (target?.agentBinding?.kind === 'external') {
+      return { binding: target.agentBinding, fixedTarget: null };
+    }
     const binding = this.dependencies.resolvePersistedExternalBinding(
       canvasId,
       threadId,
@@ -245,46 +266,6 @@ export class AgentThreadService {
   async invoke(
     options: AgentThreadInvocationOptions,
   ): Promise<AgentThreadInvocation> {
-    const fixedTarget =
-      options.fixedTarget === undefined
-        ? await this.resolveFixedTarget(options.canvasId, options.threadId)
-        : options.fixedTarget;
-    const agentTarget =
-      options.agentTarget === undefined
-        ? (fixedTarget ??
-          (options.canvasId
-            ? await this.dependencies.resolveAgentNode(
-                options.canvasId,
-                options.threadId,
-              )
-            : null))
-        : options.agentTarget;
-    const persistedExternalBinding =
-      !fixedTarget && options.canvasId
-        ? this.dependencies.resolvePersistedExternalBinding(
-            options.canvasId,
-            options.threadId,
-          )
-        : null;
-    let binding: AgentBinding = fixedTarget?.agentBinding ??
-      persistedExternalBinding ??
-      options.requestBinding ?? { kind: 'internal' };
-    const externalRealization =
-      binding.kind === 'external'
-        ? await this.dependencies.realizeExternal({
-            threadId: options.threadId,
-            canvasId: options.canvasId,
-            requestedBinding:
-              options.requestBinding?.kind === 'external'
-                ? options.requestBinding
-                : undefined,
-            agentTarget,
-            fixedTarget,
-            logger: options.logger,
-          })
-        : undefined;
-    if (externalRealization) binding = externalRealization.binding;
-
     await this.dependencies.waitForTurnRelease(options.threadId);
     const releaseTurn = this.dependencies.acquireTurn(options.threadId);
     if (!releaseTurn) throw new AgentThreadBusyError(options.threadId);
@@ -302,16 +283,150 @@ export class AgentThreadService {
       abortController,
       turnStarted,
       resolveTurnStarted,
+      phase: 'preparing',
     };
     this.activeInvocations.set(options.threadId, active);
 
-    let spacePrompt: string | undefined;
-    try {
-      if (agentTarget && options.canvasId && binding.kind !== 'external') {
-        const persisted = this.dependencies.resolvePersistedSpacePrompt(
-          options.canvasId,
-          options.threadId,
+    const onAbort = () => {
+      if (active.phase !== 'settled' && !active.outcome)
+        active.phase = 'stopping';
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    if (signal.aborted) onAbort();
+    const invocationToken = randomUUID();
+    let agentTarget: AgentNodeTarget | null = null;
+    let fixedTarget: FixedAgentNodeTarget | null = null;
+    let binding: AgentBinding = options.requestBinding ?? { kind: 'internal' };
+    let externalRealization: RealizedExternalAgentThread | undefined;
+    let envelope =
+      typeof options.envelope === 'function' ? undefined : options.envelope;
+    let projected = false;
+    let settled = false;
+    const settle = async (
+      terminal: 'done' | 'error',
+      message?: string,
+    ): Promise<void> => {
+      if (settled) return;
+      settled = true;
+      terminal = active.outcome ?? terminal;
+      message =
+        active.outcome === 'error' ? (active.errorMessage ?? message) : message;
+      active.phase = 'settled';
+      resolveTurnStarted(false);
+      try {
+        if (projected && agentTarget) {
+          if (terminal === 'error') {
+            await this.dependencies.failLifecycle(
+              agentTarget,
+              message ?? 'Internal Error',
+              invocationToken,
+            );
+          } else {
+            await this.dependencies.finishLifecycle(
+              agentTarget,
+              invocationToken,
+            );
+          }
+        }
+      } catch (error) {
+        options.logger.error(
+          { err: error, threadId: options.threadId, outcome: terminal },
+          'Agent Node terminal projection failed',
         );
+        throw error;
+      } finally {
+        signal.removeEventListener('abort', onAbort);
+        if (this.activeInvocations.get(options.threadId) === active) {
+          this.activeInvocations.delete(options.threadId);
+        }
+        releaseTurn();
+      }
+    };
+    let spacePrompt: string | undefined;
+    let persistedSpacePrompt:
+      | ReturnType<
+          AgentThreadServiceDependencies['resolvePersistedSpacePrompt']
+        >
+      | undefined;
+    try {
+      // Resolve only after admission: a queued request must not execute an old draft.
+      agentTarget = options.canvasId
+        ? await this.dependencies.resolveAgentNode(
+            options.canvasId,
+            options.threadId,
+          )
+        : null;
+      fixedTarget = await this.resolveFixedTarget(
+        options.canvasId,
+        options.threadId,
+      );
+      if (agentTarget) {
+        binding =
+          agentTarget.agentBinding ?? fixedTarget?.agentBinding ?? binding;
+        agentNodeBinding.assertRequestedBinding(
+          binding,
+          options.requestBinding,
+        );
+        await this.dependencies.startLifecycle(
+          agentTarget,
+          options.content,
+          invocationToken,
+        );
+        projected = true;
+        if (binding.kind !== 'external') {
+          persistedSpacePrompt = this.dependencies.resolvePersistedSpacePrompt(
+            agentTarget.canvasId,
+            agentTarget.threadId,
+          );
+          const canonical = await this.dependencies.confirmBinding?.(
+            agentTarget,
+            { record: persistedSpacePrompt.record },
+          );
+          if (canonical)
+            agentNodeBinding.assertRequestedBinding(canonical, binding);
+          binding = canonical ?? binding;
+          agentNodeBinding.assertRequestedBinding(
+            binding,
+            options.requestBinding,
+          );
+        }
+      } else if (options.canvasId) {
+        binding =
+          this.dependencies.resolvePersistedExternalBinding(
+            options.canvasId,
+            options.threadId,
+          ) ?? binding;
+      }
+      if (!signal.aborted && typeof options.envelope === 'function') {
+        envelope = await options.envelope();
+      }
+      if (signal.aborted) {
+        await settle('done');
+      } else if (binding.kind === 'external') {
+        externalRealization = await this.dependencies.realizeExternal({
+          threadId: options.threadId,
+          canvasId: options.canvasId,
+          requestedBinding: binding,
+          agentTarget,
+          fixedTarget,
+          logger: options.logger,
+          signal,
+          turnLeaseHeld: true,
+        });
+        binding = externalRealization.binding;
+      }
+      if (
+        !signal.aborted &&
+        agentTarget &&
+        options.canvasId &&
+        binding.kind !== 'external'
+      ) {
+        const persisted =
+          persistedSpacePrompt ??
+          this.dependencies.resolvePersistedSpacePrompt(
+            options.canvasId,
+            options.threadId,
+          );
         if (persisted.realised) {
           spacePrompt = persisted.markdown;
         } else {
@@ -339,50 +454,40 @@ export class AgentThreadService {
           }
         }
       }
-      if (fixedTarget) {
-        await this.dependencies.startLifecycle(fixedTarget, options.content);
-      }
     } catch (error) {
-      resolveTurnStarted(false);
-      if (this.activeInvocations.get(options.threadId) === active) {
-        this.activeInvocations.delete(options.threadId);
+      const cancelled =
+        signal.aborted &&
+        (error === signal.reason ||
+          (error instanceof Error && error.name === 'AbortError'));
+      try {
+        await settle(cancelled ? 'done' : 'error', errorMessage(error));
+      } catch (projectionError) {
+        options.logger.error(
+          { err: projectionError, preparationError: error },
+          'Preparation failed and its terminal projection also failed',
+        );
+        if (cancelled) throw projectionError;
       }
-      releaseTurn();
-      throw error;
+      if (!cancelled) throw error;
     }
 
     const effectiveOptions: EffectiveAgentThreadInvocationOptions = {
       ...options,
+      agentTarget,
+      envelope,
       signal,
       spacePrompt,
       externalRealization,
-    };
-
-    let settled = false;
-    const settle = async (
-      terminal: 'done' | 'error',
-      message?: string,
-    ): Promise<void> => {
-      if (settled) return;
-      settled = true;
-      resolveTurnStarted(false);
-      if (this.activeInvocations.get(options.threadId) === active) {
-        this.activeInvocations.delete(options.threadId);
-      }
-      try {
-        if (fixedTarget) {
-          if (terminal === 'error') {
-            await this.dependencies.failLifecycle(
-              fixedTarget,
-              message ?? 'Internal Error',
-            );
-          } else {
-            await this.dependencies.finishLifecycle(fixedTarget);
+      mode: !agentTarget?.invocationToken
+        ? (agentTarget?.agentMode ?? options.mode)
+        : options.mode,
+      onExecutionCreated: agentTarget
+        ? async () => {
+            await this.dependencies.confirmBinding?.(agentTarget, {
+              required: true,
+            });
           }
-        }
-      } finally {
-        releaseTurn();
-      }
+        : undefined,
     };
 
     return {
@@ -393,8 +498,13 @@ export class AgentThreadService {
         effectiveOptions,
         binding,
         fixedTarget,
-        () => resolveTurnStarted(true),
+        () => {
+          if (!signal.aborted) active.phase = 'executing';
+          resolveTurnStarted(true);
+        },
         settle,
+        active,
+        () => settled,
       ),
       dispose: (error) =>
         settle(
@@ -405,7 +515,9 @@ export class AgentThreadService {
   }
 
   stop(threadId: string): boolean {
-    const controller = this.activeInvocations.get(threadId)?.abortController;
+    const active = this.activeInvocations.get(threadId);
+    if (active?.outcome || active?.phase === 'settled') return false;
+    const controller = active?.abortController;
     if (!controller || controller.signal.aborted) return false;
     controller.abort();
     return true;
@@ -434,12 +546,19 @@ export class AgentThreadService {
     fixedTarget: FixedAgentNodeTarget | null,
     onTurnStarted: () => void,
     settle: (terminal: 'done' | 'error', message?: string) => Promise<void>,
+    active: ActiveAgentInvocation,
+    isSettled: () => boolean,
   ): AsyncGenerator<AgentStreamEvent, void> {
     let runError: unknown;
     let eventError: string | null = null;
     let sawDone = false;
 
     try {
+      if (isSettled()) return;
+      if (options.signal.aborted) {
+        await settle('done');
+        return;
+      }
       const stream = this.createDispatchStream(
         options,
         binding,
@@ -448,18 +567,31 @@ export class AgentThreadService {
       );
       try {
         for await (const event of stream) {
-          if (event.type === AGENT_SSE_EVENTS.Done) sawDone = true;
+          if (event.type === AGENT_SSE_EVENTS.Done) {
+            sawDone = true;
+            active.outcome = 'done';
+          }
           if (event.type === AGENT_SSE_EVENTS.Error) {
             eventError = event.data.error || 'Internal Error';
+            if (!sawDone && !options.signal.aborted) {
+              active.outcome = 'error';
+              active.errorMessage = eventError;
+            }
           }
           yield event;
         }
       } catch (error) {
         runError = error;
+        if (!sawDone && !options.signal.aborted && !active.outcome) {
+          active.outcome = 'error';
+          active.errorMessage = errorMessage(error);
+        }
       }
 
       const failed =
-        !sawDone && !options.signal.aborted && (runError || eventError);
+        !sawDone &&
+        (active.outcome === 'error' ||
+          (!options.signal.aborted && (runError || eventError)));
       await settle(
         failed ? 'error' : 'done',
         runError ? errorMessage(runError) : (eventError ?? undefined),
@@ -467,7 +599,10 @@ export class AgentThreadService {
 
       if (runError) throw runError;
     } finally {
-      await settle('error', 'Invocation stream was not drained');
+      await settle(
+        options.signal.aborted ? 'done' : 'error',
+        'Invocation stream was not drained',
+      );
     }
   }
 
@@ -477,6 +612,7 @@ export class AgentThreadService {
     fixedTarget: FixedAgentNodeTarget | null,
     onTurnStarted: () => void,
   ): AsyncGenerator<AgentStreamEvent, unknown> {
+    if (!options.envelope) throw new Error('Invocation input was not prepared');
     if (binding.kind === 'external') {
       if (!options.externalRealization) {
         throw new Error(
@@ -519,6 +655,7 @@ export class AgentThreadService {
           canvasId: options.canvasId,
           mode: options.mode,
           additionalInitialPreamble:
+            options.agentTarget?.launchOverrides?.additionalInitialPreamble ??
             fixedTarget?.launchOverrides?.additionalInitialPreamble,
           spacePrompt: options.spacePrompt,
         }),
@@ -533,6 +670,7 @@ export class AgentThreadService {
       logger: options.logger,
       debugPrompt: options.debugPrompt,
       onTurnStarted,
+      onExecutionCreated: options.onExecutionCreated,
     });
   }
 }

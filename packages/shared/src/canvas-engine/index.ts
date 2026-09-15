@@ -16,6 +16,15 @@
 
 // ── Executor + runtime types ──────────────────────────────────────────────
 export {
+  AGENT_NODE_OWNED_DATA_KEYS,
+  AGENT_NODE_PREPARATION_KEYS,
+  hasAgentNodeOwnedData,
+  projectAgentNodeEditableData,
+  preserveAgentNodeOwnedData,
+  replayAgentNodeEditableData,
+  changesAgentNodePreparation,
+} from './agentNodeOwnership.js';
+export {
   executeCanvasCommands,
   type ExecutorOutput,
   type ExecutorOptions,

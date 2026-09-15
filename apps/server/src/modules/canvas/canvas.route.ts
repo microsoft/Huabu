@@ -21,11 +21,29 @@ import {
   moveSelectionBodySchema,
   preprocessNodeBodySchema,
   putCanvasBodySchema,
+  canvasEditableNodeDataSchema,
+  acknowledgeAgentNodeResultBodySchema,
+  associateAgentNodeBodySchema,
+  associateAgentNodeParamsSchema,
   putNodeContentBodySchema,
   setPortalNodePinsCommandSchema,
 } from '@huabu/shared';
 import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
+import {
+  preserveAgentNodeOwnedData,
+  projectAgentNodeEditableData,
+  changesAgentNodePreparation,
+} from '@huabu/shared/canvas-engine';
 
+import {
+  associateAgentNode,
+  AgentNodeAssociationError,
+} from './agent-node-association.js';
+import {
+  AgentNodeEditError,
+  guardAgentNodeDraftEditsAlreadyLocked,
+} from './agent-node-edit.js';
+import { acknowledgeAgentNodeResult } from './agent-node-projection.js';
 import {
   CanvasCommandRoutingError,
   executeCanvasCommandsOnHost,
@@ -49,7 +67,9 @@ import {
   resolveWorldReferences,
   WorldReferenceResolutionError,
 } from './world-reference-resolver.js';
+import { withCanvasMutex } from './write-coordinator.js';
 import { MAX_UPLOAD_BYTES } from '../../upload-limits.js';
+import { AgentNodeBindingError } from '../agent/agent-node-binding.js';
 import { ARTIFACT_URL_REGEX } from '../artifact/utils.js';
 import { getPreprocessDispatcher, getProfile } from '../preprocessing/index.js';
 import { stripOfficeparserPreamble } from '../preprocessing/loaders/office-strip.js';
@@ -726,6 +746,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       // existing body but still refreshes the frontmatter.
       const wouldClobber =
         acceptsBody &&
+        nodeType !== 'question' &&
         incomingContent === '' &&
         typeof existing?.content === 'string' &&
         existing.content.length > 0;
@@ -1150,6 +1171,55 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
 
   // --- PUT Canvas ---
 
+  fastify.post(
+    '/:canvasId/nodes/:nodeId/association',
+    async (request, reply) => {
+      const params = associateAgentNodeParamsSchema.safeParse(request.params);
+      const body = associateAgentNodeBodySchema.safeParse(request.body);
+      if (!params.success || !body.success)
+        return reply
+          .code(400)
+          .send({ message: 'Invalid Agent Node association' });
+      try {
+        return reply.send(
+          await associateAgentNode(
+            params.data.canvasId,
+            params.data.nodeId,
+            body.data,
+          ),
+        );
+      } catch (error) {
+        if (
+          error instanceof AgentNodeAssociationError ||
+          error instanceof AgentNodeBindingError
+        )
+          return reply.code(409).send({ message: error.message });
+        throw error;
+      }
+    },
+  );
+
+  fastify.post<{ Params: { canvasId: string; nodeId: string } }>(
+    '/:canvasId/nodes/:nodeId/viewed',
+    async (request, reply) => {
+      const params = associateAgentNodeParamsSchema.safeParse(request.params);
+      const parsed = acknowledgeAgentNodeResultBodySchema.safeParse(
+        request.body,
+      );
+      if (!parsed.success || !params.success)
+        return reply
+          .code(400)
+          .send({ message: 'Invalid result acknowledgement' });
+      return reply.send({
+        acknowledged: await acknowledgeAgentNodeResult(
+          params.data.canvasId,
+          params.data.nodeId,
+          parsed.data.invocationToken,
+        ),
+      });
+    },
+  );
+
   fastify.put<{
     Params: { canvasId: string };
     Body: PutCanvasRequest;
@@ -1168,123 +1238,221 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       [key: string]: unknown;
     };
 
-    const structured = getStructuredStore();
-    const spaces = structured.spaces();
-    const handle = structured.space(canvasId);
-    const existing = await handle.read();
-    const serverVersion = existing?.version ?? 0;
-    if (clientVersion !== serverVersion) {
-      return reply.code(409).send({
-        code: 'CANVAS_VERSION_CONFLICT',
-        message: 'Canvas version mismatch',
-        serverVersion,
-      } satisfies CanvasConflictResponse);
-    }
-
-    try {
-      assertWorldPortalTopologyAllowed(
-        canvasId,
-        (existing?.state.nodes ?? []) as NodeLike[],
-        incomingState.nodes ?? [],
-        isWorldCanvasId(canvasId)
-          ? await readLiveSpaceIds()
-          : new Set<string>(),
-      );
-    } catch (error) {
-      if (error instanceof WorldPortalMutationError) {
-        return reply.code(409).send({ message: error.message });
+    return withCanvasMutex(canvasId, async () => {
+      const structured = getStructuredStore();
+      const spaces = structured.spaces();
+      const handle = structured.space(canvasId);
+      let existing = await handle.read();
+      let serverVersion = existing?.version ?? 0;
+      if (clientVersion !== serverVersion) {
+        return reply.code(409).send({
+          code: 'CANVAS_VERSION_CONFLICT',
+          message: 'Canvas version mismatch',
+          serverVersion,
+        } satisfies CanvasConflictResponse);
       }
-      throw error;
-    }
 
-    const previousTitle = existing?.title ?? null;
-    // The record write below refuses to change the title — addressing is the
-    // rename operation's business. So the title it carries must be the one
-    // rename actually installed, not the one the client asked for: the two
-    // differ whenever the backend reconciles a title against its locator, and
-    // sending the requested title would make the write throw instead of
-    // returning a business result the route can answer with.
-    let nextTitle = title ?? previousTitle;
-    const titleChange =
-      typeof title === 'string' && title !== previousTitle
-        ? { title }
-        : undefined;
-
-    if (existing !== null && titleChange !== undefined) {
-      let renamed;
       try {
-        renamed = await spaces.rename({ canvasId, ...titleChange });
-      } catch (error) {
-        request.log.error(
-          { canvasId, err: toMessage(error) },
-          'Failed to rename canvas directory',
+        assertWorldPortalTopologyAllowed(
+          canvasId,
+          (existing?.state.nodes ?? []) as NodeLike[],
+          incomingState.nodes ?? [],
+          isWorldCanvasId(canvasId)
+            ? await readLiveSpaceIds()
+            : new Set<string>(),
         );
-        return reply.code(500).send({ message: 'Failed to rename canvas' });
-      }
-      if (!renamed.ok) {
-        switch (renamed.reason) {
-          case 'not-found':
-            return reply.code(404).send({ message: 'Canvas not found' });
-          case 'title-conflict':
-            return reply.code(409).send({
-              code: 'CANVAS_TITLE_CONFLICT',
-              message: `Another canvas already uses the title "${renamed.conflictingTitle ?? ''}"`,
-              conflictWith: renamed.conflictingTitle ?? '',
-            } satisfies CanvasConflictResponse);
-          case 'world-forbidden':
-            return reply
-              .code(403)
-              .send({ message: 'World canvas cannot be renamed' });
+      } catch (error) {
+        if (error instanceof WorldPortalMutationError) {
+          return reply.code(409).send({ message: error.message });
         }
-      } else {
-        nextTitle = renamed.record.title;
+        throw error;
       }
-    }
 
-    const timestamp = nowMs();
-    const nextVersion = serverVersion + 1;
+      const previousTitle = existing?.title ?? null;
+      // The record write below refuses to change the title — addressing is the
+      // rename operation's business. So the title it carries must be the one
+      // rename actually installed, not the one the client asked for: the two
+      // differ whenever the backend reconciles a title against its locator, and
+      // sending the requested title would make the write throw instead of
+      // returning a business result the route can answer with.
+      let nextTitle = title ?? previousTitle;
+      const titleChange =
+        typeof title === 'string' && title !== previousTitle
+          ? { title }
+          : undefined;
 
-    const rawState = incomingState;
+      if (existing !== null && titleChange !== undefined) {
+        let renamed;
+        try {
+          renamed = await spaces.rename({ canvasId, ...titleChange });
+        } catch (error) {
+          request.log.error(
+            { canvasId, err: toMessage(error) },
+            'Failed to rename canvas directory',
+          );
+          return reply.code(500).send({ message: 'Failed to rename canvas' });
+        }
+        if (!renamed.ok) {
+          switch (renamed.reason) {
+            case 'not-found':
+              return reply.code(404).send({ message: 'Canvas not found' });
+            case 'title-conflict':
+              return reply.code(409).send({
+                code: 'CANVAS_TITLE_CONFLICT',
+                message: `Another canvas already uses the title "${renamed.conflictingTitle ?? ''}"`,
+                conflictWith: renamed.conflictingTitle ?? '',
+              } satisfies CanvasConflictResponse);
+            case 'world-forbidden':
+              return reply
+                .code(403)
+                .send({ message: 'World canvas cannot be renamed' });
+          }
+        } else {
+          nextTitle = renamed.record.title;
+        }
+      }
 
-    const slimNodes = stripNodesForCanvas(
-      (rawState?.nodes ?? []) as NodeLike[],
-    );
+      const timestamp = nowMs();
 
-    const canvasFile: CanvasFile = {
-      canvasId,
-      title: nextTitle,
-      version: nextVersion,
-      state: {
-        ...rawState,
-        nodes: slimNodes,
-        edges: rawState?.edges ?? [],
-      },
-      createdAt: existing?.createdAt ?? timestamp,
-      updatedAt: timestamp,
-    };
+      const rawState = incomingState;
 
-    const outcome = await handle.write({
-      expectedVersion: serverVersion,
-      nextRecord: canvasFile,
-      nodeMutations: [],
-      allowCreate: existing === null,
-    });
-    if (!outcome.ok) {
-      switch (outcome.reason) {
-        case 'not-found':
+      const currentById = new Map(
+        ((existing?.state.nodes ?? []) as NodeLike[]).map((node) => [
+          node.id,
+          node,
+        ]),
+      );
+      let releaseDrafts: () => void;
+      try {
+        for (const node of rawState.nodes ?? []) {
+          if (currentById.get(node.id)?.type !== 'question') continue;
+          const parsed = canvasEditableNodeDataSchema.safeParse(
+            node.data ?? {},
+          );
+          if (!parsed.success)
+            throw new AgentNodeEditError(
+              'Agent Node lifecycle and association are server-owned',
+            );
+        }
+        releaseDrafts = await guardAgentNodeDraftEditsAlreadyLocked(
+          canvasId,
+          (rawState.nodes ?? []).flatMap((node) => {
+            const current = currentById.get(node.id);
+            return current ? [{ current, patch: node.data ?? {} }] : [];
+          }),
+        );
+      } catch (error) {
+        if (error instanceof AgentNodeEditError) {
+          return reply
+            .code(400)
+            .send({ code: 'INVALID_REQUEST', message: error.message });
+        }
+        if (error instanceof AgentNodeBindingError) {
+          return reply
+            .code(409)
+            .send({ code: error.code, message: error.message });
+        }
+        throw error;
+      }
+      try {
+        // Admission above may have completed a canonical record-to-Bound write.
+        const confirmedCanvas = await handle.read();
+        if (existing !== null && confirmedCanvas === null) {
           return reply.code(404).send({ message: 'Canvas not found' });
-        case 'version-conflict':
-          return reply.code(409).send({
-            code: 'CANVAS_VERSION_CONFLICT',
-            message: 'Canvas version mismatch',
-            serverVersion: outcome.actualVersion,
-          } satisfies CanvasConflictResponse);
-      }
-    }
+        }
+        existing = confirmedCanvas;
+        serverVersion = existing?.version ?? 0;
+        const nextVersion = serverVersion + 1;
+        currentById.clear();
+        for (const node of (existing?.state.nodes ?? []) as NodeLike[])
+          currentById.set(node.id, node);
+        const composedNodes: NodeLike[] = [];
+        for (const node of rawState.nodes ?? []) {
+          const current = currentById.get(node.id ?? '');
+          if (current?.type === 'question') {
+            if (node.type !== undefined && node.type !== 'question') {
+              return reply
+                .code(409)
+                .send({ message: 'Agent Node type cannot change' });
+            }
+            if (
+              current.data?.bindingState === 'bound' &&
+              changesAgentNodePreparation(current.data, node.data ?? {})
+            )
+              return reply.code(409).send({
+                message: 'Agent preparation cannot change after binding',
+              });
+            const composedData = preserveAgentNodeOwnedData(
+              { ...current.data, ...node.data },
+              current.data ?? {},
+            );
+            if (node.data?.agentLaunchOverrides === null)
+              delete composedData.agentLaunchOverrides;
+            composedNodes.push({
+              ...current,
+              ...node,
+              type: current.type,
+              data: composedData,
+            });
+          } else {
+            composedNodes.push({
+              ...current,
+              ...node,
+              data: {
+                ...(node.type === 'question'
+                  ? projectAgentNodeEditableData({
+                      ...current?.data,
+                      ...node.data,
+                    })
+                  : { ...current?.data, ...node.data }),
+                ...(node.type === 'question'
+                  ? { bindingState: 'editing', threadId: createId('thread') }
+                  : {}),
+              },
+            });
+          }
+        }
+        const slimNodes = stripNodesForCanvas(composedNodes);
 
-    return reply.send({
-      canvasId,
-      version: nextVersion,
+        const canvasFile: CanvasFile = {
+          canvasId,
+          title: nextTitle,
+          version: nextVersion,
+          state: {
+            ...rawState,
+            nodes: slimNodes,
+            edges: rawState?.edges ?? [],
+          },
+          createdAt: existing?.createdAt ?? timestamp,
+          updatedAt: timestamp,
+        };
+
+        const outcome = await handle.write({
+          expectedVersion: serverVersion,
+          nextRecord: canvasFile,
+          nodeMutations: [],
+          allowCreate: existing === null,
+        });
+        if (!outcome.ok) {
+          switch (outcome.reason) {
+            case 'not-found':
+              return reply.code(404).send({ message: 'Canvas not found' });
+            case 'version-conflict':
+              return reply.code(409).send({
+                code: 'CANVAS_VERSION_CONFLICT',
+                message: 'Canvas version mismatch',
+                serverVersion: outcome.actualVersion,
+              } satisfies CanvasConflictResponse);
+          }
+        }
+
+        return reply.send({
+          canvasId,
+          version: nextVersion,
+        });
+      } finally {
+        releaseDrafts();
+      }
     });
   });
 
@@ -1398,6 +1566,14 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       if (err instanceof WorldPortalMutationError) {
         return reply.code(409).send({ message: err.message });
       }
+      if (err instanceof AgentNodeBindingError) {
+        return reply.code(409).send({ code: err.code, message: err.message });
+      }
+      if (err instanceof AgentNodeEditError) {
+        return reply
+          .code(400)
+          .send({ code: 'INVALID_REQUEST', message: err.message });
+      }
       if (err instanceof MissingWorldPortalError) {
         return reply
           .code(409)
@@ -1486,6 +1662,9 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       } catch (err) {
         if (err instanceof CanvasNotFoundError) {
           return reply.code(404).send({ message: 'Canvas not found' });
+        }
+        if (err instanceof AgentNodeBindingError) {
+          return reply.code(409).send({ code: err.code, message: err.message });
         }
         request.log.error(
           { canvasId, changeId, err },

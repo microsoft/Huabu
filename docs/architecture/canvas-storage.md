@@ -1,6 +1,6 @@
 # Canvas Storage Architecture
 
-> Last updated: 2026-09-04
+> Last updated: 2026-09-15
 
 ## 1. Overview
 
@@ -194,6 +194,10 @@ A completed Run stores immutable `completion.completedAt` and an optional trimme
 
 ## 4. Portable write seam and application ordering
 
+Agent Node FSM metadata (`bindingState`, `invocationToken`, `status`, `errorMessage`, `viewed`) and association (`threadId`) live in the Space node record, separate from authored Markdown content. On Disk these are node data in `space.json`; SQLite persists them through its existing structured record adapter. `AgentNodeBindingCoordinator` confirms the canonical workload with `agenetes.record()` through the existing Disk/SQLite conversation-store dispatch; application FSM modules use the portable `space(canvasId)` facade and never name `.history/threads.json` or a database table.
+
+Canonical create persists a ThreadRecord before the Canvas projection acknowledges Bound. These are ordered writes, not a cross-store transaction. If the second write fails, the next guarded edit or interaction recognizes the record and completes promotion; no background recovery scan or automatic invocation replay is added. Bound remains monotonic even when the record later goes missing. Existing in-process persistence restoration and crash limitations below are unchanged.
+
 Standalone content PUT and preprocessing persist call
 `updateNode(SpaceNodes, ...)`. The Canvas-domain promise-chain mutex remains
 per Space and stays held across the repository's asynchronous read and CAS put.
@@ -219,6 +223,8 @@ The mutex is single-process application policy. It is not advertised as a
 backend transaction or distributed lock; an adapter supplies its own CAS and
 may be stronger than the common contract.
 
+Ordinary structure PUT composes supported editable fields with current Agent metadata under this same Canvas mutex. Trusted projections and editable inverse replay use already-locked writer entries to avoid recursive acquisition; draft acceptance holds a nonblocking turn lease through its actual Canvas write. Space Move retains sorted multi-Canvas locking and nonblocking turn acquisition rather than waiting for an invocation while holding a Canvas lock.
+
 ### 4.1 Executor persistence restoration
 
 For a node/delta batch, Disk's ordered writer changes multiple files: affected node sidecars, `space.json`, and the append-only delta log. Its existing `runCanvasPersistenceTransaction()` helper now lives inside the Disk adapter. It captures raw bytes for `space.json` and affected sidecars, plus the delta log's existence and byte length. If a normal in-process write throws, rollback restores the sidecars and record bytes and truncates or removes the delta log back to its captured state before the rejection returns. A rejected node → record → delta batch therefore does not expose a completed prefix.
@@ -226,3 +232,14 @@ For a node/delta batch, Disk's ordered writer changes multiple files: affected n
 `CanvasStore.withValidatedNodeMutationTransaction()` validates `space.json` once, snapshots adapter-local tombstones for affected node ids, and grants the authoritative inserted-id set a tombstone bypass until the full commit succeeds. Rollback restores `space.json` through `writeNodeMutationRollback()` without inferring another tombstone transition, then restores the captured in-memory tombstones. The normal rejection path returns only after the persisted and in-memory prestate has been restored.
 
 An explicit title rename is resolved before the protected node → record → delta batch and retains the old ordered, best-effort behavior; a later batch rejection does not promise to undo that rename. Artifact import happens before the Canvas mutex and is also outside this restoration boundary. Post-write change-review persistence happens afterwards. Process termination, power loss, an unknown remote outcome, and uncoordinated multi-process access can still leave an unknown or partial result: Phase 4 adds no filesystem WAL, commit marker, startup recovery, durable tombstone, idempotency record, or outbox. SQLite/Postgres may satisfy the in-process batch guarantee with a native transaction, but callers cannot infer any of those additional guarantees from it.
+
+## Code entry points
+
+| File                                                                                          | Responsibility                                               |
+| --------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| [storage/index.ts](../../apps/server/src/modules/storage/index.ts)                            | Portable Space facade and storage composition exports        |
+| [structured.ts](../../apps/server/src/modules/storage/ports/structured.ts)                    | Space, node, and ordered-write ports                         |
+| [write-coordinator.ts](../../apps/server/src/modules/canvas/write-coordinator.ts)             | Per-Canvas non-reentrant application mutex                   |
+| [canvas-executor.ts](../../apps/server/src/modules/canvas/canvas-executor.ts)                 | Editable command/inverse composition and ordered persistence |
+| [agent-node-binding.ts](../../apps/server/src/modules/agent/agent-node-binding.ts)            | Canonical record confirmation before Bound acknowledgement   |
+| [conversation-stores.ts](../../apps/server/src/modules/agent/agenetes/conversation-stores.ts) | Existing file/SQLite Agenetes persistence dispatch           |

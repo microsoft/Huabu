@@ -23,7 +23,14 @@ import type { ChatSession } from './useChatSession';
 
 const apiMocks = vi.hoisted(() => ({
   fetchHistory: vi.fn(),
-  reconnectStream: vi.fn(async () => ({ status: 'inactive' as const })),
+  reconnectStream: vi.fn(
+    async (
+      _threadId: string,
+      _canvasId: string,
+      _callbacks: { onComplete: () => void },
+    ) => ({ status: 'inactive' as const }),
+  ),
+  patchOwner: vi.fn(),
 }));
 
 const canvasMock = vi.hoisted(() => ({
@@ -60,7 +67,7 @@ vi.mock('@/store/conversationOwner', () => ({
   filterClientOwnedQuestionPatch: vi.fn(
     (_source: unknown, patch: Record<string, unknown>) => patch,
   ),
-  patchConversationOwnerNode: vi.fn(),
+  patchConversationOwnerNode: apiMocks.patchOwner,
   refreshConversationPresentation: vi.fn(),
   resolveConversationOwnerSource: vi.fn(() => undefined),
   validateConversationView: vi.fn(async () => {}),
@@ -71,7 +78,9 @@ vi.mock('@/hooks/useActivelyViewingQuestion', () => ({
 }));
 
 vi.mock('@/store/acpThreadChangesStore', () => ({
-  useAcpThreadChangesStore: { getState: () => ({}) },
+  useAcpThreadChangesStore: {
+    getState: () => ({ load: vi.fn().mockResolvedValue(undefined) }),
+  },
 }));
 
 const THREAD_ID = 'thread-1';
@@ -142,6 +151,8 @@ beforeEach(() => {
   apiMocks.reconnectStream.mockReset();
   apiMocks.reconnectStream.mockResolvedValue({ status: 'inactive' });
   canvasMock.state.nodes = [];
+  canvasMock.state.patchNodeSilent.mockClear();
+  apiMocks.patchOwner.mockClear();
 });
 
 afterEach(() => {
@@ -180,44 +191,53 @@ describe('useChatHistory reconnect', () => {
     );
   });
 
-  it('attaches when an already-loaded Agent Node becomes running', async () => {
-    seedStore(false);
-    useChatStore.getState().setMessages(THREAD_ID, [
-      {
-        id: 'prior-answer',
-        role: 'assistant',
-        segments: [{ kind: 'text', text: 'Previous answer' }],
-      },
-    ]);
-    canvasMock.state.nodes = [
-      {
-        id: 'node-agent',
-        type: 'question',
-        data: {
-          threadId: THREAD_ID,
-          status: 'running',
-          agentBindingPolicy: 'fixed',
+  it.each([undefined, 'selectable', 'fixed'])(
+    'observes a running %s Agent Node without history-based repair',
+    async (policy) => {
+      seedStore(false);
+      useChatStore.getState().setMessages(THREAD_ID, [
+        {
+          id: 'prior-answer',
+          role: 'assistant',
+          segments: [{ kind: 'text', text: 'Previous answer' }],
         },
-      },
-    ];
-    const session: ChatSession = {
-      ...SESSION,
-      conversationView: {
-        presentationAnchor: {
-          canvasId: CANVAS_ID,
-          nodeId: 'node-agent',
+      ]);
+      canvasMock.state.nodes = [
+        {
+          id: 'node-agent',
+          type: 'question',
+          data: {
+            threadId: THREAD_ID,
+            status: 'running',
+            agentBindingPolicy: policy,
+          },
         },
-        conversationOwner: {
-          canvasId: CANVAS_ID,
-          nodeId: 'node-agent',
-          threadId: THREAD_ID,
+      ];
+      const session: ChatSession = {
+        ...SESSION,
+        conversationView: {
+          presentationAnchor: {
+            canvasId: CANVAS_ID,
+            nodeId: 'node-agent',
+          },
+          conversationOwner: {
+            canvasId: CANVAS_ID,
+            nodeId: 'node-agent',
+            threadId: THREAD_ID,
+          },
         },
-      },
-    };
+      };
 
-    await renderHarness(session);
+      await renderHarness(session);
 
-    expect(apiMocks.fetchHistory).toHaveBeenCalledWith(THREAD_ID, CANVAS_ID);
-    expect(apiMocks.reconnectStream).toHaveBeenCalledTimes(1);
-  });
+      expect(apiMocks.fetchHistory).toHaveBeenCalledWith(THREAD_ID, CANVAS_ID);
+      expect(apiMocks.reconnectStream).toHaveBeenCalledTimes(1);
+      await act(async () =>
+        apiMocks.reconnectStream.mock.calls[0][2].onComplete(),
+      );
+      expect(canvasMock.state.nodes[0].data.status).toBe('running');
+      expect(canvasMock.state.patchNodeSilent).not.toHaveBeenCalled();
+      expect(apiMocks.patchOwner).not.toHaveBeenCalled();
+    },
+  );
 });

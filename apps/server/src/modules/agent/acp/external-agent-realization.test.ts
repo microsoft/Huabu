@@ -11,6 +11,7 @@ vi.mock('../../workspace/paths.js', () => ({
 }));
 
 import { ExternalAgentRealizationService } from './external-agent-realization.js';
+import { AgentNodeBindingCoordinator } from '../agent-node-binding.js';
 
 import type { ExternalAgentRealizationError } from './external-agent-realization.js';
 import type { AcpHandle, AcpWorkloadSpec } from '../agenetes/drivers.js';
@@ -54,6 +55,7 @@ const selectableTarget: AgentNodeTarget = {
 };
 
 function createHarness(options?: {
+  bindingCoordinator?: boolean;
   agentTarget?: AgentNodeTarget | null;
   record?: ThreadRecord;
   collect?: () => Promise<{
@@ -73,7 +75,24 @@ function createHarness(options?: {
   const handle = {
     control: vi.fn().mockResolvedValue({ ok: true }),
   } as unknown as AcpHandle;
-  const createHandle = vi.fn(() => handle);
+  let durableRecord = options?.record;
+  const createHandle = vi.fn((spec: AcpWorkloadSpec) => {
+    durableRecord ??= {
+      spec,
+      driverSchemaVersion: 1,
+      state: { driverState: {} },
+    };
+    return handle;
+  });
+  const promote = vi.fn().mockResolvedValue(undefined);
+  const release = vi.fn();
+  const acquireTurn = vi.fn((): (() => void) | null => release);
+  const binding = new AgentNodeBindingCoordinator({
+    record: () => durableRecord,
+    hasHistory: () => false,
+    promote,
+    acquireTurn,
+  });
   const buildSpec = vi.fn(
     ({
       binding,
@@ -144,11 +163,18 @@ function createHarness(options?: {
       ),
     resolveFixedAgentNode: vi.fn().mockResolvedValue(target),
     collectSpacePrompt,
-    readRecord: vi.fn(() => options?.record),
+    readRecord: vi.fn(() => durableRecord),
     createHandle,
     buildSpec,
     subscribeProfileCache: vi.fn(),
     ensureSession,
+    ...(options?.bindingCoordinator
+      ? {
+          confirmBinding: (...args: Parameters<typeof binding.confirm>) =>
+            binding.confirm(...args),
+          acquireTurn,
+        }
+      : {}),
   });
   return {
     service,
@@ -157,10 +183,135 @@ function createHarness(options?: {
     buildSpec,
     collectSpacePrompt,
     ensureSession,
+    promote,
+    acquireTurn,
+    release,
+    record: () => durableRecord,
   };
 }
 
 describe('ExternalAgentRealizationService', () => {
+  it('rejects a persisted internal node before opening its mismatched external execution', async () => {
+    const node = {
+      ...target,
+      agentBinding: { kind: 'internal' as const },
+      bindingState: 'editing' as const,
+    };
+    const h = createHarness({
+      bindingCoordinator: true,
+      agentTarget: node,
+      record: {
+        spec: {
+          threadId: target.threadId,
+          namespace: { name: target.canvasId },
+          kind: 'external',
+          workloadType: 'Deployment',
+          spec: { binding: targetBinding },
+        },
+        driverSchemaVersion: 1,
+        state: { driverState: {} },
+      } as ThreadRecord,
+    });
+    await expect(
+      h.service.realize({
+        canvasId: node.canvasId,
+        threadId: node.threadId,
+        agentTarget: node,
+        fixedTarget: null,
+        logger,
+      }),
+    ).rejects.toMatchObject({ code: 'agent_binding_conflict' });
+    expect(h.promote).toHaveBeenCalledOnce();
+    expect(h.createHandle).not.toHaveBeenCalled();
+    expect(h.ensureSession).not.toHaveBeenCalled();
+  });
+
+  it('binds a first control before opening the session without a prompt projection', async () => {
+    const node = { ...target, bindingState: 'editing' as const };
+    const h = createHarness({ bindingCoordinator: true, agentTarget: node });
+    h.promote.mockImplementation(async () => {
+      expect(h.record()?.spec.kind).toBe('external');
+      expect(h.ensureSession).not.toHaveBeenCalled();
+      expect(h.handle.control).not.toHaveBeenCalled();
+    });
+    const realized = await h.service.realize({
+      canvasId: node.canvasId,
+      threadId: node.threadId,
+      fixedTarget: node,
+      requestedBinding: targetBinding,
+      logger,
+    });
+    expect(h.promote).toHaveBeenCalledOnce();
+    expect(node).not.toHaveProperty('invocationToken');
+    expect(node.status).toBe('idle');
+    expect(node.content).toBe('');
+    expect(h.release).toHaveBeenCalledOnce();
+    await h.service.ensureSession(realized, logger);
+  });
+
+  it('keeps canonical execution after promotion fails and completes it on retry', async () => {
+    const node = { ...target, bindingState: 'editing' as const };
+    const h = createHarness({ bindingCoordinator: true, agentTarget: node });
+    h.promote.mockRejectedValueOnce(new Error('Bound persistence failed'));
+    const options = {
+      canvasId: node.canvasId,
+      threadId: node.threadId,
+      fixedTarget: node,
+      requestedBinding: targetBinding,
+      logger,
+    };
+    await expect(h.service.realize(options)).rejects.toThrow(
+      'Bound persistence failed',
+    );
+    expect(h.record()).toBeDefined();
+    expect(node.bindingState).toBe('editing');
+    expect(h.ensureSession).not.toHaveBeenCalled();
+    await h.service.realize(options);
+    expect(node.bindingState).toBe('bound');
+    expect(h.promote).toHaveBeenCalledTimes(2);
+    expect(h.buildSpec).toHaveBeenCalledOnce();
+  });
+
+  it('refuses first control realization while another operation owns admission', async () => {
+    const h = createHarness({ bindingCoordinator: true });
+    h.acquireTurn.mockReturnValueOnce(null);
+    await expect(
+      h.service.realize({
+        canvasId: 'canvas-1',
+        threadId: 'thread-1',
+        fixedTarget: target,
+        requestedBinding: targetBinding,
+        logger,
+      }),
+    ).rejects.toMatchObject({ code: 'agent_draft_busy' });
+    expect(h.createHandle).not.toHaveBeenCalled();
+  });
+
+  it('does not create a delayed execution after preparation is cancelled', async () => {
+    const controller = new AbortController();
+    const h = createHarness({
+      bindingCoordinator: true,
+      agentTarget: { ...target },
+      collect: async () => {
+        controller.abort();
+        return null;
+      },
+    });
+    await expect(
+      h.service.realize({
+        canvasId: 'canvas-1',
+        threadId: 'thread-1',
+        fixedTarget: { ...target },
+        requestedBinding: targetBinding,
+        signal: controller.signal,
+        logger,
+      }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(h.createHandle).not.toHaveBeenCalled();
+    expect(h.promote).not.toHaveBeenCalled();
+    expect(h.release).toHaveBeenCalledOnce();
+  });
+
   it('realizes first control with the fixed Space Prompt and node instructions', async () => {
     const harness = createHarness();
     const realized = await harness.service.realize({

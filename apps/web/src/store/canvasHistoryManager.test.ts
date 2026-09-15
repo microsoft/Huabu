@@ -17,6 +17,52 @@ function node(id: string, x: number): Node {
 }
 
 describe('CanvasHistoryRegistry', () => {
+  it('undoes editable Question content and geometry while retaining the current FSM', () => {
+    const history = new CanvasHistoryRegistry();
+    const before: Node = {
+      ...node('question', 0),
+      type: 'question',
+      data: {
+        content: 'Before',
+        bindingState: 'editing',
+        status: 'idle',
+        threadId: 'thread',
+      },
+    };
+    history.activate('canvas');
+    history.takeSnapshot([before], []);
+    const current = {
+      ...before,
+      position: { x: 20, y: 0 },
+      data: {
+        ...before.data,
+        content: 'After',
+        bindingState: 'bound',
+        status: 'done',
+        invocationToken: 'new',
+        viewed: false,
+      },
+    };
+    const restored = history.undo([current], [])?.nodes[0];
+    expect(restored).toMatchObject({
+      position: { x: 0, y: 0 },
+      data: {
+        content: 'Before',
+        bindingState: 'bound',
+        status: 'done',
+        invocationToken: 'new',
+        viewed: false,
+        threadId: 'thread',
+      },
+    });
+    if (!restored) throw new Error('Question was not restored');
+    expect(history.redo([restored], [])?.nodes[0]?.data).toMatchObject({
+      content: 'After',
+      invocationToken: 'new',
+      bindingState: 'bound',
+    });
+  });
+
   it('restores independent undo stacks when switching Canvas scopes', () => {
     const history = new CanvasHistoryRegistry();
 

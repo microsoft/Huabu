@@ -1,14 +1,14 @@
 # Server-Owned Agent Node State Machine
 
-Status: Proposed
+Status: Implemented (pending merge)
 Last updated: 2026-09-15
 Issue: [#163](https://github.com/microsoft/Huabu/issues/163)
 
 ## Context and scope
 
-Huabu currently uses `agentBindingPolicy` both for pre-message Profile selection and as a proxy for lifecycle ownership: fixed Agent Nodes receive server-authored lifecycle updates, while selectable Question Nodes retain browser-authored updates. Binding mutability should not decide who owns execution state.
+Before this change, Huabu used `agentBindingPolicy` both for pre-message Profile selection and as a proxy for lifecycle ownership: fixed Agent Nodes received server-authored lifecycle updates, while selectable Question Nodes retained browser-authored updates. Binding mutability must not decide who owns execution state.
 
-This proposal defines one Huabu Server-owned Agent Node FSM, with two separate dimensions: **execution binding** and **prompt invocation**. It targets a small personal-use application with one Huabu Server, not a distributed orchestration system. It is a proposed contract, not a description of shipped behavior or authorization to implement it.
+This approved design defines one Huabu Server-owned Agent Node FSM, with two separate dimensions: **execution binding** and **prompt invocation**. It targets a small personal-use application with one Huabu Server, not a distributed orchestration system. The implementation is complete on `fix/issue-163` pending merge; current behavior is documented in [Question Node](../architecture/question-node.md), [Agent architecture](../architecture/agent-architecture.md), [Canvas commands](../architecture/canvas-command-architecture.md), and [Canvas sync](../architecture/canvas-realtime-sync.md). The sections below preserve the approved contract and implementation plan.
 
 Reuse `AgentThreadService`, canonical realization, `AgentNodeLifecycle`, and existing Canvas persistence and synchronization. Do not introduce another Agent runtime, FSM library, event journal, or automatic recovery subsystem.
 
@@ -84,7 +84,7 @@ An absent legacy field is unconfirmed, not proof of a genuinely fresh thread. Ex
 
 ### Ordering and the small partial-write case
 
-Timing clarification accepted during the 2026-09-14 sequence review: creating a Canvas Agent Node is not `agenetes.create(spec)`. Agenetes writes the durable ThreadRecord during `create()`, before returning the handle, for Deployments and thread-associated Jobs; it does not wait for `handle.run()` or `handle.control()`. Huabu defers that create call until an actual first interaction. The intended first-interaction order is saved draft, canonical create/record confirmation, persisted Bound, then prompt/control execution. Internal preparation must expose the same confirmation point before its subsequent controls/run. This timing agreement is not implementation authorization.
+Timing clarification accepted during the 2026-09-14 sequence review: creating a Canvas Agent Node is not `agenetes.create(spec)`. Agenetes writes the durable ThreadRecord during `create()`, before returning the handle, for Deployments and thread-associated Jobs; it does not wait for `handle.run()` or `handle.control()`. Huabu defers that create call until an actual first interaction. The first-interaction order is saved draft, canonical create/record confirmation, persisted Bound, then prompt/control execution. Internal preparation exposes the same confirmation point before subsequent controls/run. Implementation was separately authorized on 2026-09-15.
 
 The ordering is canonical ThreadRecord persistence, confirmation through the existing record interface, then the Canvas write of Bound. A failed Bound write must be surfaced and must not be treated as a successful transition by the caller. It cannot roll back the canonical binding. Keep this ordering across supported persistent backends rather than relying on a Disk filename or a SQLite-specific transaction.
 
@@ -150,7 +150,7 @@ Keep the existing Canvas status vocabulary:
 
 The live phase, cancellation controller and settlement guard stay in the existing server invocation object. Agenetes does not expose a universal Agent Node lifecycle enum: Huabu maps supported execution facts, not opaque driver state.
 
-Propose one server-authored current-invocation token on the node. Replace it at admission and retain it with the result. Check it at the serialized write boundary to prevent an old completion from modifying a newer invocation, and use it to validate viewed acknowledgements. It is not a durable Agenetes turn identifier or a restart-recovery log; exact field/API names remain an implementation detail.
+Persist one server-authored current-invocation token (`invocationToken`) on the node. Replace it at admission and retain it with the result. Check it at the serialized write boundary to prevent an old completion from modifying a newer invocation, and use it to validate viewed acknowledgements. It is not a durable Agenetes turn identifier or a restart-recovery log.
 
 Persist `status`, `errorMessage`, the token and result attention through the existing Canvas writer, alongside the separate monotonic `bindingState`. Separate the complete node read model from owner-specific write contracts: ordinary Canvas edits do not submit FSM-owned fields, and ordinary undo does not restore them. Server-side validation enforces this boundary rather than treating every incoming node snapshot as writable state.
 
@@ -229,7 +229,7 @@ Global deletion of `agentBindingPolicy`, Profile lock indicators, new FSM depend
 
 The binding coordinator belongs to Huabu Server's Agent Node business layer under `modules/agent/`; its exact name is not decided. It owns binding reads, guarded draft edits and first-binding orchestration through existing resolver/realization/Canvas interfaces. `AgentThreadService` owns each live prompt invocation and calls this coordinator during preparation; the external control path uses the same binding entry without creating a prompt invocation. `AgentNodeLifecycle` remains a projection writer, not a third independent state machine. No event bus or bidirectional FSM synchronization is needed.
 
-The product choices are settled. Shared edit/transition/ack schemas, local ordering and adapter characterization are implementation deliverables, not another product-design gate. Section 8 lists the remaining work against the merged baseline. Runtime implementation still requires explicit authorization.
+The product choices are settled. Shared edit/transition/ack schemas, local ordering and adapter characterization are implementation deliverables, not another product-design gate. Section 8 records the implemented work against the merged baseline. Runtime implementation was explicitly authorized on 2026-09-15.
 
 ## 7. Acceptance scenarios
 
@@ -250,7 +250,7 @@ The product choices are settled. Shared edit/transition/ack schemas, local order
 
 ## 8. Implementation plan on the merged baseline
 
-Baseline: `origin/main` at `54d1e6cb`, merged into `fix/issue-163` as `56dc5048` on 2026-09-15. This section replaces the earlier gap matrix and repeated readiness checkpoints; prior review history remains in Git and the Issue Execution Note. The user authorized main integration and proposal adjustment, then authorized committing and pushing the revised proposal and integrated branch on 2026-09-15. Runtime implementation remains subject to separate authorization.
+Baseline: `origin/main` at `54d1e6cb`, merged into `fix/issue-163` as `56dc5048` on 2026-09-15. This section replaces the earlier gap matrix and repeated readiness checkpoints; prior review history remains in Git and the Issue Execution Note. The user authorized main integration and proposal adjustment, then authorized committing and pushing the revised proposal and integrated branch on 2026-09-15. Runtime implementation was subsequently authorized on 2026-09-15 and completed against this plan.
 
 The user confirmed the mixed-content synchronization rule on 2026-09-15: retain existing authored-content conflict handling while accepting server-owned FSM fields from the same update. This confirms the bounded extension below, not a new general merge policy.
 
@@ -264,9 +264,9 @@ The user confirmed the mixed-content synchronization rule on 2026-09-15: retain 
 | Portable Space storage and Agenetes conversation-store dispatchers (#92)                                              | Add node metadata through existing contracts and confirm through `agenetes.record()`. No file-store assumptions, new backend or cross-store transaction.                                                    |
 | Existing realization single-flight, turn admission, invocation cleanup and lifecycle writer                           | Extend their ownership and ordering; do not add another runtime, runner or event bus.                                                                                                                       |
 
-The merge does not implement Editing/Bound or invocation fencing. Fixed/selectable lifecycle branching, unrestricted node-metadata saves, client rescue writes and unguarded viewed updates still need the coordinated migration below.
+The main integration alone did not implement Editing/Bound or invocation fencing. The subsequent implementation replaces policy-dependent lifecycle branching, unrestricted Question metadata saves, browser rescue writes, and unguarded viewed updates with the coordinated migration below.
 
-### Remaining implementation slices
+### Implemented slices
 
 1. **Shared ownership contracts and Canvas composition.** Add the proposed binding state and current-invocation identity, with separate editable payloads and result acknowledgement. Reuse the same writable subset across structure PUT, commands and editable inverse replay; retain current server-owned fields and serialize composition with FSM writes. Propagate the read fields through bounded owner/reference projections. Do not build a general field-permission registry.
 2. **Binding and admitted invocation.** Generalize existing validated resolver/realization paths beyond fixed policy. Order draft edits against first binding locally; register admission/cancellation before slow prompt preparation. Confirm and persist Bound immediately after external/internal create and before controls/run. Reuse `AgentNodeLifecycle` for fresh-state, current-invocation-guarded projection and preserve existing settlement/cleanup behavior.
@@ -292,7 +292,7 @@ Reuse the existing server suites for thread service, lifecycle, resolver, extern
 
 Reuse Web suites for `conversationOwner`, stream/history, `questionCompose`, `canvasStore.structureSaveReconciliation` and `canvasStore.agentDeltaConflict`. Cover persisted draft selection after refresh, metadata-only and mixed-content FSM deltas, content-CAS baselines, late HTTP responses after SSE, copy/fork/attachment, and auto-accept with editable undo. Preserve existing refresh/error behavior without automatic replay; Task/Run/View need only low-cost happy-path coverage.
 
-**Readiness:** main integration is complete and the product/architecture direction remains settled. The remaining work is this bounded server/Web contract migration, not another design investigation. No runtime code has been implemented for #163; explicit implementation authorization is still required.
+**Implementation status:** the bounded server/Web contract migration is implemented pending merge. Shared owner-specific edits, canonical binding confirmation, admitted token-fenced invocation, acknowledged browser drafts, mixed-content FSM reconciliation, and validated copy/association/move integration are covered by existing-runner regression suites, including Disk and SQLite persistence. Architecture documents are updated in the same change. No recovery framework, native-session dependency, Task/Run/View redesign, or global `agentBindingPolicy` deletion was introduced.
 
 ## Code and design references
 
@@ -306,7 +306,7 @@ Reuse Web suites for `conversationOwner`, stream/history, `questionCompose`, `ca
 | [Conversation stores](../../apps/server/src/modules/agent/agenetes/conversation-stores.ts)    | Existing backend dispatch behind Agenetes storage ports |
 | [Canvas real-time sync](../architecture/canvas-realtime-sync.md)                              | Dirty-content reconciliation and change-review behavior |
 | [Canvas storage](../architecture/canvas-storage.md)                                           | Portable Space persistence and backend contracts        |
-| [Question Node architecture](../architecture/question-node.md)                                | Current persisted fields and split lifecycle ownership  |
+| [Question Node architecture](../architecture/question-node.md)                                | Current persisted fields and server-owned lifecycle     |
 | [Agent architecture](../architecture/agent-architecture.md)                                   | Existing runtime and transport                          |
 | [API design](../architecture/api-design.md)                                                   | Shared wire-contract rules                              |
 | [Canonical realization proposal](./external-agent-capability-cache-and-realization.md)        | Capability reads versus real interaction                |

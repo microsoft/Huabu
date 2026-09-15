@@ -197,6 +197,7 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
                   deltas as Delta[],
                   toVersion,
                   pendingEffects as SyncPendingEffects,
+                  event.data.agentNodeProjection,
                 );
               } else if (toVersion > canvasStore.version) {
                 // Gap (missed an earlier update). A blind `loadCanvas` would

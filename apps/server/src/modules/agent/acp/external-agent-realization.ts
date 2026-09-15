@@ -16,11 +16,16 @@ import {
   type AcpWorkloadSpec,
 } from '../agenetes/drivers.js';
 import {
+  agentNodeBinding,
+  AgentNodeBindingError,
+} from '../agent-node-binding.js';
+import {
   agentThreadResolver,
   type AgentNodeTarget,
   type FixedAgentNodeTarget,
 } from '../agent-thread-resolver.js';
 import { resolveSpacePrompt } from '../space-instruction-frames.js';
+import { acquireAgentTurn } from '../turn-lease.js';
 import { ensureProfileCacheSubscription } from './profile-cache-port.js';
 import { getExternalAgentRuntimeConfig } from './runtime-config.js';
 import { buildAcpWorkloadSpec } from './service.js';
@@ -56,6 +61,9 @@ export interface RealizeExternalAgentThreadOptions {
   agentTarget?: AgentNodeTarget | null;
   fixedTarget?: FixedAgentNodeTarget | null;
   logger: FastifyBaseLogger;
+  signal?: AbortSignal;
+  /** The prompt coordinator already owns admission across preparation. */
+  turnLeaseHeld?: boolean;
 }
 
 export interface RealizedExternalAgentThread {
@@ -63,6 +71,7 @@ export interface RealizedExternalAgentThread {
   fixedTarget: FixedAgentNodeTarget | null;
   spec: AcpWorkloadSpec;
   handle: AcpHandle;
+  agentTarget?: AgentNodeTarget | null;
 }
 
 interface RealizationDependencies {
@@ -86,6 +95,8 @@ interface RealizationDependencies {
     realized: RealizedExternalAgentThread,
     logger: FastifyBaseLogger,
   ) => Promise<AcpSessionEntry>;
+  confirmBinding?: typeof agentNodeBinding.confirm;
+  acquireTurn?: typeof acquireAgentTurn;
 }
 
 function bindingFromSpec(spec: AcpWorkloadSpec): ExternalBinding {
@@ -140,6 +151,8 @@ const DEFAULT_DEPENDENCIES: RealizationDependencies = {
   buildSpec: buildAcpWorkloadSpec,
   subscribeProfileCache: ensureProfileCacheSubscription,
   ensureSession: ensureSessionFromCanonicalSpec,
+  confirmBinding: (...args) => agentNodeBinding.confirm(...args),
+  acquireTurn: acquireAgentTurn,
 };
 
 export class ExternalAgentRealizationService {
@@ -182,6 +195,29 @@ export class ExternalAgentRealizationService {
     options: RealizeExternalAgentThreadOptions,
     namespace: Namespace,
   ): Promise<RealizedExternalAgentThread> {
+    const record = this.dependencies.readRecord(namespace, options.threadId);
+    const release =
+      !record && !options.turnLeaseHeld && this.dependencies.acquireTurn
+        ? this.dependencies.acquireTurn(options.threadId)
+        : undefined;
+    if (release === null) {
+      throw new AgentNodeBindingError(
+        'agent_draft_busy',
+        `Thread ${options.threadId} is preparing or running`,
+      );
+    }
+    try {
+      return await this.realizeAdmitted(options, namespace, record);
+    } finally {
+      release?.();
+    }
+  }
+
+  private async realizeAdmitted(
+    options: RealizeExternalAgentThreadOptions,
+    namespace: Namespace,
+    record: ReturnType<typeof agenetes.record>,
+  ): Promise<RealizedExternalAgentThread> {
     const fixedTarget =
       options.fixedTarget === undefined
         ? options.canvasId
@@ -201,7 +237,10 @@ export class ExternalAgentRealizationService {
               )
             : null))
         : options.agentTarget;
-    const record = this.dependencies.readRecord(namespace, options.threadId);
+    if (agentTarget)
+      await this.dependencies.confirmBinding?.(agentTarget, {
+        record: record ?? null,
+      });
 
     if (record) {
       if (record.spec.kind !== EXTERNAL_DRIVER_KIND) {
@@ -215,6 +254,7 @@ export class ExternalAgentRealizationService {
       const realized = {
         binding,
         fixedTarget,
+        agentTarget,
         spec,
         handle: this.dependencies.createHandle(spec),
       };
@@ -225,7 +265,10 @@ export class ExternalAgentRealizationService {
       return realized;
     }
 
-    const binding = fixedTarget?.agentBinding ?? options.requestedBinding;
+    const binding =
+      agentTarget?.agentBinding ??
+      fixedTarget?.agentBinding ??
+      options.requestedBinding;
     if (!binding || binding.kind !== 'external') {
       throw new ExternalAgentRealizationError(
         'external_binding_required',
@@ -234,22 +277,24 @@ export class ExternalAgentRealizationService {
     }
 
     if (
-      fixedTarget &&
+      agentTarget &&
       options.requestedBinding &&
       options.requestedBinding.profileId !== binding.profileId
     ) {
       throw new ExternalAgentRealizationError(
         'external_binding_conflict',
-        `Thread ${options.threadId} is fixed to Profile ${binding.profileId}`,
+        `Thread ${options.threadId} is configured for Profile ${binding.profileId}`,
       );
     }
 
+    options.signal?.throwIfAborted();
     const collected = agentTarget
       ? await this.dependencies.collectSpacePrompt(
           agentTarget.canvasId,
           agentTarget.nodeId,
         )
       : null;
+    options.signal?.throwIfAborted();
     if (
       collected &&
       (collected.diagnostics.truncated ||
@@ -272,14 +317,17 @@ export class ExternalAgentRealizationService {
       binding,
       threadId: options.threadId,
       canvasId: options.canvasId,
-      cwd: fixedTarget ? undefined : options.requestedCwd,
-      ...(fixedTarget?.launchOverrides
-        ? { launchOverrides: fixedTarget.launchOverrides }
+      cwd: agentTarget ? undefined : options.requestedCwd,
+      ...((agentTarget?.launchOverrides ?? fixedTarget?.launchOverrides)
+        ? {
+            launchOverrides:
+              agentTarget?.launchOverrides ?? fixedTarget?.launchOverrides,
+          }
         : {}),
       spacePrompt: collected?.markdown,
     });
     if (
-      fixedTarget &&
+      agentTarget &&
       options.requestedCwd !== undefined &&
       options.requestedCwd !== spec.spec.cwd
     ) {
@@ -292,9 +340,12 @@ export class ExternalAgentRealizationService {
     const realized = {
       binding,
       fixedTarget,
+      agentTarget,
       spec,
       handle: this.dependencies.createHandle(spec),
     };
+    if (agentTarget)
+      await this.dependencies.confirmBinding?.(agentTarget, { required: true });
     this.dependencies.subscribeProfileCache(
       options.threadId,
       binding.profileId,
@@ -306,7 +357,8 @@ export class ExternalAgentRealizationService {
     realized: RealizedExternalAgentThread,
     options: RealizeExternalAgentThreadOptions,
   ): void {
-    const fixedBinding = realized.fixedTarget?.agentBinding;
+    const fixedBinding =
+      realized.agentTarget?.agentBinding ?? realized.fixedTarget?.agentBinding;
     if (
       fixedBinding &&
       (fixedBinding.kind !== 'external' ||
@@ -317,7 +369,10 @@ export class ExternalAgentRealizationService {
         `Fixed Agent Node for thread ${options.threadId} does not match its realized Profile`,
       );
     }
-    const fixedCwd = realized.fixedTarget?.launchOverrides?.workingDirPath;
+    const fixedCwd = (
+      realized.agentTarget?.launchOverrides ??
+      realized.fixedTarget?.launchOverrides
+    )?.workingDirPath;
     if (fixedCwd !== undefined && fixedCwd !== realized.spec.spec.cwd) {
       throw new ExternalAgentRealizationError(
         'external_working_directory_conflict',
@@ -354,6 +409,9 @@ export function realizationHttpError(error: unknown): {
       status: 409,
       body: { message: error.message, code: error.code },
     };
+  }
+  if (error instanceof AgentNodeBindingError) {
+    return { status: 409, body: { message: error.message, code: error.code } };
   }
   const message = error instanceof Error ? error.message : String(error);
   return {

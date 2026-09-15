@@ -5,6 +5,10 @@ import { ApiError, apiFetch, apiUrl } from './_client';
 import { routes } from './_routes';
 
 import type {
+  AcknowledgeAgentNodeResultBody,
+  AcknowledgeAgentNodeResultResponse,
+  AssociateAgentNodeBody,
+  AssociateAgentNodeResponse,
   ApiErrorBody,
   CanvasConflictResponse,
   CanvasErrorCode,
@@ -30,6 +34,36 @@ import type {
   MoveSelectionBody,
   MoveSelectionResponse,
 } from '@huabu/shared';
+
+export async function associateAgentNode(
+  canvasId: string,
+  nodeId: string,
+  body: AssociateAgentNodeBody,
+): Promise<AssociateAgentNodeResponse> {
+  return apiFetch<AssociateAgentNodeResponse>(
+    routes.agentNodeAssociation(canvasId, nodeId),
+    {
+      method: 'POST',
+      json: body,
+      fallbackMessage: 'Failed to associate Agent conversation',
+    },
+  );
+}
+
+export async function acknowledgeAgentNodeResult(
+  canvasId: string,
+  nodeId: string,
+  body: AcknowledgeAgentNodeResultBody,
+): Promise<AcknowledgeAgentNodeResultResponse> {
+  return apiFetch<AcknowledgeAgentNodeResultResponse>(
+    routes.agentNodeResultViewed(canvasId, nodeId),
+    {
+      method: 'POST',
+      json: body,
+      fallbackMessage: 'Failed to mark Agent result viewed',
+    },
+  );
+}
 
 /**
  * Error thrown when a canvas mutation is rejected by the server with a

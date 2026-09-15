@@ -179,6 +179,16 @@ export async function resolveWorldReferences(
                   : {}),
                 status: getQuestionNodeStatus(sourceData),
                 viewed: sourceData.viewed === true,
+                ...(sourceData.bindingState === 'bound' ||
+                sourceData.bindingState === 'editing'
+                  ? { bindingState: sourceData.bindingState }
+                  : {}),
+                ...(typeof sourceData.invocationToken === 'string'
+                  ? { invocationToken: sourceData.invocationToken }
+                  : {}),
+                ...(typeof sourceData.errorMessage === 'string'
+                  ? { errorMessage: sourceData.errorMessage }
+                  : {}),
                 agentMode:
                   sourceData.agentMode === 'operate' ? 'operate' : 'ask',
                 agentBinding: agentBinding?.success

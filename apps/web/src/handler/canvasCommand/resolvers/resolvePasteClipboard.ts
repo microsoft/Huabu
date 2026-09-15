@@ -121,16 +121,21 @@ export default function resolvePasteClipboard(
 
     // Reset question node runtime state so the copy starts fresh -
     // UNLESS it's a forked copy (`__forkConversation`), in which case
-    // `pasteNodes` already assigned a new threadId + status and queued a
+    // `pasteNodes` already assigned a new threadId and queued a
     // server-side history fork, so we keep the conversation pointer and
     // only drop the transient marker.
-    if (clonedData.type === 'question') {
+    if (nodeType === 'question') {
+      delete clonedData.bindingState;
+      delete clonedData.invocationToken;
+      delete clonedData.viewed;
+      delete clonedData.status;
+      delete clonedData.errorMessage;
       if (clonedData.__forkConversation) {
         delete clonedData.__forkConversation;
       } else {
         delete clonedData.status;
         delete clonedData.runAt;
-        delete clonedData.threadId;
+        clonedData.threadId = createId('thread');
         delete clonedData.errorMessage;
         delete clonedData.responseSummary;
       }

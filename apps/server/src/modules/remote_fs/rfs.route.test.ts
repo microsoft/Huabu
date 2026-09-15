@@ -1495,96 +1495,101 @@ describe('POST /api/rfs/:canvasId/agent', () => {
     }
   });
 
-  it('submits a prompt to an existing Agent through AgentThreadService', async () => {
-    const target: FixedAgentNodeTarget = {
-      canvasId: 'c1',
-      nodeId: 'node-fixed' as CanvasNodeId,
-      threadId: 'thread-fixed',
-      agentBinding: {
-        kind: 'external',
-        profileId: 'profile-fixed',
-        alias: 'Fixed Agent',
-      },
-      status: 'idle',
-      content: '',
-    };
-    const store = getCanvasStore('c1');
-    store.write({
-      canvasId: 'c1',
-      title: null,
-      version: 1,
-      state: {
-        nodes: [
-          {
-            id: 'node-fixed',
-            type: 'question',
-            position: { x: 0, y: 0 },
-            data: {
-              threadId: 'thread-fixed',
-              agentBindingPolicy: 'fixed',
-              agentBinding: target.agentBinding,
-            },
-          },
-        ],
-        edges: [],
-      },
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    });
-    store.writeNode('node-fixed', {
-      nodeId: 'node-fixed',
-      type: 'question',
-      label: null,
-      content: '',
-    });
-
-    vi.spyOn(agentThreadService, 'resolveFixedTarget').mockResolvedValue(
-      target,
-    );
-    const dispose = vi.fn().mockResolvedValue(undefined);
-    const invoke = vi
-      .spyOn(agentThreadService, 'invoke')
-      .mockImplementation(async (options) => ({
-        binding: target.agentBinding,
-        fixedTarget: target,
-        signal: options.signal ?? new AbortController().signal,
-        dispose,
-        events: (async function* () {
-          yield {
-            type: 'done' as const,
-            data: { message: 'delegated answer' },
-          };
-        })(),
-      }));
-
-    const app = await buildApp();
-    try {
-      const res = await app.inject({
-        method: 'POST',
-        url: '/rfs/c1/agent/thread-fixed/prompt',
-        headers: {
-          'content-type': 'text/plain',
+  it.each(['fixed', 'selectable'] as const)(
+    'submits a prompt to an existing %s Agent through AgentThreadService',
+    async (policy) => {
+      const target: FixedAgentNodeTarget = {
+        canvasId: 'c1',
+        nodeId: 'node-fixed' as CanvasNodeId,
+        threadId: 'thread-fixed',
+        agentBinding: {
+          kind: 'external',
+          profileId: 'profile-fixed',
+          alias: 'Fixed Agent',
         },
-        payload: 'continue delegated work',
+        status: 'idle',
+        content: '',
+      };
+      const store = getCanvasStore('c1');
+      store.write({
+        canvasId: 'c1',
+        title: null,
+        version: 1,
+        state: {
+          nodes: [
+            {
+              id: 'node-fixed',
+              type: 'question',
+              position: { x: 0, y: 0 },
+              data: {
+                threadId: 'thread-fixed',
+                agentBindingPolicy: policy,
+                agentBinding: target.agentBinding,
+              },
+            },
+          ],
+          edges: [],
+        },
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+      store.writeNode('node-fixed', {
+        nodeId: 'node-fixed',
+        type: 'question',
+        label: null,
+        content: '',
       });
 
-      expect(res.statusCode).toBe(200);
-      expect(res.body).toContain('data: delegated answer');
-      expect(invoke).toHaveBeenCalledWith(
-        expect.objectContaining({
-          threadId: 'thread-fixed',
-          canvasId: 'c1',
-          content: 'continue delegated work',
-          mode: 'operate',
-          fixedTarget: target,
-        }),
+      vi.spyOn(agentThreadService, 'resolveFixedTarget').mockResolvedValue(
+        policy === 'fixed' ? target : null,
       );
-      expect(agentMocks.get).not.toHaveBeenCalled();
-      expect(dispose).not.toHaveBeenCalled();
-    } finally {
-      await app.close();
-    }
-  });
+      const dispose = vi.fn().mockResolvedValue(undefined);
+      const invoke = vi
+        .spyOn(agentThreadService, 'invoke')
+        .mockImplementation(async (options) => ({
+          binding: target.agentBinding,
+          fixedTarget: target,
+          signal: options.signal ?? new AbortController().signal,
+          dispose,
+          events: (async function* () {
+            yield {
+              type: 'done' as const,
+              data: { message: 'delegated answer' },
+            };
+          })(),
+        }));
+
+      const app = await buildApp();
+      try {
+        const res = await app.inject({
+          method: 'POST',
+          url: '/rfs/c1/agent/thread-fixed/prompt',
+          headers: {
+            'content-type': 'text/plain',
+          },
+          payload: 'continue delegated work',
+        });
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body).toContain('data: delegated answer');
+        expect(invoke).toHaveBeenCalledWith(
+          expect.objectContaining({
+            threadId: 'thread-fixed',
+            canvasId: 'c1',
+            content: 'continue delegated work',
+            mode: 'operate',
+            fixedTarget: policy === 'fixed' ? target : null,
+            agentTarget: expect.objectContaining({ nodeId: target.nodeId }),
+            envelope: expect.any(Function),
+          }),
+        );
+        expect(agentMocks.get).not.toHaveBeenCalled();
+        expect(dispose).not.toHaveBeenCalled();
+      } finally {
+        await app.close();
+      }
+    },
+  );
 
   it('uses text/plain to create and immediately start a Huabu Agent', async () => {
     seedNote('c1', 'node-anchor', 'Anchor', 'content');
@@ -1742,6 +1747,7 @@ describe('POST /api/rfs/:canvasId/agent', () => {
   });
 
   it('returns thread_not_found before opening SSE', async () => {
+    seedNote('c1', 'node-other', 'Other', 'content');
     vi.spyOn(agentThreadService, 'resolveFixedTarget').mockResolvedValue(null);
 
     const app = await buildApp();

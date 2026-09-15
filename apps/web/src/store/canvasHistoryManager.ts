@@ -5,12 +5,16 @@ import {
   stripTransientNodeFields,
   stripTransientEdgeFields,
   TRANSIENT_NODE_FIELDS,
+  preserveAgentNodeOwnedData,
+  projectAgentNodeEditableData,
+  AGENT_NODE_PREPARATION_KEYS,
 } from '@huabu/shared/canvas-engine';
 
 import { ApiError, deleteNode } from '../api';
 import { toast } from '../components/Common/Toast';
 
 import type { RecentAction } from '@huabu/shared';
+import type { Delta } from '@huabu/shared/canvas-engine';
 import type { Node, Edge } from '@xyflow/react';
 
 const MAX_HISTORY = 50;
@@ -95,7 +99,15 @@ function snapshotsEqual(a: CanvasSnapshot, b: CanvasSnapshot): boolean {
   if (a.nodes.length !== b.nodes.length || a.edges.length !== b.edges.length)
     return false;
   for (let i = 0; i < a.nodes.length; i++) {
-    if (JSON.stringify(a.nodes[i]) !== JSON.stringify(b.nodes[i])) return false;
+    const editable = (node: Node) =>
+      node.type === 'question'
+        ? { ...node, data: projectAgentNodeEditableData(node.data) }
+        : node;
+    if (
+      JSON.stringify(editable(a.nodes[i])) !==
+      JSON.stringify(editable(b.nodes[i]))
+    )
+      return false;
   }
   for (let i = 0; i < a.edges.length; i++) {
     if (JSON.stringify(a.edges[i]) !== JSON.stringify(b.edges[i])) return false;
@@ -103,27 +115,8 @@ function snapshotsEqual(a: CanvasSnapshot, b: CanvasSnapshot): boolean {
   return true;
 }
 
-/**
- * Question nodes own a conversational `data` payload (`content`,
- * `threadId`, `status`, `viewed`, `agentBinding`, `agentMode`,
- * `errorMessage`, `responseSummary`, plus the `label` derived from
- * `content`). That payload is entirely system-driven — authored on
- * send and mutated by the agent runner via `patchNodeSilent` — never a
- * deliberate canvas edit. Undo/redo therefore restores a question
- * node's geometry (position / size / parent, all top-level props) but
- * must NOT rewind its `data` to a stale snapshot value: undoing a move
- * should not wipe the thread binding or answer the node already holds.
- *
- * So for every question node that still exists in the live canvas we
- * keep its current `data` and take only the structural props from the
- * restored snapshot. Question nodes absent from the live canvas (undo
- * is resurrecting a deleted node) fall back to the snapshot's `data` —
- * the only source available, and the correct pre-deletion value.
- *
- * Direction-neutral: both undo and redo pop a target snapshot and own
- * the live `currentNodes`, so the same merge applies to either.
- */
-function preserveLiveQuestionData(
+/** Restore editable effects while preserving live execution state and Bound preparation. */
+export function preserveLiveQuestionData(
   restoredNodes: Node[],
   currentNodes: Node[],
 ): Node[] {
@@ -133,7 +126,14 @@ function preserveLiveQuestionData(
     const live = liveById.get(node.id);
     // Resurrection (no live node) → snapshot data is the correct source.
     if (!live) return node;
-    return { ...node, data: live.data };
+    const data = preserveAgentNodeOwnedData(node.data, live.data);
+    if (live.data.bindingState === 'bound') {
+      for (const key of AGENT_NODE_PREPARATION_KEYS) {
+        if (key in live.data) data[key] = live.data[key];
+        else delete data[key];
+      }
+    }
+    return { ...node, data };
   });
 }
 
@@ -185,6 +185,16 @@ class CanvasHistoryManager {
 
   // ---- In-flight DELETE requests (abortable on undo) ----
   private inflightDeletes = new Map<string, AbortController>();
+  private deleteSettlements = new Map<string, Promise<void>>();
+
+  waitForDeletion(nodeId: string): Promise<void> {
+    return this.deleteSettlements.get(nodeId) ?? Promise.resolve();
+  }
+
+  waitForDeletions(): Promise<void> | undefined {
+    if (this.deleteSettlements.size === 0) return undefined;
+    return Promise.all(this.deleteSettlements.values()).then(() => {});
+  }
 
   // ---- Gesture snapshot tracking ----
   /** True when `beginGesture` has been called but the resulting command
@@ -268,6 +278,44 @@ class CanvasHistoryManager {
     return true;
   }
 
+  /** First submission is a server effect, not an editable empty-content undo. */
+  rebaseAgentInitialContent(deltas: readonly Delta[]): void {
+    for (const delta of deltas) {
+      if (
+        delta.type !== 'REPLACE_NODE' ||
+        delta.next.type !== 'question' ||
+        delta.prev.data.invocationToken ||
+        !delta.next.data.invocationToken ||
+        typeof delta.prev.data.content !== 'string' ||
+        delta.prev.data.content.trim() !== '' ||
+        delta.prev.data.content === delta.next.data.content
+      )
+        continue;
+      for (const snapshot of [...this.undoStack, ...this.redoStack]) {
+        snapshot.nodes = snapshot.nodes.map((node) =>
+          node.id === delta.next.id &&
+          node.type === 'question' &&
+          !node.data.invocationToken &&
+          node.data.content === delta.prev.data.content
+            ? {
+                ...node,
+                data: { ...node.data, content: delta.next.data.content },
+              }
+            : node,
+        );
+      }
+    }
+  }
+
+  discardNodes(nodeIds: ReadonlySet<string>): void {
+    for (const snapshot of [...this.undoStack, ...this.redoStack]) {
+      snapshot.nodes = snapshot.nodes.filter((node) => !nodeIds.has(node.id));
+      snapshot.edges = snapshot.edges.filter(
+        (edge) => !nodeIds.has(edge.source) && !nodeIds.has(edge.target),
+      );
+    }
+  }
+
   // ---------- Undo / Redo ----------
 
   /**
@@ -319,6 +367,7 @@ class CanvasHistoryManager {
       controller.abort();
     }
     this.inflightDeletes.clear();
+    this.deleteSettlements.clear();
   }
 
   // ---------- Server-side sync after undo/redo ----------
@@ -335,6 +384,7 @@ class CanvasHistoryManager {
     prevNodes: Node[],
     restoredNodes: Node[],
     triggerPreprocessing: TriggerPreprocessingFn,
+    getPendingCreation?: (nodeId: string) => Promise<void> | undefined,
   ): void {
     const prevIds = new Set(prevNodes.map((n) => n.id));
     const restoredIds = new Set(restoredNodes.map((n) => n.id));
@@ -342,6 +392,8 @@ class CanvasHistoryManager {
     // Nodes that reappear after undo/redo
     for (const node of restoredNodes) {
       if (!prevIds.has(node.id)) {
+        // Question reinsertion has an explicit server-validated association path.
+        if (node.type === 'question') continue;
         const controller = this.inflightDeletes.get(node.id);
         if (controller) {
           controller.abort();
@@ -354,27 +406,7 @@ class CanvasHistoryManager {
     // Nodes that disappear after undo/redo
     for (const node of prevNodes) {
       if (!restoredIds.has(node.id)) {
-        this.inflightDeletes.get(node.id)?.abort();
-
-        const controller = new AbortController();
-        this.inflightDeletes.set(node.id, controller);
-
-        void deleteNode(canvasId, node.id, { signal: controller.signal })
-          .catch((error) => {
-            if (error instanceof DOMException && error.name === 'AbortError')
-              return;
-            console.error(
-              'Failed to delete node after undo/redo:',
-              node.id,
-              error,
-            );
-            toast(describeDeleteFailure(error), { tone: 'danger' });
-          })
-          .finally(() => {
-            if (this.inflightDeletes.get(node.id) === controller) {
-              this.inflightDeletes.delete(node.id);
-            }
-          });
+        this.trackDelete(canvasId, node.id, getPendingCreation?.(node.id));
       }
     }
   }
@@ -386,13 +418,26 @@ class CanvasHistoryManager {
    * by a subsequent undo.  Aborts any previous in-flight delete for the
    * same nodeId.  Returns the new AbortController.
    */
-  trackDelete(canvasId: string, nodeId: string): AbortController {
+  trackDelete(
+    canvasId: string,
+    nodeId: string,
+    pendingCreation?: Promise<void>,
+  ): AbortController {
     this.inflightDeletes.get(nodeId)?.abort();
 
     const controller = new AbortController();
     this.inflightDeletes.set(nodeId, controller);
 
-    void deleteNode(canvasId, nodeId, { signal: controller.signal })
+    const remove = async (): Promise<void> => {
+      if (!controller.signal.aborted) {
+        await deleteNode(canvasId, nodeId, { signal: controller.signal });
+      }
+    };
+    // Even a failed HTTP acknowledgement can have committed on the server.
+    // Compensate after settlement without hiding the creation's own rejection.
+    const deletion = (
+      pendingCreation ? pendingCreation.then(remove, remove) : remove()
+    )
       .catch((error) => {
         if (error instanceof DOMException && error.name === 'AbortError')
           return;
@@ -404,6 +449,10 @@ class CanvasHistoryManager {
           this.inflightDeletes.delete(nodeId);
         }
       });
+    this.deleteSettlements.set(
+      nodeId,
+      deletion.then(() => {}),
+    );
 
     return controller;
   }
@@ -463,6 +512,14 @@ export class CanvasHistoryRegistry {
     return this.active.takeSnapshot(nodes, edges);
   }
 
+  rebaseAgentInitialContent(deltas: readonly Delta[]): void {
+    this.active.rebaseAgentInitialContent(deltas);
+  }
+
+  discardNodes(canvasId: string, nodeIds: ReadonlySet<string>): void {
+    this.managers.get(canvasId)?.discardNodes(nodeIds);
+  }
+
   undo(nodes: Node[], edges: Edge[]): CanvasSnapshot | null {
     return this.active.undo(nodes, edges);
   }
@@ -484,17 +541,31 @@ export class CanvasHistoryRegistry {
     prevNodes: Node[],
     restoredNodes: Node[],
     triggerPreprocessing: TriggerPreprocessingFn,
+    getPendingCreation?: (nodeId: string) => Promise<void> | undefined,
   ): void {
     this.active.syncServerAfterRestore(
       canvasId,
       prevNodes,
       restoredNodes,
       triggerPreprocessing,
+      getPendingCreation,
     );
   }
 
-  trackDelete(canvasId: string, nodeId: string): AbortController {
-    return this.active.trackDelete(canvasId, nodeId);
+  trackDelete(
+    canvasId: string,
+    nodeId: string,
+    pendingCreation?: Promise<void>,
+  ): AbortController {
+    return this.active.trackDelete(canvasId, nodeId, pendingCreation);
+  }
+
+  waitForDeletion(nodeId: string): Promise<void> {
+    return this.active.waitForDeletion(nodeId);
+  }
+
+  waitForDeletions(canvasId: string): Promise<void> | undefined {
+    return this.managers.get(canvasId)?.waitForDeletions();
   }
 }
 

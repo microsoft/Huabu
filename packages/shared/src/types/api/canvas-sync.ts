@@ -47,6 +47,8 @@ export const canvasSyncEventSchema = z.discriminatedUnion('type', [
     data: z.object({
       fromVersion: z.number(),
       toVersion: z.number(),
+      /** Lifecycle projections do not create editable-operation undo entries. */
+      agentNodeProjection: z.boolean().optional(),
       /** Structural deltas between prestate and poststate, in apply order. */
       deltas: z.array(z.unknown()),
       pendingEffects: canvasSyncPendingEffectsSchema,

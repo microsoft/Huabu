@@ -5,11 +5,12 @@ import { MessageSquare } from 'lucide-react';
 import { memo, useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { createId, getQuestionNodeStatus } from '@huabu/shared';
+import { getQuestionNodeStatus } from '@huabu/shared';
 
 import './QuestionNode.css';
 
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar.tsx';
+import { toast } from '@/components/Common/Toast';
 import { useActivelyViewingQuestionNode } from '@/hooks/useActivelyViewingQuestion';
 import { useTextNodeSurface } from '@/hooks/useTextNodeSurface';
 import { useAcpProfilesStore } from '@/store/acpProfilesStore.ts';
@@ -22,6 +23,10 @@ import {
   useChatStore,
 } from '@/store/chatStore.ts';
 import { findPendingPermissionRequestId } from '@/store/chatTypes.ts';
+import {
+  acknowledgeConversationResult,
+  resolveConversationAgentBinding,
+} from '@/store/conversationOwner';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 import {
   getQuestionFontOpts,
@@ -37,6 +42,7 @@ import { NodeWrapper } from '../NodeWrapper';
 import {
   enterQuestionCompose,
   enterQuestionConversation,
+  ensureQuestionThread,
 } from './questionCompose.ts';
 import { QuestionTakeoverMark } from './QuestionTakeoverMark.tsx';
 import { TextNodeBody } from '../shared/TextNodeBody';
@@ -66,7 +72,6 @@ const STICKY_BG = 'var(--question-bg)';
 export const QuestionNode = memo(
   ({ id, data, selected, width }: NodeProps<QuestionNodeType>) => {
     const { t } = useTranslation();
-    const patchNodeSilent = useCanvasStore((state) => state.patchNodeSilent);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
     // On-canvas anchor text. Prefer the generated `label` (a concise
@@ -199,7 +204,23 @@ export const QuestionNode = memo(
         );
         // Mark as viewed only once the run has finished.
         if (hasRun && !data.viewed) {
-          patchNodeSilent(id, { viewed: true });
+          void acknowledgeConversationResult(
+            {
+              presentationAnchor: { canvasId, nodeId: id },
+              conversationOwner: {
+                canvasId,
+                nodeId: id,
+                threadId: data.threadId,
+              },
+            },
+            {
+              status: data.status,
+              viewed: data.viewed,
+              invocationToken: data.invocationToken,
+            },
+          ).catch((error) =>
+            console.error('Failed to acknowledge Agent result', error),
+          );
         }
       },
       [
@@ -210,7 +231,8 @@ export const QuestionNode = memo(
         needsApproval,
         hasRun,
         canvasId,
-        patchNodeSilent,
+        data.invocationToken,
+        data.status,
       ],
     );
 
@@ -221,22 +243,28 @@ export const QuestionNode = memo(
     // ------------------------------------------------------------------
     const openInCompose = useCallback(
       (transient = false) => {
-        let threadId = data.threadId;
-        if (!threadId) {
-          threadId = createId('thread');
-          patchNodeSilent(id, { threadId });
-        }
-        enterQuestionCompose(
-          {
-            presentationAnchor: { canvasId, nodeId: id },
-            conversationOwner: { canvasId, nodeId: id, threadId },
-          },
-          canvasId,
-          data.agentBinding,
-          { transient },
-        );
+        void ensureQuestionThread(canvasId, id)
+          .then((threadId) =>
+            enterQuestionCompose(
+              {
+                presentationAnchor: { canvasId, nodeId: id },
+                conversationOwner: { canvasId, nodeId: id, threadId },
+              },
+              canvasId,
+              data.agentBinding,
+              { transient },
+            ),
+          )
+          .catch((error) =>
+            toast(
+              error instanceof Error
+                ? error.message
+                : 'Failed to open Agent conversation',
+              { tone: 'danger' },
+            ),
+          );
       },
-      [id, data.threadId, data.agentBinding, canvasId, patchNodeSilent],
+      [id, data.agentBinding, canvasId],
     );
 
     // ------------------------------------------------------------------
@@ -289,17 +317,16 @@ export const QuestionNode = memo(
 
     const isDoneUnviewed = status === 'done' && !viewed;
     const isErrorUnviewed = status === 'error' && !viewed;
-    const effectiveBinding = (isOpenForQuestion
-      ? composeAgentBinding
-      : data.agentBinding) ??
-      data.agentBinding ?? { kind: 'internal' as const };
+    const effectiveBinding = resolveConversationAgentBinding(
+      data,
+      composeAgentBinding ?? { kind: 'internal' },
+    );
     const agentPresentation = resolveQuestionAgentPresentation({
       binding: effectiveBinding,
       fallbackIcon: data.agentIcon,
       profiles: agentProfiles,
-      agentMode: isOpenForQuestion
-        ? composeAgentMode
-        : (data.agentMode ?? 'ask'),
+      agentMode:
+        data.agentMode ?? (isOpenForQuestion ? composeAgentMode : 'ask'),
     });
     // `open` is the highest-priority badge state, BUT only while the chat
     // panel is actually visible: whenever this node's conversation is open in

@@ -1218,33 +1218,20 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
             ),
           );
       }
-      let envelope;
-      try {
-        envelope = await buildChatEnvelope({
-          content: initialPrompt,
-          anchorNodeId: target.nodeId,
-          canvasId,
-          logger: request.log,
-        });
-      } catch (error) {
-        request.log.error(
-          {
-            error,
+      let preparationFailed = false;
+      const envelope = async () => {
+        try {
+          return await buildChatEnvelope({
+            content: initialPrompt,
+            anchorNodeId: target.nodeId,
             canvasId,
-            nodeId: created.nodeId,
-            threadId: created.threadId,
-          },
-          'rfs created Agent prompt preparation failed',
-        );
-        return reply
-          .code(500)
-          .send(
-            rfsError(
-              `Agent ${created.nodeId} was created with thread ${created.threadId}, but its first prompt could not be prepared.`,
-              'prompt_preparation_failed',
-            ),
-          );
-      }
+            logger: request.log,
+          });
+        } catch (error) {
+          preparationFailed = true;
+          throw error;
+        }
+      };
       let invocation;
       try {
         invocation = await agentThreadService.invoke({
@@ -1273,8 +1260,12 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
           .code(500)
           .send(
             rfsError(
-              `Agent ${created.nodeId} was created with thread ${created.threadId}, but its first turn could not start.`,
-              'invocation_failed',
+              preparationFailed
+                ? `Agent ${created.nodeId} was created with thread ${created.threadId}, but its first prompt could not be prepared.`
+                : `Agent ${created.nodeId} was created with thread ${created.threadId}, but its first turn could not start.`,
+              preparationFailed
+                ? 'prompt_preparation_failed'
+                : 'invocation_failed',
             ),
           );
       }
@@ -1343,11 +1334,15 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
       }
 
       let target;
+      let fixedTarget;
       try {
-        target = await agentThreadService.resolveFixedTarget(
+        fixedTarget = await agentThreadService.resolveFixedTarget(
           canvasId,
           threadId,
         );
+        target =
+          fixedTarget ??
+          (await agentThreadResolver.resolveAgentNode(canvasId, threadId));
       } catch (error) {
         if (error instanceof AgentThreadResolutionError) {
           return reply
@@ -1367,12 +1362,13 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
           );
       }
 
-      const envelope = await buildChatEnvelope({
-        content: prompt,
-        anchorNodeId: target.nodeId,
-        canvasId,
-        logger: request.log,
-      });
+      const envelope = () =>
+        buildChatEnvelope({
+          content: prompt,
+          anchorNodeId: target.nodeId,
+          canvasId,
+          logger: request.log,
+        });
       let invocation;
       try {
         invocation = await agentThreadService.invoke({
@@ -1381,7 +1377,8 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
           content: prompt,
           mode: 'operate',
           envelope,
-          fixedTarget: target,
+          fixedTarget,
+          agentTarget: target,
           logger: request.log,
         });
       } catch (error) {

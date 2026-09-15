@@ -93,6 +93,7 @@ function createHarness(options?: {
   persistedBinding?: Extract<AgentBinding, { kind: 'external' }> | null;
   persistedSpacePrompt?: { realised: boolean; markdown?: string };
   collectedSpacePrompt?: string;
+  canonicalBinding?: AgentBinding;
 }) {
   const release = vi.fn();
   const startLifecycle = options?.startError
@@ -158,7 +159,9 @@ function createHarness(options?: {
     resolveAgentNode: async () =>
       options && 'agentTarget' in options
         ? (options.agentTarget ?? null)
-        : (options?.target ?? TARGET),
+        : options && 'target' in options
+          ? (options.target ?? null)
+          : TARGET,
     resolveFixedAgentNode: async () =>
       options && 'target' in options ? (options.target ?? null) : TARGET,
     resolvePersistedExternalBinding: () =>
@@ -177,6 +180,9 @@ function createHarness(options?: {
     runExternal,
     runInternal,
     closeHandle: vi.fn(),
+    confirmBinding: options?.canonicalBinding
+      ? vi.fn().mockResolvedValue(options.canonicalBinding)
+      : undefined,
   });
   return {
     service,
@@ -200,8 +206,8 @@ function invocationOptions() {
     envelope: ENVELOPE,
     requestBinding: {
       kind: 'external' as const,
-      profileId: 'profile-request',
-      alias: 'Request Agent',
+      profileId: 'profile-fixed',
+      alias: 'Fixed Agent',
     },
     fixedTarget: TARGET,
     signal: new AbortController().signal,
@@ -210,6 +216,322 @@ function invocationOptions() {
 }
 
 describe('AgentThreadService', () => {
+  it('keeps slow input preparation inside cancellable admission and never dispatches after stop', async () => {
+    const h = createHarness();
+    let finishPreparation!: () => void;
+    let started!: () => void;
+    const preparing = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const preparation = new Promise<void>((resolve) => {
+      finishPreparation = resolve;
+    });
+    const pending = h.service.invoke({
+      ...invocationOptions(),
+      envelope: async () => {
+        started();
+        await preparation;
+        return ENVELOPE;
+      },
+    });
+    await preparing;
+    expect(h.startLifecycle).toHaveBeenCalledOnce();
+    expect(h.service.stop('thread-a')).toBe(true);
+    expect(h.release).not.toHaveBeenCalled();
+    finishPreparation();
+    const invocation = await pending;
+    for await (const _event of invocation.events) {
+      /* Drain cancelled preparation. */
+    }
+    expect(h.realizeExternal).not.toHaveBeenCalled();
+    expect(h.runExternal).not.toHaveBeenCalled();
+    expect(h.finishLifecycle).toHaveBeenCalledOnce();
+    expect(h.release).toHaveBeenCalledOnce();
+  });
+
+  it('projects input preparation failures with the admitted token and does not realize an execution', async () => {
+    const h = createHarness();
+    await expect(
+      h.service.invoke({
+        ...invocationOptions(),
+        envelope: async () => {
+          throw new Error('Input preparation failed');
+        },
+      }),
+    ).rejects.toThrow('Input preparation failed');
+    expect(h.failLifecycle).toHaveBeenCalledWith(
+      TARGET,
+      'Input preparation failed',
+      h.startLifecycle.mock.calls[0]?.[2],
+    );
+    expect(h.realizeExternal).not.toHaveBeenCalled();
+    expect(h.release).toHaveBeenCalledOnce();
+  });
+
+  it('admits and installs cancellation before slow external preparation', async () => {
+    const h = createHarness();
+    let finishPreparation!: () => void;
+    const preparation = new Promise<void>((resolve) => {
+      finishPreparation = resolve;
+    });
+    let preparationStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      preparationStarted = resolve;
+    });
+    h.realizeExternal.mockImplementationOnce(async () => {
+      preparationStarted();
+      await preparation;
+      return {
+        binding: TARGET.agentBinding as Extract<
+          AgentBinding,
+          { kind: 'external' }
+        >,
+        fixedTarget: TARGET,
+        spec: {} as AcpWorkloadSpec,
+        handle: {} as AcpHandle,
+      };
+    });
+    const pending = h.service.invoke(invocationOptions());
+    await started;
+    expect(h.startLifecycle).toHaveBeenCalledOnce();
+    expect(h.service.isActive('thread-a', 'canvas-a')).toBe(true);
+    expect(h.service.stop('thread-a')).toBe(true);
+    expect(h.release).not.toHaveBeenCalled();
+    finishPreparation();
+    const invocation = await pending;
+    for await (const _event of invocation.events) {
+      /* Drain settlement. */
+    }
+    expect(h.runExternal).not.toHaveBeenCalled();
+    expect(h.finishLifecycle).toHaveBeenCalledOnce();
+    expect(h.release).toHaveBeenCalledOnce();
+    expect(h.service.isActive('thread-a', 'canvas-a')).toBe(false);
+  });
+
+  it('settles preparation errors and retains the admitted token', async () => {
+    const h = createHarness();
+    h.realizeExternal.mockRejectedValueOnce(new Error('Profile unavailable'));
+    await expect(h.service.invoke(invocationOptions())).rejects.toThrow(
+      'Profile unavailable',
+    );
+    const token = h.startLifecycle.mock.calls[0]?.[2];
+    expect(h.failLifecycle).toHaveBeenCalledWith(
+      TARGET,
+      'Profile unavailable',
+      token,
+    );
+    expect(h.release).toHaveBeenCalledOnce();
+    expect(h.runExternal).not.toHaveBeenCalled();
+  });
+
+  it('treats cancellation unwinding preparation as cancellation, not an HTTP preparation error', async () => {
+    const h = createHarness();
+    h.realizeExternal.mockImplementationOnce(async () => {
+      h.service.stop('thread-a');
+      throw new DOMException('Stopped during preparation', 'AbortError');
+    });
+    const invocation = await h.service.invoke(invocationOptions());
+    expect(invocation.signal.aborted).toBe(true);
+    for await (const _event of invocation.events) {
+      /* Drain cancelled preparation. */
+    }
+    expect(h.finishLifecycle).toHaveBeenCalledOnce();
+    expect(h.failLifecycle).not.toHaveBeenCalled();
+    expect(h.runExternal).not.toHaveBeenCalled();
+    expect(h.release).toHaveBeenCalledOnce();
+  });
+
+  it('rejects stale requested selection without a lifecycle transition or realization', async () => {
+    const h = createHarness();
+    await expect(
+      h.service.invoke({
+        ...invocationOptions(),
+        requestBinding: {
+          kind: 'external',
+          profileId: 'stale',
+          alias: 'Old selection',
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'agent_binding_conflict' });
+    expect(h.startLifecycle).not.toHaveBeenCalled();
+    expect(h.realizeExternal).not.toHaveBeenCalled();
+    expect(h.release).toHaveBeenCalledOnce();
+  });
+
+  it('rejects an internal node whose confirmed execution uses an external binding without a request binding', async () => {
+    const h = createHarness({
+      target: null,
+      agentTarget: { ...SELECTABLE_TARGET, agentBinding: { kind: 'internal' } },
+      canonicalBinding: {
+        kind: 'external',
+        profileId: 'other',
+        alias: 'Other',
+      },
+    });
+    await expect(
+      h.service.invoke({
+        ...invocationOptions(),
+        requestBinding: undefined,
+      }),
+    ).rejects.toMatchObject({ code: 'agent_binding_conflict' });
+    expect(h.realizeExternal).not.toHaveBeenCalled();
+    expect(h.runInternal).not.toHaveBeenCalled();
+    expect(h.failLifecycle).toHaveBeenCalledOnce();
+    expect(h.release).toHaveBeenCalledOnce();
+  });
+
+  it('does not turn a captured preparation failure into success when cancellation arrives before the catch', async () => {
+    const h = createHarness();
+    h.realizeExternal.mockImplementationOnce(async () => {
+      const failure = new Error('Canonical record invalid');
+      queueMicrotask(() => h.service.stop('thread-a'));
+      throw failure;
+    });
+    await expect(h.service.invoke(invocationOptions())).rejects.toThrow(
+      'Canonical record invalid',
+    );
+    expect(h.failLifecycle).toHaveBeenCalledWith(
+      TARGET,
+      'Canonical record invalid',
+      expect.any(String),
+    );
+    expect(h.finishLifecycle).not.toHaveBeenCalled();
+    expect(h.release).toHaveBeenCalledOnce();
+  });
+
+  it('cannot run a lazy stream after explicit disposal released admission', async () => {
+    const h = createHarness();
+    const invocation = await h.service.invoke(invocationOptions());
+    await invocation.dispose(new Error('Transport setup failed'));
+    for await (const _event of invocation.events) {
+      /* Drain disposed stream. */
+    }
+    expect(h.runExternal).not.toHaveBeenCalled();
+    expect(h.release).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    { name: 'empty output', stream: [] as AgentStreamEvent[], outcome: 'done' },
+    {
+      name: 'Done after an error',
+      stream: [
+        { type: 'error', data: { error: 'Recoverable' } },
+        { type: 'done', data: { message: '' } },
+      ] as AgentStreamEvent[],
+      outcome: 'done',
+    },
+    {
+      name: 'error after Done',
+      stream: [
+        { type: 'done', data: { message: '' } },
+        { type: 'error', data: { error: 'Late error' } },
+      ] as AgentStreamEvent[],
+      outcome: 'done',
+    },
+    {
+      name: 'a handled tool error',
+      stream: [
+        {
+          type: 'tool_call',
+          data: { toolCallId: 'tool', title: 'read', status: 'failed' },
+        },
+      ] as AgentStreamEvent[],
+      outcome: 'done',
+    },
+    {
+      name: 'an unhandled stream error',
+      stream: [
+        { type: 'error', data: { error: 'Failed' } },
+      ] as AgentStreamEvent[],
+      outcome: 'error',
+    },
+  ])('preserves terminal precedence for $name', async ({ stream, outcome }) => {
+    const h = createHarness({ externalEvents: stream });
+    const invocation = await h.service.invoke(invocationOptions());
+    for await (const _event of invocation.events) {
+      /* Drain characterized events. */
+    }
+    expect(h.finishLifecycle).toHaveBeenCalledTimes(outcome === 'done' ? 1 : 0);
+    expect(h.failLifecycle).toHaveBeenCalledTimes(outcome === 'error' ? 1 : 0);
+    expect(h.release).toHaveBeenCalledOnce();
+  });
+
+  it.each(['done', 'error'] as const)(
+    'a late stop cannot rewrite an established %s fact',
+    async (outcome) => {
+      const h = createHarness({
+        externalEvents:
+          outcome === 'done'
+            ? [{ type: 'done', data: { message: '' } }]
+            : [{ type: 'error', data: { error: 'Failure' } }],
+      });
+      const controller = new AbortController();
+      const invocation = await h.service.invoke({
+        ...invocationOptions(),
+        signal: controller.signal,
+      });
+      const stream = invocation.events;
+      await stream.next();
+      expect(h.service.stop('thread-a')).toBe(false);
+      controller.abort();
+      await stream.next();
+      expect(h.failLifecycle).toHaveBeenCalledTimes(
+        outcome === 'error' ? 1 : 0,
+      );
+      expect(h.finishLifecycle).toHaveBeenCalledTimes(
+        outcome === 'done' ? 1 : 0,
+      );
+    },
+  );
+
+  it('preserves cancellation when the adapter reports an error after stop', async () => {
+    const h = createHarness({
+      externalEvents: [
+        { type: 'text_delta', data: { content: 'Partial' } },
+        { type: 'error', data: { error: 'Aborted' } },
+      ],
+    });
+    const invocation = await h.service.invoke(invocationOptions());
+    await invocation.events.next();
+    expect(h.service.stop('thread-a')).toBe(true);
+    expect(h.release).not.toHaveBeenCalled();
+    await invocation.events.next();
+    await invocation.events.next();
+    expect(h.finishLifecycle).toHaveBeenCalledOnce();
+    expect(h.failLifecycle).not.toHaveBeenCalled();
+    expect(h.release).toHaveBeenCalledOnce();
+  });
+
+  it.each(['done', 'error'] as const)(
+    'stream disposal retains an established %s outcome',
+    async (outcome) => {
+      const h = createHarness({
+        externalEvents:
+          outcome === 'done'
+            ? [{ type: 'done', data: { message: '' } }]
+            : [{ type: 'error', data: { error: 'Original failure' } }],
+      });
+      const invocation = await h.service.invoke(invocationOptions());
+      await invocation.events.next();
+      await invocation.dispose(new Error('Late transport failure'));
+      await invocation.events.return();
+      expect(h.finishLifecycle).toHaveBeenCalledTimes(
+        outcome === 'done' ? 1 : 0,
+      );
+      expect(h.failLifecycle).toHaveBeenCalledTimes(
+        outcome === 'error' ? 1 : 0,
+      );
+      if (outcome === 'error') {
+        expect(h.failLifecycle).toHaveBeenCalledWith(
+          TARGET,
+          'Original failure',
+          expect.any(String),
+        );
+      }
+      expect(h.release).toHaveBeenCalledOnce();
+    },
+  );
+
   it('validates an external binding from a durable workload spec', () => {
     expect(
       externalBindingFromWorkloadSpec({
@@ -280,6 +602,7 @@ describe('AgentThreadService', () => {
     expect(harness.startLifecycle).toHaveBeenCalledWith(
       TARGET,
       'Investigate this',
+      expect.any(String),
     );
     expect(harness.runExternal).not.toHaveBeenCalled();
 
@@ -294,7 +617,10 @@ describe('AgentThreadService', () => {
         binding: TARGET.agentBinding,
       }),
     );
-    expect(harness.finishLifecycle).toHaveBeenCalledWith(TARGET);
+    expect(harness.finishLifecycle).toHaveBeenCalledWith(
+      TARGET,
+      expect.any(String),
+    );
     expect(harness.failLifecycle).not.toHaveBeenCalled();
     expect(harness.release).toHaveBeenCalledOnce();
   });
@@ -335,6 +661,7 @@ describe('AgentThreadService', () => {
     expect(harness.failLifecycle).toHaveBeenCalledWith(
       TARGET,
       'Agent unavailable',
+      expect.any(String),
     );
     expect(harness.finishLifecycle).not.toHaveBeenCalled();
     expect(harness.release).toHaveBeenCalledOnce();
@@ -352,6 +679,7 @@ describe('AgentThreadService', () => {
     const invocation = await harness.service.invoke({
       ...invocationOptions(),
       fixedTarget: target,
+      requestBinding: { kind: 'internal' },
     });
 
     for await (const _event of invocation.events) {
@@ -393,7 +721,11 @@ describe('AgentThreadService', () => {
     expect(harness.runInternal).toHaveBeenCalledWith(
       expect.objectContaining({ spacePrompt: 'Space prompt' }),
     );
-    expect(harness.startLifecycle).not.toHaveBeenCalled();
+    expect(harness.startLifecycle).toHaveBeenCalledWith(
+      SELECTABLE_TARGET,
+      'Investigate this',
+      expect.any(String),
+    );
   });
 
   it('passes a selectable Agent Node to external realization', async () => {
@@ -417,7 +749,11 @@ describe('AgentThreadService', () => {
         fixedTarget: null,
       }),
     );
-    expect(harness.startLifecycle).not.toHaveBeenCalled();
+    expect(harness.startLifecycle).toHaveBeenCalledWith(
+      SELECTABLE_TARGET,
+      'Investigate this',
+      expect.any(String),
+    );
   });
 
   it('does not collect a Space Prompt for a node-less thread', async () => {
@@ -482,6 +818,7 @@ describe('AgentThreadService', () => {
     expect(harness.failLifecycle).toHaveBeenCalledWith(
       TARGET,
       'SSE setup failed',
+      expect.any(String),
     );
     expect(harness.release).toHaveBeenCalledOnce();
   });

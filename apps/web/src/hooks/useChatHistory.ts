@@ -6,7 +6,6 @@ import { useEffect } from 'react';
 import { createId } from '@huabu/shared';
 
 import { agentApi } from '@/api/agent';
-import { isActivelyViewingQuestion } from '@/hooks/useActivelyViewingQuestion';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import useCanvasStore from '@/store/canvasStore';
 import {
@@ -17,10 +16,7 @@ import {
 } from '@/store/chatStore';
 import {
   ConversationIntegrityError,
-  filterClientOwnedQuestionPatch,
-  patchConversationOwnerNode,
   refreshConversationPresentation,
-  resolveConversationOwnerSource,
   validateConversationView,
 } from '@/store/conversationOwner';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
@@ -270,86 +266,16 @@ export function useChatHistory(
       const assistantId = createId('message');
       // Flag set to true once we know the server has an active run
       let streaming = false;
-      // Track whether a usable final `done` event arrived so a late
-      // cap-out error after a complete answer terminalizes as `done`.
-      let sawDone = false;
-
-      // Drive the question node that owns the reconnected thread to a
-      // terminal status. Resolves the node by `data.threadId` so it
-      // works regardless of which thread is currently visible. Only
-      // rescues a still-live node (`running` / `pending`): never
-      // overrides a terminal status the originating run already wrote,
-      // nor resurrects a user cancel (`idle`).
-      const rescueQuestionNode = (
-        forThreadId: string,
-        patch: Record<string, unknown>,
-      ) => {
-        if (
-          ownerView?.conversationOwner.threadId === forThreadId &&
-          ownerView.conversationOwner.canvasId === ownerCanvasId
-        ) {
-          const canvas = useCanvasStore.getState();
-          const ownerPatch = filterClientOwnedQuestionPatch(
-            resolveConversationOwnerSource(
-              canvas.canvasId,
-              canvas.nodes,
-              canvas.worldReferences,
-              ownerView,
-            ),
-            patch,
-          );
-          if (!ownerPatch) return;
-          void patchConversationOwnerNode(ownerView, ownerPatch)
-            .then(async () => {
-              await refreshConversationPresentation(ownerView);
-              if (
-                ownerView.presentationAnchor.canvasId !==
-                  ownerView.conversationOwner.canvasId ||
-                ownerView.presentationAnchor.nodeId !==
-                  ownerView.conversationOwner.nodeId
-              ) {
-                await useAcpThreadChangesStore
-                  .getState()
-                  .load(ownerCanvasId, forThreadId);
-              }
-            })
-            .catch((error) =>
-              console.error(
-                '[useChatHistory] failed to persist owner lifecycle',
-                error,
-              ),
-            );
-          return;
-        }
-        const node = useCanvasStore
-          .getState()
-          .nodes.find(
-            (n) =>
-              n.type === 'question' &&
-              (n.data as Record<string, unknown> | undefined)?.threadId ===
-                forThreadId,
-          );
-        if (!node) return;
-        const bindingPolicy = (
-          node.data as { agentBindingPolicy?: unknown } | undefined
-        )?.agentBindingPolicy;
-        const ownerPatch = filterClientOwnedQuestionPatch(
-          bindingPolicy === 'fixed' || bindingPolicy === 'selectable'
-            ? { agentBindingPolicy: bindingPolicy }
-            : undefined,
-          patch,
+      const refreshObservation = () => {
+        if (!ownerView) return;
+        void Promise.all([
+          refreshConversationPresentation(ownerView),
+          useAcpThreadChangesStore
+            .getState()
+            .load(ownerCanvasId, ownerThreadId),
+        ]).catch((error) =>
+          console.error('[useChatHistory] observation refresh failed', error),
         );
-        if (!ownerPatch) return;
-        const curStatus = (node.data as Record<string, unknown> | undefined)
-          ?.status;
-        if (
-          bindingPolicy !== 'fixed' &&
-          curStatus !== 'running' &&
-          curStatus !== 'pending'
-        ) {
-          return;
-        }
-        useCanvasStore.getState().patchNodeSilent(node.id, ownerPatch);
       };
 
       // Clear assistant / status messages loaded from history for the
@@ -380,7 +306,6 @@ export function useChatHistory(
         {
           onEvent: (event: AgentStreamEvent) => {
             if (cancelled) return;
-            if (event.type === 'done') sawDone = true;
             if (!streaming) {
               streaming = true;
               setIsLoading(ownerThreadId, true);
@@ -397,33 +322,12 @@ export function useChatHistory(
               detail: err.message,
             });
             setIsLoading(ownerThreadId, false);
-            // A reconnected run that errors must still terminalize the
-            // owning question node — otherwise it stalls at `running`.
-            rescueQuestionNode(
-              ownerThreadId,
-              sawDone
-                ? { status: 'done', errorMessage: undefined }
-                : { status: 'error', errorMessage: err.message },
-            );
+            refreshObservation();
           },
           onComplete: () => {
             if (cancelled) return;
             setIsLoading(ownerThreadId, false);
-            // When the reconnect stream is the consumer that sees the run
-            // finish, the originating `useQuestionRunner` callback may
-            // never fire (its POST stream was superseded / dropped). Drive
-            // the question node to `done` here so the status badge + chat
-            // affordance reappear. Count it as viewed only if the user is
-            // actively watching — this thread is open AND the chat panel is
-            // expanded; a collapsed panel leaves the answer unread.
-            const stillViewing = isActivelyViewingQuestion({
-              threadId: ownerThreadId,
-            });
-            rescueQuestionNode(ownerThreadId, {
-              status: 'done',
-              errorMessage: undefined,
-              ...(stillViewing ? { viewed: true } : {}),
-            });
+            refreshObservation();
           },
         },
         claim.signal,

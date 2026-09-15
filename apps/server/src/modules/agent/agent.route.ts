@@ -22,6 +22,11 @@ import {
   setChatThreadReasoningEffortRequestSchema,
 } from '@huabu/shared';
 
+import {
+  AgentNodeBindingError,
+  agentNodeBinding,
+} from './agent-node-binding.js';
+import { agentThreadResolver } from './agent-thread-resolver.js';
 import { ExternalAgentRealizationError } from '../agent/acp/external-agent-realization.js';
 import { agenetes, INTERNAL_DRIVER_KIND } from '../agent/agenetes/drivers.js';
 import {
@@ -82,6 +87,27 @@ async function dispatchBuiltinControl(
   { ok: true } | { ok: false; status: number; message: string; code: string }
 > {
   const record = agenetes.record(namespace, threadId);
+  if (namespace.name) {
+    const target = await agentThreadResolver.resolveAgentNode(
+      namespace.name,
+      threadId,
+    );
+    if (target) {
+      try {
+        await agentNodeBinding.confirm(target, { record: record ?? null });
+      } catch (error) {
+        if (error instanceof AgentNodeBindingError) {
+          return {
+            ok: false,
+            status: 409,
+            message: error.message,
+            code: error.code,
+          };
+        }
+        throw error;
+      }
+    }
+  }
   if (!record) {
     return {
       ok: false,
@@ -578,15 +604,16 @@ const agentRoutes: FastifyPluginAsync = async (
     // message INSIDE the dispatch layer (runAgent / runAcpAgent), so both
     // backends share one render timing and it never enters the persisted
     // transcript (it is re-derived from the envelope on reload).
-    const envelope = await buildChatEnvelope({
-      content,
-      attachments,
-      selectedNodes: canvasContext?.selectedNodes,
-      anchorNodeId: fixedTarget?.nodeId ?? anchorNodeId,
-      invokedSkills,
-      canvasId: canvasId ?? null,
-      logger: request.log,
-    });
+    const envelope = () =>
+      buildChatEnvelope({
+        content,
+        attachments,
+        selectedNodes: canvasContext?.selectedNodes,
+        anchorNodeId: fixedTarget?.nodeId ?? anchorNodeId,
+        invokedSkills,
+        canvasId: canvasId ?? null,
+        logger: request.log,
+      });
     // Debug-prompt metadata forwarded to the dispatch layer (it assembles
     // the final prompt). No-op unless HUABU_DEBUG_PROMPT is set.
     const debugPrompt = {
@@ -621,7 +648,10 @@ const agentRoutes: FastifyPluginAsync = async (
           code: 'thread_busy',
         });
       }
-      if (error instanceof ExternalAgentRealizationError) {
+      if (
+        error instanceof ExternalAgentRealizationError ||
+        error instanceof AgentNodeBindingError
+      ) {
         return reply.code(409).send({
           message: error.message,
           code: error.code,

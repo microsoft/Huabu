@@ -11,6 +11,11 @@
 
 import { z } from 'zod';
 
+import {
+  canvasEditableNodeSchema,
+  agentNodeBindingStateSchema,
+  agentNodeInvocationTokenSchema,
+} from './agent-node.js';
 import { agentBindingSchema } from './agent.js';
 
 export interface GetCanvasResponse {
@@ -33,6 +38,9 @@ const resolvedSourceNodeSchema = z
     threadId: z.string().min(1).optional(),
     status: z.enum(['idle', 'running', 'done', 'error']).optional(),
     viewed: z.boolean().optional(),
+    bindingState: agentNodeBindingStateSchema.optional(),
+    invocationToken: agentNodeInvocationTokenSchema.optional(),
+    errorMessage: z.string().optional(),
     agentMode: z.enum(['ask', 'operate']).optional(),
     agentBinding: agentBindingSchema.optional(),
     hasAuthoredContent: z.boolean().optional(),
@@ -94,7 +102,12 @@ export type GetWorldReferencesResponse = z.infer<
 /** Body for `PUT /api/canvas/:canvasId`. */
 export const putCanvasBodySchema = z.object({
   version: z.number().int().nonnegative(),
-  state: z.unknown(),
+  state: z
+    .object({
+      nodes: z.array(canvasEditableNodeSchema),
+      edges: z.array(z.unknown()).optional(),
+    })
+    .catchall(z.unknown()),
   title: z.string().min(1).optional(),
 });
 export type PutCanvasRequest = z.infer<typeof putCanvasBodySchema>;

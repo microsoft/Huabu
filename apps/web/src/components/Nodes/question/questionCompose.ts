@@ -12,11 +12,19 @@
  */
 import { createId } from '@huabu/shared';
 
+import { associateAgentNode } from '@/api/canvas';
+import { toast } from '@/components/Common/Toast';
+import { useAcpProfilesStore } from '@/store/acpProfilesStore';
 import useCanvasStore from '@/store/canvasStore.ts';
 import { useChatStore } from '@/store/chatStore.ts';
+import {
+  resolveConversationOwnerSource,
+  saveConversationDraft,
+} from '@/store/conversationOwner';
 import { usePanelStore } from '@/store/panelStore.ts';
 import { openPreviewNode } from '@/store/previewWorkspace/actions.ts';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store.ts';
+import { snapshotAgentIcon } from '@/utils/agentIcon';
 
 import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent.ts';
 import type {
@@ -24,6 +32,55 @@ import type {
   AgentConversationView,
   CanvasNodeId,
 } from '@huabu/shared';
+import type { Node } from '@xyflow/react';
+
+/** Legacy Questions acquire an identity on the server before compose opens. */
+export async function ensureQuestionThread(
+  canvasId: string,
+  nodeId: string,
+): Promise<string> {
+  const initial = useCanvasStore.getState();
+  const existing = initial.nodes.find((node) => node.id === nodeId);
+  if (initial.canvasId !== canvasId || existing?.type !== 'question')
+    throw new Error('Agent Node no longer exists');
+  if (typeof existing.data.threadId === 'string' && existing.data.threadId)
+    return existing.data.threadId;
+  const response = await associateAgentNode(canvasId, nodeId, {
+    kind: 'initialize',
+  });
+  const current = useCanvasStore.getState();
+  const live = current.nodes.find((node) => node.id === nodeId);
+  if (current.canvasId !== canvasId || live?.type !== 'question')
+    throw new Error('Agent Node no longer exists');
+  const confirmed = response.node as Node;
+  if (!live.data.threadId) {
+    current._setStateNoAutosave({
+      nodes: current.nodes.map((node) =>
+        node.id === nodeId
+          ? {
+              ...node,
+              data: {
+                ...node.data,
+                threadId: confirmed.data.threadId,
+                bindingState: confirmed.data.bindingState,
+                agentBinding:
+                  confirmed.data.agentBinding ?? node.data.agentBinding,
+              },
+            }
+          : node,
+      ),
+      ...(current.version === response.fromVersion
+        ? { version: response.toVersion }
+        : {}),
+    });
+  }
+  const threadId = useCanvasStore
+    .getState()
+    .nodes.find((node) => node.id === nodeId)?.data.threadId;
+  if (typeof threadId !== 'string' || !threadId)
+    throw new Error('Agent Node association was not acknowledged');
+  return threadId;
+}
 
 function initializeQuestionBinding(
   view: AgentConversationView,
@@ -33,11 +90,56 @@ function initializeQuestionBinding(
 ): void {
   const chat = useChatStore.getState();
   const ownerCanvasId = canvasId ?? view.conversationOwner.canvasId;
-  const effectiveBinding =
-    binding ??
-    (inheritCanvasDefault ? chat.bindingMap[ownerCanvasId] : undefined);
+  const effectiveBinding = binding ??
+    (inheritCanvasDefault ? chat.bindingMap[ownerCanvasId] : undefined) ?? {
+      kind: 'internal' as const,
+    };
+  const canvas = useCanvasStore.getState();
+  const source = resolveConversationOwnerSource(
+    canvas.canvasId,
+    canvas.nodes,
+    canvas.worldReferences,
+    view,
+  );
   if (effectiveBinding) {
     chat.setAgentBinding(view.conversationOwner.threadId, effectiveBinding);
+  }
+  const mode =
+    source?.agentMode ??
+    (effectiveBinding.kind === 'internal' ? 'operate' : 'ask');
+  chat.setThreadLastAction(view.conversationOwner.threadId, mode);
+  if (
+    inheritCanvasDefault &&
+    !source?.agentBinding &&
+    source?.bindingState !== 'bound'
+  ) {
+    const profiles = useAcpProfilesStore.getState().profiles;
+    const profile =
+      effectiveBinding.kind === 'external'
+        ? profiles.find((entry) => entry.id === effectiveBinding.profileId)
+        : undefined;
+    const icon = snapshotAgentIcon(effectiveBinding, profiles);
+    void saveConversationDraft(view, {
+      agentBinding:
+        profile && effectiveBinding.kind === 'external'
+          ? { ...effectiveBinding, alias: profile.alias }
+          : effectiveBinding,
+      agentMode: mode,
+      ...(icon ? { agentIcon: icon } : {}),
+    })
+      .then(() =>
+        chat.makeThreadMetadataEphemeral(view.conversationOwner.threadId, {
+          preserveSettings: true,
+        }),
+      )
+      .catch((error) =>
+        toast(
+          error instanceof Error
+            ? error.message
+            : 'Failed to save Agent selection',
+          { tone: 'danger' },
+        ),
+      );
   }
 }
 

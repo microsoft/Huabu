@@ -3,6 +3,7 @@
 
 import { noop, type CommandDefinition } from './types.js';
 import { createId, type CanvasCommand } from '../../index.js';
+import { projectAgentNodeEditableData } from '../agentNodeOwnership.js';
 import { materializeAutoHeight } from '../height/materialize.js';
 import { getHeightPolicy } from '../height/policy.js';
 import { deduplicateLabel, generateNextLabel } from '../utils/labels.js';
@@ -104,7 +105,19 @@ const createNodes: CommandDefinition<Cmd> = {
 
       // Apply the per-type default accent, but only if the caller did
       // not explicitly set one (preserves clipboard paste / undo data).
-      const inputData = (input.data ?? {}) as Record<string, unknown>;
+      const suppliedData = (input.data ?? {}) as Record<string, unknown>;
+      const inputData =
+        nodeType === 'question'
+          ? {
+              ...projectAgentNodeEditableData(suppliedData),
+              threadId:
+                typeof suppliedData.threadId === 'string' &&
+                suppliedData.threadId
+                  ? suppliedData.threadId
+                  : createId('thread'),
+              bindingState: 'editing',
+            }
+          : suppliedData;
       const inputStyle = (inputData.style ?? {}) as Record<string, unknown>;
       const hasExplicitAccent = 'accent' in inputStyle;
       const defaultAccent = DEFAULT_ACCENT_BY_TYPE[nodeType];
