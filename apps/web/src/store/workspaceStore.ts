@@ -343,12 +343,11 @@ export function useWorkspaceLabel(): string | null {
 /**
  * Whether the user-facing folder-picker button should be shown.
  *
- * In the Electron desktop shell we always have a GUI and route the
- * picker through `dialog.showOpenDialog` (see
- * `apps/web/src/api/workspace.ts`), so the answer is unconditionally
- * `true`. In a plain browser the picker still runs on the server, so
- * we defer to the server's `capabilities.nativePicker` capability
- * flag (false on headless Linux hosts).
+ * A local Electron shell routes the picker through
+ * `dialog.showOpenDialog` (see `apps/web/src/api/workspace.ts`). Remote
+ * Electron mode disables it because client paths are meaningless to the
+ * Server. In a plain browser the picker still runs on the server, so we
+ * defer to `capabilities.nativePicker` (false on headless Linux hosts).
  *
  * Returns `false` while the first capability snapshot is still loading,
  * matching the conservative behaviour of the workspace setup flow.
@@ -357,5 +356,16 @@ export function useFolderPickerSupported(): boolean {
   const serverCanPick = useWorkspaceStore(
     (s) => s.capabilities?.nativePicker ?? false,
   );
-  return getElectronBridge()?.dialog ? true : serverCanPick;
+  return resolveFolderPickerSupported(serverCanPick);
+}
+
+export function resolveFolderPickerSupported(
+  serverCanPick: boolean,
+  bridge: {
+    isRemoteServer: boolean;
+    dialog?: unknown;
+  } | null = getElectronBridge(),
+): boolean {
+  if (bridge?.isRemoteServer) return false;
+  return bridge?.dialog ? true : serverCanPick;
 }

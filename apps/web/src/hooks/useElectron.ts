@@ -184,6 +184,8 @@ interface ElectronBridge {
     electron: string;
   };
   isElectron: true;
+  /** Whether Electron is connected to a separately hosted Huabu Server. */
+  isRemoteServer: boolean;
   /** Forwarded `process.platform` value: 'win32' | 'darwin' | 'linux' | ... */
   platform: NodeJS.Platform;
   /**

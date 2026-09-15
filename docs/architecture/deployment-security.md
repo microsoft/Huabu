@@ -25,6 +25,8 @@ The global Agent Change Review configuration follows the same owner boundary. `G
 
 `pnpm start:web` serves the compiled SPA and API from Fastify. On a non-loopback bind, startup validation guarantees that every browser route is behind Basic Auth.
 
+`pnpm start:desktop --server <URL>` is a native client for the same remote deployment boundary. It accepts a root HTTP or HTTPS origin but does not weaken the Server's Host, Origin, CORS, or Basic Auth policy and does not inject allowed hosts. A `401` challenge from the selected exact origin opens a sandboxed Electron credential prompt; credentials remain in Chromium's current network session and are not placed in the command line, exposed to the renderer, or persisted by Huabu Desktop.
+
 ## Deployment readiness
 
 `GET /api/deployment/readiness` is available before workspace activation. It returns the resolved bind scope, whether remote-access prerequisites are configured, whether the current request is recognized as the owner, credential-store writability, transport status, and structured warning codes.
@@ -39,6 +41,8 @@ Huabu's Node server currently speaks HTTP. A non-loopback bind logs and reports 
 
 Production HTTPS termination belongs to deployment infrastructure such as Caddy, Nginx, Tailscale Serve, or a cloud load balancer. Trusted-proxy identity and verified forwarded transport are intentionally separate from the current direct/Vite deployment boundary and must not be implemented by accepting arbitrary forwarding headers.
 
+The Desktop remote-client path uses the operating system's normal certificate validation and does not bypass invalid or self-signed certificate errors. Its startup readiness probe follows no redirects, so an unexpected redirect, TLS failure, unreachable host, rejected Host header, or incompatible readiness response produces an actionable startup failure instead of silently starting a local Server.
+
 ## Code entry points
 
 | File                                                                                                                                     | Responsibility                                                                      |
@@ -50,3 +54,5 @@ Production HTTPS termination belongs to deployment infrastructure such as Caddy,
 | [`apps/server/src/app.ts`](../../apps/server/src/app.ts)                                                                                 | Apply Host, Origin, Basic Auth, and route composition.                              |
 | [`apps/web/vite.config.ts`](../../apps/web/vite.config.ts)                                                                               | Gate non-loopback development clients before assets and API proxying.               |
 | [`apps/web/src/components/Settings/DeploymentReadinessNotice.tsx`](../../apps/web/src/components/Settings/DeploymentReadinessNotice.tsx) | Explain readiness warnings in Settings.                                             |
+| [`apps/desktop/src/server-target.ts`](../../apps/desktop/src/server-target.ts)                                                           | Validate a remote origin and probe the deployment-readiness contract.               |
+| [`apps/desktop/src/remote-basic-auth.ts`](../../apps/desktop/src/remote-basic-auth.ts)                                                   | Restrict HTTP Basic Auth challenges to the configured exact origin.                 |
