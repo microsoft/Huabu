@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { stripLegacyPortalTopology } from '@huabu/shared';
 import {
   stripTransientNodeFields,
   stripTransientEdgeFields,
@@ -280,10 +281,11 @@ class CanvasHistoryManager {
     if (!snapshot) return null;
 
     this.redoStack.push(createSnapshot(currentNodes, currentEdges));
+    const topology = stripLegacyPortalTopology(snapshot.nodes, snapshot.edges);
     return {
-      ...snapshot,
+      ...topology,
       nodes: preserveLiveTransient(
-        preserveLiveQuestionData(snapshot.nodes, currentNodes),
+        preserveLiveQuestionData(topology.nodes, currentNodes),
         currentNodes,
       ),
     };
@@ -299,10 +301,11 @@ class CanvasHistoryManager {
     if (!snapshot) return null;
 
     this.undoStack.push(createSnapshot(currentNodes, currentEdges));
+    const topology = stripLegacyPortalTopology(snapshot.nodes, snapshot.edges);
     return {
-      ...snapshot,
+      ...topology,
       nodes: preserveLiveTransient(
-        preserveLiveQuestionData(snapshot.nodes, currentNodes),
+        preserveLiveQuestionData(topology.nodes, currentNodes),
         currentNodes,
       ),
     };

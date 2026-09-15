@@ -169,8 +169,8 @@ export default function CanvasPage() {
   useEffect(() => {
     if (!canvasId || canvasId !== worldCanvasId) return;
     void refreshSpaceTitles().catch((error) => {
-      console.error('Failed to load World Portal titles:', error);
-      toast(t('world.loadFailed'), { tone: 'danger' });
+      console.error('Failed to load Space titles:', error);
+      toast(t('spacePreview.targetsUnavailable'), { tone: 'danger' });
     });
   }, [canvasId, refreshSpaceTitles, t, worldCanvasId]);
 

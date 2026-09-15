@@ -11,7 +11,7 @@ import {
 import { nodeRevision, type Delta } from '@huabu/shared/canvas-engine';
 
 import { prepareAgentCanvasCommands } from '../canvas/agent-command-preparation.js';
-import { executeCanvasCommandsOnHost } from '../canvas/canvas-command-router.js';
+import { executeOnServer } from '../canvas/canvas-executor.js';
 
 import type { CanvasCommand } from '@huabu/shared';
 
@@ -141,11 +141,6 @@ function collectCommandIds(
     case 'SET_NODE_LOCKED':
     case 'CHANGE_NODE_TYPE':
       break;
-    case 'SET_PORTAL_NODE_PINS':
-      for (const update of command.updates) {
-        for (const nodeId of update.sourceNodeIds) nodeIds.add(nodeId);
-      }
-      break;
   }
 }
 
@@ -156,7 +151,7 @@ export async function executeRfsCommands(
 ): Promise<RfsExecuteResponse> {
   const runId = request.runId ?? createId('run');
   const hostThreadId = opts?.hostThreadId;
-  const output = await executeCanvasCommandsOnHost({
+  const output = await executeOnServer({
     canvasId,
     commands: prepareAgentCanvasCommands(request.commands, {
       allowCallerRevisions: true,

@@ -206,11 +206,7 @@ export function PreviewWorkspace({
           (candidate) => candidate.id === target.nodeId,
         );
         if (!node) return undefined;
-        const view = conversationViewForNode(
-          node,
-          target.canvasId,
-          state.worldReferences[target.nodeId],
-        );
+        const view = conversationViewForNode(node, target.canvasId);
         return view
           ? messageListViewKey(
               view.conversationOwner.canvasId,

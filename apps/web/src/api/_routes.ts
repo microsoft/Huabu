@@ -56,7 +56,6 @@ export const routes = {
   canvasExecute: (canvasId: string) => `/canvas/${enc(canvasId)}/execute`,
   canvasMoveSelection: (canvasId: string) =>
     `/canvas/${enc(canvasId)}/move-selection`,
-  canvasReferences: (canvasId: string) => `/canvas/${enc(canvasId)}/references`,
   canvasPreviewScene: (canvasId: string) =>
     `/canvas/${enc(canvasId)}/preview-scene`,
   canvasExport: (canvasId: string) => `/canvas/${enc(canvasId)}/export`,

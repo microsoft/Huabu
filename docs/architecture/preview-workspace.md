@@ -78,9 +78,9 @@ Each group mounts its active tab plus at most one warm inactive tab selected by 
 
 PDF tabs retain view state in the warm slot, but discard the loaded pdf.js document proxy during Activity cleanup because `react-pdf` destroys that proxy's worker transport while hidden. Page rendering and text indexing remain suspended until the visible tab loads a fresh proxy.
 
-Chat, Question, Note, Text, PDF, and Office tabs are eligible for the warm slot. Eligibility follows the resolved renderer, so a valid World `nodeRef` that presents a source Question is treated as a Question rather than as a generic reference. Web, Audio, Video, and other node types are not retained because hidden native media or iframe work can outlive React Effect cleanup. Closing or replacing a warm tab, deleting its node, or advancing the slot to a more recently active eligible tab unmounts the old tree. The shared runtime scroll cache remains the cold-restore fallback after a real unmount.
+Chat, Question, Note, Text, PDF, and Office tabs are eligible for the warm slot. Node eligibility follows the live node type, without a World-reference projection. Web, Audio, Video, and other node types are not retained because hidden native media or iframe work can outlive React Effect cleanup. Closing or replacing a warm tab, deleting its node, or advancing the slot to a more recently active eligible tab unmounts the old tree. The shared runtime scroll cache remains the cold-restore fallback after a real unmount.
 
-`PreviewRenderer` resolves node targets against the current Canvas nodes and World references. Ordinary nodes render through `ExpandedNodePanel`; Question nodes and unbound Chat targets render through `ChatPanel`. An ordinary node's AI summary can be dismissed for the lifetime of the mounted preview without mutating node data.
+`PreviewRenderer` resolves node targets against the current Canvas nodes. Ordinary nodes render through `ExpandedNodePanel`; Question nodes and unbound Chat targets render through `ChatPanel`. An ordinary node's AI summary can be dismissed for the lifetime of the mounted preview without mutating node data.
 
 Every mounted `ChatPanel` receives an explicit `ChatSession` and owning preview tab ID. There is no globally current Chat thread or Question replay pointer, so two groups can render independent conversations without sharing messages, drafts, bindings, attachments, settings, loading state, or stream control.
 
@@ -90,7 +90,7 @@ PDF area capture routes directly to a Chat or Question conversation that is acti
 
 When a conversation is visible beside an ordinary node, its composer offers that active node as a dashed source candidate. Confirming the candidate stages a thread-owned source attachment that the prompt renderer emits as a structured node reference; switching the node in the adjacent group updates the unconfirmed candidate, while an already confirmed source remains attached to the thread.
 
-For a World `nodeRef` that presents a source Question, the target remains the World presentation node while `AgentConversationView` carries the source Canvas, node, and thread as conversation owner. History, reconnect, agent turns, tools, lifecycle writes, binding, mode, and change records use that owner scope.
+Ordinary Question sessions retain `AgentConversationView`: presentation and owner identify the same active Canvas/node, and the owner carries the Question's `threadId`. History, reconnect, Agent turns, tools, lifecycle writes, binding, mode, and change records use that owner scope. Legacy World `nodeRef` sessions and source-reference resolution are removed. Space Preview scenes do not mount source Question conversations; the user enters the source Space to open one.
 
 An authored Question node remains authoritative for persisted agent mode and fixed binding. A new selectable Question thread inherits the Canvas's current binding unless the node supplies an explicit binding.
 

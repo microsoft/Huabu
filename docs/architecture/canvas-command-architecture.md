@@ -73,7 +73,7 @@ Composite intent examples:
 `CanvasCommand` is the smallest shared executable domain instruction (not the smallest state diff). A command may own deterministic domain behavior inside execution:
 
 - `DELETE_NODES` automatically removes incident edges.
-- `SET_NODE_PARENT` rejects invalid targets, non-Container parents, or cycles.
+- `SET_NODE_PARENT` rejects invalid targets, non-Container parents, or cycles. Frames are the only persistent Container type; `spacePreview` nodes may be Frame children but cannot own children.
 - `CONNECT_NODES` rejects the command (`applied: false`, `reason: 'invalid-target'`) when any edge endpoint is not a live node — it never silently drops the edge.
 - `ALIGN_NODES` aligns provided nodes without relying on selection.
 
@@ -142,7 +142,6 @@ See `packages/shared/src/types/canvas/command.ts` for the full discriminated uni
 | Node lifecycle   | `CREATE_NODES`, `DELETE_NODES`                          |
 | Node editing     | `MERGE_NODE_DATA`, `CHANGE_NODE_TYPE`                   |
 | Structure        | `SET_NODE_PARENT`, `DISSOLVE_FRAME`, `SET_FRAME_LAYOUT` |
-| World projection | `SET_PORTAL_NODE_PINS`                                  |
 | Geometry         | `SET_NODE_GEOMETRY`                                     |
 | Selection / view | `SET_NODE_SELECTION`                                    |
 | Ordering         | `REORDER_NODES`                                         |
@@ -193,7 +192,7 @@ Node ids use `node-<uuid>`, edge ids use `edge-<uuid>`.
 The engine is shared, in `packages/shared/src/canvas-engine/`:
 
 - `executor.ts` — `executeCanvasCommands(execution, state) -> ExecutorOutput`
-- `commands/` — one handler per command type (18) + `index.ts` (`HANDLERS` registry + `COMMAND_META`) + `types.ts`
+- `commands/` — one handler per command type (17) + `index.ts` (`HANDLERS` registry + `COMMAND_META`) + `types.ts`
 - `postEffects.ts` — pure post-commit effects (edge reroute)
 - `interfaces.ts` — `CanvasReadState`, `CanvasWriteResult`; `delta.ts` / `diff.ts` — self-inverting delta types
 
@@ -228,7 +227,7 @@ Agent and web now converge on the same `CanvasCommand` pipeline. The server neve
 
 ### Agent Command Schema
 
-The agent exposes a single `space_commands` tool (`apps/server/src/modules/agent/tools/definitions.ts`). Its parameter schema is generated from the canonical Zod contracts in `packages/shared/src/types/api/space-operations.ts` and covers the agent-allowed command subset (excluding `SET_NODE_LOCKED`, `SET_NODE_SELECTION`, and `CHANGE_NODE_TYPE`).
+The agent exposes a single `space_commands` tool (`apps/server/src/modules/agent/tools/definitions.ts`). Its parameter schema is generated from the canonical Zod contracts in `packages/shared/src/types/api/space-operations.ts` and covers the 13 Agent-allowed commands (excluding `SET_NODE_LOCKED`, `SET_NODE_SELECTION`, `CHANGE_NODE_TYPE`, and internal `APPLY_MEASURED_HEIGHT`).
 
 Built-in tool calls and direct RFS execution both pass their validated wire commands through `prepareAgentCanvasCommands()`. This thin preparation step adds server-owned `origin` and `labelSource` metadata and, for built-in turns, injects content revisions from the turn read-set; it does not implement command behavior.
 
@@ -242,9 +241,11 @@ Same engine runs both sides; the only authority is the server. `POST /api/canvas
 
 Cross-Space Move is the bounded exception that coordinates two otherwise independent executor batches. `SpaceMoveService` acquires both Canvas mutexes in lexical order, uses `executeOnServerAlreadyLocked()` for destination creation and the source batch, and withholds both sync publications until the complete move succeeds. The source batch always deletes the moved roots and optionally creates one `spacePreview` breadcrumb pointing to the destination; when requested, its absolute position and clamped dimensions derive from the authoritative moved-set bounds. Determinate failure applies any source and destination inverse deltas through `applyDeltasOnServerAlreadyLocked()` while the same locks remain held. The service still expresses topology changes only as ordinary `CREATE_NODES`, `CONNECT_NODES`, and `DELETE_NODES` commands; the coordinator owns selection expansion, optional destination lifecycle, artifact transfer, Agent rehome, ordering, and compensation.
 
-World `canvasRef` Portals add a host-level ownership policy before shared-engine execution. Only system reconciliation may create them; UI and agent batches cannot repoint them, manually resize them, or delete a Portal whose target is still a live Space. A broken Portal remains removable. Movement and ordinary Container parenting still use the same shared geometry and `SET_NODE_PARENT` semantics as other Canvas nodes.
+World `spacePreview` nodes add a host-level ownership policy before shared-engine execution. Only system reconciliation may create them; UI and Agent batches cannot repoint them, change their type, or delete a preview whose target is still a live Space, including by deleting an ancestor Frame. Missing-target previews remain removable. Position, size, and ordinary Frame parenting still use shared geometry and `SET_NODE_PARENT` semantics. Full-state writes and post-execution topology checks enforce managed identity as well, so sequential reparent-then-delete commands cannot bypass the policy.
 
-`SET_PORTAL_NODE_PINS` is the only creation/removal path for persistent `frameRef` and `nodeRef` nodes. The server host router serializes World Pin preparation with execution, resolves the World and matching existing canonical Portals, validates pin sources while allowing broken-reference unpin, expands a newly pinned source Frame's current recursive subtree into one prepared World hierarchy, injects deterministic parent/placement hints, and rejects a batch that mixes source-local commands with World mutation. When a pinned source Space has no canonical Portal yet, the router runs the same idempotent World reconciliation before preparation instead of failing on a state the user cannot see; the precondition error survives only for a source Canvas that reconciliation does not recognize as a live Space. The shared handler deduplicates exact desired states, rejects contradictions, enforces one reference per source target inside a Portal subtree, adopts existing descendant references while preserving absolute World positions, and recursively deletes the current World subtree when a `frameRef` is unpinned. Portal and `frameRef` content-hug run after membership or child geometry changes. References retain ordinary World-owned node behavior such as locking and visual style; the topology guard rejects copied source content rather than generic Canvas metadata. Recursive Frame Pin is an explicit snapshot: re-pinning an existing `frameRef` is idempotent and never reconciles later source mutations.
+Built-in tools, RFS execution, and the Canvas execute route call `executeOnServer()` for the addressed Canvas; there is no implicit source-to-World mutation routing. Every command discriminator is preflighted before batch I/O using an own-property lookup in the shared engine's full `COMMAND_META` registry, not the Agent-only command list. Payload semantics remain with the handlers: invalid payloads may be rejected or no-op without a special retirement exception. Command results, delta replay (including revert), and full-state PUT check explicitly supplied node `type` and optional `data.type` against `CANVAS_NODE_TYPES` before persistence; omitted discriminators remain accepted under the existing loose full-state contract. Agent source normalization also checks all create-node discriminators before any media import, so an unsupported create cannot leave imported artifacts behind.
+
+Portal/Pin commands, schemas, handlers, placement and content-hug passes are removed; writes need no explicit legacy blacklist. The non-migrating read/load, clipboard, and history filter ignores only the three retired node types and preserves unrelated unknown types, unlike the canonical write validation. It performs no local cleanup or migration; see [canvas-storage.md](./canvas-storage.md#retired-portalpin-topology-on-load).
 
 Two properties make the agent loop self-correcting:
 
@@ -272,5 +273,6 @@ The parallel `IntentAction` union is gone: `RecentAction` ([context.ts](../../pa
 | [`packages/shared/src/canvas-engine/autoLayout/gridLayout.ts`](../../packages/shared/src/canvas-engine/autoLayout/gridLayout.ts)           | Solve structured tracks, edge-aware gutters, and resize-time frozen spacing.          |
 | [`apps/web/src/store/canvasStore/slices/resizePreview.ts`](../../apps/web/src/store/canvasStore/slices/resizePreview.ts)                   | Capture and scale frozen structured gutter plans during Frame resize.                 |
 | [`apps/web/src/store/canvasStore/slices/structuredReflow.ts`](../../apps/web/src/store/canvasStore/slices/structuredReflow.ts)             | Apply and reverse the live structured drop reflow preview.                            |
-| [`packages/shared/src/canvas-engine/commands/setPortalNodePins.ts`](../../packages/shared/src/canvas-engine/commands/setPortalNodePins.ts) | Apply idempotent World-local Portal pin state.                                        |
-| [`apps/server/src/modules/canvas/canvas-command-router.ts`](../../apps/server/src/modules/canvas/canvas-command-router.ts)                 | Route public Portal Pin commands to the workspace World.                              |
+| [`apps/server/src/modules/canvas/canvas-executor.ts`](../../apps/server/src/modules/canvas/canvas-executor.ts)                             | Execute commands against the addressed Canvas and validate resulting topology.        |
+| [`apps/server/src/modules/canvas/world-preview-policy.ts`](../../apps/server/src/modules/canvas/world-preview-policy.ts)                   | Protect managed preview identity and validate canonical command and node types.       |
+| [`apps/server/src/modules/canvas/world-previews.ts`](../../apps/server/src/modules/canvas/world-previews.ts)                               | Reconcile canonical previews through ordinary system command batches.                 |

@@ -6,11 +6,7 @@ import { getQuestionNodeStatus } from '@huabu/shared';
 import { postCanvasExecute } from '@/api/canvas';
 import useCanvasStore from '@/store/canvasStore';
 
-import type {
-  AgentBinding,
-  AgentConversationView,
-  ResolvedWorldReference,
-} from '@huabu/shared';
+import type { AgentBinding, AgentConversationView } from '@huabu/shared';
 import type { Delta } from '@huabu/shared/canvas-engine';
 import type { Node } from '@xyflow/react';
 
@@ -24,7 +20,6 @@ export type ConversationOwnerSource = {
   agentBinding?: AgentBinding;
   agentBindingPolicy?: 'selectable' | 'fixed';
   content?: unknown;
-  hasAuthoredContent?: boolean;
 };
 
 const ownerPatchChains = new Map<string, Promise<void>>();
@@ -36,40 +31,9 @@ export class ConversationIntegrityError extends Error {
   }
 }
 
-export function conversationViewFromWorldReference(
-  presentationCanvasId: string,
-  referenceNodeId: string,
-  reference: ResolvedWorldReference | undefined,
-): AgentConversationView | null {
-  if (
-    reference?.kind !== 'nodeRef' ||
-    reference.status !== 'ok' ||
-    reference.source?.type !== 'question'
-  ) {
-    return null;
-  }
-  if (!reference.source.threadId) {
-    throw new ConversationIntegrityError(
-      'Source Agent Node has no conversation thread',
-    );
-  }
-  return {
-    presentationAnchor: {
-      canvasId: presentationCanvasId,
-      nodeId: referenceNodeId,
-    },
-    conversationOwner: {
-      canvasId: reference.target.canvasId,
-      nodeId: reference.target.nodeId,
-      threadId: reference.source.threadId,
-    },
-  };
-}
-
 export function conversationViewForNode(
   node: Node,
   canvasId: string,
-  reference: ResolvedWorldReference | undefined,
 ): AgentConversationView | null {
   if (node.type === 'question' && typeof node.data.threadId === 'string') {
     return {
@@ -81,17 +45,7 @@ export function conversationViewForNode(
       },
     };
   }
-  return conversationViewFromWorldReference(canvasId, node.id, reference);
-}
-
-export function isHeadlessConversation(
-  view: AgentConversationView | null,
-): boolean {
-  return (
-    !!view &&
-    (view.presentationAnchor.canvasId !== view.conversationOwner.canvasId ||
-      view.presentationAnchor.nodeId !== view.conversationOwner.nodeId)
-  );
+  return null;
 }
 
 export function conversationRequestScope(
@@ -105,17 +59,16 @@ export function conversationRequestScope(
   return {
     canvasId: view?.conversationOwner.canvasId || activeCanvasId,
     ...(view ? { anchorNodeId: view.conversationOwner.nodeId } : {}),
-    includeCanvasSelection: !isHeadlessConversation(view),
+    includeCanvasSelection:
+      !view || view.conversationOwner.canvasId === activeCanvasId,
   };
 }
 
 export function shouldComposeConversationOwner(
   source: ConversationOwnerSource | undefined,
-  headless: boolean,
 ): boolean {
-  const hasAuthoredContent = headless
-    ? source?.hasAuthoredContent !== false
-    : typeof source?.content === 'string' && source.content.trim().length > 0;
+  const hasAuthoredContent =
+    typeof source?.content === 'string' && source.content.trim().length > 0;
   return getQuestionNodeStatus(source) === 'idle' && !hasAuthoredContent;
 }
 
@@ -139,36 +92,18 @@ export function filterClientOwnedQuestionPatch(
 export async function validateConversationView(
   view: AgentConversationView,
 ): Promise<void> {
-  if (!isHeadlessConversation(view)) return;
-
   const active = useCanvasStore.getState();
-  if (active.canvasId !== view.presentationAnchor.canvasId) {
-    throw new ConversationIntegrityError(
-      'Conversation presentation Canvas is no longer active',
-    );
-  }
-
-  await active.refreshWorldReferences();
-  const current = useCanvasStore.getState();
-  if (current.canvasId !== view.presentationAnchor.canvasId) {
-    throw new ConversationIntegrityError(
-      'Conversation presentation Canvas changed during validation',
-    );
-  }
-
-  const latest = conversationViewFromWorldReference(
-    view.presentationAnchor.canvasId,
-    view.presentationAnchor.nodeId,
-    current.worldReferences[view.presentationAnchor.nodeId],
-  );
+  const owner = view.conversationOwner;
+  const node = active.nodes.find((candidate) => candidate.id === owner.nodeId);
   if (
-    !latest ||
-    latest.conversationOwner.canvasId !== view.conversationOwner.canvasId ||
-    latest.conversationOwner.nodeId !== view.conversationOwner.nodeId ||
-    latest.conversationOwner.threadId !== view.conversationOwner.threadId
+    active.canvasId !== owner.canvasId ||
+    view.presentationAnchor.canvasId !== owner.canvasId ||
+    view.presentationAnchor.nodeId !== owner.nodeId ||
+    node?.type !== 'question' ||
+    node.data.threadId !== owner.threadId
   ) {
     throw new ConversationIntegrityError(
-      'Conversation owner no longer matches the World reference',
+      'Conversation owner no longer matches the active Agent node',
     );
   }
 }
@@ -176,24 +111,14 @@ export async function validateConversationView(
 export function resolveConversationOwnerSource(
   activeCanvasId: string,
   nodes: readonly Node[],
-  references: Record<string, ResolvedWorldReference>,
   view: AgentConversationView | null,
 ): ConversationOwnerSource | undefined {
-  if (!view) return undefined;
-  if (view.conversationOwner.canvasId === activeCanvasId) {
-    return nodes.find((node) => node.id === view.conversationOwner.nodeId)
-      ?.data as ConversationOwnerSource | undefined;
-  }
-  const reference = references[view.presentationAnchor.nodeId];
-  if (
-    reference?.kind !== 'nodeRef' ||
-    reference.status !== 'ok' ||
-    reference.target.canvasId !== view.conversationOwner.canvasId ||
-    reference.target.nodeId !== view.conversationOwner.nodeId
-  ) {
+  if (!view || view.conversationOwner.canvasId !== activeCanvasId)
     return undefined;
-  }
-  return reference.source;
+  return nodes.find(
+    (node) =>
+      node.id === view.conversationOwner.nodeId && node.type === 'question',
+  )?.data as ConversationOwnerSource | undefined;
 }
 
 async function applyConversationOwnerPatch(
@@ -265,17 +190,4 @@ export function patchConversationOwnerNode(
   return current.finally(() => {
     if (ownerPatchChains.get(key) === current) ownerPatchChains.delete(key);
   });
-}
-
-export async function refreshConversationPresentation(
-  view: AgentConversationView,
-): Promise<void> {
-  const active = useCanvasStore.getState();
-  if (
-    active.canvasId !== view.presentationAnchor.canvasId ||
-    !isHeadlessConversation(view)
-  ) {
-    return;
-  }
-  await active.refreshWorldReferences();
 }

@@ -43,9 +43,7 @@ export type LayerFilterLabelKey =
   | 'layers.filterLabels.audio'
   | 'layers.filterLabels.web'
   | 'layers.filterLabels.frame'
-  | 'layers.filterLabels.canvasRef'
-  | 'layers.filterLabels.frameRef'
-  | 'layers.filterLabels.nodeRef'
+  | 'layers.filterLabels.spacePreview'
   | 'layers.filterLabels.sketch'
   | 'layers.filterLabels.question';
 
@@ -93,10 +91,7 @@ const FILTER_LABEL_KEY_BY_TYPE: Record<CanvasNodeType, LayerFilterLabelKey> = {
   audio: 'layers.filterLabels.audio',
   web: 'layers.filterLabels.web',
   frame: 'layers.filterLabels.frame',
-  spacePreview: 'layers.filterLabels.canvasRef',
-  canvasRef: 'layers.filterLabels.canvasRef',
-  frameRef: 'layers.filterLabels.frameRef',
-  nodeRef: 'layers.filterLabels.nodeRef',
+  spacePreview: 'layers.filterLabels.spacePreview',
   sketch: 'layers.filterLabels.sketch',
   question: 'layers.filterLabels.question',
 };

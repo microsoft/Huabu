@@ -1,15 +1,21 @@
 # Space Preview and World
 
 > Authoritative contract for view-only Space projection nodes and the preview-based World.
-> Last updated: 2026-08-20
+> Last updated: 2026-09-14
 
 ## 1. Product model
 
 A `spacePreview` is a normal Canvas node whose persisted data contains only `{ type: 'spacePreview', targetCanvasId }`. It displays the spatial structure of one ordinary Space without mounting that Space's React Flow tree, node components, editors, media, links, Agents, Interactive Views, or mutation paths.
 
-World is a server-managed Canvas containing exactly one `spacePreview` for every ordinary Space in the active workspace. Reconciliation owns membership and target identity while preserving user-owned position and size. New Spaces receive deterministic open-grid placement, deleted targets lose their managed preview, and a legacy canonical `canvasRef` may donate its id and geometry during one-way reconciliation.
+World is a server-managed Canvas containing exactly one `spacePreview` for every ordinary Space in the active workspace, alongside any ordinary World-owned nodes and edges. `reconcileWorldPreviews()` owns preview membership and target identity while preserving existing preview IDs, position, size, and presentation data. Missing previews receive fresh IDs and deterministic open-grid placement; deleted targets lose their managed preview. Duplicate targets or malformed managed identities are integrity errors. Reconciliation never reuses legacy Portal IDs or geometry.
 
-Legacy `canvasRef`, `frameRef`, `nodeRef`, and Pin data remain readable for compatibility, but World no longer creates Portals or exposes Pin controls.
+Legacy `canvasRef`, `frameRef`, and `nodeRef` nodes, Portal/Pin renderers, the `SET_PORTAL_NODE_PINS` command, and `GET /api/canvas/:canvasId/references` are retired, not compatibility APIs. The shared `stripLegacyPortalTopology()` helper ignores those three exact node types and their incident edges at read/load, clipboard, and history-restore boundaries. Ordinary children survive: a child directly parented by an ignored node is detached to the root with its position rebased through the original ancestor chain. This is an in-memory projection with no disk cleanup, sidecar deletion, or legacy-to-preview migration; normal later saves may omit ignored topology. See [canvas-storage.md](./canvas-storage.md) for the storage boundary.
+
+Only system reconciliation creates managed World previews. UI and Agent mutations cannot repoint them, change their type, or delete them while their target remains a live Space, including through ancestor deletion or a reparent-then-delete batch. Missing-target previews remain removable. Users may move, resize, and parent previews under ordinary Frames; a preview is not itself a Container and owns no source-node children.
+
+Write boundaries use the canonical registries, not a retired-type blacklist: every command discriminator must be an own entry in the shared engine's full `COMMAND_META` registry, including UI-only commands. Before persistence, command results, delta replay (including revert), and full-state PUT validate explicitly supplied node `type` and optional `data.type` against `CANVAS_NODE_TYPES`; omitted discriminators remain accepted by the loose full-state contract. Unsupported explicit types are rejected on writes, whereas `stripLegacyPortalTopology()` still preserves unrelated unknown node types on reads/imports rather than silently stripping them. Agent media normalization checks all create-node discriminators before importing bytes; other command payloads retain normal handler rejection/no-op behavior and final topology validation.
+
+World-owned conversations may use `spacePreview.targetCanvasId` from the World outline for explicit read-only tool access. The server requires exactly one matching canonical preview and a readable live ordinary target Space. This does not grant cross-Space writes or source conversation presentation: opening a source Question requires entering its Space, not interacting with the projected scene.
 
 ## 2. Scene projection boundary
 
@@ -17,7 +23,7 @@ Legacy `canvasRef`, `frameRef`, `nodeRef`, and Pin data remain readable for comp
 
 The response contains identity, title, Canvas version, absolute node geometry, safe visual kinds, whitespace-normalized labels, bounded plain-text excerpts for Note and Text nodes, bounded Image source references, eligible edges, scene bounds, and explicit truncation flags. Markdown is flattened before projection; inline `data:` and renderer-local `blob:` image sources are excluded. The response never includes complete rich-editor state, prompts, chat and Agent state, Interactive View state, artifact bytes, handles, selection, or mutation metadata.
 
-Projection keeps deterministic source order and is bounded to 250 nodes, 400 edges, and 1 MiB serialized JSON. `spacePreview` and `canvasRef` source nodes become inert `nested-preview` placeholders, so projection has exactly one live scene depth and cannot recurse through self-reference or cycles.
+Projection keeps deterministic source order and is bounded to 250 nodes, 400 edges, and 1 MiB serialized JSON. Source `spacePreview` nodes become inert `nested-preview` placeholders, so projection has exactly one live scene depth and cannot recurse through self-reference or cycles. Retired Portal/Pin topology is already excluded by the composed Space read.
 
 ## 3. Web rendering and freshness
 
@@ -41,12 +47,14 @@ Moving content between Spaces can also create an ordinary source-owned `spacePre
 
 ## Code entry points
 
-| File                                                                                                                   | Responsibility                                                            |
-| ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| [`packages/shared/src/types/canvas/node.ts`](../../packages/shared/src/types/canvas/node.ts)                           | Canonical `spacePreview` node identity and data.                          |
-| [`packages/shared/src/types/api/space-preview.ts`](../../packages/shared/src/types/api/space-preview.ts)               | Scene wire schema and hard budgets.                                       |
-| [`apps/server/src/modules/canvas/space-preview-scene.ts`](../../apps/server/src/modules/canvas/space-preview-scene.ts) | Authorized, sanitized, bounded scene projection.                          |
-| [`apps/server/src/modules/canvas/world-portals.ts`](../../apps/server/src/modules/canvas/world-portals.ts)             | World preview reconciliation and legacy Portal migration.                 |
-| [`apps/server/src/modules/canvas/world-portal-policy.ts`](../../apps/server/src/modules/canvas/world-portal-policy.ts) | Managed World preview mutation policy.                                    |
-| [`apps/web/src/components/Nodes/spacePreview/`](../../apps/web/src/components/Nodes/spacePreview)                      | Preview shell, static viewport, interaction, and local persistence.       |
-| [`apps/web/src/store/spacePreviewSceneCache.ts`](../../apps/web/src/store/spacePreviewSceneCache.ts)                   | Shared freshness cache, request deduplication, and concurrency admission. |
+| File                                                                                                                           | Responsibility                                                               |
+| ------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| [`packages/shared/src/types/canvas/node.ts`](../../packages/shared/src/types/canvas/node.ts)                                   | Canonical `spacePreview` node identity and data.                             |
+| [`packages/shared/src/types/api/space-preview.ts`](../../packages/shared/src/types/api/space-preview.ts)                       | Scene wire schema and hard budgets.                                          |
+| [`apps/server/src/modules/canvas/space-preview-scene.ts`](../../apps/server/src/modules/canvas/space-preview-scene.ts)         | Authorized, sanitized, bounded scene projection.                             |
+| [`apps/server/src/modules/canvas/world-previews.ts`](../../apps/server/src/modules/canvas/world-previews.ts)                   | Canonical World preview reconciliation without legacy migration.             |
+| [`apps/server/src/modules/canvas/world-preview-policy.ts`](../../apps/server/src/modules/canvas/world-preview-policy.ts)       | Managed World preview policy and canonical command/node registry validation. |
+| [`apps/server/src/modules/canvas/world-target-access.ts`](../../apps/server/src/modules/canvas/world-target-access.ts)         | Preview-addressed read-only target authorization.                            |
+| [`packages/shared/src/utils/strip-legacy-portal-topology.ts`](../../packages/shared/src/utils/strip-legacy-portal-topology.ts) | Pure legacy topology filtering and surviving-child coordinate rebase.        |
+| [`apps/web/src/components/Nodes/spacePreview/`](../../apps/web/src/components/Nodes/spacePreview)                              | Preview shell, static viewport, interaction, and local persistence.          |
+| [`apps/web/src/store/spacePreviewSceneCache.ts`](../../apps/web/src/store/spacePreviewSceneCache.ts)                           | Shared freshness cache, request deduplication, and concurrency admission.    |

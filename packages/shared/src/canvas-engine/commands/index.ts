@@ -26,7 +26,6 @@ import setNodeGeometry from './setNodeGeometry.js';
 import setNodeLocked from './setNodeLocked.js';
 import setNodeParent from './setNodeParent.js';
 import setNodeSelection from './setNodeSelection.js';
-import setPortalNodePins from './setPortalNodePins.js';
 
 import type {
   CommandHandler,
@@ -62,7 +61,6 @@ export const HANDLERS: HandlerMap = {
   DISTRIBUTE_NODES: distributeNodes.handler,
   CHANGE_NODE_TYPE: changeNodeType.handler,
   SET_FRAME_LAYOUT: setFrameLayout.handler,
-  SET_PORTAL_NODE_PINS: setPortalNodePins.handler,
 };
 
 // ---------------------------------------------------------------------------
@@ -87,7 +85,6 @@ export const COMMAND_META: Record<CanvasCommandType, CommandMeta> = {
   DISTRIBUTE_NODES: distributeNodes.meta,
   CHANGE_NODE_TYPE: changeNodeType.meta,
   SET_FRAME_LAYOUT: setFrameLayout.meta,
-  SET_PORTAL_NODE_PINS: setPortalNodePins.meta,
 };
 
 // Re-export types for consumers.

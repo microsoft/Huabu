@@ -185,6 +185,90 @@ forEachProductProfile((profile: StorageProfile, label: string) => {
       expect(delivered.sort()).toEqual([NODE_A, NODE_B].sort());
     });
 
+    it('ignores retired topology without writes and drops it on the next normal save', async () => {
+      const canvasId = 'canvas-retired-topology';
+      const m = await seedSpace(canvasId);
+      const raw = m.storage.structured.space(canvasId);
+      const original = await raw.read();
+      if (!original) throw new Error('Missing test Space');
+      const question = {
+        id: 'node-question',
+        type: 'question',
+        position: { x: 80, y: 90 },
+        data: {
+          threadId: 'thread-preserved',
+          content: 'Keep this conversation',
+        },
+      };
+      const unrelated = {
+        id: 'node-unknown',
+        type: 'futureKind',
+        position: { x: 1, y: 2 },
+        data: { target: { canvasId, nodeId: NODE_A } },
+      };
+      const legacy = [
+        {
+          id: 'node-portal',
+          type: 'canvasRef',
+          position: { x: 100, y: 200 },
+          data: { targetCanvasId: 'canvas-other' },
+        },
+        {
+          id: 'node-pin',
+          type: 'frameRef',
+          parentId: 'node-portal',
+          position: { x: 10, y: 20 },
+          data: {},
+        },
+        { id: 'node-ref', type: 'nodeRef', position: { x: 0, y: 0 }, data: {} },
+      ];
+      const child = {
+        id: NODE_A,
+        type: 'note',
+        parentId: 'node-pin',
+        extent: 'parent',
+        position: { x: 3, y: 4 },
+        data: {},
+      };
+      const edges = [
+        { id: 'edge-removed', source: 'node-portal', target: NODE_A },
+        { id: 'edge-kept', source: NODE_A, target: 'node-question' },
+        { id: 'edge-dangling', source: 'node-missing', target: NODE_A },
+      ];
+      await raw.write({
+        expectedVersion: original.version,
+        nextRecord: {
+          ...original,
+          version: original.version + 1,
+          state: {
+            ...original.state,
+            nodes: [...legacy, child, question, unrelated],
+            edges,
+          },
+        },
+        nodeMutations: [],
+      });
+      const before = await raw.read();
+      const loaded = await m.storage.space(canvasId).read();
+      expect(loaded?.state.nodes).toEqual([
+        { id: NODE_A, type: 'note', position: { x: 113, y: 224 }, data: {} },
+        question,
+        unrelated,
+      ]);
+      expect(loaded?.state.edges).toEqual(edges.slice(1));
+      expect(await raw.read()).toEqual(before);
+      expect(
+        (await m.storage.space(canvasId).nodes.read(NODE_A))?.record.content,
+      ).toBe('alpha');
+      if (!loaded) throw new Error('Missing loaded Space');
+      await m.storage.space(canvasId).write({
+        expectedVersion: loaded.version,
+        nextRecord: { ...loaded, version: loaded.version + 1 },
+        nodeMutations: [],
+      });
+      expect((await raw.read())?.state).toEqual(loaded.state);
+    });
+
     it('refuses a write from a version the caller no longer holds', async () => {
       const canvasId = 'space-product-cas';
       const m = await seedSpace(canvasId);

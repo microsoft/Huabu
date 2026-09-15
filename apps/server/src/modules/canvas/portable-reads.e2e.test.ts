@@ -598,104 +598,19 @@ describe('two directories claiming one Space', () => {
   });
 });
 
-// ─── 5. GET /canvas/:id/references ──────────────────────────────────────────
+// ─── 5. Retired references route ──────────────────────────────────────────
 
-describe('GET /canvas/:canvasId/references', () => {
-  async function seedWorld(nodes: readonly SeedNode[]): Promise<string> {
-    const worldId = await getStructuredStore().spaces().worldId();
-    await writeTopology(worldId, nodes);
-    return worldId;
-  }
-
-  it('resolves Portal and node references through the ports', async () => {
-    await seedSpace('canvas-src', 'Source', [
-      {
-        id: 'node-target',
-        type: 'note',
-        label: 'Target',
-        content: 'target body',
-      },
-    ]);
-    const worldId = await seedWorld([
-      {
-        id: 'node-portal',
-        type: 'canvasRef',
-        label: null,
-        sidecar: false,
-        data: { targetCanvasId: 'canvas-src' },
-      },
-      {
-        id: 'node-ref',
-        type: 'nodeRef',
-        label: null,
-        sidecar: false,
-        data: { target: { canvasId: 'canvas-src', nodeId: 'node-target' } },
-      },
-    ]);
-
-    const response = await app.inject({
-      method: 'GET',
-      url: `/canvas/${worldId}/references`,
-    });
-
-    expect(response.statusCode).toBe(200);
-    const { references } = response.json();
-    expect(references).toEqual([
-      expect.objectContaining({
-        kind: 'canvasRef',
-        targetCanvasId: 'canvas-src',
-        status: 'ok',
-        title: 'Source',
-      }),
-      expect.objectContaining({
-        kind: 'nodeRef',
-        status: 'ok',
-        source: expect.objectContaining({ type: 'note', label: 'Target' }),
-      }),
-    ]);
-  });
-
-  it('reports a missing Space and a missing node distinctly', async () => {
-    await seedSpace('canvas-partial', 'Partial', [
-      { id: 'node-present', type: 'note', label: 'Present', content: 'here' },
-    ]);
-    const worldId = await seedWorld([
-      {
-        id: 'node-portal',
-        type: 'canvasRef',
-        label: null,
-        sidecar: false,
-        data: { targetCanvasId: 'canvas-gone' },
-      },
-      {
-        id: 'node-ref',
-        type: 'nodeRef',
-        label: null,
-        sidecar: false,
-        data: { target: { canvasId: 'canvas-partial', nodeId: 'node-gone' } },
-      },
-    ]);
-
-    const response = await app.inject({
-      method: 'GET',
-      url: `/canvas/${worldId}/references`,
-    });
-
-    expect(response.statusCode).toBe(200);
-    expect(
-      response.json().references.map((ref: { status: string }) => ref.status),
-    ).toEqual(['canvas-missing', 'node-missing']);
-  });
-
-  it('refuses to resolve references for an ordinary Space', async () => {
+describe('retired GET /canvas/:canvasId/references', () => {
+  it('is absent for World and ordinary Spaces', async () => {
     await seedSpace('canvas-ordinary', 'Ordinary', []);
-
-    const response = await app.inject({
-      method: 'GET',
-      url: '/canvas/canvas-ordinary/references',
-    });
-
-    expect(response.statusCode).toBe(400);
+    const worldId = await getStructuredStore().spaces().worldId();
+    for (const canvasId of [worldId, 'canvas-ordinary']) {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/canvas/${canvasId}/references`,
+      });
+      expect(response.statusCode).toBe(404);
+    }
   });
 });
 

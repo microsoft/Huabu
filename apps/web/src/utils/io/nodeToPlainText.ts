@@ -11,7 +11,7 @@
  * a human would expect, instead of leaking serialized JSON.
  *
  * Each node type maps to whatever a user would consider "the text of this
- * node". Types whose content is not textual (images, sketches, portals) map to
+ * node". Types whose content is not textual (images, sketches) map to
  * nothing at all and are dropped from the output — for a single image node
  * that means no `text/plain` representation is written, so the receiving
  * application pastes only the image.
@@ -59,15 +59,11 @@ function nodeToPlainText(node: PlainTextNode): string {
     case 'video':
     case 'audio':
     case 'frame':
-    case 'canvasRef':
       return readString(data, 'label');
 
-    // Images paste as images, sketches are pure geometry, and ref nodes are
-    // pointers whose label is owned by their target.
+    // Images paste as images and sketches are pure geometry.
     case 'image':
     case 'sketch':
-    case 'nodeRef':
-    case 'frameRef':
       return '';
 
     default:

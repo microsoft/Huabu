@@ -57,14 +57,6 @@ const pointSchema = z
   })
   .strict();
 
-const canvasIdSchema = z
-  .string()
-  .regex(/^canvas-.+$/, 'Expected a canonical canvas- prefixed ID');
-
-const nodeIdSchema = z
-  .string()
-  .regex(/^node-.+$/, 'Expected a canonical node- prefixed ID');
-
 const nodeSizeSchema = z
   .object({
     width: z.number().positive(),
@@ -397,26 +389,6 @@ export const setFrameLayoutCommandSchema = z
   .strict()
   .describe("Set a frame's layout mode, track count, or sizing.");
 
-export const setPortalNodePinsCommandSchema = z
-  .object({
-    type: z.literal('SET_PORTAL_NODE_PINS'),
-    updates: z
-      .array(
-        z
-          .object({
-            sourceCanvasId: canvasIdSchema,
-            sourceNodeIds: z.array(nodeIdSchema).min(1),
-            pinned: z.boolean(),
-          })
-          .strict(),
-      )
-      .min(1),
-  })
-  .strict()
-  .describe(
-    'Add or remove symbolic references to source Space nodes inside a Project Portal. This never modifies or deletes the source nodes.',
-  );
-
 export const AGENT_COMMAND_SCHEMAS = {
   CREATE_NODES: createNodesCommandSchema,
   DELETE_NODES: deleteNodesCommandSchema,
@@ -431,7 +403,6 @@ export const AGENT_COMMAND_SCHEMAS = {
   ALIGN_NODES: alignNodesCommandSchema,
   DISTRIBUTE_NODES: distributeNodesCommandSchema,
   SET_FRAME_LAYOUT: setFrameLayoutCommandSchema,
-  SET_PORTAL_NODE_PINS: setPortalNodePinsCommandSchema,
 } as const satisfies Record<
   (typeof AGENT_CANVAS_COMMAND_TYPES)[number],
   z.ZodType
@@ -451,7 +422,6 @@ export const agentCanvasCommandSchema = z.discriminatedUnion('type', [
   alignNodesCommandSchema,
   distributeNodesCommandSchema,
   setFrameLayoutCommandSchema,
-  setPortalNodePinsCommandSchema,
 ]);
 
 export type AgentOperationCommand = z.infer<typeof agentCanvasCommandSchema>;
@@ -480,7 +450,6 @@ export const builtInAgentCanvasCommandSchema = z.discriminatedUnion('type', [
   alignNodesCommandSchema,
   distributeNodesCommandSchema,
   setFrameLayoutCommandSchema,
-  setPortalNodePinsCommandSchema,
 ]);
 
 export type BuiltInAgentOperationCommand = z.infer<

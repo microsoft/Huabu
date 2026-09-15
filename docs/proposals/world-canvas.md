@@ -2,7 +2,9 @@
 
 > Explore a workspace-level semantic canvas above project Spaces without dissolving their storage and execution boundaries.
 >
-> Status: **Shipped** · Last updated: 2026-08-08 · Tracks: [#346](https://github.com/hai-team/Huabu/issues/346)
+> Status: **Retired / Superseded** · Last updated: 2026-09-14 · Tracks: [#346](https://github.com/hai-team/Huabu/issues/346)
+
+> **Historical design — not the current contract.** The first-version Portal/Pin implementation described below has been retired in favor of [Space Preview and World](../architecture/space-preview.md). `canvasRef`, `frameRef`, `nodeRef`, `SET_PORTAL_NODE_PINS`, the references API, Portal geometry, cross-Canvas Pin routing, and World source-conversation shortcuts are removed. Current loads ignore legacy topology without disk cleanup or migration; ordinary later saves may omit it, and reconciliation never reuses legacy IDs or geometry. See [Canvas storage](../architecture/canvas-storage.md#retired-portalpin-topology-on-load) and [Canvas commands](../architecture/canvas-command-architecture.md). The original design and its historical code references remain below at this stable path; they are not implementation instructions.
 
 ---
 

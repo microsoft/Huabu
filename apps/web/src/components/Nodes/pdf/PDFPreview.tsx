@@ -515,11 +515,8 @@ export const PDFPreview = ({
           );
           if (!node) return undefined;
           return (
-            conversationViewForNode(
-              node,
-              canvasId,
-              canvas.worldReferences[nodeId],
-            )?.conversationOwner.threadId ?? undefined
+            conversationViewForNode(node, canvasId)?.conversationOwner
+              .threadId ?? undefined
           );
         },
       );

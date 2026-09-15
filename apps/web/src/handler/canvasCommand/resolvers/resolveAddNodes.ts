@@ -189,28 +189,18 @@ export default function resolveAddNodes(
   if (intent.inputs.length === 0) {
     return { commands: [], trace: [] };
   }
-  const creatableInputs = intent.inputs.filter(
-    (input) =>
-      input.nodeType !== 'canvasRef' &&
-      input.nodeType !== 'frameRef' &&
-      input.nodeType !== 'nodeRef',
-  );
-  if (creatableInputs.length === 0) {
-    return { commands: [], trace: [] };
-  }
-
   // Only nodes that actually fall back to viewport-centre placement
   // (i.e. have no `placementPoint`) consume a stagger slot, so a mixed
   // batch — one drag-dropped input plus one button-click input — still
   // stagger correctly without leaving a gap.
   let staggerIndex = 0;
-  const created = creatableInputs.map((input) => {
+  const created = intent.inputs.map((input) => {
     const usesFallback = !input.placementPoint;
     const item = materializeAddNode(input, ui, staggerIndex);
     if (usesFallback) staggerIndex += 1;
     return item;
   });
-  const onlyInput = creatableInputs.length === 1 ? creatableInputs[0] : null;
+  const onlyInput = intent.inputs.length === 1 ? intent.inputs[0] : null;
   const origin = onlyInput?.data?.origin as { type?: unknown } | undefined;
   const requestsEditing = origin?.type === 'user-created';
 

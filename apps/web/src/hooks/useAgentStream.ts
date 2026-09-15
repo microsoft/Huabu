@@ -19,7 +19,6 @@ import { toast } from '@/components/Common/Toast';
 import { isActivelyViewingQuestion } from '@/hooks/useActivelyViewingQuestion';
 import { i18n } from '@/i18n';
 import { useAcpProfilesStore } from '@/store/acpProfilesStore';
-import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import useCanvasStore from '@/store/canvasStore';
 import {
   selectThreadBinding,
@@ -33,9 +32,7 @@ import {
   conversationRequestScope,
   ConversationIntegrityError,
   filterClientOwnedQuestionPatch,
-  isHeadlessConversation,
   patchConversationOwnerNode,
-  refreshConversationPresentation,
   resolveConversationAgentBinding,
   resolveConversationOwnerSource,
   shouldComposeConversationOwner,
@@ -696,7 +693,7 @@ export function useAgentStream(
           await validateConversationView(conversationView);
         } catch (error) {
           if (error instanceof ConversationIntegrityError) {
-            toast(i18n.t('world.conversationIntegrityError'), {
+            toast(i18n.t('chat.conversationIntegrityError'), {
               tone: 'danger',
             });
             return;
@@ -738,19 +735,6 @@ export function useAgentStream(
       const requestScope = conversationRequestScope(conversationView, canvasId);
       const anchorQuestionNodeId =
         conversationView?.conversationOwner.nodeId ?? null;
-      const headless = isHeadlessConversation(conversationView);
-      const refreshAfterLifecycle = async () => {
-        if (!conversationView) return;
-        await refreshConversationPresentation(conversationView);
-        if (headless) {
-          await useAcpThreadChangesStore
-            .getState()
-            .load(
-              conversationView.conversationOwner.canvasId,
-              conversationView.conversationOwner.threadId,
-            );
-        }
-      };
 
       // Selected node ids are still recorded on the persisted user
       // message so the UI can re-render the selection chip after a
@@ -863,7 +847,6 @@ export function useAgentStream(
         ? resolveConversationOwnerSource(
             canvasState.canvasId,
             canvasState.nodes,
-            canvasState.worldReferences,
             conversationView,
           )
         : undefined;
@@ -875,11 +858,11 @@ export function useAgentStream(
         // send we author the node's `content` and lock in the agent the user
         // picked in the inline selector (binding + built-in mode); follow-up
         // turns skip both.
-        const isCompose = shouldComposeConversationOwner(ownerSource, headless);
+        const isCompose = shouldComposeConversationOwner(ownerSource);
         isComposingQuestion = isCompose;
         serverOwnsQuestionLifecycle =
           ownerSource?.agentBindingPolicy === 'fixed';
-        if (isCompose && !headless && !serverOwnsQuestionLifecycle) {
+        if (isCompose && !serverOwnsQuestionLifecycle) {
           // Author content through the intent pipeline so it gets a
           // markdown sidecar save + server-side label preprocessing —
           // matching how the inline editor used to commit the prompt.
@@ -904,7 +887,7 @@ export function useAgentStream(
             ? { ...selectedBinding, alias: selectedProfile.alias }
             : selectedBinding;
         const composeBinding =
-          isCompose && !headless && !serverOwnsQuestionLifecycle
+          isCompose && !serverOwnsQuestionLifecycle
             ? {
                 agentBinding: snapshotBinding,
                 agentIcon: snapshotAgentIcon(
@@ -918,7 +901,6 @@ export function useAgentStream(
         // glow re-appear when the follow-up answer lands. Completion marks it
         // viewed again if the user is still in the thread.
         const startPatch = filterClientOwnedQuestionPatch(ownerSource, {
-          ...(isCompose && headless ? { content: prompt } : {}),
           status: 'running',
           errorMessage: undefined,
           viewed: false,
@@ -927,7 +909,6 @@ export function useAgentStream(
         try {
           if (startPatch) {
             await patchConversationOwnerNode(conversationView, startPatch);
-            await refreshConversationPresentation(conversationView);
             if (isCompose) {
               useChatStore.getState().makeThreadMetadataEphemeral(threadId, {
                 preserveSettings: true,
@@ -969,15 +950,14 @@ export function useAgentStream(
       const baseCanvasContext = requestScope.includeCanvasSelection
         ? getAgentChatContext()
         : { selectedNodes: [] };
-      const canvasContext =
-        anchorQuestionNodeId && !headless
-          ? {
-              ...baseCanvasContext,
-              selectedNodes: baseCanvasContext.selectedNodes.filter(
-                (n) => n.id !== anchorQuestionNodeId,
-              ),
-            }
-          : baseCanvasContext;
+      const canvasContext = anchorQuestionNodeId
+        ? {
+            ...baseCanvasContext,
+            selectedNodes: baseCanvasContext.selectedNodes.filter(
+              (n) => n.id !== anchorQuestionNodeId,
+            ),
+          }
+        : baseCanvasContext;
 
       try {
         await agentApi.streamMessage(
@@ -1022,7 +1002,6 @@ export function useAgentStream(
                     conversationView,
                     terminalPatch,
                   )
-                    .then(refreshAfterLifecycle)
                     .catch((error) =>
                       console.error(
                         '[useAgentStream] failed to persist owner error',
@@ -1072,7 +1051,6 @@ export function useAgentStream(
                     conversationView,
                     terminalPatch,
                   )
-                    .then(refreshAfterLifecycle)
                     .catch((error) =>
                       console.error(
                         '[useAgentStream] failed to persist owner completion',
@@ -1147,7 +1125,6 @@ export function useAgentStream(
                   conversationView,
                   terminalPatch,
                 );
-                await refreshAfterLifecycle();
               }
             }
           }
@@ -1177,7 +1154,6 @@ export function useAgentStream(
             );
             if (terminalPatch) {
               await patchConversationOwnerNode(conversationView, terminalPatch);
-              await refreshAfterLifecycle();
             }
           }
         }

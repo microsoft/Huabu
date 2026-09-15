@@ -26,41 +26,28 @@ function node(id: string, options: Partial<NestableNode> = {}): NestableNode {
 }
 
 describe('Container policy and reparenting', () => {
-  it('accepts only matching node references as Portal children', () => {
+  it('accepts ordinary nodes and previews as Frame children only', () => {
     const child = node('child');
-    expect(canParentNode(node('frame', { type: 'frame' }), child)).toBe(true);
-    const portal = node('portal', {
-      type: 'canvasRef',
-      data: { targetCanvasId: 'canvas-a' },
-    });
-    const matchingRef = node('ref', {
-      type: 'nodeRef',
-      data: {
-        target: { canvasId: 'canvas-a', nodeId: 'node-a' },
-      },
-    });
-    const mismatchedRef = node('other-ref', {
-      type: 'nodeRef',
-      data: {
-        target: { canvasId: 'canvas-b', nodeId: 'node-b' },
-      },
-    });
-    expect(canParentNode(portal, child)).toBe(false);
-    expect(canParentNode(portal, matchingRef)).toBe(true);
-    expect(canParentNode(portal, mismatchedRef)).toBe(false);
-    const frameRef = node('frame-ref', {
-      type: 'frameRef',
-      data: {
-        target: { canvasId: 'canvas-a', nodeId: 'node-frame' },
-      },
-    });
-    expect(canParentNode(portal, frameRef)).toBe(true);
-    expect(canParentNode(frameRef, matchingRef)).toBe(true);
-    expect(canParentNode(frameRef, mismatchedRef)).toBe(false);
-    expect(canParentNode(node('frame', { type: 'frame' }), matchingRef)).toBe(
-      false,
-    );
+    const frame = node('frame', { type: 'frame' });
+    const preview = node('preview', { type: 'spacePreview' });
+    expect(canParentNode(frame, child)).toBe(true);
+    expect(canParentNode(frame, preview)).toBe(true);
+    expect(canParentNode(frame, node('nested', { type: 'frame' }))).toBe(true);
+    expect(canParentNode(frame, frame)).toBe(false);
+    expect(canParentNode(preview, child)).toBe(false);
     expect(canParentNode(node('note'), child)).toBe(false);
+    expect(canParentNode(undefined, child)).toBe(false);
+    expect(canParentNode(frame, undefined)).toBe(false);
+  });
+
+  it('preserves locked Frame membership', () => {
+    const nodes = [
+      node('frame', { type: 'frame', data: { locked: true } }),
+      node('child', { parentId: 'frame' }),
+      node('outside'),
+    ];
+    expect(moveNodeIntoContainer(nodes, 'outside', 'frame')).toBe(nodes);
+    expect(moveNodeOutOfContainer(nodes, 'child')).toBe(nodes);
   });
 
   it('preserves absolute position when entering and leaving a Container', () => {
@@ -89,22 +76,21 @@ describe('Container policy and reparenting', () => {
     });
   });
 
-  it('moves a selected frameRef without independently moving its descendants', () => {
+  it('moves a selected Frame without independently moving its descendants', () => {
     const nodes = [
-      node('frame-ref', {
-        type: 'frameRef',
+      node('frame', {
+        type: 'frame',
         position: { x: 100, y: 50 },
         style: { width: 200, height: 100 },
       }),
       node('child', {
-        type: 'nodeRef',
-        parentId: 'frame-ref',
+        parentId: 'frame',
         position: { x: 20, y: 30 },
       }),
       node('peer', { position: { x: 0, y: 0 } }),
     ];
 
-    const aligned = alignNodes(nodes, 'left', ['frame-ref', 'child', 'peer']);
+    const aligned = alignNodes(nodes, 'left', ['frame', 'child', 'peer']);
 
     expect(
       aligned?.find((candidate) => candidate.id === 'child')?.position,

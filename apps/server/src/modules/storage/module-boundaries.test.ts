@@ -675,10 +675,8 @@ describe('root forwarding shims', () => {
   const EXPECTED_IMPORTERS: Record<string, readonly string[]> = {
     'storage/canvas-dirs.js': [
       'modules/agent/tools/world-target-read.test.ts',
-      'modules/canvas/canvas-command-router.test.ts',
       'modules/canvas/external-watcher.test.ts',
-      'modules/canvas/world-portals.test.ts',
-      'modules/canvas/world-reference-resolver.test.ts',
+      'modules/canvas/world-previews.test.ts',
       'modules/workspace.ts',
     ],
     'storage/paths.js': [

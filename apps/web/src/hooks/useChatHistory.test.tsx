@@ -34,7 +34,6 @@ const canvasMock = vi.hoisted(() => ({
       type: string;
       data: Record<string, unknown>;
     }>,
-    worldReferences: {},
     patchNodeSilent: vi.fn(),
   },
 }));
@@ -61,17 +60,12 @@ vi.mock('@/store/conversationOwner', () => ({
     (_source: unknown, patch: Record<string, unknown>) => patch,
   ),
   patchConversationOwnerNode: vi.fn(),
-  refreshConversationPresentation: vi.fn(),
   resolveConversationOwnerSource: vi.fn(() => undefined),
   validateConversationView: vi.fn(async () => {}),
 }));
 
 vi.mock('@/hooks/useActivelyViewingQuestion', () => ({
   isActivelyViewingQuestion: vi.fn(() => false),
-}));
-
-vi.mock('@/store/acpThreadChangesStore', () => ({
-  useAcpThreadChangesStore: { getState: () => ({}) },
 }));
 
 const THREAD_ID = 'thread-1';

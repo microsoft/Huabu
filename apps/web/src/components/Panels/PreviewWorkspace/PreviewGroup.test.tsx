@@ -146,7 +146,6 @@ beforeEach(() => {
   useCanvasStore.setState({
     canvasId: 'canvas',
     nodes: [node('a'), node('b')],
-    worldReferences: {},
   });
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -156,7 +155,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
-  useCanvasStore.setState({ canvasId: '', nodes: [], worldReferences: {} });
+  useCanvasStore.setState({ canvasId: '', nodes: [] });
 });
 
 describe('PreviewGroup retention', () => {

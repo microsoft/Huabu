@@ -53,9 +53,7 @@ const ALL_NODE_TYPES = [
   'audio',
   'frame',
   'sketch',
-  'canvasRef',
-  'frameRef',
-  'nodeRef',
+  'spacePreview',
   'unknown-future-type',
 ];
 

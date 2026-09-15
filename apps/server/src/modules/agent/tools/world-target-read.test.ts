@@ -75,8 +75,8 @@ beforeEach(() => {
   workspaceState.leases = 0;
   writeCanvas('.world', 'canvas-world', [
     {
-      id: 'node-portal',
-      type: 'canvasRef',
+      id: 'node-preview',
+      type: 'spacePreview',
       position: { x: 0, y: 0 },
       style: { width: 320, height: 240 },
       data: { targetCanvasId: 'canvas-a' },
@@ -100,7 +100,74 @@ afterEach(() => {
 });
 
 describe('World target reads', () => {
-  it('exposes Portal targets and reads a referenced Space', async () => {
+  it('rejects duplicate previews and legacy-only addresses', async () => {
+    for (const types of [
+      ['spacePreview', 'spacePreview'],
+      ['canvasRef'],
+      ['frameRef'],
+      ['nodeRef'],
+    ]) {
+      writeCanvas(
+        '.world',
+        'canvas-world',
+        types.map((type, index) => ({
+          id: `node-entry-${index}`,
+          type,
+          position: { x: 0, y: 0 },
+          data: { targetCanvasId: 'canvas-a' },
+        })),
+      );
+      await expect(
+        executeTool(
+          'get_space_outline',
+          { targetCanvasId: 'canvas-a' },
+          { canvasId: 'canvas-world' },
+        ),
+      ).rejects.toThrow('not addressed by one canonical World preview');
+    }
+  });
+
+  it('denies explicit targets even when an ordinary Space contains a preview', async () => {
+    writeCanvas('Project A', 'canvas-a', [
+      {
+        id: 'node-preview',
+        type: 'spacePreview',
+        position: { x: 0, y: 0 },
+        data: { targetCanvasId: 'canvas-b' },
+      },
+    ]);
+    for (const targetCanvasId of ['canvas-a', 'canvas-b']) {
+      await expect(
+        executeTool(
+          'get_space_outline',
+          { targetCanvasId },
+          { canvasId: 'canvas-a' },
+        ),
+      ).rejects.toThrow('available only in a World conversation');
+    }
+  });
+
+  it('rejects previews addressing World or a deleted Space', async () => {
+    for (const targetCanvasId of ['canvas-world', 'canvas-gone']) {
+      writeCanvas('.world', 'canvas-world', [
+        {
+          id: 'node-preview',
+          type: 'spacePreview',
+          position: { x: 0, y: 0 },
+          data: { targetCanvasId },
+        },
+      ]);
+      await expect(
+        executeTool(
+          'get_space_outline',
+          { targetCanvasId },
+          { canvasId: 'canvas-world' },
+        ),
+      ).rejects.toThrow('not a live ordinary Space');
+    }
+  });
+
+  it('exposes preview targets and reads the addressed Space', async () => {
     const worldOutline = JSON.parse(
       (await executeTool(
         'get_space_outline',
@@ -109,7 +176,7 @@ describe('World target reads', () => {
       )) as string,
     ) as { nodes: Array<Record<string, unknown>> };
     expect(worldOutline.nodes[0]).toMatchObject({
-      id: 'node-portal',
+      id: 'node-preview',
       targetCanvasId: 'canvas-a',
     });
 
@@ -125,14 +192,14 @@ describe('World target reads', () => {
     ]);
   });
 
-  it('rejects targets outside World and targets without a Portal', async () => {
+  it('rejects targets outside World and targets without a preview', async () => {
     await expect(
       executeTool(
         'get_space_outline',
         { targetCanvasId: 'canvas-b' },
         { canvasId: 'canvas-world' },
       ),
-    ).rejects.toThrow('not addressed by one canonical World Portal');
+    ).rejects.toThrow('not addressed by one canonical World preview');
 
     await expect(
       executeTool(
@@ -159,15 +226,15 @@ describe('World target reads', () => {
     ).rejects.toThrow();
   });
 
-  it('keeps portal authorization and the target read in one Workspace', async () => {
+  it('keeps preview authorization and the target read in one Workspace', async () => {
     const originalWorkspace = workspaceState.path;
     const otherWorkspace = mkdtempSync(
       path.join(tmpdir(), 'huabu-world-target-read-other-'),
     );
     writeCanvasAt(otherWorkspace, '.world', 'canvas-world', [
       {
-        id: 'node-portal',
-        type: 'canvasRef',
+        id: 'node-preview',
+        type: 'spacePreview',
         position: { x: 0, y: 0 },
         data: { targetCanvasId: 'canvas-a' },
       },

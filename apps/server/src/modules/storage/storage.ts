@@ -25,6 +25,8 @@
 
 import { rm } from 'node:fs/promises';
 
+import { stripLegacyPortalTopology } from '@huabu/shared';
+
 import {
   acquireWorkspaceOperationLease,
   commitWorkspaceIdentity,
@@ -229,7 +231,15 @@ function composeSpace(storage: Storage, canvasId: string): Space {
     guardedBlobScope(storage, canvasId, scope);
   return {
     canvasId: handle.canvasId,
-    read: () => handle.read(),
+    read: async () => {
+      const record = await handle.read();
+      if (!record) return null;
+      const topology = stripLegacyPortalTopology(
+        record.state.nodes as Parameters<typeof stripLegacyPortalTopology>[0],
+        record.state.edges as Parameters<typeof stripLegacyPortalTopology>[1],
+      );
+      return { ...record, state: { ...record.state, ...topology } };
+    },
     write: (input) => handle.write(input),
     nodes: handle.nodes,
     changes: handle.changes,

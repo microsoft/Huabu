@@ -14,7 +14,7 @@ import {
   requireAvailableAgentProfile,
   SelectableAgentProfileError,
 } from '../agent/selectable-agent-profile.js';
-import { executeCanvasCommandsOnHost } from '../canvas/canvas-command-router.js';
+import { executeOnServer } from '../canvas/canvas-executor.js';
 import { getStructuredStore } from '../storage/index.js';
 
 import type { ExecuteOnServerOutput } from '../canvas/canvas-executor.js';
@@ -39,7 +39,7 @@ const DEFAULT_DEPENDENCIES: TaskServiceDependencies = {
     requireAvailableAgentProfile(profileId);
   },
   repository: (canvasId) => getStructuredStore().space(canvasId).tasks,
-  execute: executeCanvasCommandsOnHost,
+  execute: executeOnServer,
   now: Date.now,
 };
 

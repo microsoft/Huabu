@@ -17,6 +17,43 @@ function node(id: string, x: number): Node {
 }
 
 describe('CanvasHistoryRegistry', () => {
+  it('ignores legacy topology on undo and redo without losing ordinary child geometry', () => {
+    const history = new CanvasHistoryRegistry();
+    history.activate('canvas-world');
+    const legacy: Node[] = [
+      { ...node('portal', 100), type: 'canvasRef' },
+      { ...node('pin', 20), type: 'frameRef', parentId: 'portal' },
+      { ...node('ref', 30), type: 'nodeRef', parentId: 'pin' },
+      { ...node('frame', 5), type: 'frame', parentId: 'pin', extent: 'parent' },
+      { ...node('child', 7), parentId: 'frame' },
+      { ...node('preview', 400), type: 'spacePreview' },
+    ];
+    const edges = [
+      { id: 'removed', source: 'ref', target: 'child' },
+      { id: 'kept', source: 'child', target: 'preview' },
+    ];
+    const original = JSON.stringify({ nodes: legacy, edges });
+    history.takeSnapshot(legacy, edges);
+    const undone = history.undo(legacy, edges)!;
+    const redone = history.redo(undone.nodes, undone.edges)!;
+    for (const restored of [undone, redone]) {
+      expect(restored.nodes.map((n) => n.id)).toEqual([
+        'frame',
+        'child',
+        'preview',
+      ]);
+      expect(restored.nodes[0].position).toEqual({ x: 125, y: 0 });
+      expect(restored.nodes[0]).not.toHaveProperty('parentId');
+      expect(restored.nodes[0]).not.toHaveProperty('extent');
+      expect(restored.nodes[1]).toMatchObject({
+        parentId: 'frame',
+        position: { x: 7, y: 0 },
+      });
+      expect(restored.edges).toEqual([edges[1]]);
+    }
+    expect(JSON.stringify({ nodes: legacy, edges })).toBe(original);
+  });
+
   it('restores independent undo stacks when switching Canvas scopes', () => {
     const history = new CanvasHistoryRegistry();
 

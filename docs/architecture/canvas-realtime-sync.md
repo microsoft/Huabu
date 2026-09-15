@@ -18,6 +18,8 @@ Two channels cooperate:
 
 Space Preview does not open a target Canvas sync stream. It reads bounded snapshots through `GET /:canvasId/preview-scene`, shares them by target in a tab-local cache, and revalidates on a ten-second freshness interval and window focus. A target mutation therefore appears after revalidation rather than through the host Canvas SSE channel; see [space-preview.md](./space-preview.md).
 
+World preview reconciliation is a system-originated command batch against World and publishes through World's existing delta stream when topology changes. Portal Pin routing, batched source-reference refreshes, and World `nodeRef` conversation presentation are retired; previews add no cross-Space sync channel or source-conversation subscription.
+
 `version` (monotonic per canvas) is the concurrency primitive; a **dirty-node**
 filter guarantees an incoming agent write never clobbers a node the user is
 mid-editing.
@@ -195,8 +197,7 @@ is deferred — see the plan.
 
 ## Undo interaction
 
-Broadcast applies take **one** undo snapshot per batch (via
-`applyDeltasFromAgent`). Two host-side refinements keep undo coherent with sync:
+Broadcast applies take **one** undo snapshot per batch (via `applyDeltasFromAgent`). Host-side refinements keep undo coherent with sync:
 
 - **Transient-field parity.** `diff.ts` and the web snapshotter share one
   canonical `TRANSIENT_NODE_FIELDS` / `TRANSIENT_EDGE_FIELDS` list
@@ -206,6 +207,7 @@ Broadcast applies take **one** undo snapshot per batch (via
 - **Question-node data preservation.** Undo/redo restores a question node's
   geometry but keeps its **live** `data` (thread binding, answer) — that payload
   is system-driven, so rewinding a move must not wipe it.
+- **Retired topology filtering.** Undo/redo applies the shared `stripLegacyPortalTopology()` helper before restoring a snapshot, so old Portal/Pin nodes and their incident edges cannot reappear and ordinary children retain rebased positions. The former Portal-specific history invalidation path is removed; this filtering does not migrate or clean up stored files.
 
 ## Stream reliability
 

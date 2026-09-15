@@ -88,8 +88,8 @@ function boundedImageSrc(value: unknown): string | undefined {
 }
 
 function sceneKind(type: string | undefined): SpacePreviewSceneNode['kind'] {
-  if (type === 'frame' || type === 'frameRef') return 'frame';
-  if (type === 'spacePreview' || type === 'canvasRef') {
+  if (type === 'frame') return 'frame';
+  if (type === 'spacePreview') {
     return 'nested-preview';
   }
   return 'content';

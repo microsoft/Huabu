@@ -20,7 +20,7 @@ import type { CanvasNodeType } from '@huabu/shared';
  */
 export type PendingNodeType = Exclude<
   CanvasNodeType,
-  'image' | 'pdf' | 'video' | 'web' | 'canvasRef' | 'frameRef'
+  'image' | 'pdf' | 'video' | 'web'
 > | null;
 
 /**
