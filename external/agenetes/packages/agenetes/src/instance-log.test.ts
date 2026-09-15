@@ -201,6 +201,75 @@ describe('Agenetes two-tier conversation log (M5.6/C3)', () => {
     expect(keys).not.toContain('seqEnd');
   });
 
+  it('counts a non-null active tail as one display turn and preserves its identity on completion', async () => {
+    const inst = mount();
+    const handle = inst.create(deployment);
+    for (const content of ['one', 'two']) {
+      raw!.scripts.push({
+        events: [text(content), end()],
+        result: [{ type: 'text', data: { content } }],
+      });
+      await drain(handle, { type: 'user_text', content });
+    }
+    raw!.scripts.push({
+      events: [text('live')],
+      result: [{ type: 'text', data: { content: 'live' } }],
+    });
+    const gen = handle.run(
+      { type: 'user_text', content: 'three' } as never,
+      {} as never,
+    );
+    await gen.next();
+
+    const active = inst.historyPage(ns, threadId, {
+      limit: 2,
+      withTail: true,
+    });
+    expect(active.groups).toHaveLength(2);
+    expect(active.groups[0]!.turns[0]!.request).toMatchObject({
+      content: 'two',
+    });
+    expect(active.groups[1]!.isActive).toBe(true);
+    expect(active.groups[1]!.activeTurnIndex).toBe(0);
+    const activeId = active.groups[1]!.id;
+
+    for await (const _ of gen) {
+      // finish the fold
+    }
+    const completed = inst.historyPage(ns, threadId, {
+      limit: 2,
+      withTail: true,
+    });
+    expect(completed.groups[1]!.id).toBe(activeId);
+    expect(completed.groups[1]!.isActive).toBeUndefined();
+  });
+
+  it('attaches a null-request active tail without consuming another display slot', async () => {
+    const inst = mount();
+    const handle = inst.create(deployment);
+    raw!.scripts.push({
+      events: [text('committed'), end()],
+      result: [{ type: 'text', data: { content: 'committed' } }],
+    });
+    await drain(handle, { type: 'user_text', content: 'question' });
+    raw!.scripts.push({
+      events: [text('resumed')],
+      result: [{ type: 'text', data: { content: 'resumed' } }],
+    });
+    const gen = handle.run(null as never, {} as never);
+    await gen.next();
+
+    const page = inst.historyPage(ns, threadId, {
+      limit: 1,
+      withTail: true,
+    });
+    expect(page.groups).toHaveLength(1);
+    expect(page.groups[0]!.turns).toHaveLength(2);
+    expect(page.groups[0]!.turns[1]!.request).toBeNull();
+    expect(page.groups[0]!.isActive).toBe(true);
+    expect(page.groups[0]!.activeTurnIndex).toBe(1);
+  });
+
   it('tail() ends when a terminal (end) frame is observed', async () => {
     const inst = mount();
     const handle = inst.create(deployment);

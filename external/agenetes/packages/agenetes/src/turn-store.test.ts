@@ -6,7 +6,15 @@
 // resumes from), on-disk round-trip + tolerance (a corrupt tail line never
 // bricks a read), and per-`(namespace, threadId)` isolation.
 
-import { appendFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -49,6 +57,8 @@ const persisted = (
 
 const turnFilePath = (namespace: Namespace, threadId: string): string =>
   path.join(namespace.storage!.root!, 'chat_v2', `${threadId}.turns.jsonl`);
+const turnDatabasePath = (namespace: Namespace): string =>
+  path.join(namespace.storage!.root!, 'chat_v2', 'turns.sqlite');
 
 // Run the shared store contract against both backings so the on-disk store
 // stays a faithful twin of the in-memory default.
@@ -146,20 +156,112 @@ describe.each<[string, () => TurnStore]>([
     store.append(n, 'thread-1', persisted('fresh', 1, 1));
     expect(store.count(n, 'thread-1')).toBe(1);
   });
+
+  it('pages complete display groups backward in chronological order', () => {
+    const store = make();
+    const n = ns('canvas-1');
+    store.append(n, 'thread-1', {
+      ...persisted('orphan-a', 1, 1),
+      turn: { ...turn('orphan-a'), request: null },
+    });
+    store.append(n, 'thread-1', {
+      ...persisted('orphan-b', 2, 2),
+      turn: { ...turn('orphan-b'), request: null },
+    });
+    store.append(n, 'thread-1', persisted('user-a', 3, 3));
+    store.append(n, 'thread-1', persisted('user-b', 4, 4));
+    store.append(n, 'thread-1', {
+      ...persisted('resume', 5, 5),
+      turn: { ...turn('resume'), request: null },
+    });
+
+    const newest = store.page(n, 'thread-1', { limit: 2 });
+    expect(
+      newest.groups.map((group) =>
+        group.turns.map((item) => item.turn.transcript[0]!.data),
+      ),
+    ).toEqual([
+      [{ content: 'user-a' }],
+      [{ content: 'user-b' }, { content: 'resume' }],
+    ]);
+    expect(newest.hasMore).toBe(true);
+
+    const older = store.page(n, 'thread-1', {
+      limit: 2,
+      before: newest.before!,
+    });
+    expect(older.groups).toHaveLength(1);
+    expect(older.groups[0]!.turns).toHaveLength(2);
+    expect(older.hasMore).toBe(false);
+  });
+
+  it('keeps cursors valid across append and invalidates them on replace', () => {
+    const store = make();
+    const n = ns('canvas-1');
+    store.append(n, 'thread-1', persisted('a', 1, 1));
+    store.append(n, 'thread-1', persisted('b', 2, 2));
+    const cursor = store.page(n, 'thread-1', { limit: 1 }).before!;
+
+    store.append(n, 'thread-1', persisted('c', 3, 3));
+    expect(
+      store.page(n, 'thread-1', { limit: 1, before: cursor }).groups[0]!
+        .turns[0]!.turn.transcript[0]!.data,
+    ).toEqual({ content: 'a' });
+
+    store.replace(n, 'thread-1', [persisted('replacement', 1, 1)]);
+    expect(() =>
+      store.page(n, 'thread-1', { limit: 1, before: cursor }),
+    ).toThrow('stale');
+  });
+
+  it('rejects invalid limits and malformed or cross-thread cursors', () => {
+    const store = make();
+    const n = ns('canvas-1');
+    store.append(n, 'thread-1', persisted('a', 1, 1));
+    store.append(n, 'thread-1', persisted('b', 2, 2));
+    const cursor = store.page(n, 'thread-1', { limit: 1 }).before!;
+
+    expect(() => store.page(n, 'thread-1', { limit: 0 })).toThrow(
+      'positive integer',
+    );
+    expect(() =>
+      store.page(n, 'thread-1', { limit: 1, before: 'not-a-cursor' }),
+    ).toThrow('Malformed');
+    expect(() =>
+      store.page(n, 'thread-2', { limit: 1, before: cursor }),
+    ).toThrow('Malformed');
+  });
 });
 
 describe('FileTurnStore — on-disk specifics', () => {
-  it('persists to <root>/chat_v2/<threadId>.turns.jsonl and survives a restart', () => {
+  it('persists to the Space-owned turns.sqlite and survives a restart', () => {
     const n = ns('canvas-1');
     const first = new FileTurnStore();
     first.append(n, 'thread-1', persisted('a', 1, 3));
     first.append(n, 'thread-1', persisted('b', 4, 7));
+    expect(existsSync(turnDatabasePath(n))).toBe(true);
 
     // A fresh store reads the same on-disk log (restart-surviving).
     const restarted = new FileTurnStore();
     expect(restarted.list(n, 'thread-1').map((p) => p.seqEnd)).toEqual([3, 7]);
     expect(restarted.count(n, 'thread-1')).toBe(2);
     expect(restarted.fence(n, 'thread-1')).toBe(7);
+  });
+
+  it('closes the Space-owned database before its directory moves', () => {
+    const n = ns('canvas-1');
+    const store = new FileTurnStore();
+    store.append(n, 'thread-1', persisted('a', 1, 3));
+
+    store.close(n);
+    const root = n.storage?.root;
+    if (!root) throw new Error('Expected a Disk namespace');
+    const movedRoot = `${root}-moved`;
+    renameSync(root, movedRoot);
+
+    expect(existsSync(path.join(movedRoot, 'chat_v2', 'turns.sqlite'))).toBe(
+      true,
+    );
   });
 
   it('tolerates a corrupt tail line without bricking the read', () => {
@@ -175,7 +277,7 @@ describe('FileTurnStore — on-disk specifics', () => {
     expect(store.fence(n, 'thread-1')).toBe(7);
   });
 
-  it('replace() writes the target file and a fresh store instance reads it back', () => {
+  it('replace() writes the target database and a fresh store instance reads it back', () => {
     const source = ns('canvas-1');
     const target = ns('canvas-2');
     const writer = new FileTurnStore();
@@ -184,24 +286,66 @@ describe('FileTurnStore — on-disk specifics', () => {
     const snapshot = writer.list(source, 'thread-1');
 
     writer.replace(target, 'thread-1', snapshot);
-    expect(existsSync(turnFilePath(target, 'thread-1'))).toBe(true);
+    expect(existsSync(turnDatabasePath(target))).toBe(true);
 
     const restarted = new FileTurnStore();
     expect(restarted.list(target, 'thread-1')).toEqual(snapshot);
     expect(restarted.fence(target, 'thread-1')).toBe(7);
   });
 
-  it('delete() removes the on-disk file so a fresh store observes an empty log', () => {
+  it('delete() removes the thread rows so a fresh store observes an empty log', () => {
     const n = ns('canvas-1');
     const writer = new FileTurnStore();
     writer.append(n, 'thread-1', persisted('a', 1, 3));
-    expect(existsSync(turnFilePath(n, 'thread-1'))).toBe(true);
+    expect(existsSync(turnDatabasePath(n))).toBe(true);
 
     writer.delete(n, 'thread-1');
-    expect(existsSync(turnFilePath(n, 'thread-1'))).toBe(false);
+    expect(existsSync(turnDatabasePath(n))).toBe(true);
 
     const restarted = new FileTurnStore();
     expect(restarted.list(n, 'thread-1')).toEqual([]);
     expect(restarted.count(n, 'thread-1')).toBe(0);
+  });
+
+  it('lazily imports valid JSONL records, skips malformed/trailing partial lines, and retires the source', () => {
+    const n = ns('canvas-1');
+    const source = turnFilePath(n, 'thread-1');
+    mkdirSync(path.dirname(source), { recursive: true });
+    writeFileSync(
+      source,
+      `${JSON.stringify(persisted('a', 1, 3))}\n{not json}\n${JSON.stringify(
+        persisted('b', 4, 7),
+      )}\n{"turn":`,
+      { flag: 'w' },
+    );
+
+    const store = new FileTurnStore();
+    expect(store.list(n, 'thread-1').map((record) => record.seqEnd)).toEqual([
+      3, 7,
+    ]);
+    expect(existsSync(source)).toBe(false);
+    expect(existsSync(`${source}.bak`)).toBe(true);
+  });
+
+  it('leaves a JSONL source retryable when retirement fails after import', () => {
+    const n = ns('canvas-1');
+    const source = turnFilePath(n, 'thread-1');
+    mkdirSync(path.dirname(source), { recursive: true });
+    writeFileSync(source, `${JSON.stringify(persisted('a', 1, 3))}\n`);
+    let fail = true;
+    const store = new FileTurnStore({
+      rename: (from, to) => {
+        if (fail) {
+          fail = false;
+          throw new Error('simulated rename failure');
+        }
+        renameSync(from, to);
+      },
+    });
+
+    expect(() => store.list(n, 'thread-1')).toThrow('simulated rename failure');
+    expect(existsSync(source)).toBe(true);
+    expect(store.list(n, 'thread-1')).toHaveLength(1);
+    expect(existsSync(`${source}.bak`)).toBe(true);
   });
 });

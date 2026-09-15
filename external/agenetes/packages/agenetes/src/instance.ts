@@ -156,6 +156,12 @@ export interface Agenetes {
     threadId: string,
     options?: HistoryOptions,
   ): ThreadHistory;
+  /** Read a bounded page of display-turn groups without loading full history. */
+  historyPage(
+    namespace: Namespace,
+    threadId: string,
+    options: HistoryPageOptions,
+  ): ThreadHistoryPage;
   /**
    * Follow a thread's LIVE tail: the Tier-1 events appended after the last
    * folded turn (the uncommitted in-flight turn, replayed on connect) plus
@@ -179,6 +185,27 @@ export interface HistoryOptions {
 export interface ThreadHistory {
   /** Completed turns plus the optional read-time incomplete projection. */
   readonly turns: ObservedAgentTurn[];
+}
+
+export interface HistoryPageOptions {
+  readonly limit: number;
+  readonly before?: string;
+  /** Only applies to the newest page; older pages never include the tail. */
+  readonly withTail?: boolean;
+}
+
+export interface ThreadHistoryGroup {
+  readonly id: string;
+  readonly turns: ObservedAgentTurn[];
+  readonly isActive?: true;
+  /** Index of the first Tier-1 turn within an active display group. */
+  readonly activeTurnIndex?: number;
+}
+
+export interface ThreadHistoryPage {
+  readonly groups: ThreadHistoryGroup[];
+  readonly before?: string;
+  readonly hasMore: boolean;
 }
 
 /** Lightweight counts for one thread's two-tier conversation log. */
@@ -828,6 +855,77 @@ export function createAgenetesInstance(
     ): ThreadHistory {
       return {
         turns: readHistory(namespace, threadId, options?.withTail === true),
+      };
+    },
+    historyPage(
+      namespace: Namespace,
+      threadId: string,
+      options: HistoryPageOptions,
+    ): ThreadHistoryPage {
+      const includeTail =
+        options.before === undefined && options.withTail === true;
+      const fence = turnStore.fence(namespace, threadId);
+      const tail = includeTail
+        ? materializeHistory(
+            [],
+            eventLog.readRecords(namespace, threadId, fence),
+          )[0]
+        : undefined;
+      const tailStartsGroup = tail !== undefined && tail.request !== null;
+      const persistedLimit =
+        tailStartsGroup === true
+          ? Math.max(1, options.limit - 1)
+          : options.limit;
+      const page = turnStore.page(namespace, threadId, {
+        limit: persistedLimit,
+        ...(options.before ? { before: options.before } : {}),
+      });
+      let groups: ThreadHistoryGroup[] = page.groups.map((group) => ({
+        id: group.id,
+        turns: group.turns.map(({ turn }) => turn),
+      }));
+      let before = page.before;
+      let hasMore = page.hasMore;
+
+      if (tail) {
+        if (tailStartsGroup) {
+          if (options.limit === 1) {
+            hasMore = page.groups.length > 0;
+            before = hasMore ? page.next : undefined;
+            groups = [];
+          } else {
+            groups = groups.slice(-(options.limit - 1));
+          }
+          groups.push({
+            id: page.next,
+            turns: [tail],
+            isActive: true,
+            activeTurnIndex: 0,
+          });
+        } else if (groups.length > 0) {
+          const latest = groups[groups.length - 1]!;
+          groups[groups.length - 1] = {
+            ...latest,
+            turns: [...latest.turns, tail],
+            isActive: true,
+            activeTurnIndex: latest.turns.length,
+          };
+        } else {
+          groups = [
+            {
+              id: page.next,
+              turns: [tail],
+              isActive: true,
+              activeTurnIndex: 0,
+            },
+          ];
+        }
+      }
+
+      return {
+        groups,
+        ...(before ? { before } : {}),
+        hasMore,
       };
     },
     tail(

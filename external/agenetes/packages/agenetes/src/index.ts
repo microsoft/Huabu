@@ -9,8 +9,11 @@ export type { MountAgenetesOptions } from './mount.js';
 export { createAgenetesInstance } from './instance.js';
 export type {
   Agenetes,
+  HistoryPageOptions,
   HistoryOptions,
   ThreadHistory,
+  ThreadHistoryGroup,
+  ThreadHistoryPage,
   ThreadLogMetadata,
 } from './instance.js';
 
@@ -34,8 +37,24 @@ export type {
   TurnStartLogEntry,
 } from './event-log.js';
 
-export { InMemoryTurnStore, FileTurnStore } from './turn-store.js';
-export type { PersistedTurn, TurnStore } from './turn-store.js';
+export {
+  decodeTurnCursor,
+  encodeTurnCursor,
+  FileTurnStore,
+  groupPersistedTurns,
+  InMemoryTurnStore,
+  MalformedTurnCursorError,
+  requireTurnPageLimit,
+  StaleTurnCursorError,
+} from './turn-store.js';
+export type {
+  PersistedTurn,
+  PersistedTurnGroup,
+  TurnCursor,
+  TurnStore,
+  TurnStorePage,
+  TurnStorePageOptions,
+} from './turn-store.js';
 export { createTranscriptFolder } from './fold.js';
 export type { TranscriptFolder } from './fold.js';
 export { materializeHistory } from './materialize-history.js';
