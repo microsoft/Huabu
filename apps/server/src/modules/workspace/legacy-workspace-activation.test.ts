@@ -46,9 +46,9 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 
 import multipart from '@fastify/multipart';
 import fastify from 'fastify';
