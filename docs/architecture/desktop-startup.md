@@ -68,3 +68,9 @@ Verify after touching any of this by building and reading the emitted `dist/inde
 | [apps/web/src/App.tsx](../../apps/web/src/App.tsx)                                                       | Lazy canvas route; workspace bootstrap that drives `WorkspaceLoadingScreen`            |
 | [apps/web/src/store/workspaceStore.ts](../../apps/web/src/store/workspaceStore.ts)                       | `init()` — the `GET` / `PUT /api/workspace` bootstrap                                  |
 | [apps/server/src/modules/workspace-activation.ts](../../apps/server/src/modules/workspace-activation.ts) | Forked workspace preparation, timeout and in-progress guards                           |
+
+## 5. Space deep links and windows
+
+Shareable Node links use the same HTTP(S) `/canvas/:canvasId?node=:nodeId` route as the web application; Desktop does not register a custom `huabu:` protocol. Same-origin top-level navigation and refresh in the main renderer therefore use the normal React Router contract. Links opened as child windows continue through Electron's existing `setWindowOpenHandler`: HTTP(S) destinations open in the operating-system browser rather than creating another Huabu application window.
+
+Electron remains single-instance. Launching another application process restores and focuses the existing main window, but the current `second-instance` handler does not forward a URL into that renderer. A local Desktop loopback origin is generally not shareable with another user; collaboration links are practical when the application uses a reachable remote/server-backed HTTP(S) origin.

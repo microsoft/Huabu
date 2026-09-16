@@ -382,7 +382,9 @@
     "loading": "Loading Space…",
     "notFoundTitle": "Space not found",
     "notFoundDescription": "This Space doesn't exist or may have been deleted.",
-    "backToList": "Back to Space list"
+    "backToList": "Back to Space list",
+    "nodeTargetUnavailable": "This linked node is unavailable.",
+    "nodeFocusedNoPreview": "Node focused. This node has no expanded preview."
   },
   "world": {
     "title": "World",
@@ -559,6 +561,9 @@
     "copyImage": "Copy image",
     "imageCopied": "Image copied",
     "copyImageFailed": "This image could not be copied. Download it instead.",
+    "copyLink": "Copy link to node",
+    "linkCopied": "Node link copied",
+    "copyLinkFailed": "The node link could not be copied.",
     "downloadImage": "Download image",
     "videoFileMissing": "Video file missing",
     "noVideoSource": "No Video Source"

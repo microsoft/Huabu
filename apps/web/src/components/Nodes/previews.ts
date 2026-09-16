@@ -24,4 +24,7 @@ export const NodePreviews: Record<
   sketch: SketchPreview,
 };
 
+export const hasNodePreview = (nodeType: string): boolean =>
+  Object.hasOwn(NodePreviews, nodeType);
+
 export type { PreviewComponentProps };

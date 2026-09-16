@@ -382,7 +382,9 @@
     "loading": "正在加载 Space…",
     "notFoundTitle": "未找到 Space",
     "notFoundDescription": "该 Space 不存在，或已被删除。",
-    "backToList": "返回 Space 列表"
+    "backToList": "返回 Space 列表",
+    "nodeTargetUnavailable": "链接指向的节点不可用。",
+    "nodeFocusedNoPreview": "已定位到节点，但该节点没有展开预览。"
   },
   "world": {
     "title": "World",
@@ -559,6 +561,9 @@
     "copyImage": "复制图片",
     "imageCopied": "图片已复制",
     "copyImageFailed": "无法复制此图片，请改用下载。",
+    "copyLink": "复制节点链接",
+    "linkCopied": "已复制节点链接",
+    "copyLinkFailed": "无法复制节点链接。",
     "downloadImage": "下载图片",
     "videoFileMissing": "视频文件缺失",
     "noVideoSource": "无视频来源"

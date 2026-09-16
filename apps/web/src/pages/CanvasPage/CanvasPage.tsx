@@ -8,10 +8,15 @@ import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 
 import { CenterArea } from '@/pages/CanvasPage/CenterArea.tsx';
 import { MainLayout } from '@/pages/CanvasPage/MainLayout.tsx';
+import { usePanelStore } from '@/store/panelStore';
+import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
+import { readNodeDeepLinkIntent } from '@/utils/nodeDeepLink';
 
 import { Loading } from '../../components/Common/Loading';
 import { toast } from '../../components/Common/Toast';
+import { hasNodePreview } from '../../components/Nodes/previews';
 import { CanvasLayerPanel } from '../../components/Panels/CanvasLayerPanel';
+import { focusNodesOnCanvas } from '../../components/Panels/CanvasLayerPanel/focusNodesOnCanvas';
 import { CanvasHeader } from '../../components/Panels/Header/CanvasHeader.tsx';
 import { PreviewWorkspacePanel } from '../../components/Panels/PreviewWorkspace/PreviewWorkspacePanel';
 import { useGlobalSearchHotkey } from '../../hooks/useGlobalSearchHotkey';
@@ -88,9 +93,13 @@ export default function CanvasPage() {
   // for one synchronous frame before the mount effect below kicks
   // `loadCanvas` and flips `isLoading` on.
   const storeCanvasId = useStore((s) => s.canvasId);
+  const rfInstance = useStore((s) => s.rfInstance);
+  const previewCanvasId = usePreviewWorkspaceStore((s) => s.canvasId);
+  const isPreviewFullscreen = usePanelStore((s) => s.isPreviewFullscreen);
   const initialised = useRef(false);
   const newCanvasPlacementRef = useRef<NewCanvasPlacementIntent | null>(null);
   const previewNodeIntentRef = useRef<string | null>(null);
+  const consumedDeepLinkActivationRef = useRef<string | null>(null);
   const setPendingNodeType = useToolStore((s) => s.setPendingNodeType);
   const isShortcutsOpen = useShortcutsUiStore((s) => s.isOpen);
   const openShortcuts = useShortcutsUiStore((s) => s.open);
@@ -146,6 +155,75 @@ export default function CanvasPage() {
       openPreviewNode(nodeId);
     }
   }, [canvasId, isLoading, storeCanvasId]);
+
+  useEffect(() => {
+    const intent = readNodeDeepLinkIntent(location.search);
+    if (intent.kind === 'none') {
+      consumedDeepLinkActivationRef.current = null;
+      return;
+    }
+
+    if (
+      !canvasId ||
+      storeCanvasId !== canvasId ||
+      previewCanvasId !== canvasId ||
+      isLoading
+    ) {
+      return;
+    }
+
+    const activation = `${location.key}\0${canvasId}\0${location.search}`;
+    if (consumedDeepLinkActivationRef.current === activation) return;
+
+    if (intent.kind === 'invalid') {
+      consumedDeepLinkActivationRef.current = activation;
+      toast(t('canvasPage.nodeTargetUnavailable'), { tone: 'warning' });
+      return;
+    }
+
+    if (isPreviewFullscreen) {
+      usePanelStore.getState().setPreviewFullscreen(false);
+      return;
+    }
+    if (!rfInstance) return;
+
+    consumedDeepLinkActivationRef.current = activation;
+    const canvas = useStore.getState();
+    const node = canvas.nodes.find(
+      (candidate) => candidate.id === intent.nodeId,
+    );
+    if (!node) {
+      toast(t('canvasPage.nodeTargetUnavailable'), { tone: 'warning' });
+      return;
+    }
+
+    canvas.selectNodes([node.id], false);
+    if (node.type === 'question') {
+      if (typeof node.data.threadId === 'string' && node.data.threadId) {
+        const tabId = openPreviewNode(node.id);
+        if (tabId) {
+          usePreviewWorkspaceStore.getState().requestChatOpen(tabId, 'bottom');
+        }
+      } else {
+        toast(t('canvasPage.nodeFocusedNoPreview'), { tone: 'info' });
+      }
+    } else if (hasNodePreview(node.type ?? '')) {
+      openPreviewNode(node.id);
+    } else {
+      toast(t('canvasPage.nodeFocusedNoPreview'), { tone: 'info' });
+    }
+    focusNodesOnCanvas(rfInstance, [node.id], 400);
+  }, [
+    canvasId,
+    isLoading,
+    isPreviewFullscreen,
+    location.key,
+    location.search,
+    previewCanvasId,
+    rfInstance,
+    storeCanvasId,
+    t,
+  ]);
 
   useEffect(() => {
     if (!canvasId) {

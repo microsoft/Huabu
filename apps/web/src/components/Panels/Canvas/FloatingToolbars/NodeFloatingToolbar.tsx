@@ -2,7 +2,7 @@
 // Licensed under the MIT license.
 
 import { useInternalNode } from '@xyflow/react';
-import { MoveRight, Trash2 } from 'lucide-react';
+import { Link, MoveRight, Trash2 } from 'lucide-react';
 import { memo, useCallback, useMemo, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -18,6 +18,7 @@ import {
   FloatingToolbar,
   FLOATING_TOOLBAR_CLASS,
 } from '@/components/Common/FloatingToolbar';
+import { toast } from '@/components/Common/Toast';
 import { Tooltip } from '@/components/Common/Tooltip';
 import { useHeightMode } from '@/components/Nodes/shared/height/useHeightMode';
 import { NODE_ICON } from '@/config/nodeIcons';
@@ -33,7 +34,9 @@ import {
   selectIsNodeOpen,
   usePreviewWorkspaceStore,
 } from '@/store/previewWorkspace/store';
+import { copyToClipboard } from '@/utils/io/clipboard';
 import { resolveGeometryEdit } from '@/utils/node/geometry';
+import { buildNodeDeepLink } from '@/utils/nodeDeepLink';
 
 import type { CanvasNodeType, NodeData } from '@/components/Nodes/types';
 
@@ -97,6 +100,7 @@ export const NodeFloatingToolbar = memo(
     // top edge of an invisible rectangle.
     const mark = useNodeCollapseStore((s) => s.marks[id]);
     const updateNodeData = useCanvasStore((s) => s.updateNodeData);
+    const canvasId = useCanvasStore((s) => s.canvasId);
     const convertNodeType = useCanvasStore((s) => s.convertNodeType);
     const deleteNodes = useCanvasStore((s) => s.deleteNodes);
     const setMoveSelectionDialogOpen = useCanvasStore(
@@ -393,6 +397,28 @@ export const NodeFloatingToolbar = memo(
             </FloatingToolbar.ActionButton>
           </>
         )}
+
+        <FloatingToolbar.Divider />
+        <FloatingToolbar.ActionButton
+          title={t('node.copyLink')}
+          onClick={(event) => {
+            event.stopPropagation();
+            const href = buildNodeDeepLink(
+              window.location.origin,
+              canvasId,
+              id,
+            );
+            void copyToClipboard(href)
+              .then(() => {
+                toast(t('node.linkCopied'), { tone: 'success' });
+              })
+              .catch(() => {
+                toast(t('node.copyLinkFailed'), { tone: 'danger' });
+              });
+          }}
+        >
+          <Link />
+        </FloatingToolbar.ActionButton>
 
         {/* Non-mouse only: mouse users have keyboard Delete / Backspace. */}
         {isNotMouse && (
