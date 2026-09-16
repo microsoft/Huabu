@@ -294,6 +294,11 @@
   border-color: var(--edge-default);
 }
 
+/* Only the expanded Note opts into plain-click workspace navigation. */
+.milkdown-note-preview .ProseMirror a[href] {
+  cursor: pointer;
+}
+
 /* Horizontal rule. Crepe paints `<hr>` as a 1px-tall background bar
    filled with `color-mix(--crepe-color-outline, transparent 80%)` —
    i.e. 20% of our near-white `--edge-default`, which renders almost

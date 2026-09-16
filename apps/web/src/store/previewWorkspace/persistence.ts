@@ -16,6 +16,7 @@ import {
   MAX_PREVIEW_GROUPS,
   createEmptyWorkspace,
   findTabByTarget,
+  normalizePreviewTarget,
   repairTransientTabs,
   type CanvasPreviewWorkspace,
   type PreviewGroup,
@@ -85,6 +86,13 @@ function parseTarget(value: unknown, canvasId: string): PreviewTarget | null {
     candidate.threadId.length > 0
   ) {
     return { kind: 'chat', canvasId, threadId: candidate.threadId };
+  }
+  if (candidate.kind === 'url' && typeof candidate.url === 'string') {
+    return normalizePreviewTarget({
+      kind: 'url',
+      canvasId,
+      url: candidate.url,
+    });
   }
   return null;
 }

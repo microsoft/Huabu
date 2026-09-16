@@ -3,6 +3,8 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
+
 const { associateNode, deleteNode, putCanvas, postCanvasExecute, forkThread } =
   vi.hoisted(() => ({
     associateNode: vi.fn(),
@@ -19,12 +21,28 @@ vi.mock('../api', async (importOriginal) => ({
   postCanvasExecute,
   postCanvasEvents: vi.fn().mockResolvedValue({ success: true }),
 }));
+vi.mock('../api/canvas', async (importOriginal) => ({
+  ...(await importOriginal<typeof CanvasApi>()),
+  putNodeContent: vi.fn(
+    async (
+      _canvasId: string,
+      nodeId: string,
+      request: PutNodeContentRequest,
+    ) => ({
+      nodeId,
+      label: null,
+      rev: nodeRevisionOf({ content: request.content }),
+    }),
+  ),
+  preprocessNode: vi.fn().mockResolvedValue({ success: true }),
+}));
 vi.mock('../api/agent', () => ({ agentApi: { forkThread } }));
 
 import { canvasHistoryManager } from './canvasHistoryManager';
 import useCanvasStore, { awaitQuestionCreation } from './canvasStore';
 
 import type * as CanvasApi from '../api';
+import type { PutNodeContentRequest } from '@huabu/shared';
 import type { Node } from '@xyflow/react';
 
 const question: Node = {
@@ -163,7 +181,7 @@ describe('Question creation settlement', () => {
       }
       acknowledge(response);
       await awaitQuestionCreation('canvas-restore', node.id);
-      await canvasHistoryManager.waitForDeletion(node.id);
+      await canvasHistoryManager.waitForDeletion('canvas-restore', node.id);
       await removalSave;
       expect(putCanvas).toHaveBeenCalledTimes(1);
       expect(putCanvas.mock.calls[0][1].state.nodes).toEqual([]);
@@ -175,11 +193,7 @@ describe('Question creation settlement', () => {
       expect(useCanvasStore.getState().nodes).toEqual([]);
       expect(canvasHistoryManager.canUndo).toBe(false);
       expect(deleteNode).toHaveBeenCalledTimes(1);
-      expect(deleteNode).toHaveBeenCalledWith(
-        'canvas-restore',
-        node.id,
-        expect.any(Object),
-      );
+      expect(deleteNode).toHaveBeenCalledWith('canvas-restore', node.id);
       useCanvasStore.getState().addNode({
         nodeType: 'note',
         placementPoint: { x: 100, y: 100 },
@@ -222,12 +236,12 @@ describe('Question creation settlement', () => {
       pendingEffects,
     });
     await awaitQuestionCreation('canvas-restore', node.id);
-    await canvasHistoryManager.waitForDeletion(node.id);
+    await canvasHistoryManager.waitForDeletion('canvas-restore', node.id);
     expect(useCanvasStore.getState().nodes).toEqual([]);
     expect(deleteNode).toHaveBeenCalledTimes(1);
   });
 
-  it('can redo while creation and its compensating deletion are still pending', async () => {
+  it('can redo while a structure save awaits creation and its compensating deletion', async () => {
     let acknowledge!: (response: unknown) => void;
     postCanvasExecute.mockReturnValue(
       new Promise((resolve) => {
@@ -237,6 +251,8 @@ describe('Question creation settlement', () => {
     const node = createQuestion('node-pending-redo');
     await vi.waitFor(() => expect(postCanvasExecute).toHaveBeenCalledTimes(1));
     await useCanvasStore.getState().undo();
+    putCanvas.mockResolvedValue({ canvasId: 'canvas-restore', version: 4 });
+    const removalSave = useCanvasStore.getState().saveCanvas();
     associateNode.mockResolvedValue({ node, fromVersion: 2, toVersion: 3 });
     await useCanvasStore.getState().redo();
     expect(associateNode).not.toHaveBeenCalled();
@@ -257,9 +273,11 @@ describe('Question creation settlement', () => {
     expect(useCanvasStore.getState().nodes[0].data.threadId).toBe(
       node.data.threadId,
     );
-    putCanvas.mockResolvedValue({ canvasId: 'canvas-restore', version: 4 });
-    await useCanvasStore.getState().saveCanvas();
+    await removalSave;
     expect(putCanvas).toHaveBeenCalledTimes(1);
+    expect(associateNode.mock.invocationCallOrder[0]).toBeLessThan(
+      putCanvas.mock.invocationCallOrder[0],
+    );
   });
 
   it('does not resurrect a pending undo reinsertion removed by redo', async () => {
@@ -279,7 +297,7 @@ describe('Question creation settlement', () => {
     useCanvasStore.getState().applyDeltasFromAgent([delta], 2, pendingEffects);
     acknowledge({ node, fromVersion: 1, toVersion: 2 });
     await awaitQuestionCreation('canvas-restore', node.id);
-    await canvasHistoryManager.waitForDeletion(node.id);
+    await canvasHistoryManager.waitForDeletion('canvas-restore', node.id);
     expect(useCanvasStore.getState().nodes).toEqual([]);
     expect(deleteNode).toHaveBeenCalledTimes(1);
   });
@@ -308,6 +326,33 @@ describe('Question creation settlement', () => {
 });
 
 describe('Question undo identity reinsertion', () => {
+  it('restores the UI immediately but waits for an issued topology PUT before association', async () => {
+    let finishStructure!: (response: unknown) => void;
+    putCanvas.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finishStructure = resolve;
+      }),
+    );
+    const saving = useCanvasStore.getState().saveCanvas();
+    await vi.waitFor(() => expect(putCanvas).toHaveBeenCalledTimes(1));
+    canvasHistoryManager.takeSnapshot([question], []);
+    associateNode.mockResolvedValue({
+      node: question,
+      fromVersion: 2,
+      toVersion: 3,
+    });
+
+    await useCanvasStore.getState().undo();
+    expect(useCanvasStore.getState().nodes[0].id).toBe(question.id);
+    expect(associateNode).not.toHaveBeenCalled();
+
+    finishStructure({ canvasId: 'canvas-restore', version: 2 });
+    await saving;
+    await awaitQuestionCreation('canvas-restore', question.id);
+    expect(associateNode).toHaveBeenCalledTimes(1);
+    expect(useCanvasStore.getState().version).toBe(3);
+  });
+
   it('awaits deletion and validates the old thread before autosave, without replaying old FSM', async () => {
     let finishDelete!: () => void;
     deleteNode.mockReturnValueOnce(

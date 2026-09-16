@@ -63,16 +63,8 @@ export const MultiSelectToolbar = () => {
     () => nodes.filter((n) => n.selected) as CanvasNode[],
     [nodes],
   );
-  const hasPortalSelection = selectedNodes.some(
-    (node) => node.type === 'canvasRef',
-  );
-  const hasManagedSizeSelection = selectedNodes.some(
-    (node) => node.type === 'canvasRef' || node.type === 'frameRef',
-  );
-  const hasNonMovableSelection = selectedNodes.some((node) =>
-    ['spacePreview', 'canvasRef', 'frameRef', 'nodeRef'].includes(
-      node.type ?? '',
-    ),
+  const hasNonMovableSelection = selectedNodes.some(
+    (node) => node.type === 'spacePreview',
   );
 
   // Edges whose endpoints are both in the node selection participate in
@@ -217,58 +209,55 @@ export const MultiSelectToolbar = () => {
       <FloatingToolbar.Divider />
 
       {/* Size editor: set width / height of every selected node. */}
-      {!hasManagedSizeSelection && (
-        <FloatingToolbar.SizePicker
-          width={commonSize.width}
-          height={textFlowSelection ? null : commonSize.height}
-          showHeight={!textFlowSelection && !hasMixedTextAndBoxSelection}
-          onApply={({ width, height }) => {
-            if (selectedNodes.length === 0) return;
-            if (width === undefined && height === undefined) return;
-            // Resolve per-node via the shared helper, which:
-            //  - falls back to each node's existing width when only height
-            //    was edited (and skips nodes whose width can't be resolved);
-            //  - reads each node's height *ownership* when the user didn't
-            //    enter a height, so a width-only edit never pins an auto
-            //    node (its `style.height` is a number in both modes).
-            const items = selectedNodes
-              .map((node): GeometryToolbarItem | null => {
-                const resolved = resolveGeometryEdit(node, {
-                  width,
-                  height,
-                });
-                if (!resolved) return null;
-                return {
-                  nodeId: node.id as CanvasNodeId,
-                  size: {
-                    width: resolved.width,
-                    height: resolved.height,
-                  },
-                };
-              })
-              .filter((item): item is GeometryToolbarItem => item !== null);
-            if (items.length === 0) return;
-            // SET_NODE_GEOMETRY uses snapshot:'caller' — open a gesture so
-            // the resize folds into one undo entry and the store doesn't warn.
-            beginGesture('SET_NODE_GEOMETRY');
-            setNodeGeometry(
-              items.map(({ nodeId, size }) => ({
-                nodeId,
-                size,
-              })),
-            );
-          }}
-          heightAuto={
-            noteAutoState
-              ? {
-                  active: noteAutoState.active,
-                  onToggle: toggleNotesAutoHeight,
-                }
-              : undefined
-          }
-        />
-      )}
-
+      <FloatingToolbar.SizePicker
+        width={commonSize.width}
+        height={textFlowSelection ? null : commonSize.height}
+        showHeight={!textFlowSelection && !hasMixedTextAndBoxSelection}
+        onApply={({ width, height }) => {
+          if (selectedNodes.length === 0) return;
+          if (width === undefined && height === undefined) return;
+          // Resolve per-node via the shared helper, which:
+          //  - falls back to each node's existing width when only height
+          //    was edited (and skips nodes whose width can't be resolved);
+          //  - reads each node's height *ownership* when the user didn't
+          //    enter a height, so a width-only edit never pins an auto
+          //    node (its `style.height` is a number in both modes).
+          const items = selectedNodes
+            .map((node): GeometryToolbarItem | null => {
+              const resolved = resolveGeometryEdit(node, {
+                width,
+                height,
+              });
+              if (!resolved) return null;
+              return {
+                nodeId: node.id as CanvasNodeId,
+                size: {
+                  width: resolved.width,
+                  height: resolved.height,
+                },
+              };
+            })
+            .filter((item): item is GeometryToolbarItem => item !== null);
+          if (items.length === 0) return;
+          // SET_NODE_GEOMETRY uses snapshot:'caller' — open a gesture so
+          // the resize folds into one undo entry and the store doesn't warn.
+          beginGesture('SET_NODE_GEOMETRY');
+          setNodeGeometry(
+            items.map(({ nodeId, size }) => ({
+              nodeId,
+              size,
+            })),
+          );
+        }}
+        heightAuto={
+          noteAutoState
+            ? {
+                active: noteAutoState.active,
+                onToggle: toggleNotesAutoHeight,
+              }
+            : undefined
+        }
+      />
       {textFlowSelection && (
         <FloatingToolbar.NumberInput
           label="Font"
@@ -296,42 +285,40 @@ export const MultiSelectToolbar = () => {
       <FloatingToolbar.Divider />
 
       {/* Accent color for selected nodes and the edges between them. */}
-      {!hasPortalSelection && (
-        <FloatingToolbar.ColorPicker
-          colors={accentPickerOptions}
-          value={commonAccent}
-          onSelect={(token) => {
-            const accent = token === ACCENT_NONE ? null : token;
-            if (selectedNodes.length === 0) return;
+      <FloatingToolbar.ColorPicker
+        colors={accentPickerOptions}
+        value={commonAccent}
+        onSelect={(token) => {
+          const accent = token === ACCENT_NONE ? null : token;
+          if (selectedNodes.length === 0) return;
 
-            executeCommands([
-              {
-                type: 'MERGE_NODE_DATA',
-                patches: selectedNodes.map((node) => ({
-                  nodeId: node.id as CanvasNodeId,
-                  patch: {
-                    style: { ...node.data?.style, accent },
+          executeCommands([
+            {
+              type: 'MERGE_NODE_DATA',
+              patches: selectedNodes.map((node) => ({
+                nodeId: node.id as CanvasNodeId,
+                patch: {
+                  style: { ...node.data?.style, accent },
+                },
+              })),
+            },
+            ...(selectedInternalEdges.length > 0
+              ? [
+                  {
+                    type: 'SET_EDGE_STYLE' as const,
+                    edges: selectedInternalEdges.map((edge) => ({
+                      edge: edge.id as CanvasEdgeId,
+                      style: {
+                        stroke: accent ?? DEFAULT_EDGE_STROKE_TOKEN,
+                      },
+                    })),
                   },
-                })),
-              },
-              ...(selectedInternalEdges.length > 0
-                ? [
-                    {
-                      type: 'SET_EDGE_STYLE' as const,
-                      edges: selectedInternalEdges.map((edge) => ({
-                        edge: edge.id as CanvasEdgeId,
-                        style: {
-                          stroke: accent ?? DEFAULT_EDGE_STROKE_TOKEN,
-                        },
-                      })),
-                    },
-                  ]
-                : []),
-            ]);
-          }}
-          title={t('toolbar.accentColor')}
-        />
-      )}
+                ]
+              : []),
+          ]);
+        }}
+        title={t('toolbar.accentColor')}
+      />
 
       {!hasNonMovableSelection && (
         <>

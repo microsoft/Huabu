@@ -39,15 +39,12 @@ import { resolveArtifactUrl } from '@/api/artifact';
 import { cn } from '@/components/Common/cn';
 import { Loading } from '@/components/Common/Loading';
 import { AudioNode } from '@/components/Nodes/audio/AudioNode';
-import { CanvasRefNode } from '@/components/Nodes/canvasRef/CanvasRefNode';
-import { FrameRefNode } from '@/components/Nodes/frameRef/FrameRefNode';
 import { ImageNode } from '@/components/Nodes/image/ImageNode';
 import {
   sideFromHandleId,
   useCreateConnectedNode,
   type ConnectedNodeKind,
 } from '@/components/Nodes/NodeConnectAffordance.tsx';
-import { NodeRefNode } from '@/components/Nodes/nodeRef/NodeRefNode';
 import { NoteNode } from '@/components/Nodes/note/NoteNode';
 import { OfficeNode } from '@/components/Nodes/office/OfficeNode';
 import { PDFNode } from '@/components/Nodes/pdf/PDFNode';
@@ -123,7 +120,6 @@ import {
   usePreviewWorkspaceStore,
 } from '../../../store/previewWorkspace/store.ts';
 import { useToolStore } from '../../../store/toolStore.ts';
-import { useWorkspaceStore } from '../../../store/workspaceStore.ts';
 import {
   canMoveHuabuPayload,
   canReadHuabuPayload,
@@ -168,9 +164,6 @@ const nodeTypes = {
   office: OfficeNode,
   frame: FrameNode,
   spacePreview: SpacePreviewNode,
-  canvasRef: CanvasRefNode,
-  frameRef: FrameRefNode,
-  nodeRef: NodeRefNode,
   sketch: SketchNode,
   question: QuestionNode,
 } as const;
@@ -463,7 +456,6 @@ export const Canvas: React.FC<CanvasProps> = ({
     setViewport,
     frameNodesInRect,
     selectNodes,
-    refreshWorldReferences,
   } = useCanvasStore.getState();
   const { setPendingNodeType } = useToolStore.getState();
 
@@ -478,18 +470,6 @@ export const Canvas: React.FC<CanvasProps> = ({
   const layoutAnchorNodeIdRef = useRef(layoutAnchorNodeId);
   layoutAnchorNodeIdRef.current = layoutAnchorNodeId;
 
-  // Turning the World feature on/off changes whether this Space resolves
-  // its derived pin state at all, so re-run the boundary refresh.
-  const worldEnabled = useWorkspaceStore((s) => s.worldEnabled);
-  useEffect(() => {
-    void refreshWorldReferences();
-  }, [worldEnabled, refreshWorldReferences]);
-
-  useEffect(() => {
-    const handleFocus = () => void refreshWorldReferences();
-    window.addEventListener('focus', handleFocus);
-    return () => window.removeEventListener('focus', handleFocus);
-  }, [refreshWorldReferences]);
   const selectedNodeIds = useMemo(
     () => new Set(nodes.filter((node) => node.selected).map((node) => node.id)),
     [nodes],

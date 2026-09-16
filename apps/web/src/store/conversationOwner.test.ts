@@ -19,10 +19,11 @@ import { useChatStore } from './chatStore';
 import {
   ConversationIntegrityError,
   conversationRequestScope,
-  conversationViewFromWorldReference,
+  conversationViewForNode,
   filterClientOwnedQuestionPatch,
   patchConversationOwnerNode,
   resolveConversationAgentBinding,
+  resolveConversationOwnerSource,
   shouldComposeConversationOwner,
   validateConversationView,
   saveConversationDraft,
@@ -33,10 +34,10 @@ import {
 import type * as CanvasApi from '@/api/canvas';
 import type { AgentConversationView } from '@huabu/shared';
 
-const worldView: AgentConversationView = {
+const ownerView: AgentConversationView = {
   presentationAnchor: {
-    canvasId: 'canvas-world',
-    nodeId: 'node-ref-source',
+    canvasId: 'canvas-source',
+    nodeId: 'node-source',
   },
   conversationOwner: {
     canvasId: 'canvas-source',
@@ -72,15 +73,18 @@ beforeEach(() => {
     },
   });
   useCanvasStore.getState()._setStateNoAutosave({
-    canvasId: 'canvas-world',
+    canvasId: 'canvas-source',
+    version: 1,
     nodes: [
       {
-        id: 'node-ref-source',
-        type: 'nodeRef',
+        id: 'node-source',
+        type: 'question',
         position: { x: 0, y: 0 },
         data: {
-          type: 'nodeRef',
-          target: { canvasId: 'canvas-source', nodeId: 'node-source' },
+          type: 'question',
+          threadId: 'thread-source',
+          content: '',
+          status: 'idle',
         },
       },
     ],
@@ -94,7 +98,7 @@ beforeEach(() => {
 describe('conversation owner routing', () => {
   it('acknowledges only the observed terminal invocation, never a viewed merge', async () => {
     const view = {
-      ...worldView,
+      ...ownerView,
       presentationAnchor: { canvasId: 'canvas-source', nodeId: 'node-source' },
     };
     await acknowledgeConversationResult(view, {
@@ -117,7 +121,7 @@ describe('conversation owner routing', () => {
 
   it('preserves legacy viewed interaction with an explicit absent-token acknowledgement', async () => {
     const view = {
-      ...worldView,
+      ...ownerView,
       presentationAnchor: { canvasId: 'canvas-source', nodeId: 'node-source' },
     };
     await acknowledgeConversationResult(view, {
@@ -346,18 +350,23 @@ describe('conversation owner routing', () => {
     ).toBeNull();
   });
 
-  it('routes headless requests to the source owner without World selection', () => {
-    expect(conversationRequestScope(worldView, 'canvas-world')).toEqual({
+  it('routes ordinary Question and unbound Chat requests with Canvas selection', () => {
+    expect(conversationRequestScope(ownerView, 'canvas-source')).toEqual({
       canvasId: 'canvas-source',
       anchorNodeId: 'node-source',
-      includeCanvasSelection: false,
+      includeCanvasSelection: true,
+    });
+    expect(conversationRequestScope(null, 'canvas-source')).toEqual({
+      canvasId: 'canvas-source',
+      includeCanvasSelection: true,
     });
   });
 
-  it('mutates a headless source through the server without patching World', async () => {
+  it('persists a background lifecycle update without patching a different active Canvas', async () => {
+    useCanvasStore.getState()._setStateNoAutosave({ canvasId: 'canvas-other' });
     const before = useCanvasStore.getState().nodes[0];
 
-    await patchConversationOwnerNode(worldView, {
+    await patchConversationOwnerNode(ownerView, {
       agentMode: 'operate',
     });
 
@@ -410,78 +419,61 @@ describe('conversation owner routing', () => {
     expect(postCanvasExecute).not.toHaveBeenCalled();
   });
 
-  it('rejects a resolved source question that has no thread', () => {
-    expect(() =>
-      conversationViewFromWorldReference('canvas-world', 'node-ref-source', {
-        kind: 'nodeRef',
-        referenceNodeId: 'node-ref-source',
-        target: { canvasId: 'canvas-source', nodeId: 'node-source' },
-        status: 'ok',
-        source: {
-          type: 'question',
-          status: 'idle',
-          viewed: false,
-          agentMode: 'ask',
-          agentBinding: { kind: 'internal' },
-        },
-      }),
-    ).toThrow(ConversationIntegrityError);
+  it('resolves only ordinary Question nodes with a thread', () => {
+    const node = useCanvasStore.getState().nodes[0];
+    expect(conversationViewForNode(node, 'canvas-source')).toEqual(ownerView);
+    expect(
+      conversationViewForNode({ ...node, data: {} }, 'canvas-source'),
+    ).toBeNull();
+    expect(
+      conversationViewForNode({ ...node, type: 'note' }, 'canvas-source'),
+    ).toBeNull();
+    expect(
+      resolveConversationOwnerSource('canvas-source', [node], ownerView),
+    ).toBe(node.data);
+    expect(
+      resolveConversationOwnerSource('canvas-other', [node], ownerView),
+    ).toBeUndefined();
   });
 
   it('does not compose over authored source content with stale idle status', () => {
     expect(
-      shouldComposeConversationOwner(
-        { status: 'idle', content: 'Existing question' },
-        false,
-      ),
+      shouldComposeConversationOwner({
+        status: 'idle',
+        content: 'Existing question',
+      }),
     ).toBe(false);
     expect(
-      shouldComposeConversationOwner(
-        { status: 'idle', hasAuthoredContent: true },
-        true,
-      ),
-    ).toBe(false);
-    expect(
-      shouldComposeConversationOwner(
-        { status: 'idle', hasAuthoredContent: false },
-        true,
-      ),
-    ).toBe(true);
-    expect(
-      shouldComposeConversationOwner({ status: 'idle', content: '' }, false),
+      shouldComposeConversationOwner({ status: 'idle', content: '' }),
     ).toBe(true);
   });
 
-  it('rejects a stale headless owner after refreshing World references', async () => {
-    useCanvasStore.getState()._setStateNoAutosave({
-      worldReferences: {
-        'node-ref-source': {
-          kind: 'nodeRef',
-          referenceNodeId: 'node-ref-source',
-          target: { canvasId: 'canvas-source', nodeId: 'node-source' },
-          status: 'ok',
-          source: {
-            type: 'question',
-            threadId: 'thread-replaced',
-            status: 'idle',
-            viewed: false,
-            agentMode: 'ask',
-            agentBinding: { kind: 'internal' },
-          },
-        },
-      },
-    });
-    const refresh = vi
-      .spyOn(useCanvasStore.getState(), 'refreshWorldReferences')
-      .mockResolvedValue();
-
-    await expect(validateConversationView(worldView)).rejects.toThrow(
+  it('validates the current owner and rejects stale thread identity', async () => {
+    await expect(validateConversationView(ownerView)).resolves.toBeUndefined();
+    useCanvasStore
+      .getState()
+      .patchNodeSilent('node-source', { threadId: 'thread-replaced' });
+    await expect(validateConversationView(ownerView)).rejects.toThrow(
       ConversationIntegrityError,
     );
-    expect(refresh).toHaveBeenCalledOnce();
+    expect(postCanvasExecute).not.toHaveBeenCalled();
+  });
+
+  it('rejects a deleted owner or a different active Canvas', async () => {
+    useCanvasStore.getState()._setStateNoAutosave({ canvasId: 'canvas-other' });
+    await expect(validateConversationView(ownerView)).rejects.toThrow(
+      ConversationIntegrityError,
+    );
+    useCanvasStore
+      .getState()
+      ._setStateNoAutosave({ canvasId: 'canvas-source', nodes: [] });
+    await expect(validateConversationView(ownerView)).rejects.toThrow(
+      ConversationIntegrityError,
+    );
   });
 
   it('reconciles a routed lifecycle response when its source becomes active', async () => {
+    useCanvasStore.getState()._setStateNoAutosave({ canvasId: 'canvas-other' });
     postCanvasExecute.mockImplementationOnce(async () => {
       useCanvasStore.getState()._setStateNoAutosave({
         canvasId: 'canvas-source',
@@ -527,7 +519,7 @@ describe('conversation owner routing', () => {
       };
     });
 
-    await patchConversationOwnerNode(worldView, { agentMode: 'operate' });
+    await patchConversationOwnerNode(ownerView, { agentMode: 'operate' });
 
     expect(useCanvasStore.getState().version).toBe(2);
     expect(useCanvasStore.getState().nodes[0]?.data.status).toBe('running');
@@ -571,8 +563,8 @@ describe('conversation owner routing', () => {
         },
       });
 
-    const done = patchConversationOwnerNode(worldView, { agentMode: 'ask' });
-    const running = patchConversationOwnerNode(worldView, {
+    const done = patchConversationOwnerNode(ownerView, { agentMode: 'ask' });
+    const running = patchConversationOwnerNode(ownerView, {
       agentMode: 'operate',
     });
     await vi.waitFor(() => expect(postCanvasExecute).toHaveBeenCalledTimes(1));
@@ -592,7 +584,7 @@ describe('conversation owner routing', () => {
 
   it('does not replay a delayed command patch after a newer SSE update', async () => {
     const view = {
-      ...worldView,
+      ...ownerView,
       presentationAnchor: { canvasId: 'canvas-source', nodeId: 'node-source' },
     };
     useCanvasStore.getState()._setStateNoAutosave({

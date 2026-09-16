@@ -80,6 +80,17 @@ export type NodeContentQueueState = {
  * Public shape returned by {@link createNodeContentQueue}.
  */
 export type NodeContentQueue = {
+  /** Hold resurrected sidecars until the matching topology is acknowledged. */
+  holdRestoredNodes(canvasId: string, nodes: readonly Node[]): void;
+  restoreTokens(): ReadonlyMap<string, object>;
+  acknowledgeRestores(
+    canvasId: string,
+    tokens: ReadonlyMap<string, object>,
+  ): void;
+  hasRestore(nodeId: string): boolean;
+  hasPendingRestoredContent(nodeId?: string): boolean;
+  reportRestoreFailure(canvasId: string): void;
+  waitForIdle(): Promise<void>;
   /**
    * Diff `prevNodes` against `nextNodes` and schedule a per-node
    * content save for every markdown-backed node whose content keys
@@ -190,9 +201,14 @@ export type NodeContentQueue = {
 export function createNodeContentQueue(opts: {
   delayMs: number;
   getState: () => NodeContentQueueState;
+  retryStructure?: () => Promise<void>;
+  onRestoredContentPersisted?: (canvasId: string, nodeId: string) => void;
 }): NodeContentQueue {
   const debouncer = createPerKeyDebouncer<string>(opts.delayMs);
   const inflight = new Map<string, Promise<void>>();
+  const restores = new Map<string, { canvasId: string; token: object }>();
+  const restoredContent = new Map<string, string>();
+  const generations = new Map<string, object>();
   /**
    * Last `(label, labelSource)` the server confirmed it persisted for
    * each nodeId. Used by {@link handleSaveFailure} to revert an
@@ -276,7 +292,7 @@ export function createNodeContentQueue(opts: {
     // Frozen after a content conflict: refuse every write path until the
     // user resolves it, so neither a debounced autosave nor the unload
     // keepalive can clobber the newer server content.
-    if (frozen.has(nodeId)) return null;
+    if (frozen.has(nodeId) || restores.has(nodeId)) return null;
 
     const data = (node.data ?? {}) as Record<string, unknown>;
     if (data['contentMissing'] === true) return null;
@@ -347,15 +363,24 @@ export function createNodeContentQueue(opts: {
     nodeId: string,
     kOpts?: { keepalive?: boolean },
   ): Promise<void> {
+    if (opts.getState().canvasId !== canvasId) return;
+    const generation = generations.get(nodeId);
     const body = buildRequest(nodeId);
     if (!body) return;
     const response = await putNodeContent(canvasId, nodeId, body, kOpts);
+    if (
+      opts.getState().canvasId !== canvasId ||
+      generations.get(nodeId) !== generation ||
+      !opts.getState().nodes.some((node) => node.id === nodeId)
+    )
+      return;
     // Content and its baseline update together: record the rev the server
     // actually persisted so the next edit's `expectRev` is fresh (and a
     // rapid follow-up edit doesn't 409 against our own just-committed
     // write). Also clear any content-conflict toast guard — a success
     // means the node is no longer blocked.
     baselineRev.set(nodeId, response.rev);
+    const completedRestore = restoredContent.delete(nodeId);
     contentConflictToasted.delete(nodeId);
     saveErrorToasted.delete(nodeId);
     // A write that succeeded means any prior duplicate has been
@@ -400,6 +425,7 @@ export function createNodeContentQueue(opts: {
         ),
       });
     }
+    if (completedRestore) opts.onRestoredContentPersisted?.(canvasId, nodeId);
   }
 
   /**
@@ -544,6 +570,7 @@ export function createNodeContentQueue(opts: {
     frozen.delete(nodeId);
     contentConflictToasted.delete(nodeId);
     toast(i18n.t('node.contentConflictLoaded'), { tone: 'success' });
+    restoredContent.delete(nodeId);
   }
 
   /**
@@ -565,9 +592,15 @@ export function createNodeContentQueue(opts: {
     source: 'user' | 'auto',
     kOpts?: { keepalive?: boolean },
   ): Promise<void> {
+    const generation = generations.get(nodeId);
     try {
       await performSave(canvasId, nodeId, kOpts);
     } catch (err) {
+      if (
+        opts.getState().canvasId !== canvasId ||
+        generations.get(nodeId) !== generation
+      )
+        return;
       if (err instanceof NodeDuplicateFilesError) {
         notifyDuplicate(nodeId, err);
         throw err;
@@ -734,6 +767,12 @@ export function createNodeContentQueue(opts: {
         onClick: () => {
           // Allow a later failure to re-alert, then re-attempt the write.
           saveErrorToasted.delete(nodeId);
+          if (restores.get(nodeId)?.canvasId === canvasId) {
+            if (opts.getState().canvasId === canvasId) {
+              void opts.retryStructure?.().catch(() => undefined);
+            }
+            return;
+          }
           void serializedFlush(canvasId, nodeId, 'user').catch(() => undefined);
         },
       },
@@ -752,6 +791,7 @@ export function createNodeContentQueue(opts: {
     source: 'user' | 'auto',
     kOpts?: { keepalive?: boolean },
   ): Promise<void> {
+    if (!generations.has(nodeId)) generations.set(nodeId, {});
     const prev = inflight.get(nodeId) ?? Promise.resolve();
     const next = prev
       // Detach from prev's rejection so a previous 409 doesn't poison
@@ -795,6 +835,79 @@ export function createNodeContentQueue(opts: {
   }
 
   return {
+    holdRestoredNodes(canvasId, nodes) {
+      for (const node of nodes) {
+        if (!MD_BACKED_NODE_TYPES.has(node.type ?? '')) continue;
+        const token = {};
+        generations.set(node.id, token);
+        restores.set(node.id, { canvasId, token });
+        restoredContent.set(node.id, canvasId);
+        debouncer.cancel(node.id);
+      }
+    },
+
+    restoreTokens() {
+      return new Map(
+        [...restores]
+          .filter(([, entry]) => entry.canvasId === opts.getState().canvasId)
+          .map(([id, entry]) => [id, entry.token]),
+      );
+    },
+
+    acknowledgeRestores(canvasId, tokens) {
+      if (opts.getState().canvasId !== canvasId) return;
+      for (const [id, token] of tokens) {
+        const entry = restores.get(id);
+        if (entry?.canvasId !== canvasId || entry.token !== token) continue;
+        const node = opts.getState().nodes.find((n) => n.id === id);
+        if (!node) continue;
+        restores.delete(id);
+        // The deletion has settled. Only this resurrection starts from an
+        // absent sidecar; ordinary edits retain their authoritative baseline.
+        baselineRev.delete(id);
+        frozen.delete(id);
+        if (
+          node.data?.contentMissing === true ||
+          (TEXT_BEARING_NODE_TYPES.has(node.type ?? '') &&
+            typeof node.data?.content !== 'string')
+        ) {
+          restoredContent.delete(id);
+          opts.getState().patchNodeSilent(id, { contentMissing: true });
+          continue;
+        }
+        debouncer.cancel(id);
+        void serializedFlush(canvasId, id, 'auto').catch(() => undefined);
+      }
+    },
+
+    hasRestore: (nodeId) => restores.has(nodeId),
+    hasPendingRestoredContent: (nodeId) =>
+      nodeId === undefined
+        ? [...restoredContent.values()].includes(opts.getState().canvasId)
+        : restoredContent.get(nodeId) === opts.getState().canvasId,
+
+    reportRestoreFailure(canvasId) {
+      for (const [id, entry] of restores) {
+        if (entry.canvasId !== canvasId) continue;
+        const label = opts.getState().nodes.find((n) => n.id === id)
+          ?.data?.label;
+        surfaceSaveError(
+          canvasId,
+          id,
+          i18n.t('errors.nodeSaveFailed', {
+            name: typeof label === 'string' ? label : i18n.t('node.untitled'),
+          }),
+          'auto',
+        );
+      }
+    },
+
+    async waitForIdle() {
+      await Promise.all(
+        [...inflight.values()].map((p) => p.catch(() => undefined)),
+      );
+    },
+
     scheduleChanges(canvasId, prevNodes, nextNodes) {
       if (!canvasId || prevNodes === nextNodes) return;
       const prevById = new Map(prevNodes.map((n) => [n.id, n]));
@@ -857,6 +970,9 @@ export function createNodeContentQueue(opts: {
     },
 
     forgetNode(nodeId) {
+      generations.delete(nodeId);
+      restores.delete(nodeId);
+      restoredContent.delete(nodeId);
       debouncer.cancel(nodeId);
       baselineRev.delete(nodeId);
       frozen.delete(nodeId);
@@ -883,7 +999,13 @@ export function createNodeContentQueue(opts: {
       // Debounced-but-not-yet-fired saves plus in-flight PUTs: both mean
       // the node holds a local edit the server hasn't acknowledged.
       return Array.from(
-        new Set([...debouncer.pendingKeys(), ...inflight.keys()]),
+        new Set([
+          ...debouncer.pendingKeys(),
+          ...inflight.keys(),
+          ...[...restoredContent]
+            .filter(([, canvasId]) => canvasId === opts.getState().canvasId)
+            .map(([id]) => id),
+        ]),
       );
     },
   };

@@ -19,7 +19,6 @@ import {
 } from '@/store/chatStore';
 import {
   ConversationIntegrityError,
-  refreshConversationPresentation,
   validateConversationView,
 } from '@/store/conversationOwner';
 import {
@@ -460,7 +459,6 @@ export function useChatHistory(
       const refreshObservation = () => {
         if (!ownerView) return;
         void Promise.all([
-          refreshConversationPresentation(ownerView),
           useAcpThreadChangesStore
             .getState()
             .load(ownerCanvasId, ownerThreadId),

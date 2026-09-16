@@ -107,8 +107,8 @@ export const DropdownMenuLink: React.FC<DropdownMenuLinkProps> = ({
   <Link
     role="menuitem"
     className={cn(
-      'text-fg-muted hover:bg-hover flex w-full cursor-pointer items-center justify-start gap-2 rounded-none border-none bg-transparent px-3 py-1.5 text-xs transition-colors',
-      '[&_svg]:shrink-0',
+      'text-fg-muted hover:bg-hover flex w-full cursor-pointer items-center justify-start gap-2 rounded-none border-none bg-transparent px-3 py-1.5 text-xs font-medium transition-colors',
+      '[&_svg]:h-4 [&_svg]:w-4 [&_svg]:shrink-0',
       className,
     )}
     {...props}

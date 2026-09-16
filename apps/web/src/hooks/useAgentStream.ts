@@ -31,8 +31,6 @@ import {
   conversationRequestScope,
   ConversationIntegrityError,
   awaitConversationDraft,
-  isHeadlessConversation,
-  refreshConversationPresentation,
   resolveConversationAgentBinding,
   resolveConversationOwnerSource,
   shouldComposeConversationOwner,
@@ -707,7 +705,7 @@ export function useAgentStream(
           await validateConversationView(conversationView);
         } catch (error) {
           if (error instanceof ConversationIntegrityError) {
-            toast(i18n.t('world.conversationIntegrityError'), {
+            toast(i18n.t('chat.conversationIntegrityError'), {
               tone: 'danger',
             });
             return;
@@ -757,18 +755,14 @@ export function useAgentStream(
       const requestScope = conversationRequestScope(conversationView, canvasId);
       const anchorQuestionNodeId =
         conversationView?.conversationOwner.nodeId ?? null;
-      const headless = isHeadlessConversation(conversationView);
       const refreshAfterLifecycle = async () => {
         if (!conversationView) return;
-        await refreshConversationPresentation(conversationView);
-        if (headless) {
-          await useAcpThreadChangesStore
-            .getState()
-            .load(
-              conversationView.conversationOwner.canvasId,
-              conversationView.conversationOwner.threadId,
-            );
-        }
+        await useAcpThreadChangesStore
+          .getState()
+          .load(
+            conversationView.conversationOwner.canvasId,
+            conversationView.conversationOwner.threadId,
+          );
       };
 
       // Selected node ids are still recorded on the persisted user
@@ -868,14 +862,12 @@ export function useAgentStream(
         ? resolveConversationOwnerSource(
             canvasState.canvasId,
             canvasState.nodes,
-            canvasState.worldReferences,
             conversationView,
           )
         : undefined;
 
       const isComposingQuestion =
-        !!conversationView &&
-        shouldComposeConversationOwner(ownerSource, headless);
+        !!conversationView && shouldComposeConversationOwner(ownerSource);
 
       // Make sure any buffered behavioural events have hit the server
       // before the agent builds its request context. Failures are
@@ -897,15 +889,14 @@ export function useAgentStream(
       const baseCanvasContext = requestScope.includeCanvasSelection
         ? getAgentChatContext()
         : { selectedNodes: [] };
-      const canvasContext =
-        anchorQuestionNodeId && !headless
-          ? {
-              ...baseCanvasContext,
-              selectedNodes: baseCanvasContext.selectedNodes.filter(
-                (n) => n.id !== anchorQuestionNodeId,
-              ),
-            }
-          : baseCanvasContext;
+      const canvasContext = anchorQuestionNodeId
+        ? {
+            ...baseCanvasContext,
+            selectedNodes: baseCanvasContext.selectedNodes.filter(
+              (n) => n.id !== anchorQuestionNodeId,
+            ),
+          }
+        : baseCanvasContext;
 
       try {
         await agentApi.streamMessage(

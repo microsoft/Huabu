@@ -131,12 +131,13 @@ function RootLayout() {
       if (!cancelled) setIsDraining(true);
     }, SHOW_OVERLAY_AFTER_MS);
     void (async () => {
+      let drained = false;
       try {
-        // `drainPendingSaves` never throws — per-queue
-        // `handleSaveFailure` already surfaces failures via toast +
-        // console.error. We unconditionally proceed because trapping
-        // the user on the canvas after a failed save helps nothing.
         await drainPendingSaves();
+        drained = true;
+      } catch {
+        // Resurrection failures retain the only body snapshot in this Canvas.
+        // The queue has already surfaced Retry; do not discard that snapshot.
       } finally {
         // `cancelled` is only ever true here if some external code
         // resets the blocker mid-drain (nothing does today, but the
@@ -146,7 +147,8 @@ function RootLayout() {
         if (!cancelled) {
           window.clearTimeout(overlayTimer);
           setIsDraining(false);
-          blocker.proceed?.();
+          if (drained) blocker.proceed?.();
+          else blocker.reset?.();
         }
       }
     })();

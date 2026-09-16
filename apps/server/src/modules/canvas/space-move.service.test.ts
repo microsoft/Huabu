@@ -5,13 +5,14 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { executeOnServer } from './canvas-executor.js';
+import * as canvasSync from './canvas-sync.js';
 import { moveCanvasSelection } from './space-move.service.js';
 import { acquireAgentTurn } from '../agent/turn-lease.js';
 import { createCanvas } from '../storage/compatibility/canvas.js';
-import { resetStorageCache, space } from '../storage/index.js';
+import { getCanvasStore, resetStorageCache, space } from '../storage/index.js';
 import { getStructuredStore } from '../storage/index.js';
 import { setWorkspacePath } from '../workspace.js';
 
@@ -164,6 +165,62 @@ describe('moveCanvasSelection', () => {
       expect(edited.results[0]?.applied).toBe(true);
     } finally {
       release?.();
+    }
+  });
+
+  it('compensates both committed Spaces without retaining the source breadcrumb', async () => {
+    const seeded = await seedSource();
+    const sourceBefore = (await space('source').read())!;
+    const destinationBefore = (await space('destination').read())!;
+    const failure = new Error('Injected post-commit publication failure');
+    const publish = vi
+      .spyOn(canvasSync, 'publishCanvasUpdate')
+      .mockImplementationOnce(() => {
+        expect(getCanvasStore('source').read()?.state.nodes).toContainEqual(
+          expect.objectContaining({ type: 'spacePreview' }),
+        );
+        expect(getCanvasStore('destination').read()?.state.nodes).toHaveLength(
+          2,
+        );
+        throw failure;
+      });
+    try {
+      await expect(
+        moveCanvasSelection('source', {
+          selectedNodeIds: ['node-frame'],
+          destination: { kind: 'existing', canvasId: 'destination' },
+          createSourcePreview: true,
+          expectedSourceVersion: seeded.toVersion,
+        }),
+      ).rejects.toBe(failure);
+      expect(publish).toHaveBeenCalledTimes(1);
+
+      const source = (await space('source').read())!;
+      const destination = (await space('destination').read())!;
+      expect(source.state.nodes).toHaveLength(sourceBefore.state.nodes.length);
+      expect(source.state.nodes).toEqual(
+        expect.arrayContaining(sourceBefore.state.nodes),
+      );
+      expect(source.state.edges).toEqual(sourceBefore.state.edges);
+      expect(destination.state).toEqual(destinationBefore.state);
+      expect(getCanvasStore('source').readNode('node-child')?.content).toBe(
+        'Hello',
+      );
+      expect((await space('destination').nodes.list()).size).toBe(0);
+      for (const [canvasId, before] of [
+        ['source', sourceBefore],
+        ['destination', destinationBefore],
+      ] as const) {
+        const log = getCanvasStore(canvasId).readDeltaLogSince(before.version);
+        expect(log).toHaveLength(2);
+        expect(log[1]).toMatchObject({
+          version: before.version + 2,
+          commands: [],
+          originator: { source: 'system' },
+        });
+      }
+    } finally {
+      publish.mockRestore();
     }
   });
 

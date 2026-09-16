@@ -24,6 +24,7 @@ import {
   markdownArtifactFields,
   parseArtifactRef,
   rewriteMarkdownArtifactRefs,
+  stripLegacyPortalTopology,
 } from '@huabu/shared';
 import {
   COMMAND_META,
@@ -86,16 +87,10 @@ import {
   setSnapStructuredSuppressed,
   writeDragDecision,
 } from '@/handler/snap/snapSession';
-import { i18n } from '@/i18n';
 
+import { canvasHistoryManager } from './canvasHistoryManager';
 import {
-  canvasHistoryManager,
-  preserveLiveQuestionData,
-} from './canvasHistoryManager';
-import {
-  ApiError,
   getCanvas,
-  getWorldReferences,
   postCanvasExecute,
   associateAgentNode,
   putCanvas,
@@ -128,7 +123,6 @@ import {
   usePreviewWorkspaceStore,
 } from './previewWorkspace/store';
 import { useToolStore } from './toolStore';
-import { useWorkspaceStore } from './workspaceStore';
 import { toast, dismissToast } from '../components/Common/Toast';
 import { seedNoteFixedHeight } from '../components/Nodes/note/autoHeight';
 import { getNoteFixedHeight } from '../components/Nodes/note/heightMemory';
@@ -155,50 +149,13 @@ import type {
   CanvasNodeType,
   CanvasViewport,
   Point,
-  PortalNodePinUpdate,
   RecentAction,
   WireSelectionNode,
-  ResolvedWorldReference,
 } from '@huabu/shared';
 
 const AUTOSAVE_DEBOUNCE_MS = 1000;
 const PREPROCESS_DEBOUNCE_MS = 1000;
 const NODE_CONTENT_DEBOUNCE_MS = 500;
-const nodeRefTopologySignatures = new Map<string, string>();
-let worldReferenceRefreshGeneration = 0;
-
-function nodeRefTopologySignature(nodes: readonly Node[]): string {
-  return JSON.stringify(
-    nodes
-      .filter((node) => node.type === 'nodeRef' || node.type === 'frameRef')
-      .map((node) => {
-        const target = (
-          node.data as
-            | { target?: { canvasId?: unknown; nodeId?: unknown } }
-            | undefined
-        )?.target;
-        return [
-          node.id,
-          node.type,
-          node.parentId ?? null,
-          typeof target?.canvasId === 'string' ? target.canvasId : null,
-          typeof target?.nodeId === 'string' ? target.nodeId : null,
-        ];
-      })
-      .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
-  );
-}
-
-function isWorldReferenceTopologyDelta(delta: Delta): boolean {
-  if (delta.type === 'INSERT_NODE' || delta.type === 'DELETE_NODE') {
-    return delta.node.type === 'nodeRef' || delta.node.type === 'frameRef';
-  }
-  if (delta.type !== 'REPLACE_NODE') return false;
-  return (
-    nodeRefTopologySignature([delta.prev]) !==
-    nodeRefTopologySignature([delta.next])
-  );
-}
 
 /**
  * Arm a single undo snapshot for a gesture: snapshot the current state and
@@ -373,7 +330,14 @@ function showVersionConflictToast(): void {
       duration: 0,
       action: {
         label: 'Reload',
-        onClick: () => window.location.reload(),
+        onClick: () => {
+          if (!nodeContentQueue.hasPendingRestoredContent())
+            window.location.reload();
+          else
+            nodeContentQueue.reportRestoreFailure(
+              useCanvasStore.getState().canvasId,
+            );
+        },
       },
     },
   );
@@ -451,20 +415,6 @@ type RFState = {
   version: number;
   isLoading: boolean;
   canvasNotFound: boolean;
-  worldReferences: Record<string, ResolvedWorldReference>;
-  worldReferenceError: string | null;
-  /**
-   * Source-Space projection of World pin state: the ids of *this* canvas'
-   * nodes that currently have a `nodeRef` / `frameRef` in the World.
-   *
-   * Populated only while an ordinary Space is active and the World feature
-   * is enabled — the World canvas itself uses `worldReferences` instead.
-   * Refreshed on the same boundaries as `worldReferences` (canvas load,
-   * window focus, Pin/Unpin completion) per the World Canvas proposal's
-   * boundary-driven freshness rule.
-   */
-  pinnedSourceNodeIds: Record<string, true>;
-  refreshWorldReferences: () => Promise<void>;
   isSaving: boolean;
   pendingSave: boolean;
   moveSelectionDialogOpen: boolean;
@@ -608,7 +558,6 @@ type RFState = {
     dropPoint: { x: number; y: number };
   }) => void;
   deleteNodes: (nodeIds: string[]) => void;
-  setPortalNodePins: (updates: PortalNodePinUpdate[]) => Promise<boolean>;
   disconnectEdges: (edgeIds: string[]) => void;
   setNodeGeometry: (
     items: Array<{
@@ -997,6 +946,7 @@ const canvasEvents = createCanvasEventBuffer();
 const preprocessQueue = createPreprocessQueue({
   delayMs: PREPROCESS_DEBOUNCE_MS,
   getState: () => useCanvasStore.getState(),
+  isBlocked: (nodeId) => nodeContentQueue.hasPendingRestoredContent(nodeId),
 });
 
 /**
@@ -1007,7 +957,18 @@ const preprocessQueue = createPreprocessQueue({
 const nodeContentQueue = createNodeContentQueue({
   delayMs: NODE_CONTENT_DEBOUNCE_MS,
   getState: () => useCanvasStore.getState(),
+  retryStructure: () => useCanvasStore.getState().saveCanvas(),
+  onRestoredContentPersisted: (canvasId, nodeId) =>
+    preprocessQueue.resumeRestored(canvasId, nodeId),
 });
+
+/** Drain issued sidecar writers without promoting held/debounced writes. */
+async function waitForSidecarWrites(): Promise<void> {
+  await Promise.all([
+    nodeContentQueue.waitForIdle(),
+    preprocessQueue.waitForIdle(),
+  ]);
+}
 
 /**
  * Promote every pending canvas-level structure save AND every pending
@@ -1020,16 +981,13 @@ const nodeContentQueue = createNodeContentQueue({
  * and its response received. Without this, trailing edits would fire
  * later under a stale captured `canvasId` — by which time the user
  * has moved on and there's nothing left in the store to revert if the
- * PUT fails. Failures inside the drain are surfaced through each
- * queue's own `handleSaveFailure` (toast + console.error) and do NOT
- * reject this promise — the navigation should always proceed even if
- * a save failed, because keeping the user trapped on the canvas
- * doesn't help.
+ * PUT fails. Ordinary failures retain the existing non-blocking behavior.
+ * A failed resurrection rejects: the current Canvas owns the only restored
+ * body, so navigation must retain it until Retry or explicit deletion.
  *
  * Order mirrors {@link switchCanvas}: structure first (canvas-level
- * version PUT), then per-node content. The two queues touch disjoint
- * server resources, so the order is purely for consistency with the
- * canvas-switch path.
+ * version PUT), then per-node content. Resurrection makes this ordering a
+ * dependency: topology must admit the restored sidecar before its PUT.
  */
 export async function drainPendingSaves(): Promise<void> {
   await structureScheduler.flushAsync();
@@ -1047,6 +1005,12 @@ export async function drainPendingSaves(): Promise<void> {
     });
   }
   await nodeContentQueue.flushAll();
+  await canvasHistoryManager.waitForDeletes(useCanvasStore.getState().canvasId);
+  if (nodeContentQueue.hasPendingRestoredContent()) {
+    throw new Error(
+      'Restored node content is waiting for a successful structure save. Retry before leaving this Canvas.',
+    );
+  }
 }
 
 /**
@@ -1166,6 +1130,13 @@ const autoSaveMiddleware =
         // on their own (faster) debounce and never participate in the
         // canvas-level `version` counter.
         if (prev.nodes !== next.nodes) {
+          const nextIds = new Set(next.nodes.map((node) => node.id));
+          for (const node of prev.nodes) {
+            if (!nextIds.has(node.id)) {
+              nodeContentQueue.forgetNode(node.id);
+              preprocessQueue.forgetNode(node.id);
+            }
+          }
           nodeContentQueue.scheduleChanges(
             next.canvasId,
             prev.nodes,
@@ -1290,6 +1261,7 @@ const questionCreations = new Map<
   { promise: Promise<void>; toVersion?: number }
 >();
 const questionForks = new Map<string, Promise<unknown>>();
+const inflightStructureWrites = new Map<string, ReturnType<typeof putCanvas>>();
 
 export async function awaitQuestionCreation(
   canvasId: string,
@@ -1342,50 +1314,52 @@ function restoreQuestionAssociations(
   const previousIds = new Set(previous.map((node) => node.id));
   for (const node of restored) {
     if (node.type !== 'question' || previousIds.has(node.id)) continue;
-    const creation = canvasHistoryManager
-      .waitForDeletion(node.id)
-      .then(async () => {
-        const response = await associateAgentNode(canvasId, node.id, {
-          kind: 'restore',
-          node: {
-            ...stripTransientNodeFields(node),
-            type: 'question',
-            data: projectAgentNodeEditableData(node.data),
-          },
-          threadId:
-            typeof node.data.threadId === 'string'
-              ? node.data.threadId
-              : undefined,
-          requireBinding: node.data.bindingState === 'bound',
-        });
-        const pending = questionCreations.get(`${canvasId}\0${node.id}`);
-        if (pending?.promise === creation)
-          pending.toVersion = response.toVersion;
-        const current = useCanvasStore.getState();
-        if (current.canvasId !== canvasId) return;
-        const confirmed = response.node as Node;
-        current._setStateNoAutosave({
-          nodes: current.nodes.map((live) =>
-            live.id === node.id && current.version <= response.toVersion
-              ? {
-                  ...live,
-                  data: {
-                    ...preserveAgentNodeOwnedData(live.data, confirmed.data),
-                    agentBinding:
-                      confirmed.data.agentBinding ?? live.data.agentBinding,
-                  },
-                }
-              : live,
-          ),
-          ...(current.version === response.fromVersion
-            ? { version: response.toVersion }
-            : {}),
-        });
-        const live = useCanvasStore
-          .getState()
-          .nodes.find((item) => item.id === node.id);
-        if (live) preprocessQueue.schedule(live);
+    // Wait only for already-issued writes, not saves that need this association.
+    // saveCanvas owns transport errors; association validates the resulting state.
+    const creation = Promise.allSettled([
+      inflightStructureWrites.get(canvasId),
+      canvasHistoryManager.waitForDeletion(canvasId, node.id),
+    ]).then(async () => {
+      const response = await associateAgentNode(canvasId, node.id, {
+        kind: 'restore',
+        node: {
+          ...stripTransientNodeFields(node),
+          type: 'question',
+          data: projectAgentNodeEditableData(node.data),
+        },
+        threadId:
+          typeof node.data.threadId === 'string'
+            ? node.data.threadId
+            : undefined,
+        requireBinding: node.data.bindingState === 'bound',
       });
+      const pending = questionCreations.get(`${canvasId}\0${node.id}`);
+      if (pending?.promise === creation) pending.toVersion = response.toVersion;
+      const current = useCanvasStore.getState();
+      if (current.canvasId !== canvasId) return;
+      const confirmed = response.node as Node;
+      current._setStateNoAutosave({
+        nodes: current.nodes.map((live) =>
+          live.id === node.id && current.version <= response.toVersion
+            ? {
+                ...live,
+                data: {
+                  ...preserveAgentNodeOwnedData(live.data, confirmed.data),
+                  agentBinding:
+                    confirmed.data.agentBinding ?? live.data.agentBinding,
+                },
+              }
+            : live,
+        ),
+        ...(current.version === response.fromVersion
+          ? { version: response.toVersion }
+          : {}),
+      });
+      const live = useCanvasStore
+        .getState()
+        .nodes.find((item) => item.id === node.id);
+      if (live) preprocessQueue.schedule(live);
+    });
     questionCreations.set(`${canvasId}\0${node.id}`, { promise: creation });
     void creation.catch((error) => {
       rollbackFailedQuestions(canvasId, [node]);
@@ -1407,9 +1381,6 @@ const useCanvasStore = create<RFState>()(
     version: 0,
     isLoading: false,
     canvasNotFound: false,
-    worldReferences: {},
-    worldReferenceError: null,
-    pinnedSourceNodeIds: {},
     isSaving: false,
     pendingSave: false,
     moveSelectionDialogOpen: false,
@@ -1417,79 +1388,6 @@ const useCanvasStore = create<RFState>()(
       set({ moveSelectionDialogOpen: open }),
     versionConflict: false,
     versionConflictServerVersion: null,
-
-    refreshWorldReferences: async () => {
-      const generation = ++worldReferenceRefreshGeneration;
-      const canvasId = get().canvasId;
-      const { worldCanvasId, worldEnabled } = useWorkspaceStore.getState();
-      const isWorld = canvasId !== '' && canvasId === worldCanvasId;
-      // Source Spaces only need pin state while the World feature is on;
-      // `worldCanvasId` is workspace metadata that exists either way.
-      if (!canvasId || (!isWorld && (!worldEnabled || !worldCanvasId))) {
-        get()._setStateNoAutosave({
-          worldReferences: {},
-          worldReferenceError: null,
-          pinnedSourceNodeIds: {},
-        });
-        return;
-      }
-      try {
-        const response = await getWorldReferences(
-          isWorld ? canvasId : (worldCanvasId as string),
-        );
-        if (
-          get().canvasId !== canvasId ||
-          generation !== worldReferenceRefreshGeneration
-        ) {
-          return;
-        }
-        if (!isWorld) {
-          // Derive which of this Space's nodes are pinned by filtering the
-          // World's references down to the ones targeting this canvas.
-          const pinnedSourceNodeIds: Record<string, true> = {};
-          for (const reference of response.references) {
-            if (reference.kind === 'canvasRef') continue;
-            if (reference.target.canvasId !== canvasId) continue;
-            pinnedSourceNodeIds[reference.target.nodeId] = true;
-          }
-          get()._setStateNoAutosave({
-            worldReferences: {},
-            worldReferenceError: null,
-            pinnedSourceNodeIds,
-          });
-          return;
-        }
-        get()._setStateNoAutosave({
-          worldReferences: Object.fromEntries(
-            response.references.map((reference) => [
-              reference.referenceNodeId,
-              reference,
-            ]),
-          ),
-          worldReferenceError: null,
-          pinnedSourceNodeIds: {},
-        });
-      } catch (error) {
-        if (
-          get().canvasId !== canvasId ||
-          generation !== worldReferenceRefreshGeneration
-        ) {
-          return;
-        }
-        if (!isWorld) {
-          // A failed source-side probe only costs pin affordances; it is not
-          // the World's broken-reference banner state.
-          get()._setStateNoAutosave({ pinnedSourceNodeIds: {} });
-          return;
-        }
-        get()._setStateNoAutosave({
-          worldReferences: {},
-          worldReferenceError:
-            error instanceof Error ? error.message : String(error),
-          pinnedSourceNodeIds: {},
-        });
-      }
-    },
 
     // Placeholder — the autoSaveMiddleware injects the real raw setter
     // that bypasses autosave scheduling. Calling it before middleware has
@@ -1717,6 +1615,7 @@ const useCanvasStore = create<RFState>()(
         forgetNodeContent: nodeContentQueue.forgetNode,
         getPendingCreation: (nodeId) =>
           questionCreations.get(`${state.canvasId}\0${nodeId}`)?.promise,
+        waitForNodeContent: waitForSidecarWrites,
         validatePreviewNodes: (liveNodeIds) =>
           usePreviewWorkspaceStore.getState().validate(liveNodeIds),
       });
@@ -1732,9 +1631,7 @@ const useCanvasStore = create<RFState>()(
      *      batch; commit via `_setStateNoAutosave` and reconcile
      *      local `version` to `toVersion` so the NEXT user edit's
      *      autosave PUTs against the right baseline.
-     *   3. Ordinary agent batches snapshot for undo. Portal Pin/Unpin clears
-     *      history because protected reference topology cannot be restored by
-     *      the legacy full-state snapshot boundary.
+     *   3. Snapshot the pre-batch state for ordinary undo.
      */
     applyDeltasFromAgent: (
       deltas,
@@ -1894,17 +1791,7 @@ const useCanvasStore = create<RFState>()(
       const prevNodes = get().nodes;
       const prevEdges = get().edges;
       const canvasId = get().canvasId;
-
-      // Pin/Unpin uses a dedicated cross-Canvas command and cannot be
-      // faithfully restored by replaying a generic topology snapshot: a
-      // resurrected nodeRef would be rejected by the server ownership guard.
-      // Its product-level inverse is another Pin/Unpin operation.
-      const isPortalPinMutation = safeDeltas.some(
-        isWorldReferenceTopologyDelta,
-      );
-      if (isPortalPinMutation) {
-        canvasHistoryManager.clear();
-      } else if (agentNodeProjection) {
+      if (agentNodeProjection) {
         canvasHistoryManager.rebaseAgentInitialContent(safeDeltas);
       } else if (
         safeDeltas.some((delta) => {
@@ -1960,15 +1847,10 @@ const useCanvasStore = create<RFState>()(
       // found". This delta-replay path bypasses the server executor entirely,
       // so we normalize here at the client state-producer boundary.
       const orderedNodes = normalizeTreeOrder(applied.nodes as NestableNode[]);
-      nodeRefTopologySignatures.set(
-        canvasId,
-        nodeRefTopologySignature(orderedNodes as Node[]),
-      );
 
       get()._setStateNoAutosave({
         nodes: orderedNodes as Node[],
         edges: applied.edges as Edge[],
-        ...(isPortalPinMutation ? { canUndo: false, canRedo: false } : {}),
       });
       reconcileIncomingVersion();
 
@@ -2015,6 +1897,7 @@ const useCanvasStore = create<RFState>()(
         forgetNodeContent: nodeContentQueue.forgetNode,
         getPendingCreation: (nodeId) =>
           questionCreations.get(`${canvasId}\0${nodeId}`)?.promise,
+        waitForNodeContent: waitForSidecarWrites,
         validatePreviewNodes: (liveNodeIds) =>
           usePreviewWorkspaceStore.getState().validate(liveNodeIds),
       });
@@ -2117,53 +2000,6 @@ const useCanvasStore = create<RFState>()(
       }
     },
 
-    setPortalNodePins: async (updates) => {
-      const callerCanvasId = get().canvasId;
-      if (!callerCanvasId || updates.length === 0) return false;
-      try {
-        await drainPendingSaves();
-        if (get().canvasId !== callerCanvasId || get().versionConflict) {
-          return false;
-        }
-        const response = await postCanvasExecute(callerCanvasId, {
-          commands: [{ type: 'SET_PORTAL_NODE_PINS', updates }],
-          originator: { source: 'ui' },
-        });
-        const current = get();
-        if (
-          current.canvasId === response.canvasId &&
-          current.version === response.fromVersion
-        ) {
-          current.applyDeltasFromAgent(
-            response.deltas as Delta[],
-            response.toVersion,
-            response.pendingEffects as Parameters<
-              typeof current.applyDeltasFromAgent
-            >[2],
-          );
-        } else if (
-          (response.deltas as Delta[]).some(isWorldReferenceTopologyDelta)
-        ) {
-          canvasHistoryManager.clearCanvas(response.canvasId);
-          nodeRefTopologySignatures.delete(response.canvasId);
-        }
-        // Refresh unconditionally: a Pin invoked from a source Space
-        // mutates the World (`response.canvasId` is the World), while the
-        // active canvas still needs its derived pin state re-read. The
-        // refresh itself is scope-aware and generation-guarded.
-        await get().refreshWorldReferences();
-        return true;
-      } catch (error) {
-        toast(
-          error instanceof ApiError && error.code === 'WORLD_PORTAL_MISSING'
-            ? i18n.t('world.pinSourceMissing')
-            : i18n.t('world.pinFailed'),
-          { tone: 'danger' },
-        );
-        return false;
-      }
-    },
-
     getAgentChatContext: (): AgentChatContext => {
       const { nodes } = get();
       const buildSelectedDetail = makeBuildSelectedDetail(nodes);
@@ -2203,6 +2039,10 @@ const useCanvasStore = create<RFState>()(
     },
 
     loadCanvas: async (canvasId, options) => {
+      // Explicit reloads must not discard the only copy of a restored body.
+      // SSE gap reloads already skip dirty nodes; this also covers manual load.
+      if (nodeContentQueue.hasPendingRestoredContent())
+        await drainPendingSaves();
       set({
         isLoading: true,
         canvasNotFound: false,
@@ -2234,9 +2074,6 @@ const useCanvasStore = create<RFState>()(
             canvasNotFound: true,
             ingestionByNodeId: {},
             pendingForkThreadIds: {},
-            worldReferences: {},
-            worldReferenceError: null,
-            pinnedSourceNodeIds: {},
           });
           return;
         }
@@ -2264,22 +2101,18 @@ const useCanvasStore = create<RFState>()(
         // a numeric `style.height` materialized from its stored
         // measurement hint, so geometry no longer depends on whether the
         // node has ever been rendered. See `normalizeNodeHeights`.
+        // Ignore retired topology in memory only. Import and snapshot reloads
+        // enter here too; loading does not delete files or persist a migration.
+        const topology = stripLegacyPortalTopology(
+          state.nodes ?? [],
+          state.edges ?? [],
+        );
         const loadedNodes = normalizeNodeHeights(
           normalizeTreeOrder(
-            reconcileQuestionStatus(state.nodes ?? []) as NestableNode[],
+            reconcileQuestionStatus(topology.nodes) as NestableNode[],
           ) as Node[],
         );
-        const loadedEdges = state.edges ?? [];
-        const loadedNodeRefSignature = nodeRefTopologySignature(loadedNodes);
-        const previousNodeRefSignature =
-          nodeRefTopologySignatures.get(targetId);
-        if (
-          previousNodeRefSignature !== undefined &&
-          previousNodeRefSignature !== loadedNodeRefSignature
-        ) {
-          canvasHistoryManager.clearCanvas(targetId);
-        }
-        nodeRefTopologySignatures.set(targetId, loadedNodeRefSignature);
+        const loadedEdges = topology.edges;
         // Prefer this client's persistent UI state; fall back to whatever the
         // server still has from before viewport was moved client-side.
         // A corrupt entry on either side falls through to `null`, which
@@ -2335,11 +2168,10 @@ const useCanvasStore = create<RFState>()(
           canRedo: canvasHistoryManager.canRedo,
           ingestionByNodeId: {},
           pendingForkThreadIds: {},
-          worldReferences: {},
-          worldReferenceError: null,
-          pinnedSourceNodeIds: {},
         });
-        void get().refreshWorldReferences();
+        usePreviewWorkspaceStore
+          .getState()
+          .validate(new Set(warmedNodes.map((node) => node.id)));
 
         // Warmup hints were folded in before the commit, and a load
         // deliberately never schedules a save — so without this they
@@ -2385,19 +2217,17 @@ const useCanvasStore = create<RFState>()(
       set({
         isLoading: true,
         canvasNotFound: false,
-        versionConflict: false,
-        versionConflictServerVersion: null,
       });
-      // Same rationale as `loadCanvas`: the persistent conflict toast
-      // is bound to the outgoing canvas; clear it so it doesn't bleed
-      // into the new one (which has its own fresh version baseline).
-      dismissVersionConflictToast();
+      // Retain the outgoing conflict gate until its drain succeeds.
+      // loadCanvas clears it when the new authoritative state is requested.
 
       // Flush any pending save for the current canvas before switching
-      await structureScheduler.flushAsync();
-      // Also drain any pending per-node content PUTs so editor edits
-      // made on the outgoing canvas land before we tear its state down.
-      await nodeContentQueue.flushAll();
+      try {
+        await drainPendingSaves();
+      } catch (error) {
+        set({ isLoading: false });
+        throw error;
+      }
 
       // Cancel all pending preprocessing timers
       preprocessQueue.cancelAll();
@@ -2447,21 +2277,32 @@ const useCanvasStore = create<RFState>()(
       }
 
       set({ isSaving: true });
+      const savingCanvasId = get().canvasId;
       let saveSucceeded = false;
+      let structureWrite: ReturnType<typeof putCanvas> | undefined;
       try {
-        const before = get();
-        const creating = before.nodes.flatMap((node) => {
-          const creation = questionCreations.get(
-            `${before.canvasId}\0${node.id}`,
-          );
-          return creation ? [creation.promise] : [];
-        });
-        // DELETE removes the sidecar, not Canvas topology. Wait even for
-        // locally absent Questions so this PUT follows their delayed create.
-        const deleting = canvasHistoryManager.waitForDeletions(before.canvasId);
-        if (deleting) creating.push(deleting);
-        if (creating.length > 0) await Promise.all(creating);
+        const acknowledgedCreations = new Set<Promise<void>>();
+        while (get().canvasId === savingCanvasId) {
+          const creating = get().nodes.flatMap((node) => {
+            const creation = questionCreations.get(
+              `${savingCanvasId}\0${node.id}`,
+            )?.promise;
+            return creation && !acknowledgedCreations.has(creation)
+              ? [creation]
+              : [];
+          });
+          const deleting =
+            canvasHistoryManager.hasPendingDeletes(savingCanvasId);
+          if (creating.length === 0 && !deleting) break;
+          await Promise.all(creating);
+          for (const creation of creating) acknowledgedCreations.add(creation);
+          // Re-read identities after waiting: undo/redo may have restored a
+          // different Question while its previous creation/delete was pending.
+          await canvasHistoryManager.waitForDeletes(savingCanvasId);
+        }
+        if (get().canvasId !== savingCanvasId) return;
         const { nodes, edges, version, canvasId, canvasTitle } = get();
+        const restoreTokens = nodeContentQueue.restoreTokens();
         // Strip every per-node content / label / src / summary / etc.
         // field from the body. Those live in `nodes/<safe(label)>.md`
         // now and ride the per-node content PUT, so the structure PUT
@@ -2469,7 +2310,7 @@ const useCanvasStore = create<RFState>()(
         // Viewport is intentionally omitted: it's local UI state mirrored
         // into `localStorage`, not canvas data.
         const slimNodes = stripNodeContentForStructurePut(nodes);
-        const response = await putCanvas(
+        structureWrite = putCanvas(
           canvasId,
           {
             version,
@@ -2478,6 +2319,10 @@ const useCanvasStore = create<RFState>()(
           },
           { keepalive: options?.keepalive },
         );
+        inflightStructureWrites.set(canvasId, structureWrite);
+        const response = await structureWrite;
+        if (get().canvasId !== canvasId) return;
+        nodeContentQueue.acknowledgeRestores(canvasId, restoreTokens);
         const reconciled = reconcileCanvasVersion(
           get().version,
           response.version,
@@ -2497,6 +2342,8 @@ const useCanvasStore = create<RFState>()(
         }
         saveSucceeded = true;
       } catch (error) {
+        if (get().canvasId !== savingCanvasId) return;
+        nodeContentQueue.reportRestoreFailure(savingCanvasId);
         if (error instanceof CanvasConflictError) {
           if (error.code === 'CANVAS_VERSION_CONFLICT') {
             if (
@@ -2530,10 +2377,13 @@ const useCanvasStore = create<RFState>()(
         }
         console.error('Failed to save canvas:', error);
       } finally {
-        set({ isSaving: false });
+        if (inflightStructureWrites.get(savingCanvasId) === structureWrite) {
+          inflightStructureWrites.delete(savingCanvasId);
+        }
+        if (get().canvasId === savingCanvasId) set({ isSaving: false });
 
         const { pendingSave } = get();
-        if (pendingSave) {
+        if (pendingSave && get().canvasId === savingCanvasId) {
           set({ pendingSave: false });
           // Fire-and-forget: re-save the latest state after the in-flight save completes.
           // Conflict errors are surfaced via tryRename; ignore them here so
@@ -3686,51 +3536,7 @@ const useCanvasStore = create<RFState>()(
     },
 
     deleteNodes: (nodeIds) => {
-      const sourceRefs = get().nodes.filter(
-        (node) =>
-          nodeIds.includes(node.id) &&
-          (node.type === 'nodeRef' || node.type === 'frameRef'),
-      );
-      if (sourceRefs.length > 0) {
-        void get().setPortalNodePins(
-          sourceRefs.map((node) => {
-            const target = (
-              node.data as {
-                target: { canvasId: string; nodeId: string };
-              }
-            ).target;
-            return {
-              sourceCanvasId: target.canvasId as `canvas-${string}`,
-              sourceNodeIds: [target.nodeId as `node-${string}`],
-              pinned: false,
-            };
-          }),
-        );
-      }
-      const { spaceTitles, spaceTitlesLoaded } = useWorkspaceStore.getState();
-      const nodesById = new Map(get().nodes.map((node) => [node.id, node]));
-      const deletableNodeIds = nodeIds.filter((nodeId) => {
-        const node = nodesById.get(nodeId);
-        if (node?.type === 'nodeRef' || node?.type === 'frameRef') return false;
-        if (node?.type !== 'canvasRef') return true;
-        const targetCanvasId = node.data.targetCanvasId;
-        return (
-          spaceTitlesLoaded &&
-          typeof targetCanvasId === 'string' &&
-          !(targetCanvasId in spaceTitles)
-        );
-      });
-      if (deletableNodeIds.length > 0) {
-        const nodeRefTopologyBefore = nodeRefTopologySignature(get().nodes);
-        get().dispatchUiIntent({
-          type: 'DELETE_NODES',
-          nodeIds: deletableNodeIds,
-        });
-        if (nodeRefTopologyBefore !== nodeRefTopologySignature(get().nodes)) {
-          canvasHistoryManager.clear();
-          set({ canUndo: false, canRedo: false });
-        }
-      }
+      get().dispatchUiIntent({ type: 'DELETE_NODES', nodeIds });
     },
 
     disconnectEdges: (edgeIds) => {
@@ -4073,12 +3879,12 @@ const useCanvasStore = create<RFState>()(
     pasteNodes: (flowPosition, clipboardNodes, clipboardEdges, srcCanvasId) => {
       const dstCanvasId = get().canvasId;
       if (!dstCanvasId || clipboardNodes.length === 0) return;
-      clipboardNodes = clipboardNodes.filter(
-        (node) =>
-          node.type !== 'canvasRef' &&
-          node.type !== 'frameRef' &&
-          node.type !== 'nodeRef',
+      const topology = stripLegacyPortalTopology(
+        clipboardNodes,
+        clipboardEdges ?? [],
       );
+      clipboardNodes = topology.nodes;
+      clipboardEdges = topology.edges;
       if (clipboardNodes.length === 0) return;
 
       // ── Question-node conversation handling ─────────────────────────
@@ -4316,18 +4122,6 @@ const useCanvasStore = create<RFState>()(
       const { nodes, edges, canvasId } = get();
       const snapshot = canvasHistoryManager.undo(nodes, edges);
       if (!snapshot) return;
-      if (
-        snapshot.nodes.some(
-          (node) =>
-            node.type === 'question' &&
-            !nodes.some((live) => live.id === node.id),
-        )
-      ) {
-        await drainPendingSaves();
-        if (get().canvasId !== canvasId) return;
-        snapshot.nodes = preserveLiveQuestionData(snapshot.nodes, get().nodes);
-      }
-
       // Undo swaps in authoritative geometry, so any retained stroke
       // selection / polygon may no longer describe it (e.g. the classic
       // "move strokes then undo" strands the dashed region at the moved
@@ -4339,17 +4133,24 @@ const useCanvasStore = create<RFState>()(
 
       const action: RecentAction = { action: 'canvas_undone' };
       restoreQuestionAssociations(canvasId, nodes, snapshot.nodes);
+      nodeContentQueue.holdRestoredNodes(
+        canvasId,
+        snapshot.nodes.filter(
+          (node) => !nodes.some((before) => before.id === node.id),
+        ),
+      );
       set({
         nodes: snapshot.nodes,
         edges: snapshot.edges,
       });
+      preprocessQueue.reconcileHistory(nodes);
       canvasEvents.buffer(canvasId, action);
 
       canvasHistoryManager.syncServerAfterRestore(
         canvasId,
         nodes,
         snapshot.nodes,
-        preprocessQueue.schedule,
+        waitForSidecarWrites,
         (nodeId) => questionCreations.get(`${canvasId}\0${nodeId}`)?.promise,
       );
     },
@@ -4358,35 +4159,30 @@ const useCanvasStore = create<RFState>()(
       const { nodes, edges, canvasId } = get();
       const snapshot = canvasHistoryManager.redo(nodes, edges);
       if (!snapshot) return;
-      if (
-        snapshot.nodes.some(
-          (node) =>
-            node.type === 'question' &&
-            !nodes.some((live) => live.id === node.id),
-        )
-      ) {
-        await drainPendingSaves();
-        if (get().canvasId !== canvasId) return;
-        snapshot.nodes = preserveLiveQuestionData(snapshot.nodes, get().nodes);
-      }
-
       // See `undo`: a redo is the same authoritative geometry swap, so
       // discard the floating stroke selection for the same reason.
       useGesturePreviewStore.getState().resetCanvasScopedTransients();
 
       const action: RecentAction = { action: 'canvas_redone' };
       restoreQuestionAssociations(canvasId, nodes, snapshot.nodes);
+      nodeContentQueue.holdRestoredNodes(
+        canvasId,
+        snapshot.nodes.filter(
+          (node) => !nodes.some((before) => before.id === node.id),
+        ),
+      );
       set({
         nodes: snapshot.nodes,
         edges: snapshot.edges,
       });
+      preprocessQueue.reconcileHistory(nodes);
       canvasEvents.buffer(canvasId, action);
 
       canvasHistoryManager.syncServerAfterRestore(
         canvasId,
         nodes,
         snapshot.nodes,
-        preprocessQueue.schedule,
+        waitForSidecarWrites,
         (nodeId) => questionCreations.get(`${canvasId}\0${nodeId}`)?.promise,
       );
     },

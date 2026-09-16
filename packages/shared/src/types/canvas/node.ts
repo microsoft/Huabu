@@ -34,9 +34,6 @@ export const CANVAS_NODE_TYPES = [
   'web',
   'frame',
   'spacePreview',
-  'canvasRef',
-  'frameRef',
-  'nodeRef',
   'sketch',
   'question',
 ] as const;
@@ -47,7 +44,6 @@ export type CanvasNodeType = (typeof CANVAS_NODE_TYPES)[number];
  * Excludes:
  * - `sketch` — produced only by the freehand drawing tool.
  * - `spacePreview` — created only by the user-facing target picker or World host operations.
- * - `canvasRef` / `frameRef` / `nodeRef` — created only by legacy World host operations.
  */
 export const AGENT_CREATABLE_NODE_TYPES = [
   'note',
@@ -668,54 +664,10 @@ export interface FrameNodeData extends BaseNodeData {
   sizing?: FrameSizing;
 }
 
-/** A World-owned Portal that points to an ordinary Space Canvas. */
-export interface CanvasRefNodeData extends BaseNodeData {
-  type: 'canvasRef';
-  targetCanvasId: string;
-}
-
 /** A view-only projection of another ordinary Space. */
 export interface SpacePreviewNodeData extends BaseNodeData {
   type: 'spacePreview';
   targetCanvasId: string;
-}
-
-/** A World-owned symbolic reference to a node in an ordinary Space. */
-export interface NodeRefNodeData extends BaseNodeData {
-  type: 'nodeRef';
-  origin?: never;
-  label?: never;
-  labelSource?: never;
-  contentMissing?: never;
-  artifactMissing?: never;
-  contentDuplicate?: never;
-  duplicateFiles?: never;
-  frameColumn?: never;
-  frameRow?: never;
-  frameSlot?: never;
-  target: {
-    canvasId: string;
-    nodeId: string;
-  };
-}
-
-/** A World-owned symbolic Container reference to a source Frame. */
-export interface FrameRefNodeData extends BaseNodeData {
-  type: 'frameRef';
-  origin?: never;
-  label?: never;
-  labelSource?: never;
-  contentMissing?: never;
-  artifactMissing?: never;
-  contentDuplicate?: never;
-  duplicateFiles?: never;
-  frameColumn?: never;
-  frameRow?: never;
-  frameSlot?: never;
-  target: {
-    canvasId: string;
-    nodeId: string;
-  };
 }
 
 /**
@@ -853,9 +805,6 @@ export type NodeData =
   | AudioNodeData
   | FrameNodeData
   | SpacePreviewNodeData
-  | CanvasRefNodeData
-  | FrameRefNodeData
-  | NodeRefNodeData
   | SketchNodeData
   | QuestionNodeData;
 
@@ -895,22 +844,10 @@ export function isFrameNode(data: NodeData): data is FrameNodeData {
   return data.type === 'frame';
 }
 
-export function isCanvasRefNode(data: NodeData): data is CanvasRefNodeData {
-  return data.type === 'canvasRef';
-}
-
 export function isSpacePreviewNode(
   data: NodeData,
 ): data is SpacePreviewNodeData {
   return data.type === 'spacePreview';
-}
-
-export function isNodeRefNode(data: NodeData): data is NodeRefNodeData {
-  return data.type === 'nodeRef';
-}
-
-export function isFrameRefNode(data: NodeData): data is FrameRefNodeData {
-  return data.type === 'frameRef';
 }
 
 export function isSketchNode(data: NodeData): data is SketchNodeData {

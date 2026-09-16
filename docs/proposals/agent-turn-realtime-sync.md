@@ -2,9 +2,11 @@
 
 Status: In-Progress
 
-Last updated: 2026-08-14
+Last updated: 2026-09-14
 
 Tracking issue: [#75](https://github.com/microsoft/Huabu/issues/75)
+
+> **Retired presentation context.** The World `nodeRef` non-goal below is historical: that source-conversation shortcut has been removed, not deferred as a future sync integration. Ordinary Question conversations and server-side RFS/background execution remain; [Agent architecture](../architecture/agent-architecture.md) and [Preview Workspace](../architecture/preview-workspace.md) define the current boundaries.
 
 ## Context
 

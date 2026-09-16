@@ -70,6 +70,28 @@ beforeEach(() => {
 });
 
 describe('nodeContentQueue baseline lifecycle', () => {
+  it('forgetting a removed restore clears both barriers before an obsolete acknowledgement', async () => {
+    const node = noteNode('restored');
+    const { queue, state } = makeQueue(node);
+    queue.holdRestoredNodes('c1', [node]);
+    const tokens = queue.restoreTokens();
+    expect(queue.hasRestore(node.id)).toBe(true);
+    expect(queue.hasPendingRestoredContent()).toBe(true);
+
+    // The store deletion diff forgets the node synchronously on rapid redo.
+    state.nodes = [];
+    queue.forgetNode(node.id);
+    queue.acknowledgeRestores('c1', tokens);
+
+    expect(queue.hasRestore(node.id)).toBe(false);
+    expect(queue.hasPendingRestoredContent()).toBe(false);
+    expect(queue.restoreTokens().size).toBe(0);
+    expect(queue.pendingNodeIds()).toEqual([]);
+    await queue.waitForIdle();
+    await queue.flushAll();
+    expect(putMock).not.toHaveBeenCalled();
+  });
+
   it('sends the seeded rev, then advances to the server-returned rev', async () => {
     const node = noteNode('v1');
     const { queue } = makeQueue(node);

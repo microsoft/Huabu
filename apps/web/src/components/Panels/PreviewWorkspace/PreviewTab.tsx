@@ -15,7 +15,7 @@
 
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { MessageSquare, Pin, X } from 'lucide-react';
+import { Globe, MessageSquare, Pin, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { getNodeIcon } from '@/config/nodeIcons';
@@ -74,16 +74,28 @@ function usePreviewTabPresentation(
     isNode && typeof node?.data.label === 'string' ? node.data.label : '';
   const title = isNode
     ? label || t('node.untitled')
-    : chatTitle || t('chat.newConversation');
-  const Icon = isNode ? getNodeIcon(node?.type, node?.data) : MessageSquare;
-  const accessibleName = isNode ? `${title} (${node?.type ?? 'node'})` : title;
+    : target.kind === 'url'
+      ? new URL(target.url).host
+      : chatTitle || t('chat.newConversation');
+  const Icon = isNode
+    ? getNodeIcon(node?.type, node?.data)
+    : target.kind === 'url'
+      ? Globe
+      : MessageSquare;
+  const accessibleName = isNode
+    ? `${title} (${node?.type ?? 'node'})`
+    : target.kind === 'url'
+      ? target.url
+      : title;
 
   return {
     title,
     accessibleName,
     tabDescription: tab.transient
       ? t('preview.transientTabHint', { title })
-      : title,
+      : target.kind === 'url'
+        ? target.url
+        : title,
     Icon,
   };
 }

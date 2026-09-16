@@ -98,7 +98,6 @@ function initializeQuestionBinding(
   const source = resolveConversationOwnerSource(
     canvas.canvasId,
     canvas.nodes,
-    canvas.worldReferences,
     view,
   );
   if (effectiveBinding) {

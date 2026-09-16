@@ -105,9 +105,9 @@ import {
   SelectableAgentProfileError,
 } from '../agent/selectable-agent-profile.js';
 import { safeResolve } from '../agent/tools/handlers/fs-sandbox.js';
-import { MissingWorldPortalError } from '../canvas/canvas-command-router.js';
 import { CanvasNotFoundError } from '../canvas/canvas-executor.js';
 import { executeSpaceQuery, SpaceQueryError } from '../canvas/space-query.js';
+import { WorldPreviewMutationError } from '../canvas/world-preview-policy.js';
 import {
   InteractiveViewServiceError,
   interactiveViewService,
@@ -644,10 +644,8 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
             .code(404)
             .send(rfsError('Canvas not found.', 'canvas_not_found'));
         }
-        if (error instanceof MissingWorldPortalError) {
-          return reply
-            .code(409)
-            .send(rfsError(error.message, 'WORLD_PORTAL_MISSING'));
+        if (error instanceof WorldPreviewMutationError) {
+          return reply.code(409).send(rfsError(error.message));
         }
         request.log.error(
           { err: error, canvasId: request.params.canvasId },

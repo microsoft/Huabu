@@ -85,6 +85,8 @@ export interface MilkdownEditorProps {
    * overlays). Called with `null` on unmount.
    */
   onReady?: (instance: MilkdownInstance | null) => void;
+  /** Opt in to host-owned plain-click links without changing other editors. */
+  onLinkClick?: (href: string) => void;
   /**
    * Fires when the user drags a block (or a multi-block selection) out
    * of the editor — typically used by note nodes to construct the
@@ -107,6 +109,7 @@ export function MilkdownEditor(props: MilkdownEditorProps): React.JSX.Element {
     decorations,
     onExternalUpdate,
     onReady,
+    onLinkClick,
     onBlockDragStart,
   } = props;
 
@@ -128,6 +131,8 @@ export function MilkdownEditor(props: MilkdownEditorProps): React.JSX.Element {
   /** Track latest onReady callback. */
   const onReadyRef = useRef(onReady);
   onReadyRef.current = onReady;
+  const onLinkClickRef = useRef(onLinkClick);
+  onLinkClickRef.current = onLinkClick;
   /** Track latest canvasId so the mount-only editor reads a fresh value. */
   const canvasIdRef = useRef(canvasId);
   canvasIdRef.current = canvasId;
@@ -157,6 +162,9 @@ export function MilkdownEditor(props: MilkdownEditorProps): React.JSX.Element {
         editable,
         placeholder,
         toolbarMode: 'huabu',
+        onLinkClick: onLinkClick
+          ? (href) => onLinkClickRef.current?.(href)
+          : undefined,
         resolveImageSrc: (src) => {
           const id = canvasIdRef.current;
           return id ? resolveArtifactUrl(src, id) : src;

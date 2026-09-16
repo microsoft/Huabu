@@ -22,18 +22,11 @@ const distributeNodes: CommandDefinition<Cmd> = {
     const result = spreadNodes(state.nodes, 24, cmd.nodeIds as string[]);
     if (!result) return noop(state);
 
-    // Declare affected Containers for their type-specific fit passes.
+    // Declare affected Frames for the end-of-batch fit pass.
     const affectedFrameIds = new Set<string>();
-    const affectedPortalIds = new Set<string>();
-    const byId = new Map(result.map((node) => [node.id, node]));
     for (const n of result) {
       if (!targetIds.has(n.id) || !n.parentId) continue;
-      const parentType = byId.get(n.parentId)?.type;
-      if (parentType === 'canvasRef' || parentType === 'frameRef') {
-        affectedPortalIds.add(n.parentId);
-      } else {
-        affectedFrameIds.add(n.parentId);
-      }
+      affectedFrameIds.add(n.parentId);
     }
 
     return {
@@ -42,9 +35,6 @@ const distributeNodes: CommandDefinition<Cmd> = {
       edges: state.edges,
       ...(affectedFrameIds.size > 0
         ? { affectedFrameIds: Array.from(affectedFrameIds) }
-        : {}),
-      ...(affectedPortalIds.size > 0
-        ? { affectedPortalIds: Array.from(affectedPortalIds) }
         : {}),
     };
   },

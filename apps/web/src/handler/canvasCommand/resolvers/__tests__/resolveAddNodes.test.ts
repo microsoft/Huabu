@@ -123,32 +123,81 @@ describe('resolveAddNodes', () => {
     if (create?.type !== 'CREATE_NODES') return;
     expect(create.nodes[0]).not.toHaveProperty('selectOnCreate');
   });
-
-  it.each(['nodeRef', 'frameRef'] satisfies CanvasNodeType[])(
-    'does not generically create %s references',
-    (nodeType) => {
-      const resolution = resolveAddNodes(
-        {
-          type: 'ADD_NODES',
-          inputs: [
-            {
-              id: 'node-ref-copy',
-              nodeType,
-              data: {
-                target: { canvasId: 'canvas-source', nodeId: 'node-source' },
-              },
-            },
-          ],
-        },
-        ui,
-      );
-      expect(resolution.commands).toEqual([]);
-    },
-  );
 });
 
 describe('resolvePasteClipboard', () => {
-  it.each(['nodeRef', 'frameRef'] satisfies CanvasNodeType[])(
+  it('rebases surviving children before paste placement and drops incident edges', () => {
+    const nodes: Node[] = [
+      { id: 'old', type: 'canvasRef', position: { x: 100, y: 200 }, data: {} },
+      {
+        id: 'nested',
+        type: 'frameRef',
+        parentId: 'old',
+        position: { x: 20, y: 30 },
+        data: {},
+      },
+      {
+        id: 'kept',
+        type: 'frame',
+        parentId: 'nested',
+        position: { x: 5, y: 6 },
+        data: { label: 'Frame' },
+      },
+      {
+        id: 'child',
+        type: 'note',
+        parentId: 'kept',
+        position: { x: 7, y: 8 },
+        data: { label: 'Note' },
+      },
+      {
+        id: 'preview',
+        type: 'spacePreview',
+        position: { x: 500, y: 600 },
+        data: { targetCanvasId: 'canvas-target' },
+      },
+    ];
+    const before = JSON.stringify(nodes);
+    const resolution = resolvePasteClipboard(
+      {
+        type: 'PASTE_CLIPBOARD',
+        clipboardNodes: nodes,
+        clipboardEdges: [
+          { id: 'removed', source: 'old', target: 'kept' },
+          { id: 'kept-edge', source: 'child', target: 'preview' },
+        ],
+      },
+      ui,
+    );
+    const create = resolution.commands.find(
+      (command) => command.type === 'CREATE_NODES',
+    )!;
+    const connect = resolution.commands.find(
+      (command) => command.type === 'CONNECT_NODES',
+    )!;
+    expect(create.nodes.map((node) => node.nodeType)).toEqual([
+      'frame',
+      'note',
+      'spacePreview',
+    ]);
+    expect(create.nodes[0]).toMatchObject({ position: { x: 165, y: 276 } });
+    expect(create.nodes[0]).not.toHaveProperty('parentId');
+    expect(create.nodes[1]).toMatchObject({
+      parentId: create.nodes[0].id,
+      position: { x: 7, y: 8 },
+    });
+    expect(create.nodes[2].data).toMatchObject({
+      targetCanvasId: 'canvas-target',
+    });
+    expect(connect.edges).toHaveLength(1);
+    expect(connect.edges[0]).toMatchObject({
+      source: create.nodes[1].id,
+      target: create.nodes[2].id,
+    });
+    expect(JSON.stringify(nodes)).toBe(before);
+  });
+
+  it.each(['canvasRef', 'nodeRef', 'frameRef'])(
     'does not paste %s reference nodes',
     (type) => {
       const source = {

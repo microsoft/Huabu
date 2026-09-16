@@ -7,12 +7,54 @@ import {
   AGENT_COMMAND_SCHEMAS,
   SPACE_EXECUTE_MAX_COMMANDS,
   agentCanvasCommandSchema,
+  builtInAgentCanvasCommandSchema,
   inspectNodesQuerySchema,
   rfsExecuteRequestSchema,
 } from './space-operations.js';
-import { AGENT_CANVAS_COMMAND_TYPES } from '../canvas/index.js';
+import {
+  AGENT_CANVAS_COMMAND_TYPES,
+  CANVAS_NODE_TYPES,
+} from '../canvas/index.js';
 
 describe('agentCanvasCommandSchema', () => {
+  it('rejects the retired Pin command at both agent boundaries', () => {
+    const command = {
+      type: 'SET_PORTAL_NODE_PINS',
+      updates: [
+        {
+          sourceCanvasId: 'canvas-source',
+          sourceNodeIds: ['node-source'],
+          pinned: true,
+        },
+      ],
+    };
+    expect(agentCanvasCommandSchema.safeParse(command).success).toBe(false);
+    expect(builtInAgentCanvasCommandSchema.safeParse(command).success).toBe(
+      false,
+    );
+    expect(AGENT_CANVAS_COMMAND_TYPES).not.toContain(command.type);
+  });
+
+  it.each(['canvasRef', 'frameRef', 'nodeRef'])(
+    'retires the %s node kind',
+    (nodeType) => {
+      expect(CANVAS_NODE_TYPES).not.toContain(nodeType);
+      const command = {
+        type: 'CREATE_NODES',
+        nodes: [{ nodeType, position: { x: 0, y: 0 } }],
+      };
+      expect(agentCanvasCommandSchema.safeParse(command).success).toBe(false);
+      expect(builtInAgentCanvasCommandSchema.safeParse(command).success).toBe(
+        false,
+      );
+    },
+  );
+
+  it('keeps spacePreview and Frame as supported canvas node kinds', () => {
+    expect(CANVAS_NODE_TYPES).toContain('spacePreview');
+    expect(CANVAS_NODE_TYPES).toContain('frame');
+  });
+
   it('keeps the schema registry aligned with the agent command catalogue', () => {
     expect(Object.keys(AGENT_COMMAND_SCHEMAS).sort()).toEqual(
       [...AGENT_CANVAS_COMMAND_TYPES].sort(),

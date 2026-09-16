@@ -203,16 +203,14 @@ export function PreviewWorkspace({
         if (target.kind === 'chat') {
           return messageListViewKey(target.canvasId, target.threadId);
         }
+        // Cross-origin frame scroll state is neither accessible nor retained.
+        if (target.kind === 'url') return undefined;
 
         const node = state.nodes.find(
           (candidate) => candidate.id === target.nodeId,
         );
         if (!node) return undefined;
-        const view = conversationViewForNode(
-          node,
-          target.canvasId,
-          state.worldReferences[target.nodeId],
-        );
+        const view = conversationViewForNode(node, target.canvasId);
         return view
           ? messageListViewKey(
               view.conversationOwner.canvasId,

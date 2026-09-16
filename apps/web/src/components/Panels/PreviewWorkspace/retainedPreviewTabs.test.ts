@@ -13,7 +13,6 @@ import {
   selectRetainedPreviewTabs,
 } from './retainedPreviewTabs';
 
-import type { ResolvedWorldReference } from '@huabu/shared';
 import type { Node } from '@xyflow/react';
 
 function node(id: string, type: string): Node {
@@ -75,14 +74,8 @@ describe('selectRetainedPreviewTabs', () => {
     ).toEqual(['note']);
   });
 
-  it('treats a valid World Question reference as retainable', () => {
-    const reference = {
-      kind: 'nodeRef',
-      status: 'ok',
-      target: { canvasId: 'source-canvas', nodeId: 'source-question' },
-      source: { type: 'question', threadId: 'source-thread' },
-    } as ResolvedWorldReference;
-
-    expect(canRetainPreviewNode(node('ref', 'nodeRef'), reference)).toBe(true);
+  it('retains ordinary Questions but not view-only Space previews', () => {
+    expect(canRetainPreviewNode(node('question', 'question'))).toBe(true);
+    expect(canRetainPreviewNode(node('preview', 'spacePreview'))).toBe(false);
   });
 });

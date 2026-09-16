@@ -42,7 +42,6 @@ const canvasMock = vi.hoisted(() => ({
       type: string;
       data: Record<string, unknown>;
     }>,
-    worldReferences: {},
     patchNodeSilent: vi.fn(),
   },
 }));
@@ -73,7 +72,6 @@ vi.mock('@/store/conversationOwner', () => ({
     (_source: unknown, patch: Record<string, unknown>) => patch,
   ),
   patchConversationOwnerNode: apiMocks.patchOwner,
-  refreshConversationPresentation: vi.fn(),
   resolveConversationOwnerSource: vi.fn(() => undefined),
   validateConversationView: vi.fn(async () => {}),
 }));

@@ -22,7 +22,9 @@ export function previewTargetKey(target: PreviewTarget): string {
   return JSON.stringify(
     target.kind === 'chat'
       ? [target.kind, target.canvasId, target.threadId]
-      : [target.kind, target.canvasId, target.nodeId],
+      : target.kind === 'node'
+        ? [target.kind, target.canvasId, target.nodeId]
+        : [target.kind, target.canvasId, target.url],
   );
 }
 

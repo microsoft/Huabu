@@ -3,6 +3,7 @@
 
 import {
   createId,
+  stripLegacyPortalTopology,
   type CanvasCommand,
   type CanvasEdgeId,
   type CanvasNodeId,
@@ -31,13 +32,12 @@ export default function resolvePasteClipboard(
   ui: UiResolverState,
 ): UiIntentResolution {
   const { nodes } = ui;
-  const clipboard = intent.clipboardNodes?.filter(
-    (node) =>
-      node.type !== 'canvasRef' &&
-      node.type !== 'frameRef' &&
-      node.type !== 'nodeRef',
+  const topology = stripLegacyPortalTopology(
+    intent.clipboardNodes ?? [],
+    intent.clipboardEdges ?? [],
   );
-  if (!clipboard || clipboard.length === 0) {
+  const clipboard = topology.nodes;
+  if (clipboard.length === 0) {
     return { commands: [], trace: [] };
   }
 
@@ -191,7 +191,7 @@ export default function resolvePasteClipboard(
     CanvasCommand,
     { type: 'CONNECT_NODES' }
   >['edges'] = [];
-  for (const edge of intent.clipboardEdges ?? []) {
+  for (const edge of topology.edges) {
     const newSource = idMap.get(edge.source);
     const newTarget = idMap.get(edge.target);
     if (!newSource || !newTarget) continue;

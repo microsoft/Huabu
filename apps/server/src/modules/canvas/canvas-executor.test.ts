@@ -28,7 +28,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
-import { executeCanvasCommandsOnHost } from './canvas-command-router.js';
 import { applyDeltasOnServer, executeOnServer } from './canvas-executor.js';
 import { setAgentChangeReviewConfig } from '../agent/change-review-config.js';
 import {
@@ -110,7 +109,7 @@ describe('atomic automatic label commits', () => {
       });
     });
     await locked;
-    const manual = executeCanvasCommandsOnHost({
+    const manual = executeOnServer({
       canvasId: 'canvas-title',
       originator: { source: 'ui' },
       commands: [
@@ -125,7 +124,7 @@ describe('atomic automatic label commits', () => {
         },
       ],
     });
-    const automatic = executeCanvasCommandsOnHost({
+    const automatic = executeOnServer({
       canvasId: 'canvas-title',
       originator: { source: 'system' },
       commands: [

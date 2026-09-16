@@ -63,15 +63,7 @@ export function isActivelyViewingQuestion(match: {
     const node = canvas.nodes.find(
       (candidate) => candidate.id === targetNodeId,
     );
-    if (node?.type === 'question' && node.data.threadId === match.threadId) {
-      return true;
-    }
-    const reference = canvas.worldReferences[targetNodeId];
-    return (
-      reference?.kind === 'nodeRef' &&
-      reference.status === 'ok' &&
-      reference.source?.threadId === match.threadId
-    );
+    return node?.type === 'question' && node.data.threadId === match.threadId;
   });
   return matches && !usePanelStore.getState().isRightCollapsed;
 }

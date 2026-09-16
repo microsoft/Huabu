@@ -665,7 +665,7 @@ describe('rendered conversation titles', () => {
     await renderPanel(
       {
         ...baseSession,
-        conversationView: conversationViewForNode(node, 'canvas', undefined),
+        conversationView: conversationViewForNode(node, 'canvas'),
       },
       {
         ...baseTab,

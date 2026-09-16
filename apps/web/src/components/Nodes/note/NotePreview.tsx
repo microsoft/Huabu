@@ -39,8 +39,10 @@ import { Button } from '@/components/Common/Button';
 import { MilkdownEditor } from '@/components/Milkdown';
 import { MilkdownFloatingToolbar } from '@/components/Milkdown/MilkdownFloatingToolbar';
 import { usePreviewHeaderSlot } from '@/components/Nodes/PreviewHeaderSlot';
+import { isElectron } from '@/hooks/useElectron';
 import { usePreviewScrollMemory } from '@/hooks/usePreviewScrollMemory';
 import useCanvasStore from '@/store/canvasStore';
+import { openPreviewUrl } from '@/store/previewWorkspace/actions';
 import {
   coerceProvenance,
   dismissDeletedBlock,
@@ -108,6 +110,13 @@ export const NotePreview = ({
   onDataChange,
 }: PreviewComponentProps) => {
   const { t } = useTranslation();
+  const handleLinkClick = useCallback(
+    (href: string) => {
+      if (isElectron()) openPreviewUrl(href, id);
+      else window.open(href, '_blank', 'noopener,noreferrer');
+    },
+    [id],
+  );
   // `content` is the canonical Markdown string. Brand-new note records
   // may have it absent or non-string; normalise to empty.
   const markdown = typeof data.content === 'string' ? data.content : '';
@@ -617,6 +626,7 @@ export const NotePreview = ({
                 onBlockDragStart={readOnly ? undefined : handleBlockDragStart}
                 decorations={decorations}
                 className="milkdown-note-preview"
+                onLinkClick={handleLinkClick}
               />
             </div>
             {PROVENANCE_ENABLED && !readOnly ? (

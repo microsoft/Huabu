@@ -40,9 +40,8 @@ interface WorkspaceState {
   worldCanvasId: string | null;
   /** Whether World is exposed as the workspace landing page. */
   worldEnabled: boolean;
-  /** Derived ordinary Space titles used by World Portal rendering. */
+  /** Derived ordinary Space titles used by Space Preview rendering. */
   spaceTitles: Record<string, string | null>;
-  spaceTitlesLoaded: boolean;
   /** Registered free-mode Workspaces (most recently used first). */
   recentWorkspaces: WorkspaceDescriptor[];
 
@@ -100,7 +99,6 @@ function fromInfo(info: WorkspaceInfo): Partial<WorkspaceState> {
     workspaceName: info.name,
     worldCanvasId: info.worldCanvasId,
     spaceTitles: {},
-    spaceTitlesLoaded: false,
     isReady: info.configured,
   };
 }
@@ -150,7 +148,6 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       ? false
       : localStorage.getItem(WORLD_ENABLED_KEY) === 'true',
   spaceTitles: {},
-  spaceTitlesLoaded: false,
   recentWorkspaces: [],
   isReady: false,
   isSyncing: false,
@@ -162,14 +159,12 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     set({ worldEnabled });
   },
   refreshSpaceTitles: async () => {
-    set({ spaceTitlesLoaded: false });
     const { canvases } = await listCanvases();
     set({
       canvasCount: canvases.length,
       spaceTitles: Object.fromEntries(
         canvases.map((canvas) => [canvas.canvasId, canvas.title]),
       ),
-      spaceTitlesLoaded: true,
     });
   },
 

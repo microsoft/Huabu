@@ -6,7 +6,6 @@ import type {
   PreviewGroup,
   PreviewTab,
 } from '@/store/previewWorkspace/model';
-import type { ResolvedWorldReference } from '@huabu/shared';
 import type { Node } from '@xyflow/react';
 
 const RETAINABLE_NODE_TYPES = new Set([
@@ -17,17 +16,8 @@ const RETAINABLE_NODE_TYPES = new Set([
   'question',
 ]);
 
-export function canRetainPreviewNode(
-  node: Node,
-  reference: ResolvedWorldReference | undefined,
-): boolean {
-  if (RETAINABLE_NODE_TYPES.has(node.type ?? '')) return true;
-  return (
-    reference?.kind === 'nodeRef' &&
-    reference.status === 'ok' &&
-    reference.source?.type === 'question' &&
-    typeof reference.source.threadId === 'string'
-  );
+export function canRetainPreviewNode(node: Node): boolean {
+  return RETAINABLE_NODE_TYPES.has(node.type ?? '');
 }
 
 export function selectRetainedPreviewTabs(

@@ -9,5 +9,6 @@ export * from './utils/agent-icon.js';
 export * from './utils/spatial/index.js';
 export * from './utils/artifact-url.js';
 export * from './utils/acp-session-selectors.js';
+export { stripLegacyPortalTopology } from './utils/strip-legacy-portal-topology.js';
 export * from './llm/image-capabilities.js';
 export * from './llm/model-roles.js';

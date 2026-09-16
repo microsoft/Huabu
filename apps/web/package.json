@@ -32,6 +32,7 @@
     "@milkdown/ctx": "^7.21.1",
     "@milkdown/plugin-block": "^7.21.1",
     "@milkdown/plugin-cursor": "^7.21.1",
+    "@milkdown/preset-commonmark": "^7.21.2",
     "@milkdown/prose": "^7.21.1",
     "@milkdown/react": "^7.21.1",
     "@milkdown/utils": "^7.21.1",

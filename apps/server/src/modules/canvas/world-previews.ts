@@ -13,10 +13,10 @@ import { executeOnServer } from './canvas-executor.js';
 import { getStructuredStore, space } from '../storage/index.js';
 
 const PREVIEW_SIZE = getNodeDefaultSize('spacePreview');
-const PORTAL_WIDTH = PREVIEW_SIZE.width ?? 480;
-const PORTAL_HEIGHT = PREVIEW_SIZE.height ?? 320;
-const PORTAL_GAP = 80;
-const PORTAL_COLUMNS = 4;
+const PREVIEW_WIDTH = PREVIEW_SIZE.width ?? 480;
+const PREVIEW_HEIGHT = PREVIEW_SIZE.height ?? 320;
+const PREVIEW_GAP = 80;
+const PREVIEW_COLUMNS = 4;
 
 interface Rect {
   x: number;
@@ -34,10 +34,10 @@ interface StoredWorldNode {
   style?: { width?: number | string; height?: number | string };
 }
 
-export class WorldPortalIntegrityError extends Error {
+export class WorldPreviewIntegrityError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = 'WorldPortalIntegrityError';
+    this.name = 'WorldPreviewIntegrityError';
   }
 }
 
@@ -45,23 +45,23 @@ let reconciliationQueue: Promise<void> = Promise.resolve();
 
 function overlaps(a: Rect, b: Rect): boolean {
   return !(
-    a.x + a.width + PORTAL_GAP <= b.x ||
-    b.x + b.width + PORTAL_GAP <= a.x ||
-    a.y + a.height + PORTAL_GAP <= b.y ||
-    b.y + b.height + PORTAL_GAP <= a.y
+    a.x + a.width + PREVIEW_GAP <= b.x ||
+    b.x + b.width + PREVIEW_GAP <= a.x ||
+    a.y + a.height + PREVIEW_GAP <= b.y ||
+    b.y + b.height + PREVIEW_GAP <= a.y
   );
 }
 
-function findOpenPortalSlot(occupied: readonly Rect[]): {
+function findOpenPreviewSlot(occupied: readonly Rect[]): {
   x: number;
   y: number;
 } {
   for (let slot = 0; ; slot += 1) {
     const candidate = {
-      x: (slot % PORTAL_COLUMNS) * (PORTAL_WIDTH + PORTAL_GAP),
-      y: Math.floor(slot / PORTAL_COLUMNS) * (PORTAL_HEIGHT + PORTAL_GAP),
-      width: PORTAL_WIDTH,
-      height: PORTAL_HEIGHT,
+      x: (slot % PREVIEW_COLUMNS) * (PREVIEW_WIDTH + PREVIEW_GAP),
+      y: Math.floor(slot / PREVIEW_COLUMNS) * (PREVIEW_HEIGHT + PREVIEW_GAP),
+      width: PREVIEW_WIDTH,
+      height: PREVIEW_HEIGHT,
     };
     if (!occupied.some((rect) => overlaps(candidate, rect))) {
       return { x: candidate.x, y: candidate.y };
@@ -98,48 +98,45 @@ function absolutePosition(
 }
 
 /**
- * Ensure every live ordinary Space has exactly one canonical Portal in World.
- * Existing nodes and geometry are never changed; only missing Portals are added.
+ * Ensure every live ordinary Space has exactly one canonical preview in World.
+ * Preserve existing preview identity and geometry; remove only deleted targets.
  */
-interface WorldPortalReconciliationPlan {
+interface WorldPreviewReconciliationPlan {
   worldCanvasId: string;
   deleteNodeIds: CanvasNodeId[];
   inputs: CanvasNodeCreateInput[];
 }
 
-async function planWorldPortalReconciliation(): Promise<WorldPortalReconciliationPlan> {
+async function planWorldPreviewReconciliation(): Promise<WorldPreviewReconciliationPlan> {
   // One repository instance spans World resolution and membership, so a
   // Workspace switch between them is rejected by the handle rather than
-  // reconciling one Workspace's Portals against another's Space list.
+  // reconciling one Workspace's previews against another's Space list.
   const spaces = getStructuredStore().spaces();
   const worldCanvasId = await spaces.worldId();
   const world = await space(worldCanvasId).read();
   if (!world) {
-    throw new WorldPortalIntegrityError('World Canvas is not readable');
+    throw new WorldPreviewIntegrityError('World Canvas is not readable');
   }
 
   const nodes = world.state.nodes as StoredWorldNode[];
   const previewByTarget = new Map<string, StoredWorldNode>();
-  const legacyPortalByTarget = new Map<string, StoredWorldNode>();
 
   for (const node of nodes) {
-    if (node.type !== 'spacePreview' && node.type !== 'canvasRef') continue;
+    if (node.type !== 'spacePreview') continue;
     const targetCanvasId = (
       node.data as { targetCanvasId?: unknown } | undefined
     )?.targetCanvasId;
     if (typeof targetCanvasId !== 'string' || targetCanvasId.length === 0) {
-      throw new WorldPortalIntegrityError(
+      throw new WorldPreviewIntegrityError(
         `World Space entry ${node.id} has no valid targetCanvasId`,
       );
     }
-    const targetMap =
-      node.type === 'spacePreview' ? previewByTarget : legacyPortalByTarget;
-    if (targetMap.has(targetCanvasId)) {
-      throw new WorldPortalIntegrityError(
+    if (previewByTarget.has(targetCanvasId)) {
+      throw new WorldPreviewIntegrityError(
         `World contains duplicate ${node.type} nodes for Canvas ${targetCanvasId}`,
       );
     }
-    targetMap.set(targetCanvasId, node);
+    previewByTarget.set(targetCanvasId, node);
   }
 
   // `list()` promises no order, and slot allocation is positional, so the
@@ -163,20 +160,18 @@ async function planWorldPortalReconciliation(): Promise<WorldPortalReconciliatio
   const deleteNodeIds = nodes
     .filter(
       (node) =>
-        node.type === 'canvasRef' ||
-        (node.type === 'spacePreview' &&
-          typeof node.data?.targetCanvasId === 'string' &&
-          !liveCanvasIds.has(node.data.targetCanvasId)),
+        node.type === 'spacePreview' &&
+        typeof node.data?.targetCanvasId === 'string' &&
+        !liveCanvasIds.has(node.data.targetCanvasId),
     )
     .map((node) => node.id as CanvasNodeId);
 
   const inputs: CanvasNodeCreateInput[] = members.flatMap((member) => {
     if (previewByTarget.has(member.canvasId)) return [];
-    const legacy = legacyPortalByTarget.get(member.canvasId);
-    const position = legacy?.position ?? findOpenPortalSlot(occupied);
+    const position = findOpenPreviewSlot(occupied);
     const size = {
-      width: dimension(legacy?.style?.width, PORTAL_WIDTH),
-      height: dimension(legacy?.style?.height, PORTAL_HEIGHT),
+      width: PREVIEW_WIDTH,
+      height: PREVIEW_HEIGHT,
     };
     occupied.push({
       ...position,
@@ -184,7 +179,7 @@ async function planWorldPortalReconciliation(): Promise<WorldPortalReconciliatio
     });
     return [
       {
-        id: (legacy?.id ?? createId('node')) as CanvasNodeId,
+        id: createId('node') as CanvasNodeId,
         nodeType: 'spacePreview' as const,
         position,
         size,
@@ -199,9 +194,9 @@ async function planWorldPortalReconciliation(): Promise<WorldPortalReconciliatio
   return { worldCanvasId, deleteNodeIds, inputs };
 }
 
-async function reconcileWorldPortalsOnce(): Promise<void> {
+async function reconcileWorldPreviewsOnce(): Promise<void> {
   const { worldCanvasId, deleteNodeIds, inputs } =
-    await planWorldPortalReconciliation();
+    await planWorldPreviewReconciliation();
   if (inputs.length === 0 && deleteNodeIds.length === 0) return;
 
   const commands: CanvasCommand[] = [];
@@ -217,14 +212,24 @@ async function reconcileWorldPortalsOnce(): Promise<void> {
     originator: { source: 'system' },
   });
   if (result.results.some((commandResult) => !commandResult.applied)) {
-    throw new WorldPortalIntegrityError(
+    // Another writer may have satisfied the plan before execution (for
+    // example, deleting an already-stale preview). Accept only a freshly
+    // verified complete state, never a blanket suppression of rejected work.
+    const remaining = await planWorldPreviewReconciliation();
+    if (
+      remaining.worldCanvasId === worldCanvasId &&
+      remaining.inputs.length === 0 &&
+      remaining.deleteNodeIds.length === 0
+    )
+      return;
+    throw new WorldPreviewIntegrityError(
       'Failed to reconcile canonical Space previews',
     );
   }
 }
 
-export function reconcileWorldPortals(): Promise<void> {
-  const result = reconciliationQueue.then(reconcileWorldPortalsOnce);
+export function reconcileWorldPreviews(): Promise<void> {
+  const result = reconciliationQueue.then(reconcileWorldPreviewsOnce);
   reconciliationQueue = result.catch(() => {});
   return result;
 }

@@ -58,6 +58,7 @@ export interface RunWebPostEffectsInput {
    */
   forgetNodeContent: (nodeId: string) => void;
   getPendingCreation?: (nodeId: string) => Promise<void> | undefined;
+  waitForNodeContent?: () => Promise<void>;
   /** Remove Preview Workspace tabs whose node targets were deleted. */
   validatePreviewNodes: (liveNodeIds: ReadonlySet<string>) => void;
 }
@@ -115,6 +116,7 @@ export function runWebPostEffects(input: RunWebPostEffectsInput): void {
     canvasHistoryManager.trackDelete(
       canvasId,
       nodeId,
+      input.waitForNodeContent?.(),
       getPendingCreation?.(nodeId),
     );
     // Release the node's per-node save-queue state so a long session of

@@ -68,10 +68,12 @@ import {
 import { publishCanvasUpdate } from './canvas-sync.js';
 import { importForeignNodeSources } from './import-node-src.js';
 import {
-  assertWorldPortalMutationsAllowed,
-  assertWorldPortalResultAllowed,
+  assertWorldPreviewMutationsAllowed,
+  assertWorldPreviewResultAllowed,
+  assertWorldPreviewTopologyAllowed,
+  assertCurrentCanvasCommands,
   readLiveSpaceIds,
-} from './world-portal-policy.js';
+} from './world-preview-policy.js';
 import { getLogger } from '../../utils/logger.js';
 import { getAgentChangeReviewConfig } from '../agent/change-review-config.js';
 import { isLabelProtected } from '../preprocessing/label-policy.js';
@@ -87,7 +89,7 @@ import {
   type SpaceNodeMutation,
 } from '../storage/index.js';
 
-/** Reused for every Space that cannot hold a Portal, which is all but one. */
+/** Ordinary Spaces do not need World membership checks. */
 const EMPTY_CANVAS_IDS: ReadonlySet<string> = new Set<string>();
 
 const log = getLogger('canvas.executor');
@@ -693,6 +695,7 @@ export async function executeOnServer(
   input: ExecuteOnServerInput,
 ): Promise<ExecuteOnServerOutput> {
   const { canvasId, originator } = input;
+  assertCurrentCanvasCommands(input.commands);
   let commands = preAssignIds(input.commands);
 
   // Normalize agent-authored `data.src` values into artifact keys BEFORE the
@@ -728,6 +731,7 @@ export async function executeOnServerAlreadyLocked(
   input: ExecuteOnServerInput,
 ): Promise<ExecuteOnServerOutput> {
   const { canvasId } = input;
+  assertCurrentCanvasCommands(input.commands);
   const commands = [...input.commands];
 
   const handle = space(canvasId);
@@ -849,13 +853,13 @@ async function executePreparedOnServerAlreadyLocked(
         },
   );
 
-  // Only the World's rules consult it, and only the World can hold Portals,
+  // Only the World's rules consult it, and only World has managed previews,
   // so an ordinary Space never pays for the catalogue read.
   const liveCanvasIds = isWorldCanvasId(canvasId)
     ? await readLiveSpaceIds()
     : EMPTY_CANVAS_IDS;
 
-  assertWorldPortalMutationsAllowed(
+  assertWorldPreviewMutationsAllowed(
     canvasId,
     commands,
     prestateNodes,
@@ -989,12 +993,11 @@ async function executePreparedOnServerAlreadyLocked(
     (node) => finalNodes.find((candidate) => candidate.id === node.id) ?? node,
   );
   const finalEdges = sharedOut.edges;
-  assertWorldPortalResultAllowed(
-    canvasId,
-    prestateNodes,
-    finalNodes,
-    liveCanvasIds,
-  );
+  const assertResultAllowed =
+    originator.source === 'system'
+      ? assertWorldPreviewResultAllowed
+      : assertWorldPreviewTopologyAllowed;
+  assertResultAllowed(canvasId, prestateNodes, finalNodes, liveCanvasIds);
 
   const deltas = diffCanvasState(
     { nodes: prestateNodes, edges: prestateEdges },
@@ -1456,6 +1459,16 @@ export async function applyDeltasOnServerAlreadyLocked(input: {
       threadOwners.add(node.data.threadId);
     }
     const finalEdges = final.edges;
+
+    // Reverts bypass commands, not topology policy.
+    const liveCanvasIds = isWorldCanvasId(canvasId)
+      ? await readLiveSpaceIds()
+      : EMPTY_CANVAS_IDS;
+    const assertResultAllowed =
+      originator.source === 'system'
+        ? assertWorldPreviewResultAllowed
+        : assertWorldPreviewTopologyAllowed;
+    assertResultAllowed(canvasId, prestateNodes, finalNodes, liveCanvasIds);
 
     // Recompute the authoritative diff so the log row and broadcast
     // reflect exactly what landed (tolerates already-applied / missing

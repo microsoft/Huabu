@@ -42,7 +42,6 @@ describe('nodesToPlainText', () => {
     expect(
       nodesToPlainText([{ type: 'sketch', data: { label: 'Doodle' } }]),
     ).toBe('');
-    expect(nodesToPlainText([{ type: 'nodeRef', data: {} }])).toBe('');
   });
 
   it('joins a multi-node selection and drops the textless nodes', () => {

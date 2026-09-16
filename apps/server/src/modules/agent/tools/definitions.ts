@@ -58,7 +58,7 @@ export interface ToolDefinition extends Tool {
 const targetCanvasIdSchema = Type.String({
   pattern: '^canvas-.+$',
   description:
-    'Optional source Space address for a cross-Space read. Available only when the conversation belongs to World, and only for a targetCanvasId exposed by a canonical canvasRef in the World outline.',
+    'Optional source Space address for a cross-Space read. Available only when the conversation belongs to World, and only for a live ordinary Space addressed by exactly one canonical spacePreview in the World outline. Does not grant write access.',
 });
 const targetCanvasIdProperty = Type.Optional(targetCanvasIdSchema);
 
@@ -130,7 +130,7 @@ export const webSearchTool: ToolDefinition = {
 //
 // Every canvas tool defaults to the current request's canvas. A World-owned
 // conversation may explicitly address a source Space through targetCanvasId;
-// the executor validates it against the canonical Portal topology.
+// the executor validates it against the canonical preview topology.
 
 export const getCanvasOutlineParamsSchema = withWorldReadTarget(
   zodToToolSchema(getSpaceOutlineQueryParamsSchema),
@@ -139,7 +139,7 @@ export const getCanvasOutlineParamsSchema = withWorldReadTarget(
 export const getCanvasOutlineTool: ToolDefinition = {
   name: 'get_space_outline',
   label: 'Get Space Outline',
-  description: `One-shot map of the whole Space. Returns JSON: { version, bbox, nodes: [{ id, type, label, filename, parentFrame?: { id, label? }, position, absolutePosition, size: { width, height }, style?, preview?, targetCanvasId?, target? }], edges: [{ id?, source, target }], spatial: { clusters: [{ frameId?, frameLabel?, nodeIds (reading-order), arrangement }] } }. In World, canvasRef entries expose targetCanvasId and nodeRef entries expose target; pass a Portal's targetCanvasId to any read-only tool to inspect that source Space. The server rejects targets not represented by exactly one canonical Portal. Edges are topology-only here — for an edge's direction / line style / stroke / strokeWidth call \`inspect_edges\` instead. Call this once when you enter a Space to orient yourself; later, drill in with inspect_nodes / inspect_edges / read. Frame nodes are entries in \`nodes\` with type='frame' — group by \`parentFrame.id\` to recover the frame tree. Coordinates: \`position\` is parent-local (relative to \`parentFrame\`; absolute for root nodes); \`absolutePosition\` is the resolved world coordinate (read-only). Isolated nodes = all node ids minus the union of cluster nodeIds. \`preview\` and \`style\` are opt-in via the matching flags. For full content of any node, call read on the \`filename\` field ("nodes/*.md").`,
+  description: `One-shot map of the whole Space. Returns JSON: { version, bbox, nodes: [{ id, type, label, filename, parentFrame?: { id, label? }, position, absolutePosition, size: { width, height }, style?, preview?, targetCanvasId? }], edges: [{ id?, source, target }], spatial: { clusters: [{ frameId?, frameLabel?, nodeIds (reading-order), arrangement }] } }. Space previews expose targetCanvasId; in World, pass it to tools that accept targetCanvasId to inspect that source Space under the parameter's access rules. Edges are topology-only here — for an edge's direction / line style / stroke / strokeWidth call \`inspect_edges\` instead. Call this once when you enter a Space to orient yourself; later, drill in with inspect_nodes / inspect_edges / read. Frame nodes are entries in \`nodes\` with type='frame' — group by \`parentFrame.id\` to recover the frame tree. Coordinates: \`position\` is parent-local (relative to \`parentFrame\`; absolute for root nodes); \`absolutePosition\` is the resolved world coordinate (read-only). Isolated nodes = all node ids minus the union of cluster nodeIds. \`preview\` and \`style\` are opt-in via the matching flags. For full content of any node, call read on the \`filename\` field ("nodes/*.md").`,
   parameters: getCanvasOutlineParamsSchema,
 };
 
@@ -177,8 +177,6 @@ export const canvasCommandsTool: ToolDefinition = {
   description: `Execute Space commands. Commands run in the order given; each command succeeds or fails independently, and every command's outcome — including a failure \`reason\` — is reported back in \`results[]\`. Always check it: a command is not guaranteed to succeed (e.g. CONNECT_NODES / SET_NODE_PARENT fail with \`invalid-target\` when an endpoint doesn't exist).
 
 Batch **independent** commands together (fewer re-renders). **Dependency rule:** the server assigns every node/edge id, so a command can't reference a node created earlier in the **same call or turn** — its id isn't known yet. Create first, read the assigned ids from \`results[].nodes\`, then CONNECT / SET_NODE_PARENT them in a **follow-up call** (next turn). \`ALIGN_NODES\` / \`DISTRIBUTE_NODES\` touch only existing nodes, so they can ride along once you hold the ids.
-
-\`SET_PORTAL_NODE_PINS\` adds or removes symbolic references to source Space nodes inside their Project Portals. It never modifies or deletes the source nodes, and positions are assigned by the host.
 
 Supported command types: ${AGENT_CANVAS_COMMAND_TYPES.join(', ')}. Field-level requirements (which fields each command takes) are described by this tool's parameter schema.
 
@@ -272,7 +270,7 @@ export const readParamsSchema = Type.Object({
 export const readTool: ToolDefinition = {
   name: 'read',
   label: 'Read',
-  description: `Read the contents of a **single** file under the current Space folder — no globs (use find to enumerate, then read each match). In a World conversation, targetCanvasId may select a source Space exposed by a canonical Portal. Text files return JSON: { path, startLine, endLine, totalLines, truncated, nextOffset?, content, frontmatter?, rev? }, truncated to 2000 lines or 50 KB, whichever is hit first; when truncated:true, nextOffset is the 1-indexed line number of the next unread line — pass it as the next offset to keep paging.
+  description: `Read the contents of a **single** file under the current Space folder — no globs (use find to enumerate, then read each match). The optional targetCanvasId follows the parameter's World preview access rules. Text files return JSON: { path, startLine, endLine, totalLines, truncated, nextOffset?, content, frontmatter?, rev? }, truncated to 2000 lines or 50 KB, whichever is hit first; when truncated:true, nextOffset is the 1-indexed line number of the next unread line — pass it as the next offset to keep paging.
 
 Raster image artifacts (png / jpg / gif / webp, stored under \`.artifacts/\`) are returned **inline as vision content you can actually see** — so to view an inline \`![](<key>)\` image referenced in a note body, call \`read(".artifacts/<key>")\` (the file also shows up as \`.artifacts/<key>\` in find / grep / ls output). Other binary files (pdf / video / archives) are rejected with an error; use the node's \`src\` URL or the Space UI for those.
 
