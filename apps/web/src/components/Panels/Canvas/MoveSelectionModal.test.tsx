@@ -9,11 +9,19 @@ import useCanvasStore from '@/store/canvasStore';
 
 import { MoveSelectionModal } from './MoveSelectionModal';
 
-const { listCanvases, moveCanvasSelection, translate } = vi.hoisted(() => ({
-  listCanvases: vi.fn(),
-  moveCanvasSelection: vi.fn(),
-  translate: (key: string) => key,
-}));
+const { drainPendingSaves, listCanvases, moveCanvasSelection, translate } =
+  vi.hoisted(() => ({
+    drainPendingSaves: vi.fn().mockResolvedValue(undefined),
+    listCanvases: vi.fn(),
+    moveCanvasSelection: vi.fn(),
+    translate: (key: string) => key,
+  }));
+
+const moveResult = {
+  movedNodeCount: 1,
+  movedConversationCount: 0,
+  destination: { canvasId: 'destination' },
+};
 
 vi.mock('react-i18next', async (importOriginal) => ({
   ...(await importOriginal()),
@@ -28,6 +36,11 @@ vi.mock('@/api/canvas', async (importOriginal) => ({
   ...(await importOriginal()),
   listCanvases,
   moveCanvasSelection,
+}));
+
+vi.mock('@/store/canvasStore', async (importOriginal) => ({
+  ...(await importOriginal()),
+  drainPendingSaves,
 }));
 
 let root: Root | undefined;
@@ -75,8 +88,10 @@ describe('MoveSelectionModal', () => {
     expect(container.innerHTML).toBe('');
   });
 
-  it('allows entering a name for a new destination Space', async () => {
-    listCanvases.mockResolvedValue({ canvases: [] });
+  it('lists existing Spaces and the separated create action in one selector', async () => {
+    listCanvases.mockResolvedValue({
+      canvases: [{ canvasId: 'destination', title: 'Destination' }],
+    });
     useCanvasStore.setState({
       canvasId: 'source',
       nodes: [
@@ -95,22 +110,125 @@ describe('MoveSelectionModal', () => {
     root = createRoot(container);
 
     await act(async () => root?.render(<MoveSelectionModal />));
-    const kindSelect = document.querySelector<HTMLButtonElement>(
-      'button[aria-label="moveSelection.destinationKind"]',
+    const destinationSelectors = document.querySelectorAll<HTMLButtonElement>(
+      'button[aria-label="moveSelection.selectDestination"]',
     );
-    act(() => kindSelect?.click());
+    expect(destinationSelectors).toHaveLength(1);
+
+    act(() => destinationSelectors[0]?.click());
+    const optionLabels = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('[role="option"]'),
+    ).map((button) => button.textContent);
+    expect(optionLabels).toEqual([
+      'Destination',
+      'moveSelection.createNewDestination',
+    ]);
+    expect(document.body.textContent).toContain(
+      'moveSelection.newDestinationSection',
+    );
+  });
+
+  it('allows entering a name for a new destination Space when no existing target is available', async () => {
+    listCanvases.mockResolvedValue({ canvases: [] });
+    moveCanvasSelection.mockResolvedValue(moveResult);
+    useCanvasStore.setState({
+      canvasId: 'source',
+      version: 3,
+      nodes: [
+        {
+          id: 'node-selected',
+          type: 'note',
+          position: { x: 0, y: 0 },
+          data: { label: 'Selected' },
+          selected: true,
+        },
+      ],
+      moveSelectionDialogOpen: true,
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    await act(async () => root?.render(<MoveSelectionModal />));
+    const destinationSelect = document.querySelector<HTMLButtonElement>(
+      'button[aria-label="moveSelection.selectDestination"]',
+    );
+    act(() => destinationSelect?.click());
     const newDestination = Array.from(
       document.querySelectorAll<HTMLButtonElement>('[role="option"]'),
     ).find((button) =>
-      button.textContent?.includes('moveSelection.newDestination'),
+      button.textContent?.includes('moveSelection.createNewDestination'),
     );
     act(() => newDestination?.click());
 
-    expect(
-      document.querySelector<HTMLInputElement>(
-        'input[aria-label="moveSelection.newSpaceName"]',
-      ),
-    ).not.toBeNull();
+    const nameInput = document.querySelector<HTMLInputElement>(
+      'input[aria-label="moveSelection.newSpaceName"]',
+    );
+    expect(nameInput).not.toBeNull();
+    act(() => {
+      const setValue = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        'value',
+      )?.set;
+      setValue?.call(nameInput, 'New destination');
+      nameInput?.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const move = Array.from(document.querySelectorAll('button')).find(
+      (button) => button.textContent === 'moveSelection.confirm',
+    );
+    await act(async () => move?.click());
+
+    expect(moveCanvasSelection).toHaveBeenCalledWith('source', {
+      selectedNodeIds: ['node-selected'],
+      destination: { kind: 'new', title: 'New destination' },
+      createSourcePreview: true,
+      expectedSourceVersion: 3,
+    });
+  });
+
+  it('submits the selected existing destination', async () => {
+    listCanvases.mockResolvedValue({
+      canvases: [{ canvasId: 'destination', title: 'Destination' }],
+    });
+    moveCanvasSelection.mockResolvedValue(moveResult);
+    useCanvasStore.setState({
+      canvasId: 'source',
+      version: 3,
+      nodes: [
+        {
+          id: 'node-selected',
+          type: 'note',
+          position: { x: 0, y: 0 },
+          data: { label: 'Selected' },
+          selected: true,
+        },
+      ],
+      moveSelectionDialogOpen: true,
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    await act(async () => root?.render(<MoveSelectionModal />));
+    const destinationSelect = document.querySelector<HTMLButtonElement>(
+      'button[aria-label="moveSelection.selectDestination"]',
+    );
+    act(() => destinationSelect?.click());
+    const destination = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('[role="option"]'),
+    ).find((button) => button.textContent === 'Destination');
+    act(() => destination?.click());
+    const move = Array.from(document.querySelectorAll('button')).find(
+      (button) => button.textContent === 'moveSelection.confirm',
+    );
+    await act(async () => move?.click());
+
+    expect(moveCanvasSelection).toHaveBeenCalledWith('source', {
+      selectedNodeIds: ['node-selected'],
+      destination: { kind: 'existing', canvasId: 'destination' },
+      createSourcePreview: true,
+      expectedSourceVersion: 3,
+    });
   });
 
   it('defaults the source Preview checkbox on and allows disabling it', async () => {

@@ -13,6 +13,8 @@ import { TextInput } from '@/components/Common/TextInput';
 import { toast } from '@/components/Common/Toast';
 import useCanvasStore, { drainPendingSaves } from '@/store/canvasStore';
 
+const NEW_SPACE_DESTINATION = '__new_space__';
+
 export function MoveSelectionModal() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -22,9 +24,7 @@ export function MoveSelectionModal() {
   const nodes = useCanvasStore((state) => state.nodes);
   const [options, setOptions] = useState<SelectOption<string>[]>([]);
   const [destinationCanvasId, setDestinationCanvasId] = useState('');
-  const [destinationKind, setDestinationKind] = useState<'existing' | 'new'>(
-    'existing',
-  );
+  const [creatingNewSpace, setCreatingNewSpace] = useState(false);
   const [newSpaceTitle, setNewSpaceTitle] = useState('');
   const [createSourcePreview, setCreateSourcePreview] = useState(true);
   const [loading, setLoading] = useState(false);
@@ -34,6 +34,41 @@ export function MoveSelectionModal() {
   const selectedNodeIds = useMemo(
     () => nodes.filter((node) => node.selected).map((node) => node.id),
     [nodes],
+  );
+  const destinationOptions = useMemo<SelectOption<string>[]>(
+    () => [
+      ...(loading
+        ? [
+            {
+              value: '__loading__',
+              label: t('moveSelection.loadingTargets'),
+              disabled: true,
+            },
+          ]
+        : loadError
+          ? [
+              {
+                value: '__load_error__',
+                label: t('moveSelection.targetsUnavailable'),
+                disabled: true,
+              },
+            ]
+          : options.length === 0
+            ? [
+                {
+                  value: '__empty__',
+                  label: t('moveSelection.noTargets'),
+                  disabled: true,
+                },
+              ]
+            : options),
+      {
+        value: NEW_SPACE_DESTINATION,
+        label: t('moveSelection.createNewDestination'),
+        sectionLabel: t('moveSelection.newDestinationSection'),
+      },
+    ],
+    [loadError, loading, options, t],
   );
 
   useEffect(() => {
@@ -76,13 +111,22 @@ export function MoveSelectionModal() {
     if (!submitting) setOpen(false);
   };
 
+  const selectDestination = (value: string) => {
+    if (value === NEW_SPACE_DESTINATION) {
+      setCreatingNewSpace(true);
+      return;
+    }
+    setCreatingNewSpace(false);
+    setDestinationCanvasId(value);
+  };
+
   const submit = async () => {
     const title = newSpaceTitle.trim();
     if (
       !canvasId ||
       selectedNodeIds.length === 0 ||
-      (destinationKind === 'existing' && !destinationCanvasId) ||
-      (destinationKind === 'new' && !title)
+      (!creatingNewSpace && !destinationCanvasId) ||
+      (creatingNewSpace && !title)
     ) {
       return;
     }
@@ -92,10 +136,9 @@ export function MoveSelectionModal() {
       const expectedSourceVersion = useCanvasStore.getState().version;
       const result = await moveCanvasSelection(canvasId, {
         selectedNodeIds,
-        destination:
-          destinationKind === 'existing'
-            ? { kind: 'existing', canvasId: destinationCanvasId }
-            : { kind: 'new', title },
+        destination: creatingNewSpace
+          ? { kind: 'new', title }
+          : { kind: 'existing', canvasId: destinationCanvasId },
         createSourcePreview,
         expectedSourceVersion,
       });
@@ -141,10 +184,10 @@ export function MoveSelectionModal() {
           <Button
             variant="solid"
             disabled={
-              (destinationKind === 'existing' && (loading || loadError)) ||
               submitting ||
-              (destinationKind === 'existing' && !destinationCanvasId) ||
-              (destinationKind === 'new' && !newSpaceTitle.trim()) ||
+              (!creatingNewSpace &&
+                (loading || loadError || !destinationCanvasId)) ||
+              (creatingNewSpace && !newSpaceTitle.trim()) ||
               selectedNodeIds.length === 0
             }
             onClick={() => void submit()}
@@ -159,19 +202,14 @@ export function MoveSelectionModal() {
       <div className="mt-4">
         <Select
           className="w-full"
-          options={[
-            {
-              value: 'existing',
-              label: t('moveSelection.existingDestination'),
-            },
-            { value: 'new', label: t('moveSelection.newDestination') },
-          ]}
-          value={destinationKind}
-          onChange={setDestinationKind}
+          options={destinationOptions}
+          value={creatingNewSpace ? NEW_SPACE_DESTINATION : destinationCanvasId}
+          onChange={selectDestination}
           disabled={submitting}
-          ariaLabel={t('moveSelection.destinationKind')}
+          placeholder={t('moveSelection.selectDestination')}
+          ariaLabel={t('moveSelection.selectDestination')}
         />
-        {destinationKind === 'new' ? (
+        {creatingNewSpace ? (
           <TextInput
             className="mt-3 w-full"
             size="md"
@@ -182,25 +220,7 @@ export function MoveSelectionModal() {
             aria-label={t('moveSelection.newSpaceName')}
             autoFocus
           />
-        ) : loadError ? (
-          <p className="text-danger text-sm">
-            {t('moveSelection.targetsUnavailable')}
-          </p>
-        ) : options.length === 0 && !loading ? (
-          <p className="text-fg-muted text-sm">
-            {t('moveSelection.noTargets')}
-          </p>
-        ) : (
-          <Select
-            className="mt-3 w-full"
-            options={options}
-            value={destinationCanvasId}
-            onChange={setDestinationCanvasId}
-            disabled={loading || submitting}
-            placeholder={t('moveSelection.selectDestination')}
-            ariaLabel={t('moveSelection.selectDestination')}
-          />
-        )}
+        ) : null}
         <p className="text-fg-subtle mt-3 text-xs">
           {t('moveSelection.boundaryNotice')}
         </p>
