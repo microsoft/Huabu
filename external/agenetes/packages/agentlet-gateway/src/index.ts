@@ -13,6 +13,14 @@ export type {
 export type {
   AcpMessage,
   AgentletProfile,
+  DiscoverHarnessesParams,
+  DiscoverHarnessesResult,
+  HarnessDiscoveryCandidate,
+  HarnessDiscoveryObservation,
   LifecycleEvent,
+  MachineControlErrorData,
+  NativePathErrorCode,
   SessionProfile,
+  ValidateNativePathParams,
+  ValidateNativePathResult,
 } from '@agentlet/protocol';

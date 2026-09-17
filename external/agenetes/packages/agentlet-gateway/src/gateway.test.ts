@@ -95,13 +95,29 @@ async function connect(
   return client;
 }
 
-function agentletHello(agentletId: string): JsonRpcMessage {
+function agentletHello(
+  agentletId: string,
+  machineControl = false,
+): JsonRpcMessage {
   const params: AgentletHelloParams = {
     agentletId,
     agentletProfile: {
       bridge: { name: 'agentlet', version: PROTOCOL_VERSION },
       machine: { hostname: agentletId, platform: process.platform },
-      capabilities: { autoRestart: true, bufferLimit: 1000, maxAgents: 10 },
+      capabilities: {
+        autoRestart: true,
+        bufferLimit: 1000,
+        maxAgents: 10,
+        ...(machineControl
+          ? {
+              control: {
+                version: 1 as const,
+                harnessDiscovery: true as const,
+                nativePathValidation: true as const,
+              },
+            }
+          : {}),
+      },
     },
   };
   return {
@@ -298,6 +314,7 @@ describe('AgentletGateway', () => {
       controlRequestTimeout: 20,
       spawnRequestTimeout: 200,
     });
+
     const agentlet = await connect(url, {
       role: 'agentlet',
       queryId: 'machine-a',
@@ -329,6 +346,98 @@ describe('AgentletGateway', () => {
         sessionSpec: { command: 'mock-agent' },
       }),
     ).resolves.toEqual({ sessionId: 'slow-bootstrap', pid: 456 });
+  });
+
+  it('routes machine inspection to a selected capable agentlet', async () => {
+    const { gateway, url } = await startHarness();
+    const machineA = await connect(url, {
+      role: 'agentlet',
+      queryId: 'machine-a',
+      token: 'token-a',
+      hello: agentletHello('machine-a', true),
+    });
+    await connect(url, {
+      role: 'agentlet',
+      queryId: 'machine-b',
+      token: 'token-b',
+      hello: agentletHello('machine-b', true),
+    });
+    machineA.socket.on('message', (data) => {
+      const message = JSON.parse(data.toString()) as JsonRpcMessage;
+      if (!('method' in message) || !('id' in message)) return;
+      if (message.method === ServerMethods.DISCOVER_HARNESSES) {
+        machineA.socket.send(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: message.id,
+            result: {
+              harnesses: [
+                {
+                  harnessId: 'copilot',
+                  status: 'installed',
+                  executablePath: '/usr/bin/copilot',
+                },
+              ],
+            },
+          }),
+        );
+      } else if (message.method === ServerMethods.VALIDATE_NATIVE_PATH) {
+        machineA.socket.send(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: message.id,
+            result: { cwd: '/home/agent', source: 'default' },
+          }),
+        );
+      }
+    });
+
+    await expect(
+      gateway.discoverHarnesses('machine-a', {
+        harnesses: [{ harnessId: 'copilot', executable: 'copilot' }],
+      }),
+    ).resolves.toEqual({
+      harnesses: [
+        {
+          harnessId: 'copilot',
+          status: 'installed',
+          executablePath: '/usr/bin/copilot',
+        },
+      ],
+    });
+    await expect(gateway.validateNativePath('machine-a')).resolves.toEqual({
+      cwd: '/home/agent',
+      source: 'default',
+    });
+  });
+
+  it('rejects machine inspection explicitly for older agentlets', async () => {
+    const { gateway, url } = await startHarness();
+    await connect(url, {
+      role: 'agentlet',
+      queryId: 'machine-a',
+      token: 'token-a',
+      hello: agentletHello('machine-a'),
+    });
+
+    await expect(
+      gateway.discoverHarnesses('machine-a', { harnesses: [] }),
+    ).rejects.toMatchObject({
+      rpcCode: -32010,
+      data: {
+        code: 'unsupported_capability',
+        capability: 'harnessDiscovery',
+      },
+    });
+    await expect(gateway.validateNativePath('machine-a')).rejects.toMatchObject(
+      {
+        rpcCode: -32010,
+        data: {
+          code: 'unsupported_capability',
+          capability: 'nativePathValidation',
+        },
+      },
+    );
   });
 
   it('keys equal native session IDs independently per daemon', async () => {
