@@ -62,8 +62,12 @@ export function openChat(): string {
   return tabId;
 }
 
-/** Follow a Note link without consuming its temporary inspection tab. */
-export function openPreviewUrl(href: string, sourceNodeId?: string): string {
+/** Follow a document link without consuming its source inspection tab. */
+export function openPreviewUrl(
+  href: string,
+  sourceNodeId?: string,
+  sourceThreadId?: string,
+): string {
   const preview = usePreviewWorkspaceStore.getState();
   const canvasId = preview.canvasId;
   if (!canvasId) return '';
@@ -75,12 +79,20 @@ export function openPreviewUrl(href: string, sourceNodeId?: string): string {
         canvasId,
         nodeId: sourceNodeId,
       })
-    : null;
+    : sourceThreadId
+      ? findTabByTarget(preview.workspace, {
+          kind: 'chat',
+          canvasId,
+          threadId: sourceThreadId,
+        })
+      : null;
   const groupId = source
     ? groupOfTab(preview.workspace, source.id)?.id
     : undefined;
-  if (source && sourceNodeId) {
-    settleNodePreprocess(sourceNodeId);
+  if (source) {
+    if (source.target.kind === 'node') {
+      settleNodePreprocess(source.target.nodeId);
+    }
     preview.promoteTab(source.id);
   }
   usePanelStore.getState().requestOpenRightPanel();

@@ -85,7 +85,7 @@ describe('conversation naming through canonical ProviderManager routing', () => 
     await service.initialize('canvas-a', 'thread-a', 'Later prompt');
     expect(generate).toHaveResolvedWith(undefined);
     expect(complete).not.toHaveBeenCalled();
-    expect(service.get('canvas-a', 'thread-a')).toEqual({
+    expect(await service.get('canvas-a', 'thread-a')).toEqual({
       title: 'ACP fallback',
       source: 'acp',
     });
@@ -111,7 +111,7 @@ describe('conversation naming through canonical ProviderManager routing', () => 
     expect(JSON.stringify(complete.mock.calls[0][1])).not.toContain(
       'Another later prompt',
     );
-    expect(service.get('canvas-a', 'thread-a')).toEqual({
+    expect(await service.get('canvas-a', 'thread-a')).toEqual({
       title: 'Inherited global title',
       source: 'generated',
     });

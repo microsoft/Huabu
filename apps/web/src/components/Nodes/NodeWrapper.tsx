@@ -698,7 +698,8 @@ export const NodeWrapper = memo(
             // tracks `:hover`, which the overlay cannot observe.
             !selected && type !== 'sketch' && 'ring-edge-default hover:ring',
 
-            type !== 'sketch' && 'border-3 border-transparent',
+            type !== 'sketch' && 'border-transparent',
+            type !== 'sketch' && type !== 'image' && 'border-3',
             // Question nodes need visible overflow for status badges and progress bar
             type === 'question' && 'overflow-visible',
             className,
@@ -832,6 +833,15 @@ export const NodeWrapper = memo(
           >
             {children}
           </div>
+
+          {/* Paint image borders above the media without shrinking its aspect-ratio box. */}
+          {type === 'image' && (
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-0 z-1 rounded-[inherit] border-3 border-[inherit]"
+              data-node-image-border
+            />
+          )}
 
           <NodeConnectionHandles
             nodeId={id}

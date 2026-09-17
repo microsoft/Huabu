@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import clsx from 'clsx';
 import { Bookmark, ListIndentIncrease, PanelRightOpen } from 'lucide-react';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -20,7 +19,7 @@ import {
   setAcpSessionModel,
 } from '@/api/acp';
 import { Button } from '@/components/Common/Button';
-import { TextInput } from '@/components/Common/TextInput';
+import { InlineEditableTitle } from '@/components/Common/InlineEditableTitle';
 import { toast } from '@/components/Common/Toast';
 import { PermissionTray } from '@/components/Messages/AIMessage/PermissionCard';
 import { useAcpProfiles } from '@/hooks/useAcpProfiles';
@@ -223,7 +222,6 @@ export const ChatPanel = ({
   const [draftQuestionTitle, setDraftQuestionTitle] = useState(
     editableTitle ?? '',
   );
-  const questionTitleInputRef = useRef<HTMLInputElement>(null);
   const titleEditActive = useRef(false);
   const titleIdentity = `${titleKey}:${viewingQuestionNodeId ?? ''}`;
   const currentTitleIdentity = useRef(titleIdentity);
@@ -248,12 +246,6 @@ export const ChatPanel = ({
       }
     };
   }, [titleIdentity]);
-
-  useEffect(() => {
-    if (!isEditingQuestionTitle) return;
-    questionTitleInputRef.current?.focus();
-    questionTitleInputRef.current?.select();
-  }, [isEditingQuestionTitle]);
 
   const mode: AgentMode =
     activeConversationView && !isComposingQuestion
@@ -931,60 +923,33 @@ export const ChatPanel = ({
         title={panelTitle}
         tabs={
           <span className="flex max-w-full min-w-0 flex-1 items-center gap-1">
-            {canRenameQuestion && isEditingQuestionTitle ? (
-              <TextInput
-                ref={questionTitleInputRef}
-                value={draftQuestionTitle}
-                maxLength={120}
-                aria-label={renameTitleLabel}
-                placeholder={t('node.untitled')}
-                className="text-fg-default bg-bg-default border-edge-default w-64 max-w-full min-w-0 shrink basis-auto truncate rounded border px-1 py-0.5 text-sm font-semibold outline-none"
-                onChange={(event) => setDraftQuestionTitle(event.target.value)}
-                onBlur={commitQuestionTitle}
-                onKeyDown={(event) => {
-                  event.stopPropagation();
-                  if (event.key === 'Enter') {
-                    if (event.nativeEvent.isComposing) return;
-                    event.preventDefault();
-                    commitQuestionTitle();
-                  }
-                  if (event.key === 'Escape') {
-                    event.preventDefault();
-                    titleEditActive.current = false;
-                    setDraftQuestionTitle(editableTitle ?? '');
-                    setIsEditingQuestionTitle(false);
-                  }
-                }}
-              />
-            ) : canRenameQuestion ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                title={panelTitle}
-                aria-label={renameTitleLabel}
-                tooltipPlacement="bottom"
-                tooltipWrapperClassName="inline-flex max-w-full min-w-0 shrink basis-auto"
-                className={clsx(
-                  'hover:text-fg-default max-w-full min-w-0 shrink cursor-text justify-start rounded border border-transparent px-1 py-0.5 text-sm font-semibold',
-                )}
-                disabled={isSavingTitle || !isHistoryLoaded}
-                onClick={() => {
-                  titleEditActive.current = true;
-                  setIsEditingQuestionTitle(true);
-                }}
-              >
-                <span className="max-w-full min-w-0 truncate">
-                  {panelTitle}
-                </span>
-              </Button>
-            ) : (
-              <span
-                className="max-w-full min-w-0 shrink truncate px-1 py-0.5"
-                title={panelTitle}
-              >
-                {panelTitle}
-              </span>
-            )}
+            <InlineEditableTitle
+              key={titleIdentity}
+              title={panelTitle}
+              ariaLabel={renameTitleLabel}
+              placeholder={t('node.untitled')}
+              editor={
+                canRenameQuestion
+                  ? {
+                      active: isEditingQuestionTitle,
+                      draft: draftQuestionTitle,
+                      maxLength: 120,
+                      disabled: isSavingTitle || !isHistoryLoaded,
+                      onChange: setDraftQuestionTitle,
+                      onCommit: commitQuestionTitle,
+                      onStart: () => {
+                        titleEditActive.current = true;
+                        setIsEditingQuestionTitle(true);
+                      },
+                      onCancel: () => {
+                        titleEditActive.current = false;
+                        setDraftQuestionTitle(editableTitle ?? '');
+                        setIsEditingQuestionTitle(false);
+                      },
+                    }
+                  : undefined
+              }
+            />
             {acpConnectionStatus && agentBinding.kind === 'external' && (
               <AcpConnectionBadge
                 status={acpConnectionStatus}

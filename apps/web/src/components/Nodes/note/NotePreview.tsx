@@ -39,10 +39,8 @@ import { Button } from '@/components/Common/Button';
 import { MilkdownEditor } from '@/components/Milkdown';
 import { MilkdownFloatingToolbar } from '@/components/Milkdown/MilkdownFloatingToolbar';
 import { usePreviewHeaderSlot } from '@/components/Nodes/PreviewHeaderSlot';
-import { isElectron } from '@/hooks/useElectron';
 import { usePreviewScrollMemory } from '@/hooks/usePreviewScrollMemory';
 import useCanvasStore from '@/store/canvasStore';
-import { openPreviewUrl } from '@/store/previewWorkspace/actions';
 import {
   coerceProvenance,
   dismissDeletedBlock,
@@ -56,6 +54,7 @@ import {
   setDragPayload,
 } from '@/utils/io/dragDrop';
 import { dragPayloadToMarkdown } from '@/utils/io/payloadToMarkdown';
+import { openDocumentLink } from '@/utils/openDocumentLink';
 
 import { ProvenanceOverlay } from './ProvenanceOverlay';
 
@@ -112,8 +111,7 @@ export const NotePreview = ({
   const { t } = useTranslation();
   const handleLinkClick = useCallback(
     (href: string) => {
-      if (isElectron()) openPreviewUrl(href, id);
-      else window.open(href, '_blank', 'noopener,noreferrer');
+      openDocumentLink(href, { nodeId: id });
     },
     [id],
   );
@@ -627,6 +625,7 @@ export const NotePreview = ({
                 decorations={decorations}
                 className="milkdown-note-preview"
                 onLinkClick={handleLinkClick}
+                linkActivation="plain"
               />
             </div>
             {PROVENANCE_ENABLED && !readOnly ? (

@@ -27,6 +27,7 @@ export const canvasEditableNodeDataSchema = z
     invocationToken: z.never().optional(),
     viewed: z.never().optional(),
     threadId: z.never().optional(),
+    conversationTitleSource: z.never().optional(),
     agentBinding: agentBindingSchema.optional(),
     agentLaunchOverrides: agentNodeLaunchOverridesSchema.nullable().optional(),
   })

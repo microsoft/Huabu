@@ -3,6 +3,8 @@
 
 import { useSyncExternalStore } from 'react';
 
+import { isMac } from '@/utils/platform';
+
 /**
  * Tracks whether the multi-selection modifier (Ctrl / Cmd) is currently
  * held down.
@@ -20,15 +22,17 @@ import { useSyncExternalStore } from 'react';
  */
 
 let held = false;
+let followHeld = false;
 const listeners = new Set<() => void>();
 
 function emit(): void {
   for (const listener of listeners) listener();
 }
 
-function setHeld(next: boolean): void {
-  if (held === next) return;
+function setHeld(next: boolean, follow: boolean): void {
+  if (held === next && followHeld === follow) return;
   held = next;
+  followHeld = follow;
   emit();
 }
 
@@ -36,21 +40,25 @@ function setHeld(next: boolean): void {
 // individual key up/down: a `keyup` for Control already reports
 // `ctrlKey === false`, so this stays correct even if the down event was
 // missed (e.g. the key was pressed while another element had focus).
-function syncFromEvent(event: KeyboardEvent): void {
-  setHeld(event.metaKey || event.ctrlKey);
+function syncFromEvent(event: KeyboardEvent | PointerEvent): void {
+  setHeld(
+    event.metaKey || event.ctrlKey,
+    isMac ? event.metaKey : event.ctrlKey,
+  );
 }
 
 // Reset when focus leaves the window (Cmd+Tab, Alt+Tab): the matching
 // `keyup` is delivered to whichever window gained focus, never to us, so
 // the key would otherwise appear stuck-down forever.
 function reset(): void {
-  setHeld(false);
+  setHeld(false, false);
 }
 
 function subscribe(listener: () => void): () => void {
   if (listeners.size === 0) {
     window.addEventListener('keydown', syncFromEvent, true);
     window.addEventListener('keyup', syncFromEvent, true);
+    window.addEventListener('pointermove', syncFromEvent, true);
     window.addEventListener('blur', reset);
   }
   listeners.add(listener);
@@ -59,7 +67,10 @@ function subscribe(listener: () => void): () => void {
     if (listeners.size === 0) {
       window.removeEventListener('keydown', syncFromEvent, true);
       window.removeEventListener('keyup', syncFromEvent, true);
+      window.removeEventListener('pointermove', syncFromEvent, true);
       window.removeEventListener('blur', reset);
+      held = false;
+      followHeld = false;
     }
   };
 }
@@ -71,4 +82,17 @@ function getSnapshot(): boolean {
 /** Reactive "is the multi-select modifier (Ctrl / Cmd) held right now?" */
 export function useMultiSelectModifierHeld(): boolean {
   return useSyncExternalStore(subscribe, getSnapshot, () => false);
+}
+
+const noSubscription = () => () => {};
+const notHeld = () => false;
+const getFollowSnapshot = () => followHeld;
+
+/** Shares the existing global listeners, but matches the link platform modifier. */
+export function useLinkFollowModifierHeld(enabled = true): boolean {
+  return useSyncExternalStore(
+    enabled ? subscribe : noSubscription,
+    enabled ? getFollowSnapshot : notHeld,
+    notHeld,
+  );
 }

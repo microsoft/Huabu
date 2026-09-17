@@ -294,8 +294,21 @@
   border-color: var(--edge-default);
 }
 
-/* Only the expanded Note opts into plain-click workspace navigation. */
-.milkdown-note-preview .ProseMirror a[href] {
+/* Shared navigation affordance for Chat and expanded Notes. */
+.milkdown .ProseMirror[data-link-activation='plain'] a[href] {
+  cursor: pointer;
+}
+
+/* Modifier state belongs to the React host, outside ProseMirror's observed DOM. */
+[data-link-follow-held='false']
+  .ProseMirror[data-link-activation='modifier']
+  a[href] {
+  cursor: default;
+}
+
+[data-link-follow-held='true']
+  .ProseMirror[data-link-activation='modifier']
+  a[href] {
   cursor: pointer;
 }
 

@@ -326,7 +326,10 @@ describe('ExternalAgentRealizationService', () => {
     });
 
     await harness.service.ensureSession(realized, logger);
-    expect(harness.subscribeTitles).not.toHaveBeenCalled();
+    expect(harness.subscribeTitles).toHaveBeenCalledWith(
+      'canvas-1',
+      'thread-1',
+    );
     await realized.handle.control({
       type: 'set_mode',
       data: { modeId: 'plan' },
@@ -370,7 +373,10 @@ describe('ExternalAgentRealizationService', () => {
       'Huabu bootstrap',
       '<space_prompt>Space rules</space_prompt>',
     ]);
-    expect(harness.subscribeTitles).not.toHaveBeenCalled();
+    expect(harness.subscribeTitles).toHaveBeenCalledWith(
+      'canvas-1',
+      'thread-1',
+    );
   });
 
   it('does not capture a Space Prompt for a node-less external thread', async () => {
@@ -487,7 +493,10 @@ describe('ExternalAgentRealizationService', () => {
     expect(realized.spec).toBe(persisted);
     expect(harness.buildSpec).not.toHaveBeenCalled();
     expect(harness.collectSpacePrompt).not.toHaveBeenCalled();
-    expect(harness.subscribeTitles).not.toHaveBeenCalled();
+    expect(harness.subscribeTitles).toHaveBeenCalledWith(
+      'canvas-1',
+      'thread-1',
+    );
   });
 
   it.each([false, true])(
@@ -517,9 +526,7 @@ describe('ExternalAgentRealizationService', () => {
       });
 
       await harness.service.ensureSession(realized, logger);
-      expect(harness.subscribeTitles).toHaveBeenCalledTimes(
-        questionOwned ? 0 : 1,
-      );
+      expect(harness.subscribeTitles).toHaveBeenCalledTimes(1);
       expect(harness.buildSpec).not.toHaveBeenCalled();
       expect(harness.collectSpacePrompt).not.toHaveBeenCalled();
     },

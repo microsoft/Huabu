@@ -37,9 +37,8 @@ import {
   validateConversationView,
 } from '@/store/conversationOwner';
 import {
-  receiveAcpConversationTitle,
+  invalidateConversationTitle,
   refreshConversationTitleAfterStream,
-  seedConversationTitle,
 } from '@/store/conversationTitleStore';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
@@ -604,12 +603,12 @@ export function handleStreamEvent(
     // the owning ChatPanel's mode/model/config selector dropdowns. If
     // that thread has no mounted panel (e.g. headless reconnect), drop.
     acpSessionMetaSinks.get(ctx.threadId)?.(event);
-    if (event.type === 'session_info_update' && ctx.titleCanvasId) {
-      receiveAcpConversationTitle(
-        ctx.titleCanvasId,
-        ctx.threadId,
-        event.data.title,
-      );
+    if (
+      event.type === 'session_info_update' &&
+      event.data.title !== undefined &&
+      ctx.titleCanvasId
+    ) {
+      invalidateConversationTitle(ctx.titleCanvasId, ctx.threadId);
     }
   }
 }
@@ -735,7 +734,6 @@ export function useAgentStream(
       }
 
       setThreadLastAction(threadId, agentMode);
-      if (!conversationView) seedConversationTitle(canvasId, threadId, prompt);
       let titleCreationConfirmed = false;
 
       // Merge pending attachments + selection attachment into a single array.

@@ -189,6 +189,62 @@ afterEach(() => {
 });
 
 describe('ExpandedNodePanel edge navigation', () => {
+  it('keeps a compact gap between navigation and the title without reserving an empty button slot', () => {
+    renderPanel(
+      [canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')],
+      [edge('ab', 'a', 'b')],
+      true,
+    );
+    const header = container?.querySelector(
+      '[data-testid="expanded-node-header"]',
+    );
+    const titleGroup = header?.firstElementChild;
+    expect(header?.classList.contains('px-2.5')).toBe(true);
+    expect(titleGroup?.classList.contains('gap-1.5')).toBe(true);
+    expect(titleGroup?.firstElementChild?.classList.contains('w-3.5')).toBe(
+      true,
+    );
+    const trigger = titleGroup?.querySelector('[aria-haspopup="menu"]');
+    expect(trigger?.classList.contains('min-w-6')).toBe(true);
+    expect(trigger?.classList.contains('[&_svg]:w-3.5')).toBe(true);
+    expect(titleGroup?.children.length).toBe(2);
+    expect(titleGroup?.querySelector('[aria-haspopup="menu"]')).not.toBeNull();
+    act(() => useCanvasStore.setState({ edges: [] }));
+    expect(titleGroup?.children.length).toBe(1);
+    expect(titleGroup?.querySelector('[aria-haspopup="menu"]')).toBeNull();
+    expect(titleGroup?.textContent).toBe('Alpha');
+  });
+
+  it('uses the shared title control in embedded and standalone headers', () => {
+    renderPanel([canvasNode('a', 'Alpha')], [], true);
+    const selector = '[data-testid="expanded-node-header"] button[aria-label]';
+    const host = container;
+    if (!host) throw new Error('Missing panel');
+    const embeddedTitle = host.querySelector<HTMLButtonElement>(selector);
+    if (!embeddedTitle) throw new Error('Missing embedded title');
+    const embeddedClasses = embeddedTitle.className;
+    expect(embeddedClasses).toContain('text-sm');
+    expect(embeddedClasses).toContain('font-normal');
+    expect(embeddedClasses).toContain('-ml-1.25');
+    act(() => root?.render(<ExpandedNodePanel embedded={false} />));
+    const standaloneTitle = host.querySelector<HTMLButtonElement>(selector);
+    if (!standaloneTitle) throw new Error('Missing standalone title');
+    expect(standaloneTitle.className).toBe(embeddedClasses);
+    act(() => standaloneTitle.click());
+    const input = host.querySelector('input');
+    if (!input) throw new Error('Missing title input');
+    expect(input.className).toContain('focus:ring-info-light');
+    expect(input.className).toContain('-ml-1.25');
+    expect(document.activeElement).toBe(input);
+    act(() =>
+      input.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+      ),
+    );
+    expect(host.querySelector('input')).toBeNull();
+    expect(expandedNodeId()).toBe('a');
+  });
+
   it('does not clear a selection attachment owned by another node', () => {
     renderPanel([canvasNode('a', 'Alpha')], [], true);
     useChatStore.getState().setSelectionAttachment({
@@ -241,14 +297,15 @@ describe('ExpandedNodePanel edge navigation', () => {
       '[data-testid="expanded-node-header"]',
     );
     expect(header?.classList.contains('h-9')).toBe(true);
-    expect(header?.classList.contains('px-2')).toBe(true);
+    expect(header?.classList.contains('px-2.5')).toBe(true);
     expect(header?.classList.contains('border-b')).toBe(false);
     const renameTitle = header?.querySelector<HTMLElement>(
       '[aria-label="Rename node"]',
     );
     expect(renameTitle?.textContent).toBe('Alpha');
-    expect(renameTitle?.classList.contains('text-fg-subtle')).toBe(true);
-    expect(renameTitle?.classList.contains('text-xs')).toBe(true);
+    expect(renameTitle?.classList.contains('text-fg-muted')).toBe(true);
+    expect(renameTitle?.classList.contains('text-sm')).toBe(true);
+    expect(renameTitle?.classList.contains('font-normal')).toBe(true);
     act(() => renameTitle?.click());
     expect(header?.querySelector<HTMLInputElement>('input')?.value).toBe(
       'Alpha',
@@ -280,8 +337,15 @@ describe('ExpandedNodePanel edge navigation', () => {
     expect(titleRegion?.classList.contains('flex-1')).toBe(true);
     expect(tooltipWrapper?.classList.contains('min-w-0')).toBe(true);
     expect(tooltipWrapper?.classList.contains('max-w-full')).toBe(true);
+    expect(tooltipWrapper?.classList.contains('flex-1')).toBe(true);
+    expect(renameTitle?.classList.contains('w-full')).toBe(true);
     expect(renameTitle?.classList.contains('max-w-full')).toBe(true);
     expect(renameTitle?.classList.contains('max-w-40')).toBe(false);
+    act(() => renameTitle?.click());
+    const input = container?.querySelector('input');
+    expect(input?.classList.contains('w-full')).toBe(true);
+    expect(input?.classList.contains('w-64')).toBe(false);
+    expect(input?.classList.contains('-ml-1.25')).toBe(true);
   });
 
   it('keeps the full header in the legacy layout', () => {
@@ -291,7 +355,7 @@ describe('ExpandedNodePanel edge navigation', () => {
       '[data-testid="expanded-node-header"]',
     );
     expect(header?.classList.contains('h-12')).toBe(true);
-    expect(header?.classList.contains('px-3')).toBe(true);
+    expect(header?.classList.contains('px-2.5')).toBe(true);
     expect(header?.classList.contains('border-b')).toBe(true);
     expect(
       header?.querySelector<HTMLButtonElement>('[aria-label="Close"]'),

@@ -41,10 +41,11 @@ export function project(
   // the deduped form once the next content-save round-trips. For nodes
   // that skip Persist (image, frame, …) fall back to the raw extracted /
   // enriched label.
-  if (!isLabelProtected(request.snapshot.labelSource, request.snapshot.title)) {
-    // `ctx.normalized.label` is the last-resort local fallback (e.g. a
-    // `question`'s first line when the LLM enrich stage produced nothing —
-    // offline / provider unreachable), so the node is never left nameless.
+  if (
+    request.nodeType !== 'question' &&
+    !isLabelProtected(request.snapshot.labelSource, request.snapshot.title)
+  ) {
+    // Questions commit names through ConversationTitleService, never this patch.
     const rawAutoLabel =
       ctx.extracted?.title ??
       ctx.enriched?.suggestedLabel ??

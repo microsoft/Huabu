@@ -12,6 +12,9 @@ import type { AccentToken } from '@huabu/shared';
 
 export type MilkdownToolbarMode = 'none' | 'huabu';
 
+/** Navigation policy is independent of editability and the host destination. */
+export type MilkdownLinkActivation = 'plain' | 'modifier';
+
 export type MilkdownInlineMark = 'bold' | 'italic' | 'strike' | 'inlineCode';
 
 export type MilkdownBlockType =

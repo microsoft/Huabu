@@ -30,7 +30,6 @@ import { conversationViewForNode } from '@/store/conversationOwner';
 import {
   conversationTitleKey,
   getConversationTitle,
-  receiveAcpConversationTitle,
   refreshConversationTitles,
   useConversationTitleStore,
 } from '@/store/conversationTitleStore';
@@ -137,6 +136,16 @@ vi.mock('@/api/agent', () => ({
 
 const query = vi.mocked(queryConversationTitles);
 const save = vi.mocked(setConversationTitle);
+const serverTitles = new Map<string, ConversationTitle>();
+const finishStreams = new Set<() => void>();
+
+async function loadTitle(
+  title: string,
+  source: ConversationTitle['source'] = 'acp',
+) {
+  serverTitles.set(conversationTitleKey('canvas', 'thread'), { title, source });
+  await refreshConversationTitles('canvas', ['thread']);
+}
 const systemLikeTitle =
   'You are a helpful assistant collaborating with a user inside **Huabu**, an infinite visual Space. The user works on an i';
 let root: Root;
@@ -229,6 +238,7 @@ async function enter(input: HTMLInputElement) {
 
 beforeEach(async () => {
   vi.resetAllMocks();
+  serverTitles.clear();
   await i18n.changeLanguage('en');
   useConversationTitleStore.setState({
     entries: {},
@@ -256,20 +266,31 @@ beforeEach(async () => {
     flushCanvasEvents: async () => {},
     getAgentChatContext: () => ({ selectedNodes: [] }),
   });
-  query.mockImplementation(async ({ threadIds }) => ({
+  query.mockImplementation(async ({ canvasId, threadIds }) => ({
     titles: Object.fromEntries(
-      threadIds.map((id) => [id, { title: null, source: null }]),
+      threadIds.map((id) => [
+        id,
+        serverTitles.get(conversationTitleKey(canvasId, id)) ?? {
+          title: null,
+          source: null,
+        },
+      ]),
     ),
   }));
-  save.mockImplementation(async (_canvas, _thread, { title }) => ({
-    title,
-    source: 'user',
-  }));
+  save.mockImplementation(async (canvasId, threadId, { title }) => {
+    const value: ConversationTitle = { title, source: 'user' };
+    serverTitles.set(conversationTitleKey(canvasId, threadId), value);
+    return value;
+  });
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
 });
 afterEach(async () => {
+  await act(async () => {
+    for (const finish of finishStreams) finish();
+    finishStreams.clear();
+  });
   await act(async () => root.unmount());
   container.remove();
   vi.useRealTimers();
@@ -300,32 +321,26 @@ describe('rendered conversation titles', () => {
     expect(header().textContent).toBe('Actual question');
     expect(title()).toBe('Actual question');
     expect(overlay()?.textContent).toBe('Actual question');
-    await act(async () =>
-      receiveAcpConversationTitle('canvas', 'thread', systemLikeTitle),
-    );
-    expect(header().textContent).toBe('Actual question');
-    expect(title()).toBe('Actual question');
-    expect(overlay()?.textContent).toBe('Actual question');
     await enter(await edit(systemLikeTitle));
     expect(header().textContent).toBe(systemLikeTitle);
     expect(title()).toBe(systemLikeTitle);
     expect(overlay()?.textContent).toBe(systemLikeTitle);
   });
 
-  it('rejects overlong cached and live ACP in every title surface', async () => {
-    useConversationTitleStore.setState({
-      entries: {
-        [conversationTitleKey('canvas', 'thread')]: {
-          value: { title: 'x'.repeat(121), source: 'acp' },
-          revision: 0,
-          durable: true,
-        },
-      },
-    });
+  it('projects lower-ranked backend names and null into every title surface', async () => {
+    await loadTitle('Generated', 'generated');
     await renderPanel();
-    await act(async () =>
-      receiveAcpConversationTitle('canvas', 'thread', 'y'.repeat(121)),
-    );
+    await act(async () => loadTitle('Backend fallback', 'fallback'));
+    expect(header().textContent).toBe('Backend fallback');
+    expect(title()).toBe('Backend fallback');
+    expect(
+      container.querySelector('[data-testid="preview-tab-drag-overlay"]')
+        ?.textContent,
+    ).toBe('Backend fallback');
+    query.mockResolvedValueOnce({
+      titles: { thread: { title: null, source: null } },
+    });
+    await act(async () => refreshConversationTitles('canvas', ['thread']));
     expect(header().textContent).toBe('New conversation');
     expect(title()).toBe('New conversation');
     expect(
@@ -343,11 +358,7 @@ describe('rendered conversation titles', () => {
       profileId: 'fixture',
       alias: 'Fixture',
     });
-    receiveAcpConversationTitle(
-      'canvas',
-      'thread',
-      'Long valid topic '.repeat(7).trim(),
-    );
+    await loadTitle('Long valid topic '.repeat(7).trim());
     await renderPanel();
     const button = header();
     const wrapper = button.parentElement;
@@ -419,9 +430,7 @@ describe('rendered conversation titles', () => {
     await renderPanel();
     expect(header().textContent).toBe('New conversation');
     expect(title()).toBe('New conversation');
-    await act(async () =>
-      receiveAcpConversationTitle('canvas', 'thread', 'ACP topic'),
-    );
+    await act(async () => loadTitle('ACP topic'));
     expect(header().textContent).toBe('ACP topic');
     expect(title()).toBe('ACP topic');
     const input = await edit('Manual topic');
@@ -429,9 +438,7 @@ describe('rendered conversation titles', () => {
     expect(save).toHaveBeenCalledTimes(1);
     expect(header().textContent).toBe('Manual topic');
     expect(title()).toBe('Manual topic');
-    await act(async () =>
-      receiveAcpConversationTitle('canvas', 'thread', 'Overwritten?'),
-    );
+    await act(async () => refreshConversationTitles('canvas', ['thread']));
     expect(title()).toBe('Manual topic');
   });
 
@@ -458,7 +465,7 @@ describe('rendered conversation titles', () => {
     ).toBe('Draft name');
   });
 
-  it('seeds immediately on submit, refreshes first event and finish, and flushes a pre-send rename', async () => {
+  it('does not derive titles from submitted messages or raw ACP events and flushes a pre-send rename', async () => {
     let event!: (event: AgentStreamEvent) => void;
     let complete!: () => void;
     let release!: () => void;
@@ -468,6 +475,10 @@ describe('rendered conversation titles', () => {
         complete = callbacks.onComplete!;
         await new Promise<void>((resolve) => {
           release = resolve;
+          finishStreams.add(() => {
+            complete();
+            resolve();
+          });
         });
       },
     );
@@ -479,8 +490,8 @@ describe('rendered conversation titles', () => {
           new Event('submit', { bubbles: true, cancelable: true }),
         ),
     );
-    expect(title()).toBe('First prompt');
-    expect(header().textContent).toBe('First prompt');
+    expect(title()).toBe('New conversation');
+    expect(header().textContent).toBe('New conversation');
     expect(query).not.toHaveBeenCalled();
     await act(async () =>
       event({ type: 'text_delta', data: { content: 'Answer' } }),
@@ -489,11 +500,13 @@ describe('rendered conversation titles', () => {
     await act(async () =>
       event({ type: 'session_info_update', data: { title: systemLikeTitle } }),
     );
-    expect(title()).toBe(systemLikeTitle);
-    query.mockResolvedValueOnce({
-      titles: { thread: { title: 'Generated topic', source: 'generated' } },
+    expect(title()).toBe('New conversation');
+    expect(header().textContent).toBe('New conversation');
+    expect(query).toHaveBeenCalledTimes(2);
+    serverTitles.set(conversationTitleKey('canvas', 'thread'), {
+      title: 'Generated topic',
+      source: 'generated',
     });
-    await act(async () => refreshConversationTitles('canvas', ['thread']));
     await act(async () =>
       event({ type: 'session_info_update', data: { title: 'Late ACP title' } }),
     );
@@ -503,7 +516,7 @@ describe('rendered conversation titles', () => {
       complete();
       release();
     });
-    expect(query).toHaveBeenCalledTimes(3);
+    expect(query).toHaveBeenCalledTimes(4);
 
     // A separate brand-new thread queues its title without a durable endpoint.
     useChatStore.getState().setHistoryLoaded('draft-thread', true);
@@ -547,6 +560,10 @@ describe('rendered conversation titles', () => {
         complete = callbacks.onComplete;
         await new Promise<void>((resolve) => {
           release = resolve;
+          finishStreams.add(() => {
+            complete();
+            resolve();
+          });
         });
       },
     );
@@ -585,9 +602,7 @@ describe('rendered conversation titles', () => {
   });
 
   it('rolls back failed saves in both views and exposes Retry', async () => {
-    await act(async () =>
-      receiveAcpConversationTitle('canvas', 'thread', 'Original'),
-    );
+    await act(async () => loadTitle('Original'));
     useChatStore
       .getState()
       .addMessage('thread', { id: 'u', role: 'user', content: 'Prompt' });
@@ -617,7 +632,7 @@ describe('rendered conversation titles', () => {
           resolve = done;
         }),
     );
-    receiveAcpConversationTitle('canvas', 'thread', 'Original');
+    await loadTitle('Original');
     useChatStore
       .getState()
       .addMessage('thread', { id: 'u', role: 'user', content: 'Prompt' });
@@ -661,7 +676,7 @@ describe('rendered conversation titles', () => {
       return true;
     });
     useCanvasStore.setState({ nodes: [node], tryRename });
-    receiveAcpConversationTitle('canvas', 'thread', 'Irrelevant cached title');
+    await loadTitle('Irrelevant cached title');
     await renderPanel(
       {
         ...baseSession,

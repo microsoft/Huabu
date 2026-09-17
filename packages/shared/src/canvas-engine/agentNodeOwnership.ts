@@ -9,6 +9,7 @@ export const AGENT_NODE_OWNED_DATA_KEYS = [
   'invocationToken',
   'viewed',
   'threadId',
+  'conversationTitleSource',
 ] as const;
 
 export const AGENT_NODE_PREPARATION_KEYS = [

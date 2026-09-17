@@ -37,7 +37,7 @@ import {
 } from '../../../store/previewWorkspace/store.ts';
 import { Button } from '../../Common/Button.tsx';
 import { DropdownMenu, DropdownMenuItem } from '../../Common/DropdownMenu.tsx';
-import { Input } from '../../Common/Input.tsx';
+import { InlineEditableTitle } from '../../Common/InlineEditableTitle';
 import { NodePreviewContent } from '../../Nodes/NodePreviewContent.tsx';
 import { PreviewHeaderSlotContext } from '../../Nodes/PreviewHeaderSlot.tsx';
 
@@ -163,6 +163,8 @@ const ConnectedNodeMenu = ({
           tooltipPlacement="bottom"
           aria-label={title}
           aria-haspopup="menu"
+          tooltipWrapperClassName="inline-flex shrink-0"
+          className="shrink-0 [&_svg]:h-3.5 [&_svg]:w-3.5"
         >
           <TableOfContents />
         </Button>
@@ -439,18 +441,11 @@ export const ExpandedNodePanel = ({
   }, [node]);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [draftTitle, setDraftTitle] = useState(liveLabel);
-  const titleInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (isEditingTitle) return;
     setDraftTitle(liveLabel);
   }, [liveLabel, isEditingTitle]);
-
-  useEffect(() => {
-    if (!isEditingTitle) return;
-    titleInputRef.current?.focus();
-    titleInputRef.current?.select();
-  }, [isEditingTitle]);
 
   // Always exit edit mode when the underlying expanded item changes,
   // so an unsubmitted draft never leaks onto the next node's title.
@@ -543,80 +538,58 @@ export const ExpandedNodePanel = ({
       {/* Header bar */}
       <div
         data-testid="expanded-node-header"
-        className={`bg-surface flex shrink-0 items-center justify-between ${embedded ? 'h-9 gap-2 px-2' : 'border-edge-default h-12 gap-3 border-b px-3'}`}
+        className={`bg-surface flex shrink-0 items-center justify-between px-2.5 ${embedded ? 'h-9 gap-2' : 'border-edge-default h-12 gap-3 border-b'}`}
       >
-        {/* Left: connected-node navigation and rename editing. The workspace
-          tab already shows node identity, so embedded previews expose an
-          icon until editing begins instead of repeating the title. */}
-        <div className="flex min-w-0 flex-1 items-center gap-2">
+        {/* Left: connected-node navigation and the shared inline title. */}
+        <div className="flex min-w-0 flex-1 items-center gap-1.5">
           {connectedNodeGroups.length > 0 && (
-            <ConnectedNodeMenu
-              groups={connectedNodeGroups}
-              open={openNeighborDirection !== null}
-              focusDirection={openNeighborDirection}
-              title={t('node.connectedNodeNavigation')}
-              menuLabel={t('node.connectedNodeNavigation')}
-              untitledLabel={t('node.untitled')}
-              onOpenChange={(open) =>
-                setOpenNeighborDirection(
-                  open
-                    ? (openNeighborDirection ??
-                        connectedNodeGroups[0].direction)
-                    : null,
-                )
-              }
-              onSelect={selectNeighbor}
-            />
+            // Match the tab's 14px icon column without shrinking the hit target.
+            <div className="flex w-3.5 shrink-0 items-center justify-center">
+              <ConnectedNodeMenu
+                groups={connectedNodeGroups}
+                open={openNeighborDirection !== null}
+                focusDirection={openNeighborDirection}
+                title={t('node.connectedNodeNavigation')}
+                menuLabel={t('node.connectedNodeNavigation')}
+                untitledLabel={t('node.untitled')}
+                onOpenChange={(open) =>
+                  setOpenNeighborDirection(
+                    open
+                      ? (openNeighborDirection ??
+                          connectedNodeGroups[0].direction)
+                      : null,
+                  )
+                }
+                onSelect={selectNeighbor}
+              />
+            </div>
           )}
 
-          <div className="flex min-w-0 flex-1 items-center gap-2 text-sm font-medium">
-            {canEditTitle && isEditingTitle ? (
-              <Input
-                ref={titleInputRef}
-                value={draftTitle}
-                placeholder={t('node.untitled')}
-                wrapperClassName="min-w-0"
-                className="text-fg-default bg-bg-default border-edge-default w-64 max-w-lg min-w-0 truncate rounded border px-1 py-0.5 text-sm font-medium outline-none"
-                onChange={(e) => setDraftTitle(e.target.value)}
-                onBlur={commitTitle}
-                onKeyDown={(e) => {
-                  // Keep keystrokes (notably Escape) from reaching the
-                  // window-level Escape handler that closes the panel.
-                  e.stopPropagation();
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    commitTitle();
-                  }
-                  if (e.key === 'Escape') {
-                    e.preventDefault();
-                    setDraftTitle(liveLabel);
-                    setIsEditingTitle(false);
-                  }
-                }}
-              />
-            ) : canEditTitle ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                title={t('node.rename')}
-                aria-label={t('node.rename')}
-                tooltipPlacement="bottom"
-                tooltipWrapperClassName="inline-flex min-w-0 max-w-full"
-                className={clsx(
-                  'hover:text-fg-default max-w-full cursor-text justify-start truncate rounded border border-transparent py-0.5',
-                  embedded
-                    ? 'text-fg-subtle hover:bg-hover px-1.5 text-xs font-normal'
-                    : 'text-fg-muted px-1 text-sm font-medium',
-                )}
-                onClick={() => setIsEditingTitle(true)}
-              >
-                {liveLabel || t('node.untitled')}
-              </Button>
-            ) : (
-              <span className="text-fg-muted max-w-lg truncate px-1 py-0.5">
-                {liveLabel || t('node.untitled')}
-              </span>
-            )}
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <InlineEditableTitle
+              // Align the text, not the control's 4px padding + 1px border.
+              className="-ml-1.25"
+              width="fill"
+              key={expandedNodeId}
+              title={liveLabel}
+              ariaLabel={t('node.rename')}
+              placeholder={t('node.untitled')}
+              editor={
+                canEditTitle
+                  ? {
+                      active: isEditingTitle,
+                      draft: draftTitle,
+                      onChange: setDraftTitle,
+                      onCommit: commitTitle,
+                      onStart: () => setIsEditingTitle(true),
+                      onCancel: () => {
+                        setDraftTitle(liveLabel);
+                        setIsEditingTitle(false);
+                      },
+                    }
+                  : undefined
+              }
+            />
           </div>
         </div>
 

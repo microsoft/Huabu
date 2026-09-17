@@ -11,6 +11,7 @@ import { agenetes } from '../agent/agenetes/drivers.js';
 import { parseAgentLaunchOverrides } from '../agent/agent-launch-overrides.js';
 import { agentNodeBinding } from '../agent/agent-node-binding.js';
 import { agentThreadResolver } from '../agent/agent-thread-resolver.js';
+import { effectiveConversationTitle } from '../agent/conversation-title.service.js';
 import { canvasAcpNamespace } from '../workspace/paths.js';
 
 import type { CanvasNodeId } from '@huabu/shared';
@@ -70,6 +71,24 @@ export async function initializeAgentNodeCreationAlreadyLocked(
   };
   const record = agenetes.record(canvasAcpNamespace(canvasId), target.threadId);
   if (record) {
+    // Conversion transfers authority at canonical creation, using the latest
+    // backend value rather than a potentially stale browser title cache.
+    const title = effectiveConversationTitle(record);
+    if (
+      title.title &&
+      node.data.labelSource !== 'user' &&
+      node.data.labelSource !== 'agent'
+    ) {
+      node = {
+        ...node,
+        data: {
+          ...node.data,
+          label: title.title,
+          labelSource: title.source === 'user' ? 'user' : 'auto',
+          conversationTitleSource: title.source,
+        },
+      };
+    }
     const binding = await agentNodeBinding.confirm(
       { ...target, bindingState: 'bound' },
       { required: true, alreadyLocked: true, record },

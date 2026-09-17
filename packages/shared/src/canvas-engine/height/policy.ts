@@ -84,8 +84,8 @@ const MANUAL_POLICY: HeightPolicy = { kind: 'manual' };
  * Vertical and horizontal chrome (px) the node shell adds around a
  * node's body.
  *
- * `NodeWrapper` gives every non-sketch node root a 3px transparent
- * border, and `box-sizing: border-box` means that border eats into the
+ * `NodeWrapper` defaults to a 3px transparent border for non-sketch
+ * nodes (images paint it as an overlay instead), and border-box sizing eats into the
  * geometry the store assigned — on *both* axes. The body is `h-full
  * w-full` inside it.
  *

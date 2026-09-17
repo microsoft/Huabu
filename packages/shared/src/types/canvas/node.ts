@@ -740,6 +740,8 @@ export function getQuestionNodeStatus(data: unknown): QuestionNodeStatus {
 /** Question node: AI interaction medium embedded on canvas. */
 export interface QuestionNodeData extends BaseNodeData {
   type: 'question';
+  /** Naming provenance only; the canonical node label remains the title value. */
+  conversationTitleSource?: 'user' | 'generated' | 'acp' | 'fallback' | null;
   /** Server acknowledgement of a canonical execution record; never demoted. */
   bindingState?: AgentNodeBindingState;
   /** Server-owned identity of the current or most recent admitted prompt. */

@@ -21,10 +21,7 @@ import {
   ConversationIntegrityError,
   validateConversationView,
 } from '@/store/conversationOwner';
-import {
-  refreshConversationTitleAfterStream,
-  seedConversationTitle,
-} from '@/store/conversationTitleStore';
+import { refreshConversationTitleAfterStream } from '@/store/conversationTitleStore';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 
 import { claimAgentStream } from './agentStreamCoordinator';
@@ -307,14 +304,6 @@ export function useChatHistory(
           }));
         }
 
-        const serverMessages = historyTurnsToMessages(res.turns);
-        if (!effectiveConversationView) {
-          const firstUser = serverMessages.find(
-            (message) => message.role === 'user',
-          );
-          if (firstUser?.role === 'user')
-            seedConversationTitle(ownerCanvasId, finalTid, firstUser.content);
-        }
         applyInitialHistoryPage({ ...res, threadId: finalTid });
       })
       .catch((err: unknown) => {

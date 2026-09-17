@@ -39,6 +39,8 @@ PDF in-preview search is independent of both the render window and canvas-wide s
 
 [`NodeWrapper`](../../apps/web/src/components/Nodes/NodeWrapper.tsx) keeps the full body and [`SemanticPlaceholder`](../../apps/web/src/components/Nodes/SemanticPlaceholder.tsx) in the same node shell so CSS can cross-fade the two render modes without changing geometry.
 
+Image nodes retain the wrapper's 3 px accent border, painted as a non-interactive overlay above the image rather than consuming layout space. The image fills the node footprint underneath the border, avoiding a shell inset that changes the content aspect ratio and exposes gaps. Images retain `object-contain` rendering and the canvas-level selection outline; other node types keep their existing shell geometry.
+
 The minimal placeholder expresses hierarchy from node geometry, not title length. [`selectTypographyTier`](../../apps/web/src/config/semanticZoom.ts) uses the canvas-space representative size $\sqrt{width \times height}$ to select 32 px, 52 px, or 76 px typography; the resulting text still participates in viewport scaling.
 
 Minimal labels wrap at word boundaries, break only an otherwise unbreakable token, and clamp to the smaller of six lines or the number of lines that physically fit the padded node height. They never continuously shrink to fit content.

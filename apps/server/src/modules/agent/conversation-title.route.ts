@@ -34,7 +34,7 @@ export function createConversationTitleRoutes(
             .code(400)
             .send({ message: body.error.issues[0]?.message ?? 'Invalid body' });
         return reply.send(
-          service.query(body.data.canvasId, body.data.threadIds),
+          await service.query(body.data.canvasId, body.data.threadIds),
         );
       },
     );
@@ -48,7 +48,7 @@ export function createConversationTitleRoutes(
           return reply
             .code(400)
             .send({ message: 'Invalid conversation title request' });
-        const result = service.setUserTitle(
+        const result = await service.setUserTitle(
           query.data.canvasId,
           params.data.threadId,
           body.data.title,

@@ -15,6 +15,11 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useChatStore } from '@/store/chatStore';
+import {
+  conversationTitleKey,
+  getConversationTitle,
+  useConversationTitleStore,
+} from '@/store/conversationTitleStore';
 
 import { claimAgentStream } from './agentStreamCoordinator';
 import { useChatHistory } from './useChatHistory';
@@ -147,6 +152,11 @@ async function renderHarness(session: ChatSession = SESSION): Promise<void> {
 }
 
 beforeEach(() => {
+  useConversationTitleStore.setState({
+    entries: {},
+    pending: {},
+    refreshEpoch: 0,
+  });
   useChatStore.persist.setOptions({
     storage: {
       getItem: () => null,
@@ -181,6 +191,49 @@ afterEach(() => {
 });
 
 describe('useChatHistory paging', () => {
+  it.each([null, 'Backend title'])(
+    'does not derive a title from hydrated user messages with cached title %s',
+    async (title) => {
+      useChatStore.setState({
+        threadMap: { [CANVAS_ID]: THREAD_ID },
+        threadsById: {},
+      });
+      const value = title
+        ? { title, source: 'generated' as const }
+        : { title: null, source: null };
+      useConversationTitleStore.setState({
+        entries: {
+          [conversationTitleKey(CANVAS_ID, THREAD_ID)]: {
+            value,
+            revision: 0,
+            durable: true,
+          },
+        },
+      });
+      apiMocks.fetchHistoryPage.mockResolvedValueOnce({
+        threadId: THREAD_ID,
+        turns: [
+          {
+            id: 'turn-1',
+            messages: [
+              {
+                role: 'user',
+                content: '# A heading that must not become a title',
+              },
+              { role: 'assistant', content: 'Answer' },
+            ],
+          },
+        ],
+        hasMore: false,
+      });
+      await renderHarness();
+      expect(
+        useChatStore.getState().threadsById[THREAD_ID]?.messages,
+      ).toHaveLength(2);
+      expect(getConversationTitle(CANVAS_ID, THREAD_ID)).toEqual(value);
+    },
+  );
+
   it('hydrates only the configured newest page with stable message IDs', async () => {
     useChatStore.setState({
       threadMap: { [CANVAS_ID]: THREAD_ID },

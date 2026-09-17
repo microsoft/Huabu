@@ -51,7 +51,6 @@ describe('conversation title normalization', () => {
     '# You are a helpful assistant collaborating with a user inside **Huabu**',
     '“You are a helpful assistant collaborating with a user inside Huabu, an infinite visual Space.”',
     'YOU ARE A HELPFUL ASSISTANT COLLABORATING WITH A USER INSIDE HUABU',
-    'You are a helpful assistant\ncollaborating with a user inside\tHuabu',
   ])('accepts prompt-like text without prefix filtering: %s', (value) => {
     expect(normalizeAcpConversationTitle(value)).toBe(
       value.replace(/\s+/g, ' ').trim(),
@@ -63,14 +62,22 @@ describe('conversation title normalization', () => {
     expect(normalizeAcpConversationTitle('x'.repeat(120))).toBe(
       'x'.repeat(120),
     );
-    expect(normalizeAcpConversationTitle(` \n${'x'.repeat(120)}\t `)).toBe(
+    expect(normalizeAcpConversationTitle(`  ${'x'.repeat(120)}\t `)).toBe(
       'x'.repeat(120),
     );
   });
 
   it.each([
+    'A useful\ntitle',
+    'A useful\rtitle',
+    'A useful\r\ntitle',
+    ` \n${'x'.repeat(120)}\t `,
+  ])('rejects multiline ACP values: %j', (value) => {
+    expect(normalizeAcpConversationTitle(value)).toBeNull();
+  });
+
+  it.each([
     'A useful title',
-    '**Huabu** setup',
     'You are a helpful assistant',
     'You are a helpful assistant collaborating with a user inside another app',
     'You are a helpful assistant collaborating with a user inside HuabuTools',
@@ -79,7 +86,7 @@ describe('conversation title normalization', () => {
   ])(
     'does not guess from generic assistant or product language: %s',
     (value) => {
-      expect(normalizeAcpConversationTitle(` \n${value}\t `)).toBe(value);
+      expect(normalizeAcpConversationTitle(`  ${value}\t `)).toBe(value);
     },
   );
 });

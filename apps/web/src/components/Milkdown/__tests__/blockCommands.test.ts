@@ -22,6 +22,7 @@ async function mount(
   overrides?: {
     editable?: boolean;
     previewMode?: boolean;
+    linkActivation?: 'plain' | 'modifier';
     onLinkClick?: (href: string) => void;
   },
 ): Promise<MilkdownInstance> {
@@ -506,7 +507,7 @@ describe('Milkdown block commands', () => {
     { editable: false },
     { editable: true, previewMode: true },
   ])(
-    'does not install pointer gesture handlers without opt-in: %j',
+    'installs shared pointer gesture handlers without a host callback: %j',
     async (options) => {
       const updates = vi.spyOn(EditorView.prototype, 'updateState');
       const open = vi.spyOn(window, 'open').mockReturnValue(null);
@@ -523,23 +524,16 @@ describe('Milkdown block commands', () => {
       expect(handlers?.click).toBeTypeOf('function');
       expect(handlers?.auxclick).toBe(handlers?.click);
       for (const type of ['pointerdown', 'pointermove', 'pointercancel']) {
-        expect(handlers).not.toHaveProperty(type);
+        expect(handlers).toHaveProperty(type, expect.any(Function));
       }
 
       pointAtLink('pointerdown');
       pointAtLink('pointermove', { clientX: 30 });
       const plain = clickLink({ modifier: false, clientX: 30 });
-      if (!options.editable || options.previewMode) {
-        expect(open).toHaveBeenCalledExactlyOnceWith(
-          'https://example.com',
-          '_blank',
-          'noopener,noreferrer',
-        );
-        expect(plain.defaultPrevented).toBe(true);
-      } else {
-        expect(open).not.toHaveBeenCalled();
-      }
-      open.mockClear();
+      expect(plain.defaultPrevented).toBe(true);
+      expect(open).not.toHaveBeenCalled();
+      pointAtLink('pointerdown');
+      pointAtLink('pointerup', { buttons: 0 });
       clickLink({ modifier: true });
       expect(open).toHaveBeenCalledExactlyOnceWith(
         'https://example.com',
@@ -549,9 +543,10 @@ describe('Milkdown block commands', () => {
     },
   );
 
-  it('installs pointer gesture handlers for an opted-in editor', async () => {
+  it('installs pointer gesture handlers for a plain-activation editor with a host callback', async () => {
     const updates = vi.spyOn(EditorView.prototype, 'updateState');
     const instance = await mount('[docs](https://example.com)', {
+      linkActivation: 'plain',
       onLinkClick: vi.fn(),
     });
     instance.__setCursorAfterTextForTest?.('docs');
@@ -574,6 +569,165 @@ describe('Milkdown block commands', () => {
     }
   });
 
+  it.each([
+    { editable: true, linkActivation: 'plain' as const, modifier: false },
+    { editable: false, linkActivation: 'plain' as const, modifier: false },
+    {
+      editable: true,
+      previewMode: true,
+      linkActivation: 'plain' as const,
+      modifier: false,
+    },
+    { editable: true, linkActivation: 'modifier' as const, modifier: true },
+    { editable: false, linkActivation: 'modifier' as const, modifier: true },
+    {
+      editable: true,
+      previewMode: true,
+      linkActivation: 'modifier' as const,
+      modifier: true,
+    },
+  ])(
+    'suppresses repeated clicks and drags without a callback: %j',
+    async ({ modifier, ...options }) => {
+      const open = vi.spyOn(window, 'open').mockReturnValue(null);
+      await mount('[docs](https://example.com)', options);
+      for (let detail = 1; detail <= 3; detail++) {
+        pointAtLink('pointerdown', { detail });
+        pointAtLink('pointerup', { buttons: 0, detail });
+        expect(clickLink({ modifier, detail }).defaultPrevented).toBe(true);
+        expect(open).toHaveBeenCalledExactlyOnceWith(
+          'https://example.com',
+          '_blank',
+          'noopener,noreferrer',
+        );
+      }
+
+      for (const path of ['endpoint', 'out-and-back']) {
+        open.mockClear();
+        pointAtLink('pointerdown');
+        if (path === 'out-and-back') {
+          pointAtLink('pointermove', { clientX: 30 });
+          pointAtLink('pointermove');
+        }
+        const clientX = path === 'endpoint' ? 30 : 0;
+        pointAtLink('pointerup', { clientX, buttons: 0 });
+        expect(clickLink({ modifier, clientX }).defaultPrevented).toBe(true);
+        expect(open).not.toHaveBeenCalled();
+
+        pointAtLink('pointerdown');
+        pointAtLink('pointerup', { buttons: 0 });
+        clickLink({ modifier });
+        expect(open).toHaveBeenCalledExactlyOnceWith(
+          'https://example.com',
+          '_blank',
+          'noopener,noreferrer',
+        );
+      }
+    },
+  );
+
+  it.each([false, true])(
+    'keeps readonly canvas plain clicks available for selection with callback=%s',
+    async (withCallback) => {
+      const open = vi.spyOn(window, 'open').mockReturnValue(null);
+      const onLinkClick = vi.fn();
+      await mount('[docs](https://example.com)', {
+        editable: false,
+        linkActivation: 'modifier',
+        ...(withCallback ? { onLinkClick } : {}),
+      });
+      const bubbled = vi.fn();
+      roots[0].addEventListener('click', bubbled);
+
+      const plain = clickLink({ modifier: false });
+      expect(plain.defaultPrevented).toBe(true);
+      expect(bubbled).toHaveBeenCalledExactlyOnceWith(plain);
+      expect(open).not.toHaveBeenCalled();
+      expect(onLinkClick).not.toHaveBeenCalled();
+      expect(editorSurface().getAttribute('data-link-activation')).toBe(
+        'modifier',
+      );
+
+      expect(clickLink({ modifier: true }).defaultPrevented).toBe(true);
+      expect(open).toHaveBeenCalledExactlyOnceWith(
+        'https://example.com',
+        '_blank',
+        'noopener,noreferrer',
+      );
+      expect(onLinkClick).not.toHaveBeenCalled();
+    },
+  );
+
+  it('does not infer plain activation from a callback in an editable editor', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    const onLinkClick = vi.fn();
+    await mount('[docs](https://example.com)', { onLinkClick });
+    expect(clickLink({ modifier: false }).defaultPrevented).toBe(true);
+    expect(onLinkClick).not.toHaveBeenCalled();
+    expect(open).not.toHaveBeenCalled();
+    expect(editorSurface().getAttribute('data-link-activation')).toBe(
+      'modifier',
+    );
+  });
+
+  it.each([
+    { editable: false, previewMode: false },
+    { editable: true, previewMode: true },
+    { editable: true, previewMode: false },
+  ])(
+    'allows keyboard link activation under modifier policy: %j',
+    async (options) => {
+      const open = vi.spyOn(window, 'open').mockReturnValue(null);
+      await mount('[docs](https://example.com)', {
+        ...options,
+        linkActivation: 'modifier',
+      });
+      expect(clickLink({ modifier: false }).defaultPrevented).toBe(true);
+      expect(open).not.toHaveBeenCalled();
+      expect(clickLink({ modifier: false, detail: 0 }).defaultPrevented).toBe(
+        true,
+      );
+      expect(open).toHaveBeenCalledExactlyOnceWith(
+        'https://example.com',
+        '_blank',
+        'noopener,noreferrer',
+      );
+    },
+  );
+
+  it('routes keyboard activation through the host without allowing plain pointer clicks', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    const onLinkClick = vi.fn();
+    await mount('[docs](https://example.com)', {
+      editable: false,
+      linkActivation: 'modifier',
+      onLinkClick,
+    });
+    clickLink({ modifier: false });
+    expect(onLinkClick).not.toHaveBeenCalled();
+    clickLink({ modifier: false, detail: 0 });
+    expect(onLinkClick).toHaveBeenCalledExactlyOnceWith('https://example.com');
+    expect(
+      clickLink({ modifier: false, detail: 0, href: 'javascript:alert(1)' })
+        .defaultPrevented,
+    ).toBe(true);
+    expect(onLinkClick).toHaveBeenCalledTimes(1);
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it('blocks unsafe keyboard navigation without a host callback', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    await mount('[docs](https://example.com)', {
+      editable: false,
+      linkActivation: 'modifier',
+    });
+    expect(
+      clickLink({ modifier: false, detail: 0, href: 'javascript:alert(1)' })
+        .defaultPrevented,
+    ).toBe(true);
+    expect(open).not.toHaveBeenCalled();
+  });
+
   it('opens a link in a new tab on modifier-click', async () => {
     const open = vi.spyOn(window, 'open').mockReturnValue(null);
     await mount('see [docs](https://example.com) here');
@@ -588,10 +742,13 @@ describe('Milkdown block commands', () => {
     expect(event.defaultPrevented).toBe(true);
   });
 
-  it('routes an opted-in plain click to the host rather than the browser', async () => {
+  it('routes explicit plain activation to the host rather than the browser', async () => {
     const open = vi.spyOn(window, 'open').mockReturnValue(null);
     const onLinkClick = vi.fn();
-    await mount('see [docs](https://example.com) here', { onLinkClick });
+    await mount('see [docs](https://example.com) here', {
+      linkActivation: 'plain',
+      onLinkClick,
+    });
     const event = clickLink({ modifier: false });
     expect(onLinkClick).toHaveBeenCalledExactlyOnceWith('https://example.com');
     expect(open).not.toHaveBeenCalled();
@@ -601,7 +758,10 @@ describe('Milkdown block commands', () => {
   it('keeps modifier-click external when a host callback is installed', async () => {
     const open = vi.spyOn(window, 'open').mockReturnValue(null);
     const onLinkClick = vi.fn();
-    await mount('[docs](https://example.com)', { onLinkClick });
+    await mount('[docs](https://example.com)', {
+      linkActivation: 'plain',
+      onLinkClick,
+    });
     clickLink({ modifier: true });
     expect(onLinkClick).not.toHaveBeenCalled();
     expect(open).toHaveBeenCalledExactlyOnceWith(
@@ -621,7 +781,10 @@ describe('Milkdown block commands', () => {
   ])('blocks unsafe host navigation: %s', async (href) => {
     const onLinkClick = vi.fn();
     const open = vi.spyOn(window, 'open').mockReturnValue(null);
-    await mount('[docs](https://example.com)', { onLinkClick });
+    await mount('[docs](https://example.com)', {
+      linkActivation: 'plain',
+      onLinkClick,
+    });
     expect(clickLink({ modifier: false, href }).defaultPrevented).toBe(true);
     expect(onLinkClick).not.toHaveBeenCalled();
     expect(open).not.toHaveBeenCalled();
@@ -630,6 +793,7 @@ describe('Milkdown block commands', () => {
   it('follows a fresh stationary click despite an existing ProseMirror selection', async () => {
     const onLinkClick = vi.fn();
     const instance = await mount('before [docs](https://example.com) after', {
+      linkActivation: 'plain',
       onLinkClick,
     });
     instance.__selectTextBetweenForTest?.('before', 'docs');
@@ -644,6 +808,7 @@ describe('Milkdown block commands', () => {
   it('follows a fresh stationary click despite an existing native selection', async () => {
     const onLinkClick = vi.fn();
     await mount('[docs](https://example.com)', {
+      linkActivation: 'plain',
       onLinkClick,
       editable: false,
     });
@@ -673,6 +838,7 @@ describe('Milkdown block commands', () => {
       const onLinkClick = vi.fn();
       const open = vi.spyOn(window, 'open').mockReturnValue(null);
       const instance = await mount('before [docs](https://example.com) after', {
+        linkActivation: 'plain',
         onLinkClick,
       });
       pointAtLink('pointerdown');
@@ -705,7 +871,10 @@ describe('Milkdown block commands', () => {
     async (clickCount) => {
       const onLinkClick = vi.fn();
       const open = vi.spyOn(window, 'open').mockReturnValue(null);
-      await mount('[docs](https://example.com)', { onLinkClick });
+      await mount('[docs](https://example.com)', {
+        linkActivation: 'plain',
+        onLinkClick,
+      });
       for (let detail = 1; detail <= clickCount; detail++) {
         pointAtLink('pointerdown', { detail });
         pointAtLink('pointerup', { buttons: 0, detail });
@@ -726,7 +895,10 @@ describe('Milkdown block commands', () => {
     'does not retain an abandoned drag after %s',
     async (recovery) => {
       const onLinkClick = vi.fn();
-      await mount('[docs](https://example.com)', { onLinkClick });
+      await mount('[docs](https://example.com)', {
+        linkActivation: 'plain',
+        onLinkClick,
+      });
       pointAtLink('pointerdown');
       pointAtLink('pointermove', { clientX: 30 });
       document.body.dispatchEvent(
@@ -749,7 +921,10 @@ describe('Milkdown block commands', () => {
 
   it('allows small pointer jitter during a stationary click', async () => {
     const onLinkClick = vi.fn();
-    await mount('[docs](https://example.com)', { onLinkClick });
+    await mount('[docs](https://example.com)', {
+      linkActivation: 'plain',
+      onLinkClick,
+    });
     pointAtLink('pointerdown', { clientX: 10, clientY: 20 });
     pointAtLink('pointermove', { clientX: 12, clientY: 21 });
     pointAtLink('pointerup', { clientX: 12, clientY: 21, buttons: 0 });
@@ -761,7 +936,10 @@ describe('Milkdown block commands', () => {
     'does not route a modified or secondary click to the host: %j',
     async (options) => {
       const onLinkClick = vi.fn();
-      await mount('[docs](https://example.com)', { onLinkClick });
+      await mount('[docs](https://example.com)', {
+        linkActivation: 'plain',
+        onLinkClick,
+      });
       document.querySelector('.milkdown a')?.dispatchEvent(
         new MouseEvent('click', {
           bubbles: true,

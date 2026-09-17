@@ -5,13 +5,14 @@
  * Milkdown-backed renderer for AI chat messages.
  */
 
-import { memo } from 'react';
+import { memo, useCallback } from 'react';
 
 import { parseArtifactUrl } from '@huabu/shared';
 
 import { MilkdownPreview } from '@/components/Milkdown';
 import useCanvasStore from '@/store/canvasStore';
 import { setDragPayload } from '@/utils/io/dragDrop';
+import { openDocumentLink } from '@/utils/openDocumentLink';
 
 import type { ImageDragPayload, NoteDragPayload } from '@/utils/io/dragDrop';
 import type { NodeOrigin } from '@huabu/shared';
@@ -93,11 +94,17 @@ export const MilkdownMessageCard = memo(function MilkdownMessageCard({
   threadId,
 }: MilkdownMessageCardProps) {
   const canvasId = useCanvasStore((s) => s.canvasId);
+  const handleLinkClick = useCallback(
+    (href: string) => openDocumentLink(href, { threadId }),
+    [threadId],
+  );
 
   return (
     <MilkdownPreview
       markdown={content}
       canvasId={canvasId ?? undefined}
+      onLinkClick={handleLinkClick}
+      linkActivation="plain"
       enableBlockDrag
       onBlockDragStart={({ markdown, nativeEvent }) => {
         const built =

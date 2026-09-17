@@ -12,7 +12,12 @@ import {
 
 import { agenetes } from './agenetes/drivers.js';
 import { chatEnvelopeFromSubmission } from './agenetes/handle.js';
+import {
+  conversationTitleNodeStore,
+  type QuestionTitleSnapshot,
+} from './conversation-title-node-store.js';
 import { getLogger } from '../../utils/logger.js';
+import { withCanvasMutex } from '../canvas/write-coordinator.js';
 import { coalesceInFlight } from '../preprocessing/coalesce.js';
 import { ProviderManager } from '../preprocessing/provider-manager.js';
 import { extractTitleFromText } from '../preprocessing/utils.js';
@@ -60,7 +65,22 @@ export function effectiveConversationTitle(
   return { title: null, source: null };
 }
 
+function acceptsTitle(
+  current: ConversationTitle,
+  source: NonNullable<ConversationTitle['source']>,
+): boolean {
+  return (
+    source === 'user' ||
+    (current.source !== 'user' &&
+      current.source !== 'generated' &&
+      (source !== 'fallback' ||
+        !current.title ||
+        current.source === 'fallback'))
+  );
+}
+
 export interface ConversationTitleDependencies {
+  questions?: typeof conversationTitleNodeStore;
   readRecord: (canvasId: string, threadId: string) => ThreadRecord | undefined;
   updateHostMetadata: (
     canvasId: string,
@@ -78,6 +98,7 @@ export interface ConversationTitleDependencies {
 
 const provider = new ProviderManager();
 const defaults: ConversationTitleDependencies = {
+  questions: conversationTitleNodeStore,
   readRecord: (canvasId, threadId) =>
     agenetes.record(canvasAcpNamespace(canvasId), threadId),
   updateHostMetadata: (canvasId, threadId, patch) => {
@@ -111,7 +132,7 @@ const defaults: ConversationTitleDependencies = {
     ),
 };
 
-/** Independent host-owned Chat names; never realizes a driver or reads/writes nodes. */
+/** One naming policy with thread and Question storage adapters; never realizes a driver. */
 export class ConversationTitleService {
   private readonly inFlight = new Map<string, Promise<void>>();
   private readonly subscriptions = new Map<string, symbol>();
@@ -120,7 +141,9 @@ export class ConversationTitleService {
     private readonly deps: ConversationTitleDependencies = defaults,
   ) {}
 
-  get(canvasId: string, threadId: string): ConversationTitle {
+  async get(canvasId: string, threadId: string): Promise<ConversationTitle> {
+    const question = await this.deps.questions?.read(canvasId, threadId);
+    if (question) return question.title;
     const record = this.deps.readRecord(canvasId, threadId);
     const effective = effectiveConversationTitle(record);
     if (!record || effective.title) return effective;
@@ -130,27 +153,29 @@ export class ConversationTitleService {
     return { title, source: title ? 'fallback' : null };
   }
 
-  query(
+  async query(
     canvasId: string,
     threadIds: string[],
-  ): QueryConversationTitlesResponse {
+  ): Promise<QueryConversationTitlesResponse> {
     return {
       titles: Object.fromEntries(
-        threadIds.map((id) => [id, this.get(canvasId, id)]),
+        await Promise.all(
+          threadIds.map(async (id) => [id, await this.get(canvasId, id)]),
+        ),
       ),
     };
   }
 
-  setUserTitle(
+  async setUserTitle(
     canvasId: string,
     threadId: string,
     title: string,
-  ): ConversationTitle | null {
+  ): Promise<ConversationTitle | null> {
     const parsed = setConversationTitleBodySchema.safeParse({ title });
     if (!parsed.success) throw new Error('Invalid conversation title');
     const user = normalizeConversationTitle(parsed.data.title);
     if (!user) throw new Error('Invalid conversation title');
-    if (!this.writeTitle(canvasId, threadId, user, 'user')) return null;
+    if (!(await this.writeTitle(canvasId, threadId, user, 'user'))) return null;
     return this.get(canvasId, threadId);
   }
 
@@ -160,55 +185,148 @@ export class ConversationTitleService {
     threadId: string,
     prompt: string,
   ): Promise<void> {
-    const key = JSON.stringify([canvasId, threadId]);
-    return coalesceInFlight(this.inFlight, key, () =>
-      this.initializeOnce(canvasId, threadId, prompt).catch((error) =>
-        this.deps.onError(error),
-      ),
+    return this.initializeTarget(canvasId, threadId, prompt);
+  }
+
+  /** Preprocess remains an entry, but never returns a second automatic label patch. */
+  async initializeQuestion(
+    canvasId: string,
+    nodeId: string,
+    prompt: string,
+    allowLLM = true,
+  ): Promise<void> {
+    const question = await this.deps.questions?.read(
+      canvasId,
+      undefined,
+      nodeId,
+    );
+    if (!question || question.content !== prompt) return;
+    await this.initializeTarget(
+      canvasId,
+      question.threadId,
+      prompt,
+      question,
+      allowLLM,
     );
   }
 
-  private async initializeOnce(
+  /** Await durable fallback, not the utility model, before dispatching a turn. */
+  async ensureFallback(
     canvasId: string,
     threadId: string,
     prompt: string,
   ): Promise<void> {
-    const record = this.deps.readRecord(canvasId, threadId);
-    if (!record) return;
-    const saved = effectiveConversationTitle(record);
-    if (saved.source === 'user' || saved.source === 'generated') return;
-    const firstPrompt = this.deps.firstPrompt(canvasId, threadId) ?? prompt;
-    if (!saved.title) {
+    try {
+      await this.prepare(canvasId, threadId, prompt);
+    } catch (error) {
+      this.deps.onError(error);
+    }
+  }
+
+  async start(
+    canvasId: string,
+    threadId: string,
+    prompt: string,
+  ): Promise<void> {
+    try {
+      await this.prepare(canvasId, threadId, prompt);
+      void this.initialize(canvasId, threadId, prompt);
+    } catch (error) {
+      this.deps.onError(error);
+    }
+  }
+
+  private initializeTarget(
+    canvasId: string,
+    threadId: string | undefined,
+    prompt: string,
+    question?: QuestionTitleSnapshot,
+    allowLLM = true,
+  ): Promise<void> {
+    const key = JSON.stringify([canvasId, threadId ?? question?.nodeId]);
+    return coalesceInFlight(this.inFlight, key, () =>
+      this.initializeOnce(canvasId, threadId, prompt, question, allowLLM).catch(
+        (error) => this.deps.onError(error),
+      ),
+    );
+  }
+
+  private async prepare(
+    canvasId: string,
+    threadId: string | undefined,
+    prompt: string,
+    expected?: QuestionTitleSnapshot,
+  ) {
+    const question = await this.deps.questions?.read(
+      canvasId,
+      threadId,
+      expected?.nodeId,
+    );
+    if (
+      expected &&
+      (!question ||
+        question.content !== expected.content ||
+        question.threadId !== expected.threadId)
+    )
+      return;
+    const record = threadId
+      ? this.deps.readRecord(canvasId, threadId)
+      : undefined;
+    if (!record && !question) return;
+    const saved = question?.title ?? effectiveConversationTitle(record);
+    if (
+      question?.protected ||
+      saved.source === 'user' ||
+      saved.source === 'generated'
+    )
+      return;
+    const firstPrompt =
+      (threadId && record
+        ? this.deps.firstPrompt(canvasId, threadId)
+        : undefined) ??
+      (question?.content.trim() || prompt);
+    if (!saved.title || (question && saved.source === 'fallback')) {
       const fallback = normalizeConversationTitle(
         extractTitleFromText(firstPrompt),
       );
-      if (fallback) this.writeTitle(canvasId, threadId, fallback, 'fallback');
+      if (fallback)
+        await this.writeTitle(
+          canvasId,
+          threadId,
+          fallback,
+          'fallback',
+          question ?? undefined,
+        );
     }
-    if (!firstPrompt.trim()) return;
+    return { firstPrompt, question: question ?? undefined };
+  }
+
+  private async initializeOnce(
+    canvasId: string,
+    threadId: string | undefined,
+    prompt: string,
+    expected?: QuestionTitleSnapshot,
+    allowLLM = true,
+  ): Promise<void> {
+    const prepared = await this.prepare(canvasId, threadId, prompt, expected);
+    if (!prepared || !allowLLM || !prepared.firstPrompt.trim()) return;
+    const { firstPrompt, question } = prepared;
     const generated = await this.deps.generate(firstPrompt);
     // Check the latest source after the await; a manual rename wins even if
     // generation began earlier. Rejected titles are not retained as candidates.
-    this.saveGenerated(canvasId, threadId, generated);
+    const title = normalizeConversationTitle(generated);
+    if (title)
+      await this.writeTitle(canvasId, threadId, title, 'generated', question);
   }
 
-  private saveGenerated(
+  private async acceptAcpTitle(
     canvasId: string,
     threadId: string,
     value: unknown,
-  ): void {
-    const generated = normalizeConversationTitle(value);
-    if (!generated) return;
-    this.writeTitle(canvasId, threadId, generated, 'generated');
-  }
-
-  private acceptAcpTitle(
-    canvasId: string,
-    threadId: string,
-    value: unknown,
-  ): void {
+  ): Promise<void> {
     const title = normalizeAcpConversationTitle(value);
     if (!title) return;
-    this.writeTitle(canvasId, threadId, title, 'acp');
+    await this.writeTitle(canvasId, threadId, title, 'acp');
   }
 
   /** Install at realization, before session bootstrap; notifications are persist-then-notify. */
@@ -225,7 +343,7 @@ export class ConversationTitleService {
         // Register before replaying persisted state so bootstrap updates are
         // buffered, including a blank update following a useful cached title.
         try {
-          this.acceptAcpTitle(
+          await this.acceptAcpTitle(
             canvasId,
             threadId,
             record ? acpTitle(record) : undefined,
@@ -235,7 +353,11 @@ export class ConversationTitleService {
         }
         for await (const meta of stream) {
           try {
-            this.acceptAcpTitle(canvasId, threadId, meta.sessionInfo?.title);
+            await this.acceptAcpTitle(
+              canvasId,
+              threadId,
+              meta.sessionInfo?.title,
+            );
           } catch (error) {
             this.deps.onError(error);
           }
@@ -250,22 +372,54 @@ export class ConversationTitleService {
   }
 
   /** Replace the current title only when its source permits the incoming update. */
-  private writeTitle(
+  private async writeTitle(
     canvasId: string,
-    threadId: string,
+    threadId: string | undefined,
     title: string,
     source: NonNullable<ConversationTitle['source']>,
-  ): boolean {
+    expected?: QuestionTitleSnapshot,
+  ): Promise<boolean> {
+    return withCanvasMutex(canvasId, () =>
+      this.writeTitleAlreadyLocked(canvasId, threadId, title, source, expected),
+    );
+  }
+
+  private async writeTitleAlreadyLocked(
+    canvasId: string,
+    threadId: string | undefined,
+    title: string,
+    source: NonNullable<ConversationTitle['source']>,
+    expected?: QuestionTitleSnapshot,
+  ): Promise<boolean> {
+    const question = await this.deps.questions?.read(
+      canvasId,
+      threadId,
+      expected?.nodeId,
+    );
+    if (expected && !question) return false;
+    if (question && this.deps.questions) {
+      return this.deps.questions.write(
+        canvasId,
+        threadId,
+        expected ?? question,
+        (current) => {
+          if (
+            !acceptsTitle(current.title, source) ||
+            (source !== 'user' &&
+              (current.protected ||
+                (expected && current.content !== expected.content)))
+          )
+            return null;
+          return { title, source };
+        },
+        true,
+      );
+    }
+    if (!threadId) return false;
     const record = this.deps.readRecord(canvasId, threadId);
     if (!record) return false;
     const current = effectiveConversationTitle(record);
-    if (
-      source !== 'user' &&
-      (current.source === 'user' ||
-        current.source === 'generated' ||
-        (source === 'fallback' && current.title !== null))
-    )
-      return false;
+    if (!acceptsTitle(current, source)) return false;
     const saved = storedTitle(record);
     if (saved.title !== title || saved.source !== source) {
       this.deps.updateHostMetadata(canvasId, threadId, {

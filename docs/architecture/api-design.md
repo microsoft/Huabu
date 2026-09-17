@@ -116,7 +116,15 @@ export async function postEcho(body: EchoBody): Promise<EchoResponse> {
 
 [`agent-node.ts`](../../packages/shared/src/types/api/agent-node.ts) defines the bounded editable node schema, launch overrides, association bodies, result acknowledgements, and internal projection shape. `PUT /api/canvas/:canvasId` accepts editable fields, not a complete replacement read model: omitted fields remain unchanged, Question FSM fields cannot be submitted, and the server composes from current state under the Canvas mutex. The same ownership guard applies to ordinary `MERGE_NODE_DATA`, regardless of the submitted originator. It does not reserve unrelated node types' `status` or thread-reference metadata.
 
+Question `conversationTitleSource` is also server-owned and excluded from ordinary editable snapshots, commands, and undo. It records naming provenance only; the canonical node `label` remains the title value. Trusted shared-service title writes use the canonical node projection and Canvas Sync path, while ordinary user/agent label renames retain their existing protection against automatic naming. Chat-to-Question creation transfers naming authority using the current backend title rather than establishing a second mutable thread title. See [Question naming](./question-node.md#2-data-model--persistence).
+
 `POST /api/canvas/:canvasId/nodes/:nodeId/association` initializes a legacy Question or validates undo reinsertion; it cannot replace an existing thread association. `POST /api/canvas/:canvasId/nodes/:nodeId/viewed` accepts `{ invocationToken }` and returns `{ acknowledged }`, where false means the observed token is no longer the current terminal result. A null acknowledgement token is the bounded legacy case: it succeeds only for a terminal node whose token is still absent, and cannot acknowledge any newly admitted result. Both use shared schemas and `safeParse`. Trusted FSM projection is an in-process business writer, not an HTTP endpoint or client-controlled originator privilege. Canvas Sync may emit `agentNodeProjection` to keep these server effects out of editable undo.
+
+## Conversation titles
+
+[`conversation-title.ts`](../../packages/shared/src/types/api/conversation-title.ts) defines the shared schemas and inferred types for `ConversationTitle { title, source }`, batch queries, and manual renames. `POST /api/agent/threads/titles/query` validates `{ canvasId, threadIds }` (at most 100 thread IDs; an empty batch is valid) and returns `{ titles }` keyed by thread ID. `PUT /api/agent/threads/:threadId/title?canvasId=...` validates params, query, and a trimmed non-empty `{ title }` of at most 120 characters, returning the effective title or `404 thread_not_found` when no writable Question or durable thread exists.
+
+Both routes await the shared `ConversationTitleService`: current Question ownership resolves to the canonical node label and protected provenance, otherwise the durable thread owns its host title. A missing owner produces `{ title: null, source: null }` on query, not an error. Queries never generate titles, realize an Agent, or repair metadata. The backend alone normalizes and arbitrates title sources; the frontend caches exact responses and keeps pre-send unbound manual intent locally until durable creation. Existing thread events invalidate cache entries, and Question naming uses Canvas Sync; no separate title SSE contract is added. See [conversation naming policy](./agent-architecture.md#panel-conversation-titles).
 
 ## Agent history paging
 
@@ -148,9 +156,11 @@ grep -l 'ZodObject\|safeParse' dist/assets/*.js && echo LEAK || echo OK
 
 ## Code entry points
 
-| File                                                                    | Responsibility                                                                       |
-| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| [types/api/](../../packages/shared/src/types/api)                       | Canonical wire schemas and inferred types                                            |
-| [agent-node.ts](../../packages/shared/src/types/api/agent-node.ts)      | Bounded Question edit, association, result-acknowledgement, and projection contracts |
-| [canvas.route.ts](../../apps/server/src/modules/canvas/canvas.route.ts) | Runtime input validation and owner-specific Canvas operations                        |
-| [canvas.ts](../../apps/web/src/api/canvas.ts)                           | Type-only web contract imports and Canvas HTTP helpers                               |
+| File                                                                                           | Responsibility                                                                       |
+| ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| [types/api/](../../packages/shared/src/types/api)                                              | Canonical wire schemas and inferred types                                            |
+| [agent-node.ts](../../packages/shared/src/types/api/agent-node.ts)                             | Bounded Question edit, association, result-acknowledgement, and projection contracts |
+| [canvas.route.ts](../../apps/server/src/modules/canvas/canvas.route.ts)                        | Runtime input validation and owner-specific Canvas operations                        |
+| [canvas.ts](../../apps/web/src/api/canvas.ts)                                                  | Type-only web contract imports and Canvas HTTP helpers                               |
+| [conversation-title.ts](../../packages/shared/src/types/api/conversation-title.ts)             | Canonical title query and rename schemas                                             |
+| [conversation-title.route.ts](../../apps/server/src/modules/agent/conversation-title.route.ts) | Validated Canvas-scoped title routes                                                 |

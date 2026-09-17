@@ -19,6 +19,7 @@ import {
 } from './agent-thread-resolver.js';
 import { runAgent } from './agent.service.js';
 import { envelopeHasImage } from './conversation/envelope.js';
+import { conversationTitleService } from './conversation-title.service.js';
 import { readWorkspaceMemory } from './memory/index.js';
 import { planSkillDispatch } from './skill-model-routing.js';
 import { resolveSpacePrompt } from './space-instruction-frames.js';
@@ -126,7 +127,15 @@ const DEFAULT_DEPENDENCIES: AgentThreadServiceDependencies = {
   realizeExternal: (options) => externalAgentRealization.realize(options),
   waitForTurnRelease: waitForAgentTurnRelease,
   acquireTurn: acquireAgentTurn,
-  startLifecycle: (...args) => agentNodeLifecycle.start(...args),
+  startLifecycle: async (target, content, token) => {
+    await agentNodeLifecycle.start(target, content, token);
+    // Preparation can fail before a driver exists; naming never requires ACP.
+    await conversationTitleService.ensureFallback(
+      target.canvasId,
+      target.threadId,
+      content,
+    );
+  },
   finishLifecycle: (...args) => agentNodeLifecycle.done(...args),
   failLifecycle: (...args) => agentNodeLifecycle.error(...args),
   runExternal: runAcpAgent,
@@ -624,7 +633,6 @@ export class AgentThreadService {
         binding,
         threadId: options.threadId,
         canvasId: options.canvasId,
-        questionOwned: Boolean(fixedTarget || options.agentTarget),
         envelope: options.envelope,
         submission: options.submission,
         overlay: emptyAcpOverlay(),
@@ -649,7 +657,6 @@ export class AgentThreadService {
         : undefined,
       threadId: options.threadId,
       canvasId: options.canvasId,
-      questionOwned: Boolean(fixedTarget || options.agentTarget),
       envelope: options.envelope,
       submission: options.submission,
       context: {

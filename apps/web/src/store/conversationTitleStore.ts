@@ -4,12 +4,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-import {
-  extractTitleFromText,
-  normalizeAcpConversationTitle,
-  normalizeConversationTitle,
-} from '@huabu/shared/conversation-title';
-
 import { ApiError } from '@/api/_client';
 import {
   queryConversationTitles,
@@ -38,19 +32,6 @@ export const conversationTitleKey = (canvasId: string, threadId: string) =>
   JSON.stringify([canvasId, threadId]);
 
 const EMPTY_TITLE: ConversationTitle = { title: null, source: null };
-const priority = { user: 4, generated: 3, acp: 2, fallback: 1 };
-const rank = (value: ConversationTitle) =>
-  value.source ? priority[value.source] : 0;
-
-/** Validate before display or ranking, including cache entries retained by HMR. */
-function normalizeTitleValue(value: ConversationTitle): ConversationTitle {
-  const title =
-    value.source === 'acp'
-      ? normalizeAcpConversationTitle(value.title)
-      : normalizeConversationTitle(value.title);
-  if (!title) return EMPTY_TITLE;
-  return title === value.title ? value : { ...value, title };
-}
 
 export const useConversationTitleStore = create<TitleState>()(
   persist(() => ({ entries: {}, pending: {}, refreshEpoch: 0 }), {
@@ -88,9 +69,7 @@ export const useConversationTitleStore = create<TitleState>()(
 
 function entry(key: string): TitleEntry {
   const cached = useConversationTitleStore.getState().entries[key];
-  return cached
-    ? { ...cached, value: normalizeTitleValue(cached.value) }
-    : { value: EMPTY_TITLE, revision: 0 };
+  return cached ?? { value: EMPTY_TITLE, revision: 0 };
 }
 
 function patch(key: string, change: Partial<TitleEntry>) {
@@ -120,41 +99,29 @@ export function getConversationTitle(
   const pending = state.pending[key];
   return pending
     ? { title: pending, source: 'user' }
-    : normalizeTitleValue(state.entries[key]?.value ?? EMPTY_TITLE);
-}
-
-export function seedConversationTitle(
-  canvasId: string,
-  threadId: string,
-  prompt: string,
-) {
-  const key = conversationTitleKey(canvasId, threadId);
-  const title = normalizeConversationTitle(extractTitleFromText(prompt));
-  if (title && !entry(key).value.title)
-    patch(key, { value: { title, source: 'fallback' } });
-}
-
-export function receiveAcpConversationTitle(
-  canvasId: string,
-  threadId: string,
-  raw: string | null | undefined,
-) {
-  const title = normalizeAcpConversationTitle(raw);
-  const key = conversationTitleKey(canvasId, threadId);
-  const value: ConversationTitle = { title, source: 'acp' };
-  if (!title || rank(getConversationTitle(canvasId, threadId)) > rank(value))
-    return;
-  patch(key, {
-    value,
-    durable: true,
-    revision: entry(key).revision + 1,
-  });
+    : (state.entries[key]?.value ?? EMPTY_TITLE);
 }
 
 const queries = new Map<string, Promise<void>>();
+const invalidated = new Set<string>();
 const saves = new Map<string, Promise<void>>();
 const errorMessage = (error: unknown) =>
   error instanceof Error ? error.message : 'Failed to save conversation title';
+
+/** Refetch backend facts; events arriving during a read queue one fresh read. */
+export function invalidateConversationTitle(
+  canvasId: string,
+  threadId: string,
+) {
+  if (!canvasId) return;
+  const key = conversationTitleKey(canvasId, threadId);
+  patch(key, { durable: true });
+  // Do not invalidate the revision of an in-flight manual save. Reads begun
+  // during that save are already fenced by the renaming flag.
+  if (!entry(key).renaming) patch(key, { revision: entry(key).revision + 1 });
+  if (queries.has(key)) invalidated.add(key);
+  else void refreshConversationTitles(canvasId, [threadId]);
+}
 
 /** Dedupe overlapping requests per namespace/thread, not just identical batches. */
 export async function refreshConversationTitles(
@@ -185,20 +152,18 @@ export async function refreshConversationTitles(
           batch.map(async (threadId, index) => {
             const key = conversationTitleKey(canvasId, threadId);
             const current = entry(key);
-            const received = titles[threadId];
-            const value = received && normalizeTitleValue(received);
-            // A newer ACP event must not discard a generated upgrade. Keep
-            // revision protection for equal-ranked results, especially renames.
+            const value = titles[threadId];
+            // The backend owns title policy; only local edit/read ordering
+            // can prevent adopting its exact projection, including absence.
             if (
               value &&
+              !invalidated.has(key) &&
               !duringRename[index] &&
               !current.renaming &&
-              (current.revision === revisions[index] ||
-                rank(value) > rank(current.value))
+              current.revision === revisions[index]
             ) {
               patch(key, {
-                value:
-                  rank(value) >= rank(current.value) ? value : current.value,
+                value,
                 durable: current.durable || !!value.title,
                 error: current.failedTitle ? current.error : undefined,
               });
@@ -222,9 +187,12 @@ export async function refreshConversationTitles(
         });
       })
       .finally(() => {
-        batch.forEach((id) =>
-          queries.delete(conversationTitleKey(canvasId, id)),
-        );
+        const followup = batch.filter((id) => {
+          const key = conversationTitleKey(canvasId, id);
+          queries.delete(key);
+          return invalidated.delete(key);
+        });
+        if (followup.length) void refreshConversationTitles(canvasId, followup);
       });
     batch.forEach((id) =>
       queries.set(conversationTitleKey(canvasId, id), request),
@@ -342,7 +310,7 @@ export function refreshConversationTitleAfterStream(
   threadId: string,
 ) {
   void flushPendingConversationTitle(canvasId, threadId).then(() =>
-    refreshConversationTitles(canvasId, [threadId]),
+    invalidateConversationTitle(canvasId, threadId),
   );
   useConversationTitleStore.setState((state) => ({
     refreshEpoch: state.refreshEpoch + 1,

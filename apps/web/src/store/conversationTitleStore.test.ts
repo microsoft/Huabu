@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApiError } from '@/api/_client';
 import {
@@ -14,12 +14,11 @@ import {
   conversationTitleKey,
   flushPendingConversationTitle,
   getConversationTitle,
+  invalidateConversationTitle,
   needsConversationTitleRefresh,
-  receiveAcpConversationTitle,
   refreshConversationTitles,
   renameConversationTitle,
   retryConversationTitle,
-  seedConversationTitle,
   useConversationTitleStore,
 } from './conversationTitleStore';
 
@@ -38,7 +37,15 @@ const key = conversationTitleKey('canvas', 'thread');
 const current = () => getConversationTitle('canvas', 'thread');
 const systemLikeTitle =
   'You are a helpful assistant collaborating with a user inside **Huabu**, an infinite visual Space. The user works on an i';
-const invalidAcpTitles = ['', '   ', 'x'.repeat(121)];
+const settleRequests = new Set<() => void>();
+
+async function loadTitle(
+  title: string,
+  source: ConversationTitle['source'] = 'fallback',
+) {
+  query.mockResolvedValueOnce({ titles: { thread: { title, source } } });
+  await refreshConversationTitles('canvas', ['thread']);
+}
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -47,8 +54,18 @@ function deferred<T>() {
     resolve = yes;
     reject = no;
   });
+  // A failed race assertion must not leave the store's module-level dedupe locked.
+  void promise.catch(() => {});
+  settleRequests.add(() => reject(new Error('Test cleanup')));
   return { promise, resolve, reject };
 }
+
+afterEach(async () => {
+  query.mockResolvedValue({ titles: {} });
+  for (const settle of settleRequests) settle();
+  settleRequests.clear();
+  for (let index = 0; index < 10; index++) await Promise.resolve();
+});
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -73,27 +90,34 @@ beforeEach(() => {
 });
 
 describe('conversation titles', () => {
-  it('uses a first-line fallback immediately and never replaces it with a later prompt', () => {
-    seedConversationTitle('canvas', 'thread', '  First prompt\nSecond line ');
-    seedConversationTitle('canvas', 'thread', 'Later prompt');
-    expect(current()).toEqual({ title: 'First prompt', source: 'fallback' });
+  it('remains untitled until the backend supplies a title', async () => {
+    expect(current()).toEqual({ title: null, source: null });
+    await loadTitle('Backend fallback');
+    expect(current()).toEqual({
+      title: 'Backend fallback',
+      source: 'fallback',
+    });
   });
 
-  it.each([
-    ['# **Research plan**', 'Research plan'],
-    ['Intro\n## Specific topic', 'Specific topic'],
-    ['\n> - **Topic** and `code`', 'Topic and code'],
-    ['A'.repeat(80), 'A'.repeat(50)],
+  it.each<ConversationTitle>([
+    { title: 'Backend generated', source: 'generated' },
+    { title: 'Backend ACP', source: 'acp' },
+    { title: 'Backend fallback', source: 'fallback' },
+    { title: null, source: null },
+    { title: '', source: 'acp' },
+    { title: '  Topic\tname  ', source: 'acp' },
+    { title: 'Multiple\nlines', source: 'acp' },
+    { title: 'x'.repeat(121), source: 'acp' },
   ])(
-    'seeds the same fallback that the server returns for %s',
-    async (prompt, expected) => {
-      seedConversationTitle('canvas', 'thread', prompt);
-      expect(current()).toEqual({ title: expected, source: 'fallback' });
-      query.mockResolvedValueOnce({
-        titles: { thread: { title: expected, source: 'fallback' } },
-      });
+    'adopts the exact backend projection without local ranking or filtering: %j',
+    async (value) => {
+      await loadTitle('Previous server manual title', 'user');
+      query.mockResolvedValueOnce({ titles: { thread: value } });
       await refreshConversationTitles('canvas', ['thread']);
-      expect(current()).toEqual({ title: expected, source: 'fallback' });
+      expect(current()).toEqual(value);
+      expect(useConversationTitleStore.getState().entries[key].value).toEqual(
+        value,
+      );
     },
   );
 
@@ -181,56 +205,98 @@ describe('conversation titles', () => {
     expect(query).toHaveBeenCalledTimes(2);
   });
 
-  it('accepts generated query upgrades despite intervening live ACP revisions', async () => {
+  it('fences an invalidated in-flight read and fetches the latest backend value after it settles', async () => {
+    await loadTitle('Displayed');
+    const result = deferred<QueryConversationTitlesResponse>();
+    const latest = deferred<QueryConversationTitlesResponse>();
+    query.mockClear();
+    query
+      .mockReturnValueOnce(result.promise)
+      .mockReturnValueOnce(latest.promise);
+    const loading = refreshConversationTitles('canvas', ['thread']);
+    const revision = useConversationTitleStore.getState().entries[key].revision;
+    invalidateConversationTitle('canvas', 'thread');
+    expect(
+      useConversationTitleStore.getState().entries[key].revision,
+    ).toBeGreaterThan(revision);
+    expect(query).toHaveBeenCalledTimes(1);
+    result.resolve({
+      titles: { thread: { title: 'Obsolete', source: 'generated' } },
+    });
+    await vi.waitFor(() => expect(query).toHaveBeenCalledTimes(2));
+    expect(current()).toEqual({ title: 'Displayed', source: 'fallback' });
+    latest.resolve({
+      titles: { thread: { title: 'Latest backend', source: 'fallback' } },
+    });
+    await loading;
+    await vi.waitFor(() =>
+      expect(current()).toEqual({
+        title: 'Latest backend',
+        source: 'fallback',
+      }),
+    );
+    expect(query).toHaveBeenLastCalledWith({
+      canvasId: 'canvas',
+      threadIds: ['thread'],
+    });
+  });
+
+  it('coalesces a burst of invalidations into one followup while ordinary refreshes only deduplicate', async () => {
     const result = deferred<QueryConversationTitlesResponse>();
     query.mockReturnValueOnce(result.promise);
     const loading = refreshConversationTitles('canvas', ['thread']);
-    receiveAcpConversationTitle('canvas', 'thread', ' ACP name ');
-    receiveAcpConversationTitle('canvas', 'thread', 'Newer ACP name');
-    receiveAcpConversationTitle('canvas', 'thread', '  ');
-    receiveAcpConversationTitle('canvas', 'thread', null);
+    const duplicate = refreshConversationTitles('canvas', ['thread']);
+    for (let index = 0; index < 10; index++)
+      invalidateConversationTitle('canvas', 'thread');
+    expect(query).toHaveBeenCalledTimes(1);
     result.resolve({
-      titles: { thread: { title: 'Generated', source: 'generated' } },
+      titles: { thread: { title: 'Obsolete', source: 'user' } },
     });
-    await loading;
-    expect(current()).toEqual({ title: 'Generated', source: 'generated' });
-    receiveAcpConversationTitle('canvas', 'thread', 'Late ACP name');
-    expect(current()).toEqual({ title: 'Generated', source: 'generated' });
+    await Promise.all([loading, duplicate]);
+    await vi.waitFor(() => expect(current().title).toBe('Title thread'));
+    expect(query).toHaveBeenCalledTimes(2);
   });
 
-  it.each(['acp', 'fallback'] as const)(
-    'protects live ACP against stale %s query responses',
-    async (source) => {
-      const result = deferred<QueryConversationTitlesResponse>();
-      query.mockReturnValueOnce(result.promise);
-      const loading = refreshConversationTitles('canvas', ['thread']);
-      receiveAcpConversationTitle('canvas', 'thread', 'Latest ACP');
-      result.resolve({ titles: { thread: { title: 'Older', source } } });
-      await loading;
-      expect(current()).toEqual({ title: 'Latest ACP', source: 'acp' });
-    },
-  );
-
-  it('upgrades cached ACP through a later backend query and rejects subsequent ACP downgrades', async () => {
-    receiveAcpConversationTitle('canvas', 'thread', 'ACP fallback');
-    expect(needsConversationTitleRefresh('canvas', 'thread')).toBe(true);
-    await refreshConversationTitles('canvas', ['thread']);
-    expect(current()).toEqual({ title: 'Title thread', source: 'generated' });
+  it('retries an untitled realized thread without polling an untouched empty tab', async () => {
     expect(needsConversationTitleRefresh('canvas', 'thread')).toBe(false);
-    receiveAcpConversationTitle('canvas', 'thread', 'Late ACP');
     query.mockResolvedValueOnce({
-      titles: { thread: { title: 'Saved ACP', source: 'acp' } },
+      titles: { thread: { title: null, source: null } },
     });
+    invalidateConversationTitle('canvas', 'thread');
     await refreshConversationTitles('canvas', ['thread']);
-    expect(current()).toEqual({ title: 'Title thread', source: 'generated' });
+    expect(current()).toEqual({ title: null, source: null });
+    expect(needsConversationTitleRefresh('canvas', 'thread')).toBe(true);
+    expect(needsConversationTitleRefresh('canvas', 'untouched')).toBe(false);
   });
 
-  it('protects manual priority against both live ACP and older server responses', async () => {
+  it('does not invalidate a manual save when ACP metadata triggers a refetch', async () => {
+    await loadTitle('Original');
+    const saving = deferred<ConversationTitle>();
+    save.mockReturnValueOnce(saving.promise);
+    const rename = renameConversationTitle('canvas', 'thread', 'Manual', false);
+    const revision = useConversationTitleStore.getState().entries[key].revision;
+    query.mockResolvedValueOnce({
+      titles: { thread: { title: 'Old backend', source: 'acp' } },
+    });
+    invalidateConversationTitle('canvas', 'thread');
+    await refreshConversationTitles('canvas', ['thread']);
+    expect(useConversationTitleStore.getState().entries[key].revision).toBe(
+      revision,
+    );
+    expect(current().title).toBe('Manual');
+    saving.resolve({ title: 'Saved manual title', source: 'user' });
+    await rename;
+    expect(current()).toEqual({ title: 'Saved manual title', source: 'user' });
+    expect(useConversationTitleStore.getState().entries[key].renaming).toBe(
+      false,
+    );
+  });
+
+  it('protects a manual rename against an older server response', async () => {
     const result = deferred<QueryConversationTitlesResponse>();
     query.mockReturnValueOnce(result.promise);
     const loading = refreshConversationTitles('canvas', ['thread']);
     await renameConversationTitle('canvas', 'thread', ' My title ', false);
-    receiveAcpConversationTitle('canvas', 'thread', 'Agent title');
     result.resolve({
       titles: { thread: { title: 'Old user title', source: 'user' } },
     });
@@ -279,7 +345,7 @@ describe('conversation titles', () => {
   );
 
   it('ignores an in-save query after a failed rename rolls back', async () => {
-    seedConversationTitle('canvas', 'thread', 'Original');
+    await loadTitle('Original');
     const saving = deferred<ConversationTitle>();
     save.mockReturnValueOnce(saving.promise);
     const rename = renameConversationTitle(
@@ -305,7 +371,7 @@ describe('conversation titles', () => {
   });
 
   it('preserves a first-send rename across thread_not_found, reload, and later creation', async () => {
-    seedConversationTitle('canvas', 'thread', 'First prompt');
+    await loadTitle('First prompt');
     save.mockRejectedValueOnce(
       new ApiError(404, { code: 'thread_not_found' }, 'Not durable yet'),
     );
@@ -330,7 +396,7 @@ describe('conversation titles', () => {
   });
 
   it('does not turn unrelated 404 failures into pending intent', async () => {
-    seedConversationTitle('canvas', 'thread', 'Original');
+    await loadTitle('Original');
     save.mockRejectedValueOnce(new ApiError(404, {}, 'Route not found'));
     await expect(
       renameConversationTitle('canvas', 'thread', 'New', false),
@@ -352,177 +418,45 @@ describe('conversation titles', () => {
     expect(useConversationTitleStore.getState().pending[key]).toBeUndefined();
   });
 
-  it('normalizes streamed ACP names like the durable server title', () => {
-    receiveAcpConversationTitle('canvas', 'thread', '  Topic\n\tname  ');
-    expect(current().title).toBe('Topic name');
-    receiveAcpConversationTitle('canvas', 'thread', 'x'.repeat(150));
-    expect(current().title).toBe('Topic name');
-    receiveAcpConversationTitle('canvas', 'thread', 'x'.repeat(120));
-    expect(current().title).toHaveLength(120);
-  });
-
-  it.each(invalidAcpTitles)(
-    'rejects blank or overlong streamed/query ACP without displacing a fallback: %s',
-    async (title) => {
-      seedConversationTitle('canvas', 'thread', 'Actual user question');
-      const result = deferred<QueryConversationTitlesResponse>();
-      query.mockReturnValueOnce(result.promise);
-      const loading = refreshConversationTitles('canvas', ['thread']);
-      receiveAcpConversationTitle('canvas', 'thread', title);
-      expect(current()).toEqual({
-        title: 'Actual user question',
-        source: 'fallback',
-      });
-      result.resolve({
-        titles: { thread: { title: 'Generated topic', source: 'generated' } },
-      });
-      await loading;
-      expect(current()).toEqual({
-        title: 'Generated topic',
-        source: 'generated',
-      });
-      query.mockResolvedValueOnce({
-        titles: { thread: { title, source: 'acp' } },
-      });
-      await refreshConversationTitles('canvas', ['thread']);
-      expect(current()).toEqual({
-        title: 'Generated topic',
-        source: 'generated',
-      });
-    },
-  );
-
-  it.each(invalidAcpTitles)(
-    'ignores invalid cached ACP and allows a server fallback: %s',
-    async (title) => {
-      useConversationTitleStore.setState({
-        entries: {
-          [key]: {
-            value: { title, source: 'acp' },
-            revision: 7,
-            durable: true,
-          },
-        },
-      });
-      expect(current()).toEqual({ title: null, source: null });
-      expect(needsConversationTitleRefresh('canvas', 'thread')).toBe(true);
-      query.mockResolvedValueOnce({
-        titles: { thread: { title: 'Actual question', source: 'fallback' } },
-      });
-      await refreshConversationTitles('canvas', ['thread']);
-      expect(current()).toEqual({
-        title: 'Actual question',
-        source: 'fallback',
-      });
-      expect(useConversationTitleStore.getState().entries[key].value).toEqual(
-        current(),
-      );
-    },
-  );
-
-  it('clears invalid cached/query ACP rank and allows immediate prompt seeding', async () => {
-    useConversationTitleStore.setState({
-      entries: {
-        [key]: {
-          value: { title: 'x'.repeat(121), source: 'acp' },
-          revision: 0,
-          durable: true,
-        },
-      },
-    });
-    query.mockResolvedValueOnce({
-      titles: { thread: { title: 'x'.repeat(121), source: 'acp' } },
-    });
-    await refreshConversationTitles('canvas', ['thread']);
-    expect(useConversationTitleStore.getState().entries[key].value).toEqual({
-      title: null,
-      source: null,
-    });
-    seedConversationTitle('canvas', 'thread', 'Real question');
-    expect(current()).toEqual({ title: 'Real question', source: 'fallback' });
-  });
-
-  it('retains valid ACP when invalid metadata or lower-ranked queries arrive', async () => {
-    receiveAcpConversationTitle('canvas', 'thread', 'Valid ACP');
-    for (const title of invalidAcpTitles) {
-      receiveAcpConversationTitle('canvas', 'thread', title);
-      query.mockResolvedValueOnce({
-        titles: { thread: { title, source: 'acp' } },
-      });
-      await refreshConversationTitles('canvas', ['thread']);
-      expect(current()).toEqual({ title: 'Valid ACP', source: 'acp' });
-    }
-    query.mockResolvedValueOnce({
-      titles: { thread: { title: 'Prompt', source: 'fallback' } },
-    });
-    await refreshConversationTitles('canvas', ['thread']);
-    expect(current().title).toBe('Valid ACP');
-  });
-
-  it.each([systemLikeTitle, systemLikeTitle.replace(/\*/g, '')])(
-    'accepts system-like ACP text within 120 characters as a fallback: %s',
-    async (title) => {
-      expect(title.length).toBeLessThanOrEqual(120);
-      seedConversationTitle('canvas', 'thread', 'First prompt');
-      receiveAcpConversationTitle('canvas', 'thread', title);
-      expect(current()).toEqual({ title, source: 'acp' });
-      seedConversationTitle('canvas', 'queried', 'First prompt');
-      query.mockResolvedValueOnce({
-        titles: { queried: { title, source: 'acp' } },
-      });
-      await refreshConversationTitles('canvas', ['queried']);
-      expect(getConversationTitle('canvas', 'queried')).toEqual({
-        title,
-        source: 'acp',
-      });
-      await refreshConversationTitles('canvas', ['thread', 'queried']);
-      expect(current().source).toBe('generated');
-      expect(getConversationTitle('canvas', 'queried').source).toBe(
-        'generated',
-      );
-    },
-  );
-
   it('accepts system-like manual cached, queried, and pending titles', async () => {
     query.mockResolvedValueOnce({
       titles: { thread: { title: systemLikeTitle, source: 'user' } },
     });
     await refreshConversationTitles('canvas', ['thread']);
-    receiveAcpConversationTitle('canvas', 'thread', 'Valid ACP');
-    await refreshConversationTitles('canvas', ['thread']);
     expect(current()).toEqual({ title: systemLikeTitle, source: 'user' });
     await renameConversationTitle('canvas', 'draft', systemLikeTitle, true);
-    receiveAcpConversationTitle('canvas', 'draft', 'Valid ACP');
     expect(getConversationTitle('canvas', 'draft')).toEqual({
       title: systemLikeTitle,
       source: 'user',
     });
   });
 
-  it('preserves pending manual intent during ACP events and a generated query upgrade', async () => {
+  it('preserves pending manual intent through invalidation and backend refreshes', async () => {
     const result = deferred<QueryConversationTitlesResponse>();
     query.mockReturnValueOnce(result.promise);
     const loading = refreshConversationTitles('canvas', ['thread']);
-    receiveAcpConversationTitle('canvas', 'thread', 'ACP fallback');
     save.mockRejectedValue(new ApiError(404, {}, 'Not durable yet'));
     await renameConversationTitle('canvas', 'thread', 'Pending manual', true);
-    receiveAcpConversationTitle('canvas', 'thread', 'Late ACP');
+    invalidateConversationTitle('canvas', 'thread');
+    invalidateConversationTitle('canvas', 'thread');
     result.resolve({
       titles: { thread: { title: 'Generated', source: 'generated' } },
     });
     await loading;
+    await vi.waitFor(() => expect(query).toHaveBeenCalledTimes(2));
+    await refreshConversationTitles('canvas', ['thread']);
     expect(current()).toEqual({ title: 'Pending manual', source: 'user' });
     expect(useConversationTitleStore.getState().pending[key]).toBe(
       'Pending manual',
     );
     expect(useConversationTitleStore.getState().entries[key].value).toEqual({
-      title: 'Generated',
+      title: 'Title thread',
       source: 'generated',
     });
   });
 
   it('rolls back a failed established rename and retries the attempted title explicitly', async () => {
-    receiveAcpConversationTitle('canvas', 'thread', 'Original');
+    await loadTitle('Original', 'acp');
     save.mockRejectedValueOnce(new Error('Save failed'));
     await expect(
       renameConversationTitle('canvas', 'thread', 'New', false),
@@ -545,7 +479,6 @@ describe('conversation titles', () => {
   });
 
   it('persists only pending pre-send user names and flushes after reload/durability', async () => {
-    seedConversationTitle('canvas', 'thread', 'Prompt');
     await renameConversationTitle('canvas', 'thread', 'Draft title', true);
     expect(save).not.toHaveBeenCalled();
     const persisted = localStorage.getItem('huabu.conversationTitleDrafts')!;

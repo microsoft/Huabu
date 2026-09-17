@@ -21,11 +21,12 @@ export function saveChatAsQuestion(
     ...input,
     data: {
       ...input.data,
-      // Copy once; ordinary preprocessing must not replace this node label.
+      // Transfer naming provenance; automatic names continue through the backend service.
       ...(title?.title
         ? {
             label: title.title,
-            labelSource: title.source === 'user' ? 'user' : 'agent',
+            labelSource: title.source === 'user' ? 'user' : 'auto',
+            conversationTitleSource: title.source,
           }
         : {}),
     },

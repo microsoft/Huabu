@@ -13,8 +13,9 @@ export function normalizeConversationTitle(value: unknown): string | null {
   return normalizeWhitespace(value)?.slice(0, MAX_TITLE_LENGTH) ?? null;
 }
 
-/** Accept nonempty ACP titles within the limit, without inspecting their text. */
+/** Accept nonempty, single-line ACP titles within the limit. */
 export function normalizeAcpConversationTitle(value: unknown): string | null {
+  if (typeof value !== 'string' || /[\r\n]/.test(value)) return null;
   const title = normalizeWhitespace(value);
   if (!title || title.length > MAX_TITLE_LENGTH) return null;
   return title;

@@ -158,11 +158,8 @@ export const profiles: Record<CanvasNodeType, NodePreprocessProfile> = {
   question: {
     nodeType: 'question',
     bodyOwnership: 'authored',
-    capabilities: ['resolve_input', 'generate_label', 'build_patch'],
+    capabilities: ['resolve_input', 'build_patch'],
     watchFields: ['content'],
-    capabilityTriggers: {
-      generate_label: ['content'],
-    },
   },
 };
 

@@ -40,7 +40,7 @@ function planFor(request: PreprocessNodeRequest): string[] {
 }
 
 describe('buildPlan — question label gating', () => {
-  it('runs generate_label for an automatic question label', () => {
+  it('delegates automatic Question naming instead of planning generate_label', () => {
     expect(
       planFor(
         req('question', {
@@ -49,7 +49,7 @@ describe('buildPlan — question label gating', () => {
           labelSource: 'auto',
         }),
       ),
-    ).toContain('generate_label');
+    ).not.toContain('generate_label');
   });
 
   it.each(['user', 'agent'])(
@@ -68,7 +68,7 @@ describe('buildPlan — question label gating', () => {
   );
 
   it.each(['user', 'agent'])(
-    'allows generation when a %s question label is empty',
+    'delegates even when a %s question label is empty',
     (labelSource) => {
       expect(
         planFor(
@@ -78,7 +78,7 @@ describe('buildPlan — question label gating', () => {
             labelSource,
           }),
         ),
-      ).toContain('generate_label');
+      ).not.toContain('generate_label');
     },
   );
 });

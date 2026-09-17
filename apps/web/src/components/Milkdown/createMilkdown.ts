@@ -67,6 +67,7 @@ import type {
   MilkdownBlockType,
   MilkdownFormattingState,
   MilkdownInlineMark,
+  MilkdownLinkActivation,
   MilkdownTextColor,
 } from './types';
 import type { Ctx } from '@milkdown/ctx';
@@ -226,6 +227,8 @@ export interface MilkdownFactoryOptions {
   previewMode?: boolean;
   /** Opt in to host-owned plain-click navigation; modifiers stay external. */
   onLinkClick?: (href: string) => void;
+  /** Explicit activation policy; defaults to modifier for editors, plain for previews. */
+  linkActivation?: MilkdownLinkActivation;
 }
 
 /** Range of a drag, expressed in ProseMirror doc positions. */
@@ -275,6 +278,20 @@ export interface MilkdownLinkState {
   range: MilkdownTextRange;
 }
 
+/** Opaque edit capability, valid only for the document captured by this instance. */
+export interface MilkdownLinkSnapshot extends MilkdownLinkState {
+  readonly text: string;
+  readonly kind: 'link' | 'selection';
+  /** Cross-block selections can receive marks, but cannot be flattened to a label. */
+  readonly textEditable: boolean;
+}
+
+interface MilkdownLinkEdit {
+  snapshot: MilkdownLinkSnapshot;
+  text?: string;
+  applied?: boolean;
+}
+
 export interface MilkdownInlineMathState {
   value: string;
   range: MilkdownTextRange;
@@ -322,6 +339,25 @@ export interface MilkdownInstance {
   getSelectionText(): string | null;
   /** Active link under the current selection or cursor. */
   getActiveLink(): MilkdownLinkState | null;
+  /** Capture one whole link or unlinked selected text, without moving selection. */
+  getLinkSnapshot(anchor?: HTMLAnchorElement): MilkdownLinkSnapshot | null;
+  /** Send the captured target to this editor's single React link-panel owner. */
+  requestLinkEdit(anchor?: HTMLAnchorElement): boolean;
+  onLinkEditRequested(
+    listener: (snapshot: MilkdownLinkSnapshot) => void,
+  ): () => void;
+  /** Restore the captured selection only while its document is still current. */
+  restoreLinkSelection(snapshot: MilkdownLinkSnapshot): void;
+  /** Reject foreign or stale snapshots, including equal text at other positions. */
+  isLinkSnapshotCurrent(snapshot: MilkdownLinkSnapshot): boolean;
+  /** Viewport bounds of a captured link, or null after a document change. */
+  getLinkClientRect(snapshot: MilkdownLinkSnapshot): DOMRect | null;
+  /** Atomically create/edit a link; null href removes only an existing link mark. */
+  editLink(
+    snapshot: MilkdownLinkSnapshot,
+    href: string | null,
+    text?: string,
+  ): boolean;
   /** Active inline math node under the current selection. */
   getActiveInlineMath(): MilkdownInlineMathState | null;
   /** Toggle an inline mark at the current selection. */
@@ -333,7 +369,11 @@ export interface MilkdownInstance {
   /** Apply or clear a semantic background/highlight color mark. */
   setBackgroundColor(color: MilkdownBackgroundColor | null): void;
   /** Apply or clear a link mark at the current selection. */
-  setLink(href: string | null, range?: MilkdownTextRange | null): void;
+  setLink(
+    href: string | null,
+    range?: MilkdownTextRange | null,
+    edit?: MilkdownLinkEdit,
+  ): void;
   /** Insert an inline math scaffold at the current selection. */
   insertInlineMath(): void;
   /** Insert or update an inline math node. */
@@ -829,7 +869,33 @@ function activeAccentToken(
 function markRangeAt(
   state: EditorState,
   markType: MarkType,
+  position?: number,
 ): (MilkdownTextRange & { attrs: Record<string, unknown> }) | null {
+  // Expand across identical marks even when other formatting splits the text.
+  if (position !== undefined) {
+    const $pos = state.doc.resolve(position);
+    const parent = $pos.parent;
+    if (!parent.inlineContent) return null;
+    const after = parent.childAfter($pos.parentOffset);
+    const before = parent.childBefore($pos.parentOffset);
+    const child =
+      after.node && markType.isInSet(after.node.marks) ? after : before;
+    const mark = child.node && markType.isInSet(child.node.marks);
+    if (!mark) return null;
+    const matches = (index: number) => {
+      const candidate = markType.isInSet(parent.child(index).marks);
+      return candidate !== undefined && mark.eq(candidate);
+    };
+    let first = child.index;
+    let last = child.index;
+    while (first > 0 && matches(first - 1)) first--;
+    while (last + 1 < parent.childCount && matches(last + 1)) last++;
+    let from = $pos.start();
+    for (let i = 0; i < first; i++) from += parent.child(i).nodeSize;
+    let to = from;
+    for (let i = first; i <= last; i++) to += parent.child(i).nodeSize;
+    return { from, to, attrs: mark.attrs };
+  }
   const { selection } = state;
   const from = selection.empty
     ? Math.max(0, selection.from - 2)
@@ -1640,20 +1706,25 @@ function createLinkClickHandler(
       !mouseEvent.ctrlKey &&
       !mouseEvent.shiftKey &&
       !mouseEvent.altKey;
+    // Always block native navigation, including a plain click in a read-only
+    // canvas card. Leave propagation intact so that click can select its node.
+    mouseEvent.preventDefault();
+    if (selecting) return false;
+    // Native keyboard activation has no pointer click count or follow modifier.
+    const isKeyboardActivation = mouseEvent.detail === 0 && isPlainClick;
+    if (
+      !hasFollowModifier &&
+      !(allowPlainClick && isPlainClick) &&
+      !isKeyboardActivation
+    )
+      return false;
     if (onLinkClick && isPlainClick) {
-      mouseEvent.preventDefault();
-      // Only the current gesture matters; an older selection must not block a click.
-      if (selecting) return false;
       onLinkClick(href);
       return true;
     }
-    if (!allowPlainClick && !hasFollowModifier) return false;
-    mouseEvent.preventDefault();
     window.open(href, '_blank', 'noopener,noreferrer');
     return true;
   };
-
-  if (!onLinkClick) return { click, auxclick: click };
 
   return {
     pointerdown: (_view: EditorView, event: PointerEvent): boolean => {
@@ -1807,8 +1878,10 @@ export async function createMilkdown(
   } = options;
   const resolveImageSrc = options.resolveImageSrc ?? ((src: string) => src);
   const useReactToolbar = !previewMode && toolbarMode === 'huabu';
+  const linkActivation =
+    options.linkActivation ?? (previewMode || !editable ? 'plain' : 'modifier');
   const handleLinkClick = createLinkClickHandler(
-    previewMode || !editable,
+    linkActivation === 'plain',
     options.onLinkClick,
   );
   let ariaLabel = initialAriaLabel;
@@ -1875,6 +1948,7 @@ export async function createMilkdown(
             ? inheritedAttributes(state)
             : inheritedAttributes),
           ...(ariaLabel ? { 'aria-label': ariaLabel } : {}),
+          'data-link-activation': linkActivation,
         }),
       };
     });
@@ -1896,6 +1970,13 @@ export async function createMilkdown(
   // plugin's `view.update`. By definition that fires while the editor
   // view is alive, so `editorViewCtx` is always set.
   const listeners = new Set<(markdown: string) => void>();
+  const linkSnapshots = new WeakMap<MilkdownLinkSnapshot, ProseNode>();
+  const linkSelections = new WeakMap<
+    MilkdownLinkSnapshot,
+    EditorState['selection']
+  >();
+  let linkEditListener: ((snapshot: MilkdownLinkSnapshot) => void) | null =
+    null;
   const formattingListeners = new Set<
     (state: MilkdownFormattingState) => void
   >();
@@ -2449,7 +2530,7 @@ export async function createMilkdown(
   });
   crepe.setReadonly(!editable);
 
-  return {
+  const instance: MilkdownInstance = {
     getMarkdown: () => crepe.getMarkdown(),
     setMarkdown: (markdown: string) => {
       crepe.editor.action(replaceAll(normalizeMathDelimiters(markdown)));
@@ -2573,7 +2654,11 @@ export async function createMilkdown(
         const view = ctx.get(editorViewCtx);
         const linkType = getMarkType(ctx, 'link');
         if (!linkType) return;
-        const range = markRangeAt(view.state, linkType);
+        const range = markRangeAt(
+          view.state,
+          linkType,
+          view.state.selection.from,
+        );
         if (!range) return;
         const href = range.attrs.href;
         if (typeof href === 'string') {
@@ -2581,6 +2666,134 @@ export async function createMilkdown(
         }
       });
       return result;
+    },
+    getLinkSnapshot: (anchor) => {
+      let result: MilkdownLinkSnapshot | null = null;
+      crepe.editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        const type = getMarkType(ctx, 'link');
+        if (!type || !view.editable) return;
+        if (anchor && (!anchor.isConnected || !view.dom.contains(anchor)))
+          return;
+        const { selection, doc } = view.state;
+        if (!anchor && selection instanceof NodeSelection) return;
+        let range: MilkdownTextRange = selection;
+        if (!anchor && !selection.empty) {
+          // Native Select All uses AllSelection and includes document boundaries.
+          // Capture only the selected inline extent, retaining interior blocks.
+          let from: number | null = null;
+          let to = selection.to;
+          doc.nodesBetween(selection.from, selection.to, (node, pos) => {
+            if (!node.isInline) return;
+            from ??= Math.max(selection.from, pos);
+            to = Math.min(selection.to, pos + node.nodeSize);
+          });
+          if (from === null) return;
+          range = { from, to };
+        }
+        const position = anchor ? view.posAtDOM(anchor, 0) : range.from;
+        const link = markRangeAt(view.state, type, position);
+        const existing =
+          link && (anchor || (range.from >= link.from && range.to <= link.to));
+        if (anchor && !existing) return;
+        if (existing) range = link;
+        // Mixed text/link ranges create a link over exactly the selection;
+        // only a range wholly inside one existing link expands to its bounds.
+        else if (selection.empty) return;
+        let supported = true;
+        doc.nodesBetween(range.from, range.to, (node, _pos, parent) => {
+          if (
+            node.isInline &&
+            (!node.isText ||
+              !parent?.type.allowsMarkType(type) ||
+              node.marks.some(
+                (mark) =>
+                  mark.type !== type &&
+                  (mark.type.spec.code ||
+                    mark.type.excludes(type) ||
+                    type.excludes(mark.type)),
+              ))
+          )
+            supported = false;
+        });
+        const text = doc.textBetween(range.from, range.to, ' ');
+        if (!supported || !text.trim()) return;
+        result = Object.freeze({
+          kind: existing ? 'link' : 'selection',
+          href:
+            existing && typeof link.attrs.href === 'string'
+              ? link.attrs.href
+              : '',
+          range: Object.freeze({ from: range.from, to: range.to }),
+          text,
+          textEditable:
+            range.to - range.from === text.length && !/[\r\n]/.test(text),
+        });
+        linkSnapshots.set(result, doc);
+        linkSelections.set(result, selection);
+      });
+      return result;
+    },
+    requestLinkEdit: (anchor) => {
+      if (!linkEditListener) return false;
+      const snapshot = instance.getLinkSnapshot(anchor);
+      if (!snapshot) return false;
+      linkEditListener(snapshot);
+      return true;
+    },
+    onLinkEditRequested: (listener) => {
+      linkEditListener = listener;
+      return () => {
+        if (linkEditListener === listener) linkEditListener = null;
+      };
+    },
+    restoreLinkSelection: (snapshot) => {
+      if (!instance.isLinkSnapshotCurrent(snapshot)) return;
+      const selection = linkSelections.get(snapshot);
+      if (!selection) return;
+      crepe.editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        view.dispatch(view.state.tr.setSelection(selection));
+      });
+    },
+    isLinkSnapshotCurrent: (snapshot) => {
+      let current = false;
+      crepe.editor.action((ctx) => {
+        current =
+          linkSnapshots.get(snapshot) === ctx.get(editorViewCtx).state.doc;
+      });
+      return current;
+    },
+    getLinkClientRect: (snapshot) => {
+      if (!instance.isLinkSnapshotCurrent(snapshot)) return null;
+      let rect: DOMRect | null = null;
+      crepe.editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        const start = view.coordsAtPos(snapshot.range.from);
+        const end = view.coordsAtPos(snapshot.range.to);
+        const left = Math.min(start.left, end.left);
+        const top = Math.min(start.top, end.top);
+        rect = new DOMRect(
+          left,
+          top,
+          Math.max(start.right, end.right) - left,
+          Math.max(start.bottom, end.bottom) - top,
+        );
+      });
+      return rect;
+    },
+    editLink: (snapshot, href, text) => {
+      if (!instance.isLinkSnapshotCurrent(snapshot)) return false;
+      if (href !== null && !normalizeSafeLinkHref(href)) return false;
+      if (
+        href !== null &&
+        text !== undefined &&
+        (!text.trim() || /[\r\n]/.test(text))
+      )
+        return false;
+      const edit: MilkdownLinkEdit = { snapshot, text };
+      instance.setLink(href, snapshot.range, edit);
+      return edit.applied === true;
     },
     getActiveInlineMath: () => {
       let result: MilkdownInlineMathState | null = null;
@@ -2782,12 +2995,82 @@ export async function createMilkdown(
         );
       });
     },
-    setLink: (href, range) => {
+    setLink: (href, range, edit) => {
       crepe.editor.action((ctx) => {
         const view = ctx.get(editorViewCtx);
         const linkType = getMarkType(ctx, 'link');
         if (!linkType) return;
         const { state } = view;
+        if (edit) {
+          // Document identity, not matching text or positions, authorizes a write.
+          if (linkSnapshots.get(edit.snapshot) !== state.doc || !view.editable)
+            return;
+          const nextHref = normalizeSafeLinkHref(href);
+          if (href !== null && !nextHref) return;
+          const { from, to } = edit.snapshot.range;
+          const link = markRangeAt(state, linkType, from);
+          if (edit.snapshot.kind === 'link') {
+            if (!link || link.from !== from || link.to !== to) return;
+          } else if (href === null) return;
+          const tr = state.tr;
+          let nextTo = to;
+          if (
+            href !== null &&
+            edit.text !== undefined &&
+            edit.text !== edit.snapshot.text
+          ) {
+            if (!edit.snapshot.textEditable) return;
+            if (!edit.text.trim() || /[\r\n]/.test(edit.text)) return;
+            // Keep untouched prefix/suffix runs and their formatting. The new
+            // middle inherits the marks at its insertion point.
+            const oldText = edit.snapshot.text;
+            if (to - from !== oldText.length) return;
+            let prefix = 0;
+            while (
+              prefix < oldText.length &&
+              prefix < edit.text.length &&
+              oldText[prefix] === edit.text[prefix]
+            )
+              prefix++;
+            let suffix = 0;
+            while (
+              suffix < oldText.length - prefix &&
+              suffix < edit.text.length - prefix &&
+              oldText[oldText.length - suffix - 1] ===
+                edit.text[edit.text.length - suffix - 1]
+            )
+              suffix++;
+            const replacement = edit.text.slice(
+              prefix,
+              edit.text.length - suffix,
+            );
+            const $insertion = state.doc.resolve(from + prefix);
+            const marks = $insertion.nodeAfter?.marks ?? $insertion.marks();
+            if (replacement)
+              tr.replaceWith(
+                from + prefix,
+                to - suffix,
+                state.schema.text(replacement, marks),
+              );
+            else tr.delete(from + prefix, to - suffix);
+            nextTo = from + edit.text.length;
+          }
+          // Replace only selected link marks, including partial old links.
+          // Other marks and block structure remain untouched in this transaction.
+          tr.removeMark(from, nextTo, linkType);
+          if (nextHref)
+            tr.addMark(
+              from,
+              nextTo,
+              linkType.create({
+                ...(edit.snapshot.kind === 'link' ? link?.attrs : {}),
+                href: nextHref,
+              }),
+            );
+          view.dispatch(tr.scrollIntoView());
+          edit.applied = true;
+          return;
+        }
         const liveSelection = state.selection;
         const selectionRange =
           !liveSelection.empty && !(liveSelection instanceof NodeSelection)
@@ -3267,6 +3550,8 @@ export async function createMilkdown(
 
     destroy: async () => {
       listeners.clear();
+      linkEditListener = null;
+      formattingListeners.clear();
       // Neutralise the EditorView's `dispatch` BEFORE we tear Crepe
       // down. Crepe internals schedule transactions through several
       // async paths (tooltip providers' debounced shouldShow that may
@@ -3294,6 +3579,8 @@ export async function createMilkdown(
       await crepe.destroy();
     },
   };
+
+  return instance;
 
   /**
    * Internal: walk every top-level block once and produce both the

@@ -4,6 +4,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const extractMock = vi.hoisted(() => vi.fn());
+const nameQuestion = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+vi.mock('../agent/conversation-title.service.js', () => ({
+  conversationTitleService: { initializeQuestion: nameQuestion },
+}));
 
 vi.mock('./stages/extract.js', () => ({ extract: extractMock }));
 
@@ -45,10 +49,11 @@ function deps(release: () => Promise<void>) {
 
 beforeEach(() => {
   extractMock.mockReset();
+  nameQuestion.mockClear();
 });
 
-describe('Question title Enrich', () => {
-  it('uses the ordinary content metadata provider to generate an automatic label', async () => {
+describe('Question title delegation', () => {
+  it('delegates naming without calling the pipeline provider or returning a label patch', async () => {
     const harness = deps(vi.fn());
     harness.generateContentMeta.mockResolvedValue({ label: 'Generated title' });
     const result = await runPipeline(
@@ -66,20 +71,15 @@ describe('Question title Enrich', () => {
       undefined,
       harness.value,
     );
-    expect(harness.generateContentMeta).toHaveBeenCalledExactlyOnceWith(
+    expect(nameQuestion).toHaveBeenCalledExactlyOnceWith(
+      'canvas-test',
+      'node-test',
       'First user prompt',
-      {
-        title: 'Existing automatic label',
-        needLabel: true,
-        needSummary: false,
-        needKeywords: false,
-      },
+      true,
     );
-    expect(result.enriched?.suggestedLabel).toBe('Generated title');
-    expect(result.patch).toMatchObject({
-      label: 'Generated title',
-      labelSource: 'auto',
-    });
+    expect(harness.generateContentMeta).not.toHaveBeenCalled();
+    expect(result.enriched).toBeUndefined();
+    expect(result.patch).toEqual({});
     expect(result.success).toBe(true);
   });
 
@@ -106,8 +106,9 @@ describe('Question title Enrich', () => {
         undefined,
         harness.value,
       );
-      expect(harness.generateContentMeta).toHaveBeenCalledOnce();
-      expect(result.enriched?.suggestedLabel).toBe('Generated title');
+      expect(harness.generateContentMeta).not.toHaveBeenCalled();
+      expect(nameQuestion).toHaveBeenCalledOnce();
+      expect(result.enriched).toBeUndefined();
       expect(result.patch).not.toHaveProperty('label');
       expect(result.patch).not.toHaveProperty('labelSource');
       expect(result.success).toBe(true);
@@ -129,9 +130,15 @@ describe('Question title Enrich', () => {
       harness.value,
     );
     expect(harness.generateContentMeta).not.toHaveBeenCalled();
+    expect(nameQuestion).toHaveBeenCalledWith(
+      'canvas-test',
+      'node-test',
+      'First prompt',
+      false,
+    );
   });
 
-  it('keeps the local fallback when the provider returns no metadata', async () => {
+  it('never adds a second fallback when the naming service returns no metadata', async () => {
     const harness = deps(vi.fn());
     harness.generateContentMeta.mockResolvedValue(undefined);
     const result = await runPipeline(
@@ -145,12 +152,9 @@ describe('Question title Enrich', () => {
       undefined,
       harness.value,
     );
-    expect(harness.generateContentMeta).toHaveBeenCalledOnce();
+    expect(harness.generateContentMeta).not.toHaveBeenCalled();
     expect(result.enriched).toBeUndefined();
-    expect(result.patch).toMatchObject({
-      label: 'First user prompt',
-      labelSource: 'auto',
-    });
+    expect(result.patch).toEqual({});
     expect(result.success).toBe(true);
   });
 });

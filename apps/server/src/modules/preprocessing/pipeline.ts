@@ -13,6 +13,7 @@ import { randomUUID } from 'node:crypto';
 import { createId } from '@huabu/shared';
 
 import { getLogger } from '../../utils/logger.js';
+import { conversationTitleService } from '../agent/conversation-title.service.js';
 import { wrapAsMhtml } from '../web/mhtml.js';
 import { tryCacheShortCircuit } from './stages/cache-check.js';
 import { enrich } from './stages/enrich.js';
@@ -57,6 +58,30 @@ export async function runPipeline(
   bodyOwnership: BodyOwnership | undefined,
   deps: PipelineDeps,
 ): Promise<PreprocessNodeResult> {
+  if (request.nodeType === 'question') {
+    if (request.options?.allowPersistence !== false) {
+      await conversationTitleService.initializeQuestion(
+        request.canvasId,
+        request.nodeId,
+        typeof request.snapshot.content === 'string'
+          ? request.snapshot.content
+          : '',
+        request.options?.allowLLM !== false &&
+          request.options?.mode !== 'interactive',
+      );
+    }
+    return {
+      nodeId: request.nodeId,
+      nodeType: request.nodeType,
+      trigger: request.trigger,
+      requestId: randomUUID(),
+      success: true,
+      status: 'success',
+      usedCapabilities: [],
+      patch: {},
+      diagnostics: [],
+    };
+  }
   const leases: BlobLease[] = [];
   try {
     return await runPipelineStages(

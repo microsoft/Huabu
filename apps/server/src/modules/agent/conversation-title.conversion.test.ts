@@ -1,352 +1,447 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { agenetes, EXTERNAL_DRIVER_KIND } from './agenetes/drivers.js';
+import { createId, type CanvasNodeId } from '@huabu/shared';
+
+import { agenetes } from './agenetes/drivers.js';
+import { buildHuabuPiWorkloadSpec } from './agenetes/pi-driver.js';
 import {
-  CONVERSATION_TITLE_METADATA_KEY,
   ConversationTitleService,
+  CONVERSATION_TITLE_METADATA_KEY,
+  conversationTitleService,
 } from './conversation-title.service.js';
-import { executeOnServer } from '../canvas/canvas-executor.js';
+import {
+  executeOnServer,
+  hydrateCanvasNodes,
+  applyDeltasOnServerAlreadyLocked,
+} from '../canvas/canvas-executor.js';
+import { subscribeCanvasUpdates } from '../canvas/canvas-sync.js';
 import { PreprocessDispatcher } from '../preprocessing/dispatcher.js';
 import { ProviderManager } from '../preprocessing/provider-manager.js';
-import { getCanvasStore } from '../storage/index.js';
-import { setWorkspacePath } from '../workspace.js';
+import { createSpace, space, withCanvasMutex } from '../storage/index.js';
+import {
+  forEachProductProfile,
+  mountTestWorkspace,
+  type MountedTestStorage,
+} from '../storage/testing.js';
+import { canvasAcpNamespace } from '../workspace/paths.js';
 
-import type { ThreadRecord } from '@agenetes/agenetes';
-import type { ConversationTitle } from '@huabu/shared';
 import type { CanvasNode } from '@huabu/shared/canvas-engine';
+import type { MockInstance } from 'vitest';
 
-const canvasId = 'canvas-conversion';
-const threadId = 'thread-conversion';
-let tmp: string;
-
-beforeEach(() => {
-  tmp = mkdtempSync(join(tmpdir(), 'huabu-title-conversion-'));
-  vi.stubEnv('HUABU_DATA_DIR', tmp);
-  setWorkspacePath(tmp);
-});
-
-afterEach(() => {
-  vi.restoreAllMocks();
-  vi.unstubAllEnvs();
-  rmSync(tmp, { recursive: true, force: true });
-});
-
-async function fixture(
-  source: NonNullable<ConversationTitle['source']> = 'acp',
-  convertImmediately = true,
-) {
-  const title = {
-    acp: 'ACP fallback',
-    generated: 'Generated title',
-    fallback: 'First user prompt',
-    user: 'Manual title',
-  }[source];
-  const labelSource = source === 'user' ? 'user' : 'agent';
-  let record: ThreadRecord = {
-    driverSchemaVersion: 1,
-    spec: {
-      kind: EXTERNAL_DRIVER_KIND,
-      workloadType: 'Deployment',
-      threadId,
-      namespace: { name: canvasId },
-      spec: {
-        binding: {
-          kind: 'external',
-          profileId: 'profile-conversion',
-          alias: 'Conversion Agent',
-        },
-      },
-    },
-    state: {
-      driverState: {},
-      metadata: {
-        sessionInfo: { title: source === 'acp' ? title : '', updatedAt: null },
-      },
-    },
-    hostMetadata: {
-      [CONVERSATION_TITLE_METADATA_KEY]: {
-        title,
-        source,
-      },
-    },
-  };
-  vi.spyOn(agenetes, 'record').mockImplementation(() => record);
-  vi.spyOn(agenetes, 'history').mockReturnValue({ turns: [] } as never);
-  vi.spyOn(agenetes, 'updateHostMetadata').mockImplementation(
-    (_namespace, _thread, patch) => {
-      record = JSON.parse(
-        JSON.stringify({
-          ...record,
-          hostMetadata: { ...record.hostMetadata, ...patch },
-        }),
-      ) as ThreadRecord;
-      return record;
-    },
-  );
-  const generate = vi
-    .spyOn(ProviderManager.prototype, 'generateContentMeta')
-    .mockResolvedValue({ label: 'Generated title' });
-  const notifications = vi
-    .spyOn(agenetes, 'notifications')
-    .mockImplementation(async function* () {});
-  const notify = async (service: ConversationTitleService, title: string) => {
-    let finished = false;
-    notifications.mockImplementationOnce(async function* () {
-      record.state.metadata = {
-        sessionInfo: { title, updatedAt: null },
-      };
-      yield record.state.metadata;
-      finished = true;
+forEachProductProfile((profile, label) => {
+  describe(`Unified conversation naming (${label})`, () => {
+    let mounted: MountedTestStorage;
+    let canvasId: string;
+    let threadId: string;
+    let nodeId: CanvasNodeId;
+    let service: ConversationTitleService;
+    let generate: MockInstance<ProviderManager['generateContentMeta']>;
+    beforeEach(async () => {
+      mounted = await mountTestWorkspace(profile, 'unified-titles-');
+      canvasId = createId('canvas');
+      threadId = createId('thread');
+      nodeId = createId('node');
+      await createSpace(canvasId, 'Titles');
+      service = new ConversationTitleService();
+      generate = vi
+        .spyOn(ProviderManager.prototype, 'generateContentMeta')
+        .mockResolvedValue({ label: 'Generated title' });
     });
-    service.subscribe(canvasId, threadId);
-    await vi.waitFor(() => expect(finished).toBe(true));
-  };
-  const store = getCanvasStore(canvasId);
-  store.write({
-    canvasId,
-    title: null,
-    version: 0,
-    state: { nodes: [], edges: [] },
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-  });
-  await executeOnServer({
-    canvasId,
-    originator: { source: 'ui' },
-    commands: [
-      {
-        type: 'CREATE_NODES',
-        nodes: [
+    afterEach(async () => {
+      agenetes.close(threadId);
+      vi.restoreAllMocks();
+      await mounted.close();
+    });
+    function realize() {
+      return agenetes.create(
+        buildHuabuPiWorkloadSpec({
+          kind: 'internal',
+          workloadType: 'Deployment',
+          threadId,
+          namespace: canvasAcpNamespace(canvasId),
+          canvasId,
+          systemPrompt: 'Test',
+          toolNames: [],
+          initialMessages: [],
+          maxIterations: 1,
+          toolExecution: 'sequential',
+        }),
+      );
+    }
+    async function create(data: Record<string, unknown> = {}) {
+      await executeOnServer({
+        canvasId,
+        originator: { source: 'ui' },
+        commands: [
           {
-            id: 'node-existing-title',
-            nodeType: 'note',
-            position: { x: 0, y: 0 },
-            data: { label: title },
+            type: 'CREATE_NODES',
+            nodes: [
+              {
+                id: nodeId,
+                nodeType: 'question',
+                position: { x: 0, y: 0 },
+                data: {
+                  threadId,
+                  content: 'First user prompt',
+                  label: 'Question',
+                  labelSource: 'auto',
+                  ...data,
+                },
+              },
+            ],
           },
         ],
-      },
-    ],
-  });
-  const convert = async () => {
-    await executeOnServer({
-      canvasId,
-      originator: { source: 'ui' },
-      commands: [
-        {
-          type: 'CREATE_NODES',
-          nodes: [
-            {
-              id: 'node-q',
-              nodeType: 'question',
-              position: { x: 200, y: 0 },
-              data: {
-                threadId,
-                label: title,
-                labelSource,
-                content: 'First user prompt',
-              },
-            },
-          ],
-        },
-      ],
-    });
-    const node = store.readNode('node-q');
-    const canvas = store.read();
-    expect(node).toMatchObject({
-      label: `${title} 1`,
-      labelSource,
-      content: 'First user prompt',
-    });
-    expect(canvas?.state.nodes).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          id: 'node-q',
-          data: expect.objectContaining({
-            threadId,
-            bindingState: 'bound',
-            agentBinding: {
-              kind: 'external',
-              profileId: 'profile-conversion',
-              alias: 'Conversion Agent',
-            },
-          }),
-        }),
-      ]),
-    );
-    const question = (canvas?.state.nodes as CanvasNode[] | undefined)?.find(
-      (entry) => entry.id === 'node-q',
-    );
-    expect(question?.data).not.toHaveProperty('status');
-    expect(question?.data).not.toHaveProperty('viewed');
-    expect(question?.data).not.toHaveProperty('invocationToken');
-    return () => {
-      const reopened = getCanvasStore(canvasId);
-      expect(reopened.readNode('node-q')).toEqual(node);
-      expect(reopened.read()?.version).toBe(canvas?.version);
-      expect(reopened.read()).toEqual(canvas);
-    };
-  };
-  const checkUnchanged = convertImmediately ? await convert() : undefined;
-  const assertUnchanged = () => {
-    if (!checkUnchanged)
-      throw new Error('Question conversion has not been created');
-    checkUnchanged();
-  };
-  return {
-    store,
-    generate,
-    record: () => record,
-    convert,
-    assertUnchanged,
-    notify,
-  };
-}
-
-describe('persisted Chat to Question title conversion', () => {
-  it('keeps the canonical copied ACP label through retries, ACP metadata, generated and manual Chat titles, and restart', async () => {
-    const { generate, record, assertUnchanged, notify } = await fixture();
-    generate.mockResolvedValueOnce(undefined);
-    const service = new ConversationTitleService();
-    await service.initialize(canvasId, threadId, 'First user prompt');
-    assertUnchanged();
-    expect(record().hostMetadata?.[CONVERSATION_TITLE_METADATA_KEY]).toEqual({
-      title: 'ACP fallback',
-      source: 'acp',
-    });
-    await notify(service, 'Later ACP title');
-    expect(service.get(canvasId, threadId)).toEqual({
-      title: 'Later ACP title',
-      source: 'acp',
-    });
-    assertUnchanged();
-    const restarted = new ConversationTitleService();
-    await Promise.all([
-      restarted.initialize(canvasId, threadId, 'First user prompt'),
-      restarted.initialize(canvasId, threadId, 'First user prompt'),
-    ]);
-    expect(record().hostMetadata?.[CONVERSATION_TITLE_METADATA_KEY]).toEqual({
-      title: 'Generated title',
-      source: 'generated',
-    });
-    assertUnchanged();
-    await notify(restarted, 'Late ACP');
-    expect(restarted.get(canvasId, threadId)).toEqual({
-      title: 'Generated title',
-      source: 'generated',
-    });
-    assertUnchanged();
-    expect(restarted.setUserTitle(canvasId, threadId, 'Renamed Chat')).toEqual({
-      title: 'Renamed Chat',
-      source: 'user',
-    });
-    assertUnchanged();
-    const again = new ConversationTitleService();
-    await again.initialize(canvasId, threadId, 'Later prompt');
-    expect(again.get(canvasId, threadId)).toEqual({
-      title: 'Renamed Chat',
-      source: 'user',
-    });
-    assertUnchanged();
-    expect(generate).toHaveBeenCalledTimes(2);
-    expect(generate).toHaveBeenLastCalledWith('First user prompt', {
-      needLabel: true,
-      needSummary: false,
-      needKeywords: false,
-    });
-  });
-
-  it.each(['generated', 'fallback', 'user'] as const)(
-    'preserves the canonical copied %s label through later Chat titles and restart',
-    async (source) => {
-      const { generate, assertUnchanged, notify } = await fixture(source);
-      const service = new ConversationTitleService();
-      await service.initialize(canvasId, threadId, 'First user prompt');
-      generate.mockResolvedValue({ label: 'Later generated title' });
-      await service.initialize(canvasId, threadId, 'Later prompt');
-      expect(service.get(canvasId, threadId)).toEqual({
-        title: source === 'user' ? 'Manual title' : 'Generated title',
-        source: source === 'user' ? 'user' : 'generated',
       });
-      assertUnchanged();
-      await notify(service, 'Later ACP title');
-      assertUnchanged();
-      service.setUserTitle(canvasId, threadId, 'Later manual Chat title');
-      assertUnchanged();
-      const restarted = new ConversationTitleService();
-      await restarted.initialize(canvasId, threadId, 'Later prompt');
-      expect(restarted.get(canvasId, threadId)).toEqual({
-        title: 'Later manual Chat title',
-        source: 'user',
-      });
-      assertUnchanged();
-      expect(generate).toHaveBeenCalledTimes(source === 'fallback' ? 1 : 0);
-    },
-  );
-
-  it('does not rename the created Question when pre-conversion generation finishes', async () => {
-    const { store, generate, convert } = await fixture('acp', false);
-    let complete!: (value: { label: string }) => void;
-    let markStarted!: () => void;
-    const started = new Promise<void>((resolve) => {
-      markStarted = resolve;
-    });
-    generate.mockImplementationOnce(() => {
-      markStarted();
-      return new Promise((resolve) => {
-        complete = resolve;
-      });
-    });
-    const service = new ConversationTitleService();
-    const pending = service.initialize(canvasId, threadId, 'First user prompt');
-    await started;
-    expect(store.readNode('node-q')).toBeNull();
-    const assertUnchanged = await convert();
-    complete({ label: 'Generated title' });
-    await pending;
-    expect(service.get(canvasId, threadId)).toEqual({
-      title: 'Generated title',
-      source: 'generated',
-    });
-    assertUnchanged();
-    await new ConversationTitleService().initialize(
-      canvasId,
-      threadId,
-      'Later prompt',
-    );
-    assertUnchanged();
-    expect(generate).toHaveBeenCalledOnce();
-  });
-
-  it.each(['acp', 'generated', 'fallback', 'user'] as const)(
-    'protects a copied %s title during ordinary Question preprocessing',
-    async (source) => {
-      const { store, generate, assertUnchanged } = await fixture(source);
-      const node = store.readNode('node-q');
-      if (!node) throw new Error('Missing converted Question node');
-      const result = await new PreprocessDispatcher().preprocess({
+    }
+    async function current() {
+      const handle = space(canvasId);
+      const canvas = await handle.read();
+      const node = hydrateCanvasNodes(
+        await handle.nodes.list(),
+        canvas?.state.nodes as CanvasNode[],
+      ).find((node) => node.id === nodeId);
+      if (!node) throw new Error(`Expected Question node ${nodeId}`);
+      return node;
+    }
+    async function rename(
+      labelSource: 'user' | 'agent',
+      label = 'Explicit name',
+    ) {
+      await executeOnServer({
         canvasId,
-        nodeId: 'node-q',
-        nodeType: 'question',
-        trigger: 'node_inserted',
-        snapshot: {
-          content: node.content,
-          title: node.label,
-          labelSource: node.labelSource,
-        },
+        originator: { source: 'ui' },
+        commands: [
+          {
+            type: 'MERGE_NODE_DATA',
+            patches: [{ nodeId, patch: { label, labelSource } }],
+          },
+        ],
       });
-      expect(result.success).toBe(true);
-      expect(result.usedCapabilities).not.toContain('generate_label');
-      expect(result.patch).not.toHaveProperty('label');
-      expect(result.patch).not.toHaveProperty('labelSource');
-      expect(generate).not.toHaveBeenCalled();
-      assertUnchanged();
-    },
-  );
+    }
+    async function notify(title: string) {
+      let finished = false;
+      vi.spyOn(agenetes, 'notifications').mockImplementationOnce(
+        async function* () {
+          yield { sessionInfo: { title, updatedAt: null } };
+          finished = true;
+        },
+      );
+      service.subscribe(canvasId, threadId);
+      await vi.waitFor(() => expect(finished).toBe(true));
+    }
+    function delayed() {
+      let complete!: (value: { label: string }) => void;
+      generate.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            complete = resolve;
+          }),
+      );
+      return { finish: (label = 'Delayed title') => complete({ label }) };
+    }
+    it('preprocess names before durable execution, coalesces with send, and returns no second fallback patch', async () => {
+      await create();
+      const createHandle = vi.spyOn(agenetes, 'create');
+      const wait = delayed();
+      const dispatcher = new PreprocessDispatcher();
+      const request = {
+        canvasId,
+        nodeId,
+        nodeType: 'question' as const,
+        trigger: 'node_inserted' as const,
+        snapshot: {
+          content: 'First user prompt',
+          title: 'Question',
+          labelSource: 'auto',
+        },
+      };
+      const pending = dispatcher.preprocess(request);
+      await vi.waitFor(() => expect(generate).toHaveBeenCalledOnce());
+      expect((await current()).data.label).toBe('First user prompt');
+      await conversationTitleService.start(
+        canvasId,
+        threadId,
+        'First user prompt',
+      );
+      expect(createHandle).not.toHaveBeenCalled();
+      expect(
+        agenetes.record(canvasAcpNamespace(canvasId), threadId),
+      ).toBeUndefined();
+      wait.finish();
+      expect((await pending).patch).toEqual({});
+      expect((await current()).data.label).toBe('Delayed title');
+      const before = (await space(canvasId).read())?.version;
+      await dispatcher.preprocess(request);
+      expect((await space(canvasId).read())?.version).toBe(before);
+      expect(generate).toHaveBeenCalledOnce();
+      await mounted.reopen();
+      expect(await service.get(canvasId, threadId)).toEqual({
+        title: 'Delayed title',
+        source: 'generated',
+      });
+    });
+    it('start persists fallback before model completion and publishes the later upgrade', async () => {
+      await create();
+      const events = vi.fn();
+      const unsubscribe = subscribeCanvasUpdates(canvasId, events);
+      try {
+        const wait = delayed();
+        await service.start(canvasId, threadId, 'First user prompt');
+        expect((await current()).data.label).toBe('First user prompt');
+        await vi.waitFor(() => expect(generate).toHaveBeenCalledOnce());
+        wait.finish();
+        await vi.waitFor(async () =>
+          expect((await current()).data.label).toBe('Delayed title'),
+        );
+        expect(events).toHaveBeenCalledTimes(2);
+        expect(events.mock.calls[1][0].data.agentNodeProjection).toBe(true);
+      } finally {
+        unsubscribe();
+      }
+    });
+    it.each(['user', 'agent'] as const)(
+      'protects an in-flight %s node rename and reports its effective title',
+      async (owner) => {
+        await create();
+        const wait = delayed();
+        const pending = service.initialize(
+          canvasId,
+          threadId,
+          'First user prompt',
+        );
+        await vi.waitFor(() => expect(generate).toHaveBeenCalledOnce());
+        await rename(owner);
+        wait.finish();
+        await pending;
+        await notify('Late ACP');
+        expect((await current()).data.label).toBe('Explicit name');
+        expect((await service.get(canvasId, threadId)).title).toBe(
+          'Explicit name',
+        );
+        await service.initialize(canvasId, threadId, 'Later');
+        expect(generate).toHaveBeenCalledOnce();
+      },
+    );
+    it.each(['delete', 'content', 'thread'] as const)(
+      'rejects delayed generation after %s changes',
+      async (change) => {
+        await create();
+        const wait = delayed();
+        const pending = service.initialize(
+          canvasId,
+          threadId,
+          'First user prompt',
+        );
+        await vi.waitFor(() => expect(generate).toHaveBeenCalledOnce());
+        if (change === 'delete') {
+          await executeOnServer({
+            canvasId,
+            originator: { source: 'ui' },
+            commands: [{ type: 'DELETE_NODES', nodeIds: [nodeId] }],
+          });
+        } else {
+          await withCanvasMutex(canvasId, async () => {
+            const node = await current();
+            await applyDeltasOnServerAlreadyLocked({
+              canvasId,
+              originator: { source: 'system' },
+              agentNodeProjection: true,
+              deltas: [
+                {
+                  type: 'REPLACE_NODE',
+                  prev: node,
+                  next: {
+                    ...node,
+                    data: {
+                      ...node.data,
+                      ...(change === 'thread'
+                        ? { threadId: 'replacement-thread' }
+                        : { content: 'Changed content' }),
+                    },
+                  },
+                },
+              ],
+            });
+          });
+        }
+        wait.finish();
+        await pending;
+        if (change === 'delete')
+          expect(await space(canvasId).nodes.read(nodeId)).toBeNull();
+        else expect((await current()).data.label).toBe('First user prompt');
+      },
+    );
+    it('retains valid ACP across generation failure, filters multiline updates, retries and deduplicates', async () => {
+      await create();
+      realize();
+      generate.mockRejectedValueOnce(new Error('offline'));
+      await service.initialize(canvasId, threadId, 'First user prompt');
+      await notify('ACP title');
+      await notify('Bad\nACP');
+      expect(await service.get(canvasId, threadId)).toEqual({
+        title: 'ACP title',
+        source: 'acp',
+      });
+      const version = (await space(canvasId).read())?.version;
+      await notify('ACP title');
+      expect((await space(canvasId).read())?.version).toBe(version);
+      await service.initialize(canvasId, threadId, 'Later');
+      await notify('Late ACP');
+      expect(await service.get(canvasId, threadId)).toEqual({
+        title: 'Generated title',
+        source: 'generated',
+      });
+      expect(
+        agenetes.record(canvasAcpNamespace(canvasId), threadId)?.hostMetadata,
+      ).toBeUndefined();
+    });
+    it.each(['fallback', 'acp', 'generated', 'user'] as const)(
+      'transfers %s Chat authority at conversion without freezing automatic names',
+      async (source) => {
+        realize();
+        agenetes.updateHostMetadata(canvasAcpNamespace(canvasId), threadId, {
+          [CONVERSATION_TITLE_METADATA_KEY]: {
+            title: 'Latest backend title',
+            source,
+          },
+        });
+        await create({ label: 'Stale frontend title' });
+        expect((await current()).data.label).toBe('Latest backend title');
+        await service.initialize(canvasId, threadId, 'First user prompt');
+        expect((await current()).data.label).toBe(
+          source === 'user' || source === 'generated'
+            ? 'Latest backend title'
+            : 'Generated title',
+        );
+        await service.setUserTitle(
+          canvasId,
+          threadId,
+          'Manual after conversion',
+        );
+        expect((await current()).data.labelSource).toBe('user');
+        expect(await service.get(canvasId, threadId)).toEqual({
+          title: 'Manual after conversion',
+          source: 'user',
+        });
+      },
+    );
+    it('routes pre-conversion generation completion to the newly authoritative node', async () => {
+      realize();
+      const wait = delayed();
+      const pending = service.initialize(
+        canvasId,
+        threadId,
+        'First user prompt',
+      );
+      await vi.waitFor(() => expect(generate).toHaveBeenCalledOnce());
+      await create();
+      wait.finish();
+      await pending;
+      expect((await current()).data.label).toBe('Delayed title');
+      expect((await service.get(canvasId, threadId)).source).toBe('generated');
+    });
+    it('preprocess failure retains one fallback and later retries, while a stale request does no work', async () => {
+      await create();
+      generate.mockResolvedValueOnce(undefined);
+      const dispatcher = new PreprocessDispatcher();
+      const request = {
+        canvasId,
+        nodeId,
+        nodeType: 'question' as const,
+        trigger: 'node_updated' as const,
+        snapshot: { content: 'First user prompt', title: 'Old request title' },
+      };
+      expect((await dispatcher.preprocess(request)).patch).toEqual({});
+      expect((await current()).data.label).toBe('First user prompt');
+      await dispatcher.preprocess({
+        ...request,
+        snapshot: { content: 'Stale' },
+      });
+      expect(generate).toHaveBeenCalledOnce();
+      await dispatcher.preprocess(request);
+      expect((await current()).data.label).toBe('Generated title');
+    });
+    it.each([
+      { source: 'fallback', collision: false },
+      { source: 'fallback', collision: true },
+      { source: 'acp', collision: false },
+      { source: 'acp', collision: true },
+      { source: 'generated', collision: false },
+      { source: 'generated', collision: true },
+    ] as const)(
+      'preserves punctuation in $source titles with collision=$collision across repeated writes and reload',
+      async ({ source, collision }) => {
+        const title = 'Plan: next steps?';
+        await create({ content: title });
+        if (collision) {
+          await executeOnServer({
+            canvasId,
+            originator: { source: 'ui' },
+            commands: [
+              {
+                type: 'CREATE_NODES',
+                nodes: [
+                  {
+                    nodeType: 'note',
+                    position: { x: 300, y: 0 },
+                    data: { label: 'Plan_ next steps_' },
+                  },
+                ],
+              },
+            ],
+          });
+        }
+        generate.mockResolvedValue({ label: title });
+        const synchronize = () =>
+          source === 'fallback'
+            ? service.ensureFallback(canvasId, threadId, title)
+            : source === 'acp'
+              ? notify(title)
+              : service.initialize(canvasId, threadId, title);
+        await synchronize();
+        const expected = collision ? `${title} (2)` : title;
+        expect((await current()).data.label).toBe(expected);
+        expect(await service.get(canvasId, threadId)).toEqual({
+          title: expected,
+          source,
+        });
+        const version = (await space(canvasId).read())?.version;
+        await synchronize();
+        expect((await space(canvasId).read())?.version).toBe(version);
+        await mounted.reopen();
+        expect((await current()).data.label).toBe(expected);
+        expect(await service.get(canvasId, threadId)).toEqual({
+          title: expected,
+          source,
+        });
+      },
+    );
+    it('uses the canonical deduplicated label without a repeat write', async () => {
+      await create();
+      await executeOnServer({
+        canvasId,
+        originator: { source: 'ui' },
+        commands: [
+          {
+            type: 'CREATE_NODES',
+            nodes: [
+              {
+                nodeType: 'note',
+                position: { x: 300, y: 0 },
+                data: { label: 'Generated title' },
+              },
+            ],
+          },
+        ],
+      });
+      await service.initialize(canvasId, threadId, 'First user prompt');
+      expect((await current()).data.label).toBe('Generated title (2)');
+      const version = (await space(canvasId).read())?.version;
+      await service.initialize(canvasId, threadId, 'Later');
+      expect((await space(canvasId).read())?.version).toBe(version);
+    });
+  });
 });

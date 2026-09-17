@@ -68,7 +68,6 @@ type MilkdownToolbarPopover =
   | 'block-list'
   | 'text-color'
   | 'background-color'
-  | 'link'
   | 'inline-math';
 
 const BLOCK_GROUPS: ReadonlyArray<{
@@ -211,10 +210,10 @@ export function MilkdownFloatingToolbar({
   const [selectionRect, setSelectionRect] = useState(() =>
     readSelectionRect(instance),
   );
+  const [linkAvailable, setLinkAvailable] = useState(false);
   const [openPopover, setOpenPopover] = useState<MilkdownToolbarPopover | null>(
     null,
   );
-  const [linkHref, setLinkHref] = useState('');
   const [mathValue, setMathValue] = useState('x');
   // A ProseMirror selection survives blur, so "there is a selection" is
   // not enough to keep the toolbar on screen: after clicking into the
@@ -231,12 +230,9 @@ export function MilkdownFloatingToolbar({
   // A modal owns the whole window while it is open; a toolbar portalled
   // to `document.body` would otherwise paint on top of its backdrop.
   const hiddenByGlobalModal = useAnyGlobalModalOpen();
-  const linkInputRef = useRef<HTMLInputElement>(null);
   const mathInputRef = useRef<HTMLInputElement>(null);
-  const linkSelectionRef = useRef<MilkdownTextRange | null>(null);
   const mathSelectionRef = useRef<MilkdownTextRange | null>(null);
   const blockListOpen = openPopover === 'block-list';
-  const linkOpen = openPopover === 'link';
   const mathOpen = openPopover === 'inline-math';
   useCloseOnEscape(openPopover !== null, () => setOpenPopover(null));
   const toolbarOpen = selectionRect !== null && engaged && !hiddenByGlobalModal;
@@ -267,16 +263,6 @@ export function MilkdownFloatingToolbar({
     whileElementsMounted: autoUpdate,
   });
   const {
-    refs: linkRefs,
-    floatingStyles: linkStyles,
-    isPositioned: linkPositioned,
-  } = useFloating({
-    open: linkOpen,
-    placement: 'bottom',
-    middleware: [offset(8), flip({ padding: 8 }), shift({ padding: 8 })],
-    whileElementsMounted: autoUpdate,
-  });
-  const {
     refs: mathRefs,
     floatingStyles: mathStyles,
     isPositioned: mathPositioned,
@@ -294,15 +280,18 @@ export function MilkdownFloatingToolbar({
   useEffect(() => {
     setFormatting(readFormattingState(instance));
     setSelectionRect(readSelectionRect(instance));
+    setLinkAvailable(Boolean(instance?.getLinkSnapshot()));
     if (!instance) return;
 
     const update = () => {
       setFormatting(readFormattingState(instance));
       setSelectionRect(readSelectionRect(instance));
+      setLinkAvailable(Boolean(instance.getLinkSnapshot()));
     };
     const unsubscribeFormatting = instance.onFormattingUpdated((state) => {
       setFormatting(state);
       setSelectionRect(readSelectionRect(instance));
+      setLinkAvailable(Boolean(instance.getLinkSnapshot()));
     });
     document.addEventListener('selectionchange', update);
     document.addEventListener('keyup', update, true);
@@ -323,14 +312,6 @@ export function MilkdownFloatingToolbar({
     if (toolbarOpen) return;
     setOpenPopover(null);
   }, [toolbarOpen]);
-
-  useEffect(() => {
-    if (!linkOpen) return;
-    window.requestAnimationFrame(() => {
-      linkInputRef.current?.focus();
-      linkInputRef.current?.select();
-    });
-  }, [linkOpen]);
 
   useEffect(() => {
     if (!mathOpen) return;
@@ -395,20 +376,6 @@ export function MilkdownFloatingToolbar({
         apply(token);
       }
     });
-  };
-
-  const applyLink = () => {
-    run(() => instance.setLink(linkHref, linkSelectionRef.current));
-    linkSelectionRef.current = null;
-    setLinkHref('');
-    setOpenPopover(null);
-  };
-
-  const clearLink = () => {
-    run(() => instance.setLink(null, linkSelectionRef.current));
-    linkSelectionRef.current = null;
-    setLinkHref('');
-    setOpenPopover(null);
   };
 
   const applyInlineMath = () => {
@@ -558,24 +525,14 @@ export function MilkdownFloatingToolbar({
       <FloatingToolbar.Divider />
 
       <FloatingToolbar.Group>
-        <div ref={linkRefs.setReference} className="flex items-center">
+        <div className="flex items-center">
           <FloatingToolbar.ActionButton
             title={t('editor.link')}
-            disabled={disabled}
+            disabled={disabled || !linkAvailable}
             onClick={(event) => {
               event.stopPropagation();
-              setOpenPopover((open) => {
-                const nextOpen = open === 'link' ? null : 'link';
-                if (nextOpen) {
-                  const activeLink = instance.getActiveLink();
-                  linkSelectionRef.current =
-                    activeLink?.range ?? instance.getSelectionRange();
-                  setLinkHref(activeLink?.href ?? '');
-                } else {
-                  linkSelectionRef.current = null;
-                }
-                return nextOpen;
-              });
+              setOpenPopover(null);
+              instance.requestLinkEdit();
             }}
           >
             <Link />
@@ -617,65 +574,6 @@ export function MilkdownFloatingToolbar({
         </div>
       </FloatingToolbar.Group>
 
-      {linkOpen
-        ? createPortal(
-            <>
-              <div
-                role="presentation"
-                className="fixed inset-0 z-40"
-                {...FLOATING_CHROME_PROPS}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setOpenPopover(null);
-                }}
-              />
-              {/* Handlers below only isolate the popover from the editor. */}
-              {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/click-events-have-key-events */}
-              <form
-                ref={linkRefs.setFloating}
-                {...FLOATING_CHROME_PROPS}
-                className="border-edge-default shadow-bottom bg-surface z-50 flex items-center gap-1 rounded-md border p-1"
-                style={{
-                  ...linkStyles,
-                  visibility: linkPositioned ? 'visible' : 'hidden',
-                }}
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  applyLink();
-                }}
-                onMouseDown={(event) => event.stopPropagation()}
-                onClick={(event) => event.stopPropagation()}
-              >
-                <Input
-                  ref={linkInputRef}
-                  value={linkHref}
-                  onChange={(event) => setLinkHref(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Escape') {
-                      event.preventDefault();
-                      setOpenPopover(null);
-                    }
-                  }}
-                  placeholder="https://example.com"
-                  aria-label={t('editor.linkUrl')}
-                  className="border-edge-default bg-bg-default text-fg-default placeholder:text-fg-subtle focus:border-info h-7 w-56 rounded-sm border px-2 text-xs outline-none"
-                />
-                <Button type="submit" variant="solid" size="sm">
-                  {t('actions.apply')}
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={clearLink}
-                >
-                  {t('actions.clear')}
-                </Button>
-              </form>
-            </>,
-            document.body,
-          )
-        : null}
       {mathOpen
         ? createPortal(
             <>
@@ -742,6 +640,21 @@ export function MilkdownFloatingToolbar({
     <div
       ref={toolbarRefs.setFloating}
       {...FLOATING_CHROME_PROPS}
+      role="presentation"
+      onKeyDown={(event) => {
+        if (
+          (event.metaKey || event.ctrlKey) &&
+          !event.altKey &&
+          !event.shiftKey &&
+          event.key.toLowerCase() === 'k' &&
+          !disabled &&
+          instance.requestLinkEdit()
+        ) {
+          event.preventDefault();
+          event.stopPropagation();
+          setOpenPopover(null);
+        }
+      }}
       style={{
         ...toolbarStyles,
         zIndex: 1000,

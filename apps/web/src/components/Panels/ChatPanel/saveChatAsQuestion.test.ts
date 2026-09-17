@@ -17,12 +17,12 @@ const input: AddNodeInput & { id: CanvasNodeId } = {
 describe('saveChatAsQuestion', () => {
   it.each([
     ['user', 'user'],
-    ['acp', 'agent'],
-    ['generated', 'agent'],
-    ['fallback', 'agent'],
-    [null, 'agent'],
+    ['acp', 'auto'],
+    ['generated', 'auto'],
+    ['fallback', 'auto'],
+    [null, 'auto'],
   ] as const)(
-    'copies the current %s title once with protected labelSource %s',
+    'transfers the current %s title with labelSource %s and naming provenance',
     (source, labelSource) => {
       const addNode = vi.fn();
       saveChatAsQuestion(input, {
@@ -39,6 +39,7 @@ describe('saveChatAsQuestion', () => {
           ...input.data,
           label: 'Retained conversation name',
           labelSource,
+          conversationTitleSource: source,
         },
       });
     },
@@ -99,7 +100,8 @@ describe('saveChatAsQuestion', () => {
       data: {
         ...input.data,
         label: 'Title at conversion',
-        labelSource: 'agent',
+        labelSource: 'auto',
+        conversationTitleSource: 'acp',
       },
     });
   });

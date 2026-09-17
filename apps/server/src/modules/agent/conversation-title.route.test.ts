@@ -13,13 +13,14 @@ import { createConversationTitleRoutes } from './conversation-title.route.js';
 
 async function fixture() {
   const service = {
-    query: vi.fn((_canvas: string, ids: string[]) => ({
+    query: vi.fn(async (_canvas: string, ids: string[]) => ({
       titles: Object.fromEntries(
         ids.map((id) => [id, { title: null, source: null }]),
       ),
     })),
-    setUserTitle: vi.fn((_canvas: string, thread: string, title: string) =>
-      thread === 'missing' ? null : { title, source: 'user' as const },
+    setUserTitle: vi.fn(
+      async (_canvas: string, thread: string, title: string) =>
+        thread === 'missing' ? null : { title, source: 'user' as const },
     ),
   };
   const app = Fastify();

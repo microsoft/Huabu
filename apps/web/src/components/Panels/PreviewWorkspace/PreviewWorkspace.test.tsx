@@ -228,6 +228,94 @@ describe('tab strip', () => {
     expect(store().workspace).toBe(before);
     expect(store().workspace.tabs[sourceId].transient).toBe(true);
   });
+
+  it('promotes the source Chat and opens its URL in that group rather than the focused group', () => {
+    const sourceId = store().openPreviewTarget(
+      { kind: 'chat', canvasId: CANVAS_ID, threadId: 'source-thread' },
+      { transient: true },
+    );
+    const otherId = store().openPreviewTarget(
+      { kind: 'node', canvasId: CANVAS_ID, nodeId: 'other' },
+      { openToSide: true, transient: true },
+    );
+    const otherGroupId = store().workspace.activeGroupId;
+    expect(otherGroupId).not.toBe('g1');
+
+    const urlId = openPreviewUrl(
+      'https://example.com/path',
+      undefined,
+      'source-thread',
+    );
+    const workspace = store().workspace;
+    expect(workspace.tabs[sourceId]).toMatchObject({
+      transient: false,
+      target: { kind: 'chat', threadId: 'source-thread' },
+    });
+    expect(workspace.tabs[urlId].transient).toBe(false);
+    expect(workspace.groups.find((group) => group.id === 'g1')).toMatchObject({
+      tabIds: [sourceId, urlId],
+      activeTabId: urlId,
+    });
+    expect(
+      workspace.groups.find((group) => group.id === otherGroupId),
+    ).toMatchObject({
+      tabIds: [otherId],
+      activeTabId: otherId,
+    });
+    expect(workspace.tabs[otherId].transient).toBe(true);
+    expect(workspace.activeGroupId).toBe('g1');
+    openNode('next-inspection', true);
+    expect(store().workspace.tabs[sourceId]).toBeDefined();
+    expect(store().workspace.tabs[urlId]).toBeDefined();
+  });
+
+  it('promotes a source Chat while deduplicating a URL already in the other group', () => {
+    const sourceId = store().openPreviewTarget(
+      { kind: 'chat', canvasId: CANVAS_ID, threadId: 'source-thread' },
+      { transient: true },
+    );
+    const urlId = store().openPreviewTarget(
+      {
+        kind: 'url',
+        canvasId: CANVAS_ID,
+        url: 'https://example.com/path?q=1#section',
+      },
+      { openToSide: true },
+    );
+    const urlGroupId = store().workspace.activeGroupId;
+    store().activateTab(sourceId);
+
+    expect(
+      openPreviewUrl(
+        'https://EXAMPLE.com:443/path?q=1#section',
+        undefined,
+        'source-thread',
+      ),
+    ).toBe(urlId);
+    expect(
+      openPreviewUrl(
+        'https://example.com/path?q=1#section',
+        undefined,
+        'source-thread',
+      ),
+    ).toBe(urlId);
+
+    const workspace = store().workspace;
+    expect(Object.keys(workspace.tabs)).toHaveLength(2);
+    expect(workspace.tabs[sourceId].transient).toBe(false);
+    expect(workspace.groups.find((group) => group.id === 'g1')).toMatchObject({
+      tabIds: [sourceId],
+      activeTabId: sourceId,
+    });
+    expect(
+      workspace.groups.find((group) => group.id === urlGroupId),
+    ).toMatchObject({
+      tabIds: [urlId],
+      activeTabId: urlId,
+    });
+    expect(workspace.activeGroupId).toBe(urlGroupId);
+  });
+
   it('forgets a Chat scroll position when its tab is explicitly closed', () => {
     const threadId = 'thread-close-scroll';
     const viewKey = messageListViewKey(CANVAS_ID, threadId);

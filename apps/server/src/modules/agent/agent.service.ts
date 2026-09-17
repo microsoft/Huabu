@@ -94,8 +94,6 @@ export interface AgentRunOptions {
   threadId?: string;
   /** Current canvas ID available as implicit context for canvas-aware tools. */
   canvasId?: string;
-  /** Trusted upstream Question ownership; node labels are not Chat titles. */
-  questionOwned?: boolean;
   /**
    * This turn's structured input. When provided (the chat route), it is
    * rendered into the per-turn user message internally — symmetric with
@@ -298,10 +296,9 @@ export async function* runAgent(
     workloadType === 'Deployment' &&
     canvasId &&
     deploymentThreadId &&
-    envelope &&
-    !options.questionOwned
+    envelope
   ) {
-    void conversationTitleService.initialize(
+    await conversationTitleService.start(
       canvasId,
       deploymentThreadId,
       envelope.user.text,

@@ -25,7 +25,7 @@
  * default behavior.
  */
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import {
   cloneArtifactToCanvas,
@@ -36,8 +36,13 @@ import {
 import { attachBlockDragListeners } from './blockDrag';
 import { createMilkdown, type MilkdownInstance } from './createMilkdown';
 import { markdownEquals, normalizeMarkdown } from './markdownUtils';
+import { MilkdownLinkPopover } from './MilkdownLinkPopover';
 
-import type { MilkdownBlockDragEvent, MilkdownDecorationSpec } from './types';
+import type {
+  MilkdownBlockDragEvent,
+  MilkdownDecorationSpec,
+  MilkdownLinkActivation,
+} from './types';
 
 export interface MilkdownEditorProps {
   /** Source of truth. Controlled. */
@@ -87,6 +92,7 @@ export interface MilkdownEditorProps {
   onReady?: (instance: MilkdownInstance | null) => void;
   /** Opt in to host-owned plain-click links without changing other editors. */
   onLinkClick?: (href: string) => void;
+  linkActivation?: MilkdownLinkActivation;
   /**
    * Fires when the user drags a block (or a multi-block selection) out
    * of the editor — typically used by note nodes to construct the
@@ -110,11 +116,14 @@ export function MilkdownEditor(props: MilkdownEditorProps): React.JSX.Element {
     onExternalUpdate,
     onReady,
     onLinkClick,
+    linkActivation = 'modifier',
     onBlockDragStart,
   } = props;
 
   const rootRef = useRef<HTMLDivElement>(null);
   const instanceRef = useRef<MilkdownInstance | null>(null);
+  const [popoverInstance, setPopoverInstance] =
+    useState<MilkdownInstance | null>(null);
   /** Most recent value either set on or emitted from the editor. */
   const lastSyncedRef = useRef<string>(normalizeMarkdown(markdown));
   /** Markdown queued while the async mount is in flight. */
@@ -162,6 +171,7 @@ export function MilkdownEditor(props: MilkdownEditorProps): React.JSX.Element {
         editable,
         placeholder,
         toolbarMode: 'huabu',
+        linkActivation,
         onLinkClick: onLinkClick
           ? (href) => onLinkClickRef.current?.(href)
           : undefined,
@@ -197,6 +207,7 @@ export function MilkdownEditor(props: MilkdownEditorProps): React.JSX.Element {
       });
 
       instanceRef.current = instance;
+      setPopoverInstance(instance);
       onReadyRef.current?.(instance);
 
       // Apply any prop change that landed during the async mount.
@@ -213,6 +224,7 @@ export function MilkdownEditor(props: MilkdownEditorProps): React.JSX.Element {
       detachDrag();
       const instance = instanceRef.current;
       instanceRef.current = null;
+      setPopoverInstance(null);
       onReadyRef.current?.(null);
       if (instance) void instance.destroy();
     };
@@ -287,5 +299,12 @@ export function MilkdownEditor(props: MilkdownEditorProps): React.JSX.Element {
     }
   }
 
-  return <div ref={rootRef} className={className} />;
+  return (
+    <>
+      <div ref={rootRef} className={className} />
+      {editable && popoverInstance ? (
+        <MilkdownLinkPopover instance={popoverInstance} rootRef={rootRef} />
+      ) : null}
+    </>
+  );
 }

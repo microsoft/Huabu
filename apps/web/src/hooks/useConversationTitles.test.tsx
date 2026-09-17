@@ -14,7 +14,6 @@ import {
   conversationTitleKey,
   getConversationTitle,
   refreshConversationTitleAfterStream,
-  seedConversationTitle,
   useConversationTitleStore,
 } from '@/store/conversationTitleStore';
 import {
@@ -194,7 +193,15 @@ describe('useConversationTitles', () => {
       {},
       { tabId: 'node-tab' },
     ).workspace;
-    seedConversationTitle('canvas', 'closed-chat', 'Not open');
+    useConversationTitleStore.setState({
+      entries: {
+        [conversationTitleKey('canvas', 'closed-chat')]: {
+          value: { title: 'Not open', source: 'fallback' },
+          revision: 0,
+          durable: true,
+        },
+      },
+    });
 
     await renderHook(workspace);
 
@@ -289,8 +296,7 @@ describe('useConversationTitles', () => {
     expect(getConversationTitle('canvas', 'b').source).toBe('fallback');
   });
 
-  it('replaces a first-prompt fallback on a delayed poll and polls only unresolved titles', async () => {
-    seedConversationTitle('canvas', 'pending', 'First prompt\nMore context');
+  it('replaces a backend fallback on a delayed poll and polls only unresolved titles', async () => {
     const initial = deferredResponse();
     query
       .mockReturnValueOnce(initial.promise)
@@ -298,8 +304,8 @@ describe('useConversationTitles', () => {
       .mockResolvedValueOnce(response(['pending'], 'generated', 'Generated'));
     await renderHook(workspaceWith(chat('pending'), chat('established')));
     expect(getConversationTitle('canvas', 'pending')).toEqual({
-      title: 'First prompt',
-      source: 'fallback',
+      title: null,
+      source: null,
     });
     await act(async () => {
       initial.resolve({
