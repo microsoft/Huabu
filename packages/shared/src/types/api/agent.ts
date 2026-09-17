@@ -208,6 +208,12 @@ export const agentRequestSchema = z.object({
    */
   agentBinding: agentBindingSchema.optional(),
   /**
+   * Target-machine working-directory override for an external thread.
+   * The server validates it through the selected agentlet before first
+   * realization. Once realized, the durable workload snapshot is canonical.
+   */
+  workingDirPath: z.string().min(1).max(4096).optional(),
+  /**
    * User-invoked skill ids parsed from leading `/<id>` tokens in the
    * chat input (see `useInternalSlashCommands` on the web side). The
    * server fetches each skill's body and prepends a dedicated SYSTEM

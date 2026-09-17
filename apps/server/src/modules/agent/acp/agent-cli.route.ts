@@ -1,44 +1,123 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-/**
- * `GET /api/acp/agent-cli` — host-side detection of installed ACP-capable
- * agent CLIs from the trusted built-in catalogue.
- *
- * Powers the Agent picker in the Settings UI. The response includes the
- * complete trusted catalogue with an `installed` flag so missing agents can
- * remain visible with installation guidance. The user picks an installed
- * CLI when creating a profile; the server then
- * spawns it (via the embedded agentlet daemon) on demand. There is no
- * longer any pairing / clipboard step \u2014 the wrapper script and on-PATH
- * agentlet check were removed in the daemon-mode refactor.
- *
- * Security: owner-only. Detection shells out to `which` / `where` and
- * `<binary> --version`, so unauthenticated callers must not trigger it.
- */
+import {
+  materializeDiscoveredAgentRequestSchema,
+  refreshAcpAgentCliRequestSchema,
+  validateAcpWorkingDirectoryRequestSchema,
+} from '@huabu/shared';
 
-import { detectAgentClis } from './agent-cli-detect.js';
+import {
+  AcpMachineDiscoveryError,
+  acpMachineDiscovery,
+  type AcpMachineDiscoveryService,
+} from './machine-discovery.js';
 import { isOwnerRequest } from '../../security/owner.js';
 
-import type { AcpAgentCliListResponse, ApiResult } from '@huabu/shared';
-import type { FastifyPluginAsync } from 'fastify';
+import type {
+  AcpAgentCliListResponse,
+  AcpProfileMutationResponse,
+  ApiResult,
+  ValidateAcpWorkingDirectoryResponse,
+} from '@huabu/shared';
+import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
+
+function authorize(request: FastifyRequest, reply: FastifyReply): boolean {
+  if (isOwnerRequest(request)) return true;
+  reply.status(403).send({
+    message: 'Forbidden: Agent discovery requires owner authorization',
+    code: 'forbidden',
+  });
+  return false;
+}
+
+function sendServiceError(reply: FastifyReply, error: unknown) {
+  if (error instanceof AcpMachineDiscoveryError) {
+    return reply.status(error.status).send({
+      message: error.message,
+      code: error.code,
+    });
+  }
+  throw error;
+}
 
 export function createAcpAgentCliRoutes(
-  detect: typeof detectAgentClis = detectAgentClis,
+  service: AcpMachineDiscoveryService = acpMachineDiscovery,
 ): FastifyPluginAsync {
   return async (app) => {
     app.get<{ Reply: ApiResult<AcpAgentCliListResponse> }>(
       '/agent-cli',
       async (request, reply) => {
-        if (!isOwnerRequest(request)) {
-          return reply.status(403).send({
-            message:
-              'Forbidden: agent CLI detection requires owner authorization',
+        if (!authorize(request, reply)) return;
+        return service.list();
+      },
+    );
+
+    app.post<{ Reply: ApiResult<AcpAgentCliListResponse> }>(
+      '/agent-cli/refresh',
+      async (request, reply) => {
+        if (!authorize(request, reply)) return;
+        const parsed = refreshAcpAgentCliRequestSchema.safeParse(request.body);
+        if (!parsed.success) {
+          return reply.status(400).send({
+            message: 'Invalid Agent discovery refresh body',
+            code: 'validation_failed',
           });
         }
-        return {
-          agents: await detect(),
-        };
+        try {
+          return await service.refresh(parsed.data.agentletId);
+        } catch (error) {
+          return sendServiceError(reply, error);
+        }
+      },
+    );
+
+    app.post<{ Reply: ApiResult<AcpProfileMutationResponse> }>(
+      '/agent-cli/materialize',
+      async (request, reply) => {
+        if (!authorize(request, reply)) return;
+        const parsed = materializeDiscoveredAgentRequestSchema.safeParse(
+          request.body,
+        );
+        if (!parsed.success) {
+          return reply.status(400).send({
+            message: 'Invalid discovered Agent materialization body',
+            code: 'validation_failed',
+          });
+        }
+        try {
+          return await service.materialize(
+            parsed.data.agentletId,
+            parsed.data.harnessId,
+            parsed.data.workingDirPath,
+          );
+        } catch (error) {
+          return sendServiceError(reply, error);
+        }
+      },
+    );
+
+    app.post<{ Reply: ApiResult<ValidateAcpWorkingDirectoryResponse> }>(
+      '/working-directory/validate',
+      async (request, reply) => {
+        if (!authorize(request, reply)) return;
+        const parsed = validateAcpWorkingDirectoryRequestSchema.safeParse(
+          request.body,
+        );
+        if (!parsed.success) {
+          return reply.status(400).send({
+            message: 'Invalid working-directory validation body',
+            code: 'validation_failed',
+          });
+        }
+        try {
+          return await service.validateWorkingDirectory(
+            parsed.data.agentletId,
+            parsed.data.workingDirPath,
+          );
+        } catch (error) {
+          return sendServiceError(reply, error);
+        }
       },
     );
   };

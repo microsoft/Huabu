@@ -19,6 +19,7 @@ import type {
   AcpSessionMetaSnapshot,
   AcpThreadCachedMetaResponse,
   AgentBinding,
+  AcpThreadRealization,
 } from '@huabu/shared';
 
 const STALE_TTL_MS = 10_000;
@@ -59,6 +60,8 @@ export interface UseAcpSessionMetaResult {
   meta: AcpSessionMetaSnapshot;
   /** Whether the snapshot belongs to this thread or is a Profile observation. */
   source: AcpThreadCachedMetaResponse['source'];
+  /** Canonical durable launch state for this thread. */
+  realization: AcpThreadRealization;
   /** True while ANY in-flight fetch is pending. */
   loading: boolean;
   /** Last error from a fetch, or `null`. */
@@ -105,6 +108,9 @@ export function useAcpSessionMeta({
   const [meta, setMeta] = useState<AcpSessionMetaSnapshot>(EMPTY_META);
   const [source, setSource] =
     useState<AcpThreadCachedMetaResponse['source']>('none');
+  const [realization, setRealization] = useState<AcpThreadRealization>({
+    state: 'unrealized',
+  });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
@@ -131,6 +137,7 @@ export function useAcpSessionMeta({
       // showing the previous agent's snapshot.
       setMeta(EMPTY_META);
       setSource('none');
+      setRealization({ state: 'unrealized' });
       setError(null);
       setLoading(false);
       loadingRef.current = false;
@@ -148,6 +155,7 @@ export function useAcpSessionMeta({
       if (!isCurrent()) return;
       setMeta(res.sessionMeta);
       setSource(res.source);
+      setRealization(res.realization);
       setError(null);
       lastFetchedAtRef.current = Date.now();
     } catch (err) {
@@ -267,6 +275,7 @@ export function useAcpSessionMeta({
   useEffect(() => {
     setMeta(EMPTY_META);
     setSource('none');
+    setRealization({ state: 'unrealized' });
     setError(null);
     lastFetchedAtRef.current = 0;
     if (threadId && bindingKind === 'external' && enabled) void refresh();
@@ -289,6 +298,7 @@ export function useAcpSessionMeta({
   return {
     meta,
     source,
+    realization,
     loading,
     error,
     refresh,

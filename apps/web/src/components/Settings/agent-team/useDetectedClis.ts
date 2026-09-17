@@ -17,7 +17,7 @@
 
 import { useEffect, useState } from 'react';
 
-import { listAcpAgentClis } from '@/api/acp';
+import { flattenAcpAgentCatalogue, listAcpAgentClis } from '@/api/acp';
 
 import type { AcpAgentCliInfo } from '@huabu/shared';
 
@@ -29,8 +29,8 @@ function loadDetectedClis(force = false): Promise<AcpAgentCliInfo[]> {
   if (detectedClisRequest) return detectedClisRequest;
   const request: Promise<AcpAgentCliInfo[]> = listAcpAgentClis()
     .then((response) => {
-      detectedClisCache = response.agents;
-      return response.agents;
+      detectedClisCache = flattenAcpAgentCatalogue(response);
+      return detectedClisCache;
     })
     .finally(() => {
       if (detectedClisRequest === request) detectedClisRequest = null;

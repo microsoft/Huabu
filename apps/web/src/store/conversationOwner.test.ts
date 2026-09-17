@@ -23,6 +23,7 @@ import {
   filterClientOwnedQuestionPatch,
   patchConversationOwnerNode,
   resolveConversationAgentBinding,
+  resolveConversationLaunchOverrides,
   resolveConversationOwnerSource,
   shouldComposeConversationOwner,
   validateConversationView,
@@ -322,6 +323,20 @@ describe('conversation owner routing', () => {
     expect(
       resolveConversationAgentBinding(undefined, { kind: 'internal' }),
     ).toEqual({ kind: 'internal' });
+  });
+
+  it('uses durable owner launch settings before the thread cache', () => {
+    expect(
+      resolveConversationLaunchOverrides(
+        { agentLaunchOverrides: { workingDirPath: '/owner/work' } },
+        { workingDirPath: '/cached/work' },
+      ),
+    ).toEqual({ workingDirPath: '/owner/work' });
+    expect(
+      resolveConversationLaunchOverrides(undefined, {
+        workingDirPath: '/cached/work',
+      }),
+    ).toEqual({ workingDirPath: '/cached/work' });
   });
 
   it('omits server-owned fields regardless of binding policy', () => {

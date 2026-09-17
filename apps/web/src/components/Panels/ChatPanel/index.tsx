@@ -15,6 +15,7 @@ import {
 } from '@huabu/shared';
 
 import {
+  materializeDiscoveredAgent,
   setAcpSessionConfigOption,
   setAcpSessionMode,
   setAcpSessionModel,
@@ -30,6 +31,7 @@ import { useActivelyViewingQuestionNode } from '@/hooks/useActivelyViewingQuesti
 import { useBuiltinThreadSettings } from '@/hooks/useBuiltinThreadSettings';
 import { ChatSessionProvider, type ChatSession } from '@/hooks/useChatSession';
 import { useInternalSlashCommands } from '@/hooks/useInternalSlashCommands';
+import { useAcpDiscoveryStore } from '@/store/acpDiscoveryStore';
 import { useAcpProfilesStore } from '@/store/acpProfilesStore';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import useCanvasStore from '@/store/canvasStore';
@@ -39,6 +41,7 @@ import {
   selectThreadHistoryLoaded,
   selectThreadHistoryPageState,
   selectThreadLastAction,
+  selectThreadLaunchOverrides,
   selectThreadMessages,
   useChatStore,
 } from '@/store/chatStore';
@@ -48,6 +51,7 @@ import {
   awaitConversationDraft,
   saveConversationDraft,
   resolveConversationAgentBinding,
+  resolveConversationLaunchOverrides,
   resolveConversationOwnerSource,
 } from '@/store/conversationOwner';
 import {
@@ -70,6 +74,7 @@ import {
 import { AcpSessionSelectors } from './AcpSessionSelectors';
 import { bindingsEqual } from './agentMenu';
 import { AgentSelector, type AgentChoice } from './AgentSelector';
+import { AgentWorkingDirectory } from './AgentWorkingDirectory';
 import { BuiltinSessionSelectors } from './BuiltinSessionSelectors';
 import { ChangeReviewCard } from './ChangeReviewCard';
 import { parseSlashInvocations } from './parseSlashInvocations';
@@ -310,6 +315,16 @@ export const ChatPanel = ({
     conversationOwnerSource,
     cachedAgentBinding,
   );
+  const cachedLaunchOverrides = useChatStore((state) =>
+    selectThreadLaunchOverrides(state, threadId),
+  );
+  const launchOverrides = resolveConversationLaunchOverrides(
+    conversationOwnerSource,
+    cachedLaunchOverrides,
+  );
+  const setThreadLaunchOverrides = useChatStore(
+    (state) => state.setThreadLaunchOverrides,
+  );
   const setAgentBinding = useChatStore((state) => state.setAgentBinding);
   const makeThreadMetadataEphemeral = useChatStore(
     (state) => state.makeThreadMetadataEphemeral,
@@ -317,8 +332,20 @@ export const ChatPanel = ({
   const {
     profiles: acpProfiles,
     refresh: refreshAcpProfiles,
-    loaded: acpProfilesLoaded,
+    agentlet: acpAgentlet,
   } = useAcpProfiles();
+  const discoveryMachines = useAcpDiscoveryStore((state) => state.machines);
+  const discoveryLoaded = useAcpDiscoveryStore((state) => state.loaded);
+  const discoveryLoading = useAcpDiscoveryStore((state) => state.loading);
+  const initDiscovery = useAcpDiscoveryStore((state) => state.init);
+  const refreshDiscovery = useAcpDiscoveryStore((state) => state.refresh);
+  useEffect(() => {
+    if (agentBinding.kind === 'external') void initDiscovery();
+  }, [agentBinding.kind, initDiscovery]);
+  const selectedProfile =
+    agentBinding.kind === 'external'
+      ? acpProfiles.find((profile) => profile.id === agentBinding.profileId)
+      : undefined;
 
   useEffect(() => {
     if (bindingsEqual(cachedAgentBinding, agentBinding)) {
@@ -330,39 +357,6 @@ export const ChatPanel = ({
     agentBinding,
     cachedAgentBinding,
     makeThreadMetadataEphemeral,
-    setAgentBinding,
-    threadId,
-  ]);
-
-  // Auto-reset a stale external binding on an *empty* thread: the
-  // persisted binding refers to a profile that no longer exists
-  // (user deleted it from Settings, or imported a workspace whose
-  // profiles were never created locally). Threads with messages
-  // keep the stale binding so the title still reads "Chat with
-  // <alias>" — the user can recreate the profile in Settings to
-  // bring the binding back to life.
-  useEffect(() => {
-    if (viewingQuestionBindingIsFixed) return;
-    if (!isHistoryLoaded) return;
-    // Node-backed selection is never silently rebound after a Profile vanishes.
-    // An Editing node can have failed preparation text, and Bound can be empty.
-    if (activeConversationView || messages.length > 0) return;
-    if (!acpProfilesLoaded) return;
-    if (agentBinding.kind !== 'external') return;
-    const profileExists = acpProfiles.some(
-      (p) => p.id === agentBinding.profileId,
-    );
-    if (profileExists) return;
-    setAgentBinding(threadId, { kind: 'internal' }, canvasId || undefined);
-  }, [
-    isHistoryLoaded,
-    activeConversationView,
-    messages.length,
-    acpProfilesLoaded,
-    agentBinding,
-    acpProfiles,
-    canvasId,
-    viewingQuestionBindingIsFixed,
     setAgentBinding,
     threadId,
   ]);
@@ -455,6 +449,7 @@ export const ChatPanel = ({
   const {
     meta: acpSessionMeta,
     source: acpSessionMetaSource,
+    realization: acpRealization,
     loading: acpSessionMetaLoading,
     error: acpSessionMetaError,
     refresh: refreshAcpSessionMeta,
@@ -465,6 +460,13 @@ export const ChatPanel = ({
     canvasId: ownerCanvasId,
     enabled: ownerScopeReady && acpExternalReachable,
   });
+  const selectedAgentletId =
+    acpRealization.state === 'realized'
+      ? acpRealization.agentletId
+      : selectedProfile?.agentletId;
+  const selectedMachine = discoveryMachines.find(
+    (machine) => machine.agentletId === selectedAgentletId,
+  );
 
   // Keep a ref to the latest snapshot so the optimistic handlers can
   // read prior values for revert without re-creating themselves (and
@@ -488,22 +490,9 @@ export const ChatPanel = ({
       : messages.length > 0,
   });
 
-  // Three-state connection summary for the header badge, derived from
-  // `useAcpSessionMeta`. **Optimistic green by default** — opening a
-  // thread is no longer a "connection in flight" event because we
-  // hydrate selectors from the server's cached meta snapshot without
-  // spawning the agentlet (see `useAcpSessionMeta`'s mount effect).
-  // The badge only deviates from `connected` when there is positive
-  // evidence of trouble:
-  //
-  //   connecting: the GET-only capability cache read is in flight
-  //   failed:     the cache read failed and there is no cached snapshot
-  //   connected:  everything else — cache hit, post-success steady
-  //               state, or transient ensure failure that still leaves
-  //               us with a valid (if possibly stale) snapshot. We
-  //               degrade gracefully here: showing red just because a
-  //               background refresh failed while the cached state is
-  //               perfectly usable would be noise.
+  // Show only positive connection evidence. Cached ACP metadata is not proof
+  // of a live session, so the healthy/unknown state intentionally has no
+  // optimistic green badge.
   //
   // Internal bindings get `null` — the parent only renders the badge
   // for `agentBinding.kind === 'external'`.
@@ -516,11 +505,20 @@ export const ChatPanel = ({
   const acpConnectionStatus: AcpConnectionStatus | null =
     agentBinding.kind !== 'external'
       ? null
-      : acpSessionMetaLoading
+      : acpSessionMetaLoading ||
+          discoveryLoading ||
+          !discoveryLoaded ||
+          selectedMachine?.discovery === 'refreshing'
         ? 'connecting'
-        : acpSessionMetaError && acpSessionMeta.updatedAt === 0
+        : (selectedMachine && !selectedMachine.connected) ||
+            selectedMachine?.discovery === 'unsupported' ||
+            selectedMachine?.discovery === 'error' ||
+            (!!selectedAgentletId && !selectedMachine && discoveryLoaded) ||
+            (!selectedProfile && acpRealization.state !== 'realized') ||
+            (!selectedMachine && acpAgentlet?.online === false) ||
+            (acpSessionMetaError && acpSessionMeta.updatedAt === 0)
           ? 'failed'
-          : 'connected';
+          : null;
 
   // Optimistic onChange handlers for the ACP selectors: merge the
   // chosen value into the local snapshot immediately, then fire the
@@ -537,8 +535,9 @@ export const ChatPanel = ({
     () => ({
       binding: agentBinding.kind === 'external' ? agentBinding : undefined,
       canvasId: ownerCanvasId ?? undefined,
+      cwd: launchOverrides?.workingDirPath,
     }),
-    [agentBinding, ownerCanvasId],
+    [agentBinding, launchOverrides?.workingDirPath, ownerCanvasId],
   );
 
   // Set-RPC handlers.
@@ -565,6 +564,7 @@ export const ChatPanel = ({
           modeId,
           binding: acpControlTarget.binding,
           canvasId: acpControlTarget.canvasId,
+          cwd: acpControlTarget.cwd,
         });
         await refreshAcpSessionMeta();
         onCommit?.();
@@ -607,6 +607,7 @@ export const ChatPanel = ({
           modelId,
           binding: acpControlTarget.binding,
           canvasId: acpControlTarget.canvasId,
+          cwd: acpControlTarget.cwd,
         });
         await refreshAcpSessionMeta();
         onCommit?.();
@@ -649,6 +650,7 @@ export const ChatPanel = ({
           value,
           binding: acpControlTarget.binding,
           canvasId: acpControlTarget.canvasId,
+          cwd: acpControlTarget.cwd,
         });
         await refreshAcpSessionMeta();
         onCommit?.();
@@ -820,54 +822,98 @@ export const ChatPanel = ({
     (activeConversationView
       ? conversationOwnerSource?.bindingState !== 'bound'
       : !threadHasUserMessage) &&
+    acpRealization.state !== 'realized' &&
+    !acpSessionMetaLoading &&
+    ownerScopeReady &&
     !savingAgentDraft &&
     !isLoading;
+  const handleWorkingDirectoryChange = useCallback(
+    async (workingDirPath: string | undefined) => {
+      const next = workingDirPath ? { workingDirPath } : undefined;
+      if (activeConversationView) {
+        setSavingAgentDraft(true);
+        try {
+          await saveConversationDraft(activeConversationView, {
+            agentBinding,
+            agentMode: mode,
+            agentLaunchOverrides: next ?? {},
+          });
+          makeThreadMetadataEphemeral(threadId, { preserveSettings: true });
+        } finally {
+          setSavingAgentDraft(false);
+        }
+      }
+      setThreadLaunchOverrides(threadId, next);
+      onCommit?.();
+    },
+    [
+      activeConversationView,
+      agentBinding,
+      makeThreadMetadataEphemeral,
+      mode,
+      onCommit,
+      setThreadLaunchOverrides,
+      threadId,
+    ],
+  );
   const handleSelectAgent = useCallback(
     async (choice: AgentChoice) => {
       // Agent binding is immutable once a turn starts (1 thread = 1 binding).
       // The selector is already read-only then; keep this guard as defense in
       // depth in case a stale menu event arrives during the transition.
-      if (isLoading || savingAgentDraft || viewingQuestionBindingIsFixed)
-        return;
-      if (activeConversationView) {
-        setSavingAgentDraft(true);
-        try {
+      if (!agentSelectorEditable) return;
+      setSavingAgentDraft(true);
+      try {
+        let binding = choice.binding;
+        if (choice.discoveredAgent) {
+          const profile = await materializeDiscoveredAgent({
+            agentletId: choice.discoveredAgent.agentletId,
+            harnessId: choice.discoveredAgent.harnessId,
+          });
+          binding = {
+            kind: 'external',
+            profileId: profile.id,
+            alias: profile.alias,
+          };
+          await refreshAcpProfiles();
+        }
+        if (!binding) return;
+        if (activeConversationView) {
           await saveConversationDraft(activeConversationView, {
-            agentBinding: choice.binding,
+            agentBinding: binding,
             agentMode: choice.mode,
             agentIcon: snapshotAgentIcon(
-              choice.binding,
+              binding,
               useAcpProfilesStore.getState().profiles,
             ),
           });
           makeThreadMetadataEphemeral(threadId, { preserveSettings: true });
-        } catch (error) {
-          toast(
-            error instanceof Error
-              ? error.message
-              : 'Failed to save Agent selection',
-            { tone: 'danger' },
-          );
-          return;
-        } finally {
-          setSavingAgentDraft(false);
         }
+        setAgentBinding(threadId, binding, canvasId || undefined);
+        setThreadLastAction(threadId, choice.mode);
+        onCommit?.();
+      } catch (error) {
+        toast(
+          error instanceof Error
+            ? error.message
+            : t('chat.materializeAgentFailed'),
+          { tone: 'danger' },
+        );
+      } finally {
+        setSavingAgentDraft(false);
       }
-      setAgentBinding(threadId, choice.binding, canvasId || undefined);
-      setThreadLastAction(threadId, choice.mode);
-      onCommit?.();
     },
     [
-      isLoading,
-      savingAgentDraft,
+      agentSelectorEditable,
       activeConversationView,
       makeThreadMetadataEphemeral,
       onCommit,
-      viewingQuestionBindingIsFixed,
+      refreshAcpProfiles,
       setAgentBinding,
       setThreadLastAction,
       canvasId,
       threadId,
+      t,
     ],
   );
 
@@ -899,6 +945,7 @@ export const ChatPanel = ({
             useAcpProfilesStore.getState().profiles,
           ),
           agentMode: mode,
+          ...(launchOverrides ? { agentLaunchOverrides: launchOverrides } : {}),
         },
       },
       {
@@ -918,6 +965,7 @@ export const ChatPanel = ({
     messages,
     threadId,
     agentBinding,
+    launchOverrides,
     mode,
     canvasId,
     addNode,
@@ -1084,16 +1132,43 @@ export const ChatPanel = ({
               slashLoading={slashLoading}
               onSlashMenuIntent={refreshSlashCommands}
               agentSelectorSlot={
-                <AgentSelector
-                  currentBinding={agentBinding}
-                  currentMode={mode}
-                  profiles={acpProfiles}
-                  editable={agentSelectorEditable}
-                  onSelect={handleSelectAgent}
-                  onRefreshProfiles={refreshAcpProfiles}
-                  disabled={!isHistoryLoaded}
-                  fallbackIcon={viewingQuestionAgentIcon}
-                />
+                <div className="flex min-w-0 items-center">
+                  <AgentSelector
+                    currentBinding={agentBinding}
+                    currentMode={mode}
+                    profiles={acpProfiles}
+                    machines={discoveryMachines}
+                    editable={agentSelectorEditable}
+                    onSelect={handleSelectAgent}
+                    onRefreshProfiles={refreshAcpProfiles}
+                    onRefreshDiscovery={refreshDiscovery}
+                    disabled={!isHistoryLoaded}
+                    fallbackIcon={viewingQuestionAgentIcon}
+                  />
+                  {(selectedProfile?.launch.kind === 'acp-command' ||
+                    acpRealization.state === 'realized') && (
+                    <AgentWorkingDirectory
+                      agentletId={
+                        acpRealization.state === 'realized'
+                          ? acpRealization.agentletId
+                          : (selectedProfile?.agentletId ?? '')
+                      }
+                      profileWorkingDirPath={
+                        selectedProfile?.workingDirPath ??
+                        (acpRealization.state === 'realized'
+                          ? (acpRealization.workingDirPath ?? '')
+                          : '')
+                      }
+                      overrideWorkingDirPath={launchOverrides?.workingDirPath}
+                      realization={acpRealization}
+                      readOnly={viewingQuestionBindingIsFixed}
+                      disabled={
+                        !isHistoryLoaded || isLoading || acpSessionMetaLoading
+                      }
+                      onChange={handleWorkingDirectoryChange}
+                    />
+                  )}
+                </div>
               }
               acpSelectorsSlot={
                 agentBinding.kind === 'external' ? (

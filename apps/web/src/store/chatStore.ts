@@ -9,6 +9,7 @@ import { createId } from '@huabu/shared';
 import type { ChatMessage } from './chatTypes';
 import type {
   AgentBinding,
+  AgentLaunchOverrides,
   AgentMode,
   AssistantToolPart,
   ChatAttachment,
@@ -56,6 +57,8 @@ export interface ChatThreadState {
    * lifetime; the only way to change it is to start a new thread.
    */
   binding: AgentBinding;
+  /** Mutable launch settings used only until the external workload is realized. */
+  launchOverrides?: AgentLaunchOverrides;
   /**
    * Built-in per-thread capability selection. `null` means "no override".
    * Read at send time so a model picked before the first message is carried
@@ -87,6 +90,8 @@ export interface ChatState {
   lastActionByThread: Record<string, AgentMode>;
   /** Persisted binding identity for independent Preview Workspace threads. */
   bindingByThread: Record<string, AgentBinding>;
+  /** Persisted pre-realization launch settings for independent threads. */
+  launchOverridesByThread: Record<string, AgentLaunchOverrides>;
   /** Persisted built-in model settings for independent threads. */
   settingsByThread: Record<
     string,
@@ -172,6 +177,7 @@ export interface ChatState {
   createThread: (options?: {
     binding?: AgentBinding;
     lastAction?: AgentMode;
+    launchOverrides?: AgentLaunchOverrides;
   }) => string;
   /** Return the Canvas's canonical chat thread, creating its mapping once. */
   ensureCanvasThread: (canvasId: string) => string;
@@ -185,6 +191,11 @@ export interface ChatState {
     threadId: string,
     binding: AgentBinding,
     canvasId?: string,
+  ) => void;
+  /** Replace the thread's mutable pre-realization launch settings. */
+  setThreadLaunchOverrides: (
+    threadId: string,
+    overrides: AgentLaunchOverrides | undefined,
   ) => void;
 
   /** Replace a thread's built-in capability selection. */
@@ -266,6 +277,7 @@ function threadOf(state: ChatState, threadId: string): ChatThreadState {
       lastAction:
         state.lastActionByThread[threadId] ?? defaultActionForBinding(binding),
       binding,
+      launchOverrides: state.launchOverridesByThread[threadId],
       settings: state.settingsByThread[threadId] ?? EMPTY_THREAD.settings,
     }
   );
@@ -327,6 +339,7 @@ export const useChatStore = create<ChatState>()(
       threadsById: {},
       lastActionByThread: {},
       bindingByThread: {},
+      launchOverridesByThread: {},
       settingsByThread: {},
       ephemeralMetadataThreads: {},
       ephemeralSettingsThreads: {},
@@ -472,6 +485,7 @@ export const useChatStore = create<ChatState>()(
             olderHistoryError: null,
             binding,
             lastAction,
+            launchOverrides: options?.launchOverrides,
           }),
           lastActionByThread: rememberLastAction(state, threadId, lastAction),
           bindingByThread: rememberThreadValue(
@@ -479,6 +493,13 @@ export const useChatStore = create<ChatState>()(
             threadId,
             binding,
           ),
+          launchOverridesByThread: options?.launchOverrides
+            ? rememberThreadValue(
+                state.launchOverridesByThread,
+                threadId,
+                options.launchOverrides,
+              )
+            : state.launchOverridesByThread,
         }));
         return threadId;
       },
@@ -519,6 +540,21 @@ export const useChatStore = create<ChatState>()(
         });
       },
 
+      setThreadLaunchOverrides: (threadId, overrides) =>
+        set((state) => {
+          const launchOverridesByThread = {
+            ...state.launchOverridesByThread,
+          };
+          if (overrides) launchOverridesByThread[threadId] = overrides;
+          else delete launchOverridesByThread[threadId];
+          return {
+            ...patchThread(state, threadId, { launchOverrides: overrides }),
+            launchOverridesByThread: state.ephemeralMetadataThreads[threadId]
+              ? state.launchOverridesByThread
+              : launchOverridesByThread,
+          };
+        }),
+
       setThreadSettings: (threadId, settings) =>
         set((state) => {
           const current = threadOf(state, threadId).settings;
@@ -540,13 +576,18 @@ export const useChatStore = create<ChatState>()(
         set((state) => {
           const lastActionByThread = { ...state.lastActionByThread };
           const bindingByThread = { ...state.bindingByThread };
+          const launchOverridesByThread = {
+            ...state.launchOverridesByThread,
+          };
           const settingsByThread = { ...state.settingsByThread };
           delete lastActionByThread[threadId];
           delete bindingByThread[threadId];
+          delete launchOverridesByThread[threadId];
           if (!options?.preserveSettings) delete settingsByThread[threadId];
           return {
             lastActionByThread,
             bindingByThread,
+            launchOverridesByThread,
             settingsByThread,
             ephemeralMetadataThreads: {
               ...state.ephemeralMetadataThreads,
@@ -620,7 +661,7 @@ export const useChatStore = create<ChatState>()(
     }),
     {
       name: 'huabu-chat',
-      version: 5,
+      version: 6,
       migrate: (persisted) => {
         const state = persisted as Partial<ChatState> & {
           lastAction?: AgentMode;
@@ -630,6 +671,9 @@ export const useChatStore = create<ChatState>()(
         const threadMap = state.threadMap ?? {};
         const bindingMap = state.bindingMap ?? {};
         const bindingByThread = { ...(state.bindingByThread ?? {}) };
+        const launchOverridesByThread = {
+          ...(state.launchOverridesByThread ?? {}),
+        };
         for (const [canvasId, threadId] of Object.entries(threadMap)) {
           const binding = bindingMap[canvasId];
           if (threadId && binding && !bindingByThread[threadId]) {
@@ -652,6 +696,7 @@ export const useChatStore = create<ChatState>()(
               ? { [legacyThreadId]: state.lastAction }
               : {}),
           bindingByThread,
+          launchOverridesByThread,
           settingsByThread,
           bindingMap,
         };
@@ -660,6 +705,7 @@ export const useChatStore = create<ChatState>()(
         threadMap: state.threadMap,
         lastActionByThread: state.lastActionByThread,
         bindingByThread: state.bindingByThread,
+        launchOverridesByThread: state.launchOverridesByThread,
         settingsByThread: state.settingsByThread,
         bindingMap: state.bindingMap,
       }),
@@ -723,6 +769,13 @@ export const selectThreadBinding = (
   state: ChatState,
   threadId: string,
 ): AgentBinding => threadOf(state, threadId).binding;
+
+/** Mutable launch settings for an unrealized external thread. */
+export const selectThreadLaunchOverrides = (
+  state: ChatState,
+  threadId: string,
+): AgentLaunchOverrides | undefined =>
+  threadOf(state, threadId).launchOverrides;
 
 /** The compose mode last selected for a thread. */
 export const selectThreadLastAction = (

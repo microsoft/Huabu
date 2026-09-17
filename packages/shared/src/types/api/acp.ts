@@ -5,13 +5,9 @@
  * ACP (External-agent) API wire types.
  *
  * Huabu connects to external agent CLIs (Copilot / Claude / Gemini /
- * custom) via agentlet's **daemon mode**. The server forks an in-process
- * agentlet daemon at boot; users configure long-lived **agent profiles**
- * (cli + cwd + flags) and the daemon spawns agent processes on demand.
- *
- * There is one daemon per Huabu instance and the user never has to
- * pair it manually — it is invisible infrastructure surfaced only when
- * something has gone wrong (see `AcpAgentletStatus.lastError`).
+ * custom) through local or remote agentlets. Users can select machine-local
+ * discovered Agents or configure long-lived **agent profiles** (cli + cwd +
+ * flags), and the selected agentlet spawns agent processes on demand.
  *
  * Per docs/architecture/api-design.md, zod schemas defined here are server-side
  * truth; the web bundle imports the inferred TS types only
@@ -95,7 +91,7 @@ export interface AcpAgentProfile {
   updatedAt: number;
 }
 
-// ─── Agentlet status (one agentlet per Huabu) ──────────────────────
+// ─── Supervised local agentlet status ──────────────────────────────
 //
 // The server forks an idle agentlet as a child process at boot and
 // supervises it with exponential-backoff restart. Status is exposed
@@ -103,7 +99,7 @@ export interface AcpAgentProfile {
 // the supervisor gives up; on the happy path the user never sees it.
 
 /**
- * Status of the single agentlet known to this Huabu instance.
+ * Status of the Server-supervised local agentlet.
  *
  * Canonically defined as `AgentletStatus` in `@agenetes/protocol`
  * (the L2 control-plane wire contract); re-exported here under the
@@ -145,17 +141,11 @@ export type AcpAgentletRestartResponse = AcpAgentletStatus;
 /** @deprecated Use {@link AcpAgentletRestartResponse} instead. */
 export type AcpDaemonRestartResponse = AcpAgentletRestartResponse;
 
-// ─── Local agent CLI detection ────────────────────────────────────────
+// ─── Execution-machine Agent discovery ───────────────────────────────
 //
-// The server probes the host for known ACP-capable agent binaries
-// (`copilot`, `gemini` natively; `claude-agent-acp` and `codex-acp` for
-// Claude / Codex, which have no native ACP mode and are driven through
-// their ACP adapters) and reports their installation state. Powers the
-// agent dropdown in the Profile Editor — picking an installed agent
-// pre-fills `command` for the new profile.
-//
-// This endpoint is loopback-only — it shells out to discover host
-// binaries and must never be reachable from a remote browser.
+// The Server sends its trusted harness catalogue to each connected agentlet,
+// which reports machine-local installation observations. HTTP callers only
+// see this cache; they never trigger Server-local PATH probing.
 
 /** Definition + detection result for one known external agent CLI. */
 export interface AcpAgentCliInfo {
@@ -181,25 +171,131 @@ export interface AcpAgentCliInfo {
     position: 'before-acp' | 'after-acp';
   } | null;
   /**
-   * `<binary> --version` first line (trimmed). May be an empty string
-   * when the binary is on PATH but the version probe failed (network
-   * tool, slow startup, etc.) — `installed` is still `true`.
+   * `<binary> --version` first line (trimmed), when the target-machine probe
+   * is safe and succeeds.
    */
   version?: string;
-  /** True iff `binary` was resolved on the host's PATH. */
+  /** True iff `binary` was resolved on at least one projected target machine. */
   installed: boolean;
   /** One-line `npm install -g …` hint used in error / help text. */
   installHint: string;
 }
 
+export const acpHarnessObservationStatusSchema = z.enum([
+  'installed',
+  'missing',
+  'error',
+]);
+export type AcpHarnessObservationStatus = z.infer<
+  typeof acpHarnessObservationStatusSchema
+>;
+
+export const acpDiscoveredAgentSchema = z
+  .object({
+    agentletId: z.string().min(1),
+    hostname: z.string().min(1),
+    platform: z.string().min(1),
+    harnessId: z.string().min(1),
+    displayName: z.string().min(1),
+    binary: z.string().min(1),
+    acpArgs: z.array(z.string()),
+    autoApprove: z
+      .object({
+        args: z.array(z.string()),
+        position: z.enum(['before-acp', 'after-acp']),
+      })
+      .nullable(),
+    installHint: z.string(),
+    status: acpHarnessObservationStatusSchema,
+    version: z.string().optional(),
+    error: z
+      .object({
+        code: z.string().min(1),
+        message: z.string().min(1),
+      })
+      .optional(),
+  })
+  .strict();
+export type AcpDiscoveredAgent = z.infer<typeof acpDiscoveredAgentSchema>;
+
+export const acpAgentMachineDiscoverySchema = z
+  .object({
+    agentletId: z.string().min(1),
+    hostname: z.string().min(1),
+    platform: z.string().min(1),
+    connected: z.boolean(),
+    connectedAt: z.string().optional(),
+    discovery: z.enum(['ready', 'refreshing', 'unsupported', 'error']),
+    defaultWorkingDirPath: z.string().min(1).optional(),
+    refreshedAt: z.number().int().nonnegative().optional(),
+    error: z
+      .object({
+        code: z.string().min(1),
+        message: z.string().min(1),
+      })
+      .optional(),
+    agents: z.array(acpDiscoveredAgentSchema),
+  })
+  .strict();
+export type AcpAgentMachineDiscovery = z.infer<
+  typeof acpAgentMachineDiscoverySchema
+>;
+
 /** Response body for `GET /api/acp/agent-cli`. */
-export interface AcpAgentCliListResponse {
-  /**
-   * Complete trusted agent catalogue in canonical display order, including
-   * entries with `installed === false`.
-   */
-  agents: AcpAgentCliInfo[];
-}
+export const acpAgentCliListResponseSchema = z
+  .object({
+    machines: z.array(acpAgentMachineDiscoverySchema),
+  })
+  .strict();
+export type AcpAgentCliListResponse = z.infer<
+  typeof acpAgentCliListResponseSchema
+>;
+
+export const refreshAcpAgentCliRequestSchema = z
+  .object({ agentletId: z.string().min(1).optional() })
+  .strict();
+export type RefreshAcpAgentCliRequest = z.infer<
+  typeof refreshAcpAgentCliRequestSchema
+>;
+
+export const materializeDiscoveredAgentRequestSchema = z
+  .object({
+    agentletId: z.string().min(1),
+    harnessId: z.string().min(1),
+    workingDirPath: z.string().min(1).max(4096).optional(),
+  })
+  .strict();
+export type MaterializeDiscoveredAgentRequest = z.infer<
+  typeof materializeDiscoveredAgentRequestSchema
+>;
+
+export const validateAcpWorkingDirectoryRequestSchema = z
+  .object({
+    agentletId: z.string().min(1),
+    workingDirPath: z.string().min(1).max(4096).optional(),
+  })
+  .strict();
+export type ValidateAcpWorkingDirectoryRequest = z.infer<
+  typeof validateAcpWorkingDirectoryRequestSchema
+>;
+
+export const validateAcpWorkingDirectoryResponseSchema = z
+  .object({
+    agentletId: z.string().min(1),
+    workingDirPath: z.string().min(1),
+    source: z.enum(['explicit', 'machine_default']),
+    valid: z.boolean(),
+    error: z
+      .object({
+        code: z.string().min(1),
+        message: z.string().min(1),
+      })
+      .optional(),
+  })
+  .strict();
+export type ValidateAcpWorkingDirectoryResponse = z.infer<
+  typeof validateAcpWorkingDirectoryResponseSchema
+>;
 
 // ─── Thread → agent binding ────────────────────────────────────────────
 //
@@ -440,9 +536,24 @@ export type AcpThreadCachedMetaQuery = z.infer<
   typeof acpThreadCachedMetaQuerySchema
 >;
 
+export const acpThreadRealizationSchema = z.discriminatedUnion('state', [
+  z.object({ state: z.literal('unrealized') }).strict(),
+  z
+    .object({
+      state: z.literal('realized'),
+      profileId: z.string().min(1),
+      alias: z.string().min(1),
+      agentletId: z.string().min(1),
+      workingDirPath: z.string().min(1).optional(),
+    })
+    .strict(),
+]);
+export type AcpThreadRealization = z.infer<typeof acpThreadRealizationSchema>;
+
 /** Schema mirror of {@link AcpThreadCachedMetaResponse}. */
 export const acpThreadCachedMetaResponseSchema = z.object({
   source: z.enum(['thread', 'profile', 'none']),
+  realization: acpThreadRealizationSchema,
   availableCommands: z.array(availableCommandSchema),
   commandsUpdatedAt: z.number().int().nonnegative(),
   sessionMeta: acpSessionMetaSnapshotSchema,

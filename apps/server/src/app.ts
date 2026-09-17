@@ -16,6 +16,7 @@ import { getDataDir } from './data-dir.js';
 import { setHostServerPort } from './host-port.js';
 import {
   acpAgentCliRoutes,
+  acpMachineDiscovery,
   acpAgentletRoutes,
   acpProfilesRoutes,
   acpThreadsRoutes,
@@ -342,6 +343,9 @@ const agentletGateway = mountAgenetes(app, {
     onLegacyProfilesMigrated: removeLegacyAcpProfiles,
   },
 });
+const unregisterAcpMachineDiscovery =
+  acpMachineDiscovery.attach(agentletGateway);
+app.addHook('onClose', async () => unregisterAcpMachineDiscovery());
 // Legacy `agent-team` ACP records predate managed Agent Teams. They can't
 // be auto-migrated (they bypass managed roots, Configs, and setup) and are
 // no longer surfaced in Settings, so drop them at startup instead of

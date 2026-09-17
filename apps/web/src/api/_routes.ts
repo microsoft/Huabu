@@ -153,6 +153,9 @@ export const routes = {
 
   // ── ACP (external agent bridge) ───────────────────────────────────
   acpAgentCli: '/acp/agent-cli',
+  acpAgentCliRefresh: '/acp/agent-cli/refresh',
+  acpAgentCliMaterialize: '/acp/agent-cli/materialize',
+  acpWorkingDirectoryValidate: '/acp/working-directory/validate',
   // Profiles (loopback-only) — user-managed spawn recipes.
   acpProfiles: '/acp/profiles',
   acpProfileItem: (id: string) => `/acp/profiles/${enc(id)}`,

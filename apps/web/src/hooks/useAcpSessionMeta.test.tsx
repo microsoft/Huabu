@@ -74,6 +74,7 @@ describe('useAcpSessionMeta', () => {
   it('uses a GET-only cold cache result without starting a session', async () => {
     apiMocks.getCached.mockResolvedValue({
       source: 'none',
+      realization: { state: 'unrealized' },
       availableCommands: [],
       commandsUpdatedAt: 0,
       sessionMeta: EMPTY_META,
@@ -88,6 +89,7 @@ describe('useAcpSessionMeta', () => {
   it('renders a Profile capability observation without warming a thread', async () => {
     apiMocks.getCached.mockResolvedValue({
       source: 'profile',
+      realization: { state: 'unrealized' },
       availableCommands: [{ name: 'help', description: 'Help' }],
       commandsUpdatedAt: 1,
       sessionMeta: {

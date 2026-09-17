@@ -58,6 +58,7 @@ function createHarness(options?: {
   bindingCoordinator?: boolean;
   agentTarget?: AgentNodeTarget | null;
   record?: ThreadRecord;
+  profileWorkingDirPath?: string;
   collect?: () => Promise<{
     markdown: string;
     diagnostics: {
@@ -123,7 +124,10 @@ function createHarness(options?: {
       spec: {
         binding,
         agentletId: 'agentlet-1',
-        cwd: launchOverrides?.workingDirPath ?? cwd,
+        cwd:
+          launchOverrides?.workingDirPath ??
+          cwd ??
+          options?.profileWorkingDirPath,
         recipe: null,
         initialPreamble: [
           'Huabu bootstrap',
@@ -139,6 +143,9 @@ function createHarness(options?: {
     profileId: 'profile-fixed',
     configOptions: [],
   } as unknown as AcpSessionEntry);
+  const validateWorkingDirectory = vi.fn(
+    async (_agentletId: string, workingDirPath: string) => workingDirPath,
+  );
   const collectSpacePrompt =
     options?.collect ??
     vi.fn().mockResolvedValue({
@@ -167,6 +174,7 @@ function createHarness(options?: {
     readRecord: vi.fn(() => durableRecord),
     createHandle,
     buildSpec,
+    validateWorkingDirectory,
     subscribeProfileCache: vi.fn(),
     subscribeTitles,
     ensureSession,
@@ -190,6 +198,7 @@ function createHarness(options?: {
     acquireTurn,
     release,
     record: () => durableRecord,
+    validateWorkingDirectory,
   };
 }
 
@@ -429,6 +438,78 @@ describe('ExternalAgentRealizationService', () => {
     expect(harness.createHandle).not.toHaveBeenCalled();
   });
 
+  it('validates a requested cwd before creating a workload', async () => {
+    const harness = createHarness({ agentTarget: null });
+    harness.validateWorkingDirectory.mockResolvedValue('/client/work');
+
+    const realized = await harness.service.realize({
+      threadId: 'thread-1',
+      canvasId: 'canvas-1',
+      requestedBinding: {
+        kind: 'external',
+        alias: 'Standalone Agent',
+        profileId: 'profile-standalone',
+      },
+      requestedCwd: '/client/work/',
+      fixedTarget: null,
+      logger,
+    });
+
+    expect(harness.validateWorkingDirectory).toHaveBeenCalledWith(
+      'agentlet-1',
+      '/client/work/',
+    );
+    expect(realized.spec.spec.cwd).toBe('/client/work/');
+    expect(harness.createHandle).toHaveBeenCalledWith(realized.spec);
+  });
+
+  it('validates the Profile default cwd before creating a workload', async () => {
+    const harness = createHarness({
+      agentTarget: null,
+      profileWorkingDirPath: '/profile/default',
+    });
+
+    await harness.service.realize({
+      threadId: 'thread-1',
+      canvasId: 'canvas-1',
+      requestedBinding: {
+        kind: 'external',
+        alias: 'Standalone Agent',
+        profileId: 'profile-standalone',
+      },
+      fixedTarget: null,
+      logger,
+    });
+
+    expect(harness.validateWorkingDirectory).toHaveBeenCalledWith(
+      'agentlet-1',
+      '/profile/default',
+    );
+    expect(harness.createHandle).toHaveBeenCalledOnce();
+  });
+
+  it('rejects an invalid fixed cwd before creating a workload', async () => {
+    const harness = createHarness();
+    harness.validateWorkingDirectory.mockRejectedValue(
+      new (await import('./machine-discovery.js')).AcpMachineDiscoveryError(
+        'path_not_found',
+        'cwd does not exist on the target machine',
+        400,
+      ),
+    );
+
+    await expect(
+      harness.service.realize({
+        threadId: 'thread-1',
+        canvasId: 'canvas-1',
+        requestedBinding: targetBinding,
+        fixedTarget: target,
+        logger,
+      }),
+    ).rejects.toMatchObject({ code: 'path_not_found' });
+    expect(harness.createHandle).not.toHaveBeenCalled();
+  });
+
   it('rejects a fixed working-directory mismatch before creating a workload', async () => {
     const harness = createHarness();
 
@@ -488,6 +569,7 @@ describe('ExternalAgentRealizationService', () => {
     expect(harness.buildSpec).not.toHaveBeenCalled();
     expect(harness.collectSpacePrompt).not.toHaveBeenCalled();
     expect(harness.subscribeTitles).not.toHaveBeenCalled();
+    expect(harness.validateWorkingDirectory).not.toHaveBeenCalled();
   });
 
   it.each([false, true])(

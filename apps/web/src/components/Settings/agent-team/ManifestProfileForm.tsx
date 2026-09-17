@@ -22,7 +22,7 @@
 import { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { listAcpAgentClis } from '@/api/acp';
+import { flattenAcpAgentCatalogue, listAcpAgentClis } from '@/api/acp';
 import {
   createAgentTeamProfile,
   patchAgentTeamProfile,
@@ -172,7 +172,9 @@ function CreateManifestProfileForm({
     try {
       const latest = await listAcpAgentClis();
       if (
-        !latest.agents.some((agent) => agent.id === agentId && agent.installed)
+        !flattenAcpAgentCatalogue(latest).some(
+          (agent) => agent.id === agentId && agent.installed,
+        )
       ) {
         toast(t('settings.selectedAgentUnavailable'), { tone: 'danger' });
         return;

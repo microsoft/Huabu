@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AgentMenuOptions } from './agentMenu';
 
-import type { AgentProfileView } from '@huabu/shared';
+import type { AcpAgentMachineDiscovery, AgentProfileView } from '@huabu/shared';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
@@ -61,6 +61,31 @@ const profiles: AgentProfileView[] = [
   },
 ];
 
+const machines: AcpAgentMachineDiscovery[] = [
+  {
+    agentletId: 'machine-a',
+    hostname: 'Workstation',
+    platform: 'linux',
+    connected: true,
+    discovery: 'ready',
+    defaultWorkingDirPath: '/home/user',
+    agents: [
+      {
+        agentletId: 'machine-a',
+        hostname: 'Workstation',
+        platform: 'linux',
+        harnessId: 'copilot',
+        displayName: 'GitHub Copilot',
+        binary: 'copilot',
+        acpArgs: ['--acp'],
+        autoApprove: null,
+        installHint: '',
+        status: 'installed',
+      },
+    ],
+  },
+];
+
 let root: Root | undefined;
 let container: HTMLDivElement | undefined;
 
@@ -93,5 +118,35 @@ describe('AgentMenuOptions', () => {
     expect(container.textContent).not.toContain('Pending Team');
     expect(container.textContent).toContain('chat.externalAgents');
     expect(container.textContent).toContain('External Command');
+  });
+
+  it('keeps discovered Agent identity qualified by its machine', () => {
+    const onSelect = vi.fn();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() => {
+      root?.render(
+        <AgentMenuOptions
+          heading="Agents"
+          currentBinding={{ kind: 'internal' }}
+          currentMode="ask"
+          profiles={[]}
+          machines={machines}
+          onSelect={onSelect}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain('GitHub Copilot');
+    expect(container.textContent).toContain('Workstation');
+    const row = [...container.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('GitHub Copilot'),
+    );
+    act(() => row?.click());
+    expect(onSelect).toHaveBeenCalledWith({
+      mode: 'ask',
+      discoveredAgent: machines[0]?.agents[0],
+    });
   });
 });

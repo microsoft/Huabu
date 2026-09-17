@@ -22,9 +22,10 @@ import {
   rememberProfileSessionPreference,
 } from './profile-session-preferences.js';
 import { canvasAcpNamespace } from '../../workspace/paths.js';
-import { agenetes } from '../agenetes/index.js';
+import { agenetes, EXTERNAL_DRIVER_KIND } from '../agenetes/index.js';
 
 import type { AcpProfileSchemaCacheEntry } from './profile-schema-cache.js';
+import type { AcpWorkloadSpec } from '../agenetes/index.js';
 import type { AcpSessionEntry } from '@agenetes/acp-driver';
 import type { AgentMetadata } from '@agenetes/protocol';
 import type {
@@ -32,6 +33,7 @@ import type {
   AcpSessionMetaSnapshot,
   AcpThreadCachedMetaQuery,
   AcpThreadCachedMetaResponse,
+  AcpThreadRealization,
   SetAcpSessionConfigOptionResponse,
   SetAcpSessionModelResponse,
   SetAcpSessionModeResponse,
@@ -40,6 +42,24 @@ import type { FastifyBaseLogger, FastifyPluginAsync } from 'fastify';
 
 interface ThreadParams {
   threadId: string;
+}
+
+function threadRealization(
+  threadId: string,
+  canvasId?: string,
+): AcpThreadRealization {
+  const record = agenetes.record(canvasAcpNamespace(canvasId ?? ''), threadId);
+  if (!record || record.spec.kind !== EXTERNAL_DRIVER_KIND) {
+    return { state: 'unrealized' };
+  }
+  const spec = (record.spec as AcpWorkloadSpec).spec;
+  return {
+    state: 'realized',
+    profileId: spec.binding.profileId,
+    alias: spec.binding.alias,
+    agentletId: spec.agentletId ?? getSupervisedAgentletId(),
+    ...(spec.cwd ? { workingDirPath: spec.cwd } : {}),
+  };
 }
 
 function controlFailureStatus(code?: string): 409 | 502 {
@@ -223,11 +243,13 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
       });
     }
     const { canvasId, profileId } = parsed.data;
+    const realization = threadRealization(threadId, canvasId);
     const agentletId = resolveThreadAgentletId(threadId, canvasId);
     const live = acpSessionRegistry.get(agentletId, threadId);
     if (live) {
       return {
         source: 'thread',
+        realization,
         availableCommands: live.availableCommands,
         commandsUpdatedAt: live.commandsUpdatedAt,
         sessionMeta: snapshotSessionMeta(live),
@@ -239,6 +261,7 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
       if (persistedMeta) {
         return {
           source: 'thread',
+          realization,
           availableCommands: persistedMeta.availableCommands ?? [],
           commandsUpdatedAt: persistedMeta.commandsUpdatedAt ?? 0,
           sessionMeta: snapshotMetaFromPersisted(persistedMeta),
@@ -254,6 +277,7 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
       ) {
         return {
           source: 'profile',
+          realization,
           availableCommands: profileCache.availableCommands ?? [],
           commandsUpdatedAt: profileCache.commandsUpdatedAt ?? 0,
           sessionMeta: snapshotMetaFromProfileCache(profileCache),
@@ -262,6 +286,7 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
     }
     return {
       source: 'none',
+      realization,
       availableCommands: [],
       commandsUpdatedAt: 0,
       sessionMeta: emptySessionMetaSnapshot(),

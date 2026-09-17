@@ -24,6 +24,7 @@ import { useCallback, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { AgentIcon } from '@/components/Common/AgentIcon';
+import { Button } from '@/components/Common/Button';
 import { resolveQuestionAgentPresentation } from '@/utils/questionAgentPresentation';
 
 import {
@@ -37,6 +38,7 @@ import { Popover } from '../../Common/Popover';
 
 import type {
   AgentBinding,
+  AcpAgentMachineDiscovery,
   AgentIcon as AgentIconData,
   AgentMode,
   AgentProfileView,
@@ -51,15 +53,19 @@ interface AgentSelectorProps {
   currentMode: AgentMode;
   /** Configured external-agent profiles available for binding. */
   profiles: AgentProfileView[];
+  /** Machine-scoped harness observations available for zero-setup selection. */
+  machines?: AcpAgentMachineDiscovery[];
   /**
    * When true the selector is interactive (thread still empty). When
    * false it is a read-only chip (binding locked for the thread).
    */
   editable: boolean;
   /** Apply a picked (mode, binding) to the current thread. */
-  onSelect: (choice: AgentChoice) => void;
+  onSelect: (choice: AgentChoice) => void | Promise<void>;
   /** Re-fetch the profile list (after the inline "Add agent" modal saves). */
   onRefreshProfiles?: () => void | Promise<void>;
+  /** Refresh machine-local harness observations. */
+  onRefreshDiscovery?: () => void | Promise<void>;
   /** Disable the control completely (e.g. history not yet loaded). */
   disabled?: boolean;
   /**
@@ -114,9 +120,11 @@ export const AgentSelector = ({
   currentBinding,
   currentMode,
   profiles,
+  machines,
   editable,
   onSelect,
   onRefreshProfiles,
+  onRefreshDiscovery,
   disabled = false,
   fallbackIcon,
 }: AgentSelectorProps) => {
@@ -142,13 +150,14 @@ export const AgentSelector = ({
       // Refresh the profile list on the rising edge so a freshly-added
       // agent shows up without reopening the panel.
       if (next) void onRefreshProfiles?.();
+      if (next) void onRefreshDiscovery?.();
       return next;
     });
-  }, [disabled, editable, onRefreshProfiles]);
+  }, [disabled, editable, onRefreshDiscovery, onRefreshProfiles]);
 
   const handleSelect = useCallback(
     (choice: AgentChoice) => {
-      onSelect(choice);
+      void onSelect(choice);
       setIsOpen(false);
     },
     [onSelect],
@@ -173,9 +182,11 @@ export const AgentSelector = ({
 
   return (
     <>
-      <button
+      <Button
         ref={triggerRef}
-        type="button"
+        variant="ghost"
+        tone="neutral"
+        size="sm"
         onClick={handleToggle}
         disabled={disabled || !editable}
         aria-expanded={editable ? isOpen : undefined}
@@ -205,7 +216,7 @@ export const AgentSelector = ({
             isOpen && 'rotate-180',
           )}
         />
-      </button>
+      </Button>
       {editable && isOpen && (
         <Popover
           position={computePosition()}
@@ -219,8 +230,12 @@ export const AgentSelector = ({
             currentBinding={currentBinding}
             currentMode={currentMode}
             profiles={profiles}
+            machines={machines}
             currentRowTitle={t('chat.currentAgentThread')}
             onSelect={handleSelect}
+            onRefreshDiscovery={
+              onRefreshDiscovery ? () => void onRefreshDiscovery() : undefined
+            }
             onAddAgent={
               onRefreshProfiles
                 ? () => {

@@ -9,6 +9,7 @@ import {
   selectThreadHistoryLoaded,
   selectThreadIsLoading,
   selectThreadLastAction,
+  selectThreadLaunchOverrides,
   selectThreadMessages,
   selectThreadPendingAttachments,
   selectThreadSettings,
@@ -36,6 +37,7 @@ function resetStore() {
     threadsById: {},
     lastActionByThread: {},
     bindingByThread: {},
+    launchOverridesByThread: {},
     settingsByThread: {},
     ephemeralMetadataThreads: {},
     ephemeralSettingsThreads: {},
@@ -97,6 +99,20 @@ describe('chatStore thread-scoped state', () => {
     expect(selectThreadBinding(state, 'thread-b')).toEqual(INTERNAL);
     expect(selectThreadLastAction(state, 'thread-a')).toBe('operate');
     expect(selectThreadLastAction(state, 'thread-b')).toBe('operate');
+  });
+
+  it('keeps pre-realization launch settings with their thread', () => {
+    const store = useChatStore.getState();
+    store.setThreadLaunchOverrides('thread-a', {
+      workingDirPath: '/target/project',
+    });
+
+    expect(
+      selectThreadLaunchOverrides(useChatStore.getState(), 'thread-a'),
+    ).toEqual({ workingDirPath: '/target/project' });
+    expect(
+      selectThreadLaunchOverrides(useChatStore.getState(), 'thread-b'),
+    ).toBeUndefined();
   });
 
   it('defaults an uncached external thread to ask', () => {
@@ -186,6 +202,9 @@ describe('chatStore persistence and eviction', () => {
     const store = useChatStore.getState();
     store.setAgentBinding('thread-question', EXTERNAL);
     store.setThreadLastAction('thread-question', 'operate');
+    store.setThreadLaunchOverrides('thread-question', {
+      workingDirPath: '/target/question',
+    });
     store.setThreadSettings('thread-question', {
       modelId: 'model-1',
       reasoningEffort: 'high',
@@ -202,6 +221,7 @@ describe('chatStore persistence and eviction', () => {
       reasoningEffort: 'high',
     });
     expect(state.bindingByThread['thread-question']).toBeUndefined();
+    expect(state.launchOverridesByThread['thread-question']).toBeUndefined();
     expect(state.lastActionByThread['thread-question']).toBeUndefined();
     expect(state.settingsByThread['thread-question']).toBeUndefined();
   });

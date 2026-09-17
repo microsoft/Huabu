@@ -232,6 +232,8 @@ export const agentApi = {
        * Defaults to internal when omitted.
        */
       agentBinding?: AgentBinding;
+      /** Target-machine cwd override used only before external realization. */
+      workingDirPath?: string;
       /**
        * Skill ids the user explicitly invoked by typing `/<id>` in the
        * chat input (parsed by `useInternalSlashCommands`). Forwarded
@@ -262,6 +264,7 @@ export const agentApi = {
         : undefined,
       anchorNodeId: options?.anchorNodeId,
       agentBinding: options?.agentBinding,
+      workingDirPath: options?.workingDirPath,
       invokedSkills: options?.invokedSkills?.length
         ? options.invokedSkills
         : undefined,

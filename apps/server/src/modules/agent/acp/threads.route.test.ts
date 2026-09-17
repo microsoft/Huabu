@@ -47,6 +47,7 @@ vi.mock('../../workspace/paths.js', () => ({
 }));
 
 vi.mock('../agenetes/index.js', () => ({
+  EXTERNAL_DRIVER_KIND: 'external',
   agenetes: {
     record: () => mocks.record,
     get: vi.fn(),
@@ -105,6 +106,7 @@ describe('ACP cached capability route', () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
       source: 'profile',
+      realization: { state: 'unrealized' },
       availableCommands: [{ name: 'review' }],
       commandsUpdatedAt: 11,
       sessionMeta: {
@@ -128,6 +130,7 @@ describe('ACP cached capability route', () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
       source: 'none',
+      realization: { state: 'unrealized' },
       availableCommands: [],
       commandsUpdatedAt: 0,
       sessionMeta: { updatedAt: 0 },
@@ -151,11 +154,48 @@ describe('ACP cached capability route', () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
       source: 'profile',
+      realization: { state: 'unrealized' },
       availableCommands: [{ name: 'review' }],
       commandsUpdatedAt: 11,
       sessionMeta: { updatedAt: 0 },
     });
     expect(mocks.create).not.toHaveBeenCalled();
+  });
+
+  it('projects a durable realization without creating or spawning it', async () => {
+    mocks.record = {
+      spec: {
+        kind: 'external',
+        spec: {
+          binding: {
+            alias: 'Persisted Agent',
+            profileId: 'profile-persisted',
+          },
+          agentletId: 'machine-2',
+          cwd: '/persisted/work',
+        },
+      },
+    };
+    const server = await createApp();
+
+    const response = await server.inject({
+      method: 'GET',
+      url: '/api/acp/threads/thread-1/cached-meta?canvasId=canvas-1',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      source: 'none',
+      realization: {
+        state: 'realized',
+        profileId: 'profile-persisted',
+        alias: 'Persisted Agent',
+        agentletId: 'machine-2',
+        workingDirPath: '/persisted/work',
+      },
+    });
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(mocks.realize).not.toHaveBeenCalled();
   });
 
   it('realizes and ensures the canonical workload before a first control', async () => {

@@ -13,6 +13,8 @@ The owner may perform Settings, OAuth, credential, External Agent, and Agent Tea
 
 The connection token is a separate machine credential used by RFS and the embedded Agentlet transport. Its generation and injection are independent of browser owner authentication.
 
+Machine-scoped Agent discovery, refresh, Profile materialization, and working-directory validation remain owner-only Huabu HTTP operations. After owner validation, the Server invokes bounded shell-free discovery and native-path RPCs over the already authenticated Agentlet control connection; capability negotiation does not add a pairing mechanism or authorize a browser with the connection token. Discovery reports executable presence only and never claims that an Agent provider is authenticated.
+
 The global Agent Change Review configuration follows the same owner boundary. `GET` and `PUT /api/agent-change-review/config` are available only to loopback or Basic-authenticated owner requests; possession of the RFS connection token does not authorize reading or changing the automatic-acceptance policy.
 
 ## Bind and authentication policy

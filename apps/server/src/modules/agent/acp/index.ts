@@ -3,6 +3,7 @@
 
 export {
   mountAgenetes,
+  getAgentletGateway,
   getAgentTeamRegistry,
   getSupervisedAgentletId,
   ACP_UPGRADE_PATH,
@@ -39,6 +40,7 @@ export { getDaemonAuth } from '@agenetes/agentlet-host';
 export { getDaemonSupervisor, getDaemonStatus } from '@agenetes/agentlet-host';
 export { resolveDaemonEntry } from './daemon-entry.js';
 export { installAcpProfileCachePort } from './profile-cache-port.js';
+export { acpMachineDiscovery } from './machine-discovery.js';
 export {
   ensureAgentForThread,
   releaseThread,
