@@ -67,6 +67,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const { t } = useTranslation();
   const llmInit = useLLMStore((s) => s.init);
   const acpInit = useAcpProfilesStore((s) => s.init);
+  const refreshAcpProfiles = useAcpProfilesStore((s) => s.refresh);
   const loadDeploymentReadiness = useDeploymentReadinessStore((s) => s.load);
   const requestedTab = useSettingsUiStore((s) => s.requestedTab);
   const clearRequestedTab = useSettingsUiStore((s) => s.clearRequestedTab);
@@ -109,8 +110,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   useEffect(() => {
     if (!isOpen) return;
     if (activeTab === 'huabuAgent') void llmInit();
-    if (activeTab === 'agents') void acpInit();
-  }, [isOpen, activeTab, llmInit, acpInit]);
+    if (activeTab === 'agents') {
+      // init installs singleton lifecycle listeners; refresh also picks up
+      // Profiles materialized by another browser or device since last open.
+      void acpInit();
+      void refreshAcpProfiles();
+    }
+  }, [isOpen, activeTab, llmInit, acpInit, refreshAcpProfiles]);
 
   // Close on Escape.
   useEffect(() => {
