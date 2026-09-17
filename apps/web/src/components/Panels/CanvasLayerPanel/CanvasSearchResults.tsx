@@ -53,21 +53,9 @@ import {
 } from '../../../store/searchStore';
 import { cn } from '../../Common/cn';
 import { toast } from '../../Common/Toast';
-import { NodePreviews } from '../../Nodes/previews';
+import { hasNodePreview } from '../../Nodes/previews';
 
 const ROW_HEIGHT = 52;
-
-/**
- * True when `nodeType` has a dedicated `NodePreviews` entry — i.e.
- * `ExpandedNodePanel` will render real content for it rather than the
- * "Preview not available for {type}" placeholder. Search uses this to
- * decide whether to auto-open the expanded panel when focusing a
- * result: opening a placeholder panel would split the canvas, hide
- * other nodes, and add a redundant close step without surfacing any
- * extra match context, so we skip it for those types and just centre
- * the canvas on the node instead.
- */
-const hasNodePreview = (nodeType: string): boolean => nodeType in NodePreviews;
 
 export const CanvasSearchResults = (): React.JSX.Element => {
   const query = useSearchStore((s) => s.query);

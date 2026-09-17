@@ -8,6 +8,7 @@ import {
   fitNodesOnCanvas,
   getReliableNodeBounds,
   revealBoundsInViewport,
+  revealNodesOnCanvas,
 } from './focusNodesOnCanvas';
 
 import type { ReactFlowInstance } from '@xyflow/react';
@@ -26,12 +27,15 @@ const createInstance = () => {
     },
   };
   const fitBounds = vi.fn().mockResolvedValue(true);
+  const setViewport = vi.fn().mockResolvedValue(true);
   const instance = {
     getInternalNode: (id: string) =>
       internalNodes[id as keyof typeof internalNodes],
     fitBounds,
+    getViewport: () => ({ x: 0, y: 0, zoom: 1 }),
+    setViewport,
   } as unknown as ReactFlowInstance;
-  return { instance, fitBounds };
+  return { instance, fitBounds, setViewport };
 };
 
 describe('reliable canvas node bounds', () => {
@@ -64,6 +68,25 @@ describe('reliable canvas node bounds', () => {
 
     await expect(fitNodesOnCanvas(instance, [])).resolves.toBe(false);
     expect(fitBounds).not.toHaveBeenCalled();
+  });
+
+  it('minimally reveals clipped nodes without changing zoom', () => {
+    const { instance, setViewport } = createInstance();
+    const wrapper = { clientWidth: 600, clientHeight: 500 } as HTMLElement;
+
+    expect(revealNodesOnCanvas(instance, wrapper, ['first'], 250)).toBe(true);
+    expect(setViewport).toHaveBeenCalledWith(
+      { x: -624, y: -144, zoom: 1 },
+      { duration: 250 },
+    );
+  });
+
+  it('does not take over the viewport when nodes are already visible', () => {
+    const { instance, setViewport } = createInstance();
+    const wrapper = { clientWidth: 1600, clientHeight: 1000 } as HTMLElement;
+
+    expect(revealNodesOnCanvas(instance, wrapper, ['first'])).toBe(false);
+    expect(setViewport).not.toHaveBeenCalled();
   });
 });
 

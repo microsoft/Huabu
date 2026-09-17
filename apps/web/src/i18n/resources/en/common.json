@@ -594,6 +594,10 @@
     "clearSearchBeforeMissingFilter": "Clear search before filtering missing nodes",
     "nodeContentFileMissing": "Node content file missing",
     "nodeSourceFileMissing": "Node source file missing",
+    "nodeUnavailable": "This layer is no longer available.",
+    "nodeFocusedNoPreview": "Node focused. This node has no expanded preview.",
+    "emptyFrame": "This frame has no child nodes.",
+    "reorderNode": "Reorder {{label}}",
     "filterLabels": {
       "note": "Note",
       "text": "Text",

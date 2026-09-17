@@ -150,3 +150,27 @@ export const focusNodesOnCanvas = (
   const zoom = Math.min(rfInstance.getZoom(), 1);
   void rfInstance.setCenter(cx, cy, { duration, zoom });
 };
+
+/** Reveal nodes with the smallest pan needed, preserving the current zoom. */
+export const revealNodesOnCanvas = (
+  rfInstance: ReactFlowInstance,
+  canvasWrapper: HTMLElement,
+  nodeIds: string[],
+  duration = 400,
+): boolean => {
+  const bounds = getReliableNodeBounds(rfInstance, nodeIds);
+  if (!bounds) return false;
+
+  const currentViewport = rfInstance.getViewport();
+  const nextViewport = revealBoundsInViewport(
+    currentViewport,
+    {
+      width: canvasWrapper.clientWidth,
+      height: canvasWrapper.clientHeight,
+    },
+    bounds,
+  );
+  if (nextViewport === currentViewport) return false;
+  void rfInstance.setViewport(nextViewport, { duration });
+  return true;
+};

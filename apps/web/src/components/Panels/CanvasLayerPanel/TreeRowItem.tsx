@@ -6,6 +6,7 @@ import {
   ChevronDown,
   ChevronRight,
   FileWarning,
+  GripVertical,
   Lock,
   Plus,
   Unlock,
@@ -16,7 +17,10 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '../../Common/Button';
 import { Tooltip } from '../../Common/Tooltip';
 
-import type { DraggableSyntheticListeners } from '@dnd-kit/core';
+import type {
+  DraggableAttributes,
+  DraggableSyntheticListeners,
+} from '@dnd-kit/core';
 import type { ReactNode } from 'react';
 
 export interface TreeRowItemProps extends React.HTMLAttributes<HTMLDivElement> {
@@ -27,6 +31,7 @@ export interface TreeRowItemProps extends React.HTMLAttributes<HTMLDivElement> {
   // Visual states
   isSelected?: boolean;
   isHighlighted?: boolean;
+  isPreviewOpen?: boolean;
   isDragging?: boolean;
   missingFileLabel?: string;
 
@@ -100,6 +105,8 @@ export interface TreeRowItemProps extends React.HTMLAttributes<HTMLDivElement> {
 
   // DnD refs and props
   forwardedRef?: React.Ref<HTMLDivElement>;
+  forwardedDragHandleRef?: React.Ref<HTMLButtonElement>;
+  dndAttributes?: DraggableAttributes;
   dndListeners?: DraggableSyntheticListeners;
 }
 
@@ -110,6 +117,7 @@ export const TreeRowItem = React.memo(
     label,
     isSelected,
     isHighlighted,
+    isPreviewOpen,
     isDragging,
     missingFileLabel,
     isCollapsible = false,
@@ -127,6 +135,8 @@ export const TreeRowItem = React.memo(
     dropIntentDepth,
     isIntoFrameHighlight = false,
     forwardedRef,
+    forwardedDragHandleRef,
+    dndAttributes,
     dndListeners,
     style,
     className,
@@ -216,11 +226,10 @@ export const TreeRowItem = React.memo(
       <div
         ref={forwardedRef}
         style={mergedStyle}
-        {...(!isEditing ? dndListeners : {})}
         onClick={onClick}
         onDoubleClick={handleDoubleClick}
         className={clsx(
-          'bg-surface flex h-9 w-full cursor-pointer touch-none items-center gap-1 px-2 focus:outline-none focus-visible:outline-none',
+          'bg-surface focus-visible:ring-info flex h-9 w-full cursor-pointer touch-none items-center gap-1 px-2 outline-none focus-visible:ring-2 focus-visible:ring-inset',
           className,
         )}
         {...rest}
@@ -251,6 +260,7 @@ export const TreeRowItem = React.memo(
           className={clsx(
             'group flex w-full items-center gap-1 rounded px-1 py-1 text-sm transition-colors',
             bgColor,
+            isPreviewOpen && 'ring-info ring-1 ring-inset',
             // `'into'` / `isIntoFrameHighlight` paints the destination
             // frame's row with a soft `bg-info-bg` fill PLUS a dashed
             // `outline-info` border — bg makes it obvious at a glance,
@@ -284,7 +294,7 @@ export const TreeRowItem = React.memo(
                 iconOnly
                 size="sm"
                 onClick={handleToggleCollapse}
-                className="text-fg-subtle opacity-0 transition-opacity group-hover:opacity-100 hover:!bg-transparent"
+                className="text-fg-subtle opacity-0 transition-opacity group-hover:opacity-100 hover:!bg-transparent focus-visible:opacity-100"
                 aria-label={
                   isCollapsed ? t('actions.expand') : t('actions.collapse')
                 }
@@ -337,6 +347,21 @@ export const TreeRowItem = React.memo(
 
           {/* Action buttons on the right */}
           <div className="ml-auto flex shrink-0 items-center gap-1">
+            {!isExternal && dndListeners && (
+              <Button
+                ref={forwardedDragHandleRef}
+                variant="ghost"
+                iconOnly
+                size="sm"
+                className="text-fg-subtle opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+                aria-label={t('layers.reorderNode', { label })}
+                onClick={(event) => event.stopPropagation()}
+                {...dndAttributes}
+                {...dndListeners}
+              >
+                <GripVertical />
+              </Button>
+            )}
             {missingFileLabel && (
               <Tooltip content={missingFileLabel}>
                 <span

@@ -594,6 +594,10 @@
     "clearSearchBeforeMissingFilter": "请先清除搜索，再筛选缺失节点",
     "nodeContentFileMissing": "节点内容文件缺失",
     "nodeSourceFileMissing": "节点源文件缺失",
+    "nodeUnavailable": "此图层已不可用。",
+    "nodeFocusedNoPreview": "已定位到节点，但该节点没有展开预览。",
+    "emptyFrame": "此框架中没有子节点。",
+    "reorderNode": "重新排序 {{label}}",
     "filterLabels": {
       "note": "笔记",
       "text": "文本",

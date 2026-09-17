@@ -24,10 +24,12 @@ import React, {
 import { useTranslation } from 'react-i18next';
 
 import { getMissingFileKind } from '@/components/Nodes/missingFile';
+import { hasNodePreview } from '@/components/Nodes/previews';
 import useCanvasStore from '@/store/canvasStore.ts';
 import { useExternalImportsStore } from '@/store/externalImportsStore';
 import { usePanelStore } from '@/store/panelStore';
 import { openPreviewNode } from '@/store/previewWorkspace/actions';
+import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 
 import {
   computeCollision as computeCollisionPure,
@@ -35,9 +37,10 @@ import {
   type DropIntent,
   type ResolvedDrop,
 } from './dropResolver';
-import { focusNodesOnCanvas } from './focusNodesOnCanvas';
+import { revealNodesOnCanvas } from './focusNodesOnCanvas';
 import { TreeRowItem } from './TreeRowItem';
 import { EmptyState } from '../../Common/EmptyState';
+import { toast } from '../../Common/Toast';
 
 import type { DataSourceNodeLike, DataSourceTreeItem } from './types';
 import type {
@@ -92,6 +95,8 @@ interface SortableRowProps {
   item: DataSourceTreeItem;
   isDirectlySelected: boolean;
   isHighlighted: boolean;
+  isPreviewOpen: boolean;
+  tabIndex: 0 | -1;
   isCollapsible: boolean;
   isCollapsed: boolean;
   isLocked: boolean;
@@ -102,6 +107,8 @@ interface SortableRowProps {
   getIcon: (node: DataSourceNodeLike) => React.ReactNode;
   getDisplayName: (node: DataSourceNodeLike) => string;
   onSelect: (id: string, event: React.MouseEvent) => void;
+  onFocus: (id: string) => void;
+  onKeyDown: (id: string, event: React.KeyboardEvent) => void;
   onRename: (id: string, newName: string) => Promise<boolean>;
   onToggleCollapse: (id: string) => void;
   onToggleLock: (id: string) => void;
@@ -112,6 +119,8 @@ const SortableRow = React.memo(
     item,
     isDirectlySelected,
     isHighlighted,
+    isPreviewOpen,
+    tabIndex,
     isCollapsible,
     isCollapsed,
     isLocked,
@@ -122,12 +131,20 @@ const SortableRow = React.memo(
     getIcon,
     getDisplayName,
     onSelect,
+    onFocus,
+    onKeyDown,
     onRename,
     onToggleCollapse,
     onToggleLock,
   }: SortableRowProps) => {
     const { t } = useTranslation();
-    const { listeners, setNodeRef, isDragging } = useSortable({
+    const {
+      attributes,
+      listeners,
+      setActivatorNodeRef,
+      setNodeRef,
+      isDragging,
+    } = useSortable({
       id: item.id,
     });
     const missingFileKind = getMissingFileKind(item.node.data);
@@ -157,6 +174,7 @@ const SortableRow = React.memo(
         label={getDisplayName(item.node)}
         isSelected={isDirectlySelected}
         isHighlighted={isHighlighted}
+        isPreviewOpen={isPreviewOpen}
         isDragging={isDragging}
         missingFileLabel={missingFileLabel}
         isCollapsible={isCollapsible}
@@ -166,13 +184,23 @@ const SortableRow = React.memo(
         dropIntentDepth={dropIntentDepth}
         isIntoFrameHighlight={isIntoFrameHighlight}
         onClick={(e) => onSelect(item.id, e)}
+        onFocus={() => onFocus(item.id)}
+        onKeyDown={(e) => onKeyDown(item.id, e)}
+        role="treeitem"
+        aria-level={item.depth + 1}
+        aria-selected={isDirectlySelected}
+        aria-expanded={isCollapsible ? !isCollapsed : undefined}
+        tabIndex={tabIndex}
+        data-layer-id={item.id}
         editable={true}
         onRename={(newName) => onRename(item.id, newName)}
         onToggleCollapse={() => onToggleCollapse(item.id)}
         onToggleLock={() => onToggleLock(item.id)}
         // DnD plumbing - disabled if dragging is disabled
         forwardedRef={setNodeRef}
+        forwardedDragHandleRef={setActivatorNodeRef}
         style={style}
+        dndAttributes={isDraggingDisabled ? undefined : attributes}
         dndListeners={isDraggingDisabled ? undefined : listeners}
       />
     );
@@ -197,14 +225,14 @@ export interface CanvasLayerTreeProps {
   isFilterActive?: boolean;
 }
 
-export function shouldOpenLayerInPreview(
-  isPreviewFullscreen: boolean,
-  event: Pick<React.MouseEvent, 'shiftKey' | 'metaKey' | 'ctrlKey'>,
-): boolean {
-  return (
-    isPreviewFullscreen && !event.shiftKey && !event.metaKey && !event.ctrlKey
-  );
-}
+const isStructuralNode = (type: string | undefined): boolean =>
+  type === 'frame' || type === 'group';
+
+export const resolveCollisionY = (
+  pointerCoordinates: { y: number } | null,
+  collisionRect: { top: number; height: number },
+): number =>
+  pointerCoordinates?.y ?? collisionRect.top + collisionRect.height / 2;
 
 export const CanvasLayerTree = ({
   items,
@@ -213,11 +241,13 @@ export const CanvasLayerTree = ({
   emptyText = 'No items',
   isFilterActive = false,
 }: CanvasLayerTreeProps) => {
+  const { t } = useTranslation();
   const nodes = useCanvasStore((state) => state.nodes);
   const selectNodes = useCanvasStore((state) => state.selectNodes);
   const reorderNodes = useCanvasStore((state) => state.reorderNodes);
   const tryRename = useCanvasStore((state) => state.tryRename);
   const rfInstance = useCanvasStore((state) => state.rfInstance);
+  const canvasWrapper = useCanvasStore((state) => state.canvasWrapper);
   const moveNodeIntoFrame = useCanvasStore((state) => state.moveNodeIntoFrame);
   const moveNodeOutOfFrame = useCanvasStore(
     (state) => state.moveNodeOutOfFrame,
@@ -227,6 +257,8 @@ export const CanvasLayerTree = ({
   );
   const collapsedFrameIds = useCanvasStore((state) => state.collapsedFrameIds);
   const toggleNodeLock = useCanvasStore((state) => state.toggleNodeLock);
+  const previewWorkspace = usePreviewWorkspaceStore((state) => state.workspace);
+  const isRightCollapsed = usePanelStore((state) => state.isRightCollapsed);
 
   const isFrameCollapsed = (frameId: string) => collapsedFrameIds.has(frameId);
 
@@ -292,6 +324,10 @@ export const CanvasLayerTree = ({
   // Finder / VS Code behaviour). `null` until the user has clicked any
   // row in this tree session.
   const selectionAnchorRef = useRef<string | null>(null);
+  const treeRef = useRef<HTMLDivElement>(null);
+  const [focusedId, setFocusedId] = useState<string | null>(
+    () => items[0]?.id ?? null,
+  );
   useEffect(() => clearExpandTimer, [clearExpandTimer]);
 
   // Filter out children of collapsed frames.
@@ -330,6 +366,18 @@ export const CanvasLayerTree = ({
     for (const n of nodes) if (n.selected) set.add(n.id);
     return set;
   }, [nodes]);
+
+  const previewVisibleIdSet = useMemo(() => {
+    const visible = new Set<string>();
+    if (isRightCollapsed) return visible;
+    for (const group of previewWorkspace.groups) {
+      const tab = group.activeTabId
+        ? previewWorkspace.tabs[group.activeTabId]
+        : undefined;
+      if (tab?.target.kind === 'node') visible.add(tab.target.nodeId);
+    }
+    return visible;
+  }, [isRightCollapsed, previewWorkspace]);
 
   const highlightedIdSet = useMemo(() => {
     const highlighted = new Set<string>(selectedIdSet);
@@ -370,13 +418,85 @@ export const CanvasLayerTree = ({
     () => new Map(items.map((item) => [item.id, item])),
     [items],
   );
-  // Visible-items lookup is used both by the drag-over caret anchor
-  // resolver and (further down) by the row render to walk the parent
-  // chain for `isLocked`. Kept here, near `itemById`, because
-  // `handleDragOver` is defined above the row render.
   const visibleItemMap = useMemo(
     () => new Map(visibleItems.map((item) => [item.id, item])),
     [visibleItems],
+  );
+  const hierarchyNodeById = useMemo(
+    () => new Map(nodes.map((node) => [node.id, node])),
+    [nodes],
+  );
+  const childrenByParent = useMemo(() => {
+    const children = new Map<string, string[]>();
+    for (const node of nodes) {
+      const parentId = node.parentId;
+      if (!parentId) continue;
+      const ids = children.get(parentId) ?? [];
+      ids.push(node.id);
+      children.set(parentId, ids);
+    }
+    return children;
+  }, [nodes]);
+
+  useEffect(() => {
+    if (visibleItems.length === 0) {
+      setFocusedId(null);
+      return;
+    }
+    if (focusedId && visibleItemMap.has(focusedId)) return;
+
+    let nextId = focusedId;
+    while (nextId && !visibleItemMap.has(nextId)) {
+      nextId = itemById.get(nextId)?.node.parentId ?? null;
+    }
+    setFocusedId(
+      nextId ??
+        visibleItems.find((item) => selectedIdSet.has(item.id))?.id ??
+        visibleItems[0].id,
+    );
+  }, [focusedId, itemById, selectedIdSet, visibleItemMap, visibleItems]);
+
+  const focusRow = useCallback((id: string) => {
+    setFocusedId(id);
+    requestAnimationFrame(() => {
+      const rows =
+        treeRef.current?.querySelectorAll<HTMLElement>('[data-layer-id]');
+      for (const row of rows ?? []) {
+        if (row.dataset.layerId === id) {
+          row.focus();
+          break;
+        }
+      }
+    });
+  }, []);
+
+  const setFrameCollapsed = useCallback((id: string, collapsed: boolean) => {
+    const current = useCanvasStore.getState().collapsedFrameIds;
+    if (current.has(id) === collapsed) return;
+    const next = new Set(current);
+    if (collapsed) next.add(id);
+    else next.delete(id);
+    useCanvasStore.setState({ collapsedFrameIds: next });
+  }, []);
+
+  const expandItemAndAncestors = useCallback(
+    (item: DataSourceTreeItem, includeItem: boolean) => {
+      const ids: string[] = [];
+      if (includeItem) ids.push(item.id);
+      let parentId = item.node.parentId;
+      while (parentId) {
+        ids.push(parentId);
+        parentId = hierarchyNodeById.get(parentId)?.parentId;
+      }
+      if (ids.length === 0) return;
+
+      const current = useCanvasStore.getState().collapsedFrameIds;
+      if (!ids.some((id) => current.has(id))) return;
+      const next = new Set(current);
+      for (const id of ids) next.delete(id);
+      useCanvasStore.setState({ collapsedFrameIds: next });
+    },
+    [hierarchyNodeById],
   );
   const descendantsByFrameId = useMemo(() => {
     const childrenByParent = new Map<string, string[]>();
@@ -423,8 +543,13 @@ export const CanvasLayerTree = ({
    * the `DropIntent` encoded in `data.intent`.
    */
   const collisionDetection: CollisionDetection = useCallback(
-    ({ pointerCoordinates, droppableContainers, droppableRects, active }) => {
-      if (!pointerCoordinates) return [];
+    ({
+      pointerCoordinates,
+      collisionRect,
+      droppableContainers,
+      droppableRects,
+      active,
+    }) => {
       const candidates = [];
       for (const c of droppableContainers) {
         const rect = droppableRects.get(c.id);
@@ -436,7 +561,7 @@ export const CanvasLayerTree = ({
         });
       }
       const out = computeCollisionPure({
-        pointerY: pointerCoordinates.y,
+        pointerY: resolveCollisionY(pointerCoordinates, collisionRect),
         activeId: active.id as string,
         candidates,
         visibleItems,
@@ -701,21 +826,76 @@ export const CanvasLayerTree = ({
   // callback (rather than closing over `selectedIdSet`, which changes
   // every selection) so they retain identity across renders. That keeps
   // `SortableRow`'s `React.memo` valid for unchanged rows.
+  const activatePrimary = useCallback(
+    (id: string) => {
+      const item = itemById.get(id);
+      const snapshot = useCanvasStore.getState();
+      const node = snapshot.nodes.find((candidate) => candidate.id === id);
+      if (!item || !node) {
+        toast(t('layers.nodeUnavailable'), { tone: 'warning' });
+        return;
+      }
+
+      const structural = isStructuralNode(node.type);
+      expandItemAndAncestors(item, structural);
+      snapshot.selectNodes([id], false);
+      selectionAnchorRef.current = id;
+
+      if (snapshot.rfInstance && snapshot.canvasWrapper) {
+        revealNodesOnCanvas(
+          snapshot.rfInstance,
+          snapshot.canvasWrapper,
+          [id],
+          400,
+        );
+      }
+
+      if (structural) {
+        if ((childrenByParent.get(id)?.length ?? 0) === 0) {
+          toast(t('layers.emptyFrame'), { tone: 'info' });
+        }
+        return;
+      }
+
+      if (previewVisibleIdSet.has(id)) return;
+      if (node.type === 'question') {
+        const threadId = node.data.threadId;
+        if (typeof threadId === 'string' && threadId) {
+          const tabId = openPreviewNode(id);
+          if (tabId) {
+            usePreviewWorkspaceStore
+              .getState()
+              .requestChatOpen(tabId, 'bottom');
+          }
+        } else {
+          toast(t('layers.nodeFocusedNoPreview'), { tone: 'info' });
+        }
+        return;
+      }
+      if (hasNodePreview(node.type ?? '')) {
+        openPreviewNode(id);
+      } else {
+        toast(t('layers.nodeFocusedNoPreview'), { tone: 'info' });
+      }
+    },
+    [
+      childrenByParent,
+      expandItemAndAncestors,
+      itemById,
+      previewVisibleIdSet,
+      t,
+    ],
+  );
+
   const handleSelect = useCallback(
     (id: string, event: React.MouseEvent) => {
       event.stopPropagation();
-      if (
-        shouldOpenLayerInPreview(
-          usePanelStore.getState().isPreviewFullscreen,
-          event,
-        )
-      ) {
-        openPreviewNode(id);
-        selectionAnchorRef.current = id;
-        return;
-      }
       const isShift = event.shiftKey;
       const isMulti = event.metaKey || event.ctrlKey;
+      if (!isShift && !isMulti) {
+        activatePrimary(id);
+        return;
+      }
 
       // Snapshot the selection BEFORE dispatching so toggle / range math
       // operates on the pre-update set (matches the original semantics).
@@ -780,17 +960,81 @@ export const CanvasLayerTree = ({
       selectNodes(targetIds, false);
       selectionAnchorRef.current = nextAnchor;
 
-      // Re-center the canvas on the just-selected node(s). See
-      // `focusNodesOnCanvas` for why we don't use `rfInstance.fitView`
-      // here — short version: `onlyRenderVisibleElements` leaves
-      // offscreen nodes unmeasured, and `fitView` silently no-ops on
-      // them. The helper falls back to `style.width|height` and uses
-      // `setCenter` directly.
-      if (rfInstance && targetIds.length > 0) {
-        focusNodesOnCanvas(rfInstance, targetIds, 800);
+      if (rfInstance && canvasWrapper && targetIds.length > 0) {
+        revealNodesOnCanvas(rfInstance, canvasWrapper, targetIds, 400);
       }
     },
-    [selectNodes, rfInstance, visibleItems],
+    [activatePrimary, canvasWrapper, rfInstance, selectNodes, visibleItems],
+  );
+
+  const handleRowKeyDown = useCallback(
+    (id: string, event: React.KeyboardEvent) => {
+      if (event.target !== event.currentTarget) return;
+      const index = visibleItems.findIndex((item) => item.id === id);
+      if (index < 0) return;
+      const item = visibleItems[index];
+      const structural = isStructuralNode(item.node.type);
+
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        activatePrimary(id);
+        return;
+      }
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        if (index < visibleItems.length - 1) {
+          focusRow(visibleItems[index + 1].id);
+        }
+        return;
+      }
+      if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        if (index > 0) focusRow(visibleItems[index - 1].id);
+        return;
+      }
+      if (event.key === 'Home') {
+        event.preventDefault();
+        focusRow(visibleItems[0].id);
+        return;
+      }
+      if (event.key === 'End') {
+        event.preventDefault();
+        focusRow(visibleItems[visibleItems.length - 1].id);
+        return;
+      }
+      if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        if (!structural) return;
+        if (collapsedFrameIds.has(id)) {
+          setFrameCollapsed(id, false);
+          return;
+        }
+        const firstChild = visibleItems.find(
+          (candidate) => candidate.node.parentId === id,
+        );
+        if (firstChild) focusRow(firstChild.id);
+        return;
+      }
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        if (structural && !collapsedFrameIds.has(id)) {
+          setFrameCollapsed(id, true);
+          return;
+        }
+        const parentId = item.node.parentId;
+        if (parentId && visibleItemMap.has(parentId)) {
+          focusRow(parentId);
+        }
+      }
+    },
+    [
+      activatePrimary,
+      collapsedFrameIds,
+      focusRow,
+      setFrameCollapsed,
+      visibleItemMap,
+      visibleItems,
+    ],
   );
 
   const handleRename = useCallback(
@@ -854,7 +1098,13 @@ export const CanvasLayerTree = ({
       onDragEnd={handleDragEnd}
     >
       <div className="overflow-hidden">
-        <div className="flex flex-col py-1">
+        <div
+          ref={treeRef}
+          role="tree"
+          aria-label={t('layers.title')}
+          aria-multiselectable="true"
+          className="flex flex-col py-1"
+        >
           <SortableContext
             items={sortableIds}
             strategy={verticalListSortingStrategy}
@@ -897,6 +1147,8 @@ export const CanvasLayerTree = ({
                   item={item}
                   isDirectlySelected={selectedIdSet.has(item.id)}
                   isHighlighted={highlightedIdSet.has(item.id)}
+                  isPreviewOpen={previewVisibleIdSet.has(item.id)}
+                  tabIndex={focusedId === item.id ? 0 : -1}
                   isCollapsible={isCollapsible}
                   isCollapsed={isCollapsed}
                   isLocked={isLocked}
@@ -907,6 +1159,8 @@ export const CanvasLayerTree = ({
                   getIcon={getIcon}
                   getDisplayName={getDisplayName}
                   onSelect={handleSelect}
+                  onFocus={setFocusedId}
+                  onKeyDown={handleRowKeyDown}
                   onRename={handleRename}
                   onToggleCollapse={handleToggleCollapse}
                   onToggleLock={handleToggleLock}
@@ -924,6 +1178,10 @@ export const CanvasLayerTree = ({
                 icon={getIcon(item.node)}
                 label={getDisplayName(item.node)}
                 isExternal
+                role="treeitem"
+                aria-level={1}
+                aria-disabled
+                tabIndex={-1}
                 onImport={() => handleImport(relativePath)}
               />
             );
