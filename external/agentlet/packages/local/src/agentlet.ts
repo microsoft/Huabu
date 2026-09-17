@@ -22,6 +22,8 @@ import {
   type AgentTeamSetupParams,
   type AgentTeamSetupProgressParams,
   type AgentTeamValidateParams,
+  type DiscoverHarnessesParams,
+  type ValidateNativePathParams,
   type JsonRpcMessage,
   type JsonRpcError,
 } from '@agentlet/protocol'
@@ -41,6 +43,13 @@ import {
   type SessionProfile,
 } from './session-bootstrap.js'
 import type { AgentletOptions } from './cli.js'
+import {
+  MachineControlInputError,
+  discoverHarnesses,
+  parseDiscoverHarnessesParams,
+  parseValidateNativePathParams,
+  validateNativePath,
+} from './machine-control.js'
 
 interface ManagedAgent {
   sessionId: string
@@ -231,6 +240,11 @@ export class Agentlet {
         autoRestart: true,
         bufferLimit: this.options.bufferLimit,
         maxAgents: this.options.maxAgents,
+        control: {
+          version: 1,
+          harnessDiscovery: true,
+          nativePathValidation: true,
+        },
       },
     }
     const params: AgentletHelloParams = {
@@ -303,8 +317,58 @@ export class Agentlet {
       case ServerMethods.AGENT_TEAM_VALIDATE:
         this.handleAgentTeamValidate(msg.id, msg.params as unknown as AgentTeamValidateParams)
         break
+      case ServerMethods.DISCOVER_HARNESSES:
+        void this.handleDiscoverHarnesses(msg.id, msg.params)
+        break
+      case ServerMethods.VALIDATE_NATIVE_PATH:
+        this.handleValidateNativePath(msg.id, msg.params)
+        break
       default:
         this.sendDaemonResponse(msg.id, undefined, { code: -32601, message: `Unknown method: ${msg.method}` })
+    }
+  }
+
+  private async handleDiscoverHarnesses(
+    requestId: string | number,
+    params: unknown,
+  ): Promise<void> {
+    let parsed: DiscoverHarnessesParams
+    try {
+      parsed = parseDiscoverHarnessesParams(params)
+    } catch (error) {
+      this.sendDaemonResponse(requestId, undefined, {
+        code: -32602,
+        message: error instanceof Error ? error.message : String(error),
+      })
+      return
+    }
+    try {
+      this.sendDaemonResponse(requestId, await discoverHarnesses(parsed))
+    } catch (error) {
+      this.sendDaemonResponse(requestId, undefined, {
+        code: -32000,
+        message: error instanceof Error ? error.message : String(error),
+        data: { code: 'harness_discovery_failed' },
+      })
+    }
+  }
+
+  private handleValidateNativePath(
+    requestId: string | number,
+    params: unknown,
+  ): void {
+    let parsed: ValidateNativePathParams
+    try {
+      parsed = parseValidateNativePathParams(params)
+      this.sendDaemonResponse(requestId, validateNativePath(parsed))
+    } catch (error) {
+      this.sendDaemonResponse(requestId, undefined, {
+        code: -32602,
+        message: error instanceof Error ? error.message : String(error),
+        ...(error instanceof MachineControlInputError
+          ? { data: { code: error.code } }
+          : {}),
+      })
     }
   }
 
@@ -590,19 +654,22 @@ export class Agentlet {
       return
     }
 
-    // Validate cwd: must be non-empty if provided, must exist on this machine
     let cwd: string
-    if (sessionSpec.cwd && sessionSpec.cwd.trim()) {
-      cwd = resolve(sessionSpec.cwd.trim())
-      if (!existsSync(cwd)) {
-        this.sendDaemonResponse(requestId, undefined, {
-          code: -32602,
-          message: `cwd directory does not exist on this machine: ${cwd}`,
-        })
-        return
-      }
-    } else {
-      cwd = process.cwd()
+    try {
+      cwd = validateNativePath(
+        parseValidateNativePathParams(
+          sessionSpec.cwd === undefined ? {} : { cwd: sessionSpec.cwd },
+        ),
+      ).cwd
+    } catch (error) {
+      this.sendDaemonResponse(requestId, undefined, {
+        code: -32602,
+        message: error instanceof Error ? error.message : String(error),
+        ...(error instanceof MachineControlInputError
+          ? { data: { code: error.code } }
+          : {}),
+      })
+      return
     }
 
     const autoRestart = sessionSpec.autoRestart ?? false

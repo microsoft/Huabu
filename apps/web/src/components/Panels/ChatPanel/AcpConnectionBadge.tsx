@@ -2,24 +2,17 @@
 // Licensed under the MIT license.
 
 /**
- * `AcpConnectionBadge` — three-state pill summarising the live
- * transport health of the thread's bound external agent.
+ * `AcpConnectionBadge` — transient/problem status for the selected
+ * external execution machine.
  *
- * **Optimistic-green design**: opening a thread no longer triggers a
- * real ensure-session — the chat panel hydrates selectors from a
- * cached meta snapshot first (see `useAcpSessionMeta`). The badge
- * therefore defaults to `connected` and only deviates when there is
- * positive evidence of trouble.
+ * Cached capability metadata is not proof of a live ACP session, so the
+ * healthy state renders no badge. The parent supplies only positive
+ * connecting or failure evidence from machine discovery and cache reads.
  *
  * States (mutually exclusive; derived upstream from
  * {@link useAcpSessionMeta}'s `{loading, error, meta.updatedAt}`):
  *
  *   • `connecting` — the GET-only capability cache read is in flight.
- *
- *   • `connected` — default. Cache hit, post-success steady state,
- *     OR a transient refresh error while we still have a usable
- *     cached snapshot. Green solid dot, no text — once everything is
- *     working the badge should be near-invisible chrome.
  *
  *   • `failed` — the cache read failed and there is no snapshot to show.
  *
@@ -34,15 +27,13 @@ import { Tooltip } from '@/components/Common/Tooltip';
 
 import type { FC } from 'react';
 
-export type AcpConnectionStatus = 'connecting' | 'connected' | 'failed';
+export type AcpConnectionStatus = 'connecting' | 'failed';
 
 interface AcpConnectionBadgeProps {
   status: AcpConnectionStatus;
   /** Display name of the bound external agent — shown in tooltips. */
   alias: string;
-  /**
-   * Last capability-cache read error. Used by the failed-state tooltip.
-   */
+  /** Underlying discovery or cache error for the failed-state tooltip. */
   errorMessage?: string | null;
 }
 
@@ -72,27 +63,6 @@ export const AcpConnectionBadge: FC<AcpConnectionBadgeProps> = ({
     );
   }
 
-  if (status === 'connected') {
-    return (
-      <Tooltip
-        content={t('chat.connected')}
-        placement="bottom"
-        wrapperClassName="inline-flex shrink-0"
-      >
-        <span
-          className="inline-flex shrink-0 items-center gap-1 px-0.5 py-0.5"
-          aria-label={t('chat.connected')}
-        >
-          <span
-            aria-hidden
-            className="bg-success h-1.5 w-1.5 shrink-0 rounded-full opacity-50"
-          />
-        </span>
-      </Tooltip>
-    );
-  }
-
-  // failed
   // Categorical headline drives the user to the right remediation
   // without needing to read the raw error. The detail message is
   // appended on a second line so power users can still see the

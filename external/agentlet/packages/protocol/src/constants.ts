@@ -31,6 +31,8 @@ export const ServerMethods = {
   AGENT_TEAM_SETUP: 'agent-team/setup',
   AGENT_TEAM_SETUP_CANCEL: 'agent-team/setup-cancel',
   AGENT_TEAM_VALIDATE: 'agent-team/validate',
+  DISCOVER_HARNESSES: 'server/discoverHarnesses',
+  VALIDATE_NATIVE_PATH: 'server/validateNativePath',
 } as const
 
 /** Error codes used in agent/hello rejection */
@@ -39,6 +41,8 @@ export const ErrorCodes = {
   VERSION_MISMATCH: -32002,
   HANDSHAKE_TIMEOUT: -32003,
   DUPLICATE_SESSION: -32004,
+  UNSUPPORTED_CAPABILITY: -32010,
   INVALID_REQUEST: -32600,
+  INVALID_PARAMS: -32602,
   PARSE_ERROR: -32700,
 } as const

@@ -32,6 +32,7 @@ import {
 } from '@agenetes/agentlet-host';
 
 import {
+  DISCOVERED_AGENT_CUSTOM_DATA_KEY,
   createAcpCommandProfileBodySchema,
   patchAgentProfileBodySchema,
 } from '@huabu/shared';
@@ -48,6 +49,7 @@ import type {
   AcpProfileMutationResponse,
   AcpProfilesListResponse,
   ApiResult,
+  CustomData,
 } from '@huabu/shared';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 
@@ -62,6 +64,26 @@ function denyRemote(request: FastifyRequest, reply: FastifyReply): boolean {
 
 function isCommandProfile(profile: AgentProfile): profile is AcpCommandProfile {
   return profile.launch.kind === 'acp-command';
+}
+
+function removeDiscoveryProvenance(customData: CustomData): CustomData {
+  const filtered = { ...customData };
+  delete filtered[DISCOVERED_AGENT_CUSTOM_DATA_KEY];
+  return filtered;
+}
+
+function preserveDiscoveryProvenance(
+  existing: CustomData | undefined,
+  requested: CustomData | null,
+): CustomData | null {
+  const provenance = existing?.[DISCOVERED_AGENT_CUSTOM_DATA_KEY];
+  if (provenance === undefined) {
+    return requested === null ? null : removeDiscoveryProvenance(requested);
+  }
+  return {
+    ...(requested === null ? {} : removeDiscoveryProvenance(requested)),
+    [DISCOVERED_AGENT_CUSTOM_DATA_KEY]: provenance,
+  };
 }
 
 const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
@@ -108,7 +130,9 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
         ...(parsed.data.metadata && { metadata: parsed.data.metadata }),
         ...(parsed.data.customData === undefined
           ? {}
-          : { customData: parsed.data.customData }),
+          : {
+              customData: removeDiscoveryProvenance(parsed.data.customData),
+            }),
       });
       if (!isCommandProfile(created)) {
         throw new Error('Agent Profile registry returned an invalid kind');
@@ -159,7 +183,12 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
       ...(parsed.data.alias === undefined ? {} : { alias: parsed.data.alias }),
       ...(parsed.data.customData === undefined
         ? {}
-        : { customData: parsed.data.customData }),
+        : {
+            customData: preserveDiscoveryProvenance(
+              existing.customData,
+              parsed.data.customData,
+            ),
+          }),
       ...(parsed.data.metadata === undefined
         ? {}
         : { metadata: parsed.data.metadata }),

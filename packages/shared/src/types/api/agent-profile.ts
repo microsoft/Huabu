@@ -63,6 +63,20 @@ export type AgentIcon = z.infer<typeof agentIconSchema>;
 /** Reserved `customData` key under which the agent avatar is stored. */
 export const AGENT_ICON_CUSTOM_DATA_KEY = 'icon';
 
+/** Host-owned `customData` key for Profiles created from machine discovery. */
+export const DISCOVERED_AGENT_CUSTOM_DATA_KEY = 'discoveredAgent';
+
+export const discoveredAgentProfileProvenanceSchema = z
+  .object({
+    version: z.literal(1),
+    agentletId: trimmedString(255),
+    harnessId: trimmedString(255),
+  })
+  .strict();
+export type DiscoveredAgentProfileProvenance = z.infer<
+  typeof discoveredAgentProfileProvenanceSchema
+>;
+
 const profileBaseSchema = z.object({
   id: trimmedString(255),
   alias: trimmedString(255),

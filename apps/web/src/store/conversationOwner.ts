@@ -7,7 +7,11 @@ import { projectAgentNodeEditableData } from '@huabu/shared/canvas-engine';
 import { acknowledgeAgentNodeResult, postCanvasExecute } from '@/api/canvas';
 import useCanvasStore, { awaitQuestionCreation } from '@/store/canvasStore';
 
-import type { AgentBinding, AgentConversationView } from '@huabu/shared';
+import type {
+  AgentBinding,
+  AgentConversationView,
+  AgentLaunchOverrides,
+} from '@huabu/shared';
 import type { Delta } from '@huabu/shared/canvas-engine';
 import type { Node } from '@xyflow/react';
 
@@ -22,6 +26,7 @@ export type ConversationOwnerSource = {
   agentBindingPolicy?: 'selectable' | 'fixed';
   bindingState?: 'editing' | 'bound';
   invocationToken?: string;
+  agentLaunchOverrides?: AgentLaunchOverrides;
   content?: unknown;
 };
 
@@ -81,6 +86,14 @@ export function resolveConversationAgentBinding(
   cachedBinding: AgentBinding,
 ): AgentBinding {
   return source?.agentBinding ?? cachedBinding;
+}
+
+/** Prefer the conversation owner's durable launch settings over thread cache. */
+export function resolveConversationLaunchOverrides(
+  source: ConversationOwnerSource | undefined,
+  cachedOverrides: AgentLaunchOverrides | undefined,
+): AgentLaunchOverrides | undefined {
+  return source?.agentLaunchOverrides ?? cachedOverrides;
 }
 
 /** Lifecycle and association are never ordinary browser edits. */
@@ -177,6 +190,7 @@ export function saveConversationDraft(
     agentBinding: AgentBinding;
     agentMode: 'ask' | 'operate';
     agentIcon?: unknown;
+    agentLaunchOverrides?: AgentLaunchOverrides;
   },
 ): Promise<void> {
   const save = patchConversationOwnerNode(view, patch).then(async () => {
@@ -199,6 +213,15 @@ export function saveConversationDraft(
     ) {
       throw new ConversationIntegrityError(
         'Agent selection changed before the draft was acknowledged',
+      );
+    }
+    if (
+      patch.agentLaunchOverrides !== undefined &&
+      source?.agentLaunchOverrides?.workingDirPath !==
+        patch.agentLaunchOverrides.workingDirPath
+    ) {
+      throw new ConversationIntegrityError(
+        'Agent launch settings changed before the draft was acknowledged',
       );
     }
   });

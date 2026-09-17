@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import compress from '@fastify/compress';
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
+import rateLimit from '@fastify/rate-limit';
 import staticPlugin from '@fastify/static';
 import { fastify, type FastifyBaseLogger } from 'fastify';
 
@@ -16,6 +17,7 @@ import { getDataDir } from './data-dir.js';
 import { setHostServerPort } from './host-port.js';
 import {
   acpAgentCliRoutes,
+  acpMachineDiscovery,
   acpAgentletRoutes,
   acpProfilesRoutes,
   acpThreadsRoutes,
@@ -57,6 +59,7 @@ import {
   originGuardPlugin,
   resolveAllowedHostnames,
 } from './modules/security/index.js';
+import { GLOBAL_RATE_LIMIT_OPTIONS } from './modules/security/rate-limit.js';
 import { closeStorage } from './modules/storage/index.js';
 import webRoutes from './modules/web/web.route.js';
 import {
@@ -231,6 +234,8 @@ if (basicAuthUser && basicAuthPass) {
   });
 }
 
+app.register(rateLimit, GLOBAL_RATE_LIMIT_OPTIONS);
+
 // Register @fastify/static to enable `reply.sendFile()`.
 // Actual artifact serving uses a dynamic root resolved at request time
 // (see artifact.route.ts), so we pass `serve: false` here and use the
@@ -342,6 +347,9 @@ const agentletGateway = mountAgenetes(app, {
     onLegacyProfilesMigrated: removeLegacyAcpProfiles,
   },
 });
+const unregisterAcpMachineDiscovery =
+  acpMachineDiscovery.attach(agentletGateway);
+app.addHook('onClose', async () => unregisterAcpMachineDiscovery());
 // Legacy `agent-team` ACP records predate managed Agent Teams. They can't
 // be auto-migrated (they bypass managed roots, Configs, and setup) and are
 // no longer surfaced in Settings, so drop them at startup instead of

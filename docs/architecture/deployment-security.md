@@ -13,6 +13,8 @@ The owner may perform Settings, OAuth, credential, External Agent, and Agent Tea
 
 The connection token is a separate machine credential used by RFS and the embedded Agentlet transport. Its generation and injection are independent of browser owner authentication.
 
+Machine-scoped Agent discovery, refresh, Profile materialization, and working-directory validation remain owner-only Huabu HTTP operations. After owner validation, the Server invokes bounded shell-free discovery and native-path RPCs over the already authenticated Agentlet control connection; capability negotiation does not add a pairing mechanism or authorize a browser with the connection token. Discovery reports executable presence only and never claims that an Agent provider is authenticated.
+
 The global Agent Change Review configuration follows the same owner boundary. `GET` and `PUT /api/agent-change-review/config` are available only to loopback or Basic-authenticated owner requests; possession of the RFS connection token does not authorize reading or changing the automatic-acceptance policy.
 
 ## Bind and authentication policy
@@ -34,6 +36,14 @@ The global Agent Change Review configuration follows the same owner boundary. `G
 The response is deliberately redacted: it never contains usernames, passwords, connection tokens, secret keys, credential values, or the configured allowed-host entries.
 
 Settings loads readiness when it opens. A read-only credential store disables API-key and OAuth mutations while leaving non-secret model configuration available. Standalone deployments enable encrypted credential writes with `HUABU_SECRET_KEY`; see [`credential-storage.md`](./credential-storage.md).
+
+## Rate limiting
+
+Huabu applies one application-wide in-memory limit of 1000 HTTP requests per minute for each direct peer IP. The limiter is registered once at the Fastify composition root after authentication, so invalid credentials are rejected before consuming the authenticated owner's budget and every subsequently registered route receives the same default policy.
+
+The deliberately generous default protects a personal Server from unbounded request volume without requiring endpoint-specific configuration. Static assets, readiness requests, uploads, and SSE connection handshakes use the same budget; an established SSE connection does not consume additional requests for emitted events. Routes may override or disable the default through Fastify rate-limit route configuration when a measured workload requires a different policy.
+
+The limiter uses process memory because Huabu runs as one Server process and does not require distributed counters. Keys use Fastify's direct peer address under the current `trustProxy: false` boundary, so untrusted forwarding headers cannot split or evade a budget. Deployments behind one reverse proxy therefore share that proxy's backend-facing budget, which is appropriate for the single-owner model; future trusted-proxy support must define explicit trusted proxy addresses before forwarded client identity can be used.
 
 ## Transport
 

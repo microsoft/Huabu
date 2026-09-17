@@ -8,7 +8,7 @@ Agentlet uses two independent outbound WebSocket connection roles:
 
 | Role | Identity | First message | Purpose |
 | --- | --- | --- | --- |
-| `agentlet` | `agentletId` | `agentlet/hello` | Machine-level control channel for spawn, stop, list, resource delivery, and shutdown. |
+| `agentlet` | `agentletId` | `agentlet/hello` | Authenticated machine-level control channel for spawn, stop, list, machine inspection, resource delivery, and shutdown. |
 | `session` | ACP `sessionId` | `agent/hello` | Per-agent ACP relay channel with bootstrap metadata. |
 
 The WebSocket URL includes `role`, `id`, and `token` query parameters. The Gateway authenticates the token and verifies that the query identity matches the hello payload before registering the connection.
@@ -48,7 +48,12 @@ Gateway <-> daemon <-> ACP process: transparent ACP JSON-RPC relay
       "capabilities": {
         "autoRestart": true,
         "bufferLimit": 1000,
-        "maxAgents": 10
+        "maxAgents": 10,
+        "control": {
+          "version": 1,
+          "harnessDiscovery": true,
+          "nativePathValidation": true
+        }
       }
     }
   }
@@ -81,6 +86,8 @@ Both hello methods are requests and require a matching JSON-RPC response before 
 | `server/spawn` | Request | Launch and bootstrap an ACP agent. |
 | `server/stop` | Request | Stop one managed agent session. |
 | `server/list` | Request | List the daemon's active agents. |
+| `server/discoverHarnesses` | Request | Observe installation and optional version-probe status for a bounded host-supplied trusted harness catalogue. |
+| `server/validateNativePath` | Request | Report the target default cwd or validate one explicit target-native absolute directory. |
 | `agent-team/scan` | Request | Scan one absolute collection root and return valid members plus diagnostics for invalid manifests. |
 | `agent-team/setup` | Request | Start an isolated asynchronous setup worker for one explicit deployment workspace. |
 | `agent-team/setup-cancel` | Request | Terminate one active setup worker by operation ID. |
@@ -96,11 +103,21 @@ Both hello methods are requests and require a matching JSON-RPC response before 
 
 All JSON-RPC envelopes and method payloads are defined in [`messages.ts`](../packages/protocol/src/messages.ts) and [`json-rpc.ts`](../packages/protocol/src/json-rpc.ts).
 
+### 3.1 Machine inspection
+
+Machine inspection is capability-negotiated through the optional `agentletProfile.capabilities.control` object. Version 1 advertises `harnessDiscovery` and `nativePathValidation`; absence means an older daemon does not support the corresponding operation. The Gateway rejects such calls with JSON-RPC code `-32010` and `data: { "code": "unsupported_capability", "capability": "<name>" }` instead of probing its own machine.
+
+`server/discoverHarnesses` accepts `{ "harnesses": [...] }`, where each entry contains the host-owned stable `harnessId`, an absolute executable path or bare executable name, and an optional argv-only `versionProbe`. The daemon resolves executables directly without constructing a shell command. Results preserve request order and report `installed`, `missing`, or `probe_failed`; `installed` means only that the executable was found, not that authentication or an ACP handshake succeeded. Hosts should omit `versionProbe` for harnesses that cannot safely run a version command.
+
+Discovery requests are bounded to 64 unique harnesses, 16 probe arguments per harness, a 100–10,000 ms probe timeout, and bounded strings/output. Invalid request shapes return `-32602`. The host remains authoritative for catalogue entries and launch recipes; the daemon returns observations only and stores no inventory.
+
+`server/validateNativePath` accepts `{}` to report the target machine's default cwd or `{ "cwd": "<absolute-native-path>" }` to validate an explicit path. The default is `os.homedir()` only when it is an absolute existing directory. Explicit paths are interpreted with the target operating system's semantics, including Windows drive and UNC paths, and must be absolute, exist, and be directories. Invalid explicit paths never fall back to the default. Structured error `data.code` values are `default_cwd_unavailable`, `path_not_absolute`, `path_not_found`, and `path_not_directory`.
+
 ## 4. Spawn and bootstrap
 
 `server/spawn` includes a host correlation `appId`, an optional native ACP `sessionId`, and a `sessionSpec`.
 
-The daemon resolves the command and working directory either directly from `sessionSpec` or from `sessionSpec.agentTeam`, then launches the process with `shell: true`. The host must therefore send only trusted commands.
+The daemon resolves the command and working directory either directly from `sessionSpec` or from `sessionSpec.agentTeam`, then launches the process with `shell: true`. The host must therefore send only trusted commands. An omitted direct `sessionSpec.cwd` uses the same validated target home-directory default as `server/validateNativePath`; an explicit cwd must pass the same absolute, existing-directory validation and never falls back.
 
 For a fresh session the daemon performs:
 

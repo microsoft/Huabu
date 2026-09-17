@@ -3,20 +3,17 @@
 
 /**
  * Data catalogue of the ACP-capable agents the Settings UI knows how to
- * launch. Kept separate from the host probing logic in
- * {@link ./agent-cli-detect} so adding / editing an agent is a pure data
- * change with no need to touch the detection machinery.
+ * launch. The Server sends only these trusted executable names and safe
+ * version probes to agentlets; observations never supply launch commands.
  *
  * Each entry is a launch *recipe*: what binary to look for on PATH and
  * what to spawn. There is no way to infer this from the binary alone —
  * some agents speak ACP natively (`<binary> --acp`), others are driven
  * through an adapter whose bin *is* the ACP agent (empty `acpArgs`).
  *
- * This is intentionally a local module (no remote fetch): it ships with
- * the app and is signed/trusted. A future iteration may layer a
- * remotely-refreshable overlay on top, but detection must always fall
- * back to this built-in list and never execute an arbitrary
- * remotely-supplied command.
+ * This is intentionally a local module (no remote fetch): it ships with the
+ * app and is signed/trusted. Discovery must never execute an arbitrary
+ * remotely supplied command.
  */
 
 /** One known external agent's detection + launch recipe. */
@@ -192,3 +189,13 @@ export const KNOWN_CLIS: readonly KnownCli[] = [
       'Install from https://hermes-agent.nousresearch.com/docs/user-guide/features/acp',
   },
 ];
+
+/** Build the trusted default launch command used for discovered Profiles. */
+export function buildKnownCliCommand(cli: KnownCli, allowAll = false): string {
+  const approval = allowAll ? cli.autoApprove : null;
+  const parts = [cli.binary];
+  if (approval?.position === 'before-acp') parts.push(...approval.args);
+  parts.push(...cli.acpArgs);
+  if (approval?.position === 'after-acp') parts.push(...approval.args);
+  return parts.join(' ');
+}

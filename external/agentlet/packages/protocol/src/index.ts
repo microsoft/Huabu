@@ -10,6 +10,7 @@ export {
   ServerMethods,
   ErrorCodes,
 } from './constants.js'
+export { MACHINE_CONTROL_LIMITS } from './messages.js'
 
 export type {
   JsonRpcRequest,
@@ -47,6 +48,14 @@ export type {
   StopResult,
   ListParams,
   ListResult,
+  HarnessDiscoveryCandidate,
+  DiscoverHarnessesParams,
+  HarnessDiscoveryObservation,
+  DiscoverHarnessesResult,
+  ValidateNativePathParams,
+  ValidateNativePathResult,
+  NativePathErrorCode,
+  MachineControlErrorData,
   SendResourceParams,
   AgentTeamEnvField,
   AgentTeamScanParams,

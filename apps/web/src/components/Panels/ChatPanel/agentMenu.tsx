@@ -10,7 +10,7 @@
  * `bindingsEqual` / `INTERNAL` helpers.
  */
 
-import { Plus } from 'lucide-react';
+import { Plus, RefreshCw } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { AgentIcon } from '@/components/Common/AgentIcon';
@@ -23,6 +23,8 @@ import { cn } from '../../Common/cn';
 
 import type {
   AgentBinding,
+  AcpAgentMachineDiscovery,
+  AcpDiscoveredAgent,
   AgentMode,
   AgentProfileView,
   AgentTeamManifestProfileView,
@@ -30,10 +32,17 @@ import type {
 import type { ReactNode } from 'react';
 
 /** A picked (mode, binding) pair emitted by either agent menu. */
-export interface AgentChoice {
-  mode: AgentMode;
-  binding: AgentBinding;
-}
+export type AgentChoice =
+  | {
+      mode: AgentMode;
+      binding: AgentBinding;
+      discoveredAgent?: never;
+    }
+  | {
+      mode: AgentMode;
+      discoveredAgent: AcpDiscoveredAgent;
+      binding?: never;
+    };
 
 /** The built-in (Huabu) agent binding. */
 export const INTERNAL_BINDING: AgentBinding = { kind: 'internal' };
@@ -104,6 +113,7 @@ interface AgentMenuOptionsProps {
   currentBinding: AgentBinding;
   currentMode: AgentMode;
   profiles: AgentProfileView[];
+  machines?: AcpAgentMachineDiscovery[];
   /** Grey out every row (e.g. mid-stream) without closing the menu. */
   busy?: boolean;
   /** Tooltip applied to whichever row matches the current binding. */
@@ -111,6 +121,7 @@ interface AgentMenuOptionsProps {
   onSelect: (choice: AgentChoice) => void;
   /** When provided, renders the inline "Add agent" row that calls this. */
   onAddAgent?: () => void;
+  onRefreshDiscovery?: () => void;
 }
 
 /**
@@ -123,10 +134,12 @@ export function AgentMenuOptions({
   currentBinding,
   currentMode,
   profiles,
+  machines = [],
   busy,
   currentRowTitle,
   onSelect,
   onAddAgent,
+  onRefreshDiscovery,
 }: AgentMenuOptionsProps) {
   const { t } = useTranslation();
   const modeItems: { mode: AgentMode; label: string; icon: ReactNode }[] = [
@@ -197,6 +210,10 @@ export function AgentMenuOptions({
               };
               const isCurrent = bindingsEqual(currentBinding, binding);
               const icon = readAgentIcon(profile);
+              const machine =
+                machines.find(
+                  (candidate) => candidate.agentletId === profile.agentletId,
+                )?.hostname ?? profile.agentletId;
               return (
                 <AgentMenuRow
                   key={`profile:${profile.id}`}
@@ -209,6 +226,7 @@ export function AgentMenuOptions({
                     />
                   }
                   label={profile.alias}
+                  hint={`${machine} · ${profile.id}`}
                   current={isCurrent}
                   disabled={busy}
                   title={isCurrent ? currentRowTitle : undefined}
@@ -219,6 +237,82 @@ export function AgentMenuOptions({
           </>
         );
       })()}
+      {machines.length > 0 && (
+        <>
+          <div
+            role="presentation"
+            className="text-fg-muted mt-1 flex items-center gap-2 px-3 pt-1 pb-0.5 text-[10px] tracking-wider uppercase"
+          >
+            <span className="bg-edge-default h-px flex-1" />
+            <span>{t('chat.discoveredAgents')}</span>
+            {onRefreshDiscovery && (
+              <Button
+                variant="ghost"
+                tone="neutral"
+                size="sm"
+                iconOnly
+                title={t('actions.refresh')}
+                onClick={onRefreshDiscovery}
+              >
+                <RefreshCw />
+              </Button>
+            )}
+            <span className="bg-edge-default h-px flex-1" />
+          </div>
+          {machines.flatMap((machine) => {
+            if (machine.discovery !== 'ready') {
+              return [
+                <AgentMenuRow
+                  key={`machine:${machine.agentletId}`}
+                  icon={<BuiltInAgentAvatar mode="ask" size={16} />}
+                  label={machine.hostname}
+                  hint={
+                    machine.error?.message ??
+                    t(`chat.discovery.${machine.discovery}`)
+                  }
+                  disabled
+                  onClick={() => undefined}
+                />,
+              ];
+            }
+            const visibleAgents = machine.agents.filter(
+              (agent) => agent.status !== 'missing',
+            );
+            if (visibleAgents.length === 0) {
+              return [
+                <AgentMenuRow
+                  key={`machine:${machine.agentletId}:empty`}
+                  icon={<BuiltInAgentAvatar mode="ask" size={16} />}
+                  label={machine.hostname}
+                  hint={t('chat.discovery.empty')}
+                  disabled
+                  onClick={() => undefined}
+                />,
+              ];
+            }
+            return visibleAgents.map((agent) => (
+              <AgentMenuRow
+                key={`discovered:${agent.agentletId}:${agent.harnessId}`}
+                icon={<BuiltInAgentAvatar mode="ask" size={16} />}
+                label={agent.displayName}
+                hint={
+                  agent.error?.message ??
+                  `${machine.hostname} · ${agent.harnessId}`
+                }
+                disabled={
+                  busy || !machine.connected || agent.status !== 'installed'
+                }
+                onClick={() =>
+                  onSelect({
+                    mode: currentMode,
+                    discoveredAgent: agent,
+                  })
+                }
+              />
+            ));
+          })}
+        </>
+      )}
       {onAddAgent && (
         <>
           <div

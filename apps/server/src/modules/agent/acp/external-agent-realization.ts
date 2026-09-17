@@ -27,6 +27,10 @@ import {
 import { conversationTitleService } from '../conversation-title.service.js';
 import { resolveSpacePrompt } from '../space-instruction-frames.js';
 import { acquireAgentTurn } from '../turn-lease.js';
+import {
+  AcpMachineDiscoveryError,
+  acpMachineDiscovery,
+} from './machine-discovery.js';
 import { ensureProfileCacheSubscription } from './profile-cache-port.js';
 import { getExternalAgentRuntimeConfig } from './runtime-config.js';
 import { buildAcpWorkloadSpec } from './service.js';
@@ -42,7 +46,16 @@ export type ExternalAgentRealizationErrorCode =
   | 'external_binding_required'
   | 'external_binding_conflict'
   | 'external_working_directory_conflict'
-  | 'external_thread_kind_conflict';
+  | 'external_thread_kind_conflict'
+  | 'default_cwd_unavailable'
+  | 'path_not_absolute'
+  | 'path_not_found'
+  | 'path_not_directory'
+  | 'unsupported_capability'
+  | 'path_validation_failed'
+  | 'agentlet_not_found'
+  | 'agentlet_offline'
+  | 'agentlet_gateway_unavailable';
 
 export class ExternalAgentRealizationError extends Error {
   constructor(
@@ -91,6 +104,10 @@ interface RealizationDependencies {
   ) => ReturnType<typeof agenetes.record>;
   createHandle: (spec: AcpWorkloadSpec) => AcpHandle;
   buildSpec: typeof buildAcpWorkloadSpec;
+  validateWorkingDirectory: (
+    agentletId: string,
+    workingDirPath: string,
+  ) => Promise<string>;
   subscribeProfileCache: typeof ensureProfileCacheSubscription;
   subscribeTitles?: (canvasId: string, threadId: string) => void;
   ensureSession: (
@@ -151,6 +168,13 @@ const DEFAULT_DEPENDENCIES: RealizationDependencies = {
   readRecord: (namespace, threadId) => agenetes.record(namespace, threadId),
   createHandle: (spec) => agenetes.create(spec) as AcpHandle,
   buildSpec: buildAcpWorkloadSpec,
+  validateWorkingDirectory: async (agentletId, workingDirPath) => {
+    const validated = await acpMachineDiscovery.validateWorkingDirectory(
+      agentletId,
+      workingDirPath,
+    );
+    return validated.workingDirPath;
+  },
   subscribeProfileCache: ensureProfileCacheSubscription,
   subscribeTitles: (canvasId, threadId) =>
     conversationTitleService.subscribe(canvasId, threadId),
@@ -345,6 +369,23 @@ export class ExternalAgentRealizationService {
         'external_working_directory_conflict',
         `Thread ${options.threadId} is fixed to working directory ${spec.spec.cwd ?? '(profile default)'}`,
       );
+    }
+    const realizedWorkingDirectory = spec.spec.cwd;
+    if (realizedWorkingDirectory !== undefined) {
+      try {
+        await this.dependencies.validateWorkingDirectory(
+          resolveAcpAgentletId(spec),
+          realizedWorkingDirectory,
+        );
+      } catch (error) {
+        if (error instanceof AcpMachineDiscoveryError) {
+          throw new ExternalAgentRealizationError(
+            error.code as ExternalAgentRealizationErrorCode,
+            error.message,
+          );
+        }
+        throw error;
+      }
     }
 
     const realized = {

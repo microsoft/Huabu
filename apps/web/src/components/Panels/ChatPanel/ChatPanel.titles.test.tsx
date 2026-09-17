@@ -65,6 +65,24 @@ vi.mock('react-router-dom', () => ({ useNavigate: () => () => {} }));
 vi.mock('@/components/Common/Loading', () => ({ Loading: () => null }));
 vi.mock('@/components/Common/Toast', () => ({ toast: vi.fn() }));
 vi.mock('@/hooks/useChatHistory', () => ({ useChatHistory: () => {} }));
+vi.mock('@/store/acpDiscoveryStore', () => ({
+  useAcpDiscoveryStore: (
+    selector: (state: {
+      machines: never[];
+      loaded: boolean;
+      loading: boolean;
+      init: () => Promise<void>;
+      refresh: () => Promise<void>;
+    }) => unknown,
+  ) =>
+    selector({
+      machines: [],
+      loaded: true,
+      loading: false,
+      init: vi.fn(async () => undefined),
+      refresh: vi.fn(async () => undefined),
+    }),
+}));
 vi.mock('@/hooks/useAcpProfiles', () => ({
   useAcpProfiles: () => ({ profiles: [], loaded: true, refresh: vi.fn() }),
 }));
@@ -72,6 +90,7 @@ vi.mock('@/hooks/useAcpSessionMeta', () => ({
   useAcpSessionMeta: () => ({
     meta: { selections: {}, usage: null, updatedAt: 0 },
     source: 'none',
+    realization: { state: 'unrealized' },
     loading: false,
     error: null,
     refresh: vi.fn(),

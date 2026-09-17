@@ -12,6 +12,7 @@ import { useTranslation } from 'react-i18next';
 
 import {
   createAcpProfile,
+  flattenAcpAgentCatalogue,
   listAcpAgentClis,
   updateAcpProfile,
 } from '@/api/acp';
@@ -372,7 +373,7 @@ export const CommandProfileForm: React.FC<CommandProfileFormProps> = ({
       if (form.cliId !== 'custom') {
         const latest = await listAcpAgentClis();
         if (
-          !latest.agents.some(
+          !flattenAcpAgentCatalogue(latest).some(
             (agent) => agent.id === form.cliId && agent.installed,
           )
         ) {

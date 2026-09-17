@@ -16,6 +16,8 @@ import {
   type AgentTeamSetupStartResult,
   type AgentTeamValidateParams,
   type AgentTeamValidateResult,
+  type DiscoverHarnessesParams,
+  type DiscoverHarnessesResult,
   type JsonRpcError,
   type JsonRpcMessage,
   type SendResourceParams,
@@ -23,6 +25,8 @@ import {
   type SpawnResult,
   type StopParams,
   type StopResult,
+  type ValidateNativePathParams,
+  type ValidateNativePathResult,
 } from '@agentlet/protocol';
 import { WebSocket, WebSocketServer } from 'ws';
 
@@ -209,6 +213,30 @@ export class AgentletGateway {
     }>;
   }> {
     return this.sendControlRequest(agentletId, ServerMethods.LIST, {});
+  }
+
+  async discoverHarnesses(
+    agentletId: string,
+    params: DiscoverHarnessesParams,
+  ): Promise<DiscoverHarnessesResult> {
+    this.requireControlCapability(agentletId, 'harnessDiscovery');
+    return this.sendControlRequest(
+      agentletId,
+      ServerMethods.DISCOVER_HARNESSES,
+      params,
+    );
+  }
+
+  async validateNativePath(
+    agentletId: string,
+    params: ValidateNativePathParams = {},
+  ): Promise<ValidateNativePathResult> {
+    this.requireControlCapability(agentletId, 'nativePathValidation');
+    return this.sendControlRequest(
+      agentletId,
+      ServerMethods.VALIDATE_NATIVE_PATH,
+      params,
+    );
   }
 
   scanAgentTeams(
@@ -596,6 +624,23 @@ export class AgentletGateway {
       throw new Error(`Agentlet not found or disconnected: ${agentletId}`);
     }
     return connection;
+  }
+
+  private requireControlCapability(
+    agentletId: string,
+    capability: 'harnessDiscovery' | 'nativePathValidation',
+  ): void {
+    const connection = this.requireConnectedAgentlet(agentletId);
+    if (
+      connection.agentletProfile?.capabilities.control?.[capability] === true
+    ) {
+      return;
+    }
+    throw new AgentletRequestError({
+      code: ErrorCodes.UNSUPPORTED_CAPABILITY,
+      message: `Agentlet does not support ${capability}`,
+      data: { code: 'unsupported_capability', capability },
+    });
   }
 
   private handlePendingResponse(

@@ -69,6 +69,7 @@ vi.mock('./useAcpProfiles', () => ({
 vi.mock('./useAcpSessionMeta', () => ({
   useAcpSessionMeta: () => ({
     meta: null,
+    realization: { state: 'unrealized' },
     applyOptimistic: () => {},
     setRpcSpawnCtx: () => {},
   }),

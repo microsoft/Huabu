@@ -4,16 +4,13 @@
 /**
  * ACP (external agent bridge) API client.
  *
- * The bridge now uses an **embedded agentlet daemon** managed by the
- * server's `DaemonSupervisor`. The user never sees the daemon directly
- * — instead they author **profiles** ({@link AcpAgentProfile}) which
- * describe how to spawn one external agent CLI on demand. This module
- * wraps the loopback-only profile/daemon endpoints plus the existing
- * thread-scoped cached capability and control routes.
+ * The bridge uses local or remote execution-machine agentlets. Users select
+ * discovered Agents or author **profiles** ({@link AcpAgentProfile}) that
+ * describe how to spawn an external agent CLI on demand.
  *
  * Endpoint surface:
- *  - `GET /api/acp/agent-cli` — probe the trusted built-in agent catalogue
- *     and populate the profile editor's picker with installation state.
+ *  - `GET /api/acp/agent-cli` — read cached machine-scoped discovery.
+ *  - `POST /api/acp/agent-cli/refresh` — refresh target-machine discovery.
  *  - `GET/POST/PATCH/DELETE /api/acp/profiles` — CRUD for spawn
  *     recipes. Always returns the runtime status (spawned/pid/etc.)
  *     alongside each profile.
@@ -27,6 +24,7 @@ import { routes } from './_routes';
 
 import type {
   AcpAgentCliListResponse,
+  AcpAgentCliInfo,
   AcpAgentletStatus,
   AcpAgentletStatusResponse,
   AcpPermissionDecisionRequest,
@@ -43,6 +41,10 @@ import type {
   SetAcpSessionModeRequest,
   SetAcpSessionModeResponse,
   ExternalAgentRuntimeConfig,
+  MaterializeDiscoveredAgentRequest,
+  RefreshAcpAgentCliRequest,
+  ValidateAcpWorkingDirectoryRequest,
+  ValidateAcpWorkingDirectoryResponse,
 } from '@huabu/shared';
 
 export type {
@@ -69,17 +71,80 @@ export type {
   SetAcpSessionModeRequest,
   SetAcpSessionModeResponse,
   ExternalAgentRuntimeConfig,
+  AcpAgentMachineDiscovery,
+  AcpDiscoveredAgent,
+  AcpThreadRealization,
+  MaterializeDiscoveredAgentRequest,
+  RefreshAcpAgentCliRequest,
+  ValidateAcpWorkingDirectoryRequest,
+  ValidateAcpWorkingDirectoryResponse,
 } from '@huabu/shared';
 
 // ── Agent CLI detection ──────────────────────────────────────────────
 
 /**
- * Probe the complete trusted ACP-capable agent catalogue on the host.
+ * Read cached discovery for the trusted ACP-capable Agent catalogue.
  */
 export async function listAcpAgentClis(): Promise<AcpAgentCliListResponse> {
   return apiFetch<AcpAgentCliListResponse>(routes.acpAgentCli, {
     fallbackMessage: 'Failed to detect installed agent CLIs',
   });
+}
+
+export function flattenAcpAgentCatalogue(
+  response: AcpAgentCliListResponse,
+): AcpAgentCliInfo[] {
+  const byHarness = new Map<string, AcpAgentCliInfo>();
+  for (const machine of response.machines) {
+    for (const agent of machine.agents) {
+      const previous = byHarness.get(agent.harnessId);
+      if (previous?.installed) continue;
+      byHarness.set(agent.harnessId, {
+        id: agent.harnessId,
+        displayName: agent.displayName,
+        binary: agent.binary,
+        acpArgs: agent.acpArgs,
+        autoApprove: agent.autoApprove,
+        installHint: agent.installHint,
+        installed: agent.status === 'installed',
+        ...(agent.version ? { version: agent.version } : {}),
+      });
+    }
+  }
+  return [...byHarness.values()];
+}
+
+export async function refreshAcpAgentClis(
+  payload: RefreshAcpAgentCliRequest = {},
+): Promise<AcpAgentCliListResponse> {
+  return apiFetch<AcpAgentCliListResponse>(routes.acpAgentCliRefresh, {
+    method: 'POST',
+    json: payload,
+    fallbackMessage: 'Failed to refresh execution-machine agents',
+  });
+}
+
+export async function materializeDiscoveredAgent(
+  payload: MaterializeDiscoveredAgentRequest,
+): Promise<AcpProfileMutationResponse> {
+  return apiFetch<AcpProfileMutationResponse>(routes.acpAgentCliMaterialize, {
+    method: 'POST',
+    json: payload,
+    fallbackMessage: 'Failed to save discovered agent',
+  });
+}
+
+export async function validateAcpWorkingDirectory(
+  payload: ValidateAcpWorkingDirectoryRequest,
+): Promise<ValidateAcpWorkingDirectoryResponse> {
+  return apiFetch<ValidateAcpWorkingDirectoryResponse>(
+    routes.acpWorkingDirectoryValidate,
+    {
+      method: 'POST',
+      json: payload,
+      fallbackMessage: 'Failed to validate working directory',
+    },
+  );
 }
 
 // ── Profile CRUD ─────────────────────────────────────────────────────

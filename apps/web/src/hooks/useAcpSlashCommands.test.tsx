@@ -58,6 +58,7 @@ describe('useAcpSlashCommands', () => {
   it('hydrates a cold cache with one GET and no polling', async () => {
     apiMocks.getCached.mockResolvedValue({
       source: 'none',
+      realization: { state: 'unrealized' },
       availableCommands: [],
       commandsUpdatedAt: 0,
       sessionMeta: {
@@ -86,6 +87,12 @@ describe('useAcpSlashCommands', () => {
     // test for #164: this must not leave `commands` as `undefined`.
     apiMocks.getCached.mockResolvedValue({
       source: 'thread',
+      realization: {
+        state: 'realized',
+        profileId: 'profile-1',
+        alias: 'Agent',
+        agentletId: 'machine-a',
+      },
       commandsUpdatedAt: 0,
       sessionMeta: {
         availableModes: [],
@@ -110,6 +117,7 @@ describe('useAcpSlashCommands', () => {
     apiMocks.getCached
       .mockResolvedValueOnce({
         source: 'profile',
+        realization: { state: 'unrealized' },
         availableCommands: [],
         commandsUpdatedAt: 0,
         sessionMeta: {
@@ -126,6 +134,7 @@ describe('useAcpSlashCommands', () => {
       })
       .mockResolvedValueOnce({
         source: 'profile',
+        realization: { state: 'unrealized' },
         availableCommands: [{ name: 'review', description: 'Review' }],
         commandsUpdatedAt: 2,
         sessionMeta: {

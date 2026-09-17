@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => ({
     listProfiles: vi.fn(),
     listSelectableProfileIds: vi.fn(),
     createProfile: vi.fn(),
+    getProfile: vi.fn(),
+    patchProfile: vi.fn(),
   },
 }));
 
@@ -88,6 +90,89 @@ describe('ACP Profile catalog routes', () => {
       metadata: { cliId: 'copilot' },
     });
     expect(response.json()).toEqual(commandProfile);
+  });
+
+  it('prevents callers from forging discovery provenance', async () => {
+    mocks.registry.createProfile.mockImplementation((input) => ({
+      ...commandProfile,
+      customData: input.customData,
+    }));
+    app = Fastify({ logger: false });
+    await app.register(acpProfilesRoutes, { prefix: '/api/acp' });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/acp/profiles',
+      payload: {
+        alias: 'Copilot',
+        workingDirPath: '/work/project',
+        launch: { kind: 'acp-command', command: 'copilot --acp' },
+        customData: {
+          icon: { shape: 'circle', color: 'blue' },
+          discoveredAgent: {
+            version: 1,
+            agentletId: 'forged-machine',
+            harnessId: 'copilot',
+          },
+        },
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(mocks.registry.createProfile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        customData: {
+          icon: { shape: 'circle', color: 'blue' },
+        },
+      }),
+    );
+  });
+
+  it('preserves host-owned discovery provenance when patching custom data', async () => {
+    const discoveredProfile = {
+      ...commandProfile,
+      customData: {
+        discoveredAgent: {
+          version: 1,
+          agentletId: 'machine-a',
+          harnessId: 'copilot',
+        },
+      },
+    };
+    mocks.registry.getProfile.mockReturnValue(discoveredProfile);
+    mocks.registry.patchProfile.mockImplementation((_id, patch) => ({
+      ...discoveredProfile,
+      ...patch,
+    }));
+    app = Fastify({ logger: false });
+    await app.register(acpProfilesRoutes, { prefix: '/api/acp' });
+
+    const response = await app.inject({
+      method: 'PATCH',
+      url: '/api/acp/profiles/command-1',
+      payload: {
+        customData: {
+          icon: { shape: 'diamond', color: 'green' },
+          discoveredAgent: {
+            version: 1,
+            agentletId: 'forged-machine',
+            harnessId: 'claude',
+          },
+        },
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(mocks.registry.patchProfile).toHaveBeenCalledWith('command-1', {
+      customData: {
+        icon: { shape: 'diamond', color: 'green' },
+        discoveredAgent: {
+          version: 1,
+          agentletId: 'machine-a',
+          harnessId: 'copilot',
+        },
+      },
+    });
   });
 
   it('lists every Profile but selects only runtime-ready resources', async () => {

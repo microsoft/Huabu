@@ -22,6 +22,7 @@ import useCanvasStore from '@/store/canvasStore';
 import {
   selectThreadBinding,
   selectThreadIsLoading,
+  selectThreadLaunchOverrides,
   selectThreadMessages,
   selectThreadPendingAttachments,
   selectThreadSettings,
@@ -32,6 +33,7 @@ import {
   ConversationIntegrityError,
   awaitConversationDraft,
   resolveConversationAgentBinding,
+  resolveConversationLaunchOverrides,
   resolveConversationOwnerSource,
   shouldComposeConversationOwner,
   validateConversationView,
@@ -865,6 +867,10 @@ export function useAgentStream(
             conversationView,
           )
         : undefined;
+      const selectedLaunchOverrides = resolveConversationLaunchOverrides(
+        ownerSource,
+        selectThreadLaunchOverrides(useChatStore.getState(), threadId),
+      );
 
       const isComposingQuestion =
         !!conversationView && shouldComposeConversationOwner(ownerSource);
@@ -944,6 +950,7 @@ export function useAgentStream(
             canvasId: requestScope.canvasId || undefined,
             attachments,
             agentBinding,
+            workingDirPath: selectedLaunchOverrides?.workingDirPath,
             anchorNodeId: requestScope.anchorNodeId,
             invokedSkills,
             // Carry this thread's built-in selection so a model /

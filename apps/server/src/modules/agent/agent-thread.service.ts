@@ -152,6 +152,7 @@ export interface AgentThreadInvocationOptions {
   /** Canonical durable submission; ordinary chat callers omit it. */
   submission?: HuabuSubmission;
   requestBinding?: AgentBinding;
+  requestedCwd?: string;
   agentTarget?: AgentNodeTarget | null;
   fixedTarget?: FixedAgentNodeTarget | null;
   modelId?: string;
@@ -407,6 +408,7 @@ export class AgentThreadService {
           threadId: options.threadId,
           canvasId: options.canvasId,
           requestedBinding: binding,
+          requestedCwd: options.requestedCwd,
           agentTarget,
           fixedTarget,
           logger: options.logger,

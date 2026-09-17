@@ -209,6 +209,7 @@ function invocationOptions() {
       profileId: 'profile-fixed',
       alias: 'Fixed Agent',
     },
+    requestedCwd: '/task/work',
     fixedTarget: TARGET,
     signal: new AbortController().signal,
     logger,
@@ -616,6 +617,9 @@ describe('AgentThreadService', () => {
         handle: expect.any(Object),
         binding: TARGET.agentBinding,
       }),
+    );
+    expect(harness.realizeExternal).toHaveBeenCalledWith(
+      expect.objectContaining({ requestedCwd: '/task/work' }),
     );
     expect(harness.finishLifecycle).toHaveBeenCalledWith(
       TARGET,
