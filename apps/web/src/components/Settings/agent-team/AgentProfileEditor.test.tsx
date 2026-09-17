@@ -25,6 +25,22 @@ const apiMocks = vi.hoisted(() => ({
 
 vi.mock('@/api/acp', () => ({
   createAcpProfile: apiMocks.createCommand,
+  flattenAcpAgentCatalogue: (response: {
+    machines: Array<{
+      agents: Array<{
+        harnessId: string;
+        displayName: string;
+        status: string;
+      }>;
+    }>;
+  }) =>
+    response.machines.flatMap((machine) =>
+      machine.agents.map((agent) => ({
+        id: agent.harnessId,
+        displayName: agent.displayName,
+        installed: agent.status === 'installed',
+      })),
+    ),
   listAcpAgentClis: apiMocks.listClis,
   updateAcpProfile: vi.fn(),
 }));
@@ -98,6 +114,22 @@ const agents = [
     installHint: 'Install Claude',
   },
 ];
+
+const discoveryResponse = {
+  machines: [
+    {
+      agents: agents.map((agent) => ({
+        harnessId: agent.id,
+        displayName: agent.displayName,
+        binary: agent.binary,
+        acpArgs: agent.acpArgs,
+        autoApprove: agent.autoApprove,
+        installHint: agent.installHint,
+        status: agent.installed ? 'installed' : 'missing',
+      })),
+    },
+  ],
+};
 
 const members: ManifestMemberGroup[] = [
   {
@@ -224,7 +256,7 @@ describe('AgentProfileEditor (create)', () => {
   });
 
   it('creates a manifest Profile and kicks off setup', async () => {
-    apiMocks.listClis.mockResolvedValue({ agents });
+    apiMocks.listClis.mockResolvedValue(discoveryResponse);
     apiMocks.createManifest.mockResolvedValue({ id: 'profile-1' });
     apiMocks.setupManifest.mockResolvedValue({ id: 'profile-1' });
     renderFlow();
@@ -284,7 +316,7 @@ describe('AgentProfileEditor (create)', () => {
   });
 
   it('uses an isolated default workspace without requiring a path', async () => {
-    apiMocks.listClis.mockResolvedValue({ agents });
+    apiMocks.listClis.mockResolvedValue(discoveryResponse);
     apiMocks.createManifest.mockResolvedValue({ id: 'profile-default' });
     apiMocks.setupManifest.mockResolvedValue({ id: 'profile-default' });
     renderFlow();
