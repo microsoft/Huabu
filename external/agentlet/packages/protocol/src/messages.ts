@@ -21,6 +21,12 @@ export interface AgentletProfile {
     autoRestart: boolean
     bufferLimit: number
     maxAgents?: number
+    /** Optional machine-control operations supported by this daemon. */
+    control?: {
+      version: 1
+      harnessDiscovery?: boolean
+      nativePathValidation?: boolean
+    }
   }
 }
 
@@ -238,6 +244,80 @@ export interface ListResult {
     cwd: string
     status: 'running' | 'starting'
   }>
+}
+
+// ─── Host → Agentlet Machine Inspection ─────────────────────────────────────
+
+export const MACHINE_CONTROL_LIMITS = {
+  maxHarnesses: 64,
+  maxHarnessIdLength: 128,
+  maxExecutableLength: 4096,
+  maxProbeArgs: 16,
+  maxProbeArgLength: 1024,
+  maxPathLength: 4096,
+  minProbeTimeoutMs: 100,
+  maxProbeTimeoutMs: 10_000,
+  defaultProbeTimeoutMs: 2_000,
+  maxProbeOutputLength: 4096,
+} as const
+
+export interface HarnessDiscoveryCandidate {
+  /** Stable host-catalogue identity. */
+  harnessId: string
+  /** Absolute executable path or one executable name to resolve through PATH. */
+  executable: string
+  /** Optional safe argv-only version probe. Omit for harnesses that cannot be probed safely. */
+  versionProbe?: {
+    args: string[]
+    timeoutMs?: number
+  }
+}
+
+export interface DiscoverHarnessesParams {
+  harnesses: HarnessDiscoveryCandidate[]
+}
+
+export type HarnessDiscoveryObservation =
+  | {
+      harnessId: string
+      status: 'installed'
+      executablePath: string
+      version?: string
+    }
+  | {
+      harnessId: string
+      status: 'missing'
+    }
+  | {
+      harnessId: string
+      status: 'probe_failed'
+      executablePath: string
+      error: string
+    }
+
+export interface DiscoverHarnessesResult {
+  harnesses: HarnessDiscoveryObservation[]
+}
+
+export interface ValidateNativePathParams {
+  /** Omit to request the target machine's default cwd. */
+  cwd?: string
+}
+
+export interface ValidateNativePathResult {
+  cwd: string
+  source: 'default' | 'explicit'
+}
+
+export type NativePathErrorCode =
+  | 'default_cwd_unavailable'
+  | 'path_not_absolute'
+  | 'path_not_found'
+  | 'path_not_directory'
+
+export interface MachineControlErrorData {
+  code: NativePathErrorCode | 'unsupported_capability'
+  capability?: 'harnessDiscovery' | 'nativePathValidation'
 }
 
 // ─── Server → Agentlet Resource Distribution ──────────────────────────────────
