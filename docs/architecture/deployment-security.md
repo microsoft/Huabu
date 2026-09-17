@@ -37,6 +37,14 @@ The response is deliberately redacted: it never contains usernames, passwords, c
 
 Settings loads readiness when it opens. A read-only credential store disables API-key and OAuth mutations while leaving non-secret model configuration available. Standalone deployments enable encrypted credential writes with `HUABU_SECRET_KEY`; see [`credential-storage.md`](./credential-storage.md).
 
+## Rate limiting
+
+Huabu applies one application-wide in-memory limit of 1000 HTTP requests per minute for each direct peer IP. The limiter is registered once at the Fastify composition root after authentication, so invalid credentials are rejected before consuming the authenticated owner's budget and every subsequently registered route receives the same default policy.
+
+The deliberately generous default protects a personal Server from unbounded request volume without requiring endpoint-specific configuration. Static assets, readiness requests, uploads, and SSE connection handshakes use the same budget; an established SSE connection does not consume additional requests for emitted events. Routes may override or disable the default through Fastify rate-limit route configuration when a measured workload requires a different policy.
+
+The limiter uses process memory because Huabu runs as one Server process and does not require distributed counters. Keys use Fastify's direct peer address under the current `trustProxy: false` boundary, so untrusted forwarding headers cannot split or evade a budget. Deployments behind one reverse proxy therefore share that proxy's backend-facing budget, which is appropriate for the single-owner model; future trusted-proxy support must define explicit trusted proxy addresses before forwarded client identity can be used.
+
 ## Transport
 
 Huabu's Node server currently speaks HTTP. A non-loopback bind logs and reports `operator-unverified` transport because the process cannot prove whether a private network or external TLS terminator protects the client-facing connection.

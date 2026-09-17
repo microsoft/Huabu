@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import compress from '@fastify/compress';
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
+import rateLimit from '@fastify/rate-limit';
 import staticPlugin from '@fastify/static';
 import { fastify, type FastifyBaseLogger } from 'fastify';
 
@@ -58,6 +59,7 @@ import {
   originGuardPlugin,
   resolveAllowedHostnames,
 } from './modules/security/index.js';
+import { GLOBAL_RATE_LIMIT_OPTIONS } from './modules/security/rate-limit.js';
 import { closeStorage } from './modules/storage/index.js';
 import webRoutes from './modules/web/web.route.js';
 import {
@@ -231,6 +233,8 @@ if (basicAuthUser && basicAuthPass) {
     reply.status(401).send({ message: 'Authentication required' });
   });
 }
+
+app.register(rateLimit, GLOBAL_RATE_LIMIT_OPTIONS);
 
 // Register @fastify/static to enable `reply.sendFile()`.
 // Actual artifact serving uses a dynamic root resolved at request time
