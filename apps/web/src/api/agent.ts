@@ -10,12 +10,11 @@
 
 import { AGENT_HOST_SSE_EVENTS, AGENT_SSE_EVENTS } from '@huabu/shared';
 
-import { ApiError, apiFetch, apiUrl } from './_client';
+import { ApiError, apiErrorFromResponse, apiFetch, apiUrl } from './_client';
 import { routes } from './_routes';
 import { readTypedSSEStream } from './_sse';
 
 import type {
-  ApiErrorBody,
   AgentBinding,
   AgentHostStreamEvent,
   AgentInputKind,
@@ -208,7 +207,13 @@ export const agentApi = {
 
       if (response.status === 404) return { status: 'inactive' };
       if (!response.ok || !response.body) {
-        throw new Error(`Agent stream failed with HTTP ${response.status}`);
+        if (!response.ok) {
+          throw await apiErrorFromResponse(
+            response,
+            `Agent stream failed with HTTP ${response.status}`,
+          );
+        }
+        throw new Error('Agent stream response body is null');
       }
 
       const terminal = await pumpAgentStream(response, callbacks, signal, {
@@ -310,15 +315,8 @@ export const agentApi = {
       });
 
       if (!response.ok) {
-        let body: Partial<ApiErrorBody> = {};
-        try {
-          body = (await response.json()) as Partial<ApiErrorBody>;
-        } catch {
-          // Preserve the status even when an intermediary returns non-JSON.
-        }
-        throw new ApiError(
-          response.status,
-          body,
+        throw await apiErrorFromResponse(
+          response,
           `Agent request failed with HTTP ${response.status}`,
         );
       }

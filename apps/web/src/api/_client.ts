@@ -26,6 +26,12 @@ import { API_CONFIG } from '../config/api';
 
 import type { ApiErrorBody } from '@huabu/shared';
 
+export const RATE_LIMITED_EVENT = 'huabu:rate-limited';
+
+export interface RateLimitedEventDetail {
+  retryAfterSeconds: number;
+}
+
 /** Strongly-typed runtime error raised when the server returns a non-2xx. */
 export class ApiError extends Error {
   readonly status: number;
@@ -75,6 +81,56 @@ async function readErrorBody(
   return {};
 }
 
+function retryAfterSeconds(
+  response: Response,
+  body: Partial<ApiErrorBody>,
+): number {
+  const headerValue = Number.parseInt(
+    response.headers.get('retry-after') ?? '',
+  );
+  if (Number.isFinite(headerValue) && headerValue > 0) return headerValue;
+
+  const detailValue =
+    body.details &&
+    typeof body.details === 'object' &&
+    'retryAfterSeconds' in body.details
+      ? Number(body.details.retryAfterSeconds)
+      : Number.NaN;
+  return Number.isFinite(detailValue) && detailValue > 0 ? detailValue : 60;
+}
+
+function notifyRateLimited(detail: RateLimitedEventDetail): void {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(
+    new CustomEvent<RateLimitedEventDetail>(RATE_LIMITED_EVENT, { detail }),
+  );
+}
+
+export function getRateLimitRetryAfterSeconds(error: unknown): number | null {
+  if (!(error instanceof ApiError) || error.status !== 429) return null;
+  const value =
+    error.details &&
+    typeof error.details === 'object' &&
+    'retryAfterSeconds' in error.details
+      ? Number(error.details.retryAfterSeconds)
+      : Number.NaN;
+  return Number.isFinite(value) && value > 0 ? value : 60;
+}
+
+export async function apiErrorFromResponse(
+  response: Response,
+  fallback: string,
+): Promise<ApiError> {
+  const body = await readErrorBody(response);
+  if (response.status === 429) {
+    const seconds = retryAfterSeconds(response, body);
+    body.code ??= 'RATE_LIMITED';
+    body.details = { retryAfterSeconds: seconds };
+    notifyRateLimited({ retryAfterSeconds: seconds });
+  }
+  return new ApiError(response.status, body, fallback);
+}
+
 /**
  * Perform a JSON request and parse the response.
  *
@@ -121,10 +177,8 @@ export async function apiFetch<T>(
   const response = await fetch(apiUrl(path), init);
 
   if (!response.ok) {
-    const errBody = await readErrorBody(response);
-    throw new ApiError(
-      response.status,
-      errBody,
+    throw await apiErrorFromResponse(
+      response,
       fallbackMessage ??
         `Request to ${path} failed: ${response.status} ${response.statusText}`,
     );

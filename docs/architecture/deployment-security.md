@@ -1,6 +1,6 @@
 # Deployment Security
 
-> Network exposure, owner authentication, deployment readiness, and transport guidance. Last updated: 2026-08-15
+> Network exposure, owner authentication, deployment readiness, transport guidance, and request-volume controls. Last updated: 2026-09-18
 
 ## Security model
 
@@ -35,6 +35,16 @@ The response is deliberately redacted: it never contains usernames, passwords, c
 
 Settings loads readiness when it opens. A read-only credential store disables API-key and OAuth mutations while leaving non-secret model configuration available. Standalone deployments enable encrypted credential writes with `HUABU_SECRET_KEY`; see [`credential-storage.md`](./credential-storage.md).
 
+## Application-wide rate limiting
+
+Every production HTTP route inherits one in-memory `@fastify/rate-limit` policy: 1,000 admitted requests per 60-second window, keyed by the normalized direct TCP peer IP. Authentication and authorization are independent of admission control, so loopback clients, Basic-authenticated browser traffic, and RFS bearer traffic receive neither a bypass nor credential-specific buckets.
+
+Huabu does not enable Fastify `trustProxy` and does not derive rate-limit identity from `Forwarded`, `X-Forwarded-For`, or similar caller-controlled headers. A supported external TLS terminator therefore shares one bucket for all clients that reach Huabu through that proxy. Per-client identity behind trusted proxies requires a future explicit proxy trust contract; operators must not enable arbitrary forwarded-header trust as a workaround.
+
+`OPTIONS` preflights and `GET /api/deployment/readiness` are exempt so browsers can negotiate access and deployment monitoring remains available. There is no separate health endpoint. Static assets, ordinary APIs, RFS—including the public root Skill bootstrap—and uploads are limited. Upload admission runs before body parsing and remains additionally bounded by the 500 MB upload-size ceiling.
+
+An SSE connection attempt consumes one request when the stream opens; events and heartbeats on the established connection consume no further requests. Reconnect attempts are ordinary requests. A rejected request returns HTTP 429 with the canonical `ApiErrorBody`, `code: "RATE_LIMITED"`, retry details, limit/remaining/reset headers, and `Retry-After`. The web client shows one deduplicated warning and Canvas Sync waits at least the advertised retry interval before reconnecting. The server records a structured warning containing the direct-peer key, method, and route template, never credentials.
+
 ## Transport
 
 Huabu's Node server currently speaks HTTP. A non-loopback bind logs and reports `operator-unverified` transport because the process cannot prove whether a private network or external TLS terminator protects the client-facing connection.
@@ -50,6 +60,7 @@ The Desktop remote-client path uses the operating system's normal certificate va
 | [`apps/server/src/modules/security/deployment-config.ts`](../../apps/server/src/modules/security/deployment-config.ts)                   | Resolve and fail closed on invalid bind, allowed-host, and Basic Auth combinations. |
 | [`apps/server/src/modules/security/owner.ts`](../../apps/server/src/modules/security/owner.ts)                                           | Recognize the loopback or Basic-authenticated single owner.                         |
 | [`apps/server/src/modules/security/deployment.route.ts`](../../apps/server/src/modules/security/deployment.route.ts)                     | Serve the redacted readiness model.                                                 |
+| [`apps/server/src/modules/security/rate-limit.ts`](../../apps/server/src/modules/security/rate-limit.ts)                                 | Define global request admission, identity, exemptions, and 429 diagnostics.         |
 | [`apps/server/src/modules/agent/change-review-config.route.ts`](../../apps/server/src/modules/agent/change-review-config.route.ts)       | Enforce owner-only access to the global Agent Change Review configuration.          |
 | [`apps/server/src/app.ts`](../../apps/server/src/app.ts)                                                                                 | Apply Host, Origin, Basic Auth, and route composition.                              |
 | [`apps/web/vite.config.ts`](../../apps/web/vite.config.ts)                                                                               | Gate non-loopback development clients before assets and API proxying.               |

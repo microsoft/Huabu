@@ -9,6 +9,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -20,8 +21,9 @@ import {
   useBlocker,
 } from 'react-router-dom';
 
+import { RATE_LIMITED_EVENT, type RateLimitedEventDetail } from './api/_client';
 import { Loading } from './components/Common/Loading';
-import { ToastContainer } from './components/Common/Toast';
+import { dismissToast, toast, ToastContainer } from './components/Common/Toast';
 import { GlobalModals } from './components/Shell/GlobalModals';
 import { NativeMenuBridge } from './components/Shell/NativeMenuBridge';
 import { WindowChrome } from './components/Shell/WindowChrome';
@@ -234,15 +236,47 @@ function WorkspaceLanding() {
 }
 
 export default function App() {
+  const { t } = useTranslation();
   useInputModeListener();
   useDisableBrowserZoom();
 
   const init = useWorkspaceStore((s) => s.init);
   const [initialising, setInitialising] = useState(true);
+  const rateLimitToastIdRef = useRef<string | null>(null);
+  const lastRateLimitToastAtRef = useRef(0);
 
   useEffect(() => {
     void init().finally(() => setInitialising(false));
   }, [init]);
+
+  useEffect(() => {
+    const handleRateLimited = (event: Event) => {
+      const now = Date.now();
+      if (now - lastRateLimitToastAtRef.current < 5_000) return;
+      lastRateLimitToastAtRef.current = now;
+
+      const { retryAfterSeconds } = (
+        event as CustomEvent<RateLimitedEventDetail>
+      ).detail;
+      if (rateLimitToastIdRef.current) {
+        dismissToast(rateLimitToastIdRef.current);
+      }
+      rateLimitToastIdRef.current = toast(
+        t('errors.rateLimited', {
+          seconds: Math.max(1, Math.ceil(retryAfterSeconds)),
+        }),
+        {
+          tone: 'warning',
+          duration: 6_000,
+          dismissible: true,
+        },
+      );
+    };
+    window.addEventListener(RATE_LIMITED_EVENT, handleRateLimited);
+    return () => {
+      window.removeEventListener(RATE_LIMITED_EVENT, handleRateLimited);
+    };
+  }, [t]);
 
   // Build the data router exactly once for the lifetime of the app.
   // We need a data router (not the legacy `<BrowserRouter>`) so that

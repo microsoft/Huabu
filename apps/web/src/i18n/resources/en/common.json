@@ -1017,6 +1017,7 @@
     }
   },
   "errors": {
-    "nodeSaveFailed": "Couldn't write \"{{name}}\" to disk — the file may be locked or not writable."
+    "nodeSaveFailed": "Couldn't write \"{{name}}\" to disk — the file may be locked or not writable.",
+    "rateLimited": "Too many requests. Try again in {{seconds}} seconds."
   }
 }

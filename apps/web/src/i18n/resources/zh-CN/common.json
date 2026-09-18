@@ -1017,6 +1017,7 @@
     }
   },
   "errors": {
-    "nodeSaveFailed": "「{{name}}」写盘失败，可能文件被占用或没有写入权限。"
+    "nodeSaveFailed": "「{{name}}」写盘失败，可能文件被占用或没有写入权限。",
+    "rateLimited": "请求过于频繁，请在 {{seconds}} 秒后重试。"
   }
 }

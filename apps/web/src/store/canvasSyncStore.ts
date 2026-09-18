@@ -3,6 +3,10 @@
 
 import { create } from 'zustand';
 
+import {
+  apiErrorFromResponse,
+  getRateLimitRetryAfterSeconds,
+} from '@/api/_client';
 import { readTypedSSEStream } from '@/api/_sse';
 import { canvasSyncStreamUrl } from '@/api/canvasSync';
 import { dismissToast, toast } from '@/components/Common/Toast';
@@ -144,11 +148,18 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
     void (async () => {
       let reconnectDelay = INITIAL_RECONNECT_DELAY_MS;
       while (!signal.aborted && get().canvasId === canvasId) {
+        let nextDelay = reconnectDelay;
         try {
           const response = await fetch(canvasSyncStreamUrl(canvasId), {
             signal,
           });
           if (!response.ok || !response.body) {
+            if (!response.ok) {
+              throw await apiErrorFromResponse(
+                response,
+                `Canvas sync failed with HTTP ${response.status}`,
+              );
+            }
             throw new Error(`Canvas sync failed with HTTP ${response.status}`);
           }
           await readTypedSSEStream<CanvasSyncEvent>(
@@ -259,6 +270,10 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
           }
         } catch (error) {
           if (signal.aborted || get().canvasId !== canvasId) return;
+          const retryAfterSeconds = getRateLimitRetryAfterSeconds(error);
+          if (retryAfterSeconds !== null) {
+            nextDelay = Math.max(nextDelay, retryAfterSeconds * 1_000);
+          }
           console.warn('[canvasSync] reconnecting after stream failure', error);
         }
 
@@ -271,7 +286,7 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
             window.clearTimeout(timeout);
             finish();
           };
-          const timeout = window.setTimeout(finish, reconnectDelay);
+          const timeout = window.setTimeout(finish, nextDelay);
           signal.addEventListener('abort', onAbort, { once: true });
         });
         reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY_MS);

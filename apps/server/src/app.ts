@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import compress from '@fastify/compress';
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
+import rateLimit from '@fastify/rate-limit';
 import staticPlugin from '@fastify/static';
 import { fastify, type FastifyBaseLogger } from 'fastify';
 
@@ -57,6 +58,7 @@ import {
   originGuardPlugin,
   resolveAllowedHostnames,
 } from './modules/security/index.js';
+import { createApplicationRateLimitOptions } from './modules/security/rate-limit.js';
 import { closeStorage } from './modules/storage/index.js';
 import webRoutes from './modules/web/web.route.js';
 import {
@@ -142,6 +144,12 @@ app.register(cors, {
 //   hostGuard → originGuard → basic-auth → workspace guard → routes.
 app.register(hostGuardPlugin);
 app.register(originGuardPlugin);
+
+// Bound request admission independently from authentication. The limiter keys
+// the direct TCP peer and deliberately ignores forwarding headers; supported
+// reverse proxies therefore share one conservative bucket until Huabu defines
+// an explicit trusted-proxy contract.
+app.register(rateLimit, createApplicationRateLimitOptions());
 
 // Register multipart for file uploads.
 // The file-size ceiling is shared with `bodyLimit` above and tunable via
