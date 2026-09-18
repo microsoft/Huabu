@@ -48,7 +48,7 @@ docs/
 | [agent-architecture.md](./architecture/agent-architecture.md)                   | Server-side agent runtime, tools, skills, SSE protocol.                                                  |
 | [agent-context.md](./architecture/agent-context.md)                             | How canvas state gets shaped into `AgentChatContext` and reaches the model.                              |
 | [agent-reachback.md](./architecture/agent-reachback.md)                         | Huabu Reachback Tool (HRT) — how external agents read/write the Space out-of-band.                       |
-| [agent-teams-as-extensions.md](./architecture/agent-teams-as-extensions.md)     | Product/vision: managed Agent Teams as Huabu's "plugin system".                                          |
+| [agent-profiles.md](./architecture/agent-profiles.md)                           | Generic persisted Profiles, agentlet-local harness discovery, Settings and retired Team data.            |
 | [api-design.md](./architecture/api-design.md)                                   | **Authoritative** rules for every HTTP / SSE endpoint, zod-first wire contracts.                         |
 | [canvas-command-architecture.md](./architecture/canvas-command-architecture.md) | `CanvasUiIntent` / `CanvasCommand` / `CanvasExecution` three-layer model.                                |
 | [canvas-input-interactions.md](./architecture/canvas-input-interactions.md)     | Mouse, touch, and pen preference resolution, gesture ownership, and multi-touch arbitration.             |
@@ -94,8 +94,6 @@ docs/
 | [ink-lasso-question-flow.md](./proposals/ink-lasso-question-flow.md)                                                 | Proposed                    | Lasso-selected Ink intent submission through Question Nodes and the existing Agent.  |
 | [interactive-agent-views.md](./proposals/interactive-agent-views.md)                                                 | In-Progress                 | Capability-bound HTML views for persistent external-Agent interaction.               |
 | [long-horizon-tasks.md](./proposals/long-horizon-tasks.md)                                                           | Partly shipped              | Canvas-scoped recursive Agent creation, invocation, and handoff pipeline.            |
-| [managed-acp-harness.md](./proposals/managed-acp-harness.md)                                                         | Draft                       | Resource-first Agent Team Profile compilation.                                       |
-| [managed-agent-teams.md](./proposals/managed-agent-teams.md)                                                         | In-Progress                 | Huabu-managed discovery, configuration, preparation, and runtime.                    |
 | [milkdown-custom-toolbar-plan.md](./proposals/milkdown-custom-toolbar-plan.md)                                       | In-Progress                 | Huabu-owned Milkdown toolbar and semantic editor commands.                           |
 | [model-role-routing.md](./proposals/model-role-routing.md)                                                           | Proposed                    | Model selection by runtime role.                                                     |
 | [move-selected-nodes-between-spaces.md](./proposals/move-selected-nodes-between-spaces.md)                           | Proposed                    | #142 selected-node and Frame-subtree moves between Spaces with bounded compensation. |
@@ -122,9 +120,11 @@ docs/
 
 ### Retired records retained at stable paths
 
-| Doc                                            | Status               | Replacement                                                                                                                            |
-| ---------------------------------------------- | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| [world-canvas.md](./proposals/world-canvas.md) | Retired / Superseded | [Space Preview and World](./architecture/space-preview.md); the original Portal/Pin and source-conversation design is historical only. |
+| Doc                                                          | Status               | Replacement                                                                                                                            |
+| ------------------------------------------------------------ | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| [world-canvas.md](./proposals/world-canvas.md)               | Retired / Superseded | [Space Preview and World](./architecture/space-preview.md); the original Portal/Pin and source-conversation design is historical only. |
+| [managed-acp-harness.md](./proposals/managed-acp-harness.md) | Superseded           | [Generic Agent Profiles](./architecture/agent-profiles.md); no Team setup dependency.                                                  |
+| [managed-agent-teams.md](./proposals/managed-agent-teams.md) | Superseded           | [Generic Agent Profiles](./architecture/agent-profiles.md); manifests retained as data.                                                |
 
 When a proposal ships, set `Status: Shipped`, record the merge PR or commit, update the corresponding architecture document, and retain the proposal's stable path.
 
@@ -149,6 +149,7 @@ Archive contains only abandoned or superseded designs.
 | [acp-eventstore-refactor-plan.md](./archive/acp-eventstore-refactor-plan.md) | Superseded | Earlier EventStore adaptation replaced by Gateway-owned live buffering and Agenetes durability. |
 | [agent-reachback.md](./archive/agent-reachback.md)                           | Superseded | Removed HRT `.mjs` node-CRUD reachback design.                                                  |
 | [agentlet-upgrade-plan.md](./archive/agentlet-upgrade-plan.md)               | Superseded | Earlier split-hello migration absorbed by the Gateway consolidation.                            |
+| [agent-teams-as-extensions.md](./archive/agent-teams-as-extensions.md)       | Superseded | Agent Team runtime retired in favor of [generic Profiles](./architecture/agent-profiles.md).    |
 
 ---
 
@@ -161,6 +162,6 @@ Archive contains only abandoned or superseded designs.
 5. [architecture/api-design.md](./architecture/api-design.md) — every HTTP / SSE boundary follows this.
 6. Specific docs in `architecture/` as you touch the relevant area.
 
-For agent-team / external-agent work also read
+For external-agent work also read [Agent Profiles](./architecture/agent-profiles.md),
 [`external/agentlet/spec/`](../external/agentlet/spec) and
 [`agent-teams/README.md`](../agent-teams/README.md).

@@ -45,6 +45,7 @@ import { agentMetadataSchema } from '@agenetes/protocol';
 
 import { parseMigratableV3Records } from './legacy/acp-sessions-v3.js';
 import { readJson } from '../../../utils/fs.js';
+import { logger } from '../../../utils/logger.js';
 import { SPACE_JSON_FILENAME } from '../../storage/paths.js';
 
 import type { AcpWorkloadSpec } from '../../agent/agenetes/drivers.js';
@@ -69,7 +70,12 @@ export function migrateAcpSessionsFile(
   sessionsPath: string,
 ): number {
   const raw = readJson<unknown>(sessionsPath);
-  const migratable = parseMigratableV3Records(raw);
+  const migratable = parseMigratableV3Records(raw, (threadId) => {
+    logger.warn(
+      { threadId, sessionsPath },
+      '[migration] Retired Agent Team recipe is not migratable',
+    );
+  });
 
   let migrated = 0;
   for (const { threadId, record } of migratable) {

@@ -3,7 +3,7 @@
 
 export {
   mountAgenetes,
-  getAgentTeamRegistry,
+  getAgentProfileRegistry,
   getSupervisedAgentletId,
   ACP_UPGRADE_PATH,
 } from '@agenetes/agentlet-host';

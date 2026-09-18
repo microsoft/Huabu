@@ -12,11 +12,6 @@ import { ReadOnlyField } from './ReadOnlyField';
 import type { ReactNode } from 'react';
 
 interface ProfileEditFieldsProps {
-  preset?: {
-    name: string;
-    description?: string;
-    configuration?: ReactNode;
-  };
   agentName: string;
   agentDetails?: ReactNode;
   workingDirPath: string;
@@ -26,7 +21,6 @@ interface ProfileEditFieldsProps {
 
 /** Canonical field order and labels shared by every Profile edit form. */
 export function ProfileEditFields({
-  preset,
   agentName,
   agentDetails,
   workingDirPath,
@@ -37,20 +31,6 @@ export function ProfileEditFields({
 
   return (
     <>
-      {preset ? (
-        <div className="flex flex-col">
-          <SettingRow
-            title={t('settings.template')}
-            description={preset.description}
-          >
-            <SettingControl>
-              <ReadOnlyField value={preset.name} />
-            </SettingControl>
-          </SettingRow>
-          {preset.configuration}
-        </div>
-      ) : null}
-
       <div className="flex flex-col">
         <SettingRow title={t('settings.agent')}>
           <SettingControl>

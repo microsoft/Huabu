@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { getAgentTeamRegistry } from '@agenetes/agentlet-host';
+import { getAgentProfileRegistry } from '@agenetes/agentlet-host';
 
 import type { CustomData, JsonValue } from '@huabu/shared';
 
@@ -27,7 +27,7 @@ function parsePreferences(
 export function getProfileSessionPreferences(
   profileId: string,
 ): AcpProfileSessionPreferences {
-  const profile = getAgentTeamRegistry()?.getProfile(profileId);
+  const profile = getAgentProfileRegistry()?.getProfile(profileId);
   return parsePreferences(profile?.customData?.[CUSTOM_DATA_KEY]);
 }
 
@@ -36,7 +36,7 @@ export function rememberProfileSessionPreference(
   key: keyof AcpProfileSessionPreferences,
   value: string,
 ): void {
-  const registry = getAgentTeamRegistry();
+  const registry = getAgentProfileRegistry();
   const profile = registry?.getProfile(profileId);
   if (!registry || !profile) return;
 

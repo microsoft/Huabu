@@ -53,16 +53,23 @@ describe('buildLegacyCommandProfiles', () => {
     expect(profile?.workingDirPath).toBe('/server-cwd');
   });
 
-  it('leaves legacy Agent Team and commandless records unmigrated', () => {
+  it('leaves legacy Agent Team records unmigrated', () => {
     expect(
       buildLegacyCommandProfiles(
-        [
-          makeProfile({ id: 'team', cliId: 'agent-team' }),
-          makeProfile({ id: 'commandless', command: undefined }),
-        ],
+        [makeProfile({ id: 'team', cliId: 'agent-team' })],
         'local-agentlet',
         '/server-cwd',
       ),
     ).toEqual([]);
+  });
+
+  it('fails explicitly for an ordinary record without a command', () => {
+    expect(() =>
+      buildLegacyCommandProfiles(
+        [makeProfile({ command: undefined })],
+        'local-agentlet',
+        '/server-cwd',
+      ),
+    ).toThrow("Legacy command Profile 'legacy-profile' has no command");
   });
 });

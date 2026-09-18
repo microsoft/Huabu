@@ -21,13 +21,12 @@
  */
 
 import {
-  getAgentTeamRegistry,
+  getAgentProfileRegistry,
   getSupervisedAgentletId,
 } from '@agenetes/agentlet-host';
 
 import { renderExternalAgentInputs } from './preprocessor.js';
 import { getProfileSessionPreferences } from './profile-session-preferences.js';
-import { getProfile as getLegacyProfile } from './profile-store.js';
 import { buildReachbackEnv } from './reachback-env.js';
 import { renderExternalAgentSystemPreamble } from '../../../prompt/external-agent/system-preamble.js';
 import { canvasAcpNamespace } from '../../workspace/paths.js';
@@ -44,7 +43,7 @@ import { conversationTitleService } from '../conversation-title.service.js';
 import type { HuabuSubmission } from '../agenetes/handle.js';
 import type { ChatEnvelope } from '../conversation/envelope.js';
 import type { AcpBindingRecipe, AcpTurnOverlay } from '@agenetes/acp-driver';
-import type { AgentProfileSnapshot } from '@agenetes/agent-team';
+import type { AgentProfileSnapshot } from '@agenetes/agent-profile';
 import type {
   AgentLaunchOverrides,
   AgentStreamEvent,
@@ -57,7 +56,7 @@ export interface RunAcpAgentOptions {
   handle: AcpHandle;
   /**
    * External binding for the active thread. `profileId` references a
-   * user-configured spawn recipe (see `./profile-store.ts`); the
+   * persisted Profile in the generic registry; the
    * orchestrator resolves it to a live agentlet agent (spawning one
    * on the daemon if needed). `alias` is purely a label for logs +
    * `prepared_prompt` events.
@@ -144,7 +143,7 @@ export interface RunAcpAgentOptions {
 export function resolveBindingRecipe(
   profileId: string,
 ): AcpBindingRecipe | null {
-  const managed = getAgentTeamRegistry()?.getProfile(profileId);
+  const managed = getAgentProfileRegistry()?.getProfile(profileId);
   if (managed?.launch.kind === 'acp-command') {
     return {
       command: managed.launch.command,
@@ -154,21 +153,13 @@ export function resolveBindingRecipe(
     };
   }
 
-  const profile = getLegacyProfile(profileId);
-  if (!profile) return null;
-  return {
-    command: profile.command,
-    cwd: profile.cwd,
-    autoRestart: profile.autoRestart,
-    alias: profile.displayName,
-    ...(profile.agentTeam && { agentTeam: profile.agentTeam }),
-  };
+  return null;
 }
 
 export function resolveProfileSnapshot(
   profileId: string,
 ): AgentProfileSnapshot | null {
-  const profile = getAgentTeamRegistry()?.getProfile(profileId);
+  const profile = getAgentProfileRegistry()?.getProfile(profileId);
   if (!profile) return null;
   return {
     profileId: profile.id,
@@ -186,14 +177,6 @@ function applyWorkingDirectoryOverride(
   return {
     ...recipe,
     cwd: workingDirPath,
-    ...(recipe.agentTeam && 'workingDirPath' in recipe.agentTeam
-      ? {
-          agentTeam: {
-            ...recipe.agentTeam,
-            workingDirPath,
-          },
-        }
-      : {}),
   };
 }
 
@@ -218,24 +201,12 @@ export function buildAcpWorkloadSpec(
   if (profile) {
     agentletId = profile.agentletId;
     cwd = profile.workingDirPath;
-    if (profile.launch.kind === 'acp-command') {
-      recipe = {
-        command: profile.launch.command,
-        cwd: profile.workingDirPath,
-        autoRestart: true,
-        alias: binding.alias,
-      };
-    } else {
-      recipe = {
-        autoRestart: true,
-        alias: binding.alias,
-        agentTeam: {
-          manifestPath: profile.launch.manifestPath,
-          workingDirPath: profile.workingDirPath,
-          harness: profile.launch.harness,
-        },
-      };
-    }
+    recipe = {
+      command: profile.launch.command,
+      cwd: profile.workingDirPath,
+      autoRestart: true,
+      alias: binding.alias,
+    };
   } else {
     agentletId = getSupervisedAgentletId();
     cwd = opts.cwd;

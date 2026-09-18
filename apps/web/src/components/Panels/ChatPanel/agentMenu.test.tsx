@@ -9,6 +9,12 @@ import { AgentMenuOptions } from './agentMenu';
 
 import type { AgentProfileView } from '@huabu/shared';
 
+declare global {
+  var IS_REACT_ACT_ENVIRONMENT: boolean;
+}
+
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
@@ -29,28 +35,15 @@ vi.mock('../../Common/Button', () => ({
 
 const profiles: AgentProfileView[] = [
   {
-    id: 'team-ready',
-    alias: 'Ready Team',
+    id: 'reviewer',
+    alias: 'Reviewer',
     agentletId: 'machine-a',
-    workingDirPath: '/work/ready',
+    workingDirPath: '/work/reviewer',
     launch: {
-      kind: 'agent-team-manifest',
-      manifestPath: '/teams/ready/agentlet.yaml',
-      harness: 'claude',
+      kind: 'acp-command',
+      command: 'copilot --acp',
     },
-    preparation: { status: 'ready', completedAt: 1 },
-  },
-  {
-    id: 'team-pending',
-    alias: 'Pending Team',
-    agentletId: 'machine-a',
-    workingDirPath: '/work/pending',
-    launch: {
-      kind: 'agent-team-manifest',
-      manifestPath: '/teams/pending/agentlet.yaml',
-      harness: 'claude',
-    },
-    preparation: { status: 'not_prepared' },
+    metadata: { cliId: 'copilot' },
   },
   {
     id: 'command',
@@ -58,6 +51,7 @@ const profiles: AgentProfileView[] = [
     agentletId: 'machine-a',
     workingDirPath: '/work/command',
     launch: { kind: 'acp-command', command: 'copilot --acp' },
+    metadata: { cliId: 'copilot' },
   },
 ];
 
@@ -72,7 +66,7 @@ afterEach(() => {
 });
 
 describe('AgentMenuOptions', () => {
-  it('groups ready template and command Profiles under External Agents', () => {
+  it('lists separate Profiles that share an agentlet and CLI under External Agents', () => {
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -88,10 +82,42 @@ describe('AgentMenuOptions', () => {
       );
     });
 
-    expect(container.textContent).not.toContain('chat.agentTeams');
-    expect(container.textContent).toContain('Ready Team');
-    expect(container.textContent).not.toContain('Pending Team');
+    expect(container.textContent).toContain('Reviewer');
     expect(container.textContent).toContain('chat.externalAgents');
     expect(container.textContent).toContain('External Command');
+  });
+
+  it('selects the chosen Profile identity without changing the current mode', () => {
+    const onSelect = vi.fn();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() => {
+      root?.render(
+        <AgentMenuOptions
+          heading="Agents"
+          currentBinding={{
+            kind: 'external',
+            profileId: 'reviewer',
+            alias: 'Reviewer',
+          }}
+          currentMode="operate"
+          profiles={profiles}
+          onSelect={onSelect}
+        />,
+      );
+    });
+    const choice = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'External Command',
+    );
+    act(() => choice?.click());
+    expect(onSelect).toHaveBeenCalledWith({
+      mode: 'operate',
+      binding: {
+        kind: 'external',
+        profileId: 'command',
+        alias: 'External Command',
+      },
+    });
   });
 });

@@ -61,39 +61,8 @@ export type ExternalAgentRuntimeConfig = z.infer<
 // in the chat panel; the actual agentlet process is spawned by the
 // daemon on demand and may be torn down between turns.
 
-/** A user-configured external agent the daemon spawns on demand. */
-export interface AcpAgentProfile {
-  /** Stable uuid; never reused after delete. */
-  id: string;
-  /** User-edited display name (e.g. "Copilot @ project-x"). */
-  displayName: string;
-  /**
-   * CLI id from {@link AcpAgentCliInfo.id} (`copilot` / `claude` / …),
-   * `'custom'` when {@link command} was entered manually,
-   * or `'agent-team'` when this profile is backed by an Agent Team package.
-   */
-  cliId: string;
-  /** Full command line passed to the daemon. Absent for agent-team profiles. */
-  command?: string;
-  /** Absolute working directory on the daemon's host. Absent for agent-team profiles. */
-  cwd?: string;
-  /** Whether the daemon should auto-restart the agent on crash. */
-  autoRestart: boolean;
-  /**
-   * Agent Team reference. When present, the daemon resolves command/cwd
-   * from the agent-team manifest instead of using stored command/cwd.
-   */
-  agentTeam?: {
-    /** Absolute path to the agent-team package folder (containing agentlet.yaml). */
-    agentDir: string;
-    /** Target harness. If omitted, uses the first from manifest supported_harnesses. */
-    harness?: string;
-  };
-  /** Epoch ms. */
-  createdAt: number;
-  /** Epoch ms. */
-  updatedAt: number;
-}
+/** Legacy command Profile, retained only for read-only migration. */
+export type AcpAgentProfile = z.infer<typeof acpAgentProfileSchema>;
 
 // ─── Agentlet status (one agentlet per Huabu) ──────────────────────
 //
@@ -147,59 +116,43 @@ export type AcpDaemonRestartResponse = AcpAgentletRestartResponse;
 
 // ─── Local agent CLI detection ────────────────────────────────────────
 //
-// The server probes the host for known ACP-capable agent binaries
-// (`copilot`, `gemini` natively; `claude-agent-acp` and `codex-acp` for
-// Claude / Codex, which have no native ACP mode and are driven through
-// their ACP adapters) and reports their installation state. Powers the
-// agent dropdown in the Profile Editor — picking an installed agent
-// pre-fills `command` for the new profile.
+// The server proxies the daemon's detection result from the local machine.
+// Picking an installed agent pre-fills `command` for a manual Profile.
 //
 // This endpoint is loopback-only — it shells out to discover host
 // binaries and must never be reachable from a remote browser.
 
-/** Definition + detection result for one known external agent CLI. */
-export interface AcpAgentCliInfo {
-  /** Stable short id used by the UI (`copilot` / `claude` / `gemini`). */
-  id: string;
-  /** Display name shown in the Profile Editor. */
-  displayName: string;
-  /**
-   * Binary name the user must install and that the daemon launches
-   * (`copilot`, or `claude-agent-acp` for the Claude ACP adapter).
-   */
-  binary: string;
-  /** Args after the binary to enter ACP mode (typically `['--acp']`). */
-  acpArgs: string[];
-  /**
-   * Official CLI arguments that enable full tool auto-approval, or `null`
-   * when the agent requires another mechanism such as an environment
-   * variable or an ACP session mode. `position` preserves CLIs where global
-   * options must precede an ACP subcommand.
-   */
-  autoApprove: {
-    args: string[];
-    position: 'before-acp' | 'after-acp';
-  } | null;
-  /**
-   * `<binary> --version` first line (trimmed). May be an empty string
-   * when the binary is on PATH but the version probe failed (network
-   * tool, slow startup, etc.) — `installed` is still `true`.
-   */
-  version?: string;
-  /** True iff `binary` was resolved on the host's PATH. */
-  installed: boolean;
-  /** One-line `npm install -g …` hint used in error / help text. */
-  installHint: string;
-}
+/** Daemon-owned detection result for one external agent CLI. */
+export const acpAgentCliInfoSchema = z.object({
+  id: z.string().min(1),
+  displayName: z.string().min(1),
+  binary: z.string().min(1),
+  acpArgs: z.array(z.string()),
+  /** `position` preserves CLIs whose global options precede ACP arguments. */
+  autoApprove: z
+    .object({
+      args: z.array(z.string()),
+      position: z.enum(['before-acp', 'after-acp']),
+    })
+    .nullable(),
+  version: z.string().optional(),
+  installed: z.boolean(),
+  installHint: z.string(),
+  executablePath: z.string().optional(),
+  workingDirPath: z.string().optional(),
+  diagnostics: z
+    .array(z.object({ code: z.string(), message: z.string() }))
+    .optional(),
+});
+export type AcpAgentCliInfo = z.infer<typeof acpAgentCliInfoSchema>;
 
-/** Response body for `GET /api/acp/agent-cli`. */
-export interface AcpAgentCliListResponse {
-  /**
-   * Complete trusted agent catalogue in canonical display order, including
-   * entries with `installed === false`.
-   */
-  agents: AcpAgentCliInfo[];
-}
+/** Response body for `GET /api/acp/agent-cli`, including unavailable entries. */
+export const acpAgentCliListResponseSchema = z.object({
+  agents: z.array(acpAgentCliInfoSchema),
+});
+export type AcpAgentCliListResponse = z.infer<
+  typeof acpAgentCliListResponseSchema
+>;
 
 // ─── Thread → agent binding ────────────────────────────────────────────
 //
@@ -524,13 +477,7 @@ export type SetAcpSessionConfigOptionResponse = z.infer<
 
 // ─── Agent-profile / daemon schemas ────────────────────────────────────
 
-/** Zod schema for the agentTeam sub-object. */
-const agentTeamFieldSchema = z.object({
-  agentDir: z.string().min(1),
-  harness: z.string().min(1).optional(),
-});
-
-/** Schema mirror of {@link AcpAgentProfile}. */
+/** Legacy command Profile schema for read-only migration. */
 export const acpAgentProfileSchema = z.object({
   id: z.string().min(1),
   displayName: z.string().min(1),
@@ -538,10 +485,9 @@ export const acpAgentProfileSchema = z.object({
   command: z.string().min(1).optional(),
   cwd: z.string().min(1).optional(),
   autoRestart: z.boolean(),
-  agentTeam: agentTeamFieldSchema.optional(),
   createdAt: z.number().int().nonnegative(),
   updatedAt: z.number().int().nonnegative(),
-}) satisfies z.ZodType<AcpAgentProfile>;
+});
 
 /** Schema mirror of {@link AcpAgentletStatus}; re-exported from `@agenetes/protocol`. */
 export const acpAgentletStatusSchema = agentletStatusSchema;

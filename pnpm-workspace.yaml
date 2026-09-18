@@ -3,10 +3,9 @@ packages:
   - packages/*
   - external/agentlet/packages/protocol
   - external/agentlet/packages/local
-  - external/agentlet/packages/agent-team
   - external/agenetes/packages/protocol
   - external/agenetes/packages/runtime
-  - external/agenetes/packages/agent-team
+  - external/agenetes/packages/agent-profile
   - external/agenetes/packages/agentlet-gateway
   - external/agenetes/packages/agentlet-host
   - external/agenetes/packages/acp-driver

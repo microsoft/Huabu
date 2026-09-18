@@ -15,7 +15,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@agenetes/agentlet-host', () => ({
-  getAgentTeamRegistry: () => ({
+  getAgentProfileRegistry: () => ({
     getProfile: mocks.getProfile,
     patchProfile: mocks.patchProfile,
   }),

@@ -1,5 +1,7 @@
 # Huabu Managed Agent Teams — Vision & Examples
 
+Status: Superseded. This is a historical description of the retired Agent Team runtime, not current implementation guidance. See [Agent Profiles and Harness Discovery](../architecture/agent-profiles.md). Manifest and Skill folders are retained as data only.
+
 > **Core thesis**: In the AI/Agent era, **the agent IS the plugin system**. Instead of designing extension points, hooks, event buses, and SDK APIs — you connect an agent. The agent reads context, reasons about intent, uses whatever tools exist in its environment (CLIs, APIs, SDKs), and writes results back. This is fundamentally more powerful than any plugin system because the interface is _natural language_ + _tool use_ — infinitely flexible, self-describing, and composable.
 
 This document is the **Huabu product/vision layer** for Agent Teams. The generic packaging/runtime model lives in [`external/agentlet/spec/agent-team.md`](../../external/agentlet/spec/agent-team.md). The remaining runtime-service work is tracked in [`managed-agent-teams.md`](../proposals/managed-agent-teams.md).

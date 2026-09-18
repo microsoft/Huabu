@@ -44,14 +44,10 @@ export const ACP_SESSION_STORE_SCHEMA_VERSION = 3;
  * migration.
  */
 export interface AcpBindingRecipe {
-  command?: string;
+  command: string;
   cwd?: string;
   autoRestart: boolean;
   alias: string;
-  agentTeam?: {
-    agentDir: string;
-    harness?: string;
-  };
 }
 
 /** Snapshot of selector/usage state pushed by the agent. All optional. */
@@ -123,21 +119,8 @@ export function sanitizeBindingRecipe(
   const r = raw as Record<string, unknown>;
   if (typeof r.alias !== 'string') return undefined;
 
-  // Agent Team recipe — requires agentTeam.agentDir
-  if (r.agentTeam && typeof r.agentTeam === 'object') {
-    const at = r.agentTeam as Record<string, unknown>;
-    if (typeof at.agentDir === 'string' && at.agentDir.length > 0) {
-      return {
-        autoRestart: r.autoRestart === true,
-        alias: r.alias,
-        agentTeam: {
-          agentDir: at.agentDir,
-          ...(typeof at.harness === 'string' && at.harness.length > 0
-            ? { harness: at.harness }
-            : {}),
-        },
-      };
-    }
+  if (Object.prototype.hasOwnProperty.call(r, 'agentTeam')) {
+    return undefined;
   }
 
   // Standard recipe — requires command + cwd
@@ -241,6 +224,7 @@ export interface MigratableV3Record extends AcpSessionRecord {
  */
 export function parseMigratableV3Records(
   raw: unknown,
+  onRetiredRecipe: (threadId: string) => void,
 ): { threadId: string; record: MigratableV3Record }[] {
   if (!raw || typeof raw !== 'object') return [];
   const records = (raw as { records?: unknown }).records;
@@ -250,6 +234,13 @@ export function parseMigratableV3Records(
     records as Record<string, unknown>,
   )) {
     if (!isAcpSessionRecord(value)) continue;
+    if (
+      value.bindingRecipe &&
+      Object.prototype.hasOwnProperty.call(value.bindingRecipe, 'agentTeam')
+    ) {
+      onRetiredRecipe(threadId);
+      continue;
+    }
     const bindingRecipe = sanitizeBindingRecipe(value.bindingRecipe);
     if (!bindingRecipe) continue; // v2 (recipe-absent) → skip per v3-only rule
     const meta = sanitizeMeta(value.meta);

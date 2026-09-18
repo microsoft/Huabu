@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import type { CreateAcpCommandProfileInput } from '@agenetes/agent-team';
+import type { CreateAcpCommandProfileInput } from '@agenetes/agent-profile';
 import type { AcpAgentProfile } from '@huabu/shared';
 
 /**
@@ -15,18 +15,20 @@ export function buildLegacyCommandProfiles(
   agentletId: string,
   defaultWorkingDir: string,
 ): CreateAcpCommandProfileInput[] {
-  return profiles.flatMap((profile) =>
-    profile.cliId === 'agent-team' || !profile.command
-      ? []
-      : [
-          {
-            id: profile.id,
-            alias: profile.displayName,
-            agentletId,
-            command: profile.command,
-            workingDirPath: profile.cwd ?? defaultWorkingDir,
-            metadata: { cliId: profile.cliId },
-          },
-        ],
-  );
+  return profiles.flatMap((profile) => {
+    if (profile.cliId === 'agent-team') return [];
+    if (!profile.command?.trim()) {
+      throw new Error(`Legacy command Profile '${profile.id}' has no command`);
+    }
+    return [
+      {
+        id: profile.id,
+        alias: profile.displayName,
+        agentletId,
+        command: profile.command,
+        workingDirPath: profile.cwd ?? defaultWorkingDir,
+        metadata: { cliId: profile.cliId },
+      },
+    ];
+  });
 }

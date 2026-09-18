@@ -10,7 +10,6 @@ declare module 'i18next' {
     defaultNS: 'common';
     resources: {
       common: typeof common;
-      agentTeam: Record<string, string>;
     };
   }
 }

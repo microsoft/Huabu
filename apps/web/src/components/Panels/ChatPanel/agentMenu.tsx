@@ -21,12 +21,7 @@ import { readAgentIcon } from '@/utils/agentIcon';
 import { Button } from '../../Common/Button';
 import { cn } from '../../Common/cn';
 
-import type {
-  AgentBinding,
-  AgentMode,
-  AgentProfileView,
-  AgentTeamManifestProfileView,
-} from '@huabu/shared';
+import type { AgentBinding, AgentMode, AgentProfileView } from '@huabu/shared';
 import type { ReactNode } from 'react';
 
 /** A picked (mode, binding) pair emitted by either agent menu. */
@@ -44,12 +39,6 @@ export function bindingsEqual(a: AgentBinding, b: AgentBinding): boolean {
     return a.profileId === b.profileId;
   }
   return false;
-}
-
-function isManifestProfile(
-  profile: AgentProfileView,
-): profile is AgentTeamManifestProfileView {
-  return 'preparation' in profile;
 }
 
 interface AgentMenuRowProps {
@@ -169,16 +158,7 @@ export function AgentMenuOptions({
         );
       })}
       {(() => {
-        // Both Profile kinds share one "External Agents" group now. Only
-        // ready manifest Profiles are selectable; command Profiles are
-        // always selectable. Preserve order: manifest first, then command.
-        const external = profiles.filter(
-          (profile) =>
-            (isManifestProfile(profile) &&
-              profile.preparation.status === 'ready') ||
-            profile.launch.kind === 'acp-command',
-        );
-        if (external.length === 0) return null;
+        if (profiles.length === 0) return null;
         return (
           <>
             <div
@@ -189,7 +169,7 @@ export function AgentMenuOptions({
               <span>{t('chat.externalAgents')}</span>
               <span className="bg-edge-default h-px flex-1" />
             </div>
-            {external.map((profile) => {
+            {profiles.map((profile) => {
               const binding: AgentBinding = {
                 kind: 'external',
                 alias: profile.alias,

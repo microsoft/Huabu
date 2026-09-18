@@ -4,6 +4,8 @@
 >
 > Status: **Shipped** · Last updated: 2026-07-15
 
+The manifest-specific portions of this shipped design were retired on 2026-09-18. The current [Profile Settings](../architecture/agent-profiles.md#settings-and-apis) retains ordinary Profile management without Template, Config or setup controls.
+
 ---
 
 ## 1. Context

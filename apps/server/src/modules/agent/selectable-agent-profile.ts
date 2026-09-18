@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { getAgentTeamRegistry } from '@agenetes/agentlet-host';
+import { getAgentProfileRegistry } from '@agenetes/agentlet-host';
 
 import { HUABU_AGENT_PROFILE_ID } from '@huabu/shared';
 
@@ -36,7 +36,7 @@ export class SelectableAgentProfileError extends Error {
 
 export function requireSelectableAgentProfile(
   profileId: string,
-  registry: AgentProfileRegistryPort | null = getAgentTeamRegistry(),
+  registry: AgentProfileRegistryPort | null = getAgentProfileRegistry(),
 ): SelectableAgentProfile {
   if (!registry) {
     throw new SelectableAgentProfileError(
@@ -60,14 +60,14 @@ export function requireSelectableAgentProfile(
 
 export function requireAvailableAgentProfile(
   profileId: string,
-  registry: AgentProfileRegistryPort | null = getAgentTeamRegistry(),
+  registry: AgentProfileRegistryPort | null = getAgentProfileRegistry(),
 ): void {
   if (profileId === HUABU_AGENT_PROFILE_ID) return;
   requireSelectableAgentProfile(profileId, registry);
 }
 
 export function listAvailableAgentProfiles(
-  registry: AgentProfileRegistryPort | null = getAgentTeamRegistry(),
+  registry: AgentProfileRegistryPort | null = getAgentProfileRegistry(),
 ): AvailableAgentProfileSummary[] {
   const huabu = {
     id: HUABU_AGENT_PROFILE_ID,

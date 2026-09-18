@@ -2,7 +2,9 @@
 
 > Record the deferred managed-harness direction and define the nearer-term Profile lifecycle that compiles a scanned Agent Team manifest into a durable external-agent `WorkloadSpec`.
 >
-> Status: **Draft** · Last updated: 2026-07-20 · Tracks: [#321](https://github.com/hai-team/Huabu/issues/321) · Follows: [#253](https://github.com/hai-team/Huabu/issues/253), [#334](https://github.com/hai-team/Huabu/issues/334)
+> Status: **Superseded** · Last updated: 2026-09-18
+
+The Team-dependent compilation direction below is historical. Current [generic Agent Profiles](../architecture/agent-profiles.md) do not require manifest setup, resource acquisition or preparation.
 
 ---
 

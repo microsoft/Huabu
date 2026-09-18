@@ -10,19 +10,13 @@ const mocks = vi.hoisted(() => ({
         alias: string;
         agentletId: string;
         workingDirPath: string;
-        launch:
-          | { kind: 'acp-command'; command: string }
-          | {
-              kind: 'agent-team-manifest';
-              manifestPath: string;
-              harness: string;
-            };
+        launch: { kind: 'acp-command'; command: string };
       }
     | undefined,
 }));
 
 vi.mock('@agenetes/agentlet-host', () => ({
-  getAgentTeamRegistry: () => ({
+  getAgentProfileRegistry: () => ({
     getProfile: () => mocks.profile,
   }),
   getSupervisedAgentletId: () => 'supervised-agentlet',
@@ -84,37 +78,33 @@ describe('buildAcpWorkloadSpec', () => {
     });
   });
 
-  it('updates both workload and manifest working directories', () => {
+  it('uses the discovered Profile machine and default workspace without overrides', () => {
     mocks.profile = {
       id: 'profile-a',
-      alias: 'Reviewer',
+      alias: 'Claude',
       agentletId: 'agentlet-a',
-      workingDirPath: '/profile/work',
+      workingDirPath: '/home/user/.agentlet/workspace/claude',
       launch: {
-        kind: 'agent-team-manifest',
-        manifestPath: '/team/agentlet.yaml',
-        harness: 'claude',
+        kind: 'acp-command',
+        command: 'claude-agent-acp',
       },
     };
 
     const workload = buildAcpWorkloadSpec({
       binding: {
         profileId: 'profile-a',
-        alias: 'Reviewer',
+        alias: 'Claude',
       },
       threadId: 'thread-a',
       canvasId: 'canvas-a',
-      launchOverrides: { workingDirPath: '/task/work' },
     });
 
     expect(workload.spec).toMatchObject({
-      cwd: '/task/work',
+      agentletId: 'agentlet-a',
+      cwd: '/home/user/.agentlet/workspace/claude',
       recipe: {
-        agentTeam: {
-          manifestPath: '/team/agentlet.yaml',
-          workingDirPath: '/task/work',
-          harness: 'claude',
-        },
+        command: 'claude-agent-acp',
+        cwd: '/home/user/.agentlet/workspace/claude',
       },
     });
   });

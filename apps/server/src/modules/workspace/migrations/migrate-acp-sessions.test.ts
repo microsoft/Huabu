@@ -17,6 +17,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -24,9 +25,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { FileThreadStore } from '@agenetes/agenetes';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { migrateLegacyAcpSessions } from './migrate-acp-sessions.js';
+import { logger } from '../../../utils/logger.js';
 
 import type { AcpWorkloadSpec } from '../../agent/agenetes/drivers.js';
 import type { Namespace } from '@agenetes/protocol';
@@ -119,6 +121,31 @@ describe('migrateLegacyAcpSessions', () => {
     // source retired.
     expect(existsSync(sessionsPath)).toBe(false);
     expect(existsSync(`${sessionsPath}.bak`)).toBe(true);
+  });
+
+  it('does not reinterpret retired Team recipes as ordinary commands', () => {
+    const { namespace, sessionsPath } = seedCanvas('Old Team', 'canvas-team', {
+      team: {
+        ...V3_RECORD,
+        bindingRecipe: {
+          ...V3_RECORD.bindingRecipe,
+          agentTeam: { agentDir: '/team' },
+        },
+      },
+    });
+    const before = readFileSync(sessionsPath, 'utf-8');
+    const warning = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    try {
+      migrateLegacyAcpSessions(tmp);
+      expect(new FileThreadStore().get(namespace, 'team')).toBeUndefined();
+      expect(readFileSync(`${sessionsPath}.bak`, 'utf-8')).toBe(before);
+      expect(warning).toHaveBeenCalledWith(
+        { threadId: 'team', sessionsPath },
+        '[migration] Retired Agent Team recipe is not migratable',
+      );
+    } finally {
+      warning.mockRestore();
+    }
   });
 
   it('never clobbers a thread already present in threads.json', () => {

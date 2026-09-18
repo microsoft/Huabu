@@ -56,7 +56,7 @@ describe('ACP agent CLI route', () => {
     });
   });
 
-  it('rejects remote callers before probing the host', async () => {
+  it('rejects remote callers before contacting the agentlet', async () => {
     const detect = vi.fn(async () => []);
     app = Fastify({ logger: false });
     await app.register(createAcpAgentCliRoutes(detect), {
@@ -73,7 +73,7 @@ describe('ACP agent CLI route', () => {
     expect(detect).not.toHaveBeenCalled();
   });
 
-  it('allows the authenticated remote owner to probe the host', async () => {
+  it('allows the authenticated remote owner to request agentlet detection', async () => {
     const detect = vi.fn(async () => []);
     app = Fastify({ logger: false });
     app.addHook('onRequest', async (request) => {
@@ -91,5 +91,19 @@ describe('ACP agent CLI route', () => {
 
     expect(response.statusCode).toBe(200);
     expect(detect).toHaveBeenCalledOnce();
+  });
+
+  it('returns an explicit failure instead of an empty installed catalogue', async () => {
+    app = Fastify({ logger: false });
+    await app.register(
+      createAcpAgentCliRoutes(
+        vi.fn().mockRejectedValue(new Error('agentlet offline')),
+      ),
+      { prefix: '/api/acp' },
+    );
+    const response = await app.inject('/api/acp/agent-cli');
+    expect(response.statusCode).toBe(503);
+    expect(response.json().code).toBe('harness_discovery_unavailable');
+    expect(response.json()).not.toHaveProperty('agents');
   });
 });

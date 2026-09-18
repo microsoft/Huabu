@@ -6,7 +6,7 @@
 
 Huabu is a single-owner application. It distinguishes the authenticated owner from unauthenticated callers and does not define viewer, administrator, or multi-user roles.
 
-The owner may perform Settings, OAuth, credential, External Agent, and Agent Team operations when either condition holds:
+The owner may perform Settings, OAuth, credential, External Agent Profile and harness-discovery operations when either condition holds:
 
 - the request's direct TCP peer is loopback;
 - the request passed Huabu's configured HTTP Basic Auth gate.

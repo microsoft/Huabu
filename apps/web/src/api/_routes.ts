@@ -40,15 +40,6 @@ export const routes = {
   // ── Integrations (third-party API keys) ──────────────────────────
   integrationsConfig: '/integrations/config',
 
-  // ── Agent Team Settings (loopback-only) ─────────────────────────
-  agentTeamSettings: '/agent-team/settings',
-  agentTeamMemberDetail: '/agent-team/settings/member-detail',
-  agentTeamConfigs: '/agent-team/settings/configs',
-  agentTeamProfiles: '/agent-team/settings/profiles',
-  agentTeamProfile: (id: string) => `/agent-team/settings/profiles/${enc(id)}`,
-  agentTeamProfileAction: (id: string, action: 'setup' | 'cancel') =>
-    `/agent-team/settings/profiles/${enc(id)}/${action}`,
-
   // ── Canvas ────────────────────────────────────────────────────────
   canvasList: '/canvas',
   canvasImport: '/canvas/import',

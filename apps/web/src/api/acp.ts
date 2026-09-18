@@ -6,17 +6,16 @@
  *
  * The bridge now uses an **embedded agentlet daemon** managed by the
  * server's `DaemonSupervisor`. The user never sees the daemon directly
- * — instead they author **profiles** ({@link AcpAgentProfile}) which
+ * — instead they author command Profiles which
  * describe how to spawn one external agent CLI on demand. This module
  * wraps the loopback-only profile/daemon endpoints plus the existing
  * thread-scoped cached capability and control routes.
  *
  * Endpoint surface:
- *  - `GET /api/acp/agent-cli` — probe the trusted built-in agent catalogue
+ *  - `GET /api/acp/agent-cli` — read the daemon's detected agent catalogue
  *     and populate the profile editor's picker with installation state.
  *  - `GET/POST/PATCH/DELETE /api/acp/profiles` — CRUD for spawn
- *     recipes. Always returns the runtime status (spawned/pid/etc.)
- *     alongside each profile.
+ *     recipes with immutable command and working directory.
  *  - `GET/POST /api/acp/daemon` — daemon liveness + manual restart.
  *  - `GET /api/acp/threads/:threadId/cached-meta` — cached capabilities.
  *  - thread control POSTs — canonical realization plus per-session knobs.
@@ -74,7 +73,7 @@ export type {
 // ── Agent CLI detection ──────────────────────────────────────────────
 
 /**
- * Probe the complete trusted ACP-capable agent catalogue on the host.
+ * Read the local daemon's ACP-capable agent catalogue.
  */
 export async function listAcpAgentClis(): Promise<AcpAgentCliListResponse> {
   return apiFetch<AcpAgentCliListResponse>(routes.acpAgentCli, {
@@ -84,7 +83,7 @@ export async function listAcpAgentClis(): Promise<AcpAgentCliListResponse> {
 
 // ── Profile CRUD ─────────────────────────────────────────────────────
 
-/** Snapshot every profile with its current runtime status. */
+/** Snapshot every Profile, selectability, and the current agentlet status. */
 export async function listAcpProfiles(): Promise<AcpProfilesListResponse> {
   return apiFetch<AcpProfilesListResponse>(routes.acpProfiles, {
     fallbackMessage: 'Failed to list agent profiles',
@@ -92,9 +91,7 @@ export async function listAcpProfiles(): Promise<AcpProfilesListResponse> {
 }
 
 /**
- * Create a new profile. The server allocates an id and timestamps;
- * the request body only carries the user-edited fields. Returns the
- * fully-formed profile + initial runtime (`spawned: false`).
+ * Create a command Profile on the local agentlet. The server allocates its id.
  */
 export async function createAcpProfile(
   payload: CreateAcpCommandProfileBody,
@@ -107,9 +104,7 @@ export async function createAcpProfile(
 }
 
 /**
- * Patch an existing profile. Any field present in the patch replaces
- * the stored value; omitted fields are left intact. Pass `env: null`
- * to clear all env vars; pass an object to replace the env map.
+ * Patch mutable Profile display/metadata fields; omitted fields remain intact.
  */
 export async function updateAcpProfile(
   id: string,

@@ -2,8 +2,7 @@
 // Licensed under the MIT license.
 
 /**
- * `GET /api/acp/agent-cli` — host-side detection of installed ACP-capable
- * agent CLIs from the trusted built-in catalogue.
+ * `GET /api/acp/agent-cli` — agentlet-local ACP harness detection.
  *
  * Powers the Agent picker in the Settings UI. The response includes the
  * complete trusted catalogue with an `installed` flag so missing agents can
@@ -13,15 +12,31 @@
  * longer any pairing / clipboard step \u2014 the wrapper script and on-PATH
  * agentlet check were removed in the daemon-mode refactor.
  *
- * Security: owner-only. Detection shells out to `which` / `where` and
- * `<binary> --version`, so unauthenticated callers must not trigger it.
+ * Owner-only. This adapter never probes the Huabu Server's PATH.
  */
 
-import { detectAgentClis } from './agent-cli-detect.js';
+import {
+  getAgentletGateway,
+  getSupervisedAgentletId,
+} from '@agenetes/agentlet-host';
+
 import { isOwnerRequest } from '../../security/owner.js';
 
-import type { AcpAgentCliListResponse, ApiResult } from '@huabu/shared';
+import type {
+  AcpAgentCliInfo,
+  AcpAgentCliListResponse,
+  ApiResult,
+} from '@huabu/shared';
 import type { FastifyPluginAsync } from 'fastify';
+
+async function detectAgentClis(): Promise<AcpAgentCliInfo[]> {
+  const gateway = getAgentletGateway();
+  if (!gateway) throw new Error('Agentlet Gateway is not ready');
+  const result = await gateway.discoverHarnesses(getSupervisedAgentletId(), {
+    prepareWorkspaces: false,
+  });
+  return result.harnesses;
+}
 
 export function createAcpAgentCliRoutes(
   detect: typeof detectAgentClis = detectAgentClis,
@@ -36,9 +51,18 @@ export function createAcpAgentCliRoutes(
               'Forbidden: agent CLI detection requires owner authorization',
           });
         }
-        return {
-          agents: await detect(),
-        };
+        try {
+          return { agents: await detect() };
+        } catch (error) {
+          request.log.warn(
+            { err: error },
+            '[acp] agentlet harness detection failed',
+          );
+          return reply.status(503).send({
+            message: 'Agentlet harness detection is unavailable',
+            code: 'harness_discovery_unavailable',
+          });
+        }
       },
     );
   };

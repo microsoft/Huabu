@@ -13,11 +13,8 @@
  * that the daemon will execute on this machine, so unauthenticated callers
  * must never read or mutate them.
  *
- * The response shape includes a snapshot of {@link AcpAgentletStatus}
- * on the list endpoint so the UI can render the agentlet health banner
- * without a second request — there is only ever one agentlet per
- * Huabu instance and the two are conceptually coupled (profiles
- * are useless without a running agentlet).
+ * The list includes the supervised agentlet's health snapshot. Profiles
+ * retain their own explicit machine identity.
  *
  * Profiles are templates: once a thread is created against a profile
  * we snapshot the recipe onto the thread record and the two become
@@ -26,24 +23,24 @@
  */
 
 import {
-  getAgentTeamRegistry,
+  getAgentProfileRegistry,
   getDaemonSupervisor,
   getSupervisedAgentletId,
 } from '@agenetes/agentlet-host';
 
 import {
+  agentProfileParamsSchema,
   createAcpCommandProfileBodySchema,
   patchAgentProfileBodySchema,
 } from '@huabu/shared';
 
-import { invalidateProfileSchemaCache } from './profile-schema-cache.js';
 import {
-  deleteProfile as deleteLegacyProfile,
-  getProfile as getLegacyProfile,
-} from './profile-store.js';
+  hasDiscoverySource,
+  mergeProfileCustomData,
+} from './harness-profile-discovery.js';
+import { invalidateProfileSchemaCache } from './profile-schema-cache.js';
 import { isOwnerRequest } from '../../security/owner.js';
 
-import type { AcpCommandProfile, AgentProfile } from '@agenetes/agentlet-host';
 import type {
   AcpProfileMutationResponse,
   AcpProfilesListResponse,
@@ -60,21 +57,22 @@ function denyRemote(request: FastifyRequest, reply: FastifyReply): boolean {
   return true;
 }
 
-function isCommandProfile(profile: AgentProfile): profile is AcpCommandProfile {
-  return profile.launch.kind === 'acp-command';
-}
-
 const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
   // ── List ─────────────────────────────────────────────────────────────
   app.get<{ Reply: ApiResult<AcpProfilesListResponse> }>(
     '/profiles',
     async (request, reply) => {
       if (denyRemote(request, reply)) return;
-      const registry = getAgentTeamRegistry();
-      const profiles = registry?.listProfiles() ?? [];
+      const registry = getAgentProfileRegistry();
+      if (!registry) {
+        return reply.status(503).send({
+          message: 'Agent Profile registry is not ready',
+          code: 'profile_registry_unavailable',
+        });
+      }
       return {
-        profiles,
-        selectableProfileIds: registry?.listSelectableProfileIds() ?? [],
+        profiles: registry.listProfiles(),
+        selectableProfileIds: registry.listSelectableProfileIds(),
         agentlet: getDaemonSupervisor().getStatus(),
       };
     },
@@ -92,7 +90,13 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
           code: 'validation_failed',
         });
       }
-      const registry = getAgentTeamRegistry();
+      if (hasDiscoverySource(parsed.data.customData)) {
+        return reply.status(400).send({
+          message: 'Automatic Profile source is reserved',
+          code: 'invalid_profile_source',
+        });
+      }
+      const registry = getAgentProfileRegistry();
       if (!registry) {
         return reply.status(503).send({
           message: 'Agent Profile registry is not ready',
@@ -110,9 +114,6 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
           ? {}
           : { customData: parsed.data.customData }),
       });
-      if (!isCommandProfile(created)) {
-        throw new Error('Agent Profile registry returned an invalid kind');
-      }
       return created;
     },
   );
@@ -123,6 +124,13 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
     Reply: ApiResult<AcpProfileMutationResponse>;
   }>('/profiles/:id', async (request, reply) => {
     if (denyRemote(request, reply)) return;
+    const params = agentProfileParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.status(400).send({
+        message: 'Invalid Profile id',
+        code: 'validation_failed',
+      });
+    }
     const parsed = patchAgentProfileBodySchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.status(400).send({
@@ -130,43 +138,42 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
         code: 'validation_failed',
       });
     }
-    const registry = getAgentTeamRegistry();
-    const existing = registry?.getProfile(request.params.id);
+    const registry = getAgentProfileRegistry();
+    if (!registry) {
+      return reply.status(503).send({
+        message: 'Agent Profile registry is not ready',
+        code: 'profile_registry_unavailable',
+      });
+    }
+    const existing = registry.getProfile(params.data.id);
     if (!existing) {
-      const legacy = getLegacyProfile(request.params.id);
-      if (legacy?.cliId === 'agent-team') {
-        return reply.status(409).send({
-          message:
-            'Recreate legacy Agent Team profiles from Agent Team Settings',
-          code: 'legacy_agent_team_profile',
-        });
-      }
       return reply.status(404).send({
-        message: `No profile with id ${request.params.id}`,
+        message: `No profile with id ${params.data.id}`,
         code: 'profile_not_found',
       });
     }
-    if (!isCommandProfile(existing)) {
-      return reply.status(409).send({
-        message: 'Manage manifest Profiles from Agent Team Settings',
-        code: 'invalid_profile_kind',
-      });
+    let customData = parsed.data.customData;
+    if (customData !== undefined) {
+      try {
+        customData = mergeProfileCustomData(existing, customData);
+      } catch (error) {
+        request.log.warn(
+          { err: error, profileId: existing.id },
+          'Invalid Profile source update',
+        );
+        return reply.status(400).send({
+          message: 'Automatic Profile source cannot be changed',
+          code: 'invalid_profile_source',
+        });
+      }
     }
-    if (!registry) {
-      throw new Error('Agent Profile registry became unavailable');
-    }
-    const updated = registry.patchProfile(request.params.id, {
+    const updated = registry.patchProfile(params.data.id, {
       ...(parsed.data.alias === undefined ? {} : { alias: parsed.data.alias }),
-      ...(parsed.data.customData === undefined
-        ? {}
-        : { customData: parsed.data.customData }),
+      ...(customData === undefined ? {} : { customData }),
       ...(parsed.data.metadata === undefined
         ? {}
         : { metadata: parsed.data.metadata }),
     });
-    if (!isCommandProfile(updated)) {
-      throw new Error('Agent Profile registry returned an invalid kind');
-    }
     return updated;
   });
 
@@ -176,13 +183,24 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
     Reply: ApiResult<{ deleted: boolean }>;
   }>('/profiles/:id', async (request, reply) => {
     if (denyRemote(request, reply)) return;
+    const params = agentProfileParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.status(400).send({
+        message: 'Invalid Profile id',
+        code: 'validation_failed',
+      });
+    }
     // Profile is a template only — threads created against it have
     // already snapshotted the recipe and continue running their own
     // CLI processes. Nothing to stop here.
-    const registry = getAgentTeamRegistry();
-    const deleted =
-      (registry?.deleteProfile(request.params.id) ?? false) ||
-      deleteLegacyProfile(request.params.id);
+    const registry = getAgentProfileRegistry();
+    if (!registry) {
+      return reply.status(503).send({
+        message: 'Agent Profile registry is not ready',
+        code: 'profile_registry_unavailable',
+      });
+    }
+    const deleted = registry.deleteProfile(params.data.id);
     if (!deleted) {
       return reply.status(404).send({
         message: `No profile with id ${request.params.id}`,

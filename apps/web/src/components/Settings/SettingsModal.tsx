@@ -16,7 +16,7 @@ import { useSettingsUiStore } from '@/store/settingsUiStore';
 import {
   ExternalAgentsSettings,
   type ExternalAgentsNavigation,
-} from './agent-team/ExternalAgentsSettings';
+} from './agent-profiles/ExternalAgentsSettings';
 import { DeploymentReadinessNotice } from './DeploymentReadinessNotice';
 import { GeneralSettings } from './sections/GeneralSettings';
 import { ImageProviderSettings } from './sections/ImageProviderSettings';

@@ -79,6 +79,10 @@ What stays in `apps/web/src/handler/canvasCommand/`:
 
 Space Preview is the intentional exception to ordinary node rendering: it consumes a sanitized server scene through one target-keyed external-store cache and draws inert SVG instead of mounting target node components or a nested React Flow. See [space-preview.md](./space-preview.md).
 
+### External Agent Settings
+
+External Agents Settings uses `components/Settings/agent-profiles/` and the canonical `acpProfilesStore`. It has ordinary command Profile creation/editing/deletion and no Agent Team templates, Configs or setup lifecycle. The manual editor reads the agentlet-backed catalogue; automatic defaults arrive through the same persisted Profile list used by selectors. See [Agent Profiles](./agent-profiles.md).
+
 ### Toast duration contract
 
 [`Toast`](../../apps/web/src/components/Common/Toast.tsx) derives its default auto-dismiss duration from tone: `danger` toasts persist until dismissed, while `neutral`, `info`, `success`, and `warning` toasts dismiss after 3000 ms. Callers may explicitly set `duration` to override either default, including a positive duration for a transient danger message or `0` for any persistent message.

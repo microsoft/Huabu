@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { unlinkSync } from 'node:fs';
+import { existsSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -14,33 +14,26 @@ import { fastify, type FastifyBaseLogger } from 'fastify';
 import { getConnectionToken } from './connection-token.js';
 import { getDataDir } from './data-dir.js';
 import { setHostServerPort } from './host-port.js';
+import { registerHarnessProfileDiscovery } from './modules/agent/acp/harness-profile-discovery.js';
 import {
   acpAgentCliRoutes,
   acpAgentletRoutes,
   acpProfilesRoutes,
   acpThreadsRoutes,
   externalAgentRuntimeConfigRoutes,
-  getAgentTeamRegistry,
+  getAgentProfileRegistry,
   getSupervisedAgentletId,
   installAcpProfileCachePort,
   mountAgenetes,
   resolveDaemonEntry,
 } from './modules/agent/acp/index.js';
 import { buildLegacyCommandProfiles } from './modules/agent/acp/legacy-profile-migration.js';
-import {
-  listProfiles as listLegacyAcpProfiles,
-  removeProfiles as removeLegacyAcpProfiles,
-} from './modules/agent/acp/profile-store.js';
+import { listProfiles as listLegacyAcpProfiles } from './modules/agent/acp/profile-store.js';
 import agentRoutes from './modules/agent/agent.route.js';
 import agentChangeReviewConfigRoutes from './modules/agent/change-review-config.route.js';
 import llmRoutes from './modules/agent/llm.route.js';
 import { registerOpCounterHook } from './modules/agent/memory/op-counter-hook.js';
 import skillsRoutes from './modules/agent/skills.route.js';
-import agentTeamRoutes from './modules/agent-team/agent-team.route.js';
-import {
-  registerBundledAgentTeams,
-  resolveBundledAgentTeamsPath,
-} from './modules/agent-team/bundled-agent-teams.js';
 import artifactRoute from './modules/artifact/artifact.route.js';
 import canvasRoutes from './modules/canvas/canvas.route.js';
 import { resetExternalNoteSessions } from './modules/canvas/external-watcher.js';
@@ -66,7 +59,6 @@ import {
 import workspaceRoutes from './modules/workspace.route.js';
 import workspacesRoutes from './modules/workspaces.route.js';
 import { preloadSkills } from './prompt/index.js';
-import { getPersistedSecret, setSecrets } from './security/secret-store.js';
 import { MAX_UPLOAD_BYTES } from './upload-limits.js';
 import { logger } from './utils/logger.js';
 
@@ -283,7 +275,6 @@ app.register(skillsRoutes, { prefix: '/api/skills' });
 app.register(workspaceRoutes, { prefix: '/api/workspace' });
 app.register(workspacesRoutes, { prefix: '/api/workspaces' });
 app.register(rfsRoutes, { prefix: '/api/rfs' });
-app.register(agentTeamRoutes, { prefix: '/api/agent-team' });
 
 // ── External agent (ACP) transport host ───────────────────────────────
 // Mount the Agenetes agentlet transport host (`@agenetes/agentlet-host`).
@@ -328,42 +319,29 @@ const agentletGateway = mountAgenetes(app, {
   // docs/architecture/agent-reachback.md ("Environment injection and isolation").
   hostEnvPrefix: 'HUABU_',
   hostEnvAllowlist: [],
-  agentTeam: {
-    storageDir: join(getDataDir(), 'agent-team'),
-    secretStore: {
-      get: getPersistedSecret,
-      setMany: setSecrets,
-    },
-    legacyCommandProfiles: buildLegacyCommandProfiles(
-      listLegacyAcpProfiles(),
-      getSupervisedAgentletId(),
-      process.cwd(),
-    ),
-    onLegacyProfilesMigrated: removeLegacyAcpProfiles,
+  profiles: {
+    storageDir: join(getDataDir(), 'agent-profiles'),
+    legacyStorageDir: join(getDataDir(), 'agent-team'),
+    legacyCommandProfiles: existsSync(
+      join(getDataDir(), 'agent-profiles', 'registry.json'),
+    )
+      ? []
+      : buildLegacyCommandProfiles(
+          listLegacyAcpProfiles(),
+          getSupervisedAgentletId(),
+          process.cwd(),
+        ),
   },
 });
-// Legacy `agent-team` ACP records predate managed Agent Teams. They can't
-// be auto-migrated (they bypass managed roots, Configs, and setup) and are
-// no longer surfaced in Settings, so drop them at startup instead of
-// letting them linger as orphaned entries.
-removeLegacyAcpProfiles(
-  listLegacyAcpProfiles()
-    .filter((profile) => profile.cliId === 'agent-team')
-    .map((profile) => profile.id),
-);
-const bundledAgentTeamsPath = resolveBundledAgentTeamsPath();
-if (bundledAgentTeamsPath) {
-  const unregisterBundledAgentTeams = registerBundledAgentTeams({
-    bundledRootPath: bundledAgentTeamsPath,
-    localMachine: getSupervisedAgentletId(),
-    machineSource: agentletGateway,
-    getRegistry: getAgentTeamRegistry,
+let unregisterHarnessDiscovery: (() => void) | undefined;
+app.addHook('onReady', async () => {
+  unregisterHarnessDiscovery = registerHarnessProfileDiscovery({
+    gateway: agentletGateway,
+    getRegistry: getAgentProfileRegistry,
     log: app.log,
   });
-  app.addHook('onClose', async () => unregisterBundledAgentTeams());
-} else {
-  app.log.warn('[agent-team] bundled collection not found');
-}
+});
+app.addHook('preClose', async () => unregisterHarnessDiscovery?.());
 // Release every active external-note session on shutdown. Their `fs.watch`
 // handles are otherwise only closed on a workspace switch, so a
 // force-terminated process leaves them open — and on virtual/network

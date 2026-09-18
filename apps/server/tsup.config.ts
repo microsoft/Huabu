@@ -78,19 +78,6 @@ export default defineConfig([
       const dst = path.resolve('dist-bundle/prompt');
       cpSync(src, dst, { recursive: true });
       console.log(`[tsup] copied prompt templates -> ${dst}`);
-      const agentTeamsSrc = path.resolve('../../agent-teams');
-      const agentTeamsDst = path.resolve('dist-bundle/agent-teams');
-      // `deepv-slides-maker` is dev-only and must not ship in production
-      // installers. Skip its subtree (and anything under it) while copying
-      // the rest of the bundled Agent Team templates.
-      const excludedTeamDir = path.join(agentTeamsSrc, 'deepv-slides-maker');
-      cpSync(agentTeamsSrc, agentTeamsDst, {
-        recursive: true,
-        filter: (source) =>
-          source !== excludedTeamDir &&
-          !source.startsWith(excludedTeamDir + path.sep),
-      });
-      console.log(`[tsup] copied bundled Agent Teams -> ${agentTeamsDst}`);
       // @resvg/resvg-wasm — copied next to server.js so the
       // snapshot_nodes tool's bundle-layout fallback finds it via
       // bundled server module's file URL.
@@ -100,7 +87,7 @@ export default defineConfig([
     },
   },
   {
-    // Agentlet daemon and setup worker: build self-contained bundles from
+    // Agentlet daemon: build a self-contained bundle from
     // source. We cannot just `cpSync` the `tsc`-emitted dist tree because its
     // `import { Command } from 'commander'` (and `ws`,
     // `@agentclientprotocol/sdk`, `@agentlet/protocol`) are bare
@@ -117,9 +104,6 @@ export default defineConfig([
     entry: {
       index: path.resolve(
         '../../external/agentlet/packages/local/src/index.ts',
-      ),
-      'setup-worker': path.resolve(
-        '../../external/agentlet/packages/agent-team/src/setup/managed-setup-worker.ts',
       ),
     },
     format: ['esm'],

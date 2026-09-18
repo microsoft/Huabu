@@ -71,62 +71,6 @@ const profileBaseSchema = z.object({
   customData: customDataSchema.optional(),
 });
 
-const setupErrorSchema = z
-  .object({
-    code: trimmedString(255),
-    message: z.string(),
-  })
-  .strict();
-
-export const agentTeamPreparationSchema = z.discriminatedUnion('status', [
-  z.object({ status: z.literal('not_prepared') }).strict(),
-  z
-    .object({
-      status: z.literal('setting_up'),
-      operationId: trimmedString(255),
-      startedAt: z.number().int().nonnegative(),
-    })
-    .strict(),
-  z
-    .object({
-      status: z.literal('ready'),
-      completedAt: z.number().int().nonnegative(),
-    })
-    .strict(),
-  z
-    .object({
-      status: z.literal('error'),
-      failedAt: z.number().int().nonnegative(),
-      error: setupErrorSchema,
-    })
-    .strict(),
-]);
-
-export const agentTeamSetupLogEntrySchema = z
-  .object({
-    receivedAt: z.number().int().nonnegative(),
-    phase: z.enum([
-      'validating_manifest',
-      'preparing_workspace',
-      'installing_tools',
-      'installing_skills',
-      'placing_prompt',
-      'copying_files',
-      'running_custom_setup',
-    ]),
-    status: z.enum(['started', 'completed']),
-    message: z.string(),
-  })
-  .strict();
-
-const manifestLaunchSchema = z
-  .object({
-    kind: z.literal('agent-team-manifest'),
-    manifestPath: pathSchema,
-    harness: trimmedString(255),
-  })
-  .strict();
-
 const commandLaunchSchema = z
   .object({
     kind: z.literal('acp-command'),
@@ -140,26 +84,6 @@ const commandMetadataSchema = z
   })
   .strict();
 
-export const agentTeamManifestProfileSchema = profileBaseSchema
-  .extend({
-    launch: manifestLaunchSchema,
-    preparation: agentTeamPreparationSchema,
-  })
-  .strict();
-export type AgentTeamManifestProfileView = z.infer<
-  typeof agentTeamManifestProfileSchema
->;
-
-export const agentTeamManifestProfileDetailSchema =
-  agentTeamManifestProfileSchema
-    .extend({
-      setupLog: z.array(agentTeamSetupLogEntrySchema),
-    })
-    .strict();
-export type AgentTeamManifestProfileDetailView = z.infer<
-  typeof agentTeamManifestProfileDetailSchema
->;
-
 export const acpCommandProfileSchema = profileBaseSchema
   .extend({
     launch: commandLaunchSchema,
@@ -168,52 +92,14 @@ export const acpCommandProfileSchema = profileBaseSchema
   .strict();
 export type AcpCommandProfileView = z.infer<typeof acpCommandProfileSchema>;
 
-export const agentProfileSchema = z.union([
-  agentTeamManifestProfileSchema,
-  acpCommandProfileSchema,
-]);
+export const agentProfileSchema = acpCommandProfileSchema;
 export type AgentProfileView = z.infer<typeof agentProfileSchema>;
 
-export const createAgentProfileBodySchema = z.union([
-  profileBaseSchema
-    .omit({ id: true })
-    .extend({ launch: manifestLaunchSchema })
-    .strict(),
-  profileBaseSchema
-    .omit({ id: true })
-    .extend({
-      launch: commandLaunchSchema,
-      metadata: commandMetadataSchema.optional(),
-    })
-    .strict(),
-]);
+export const createAgentProfileBodySchema = acpCommandProfileSchema
+  .omit({ id: true })
+  .strict();
 export type CreateAgentProfileBody = z.infer<
   typeof createAgentProfileBodySchema
->;
-
-const createAgentTeamProfileBaseSchema = profileBaseSchema
-  .omit({ id: true, workingDirPath: true })
-  .extend({ launch: manifestLaunchSchema });
-
-export const createAgentTeamProfileBodySchema = z.union([
-  createAgentTeamProfileBaseSchema
-    .extend({
-      workingDirectory: z.object({ kind: z.literal('default') }).strict(),
-    })
-    .strict(),
-  createAgentTeamProfileBaseSchema
-    .extend({
-      workingDirectory: z
-        .object({
-          kind: z.literal('custom'),
-          path: pathSchema,
-        })
-        .strict(),
-    })
-    .strict(),
-]);
-export type CreateAgentTeamProfileBody = z.infer<
-  typeof createAgentTeamProfileBodySchema
 >;
 
 export const createAcpCommandProfileBodySchema = profileBaseSchema
@@ -239,9 +125,7 @@ export const patchAgentProfileBodySchema = z
   });
 export type PatchAgentProfileBody = z.infer<typeof patchAgentProfileBodySchema>;
 
-export const agentProfileParamsSchema = z
-  .object({ id: trimmedString(255) })
-  .strict();
+export const agentProfileParamsSchema = z.object({ id: z.string().min(1) });
 export type AgentProfileParams = z.infer<typeof agentProfileParamsSchema>;
 
 export const agentProfileListSchema = z

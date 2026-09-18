@@ -8,7 +8,6 @@ import {
   type AcpTurnCtx,
 } from '@agenetes/acp-driver';
 import { mountAgenetes } from '@agenetes/agenetes';
-import { getAgentTeamRegistry } from '@agenetes/agentlet-host';
 import { piDriverFactory, type PiTurnCtx } from '@agenetes/pi-driver';
 
 import {
@@ -21,7 +20,7 @@ import { HISTORY_LOAD_SANITY_LIMIT } from './history-replay.js';
 import { huabuPiDriverPorts } from './pi-driver.js';
 import { getExternalAgentRuntimeConfig } from '../acp/runtime-config.js';
 
-import type { AcpRuntimePolicy, AcpSpec } from '@agenetes/acp-driver';
+import type { AcpRuntimePolicy } from '@agenetes/acp-driver';
 import type { Agenetes } from '@agenetes/agenetes';
 import type { PiWorkloadSpec } from '@agenetes/pi-driver';
 import type { AgentHandle as RuntimeAgentHandle } from '@agenetes/runtime';
@@ -38,23 +37,6 @@ export type AgenetesHandle = RuntimeAgentHandle;
 
 export const acpRuntimePolicy: AcpRuntimePolicy = {
   getIdleTimeoutSecs: () => getExternalAgentRuntimeConfig().idleTimeoutSecs,
-  resolveRuntimeEnvironment: async (spec: AcpSpec) => {
-    const agentTeam = spec.recipe?.agentTeam;
-    if (!agentTeam || !('workingDirPath' in agentTeam)) return undefined;
-    const registry = getAgentTeamRegistry();
-    if (!registry) throw new Error('Agent Profile registry is not mounted');
-    const runtime = await registry.resolveManifestRuntime({
-      profileId: spec.binding.profileId,
-      agentletId: spec.agentletId ?? '',
-      workingDirPath: agentTeam.workingDirPath,
-      launch: {
-        kind: 'agent-team-manifest',
-        manifestPath: agentTeam.manifestPath,
-        harness: agentTeam.harness,
-      },
-    });
-    return runtime.environment;
-  },
 };
 
 const externalDriver = acpDriverFactory(acpRuntimePolicy);

@@ -244,21 +244,10 @@ function migrateExternalSpec(
       env: workload.env,
     };
   } else if (profile && launch?.kind === 'agent-team-manifest') {
-    driverFields = {
-      binding: workload.binding,
-      agentletId: profile.agentletId,
-      cwd: profile.workingDirPath,
-      recipe: {
-        autoRestart: true,
-        alias: (workload.binding as { alias?: unknown } | undefined)?.alias,
-        agentTeam: {
-          manifestPath: launch.manifestPath,
-          workingDirPath: profile.workingDirPath,
-          harness: launch.harness,
-        },
-      },
-      env: workload.env,
-    };
+    return invalid(
+      filePath,
+      `thread '${threadId}' uses a retired Agent Team Profile`,
+    );
   } else if (profile) {
     return invalid(filePath, `thread '${threadId}' has an invalid Profile`);
   } else {

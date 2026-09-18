@@ -2,7 +2,9 @@
 
 > Redesign Agent Teams as a Huabu-managed experience and unify every non-internal agent behind one Agenetes Agent Profile model.
 >
-> Status: **In-Progress** · Last updated: 2026-07-15 · Tracks: [#253](https://github.com/hai-team/Huabu/issues/253)
+> Status: **Superseded** · Last updated: 2026-09-18
+
+This historical proposal no longer describes the runtime. Team execution and preparation have been retired; see [generic Agent Profiles](../architecture/agent-profiles.md). The manifest folders remain data assets.
 
 ---
 

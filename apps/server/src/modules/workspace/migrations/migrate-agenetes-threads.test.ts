@@ -157,6 +157,35 @@ describe('migrateLegacyAgenetesThreads', () => {
     expect(existsSync(`${invalidPath}.agenetes-v1.bak`)).toBe(false);
   });
 
+  it('rejects retired Team Profiles without rewriting historical data', () => {
+    const filePath = writeLegacy({
+      team: {
+        spec: {
+          kind: 'external',
+          workloadType: 'Deployment',
+          namespace,
+          threadId: 'team',
+          binding: { alias: 'Retired Team', profileId: 'old-team' },
+          profile: {
+            agentletId: 'local',
+            workingDirPath: '/team',
+            launch: {
+              kind: 'agent-team-manifest',
+              manifestPath: '/team/agentlet.yaml',
+            },
+          },
+        },
+        state: {},
+      },
+    });
+    const before = readFileSync(filePath, 'utf-8');
+    expect(() => migrateAgenetesThreadFile(filePath)).toThrow(
+      'retired Agent Team Profile',
+    );
+    expect(readFileSync(filePath, 'utf-8')).toBe(before);
+    expect(existsSync(`${filePath}.agenetes-v1.bak`)).toBe(false);
+  });
+
   it('migrates the legacy flattened pi Job shape', () => {
     const filePath = writeLegacy({
       'legacy-pi': {
