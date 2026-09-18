@@ -16,7 +16,10 @@ import {
   isOfficeFilterKey,
   type LayerFilterKey,
 } from './layerFilterKey';
-import { nodeMatchesLayerFilters } from './missingNodeFilter';
+import {
+  isLayerNodeVisibleByDefault,
+  nodeMatchesLayerFilters,
+} from './missingNodeFilter';
 import { MissingNodesSummary } from './MissingNodesSummary';
 import { QuestionStatusDot } from './QuestionStatusDot';
 import { getNodeIcon } from '../../../config/nodeIcons';
@@ -224,7 +227,9 @@ export const CanvasLayerPanel = ({
   // as the canvas-wide search input — see `CanvasSearchInput`
   // and `CanvasSearchResults`. When the query is non-empty the
   // tree below is replaced by the result list; when empty, the
-  // chip whitelist still applies to the tree as before.
+  // chip whitelist still applies to the tree as before. With no
+  // explicit type selection, the hierarchy keeps its full structure
+  // but omits Sketch rows to avoid clutter from freehand input.
   // ============================================================
   const [selectedKeys, setSelectedKeys] = useState<Set<LayerFilterKey>>(
     () => new Set(),
@@ -313,8 +318,8 @@ export const CanvasLayerPanel = ({
 
   // The text query for filtering the tree has been folded into
   // the canvas-wide search (see `CanvasSearchInput`), so the
-  // tree itself now only filters by the chip whitelist —
-  // matching the historical "chips alone are active" code path.
+  // tree itself now only filters by the chip whitelist plus the
+  // default Sketch exclusion.
   const missingNodeCount = useMemo(
     () =>
       nodes.reduce(
@@ -350,6 +355,11 @@ export const CanvasLayerPanel = ({
     return stabilized;
   }, [nodes]);
 
+  const defaultVisibleLayerItems = useMemo(
+    () => layerItems.filter((item) => isLayerNodeVisibleByDefault(item.node)),
+    [layerItems],
+  );
+
   // When filtering is active we switch to a flat "search results" view
   // (VS Code global-search style): hierarchy and indentation are dropped,
   // every match is rendered at depth 0. This sidesteps the messy
@@ -380,7 +390,9 @@ export const CanvasLayerPanel = ({
     return out;
   }, [layerItems, isFilterActive, selectedKeys, showMissingOnly]);
 
-  const itemsToRender = isFilterActive ? (filteredFlatItems ?? []) : layerItems;
+  const itemsToRender = isFilterActive
+    ? (filteredFlatItems ?? [])
+    : defaultVisibleLayerItems;
   const emptyText = showMissingOnly
     ? t('layers.noMissingMatches')
     : isFilterActive
@@ -437,7 +449,12 @@ export const CanvasLayerPanel = ({
         ? itemsToRender
         : [...itemsToRender, ...externalItems],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [externalItems, layerItems, filteredFlatItems, isFilterActive],
+    [
+      defaultVisibleLayerItems,
+      externalItems,
+      filteredFlatItems,
+      isFilterActive,
+    ],
   );
 
   return (

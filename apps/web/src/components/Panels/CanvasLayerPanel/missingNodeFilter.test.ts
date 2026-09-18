@@ -3,7 +3,10 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { nodeMatchesLayerFilters } from './missingNodeFilter';
+import {
+  isLayerNodeVisibleByDefault,
+  nodeMatchesLayerFilters,
+} from './missingNodeFilter';
 
 import type { LayerFilterKey } from './layerFilterKey';
 import type { DataSourceNodeLike } from './types';
@@ -14,12 +17,30 @@ const node = (
 ): DataSourceNodeLike => ({ id: `${type}-node`, type, data });
 
 describe('nodeMatchesLayerFilters', () => {
+  it('hides Sketch nodes by default but keeps explicit Sketch filtering', () => {
+    const noTypes = new Set<LayerFilterKey>();
+    const sketchOnly = new Set<LayerFilterKey>(['sketch']);
+    const sketch = node('sketch');
+
+    expect(isLayerNodeVisibleByDefault(sketch)).toBe(false);
+    expect(isLayerNodeVisibleByDefault(node('note'))).toBe(true);
+    expect(nodeMatchesLayerFilters(sketch, noTypes, false)).toBe(false);
+    expect(nodeMatchesLayerFilters(sketch, sketchOnly, false)).toBe(true);
+  });
+
   it('shows only missing nodes when the missing filter is active', () => {
     const noTypes = new Set<LayerFilterKey>();
 
     expect(
       nodeMatchesLayerFilters(
         node('note', { label: 'Missing', contentMissing: true }),
+        noTypes,
+        true,
+      ),
+    ).toBe(true);
+    expect(
+      nodeMatchesLayerFilters(
+        node('sketch', { label: 'Missing sketch', contentMissing: true }),
         noTypes,
         true,
       ),

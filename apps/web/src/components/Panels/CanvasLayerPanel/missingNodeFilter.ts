@@ -8,13 +8,19 @@ import { nodeMatchesFilterKey, type LayerFilterKey } from './layerFilterKey';
 import type { DataSourceNodeLike } from './types';
 import type { CanvasNodeType } from '@huabu/shared';
 
+export function isLayerNodeVisibleByDefault(node: DataSourceNodeLike): boolean {
+  return node.type !== 'sketch';
+}
+
 export function nodeMatchesLayerFilters(
   node: DataSourceNodeLike,
   selectedKeys: ReadonlySet<LayerFilterKey>,
   showMissingOnly: boolean,
 ): boolean {
   if (showMissingOnly && !hasMissingFile(node.data)) return false;
-  if (selectedKeys.size === 0) return true;
+  if (selectedKeys.size === 0) {
+    return showMissingOnly || isLayerNodeVisibleByDefault(node);
+  }
 
   const nodeType = node.type as CanvasNodeType | undefined;
   for (const key of selectedKeys) {

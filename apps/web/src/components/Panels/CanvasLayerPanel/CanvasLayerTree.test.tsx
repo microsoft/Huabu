@@ -218,7 +218,7 @@ describe('CanvasLayerTree activation', () => {
     expect(row('note-1').querySelector('.ring-info.ring-1')).not.toBeNull();
   });
 
-  it('expands Frames without opening Preview and announces an empty Frame', async () => {
+  it('expands a Frame and collapses it on repeated primary activation', async () => {
     await renderTree([item('frame-1', 'frame')]);
     act(() =>
       useCanvasStore.setState({
@@ -235,6 +235,32 @@ describe('CanvasLayerTree activation', () => {
     expect(mocks.toast).toHaveBeenCalledWith('layers.emptyFrame', {
       tone: 'info',
     });
+
+    act(() => row('frame-1').click());
+
+    expect(useCanvasStore.getState().collapsedFrameIds.has('frame-1')).toBe(
+      true,
+    );
+    expect(mocks.openPreviewNode).not.toHaveBeenCalled();
+  });
+
+  it('selects an expanded Frame before a later activation collapses it', async () => {
+    await renderTree([
+      item('frame-1', 'frame'),
+      item('note-1', 'note', 'frame-1'),
+    ]);
+
+    act(() => row('frame-1').click());
+
+    expect(useCanvasStore.getState().collapsedFrameIds.has('frame-1')).toBe(
+      false,
+    );
+
+    act(() => row('frame-1').click());
+
+    expect(useCanvasStore.getState().collapsedFrameIds.has('frame-1')).toBe(
+      true,
+    );
   });
 
   it('opens only an existing Question conversation', async () => {

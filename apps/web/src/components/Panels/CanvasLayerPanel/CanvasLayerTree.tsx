@@ -837,7 +837,16 @@ export const CanvasLayerTree = ({
       }
 
       const structural = isStructuralNode(node.type);
-      expandItemAndAncestors(item, structural);
+      if (structural) {
+        expandItemAndAncestors(item, false);
+        if (snapshot.collapsedFrameIds.has(id)) {
+          setFrameCollapsed(id, false);
+        } else if (node.selected) {
+          setFrameCollapsed(id, true);
+        }
+      } else {
+        expandItemAndAncestors(item, false);
+      }
       snapshot.selectNodes([id], false);
       selectionAnchorRef.current = id;
 
@@ -883,6 +892,7 @@ export const CanvasLayerTree = ({
       expandItemAndAncestors,
       itemById,
       previewVisibleIdSet,
+      setFrameCollapsed,
       t,
     ],
   );

@@ -21,8 +21,9 @@ interface LayerFilterBarProps {
   availableKeys: LayerFilterKey[];
   /**
    * Whitelist of filter keys the user has clicked. An empty set means
-   * "no type constraint" — the list shows every type. Otherwise only
-   * nodes whose key is in this set survive the filter.
+   * "no explicit type constraint"; the ordinary hierarchy applies its
+   * default visibility policy, while Canvas search remains unrestricted.
+   * Otherwise only nodes whose key is in this set survive the filter.
    */
   selectedKeys: Set<LayerFilterKey>;
   onToggleKey: (key: LayerFilterKey) => void;
@@ -72,7 +73,7 @@ interface LayerFilterBarProps {
  * two search inputs in the same panel became redundant. The chip
  * row stayed because it acts on the tree (which is hidden the
  * moment the canvas search has a query); both controls now serve
- * orthogonal axes (type whitelist vs. live query).
+ * orthogonal axes (explicit type whitelist vs. live query).
  */
 export const LayerFilterBar = ({
   availableKeys,
