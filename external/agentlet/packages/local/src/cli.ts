@@ -1,5 +1,4 @@
 import { Command } from 'commander'
-import type { SetupCommandArgs } from '@agentlet/agent-team'
 
 export interface AgentletOptions {
   server: string
@@ -16,14 +15,8 @@ export interface AgentletOptions {
   maxAgents: number
 }
 
-/**
- * Result of parsing the `agentlet` CLI: either run the daemon, or run an
- * Agent Team setup command. The two roles are exposed as explicit
- * subcommands (`agentlet daemon …` / `agentlet agent-team …`).
- */
-export type CliResult =
-  | { mode: 'daemon'; options: AgentletOptions }
-  | { mode: 'agent-team'; args: SetupCommandArgs }
+/** Result of parsing the generic `agentlet daemon` command. */
+export type CliResult = { mode: 'daemon'; options: AgentletOptions }
 
 export function parseCli(argv: string[]): CliResult {
   const program = new Command()
@@ -69,35 +62,6 @@ export function parseCli(argv: string[]): CliResult {
           maxAgents: parseInt(opts.maxAgents, 10),
         },
       }
-    })
-
-  const agentTeam = program
-    .command('agent-team')
-    .description('Manage Agent Team packages (setup, validate, doctor). Run from inside the agent-team folder.')
-
-  agentTeam
-    .command('setup')
-    .alias('unpack')
-    .description('Prepare per-harness workspaces from the agentlet.yaml in the current directory')
-    .option('--harness <name>', 'Target a specific harness (defaults to all in the manifest)')
-    .action((opts) => {
-      result = { mode: 'agent-team', args: { command: 'setup', harness: opts.harness } }
-    })
-
-  agentTeam
-    .command('validate')
-    .description('Validate that the agentlet.yaml in the current directory is well-formed and ready')
-    .option('--harness <name>', 'Target a specific harness (defaults to all in the manifest)')
-    .action((opts) => {
-      result = { mode: 'agent-team', args: { command: 'validate', harness: opts.harness } }
-    })
-
-  agentTeam
-    .command('doctor')
-    .description('Diagnose the readiness of the agent-team package in the current directory')
-    .option('--harness <name>', 'Target a specific harness (defaults to all in the manifest)')
-    .action((opts) => {
-      result = { mode: 'agent-team', args: { command: 'doctor', harness: opts.harness } }
     })
 
   program.parse(argv)

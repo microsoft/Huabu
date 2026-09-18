@@ -4,7 +4,6 @@ export const PROTOCOL_VERSION = '1.0.0'
 /** Agentlet → Server method names */
 export const AgentletMethods = {
   HELLO: 'agentlet/hello',
-  AGENT_TEAM_SETUP_PROGRESS: 'agent-team/setup-progress',
 } as const
 
 /** Agent → Server method names */
@@ -27,10 +26,7 @@ export const ServerMethods = {
   STOP: 'server/stop',
   LIST: 'server/list',
   SEND_RESOURCE: 'server/sendResource',
-  AGENT_TEAM_SCAN: 'agent-team/scan',
-  AGENT_TEAM_SETUP: 'agent-team/setup',
-  AGENT_TEAM_SETUP_CANCEL: 'agent-team/setup-cancel',
-  AGENT_TEAM_VALIDATE: 'agent-team/validate',
+  DISCOVER_HARNESSES: 'server/discoverHarnesses',
 } as const
 
 /** Error codes used in agent/hello rejection */

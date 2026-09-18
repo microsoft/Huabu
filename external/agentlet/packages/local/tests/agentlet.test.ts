@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest'
 import {
   buildAgentProcessEnv,
   resolveAgentletId,
-  resolveManagedSetupWorkerPath,
 } from '../src/agentlet.js'
 import { parseCli } from '../src/cli.js'
 
@@ -30,28 +29,6 @@ describe('agentlet daemon identity', () => {
       mode: 'daemon',
       options: { agentletId: 'machine-a' },
     })
-  })
-})
-
-describe('managed setup worker resolution', () => {
-  it('uses the worker bundled beside the daemon entry', () => {
-    expect(
-      resolveManagedSetupWorkerPath(
-        'file:///app/agentlet/index.js',
-        (path) => path === '/app/agentlet/setup-worker.js',
-        () => '/workspace/node_modules/@agentlet/agent-team/dist/setup/managed-setup-worker.js',
-      ),
-    ).toBe('/app/agentlet/setup-worker.js')
-  })
-
-  it('falls back to the package export in development', () => {
-    expect(
-      resolveManagedSetupWorkerPath(
-        'file:///workspace/packages/local/dist/agentlet.js',
-        () => false,
-        () => '/workspace/packages/agent-team/dist/setup/managed-setup-worker.js',
-      ),
-    ).toBe('/workspace/packages/agent-team/dist/setup/managed-setup-worker.js')
   })
 })
 

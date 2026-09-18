@@ -7,14 +7,14 @@ It contains no AI or host-application logic. The daemon accepts authenticated co
 ## Responsibilities
 
 - Register one execution machine through an `agentlet/hello` control connection.
-- Accept `server/spawn`, `server/stop`, `server/list`, `server/sendResource`, and shutdown control messages.
+- Accept `server/spawn`, `server/stop`, `server/list`, `server/discoverHarnesses`, `server/sendResource`, and shutdown control messages.
 - Launch and supervise multiple ACP agent processes.
 - Bootstrap each process with `initialize` followed by `session/new`, `session/resume`, or `session/load`.
 - Register each bootstrapped session through its own `agent/hello` WebSocket connection.
 - Relay ACP JSON-RPC messages without interpreting application semantics.
 - Reconnect the machine control channel with bounded exponential backoff.
 - Buffer the bounded pre-attach notification window until a new session relay is ready.
-- Prepare and validate Agent Team packages through the `agentlet agent-team` commands.
+- Discover installed ACP harnesses from the daemon's trusted static catalogue, optionally preparing reusable local workspaces.
 
 Agentlet does not provide a standalone relay server, REST API, browser UI, token administration service, or durable session/event store. Those control-plane responsibilities belong to the embedding host and its Gateway.
 
@@ -22,9 +22,8 @@ Agentlet does not provide a standalone relay server, REST API, browser UI, token
 
 | Package | Responsibility |
 | --- | --- |
-| `agentlet` | Daemon CLI, ACP process lifecycle, WebSocket client, relay, logging, and Agent Team commands. |
+| `agentlet` | Daemon CLI, ACP process lifecycle, WebSocket client, relay, logging, and generic harness discovery. |
 | `@agentlet/protocol` | Shared daemon/Gateway JSON-RPC types and method constants. |
-| `@agentlet/agent-team` | Agent Team manifest parsing, setup, validation, and diagnostics. |
 
 ## Build and test
 
@@ -72,19 +71,13 @@ Important options:
 
 The control and session connections use the same `agentletId`. Each spawned ACP session has its own `sessionId` and WebSocket, so control-channel and session-channel failures remain independent. The machine control channel reconnects automatically; a closed session channel stops that session's relay and is not automatically reconnected.
 
-## Agent Teams
+## Harness discovery
 
-Run Agent Team commands from a directory containing `agentlet.yaml`:
+The daemon advertises `capabilities.harnessDiscovery: { version: 1 }`. Gateways may call `server/discoverHarnesses` with `{}` for read-only discovery or `{ "prepareWorkspaces": true }` for automatic provisioning. The response includes every static catalogue entry, installation state, resolved executable path, optional version, and diagnostics. No remote candidates, commands, IDs, or roots are accepted.
 
-```bash
-agentlet agent-team setup
-agentlet agent-team validate
-agentlet agent-team doctor
-```
+Discovery uses bounded, shell-free PATH and optional version probes. It does not start ACP sessions, install packages, provision credentials, or copy prompts or skills. An optional version-probe failure does not change a successfully detected executable into a missing binary.
 
-Use `--harness <name>` to target one configured harness.
-
-The declarative manifest and workspace preparation contract are documented in [`spec/agent-team.md`](spec/agent-team.md).
+Only explicit workspace preparation creates `~/.agentlet/workspace/<catalogue-id>` on the daemon machine, and only for installed binaries. Existing contents are retained. Failed creation produces a diagnostic without a fallback directory. Agent Team runtime packages, setup commands, and Team RPCs are retired; manifests remain historical data only.
 
 ## Protocol lifecycle
 
@@ -125,9 +118,8 @@ Agentlet transports opaque resources and environment values; it does not interpr
 packages/
   protocol/    # Shared daemon/Gateway wire contract
   local/       # agentlet CLI and execution daemon
-  agent-team/  # Agent Team manifests and setup logic
 spec/
   protocol.md
   agent-reachback.md
-  agent-team.md
+  agent-team.md # Historical manifest data reference, not a runtime contract
 ```

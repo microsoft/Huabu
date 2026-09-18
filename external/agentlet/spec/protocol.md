@@ -48,7 +48,8 @@ Gateway <-> daemon <-> ACP process: transparent ACP JSON-RPC relay
       "capabilities": {
         "autoRestart": true,
         "bufferLimit": 1000,
-        "maxAgents": 10
+        "maxAgents": 10,
+        "harnessDiscovery": { "version": 1 }
       }
     }
   }
@@ -81,18 +82,21 @@ Both hello methods are requests and require a matching JSON-RPC response before 
 | `server/spawn` | Request | Launch and bootstrap an ACP agent. |
 | `server/stop` | Request | Stop one managed agent session. |
 | `server/list` | Request | List the daemon's active agents. |
-| `agent-team/scan` | Request | Scan one absolute collection root and return valid members plus diagnostics for invalid manifests. |
-| `agent-team/setup` | Request | Start an isolated asynchronous setup worker for one explicit deployment workspace. |
-| `agent-team/setup-cancel` | Request | Terminate one active setup worker by operation ID. |
-| `agent-team/validate` | Request | Validate one prepared deployment without mutating or repairing it. |
+| `server/discoverHarnesses` | Request | Discover the daemon's static ACP harness catalogue, optionally preparing local workspaces. |
 | `server/sendResource` | Notification | Write a host-provided resource through the daemon environment registry. |
 | `server/replay` | Notification | Replay Gateway-to-daemon messages buffered during disconnection. |
 | `server/ping` | Notification | Application-level heartbeat request. |
 | `server/shutdown` | Notification | Ask the daemon to stop gracefully. |
 
-`agent-team/setup` requires a complete absolute `workingDirPath` and returns after the worker is accepted. The daemon subsequently emits `agent-team/setup-progress` notifications containing structured phase events and exactly one terminal `completed`, `failed`, or `cancelled` event while the control connection remains available. The complete setup pipeline, including custom `onInstall`, runs in an isolated child process so cancellation never requires terminating the daemon. A daemon rejects concurrent setup operations targeting the same normalized workspace path.
+`server/discoverHarnesses` accepts omitted params, `{}`, or `{ "prepareWorkspaces": boolean }`; every other option and invalid request shape is rejected with `-32602`. The advertised `AgentletProfile.capabilities.harnessDiscovery` is `{ version: 1 }`. Unsupported daemons must not be inferred to support discovery.
 
-`agent-team/validate` requires the workspace's completed-setup marker in addition to a valid manifest, supported harness, and existing workspace directory. Setup clears the marker before changing the workspace and writes it atomically only after successful completion.
+The result is `{ harnesses: HarnessDiscoveryEntry[] }`, including the complete catalogue in stable order. Each entry contains `id`, `displayName`, `binary`, `acpArgs`, `autoApprove`, `installHint`, and `installed`, with optional `executablePath`, `version`, `workingDirPath`, and `diagnostics: Array<{ code, message }>`. `autoApprove` is either `null` or `{ args: string[], position: "before-acp" | "after-acp" }`. Skip-version rules are internal catalogue data and are not returned.
+
+Discovery is read-only unless `prepareWorkspaces` is explicitly true. Probes use shell-free `execFile` calls with a 2.5-second timeout and bounded output. PATH lookup distinguishes `binary_missing` from `lookup_failed`; optional version failures produce `version_unknown` or `version_probe_failed` while retaining `installed: true`. Known interactive adapters are never invoked for version detection. Discovery never installs tools, copies skills or prompts, provisions credentials, or starts an ACP session.
+
+With preparation enabled, only installed entries receive reusable directories under the daemon's own `homedir()/.agentlet/workspace/<static-catalogue-id>`. Neither roots nor IDs are supplied remotely. Directory creation never clears existing data; failure returns `workspace_failed` without `workingDirPath` and without a fallback path. Installation state remains independent of workspace readiness.
+
+The retired `agent-team/*` RPCs return unknown-method errors; there is no setup worker or progress notification.
 
 All JSON-RPC envelopes and method payloads are defined in [`messages.ts`](../packages/protocol/src/messages.ts) and [`json-rpc.ts`](../packages/protocol/src/json-rpc.ts).
 
@@ -100,7 +104,7 @@ All JSON-RPC envelopes and method payloads are defined in [`messages.ts`](../pac
 
 `server/spawn` includes a host correlation `appId`, an optional native ACP `sessionId`, and a `sessionSpec`.
 
-The daemon resolves the command and working directory either directly from `sessionSpec` or from `sessionSpec.agentTeam`, then launches the process with `shell: true`. The host must therefore send only trusted commands.
+The daemon uses the required `sessionSpec.command` and optional `sessionSpec.cwd` directly, then launches the process with `shell: true`. The host must therefore send only trusted commands. Any `sessionSpec.agentTeam` field is explicitly rejected with `-32602`, including when a command is also supplied; there is no manifest resolution or silent fallback.
 
 For a fresh session the daemon performs:
 
@@ -113,7 +117,7 @@ When `sessionId` is supplied, the daemon prefers `session/resume` and falls back
 
 The host must include the required spawn parameters in every request. Agentlet has no durable session store.
 
-Agent Team resolution is documented in [`agent-team.md`](agent-team.md).
+Historical Team manifest data is described in [`agent-team.md`](agent-team.md); it is not a runtime launch contract.
 
 ## 5. ACP relay
 
@@ -173,4 +177,6 @@ The host-agnostic Reachback contract is documented in [`agent-reachback.md`](age
 | Hello, lifecycle, spawn, replay, and resource payloads | [`packages/protocol/src/messages.ts`](../packages/protocol/src/messages.ts) |
 | Shared Gateway-facing connection types | [`packages/protocol/src/gateway-types.ts`](../packages/protocol/src/gateway-types.ts) |
 | Daemon implementation | [`packages/local/src/agentlet.ts`](../packages/local/src/agentlet.ts) |
+| Trusted harness catalogue and probes | [`packages/local/src/harnesses/catalogue.ts`](../packages/local/src/harnesses/catalogue.ts), [`detect.ts`](../packages/local/src/harnesses/detect.ts) |
+| Daemon-owned reusable workspaces | [`packages/local/src/harnesses/workspace.ts`](../packages/local/src/harnesses/workspace.ts) |
 | WebSocket client and reconnect behavior | [`packages/local/src/ws-client.ts`](../packages/local/src/ws-client.ts) |

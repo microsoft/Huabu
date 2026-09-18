@@ -21,6 +21,7 @@ export interface AgentletProfile {
     autoRestart: boolean
     bufferLimit: number
     maxAgents?: number
+    harnessDiscovery?: { version: 1 }
   }
 }
 
@@ -80,8 +81,8 @@ export interface SessionProfile {
 
 /** Specification for spawning a new agent */
 export interface SessionSpec {
-  /** Shell command to spawn the agent (must support ACP stdio). Required unless agentTeam is set. */
-  command?: string
+  /** Trusted shell command to spawn the agent (must support ACP stdio). */
+  command: string
   /** Working directory for the agent subprocess */
   cwd?: string
   /** Extra environment variables for the agent */
@@ -90,21 +91,6 @@ export interface SessionSpec {
   autoRestart?: boolean
   /** Seconds of inactivity before suspending. 0 or omitted = no timeout. */
   idleTimeoutSecs?: number
-  /** Agent Team resolution — if set, command/cwd are resolved from the manifest. */
-  agentTeam?:
-    | {
-        /** Absolute path to agentlet.yaml. */
-        manifestPath: string
-        /** Prepared workspace selected by the Profile. */
-        workingDirPath: string
-        /** Target harness declared by the manifest. */
-        harness: string
-      }
-    | {
-        /** Legacy package directory used by existing durable workloads. */
-        agentDir: string
-        harness?: string
-      }
 }
 
 // ─── agentlet/hello (Request/Response) ────────────────────────────────────────
@@ -254,118 +240,31 @@ export interface SendResourceParams {
   content: string
 }
 
-// ─── Agent Team Control ──────────────────────────────────────────────────────
+// ─── Generic harness discovery ───────────────────────────────────────────────
 
-/** Host-configurable environment field exposed by an Agent Team manifest. */
-export interface AgentTeamEnvField {
-  name: string
-  description: string
-  required: boolean
-  secret: boolean
-  default?: string
+export interface HarnessCatalogueEntry {
+  id: string
+  displayName: string
+  binary: string
+  acpArgs: string[]
+  autoApprove: { args: string[]; position: 'before-acp' | 'after-acp' } | null
+  installHint: string
 }
 
-/** agent-team/scan — discover Agent Team manifests below one collection root. */
-export interface AgentTeamScanParams {
-  rootPath: string
+export interface HarnessDiscoveryEntry extends HarnessCatalogueEntry {
+  installed: boolean
+  executablePath?: string
+  version?: string
+  workingDirPath?: string
+  diagnostics?: Array<{ code: string; message: string }>
 }
 
-export interface AgentTeamScanMember {
-  name: string
-  manifestPath: string
-  description: string
-  harnesses: string[]
-  env: AgentTeamEnvField[]
+export interface HarnessDiscoveryParams {
+  prepareWorkspaces?: boolean
 }
 
-export interface AgentTeamScanDiagnostic {
-  manifestPath: string
-  code: 'invalid_manifest' | 'manifest_unreadable'
-  message: string
-}
-
-export interface AgentTeamScanResult {
-  rootPath: string
-  members: AgentTeamScanMember[]
-  diagnostics: AgentTeamScanDiagnostic[]
-}
-
-/** agent-team/setup — start one isolated deployment setup operation. */
-export interface AgentTeamSetupParams {
-  operationId: string
-  manifestPath: string
-  harness: string
-  workingDirPath: string
-}
-
-export interface AgentTeamSetupStartResult {
-  operationId: string
-  accepted: true
-}
-
-/** agent-team/setup-progress — asynchronous phase and terminal setup events. */
-export type AgentTeamSetupProgressParams =
-  | {
-      operationId: string
-      type: 'phase'
-      phase:
-        | 'validating_manifest'
-        | 'preparing_workspace'
-        | 'installing_tools'
-        | 'installing_skills'
-        | 'placing_prompt'
-        | 'copying_files'
-        | 'running_custom_setup'
-      status: 'started' | 'completed'
-      message: string
-    }
-  | {
-      operationId: string
-      type: 'completed'
-      workingDirPath: string
-    }
-  | {
-      operationId: string
-      type: 'failed'
-      error: {
-        code: 'setup_failed' | 'worker_exited'
-        message: string
-      }
-    }
-  | {
-      operationId: string
-      type: 'cancelled'
-    }
-
-/** agent-team/setup-cancel — terminate one active setup worker. */
-export interface AgentTeamSetupCancelParams {
-  operationId: string
-}
-
-export interface AgentTeamSetupCancelResult {
-  operationId: string
-  cancelled: boolean
-}
-
-/** agent-team/validate — inspect one deployment without mutating it. */
-export interface AgentTeamValidateParams {
-  manifestPath: string
-  harness: string
-  workingDirPath: string
-}
-
-export interface AgentTeamValidationIssue {
-  code:
-    | 'manifest_invalid'
-    | 'harness_unsupported'
-    | 'workspace_missing'
-    | 'workspace_not_ready'
-  message: string
-}
-
-export interface AgentTeamValidateResult {
-  valid: boolean
-  issues: AgentTeamValidationIssue[]
+export interface HarnessDiscoveryResult {
+  harnesses: HarnessDiscoveryEntry[]
 }
 
 // ─── Lifecycle Events (surfaced to host app) ──────────────────────────────────
