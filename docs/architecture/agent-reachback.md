@@ -46,7 +46,7 @@ There is no directory-listing endpoint. External agents receive exact node paths
 
 `POST /query` accepts the canonical discriminated union from `packages/shared/src/types/api/space-operations.ts`: `GET_SPACE_OUTLINE`, `INSPECT_NODES`, `INSPECT_EDGES`, `SEARCH`, or `SNAPSHOT_NODES`. The RFS route validates JSON and delegates to `executeSpaceQuery()`; spatial queries reuse the existing canvas spatial services, search collects the existing cancellable event stream into a bounded JSON result, and snapshot delegates to the shared renderer. The route does not duplicate query semantics.
 
-Capability detail schemas are generated from the same Zod registry used for request validation and built-in agent tools. Query responses remain bounded and carry metadata rather than large bodies; node content and snapshot artifact bytes are still read through `download`.
+Capability detail schemas are generated from the same Zod registry used for request validation and built-in agent tools. Query responses remain bounded and carry metadata rather than large bodies; node content and snapshot artifact bytes are still read through `download`. `INSPECT_NODES` includes a non-empty `threadId` only for Question Nodes that currently have a thread association. This read-only mapping lets an authenticated RFS caller discover an Agent Node and continue its existing conversation through `POST /agent/:threadId/prompt`; it does not create or realize any Agent state.
 
 ## Direct execution plane
 
@@ -86,7 +86,7 @@ Uploads are inert payloads stored under `.upload/`. Names must be explicit and c
 
 Parent lineage is best effort. The route resolves `parentThreadId` or `X-Huabu-Host-Thread-Id` to any Question Node in the current Space and attempts an ordinary Canvas edge after creating the Agent Node. A missing parent or rejected edge is returned as non-blocking creation metadata and never rolls back or rejects the new Agent.
 
-`POST /agent/:threadId/prompt` addresses one existing Agent conversation directly and never creates a Node or changes its Profile. Both immediate creation and later prompts use SSE; creation streams begin with a `created` event carrying `nodeId`, `threadId`, effective `profileId`, parent-connection state, and warnings.
+`POST /agent/:threadId/prompt` addresses one existing Agent conversation directly and never creates a Node or changes its Profile. A caller that retained no creation response can query `INSPECT_NODES` for the Agent/Question Node and use its optional `threadId`; non-Question and unbound Question results omit the field. Both immediate creation and later prompts use SSE; creation streams begin with a `created` event carrying `nodeId`, `threadId`, effective `profileId`, parent-connection state, and warnings.
 
 `GET /agent/profiles` exposes the public available Profile catalogue. It includes `huabu` as the default and projects other Profiles to stable `id` and `alias` fields without exposing commands, working directories, manifests, setup details, or registry eligibility state.
 

@@ -416,6 +416,8 @@ export interface InspectNodesArgs {
  * `read("nodes/<file>.md")` for content.
  */
 export interface InspectNodeResult extends AgentNodeOutline {
+  /** Existing conversation association, emitted only for Question nodes. */
+  threadId?: string;
   // Per-predicate derived fields (only set when relevant predicate ran).
   distance?: number;
   centerDistance?: number;
@@ -722,6 +724,10 @@ export async function inspectNodes(
     delete base.summary;
     delete base.preview;
     const result: InspectNodeResult = base;
+    const threadId = raw?.type === 'question' ? raw.data.threadId : undefined;
+    if (typeof threadId === 'string' && threadId.length > 0) {
+      result.threadId = threadId;
+    }
     const style = readVisualStyle(raw);
     if (style) result.style = style;
     const d = derived.get(s.id);

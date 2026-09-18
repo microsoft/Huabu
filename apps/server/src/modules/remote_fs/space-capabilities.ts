@@ -33,7 +33,8 @@ const QUERY_DETAILS: Record<
   },
   INSPECT_NODES: {
     constraints: [`At most ${SPACE_QUERY_MAX_LIMIT} results.`],
-    result: 'Bounded node matches with geometry and derived spatial fields.',
+    result:
+      'Bounded node matches with geometry and derived spatial fields. Question Nodes with an existing conversation association also include threadId.',
     examples: [{ type: 'INSPECT_NODES', ids: ['node-123'] }],
   },
   INSPECT_EDGES: {

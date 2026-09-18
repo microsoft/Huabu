@@ -56,13 +56,19 @@ The JSON response contains the same creation metadata. The Agent remains idle un
 
 ## 4. Continue an Agent conversation
 
+If you know the Agent Node but did not retain its creation response, resolve its existing thread association through `INSPECT_NODES`:
+
 ```bash
-THREAD_ID="thread-..."
+THREAD_ID="$(curl -fsS -H "$AUTH" -H "Content-Type: application/json" \
+  --data-binary '{"type":"INSPECT_NODES","ids":["node-123"]}' \
+  "$HUABU_RFS_URL/query" \
+  | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).result.nodes[0]?.threadId ?? ""))')"
+
 curl -N -H "$AUTH" -H "Content-Type: text/plain" \
   --data-binary @./follow-up.txt \
   "$HUABU_RFS_URL/agent/$THREAD_ID/prompt"
 ```
 
-This endpoint never creates another Agent or changes its Profile. The response is SSE, and closing the connection stops delivery without aborting the durable turn.
+Only Question Nodes with a non-empty existing association include `threadId`; non-Question Nodes and unbound Questions omit it. Inspection is read-only and never creates or realizes Agent state. The prompt endpoint never creates another Agent or changes its Profile. The response is SSE, and closing the connection stops delivery without aborting the durable turn.
 
 An Agent can repeat the same create-and-prompt workflow to delegate recursively. Prefer direct work when another Agent adds no useful specialization, isolation, or parallelism.

@@ -10,6 +10,7 @@ import {
   builtInAgentCanvasCommandSchema,
   inspectNodesQuerySchema,
   rfsExecuteRequestSchema,
+  spaceQueryResponseSchema,
 } from './space-operations.js';
 import {
   AGENT_CANVAS_COMMAND_TYPES,
@@ -122,6 +123,42 @@ describe('agentCanvasCommandSchema', () => {
 });
 
 describe('Space operation limits', () => {
+  it('accepts a thread association only on inspect-node results', () => {
+    const node = {
+      id: 'node-agent',
+      type: 'question',
+      filename: 'nodes/Agent.md',
+      position: { x: 0, y: 0 },
+      absolutePosition: { x: 0, y: 0 },
+      size: { width: 200, height: 80 },
+      threadId: 'thread-agent',
+    };
+
+    expect(
+      spaceQueryResponseSchema.safeParse({
+        type: 'INSPECT_NODES',
+        result: {
+          count: 1,
+          total: 1,
+          truncated: false,
+          nodes: [node],
+        },
+      }).success,
+    ).toBe(true);
+    expect(
+      spaceQueryResponseSchema.safeParse({
+        type: 'GET_SPACE_OUTLINE',
+        result: {
+          version: 1,
+          bbox: null,
+          nodes: [node],
+          edges: [],
+          spatial: { clusters: [] },
+        },
+      }).success,
+    ).toBe(false);
+  });
+
   it('bounds inspect results', () => {
     expect(
       inspectNodesQuerySchema.safeParse({

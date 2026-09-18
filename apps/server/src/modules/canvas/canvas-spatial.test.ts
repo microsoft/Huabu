@@ -15,7 +15,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { buildCanvasOutline, inspectNodes } from './canvas-spatial.js';
-import { getCanvasStore } from '../storage/index.js';
+import { getCanvasStore, resetStorageCache } from '../storage/index.js';
 import { setWorkspacePath } from '../workspace.js';
 
 let tmp: string;
@@ -26,6 +26,7 @@ interface SeedNode {
   position: { x: number; y: number };
   parentId?: string;
   label: string;
+  threadId?: string;
 }
 
 function seed(canvasId: string, nodes: SeedNode[]): void {
@@ -41,7 +42,10 @@ function seed(canvasId: string, nodes: SeedNode[]): void {
         ...(n.parentId ? { parentId: n.parentId } : {}),
         style: { width: 200, height: 100 },
         measured: { width: 200, height: 100 },
-        data: { label: n.label },
+        data: {
+          label: n.label,
+          ...(n.threadId ? { threadId: n.threadId } : {}),
+        },
       })),
       edges: [],
     },
@@ -72,6 +76,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  resetStorageCache();
   rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -151,5 +156,48 @@ describe('inspect_nodes / outline — dual-field coordinates', () => {
     const child = outline.nodes.find((n) => n.id === 'child');
     expect(child?.position).toEqual({ x: 50, y: 60 });
     expect(child?.absolutePosition).toEqual({ x: 1050, y: 560 });
+  });
+
+  it('returns persisted thread associations only for Question nodes', async () => {
+    seed(CANVAS, [
+      {
+        id: 'agent',
+        type: 'question',
+        position: { x: 0, y: 0 },
+        label: 'Agent',
+        threadId: 'thread-agent',
+      },
+      {
+        id: 'unbound',
+        type: 'question',
+        position: { x: 250, y: 0 },
+        label: 'Unbound',
+      },
+      {
+        id: 'note',
+        type: 'note',
+        position: { x: 500, y: 0 },
+        label: 'Note',
+        threadId: 'thread-invalid',
+      },
+    ]);
+
+    const first = await inspectNodes(CANVAS, {});
+    if ('error' in first) throw new Error(first.error);
+    const firstById = new Map(first.nodes.map((node) => [node.id, node]));
+    expect(firstById.get('agent')).toMatchObject({
+      id: 'agent',
+      threadId: 'thread-agent',
+    });
+    expect(firstById.get('unbound')).not.toHaveProperty('threadId');
+    expect(firstById.get('note')).not.toHaveProperty('threadId');
+
+    resetStorageCache();
+    const restarted = await inspectNodes(CANVAS, { ids: ['agent'] });
+    if ('error' in restarted) throw new Error(restarted.error);
+    expect(restarted.nodes[0]).toMatchObject({
+      id: 'agent',
+      threadId: 'thread-agent',
+    });
   });
 });

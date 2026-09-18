@@ -604,6 +604,7 @@ describe('direct Space query discovery', () => {
       expect(parsedDetail).toMatchObject({
         kind: 'query',
         type: 'INSPECT_NODES',
+        result: expect.stringContaining('threadId'),
       });
       expect(parsedDetail.schema).toHaveProperty('properties.type');
 
@@ -676,6 +677,73 @@ describe('POST /api/rfs/:canvasId/query', () => {
           nodes: [{ id: 'node-1', label: 'Alpha' }],
         },
       });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('exposes persisted Question thread mappings without Agent side effects', async () => {
+    const store = getCanvasStore('c1');
+    store.write({
+      canvasId: 'c1',
+      title: null,
+      version: 1,
+      state: {
+        nodes: [
+          {
+            id: 'node-agent',
+            type: 'question',
+            position: { x: 0, y: 0 },
+            data: { threadId: 'thread-agent' },
+          },
+          {
+            id: 'node-unbound',
+            type: 'question',
+            position: { x: 250, y: 0 },
+            data: {},
+          },
+          {
+            id: 'node-note',
+            type: 'note',
+            position: { x: 500, y: 0 },
+            data: { threadId: 'thread-invalid' },
+          },
+        ],
+        edges: [],
+      },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    const before = store.read();
+    const create = vi.spyOn(agentNodeService, 'create');
+    const invoke = vi.spyOn(agentThreadService, 'invoke');
+
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/query',
+        headers: { 'content-type': 'application/json' },
+        payload: { type: 'INSPECT_NODES' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const parsed = spaceQueryResponseSchema.parse(response.json());
+      if (parsed.type !== 'INSPECT_NODES') {
+        throw new Error('Expected INSPECT_NODES response');
+      }
+      const nodes = new Map(parsed.result.nodes.map((node) => [node.id, node]));
+      expect(nodes.get('node-agent')).toMatchObject({
+        id: 'node-agent',
+        threadId: 'thread-agent',
+      });
+      expect(nodes.get('node-unbound')).not.toHaveProperty('threadId');
+      expect(nodes.get('node-note')).not.toHaveProperty('threadId');
+      expect(getCanvasStore('c1').read()).toEqual(before);
+      expect(create).not.toHaveBeenCalled();
+      expect(invoke).not.toHaveBeenCalled();
+      expect(agentMocks.record).not.toHaveBeenCalled();
+      expect(agentMocks.get).not.toHaveBeenCalled();
     } finally {
       await app.close();
     }

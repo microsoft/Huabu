@@ -816,6 +816,7 @@ const inspectNodesResultSchema = z
     arrangement: z.string().optional(),
     nodes: z.array(
       spaceNodeResultSchema.extend({
+        threadId: z.string().min(1).optional(),
         distance: z.number().optional(),
         centerDistance: z.number().optional(),
         direction: z.enum(['left', 'right', 'above', 'below']).optional(),

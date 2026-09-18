@@ -255,14 +255,21 @@ The SSE `created` event reports the new Node, thread, effective Profile, and opt
 
 ### 8.2 Continue the Agent
 
-Address the existing thread in the URL. This submits another turn without creating an Agent:
+Address the existing thread in the URL. If you know the Agent Node but did not retain its creation response, query that Node first; a Question Node with an existing association includes `threadId`:
 
 ```bash
+THREAD_ID="$(curl -fsS -H "$AUTH" -H "Content-Type: application/json" \
+  --data-binary '{"type":"INSPECT_NODES","ids":["node-123"]}' \
+  "$HUABU_RFS_URL/query" \
+  | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).result.nodes[0]?.threadId ?? ""))')"
+
 SSE="$(curl -fsS -N -H "$AUTH" -H "Content-Type: text/plain" \
   --data-binary @./follow-up.txt \
   "$HUABU_RFS_URL/agent/$THREAD_ID/prompt")"
 printf '%s\n' "$SSE" | sed -n 's/^data: //p'
 ```
+
+An absent `threadId` means the result is not a Question Node with an existing thread association. Inspection is read-only and never creates or realizes Agent state. Submitting the prompt continues the associated conversation without creating another Agent or changing its Profile.
 
 ### 8.3 Choose Profiles or create without starting
 

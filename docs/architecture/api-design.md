@@ -126,6 +126,10 @@ Success returns `{ threadId, turns, before?, hasMore }`. Each `turns[]` entry is
 
 Malformed request fields and malformed cursors return HTTP 400 with `code: "malformed_history_request"` or `code: "malformed_history_cursor"`. A cursor whose thread generation was replaced or rehomed returns HTTP 409 with `code: "stale_history_cursor"`. The existing `GET /api/agent/history/:threadId` remains the unbounded compatibility endpoint for current consumers; pagination is not applied implicitly to model recovery or complete-history callers.
 
+## RFS Agent discovery
+
+`POST /api/rfs/:canvasId/query` with `type: "INSPECT_NODES"` uses the canonical response contract in [`space-operations.ts`](../../packages/shared/src/types/api/space-operations.ts). Each Question Node result includes its non-empty persisted `threadId` when associated; non-Question Nodes and unbound Questions omit the field. The mapping is scoped by the authenticated RFS URL's Canvas and is read-only: inspection does not create a thread, workload, binding, realization, or invocation. Callers continue the mapped conversation through the existing `POST /api/rfs/:canvasId/agent/:threadId/prompt` SSE endpoint.
+
 ## Anti-patterns
 
 | Don't                                               | Do                                              |
