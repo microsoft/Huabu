@@ -101,7 +101,12 @@ function agentletHello(agentletId: string): JsonRpcMessage {
     agentletProfile: {
       bridge: { name: 'agentlet', version: PROTOCOL_VERSION },
       machine: { hostname: agentletId, platform: process.platform },
-      capabilities: { autoRestart: true, bufferLimit: 1000, maxAgents: 10 },
+      capabilities: {
+        autoRestart: true,
+        bufferLimit: 1000,
+        maxAgents: 10,
+        harnessDiscovery: { version: 1 },
+      },
     },
   };
   return {
@@ -530,10 +535,8 @@ describe('AgentletGateway', () => {
 
   it('routes control RPCs to the explicitly selected daemon', async () => {
     const { gateway, url } = await startHarness();
-    const setupProgress = vi.fn();
     const machinesChanged = vi.fn();
-    gateway.onAgentTeamSetupProgress(setupProgress);
-    gateway.onAgentTeamMachinesChanged(machinesChanged);
+    gateway.onAgentletsChanged(machinesChanged);
     const machineA = await connect(url, {
       role: 'agentlet',
       queryId: 'machine-a',
@@ -546,17 +549,9 @@ describe('AgentletGateway', () => {
       token: 'token-b',
       hello: agentletHello('machine-b'),
     });
-    expect(gateway.listAgentTeamMachines()).toEqual([
-      {
-        machine: 'machine-a',
-        hostname: 'machine-a',
-        platform: process.platform,
-      },
-      {
-        machine: 'machine-b',
-        hostname: 'machine-b',
-        platform: process.platform,
-      },
+    expect(gateway.getAgentlets().map(({ agentletId }) => agentletId)).toEqual([
+      'machine-a',
+      'machine-b',
     ]);
     expect(machinesChanged).toHaveBeenCalledTimes(2);
     machineA.socket.on('message', (data) => {
@@ -576,71 +571,14 @@ describe('AgentletGateway', () => {
       }
       if (
         'method' in message &&
-        message.method === ServerMethods.AGENT_TEAM_SETUP &&
+        message.method === ServerMethods.DISCOVER_HARNESSES &&
         'id' in message
       ) {
         machineA.socket.send(
           JSON.stringify({
             jsonrpc: '2.0',
             id: message.id,
-            result: {
-              operationId: 'setup-a',
-              accepted: true,
-            },
-          }),
-        );
-        machineA.socket.send(
-          JSON.stringify({
-            jsonrpc: '2.0',
-            method: AgentletMethods.AGENT_TEAM_SETUP_PROGRESS,
-            params: {
-              operationId: 'setup-a',
-              type: 'completed',
-              workingDirPath: '/deployments/reviewer',
-            },
-          }),
-        );
-      }
-      if (
-        'method' in message &&
-        message.method === ServerMethods.AGENT_TEAM_SETUP_CANCEL &&
-        'id' in message
-      ) {
-        machineA.socket.send(
-          JSON.stringify({
-            jsonrpc: '2.0',
-            id: message.id,
-            result: { operationId: 'setup-a', cancelled: true },
-          }),
-        );
-      }
-      if (
-        'method' in message &&
-        message.method === ServerMethods.AGENT_TEAM_VALIDATE &&
-        'id' in message
-      ) {
-        machineA.socket.send(
-          JSON.stringify({
-            jsonrpc: '2.0',
-            id: message.id,
-            result: { valid: true, issues: [] },
-          }),
-        );
-      }
-      if (
-        'method' in message &&
-        message.method === ServerMethods.AGENT_TEAM_SCAN &&
-        'id' in message
-      ) {
-        machineA.socket.send(
-          JSON.stringify({
-            jsonrpc: '2.0',
-            id: message.id,
-            result: {
-              rootPath: '/teams',
-              members: [],
-              diagnostics: [],
-            },
+            result: { harnesses: [] },
           }),
         );
       }
@@ -654,44 +592,179 @@ describe('AgentletGateway', () => {
     ).resolves.toEqual({ sessionId: 'native-a', pid: 456 });
 
     await expect(
-      gateway.scanAgentTeams('machine-a', { rootPath: '/teams' }),
-    ).resolves.toEqual({
-      rootPath: '/teams',
-      members: [],
-      diagnostics: [],
-    });
+      gateway.discoverHarnesses('machine-a', { prepareWorkspaces: true }),
+    ).resolves.toEqual({ harnesses: [] });
+  });
 
-    await expect(
-      gateway.setupAgentTeam('machine-a', {
-        operationId: 'setup-a',
-        manifestPath: '/teams/reviewer/agentlet.yaml',
-        harness: 'copilot',
-        workingDirPath: '/deployments/reviewer',
-      }),
-    ).resolves.toEqual({
-      operationId: 'setup-a',
-      accepted: true,
+  it('emits only machine connection events, including replacement, and unsubscribes', async () => {
+    const { gateway, url } = await startHarness();
+    const changed = vi.fn();
+    const unsubscribe = gateway.onAgentletsChanged(changed);
+    const first = await connect(url, {
+      role: 'agentlet',
+      queryId: 'machine-a',
+      token: 'token-a',
+      hello: agentletHello('machine-a'),
     });
-    await waitUntil(() => setupProgress.mock.calls.length === 1);
-    expect(setupProgress).toHaveBeenCalledWith('machine-a', {
-      operationId: 'setup-a',
-      type: 'completed',
-      workingDirPath: '/deployments/reviewer',
+    const session = await connect(url, {
+      role: 'session',
+      queryId: 'session-a',
+      token: 'token-a',
+      hello: sessionHello('machine-a', 'session-a'),
     });
+    session.socket.close();
+    await waitUntil(
+      () =>
+        gateway.getSession('machine-a', 'session-a')?.status === 'disconnected',
+    );
+    expect(changed).toHaveBeenCalledTimes(1);
+    const replacement = await connect(url, {
+      role: 'agentlet',
+      queryId: 'machine-a',
+      token: 'token-a',
+      hello: agentletHello('machine-a'),
+    });
+    await waitUntil(() => first.socket.readyState === WebSocket.CLOSED);
+    expect(changed.mock.calls).toEqual([
+      [{ agentletId: 'machine-a', status: 'connected' }],
+      [{ agentletId: 'machine-a', status: 'connected' }],
+    ]);
+    replacement.socket.close();
+    await waitUntil(() => changed.mock.calls.length === 3);
+    expect(changed).toHaveBeenLastCalledWith({
+      agentletId: 'machine-a',
+      status: 'disconnected',
+    });
+    unsubscribe();
+    await connect(url, {
+      role: 'agentlet',
+      queryId: 'machine-a',
+      token: 'token-a',
+      hello: agentletHello('machine-a'),
+    });
+    expect(changed).toHaveBeenCalledTimes(3);
+  });
 
+  it('fails discovery for disconnected and unsupported targets without fallback', async () => {
+    const { gateway, url } = await startHarness();
     await expect(
-      gateway.cancelAgentTeamSetup('machine-a', {
-        operationId: 'setup-a',
-      }),
-    ).resolves.toEqual({ operationId: 'setup-a', cancelled: true });
+      gateway.discoverHarnesses('machine-a', {}),
+    ).rejects.toMatchObject({ code: 'agentlet_disconnected' });
+    const hello = agentletHello('machine-a');
+    if ('params' in hello) {
+      const params = hello.params as unknown as AgentletHelloParams;
+      delete params.agentletProfile.capabilities.harnessDiscovery;
+    }
+    await connect(url, {
+      role: 'agentlet',
+      queryId: 'machine-a',
+      token: 'token-a',
+      hello,
+    });
+    await expect(
+      gateway.discoverHarnesses('machine-a', {}),
+    ).rejects.toMatchObject({ code: 'harness_discovery_unsupported' });
+  });
 
+  it('rejects stale pending RPCs on replacement and routes new replies correctly', async () => {
+    const { gateway, url } = await startHarness();
+    const first = await connect(url, {
+      role: 'agentlet',
+      queryId: 'machine-a',
+      token: 'token-a',
+      hello: agentletHello('machine-a'),
+    });
+    const pending = gateway.discoverHarnesses('machine-a', {});
+    const rejected = expect(pending).rejects.toMatchObject({
+      code: 'agentlet_disconnected',
+    });
+    await waitUntil(() =>
+      first.messages.some(
+        (message) =>
+          'method' in message &&
+          message.method === ServerMethods.DISCOVER_HARNESSES,
+      ),
+    );
+    const replacement = await connect(url, {
+      role: 'agentlet',
+      queryId: 'machine-a',
+      token: 'token-a',
+      hello: agentletHello('machine-a'),
+    });
+    await rejected;
+    replacement.socket.on('message', (data) => {
+      const message = JSON.parse(data.toString()) as JsonRpcMessage;
+      if (
+        'method' in message &&
+        'id' in message &&
+        message.method === ServerMethods.DISCOVER_HARNESSES
+      ) {
+        replacement.socket.send(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: message.id,
+            result: { harnesses: [] },
+          }),
+        );
+      }
+    });
+    await expect(gateway.discoverHarnesses('machine-a', {})).resolves.toEqual({
+      harnesses: [],
+    });
+  });
+
+  it('rejects pending RPCs and emits disconnection when the host closes machine control', async () => {
+    const { gateway, url } = await startHarness();
+    const changed = vi.fn();
+    gateway.onAgentletsChanged(changed);
+    const client = await connect(url, {
+      role: 'agentlet',
+      queryId: 'machine-a',
+      token: 'token-a',
+      hello: agentletHello('machine-a'),
+    });
+    const rejected = expect(
+      gateway.discoverHarnesses('machine-a', {}),
+    ).rejects.toMatchObject({ code: 'agentlet_disconnected' });
+    await waitUntil(() =>
+      client.messages.some(
+        (message) =>
+          'method' in message &&
+          message.method === ServerMethods.DISCOVER_HARNESSES,
+      ),
+    );
+    gateway.getAgentlet('machine-a')?.disconnect('host_requested');
+    await rejected;
+    expect(changed).toHaveBeenLastCalledWith({
+      agentletId: 'machine-a',
+      status: 'disconnected',
+    });
+    expect(changed).toHaveBeenCalledTimes(2);
+  });
+
+  it('validates discovery responses at the transport boundary', async () => {
+    const { gateway, url } = await startHarness();
+    const client = await connect(url, {
+      role: 'agentlet',
+      queryId: 'machine-a',
+      token: 'token-a',
+      hello: agentletHello('machine-a'),
+    });
+    client.socket.on('message', (data) => {
+      const message = JSON.parse(data.toString()) as JsonRpcMessage;
+      if ('method' in message && 'id' in message) {
+        client.socket.send(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: message.id,
+            result: { harnesses: [{ id: 'malformed' }] },
+          }),
+        );
+      }
+    });
     await expect(
-      gateway.validateAgentTeam('machine-a', {
-        manifestPath: '/teams/reviewer/agentlet.yaml',
-        harness: 'copilot',
-        workingDirPath: '/deployments/reviewer',
-      }),
-    ).resolves.toEqual({ valid: true, issues: [] });
+      gateway.discoverHarnesses('machine-a', {}),
+    ).rejects.toMatchObject({ code: 'invalid_harness_discovery_response' });
   });
 
   it('rejects non-positive buffer limits', () => {

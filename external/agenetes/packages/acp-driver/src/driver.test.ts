@@ -29,6 +29,58 @@ const freshContext = {
 };
 
 describe('acpDriverFactory (M5 FACTORY)', () => {
+  it.each([
+    { agentDir: '/retired', harness: 'copilot' },
+    {
+      manifestPath: '/retired/agentlet.yaml',
+      workingDirPath: '/work',
+      harness: 'copilot',
+    },
+  ])(
+    'rejects retired Team recipes even when an ordinary command is also present',
+    (agentTeam) => {
+      const driver = acpDriverFactory();
+      for (const command of [undefined, 'agent --acp']) {
+        expect(() =>
+          driver.validateSpec({
+            binding: { alias: 'Retired', profileId: 'old' },
+            recipe: { alias: 'Retired', autoRestart: true, command, agentTeam },
+          }),
+        ).toThrow(expect.objectContaining({ code: 'invalid_driver_spec' }));
+      }
+    },
+  );
+
+  it('preserves generic runtime recipe resolution and validates its output', async () => {
+    const recipe = {
+      command: 'ordinary --acp',
+      alias: 'Ordinary',
+      autoRestart: true,
+      cwd: '/user/work',
+    };
+    const spec: AcpCreateSpec['spec'] = {
+      binding: { alias: 'Ordinary', profileId: 'ordinary' },
+      resolveRecipe: async () => ({ recipe, env: { RUNTIME: 'value' } }),
+      env: { HOST: 'value' },
+    };
+    await expect(
+      resolveAcpRuntimeLaunch(spec, { getIdleTimeoutSecs: () => 0 }),
+    ).resolves.toEqual({
+      recipe,
+      env: { RUNTIME: 'value', HOST: 'value' },
+    });
+    const retiredRecipe = { ...recipe, agentTeam: { agentDir: '/retired' } };
+    await expect(
+      resolveAcpRuntimeLaunch(
+        {
+          ...spec,
+          resolveRecipe: async () => ({ recipe: retiredRecipe }),
+        },
+        { getIdleTimeoutSecs: () => 0 },
+      ),
+    ).rejects.toThrow();
+  });
+
   it('preserves explicit placement and resolves legacy specs without mutation', () => {
     const explicit: AcpCreateSpec = {
       kind: 'acp',

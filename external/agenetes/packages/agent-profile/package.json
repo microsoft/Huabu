@@ -1,7 +1,7 @@
 {
-  "name": "@agenetes/agent-team",
+  "name": "@agenetes/agent-profile",
   "version": "0.1.0",
-  "description": "Host-agnostic Agent Team discovery registry, reconciliation, and persistence.",
+  "description": "Host-agnostic ordinary Agent Profile registry and atomic persistence.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -23,7 +23,6 @@
   "dependencies": {
     "@agenetes/protocol": "workspace:*",
     "@agenetes/runtime": "workspace:*",
-    "@agentlet/protocol": "workspace:*",
     "zod": "^4.3.6"
   },
   "devDependencies": {

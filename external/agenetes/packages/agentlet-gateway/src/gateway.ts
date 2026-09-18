@@ -7,15 +7,8 @@ import {
   type AgentHelloResult,
   type AgentletHelloParams,
   type AgentletHelloResult,
-  type AgentTeamScanParams,
-  type AgentTeamScanResult,
-  type AgentTeamSetupCancelParams,
-  type AgentTeamSetupCancelResult,
-  type AgentTeamSetupParams,
-  type AgentTeamSetupProgressParams,
-  type AgentTeamSetupStartResult,
-  type AgentTeamValidateParams,
-  type AgentTeamValidateResult,
+  type HarnessDiscoveryParams,
+  type HarnessDiscoveryResult,
   type JsonRpcError,
   type JsonRpcMessage,
   type SendResourceParams,
@@ -27,6 +20,10 @@ import {
 import { WebSocket, WebSocketServer } from 'ws';
 
 import { LiveAgentletConnection } from './connection.js';
+import {
+  AgentletGatewayError,
+  parseHarnessDiscoveryResult,
+} from './harness-discovery.js';
 import { AgentletRequestError } from './request-error.js';
 
 import type {
@@ -50,6 +47,7 @@ const noopLogger: AgentletGatewayLogger = {
 };
 
 interface PendingRequest {
+  agentletId: string;
   resolve(value: unknown): void;
   reject(error: Error): void;
   timer: NodeJS.Timeout;
@@ -71,10 +69,12 @@ export class AgentletGateway {
     Map<string, LiveAgentletConnection>
   >();
   private readonly pendingRequests = new Map<string, PendingRequest>();
-  private readonly setupProgressHandlers = new Set<
-    (agentletId: string, progress: AgentTeamSetupProgressParams) => void
+  private readonly agentletChangeHandlers = new Set<
+    (event: {
+      agentletId: string;
+      status: 'connected' | 'disconnected';
+    }) => void
   >();
-  private readonly agentTeamMachineHandlers = new Set<() => void>();
   private readonly handshakeTimeout: number;
   private readonly controlRequestTimeout: number;
   private readonly spawnRequestTimeout: number;
@@ -136,28 +136,14 @@ export class AgentletGateway {
     );
   }
 
-  listAgentTeamMachines(): Array<{
-    machine: string;
-    hostname: string;
-    platform: string;
-  }> {
-    return this.getAgentlets({ status: 'connected' }).flatMap((connection) => {
-      const machine = connection.agentletProfile?.machine;
-      return machine
-        ? [
-            {
-              machine: connection.agentletId,
-              hostname: machine.hostname,
-              platform: machine.platform,
-            },
-          ]
-        : [];
-    });
-  }
-
-  onAgentTeamMachinesChanged(handler: () => void): () => void {
-    this.agentTeamMachineHandlers.add(handler);
-    return () => this.agentTeamMachineHandlers.delete(handler);
+  onAgentletsChanged(
+    handler: (event: {
+      agentletId: string;
+      status: 'connected' | 'disconnected';
+    }) => void,
+  ): () => void {
+    this.agentletChangeHandlers.add(handler);
+    return () => this.agentletChangeHandlers.delete(handler);
   }
 
   getSession(
@@ -211,58 +197,26 @@ export class AgentletGateway {
     return this.sendControlRequest(agentletId, ServerMethods.LIST, {});
   }
 
-  scanAgentTeams(
+  async discoverHarnesses(
     agentletId: string,
-    params: AgentTeamScanParams,
-  ): Promise<AgentTeamScanResult> {
-    return this.sendControlRequest(
-      agentletId,
-      ServerMethods.AGENT_TEAM_SCAN,
-      params,
+    params: HarnessDiscoveryParams,
+  ): Promise<HarnessDiscoveryResult> {
+    const connection = this.requireConnectedAgentlet(agentletId);
+    if (
+      connection.agentletProfile?.capabilities?.harnessDiscovery?.version !== 1
+    ) {
+      throw new AgentletGatewayError(
+        'harness_discovery_unsupported',
+        `Agentlet does not support harness discovery v1: ${agentletId}`,
+      );
+    }
+    return parseHarnessDiscoveryResult(
+      await this.sendControlRequest<unknown>(
+        agentletId,
+        ServerMethods.DISCOVER_HARNESSES,
+        params,
+      ),
     );
-  }
-
-  setupAgentTeam(
-    agentletId: string,
-    params: AgentTeamSetupParams,
-  ): Promise<AgentTeamSetupStartResult> {
-    return this.sendControlRequest(
-      agentletId,
-      ServerMethods.AGENT_TEAM_SETUP,
-      params,
-    );
-  }
-
-  cancelAgentTeamSetup(
-    agentletId: string,
-    params: AgentTeamSetupCancelParams,
-  ): Promise<AgentTeamSetupCancelResult> {
-    return this.sendControlRequest(
-      agentletId,
-      ServerMethods.AGENT_TEAM_SETUP_CANCEL,
-      params,
-    );
-  }
-
-  validateAgentTeam(
-    agentletId: string,
-    params: AgentTeamValidateParams,
-  ): Promise<AgentTeamValidateResult> {
-    return this.sendControlRequest(
-      agentletId,
-      ServerMethods.AGENT_TEAM_VALIDATE,
-      params,
-    );
-  }
-
-  onAgentTeamSetupProgress(
-    handler: (
-      agentletId: string,
-      progress: AgentTeamSetupProgressParams,
-    ) => void,
-  ): () => void {
-    this.setupProgressHandlers.add(handler);
-    return () => this.setupProgressHandlers.delete(handler);
   }
 
   sendResource(agentletId: string, params: SendResourceParams): void {
@@ -375,27 +329,6 @@ export class AgentletGateway {
         this.hasPendingRequest(connection.agentletId, message.id)
       ) {
         this.handlePendingResponse(connection.agentletId, message);
-      } else if (
-        connection.role === 'agentlet' &&
-        'method' in message &&
-        message.method === AgentletMethods.AGENT_TEAM_SETUP_PROGRESS
-      ) {
-        for (const handler of this.setupProgressHandlers) {
-          try {
-            handler(
-              connection.agentletId,
-              message.params as unknown as AgentTeamSetupProgressParams,
-            );
-          } catch (error) {
-            this.logger.warn(
-              {
-                agentletId: connection.agentletId,
-                error: error instanceof Error ? error.message : String(error),
-              },
-              'Agent Team setup progress handler failed',
-            );
-          }
-        }
       } else {
         connection.handleIncomingMessage(message);
       }
@@ -406,7 +339,6 @@ export class AgentletGateway {
       const connection = this.findConnectionByWs(ws);
       if (!connection) return;
       connection.handleWsClose('websocket_closed');
-      this.notifyDisconnection(connection, 'websocket_closed');
     });
 
     ws.on('error', () => {
@@ -449,6 +381,7 @@ export class AgentletGateway {
 
     const existing = this.agentlets.get(params.agentletId);
     if (existing) {
+      this.rejectPendingRequests(params.agentletId);
       existing.handleReconnect(ws, {
         agentletProfile: params.agentletProfile,
       });
@@ -462,7 +395,7 @@ export class AgentletGateway {
         this.options.onReconnection,
         existing,
       );
-      this.notifyAgentTeamMachinesChanged();
+      this.notifyAgentletsChanged(params.agentletId, 'connected');
       return;
     }
 
@@ -476,6 +409,8 @@ export class AgentletGateway {
       inboundPreAttachBufferLimit: this.inboundPreAttachBufferLimit,
       logger: this.logger,
       agentletProfile: params.agentletProfile,
+      onDisconnection: (closed, reason) =>
+        this.notifyDisconnection(closed, reason),
     });
     this.agentlets.set(params.agentletId, connection);
     this.sendResult(ws, message.id, {
@@ -487,7 +422,7 @@ export class AgentletGateway {
       this.options.onConnection,
       connection,
     );
-    this.notifyAgentTeamMachinesChanged();
+    this.notifyAgentletsChanged(params.agentletId, 'connected');
   }
 
   private async handleSessionHello(
@@ -548,6 +483,8 @@ export class AgentletGateway {
       inboundPreAttachBufferLimit: this.inboundPreAttachBufferLimit,
       logger: this.logger,
       sessionProfile: params.sessionProfile,
+      onDisconnection: (closed, reason) =>
+        this.notifyDisconnection(closed, reason),
     });
     sessions.set(params.sessionId, connection);
     this.sendResult(ws, message.id, {
@@ -577,23 +514,33 @@ export class AgentletGateway {
         reject(new Error(`Agentlet request timed out: ${method}`));
       }, timeoutMs);
       this.pendingRequests.set(key, {
+        agentletId,
         resolve: (value) => resolve(value as T),
         reject,
         timer,
       });
-      connection.sendRaw({
-        jsonrpc: '2.0',
-        method,
-        id,
-        params: params as Record<string, unknown>,
-      });
+      try {
+        connection.sendRaw({
+          jsonrpc: '2.0',
+          method,
+          id,
+          params: params as Record<string, unknown>,
+        });
+      } catch (error) {
+        clearTimeout(timer);
+        this.pendingRequests.delete(key);
+        reject(error);
+      }
     });
   }
 
   private requireConnectedAgentlet(agentletId: string): LiveAgentletConnection {
     const connection = this.agentlets.get(agentletId);
     if (!connection || connection.status !== 'connected') {
-      throw new Error(`Agentlet not found or disconnected: ${agentletId}`);
+      throw new AgentletGatewayError(
+        'agentlet_disconnected',
+        `Agentlet not found or disconnected: ${agentletId}`,
+      );
     }
     return connection;
   }
@@ -609,9 +556,20 @@ export class AgentletGateway {
     clearTimeout(pending.timer);
     this.pendingRequests.delete(key);
     if ('error' in message && message.error) {
-      pending.reject(new AgentletRequestError(message.error));
+      if (
+        typeof message.error.code !== 'number' ||
+        typeof message.error.message !== 'string'
+      ) {
+        pending.reject(new Error('Malformed Agentlet JSON-RPC error'));
+      } else {
+        pending.reject(new AgentletRequestError(message.error));
+      }
     } else if ('result' in message) {
       pending.resolve(message.result);
+    } else {
+      pending.reject(
+        new Error('Agentlet JSON-RPC response has no result or error'),
+      );
     }
   }
 
@@ -707,7 +665,8 @@ export class AgentletGateway {
     reason: string,
   ): void {
     if (connection.role === 'agentlet') {
-      this.notifyAgentTeamMachinesChanged();
+      this.rejectPendingRequests(connection.agentletId);
+      this.notifyAgentletsChanged(connection.agentletId, 'disconnected');
     }
     const callback = this.options.onDisconnection;
     if (!callback) return;
@@ -726,14 +685,31 @@ export class AgentletGateway {
     }
   }
 
-  private notifyAgentTeamMachinesChanged(): void {
-    for (const handler of this.agentTeamMachineHandlers) {
+  private rejectPendingRequests(agentletId: string): void {
+    for (const [key, pending] of this.pendingRequests) {
+      if (pending.agentletId !== agentletId) continue;
+      clearTimeout(pending.timer);
+      this.pendingRequests.delete(key);
+      pending.reject(
+        new AgentletGatewayError(
+          'agentlet_disconnected',
+          `Agentlet connection changed: ${agentletId}`,
+        ),
+      );
+    }
+  }
+
+  private notifyAgentletsChanged(
+    agentletId: string,
+    status: 'connected' | 'disconnected',
+  ): void {
+    for (const handler of this.agentletChangeHandlers) {
       try {
-        handler();
+        handler({ agentletId, status });
       } catch (error) {
         this.logger.warn(
           {
-            callback: 'onAgentTeamMachinesChanged',
+            callback: 'onAgentletsChanged',
             error: error instanceof Error ? error.message : String(error),
           },
           'Agentlet Gateway machine-list callback failed',

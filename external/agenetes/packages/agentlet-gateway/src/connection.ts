@@ -27,6 +27,7 @@ export interface LiveAgentletConnectionOptions {
   logger: AgentletGatewayLogger;
   sessionProfile?: SessionProfile;
   agentletProfile?: AgentletProfile;
+  onDisconnection?: (connection: AgentletConnection, reason: string) => void;
 }
 
 export class LiveAgentletConnection implements AgentletConnection {
@@ -49,6 +50,7 @@ export class LiveAgentletConnection implements AgentletConnection {
   private readonly inboundPreAttachBufferLimit: number;
   private readonly logger: AgentletGatewayLogger;
   private firstMessageHandlerAttached = false;
+  private readonly onDisconnection?: LiveAgentletConnectionOptions['onDisconnection'];
 
   constructor(options: LiveAgentletConnectionOptions) {
     this.sessionId = options.sessionId;
@@ -61,6 +63,7 @@ export class LiveAgentletConnection implements AgentletConnection {
     this.logger = options.logger;
     this.currentSessionProfile = options.sessionProfile;
     this.currentAgentletProfile = options.agentletProfile;
+    this.onDisconnection = options.onDisconnection;
     this.connectedAt = new Date();
   }
 
@@ -117,8 +120,7 @@ export class LiveAgentletConnection implements AgentletConnection {
       this.ws.send(JSON.stringify(shutdown));
       this.ws.close(1000, reason ?? 'server_requested');
     }
-    this.currentStatus = 'disconnected';
-    this.ws = null;
+    this.handleWsClose(reason ?? 'server_requested');
   }
 
   handleIncomingMessage(message: JsonRpcMessage): void {
@@ -155,8 +157,10 @@ export class LiveAgentletConnection implements AgentletConnection {
   }
 
   handleWsClose(reason = 'websocket_closed'): void {
+    if (this.currentStatus === 'disconnected') return;
     this.currentStatus = 'disconnected';
     this.ws = null;
+    this.onDisconnection?.(this, reason);
     for (const handler of this.lifecycleHandlers) {
       handler({ type: 'agent/disconnected', reason });
     }

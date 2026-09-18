@@ -2,10 +2,7 @@ import { agentSpecSchema } from '@agenetes/protocol';
 import { defineDriver } from '@agenetes/runtime';
 import { z } from 'zod';
 
-import type {
-  AgentProfileSnapshot,
-  AgentTeamManifestRuntime,
-} from './types.js';
+import type { AgentProfileSnapshot } from './types.js';
 import type {
   AgentCapabilities,
   AgentSpec,
@@ -34,52 +31,31 @@ interface AcpDelegateSpec extends AgentSpec {
   readonly agentletId: string;
   readonly cwd: string;
   readonly recipe?: {
-    readonly command?: string;
+    readonly command: string;
     readonly cwd?: string;
     readonly autoRestart: true;
     readonly alias: string;
-    readonly agentTeam?: {
-      readonly manifestPath: string;
-      readonly workingDirPath: string;
-      readonly harness: string;
-    };
   };
-  readonly resolveRecipe?: () => Promise<{
-    recipe: NonNullable<AcpDelegateSpec['recipe']>;
-    env?: Record<string, string>;
-  }>;
   readonly env?: Record<string, string>;
 }
 
 type AcpDelegateWorkloadSpec = TypedWorkloadSpec<AcpDelegateSpec>;
 
-export interface AgentProfileRuntimePorts {
-  resolveManifestRuntime(
-    snapshot: AgentProfileSnapshot,
-  ): Promise<AgentTeamManifestRuntime>;
-}
-
 export interface AgentProfileDriverConfig {
   readonly delegate: MountedAgentDriver;
   readonly delegateCapabilities: AgentCapabilities;
-  readonly ports: AgentProfileRuntimePorts;
 }
 
 const profileSnapshotSchema = z.object({
   profileId: z.string(),
   agentletId: z.string(),
   workingDirPath: z.string(),
-  launch: z.discriminatedUnion('kind', [
-    z.object({
+  launch: z
+    .object({
       kind: z.literal('acp-command'),
       command: z.string(),
-    }),
-    z.object({
-      kind: z.literal('agent-team-manifest'),
-      manifestPath: z.string(),
-      harness: z.string(),
-    }),
-  ]),
+    })
+    .strict(),
 });
 
 export const agentProfileSpecSchema = agentSpecSchema.extend({
@@ -93,29 +69,8 @@ export const agentProfileSpecSchema = agentSpecSchema.extend({
 
 function lowerProfile(
   workload: AgentProfileWorkloadSpec,
-  ports: AgentProfileRuntimePorts,
 ): AcpDelegateWorkloadSpec {
   const { profile, binding, env, initialPreamble } = workload.spec;
-  if (profile.launch.kind === 'acp-command') {
-    return {
-      ...workload,
-      spec: {
-        initialPreamble,
-        binding,
-        agentletId: profile.agentletId,
-        cwd: profile.workingDirPath,
-        env,
-        recipe: {
-          command: profile.launch.command,
-          cwd: profile.workingDirPath,
-          autoRestart: true,
-          alias: binding.alias,
-        },
-      },
-    };
-  }
-  const launch = profile.launch;
-
   return {
     ...workload,
     spec: {
@@ -124,20 +79,11 @@ function lowerProfile(
       agentletId: profile.agentletId,
       cwd: profile.workingDirPath,
       env,
-      resolveRecipe: async () => {
-        const runtime = await ports.resolveManifestRuntime(profile);
-        return {
-          env: { ...runtime.environment, ...env },
-          recipe: {
-            autoRestart: true,
-            alias: binding.alias,
-            agentTeam: {
-              manifestPath: launch.manifestPath,
-              workingDirPath: profile.workingDirPath,
-              harness: launch.harness,
-            },
-          },
-        };
+      recipe: {
+        command: profile.launch.command,
+        cwd: profile.workingDirPath,
+        autoRestart: true,
+        alias: binding.alias,
       },
     },
   };
@@ -184,7 +130,7 @@ class AgentProfileHandle<
   private async createDelegate(): Promise<
     AgentHandle<TSubmission, TResult, TEvent, TTurnCtx>
   > {
-    const lowered = lowerProfile(this.workload, this.config.ports);
+    const lowered = lowerProfile(this.workload);
     const delegate = this.config.delegate.create(
       lowered,
       this.context,

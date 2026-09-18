@@ -30,6 +30,7 @@
 import { getAgentletGateway } from '@agenetes/agentlet-host';
 import { RequestError } from '@agentclientprotocol/sdk';
 
+import { acpBindingRecipeSchema } from './binding-recipe.js';
 import { AcpAgentClient } from './client.js';
 import { AcpServiceError } from './errors.js';
 import { acpSessionRegistry } from './session-registry.js';
@@ -797,6 +798,7 @@ function seedEntryFromNewSessionResult(
 export async function ensureAcpSession(
   opts: EnsureAcpSessionOptions,
 ): Promise<AcpSessionEntry> {
+  if (opts.recipe) acpBindingRecipeSchema.parse(opts.recipe);
   const key = ensureSessionKey(
     opts.agentletId,
     opts.threadId,
@@ -839,12 +841,7 @@ async function ensureAcpSessionInner(
       `External agent '${binding.alias}' is no longer configured. Re-create the profile in Settings → External Agents, or start a new chat with another agent.`,
     );
   }
-  const agentTeamCwd = recipe.agentTeam
-    ? 'workingDirPath' in recipe.agentTeam
-      ? recipe.agentTeam.workingDirPath
-      : recipe.agentTeam.agentDir
-    : undefined;
-  const cwd = opts.cwd ?? recipe.cwd ?? agentTeamCwd ?? '';
+  const cwd = opts.cwd ?? recipe.cwd ?? '';
 
   const gateway = getAgentletGateway();
   if (!gateway) {

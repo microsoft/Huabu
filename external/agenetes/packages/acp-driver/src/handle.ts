@@ -41,6 +41,10 @@ import {
   projectTextHistoryTurn,
 } from '@agenetes/runtime';
 
+import {
+  acpBindingRecipeSchema,
+  type AcpBindingRecipe,
+} from './binding-recipe.js';
 import { AcpServiceError } from './errors.js';
 import { applyToolExt } from './overlay.js';
 import { acpSessionRegistry } from './session-registry.js';
@@ -55,7 +59,6 @@ import {
 } from './session.js';
 import { acpUpdateToStreamEvent } from './translator.js';
 
-import type { AcpBindingRecipe } from './binding-recipe.js';
 import type { AcpTurnOverlay } from './overlay.js';
 import type { AcpSessionEntry } from './session-registry.js';
 import type { AcpSessionLogger } from './session.js';
@@ -213,10 +216,12 @@ export async function resolveAcpRuntimeLaunch(
   recipe: AcpBindingRecipe | null | undefined;
   env: Record<string, string> | undefined;
 }> {
+  if (spec.recipe) acpBindingRecipeSchema.parse(spec.recipe);
   const [runtime, resolvedEnvironment] = await Promise.all([
     spec.resolveRecipe?.(),
     runtimePolicy.resolveRuntimeEnvironment?.(spec),
   ]);
+  if (runtime?.recipe) acpBindingRecipeSchema.parse(runtime.recipe);
   const runtimeEnvironment = runtime?.env ?? resolvedEnvironment;
   return {
     recipe: runtime?.recipe ?? spec.recipe,

@@ -17,12 +17,12 @@
 
 import { hostname } from 'node:os';
 
-import { mountAgentTeamRegistry } from './agent-team-mount.js';
+import { mountAgentProfileRegistry } from './agent-profile-mount.js';
 import { getDaemonAuth } from './daemon-auth.js';
 import { getDaemonSupervisor } from './daemon-supervisor.js';
 import { mountAgentletGateway } from './gateway-mount.js';
 
-import type { MountAgentTeamOptions } from './agent-team-mount.js';
+import type { MountAgentProfileOptions } from './agent-profile-mount.js';
 import type {
   AgentletConnection,
   AgentletGateway,
@@ -37,7 +37,7 @@ export function getSupervisedAgentletId(): string {
   return supervisedAgentletId;
 }
 
-export { getAgentTeamRegistry } from './agent-team-mount.js';
+export { getAgentProfileRegistry } from './agent-profile-mount.js';
 export {
   ACP_UPGRADE_PATH,
   getAgentletGateway,
@@ -52,7 +52,7 @@ export {
 export { getDaemonAuth, _resetDaemonAuthForTests } from './daemon-auth.js';
 
 export type { AttachOptions } from './daemon-supervisor.js';
-export type { MountAgentTeamOptions } from './agent-team-mount.js';
+export type { MountAgentProfileOptions } from './agent-profile-mount.js';
 export type {
   MountAcpOptions,
   MountAgentletGatewayOptions,
@@ -69,13 +69,12 @@ export type AgentConnection = Omit<
 >;
 export type { AcpMessage, LifecycleEvent } from '@agentlet/protocol';
 export { AgentletRequestError } from '@agenetes/agentlet-gateway';
-export { AgentTeamError } from '@agenetes/agent-team';
+export { AgentProfileError } from '@agenetes/agent-profile';
 export type {
   AcpCommandProfile,
   AgentProfile,
-  AgentTeamManifestProfile,
-  AgentTeamRegistry,
-} from '@agenetes/agent-team';
+  AgentProfileRegistry,
+} from '@agenetes/agent-profile';
 
 /** Host-injected configuration for {@link mountAgenetes}. */
 export interface MountAgenetesOptions {
@@ -113,10 +112,9 @@ export interface MountAgenetesOptions {
    */
   authenticate?: AgentletGatewayOptions['authenticateAgentlet'];
   /**
-   * Host capabilities for the durable Agent Team control plane. The mounted
-   * Gateway is connected internally and is never supplied by the host.
+   * Host-owned storage for the ordinary Profile registry.
    */
-  agentTeam?: MountAgentTeamOptions;
+  profiles?: MountAgentProfileOptions;
 }
 
 /**
@@ -125,7 +123,7 @@ export interface MountAgenetesOptions {
  * Wires the three pieces in dependency order:
  *   1. Store the host connection token so handshakes can be validated.
  *   2. Mount the stateless Agentlet Gateway.
- *   3. Mount the durable Agent Team registry when host capabilities exist.
+ *   3. Mount the durable Agent Profile registry when configured.
  *   4. Fork & supervise the agentlet daemon child.
  *
  * Idempotent — the underlying server mount and supervisor attach are
@@ -142,8 +140,8 @@ export function mountAgenetes(
     authenticate: opts.authenticate,
   });
 
-  if (opts.agentTeam) {
-    mountAgentTeamRegistry(app, opts.agentTeam, gateway);
+  if (opts.profiles) {
+    mountAgentProfileRegistry(app, opts.profiles);
   }
 
   getDaemonSupervisor().attach(app, {

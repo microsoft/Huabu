@@ -44,6 +44,7 @@ import {
   getSupervisedAgentletId,
 } from '@agenetes/agentlet-host';
 
+import { acpBindingRecipeSchema } from './binding-recipe.js';
 import { AcpServiceError } from './errors.js';
 
 import type { AcpBindingRecipe } from './binding-recipe.js';
@@ -188,6 +189,7 @@ export async function ensureAgentForThread(
   env?: Record<string, string>,
   idleTimeoutSecs = 600,
 ): Promise<{ agentletId: string; sessionId: string; pid: number }> {
+  acpBindingRecipeSchema.parse(recipe);
   const agentlet = await waitForTargetAgentlet(
     agentletId,
     AGENTLET_READY_TIMEOUT_MS,
@@ -242,9 +244,8 @@ export async function ensureAgentForThread(
       appId: threadId,
       ...(existingSessionId ? { sessionId: existingSessionId } : {}),
       sessionSpec: {
-        ...(recipe.agentTeam
-          ? { agentTeam: recipe.agentTeam }
-          : { command: recipe.command, cwd: recipe.cwd }),
+        command: recipe.command,
+        cwd: recipe.cwd,
         autoRestart: recipe.autoRestart,
         idleTimeoutSecs,
         env: spawnEnv,
