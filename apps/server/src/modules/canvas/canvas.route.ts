@@ -19,6 +19,7 @@ import {
   postCanvasEventsBodySchema,
   postCanvasExecuteBodySchema,
   moveSelectionBodySchema,
+  moveSelectionParamsSchema,
   preprocessNodeBodySchema,
   putCanvasBodySchema,
   canvasEditableNodeDataSchema,
@@ -111,6 +112,7 @@ import type {
   PostCanvasExecuteRequest,
   PostCanvasExecuteResponse,
   MoveSelectionResponse,
+  MoveSelectionParams,
   PreprocessNodeBody,
   PreprocessNodeRequest,
   PreprocessNodeResponse,
@@ -1453,19 +1455,21 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
   // Idempotent no-op batches do not bump the version.
 
   fastify.post<{
-    Params: { canvasId: string };
+    Params: MoveSelectionParams;
     Body: unknown;
     Reply: ApiResult<MoveSelectionResponse>;
   }>('/:canvasId/move-selection', async function (request, reply) {
     const parsed = moveSelectionBodySchema.safeParse(request.body);
-    if (!parsed.success) {
+    const params = moveSelectionParamsSchema.safeParse(request.params);
+    if (!parsed.success || !params.success) {
       return reply.code(400).send({
-        message: parsed.error.issues[0]?.message ?? 'Invalid request body',
+        code: 'MOVE_FAILED',
+        message: 'Invalid move request',
       });
     }
     try {
       return reply.send(
-        await moveCanvasSelection(request.params.canvasId, parsed.data),
+        await moveCanvasSelection(params.data.canvasId, parsed.data),
       );
     } catch (error) {
       if (error instanceof SpaceMoveError) {
@@ -1474,7 +1478,15 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           message: error.message,
         });
       }
-      throw error;
+      request.log.error(
+        { code: 'MOVE_FAILED', phase: 'move-admission' },
+        'Move failed outside the compensated service boundary',
+      );
+      const failure = new SpaceMoveError('MOVE_FAILED', 500);
+      return reply.code(failure.statusCode).send({
+        code: failure.code,
+        message: failure.message,
+      });
     }
   });
 

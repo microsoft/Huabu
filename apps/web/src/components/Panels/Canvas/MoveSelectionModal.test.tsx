@@ -5,16 +5,23 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { ApiError } from '@/api/_client';
+import { dismissToast, toast, ToastContainer } from '@/components/Common/Toast';
+import en from '@/i18n/resources/en/common.json';
+import zhCN from '@/i18n/resources/zh-CN/common.json';
 import useCanvasStore from '@/store/canvasStore';
 
 import { MoveSelectionModal } from './MoveSelectionModal';
+
+import type * as ToastModule from '@/components/Common/Toast';
+import type { MoveSelectionErrorCode } from '@huabu/shared';
 
 const { drainPendingSaves, listCanvases, moveCanvasSelection, translate } =
   vi.hoisted(() => ({
     drainPendingSaves: vi.fn().mockResolvedValue(undefined),
     listCanvases: vi.fn(),
     moveCanvasSelection: vi.fn(),
-    translate: (key: string) => key,
+    translate: vi.fn((key: string) => key),
   }));
 
 const moveResult = {
@@ -43,11 +50,49 @@ vi.mock('@/store/canvasStore', async (importOriginal) => ({
   drainPendingSaves,
 }));
 
+vi.mock('@/components/Common/Toast', async (importOriginal) => {
+  const original = await importOriginal<typeof ToastModule>();
+  return { ...original, toast: vi.fn(original.toast) };
+});
+
+const sensitiveMessage =
+  'Synthetic Space secret; thread-synthetic; /synthetic/private/content; prompt-synthetic; credential-synthetic';
+const sensitiveDetails = 'synthetic-private-details';
+const knownErrors = {
+  MOVE_SOURCE_STALE: 'sourceStale',
+  MOVE_SOURCE_NODE_MISSING: 'sourceNodeMissing',
+  MOVE_NODE_NOT_MOVABLE: 'nodeNotMovable',
+  MOVE_DESTINATION_MISSING: 'destinationMissing',
+  MOVE_DESTINATION_SAME_AS_SOURCE: 'sameDestination',
+  MOVE_DESTINATION_CREATE_FAILED: 'destinationCreateFailed',
+  MOVE_DESTINATION_CLEANUP_FAILED: 'reconcile',
+  MOVE_WORLD_NOT_ALLOWED: 'worldNotAllowed',
+  MOVE_AGENT_RUNNING: 'agentRunning',
+  MOVE_AGENT_TASK_OWNED: 'agentTaskOwned',
+  MOVE_AGENT_PENDING_CHANGES: 'agentPendingChanges',
+  MOVE_AGENT_HISTORY_INVALID: 'agentHistoryInvalid',
+  MOVE_AGENT_CLOSE_FAILED: 'agentCloseFailed',
+  MOVE_AGENT_REHOME_FAILED: 'agentRehomeFailed',
+  MOVE_ARTIFACT_MISSING: 'artifactMissing',
+  MOVE_DESTINATION_CONFLICT: 'destinationConflict',
+  MOVE_COMPENSATION_FAILED: 'reconcile',
+  MOVE_OUTCOME_UNKNOWN: 'reconcile',
+  MOVE_FAILED: null,
+} as const satisfies Record<
+  MoveSelectionErrorCode,
+  keyof typeof en.moveSelection.errors | null
+>;
+
 let root: Root | undefined;
 let container: HTMLDivElement | undefined;
 
 afterEach(() => {
   act(() => root?.unmount());
+  for (const result of vi.mocked(toast).mock.results) {
+    if (result.type === 'return') dismissToast(result.value);
+  }
+  vi.mocked(toast).mockClear();
+  translate.mockClear();
   container?.remove();
   root = undefined;
   container = undefined;
@@ -59,9 +104,155 @@ afterEach(() => {
   });
   listCanvases.mockReset();
   moveCanvasSelection.mockReset();
+  drainPendingSaves.mockReset().mockResolvedValue(undefined);
 });
 
+async function submitFailure(error: unknown, duringSave = false) {
+  listCanvases.mockResolvedValue({
+    canvases: [{ canvasId: 'destination', title: 'Destination' }],
+  });
+  if (duringSave) drainPendingSaves.mockRejectedValueOnce(error);
+  else moveCanvasSelection.mockRejectedValueOnce(error);
+  useCanvasStore.setState({
+    canvasId: 'source',
+    version: 3,
+    nodes: [
+      {
+        id: 'node-selected',
+        type: 'note',
+        position: { x: 0, y: 0 },
+        data: { label: 'Selected' },
+        selected: true,
+      },
+    ],
+    moveSelectionDialogOpen: true,
+  });
+  container = document.createElement('div');
+  document.body.appendChild(container);
+  root = createRoot(container);
+  await act(async () =>
+    root?.render(
+      <>
+        <MoveSelectionModal />
+        <ToastContainer />
+      </>,
+    ),
+  );
+  const move = Array.from(document.querySelectorAll('button')).find(
+    (button) => button.textContent === 'moveSelection.confirm',
+  );
+  expect(move).toBeDefined();
+  await act(async () => move?.click());
+  expect(drainPendingSaves).toHaveBeenCalledTimes(1);
+  expect(moveCanvasSelection).toHaveBeenCalledTimes(duringSave ? 0 : 1);
+}
+
+function expectSafeFailure(key: string, rawCode?: string) {
+  expect(toast).toHaveBeenCalledExactlyOnceWith(key, {
+    tone: 'danger',
+    duration: 0,
+  });
+  expect(translate).toHaveBeenCalledWith(key);
+  expect(document.body.textContent).toContain(key);
+  expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+  expect(useCanvasStore.getState().moveSelectionDialogOpen).toBe(true);
+  for (const raw of [sensitiveMessage, sensitiveDetails, rawCode].filter(
+    Boolean,
+  )) {
+    expect(document.body.textContent).not.toContain(raw);
+    expect(JSON.stringify(vi.mocked(toast).mock.calls)).not.toContain(raw);
+    expect(JSON.stringify(translate.mock.calls)).not.toContain(raw);
+  }
+}
+
 describe('MoveSelectionModal', () => {
+  it.each(Object.entries(knownErrors))(
+    'localizes %s without exposing error messages or details',
+    async (code, suffix) => {
+      await submitFailure(
+        new ApiError(
+          409,
+          { code, message: sensitiveMessage, details: sensitiveDetails },
+          'synthetic fallback',
+        ),
+      );
+      const key = suffix
+        ? `moveSelection.errors.${suffix}`
+        : 'moveSelection.failed';
+      expectSafeFailure(key, code);
+      for (const locale of [en, zhCN]) {
+        const message = suffix
+          ? locale.moveSelection.errors[suffix]
+          : locale.moveSelection.failed;
+        expect(message).toBeTruthy();
+        expect(message).not.toContain('{{');
+      }
+    },
+  );
+
+  it.each([
+    undefined,
+    '',
+    '__proto__',
+    'constructor',
+    'toString',
+    '<img src=x onerror="synthetic-malicious-code">',
+    'moveSelection.errors.agentRunning',
+  ])('uses the safe fallback for unrecognized code %s', async (code) => {
+    await submitFailure(
+      new ApiError(
+        500,
+        { code, message: sensitiveMessage, details: sensitiveDetails },
+        'synthetic fallback',
+      ),
+    );
+    expectSafeFailure('moveSelection.failed', code || undefined);
+  });
+
+  it.each([
+    new Error(sensitiveMessage),
+    new TypeError(sensitiveMessage),
+    sensitiveMessage,
+    {
+      code: 'MOVE_AGENT_RUNNING',
+      message: sensitiveMessage,
+      details: sensitiveDetails,
+    },
+  ])('uses the safe fallback for non-ApiError failures %#', async (error) => {
+    await submitFailure(error);
+    expectSafeFailure('moveSelection.failed');
+  });
+
+  it.each([
+    new Error(sensitiveMessage),
+    new ApiError(
+      409,
+      { code: 'MOVE_AGENT_RUNNING', message: sensitiveMessage },
+      'synthetic fallback',
+    ),
+  ])(
+    'keeps save-drain failures generic and does not request a move %#',
+    async (error) => {
+      await submitFailure(error, true);
+      expectSafeFailure('moveSelection.failed');
+    },
+  );
+
+  it('provides reload and reconciliation guidance in both locales', () => {
+    expect(en.moveSelection.failed).toContain(
+      'Reload and check both the source and destination Spaces',
+    );
+    expect(en.moveSelection.errors.reconcile).toContain(
+      'reconcile their contents before trying again',
+    );
+    expect(zhCN.moveSelection.failed).toContain(
+      '重新加载并检查源 Space 和目标 Space',
+    );
+    expect(zhCN.moveSelection.errors.reconcile).toContain(
+      '核对并整理两处内容后再尝试',
+    );
+  });
+
   it('renders from a stable Canvas store snapshot', () => {
     useCanvasStore.setState({
       canvasId: 'source',

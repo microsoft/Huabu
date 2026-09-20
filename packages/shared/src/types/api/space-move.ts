@@ -3,6 +3,11 @@
 
 import { z } from 'zod';
 
+export const moveSelectionParamsSchema = z.object({
+  canvasId: z.string().min(1),
+});
+export type MoveSelectionParams = z.infer<typeof moveSelectionParamsSchema>;
+
 export const moveSelectionBodySchema = z
   .object({
     selectedNodeIds: z.array(z.string().min(1)).min(1),
@@ -39,10 +44,13 @@ export const moveSelectionErrorCodeSchema = z.enum([
   'MOVE_AGENT_TASK_OWNED',
   'MOVE_AGENT_PENDING_CHANGES',
   'MOVE_AGENT_HISTORY_INVALID',
+  'MOVE_AGENT_CLOSE_FAILED',
+  'MOVE_AGENT_REHOME_FAILED',
   'MOVE_ARTIFACT_MISSING',
   'MOVE_DESTINATION_CONFLICT',
   'MOVE_COMPENSATION_FAILED',
   'MOVE_OUTCOME_UNKNOWN',
+  'MOVE_FAILED',
 ]);
 export type MoveSelectionErrorCode = z.infer<
   typeof moveSelectionErrorCodeSchema

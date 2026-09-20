@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 
+import { ApiError } from '@/api/_client';
 import { listCanvases, moveCanvasSelection } from '@/api/canvas';
 import { Button } from '@/components/Common/Button';
 import { Modal } from '@/components/Common/Modal';
@@ -13,7 +14,31 @@ import { TextInput } from '@/components/Common/TextInput';
 import { toast } from '@/components/Common/Toast';
 import useCanvasStore, { drainPendingSaves } from '@/store/canvasStore';
 
+import type { MoveSelectionErrorCode } from '@huabu/shared';
+
 const NEW_SPACE_DESTINATION = '__new_space__';
+const MOVE_ERROR_MESSAGES = {
+  MOVE_SOURCE_STALE: 'moveSelection.errors.sourceStale',
+  MOVE_SOURCE_NODE_MISSING: 'moveSelection.errors.sourceNodeMissing',
+  MOVE_NODE_NOT_MOVABLE: 'moveSelection.errors.nodeNotMovable',
+  MOVE_DESTINATION_MISSING: 'moveSelection.errors.destinationMissing',
+  MOVE_DESTINATION_SAME_AS_SOURCE: 'moveSelection.errors.sameDestination',
+  MOVE_DESTINATION_CREATE_FAILED:
+    'moveSelection.errors.destinationCreateFailed',
+  MOVE_DESTINATION_CLEANUP_FAILED: 'moveSelection.errors.reconcile',
+  MOVE_WORLD_NOT_ALLOWED: 'moveSelection.errors.worldNotAllowed',
+  MOVE_AGENT_RUNNING: 'moveSelection.errors.agentRunning',
+  MOVE_AGENT_TASK_OWNED: 'moveSelection.errors.agentTaskOwned',
+  MOVE_AGENT_PENDING_CHANGES: 'moveSelection.errors.agentPendingChanges',
+  MOVE_AGENT_HISTORY_INVALID: 'moveSelection.errors.agentHistoryInvalid',
+  MOVE_AGENT_CLOSE_FAILED: 'moveSelection.errors.agentCloseFailed',
+  MOVE_AGENT_REHOME_FAILED: 'moveSelection.errors.agentRehomeFailed',
+  MOVE_ARTIFACT_MISSING: 'moveSelection.errors.artifactMissing',
+  MOVE_DESTINATION_CONFLICT: 'moveSelection.errors.destinationConflict',
+  MOVE_COMPENSATION_FAILED: 'moveSelection.errors.reconcile',
+  MOVE_OUTCOME_UNKNOWN: 'moveSelection.errors.reconcile',
+  MOVE_FAILED: 'moveSelection.failed',
+} as const satisfies Record<MoveSelectionErrorCode, string>;
 
 export function MoveSelectionModal() {
   const { t } = useTranslation();
@@ -131,9 +156,11 @@ export function MoveSelectionModal() {
       return;
     }
     setSubmitting(true);
+    let moveRequested = false;
     try {
       await drainPendingSaves();
       const expectedSourceVersion = useCanvasStore.getState().version;
+      moveRequested = true;
       const result = await moveCanvasSelection(canvasId, {
         selectedNodeIds,
         destination: creatingNewSpace
@@ -157,10 +184,14 @@ export function MoveSelectionModal() {
         },
       );
     } catch (error) {
-      toast(
-        error instanceof Error ? error.message : t('moveSelection.failed'),
-        { tone: 'danger', duration: 0 },
-      );
+      const code =
+        moveRequested && error instanceof ApiError ? error.code : undefined;
+      const messageKey =
+        typeof code === 'string' &&
+        Object.prototype.hasOwnProperty.call(MOVE_ERROR_MESSAGES, code)
+          ? MOVE_ERROR_MESSAGES[code as MoveSelectionErrorCode]
+          : 'moveSelection.failed';
+      toast(t(messageKey), { tone: 'danger', duration: 0 });
     } finally {
       setSubmitting(false);
     }

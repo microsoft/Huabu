@@ -192,7 +192,7 @@ describe('moveCanvasSelection', () => {
           createSourcePreview: true,
           expectedSourceVersion: seeded.toVersion,
         }),
-      ).rejects.toBe(failure);
+      ).rejects.toMatchObject({ code: 'MOVE_FAILED', cause: failure });
       expect(publish).toHaveBeenCalledTimes(1);
 
       const source = (await space('source').read())!;

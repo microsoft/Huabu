@@ -121,6 +121,8 @@ The Markdown walk is what keeps images inside a `note` alive across Canvases —
 
 Move is an explicit server-coordinated action rather than a clipboard operation. The single-node and multi-selection floating toolbars open one Canvas-level `MoveSelectionModal`, which lets the user choose an existing ordinary Space or enter the name of a new Space, and provides a default-enabled checkbox for leaving a source `spacePreview` breadcrumb. The modal resets that choice to enabled each time it opens, drains pending Canvas saves, and submits the selected node ids, Preview choice, and current source version to `POST /api/canvas/:canvasId/move-selection`. A successful toast reports the durable outcome and links to the destination; typed server failures are shown without applying optimistic local mutations. `spacePreview` nodes do not expose the action.
 
+Move failures use an allowlisted `ApiError.code` mapping to localized English/Chinese text in a persistent danger toast, leaving the dialog open. The modal never renders server messages or details, including unknown codes, network errors, and pending-save failures. Ambiguous outcomes, compensation/cleanup failures, and unknown failures instruct the user to reload and reconcile both Spaces before retrying; the modal does not automatically resubmit.
+
 ## Workspace routes and World
 
 `/` is the workspace landing redirect. When the persisted World setting is enabled it redirects to the hidden World through `/canvas/:worldCanvasId`; otherwise it redirects to `/spaces`. The ordinary Space List remains a sibling page at `/spaces`, and every Canvas scope, including World, continues to use the existing `CanvasPage` and `/canvas/:canvasId` route.

@@ -2,7 +2,7 @@
 
 Status: Implemented
 
-Last updated: 2026-09-14
+Last updated: 2026-09-19
 
 Tracking issue: [#142](https://github.com/microsoft/Huabu/issues/142)
 
@@ -162,7 +162,7 @@ interface Agenetes {
 
 The underlying `ThreadStore`, `EventLogStore`, and `TurnStore` receive narrow replace/delete capabilities implemented by both memory and file stores. If any target write or source removal fails, `rehome()` restores the complete source snapshot and removes every target record/log it wrote before returning the original error. A failed rollback becomes an explicit unknown-outcome error. Huabu never reads, renames, or deletes Agenetes-private files directly. This change belongs to the `external/agenetes/` subtree and must be committed separately so it can be pushed upstream.
 
-Before calling `rehome()`, Huabu closes the dormant runtime handle and verifies the Agent turn lease is free. After rehome, the next invocation recovers from the destination namespace with the preserved driver state and history.
+Huabu validates the full selection and acquires every required Agent turn lease before closing a dormant runtime handle. After destination insertion, each synchronous `close()` immediately precedes its `rehome()` inside compensation coverage. A failed driver close leaves persistence listeners attached and rejects the move without rehoming that thread. After rehome, the next invocation recovers from the destination namespace with the preserved driver state and history. Compensation restores durable ownership only, never eagerly recreating a successfully closed handle. Existing control-operation locking policy is unchanged.
 
 The existing generic conversation-copy endpoint remains unavailable. Move can build a complete target spec from the node being moved; clipboard copy still cannot safely infer an independent target Agent identity.
 
@@ -233,7 +233,7 @@ drain client writes
   -> allocate IDs, labels, placement, and rewritten references
   -> write fresh destination artifacts
   -> execute destination CREATE_NODES + CONNECT_NODES without publication
-  -> rehome eligible Agent conversations to the destination namespace
+  -> close each dormant handle and rehome its conversation to the destination
   -> execute source DELETE_NODES without publication
   -> publish destination and source updates
   -> return result
@@ -253,13 +253,15 @@ Validation, source reads, artifact reads, and destination artifact writes occur 
 
 If destination command execution rejects, its existing `SpaceHandle.write()` rollback restores that Space's structured prestate. The source has not yet changed.
 
-If an Agent rehome rejects, the service applies the destination execution's inverse deltas while both Canvas locks remain held. The source nodes and Agent ownership remain unchanged.
+If close or rehome rejects with a determinate outcome, the service rehomes any earlier completed conversations back and applies the destination execution's inverse deltas while both Canvas locks remain held. The source nodes and durable Agent ownership are restored; already-closed handles stay closed until a subsequent invocation recovers them.
 
-If the source replacement batch rejects after Agent rehome, the service applies any source inverse deltas, rehomes moved conversations back to their source specs, then applies the destination execution's inverse deltas. It publishes neither the insertion nor the compensation.
+If the source replacement batch rejects after Agent rehome, the service first rehomes moved conversations back to their source specs, then applies any source inverse deltas and finally the destination execution's inverse deltas. Source Agent reinsertion validates the restored canonical record and uses the trusted Move-state input to preserve binding and invocation metadata without weakening ordinary undo. It publishes neither the insertion nor the compensation.
 
 If compensation succeeds, the endpoint returns the original failure and both Spaces remain user-visible equivalents of their pre-request states, apart from possible unreachable destination Blob bytes.
 
 If compensation itself fails or the backend outcome becomes unknown, the endpoint returns a distinct persistent-error code and instructs the client to reload both Spaces before retrying. The service does not claim success and the client must not automatically retry.
+
+An Agenetes unknown rehome outcome is mapped to `MOVE_OUTCOME_UNKNOWN` before topology compensation or request-created destination cleanup; ambiguous data is retained for reconciliation rather than deleted. Public Move errors use fixed messages and bounded codes, with separate close/rehome failure codes. Web error copy is localized by code; raw exception text is never shown, even for unknown errors.
 
 ## 15. Durability and publication
 
