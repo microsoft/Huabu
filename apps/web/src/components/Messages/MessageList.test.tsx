@@ -227,14 +227,9 @@ describe('MessageList bottom navigation', () => {
     expect(top).toBe(1_400);
     expect(observe).toHaveBeenCalledWith(thread());
     expect(observe).toHaveBeenCalledWith(thread().firstElementChild);
-    expect(
-      vi
-        .mocked(HTMLElement.prototype.scrollTo)
-        .mock.calls.every(
-          ([options]) =>
-            typeof options === 'object' && options.behavior === 'instant',
-        ),
-    ).toBe(true);
+    for (const args of vi.mocked(HTMLElement.prototype.scrollTo).mock.calls) {
+      expect(args).toEqual([expect.objectContaining({ behavior: 'instant' })]);
+    }
   });
 
   it('does not hide the button before the scroll actually reaches bottom', () => {
