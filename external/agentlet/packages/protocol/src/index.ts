@@ -11,6 +11,15 @@ export {
   ErrorCodes,
 } from './constants.js'
 
+export { parseAcpHarnessLaunch } from './harness.js'
+export type {
+  AcpHarnessLaunch,
+  HarnessCapabilities,
+  HarnessCapabilityStatus,
+  HarnessLaunchOptions,
+  HarnessLaunchPlan,
+} from './harness.js'
+
 export type {
   JsonRpcRequest,
   JsonRpcNotification,

@@ -1,4 +1,5 @@
 import type { AcpMessage, JsonRpcError } from './json-rpc.js'
+import type { AcpHarnessLaunch, HarnessCapabilities, HarnessLaunchPlan } from './harness.js'
 
 // ─── Agentlet Profile ────────────────────────────────────────────────────────
 
@@ -22,6 +23,7 @@ export interface AgentletProfile {
     bufferLimit: number
     maxAgents?: number
     harnessDiscovery?: { version: 1 }
+    harnessLaunch?: { version: 1 }
   }
 }
 
@@ -82,7 +84,11 @@ export interface SessionProfile {
 /** Specification for spawning a new agent */
 export interface SessionSpec {
   /** Trusted shell command to spawn the agent (must support ACP stdio). */
-  command: string
+  command?: string
+  /** Structured alternative to command; requires harnessLaunch v1. */
+  launch?: AcpHarnessLaunch
+  /** Previously authorized plan. A mismatch with the local catalogue fails closed. */
+  launchPlan?: HarnessLaunchPlan
   /** Working directory for the agent subprocess */
   cwd?: string
   /** Extra environment variables for the agent */
@@ -194,6 +200,7 @@ export interface SpawnParams {
 export interface SpawnResult {
   sessionId: string
   pid: number
+  launchPlan?: HarnessLaunchPlan
 }
 
 /** Structured daemon error data for a failed session resume/load. */
@@ -252,6 +259,10 @@ export interface HarnessCatalogueEntry {
 }
 
 export interface HarnessDiscoveryEntry extends HarnessCatalogueEntry {
+  /** Structured ACP launch support; absent on older daemons. */
+  launchVersion?: 1
+  /** Absent on older daemons; absence is not evidence of support. */
+  capabilities?: HarnessCapabilities
   installed: boolean
   executablePath?: string
   version?: string
