@@ -144,9 +144,11 @@ export function resolveBindingRecipe(
   profileId: string,
 ): AcpBindingRecipe | null {
   const managed = getAgentProfileRegistry()?.getProfile(profileId);
-  if (managed?.launch.kind === 'acp-command') {
+  if (managed) {
     return {
-      command: managed.launch.command,
+      ...(managed.launch.kind === 'acp-command'
+        ? { command: managed.launch.command }
+        : { launch: managed.launch }),
       cwd: managed.workingDirPath,
       autoRestart: true,
       alias: managed.alias,
@@ -202,7 +204,9 @@ export function buildAcpWorkloadSpec(
     agentletId = profile.agentletId;
     cwd = profile.workingDirPath;
     recipe = {
-      command: profile.launch.command,
+      ...(profile.launch.kind === 'acp-command'
+        ? { command: profile.launch.command }
+        : { launch: profile.launch }),
       cwd: profile.workingDirPath,
       autoRestart: true,
       alias: binding.alias,

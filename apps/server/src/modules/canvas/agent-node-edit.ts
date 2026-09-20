@@ -8,10 +8,16 @@ import {
 } from '@huabu/shared/canvas-engine';
 
 import { agenetes } from '../agent/agenetes/drivers.js';
+import { getAgentDefaults } from '../agent/agent-defaults.js';
 import { parseAgentLaunchOverrides } from '../agent/agent-launch-overrides.js';
 import { agentNodeBinding } from '../agent/agent-node-binding.js';
 import { agentThreadResolver } from '../agent/agent-thread-resolver.js';
 import { effectiveConversationTitle } from '../agent/conversation-title.service.js';
+import {
+  requireSelectableAgentProfile,
+  SelectableAgentProfileError,
+  type SelectableAgentProfile,
+} from '../agent/selectable-agent-profile.js';
 import { canvasAcpNamespace } from '../workspace/paths.js';
 
 import type { CanvasNodeId } from '@huabu/shared';
@@ -28,6 +34,35 @@ export class AgentNodeEditError extends Error {
     super(message);
     this.name = 'AgentNodeEditError';
   }
+}
+
+export function withDefaultAgentBinding(
+  data: Record<string, unknown>,
+): Record<string, unknown> {
+  if (data.agentBinding) return data;
+  const profileId = getAgentDefaults().profileId;
+  if (!profileId) {
+    throw new AgentNodeEditError(
+      'Connect an external Agent and select a default Profile in Settings.',
+    );
+  }
+  let profile: SelectableAgentProfile;
+  try {
+    profile = requireSelectableAgentProfile(profileId);
+  } catch (error) {
+    if (error instanceof SelectableAgentProfileError) {
+      throw new AgentNodeEditError(error.message);
+    }
+    throw error;
+  }
+  return {
+    ...data,
+    agentBinding: {
+      kind: 'external',
+      profileId: profile.id,
+      alias: profile.alias,
+    },
+  };
 }
 
 export function validateAgentNodeEditableData(
@@ -60,6 +95,7 @@ export async function initializeAgentNodeCreationAlreadyLocked(
   canvasId: string,
   node: CanvasNode,
   requireBinding = false,
+  applyDefault = false,
 ): Promise<CanvasNode> {
   if (node.type !== 'question' || typeof node.data.threadId !== 'string')
     return node;
@@ -103,6 +139,12 @@ export async function initializeAgentNodeCreationAlreadyLocked(
     required: requireBinding,
     record: null,
   });
+  if (applyDefault && !node.data.agentBinding) {
+    return {
+      ...node,
+      data: withDefaultAgentBinding(node.data),
+    };
+  }
   return node;
 }
 

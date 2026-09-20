@@ -304,11 +304,8 @@ export const ChatPanel = ({
   const makeThreadMetadataEphemeral = useChatStore(
     (state) => state.makeThreadMetadataEphemeral,
   );
-  const {
-    profiles: acpProfiles,
-    refresh: refreshAcpProfiles,
-    loaded: acpProfilesLoaded,
-  } = useAcpProfiles();
+  const { profiles: acpProfiles, refresh: refreshAcpProfiles } =
+    useAcpProfiles();
 
   useEffect(() => {
     if (bindingsEqual(cachedAgentBinding, agentBinding)) {
@@ -320,39 +317,6 @@ export const ChatPanel = ({
     agentBinding,
     cachedAgentBinding,
     makeThreadMetadataEphemeral,
-    setAgentBinding,
-    threadId,
-  ]);
-
-  // Auto-reset a stale external binding on an *empty* thread: the
-  // persisted binding refers to a profile that no longer exists
-  // (user deleted it from Settings, or imported a workspace whose
-  // profiles were never created locally). Threads with messages
-  // keep the stale binding so the title still reads "Chat with
-  // <alias>" — the user can recreate the profile in Settings to
-  // bring the binding back to life.
-  useEffect(() => {
-    if (viewingQuestionBindingIsFixed) return;
-    if (!isHistoryLoaded) return;
-    // Node-backed selection is never silently rebound after a Profile vanishes.
-    // An Editing node can have failed preparation text, and Bound can be empty.
-    if (activeConversationView || messages.length > 0) return;
-    if (!acpProfilesLoaded) return;
-    if (agentBinding.kind !== 'external') return;
-    const profileExists = acpProfiles.some(
-      (p) => p.id === agentBinding.profileId,
-    );
-    if (profileExists) return;
-    setAgentBinding(threadId, { kind: 'internal' }, canvasId || undefined);
-  }, [
-    isHistoryLoaded,
-    activeConversationView,
-    messages.length,
-    acpProfilesLoaded,
-    agentBinding,
-    acpProfiles,
-    canvasId,
-    viewingQuestionBindingIsFixed,
     setAgentBinding,
     threadId,
   ]);

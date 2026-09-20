@@ -15,6 +15,8 @@ The connection token is a separate machine credential used by RFS and the embedd
 
 The global Agent Change Review configuration follows the same owner boundary. `GET` and `PUT /api/agent-change-review/config` are available only to loopback or Basic-authenticated owner requests; possession of the RFS connection token does not authorize reading or changing the automatic-acceptance policy.
 
+The default external Profile and functional-model preference follow the same boundary through `GET` and `PUT /api/agent/defaults`. These settings do not grant new tool permissions, change native harness approval policy, or authorize callers holding only an RFS connection token to mutate the global selection.
+
 ## Bind and authentication policy
 
 `HUABU_BIND_HOST` defaults to `127.0.0.1`. A non-loopback bind requires all of `HUABU_ALLOWED_HOSTS`, `HUABU_BASIC_AUTH_USER`, and `HUABU_BASIC_AUTH_PASS`; the server fails before listening when any requirement is missing. A partial Basic Auth pair also fails on loopback because silently disabling authentication is more dangerous than rejecting an invalid deployment.

@@ -42,6 +42,7 @@ import {
 import {
   AgentNodeEditError,
   guardAgentNodeDraftEditsAlreadyLocked,
+  withDefaultAgentBinding,
 } from './agent-node-edit.js';
 import { acknowledgeAgentNodeResult } from './agent-node-projection.js';
 import {
@@ -1386,10 +1387,12 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
               ...node,
               data: {
                 ...(node.type === 'question'
-                  ? projectAgentNodeEditableData({
-                      ...current?.data,
-                      ...node.data,
-                    })
+                  ? withDefaultAgentBinding(
+                      projectAgentNodeEditableData({
+                        ...current?.data,
+                        ...node.data,
+                      }),
+                    )
                   : { ...current?.data, ...node.data }),
                 ...(node.type === 'question'
                   ? { bindingState: 'editing', threadId: createId('thread') }
@@ -1436,6 +1439,13 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           canvasId,
           version: nextVersion,
         });
+      } catch (error) {
+        if (error instanceof AgentNodeEditError) {
+          return reply
+            .code(400)
+            .send({ code: 'INVALID_REQUEST', message: error.message });
+        }
+        throw error;
       } finally {
         releaseDrafts();
       }

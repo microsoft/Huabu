@@ -14,9 +14,13 @@ import { createId } from '@huabu/shared';
 
 import { associateAgentNode } from '@/api/canvas';
 import { toast } from '@/components/Common/Toast';
-import { useAcpProfilesStore } from '@/store/acpProfilesStore';
+import {
+  getDefaultAgentBinding,
+  loadDefaultAgentBinding,
+  useAcpProfilesStore,
+} from '@/store/acpProfilesStore';
 import useCanvasStore from '@/store/canvasStore.ts';
-import { useChatStore } from '@/store/chatStore.ts';
+import { selectThreadBinding, useChatStore } from '@/store/chatStore.ts';
 import {
   resolveConversationOwnerSource,
   saveConversationDraft,
@@ -86,21 +90,19 @@ export async function ensureQuestionThread(
 function initializeQuestionBinding(
   view: AgentConversationView,
   binding: AgentBinding | undefined,
-  canvasId: string | null,
-  inheritCanvasDefault: boolean,
+  saveDraft: boolean,
 ): void {
   const chat = useChatStore.getState();
-  const ownerCanvasId = canvasId ?? view.conversationOwner.canvasId;
-  const effectiveBinding = binding ??
-    (inheritCanvasDefault ? chat.bindingMap[ownerCanvasId] : undefined) ?? {
-      kind: 'internal' as const,
-    };
   const canvas = useCanvasStore.getState();
   const source = resolveConversationOwnerSource(
     canvas.canvasId,
     canvas.nodes,
     view,
   );
+  const effectiveBinding =
+    source?.agentBinding ??
+    binding ??
+    selectThreadBinding(chat, view.conversationOwner.threadId);
   if (effectiveBinding) {
     chat.setAgentBinding(view.conversationOwner.threadId, effectiveBinding);
   }
@@ -108,11 +110,7 @@ function initializeQuestionBinding(
     source?.agentMode ??
     (effectiveBinding.kind === 'internal' ? 'operate' : 'ask');
   chat.setThreadLastAction(view.conversationOwner.threadId, mode);
-  if (
-    inheritCanvasDefault &&
-    !source?.agentBinding &&
-    source?.bindingState !== 'bound'
-  ) {
+  if (saveDraft && !source?.agentBinding && source?.bindingState !== 'bound') {
     const profiles = useAcpProfilesStore.getState().profiles;
     const profile =
       effectiveBinding.kind === 'external'
@@ -147,14 +145,14 @@ function initializeQuestionBinding(
 export function enterQuestionConversation(
   view: AgentConversationView,
   binding: AgentBinding | undefined,
-  canvasId: string | null,
+  _canvasId: string | null,
   openPosition: 'last-user' | 'bottom',
   options?: { transient?: boolean },
 ): void {
   useChatStore
     .getState()
     .makeThreadMetadataEphemeral(view.conversationOwner.threadId);
-  initializeQuestionBinding(view, binding, canvasId, false);
+  initializeQuestionBinding(view, binding, false);
   const tabId = openPreviewNode(view.presentationAnchor.nodeId, options);
   if (tabId) {
     usePreviewWorkspaceStore.getState().requestChatOpen(tabId, openPosition);
@@ -167,11 +165,11 @@ export function enterQuestionConversation(
  */
 export function enterQuestionCompose(
   view: AgentConversationView,
-  canvasId: string | null,
+  _canvasId: string | null,
   binding?: AgentBinding,
   options?: { transient?: boolean },
 ): void {
-  initializeQuestionBinding(view, binding, canvasId, true);
+  initializeQuestionBinding(view, binding, true);
   openPreviewNode(view.presentationAnchor.nodeId, options);
   usePanelStore
     .getState()
@@ -180,19 +178,38 @@ export function enterQuestionCompose(
 
 /**
  * Create a question node bound to a fresh thread at `placementPoint` and
- * immediately enter compose. The node id and thread id are minted up front
- * so callers can wire follow-up work (e.g. a connecting edge) to the new
- * node. Pass `id` to reuse a pre-minted node id.
+ * enter compose after loading the default Profile. IDs are returned only
+ * after creation so callers can wire follow-up work (e.g. a connecting edge).
+ * Pass `id` to reuse a pre-minted node id.
  */
-export function createQuestionNodeAndCompose(opts: {
+export async function createQuestionNodeAndCompose(opts: {
   addNode: (input: AddNodeInput) => void;
   placementPoint: { x: number; y: number };
   canvasId: string | null;
   id?: CanvasNodeId;
-}): { nodeId: CanvasNodeId; threadId: string } {
-  const created = createQuestionNode(opts);
-  enterQuestionCompose(created.conversationView, opts.canvasId);
-  return { nodeId: created.nodeId, threadId: created.threadId };
+  /** Additional caller-owned scope, such as a connected source node. */
+  isCurrent?: () => boolean;
+}): Promise<{ nodeId: CanvasNodeId; threadId: string } | null> {
+  const canvasId = opts.canvasId ?? useCanvasStore.getState().canvasId;
+  const workspace = usePreviewWorkspaceStore.getState().workspace;
+  try {
+    const binding = await loadDefaultAgentBinding();
+    if (
+      useCanvasStore.getState().canvasId !== canvasId ||
+      usePreviewWorkspaceStore.getState().workspace !== workspace ||
+      opts.isCurrent?.() === false
+    ) {
+      return null;
+    }
+    const created = createQuestionNode({ ...opts, canvasId, binding });
+    enterQuestionCompose(created.conversationView, canvasId, binding);
+    return { nodeId: created.nodeId, threadId: created.threadId };
+  } catch (error) {
+    toast(error instanceof Error ? error.message : String(error), {
+      tone: 'danger',
+    });
+    return null;
+  }
 }
 
 export function createQuestionNode(opts: {
@@ -209,6 +226,10 @@ export function createQuestionNode(opts: {
   threadId: string;
   conversationView: AgentConversationView;
 } {
+  const binding = opts.binding ?? getDefaultAgentBinding();
+  const mode = opts.mode ?? (binding.kind === 'external' ? 'ask' : 'operate');
+  const profiles = useAcpProfilesStore.getState().profiles;
+  const icon = snapshotAgentIcon(binding, profiles);
   const nodeId = opts.id ?? (createId('node') as CanvasNodeId);
   const threadId = createId('thread');
   const canvasId = opts.canvasId ?? useCanvasStore.getState().canvasId;
@@ -219,8 +240,9 @@ export function createQuestionNode(opts: {
     data: {
       content: '',
       threadId,
-      ...(opts.binding ? { agentBinding: opts.binding } : {}),
-      ...(opts.mode ? { agentMode: opts.mode } : {}),
+      agentBinding: binding,
+      agentMode: mode,
+      ...(icon ? { agentIcon: icon } : {}),
       ...(opts.label ? { label: opts.label } : {}),
       ...(opts.pendingInkIntentLabel ? { pendingInkIntentLabel: true } : {}),
       origin: { type: 'user-created' },
@@ -237,9 +259,7 @@ export function createQuestionNode(opts: {
       threadId,
     },
   };
-  if (opts.binding)
-    useChatStore.getState().setAgentBinding(threadId, opts.binding);
-  if (opts.mode)
-    useChatStore.getState().setThreadLastAction(threadId, opts.mode);
+  useChatStore.getState().setAgentBinding(threadId, binding);
+  useChatStore.getState().setThreadLastAction(threadId, mode);
   return { nodeId, threadId, conversationView };
 }

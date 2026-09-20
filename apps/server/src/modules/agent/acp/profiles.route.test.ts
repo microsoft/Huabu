@@ -16,6 +16,13 @@ const mocks = vi.hoisted(() => ({
     deleteProfile: vi.fn(),
   },
   invalidate: vi.fn(),
+  initializeDefaults: vi.fn(),
+  discoverHarnesses: vi.fn(),
+}));
+
+vi.mock('../agent-defaults.js', () => ({
+  getAgentDefaults: () => ({ profileId: null, functionalModel: '' }),
+  initializeAgentDefaults: mocks.initializeDefaults,
 }));
 
 vi.mock('@agenetes/agentlet-host', () => ({
@@ -24,6 +31,7 @@ vi.mock('@agenetes/agentlet-host', () => ({
     getStatus: () => ({ online: true, restartAttempt: 0 }),
   }),
   getSupervisedAgentletId: () => 'machine-a',
+  getAgentletGateway: () => ({ discoverHarnesses: mocks.discoverHarnesses }),
 }));
 
 vi.mock('./profile-schema-cache.js', () => ({
@@ -53,6 +61,66 @@ afterEach(async () => {
 });
 
 describe('ordinary Profile catalog routes', () => {
+  it('validates typed harness launch on the target daemon and preserves structured options', async () => {
+    const launch = {
+      kind: 'acp-harness',
+      harnessId: 'copilot',
+      options: { autoApprove: true },
+    };
+    mocks.discoverHarnesses.mockResolvedValue({
+      harnesses: [
+        {
+          id: 'copilot',
+          installed: true,
+          launchVersion: 1,
+          autoApprove: { args: ['--allow-all'], position: 'after-acp' },
+        },
+      ],
+    });
+    mocks.registry.createProfile.mockReturnValue({ ...commandProfile, launch });
+    const server = await setup();
+    const response = await server.inject({
+      method: 'POST',
+      url: '/api/acp/profiles',
+      payload: { alias: 'Typed', workingDirPath: '/work', launch },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(mocks.discoverHarnesses).toHaveBeenCalledWith('machine-a', {
+      prepareWorkspaces: false,
+    });
+    expect(mocks.registry.createProfile).toHaveBeenCalledWith({
+      alias: 'Typed',
+      agentletId: 'machine-a',
+      workingDirPath: '/work',
+      launchKind: 'acp-harness',
+      harnessId: 'copilot',
+      options: { autoApprove: true },
+    });
+  });
+
+  it.each([
+    { harnesses: [] },
+    { harnesses: [{ id: 'copilot', installed: true }] },
+    { harnesses: [{ id: 'copilot', installed: false, launchVersion: 1 }] },
+  ])(
+    'rejects unavailable structured launches without command fallback: %j',
+    async (discovery) => {
+      mocks.discoverHarnesses.mockResolvedValue(discovery);
+      const server = await setup();
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/acp/profiles',
+        payload: {
+          alias: 'Typed',
+          workingDirPath: '/work',
+          launch: { kind: 'acp-harness', harnessId: 'copilot' },
+        },
+      });
+      expect(response.statusCode).toBe(409);
+      expect(mocks.registry.createProfile).not.toHaveBeenCalled();
+    },
+  );
+
   it('creates manual command Profiles without an automatic source', async () => {
     mocks.registry.createProfile.mockReturnValue(commandProfile);
     const server = await setup();
@@ -90,6 +158,8 @@ describe('ordinary Profile catalog routes', () => {
       selectableProfileIds: ['command-1'],
     });
     expect(mocks.registry.createProfile).not.toHaveBeenCalled();
+    expect(mocks.initializeDefaults).not.toHaveBeenCalled();
+    expect(mocks.discoverHarnesses).not.toHaveBeenCalled();
   });
 
   it('rejects caller-created automatic provenance', async () => {

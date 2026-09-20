@@ -313,6 +313,18 @@ afterEach(async () => {
 });
 
 describe('rendered conversation titles', () => {
+  it('preserves a missing external Profile on an empty standalone conversation', async () => {
+    const binding = {
+      kind: 'external' as const,
+      profileId: 'deleted-profile',
+      alias: 'Deleted Agent',
+    };
+    useChatStore.getState().setAgentBinding('thread', binding);
+    await renderPanel();
+    expect(useChatStore.getState().threadsById.thread.binding).toEqual(binding);
+    expect(useChatStore.getState().threadsById.thread.messages).toEqual([]);
+  });
+
   it('displays valid system-like ACP fallback in all title surfaces and upgrades it to generation', async () => {
     const key = conversationTitleKey('canvas', 'thread');
     useConversationTitleStore.setState({

@@ -6,6 +6,8 @@ import { persist } from 'zustand/middleware';
 
 import { createId } from '@huabu/shared';
 
+import { getDefaultAgentBinding } from './acpProfilesStore';
+
 import type { ChatMessage } from './chatTypes';
 import type {
   AgentBinding,
@@ -15,8 +17,8 @@ import type {
 } from '@huabu/shared';
 
 /**
- * Default binding for any newly opened canvas / cleared thread.
- * External bindings only appear when the user explicitly selects an agent.
+ * Compatibility binding for existing threads without persisted metadata.
+ * New threads must resolve the configured default or supply a binding.
  */
 const DEFAULT_BINDING: AgentBinding = { kind: 'internal' };
 const DEFAULT_ACTION: AgentMode = 'operate';
@@ -167,14 +169,15 @@ export interface ChatState {
   setThreadLastAction: (threadId: string, action: AgentMode) => void;
   /**
    * Create an empty loaded thread without changing the active-canvas pointer.
-   * Preview Workspace uses this before opening the thread in a new Chat tab.
+   * Supply a resolved binding, or load defaults before this synchronous call.
+   * Missing defaults reject creation rather than creating an internal Chat.
    */
   createThread: (options?: {
     binding?: AgentBinding;
     lastAction?: AgentMode;
   }) => string;
-  /** Return the Canvas's canonical chat thread, creating its mapping once. */
-  ensureCanvasThread: (canvasId: string) => string;
+  /** Reuse legacy identity; new mappings require resolved global defaults. */
+  ensureCanvasThread: (canvasId: string, binding?: AgentBinding) => string;
   /**
    * Change a thread's agent binding. Pass `canvasId` to also persist the
    * choice to `bindingMap` so it seeds the next thread on this canvas. UI
@@ -459,7 +462,7 @@ export const useChatStore = create<ChatState>()(
 
       createThread: (options) => {
         const threadId = createId('thread');
-        const binding = options?.binding ?? DEFAULT_BINDING;
+        const binding = options?.binding ?? getDefaultAgentBinding();
         const lastAction =
           options?.lastAction ?? defaultActionForBinding(binding);
         set((state) => ({
@@ -483,13 +486,13 @@ export const useChatStore = create<ChatState>()(
         return threadId;
       },
 
-      ensureCanvasThread: (canvasId) => {
+      ensureCanvasThread: (canvasId, initialBinding) => {
         const state = get();
         const existing = state.threadMap[canvasId];
         if (existing) return existing;
 
         const threadId = createId('thread');
-        const binding = state.bindingMap[canvasId] ?? DEFAULT_BINDING;
+        const binding = initialBinding ?? getDefaultAgentBinding();
         set({
           ...patchThread(state, threadId, {
             binding,

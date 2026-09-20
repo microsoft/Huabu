@@ -40,6 +40,7 @@ import {
   resolveTabDropIndicator,
 } from './tabDnd';
 
+import type * as AcpApi from '@/api/acp';
 import type { Node } from '@xyflow/react';
 
 (
@@ -68,6 +69,15 @@ vi.hoisted(() => {
 vi.mock('@/api/conversationTitles', () => ({
   queryConversationTitles: async () => ({ titles: {} }),
   setConversationTitle: vi.fn(),
+}));
+vi.mock('@/api/acp', async (importOriginal) => ({
+  ...(await importOriginal<typeof AcpApi>()),
+  listAcpProfiles: async () => ({
+    profiles: [],
+    selectableProfileIds: [],
+    agentlet: null,
+    agentDefaults: { profileId: 'global-profile', functionalModel: '' },
+  }),
 }));
 
 vi.mock('../ChatPanel', () => ({
@@ -476,7 +486,7 @@ describe('tab strip', () => {
     ).toBe('thread-question-1');
   });
 
-  it('creates a Chat tab from the workspace toolbar while a node is active', () => {
+  it('creates a Chat tab from the workspace toolbar while a node is active', async () => {
     openNode('a');
     render([canvasNode('a', 'Alpha')]);
 
@@ -484,7 +494,7 @@ describe('tab strip', () => {
       '[aria-label="New conversation"]',
     );
     expect(newChatButton).not.toBeNull();
-    act(() => newChatButton?.click());
+    await act(async () => newChatButton?.click());
 
     expect(tabs()).toHaveLength(2);
     expect(activeTabName()).toBe('New conversation');
@@ -971,7 +981,9 @@ describe('split', () => {
 
   it('offers an ordinary node beside a chat as a source candidate', () => {
     openNode('a');
-    const threadId = useChatStore.getState().createThread();
+    const threadId = useChatStore
+      .getState()
+      .createThread({ binding: { kind: 'internal' } });
     store().openPreviewTarget({ kind: 'chat', canvasId: CANVAS_ID, threadId });
     store().openPreviewTarget(
       { kind: 'chat', canvasId: CANVAS_ID, threadId },

@@ -96,12 +96,14 @@ interface DiscoveryOptions {
   gateway: DiscoveryGateway;
   getRegistry: () => ProfileRegistry | null;
   log: Pick<FastifyBaseLogger, 'info' | 'warn'>;
+  onProfilesDiscovered?: (profiles: AgentProfile[]) => void;
 }
 
 export function registerHarnessProfileDiscovery({
   gateway,
   getRegistry,
   log,
+  onProfilesDiscovered,
 }: DiscoveryOptions): () => void {
   const generations = new Map<string, number>();
   let disposed = false;
@@ -139,22 +141,30 @@ export function registerHarnessProfileDiscovery({
         );
       });
       if (existing) continue;
-      const profile = registry.createProfile({
-        launchKind: 'acp-command',
+      const common = {
         agentletId,
         alias: `${harness.displayName} (${agentletId})`,
         workingDirPath: harness.workingDirPath,
-        command: [harness.binary, ...harness.acpArgs].join(' '),
         metadata: { cliId: harness.id },
         customData: {
           [SOURCE_KEY]: { version: 1, agentletId, harnessId: harness.id },
         },
-      });
+      };
+      const profile = registry.createProfile(
+        harness.launchVersion === 1
+          ? { ...common, launchKind: 'acp-harness', harnessId: harness.id }
+          : {
+              ...common,
+              launchKind: 'acp-command',
+              command: [harness.binary, ...harness.acpArgs].join(' '),
+            },
+      );
       log.info(
         { agentletId, harnessId: harness.id, profileId: profile.id },
         '[acp] automatically created Profile',
       );
     }
+    onProfilesDiscovered?.(registry.listProfiles());
   };
 
   const onChanged: Parameters<DiscoveryGateway['onAgentletsChanged']>[0] = ({

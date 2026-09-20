@@ -235,7 +235,7 @@ export type RfsAgentPromptRequest = z.infer<typeof rfsAgentPromptRequestSchema>;
 
 /** Full JSON body for `POST /api/rfs/:canvasId/agent`. */
 export const rfsAgentCreateRequestSchema = z.object({
-  profileId: z.string().trim().min(1).default(HUABU_AGENT_PROFILE_ID),
+  profileId: z.string().trim().min(1).optional(),
   prompt: z.string().trim().min(1).optional(),
   position: z
     .object({

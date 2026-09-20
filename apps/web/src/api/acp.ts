@@ -32,7 +32,7 @@ import type {
   AcpPermissionDecisionResponse,
   AcpProfileMutationResponse,
   AcpProfilesListResponse,
-  CreateAcpCommandProfileBody,
+  CreateAcpProfileBody,
   PatchAgentProfileBody,
   AcpThreadCachedMetaResponse,
   SetAcpSessionConfigOptionRequest,
@@ -54,6 +54,7 @@ export type {
   AcpProfileMutationResponse,
   AcpProfilesListResponse,
   CreateAcpCommandProfileBody,
+  CreateAcpProfileBody,
   PatchAgentProfileBody,
   AgentProfileView,
   AcpSessionConfigOption,
@@ -94,7 +95,7 @@ export async function listAcpProfiles(): Promise<AcpProfilesListResponse> {
  * Create a command Profile on the local agentlet. The server allocates its id.
  */
 export async function createAcpProfile(
-  payload: CreateAcpCommandProfileBody,
+  payload: CreateAcpProfileBody,
 ): Promise<AcpProfileMutationResponse> {
   return apiFetch<AcpProfileMutationResponse>(routes.acpProfiles, {
     method: 'POST',

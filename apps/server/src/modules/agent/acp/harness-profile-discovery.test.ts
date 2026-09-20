@@ -46,7 +46,14 @@ function setup(initialMachines = ['machine-a']) {
         alias: input.alias,
         agentletId: input.agentletId,
         workingDirPath: input.workingDirPath,
-        launch: { kind: 'acp-command', command: input.command },
+        launch:
+          input.launchKind === 'acp-command'
+            ? { kind: 'acp-command', command: input.command }
+            : {
+                kind: 'acp-harness',
+                harnessId: input.harnessId,
+                options: input.options,
+              },
         metadata: input.metadata,
         customData: input.customData,
       };
@@ -122,6 +129,27 @@ describe('automatic ordinary Profile provisioning', () => {
       alias: 'My helper',
       customData: { preference: 'kept' },
     });
+    dispose();
+  });
+
+  it('uses structured harness configuration only when the daemon advertises it', async () => {
+    const context = setup();
+    context.gateway.discoverHarnesses.mockResolvedValue({
+      harnesses: observation.harnesses.map((harness) => ({
+        ...harness,
+        launchVersion: 1,
+      })),
+    });
+    const dispose = context.start();
+    await flush();
+    expect(context.profiles[0]?.launch).toEqual({
+      kind: 'acp-harness',
+      harnessId: 'copilot',
+      options: undefined,
+    });
+    context.emit({ agentletId: 'machine-a', status: 'connected' });
+    await flush();
+    expect(context.registry.createProfile).toHaveBeenCalledOnce();
     dispose();
   });
 

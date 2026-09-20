@@ -24,20 +24,38 @@ describe('listAvailableAgentProfiles', () => {
     ]);
 
     expect(
-      listAvailableAgentProfiles({
-        getProfile: (id: string) => profiles.get(id),
-        listSelectableProfileIds: () => ['profile-a', 'profile-b'],
-      }),
+      listAvailableAgentProfiles(
+        {
+          getProfile: (id: string) => profiles.get(id),
+          listSelectableProfileIds: () => ['profile-a', 'profile-b'],
+        },
+        'profile-b',
+      ),
     ).toEqual([
-      { id: 'huabu', alias: 'Huabu', default: true },
+      { id: 'huabu', alias: 'Huabu' },
       { id: 'profile-a', alias: 'Researcher' },
-      { id: 'profile-b', alias: 'Builder' },
+      { id: 'profile-b', alias: 'Builder', default: true },
     ]);
   });
 
   it('keeps the Huabu Profile available while the registry is unavailable', () => {
-    expect(listAvailableAgentProfiles(null)).toEqual([
-      { id: 'huabu', alias: 'Huabu', default: true },
+    expect(listAvailableAgentProfiles(null, null)).toEqual([
+      { id: 'huabu', alias: 'Huabu' },
+    ]);
+  });
+
+  it('does not mark another Profile as default when the selected one is missing', () => {
+    expect(
+      listAvailableAgentProfiles(
+        {
+          getProfile: () => ({ id: 'other', alias: 'Other' }),
+          listSelectableProfileIds: () => ['other'],
+        },
+        'deleted',
+      ),
+    ).toEqual([
+      { id: 'huabu', alias: 'Huabu' },
+      { id: 'other', alias: 'Other' },
     ]);
   });
 

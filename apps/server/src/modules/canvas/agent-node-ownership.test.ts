@@ -524,7 +524,11 @@ forEachProductProfile((profile, label) => {
           state: {
             nodes: [
               { id: node.id, type: 'question', data: {} },
-              { id: 'node-note', type: 'question', data: {} },
+              {
+                id: 'node-note',
+                type: 'question',
+                data: { agentBinding: { kind: 'internal' } },
+              },
             ],
           },
         },

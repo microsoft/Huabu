@@ -22,23 +22,23 @@ The shipped design record is [`agent-reachback-rfs.md`](../proposals/agent-reach
 
 All endpoints are mounted under `/api/rfs/:canvasId`; `HUABU_RFS_URL` already contains that canvas-scoped base.
 
-| Endpoint                           | Responsibility                                                                                                            |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `GET /skill`                       | Return the public bundled root guide; authenticated requests resolve the current root guide and append live Skill Frames. |
-| `GET /skill/:skillId`              | Return an authenticated advanced guide: `layout`, `tasks`, or `agents`.                                                   |
-| `GET /download/<path>`             | Stream a known node, artifact, or staged-upload file.                                                                     |
-| `POST /upload/<name>`              | Stage bytes in the canvas `.upload/` directory without creating a node.                                                   |
-| `DELETE /upload/<name>`            | Remove one exact staged upload.                                                                                           |
-| `POST /agent`                      | Create a visible Agent Node and optionally start its first turn.                                                          |
-| `POST /agent/:threadId/prompt`     | Submit a turn to an existing Agent conversation over SSE.                                                                 |
-| `GET /agent/profiles`              | Return available Agent Profile IDs and aliases, including the default `huabu` Profile.                                    |
-| `POST /task/create`                | Create a durable Task and its static Task Note.                                                                           |
-| `POST /task/:taskId/run/create`    | Create a Run, its visible root Agent Node, and start the first turn.                                                      |
-| `GET /capabilities`                | Report the direct-operation protocol, limits, semantics, and supported operation types.                                   |
-| `GET /capabilities/queries/:type`  | Return one query's generated JSON Schema, constraints, result description, and examples.                                  |
-| `GET /capabilities/commands/:type` | Return one command's generated JSON Schema, constraints, result description, and examples.                                |
-| `POST /query`                      | Validate and execute one bounded `SpaceQuery`, returning a query-discriminated JSON result.                               |
-| `POST /execute`                    | Validate and execute an ordered batch of agent-allowed `CanvasCommand` variants.                                          |
+| Endpoint                           | Responsibility                                                                                                               |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `GET /skill`                       | Return the public bundled root guide; authenticated requests resolve the current root guide and append live Skill Frames.    |
+| `GET /skill/:skillId`              | Return an authenticated advanced guide: `layout`, `tasks`, or `agents`.                                                      |
+| `GET /download/<path>`             | Stream a known node, artifact, or staged-upload file.                                                                        |
+| `POST /upload/<name>`              | Stage bytes in the canvas `.upload/` directory without creating a node.                                                      |
+| `DELETE /upload/<name>`            | Remove one exact staged upload.                                                                                              |
+| `POST /agent`                      | Create a visible Agent Node and optionally start its first turn.                                                             |
+| `POST /agent/:threadId/prompt`     | Submit a turn to an existing Agent conversation over SSE.                                                                    |
+| `GET /agent/profiles`              | Return available Agent Profile IDs and aliases, marking the configured external default with `default: true` when available. |
+| `POST /task/create`                | Create a durable Task and its static Task Note.                                                                              |
+| `POST /task/:taskId/run/create`    | Create a Run, its visible root Agent Node, and start the first turn.                                                         |
+| `GET /capabilities`                | Report the direct-operation protocol, limits, semantics, and supported operation types.                                      |
+| `GET /capabilities/queries/:type`  | Return one query's generated JSON Schema, constraints, result description, and examples.                                     |
+| `GET /capabilities/commands/:type` | Return one command's generated JSON Schema, constraints, result description, and examples.                                   |
+| `POST /query`                      | Validate and execute one bounded `SpaceQuery`, returning a query-discriminated JSON result.                                  |
+| `POST /execute`                    | Validate and execute an ordered batch of agent-allowed `CanvasCommand` variants.                                             |
 
 There is no directory-listing endpoint. External agents receive exact node paths in selected-node context or ask the internal agent to discover relevant files.
 
@@ -82,13 +82,13 @@ Uploads are inert payloads stored under `.upload/`. Names must be explicit and c
 
 ## Agent control plane
 
-`POST /agent` always creates a visible Agent Node. A plain-text body is shorthand for the default `huabu` Profile plus an immediate first prompt; the full JSON form selects another available Profile, position, launch options, optional parent thread, and optional prompt. `X-Huabu-Agent-Start: false` creates an idle Agent from JSON without submitting a turn.
+`POST /agent` always creates a visible Agent Node. A plain-text body uses the configured default external Profile plus an immediate first prompt; the full JSON form optionally selects another available Profile, position, launch options, optional parent thread, and optional prompt. Omitting `profileId` uses the same saved default and fails explicitly if it is unconfigured or unavailable. `X-Huabu-Agent-Start: false` creates an idle Agent from JSON without submitting a turn.
 
 Parent lineage is best effort. The route resolves `parentThreadId` or `X-Huabu-Host-Thread-Id` to any Question Node in the current Space and attempts an ordinary Canvas edge after creating the Agent Node. A missing parent or rejected edge is returned as non-blocking creation metadata and never rolls back or rejects the new Agent.
 
 `POST /agent/:threadId/prompt` addresses one existing Agent conversation directly and never creates a Node or changes its Profile. A caller that retained no creation response can query `INSPECT_NODES` for the Agent/Question Node and use its optional `threadId`; non-Question and unbound Question results omit the field. Both immediate creation and later prompts use SSE; creation streams begin with a `created` event carrying `nodeId`, `threadId`, effective `profileId`, parent-connection state, and warnings.
 
-`GET /agent/profiles` exposes the public available Profile catalogue. It includes `huabu` as the default and projects other Profiles to stable `id` and `alias` fields without exposing commands, working directories, manifests, setup details, or registry eligibility state.
+`GET /agent/profiles` exposes the public available Profile catalogue. It retains `huabu` as an explicit transitional choice, marks only the available saved external default with `default: true`, and projects Profiles to stable `id` and `alias` fields without exposing commands, working directories, manifests, setup details, or registry eligibility state. List order is not a default-selection contract.
 
 ## External-agent bootstrap
 

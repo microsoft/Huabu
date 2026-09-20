@@ -2120,9 +2120,9 @@ const useCanvasStore = create<RFState>()(
       dismissVersionConflictToast();
       try {
         const targetId = canvasId ?? get().canvasId;
-        const chatThreadId = useChatStore
-          .getState()
-          .ensureCanvasThread(targetId);
+        // Loading a Space only restores an existing legacy conversation.
+        // Creating a new Chat is an explicit action requiring Agent defaults.
+        const chatThreadId = useChatStore.getState().threadMap[targetId];
         usePreviewWorkspaceStore
           .getState()
           .loadForCanvas(targetId, { chatThreadId });

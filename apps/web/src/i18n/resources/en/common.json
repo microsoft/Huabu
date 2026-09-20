@@ -156,6 +156,21 @@
     "profileCreated": "Profile created",
     "profileUpdated": "Profile updated",
     "profileSaveFailed": "Failed to save profile",
+    "agentDefaultsTitle": "Global Agent defaults",
+    "structuredLaunchUnavailable": "This Agentlet cannot launch every detected harness with structured configuration. Use a compatible executable or a Custom command.",
+    "agentDefaultsProfile": "Default Agent Profile",
+    "agentDefaultsDescription": "Used for new Agent Nodes and unbound chats. Existing conversations keep their Agent.",
+    "agentDefaultsModel": "Functional-task model",
+    "agentDefaultsModelDescription": "Shared override for functional tasks. Does not change Profile or chat model preferences; production tasks are not migrated yet.",
+    "agentDefaultsInherit": "Inherit the Profile model",
+    "agentDefaultsUnconfigured": "No default Agent selected",
+    "agentDefaultsMissing": "Missing Profile ({{id}})",
+    "agentDefaultsDeleted": "The selected Profile was deleted. Choose a replacement; the default will not switch automatically.",
+    "agentDefaultsOffline": "The selected Profile's machine is offline. Its selection is retained.",
+    "agentDefaultsModelUnknown": "Model-selection support is unknown. This override is saved but has not been verified with the selected Agent.",
+    "agentDefaultsModelUnsupported": "The selected Agent does not support model selection. This override cannot be applied.",
+    "agentDefaultsSaveFailed": "Failed to save Agent defaults",
+    "agentDefaultsSaved": "Agent defaults saved",
     "agentDirectoryRequired": "Agent directory is required",
     "commandRequired": "Command is required",
     "workingDirectoryRequired": "Working directory is required",
@@ -998,6 +1013,8 @@
     }
   },
   "errors": {
+    "agentDefaultUnconfigured": "Connect an Agent and configure a default Profile in Settings before starting a new conversation.",
+    "agentDefaultsUnavailable": "Agent defaults could not be loaded. Check the server connection and configure a default Profile in Settings.",
     "nodeSaveFailed": "Couldn't write \"{{name}}\" to disk — the file may be locked or not writable.",
     "rateLimited": "Too many requests. Try again in {{seconds}} seconds."
   }

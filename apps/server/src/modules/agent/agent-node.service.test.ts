@@ -39,6 +39,7 @@ function createHarness(options?: {
   nodeApplied?: boolean;
   edgeApplied?: boolean;
   edgeError?: Error;
+  defaultProfileId?: string | null;
 }) {
   const execute = vi
     .fn()
@@ -49,6 +50,10 @@ function createHarness(options?: {
     execute.mockResolvedValueOnce(output(options?.edgeApplied ?? true));
   }
   const service = new AgentNodeService({
+    getDefaultProfileId: () =>
+      options?.defaultProfileId === undefined
+        ? 'profile-a'
+        : options.defaultProfileId,
     getProfileRegistry: () => ({
       getProfile: (profileId) =>
         profileId === 'profile-a'
@@ -237,6 +242,7 @@ describe('AgentNodeService', () => {
 
     const result = await service.create({
       canvasId: 'canvas-a',
+      profileId: 'huabu',
       position: { x: 1, y: 2 },
       launchOverrides: {
         additionalInitialPreamble: 'Review before editing.',
@@ -261,5 +267,38 @@ describe('AgentNodeService', () => {
         ],
       }),
     );
+  });
+
+  it('uses the configured default only when no Profile was supplied', async () => {
+    const { service, execute } = createHarness();
+    const result = await service.create({
+      canvasId: 'canvas-a',
+      position: { x: 1, y: 2 },
+    });
+    expect(result.profileId).toBe('profile-a');
+    expect(
+      execute.mock.calls[0]?.[0].commands[0].nodes[0].data.agentBinding,
+    ).toEqual({
+      kind: 'external',
+      profileId: 'profile-a',
+      alias: 'Researcher',
+    });
+  });
+
+  it('does not fall back when the default is unconfigured or deleted', async () => {
+    for (const defaultProfileId of [null, 'deleted-profile']) {
+      const { service, execute } = createHarness({ defaultProfileId });
+      await expect(
+        service.create({
+          canvasId: 'canvas-a',
+          position: { x: 1, y: 2 },
+        }),
+      ).rejects.toMatchObject({
+        code: defaultProfileId
+          ? 'profile_not_selectable'
+          : 'default_profile_unconfigured',
+      });
+      expect(execute).not.toHaveBeenCalled();
+    }
   });
 });

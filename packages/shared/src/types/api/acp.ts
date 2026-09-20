@@ -27,6 +27,7 @@ import {
   ZAcpSessionConfigOption,
   ZAcpSessionMode,
 } from './acp-tool.js';
+import { agentDefaultsSchema } from './agent-defaults.js';
 import { agentProfileSchema } from './agent-profile.js';
 
 import type { AgentProfileView } from './agent-profile.js';
@@ -87,11 +88,9 @@ export type AcpDaemonStatus = AcpAgentletStatus;
 // ─── Profile + agentlet HTTP wire ─────────────────────────────────────
 
 /** Response body for `GET /api/acp/profiles`. */
-export interface AcpProfilesListResponse {
-  profiles: AgentProfileView[];
-  selectableProfileIds: string[];
-  agentlet: AcpAgentletStatus;
-}
+export type AcpProfilesListResponse = z.infer<
+  typeof acpProfilesListResponseSchema
+>;
 
 /** Response body for `POST` / `PATCH` /api/acp/profiles[/:id]. */
 export type AcpProfileMutationResponse = AgentProfileView;
@@ -117,10 +116,9 @@ export type AcpDaemonRestartResponse = AcpAgentletRestartResponse;
 // ─── Local agent CLI detection ────────────────────────────────────────
 //
 // The server proxies the daemon's detection result from the local machine.
-// Picking an installed agent pre-fills `command` for a manual Profile.
+// Picking a supported installed agent submits a structured harness launch.
 //
-// This endpoint is loopback-only — it shells out to discover host
-// binaries and must never be reachable from a remote browser.
+// This endpoint is owner-only and never probes the Huabu Server's PATH.
 
 /** Daemon-owned detection result for one external agent CLI. */
 export const acpAgentCliInfoSchema = z.object({
@@ -140,6 +138,14 @@ export const acpAgentCliInfoSchema = z.object({
   installHint: z.string(),
   executablePath: z.string().optional(),
   workingDirPath: z.string().optional(),
+  launchVersion: z.literal(1).optional(),
+  capabilities: z
+    .object({
+      autoApprove: z.enum(['supported', 'unsupported', 'unknown']),
+      modelOverride: z.enum(['supported', 'unsupported', 'unknown']),
+      sessionPersistence: z.enum(['supported', 'unsupported', 'unknown']),
+    })
+    .optional(),
   diagnostics: z
     .array(z.object({ code: z.string(), message: z.string() }))
     .optional(),
@@ -500,7 +506,8 @@ export const acpProfilesListResponseSchema = z.object({
   profiles: z.array(agentProfileSchema),
   selectableProfileIds: z.array(z.string().min(1)),
   agentlet: acpAgentletStatusSchema,
-}) satisfies z.ZodType<AcpProfilesListResponse>;
+  agentDefaults: agentDefaultsSchema.optional(),
+});
 
 // {@link AcpProfileMutationResponse}, {@link AcpAgentletStatusResponse} and
 // {@link AcpAgentletRestartResponse} are type aliases; reuse
