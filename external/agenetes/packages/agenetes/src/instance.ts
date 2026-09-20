@@ -118,7 +118,11 @@ export interface Agenetes {
    * write on a dead thread), not a lazy spawn.
    */
   get(threadId: string): AgentHandle | undefined;
-  /** Tear the live handle down and evict it from the live table (I9.3). */
+  /**
+   * Tear the live handle down and evict it from the live table (I9.3).
+   * A driver teardown failure keeps the handle and its persistence/notification
+   * wiring intact for retry. Durable records and conversation logs are retained.
+   */
   close(threadId: string): void;
   /**
    * Read one durable thread record by `(namespace, threadId)` (I9.4),
@@ -861,15 +865,14 @@ export function createAgenetesInstance(
       return runtime.get(threadId);
     },
     close(threadId: string): void {
-      // Tear down the up-report listener + end any open notification streams
-      // before evicting the live handle.
+      // Keep persistence and notifications wired if driver teardown fails.
+      runtime.close(threadId);
       const unsub = unsubscribers.get(threadId);
       if (unsub) {
         unsub();
         unsubscribers.delete(threadId);
       }
       bus.closeThread(threadId);
-      runtime.close(threadId);
     },
     record(namespace: Namespace, threadId: string): ThreadRecord | undefined {
       const record = threadStore.get(namespace, threadId);

@@ -10,7 +10,7 @@
 // source.
 
 import { AgenetesError, defineDriver } from '@agenetes/runtime';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { InMemoryEventLogStore, type EventLogStore } from './event-log.js';
 import { InMemoryThreadStore, type ThreadStore } from './thread-store.js';
@@ -229,6 +229,91 @@ describe('Agenetes.rehome() — the destructive counterpart to fork()', () => {
     expect(inst.record(targetNamespace, threadId)).toBeUndefined();
     expect(inst.record(sourceNamespace, threadId)).toBeDefined();
     expect(inst.get(threadId)).toBeDefined();
+  });
+
+  it('requires successful close before rehome and recovers the complete durable thread at the destination', () => {
+    const threadStore = new InMemoryThreadStore();
+    const eventLogStore = new InMemoryEventLogStore();
+    const turnStore = new InMemoryTurnStore();
+    const sourceNamespace = ns('close_rehome_source');
+    const targetNamespace = ns('close_rehome_target');
+    const threadId = 'close_rehome_thread';
+    seedSource(
+      threadStore,
+      eventLogStore,
+      turnStore,
+      sourceNamespace,
+      threadId,
+    );
+    const sourceRecord = threadStore.get(sourceNamespace, threadId)!;
+    const sourceEvents = eventLogStore.readRecords(sourceNamespace, threadId);
+    const sourceTurns = turnStore.list(sourceNamespace, threadId);
+    const inst = mountAgenetes({
+      drivers: { external: stubDriver() },
+      threadStore,
+      eventLogStore,
+      turnStore,
+    });
+    const handle = inst.create(sourceRecord.spec) as unknown as StubHandle;
+    const targetSpec = targetSpecFor(
+      sourceRecord.spec as StubSpec,
+      targetNamespace,
+    );
+    const source = { namespace: sourceNamespace, threadId };
+    const failure = new Error('synthetic close failure');
+    const close = vi.spyOn(handle, 'close').mockImplementationOnce(() => {
+      throw failure;
+    });
+
+    expect(() => inst.close(threadId)).toThrow(failure);
+    expect(inst.get(threadId)).toBe(handle);
+    expect(() => inst.rehome(source, targetSpec)).toThrow(/live handle/);
+    expect(inst.record(sourceNamespace, threadId)).toEqual(sourceRecord);
+    expect(eventLogStore.readRecords(sourceNamespace, threadId)).toEqual(
+      sourceEvents,
+    );
+    expect(turnStore.list(sourceNamespace, threadId)).toEqual(sourceTurns);
+    expect(inst.record(targetNamespace, threadId)).toBeUndefined();
+    expect(eventLogStore.readRecords(targetNamespace, threadId)).toEqual([]);
+    expect(turnStore.list(targetNamespace, threadId)).toEqual([]);
+
+    inst.close(threadId);
+    inst.close(threadId);
+    expect(close).toHaveBeenCalledTimes(2);
+    expect(handle.closed).toBe(true);
+    expect(inst.get(threadId)).toBeUndefined();
+    expect(inst.record(sourceNamespace, threadId)).toEqual(sourceRecord);
+    expect(eventLogStore.readRecords(sourceNamespace, threadId)).toEqual(
+      sourceEvents,
+    );
+    expect(turnStore.list(sourceNamespace, threadId)).toEqual(sourceTurns);
+
+    inst.rehome(source, targetSpec);
+    expect(inst.get(threadId)).toBeUndefined();
+    expect(inst.record(sourceNamespace, threadId)).toBeUndefined();
+    expect(eventLogStore.readRecords(sourceNamespace, threadId)).toEqual([]);
+    expect(turnStore.list(sourceNamespace, threadId)).toEqual([]);
+
+    const recovered = inst.create(targetSpec) as unknown as StubHandle;
+    expect(recovered).not.toBe(handle);
+    expect(inst.get(threadId)).toBe(recovered);
+    expect(recovered.spec).toEqual(targetSpec);
+    expect(recovered.createContext.recoveryInput).toMatchObject({
+      state: sourceRecord.state,
+      turns: sourceTurns.map(({ turn }) => turn),
+    });
+    expect(inst.record(targetNamespace, threadId)).toEqual({
+      ...sourceRecord,
+      spec: targetSpec,
+    });
+    expect(eventLogStore.readRecords(targetNamespace, threadId)).toEqual(
+      sourceEvents,
+    );
+    expect(turnStore.list(targetNamespace, threadId)).toEqual(sourceTurns);
+    expect(inst.history(targetNamespace, threadId).turns).toEqual(
+      sourceTurns.map(({ turn }) => turn),
+    );
+    inst.close(threadId);
   });
 
   it('rejects a missing source thread', () => {

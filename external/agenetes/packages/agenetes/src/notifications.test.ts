@@ -7,7 +7,7 @@
 // every open stream.
 
 import { defineDriver } from '@agenetes/runtime';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { ThreadNotificationBus } from './notifications.js';
 
@@ -318,6 +318,73 @@ describe('notification surface (M5.5/A3.0, I9.7)', () => {
     inst.close('thr_1');
     await loop; // returns because the stream ended
     expect(drained).toEqual([]);
+  });
+
+  it('keeps persistence and both notification scopes wired until driver close succeeds', async () => {
+    const inst = mount((spec) => new ReportingHandle(spec));
+    const spec = {
+      ...deployment('close_retry'),
+      namespace: ns('close_retry_source'),
+    };
+    const handle = inst.create(spec) as unknown as ReportingHandle;
+    const legacy = inst.notifications(spec.threadId)[Symbol.asyncIterator]();
+    const scoped = inst
+      .notifications(spec.threadId, spec.namespace)
+      [Symbol.asyncIterator]();
+    const pendingLegacy = legacy.next();
+    const pendingScoped = scoped.next();
+    const failure = new Error('synthetic close failure');
+    const close = vi.spyOn(handle, 'close').mockImplementationOnce(() => {
+      throw failure;
+    });
+    const hostMetadata = { label: 'preserved host metadata' };
+    inst.updateHostMetadata(spec.namespace, spec.threadId, hostMetadata);
+
+    expect(() => inst.close(spec.threadId)).toThrow(failure);
+    expect(inst.get(spec.threadId)).toBe(handle);
+    expect(handle.wired).toBe(true);
+    const afterFailure = {
+      driverState: { sessionId: 'after_failed_close' },
+      metadata: meta,
+    };
+    handle.emit(afterFailure);
+    expect(inst.record(spec.namespace, spec.threadId)).toMatchObject({
+      state: afterFailure,
+      hostMetadata,
+    });
+    expect(await pendingLegacy).toEqual({ value: meta, done: false });
+    expect(await pendingScoped).toEqual({ value: meta, done: false });
+
+    const finalSnapshot = {
+      driverState: { sessionId: 'final_close_state' },
+      metadata: { ...meta, metaUpdatedAt: 2 },
+    };
+    close.mockImplementationOnce(() => {
+      expect(handle.wired).toBe(true);
+      handle.emit(finalSnapshot);
+      handle.closed = true;
+    });
+    inst.close(spec.threadId);
+    expect(handle.closed).toBe(true);
+    expect(handle.wired).toBe(false);
+    expect(inst.get(spec.threadId)).toBeUndefined();
+    for (const iterator of [legacy, scoped]) {
+      expect(await iterator.next()).toEqual({
+        value: finalSnapshot.metadata,
+        done: false,
+      });
+      expect(await iterator.next()).toEqual({ value: undefined, done: true });
+    }
+    expect(inst.record(spec.namespace, spec.threadId)).toMatchObject({
+      state: finalSnapshot,
+      hostMetadata,
+    });
+    handle.emit(afterFailure);
+    inst.close(spec.threadId);
+    expect(close).toHaveBeenCalledTimes(2);
+    expect(inst.record(spec.namespace, spec.threadId)?.state).toEqual(
+      finalSnapshot,
+    );
   });
 
   it('a handle with no onState leaves the notification stream empty', async () => {

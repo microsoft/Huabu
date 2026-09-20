@@ -418,6 +418,8 @@ The instance is a **handle factory/registry addressed by `threadId`** (I9.1) —
 | `get(threadId) → AgentHandle \| undefined` | Pure lookup — **never spawns**. A missing handle is a precondition failure (e.g. a control write on a dead thread), not a lazy spawn.                                                                                                                                                                                                 |
 | `close(threadId)`                          | Tear the handle down and evict it from the registry.                                                                                                                                                                                                                                                                                  |
 
+`close(threadId)` tears down the driver before removing its up-report listener and ending notification streams. If driver teardown throws, the error propagates and the handle remains cached with persistence and notifications still wired, so the host can retry. A successful close is idempotent and retains the durable thread record, host metadata, and both conversation-log tiers. Rehome still requires no live handle: close successfully before relocating the durable thread, then create it in the destination namespace to recover its state and history.
+
 `run` / `control` / `capabilities` live on the **`AgentHandle`** (I8), not on the instance, so the host composes them:
 
 `run` / `control` / `capabilities` 在 **`AgentHandle`**（I8）上，不在实例上，宿主据此组合：
