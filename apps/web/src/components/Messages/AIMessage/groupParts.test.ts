@@ -19,9 +19,17 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { groupAdjacentToolParts, groupByThinkingPhase } from './groupParts';
+import {
+  groupAdjacentToolParts,
+  groupByThinkingPhase,
+  projectTaskCompleteResults,
+} from './groupParts';
+import {
+  assistantMessageText,
+  type AssistantSegment,
+} from '../../../store/chatTypes';
 
-import type { AssistantSegment } from '../../../store/chatTypes';
+import type { GenericToolPart } from '@huabu/shared';
 
 function text(t: string): AssistantSegment {
   return { kind: 'text', text: t };
@@ -56,14 +64,76 @@ function spaceCommandsTool(toolCallId: string): AssistantSegment {
 function genericTool(
   toolCallId: string,
   title = 'External op',
-): AssistantSegment {
+  output?: string,
+): GenericToolPart {
   return {
     kind: 'tool',
     toolCallId,
     title,
     variant: 'generic',
+    ...(output
+      ? {
+          content: [
+            {
+              type: 'content' as const,
+              content: { type: 'text' as const, text: output },
+            },
+          ],
+        }
+      : {}),
   };
 }
+
+describe('projectTaskCompleteResults', () => {
+  it('projects the latest task_complete text as copyable assistant text', () => {
+    const projected = projectTaskCompleteResults([
+      thinking('Finishing'),
+      {
+        ...genericTool('tc-1', 'task_complete'),
+        status: 'completed',
+        content: [
+          {
+            type: 'content',
+            content: { type: 'text', text: 'Partial result' },
+          },
+          {
+            type: 'content',
+            content: { type: 'text', text: 'Final **result**\n\nNext step.\n' },
+          },
+        ],
+      },
+    ]);
+
+    expect(projected).toEqual([
+      thinking('Finishing'),
+      text('Final **result**\n\nNext step.'),
+    ]);
+    expect(assistantMessageText(projected)).toBe(
+      'Final **result**\n\nNext step.',
+    );
+  });
+
+  it('keeps a task_complete without text as a tool fallback', () => {
+    const tool = {
+      ...genericTool('tc-1', 'task_complete'),
+      status: 'completed' as const,
+    };
+
+    expect(projectTaskCompleteResults([tool])).toEqual([tool]);
+  });
+
+  it.each(['pending', 'failed'] as const)(
+    'keeps a %s task_complete as a tool fallback',
+    (status) => {
+      const tool = {
+        ...genericTool('tc-1', 'task_complete', 'Not a final result'),
+        status,
+      };
+
+      expect(projectTaskCompleteResults([tool])).toEqual([tool]);
+    },
+  );
+});
 
 describe('groupAdjacentToolParts', () => {
   it('passes non-tool parts through as singleton segment groups', () => {
@@ -218,6 +288,36 @@ describe('groupByThinkingPhase', () => {
       expect(phases[1].group.kind).toBe('segment');
     expect(phases[2]?.kind).toBe('phase');
     if (phases[2]?.kind === 'phase') expect(phases[2].closed).toBe(false);
+  });
+
+  it('renders projected task_complete text outside its preceding thinking phase', () => {
+    const phases = groupByThinkingPhase(
+      projectTaskCompleteResults([
+        thinking('Confirming expense submissions'),
+        genericTool('tc-1', 'Save and verify the draft'),
+        {
+          ...genericTool('tc-2', 'task_complete', 'Final answer'),
+          status: 'completed',
+        },
+      ]),
+    );
+
+    expect(phases).toHaveLength(2);
+    expect(phases[0]?.kind).toBe('phase');
+    if (phases[0]?.kind === 'phase') {
+      expect(phases[0].closed).toBe(true);
+      expect(phases[0].toolGroups).toHaveLength(1);
+      expect(phases[0].toolGroups[0]?.parts[0]?.title).toBe(
+        'Save and verify the draft',
+      );
+    }
+    expect(phases[1]?.kind).toBe('loose');
+    if (phases[1]?.kind === 'loose') {
+      expect(phases[1].group.kind).toBe('segment');
+      if (phases[1].group.kind === 'segment') {
+        expect(phases[1].group.segment).toEqual(text('Final answer'));
+      }
+    }
   });
 
   it('emits tool runs that appear before any thinking as loose groups', () => {

@@ -87,6 +87,10 @@ External Agents Settings uses `components/Settings/agent-profiles/` and the cano
 
 [`Toast`](../../apps/web/src/components/Common/Toast.tsx) derives its default auto-dismiss duration from tone: `danger` toasts persist until dismissed, while `neutral`, `info`, `success`, and `warning` toasts dismiss after 3000 ms. Callers may explicitly set `duration` to override either default, including a positive duration for a transient danger message or `0` for any persistent message.
 
+### Assistant tool disclosures
+
+Generic tool calls render through [`ToolCallCard`](../../apps/web/src/components/Messages/AIMessage/Tool/ToolCallCard.tsx) and start collapsed by default. A completed textual `task_complete` result is projected into an ordinary top-level assistant text segment before phase grouping, so it closes any preceding thinking phase, renders as Markdown, and participates in Copy and Add as note. ACP tool updates are cumulative, so the latest text content block is authoritative; a pending, failed, or textless `task_complete` result remains a generic tool card.
+
 ### Clipboard contract
 
 Canvas copy carries Huabu's serialized node payload so that pasting back into Huabu preserves node identity and artifact ownership. The payload always rides in `text/html`; the other representations exist for applications outside Huabu:

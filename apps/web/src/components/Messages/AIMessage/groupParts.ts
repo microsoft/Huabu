@@ -34,6 +34,38 @@ import type {
   WebSearchToolPart,
 } from '@huabu/shared';
 
+function taskCompleteText(part: GenericToolPart): string | undefined {
+  let text: string | undefined;
+  for (const entry of part.content ?? []) {
+    if (entry.type === 'content' && entry.content.type === 'text') {
+      text = entry.content.text.trimEnd();
+    }
+  }
+  return text || undefined;
+}
+
+/**
+ * Present a textual `task_complete` result as the assistant's final answer.
+ * ACP tool updates are cumulative, so the last text frame is authoritative.
+ * Pending, failed, or textless results remain tool cards.
+ */
+export function projectTaskCompleteResults(
+  segments: AssistantSegment[],
+): AssistantSegment[] {
+  return segments.map((segment) => {
+    if (
+      segment.kind !== 'tool' ||
+      segment.variant !== 'generic' ||
+      segment.title !== 'task_complete' ||
+      segment.status !== 'completed'
+    ) {
+      return segment;
+    }
+    const text = taskCompleteText(segment);
+    return text ? { kind: 'text', text } : segment;
+  });
+}
+
 export type SegmentGroup =
   | { kind: 'segment'; segment: Exclude<AssistantSegment, { kind: 'tool' }> }
   | { kind: 'tool-group'; variant: 'generic'; parts: GenericToolPart[] }
@@ -181,6 +213,8 @@ export function groupAdjacentToolParts(
  *    in the message render as their own loose entries with no
  *    surrounding phase — preserves backward-compat for agents that
  *    never emit thinking chunks.
+ *  - A text segment projected from `task_complete` closes the phase by
+ *    the same ordinary non-tool boundary rule as any final answer.
  *
  * A phase is "closed" iff another phase or any loose segment exists
  * after it in the same message. Callers use `closed` to drive the
