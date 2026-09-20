@@ -105,6 +105,7 @@ function mount(element: React.ReactNode): void {
 }
 
 beforeEach(() => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   renderCounts.assistant.clear();
   renderCounts.user = 0;
   renderCounts.userInputKinds = [];
@@ -123,6 +124,10 @@ afterEach(() => {
 });
 
 describe('MessageList bottom navigation', () => {
+  const scrollTopDescriptor = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    'scrollTop',
+  );
   let height: number;
   let viewportHeight: number;
   let top: number;
@@ -141,14 +146,13 @@ describe('MessageList bottom navigation', () => {
     vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(
       () => viewportHeight,
     );
-    vi.spyOn(HTMLElement.prototype, 'scrollTop', 'get').mockImplementation(
-      () => top,
-    );
-    vi.spyOn(HTMLElement.prototype, 'scrollTop', 'set').mockImplementation(
-      (value) => {
+    Object.defineProperty(HTMLElement.prototype, 'scrollTop', {
+      configurable: true,
+      get: () => top,
+      set: (value: number) => {
         top = Math.max(0, Math.min(value, height - viewportHeight));
       },
-    );
+    });
     vi.mocked(HTMLElement.prototype.scrollTo).mockImplementation(function (
       this: HTMLElement,
       options?: ScrollToOptions | number,
@@ -169,6 +173,18 @@ describe('MessageList bottom navigation', () => {
         }
       },
     );
+  });
+
+  afterEach(() => {
+    if (scrollTopDescriptor) {
+      Object.defineProperty(
+        HTMLElement.prototype,
+        'scrollTop',
+        scrollTopDescriptor,
+      );
+    } else {
+      Reflect.deleteProperty(HTMLElement.prototype, 'scrollTop');
+    }
   });
 
   function thread(): HTMLElement {
