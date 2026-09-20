@@ -3,7 +3,10 @@ import { describe, expect, it, vi } from 'vitest';
 import { AgentProfileRegistry } from './registry.js';
 import { InMemoryAgentProfileRegistryStore } from './store.js';
 
-import type { CreateAgentProfileInput } from './types.js';
+import type {
+  CreateAgentProfileInput,
+  PatchAgentProfileInput,
+} from './types.js';
 
 const input: CreateAgentProfileInput = {
   launchKind: 'acp-command',
@@ -20,6 +23,61 @@ const input: CreateAgentProfileInput = {
 };
 
 describe('AgentProfileRegistry', () => {
+  it('persists structured launch separately from editable metadata and clones immutable snapshots', () => {
+    const store = new InMemoryAgentProfileRegistryStore();
+    const registry = new AgentProfileRegistry(store);
+    const created = registry.createProfile({
+      launchKind: 'acp-harness',
+      id: 'harness',
+      alias: 'Typed',
+      agentletId: 'machine-a',
+      workingDirPath: '/work',
+      harnessId: 'copilot',
+      options: { autoApprove: true },
+      metadata: { cliId: 'claude' },
+    });
+    const expected = {
+      kind: 'acp-harness',
+      harnessId: 'copilot',
+      options: { autoApprove: true },
+    };
+    expect(created.launch).toEqual(expected);
+    const snapshot = registry.snapshotProfile('harness');
+    if (created.launch.kind === 'acp-harness')
+      created.launch.options!.autoApprove = false;
+    registry.patchProfile('harness', { metadata: { cliId: 'custom' } });
+    expect(registry.snapshotProfile('harness')).toEqual(snapshot);
+    expect(
+      new AgentProfileRegistry(store).getProfile('harness')?.launch,
+    ).toEqual(expected);
+    expect(() =>
+      registry.patchProfile('harness', {
+        launch: { ...expected, options: { autoApprove: false } },
+      } as unknown as PatchAgentProfileInput),
+    ).toThrow('immutable');
+  });
+
+  it.each([
+    { autoApprove: 'yes' },
+    { model: 'not-a-launch-option' },
+    { argv: [] },
+  ])('rejects unsupported harness options %j', (options) => {
+    const registry = new AgentProfileRegistry(
+      new InMemoryAgentProfileRegistryStore(),
+    );
+    expect(() =>
+      registry.createProfile({
+        launchKind: 'acp-harness',
+        alias: 'Invalid',
+        agentletId: 'machine-a',
+        workingDirPath: '/work',
+        harnessId: 'copilot',
+        options,
+      } as CreateAgentProfileInput),
+    ).toThrow();
+    expect(registry.listProfiles()).toEqual([]);
+  });
+
   it('preserves immutable launch identity, opaque data and stable IDs through CRUD', () => {
     const store = new InMemoryAgentProfileRegistryStore();
     const registry = new AgentProfileRegistry(store);

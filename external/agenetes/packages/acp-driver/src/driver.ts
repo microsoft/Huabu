@@ -1,6 +1,7 @@
 import {
   agentSpecSchema,
   sessionIdSchema,
+  harnessLaunchPlanSchema,
   type AgentSubmission,
 } from '@agenetes/protocol';
 import { defineDriver } from '@agenetes/runtime';
@@ -64,6 +65,7 @@ export const acpSpecSchema = agentSpecSchema.extend({
 export const acpDurableStateSchema = z.object({
   sessionId: sessionIdSchema.optional(),
   initialPreambleDelivered: z.boolean(),
+  harnessLaunchPlan: harnessLaunchPlanSchema.optional(),
 });
 
 export function acpDriverFactory<

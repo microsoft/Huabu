@@ -8,6 +8,7 @@ export class AgentletGatewayError extends Error {
     readonly code:
       | 'agentlet_disconnected'
       | 'harness_discovery_unsupported'
+      | 'harness_launch_unsupported'
       | 'invalid_harness_discovery_response',
     message: string,
   ) {
@@ -76,6 +77,34 @@ export function parseHarnessDiscoveryResult(
         installHint: entry.installHint,
         installed: entry.installed,
       };
+      if (entry.capabilities !== undefined) {
+        if (!object(entry.capabilities)) return invalid();
+        const capabilities = entry.capabilities;
+        const statuses = ['supported', 'unsupported', 'unknown'];
+        if (
+          ['autoApprove', 'modelOverride', 'sessionPersistence'].some(
+            (key) =>
+              typeof capabilities[key] !== 'string' ||
+              !statuses.includes(capabilities[key]),
+          )
+        )
+          return invalid();
+        result.capabilities = {
+          autoApprove: capabilities.autoApprove as NonNullable<
+            HarnessDiscoveryEntry['capabilities']
+          >['autoApprove'],
+          modelOverride: capabilities.modelOverride as NonNullable<
+            HarnessDiscoveryEntry['capabilities']
+          >['modelOverride'],
+          sessionPersistence: capabilities.sessionPersistence as NonNullable<
+            HarnessDiscoveryEntry['capabilities']
+          >['sessionPersistence'],
+        };
+      }
+      if (entry.launchVersion !== undefined) {
+        if (entry.launchVersion !== 1) return invalid();
+        result.launchVersion = 1;
+      }
       for (const key of [
         'executablePath',
         'version',

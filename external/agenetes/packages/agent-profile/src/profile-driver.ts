@@ -1,4 +1,4 @@
-import { agentSpecSchema } from '@agenetes/protocol';
+import { agentSpecSchema, agentProfileLaunchSchema } from '@agenetes/protocol';
 import { defineDriver } from '@agenetes/runtime';
 import { z } from 'zod';
 
@@ -22,6 +22,10 @@ export interface AgentProfileSpec extends AgentSpec {
   readonly binding: { readonly alias: string; readonly profileId: string };
   readonly profile: AgentProfileSnapshot;
   readonly env?: Record<string, string>;
+  readonly initialPreferences?: {
+    readonly model?: string;
+    readonly thoughtLevel?: string;
+  };
 }
 
 export type AgentProfileWorkloadSpec = TypedWorkloadSpec<AgentProfileSpec>;
@@ -31,12 +35,17 @@ interface AcpDelegateSpec extends AgentSpec {
   readonly agentletId: string;
   readonly cwd: string;
   readonly recipe?: {
-    readonly command: string;
+    readonly command?: string;
+    readonly launch?: Extract<
+      AgentProfileSnapshot['launch'],
+      { kind: 'acp-harness' }
+    >;
     readonly cwd?: string;
     readonly autoRestart: true;
     readonly alias: string;
   };
   readonly env?: Record<string, string>;
+  readonly initialPreferences?: AgentProfileSpec['initialPreferences'];
 }
 
 type AcpDelegateWorkloadSpec = TypedWorkloadSpec<AcpDelegateSpec>;
@@ -50,12 +59,7 @@ const profileSnapshotSchema = z.object({
   profileId: z.string(),
   agentletId: z.string(),
   workingDirPath: z.string(),
-  launch: z
-    .object({
-      kind: z.literal('acp-command'),
-      command: z.string(),
-    })
-    .strict(),
+  launch: agentProfileLaunchSchema,
 });
 
 export const agentProfileSpecSchema = agentSpecSchema.extend({
@@ -65,12 +69,20 @@ export const agentProfileSpecSchema = agentSpecSchema.extend({
   }),
   profile: profileSnapshotSchema,
   env: z.record(z.string(), z.string()).optional(),
+  initialPreferences: z
+    .object({
+      model: z.string().optional(),
+      thoughtLevel: z.string().optional(),
+    })
+    .strict()
+    .optional(),
 });
 
 function lowerProfile(
   workload: AgentProfileWorkloadSpec,
 ): AcpDelegateWorkloadSpec {
-  const { profile, binding, env, initialPreamble } = workload.spec;
+  const { profile, binding, env, initialPreamble, initialPreferences } =
+    workload.spec;
   return {
     ...workload,
     spec: {
@@ -79,8 +91,11 @@ function lowerProfile(
       agentletId: profile.agentletId,
       cwd: profile.workingDirPath,
       env,
+      ...(initialPreferences ? { initialPreferences } : {}),
       recipe: {
-        command: profile.launch.command,
+        ...(profile.launch.kind === 'acp-command'
+          ? { command: profile.launch.command }
+          : { launch: profile.launch }),
         cwd: profile.workingDirPath,
         autoRestart: true,
         alias: binding.alias,

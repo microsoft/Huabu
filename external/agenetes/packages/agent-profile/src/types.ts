@@ -11,13 +11,15 @@ export interface AgentProfile {
   alias: string;
   agentletId: string;
   workingDirPath: string;
-  launch: { kind: 'acp-command'; command: string };
+  launch: AgentProfileLaunch;
   metadata?: { cliId?: string };
   /** Opaque host-owned JSON, persisted without interpretation. */
   customData?: Record<string, JsonValue>;
 }
 
-export type AcpCommandProfile = AgentProfile;
+export type AcpCommandProfile = AgentProfile & {
+  launch: Extract<AgentProfileLaunch, { kind: 'acp-command' }>;
+};
 export type AgentProfileBase = Omit<AgentProfile, 'launch' | 'metadata'>;
 
 export interface AgentProfileSnapshot {
@@ -37,9 +39,17 @@ export interface CreateAcpCommandProfileInput {
   customData?: Record<string, JsonValue>;
 }
 
-export type CreateAgentProfileInput = CreateAcpCommandProfileInput & {
-  launchKind: 'acp-command';
-};
+export interface CreateAcpHarnessProfileInput extends Omit<
+  CreateAcpCommandProfileInput,
+  'command'
+> {
+  harnessId: string;
+  options?: HarnessLaunchOptions;
+}
+
+export type CreateAgentProfileInput =
+  | (CreateAcpCommandProfileInput & { launchKind: 'acp-command' })
+  | (CreateAcpHarnessProfileInput & { launchKind: 'acp-harness' });
 
 export interface PatchAgentProfileInput {
   alias?: string;
@@ -59,3 +69,7 @@ export interface AgentProfileRegistryStore {
 
 export type AgentProfileRegistryChangeHandler = () => void;
 export type AgentProfileRegistryChangeErrorHandler = (error: unknown) => void;
+import type {
+  AgentProfileLaunch,
+  HarnessLaunchOptions,
+} from '@agenetes/protocol';
