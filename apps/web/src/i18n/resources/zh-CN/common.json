@@ -615,6 +615,8 @@
   "chat": {
     "showEarlierTurns": "显示更早的 {{count}} 个轮次",
     "loadingEarlierTurns": "正在加载更早的轮次…",
+    "backToBottom": "回到底部",
+    "newMessage": "新消息",
     "conversationIntegrityError": "此 Agent 节点的对话已不可用。请重新打开节点以继续。",
     "open": "打开聊天",
     "close": "关闭聊天",

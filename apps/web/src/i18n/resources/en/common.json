@@ -615,6 +615,8 @@
   "chat": {
     "showEarlierTurns": "Show {{count}} earlier turns",
     "loadingEarlierTurns": "Loading earlier turns…",
+    "backToBottom": "Back to bottom",
+    "newMessage": "New message",
     "conversationIntegrityError": "This Agent node's conversation is no longer available. Reopen the node to continue.",
     "open": "Open Chat",
     "close": "Close Chat",
