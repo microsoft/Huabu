@@ -26,6 +26,7 @@ const apiMocks = vi.hoisted(() => ({
   delete: vi.fn(),
   restart: vi.fn(),
   toast: vi.fn(),
+  detection: vi.fn(),
 }));
 
 vi.mock('@/api/acp', () => ({
@@ -68,7 +69,12 @@ vi.mock('@/components/Common/PathInput', () => ({
 }));
 vi.mock('./useDetectedClis', () => {
   const detectedClis: [] = [];
-  return { useDetectedClis: () => ({ detectedClis, loaded: true }) };
+  return {
+    useDetectedClis: (enabled: boolean, profileId?: string) => {
+      apiMocks.detection(enabled, profileId);
+      return { detectedClis, loaded: true };
+    },
+  };
 });
 vi.mock('./AgentIconPicker', () => ({
   AgentIconPicker: ({
@@ -194,10 +200,7 @@ describe('ExternalAgentsSettings', () => {
     });
     await renderSettings();
     await click('settings.addAgent');
-    input(
-      'input[placeholder="/usr/local/bin/copilot --acp --allow-all"]',
-      'agent --acp',
-    );
+    input('input[aria-label="settings.launchCommand"]', 'agent --acp');
     input('[aria-label="path"]', '/work/project');
     await click('settings.createProfile');
 
@@ -219,10 +222,12 @@ describe('ExternalAgentsSettings', () => {
     });
     await renderSettings();
     await click('settings.editProfile');
-    input('input[type="text"]', 'Renamed');
+    expect(apiMocks.detection).toHaveBeenLastCalledWith(true, profile.id);
+    input('input[aria-label="settings.displayName"]', 'Renamed');
     await click('settings.saveChanges');
 
     expect(apiMocks.update).toHaveBeenCalledWith(profile.id, {
+      expectedRevision: 0,
       alias: 'Renamed',
       customData: expect.objectContaining({ note: 'keep' }),
     });
@@ -236,6 +241,7 @@ describe('ExternalAgentsSettings', () => {
     await click('Change icon');
 
     expect(apiMocks.update).toHaveBeenCalledWith(profile.id, {
+      expectedRevision: 0,
       customData: { note: 'keep', icon: { shape: 'diamond', color: 'red' } },
     });
     expect(apiMocks.list).toHaveBeenCalledTimes(2);

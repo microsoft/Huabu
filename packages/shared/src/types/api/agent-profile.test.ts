@@ -84,17 +84,43 @@ describe('ordinary command Profile contracts', () => {
     ).toBe(false);
   });
 
-  it('patches only mutable display/metadata fields', () => {
-    const patch = { alias: 'New name', customData: commandBody.customData };
+  it('requires a revision for editable template fields and rejects identity changes', () => {
+    const patch = {
+      expectedRevision: 0,
+      alias: 'New name',
+      customData: commandBody.customData,
+    };
     expect(patchAgentProfileBodySchema.parse(patch)).toEqual(patch);
     expect(patchAgentProfileBodySchema.safeParse({}).success).toBe(false);
     expect(
-      patchAgentProfileBodySchema.safeParse({ workingDirPath: '/new/path' })
-        .success,
+      patchAgentProfileBodySchema.safeParse({
+        expectedRevision: 0,
+        workingDirPath: '/new/path',
+      }).success,
+    ).toBe(true);
+    expect(
+      patchAgentProfileBodySchema.safeParse({
+        expectedRevision: 0,
+        launch: commandBody.launch,
+      }).success,
+    ).toBe(true);
+    expect(
+      patchAgentProfileBodySchema.safeParse({ alias: 'No guard' }).success,
     ).toBe(false);
     expect(
-      patchAgentProfileBodySchema.safeParse({ launch: commandBody.launch })
-        .success,
+      patchAgentProfileBodySchema.safeParse({ expectedRevision: 0 }).success,
+    ).toBe(false);
+    expect(
+      patchAgentProfileBodySchema.safeParse({
+        expectedRevision: 0,
+        agentletId: 'other',
+      }).success,
+    ).toBe(false);
+    expect(
+      patchAgentProfileBodySchema.safeParse({
+        expectedRevision: 0,
+        revision: 5,
+      }).success,
     ).toBe(false);
   });
 

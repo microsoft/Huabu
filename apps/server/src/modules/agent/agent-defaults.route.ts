@@ -51,7 +51,12 @@ function projectDefaults(defaults: AgentDefaults): AgentDefaultsResponse {
             ? 'available'
             : 'offline',
     // Missing observations and editable CLI labels do not prove lack of support.
-    modelCapability: modelSelector ? 'supported' : 'unknown',
+    modelCapability:
+      profile?.launch.kind === 'acp-command'
+        ? 'unsupported'
+        : modelSelector
+          ? 'supported'
+          : 'unknown',
   };
 }
 

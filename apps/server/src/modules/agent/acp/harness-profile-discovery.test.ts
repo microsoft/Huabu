@@ -89,6 +89,21 @@ function setup(initialMachines = ['machine-a']) {
 }
 
 describe('automatic ordinary Profile provisioning', () => {
+  it('never automatically provisions the manual Custom wrapper', async () => {
+    const context = setup();
+    context.gateway.discoverHarnesses.mockResolvedValue({
+      harnesses: observation.harnesses.map((harness) => ({
+        ...harness,
+        id: 'custom',
+        workingDirPath: '/custom',
+      })),
+    });
+    const dispose = context.start();
+    await flush();
+    expect(context.registry.createProfile).not.toHaveBeenCalled();
+    dispose();
+  });
+
   it('creates a persisted command Profile with the daemon workspace and no auto-approval flags', async () => {
     const context = setup();
     const dispose = context.start();

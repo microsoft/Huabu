@@ -147,9 +147,11 @@ export const routes = {
   agentChangeReviewConfig: '/agent-change-review/config',
 
   // ── ACP (external agent bridge) ───────────────────────────────────
-  acpAgentCli: '/acp/agent-cli',
+  acpAgentCli: (profileId?: string) =>
+    `/acp/agent-cli${profileId ? `?profileId=${enc(profileId)}` : ''}`,
   // Profiles (loopback-only) — user-managed spawn recipes.
   acpProfiles: '/acp/profiles',
+  acpProfileLaunchPreview: '/acp/profile-launch-preview',
   acpProfileItem: (id: string) => `/acp/profiles/${enc(id)}`,
   // Embedded agentlet daemon — health + manual restart.
   acpAgentlet: '/acp/agentlet',

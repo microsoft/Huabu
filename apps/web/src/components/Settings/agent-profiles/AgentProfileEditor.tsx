@@ -15,6 +15,11 @@ type AgentProfileEditorProps = {
 export function AgentProfileEditor(props: AgentProfileEditorProps) {
   return (
     <CommandProfileForm
+      key={
+        props.mode === 'create'
+          ? 'create'
+          : `${props.profile.id}:${props.profile.revision ?? 0}`
+      }
       editing={props.mode === 'create' ? null : props.profile}
       detectedClis={props.detectedClis}
       detectionLoaded={props.detectionLoaded}

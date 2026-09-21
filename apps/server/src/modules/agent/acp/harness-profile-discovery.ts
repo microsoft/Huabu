@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { CUSTOM_COMMAND_WRAPPER_ID } from '@agentlet/protocol';
+
 import type {
   AgentProfile,
   AgentProfileRegistry,
@@ -117,6 +119,7 @@ export function registerHarnessProfileDiscovery({
     if (!registry) throw new Error('Agent Profile registry is not ready');
 
     for (const harness of result.harnesses) {
+      if (harness.id === CUSTOM_COMMAND_WRAPPER_ID) continue;
       for (const diagnostic of harness.diagnostics ?? []) {
         log.warn(
           { agentletId, harnessId: harness.id, ...diagnostic },

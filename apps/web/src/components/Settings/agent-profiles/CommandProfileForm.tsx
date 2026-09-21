@@ -1,19 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-/**
- * Structured harness and legacy command Profile form. Rendered inside {@link AgentProfileEditor}
- * for both creating a new custom agent and editing an existing one.
- */
-
-import React, { useCallback, useEffect, useId, useMemo, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import {
-  createAcpProfile,
-  listAcpAgentClis,
-  updateAcpProfile,
-} from '@/api/acp';
+import { ApiError } from '@/api/_client';
+import { createAcpProfile, updateAcpProfile } from '@/api/acp';
 import { Button } from '@/components/Common/Button';
 import { PathInput } from '@/components/Common/PathInput';
 import { Select } from '@/components/Common/Select';
@@ -22,7 +14,6 @@ import { toast } from '@/components/Common/Toast';
 import { SettingControl } from '@/components/Settings/Common/SettingControl';
 import { SettingLabel } from '@/components/Settings/Common/SettingLabel';
 import { SettingRow } from '@/components/Settings/Common/SettingRow';
-import { SettingSubGroup } from '@/components/Settings/Common/SettingSubGroup';
 import {
   readAgentIcon,
   randomAgentIcon,
@@ -31,584 +22,344 @@ import {
 
 import { AgentIconField } from './AgentIconField';
 import { ProfileEditActions } from './ProfileEditActions';
-import { ProfileEditFields } from './ProfileEditFields';
-import { ProfileFormFooter } from './ProfileFormFooter';
 import { ReadOnlyField } from './ReadOnlyField';
+import { useProfileLaunchPreview } from './useProfileLaunchPreview';
 
-import type { AgentIconValue } from '@/components/Common/AgentIcon';
-import type {
-  AcpAgentCliInfo,
-  AgentProfileView,
-  CreateAcpProfileBody,
-} from '@huabu/shared';
-
-// ── Command Profile form ──────────────────────────────────────────────
+import type { AcpAgentCliInfo, AgentProfileView } from '@huabu/shared';
 
 interface CommandProfileFormProps {
-  /** When non-null we're editing; when null we're creating. */
   editing: AgentProfileView | null;
-  /** Host-detected CLIs used to pre-fill `command` for new profiles. */
   detectedClis: AcpAgentCliInfo[];
-  /**
-   * Whether host-CLI detection has settled at least once. Until it has,
-   * a new profile keeps the picker in a "detecting…" placeholder instead
-   * of prematurely selecting "Custom command" — which would flash the raw
-   * command field open on mount and then snap to a detected CLI once the
-   * CLIs arrive.
-   */
   detectionLoaded: boolean;
-  /** Dismiss the editor (cancel or after a successful save). */
   onClose: () => void;
-  /** Parent re-fetches profiles after the mutation succeeds. */
   onSaved: () => Promise<void>;
 }
 
-interface CommandProfileFormState {
-  displayName: string;
-  /**
-   * Either the id of a detected CLI (`copilot` / `claude` / …) or
-   * the literal `'custom'`. Drives whether structured controls
-   * (auto-approve toggle, command preview) or the raw `customCommand`
-   * field is rendered.
-   */
-  cliId: string;
-  /** Whether to add the selected CLI's official auto-approval arguments. */
-  allowAll: boolean;
-  /**
-   * Custom mode (`cliId === 'custom'` or the picked CLI is no longer
-   * detected on host): the full command line the worker should spawn.
-   */
-  customCommand: string;
-  cwd: string;
+const CUSTOM_CAPABILITIES = {
+  customLaunchCommand: 'supported',
+  autoApprove: 'unsupported',
+  modelOverride: 'unsupported',
+  sessionPersistence: 'unsupported',
+} as const;
+
+function supportsStructuredEditing(cli: AcpAgentCliInfo | undefined) {
+  return (
+    cli?.installed === true &&
+    cli.launchVersion === 1 &&
+    cli.launchPreviewVersion === 1 &&
+    cli.capabilities !== undefined
+  );
 }
 
-const EMPTY_FORM: CommandProfileFormState = {
-  displayName: '',
-  cliId: 'custom',
-  allowAll: false,
-  customCommand: '',
-  cwd: '',
-};
-
-/**
- * Strip directory + `.exe` from a path so e.g.
- * `C:\Users\me\AppData\npm\copilot.exe` → `copilot`. Used to match
- * a stored command's first token against a detected CLI's `binary`
- * name without being defeated by Windows absolute paths.
- */
-function binaryBasename(token: string): string {
-  const flat = token.replace(/\\/g, '/');
-  const last = flat.slice(flat.lastIndexOf('/') + 1);
-  return last.replace(/\.exe$/i, '');
+function defaultWrapper(clis: AcpAgentCliInfo[]) {
+  return (
+    clis.find((cli) => cli.id !== 'custom' && supportsStructuredEditing(cli))
+      ?.id ?? 'custom'
+  );
 }
 
-/**
- * Take the last path segment of a file-system path, normalised across
- * `/` and `\\` separators. Used to derive a friendly default display
- * name (`Copilot (project-x)` from `/Users/me/project-x`). Returns an
- * empty string for empty / whitespace input — callers fall back to
- * just the agent name in that case.
- */
-function basenameFromPath(p: string): string {
-  if (!p) return '';
-  const flat = p.replace(/\\/g, '/').replace(/\/+$/, '');
-  if (!flat) return '';
-  const idx = flat.lastIndexOf('/');
-  return idx >= 0 ? flat.slice(idx + 1) : flat;
-}
-
-/**
- * Compose the editor's default display name from the selected CLI's
- * label + the working-directory basename. Example:
- * `Copilot CLI (project-x)`. Used both as the placeholder in the
- * Display name input AND as the fallback sent to the server when the
- * user leaves the field blank — so the persisted profile always has a
- * reasonable label without forcing the user to type one.
- */
-function buildDefaultDisplayName(
-  cliDisplayName: string | null,
-  cwd: string,
-  customAgentLabel: string,
-): string {
-  const folder = basenameFromPath(cwd.trim());
-  const agent = cliDisplayName?.trim() || customAgentLabel;
+function displayNameFor(agent: string, cwd: string) {
+  const folder = cwd
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/\/+$/, '')
+    .split('/')
+    .at(-1);
   return folder ? `${agent} (${folder})` : agent;
 }
 
-/**
- * Interpret known legacy command recipes for read-only display, never launch.
- */
-function parseCommandIntoForm(
-  command: string,
-  cliId: string,
-  detectedClis: AcpAgentCliInfo[],
-): {
-  cliId: string;
-  allowAll: boolean;
-  customCommand: string;
-} {
-  const fallback = {
-    cliId: 'custom',
-    allowAll: false,
-    customCommand: command,
-  };
-  if (cliId === 'custom') return fallback;
-  const cli = detectedClis.find((c) => c.id === cliId);
-  if (!cli) return fallback;
-  const tokens = command.trim().split(/\s+/);
-  if (tokens.length === 0 || binaryBasename(tokens[0]) !== cli.binary) {
-    return fallback;
-  }
-  const actualArgs = tokens.slice(1);
-  const sameArgs = (expected: string[]) =>
-    actualArgs.length === expected.length &&
-    actualArgs.every((arg, index) => arg === expected[index]);
-  if (sameArgs(cli.acpArgs)) {
-    return { cliId: cli.id, allowAll: false, customCommand: '' };
-  }
-  if (cli.autoApprove) {
-    const approvedArgs =
-      cli.autoApprove.position === 'before-acp'
-        ? [...cli.autoApprove.args, ...cli.acpArgs]
-        : [...cli.acpArgs, ...cli.autoApprove.args];
-    if (sameArgs(approvedArgs)) {
-      return { cliId: cli.id, allowAll: true, customCommand: '' };
-    }
-  }
-  // Anything outside the known recipes means the command was customised —
-  // drop into Manual setup so no arguments are hidden from the user.
-  return fallback;
-}
-
-export const CommandProfileForm: React.FC<CommandProfileFormProps> = ({
+/** One capability-driven form for both structured and raw-command Profiles. */
+export function CommandProfileForm({
   editing,
   detectedClis,
   detectionLoaded,
   onClose,
   onSaved,
-}) => {
+}: CommandProfileFormProps) {
   const { t } = useTranslation();
-  const autoApproveId = useId();
   const commandId = useId();
   const cwdId = useId();
   const displayNameId = useId();
-  // Start a *new* profile on the ACP Agent tab. An empty `cliId` keeps
-  // the picker in its detecting state until host detection settles; the
-  // effect below then commits the first CLI, or Manual setup when none
-  // were found.
-  const [form, setForm] = useState<CommandProfileFormState>(() =>
-    editing ? EMPTY_FORM : { ...EMPTY_FORM, cliId: '' },
+  const [cliId, setCliId] = useState(() =>
+    editing
+      ? editing.launch.kind === 'acp-harness'
+        ? editing.launch.harnessId
+        : 'custom'
+      : detectionLoaded
+        ? defaultWrapper(detectedClis)
+        : '',
   );
-  const [icon, setIcon] = useState<AgentIconValue>(() =>
+  const [displayName, setDisplayName] = useState(editing?.alias ?? '');
+  const [cwd, setCwd] = useState(editing?.workingDirPath ?? '');
+  const [command, setCommand] = useState(
+    editing?.launch.kind === 'acp-command' ? editing.launch.command : '',
+  );
+  const initialApproval =
+    editing?.launch.kind === 'acp-harness'
+      ? (editing.launch.options?.autoApprove ?? false)
+      : false;
+  const [allowAll, setAllowAll] = useState(initialApproval);
+  const [icon, setIcon] = useState(() =>
     editing ? readAgentIcon(editing) : randomAgentIcon(),
   );
   const [saving, setSaving] = useState(false);
 
-  // Reset the form whenever the editor is (re)opened for a different
-  // profile (or transitions create ↔ edit). The form only mounts while
-  // the editor is visible — as a Modal child (unmounted when closed) or
-  // as the inline detail pane — so a mount is equivalent to an "open".
   useEffect(() => {
-    if (editing) {
-      const cliId = editing.metadata?.cliId ?? 'custom';
-      const parsed =
-        editing.launch.kind === 'acp-harness'
-          ? {
-              cliId: editing.launch.harnessId,
-              allowAll: editing.launch.options?.autoApprove ?? false,
-              customCommand: '',
-            }
-          : parseCommandIntoForm(editing.launch.command, cliId, detectedClis);
-      setForm({
-        displayName: editing.alias,
-        cliId: parsed.cliId,
-        allowAll: parsed.allowAll,
-        customCommand: parsed.customCommand,
-        cwd: editing.workingDirPath,
-      });
-      setIcon(readAgentIcon(editing));
-    } else {
-      // For new profiles, wait for host-CLI detection to settle before
-      // committing a default. Until then keep `cliId` empty so the ACP
-      // picker shows a stable "detecting…" placeholder rather than
-      // momentarily selecting Manual setup.
-      if (!detectionLoaded) return;
-      // Detection done: default to the first detected CLI so the
-      // structured controls appear immediately. Falls back to
-      // `'custom'` when nothing is on PATH. `displayName` stays empty
-      // so the input's placeholder shows the derived default — the
-      // submit handler falls back to `defaultDisplayName` when the
-      // field is left blank.
-      const firstDetected = detectedClis.find(
-        (agent) => agent.installed && agent.launchVersion === 1,
-      );
-      setForm({
-        ...EMPTY_FORM,
-        cliId: firstDetected ? firstDetected.id : 'custom',
-      });
+    if (!editing && !cliId && detectionLoaded) {
+      setCliId(defaultWrapper(detectedClis));
     }
-  }, [editing, detectedClis, detectionLoaded]);
+  }, [editing, cliId, detectedClis, detectionLoaded]);
 
-  /**
-   * Switching CLIs resets the per-CLI allow-all flag since the
-   * vocabulary doesn't carry across CLIs. `displayName` is left
-   * untouched — the input's placeholder already reflects the new
-   * default via `buildDefaultDisplayName`, and the submit path
-   * substitutes the derived default when the field is empty.
-   */
-  const handleCliChange = useCallback((cliId: string) => {
-    setForm((prev) => {
-      return {
-        ...prev,
-        cliId,
-        allowAll: false,
-        customCommand: prev.customCommand,
-      };
-    });
-  }, []);
-
-  const selectedCli = useMemo(
-    () =>
-      form.cliId === 'custom'
-        ? null
-        : (detectedClis.find((c) => c.id === form.cliId && c.installed) ??
-          null),
-    [form.cliId, detectedClis],
+  const custom = cliId === 'custom';
+  const descriptor = detectedClis.find((cli) => cli.id === cliId);
+  // Manual setup remains available when discovery fails or an old daemon has no custom descriptor.
+  const capabilities =
+    descriptor?.capabilities ??
+    (custom && !descriptor ? CUSTOM_CAPABILITIES : undefined);
+  const structuredSupported = supportsStructuredEditing(descriptor);
+  const commandSupported =
+    custom && capabilities?.customLaunchCommand === 'supported';
+  const approvalSupported =
+    !custom && structuredSupported && capabilities?.autoApprove === 'supported';
+  const agentName = custom
+    ? t('settings.customCommand')
+    : (descriptor?.displayName ?? cliId);
+  const defaultName = displayNameFor(
+    custom ? t('settings.customAgent') : agentName,
+    cwd,
   );
-  const isStructured = selectedCli !== null;
-
-  /**
-   * Friendly fallback used both as the Display name placeholder AND
-   * as the value persisted when the user leaves the field blank. Recomputed
-   * whenever the CLI selection or working directory changes so it always
-   * reflects what the saved profile will be called.
-   */
-  const defaultDisplayName = useMemo(
-    () =>
-      buildDefaultDisplayName(
-        selectedCli?.displayName ?? null,
-        form.cwd,
-        t('settings.customAgent'),
-      ),
-    [selectedCli, form.cwd, t],
+  const launchChanged = editing
+    ? custom
+      ? editing.launch.kind === 'acp-command' &&
+        command.trim() !== editing.launch.command
+      : allowAll !== initialApproval
+    : true;
+  const cwdChanged = editing ? cwd.trim() !== editing.workingDirPath : true;
+  const launch: AgentProfileView['launch'] =
+    editing && !launchChanged
+      ? editing.launch
+      : custom
+        ? { kind: 'acp-command', command: command.trim() }
+        : {
+            kind: 'acp-harness',
+            harnessId: cliId,
+            ...(editing?.launch.kind === 'acp-harness' || approvalSupported
+              ? {
+                  options: {
+                    ...(editing?.launch.kind === 'acp-harness'
+                      ? editing.launch.options
+                      : {}),
+                    ...(approvalSupported ? { autoApprove: allowAll } : {}),
+                  },
+                }
+              : {}),
+          };
+  const preview = useProfileLaunchPreview(
+    !custom && structuredSupported
+      ? { launch, ...(editing ? { profileId: editing.id } : {}) }
+      : null,
   );
+  const executionChanged = launchChanged || cwdChanged;
+  const invalidExecution =
+    executionChanged &&
+    (!cwd.trim() ||
+      (custom
+        ? launchChanged && (!commandSupported || !command.trim())
+        : !structuredSupported ||
+          !preview.plan ||
+          !!preview.error ||
+          (launchChanged && !approvalSupported && !!editing)));
+  const saveDisabled = saving || !cliId || invalidExecution;
+  const knownControlsDisabled =
+    saving || !structuredSupported || !!preview.error;
+  const options = [
+    ...detectedClis
+      .filter((cli) => cli.id !== 'custom')
+      .map((cli) => ({
+        value: cli.id,
+        label: cli.displayName,
+        disabled: !supportsStructuredEditing(cli),
+      })),
+    { value: 'custom', label: t('settings.customCommand') },
+  ];
 
-  const handleSubmit = useCallback(async () => {
-    if (editing) {
-      const displayName = form.displayName.trim() || editing.alias;
-      setSaving(true);
-      try {
-        await updateAcpProfile(editing.id, {
-          alias: displayName,
-          ...(icon
-            ? { customData: withAgentIcon(editing.customData, icon) }
-            : {}),
-        });
-        toast(t('settings.profileUpdated'), { tone: 'success' });
-        await onSaved();
-        onClose();
-      } catch (err) {
-        toast(
-          err instanceof Error ? err.message : t('settings.profileSaveFailed'),
-          {
-            tone: 'danger',
-          },
-        );
-      } finally {
-        setSaving(false);
-      }
-      return;
-    }
-
-    const command = form.customCommand.trim();
-    const cwd = form.cwd.trim();
-    if (form.cliId === 'custom' && !command) {
-      toast(t('settings.commandRequired'), { tone: 'danger' });
-      return;
-    }
-    if (!cwd) {
-      toast(t('settings.workingDirectoryRequired'), { tone: 'danger' });
-      return;
-    }
-    // Empty input → fall back to the computed default so the user
-    // doesn't have to type a name to save. The default is also what
-    // the placeholder shows, so the saved label matches expectations.
-    const displayName = form.displayName.trim() || defaultDisplayName;
+  async function save() {
+    if (saveDisabled) return;
     setSaving(true);
     try {
-      if (form.cliId !== 'custom') {
-        const latest = await listAcpAgentClis();
-        if (
-          !latest.agents.some(
-            (agent) =>
-              agent.id === form.cliId &&
-              agent.installed &&
-              agent.launchVersion === 1,
-          )
-        ) {
-          toast(t('settings.selectedAgentUnavailable'), { tone: 'danger' });
-          return;
-        }
+      if (editing) {
+        await updateAcpProfile(editing.id, {
+          expectedRevision: editing.revision ?? 0,
+          alias: displayName.trim() || editing.alias,
+          customData: withAgentIcon(editing.customData, icon),
+          ...(cwdChanged ? { workingDirPath: cwd.trim() } : {}),
+          ...(launchChanged ? { launch } : {}),
+        });
+      } else {
+        await createAcpProfile({
+          alias: displayName.trim() || defaultName,
+          workingDirPath: cwd.trim(),
+          launch,
+          metadata: { cliId },
+          customData: withAgentIcon(undefined, icon),
+        });
       }
-      const payload: CreateAcpProfileBody = {
-        alias: displayName,
-        workingDirPath: cwd,
-        launch:
-          form.cliId === 'custom'
-            ? { kind: 'acp-command', command }
-            : {
-                kind: 'acp-harness',
-                harnessId: form.cliId,
-                options: { autoApprove: form.allowAll },
-              },
-        metadata: { cliId: form.cliId },
-        customData: withAgentIcon(undefined, icon),
-      };
-      await createAcpProfile(payload);
-      toast(t('settings.profileCreated'), { tone: 'success' });
+      toast(
+        t(editing ? 'settings.profileUpdated' : 'settings.profileCreated'),
+        { tone: 'success' },
+      );
       await onSaved();
       onClose();
-    } catch (err) {
+    } catch (error) {
       toast(
-        err instanceof Error ? err.message : t('settings.profileSaveFailed'),
-        {
-          tone: 'danger',
-        },
+        error instanceof ApiError && error.status === 409
+          ? t('settings.profileEditConflict')
+          : error instanceof Error
+            ? error.message
+            : t('settings.profileSaveFailed'),
+        { tone: 'danger' },
       );
     } finally {
       setSaving(false);
     }
-  }, [form, defaultDisplayName, editing, icon, onSaved, onClose, t]);
-
-  /**
-   * One unified picker: installed Agents first, missing Agents disabled
-   * after them, and a trailing "Custom command" option. Selecting
-   * "custom" is the single source of truth for showing the raw
-   * launch-command field, so loading an existing profile lands on the
-   * right control automatically.
-   */
-  const cliOptions = useMemo(() => {
-    const installed = detectedClis
-      .filter((cli) => cli.installed && cli.launchVersion === 1)
-      .map((cli) => ({
-        value: cli.id,
-        label: cli.displayName,
-      }));
-    const missing = detectedClis
-      .filter((cli) => !cli.installed || cli.launchVersion !== 1)
-      .map((cli, index) => ({
-        value: cli.id,
-        label: cli.displayName,
-        disabled: true,
-        sectionLabel:
-          index === 0 && !cli.installed
-            ? t('settings.notInstalledAgents')
-            : undefined,
-      }));
-    const options = [
-      ...installed,
-      ...missing,
-      {
-        value: 'custom',
-        label: t('settings.customCommand'),
-      },
-    ];
-    return options;
-  }, [detectedClis, t]);
-
-  const setCwd = useCallback(
-    (cwd: string) => setForm((p) => ({ ...p, cwd })),
-    [],
-  );
-  const createDisabled =
-    !editing &&
-    (!detectionLoaded ||
-      !form.cliId ||
-      (form.cliId === 'custom'
-        ? !form.customCommand.trim()
-        : selectedCli?.launchVersion !== 1) ||
-      !form.cwd.trim());
-
-  if (editing) {
-    const agentName =
-      detectedClis.find((cli) => cli.id === form.cliId)?.displayName ??
-      (form.cliId === 'custom' ? t('settings.customCommand') : form.cliId);
-    const agentDetails = (
-      <>
-        {editing.launch.kind === 'acp-command' ? (
-          <SettingRow title={t('settings.launchCommand')}>
-            <SettingControl>
-              <ReadOnlyField value={editing.launch.command} mono />
-            </SettingControl>
-          </SettingRow>
-        ) : null}
-        {isStructured && selectedCli?.autoApprove ? (
-          <SettingSubGroup density="compact">
-            <SettingRow
-              description={t('settings.autoApproveAllToolCallsHint')}
-              title={
-                <span>
-                  {t('settings.autoApproveAllToolCalls')} (
-                  <code className="font-mono">
-                    {selectedCli.autoApprove.args.join(' ')}
-                  </code>
-                  )
-                </span>
-              }
-              density="compact"
-            >
-              <input
-                id={autoApproveId}
-                type="checkbox"
-                aria-label={t('settings.autoApproveAllToolCalls')}
-                className="accent-info h-3.5 w-3.5"
-                checked={form.allowAll}
-                disabled
-                readOnly
-              />
-            </SettingRow>
-          </SettingSubGroup>
-        ) : null}
-      </>
-    );
-
-    return (
-      <div className="divide-edge-default flex flex-col divide-y">
-        <ProfileEditFields
-          agentName={agentName}
-          agentDetails={agentDetails}
-          workingDirPath={form.cwd}
-          displayNameId={displayNameId}
-          displayNameControl={
-            <TextInput
-              id={displayNameId}
-              value={form.displayName}
-              onChange={(event) =>
-                setForm((previous) => ({
-                  ...previous,
-                  displayName: event.target.value,
-                }))
-              }
-              className="w-full"
-            />
-          }
-        />
-        <AgentIconField
-          value={icon}
-          onChange={setIcon}
-          alias={form.displayName || editing.alias}
-          disabled={saving}
-        />
-        <ProfileEditActions
-          saving={saving}
-          onCancel={onClose}
-          onSave={() => void handleSubmit()}
-        />
-      </div>
-    );
   }
 
   return (
     <div className="divide-edge-default flex flex-col divide-y">
-      {/* ─── Agent ─────────────────────────────────────────────── */}
-      <div className="flex flex-col">
-        <div className="flex flex-col">
-          <SettingRow title={t('settings.agent')}>
+      <SettingRow title={t('settings.agent')}>
+        <SettingControl>
+          {editing ? (
+            <ReadOnlyField value={agentName} />
+          ) : (
+            <Select
+              value={cliId}
+              onChange={(value) => {
+                setCliId(value);
+                setAllowAll(false);
+              }}
+              options={options}
+              placeholder={t('settings.detectingClis')}
+              ariaLabel={t('settings.agent')}
+              disabled={saving}
+              className="w-full"
+            />
+          )}
+        </SettingControl>
+      </SettingRow>
+      {editing ? (
+        <SettingRow title={t('settings.profileMachine')}>
+          <SettingControl>
+            <ReadOnlyField value={editing.agentletId} mono />
+          </SettingControl>
+        </SettingRow>
+      ) : null}
+      {custom ? (
+        <SettingRow
+          labelFor={commandId}
+          title={t('settings.launchCommand')}
+          description={t('settings.launchCommandHint')}
+        >
+          <SettingControl>
+            <TextInput
+              id={commandId}
+              aria-label={t('settings.launchCommand')}
+              value={command}
+              onChange={(event) => setCommand(event.target.value)}
+              placeholder="/usr/local/bin/copilot --acp"
+              disabled={saving || !commandSupported}
+              mono
+              className="w-full"
+            />
+          </SettingControl>
+        </SettingRow>
+      ) : cliId ? (
+        <>
+          <SettingRow
+            title={t('settings.launchCommand')}
+            description={t('settings.profileLaunchPreviewHint')}
+          >
             <SettingControl>
-              {!detectionLoaded ? (
-                // Detection still in flight — a neutral placeholder avoids
-                // flashing a premature selection before the CLIs have
-                // actually been probed.
-                <div className="border-edge-default bg-surface text-fg-subtle rounded border px-2 py-1 text-xs leading-snug">
-                  {t('settings.detectingClis')}
-                </div>
-              ) : (
-                // Detected CLIs first, then "Custom command" as the last
-                // option. Selecting it reveals the raw launch-command
-                // field below.
-                <Select
-                  value={form.cliId}
-                  onChange={handleCliChange}
-                  options={cliOptions}
-                  ariaLabel={t('settings.agent')}
-                  className="w-full"
+              {preview.plan ? (
+                <ReadOnlyField
+                  value={
+                    preview.plan.kind === 'shell'
+                      ? preview.plan.command
+                      : JSON.stringify([
+                          preview.plan.executable,
+                          ...preview.plan.argv,
+                        ])
+                  }
+                  mono
                 />
+              ) : (
+                <span className="text-fg-muted text-xs">
+                  {t(
+                    preview.pending
+                      ? 'settings.profilePreviewLoading'
+                      : 'settings.profilePreviewUnavailable',
+                  )}
+                </span>
               )}
+              {preview.error ? (
+                <>
+                  <p className="text-danger text-xs" role="alert">
+                    {preview.error}
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={preview.retry}
+                    disabled={saving}
+                  >
+                    {t('settings.profilePreviewRetry')}
+                  </Button>
+                </>
+              ) : null}
             </SettingControl>
           </SettingRow>
-          {detectionLoaded &&
-          detectedClis.some(
-            (cli) => cli.installed && cli.launchVersion !== 1,
-          ) ? (
-            <p className="text-warning px-3 py-2 text-xs">
-              {t('settings.structuredLaunchUnavailable')}
+          <SettingRow
+            title={t('settings.autoApproveAllToolCalls')}
+            description={t('settings.autoApproveAllToolCallsHint')}
+          >
+            <input
+              type="checkbox"
+              aria-label={t('settings.autoApproveAllToolCalls')}
+              className="accent-info h-3.5 w-3.5"
+              checked={allowAll}
+              disabled={knownControlsDisabled || !approvalSupported}
+              onChange={(event) => setAllowAll(event.target.checked)}
+            />
+          </SettingRow>
+          {!approvalSupported ? (
+            <p className="text-fg-muted px-3 py-2 text-xs">
+              {t('settings.profileApprovalUnsupported')}
             </p>
           ) : null}
-          {form.cliId === 'custom' ? (
-            <SettingRow
-              labelFor={commandId}
-              title={t('settings.launchCommand')}
-              description={t('settings.launchCommandHint')}
-            >
-              <SettingControl>
-                <TextInput
-                  id={commandId}
-                  value={form.customCommand}
-                  onChange={(e) =>
-                    setForm((p) => ({
-                      ...p,
-                      customCommand: e.target.value,
-                    }))
-                  }
-                  placeholder="/usr/local/bin/copilot --acp --allow-all"
-                  mono
-                  className="w-full"
-                />
-              </SettingControl>
-            </SettingRow>
+          {allowAll && !initialApproval ? (
+            <p className="text-warning px-3 py-2 text-xs" role="alert">
+              {t('settings.profilePermissionIncrease')}
+            </p>
           ) : null}
-        </div>
-
-        {isStructured && selectedCli?.autoApprove && (
-          <SettingSubGroup density="compact">
-            <SettingRow
-              description={t('settings.autoApproveAllToolCallsHint')}
-              title={
-                <label
-                  htmlFor={autoApproveId}
-                  className={editing ? undefined : 'cursor-pointer'}
-                >
-                  <span>
-                    {t('settings.autoApproveAllToolCalls')} (
-                    <code className="font-mono">
-                      {selectedCli.autoApprove.args.join(' ')}
-                    </code>
-                    )
-                  </span>
-                </label>
-              }
-              density="compact"
-            >
-              {/*
-               * Read-only in edit: the command (and therefore this flag) is
-               * immutable after creation, so the checkbox reflects the saved
-               * choice but can't be toggled.
-               */}
-              <input
-                id={autoApproveId}
-                type="checkbox"
-                aria-label={t('settings.autoApproveAllToolCalls')}
-                className="accent-info h-3.5 w-3.5 cursor-pointer"
-                checked={form.allowAll}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, allowAll: e.target.checked }))
-                }
-              />
-            </SettingRow>
-          </SettingSubGroup>
-        )}
-      </div>
-
+        </>
+      ) : null}
+      {(custom && !commandSupported) ||
+      (!custom && cliId && !structuredSupported) ? (
+        <p className="text-warning px-3 py-2 text-xs">
+          {t('settings.profileExecutionEditingUnavailable')}
+        </p>
+      ) : null}
+      {!editing &&
+      detectionLoaded &&
+      detectedClis.some(
+        (cli) =>
+          cli.id !== 'custom' &&
+          cli.installed &&
+          !supportsStructuredEditing(cli),
+      ) ? (
+        <p className="text-warning px-3 py-2 text-xs">
+          {t('settings.structuredLaunchUnavailable')}
+        </p>
+      ) : null}
       <SettingRow
         labelFor={cwdId}
         title={t('settings.workingDirectory')}
@@ -617,9 +368,12 @@ export const CommandProfileForm: React.FC<CommandProfileFormProps> = ({
         <SettingControl>
           <PathInput
             id={cwdId}
-            value={form.cwd}
+            value={cwd}
             onChange={setCwd}
+            ariaLabel={t('settings.workingDirectory')}
             placeholder="/Users/me/project-x"
+            disabled={custom ? saving : knownControlsDisabled}
+            pickerEnabled={!editing}
             size="sm"
             mono
             pickTitle={t('settings.pickFolder')}
@@ -627,8 +381,6 @@ export const CommandProfileForm: React.FC<CommandProfileFormProps> = ({
           />
         </SettingControl>
       </SettingRow>
-
-      {/* ─── Display name (placed last per UX request) ─────────── */}
       <SettingRow
         labelFor={displayNameId}
         title={
@@ -638,45 +390,33 @@ export const CommandProfileForm: React.FC<CommandProfileFormProps> = ({
         <SettingControl>
           <TextInput
             id={displayNameId}
-            value={form.displayName}
-            onChange={(e) =>
-              setForm((p) => ({ ...p, displayName: e.target.value }))
-            }
-            placeholder={defaultDisplayName}
+            aria-label={t('settings.displayName')}
+            value={displayName}
+            onChange={(event) => setDisplayName(event.target.value)}
+            placeholder={defaultName}
+            disabled={saving}
             className="w-full"
           />
         </SettingControl>
       </SettingRow>
-
-      {/* ─── Icon ──────────────────────────────────────────────── */}
       <AgentIconField
         value={icon}
         onChange={setIcon}
-        alias={form.displayName || defaultDisplayName}
+        alias={displayName || defaultName}
         disabled={saving}
       />
-
-      {/* ─── Actions ───────────────────────────────────────────── */}
-      <ProfileFormFooter>
-        <Button
-          variant="outline"
-          tone="neutral"
-          size="sm"
-          onClick={onClose}
-          disabled={saving}
-        >
-          {t('actions.cancel')}
-        </Button>
-        <Button
-          variant="solid"
-          tone="info"
-          size="sm"
-          onClick={() => void handleSubmit()}
-          disabled={saving || createDisabled}
-        >
-          {saving ? t('settings.saving') : t('settings.createProfile')}
-        </Button>
-      </ProfileFormFooter>
+      {editing ? (
+        <p className="text-fg-muted px-3 py-2 text-xs">
+          {t('settings.profileChangesNewExecutions')}
+        </p>
+      ) : null}
+      <ProfileEditActions
+        saving={saving}
+        saveDisabled={saveDisabled}
+        saveLabel={editing ? undefined : t('settings.createProfile')}
+        onCancel={onClose}
+        onSave={() => void save()}
+      />
     </div>
   );
-};
+}

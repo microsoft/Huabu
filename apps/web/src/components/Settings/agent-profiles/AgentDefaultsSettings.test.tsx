@@ -210,4 +210,33 @@ describe('Agent defaults Settings', () => {
       'settings.agentDefaultsModelUnknown',
     );
   });
+
+  it('treats a newly selected legacy command as custom despite known CLI metadata', async () => {
+    mocks.get.mockResolvedValue({
+      ...initial,
+      defaults: { profileId: 'other', functionalModel: 'fast' },
+      modelCapability: 'supported',
+    });
+    mocks.state.profiles[0].metadata = { cliId: 'copilot' };
+    await render();
+    const select = container.querySelector('select') as HTMLSelectElement;
+    await act(async () => {
+      select.value = 'external';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(container.textContent).toContain(
+      'settings.agentDefaultsModelUnsupported',
+    );
+  });
+
+  it('honors separately reported runtime ACP model support for a custom Profile', async () => {
+    mocks.get.mockResolvedValue({ ...initial, modelCapability: 'supported' });
+    await render();
+    expect(container.textContent).not.toContain(
+      'settings.agentDefaultsModelUnsupported',
+    );
+    expect(container.textContent).not.toContain(
+      'settings.agentDefaultsModelUnknown',
+    );
+  });
 });

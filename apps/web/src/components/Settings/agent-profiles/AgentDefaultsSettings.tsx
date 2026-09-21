@@ -71,7 +71,10 @@ export function AgentDefaultsSettings() {
   const modelCapability =
     snapshot?.defaults.profileId === draft?.profileId
       ? (snapshot?.modelCapability ?? 'unknown')
-      : 'unknown';
+      : externalProfiles.find((profile) => profile.id === draft?.profileId)
+            ?.launch.kind === 'acp-command'
+        ? 'unsupported'
+        : 'unknown';
 
   async function save() {
     if (!draft) return;

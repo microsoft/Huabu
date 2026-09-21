@@ -154,6 +154,7 @@ function createHarness(options?: {
         truncated: false,
       },
     });
+  const subscribeProfileCache = vi.fn();
   const service = new ExternalAgentRealizationService({
     resolveAgentNode: vi
       .fn()
@@ -167,7 +168,7 @@ function createHarness(options?: {
     readRecord: vi.fn(() => durableRecord),
     createHandle,
     buildSpec,
-    subscribeProfileCache: vi.fn(),
+    subscribeProfileCache,
     subscribeTitles,
     ensureSession,
     ...(options?.bindingCoordinator
@@ -184,6 +185,7 @@ function createHarness(options?: {
     createHandle,
     subscribeTitles,
     buildSpec,
+    subscribeProfileCache,
     collectSpacePrompt,
     ensureSession,
     promote,
@@ -464,6 +466,7 @@ describe('ExternalAgentRealizationService', () => {
       workloadType: 'Deployment',
       spec: {
         binding: { alias: 'Fixed Agent', profileId: 'profile-fixed' },
+        profileExecutionRevision: 3,
         agentletId: 'agentlet-1',
         cwd: '/fixed/work',
         recipe: null,
@@ -491,6 +494,11 @@ describe('ExternalAgentRealizationService', () => {
     });
 
     expect(realized.spec).toBe(persisted);
+    expect(harness.subscribeProfileCache).toHaveBeenCalledWith(
+      'thread-1',
+      'profile-fixed',
+      3,
+    );
     expect(harness.buildSpec).not.toHaveBeenCalled();
     expect(harness.collectSpacePrompt).not.toHaveBeenCalled();
     expect(harness.subscribeTitles).toHaveBeenCalledWith(

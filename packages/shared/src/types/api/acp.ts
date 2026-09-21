@@ -139,11 +139,15 @@ export const acpAgentCliInfoSchema = z.object({
   executablePath: z.string().optional(),
   workingDirPath: z.string().optional(),
   launchVersion: z.literal(1).optional(),
+  launchPreviewVersion: z.literal(1).optional(),
   capabilities: z
     .object({
       autoApprove: z.enum(['supported', 'unsupported', 'unknown']),
       modelOverride: z.enum(['supported', 'unsupported', 'unknown']),
       sessionPersistence: z.enum(['supported', 'unsupported', 'unknown']),
+      customLaunchCommand: z
+        .enum(['supported', 'unsupported', 'unknown'])
+        .optional(),
     })
     .optional(),
   diagnostics: z
@@ -151,6 +155,11 @@ export const acpAgentCliInfoSchema = z.object({
     .optional(),
 });
 export type AcpAgentCliInfo = z.infer<typeof acpAgentCliInfoSchema>;
+
+export const acpAgentCliQuerySchema = z
+  .object({ profileId: z.string().min(1).optional() })
+  .strict();
+export type AcpAgentCliQuery = z.infer<typeof acpAgentCliQuerySchema>;
 
 /** Response body for `GET /api/acp/agent-cli`, including unavailable entries. */
 export const acpAgentCliListResponseSchema = z.object({

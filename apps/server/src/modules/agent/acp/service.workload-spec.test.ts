@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
         id: string;
         alias: string;
         agentletId: string;
+        executionRevision?: number;
         workingDirPath: string;
         launch: { kind: 'acp-command'; command: string };
       }
@@ -51,6 +52,7 @@ describe('buildAcpWorkloadSpec', () => {
       id: 'profile-a',
       alias: 'Researcher',
       agentletId: 'agentlet-a',
+      executionRevision: 4,
       workingDirPath: '/profile/work',
       launch: { kind: 'acp-command', command: 'copilot --acp' },
     };
@@ -69,6 +71,7 @@ describe('buildAcpWorkloadSpec', () => {
     });
 
     expect(workload.spec).toMatchObject({
+      profileExecutionRevision: 4,
       cwd: '/task/work',
       initialPreamble: ['Mandatory preamble', 'Task-specific constraints'],
       recipe: {

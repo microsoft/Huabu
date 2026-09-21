@@ -18,7 +18,14 @@
 import {
   getAgentletGateway,
   getSupervisedAgentletId,
+  getAgentProfileRegistry,
 } from '@agenetes/agentlet-host';
+import {
+  CUSTOM_COMMAND_CAPABILITIES,
+  CUSTOM_COMMAND_WRAPPER_ID,
+} from '@agentlet/protocol';
+
+import { acpAgentCliQuerySchema } from '@huabu/shared';
 
 import { isOwnerRequest } from '../../security/owner.js';
 
@@ -29,13 +36,34 @@ import type {
 } from '@huabu/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
-async function detectAgentClis(): Promise<AcpAgentCliInfo[]> {
+async function detectAgentClis(profileId?: string): Promise<AcpAgentCliInfo[]> {
   const gateway = getAgentletGateway();
   if (!gateway) throw new Error('Agentlet Gateway is not ready');
-  const result = await gateway.discoverHarnesses(getSupervisedAgentletId(), {
-    prepareWorkspaces: false,
-  });
-  return result.harnesses;
+  const profile = profileId
+    ? getAgentProfileRegistry()?.getProfile(profileId)
+    : undefined;
+  if (profileId && !profile) throw new Error('Agent Profile is unavailable');
+  const result = await gateway.discoverHarnesses(
+    profile?.agentletId ?? getSupervisedAgentletId(),
+    {
+      prepareWorkspaces: false,
+    },
+  );
+  if (result.harnesses.some((entry) => entry.id === CUSTOM_COMMAND_WRAPPER_ID))
+    return result.harnesses;
+  return [
+    ...result.harnesses,
+    {
+      id: CUSTOM_COMMAND_WRAPPER_ID,
+      displayName: 'Custom command',
+      binary: CUSTOM_COMMAND_WRAPPER_ID,
+      acpArgs: [],
+      autoApprove: null,
+      installed: false,
+      installHint: '',
+      capabilities: CUSTOM_COMMAND_CAPABILITIES,
+    },
+  ];
 }
 
 export function createAcpAgentCliRoutes(
@@ -51,8 +79,28 @@ export function createAcpAgentCliRoutes(
               'Forbidden: agent CLI detection requires owner authorization',
           });
         }
+        const parsed = acpAgentCliQuerySchema.safeParse(request.query);
+        if (!parsed.success) {
+          return reply
+            .status(400)
+            .send({
+              code: 'validation_failed',
+              message: 'Invalid harness catalogue query',
+            });
+        }
         try {
-          return { agents: await detect() };
+          if (
+            parsed.data.profileId &&
+            !getAgentProfileRegistry()?.getProfile(parsed.data.profileId)
+          ) {
+            return reply
+              .status(404)
+              .send({
+                code: 'profile_not_found',
+                message: 'Agent Profile is unavailable',
+              });
+          }
+          return { agents: await detect(parsed.data.profileId) };
         } catch (error) {
           request.log.warn(
             { err: error },

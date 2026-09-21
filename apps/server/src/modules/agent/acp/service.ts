@@ -168,6 +168,7 @@ export function resolveProfileSnapshot(
     agentletId: profile.agentletId,
     workingDirPath: profile.workingDirPath,
     launch: profile.launch,
+    executionRevision: profile.executionRevision ?? 0,
   };
 }
 
@@ -235,6 +236,7 @@ export function buildAcpWorkloadSpec(
           : []),
       ],
       initialPreferences: getProfileSessionPreferences(binding.profileId),
+      profileExecutionRevision: profile?.executionRevision ?? 0,
       binding,
       agentletId,
       ...(cwd !== undefined && { cwd }),

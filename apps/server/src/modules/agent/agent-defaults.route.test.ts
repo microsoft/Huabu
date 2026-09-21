@@ -131,6 +131,7 @@ describe('owner-only Agent defaults', () => {
       id: 'external',
       agentletId: 'machine',
       metadata: { cliId: 'copilot' },
+      launch: { kind: 'acp-command', command: 'copilot --acp' },
     });
     mocks.getAgentlet.mockReturnValue({ status: 'connected' });
     const response = await app.inject({
@@ -145,14 +146,18 @@ describe('owner-only Agent defaults', () => {
     });
     expect(response.json()).toMatchObject({
       selectionState: 'available',
-      modelCapability: 'unknown',
+      modelCapability: 'unsupported',
     });
   });
 
   it('projects missing and offline selections without switching them', async () => {
     mocks.get.mockReturnValue({ profileId: 'selected', functionalModel: '' });
     expect((await app.inject(url)).json().selectionState).toBe('deleted');
-    mocks.getProfile.mockReturnValue({ id: 'selected', agentletId: 'offline' });
+    mocks.getProfile.mockReturnValue({
+      id: 'selected',
+      agentletId: 'offline',
+      launch: { kind: 'acp-harness', harnessId: 'copilot' },
+    });
     expect((await app.inject(url)).json().selectionState).toBe('offline');
     expect(mocks.set).not.toHaveBeenCalled();
   });
@@ -178,6 +183,7 @@ describe('owner-only Agent defaults', () => {
       mocks.getProfile.mockReturnValue({
         id: 'external',
         agentletId: 'machine',
+        launch: { kind: 'acp-harness', harnessId: 'copilot' },
       });
       mocks.getCache.mockReturnValue(cached);
       const response = await app.inject(url);
@@ -189,7 +195,11 @@ describe('owner-only Agent defaults', () => {
 
   it('does not interpret partial or empty cached metadata as unsupported', async () => {
     mocks.get.mockReturnValue({ profileId: 'external', functionalModel: '' });
-    mocks.getProfile.mockReturnValue({ id: 'external', agentletId: 'machine' });
+    mocks.getProfile.mockReturnValue({
+      id: 'external',
+      agentletId: 'machine',
+      launch: { kind: 'acp-harness', harnessId: 'copilot' },
+    });
     mocks.getCache.mockReturnValue({ availableModels: [], configOptions: [] });
     expect((await app.inject(url)).json().modelCapability).toBe('unknown');
   });

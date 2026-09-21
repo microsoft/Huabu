@@ -5,6 +5,7 @@ import { Pencil, Plus, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { ApiError } from '@/api/_client';
 import {
   deleteAcpProfile,
   restartAcpAgentlet,
@@ -178,22 +179,28 @@ export function ExternalAgentsSettings({
   );
 
   const needsCliNames = profiles.some(
-    (profile) => profile.metadata?.cliId && profile.metadata.cliId !== 'custom',
+    (profile) => profile.launch.kind === 'acp-harness',
   );
   const { detectedClis, loaded: detectionLoaded } = useDetectedClis(
     needsCliNames || editor !== null,
+    editor?.kind === 'edit-command' ? editor.profile.id : undefined,
   );
 
   const saveIcon = useCallback(
     async (profile: AgentProfileView, icon: AgentIconValue) => {
       try {
         await updateAcpProfile(profile.id, {
+          expectedRevision: profile.revision ?? 0,
           customData: withAgentIcon(profile.customData, icon),
         });
         await refresh();
       } catch (err) {
         toast(
-          err instanceof Error ? err.message : t('settings.profileSaveFailed'),
+          err instanceof ApiError && err.status === 409
+            ? t('settings.profileEditConflict')
+            : err instanceof Error
+              ? err.message
+              : t('settings.profileSaveFailed'),
           { tone: 'danger' },
         );
         throw err;
@@ -206,7 +213,7 @@ export function ExternalAgentsSettings({
     const cliId =
       profile.launch.kind === 'acp-harness'
         ? profile.launch.harnessId
-        : profile.metadata?.cliId;
+        : 'custom';
     if (!cliId || cliId === 'custom') {
       return [
         t('settings.agentCustomBadge'),

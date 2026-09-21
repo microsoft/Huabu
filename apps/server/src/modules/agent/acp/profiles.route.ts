@@ -16,12 +16,15 @@
  * The list includes the supervised agentlet's health snapshot. Profiles
  * retain their own explicit machine identity.
  *
- * Profiles are templates: once a thread is created against a profile
+ * Profiles are templates: once a thread is first realized against a profile
  * we snapshot the recipe onto the thread record and the two become
  * independent. Deleting the profile here therefore does NOT stop any
  * running agent process — each thread carries its own recipe.
  */
 
+import { isDeepStrictEqual } from 'node:util';
+
+import { AgentProfileError } from '@agenetes/agent-profile';
 import {
   getAgentProfileRegistry,
   getAgentletGateway,
@@ -33,6 +36,7 @@ import {
   agentProfileParamsSchema,
   createAcpProfileBodySchema,
   patchAgentProfileBodySchema,
+  acpProfileLaunchPreviewBodySchema,
 } from '@huabu/shared';
 
 import {
@@ -49,6 +53,8 @@ import {
 import type {
   AcpProfileMutationResponse,
   AcpProfilesListResponse,
+  AcpProfileLaunchPreviewResponse,
+  AgentProfileView,
   ApiResult,
 } from '@huabu/shared';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
@@ -62,7 +68,102 @@ function denyRemote(request: FastifyRequest, reply: FastifyReply): boolean {
   return true;
 }
 
+async function validateHarnessLaunch(
+  launch: AgentProfileView['launch'],
+  agentletId: string,
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<boolean> {
+  if (launch.kind === 'acp-command') return true;
+  try {
+    const gateway = getAgentletGateway();
+    if (!gateway) throw new Error('Agentlet Gateway is not ready');
+    const result = await gateway.discoverHarnesses(agentletId, {
+      prepareWorkspaces: false,
+    });
+    const harness = result.harnesses.find(
+      (entry) => entry.id === launch.harnessId,
+    );
+    if (
+      !harness?.installed ||
+      harness.launchVersion !== 1 ||
+      harness.launchPreviewVersion !== 1
+    ) {
+      reply.status(409).send({
+        code: 'harness_launch_unavailable',
+        message:
+          'The selected Agentlet cannot validate this structured harness Profile. Update Agentlet and check the harness installation.',
+      });
+      return false;
+    }
+    if (
+      launch.options?.autoApprove &&
+      harness.capabilities?.autoApprove !== 'supported'
+    ) {
+      reply.status(400).send({
+        code: 'harness_option_unsupported',
+        message:
+          'This harness does not support an auto-approval launch option.',
+      });
+      return false;
+    }
+    await gateway.buildHarnessLaunch(agentletId, { launch });
+    return true;
+  } catch (error) {
+    request.log.warn(
+      { err: error, agentletId },
+      'Harness launch validation failed',
+    );
+    reply.status(503).send({
+      code: 'harness_validation_unavailable',
+      message: 'Agentlet could not validate the harness configuration.',
+    });
+    return false;
+  }
+}
+
 const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
+  app.post<{ Reply: ApiResult<AcpProfileLaunchPreviewResponse> }>(
+    '/profile-launch-preview',
+    async (request, reply) => {
+      if (denyRemote(request, reply)) return;
+      const parsed = acpProfileLaunchPreviewBodySchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply
+          .status(400)
+          .send({
+            code: 'validation_failed',
+            message: 'Invalid launch preview request',
+          });
+      }
+      const profile = parsed.data.profileId
+        ? getAgentProfileRegistry()?.getProfile(parsed.data.profileId)
+        : undefined;
+      if (parsed.data.profileId && !profile) {
+        return reply
+          .status(404)
+          .send({
+            code: 'profile_not_found',
+            message: 'Agent Profile is unavailable',
+          });
+      }
+      try {
+        const gateway = getAgentletGateway();
+        if (!gateway) throw new Error('Agentlet Gateway is not ready');
+        return await gateway.buildHarnessLaunch(
+          profile?.agentletId ?? getSupervisedAgentletId(),
+          { launch: parsed.data.launch },
+        );
+      } catch (error) {
+        request.log.warn({ err: error }, 'Profile launch preview failed');
+        return reply.status(503).send({
+          code: 'harness_preview_unavailable',
+          message:
+            'Agentlet could not preview this launch configuration. Check its availability and supported options.',
+        });
+      }
+    },
+  );
   // ── List ─────────────────────────────────────────────────────────────
   app.get<{ Reply: ApiResult<AcpProfilesListResponse> }>(
     '/profiles',
@@ -111,41 +212,8 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
       }
       const agentletId = getSupervisedAgentletId();
       const launch = parsed.data.launch;
-      if (launch.kind === 'acp-harness') {
-        try {
-          const gateway = getAgentletGateway();
-          if (!gateway) throw new Error('Agentlet Gateway is not ready');
-          const result = await gateway.discoverHarnesses(agentletId, {
-            prepareWorkspaces: false,
-          });
-          const harness = result.harnesses.find(
-            (entry) => entry.id === launch.harnessId,
-          );
-          if (!harness?.installed || harness.launchVersion !== 1) {
-            return reply.status(409).send({
-              code: 'harness_launch_unavailable',
-              message:
-                'The selected Agentlet cannot launch this structured harness Profile.',
-            });
-          }
-          if (launch.options?.autoApprove && !harness.autoApprove) {
-            return reply.status(400).send({
-              code: 'harness_option_unsupported',
-              message:
-                'This harness does not support an auto-approval launch option.',
-            });
-          }
-        } catch (error) {
-          request.log.warn(
-            { err: error, agentletId },
-            'Harness launch validation failed',
-          );
-          return reply.status(503).send({
-            code: 'harness_discovery_unavailable',
-            message: 'Agentlet harness detection is unavailable.',
-          });
-        }
-      }
+      if (!(await validateHarnessLaunch(launch, agentletId, request, reply)))
+        return;
       const common = {
         alias: parsed.data.alias,
         agentletId,
@@ -204,6 +272,40 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
         code: 'profile_not_found',
       });
     }
+    if ((existing.revision ?? 0) !== parsed.data.expectedRevision) {
+      return reply
+        .status(409)
+        .send({
+          code: 'profile_conflict',
+          message: 'Profile changed. Reload it before saving.',
+        });
+    }
+    const launch = parsed.data.launch ?? existing.launch;
+    if (
+      launch.kind !== existing.launch.kind ||
+      (launch.kind === 'acp-harness' &&
+        existing.launch.kind === 'acp-harness' &&
+        launch.harnessId !== existing.launch.harnessId)
+    ) {
+      return reply.status(400).send({
+        code: 'profile_wrapper_immutable',
+        message: 'Create a new Profile to change its wrapper.',
+      });
+    }
+    const executionChanged =
+      !isDeepStrictEqual(launch, existing.launch) ||
+      (parsed.data.workingDirPath !== undefined &&
+        parsed.data.workingDirPath !== existing.workingDirPath);
+    if (
+      executionChanged &&
+      !(await validateHarnessLaunch(
+        launch,
+        existing.agentletId,
+        request,
+        reply,
+      ))
+    )
+      return;
     let customData = parsed.data.customData;
     if (customData !== undefined) {
       try {
@@ -219,14 +321,36 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
         });
       }
     }
-    const updated = registry.patchProfile(params.data.id, {
-      ...(parsed.data.alias === undefined ? {} : { alias: parsed.data.alias }),
-      ...(customData === undefined ? {} : { customData }),
-      ...(parsed.data.metadata === undefined
-        ? {}
-        : { metadata: parsed.data.metadata }),
-    });
-    return updated;
+    try {
+      const updated = registry.patchProfile(params.data.id, {
+        expectedRevision: parsed.data.expectedRevision,
+        ...(parsed.data.alias === undefined
+          ? {}
+          : { alias: parsed.data.alias }),
+        ...(customData === undefined ? {} : { customData }),
+        ...(parsed.data.metadata === undefined
+          ? {}
+          : { metadata: parsed.data.metadata }),
+        ...(parsed.data.launch === undefined
+          ? {}
+          : { launch: parsed.data.launch }),
+        ...(parsed.data.workingDirPath === undefined
+          ? {}
+          : { workingDirPath: parsed.data.workingDirPath }),
+      });
+      if (executionChanged) invalidateProfileSchemaCache(existing.id);
+      return updated;
+    } catch (error) {
+      if (!(error instanceof AgentProfileError)) throw error;
+      request.log.warn(
+        { err: error, profileId: existing.id },
+        'Profile update rejected',
+      );
+      return reply.status(error.code === 'profile_conflict' ? 409 : 400).send({
+        code: error.code,
+        message: error.message,
+      });
+    }
   });
 
   // ── Delete ──────────────────────────────────────────────────────────

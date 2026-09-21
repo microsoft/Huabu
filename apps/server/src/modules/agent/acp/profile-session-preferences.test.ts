@@ -28,6 +28,7 @@ beforeEach(() => {
 describe('ACP Profile session preferences', () => {
   it('reads only the supported string preferences', () => {
     mocks.getProfile.mockReturnValue({
+      launch: { kind: 'acp-harness', harnessId: 'copilot' },
       customData: {
         sessionPreferences: {
           model: 'claude-opus',
@@ -45,6 +46,7 @@ describe('ACP Profile session preferences', () => {
 
   it('preserves unrelated custom data when remembering a preference', () => {
     mocks.getProfile.mockReturnValue({
+      launch: { kind: 'acp-harness', harnessId: 'copilot' },
       customData: {
         icon: { shape: 'circle', color: 'blue' },
         sessionPreferences: { model: 'gpt-5' },
@@ -62,7 +64,10 @@ describe('ACP Profile session preferences', () => {
   });
 
   it('remembers only model and thought-level config options', () => {
-    mocks.getProfile.mockReturnValue({ customData: {} });
+    mocks.getProfile.mockReturnValue({
+      launch: { kind: 'acp-harness', harnessId: 'copilot' },
+      customData: {},
+    });
     const options = [
       { id: 'model_id', category: 'model' },
       { id: 'reasoning', category: 'thought_level' },
@@ -90,5 +95,27 @@ describe('ACP Profile session preferences', () => {
         sessionPreferences: { model: 'claude-opus' },
       },
     });
+  });
+
+  it('keeps Custom model choices session-local even when metadata names a known harness', () => {
+    mocks.getProfile.mockReturnValue({
+      launch: { kind: 'acp-command', command: 'copilot --acp' },
+      metadata: { cliId: 'copilot' },
+      customData: { sessionPreferences: { model: 'old' } },
+    });
+    expect(getProfileSessionPreferences('custom')).toEqual({});
+    rememberProfileSessionPreference('custom', 'model', 'new');
+    expect(mocks.patchProfile).not.toHaveBeenCalled();
+  });
+
+  it('does not let an old execution overwrite preferences after a Profile edit', () => {
+    mocks.getProfile.mockReturnValue({
+      launch: { kind: 'acp-harness', harnessId: 'copilot' },
+      executionRevision: 2,
+    });
+    rememberProfileSessionPreference('profile', 'model', 'stale', 1);
+    expect(mocks.patchProfile).not.toHaveBeenCalled();
+    rememberProfileSessionPreference('profile', 'model', 'current', 2);
+    expect(mocks.patchProfile).toHaveBeenCalledOnce();
   });
 });
