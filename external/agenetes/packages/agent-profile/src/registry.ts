@@ -10,6 +10,7 @@ import type {
   AgentProfileRegistryStore,
   AgentProfileSnapshot,
   CreateAcpCommandProfileInput,
+  CreateAcpHarnessProfileInput,
   CreateAgentProfileInput,
   PatchAgentProfileInput,
   AgentProfileRegistryChangeHandler,
@@ -26,6 +27,25 @@ export function commandProfile(
     agentletId: input.agentletId,
     workingDirPath: input.workingDirPath,
     launch: { kind: 'acp-command', command: input.command },
+    ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
+    ...(input.customData === undefined ? {} : { customData: input.customData }),
+  });
+}
+
+export function harnessProfile(
+  input: CreateAcpHarnessProfileInput,
+  generateId: () => string = randomUUID,
+): AgentProfile {
+  return parseProfile({
+    id: input.id ?? generateId(),
+    alias: input.alias,
+    agentletId: input.agentletId,
+    workingDirPath: input.workingDirPath,
+    launch: {
+      kind: 'acp-harness',
+      harnessId: input.harnessId,
+      ...(input.options === undefined ? {} : { options: input.options }),
+    },
     ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
     ...(input.customData === undefined ? {} : { customData: input.customData }),
   });
@@ -69,12 +89,18 @@ export class AgentProfileRegistry {
     return { profileId: id, agentletId, workingDirPath, launch };
   }
   createProfile(input: CreateAgentProfileInput): AgentProfile {
-    if (input.launchKind !== 'acp-command')
+    if (
+      input.launchKind !== 'acp-command' &&
+      input.launchKind !== 'acp-harness'
+    )
       throw new AgentProfileError(
         'invalid_profile_kind',
-        'Only ACP command Profiles are supported',
+        'Only ACP command or harness Profiles are supported',
       );
-    const profile = commandProfile(input, this.generateId);
+    const profile =
+      input.launchKind === 'acp-command'
+        ? commandProfile(input, this.generateId)
+        : harnessProfile(input, this.generateId);
     if (this.getProfile(profile.id))
       throw new AgentProfileError(
         'profile_conflict',

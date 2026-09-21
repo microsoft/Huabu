@@ -5,6 +5,8 @@ import { getAgentProfileRegistry } from '@agenetes/agentlet-host';
 
 import { HUABU_AGENT_PROFILE_ID } from '@huabu/shared';
 
+import { getAgentDefaults } from './agent-defaults.js';
+
 import type { CustomData } from '@huabu/shared';
 
 export interface SelectableAgentProfile {
@@ -68,11 +70,11 @@ export function requireAvailableAgentProfile(
 
 export function listAvailableAgentProfiles(
   registry: AgentProfileRegistryPort | null = getAgentProfileRegistry(),
+  defaultProfileId: string | null = getAgentDefaults().profileId,
 ): AvailableAgentProfileSummary[] {
   const huabu = {
     id: HUABU_AGENT_PROFILE_ID,
     alias: 'Huabu',
-    default: true,
   } as const;
   if (!registry) {
     return [huabu];
@@ -86,7 +88,11 @@ export function listAvailableAgentProfiles(
           `Selectable Agent Profile ${profileId} is missing from the registry`,
         );
       }
-      return { id: profile.id, alias: profile.alias };
+      return {
+        id: profile.id,
+        alias: profile.alias,
+        ...(profile.id === defaultProfileId ? { default: true } : {}),
+      };
     }),
   ];
 }

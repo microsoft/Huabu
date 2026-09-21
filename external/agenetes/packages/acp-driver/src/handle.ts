@@ -68,6 +68,7 @@ import type {
   AgentSubmission,
   AgentTurn,
   SessionId,
+  HarnessLaunchPlan,
 } from '@agenetes/protocol';
 import type {
   AgentCapabilities,
@@ -194,6 +195,7 @@ export type AcpCreateSpec = TypedWorkloadSpec<AcpSpec>;
 export interface AcpDurableState {
   readonly sessionId?: SessionId;
   readonly initialPreambleDelivered: boolean;
+  readonly harnessLaunchPlan?: HarnessLaunchPlan;
 }
 
 export interface AcpRuntimePolicy {
@@ -381,12 +383,22 @@ export class AcpAgentHandle<
       }
 
       await this.authorizeHistoryLoad('recover', turns);
-      const fallbackState = sourceState?.metadata
-        ? {
-            driverState: { initialPreambleDelivered: false },
-            metadata: sourceState.metadata,
-          }
-        : undefined;
+      const harnessLaunchPlan =
+        sourceState?.driverState.harnessLaunchPlan ??
+        acpSessionRegistry.get(this.agentletId, this.spec.threadId)
+          ?.bindingRecipe?.launchPlan;
+      const fallbackState =
+        sourceState?.metadata || harnessLaunchPlan
+          ? {
+              driverState: {
+                initialPreambleDelivered: false,
+                ...(harnessLaunchPlan ? { harnessLaunchPlan } : {}),
+              },
+              ...(sourceState?.metadata
+                ? { metadata: sourceState.metadata }
+                : {}),
+            }
+          : undefined;
       return this.openSession(fallbackState, logger, false);
     }
   }

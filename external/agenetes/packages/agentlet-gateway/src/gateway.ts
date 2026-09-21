@@ -168,10 +168,21 @@ export class AgentletGateway {
     );
   }
 
-  spawnOnAgentlet(
+  async spawnOnAgentlet(
     agentletId: string,
     params: SpawnParams,
   ): Promise<SpawnResult> {
+    if (params.sessionSpec.launch !== undefined) {
+      const connection = this.requireConnectedAgentlet(agentletId);
+      if (
+        connection.agentletProfile?.capabilities?.harnessLaunch?.version !== 1
+      ) {
+        throw new AgentletGatewayError(
+          'harness_launch_unsupported',
+          `Agentlet does not support structured harness launch v1: ${agentletId}`,
+        );
+      }
+    }
     return this.sendControlRequest(
       agentletId,
       ServerMethods.SPAWN,

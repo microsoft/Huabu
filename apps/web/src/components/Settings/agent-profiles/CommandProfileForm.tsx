@@ -2,8 +2,7 @@
 // Licensed under the MIT license.
 
 /**
- * Command-backed (`acp-command`) Profile form — the add/edit form plus its
- * supporting command-assembly helpers. Rendered inside {@link AgentProfileEditor}
+ * Structured harness and legacy command Profile form. Rendered inside {@link AgentProfileEditor}
  * for both creating a new custom agent and editing an existing one.
  */
 
@@ -39,15 +38,15 @@ import { ReadOnlyField } from './ReadOnlyField';
 import type { AgentIconValue } from '@/components/Common/AgentIcon';
 import type {
   AcpAgentCliInfo,
-  AcpCommandProfileView,
-  CreateAcpCommandProfileBody,
+  AgentProfileView,
+  CreateAcpProfileBody,
 } from '@huabu/shared';
 
 // ── Command Profile form ──────────────────────────────────────────────
 
 interface CommandProfileFormProps {
   /** When non-null we're editing; when null we're creating. */
-  editing: AcpCommandProfileView | null;
+  editing: AgentProfileView | null;
   /** Host-detected CLIs used to pre-fill `command` for new profiles. */
   detectedClis: AcpAgentCliInfo[];
   /**
@@ -104,28 +103,6 @@ function binaryBasename(token: string): string {
 }
 
 /**
- * Assemble the final command line from a structured form + the
- * selected detected CLI. Returns the trimmed string the worker will
- * spawn. Returns `customCommand` (trimmed) in custom mode or when the
- * referenced CLI isn't currently detected. Use Manual setup for
- * anything outside the preset command recipes.
- */
-function buildCommand(
-  state: CommandProfileFormState,
-  detectedClis: AcpAgentCliInfo[],
-): string {
-  if (state.cliId === 'custom') return state.customCommand.trim();
-  const cli = detectedClis.find((c) => c.id === state.cliId);
-  if (!cli) return state.customCommand.trim();
-  const approval = state.allowAll ? cli.autoApprove : null;
-  const parts: string[] = [cli.binary];
-  if (approval?.position === 'before-acp') parts.push(...approval.args);
-  parts.push(...cli.acpArgs);
-  if (approval?.position === 'after-acp') parts.push(...approval.args);
-  return parts.join(' ');
-}
-
-/**
  * Take the last path segment of a file-system path, normalised across
  * `/` and `\\` separators. Used to derive a friendly default display
  * name (`Copilot (project-x)` from `/Users/me/project-x`). Returns an
@@ -159,15 +136,7 @@ function buildDefaultDisplayName(
 }
 
 /**
- * Best-effort reverse of {@link buildCommand}: given a stored
- * `command` plus its `cliId`, recover the structured form fields so
- * the editor opens with the same checkboxes the user originally
- * chose. When the command no longer matches the detected CLI's
- * exact shape (binary + acpArgs (+ allow-all flag)) — e.g. extra
- * flags were appended, the user hand-edited it, or the CLI was
- * uninstalled — falls back to Manual setup so the raw command is
- * fully visible and editable rather than partially hidden behind
- * structured controls.
+ * Interpret known legacy command recipes for read-only display, never launch.
  */
 function parseCommandIntoForm(
   command: string,
@@ -242,11 +211,14 @@ export const CommandProfileForm: React.FC<CommandProfileFormProps> = ({
   useEffect(() => {
     if (editing) {
       const cliId = editing.metadata?.cliId ?? 'custom';
-      const parsed = parseCommandIntoForm(
-        editing.launch.command,
-        cliId,
-        detectedClis,
-      );
+      const parsed =
+        editing.launch.kind === 'acp-harness'
+          ? {
+              cliId: editing.launch.harnessId,
+              allowAll: editing.launch.options?.autoApprove ?? false,
+              customCommand: '',
+            }
+          : parseCommandIntoForm(editing.launch.command, cliId, detectedClis);
       setForm({
         displayName: editing.alias,
         cliId: parsed.cliId,
@@ -267,7 +239,9 @@ export const CommandProfileForm: React.FC<CommandProfileFormProps> = ({
       // so the input's placeholder shows the derived default — the
       // submit handler falls back to `defaultDisplayName` when the
       // field is left blank.
-      const firstDetected = detectedClis.find((agent) => agent.installed);
+      const firstDetected = detectedClis.find(
+        (agent) => agent.installed && agent.launchVersion === 1,
+      );
       setForm({
         ...EMPTY_FORM,
         cliId: firstDetected ? firstDetected.id : 'custom',
@@ -282,23 +256,16 @@ export const CommandProfileForm: React.FC<CommandProfileFormProps> = ({
    * default via `buildDefaultDisplayName`, and the submit path
    * substitutes the derived default when the field is empty.
    */
-  const handleCliChange = useCallback(
-    (cliId: string) => {
-      setForm((prev) => {
-        const customCommand =
-          cliId === 'custom' && prev.cliId !== 'custom'
-            ? prev.customCommand.trim() || buildCommand(prev, detectedClis)
-            : prev.customCommand;
-        return {
-          ...prev,
-          cliId,
-          allowAll: false,
-          customCommand,
-        };
-      });
-    },
-    [detectedClis],
-  );
+  const handleCliChange = useCallback((cliId: string) => {
+    setForm((prev) => {
+      return {
+        ...prev,
+        cliId,
+        allowAll: false,
+        customCommand: prev.customCommand,
+      };
+    });
+  }, []);
 
   const selectedCli = useMemo(
     () =>
@@ -353,9 +320,9 @@ export const CommandProfileForm: React.FC<CommandProfileFormProps> = ({
       return;
     }
 
-    const command = buildCommand(form, detectedClis);
+    const command = form.customCommand.trim();
     const cwd = form.cwd.trim();
-    if (!command) {
+    if (form.cliId === 'custom' && !command) {
       toast(t('settings.commandRequired'), { tone: 'danger' });
       return;
     }
@@ -373,17 +340,27 @@ export const CommandProfileForm: React.FC<CommandProfileFormProps> = ({
         const latest = await listAcpAgentClis();
         if (
           !latest.agents.some(
-            (agent) => agent.id === form.cliId && agent.installed,
+            (agent) =>
+              agent.id === form.cliId &&
+              agent.installed &&
+              agent.launchVersion === 1,
           )
         ) {
           toast(t('settings.selectedAgentUnavailable'), { tone: 'danger' });
           return;
         }
       }
-      const payload: CreateAcpCommandProfileBody = {
+      const payload: CreateAcpProfileBody = {
         alias: displayName,
         workingDirPath: cwd,
-        launch: { kind: 'acp-command', command },
+        launch:
+          form.cliId === 'custom'
+            ? { kind: 'acp-command', command }
+            : {
+                kind: 'acp-harness',
+                harnessId: form.cliId,
+                options: { autoApprove: form.allowAll },
+              },
         metadata: { cliId: form.cliId },
         customData: withAgentIcon(undefined, icon),
       };
@@ -401,16 +378,7 @@ export const CommandProfileForm: React.FC<CommandProfileFormProps> = ({
     } finally {
       setSaving(false);
     }
-  }, [
-    form,
-    defaultDisplayName,
-    detectedClis,
-    editing,
-    icon,
-    onSaved,
-    onClose,
-    t,
-  ]);
+  }, [form, defaultDisplayName, editing, icon, onSaved, onClose, t]);
 
   /**
    * One unified picker: installed Agents first, missing Agents disabled
@@ -421,19 +389,21 @@ export const CommandProfileForm: React.FC<CommandProfileFormProps> = ({
    */
   const cliOptions = useMemo(() => {
     const installed = detectedClis
-      .filter((cli) => cli.installed)
+      .filter((cli) => cli.installed && cli.launchVersion === 1)
       .map((cli) => ({
         value: cli.id,
         label: cli.displayName,
       }));
     const missing = detectedClis
-      .filter((cli) => !cli.installed)
+      .filter((cli) => !cli.installed || cli.launchVersion !== 1)
       .map((cli, index) => ({
         value: cli.id,
         label: cli.displayName,
         disabled: true,
         sectionLabel:
-          index === 0 ? t('settings.notInstalledAgents') : undefined,
+          index === 0 && !cli.installed
+            ? t('settings.notInstalledAgents')
+            : undefined,
       }));
     const options = [
       ...installed,
@@ -452,7 +422,12 @@ export const CommandProfileForm: React.FC<CommandProfileFormProps> = ({
   );
   const createDisabled =
     !editing &&
-    (!detectionLoaded || !buildCommand(form, detectedClis) || !form.cwd.trim());
+    (!detectionLoaded ||
+      !form.cliId ||
+      (form.cliId === 'custom'
+        ? !form.customCommand.trim()
+        : selectedCli?.launchVersion !== 1) ||
+      !form.cwd.trim());
 
   if (editing) {
     const agentName =
@@ -460,7 +435,7 @@ export const CommandProfileForm: React.FC<CommandProfileFormProps> = ({
       (form.cliId === 'custom' ? t('settings.customCommand') : form.cliId);
     const agentDetails = (
       <>
-        {detectionLoaded && !isStructured ? (
+        {editing.launch.kind === 'acp-command' ? (
           <SettingRow title={t('settings.launchCommand')}>
             <SettingControl>
               <ReadOnlyField value={editing.launch.command} mono />
@@ -561,6 +536,14 @@ export const CommandProfileForm: React.FC<CommandProfileFormProps> = ({
               )}
             </SettingControl>
           </SettingRow>
+          {detectionLoaded &&
+          detectedClis.some(
+            (cli) => cli.installed && cli.launchVersion !== 1,
+          ) ? (
+            <p className="text-warning px-3 py-2 text-xs">
+              {t('settings.structuredLaunchUnavailable')}
+            </p>
+          ) : null}
           {form.cliId === 'custom' ? (
             <SettingRow
               labelFor={commandId}

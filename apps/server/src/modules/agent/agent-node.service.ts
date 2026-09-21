@@ -13,6 +13,7 @@ import {
   type Point,
 } from '@huabu/shared';
 
+import { getAgentDefaults } from './agent-defaults.js';
 import {
   InvalidAgentLaunchOverridesError,
   parseAgentLaunchOverrides,
@@ -55,6 +56,7 @@ export type AgentNodeCreationErrorCode =
   | 'canvas_not_found'
   | 'profile_registry_unavailable'
   | 'profile_not_selectable'
+  | 'default_profile_unconfigured'
   | 'anchor_not_found'
   | 'invalid_anchor'
   | 'invalid_position'
@@ -87,6 +89,7 @@ interface StoredNode {
 
 interface AgentNodeServiceDependencies {
   getProfileRegistry: () => AgentProfileRegistryPort | null;
+  getDefaultProfileId?: () => string | null;
   readCanvasNodes: (canvasId: string) => Promise<StoredNode[] | null>;
   execute: (input: {
     canvasId: string;
@@ -212,7 +215,17 @@ export class AgentNodeService {
     }
     const sourceNodeId = resolveAnchor(nodes, input.anchor);
 
-    const profileId = input.profileId ?? HUABU_AGENT_PROFILE_ID;
+    const profileId =
+      input.profileId ??
+      (this.dependencies.getDefaultProfileId
+        ? this.dependencies.getDefaultProfileId()
+        : getAgentDefaults().profileId);
+    if (!profileId) {
+      throw new AgentNodeCreationError(
+        'default_profile_unconfigured',
+        'Connect an external Agent and select a default Profile in Settings.',
+      );
+    }
     let binding: AgentBinding;
     let agentIcon;
     if (profileId === HUABU_AGENT_PROFILE_ID) {

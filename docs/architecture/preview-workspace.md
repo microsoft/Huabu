@@ -89,7 +89,7 @@ Layers primary activation uses the same permanent semantic node targets and pass
 
 Note and Chat links share the pointer cursor through `data-link-activation="plain"`. Activation is not inferred from callback presence: canvas `NoteNode` uses `modifier`, suppressing native plain-click navigation while allowing the event to bubble for node selection. Platform-modifier clicks open externally on both Note and Chat rather than invoking their host callback. All Milkdown link handlers suppress drag and repeated-click navigation, including surfaces without a callback; the first eligible stationary click opens synchronously and cannot be cancelled by a later double-click. See [Note link activation](./note-node.md#6-link-activation) for the shared gesture contract and single editable-editor link panel used by toolbar, shortcut, and hover. Expanded Note supports creating links from selected text and editing existing links; Chat remains read-only and has no link-edit form.
 
-`openChat` activates the most recently used unbound Chat target or creates a new thread and tab when none exists. New conversation always creates an independent `threadId`. A thread with no persisted selection defaults to the built-in Huabu Agent in `operate` mode; persisted per-thread and per-Canvas selections still take precedence.
+`openChat` activates the most recently used unbound Chat target or creates a new thread and tab when none exists. New conversation always creates an independent `threadId` and snapshots the configured default external Profile unless explicitly supplied another binding. Missing or deleted defaults produce an error rather than silently selecting built-in Huabu or another Profile. Existing threads retain their persisted selection; legacy Canvas-thread initialization does not require an external default merely to load a Space.
 
 Open to Side moves the existing semantic target into the other group instead of duplicating it and preserves whether the tab is transient or permanent. Saving an unbound Chat as a Question replaces that tab's target in place, preserving tab identity, position, messages, and draft continuity.
 
@@ -127,7 +127,7 @@ When a conversation is visible beside an ordinary node, its composer offers that
 
 Ordinary Question sessions retain `AgentConversationView`: presentation and owner identify the same active Canvas/node, and the owner carries the Question's `threadId`. History, reconnect, Agent turns, tools, lifecycle writes, binding, mode, and change records use that owner scope. Legacy World `nodeRef` sessions and source-reference resolution are removed. Space Preview scenes do not mount source Question conversations; the user enters the source Space to open one.
 
-An authored Question node remains authoritative for persisted agent mode and fixed binding. A new selectable Question thread inherits the Canvas's current binding unless the node supplies an explicit binding.
+An authored Question node remains authoritative for persisted agent mode and fixed binding. A new selectable Question snapshots the configured external default unless the caller supplies an explicit binding; existing Questions do not inherit later global or Canvas selection changes.
 
 ## 5. Groups, tabs, and bounds
 

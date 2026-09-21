@@ -299,6 +299,9 @@ export function snapshotEntryState(
         ? { sessionId: entry.sessionId as SessionId }
         : {}),
       initialPreambleDelivered: entry.initialPreambleDelivered,
+      ...(entry.bindingRecipe?.launchPlan
+        ? { harnessLaunchPlan: entry.bindingRecipe.launchPlan }
+        : {}),
     },
     metadata: snapshotEntryMeta(entry),
   };
@@ -834,7 +837,7 @@ async function ensureAcpSessionInner(
   // returning thread's recipe stable; the driver no longer reads a
   // persisted `bindingRecipe`. When absent, the binding is unbound — fail
   // with a clear, user-actionable error.
-  const recipe: AcpBindingRecipe | null = opts.recipe ?? null;
+  let recipe: AcpBindingRecipe | null = opts.recipe ?? null;
   if (!recipe) {
     throw new AcpServiceError(
       'profile_missing',
@@ -901,6 +904,16 @@ async function ensureAcpSessionInner(
     );
   }
   const priorSessionId = priorState?.driverState.sessionId;
+  const savedPlan = priorState?.driverState.harnessLaunchPlan;
+  if (savedPlan) {
+    if (!recipe.launch) {
+      throw new AcpServiceError(
+        'spawn_failed',
+        'Persisted harness launch cannot be replaced by a shell command',
+      );
+    }
+    recipe = { ...recipe, launchPlan: savedPlan };
+  }
 
   // Resolve the thread to a live agentlet agent. Each thread owns its
   // own CLI process — the orchestrator either returns the cached spawn
@@ -909,7 +922,7 @@ async function ensureAcpSessionInner(
   // the daemon can resume a suspended session instead of creating new.
   // Failures here surface as a 503 from the caller with a user-actionable
   // hint pointing at Settings → External Agents.
-  const { sessionId: agentSessionId } = await ensureAgentForThread(
+  const { sessionId: agentSessionId, launchPlan } = await ensureAgentForThread(
     agentletId,
     threadId,
     recipe,
@@ -975,7 +988,7 @@ async function ensureAcpSessionInner(
     namespace,
     cwd,
     createdAt: Date.now(),
-    bindingRecipe: recipe,
+    bindingRecipe: launchPlan ? { ...recipe, launchPlan } : recipe,
     // Resume path (`priorSessionId` was down-fed + agent accepted it)
     // already has a recoverable session, so the entry starts persisted and
     // the handle's first up-report refreshes the durable record. Fresh

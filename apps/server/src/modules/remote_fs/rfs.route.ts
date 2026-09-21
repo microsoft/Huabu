@@ -44,7 +44,6 @@ import {
   createTaskRequestSchema,
   completeTaskRunRequestSchema,
   createInteractiveViewRequestSchema,
-  HUABU_AGENT_PROFILE_ID,
   interactiveViewLookupQuerySchema,
   interactiveViewResourceParamsSchema,
   rfsAgentCreateHeadersSchema,
@@ -1004,7 +1003,7 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
         : '';
       const contentType = request.headers['content-type'] ?? '';
       let creation: {
-        profileId: string;
+        profileId?: string;
         prompt?: string;
         position?: { x: number; y: number };
         parentThreadId?: string;
@@ -1040,7 +1039,7 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
             .code(400)
             .send(rfsError('A non-empty prompt is required.'));
         }
-        creation = { profileId: HUABU_AGENT_PROFILE_ID, prompt };
+        creation = { prompt };
       }
 
       const start = parsedHeaders.data['x-huabu-agent-start'] ?? true;
@@ -1139,21 +1138,23 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
           const status =
             error.code === 'canvas_not_found'
               ? 404
-              : error.code === 'profile_registry_unavailable'
-                ? 503
-                : error.code === 'profile_not_selectable'
-                  ? 404
-                  : ['invalid_launch_overrides', 'invalid_position'].includes(
-                        error.code,
-                      )
-                    ? 400
-                    : 500;
+              : error.code === 'default_profile_unconfigured'
+                ? 409
+                : error.code === 'profile_registry_unavailable'
+                  ? 503
+                  : error.code === 'profile_not_selectable'
+                    ? 404
+                    : ['invalid_launch_overrides', 'invalid_position'].includes(
+                          error.code,
+                        )
+                      ? 400
+                      : 500;
           const code =
             error.code === 'profile_not_selectable'
               ? 'profile_not_found'
               : error.code;
           const message =
-            error.code === 'profile_not_selectable'
+            error.code === 'profile_not_selectable' && creation.profileId
               ? `Agent Profile ${creation.profileId} is unavailable.`
               : error.message;
           return reply.code(status).send(rfsError(message, code));

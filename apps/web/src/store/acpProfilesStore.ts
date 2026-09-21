@@ -8,8 +8,8 @@
  * Why a store and not per-component state? Several surfaces need the
  * profile list in lockstep: the Settings editor lets the user CRUD
  * profiles, the chat picker uses the same list to label "external"
- * binding options, and ChatPanel's stale-binding auto-reset needs to
- * see the latest profiles BEFORE flipping a binding. Centralising
+ * binding options, and new conversations snapshot the global default.
+ * Centralising
  * the list in a store means any caller can `await
  * useAcpProfilesStore.getState().refresh()` and be sure every
  * subscriber sees the new data on the next render.
@@ -40,8 +40,10 @@
 import { create } from 'zustand';
 
 import { listAcpProfiles } from '@/api/acp';
+import { i18n } from '@/i18n';
 
 import type { AcpAgentletStatus, AgentProfileView } from '@/api/acp';
+import type { AgentBinding, AgentDefaults } from '@huabu/shared';
 
 let inFlightRefresh: Promise<void> | null = null;
 
@@ -52,6 +54,8 @@ interface AcpProfilesState {
   selectableProfileIds: string[];
   /** Latest agentlet snapshot. `null` until the first fetch resolves. */
   agentlet: AcpAgentletStatus | null;
+  /** Absent on older servers; never infer a default from list ordering. */
+  agentDefaults: AgentDefaults | null;
   /**
    * `true` once a fetch has *succeeded* at least once. A failed initial
    * fetch leaves this `false` (and {@link profiles} empty), so consumers
@@ -76,6 +80,7 @@ export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
   profiles: [],
   selectableProfileIds: [],
   agentlet: null,
+  agentDefaults: null,
   loaded: false,
   error: null,
   loading: false,
@@ -118,6 +123,7 @@ export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
           profiles: res.profiles,
           selectableProfileIds: res.selectableProfileIds,
           agentlet: res.agentlet,
+          agentDefaults: res.agentDefaults ?? null,
           loaded: true,
           error: null,
           loading: false,
@@ -138,3 +144,27 @@ export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
     return request;
   },
 }));
+
+/** Snapshot only the chat identity; functional-model routing is unrelated. */
+export function getDefaultAgentBinding(): AgentBinding {
+  const state = useAcpProfilesStore.getState();
+  if (!state.loaded || state.error) {
+    throw new Error(i18n.t('errors.agentDefaultsUnavailable'));
+  }
+  const profileId = state.agentDefaults?.profileId;
+  if (!profileId) {
+    throw new Error(i18n.t('errors.agentDefaultUnconfigured'));
+  }
+  const profile = state.profiles.find((entry) => entry.id === profileId);
+  return {
+    kind: 'external',
+    profileId,
+    alias: profile?.alias ?? profileId,
+  };
+}
+
+/** User-initiated creation waits for the canonical server snapshot. */
+export async function loadDefaultAgentBinding(): Promise<AgentBinding> {
+  await useAcpProfilesStore.getState().refresh();
+  return getDefaultAgentBinding();
+}

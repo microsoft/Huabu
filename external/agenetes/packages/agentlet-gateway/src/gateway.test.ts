@@ -160,6 +160,80 @@ afterEach(async () => {
 });
 
 describe('AgentletGateway', () => {
+  it('rejects structured launch before sending to a daemon without the versioned transport capability', async () => {
+    const { gateway, url } = await startHarness();
+    const client = await connect(url, {
+      role: 'agentlet',
+      queryId: 'machine-a',
+      token: 'token-a',
+      hello: agentletHello('machine-a'),
+    });
+    await expect(
+      gateway.spawnOnAgentlet('machine-a', {
+        appId: 'typed',
+        sessionSpec: { launch: { kind: 'acp-harness', harnessId: 'copilot' } },
+      }),
+    ).rejects.toMatchObject({ code: 'harness_launch_unsupported' });
+    expect(
+      client.messages.some(
+        (message) =>
+          'method' in message && message.method === ServerMethods.SPAWN,
+      ),
+    ).toBe(false);
+  });
+
+  it('routes structured launch unchanged only to a capable target daemon', async () => {
+    const { gateway, url } = await startHarness();
+    const hello = agentletHello('machine-a');
+    if ('params' in hello) {
+      (
+        hello.params as unknown as AgentletHelloParams
+      ).agentletProfile.capabilities.harnessLaunch = { version: 1 };
+    }
+    const client = await connect(url, {
+      role: 'agentlet',
+      queryId: 'machine-a',
+      token: 'token-a',
+      hello,
+    });
+    const params = {
+      appId: 'typed',
+      sessionSpec: {
+        launch: {
+          kind: 'acp-harness' as const,
+          harnessId: 'copilot',
+          options: { autoApprove: true },
+        },
+      },
+    };
+    const result = {
+      sessionId: 'typed-session',
+      pid: 456,
+      launchPlan: {
+        version: 1,
+        executable: 'copilot',
+        argv: ['--acp', '--allow-all'],
+        env: {},
+      },
+    };
+    client.socket.on('message', (data) => {
+      const message = JSON.parse(data.toString()) as JsonRpcMessage;
+      if (
+        'method' in message &&
+        message.method === ServerMethods.SPAWN &&
+        'id' in message
+      ) {
+        expect(message.params).toEqual(params);
+        client.socket.send(
+          JSON.stringify({ jsonrpc: '2.0', id: message.id, result }),
+        );
+      }
+    });
+    await expect(gateway.spawnOnAgentlet('machine-a', params)).resolves.toEqual(
+      result,
+    );
+  });
+
   it('surfaces session WebSocket closure as a connection lifecycle event', async () => {
     const { gateway, url } = await startHarness();
     const client = await connect(url, {

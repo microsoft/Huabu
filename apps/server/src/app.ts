@@ -30,6 +30,8 @@ import {
 } from './modules/agent/acp/index.js';
 import { buildLegacyCommandProfiles } from './modules/agent/acp/legacy-profile-migration.js';
 import { listProfiles as listLegacyAcpProfiles } from './modules/agent/acp/profile-store.js';
+import { initializeAgentDefaults } from './modules/agent/agent-defaults.js';
+import agentDefaultsRoutes from './modules/agent/agent-defaults.route.js';
 import agentRoutes from './modules/agent/agent.route.js';
 import agentChangeReviewConfigRoutes from './modules/agent/change-review-config.route.js';
 import llmRoutes from './modules/agent/llm.route.js';
@@ -343,10 +345,13 @@ const agentletGateway = mountAgenetes(app, {
 });
 let unregisterHarnessDiscovery: (() => void) | undefined;
 app.addHook('onReady', async () => {
+  const registry = getAgentProfileRegistry();
+  if (registry) initializeAgentDefaults(registry.listProfiles());
   unregisterHarnessDiscovery = registerHarnessProfileDiscovery({
     gateway: agentletGateway,
     getRegistry: getAgentProfileRegistry,
     log: app.log,
+    onProfilesDiscovered: initializeAgentDefaults,
   });
 });
 app.addHook('preClose', async () => unregisterHarnessDiscovery?.());
@@ -375,6 +380,7 @@ app.addHook('onListen', async () => {
 // (M3). See modules/agent/acp/profile-cache-port.ts.
 installAcpProfileCachePort();
 app.register(acpProfilesRoutes, { prefix: '/api/acp' });
+app.register(agentDefaultsRoutes, { prefix: '/api/agent/defaults' });
 app.register(acpAgentletRoutes, { prefix: '/api/acp' });
 app.register(acpAgentCliRoutes, { prefix: '/api/acp' });
 app.register(acpThreadsRoutes, { prefix: '/api/acp' });

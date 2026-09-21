@@ -7,7 +7,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AgentProfileEditor } from './AgentProfileEditor';
 
-import type { AcpAgentCliInfo, AcpCommandProfileView } from '@huabu/shared';
+import type {
+  AcpAgentCliInfo,
+  AcpCommandProfileView,
+  AgentProfileView,
+} from '@huabu/shared';
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean;
@@ -83,6 +87,7 @@ const agents: AcpAgentCliInfo[] = [
     acpArgs: ['--acp'],
     autoApprove: { args: ['--allow-all'], position: 'after-acp' },
     installed: true,
+    launchVersion: 1,
     installHint: 'Install Copilot',
   },
   {
@@ -111,7 +116,7 @@ let container: HTMLDivElement | undefined;
 const onSaved = vi.fn<() => Promise<void>>();
 const onClose = vi.fn();
 
-function renderEditor(editing?: AcpCommandProfileView, clis = agents) {
+function renderEditor(editing?: AgentProfileView, clis = agents) {
   onSaved.mockResolvedValue(undefined);
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -156,6 +161,28 @@ afterEach(() => {
 });
 
 describe('AgentProfileEditor', () => {
+  it('edits a structured Profile without converting or changing its launch configuration', async () => {
+    apiMocks.updateCommand.mockResolvedValue(profile);
+    renderEditor({
+      ...profile,
+      launch: {
+        kind: 'acp-harness',
+        harnessId: 'copilot',
+        options: { autoApprove: true },
+      },
+    });
+    input('input[type="text"]', 'Renamed');
+    await act(async () => saveButton()?.click());
+    expect(apiMocks.updateCommand).toHaveBeenCalledWith(
+      'profile-1',
+      expect.objectContaining({ alias: 'Renamed' }),
+    );
+    expect(apiMocks.updateCommand.mock.calls[0]?.[1]).not.toHaveProperty(
+      'launch',
+    );
+    expect(apiMocks.createCommand).not.toHaveBeenCalled();
+  });
+
   it('lists daemon CLIs with missing entries disabled and a custom command option', () => {
     renderEditor();
     const selects = container?.querySelectorAll('select');
@@ -172,7 +199,7 @@ describe('AgentProfileEditor', () => {
     expect(saveButton()?.disabled).toBe(true);
   });
 
-  it('creates an ordinary command Profile with the required path and manual approval flag', async () => {
+  it('creates a structured harness Profile without compiling a command in the browser', async () => {
     apiMocks.listClis.mockResolvedValue({ agents });
     apiMocks.createCommand.mockResolvedValue(profile);
     renderEditor();
@@ -188,7 +215,11 @@ describe('AgentProfileEditor', () => {
     expect(apiMocks.createCommand).toHaveBeenCalledWith({
       alias: 'GitHub Copilot (project)',
       workingDirPath: 'C:\\work\\project',
-      launch: { kind: 'acp-command', command: 'copilot --acp --allow-all' },
+      launch: {
+        kind: 'acp-harness',
+        harnessId: 'copilot',
+        options: { autoApprove: true },
+      },
       metadata: { cliId: 'copilot' },
       customData: {
         icon: { shape: expect.any(String), color: expect.any(String) },
@@ -217,6 +248,18 @@ describe('AgentProfileEditor', () => {
         metadata: { cliId: 'custom' },
       }),
     );
+  });
+
+  it('keeps custom commands available when an older daemon cannot compile harness launches', () => {
+    renderEditor(
+      undefined,
+      agents.map((agent) => ({ ...agent, launchVersion: undefined })),
+    );
+    expect(container?.querySelector('select')?.value).toBe('custom');
+    expect(container?.textContent).toContain(
+      'settings.structuredLaunchUnavailable',
+    );
+    expect(apiMocks.createCommand).not.toHaveBeenCalled();
   });
 
   it('does not create a structured Profile if detection no longer finds the CLI', async () => {

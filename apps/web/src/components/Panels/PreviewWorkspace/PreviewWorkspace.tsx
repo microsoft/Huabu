@@ -39,8 +39,8 @@ import { useShallow } from 'zustand/react/shallow';
 
 import { useConversationTitles } from '@/hooks/useConversationTitles';
 import useCanvasStore, { settleNodePreprocess } from '@/store/canvasStore';
-import { useChatStore } from '@/store/chatStore';
 import { conversationViewForNode } from '@/store/conversationOwner';
+import { openNewChat as createWorkspaceChat } from '@/store/previewWorkspace/actions';
 import {
   messageListViewKey,
   nodePreviewViewKey,
@@ -291,14 +291,9 @@ export function PreviewWorkspace({
   const openNewChat = useCallback(
     (groupId: string) => {
       if (!canvasId) return;
-      const threadId = useChatStore.getState().createThread();
-      const activeTabId = usePreviewWorkspaceStore
-        .getState()
-        .workspace.groups.find((group) => group.id === groupId)?.activeTabId;
-      if (activeTabId) settleTab(activeTabId);
-      openPreviewTarget({ kind: 'chat', canvasId, threadId }, { groupId });
+      void createWorkspaceChat(groupId, settleTab);
     },
-    [canvasId, openPreviewTarget, settleTab],
+    [canvasId, settleTab],
   );
 
   const containerRef = useRef<HTMLDivElement>(null);

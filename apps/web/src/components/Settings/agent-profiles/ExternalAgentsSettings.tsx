@@ -26,11 +26,11 @@ import { ProfileFormFooterTarget } from './ProfileFormFooter';
 import { useDetectedClis } from './useDetectedClis';
 
 import type { AgentIconValue } from '@/components/Common/AgentIcon';
-import type { AcpCommandProfileView } from '@huabu/shared';
+import type { AgentProfileView } from '@huabu/shared';
 
 type EditorState =
   | { kind: 'create' }
-  | { kind: 'edit-command'; profile: AcpCommandProfileView };
+  | { kind: 'edit-command'; profile: AgentProfileView };
 
 interface PendingDelete {
   id: string;
@@ -185,7 +185,7 @@ export function ExternalAgentsSettings({
   );
 
   const saveIcon = useCallback(
-    async (profile: AcpCommandProfileView, icon: AgentIconValue) => {
+    async (profile: AgentProfileView, icon: AgentIconValue) => {
       try {
         await updateAcpProfile(profile.id, {
           customData: withAgentIcon(profile.customData, icon),
@@ -202,12 +202,18 @@ export function ExternalAgentsSettings({
     [refresh, t],
   );
 
-  const describeProfile = (profile: AcpCommandProfileView): string => {
-    const cliId = profile.metadata?.cliId;
+  const describeProfile = (profile: AgentProfileView): string => {
+    const cliId =
+      profile.launch.kind === 'acp-harness'
+        ? profile.launch.harnessId
+        : profile.metadata?.cliId;
     if (!cliId || cliId === 'custom') {
-      return [t('settings.agentCustomBadge'), profile.launch.command].join(
-        ' · ',
-      );
+      return [
+        t('settings.agentCustomBadge'),
+        profile.launch.kind === 'acp-command'
+          ? profile.launch.command
+          : profile.launch.harnessId,
+      ].join(' · ');
     }
     return detectedClis.find((cli) => cli.id === cliId)?.displayName ?? cliId;
   };

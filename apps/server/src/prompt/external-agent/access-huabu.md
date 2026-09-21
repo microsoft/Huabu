@@ -240,9 +240,9 @@ The response includes version transition, projected commands, command results, g
 
 Use an Agent when open-ended work benefits from interpretation or a durable visible conversation. Prefer direct `query`, `download`, `upload`, and `execute` for deterministic operations; they work without an internal model provider.
 
-### 8.1 Create and start a Huabu Agent
+### 8.1 Create and start an Agent
 
-Plain text creates a visible Agent with the default `huabu` Profile and immediately submits its first prompt:
+Plain text creates a visible Agent with the external Profile selected in Global Settings and immediately submits its first prompt. An unconfigured or deleted default produces an explicit error; no other Profile is substituted:
 
 ```bash
 SSE="$(curl -fsS -N -H "$AUTH" -H "Content-Type: text/plain" \

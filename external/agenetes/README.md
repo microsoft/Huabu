@@ -67,6 +67,16 @@ Each surface has an in-process programmatic form today, used when Agenetes is mo
 | Configuration       | `defineDriver(definition) -> MountedAgentDriver`                                   | deployment / configuration API                                  | Bind one driver's schema version, workload types, spec/state schemas, initial state, and typed implementation. |
 | Configuration       | `mountAgenetes({ drivers, ...stores }) -> Agenetes`                                | deployment / configuration API                                  | Mount a complete static `kind → driver` map with instance-level persistence and recovery policy.               |
 
+## Structured ACP Profiles
+
+The Profile registry supports immutable `launch: { kind: 'acp-command', command }` and `launch: { kind: 'acp-harness', harnessId, options?: { autoApprove?: boolean } }` identities. `createProfile()` selects these via `launchKind`; existing command Profiles, persisted snapshots, and trusted shell commands retain their behavior. `@agenetes/protocol` exports the strict `agentProfileLaunchSchema`, `acpHarnessLaunchSchema`, `harnessLaunchOptionsSchema`, and `harnessLaunchPlanSchema` contracts. Unknown structured options are rejected, and editable `metadata.cliId` never controls execution.
+
+Profile lowering carries the structured launch through the ACP recipe to the selected agentlet without manufacturing a command string. The Gateway rejects structured spawning when the daemon does not advertise `harnessLaunch` v1. Profile `initialPreferences` are forwarded to existing ACP model/config preference controls rather than command-line flags; no permission, history, or Job policy is introduced.
+
+Discovery entries optionally carry `launchVersion: 1`, which hosts can use to opt new Profiles and editors into structured launch without looking up a separate connection object. Its absence retains legacy command provisioning. The Gateway validates the discovery field and independently enforces the machine's handshake capability when spawning.
+
+After successful structured bootstrap, the ACP driver stores the daemon-resolved `harnessLaunchPlan` in its ordinary durable state, including for empty sessions whose native session ID is not yet recoverable. Recovery, idle respawn, and native-session repair send the plan back for equality validation against the daemon's catalogue; changed arguments fail explicitly. Persistence uses the existing state-report channel, so a crash before the first successful state report can precede plan persistence. The plan pins executable name, argv, and catalogue environment, not binary versions, PATH resolution, inherited environment, or runtime host environment.
+
 ## The Name: Agenetes / 名称：Agenetes
 
 The name is coined in the shape of its model, Kubernetes. Ancient Greek κυβερνήτης (_kubernḗtēs_, "helmsman/governor") is built from the root _kubern-_ plus the agentive suffix **-ήτης (_-ētēs_)**, "the one who does." Agenetes keeps **ag- / agen-** legible as "agent" while pointing back to the older "act / drive / lead" family behind Greek ἄγω and Latin _agō_ → _agent_; it then mirrors the same **-ētēs** agentive ending. The result suggests "the one who drives agents / sets agent workloads in motion" — precisely a control plane's job. It scans like its model: Ku-ber-NÉ-tēs ⟷ A-ge-NÉ-tēs.

@@ -75,11 +75,21 @@ The control and session connections use the same `agentletId`. Each spawned ACP 
 
 The daemon advertises `capabilities.harnessDiscovery: { version: 1 }`. Gateways may call `server/discoverHarnesses` with `{}` for read-only discovery or `{ "prepareWorkspaces": true }` for automatic provisioning. The response includes every static catalogue entry, installation state, resolved executable path, optional version, and diagnostics. No remote candidates, commands, IDs, or roots are accepted.
 
+Detected catalogue entries include `launchVersion: 1` as the explicit opt-in for hosts provisioning structured Profiles or presenting the structured editor only when the located executable supports shell-free launch. Windows opts in native `.exe`/`.com` executables, not npm `.cmd`/`.bat` shims or other script wrappers; shim entries remain installed and retain their legacy command recipe. Missing binaries and older daemon responses omit the field as well. This discovery hint does not replace the Gateway's independent handshake capability check at spawn.
+
 Discovery uses bounded, shell-free PATH and optional version probes. It does not start ACP sessions, install packages, provision credentials, or copy prompts or skills. An optional version-probe failure does not change a successfully detected executable into a missing binary.
 
 Only explicit workspace preparation creates `~/.agentlet/workspace/<catalogue-id>` on the daemon machine, and only for installed binaries. Existing contents are retained. Failed creation produces a diagnostic without a fallback directory. Agent Team runtime packages, setup commands, and Team RPCs are retired; manifests remain historical data only.
 
 ## Protocol lifecycle
+
+### Typed harness launch
+
+The daemon advertises `capabilities.harnessLaunch: { version: 1 }` independently of discovery. A host must gate structured spawning on that capability. `sessionSpec` accepts exactly one of the legacy trusted `command` string or `launch: { kind: 'acp-harness', harnessId, options?: { autoApprove?: boolean } }`. The structured path validates the daemon's own catalogue, rejects unknown options and unsupported approval presets, and spawns executable/argv without a shell. The legacy command path is unchanged. Editable display metadata never chooses an executable.
+
+`Harness.get(id).describeCapabilities()` reports `supported`, `unsupported`, or `unknown` for `autoApprove`, `modelOverride`, and `sessionPersistence`, scoped specifically to the ACP entry. Discovery includes these as an optional `capabilities` field; older daemons may omit it. `Harness.buildLaunch()` returns executable, argv, and catalogue-owned environment. An optional model intent becomes `initialPreferences.model` for standard ACP controls, never a guessed CLI argument. Model override and session-persistence control remain unknown until verified; native print transports and adapter no-save flags are not inferred.
+
+A successful structured spawn returns `launchPlan: { version: 1, executable, argv, env }`. A host can persist and send that plan with subsequent spawns; the daemon compares it against its locally resolved plan and refuses catalogue drift instead of executing caller-supplied arguments. This pins the catalogue command recipe, not the installed binary version, PATH resolution, inherited environment, credentials, or runtime reachback environment. Structured launch requires an executable that the OS can spawn without a shell; shell-only wrappers such as Windows `.cmd` shims are not converted into shell commands.
 
 ```text
 agentlet daemon

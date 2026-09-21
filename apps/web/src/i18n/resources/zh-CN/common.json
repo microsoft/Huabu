@@ -174,6 +174,21 @@
     "profileCreated": "配置已创建",
     "profileUpdated": "配置已更新",
     "profileSaveFailed": "保存配置失败",
+    "agentDefaultsTitle": "全局 Agent 默认设置",
+    "structuredLaunchUnavailable": "此 Agentlet 无法通过结构化配置启动所有已发现的 harness。请使用兼容的可执行文件或自定义命令。",
+    "agentDefaultsProfile": "默认 Agent 配置",
+    "agentDefaultsDescription": "用于新建 Agent 节点和未绑定的聊天。现有会话保持原有 Agent。",
+    "agentDefaultsModel": "功能任务模型",
+    "agentDefaultsModelDescription": "功能任务共用的模型覆盖设置，不修改 Agent 配置或聊天模型偏好；现有生产任务尚未迁移。",
+    "agentDefaultsInherit": "继承 Agent 配置的模型",
+    "agentDefaultsUnconfigured": "尚未选择默认 Agent",
+    "agentDefaultsMissing": "配置已不存在（{{id}}）",
+    "agentDefaultsDeleted": "所选配置已删除，请选择替代配置；默认选择不会自动切换。",
+    "agentDefaultsOffline": "所选配置所在的机器已离线，仍保留此选择。",
+    "agentDefaultsModelUnknown": "模型选择支持情况未知。此设置会保存，但尚未通过所选 Agent 验证。",
+    "agentDefaultsModelUnsupported": "所选 Agent 不支持模型选择，无法应用此模型覆盖设置。",
+    "agentDefaultsSaveFailed": "保存 Agent 默认设置失败",
+    "agentDefaultsSaved": "Agent 默认设置已保存",
     "agentDirectoryRequired": "必须填写 Agent 目录",
     "commandRequired": "必须填写命令",
     "workingDirectoryRequired": "必须填写工作目录",
@@ -1018,6 +1033,8 @@
     }
   },
   "errors": {
+    "agentDefaultUnconfigured": "请先连接 Agent 并在设置中选择默认配置，再开始新会话。",
+    "agentDefaultsUnavailable": "无法加载 Agent 默认设置。请检查服务器连接，并在设置中选择默认配置。",
     "nodeSaveFailed": "「{{name}}」写盘失败，可能文件被占用或没有写入权限。",
     "rateLimited": "请求过于频繁，请在 {{seconds}} 秒后重试。"
   }

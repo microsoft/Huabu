@@ -43,6 +43,49 @@ function driver() {
   };
 }
 describe('command Profile lowering', () => {
+  it('forwards structured identity and ACP preferences without manufacturing a shell command', async () => {
+    const { mounted, create } = driver();
+    const launch = {
+      kind: 'acp-harness',
+      harnessId: 'copilot',
+      options: { autoApprove: true },
+    };
+    const initialPreferences = { model: 'model with spaces; not shell syntax' };
+    const spec = {
+      binding: { alias: 'Typed', profileId: profile.profileId },
+      profile: { ...profile, launch },
+      initialPreferences,
+    };
+    expect(mounted.validateSpec(spec)).toEqual(spec);
+    const handle = mounted.create(
+      {
+        kind: 'agent-profile',
+        workloadType: 'Deployment',
+        threadId: 'typed',
+        namespace: { name: 'canvas' },
+        spec,
+      },
+      {
+        recovery: {
+          authorizeHistoryLoad: async () => ({
+            allowed: true,
+            estimatedSize: 0,
+          }),
+        },
+      },
+    );
+    await handle.control({ type: 'cancel', data: {} });
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        spec: expect.objectContaining({
+          initialPreferences,
+          recipe: { launch, cwd: '/work', autoRestart: true, alias: 'Typed' },
+        }),
+      }),
+      expect.anything(),
+    );
+  });
+
   it('preserves placement, bootstrap, environment and recovery context', async () => {
     const { mounted, create } = driver();
     const context = {

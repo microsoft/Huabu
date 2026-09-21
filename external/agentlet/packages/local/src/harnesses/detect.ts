@@ -8,6 +8,7 @@ import { promisify } from 'node:util'
 import type { HarnessDiscoveryEntry, HarnessDiscoveryParams, HarnessDiscoveryResult } from '@agentlet/protocol'
 import { KNOWN_CLIS } from './catalogue.js'
 import { prepareHarnessWorkspace } from './workspace.js'
+import { Harness } from './harness.js'
 
 const execFileP = promisify(execFile)
 const PROBE_OPTIONS = {
@@ -47,6 +48,7 @@ export async function discoverHarnesses(params: HarnessDiscoveryParams = {}): Pr
         acpArgs: [...cli.acpArgs],
         autoApprove: cli.autoApprove ? { ...cli.autoApprove, args: [...cli.autoApprove.args] } : null,
         installed: false,
+        capabilities: Harness.get(cli.id).describeCapabilities(),
       }
       const diagnose = (code: string, detail: string) => {
         ;(entry.diagnostics ??= []).push({ code, message: detail })
@@ -60,6 +62,8 @@ export async function discoverHarnesses(params: HarnessDiscoveryParams = {}): Pr
         }
         entry.executablePath = executablePath
         entry.installed = true
+        // Windows npm shims require a shell; only native executables opt into typed launch.
+        if (!windows || /\.(exe|com)$/i.test(executablePath)) entry.launchVersion = 1
       } catch (error) {
         const missing = typeof error === 'object' && error !== null &&
           'code' in error && error.code === 1 && !('killed' in error && error.killed)

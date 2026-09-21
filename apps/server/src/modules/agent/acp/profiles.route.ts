@@ -24,13 +24,14 @@
 
 import {
   getAgentProfileRegistry,
+  getAgentletGateway,
   getDaemonSupervisor,
   getSupervisedAgentletId,
 } from '@agenetes/agentlet-host';
 
 import {
   agentProfileParamsSchema,
-  createAcpCommandProfileBodySchema,
+  createAcpProfileBodySchema,
   patchAgentProfileBodySchema,
 } from '@huabu/shared';
 
@@ -40,6 +41,10 @@ import {
 } from './harness-profile-discovery.js';
 import { invalidateProfileSchemaCache } from './profile-schema-cache.js';
 import { isOwnerRequest } from '../../security/owner.js';
+import {
+  getAgentDefaults,
+  initializeAgentDefaults,
+} from '../agent-defaults.js';
 
 import type {
   AcpProfileMutationResponse,
@@ -74,6 +79,7 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
         profiles: registry.listProfiles(),
         selectableProfileIds: registry.listSelectableProfileIds(),
         agentlet: getDaemonSupervisor().getStatus(),
+        agentDefaults: getAgentDefaults(),
       };
     },
   );
@@ -83,7 +89,7 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
     '/profiles',
     async (request, reply) => {
       if (denyRemote(request, reply)) return;
-      const parsed = createAcpCommandProfileBodySchema.safeParse(request.body);
+      const parsed = createAcpProfileBodySchema.safeParse(request.body);
       if (!parsed.success) {
         return reply.status(400).send({
           message: 'Invalid profile body',
@@ -103,17 +109,63 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
           code: 'profile_registry_unavailable',
         });
       }
-      const created = registry.createProfile({
-        launchKind: 'acp-command',
+      const agentletId = getSupervisedAgentletId();
+      const launch = parsed.data.launch;
+      if (launch.kind === 'acp-harness') {
+        try {
+          const gateway = getAgentletGateway();
+          if (!gateway) throw new Error('Agentlet Gateway is not ready');
+          const result = await gateway.discoverHarnesses(agentletId, {
+            prepareWorkspaces: false,
+          });
+          const harness = result.harnesses.find(
+            (entry) => entry.id === launch.harnessId,
+          );
+          if (!harness?.installed || harness.launchVersion !== 1) {
+            return reply.status(409).send({
+              code: 'harness_launch_unavailable',
+              message:
+                'The selected Agentlet cannot launch this structured harness Profile.',
+            });
+          }
+          if (launch.options?.autoApprove && !harness.autoApprove) {
+            return reply.status(400).send({
+              code: 'harness_option_unsupported',
+              message:
+                'This harness does not support an auto-approval launch option.',
+            });
+          }
+        } catch (error) {
+          request.log.warn(
+            { err: error, agentletId },
+            'Harness launch validation failed',
+          );
+          return reply.status(503).send({
+            code: 'harness_discovery_unavailable',
+            message: 'Agentlet harness detection is unavailable.',
+          });
+        }
+      }
+      const common = {
         alias: parsed.data.alias,
-        agentletId: getSupervisedAgentletId(),
-        command: parsed.data.launch.command,
+        agentletId,
         workingDirPath: parsed.data.workingDirPath,
         ...(parsed.data.metadata && { metadata: parsed.data.metadata }),
         ...(parsed.data.customData === undefined
           ? {}
           : { customData: parsed.data.customData }),
-      });
+      };
+      const created = registry.createProfile(
+        launch.kind === 'acp-command'
+          ? { ...common, launchKind: 'acp-command', command: launch.command }
+          : {
+              ...common,
+              launchKind: 'acp-harness',
+              harnessId: launch.harnessId,
+              options: launch.options,
+            },
+      );
+      initializeAgentDefaults(registry.listProfiles());
       return created;
     },
   );

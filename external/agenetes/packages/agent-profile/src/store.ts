@@ -8,6 +8,7 @@ import {
 } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 
+import { agentProfileLaunchSchema } from '@agenetes/protocol';
 import { z } from 'zod';
 
 import { AgentProfileError } from './errors.js';
@@ -26,9 +27,7 @@ export const profileSchema = z
     alias: identity,
     agentletId: nonempty,
     workingDirPath: nonempty,
-    launch: z
-      .object({ kind: z.literal('acp-command'), command: nonempty })
-      .strict(),
+    launch: agentProfileLaunchSchema,
     metadata: z.object({ cliId: z.string().optional() }).optional(),
     customData: z.record(z.string(), z.json()).optional(),
   })
@@ -93,7 +92,13 @@ export function readLegacyProfiles(storageDir: string): AgentProfile[] {
       .object({ launch: z.object({ kind: z.literal('agent-team-manifest') }) })
       .safeParse(profile);
     if (retired.success) continue;
-    commandProfiles.push(parseProfile(profile));
+    const parsedProfile = parseProfile(profile);
+    if (parsedProfile.launch.kind !== 'acp-command')
+      throw new AgentProfileError(
+        'invalid_registry',
+        'Legacy registry may contain only ACP command Profiles',
+      );
+    commandProfiles.push(parsedProfile);
   }
   return parseState({ profiles: commandProfiles }).profiles;
 }

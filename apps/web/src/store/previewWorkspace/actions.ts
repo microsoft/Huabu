@@ -1,6 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { toast } from '@/components/Common/Toast';
+
+import { loadDefaultAgentBinding } from '../acpProfilesStore';
 import useCanvasStore, { settleNodePreprocess } from '../canvasStore';
 import { useChatStore } from '../chatStore';
 import { usePanelStore } from '../panelStore';
@@ -41,7 +44,7 @@ export function openPreviewNode(
 }
 
 /** Opens the most recently used Chat, creating one when none exists. */
-export function openChat(): string {
+export async function openChat(): Promise<string> {
   const preview = usePreviewWorkspaceStore.getState();
   const canvasId = preview.canvasId || useCanvasStore.getState().canvasId;
   if (!canvasId) return '';
@@ -51,15 +54,52 @@ export function openChat(): string {
       (tab) => tab.target.kind === 'chat' && tab.target.canvasId === canvasId,
     )
     .sort((a, b) => b.lastActiveSeq - a.lastActiveSeq)[0];
-  const threadId =
-    recentChat?.target.kind === 'chat'
-      ? recentChat.target.threadId
-      : useChatStore.getState().createThread();
+  if (recentChat?.target.kind !== 'chat') return openNewChat();
+  const threadId = recentChat.target.threadId;
 
   usePanelStore.getState().requestOpenRightPanel();
   const tabId = preview.openPreviewTarget({ kind: 'chat', canvasId, threadId });
   usePanelStore.getState().requestFocusChatInput(threadId);
   return tabId;
+}
+
+/** Creates a Chat only after defaults load, without stealing a changed UI. */
+export async function openNewChat(
+  groupId?: string,
+  settleTab?: (tabId: string) => void,
+): Promise<string> {
+  const initial = usePreviewWorkspaceStore.getState();
+  const canvasId = initial.canvasId || useCanvasStore.getState().canvasId;
+  if (!canvasId) return '';
+  try {
+    const binding = await loadDefaultAgentBinding();
+    const preview = usePreviewWorkspaceStore.getState();
+    if (
+      useCanvasStore.getState().canvasId !== canvasId ||
+      preview.canvasId !== initial.canvasId ||
+      preview.workspace !== initial.workspace
+    ) {
+      return '';
+    }
+    const group = preview.workspace.groups.find(
+      (entry) => entry.id === (groupId ?? preview.workspace.activeGroupId),
+    );
+    if (!group) return '';
+    const threadId = useChatStore.getState().createThread({ binding });
+    if (group.activeTabId) settleTab?.(group.activeTabId);
+    usePanelStore.getState().requestOpenRightPanel();
+    const tabId = preview.openPreviewTarget(
+      { kind: 'chat', canvasId, threadId },
+      { groupId: group.id },
+    );
+    usePanelStore.getState().requestFocusChatInput(threadId);
+    return tabId;
+  } catch (error) {
+    toast(error instanceof Error ? error.message : String(error), {
+      tone: 'danger',
+    });
+    return '';
+  }
 }
 
 /** Follow a document link without consuming its source inspection tab. */

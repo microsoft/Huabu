@@ -16,8 +16,10 @@ import {
   type SendResourceParams,
   type JsonRpcMessage,
   type JsonRpcError,
+  type HarnessLaunchPlan,
 } from '@agentlet/protocol'
 import { discoverHarnesses, parseHarnessDiscoveryParams } from './harnesses/detect.js'
+import { resolveHarnessLaunch } from './harnesses/harness.js'
 import { AgentProcess } from './agent-process.js'
 import { WsClient } from './ws-client.js'
 import { Relay } from './relay.js'
@@ -201,6 +203,7 @@ export class Agentlet {
         bufferLimit: this.options.bufferLimit,
         maxAgents: this.options.maxAgents,
         harnessDiscovery: { version: 1 },
+        harnessLaunch: { version: 1 },
       },
     }
     const params: AgentletHelloParams = {
@@ -293,6 +296,11 @@ export class Agentlet {
   private async handleSpawn(requestId: string | number, params: SpawnParams): Promise<void> {
     const sessionSpec = params?.sessionSpec
 
+    if (!sessionSpec || typeof sessionSpec !== 'object' || Array.isArray(sessionSpec)) {
+      this.sendDaemonResponse(requestId, undefined, { code: -32602, message: 'Missing required param: sessionSpec' })
+      return
+    }
+
     if (sessionSpec && typeof sessionSpec === 'object' && 'agentTeam' in sessionSpec) {
       this.sendDaemonResponse(requestId, undefined, {
         code: -32602,
@@ -301,10 +309,36 @@ export class Agentlet {
       return
     }
 
-    if (typeof sessionSpec?.command !== 'string' || !sessionSpec.command.trim()) {
+    let launchPlan: HarnessLaunchPlan | undefined
+    if (sessionSpec && 'launch' in sessionSpec) {
+      try {
+        if ('command' in sessionSpec) throw new Error('Provide exactly one of sessionSpec.command or sessionSpec.launch')
+        if (Object.keys(sessionSpec).some((key) => !['launch', 'launchPlan', 'cwd', 'env', 'autoRestart', 'idleTimeoutSecs'].includes(key))) {
+          throw new Error('Unknown structured sessionSpec field')
+        }
+        if ((sessionSpec.cwd !== undefined && typeof sessionSpec.cwd !== 'string') ||
+          (sessionSpec.autoRestart !== undefined && typeof sessionSpec.autoRestart !== 'boolean') ||
+          (sessionSpec.idleTimeoutSecs !== undefined &&
+            (!Number.isFinite(sessionSpec.idleTimeoutSecs) || sessionSpec.idleTimeoutSecs < 0)) ||
+          (sessionSpec.env !== undefined && (
+            sessionSpec.env === null || typeof sessionSpec.env !== 'object' || Array.isArray(sessionSpec.env) ||
+            Object.values(sessionSpec.env).some((value) => typeof value !== 'string')
+          ))) {
+          throw new Error('Invalid structured sessionSpec process options')
+        }
+        launchPlan = resolveHarnessLaunch(sessionSpec.launch, sessionSpec.launchPlan)
+      } catch (error) {
+        this.sendDaemonResponse(requestId, undefined, { code: -32602, message: error instanceof Error ? error.message : String(error) })
+        return
+      }
+    } else if (sessionSpec && 'launchPlan' in sessionSpec) {
+      this.sendDaemonResponse(requestId, undefined, { code: -32602, message: 'launchPlan requires sessionSpec.launch' })
+      return
+    } else if (typeof sessionSpec?.command !== 'string' || !sessionSpec.command.trim()) {
       this.sendDaemonResponse(requestId, undefined, { code: -32602, message: 'Missing required param: sessionSpec.command' })
       return
     }
+    const command = launchPlan ? `acp-harness:${sessionSpec.launch!.harnessId}` : sessionSpec.command!
 
     if (this.options.maxAgents && this.agents.size >= this.options.maxAgents) {
       this.sendDaemonResponse(requestId, undefined, { code: -32000, message: `Max agents reached (${this.options.maxAgents})` })
@@ -328,7 +362,7 @@ export class Agentlet {
 
     const autoRestart = sessionSpec.autoRestart ?? false
 
-    this.logger.info('spawning_agent', { command: sessionSpec.command, cwd, sessionId: params.sessionId })
+    this.logger.info('spawning_agent', { command, cwd, sessionId: params.sessionId })
 
     try {
       // Inject daemon-managed env vars into the spawned agent process:
@@ -337,7 +371,8 @@ export class Agentlet {
       // - envRegistry: all well-known dirs (AGENTLET_REACHBACK_DIR, etc.)
       // Host env overrides defaults, except for the daemon-owned token.
       const agent = new AgentProcess({
-        command: sessionSpec.command,
+        command,
+        ...(launchPlan ? { launchPlan } : {}),
         cwd,
         env: buildAgentProcessEnv(
           this.options.server,
@@ -348,11 +383,11 @@ export class Agentlet {
       })
 
       agent.on('error', (err) => {
-        this.logger.error('agent_error', { command: sessionSpec.command, message: err.message })
+        this.logger.error('agent_error', { command, message: err.message })
       })
 
       agent.on('stderr', (line) => {
-        this.logger.debug('agent_stderr', { command: sessionSpec.command, line })
+        this.logger.debug('agent_stderr', { command, line })
       })
 
       agent.start()
@@ -423,7 +458,7 @@ export class Agentlet {
 
       const managed: ManagedAgent = {
         sessionId,
-        command: sessionSpec.command,
+        command,
         cwd,
         pid,
         agent,
@@ -481,7 +516,7 @@ export class Agentlet {
         role: 'session',
         agentletId: this.daemonId,
         agent: {
-          command: sessionSpec.command,
+          command,
           pid: managed.pid,
           cwd,
         },
@@ -537,7 +572,7 @@ export class Agentlet {
       agentWs.connect()
 
       // Return spawn result immediately (agent PID is already known)
-      this.sendDaemonResponse(requestId, { sessionId, pid: managed.pid })
+      this.sendDaemonResponse(requestId, { sessionId, pid: managed.pid, ...(launchPlan ? { launchPlan } : {}) })
     } catch (err) {
       this.sendDaemonResponse(requestId, undefined, {
         code: -32000,

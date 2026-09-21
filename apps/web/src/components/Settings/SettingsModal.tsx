@@ -13,6 +13,7 @@ import { useDeploymentReadinessStore } from '@/store/deploymentReadinessStore';
 import { useLLMStore } from '@/store/llmStore';
 import { useSettingsUiStore } from '@/store/settingsUiStore';
 
+import { AgentDefaultsSettings } from './agent-profiles/AgentDefaultsSettings';
 import {
   ExternalAgentsSettings,
   type ExternalAgentsNavigation,
@@ -53,7 +54,8 @@ interface SettingsModalProps {
  *
  * Each tab renders the existing self-contained `*Settings` components:
  *  - **General** — language and canvas display preferences
- *  - **Huabu Agent** — chat LLM (required) + optional capabilities
+ *  - **Huabu Agent** — external defaults, staged functional model, legacy
+ *    chat LLM and optional capabilities
  *    (image generation, web search, YouTube transcripts)
  *  - **External Agents** — ACP profile management
  *
@@ -255,6 +257,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             )}
             {activeTab === 'huabuAgent' && (
               <>
+                <AgentDefaultsSettings />
                 <LLMSettings />
                 <ImageProviderSettings />
                 <IntegrationsSettings />
