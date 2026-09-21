@@ -1,10 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import rateLimit from '@fastify/rate-limit';
 import Fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import agentDefaultsRoutes from './agent-defaults.route.js';
+import { createApplicationRateLimitOptions } from '../security/rate-limit.js';
 
 import type { AgentDefaults } from '@huabu/shared';
 import type { FastifyInstance } from 'fastify';
@@ -35,6 +37,7 @@ beforeEach(async () => {
   mocks.get.mockReturnValue({ profileId: null, functionalModel: '' });
   mocks.set.mockImplementation((value: AgentDefaults) => value);
   app = Fastify({ logger: false });
+  await app.register(rateLimit, createApplicationRateLimitOptions({ max: 10 }));
   await app.register(agentDefaultsRoutes, { prefix: url });
 });
 afterEach(async () => {
@@ -42,6 +45,29 @@ afterEach(async () => {
 });
 
 describe('owner-only Agent defaults', () => {
+  it.each(['GET', 'PUT'] as const)(
+    'rate-limits %s before accessing settings or Profile data',
+    async (method) => {
+      for (let index = 0; index < 10; index += 1) {
+        expect((await app.inject(url)).statusCode).toBe(200);
+      }
+      vi.clearAllMocks();
+      const response = await app.inject({
+        method,
+        url,
+        ...(method === 'PUT'
+          ? { payload: { profileId: null, functionalModel: '' } }
+          : {}),
+      });
+      expect(response.statusCode).toBe(429);
+      expect(response.json()).toMatchObject({ code: 'RATE_LIMITED' });
+      expect(mocks.get).not.toHaveBeenCalled();
+      expect(mocks.set).not.toHaveBeenCalled();
+      expect(mocks.getProfile).not.toHaveBeenCalled();
+      expect(mocks.getCache).not.toHaveBeenCalled();
+    },
+  );
+
   it.each(['', '/'])(
     'serves the prefixed endpoint with suffix "%s"',
     async (suffix) => {

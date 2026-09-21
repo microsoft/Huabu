@@ -135,7 +135,11 @@ describe('moveCanvasSelection', () => {
               id: 'node-busy',
               nodeType: 'question',
               position: { x: 0, y: 0 },
-              data: { threadId: 'thread-busy', content: '' },
+              data: {
+                threadId: 'thread-busy',
+                content: '',
+                agentBinding: { kind: 'internal' },
+              },
             },
           ],
         },

@@ -41,6 +41,7 @@ vi.mock('react-i18next', () => {
   const t = (key: string) => key;
   return { useTranslation: () => ({ t }) };
 });
+vi.mock('@/i18n', () => ({ i18n: { t: (key: string) => key } }));
 
 vi.mock('@/components/Common/Toast', () => ({ toast: apiMocks.toast }));
 vi.mock('@/components/Common/Loading', () => ({
