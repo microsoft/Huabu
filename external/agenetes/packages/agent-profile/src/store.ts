@@ -28,6 +28,18 @@ export const profileSchema = z
     agentletId: nonempty,
     workingDirPath: nonempty,
     launch: agentProfileLaunchSchema,
+    revision: z
+      .number()
+      .int()
+      .nonnegative()
+      .max(Number.MAX_SAFE_INTEGER)
+      .optional(),
+    executionRevision: z
+      .number()
+      .int()
+      .nonnegative()
+      .max(Number.MAX_SAFE_INTEGER)
+      .optional(),
     metadata: z.object({ cliId: z.string().optional() }).optional(),
     customData: z.record(z.string(), z.json()).optional(),
   })

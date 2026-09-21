@@ -30,6 +30,7 @@ const spec: AcpCreateSpec = {
   spec: {
     agentletId: 'machine-a',
     binding: { alias: 'copilot', profileId: 'profile_1' },
+    profileExecutionRevision: 7,
     recipe: {
       alias: 'copilot',
       command: 'copilot --acp',
@@ -152,6 +153,7 @@ describe('ACP durable history recovery', () => {
 
     expect(sessionMocks.ensureAcpSession).toHaveBeenCalledTimes(2);
     expect(sessionMocks.ensureAcpSession.mock.calls[0]?.[0]).toMatchObject({
+      profileExecutionRevision: 7,
       priorState: {
         driverState: {
           sessionId: 'stale_session',
@@ -160,6 +162,7 @@ describe('ACP durable history recovery', () => {
       },
     });
     expect(sessionMocks.ensureAcpSession.mock.calls[1]?.[0]).toMatchObject({
+      profileExecutionRevision: 7,
       priorState: {
         driverState: { initialPreambleDelivered: false },
         metadata: { currentModeId: 'ask' },

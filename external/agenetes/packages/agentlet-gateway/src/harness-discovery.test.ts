@@ -51,6 +51,27 @@ describe('discovery response validation', () => {
     expect(
       parseHarnessDiscoveryResult({ harnesses: [entry] }).harnesses[0],
     ).not.toHaveProperty('capabilities');
+    expect(
+      parseHarnessDiscoveryResult({
+        harnesses: [
+          {
+            ...entry,
+            launchPreviewVersion: 1,
+            capabilities: {
+              ...capabilities,
+              customLaunchCommand: 'unsupported',
+            },
+          },
+        ],
+      }).harnesses[0],
+    ).toMatchObject({
+      launchPreviewVersion: 1,
+      capabilities: { customLaunchCommand: 'unsupported' },
+    });
+    expect(
+      parseHarnessDiscoveryResult({ harnesses: [{ ...entry, capabilities }] })
+        .harnesses[0]?.capabilities,
+    ).not.toHaveProperty('customLaunchCommand');
   });
   it.each([
     { ...entry, installed: 'true' },
@@ -68,6 +89,16 @@ describe('discovery response validation', () => {
       },
     },
     { ...entry, capabilities: { autoApprove: 'supported' } },
+    { ...entry, launchPreviewVersion: 2 },
+    {
+      ...entry,
+      capabilities: {
+        autoApprove: 'supported',
+        modelOverride: 'unknown',
+        sessionPersistence: 'unknown',
+        customLaunchCommand: true,
+      },
+    },
   ])('rejects invalid fields', (invalid) => {
     expect(() => parseHarnessDiscoveryResult({ harnesses: [invalid] })).toThrow(
       expect.objectContaining({ code: 'invalid_harness_discovery_response' }),

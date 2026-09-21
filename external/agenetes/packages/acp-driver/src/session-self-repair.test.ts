@@ -39,7 +39,7 @@ vi.mock('./client.js', () => ({
 }));
 
 import { acpSessionRegistry } from './session-registry.js';
-import { ensureAcpSession } from './session.js';
+import { ensureAcpSession, setAcpProfileCachePort } from './session.js';
 
 import type { AcpBindingRecipe } from './binding-recipe.js';
 import type { AcpAgentClient } from './client.js';
@@ -121,9 +121,108 @@ beforeEach(() => {
 
 afterEach(() => {
   acpSessionRegistry.remove(agentletId, threadId);
+  setAcpProfileCachePort(null);
 });
 
 describe('ACP Handle session self-repair', () => {
+  it('recovers the frozen recipe and resolved plan after the Profile template changes', async () => {
+    const profile = {
+      executionRevision: 1,
+      workingDirPath: '/original',
+      launch: {
+        kind: 'acp-harness' as const,
+        harnessId: 'copilot',
+        options: { autoApprove: true },
+      },
+    };
+    const frozen = structuredClone(profile);
+    const launchPlan = {
+      version: 1 as const,
+      executable: 'copilot',
+      argv: ['--acp', '--allow-all'],
+      env: {},
+    };
+    profile.executionRevision = 2;
+    profile.workingDirPath = '/edited';
+    profile.launch.options.autoApprove = false;
+    const readCommands = vi.fn((_profileId: string, revision?: number) =>
+      (revision ?? 0) === profile.executionRevision
+        ? {
+            availableCommands: [
+              {
+                name: 'new-template-command',
+                description: 'New configuration',
+              },
+            ],
+            commandsUpdatedAt: 42,
+          }
+        : null,
+    );
+    setAcpProfileCachePort({ readCommands });
+    orchestrator.ensureAgentForThread.mockResolvedValueOnce({
+      sessionId: 'recovered-session',
+      pid: 43,
+      launchPlan,
+    });
+    const frozenRecipe = {
+      alias: binding.alias,
+      launch: frozen.launch,
+      cwd: frozen.workingDirPath,
+      autoRestart: true,
+    };
+    const entry = await ensureAcpSession({
+      ...ensureOptions(),
+      profileExecutionRevision: frozen.executionRevision,
+      recipe: frozenRecipe,
+      priorState: {
+        driverState: {
+          sessionId: 'original-session',
+          initialPreambleDelivered: true,
+          harnessLaunchPlan: launchPlan,
+        },
+      },
+    });
+    expect(orchestrator.ensureAgentForThread).toHaveBeenCalledWith(
+      agentletId,
+      threadId,
+      { ...frozenRecipe, launchPlan },
+      'original-session',
+      undefined,
+      undefined,
+    );
+    expect(entry).toMatchObject({
+      cwd: '/original',
+      bindingRecipe: { launch: { options: { autoApprove: true } }, launchPlan },
+      availableCommands: [],
+    });
+    expect(readCommands).toHaveBeenCalledWith(binding.profileId, 1);
+  });
+
+  it.each([undefined, 0, 7])(
+    'forwards the frozen revision %j to the host warm-start cache',
+    async (profileExecutionRevision) => {
+      const cached = {
+        availableCommands: [{ name: 'review', description: 'Review' }],
+        commandsUpdatedAt: 42,
+      };
+      const readCommands = vi.fn(() => cached);
+      setAcpProfileCachePort({ readCommands });
+      orchestrator.ensureAgentForThread.mockResolvedValueOnce({
+        sessionId: 'warm-session',
+        pid: 43,
+      });
+      const entry = await ensureAcpSession({
+        ...ensureOptions(),
+        profileExecutionRevision,
+      });
+      expect(readCommands).toHaveBeenCalledWith(
+        binding.profileId,
+        profileExecutionRevision,
+      );
+      expect(entry.availableCommands).toEqual(cached.availableCommands);
+    },
+  );
+
   it('repairs a closed committed entry from its latest session state', async () => {
     const oldEntry = closedEntry();
     acpSessionRegistry.set(agentletId, threadId, oldEntry);

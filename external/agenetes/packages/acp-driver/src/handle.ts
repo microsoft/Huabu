@@ -166,6 +166,8 @@ export interface AcpSpec {
   };
   /** External binding (alias + profileId) for the thread. */
   readonly binding: { readonly alias: string; readonly profileId: string };
+  /** Frozen Profile configuration identity; absent legacy revisions mean zero. */
+  readonly profileExecutionRevision?: number;
   /**
    * Explicit execution-node placement. Optional only when reading legacy
    * persisted specs; newly compiled specs must always provide it.
@@ -416,6 +418,7 @@ export class AcpAgentHandle<
       agentletId: this.agentletId,
       threadId: this.spec.threadId,
       binding: this.spec.spec.binding,
+      profileExecutionRevision: this.spec.spec.profileExecutionRevision,
       namespace: this.spec.namespace,
       ...(this.spec.spec.cwd !== undefined && { cwd: this.spec.spec.cwd }),
       ...(recipe !== undefined && { recipe }),

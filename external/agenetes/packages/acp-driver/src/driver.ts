@@ -44,6 +44,12 @@ const recipeResolverSchema = z.custom<
 >((value) => typeof value === 'function', 'Invalid ACP recipe resolver');
 
 export const acpSpecSchema = agentSpecSchema.extend({
+  profileExecutionRevision: z
+    .number()
+    .int()
+    .nonnegative()
+    .max(Number.MAX_SAFE_INTEGER)
+    .optional(),
   initialPreferences: z
     .object({
       model: z.string().optional(),

@@ -50,11 +50,18 @@ describe('AgentProfileRegistry', () => {
     expect(
       new AgentProfileRegistry(store).getProfile('harness')?.launch,
     ).toEqual(expected);
-    expect(() =>
-      registry.patchProfile('harness', {
-        launch: { ...expected, options: { autoApprove: false } },
-      } as unknown as PatchAgentProfileInput),
-    ).toThrow('immutable');
+    registry.patchProfile('harness', {
+      launch: {
+        kind: 'acp-harness',
+        harnessId: 'copilot',
+        options: { autoApprove: false },
+      },
+    });
+    expect(registry.getProfile('harness')).toMatchObject({
+      revision: 2,
+      executionRevision: 1,
+    });
+    expect(snapshot.launch).toEqual(expected);
   });
 
   it.each([
@@ -131,6 +138,138 @@ describe('AgentProfileRegistry', () => {
       ]),
     ).toThrow(expect.objectContaining({ code: 'profile_conflict' }));
     expect(registry.listSelectableProfileIds()).toEqual(['ordinary']);
+  });
+
+  it('does not conflict on revision fields when importing an identical existing Profile', () => {
+    const registry = new AgentProfileRegistry(
+      new InMemoryAgentProfileRegistryStore(),
+    );
+    registry.createProfile(input);
+    registry.patchProfile('ordinary', { alias: 'Another alias' });
+    registry.patchProfile('ordinary', { alias: input.alias });
+    expect(registry.importCommandProfiles([input])).toEqual(['ordinary']);
+    expect(registry.getProfile('ordinary')).toMatchObject({
+      revision: 2,
+      executionRevision: 0,
+    });
+  });
+
+  it('edits commands and cwd with revision fencing while preserving snapshots and opaque data', () => {
+    const store = new InMemoryAgentProfileRegistryStore();
+    const registry = new AgentProfileRegistry(store);
+    expect(registry.createProfile(input)).toMatchObject({
+      revision: 0,
+      executionRevision: 0,
+    });
+    const snapshot = registry.snapshotProfile('ordinary');
+    const changed = vi.fn();
+    const save = vi.spyOn(store, 'save');
+    registry.onChange(changed);
+    expect(
+      registry.patchProfile('ordinary', {
+        expectedRevision: 0,
+        alias: input.alias,
+      }),
+    ).toMatchObject({ revision: 0 });
+    expect(save).not.toHaveBeenCalled();
+    expect(changed).not.toHaveBeenCalled();
+    expect(
+      registry.patchProfile('ordinary', {
+        expectedRevision: 0,
+        workingDirPath: '/new',
+        launch: { kind: 'acp-command', command: 'new-agent --acp' },
+      }),
+    ).toMatchObject({
+      revision: 1,
+      executionRevision: 1,
+      customData: input.customData,
+    });
+    expect(() =>
+      registry.patchProfile('ordinary', {
+        expectedRevision: 0,
+        alias: 'Stale',
+      }),
+    ).toThrow(expect.objectContaining({ code: 'profile_conflict' }));
+    expect(() =>
+      registry.patchProfile('ordinary', { expectedRevision: 0 }),
+    ).toThrow(expect.objectContaining({ code: 'profile_conflict' }));
+    expect(
+      registry.patchProfile('ordinary', {
+        expectedRevision: 1,
+        alias: 'Fresh',
+      }),
+    ).toMatchObject({ revision: 2, executionRevision: 1 });
+    expect(snapshot).toEqual({
+      profileId: 'ordinary',
+      agentletId: input.agentletId,
+      workingDirPath: input.workingDirPath,
+      launch: { kind: 'acp-command', command: input.command },
+      executionRevision: 0,
+    });
+    snapshot.launch = { kind: 'acp-command', command: 'mutated snapshot' };
+    expect(registry.getProfile('ordinary')?.launch).toEqual({
+      kind: 'acp-command',
+      command: 'new-agent --acp',
+    });
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(changed).toHaveBeenCalledTimes(2);
+  });
+
+  it('loads legacy revisions without migrating and treats absence as zero', () => {
+    const original = {
+      id: 'legacy',
+      alias: 'Legacy',
+      agentletId: 'machine-a',
+      workingDirPath: '/work',
+      launch: { kind: 'acp-command' as const, command: 'agent' },
+    };
+    const store = new InMemoryAgentProfileRegistryStore({
+      profiles: [original],
+    });
+    const save = vi.spyOn(store, 'save');
+    const registry = new AgentProfileRegistry(store);
+    expect(registry.getProfile('legacy')).toEqual(original);
+    expect(registry.snapshotProfile('legacy')).not.toHaveProperty(
+      'executionRevision',
+    );
+    expect(registry.patchProfile('legacy', { expectedRevision: 0 })).toEqual(
+      original,
+    );
+    expect(save).not.toHaveBeenCalled();
+    expect(
+      registry.patchProfile('legacy', {
+        expectedRevision: 0,
+        workingDirPath: '/other',
+      }),
+    ).toMatchObject({ revision: 1, executionRevision: 1 });
+  });
+
+  it('rejects wrapper/machine switching and malformed revision guards', () => {
+    const registry = new AgentProfileRegistry(
+      new InMemoryAgentProfileRegistryStore(),
+    );
+    registry.createProfile(input);
+    registry.createProfile({
+      launchKind: 'acp-harness',
+      id: 'typed',
+      alias: 'Typed',
+      agentletId: 'machine-a',
+      workingDirPath: '/work',
+      harnessId: 'copilot',
+    });
+    for (const [id, patch] of [
+      ['ordinary', { agentletId: 'machine-b' }],
+      ['ordinary', { launch: { kind: 'acp-harness', harnessId: 'copilot' } }],
+      ['typed', { launch: { kind: 'acp-harness', harnessId: 'claude' } }],
+      ['typed', { launch: { kind: 'acp-command', command: 'agent' } }],
+      ['ordinary', { expectedRevision: -1 }],
+      ['ordinary', { expectedRevision: 0.5 }],
+      ['ordinary', { expectedRevision: '0' }],
+    ] as const) {
+      expect(() =>
+        registry.patchProfile(id, patch as unknown as PatchAgentProfileInput),
+      ).toThrow(expect.objectContaining({ code: 'invalid_profile_patch' }));
+    }
   });
 
   it('does not mutate memory or notify listeners when persistence fails', () => {

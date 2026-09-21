@@ -12,6 +12,8 @@ export interface AgentProfile {
   agentletId: string;
   workingDirPath: string;
   launch: AgentProfileLaunch;
+  revision?: number;
+  executionRevision?: number;
   metadata?: { cliId?: string };
   /** Opaque host-owned JSON, persisted without interpretation. */
   customData?: Record<string, JsonValue>;
@@ -27,6 +29,7 @@ export interface AgentProfileSnapshot {
   agentletId: string;
   workingDirPath: string;
   launch: AgentProfile['launch'];
+  executionRevision?: number;
 }
 
 export interface CreateAcpCommandProfileInput {
@@ -52,6 +55,9 @@ export type CreateAgentProfileInput =
   | (CreateAcpHarnessProfileInput & { launchKind: 'acp-harness' });
 
 export interface PatchAgentProfileInput {
+  expectedRevision?: number;
+  workingDirPath?: string;
+  launch?: AgentProfileLaunch;
   alias?: string;
   metadata?: { cliId?: string } | null;
   /** Undefined preserves, null clears, and an object replaces the entire bag. */

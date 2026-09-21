@@ -32,6 +32,7 @@ export type AgentProfileWorkloadSpec = TypedWorkloadSpec<AgentProfileSpec>;
 
 interface AcpDelegateSpec extends AgentSpec {
   readonly binding: { readonly alias: string; readonly profileId: string };
+  readonly profileExecutionRevision?: number;
   readonly agentletId: string;
   readonly cwd: string;
   readonly recipe?: {
@@ -60,6 +61,12 @@ const profileSnapshotSchema = z.object({
   agentletId: z.string(),
   workingDirPath: z.string(),
   launch: agentProfileLaunchSchema,
+  executionRevision: z
+    .number()
+    .int()
+    .nonnegative()
+    .max(Number.MAX_SAFE_INTEGER)
+    .optional(),
 });
 
 export const agentProfileSpecSchema = agentSpecSchema.extend({
@@ -88,6 +95,9 @@ function lowerProfile(
     spec: {
       initialPreamble,
       binding,
+      ...(profile.executionRevision === undefined
+        ? {}
+        : { profileExecutionRevision: profile.executionRevision }),
       agentletId: profile.agentletId,
       cwd: profile.workingDirPath,
       env,

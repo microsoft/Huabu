@@ -87,8 +87,12 @@ export interface AcpProfileCachePort {
    * Read the warm-start slash-command list cached for a profile, or `null`
    * when none is cached. Used to paint the `/` menu on a fresh session
    * before the agent's authoritative `available_commands_update` arrives.
+   * Hosts fence this cache read against the frozen execution revision; absent means zero.
    */
-  readCommands(profileId: string): {
+  readCommands(
+    profileId: string,
+    profileExecutionRevision?: number,
+  ): {
     availableCommands: AvailableCommand[];
     commandsUpdatedAt: number;
   } | null;
@@ -168,6 +172,7 @@ export interface EnsureAcpSessionOptions {
   threadId: string;
   /** External binding for the thread (see {@link RunAcpAgentOptions.binding}). */
   binding: { alias: string; profileId: string };
+  profileExecutionRevision?: number;
   /**
    * `cwd` for `session/new`. When omitted, resolved from the bound
    * profile's `cwd` (see {@link RunAcpAgentOptions.cwd} for the full
@@ -1083,7 +1088,10 @@ async function ensureAcpSessionInner(
   // optimistic localStorage cache the web client maintains for the
   // same purpose.
   if (created.availableCommands.length === 0 && binding.profileId) {
-    const warm = profileCachePort?.readCommands(binding.profileId);
+    const warm = profileCachePort?.readCommands(
+      binding.profileId,
+      opts.profileExecutionRevision,
+    );
     if (warm) {
       created.availableCommands = warm.availableCommands;
       created.commandsUpdatedAt = warm.commandsUpdatedAt;

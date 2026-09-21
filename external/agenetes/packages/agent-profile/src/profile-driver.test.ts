@@ -53,7 +53,7 @@ describe('command Profile lowering', () => {
     const initialPreferences = { model: 'model with spaces; not shell syntax' };
     const spec = {
       binding: { alias: 'Typed', profileId: profile.profileId },
-      profile: { ...profile, launch },
+      profile: { ...profile, launch, executionRevision: 7 },
       initialPreferences,
     };
     expect(mounted.validateSpec(spec)).toEqual(spec);
@@ -78,6 +78,7 @@ describe('command Profile lowering', () => {
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({
         spec: expect.objectContaining({
+          profileExecutionRevision: 7,
           initialPreferences,
           recipe: { launch, cwd: '/work', autoRestart: true, alias: 'Typed' },
         }),

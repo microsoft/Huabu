@@ -29,6 +29,26 @@ const freshContext = {
 };
 
 describe('acpDriverFactory (M5 FACTORY)', () => {
+  it('preserves optional frozen Profile execution revisions outside the recipe', () => {
+    const driver = acpDriverFactory();
+    const binding = { alias: 'Agent', profileId: 'profile' };
+    expect(driver.validateSpec({ binding })).toEqual({ binding });
+    expect(
+      driver.validateSpec({ binding, profileExecutionRevision: 7 }),
+    ).toEqual({ binding, profileExecutionRevision: 7 });
+    for (const profileExecutionRevision of [
+      -1,
+      0.5,
+      '1',
+      null,
+      Number.MAX_SAFE_INTEGER + 1,
+    ]) {
+      expect(() =>
+        driver.validateSpec({ binding, profileExecutionRevision }),
+      ).toThrow();
+    }
+  });
+
   it.each([
     { agentDir: '/retired', harness: 'copilot' },
     {
