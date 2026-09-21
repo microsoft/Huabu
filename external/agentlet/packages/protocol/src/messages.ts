@@ -24,6 +24,7 @@ export interface AgentletProfile {
     maxAgents?: number
     harnessDiscovery?: { version: 1 }
     harnessLaunch?: { version: 1 }
+    harnessLaunchPreview?: { version: 1 }
   }
 }
 
@@ -261,6 +262,7 @@ export interface HarnessCatalogueEntry {
 export interface HarnessDiscoveryEntry extends HarnessCatalogueEntry {
   /** Structured ACP launch support; absent on older daemons. */
   launchVersion?: 1
+  launchPreviewVersion?: 1
   /** Absent on older daemons; absence is not evidence of support. */
   capabilities?: HarnessCapabilities
   installed: boolean

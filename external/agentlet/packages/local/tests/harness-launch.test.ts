@@ -1,22 +1,24 @@
 import { describe, expect, it } from 'vitest'
-import { parseAcpHarnessLaunch } from '@agentlet/protocol'
+import { parseAcpHarnessLaunch, CUSTOM_COMMAND_WRAPPER_ID, CUSTOM_COMMAND_CAPABILITIES } from '@agentlet/protocol'
 import { KNOWN_CLIS } from '../src/harnesses/catalogue.js'
-import { Harness, resolveHarnessLaunch } from '../src/harnesses/harness.js'
+import { Harness, buildHarnessLaunch, resolveHarnessLaunch } from '../src/harnesses/harness.js'
 
 describe('typed ACP harness launch', () => {
   it.each(KNOWN_CLIS)('retains the existing $id ACP preset exactly', (entry) => {
     const harness = Harness.get(entry.id)
     expect(harness.buildLaunch()).toEqual({
-      version: 1, executable: entry.binary, argv: entry.acpArgs, env: {},
+      kind: 'exec', executable: entry.binary, argv: entry.acpArgs, env: {},
     })
     expect(harness.describeCapabilities()).toEqual({
       autoApprove: entry.autoApprove ? 'supported' : 'unsupported',
       modelOverride: 'unknown',
       sessionPersistence: 'unknown',
+      customLaunchCommand: 'unsupported',
     })
     expect(harness.buildLaunch({ autoApprove: false })).toEqual(harness.buildLaunch())
     if (entry.autoApprove) {
-      expect(harness.buildLaunch({ autoApprove: true }).argv).toEqual(
+      const built = harness.buildLaunch({ autoApprove: true })
+      expect(built.kind === 'exec' && built.argv).toEqual(
         entry.autoApprove.position === 'before-acp'
           ? [...entry.autoApprove.args, ...entry.acpArgs]
           : [...entry.acpArgs, ...entry.autoApprove.args],
@@ -41,8 +43,10 @@ describe('typed ACP harness launch', () => {
   })
 
   it('does not expose mutable catalogue arrays', () => {
-    Harness.get('copilot').buildLaunch({ autoApprove: true }).argv.push('--untrusted')
-    expect(Harness.get('copilot').buildLaunch({ autoApprove: true }).argv)
+    const built = Harness.get('copilot').buildLaunch({ autoApprove: true })
+    if (built.kind === 'exec') built.argv.push('--untrusted')
+    const next = Harness.get('copilot').buildLaunch({ autoApprove: true })
+    expect(next.kind === 'exec' && next.argv)
       .toEqual(['--acp', '--allow-all'])
   })
 
@@ -59,7 +63,7 @@ describe('typed ACP harness launch', () => {
   })
 
   it('validates identity locally and rejects altered persisted plans instead of executing them', () => {
-    expect(() => Harness.get('custom')).toThrow('Unknown harness')
+    expect(() => Harness.get('not-known')).toThrow('Unknown harness')
     const launch = { kind: 'acp-harness', harnessId: 'copilot', options: { autoApprove: true } }
     const plan = resolveHarnessLaunch(launch)
     expect(resolveHarnessLaunch(launch, plan)).toEqual(plan)
@@ -71,5 +75,29 @@ describe('typed ACP harness launch', () => {
       expect(() => resolveHarnessLaunch(launch, changed)).toThrow('reauthorization')
     }
     expect(() => resolveHarnessLaunch({ ...launch, options: {} }, plan)).toThrow('reauthorization')
+  })
+
+  it('maps legacy commands only to custom without inferring a known wrapper', async () => {
+    const custom = Harness.get(CUSTOM_COMMAND_WRAPPER_ID)
+    expect(custom.describeCapabilities()).toEqual(CUSTOM_COMMAND_CAPABILITIES)
+    expect(Object.isFrozen(CUSTOM_COMMAND_CAPABILITIES)).toBe(true)
+    expect(custom.describeCapabilities()).toEqual({
+      customLaunchCommand: 'supported', autoApprove: 'unsupported',
+      modelOverride: 'unsupported', sessionPersistence: 'unsupported',
+    })
+    expect(await custom.detect({ prepareWorkspaces: true })).toMatchObject({
+      id: 'custom', installed: false, launchPreviewVersion: 1,
+    })
+    expect(buildHarnessLaunch({ launch: { kind: 'acp-command', command: 'copilot --acp && echo trusted' } }))
+      .toEqual({ kind: 'shell', command: 'copilot --acp && echo trusted' })
+    for (const intent of [{ autoApprove: false }, { model: 'model' }, { sessionPersistence: false }]) {
+      expect(() => custom.buildLaunch({ customLaunchCommand: 'agent', ...intent })).toThrow()
+    }
+    expect(() => Harness.get('copilot').buildLaunch({ customLaunchCommand: 'agent' })).toThrow()
+    expect(() => buildHarnessLaunch({ launch: { kind: 'acp-harness', harnessId: 'custom' } })).toThrow()
+    expect(() => buildHarnessLaunch({ launch: { kind: 'acp-command', command: ' ' } })).toThrow()
+    expect(() => buildHarnessLaunch({ launch: { kind: 'acp-command', command: 'agent', options: { autoApprove: true } } })).toThrow()
+    expect(buildHarnessLaunch({ launch: { kind: 'acp-harness', harnessId: 'copilot', options: { autoApprove: true } } }))
+      .toEqual({ kind: 'exec', executable: 'copilot', argv: ['--acp', '--allow-all'], env: {} })
   })
 })

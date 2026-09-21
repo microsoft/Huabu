@@ -83,12 +83,17 @@ Both hello methods are requests and require a matching JSON-RPC response before 
 | `server/stop` | Request | Stop one managed agent session. |
 | `server/list` | Request | List the daemon's active agents. |
 | `server/discoverHarnesses` | Request | Discover the daemon's static ACP harness catalogue, optionally preparing local workspaces. |
+| `server/buildHarnessLaunch` | Request | Compile a Profile launch without probing, spawning, or preparing workspaces. |
 | `server/sendResource` | Notification | Write a host-provided resource through the daemon environment registry. |
 | `server/replay` | Notification | Replay Gateway-to-daemon messages buffered during disconnection. |
 | `server/ping` | Notification | Application-level heartbeat request. |
 | `server/shutdown` | Notification | Ask the daemon to stop gracefully. |
 
 `server/discoverHarnesses` accepts omitted params, `{}`, or `{ "prepareWorkspaces": boolean }`; every other option and invalid request shape is rejected with `-32602`. The advertised `AgentletProfile.capabilities.harnessDiscovery` is `{ version: 1 }`. Unsupported daemons must not be inferred to support discovery.
+
+Discovery includes a final `custom` descriptor for manual selection, with `installed: false` and no executable probe or workspace preparation. Hosts must not auto-provision it. Entries may include `launchPreviewVersion: 1` and `capabilities.customLaunchCommand` (`supported`, `unsupported`, or `unknown`); older responses may omit these fields. Custom supports only custom commands, while known wrappers do not support command overrides.
+
+`server/buildHarnessLaunch` requires `AgentletProfile.capabilities.harnessLaunchPreview: { version: 1 }`. Its only parameter is `{ launch }`, where launch is the unchanged Profile union `{ kind: 'acp-command', command }` or `{ kind: 'acp-harness', harnessId, options?: { autoApprove?: boolean } }`. A legacy command maps to Custom without inspecting its text or metadata. A structured launch maps to its known catalogue wrapper; `harnessId: 'custom'` is invalid. The response is `{ kind: 'exec', executable, argv, env }` or `{ kind: 'shell', command }`. Compilation is pure and shares runtime wrapper logic; it does not resolve PATH, create directories, test credentials, or start ACP. Unknown fields, malformed input, unknown wrappers, and unsupported options fail with `-32602`. No model launch option is introduced. Gateways validate request and response and reject old daemons explicitly rather than computing a local fallback.
 
 The result is `{ harnesses: HarnessDiscoveryEntry[] }`, including the complete catalogue in stable order. Each entry contains `id`, `displayName`, `binary`, `acpArgs`, `autoApprove`, `installHint`, and `installed`, with optional `executablePath`, `version`, `workingDirPath`, and `diagnostics: Array<{ code, message }>`. `autoApprove` is either `null` or `{ args: string[], position: "before-acp" | "after-acp" }`. Skip-version rules are internal catalogue data and are not returned.
 

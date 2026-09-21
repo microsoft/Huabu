@@ -19,7 +19,7 @@ import {
   type HarnessLaunchPlan,
 } from '@agentlet/protocol'
 import { discoverHarnesses, parseHarnessDiscoveryParams } from './harnesses/detect.js'
-import { resolveHarnessLaunch } from './harnesses/harness.js'
+import { buildHarnessLaunch, resolveHarnessLaunch } from './harnesses/harness.js'
 import { AgentProcess } from './agent-process.js'
 import { WsClient } from './ws-client.js'
 import { Relay } from './relay.js'
@@ -204,6 +204,7 @@ export class Agentlet {
         maxAgents: this.options.maxAgents,
         harnessDiscovery: { version: 1 },
         harnessLaunch: { version: 1 },
+        harnessLaunchPreview: { version: 1 },
       },
     }
     const params: AgentletHelloParams = {
@@ -266,6 +267,15 @@ export class Agentlet {
         break
       case ServerMethods.DISCOVER_HARNESSES:
         void this.handleDiscoverHarnesses(msg.id, msg.params)
+        break
+      case ServerMethods.BUILD_HARNESS_LAUNCH:
+        try {
+          this.sendDaemonResponse(msg.id, buildHarnessLaunch(msg.params))
+        } catch (error) {
+          this.sendDaemonResponse(msg.id, undefined, {
+            code: -32602, message: error instanceof Error ? error.message : String(error),
+          })
+        }
         break
       default:
         this.sendDaemonResponse(msg.id, undefined, { code: -32601, message: `Unknown method: ${msg.method}` })
@@ -338,7 +348,14 @@ export class Agentlet {
       this.sendDaemonResponse(requestId, undefined, { code: -32602, message: 'Missing required param: sessionSpec.command' })
       return
     }
-    const command = launchPlan ? `acp-harness:${sessionSpec.launch!.harnessId}` : sessionSpec.command!
+    let command: string
+    try {
+      const custom = launchPlan ? undefined : buildHarnessLaunch({ launch: { kind: 'acp-command', command: sessionSpec.command } })
+      command = custom?.kind === 'shell' ? custom.command : `acp-harness:${sessionSpec.launch!.harnessId}`
+    } catch (error) {
+      this.sendDaemonResponse(requestId, undefined, { code: -32602, message: error instanceof Error ? error.message : String(error) })
+      return
+    }
 
     if (this.options.maxAgents && this.agents.size >= this.options.maxAgents) {
       this.sendDaemonResponse(requestId, undefined, { code: -32000, message: `Max agents reached (${this.options.maxAgents})` })
