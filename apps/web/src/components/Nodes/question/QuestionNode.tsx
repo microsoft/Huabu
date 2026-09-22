@@ -195,11 +195,7 @@ export const QuestionNode = memo(
           },
           data.agentBinding,
           canvasId,
-          needsApproval
-            ? 'bottom'
-            : hasRun && !data.viewed
-              ? 'last-user'
-              : 'bottom',
+          'bottom',
           { transient },
         );
         // Mark as viewed only once the run has finished.
@@ -228,7 +224,6 @@ export const QuestionNode = memo(
         data.threadId,
         data.agentBinding,
         data.viewed,
-        needsApproval,
         hasRun,
         canvasId,
         data.invocationToken,

@@ -284,9 +284,21 @@ export const CanvasSearchResults = (): React.JSX.Element => {
       // the matched message inside it.
       if (row.match.field === 'conversation') {
         if (openConversationForNode(nodeId) && query) {
+          const node = useCanvasStore
+            .getState()
+            .nodes.find((entry) => entry.id === nodeId);
+          const threadId = node?.data.threadId;
           scheduleScrollToMatch(
             () =>
-              document.querySelector<HTMLElement>('[data-chat-thread-root]'),
+              Array.from(
+                document.querySelectorAll<HTMLElement>(
+                  '[data-chat-thread-root]',
+                ),
+              ).find(
+                (element) =>
+                  element.dataset.chatThreadId === threadId &&
+                  !element.closest('[data-preview-active="false"]'),
+              ) ?? null,
             query,
             row.match.occurrenceIndex,
             {

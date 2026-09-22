@@ -488,7 +488,9 @@ export function handleStreamEvent(
   // thread that issued the request.
   const ownerMessages = selectThreadMessages(state, ctx.threadId);
 
-  if (event.type === 'text_delta' || event.type === 'thinking_delta') {
+  if (event.type === 'done') {
+    state.markTurnCompleted(ctx.threadId, ctx.assistantId);
+  } else if (event.type === 'text_delta' || event.type === 'thinking_delta') {
     const delta = event.data.content;
     if (!delta) return;
     const kind: AssistantSegment['kind'] =

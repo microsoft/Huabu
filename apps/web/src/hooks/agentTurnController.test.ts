@@ -84,6 +84,31 @@ function request(inputKind: 'text' | 'ink-intent' = 'text', owner = session) {
   });
 }
 
+it('records genuine completion by owner thread, not tool updates or repeated done events', () => {
+  const ctx = { threadId: 'completed-owner', assistantId: 'assistant-1' };
+  handleStreamEvent({ type: 'text_delta', data: { content: 'Answer' } }, ctx);
+  handleStreamEvent(
+    {
+      type: 'tool_call_update',
+      data: { toolCallId: 'tool-1', status: 'completed' },
+    },
+    ctx,
+  );
+  expect(
+    useChatStore.getState().threadsById[ctx.threadId]?.completedTurnId,
+  ).toBeUndefined();
+  handleStreamEvent({ type: 'done', data: { message: 'Answer' } }, ctx);
+  expect(
+    useChatStore.getState().threadsById[ctx.threadId]?.completedTurnId,
+  ).toBe('assistant-1');
+  expect(
+    useChatStore.getState().threadsById['other-thread']?.completedTurnId,
+  ).toBeUndefined();
+  const snapshot = useChatStore.getState();
+  handleStreamEvent({ type: 'done', data: { message: 'Answer' } }, ctx);
+  expect(useChatStore.getState()).toBe(snapshot);
+});
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.save.mockReset().mockResolvedValue(undefined);

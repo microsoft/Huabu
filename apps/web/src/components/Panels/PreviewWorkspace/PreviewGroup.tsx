@@ -8,7 +8,7 @@
  * Older and resource-heavy tabs are unmounted (§4).
  */
 
-import { Activity } from 'react';
+import { Activity, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useShallow } from 'zustand/react/shallow';
 
@@ -80,6 +80,13 @@ export function PreviewGroup({
   onCollapse,
 }: PreviewGroupProps) {
   const { t } = useTranslation();
+  const [activation, setActivation] = useState({
+    tabId: group.activeTabId,
+    id: 0,
+  });
+  if (activation.tabId !== group.activeTabId) {
+    setActivation({ tabId: group.activeTabId, id: activation.id + 1 });
+  }
   const tabs = group.tabIds
     .map((id) => workspace.tabs[id])
     .filter((tab) => tab !== undefined);
@@ -148,6 +155,8 @@ export function PreviewGroup({
                 <div className="contents" data-preview-active={isActive}>
                   <PreviewRenderer
                     tabId={tab.id}
+                    isActive={isActive}
+                    activationId={isActive ? activation.id : undefined}
                     target={tab.target}
                     adjacentNodeTarget={
                       isActive ? adjacentNodeTarget : undefined

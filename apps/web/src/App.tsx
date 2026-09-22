@@ -61,14 +61,6 @@ const playgroundRoutes = import.meta.env.DEV
         }),
       },
       {
-        path: '/playground/chat-performance',
-        lazy: async () => ({
-          Component: (
-            await import('./pages/playground/ChatPerformancePlaygroundPage')
-          ).default,
-        }),
-      },
-      {
         path: '/playground/agent-nodes',
         lazy: async () => ({
           Component: (
@@ -78,6 +70,21 @@ const playgroundRoutes = import.meta.env.DEV
       },
     ]
   : [];
+
+const chatPerformanceRoutes =
+  import.meta.env.DEV ||
+  import.meta.env.VITE_CHAT_PERFORMANCE_FIXTURE === 'true'
+    ? [
+        {
+          path: '/playground/chat-performance',
+          lazy: async () => ({
+            Component: (
+              await import('./pages/playground/ChatPerformancePlaygroundPage')
+            ).default,
+          }),
+        },
+      ]
+    : [];
 
 /**
  * Carries the "still bootstrapping the workspace store" flag from the
@@ -296,6 +303,7 @@ export default function App() {
             // redirects to "/" in managed mode.
             { path: '/setup', element: <SetupRoute /> },
             ...playgroundRoutes,
+            ...chatPerformanceRoutes,
             {
               element: <WorkspaceGuardLayout />,
               children: [

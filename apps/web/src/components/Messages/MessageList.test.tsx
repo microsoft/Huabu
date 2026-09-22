@@ -1,13 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { act, useState } from 'react';
+import { Activity, act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MessageList } from './MessageList';
 import {
   forgetMessageListScrollPosition,
+  rememberMessageListScrollAnchor,
   rememberMessageListScrollPosition,
 } from './messageListScroll';
 
@@ -15,6 +16,7 @@ import type { ChatMessage } from '../../store/chatTypes';
 
 const renderCounts = vi.hoisted(() => ({
   assistant: new Map<string, number>(),
+  assistantEffects: [] as string[],
   user: 0,
   userInputKinds: [] as Array<string | undefined>,
   userInferredIntents: [] as Array<string | undefined>,
@@ -22,7 +24,7 @@ const renderCounts = vi.hoisted(() => ({
 }));
 
 vi.mock('./AIMessage', async () => {
-  const { memo } = await import('react');
+  const { memo, useEffect } = await import('react');
   return {
     AIMessage: memo(function MockAIMessage({
       messageId,
@@ -33,6 +35,9 @@ vi.mock('./AIMessage', async () => {
         messageId,
         (renderCounts.assistant.get(messageId) ?? 0) + 1,
       );
+      useEffect(() => {
+        renderCounts.assistantEffects.push(messageId);
+      }, [messageId]);
       return <div data-assistant-message={messageId} />;
     }),
   };
@@ -107,6 +112,7 @@ function mount(element: React.ReactNode): void {
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   renderCounts.assistant.clear();
+  renderCounts.assistantEffects = [];
   renderCounts.user = 0;
   renderCounts.userInputKinds = [];
   renderCounts.userInferredIntents = [];
@@ -416,6 +422,363 @@ describe('MessageList bottom navigation', () => {
     wrapper?.setAttribute('data-preview-active', 'true');
     resize();
     expect(top).toBe(1_300);
+  });
+
+  const history = (count: number): ChatMessage[] =>
+    Array.from({ length: count }, (_, index): ChatMessage[] => [
+      { id: `u${index}`, role: 'user', content: `Turn ${index}` },
+      {
+        id: `a${index}`,
+        role: 'assistant',
+        segments: [{ kind: 'text', text: `Reply ${index}` }],
+      },
+    ]).flat();
+  const messageIds = () =>
+    Array.from(
+      thread().querySelectorAll<HTMLElement>('[data-chat-message-id]'),
+      (element) => element.dataset.chatMessageId,
+    );
+  const earlier = () =>
+    Array.from(container?.querySelectorAll('button') ?? []).find((button) =>
+      button.textContent?.includes('earlier turns'),
+    );
+
+  it('mounts only recent cached turns and expands cache before fetching', () => {
+    const messages = history(10);
+    const fetchOlder = vi.fn();
+    mount(
+      <MessageList
+        messages={messages}
+        isLoading={false}
+        recentTurnCount={3}
+        hasOlderHistory
+        onLoadOlderHistory={fetchOlder}
+      />,
+    );
+    expect(messageIds()).toEqual(['u7', 'a7', 'u8', 'a8', 'u9', 'a9']);
+    expect([...renderCounts.assistant.keys()]).toEqual(['a7', 'a8', 'a9']);
+    act(() => earlier()?.click());
+    expect(messageIds()).toHaveLength(12);
+    expect(fetchOlder).not.toHaveBeenCalled();
+    act(() => earlier()?.click());
+    act(() => earlier()?.click());
+    expect(messageIds()).toHaveLength(20);
+    expect(fetchOlder).not.toHaveBeenCalled();
+    act(() => earlier()?.click());
+    expect(fetchOlder).toHaveBeenCalledTimes(1);
+    expect(messages).toHaveLength(20);
+  });
+
+  it('does not reset expanded history on ordinary rerenders, but does on activation', () => {
+    const messages = history(10);
+    const view = (activationId: number) => (
+      <MessageList
+        messages={messages}
+        recentTurnCount={3}
+        isLoading={false}
+        activationId={activationId}
+      />
+    );
+    mount(view(0));
+    act(() => earlier()?.click());
+    act(() => root?.render(view(0)));
+    expect(messageIds()).toHaveLength(12);
+    act(() => root?.render(view(1)));
+    expect(messageIds()).toHaveLength(6);
+    expect(top).toBe(800);
+  });
+
+  it('selects the recent window before a retained Activity reconnects', () => {
+    const messages = history(10);
+    const view = (active: boolean, activationId: number) => (
+      <Activity mode={active ? 'visible' : 'hidden'}>
+        <MessageList
+          messages={messages}
+          recentTurnCount={3}
+          isLoading={false}
+          activationId={activationId}
+          isActive={active}
+        />
+      </Activity>
+    );
+    mount(view(true, 0));
+    act(() => earlier()?.click());
+    act(() => root?.render(view(false, 0)));
+    renderCounts.assistant.clear();
+    renderCounts.assistantEffects = [];
+    act(() => root?.render(view(true, 1)));
+    expect(messageIds()).toHaveLength(6);
+    expect(
+      [...renderCounts.assistant.keys()].every((id) =>
+        ['a7', 'a8', 'a9'].includes(id),
+      ),
+    ).toBe(true);
+    expect(renderCounts.assistantEffects).toEqual(['a7', 'a8', 'a9']);
+  });
+
+  it('grows during a turn and compacts only on genuine completion', () => {
+    mount(
+      <MessageList
+        messages={history(3)}
+        recentTurnCount={3}
+        isLoading={false}
+      />,
+    );
+    const grown = history(4);
+    act(() =>
+      root?.render(
+        <MessageList messages={grown} recentTurnCount={3} isLoading />,
+      ),
+    );
+    expect(messageIds()).toHaveLength(8);
+    act(() =>
+      root?.render(
+        <MessageList messages={grown} recentTurnCount={3} isLoading={false} />,
+      ),
+    );
+    expect(messageIds()).toHaveLength(8);
+    act(() =>
+      root?.render(
+        <MessageList
+          messages={grown}
+          recentTurnCount={3}
+          isLoading={false}
+          completedTurnId="a3"
+        />,
+      ),
+    );
+    expect(messageIds()).toHaveLength(6);
+    expect(messageIds()[0]).toBe('u1');
+    expect(top).toBe(800);
+  });
+
+  it('does not compact an upward-reading gesture even before its scroll event', () => {
+    mount(
+      <MessageList
+        messages={history(3)}
+        recentTurnCount={3}
+        isLoading={false}
+      />,
+    );
+    act(() =>
+      thread().dispatchEvent(
+        new WheelEvent('wheel', { deltaY: -100, bubbles: true }),
+      ),
+    );
+    act(() =>
+      root?.render(
+        <MessageList
+          messages={history(4)}
+          recentTurnCount={3}
+          isLoading={false}
+          completedTurnId="a3"
+        />,
+      ),
+    );
+    expect(messageIds()).toHaveLength(8);
+  });
+
+  it('does not compact or override native scrolling before its event at completion', () => {
+    mount(
+      <MessageList
+        messages={history(3)}
+        recentTurnCount={3}
+        isLoading={false}
+      />,
+    );
+    thread().scrollTop = 100;
+    act(() =>
+      root?.render(
+        <MessageList
+          messages={history(4)}
+          recentTurnCount={3}
+          isLoading={false}
+          completedTurnId="a3"
+        />,
+      ),
+    );
+    expect(messageIds()).toHaveLength(8);
+    expect(top).toBe(100);
+  });
+
+  it('protects expanded history at completion and compacts on explicit return to latest', () => {
+    mount(
+      <MessageList
+        messages={history(6)}
+        recentTurnCount={3}
+        isLoading={false}
+      />,
+    );
+    act(() => earlier()?.click());
+    scrollTo(100);
+    act(() =>
+      root?.render(
+        <MessageList
+          messages={history(7)}
+          recentTurnCount={3}
+          isLoading={false}
+          completedTurnId="a6"
+        />,
+      ),
+    );
+    expect(messageIds()).toHaveLength(14);
+    expect(top).toBe(100);
+    act(() => bottomButton()?.click());
+    expect(messageIds()).toHaveLength(6);
+    expect(top).toBe(800);
+  });
+
+  it('does not compact or scroll a hidden conversation on completion', () => {
+    const view = (messages: ChatMessage[], active: boolean, done?: string) => (
+      <MessageList
+        messages={messages}
+        recentTurnCount={3}
+        isLoading={false}
+        isActive={active}
+        completedTurnId={done}
+      />
+    );
+    mount(view(history(3), true));
+    act(() => root?.render(view(history(4), false, 'a3')));
+    expect(messageIds()).toHaveLength(8);
+    expect(top).toBe(800);
+  });
+
+  it('materializes cached history for explicit search and protects the target', () => {
+    mount(
+      <MessageList
+        messages={history(10)}
+        recentTurnCount={3}
+        isLoading={false}
+      />,
+    );
+    const request = new Event('chat-reveal-search', { cancelable: true });
+    act(() => thread().dispatchEvent(request));
+    expect(request.defaultPrevented).toBe(true);
+    expect(messageIds()).toHaveLength(20);
+    act(() =>
+      root?.render(
+        <MessageList
+          messages={history(11)}
+          recentTurnCount={3}
+          isLoading={false}
+          completedTurnId="a10"
+        />,
+      ),
+    );
+    expect(messageIds()).toHaveLength(22);
+  });
+
+  it('hydrates a recent window without ever mounting the full fetched array', () => {
+    mount(
+      <MessageList
+        messages={[]}
+        recentTurnCount={3}
+        isLoading={false}
+        isHistoryLoading
+      />,
+    );
+    act(() =>
+      root?.render(
+        <MessageList
+          messages={history(10)}
+          recentTurnCount={3}
+          isLoading={false}
+        />,
+      ),
+    );
+    expect(messageIds()).toHaveLength(6);
+    expect(renderCounts.user).toBe(3);
+  });
+
+  it('opens at latest without overwriting a bookmark and reveals it from cache on request', () => {
+    const viewKey = 'reading-return-test';
+    const source = document.createElement('div');
+    const anchor = document.createElement('div');
+    anchor.dataset.chatMessageId = 'u2';
+    anchor.getBoundingClientRect = () => ({ top: 10, bottom: 100 }) as DOMRect;
+    source.appendChild(anchor);
+    rememberMessageListScrollAnchor(source, viewKey);
+    const fetchOlder = vi.fn();
+    mount(
+      <MessageList
+        messages={history(10)}
+        recentTurnCount={3}
+        isLoading={false}
+        viewKey={viewKey}
+        onLoadOlderHistory={fetchOlder}
+      />,
+    );
+    expect(messageIds()[0]).toBe('u7');
+    expect(top).toBe(800);
+    act(() => thread().dispatchEvent(new Event('scroll')));
+    const button = Array.from(container?.querySelectorAll('button') ?? []).find(
+      (entry) => entry.textContent === 'chat.returnToReadingPosition',
+    );
+    expect(button).toBeDefined();
+    button?.focus();
+    act(() => button?.click());
+    expect(messageIds()[0]).toBe('u2');
+    expect(document.activeElement).toBe(thread());
+    expect(fetchOlder).not.toHaveBeenCalled();
+    forgetMessageListScrollPosition(viewKey);
+  });
+
+  it('reports an unavailable reading target without fetching history', () => {
+    const viewKey = 'missing-return-test';
+    const source = document.createElement('div');
+    const anchor = document.createElement('div');
+    anchor.dataset.chatMessageId = 'no-longer-cached';
+    anchor.getBoundingClientRect = () => ({ top: 10, bottom: 100 }) as DOMRect;
+    source.appendChild(anchor);
+    rememberMessageListScrollAnchor(source, viewKey);
+    const fetchOlder = vi.fn();
+    mount(
+      <MessageList
+        messages={history(10)}
+        recentTurnCount={3}
+        isLoading={false}
+        viewKey={viewKey}
+        onLoadOlderHistory={fetchOlder}
+      />,
+    );
+    act(() =>
+      Array.from(container?.querySelectorAll('button') ?? [])
+        .find((entry) => entry.textContent === 'chat.returnToReadingPosition')
+        ?.click(),
+    );
+    expect(container?.querySelector('[role="status"]')?.textContent).toBe(
+      'chat.readingPositionUnavailable',
+    );
+    expect(messageIds()).toHaveLength(6);
+    expect(fetchOlder).not.toHaveBeenCalled();
+    forgetMessageListScrollPosition(viewKey);
+  });
+
+  it('keeps the reading window across live-to-history ID reconciliation', () => {
+    const messages = history(10);
+    mount(
+      <MessageList messages={messages} recentTurnCount={3} isLoading={false} />,
+    );
+    act(() => earlier()?.click());
+    scrollTo(100);
+    const hydrated = messages.map((message, index) => ({
+      ...message,
+      id: `server-${index}`,
+      historyTurnId: `turn-${Math.floor(index / 2)}`,
+    }));
+    act(() =>
+      root?.render(
+        <MessageList
+          messages={hydrated}
+          recentTurnCount={3}
+          isLoading={false}
+        />,
+      ),
+    );
+    expect(messageIds()).toHaveLength(12);
+    expect(messageIds()[0]).toBe('server-8');
+    expect(top).toBe(100);
   });
 });
 

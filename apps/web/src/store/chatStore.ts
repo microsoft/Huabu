@@ -49,6 +49,8 @@ export interface ChatThreadState {
   olderHistoryError: string | null;
   /** Whether an agent run is streaming into this thread right now. */
   isStreaming: boolean;
+  /** Last genuine stream done event, not a transport close or permission wait. */
+  completedTurnId?: string;
   /** Last compose mode selected for this thread. */
   lastAction: AgentMode;
   /**
@@ -146,6 +148,7 @@ export interface ChatState {
   ) => void;
   /** Replace the entire message list for a thread. */
   setMessages: (threadId: string, messages: ChatMessage[]) => void;
+  markTurnCompleted: (threadId: string, assistantId: string) => void;
   /** Prepend a page while deduplicating stable server message IDs. */
   prependHistoryMessages: (threadId: string, messages: ChatMessage[]) => void;
   /** Replace the overlapping newest history suffix and preserve older pages. */
@@ -376,6 +379,13 @@ export const useChatStore = create<ChatState>()(
 
       setMessages: (threadId, messages) =>
         set((state) => patchThread(state, threadId, { messages })),
+
+      markTurnCompleted: (threadId, assistantId) =>
+        set((state) =>
+          threadOf(state, threadId).completedTurnId === assistantId
+            ? state
+            : patchThread(state, threadId, { completedTurnId: assistantId }),
+        ),
 
       prependHistoryMessages: (threadId, messages) =>
         set((state) => {

@@ -82,6 +82,8 @@ import { SidebarPanel } from '../SidebarPanel';
 import type { AgentIcon, AgentMode, CanvasNodeId } from '@huabu/shared';
 
 interface ChatPanelProps {
+  isActive?: boolean;
+  activationId?: number;
   isCollapsed?: boolean;
   onToggle?: () => void;
   /** The conversation rendered by this Preview Workspace tab. */
@@ -101,6 +103,8 @@ interface ChatPanelProps {
 }
 
 export const ChatPanel = ({
+  isActive = true,
+  activationId,
   isCollapsed,
   onToggle,
   session,
@@ -268,6 +272,9 @@ export const ChatPanel = ({
   // thread (e.g. a question node) does not paint into this list.
   const messages = useChatStore((state) =>
     selectThreadMessages(state, threadId),
+  );
+  const completedTurnId = useChatStore(
+    (state) => state.threadsById[threadId]?.completedTurnId,
   );
   const pendingPermission = useMemo(
     () => findPendingPermissionRequest(messages),
@@ -1003,6 +1010,10 @@ export const ChatPanel = ({
           )}
           <MessageList
             messages={messages}
+            recentTurnCount={recentTurnCount}
+            activationId={activationId}
+            completedTurnId={completedTurnId}
+            threadId={threadId}
             isLoading={isLoading}
             isHistoryLoading={!isHistoryLoaded}
             hasOlderHistory={historyPage.hasOlderHistory}
@@ -1011,7 +1022,7 @@ export const ChatPanel = ({
             olderHistoryError={historyPage.olderHistoryError ?? undefined}
             onLoadOlderHistory={loadOlderHistory}
             viewKey={messageListViewKey(ownerCanvasId, threadId)}
-            isActive={!isCollapsed}
+            isActive={isActive && !isCollapsed}
             openPosition={
               pendingPermission
                 ? 'bottom'
