@@ -642,19 +642,6 @@ export class AcpAgentHandle<
           resolveWaiter = resolve;
         });
       }
-
-      // Visibility fallback for "empty" turns. External agents can finish
-      // a turn with zero text (e.g. a tool-only Read/Glob/Bash chain).
-      // Synthesize a single explanatory `text_delta` whenever the agent
-      // produced no text AND we're not about to surface an error or abort,
-      // so the UI doesn't look hung.
-      const aborted = signal?.aborted ?? false;
-      if (assembledText.length === 0 && !promptError && !aborted) {
-        const reason = stopReason ?? 'unknown';
-        const synthetic = `_(agent returned no text — stopReason: ${reason}. Usually a tool-only turn or a refusal without prose. Extend the ACP translator if you need tool-call rendering.)_`;
-        assembledText = synthetic;
-        yield { type: 'text_delta', data: { content: synthetic } };
-      }
     } finally {
       // Commit the turn's plan (full-replacement; latest wins) into the
       // route-owned `overlay` for the live sidecar. The durable transcript's
