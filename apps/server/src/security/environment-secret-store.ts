@@ -22,6 +22,9 @@ export class EnvironmentSecretStore implements SecretStore {
     if (id === SECRET_IDS.rapidApiKey) {
       return process.env.RAPIDAPI_KEY ?? null;
     }
+    if (id === SECRET_IDS.inkOcrApiKey) {
+      return process.env.VISION_KEY?.trim() || null;
+    }
     if (id === SECRET_IDS.imageApiKey) {
       return process.env.AZURE_OPENAI_API_KEY ?? null;
     }

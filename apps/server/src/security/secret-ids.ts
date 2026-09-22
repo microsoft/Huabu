@@ -5,6 +5,7 @@ export const SECRET_IDS = {
   imageApiKey: 'llm:image:api-key',
   tavilyApiKey: 'integration:tavily:api-key',
   rapidApiKey: 'integration:rapidapi:api-key',
+  inkOcrApiKey: 'integration:azure-vision:api-key',
   copilotOAuth: 'oauth:github-copilot:credentials',
   codexOAuth: 'oauth:openai-codex:credentials',
 } as const;

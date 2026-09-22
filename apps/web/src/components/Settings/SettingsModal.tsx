@@ -20,6 +20,7 @@ import {
 import { DeploymentReadinessNotice } from './DeploymentReadinessNotice';
 import { GeneralSettings } from './sections/GeneralSettings';
 import { ImageProviderSettings } from './sections/ImageProviderSettings';
+import { InkOcrSettings } from './sections/InkOcrSettings';
 import { IntegrationsSettings } from './sections/IntegrationsSettings';
 import { LLMSettings } from './sections/LLMSettings';
 
@@ -249,9 +250,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
             <DeploymentReadinessNotice />
             {activeTab === 'general' && (
-              <SettingSection>
-                <GeneralSettings />
-              </SettingSection>
+              <>
+                <SettingSection>
+                  <GeneralSettings />
+                </SettingSection>
+                <InkOcrSettings />
+              </>
             )}
             {activeTab === 'huabuAgent' && (
               <>

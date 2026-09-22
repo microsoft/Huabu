@@ -18,6 +18,7 @@ export * from './workspace.js';
 export * from './web.js';
 export * from './llm.js';
 export * from './integrations.js';
+export * from './ink-ocr-config.js';
 export * from './preprocessing.js';
 export * from './agent.js';
 export * from './agent-history.js';

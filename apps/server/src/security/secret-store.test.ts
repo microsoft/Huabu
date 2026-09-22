@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -21,6 +21,7 @@ afterEach(() => {
   delete process.env.HUABU_SECRET_KEY;
   delete process.env.HUABU_DATA_DIR;
   delete process.env.HUABU_SECRET_BRIDGE;
+  vi.unstubAllEnvs();
   vi.resetModules();
 });
 
@@ -36,6 +37,41 @@ afterEach(() => {
 const MODULE_RELOAD_TIMEOUT_MS = 30_000;
 
 describe('initializeSecretStore — master key isolation', () => {
+  it(
+    'persists the Azure Vision key encrypted and resolves it after reinitialization',
+    async () => {
+      const dataDir = createDataDir();
+      const masterKey = Buffer.alloc(32, 2).toString('base64');
+      process.env.HUABU_DATA_DIR = dataDir;
+      process.env.HUABU_SECRET_KEY = masterKey;
+      vi.stubEnv('VISION_KEY', 'test-environment-vision-key');
+      const { SECRET_IDS } = await import('./secret-ids.js');
+      const mod = await import('./secret-store.js');
+      await mod.initializeSecretStore();
+      await mod.setSecret(SECRET_IDS.inkOcrApiKey, 'test-vision-private-key');
+      expect(
+        readFileSync(join(dataDir, 'encrypted-secrets.json'), 'utf8'),
+      ).not.toContain('test-vision-private-key');
+
+      vi.resetModules();
+      process.env.HUABU_SECRET_KEY = masterKey;
+      const reloaded = await import('./secret-store.js');
+      await reloaded.initializeSecretStore();
+      expect(reloaded.getPersistedSecret(SECRET_IDS.inkOcrApiKey)).toBe(
+        'test-vision-private-key',
+      );
+      expect(reloaded.getSecret(SECRET_IDS.inkOcrApiKey)).toBe(
+        'test-vision-private-key',
+      );
+      await reloaded.setSecret(SECRET_IDS.inkOcrApiKey, null);
+      expect(reloaded.getPersistedSecret(SECRET_IDS.inkOcrApiKey)).toBeNull();
+      expect(reloaded.getSecret(SECRET_IDS.inkOcrApiKey)).toBe(
+        'test-environment-vision-key',
+      );
+    },
+    MODULE_RELOAD_TIMEOUT_MS,
+  );
+
   it(
     'scrubs HUABU_SECRET_KEY from the environment after consuming it',
     async () => {

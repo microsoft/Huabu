@@ -1,14 +1,14 @@
 # Ink Lasso Question Flow
 
-> Status: **Proposed** · Last updated: 2026-09-18
+> Status: **Proposed** · Last updated: 2026-09-22
 
 ## 1. Summary
 
 Huabu should let a user lasso handwritten Sketch strokes together with optional Canvas nodes and explicitly submit that bounded selection as an Agent request. The selected Ink is a source that carries the user's intent. New tasks use the built-in Huabu `operate` Agent to infer that intent from the partial-stroke image and execute it through the existing Agent and Canvas toolchain; an existing Question thread retains its internal or external binding and effective mode.
 
-The V1 flow reuses the existing Lasso gesture, retained stroke selection, partial-stroke snapshotting, Question Node lifecycle, Agent request pipeline, and Chat history. It does not add a second pointer engine, a separate Ink runtime, OCR, an intent-recognizer model call, or an Ink-specific execution backend. The executing Agent may publish one structured inferred-intent summary from the same turn so the generated Question and Ink history row become understandable without pretending the user typed that text.
+The V1 flow reuses the existing Lasso gesture, retained stroke selection, partial-stroke snapshotting, Question Node lifecycle, Agent request pipeline, and Chat history. It does not add a second pointer engine, a separate Ink runtime, an intent-recognizer model call, or an Ink-specific execution backend. The executing Agent may publish one structured inferred-intent summary from the same turn so the generated Question and Ink history row become understandable without pretending the user typed that text.
 
-The Post-V1 amendment in §14 plans three interaction-polish changes for retained-selection dismissal, submission feedback, and touch-on-Ink behavior.
+The Post-V1 amendments add interaction polish in §14 and optional submission-time handwriting OCR enrichment in §15. When Azure Vision is configured, the server waits within a fixed deadline for an approximate transcription of a pure-Ink raster and includes a successful result beside the required Ink image in the same durable turn. OCR never replaces the image, becomes user-authored text, or arrives as a later Agent message; unavailable, empty, failed, or timed-out recognition falls back to the existing image-only flow.
 
 The earlier interactive HTML concept was a visual exploration and is not included in this branch. This Markdown proposal is the self-contained implementation contract and records the deliberate differences from that concept in §3.
 
@@ -24,30 +24,34 @@ The earlier interactive HTML concept was a visual exploration and is not include
 8. Reuse one Agent-turn pipeline for Chat and Lasso submissions so lifecycle, persistence, streaming, cancellation, and error behavior cannot drift. Question anchoring is an optional capability of that pipeline, not a requirement imposed on ordinary node-less Chat.
 9. Preserve the visible relationship between submitted Ink and selected Canvas objects through a hidden grounding image captured at the user's current zoom and text-detail level.
 10. Replace generic Ink placeholders with a concise Agent-inferred intent when the executing Agent reports one, while preserving the original Ink provenance and every user-authored rename.
+11. Optionally improve Chinese and mixed-language handwriting comprehension through bounded server-side OCR without adding another user message, Agent turn, or durable Sketch transcription.
 
 ## 3. Approved V1 Product Decisions
 
-| Topic                               | Decision                                                                                                                                                                                                                                                   |
-| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Intent inference                    | The Question's bound Agent interprets Ink in the same turn. New tasks use built-in `operate`; existing tasks retain their internal or external binding and effective mode. There is no separate intent-model call.                                         |
-| Ambiguous Ink                       | The Agent does not guess an operation; it asks one focused clarification question in the Question thread.                                                                                                                                                  |
-| Submission requirement              | At least one selected Sketch stroke is required. Ordinary nodes are optional additional sources.                                                                                                                                                           |
-| Source language                     | The UI calls every included item a `source`; it does not expose separate intent/reference categories.                                                                                                                                                      |
-| No Question Node selected           | Create a Question Node below the selection with collision avoidance, keep Chat closed, and start immediately. An open Preview/Chat Question is not an implicit target.                                                                                     |
-| One Question Node selected          | Continue the Question/Agent Node actually selected by this Lasso, inherit its internal or external binding and effective mode, and exclude the Question Node itself from sources.                                                                          |
-| Two or more Question Nodes selected | Disable submission and ask the user to narrow the selection. V1 does not merge threads or ask the user to choose a target.                                                                                                                                 |
-| New Agent binding                   | New tasks use the built-in Huabu `operate` Agent. V1 has no Agent/Profile picker.                                                                                                                                                                          |
-| New node title                      | Show `New ink request` while inference is pending. The first successful built-in Ink turn may replace only that untouched placeholder with its structured inferred intent; existing Question titles and user-renamed nodes never change.                   |
-| Submission UI                       | Extend the existing `StrokeSelectionToolbar`; do not add a second floating toolbar or remove current stroke-editing actions.                                                                                                                               |
-| Agent target feedback               | Place a compact Agent target hint beside the source count. No selected Agent Node displays `New · Huabu`; one valid selected Agent Node displays its bound Agent name; multiple or invalid targets display the corresponding blocked state.                |
-| Mixed Ink grounding                 | A mixed Ink/object submission includes a hidden visual grounding image of the relevant visible Canvas region. It preserves the current viewport zoom, node LOD, text truncation, and Ink/object placement instead of re-rendering hidden detail.           |
-| Grounding presentation              | The grounding image is Agent input, not a user attachment or source. ChatPanel never renders its thumbnail, filename, attachment row, or source chip, and it does not change the source count.                                                             |
-| Inferred intent presentation        | A structured inferred intent becomes the primary text of that Ink row and may name its newly created Question. It remains Agent-derived metadata, never user-authored `content`; the Pen affordance preserves Ink provenance.                              |
-| Missing or ambiguous inference      | Keep the generic `Ink request` / `New ink request` presentation. Clarification remains an assistant response, and Huabu never derives intent by parsing arbitrary reply text.                                                                              |
-| Request semantics                   | Persist a structured `ink-intent` marker. Do not pretend the user typed a synthetic text message.                                                                                                                                                          |
-| Successful submission               | Clear the retained Lasso selection only after the server accepts the turn. The original Canvas content remains.                                                                                                                                            |
-| Failed submission                   | A rejection before acceptance keeps the selection and any created Question for retry. A transport failure with unknown acceptance requires reconciliation before resubmission. An accepted turn's later runtime failure uses normal Chat recovery.         |
-| Consistency                         | Reuse Huabu's existing split semantics: visual sources are materialized for the turn, ordinary nodes remain revisioned live references, and Agent content writes use read-set CAS. Never widen a fully stale partial Sketch selection to the whole Sketch. |
+| Topic                               | Decision                                                                                                                                                                                                                                                                                                                        |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Intent inference                    | The Question's bound Agent interprets Ink in the same turn. New tasks use built-in `operate`; existing tasks retain their internal or external binding and effective mode. There is no separate intent-model call.                                                                                                              |
+| Ambiguous Ink                       | The Agent does not guess an operation; it asks one focused clarification question in the Question thread.                                                                                                                                                                                                                       |
+| Submission requirement              | At least one selected Sketch stroke is required. Ordinary nodes are optional additional sources.                                                                                                                                                                                                                                |
+| Source language                     | The UI calls every included item a `source`; it does not expose separate intent/reference categories.                                                                                                                                                                                                                           |
+| No Question Node selected           | Create a Question Node below the selection with collision avoidance, keep Chat closed, and start immediately. An open Preview/Chat Question is not an implicit target.                                                                                                                                                          |
+| One Question Node selected          | Continue the Question/Agent Node actually selected by this Lasso, inherit its internal or external binding and effective mode, and exclude the Question Node itself from sources.                                                                                                                                               |
+| Two or more Question Nodes selected | Disable submission and ask the user to narrow the selection. V1 does not merge threads or ask the user to choose a target.                                                                                                                                                                                                      |
+| New Agent binding                   | New tasks use the built-in Huabu `operate` Agent. V1 has no Agent/Profile picker.                                                                                                                                                                                                                                               |
+| New node title                      | Show `New ink request` while inference is pending. The first successful built-in Ink turn may replace only that untouched placeholder with its structured inferred intent; existing Question titles and user-renamed nodes never change.                                                                                        |
+| Submission UI                       | Extend the existing `StrokeSelectionToolbar`; do not add a second floating toolbar or remove current stroke-editing actions.                                                                                                                                                                                                    |
+| Agent target feedback               | Place a compact Agent target hint beside the source count. No selected Agent Node displays `New · Huabu`; one valid selected Agent Node displays its bound Agent name; multiple or invalid targets display the corresponding blocked state.                                                                                     |
+| Mixed Ink grounding                 | A mixed Ink/object submission includes a hidden visual grounding image of the relevant visible Canvas region. It preserves the current viewport zoom, node LOD, text truncation, and Ink/object placement instead of re-rendering hidden detail.                                                                                |
+| Grounding presentation              | The grounding image is Agent input, not a user attachment or source. ChatPanel never renders its thumbnail, filename, attachment row, or source chip, and it does not change the source count.                                                                                                                                  |
+| Inferred intent presentation        | A structured inferred intent becomes the primary text of that Ink row and may name its newly created Question. It remains Agent-derived metadata, never user-authored `content`; the Pen affordance preserves Ink provenance.                                                                                                   |
+| Missing or ambiguous inference      | Keep the generic `Ink request` / `New ink request` presentation. Clarification remains an assistant response, and Huabu never derives intent by parsing arbitrary reply text.                                                                                                                                                   |
+| Request semantics                   | Persist a structured `ink-intent` marker. Do not pretend the user typed a synthetic text message.                                                                                                                                                                                                                               |
+| Submission-time OCR                 | When Azure Vision credentials are configured, derive an approximate transcription from a pure-Ink raster after the required partial-stroke visual is prepared and before canonical rendering. A successful non-empty result enters the same envelope and turn; it never replaces the required Ink image or becomes `user.text`. |
+| OCR deadline and fallback           | Wait at most 2,000 ms for OCR in the initial implementation. Disabled, empty, failed, malformed, or timed-out recognition continues image-only; a result arriving after the attempt deadline is discarded and never appended to a running or completed turn.                                                                    |
+| OCR presentation                    | OCR is hidden Agent input and does not appear as a Chat message, attachment, source chip, Question title, inferred intent, or Sketch transcription. The prompt identifies it as approximate evidence that must be checked against the Ink image.                                                                                |
+| Successful submission               | Clear the retained Lasso selection only after the server accepts the turn. The original Canvas content remains.                                                                                                                                                                                                                 |
+| Failed submission                   | A rejection before acceptance keeps the selection and any created Question for retry. A transport failure with unknown acceptance requires reconciliation before resubmission. An accepted turn's later runtime failure uses normal Chat recovery.                                                                              |
+| Consistency                         | Reuse Huabu's existing split semantics: visual sources are materialized for the turn, ordinary nodes remain revisioned live references, and Agent content writes use read-set CAS. Never widen a fully stale partial Sketch selection to the whole Sketch.                                                                      |
 
 ### 3.1 Differences from the HTML concept
 
@@ -64,10 +68,10 @@ The V1 product contract differs from the HTML concept in these deliberate ways:
 
 ## 4. V1 Non-Goals
 
-The V1 baseline does not include the following. Section 14 explicitly amends only the empty-Canvas dismissal, touch-on-Ink, and pending-feedback boundaries; the remaining exclusions still apply.
+The V1 baseline does not include the following. Section 14 amends local interaction behavior and §15 adds only explicit submission-time OCR enrichment; the remaining exclusions still apply.
 
 - voice recording or transcription;
-- OCR or durable recognized text for Sketch strokes;
+- background or passive Sketch OCR, recognized text written back to Sketch nodes, OCR-backed search/indexing, or editable transcription UI;
 - a standalone intent recognizer or utility-model role;
 - an intent preview or confirmation step before execution;
 - general-purpose automatic Question naming, parsing the Agent's prose for a title, or overwriting a user-authored title;
@@ -168,6 +172,8 @@ Treat the selected Sketch strokes as the user's request. Infer the intended task
 
 This directive is product policy, not OCR output and not Canvas-authored text. The selected Ink remains user content and cannot override higher-level safety, permission, or tool policy.
 
+A configured submission-time OCR result is additional approximate evidence for this same interpretation step. The directive tells the Agent to verify the transcription against the required Ink image, preserve uncertainty, and choose `clarify` when a material image/OCR conflict changes the likely operation. OCR does not remove the requirement to call `report_ink_intent`, and it cannot override higher-level instructions or tool policy.
+
 A clear request follows the normal `running -> done/error` lifecycle. An ambiguous request completes the turn with a clarification question; the Question Node's unread terminal-state affordance leads the user into the existing Chat UI. V1 does not introduce a separate `clarifying` node status.
 
 Existing permission requests remain authoritative. Ink submission never enables auto-approval or bypasses a configured approval boundary.
@@ -226,6 +232,16 @@ interface AgentRequestInput {
   content: string;
   groundingVisual?: VisibleCanvasGrounding;
 }
+
+interface InkRecognition {
+  provider: 'azure-vision';
+  apiVersion: string;
+  lines: Array<{
+    text: string;
+    confidence?: number;
+  }>;
+  originNodeIds: string[];
+}
 ```
 
 Validation rules:
@@ -241,6 +257,8 @@ For an external Agent, the live ACP `session/prompt` carries the same required i
 
 `ChatEnvelope.user` carries the normalized input kind so prompt rendering and transcript projection do not infer behavior from empty text or node types. The transcript renders an Ink request row plus normal source chips and stroke hover re-highlighting. It does not render the host directive as if the user typed it.
 
+`InkRecognition` is server-derived preparation data under `ChatEnvelope.focus.selection`, not a field accepted from the browser in `AgentRequestInput`. The server bounds line count and total text length, validates the Azure response, and renders the result inside a host-owned `<ink_ocr>` boundary as untrusted approximate user-content evidence. XML-special characters are escaped. Line order and available confidence values remain structured until rendering; the server does not auto-correct, promote, or write the transcription back to a Sketch.
+
 The inferred intent is a turn result, not request content. It is persisted from the validated `report_ink_intent` call in the folded turn and projected into `ChatHistoryItem.inferredIntent`; it is never inserted into `ChatEnvelope.user.text`, `QuestionNodeData.content`, `responseSummary`, or the immutable submitted grounding image.
 
 ### 7.2 Reuse the existing submission boundary
@@ -249,8 +267,9 @@ Ink submission does not add client-authored revision fields or a second all-or-n
 
 1. `/api/agent` resolves the effective thread and binding, then builds one `ChatEnvelope` before invoking the Agent.
 2. Envelope construction reads selected-node records from the canonical store, emits metadata refs with their current `rev`, and materializes selected Sketch/Image visuals through `snapshotNodesToArtifacts()`.
-3. The Agent service renders that envelope into canonical `AgentInput[]` before `handle.run()` and stores those inputs in `AgentSubmission.rendered` with the turn.
-4. Replay consumes the stored `rendered` inputs byte-for-byte, including image parts, instead of rebuilding them against the current Canvas.
+3. When submission-time OCR is configured, the server derives a separate pure-Ink raster from the same frozen stroke subsets and waits within the §15 deadline for recognition. It does not OCR a mixed Sketch/Image composite or the visible-Canvas grounding image.
+4. The Agent service renders the complete envelope into canonical `AgentInput[]` before `handle.run()` and stores those inputs in `AgentSubmission.rendered` with the turn.
+5. Replay consumes the stored `rendered` inputs byte-for-byte, including image parts and any rendered OCR evidence, instead of rebuilding them or calling the OCR provider again.
 
 This gives each source kind the same temporal semantics it already has in Huabu:
 
@@ -261,6 +280,7 @@ This gives each source kind the same temporal semantics it already has in Huabu:
 | Uploaded or excerpted attachment | Its submitted content is rendered and persisted with the turn.                                                                                                                                                                                                                                                                                                                                                                        |
 | Selected Note/PDF/Web/other node | The envelope stores a metadata ref with `file`, preview, and `rev`, not a full body snapshot. If the Agent needs the body, `read()` returns the latest canonical content and its current revision.                                                                                                                                                                                                                                    |
 | Mixed Ink/object grounding       | The browser captures the visible relationship at the activation-time viewport/LOD and the server persists it as a hidden canonical image part. It provides pointing evidence only; canonical object content still comes from refs and `read()`.                                                                                                                                                                                       |
+| Submission-time OCR              | The server derives a pure-Ink raster from the same stroke KEEP-lists after required visual validation. A successful bounded result becomes hidden canonical text evidence in this turn; disabled, empty, failed, malformed, or timed-out recognition leaves no OCR block and preserves image-only behavior.                                                                                                                           |
 
 The selected Note/PDF/Web/other-node row is intentionally a live-reference contract. If a user edits an ordinary selected material after submitting but before the Agent first reads it, the Agent reads the newer content. Huabu surfaces the envelope revision and fresh read revision so the change is observable; V1 does not fork or duplicate the node merely to preserve the earlier body. The grounding image remains the point-in-time visual evidence of what was visible when the gesture was submitted.
 
@@ -362,6 +382,8 @@ The accepted boundary must be explicit and shared with text Chat. The current in
 
 At acknowledgement, retire the retained selection only if the originating Canvas and Lasso gesture identity still match the captured attempt. That identity is derived from the retained polygon plus its partial-stroke subsets, not React Flow's whole-node `selected` projection, because Question creation and Canvas lifecycle synchronization may refresh that projection before acceptance without creating a new Lasso. A different polygon or stroke subset, undo/reset, or Canvas switch must not be cleared by a delayed callback. Once a turn has been accepted, a later Agent error does not restore an obsolete selection over the user's current work.
 
+OCR does not add another state machine. The server waits only during pre-acceptance preparation. A 1,500 ms threshold is observability-only; the initial 2,000 ms hard deadline is the sole flow-control timeout. The OCR fetch should consume the request/preparation `AbortSignal` when one is available and must always enforce its own deadline. Physical cancellation is an optimization, not the correctness boundary: after timeout, abort, or attempt completion, a late promise result is logically ineligible and cannot mutate the envelope, rendered inputs, history, Question, inferred intent, or any active turn.
+
 ### 9.1 Retry Is Not Replay
 
 The current Chat retry action calls `startStream(lastUserMsg.content, mode)`, losing the original source/attachment/Skill input and failing outright on an empty-text Ink message. Replace it in the shared path, not with an Ink-only retry button:
@@ -414,7 +436,7 @@ The feature should ship as one PR built from reviewable commits. Tests belong wi
 
 - Add the narrowest practical integration or Playwright coverage for new-task execution, internal/external existing-thread continuation, fully stale Ink rejection, ambiguous clarification visibility, and failure retry.
 - Verify desktop and touch toolbar layouts without changing Lasso gesture ownership.
-- Keep Voice, OCR, general/heuristic automatic naming, ACP vision-capability claims, and multi-target synthesis explicitly absent; the guarded structured placeholder replacement arrives only in Commit 6.
+- Keep Voice, general-purpose/passive Sketch OCR, durable transcription, general/heuristic automatic naming, ACP vision-capability claims, and multi-target synthesis explicitly absent; the guarded structured placeholder replacement arrives only in Commit 6, and bounded submission-time OCR arrives only in Commit 7.
 
 ### Commit 6 — `feat(agent): ground and present inferred ink intent`
 
@@ -425,7 +447,16 @@ The feature should ship as one PR built from reviewable commits. Tests belong wi
 - Add request/envelope/renderer tests, browser capture tests across zoom LODs, and integration coverage proving that object-internal pointing survives submission and replay.
 - Add live/history parity, retry/reconnect, malformed-report, user-rename race, existing-target protection, external fallback, and conversation-search tests for inferred intent.
 
-### Commit 7 — `docs: document shipped ink question flow`
+### Commit 7 — `feat(agent): enrich ink submissions with bounded OCR`
+
+- Add a server-only Azure Vision adapter configurable through Settings > General, with `VISION_KEY` and `VISION_ENDPOINT` as environment fallbacks. Reuse secure credential storage and secret-entry UI; never return saved keys to the Web client or expose an OCR execution endpoint.
+- Derive a white-background pure-Ink OCR raster from the same validated stroke subsets as the required Agent visual. Exclude selected images, ordinary objects, and the visible-Canvas grounding capture so printed reference text cannot become handwritten intent.
+- Wait within one hard deadline, attach a validated non-empty structured recognition result to the envelope, and render it as escaped approximate evidence before canonical turn persistence.
+- Preserve image-only behavior for disabled, empty, failed, malformed, and timed-out OCR. User Stop or parent preparation cancellation stops the entire submission without starting the Agent; discard all late results without follow-up messages or turn mutation.
+- Add structured outcome and latency logging without image bytes, recognized text, credentials, or other sensitive payloads.
+- Add server tests for raster purity, success, empty output, timeout, provider error, malformed output, abort/late completion, prompt conflict guidance, replay without another provider call, and unchanged behavior when configuration is absent.
+
+### Commit 8 — `docs: document shipped ink question flow`
 
 - After product behavior is accepted, fold the durable contracts into [`sketch-node.md`](../architecture/sketch-node.md), [`question-node.md`](../architecture/question-node.md), [`agent-context.md`](../architecture/agent-context.md), [`agent-architecture.md`](../architecture/agent-architecture.md), [`preview-workspace.md`](../architecture/preview-workspace.md), and [`canvas-input-interactions.md`](../architecture/canvas-input-interactions.md) as applicable. Document shared acceptance, persistence, retry, and controller lifetime where their owning subsystem is described.
 - Set this proposal to `Status: Shipped`, record the PR/commit, update `Last updated`, and leave the proposal at this stable path.
@@ -444,6 +475,10 @@ If implementation shows that Commit 2 and Commit 3 cannot be reviewed independen
 - Required Ink image snapshot/inlining failures and non-vision effective models reject before execution; optional text-Chat visuals retain their existing fallback behavior.
 - Mixed Ink/object requests reject before execution when the visible-Canvas grounding image is missing, invalid, or cannot be inlined; pure Ink retains its existing partial-stroke visual requirement without inventing an object relationship image.
 - The grounding renderer preserves the submitted bitmap and metadata byte-for-byte through durable replay and never re-renders hidden text at a different zoom/LOD.
+- Configured OCR receives a pure-Ink raster derived from exactly the validated submitted stroke subsets; selected images, ordinary objects, and grounding pixels are absent.
+- OCR success renders escaped structured lines and confidence as approximate evidence in the same canonical input, while disabled, empty, provider-error, malformed, and hard-timeout cases render the existing image-only input. User Stop or parent preparation cancellation during OCR prevents Agent execution and durable acceptance for that attempt.
+- A slow-call threshold does not resolve the OCR race; only the hard deadline or attempt cancellation does. A late provider result cannot mutate the envelope, persisted inputs, history, inferred intent, Question, or running turn.
+- Durable replay and reconnect use the stored canonical inputs and never call the OCR provider again.
 - Durable acceptance is emitted only after turn-start persistence, never for preparation/persistence failure; initial `meta` does not trigger acceptance.
 - Stop racing with turn-start returns and applies the same durable acceptance exactly once before local stream cancellation.
 - An ordinary selected material edited before the Agent's first full read is read at its latest revision.
@@ -491,6 +526,8 @@ Start from existing `agentStreamCoordinator.test.ts`, `chatSessionIsolation.test
 - A clear Ink request can execute existing Canvas tools under normal approval policy.
 - In a mixed Ink/object example, an arrow or underline aimed at a visible internal object element is delivered as one relationship image with the same current LOD, allowing the Agent to distinguish element-level elaboration from whole-node resize/rewrite intent.
 - The same example displays a concise structured interpretation such as `Expand the third comparison step in the left note` in its Ink history row and, for a newly created untouched Question only, as the Question label.
+- With Azure Vision configured, a Chinese or mixed-language handwritten request can include a bounded approximate OCR block in the same Agent turn; provider unavailability or deadline expiry still starts the image-only turn without a second message.
+- A mixed Ink/image request sends only the selected strokes to OCR, so printed text in the reference image or visible-Canvas grounding cannot be introduced as recognized handwriting.
 - An ambiguous Ink request produces a focused clarification and no guessed Canvas mutation.
 - Restart/reload preserves the Ink request row, source chips, selected stroke IDs, thread ownership, and terminal status.
 - Undo/redo or authoritative Canvas replacement clears stale transient selection through the existing preview reset contract.
@@ -509,19 +546,21 @@ V1 is complete when all of the following are true:
 6. The request, rendered input, selected stroke IDs, source metadata, and Question lifecycle survive reload and replay.
 7. Visual replay remains point-in-time, ordinary material reads remain fresh, fully stale Ink is never widened to a whole Sketch, and Agent content writes retain existing read-before-write/CAS protection.
 8. Existing text Chat, Lasso editing, stroke movement, deletion, undo, pointer routing, and Question interactions do not regress.
-9. Voice, OCR, intent confirmation, ACP capability negotiation, general/heuristic automatic naming, and multi-target synthesis are absent from the shipped UI and protocol behavior; the only naming exception is Commit 6's structured replacement of an untouched Ink placeholder.
+9. Voice, general-purpose/passive Sketch OCR, durable or editable Sketch transcription, OCR-backed search, intent confirmation, ACP capability negotiation, general/heuristic automatic naming, and multi-target synthesis are absent from the shipped UI and protocol behavior; the only naming exception is Commit 6's structured replacement of an untouched Ink placeholder.
 10. Chat and Ink share one dispatch/retry/stream/recovery implementation, with thread-scoped settings and no dependency on an open Chat. Optimizing the common pipeline does not require a second Ink change.
 11. A rejected submission cannot execute without its required Ink visual; a delayed acknowledgement cannot clear a newer selection; retry of a failed new task reuses its existing Question.
 12. The toolbar gives immediate target feedback beside the source count: `New · Huabu` when no Agent Node is included, the effective Agent name when exactly one valid Agent Node is included, and a blocked indication for multiple or invalid targets.
 13. Every mixed Ink/object submission gives the Agent a hidden visible-Canvas grounding image that preserves submission-time zoom/LOD and Ink/object placement, survives replay, and remains absent from ChatPanel and all user-visible source/attachment projections.
 14. A valid same-turn built-in inferred intent replaces generic Ink placeholders without changing user-authored content; it survives replay, never renames existing or user-renamed Questions, and safely falls back when no trustworthy structured report exists.
+15. When Azure Vision is configured, submission-time OCR waits only within its hard deadline and contributes escaped approximate evidence to the same durable turn; absent configuration, empty recognition, failure, malformed output, and timeout preserve deterministic image-only behavior. User Stop or parent preparation cancellation during OCR stops the entire submission before Agent execution. Late completion never produces a follow-up message or changes the settled attempt.
+16. OCR uses a pure-Ink raster derived from the validated submitted stroke subsets, never a mixed image composite or Canvas grounding capture, and its result remains hidden from user-authored text, Chat attachments/sources, Question naming, Sketch persistence, and search.
 
 ## 13. Deferred Follow-Ups
 
 Each follow-up requires its own proposal or an explicit lifecycle update to this one:
 
 - Voice as an additional intent source, including recording, transcription, and privacy/error states.
-- General-purpose Sketch OCR for search and passive question detection remains owned by [`sketch-region-redesign.md`](./sketch-region-redesign.md); §14 does not implement or replace it.
+- General-purpose Sketch OCR for search, passive question detection, durable transcription, and editable recognized text remains owned by [`sketch-region-redesign.md`](./sketch-region-redesign.md); §15 does not implement or replace it.
 - A two-stage `infer -> confirm/execute` flow with a structured `ready | clarify | unsupported` result.
 - Full inferred-intent parity for external ACP Agents, gated on an authoritative structured capability rather than session-title or reply-text heuristics.
 - ACP vision capability declaration and capability-gated Ink affordances.
@@ -531,7 +570,7 @@ Each follow-up requires its own proposal or an explicit lifecycle update to this
 
 ## 14. Post-V1 Interaction Polish
 
-This amendment is planned after the V1 submission path and contains only local interaction changes. Online handwriting transcription remains deferred and is not part of this plan.
+This amendment is planned after the V1 submission path and contains only local interaction changes. It does not own the optional submission-time OCR preparation defined separately in §15.
 
 ### 14.1 Sequence and ownership
 
@@ -617,7 +656,63 @@ The polish work is complete when all of the following hold:
 
 The first commit owns empty-Canvas dismissal, finger-on-Ink routing, retained-Lasso stacking, selected-stroke paint, and their focused tests and architecture updates. The second owns submission preparation feedback and guards, Lasso-relative toolbar placement, Ink Query integration coverage, and this proposal update. Files that contain both concerns must be staged by hunk so each commit builds and its focused tests pass independently. Tailnet proxy, local development-server configuration, and environment-only changes remain uncommitted local workspace state.
 
-## 15. Code Entry Points
+## 15. Submission-Time Ink OCR Enrichment
+
+This amendment adds optional server-side recognition only to an explicit `ink-intent` submission. It is reading assistance for the executing Agent, not a general Sketch transcription feature. The required partial-stroke image remains the authoritative visual representation of the request, and the existing image-only behavior remains fully supported when Azure Vision is not configured or recognition produces no usable result.
+
+### 15.1 Preparation sequence and ownership
+
+The Web client continues to send only the captured source tree, stroke IDs, input kind, and any required grounding visual. It never calls Azure or authors OCR text. After validating and materializing the required selected Ink, the server derives the OCR raster, performs bounded recognition, attaches any successful result to `ChatEnvelope.focus.selection`, and only then renders and persists the canonical `AgentInput[]`.
+
+```text
+frozen source tree -> required Ink visual -> pure-Ink OCR raster -> bounded OCR
+                                                                  |
+                                      complete ChatEnvelope -> canonical inputs
+                                                                  |
+                                                turn persistence -> acceptance
+```
+
+OCR and its source raster are downstream of the validated stroke snapshot and therefore do not run independently of it. Client save/Question preparation may overlap with server request preparation through the existing flow, but this amendment does not add a two-phase upload or a second submission protocol merely to hide the OCR latency.
+
+### 15.2 Pure-Ink raster
+
+The OCR raster is derived from the same validated `strokeSubsets` used by the required Ink visual, preserving stroke layout and reading order while excluding every selected image, ordinary object, Question, and visible-Canvas grounding pixel. It uses a white background, high-contrast dark strokes, bounded padding, and an OCR-appropriate scale without changing the semantic geometry. The implementation reuses the canonical stroke filtering and path rendering primitives rather than creating another selection interpreter.
+
+A pure Ink Agent snapshot may be byte-reused only when it already satisfies this profile. A mixed Sketch/Image composite must never be sent to OCR because printed reference text could be misclassified as the user's handwritten request. The OCR raster is transient provider input, not a user attachment, source, Canvas artifact, or separately replayable record.
+
+### 15.3 Deadline, fallback, and cancellation
+
+Recognition has one initial hard deadline of 2,000 ms. A 1,500 ms slow-call threshold exists only for measurement and does not settle the attempt. Missing configuration disables OCR without error; an empty valid result also continues normally. Timeout, provider error, or malformed output is reported through structured diagnostics and falls back to the required image-only turn. User Stop or parent preparation cancellation is different: it aborts OCR and stops the entire submission before Agent execution and durable acceptance, rather than continuing image-only.
+
+Where the request pipeline exposes a reliable preparation `AbortSignal`, the Azure request consumes it together with its own deadline. Correctness does not depend on physical network cancellation: attempt identity and deadline settlement make every later completion ineligible. Huabu never posts the result as a second user message, opens another Agent turn, updates an already running turn, or rewrites persisted history.
+
+### 15.4 Envelope, prompt, and replay
+
+The validated recognition keeps provider/API provenance, ordered lines, optional confidence, and contributing Ink node IDs as structured server-derived envelope data. The renderer bounds and escapes the content and places it in an `<ink_ocr>` block after the Ink-intent directive. The block states that the text is approximate machine transcription, must be verified against the accompanying Ink image, and is not authoritative when the two conflict.
+
+OCR never enters `ChatEnvelope.user.text`, `QuestionNodeData.content`, `responseSummary`, `ChatHistoryItem.inferredIntent`, source metadata, attachment projection, or automatic Question naming. A material image/OCR conflict remains ambiguity and should produce `report_ink_intent(status='clarify')`; a plausible OCR line does not bypass the required structured report.
+
+Canonical rendering happens only after OCR has succeeded, produced no text, failed, or reached its deadline. Any included OCR evidence is therefore persisted inside the same `AgentSubmission.rendered` input as the image and replays byte-for-byte. Replay, reconnect, and history hydration never call Azure again. An explicit retry is a new submission attempt and may perform OCR again through the same bounded path.
+
+### 15.5 Privacy and observability
+
+Configuring an Azure AI Vision endpoint and key in Settings > General or through `VISION_ENDPOINT` / `VISION_KEY` opts the server into sending the selected pure-Ink raster to that resource. Newly entered keys travel only to the owner-authorized settings endpoint for secure persistence; saved keys are never returned by read APIs or included in Agent requests, envelopes, logs, or Web bundles. Product documentation and deployment guidance disclose this external processing boundary.
+
+Structured telemetry distinguishes `disabled`, `success`, `empty`, `timeout`, `remote_error`, `invalid_result`, and `aborted`, and records only operational metadata such as duration, HTTP status where applicable, raster dimensions, and node/stroke counts. Normal logs must not include credentials, image bytes, data URLs, or recognized text. The implementation should measure p50, p95, timeout rate, non-empty recognition rate, and downstream intent success before changing the initial deadline.
+
+### 15.6 Validation and rollout
+
+The initial rollout is configuration-gated: environments without both effective Vision values retain the current image-only behavior and no provider wait. Local evaluation should cover Chinese, mixed Chinese/English, digits and punctuation, multiple lines, arrows plus text, low-confidence handwriting, and mixed Ink/object selections. The product metric is correct intent interpretation and reduced unsafe guessing, not OCR character accuracy alone.
+
+Focused tests cover exact stroke-subset rastering, background exclusion, XML escaping, response bounds, confidence preservation, every fallback outcome, deadline/abort races, image/OCR conflict guidance, canonical persistence, replay without provider access, and absence from all user-visible transcript and source projections. The existing required-visual tests remain authoritative: OCR success can never rescue a missing or invalid Ink image.
+
+### 15.7 Settings configuration
+
+General settings includes a compact optional handwriting-recognition row, reusing the common Settings primitives and matching the other capabilities' key icon and Set API Key / Update Key action. By default it shows the Azure AI Vision title and a brief selected-stroke processing description. One click opens Endpoint and API Key inputs with Save and Cancel; normal editing shows no configuration-source paragraphs or long instructions. Save sends only changed fields, and a blank key preserves the current credential; stored-key removal is an explicit separate action. The title identifies Azure AI Vision rather than claiming generic OCR compatibility. Both values must belong to the same Azure resource; arbitrary OCR providers are not supported merely by changing the URL. No model selector, provider selector, connectivity probe, or additional enable switch is introduced.
+
+The owner-only settings API uses shared schemas, validates HTTPS endpoints without embedded credentials, query, or fragment, and returns no saved plaintext keys. SecretStore persists the key securely; a separate non-secret settings file holds the endpoint. UI-saved values independently override environment values and affect the next submission without a restart. The API read model distinguishes stored values from environment fallbacks and describes configuration completeness rather than verified connectivity. Removing an override restores its environment fallback, so deleting a saved key is not an off switch. The compact row discloses selected-stroke external processing, while settings errors remain explicit and key mutations are disabled when secure storage is unavailable. Image-only fallback remains unchanged. See [credential storage](../architecture/credential-storage.md) for runtime-specific persistence and partial-update behavior.
+
+## 16. Code Entry Points
 
 | Concern                                   | File                                                                                                                                                                           |
 | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -639,8 +734,12 @@ The first commit owns empty-Canvas dismissal, finger-on-Ink routing, retained-La
 | Thread-scoped UI state and settings       | [`apps/web/src/store/chatStore.ts`](../../apps/web/src/store/chatStore.ts)                                                                                                     |
 | Agent transport and SSE decoding          | [`apps/web/src/api/agent.ts`](../../apps/web/src/api/agent.ts)                                                                                                                 |
 | Shared Agent request schema               | [`packages/shared/src/types/api/agent.ts`](../../packages/shared/src/types/api/agent.ts)                                                                                       |
+| Shared envelope and OCR schema            | [`packages/shared/src/types/api/chat-envelope.ts`](../../packages/shared/src/types/api/chat-envelope.ts)                                                                       |
 | Envelope and auto-snapshot                | [`apps/server/src/modules/agent/conversation/envelope.ts`](../../apps/server/src/modules/agent/conversation/envelope.ts)                                                       |
+| Azure Vision OCR adapter                  | [`apps/server/src/modules/agent/conversation/ink-ocr.ts`](../../apps/server/src/modules/agent/conversation/ink-ocr.ts)                                                         |
 | Canonical turn renderer                   | [`apps/server/src/modules/agent/conversation/prompt/build-prompt.ts`](../../apps/server/src/modules/agent/conversation/prompt/build-prompt.ts)                                 |
+| Ink intent directive                      | [`apps/server/src/modules/agent/conversation/prompt/ink-intent.ts`](../../apps/server/src/modules/agent/conversation/prompt/ink-intent.ts)                                     |
+| Ink OCR evidence renderer                 | [`apps/server/src/modules/agent/conversation/prompt/ink-ocr.ts`](../../apps/server/src/modules/agent/conversation/prompt/ink-ocr.ts)                                           |
 | Inferred-intent tool contract             | [`apps/server/src/modules/agent/tools/definitions.ts`](../../apps/server/src/modules/agent/tools/definitions.ts)                                                               |
 | Agent route                               | [`apps/server/src/modules/agent/agent.route.ts`](../../apps/server/src/modules/agent/agent.route.ts)                                                                           |
 | Shared server lease and dispatch          | [`apps/server/src/modules/agent/agent-thread.service.ts`](../../apps/server/src/modules/agent/agent-thread.service.ts)                                                         |
@@ -648,3 +747,4 @@ The first commit owns empty-Canvas dismissal, finger-on-Ink routing, retained-La
 | History source/input projection           | [`apps/server/src/modules/agent/conversation/transcript/history.ts`](../../apps/server/src/modules/agent/conversation/transcript/history.ts)                                   |
 | Image inlining and fallback policy        | [`apps/server/src/modules/agent/conversation/prompt/image-inlining.ts`](../../apps/server/src/modules/agent/conversation/prompt/image-inlining.ts)                             |
 | Partial snapshot implementation           | [`apps/server/src/modules/canvas/snapshot-nodes.ts`](../../apps/server/src/modules/canvas/snapshot-nodes.ts)                                                                   |
+| Azure Vision local probe                  | [`scripts/test-azure-vision.mjs`](../../scripts/test-azure-vision.mjs)                                                                                                         |
