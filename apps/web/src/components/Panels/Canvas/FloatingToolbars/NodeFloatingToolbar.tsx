@@ -550,6 +550,7 @@ export const NodeFloatingToolbar = memo(
             role="presentation"
             onKeyDown={handleCanvasNavigationKey}
             onClick={(event) => {
+              event.stopPropagation();
               const item = (event.target as Element).closest(
                 '[role="menuitem"]',
               );

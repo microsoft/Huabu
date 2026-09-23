@@ -5,6 +5,10 @@ import { act, type ComponentProps, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import {
+  DropdownMenuItem,
+  DropdownMenuSubmenu,
+} from '@/components/Common/DropdownMenu';
 import { resolveSetQuestionCardScale } from '@/handler/canvasCommand/resolvers/resolveSetQuestionCardScale';
 import { QUESTION_NODE_DEFAULT_FONT_SIZE } from '@/utils/node/nodeFontConfig';
 
@@ -18,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   previewOpen: false,
   connectable: true,
   active: vi.fn(),
+  ancestorClick: vi.fn(),
   canvas: {
     nodes: [] as Node[],
     canvasWrapper: null as HTMLDivElement | null,
@@ -128,14 +133,16 @@ describe('NodeFloatingToolbar type-icon drag surface', () => {
   ) {
     act(() =>
       root.render(
-        <NodeFloatingToolbar
-          id="node"
-          type="video"
-          data={{ type: 'video', src: 'video.webm' }}
-          dragEnabled
-          onDragActiveChange={mocks.active}
-          {...props}
-        />,
+        <div role="presentation" onClick={mocks.ancestorClick}>
+          <NodeFloatingToolbar
+            id="node"
+            type="video"
+            data={{ type: 'video', src: 'video.webm' }}
+            dragEnabled
+            onDragActiveChange={mocks.active}
+            {...props}
+          />
+        </div>,
       ),
     );
   }
@@ -161,6 +168,57 @@ describe('NodeFloatingToolbar type-icon drag surface', () => {
     if (!trigger) throw new Error(`Missing ${label} trigger`);
     act(() => trigger.click());
   }
+
+  it.each([
+    { nested: false, detail: 1 },
+    { nested: false, detail: 0 },
+    { nested: true, detail: 1 },
+    { nested: true, detail: 0 },
+  ])(
+    'runs overflow commands before closing without bubbling (nested=$nested, click detail=$detail)',
+    ({ nested, detail }) => {
+      const command = vi.fn(() => {
+        expect(document.querySelector('.node-toolbar-overflow')).not.toBeNull();
+      });
+      const item = (
+        <DropdownMenuItem onClick={command}>Test command</DropdownMenuItem>
+      );
+      render({
+        overflow: nested ? (
+          <DropdownMenuSubmenu label="Test submenu">{item}</DropdownMenuSubmenu>
+        ) : (
+          item
+        ),
+      });
+      openPanel('toolbar.more');
+      expect(mocks.ancestorClick).toHaveBeenCalled();
+      mocks.ancestorClick.mockClear();
+      if (nested) {
+        const submenu = document.querySelector<HTMLButtonElement>(
+          '.node-toolbar-overflow [aria-haspopup="menu"]',
+        );
+        if (!submenu) throw new Error('Missing submenu trigger');
+        act(() => submenu.click());
+        expect(submenu.getAttribute('aria-expanded')).toBe('true');
+        expect(mocks.ancestorClick).not.toHaveBeenCalled();
+      }
+      const leaf = Array.from(
+        document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+      ).find((element) => element.textContent === 'Test command');
+      if (!leaf) throw new Error('Missing overflow command');
+      expect(container.contains(leaf)).toBe(false);
+      const click = new MouseEvent('click', {
+        bubbles: true,
+        cancelable: true,
+        detail,
+      });
+      act(() => leaf.dispatchEvent(click));
+      expect(command).toHaveBeenCalledOnce();
+      expect(click.defaultPrevented).toBe(false);
+      expect(document.querySelector('.node-toolbar-overflow')).toBeNull();
+      expect(mocks.ancestorClick).not.toHaveBeenCalled();
+    },
+  );
 
   it('offers Question percentage scale and keeps font editing exclusive to Text', () => {
     render({
