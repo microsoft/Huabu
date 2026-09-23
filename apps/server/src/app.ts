@@ -127,6 +127,9 @@ app.register(cors, {
       cb(null, false);
     }
   },
+  // @fastify/cors v11 narrowed its default to the CORS-safelisted methods;
+  // keep the v10 set, since the API uses PUT, PATCH, and DELETE.
+  methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE'],
   credentials: false,
 });
 
