@@ -155,7 +155,14 @@ export function registerHarnessProfileDiscovery({
       };
       const profile = registry.createProfile(
         harness.launchVersion === 1
-          ? { ...common, launchKind: 'acp-harness', harnessId: harness.id }
+          ? {
+              ...common,
+              launchKind: 'acp-harness',
+              harnessId: harness.id,
+              ...(harness.capabilities?.autoApprove === 'supported'
+                ? { options: { autoApprove: true } }
+                : {}),
+            }
           : {
               ...common,
               launchKind: 'acp-command',

@@ -81,24 +81,20 @@ export function createAcpAgentCliRoutes(
         }
         const parsed = acpAgentCliQuerySchema.safeParse(request.query);
         if (!parsed.success) {
-          return reply
-            .status(400)
-            .send({
-              code: 'validation_failed',
-              message: 'Invalid harness catalogue query',
-            });
+          return reply.status(400).send({
+            code: 'validation_failed',
+            message: 'Invalid harness catalogue query',
+          });
         }
         try {
           if (
             parsed.data.profileId &&
             !getAgentProfileRegistry()?.getProfile(parsed.data.profileId)
           ) {
-            return reply
-              .status(404)
-              .send({
-                code: 'profile_not_found',
-                message: 'Agent Profile is unavailable',
-              });
+            return reply.status(404).send({
+              code: 'profile_not_found',
+              message: 'Agent Profile is unavailable',
+            });
           }
           return { agents: await detect(parsed.data.profileId) };
         } catch (error) {

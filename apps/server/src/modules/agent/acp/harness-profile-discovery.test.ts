@@ -168,6 +168,107 @@ describe('automatic ordinary Profile provisioning', () => {
     dispose();
   });
 
+  it.each(['supported', 'unsupported', 'unknown', undefined] as const)(
+    'defaults structured auto-approval only for explicitly supported capabilities (%s)',
+    async (autoApprove) => {
+      const context = setup();
+      context.gateway.discoverHarnesses.mockResolvedValue({
+        harnesses: observation.harnesses.map((harness) => ({
+          ...harness,
+          launchVersion: 1,
+          ...(autoApprove === undefined
+            ? {}
+            : {
+                capabilities: {
+                  autoApprove,
+                  modelOverride: 'unknown',
+                  sessionPersistence: 'unknown',
+                },
+              }),
+        })),
+      });
+      const dispose = context.start();
+      await flush();
+      expect(context.profiles[0]?.launch).toEqual({
+        kind: 'acp-harness',
+        harnessId: 'copilot',
+        options:
+          autoApprove === 'supported' ? { autoApprove: true } : undefined,
+      });
+      dispose();
+    },
+  );
+
+  it('does not inject approval options into compatibility command Profiles', async () => {
+    const context = setup();
+    context.gateway.discoverHarnesses.mockResolvedValue({
+      harnesses: observation.harnesses.map((harness) => ({
+        ...harness,
+        capabilities: {
+          autoApprove: 'supported',
+          modelOverride: 'unknown',
+          sessionPersistence: 'unknown',
+        },
+      })),
+    });
+    const dispose = context.start();
+    await flush();
+    expect(context.profiles[0]?.launch).toEqual({
+      kind: 'acp-command',
+      command: 'copilot --acp',
+    });
+    dispose();
+  });
+
+  it.each([
+    { kind: 'acp-command', command: 'copilot --acp' },
+    { kind: 'acp-harness', harnessId: 'copilot' },
+    {
+      kind: 'acp-harness',
+      harnessId: 'copilot',
+      options: { autoApprove: false },
+    },
+  ] satisfies AgentProfile['launch'][])(
+    'preserves existing automatic launch settings on reconnect: %j',
+    async (launch) => {
+      const context = setup();
+      const existing: AgentProfile = {
+        id: 'existing',
+        alias: 'My Agent',
+        agentletId: 'machine-a',
+        workingDirPath: '/my/work',
+        launch,
+        customData: {
+          discoveredAgent: {
+            version: 1,
+            agentletId: 'machine-a',
+            harnessId: 'copilot',
+          },
+        },
+      };
+      context.profiles.push(existing);
+      const original = structuredClone(existing);
+      context.gateway.discoverHarnesses.mockResolvedValue({
+        harnesses: observation.harnesses.map((harness) => ({
+          ...harness,
+          launchVersion: 1,
+          capabilities: {
+            autoApprove: 'supported',
+            modelOverride: 'unknown',
+            sessionPersistence: 'unknown',
+          },
+        })),
+      });
+      const dispose = context.start();
+      await flush();
+      context.emit({ agentletId: 'machine-a', status: 'connected' });
+      await flush();
+      expect(context.registry.createProfile).not.toHaveBeenCalled();
+      expect(context.profiles).toEqual([original]);
+      dispose();
+    },
+  );
+
   it('allows manual duplicates and isolates different machines', async () => {
     const context = setup(['machine-a', 'machine-b']);
     context.profiles.push({
@@ -215,6 +316,67 @@ describe('automatic ordinary Profile provisioning', () => {
       expect(restored.listProfiles()[0]).toMatchObject({
         id: original.id,
         alias: 'Kept after restart',
+      });
+    } finally {
+      dispose?.();
+      rmSync(storageDir, { recursive: true, force: true });
+    }
+  });
+
+  it('persists the new default and preserves an explicit opt-out after restart', async () => {
+    const storageDir = mkdtempSync(join(tmpdir(), 'huabu-discovery-approval-'));
+    const context = setup();
+    context.gateway.discoverHarnesses.mockResolvedValue({
+      harnesses: observation.harnesses.map((harness) => ({
+        ...harness,
+        launchVersion: 1,
+        capabilities: {
+          autoApprove: 'supported',
+          modelOverride: 'unknown',
+          sessionPersistence: 'unknown',
+        },
+      })),
+    });
+    let dispose: (() => void) | undefined;
+    try {
+      const registry = createAgentProfileRegistry({ storageDir });
+      dispose = registerHarnessProfileDiscovery({
+        gateway: context.gateway,
+        getRegistry: () => registry,
+        log: context.log,
+      });
+      await flush();
+      const profile = registry.listProfiles()[0];
+      if (!profile)
+        throw new Error('Expected an automatically discovered Profile');
+      expect(profile.launch).toEqual({
+        kind: 'acp-harness',
+        harnessId: 'copilot',
+        options: { autoApprove: true },
+      });
+      expect(
+        createAgentProfileRegistry({ storageDir }).getProfile(profile.id),
+      ).toEqual(profile);
+      const edited = registry.patchProfile(profile.id, {
+        expectedRevision: profile.revision ?? 0,
+        launch: {
+          kind: 'acp-harness',
+          harnessId: 'copilot',
+          options: { autoApprove: false },
+        },
+      });
+      expect(profile.launch).toMatchObject({ options: { autoApprove: true } });
+      dispose();
+      const restored = createAgentProfileRegistry({ storageDir });
+      dispose = registerHarnessProfileDiscovery({
+        gateway: context.gateway,
+        getRegistry: () => restored,
+        log: context.log,
+      });
+      await flush();
+      expect(restored.listProfiles()).toEqual([edited]);
+      expect(restored.getProfile(profile.id)?.launch).toMatchObject({
+        options: { autoApprove: false },
       });
     } finally {
       dispose?.();

@@ -129,23 +129,19 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
       if (denyRemote(request, reply)) return;
       const parsed = acpProfileLaunchPreviewBodySchema.safeParse(request.body);
       if (!parsed.success) {
-        return reply
-          .status(400)
-          .send({
-            code: 'validation_failed',
-            message: 'Invalid launch preview request',
-          });
+        return reply.status(400).send({
+          code: 'validation_failed',
+          message: 'Invalid launch preview request',
+        });
       }
       const profile = parsed.data.profileId
         ? getAgentProfileRegistry()?.getProfile(parsed.data.profileId)
         : undefined;
       if (parsed.data.profileId && !profile) {
-        return reply
-          .status(404)
-          .send({
-            code: 'profile_not_found',
-            message: 'Agent Profile is unavailable',
-          });
+        return reply.status(404).send({
+          code: 'profile_not_found',
+          message: 'Agent Profile is unavailable',
+        });
       }
       try {
         const gateway = getAgentletGateway();
@@ -273,12 +269,10 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
       });
     }
     if ((existing.revision ?? 0) !== parsed.data.expectedRevision) {
-      return reply
-        .status(409)
-        .send({
-          code: 'profile_conflict',
-          message: 'Profile changed. Reload it before saving.',
-        });
+      return reply.status(409).send({
+        code: 'profile_conflict',
+        message: 'Profile changed. Reload it before saving.',
+      });
     }
     const launch = parsed.data.launch ?? existing.launch;
     if (
