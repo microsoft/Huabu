@@ -16,11 +16,13 @@ import {
   AlignHorizontalDistributeCenter,
   AlignStartHorizontal,
   AlignStartVertical,
+  Check,
+  ChevronDown,
   Shrink,
   UnfoldVertical,
   Ungroup,
 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
@@ -29,7 +31,9 @@ import { useCloseOnEscape } from '@/hooks/useCloseOnEscape';
 import { Button } from './Button';
 import { cn } from './cn';
 import { ColorPicker, type ColorPreset } from './ColorPicker';
+import { DropdownMenu, DropdownMenuItem } from './DropdownMenu';
 import { FLOATING_CHROME_PROPS } from './floatingChrome';
+import { Popover } from './Popover';
 import {
   Select as BaseSelect,
   type SelectOption as BaseSelectOption,
@@ -61,7 +65,7 @@ export const FLOATING_TOOLBAR_CLASS =
 
 /** Shared surface chrome for compact popovers opened from a toolbar. */
 export const FLOATING_TOOLBAR_POPOVER_CLASS =
-  'border-edge-default shadow-bottom bg-surface z-50 rounded-lg border px-2 py-1.5';
+  'border-edge-default shadow-bottom bg-surface z-50 rounded-lg border p-2';
 
 // ─── Root ─────────────────────────────────────────────────────────────────────
 
@@ -199,6 +203,8 @@ function Group({ children, className }: GroupProps) {
 // ─── ToolbarSelect ────────────────────────────────────────────────────────────
 
 interface ToolbarSelectProps<T extends string = string> {
+  floating?: boolean;
+  menuClassName?: string;
   options: BaseSelectOption<T>[];
   value: T;
   onChange: (value: T) => void;
@@ -214,6 +220,8 @@ interface ToolbarSelectProps<T extends string = string> {
  * opens upward (top-left).
  */
 function ToolbarSelect<T extends string = string>({
+  floating = false,
+  menuClassName,
   options,
   value,
   onChange,
@@ -221,6 +229,48 @@ function ToolbarSelect<T extends string = string>({
   iconOnly,
   label,
 }: ToolbarSelectProps<T>) {
+  const [open, setOpen] = useState(false);
+  if (floating) {
+    const current = options.find((option) => option.value === value);
+    return (
+      <DropdownMenu
+        floating
+        placement="bottom"
+        open={open}
+        onOpenChange={setOpen}
+        className={menuClassName}
+        trigger={
+          <Button
+            variant="ghost"
+            iconOnly={iconOnly}
+            title={label}
+            aria-label={label}
+            className={className}
+          >
+            {current?.icon}
+            {!iconOnly && <span>{current?.label}</span>}
+            {!iconOnly && <ChevronDown />}
+          </Button>
+        }
+      >
+        {options.map((option) => (
+          <DropdownMenuItem
+            key={option.value}
+            icon={option.icon}
+            disabled={option.disabled}
+            aria-current={option.value === value ? 'true' : undefined}
+            trailing={option.value === value ? <Check size={14} /> : undefined}
+            onClick={() => {
+              onChange(option.value);
+              setOpen(false);
+            }}
+          >
+            {option.label}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenu>
+    );
+  }
   return (
     <div className="flex items-center">
       {label && <span className="text-fg-subtle px-0.5 text-xs">{label}</span>}
@@ -241,6 +291,7 @@ function ToolbarSelect<T extends string = string>({
 // ─── ToolbarColorPicker ───────────────────────────────────────────────────────
 
 interface ToolbarColorPickerProps {
+  floating?: boolean;
   /** Palette of selectable colors. */
   colors: readonly ColorPreset[];
   /**
@@ -270,6 +321,7 @@ interface ToolbarColorPickerProps {
  * Manages its own open/close state and outside-click dismissal.
  */
 function ToolbarColorPicker({
+  floating = false,
   colors,
   value,
   onSelect,
@@ -292,7 +344,7 @@ function ToolbarColorPicker({
     whileElementsMounted: autoUpdate,
   });
 
-  useCloseOnEscape(isOpen, () => setIsOpen(false));
+  useCloseOnEscape(isOpen && !floating, () => setIsOpen(false));
 
   // Resolve the token to a CSS color for the trigger swatch.
   // Legacy hex / CSS keyword passes through unchanged.
@@ -331,6 +383,7 @@ function ToolbarColorPicker({
         iconOnly
         size="sm"
         title={title}
+        aria-expanded={isOpen}
         onClick={(e) => {
           e.stopPropagation();
           setIsOpen(!isOpen);
@@ -344,43 +397,58 @@ function ToolbarColorPicker({
         {children ?? defaultTrigger}
       </Button>
 
-      {isOpen
-        ? createPortal(
-            <>
-              <div
-                role="presentation"
-                className="fixed inset-0 z-40"
-                {...FLOATING_CHROME_PROPS}
-                onClick={(e) => {
-                  e.stopPropagation();
+      {isOpen && floating ? (
+        <Popover
+          reference={refs.domReference.current}
+          onDismiss={() => setIsOpen(false)}
+          className={FLOATING_TOOLBAR_POPOVER_CLASS}
+        >
+          <ColorPicker
+            colors={colors}
+            activeToken={value}
+            onSelect={(token) => {
+              onSelect(token);
+              setIsOpen(false);
+            }}
+          />
+        </Popover>
+      ) : isOpen ? (
+        createPortal(
+          <>
+            <div
+              role="presentation"
+              className="fixed inset-0 z-40"
+              {...FLOATING_CHROME_PROPS}
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsOpen(false);
+              }}
+            />
+            <div
+              ref={refs.setFloating}
+              role="presentation"
+              {...FLOATING_CHROME_PROPS}
+              className={FLOATING_TOOLBAR_POPOVER_CLASS}
+              style={{
+                ...floatingStyles,
+                visibility: isPositioned ? 'visible' : 'hidden',
+              }}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <ColorPicker
+                colors={colors}
+                activeToken={value}
+                onSelect={(t) => {
+                  onSelect(t);
                   setIsOpen(false);
                 }}
               />
-              <div
-                ref={refs.setFloating}
-                role="presentation"
-                {...FLOATING_CHROME_PROPS}
-                className={cn(FLOATING_TOOLBAR_POPOVER_CLASS, 'px-1.5 py-1')}
-                style={{
-                  ...floatingStyles,
-                  visibility: isPositioned ? 'visible' : 'hidden',
-                }}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <ColorPicker
-                  colors={colors}
-                  activeToken={value}
-                  onSelect={(t) => {
-                    onSelect(t);
-                    setIsOpen(false);
-                  }}
-                />
-              </div>
-            </>,
-            document.body,
-          )
-        : null}
+            </div>
+          </>,
+          document.body,
+        )
+      ) : null}
     </div>
   );
 }
@@ -451,6 +519,8 @@ interface ToolbarSizePickerProps {
   autoSize?: {
     /** Which axes are auto-sized when `active`. Defaults to `'height'`. */
     dimensions?: 'height' | 'both';
+    togglePosition?: 'start' | 'end';
+    appearance?: 'grouped' | 'separate';
     active: boolean;
     onToggle: () => void;
   };
@@ -471,7 +541,8 @@ interface ToolbarNumberInputProps {
   ariaLabel: string;
   name: string;
   value: number | null;
-  onApply: (value: number) => void;
+  onApply: (value: number) => number | void;
+  applyUnchanged?: boolean;
   min?: number;
   max?: number;
   step?: number;
@@ -504,6 +575,7 @@ function ToolbarNumberInput({
   name,
   value,
   onApply,
+  applyUnchanged = false,
   min = 1,
   max,
   step = 1,
@@ -517,6 +589,7 @@ function ToolbarNumberInput({
   const isAuto = typeof autoText === 'string';
   const Container: 'div' | 'label' = isAuto ? 'div' : 'label';
   const [text, setText] = useState('');
+  const skipBlurCommit = useRef(false);
 
   useEffect(() => {
     setText(typeof value === 'number' ? String(Math.round(value)) : '');
@@ -547,8 +620,13 @@ function ToolbarNumberInput({
     );
     const next = Math.round(clamped);
     setText(String(next));
-    if (typeof value !== 'number' || next !== Math.round(value)) {
-      onApply(next);
+    if (
+      applyUnchanged ||
+      typeof value !== 'number' ||
+      next !== Math.round(value)
+    ) {
+      const resolved = onApply(next);
+      if (typeof resolved === 'number') setText(String(Math.round(resolved)));
     }
   };
 
@@ -558,56 +636,67 @@ function ToolbarNumberInput({
         'nodrag flex items-center gap-1',
         !unstyled && SIZE_CAPSULE_CLASS,
       )}
-      title={title}
     >
       <span className="text-fg-subtle text-xs" aria-hidden="true">
         {label}
       </span>
       <div className="relative flex items-center">
-        {isAuto ? (
-          <span
-            className={cn(
-              'nodrag inline-flex h-6 w-10 items-center bg-transparent text-xs',
-              endAdornment && 'w-9',
-              inputClassName,
-            )}
-          >
-            <span className="sr-only">{ariaLabel}: </span>
-            {autoText}
-          </span>
-        ) : (
-          <input
-            type="number"
-            name={name}
-            inputMode="numeric"
-            aria-label={ariaLabel}
-            min={min}
-            max={max}
-            step={step}
-            disabled={disabled}
-            value={text}
-            placeholder={typeof value === 'number' ? '' : '—'}
-            onChange={(e) => setText(e.target.value)}
-            onBlur={commit}
-            onMouseDown={(e) => e.stopPropagation()}
-            onKeyDown={(e) => {
-              e.stopPropagation();
-              if (e.key === 'Enter') {
-                commit();
-                (e.target as HTMLInputElement).blur();
-              } else if (e.key === 'Escape') {
-                restore();
-                (e.target as HTMLInputElement).blur();
-              }
-            }}
-            className={cn(
-              SIZE_INPUT_CLASS,
-              endAdornment && 'w-9',
-              disabled && 'cursor-not-allowed opacity-50',
-              inputClassName,
-            )}
-          />
-        )}
+        <Tooltip content={title ?? ariaLabel}>
+          {isAuto ? (
+            <span
+              className={cn(
+                'nodrag inline-flex h-6 w-10 items-center bg-transparent text-xs',
+                endAdornment && 'w-9',
+                inputClassName,
+              )}
+            >
+              <span className="sr-only">{ariaLabel}: </span>
+              {autoText}
+            </span>
+          ) : (
+            <input
+              type="number"
+              name={name}
+              inputMode="numeric"
+              aria-label={ariaLabel}
+              min={min}
+              max={max}
+              step={step}
+              disabled={disabled}
+              value={text}
+              placeholder={typeof value === 'number' ? '' : '—'}
+              onChange={(e) => setText(e.target.value)}
+              onFocus={() => {
+                skipBlurCommit.current = false;
+              }}
+              onBlur={() => {
+                if (!skipBlurCommit.current) commit();
+                skipBlurCommit.current = false;
+              }}
+              onMouseDown={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  skipBlurCommit.current = true;
+                  commit();
+                  (e.target as HTMLInputElement).blur();
+                } else if (e.key === 'Escape') {
+                  e.preventDefault();
+                  skipBlurCommit.current = true;
+                  restore();
+                  (e.target as HTMLInputElement).blur();
+                }
+              }}
+              className={cn(
+                SIZE_INPUT_CLASS,
+                endAdornment && 'w-9',
+                disabled && 'cursor-not-allowed opacity-50',
+                inputClassName,
+              )}
+            />
+          )}
+        </Tooltip>
         {endAdornment && (
           <div className="flex items-center">{endAdornment}</div>
         )}
@@ -654,11 +743,12 @@ function ToolbarSizePicker({
   const autoActive = auto?.active === true;
   const heightIsAuto = autoActive;
   const isBothAxes = auto?.dimensions === 'both';
+  const separateInputs = isBothAxes && auto?.appearance === 'separate';
   const widthIsAuto = autoActive && isBothAxes;
 
   // Auto/fixed toggle rendered as a single icon whose position matches
   // its scope: for single-axis note height it embeds in the H input;
-  // for a frame's both-axes hug it sits *before* the W/H pair as a
+  // for a frame's both-axes hug it sits beside the W/H pair as a
   // size-wide mode control (it governs W and H together, so it can't
   // belong to one dimension's input). The same glyph carries both
   // states — highlighted (info tone) when auto is active, muted when
@@ -700,11 +790,11 @@ function ToolbarSizePicker({
   const widthInput = (
     <ToolbarNumberInput
       label="W"
-      ariaLabel="Width"
+      ariaLabel={t('toolbar.size.width')}
       name="node-width"
       value={width}
       min={minSize}
-      unstyled={isBothAxes}
+      unstyled={isBothAxes && !separateInputs}
       autoText={widthIsAuto ? autoLabel : undefined}
       inputClassName={widthIsAuto ? 'text-fg-muted italic' : undefined}
       onApply={(next) => {
@@ -722,11 +812,11 @@ function ToolbarSizePicker({
   const heightInput = showHeight ? (
     <ToolbarNumberInput
       label="H"
-      ariaLabel="Height"
+      ariaLabel={t('toolbar.size.height')}
       name="node-height"
       value={height}
       min={minSize}
-      unstyled={isBothAxes}
+      unstyled={isBothAxes && !separateInputs}
       autoText={heightIsAuto ? autoLabel : undefined}
       inputClassName={heightIsAuto ? 'text-fg-muted italic' : undefined}
       endAdornment={
@@ -746,17 +836,25 @@ function ToolbarSizePicker({
 
   // Frame hug governs W *and* H together. Wrap W + H + toggle in a
   // single shared capsule (inner inputs transparent) so the trio reads
-  // as one unit and the trailing icon clearly switches the whole
+  // as one unit and the icon clearly switches the whole
   // group's mode. A hairline divider keeps W and H legible inside the
   // shared chip. Single-axis note needs no group — each input is its
   // own capsule and the toggle is embedded in the H input.
   if (isBothAxes) {
     return (
-      <div className={cn('nodrag flex items-center gap-1', SIZE_CAPSULE_CLASS)}>
+      <div
+        className={cn(
+          'nodrag flex items-center',
+          separateInputs ? 'gap-2' : ['gap-1', SIZE_CAPSULE_CLASS],
+        )}
+      >
+        {auto?.togglePosition === 'start' && modeToggle(<Shrink size={12} />)}
         {widthInput}
-        <div className="bg-edge-default h-3.5 w-px" aria-hidden />
+        {!separateInputs && (
+          <div className="bg-edge-default h-3.5 w-px" aria-hidden />
+        )}
         {heightInput}
-        {modeToggle(<Shrink size={12} />)}
+        {auto?.togglePosition !== 'start' && modeToggle(<Shrink size={12} />)}
       </div>
     );
   }
@@ -772,6 +870,8 @@ function ToolbarSizePicker({
 // ─── ToolbarAlignPicker ───────────────────────────────────────────────────────
 
 interface ToolbarAlignPickerProps {
+  floating?: boolean;
+  panelClassName?: string;
   /** Called when the user picks a horizontal or vertical alignment. */
   onAlign: (direction: ToolbarAlignDirection) => void;
   /** Called when the user clicks "Spread Apart". */
@@ -798,6 +898,8 @@ interface ToolbarAlignPickerProps {
  *    selection" placement.
  */
 function ToolbarAlignPicker({
+  floating = false,
+  panelClassName,
   onAlign,
   onSpread,
   title,
@@ -809,7 +911,7 @@ function ToolbarAlignPicker({
   // Close on outside click. Mirrors the dismissal model used by
   // `ToolbarColorPicker` so all toolbar popovers behave identically.
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || floating) return;
     const handler = (e: MouseEvent) => {
       if (
         containerRef.current &&
@@ -820,11 +922,11 @@ function ToolbarAlignPicker({
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, [isOpen]);
+  }, [isOpen, floating]);
 
   // Close on Escape — the popover sits over the canvas, so Escape
   // should dismiss the picker without deselecting nodes.
-  useCloseOnEscape(isOpen, () => setIsOpen(false));
+  useCloseOnEscape(isOpen && !floating, () => setIsOpen(false));
 
   const pick = (direction: ToolbarAlignDirection) => {
     onAlign(direction);
@@ -874,6 +976,62 @@ function ToolbarAlignPicker({
       Icon: AlignEndHorizontal,
     },
   ];
+
+  if (floating) {
+    return (
+      <DropdownMenu
+        floating
+        placement="bottom"
+        open={isOpen}
+        onOpenChange={setIsOpen}
+        className={cn(FLOATING_TOOLBAR_POPOVER_CLASS, panelClassName)}
+        trigger={
+          <Button
+            variant="ghost"
+            iconOnly
+            title={title ?? t('toolbar.align.title')}
+          >
+            <AlignHorizontalDistributeCenter />
+          </Button>
+        }
+      >
+        <div className="flex items-center gap-1">
+          {alignButtons.map(({ direction, title: buttonTitle, Icon }) => (
+            <Fragment key={direction}>
+              {direction === 'top' && (
+                <div
+                  role="separator"
+                  aria-orientation="vertical"
+                  className="bg-edge-default h-4 w-px shrink-0"
+                />
+              )}
+              <Button
+                variant="ghost"
+                iconOnly
+                title={buttonTitle}
+                onClick={() => pick(direction)}
+              >
+                <Icon />
+              </Button>
+            </Fragment>
+          ))}
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            className="bg-edge-default h-4 w-px shrink-0"
+          />
+          <Button
+            variant="ghost"
+            iconOnly
+            title={t('toolbar.align.spreadApart')}
+            onClick={spread}
+          >
+            <Ungroup />
+          </Button>
+        </div>
+      </DropdownMenu>
+    );
+  }
 
   return (
     <div ref={containerRef} className="relative flex items-center">

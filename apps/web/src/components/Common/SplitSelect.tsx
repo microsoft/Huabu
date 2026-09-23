@@ -222,7 +222,10 @@ export function SplitSelect<T extends string = string>({
           onDismiss={handleDismiss}
           anchor={anchor}
           offset={{ x: 0, y: isTop ? -4 : 4 }}
-          className={cn('flex flex-col overflow-hidden py-1', menuClassName)}
+          className={cn(
+            'flex w-max flex-col overflow-hidden py-1',
+            menuClassName,
+          )}
         >
           {options.map((option) => {
             const isSelected = option.value === value;
@@ -241,7 +244,9 @@ export function SplitSelect<T extends string = string>({
                 )}
               >
                 {option.icon && <span className="shrink-0">{option.icon}</span>}
-                <span className="flex-1">{option.label}</span>
+                <span className="min-w-0 flex-1 [overflow-wrap:anywhere] whitespace-normal">
+                  {option.label}
+                </span>
                 {option.shortcut !== null &&
                   option.shortcut !== undefined &&
                   option.shortcut !== '' && (

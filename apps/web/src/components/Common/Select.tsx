@@ -223,7 +223,13 @@ export function Select<T extends string = string>({
           // width instead of one that shrinks to its longest option.
           // The `max-w-*` cap below still lets long descriptions grow
           // the panel up to the ceiling.
-          style={triggerWidth ? { minWidth: triggerWidth } : undefined}
+          style={
+            triggerWidth
+              ? {
+                  minWidth: `min(${triggerWidth}px, 24rem, var(--popover-available-width, calc(100vw - 24px)))`,
+                }
+              : undefined
+          }
           // Cap panel width so long descriptions truncate instead of
           // pushing the dropdown wider than the parent column (e.g.
           // ChatPanel). 24rem leaves room for a useful description
@@ -234,7 +240,7 @@ export function Select<T extends string = string>({
           // option list is longer than the available space, so the
           // bottom rows remain reachable via scroll instead of being
           // clipped off-screen.
-          className="flex max-h-[min(28rem,calc(100vh-1.5rem))] max-w-[min(24rem,calc(100vw-1rem))] flex-col overflow-hidden py-1"
+          className="flex max-h-[min(28rem,calc(100vh-1.5rem))] w-max max-w-[min(24rem,var(--popover-available-width,calc(100vw-24px)))] flex-col overflow-hidden py-1"
         >
           <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
             {options.map((option) => (
@@ -269,7 +275,9 @@ export function Select<T extends string = string>({
                   {option.icon && (
                     <span className="shrink-0">{option.icon}</span>
                   )}
-                  <span className="shrink-0">{option.label}</span>
+                  <span className="min-w-0 [overflow-wrap:anywhere] whitespace-normal">
+                    {option.label}
+                  </span>
                   {option.description && (
                     <Tooltip
                       content={option.description}

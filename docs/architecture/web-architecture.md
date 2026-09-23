@@ -67,6 +67,8 @@ What stays in `apps/web/src/handler/canvasCommand/`:
 
 ## 4. Conventions
 
+Toolbar numeric inputs commit on Enter or blur. Enter suppresses the following blur commit; Escape cancels the draft without applying a value. Inside a Popover, Escape closes the panel without committing the focused draft, while an outside press blurs focused content before dismissal so width, height, Frame counts, and Question scale edits are not lost when the panel unmounts. Inline font-size inputs follow the same commit/cancel rules.
+
 1. **Use the `@/` alias** for cross-directory imports (`@/store/canvasStore`); relative paths only within the same subtree.
 2. **No `.ts` / `.tsx` extensions** in import paths.
 3. **New UI primitives** go in `components/Common/` — check existing ones first (also enforced by [copilot-instructions.md](../../.github/copilot-instructions.md)).

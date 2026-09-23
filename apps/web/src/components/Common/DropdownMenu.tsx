@@ -15,7 +15,7 @@ import { Link } from 'react-router-dom';
 
 import { Button } from './Button';
 import { cn } from './cn';
-import { Popover } from './Popover';
+import { Popover, type PopoverProps } from './Popover';
 
 import type { ButtonHTMLAttributes } from 'react';
 import type { LinkProps } from 'react-router-dom';
@@ -48,7 +48,9 @@ const DropdownMenuItemContent: React.FC<DropdownMenuItemContentProps> = ({
 }) => (
   <>
     {icon && <span className="text-fg-subtle shrink-0">{icon}</span>}
-    <span className="flex-1 text-left">{children}</span>
+    <span className="min-w-0 flex-1 text-left [overflow-wrap:anywhere] whitespace-normal">
+      {children}
+    </span>
     {shortcut && (
       <span className="text-fg-subtle ml-4 shrink-0 text-xs">{shortcut}</span>
     )}
@@ -126,6 +128,8 @@ export const DropdownMenuLink: React.FC<DropdownMenuLinkProps> = ({
 // ─── DropdownMenu (container) ─────────────────────────────────────────────────
 
 type DropdownMenuProps = {
+  floating?: boolean;
+  placement?: PopoverProps['placement'];
   /** The trigger element (typically a `<Button>`). Receives onClick and aria-expanded. */
   trigger: ReactElement<{
     onClick?: (e: React.MouseEvent) => void;
@@ -173,6 +177,8 @@ type DropdownMenuProps = {
  * ```
  */
 export const DropdownMenu: React.FC<DropdownMenuProps> = ({
+  floating = false,
+  placement,
   trigger,
   children,
   className,
@@ -254,6 +260,8 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
       <div ref={triggerRef}>{clonedTrigger}</div>
       {isOpen && (
         <Popover
+          reference={floating ? triggerRef.current : undefined}
+          placement={placement ?? (isRight ? 'bottom-end' : 'bottom-start')}
           position={computePosition()}
           onDismiss={handleDismiss}
           anchor={anchor}
@@ -261,7 +269,7 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
             offset ??
             (opensSideways ? { x: 0, y: 0 } : { x: 0, y: isTop ? -4 : 4 })
           }
-          className={cn('flex flex-col overflow-hidden py-1', className)}
+          className={cn('flex w-max flex-col overflow-hidden py-1', className)}
         >
           {children}
         </Popover>
@@ -309,10 +317,12 @@ export const DropdownMenuSubmenu: React.FC<DropdownMenuSubmenuProps> = ({
   return (
     <div onPointerEnter={openSubmenu} onPointerLeave={scheduleClose}>
       <DropdownMenu
+        floating
+        placement="right-start"
         open={open}
         onOpenChange={setOpen}
         align="right-top"
-        className={cn('min-w-44', className)}
+        className={className}
         trigger={
           <DropdownMenuItem
             aria-haspopup="menu"
