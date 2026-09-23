@@ -160,6 +160,37 @@ describe('Question title delegation', () => {
 });
 
 describe('runPipeline artifact lease lifecycle', () => {
+  it('forwards Space identity to text tasks and keeps failed enrichment retryable', async () => {
+    const harness = deps(vi.fn());
+    harness.generateContentMeta.mockRejectedValueOnce(
+      new Error('External Agent unavailable'),
+    );
+    const result = await runPipeline(
+      {
+        ...request,
+        nodeType: 'text',
+        snapshot: { content: 'Source text' },
+      },
+      ['resolve_input', 'generate_summary', 'build_patch'],
+      undefined,
+      undefined,
+      harness.value,
+    );
+    expect(harness.generateContentMeta).toHaveBeenCalledWith(
+      'Source text',
+      expect.objectContaining({ needSummary: true, needLabel: false }),
+      { canvasId: 'canvas-test' },
+    );
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: 'ENRICH_FAILED',
+        message: 'External Agent unavailable',
+      }),
+    );
+    expect(result.usedCapabilities).not.toContain('generate_summary');
+    expect(result.patch).not.toHaveProperty('summary');
+  });
+
   it('passes the materialized path to extraction and releases after success', async () => {
     const release = vi.fn().mockResolvedValue(undefined);
     const harness = deps(release);

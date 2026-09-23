@@ -118,6 +118,7 @@ describe('generated-first conversation titles', () => {
       await service.initialize('canvas-a', 'thread-a', 'Prompt');
       expect(deps.generate).toHaveBeenCalledExactlyOnceWith(
         'Original first prompt',
+        'canvas-a',
       );
       expect(
         (await service.query('canvas-a', ['thread-a'])).titles['thread-a'],
@@ -154,6 +155,7 @@ describe('generated-first conversation titles', () => {
     await service.initialize('canvas-a', 'thread-a', '# **First** submission');
     expect(deps.generate).toHaveBeenCalledExactlyOnceWith(
       '# **First** submission',
+      'canvas-a',
     );
     expect(getRecord().hostMetadata).toEqual({
       [CONVERSATION_TITLE_METADATA_KEY]: {
@@ -168,7 +170,10 @@ describe('generated-first conversation titles', () => {
       'Later turn',
     );
     expect(deps.generate).toHaveBeenCalledTimes(2);
-    expect(deps.generate).toHaveBeenLastCalledWith('# **First** submission');
+    expect(deps.generate).toHaveBeenLastCalledWith(
+      '# **First** submission',
+      'canvas-a',
+    );
     expect(getRecord().hostMetadata).toEqual({
       [CONVERSATION_TITLE_METADATA_KEY]: {
         title: 'Semantic title',
@@ -299,6 +304,7 @@ describe('generated-first conversation titles', () => {
     await service.initialize('canvas-a', 'thread-a', 'Later prompt');
     expect(deps.generate).toHaveBeenCalledExactlyOnceWith(
       'Original first prompt',
+      'canvas-a',
     );
     metadata('Late ACP');
     await notify('Late ACP');
@@ -357,7 +363,10 @@ describe('generated-first conversation titles', () => {
         'Configured model now',
       );
       expect(deps.generate).toHaveBeenCalledTimes(2);
-      expect(deps.generate).toHaveBeenLastCalledWith('Original first prompt');
+      expect(deps.generate).toHaveBeenLastCalledWith(
+        'Original first prompt',
+        'canvas-a',
+      );
       expect((await restarted.get('canvas-a', 'thread-a')).source).toBe(
         'generated',
       );
@@ -446,6 +455,7 @@ describe('generated-first conversation titles', () => {
     });
     expect(deps.generate).toHaveBeenCalledExactlyOnceWith(
       'Original first prompt',
+      'canvas-a',
     );
   });
 

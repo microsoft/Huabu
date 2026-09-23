@@ -37,7 +37,11 @@ Fresh remote PDFs are localized during preprocessing. Extract downloads the PDF 
 
 Before preprocessing, an agent-authored `web.src` is normalized at the server executor boundary: any canvas-local `.html` file is imported into `.artifacts/` and persisted as a bare artifact key (uploads staged under `.upload/` are reclaimed), while live `http(s)://` and self-contained `data:` URLs remain unchanged; other local extensions are not imported or reclaimed. Input Resolve then maps the artifact key to an absolute local path for extraction, while remote and `data:` sources continue through the URL path.
 
-Enrich runs on the **utility model tier**, not the chat model: `ProviderManager` calls `llmComplete(ctx, { role })` with the `imageLabel` / `frameLabel` / `contentMeta` roles, so labeling / summaries / keywords resolve through the user's utility model (a faster/cheaper model, or — when no utility model is configured — the cheapest eligible model in the chat provider, ultimately falling back to the chat model). See [model-role-routing](../proposals/model-role-routing.md).
+Text enrichment and Frame titles use the configured external default Profile through `ProviderManager` -> `runFunctionalText()` -> an Agenetes ACP Job. Existing prompts and projection/persistence paths remain unchanged. The caller supplies the Space identity; each task uses a separate ACP session without creating a visible Agent Node, reusing a chat session, or recording a conversation in Agenetes. Results are consumed directly from the run event stream with the existing transcript folder. The functional model override takes precedence over the Profile's remembered model; absent both, the harness default applies. Only advertised ACP model controls are used, and functional execution does not write interactive Profile preferences. Custom commands receive no model injection. Unsupported model preferences produce a warning rather than guessed CLI flags.
+
+Missing/deleted/offline Profiles, Agent errors, invalid or incomplete output, and timeouts propagate to the existing `ENRICH_FAILED` diagnostic without marking enrichment capabilities complete. Metadata must include all requested non-empty fields with the expected types; unrequested fields are not applied. Frame titles must be non-empty, single-line, and at most 60 characters. A five-minute task deadline bounds caller waiting and forwards cancellation; an interactive permission request aborts the background task rather than granting permission or waiting for unseen UI. These task instructions are behavioral guidance, not a sandbox. ACP Job process/client reclamation remains deferred, and tasks retain the current idle-suspension behavior.
+
+Image labeling still calls `llmComplete(ctx, { role: 'imageLabel', hasImage: true })` through the existing utility-model routing until the separate multimodal migration. Text tasks never fall back to this built-in path.
 
 ---
 
@@ -103,7 +107,7 @@ The task phases are `queued` (debounce), `blocked` (restore persistence), `runni
 | `dispatcher.ts`       | dirty-field analysis → execution plan                                              |
 | `pipeline.ts`         | ordered stage runner                                                               |
 | `profiles.ts`         | per-node capability registry                                                       |
-| `provider-manager.ts` | single LLM/provider entry (wraps `agent/llm.ts`)                                   |
+| `provider-manager.ts` | Text metadata through external ACP Jobs; transitional built-in image labeling      |
 | `types.ts`            | `Capability` / `NodeContentKind` / `NodePreprocessProfile` (incl. `bodyOwnership`) |
 | `stages/`             | input-resolve · cache-check · extract · normalize · enrich · persist · project     |
 | `loaders/`            | text · pdf · web · office · youtube                                                |

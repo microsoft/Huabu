@@ -88,7 +88,7 @@ export interface ConversationTitleDependencies {
     patch: Record<string, unknown>,
   ) => void;
   firstPrompt: (canvasId: string, threadId: string) => string | undefined;
-  generate: (prompt: string) => Promise<string | undefined>;
+  generate: (prompt: string, canvasId: string) => Promise<string | undefined>;
   notifications: (
     canvasId: string,
     threadId: string,
@@ -115,13 +115,17 @@ const defaults: ConversationTitleDependencies = {
     }
     return undefined;
   },
-  generate: async (prompt) =>
+  generate: async (prompt, canvasId) =>
     (
-      await provider.generateContentMeta(prompt, {
-        needLabel: true,
-        needSummary: false,
-        needKeywords: false,
-      })
+      await provider.generateContentMeta(
+        prompt,
+        {
+          needLabel: true,
+          needSummary: false,
+          needKeywords: false,
+        },
+        { canvasId },
+      )
     )?.label,
   notifications: (canvasId, threadId) =>
     agenetes.notifications(threadId, canvasAcpNamespace(canvasId)),
@@ -132,7 +136,7 @@ const defaults: ConversationTitleDependencies = {
     ),
 };
 
-/** One naming policy with thread and Question storage adapters; never realizes a driver. */
+/** Shared naming policy; only generation invokes a separate functional Agent. */
 export class ConversationTitleService {
   private readonly inFlight = new Map<string, Promise<void>>();
   private readonly subscriptions = new Map<string, symbol>();
@@ -210,7 +214,7 @@ export class ConversationTitleService {
     );
   }
 
-  /** Await durable fallback, not the utility model, before dispatching a turn. */
+  /** Await durable fallback, not title generation, before dispatching a turn. */
   async ensureFallback(
     canvasId: string,
     threadId: string,
@@ -311,7 +315,7 @@ export class ConversationTitleService {
     const prepared = await this.prepare(canvasId, threadId, prompt, expected);
     if (!prepared || !allowLLM || !prepared.firstPrompt.trim()) return;
     const { firstPrompt, question } = prepared;
-    const generated = await this.deps.generate(firstPrompt);
+    const generated = await this.deps.generate(firstPrompt, canvasId);
     // Check the latest source after the await; a manual rename wins even if
     // generation began earlier. Rejected titles are not retained as candidates.
     const title = normalizeConversationTitle(generated);

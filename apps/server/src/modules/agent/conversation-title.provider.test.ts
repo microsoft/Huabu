@@ -8,19 +8,10 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ThreadRecord } from '@agenetes/agenetes';
-import type * as PiCompat from '@earendil-works/pi-ai/compat';
-
 const complete = vi.hoisted(() => vi.fn());
-vi.mock('@earendil-works/pi-ai/compat', async (importOriginal) => ({
-  ...(await importOriginal<typeof PiCompat>()),
-  complete,
-  getEnvApiKey: () => undefined,
-}));
-vi.mock('../../security/secret-store.js', () => ({
-  getSecret: () => 'test-only-key',
-  getPersistedSecret: () => null,
-  setSecret: vi.fn(),
-}));
+const runText = vi.hoisted(() => vi.fn());
+vi.mock('./llm.js', () => ({ llmComplete: complete }));
+vi.mock('./functional-text.js', () => ({ runFunctionalText: runText }));
 
 let tmp: string | undefined;
 afterEach(() => {
@@ -28,19 +19,16 @@ afterEach(() => {
   if (tmp) rmSync(tmp, { recursive: true, force: true });
   vi.resetModules();
   complete.mockReset();
+  runText.mockReset();
 });
 
 describe('conversation naming through canonical ProviderManager routing', () => {
-  it('returns undefined without configuration, retains ACP, then upgrades through inherited global Chat and explicit utility models', async () => {
+  it('retains the accepted title on external failure, then retries through the external text path', async () => {
     tmp = mkdtempSync(join(tmpdir(), 'huabu-title-provider-'));
     vi.stubEnv('HUABU_DATA_DIR', tmp);
-    vi.stubEnv('AZURE_OPENAI_API_KEY', '');
-    vi.stubEnv('AZURE_OPENAI_API_ENDPOINT', '');
-    vi.stubEnv('AZURE_OPENAI_API_DEPLOYMENT_NAME', '');
     vi.resetModules();
     const { ProviderManager } =
       await import('../preprocessing/provider-manager.js');
-    const { setLLMConfig, setUtilityConfig } = await import('./llm.js');
     const { ConversationTitleService } =
       await import('./conversation-title.service.js');
     const provider = new ProviderManager();
@@ -59,13 +47,17 @@ describe('conversation naming through canonical ProviderManager routing', () => 
       },
     };
     const generate = vi.fn(
-      async (prompt: string) =>
+      async (prompt: string, canvasId: string) =>
         (
-          await provider.generateContentMeta(prompt, {
-            needLabel: true,
-            needSummary: false,
-            needKeywords: false,
-          })
+          await provider.generateContentMeta(
+            prompt,
+            {
+              needLabel: true,
+              needSummary: false,
+              needKeywords: false,
+            },
+            { canvasId },
+          )
         )?.label,
     );
     const onError = vi.fn();
@@ -82,53 +74,29 @@ describe('conversation naming through canonical ProviderManager routing', () => 
       notifications: async function* () {},
       onError,
     });
+    runText.mockRejectedValueOnce(
+      new Error('Select a default external Agent Profile in Settings'),
+    );
     await service.initialize('canvas-a', 'thread-a', 'Later prompt');
-    expect(generate).toHaveResolvedWith(undefined);
+    expect(onError).toHaveBeenCalledOnce();
     expect(complete).not.toHaveBeenCalled();
     expect(await service.get('canvas-a', 'thread-a')).toEqual({
       title: 'ACP fallback',
       source: 'acp',
     });
 
-    await setLLMConfig({
-      provider: 'azure-openai',
-      model: 'global-chat',
-      baseUrl: 'https://example.invalid',
-    });
-    await setUtilityConfig({ provider: '' });
-    complete.mockResolvedValue({
-      content: [{ type: 'text', text: '{"label":"Inherited global title"}' }],
-    });
+    runText.mockResolvedValue('{"label":"External title"}');
     await service.initialize('canvas-a', 'thread-a', 'Another later prompt');
-    expect(complete).toHaveBeenCalledTimes(1);
-    expect(complete.mock.calls[0][0]).toMatchObject({
-      id: 'global-chat',
-      provider: 'azure-openai',
-    });
-    expect(JSON.stringify(complete.mock.calls[0][1])).toContain(
-      'Original first prompt',
-    );
-    expect(JSON.stringify(complete.mock.calls[0][1])).not.toContain(
-      'Another later prompt',
-    );
+    expect(runText).toHaveBeenCalledTimes(2);
+    expect(runText.mock.calls[1][0]).toContain('Original first prompt');
+    expect(runText.mock.calls[1][0]).not.toContain('Another later prompt');
     expect(await service.get('canvas-a', 'thread-a')).toEqual({
-      title: 'Inherited global title',
+      title: 'External title',
       source: 'generated',
     });
     expect(record.state.metadata?.sessionInfo?.title).toBe('ACP fallback');
 
-    await setUtilityConfig({
-      provider: 'azure-openai',
-      model: 'explicit-utility',
-      baseUrl: 'https://example.invalid',
-    });
-    await provider.generateContentMeta('Another first prompt', {
-      needLabel: true,
-    });
-    expect(complete.mock.calls[1][0]).toMatchObject({
-      id: 'explicit-utility',
-      provider: 'azure-openai',
-    });
-    expect(onError).not.toHaveBeenCalled();
+    expect(runText.mock.calls[1][1]).toEqual({ canvasId: 'canvas-a' });
+    expect(complete).not.toHaveBeenCalled();
   });
 });
