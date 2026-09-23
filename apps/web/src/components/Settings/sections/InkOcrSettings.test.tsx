@@ -5,6 +5,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { ApiError } from '@/api/_client';
 import en from '@/i18n/resources/en/common.json';
 import zh from '@/i18n/resources/zh-CN/common.json';
 
@@ -195,7 +196,7 @@ describe('InkOcrSettings', () => {
     expect(keyInput().labels?.[0]?.textContent).toBe('API Key');
     expect(endpointInput().value).toBe(environment.endpoint);
     expect(keyInput().value).toBe('');
-    expect(keyInput().placeholder).toBe(en.settings.inkOcr.keepKey);
+    expect(keyInput().placeholder).toBe('Azure Key');
     expect(keyInput().autocomplete).toBe('off');
     expect(container.querySelectorAll('p')).toHaveLength(2);
     expect(container.querySelectorAll('button')).toHaveLength(2);
@@ -343,13 +344,11 @@ describe('InkOcrSettings', () => {
     expect(button(en.actions.save).disabled).toBe(true);
   });
 
-  it('reconciles partial failures without resetting drafts and safely retries', async () => {
-    getInkOcrConfig.mockResolvedValueOnce(unconfigured).mockResolvedValueOnce({
-      ...unconfigured,
-      endpoint: stored.endpoint,
-      endpointSource: 'stored',
-    });
-    putInkOcrConfig.mockRejectedValueOnce(new Error('key write failed'));
+  it('reconciles failed acknowledgements without resetting drafts and safely retries', async () => {
+    getInkOcrConfig
+      .mockResolvedValueOnce(unconfigured)
+      .mockResolvedValueOnce(stored);
+    putInkOcrConfig.mockRejectedValueOnce(new Error('acknowledgement failed'));
     await renderEditor();
     change(endpointInput(), stored.endpoint);
     change(keyInput(), 'retry-key');
@@ -382,8 +381,75 @@ describe('InkOcrSettings', () => {
     expect(container.querySelector('[role="alert"]')).not.toBeNull();
   });
 
+  it('shows safe actionable validation errors without exposing response details', async () => {
+    const guidance =
+      'Endpoint must be an HTTPS resource-root URL on a public Azure host: <resource>.cognitiveservices.azure.com or <region>.api.cognitive.microsoft.com.';
+    putInkOcrConfig.mockRejectedValueOnce(
+      new ApiError(
+        400,
+        {
+          code: 'validation_failed',
+          message: guidance,
+          details: { apiKey: 'secret-response-detail' },
+        },
+        'fallback',
+      ),
+    );
+    await renderEditor();
+    change(endpointInput(), 'https://invalid.example.com');
+    change(keyInput(), 'draft-private-key');
+    await click(en.actions.save);
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+      guidance,
+    );
+    expect(toast).toHaveBeenCalledExactlyOnceWith(guidance, {
+      tone: 'danger',
+    });
+    expect(container.textContent).not.toContain('secret-response-detail');
+    expect(endpointInput().value).toBe('https://invalid.example.com');
+    expect(keyInput().value).toBe('draft-private-key');
+    change(endpointInput(), stored.endpoint);
+    await click(en.actions.save);
+    expect(putInkOcrConfig).toHaveBeenLastCalledWith({
+      endpoint: stored.endpoint,
+      apiKey: 'draft-private-key',
+    });
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(container.querySelector('input')).toBeNull();
+  });
+
+  it.each([
+    new ApiError(
+      500,
+      { code: 'validation_failed', message: 'private-key-in-server-error' },
+      'fallback',
+    ),
+    new ApiError(
+      400,
+      { code: 'other_error', message: 'private-key-in-other-error' },
+      'fallback',
+    ),
+    new TypeError('private-key-in-network-error'),
+  ])(
+    'uses a generic localized failure instead of echoing $message',
+    async (error) => {
+      putInkOcrConfig.mockRejectedValueOnce(error);
+      await renderEditor();
+      change(endpointInput(), stored.endpoint);
+      await click(en.actions.save);
+      expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+        en.settings.inkOcr.saveFailed,
+      );
+      expect(toast).toHaveBeenCalledExactlyOnceWith(
+        en.settings.inkOcr.saveFailed,
+        { tone: 'danger' },
+      );
+      expect(container.textContent).not.toContain(error.message);
+    },
+  );
+
   it.each(['read-only', 'unknown', 'loading', 'error'] as const)(
-    'blocks credential edits but permits endpoint-only saves when readiness is %s',
+    'allows viewing but blocks all OCR edits when readiness is %s',
     async (state) => {
       getInkOcrConfig.mockResolvedValue(stored);
       if (state === 'read-only') {
@@ -399,35 +465,70 @@ describe('InkOcrSettings', () => {
       await renderEditor();
       expect(keyInput().disabled).toBe(true);
       expect(button(en.settings.inkOcr.removeStoredKey).disabled).toBe(true);
-      expect(endpointInput().disabled).toBe(false);
+      expect(endpointInput().disabled).toBe(true);
+      expect(endpointInput().value).toBe(stored.endpoint);
+      expect(button(en.actions.cancel).disabled).toBe(false);
+      expect(container.textContent).toContain(
+        state === 'read-only'
+          ? en.settings.inkOcr.readOnly
+          : en.settings.inkOcr.readinessPending,
+      );
       if (state === 'error') {
         await click(en.settings.inkOcr.retryReadiness);
         expect(readinessState.load).toHaveBeenCalledOnce();
       }
       change(endpointInput(), 'https://other.cognitiveservices.azure.com');
+      expect(button(en.actions.save).disabled).toBe(true);
       await click(en.actions.save);
-      expect(putInkOcrConfig).toHaveBeenCalledExactlyOnceWith({
-        endpoint: 'https://other.cognitiveservices.azure.com',
+      await click(en.settings.inkOcr.removeStoredKey);
+      await act(async () => {
+        container
+          .querySelector('form')
+          ?.dispatchEvent(
+            new Event('submit', { bubbles: true, cancelable: true }),
+          );
       });
+      expect(putInkOcrConfig).not.toHaveBeenCalled();
     },
   );
 
-  it('guards form submission if readiness becomes read-only while editing', async () => {
-    await renderEditor();
-    change(keyInput(), 'private-key');
-    readinessState.readiness = { credentials: { writable: false } };
-    await renderSettings();
-    expect(keyInput().value).toBe('private-key');
-    expect(button(en.actions.save).disabled).toBe(true);
-    await act(async () => {
-      container
-        .querySelector('form')
-        ?.dispatchEvent(
-          new Event('submit', { bubbles: true, cancelable: true }),
-        );
-    });
-    expect(putInkOcrConfig).not.toHaveBeenCalled();
-  });
+  it.each(['endpoint', 'key', 'combined'])(
+    'guards %s drafts if readiness becomes read-only while editing',
+    async (field) => {
+      getInkOcrConfig.mockResolvedValue(stored);
+      await renderEditor();
+      if (field !== 'key') {
+        change(endpointInput(), 'https://other.cognitiveservices.azure.com');
+      }
+      if (field !== 'endpoint') change(keyInput(), 'private-key');
+      readinessState.readiness = { credentials: { writable: false } };
+      await renderSettings();
+      expect(endpointInput().disabled).toBe(true);
+      expect(keyInput().disabled).toBe(true);
+      expect(button(en.settings.inkOcr.removeStoredKey).disabled).toBe(true);
+      expect(button(en.actions.save).disabled).toBe(true);
+      await act(async () => {
+        container
+          .querySelector('form')
+          ?.dispatchEvent(
+            new Event('submit', { bubbles: true, cancelable: true }),
+          );
+      });
+      expect(putInkOcrConfig).not.toHaveBeenCalled();
+      readinessState.readiness = { credentials: { writable: true } };
+      await renderSettings();
+      expect(endpointInput().disabled).toBe(false);
+      expect(keyInput().disabled).toBe(false);
+      expect(button(en.actions.save).disabled).toBe(false);
+      await click(en.actions.save);
+      expect(putInkOcrConfig).toHaveBeenCalledExactlyOnceWith({
+        ...(field !== 'key'
+          ? { endpoint: 'https://other.cognitiveservices.azure.com' }
+          : {}),
+        ...(field !== 'endpoint' ? { apiKey: 'private-key' } : {}),
+      });
+    },
+  );
 
   it('disables edits, duplicate submissions and cancellation while saving', async () => {
     let finish!: (config: InkOcrConfig) => void;

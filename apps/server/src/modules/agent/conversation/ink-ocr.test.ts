@@ -51,7 +51,10 @@ beforeEach(() => {
   fetchMock.mockReset();
   vi.stubGlobal('fetch', fetchMock);
   vi.stubEnv('VISION_KEY', 'private-key');
-  vi.stubEnv('VISION_ENDPOINT', 'https://private-resource.example/');
+  vi.stubEnv(
+    'VISION_ENDPOINT',
+    'https://private-resource.cognitiveservices.azure.com/',
+  );
 });
 
 afterEach(() => {
@@ -73,13 +76,28 @@ describe('Ink OCR configuration', () => {
   });
 
   it.each([
-    ['', 'https://private-resource.example/'],
+    ['', 'https://private-resource.cognitiveservices.azure.com/'],
     ['private-key', ''],
     ['private-key', 'not-a-url'],
     ['private-key', 'http://private-resource.example/'],
     ['private-key', 'https://user:pass@private-resource.example/'],
     ['private-key', 'https://private-resource.example/?secret=value'],
     ['private-key', 'https://private-resource.example/#fragment'],
+    ['private-key', 'https://gateway.example/'],
+    ['private-key', 'https://127.0.0.1/'],
+    ['private-key', 'https://private-resource.cognitiveservices.azure.cn/'],
+    [
+      'private-key',
+      'https://private-resource.cognitiveservices.azure.com:8443/',
+    ],
+    [
+      'private-key',
+      'https://private-resource.cognitiveservices.azure.com/path',
+    ],
+    [
+      'private-key',
+      'https://private-resource.cognitiveservices.azure.com.evil.example/',
+    ],
   ])('rejects unsafe or partial configuration (%#)', async (key, endpoint) => {
     vi.stubEnv('VISION_KEY', key);
     vi.stubEnv('VISION_ENDPOINT', endpoint);
@@ -96,6 +114,18 @@ describe('Ink OCR configuration', () => {
 });
 
 describe('Ink OCR response validation', () => {
+  it('posts to a public regional endpoint with the default HTTPS port', async () => {
+    vi.stubEnv(
+      'VISION_ENDPOINT',
+      'https://eastus.api.cognitive.microsoft.com:443',
+    );
+    fetchMock.mockResolvedValue(response());
+    expect(await recognizeInk(params)).toBeDefined();
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      'https://eastus.api.cognitive.microsoft.com/computervision/imageanalysis:analyze?api-version=2024-02-01&features=read',
+    );
+  });
+
   it('posts the PNG once and preserves ordered lines and confidence', async () => {
     fetchMock.mockResolvedValue(
       Response.json({
@@ -123,7 +153,7 @@ describe('Ink OCR response validation', () => {
     });
     const [url, options] = fetchMock.mock.calls[0] ?? [];
     expect(String(url)).toBe(
-      'https://private-resource.example/computervision/imageanalysis:analyze?api-version=2024-02-01&features=read',
+      'https://private-resource.cognitiveservices.azure.com/computervision/imageanalysis:analyze?api-version=2024-02-01&features=read',
     );
     expect(options).toMatchObject({
       method: 'POST',

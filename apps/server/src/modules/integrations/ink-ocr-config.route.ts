@@ -49,19 +49,22 @@ const inkOcrConfigRoutes: FastifyPluginAsync = async (app) => {
           'Forbidden: Ink OCR configuration requires owner authorization',
       });
     }
-    const parsed = inkOcrConfigUpdateSchema.safeParse(request.body);
-    if (!parsed.success) {
-      return reply.code(400).send({
-        message:
-          parsed.error.issues[0]?.message ?? 'Invalid Ink OCR configuration',
-        code: 'validation_failed',
-      });
-    }
-    if (parsed.data.apiKey !== undefined && !isSecretStoreWritable()) {
+    if (!isSecretStoreWritable()) {
       return reply.code(409).send({
         message:
-          'Credential storage is read-only. Configure secure credential storage before saving an API key.',
+          'Credential storage is read-only. Configure secure credential storage before saving Ink OCR settings.',
         code: 'credential_store_read_only',
+      });
+    }
+    const parsed = inkOcrConfigUpdateSchema.safeParse(request.body);
+    if (!parsed.success) {
+      // Unknown-key messages echo caller-controlled property names.
+      const issue = parsed.error.issues.find(
+        (item) => item.code !== 'unrecognized_keys',
+      );
+      return reply.code(400).send({
+        message: issue?.message ?? 'Invalid Ink OCR configuration',
+        code: 'validation_failed',
       });
     }
     try {
@@ -73,7 +76,7 @@ const inkOcrConfigRoutes: FastifyPluginAsync = async (app) => {
       );
       return reply.code(500).send({
         message:
-          'Unable to fully save Ink OCR configuration. Reload settings before retrying.',
+          'Unable to save Ink OCR configuration. Reload settings before retrying.',
         code: 'ink_ocr_config_write_failed',
       });
     }

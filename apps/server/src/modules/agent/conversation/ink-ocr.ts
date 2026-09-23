@@ -75,11 +75,13 @@ function readConfiguration(): Configuration {
   try {
     const { key, endpoint } = resolveInkOcrConfiguration();
     if (!key && !endpoint) return { outcome: 'disabled' };
-    if (!key || !inkOcrEndpointSchema.safeParse(endpoint).success || !endpoint)
-      return { outcome: 'config_error' };
+    const parsedEndpoint = inkOcrEndpointSchema.safeParse(endpoint);
+    if (!key || !parsedEndpoint.success) return { outcome: 'config_error' };
     const url = new URL(
       'computervision/imageanalysis:analyze',
-      endpoint.endsWith('/') ? endpoint : `${endpoint}/`,
+      parsedEndpoint.data.endsWith('/')
+        ? parsedEndpoint.data
+        : `${parsedEndpoint.data}/`,
     );
     url.searchParams.set('api-version', API_VERSION);
     url.searchParams.set('features', 'read');

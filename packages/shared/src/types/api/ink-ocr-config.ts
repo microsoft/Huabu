@@ -3,26 +3,16 @@
 
 import { z } from 'zod';
 
-/** Azure AI Vision resource endpoint, not a generic OCR or LLM API URL. */
+/** Direct Azure public-cloud resource or regional endpoint, without an API path. */
 export const inkOcrEndpointSchema = z
   .string()
   .trim()
   .min(1)
   .max(2048)
-  .refine((value) => {
-    try {
-      const url = new URL(value);
-      return (
-        url.protocol === 'https:' &&
-        !url.username &&
-        !url.password &&
-        !value.includes('?') &&
-        !value.includes('#')
-      );
-    } catch {
-      return false;
-    }
-  }, 'Use an HTTPS Azure AI Vision resource endpoint without credentials, query, or fragment');
+  .regex(
+    /^https:\/\/[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.(?:cognitiveservices\.azure\.com|api\.cognitive\.microsoft\.com)(?::443)?\/?$/i,
+    'Use an HTTPS Azure public-cloud resource root endpoint under cognitiveservices.azure.com or api.cognitive.microsoft.com, without credentials, query, fragment, or a nondefault port',
+  );
 
 const configSourceSchema = z.enum(['stored', 'environment', 'none']);
 

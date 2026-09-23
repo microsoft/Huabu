@@ -5,6 +5,7 @@ import { Key, Trash2 } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { ApiError } from '@/api/_client';
 import { getInkOcrConfig, putInkOcrConfig } from '@/api/inkOcr';
 import { Button } from '@/components/Common/Button';
 import { TextInput } from '@/components/Common/TextInput';
@@ -29,9 +30,9 @@ export function InkOcrSettings() {
   const [loadFailed, setLoadFailed] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [saving, setSaving] = useState(false);
-  const [saveFailed, setSaveFailed] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const savingRef = useRef(false);
-  const credentialWritesEnabled = useDeploymentReadinessStore(
+  const configWritesEnabled = useDeploymentReadinessStore(
     (state) =>
       state.readiness?.credentials.writable === true &&
       !state.loading &&
@@ -65,16 +66,12 @@ export function InkOcrSettings() {
   }, [loadAttempt]);
 
   async function save(update: InkOcrConfigUpdate) {
-    if (
-      savingRef.current ||
-      !config ||
-      ('apiKey' in update && !credentialWritesEnabled)
-    ) {
+    if (savingRef.current || !config || !configWritesEnabled) {
       return;
     }
     savingRef.current = true;
     setSaving(true);
-    setSaveFailed(false);
+    setSaveError(null);
     try {
       const next = await putInkOcrConfig(update);
       setConfig(next);
@@ -84,10 +81,16 @@ export function InkOcrSettings() {
       setApiKey('');
       setExpanded(false);
       toast(t('settings.inkOcr.saved'), { tone: 'success' });
-    } catch {
-      setSaveFailed(true);
-      toast(t('settings.inkOcr.saveFailed'), { tone: 'danger' });
-      // A combined update can partially persist. Refresh status, not drafts.
+    } catch (error) {
+      const message =
+        error instanceof ApiError &&
+        error.status === 400 &&
+        error.code === 'validation_failed'
+          ? error.message
+          : t('settings.inkOcr.saveFailed');
+      setSaveError(message);
+      toast(message, { tone: 'danger' });
+      // Persistence may succeed before acknowledgement fails. Refresh status, not drafts.
       try {
         setConfig(await getInkOcrConfig());
       } catch {
@@ -102,9 +105,7 @@ export function InkOcrSettings() {
   const endpointChanged = endpoint.trim() !== (config?.endpoint ?? '');
   const keyChanged = apiKey.trim().length > 0;
   const canSave =
-    !saving &&
-    (endpointChanged || keyChanged) &&
-    (!keyChanged || credentialWritesEnabled);
+    !saving && configWritesEnabled && (endpointChanged || keyChanged);
 
   function saveChanges() {
     if (!canSave) return;
@@ -119,7 +120,7 @@ export function InkOcrSettings() {
     setApiKey('');
     setEndpoint(config?.endpoint ?? '');
     setExpanded(false);
-    setSaveFailed(false);
+    setSaveError(null);
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
@@ -205,7 +206,7 @@ export function InkOcrSettings() {
                       ? t('settings.inkOcr.environmentEndpoint')
                       : undefined
                   }
-                  disabled={saving}
+                  disabled={saving || !configWritesEnabled}
                   autoComplete="off"
                   spellCheck={false}
                   className="w-full"
@@ -226,17 +227,13 @@ export function InkOcrSettings() {
                     value={apiKey}
                     onChange={(event) => setApiKey(event.target.value)}
                     onKeyDown={handleKeyDown}
-                    placeholder={
-                      config.keySource === 'none'
-                        ? t('settings.apiKey')
-                        : t('settings.inkOcr.keepKey')
-                    }
+                    placeholder={t('settings.inkOcr.apiKeyPlaceholder')}
                     title={
                       config.keySource === 'environment'
                         ? t('settings.inkOcr.environmentKey')
                         : undefined
                     }
-                    disabled={saving || !credentialWritesEnabled}
+                    disabled={saving || !configWritesEnabled}
                     autoComplete="off"
                     className="w-full min-w-0 flex-1"
                     wrapperClassName="min-w-0 flex-1"
@@ -249,7 +246,7 @@ export function InkOcrSettings() {
                       size="sm"
                       aria-label={t('settings.inkOcr.removeStoredKey')}
                       title={t('settings.inkOcr.removeStoredKey')}
-                      disabled={saving || !credentialWritesEnabled}
+                      disabled={saving || !configWritesEnabled}
                       onClick={() => void save({ apiKey: null })}
                     >
                       <Trash2 size={14} aria-hidden />
@@ -260,7 +257,7 @@ export function InkOcrSettings() {
             </SettingRow>
             <SettingRow>
               <SettingControl className="flex flex-col gap-3">
-                {!credentialWritesEnabled ? (
+                {!configWritesEnabled ? (
                   <p className="text-fg-muted text-xs">
                     {readinessUnknown
                       ? t('settings.inkOcr.readinessPending')
@@ -278,9 +275,9 @@ export function InkOcrSettings() {
                     {t('settings.inkOcr.retryReadiness')}
                   </Button>
                 ) : null}
-                {saveFailed ? (
+                {saveError ? (
                   <p role="alert" className="text-danger text-xs">
-                    {t('settings.inkOcr.saveFailed')}
+                    {saveError}
                   </p>
                 ) : null}
                 <div className="flex items-center justify-end gap-1.5">

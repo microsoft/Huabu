@@ -1,7 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -13,6 +19,7 @@ import { inkOcrConfigSchema } from '@huabu/shared';
 import {
   getInkOcrConfig,
   resolveInkOcrConfiguration,
+  setInkOcrConfig,
 } from './ink-ocr-config.js';
 import integrationsRoutes from './integrations.route.js';
 import { EnvironmentSecretStore } from '../../security/environment-secret-store.js';
@@ -37,8 +44,45 @@ vi.mock('../../security/secret-store.js', () => ({
 }));
 
 const url = '/api/integrations/ink-ocr/config';
+const oldEndpoint = 'https://old.cognitiveservices.azure.com/';
+const newEndpoint = 'https://new.cognitiveservices.azure.com/';
 let app: FastifyInstance;
 let dataDir: string;
+
+function storeRecord(endpoint: string | null, apiKey: string | null): void {
+  secrets.set(
+    SECRET_IDS.inkOcrConfig,
+    JSON.stringify({ version: 1, endpoint, apiKey }),
+  );
+}
+
+function storeLegacy(): string {
+  const raw = JSON.stringify({ endpoint: oldEndpoint });
+  writeFileSync(join(dataDir, 'ink-ocr-config.json'), raw);
+  secrets.set(SECRET_IDS.inkOcrApiKey, 'old-private-key');
+  return raw;
+}
+
+function deferred() {
+  let resolve!: () => void;
+  let reject!: (reason: Error) => void;
+  const promise = new Promise<void>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+function pauseNextWrite() {
+  const started = deferred();
+  const completion = deferred();
+  setSecret.mockImplementationOnce(async (id: string, value: string) => {
+    started.resolve();
+    await completion.promise;
+    secrets.set(id, value);
+  });
+  return { started: started.promise, completion };
+}
 
 beforeEach(async () => {
   dataDir = mkdtempSync(join(tmpdir(), 'huabu-ocr-config-'));
@@ -84,13 +128,13 @@ describe('Azure Ink OCR settings', () => {
       method: 'PUT',
       url,
       payload: {
-        endpoint: ' https://stored.example/ ',
+        endpoint: ' https://stored.cognitiveservices.azure.com/ ',
         apiKey: ' stored-private-key ',
       },
     });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
-      endpoint: 'https://stored.example/',
+      endpoint: 'https://stored.cognitiveservices.azure.com/',
       endpointSource: 'stored',
       keySource: 'stored',
       hasStoredKey: true,
@@ -98,29 +142,32 @@ describe('Azure Ink OCR settings', () => {
     });
     expect(response.body).not.toContain('stored-private-key');
     expect(setSecret).toHaveBeenCalledWith(
-      SECRET_IDS.inkOcrApiKey,
-      'stored-private-key',
+      SECRET_IDS.inkOcrConfig,
+      JSON.stringify({
+        version: 1,
+        endpoint: 'https://stored.cognitiveservices.azure.com/',
+        apiKey: 'stored-private-key',
+      }),
     );
-    expect(
-      JSON.parse(readFileSync(join(dataDir, 'ink-ocr-config.json'), 'utf8')),
-    ).toEqual({
-      endpoint: 'https://stored.example/',
-    });
+    expect(existsSync(join(dataDir, 'ink-ocr-config.json'))).toBe(false);
     await app.inject({
       method: 'PUT',
       url,
-      payload: { endpoint: 'https://replacement.example/' },
+      payload: { endpoint: 'https://replacement.cognitiveservices.azure.com/' },
     });
     expect(resolveInkOcrConfiguration()).toEqual({
-      endpoint: 'https://replacement.example/',
+      endpoint: 'https://replacement.cognitiveservices.azure.com/',
       key: 'stored-private-key',
     });
-    expect(setSecret).toHaveBeenCalledTimes(1);
+    expect(setSecret).toHaveBeenCalledTimes(2);
   });
 
   it('restores environment fallbacks on removal without deleting the environment or unrelated settings', async () => {
     vi.stubEnv('VISION_KEY', 'environment-private-key');
-    vi.stubEnv('VISION_ENDPOINT', 'https://environment.example/');
+    vi.stubEnv(
+      'VISION_ENDPOINT',
+      'https://environment.cognitiveservices.azure.com/',
+    );
     expect(getInkOcrConfig()).toMatchObject({
       keySource: 'environment',
       endpointSource: 'environment',
@@ -131,7 +178,7 @@ describe('Azure Ink OCR settings', () => {
       method: 'PUT',
       url,
       payload: {
-        endpoint: 'https://stored.example/',
+        endpoint: 'https://stored.cognitiveservices.azure.com/',
         apiKey: 'stored-private-key',
       },
     });
@@ -152,7 +199,7 @@ describe('Azure Ink OCR settings', () => {
       payload: { endpoint: null },
     });
     expect(reset.json()).toMatchObject({
-      endpoint: 'https://environment.example/',
+      endpoint: 'https://environment.cognitiveservices.azure.com/',
       endpointSource: 'environment',
     });
     expect(process.env.VISION_KEY).toBe('environment-private-key');
@@ -191,19 +238,76 @@ describe('Azure Ink OCR settings', () => {
     { endpoint: 'https://example.com/?token=private' },
     { endpoint: 'https://example.com/#private' },
     { endpoint: 'invalid' },
+    { endpoint: 'https://gateway.example/' },
+    { endpoint: 'https://resource.cognitiveservices.azure.com.evil.example/' },
+    { endpoint: 'https://resource.cognitiveservices.azure.com:8443/' },
+    { endpoint: 'https://resource.cognitiveservices.azure.com/api' },
     { apiKey: ' ' },
     { apiKey: 5 },
     { apiKey: 'a'.repeat(4097) },
     { endpoint: `https://example.com/${'a'.repeat(2048)}` },
     {},
     { provider: 'baidu' },
+    { 'private-key': 'private-value' },
   ])('rejects malformed settings (%#)', async (payload) => {
     const response = await app.inject({ method: 'PUT', url, payload });
     expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({
+      message: expect.any(String),
+      code: 'validation_failed',
+    });
     expect(setSecret).not.toHaveBeenCalled();
   });
 
-  it('disables key mutation on a read-only store but allows non-secret endpoint updates', async () => {
+  it('returns actionable endpoint guidance without echoing credentials', async () => {
+    const response = await app.inject({
+      method: 'PUT',
+      url,
+      payload: {
+        endpoint: 'https://private-user:private-password@gateway.example/',
+        apiKey: 'private-api-key',
+      },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({
+      message:
+        'Use an HTTPS Azure public-cloud resource root endpoint under cognitiveservices.azure.com or api.cognitive.microsoft.com, without credentials, query, fragment, or a nondefault port',
+      code: 'validation_failed',
+    });
+    expect(response.body).not.toContain('private-');
+    expect(response.body).not.toContain('gateway.example');
+    expect(setSecret).not.toHaveBeenCalled();
+  });
+
+  it('does not echo unknown property names in validation errors', async () => {
+    const response = await app.inject({
+      method: 'PUT',
+      url,
+      payload: {
+        apiKey: 'private-api-key',
+        'private-property': 'private-value',
+      },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({
+      message: 'Invalid Ink OCR configuration',
+      code: 'validation_failed',
+    });
+    expect(response.body).not.toContain('private-');
+    expect(setSecret).not.toHaveBeenCalled();
+  });
+
+  it('preserves safe missing-update guidance', async () => {
+    const response = await app.inject({ method: 'PUT', url, payload: {} });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({
+      message: 'Provide an endpoint or API key update',
+      code: 'validation_failed',
+    });
+    expect(setSecret).not.toHaveBeenCalled();
+  });
+
+  it('rejects every settings mutation on a read-only store', async () => {
     writable.value = false;
     for (const apiKey of ['private-key', null]) {
       const response = await app.inject({
@@ -217,10 +321,308 @@ describe('Azure Ink OCR settings', () => {
     const endpoint = await app.inject({
       method: 'PUT',
       url,
-      payload: { endpoint: 'https://resource.example/' },
+      payload: { endpoint: 'https://resource.cognitiveservices.azure.com/' },
     });
-    expect(endpoint.statusCode).toBe(200);
+    expect(endpoint.statusCode).toBe(409);
+    const reset = await app.inject({
+      method: 'PUT',
+      url,
+      payload: { endpoint: null, apiKey: null },
+    });
+    expect(reset.statusCode).toBe(409);
+    expect(reset.json().message).toContain('Ink OCR settings');
+    expect(existsSync(join(dataDir, 'ink-ocr-config.json'))).toBe(false);
     expect(setSecret).not.toHaveBeenCalled();
+  });
+
+  describe('Single-record OCR configuration', () => {
+    it('never consults legacy values after a canonical record exists', () => {
+      storeLegacy();
+      storeRecord(newEndpoint, null);
+      writeFileSync(
+        join(dataDir, 'ink-ocr-config.json'),
+        'damaged legacy configuration',
+      );
+      expect(resolveInkOcrConfiguration()).toEqual({
+        endpoint: newEndpoint,
+        key: null,
+      });
+      expect(getInkOcrConfig()).toMatchObject({
+        endpoint: newEndpoint,
+        hasStoredKey: false,
+        keySource: 'none',
+        configured: false,
+      });
+    });
+
+    it('migrates on the first successful patch without changing legacy data', async () => {
+      const legacy = storeLegacy();
+      expect(resolveInkOcrConfiguration()).toEqual({
+        endpoint: oldEndpoint,
+        key: 'old-private-key',
+      });
+      expect(setSecret).not.toHaveBeenCalled();
+      await setInkOcrConfig({ endpoint: newEndpoint });
+      expect(setSecret).toHaveBeenCalledExactlyOnceWith(
+        SECRET_IDS.inkOcrConfig,
+        JSON.stringify({
+          version: 1,
+          endpoint: newEndpoint,
+          apiKey: 'old-private-key',
+        }),
+      );
+      expect(secrets.get(SECRET_IDS.inkOcrApiKey)).toBe('old-private-key');
+      expect(readFileSync(join(dataDir, 'ink-ocr-config.json'), 'utf8')).toBe(
+        legacy,
+      );
+    });
+
+    it.each(['legacy', 'canonical'] as const)(
+      'keeps the complete %s pair during a pending write and on failure, then releases the queue',
+      async (source) => {
+        const legacy = storeLegacy();
+        if (source === 'canonical') storeRecord(oldEndpoint, 'old-private-key');
+        const pending = pauseNextWrite();
+        const update = setInkOcrConfig({
+          endpoint: newEndpoint,
+          apiKey: 'new-private-key',
+        });
+        const rejected = expect(update).rejects.toThrow(
+          'Unable to save Ink OCR configuration',
+        );
+        await pending.started;
+        expect(resolveInkOcrConfiguration()).toEqual({
+          endpoint: oldEndpoint,
+          key: 'old-private-key',
+        });
+        const queued = setInkOcrConfig({ apiKey: 'queued-private-key' });
+        expect(setSecret).toHaveBeenCalledTimes(1);
+        pending.completion.reject(new Error('private-key write failure'));
+        await rejected;
+        await queued;
+        expect(resolveInkOcrConfiguration()).toEqual({
+          endpoint: oldEndpoint,
+          key: 'queued-private-key',
+        });
+        expect(readFileSync(join(dataDir, 'ink-ocr-config.json'), 'utf8')).toBe(
+          legacy,
+        );
+        expect(secrets.get(SECRET_IDS.inkOcrApiKey)).toBe('old-private-key');
+      },
+    );
+
+    it('serializes concurrent patches without losing updates and returns each captured read model', async () => {
+      storeRecord(oldEndpoint, 'old-private-key');
+      const pending = pauseNextWrite();
+      const first = setInkOcrConfig({ endpoint: newEndpoint });
+      await pending.started;
+      const second = setInkOcrConfig({
+        endpoint: null,
+        apiKey: 'new-private-key',
+      });
+      expect(resolveInkOcrConfiguration()).toEqual({
+        endpoint: oldEndpoint,
+        key: 'old-private-key',
+      });
+      expect(setSecret).toHaveBeenCalledTimes(1);
+      pending.completion.resolve();
+      const [firstResult, secondResult] = await Promise.all([first, second]);
+      expect(firstResult).toMatchObject({
+        endpoint: newEndpoint,
+        endpointSource: 'stored',
+        configured: true,
+      });
+      expect(secondResult).toMatchObject({
+        endpoint: null,
+        hasStoredKey: true,
+        configured: false,
+      });
+
+      const endpointPatch = setInkOcrConfig({ endpoint: newEndpoint });
+      const keyPatch = setInkOcrConfig({ apiKey: 'final-private-key' });
+      await Promise.all([endpointPatch, keyPatch]);
+      expect(resolveInkOcrConfiguration()).toEqual({
+        endpoint: newEndpoint,
+        key: 'final-private-key',
+      });
+    });
+
+    it('exposes only complete old or new pairs throughout an asynchronous write', async () => {
+      storeRecord(oldEndpoint, 'old-private-key');
+      const pending = pauseNextWrite();
+      const update = setInkOcrConfig({
+        endpoint: newEndpoint,
+        apiKey: 'new-private-key',
+      });
+      await pending.started;
+      expect(resolveInkOcrConfiguration()).toEqual({
+        endpoint: oldEndpoint,
+        key: 'old-private-key',
+      });
+      pending.completion.resolve();
+      await update;
+      expect(resolveInkOcrConfiguration()).toEqual({
+        endpoint: newEndpoint,
+        key: 'new-private-key',
+      });
+    });
+
+    it('persists explicit nulls that mask both legacy overrides, with environment-only fallback', async () => {
+      const legacy = storeLegacy();
+      await setInkOcrConfig({ endpoint: null, apiKey: null });
+      expect(secrets.get(SECRET_IDS.inkOcrConfig)).toBe(
+        JSON.stringify({ version: 1, endpoint: null, apiKey: null }),
+      );
+      expect(resolveInkOcrConfiguration()).toEqual({
+        endpoint: null,
+        key: null,
+      });
+      expect(getInkOcrConfig()).toMatchObject({
+        keySource: 'none',
+        hasStoredKey: false,
+        configured: false,
+      });
+      vi.stubEnv('VISION_ENDPOINT', newEndpoint);
+      vi.stubEnv('VISION_KEY', 'environment-private-key');
+      expect(resolveInkOcrConfiguration()).toEqual({
+        endpoint: newEndpoint,
+        key: 'environment-private-key',
+      });
+      expect(getInkOcrConfig()).toMatchObject({
+        keySource: 'environment',
+        endpointSource: 'environment',
+        hasStoredKey: false,
+        configured: true,
+      });
+      expect(readFileSync(join(dataDir, 'ink-ocr-config.json'), 'utf8')).toBe(
+        legacy,
+      );
+      expect(secrets.get(SECRET_IDS.inkOcrApiKey)).toBe('old-private-key');
+    });
+
+    it('does not persist an environment fallback during lazy migration', async () => {
+      vi.stubEnv('VISION_KEY', 'environment-private-key');
+      await setInkOcrConfig({ endpoint: newEndpoint });
+      expect(secrets.get(SECRET_IDS.inkOcrConfig)).toBe(
+        JSON.stringify({ version: 1, endpoint: newEndpoint, apiKey: null }),
+      );
+      vi.stubEnv('VISION_KEY', 'rotated-environment-key');
+      expect(resolveInkOcrConfiguration().key).toBe('rotated-environment-key');
+      vi.stubEnv('VISION_KEY', '');
+      expect(getInkOcrConfig().configured).toBe(false);
+    });
+
+    it.each([
+      '',
+      'private-key malformed json',
+      'null',
+      '{}',
+      JSON.stringify({ version: 2, endpoint: null, apiKey: 'private-key' }),
+      JSON.stringify({ version: 1, endpoint: null }),
+      JSON.stringify({ version: 1, endpoint: null, apiKey: 'a'.repeat(4097) }),
+      JSON.stringify({
+        version: 1,
+        endpoint: null,
+        apiKey: 'private-key',
+        extra: true,
+      }),
+      ' '.repeat(32 * 1024 + 1),
+    ])(
+      'fails closed with redacted errors for corrupt canonical records (%#)',
+      async (raw) => {
+        storeLegacy();
+        vi.stubEnv('VISION_ENDPOINT', newEndpoint);
+        vi.stubEnv('VISION_KEY', 'environment-private-key');
+        secrets.set(SECRET_IDS.inkOcrConfig, raw);
+        expect(() => resolveInkOcrConfiguration()).toThrow(
+          new Error('Invalid stored Ink OCR configuration'),
+        );
+        const read = await app.inject({ method: 'GET', url });
+        expect(read.statusCode).toBe(500);
+        expect(read.body).not.toContain('private-key');
+        const write = await app.inject({
+          method: 'PUT',
+          url,
+          payload: { apiKey: null },
+        });
+        expect(write.statusCode).toBe(500);
+        expect(write.body).not.toContain('private-key');
+        expect(setSecret).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([
+      { endpoint: 'https://gateway.example/' },
+      { apiKey: '' },
+      { apiKey: 'a'.repeat(4097) },
+      {},
+    ])('validates direct service callers (%#)', async (update) => {
+      await expect(setInkOcrConfig(update)).rejects.toThrow(
+        new Error('Invalid Ink OCR configuration update'),
+      );
+      expect(setSecret).not.toHaveBeenCalled();
+    });
+
+    it('rejects endpoint-only direct service writes without secure storage', async () => {
+      writable.value = false;
+      await expect(setInkOcrConfig({ endpoint: newEndpoint })).rejects.toThrow(
+        'Credential storage is read-only',
+      );
+      expect(setSecret).not.toHaveBeenCalled();
+    });
+
+    it.each(['environment', 'legacy', 'canonical'] as const)(
+      'blocks outbound fetch for unsafe %s endpoints without leaking configuration',
+      async (source) => {
+        const fetchMock = vi.fn();
+        vi.stubGlobal('fetch', fetchMock);
+        const warn = vi.spyOn(app.log, 'warn');
+        for (const endpoint of [
+          'https://gateway.example/',
+          'https://127.0.0.1/',
+          'https://resource.cognitiveservices.azure.com.evil.example/',
+          'https://resource.privatelink.cognitiveservices.azure.com/',
+          'https://resource.cognitiveservices.azure.us/',
+          'https://resource.cognitiveservices.azure.com:8443/',
+          'https://resource.cognitiveservices.azure.com/api',
+          'https://resource.cognitiveservices.azure.com/?key=private-key',
+        ]) {
+          if (source === 'environment') {
+            vi.stubEnv('VISION_ENDPOINT', endpoint);
+            vi.stubEnv('VISION_KEY', 'private-key');
+            expect(inkOcrConfigSchema.parse(getInkOcrConfig())).toMatchObject({
+              endpoint: null,
+              configured: false,
+            });
+          } else if (source === 'legacy') {
+            writeFileSync(
+              join(dataDir, 'ink-ocr-config.json'),
+              JSON.stringify({ endpoint }),
+            );
+            secrets.set(SECRET_IDS.inkOcrApiKey, 'private-key');
+          } else {
+            storeRecord(endpoint, 'private-key');
+          }
+          expect(
+            await recognizeInk({
+              raster: {
+                png: Buffer.from('fake-image'),
+                width: 10,
+                height: 10,
+                originNodeIds: ['ink'],
+              },
+              logger: app.log,
+            }),
+          ).toBeUndefined();
+        }
+        expect(fetchMock).not.toHaveBeenCalled();
+        expect(warn).toHaveBeenCalledWith(
+          expect.objectContaining({ outcome: 'config_error' }),
+          '[ink-ocr] recognition completed',
+        );
+        expect(JSON.stringify(warn.mock.calls)).not.toContain('private-key');
+      },
+    );
   });
 
   it('surfaces persistence failures without disclosing credential details', async () => {
@@ -298,7 +700,7 @@ describe('Azure Ink OCR settings', () => {
       method: 'PUT',
       url,
       payload: {
-        endpoint: 'https://resource.example/',
+        endpoint: 'https://resource.cognitiveservices.azure.com/',
         apiKey: 'first-private-key',
       },
     });
