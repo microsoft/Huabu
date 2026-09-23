@@ -1,15 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { getAgentDefaults, updateAgentDefaults } from '@/api/agentDefaults';
-import { Button } from '@/components/Common/Button';
 import { Select } from '@/components/Common/Select';
 import { TextInput } from '@/components/Common/TextInput';
 import { SettingRow } from '@/components/Settings/Common/SettingRow';
 import { SettingSection } from '@/components/Settings/Common/SettingSection';
+import { useDebouncedSave } from '@/components/Settings/utils';
 import { useAcpProfilesStore } from '@/store/acpProfilesStore';
 
 import type { AgentDefaults, AgentDefaultsResponse } from '@huabu/shared';
@@ -20,32 +19,81 @@ export function AgentDefaultsSettings() {
   const profilesLoaded = useAcpProfilesStore((state) => state.loaded);
   const profilesError = useAcpProfilesStore((state) => state.error);
   const refresh = useAcpProfilesStore((state) => state.refresh);
+  const loadDefaults = useAcpProfilesStore((state) => state.loadDefaults);
+  const saveDefaults = useAcpProfilesStore((state) => state.saveDefaults);
   const [snapshot, setSnapshot] = useState<AgentDefaultsResponse | null>(null);
   const [draft, setDraft] = useState<AgentDefaults | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const modelId = useId();
+  const active = useRef(false);
+  const editRevision = useRef(0);
 
   useEffect(() => {
-    let active = true;
+    active.current = true;
+    let cancelled = false;
     void refresh();
-    void getAgentDefaults().then(
+    void loadDefaults().then(
       (response) => {
-        if (!active) return;
+        if (cancelled) return;
         setSnapshot(response);
         setDraft(response.defaults);
       },
       (cause: unknown) => {
-        if (active) {
+        if (!cancelled) {
           setError(cause instanceof Error ? cause.message : String(cause));
         }
       },
     );
     return () => {
-      active = false;
+      cancelled = true;
+      active.current = false;
     };
-  }, [refresh]);
+  }, [refresh, loadDefaults]);
+
+  const debouncedSave = useDebouncedSave(
+    async ({
+      config,
+      revision,
+    }: {
+      config: AgentDefaults;
+      revision: number;
+    }) => {
+      if (active.current) {
+        setSaving(true);
+        setError(null);
+      }
+      try {
+        const response = await saveDefaults(config);
+        if (active.current && revision === editRevision.current) {
+          setSnapshot(response);
+          setDraft(response.defaults);
+          setSaved(true);
+        }
+      } catch (cause) {
+        if (active.current && revision === editRevision.current) {
+          setError(
+            cause instanceof Error
+              ? cause.message
+              : t('settings.agentDefaultsSaveFailed'),
+          );
+        }
+      } finally {
+        if (active.current && revision === editRevision.current) {
+          setSaving(false);
+        }
+      }
+    },
+  );
+
+  function edit(config: AgentDefaults, immediate = false) {
+    setDraft(config);
+    setSaved(false);
+    setError(null);
+    debouncedSave({ config, revision: ++editRevision.current });
+    if (immediate) debouncedSave.flush();
+  }
 
   const externalProfiles = profiles.filter((profile) => profile.id !== 'huabu');
   const missing =
@@ -63,11 +111,6 @@ export function AgentDefaultsSettings() {
       label: t('settings.agentDefaultsMissing', { id: draft.profileId }),
     });
   }
-  const changed =
-    draft !== null &&
-    snapshot !== null &&
-    (draft.profileId !== snapshot.defaults.profileId ||
-      draft.functionalModel.trim() !== snapshot.defaults.functionalModel);
   const modelCapability =
     snapshot?.defaults.profileId === draft?.profileId
       ? (snapshot?.modelCapability ?? 'unknown')
@@ -75,28 +118,6 @@ export function AgentDefaultsSettings() {
             ?.launch.kind === 'acp-command'
         ? 'unsupported'
         : 'unknown';
-
-  async function save() {
-    if (!draft) return;
-    setSaving(true);
-    setError(null);
-    setSaved(false);
-    try {
-      const response = await updateAgentDefaults(draft);
-      setSnapshot(response);
-      setDraft(response.defaults);
-      setSaved(true);
-      await refresh();
-    } catch (cause) {
-      setError(
-        cause instanceof Error
-          ? cause.message
-          : t('settings.agentDefaultsSaveFailed'),
-      );
-    } finally {
-      setSaving(false);
-    }
-  }
 
   return (
     <SettingSection title={t('settings.agentDefaultsTitle')}>
@@ -118,11 +139,10 @@ export function AgentDefaultsSettings() {
               options={options}
               value={draft.profileId ?? ''}
               placeholder={t('settings.agentDefaultsUnconfigured')}
-              disabled={saving || !profilesLoaded}
+              disabled={!profilesLoaded}
               onOpen={() => void refresh()}
               onChange={(profileId) => {
-                setDraft({ ...draft, profileId });
-                setSaved(false);
+                edit({ ...draft, profileId }, true);
               }}
             />
           </SettingRow>
@@ -136,10 +156,13 @@ export function AgentDefaultsSettings() {
               value={draft.functionalModel}
               placeholder={t('settings.agentDefaultsInherit')}
               maxLength={500}
-              disabled={saving}
+              disabled={missing || !profilesLoaded}
               onChange={(event) => {
-                setDraft({ ...draft, functionalModel: event.target.value });
-                setSaved(false);
+                edit({ ...draft, functionalModel: event.target.value });
+              }}
+              onBlur={() => {
+                if (error) edit(draft, true);
+                else debouncedSave.flush();
               }}
             />
           </SettingRow>
@@ -171,22 +194,13 @@ export function AgentDefaultsSettings() {
                 {error ?? profilesError?.message}
               </p>
             )}
-            {saved && (
+            {(saving || saved) && (
               <p className="text-success" role="status">
-                {t('settings.agentDefaultsSaved')}
+                {saving
+                  ? t('settings.saving')
+                  : t('settings.agentDefaultsSaved')}
               </p>
             )}
-            <div className="flex justify-end">
-              <Button
-                variant="solid"
-                tone="info"
-                size="sm"
-                disabled={saving || !changed || missing || !profilesLoaded}
-                onClick={() => void save()}
-              >
-                {saving ? t('settings.saving') : t('actions.save')}
-              </Button>
-            </div>
           </div>
         </>
       )}

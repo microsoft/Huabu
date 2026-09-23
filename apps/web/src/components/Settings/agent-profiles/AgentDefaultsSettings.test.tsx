@@ -7,7 +7,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AgentDefaultsSettings } from './AgentDefaultsSettings';
 
-import type { AgentDefaultsResponse, AgentProfileView } from '@huabu/shared';
+import type {
+  AgentDefaults,
+  AgentDefaultsResponse,
+  AgentProfileView,
+} from '@huabu/shared';
 import type { Root } from 'react-dom/client';
 
 const mocks = vi.hoisted(() => ({
@@ -26,13 +30,20 @@ vi.mock('react-i18next', () => ({
       values?.id ? `${key}:${values.id}` : key,
   }),
 }));
-vi.mock('@/api/agentDefaults', () => ({
-  getAgentDefaults: mocks.get,
-  updateAgentDefaults: mocks.update,
-}));
 vi.mock('@/store/acpProfilesStore', () => ({
-  useAcpProfilesStore: (selector: (state: typeof mocks.state) => unknown) =>
-    selector(mocks.state),
+  useAcpProfilesStore: (
+    selector: (
+      state: typeof mocks.state & {
+        loadDefaults: typeof mocks.get;
+        saveDefaults: typeof mocks.update;
+      },
+    ) => unknown,
+  ) =>
+    selector({
+      ...mocks.state,
+      loadDefaults: mocks.get,
+      saveDefaults: mocks.update,
+    }),
 }));
 vi.mock('@/components/Common/Select', () => ({
   Select: ({
@@ -40,15 +51,18 @@ vi.mock('@/components/Common/Select', () => ({
     value,
     onChange,
     ariaLabel,
+    disabled,
   }: {
     options: { value: string; label: string }[];
     value: string;
     onChange: (value: string) => void;
     ariaLabel: string;
+    disabled: boolean;
   }) => (
     <select
       aria-label={ariaLabel}
       value={value}
+      disabled={disabled}
       onChange={(event) => onChange(event.target.value)}
     >
       <option value="">Unconfigured</option>
@@ -71,9 +85,13 @@ const initial: AgentDefaultsResponse = {
 };
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.useFakeTimers();
+  vi.resetAllMocks();
   mocks.get.mockResolvedValue(initial);
-  mocks.update.mockResolvedValue(initial);
+  mocks.update.mockImplementation(async (defaults: AgentDefaults) => ({
+    ...initial,
+    defaults: { ...defaults, functionalModel: defaults.functionalModel.trim() },
+  }));
   mocks.state.profiles = [
     {
       id: 'external',
@@ -89,19 +107,30 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
 });
-afterEach(() => {
-  act(() => root.unmount());
+afterEach(async () => {
+  await act(async () => root.unmount());
   container.remove();
+  vi.useRealTimers();
 });
 
 async function render() {
   await act(async () => root.render(<AgentDefaultsSettings />));
 }
 
-function saveButton(): HTMLButtonElement {
-  return [...container.querySelectorAll('button')].find(
-    (button) => button.textContent === 'actions.save',
-  ) as HTMLButtonElement;
+async function blurModel() {
+  await act(async () => {
+    container
+      .querySelector('input')
+      ?.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+  });
+}
+
+async function selectProfile(value: string) {
+  await act(async () => {
+    const select = container.querySelector('select') as HTMLSelectElement;
+    select.value = value;
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
 }
 
 async function editModel(value: string) {
@@ -123,7 +152,7 @@ describe('Agent defaults Settings', () => {
     expect(container.textContent).toContain(
       'settings.agentDefaultsModelUnknown',
     );
-    expect(saveButton().disabled).toBe(true);
+    expect(container.querySelector('button')).toBeNull();
     expect(mocks.update).not.toHaveBeenCalled();
   });
 
@@ -138,31 +167,28 @@ describe('Agent defaults Settings', () => {
       'settings.agentDefaultsMissing:deleted',
     );
     expect(container.textContent).toContain('settings.agentDefaultsDeleted');
-    expect(saveButton().disabled).toBe(true);
-    const select = container.querySelector('select') as HTMLSelectElement;
-    await act(async () => {
-      select.value = 'external';
-      select.dispatchEvent(new Event('change', { bubbles: true }));
-    });
-    expect(saveButton().disabled).toBe(false);
-    await act(async () => saveButton().click());
+    expect(container.querySelector('input')?.disabled).toBe(true);
+    await selectProfile('external');
     expect(mocks.update).toHaveBeenCalledWith({
       profileId: 'external',
       functionalModel: '',
     });
   });
 
-  it('keeps drafts and displays server save errors', async () => {
-    mocks.update.mockRejectedValue(new Error('disk is read-only'));
+  it('keeps failed drafts, displays errors and retries on blur', async () => {
+    mocks.update.mockRejectedValueOnce(new Error('disk is read-only'));
     await render();
     await editModel('other-model');
-    expect(saveButton().disabled).toBe(false);
-    await act(async () => saveButton().click());
+    await blurModel();
     expect(container.querySelector('[role="alert"]')?.textContent).toBe(
       'disk is read-only',
     );
     expect(container.querySelector('input')?.value).toBe('other-model');
-    expect(saveButton().disabled).toBe(false);
+    expect(container.textContent).not.toContain('settings.agentDefaultsSaved');
+    await blurModel();
+    expect(mocks.update).toHaveBeenCalledTimes(2);
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(container.textContent).toContain('settings.agentDefaultsSaved');
   });
 
   it('saves an empty model as inheritance and reports success', async () => {
@@ -172,7 +198,7 @@ describe('Agent defaults Settings', () => {
     });
     await render();
     await editModel('');
-    await act(async () => saveButton().click());
+    await blurModel();
     expect(mocks.update).toHaveBeenCalledWith({
       profileId: 'external',
       functionalModel: '',
@@ -197,7 +223,8 @@ describe('Agent defaults Settings', () => {
     expect(container.textContent).not.toContain(
       'settings.agentDefaultsDeleted',
     );
-    expect(saveButton().disabled).toBe(true);
+    expect(container.querySelector('select')?.disabled).toBe(true);
+    expect(container.querySelector('input')?.disabled).toBe(true);
   });
 
   it('distinguishes known unsupported model selection from unknown support', async () => {
@@ -218,6 +245,10 @@ describe('Agent defaults Settings', () => {
       modelCapability: 'supported',
     });
     mocks.state.profiles[0].metadata = { cliId: 'copilot' };
+    mocks.update.mockResolvedValue({
+      ...initial,
+      modelCapability: 'unsupported',
+    });
     await render();
     const select = container.querySelector('select') as HTMLSelectElement;
     await act(async () => {
@@ -238,5 +269,80 @@ describe('Agent defaults Settings', () => {
     expect(container.textContent).not.toContain(
       'settings.agentDefaultsModelUnknown',
     );
+  });
+
+  it('debounces model edits for 600 ms and saves only the latest value', async () => {
+    await render();
+    await editModel('first');
+    await act(async () => vi.advanceTimersByTimeAsync(400));
+    await editModel('  latest  ');
+    await act(async () => vi.advanceTimersByTimeAsync(599));
+    expect(mocks.update).not.toHaveBeenCalled();
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    expect(mocks.update).toHaveBeenCalledExactlyOnceWith({
+      profileId: 'external',
+      functionalModel: '  latest  ',
+    });
+    expect(container.querySelector('input')?.value).toBe('latest');
+  });
+
+  it('flushes pending model edits on blur without another delayed save', async () => {
+    await render();
+    await editModel('latest');
+    await blurModel();
+    await act(async () => vi.advanceTimersByTimeAsync(600));
+    expect(mocks.update).toHaveBeenCalledTimes(1);
+  });
+
+  it('flushes pending model edits when Settings closes', async () => {
+    await render();
+    await editModel('on-close');
+    await act(async () => root.render(null));
+    expect(mocks.update).toHaveBeenCalledExactlyOnceWith({
+      profileId: 'external',
+      functionalModel: 'on-close',
+    });
+  });
+
+  it('selecting a Profile includes pending model edits without a stale delayed write', async () => {
+    mocks.state.profiles.push({ ...mocks.state.profiles[0], id: 'other' });
+    await render();
+    await editModel('new-model');
+    await selectProfile('other');
+    await act(async () => vi.advanceTimersByTimeAsync(600));
+    expect(mocks.update).toHaveBeenCalledExactlyOnceWith({
+      profileId: 'other',
+      functionalModel: 'new-model',
+    });
+  });
+
+  it('does not let an older response replace an edit made during saving', async () => {
+    let finish!: (response: AgentDefaultsResponse) => void;
+    mocks.update.mockImplementationOnce(
+      () =>
+        new Promise<AgentDefaultsResponse>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    await render();
+    await editModel('first');
+    await blurModel();
+    expect(container.textContent).toContain('settings.saving');
+    expect(container.querySelector('input')?.disabled).toBe(false);
+    await editModel('latest');
+    await act(async () =>
+      finish({
+        ...initial,
+        defaults: { profileId: 'external', functionalModel: 'first' },
+      }),
+    );
+    expect(container.querySelector('input')?.value).toBe('latest');
+    expect(container.textContent).not.toContain('settings.agentDefaultsSaved');
+    await act(async () => vi.advanceTimersByTimeAsync(600));
+    expect(mocks.update).toHaveBeenLastCalledWith({
+      profileId: 'external',
+      functionalModel: 'latest',
+    });
+    expect(container.textContent).toContain('settings.agentDefaultsSaved');
   });
 });

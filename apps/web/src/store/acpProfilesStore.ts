@@ -40,12 +40,20 @@
 import { create } from 'zustand';
 
 import { listAcpProfiles } from '@/api/acp';
+import { getAgentDefaults, updateAgentDefaults } from '@/api/agentDefaults';
+import { toast } from '@/components/Common/Toast';
 import { i18n } from '@/i18n';
 
 import type { AcpAgentletStatus, AgentProfileView } from '@/api/acp';
-import type { AgentBinding, AgentDefaults } from '@huabu/shared';
+import type {
+  AgentBinding,
+  AgentDefaults,
+  AgentDefaultsResponse,
+} from '@huabu/shared';
 
 let inFlightRefresh: Promise<void> | null = null;
+let defaultsSaveQueue = Promise.resolve();
+let defaultsRevision = 0;
 
 interface AcpProfilesState {
   /** Every profile the user has created. Empty until the first fetch. */
@@ -74,6 +82,8 @@ interface AcpProfilesState {
   init: () => Promise<void>;
   /** Force a fresh GET. Safe to call concurrently. */
   refresh: () => Promise<void>;
+  loadDefaults: () => Promise<AgentDefaultsResponse>;
+  saveDefaults: (config: AgentDefaults) => Promise<AgentDefaultsResponse>;
 }
 
 export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
@@ -113,8 +123,39 @@ export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
     }
     await get().refresh();
   },
-  refresh: () => {
+  loadDefaults: async () => {
+    await defaultsSaveQueue;
+    return getAgentDefaults();
+  },
+  saveDefaults: (config) => {
+    const request = defaultsSaveQueue.then(async () => {
+      try {
+        const response = await updateAgentDefaults(config);
+        defaultsRevision++;
+        set({ agentDefaults: response.defaults });
+        return response;
+      } catch (error) {
+        // Saves can finish after Settings closes; keep failures visible.
+        toast(
+          error instanceof Error
+            ? error.message
+            : i18n.t('settings.agentDefaultsSaveFailed'),
+          { tone: 'danger' },
+        );
+        throw error;
+      }
+    });
+    // A reported failure must not prevent later edits from being saved.
+    defaultsSaveQueue = request.then(
+      () => {},
+      () => {},
+    );
+    return request;
+  },
+  refresh: async () => {
+    await defaultsSaveQueue;
     if (inFlightRefresh) return inFlightRefresh;
+    const revision = defaultsRevision;
     const request = (async () => {
       set({ loading: true });
       try {
@@ -123,7 +164,9 @@ export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
           profiles: res.profiles,
           selectableProfileIds: res.selectableProfileIds,
           agentlet: res.agentlet,
-          agentDefaults: res.agentDefaults ?? null,
+          ...(revision === defaultsRevision
+            ? { agentDefaults: res.agentDefaults ?? null }
+            : {}),
           loaded: true,
           error: null,
           loading: false,
