@@ -24,8 +24,8 @@
     "unlock": "解锁"
   },
   "moveSelection": {
-    "action": "移动到 Space",
-    "title": "移动到 Space",
+    "action": "移至其他 Space",
+    "title": "移至其他 Space",
     "description": "移动选中的 {{count}} 个节点，包括 Frame 中的后代节点。",
     "selectDestination": "选择目标 Space",
     "createNewDestination": "新建 Space…",
@@ -441,6 +441,7 @@
     "nodeUnavailable": "此节点已不存在"
   },
   "node": {
+    "frameLayout": "布局",
     "untitled": "未命名",
     "rename": "重命名节点",
     "preview": "预览",
@@ -888,6 +889,10 @@
     "invokedSkill": "调用的技能：{{id}}"
   },
   "toolbar": {
+    "more": "更多",
+    "fontSize": "字号",
+    "fontFamily": "字体",
+    "openOriginalUrl": "打开原网址",
     "tools": {
       "select": "选择",
       "pan": "平移",
@@ -912,6 +917,9 @@
       "linkDescription": "在下方粘贴 URL（每行一个）。"
     },
     "size": {
+      "title": "尺寸",
+      "width": "宽度",
+      "height": "高度",
       "switchManual": "切换为手动尺寸",
       "fitSize": "适应内容尺寸",
       "switchFixedHeight": "切换为固定高度",

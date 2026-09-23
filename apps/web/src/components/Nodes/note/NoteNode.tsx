@@ -3,7 +3,7 @@
 
 import { type Node, type NodeProps, useStore } from '@xyflow/react';
 import clsx from 'clsx';
-import { Fullscreen } from 'lucide-react';
+import { Maximize2 } from 'lucide-react';
 import {
   memo,
   useCallback,
@@ -197,7 +197,7 @@ export const NoteNode = memo(
           openPreviewNode(id);
         }}
       >
-        <Fullscreen />
+        <Maximize2 />
       </FloatingToolbar.ActionButton>
     );
 

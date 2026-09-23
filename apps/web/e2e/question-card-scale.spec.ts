@@ -131,6 +131,7 @@ async function select(page: Page, node: Locator) {
   await page.mouse.click(rect.x + rect.width / 2, rect.y + rect.height / 2);
   await expect(node).toHaveClass(/selected/);
   await expect(page.locator('.node-floating-toolbar')).toBeVisible();
+  await page.getByRole('button', { name: 'Size', exact: true }).click();
 }
 
 function scaleInput(page: Page) {
@@ -335,8 +336,20 @@ test('Question toolbar preserves fractional scale, scales the whole card, and re
       .toBeGreaterThanOrEqual(1600);
   }
 
+  await input.fill('175');
+  await input.press('Escape');
+  await expect(input).toHaveCount(0);
+  await page.getByRole('button', { name: 'Size', exact: true }).click();
+  await expect(input).toHaveValue(
+    String(Math.round((INITIAL_FONT / 24) * 100)),
+  );
+  await expectSaved(page, question, INITIAL_WIDTH, INITIAL_FONT);
+
   await input.fill('150');
-  await input.press('Enter');
+  await page.getByRole('button', { name: 'More', exact: true }).click();
+  await expect(input).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Size', exact: true }).click();
   await expect(input).not.toBeFocused();
   await expect(input).toHaveValue('150');
   const scaledWidth = (INITIAL_WIDTH * 36) / INITIAL_FONT;
@@ -384,8 +397,10 @@ test('Question toolbar preserves fractional scale, scales the whole card, and re
     [scaled, 36, '150'],
     [initial, INITIAL_FONT, String(Math.round((INITIAL_FONT / 24) * 100))],
   ] as const) {
+    await page.locator('[data-canvas-root]').focus();
     await page.keyboard.press('ControlOrMeta+z');
     await expectRestored(page, question, expected, font);
+    if (!(await input.isVisible())) await select(page, question);
     await expect(input).toHaveValue(percent);
   }
   for (const [expected, font, percent] of [
@@ -393,8 +408,10 @@ test('Question toolbar preserves fractional scale, scales the whole card, and re
     [reflowed, 36, '150'],
     [resetMetrics, 24, '100'],
   ] as const) {
+    await page.locator('[data-canvas-root]').focus();
     await page.keyboard.press('ControlOrMeta+Shift+z');
     await expectRestored(page, question, expected, font);
+    if (!(await input.isVisible())) await select(page, question);
     await expect(input).toHaveValue(percent);
   }
   expect(await authoredNode(page, text)).toEqual(textBefore);

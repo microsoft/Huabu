@@ -358,7 +358,7 @@ describe('NodeConnectionHandles contract', () => {
         if (!dot) throw new Error(`Missing ${side} HUD dot`);
         const offset = translation(target);
         const position = SIDE_POSITION[side];
-        expect(offset).toEqual(connectionPortOffset(position, zoom, 22));
+        expect(offset).toEqual(connectionPortOffset(position, zoom, 16));
         const boundary = {
           x: (side === 'left' ? 100 : side === 'right' ? 500 : 300) * zoom + 10,
           y: (side === 'top' ? 200 : side === 'bottom' ? 400 : 300) * zoom + 20,
@@ -430,7 +430,7 @@ describe('NodeConnectionHandles contract', () => {
       });
       expect(mocks.updateNodeInternals).toHaveBeenCalledWith(['node']);
       expect(translation(hit('top'))).toEqual(
-        connectionPortOffset(Position.Top, zoom, 22),
+        connectionPortOffset(Position.Top, zoom, 16),
       );
     },
   );

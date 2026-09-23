@@ -3,7 +3,7 @@
 
 import { createRoot, type Root } from 'react-dom/client';
 import { act } from 'react-dom/test-utils';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { Popover } from './Popover';
 
@@ -19,6 +19,102 @@ afterEach(() => {
 });
 
 describe('Popover', () => {
+  it('updates the available width when a coordinate boundary changes', () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    let boundaryWidth = 220;
+    vi.spyOn(container, 'getBoundingClientRect').mockImplementation(
+      () => new DOMRect(40, 20, boundaryWidth, 400),
+    );
+    root = createRoot(container);
+    act(() => {
+      root?.render(
+        <Popover
+          boundary={container}
+          viewportMargin={10}
+          position={{ x: 250, y: 40 }}
+        >
+          <span>Content</span>
+        </Popover>,
+      );
+    });
+    const panel = document.querySelector<HTMLElement>('[data-floating-chrome]');
+    expect(panel?.style.getPropertyValue('--popover-available-width')).toBe(
+      '200px',
+    );
+    boundaryWidth = 160;
+    act(() => window.dispatchEvent(new Event('resize')));
+    expect(panel?.style.getPropertyValue('--popover-available-width')).toBe(
+      '140px',
+    );
+  });
+
+  it('blurs focused content before outside dismissal but not on Escape', async () => {
+    const events: string[] = [];
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        <Popover onDismiss={() => events.push('dismiss')}>
+          <input onBlur={() => events.push('blur')} />
+        </Popover>,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    const input = document.querySelector('input');
+    if (!input) throw new Error('Missing popover input');
+    act(() => input.focus());
+    act(() =>
+      document.body.dispatchEvent(
+        new PointerEvent('pointerdown', { bubbles: true }),
+      ),
+    );
+    expect(events).toEqual(['blur', 'dismiss']);
+    events.length = 0;
+    act(() => input.focus());
+    act(() =>
+      input.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+      ),
+    );
+    expect(events).toEqual(['dismiss']);
+  });
+
+  it('keeps reference presses available and dismisses on outside press or Escape', async () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    const reference = document.createElement('button');
+    document.body.appendChild(reference);
+    const onDismiss = vi.fn();
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        <Popover reference={reference} onDismiss={onDismiss}>
+          <span>Anchored content</span>
+        </Popover>,
+      );
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    reference.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    expect(onDismiss).not.toHaveBeenCalled();
+    document.body.dispatchEvent(
+      new PointerEvent('pointerdown', { bubbles: true }),
+    );
+    expect(onDismiss).toHaveBeenCalledOnce();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    expect(onDismiss).toHaveBeenCalledTimes(2);
+    const panel = document.querySelector(
+      '[data-floating-chrome]',
+    ) as HTMLElement;
+    expect(panel.style.transform).toBe('');
+  });
+
   it('marks its portal root as floating chrome', () => {
     container = document.createElement('div');
     document.body.appendChild(container);

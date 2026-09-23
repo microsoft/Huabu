@@ -1,11 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { Download, Fullscreen, ImageOff } from 'lucide-react';
+import { Download, Maximize2, ImageOff } from 'lucide-react';
 import { lazy, memo, Suspense, useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { resolveArtifactUrl } from '@/api/artifact';
+import { DropdownMenuItem } from '@/components/Common/DropdownMenu';
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
 import { useNodePresentation } from '@/hooks/useNodePresentation';
 import useCanvasStore from '@/store/canvasStore';
@@ -139,27 +140,19 @@ export const PDFNode = memo(
       ? resolveArtifactUrl(data.coverUrl as string, canvasId)
       : (thumbnail ?? undefined);
 
-    const handleDownload = useCallback(
-      (e: React.MouseEvent) => {
-        e.stopPropagation();
-        if (!src) return;
-        const link = document.createElement('a');
-        link.href = resolveArtifactUrl(src, canvasId);
-        link.download = data.label || src.split('/').pop() || 'document.pdf';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-      },
-      [src, data.label, canvasId],
-    );
+    const handleDownload = useCallback(() => {
+      if (!src) return;
+      const link = document.createElement('a');
+      link.href = resolveArtifactUrl(src, canvasId);
+      link.download = data.label || src.split('/').pop() || 'document.pdf';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }, [src, data.label, canvasId]);
 
-    const handleDeleteCover = useCallback(
-      (e: React.MouseEvent) => {
-        e.stopPropagation();
-        updateNodeData(id, { coverUrl: undefined });
-      },
-      [id, updateNodeData],
-    );
+    const handleDeleteCover = useCallback(() => {
+      updateNodeData(id, { coverUrl: undefined });
+    }, [id, updateNodeData]);
 
     const handleThumbnailCapture = useCallback((dataUrl: string) => {
       setThumbnail(dataUrl);
@@ -186,21 +179,19 @@ export const PDFNode = memo(
             openPreviewNode(id);
           }}
         >
-          <Fullscreen />
+          <Maximize2 />
         </FloatingToolbar.ActionButton>
-        <FloatingToolbar.ActionButton
-          title={t('node.download')}
-          onClick={handleDownload}
-        >
-          <Download />
-        </FloatingToolbar.ActionButton>
+      </>
+    );
+    const PDFOverflow = (
+      <>
+        <DropdownMenuItem icon={<Download />} onClick={handleDownload}>
+          {t('node.download')}
+        </DropdownMenuItem>
         {hasCover && (
-          <FloatingToolbar.ActionButton
-            title={t('node.deleteCover')}
-            onClick={handleDeleteCover}
-          >
-            <ImageOff />
-          </FloatingToolbar.ActionButton>
+          <DropdownMenuItem icon={<ImageOff />} onClick={handleDeleteCover}>
+            {t('node.deleteCover')}
+          </DropdownMenuItem>
         )}
       </>
     );
@@ -230,6 +221,7 @@ export const PDFNode = memo(
         type={'pdf'}
         selected={selected}
         actions={missingFileKind ? undefined : PDFActions}
+        overflow={missingFileKind ? undefined : PDFOverflow}
         resizable
         keepAspectRatio={false}
         className={missingFileKind ? undefined : 'bg-surface'}

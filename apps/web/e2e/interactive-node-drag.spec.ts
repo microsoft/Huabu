@@ -58,7 +58,13 @@ async function seed(
   page: Page,
   type: FixtureType,
   zoom: number,
-  { missingSource = false, emptyLabel = false, labelText = '' } = {},
+  {
+    missingSource = false,
+    emptyLabel = false,
+    labelText = '',
+    viewportY = 40,
+    inputMode = 'pen',
+  } = {},
 ) {
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
   await page.route('https://node-drag.example.test/**', (route) =>
@@ -227,18 +233,21 @@ async function seed(
     });
   }
   await page.addInitScript(
-    ({ canvasId, zoom }) => {
+    ({ canvasId, zoom, viewportY, inputMode }) => {
       if (window !== window.top) return;
       localStorage.setItem(
         `huabu.viewport.${canvasId}`,
-        JSON.stringify({ x: 120, y: 40, zoom }),
+        JSON.stringify({ x: 120, y: viewportY, zoom }),
       );
       localStorage.setItem(
         'huabu-sketch-tools',
-        JSON.stringify({ state: { inputModePreference: 'pen' }, version: 0 }),
+        JSON.stringify({
+          state: { inputModePreference: inputMode },
+          version: 0,
+        }),
       );
     },
-    { canvasId, zoom },
+    { canvasId, zoom, viewportY, inputMode },
   );
   await page.goto(`/canvas/${canvasId}`);
   const node = page.locator(`.react-flow__node-${type}`);
@@ -253,6 +262,62 @@ async function seed(
     return (record.state as { nodes: Node[] }).nodes[0];
   }
   return { node, persisted, canvasId };
+}
+
+for (const [zoom, flipped] of [
+  [0.5, false],
+  [1, false],
+  [2, false],
+  [1, true],
+] as const) {
+  test(`compact mouse toolbar clears connection targets at ${zoom} zoom flipped=${flipped}`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const { node } = await seed(page, 'image', zoom, {
+      viewportY: flipped ? -120 : 40,
+    });
+    await node.click();
+    const toolbar = page.locator('.node-floating-toolbar');
+    await expect(toolbar).toBeVisible();
+    await expect(async () => {
+      const boundary = await box(node);
+      const chrome = await box(toolbar);
+      const gap = flipped
+        ? chrome.y - boundary.y - boundary.height
+        : boundary.y - chrome.y - chrome.height;
+      expect(gap).toBeCloseTo(28, 0);
+    }).toPass();
+    const side = flipped ? 'bottom' : 'top';
+    const target = node.locator(
+      `[data-handleid="${side}-source"] [role="button"]`,
+    );
+    const hit = await box(target);
+    expect(hit.width).toBeCloseTo(20, 0);
+    expect(hit.height).toBeCloseTo(20, 0);
+    for (const vertical of [1, 10, 19]) {
+      expect(
+        await page.evaluate(
+          ({ x, y }) =>
+            document
+              .elementFromPoint(x, y)
+              ?.closest('[data-handleid]')
+              ?.getAttribute('data-handleid'),
+          { x: hit.x + 10, y: hit.y + vertical },
+        ),
+      ).toBe(`${side}-source`);
+    }
+    await page.mouse.move(hit.x + 10, hit.y + 10);
+    await page.screenshot({
+      path: testInfo.outputPath(`compact-${zoom}-${flipped}.png`),
+    });
+    await target.click();
+    await expect(
+      page
+        .getByRole('group', { name: 'Create connected node', exact: true })
+        .getByRole('button', { name: 'New note', exact: true }),
+    ).toBeVisible();
+  });
 }
 
 for (const type of ['web', 'pdf', 'question'] as const) {
@@ -395,7 +460,7 @@ for (const type of ['web', 'pdf'] as const) {
       const initial = await persisted();
       const viewport = await readViewportTransform(page);
       const gripBox = await box(grip);
-      expect(gripBox.width).toBeCloseTo(28, 0);
+      expect(gripBox.width).toBeCloseTo(32, 0);
       await expect(node.locator('[data-node-drag-handle]')).toHaveCount(0);
       expect(
         await grip.evaluate((el) => ({
@@ -982,14 +1047,12 @@ for (const type of ['text', 'note'] as const) {
       });
       await node.click({ position: { x: 20, y: 12 } });
       const toolbar = page.locator('.node-floating-toolbar');
-      const current = toolbar.locator(
-        '[data-node-drag-handle][aria-pressed="true"]',
-      );
-      const alternate = toolbar.getByRole('button', {
-        name: 'Ingestion in progress',
-      });
+      const current = toolbar.locator('[data-node-drag-handle]');
+      await toolbar.getByRole('button', { name: 'More', exact: true }).click();
+      const alternate = page.getByRole('menuitem', { name: /Convert to/ });
       await expect(current).toBeEnabled();
       await expect(alternate).toBeDisabled();
+      await page.keyboard.press('Escape');
       const before = await persisted();
       for (const activation of ['click', 'Enter', 'Space']) {
         await current.focus();
@@ -1001,7 +1064,6 @@ for (const type of ['text', 'note'] as const) {
         await expect(node).toContainText(
           'Toolbar drag preserves this content.',
         );
-        await expect(alternate).toBeDisabled();
         const after = await persisted();
         expect(after.id).toBe(before.id);
         expect(after.type).toBe(type);
@@ -1025,11 +1087,9 @@ for (const type of ['text', 'note'] as const) {
     await node.click({ position: { x: 20, y: 12 } });
     await expect(node).toHaveClass(/selected/);
     const toolbar = page.locator('.node-floating-toolbar');
-    await expect(toolbar.locator('[data-node-drag-handle]')).toHaveCount(2);
+    await expect(toolbar.locator('[data-node-drag-handle]')).toHaveCount(1);
     const initial = await persisted();
-    const current = toolbar.locator(
-      '[data-node-drag-handle][aria-pressed="true"]',
-    );
+    const current = toolbar.locator('[data-node-drag-handle]');
     await expect(node).toContainText('Toolbar drag preserves this content.');
     const initialBox = await box(node);
     const viewport = await readViewportTransform(page);
@@ -1048,7 +1108,7 @@ for (const type of ['text', 'note'] as const) {
       await expect(page.locator('[data-canvas-root]')).toBeFocused();
       await expect(node).toHaveClass(/selected/);
       await expect(page.locator('.react-flow__node.selected')).toHaveCount(1);
-      await expect(current).toHaveAttribute('aria-pressed', 'true');
+      await expect(current).toHaveCount(1);
       await expect(node).toContainText('Toolbar drag preserves this content.');
       expect(await box(node)).toEqual(initialBox);
       expect(await readViewportTransform(page)).toBe(viewport);
@@ -1060,18 +1120,11 @@ for (const type of ['text', 'note'] as const) {
       expect(retained.style).toEqual(initial.style);
       expect(retained.data.content).toEqual(initial.data.content);
     }
-    // Both the current and alternate type button move the same whole node.
-    for (const pressed of ['true', 'false']) {
-      const grip = toolbar.locator(
-        `[data-node-drag-handle][aria-pressed="${pressed}"]`,
-      );
-      await assertToolbarDragAndUndo(page, node, grip, persisted, 1);
-      await expect(node).toHaveCount(1);
-    }
+    await assertToolbarDragAndUndo(page, node, current, persisted, 1);
+    await expect(node).toHaveCount(1);
     const alternate = type === 'text' ? 'note' : 'text';
-    await toolbar
-      .locator('[data-node-drag-handle][aria-pressed="false"]')
-      .click();
+    await toolbar.getByRole('button', { name: 'More', exact: true }).click();
+    await page.getByRole('menuitem', { name: /Convert to/ }).click();
     const converted = page.locator(`.react-flow__node-${alternate}`);
     await expect(converted).toHaveClass(/selected/);
     await expect.poll(async () => (await persisted()).type).toBe(alternate);
@@ -1079,9 +1132,8 @@ for (const type of ['text', 'note'] as const) {
     expect((await persisted()).position).toEqual(initial.position);
     expect((await persisted()).data.content).toEqual(initial.data.content);
     // Convert back using a real keyboard activation on the alternate button.
-    await toolbar
-      .locator('[data-node-drag-handle][aria-pressed="false"]')
-      .focus();
+    await toolbar.getByRole('button', { name: 'More', exact: true }).click();
+    await page.getByRole('menuitem', { name: /Convert to/ }).focus();
     await page.keyboard.press('Enter');
     await expect(node).toHaveClass(/selected/);
     await expect.poll(async () => (await persisted()).type).toBe(type);
@@ -1090,9 +1142,8 @@ for (const type of ['text', 'note'] as const) {
     expect((await persisted()).data.content).toEqual(initial.data.content);
     // Space must retain native button activation on the conversion path too.
     for (const expectedType of [alternate, type]) {
-      const toggle = toolbar.locator(
-        '[data-node-drag-handle][aria-pressed="false"]',
-      );
+      await toolbar.getByRole('button', { name: 'More', exact: true }).click();
+      const toggle = page.getByRole('menuitem', { name: /Convert to/ });
       await expect(toggle).toBeEnabled();
       await toggle.focus();
       await page.keyboard.down('Space');
@@ -1171,6 +1222,312 @@ for (const type of ['image', 'video', 'web', 'pdf'] as const) {
   });
 }
 
+test('production size inputs commit outside and cancel with Escape', async ({
+  page,
+}) => {
+  const { node, persisted } = await seed(page, 'image', 1);
+  await node.click();
+  const toolbar = page.locator('.node-floating-toolbar');
+  const sizeButton = toolbar.getByRole('button', { name: 'Size', exact: true });
+  for (const name of ['Width', 'Height']) {
+    await sizeButton.click();
+    const input = page.getByRole('spinbutton', { name, exact: true });
+    const initial = await input.inputValue();
+    const next = String(Number(initial) + 40);
+    await input.fill(next);
+    await input.press('Escape');
+    await expect(page.locator('.node-toolbar-size-panel')).toHaveCount(0);
+    await sizeButton.click();
+    await expect(input).toHaveValue(initial);
+    await input.fill(next);
+    await toolbar.getByRole('button', { name: 'More', exact: true }).click();
+    await expect(page.locator('.node-toolbar-size-panel')).toHaveCount(0);
+    await expect
+      .poll(
+        async () =>
+          (await persisted()).style?.[name === 'Width' ? 'width' : 'height'],
+      )
+      .toBe(Number(next));
+    await page.keyboard.press('Escape');
+    await sizeButton.click();
+    await expect(input).toHaveValue(next);
+    await page.keyboard.press('Escape');
+  }
+});
+
+test('production Text toolbar and font submenu fit desktop and narrow viewports', async ({
+  page,
+}, testInfo) => {
+  const { node, persisted } = await seed(page, 'text', 1);
+  await node.click({ position: { x: 20, y: 12 } });
+  const toolbar = page.locator('.node-floating-toolbar');
+  const fontInput = toolbar.getByRole('spinbutton', {
+    name: 'Font size',
+    exact: true,
+  });
+  const initialFont = await fontInput.inputValue();
+  await fontInput.fill('38');
+  await fontInput.press('Escape');
+  await expect(fontInput).toHaveValue(initialFont);
+  for (const width of [1280, 375, 320]) {
+    await page.setViewportSize({ width, height: 800 });
+    await expect(toolbar).toBeVisible();
+    await expect(async () => {
+      const controls = await toolbar.locator('button').evaluateAll((elements) =>
+        elements.map((element) => {
+          const rect = element.getBoundingClientRect();
+          return {
+            left: rect.left,
+            right: rect.right,
+            width: rect.width,
+            height: rect.height,
+          };
+        }),
+      );
+      for (const control of controls) {
+        expect(control.left).toBeGreaterThanOrEqual(0);
+        expect(control.right).toBeLessThanOrEqual(width);
+        expect(control.height).toBe(32);
+        expect([16, 32]).toContain(control.width);
+      }
+    }).toPass();
+    await toolbar.getByRole('button', { name: 'More', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Font', exact: true }).hover();
+    const submenu = page.locator('.node-toolbar-font-submenu');
+    await expect(submenu).toBeVisible();
+    const bounds = await box(submenu);
+    expect(bounds.x).toBeGreaterThanOrEqual(0);
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(width);
+    await page.screenshot({
+      path: testInfo.outputPath(`text-toolbar-${width}.png`),
+    });
+    await page.getByRole('menuitem', { name: 'Serif', exact: true }).click();
+    await expect(page.locator('.node-toolbar-overflow')).toHaveCount(0);
+    await expect
+      .poll(async () => (await persisted()).data.style?.fontFamily)
+      .toBe('serif');
+  }
+});
+
+test('context toolbars share chrome while edge controls expose readable values', async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const { node, canvasId } = await seed(page, 'image', 1, {
+    inputMode: 'mouse',
+  });
+  await node.click();
+  await node.locator('[data-handleid="right-source"] [role="button"]').click();
+  const picker = page.getByRole('group', {
+    name: 'Create connected node',
+    exact: true,
+  });
+  const pickerToolbar = picker.locator(
+    'xpath=ancestor::*[@data-floating-chrome][1]',
+  );
+  await expect(pickerToolbar).toHaveCSS('border-radius', '12px');
+  await expect(picker.getByRole('button').first()).toHaveCSS('width', '32px');
+  await picker.getByRole('button', { name: 'New note', exact: true }).click();
+  const note = page.locator('.react-flow__node-note');
+  await expect(note).toHaveCount(1);
+  await page.keyboard.press('Escape');
+  await page.mouse.click(1100, 750);
+  const imageBounds = await box(node);
+  const noteBounds = await box(note);
+  await page.mouse.move(
+    Math.min(imageBounds.x, noteBounds.x) - 30,
+    Math.min(imageBounds.y, noteBounds.y) - 30,
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    Math.max(
+      imageBounds.x + imageBounds.width,
+      noteBounds.x + noteBounds.width,
+    ) + 30,
+    Math.max(
+      imageBounds.y + imageBounds.height,
+      noteBounds.y + noteBounds.height,
+    ) + 30,
+    { steps: 14 },
+  );
+  await page.mouse.up();
+  await expect(page.locator('.react-flow__node.selected')).toHaveCount(2);
+  const multi = page.locator('.canvas-context-toolbar');
+  await expect(multi).toBeVisible();
+  await expect(multi).toHaveCSS('height', '46px');
+  await expect(multi).toHaveCSS('border-radius', '12px');
+  await multi.getByRole('button', { name: 'Size', exact: true }).click();
+  const width = page
+    .locator('.node-toolbar-size-panel')
+    .getByRole('spinbutton', { name: 'Width', exact: true });
+  await width.fill('280');
+  await width.press('Enter');
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(`/api/canvas/${canvasId}`);
+      const record = await response.json();
+      return record.state.nodes.every(
+        (entry: Node) => entry.style?.width === 280,
+      );
+    })
+    .toBe(true);
+  await page.keyboard.press('Escape');
+  await multi.getByRole('button', { name: 'Align', exact: true }).click();
+  const align = page.locator('.canvas-context-settings');
+  await expect(align.getByRole('button')).toHaveCount(7);
+  await expect(align.getByRole('separator')).toHaveCount(2);
+  await expect(align.getByRole('button').first()).toHaveCSS('width', '32px');
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape');
+  const edge = page.locator('.react-flow__edge').first();
+  await edge.press('Enter');
+  const toolbar = page.locator('.edge-context-toolbar');
+  await expect(toolbar).toBeVisible();
+  await expect(
+    toolbar.getByRole('button', { name: 'Type', exact: true }),
+  ).toContainText('Bezier');
+  await expect(toolbar.locator('.bg-edge-default')).toHaveCount(0);
+  await toolbar.getByRole('button', { name: 'Type', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Straight', exact: true }).click();
+  await expect(
+    toolbar.getByRole('button', { name: 'Type', exact: true }),
+  ).toContainText('Straight');
+  await expect(page.locator('.node-toolbar-overflow')).toHaveCount(0);
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(`/api/canvas/${canvasId}`);
+      return (await response.json()).state.edges[0].data.edgeStyle.lineType;
+    })
+    .toBe('straight');
+  for (const viewportWidth of [1280, 320]) {
+    await page.setViewportSize({ width: viewportWidth, height: 900 });
+    await expect(toolbar).toBeVisible();
+    await expect
+      .poll(async () => {
+        const bounds = await box(toolbar);
+        return bounds.x >= 0 && bounds.x + bounds.width <= viewportWidth;
+      })
+      .toBe(true);
+    for (const button of await toolbar.locator('.edge-toolbar-value').all()) {
+      expect(
+        await button.evaluate(
+          (element) => element.scrollWidth <= element.clientWidth,
+        ),
+      ).toBe(true);
+    }
+    await page.screenshot({
+      path: testInfo.outputPath(`edge-toolbar-${viewportWidth}.png`),
+    });
+  }
+});
+
+test('stroke selection toolbar preserves emphasized submit and anchored style controls', async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const { node } = await seed(page, 'sketch', 1, { inputMode: 'mouse' });
+  const bounds = await box(node);
+  await page
+    .locator('[data-canvas-main-toolbar]')
+    .getByRole('button', { name: 'More Tools', exact: true })
+    .click();
+  await page.getByRole('option', { name: /Lasso/ }).click();
+  await expect(page.locator('.cursor-crosshair')).toBeVisible();
+  await page.mouse.move(bounds.x - 30, bounds.y - 30);
+  await page.mouse.down();
+  for (const point of [
+    { x: bounds.x + bounds.width + 30, y: bounds.y - 30 },
+    { x: bounds.x + bounds.width + 30, y: bounds.y + bounds.height + 30 },
+    { x: bounds.x - 30, y: bounds.y + bounds.height + 30 },
+    { x: bounds.x - 30, y: bounds.y - 30 },
+  ])
+    await page.mouse.move(point.x, point.y, { steps: 6 });
+  await page.mouse.up();
+  const toolbar = page.locator('.canvas-context-toolbar');
+  await expect(toolbar).toBeVisible();
+  await expect(toolbar).toHaveCSS('height', '46px');
+  await expect(toolbar).toHaveCSS('border-radius', '12px');
+  const submit = toolbar.locator('.canvas-context-submit');
+  await expect(submit).toHaveCSS('width', '32px');
+  await expect(submit).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+  await toolbar.getByRole('button', { name: /Stroke thickness/ }).click();
+  await expect(page.getByRole('slider')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('slider')).toHaveCount(0);
+  await expect(toolbar).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('stroke-toolbar.png') });
+});
+
+test('production Frame layout and independent Hug use real commands', async ({
+  page,
+}, testInfo) => {
+  const { node, persisted } = await seed(page, 'frame', 1);
+  await node.click({ position: { x: 10, y: 10 } });
+  const toolbar = page.locator('.node-floating-toolbar');
+  await toolbar.getByRole('button', { name: 'Layout', exact: true }).click();
+  const panel = page.locator('.node-toolbar-layout');
+  await expect(panel).toHaveCSS('padding', '8px');
+  await expect(panel.getByRole('button')).toHaveCount(4);
+  for (const mode of ['Row', 'Column', 'Grid']) {
+    await panel.getByRole('button', { name: mode, exact: true }).click();
+    await expect
+      .poll(async () => (await persisted()).data.layoutMode)
+      .toBe(mode.toLowerCase());
+  }
+  const rows = panel.getByRole('spinbutton', { name: 'Rows', exact: true });
+  await rows.fill('4');
+  await rows.press('Enter');
+  await expect.poll(async () => (await persisted()).data.gridRowCount).toBe(4);
+  await expect(rows).toHaveValue('4');
+  const columns = panel.getByRole('spinbutton', {
+    name: 'Columns',
+    exact: true,
+  });
+  expect((await box(columns)).y).toBe((await box(rows)).y);
+  await expect(panel.locator('.node-toolbar-layout-counts')).toHaveCSS(
+    'padding-bottom',
+    '0px',
+  );
+  const rowField = await box(rows.locator('xpath=ancestor::label'));
+  const columnField = await box(columns.locator('xpath=ancestor::label'));
+  const firstMode = await box(panel.getByRole('button').first());
+  const lastMode = await box(panel.getByRole('button').last());
+  expect(firstMode.x).toBeCloseTo(rowField.x, 1);
+  expect(lastMode.x + lastMode.width).toBeCloseTo(
+    columnField.x + columnField.width,
+    1,
+  );
+  for (const [input, label] of [
+    [rows, 'Rows'],
+    [columns, 'Columns'],
+  ] as const) {
+    await input.hover();
+    await expect(page.getByRole('tooltip')).toHaveText(label);
+  }
+  await page.mouse.move(1100, 650);
+  await page.screenshot({ path: testInfo.outputPath('frame-layout.png') });
+  await toolbar.getByRole('button', { name: 'Size', exact: true }).click();
+  await expect(panel).toHaveCount(0);
+  const size = page.locator('.node-toolbar-size-panel');
+  await expect(size).toHaveCSS('padding', '8px');
+  const toggle = size.getByRole('button');
+  expect(
+    await toggle.evaluate((element) => !!element.closest('.bg-bg-default')),
+  ).toBe(false);
+  await toggle.click();
+  await expect.poll(async () => (await persisted()).data.sizing).toBe('hug');
+  await expect(size.getByRole('spinbutton')).toHaveCount(0);
+  await toggle.click();
+  await expect.poll(async () => (await persisted()).data.sizing).toBe('manual');
+  await expect(size.getByRole('spinbutton')).toHaveCount(2);
+  await page.keyboard.press('Escape');
+  await expect(size).toHaveCount(0);
+  await toolbar.getByRole('button', { name: 'More', exact: true }).click();
+  await expect(
+    page.getByRole('menuitem', { name: 'Unframe', exact: true }),
+  ).toBeVisible();
+});
+
 async function assertToolbarCancelAndControls(
   page: Page,
   node: Locator,
@@ -1181,8 +1538,10 @@ async function assertToolbarCancelAndControls(
   const initialBox = await box(node);
   // Other toolbar controls remain independent of the draggable type button.
   const toolbar = page.locator('.node-floating-toolbar');
-  const copy = toolbar.getByRole('button', { name: /copy.*link/i });
+  await toolbar.getByRole('button', { name: 'More', exact: true }).click();
+  const copy = page.getByRole('menuitem', { name: /copy.*link/i });
   await copy.click();
+  await expect(copy).toHaveCount(0);
   await expect
     .poll(() => page.evaluate(() => navigator.clipboard.readText()))
     .toContain('/canvas/');

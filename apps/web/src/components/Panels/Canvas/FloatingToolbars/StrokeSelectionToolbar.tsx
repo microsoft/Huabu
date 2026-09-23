@@ -52,6 +52,8 @@ import {
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 import { resolveQuestionAgentPresentation } from '@/utils/questionAgentPresentation';
 
+import './NodeToolbar.css';
+
 import {
   deriveInkSubmissionCandidate,
   groundingOperandsFromContext,
@@ -536,10 +538,12 @@ export const StrokeSelectionToolbar = () => {
       open={open}
       offset={12}
       side="top"
-      className={FLOATING_TOOLBAR_CLASS}
+      className={`${FLOATING_TOOLBAR_CLASS} canvas-context-toolbar`}
     >
       {showStyle && (
         <SketchControls
+          floating
+          colorTriggerClassName="node-toolbar-color"
           color={color}
           size={size}
           touch={isNotMouse}
@@ -586,6 +590,7 @@ export const StrokeSelectionToolbar = () => {
           )}
           <Button
             variant="solid"
+            className="canvas-context-submit"
             shape="pill"
             iconOnly
             size="sm"

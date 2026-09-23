@@ -38,6 +38,17 @@ export const NODE_CONNECTION_CHROME = {
 } as const;
 
 export function nodeToolbarOffset(isNotMouse: boolean): number {
+  if (!isNotMouse) {
+    return (
+      NODE_CONNECTION_CHROME.outwardOffset +
+      Math.max(
+        NODE_CONNECTION_CHROME.hitSize.mouse,
+        NODE_CONNECTION_CHROME.hotSize.mouse,
+      ) /
+        2 +
+      2
+    );
+  }
   const pointer = isNotMouse ? 'touch' : 'mouse';
   const { outwardOffset, hitSize, dotSize, hotSize, toolbarGap } =
     NODE_CONNECTION_CHROME;

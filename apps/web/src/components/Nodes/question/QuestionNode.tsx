@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { MessageSquare } from 'lucide-react';
+import { Maximize2 } from 'lucide-react';
 import { memo, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -306,14 +306,14 @@ export const QuestionNode = memo(
             }
             onClick={() => openInChat(true)}
           >
-            <MessageSquare size={14} />
+            <Maximize2 size={16} />
           </FloatingToolbar.ActionButton>
         ) : (
           <FloatingToolbar.ActionButton
             title={t('node.ask')}
             onClick={() => openInCompose(true)}
           >
-            <MessageSquare size={14} />
+            <Maximize2 size={16} />
           </FloatingToolbar.ActionButton>
         ),
       [isForkPending, canOpenInChat, status, openInChat, openInCompose, t],

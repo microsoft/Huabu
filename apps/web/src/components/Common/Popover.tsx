@@ -2,6 +2,15 @@
 // Licensed under the MIT license.
 
 import {
+  autoUpdate,
+  flip,
+  offset as floatingOffset,
+  shift,
+  size,
+  useFloating,
+  type Placement,
+} from '@floating-ui/react';
+import {
   createContext,
   useCallback,
   useContext,
@@ -58,6 +67,8 @@ function assignRef<T>(ref: Ref<T> | undefined, value: T | null) {
 }
 
 export type PopoverProps = {
+  reference?: Element | null;
+  placement?: Placement;
   /**
    * Screen-space position (e.g. clientX/Y from the triggering event).
    * If omitted, the panel appears at the current mouse-cursor position.
@@ -140,6 +151,8 @@ export type PopoverProps = {
  * - Provides a styled card container (border + shadow + bg) by default.
  */
 export const Popover: FC<PopoverProps> = ({
+  reference,
+  placement = 'bottom',
   position: positionProp,
   onDismiss,
   dismissOnEscape = true,
@@ -160,6 +173,29 @@ export const Popover: FC<PopoverProps> = ({
     null,
   );
   const parentContainer = useContext(PopoverContainerContext);
+  const floating = useFloating({
+    open: Boolean(reference),
+    elements: { reference },
+    placement,
+    strategy: 'fixed',
+    transform: false,
+    middleware: [
+      floatingOffset(8),
+      flip({ padding: viewportMargin, boundary: boundary ?? undefined }),
+      shift({ padding: viewportMargin, boundary: boundary ?? undefined }),
+      size({
+        padding: viewportMargin,
+        boundary: boundary ?? undefined,
+        apply({ availableWidth, elements }) {
+          elements.floating.style.setProperty(
+            '--popover-available-width',
+            `${Math.max(0, availableWidth)}px`,
+          );
+        },
+      }),
+    ],
+    whileElementsMounted: autoUpdate,
+  });
 
   // If no position is provided, snapshot the mouse position on first mount.
   // Using a lazy initializer keeps the side-effect out of the render body.
@@ -175,9 +211,27 @@ export const Popover: FC<PopoverProps> = ({
 
   // Measure the panel and clamp it within the boundary (or viewport)
   const updateClampedPosition = useCallback(() => {
+    if (reference) return;
     const el = containerRef.current;
     if (!el) return;
 
+    const boundaryRect = boundary?.getBoundingClientRect();
+    const bounds = {
+      left: Math.max(0, boundaryRect?.left ?? 0),
+      top: Math.max(0, boundaryRect?.top ?? 0),
+      right: Math.min(
+        window.innerWidth,
+        boundaryRect?.right ?? window.innerWidth,
+      ),
+      bottom: Math.min(
+        window.innerHeight,
+        boundaryRect?.bottom ?? window.innerHeight,
+      ),
+    };
+    el.style.setProperty(
+      '--popover-available-width',
+      `${Math.max(0, bounds.right - bounds.left - viewportMargin * 2)}px`,
+    );
     const panelRect = el.getBoundingClientRect();
     const anchorRight = anchor === 'top-right' || anchor === 'bottom-right';
     const anchorBottom = anchor === 'bottom-left' || anchor === 'bottom-right';
@@ -187,17 +241,6 @@ export const Popover: FC<PopoverProps> = ({
     const rawY = anchorBottom
       ? position.y + oy - panelRect.height
       : position.y + oy;
-
-    // Resolve the clamping region: boundary element rect or full viewport
-    const bounds = boundary
-      ? boundary.getBoundingClientRect()
-      : {
-          left: 0,
-          top: 0,
-          right: window.innerWidth,
-          bottom: window.innerHeight,
-        };
-
     const minX = bounds.left + viewportMargin;
     const minY = bounds.top + viewportMargin;
     const maxX = bounds.right - panelRect.width - viewportMargin;
@@ -207,7 +250,16 @@ export const Popover: FC<PopoverProps> = ({
       x: Math.max(minX, Math.min(rawX, maxX)),
       y: Math.max(minY, Math.min(rawY, maxY)),
     });
-  }, [position.x, position.y, ox, oy, viewportMargin, boundary, anchor]);
+  }, [
+    position.x,
+    position.y,
+    ox,
+    oy,
+    viewportMargin,
+    boundary,
+    anchor,
+    reference,
+  ]);
 
   useLayoutEffect(() => {
     updateClampedPosition();
@@ -216,8 +268,14 @@ export const Popover: FC<PopoverProps> = ({
   // Re-clamp on window resize so the panel stays within bounds
   useEffect(() => {
     window.addEventListener('resize', updateClampedPosition);
-    return () => window.removeEventListener('resize', updateClampedPosition);
-  }, [updateClampedPosition]);
+    if (boundary)
+      window.addEventListener('scroll', updateClampedPosition, true);
+    return () => {
+      window.removeEventListener('resize', updateClampedPosition);
+      if (boundary)
+        window.removeEventListener('scroll', updateClampedPosition, true);
+    };
+  }, [boundary, updateClampedPosition]);
 
   // Re-clamp when the panel's own size changes (e.g. content switches from
   // a loading spinner to a longer list) so it doesn't overflow.
@@ -227,8 +285,9 @@ export const Popover: FC<PopoverProps> = ({
 
     const ro = new ResizeObserver(() => updateClampedPosition());
     ro.observe(el);
+    if (boundary) ro.observe(boundary);
     return () => ro.disconnect();
-  }, [updateClampedPosition]);
+  }, [boundary, updateClampedPosition]);
 
   // Dismiss on outside pointer-down.
   //
@@ -254,11 +313,18 @@ export const Popover: FC<PopoverProps> = ({
       if (!container) return;
       const target = e.target;
       if (!(target instanceof Node)) return;
-      if (container.contains(target)) return;
+      if (container.contains(target) || reference?.contains(target)) return;
       if (target instanceof Element) {
         if (target.closest('[data-popover-dismiss-ignore]')) return;
         const dialog = target.closest('[role="dialog"]');
         if (dialog && !dialogsAtOpen.has(dialog)) return;
+      }
+      const activeElement = document.activeElement;
+      if (
+        activeElement instanceof HTMLElement &&
+        container.contains(activeElement)
+      ) {
+        activeElement.blur();
       }
       onDismiss();
     };
@@ -272,7 +338,7 @@ export const Popover: FC<PopoverProps> = ({
       clearTimeout(timer);
       document.removeEventListener('pointerdown', handlePointerDown);
     };
-  }, [onDismiss]);
+  }, [onDismiss, reference]);
 
   // Dismiss on Escape key
   useEffect(() => {
@@ -300,12 +366,13 @@ export const Popover: FC<PopoverProps> = ({
       <div
         ref={(node) => {
           containerRef.current = node;
+          floating.refs.setFloating(node);
           setContentElement(node);
           assignRef(contentRef, node);
         }}
         {...FLOATING_CHROME_PROPS}
         className={cn(
-          'border-edge-default bg-surface fixed rounded-md border shadow-lg',
+          'border-edge-default bg-surface fixed max-w-[var(--popover-available-width,calc(100vw-24px))] min-w-0 rounded-md border shadow-lg',
           className,
         )}
         style={{
@@ -313,6 +380,12 @@ export const Popover: FC<PopoverProps> = ({
           left: isMeasuring ? 0 : clamped.x,
           top: isMeasuring ? 0 : clamped.y,
           visibility: isMeasuring ? 'hidden' : 'visible',
+          ...(reference
+            ? {
+                ...floating.floatingStyles,
+                visibility: floating.isPositioned ? 'visible' : 'hidden',
+              }
+            : {}),
           zIndex,
         }}
       >

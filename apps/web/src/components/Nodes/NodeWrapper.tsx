@@ -213,6 +213,7 @@ interface NodeWrapperProps {
 
   toolbar?: React.ReactNode;
   actions?: React.ReactNode;
+  overflow?: React.ReactNode;
   overlayContent?: React.ReactNode;
   /** Resolved lightweight text, shared with the node's ordinary content. */
   farLabel?: { title: string; description?: string };
@@ -280,6 +281,7 @@ export const NodeWrapper = memo(
     minHeight,
     toolbar,
     actions,
+    overflow,
     overlayContent,
     farLabel,
     takeover,
@@ -304,6 +306,7 @@ export const NodeWrapper = memo(
     const selectedCount = useCanvasStore((state) =>
       selectSelectedCount(state.nodes),
     );
+    const isBoxSelecting = useStore((state) => state.userSelectionActive);
 
     // Hide the floating toolbar + side "add node" affordances while this
     // node is being dragged, so they don't occlude the drop placeholder
@@ -649,6 +652,8 @@ export const NodeWrapper = memo(
       !data.locked &&
       selectedCount === 1 &&
       !isCollapsedToMark &&
+      !isDragging &&
+      !isBoxSelecting &&
       !multiSelectModifierHeld;
 
     // While a stroke-level (sketch) selection exists, its own toolbar (or,
@@ -722,6 +727,7 @@ export const NodeWrapper = memo(
         {selected &&
           !frameSuppressed &&
           selectedCount === 1 &&
+          !isBoxSelecting &&
           (!isDragging || toolbarGestureActive) &&
           !resizing &&
           !hasStrokeSelection &&
@@ -732,6 +738,7 @@ export const NodeWrapper = memo(
               data={data}
               toolbar={toolbar}
               actions={actions}
+              overflow={overflow}
               dragEnabled={toolbarDragEnabled}
               dragActive={toolbarGestureActive}
               onDragActiveChange={setToolbarGestureActive}
@@ -978,7 +985,7 @@ export const NodeWrapper = memo(
           <NodeConnectionHandles
             nodeId={id}
             hovered={hovered}
-            selected={!!selected && selectedCount === 1}
+            selected={!!selected && selectedCount === 1 && !isBoxSelecting}
             isNotMouse={isNotMouse}
             dragging={isDragging}
             resizing={resizing || frameSuppressed}

@@ -73,11 +73,8 @@ export type Side = 'top' | 'right' | 'bottom' | 'left';
  * painted inside it: the control has to be aimed at, but drawing something
  * this big would crowd a small node.
  *
- * The extra area is spent entirely *outward*, into empty canvas. The press
- * area's inner edge is lined up with the circle's own, so widening the
- * target costs the node body nothing — growing it inward would eat the
- * body the user is trying to click, which is the problem it exists to
- * avoid.
+ * Mouse targets are centered on the circle and remain outside the node.
+ * Touch targets spend the extra area outward to preserve body click space.
  */
 const PORT_HIT_SIZE = NODE_CONNECTION_CHROME.hitSize;
 
@@ -491,10 +488,7 @@ export const NodeConnectionHandles = memo(
     const baseHandleSize =
       NODE_CONNECTION_CHROME.dotSize[isNotMouse ? 'touch' : 'mouse'];
     const hitSize = isNotMouse ? PORT_HIT_SIZE.touch : PORT_HIT_SIZE.mouse;
-    // Distance the press area is shifted outward so its inner edge lands
-    // where the painted circle's already does. Everything the target gained
-    // over the circle therefore sits outside the node.
-    const hitOutwardShift = (hitSize - baseHandleSize) / 2;
+    const hitOutwardShift = isNotMouse ? (hitSize - baseHandleSize) / 2 : 0;
     const inverseZoom = zoom > 0 ? 1 / zoom : 1;
     const dotSize = baseHandleSize * inverseZoom;
     // A connection drag temporarily exposes the hovered target node's dots;
@@ -701,9 +695,7 @@ export const NodeConnectionHandles = memo(
             zoom,
             PORT_OUTWARD_OFFSET + hitOutwardShift,
           );
-          // Press area: bigger than the circle, and pushed outward so the
-          // extra room comes out of empty canvas rather than out of the
-          // node body the user is trying to click.
+          // Both input modes keep the complete press area outside the node.
           const hitStyle: React.CSSProperties = {
             width: hitSize * inverseZoom,
             height: hitSize * inverseZoom,

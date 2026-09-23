@@ -24,8 +24,8 @@
     "unlock": "Unlock"
   },
   "moveSelection": {
-    "action": "Move to Space",
-    "title": "Move to Space",
+    "action": "Move to another Space",
+    "title": "Move to another Space",
     "description": "Move {{count}} selected node(s), including Frame descendants.",
     "selectDestination": "Select destination Space",
     "createNewDestination": "Create new Space…",
@@ -441,6 +441,7 @@
     "nodeUnavailable": "This node is no longer available"
   },
   "node": {
+    "frameLayout": "Layout",
     "untitled": "Untitled",
     "rename": "Rename node",
     "preview": "Preview",
@@ -888,6 +889,10 @@
     "invokedSkill": "Invoked skill: {{id}}"
   },
   "toolbar": {
+    "more": "More",
+    "fontSize": "Font size",
+    "fontFamily": "Font",
+    "openOriginalUrl": "Open original URL",
     "tools": {
       "select": "Select",
       "pan": "Pan",
@@ -912,6 +917,9 @@
       "linkDescription": "Paste URLs below (one per line)."
     },
     "size": {
+      "title": "Size",
+      "width": "Width",
+      "height": "Height",
       "switchManual": "Switch to manual size",
       "fitSize": "Fit size to content",
       "switchFixedHeight": "Switch to fixed height",

@@ -93,6 +93,8 @@ export const SketchNode = memo(
 
     const sketchToolbar = (
       <SketchControls
+        floating
+        colorTriggerClassName="node-toolbar-color"
         color={toolbarColor}
         size={toolbarSize}
         onColorChange={(color) =>

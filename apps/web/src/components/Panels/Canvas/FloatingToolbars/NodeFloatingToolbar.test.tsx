@@ -5,6 +5,10 @@ import { act, type ComponentProps, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import {
+  DropdownMenuItem,
+  DropdownMenuSubmenu,
+} from '@/components/Common/DropdownMenu';
 import { resolveSetQuestionCardScale } from '@/handler/canvasCommand/resolvers/resolveSetQuestionCardScale';
 import { QUESTION_NODE_DEFAULT_FONT_SIZE } from '@/utils/node/nodeFontConfig';
 
@@ -18,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   previewOpen: false,
   connectable: true,
   active: vi.fn(),
+  ancestorClick: vi.fn(),
   canvas: {
     nodes: [] as Node[],
     canvasWrapper: null as HTMLDivElement | null,
@@ -128,14 +133,16 @@ describe('NodeFloatingToolbar type-icon drag surface', () => {
   ) {
     act(() =>
       root.render(
-        <NodeFloatingToolbar
-          id="node"
-          type="video"
-          data={{ type: 'video', src: 'video.webm' }}
-          dragEnabled
-          onDragActiveChange={mocks.active}
-          {...props}
-        />,
+        <div role="presentation" onClick={mocks.ancestorClick}>
+          <NodeFloatingToolbar
+            id="node"
+            type="video"
+            data={{ type: 'video', src: 'video.webm' }}
+            dragEnabled
+            onDragActiveChange={mocks.active}
+            {...props}
+          />
+        </div>,
       ),
     );
   }
@@ -154,23 +161,84 @@ describe('NodeFloatingToolbar type-icon drag surface', () => {
     return button;
   }
 
+  function openPanel(label: string) {
+    const trigger = container.querySelector<HTMLButtonElement>(
+      `[aria-label="${label}"]`,
+    );
+    if (!trigger) throw new Error(`Missing ${label} trigger`);
+    act(() => trigger.click());
+  }
+
+  it.each([
+    { nested: false, detail: 1 },
+    { nested: false, detail: 0 },
+    { nested: true, detail: 1 },
+    { nested: true, detail: 0 },
+  ])(
+    'runs overflow commands before closing without bubbling (nested=$nested, click detail=$detail)',
+    ({ nested, detail }) => {
+      const command = vi.fn(() => {
+        expect(document.querySelector('.node-toolbar-overflow')).not.toBeNull();
+      });
+      const item = (
+        <DropdownMenuItem onClick={command}>Test command</DropdownMenuItem>
+      );
+      render({
+        overflow: nested ? (
+          <DropdownMenuSubmenu label="Test submenu">{item}</DropdownMenuSubmenu>
+        ) : (
+          item
+        ),
+      });
+      openPanel('toolbar.more');
+      expect(mocks.ancestorClick).toHaveBeenCalled();
+      mocks.ancestorClick.mockClear();
+      if (nested) {
+        const submenu = document.querySelector<HTMLButtonElement>(
+          '.node-toolbar-overflow [aria-haspopup="menu"]',
+        );
+        if (!submenu) throw new Error('Missing submenu trigger');
+        act(() => submenu.click());
+        expect(submenu.getAttribute('aria-expanded')).toBe('true');
+        expect(mocks.ancestorClick).not.toHaveBeenCalled();
+      }
+      const leaf = Array.from(
+        document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+      ).find((element) => element.textContent === 'Test command');
+      if (!leaf) throw new Error('Missing overflow command');
+      expect(container.contains(leaf)).toBe(false);
+      const click = new MouseEvent('click', {
+        bubbles: true,
+        cancelable: true,
+        detail,
+      });
+      act(() => leaf.dispatchEvent(click));
+      expect(command).toHaveBeenCalledOnce();
+      expect(click.defaultPrevented).toBe(false);
+      expect(document.querySelector('.node-toolbar-overflow')).toBeNull();
+      expect(mocks.ancestorClick).not.toHaveBeenCalled();
+    },
+  );
+
   it('offers Question percentage scale and keeps font editing exclusive to Text', () => {
     render({
       type: 'question',
       data: { type: 'question', content: 'Question' },
     });
     expect(container.querySelector('[aria-label="Font size"]')).toBeNull();
-    const scaleInput = container.querySelector<HTMLInputElement>(
+    expect(container.querySelector('[name="question-card-scale"]')).toBeNull();
+    openPanel('toolbar.size.title');
+    const scaleInput = document.querySelector<HTMLInputElement>(
       '[name="question-card-scale"]',
     );
     expect(scaleInput?.min).toBe('10');
     expect(scaleInput?.max).toBe('1000');
     expect(scaleInput?.step).toBe('1');
     expect(
-      container.querySelector<HTMLInputElement>('[name="question-card-scale"]')
+      document.querySelector<HTMLInputElement>('[name="question-card-scale"]')
         ?.value,
     ).toBe('100');
-    const scaleLabel = container
+    const scaleLabel = document
       .querySelector('[name="question-card-scale"]')
       ?.closest('label');
     expect(scaleLabel?.textContent).toContain('toolbar.cardScale');
@@ -181,7 +249,7 @@ describe('NodeFloatingToolbar type-icon drag surface', () => {
     expect(container.querySelector('.lucide-rotate-ccw')).toBeNull();
     render({ type: 'text', data: { type: 'text', content: 'Text' } });
     expect(container.querySelector('[name="question-card-scale"]')).toBeNull();
-    expect(container.querySelector('[aria-label="Font size"]')).not.toBeNull();
+    expect(container.querySelector('[name="font-size"]')).not.toBeNull();
   });
 
   it('does not round stored fractional scales on focus/blur or Enter', () => {
@@ -199,7 +267,8 @@ describe('NodeFloatingToolbar type-icon drag surface', () => {
       type: 'question',
       data: { type: 'question', content: 'Question', style: { fontSize } },
     });
-    const input = container.querySelector<HTMLInputElement>(
+    openPanel('toolbar.size.title');
+    const input = document.querySelector<HTMLInputElement>(
       '[name="question-card-scale"]',
     );
     if (!input) throw new Error('Missing card scale input');
@@ -242,10 +311,10 @@ describe('NodeFloatingToolbar type-icon drag surface', () => {
         type: 'question',
         data: { ...node.data, ...command.patches[0].patch },
       });
+      openPanel('toolbar.size.title');
       expect(
-        container.querySelector<HTMLInputElement>(
-          '[name="question-card-scale"]',
-        )?.value,
+        document.querySelector<HTMLInputElement>('[name="question-card-scale"]')
+          ?.value,
       ).toBe(String(percent));
     },
   );
@@ -294,8 +363,8 @@ describe('NodeFloatingToolbar type-icon drag surface', () => {
           .querySelector('.node-floating-toolbar')
           ?.firstElementChild?.contains(button),
       ).toBe(true);
-      expect(button.style.width).toBe('28px');
-      expect(button.style.height).toBe('28px');
+      expect(button.style.width).toBe('32px');
+      expect(button.style.height).toBe('32px');
       expect(button.style.touchAction).toBe('none');
       expect(button.classList.contains('cursor-grab')).toBe(true);
       expect(button.hasAttribute('tabindex')).toBe(false);
@@ -320,20 +389,21 @@ describe('NodeFloatingToolbar type-icon drag surface', () => {
   );
 
   it.each(['text', 'note'] as const)(
-    'converts %s only on an alternate-type click below the drag threshold',
+    'converts %s only through the overflow command',
     (type) => {
       render({ type });
       expect(
         container.querySelectorAll('[data-node-drag-handle]'),
-      ).toHaveLength(2);
-      const current = handle('button[aria-pressed="true"]');
+      ).toHaveLength(1);
+      const current = handle();
       act(() => current.click());
       expect(mocks.canvas.convertNodeType).not.toHaveBeenCalled();
       focus.mockClear();
-      const alternate = handle('button[aria-pressed="false"]');
-      pointer(alternate, 'pointerdown');
-      pointer(alternate, 'pointermove', 0.5);
-      pointer(alternate, 'pointerup', 0.5);
+      openPanel('toolbar.more');
+      const alternate = document.querySelector<HTMLButtonElement>(
+        '.node-toolbar-overflow [role="menuitem"]',
+      );
+      if (!alternate) throw new Error('Missing conversion command');
       act(() => alternate.click());
       expect(mocks.canvas.convertNodeType).toHaveBeenCalledExactlyOnceWith(
         'node',
@@ -345,11 +415,11 @@ describe('NodeFloatingToolbar type-icon drag surface', () => {
   );
 
   it.each(['text', 'note'] as const)(
-    'drags either %s toggle without conversion',
+    'drags the current %s type without conversion',
     (type) => {
       render({ type });
-      for (const active of ['true', 'false']) {
-        const button = handle(`button[aria-pressed="${active}"]`);
+      {
+        const button = handle();
         pointer(button, 'pointerdown');
         pointer(button, 'pointermove', 20);
         pointer(button, 'pointerup', 20);
@@ -360,8 +430,8 @@ describe('NodeFloatingToolbar type-icon drag surface', () => {
         act(() => button.dispatchEvent(click));
         expect(click.defaultPrevented).toBe(true);
       }
-      expect(mocks.canvas.onNodeDragStart).toHaveBeenCalledTimes(2);
-      expect(mocks.canvas.onNodeDragStop).toHaveBeenCalledTimes(2);
+      expect(mocks.canvas.onNodeDragStart).toHaveBeenCalledOnce();
+      expect(mocks.canvas.onNodeDragStop).toHaveBeenCalledOnce();
       expect(mocks.canvas.convertNodeType).not.toHaveBeenCalled();
       expect(focus).not.toHaveBeenCalled();
     },
@@ -378,8 +448,13 @@ describe('NodeFloatingToolbar type-icon drag surface', () => {
         mocks.canvas.nodes[0].data = { type, content: 'Preserved content' };
         const before = structuredClone(mocks.canvas.nodes);
         render({ type });
-        const current = handle('button[aria-pressed="true"]');
-        const alternate = handle('button[aria-pressed="false"]');
+        const current = handle();
+        if (!document.querySelector('.node-toolbar-overflow'))
+          openPanel('toolbar.more');
+        const alternate = document.querySelector<HTMLButtonElement>(
+          '.node-toolbar-overflow [role="menuitem"]',
+        );
+        if (!alternate) throw new Error('Missing conversion command');
         expect(current.disabled).toBe(false);
         expect(alternate.disabled).toBe(true);
         expect(alternate.hasAttribute('data-node-drag-handle')).toBe(false);
@@ -409,7 +484,7 @@ describe('NodeFloatingToolbar type-icon drag surface', () => {
     (reason) => {
       for (const locked of [false, true]) {
         render({ type: 'text' });
-        const button = handle('button[aria-pressed="false"]');
+        const button = handle();
         pointer(button, 'pointerdown');
         if (locked) pointer(button, 'pointermove', 20);
         if (reason === 'Escape')
@@ -473,11 +548,7 @@ describe('NodeFloatingToolbar type-icon drag surface', () => {
       mocks.canvas.nodes[0].type = type;
       mocks.canvas.nodes[0].data = { type, content: 'Preserved content' };
       render({ type });
-      const button = handle(
-        type === 'video'
-          ? 'button[data-node-drag-handle]'
-          : 'button[aria-pressed="true"]',
-      );
+      const button = handle();
       const nodes = mocks.canvas.nodes;
       const before = structuredClone(nodes);
       act(() => button.focus());

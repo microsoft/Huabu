@@ -18,6 +18,11 @@ import {
 } from '@huabu/shared';
 import { clampGridCount, frameAccentToken } from '@huabu/shared/canvas-engine';
 
+import { Button } from '@/components/Common/Button';
+import {
+  DropdownMenu,
+  DropdownMenuItem,
+} from '@/components/Common/DropdownMenu';
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar.tsx';
 import { Input } from '@/components/Common/Input.tsx';
 import { MissingFileBanner } from '@/components/Nodes/MissingFileBanner.tsx';
@@ -43,8 +48,8 @@ const LAYOUT_MODE_OPTIONS: Array<{
   icon: React.ReactNode;
 }> = [
   { value: 'free', label: 'Free', icon: <Move /> },
-  { value: 'column', label: 'Column', icon: <Columns3 /> },
   { value: 'row', label: 'Row', icon: <Rows3 /> },
+  { value: 'column', label: 'Column', icon: <Columns3 /> },
   { value: 'grid', label: 'Grid', icon: <Grid2x2 /> },
 ];
 
@@ -53,8 +58,6 @@ const LAYOUT_MODE_OPTIONS: Array<{
  * the multi-select toolbar. Narrower (`w-8`) since the value is at most
  * two digits.
  */
-const COUNT_INPUT_CLASS =
-  'border-edge-default focus:border-info nodrag w-8 rounded border bg-transparent px-1.5 py-0.5 text-center text-xs outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none';
 
 // ── Component ──────────────────────────────────────────────────────────
 
@@ -142,23 +145,6 @@ export const FrameNode = memo(
     // layout-mode + grid-count controls (rendered below as
     // `FrameActions`).
 
-    // Local draft for the count input so the user can type freely
-    // without the value reformatting on every keystroke. Re-synced
-    // from the canonical value when it changes externally.
-    const [countDraft, setCountDraft] = useState(String(count));
-    useEffect(() => {
-      setCountDraft(String(count));
-    }, [count]);
-
-    // Same pattern for the `grid` row input. It is re-synced from the
-    // RESOLVED row total, not from what was typed: asking for fewer
-    // rows than the children need cannot be honoured, and echoing the
-    // request back would claim otherwise.
-    const [rowDraft, setRowDraft] = useState(String(gridRowCount));
-    useEffect(() => {
-      setRowDraft(String(gridRowCount));
-    }, [gridRowCount]);
-
     /**
      * Effective upper bound for the count input:
      *  - At most `FRAME_GRID_MAX_COUNT` (12).
@@ -189,21 +175,10 @@ export const FrameNode = memo(
       responsiveMetrics.headerInset,
     );
 
-    const commitCount = () => {
-      const trimmed = countDraft.trim();
-      if (trimmed === '') {
-        setCountDraft(String(count));
-        return;
-      }
-      const parsed = Number.parseInt(trimmed, 10);
-      if (!Number.isFinite(parsed)) {
-        setCountDraft(String(count));
-        return;
-      }
+    const commitCount = (parsed: number) => {
       // Clamp to [min, maxCount] — exceeding child count is silently
       // capped so the "no empty track" invariant always holds.
       const next = Math.min(maxCount, Math.max(FRAME_GRID_MIN_COUNT, parsed));
-      setCountDraft(String(next));
       if (next === count) return;
       dispatchUiIntent({
         type: 'SET_FRAME_LAYOUT_MODE',
@@ -213,13 +188,7 @@ export const FrameNode = memo(
       });
     };
 
-    const commitRowCount = () => {
-      const trimmed = rowDraft.trim();
-      const parsed = Number.parseInt(trimmed, 10);
-      if (trimmed === '' || !Number.isFinite(parsed)) {
-        setRowDraft(String(gridRowCount));
-        return;
-      }
+    const commitRowCount = (parsed: number) => {
       const next = Math.min(
         FRAME_GRID_MAX_COUNT,
         Math.max(FRAME_GRID_MIN_COUNT, parsed),
@@ -230,8 +199,7 @@ export const FrameNode = memo(
       // the most natural request there is: "keep what I see now", i.e.
       // pin the current row count so later deletions cannot shrink it.
       if (next === data.gridRowCount) {
-        setRowDraft(String(gridRowCount));
-        return;
+        return gridRowCount;
       }
       dispatchUiIntent({
         type: 'SET_FRAME_LAYOUT_MODE',
@@ -239,9 +207,19 @@ export const FrameNode = memo(
         mode: layoutMode,
         gridRowCount: next,
       });
-      // Deliberately no optimistic draft update: the request is a floor,
-      // so the resolved total may be higher. The effect above re-syncs
-      // once the solver has spoken.
+      const nodes = useCanvasStore.getState().nodes;
+      const frame = nodes.find((node) => node.id === id);
+      return nodes.reduce(
+        (rows, node) => {
+          const row = node.data.frameRow;
+          return node.parentId === id && typeof row === 'number'
+            ? Math.max(rows, row + 1)
+            : rows;
+        },
+        typeof frame?.data.gridRowCount === 'number'
+          ? frame.data.gridRowCount
+          : 0,
+      );
     };
 
     const setMode = (next: FrameLayoutMode) => {
@@ -258,25 +236,45 @@ export const FrameNode = memo(
     };
 
     const FrameActions = (
-      <>
-        <FloatingToolbar.Select
-          options={LAYOUT_MODE_OPTIONS.map((option) => ({
-            ...option,
-            label:
-              option.value === 'free'
-                ? t('node.frameLayoutFree')
-                : option.value === 'column'
-                  ? t('node.frameLayoutColumn')
-                  : option.value === 'row'
-                    ? t('node.frameLayoutRow')
-                    : t('node.frameLayoutGrid'),
-          }))}
-          value={layoutMode}
-          onChange={setMode}
-        />
+      <DropdownMenu
+        floating
+        placement="bottom"
+        className="node-toolbar-layout"
+        trigger={
+          <Button variant="ghost" iconOnly title={t('node.frameLayout')}>
+            <Grid2x2 />
+          </Button>
+        }
+      >
+        <div
+          className="node-toolbar-layout-modes"
+          role="group"
+          aria-label={t('node.frameLayout')}
+        >
+          {LAYOUT_MODE_OPTIONS.map((option) => (
+            <Button
+              key={option.value}
+              variant="ghost"
+              iconOnly
+              aria-pressed={layoutMode === option.value}
+              title={
+                option.value === 'free'
+                  ? t('node.frameLayoutFree')
+                  : option.value === 'column'
+                    ? t('node.frameLayoutColumn')
+                    : option.value === 'row'
+                      ? t('node.frameLayoutRow')
+                      : t('node.frameLayoutGrid')
+              }
+              onClick={() => setMode(option.value)}
+            >
+              {option.icon}
+            </Button>
+          ))}
+        </div>
 
         {isStructuredLayout && (
-          <div className="flex items-center gap-1">
+          <div className="node-toolbar-layout-counts">
             {/*
               `grid` reads "rows x columns", matching how a matrix is
               written and how the pair is said out loud. The row box
@@ -287,82 +285,36 @@ export const FrameNode = memo(
             */}
             {layoutMode === 'grid' && (
               <>
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  aria-label={t('node.rows')}
-                  title={t('node.gridRowsMin')}
+                <FloatingToolbar.NumberInput
+                  label={t('node.frameLayoutRow')}
+                  ariaLabel={t('node.rows')}
+                  name="frame-rows"
                   min={FRAME_GRID_MIN_COUNT}
                   max={FRAME_GRID_MAX_COUNT}
                   step={1}
-                  value={rowDraft}
-                  onChange={(e) => setRowDraft(e.target.value)}
-                  onBlur={commitRowCount}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  onKeyDown={(e) => {
-                    e.stopPropagation();
-                    if (e.key === 'Enter') {
-                      commitRowCount();
-                      (e.target as HTMLInputElement).blur();
-                    } else if (e.key === 'Escape') {
-                      setRowDraft(String(gridRowCount));
-                      (e.target as HTMLInputElement).blur();
-                    }
-                  }}
-                  className={COUNT_INPUT_CLASS}
+                  value={gridRowCount}
+                  applyUnchanged
+                  onApply={commitRowCount}
                 />
-                <span
-                  className="text-fg-subtle text-xs select-none"
-                  aria-hidden="true"
-                >
-                  {'\u00d7'}
-                </span>
               </>
             )}
-            <input
-              type="number"
-              inputMode="numeric"
-              aria-label={countsRows ? t('node.rows') : t('node.columns')}
-              title={
+            <FloatingToolbar.NumberInput
+              label={
                 countsRows
-                  ? t('node.rowsRange', { max: maxCount })
-                  : t('node.columnsRange', { max: maxCount })
+                  ? t('node.frameLayoutRow')
+                  : t('node.frameLayoutColumn')
               }
+              ariaLabel={countsRows ? t('node.rows') : t('node.columns')}
+              name="frame-count"
               min={FRAME_GRID_MIN_COUNT}
               max={maxCount}
               step={1}
-              value={countDraft}
-              onChange={(e) => setCountDraft(e.target.value)}
-              onBlur={commitCount}
-              onMouseDown={(e) => e.stopPropagation()}
-              onKeyDown={(e) => {
-                e.stopPropagation();
-                if (e.key === 'Enter') {
-                  commitCount();
-                  (e.target as HTMLInputElement).blur();
-                } else if (e.key === 'Escape') {
-                  setCountDraft(String(count));
-                  (e.target as HTMLInputElement).blur();
-                }
-              }}
-              className={COUNT_INPUT_CLASS}
+              value={count}
+              onApply={commitCount}
             />
           </div>
         )}
-
-        <FloatingToolbar.Divider />
-
-        <FloatingToolbar.ActionButton
-          title={t('node.unframe')}
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            unframe(id);
-          }}
-        >
-          <Ungroup />
-        </FloatingToolbar.ActionButton>
-      </>
+      </DropdownMenu>
     );
 
     const label = useMemo(() => {
@@ -515,6 +467,13 @@ export const FrameNode = memo(
         type={'frame'}
         selected={selected && !isEditingLabel}
         actions={isContentMissing ? undefined : FrameActions}
+        overflow={
+          isContentMissing ? undefined : (
+            <DropdownMenuItem icon={<Ungroup />} onClick={() => unframe(id)}>
+              {t('node.unframe')}
+            </DropdownMenuItem>
+          )
+        }
         borderRadius={responsiveMetrics.borderRadius}
         keepAspectRatio={shouldPreserveFrameAspectRatio({
           sizing: data.sizing,

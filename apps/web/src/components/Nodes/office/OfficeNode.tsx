@@ -2,11 +2,12 @@
 // Licensed under the MIT license.
 
 import { clsx } from 'clsx';
-import { Download, Fullscreen } from 'lucide-react';
+import { Download, Maximize2 } from 'lucide-react';
 import { memo, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { resolveArtifactUrl } from '@/api/artifact';
+import { DropdownMenuItem } from '@/components/Common/DropdownMenu';
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
 import { OFFICE_FORMAT_ICON } from '@/config/nodeIcons';
 import useCanvasStore from '@/store/canvasStore';
@@ -106,20 +107,16 @@ export const OfficeNode = memo(
     const iconColor = accentTokens?.fg ?? 'var(--fg-muted)';
     const borderColor = accentTokens?.divider ?? 'var(--edge-default)';
 
-    const handleDownload = useCallback(
-      (e: React.MouseEvent) => {
-        e.stopPropagation();
-        if (!src) return;
-        const link = document.createElement('a');
-        link.href = resolveArtifactUrl(src, canvasId);
-        link.download =
-          (data.label as string) || src.split('/').pop() || meta.fallbackName;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-      },
-      [src, data.label, canvasId, meta.fallbackName],
-    );
+    const handleDownload = useCallback(() => {
+      if (!src) return;
+      const link = document.createElement('a');
+      link.href = resolveArtifactUrl(src, canvasId);
+      link.download =
+        (data.label as string) || src.split('/').pop() || meta.fallbackName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }, [src, data.label, canvasId, meta.fallbackName]);
 
     const OfficeActions = (
       <>
@@ -130,13 +127,7 @@ export const OfficeNode = memo(
             openPreviewNode(id);
           }}
         >
-          <Fullscreen />
-        </FloatingToolbar.ActionButton>
-        <FloatingToolbar.ActionButton
-          title={t('node.download')}
-          onClick={handleDownload}
-        >
-          <Download />
+          <Maximize2 />
         </FloatingToolbar.ActionButton>
       </>
     );
@@ -149,6 +140,13 @@ export const OfficeNode = memo(
         selected={selected}
         farLabel={farLabel}
         actions={missingFileKind ? undefined : OfficeActions}
+        overflow={
+          missingFileKind ? undefined : (
+            <DropdownMenuItem icon={<Download />} onClick={handleDownload}>
+              {t('node.download')}
+            </DropdownMenuItem>
+          )
+        }
         resizable
         keepAspectRatio={false}
         className={clsx(
