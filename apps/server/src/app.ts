@@ -40,6 +40,10 @@ import canvasRoutes from './modules/canvas/canvas.route.js';
 import { resetExternalNoteSessions } from './modules/canvas/external-watcher.js';
 import externalNoteRoutes from './modules/canvas/external.route.js';
 import syncRoutes from './modules/canvas/sync.route.js';
+import {
+  createIdentityService,
+  registerIdentity,
+} from './modules/identity/index.js';
 import integrationsRoutes from './modules/integrations/integrations.route.js';
 import interactiveViewRoutes from './modules/interactive-view/interactive-view.route.js';
 import { isPublicRfsSkillBootstrapRequest } from './modules/remote_fs/public-skill.js';
@@ -48,7 +52,6 @@ import { createCorsOptions } from './modules/security/cors.js';
 import deploymentRoutes from './modules/security/deployment.route.js';
 import {
   hostGuardPlugin,
-  markBasicAuthenticated,
   originGuardPlugin,
   resolveAllowedHostnames,
 } from './modules/security/index.js';
@@ -109,9 +112,9 @@ const allowedHostnames = resolveAllowedHostnames();
 app.register(cors, createCorsOptions(allowedHostnames));
 
 // ── Network security guards ──────────────────────────────────────────
-// Registered before basic-auth so misaddressed requests fail fast with
+// Registered before identity admission so misaddressed requests fail fast with
 // a clear 403 instead of an auth challenge. Order matters:
-//   hostGuard → originGuard → basic-auth → workspace guard → routes.
+//   hostGuard → originGuard → identity → workspace guard → routes.
 app.register(hostGuardPlugin);
 app.register(originGuardPlugin);
 
@@ -131,83 +134,8 @@ app.register(multipart, {
   },
 });
 
-// ── HTTP Auth gate ───────────────────────────────────────────────────
-// Two auth mechanisms coexist:
-//
-// 1. Basic Auth (browser/Vite): when HUABU_BASIC_AUTH_USER and
-//    HUABU_BASIC_AUTH_PASS are set, requests with matching Basic creds
-//    are accepted.
-//
-// 2. Bearer token (RFS): requests with
-//    `Authorization: Bearer <AGENTLET_TOKEN>` are accepted. This allows
-//    external agents to call the RFS / canvas-agent APIs without knowing
-//    the Basic Auth credentials.
-//
-// CORS preflight (OPTIONS) always passes through unauthenticated.
-
-const basicAuthUser = process.env.HUABU_BASIC_AUTH_USER;
-const basicAuthPass = process.env.HUABU_BASIC_AUTH_PASS;
-if (basicAuthUser && basicAuthPass) {
-  const expectedBasic =
-    'Basic ' +
-    Buffer.from(`${basicAuthUser}:${basicAuthPass}`, 'utf8').toString('base64');
-  app.addHook('onRequest', async (request, reply) => {
-    if (request.method === 'OPTIONS') return;
-    const authHeader = request.headers.authorization || '';
-    if (
-      isPublicRfsSkillBootstrapRequest({
-        method: request.method,
-        url: request.url,
-        authorization: authHeader || undefined,
-      })
-    ) {
-      return;
-    }
-
-    // Basic Auth (browser / Vite proxy)
-    if (authHeader === expectedBasic) {
-      markBasicAuthenticated(request);
-      return;
-    }
-
-    // Bearer token (agentlet RFS)
-    if (authHeader.startsWith('Bearer ')) {
-      const daemonToken = getConnectionToken();
-      if (daemonToken && authHeader.slice(7) === daemonToken) return;
-    }
-
-    reply
-      .header('WWW-Authenticate', 'Basic realm="Huabu"')
-      .status(401)
-      .send({ message: 'Authentication required' });
-  });
-  app.log.info('HTTP Auth enabled (Basic + Bearer)');
-} else {
-  // No Basic Auth configured — still gate Bearer-only RFS routes
-  app.addHook('onRequest', async (request, reply) => {
-    if (request.method === 'OPTIONS') return;
-    const authHeader = request.headers.authorization || '';
-    if (
-      isPublicRfsSkillBootstrapRequest({
-        method: request.method,
-        url: request.url,
-        authorization: authHeader || undefined,
-      })
-    ) {
-      return;
-    }
-    // Without Basic Auth, all routes are open EXCEPT the Bearer-only
-    // RFS routes, which always require a valid Bearer token.
-    if (!request.url.startsWith('/api/rfs/')) {
-      return;
-    }
-    if (authHeader.startsWith('Bearer ')) {
-      const daemonToken = getConnectionToken();
-      if (daemonToken && authHeader.slice(7) === daemonToken) return;
-    }
-    reply.status(401).send({ message: 'Authentication required' });
-  });
-}
+// Identity is selected once; a failed Bubble lookup never becomes local access.
+registerIdentity(app, { service: createIdentityService(), getConnectionToken });
 
 // Register @fastify/static to enable `reply.sendFile()`.
 // Actual artifact serving uses a dynamic root resolved at request time
@@ -233,6 +161,7 @@ app.addHook('preHandler', async (request, reply) => {
     !publicSkillBootstrap &&
     !url.startsWith('/api/workspace') &&
     !url.startsWith('/api/deployment') &&
+    url.split('?', 1)[0] !== '/api/identity' &&
     !url.startsWith('/api/llm') &&
     !url.startsWith('/api/integrations')
   ) {
