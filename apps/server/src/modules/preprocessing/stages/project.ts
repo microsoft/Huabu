@@ -29,6 +29,11 @@ export function project(
   contentKind?: NodeContentKind,
 ): PreprocessNodeResult {
   const patch: Record<string, unknown> = {};
+  if (request.nodeType === 'video' && ctx.persisted?.videoCover) {
+    // Explicit null survives JSON and clears an obsolete client cover.
+    patch.coverUrl = ctx.persisted.videoCover.coverUrl ?? null;
+    patch.coverSourceSrc = ctx.persisted.videoCover.coverSourceSrc ?? null;
+  }
 
   // Apply suggested label from enrich or extract stage, but only when the
   // label is not already user/agent-owned.
@@ -43,6 +48,7 @@ export function project(
   // enriched label.
   if (
     request.nodeType !== 'question' &&
+    request.nodeType !== 'video' &&
     !isLabelProtected(request.snapshot.labelSource, request.snapshot.title)
   ) {
     // Questions commit names through ConversationTitleService, never this patch.

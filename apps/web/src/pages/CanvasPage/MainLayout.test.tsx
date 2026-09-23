@@ -22,6 +22,11 @@ let container: HTMLElement | null = null;
 let nextFrame: FrameRequestCallback | null = null;
 
 const LayoutChild = () => <div />;
+const InspectableLeftPanel = ({
+  isContentMounted,
+}: {
+  isContentMounted?: boolean;
+}) => (isContentMounted ? <div data-testid="layer-content" /> : null);
 const InspectableHeader = ({
   isCollapsed,
   vertical,
@@ -206,6 +211,62 @@ describe('MainLayout Chat motion', () => {
     });
     expect(document.activeElement).toBe(center);
     expect(focus).not.toHaveBeenCalled();
+  });
+
+  it('mounts Layers on demand and retains content until its slide transition ends', () => {
+    act(() => {
+      root?.render(
+        <MainLayout
+          header={<LayoutChild />}
+          leftPanel={<InspectableLeftPanel />}
+          rightPanel={<LayoutChild />}
+        >
+          <LayoutChild />
+        </MainLayout>,
+      );
+    });
+    const content = () =>
+      container?.querySelector('[data-testid="layer-content"]');
+    expect(content()).toBeNull();
+    act(() => usePanelStore.getState().setLeftCollapsed(false));
+    expect(content()).not.toBeNull();
+    act(() => usePanelStore.getState().setLeftCollapsed(true));
+    expect(content()).not.toBeNull();
+    act(() => {
+      const event = new Event('transitionend', { bubbles: true });
+      Object.defineProperty(event, 'propertyName', { value: 'transform' });
+      container
+        ?.querySelector('[data-canvas-panel="left"]')
+        ?.dispatchEvent(event);
+    });
+    expect(content()).toBeNull();
+  });
+
+  it('cancels stale Layers removal on reopen and falls back when motion events are absent', () => {
+    act(() => {
+      root?.render(
+        <MainLayout
+          header={<LayoutChild />}
+          leftPanel={<InspectableLeftPanel />}
+          rightPanel={<LayoutChild />}
+        >
+          <LayoutChild />
+        </MainLayout>,
+      );
+    });
+    act(() => usePanelStore.getState().setLeftCollapsed(false));
+    act(() => usePanelStore.getState().setLeftCollapsed(true));
+    act(() => vi.advanceTimersByTime(100));
+    act(() => usePanelStore.getState().setLeftCollapsed(false));
+    act(() => vi.advanceTimersByTime(500));
+    expect(
+      container?.querySelector('[data-testid="layer-content"]'),
+    ).not.toBeNull();
+    act(() => usePanelStore.getState().setLeftCollapsed(true));
+    act(() => vi.advanceTimersByTime(300));
+    expect(
+      container?.querySelector('[data-testid="layer-content"]'),
+    ).toBeNull();
   });
 
   it.each([

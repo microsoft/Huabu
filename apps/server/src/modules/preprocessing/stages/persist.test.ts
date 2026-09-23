@@ -19,7 +19,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import fastify from 'fastify';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
@@ -213,6 +213,133 @@ describe('persist — authored-body CAS guard', () => {
         record: expect.objectContaining({ src: 'artifact_local.pdf' }),
       }),
     );
+  });
+});
+
+describe('persist — video source fence', () => {
+  async function video() {
+    const nodes = await seedNode('video-space', 'v', 'video', '');
+    await nodes.put({
+      nodeId: 'v',
+      record: {
+        nodeId: 'v',
+        type: 'video',
+        label: 'Keep',
+        src: 'new.mp4',
+        content: '',
+        coverUrl: 'old.jpg',
+        coverSourceSrc: 'old.mp4',
+        custom: 'preserved',
+      },
+    });
+    return nodes;
+  }
+
+  it('refreshes cover metadata despite identical empty content', async () => {
+    const nodes = await video();
+    const cover = { coverUrl: 'new.jpg', coverSourceSrc: 'new.mp4' };
+    const result = await persist(
+      { ...normalized('v', ''), label: 'Stale label' },
+      'video',
+      'derived',
+      nodes,
+      'new.mp4',
+      true,
+      cover,
+    );
+    expect(result.videoCover).toEqual(cover);
+    expect((await nodes.read('v'))?.record).toMatchObject({
+      ...cover,
+      custom: 'preserved',
+      label: 'Keep',
+    });
+  });
+
+  it('rejects all derived fields from a stale source, even when the body differs', async () => {
+    const nodes = await video();
+    const before = await nodes.read('v');
+    const result = await persist(
+      { ...normalized('v', 'stale body'), label: 'Stale label' },
+      'video',
+      'derived',
+      nodes,
+      'old.mp4',
+      true,
+      { coverUrl: 'late.jpg', coverSourceSrc: 'old.mp4' },
+    );
+    expect(await nodes.read('v')).toEqual(before);
+    expect(result.videoCover).toBeUndefined();
+    expect(result.persistedSrc).toBeUndefined();
+  });
+
+  it('clears both obsolete refs after extraction failure without erasing unrelated metadata', async () => {
+    const nodes = await video();
+    const result = await persist(
+      normalized('v', ''),
+      'video',
+      'derived',
+      nodes,
+      'new.mp4',
+      true,
+      {},
+    );
+    const current = (await nodes.read('v'))?.record;
+    expect(current).not.toHaveProperty('coverUrl');
+    expect(current).not.toHaveProperty('coverSourceSrc');
+    expect(current).toMatchObject({ custom: 'preserved', src: 'new.mp4' });
+    expect(result.videoCover).toEqual({});
+  });
+
+  it('cannot recreate a missing video sidecar', async () => {
+    const nodes = await seedSpace('video-space', 'v', 'video');
+    const result = await persist(
+      normalized('v', ''),
+      'video',
+      'derived',
+      nodes,
+      'new.mp4',
+      true,
+      { coverUrl: 'new.jpg', coverSourceSrc: 'new.mp4' },
+    );
+    expect(await nodes.read('v')).toBeNull();
+    expect(result.videoCover).toBeUndefined();
+  });
+
+  it('returns only persisted cover refs through the real preprocess HTTP response', async () => {
+    const nodes = await video();
+    const current = await nodes.read('v');
+    if (!current) throw new Error('Missing video fixture');
+    const src = 'https://youtu.be/abc123_-ABC';
+    await nodes.put({ nodeId: 'v', record: { ...current.record, src } });
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(new Uint8Array([0xff, 0xd8, 0xff, 0xd9]), {
+        headers: { 'content-type': 'image/jpeg' },
+      }),
+    );
+    const app = fastify();
+    await app.register(canvasRoutes, { prefix: '/canvas' });
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/canvas/video-space/nodes/v/preprocess',
+        payload: {
+          nodeType: 'video',
+          snapshot: { src },
+          options: { allowLLM: false },
+        },
+      });
+      expect(response.statusCode).toBe(200);
+      const saved = (await nodes.read('v'))?.record;
+      expect(response.json()).toMatchObject({
+        success: true,
+        coverUrl: saved?.coverUrl,
+        coverSourceSrc: src,
+      });
+      expect(saved?.coverUrl).toMatch(/^cover_[\w-]+\.jpg$/);
+    } finally {
+      fetch.mockRestore();
+      await app.close();
+    }
   });
 });
 

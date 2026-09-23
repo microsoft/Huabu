@@ -153,6 +153,17 @@ function preserveLiveTransient(
     for (const k of TRANSIENT_NODE_FIELDS) {
       if (k in live) merged[k] = live[k];
     }
+    // Geometry snapshots own fixed dimensions. Carrying the live measurement
+    // from the other side of undo/redo makes parent layout observe stale sizes
+    // until ResizeObserver catches up (and can permanently refit ancestors).
+    const style = node.style;
+    if (typeof style?.width === 'number' || typeof style?.height === 'number') {
+      merged.measured = {
+        ...((live.measured ?? {}) as { width?: number; height?: number }),
+        ...(typeof style.width === 'number' ? { width: style.width } : {}),
+        ...(typeof style.height === 'number' ? { height: style.height } : {}),
+      };
+    }
     return merged as Node;
   });
 }

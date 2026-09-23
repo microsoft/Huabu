@@ -59,6 +59,8 @@ function subscribe(listener: () => void): () => void {
     window.addEventListener('keydown', syncFromEvent, true);
     window.addEventListener('keyup', syncFromEvent, true);
     window.addEventListener('pointermove', syncFromEvent, true);
+    window.addEventListener('pointerdown', syncFromEvent, true);
+    window.addEventListener('focus', reset);
     window.addEventListener('blur', reset);
   }
   listeners.add(listener);
@@ -68,6 +70,8 @@ function subscribe(listener: () => void): () => void {
       window.removeEventListener('keydown', syncFromEvent, true);
       window.removeEventListener('keyup', syncFromEvent, true);
       window.removeEventListener('pointermove', syncFromEvent, true);
+      window.removeEventListener('pointerdown', syncFromEvent, true);
+      window.removeEventListener('focus', reset);
       window.removeEventListener('blur', reset);
       held = false;
       followHeld = false;

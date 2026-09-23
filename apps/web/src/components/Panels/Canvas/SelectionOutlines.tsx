@@ -1,13 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { useStore, useViewport } from '@xyflow/react';
+import { useInternalNode, useStore, useViewport } from '@xyflow/react';
 import { useMemo } from 'react';
 import { createPortal } from 'react-dom';
 
 import {
   getAbsolutePosition,
-  getNodeSize,
+  isAlwaysAutoHeightNodeType,
   type NestableNode,
 } from '@huabu/shared/canvas-engine';
 
@@ -20,13 +20,129 @@ import {
 } from '@/store/nodeCollapseStore';
 
 import { applyNodeGeometryPreviews } from './applyNodeGeometryPreview';
+import { SelectionOutline } from './selectionChrome/SelectionOutline';
+import { useRenderedNodeGeometry } from './useRenderedNodeGeometry';
+import { selectionOutlineRadius } from '../../Nodes/design/nodeSelectionGeometry';
+
+export { selectionOutlineRadius } from '../../Nodes/design/nodeSelectionGeometry';
 
 import type { CanvasNode } from '@/components/Nodes/types';
+import type { InternalNode } from '@xyflow/react';
 
 export function selectOutlinedNodes(
   nodes: readonly CanvasNode[],
 ): CanvasNode[] {
   return nodes.filter((node) => node.selected || node.dragging);
+}
+
+export function selectionOutlineSize(
+  node: CanvasNode,
+  internalNode: Pick<InternalNode, 'measured'> | undefined,
+): { width: number; height: number } {
+  const styleWidth = node.style?.width;
+  const styleHeight = node.style?.height;
+  const contentOwnsHeight = isAlwaysAutoHeightNodeType(node.type ?? '');
+  return {
+    width:
+      (typeof styleWidth === 'number' ? styleWidth : undefined) ??
+      internalNode?.measured.width ??
+      node.measured?.width ??
+      200,
+    height:
+      (!contentOwnsHeight && typeof styleHeight === 'number'
+        ? styleHeight
+        : undefined) ??
+      internalNode?.measured.height ??
+      node.measured?.height ??
+      100,
+  };
+}
+
+interface SelectionOutlineForNodeProps {
+  node: CanvasNode;
+  previewNodes: CanvasNode[];
+  domNode: HTMLDivElement;
+  zoom: number;
+  viewportX: number;
+  viewportY: number;
+}
+
+function SelectionOutlineForNode({
+  node,
+  previewNodes,
+  domNode,
+  zoom,
+  viewportX,
+  viewportY,
+}: SelectionOutlineForNodeProps) {
+  const internalNode = useInternalNode(node.id);
+  const internalPosition = internalNode?.internals.positionAbsolute;
+  const internalWidth =
+    (internalNode?.style?.width as number | undefined) ??
+    internalNode?.measured.width ??
+    0;
+  const internalHeight =
+    (internalNode?.style?.height as number | undefined) ??
+    internalNode?.measured.height ??
+    0;
+  const { geometry: renderedGeometry } = useRenderedNodeGeometry(
+    node.id,
+    domNode,
+    internalNode?.resizing === true,
+    {
+      nodeX: internalPosition?.x ?? node.position.x,
+      nodeY: internalPosition?.y ?? node.position.y,
+      nodeWidth: internalWidth,
+      nodeHeight: internalHeight,
+      viewportX,
+      viewportY,
+      zoom,
+    },
+  );
+  const hasGeometryPreview = useGesturePreviewStore((state) =>
+    state.nodeGeometryPreviews?.has(node.id),
+  );
+  const mark = useNodeCollapseStore((state) => state.marks[node.id]);
+  const abs = hasGeometryPreview
+    ? (getAbsolutePosition(previewNodes as NestableNode[], node.id) ??
+      node.position)
+    : (internalPosition ?? node.position);
+  const fallbackSize = selectionOutlineSize(node, internalNode);
+  const { width, height } = renderedGeometry ?? fallbackSize;
+  const footprint = { x: abs.x, y: abs.y, width, height };
+  const rect = mark ? blendedMarkRect(mark) : footprint;
+  const renderedRect =
+    renderedGeometry && !mark
+      ? renderedGeometry
+      : {
+          x: rect.x * zoom + viewportX,
+          y: rect.y * zoom + viewportY,
+          width: rect.width * zoom,
+          height: rect.height * zoom,
+          radius: selectionOutlineRadius(node.type, width, height) * zoom,
+        };
+  const shellRadius = renderedRect.radius;
+
+  return (
+    <SelectionOutline
+      data-canvas-grounding-exclude
+      data-node-selection-outline={node.id}
+      className="pointer-events-none absolute z-998"
+      rect={{
+        x: renderedRect.x,
+        y: renderedRect.y,
+        width: renderedRect.width,
+        height: renderedRect.height,
+      }}
+      variant={mark ? 'offset' : 'solid'}
+      outlineOffset={mark ? easeToward(0, 2, mark.progress) : 0}
+      radius={
+        mark
+          ? easeToward(shellRadius, renderedRect.width / 2, mark.progress)
+          : shellRadius
+      }
+    />
+  );
 }
 
 /**
@@ -41,10 +157,9 @@ export function selectOutlinedNodes(
  * for the bounding-box outline.
  *
  * Visual contract:
- *  - 1px solid `--color-info` (sketch nodes: half-opacity, matching the
- *    softer in-node ring they used to render before this refactor).
- *  - `border-radius` scales with `zoom` so the outline tracks the node's
- *    `rounded-lg` corners at any view scale.
+ *  - Opaque 1.5px solid `--color-info`, without a glow or type-specific fading.
+ *  - `border-radius` uses the node shell's responsive size policy and scales
+ *    with `zoom`, so the outline tracks the rendered corners at any view scale.
  *  - `pointer-events: none` — purely cosmetic; pointer hit-testing still
  *    targets the underlying node DOM (so a covered selected node remains
  *    un-clickable through the covering node, matching common design tools).
@@ -60,10 +175,6 @@ export const SelectionOutlines = () => {
   );
   const { zoom, x: vpX, y: vpY } = useViewport();
   const domNode = useStore((s) => s.domNode);
-  // Collapsed nodes have faded their card away, so outlining the footprint
-  // would box a stretch of empty canvas beside the mark that replaced it.
-  const marks = useNodeCollapseStore((s) => s.marks);
-
   const previewNodes = useMemo(
     () =>
       applyNodeGeometryPreviews(nodes as CanvasNode[], nodeGeometryPreviews),
@@ -76,65 +187,17 @@ export const SelectionOutlines = () => {
 
   if (outlinedNodes.length === 0 || !domNode) return null;
 
-  // Corner radius of the node body (`rounded-lg` in NodeWrapper). Kept
-  // in lockstep with the Tailwind class — if NodeWrapper ever switches
-  // to a different radius, update this constant too.
-  const NODE_RADIUS_PX = 8;
-
-  const outlines = outlinedNodes.map((n) => {
-    const mark = marks[n.id];
-    const abs =
-      getAbsolutePosition(previewNodes as NestableNode[], n.id) ?? n.position;
-    const { width, height } = getNodeSize(n);
-    // Fall back to xyflow's typical defaults when the node has no explicit
-    // measured size yet (e.g. a freshly added node mid-frame).
-    const footprint = {
-      x: abs.x,
-      y: abs.y,
-      width: width || 200,
-      height: height || 100,
-    };
-    const rect = mark ? blendedMarkRect(mark) : footprint;
-    const w = rect.width * zoom;
-    const h = rect.height * zoom;
-    const left = rect.x * zoom + vpX;
-    const top = rect.y * zoom + vpY;
-
-    const isSketch = n.type === 'sketch';
-
-    return (
-      <div
-        key={n.id}
-        data-canvas-grounding-exclude
-        className="pointer-events-none absolute z-998"
-        style={{
-          left,
-          top,
-          width: w,
-          height: h,
-          outline: `1px solid var(--color-info)`,
-          outlineOffset: mark ? easeToward(0, 2, mark.progress) : 0,
-          // Eased to a full circle as the card collapses. `collapsedRadius`
-          // makes the box exactly as wide as the mark's disc is across, so at
-          // the end a circular outline hugs the mark with zero gap, while any
-          // squarer corner exposes up to 0.41r of bare canvas at each corner —
-          // which reads as a white plate behind the mark rather than a ring
-          // around it.
-          borderRadius: mark
-            ? easeToward(NODE_RADIUS_PX * zoom, w / 2, mark.progress)
-            : NODE_RADIUS_PX * zoom,
-          // Soft `info-light` glow so the node selection reads the same
-          // as the selected-edge treatment (info core + info-light halo,
-          // see `.react-flow__edge.selected` in index.css). A larger blur
-          // than the edge's 2px drop-shadow is needed because the halo
-          // wraps a big rectangle rather than a hairline stroke, so a
-          // tight radius would be visually diluted to nothing.
-          boxShadow: `0 0 6px 0 var(--color-info-light)`,
-          opacity: isSketch ? 0.5 : 1,
-        }}
-      />
-    );
-  });
+  const outlines = outlinedNodes.map((node) => (
+    <SelectionOutlineForNode
+      key={node.id}
+      node={node}
+      previewNodes={previewNodes}
+      domNode={domNode}
+      zoom={zoom}
+      viewportX={vpX}
+      viewportY={vpY}
+    />
+  ));
 
   return createPortal(<>{outlines}</>, domNode);
 };

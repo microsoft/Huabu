@@ -13,6 +13,7 @@ import {
   useLayoutEffect,
   useMemo,
   type CSSProperties,
+  type KeyboardEventHandler,
   type ReactNode,
 } from 'react';
 import { createPortal } from 'react-dom';
@@ -50,6 +51,7 @@ export interface CanvasFloatingPopoverProps {
   side?: 'top' | 'bottom';
   className?: string;
   style?: CSSProperties;
+  onKeyDown?: KeyboardEventHandler<HTMLDivElement>;
   children: ReactNode;
 }
 
@@ -84,6 +86,7 @@ export function CanvasFloatingPopover({
   side = 'top',
   className,
   style,
+  onKeyDown,
   children,
 }: CanvasFloatingPopoverProps) {
   const { zoom, x: vpX, y: vpY } = useViewport();
@@ -185,10 +188,13 @@ export function CanvasFloatingPopover({
     return null;
 
   return createPortal(
+    // Bubble boundary for descendant controls, not an interactive surface itself.
+    // eslint-disable-next-line jsx-a11y/no-static-element-interactions
     <div
       ref={refs.setFloating}
       {...FLOATING_CHROME_PROPS}
       className={className}
+      onKeyDown={onKeyDown}
       style={{
         ...floatingStyles,
         zIndex: 1000,

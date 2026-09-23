@@ -87,6 +87,71 @@ forEachProductProfile((profile, label) => {
       return (await currentCanvas()).state.nodes[0] as CanvasNode;
     }
 
+    it('saves layout with unchanged preparation despite missing execution records, but rejects preparation changes', async () => {
+      const readRecord = vi
+        .spyOn(agenetes, 'record')
+        .mockResolvedValue(undefined);
+      const history = vi.spyOn(agenetes, 'history').mockResolvedValue({
+        turns: [{}],
+      } as Awaited<ReturnType<typeof agenetes.history>>);
+      const response = await app.inject({
+        method: 'PUT',
+        url: `/canvas/${canvasId}`,
+        payload: {
+          version: 1,
+          state: {
+            nodes: [
+              {
+                ...node,
+                position: { x: 40, y: 60 },
+                data: {
+                  agentBinding: { kind: 'internal' },
+                  agentLaunchOverrides: null,
+                },
+              },
+            ],
+            edges: [],
+          },
+        },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(await current()).toMatchObject({
+        position: { x: 40, y: 60 },
+        data: {
+          threadId: 'thread-agent',
+          bindingState: 'editing',
+          agentBinding: { kind: 'internal' },
+        },
+      });
+      expect(readRecord).not.toHaveBeenCalled();
+      expect(history).not.toHaveBeenCalled();
+
+      const rejected = await app.inject({
+        method: 'PUT',
+        url: `/canvas/${canvasId}`,
+        payload: {
+          version: response.json().version,
+          state: {
+            nodes: [
+              {
+                ...node,
+                data: {
+                  agentLaunchOverrides: {
+                    additionalInitialPreamble: 'Changed',
+                  },
+                },
+              },
+            ],
+            edges: [],
+          },
+        },
+      });
+      expect(rejected.statusCode).toBe(409);
+      expect(rejected.json().code).toBe('execution_record_missing');
+      expect((await current()).position).toEqual({ x: 40, y: 60 });
+      expect((await currentCanvas()).version).toBe(response.json().version);
+    });
+
     it('initializes a legacy Question once without creating an execution record', async () => {
       const canvas = await currentCanvas();
       await space(canvasId).write({

@@ -40,8 +40,8 @@ export interface HeightPolicy {
    * Width (px) at which this node type renders its content unscaled.
    * Content-bearing containers apply `transform: scale(width / refWidth)`,
    * so a measurement is only meaningful when paired with this width.
-   * Absent for types that do not scale their content with width (`text` and
-   * `question` encode their scale as `data.style.fontSize` instead).
+   * Absent for types that do not scale their content with width. Notes
+   * reflow at their actual inner width; text/question use their font size.
    */
   refWidth?: number;
   /**
@@ -66,10 +66,8 @@ export interface HeightPolicy {
    * at that reference no longer applies and the node renders short.
    *
    * `manual` types are unaffected because their box is the user's; the
-   * scale only decides how large the content is drawn inside it. `note`
-   * deliberately has no floor — semantic zoom already replaces its body
-   * with a placeholder long before the text would become unreadable, so
-   * the floor would buy nothing and cost the invariant.
+   * scale only decides how large the content is drawn inside it. Notes
+   * have no width scale at all and are measured at their actual width.
    */
   minContentScale?: number;
 }
@@ -94,10 +92,8 @@ const MANUAL_POLICY: HeightPolicy = { kind: 'manual' };
  * truncation affordance on a node meant to fit exactly.
  *
  * Horizontally it is why the content's layout width is the node's width
- * *minus* this, which is what {@link contentScaleFor} has to divide by
- * so that the logical layout width lands on the reference width exactly.
- * Get that wrong and the same markdown wraps differently depending on
- * where it was measured.
+ * *minus* this. Notes measure at that inner width; scaled manual bodies
+ * divide it by their reference width.
  *
  * Applied outside the scaled container, so it is canvas-space px and is
  * never multiplied by the content scale.
@@ -107,18 +103,15 @@ export const NODE_SHELL_INSET = 6;
 /**
  * Height policy per node type. Types absent from this table are `manual`.
  *
- * `refWidth` values match the creation defaults in
- * `getNodeDefaultSize` — a node created at its default width renders at
- * scale 1.
+ * Manual `refWidth` values describe the unscaled inner content width,
+ * excluding the shell inset.
  */
 const HEIGHT_POLICIES: Readonly<Record<string, HeightPolicy>> = {
   // The note body measures `.ProseMirror` plus the host's own vertical
   // padding, so the only thing left to add is the node shell itself.
-  // No `minContentScale`: its height is derived from the scale, and a
-  // floor would make the content lay out narrower than `refWidth`.
+  // No reference-width transform: fonts and padding stay in canvas units.
   note: {
     kind: 'toggleable',
-    refWidth: 400,
     minIntrinsicHeight: 50,
     insetY: NODE_SHELL_INSET,
   },

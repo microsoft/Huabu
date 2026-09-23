@@ -463,6 +463,7 @@
     "aiSummary": "AI Summary",
     "closeAiSummary": "Close AI summary",
     "pdfCapture": "PDF capture",
+    "dragToMove": "Drag to move",
     "dragSelectedTextAsNote": "Drag selected text as a note",
     "dragCapturedAreaAsImage": "Drag captured area as an image",
     "sendCapturedAreaToChat": "Send captured area to chat",
@@ -489,6 +490,17 @@
     "watchLiveConversation": "Watch live conversation",
     "viewConversation": "View conversation",
     "openConversation": "Open conversation",
+    "questionCard": {
+      "idle": "Not started",
+      "open": "Conversation open",
+      "running": "Running",
+      "approval": "Approval needed",
+      "unread": "To review",
+      "unreadDescription": "Turn ended · Not viewed",
+      "viewed": "Viewed",
+      "error": "Run error",
+      "conflict": "Changes skipped"
+    },
     "ask": "Ask",
     "agentChangesSkipped_one": "{{count}} agent change was skipped because you were editing.",
     "agentChangesSkipped_other": "{{count}} agent changes were skipped because you were editing.",
@@ -558,6 +570,7 @@
     "noExtractedContentYet": "No extracted content yet. The text will appear here once preprocessing finishes.",
     "openLargeView": "Open Large View",
     "noPreview": "No preview",
+    "previewFailed": "Preview failed to load",
     "processing": "Processing…",
     "download": "Download",
     "officeFileMissing": "{{label}} file missing",
@@ -578,7 +591,9 @@
     "copyLinkFailed": "The node link could not be copied.",
     "downloadImage": "Download image",
     "videoFileMissing": "Video file missing",
-    "noVideoSource": "No Video Source"
+    "noVideoSource": "No Video Source",
+    "playVideo": "Play video",
+    "videoPlaybackFailed": "Unable to play. Try again or open the preview."
   },
   "layers": {
     "title": "Layers",
@@ -914,6 +929,7 @@
       "spreadApart": "Spread apart"
     },
     "accentColor": "Accent color",
+    "cardScale": "Scale",
     "deleteSelected": "Delete selected",
     "sendInkRequest": "Send ink request",
     "sendingInkRequest": "Sending ink request",

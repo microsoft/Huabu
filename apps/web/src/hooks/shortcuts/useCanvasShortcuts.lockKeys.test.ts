@@ -201,6 +201,79 @@ describe('useCanvasShortcuts catalog key lock', () => {
     expect(event.defaultPrevented).toBe(false);
   });
 
+  it.each([
+    '<button>Type</button>',
+    '<button><span>Nested icon</span></button>',
+    '<input type="checkbox">',
+    '<textarea></textarea>',
+    '<select><option>Type</option></select>',
+    '<a href="#">Link</a>',
+    '<div role="button" tabindex="0">Type</div>',
+    '<div role="menuitem" tabindex="0">Type</div>',
+    '<div data-keyboard-interactive tabindex="0"><span>Reader</span></div>',
+    '<div contenteditable="true"><span>Editor text</span></div>',
+  ])('leaves Space to the interactive target %s', (markup) => {
+    const host = document.createElement('div');
+    host.innerHTML = markup;
+    container.append(host);
+    const target = host.querySelector('span') ?? host.firstElementChild;
+    if (!target) throw new Error('Missing keyboard target');
+    const event = new KeyboardEvent('keydown', {
+      key: ' ',
+      bubbles: true,
+      cancelable: true,
+    });
+    act(() => target.dispatchEvent(event));
+    expect(event.defaultPrevented).toBe(false);
+    expect(container.querySelector('[data-tool="select"]')).not.toBeNull();
+    act(() =>
+      target.dispatchEvent(
+        new KeyboardEvent('keyup', {
+          key: ' ',
+          bubbles: true,
+        }),
+      ),
+    );
+    expect(container.querySelector('[data-tool="select"]')).not.toBeNull();
+  });
+
+  it('does not claim Space already handled by a child', () => {
+    const event = new KeyboardEvent('keydown', {
+      key: ' ',
+      bubbles: true,
+      cancelable: true,
+    });
+    event.preventDefault();
+    act(() => container.dispatchEvent(event));
+    expect(container.querySelector('[data-tool="select"]')).not.toBeNull();
+  });
+
+  it('restores canvas Space pan even if keyup moves to a button', () => {
+    const canvas = document.createElement('div');
+    canvas.tabIndex = -1;
+    const button = document.createElement('button');
+    container.append(canvas, button);
+    act(() =>
+      canvas.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: ' ',
+          bubbles: true,
+          cancelable: true,
+        }),
+      ),
+    );
+    expect(container.querySelector('[data-tool="pan"]')).not.toBeNull();
+    act(() =>
+      button.dispatchEvent(
+        new KeyboardEvent('keyup', {
+          key: ' ',
+          bubbles: true,
+        }),
+      ),
+    );
+    expect(container.querySelector('[data-tool="select"]')).not.toBeNull();
+  });
+
   it('keeps temporary pan active until the primary pointer is released', () => {
     act(() => {
       window.dispatchEvent(

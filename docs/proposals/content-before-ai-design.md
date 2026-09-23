@@ -146,7 +146,6 @@ Dynamic CSS rules generated per block via `useMemo`:
 | `apps/web/src/utils/provenance.ts`                   | Provenance utilities (expand, merge, diff derivation, repair)      |
 | `apps/web/src/components/Nodes/NotePreview.tsx`      | Sentinel resolution, onChange tracking, accept/reject handlers     |
 | `apps/web/src/components/Nodes/InlineBlockDiffs.tsx` | Inline diff bars, popovers, word-level diff display                |
-| `apps/web/src/components/Nodes/NodeWrapper.tsx`      | AI badge and provenance summary tooltip                            |
 | `apps/web/src/index.css`                             | `--color-ai`, `--color-ai-light`, `--color-ai-bg` theme tokens     |
 
 ## Dependencies

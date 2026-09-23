@@ -34,26 +34,43 @@ interface FirstPageThumbnailProps {
   src: string;
   canvasId: string;
   onCapture: (dataUrl: string) => void;
+  onError: (error: Error) => void;
 }
 
 export const FirstPageThumbnail = memo(function FirstPageThumbnail({
   src,
   canvasId,
   onCapture,
+  onError,
 }: FirstPageThumbnailProps) {
-  const captured = useRef(false);
+  const settled = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  const handleError = useCallback(
+    (error: Error) => {
+      if (settled.current) return;
+      settled.current = true;
+      onError(error);
+    },
+    [onError],
+  );
 
   const handleRenderSuccess = useCallback(
     (_page: { width: number }) => {
-      if (captured.current) return;
-      const canvas = containerRef.current?.querySelector('canvas');
-      if (canvas) {
-        captured.current = true;
-        onCapture(canvas.toDataURL('image/jpeg', 0.85));
+      if (settled.current) return;
+      let image: string;
+      try {
+        const canvas = containerRef.current?.querySelector('canvas');
+        if (!canvas) throw new Error('PDF thumbnail canvas is unavailable');
+        image = canvas.toDataURL('image/jpeg', 0.85);
+      } catch (error) {
+        handleError(error instanceof Error ? error : new Error(String(error)));
+        return;
       }
+      settled.current = true;
+      onCapture(image);
     },
-    [onCapture],
+    [onCapture, handleError],
   );
 
   return (
@@ -67,6 +84,8 @@ export const FirstPageThumbnail = memo(function FirstPageThumbnail({
         options={PDF_DOCUMENT_OPTIONS}
         loading={null}
         error={null}
+        onSourceError={handleError}
+        onLoadError={handleError}
       >
         <Page
           pageNumber={1}
@@ -74,6 +93,8 @@ export const FirstPageThumbnail = memo(function FirstPageThumbnail({
           renderAnnotationLayer={false}
           renderTextLayer={false}
           onRenderSuccess={handleRenderSuccess}
+          onLoadError={handleError}
+          onRenderError={handleError}
         />
       </Document>
     </div>

@@ -9,6 +9,7 @@ import {
 
 export type CanvasGestureKind =
   | 'touch-pan'
+  | 'marquee'
   | 'lasso'
   | 'sketch-stroke-move'
   | 'sketch-draw'

@@ -54,6 +54,7 @@ test('overlays never resize or pan Canvas and isolate mouse, wheel, touch and ke
   page,
 }, testInfo) => {
   await openNewCanvas(page);
+  await page.keyboard.press('Escape');
   const before = await geometry(page);
   await page.getByRole('button', { name: /open chat panel/i }).click();
   await settlePanels(page);

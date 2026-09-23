@@ -10,7 +10,6 @@
  */
 
 import {
-  BookOpen,
   Film,
   FileType2,
   FileText,
@@ -44,7 +43,7 @@ export const NODE_ICON: Record<CanvasNodeType, LucideIcon> = {
   note: Clipboard,
   text: Type,
   image: ImageIcon,
-  pdf: BookOpen,
+  pdf: FileText,
   // Generic Office icon — used by surfaces that don't have a specific
   // node instance in hand (filter bars, type pickers, fallbacks).
   // For per-instance rendering prefer `getNodeIcon(type, data)` so

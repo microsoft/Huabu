@@ -265,7 +265,7 @@ export const PDFPageWithOverlay = ({
       className={clsx(
         'relative',
         !rendered && 'min-h-40',
-        captureEnabled ? 'cursor-crosshair select-none' : 'select-auto',
+        captureEnabled ? 'cursor-crosshair select-none' : 'select-text',
       )}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}

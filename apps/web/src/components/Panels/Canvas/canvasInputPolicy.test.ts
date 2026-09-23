@@ -147,4 +147,23 @@ describe('canvas input policy', () => {
       );
     },
   );
+  it('reserves multi-selection resize controls and their paint for direct manipulation', () => {
+    const control = document.createElement('div');
+    control.dataset.multiResizeControl = 'br';
+    const grip = document.createElement('span');
+    control.append(grip);
+    expect(isPanelTarget(control)).toBe(true);
+    expect(isPanelTarget(grip)).toBe(true);
+    expect(isPanelTarget(document.createElement('div'))).toBe(false);
+  });
+
+  it('treats active video controls as native interaction but not an inactive poster', () => {
+    const surface = document.createElement('div');
+    const video = document.createElement('video');
+    surface.append(video);
+    surface.dataset.videoControls = 'true';
+    expect(isPanelTarget(video)).toBe(true);
+    surface.dataset.videoControls = 'false';
+    expect(isPanelTarget(video)).toBe(false);
+  });
 });

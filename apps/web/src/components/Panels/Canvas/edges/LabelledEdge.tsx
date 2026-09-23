@@ -17,7 +17,9 @@ import { useTranslation } from 'react-i18next';
 import { EDGE_LABEL_MAX_INVERSE_SCALE } from '@huabu/shared';
 import { getEdgeLineType, getEdgePath } from '@huabu/shared/canvas-engine';
 
-import { getAccentTokens } from '@/components/Nodes/accentTokens';
+import { getAccentTokens } from '@/components/Nodes/design/accentTokens';
+import { FRAME_REGION_STYLE } from '@/components/Nodes/frame/frameRegionStyle';
+import { useFrameInternalEdge } from '@/components/Nodes/frame/FrameZoomContext';
 import useCanvasStore from '@/store/canvasStore';
 import { TEXT_NODE_PADDING_X } from '@/utils/node/nodeFontConfig';
 import { measureTextContent } from '@/utils/node/textMeasure';
@@ -69,6 +71,7 @@ export function LabelledEdge(props: EdgeProps) {
   } = props;
 
   const edgeStyle = getEdgeStyle(data);
+  const frameInternal = useFrameInternalEdge(props.source, props.target);
   const [edgePath, labelX, labelY] = getEdgePath(
     {
       sourceX,
@@ -96,23 +99,34 @@ export function LabelledEdge(props: EdgeProps) {
   // a non-matching rotation introduces.
   return (
     <>
-      <BaseEdge
-        path={edgePath}
-        markerEnd={markerEnd}
-        markerStart={markerStart}
-        style={style}
-      />
-      <EdgeLabelRenderer>
-        <EdgeLabelHost
-          edgeId={id}
-          labelX={labelX}
-          labelY={labelY}
-          value={edgeStyle.label ?? ''}
-          selected={!!selected}
-          edgeStrokeColor={
-            typeof style?.stroke === 'string' ? style.stroke : undefined
-          }
+      <g
+        data-frame-internal-edge={frameInternal || undefined}
+        opacity={frameInternal ? FRAME_REGION_STYLE.edgeOpacity : undefined}
+      >
+        <BaseEdge
+          path={edgePath}
+          markerEnd={markerEnd}
+          markerStart={markerStart}
+          style={style}
         />
+      </g>
+      <EdgeLabelRenderer>
+        <div
+          style={{ visibility: frameInternal ? 'hidden' : undefined }}
+          inert={frameInternal || undefined}
+          aria-hidden={frameInternal || undefined}
+        >
+          <EdgeLabelHost
+            edgeId={id}
+            labelX={labelX}
+            labelY={labelY}
+            value={edgeStyle.label ?? ''}
+            selected={!!selected}
+            edgeStrokeColor={
+              typeof style?.stroke === 'string' ? style.stroke : undefined
+            }
+          />
+        </div>
       </EdgeLabelRenderer>
     </>
   );

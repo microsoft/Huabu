@@ -55,8 +55,9 @@ const setNodeGeometry: CommandDefinition<Cmd> = {
     // && layoutMode === column|row` branch below so the grid solver
     // can re-flow.
     const resizedFrameIds = new Set<string>();
+    const nodeById = new Map(state.nodes.map((node) => [node.id, node]));
     for (const item of cmd.items) {
-      const node = state.nodes.find((n) => n.id === item.nodeId);
+      const node = nodeById.get(item.nodeId);
       if (node && node.type === 'frame') {
         resizedFrameIds.add(node.id);
       }
@@ -113,7 +114,7 @@ const setNodeGeometry: CommandDefinition<Cmd> = {
           // A content-driven type has no number to offer until it renders;
           // leaving `measured.height` alone avoids briefly collapsing it.
           // For materializing types the height is filled in below.
-          delete nextStyle.height;
+          if (!materializes) delete nextStyle.height;
         } else {
           nextStyle.height = update.size.height as number;
           nextMeasured.height = update.size.height as number;
@@ -133,9 +134,8 @@ const setNodeGeometry: CommandDefinition<Cmd> = {
         // no hint exists yet the policy minimum stands in until a
         // measurement arrives.
         //
-        // This also covers a width-only change on an auto note: its
-        // content is transform-scaled by `width / refWidth`, so the
-        // layout height follows the new width.
+        // Width changes invalidate a Note's measurement. Keep its previous
+        // numeric height as a stale seed until the reflow is measured.
         if (materializes) {
           updated = materializeAutoHeight(updated);
         }
@@ -155,8 +155,7 @@ const setNodeGeometry: CommandDefinition<Cmd> = {
           !materializes &&
           updated.parentId &&
           !resizedFrameIds.has(updated.parentId) &&
-          getFrameSizing(state.nodes.find((n) => n.id === updated.parentId)) ===
-            'hug'
+          getFrameSizing(nodeById.get(updated.parentId)) === 'hug'
         ) {
           deferredFitFrameIds.add(updated.parentId);
         }

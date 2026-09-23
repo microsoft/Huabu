@@ -12,6 +12,7 @@ import {
   HEIGHT_LAYOUT_VERSION,
   HEIGHT_QUANTIZATION_STEP,
   autoHeightKey,
+  autoHeightContentWidth,
   contentScaleFor,
   getHeightPolicy,
   getHeightRefWidth,
@@ -35,7 +36,6 @@ import type { Node } from '@xyflow/react';
 const LEGACY_ALWAYS_AUTO = new Set(['text', 'question']);
 const LEGACY_AUTO_BY_DEFAULT = new Set(['text', 'note', 'question']);
 const LEGACY_REF_WIDTHS: Record<string, number> = {
-  note: 400,
   web: 400,
   pdf: 400,
   office: 400,
@@ -85,7 +85,7 @@ describe('height policy table', () => {
     }
   });
 
-  it('reproduces the legacy reference widths', () => {
+  it('retains manual reference widths but lets Notes reflow', () => {
     for (const type of ALL_NODE_TYPES) {
       expect([type, getHeightRefWidth(type)]).toEqual([
         type,
@@ -199,24 +199,19 @@ describe('intrinsicToLayoutHeight', () => {
   it('quantizes to the step so sub-step differences collapse', () => {
     expect(quantizeHeight(100)).toBe(100);
     expect(quantizeHeight(100.4)).toBe(100 + HEIGHT_QUANTIZATION_STEP);
-    expect(intrinsicToLayoutHeight(199, 'note', 400)).toBe(
-      intrinsicToLayoutHeight(201, 'note', 400),
+    expect(intrinsicToLayoutHeight(197, 'note', 400)).toBe(
+      intrinsicToLayoutHeight(198, 'note', 400),
     );
   });
 
-  it('adds the node shell inset after scaling, not before', () => {
-    // The shell border lives outside the scaled container, so doubling
-    // the width doubles the content but not the 6px chrome. The same
-    // 6px also narrows the content box, which is why the scale at the
-    // reference width is 394/400 rather than 1.
-    expect(intrinsicToLayoutHeight(200, 'note', 400)).toBe(204);
-    expect(intrinsicToLayoutHeight(200, 'note', 800)).toBe(404);
+  it('adds shell chrome without scaling the measured Note height', () => {
+    expect(intrinsicToLayoutHeight(200, 'note', 400)).toBe(208);
+    expect(intrinsicToLayoutHeight(200, 'note', 800)).toBe(208);
   });
 
-  it('applies the minimum before scaling', () => {
-    // Note minimum is 50 unscaled; at half width the scale clamp is 0.5.
+  it('keeps the Note minimum in canvas units at every width', () => {
     expect(intrinsicToLayoutHeight(10, 'note', 400)).toBe(56);
-    expect(intrinsicToLayoutHeight(10, 'note', 200)).toBe(32);
+    expect(intrinsicToLayoutHeight(10, 'note', 200)).toBe(56);
   });
 
   it('does not scale types without a reference width', () => {
@@ -224,14 +219,9 @@ describe('intrinsicToLayoutHeight', () => {
     expect(intrinsicToLayoutHeight(200, 'text', undefined)).toBe(200);
   });
 
-  it('does not floor the scale for a type whose height derives from it', () => {
-    // A note keeps shrinking all the way down. A floor would make its
-    // content lay out narrower than the reference width, so a height
-    // measured at that reference would no longer apply and the node
-    // would render short. Semantic zoom, not this, is what keeps a tiny
-    // note readable — it swaps the body for a placeholder.
-    expect(contentScaleFor(getHeightPolicy('note'), 100)).toBeCloseTo(0.235);
-    expect(intrinsicToLayoutHeight(200, 'note', 100)).toBe(56);
+  it('does not shrink Note typography for narrow nodes', () => {
+    expect(contentScaleFor(getHeightPolicy('note'), 100)).toBe(1);
+    expect(intrinsicToLayoutHeight(200, 'note', 100)).toBe(208);
   });
 
   it('floors the scale for manual types, whose box the user owns', () => {
@@ -242,19 +232,42 @@ describe('intrinsicToLayoutHeight', () => {
     expect(contentScaleFor(getHeightPolicy('office'), 100)).toBe(0.5);
   });
 
-  it('keeps the logical layout width at the reference width', () => {
-    // The premise the whole hint cache rests on: content measured at one
-    // node width wraps identically at any other.
+  it('lays out Notes at their actual inner width', () => {
     for (const width of [80, 155, 206, 400, 800, 1600]) {
       const scale = contentScaleFor(getHeightPolicy('note'), width);
-      expect((width - 6) / scale).toBeCloseTo(400);
+      expect(scale).toBe(1);
+      expect(
+        autoHeightContentWidth(node({ type: 'note', style: { width } })),
+      ).toBe(width - 6);
     }
+  });
+
+  it('uses authored width before the DOM mirror, then measured/default fallbacks', () => {
+    expect(
+      autoHeightContentWidth(
+        node({
+          type: 'note',
+          style: { width: 800.25 },
+          measured: { width: 400 },
+        }),
+      ),
+    ).toBe(794.25);
+    expect(
+      autoHeightContentWidth(node({ type: 'note', measured: { width: 600 } })),
+    ).toBe(594);
+    expect(autoHeightContentWidth(node({ type: 'note' }))).toBe(394);
+    expect(
+      autoHeightContentWidth(node({ type: 'note', style: { width: NaN } })),
+    ).toBe(394);
+    expect(
+      autoHeightContentWidth(node({ type: 'note', style: { width: 0 } })),
+    ).toBe(1);
   });
 });
 
 describe('readAutoHeightHint', () => {
   const content = '# hello';
-  const currentKey = `${HEIGHT_LAYOUT_VERSION}:${nodeRevisionOf({ content })}`;
+  const currentKey = autoHeightKey(node({ type: 'note', data: { content } }));
 
   it('reports missing when nothing is stored', () => {
     expect(readAutoHeightHint(node({ type: 'note' }))).toEqual({
@@ -364,11 +377,44 @@ describe('readAutoHeightHint', () => {
       autoHeightKey(node({ type: 'note', data: { content, src: 'a.png' } })),
     );
   });
+
+  it('invalidates width but not height or position changes', () => {
+    const original = node({
+      type: 'note',
+      style: { width: 400 },
+      data: {
+        content,
+        autoHeight: { intrinsicHeight: 120, measuredFor: currentKey },
+      },
+    });
+    expect(
+      readAutoHeightHint({ ...original, style: { width: 800 } }).freshness,
+    ).toBe('stale');
+    expect(
+      autoHeightKey({
+        ...original,
+        style: { width: 400, height: 800 },
+        position: { x: 99, y: 50 },
+      }),
+    ).toBe(currentKey);
+    expect(
+      readAutoHeightHint({
+        ...original,
+        data: {
+          content,
+          autoHeight: {
+            intrinsicHeight: 120,
+            measuredFor: `${HEIGHT_LAYOUT_VERSION}:${nodeRevisionOf({ content })}`,
+          },
+        },
+      }).freshness,
+    ).toBe('stale');
+  });
 });
 
 describe('materializeAutoHeight', () => {
   const content = '# hello';
-  const currentKey = `${HEIGHT_LAYOUT_VERSION}:${nodeRevisionOf({ content })}`;
+  const currentKey = autoHeightKey(node({ type: 'note', data: { content } }));
 
   it('gives an unmeasured auto node a positive height', () => {
     const result = materializeAutoHeight(node({ type: 'note' }));
@@ -389,8 +435,8 @@ describe('materializeAutoHeight', () => {
         },
       }),
     );
-    // 260 content, scaled by 394/400, plus 6px shell chrome, quantized.
-    expect((result.style as { height: number }).height).toBe(264);
+    // 260 content plus 6px shell chrome, quantized.
+    expect((result.style as { height: number }).height).toBe(268);
   });
 
   it('materializes a stale hint too — a seed beats a collapse', () => {
@@ -404,7 +450,7 @@ describe('materializeAutoHeight', () => {
         },
       }),
     );
-    expect((result.style as { height: number }).height).toBe(264);
+    expect((result.style as { height: number }).height).toBe(268);
   });
 
   it('leaves fixed nodes alone', () => {
@@ -446,7 +492,7 @@ describe('materializeAutoHeight', () => {
         },
       }),
     );
-    expect(result.measured?.height).toBe(264);
+    expect(result.measured?.height).toBe(268);
     expect(result.measured?.width).toBe(400);
   });
 
@@ -456,5 +502,25 @@ describe('materializeAutoHeight', () => {
       materializeAutoHeight(node({ id: 'b', type: 'note' })),
     ];
     expect(materializeAutoHeights(nodes)).toBe(nodes);
+  });
+
+  it('preserves numeric geometry as a seed when width or layout version is stale', () => {
+    for (const measuredFor of [currentKey, '10:legacy']) {
+      const stale = node({
+        type: 'note',
+        style: { width: 800, height: 321 },
+        measured: { height: 999 },
+        data: {
+          heightMode: 'auto',
+          content,
+          autoHeight: { intrinsicHeight: 260, measuredFor },
+        },
+      });
+      const result = materializeAutoHeight(stale);
+      expect(result.style?.height).toBe(321);
+      expect(result.measured?.height).toBe(321);
+      expect(result.data.autoHeight).toBe(stale.data.autoHeight);
+      expect(readAutoHeightHint(result).freshness).toBe('stale');
+    }
   });
 });

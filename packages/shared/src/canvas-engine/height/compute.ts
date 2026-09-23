@@ -6,7 +6,7 @@
  *
  * The one pure conversion shared by every producer and consumer of an
  * auto height. A measurement taken in a browser is an *intrinsic* height:
- * the unscaled height of the content at the node type's reference width.
+ * the unscaled height of Note content at its actual inner width.
  * The number written to `style.height` is a *layout* height: intrinsic,
  * clamped, scaled by the node's current width, plus chrome.
  *
@@ -19,6 +19,27 @@ import {
   NODE_SHELL_INSET,
   type HeightPolicy,
 } from './policy.js';
+import { getNodeDefaultSize } from '../utils/nodeSizes.js';
+
+import type { Node } from '@xyflow/react';
+
+/** Actual Note measurement width in canvas units, including host padding.
+ * Authored width wins over a lagging DOM mirror; zoom never participates.
+ */
+export function autoHeightContentWidth(
+  node: Pick<Node, 'type' | 'style' | 'measured'>,
+): number {
+  const authored = node.style?.width;
+  const width =
+    typeof authored === 'number' && Number.isFinite(authored)
+      ? authored
+      : node.measured?.width;
+  const outer =
+    typeof width === 'number' && Number.isFinite(width)
+      ? width
+      : getNodeDefaultSize(node.type ?? 'note').width;
+  return Math.max(1, outer - NODE_SHELL_INSET);
+}
 
 /**
  * Absolute floor on the content scale, used when a type declares no

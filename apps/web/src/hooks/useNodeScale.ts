@@ -17,7 +17,8 @@ import useCanvasStore from '@/store/canvasStore';
  * formula here is a second place for it to drift — including the node
  * shell inset, which is easy to forget and changes where text wraps.
  *
- * At the default creation size the scale is 1.  Clamped to min 0.5.
+ * Manual document bodies retain their 0.5 floor. Notes have no reference
+ * width and use an untransformed actual-width viewport instead.
  */
 export function useNodeScale(nodeId: string, nodeType: string): number {
   const policy = getHeightPolicy(nodeType);

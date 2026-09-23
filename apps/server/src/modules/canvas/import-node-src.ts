@@ -11,14 +11,15 @@
  *   - an RFS **upload** path (`upload/foo.png` → physical `.upload/foo.png`),
  *     staged via `POST /api/rfs/:canvasId/upload/*`;
  *   - any other canvas-relative file path that lives outside `.artifacts/`;
- *   - an **online** URL (`https://…/foo.png`).
+ *   - a direct **online** media URL (`https://…/foo.png`).
  *
  * The web only serves node media from `<canvasDir>/.artifacts/` (via
  * `GET /api/canvas/:id/artifact/:key`), so any of the above renders as a
  * broken image. This hook rewrites each foreign `src` into a bare artifact
  * key by copying / downloading the bytes into `.artifacts/`. Values that are
  * already artifact keys, `/api/…` URLs, or `data:` URIs pass through
- * untouched, so the pass is idempotent and safe to run on every agent batch.
+ * untouched, as do validated YouTube URLs on video nodes, so the pass is
+ * idempotent and safe to run on every agent batch.
  *
  * Called from {@link import('./canvas-executor.js').executeOnServer} before
  * the shared engine sees the batch, so both agent write paths are covered by
@@ -43,6 +44,7 @@ import {
   sandboxRoot,
   toPhysicalRel,
 } from '../agent/tools/handlers/fs-sandbox.js';
+import { extractYoutubeVideoId } from '../preprocessing/loaders/youtube-id.js';
 import { space } from '../storage/index.js';
 
 const log = getLogger('canvas.import-node-src');
@@ -80,8 +82,8 @@ const KNOWN_MEDIA_EXT: ReadonlySet<string> = new Set(
 /**
  * Node types whose `data.src` is a **local media artifact** served from
  * `.artifacts/`. Remote (`http(s)://`) srcs are downloaded and rewritten too,
- * because these node types never carry a *live* URL — the web client only ever
- * renders their bytes from the artifact store.
+ * except validated YouTube video URLs: those must remain live platform URLs
+ * for embedding and provider-specific cover preprocessing.
  */
 const ARTIFACT_SRC_NODE_TYPES: ReadonlySet<string> = new Set([
   'image',
@@ -116,8 +118,16 @@ interface SrcNormalizeMode {
  * Resolve how a given node type's `src` should be normalized, or `null` when
  * the type is not artifact-backed and should be left untouched.
  */
-function srcNormalizeMode(type: string): SrcNormalizeMode | null {
-  if (ARTIFACT_SRC_NODE_TYPES.has(type)) return { allowRemoteDownload: true };
+function srcNormalizeMode(type: string, src: unknown): SrcNormalizeMode | null {
+  if (ARTIFACT_SRC_NODE_TYPES.has(type)) {
+    return {
+      allowRemoteDownload: !(
+        type === 'video' &&
+        typeof src === 'string' &&
+        extractYoutubeVideoId(src) !== null
+      ),
+    };
+  }
   if (LOCAL_ONLY_ARTIFACT_SRC_NODE_TYPES.has(type)) {
     return {
       allowRemoteDownload: false,
@@ -173,9 +183,9 @@ export async function importForeignNodeSources(
     if (cmd.type === 'CREATE_NODES') {
       const nodes = await Promise.all(
         cmd.nodes.map(async (node) => {
-          const mode = srcNormalizeMode(node.nodeType);
-          if (!mode) return node;
           const data = node.data as Record<string, unknown> | undefined;
+          const mode = srcNormalizeMode(node.nodeType, data?.['src']);
+          if (!mode) return node;
           const key = await resolveImportedSrc(
             canvasId,
             data?.['src'],
@@ -197,7 +207,10 @@ export async function importForeignNodeSources(
     if (cmd.type === 'MERGE_NODE_DATA') {
       const patches = await Promise.all(
         cmd.patches.map(async (entry) => {
-          const mode = srcNormalizeMode(await nodeType(entry.nodeId));
+          const mode = srcNormalizeMode(
+            await nodeType(entry.nodeId),
+            entry.patch?.['src'],
+          );
           if (!mode) return entry;
           const key = await resolveImportedSrc(
             canvasId,
@@ -224,8 +237,8 @@ export async function importForeignNodeSources(
  * the caller to leave it unchanged.
  *
  * `allowRemoteDownload` gates the `http(s)://` branch: media node types
- * download and fix up remote srcs, but `web` nodes must keep a live URL
- * verbatim (see {@link LOCAL_ONLY_ARTIFACT_SRC_NODE_TYPES}). When
+ * download and fix up remote srcs, but validated YouTube video URLs and
+ * live `web` URLs stay verbatim (see {@link srcNormalizeMode}). When
  * `allowedLocalExtensions` is present, local files outside that allowlist are
  * preserved in place and left unchanged.
  */

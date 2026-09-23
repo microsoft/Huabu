@@ -3,15 +3,14 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { nodeRevisionOf } from '../change.js';
-import { HEIGHT_LAYOUT_VERSION } from '../height/freshness.js';
+import { autoHeightKey, readAutoHeightHint } from '../height/freshness.js';
 import { executeCanvasCommands } from '../index.js';
 
 import type { CanvasCommand } from '../../types/canvas/index.js';
 import type { CanvasNode, CanvasEdge } from '../interfaces.js';
 
 const CONTENT = '# hello';
-const KEY = `${HEIGHT_LAYOUT_VERSION}:${nodeRevisionOf({ content: CONTENT })}`;
+const KEY = autoHeightKey(note('n1'));
 
 function note(id: string, overrides: Partial<CanvasNode> = {}): CanvasNode {
   return {
@@ -67,12 +66,12 @@ describe("SET_NODE_GEOMETRY height: 'auto'", () => {
 
     expect(styleOf(writeResult.nodes, 'n1')).toEqual({
       width: 400,
-      height: 264,
+      height: 268,
     });
     expect(dataOf(writeResult.nodes, 'n1').heightMode).toBe('auto');
     // `getNodeSize` reads `measured` first, so the mirror must agree.
     expect(writeResult.nodes.find((n) => n.id === 'n1')?.measured?.height).toBe(
-      264,
+      268,
     );
   });
 
@@ -92,8 +91,9 @@ describe("SET_NODE_GEOMETRY height: 'auto'", () => {
     expect(styleOf(writeResult.nodes, 'n1')?.height).toBeGreaterThan(0);
   });
 
-  it('follows the new width, because note content scales with it', () => {
+  it('keeps the previous numeric height until the new width is measured', () => {
     const withHint = note('n1', {
+      style: { width: 400, height: 208 },
       data: {
         type: 'note',
         content: CONTENT,
@@ -114,8 +114,33 @@ describe("SET_NODE_GEOMETRY height: 'auto'", () => {
 
     expect(styleOf(writeResult.nodes, 'n1')).toEqual({
       width: 800,
-      height: 404,
+      height: 208,
     });
+    expect(readAutoHeightHint(writeResult.nodes[0]).freshness).toBe('stale');
+    const stale = run(
+      [
+        {
+          type: 'APPLY_MEASURED_HEIGHT',
+          items: [
+            { nodeId: 'n1' as never, intrinsicHeight: 500, measuredFor: KEY },
+          ],
+        },
+      ],
+      writeResult.nodes,
+    ).writeResult;
+    expect(stale.nodes).toBe(writeResult.nodes);
+    const measuredFor = autoHeightKey(writeResult.nodes[0]);
+    const settled = run(
+      [
+        {
+          type: 'APPLY_MEASURED_HEIGHT',
+          items: [{ nodeId: 'n1' as never, intrinsicHeight: 120, measuredFor }],
+        },
+      ],
+      writeResult.nodes,
+    ).writeResult;
+    expect(styleOf(settled.nodes, 'n1')?.height).toBe(128);
+    expect(readAutoHeightHint(settled.nodes[0]).freshness).toBe('current');
   });
 
   it('records fixed ownership when a number is written', () => {
@@ -172,9 +197,9 @@ describe('APPLY_MEASURED_HEIGHT', () => {
       ],
     );
 
-    expect(styleOf(writeResult.nodes, 'n1')?.height).toBe(264);
+    expect(styleOf(writeResult.nodes, 'n1')?.height).toBe(268);
     expect(writeResult.nodes.find((n) => n.id === 'n1')?.measured?.height).toBe(
-      264,
+      268,
     );
     expect(dataOf(writeResult.nodes, 'n1').autoHeight).toEqual({
       intrinsicHeight: 260,
@@ -266,7 +291,7 @@ describe('APPLY_MEASURED_HEIGHT', () => {
     );
 
     expect(dataOf(writeResult.nodes, 'n1').heightMode).toBe('auto');
-    expect(styleOf(writeResult.nodes, 'n1')?.height).toBe(264);
+    expect(styleOf(writeResult.nodes, 'n1')?.height).toBe(268);
   });
 
   it('reuses node references for an unchanged re-measurement', () => {

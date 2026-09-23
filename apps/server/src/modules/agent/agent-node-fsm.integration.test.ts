@@ -253,12 +253,18 @@ forEachProductProfile((profile, label) => {
     });
 
     it.each(['command', 'put', 'delta'] as const)(
-      'keeps same-config promotion and fresh CAS during %s Save',
+      'preserves the same-config binding and version policy during %s Save',
       async (operation) => {
         await createCanonicalExecution();
         const before = await space(target.canvasId).read();
         if (!before) throw new Error('Space disappeared');
         const node = await current();
+        expect(node.data.bindingState).toBe('editing');
+        const expectedBindingState = operation === 'put' ? 'editing' : 'bound';
+        const expectedVersion = before.version + (operation === 'put' ? 1 : 2);
+        const expectedLabel = operation === 'put' ? 'Agent' : 'Saved';
+        const expectedPosition =
+          operation === 'put' ? { x: 40, y: 60 } : node.position;
         if (operation === 'command') {
           const result = await executeOnServer({
             canvasId: target.canvasId,
@@ -295,6 +301,7 @@ forEachProductProfile((profile, label) => {
                   nodes: [
                     {
                       ...node,
+                      position: expectedPosition,
                       data: {
                         agentBinding: { kind: 'internal' },
                         label: 'Saved',
@@ -305,7 +312,7 @@ forEachProductProfile((profile, label) => {
               },
             });
             expect(response.statusCode, response.body).toBe(200);
-            expect(response.json().version).toBe(before.version + 2);
+            expect(response.json().version).toBe(expectedVersion);
           } finally {
             await app.close();
           }
@@ -327,14 +334,27 @@ forEachProductProfile((profile, label) => {
           expect(result.toVersion).toBe(before.version + 2);
         }
         expect((await current()).data).toMatchObject({
-          bindingState: 'bound',
+          bindingState: expectedBindingState,
           agentBinding: { kind: 'internal' },
         });
+        expect(
+          (await space(target.canvasId).nodes.read(target.nodeId))?.record
+            .label,
+        ).toBe(expectedLabel);
+        expect((await current()).position).toEqual(expectedPosition);
         await agenetes.close(target.threadId);
         await mounted.reopen();
-        expect((await current()).data.bindingState).toBe('bound');
+        expect((await current()).data).toMatchObject({
+          bindingState: expectedBindingState,
+          agentBinding: { kind: 'internal' },
+        });
+        expect(
+          (await space(target.canvasId).nodes.read(target.nodeId))?.record
+            .label,
+        ).toBe(expectedLabel);
+        expect((await current()).position).toEqual(expectedPosition);
         expect((await space(target.canvasId).read())?.version).toBe(
-          before.version + 2,
+          expectedVersion,
         );
       },
     );

@@ -1,14 +1,17 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { NOTE_SURFACE_DESIGN_CONFIG } from './noteDesign';
+import { NODE_TYPOGRAPHY_STYLE } from '../design/nodeTypography';
+
 /**
  * Shared geometry of a note's content host.
  *
  * The offscreen measurer and the mounted note must produce the same
  * number for the same markdown, and the only way to guarantee that is to
  * build the same box. Anything here that affects layout — width, padding,
- * display — is imported by both, so a change to one cannot silently
- * diverge from the other.
+ * display, and descendant spacing scope — is imported by both, so a
+ * change to one cannot silently diverge from the other.
  *
  * Colour and background are deliberately excluded: they differ between
  * the two surfaces (accent tints, `visibility: hidden`) and cannot affect
@@ -16,11 +19,19 @@
  */
 
 /**
- * Classes that determine the content host's box. `h-full` is *not* here:
- * the mounted note is constrained to the node's layout height, while the
- * measurer needs the host's natural height.
+ * Classes that determine the content host's box. The mounted note adds
+ * `min-h-full` to fill its viewport while allowing a natural scrollable
+ * document height; the offscreen measurer needs only the natural height.
  */
-export const NOTE_CONTENT_HOST_CLASS = 'flex flex-col rounded p-2';
+export const NOTE_CONTENT_HOST_SCOPE_CLASS = 'huabu-note-content-host';
+export const NOTE_FIRST_BLOCK_CLASS = 'huabu-note-first-block';
+export const NOTE_CONTENT_HOST_CLASS = `${NOTE_CONTENT_HOST_SCOPE_CLASS} flex flex-col rounded`;
+export const NOTE_CONTENT_HOST_STYLE = {
+  ...NODE_TYPOGRAPHY_STYLE,
+  boxSizing: 'border-box',
+  paddingBlock: `${NOTE_SURFACE_DESIGN_CONFIG.contentPaddingBlock}px`,
+  paddingInline: `${NOTE_SURFACE_DESIGN_CONFIG.contentPaddingInline}px`,
+} as const;
 
 /**
  * Read a note's intrinsic content height from its content host.

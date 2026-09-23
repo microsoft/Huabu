@@ -85,6 +85,8 @@ A selected Sketch node deliberately does not use or mutate these drawing presets
 
 ### 3.4 Two-layer model: sketch node vs. stroke selection
 
+Mouse hover routing freezes its hit target during a press and observes pointer release/cancellation in the capture phase so descendant gesture handlers cannot leave it frozen. A mouse move with no buttons held also recovers from a release outside the canvas. Hover must resume without an extra activation click; finger selection policy is unchanged.
+
 A sketch participates in the canvas at **two distinct layers**, and keeping them apart is the key to reasoning about selection, movement, and the two AI paths:
 
 - **Node layer (persistent, structural).** A sketch _is_ an ordinary ReactFlow node — it has an `id`, `position`, optional `parentId`, can be framed / reparented / recolored / relabeled / connected, is addressed by node id for snapshots and OCR, and flows through the same engine commands (`SET_NODE_GEOMETRY`, `SET_NODE_PARENT`, `DELETE_NODES`, …) and the same undo pipeline as every other node. Mouse and pen can use **Select** to manipulate the whole Sketch node; finger input treats Ink as transparent for direct selection and drag, so touch users use **Lasso** for deliberate Ink manipulation.

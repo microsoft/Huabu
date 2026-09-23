@@ -117,10 +117,21 @@ export {
   GRID_SIZE,
   FRAME_POINTER_CAPTURE_MARGIN,
   snapToGrid,
-  paddingFromExtent,
   medianOfChildExtents,
 } from './utils/constants.js';
+export {
+  FRAME_LAYOUT_CONFIG,
+  FRAME_DEFAULT_ACCENT,
+  frameResponsiveTierForSize,
+  frameAccentToken,
+  frameResponsiveMetricsForContentSize,
+  frameResponsiveMetricsForSize,
+  resolveFrameResponsiveLayout,
+  type FrameResponsiveMetrics,
+  type FrameResponsiveTier,
+} from './frame/design.js';
 export { stripMarkdown } from './utils/markdown.js';
+export { structuredFrameResizeScale } from './frame/resize.js';
 export { normalizeMathDelimiters } from './provenance/normalizeMathDelimiters.js';
 export {
   type AutoHeightFreshness,
@@ -132,6 +143,7 @@ export {
   HEIGHT_QUANTIZATION_STEP,
   NODE_SHELL_INSET,
   autoHeightKey,
+  autoHeightContentWidth,
   contentScaleFor,
   getHeightPolicy,
   getHeightRefWidth,

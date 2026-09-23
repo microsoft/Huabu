@@ -214,7 +214,7 @@ describe('preview agrees with the plan', () => {
     const zone = describeStructuredDropZone(
       nodes,
       'frame',
-      { x: 152, y: 136 },
+      { x: 152, y: 184 },
       'grid',
       2,
       moved,

@@ -60,21 +60,21 @@ export const ImageNode = memo(
         {missingFileKind ? (
           <MissingFileBanner nodeId={id} />
         ) : (
-          <div className="flex h-full flex-col">
-            <div className="relative h-full w-full overflow-hidden">
+          <div className="flex h-full flex-col rounded-[inherit]">
+            <div className="relative h-full w-full overflow-hidden rounded-[inherit]">
               {src ? (
                 <>
                   <img
                     src={resolveArtifactUrl(src, canvasId)}
                     alt={data?.label || t('node.nodeImage')}
-                    className="pointer-events-none h-full w-full rounded-lg border-0 object-contain"
+                    className="pointer-events-none h-full w-full rounded-[inherit] border-0 object-contain"
                     onLoad={() => setImgLoaded(true)}
                     onError={() => setImgLoaded(true)}
                     style={imgLoaded ? undefined : { visibility: 'hidden' }}
                   />
                   {!imgLoaded && (
                     <div
-                      className="bg-surface pointer-events-none absolute inset-0 flex items-center justify-center rounded-lg"
+                      className="bg-surface pointer-events-none absolute inset-0 flex items-center justify-center rounded-[inherit]"
                       // `container-type: size` exposes the node's dimensions
                       // to CSS `cqmin` units below so the icon scales with
                       // the smaller of width/height instead of staying a

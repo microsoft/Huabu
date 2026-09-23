@@ -20,6 +20,7 @@
   /* Backgrounds */
   --bg-default: #f5f5f5;
   --bg-surface: #ffffff;
+  --bg-note-surface: var(--bg-surface);
 
   --bg-hover: #f2f2f2;
   --bg-inverse: #1f1f1f;
@@ -34,22 +35,22 @@
   --info-bg-hover: #dbeafe;
 
   /* Status: success */
-  --success: #16a34a;
-  --success-light: #6faf4f;
-  --success-bg: #f0fdf4;
-  --success-bg-hover: #dcfce7;
+  --success: #1b5e20;
+  --success-light: #a4c9a4;
+  --success-bg: #f3f9f3;
+  --success-bg-hover: #deeedd;
 
   /* Status: warning */
   --warning: #d97a2b;
-  --warning-light: #f7c85c;
-  --warning-bg: #fef6e7;
-  --warning-bg-hover: #fbe7ad;
+  --warning-light: #e2b38d;
+  --warning-bg: #fdf6f1;
+  --warning-bg-hover: #f7e5d6;
 
   /* Status: danger */
-  --danger: #e43636;
-  --danger-light: #cf8181;
+  --danger: #b82132;
+  --danger-light: #e3b2a9;
   --danger-bg: #fcf8f8;
-  --danger-bg-hover: #fee2e2;
+  --danger-bg-hover: #fbe2e1;
 
   /* AI colors */
   --ai: #bda6ce;
@@ -89,6 +90,11 @@
   --fg-inverse: #191919;
   --bg-default: oklch(0.145 0 0);
   --bg-surface: oklch(0.22 0 0);
+  --bg-note-surface: color-mix(
+    in srgb,
+    var(--bg-surface) 92%,
+    var(--fg-default)
+  );
   --bg-hover: oklch(0.25 0 0);
   --bg-inverse: oklch(0.87 0 0);
   --edge-default: oklch(1 0 0 / 10%);
@@ -369,6 +375,23 @@ body,
   background-color: var(--bg-hover);
 }
 
+/* The retained native selection rectangle keeps keyboard movement and native
+  group dragging outside Mouse Select. Only the shared HUD paints chrome; otherwise
+   XYFlow's extra dotted border/fill overlaps Frame and child-selection outlines.
+   Keep the live marquee (.react-flow__selection) unchanged. */
+.react-flow .react-flow__nodesselection-rect {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+/* Mouse Select must reach the real pane/Frame/child/control below the retained
+   union. Selected node bodies already drag the native multi-selection. Keep
+   the overlay mounted and focusable; do not change touch/pen or other tools. */
+[data-canvas-root][data-mouse-marquee] .react-flow__nodesselection-rect {
+  pointer-events: none;
+}
+
 .canvas-pending-note .react-flow__pane,
 .canvas-pending-text .react-flow__pane,
 .canvas-pending-question .react-flow__pane,
@@ -457,19 +480,14 @@ body,
   color: var(--color-fg-subtle);
 }
 
-/* Semantic zoom cross-fade.
-   Both layers stay mounted so entering and leaving minimal LOD animate
-   symmetrically. Visibility changes only after the outgoing opacity reaches
-   zero, keeping hidden editors out of focus navigation without cutting the
-   fade short. Only opacity is animated; node geometry remains immediate. */
+/* Binary semantic visibility; hysteresis belongs to the presentation policy.
+  Keep text crisp throughout the handoff without changing node geometry.
+  Question's independent whole-card takeover animation remains below. */
 .semantic-lod-placeholder,
 .semantic-lod-content {
   opacity: 1;
   visibility: visible;
-  transition-property: opacity, visibility;
-  transition-duration: 120ms, 0s;
-  transition-timing-function: ease-out, linear;
-  transition-delay: 0s, 0s;
+  transition: none;
 }
 
 .semantic-lod-node[data-lod='full'] > .semantic-lod-placeholder,
@@ -477,7 +495,6 @@ body,
   pointer-events: none;
   opacity: 0;
   visibility: hidden;
-  transition-delay: 0s, 120ms;
 }
 
 /* Discrete three-stage takeover (question node). The whole card — background,
@@ -496,6 +513,18 @@ body,
 }
 .semantic-lod-node[data-lod-body='hidden'] {
   opacity: 0;
+}
+
+/* Frame takeover preserves every footprint and handle; only the shell remains. */
+.semantic-lod-node[data-frame-suppressed='true']:not([data-lod-body]) {
+  opacity: 1;
+  transition: none;
+}
+.semantic-lod-node[data-frame-suppressed='true'] > .semantic-lod-content,
+.semantic-lod-node[data-frame-suppressed='true'] > .semantic-lod-placeholder {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -610,6 +639,26 @@ body:not(.canvas-resize-active) .react-flow__node-frame:not(.dragging) {
 .react-flow__resize-control.line.bottom {
   height: 12px !important;
   z-index: 5;
+}
+
+/* Resize hit regions never paint a second frame or button chrome. */
+.react-flow__resize-control.node-resize-edge {
+  background: transparent !important;
+  outline: none;
+  box-shadow: none;
+}
+.react-flow__resize-control.node-resize-corner {
+  display: grid;
+  place-items: center;
+  outline: none;
+  box-shadow: none;
+}
+.node-resize-grip {
+  pointer-events: none;
+}
+body.node-resize-active,
+body.node-resize-active * {
+  cursor: var(--node-resize-cursor) !important;
 }
 
 /* Keep pdf.js text-layer spans invisible during text selection so the

@@ -5,10 +5,7 @@ import { MoveRight, Trash2 } from 'lucide-react';
 import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import {
-  ACCENT_NONE_TOKEN,
-  ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT,
-} from '@huabu/shared';
+import { ACCENT_NONE_TOKEN } from '@huabu/shared';
 import {
   DEFAULT_EDGE_STROKE_TOKEN,
   getSelectionBounds,
@@ -22,11 +19,17 @@ import {
   FloatingToolbar,
   FLOATING_TOOLBAR_CLASS,
 } from '@/components/Common/FloatingToolbar';
+import { nodeUsesAccent } from '@/components/Nodes/design/nodeAccentPolicy';
 import { useIsNotMouse } from '@/hooks/useInputMode';
 import { translateColorOptions } from '@/i18n/colors';
 import useCanvasStore from '@/store/canvasStore';
 import { resolveGeometryEdit } from '@/utils/node/geometry';
 import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
+
+import {
+  nodeAccentPickerOptions,
+  nodeAccentPickerValue,
+} from './nodeAccentPickerOptions';
 
 import type { CanvasNode } from '@/components/Nodes/types';
 import type { CanvasEdgeId, CanvasNodeId } from '@huabu/shared';
@@ -83,16 +86,22 @@ export const MultiSelectToolbar = () => {
   // Determine the common accent among selected nodes (empty string if mixed)
   const commonAccent = useMemo(() => {
     if (selectedNodes.length === 0) return ACCENT_NONE;
-    const first = selectedNodes[0].data?.style?.accent ?? null;
-    const allSame = selectedNodes.every(
-      (n) => (n.data?.style?.accent ?? null) === first,
+    const first = nodeAccentPickerValue(
+      selectedNodes[0].type,
+      selectedNodes[0].data?.style?.accent,
     );
-    return allSame ? (first ?? ACCENT_NONE) : ACCENT_NONE;
+    const allSame = selectedNodes.every(
+      (n) => nodeAccentPickerValue(n.type, n.data?.style?.accent) === first,
+    );
+    return allSame ? first : ACCENT_NONE;
   }, [selectedNodes]);
+  const allSelectedUseAccent = selectedNodes.every((node) =>
+    nodeUsesAccent(node.type),
+  );
 
   const textFlowSelection = useMemo(() => {
     if (selectedNodes.length === 0) return null;
-    if (!selectedNodes.every((n) => isAlwaysAutoHeightNodeType(n.type ?? ''))) {
+    if (!selectedNodes.every((n) => n.type === 'text')) {
       return null;
     }
     const first = selectedNodes[0].data?.style?.fontSize ?? 16;
@@ -112,16 +121,13 @@ export const MultiSelectToolbar = () => {
   );
   const hasMixedTextAndBoxSelection = hasTextFlowSelection && hasBoxSelection;
 
-  // Always include the "Transparent" swatch so users can revert a node
-  // back to the default (no-accent / neutral surface) state. Hiding it
-  // for non-text selections used to be the design (the assumption being
-  // that other types "need a solid background"), but in practice every
-  // node defaults to a null accent and the picker had no way to express
-  // that state — once a coloured swatch was clicked it could not be
-  // undone.
   const accentPickerOptions = useMemo(
-    () => translateColorOptions(ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT, t),
-    [t],
+    () =>
+      translateColorOptions(
+        nodeAccentPickerOptions(selectedNodes.map((node) => node.type)),
+        t,
+      ),
+    [selectedNodes, t],
   );
 
   // Common width / height across selected nodes. `null` when the
@@ -285,40 +291,42 @@ export const MultiSelectToolbar = () => {
       <FloatingToolbar.Divider />
 
       {/* Accent color for selected nodes and the edges between them. */}
-      <FloatingToolbar.ColorPicker
-        colors={accentPickerOptions}
-        value={commonAccent}
-        onSelect={(token) => {
-          const accent = token === ACCENT_NONE ? null : token;
-          if (selectedNodes.length === 0) return;
+      {allSelectedUseAccent && (
+        <FloatingToolbar.ColorPicker
+          colors={accentPickerOptions}
+          value={commonAccent}
+          onSelect={(token) => {
+            const accent = token === ACCENT_NONE ? null : token;
+            if (selectedNodes.length === 0) return;
 
-          executeCommands([
-            {
-              type: 'MERGE_NODE_DATA',
-              patches: selectedNodes.map((node) => ({
-                nodeId: node.id as CanvasNodeId,
-                patch: {
-                  style: { ...node.data?.style, accent },
-                },
-              })),
-            },
-            ...(selectedInternalEdges.length > 0
-              ? [
-                  {
-                    type: 'SET_EDGE_STYLE' as const,
-                    edges: selectedInternalEdges.map((edge) => ({
-                      edge: edge.id as CanvasEdgeId,
-                      style: {
-                        stroke: accent ?? DEFAULT_EDGE_STROKE_TOKEN,
-                      },
-                    })),
+            executeCommands([
+              {
+                type: 'MERGE_NODE_DATA',
+                patches: selectedNodes.map((node) => ({
+                  nodeId: node.id as CanvasNodeId,
+                  patch: {
+                    style: { ...node.data?.style, accent },
                   },
-                ]
-              : []),
-          ]);
-        }}
-        title={t('toolbar.accentColor')}
-      />
+                })),
+              },
+              ...(selectedInternalEdges.length > 0
+                ? [
+                    {
+                      type: 'SET_EDGE_STYLE' as const,
+                      edges: selectedInternalEdges.map((edge) => ({
+                        edge: edge.id as CanvasEdgeId,
+                        style: {
+                          stroke: accent ?? DEFAULT_EDGE_STROKE_TOKEN,
+                        },
+                      })),
+                    },
+                  ]
+                : []),
+            ]);
+          }}
+          title={t('toolbar.accentColor')}
+        />
+      )}
 
       {!hasNonMovableSelection && (
         <>

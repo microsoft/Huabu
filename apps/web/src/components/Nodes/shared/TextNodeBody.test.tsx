@@ -105,7 +105,7 @@ describe('measurement / layout agreement', () => {
     // metric (`chars * size * 0.6`), so it fits 97px but not 91px.
     const text = 'Frame Test';
     const fontSize = 16;
-    const outerWidth = 121;
+    const outerWidth = 97 + TEXT_NODE_PADDING_X * 2;
     const width = renderedTextWidth(outerWidth);
     expect(width).toBe(97);
 

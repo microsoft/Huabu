@@ -24,7 +24,7 @@
  *
  *   C. Child baseline scaling (`captureFrameResizeSnapshot` /
  *      `applyFrameResizeScale` / `clearFrameResizeSnapshot`) —
- *      captures direct children's pre-gesture geometry so the handler
+ *      captures the subtree's pre-gesture geometry so the handler
  *      can scale them proportionally each tick. Used for **every**
  *      layout mode: `free` keeps the scaled child positions; the
  *      structured (`column` / `row`) grid solver re-packs the scaled
@@ -48,10 +48,12 @@
 
 import {
   computeFrameFit,
+  createAbsolutePositionGetter,
   getAbsolutePosition as getFrameAbsolutePosition,
   getFrameSizing,
   getNodeSize,
   getStructuredFrameGutterPlan,
+  structuredFrameResizeScale,
   type NestableNode,
   type StructuredGutterSizes,
 } from '@huabu/shared/canvas-engine';
@@ -144,7 +146,7 @@ export type ResizePreviewController = {
 };
 
 /**
- * Snapshot of a frame's direct children captured at the start of a
+ * Snapshot of a frame's children captured at the start of a
  * resize gesture. {@link ResizePreviewController.applyFrameResizeScale}
  * reads these to compute a proportional scale on every preview tick.
  */
@@ -161,17 +163,16 @@ type FrameResizeChildSnapshot = {
    */
   style?: NodeStyle;
   /**
-   * Content-aware font fit captured at gesture start (text + fontOpts +
-   * inset). `null` for non-text nodes. Lets the cascade re-derive the
-   * child's fontSize for its NEW box with the same pretext fit the node
-   * uses for its own resize, instead of a crude `min(sx, sy)` multiplier
-   * that ignores re-wrapping.
+   * Starting font and outer width for Text/Question proportional scaling.
+   * Other node types do not author a font during the cascade.
    */
   fontFit?: NodeFontFit | null;
 };
 
 type FrameResizeSnapshot = {
   frameId: string;
+  parentId?: string;
+  parentOrigin: { x: number; y: number };
   frameX: number;
   frameY: number;
   frameWidth: number;
@@ -183,7 +184,11 @@ type FrameResizeSnapshot = {
    */
   sizing: FrameSizing;
   gutters?: StructuredGutterSizes;
+  /** Immutable gesture-start topology for the canonical inverse layout. */
+  layoutNodes: Node[];
+  layoutEdges: readonly Edge[];
   children: FrameResizeChildSnapshot[];
+  nestedFrames: Map<string, FrameResizeSnapshot>;
 };
 
 function collectGutterSizes(
@@ -237,7 +242,7 @@ export function createResizePreviewController(opts: {
 
   // Last fontSize actually written per child during the current
   // gesture. Lets `flushScale` skip redundant `patchNodeSilent` calls
-  // when the rounded scaled font is unchanged across coalesced ticks,
+  // when the exact scaled font is unchanged across coalesced ticks,
   // keeping store churn (and autosave middleware passes) minimal.
   const lastAppliedFont = new Map<string, number>();
 
@@ -311,8 +316,14 @@ export function createResizePreviewController(opts: {
     if (snap.frameWidth <= 0 || snap.frameHeight <= 0) return;
     const frameWidth = width;
     const frameHeight = height;
-    const frameX = x;
-    const frameY = y;
+    // XYFlow/snap proposals use the gesture-start parent coordinate space.
+    // Hug ancestors can move while fitting; convert to the current local
+    // space before dispatching, otherwise each tick accumulates that shift.
+    const parentOrigin = snap.parentId
+      ? getFrameAbsolutePosition([...opts.getState().nodes], snap.parentId)
+      : undefined;
+    const frameX = x + snap.parentOrigin.x - (parentOrigin?.x ?? 0);
+    const frameY = y + snap.parentOrigin.y - (parentOrigin?.y ?? 0);
     // Always include the frame's NEW local origin in the batch so
     // non-BR handle drags don't depend on the `onNodesChange`
     // snap-mirror running in a separate pass to commit the frame's
@@ -334,8 +345,8 @@ export function createResizePreviewController(opts: {
       // local position by the inverse delta. BR/B/R-handle drags
       // leave `(frameX, frameY)` equal to the gesture-start origin
       // and the compensation is a no-op.
-      const dx = frameX - snap.frameX;
-      const dy = frameY - snap.frameY;
+      const dx = x - snap.frameX;
+      const dy = y - snap.frameY;
       for (const child of snap.children) {
         items.push({
           nodeId: child.id,
@@ -352,82 +363,82 @@ export function createResizePreviewController(opts: {
       );
       return;
     }
-    // ---- Hug branch: per-axis scaling ------------------------------
-    // Per-axis (sx, sy) for all hug layouts (free, column, row). For
-    // structured (`column` / `row`) frames the grid solver derives
-    // padding + gap per-axis (widths drive padX + interGapX, heights
-    // drive padY + intraGapY — see
-    // `packages/shared/src/canvas-engine/autoLayout/gridLayout.ts`),
-    // so scaling all child widths by `sx` makes the resulting frame
-    // width = `oldW × sx` exactly, and same for height with `sy`.
-    // Single-edge drags therefore track the pointer pixel-perfect on
-    // the dragged axis and leave the orthogonal axis untouched —
-    // children scale per-axis along with the frame. Diagonal drags
-    // stretch children per-axis (children may look non-square); users
-    // who want uniform scaling can hold Shift (TODO: wire up the
-    // modifier).
-    const sx = width / snap.frameWidth;
-    const sy = height / snap.frameHeight;
-    for (const child of snap.children) {
-      const childWidth = Math.max(1, child.width * sx);
-      const childHeight = Math.max(1, child.height * sy);
-      items.push({
-        nodeId: child.id,
-        size: {
-          width: childWidth,
-          height: childHeight,
-        },
-        // Local positions scale uniformly from the frame origin too,
-        // so the relative gap between any two points (including the
-        // gap between a child and the frame edge) scales by the same
-        // ratio as their sizes. (Structured column / row frames ignore
-        // these positions: the grid solver re-packs the scaled
-        // children at the end of the batch.)
-        position: {
-          x: child.x * sx,
-          y: child.y * sy,
-        },
-      });
-    }
+    // Structured layouts keep their target-tier whitespace fixed. Invert the
+    // same solver used by the executor instead of scaling the entire box.
+    // Free layouts retain proportional authored positions and their explicit
+    // outer box (the geometry command excludes that Frame from auto-fitting).
+    const fonts: Array<{
+      child: FrameResizeChildSnapshot;
+      width: number;
+      height: number;
+    }> = [];
+    const scaleChildren = (
+      frame: FrameResizeSnapshot,
+      targetWidth: number,
+      targetHeight: number,
+    ) => {
+      const scale = structuredFrameResizeScale(
+        frame.layoutNodes,
+        frame.layoutEdges,
+        frame.frameId,
+        targetWidth,
+        targetHeight,
+      );
+      // Text/Question preserve their full content proportions, including
+      // padding and Question chrome. Do not invert fixed layout whitespace
+      // into different child-axis scales: the layout solver can repack the
+      // uniformly scaled children, but must not stretch their content.
+      const scalesContent = frame.children.some((child) => child.fontFit);
+      const sx = scalesContent
+        ? targetWidth / frame.frameWidth
+        : (scale?.x ?? targetWidth / frame.frameWidth);
+      const sy = scalesContent
+        ? sx
+        : (scale?.y ?? targetHeight / frame.frameHeight);
+      for (const child of frame.children) {
+        const childWidth = Math.max(1, child.width * sx);
+        const childHeight = Math.max(1, child.height * sy);
+        items.push({
+          nodeId: child.id,
+          size: {
+            width: childWidth,
+            height: childHeight,
+          },
+          // Local positions scale uniformly from the frame origin too,
+          // so the relative gap between any two points (including the
+          // gap between a child and the frame edge) scales by the same
+          // ratio as their sizes. (Structured column / row frames ignore
+          // these positions: the grid solver re-packs the scaled
+          // children at the end of the batch.)
+          position: {
+            x: child.x * sx,
+            y: child.y * sy,
+          },
+        });
+        if (child.fontFit)
+          fonts.push({ child, width: childWidth, height: childHeight });
+        const nested = frame.nestedFrames.get(child.id);
+        if (nested && nested.frameWidth > 0 && nested.frameHeight > 0) {
+          scaleChildren(nested, childWidth, childHeight);
+        }
+      }
+    };
+    scaleChildren(snap, width, height);
     // Route through the canonical dispatch path so the gesture
     // snapshot flag stays re-armed. For structured (column/row)
     // frames the grid solver re-packs the scaled children at the
     // end of the batch; for free frames the scaled positions stick.
-    const scaledGutters = snap.gutters
-      ? {
-          x: snap.gutters.x?.map((size) => size * sx),
-          y: snap.gutters.y?.map((size) => size * sy),
-        }
-      : undefined;
-    previewResizeGeometry(
-      items,
-      scaledGutters ? new Map([[snap.frameId, scaledGutters]]) : undefined,
-    );
+    // Use the same target-tier edge gutters as the inverse layout and final
+    // commit, avoiding a different gap policy when the pointer is released.
+    previewResizeGeometry(items);
 
-    // Re-derive text-bearing children's locked fontSize for their NEW
-    // box using the same content-aware pretext fit the node uses for its
-    // own resize (`computeFontSizeForHeight` via `useTextAutoSize`), so a
-    // cascaded frame resize and a direct node resize land on the same
-    // size. A plain `min(sx, sy)` multiplier handles text poorly: it
-    // ignores re-wrapping, so widening a node while keeping its height
-    // would cap the font to the smaller axis even though the rewrapped
-    // text could grow.
-    //
-    // EVERY text-bearing child is refit — including nodes that did not
-    // yet persist a locked `fontSize`. `setNodeGeometry` pins each
-    // child's `style.width`, so after the cascade an auto-sizing node is
-    // no longer width-auto; its rendered font is then `lockedFontSize ??
-    // baseFontSize` (16) and would stay 16 in the now-larger box unless
-    // we lock a refitted size here — the same lock a direct node resize
-    // would establish. Written via `patchNodeSilent` — the same silent
-    // style-patch path `useTextAutoSize` uses at resize-end — so it
-    // collapses into the gesture's single undo entry and the child's
-    // height stays content-driven (re-derived from the new font).
+    // Scale from each immutable starting font and outer width, never from
+    // the previous tick and never by fitting text to the requested height.
+    // The silent style patch remains in the gesture's single undo entry;
+    // Text/Question height remains renderer-owned.
     const patchNodeSilent = opts.getState().patchNodeSilent;
-    for (const child of snap.children) {
+    for (const { child, width: childWidth, height: childHeight } of fonts) {
       if (!child.fontFit) continue;
-      const childWidth = Math.max(1, child.width * sx);
-      const childHeight = Math.max(1, child.height * sy);
       const next = refitFont(child.fontFit, childWidth, childHeight);
       if (!Number.isFinite(next) || next <= 0) continue;
       if (lastAppliedFont.get(child.id) === next) continue;
@@ -512,45 +523,82 @@ export function createResizePreviewController(opts: {
         freeSnapshot = null;
         return;
       }
-      const sizing = getFrameSizing(frame);
-      const gutters = collectGutterSizes(
-        getStructuredFrameGutterPlan(
-          nodes as NestableNode[],
-          edges as Edge[],
-          frameId,
-        ),
-      );
-      // Children are always snapshotted — `manual` frames need them
-      // too so `flushScale` can compensate child local positions for
-      // the frame's origin shift (TL/TR/BL/T/L handles all move the
-      // frame's `(x, y)`), keeping absolute child positions stable.
-      const children: FrameResizeChildSnapshot[] = [];
+      // Index once per gesture. Each inverse layout receives only its own
+      // direct children and internal edges, never the whole canvas per level.
+      const byId = new Map(nodes.map((node) => [node.id, node]));
+      const absolutePosition = createAbsolutePositionGetter(byId);
+      const childrenByParent = new Map<string, Node[]>();
       for (const node of nodes) {
-        if (node.parentId !== frameId) continue;
-        const ns = getNodeSize(node);
-        const style = (node.data as { style?: NodeStyle } | undefined)?.style;
-        children.push({
-          id: node.id,
-          x: node.position.x,
-          y: node.position.y,
-          width: ns.width,
-          height: ns.height,
-          style,
-          fontFit: getNodeFontFit(node),
-        });
+        if (!node.parentId) continue;
+        const children = childrenByParent.get(node.parentId) ?? [];
+        children.push(node);
+        childrenByParent.set(node.parentId, children);
       }
-      // Fresh gesture — drop any stale per-child font dedupe state.
-      lastAppliedFont.clear();
-      freeSnapshot = {
-        frameId,
-        frameX: frame.position.x,
-        frameY: frame.position.y,
-        frameWidth: frameSize.width,
-        frameHeight: frameSize.height,
-        sizing,
-        gutters,
-        children,
+      const edgesByParent = new Map<string, Edge[]>();
+      for (const edge of edges) {
+        const parentId = byId.get(edge.source)?.parentId;
+        if (!parentId || parentId !== byId.get(edge.target)?.parentId) continue;
+        const internal = edgesByParent.get(parentId) ?? [];
+        internal.push(edge);
+        edgesByParent.set(parentId, internal);
+      }
+      const visited = new Set<string>();
+      const capture = (frame: Node): FrameResizeSnapshot => {
+        visited.add(frame.id);
+        const frameId = frame.id;
+        const frameSize = getNodeSize(frame);
+        const directChildren = childrenByParent.get(frameId) ?? [];
+        const layoutNodes = [frame, ...directChildren];
+        const layoutEdges = edgesByParent.get(frameId) ?? [];
+        const sizing = getFrameSizing(frame);
+        const gutters = collectGutterSizes(
+          getStructuredFrameGutterPlan(layoutNodes, layoutEdges, frameId),
+        );
+        // Children are always snapshotted — `manual` frames need them
+        // too so `flushScale` can compensate child local positions for
+        // the frame's origin shift (TL/TR/BL/T/L handles all move the
+        // frame's `(x, y)`), keeping absolute child positions stable.
+        const children: FrameResizeChildSnapshot[] = [];
+        const nestedFrames = new Map<string, FrameResizeSnapshot>();
+        for (const node of directChildren) {
+          const ns = getNodeSize(node);
+          const style = (node.data as { style?: NodeStyle } | undefined)?.style;
+          children.push({
+            id: node.id,
+            x: node.position.x,
+            y: node.position.y,
+            width: ns.width,
+            height: ns.height,
+            style,
+            fontFit: getNodeFontFit(node),
+          });
+          if (node.type === 'frame' && !visited.has(node.id)) {
+            nestedFrames.set(node.id, capture(node));
+          }
+        }
+        return {
+          frameId,
+          parentId: frame.parentId,
+          parentOrigin: frame.parentId
+            ? (absolutePosition(frame.parentId) ?? {
+                x: 0,
+                y: 0,
+              })
+            : { x: 0, y: 0 },
+          frameX: frame.position.x,
+          frameY: frame.position.y,
+          frameWidth: frameSize.width,
+          frameHeight: frameSize.height,
+          sizing,
+          gutters,
+          layoutNodes,
+          layoutEdges,
+          children,
+          nestedFrames,
+        };
       };
+      lastAppliedFont.clear();
+      freeSnapshot = capture(frame);
     },
 
     applyFrameResizeScale(width, height, x, y) {

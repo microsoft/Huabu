@@ -46,7 +46,7 @@ const DEFAULT_SIZES: Record<string, NodeSize> = {
   // the behaviour of text/note nodes. The width sets the wrap width when
   // a question is created with content. Use 80px as a nominal default for
   // layout calculations (fits one line of text + padding at default zoom).
-  question: { width: 200, height: 80 },
+  question: { width: 440, height: 80 },
 };
 
 /**

@@ -3,15 +3,14 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { HEIGHT_LAYOUT_VERSION } from '@huabu/shared/canvas-engine';
-import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
+import { autoHeightKey } from '@huabu/shared/canvas-engine';
 
 import { normalizeNodeHeights } from '../normalizeNodeHeights';
 
 import type { Node } from '@xyflow/react';
 
 const CONTENT = '# hello';
-const KEY = `${HEIGHT_LAYOUT_VERSION}:${nodeRevisionOf({ content: CONTENT })}`;
+const KEY = autoHeightKey(node());
 
 function node(overrides: Partial<Node> = {}): Node {
   return {
@@ -25,6 +24,23 @@ function node(overrides: Partial<Node> = {}): Node {
 }
 
 describe('normalizeNodeHeights', () => {
+  it('keeps the persisted numeric seed for width-stale and legacy hints', () => {
+    for (const measuredFor of [KEY, '10:legacy']) {
+      const original = node({
+        style: { width: 800, height: 321 },
+        data: {
+          content: CONTENT,
+          heightMode: 'auto',
+          autoHeight: { intrinsicHeight: 260, measuredFor },
+        },
+      });
+      const [result] = normalizeNodeHeights([original]);
+      expect(result.style?.height).toBe(321);
+      expect(result.measured?.height).toBe(321);
+      expect(result.data.autoHeight).toBe(original.data.autoHeight);
+    }
+  });
+
   it('infers auto from the legacy encoding — the absence of a height', () => {
     const [result] = normalizeNodeHeights([node()]);
     expect((result.data as { heightMode?: string }).heightMode).toBe('auto');
@@ -53,8 +69,8 @@ describe('normalizeNodeHeights', () => {
         },
       }),
     ]);
-    // 260 content, scaled by 394/400, plus 6px shell chrome, quantized.
-    expect((result.style as { height?: number }).height).toBe(264);
+    // 260 content plus 6px shell chrome, quantized.
+    expect((result.style as { height?: number }).height).toBe(268);
   });
 
   it('never fabricates a hint, not even from the legacy measured height', () => {

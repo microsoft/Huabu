@@ -21,6 +21,8 @@ import {
   type Side,
 } from '@/components/Nodes/NodeConnectAffordance.tsx';
 import { NODE_ICON } from '@/config/nodeIcons.ts';
+import { nodeToolbarOffset } from '@/config/nodeInteractionChrome';
+import { useIsNotMouse } from '@/hooks/useInputMode';
 
 /** Where a pending connection starts and ends, in flow coordinates. */
 export interface PendingConnectionTether {
@@ -182,6 +184,7 @@ export function ConnectedNodePicker({
   onDismiss,
 }: ConnectedNodePickerProps) {
   const { t } = useTranslation();
+  const isNotMouse = useIsNotMouse();
   const rootRef = useRef<HTMLDivElement>(null);
   const openerRef = useRef<HTMLElement | null>(null);
   const open = anchor !== null;
@@ -241,7 +244,10 @@ export function ConnectedNodePicker({
       <CanvasFloatingPopover
         anchor={anchor ? { ...anchor, width: 0, height: 0 } : null}
         open={open}
-        offset={12}
+        // A port click may end anywhere in its outward hit area, while keyboard
+        // activation anchors at the boundary. Reserve clearance on either side
+        // so Floating UI can flip without covering the pinned Plus icon.
+        offset={tether ? 12 : nodeToolbarOffset(isNotMouse)}
         side="top"
         className="bg-surface shadow-bottom text-fg-muted flex items-center gap-1 rounded-lg p-1.5"
       >

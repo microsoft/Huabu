@@ -6,7 +6,7 @@ import {
   indexById,
   type NestableNode,
 } from './tree.js';
-import { medianOfChildExtents, paddingFromExtent } from '../utils/constants.js';
+import { frameResponsiveMetricsForContentSize } from '../frame/design.js';
 import { getNodeSize } from '../utils/nodeSizes.js';
 
 import type { XYPosition } from '@xyflow/react';
@@ -61,16 +61,6 @@ export function computeContainerFit(
   if (children.length === 0 && extraRects.length === 0) return null;
 
   const childSizes = children.map((child) => getNodeSize(child));
-  const extraSizes = extraRects.map(({ width, height }) => ({ width, height }));
-  const padding =
-    options.padding ??
-    paddingFromExtent(medianOfChildExtents([...childSizes, ...extraSizes]));
-  const insets: ContainerInsets = {
-    top: options.insets?.top ?? padding,
-    right: options.insets?.right ?? padding,
-    bottom: options.insets?.bottom ?? padding,
-    left: options.insets?.left ?? padding,
-  };
 
   let minX = Number.POSITIVE_INFINITY;
   let minY = Number.POSITIVE_INFINITY;
@@ -102,6 +92,29 @@ export function computeContainerFit(
 
   if (!Number.isFinite(minX) || !Number.isFinite(minY)) return null;
 
+  const minWidth = options.minWidth ?? 20;
+  const minHeight = options.minHeight ?? 20;
+  const contentWidth = maxX - minX;
+  const contentHeight = maxY - minY;
+  const responsiveMetrics = frameResponsiveMetricsForContentSize(
+    contentWidth,
+    contentHeight,
+    minWidth,
+    minHeight,
+  );
+  const padding = options.padding ?? responsiveMetrics.contentSpacing;
+  const rightInset = options.insets?.right ?? padding;
+  const bottomInset = options.insets?.bottom ?? padding;
+  const leftInset = options.insets?.left ?? padding;
+  const fittedWidth = Math.max(minWidth, contentWidth + leftInset + rightInset);
+  const insets: ContainerInsets = {
+    top:
+      options.insets?.top ??
+      (container.type === 'frame' ? responsiveMetrics.headerInset : padding),
+    right: rightInset,
+    bottom: bottomInset,
+    left: leftInset,
+  };
   const deltaX = minX - insets.left;
   const deltaY = minY - insets.top;
   return {
@@ -110,14 +123,8 @@ export function computeContainerFit(
       x: container.position.x + deltaX,
       y: container.position.y + deltaY,
     },
-    width: Math.max(
-      options.minWidth ?? 20,
-      maxX - minX + insets.left + insets.right,
-    ),
-    height: Math.max(
-      options.minHeight ?? 20,
-      maxY - minY + insets.top + insets.bottom,
-    ),
+    width: fittedWidth,
+    height: Math.max(minHeight, contentHeight + insets.top + insets.bottom),
   };
 }
 

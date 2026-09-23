@@ -83,6 +83,41 @@ beforeEach(() => {
 });
 
 describe('createNodeDragRecognizer', () => {
+  it('does not claim an out-of-body toolbar grip owned by its portal hook', () => {
+    nodeIdAtScreenPoint.mockReturnValue(null);
+    const node = document.createElement('div');
+    node.className = 'react-flow__node';
+    node.dataset.id = selectedNode.id;
+    const grip = document.createElement('div');
+    grip.setAttribute('data-node-drag-handle', '');
+    const icon = document.createElement('span');
+    grip.append(icon);
+    node.append(grip);
+    const event = {
+      ...pointer(1, 900, 900),
+      target: icon,
+    } as unknown as PointerEvent;
+    const recognizer = createNodeDragRecognizer();
+    expect(recognizer.canClaim(event, context)).toBe(false);
+    expect(onNodeDragStart).not.toHaveBeenCalled();
+  });
+
+  it('does not let an unselected grip claim a Pen-mode finger drag', () => {
+    nodeIdAtScreenPoint.mockReturnValue(null);
+    const node = document.createElement('div');
+    node.className = 'react-flow__node';
+    node.dataset.id = 'unselected';
+    const grip = document.createElement('div');
+    grip.setAttribute('data-node-drag-handle', '');
+    node.append(grip);
+    expect(
+      createNodeDragRecognizer().canClaim(
+        { ...pointer(1, 0, 0), target: grip } as unknown as PointerEvent,
+        context,
+      ),
+    ).toBe(false);
+  });
+
   it('does not claim a selected node while canvas interactivity is locked', () => {
     const recognizer = createNodeDragRecognizer();
 

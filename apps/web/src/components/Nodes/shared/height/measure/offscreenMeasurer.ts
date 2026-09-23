@@ -22,17 +22,16 @@
  *
  * - `visibility: hidden`, never `display: none` — a display-none subtree
  *   has no layout and measures zero.
- * - Fixed at the node type's reference width, because an intrinsic height
- *   is only meaningful paired with the width it was measured at.
+ * - Set to each request's actual inner width before replacing Markdown;
+ *   an intrinsic height is meaningful only at that captured width.
  * - Built from the same box classes as the mounted note
  *   (`NOTE_CONTENT_HOST_CLASS`), so the two cannot silently diverge.
  */
 
-import { getHeightRefWidth } from '@huabu/shared/canvas-engine';
-
 import { resolveArtifactUrl } from '@/api/artifact';
 import {
   NOTE_CONTENT_HOST_CLASS,
+  NOTE_CONTENT_HOST_STYLE,
   readNoteIntrinsicHeight,
 } from '@/components/Nodes/note/noteContentHost';
 
@@ -43,6 +42,8 @@ import type { MilkdownInstance } from '@/components/Milkdown/createMilkdown';
 
 export interface OffscreenMeasureRequest {
   markdown: string;
+  /** Canvas-space inner width from autoHeightContentWidth, including padding. */
+  contentWidth: number;
   /** Resolves artifact-key image `src`s. Absent outside a canvas. */
   canvasId?: string;
 }
@@ -81,6 +82,7 @@ async function measureNow(
 ): Promise<StableHeight> {
   const host = await ensureHost();
   activeCanvasId = request.canvasId;
+  host.content.style.width = `${request.contentWidth}px`;
   host.instance.setMarkdown(request.markdown);
   return awaitStableHeight({
     sample: () => readNoteIntrinsicHeight(host.content),
@@ -113,10 +115,13 @@ async function buildHost(): Promise<Host> {
 
   const content = document.createElement('div');
   content.className = NOTE_CONTENT_HOST_CLASS;
-  // The note's content renders unscaled at its type's reference width;
-  // the scale factor is applied to the *result*, not to the measurement.
-  content.style.width = `${getHeightRefWidth('note') ?? 400}px`;
-
+  Object.assign(content.style, NOTE_CONTENT_HOST_STYLE);
+  // Custom properties require the CSSOM setter, not JS property assignment.
+  for (const [name, value] of Object.entries(NOTE_CONTENT_HOST_STYLE)) {
+    if (name.startsWith('--')) {
+      content.style.setProperty(name, String(value));
+    }
+  }
   container.appendChild(content);
   document.body.appendChild(container);
 

@@ -1,29 +1,27 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { Fullscreen, ArrowUpRight, ImageOff } from 'lucide-react';
-import { memo, useEffect, useMemo, useState } from 'react';
+import { Fullscreen, ArrowUpRight } from 'lucide-react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { resolveAccent } from '@huabu/shared';
-
 import { getWebPreview } from '@/api/web';
+import { useNodePresentation } from '@/hooks/useNodePresentation';
 
-import { getNodeIcon } from '../../../config/nodeIcons.ts';
-import { useNodeLOD } from '../../../hooks/useNodeLOD.ts';
-import { useNodeScale } from '../../../hooks/useNodeScale.ts';
+import { WebReadingView } from './WebReadingView';
 import useCanvasStore from '../../../store/canvasStore.ts';
 import { openPreviewNode } from '../../../store/previewWorkspace/actions.ts';
 import { FloatingToolbar } from '../../Common/FloatingToolbar.tsx';
-import { Loading } from '../../Common/Loading';
-import { getAccentTokens } from '../accentTokens.ts';
 import { getMissingFileKind, MissingFileBanner } from '../MissingFileBanner';
 import { NodeWrapper } from '../NodeWrapper.tsx';
+import {
+  ViewportPreviewCard,
+  usePreviewCardSize,
+} from '../previewCard/PreviewCard';
 import { useDeferredHydration } from '../shared/nodeHydrationScheduler.ts';
 
 import type { CanvasWebNodeData } from '../types.ts';
 import type { Node, NodeProps } from '@xyflow/react';
-import type { CSSProperties } from 'react';
 
 export type WebNodeType = Node<CanvasWebNodeData, 'web'>;
 
@@ -40,10 +38,11 @@ function shortenForToolbar(src: string): string {
 }
 
 export const WebNode = memo(
-  ({ id, data, selected }: NodeProps<WebNodeType>) => {
+  ({ id, data, selected, width, height }: NodeProps<WebNodeType>) => {
     const { t } = useTranslation();
-    const scale = useNodeScale(id, 'web');
-    const isMinimalLOD = useNodeLOD(id, 'web') === 'minimal';
+    const cardSize = usePreviewCardSize(id, 'web', width, height);
+    const presentation = useNodePresentation(id, 'web', 'reading');
+    const isMinimalLOD = presentation.mode === 'minimal';
     const canvasId = useCanvasStore((s) => s.canvasId);
     const ingestion = useCanvasStore((state) => state.ingestionByNodeId[id]);
 
@@ -52,6 +51,13 @@ export const WebNode = memo(
     > | null>(null);
     const [previewLoading, setPreviewLoading] = useState(false);
     const [previewError, setPreviewError] = useState<string | null>(null);
+    const [retryAttempt, setRetryAttempt] = useState(0);
+
+    const handleRetry = useCallback(() => {
+      setPreviewError(null);
+      setPreviewLoading(true);
+      setRetryAttempt((attempt) => attempt + 1);
+    }, []);
 
     // Defer the per-node preview fetch through the shared per-frame
     // hydration scheduler. Without this, every WebNode on a freshly-
@@ -65,6 +71,13 @@ export const WebNode = memo(
     const src = typeof data?.src === 'string' ? data.src : '';
     const missingFileKind = getMissingFileKind(data);
     const isRemoteUrl = REMOTE_URL_RE.test(src);
+    const isInteractiveView =
+      data.interactiveView !== null && typeof data.interactiveView === 'object';
+    const showReading =
+      !!src &&
+      presentation.mode === 'reading' &&
+      presentation.isVisible &&
+      !isInteractiveView;
 
     // URL surfaced as the "open externally" link in the floating toolbar.
     // Only remote http(s) URLs have a meaningful destination — uploaded
@@ -131,58 +144,23 @@ export const WebNode = memo(
       return () => {
         cancelled = true;
       };
-    }, [src, canvasId, ingestion?.status, id, isMinimalLOD, webHydrated]);
+    }, [
+      src,
+      canvasId,
+      ingestion?.status,
+      id,
+      isMinimalLOD,
+      webHydrated,
+      retryAttempt,
+    ]);
 
-    // Track image-load failures so we degrade cleanly. Without these the
-    // browser would show its built-in "broken image" placeholder (the
-    // sad-face document icon) for a few hundred ms before our onError
-    // could hide the element, which looks like the node is broken.
-    const [coverImageFailed, setCoverImageFailed] = useState(false);
-    const [thumbFaviconFailed, setThumbFaviconFailed] = useState(false);
-    const [footerFaviconFailed, setFooterFaviconFailed] = useState(false);
-
-    const summary = preview?.summary;
+    const summary =
+      preview?.summary ??
+      (typeof data.summary === 'string' ? data.summary : undefined);
     const title = preview?.label || data?.label || src;
     const favicon = preview?.favicon;
     const fallbackImage = preview?.image;
     const siteName = preview?.siteName;
-
-    // Reset image-failure flags whenever the preview payload changes so a
-    // re-preprocess that swaps in a fresh URL gets another chance to load.
-    useEffect(() => {
-      setCoverImageFailed(false);
-      setThumbFaviconFailed(false);
-      setFooterFaviconFailed(false);
-    }, [fallbackImage, favicon]);
-
-    // Accent tokens used by the footer divider + tinted backgrounds so
-    // the node visually echoes any user-picked color. Mirrors the styling
-    // of PreviewCard / PDFNode so Web nodes sit consistently next to
-    // other node types.
-    const resolvedAccent = resolveAccent(data.style?.accent);
-    const accentTokens = resolvedAccent
-      ? getAccentTokens(resolvedAccent)
-      : null;
-    const footerStyle: CSSProperties = {
-      borderTop: `2px solid ${accentTokens?.divider ?? 'var(--edge-default)'}`,
-      background: accentTokens?.softBg ?? 'transparent',
-    };
-    const accentFg: CSSProperties | undefined = accentTokens
-      ? { color: accentTokens.fg }
-      : undefined;
-    // Thumbnail background: use the accent's soft tint when set, otherwise
-    // `bg-surface` (paper-white) instead of `bg-default` (gray) so an
-    // empty / loading state never looks like a broken placeholder.
-    const thumbBgStyle: CSSProperties = {
-      background: accentTokens?.softBg ?? 'var(--surface)',
-    };
-
-    const NodeTypeIcon = getNodeIcon('web');
-
-    // Should we render the og:image cover? Only when it loaded successfully.
-    const showCoverImage = !!fallbackImage && !coverImageFailed;
-    // Big centered favicon when we can't show a cover image.
-    const showThumbFavicon = !!favicon && !thumbFaviconFailed;
 
     const WebActions = (
       <>
@@ -222,144 +200,45 @@ export const WebNode = memo(
       >
         {missingFileKind ? (
           <MissingFileBanner nodeId={id} />
+        ) : showReading ? (
+          <WebReadingView
+            key={`${canvasId}:${id}:${src}`}
+            nodeId={id}
+            canvasId={canvasId}
+            src={src}
+            interactive={presentation.isSoleSelected}
+            zoom={presentation.zoom}
+          />
         ) : (
-          <div className="bg-surface relative flex h-full w-full flex-col overflow-hidden rounded-lg">
-            <div
-              style={{
-                transform: `scale(${scale})`,
-                transformOrigin: 'top left',
-                width: `${100 / scale}%`,
-                height: `${100 / scale}%`,
-              }}
-            >
-              {!src ? (
-                <div className="text-fg-subtle flex h-full w-full items-center justify-center text-base">
-                  {t('node.invalidUrl')}
-                </div>
-              ) : (
-                <div className="flex h-full w-full flex-col">
-                  {/* ── Thumbnail area ──────────────────────────────────
-                    Static preview only — no live iframe (the embedded
-                    page's scripts were a large per-node perf cost and are
-                    reserved for the expanded Preview panel now). Layer
-                    order (bottom → top):
-                      1. Accent-tinted background (or paper-white).
-                      2. Favicon "logo card", or a "No preview" hint when
-                         even the favicon is missing.
-                      3. og:image cover (when present and not failed). */}
-                  <div
-                    className="relative min-h-0 flex-1 overflow-hidden"
-                    style={thumbBgStyle}
-                  >
-                    {/* Layer 1: favicon fallback, or a "No preview" hint.
-                      Always rendered so a missing / broken og:image
-                      (Layer 2) reveals a sensible visual underneath
-                      instead of a gray box. */}
-                    <div
-                      className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-6"
-                      style={accentFg}
-                    >
-                      {showThumbFavicon ? (
-                        <>
-                          <img
-                            src={favicon}
-                            alt=""
-                            className="h-16 w-16 rounded-md object-contain"
-                            decoding="async"
-                            onError={() => setThumbFaviconFailed(true)}
-                          />
-                          {siteName ? (
-                            <span className="text-fg-muted max-w-full truncate text-sm">
-                              {siteName}
-                            </span>
-                          ) : null}
-                        </>
-                      ) : (
-                        <>
-                          <NodeTypeIcon
-                            size={40}
-                            strokeWidth={1.25}
-                            className="text-fg-subtle"
-                          />
-                          <span className="text-fg-subtle text-sm">
-                            {siteName || t('node.noPreview')}
-                          </span>
-                        </>
-                      )}
-                    </div>
-
-                    {/* Layer 2: og:image cover. Sits above the favicon
-                      fallback and hides it when the image loads. On
-                      error we flip state so the fallback re-appears
-                      (preventing the broken-image flash). */}
-                    {showCoverImage ? (
-                      <img
-                        src={fallbackImage}
-                        alt={title}
-                        className="absolute inset-0 block h-full w-full object-cover"
-                        decoding="async"
-                        draggable={false}
-                        onError={() => setCoverImageFailed(true)}
-                      />
-                    ) : null}
-
-                    {previewLoading && !preview ? (
-                      <Loading layout="overlay" variant="skeleton" />
-                    ) : null}
-                  </div>
-
-                  {/* ── Footer: icon + title + AI summary ───────────────
-                    Fixed-content height so it never grows; the thumbnail
-                    above absorbs any extra space when the user resizes. */}
-                  <div
-                    className="flex shrink-0 flex-col gap-1 px-4 pt-2 pb-3"
-                    style={footerStyle}
-                  >
-                    <div className="flex items-start gap-2" style={accentFg}>
-                      <span className="mt-1 flex shrink-0 items-center">
-                        {favicon && !footerFaviconFailed ? (
-                          <img
-                            src={favicon}
-                            alt=""
-                            className="h-4 w-4 rounded-sm"
-                            decoding="async"
-                            onError={() => setFooterFaviconFailed(true)}
-                          />
-                        ) : (
-                          <NodeTypeIcon size={16} />
-                        )}
-                      </span>
-                      <span className="min-w-0 text-base font-medium wrap-break-word">
-                        {title}
-                      </span>
-                    </div>
-                    {previewError && ingestion?.status !== 'pending' ? (
-                      <p className="text-fg-subtle text-sm"></p>
-                    ) : summary ? (
-                      <p className="text-fg-muted line-clamp-3 text-sm leading-relaxed">
-                        {summary}
-                      </p>
-                    ) : null}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Loading overlay while preprocessing is in-flight. */}
-            {ingestion?.status === 'pending' && !preview ? (
-              <Loading
-                layout="overlay"
-                variant="skeleton"
-                message={t('node.processing')}
-              />
-            ) : null}
-
-            {/* Subtle "no preview" hint when extraction failed but the node still mounts. */}
-            {previewError && !preview && ingestion?.status !== 'pending' ? (
-              <div className="text-fg-subtle pointer-events-none absolute right-2 bottom-2 z-10 flex items-center gap-1 text-xs">
-                <ImageOff size={12} />
+          <div className="bg-surface relative flex h-full w-full flex-col rounded-[inherit]">
+            {!src ? (
+              <div className="text-fg-subtle flex h-full w-full items-center justify-center text-base">
+                {t('node.invalidUrl')}
               </div>
-            ) : null}
+            ) : (
+              <ViewportPreviewCard
+                {...cardSize}
+                accent={data.style?.accent}
+                minimal={isMinimalLOD}
+                image={fallbackImage}
+                imageAlt={title}
+                nodeType="web"
+                favicon={favicon}
+                source={
+                  isRemoteUrl ? shortenForToolbar(src) : siteName || 'HTML'
+                }
+                title={title}
+                summary={summary}
+                loading={
+                  !isMinimalLOD &&
+                  (ingestion?.status === 'pending' ||
+                    previewLoading ||
+                    (!webHydrated && !preview && !previewError))
+                }
+                error={previewError}
+                onRetry={handleRetry}
+              />
+            )}
           </div>
         )}
       </NodeWrapper>

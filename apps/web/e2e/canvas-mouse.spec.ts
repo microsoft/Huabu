@@ -166,6 +166,49 @@ test.describe('canvas mouse mode', () => {
     ).toBeGreaterThan(60);
   });
 
+  test('Sketch hover works after reload and selecting another node without a pane click', async ({
+    page,
+  }) => {
+    const center = await paneCenter(page);
+    await placeTextNode(page, { x: center.x - 250, y: center.y - 180 });
+    const toolbar = page.locator('.react-flow__panel.bottom.center');
+    await toolbar.getByRole('button', { name: /^Sketch/ }).click();
+    await page.mouse.move(center.x - 45, center.y);
+    await page.mouse.down();
+    await page.mouse.move(center.x + 45, center.y, { steps: 12 });
+    await page.mouse.up();
+    const sketch = page.locator('.react-flow__node-sketch').first();
+    await expect(sketch).toBeVisible();
+    await page.keyboard.press('s');
+    await page.reload();
+    await expect(sketch).toBeVisible();
+    await expect(sketch).not.toHaveClass(/\bselected\b/);
+    const bounds = await sketch.boundingBox();
+    if (!bounds) throw new Error('Sketch has no bounds');
+    const point = {
+      x: bounds.x + bounds.width / 2,
+      y: bounds.y + bounds.height / 2,
+    };
+    await page.mouse.move(point.x, point.y);
+    await expect(sketch).toHaveAttribute('data-sketch-hover', 'true');
+    const text = page.locator('.react-flow__node-text').first();
+    await text.click();
+    await expect(text).toHaveClass(/\bselected\b/);
+    await page.mouse.move(point.x, point.y);
+    await expect(sketch).toHaveAttribute('data-sketch-hover', 'true');
+    const hit = await page.evaluate(({ x, y }) => {
+      const target = document.elementFromPoint(x, y);
+      return {
+        nodeId: target?.closest('.react-flow__node')?.getAttribute('data-id'),
+        cursor: target ? getComputedStyle(target).cursor : null,
+      };
+    }, point);
+    expect(hit.nodeId).toBe(await sketch.getAttribute('data-id'));
+    expect(['grab', 'pointer']).toContain(hit.cursor);
+    await page.mouse.click(point.x, point.y);
+    await expect(sketch).toHaveClass(/\bselected\b/);
+  });
+
   test('selected Sketch restores mouse dragging after a touch interaction', async ({
     page,
   }) => {
@@ -199,6 +242,11 @@ test.describe('canvas mouse mode', () => {
     const sketchBox = await sketch.boundingBox();
     if (!sketchBox) throw new Error('sketch has no bounding box');
     await page.keyboard.press('s');
+    await page.mouse.move(
+      sketchBox.x + sketchBox.width / 2,
+      sketchBox.y + sketchBox.height / 2,
+    );
+    await expect(sketch).toHaveAttribute('data-sketch-hover', 'true');
     await page.mouse.click(
       sketchBox.x + sketchBox.width / 2,
       sketchBox.y + sketchBox.height / 2,
@@ -492,13 +540,20 @@ test.describe('canvas mouse mode', () => {
     const canvasCenter = await paneCenter(page);
     await page.mouse.move(canvasCenter.x, canvasCenter.y);
     const zoomOut = page.getByRole('button', { name: 'Zoom Out' });
-    for (let index = 0; index < 6; index += 1) await zoomOut.click();
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const zoom = scaleOf(await readViewportTransform(page));
+      if (zoom < 0.25) break;
+      await zoomOut.click();
+      await expect
+        .poll(async () => scaleOf(await readViewportTransform(page)))
+        .toBeLessThan(zoom);
+    }
     await expect(noteNode.locator('.semantic-lod-node')).toHaveAttribute(
       'data-lod',
       'minimal',
     );
     const submissionZoom = scaleOf(await readViewportTransform(page));
-    expect(submissionZoom).toBeLessThan(1);
+    expect(submissionZoom).toBeLessThan(0.25);
 
     const zoomedNoteBox = await noteNode.boundingBox();
     const sketchBox = await sketchNode.boundingBox();

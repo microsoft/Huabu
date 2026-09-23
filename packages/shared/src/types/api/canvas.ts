@@ -12,6 +12,9 @@
 import { z } from 'zod';
 
 import { canvasEditableNodeSchema } from './agent-node.js';
+
+import type { videoCoverPatchSchema } from './preprocessing.js';
+
 export interface GetCanvasResponse {
   canvasId: string;
   title: string | null;
@@ -127,7 +130,9 @@ export interface PutNodeContentResponse {
  * When `contentMissing` is true the markdown sidecar has not been written
  * yet (or was deleted out-of-band); sidecar-derived fields are unavailable.
  */
-export interface GetNodeContentResponse {
+export interface GetNodeContentResponse extends z.infer<
+  typeof videoCoverPatchSchema
+> {
   nodeId: string;
   type: string;
   label: string | null;

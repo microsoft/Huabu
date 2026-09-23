@@ -12,8 +12,7 @@
  *
  * Every height bug found so far reduced to exactly that, and every one
  * was found by eye — comparing the bottom whitespace of two notes.
- * The signal was on screen the whole time (the "show all content"
- * chevron); it was simply never labelled as a defect. This labels it.
+ * The truncation fade exposes the shortfall visually; this labels it.
  *
  * Deliberately delayed and re-read from the DOM rather than fired on the
  * first render that looks short. A correction is asynchronous by design:
@@ -23,7 +22,12 @@
 
 import { useEffect } from 'react';
 
+import { readAutoHeightHint } from '@huabu/shared/canvas-engine';
+
+import useCanvasStore from '@/store/canvasStore';
+
 import { readNoteIntrinsicHeight } from './noteContentHost';
+import { isHeightCommitSuspended } from '../shared/height/commitSuspension';
 
 /** Grace period for the measurement to be proposed, queued and committed. */
 const SETTLE_MS = 800;
@@ -39,16 +43,28 @@ export function useAutoHeightInvariant(
   hostRef: React.RefObject<HTMLElement | null>,
   enabled: boolean,
   contentHeight: number,
+  viewportRef: React.RefObject<HTMLElement | null>,
 ): void {
   useEffect(() => {
     if (!import.meta.env.DEV) return;
     if (!enabled || contentHeight <= 0) return;
 
     const timer = setTimeout(() => {
+      // Width/content changes deliberately retain a stale numeric seed.
+      // A held or still-unmeasured correction is not an invariant failure.
+      const node = useCanvasStore
+        .getState()
+        .nodes.find((candidate) => candidate.id === nodeId);
+      if (
+        isHeightCommitSuspended() ||
+        !node ||
+        readAutoHeightHint(node).freshness !== 'current'
+      )
+        return;
       const host = hostRef.current;
       if (!host) return;
       const content = readNoteIntrinsicHeight(host);
-      const available = host.clientHeight;
+      const available = viewportRef.current?.clientHeight ?? 0;
       if (available <= 0) return;
       const shortfall = content - available;
       if (shortfall <= TOLERANCE_PX) return;
@@ -62,5 +78,5 @@ export function useAutoHeightInvariant(
     }, SETTLE_MS);
 
     return () => clearTimeout(timer);
-  }, [contentHeight, enabled, hostRef, nodeId]);
+  }, [contentHeight, enabled, hostRef, nodeId, viewportRef]);
 }

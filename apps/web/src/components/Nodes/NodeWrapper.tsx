@@ -1,17 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import {
-  NodeResizer,
-  useInternalNode,
-  useViewport,
-  useStore,
-} from '@xyflow/react';
+import { useInternalNode, useViewport, useStore } from '@xyflow/react';
 import clsx from 'clsx';
 import { FileWarning, FolderOpen, RefreshCw } from 'lucide-react';
 import React, {
   memo,
+  forwardRef,
   useCallback,
+  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -19,7 +16,6 @@ import React, {
 } from 'react';
 import { createPortal } from 'react-dom';
 
-import { resolveAccent } from '@huabu/shared';
 import {
   createAbsolutePositionGetter,
   indexById,
@@ -31,13 +27,9 @@ import { Button } from '@/components/Common/Button.tsx';
 import { cn } from '@/components/Common/cn.ts';
 import { Loading } from '@/components/Common/Loading';
 import { toast } from '@/components/Common/Toast';
-import { Tooltip } from '@/components/Common/Tooltip.tsx';
 import { resumeHeightCommits } from '@/components/Nodes/shared/height/commitSuspension';
 import { NodeFloatingToolbar } from '@/components/Panels/Canvas/FloatingToolbars/NodeFloatingToolbar.tsx';
-import {
-  AI_BADGE_MIN_SCREEN_WIDTH,
-  SEMANTIC_ZOOM_CONFIG,
-} from '@/config/semanticZoom.ts';
+import { SEMANTIC_ZOOM_CONFIG } from '@/config/semanticZoom.ts';
 import {
   beginSnapSession,
   endSnapSession,
@@ -45,24 +37,57 @@ import {
   getResizeContext,
   getResizeSnappedRect,
 } from '@/handler/snap/snapSession.ts';
+import { handleCanvasFocusEscape } from '@/hooks/useCanvasFocusEscape';
 import { useIsNotMouse } from '@/hooks/useInputMode.ts';
 import { useMultiSelectModifierHeld } from '@/hooks/useMultiSelectModifier.ts';
-import { useNodeLOD } from '@/hooks/useNodeLOD.ts';
+import { useNodePresentation } from '@/hooks/useNodePresentation';
 import useCanvasStore, {
   clearNodeDuplicateGuard,
 } from '@/store/canvasStore.ts';
 import { useConnectPortStore } from '@/store/connectPortStore.ts';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore.ts';
 import { useNodeCollapseStore } from '@/store/nodeCollapseStore.ts';
-import { coerceProvenance } from '@/utils/blockProvenance';
 
-import { getAccentTokens } from './accentTokens.ts';
+import { getAccentTokens } from './design/accentTokens';
+import { resolveNodeAccent } from './design/nodeAccentPolicy';
+import {
+  nodeBoundaryForAccent,
+  nodeLayoutBorderInset,
+} from './design/nodeBoundary';
+import { nodeMetricsForSize } from './design/nodeDesign';
+import { frameRegionSurfaceStyle } from './frame/frameRegionStyle';
+import { FrameSurface } from './frame/FrameSurface.tsx';
+import { useFrameSuppressed } from './frame/FrameZoomContext';
 import { NodeConnectionHandles } from './NodeConnectAffordance.tsx';
+import {
+  NodeResizeControls,
+  type ResizeControlPolicy,
+} from './NodeResizeControls';
 import { NodeTakeoverLayer } from './NodeTakeoverLayer.tsx';
-import { SemanticPlaceholder } from './SemanticPlaceholder.tsx';
+import { noteSurfaceStyle } from './note/noteDesign';
+import { ViewportSemanticPlaceholder } from './SemanticPlaceholder.tsx';
+import { selectSelectedCount } from './shared/selectedCount';
 
 import type { CanvasNodeType, NodeData } from './types.ts';
 import type { TakeoverState } from '@/config/nodeTakeover';
+import type { ComponentPropsWithoutRef } from 'react';
+
+interface SurfaceRootProps extends ComponentPropsWithoutRef<'div'> {
+  frameAppearance?: {
+    accent: string | null;
+    borderRadius?: number;
+  };
+}
+
+const SurfaceRoot = forwardRef<HTMLDivElement, SurfaceRootProps>(
+  ({ frameAppearance, ...props }, ref) =>
+    frameAppearance ? (
+      <FrameSurface ref={ref} {...frameAppearance} {...props} />
+    ) : (
+      <div ref={ref} {...props} />
+    ),
+);
+SurfaceRoot.displayName = 'SurfaceRoot';
 
 const OverlayPortal = memo(
   ({
@@ -189,6 +214,8 @@ interface NodeWrapperProps {
   toolbar?: React.ReactNode;
   actions?: React.ReactNode;
   overlayContent?: React.ReactNode;
+  /** Resolved lightweight text, shared with the node's ordinary content. */
+  farLabel?: { title: string; description?: string };
   /**
    * Opt into the continuous zoom takeover. As the node shrinks on screen, the
    * node-supplied mark glides from the readable corner badge to a centred
@@ -200,6 +227,8 @@ interface NodeWrapperProps {
   takeover?: {
     renderMark: (state: TakeoverState) => React.ReactNode;
     onActivate?: React.MouseEventHandler;
+    fontSize?: number;
+    forceCollapsed?: boolean;
   };
   /** Vertical offset in screen pixels from the node's top edge. Negative = above. */
   overlayOffsetY?: number;
@@ -212,16 +241,18 @@ interface NodeWrapperProps {
 
   keepAspectRatio?: boolean;
   resizable?: boolean;
+  /** Override the shared size-tier radius; Frame retains its own surface policy. */
+  borderRadius?: number;
   /**
    * Escape hatch for node types whose fill is not the user-facing accent
    * — currently only `QuestionNode`, which paints a fixed sticky-yellow
    * background regardless of any `style.accent`. Leave `undefined` for
-   * every other node type: the wrapper derives the fill from
-   * `data.style.accent` so border + fill + text tint stay in sync.
+   * every other node type: Notes use their subdued accent surface; other
+   * non-Frame nodes derive their fill from `data.style.accent`.
    */
   fillColor?: string;
 
-  onResizeStart?: () => void;
+  onResizeStart?: (mode?: 'fit' | 'width' | 'scale') => void;
   /**
    * Live-resize tick callback. Receives the snapped width/height AND
    * the snapped local top-left (`x`, `y`) for this tick — both are
@@ -237,26 +268,6 @@ interface NodeWrapperProps {
   resizeEndClearHeight?: boolean;
 }
 
-// Reference-memoized count of selected nodes. Every NodeWrapper needs to
-// know whether it is the *sole* selected node (to show its own resize
-// handles / floating toolbar vs. deferring to the multi-select bounding
-// box). Filtering `nodes` inside each node's selector made this O(n) per
-// node — 25 nodes × scanning 25 nodes on every store update. Since all
-// selectors run during the same store notification and share the same
-// immutable `nodes` array reference, we scan once per unique array and
-// hand every node the cached scalar (25×O(n) → 1×O(n)).
-let selectedCountNodesRef: readonly { selected?: boolean }[] | null = null;
-let selectedCountCache = 0;
-function selectSelectedCount(nodes: readonly { selected?: boolean }[]): number {
-  if (nodes !== selectedCountNodesRef) {
-    selectedCountNodesRef = nodes;
-    let count = 0;
-    for (const node of nodes) if (node.selected) count++;
-    selectedCountCache = count;
-  }
-  return selectedCountCache;
-}
-
 export const NodeWrapper = memo(
   ({
     id,
@@ -270,6 +281,7 @@ export const NodeWrapper = memo(
     toolbar,
     actions,
     overlayContent,
+    farLabel,
     takeover,
     overlayOffsetY = 0,
     overlayVisible = true,
@@ -277,6 +289,7 @@ export const NodeWrapper = memo(
     overlayMaxWidth,
     keepAspectRatio = false,
     resizable = true,
+    borderRadius,
 
     allowOverflow = false,
 
@@ -380,10 +393,22 @@ export const NodeWrapper = memo(
         });
     }, [id]);
 
-    const renderMode = useNodeLOD(id, type);
-    const rootRef = useRef<HTMLDivElement>(null);
-    const { zoom } = useViewport();
+    const presentation = useNodePresentation(id, type, 'none');
+    // Media owners retain their cover/body instead of the generic text placeholder.
+    const keepsOverviewCard =
+      type === 'pdf' || type === 'web' || type === 'video';
+    const renderMode =
+      presentation.mode === 'minimal' && !keepsOverviewCard
+        ? 'minimal'
+        : 'full';
+    const [nodeRoot, setNodeRoot] = useState<HTMLDivElement | null>(null);
     const isNotMouse = useIsNotMouse();
+    const [resizing, setResizing] = useState(false);
+    const [resizeEpoch, setResizeEpoch] = useState(0);
+    const resizeGesture = useRef<{
+      params: { x: number; y: number; width: number; height: number };
+      cursor: string;
+    } | null>(null);
 
     // Read canvas-space dimensions for SemanticPlaceholder text fitting
     const nodeWidth = useStore((s) => {
@@ -392,7 +417,11 @@ export const NodeWrapper = memo(
     });
     const nodeHeight = useStore((s) => {
       const node = s.nodeLookup.get(id);
-      return (node?.style?.height as number) || node?.measured?.height || 200;
+      return (
+        (node?.style?.height as number) ||
+        node?.measured?.height ||
+        (type === 'pdf' || type === 'web' ? 400 : 200)
+      );
     });
 
     // Deliberately *not* `resolveHeightMode`: this asks whether a layout
@@ -404,32 +433,15 @@ export const NodeWrapper = memo(
       (s) => typeof s.nodeLookup.get(id)?.style?.height === 'number',
     );
 
-    // Check if this node was generated by AI
-    const isAIGenerated = data.origin?.type?.startsWith('ai-');
-    const showAIBadge =
-      isAIGenerated && nodeWidth * zoom >= AI_BADGE_MIN_SCREEN_WIDTH;
-
-    // Compute provenance summary for note nodes (Phase 4 shape).
-    const provenanceSummary = useMemo(() => {
-      if (!('provenance' in data)) return null;
-      const prov = coerceProvenance(
-        (data as { provenance?: unknown }).provenance,
-      );
-      const total = prov.blocks.length + prov.deletedBlocks.length;
-      if (total === 0) return null;
-      return {
-        editedCount: prov.blocks.length,
-        deletedCount: prov.deletedBlocks.length,
-      };
-    }, [data]);
-
     const handleResize = useCallback(
       (
         _event: unknown,
         params: { x: number; y: number; width: number; height: number },
       ) => {
+        if (!resizeGesture.current) return;
         const zoom = useCanvasStore.getState().rfInstance?.getZoom() ?? 1;
         const snapped = applyResizeProposal(params, zoom);
+        resizeGesture.current.params = snapped;
         // Keep the frame-fit overlay aligned with the live resize.
         updateResizePreview(id);
         // Forward the snapped local top-left as well as the snapped
@@ -446,7 +458,10 @@ export const NodeWrapper = memo(
       (
         event: unknown,
         params: { x: number; y: number; width: number; height: number },
+        policy: ResizeControlPolicy,
       ) => {
+        resizeGesture.current = { params, cursor: policy.cursor };
+        setResizing(true);
         onNodeResizeStart();
 
         const state = useCanvasStore.getState();
@@ -480,13 +495,14 @@ export const NodeWrapper = memo(
             },
             startLocalPos: { x: params.x, y: params.y },
             parentOffset,
-            lockAspect: keepAspectRatio,
+            mode: policy.mode,
+            lockAspect: policy.lockAspect,
           },
         });
 
-        onResizeStart?.();
+        onResizeStart?.(policy.mode);
       },
-      [id, onNodeResizeStart, onResizeStart, keepAspectRatio],
+      [id, onNodeResizeStart, onResizeStart],
     );
 
     const handleResizeEnd = useCallback(
@@ -494,6 +510,9 @@ export const NodeWrapper = memo(
         _event: unknown,
         params: { x: number; y: number; width: number; height: number },
       ) => {
+        if (!resizeGesture.current) return;
+        resizeGesture.current = null;
+        setResizing(false);
         endResizePreview();
         const snapped = getResizeSnappedRect();
         const ctx = getResizeContext();
@@ -519,13 +538,23 @@ export const NodeWrapper = memo(
         // non-frame nodes `onResizeEnd` is undefined so this is a no-op.
         onResizeEnd?.(finalSize.width, finalSize.height);
 
+        // A Frame cascade may refit/move its ancestors and compensate its
+        // local position. The flushed result is already in the current parent
+        // space; replaying the gesture-start local proposal would shift it.
+        const committedFramePosition =
+          type === 'frame'
+            ? useCanvasStore.getState().nodes.find((node) => node.id === id)
+                ?.position
+            : undefined;
         setNodeGeometry([
           {
             nodeId: id,
             size: resizeEndClearHeight
               ? { width: finalSize.width, height: 'auto' }
               : finalSize,
-            position: positionChanged ? finalLocalPos : undefined,
+            position:
+              committedFramePosition ??
+              (positionChanged ? finalLocalPos : undefined),
           },
         ]);
 
@@ -539,13 +568,59 @@ export const NodeWrapper = memo(
         endResizePreview,
         setNodeGeometry,
         id,
+        type,
         onResizeEnd,
         resizeEndClearHeight,
       ],
     );
 
+    // Native XYFlow drag remains the owner. Interruptions commit its last
+    // proposal through the same history/height path, then release its listeners.
+    useEffect(() => {
+      if (!resizing) return;
+      const body = document.body;
+      body.style.setProperty(
+        '--node-resize-cursor',
+        resizeGesture.current?.cursor ?? 'default',
+      );
+      body.classList.add('node-resize-active');
+      const finish = () => {
+        const active = resizeGesture.current;
+        if (!active) return;
+        handleResizeEnd(undefined, active.params);
+        window.dispatchEvent(
+          new MouseEvent('mouseup', { bubbles: true, view: window }),
+        );
+        setResizeEpoch((epoch) => epoch + 1);
+      };
+      const key = (event: KeyboardEvent) => {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          event.stopPropagation();
+          finish();
+        }
+      };
+      const visibility = () => {
+        if (document.hidden) finish();
+      };
+      window.addEventListener('pointercancel', finish, true);
+      window.addEventListener('blur', finish);
+      window.addEventListener('keydown', key, true);
+      document.addEventListener('visibilitychange', visibility);
+      return () => {
+        window.removeEventListener('pointercancel', finish, true);
+        window.removeEventListener('blur', finish);
+        window.removeEventListener('keydown', key, true);
+        document.removeEventListener('visibilitychange', visibility);
+        body.classList.remove('node-resize-active');
+        body.style.removeProperty('--node-resize-cursor');
+      };
+    }, [resizing, handleResizeEnd]);
+
     const isMinimal = renderMode === 'minimal';
+    const frameSuppressed = useFrameSuppressed(id);
     const supportsMinimalLOD =
+      !keepsOverviewCard &&
       SEMANTIC_ZOOM_CONFIG.nodeLOD[type]?.minimal === 'minimal';
 
     // Per-node resize handles are only ever shown when this is the *sole*
@@ -595,8 +670,15 @@ export const NodeWrapper = memo(
     // Derive accent-tinted tokens once so border/shadow stay in sync with
     // the rest of the canvas (PreviewCard, SemanticPlaceholder, ...).
     // Stored value is a palette token (or legacy hex); resolve to CSS color.
-    const accent = resolveAccent(data.style?.accent);
-    const accentTokens = accent ? getAccentTokens(accent) : null;
+    const accent = resolveNodeAccent(type, data.style?.accent);
+    const accentTokens =
+      type !== 'frame' && accent ? getAccentTokens(accent) : null;
+    const shellRadius =
+      borderRadius ?? nodeMetricsForSize(nodeWidth, nodeHeight).radius;
+    const hasMediaBorderOverlay = type === 'image' || type === 'video';
+    // Media borders overlay the content; Sketch has no layout border.
+    const borderInset = nodeLayoutBorderInset(type);
+    const innerRadius = Math.max(0, shellRadius - borderInset);
     // Accent controls colour only. Elevation is interaction-driven and only
     // applies to card-like content nodes; text, sketch, question, and frame
     // nodes retain their deliberately flat visual language.
@@ -605,29 +687,43 @@ export const NodeWrapper = memo(
       type !== 'sketch' &&
       type !== 'question' &&
       type !== 'frame';
+    const isDocumentReading =
+      (type === 'pdf' || type === 'web') && presentation.mode === 'reading';
+    const paintsCardChrome = hasCardSurface && !isDocumentReading;
+    // Every card shares one boundary policy; media paint it as an overlay
+    // rather than reserving layout space inside the shell.
+    const cardBoundaryStyle = paintsCardChrome
+      ? {
+          ...nodeBoundaryForAccent(accent),
+          ...((type === 'image' || type === 'video') &&
+            !accent && { borderColor: 'transparent' }),
+          ...(hasMediaBorderOverlay && { borderWidth: 0 }),
+        }
+      : undefined;
+
+    const [toolbarGestureActive, setToolbarGestureActive] = useState(false);
+    const toolbarDragEnabled = !data.locked;
 
     return (
       <>
-        {showResizer && (
-          <NodeResizer
-            color="var(--color-info-light)"
+        {!frameSuppressed && (showResizer || resizing) && (
+          <NodeResizeControls
+            key={resizeEpoch}
+            type={type}
+            isNotMouse={isNotMouse}
             minWidth={minWidth}
             minHeight={minHeight}
             keepAspectRatio={keepAspectRatio}
             onResizeStart={handleResizeStart}
             onResize={handleResize}
             onResizeEnd={handleResizeEnd}
-            handleStyle={{
-              width: isNotMouse ? 12 : 8,
-              height: isNotMouse ? 12 : 8,
-              borderRadius: 0,
-            }}
-            lineClassName="!border-transparent"
           />
         )}
         {selected &&
+          !frameSuppressed &&
           selectedCount === 1 &&
-          !isDragging &&
+          (!isDragging || toolbarGestureActive) &&
+          !resizing &&
           !hasStrokeSelection &&
           !hasPendingConnect && (
             <NodeFloatingToolbar
@@ -636,11 +732,14 @@ export const NodeWrapper = memo(
               data={data}
               toolbar={toolbar}
               actions={actions}
+              dragEnabled={toolbarDragEnabled}
+              dragActive={toolbarGestureActive}
+              onDragActiveChange={setToolbarGestureActive}
             />
           )}
 
         {/* Zoom-invariant overlay portal — isolated component to avoid re-rendering the entire NodeWrapper on pan/zoom */}
-        {overlayContent && (
+        {overlayContent && !frameSuppressed && (
           <OverlayPortal
             nodeId={id}
             offsetY={overlayOffsetY}
@@ -663,12 +762,20 @@ export const NodeWrapper = memo(
             nodeId={id}
             renderMark={takeover.renderMark}
             onActivate={takeover.onActivate}
-            nodeRootRef={rootRef}
+            fontSize={takeover.fontSize}
+            forceCollapsed={takeover.forceCollapsed}
+            nodeRoot={nodeRoot}
+            suppressed={frameSuppressed && type !== 'question'}
           />
         )}
 
-        <div
-          ref={rootRef}
+        <SurfaceRoot
+          ref={setNodeRoot}
+          data-node-surface={id}
+          onKeyDown={handleCanvasFocusEscape}
+          frameAppearance={
+            type === 'frame' ? { accent, borderRadius } : undefined
+          }
           className={cn(
             // `transition` (not `transition-all`) intentionally
             // EXCLUDES width / height from the animated property
@@ -683,44 +790,78 @@ export const NodeWrapper = memo(
             // `transition` still animates color / bg / border / ring
             // / shadow / transform / opacity — i.e. all the
             // selection-state visuals this class is here to smooth.
-            'semantic-lod-node group relative flex h-full w-full flex-col rounded-lg transition duration-120',
+            'semantic-lod-node group relative flex h-full w-full flex-col transition duration-120',
+            paintsCardChrome && 'border-solid',
 
-            hasCardSurface && 'hover:shadow-sm',
-            hasCardSurface && editing && 'shadow-sm',
-            hasCardSurface && isDragging && 'shadow-md',
-            !accentTokens && !fillColor && 'bg-transparent',
+            paintsCardChrome && 'hover:shadow-sm',
+            paintsCardChrome && editing && 'shadow-sm',
+            paintsCardChrome && isDragging && 'shadow-md',
+            type !== 'frame' &&
+              type !== 'note' &&
+              !accentTokens &&
+              !fillColor &&
+              'bg-transparent',
             // Selection outline is rendered as a screen-space HUD overlay
             // by `<SelectionOutlines />` (Canvas-level), not as a ring on
-            // the node DOM. Mirroring common design tools: clicking a node MUST NOT
-            // change its z-order, so the selection indicator lives on a
-            // layer that is always on top regardless of node stacking.
-            // Hover ring (only for non-sketch) stays here because it
-            // tracks `:hover`, which the overlay cannot observe.
-            !selected && type !== 'sketch' && 'ring-edge-default hover:ring',
+            // the node DOM. Canvas temporarily elevates the sole selection
+            // and its controls without changing persisted stacking order.
 
-            type !== 'sketch' && 'border-transparent',
-            type !== 'sketch' && type !== 'image' && 'border-3',
+            // Text keeps this transparent inset for stable wrapping/auto-size,
+            // but does not receive the accent border color below.
+            type !== 'sketch' &&
+              type !== 'frame' &&
+              !hasCardSurface &&
+              'border-transparent',
+            type !== 'sketch' &&
+              !hasMediaBorderOverlay &&
+              type !== 'frame' &&
+              !hasCardSurface &&
+              'border-3',
             // Question nodes need visible overflow for status badges and progress bar
             type === 'question' && 'overflow-visible',
             className,
           )}
           style={{
             // Fill priority: explicit override (`fillColor`, used by
-            // QuestionNode) > accent-derived tint > nothing (let the
-            // `bg-transparent` class above show the canvas through).
-            ...(fillColor
-              ? { backgroundColor: fillColor }
-              : accentTokens
-                ? { backgroundColor: accentTokens.bg }
-                : {}),
-            ...(accentTokens && {
-              borderColor: accentTokens.border,
-            }),
+            // QuestionNode) > subdued Note/Text surface > accent tint > transparent.
+            ...(type !== 'frame' &&
+              (fillColor
+                ? { backgroundColor: fillColor }
+                : type === 'note' ||
+                    ((type === 'text' || type === 'web' || type === 'pdf') &&
+                      accent)
+                  ? noteSurfaceStyle(accent)
+                  : accentTokens
+                    ? { backgroundColor: accentTokens.bg }
+                    : {})),
+            ...(type !== 'frame' &&
+              type !== 'text' &&
+              !hasCardSurface &&
+              accentTokens && { borderColor: accentTokens.border }),
             ...(type === 'question' && {
               borderColor: 'transparent',
             }),
+            ...cardBoundaryStyle,
+            // Preserve the shared tint, attenuating fill and border independently.
+            ...(frameSuppressed &&
+              frameRegionSurfaceStyle(
+                accent,
+                cardBoundaryStyle?.borderColor ??
+                  (type !== 'text' && type !== 'question' && accentTokens
+                    ? accentTokens.border
+                    : 'transparent'),
+                type === 'frame',
+              )),
+            ...(isDocumentReading && {
+              backgroundColor: 'transparent',
+              borderColor: 'transparent',
+              borderWidth: 0,
+            }),
+            ...(type !== 'frame' && { borderRadius: shellRadius }),
           }}
           data-lod={renderMode}
+          data-frame-suppressed={frameSuppressed || undefined}
+          data-presentation={presentation.mode}
           onDoubleClick={onDoubleClick}
           onPointerEnter={() => setHovered(true)}
           onPointerLeave={() => setHovered(false)}
@@ -728,45 +869,25 @@ export const NodeWrapper = memo(
           onBlur={() => setEditing(false)}
         >
           {/*
-            Keep the lightweight placeholder mounted inside the node shell
-            so CSS can cross-fade both directions. Its position in this
-            shared containing block also guarantees that the full-LOD hiding
-            selector and the absolute inset use the same structural anchor.
+            Keep the lightweight text inside the existing shell without
+            changing geometry or introducing another surface style.
           */}
           {supportsMinimalLOD && (
-            <SemanticPlaceholder
+            <ViewportSemanticPlaceholder
               type={type}
               data={data}
-              active={isMinimal}
+              active={isMinimal && !frameSuppressed}
               width={nodeWidth}
               height={nodeHeight}
+              label={farLabel}
+              borderRadius={innerRadius}
             />
           )}
 
-          {showIngestionOverlay && (
+          {showIngestionOverlay && !frameSuppressed && (
             <div className="pointer-events-none absolute right-1.5 bottom-1.5 z-10">
               <Loading layout="inline" size="xs" className="text-fg-subtle" />
             </div>
-          )}
-
-          {/* AI provenance badge */}
-          {showAIBadge && (
-            <Tooltip
-              content={
-                provenanceSummary
-                  ? `AI edits pending: ${provenanceSummary.editedCount}, deletions: ${provenanceSummary.deletedCount}`
-                  : 'AI generated'
-              }
-            >
-              <div
-                className={clsx(
-                  'absolute top-1 right-1 z-10 flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] leading-none font-medium',
-                  'bg-ai-bg text-ai',
-                )}
-              >
-                <span>AI</span>
-              </div>
-            </Tooltip>
           )}
 
           {/* Duplicate-sidecar warning: more than one `.md` on disk claims
@@ -779,7 +900,7 @@ export const NodeWrapper = memo(
               can decide which one to keep, and offers an "Open folder"
               shortcut. No Remove button: the fix is to delete the
               duplicate file in the folder, not the node. */}
-          {data.contentDuplicate && (
+          {data.contentDuplicate && !frameSuppressed && (
             <div className="border-warning-light bg-surface absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 overflow-hidden rounded-md border border-dashed p-3 text-center">
               <FileWarning className="text-warning h-7 w-7 shrink-0" />
               <div className="text-fg-default text-sm font-medium">
@@ -823,23 +944,34 @@ export const NodeWrapper = memo(
           )}
 
           <div
+            inert={isMinimal || frameSuppressed || undefined}
+            aria-hidden={isMinimal || frameSuppressed || undefined}
             className={clsx(
               'semantic-lod-content p-0',
 
               hasLayoutHeight ? 'min-h-0 flex-1' : 'min-h-0',
 
-              allowOverflow ? 'overflow-visible' : 'overflow-hidden rounded-md',
+              allowOverflow ? 'overflow-visible' : 'overflow-hidden',
             )}
+            style={
+              type === 'frame'
+                ? { borderRadius: 'inherit' }
+                : ({
+                    borderRadius: innerRadius,
+                    '--node-inner-radius': `${innerRadius}px`,
+                  } as React.CSSProperties)
+            }
           >
             {children}
           </div>
 
-          {/* Paint image borders above the media without shrinking its aspect-ratio box. */}
-          {type === 'image' && (
+          {/* Paint media borders above the content without shrinking its aspect-ratio box. */}
+          {hasMediaBorderOverlay && (
             <div
               aria-hidden
               className="pointer-events-none absolute inset-0 z-1 rounded-[inherit] border-3 border-[inherit]"
-              data-node-image-border
+              data-node-media-border
+              data-node-image-border={type === 'image' || undefined}
             />
           )}
 
@@ -849,8 +981,9 @@ export const NodeWrapper = memo(
             selected={!!selected && selectedCount === 1}
             isNotMouse={isNotMouse}
             dragging={isDragging}
+            resizing={resizing || frameSuppressed}
           />
-        </div>
+        </SurfaceRoot>
       </>
     );
   },

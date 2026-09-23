@@ -23,6 +23,7 @@ import {
   mergeLineRects,
 } from '@/handler/pdfHighlight/highlight';
 import { scheduleScrollToMatch } from '@/hooks/searchDom';
+import { handleCanvasNavigationKey } from '@/hooks/shortcuts/handleCanvasNavigationKey';
 import { usePreviewScrollMemory } from '@/hooks/usePreviewScrollMemory';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
@@ -49,9 +50,11 @@ import { usePdfDocumentLifecycle } from './usePdfDocumentLifecycle';
 import { usePdfTextIndex } from './usePdfTextIndex';
 import { Button } from '../../Common/Button';
 import { Loading } from '../../Common/Loading';
+import { containNoteWheel } from '../note/noteScroll';
 
 import type { AreaCapturedEvent, NormalizedRect } from './PDFPageWithOverlay';
 import type { PreviewComponentProps } from '../note/NotePreview';
+import type { PreviewSearchAdapter } from '@/components/Panels/ExpandedNodePanel/PreviewSearchAdapterContext';
 import type { ChatAttachment, PdfHighlight } from '@huabu/shared';
 
 /**
@@ -75,19 +78,43 @@ type PendingCaptureDrag = {
   captureRect: NormalizedRect;
 };
 
+type PDFPreviewProps = PreviewComponentProps & {
+  /** Reuse the page renderer without Preview Workspace tools or state. */
+  embedded?: boolean;
+  /** Canvas readers accept input only while their node is solely selected. */
+  interactive?: boolean;
+};
+
+function RegisterPDFSearch({
+  adapter,
+}: {
+  adapter: PreviewSearchAdapter | null;
+}) {
+  useRegisterPreviewSearchAdapter(adapter);
+  return null;
+}
+
 export const PDFPreview = ({
   id,
   data,
   scrollViewKey,
   onDataChange,
-}: PreviewComponentProps) => {
+  embedded = false,
+  interactive = true,
+}: PDFPreviewProps) => {
   const { t } = useTranslation();
   const src = typeof data.src === 'string' ? data.src : '';
   const canvasId = useCanvasStore((s) => s.canvasId);
   const resolvedSrc = resolveArtifactUrl(src, canvasId);
-  const previewSearchNodeId = usePreviewSearchStore((s) => s.nodeId);
-  const searchQuery = usePreviewSearchStore((s) => s.query);
-  const isPreviewSearchOpen = usePreviewSearchStore((s) => s.isOpen);
+  const previewSearchNodeId = usePreviewSearchStore((s) =>
+    embedded ? null : s.nodeId,
+  );
+  const searchQuery = usePreviewSearchStore((s) => (embedded ? '' : s.query));
+  const isPreviewSearchOpen = usePreviewSearchStore((s) =>
+    embedded ? false : s.isOpen,
+  );
+  const [loadError, setLoadError] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const {
     document: pdfDocument,
     numPages,
@@ -107,6 +134,7 @@ export const PDFPreview = ({
   >(() => new Map());
   // Reset loading state when the PDF source changes.
   useEffect(() => {
+    setLoadError(false);
     setForcedPageIndex(null);
     setVisiblePageIndexes(new Set([0]));
     setRetainedPageIndexes(new Set([0]));
@@ -131,13 +159,26 @@ export const PDFPreview = ({
   const highlightsRef = useRef(highlights);
   highlightsRef.current = highlights;
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  usePreviewScrollMemory(scrollContainerRef, scrollViewKey);
+  usePreviewScrollMemory(
+    scrollContainerRef,
+    embedded ? undefined : scrollViewKey,
+  );
   const [containerWidth, setContainerWidth] = useState<number>(0);
   // The width at which the PDF canvas is actually rendered.  Starts at 0 and
   // is updated when the container is first measured *and* whenever the
   // container grows significantly (debounced) so the canvas stays sharp.
   const [renderedWidth, setRenderedWidth] = useState<number>(0);
   const rerenderTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    const viewport = scrollContainerRef.current;
+    if (!embedded || !interactive || !viewport) return;
+    viewport.addEventListener('wheel', containNoteWheel, {
+      capture: true,
+      passive: true,
+    });
+    return () => viewport.removeEventListener('wheel', containNoteWheel, true);
+  }, [embedded, interactive]);
 
   useEffect(() => {
     const el = scrollContainerRef.current;
@@ -227,7 +268,7 @@ export const PDFPreview = ({
   // Native text selection → FloatingDragHandle (non-capture mode only)
   // ---------------------------------------------------------------------------
   useEffect(() => {
-    if (captureMode || highlightMode) {
+    if (embedded || captureMode || highlightMode) {
       setPendingTextSelection(null);
       return;
     }
@@ -259,7 +300,7 @@ export const PDFPreview = ({
 
     el.addEventListener('mouseup', handleMouseUp);
     return () => el.removeEventListener('mouseup', handleMouseUp);
-  }, [captureMode, highlightMode]);
+  }, [embedded, captureMode, highlightMode]);
 
   // Dismiss text-selection handle when selection is cleared or on scroll.
   useEffect(() => {
@@ -375,6 +416,7 @@ export const PDFPreview = ({
   );
 
   const isPdfSearchActive =
+    !embedded &&
     isPreviewSearchOpen &&
     previewSearchNodeId === id &&
     searchQuery.trim().length > 0;
@@ -434,7 +476,6 @@ export const PDFPreview = ({
       textIndex.isIndexing,
     ],
   );
-  useRegisterPreviewSearchAdapter(searchAdapter);
 
   // ---------------------------------------------------------------------------
   // Area-capture handler
@@ -608,14 +649,46 @@ export const PDFPreview = ({
   );
 
   return (
-    <div className="relative flex h-full flex-col">
-      {headerSlotEl ? createPortal(headerActions, headerSlotEl) : null}
+    // eslint-disable-next-line jsx-a11y/no-static-element-interactions -- Event boundary only; the labelled scroll viewport below owns focus and native interaction.
+    <div
+      className={clsx(
+        'relative flex h-full min-h-0 flex-col',
+        embedded &&
+          (interactive ? 'nodrag nopan' : 'pointer-events-none select-none'),
+      )}
+      data-pdf-reader={embedded ? 'embedded' : 'preview'}
+      data-keyboard-interactive={embedded && interactive ? '' : undefined}
+      inert={embedded && !interactive}
+      onKeyDown={
+        embedded && interactive ? handleCanvasNavigationKey : undefined
+      }
+      onDoubleClick={
+        embedded && interactive ? (event) => event.stopPropagation() : undefined
+      }
+    >
+      {!embedded && <RegisterPDFSearch adapter={searchAdapter} />}
+      {!embedded && headerSlotEl
+        ? createPortal(headerActions, headerSlotEl)
+        : null}
       {/* Loading overlay — visible until document metadata is parsed */}
-      {src && !docLoaded && <Loading layout="overlay" variant="skeleton" />}
+      {src && !docLoaded && !loadError && (
+        <Loading layout="overlay" variant="skeleton" />
+      )}
       {/* ── PDF pages ── */}
       <div
         ref={scrollContainerRef}
-        className="bg-surface flex-1 overflow-x-hidden overflow-y-auto p-1"
+        data-pdf-scroll-viewport
+        role={embedded ? 'region' : undefined}
+        aria-label={
+          embedded ? String(data.label || t('node.untitledPdf')) : undefined
+        }
+        // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- The selected document viewport supports native keyboard scrolling.
+        tabIndex={embedded && interactive ? 0 : undefined}
+        className={clsx(
+          'bg-surface min-h-0 flex-1 overflow-x-hidden p-1',
+          embedded && !interactive ? 'overflow-y-hidden' : 'overflow-y-auto',
+          embedded && interactive && 'overscroll-contain',
+        )}
       >
         {src ? (
           <div
@@ -626,13 +699,26 @@ export const PDFPreview = ({
             }}
           >
             <Document
+              key={loadAttempt}
               file={resolvedSrc}
               options={PDF_DOCUMENT_OPTIONS}
               onLoadSuccess={onDocumentLoadSuccess}
+              onLoadError={() => setLoadError(true)}
+              onSourceError={() => setLoadError(true)}
               loading=""
               error={
-                <div className="text-danger-light p-4 text-xs">
+                <div className="text-danger p-4 text-xs">
                   {t('node.errorLoadingPdf')}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setLoadError(false);
+                      setLoadAttempt((attempt) => attempt + 1);
+                    }}
+                  >
+                    {t('messages.retry')}
+                  </Button>
                 </div>
               }
               className={clsx('flex flex-col items-center gap-0')}
@@ -656,7 +742,7 @@ export const PDFPreview = ({
                       pageNumber={index + 1}
                       pageIndex={index}
                       pageWidth={renderedWidth > 0 ? renderedWidth : undefined}
-                      captureEnabled={captureMode}
+                      captureEnabled={!embedded && captureMode}
                       onAreaCaptured={handleAreaCaptured}
                       persistedRect={
                         pendingCapture && pendingCapture.pageIndex === index
@@ -681,7 +767,7 @@ export const PDFPreview = ({
       </div>
 
       {/* ── Floating drag handle (area capture) */}
-      {pendingCapture && (
+      {!embedded && pendingCapture && (
         <FloatingDragHandle
           excerptFromNodeId={id}
           text={pendingCapture.text}
@@ -695,7 +781,7 @@ export const PDFPreview = ({
       )}
 
       {/* ── Floating drag handle (native text selection) */}
-      {pendingTextSelection && !pendingCapture && (
+      {!embedded && pendingTextSelection && !pendingCapture && (
         <FloatingDragHandle
           excerptFromNodeId={id}
           text={pendingTextSelection.text}

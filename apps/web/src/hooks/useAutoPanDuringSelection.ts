@@ -28,6 +28,10 @@ interface UseAutoPanDuringSelectionOptions {
    * scrolling along with the camera.
    */
   onPan?: (dx: number, dy: number) => void;
+  /** App-owned rectangles recompute from their flow anchor, without native event replay. */
+  updateNativeRectangle?: boolean;
+  /** Captured owners may stop bubbling; seed auto-pan from their latest real pointer. */
+  getPointerPosition?: () => { x: number; y: number } | null;
 }
 
 /** Distance (in screen px) from the wrapper edge where auto-pan starts ramping. */
@@ -39,6 +43,8 @@ export function useAutoPanDuringSelection({
   active,
   wrapperRef,
   onPan,
+  updateNativeRectangle = true,
+  getPointerPosition,
 }: UseAutoPanDuringSelectionOptions): void {
   const storeApi = useStoreApi();
   const cursorRef = useRef<{ x: number; y: number } | null>(null);
@@ -112,7 +118,11 @@ export function useAutoPanDuringSelection({
       // Keep xyflow's box-selection anchor pinned to flow-space so the
       // marquee grows toward the panning direction rather than sliding with
       // the camera. (No-op when no marquee is active.)
-      if (state.userSelectionActive && state.userSelectionRect) {
+      if (
+        updateNativeRectangle &&
+        state.userSelectionActive &&
+        state.userSelectionRect
+      ) {
         const rect = state.userSelectionRect;
         const startX = rect.startX + dx;
         const startY = rect.startY + dy;
@@ -165,9 +175,19 @@ export function useAutoPanDuringSelection({
       }
     };
 
-    window.addEventListener('pointermove', onPointerMove);
+    cursorRef.current = getPointerPosition?.() ?? null;
+    if (cursorRef.current) rafRef.current = requestAnimationFrame(tick);
+    window.addEventListener(
+      'pointermove',
+      onPointerMove,
+      !updateNativeRectangle,
+    );
     return () => {
-      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener(
+        'pointermove',
+        onPointerMove,
+        !updateNativeRectangle,
+      );
       if (rafRef.current !== null) {
         cancelAnimationFrame(rafRef.current);
         rafRef.current = null;
@@ -175,5 +195,5 @@ export function useAutoPanDuringSelection({
       cursorRef.current = null;
       lastTsRef.current = null;
     };
-  }, [active, wrapperRef, storeApi]);
+  }, [active, wrapperRef, storeApi, updateNativeRectangle, getPointerPosition]);
 }

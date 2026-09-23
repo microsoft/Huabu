@@ -5,6 +5,8 @@ Last reviewed: 2026-09-14
 
 > **Superseded Portal assumptions.** The Portal mirroring and World/Portal audit references below are historical and no longer implementation requirements: `canvasRef` and `frameRef` have been retired. Current [Space Previews](../architecture/space-preview.md) are view-only scene projections, not persistent child Containers. This backlog remains an unapproved Frame-geometry idea; the original discussion is preserved below.
 
+> **Responsive-header exception.** The shipped Frame header normalization is deliberately narrower than the full derivation proposed here. It only expands an unlocked Hug Frame upward when legacy persisted geometry does not contain the responsive title inset; it applies the same offset to direct-child local coordinates, so child absolute positions and the Frame's bottom edge remain unchanged. It does not shrink Frames, recompute side or bottom fit, reflow structured layouts, or rewrite Manual or locked Frames. When geometry changes, loading waits for a version-checked structure save before exposing it; see [canvas-zoom-rendering.md](../architecture/canvas-zoom-rendering.md).
+
 > Spun out of [node-height-ownership-model.md](../proposals/node-height-ownership-model.md), which resolves the same distinction for node height but deliberately stops at the frame boundary. Read D9 there first — this document assumes its vocabulary (`authored` vs `derived` geometry, materialization, the per-batch derived marker).
 
 ## The distinction that is currently missing

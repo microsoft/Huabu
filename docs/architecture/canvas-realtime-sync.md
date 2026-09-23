@@ -88,6 +88,8 @@ batch — there is no per-caller broadcast flag. This unifies all writers:
 
 ## Conflict model — version + dirty-node protection
 
+Loading a Space may attempt to persist a legacy Hug Frame header adjustment before displaying the adjusted geometry. This optional layout write is not a prerequisite for reading the Space: if it fails (including version conflicts or Agent execution-record validation), loading completes with the original loaded geometry, content, edges, and snapshot version. The failure is logged without a blocking or persistent toast, and neither the rejected geometry nor its warmup hints are automatically resubmitted by the load path. Normal save validation and SSE reconciliation remain in force; this fallback does not repair missing execution records or force an overwrite.
+
 `applyDeltasFromAgent` filters incoming deltas against the set of nodes with
 un-persisted local content edits (`nodeContentQueue.pendingNodeIds()` —
 debounced-but-unsaved plus in-flight PUTs):

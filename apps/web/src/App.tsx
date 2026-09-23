@@ -61,10 +61,26 @@ const playgroundRoutes = import.meta.env.DEV
         }),
       },
       {
+        path: '/playground/question-nodes',
+        lazy: async () => ({
+          Component: (
+            await import('./pages/playground/QuestionDesignPlaygroundPage')
+          ).default,
+        }),
+      },
+      {
         path: '/playground/agent-nodes',
         lazy: async () => ({
           Component: (
             await import('./pages/playground/AgentNodePlaygroundPage')
+          ).default,
+        }),
+      },
+      {
+        path: '/playground/design',
+        lazy: async () => ({
+          Component: (
+            await import('./pages/playground/FrameDesignPlaygroundPage')
           ).default,
         }),
       },

@@ -2,10 +2,11 @@
 // Licensed under the MIT license.
 
 import { MessageSquare } from 'lucide-react';
-import { memo, useCallback, useMemo, useRef } from 'react';
+import { memo, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { getQuestionNodeStatus } from '@huabu/shared';
+import { getNodeDefaultSize } from '@huabu/shared/canvas-engine';
 
 import './QuestionNode.css';
 
@@ -30,13 +31,17 @@ import {
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 import {
   getQuestionFontOpts,
-  QUESTION_FONT_FAMILY,
+  QUESTION_NODE_DEFAULT_FONT_SIZE,
+  QUESTION_NODE_HEADER_INSET,
   QUESTION_NODE_PADDING as NODE_PADDING,
+  QUESTION_NODE_PADDING_Y,
   QUESTION_NODE_PLACEHOLDER,
 } from '@/utils/node/nodeFontConfig';
 import { getQuestionDisplayText } from '@/utils/node/questionDisplayText';
 import { resolveQuestionAgentPresentation } from '@/utils/questionAgentPresentation.ts';
 
+import { NODE_TYPOGRAPHY } from '../design/nodeTypography';
+import { useFrameSuppressed } from '../frame/FrameZoomContext';
 import { MissingFileBanner } from '../MissingFileBanner';
 import { NodeWrapper } from '../NodeWrapper';
 import {
@@ -44,17 +49,17 @@ import {
   enterQuestionConversation,
   ensureQuestionThread,
 } from './questionCompose.ts';
-import { QuestionTakeoverMark } from './QuestionTakeoverMark.tsx';
-import { TextNodeBody } from '../shared/TextNodeBody';
+import { QuestionConversationCard } from './QuestionConversationCard';
+import {
+  QuestionTakeoverMark,
+  resolveQuestionTakeoverTone,
+} from './QuestionTakeoverMark.tsx';
 
 import type { QuestionAgentBadgeStatus } from './questionBadgeChrome.ts';
 import type { CanvasQuestionNodeData } from '../types';
 import type { Node, NodeProps } from '@xyflow/react';
 
 export type QuestionNodeType = Node<CanvasQuestionNodeData, 'question'>;
-
-/** Sticky-note warm background colour (design token). */
-const STICKY_BG = 'var(--question-bg)';
 
 /**
  * Question node — a canvas anchor for a chat thread.
@@ -72,7 +77,7 @@ const STICKY_BG = 'var(--question-bg)';
 export const QuestionNode = memo(
   ({ id, data, selected, width }: NodeProps<QuestionNodeType>) => {
     const { t } = useTranslation();
-    const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const frameSuppressed = useFrameSuppressed(id);
 
     // On-canvas anchor text. Prefer the generated `label` (a concise
     // title) once preprocessing produced one; fall back to a truncated
@@ -94,9 +99,15 @@ export const QuestionNode = memo(
       width,
       isEditing: false,
       content: displayText,
-      baseFontSize: 16,
-      paddingX: NODE_PADDING,
-      paddingY: NODE_PADDING,
+      baseFontSize: QUESTION_NODE_DEFAULT_FONT_SIZE,
+      fontSizing: 'proportional',
+      minAutoWidth: getNodeDefaultSize('question').width,
+      paddingX:
+        NODE_PADDING *
+        (QUESTION_NODE_DEFAULT_FONT_SIZE / NODE_TYPOGRAPHY.cardTitle.size),
+      paddingY:
+        (QUESTION_NODE_PADDING_Y + QUESTION_NODE_HEADER_INSET) *
+        (QUESTION_NODE_DEFAULT_FONT_SIZE / NODE_TYPOGRAPHY.cardTitle.size),
       fontOpts,
       placeholder: QUESTION_NODE_PLACEHOLDER,
     });
@@ -172,9 +183,7 @@ export const QuestionNode = memo(
       data.threadId ? selectThreadLastAction(s, data.threadId) : 'ask',
     );
     const agentProfiles = useAcpProfilesStore((s) => s.profiles);
-    // True only while this node's conversation is open AND the chat panel is
-    // expanded — the badge shows `open` only then; a collapsed panel falls
-    // back to the node's real status.
+    // Open styling is independent of lifecycle and never hides a running turn.
     const isChatAnchorActive = useActivelyViewingQuestionNode(id);
     const canvasId = useCanvasStore((s) => s.canvasId);
 
@@ -323,23 +332,19 @@ export const QuestionNode = memo(
       agentMode:
         data.agentMode ?? (isOpenForQuestion ? composeAgentMode : 'ask'),
     });
-    // `open` is the highest-priority badge state, BUT only while the chat
-    // panel is actually visible: whenever this node's conversation is open in
-    // an expanded panel (it is the anchor), the user can already watch the
-    // live result there, so the badge only hints "this conversation is open"
-    // — it deliberately overrides running / done / error. Collapsing the right
-    // panel hides that live view, so the badge falls back to the node's real
-    // status. `showChatAnchor` covers both the initial compose and re-opening
-    // an already-run node.
+    // Permission and pending forks retain their existing priority over stored status.
     const badgeStatus: QuestionAgentBadgeStatus | null = needsApproval
       ? 'approval'
-      : isChatAnchorActive
-        ? 'open'
-        : isForkPending
-          ? 'running'
-          : status === 'idle'
-            ? null
-            : status;
+      : isForkPending
+        ? 'running'
+        : status === 'idle'
+          ? null
+          : status;
+    const tone = resolveQuestionTakeoverTone(
+      badgeStatus ?? 'idle',
+      isDoneUnviewed || isErrorUnviewed,
+      status === 'done' ? conflictCount : 0,
+    );
 
     return (
       <NodeWrapper
@@ -350,8 +355,16 @@ export const QuestionNode = memo(
         actions={isContentMissing ? undefined : questionToolbar}
         keepAspectRatio={false}
         allowOverflow
-        fillColor={STICKY_BG}
-        className="question-sticky rounded-lg transition-all duration-200"
+        fillColor="var(--question-fill)"
+        borderRadius={
+          12 *
+          (surface.bodyProps.effectiveFontSize / NODE_TYPOGRAPHY.cardTitle.size)
+        }
+        className={[
+          'question-compact',
+          `question-tone-${tone}`,
+          isChatAnchorActive ? 'question-open' : '',
+        ].join(' ')}
         onDoubleClick={
           isContentMissing || isForkPending ? undefined : handleActivate
         }
@@ -359,43 +372,48 @@ export const QuestionNode = memo(
           isContentMissing
             ? undefined
             : {
+                fontSize: surface.bodyProps.effectiveFontSize,
+                forceCollapsed: frameSuppressed,
                 onActivate: isForkPending ? undefined : handleActivate,
-                renderMark: (s) => (
-                  <QuestionTakeoverMark
-                    state={s}
-                    status={badgeStatus ?? 'idle'}
-                    agent={agentPresentation}
-                    unread={isDoneUnviewed || isErrorUnviewed}
-                    conflictCount={status === 'done' ? conflictCount : 0}
-                    interactive={canOpenInChat}
-                    onOpen={canOpenInChat ? openInChat : undefined}
-                    accessibleLabel={
-                      canOpenInChat
-                        ? `${agentPresentation.alias} · ${t('node.openConversation')}`
-                        : undefined
-                    }
-                    conflictTooltip={
-                      conflictCount > 0
-                        ? t('node.agentChangesSkipped', {
-                            count: conflictCount,
-                          })
-                        : undefined
-                    }
-                    tooltip={
-                      needsApproval
-                        ? t('messages.permissionRequested')
-                        : status === 'error' && data.errorMessage
-                          ? data.errorMessage
-                          : canOpenInChat
-                            ? `${agentPresentation.alias} · ${
-                                status === 'running'
-                                  ? t('node.watchLiveConversation')
-                                  : t('node.openConversation')
-                              }`
-                            : agentPresentation.alias
-                    }
-                  />
-                ),
+                renderMark: (s) =>
+                  (s.progress ?? 0) === 0 ? null : (
+                    <QuestionTakeoverMark
+                      state={{ ...s, stage: 'collapsed' }}
+                      presentation={frameSuppressed ? 'dot' : 'avatar'}
+                      status={badgeStatus ?? 'idle'}
+                      isOpen={isChatAnchorActive}
+                      agent={agentPresentation}
+                      unread={isDoneUnviewed || isErrorUnviewed}
+                      conflictCount={status === 'done' ? conflictCount : 0}
+                      interactive={canOpenInChat}
+                      onOpen={canOpenInChat ? openInChat : undefined}
+                      accessibleLabel={
+                        canOpenInChat
+                          ? `${agentPresentation.alias} · ${t('node.openConversation')}`
+                          : undefined
+                      }
+                      conflictTooltip={
+                        conflictCount > 0
+                          ? t('node.agentChangesSkipped', {
+                              count: conflictCount,
+                            })
+                          : undefined
+                      }
+                      tooltip={
+                        needsApproval
+                          ? t('messages.permissionRequested')
+                          : status === 'error' && data.errorMessage
+                            ? data.errorMessage
+                            : canOpenInChat
+                              ? `${agentPresentation.alias} · ${
+                                  status === 'running'
+                                    ? t('node.watchLiveConversation')
+                                    : t('node.openConversation')
+                                }`
+                              : agentPresentation.alias
+                      }
+                    />
+                  ),
               }
         }
         {...surface.nodeWrapperProps}
@@ -403,18 +421,16 @@ export const QuestionNode = memo(
         {isContentMissing ? (
           <MissingFileBanner nodeId={id} />
         ) : (
-          <TextNodeBody
-            ref={textareaRef}
+          <QuestionConversationCard
             {...surface.bodyProps}
-            draft={surface.draft}
-            onChange={() => {}}
-            onBlur={() => {}}
-            isEditing={false}
-            onRequestEdit={handleActivate}
+            agent={agentPresentation}
+            status={badgeStatus ?? 'idle'}
+            isOpen={isChatAnchorActive}
+            unread={isDoneUnviewed || isErrorUnviewed}
+            conflictCount={status === 'done' ? conflictCount : 0}
+            errorMessage={data.errorMessage}
+            text={surface.draft}
             placeholder={QUESTION_NODE_PLACEHOLDER}
-            fontFamily={QUESTION_FONT_FAMILY}
-            color="var(--question-fg)"
-            textareaClassName="placeholder:text-fg-default/40"
           />
         )}
       </NodeWrapper>

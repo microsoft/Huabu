@@ -3,16 +3,13 @@
 
 import { useInternalNode } from '@xyflow/react';
 import { Link, MoveRight, Trash2 } from 'lucide-react';
-import { memo, useCallback, useMemo, type ReactNode } from 'react';
+import { memo, useCallback, useMemo, useRef, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import {
-  ACCENT_NONE_TOKEN,
-  ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT,
-  type FrameNodeData,
-} from '@huabu/shared';
+import { ACCENT_NONE_TOKEN, type FrameNodeData } from '@huabu/shared';
 import { isAlwaysAutoHeightNodeType } from '@huabu/shared/canvas-engine';
 
+import { Button } from '@/components/Common/Button';
 import { CanvasFloatingPopover } from '@/components/Common/CanvasFloatingPopover';
 import {
   FloatingToolbar,
@@ -22,8 +19,14 @@ import { toast } from '@/components/Common/Toast';
 import { Tooltip } from '@/components/Common/Tooltip';
 import { useHeightMode } from '@/components/Nodes/shared/height/useHeightMode';
 import { NODE_ICON } from '@/config/nodeIcons';
+import { nodeToolbarOffset } from '@/config/nodeInteractionChrome';
+import { QUESTION_CARD_SCALE_RANGE } from '@/handler/canvasCommand/resolvers/resolveSetQuestionCardScale';
+import { resolveUiIntent } from '@/handler/canvasCommand/uiIntent';
+import { handleCanvasNavigationKey } from '@/hooks/shortcuts/handleCanvasNavigationKey';
+import { handleCanvasFocusEscape } from '@/hooks/useCanvasFocusEscape';
 import { useIsNotMouse } from '@/hooks/useInputMode';
 import { useMultiSelectModifierHeld } from '@/hooks/useMultiSelectModifier';
+import { useTakeoverMarkDrag } from '@/hooks/useTakeoverMarkDrag';
 import { translateColorOptions } from '@/i18n/colors';
 import useCanvasStore from '@/store/canvasStore';
 import {
@@ -36,7 +39,13 @@ import {
 } from '@/store/previewWorkspace/store';
 import { copyToClipboard } from '@/utils/io/clipboard';
 import { resolveGeometryEdit } from '@/utils/node/geometry';
+import { QUESTION_NODE_DEFAULT_FONT_SIZE } from '@/utils/node/nodeFontConfig';
 import { buildNodeDeepLink } from '@/utils/nodeDeepLink';
+
+import {
+  nodeAccentPickerOptions,
+  nodeAccentPickerValue,
+} from './nodeAccentPickerOptions';
 
 import type { CanvasNodeType, NodeData } from '@/components/Nodes/types';
 
@@ -63,6 +72,99 @@ interface NodeFloatingToolbarProps {
    * Rendered as the last group before the optional delete button.
    */
   actions?: ReactNode;
+  dragEnabled: boolean;
+  dragActive?: boolean;
+  onDragActiveChange?: (active: boolean) => void;
+}
+
+/** Portalled chrome cannot delegate pointer dragging to a React Flow node ancestor. */
+function ToolbarTypeButton({
+  id,
+  type,
+  dragEnabled,
+  active,
+  disabled,
+  title,
+  onClick,
+  onActiveChange,
+}: {
+  id: string;
+  type: CanvasNodeType;
+  dragEnabled: boolean;
+  active?: boolean;
+  disabled?: boolean;
+  title?: string;
+  onClick?: () => void;
+  onActiveChange?: (active: boolean) => void;
+}) {
+  const { t } = useTranslation();
+  const isNotMouse = useIsNotMouse();
+  const releasedNormally = useRef(false);
+  const cancelledClick = useRef(false);
+  const drag = useTakeoverMarkDrag(id, {
+    enabled: dragEnabled && !disabled,
+    soleSelectionOnly: true,
+    onActiveChange: (active) => {
+      // A cancelled pending press must not convert either, even before drag lock.
+      if (!active && !releasedNormally.current) cancelledClick.current = true;
+      onActiveChange?.(active);
+    },
+  });
+  const TypeIcon = NODE_ICON[type];
+  return (
+    <Button
+      {...drag}
+      onPointerDown={(event) => {
+        releasedNormally.current = false;
+        cancelledClick.current = false;
+        drag.onPointerDown(event);
+      }}
+      onPointerUp={(event) => {
+        releasedNormally.current = event.currentTarget.hasPointerCapture(
+          event.pointerId,
+        );
+        drag.onPointerUp(event);
+      }}
+      onClickCapture={(event) => {
+        drag.onClickCapture(event);
+        if (cancelledClick.current) {
+          cancelledClick.current = false;
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      }}
+      variant="ghost"
+      iconOnly
+      size={active === undefined ? 'md' : 'sm'}
+      aria-pressed={active}
+      disabled={disabled}
+      data-node-drag-handle={dragEnabled && !disabled ? '' : undefined}
+      title={
+        dragEnabled && !disabled
+          ? `${title ?? type} · ${t('node.dragToMove')}`
+          : (title ?? type)
+      }
+      onClick={() =>
+        onClick
+          ? onClick()
+          : useCanvasStore
+              .getState()
+              .canvasWrapper?.focus({ preventScroll: true })
+      }
+      className={`nodrag nopan flex shrink-0 items-center justify-center rounded select-none ${
+        active
+          ? 'text-info bg-info-bg enabled:hover:bg-info-bg'
+          : 'text-fg-muted hover:bg-hover hover:text-fg-default'
+      } ${dragEnabled && !disabled ? 'cursor-grab active:cursor-grabbing' : ''}`}
+      style={{
+        width: isNotMouse ? 32 : 28,
+        height: isNotMouse ? 32 : 28,
+        touchAction: dragEnabled && !disabled ? 'none' : undefined,
+      }}
+    >
+      <TypeIcon aria-hidden className="pointer-events-none" />
+    </Button>
+  );
 }
 
 /**
@@ -74,8 +176,8 @@ interface NodeFloatingToolbarProps {
  * one per node.
  *
  * Composes four groups separated by dividers:
- *  1. Type indicator. For `text` / `note`, a toggle to convert between them;
- *     for other nodes, a plain type icon.
+ *  1. Type buttons double as drag surfaces when enabled. For `text` / `note`,
+ *     clicking the alternate type converts; dragging never converts.
  *  2. Style: accent color picker (hidden for `question` / `sketch`) + size
  *     picker. Always present.
  *  3. Canvas display (`toolbar` prop). Controls that change how the node is
@@ -92,7 +194,16 @@ interface NodeFloatingToolbarProps {
  * `CanvasFloatingPopover`.
  */
 export const NodeFloatingToolbar = memo(
-  ({ id, type, data, toolbar, actions }: NodeFloatingToolbarProps) => {
+  ({
+    id,
+    type,
+    data,
+    toolbar,
+    actions,
+    dragEnabled,
+    dragActive,
+    onDragActiveChange,
+  }: NodeFloatingToolbarProps) => {
     const { t } = useTranslation();
     const internalNode = useInternalNode(id);
     // While the node is collapsed to its takeover mark the card has faded
@@ -122,8 +233,8 @@ export const NodeFloatingToolbar = memo(
     const multiSelectModifierHeld = useMultiSelectModifierHeld();
     const isTextFlowNode = isAlwaysAutoHeightNodeType(type);
     const accentPickerOptions = useMemo(
-      () => translateColorOptions(ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT, t),
-      [t],
+      () => translateColorOptions(nodeAccentPickerOptions([type]), t),
+      [t, type],
     );
 
     // Disable the text/note toggle while the large-view editor is open
@@ -218,6 +329,28 @@ export const NodeFloatingToolbar = memo(
     // stays in Group 2 alongside every other node type's geometry
     // controls.
     const dispatchUiIntent = useCanvasStore((s) => s.dispatchUiIntent);
+    const authoredFont = data.style?.fontSize;
+    const questionFont =
+      typeof authoredFont === 'number' &&
+      Number.isFinite(authoredFont) &&
+      authoredFont > 0
+        ? authoredFont
+        : QUESTION_NODE_DEFAULT_FONT_SIZE;
+    const questionScale =
+      (questionFont / QUESTION_NODE_DEFAULT_FONT_SIZE) * 100;
+    const applyQuestionScale = (percent: number) => {
+      const state = useCanvasStore.getState();
+      const intent = {
+        type: 'SET_QUESTION_CARD_SCALE' as const,
+        nodeId: id,
+        percent,
+      };
+      // Preflight against live state: rounded display and stale targets must
+      // never create an empty gesture or a second undo entry on blur.
+      if (resolveUiIntent(intent, state).commands.length === 0) return;
+      state.beginGesture('SET_NODE_GEOMETRY');
+      state.dispatchUiIntent(intent);
+    };
     const isFrame = type === 'frame';
     const frameData = isFrame ? (data as FrameNodeData) : null;
     const frameSizing = frameData?.sizing ?? 'hug';
@@ -235,41 +368,68 @@ export const NodeFloatingToolbar = memo(
     return (
       <CanvasFloatingPopover
         anchor={anchor}
-        open={!multiSelectModifierHeld}
-        offset={12}
+        open={dragActive || !multiSelectModifierHeld}
+        offset={nodeToolbarOffset(isNotMouse)}
         side="top"
-        className={FLOATING_TOOLBAR_CLASS}
+        className={`${FLOATING_TOOLBAR_CLASS} node-floating-toolbar`}
+        onKeyDown={(event) => {
+          handleCanvasFocusEscape(event);
+          handleCanvasNavigationKey(event);
+        }}
       >
         {/* Leading type indicator. */}
         {type === 'text' || type === 'note' ? (
           <FloatingToolbar.Group>
-            <FloatingToolbar.ToggleButton
+            <ToolbarTypeButton
+              id={id}
+              type="text"
+              dragEnabled={dragEnabled}
+              onActiveChange={onDragActiveChange}
               active={type === 'text'}
-              disabled={isTypeToggleDisabled}
+              disabled={isTypeToggleDisabled && type !== 'text'}
               title={
-                typeToggleDisabledReason ??
+                (type !== 'text' ? typeToggleDisabledReason : null) ??
                 (type === 'text'
                   ? t('layers.filterLabels.text')
                   : t('toolbar.convertToText'))
               }
-              onClick={() => convertNodeType(id, 'text')}
-            >
-              <NODE_ICON.text />
-            </FloatingToolbar.ToggleButton>
-            <FloatingToolbar.ToggleButton
+              onClick={
+                type === 'text'
+                  ? undefined
+                  : () => {
+                      if (!isTypeToggleDisabled) convertNodeType(id, 'text');
+                    }
+              }
+            />
+            <ToolbarTypeButton
+              id={id}
+              type="note"
+              dragEnabled={dragEnabled}
+              onActiveChange={onDragActiveChange}
               active={type === 'note'}
-              disabled={isTypeToggleDisabled}
+              disabled={isTypeToggleDisabled && type !== 'note'}
               title={
-                typeToggleDisabledReason ??
+                (type !== 'note' ? typeToggleDisabledReason : null) ??
                 (type === 'note'
                   ? t('layers.filterLabels.note')
                   : t('toolbar.convertToNote'))
               }
-              onClick={() => convertNodeType(id, 'note')}
-            >
-              <NODE_ICON.note />
-            </FloatingToolbar.ToggleButton>
+              onClick={
+                type === 'note'
+                  ? undefined
+                  : () => {
+                      if (!isTypeToggleDisabled) convertNodeType(id, 'note');
+                    }
+              }
+            />
           </FloatingToolbar.Group>
+        ) : dragEnabled ? (
+          <ToolbarTypeButton
+            id={id}
+            type={type}
+            dragEnabled={dragEnabled}
+            onActiveChange={onDragActiveChange}
+          />
         ) : (
           <Tooltip content={type}>
             <div className="text-fg-subtle flex items-center px-1">
@@ -287,7 +447,7 @@ export const NodeFloatingToolbar = memo(
         {type !== 'question' && type !== 'sketch' && (
           <FloatingToolbar.ColorPicker
             colors={accentPickerOptions}
-            value={data.style?.accent ?? ACCENT_NONE}
+            value={nodeAccentPickerValue(type, data.style?.accent)}
             onSelect={(t) =>
               updateNodeData(id, {
                 style: {
@@ -354,7 +514,7 @@ export const NodeFloatingToolbar = memo(
               : undefined
           }
         />
-        {isTextFlowNode && (
+        {type === 'text' && (
           <FloatingToolbar.NumberInput
             label="Font"
             ariaLabel="Font size"
@@ -368,6 +528,26 @@ export const NodeFloatingToolbar = memo(
               });
             }}
           />
+        )}
+        {type === 'question' && (
+          <FloatingToolbar.Group>
+            <FloatingToolbar.NumberInput
+              label={t('toolbar.cardScale')}
+              ariaLabel={t('toolbar.cardScale')}
+              title={t('toolbar.cardScale')}
+              name="question-card-scale"
+              value={questionScale}
+              min={QUESTION_CARD_SCALE_RANGE.min}
+              max={QUESTION_CARD_SCALE_RANGE.max}
+              inputClassName="w-9"
+              endAdornment={
+                <span aria-hidden="true" className="text-fg-subtle text-xs">
+                  %
+                </span>
+              }
+              onApply={applyQuestionScale}
+            />
+          </FloatingToolbar.Group>
         )}
 
         {/* ── Group 3: Canvas display effects ── */}

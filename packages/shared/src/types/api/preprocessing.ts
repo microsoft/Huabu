@@ -118,7 +118,16 @@ export interface PreprocessNodeRequest extends Omit<
 /**
  * Simplified response returned by the unified preprocess endpoint.
  */
-export interface PreprocessNodeResponse {
+export const videoCoverPatchSchema = z.object({
+  /** Accepted Space-local JPEG reference; null explicitly clears a stale cover. */
+  coverUrl: z.string().nullable().optional(),
+  /** Exact accepted source, or null when clearing the cover. */
+  coverSourceSrc: z.string().nullable().optional(),
+});
+
+export interface PreprocessNodeResponse extends z.infer<
+  typeof videoCoverPatchSchema
+> {
   nodeId: string;
   success: boolean;
   /** LLM-suggested label from the Enrich stage (for image/frame, or title-derived for ingest types). */

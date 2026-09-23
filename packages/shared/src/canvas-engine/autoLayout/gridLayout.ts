@@ -37,8 +37,12 @@ import {
   FRAME_GRID_MAX_COUNT,
   FRAME_GRID_MIN_COUNT,
 } from '../../types/canvas/node.js';
+import {
+  frameResponsiveMetricsForSize,
+  resolveFrameResponsiveLayout,
+  type FrameResponsiveMetrics,
+} from '../frame/design.js';
 import { getFrameSizing } from '../frame/sizing.js';
-import { paddingFromExtent } from '../utils/constants.js';
 import { getNodeSize } from '../utils/nodeSizes.js';
 
 import type { FrameLayoutMode } from '../../types/canvas/node.js';
@@ -46,32 +50,12 @@ import type { Edge, Node, XYPosition } from '@xyflow/react';
 
 // ── Spacing constants ─────────────────────────────────────────────────
 
-/**
- * Gap-to-cell ratio. Gaps breathe with content size: an extent is
- * multiplied by this ratio to produce a gap.
- *
- * Each solver derives TWO gaps per axis: an **inter-track** gap
- * (between columns / rows) and an **intra-track** gap (between items
- * stacked inside one track). Each is computed from the median of the
- * children's extents ON THE AXIS WHERE THE GAP PARTICIPATES (widths
- * for the X-axis gap, heights for the Y-axis gap). This per-axis
- * derivation makes the solver self-consistent under per-axis resize:
- * scaling all child widths by `sx` makes the X-axis gap scale by `sx`
- * too, so the resulting frame width = `oldWidth × sx` exactly.
- */
-const GAP_TO_CELL_RATIO = 0.08;
-
-/**
- * Floor applied to every derived gap so tiny nodes still get a little
- * breathing room (and frames with un-measured children never collapse
- * their tracks together).
- */
-const MIN_GAP = 8;
+const MIN_BAND_TOLERANCE = 8;
 
 /**
  * Minimum half-width (flow units) of the "insert a new track between two
  * tracks" hit band. The literal inter-track gap is only a handful of
- * pixels ({@link gapFromExtent}), which is almost impossible to aim at,
+ * pixels, which is almost impossible to aim at,
  * so the between-tracks zone is widened to at least this much on each
  * side of the gap centre. Capped per call to a fraction of the
  * neighbouring tracks so narrow tracks stay selectable for `into-existing`.
@@ -108,16 +92,6 @@ function insertBetweenHalfBand(
     Math.min(prevExtent, nextExtent) * INSERT_BETWEEN_NEIGHBOUR_RATIO;
   const cap = gap / 2 + maxReachIntoNeighbour;
   return Math.min(desired, cap);
-}
-
-/**
- * Derive a gap from a representative child extent — typically the
- * median of one axis's child extents (widths for an X-axis gap,
- * heights for a Y-axis gap). Floored at {@link MIN_GAP}.
- */
-function gapFromExtent(extent: number): number {
-  if (!Number.isFinite(extent) || extent <= 0) return MIN_GAP;
-  return Math.max(MIN_GAP, extent * GAP_TO_CELL_RATIO);
 }
 
 /**
@@ -351,7 +325,7 @@ function bandChildrenByGeometry(
     axis === 'column' ? child.width : child.height;
 
   const tolerance = Math.max(
-    MIN_GAP,
+    MIN_BAND_TOLERANCE,
     median(children.map(extentOf)) * BAND_TOLERANCE_RATIO,
   );
 
@@ -606,6 +580,8 @@ export interface StructuredGutterPlan {
 
 export interface StructuredLayoutOptions {
   edges?: readonly Edge[];
+  /** Target geometry owns the tier during an explicit Frame resize. */
+  responsiveMetrics?: FrameResponsiveMetrics;
   frozenGutters?: {
     x?: readonly number[];
     y?: readonly number[];
@@ -708,20 +684,33 @@ function planAxisGutters(
 
 // ── Column masonry ────────────────────────────────────────────────────
 
+function resolveStructuredMetrics(
+  frame: Node,
+  layout: (metrics: FrameResponsiveMetrics) => FrameGridLayoutResult | null,
+  options: StructuredLayoutOptions,
+): FrameGridLayoutResult {
+  const solve = (metrics: FrameResponsiveMetrics) => {
+    const result = layout(metrics);
+    if (!result)
+      throw new Error('Expected layout for a validated nonempty Frame');
+    return result;
+  };
+  if (options.responsiveMetrics) return solve(options.responsiveMetrics);
+  if (getFrameSizing(frame) === 'manual') {
+    const size = getNodeSize(frame);
+    return solve(frameResponsiveMetricsForSize(size.width, size.height));
+  }
+  return resolveFrameResponsiveLayout(solve);
+}
+
 /**
  * N-column layout. Children stack top-to-bottom inside their column,
  * left-aligned.
  *
- * Everything is **content-driven** — there is no pinned container
- * size. Each column's width is the widest child in that column (empty
- * columns are width 0 and collapse). Gaps + padding are per-axis
- * (see {@link gapFromExtent}): the inter-column horizontal gap and X
- * padding derive from the median of child widths; the intra-column
- * vertical gap and Y padding derive from the median of child heights.
- * Per-axis derivation lets the resize gesture pass raw (sx, sy)
- * through — when only widths scale by sx, every X-axis term scales by
- * sx and the frame width matches the pointer exactly, while Y-axis
- * terms stay constant.
+ * Everything is **content-driven** — there is no pinned container size. Each
+ * column's width is the widest child in that column (empty columns are width 0
+ * and collapse). Item gaps and side/bottom padding use the same spacing token
+ * selected from the Frame's own responsive tier.
  *
  * Resizing the frame is handled upstream by scaling every child's
  * stored size per-axis (sx, sy); this solver then re-packs them so the
@@ -734,12 +723,29 @@ export function applyColumnLayout(
   count: number | undefined,
   emptyTrackPolicy: 'fill' | 'compact' = 'compact',
   options: StructuredLayoutOptions = {},
+  responsiveMetricsOverride?: FrameResponsiveMetrics,
 ): FrameGridLayoutResult | null {
   const frame = nodes.find((n) => n.id === frameId);
   if (!frame || frame.type !== 'frame' || isLocked(frame)) return null;
 
   const children = collectChildren(nodes, frameId);
   if (children.length === 0) return null;
+
+  if (!responsiveMetricsOverride) {
+    return resolveStructuredMetrics(
+      frame,
+      (metrics) =>
+        applyColumnLayout(
+          nodes,
+          frameId,
+          count,
+          emptyTrackPolicy,
+          options,
+          metrics,
+        ),
+      options,
+    );
+  }
 
   const { assignment, count: effectiveCols } = assignTrackSlots(
     children,
@@ -767,26 +773,15 @@ export function applyColumnLayout(
     items.length === 0 ? 0 : Math.max(...items.map((i) => i.width)),
   );
 
-  // Per-axis padding + gap. Each axis derives its spacing from the
-  // SAME-AXIS median of child extents (widths for X, heights for Y).
-  // This makes the solver's frame size self-consistent under per-axis
-  // resize: when every child's width is scaled by `sx`, `max(child_w)`,
-  // `widthMedian`, `padX`, and `interGapX` all scale by `sx`, so the
-  // resulting frame width = `oldWidth × sx` exactly. Same for height
-  // with `sy`. The resize gesture's `flushScale` for structured frames
-  // therefore passes the raw (sx, sy) through without collapsing to a
-  // uniform scalar — single-edge drags then track the pointer pixel-
-  // perfect on the dragged axis, and the orthogonal axis stays put.
-  //
-  // Inter-column gap (horizontal between columns) scales with widths;
-  // intra-column gap (vertical between stacked items) scales with
-  // heights — matching which axis each gap participates in.
-  const widthMedian = median(children.map((c) => c.width));
-  const heightMedian = median(children.map((c) => c.height));
-  const padX = paddingFromExtent(widthMedian);
-  const padY = paddingFromExtent(heightMedian);
-  const interGapX = gapFromExtent(widthMedian);
-  const intraGapY = gapFromExtent(heightMedian);
+  // One Frame-owned spacing token controls all non-header whitespace.
+  const frameSize = getNodeSize(frame);
+  const responsiveMetrics =
+    responsiveMetricsOverride ??
+    frameResponsiveMetricsForSize(frameSize.width, frameSize.height);
+  const padX = responsiveMetrics.contentSpacing;
+  const padY = responsiveMetrics.contentSpacing;
+  const interGapX = responsiveMetrics.contentSpacing;
+  const intraGapY = responsiveMetrics.contentSpacing;
   const gutters = planAxisGutters(
     'x',
     effectiveCols,
@@ -806,25 +801,33 @@ export function applyColumnLayout(
         : 0);
   }
 
-  const positions = new Map<string, XYPosition>();
-  let tallest = 0;
-  for (let c = 0; c < effectiveCols; c += 1) {
-    let y = padY;
-    for (const item of colItems[c]) {
-      positions.set(item.node.id, { x: colOriginX[c], y });
-      y += item.height + intraGapY;
-    }
-    const bottom = colItems[c].length > 0 ? y - intraGapY : 0;
-    if (bottom > tallest) tallest = bottom;
-  }
-
   const lastCol = effectiveCols - 1;
   const contentRight =
     effectiveCols > 0 ? colOriginX[lastCol] + colWidth[lastCol] : padX;
   const width = contentRight + padX;
-  const height = tallest + padY;
+  const contentHeight = Math.max(
+    0,
+    ...colItems.map((items) =>
+      items.reduce(
+        (total, item, index) =>
+          total + item.height + (index > 0 ? intraGapY : 0),
+        0,
+      ),
+    ),
+  );
+  const topInset = responsiveMetrics.headerInset;
+  const positions = new Map<string, XYPosition>();
+  for (let c = 0; c < effectiveCols; c += 1) {
+    let y = topInset;
+    for (const item of colItems[c]) {
+      positions.set(item.node.id, { x: colOriginX[c], y });
+      y += item.height + intraGapY;
+    }
+  }
 
-  return {
+  const height = topInset + contentHeight + padY;
+
+  const result: FrameGridLayoutResult = {
     childPositions: positions,
     slotAssignments: assignment,
     columnTracks: colOriginX.map((left, c) => ({
@@ -835,6 +838,7 @@ export function applyColumnLayout(
     gutters,
     effectiveCount: effectiveCols,
   };
+  return result;
 }
 
 // ── Row masonry (mirror) ──────────────────────────────────────────────
@@ -842,10 +846,8 @@ export function applyColumnLayout(
 /**
  * N-row layout. Children stack left-to-right inside their row,
  * top-aligned. Mirror of {@link applyColumnLayout} on the opposite
- * axis: content-driven row heights (tallest child per row); per-axis
- * gaps + padding (inter-row vertical gap + Y padding from height
- * median, intra-row horizontal gap + X padding from width median);
- * frame sized to fit.
+ * axis: content-driven row heights (tallest child per row), with the shared
+ * Frame-owned spacing token between items and around the non-header edges.
  */
 export function applyRowLayout(
   nodes: Node[],
@@ -853,12 +855,29 @@ export function applyRowLayout(
   count: number | undefined,
   emptyTrackPolicy: 'fill' | 'compact' = 'compact',
   options: StructuredLayoutOptions = {},
+  responsiveMetricsOverride?: FrameResponsiveMetrics,
 ): FrameGridLayoutResult | null {
   const frame = nodes.find((n) => n.id === frameId);
   if (!frame || frame.type !== 'frame' || isLocked(frame)) return null;
 
   const children = collectChildren(nodes, frameId);
   if (children.length === 0) return null;
+
+  if (!responsiveMetricsOverride) {
+    return resolveStructuredMetrics(
+      frame,
+      (metrics) =>
+        applyRowLayout(
+          nodes,
+          frameId,
+          count,
+          emptyTrackPolicy,
+          options,
+          metrics,
+        ),
+      options,
+    );
+  }
 
   const { assignment, count: effectiveRows } = assignTrackSlots(
     children,
@@ -884,18 +903,15 @@ export function applyRowLayout(
     items.length === 0 ? 0 : Math.max(...items.map((i) => i.height)),
   );
 
-  // Per-axis padding + gap — mirror of `applyColumnLayout` on the
-  // opposite axis. Inter-row gap (vertical between rows) scales with
-  // heights; intra-row gap (horizontal between items inside a row)
-  // scales with widths. See `applyColumnLayout`'s comment for the
-  // self-consistency contract that lets the resize gesture pass
-  // per-axis (sx, sy) through without collapsing.
-  const widthMedian = median(children.map((c) => c.width));
-  const heightMedian = median(children.map((c) => c.height));
-  const padX = paddingFromExtent(widthMedian);
-  const padY = paddingFromExtent(heightMedian);
-  const interGapY = gapFromExtent(heightMedian);
-  const intraGapX = gapFromExtent(widthMedian);
+  // One Frame-owned spacing token controls all non-header whitespace.
+  const frameSize = getNodeSize(frame);
+  const responsiveMetrics =
+    responsiveMetricsOverride ??
+    frameResponsiveMetricsForSize(frameSize.width, frameSize.height);
+  const padX = responsiveMetrics.contentSpacing;
+  const padY = responsiveMetrics.contentSpacing;
+  const interGapY = responsiveMetrics.contentSpacing;
+  const intraGapX = responsiveMetrics.contentSpacing;
   const gutters = planAxisGutters(
     'y',
     effectiveRows,
@@ -905,7 +921,26 @@ export function applyRowLayout(
     options.frozenGutters?.y,
   );
 
-  const rowOriginY = new Array<number>(effectiveRows).fill(padY);
+  const contentWidth = Math.max(
+    0,
+    ...rowItems.map((items) =>
+      items.reduce(
+        (total, item, index) =>
+          total + item.width + (index > 0 ? intraGapX : 0),
+        0,
+      ),
+    ),
+  );
+  const width = contentWidth + padX * 2;
+  let contentHeight = 0;
+  for (let r = 0; r < effectiveRows; r += 1) {
+    if (r > 0 && rowHeight[r - 1] > 0) {
+      contentHeight += gutters[r - 1]?.finalSize ?? interGapY;
+    }
+    contentHeight += rowHeight[r];
+  }
+  const topInset = responsiveMetrics.headerInset;
+  const rowOriginY = new Array<number>(effectiveRows).fill(topInset);
   for (let r = 1; r < effectiveRows; r += 1) {
     rowOriginY[r] =
       rowOriginY[r - 1] +
@@ -913,26 +948,18 @@ export function applyRowLayout(
         ? rowHeight[r - 1] + (gutters[r - 1]?.finalSize ?? interGapY)
         : 0);
   }
-
   const positions = new Map<string, XYPosition>();
-  let widest = 0;
   for (let r = 0; r < effectiveRows; r += 1) {
     let x = padX;
     for (const item of rowItems[r]) {
       positions.set(item.node.id, { x, y: rowOriginY[r] });
       x += item.width + intraGapX;
     }
-    const right = rowItems[r].length > 0 ? x - intraGapX : 0;
-    if (right > widest) widest = right;
   }
 
-  const lastRow = effectiveRows - 1;
-  const contentBottom =
-    effectiveRows > 0 ? rowOriginY[lastRow] + rowHeight[lastRow] : padY;
-  const width = widest + padX;
-  const height = contentBottom + padY;
+  const height = topInset + contentHeight + padY;
 
-  return {
+  const result: FrameGridLayoutResult = {
     childPositions: positions,
     slotAssignments: assignment,
     rowTracks: rowOriginY.map((top, r) => ({ top, height: rowHeight[r] })),
@@ -940,6 +967,7 @@ export function applyRowLayout(
     gutters,
     effectiveCount: effectiveRows,
   };
+  return result;
 }
 
 // ── Row-aligned grid ──────────────────────────────────────────────────
@@ -1027,9 +1055,9 @@ function assignGridRows(
  * N-column layout with **aligned rows**.
  *
  * Columns behave exactly like {@link applyColumnLayout} — same
- * `frameColumn` assignment, same content-driven column widths, same
- * per-axis padding / gap derivation — so the drag-time column pickers
- * and the resize gesture are reused verbatim. The difference is the Y
+ * `frameColumn` assignment, same content-driven column widths, and the same
+ * Frame-owned spacing token, so the drag-time column pickers and resize gesture
+ * are reused verbatim. The difference is the Y
  * axis: instead of each column stacking independently from the top,
  * children are grouped by persistent `data.frameRow` and
  * every member of a row is centred on that row's mid-line, with
@@ -1043,10 +1071,8 @@ function assignGridRows(
  * has none seeds it from the children's vertical bands, so entering
  * the mode preserves what the user already lined up.
  *
- * Frame sizing stays content-driven and per-axis self-consistent:
- * scaling every child width by `sx` scales the column widths, the
- * width median, `padX` and `interGapX` alike (and likewise `sy` on the
- * height side), so a single-edge resize tracks the pointer exactly.
+ * Frame sizing stays content-driven while non-header whitespace comes from the
+ * Frame's own responsive tier.
  */
 export function applyGridLayout(
   nodes: Node[],
@@ -1054,12 +1080,29 @@ export function applyGridLayout(
   count: number | undefined,
   emptyTrackPolicy: 'fill' | 'compact' = 'compact',
   options: StructuredLayoutOptions = {},
+  responsiveMetricsOverride?: FrameResponsiveMetrics,
 ): FrameGridLayoutResult | null {
   const frame = nodes.find((n) => n.id === frameId);
   if (!frame || frame.type !== 'frame' || isLocked(frame)) return null;
 
   const children = collectChildren(nodes, frameId);
   if (children.length === 0) return null;
+
+  if (!responsiveMetricsOverride) {
+    return resolveStructuredMetrics(
+      frame,
+      (metrics) =>
+        applyGridLayout(
+          nodes,
+          frameId,
+          count,
+          emptyTrackPolicy,
+          options,
+          metrics,
+        ),
+      options,
+    );
+  }
 
   const { assignment, count: effectiveCols } = assignTrackSlots(
     children,
@@ -1078,14 +1121,16 @@ export function applyGridLayout(
     if (child.width > colWidth[c]) colWidth[c] = child.width;
   }
 
-  // Per-axis padding + gap — identical derivation to the masonry
-  // solvers so all three modes size their frame the same way.
-  const widthMedian = median(children.map((c) => c.width));
+  // One Frame-owned spacing token controls all non-header whitespace.
   const heightMedian = median(children.map((c) => c.height));
-  const padX = paddingFromExtent(widthMedian);
-  const padY = paddingFromExtent(heightMedian);
-  const interGapX = gapFromExtent(widthMedian);
-  const interGapY = gapFromExtent(heightMedian);
+  const frameSize = getNodeSize(frame);
+  const responsiveMetrics =
+    responsiveMetricsOverride ??
+    frameResponsiveMetricsForSize(frameSize.width, frameSize.height);
+  const padX = responsiveMetrics.contentSpacing;
+  const padY = responsiveMetrics.contentSpacing;
+  const interGapX = responsiveMetrics.contentSpacing;
+  const interGapY = responsiveMetrics.contentSpacing;
   const xGutters = planAxisGutters(
     'x',
     effectiveCols,
@@ -1129,15 +1174,31 @@ export function applyGridLayout(
     options.frozenGutters?.y,
   );
 
+  const lastCol = effectiveCols - 1;
+  const contentRight =
+    effectiveCols > 0 ? colOriginX[lastCol] + colWidth[lastCol] : padX;
+  const width = contentRight + padX;
+  const bandHeights = bands.map((band) =>
+    band.length > 0
+      ? Math.max(...band.map((child) => child.height))
+      : heightMedian,
+  );
+  const contentHeight = bandHeights.reduce(
+    (total, bandHeight, index) =>
+      total +
+      bandHeight +
+      (index < bandHeights.length - 1
+        ? (yGutters[index]?.finalSize ?? interGapY)
+        : 0),
+    0,
+  );
+  const topInset = responsiveMetrics.headerInset;
   const positions = new Map<string, XYPosition>();
   const rowTracks: Array<{ top: number; height: number }> = [];
-  let y = padY;
+  let y = topInset;
   for (let bandIndex = 0; bandIndex < bands.length; bandIndex += 1) {
     const band = bands[bandIndex];
-    const bandHeight =
-      band.length > 0
-        ? Math.max(...band.map((child) => child.height))
-        : heightMedian;
+    const bandHeight = bandHeights[bandIndex];
     rowTracks.push({ top: y, height: bandHeight });
     for (const item of band) {
       // Centred within the band, not top-aligned: a row is a statement
@@ -1150,16 +1211,7 @@ export function applyGridLayout(
     }
     y += bandHeight + (yGutters[bandIndex]?.finalSize ?? interGapY);
   }
-  // `y` overshot by one trailing inter-band gap.
-  const trailingGap =
-    bands.length > 0 ? (yGutters[bands.length - 1]?.finalSize ?? interGapY) : 0;
-  const contentBottom = bands.length > 0 ? y - trailingGap : padY;
-
-  const lastCol = effectiveCols - 1;
-  const contentRight =
-    effectiveCols > 0 ? colOriginX[lastCol] + colWidth[lastCol] : padX;
-
-  return {
+  const result: FrameGridLayoutResult = {
     childPositions: positions,
     slotAssignments: assignment,
     rowAssignments,
@@ -1168,10 +1220,11 @@ export function applyGridLayout(
       width: colWidth[c],
     })),
     rowTracks,
-    frameSize: { width: contentRight + padX, height: contentBottom + padY },
+    frameSize: { width, height: topInset + contentHeight + padY },
     gutters: [...xGutters, ...yGutters],
     effectiveCount: effectiveCols,
   };
+  return result;
 }
 
 /**
@@ -2054,6 +2107,7 @@ export function applyStructuredFrameRelayout(
   options: {
     edges?: readonly Edge[];
     frozenGuttersByFrame?: ReadonlyMap<string, StructuredGutterSizes>;
+    resizedFrameIds?: ReadonlySet<string>;
   } = {},
 ): { nodes: Node[]; handledFrameIds: Set<string> } {
   const handled = new Set<string>();
@@ -2094,6 +2148,13 @@ export function applyStructuredFrameRelayout(
     const layoutOptions: StructuredLayoutOptions = {
       edges: options.edges,
       frozenGutters: options.frozenGuttersByFrame?.get(frameId),
+      responsiveMetrics:
+        options.resizedFrameIds?.has(frameId) && frame
+          ? frameResponsiveMetricsForSize(
+              getNodeSize(frame).width,
+              getNodeSize(frame).height,
+            )
+          : undefined,
     };
     const result = solveStructuredFrameLayout(
       working,

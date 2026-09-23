@@ -120,7 +120,11 @@ async function measureOverflows(page: Page): Promise<number[]> {
       const padY =
         (parseFloat(style.paddingTop) || 0) +
         (parseFloat(style.paddingBottom) || 0);
-      results.push(prose.scrollHeight + padY - host.clientHeight);
+      const viewport = host.closest('[data-note-content-viewport]');
+      if (!(viewport instanceof HTMLElement)) {
+        throw new Error('Note content viewport is missing');
+      }
+      results.push(prose.scrollHeight + padY - viewport.clientHeight);
     }
     return results;
   });

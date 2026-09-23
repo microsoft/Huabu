@@ -40,9 +40,9 @@ Goal: replace a noisy cluster with a single distilled note.
 
 Goal: take a loose group of nodes and put them in a frame with a meaningful title.
 
-1. Use `inspect_nodes({ inSameClusterAs: "<anchorId>" })` (or `inRect` if you have a region) to enumerate members and pick a bounding box.
-2. Create call — `CREATE_NODES`: one `frame`, position = top-left of the bbox minus ~40px padding, size = bbox + ~80px padding. Set `data.label` to a meaningful theme name. Read the frame id back from `results[].nodes`.
-3. Follow-up call — `SET_NODE_PARENT`: each member → the new frame (by its returned id).
+1. Use `inspect_nodes({ inSameClusterAs: "<anchorId>" })` (or `inRect` if you have a region) to enumerate members and choose a nearby initial position from their `absolutePosition` values.
+2. Create call — `CREATE_NODES`: one root `frame` at that explicit position, omitting `size` and using the default Hug sizing. Set `data.label` to a meaningful theme name. Read the frame id back from `results[].nodes`.
+3. Follow-up call — `SET_NODE_PARENT` with all member `nodeIds` and the returned `parentId`. The engine preserves their absolute positions and fits the Hug Frame around them, including its responsive title inset and padding. Do not calculate these insets or overwrite the fitted geometry. For a new row, column, or grid arrangement, use `SET_FRAME_LAYOUT` as described in [Layout Recipes](./layout-recipes.md#structured-frame-layout-column--row--grid).
 4. Optional: `MERGE_NODE_DATA` to give every member the same `style.accent` for visual cohesion with the frame (can ride along with step 3, since members already exist).
 
 ## Recipe: tidy a row / column

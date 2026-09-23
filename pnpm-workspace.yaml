@@ -17,3 +17,8 @@ ignoredBuiltDependencies:
 
 onlyBuiltDependencies:
   - electron
+  - ffmpeg-static
+
+# Keep this installer-only dependency from hoisting Node 10 types into workspaces.
+overrides:
+  'http-response-object>@types/node': '^22.19.21'

@@ -3,11 +3,13 @@
 
 import { beforeEach, describe, it, expect, vi } from 'vitest';
 
+import { autoHeightKey } from '@huabu/shared/canvas-engine';
+
 import {
   __flushHeightCommitsNow,
   __resetHeightCommitQueue,
   cancelMeasuredHeight,
-  proposeMeasuredHeight,
+  proposeMeasuredHeight as propose,
 } from '../commitQueue';
 import {
   __resetHeightCommitSuspension,
@@ -20,6 +22,11 @@ import type { Node } from '@xyflow/react';
 
 const applyMeasuredHeights = vi.fn();
 let storeNodes: Node[] = [];
+
+// Keep legacy test labels readable while proposals use real freshness keys.
+function proposeMeasuredHeight(proposal: Parameters<typeof propose>[0]) {
+  propose({ ...proposal, measuredFor: autoHeightKey(note()) });
+}
 
 vi.mock('@/store/canvasStore', () => ({
   default: {
@@ -56,7 +63,10 @@ describe('height commit queue — threshold', () => {
         data: {
           type: 'note',
           heightMode: 'auto',
-          autoHeight: { intrinsicHeight: 256, measuredFor: 'k1' },
+          autoHeight: {
+            intrinsicHeight: 256,
+            measuredFor: autoHeightKey(note()),
+          },
         },
       }),
     ];
@@ -77,7 +87,11 @@ describe('height commit queue — threshold', () => {
     });
     __flushHeightCommitsNow();
     expect(applyMeasuredHeights).toHaveBeenCalledWith([
-      { nodeId: 'n1', intrinsicHeight: 400, measuredFor: 'k1' },
+      {
+        nodeId: 'n1',
+        intrinsicHeight: 400,
+        measuredFor: autoHeightKey(note()),
+      },
     ]);
   });
 
@@ -169,7 +183,11 @@ describe('height commit queue — coalescing', () => {
     });
     __flushHeightCommitsNow();
     expect(applyMeasuredHeights).toHaveBeenCalledWith([
-      { nodeId: 'n1', intrinsicHeight: 500, measuredFor: 'k2' },
+      {
+        nodeId: 'n1',
+        intrinsicHeight: 500,
+        measuredFor: autoHeightKey(note()),
+      },
     ]);
   });
 
@@ -203,6 +221,37 @@ describe('height commit queue — coalescing', () => {
 });
 
 describe('height commit queue — gesture suspension', () => {
+  it('drops width-stale proposals at flush, even when content is unchanged', () => {
+    suspendHeightCommits('node-resize');
+    propose({
+      nodeId: 'n1',
+      intrinsicHeight: 400,
+      measuredFor: autoHeightKey(storeNodes[0]),
+    });
+    storeNodes = [note({ style: { width: 800, height: 264 } })];
+    resumeHeightCommits('node-resize');
+    __flushHeightCommitsNow();
+    expect(applyMeasuredHeights).not.toHaveBeenCalled();
+    propose({
+      nodeId: 'n1',
+      intrinsicHeight: 200,
+      measuredFor: autoHeightKey(storeNodes[0]),
+    });
+    __flushHeightCommitsNow();
+    expect(applyMeasuredHeights).toHaveBeenCalledOnce();
+  });
+
+  it('drops content-stale proposals at flush', () => {
+    propose({
+      nodeId: 'n1',
+      intrinsicHeight: 400,
+      measuredFor: autoHeightKey(storeNodes[0]),
+    });
+    storeNodes = [note({ data: { heightMode: 'auto', content: 'updated' } })];
+    __flushHeightCommitsNow();
+    expect(applyMeasuredHeights).not.toHaveBeenCalled();
+  });
+
   it('holds corrections while a gesture is active and flushes once on settle', () => {
     suspendHeightCommits();
     proposeMeasuredHeight({
@@ -222,7 +271,11 @@ describe('height commit queue — gesture suspension', () => {
     __flushHeightCommitsNow();
     expect(applyMeasuredHeights).toHaveBeenCalledTimes(1);
     expect(applyMeasuredHeights).toHaveBeenCalledWith([
-      { nodeId: 'n1', intrinsicHeight: 500, measuredFor: 'k2' },
+      {
+        nodeId: 'n1',
+        intrinsicHeight: 500,
+        measuredFor: autoHeightKey(note()),
+      },
     ]);
   });
 
@@ -301,11 +354,14 @@ describe('height commit queue — gesture suspension', () => {
     // gesture, so by the time the queue drains there is nothing to do.
     storeNodes = [
       note({
-        style: { width: 400, height: 400 },
+        style: { width: 400, height: 408 },
         data: {
           type: 'note',
           heightMode: 'auto',
-          autoHeight: { intrinsicHeight: 400, measuredFor: 'k1' },
+          autoHeight: {
+            intrinsicHeight: 400,
+            measuredFor: autoHeightKey(note()),
+          },
         },
       }),
     ];

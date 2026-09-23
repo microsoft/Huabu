@@ -95,6 +95,10 @@ async function renderTree(
   options?: {
     isFilterActive?: boolean;
     liveItems?: DataSourceTreeItem[];
+    navigationState?: {
+      focusedId: string | null;
+      selectionAnchorId: string | null;
+    };
   },
 ) {
   const nodes = (options?.liveItems ?? items).map(
@@ -142,6 +146,7 @@ async function renderTree(
         getIcon={() => <span />}
         getDisplayName={(node) => node.data.label}
         isFilterActive={options?.isFilterActive}
+        navigationState={options?.navigationState}
       />,
     );
   });
@@ -180,6 +185,34 @@ afterEach(() => {
 });
 
 describe('CanvasLayerTree activation', () => {
+  it('restores roving focus and range selection after a list remount', async () => {
+    const items = [
+      item('first', 'note'),
+      item('middle', 'note'),
+      item('last', 'note'),
+    ];
+    const navigationState = {
+      focusedId: null as string | null,
+      selectionAnchorId: null as string | null,
+    };
+    await renderTree(items, { navigationState });
+    act(() => row('middle').click());
+    act(() => row('middle').focus());
+    act(() => root.render(null));
+    expect(navigationState).toEqual({
+      focusedId: 'middle',
+      selectionAnchorId: 'middle',
+    });
+    const { selectNodes } = await renderTree(items, { navigationState });
+    expect(row('middle').tabIndex).toBe(0);
+    act(() =>
+      row('last').dispatchEvent(
+        new MouseEvent('click', { bubbles: true, shiftKey: true }),
+      ),
+    );
+    expect(selectNodes).toHaveBeenLastCalledWith(['middle', 'last'], false);
+  });
+
   it('selects, minimally reveals, and transiently opens a preview-capable node', async () => {
     const { selectNodes } = await renderTree([item('note-1', 'note')]);
 

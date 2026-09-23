@@ -7,18 +7,21 @@ import { useTranslation } from 'react-i18next';
 
 import { resolveArtifactUrl } from '@/api/artifact';
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
-import { useNodeLOD } from '@/hooks/useNodeLOD';
-import { useNodeScale } from '@/hooks/useNodeScale';
+import { useNodePresentation } from '@/hooks/useNodePresentation';
 import useCanvasStore from '@/store/canvasStore';
 import { openPreviewNode } from '@/store/previewWorkspace/actions';
 
 import { getMissingFileKind, MissingFileBanner } from '../MissingFileBanner';
 import { NodeWrapper } from '../NodeWrapper';
-import { PreviewCard } from '../PreviewCard';
+import {
+  ViewportPreviewCard,
+  usePreviewCardSize,
+} from '../previewCard/PreviewCard';
 import { useDeferredHydration } from '../shared/nodeHydrationScheduler';
 
 import type { CanvasPdfNodeData } from '../types';
 import type { Node, NodeProps } from '@xyflow/react';
+import type { ReactNode } from 'react';
 
 export type PDFNodeType = Node<CanvasPdfNodeData, 'pdf'>;
 
@@ -35,12 +38,61 @@ export type PDFNodeType = Node<CanvasPdfNodeData, 'pdf'>;
  * See {@link ./PDFFirstPageThumbnail.tsx}.
  */
 const FirstPageThumbnail = lazy(() => import('./PDFFirstPageThumbnail'));
+const EmbeddedPDFPreview = lazy(() =>
+  import('./PDFPreview').then(({ PDFPreview }) => ({
+    default: PDFPreview,
+  })),
+);
+
+function ScheduledPDFReader({
+  id,
+  data,
+  interactive,
+  zoom,
+  fallback,
+}: {
+  id: string;
+  data: CanvasPdfNodeData;
+  interactive: boolean;
+  zoom: number;
+  fallback: ReactNode;
+}) {
+  const hydrated = useDeferredHydration();
+  if (!hydrated) return fallback;
+  return (
+    <Suspense fallback={fallback}>
+      <div
+        data-pdf-reading-surface
+        className="shrink-0"
+        style={{
+          // Rasterize at screen width rather than potentially huge authored dimensions.
+          transform: `scale(${1 / zoom})`,
+          transformOrigin: 'top left',
+          width: `${zoom * 100}%`,
+          height: `${zoom * 100}%`,
+        }}
+      >
+        <EmbeddedPDFPreview
+          id={id}
+          data={data}
+          embedded
+          interactive={interactive}
+        />
+      </div>
+    </Suspense>
+  );
+}
 
 export const PDFNode = memo(
-  ({ id, data, selected }: NodeProps<PDFNodeType>) => {
+  ({ id, data, selected, width, height }: NodeProps<PDFNodeType>) => {
     const { t } = useTranslation();
-    const scale = useNodeScale(id, 'pdf');
-    const isMinimalLOD = useNodeLOD(id, 'pdf') === 'minimal';
+    const cardSize = usePreviewCardSize(id, 'pdf', width, height);
+    const { mode, isVisible, isSoleSelected, zoom } = useNodePresentation(
+      id,
+      'pdf',
+      'reading',
+    );
+    const isReading = mode === 'reading' && isVisible;
     const updateNodeData = useCanvasStore((s) => s.updateNodeData);
     const canvasId = useCanvasStore((s) => s.canvasId);
 
@@ -51,14 +103,17 @@ export const PDFNode = memo(
         ? ((data as { summary?: string }).summary as string)
         : '';
     const missingFileKind = getMissingFileKind(data);
+    const title = data.label || t('node.untitledPdf');
 
     // Auto-generated thumbnail from the first PDF page (when no manual cover).
     const [thumbnail, setThumbnail] = useState<string | null>(null);
+    const [thumbnailError, setThumbnailError] = useState<string | null>(null);
 
-    // Reset thumbnail when src changes so the new PDF gets a fresh capture.
+    // Failed captures wait for an explicit retry or a source change.
     useEffect(() => {
       setThumbnail(null);
-    }, [src]);
+      setThumbnailError(null);
+    }, [src, canvasId]);
 
     // Whether a fresh first-page capture is required *for this node*. Drives
     // both the shared hydration gate (so N un-covered PDFs don't fire pdf.js
@@ -68,8 +123,11 @@ export const PDFNode = memo(
       !hasCover &&
       !!src &&
       !thumbnail &&
+      !thumbnailError &&
       !data.artifactMissing &&
-      !isMinimalLOD;
+      mode !== 'minimal' &&
+      isVisible &&
+      !isReading;
 
     // Gate the heavy pdf.js mount behind the shared per-frame scheduler.
     // `skip` short-circuits the queue entirely when no capture is needed,
@@ -107,6 +165,18 @@ export const PDFNode = memo(
       setThumbnail(dataUrl);
     }, []);
 
+    const handleThumbnailError = useCallback(
+      (error: Error) => {
+        console.warn('[PDFNode] First-page thumbnail failed', error);
+        setThumbnailError(error.message || t('node.previewFailed'));
+      },
+      [t],
+    );
+
+    const handleRetry = useCallback(() => {
+      setThumbnailError(null);
+    }, []);
+
     const PDFActions = (
       <>
         <FloatingToolbar.ActionButton
@@ -135,6 +205,24 @@ export const PDFNode = memo(
       </>
     );
 
+    const overview = (
+      <ViewportPreviewCard
+        {...cardSize}
+        accent={data.style?.accent}
+        minimal={mode === 'minimal'}
+        image={coverImage}
+        imageFit={hasCover ? 'cover' : 'contain'}
+        imageAlt={data.label || t('node.pdfCover')}
+        nodeType="pdf"
+        source="PDF"
+        title={title}
+        summary={summary}
+        loading={mode !== 'minimal' && !coverImage && !thumbnailError}
+        error={hasCover ? null : thumbnailError}
+        onRetry={handleRetry}
+      />
+    );
+
     return (
       <NodeWrapper
         id={id}
@@ -149,7 +237,7 @@ export const PDFNode = memo(
         {missingFileKind ? (
           <MissingFileBanner nodeId={id} />
         ) : (
-          <div className="relative flex h-full w-full flex-col overflow-hidden rounded-lg">
+          <div className="relative flex h-full w-full flex-col">
             {/* Render the first page off-screen to capture a thumbnail when no
                 manual cover exists. Gated behind the per-frame hydration
                 scheduler *and* React.lazy so:
@@ -160,43 +248,33 @@ export const PDFNode = memo(
             {needsThumbnailCapture && thumbnailHydrated && (
               <Suspense fallback={null}>
                 <FirstPageThumbnail
+                  key={`${canvasId}\0${src}`}
                   src={src}
                   canvasId={canvasId}
                   onCapture={handleThumbnailCapture}
+                  onError={handleThumbnailError}
                 />
               </Suspense>
             )}
 
-            <div
-              style={{
-                transform: `scale(${scale})`,
-                transformOrigin: 'top left',
-                width: `${100 / scale}%`,
-                height: `${100 / scale}%`,
-              }}
-            >
-              {src ? (
-                <PreviewCard
-                  image={coverImage}
-                  imageAlt={data.label || t('node.pdfCover')}
-                  nodeType="pdf"
-                  title={data.label || t('node.untitledPdf')}
-                  loading={!coverImage}
-                  imagePosition="top"
-                  accentColor={data.style?.accent}
-                >
-                  {summary ? (
-                    <p className="text-fg-muted line-clamp-5 text-base leading-relaxed">
-                      {summary}
-                    </p>
-                  ) : null}
-                </PreviewCard>
+            {src ? (
+              isReading ? (
+                <ScheduledPDFReader
+                  key={`${canvasId}\0${src}`}
+                  id={id}
+                  data={data}
+                  interactive={isSoleSelected}
+                  zoom={zoom}
+                  fallback={overview}
+                />
               ) : (
-                <div className="text-fg-subtle flex h-full w-full items-center justify-center text-sm">
-                  {t('node.noPdfSource')}
-                </div>
-              )}
-            </div>
+                overview
+              )
+            ) : (
+              <div className="text-fg-subtle flex h-full w-full items-center justify-center text-sm">
+                {t('node.noPdfSource')}
+              </div>
+            )}
           </div>
         )}
       </NodeWrapper>

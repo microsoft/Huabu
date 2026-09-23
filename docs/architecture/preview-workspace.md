@@ -6,6 +6,8 @@ The implementation originated in the [Unified Preview Workspace proposal](../pro
 
 ## 1. Ownership boundaries
 
+Large canvas Note, PDF, and Web nodes also support an inline reading layer, independently of Preview Workspace tabs. The activation thresholds and selection rules live in [canvas-zoom-rendering.md](./canvas-zoom-rendering.md). Canvas PDF reading reuses the virtualized page pipeline without preview search/capture/header controls; canvas Web reading uses an isolated original-site iframe rather than the expanded preview's extracted reader. Inline reading never opens a tab or claims Preview Workspace keyboard shortcuts.
+
 Preview Workspace owns presentation topology: open tabs, tab order, active tabs, groups, split ratio, transient inspection state, and runtime requests addressed to a tab.
 
 `canvasStore` owns Canvas document state and the command pipeline. Preview renderers read live nodes from that store rather than copying node content or labels into tabs.

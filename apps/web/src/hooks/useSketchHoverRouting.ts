@@ -119,6 +119,7 @@ export function useSketchHoverRouting(
     };
 
     const onPointerMove = (e: PointerEvent) => {
+      if (e.pointerType === 'mouse' && e.buttons === 0) isPointerDown = false;
       pendingClientX = e.clientX;
       pendingClientY = e.clientY;
       pendingPointerType = e.pointerType || 'mouse';
@@ -155,8 +156,8 @@ export function useSketchHoverRouting(
     // Flow's delegated listener processes mouse or pen input.
     wrapper.addEventListener('pointermove', onPointerMove, { passive: true });
     wrapper.addEventListener('pointerdown', onPointerDown, { capture: true });
-    wrapper.addEventListener('pointerup', onPointerUp, { passive: true });
-    wrapper.addEventListener('pointercancel', onPointerUp, { passive: true });
+    wrapper.addEventListener('pointerup', onPointerUp, { capture: true });
+    wrapper.addEventListener('pointercancel', onPointerUp, { capture: true });
     wrapper.addEventListener('pointerleave', onPointerLeave, { passive: true });
 
     // Re-run the hit test whenever sketch geometry changes (new stroke,
@@ -174,8 +175,10 @@ export function useSketchHoverRouting(
       wrapper.removeEventListener('pointerdown', onPointerDown, {
         capture: true,
       } as EventListenerOptions);
-      wrapper.removeEventListener('pointerup', onPointerUp);
-      wrapper.removeEventListener('pointercancel', onPointerUp);
+      wrapper.removeEventListener('pointerup', onPointerUp, { capture: true });
+      wrapper.removeEventListener('pointercancel', onPointerUp, {
+        capture: true,
+      });
       wrapper.removeEventListener('pointerleave', onPointerLeave);
       unsubscribe();
       clearHover();

@@ -32,6 +32,7 @@
  */
 
 import {
+  autoHeightKey,
   intrinsicToLayoutHeight,
   resolveHeightMode,
 } from '@huabu/shared/canvas-engine';
@@ -51,7 +52,7 @@ import type {
 
 export interface HeightProposal {
   nodeId: string;
-  /** Content height at the node type's reference width, before chrome. */
+  /** Note content height at the captured inner width, before shell chrome. */
   intrinsicHeight: number;
   /** The `AutoHeightKey` this measurement was taken under. */
   measuredFor: string;
@@ -103,6 +104,7 @@ function flushHeightCommits(): void {
     // The user pinned the node while the measurement was in flight. The
     // proposal describes a state that no longer exists.
     if (resolveHeightMode(node) !== 'auto') continue;
+    if (proposal.measuredFor !== autoHeightKey(node)) continue;
 
     const style = node.style as
       | { width?: unknown; height?: unknown }

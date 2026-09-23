@@ -7,6 +7,8 @@ import path from 'node:path';
 
 import { defineConfig } from 'tsup';
 
+import { prepareVideoMedia } from './scripts/prepare-video-media.mjs';
+
 // ESM bundles don't have `require`, `__dirname`, or `__filename` in
 // global scope, but plenty of bundled CJS packages assume they exist:
 // dynamic `require('fs')` calls need createRequire, while bundled runtime
@@ -84,6 +86,7 @@ export default defineConfig([
       const resvgWasmDst = path.resolve('dist-bundle/resvg-bg.wasm');
       cpSync(resvgWasmSrc, resvgWasmDst);
       console.log(`[tsup] copied resvg-bg.wasm -> ${resvgWasmDst}`);
+      await prepareVideoMedia({ serverRoot: path.resolve('.') });
     },
   },
   {

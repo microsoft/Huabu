@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { extractYoutubeVideoId } from './youtube-id.js';
 import { getLogger } from '../../../utils/logger.js';
 import { getRapidApiKey } from '../../integrations/integrations.js';
 
@@ -46,7 +47,7 @@ export class YoutubeLoader implements IDocumentLoader {
       );
     }
 
-    const videoId = this.extractVideoId(source);
+    const videoId = extractYoutubeVideoId(source);
     if (!videoId) {
       throw new Error('Could not extract YouTube video ID from source.');
     }
@@ -96,28 +97,6 @@ export class YoutubeLoader implements IDocumentLoader {
         }`,
       );
     }
-  }
-
-  private extractVideoId(urlOrId: string): string | null {
-    // If it's just an ID (11 chars, alphanumeric + _ -)
-    if (/^[a-zA-Z0-9_-]{11}$/.test(urlOrId)) {
-      return urlOrId;
-    }
-
-    // Try to parse as URL
-    try {
-      const url = new URL(urlOrId);
-      if (url.hostname === 'youtu.be') {
-        return url.pathname.slice(1);
-      }
-      const hostname = url.hostname.toLowerCase();
-      if (hostname === 'youtube.com' || hostname.endsWith('.youtube.com')) {
-        return url.searchParams.get('v');
-      }
-    } catch {
-      // Not a valid URL
-    }
-    return null;
   }
 
   private async fetchTranscript(videoId: string): Promise<{

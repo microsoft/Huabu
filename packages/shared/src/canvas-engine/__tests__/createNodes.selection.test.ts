@@ -61,7 +61,7 @@ describe('CREATE_NODES selection', () => {
       ).heightMode,
     ).toBe('auto');
     expect(nodes.find((n) => n.id === 'created-question')?.style).toEqual({
-      width: 200,
+      width: 440,
     });
   });
 

@@ -28,6 +28,7 @@ import {
 } from '@huabu/shared';
 import {
   COMMAND_META,
+  autoHeightContentWidth,
   preserveAgentNodeOwnedData,
   projectAgentNodeEditableData,
   stripTransientNodeFields,
@@ -38,10 +39,12 @@ import {
   FRAME_POINTER_CAPTURE_MARGIN,
   getAbsolutePosition as getFrameAbsolutePosition,
   getFrameSizing,
+  isAlwaysAutoHeightNodeType,
   wouldUnframe,
   wouldStickToStructuredFrame,
   wouldAutoFrame,
   readFrameGridConfig,
+  rerouteAllEdges,
   resolveFrameTrackCount,
   describeStructuredDropZone,
   getNodeSize,
@@ -100,6 +103,7 @@ import { agentApi } from '../api/agent';
 import { cloneArtifactToCanvas, resolveArtifactUrl } from '../api/artifact';
 import { CanvasConflictError } from '../api/canvas';
 import { measureMissingAutoHeights } from './canvasStore/height/measureMissingAutoHeights';
+import { normalizeFrameHeaderInsets } from './canvasStore/load/normalizeFrameHeaderInsets';
 import { normalizeNodeHeights } from './canvasStore/load/normalizeNodeHeights';
 import { reconcileQuestionStatus } from './canvasStore/load/reconcileQuestionStatus';
 import { shouldBackfillNodeLabel } from './canvasStore/load/shouldBackfillNodeLabel';
@@ -2213,30 +2217,49 @@ const useCanvasStore = create<RFState>()(
           edges: loadedEdges,
           centre: viewportCentreOf(loadedViewport),
         });
-        const warmedNodes = warmedCanvas.nodes;
+        let warmedNodes = normalizeFrameHeaderInsets(warmedCanvas.nodes);
+        let warmedEdges =
+          warmedNodes === warmedCanvas.nodes
+            ? warmedCanvas.edges
+            : rerouteAllEdges(warmedNodes, warmedCanvas.edges);
+        if (get().canvasId !== targetId) return;
+        let loadedVersion = response.version;
+        let headerSaveFailed = false;
+        if (warmedNodes !== warmedCanvas.nodes) {
+          // Persist the coordinate change before exposing it to users or agents.
+          try {
+            const saved = await putCanvas(targetId, {
+              version: response.version,
+              title: response.title || 'Untitled',
+              state: {
+                nodes: stripNodeContentForStructurePut(warmedNodes),
+                edges: warmedEdges,
+              },
+            });
+            loadedVersion = saved.version;
+          } catch (error) {
+            if (get().canvasId !== targetId) return;
+            console.warn('Frame header update deferred:', error);
+            headerSaveFailed = true;
+            warmedNodes = loadedNodes;
+            warmedEdges = loadedEdges;
+          }
+        }
+        if (get().canvasId !== targetId) return;
         // An authoritative node replacement invalidates every transient that
         // points at the previous in-memory geometry. This applies both to a
         // different-canvas switch and to a same-canvas SSE gap/snapshot heal:
         // even when the canvas id is unchanged, selected stroke ids and
         // retained polygons may have been deleted or moved remotely.
         useGesturePreviewStore.getState().resetCanvasScopedTransients();
-        // Apply the authoritative server state via the no-autosave setter.
-        // A load must NEVER schedule a structure PUT: the nodes/edges we
-        // just fetched already ARE the server's state, so bumping the
-        // canvas `version` would be a spurious self-write. Relying on the
-        // `!prev.isLoading` autosave gate was not enough — two concurrent
-        // loads (e.g. the CanvasPage mount load racing the realtime-sync
-        // `snapshot` reload) can flip `isLoading` false before the losing
-        // load's commit runs, leaking a PUT that resets `updatedAt` to the
-        // open time. History is cleared above, so `canUndo`/`canRedo` are
-        // reset here too (the no-autosave setter skips the middleware's
-        // availability sync).
+        // Do not autosave the loaded baseline again. The no-autosave setter
+        // also skips history availability sync, so restore those flags here.
         get()._setStateNoAutosave({
           nodes: warmedNodes,
-          edges: warmedCanvas.edges,
+          edges: warmedEdges,
           viewport: loadedViewport,
           canvasTitle: response.title || 'Untitled',
-          version: response.version,
+          version: loadedVersion,
           isLoading: false,
           canUndo: canvasHistoryManager.canUndo,
           canRedo: canvasHistoryManager.canRedo,
@@ -2247,15 +2270,12 @@ const useCanvasStore = create<RFState>()(
           .getState()
           .validate(new Set(warmedNodes.map((node) => node.id)));
 
-        // Warmup hints were folded in before the commit, and a load
-        // deliberately never schedules a save — so without this they
-        // would live only in memory and every open would re-measure the
-        // same notes. Schedule one save so the canvas warms up exactly
-        // once. This rides the structure save because that is where
-        // every other derived height goes today; Step 6 of the height
-        // model moves them all onto a dedicated channel that touches
-        // neither `version` nor the broadcast.
-        if (warmedNodes !== loadedNodes) {
+        // Persist Note warmup hints unless the header write already included them.
+        if (
+          !headerSaveFailed &&
+          warmedCanvas.nodes !== loadedNodes &&
+          warmedNodes === warmedCanvas.nodes
+        ) {
           structureScheduler.schedule();
         }
 
@@ -3365,9 +3385,24 @@ const useCanvasStore = create<RFState>()(
       // Only process RF-internal change types (position, selection, dimensions).
       // Deletions must go through dispatch({ type: 'DELETE_NODES' }).
       // Additions must go through dispatch({ type: 'ADD_NODES' }).
-      const internalChanges = changes.filter(
-        (c) => c.type !== 'remove' && c.type !== 'add',
-      );
+      const currentById = new Map(get().nodes.map((node) => [node.id, node]));
+      const internalChanges = changes.filter((change) => {
+        if (change.type === 'remove' || change.type === 'add') return false;
+        if (
+          change.type !== 'dimensions' ||
+          change.resizing !== undefined ||
+          isSnapSessionActive()
+        )
+          return true;
+        const node = currentById.get(change.id);
+        return (
+          node?.type !== 'frame' ||
+          typeof node.style?.width !== 'number' ||
+          typeof node.style?.height !== 'number' ||
+          node.measured?.width !== node.style.width ||
+          node.measured?.height !== node.style.height
+        );
+      });
       if (internalChanges.length === 0) return;
 
       // Strip `setAttributes` from dimension changes so that
@@ -3399,6 +3434,23 @@ const useCanvasStore = create<RFState>()(
 
       let nextNodes = applyNodeChanges(snappedChanges, get().nodes) as Node[];
 
+      // Frame boxes are engine-owned, not content measurements. During CSS
+      // size transitions (notably undo/redo), ResizeObserver reports interim
+      // pixels that must not become inputs to ancestor layout or the next drag.
+      const measuredFrameIds = new Set(
+        snappedChanges.flatMap((change) =>
+          change.type === 'dimensions' && !change.resizing ? [change.id] : [],
+        ),
+      );
+      nextNodes = nextNodes.map((node) => {
+        if (node.type !== 'frame' || !measuredFrameIds.has(node.id))
+          return node;
+        const { width, height } = node.style ?? {};
+        if (typeof width !== 'number' || typeof height !== 'number')
+          return node;
+        return { ...node, measured: { ...node.measured, width, height } };
+      });
+
       // ── Live-resize style sync ─────────────────────────────────────
       // RF's `applyChange` writes a `dimensions` change to
       // `node.measured.{width,height}` only — and the `setAttributes`
@@ -3416,6 +3468,22 @@ const useCanvasStore = create<RFState>()(
       const resizeCtx = getResizeContext();
       const snappedRect = resizeCtx ? getResizeSnappedRect() : null;
       if (resizeCtx && snappedRect) {
+        const resizingNode = nextNodes.find(
+          (node) => node.id === resizeCtx.nodeId,
+        );
+        const parentOrigin = resizingNode?.parentId
+          ? getFrameAbsolutePosition(nextNodes, resizingNode.parentId)
+          : undefined;
+        const localPosition = {
+          x:
+            snappedRect.local.x +
+            resizeCtx.parentOffset.x -
+            (parentOrigin?.x ?? 0),
+          y:
+            snappedRect.local.y +
+            resizeCtx.parentOffset.y -
+            (parentOrigin?.y ?? 0),
+        };
         // Per-axis pass-through. The snap session's authoritative
         // post-snap rect is mirrored directly onto the resized node's
         // `position` + `style`. This matches what `flushScale`
@@ -3426,30 +3494,31 @@ const useCanvasStore = create<RFState>()(
         // frame size = `oldSize × axisScale` exactly on that axis, so
         // mirroring the pointer-driven rect here can't put the frame
         // body smaller than the children's still-old-size snapshot.
-        nextNodes = nextNodes.map((n) =>
-          n.id === resizeCtx.nodeId
-            ? {
-                ...n,
-                position: { x: snappedRect.local.x, y: snappedRect.local.y },
-                style: {
-                  ...n.style,
-                  width: snappedRect.size.width,
-                  height: snappedRect.size.height,
-                },
-                // `getNodeSize` resolves `measured` before `style`, and the
-                // ResizeObserver only refreshes it a frame or two after the
-                // DOM has already resized. Leaving it behind would let every
-                // geometry consumer (selection outline, snap engine, frame
-                // rects) trail the live gesture, so keep the pair in lockstep
-                // exactly like `materializeAutoHeight` does.
-                measured: {
-                  ...n.measured,
-                  width: snappedRect.size.width,
-                  height: snappedRect.size.height,
-                },
-              }
-            : n,
-        );
+        nextNodes = nextNodes.map((n) => {
+          if (n.id !== resizeCtx.nodeId) return n;
+          const contentOwnsHeight =
+            (resizeCtx.mode === 'width' || resizeCtx.mode === 'scale') &&
+            isAlwaysAutoHeightNodeType(n.type ?? '');
+          const { height: _staleHeight, ...styleWithoutHeight } = n.style ?? {};
+          return {
+            ...n,
+            position: localPosition,
+            style: {
+              ...(contentOwnsHeight ? styleWithoutHeight : n.style),
+              width: snappedRect.size.width,
+              ...(!contentOwnsHeight && { height: snappedRect.size.height }),
+            },
+            // `getNodeSize` resolves `measured` before `style`, and the
+            // ResizeObserver only refreshes it a frame or two after the DOM
+            // has already resized. Keep authored axes in lockstep, but let
+            // Text/Question report their reflowed renderer-owned height.
+            measured: {
+              ...n.measured,
+              width: snappedRect.size.width,
+              ...(!contentOwnsHeight && { height: snappedRect.size.height }),
+            },
+          };
+        });
       }
 
       // Internal RF changes (position mid-drag, select, dimensions /
@@ -3476,6 +3545,7 @@ const useCanvasStore = create<RFState>()(
           if (c.type !== 'dimensions') continue;
           if (c.resizing) continue; // live tick of a resize session
           const child = nextNodes.find((n) => n.id === c.id);
+          if (child?.type === 'frame') continue;
           if (!child?.parentId) continue;
           const parent = nextNodes.find((n) => n.id === child.parentId);
           if (!parent || parent.type !== 'frame') continue;
@@ -3675,7 +3745,7 @@ const useCanvasStore = create<RFState>()(
     setNoteHeightMode: (nodeIds, mode) => {
       if (nodeIds.length === 0) return;
       const idSet = new Set(nodeIds);
-      const { nodes } = get();
+      const { nodes, canvasId } = get();
       const items: Array<{
         nodeId: string;
         size: { width: number; height?: number | 'auto' };
@@ -3731,6 +3801,22 @@ const useCanvasStore = create<RFState>()(
           get,
         );
 
+        // Never replay captured geometry after an async measurement if a
+        // resize or navigation superseded the toggle. The measurement key
+        // also guards APPLY_MEASURED_HEIGHT, but cannot undo a stale resize.
+        const live = get();
+        if (live.canvasId !== canvasId) return;
+        const currentItems = items.filter((item) => {
+          const before = nodes.find((node) => node.id === item.nodeId);
+          const after = live.nodes.find((node) => node.id === item.nodeId);
+          return (
+            before &&
+            after?.type === 'note' &&
+            autoHeightContentWidth(before) === autoHeightContentWidth(after)
+          );
+        });
+        if (currentItems.length === 0) return;
+
         // SET_NODE_GEOMETRY uses snapshot:'caller'; open a gesture so the
         // batch is captured as one undo entry without warnings. The
         // measurement rides the same batch, so undo restores the pinned
@@ -3740,7 +3826,7 @@ const useCanvasStore = create<RFState>()(
           [
             {
               type: 'SET_NODE_GEOMETRY',
-              items: items.map((item) => ({
+              items: currentItems.map((item) => ({
                 nodeId: item.nodeId as CanvasNodeId,
                 size: item.size,
               })),

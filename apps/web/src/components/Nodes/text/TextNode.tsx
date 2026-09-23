@@ -18,7 +18,7 @@ import {
   TEXT_NODE_PLACEHOLDER,
 } from '@/utils/node/nodeFontConfig';
 
-import { getAccentTokens } from '../accentTokens';
+import { getAccentTokens } from '../design/accentTokens';
 import { MissingFileBanner } from '../MissingFileBanner';
 import { NodeWrapper } from '../NodeWrapper';
 import { resolveTextBodyBox, TextNodeBody } from '../shared/TextNodeBody';
@@ -73,11 +73,9 @@ export const TextNode = memo(
     const isItalic = style.fontStyle === 'italic';
     const textDecoration = style.textDecoration || '';
 
-    // Accent is the single source of color styling. NodeWrapper paints
-    // both the border and the fill from `data.style.accent` (using the
-    // same `accentTokens` formulas as SemanticPlaceholder, so semantic
-    // zoom doesn't visibly shift the color). Locally we only need the
-    // foreground tint for the editable text body.
+    // NodeWrapper shares Note's subdued accent fill without a painted border;
+    // unaccented Text stays transparent. Locally we retain the foreground tint
+    // for the editable body independently of hover and selection outlines.
     const accent = resolveAccent(style.accent);
     const accentTokens = accent ? getAccentTokens(accent) : null;
     const textColor = accentTokens?.fg ?? undefined;
@@ -93,6 +91,7 @@ export const TextNode = memo(
       isEditing,
       content,
       baseFontSize: 16,
+      fontSizing: 'proportional',
       paddingX: NODE_PADDING_X,
       paddingY: NODE_PADDING_Y,
       fontOpts,
@@ -222,7 +221,6 @@ export const TextNode = memo(
         selected={selected}
         toolbar={isContentMissing ? undefined : TextToolbar}
         keepAspectRatio={false}
-        className="transition-all duration-200"
         {...surface.nodeWrapperProps}
       >
         {isContentMissing ? (

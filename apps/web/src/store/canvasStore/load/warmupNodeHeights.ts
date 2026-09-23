@@ -33,6 +33,7 @@
 import {
   applySharedPostEffectsFromWriteResult,
   autoHeightKey,
+  autoHeightContentWidth,
   executeCanvasCommands,
   getHeightPolicy,
   readAutoHeightHint,
@@ -87,6 +88,7 @@ export async function warmupNodeHeights(
     try {
       const measured = await measureNoteHeightOffscreen({
         markdown: target.markdown,
+        contentWidth: target.contentWidth,
         canvasId: options.canvasId,
       });
       if (measured.height <= 0) continue;
@@ -118,6 +120,7 @@ export async function warmupNodeHeights(
 export interface WarmupTarget {
   nodeId: string;
   markdown: string;
+  contentWidth: number;
   measuredFor: string;
   distance: number;
 }
@@ -146,6 +149,7 @@ export function collectUnmeasured(
     targets.push({
       nodeId: node.id,
       markdown: content,
+      contentWidth: autoHeightContentWidth(node),
       measuredFor: autoHeightKey(node),
       distance: Math.hypot(
         node.position.x - centre.x,

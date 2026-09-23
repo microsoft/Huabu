@@ -113,17 +113,28 @@ export function useCanvasPointerRouter(
       if (shouldBlock(event)) return block(event);
       core.handleCancel(event);
     };
+    // The app-owned mouse marquee releases capture on Escape/blur as well
+    // as pointerup. Leave existing touch/pen takeover lifecycles unchanged.
+    const onLostCapture = (event: PointerEvent) => {
+      if (core.ownerOf(event.pointerId)?.id === 'mouse-marquee') {
+        core.handleCancel(event);
+      }
+    };
 
     el.addEventListener('pointerdown', onDown, { capture: true });
     el.addEventListener('pointermove', onMove, { capture: true });
     el.addEventListener('pointerup', onUp, { capture: true });
     el.addEventListener('pointercancel', onCancel, { capture: true });
+    el.addEventListener('lostpointercapture', onLostCapture, { capture: true });
 
     return () => {
       el.removeEventListener('pointerdown', onDown, { capture: true });
       el.removeEventListener('pointermove', onMove, { capture: true });
       el.removeEventListener('pointerup', onUp, { capture: true });
       el.removeEventListener('pointercancel', onCancel, { capture: true });
+      el.removeEventListener('lostpointercapture', onLostCapture, {
+        capture: true,
+      });
     };
   }, [wrapperRef, rfInstanceRef, extraRecognizers]);
 }

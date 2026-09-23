@@ -1,0 +1,274 @@
+/*
+ * Copyright (c) Microsoft Corporation.
+ * Licensed under the MIT license.
+ */
+
+.selection-study__viewport {
+  background: var(--bg-default);
+  background-image: radial-gradient(var(--edge-default) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+.selection-study__stage {
+  position: relative;
+  width: 1000px;
+  height: 700px;
+  transform-origin: top left;
+  isolation: isolate;
+}
+.selection-study__node {
+  z-index: 1;
+}
+.selection-study__node[data-selected='true'] {
+  z-index: 10;
+}
+.selection-study__body {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.selection-study__body:active {
+  cursor: grabbing;
+}
+.selection-study__caption {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 22px * var(--study-inverse));
+  font-size: 11px;
+  white-space: nowrap;
+  transform: scale(var(--study-inverse));
+  transform-origin: bottom left;
+  pointer-events: none;
+}
+.selection-study__outline {
+  position: absolute;
+  inset: 0;
+  outline: calc(1px * var(--study-inverse)) solid var(--info);
+  pointer-events: none;
+}
+.selection-study__node[data-target='true'] .selection-study__body {
+  outline: calc(3px * var(--study-inverse)) solid var(--info);
+}
+.selection-study .selection-study__handle {
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  min-width: 0;
+  padding: 0;
+  transform: translate(-50%, -50%) scale(var(--study-inverse));
+  touch-action: none;
+  z-index: 2;
+  background: transparent;
+}
+.selection-study__handle--tl {
+  left: 0;
+  top: 0;
+  cursor: nwse-resize;
+}
+.selection-study__handle--tr {
+  left: 100%;
+  top: 0;
+  cursor: nesw-resize;
+}
+.selection-study__handle--bl {
+  left: 0;
+  top: 100%;
+  cursor: nesw-resize;
+}
+.selection-study__handle--br {
+  left: 100%;
+  top: 100%;
+  cursor: nwse-resize;
+}
+.selection-study__handle--left {
+  left: 0;
+  top: 50%;
+  cursor: ew-resize;
+}
+.selection-study__handle--right {
+  left: 100%;
+  top: 50%;
+  cursor: ew-resize;
+}
+.selection-study__corner-mark,
+.selection-study__width-mark {
+  display: block;
+  background: var(--bg-surface);
+  border: 1.5px solid var(--info);
+  pointer-events: none;
+}
+.selection-study__corner-mark {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+.selection-study__width-mark {
+  width: 5px;
+  height: 18px;
+  border-radius: 3px;
+}
+.selection-study__connector {
+  position: absolute;
+  left: calc(100% + 24px * var(--study-inverse));
+  top: 50%;
+  width: 20px;
+  height: 20px;
+  transform: translate(-50%, -50%) scale(var(--study-inverse));
+  z-index: 3;
+}
+.selection-study .selection-study__connect-button {
+  position: absolute;
+  left: 6px;
+  width: 20px;
+  height: 20px;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  touch-action: none;
+  cursor: crosshair;
+}
+.selection-study__connector--left {
+  left: calc(-24px * var(--study-inverse));
+}
+.selection-study__connector--top {
+  left: 50%;
+  top: calc(-24px * var(--study-inverse));
+}
+.selection-study__connector--bottom {
+  left: 50%;
+  top: calc(100% + 24px * var(--study-inverse));
+}
+.selection-study__port-dot {
+  position: absolute;
+  left: 4px;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 8px;
+  height: 8px;
+  border: 2.5px solid var(--color-info);
+  border-radius: 50%;
+  background: var(--color-info);
+  pointer-events: none;
+}
+.selection-study .selection-study__port-dot svg {
+  width: 12px;
+  height: 12px;
+  color: var(--fg-inverse);
+  opacity: 0;
+}
+.selection-study__connect-button:is(
+    :hover,
+    :focus-visible,
+    [aria-pressed='true']
+  )
+  .selection-study__port-dot {
+  width: 20px;
+  height: 20px;
+}
+.selection-study__connect-button:is(
+    :hover,
+    :focus-visible,
+    [aria-pressed='true']
+  )
+  .selection-study__port-dot
+  svg {
+  opacity: 1;
+}
+@media (pointer: coarse) {
+  .selection-study .selection-study__connect-button {
+    left: 3px;
+    width: 28px;
+    height: 28px;
+    top: -4px;
+  }
+  .selection-study__port-dot {
+    left: 7px;
+    width: 14px;
+    height: 14px;
+  }
+  .selection-study__connect-button:is(
+      :hover,
+      :focus-visible,
+      [aria-pressed='true']
+    )
+    .selection-study__port-dot {
+    width: 22px;
+    height: 22px;
+  }
+}
+.selection-study .selection-study__handle,
+.selection-study .selection-study__handle:is(:hover, :focus, :active),
+.selection-study .selection-study__connect-button,
+.selection-study .selection-study__connect-button:is(:hover, :focus, :active) {
+  background: transparent !important;
+  outline: none;
+  box-shadow: none;
+}
+/* Keyboard focus changes the existing grip fill without adding another frame. */
+.selection-study__node:not([data-resizing='true'])
+  .selection-study__handle:focus-visible
+  > span {
+  background: var(--info);
+}
+/* Preserve the active resize cursor even when the pointer crosses another body. */
+.selection-study__stage[data-resize-cursor='ew-resize'],
+.selection-study__stage[data-resize-cursor='ew-resize'] * {
+  cursor: ew-resize !important;
+}
+.selection-study__stage[data-resize-cursor='nwse-resize'],
+.selection-study__stage[data-resize-cursor='nwse-resize'] * {
+  cursor: nwse-resize !important;
+}
+.selection-study__stage[data-resize-cursor='nesw-resize'],
+.selection-study__stage[data-resize-cursor='nesw-resize'] * {
+  cursor: nesw-resize !important;
+}
+.selection-study__connector--left .selection-study__connect-button {
+  left: -6px;
+}
+.selection-study__connector--left .selection-study__port-dot {
+  left: 16px;
+}
+.selection-study__connector--top .selection-study__connect-button {
+  left: 0;
+  top: -6px;
+}
+.selection-study__connector--top .selection-study__port-dot {
+  left: 50%;
+  top: 16px;
+}
+.selection-study__connector--bottom .selection-study__connect-button {
+  left: 0;
+  top: 6px;
+}
+.selection-study__connector--bottom .selection-study__port-dot {
+  left: 50%;
+  top: 4px;
+}
+@media (pointer: coarse) {
+  .selection-study__connector--left .selection-study__connect-button {
+    left: -11px;
+  }
+  .selection-study__connector--left .selection-study__port-dot {
+    left: 21px;
+  }
+  .selection-study__connector--top .selection-study__connect-button {
+    left: -4px;
+    top: -11px;
+  }
+  .selection-study__connector--top .selection-study__port-dot {
+    top: 21px;
+  }
+  .selection-study__connector--bottom .selection-study__connect-button {
+    left: -4px;
+    top: 3px;
+  }
+  .selection-study__connector--bottom .selection-study__port-dot {
+    top: 7px;
+  }
+}

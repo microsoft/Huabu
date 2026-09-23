@@ -25,6 +25,7 @@
 
 import {
   autoHeightKey,
+  autoHeightContentWidth,
   getHeightPolicy,
   readAutoHeightHint,
   resolveHeightMode,
@@ -59,6 +60,7 @@ const RETRY_MAX_MS = 30_000;
 export interface PrewarmCandidate {
   nodeId: string;
   markdown: string;
+  contentWidth: number;
   /**
    * Key of the content being measured, captured *before* the async
    * measurement starts. Stamping the node's key at commit time instead
@@ -139,6 +141,7 @@ async function drain(): Promise<void> {
         try {
           const measured = await measureNoteHeightOffscreen({
             markdown: candidate.markdown,
+            contentWidth: candidate.contentWidth,
             canvasId,
           });
           if (stopped) return;
@@ -146,11 +149,17 @@ async function drain(): Promise<void> {
             scheduleRetry(candidate);
             continue;
           }
-          // The note was edited while its measurement was in flight, so
+          // The note was edited or resized while measurement was in flight, so
           // this height describes content the node no longer has. Drop
           // it; the next scan picks the node up again.
-          if (currentKeyOf(candidate.nodeId) !== candidate.measuredFor)
+          if (currentKeyOf(candidate.nodeId) !== candidate.measuredFor) {
+            // A later resize can return to this width. A rejected result
+            // must not suppress that future attempt for the whole session.
+            attempted.delete(
+              attemptKey(candidate.nodeId, candidate.measuredFor),
+            );
             continue;
+          }
           proposeMeasuredHeight({
             nodeId: candidate.nodeId,
             intrinsicHeight: measured.height,
@@ -208,6 +217,7 @@ function confirmCommit(candidate: PrewarmCandidate): void {
     }
     if (autoHeightKey(node) !== candidate.measuredFor) {
       failureCounts.delete(key);
+      attempted.delete(key);
       return;
     }
     scheduleRetry(candidate, new Error('measured height was not committed'));
@@ -266,6 +276,7 @@ export function selectPrewarmCandidates(
     candidates.push({
       nodeId: node.id,
       markdown,
+      contentWidth: autoHeightContentWidth(node),
       measuredFor,
       priority: priorityOf(node, centre, freshness === 'missing'),
     });
@@ -277,6 +288,14 @@ export function selectPrewarmCandidates(
 
 function collectCandidates(): PrewarmCandidate[] {
   const { nodes, viewport } = useCanvasStore.getState();
+  // Attempts deduplicate only the current layout, not every historical
+  // width. After A → B → A, B's hint cannot stand in for a new A sample.
+  const currentAttempts = new Set(
+    nodes.map((node) => attemptKey(node.id, autoHeightKey(node))),
+  );
+  for (const key of attempted) {
+    if (!currentAttempts.has(key)) attempted.delete(key);
+  }
   return selectPrewarmCandidates(nodes, viewportCentre(viewport), attempted);
 }
 

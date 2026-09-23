@@ -125,7 +125,12 @@ export const profiles: Record<CanvasNodeType, NodePreprocessProfile> = {
     nodeType: 'video',
     contentKind: 'video',
     bodyOwnership: 'derived',
-    capabilities: ['resolve_input', 'persist_source', 'build_patch'],
+    capabilities: [
+      'resolve_input',
+      'extract_video_cover',
+      'persist_source',
+      'build_patch',
+    ],
     watchFields: ['src'],
   },
   audio: {

@@ -463,6 +463,7 @@
     "aiSummary": "AI 摘要",
     "closeAiSummary": "关闭 AI 摘要",
     "pdfCapture": "PDF 截图",
+    "dragToMove": "拖动以移动",
     "dragSelectedTextAsNote": "将选中文本拖为笔记",
     "dragCapturedAreaAsImage": "将截图区域拖为图片",
     "sendCapturedAreaToChat": "发送截图区域到聊天",
@@ -489,6 +490,17 @@
     "watchLiveConversation": "查看实时对话",
     "viewConversation": "查看对话",
     "openConversation": "打开对话",
+    "questionCard": {
+      "idle": "待开始",
+      "open": "对话已打开",
+      "running": "进行中",
+      "approval": "等你授权",
+      "unread": "待查看",
+      "unreadDescription": "本轮结束 · 未查看",
+      "viewed": "已查看",
+      "error": "运行出错",
+      "conflict": "有更改被跳过"
+    },
     "ask": "提问",
     "agentChangesSkipped_one": "{{count}} 个 Agent 更改因你正在编辑而被跳过",
     "agentChangesSkipped_other": "{{count}} 个 Agent 更改因你正在编辑而被跳过",
@@ -558,6 +570,7 @@
     "noExtractedContentYet": "暂无提取内容。预处理完成后，文本会显示在这里。",
     "openLargeView": "打开大视图",
     "noPreview": "无预览",
+    "previewFailed": "预览加载失败",
     "processing": "正在处理…",
     "download": "下载",
     "officeFileMissing": "{{label}} 文件缺失",
@@ -578,7 +591,9 @@
     "copyLinkFailed": "无法复制节点链接。",
     "downloadImage": "下载图片",
     "videoFileMissing": "视频文件缺失",
-    "noVideoSource": "无视频来源"
+    "noVideoSource": "无视频来源",
+    "playVideo": "播放视频",
+    "videoPlaybackFailed": "无法播放，请重试或打开预览。"
   },
   "layers": {
     "title": "图层",
@@ -914,6 +929,7 @@
       "spreadApart": "均匀分布"
     },
     "accentColor": "强调色",
+    "cardScale": "缩放",
     "deleteSelected": "删除所选项",
     "sendInkRequest": "发送笔迹请求",
     "sendingInkRequest": "正在发送笔迹请求",

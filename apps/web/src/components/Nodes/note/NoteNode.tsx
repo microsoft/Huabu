@@ -3,17 +3,28 @@
 
 import { type Node, type NodeProps, useStore } from '@xyflow/react';
 import clsx from 'clsx';
-import { ChevronsDown, Fullscreen } from 'lucide-react';
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { Fullscreen } from 'lucide-react';
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { autoHeightKey } from '@huabu/shared/canvas-engine';
+import {
+  autoHeightKey,
+  autoHeightContentWidth,
+} from '@huabu/shared/canvas-engine';
 
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
 import { Loading } from '@/components/Common/Loading';
 import { MilkdownPreview } from '@/components/Milkdown';
-import { useNodeLOD } from '@/hooks/useNodeLOD';
-import { useNodeScale } from '@/hooks/useNodeScale';
+import { NODE_TYPE_LABEL } from '@/config/nodeIcons';
+import { useNodePresentation } from '@/hooks/useNodePresentation';
 import useCanvasStore from '@/store/canvasStore';
 import { openPreviewNode } from '@/store/previewWorkspace/actions';
 import {
@@ -27,17 +38,19 @@ import { isMac } from '@/utils/platform';
 import { MissingFileBanner } from '../MissingFileBanner';
 import { NodeWrapper } from '../NodeWrapper';
 import { useTrackNoteFixedHeight } from './heightMemory';
-import {
-  NOTE_CONTENT_HOST_CLASS,
-  readNoteIntrinsicHeight,
-} from './noteContentHost';
+import { readNoteIntrinsicHeight } from './noteContentHost';
+import { NoteContentViewport } from './NoteContentViewport';
+import { canScrollNote, containNoteWheel } from './noteScroll';
+import { NoteTruncationOverlay } from './NoteTruncationOverlay';
 import { useAutoHeightInvariant } from './useAutoHeightInvariant';
+import { noteFarDescription } from '../semanticZoom/noteFarDescription';
 import {
   cancelMeasuredHeight,
   proposeMeasuredHeight,
 } from '../shared/height/commitQueue';
 import { useHeightMode } from '../shared/height/useHeightMode';
 import { useDeferredHydration } from '../shared/nodeHydrationScheduler';
+import { selectSelectedCount } from '../shared/selectedCount';
 
 import type { CanvasNoteNodeData } from '../types';
 
@@ -77,20 +90,50 @@ export const NoteNode = memo(
     // markdown — without it the inserted `<img>` would silently fail
     // to load.
     const canvasId = useCanvasStore((s) => s.canvasId);
-    const scale = useNodeScale(id, 'note');
     // When the node is zoomed out far enough, `NodeWrapper` hides this
     // content and overlays a cheap `SemanticPlaceholder` instead. There is
     // no point building (or even staggering) a Milkdown editor that the
     // user can't see — gate hydration on the same LOD so a zoomed-out
     // canvas mounts zero editors until a node is actually zoomed in.
-    const isMinimalLOD = useNodeLOD(id, 'note') === 'minimal';
-    const viewportZoom = useStore((s) => s.transform[2]);
-    const counterZoomScale = Math.min(3, Math.max(1, 1 / viewportZoom));
+    const presentation = useNodePresentation(id, 'note', 'none');
+    const isMinimalLOD = presentation.mode === 'minimal';
+    const counterZoomScale = useStore((s) =>
+      Math.min(3, Math.max(1, 1 / s.transform[2])),
+    );
     // Who owns the height — never inferred from whether a number is
     // present, because after the ownership model an auto note carries one
-    // too. The body renders identically either way; this only gates the
-    // measurement proposal and the observers that feed it.
+    // too. Fixed mode also permits sole-selected document scrolling;
+    // auto mode continues to propose its intrinsic content height.
     const isFixedHeight = useHeightMode(id) === 'fixed';
+    const selectedCount = useCanvasStore((s) => selectSelectedCount(s.nodes));
+    const scrollingEnabled = canScrollNote({
+      selected: selected === true,
+      selectedCount,
+      fixed: isFixedHeight,
+      // Both overview and reading show the Note document, unlike PDF/Web.
+      bodyVisible: !isMinimalLOD && presentation.isVisible,
+      missing: data.contentMissing === true,
+    });
+    const scrollViewportRef = useRef<HTMLDivElement>(null);
+    const [scrollTop, setScrollTop] = useState(0);
+
+    useLayoutEffect(() => {
+      const viewport = scrollViewportRef.current;
+      if (!scrollingEnabled) {
+        if (viewport) viewport.scrollTop = 0;
+        setScrollTop(0);
+        return;
+      }
+      if (!viewport) return;
+      viewport.addEventListener('wheel', containNoteWheel, {
+        capture: true,
+        passive: true,
+      });
+      return () =>
+        viewport.removeEventListener('wheel', containNoteWheel, {
+          capture: true,
+        });
+    }, [scrollingEnabled]);
 
     // The wrapper hosts the height-measurement infrastructure and the
     // layout shell; `MilkdownPreview` mounts the editor
@@ -103,12 +146,18 @@ export const NoteNode = memo(
     // either the content grows/shrinks or the user resizes the node.
     //
     // `contentHeight` is the node's *intrinsic* height: measured at the
-    // type's reference width, before the node's own scaling. It no longer
+    // actual inner width, without a width-dependent transform. It no longer
     // sizes anything — it is a proposal, committed through
     // `applyMeasuredHeights` and materialized back into `style.height` by
     // the engine. Starting at 0 is safe precisely because of that: the
     // store already holds a usable height before this component mounts.
-    const measurementKey = autoHeightKey({ data } as unknown as Node);
+    const measurementKey = useCanvasStore((state) => {
+      if (isFixedHeight && isMinimalLOD) return null;
+      const node = state.nodes.find((candidate) => candidate.id === id);
+      return autoHeightKey(
+        node ? { ...node, data } : ({ type: 'note', data } as unknown as Node),
+      );
+    });
     const [contentMeasurement, setContentMeasurement] = useState<{
       height: number;
       measuredFor: string;
@@ -129,7 +178,9 @@ export const NoteNode = memo(
     // re-enqueues. Once hydrated we keep the editor mounted (never tear
     // down) so zooming back out and in again doesn't re-pay the build
     // cost. See `../shared/nodeHydrationScheduler`.
-    const hydrated = useDeferredHydration(isMinimalLOD);
+    const hydrated = useDeferredHydration(
+      isMinimalLOD || !presentation.isVisible,
+    );
 
     // Session-scoped memory of "last pinned height" for this note. Lets a
     // "fixed → auto → fixed" round-trip restore the previous size instead
@@ -151,13 +202,21 @@ export const NoteNode = memo(
     );
 
     const markdown = typeof data.content === 'string' ? data.content : '';
+    const title =
+      (typeof data.label === 'string' ? data.label : '') ||
+      (typeof data.title === 'string' ? data.title : '') ||
+      NODE_TYPE_LABEL.note ||
+      'note';
+    const farLabel = useMemo(
+      () => ({ title, description: noteFarDescription(markdown, title) }),
+      [markdown, title],
+    );
 
     // Measurement is shared with the offscreen measurer via
     // `readNoteIntrinsicHeight`, so the two surfaces cannot answer
     // differently for the same content. The observation chain below is
-    // what this surface adds: the host is `h-full`, so its own size never
-    // changes with content, and we have to watch the editor's root plus a
-    // MutationObserver for (re)mounts.
+    // what this surface adds: observe the viewport as well as the natural
+    // document host, and watch a MutationObserver for editor (re)mounts.
     useEffect(() => {
       const host = previewHostRef.current;
       if (!host) return;
@@ -165,9 +224,21 @@ export const NoteNode = memo(
       // to measure; skip entirely so we never report the placeholder's
       // height as the note's content height. The node keeps the footprint
       // already stored in `style.height` until the real editor mounts.
-      if (!hydrated) return;
+      if (!hydrated || measurementKey === null) return;
 
       const measure = () => {
+        const node = useCanvasStore
+          .getState()
+          .nodes.find((candidate) => candidate.id === id);
+        // An observer queued before resize must not certify a different
+        // width, nor measure before the DOM has adopted the authored width.
+        if (
+          !node ||
+          autoHeightKey(node) !== measurementKey ||
+          Math.abs(host.clientWidth - autoHeightContentWidth(node)) > 0.5 ||
+          !host.querySelector('.ProseMirror')
+        )
+          return;
         const contentH = readNoteIntrinsicHeight(host);
         if (contentH > 0) {
           setContentMeasurement((previous) =>
@@ -177,11 +248,12 @@ export const NoteNode = memo(
               : { height: contentH, measuredFor: measurementKey },
           );
         }
-        setHostHeight(host.clientHeight);
+        setHostHeight(scrollViewportRef.current?.clientHeight ?? 0);
       };
 
       const ro = new ResizeObserver(measure);
       ro.observe(host);
+      if (scrollViewportRef.current) ro.observe(scrollViewportRef.current);
 
       // Track the current first child so we only re-observe when it changes.
       let observedChild: Element | null = null;
@@ -213,7 +285,7 @@ export const NoteNode = memo(
         mo.disconnect();
         ro.disconnect();
       };
-    }, [hydrated, measurementKey]);
+    }, [hydrated, id, measurementKey]);
 
     // Truncation is no longer conditional on fixed mode. In auto mode it
     // surfaces the window between "the content grew" and "the correction
@@ -255,17 +327,12 @@ export const NoteNode = memo(
       previewHostRef,
       hydrated && !isFixedHeight,
       contentHeight,
+      scrollViewportRef,
     );
 
     // A missing sidecar is a write barrier even if stale content remains in
     // memory, so never expose editing or drop targets while it is absent.
     const isContentMissing = data.contentMissing === true;
-
-    // When the user picks an accent the wrapper paints both the border
-    // and the accent-tinted fill. Drop the inner paper surfaces in that
-    // case so the fill is visible through the note body; otherwise we
-    // keep `bg-surface` so the no-accent note still reads as paper.
-    const hasAccent = !!data.style?.accent;
 
     // ── Drop target: accept Huabu payloads (note blocks from
     // chat / other notes, image cards, web cards) and append the
@@ -401,6 +468,7 @@ export const NoteNode = memo(
         data={data}
         type={'note'}
         selected={selected}
+        farLabel={farLabel}
         actions={isContentMissing ? undefined : NoteActions}
         keepAspectRatio={false}
         // Active drop-target highlight: thick `--info-light` ring on
@@ -408,31 +476,29 @@ export const NoteNode = memo(
         // `--info-light` wash over the whole node — same hue family
         // as NotePreview's insertion bar but softer so it reads as a
         // "zone" rather than a precise insertion point.
-        className={
-          isDropTarget ? 'ring-info-light bg-info-light/60 ring-4' : undefined
-        }
+        className={clsx(
+          'huabu-note-surface',
+          isDropTarget && 'ring-info-light bg-info-light/60 ring-4',
+        )}
       >
         {isContentMissing ? (
           <MissingFileBanner nodeId={id} />
         ) : (
           <>
             <div
-              className={clsx(
-                'relative h-full w-full overflow-hidden',
-                !hasAccent && 'bg-surface',
-              )}
+              className="relative h-full w-full overflow-hidden"
               onDragEnter={handleNoteDragEnter}
               onDragOver={handleNoteDragOver}
               onDragLeave={handleNoteDragLeave}
               onDrop={handleNoteDrop}
             >
-              <div
-                style={{
-                  transform: `scale(${scale})`,
-                  transformOrigin: 'top left',
-                  width: `${100 / scale}%`,
-                  height: `${100 / scale}%`,
-                }}
+              <NoteContentViewport
+                scrollingEnabled={scrollingEnabled}
+                viewportRef={scrollViewportRef}
+                contentHostRef={previewHostRef}
+                onScroll={(event) =>
+                  setScrollTop(event.currentTarget.scrollTop)
+                }
               >
                 {/*
                   This card surface is render-only — the expanded editor
@@ -443,71 +509,38 @@ export const NoteNode = memo(
                   `milkdown-overrides.css`) so no extra isolation is
                   required.
                 */}
-                <div
-                  ref={previewHostRef}
-                  // Stable hook for the auto-height end-to-end assertion.
-                  // The box this marks is the one a measurement is taken
-                  // from, so a test that checks "content fits" has to
-                  // find exactly it — not a utility class that a restyle
-                  // could rename out from under it.
-                  data-note-content-host=""
-                  className={clsx(
-                    NOTE_CONTENT_HOST_CLASS,
-                    'h-full',
-                    !hasAccent && 'bg-surface',
-                  )}
-                >
-                  {hydrated ? (
-                    <MilkdownPreview
-                      linkActivation="modifier"
-                      markdown={markdown}
-                      canvasId={canvasId ?? undefined}
-                      className="pointer-events-none w-full select-none"
-                    />
-                  ) : (
-                    // Lightweight placeholder while the editor mount is
-                    // deferred. The host already constrains to the node's
-                    // layout height in both modes, so filling it is enough —
-                    // the footprint comes from `style.height`, never from
-                    // anything measured here.
-                    <div
-                      className="flex h-full w-full items-center justify-center"
-                      aria-hidden
-                    >
-                      {/* No shimmer in minimal LOD — the content is
-                          hidden behind the SemanticPlaceholder, so an
-                          animated placeholder would just be wasted work. */}
-                      {!isMinimalLOD && (
-                        <Loading
-                          variant="skeleton"
-                          layout="bare"
-                          className="w-full max-w-xs"
-                        />
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-              {isTruncated && (
-                <div
-                  aria-hidden
-                  className="pointer-events-none absolute right-0 bottom-0 left-0 flex h-10 items-end justify-center pb-1"
-                >
-                  {/* Fade gradient */}
-                  <div
-                    aria-hidden
-                    className="from-fg-subtle/30 absolute inset-0 bg-linear-to-t to-transparent"
+                {hydrated ? (
+                  <MilkdownPreview
+                    linkActivation="modifier"
+                    markdown={markdown}
+                    canvasId={canvasId ?? undefined}
+                    className="pointer-events-none w-full select-none"
                   />
+                ) : (
+                  // Lightweight placeholder while the editor mount is
+                  // deferred. The viewport keeps the node's
+                  // layout height in both modes —
+                  // the footprint comes from `style.height`, never from
+                  // anything measured here.
                   <div
-                    className="text-fg-subtle relative z-10"
-                    style={{
-                      transform: `scale(${counterZoomScale})`,
-                      transformOrigin: 'bottom center',
-                    }}
+                    className="flex h-full w-full items-center justify-center"
+                    aria-hidden
                   >
-                    <ChevronsDown size={14} />
+                    {/* No shimmer in minimal LOD — the content is
+                    hidden behind the SemanticPlaceholder, so an
+                    animated placeholder would just be wasted work. */}
+                    {!isMinimalLOD && (
+                      <Loading
+                        variant="skeleton"
+                        layout="bare"
+                        className="w-full max-w-xs"
+                      />
+                    )}
                   </div>
-                </div>
+                )}
+              </NoteContentViewport>
+              {isTruncated && contentHeight - hostHeight - scrollTop > 1 && (
+                <NoteTruncationOverlay counterZoomScale={counterZoomScale} />
               )}
             </div>
           </>

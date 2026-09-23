@@ -1,0 +1,74 @@
+/*
+ * Copyright (c) Microsoft Corporation.
+ * Licensed under the MIT license.
+ */
+
+/* The document keeps the inner frame's full width even when a classic
+   scrollbar consumes viewport width. Only its existing right padding is
+   covered by the scrollbar lane; text never reflows on selection. */
+.huabu-note-scroll-frame {
+  container-type: inline-size;
+}
+
+.huabu-note-scroll-viewport {
+  width: 100%;
+  scrollbar-width: none;
+}
+
+.huabu-note-scroll-viewport > [data-note-content-host] {
+  width: 100cqw;
+}
+
+.huabu-note-scroll-viewport[data-note-scroll-enabled='true'] {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--fg-subtle) 45%, transparent)
+    transparent;
+}
+
+.huabu-note-scroll-viewport[data-note-scroll-enabled='true']:hover {
+  scrollbar-color: var(--fg-subtle) transparent;
+}
+
+/* Chromium/Electron and WebKit: opt out of the standard styling override
+   so the native thumb can have an inset capsule shape and no arrow buttons. */
+@supports selector(::-webkit-scrollbar) {
+  .huabu-note-scroll-viewport[data-note-scroll-enabled='true'],
+  .huabu-note-scroll-viewport[data-note-scroll-enabled='true']:hover {
+    scrollbar-width: auto;
+    scrollbar-color: auto;
+  }
+
+  .huabu-note-scroll-viewport::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+  }
+
+  .huabu-note-scroll-viewport[data-note-scroll-enabled='true']::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .huabu-note-scroll-viewport::-webkit-scrollbar-track {
+    background: transparent;
+    margin-block: 8px;
+  }
+
+  .huabu-note-scroll-viewport::-webkit-scrollbar-thumb {
+    background-color: color-mix(in srgb, var(--fg-subtle) 45%, transparent);
+    background-clip: padding-box;
+    border: 2px solid transparent;
+    border-radius: 999px;
+    min-height: 24px;
+  }
+
+  .huabu-note-scroll-viewport::-webkit-scrollbar-thumb:hover {
+    background-color: var(--fg-subtle);
+  }
+
+  .huabu-note-scroll-viewport::-webkit-scrollbar-thumb:active {
+    background-color: var(--fg-muted);
+  }
+
+  .huabu-note-scroll-viewport::-webkit-scrollbar-button {
+    display: none;
+  }
+}

@@ -11,10 +11,11 @@ import {
   useConnection,
   useInternalNode,
   useStore,
+  useStoreApi,
   useUpdateNodeInternals,
 } from '@xyflow/react';
 import { Plus } from 'lucide-react';
-import { memo, useCallback, useLayoutEffect, useRef, useState } from 'react';
+import { memo, useCallback, useLayoutEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
@@ -27,16 +28,21 @@ import {
 
 import { cn } from '@/components/Common/cn.ts';
 import { Tooltip } from '@/components/Common/Tooltip.tsx';
+import { nodeLayoutBorderInset } from '@/components/Nodes/design/nodeBoundary.ts';
+import { FRAME_DESIGN_CONFIG } from '@/components/Nodes/frame/frameDesign.ts';
 import { computeAdjacentNodePlacement } from '@/components/Nodes/nodePlacement.ts';
 import { createQuestionNodeAndCompose } from '@/components/Nodes/question/questionCompose.ts';
-import { localMarkRect } from '@/config/nodeTakeover.ts';
+import { useRenderedNodeGeometry } from '@/components/Panels/Canvas/useRenderedNodeGeometry.ts';
+import {
+  NODE_CONNECTION_CHROME,
+  NODE_CONTROL_CHROME,
+} from '@/config/nodeInteractionChrome';
 import { useMultiSelectModifierHeld } from '@/hooks/useMultiSelectModifier.ts';
 import useCanvasStore from '@/store/canvasStore.ts';
 import { useConnectPortStore } from '@/store/connectPortStore.ts';
 import {
   blendedMarkRect,
   useNodeCollapseStore,
-  type MarkAnchorRect,
 } from '@/store/nodeCollapseStore.ts';
 
 /** Connection handle definitions – source + target on each side. */
@@ -73,7 +79,58 @@ export type Side = 'top' | 'right' | 'bottom' | 'left';
  * body the user is trying to click, which is the problem it exists to
  * avoid.
  */
-const PORT_HIT_SIZE = { mouse: 20, touch: 28 } as const;
+const PORT_HIT_SIZE = NODE_CONNECTION_CHROME.hitSize;
+
+/** Painted port centres sit this far outside the boundary, in screen px. */
+const PORT_OUTWARD_OFFSET = NODE_CONNECTION_CHROME.outwardOffset;
+
+const pendingHandleRefreshes = new WeakMap<object, Map<string, object>>();
+
+export function scheduleHandleRefresh(
+  scope: object,
+  nodeId: string,
+  update: (nodeIds: string[]) => void,
+): () => void {
+  let pending = pendingHandleRefreshes.get(scope);
+  if (!pending) {
+    pending = new Map();
+    pendingHandleRefreshes.set(scope, pending);
+    const batch = pending;
+    requestAnimationFrame(() => {
+      pendingHandleRefreshes.delete(scope);
+      if (batch.size > 0) update([...batch.keys()]);
+    });
+  }
+  const ticket = {};
+  pending.set(nodeId, ticket);
+  const batch = pending;
+  return () => {
+    if (batch.get(nodeId) === ticket) batch.delete(nodeId);
+  };
+}
+
+/** Visual/hit offset only; never apply this to React Flow's handle bounds. */
+export function connectionPortOffset(
+  position: Position,
+  zoom: number,
+  screenDistance: number = PORT_OUTWARD_OFFSET,
+): { x: number; y: number } {
+  const distance = screenDistance / (zoom > 0 ? zoom : 1);
+  return {
+    x:
+      position === Position.Left
+        ? -distance
+        : position === Position.Right
+          ? distance
+          : 0,
+    y:
+      position === Position.Top
+        ? -distance
+        : position === Position.Bottom
+          ? distance
+          : 0,
+  };
+}
 
 /** Cardinal side -> the React Flow `Position` it corresponds to. */
 export const SIDE_POSITION: Record<Side, Position> = {
@@ -210,18 +267,12 @@ export function useCreateConnectedNode() {
  * Painted circle of a port, in whatever unit the caller's coordinate
  * space uses — flow units inside the viewport, screen px in a HUD.
  */
-function portCircleStyle(
-  size: number,
-  borderWidth: number,
-): React.CSSProperties {
+function portCircleStyle(size: number, hot: boolean): React.CSSProperties {
   return {
+    ...NODE_CONTROL_CHROME.style,
     width: size,
     height: size,
-    boxSizing: 'border-box',
-    borderWidth,
-    borderStyle: 'solid',
-    borderColor: 'var(--color-info)',
-    backgroundColor: 'var(--color-info)',
+    ...(hot && { backgroundColor: 'var(--color-info)' }),
   };
 }
 
@@ -260,8 +311,8 @@ function portPointOnRect(
 }
 
 /**
- * Screen-space repaint of the aimed-at port, drawn above the selection
- * outline.
+ * One screen-space painter for idle dots and the aimed-at Plus, above nodes
+ * and selection outlines. Native handles retain hit-testing and edge geometry.
  *
  * `SelectionOutlines` is a HUD portalled into the React Flow container at
  * `z-998`, so nothing rendered inside the viewport can paint over it and a
@@ -270,102 +321,66 @@ function portPointOnRect(
  * inside the renderer, so it is all-or-nothing against a sibling of the
  * renderer. The fix is the one `MultiSelectResizer` already uses — draw in
  * the same HUD layer. The in-flow port keeps hit-testing; this is paint
- * only, and it owns the `+` so the glyph is never rendered twice.
+ * only, with exactly one painted circle per visible side.
  */
-function HotPortOverlay({
+function ConnectionPortOverlay({
   nodeId,
-  position,
+  domNode,
   size,
+  hotSize,
+  hotPosition,
+  exposed,
+  connecting,
+  rect,
 }: {
   nodeId: string;
-  position: Position;
+  domNode: HTMLDivElement | null;
   size: number;
-}) {
-  const node = useInternalNode(nodeId);
-  const domNode = useStore((s) => s.domNode);
-  const transform = useStore((s) => s.transform);
-  const mark = useNodeCollapseStore((s) => s.marks[nodeId]);
-
-  if (!node || !domNode) return null;
-
-  const [tx, ty, zoom] = transform;
-  const { x, y } = node.internals.positionAbsolute;
-  const w = node.measured.width ?? 0;
-  const h = node.measured.height ?? 0;
-  // Ports sit on the node's border box, centred on the side they name — easing
-  // onto the takeover mark as the card fades into it.
-  const { cx, cy } = portPointOnRect(
-    position,
-    mark ? blendedMarkRect(mark) : { x, y, width: w, height: h },
-  );
-
-  return createPortal(
-    <div
-      aria-hidden
-      className="pointer-events-none absolute z-999 flex items-center justify-center rounded-full"
-      style={{
-        ...portCircleStyle(size, 2.5),
-        left: cx * zoom + tx - size / 2,
-        top: cy * zoom + ty - size / 2,
-      }}
-    >
-      <Plus
-        className="text-fg-inverse"
-        strokeWidth={3.5}
-        style={{ width: size * 0.6, height: size * 0.6 }}
-      />
-    </div>,
-    domNode,
-  );
-}
-
-/**
- * Screen-space paint of a collapsed node's four ports.
- *
- * The in-flow dots live inside the node card, which fades to zero opacity
- * once the node collapses to its takeover mark. Opacity is inherited through
- * compositing, so a child cannot opt out of it — the dots would be positioned
- * correctly on the mark and still be invisible, leaving only the `+` overlay
- * to appear out of nowhere when the pointer happened to cross a port. Painting
- * them here, in the same HUD layer `HotPortOverlay` already uses, is the same
- * split that layer established: the in-flow port keeps hit-testing and edge
- * geometry, this is paint only.
- */
-function CollapsedPortDots({
-  rect,
-  hotPosition,
-  size,
-}: {
-  rect: MarkAnchorRect;
+  hotSize: number;
   hotPosition: Position | null;
-  size: number;
+  exposed: boolean;
+  connecting: boolean;
+  rect: PortRect;
 }) {
-  const domNode = useStore((s) => s.domNode);
-  const transform = useStore((s) => s.transform);
-
   if (!domNode) return null;
-
-  const [tx, ty, zoom] = transform;
 
   return createPortal(
     <>
       {PORT_POSITIONS.map((position) => {
-        // The aimed-at port is already painted at its grown size by
-        // `HotPortOverlay`; drawing the idle dot under it would show a
-        // ring of the smaller circle poking out from behind.
-        if (position === hotPosition) return null;
+        const hot = position === hotPosition;
+        if (!exposed && !hot) return null;
+        const diameter = hot ? hotSize : size;
         const { cx, cy } = portPointOnRect(position, rect);
+        const outward = connectionPortOffset(position, 1);
         return (
           <div
             key={position}
             aria-hidden
-            className="pointer-events-none absolute z-999 rounded-full"
+            data-connection-port-dot={
+              !hot ? `${nodeId}:${position}` : undefined
+            }
+            data-connection-port-icon={
+              hot ? `${nodeId}:${position}` : undefined
+            }
+            className="pointer-events-none absolute z-999 flex items-center justify-center rounded-full"
             style={{
-              ...portCircleStyle(size, 2.5),
-              left: cx * zoom + tx - size / 2,
-              top: cy * zoom + ty - size / 2,
+              ...portCircleStyle(diameter, hot),
+              left: cx + outward.x - diameter / 2,
+              top: cy + outward.y - diameter / 2,
+              boxShadow:
+                !hot && connecting
+                  ? '0 0 3px var(--color-info-light)'
+                  : undefined,
             }}
-          />
+          >
+            {hot && (
+              <Plus
+                className="text-fg-inverse"
+                strokeWidth={3.5}
+                style={{ width: diameter * 0.6, height: diameter * 0.6 }}
+              />
+            )}
+          </div>
         );
       })}
     </>,
@@ -389,6 +404,8 @@ interface NodeConnectionHandlesProps {
    * drop placeholder and inviting a connection the gesture cannot start.
    */
   dragging: boolean;
+  /** Hide and disable every port while the parent owns a resize gesture. */
+  resizing?: boolean;
 }
 
 export function shouldExposeConnectionPorts({
@@ -396,17 +413,20 @@ export function shouldExposeConnectionPorts({
   connecting,
   hovered,
   dragging,
+  resizing = false,
   multiSelectModifierHeld,
 }: {
   selected: boolean;
   connecting: boolean;
   hovered: boolean;
   dragging: boolean;
+  resizing?: boolean;
   multiSelectModifierHeld: boolean;
 }): boolean {
   return (
     (selected || (connecting && hovered)) &&
     !dragging &&
+    !resizing &&
     !multiSelectModifierHeld
   );
 }
@@ -418,43 +438,67 @@ export const NodeConnectionHandles = memo(
     selected,
     isNotMouse,
     dragging,
+    resizing = false,
   }: NodeConnectionHandlesProps) => {
     const { t } = useTranslation();
     const node = useInternalNode(nodeId);
-    // Only the pinned *side* matters here, and only when the pending
-    // gesture belongs to this node — selecting that narrowly keeps a
-    // gesture on one node from re-rendering every other node's ports.
+    const domNode = useStore((state) => state.domNode);
     const pinnedSide = useConnectPortStore((s) =>
       s.pending?.sourceId === nodeId ? s.pending.side : null,
     );
+    const connecting = useConnection((c) => c.inProgress);
+    const measurePorts =
+      selected || (connecting && hovered) || pinnedSide !== null;
+    const tx = useStore((state) => (measurePorts ? state.transform[0] : 0));
+    const ty = useStore((state) => (measurePorts ? state.transform[1] : 0));
+    const zoom = useStore((state) => (measurePorts ? state.transform[2] : 1));
+    const x = node?.internals.positionAbsolute.x ?? 0;
+    const y = node?.internals.positionAbsolute.y ?? 0;
+    const width =
+      (node?.style?.width as number | undefined) ?? node?.measured.width ?? 0;
+    const height =
+      (node?.style?.height as number | undefined) ?? node?.measured.height ?? 0;
+    const { geometry: renderedGeometry } = useRenderedNodeGeometry(
+      nodeId,
+      domNode,
+      node?.resizing === true,
+      {
+        nodeX: x,
+        nodeY: y,
+        nodeWidth: width,
+        nodeHeight: height,
+        viewportX: tx,
+        viewportY: ty,
+        zoom,
+      },
+      measurePorts,
+    );
+    // Match the shell's layout inset, not its painted overlay width.
+    // Frame retains its separate surface policy.
+    const borderInset =
+      node?.type === 'frame'
+        ? FRAME_DESIGN_CONFIG.appearance.borderWidth
+        : nodeLayoutBorderInset(node?.type);
+    const borderLeft = renderedGeometry?.borderLeft ?? borderInset;
+    const borderTop = renderedGeometry?.borderTop ?? borderInset;
+    // Only the pinned *side* matters here, and only when the pending
+    // gesture belongs to this node — selecting that narrowly keeps a
+    // gesture on one node from re-rendering every other node's ports.
     const mark = useNodeCollapseStore((s) => s.marks[nodeId]);
-    // Committed edge endpoints are React Flow's cached handle bounds, and it
-    // only re-measures them on demand. The handles below move onto the mark as
-    // the card collapses, so without this the edges would keep terminating on
-    // the border box of a card that is no longer drawn. Re-measuring instead
-    // walks the endpoints in with the ports, onto the icon that replaced the
-    // node. Skipped entirely for nodes that never collapse.
+    const flow = useStoreApi();
     const updateNodeInternals = useUpdateNodeInternals();
-    const hadMark = useRef(false);
-    useLayoutEffect(() => {
-      if (!mark && !hadMark.current) return;
-      hadMark.current = mark !== undefined;
-      updateNodeInternals(nodeId);
-    }, [mark, nodeId, updateNodeInternals]);
 
-    const baseHandleSize = isNotMouse ? 14 : 8;
+    const baseHandleSize =
+      NODE_CONNECTION_CHROME.dotSize[isNotMouse ? 'touch' : 'mouse'];
     const hitSize = isNotMouse ? PORT_HIT_SIZE.touch : PORT_HIT_SIZE.mouse;
     // Distance the press area is shifted outward so its inner edge lands
     // where the painted circle's already does. Everything the target gained
     // over the circle therefore sits outside the node.
     const hitOutwardShift = (hitSize - baseHandleSize) / 2;
-    const zoom = useStore((s) => s.transform[2]);
     const inverseZoom = zoom > 0 ? 1 / zoom : 1;
     const dotSize = baseHandleSize * inverseZoom;
-    const dotBorderWidth = 2.5 * inverseZoom;
     // A connection drag temporarily exposes the hovered target node's dots;
     // the source port remains pinned separately below.
-    const connecting = useConnection((c) => c.inProgress);
     const fromHandle = useConnection((c) => c.fromHandle);
 
     // Ports are the single control for both "connect" and "create": drag
@@ -472,11 +516,14 @@ export const NodeConnectionHandles = memo(
       connecting,
       hovered,
       dragging,
+      resizing,
       multiSelectModifierHeld,
     });
-    const hotHandleSize = isNotMouse ? 22 : 20;
+    const hotHandleSize =
+      NODE_CONNECTION_CHROME.hotSize[isNotMouse ? 'touch' : 'mouse'];
 
-    const pinnedPosition = pinnedSide ? SIDE_POSITION[pinnedSide] : null;
+    const pinnedPosition =
+      !resizing && pinnedSide ? SIDE_POSITION[pinnedSide] : null;
 
     // Pressing a port starts a connection immediately (the canvas sets
     // `connectionDragThreshold` to 0), so without this the port would
@@ -491,56 +538,75 @@ export const NodeConnectionHandles = memo(
     // At most one port of a node is ever hot, so resolve it once here
     // rather than per handle — each side renders two stacked handles
     // (a source and a target) that would otherwise both light up.
-    const hotPosition =
-      pinnedPosition ??
-      (originSide ? SIDE_POSITION[originSide] : null) ??
-      (exposed && !connecting ? hotSide : null);
+    const hotPosition = resizing
+      ? null
+      : (pinnedPosition ??
+        (originSide ? SIDE_POSITION[originSide] : null) ??
+        (exposed && !connecting ? hotSide : null));
 
     // Once the card has collapsed into its takeover mark, the footprint the
     // handles are laid out against is invisible — ports pinned to its edges
     // would hang in empty canvas, and a connection dragged from one would
     // start nowhere near the thing the user aimed at. Rebase them onto the
     // mark.
-    //
-    // Only the glide `progress` is taken from the published mark. Its rect is
-    // canvas-space and zoom-derived, so during a viewport animation it can be a
-    // frame behind the zoom this render is laying out against — and because the
-    // error is multiplicative, that briefly threw the handles clear off the
-    // node. The rect is recomputed here from the live zoom instead.
-    let collapsedRect: MarkAnchorRect | null = null;
-    let collapsedLocalRect: PortRect | null = null;
-    if (mark && node) {
-      // `||`, not `??`: an unset `style.width` is not always `undefined`, and
-      // the takeover hook this must agree with falls through on any falsy value.
-      const nodeW = (node.style?.width as number) || node.measured.width || 0;
-      const nodeH = (node.style?.height as number) || node.measured.height || 0;
-      collapsedRect = blendedMarkRect(mark);
-      collapsedLocalRect =
-        nodeW > 0 && nodeH > 0 && zoom > 0
-          ? localMarkRect(nodeW, nodeH, zoom, mark.progress)
-          : null;
-    }
+    const boundaryRect: PortRect = mark
+      ? blendedMarkRect(mark)
+      : renderedGeometry
+        ? {
+            x: (renderedGeometry.x - tx) * inverseZoom,
+            y: (renderedGeometry.y - ty) * inverseZoom,
+            width: renderedGeometry.width * inverseZoom,
+            height: renderedGeometry.height * inverseZoom,
+          }
+        : { x, y, width, height };
+    const localRect: PortRect | null =
+      mark || renderedGeometry
+        ? { ...boundaryRect, x: boundaryRect.x - x, y: boundaryRect.y - y }
+        : null;
+
+    const handleX = mark ? localRect?.x : 0;
+    const handleY = mark ? localRect?.y : 0;
+    const handleWidth = localRect?.width ?? width;
+    const handleHeight = localRect?.height ?? height;
+    useLayoutEffect(
+      () => scheduleHandleRefresh(flow, nodeId, updateNodeInternals),
+      [
+        flow,
+        nodeId,
+        updateNodeInternals,
+        handleX,
+        handleY,
+        handleWidth,
+        handleHeight,
+        borderLeft,
+        borderTop,
+        dotSize,
+      ],
+    );
 
     return (
       <>
-        {collapsedRect && (exposed || pinnedPosition) && (
-          <CollapsedPortDots
-            rect={collapsedRect}
-            hotPosition={hotPosition}
-            size={baseHandleSize}
-          />
-        )}
-        {hotPosition && (
-          <HotPortOverlay
+        {(exposed || hotPosition) && (
+          <ConnectionPortOverlay
             nodeId={nodeId}
-            position={hotPosition}
-            size={hotHandleSize}
+            domNode={domNode}
+            size={baseHandleSize}
+            hotSize={hotHandleSize}
+            hotPosition={hotPosition}
+            exposed={exposed}
+            connecting={connecting}
+            rect={{
+              x: boundaryRect.x * zoom + tx,
+              y: boundaryRect.y * zoom + ty,
+              width: boundaryRect.width * zoom,
+              height: boundaryRect.height * zoom,
+            }}
           />
         )}
         {HANDLE_DEFS.map((h) => {
           const side = sideFromHandleId(h.id);
           const keyboardReachable =
-            selected && h.type === 'source' && side !== null;
+            !resizing && selected && h.type === 'source' && side !== null;
           // Two flavours of "handle position" are consumed by React Flow:
           //   - `getHandlePosition(..., center=false)` returns the bbox's
           //     *outer edge* on the relevant axis (e.g. `bbox.y` for
@@ -549,10 +615,9 @@ export const NodeConnectionHandles = memo(
           //     *centre*. This drives the connection-line preview that
           //     renders while the user drags from a handle.
           //
-          // We want BOTH points to land exactly on the visible node
-          // edge so the preview start, the dot, the corner resize
-          // handles, the side-affordance triangles, and the committed
-          // edge endpoint all align on a single line.
+          // BOTH points stay exactly on the visible node boundary. The
+          // painted dot and its hit area move outward independently; that
+          // presentation offset must never move either edge endpoint.
           //
           // A non-zero square bbox cannot satisfy both — its outer edge
           // and its centre are always `size/2` apart. So we collapse
@@ -562,60 +627,50 @@ export const NodeConnectionHandles = memo(
           // that axis, `bbox.y === bbox.y + height/2`, so the two
           // flavours of `getHandlePosition` return the same point.
           //
-          // The visible circle is rendered as an absolutely-positioned
-          // child centred on the bbox (50%/50% + translate). It has
-          // `pointer-events: auto` so the click target is the dot, not
-          // the 0-thickness bbox; events still bubble up to the Handle
-          // so connection drags start correctly.
+          // The transparent hit child moves outward from the bbox and has
+          // `pointer-events: auto`; events still bubble up to the Handle.
+          // ConnectionPortOverlay paints the circle in the HUD instead.
           //
-          // The `-3px` perpendicular offset cancels the inner wrapper's
-          // `border-3`: the Handle is positioned absolutely against its
+          // The negative border inset cancels the shell's layout border:
+          // the Handle is positioned absolutely against its
           // containing block's *padding box* (inside the border), so
-          // `top: 0` would land 3px inside the visible border.
+          // `top: 0` would land inside a bordered shell's visible edge.
           const edgeAlign: React.CSSProperties =
             h.position === Position.Top
               ? {
-                  top: -3,
+                  top: -borderInset,
                   width: dotSize,
                   height: 0,
                   transform: 'translate(-50%, 0)',
                 }
               : h.position === Position.Bottom
                 ? {
-                    bottom: -3,
+                    bottom: -borderInset,
                     width: dotSize,
                     height: 0,
                     transform: 'translate(-50%, 0)',
                   }
                 : h.position === Position.Left
                   ? {
-                      left: -3,
+                      left: -borderInset,
                       width: 0,
                       height: dotSize,
                       transform: 'translate(0, -50%)',
                     }
                   : {
-                      right: -3,
+                      right: -borderInset,
                       width: 0,
                       height: dotSize,
                       transform: 'translate(0, -50%)',
                     };
-          // Collapsed: same zero-thickness trick, but positioned absolutely
-          // against the mark's local rect instead of the node's own edges.
-          // `right` / `bottom` are reset because React Flow's per-side CSS
-          // sets them, and a side offset left over from the readable layout
-          // would fight the explicit `left` / `top`.
-          const alignStyle: React.CSSProperties = collapsedLocalRect
+          const alignStyle: React.CSSProperties = localRect
             ? (() => {
-                const { cx, cy } = portPointOnRect(
-                  h.position,
-                  collapsedLocalRect,
-                );
+                const { cx, cy } = portPointOnRect(h.position, localRect);
                 const horizontal =
                   h.position === Position.Top || h.position === Position.Bottom;
                 return {
-                  left: cx,
-                  top: cy,
+                  left: cx - borderLeft,
+                  top: cy - borderTop,
                   right: 'auto',
                   bottom: 'auto',
                   width: horizontal ? dotSize : 0,
@@ -626,16 +681,7 @@ export const NodeConnectionHandles = memo(
                 };
               })()
             : edgeAlign;
-          // Handles stay solid in every visible state so the selection
-          // outline cannot visually bisect them. Connection drag adds a
-          // glow to strengthen the endpoint affordance.
-          //
-          // Neither the handle's bbox nor the painted circle grows on
-          // hover — the aimed-at port is drawn at its grown size by
-          // `HotPortOverlay` instead. Growing the bbox would move
-          // `getHandlePosition`, which would drag committed edge endpoints
-          // around under the pointer.
-          const isHot = hotPosition === h.position;
+          // Hover changes only HUD paint, never the handle bbox or endpoints.
           // A port with a picker open stays visible and pressed until the
           // gesture resolves, even after the pointer has left the node.
           const isPinned = pinnedPosition === h.position;
@@ -650,35 +696,11 @@ export const NodeConnectionHandles = memo(
           // pointer is not on must stay a plain click target.
           const isPinnedOrExposed = exposed || isPinned;
           const isReachable = isPinnedOrExposed || keyboardReachable;
-          // Signed offset along the axis this side faces: negative towards
-          // the node's top/left, positive towards its bottom/right.
-          const isVerticalSide =
-            h.position === Position.Top || h.position === Position.Bottom;
-          const outwardSign =
-            h.position === Position.Top || h.position === Position.Left
-              ? -1
-              : 1;
-          const outward = hitOutwardShift * inverseZoom * outwardSign;
-          const shiftAlongAxis = (distance: number) =>
-            isVerticalSide
-              ? `translateY(${distance}px)`
-              : `translateX(${distance}px)`;
-          // Painted circle. Purely decorative — the enclosing span owns
-          // hit-testing, so this must not intercept anything itself. It is
-          // centred in that span, which has been pushed outward, so the
-          // same offset is subtracted again to put the circle back on the
-          // node's border where the edge endpoints are.
-          const circleStyle: React.CSSProperties = {
-            ...portCircleStyle(baseHandleSize * inverseZoom, dotBorderWidth),
-            position: 'absolute',
-            top: '50%',
-            left: '50%',
-            transform: `translate(-50%, -50%) ${shiftAlongAxis(-outward)}`,
-            pointerEvents: 'none',
-            boxShadow: connecting
-              ? '0 0 3px var(--color-info-light)'
-              : undefined,
-          };
+          const hitOffset = connectionPortOffset(
+            h.position,
+            zoom,
+            PORT_OUTWARD_OFFSET + hitOutwardShift,
+          );
           // Press area: bigger than the circle, and pushed outward so the
           // extra room comes out of empty canvas rather than out of the
           // node body the user is trying to click.
@@ -687,22 +709,14 @@ export const NodeConnectionHandles = memo(
             height: hitSize * inverseZoom,
             top: '50%',
             left: '50%',
-            transform: `translate(-50%, -50%) ${shiftAlongAxis(outward)}`,
+            transform: `translate(-50%, -50%) translate(${hitOffset.x}px, ${hitOffset.y}px)`,
             // React Flow paints handles with `cursor: crosshair`, which only
             // describes half of what this control does. Clicking it creates a
             // node, so the pointer cursor matches the `+` the user sees.
             cursor: 'pointer',
           };
-          // The aimed-at port is painted entirely by `HotPortOverlay`, in a
-          // HUD layer above the selection outline. The in-flow circle stands
-          // down rather than being drawn underneath it: the two are placed
-          // by unrelated derivations — this one against the handle's own
-          // box (offset to cancel the wrapper's border), the overlay from
-          // `positionAbsolute` + `measured` — so any box-model discrepancy
-          // shows up as a stray ring peeking out from behind. There is also
-          // more than one in-flow circle per side, since each side stacks a
-          // source and a target handle. One painter per state, no alignment
-          // to keep.
+          // Native hit targets stay inside the node for connection bubbling
+          // and side-aligned click creation; the HUD owns all visible paint.
           const dot = (
             // Role, tabIndex and label are applied together below; the
             // linter cannot see them through the spread.
@@ -737,33 +751,15 @@ export const NodeConnectionHandles = memo(
                 }
                 event.preventDefault();
                 event.stopPropagation();
-                const { x, y } = node.internals.positionAbsolute;
-                const width = node.measured.width ?? 0;
-                const height = node.measured.height ?? 0;
-                const anchor =
-                  side === 'top'
-                    ? { x: x + width / 2, y }
-                    : side === 'bottom'
-                      ? { x: x + width / 2, y: y + height }
-                      : side === 'left'
-                        ? { x, y: y + height / 2 }
-                        : { x: x + width, y: y + height / 2 };
+                const { cx, cy } = portPointOnRect(h.position, boundaryRect);
                 useConnectPortStore.getState().setPending({
                   sourceId: nodeId,
                   side,
-                  anchor,
+                  anchor: { x: cx, y: cy },
                   kind: 'side',
                 });
               }}
-            >
-              {!isHot && (
-                <span
-                  aria-hidden
-                  className="rounded-full"
-                  style={circleStyle}
-                />
-              )}
-            </span>
+            />
           );
           return (
             <Handle
@@ -771,15 +767,22 @@ export const NodeConnectionHandles = memo(
               type={h.type}
               id={h.id}
               position={h.position}
+              isConnectable={!resizing}
+              isConnectableStart={!resizing}
+              isConnectableEnd={!resizing}
               style={{
                 ...alignStyle,
                 minWidth: 0,
                 minHeight: 0,
                 background: 'transparent',
                 border: 'none',
+                // Resize suppression is immediate, including a focused port;
+                // do not leave it visible for the opacity transition.
+                ...(resizing && { opacity: 0, pointerEvents: 'none' }),
               }}
               className={cn(
-                'z-20 transition-opacity focus-within:opacity-100',
+                'z-20 transition-opacity',
+                !resizing && 'focus-within:opacity-100',
                 isPinned
                   ? 'opacity-100'
                   : !exposed
@@ -794,16 +797,22 @@ export const NodeConnectionHandles = memo(
                 A canvas holds many nodes × eight handles each, and every
                 `<Tooltip>` carries its own Floating UI instance.
 
-                The wrapper fills the (zero-thickness) handle bbox, whose
-                centre is the dot's centre, so the tooltip stays aligned
-                without knowing the dot's current size. The offset clears
-                the grown dot.
+                The wrapper fills the zero-thickness boundary anchor;
+                only its child hit area and dot translate outward. Keeping
+                this wrapper unshifted avoids applying the offset twice.
+                The tooltip gap must include the vertical paint offset so
+                both its preferred placement and its flipped placement clear Plus.
               */}
               {isReachable ? (
                 <Tooltip
                   content={t('node.createConnectedNode')}
                   wrapperClassName="absolute inset-0"
-                  offset={hotHandleSize / 2 + 8}
+                  placement={h.position === Position.Bottom ? 'bottom' : 'top'}
+                  offset={
+                    Math.abs(connectionPortOffset(h.position, 1).y) +
+                    hotHandleSize / 2 +
+                    NODE_CONNECTION_CHROME.toolbarGap
+                  }
                 >
                   {dot}
                 </Tooltip>

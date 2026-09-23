@@ -16,6 +16,7 @@ interface MainLayoutProps {
 
 interface LayoutInjectedProps {
   isCollapsed?: boolean;
+  isContentMounted?: boolean;
   isHostCollapsed?: boolean;
   isFullscreen?: boolean;
   compact?: boolean;
@@ -134,6 +135,16 @@ export const MainLayout = ({
 
   const [leftWidthPx, setLeftWidthPx] = useState(LEFT_DEFAULT_WIDTH_PX);
   const [rightWidthPx, setRightWidthPx] = useState(RIGHT_DEFAULT_WIDTH_PX);
+  const [retainLeftContent, setRetainLeftContent] = useState(!isLeftCollapsed);
+  const leftContentMounted = !isLeftCollapsed || retainLeftContent;
+  useLayoutEffect(() => {
+    if (!isLeftCollapsed) {
+      setRetainLeftContent(true);
+      return;
+    }
+    const fallback = window.setTimeout(() => setRetainLeftContent(false), 300);
+    return () => window.clearTimeout(fallback);
+  }, [isLeftCollapsed]);
   const [isRestoringCanvas, setIsRestoringCanvas] = useState(false);
   const restoreCanvasFrameRef = useRef<number | null>(null);
   const [layoutWidth, setLayoutWidth] = useState<number | null>(null);
@@ -326,6 +337,15 @@ export const MainLayout = ({
         data-collapsed={isLeftCollapsed ? 'true' : undefined}
         tabIndex={-1}
         onPointerDownCapture={focusPanel}
+        onTransitionEnd={(event) => {
+          if (
+            event.target === event.currentTarget &&
+            event.propertyName === 'transform' &&
+            usePanelStore.getState().isLeftCollapsed
+          ) {
+            setRetainLeftContent(false);
+          }
+        }}
         style={{
           width: `${visibleLeftWidth}px`,
         }}
@@ -353,6 +373,7 @@ export const MainLayout = ({
                   leftPanel as React.ReactElement<LayoutInjectedProps>,
                   {
                     isCollapsed: false,
+                    isContentMounted: leftContentMounted,
                     onToggle: toggleLeftPanel,
                   },
                 )

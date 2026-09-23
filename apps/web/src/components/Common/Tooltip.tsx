@@ -103,6 +103,8 @@ export const Tooltip = ({
   const focus = useFocus(context);
   const dismiss = useDismiss(context, {
     escapeKey: true,
+    // Tooltips dismiss without consuming the containing surface's Escape.
+    bubbles: { escapeKey: true },
     // Close as soon as the trigger is pressed. This is the key fix
     // for the "tooltip lingers after clicking a button that opens a
     // popover" bug, since the popover's overlay used to intercept the

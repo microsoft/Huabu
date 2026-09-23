@@ -3,7 +3,6 @@
 
 import {
   ReactFlow,
-  Background,
   Controls,
   ControlButton,
   MiniMap,
@@ -42,6 +41,10 @@ import { Button } from '@/components/Common/Button';
 import { cn } from '@/components/Common/cn';
 import { Loading } from '@/components/Common/Loading';
 import { AudioNode } from '@/components/Nodes/audio/AudioNode';
+import {
+  FrameZoomController,
+  FrameZoomProvider,
+} from '@/components/Nodes/frame/FrameZoomContext';
 import { ImageNode } from '@/components/Nodes/image/ImageNode';
 import {
   sideFromHandleId,
@@ -73,8 +76,10 @@ import { createPlacementRecognizer } from '@/handler/canvasPointerRecognizers/pl
 import { useCanvasShortcuts } from '@/hooks/shortcuts';
 import { isOutsideCanvasInteraction } from '@/hooks/shortcuts/isEditableTarget';
 import { useAutoPanDuringSelection } from '@/hooks/useAutoPanDuringSelection';
+import { useCanvasFocusEscape } from '@/hooks/useCanvasFocusEscape';
 import { useCanvasGestures } from '@/hooks/useCanvasGestures';
 import { useCanvasLasso } from '@/hooks/useCanvasLasso';
+import { useCanvasMarquee } from '@/hooks/useCanvasMarquee';
 import { useCanvasPanReleaseGuard } from '@/hooks/useCanvasPanReleaseGuard';
 import { useCanvasPointerRouter } from '@/hooks/useCanvasPointerRouter';
 import { useFrameDragToCreate } from '@/hooks/useFrameDragToCreate';
@@ -90,6 +95,7 @@ import { isMac } from '@/utils/platform';
 import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 
 import { applyNodeGeometryPreviews } from './applyNodeGeometryPreview';
+import { CanvasGrid } from './CanvasGrid';
 import {
   canStartRetainedSelectionMove,
   canDirectlyManipulateWithPointer,
@@ -111,11 +117,12 @@ import { StrokeSelectionToolbar } from './FloatingToolbars/StrokeSelectionToolba
 import { MoveSelectionModal } from './MoveSelectionModal.tsx';
 import { MultiSelectResizer } from './MultiSelectResizer.tsx';
 import { SelectionOutlines } from './SelectionOutlines.tsx';
+import { selectionZOrder, withoutNodeStyleZIndex } from './selectionZOrder';
 import { SnapGuidesOverlay } from './SnapGuidesOverlay.tsx';
 import { StrokeSelectionRegion } from './StrokeSelectionRegion.tsx';
 import { StructuredDropOverlay } from './StructuredDropOverlay.tsx';
 import { useInitialCanvasViewport } from './useInitialCanvasViewport.ts';
-import { GRID_SIZE, MAX_ZOOM, MIN_ZOOM } from '../../../config/canvas.ts';
+import { MAX_ZOOM, MIN_ZOOM } from '../../../config/canvas.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
 import { useConnectPortStore } from '../../../store/connectPortStore.ts';
 import { useGesturePreviewStore } from '../../../store/gesturePreviewStore.ts';
@@ -276,6 +283,9 @@ const CanvasGestures: React.FC<{
   inputMode: 'mouse' | 'pen' | 'finger';
   interactivityLocked: boolean;
   explicitToolActive: boolean;
+  mouseMarqueeEnabled: boolean;
+  canvasId: string | null;
+  onMarqueeActiveChange: (active: boolean) => void;
   onTouchTakeover: () => void;
   onEmptyCanvasTap: () => void;
   onNodeTap: (nodeId: string) => void;
@@ -289,12 +299,26 @@ const CanvasGestures: React.FC<{
   inputMode,
   interactivityLocked,
   explicitToolActive,
+  mouseMarqueeEnabled,
+  canvasId,
+  onMarqueeActiveChange,
   onTouchTakeover,
   onEmptyCanvasTap,
   onNodeTap,
   extraRecognizers,
 }) => {
   useCanvasGestures(wrapperRef, rfInstanceRef);
+  const marquee = useCanvasMarquee({
+    enabled: mouseMarqueeEnabled,
+    scopeKey: canvasId,
+    wrapperRef,
+    rfInstanceRef,
+    onActiveChange: onMarqueeActiveChange,
+  });
+  const recognizers = useMemo(
+    () => [...extraRecognizers, marquee.recognizer],
+    [extraRecognizers, marquee.recognizer],
+  );
   useCanvasPointerRouter(
     wrapperRef,
     rfInstanceRef,
@@ -302,11 +326,14 @@ const CanvasGestures: React.FC<{
       inputMode,
       interactivityLocked,
       explicitToolActive,
-      onTouchTakeover,
+      onTouchTakeover: () => {
+        marquee.cancel();
+        onTouchTakeover();
+      },
       onEmptyCanvasTap,
       onNodeTap,
     },
-    extraRecognizers,
+    recognizers,
   );
   return null;
 };
@@ -474,7 +501,9 @@ export const Canvas: React.FC<CanvasProps> = ({
   } = useCanvasStore.getState();
   const { setPendingNodeType } = useToolStore.getState();
 
-  const [isBoxSelecting, setIsBoxSelecting] = useState(false);
+  const [isNativeBoxSelecting, setIsNativeBoxSelecting] = useState(false);
+  const [isMouseMarqueeSelecting, setIsMouseMarqueeSelecting] = useState(false);
+  const isBoxSelecting = isNativeBoxSelecting || isMouseMarqueeSelecting;
 
   const selectedNodeIds = useMemo(
     () => new Set(nodes.filter((node) => node.selected).map((node) => node.id)),
@@ -497,6 +526,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         ?.querySelector<HTMLElement>('[data-canvas-toolbar-layer]') ?? null,
     );
   }, []);
+  useCanvasFocusEscape(wrapperRef);
   const suppressNextPaneClickRef = useRef(false);
   const rfInstanceRef = useRef<ReactFlowInstance | null>(null);
   const lastDropRef = useRef<{ key: string; at: number } | null>(null);
@@ -533,6 +563,9 @@ export const Canvas: React.FC<CanvasProps> = ({
   );
   useCanvasPanReleaseGuard(wrapperRef, !isNotMouse && tool === 'pan');
 
+  const mouseMarqueeEnabled =
+    !interactivityLocked && !pendingNodeType && tool === 'select';
+
   // Tap-vs-drag activation follows the pointer actually in use.
   const dragActivationDistance = isNotMouse
     ? getDragActivationDistance(lastPointer === 'pen' ? 'pen' : 'touch')
@@ -556,13 +589,13 @@ export const Canvas: React.FC<CanvasProps> = ({
 
   const handleSelectionStart = useCallback(() => {
     if (tool !== 'select') return;
-    setIsBoxSelecting(true);
+    setIsNativeBoxSelecting(true);
   }, [tool]);
 
   // Sync the box-selected nodes back through the standard SELECT_NODES intent
   // so action history and event buffer stay in step with the visible selection.
   const handleSelectionEnd = useCallback(() => {
-    setIsBoxSelecting(false);
+    setIsNativeBoxSelecting(false);
     if (tool !== 'select') return;
     selectNodes(nodes.filter((n) => n.selected).map((n) => n.id));
   }, [nodes, selectNodes, tool]);
@@ -827,13 +860,16 @@ export const Canvas: React.FC<CanvasProps> = ({
     cancelLasso();
     window.dispatchEvent(new Event(CANCEL_SKETCH_GESTURE_EVENT));
   }, [cancelLasso]);
-  // Manual z-order: array/forest order is the sole stacking authority
-  // (see `assignNodeZIndices`). React Flow runs in `zIndexMode="manual"`
-  // so these derived values are used verbatim; without this a framed
-  // node always paints above unframed siblings regardless of order.
+  // Forest order remains authoritative at rest. Sole selection temporarily
+  // raises a node/subtree (including its actual in-node controls), without
+  // changing store order or persisted z. Manual mode uses this map verbatim.
   const nodesById = useMemo(() => indexById(nodes as NestableNode[]), [nodes]);
   const zByNode = useMemo(
-    () => assignNodeZIndices(nodes as NestableNode[]),
+    () =>
+      selectionZOrder(
+        nodes as NestableNode[],
+        assignNodeZIndices(nodes as NestableNode[]),
+      ),
     [nodes],
   );
 
@@ -865,7 +901,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       // hovered structured frame, and for the dragged node itself.
       const previewedNode = previewById.get(node.id) ?? node;
       const nextPosition = previewedNode.position;
-      const nextStyle = previewedNode.style;
+      const nextStyle = withoutNodeStyleZIndex(previewedNode.style);
       const nextMeasured = previewedNode.measured;
       const touchDraggable = resolveNodeDraggable(
         node.draggable,
@@ -1278,9 +1314,11 @@ export const Canvas: React.FC<CanvasProps> = ({
     <div
       ref={wrapperRef}
       data-canvas-root=""
+      tabIndex={-1}
       data-search-scope="canvas"
       aria-busy={isInitialViewportPending}
       data-not-mouse={isNotMouse ? '' : undefined}
+      data-mouse-marquee={mouseMarqueeEnabled && !isNotMouse ? '' : undefined}
       className={clsx(
         'bg-bg-default relative flex h-full w-full flex-col',
         pendingNodeType === 'note' && 'canvas-pending-note',
@@ -1477,227 +1515,234 @@ export const Canvas: React.FC<CanvasProps> = ({
         }
       }}
     >
-      <ReactFlow
-        className={cn(
-          isInitialViewportPending && 'invisible',
-          isStructuredReflowing && 'structured-reflow',
-        )}
-        defaultViewport={defaultViewport}
-        deleteKeyCode={null}
-        nodes={displayNodes}
-        edges={displayEdges}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
-        onConnect={onConnect}
-        onConnectEnd={onConnectEnd}
-        // A port is also the "create a connected node" button, so a plain
-        // click on one has to reach `onConnectEnd`. React Flow only starts
-        // (and therefore only ends) a connection once the pointer has moved
-        // past `connectionDragThreshold`, which defaults to 1px — a click
-        // that never moves would be dropped silently. Starting at 0px makes
-        // press-and-release a first-class connect gesture.
-        connectionDragThreshold={0}
-        // React Flow's own click-to-connect would fight ours: it treats the
-        // first port click as "arm a connection" and the next port click as
-        // "complete it", silently drawing an edge between two ports the user
-        // only meant to press the `+` on. Ports are our control now, so this
-        // second, invisible click protocol has to be off.
-        connectOnClick={false}
-        isValidConnection={isValidConnection}
-        connectionMode={ConnectionMode.Loose}
-        onNodeDragStart={onNodeDragStart}
-        onNodeDrag={onNodeDrag}
-        onNodeDragStop={onNodeDragStop}
-        nodeTypes={nodeTypes}
-        edgeTypes={edgeTypes}
-        onInit={(instance) => {
-          rfInstanceRef.current = instance;
-          setRfInstance(instance);
-          fitInitialViewport(instance);
-        }}
-        onMoveStart={() => {
-          // Pan and zoom both arrive here. A height correction committed
-          // mid-gesture would resize a node the user is moving past, so
-          // corrections queue up and land once the viewport settles.
-          suspendHeightCommits('viewport');
-        }}
-        onMoveEnd={(_event, viewport) => {
-          resumeHeightCommits('viewport');
-          // Mirror pan/zoom into localStorage (per canvas) so browser and
-          // desktop restarts restore the same view. Does NOT participate in
-          // the structure autosave.
-          setViewport(viewport);
-        }}
-        onPaneClick={handlePaneClick}
-        onNodeDoubleClick={(e, node) => {
-          e.stopPropagation();
-          // Expand any expandable node type on double-click.
-          if (EXPANDABLE_TYPES.has(node.type ?? '')) {
-            openPreviewNode(node.id, { transient: true });
-          }
-        }}
-        onEdgeDoubleClick={(e, edge) => {
-          // Jump straight into the label editor — saves the user the
-          // single-click-then-click-pill dance. `LabelledEdge` listens
-          // for this event by id; see `EDIT_EDGE_LABEL_EVENT`.
-          e.stopPropagation();
-          const detail: EditEdgeLabelDetail = { edgeId: edge.id };
-          window.dispatchEvent(
-            new CustomEvent<EditEdgeLabelDetail>(EDIT_EDGE_LABEL_EVENT, {
-              detail,
-            }),
-          );
-        }}
-        panOnDrag={
-          isNotMouse
-            ? false /* touch/pen → custom pointer router is the sole pan driver;
+      <FrameZoomProvider>
+        <ReactFlow
+          className={cn(
+            isInitialViewportPending && 'invisible',
+            isStructuredReflowing && 'structured-reflow',
+          )}
+          defaultViewport={defaultViewport}
+          deleteKeyCode={null}
+          nodes={displayNodes}
+          edges={displayEdges}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onConnect={onConnect}
+          onConnectEnd={onConnectEnd}
+          // A port is also the "create a connected node" button, so a plain
+          // click on one has to reach `onConnectEnd`. React Flow only starts
+          // (and therefore only ends) a connection once the pointer has moved
+          // past `connectionDragThreshold`, which defaults to 1px — a click
+          // that never moves would be dropped silently. Starting at 0px makes
+          // press-and-release a first-class connect gesture.
+          connectionDragThreshold={0}
+          // React Flow's own click-to-connect would fight ours: it treats the
+          // first port click as "arm a connection" and the next port click as
+          // "complete it", silently drawing an edge between two ports the user
+          // only meant to press the `+` on. Ports are our control now, so this
+          // second, invisible click protocol has to be off.
+          connectOnClick={false}
+          isValidConnection={isValidConnection}
+          connectionMode={ConnectionMode.Loose}
+          onNodeDragStart={onNodeDragStart}
+          onNodeDrag={onNodeDrag}
+          onNodeDragStop={onNodeDragStop}
+          nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
+          onInit={(instance) => {
+            rfInstanceRef.current = instance;
+            setRfInstance(instance);
+            fitInitialViewport(instance);
+          }}
+          onMoveStart={() => {
+            // Pan and zoom both arrive here. A height correction committed
+            // mid-gesture would resize a node the user is moving past, so
+            // corrections queue up and land once the viewport settles.
+            suspendHeightCommits('viewport');
+          }}
+          onMoveEnd={(_event, viewport) => {
+            resumeHeightCommits('viewport');
+            // Mirror pan/zoom into localStorage (per canvas) so browser and
+            // desktop restarts restore the same view. Does NOT participate in
+            // the structure autosave.
+            setViewport(viewport);
+          }}
+          onPaneClick={handlePaneClick}
+          onNodeDoubleClick={(e, node) => {
+            e.stopPropagation();
+            // Expand any expandable node type on double-click.
+            if (EXPANDABLE_TYPES.has(node.type ?? '')) {
+              openPreviewNode(node.id, { transient: true });
+            }
+          }}
+          onEdgeDoubleClick={(e, edge) => {
+            // Jump straight into the label editor — saves the user the
+            // single-click-then-click-pill dance. `LabelledEdge` listens
+            // for this event by id; see `EDIT_EDGE_LABEL_EVENT`.
+            e.stopPropagation();
+            const detail: EditEdgeLabelDetail = { edgeId: edge.id };
+            window.dispatchEvent(
+              new CustomEvent<EditEdgeLabelDetail>(EDIT_EDGE_LABEL_EVENT, {
+                detail,
+              }),
+            );
+          }}
+          panOnDrag={
+            isNotMouse
+              ? false /* touch/pen → custom pointer router is the sole pan driver;
                        React Flow's d3-zoom touch pan (a separate Touch Events
                        stream) would otherwise still fire under a truthy
                        `[1]` and pan the canvas mid-frame/lasso/placement */
-            : pendingNodeType
-              ? [1] /* mouse + creation tool → middle mouse button still pans */
-              : tool === 'pan'
-                ? true
-                : [
+              : pendingNodeType
+                ? [
                     1,
-                  ] /* mouse + selection tools → middle mouse button pans; drag box-selects */
-        }
-        selectionOnDrag={
-          pendingNodeType ? false : !isNotMouse && tool === 'select'
-        }
-        selectionMode={SelectionMode.Partial}
-        onSelectionStart={handleSelectionStart}
-        onSelectionEnd={handleSelectionEnd}
-        nodesDraggable={
-          !interactivityLocked && !pendingNodeType && tool !== 'lasso'
-        }
-        nodeDragThreshold={dragActivationDistance}
-        nodeClickDistance={dragActivationDistance}
-        nodesConnectable={!interactivityLocked}
-        elementsSelectable={!interactivityLocked && !pendingNodeType}
-        panOnScroll={!isNotMouse}
-        zoomOnScroll={true}
-        // Touch/pen pinch is driven by the custom pointer router (via
-        // Pointer Events). React Flow's built-in pinch uses d3-zoom on a
-        // *separate* Touch Events stream that our capture-phase pointer
-        // suppression can't stop, so leaving it on lets both fight over
-        // `setViewport` and the gesture stalls. Mirror `panOnDrag` above:
-        // hand pan AND zoom to the router whenever a finger/pen is active,
-        // keeping React Flow's pinch only for the mouse (trackpad) case.
-        zoomOnPinch={!isNotMouse}
-        minZoom={MIN_ZOOM}
-        maxZoom={MAX_ZOOM}
-        onlyRenderVisibleElements
-        // Design-tool style: selecting a node MUST NOT alter its z-order. The
-        // selection indicator (drawn by `<SelectionOutlines />` below)
-        // lives on a separate overlay layer that is always on top, so we
-        // do not need xyflow's `+1000` internal-z bump to make the ring
-        // visible. Disabling this also stops a selected covered node
-        // from popping above the node covering it, which previously felt
-        // like the click silently reordered the layers.
-        // Manual z-order: Huabu derives every node's `zIndex` from
-        // forest order (`assignNodeZIndices`) so the Layers-panel / array
-        // order is the SOLE stacking authority. `auto` would instead force
-        // framed subtrees above unframed siblings and lift framed frames by
-        // a fixed band, making a node unable to cover a frame by order.
-        zIndexMode="manual"
-        elevateNodesOnSelect={false}
-      >
-        <CanvasGestures
-          wrapperRef={wrapperRef}
-          rfInstanceRef={rfInstanceRef}
-          inputMode={inputMode}
-          interactivityLocked={interactivityLocked}
-          explicitToolActive={tool === 'lasso' || Boolean(pendingNodeType)}
-          onTouchTakeover={handleTouchTakeover}
-          onEmptyCanvasTap={() => {
-            const preview = useGesturePreviewStore.getState();
-            preview.clearSketchStrokeHighlight();
-            if (preview.inkSubmissionPreparing) return;
-            preview.clearSketchStrokeSelection();
-            selectNodes([]);
-          }}
-          onNodeTap={(nodeId) => {
-            useGesturePreviewStore.getState().clearSketchStrokeHighlight();
-            selectNodes([nodeId]);
-          }}
-          extraRecognizers={pointerRecognizers}
-        />
-        <SelectionAutoPan
-          active={isBoxSelecting || isLassoActive}
-          wrapperRef={wrapperRef}
-          onPan={shiftLassoScreenPoints}
-        />
-        {toolbarHost ? (
-          createPortal(
-            <div
-              data-canvas-main-toolbar
-              className="react-flow__panel nodrag nopan pointer-events-auto absolute !bottom-6 !left-1/2 !m-0 max-w-[calc(100%-24px)] -translate-x-1/2"
-              onPointerDown={(event) => event.stopPropagation()}
-              onDoubleClick={(event) => event.stopPropagation()}
-              onContextMenu={(event) => event.stopPropagation()}
-              onWheel={(event) => event.stopPropagation()}
-              onDragOver={(event) => event.stopPropagation()}
-              onDrop={(event) => event.stopPropagation()}
-            >
-              <NodeToolbar activeTool={tool} onToolChange={setTool} />
-            </div>,
-            toolbarHost,
-          )
-        ) : (
-          <Panel position="bottom-center" className="mb-6">
-            <NodeToolbar activeTool={tool} onToolChange={setTool} />
-          </Panel>
-        )}
-        {!isBoxSelecting && <MultiSelectResizer />}
-        {!isBoxSelecting && <SelectionOutlines />}
-        {!isBoxSelecting && !hasStrokeSelection && <MultiSelectToolbar />}
-        {!isBoxSelecting && <StrokeSelectionRegion />}
-        {!isBoxSelecting && <StrokeSelectionToolbar />}
-        {!isBoxSelecting && <EdgeStyleToolbar />}
-        <MoveSelectionModal />
-        <ConnectedNodePicker
-          anchor={connectPicker?.anchor ?? null}
-          tether={
-            connectPicker?.kind === 'point'
-              ? {
-                  nodeId: connectPicker.sourceId,
-                  side: connectPicker.side,
-                  to: connectPicker.anchor,
-                }
-              : null
+                  ] /* mouse + creation tool → middle mouse button still pans */
+                : tool === 'pan'
+                  ? true
+                  : [
+                      1,
+                    ] /* mouse + selection tools → middle mouse button pans; drag box-selects */
           }
-          onSelect={handleConnectedKindPick}
-          onDismiss={dismissConnectPicker}
-        />
-        <Background color="var(--canvas-grid)" gap={GRID_SIZE} />
-
-        <Controls
-          position="bottom-left"
-          showInteractive={false}
-          showFitView={false}
+          // useCanvasShortcuts owns temporary Space-pan and the tool state
+          // consumed by the pointer router; avoid a second keyboard owner.
+          panActivationKeyCode={null}
+          selectionOnDrag={false}
+          // Mouse Select has one app-owned rectangle path, including Shift.
+          // Other tools and non-mouse routing retain their native key policy.
+          selectionKeyCode={
+            !isNotMouse && tool === 'select' && !pendingNodeType
+              ? null
+              : 'Shift'
+          }
+          selectionMode={SelectionMode.Partial}
+          onSelectionStart={handleSelectionStart}
+          onSelectionEnd={handleSelectionEnd}
+          nodesDraggable={
+            !interactivityLocked && !pendingNodeType && tool !== 'lasso'
+          }
+          nodeDragThreshold={dragActivationDistance}
+          nodeClickDistance={dragActivationDistance}
+          nodesConnectable={!interactivityLocked}
+          elementsSelectable={!interactivityLocked && !pendingNodeType}
+          panOnScroll={!isNotMouse}
+          zoomOnScroll={true}
+          // Touch/pen pinch is driven by the custom pointer router (via
+          // Pointer Events). React Flow's built-in pinch uses d3-zoom on a
+          // *separate* Touch Events stream that our capture-phase pointer
+          // suppression can't stop, so leaving it on lets both fight over
+          // `setViewport` and the gesture stalls. Mirror `panOnDrag` above:
+          // hand pan AND zoom to the router whenever a finger/pen is active,
+          // keeping React Flow's pinch only for the mouse (trackpad) case.
+          zoomOnPinch={!isNotMouse}
+          minZoom={MIN_ZOOM}
+          maxZoom={MAX_ZOOM}
+          onlyRenderVisibleElements
+          // Huabu owns both forest order and transient sole-selection elevation.
+          // Keep xyflow's automatic selection/parent bumps disabled: they do not
+          // preserve our subtree order or the unchanged multi-selection policy.
+          zIndexMode="manual"
+          elevateNodesOnSelect={false}
         >
-          <CanvasFitControl />
-          <CanvasZoomLevel />
-          <CanvasInteractivityControl
-            locked={interactivityLocked}
-            onToggle={() => setInteractivityLocked((prev) => !prev)}
+          <FrameZoomController scopeKey={canvasId} />
+          <CanvasGestures
+            wrapperRef={wrapperRef}
+            rfInstanceRef={rfInstanceRef}
+            inputMode={inputMode}
+            interactivityLocked={interactivityLocked}
+            explicitToolActive={tool === 'lasso' || Boolean(pendingNodeType)}
+            mouseMarqueeEnabled={mouseMarqueeEnabled}
+            canvasId={canvasId}
+            onMarqueeActiveChange={setIsMouseMarqueeSelecting}
+            onTouchTakeover={handleTouchTakeover}
+            onEmptyCanvasTap={() => {
+              const preview = useGesturePreviewStore.getState();
+              preview.clearSketchStrokeHighlight();
+              if (preview.inkSubmissionPreparing) return;
+              preview.clearSketchStrokeSelection();
+              selectNodes([]);
+            }}
+            onNodeTap={(nodeId) => {
+              useGesturePreviewStore.getState().clearSketchStrokeHighlight();
+              selectNodes([nodeId]);
+            }}
+            extraRecognizers={pointerRecognizers}
           />
-        </Controls>
-        {minimapEnabled && (
-          <MiniMap
-            pannable
-            zoomable
-            ariaLabel="Minimap"
-            className="border-edge-default rounded-md border shadow-sm"
+          <SelectionAutoPan
+            active={isNativeBoxSelecting || isLassoActive}
+            wrapperRef={wrapperRef}
+            onPan={shiftLassoScreenPoints}
           />
-        )}
+          {toolbarHost ? (
+            createPortal(
+              <div
+                data-canvas-main-toolbar
+                className="react-flow__panel nodrag nopan pointer-events-auto absolute !bottom-6 !left-1/2 !m-0 max-w-[calc(100%-24px)] -translate-x-1/2"
+                onPointerDown={(event) => event.stopPropagation()}
+                onDoubleClick={(event) => event.stopPropagation()}
+                onContextMenu={(event) => event.stopPropagation()}
+                onWheel={(event) => event.stopPropagation()}
+                onDragOver={(event) => event.stopPropagation()}
+                onDrop={(event) => event.stopPropagation()}
+              >
+                <NodeToolbar activeTool={tool} onToolChange={setTool} />
+              </div>,
+              toolbarHost,
+            )
+          ) : (
+            <Panel position="bottom-center" className="mb-6">
+              <NodeToolbar activeTool={tool} onToolChange={setTool} />
+            </Panel>
+          )}
+          {!isBoxSelecting && <MultiSelectResizer />}
+          {!isBoxSelecting && <SelectionOutlines />}
+          {!isBoxSelecting && !hasStrokeSelection && <MultiSelectToolbar />}
+          {!isBoxSelecting && <StrokeSelectionRegion />}
+          {!isBoxSelecting && <StrokeSelectionToolbar />}
+          {!isBoxSelecting && <EdgeStyleToolbar />}
+          <MoveSelectionModal />
+          <ConnectedNodePicker
+            anchor={connectPicker?.anchor ?? null}
+            tether={
+              connectPicker?.kind === 'point'
+                ? {
+                    nodeId: connectPicker.sourceId,
+                    side: connectPicker.side,
+                    to: connectPicker.anchor,
+                  }
+                : null
+            }
+            onSelect={handleConnectedKindPick}
+            onDismiss={dismissConnectPicker}
+          />
+          <CanvasGrid />
 
-        {/* Sketch overlay inside ReactFlow so it shares stacking context with Panel */}
-        {pendingNodeType === 'sketch' && (
-          <SketchOverlay rfInstance={rfInstanceRef.current} />
-        )}
-      </ReactFlow>
+          <Controls
+            position="bottom-left"
+            showInteractive={false}
+            showFitView={false}
+          >
+            <CanvasFitControl />
+            <CanvasZoomLevel />
+            <CanvasInteractivityControl
+              locked={interactivityLocked}
+              onToggle={() => setInteractivityLocked((prev) => !prev)}
+            />
+          </Controls>
+          {minimapEnabled && (
+            <MiniMap
+              pannable
+              zoomable
+              ariaLabel="Minimap"
+              className="border-edge-default rounded-md border shadow-sm"
+            />
+          )}
+
+          {/* Sketch overlay inside ReactFlow so it shares stacking context with Panel */}
+          {pendingNodeType === 'sketch' && (
+            <SketchOverlay rfInstance={rfInstanceRef.current} />
+          )}
+        </ReactFlow>
+      </FrameZoomProvider>
 
       {isInitialViewportPending && (
         <Loading

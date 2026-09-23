@@ -4,6 +4,8 @@
 import { useStoreApi, type ReactFlowInstance } from '@xyflow/react';
 import { useEffect, type MutableRefObject } from 'react';
 
+import { isVideoControlTarget } from '@/components/Nodes/video/videoInteraction';
+
 import {
   isNodeTarget,
   isNodeControlTarget,
@@ -155,6 +157,10 @@ function useTrackpadPinch(
 
     const handleWheel = (e: WheelEvent) => {
       if (!e.ctrlKey) return;
+      if (isVideoControlTarget(e.target as Element | null)) {
+        e.preventDefault();
+        return;
+      }
       const instance = rfInstanceRef.current;
       if (!instance) return;
 

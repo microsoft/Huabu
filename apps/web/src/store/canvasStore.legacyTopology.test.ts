@@ -16,7 +16,9 @@ vi.mock('../api', async (importOriginal) => ({
 
 import { canvasHistoryManager } from './canvasHistoryManager';
 import useCanvasStore from './canvasStore';
+import { CanvasConflictError } from '../api';
 import { usePreviewWorkspaceStore } from './previewWorkspace/store';
+import * as notifications from '../components/Common/Toast';
 
 import type * as canvasApi from '../api';
 import type { Edge, Node } from '@xyflow/react';
@@ -106,6 +108,120 @@ afterEach(() => {
 });
 
 describe('legacy topology load boundary', () => {
+  it('saves legacy Hug headers before completing load and does not save again on reopen', async () => {
+    const graph = storedGraph();
+    graph.nodes[3].data.sizing = 'hug';
+    const before = JSON.stringify(graph);
+    api.getCanvas.mockResolvedValue({
+      canvasId: 'canvas-loaded',
+      title: 'Loaded',
+      version: 9,
+      state: graph,
+    });
+    let acknowledge!: (value: { version: number }) => void;
+    api.putCanvas.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          acknowledge = resolve;
+        }),
+    );
+    const loading = useCanvasStore.getState().loadCanvas('canvas-loaded');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(api.putCanvas).toHaveBeenCalledOnce();
+    expect(useCanvasStore.getState()).toMatchObject({
+      isLoading: true,
+      nodes: [],
+      version: 0,
+    });
+    const saved = api.putCanvas.mock.calls[0][1];
+    expect(saved.version).toBe(9);
+    expect(
+      saved.state.nodes.find((node: Node) => node.id === 'note'),
+    ).toMatchObject({
+      position: { y: 64 },
+    });
+    expect(
+      saved.state.nodes.find((node: Node) => node.id === 'note').data,
+    ).not.toHaveProperty('content');
+    acknowledge({ version: 10 });
+    await loading;
+    await vi.advanceTimersByTimeAsync(2000);
+    const loaded = useCanvasStore.getState();
+    expect(loaded.nodes.find((node) => node.id === 'note')?.position.y).toBe(
+      64,
+    );
+    expect(loaded.nodes.find((node) => node.id === 'frame')?.position.y).toBe(
+      180,
+    );
+    expect(loaded.version).toBe(10);
+    expect(loaded.isLoading).toBe(false);
+    expect(api.putCanvas).toHaveBeenCalledOnce();
+    expect(JSON.stringify(graph)).toBe(before);
+
+    api.getCanvas.mockResolvedValue({
+      canvasId: 'canvas-loaded',
+      title: 'Loaded',
+      version: 10,
+      state: { nodes: loaded.nodes, edges: loaded.edges },
+    });
+    await useCanvasStore.getState().loadCanvas('canvas-loaded');
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(api.putCanvas).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    new Error('Network unavailable'),
+    new Error('Thread thread-existing has no canonical execution record'),
+    new CanvasConflictError({
+      code: 'CANVAS_VERSION_CONFLICT',
+      message: 'Changed elsewhere',
+      serverVersion: 10,
+    }),
+  ])(
+    'loads the original geometry without retries or duplicate notifications when header saving fails: %s',
+    async (error) => {
+      const graph = storedGraph();
+      graph.nodes[3].data.sizing = 'hug';
+      api.getCanvas.mockResolvedValue({
+        canvasId: 'canvas-loaded',
+        title: 'Loaded',
+        version: 9,
+        state: graph,
+      });
+      api.putCanvas.mockRejectedValue(error);
+      const consoleWarn = vi
+        .spyOn(console, 'warn')
+        .mockImplementation(() => {});
+      const notify = vi.spyOn(notifications, 'toast');
+      try {
+        await useCanvasStore.getState().loadCanvas('canvas-loaded');
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(useCanvasStore.getState()).toMatchObject({
+          isLoading: false,
+          canvasTitle: 'Loaded',
+          version: 9,
+        });
+        const loaded = useCanvasStore.getState();
+        expect(loaded.nodes.find((node) => node.id === 'frame')).toMatchObject({
+          position: { x: 125, y: 236 },
+        });
+        expect(loaded.nodes.find((node) => node.id === 'note')).toMatchObject({
+          position: { x: 7, y: 8 },
+          data: { content: 'Keep this note' },
+        });
+        expect(loaded.edges).toEqual([graph.edges[1]]);
+        expect(api.putCanvas).toHaveBeenCalledOnce();
+        await useCanvasStore.getState().loadCanvas('canvas-loaded');
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(useCanvasStore.getState().isLoading).toBe(false);
+        expect(api.putCanvas).toHaveBeenCalledTimes(2);
+        expect(notify).not.toHaveBeenCalled();
+      } finally {
+        consoleWarn.mockRestore();
+        notify.mockRestore();
+      }
+    },
+  );
   it('ignores retired nodes without mutating stored data, issuing deletes, or saving on load', async () => {
     const graph = storedGraph();
     const before = JSON.stringify(graph);

@@ -9,12 +9,14 @@ import {
   type MutableRefObject,
 } from 'react';
 
+import { isVideoControlTarget } from '@/components/Nodes/video/videoInteraction';
 import { EDIT_EDGE_LABEL_EVENT } from '@/components/Panels/Canvas/edges/LabelledEdge';
 
 import {
   isEditableTarget,
   isOutsideCanvasInteraction,
 } from './isEditableTarget';
+import { isKeyboardInteractiveTarget } from './isKeyboardInteractiveTarget';
 import {
   uploadFileToNodeInput,
   urlToNodeInput,
@@ -126,9 +128,10 @@ export function useCanvasShortcuts(
     };
 
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== ' ' || e.repeat) return;
-      if (e.defaultPrevented || isOutsideCanvasInteraction(e.target)) return;
-      if (isEditableTarget(e.target)) return;
+      if (e.key !== ' ' || e.repeat || e.defaultPrevented) return;
+      if (isOutsideCanvasInteraction(e.target)) return;
+      if (e.target instanceof Element && isVideoControlTarget(e.target)) return;
+      if (isKeyboardInteractiveTarget(e.target)) return;
       // While a node drag is in flight, Space is reinterpreted as
       // "opt out of auto-reparent" by the snap session (it owns the
       // keydown listener for the duration of the drag). Skip the
@@ -299,6 +302,7 @@ export function useCanvasShortcuts(
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented || isOutsideCanvasInteraction(e.target)) return;
       const key = e.key;
+      if (e.target instanceof Element && isVideoControlTarget(e.target)) return;
       const mod = e.metaKey || e.ctrlKey;
       const editable = isEditableTarget(e.target);
 

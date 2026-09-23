@@ -1,15 +1,15 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { getStructuredFrameGutterPlan } from '@huabu/shared/canvas-engine';
-
-import { getNodeFontFit, refitFont } from '@/utils/node/fontFit';
 import {
-  TEXT_NODE_PADDING_X,
-  TEXT_NODE_PADDING_Y,
-} from '@/utils/node/nodeFontConfig';
+  applyStructuredFrameRelayout,
+  executeCanvasCommands,
+  getStructuredFrameGutterPlan,
+} from '@huabu/shared/canvas-engine';
+
+import { QUESTION_NODE_DEFAULT_FONT_SIZE } from '@/utils/node/nodeFontConfig';
 
 import { createSnapshot } from '../../../canvasHistoryManager';
 import {
@@ -18,6 +18,7 @@ import {
 } from '../resizePreview';
 
 import type { CanvasUiIntent } from '@/handler/canvasCommand/uiIntent';
+import type { CanvasNodeId } from '@huabu/shared';
 import type { Edge, Node } from '@xyflow/react';
 
 /**
@@ -80,8 +81,91 @@ function createStoreDouble(initialNodes: Node[], edges: Edge[] = []) {
   };
 }
 
-describe('resize-preview controller — structured gutter freeze', () => {
-  it('scales the captured gutter plan without recomputing it per tick', () => {
+describe('resize-preview controller — structured target spacing', () => {
+  it.each(['column', 'row', 'grid'])(
+    'keeps %s preview and final commit on the requested box',
+    (layoutMode) => {
+      let nodes: Node[] = applyStructuredFrameRelayout(
+        [
+          {
+            id: 'frame',
+            type: 'frame',
+            position: { x: 0, y: 0 },
+            style: { width: 440, height: 376 },
+            data: { sizing: 'hug', layoutMode, gridCount: 1 },
+          },
+          {
+            id: 'image',
+            type: 'image',
+            parentId: 'frame',
+            position: { x: 20, y: 56 },
+            style: { width: 400, height: 300 },
+            data: { frameColumn: 0, frameRow: 0 },
+          },
+        ],
+        ['frame'],
+      ).nodes;
+      const controller = createResizePreviewController({
+        getState: () => ({
+          nodes,
+          edges: [],
+          patchNodeSilent: vi.fn(),
+          dispatchUiIntent: (intent) => {
+            if (intent.type !== 'RESIZE_NODE') return;
+            nodes = executeCanvasCommands(
+              {
+                source: 'ui',
+                commands: [
+                  {
+                    type: 'SET_NODE_GEOMETRY',
+                    items: intent.items.map((item) => ({
+                      ...item,
+                      nodeId: item.nodeId as CanvasNodeId,
+                    })),
+                  },
+                ],
+              },
+              { nodes, edges: [], canvasId: 'test' },
+              { frozenStructuredGutters: intent.frozenStructuredGutters },
+            ).writeResult.nodes;
+          },
+        }),
+      });
+      controller.captureFrameResizeSnapshot('frame');
+      for (const [width, height] of [
+        [880, 376],
+        [1400, 1200],
+        [2400, 2000],
+        [880, 376],
+      ]) {
+        controller.applyFrameResizeScale(width, height, -20, -30);
+        controller.flushFrameResizeScale();
+        expect(nodes[0].style?.width).toBeCloseTo(width, 7);
+        expect(nodes[0].style?.height).toBeCloseTo(height, 7);
+        expect(nodes[0].position).toEqual({ x: -20, y: -30 });
+      }
+      controller.clearFrameResizeSnapshot();
+      nodes = executeCanvasCommands(
+        {
+          source: 'ui',
+          commands: [
+            {
+              type: 'SET_NODE_GEOMETRY',
+              items: [
+                {
+                  nodeId: 'frame' as CanvasNodeId,
+                  size: { width: 880, height: 376 },
+                },
+              ],
+            },
+          ],
+        },
+        { nodes, edges: [], canvasId: 'test' },
+      ).writeResult.nodes;
+      expect(nodes[0].style).toEqual({ width: 880, height: 376 });
+    },
+  );
+  it('does not scale fixed edge-label gutters with the outer box', () => {
     const structuredFrame = {
       ...frameNode(),
       data: { layoutMode: 'column', gridCount: 2 },
@@ -118,7 +202,8 @@ describe('resize-preview controller — structured gutter freeze', () => {
     controller.flushFrameResizeScale();
 
     const frozen = store.getLastResizeIntent()?.frozenStructuredGutters;
-    expect(frozen?.get('frame')?.x?.[0]).toBe(initialGutter * 2);
+    expect(initialGutter).toBeGreaterThan(0);
+    expect(frozen).toBeUndefined();
     controller.clearFrameResizeSnapshot();
   });
 });
@@ -167,32 +252,81 @@ const frameNode = (): Node =>
     data: { layoutMode: 'free' },
   }) as Node;
 
-describe('resize-preview controller — child font refit', () => {
-  it("re-derives a text child font from its new box (matching the node's own resize), and an undo snapshot restores it", () => {
+describe('resize-preview controller — proportional child fonts', () => {
+  it.each(['free', 'column', 'row', 'grid'])(
+    'uniformly scales Text/Question children in %s from the immutable baseline on every tick',
+    (layoutMode) => {
+      const text = textNode('text', 17.375);
+      const question = textNode('question', 22, '', {
+        type: 'question',
+        data: { label: 'Question', style: { accent: 'blue' } },
+      });
+      const note = textNode('note', 16, 'Unchanged Note font', {
+        type: 'note',
+      });
+      const store = createStoreDouble([
+        { ...frameNode(), data: { layoutMode, sizing: 'hug' } },
+        text,
+        question,
+        note,
+      ]);
+      const patchNodeSilent = vi.fn(store.getState().patchNodeSilent);
+      const controller = createResizePreviewController({
+        getState: () => ({ ...store.getState(), patchNodeSilent }),
+      });
+      controller.captureFrameResizeSnapshot('frame');
+      for (const width of [271, 392, 98, 196]) {
+        // Height deliberately differs: content scaling always follows width.
+        controller.applyFrameResizeScale(width, 210, 0, 0);
+        controller.flushFrameResizeScale();
+        const scale = width / 196;
+        for (const [id, initialFont] of [
+          ['text', 17.375],
+          ['question', QUESTION_NODE_DEFAULT_FONT_SIZE],
+        ] as const) {
+          const child = findNode(store.getNodes(), id);
+          expect(boxOf(child)).toEqual({
+            width: 40 * scale,
+            height: 20 * scale,
+          });
+          expect(child.data.style).toMatchObject({
+            fontSize: (initialFont * (40 * scale)) / 40,
+          });
+        }
+        expect(findNode(store.getNodes(), 'question').data.style).toMatchObject(
+          { accent: 'blue' },
+        );
+        expect(findNode(store.getNodes(), 'note').data.style).toEqual(
+          note.data.style,
+        );
+      }
+      const calls = patchNodeSilent.mock.calls.length;
+      controller.applyFrameResizeScale(196, 210, 0, 0);
+      controller.flushFrameResizeScale();
+      expect(patchNodeSilent).toHaveBeenCalledTimes(calls);
+      controller.clearFrameResizeSnapshot();
+    },
+  );
+
+  it('scales the starting text font by outer width, and an undo snapshot restores it', () => {
     const node = textNode('text', 16);
     const store = createStoreDouble([frameNode(), node]);
     const controller = createResizePreviewController({
       getState: store.getState,
     });
 
-    // The fit the controller captures at gesture start — text + fontOpts +
-    // inset. Computing expected with the SAME `refitFont` keeps the
-    // assertion independent of pretext's absolute output in the test env.
-    const fit = getNodeFontFit(node);
-    expect(fit).not.toBeNull();
-
     // The undo snapshot the store takes at `onNodeResizeStart`, BEFORE any
     // scaling runs. `createSnapshot` keeps the original node objects.
     const undoSnapshot = createSnapshot(store.getNodes(), []);
 
     controller.captureFrameResizeSnapshot('frame');
-    // Frame 196×196 → 396×396: content area 100×100 → 300×300, sx=sy=3.
+    // Frame 196×196 → 396×396: scale both content axes by 396/196.
     controller.applyFrameResizeScale(396, 396, 0, 0);
     controller.flushFrameResizeScale();
 
     const scaled = findNode(store.getNodes(), 'text');
     const box = boxOf(scaled);
-    const expected = refitFont(fit!, box.width, box.height);
+    const expected = (16 * box.width) / 40;
     expect(
       (scaled.data as { style: { fontSize: number } }).style.fontSize,
     ).toBe(expected);
@@ -218,12 +352,6 @@ describe('resize-preview controller — child font refit', () => {
     const controller = createResizePreviewController({
       getState: store.getState,
     });
-    const fit = getNodeFontFit(child);
-    expect(fit).toMatchObject({
-      insetX: TEXT_NODE_PADDING_X,
-      insetY: TEXT_NODE_PADDING_Y,
-    });
-
     controller.captureFrameResizeSnapshot('frame');
     // Frame 196×196 → 146×146: uniform scale sx = sy = 146/196.
     controller.applyFrameResizeScale(146, 146, 0, 0);
@@ -231,7 +359,7 @@ describe('resize-preview controller — child font refit', () => {
 
     const scaled = findNode(store.getNodes(), 'text');
     const box = boxOf(scaled);
-    const expected = refitFont(fit!, box.width, box.height);
+    const expected = (20 * box.width) / 40;
     const style = (scaled.data as { style: Record<string, unknown> }).style;
     expect(style.fontSize).toBe(expected);
     expect(style.fontFamily).toBe('serif');
@@ -240,10 +368,10 @@ describe('resize-preview controller — child font refit', () => {
     controller.clearFrameResizeSnapshot();
   });
 
-  it('locks a refitted font onto an auto-sized child that had no fontSize yet', () => {
+  it('scales the default font of a child that had no fontSize yet', () => {
     // Most text nodes never get individually resized, so they carry no
     // `style.fontSize` and render at base 16. `setNodeGeometry` pins their
-    // width during a frame cascade, so without a refit they would stay 16
+    // width during a frame cascade, so without scaling they would stay 16
     // in the enlarged box. The cascade must establish a locked fontSize.
     const node = {
       id: 'auto',
@@ -257,9 +385,6 @@ describe('resize-preview controller — child font refit', () => {
     const controller = createResizePreviewController({
       getState: store.getState,
     });
-    const fit = getNodeFontFit(node);
-    expect(fit).not.toBeNull();
-
     controller.captureFrameResizeSnapshot('frame');
     // Frame 196×196 → 396×396: uniform scale sx = sy = 396/196.
     controller.applyFrameResizeScale(396, 396, 0, 0);
@@ -267,7 +392,7 @@ describe('resize-preview controller — child font refit', () => {
 
     const scaled = findNode(store.getNodes(), 'auto');
     const box = boxOf(scaled);
-    const expected = refitFont(fit!, box.width, box.height);
+    const expected = (16 * box.width) / 40;
     const style = (scaled.data as { style: Record<string, unknown> }).style;
     expect(style.fontSize).toBe(expected);
     expect(style.fontFamily).toBe('default');
@@ -300,11 +425,7 @@ describe('resize-preview controller — child font refit', () => {
     controller.clearFrameResizeSnapshot();
   });
 
-  it('refits an EMPTY text child to its placeholder, not to a single oversized line', () => {
-    // Regression: `getNodeFontFit` used to measure the raw (empty) content,
-    // so `computeFontSizeForHeight('', …)` returned `height/lineHeight` —
-    // one giant line that overflows the box. An empty node must instead be
-    // sized to fit its placeholder, exactly like the node's own resize.
+  it('scales an empty child exactly like a populated child without fitting its placeholder', () => {
     const node = {
       id: 'empty',
       type: 'text',
@@ -317,13 +438,6 @@ describe('resize-preview controller — child font refit', () => {
     const controller = createResizePreviewController({
       getState: store.getState,
     });
-    const fit = getNodeFontFit(node);
-    expect(fit).not.toBeNull();
-    // The fit carries the node's placeholder so the empty-text branch of
-    // `refitFont` measures real glyphs.
-    expect(fit!.text).toBe('');
-    expect(fit!.placeholder.length).toBeGreaterThan(0);
-
     controller.captureFrameResizeSnapshot('frame');
     // Frame 196×196 → 396×396: uniform scale sx = sy = 396/196.
     controller.applyFrameResizeScale(396, 396, 0, 0);
@@ -331,21 +445,37 @@ describe('resize-preview controller — child font refit', () => {
 
     const scaled = findNode(store.getNodes(), 'empty');
     const box = boxOf(scaled);
-    const expected = refitFont(fit!, box.width, box.height);
+    const expected = (16 * box.width) / 40;
     const fontSize = (scaled.data as { style: { fontSize: number } }).style
       .fontSize;
     expect(fontSize).toBe(expected);
-    // The placeholder is a multi-character string, so the fitted font must
-    // be far smaller than the old "fill the height with one line" value.
-    const oneLineFont =
-      (box.height - fit!.insetY * 2) / fit!.fontOpts.lineHeight;
-    expect(fontSize).toBeLessThan(oneLineFont);
-
     controller.clearFrameResizeSnapshot();
   });
 });
 
 describe('resize-preview controller — manual sizing skips child cascade', () => {
+  it.each(['free', 'column', 'row', 'grid'])(
+    'preserves Question size and font in a Manual %s Frame',
+    (layoutMode) => {
+      const child = textNode('question', 31.25, '', { type: 'question' });
+      const store = createStoreDouble([
+        { ...frameNode(), data: { layoutMode, sizing: 'manual' } },
+        child,
+      ]);
+      const controller = createResizePreviewController({
+        getState: store.getState,
+      });
+      controller.captureFrameResizeSnapshot('frame');
+      controller.applyFrameResizeScale(392, 210, 20, 30);
+      controller.flushFrameResizeScale();
+      const after = findNode(store.getNodes(), 'question');
+      expect(after.style).toEqual(child.style);
+      expect(after.data).toEqual(child.data);
+      expect(after.position).toEqual({ x: -10, y: -20 });
+      controller.clearFrameResizeSnapshot();
+    },
+  );
+
   it('does not scale or move children when the frame is sizing: manual', () => {
     // A manual frame owns its own box: resizing the frame must NOT drag
     // children with it. The child should keep its pre-gesture size and

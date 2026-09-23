@@ -2,9 +2,10 @@
 // Licensed under the MIT license.
 
 import { useInternalNode, useStore } from '@xyflow/react';
-import { memo, useLayoutEffect, useMemo } from 'react';
+import { memo, useLayoutEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+import { QUESTION_TAKEOVER_AVATAR_RATIO } from '@/config/nodeTakeover';
 import { useNodeTakeover } from '@/hooks/useNodeTakeover';
 import { useTakeoverMarkDrag } from '@/hooks/useTakeoverMarkDrag';
 import { useNodeCollapseStore } from '@/store/nodeCollapseStore';
@@ -14,12 +15,16 @@ import type React from 'react';
 
 export interface NodeTakeoverLayerProps {
   nodeId: string;
+  fontSize?: number;
+  forceCollapsed?: boolean;
   /** The node draws its own mark (size/detail/chrome/click are the node's). */
   renderMark: (state: TakeoverState) => React.ReactNode;
   /** Semantics-free double-click passthrough wired by NodeWrapper to the node's activate handler. */
   onActivate?: React.MouseEventHandler;
   /** The node's outer shell element; the engine writes the card-fade attribute here. */
-  nodeRootRef: React.RefObject<HTMLDivElement | null>;
+  nodeRoot: HTMLDivElement | null;
+  /** Hide portal chrome under a Frame region without changing handle anchors. */
+  suppressed?: boolean;
 }
 
 /**
@@ -27,10 +32,8 @@ export interface NodeTakeoverLayerProps {
  * takeover for the question node.
  *
  *   - It positions the node-supplied mark at the size + screen point supplied by
- *     {@link useNodeTakeover}: size interpolated by zoom, so the badge resizes
- *     smoothly with the gesture, and position glided corner → centre in step
- *     with the card's fade rather than with the zoom.
- *     with no discrete stage swap and no one-shot animation to feel abrupt.
+ *     {@link useNodeTakeover}: authored geometry scales uniformly with zoom,
+ *     centered on the retained node footprint throughout the handoff.
  *   - It publishes a binary `data-lod-body` attribute on the node root so the
  *     card body fades out once the takeover band starts; the mark lives in this
  *     separate portal so it is not faded with the card.
@@ -44,10 +47,16 @@ export interface NodeTakeoverLayerProps {
  */
 export const NodeTakeoverLayer = memo(function NodeTakeoverLayer({
   nodeId,
+  fontSize,
+  forceCollapsed,
   renderMark,
   onActivate,
-  nodeRootRef,
+  nodeRoot,
+  suppressed = false,
 }: NodeTakeoverLayerProps) {
+  const [boundsRatio, setBoundsRatio] = useState<number>(
+    QUESTION_TAKEOVER_AVATAR_RATIO,
+  );
   const {
     stage,
     size,
@@ -56,7 +65,7 @@ export const NodeTakeoverLayer = memo(function NodeTakeoverLayer({
     collapsedRadius,
     glideProgress,
     collapsedFootprint,
-  } = useNodeTakeover(nodeId);
+  } = useNodeTakeover(nodeId, boundsRatio, fontSize, forceCollapsed);
   const domNode = useStore((s) => s.domNode);
   const internalNode = useInternalNode(nodeId);
   const markDrag = useTakeoverMarkDrag(nodeId);
@@ -114,31 +123,44 @@ export const NodeTakeoverLayer = memo(function NodeTakeoverLayer({
   // Binary card fade — written here (and only here) so NodeWrapper and the card
   // markup compute nothing.
   useLayoutEffect(() => {
-    const el = nodeRootRef.current;
+    const el = nodeRoot;
     if (!el) return;
     el.setAttribute(
       'data-lod-body',
       stage === 'readable' ? 'visible' : 'hidden',
     );
-    return () => el.removeAttribute('data-lod-body');
-  }, [stage, nodeRootRef]);
+    el.style.setProperty('--takeover-body-opacity', String(1 - glideProgress));
+    return () => {
+      el.removeAttribute('data-lod-body');
+      el.style.removeProperty('--takeover-body-opacity');
+    };
+  }, [stage, glideProgress, nodeRoot]);
 
-  if (!rendererEl || !internalNode) return null;
+  if (!rendererEl || !internalNode || suppressed) return null;
 
-  const state: TakeoverState = { stage, size };
+  const state: TakeoverState = {
+    stage,
+    size,
+    progress: glideProgress,
+    onBoundsChange: setBoundsRatio,
+  };
 
   return createPortal(
     <div
+      data-takeover-node={nodeId}
+      aria-hidden={glideProgress === 0 || undefined}
+      inert={glideProgress === 0}
       style={{
         position: 'absolute',
         left: point.x,
         top: point.y,
         pointerEvents: 'none',
         zIndex: 1000,
+        opacity: glideProgress,
+        visibility: glideProgress === 0 ? 'hidden' : 'visible',
       }}
     >
-      {/* Centre the mark on the interpolated point; the mark's own size (from
-          state.size) shrinks it continuously as the node collapses. */}
+      {/* Center the visible ring/bubble bounds on the retained footprint. */}
       <div
         // `nopan` opts this portal out of React Flow's zoom/pan filter
         // (`event.target.closest('.nopan')`). The portal is a direct child of
@@ -155,7 +177,7 @@ export const NodeTakeoverLayer = memo(function NodeTakeoverLayer({
         onClickCapture={markDrag.onClickCapture}
         style={{
           transform: 'translate(-50%, -50%)',
-          pointerEvents: 'auto',
+          pointerEvents: glideProgress > 0 ? 'auto' : 'none',
           display: 'flex',
           transformOrigin: 'center',
         }}

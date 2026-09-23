@@ -15,6 +15,7 @@
 import path from 'node:path';
 
 import { normalizeUrl } from '../utils.js';
+import { canonicalVideoSrc, videoArtifactKey } from '../video-source.js';
 
 import type { ResolvedInput } from '../types.js';
 import type { PreprocessNodeRequest } from '@huabu/shared';
@@ -106,9 +107,11 @@ export function inputResolve(request: PreprocessNodeRequest): ResolvedInput {
     }
 
     case 'video': {
+      const src = canonicalVideoSrc(snapshot.src, request.canvasId);
       return {
         ...base,
-        normalizedUri: (snapshot.src as string) || undefined,
+        normalizedUri: src || undefined,
+        artifactName: videoArtifactKey(src, request.canvasId),
       };
     }
 

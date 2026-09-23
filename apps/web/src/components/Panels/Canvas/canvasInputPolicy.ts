@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { isVideoControlTarget } from '@/components/Nodes/video/videoInteraction';
+
 import type { EffectiveInputMode } from '@/store/toolStore';
 
 export type CanvasTool = 'select' | 'pan' | 'lasso';
@@ -18,9 +20,13 @@ const REACT_FLOW_NODE_CONTROL =
 const REACT_FLOW_INTERACTIVE =
   '.react-flow__panel, .react-flow__node, .react-flow__edge, .react-flow__handle';
 
-/** True when the pointer target lives inside a floating panel or toolbar. */
+/** Panels and explicitly active video controls own native pointer interaction. */
 export function isPanelTarget(target: Element | null): boolean {
-  return Boolean(target?.closest(REACT_FLOW_PANEL));
+  return (
+    Boolean(
+      target?.closest(`${REACT_FLOW_PANEL}, [data-multi-resize-control]`),
+    ) || isVideoControlTarget(target)
+  );
 }
 
 /** Closest canvas node element for the pointer target, or `null`. */

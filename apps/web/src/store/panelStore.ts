@@ -11,8 +11,8 @@ interface PanelState {
    * Hoisted out of `MainLayout`'s local `useState` so subtrees inside
    * the column (notably `CanvasLayerPanel`) can read it and skip
    * expensive work while the overlay is offscreen — `MainLayout` keeps
-   * the subtree mounted on purpose so its 220ms slide animation runs
-   * without a content-swap flash.
+   * the shell mounted and retains the ordinary tree through the 220ms
+   * slide animation before allowing it to unmount.
    */
   isLeftCollapsed: boolean;
   setLeftCollapsed: (collapsed: boolean) => void;

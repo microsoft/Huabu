@@ -149,6 +149,38 @@
   display: flow-root;
 }
 
+/* The Milkdown factory marks the first real ProseMirror document node and
+   refreshes the marker whenever editor decorations rebuild the child list.
+   The host padding therefore remains the sole outer document inset without
+   relying on the number or position of `.ProseMirror-widget` siblings. */
+.huabu-note-content-host .ProseMirror > .huabu-note-first-block {
+  margin-top: 0;
+}
+
+/* Canvas Notes are display-only. Hidden Crepe block chrome must not extend
+   their native scroll range beyond the padded document. */
+.huabu-note-content-host .milkdown-block-handle,
+.huabu-note-content-host .milkdown-slash-menu {
+  display: none;
+}
+
+/* Full canvas Notes use quieter body text and stronger headings/emphasis.
+   Keep links, authored text colors, and code highlighting authoritative. */
+.huabu-note-content-host .ProseMirror {
+  color: var(--fg-muted);
+}
+
+.huabu-note-content-host
+  .ProseMirror
+  :is(h1, h2, h3, h4, h5, h6, strong, b):not(
+    a *,
+    [data-huabu-text-color] *,
+    [data-sediment-text-color] *,
+    pre *
+  ) {
+  color: var(--fg-default);
+}
+
 /* Keep an inline highlight perceptible while its text is selected. The
    translucent selection layer composes with the mark's own background,
    while unhighlighted text retains the browser's native selection style. */
@@ -168,8 +200,8 @@
   overflow-wrap: anywhere;
 }
 
-/* Headings inherit our app font + scale proportionally to the 14px
-   base */
+/* General Milkdown headings inherit the container's font size.
+  Canvas Notes and their measurer use explicit node typography below. */
 .milkdown .ProseMirror h1,
 .milkdown .ProseMirror h2,
 .milkdown .ProseMirror h3,
@@ -181,7 +213,7 @@
   padding: 2px 0;
 }
 .milkdown .ProseMirror h1 {
-  font-size: 1.715em; /* ≈ 24px */
+  font-size: 1.715em;
   line-height: 1.3;
   margin-top: 0.75rem;
 }
@@ -211,11 +243,67 @@
   margin-top: 0.5rem;
 }
 
+/* Limit node typography to canvas Notes and their offscreen measurer. */
+.huabu-note-content-host .ProseMirror h1 {
+  font-size: var(--node-title-size);
+  line-height: var(--node-title-line);
+  font-weight: var(--node-title-weight);
+}
+.huabu-note-content-host .ProseMirror h2 {
+  font-size: var(--node-h2-size);
+  line-height: var(--node-h2-line);
+  font-weight: var(--node-h2-weight);
+}
+.huabu-note-content-host .ProseMirror h3 {
+  font-size: var(--node-h3-size);
+  line-height: var(--node-h3-line);
+  font-weight: var(--node-h3-weight);
+}
+.huabu-note-content-host .ProseMirror h4 {
+  font-size: var(--node-h4-size);
+  line-height: var(--node-h4-line);
+  font-weight: var(--node-h4-weight);
+}
+.huabu-note-content-host .ProseMirror h5 {
+  font-size: var(--node-h5-size);
+  line-height: var(--node-h5-line);
+  font-weight: var(--node-h5-weight);
+}
+.huabu-note-content-host .ProseMirror h6 {
+  font-size: var(--node-h6-size);
+  line-height: var(--node-h6-line);
+  font-weight: var(--node-h6-weight);
+}
+.huabu-note-content-host .ProseMirror p {
+  font-size: var(--node-body-size);
+  line-height: var(--node-body-line);
+}
+/* Canvas and offscreen measurement retain their own heading spacing. */
+.huabu-note-content-host .ProseMirror h1 {
+  margin-top: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+.huabu-note-content-host .ProseMirror h2 {
+  margin-top: 0.4375rem;
+  margin-bottom: 0.1875rem;
+}
+.huabu-note-content-host .ProseMirror :is(h3, h4, h5, h6) {
+  margin-top: 0.3125rem;
+  margin-bottom: 0.1875rem;
+}
+
 /* Compact list density to match surrounding chat / note typography. */
 .milkdown .ProseMirror ul li,
 .milkdown .ProseMirror ol li {
   font-size: 0.875rem;
   line-height: 1.5;
+}
+
+/* Follow the generic list rule so Note markers inherit their own body scale. */
+.huabu-note-content-host .ProseMirror ul li,
+.huabu-note-content-host .ProseMirror ol li {
+  font-size: var(--node-body-size);
+  line-height: var(--node-body-line);
 }
 
 /* List marker color — Crepe styles the bullet / number label-wrapper

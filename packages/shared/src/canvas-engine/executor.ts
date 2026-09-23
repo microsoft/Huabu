@@ -11,7 +11,7 @@
  * - Sequential command execution within a batch (each command sees the
  *   previous command's result state).
  * - Collects affected parent frame IDs from each handler and performs a
- *   single end-of-batch `fitFrames` pass, filtered to frames whose
+ *   single deepest-first end-of-batch layout pass, fitting frames whose
  *   `data.sizing` is `'hug'` (the default). Frames with `sizing:
  *   'manual'` are excluded so the user's pinned size sticks across
  *   child mutations. Handlers no longer fit frames themselves — they
@@ -35,7 +35,7 @@
 import { applyStructuredFrameRelayout } from './autoLayout/gridLayout.js';
 import { HANDLERS, COMMAND_META } from './commands/index.js';
 import {
-  fitFrames,
+  fitFrameToChildren,
   normalizeTreeOrder,
   type NestableNode,
 } from './frame/index.js';
@@ -127,6 +127,7 @@ export function executeCanvasCommands(
   // all other affected frames `'compact'` away tracks emptied by organic
   // child changes (deletions, drags).
   const fillFrameIds = new Set<string>();
+  const resizedFrameIds = new Set<string>();
 
   // Track which commands were actually applied.
   let anyApplied = false;
@@ -159,6 +160,17 @@ export function executeCanvasCommands(
 
     if (result.applied) {
       anyApplied = true;
+      if (cmd.type === 'SET_NODE_GEOMETRY') {
+        const frameIds = new Set(
+          result.nodes
+            .filter((node) => node.type === 'frame')
+            .map((node) => node.id),
+        );
+        for (const item of cmd.items) {
+          if (item.size && frameIds.has(item.nodeId))
+            resizedFrameIds.add(item.nodeId);
+        }
+      }
 
       // Advance the evolving state so the next command in the batch
       // sees this command's changes.
@@ -194,7 +206,7 @@ export function executeCanvasCommands(
   // ------------------------------------------------------------------
   // Centralised frame auto-fit (single end-of-batch pass).
   //
-  // Two sub-passes with different sizing gates:
+  // Each affected Frame and ancestor is resolved once, deepest-first:
   //
   //   1. `applyStructuredFrameRelayout` — runs for **all** affected
   //      structured (`column` / `row`) frames regardless of sizing.
@@ -208,51 +220,69 @@ export function executeCanvasCommands(
   //                     spill). Free-mode frames are no-ops here
   //                     (filtered by `readFrameGridConfig`).
   //
-  //   2. `fitFrames` — generic bounding-box pass for free-mode
+  //   2. `fitFrameToChildren` — generic bounding-box fit for free-mode
   //      ancestors. Gated by `getFrameSizing === 'hug'` (or
   //      `options.forceFitFrames` for agent batches). Structured
   //      frames short-circuit inside `fitFrameToChildren` anyway, so
   //      passing them through is defensive but harmless.
   //
-  // Order matters: structured solver may resize a hug frame, which
-  // then needs to be reflected in the bounding-box pass for any
-  // ancestor wrappers.
+  // Interleaving matters: a free child may change a structured parent's
+  // footprint and vice versa. No ancestor may observe an unresolved child.
   //
-  // Per-axis padding makes the structured solver self-consistent
-  // under per-axis resize: scaling all child widths by `sx` makes
-  // `padX` + `interGapX` scale by `sx` too, so the resulting frame
-  // width = `oldWidth × sx` exactly — `flushScale` therefore passes
-  // the raw (sx, sy) from the resize gesture through without
-  // collapsing to a uniform scalar.
+  // Explicit Frame resize targets select the responsive tier. The resize
+  // controller scales content after subtracting that tier's fixed whitespace;
+  // ordinary content mutations resolve a stable Hug tier instead.
   // ------------------------------------------------------------------
   if (anyApplied && allAffectedFrameIds.size > 0) {
-    // fitFrames gate: hug-only (or all, when forced).
-    const fitTargets = options.forceFitFrames
-      ? allAffectedFrameIds
-      : new Set<string>();
-    if (!options.forceFitFrames) {
-      const nodeById = new Map(currentNodes.map((n) => [n.id, n]));
-      for (const id of allAffectedFrameIds) {
-        if (getFrameSizing(nodeById.get(id)) === 'hug') {
-          fitTargets.add(id);
-        }
-      }
-    }
     // Structured relayout runs for every affected frame; the function
     // itself skips free-mode frames and per-frame branches on sizing
     // to decide whether to write the frame's own size.
-    const structured = applyStructuredFrameRelayout(
-      currentNodes,
-      allAffectedFrameIds,
-      fillFrameIds,
-      {
-        edges: currentEdges,
-        frozenGuttersByFrame: options.frozenStructuredGutters,
-      },
-    );
-    currentNodes = structured.nodes;
-    if (fitTargets.size > 0) {
-      currentNodes = fitFrames(currentNodes as NestableNode[], fitTargets);
+    // Resolve the complete ancestor chain deepest-first, interleaving free
+    // fitting and structured layout. Separate global passes leave structured
+    // ancestors stale when an intervening free Frame changes its footprint.
+    const byId = new Map(currentNodes.map((node) => [node.id, node]));
+    const affected = new Set<string>();
+    for (const seed of allAffectedFrameIds) {
+      let id: string | undefined = seed;
+      while (id && !affected.has(id)) {
+        affected.add(id);
+        id = byId.get(id)?.parentId;
+      }
+    }
+    const depths = new Map<string, number>();
+    const depth = (id: string): number => {
+      const cached = depths.get(id);
+      if (cached !== undefined) return cached;
+      const seen = new Set<string>([id]);
+      let parent = byId.get(id)?.parentId;
+      let value = 0;
+      while (parent && !seen.has(parent)) {
+        seen.add(parent);
+        value++;
+        parent = byId.get(parent)?.parentId;
+      }
+      depths.set(id, value);
+      return value;
+    };
+    for (const id of [...affected].sort((a, b) => depth(b) - depth(a))) {
+      currentNodes = applyStructuredFrameRelayout(
+        currentNodes,
+        [id],
+        fillFrameIds,
+        {
+          edges: currentEdges,
+          frozenGuttersByFrame: options.frozenStructuredGutters,
+          resizedFrameIds,
+        },
+      ).nodes;
+      // Explicit geometry is a boundary, not a seed that a descendant's
+      // generic bounding-box fit may move. Manual ancestors stay pinned too.
+      if (
+        !resizedFrameIds.has(id) &&
+        (options.forceFitFrames || getFrameSizing(byId.get(id)) === 'hug')
+      ) {
+        currentNodes = fitFrameToChildren(currentNodes as NestableNode[], id);
+      }
     }
   }
 

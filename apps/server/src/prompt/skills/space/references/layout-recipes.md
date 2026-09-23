@@ -37,9 +37,9 @@ Place the centre at `(cx, cy)`; place N children on a ring of radius `r`. For ev
 
 ## Grouping with frames
 
-- Create a frame for each logical group / layer, sized to enclose its children with **~40px padding** on every side.
-- Use `SET_NODE_PARENT` to parent child nodes into the frame.
-- **Position the frame first**, then position children. Child `position` is **frame-relative** (parent-local): a child at `(0, 0)` sits at the frame's top-left. So the coordinates in the patterns above are the child's offsets **inside** the frame, starting from `(0, 0)` + your padding.
+- Create a frame for each logical group / layer. For existing nodes, follow the [grouping recipe](./command-cookbook.md#recipe-organise-a-cluster-into-a-labelled-frame): create a default Hug Frame, then use `SET_NODE_PARENT` with the member IDs. The engine preserves member world positions and computes the Frame bounds, responsive title inset, and padding; do not reproduce those calculations in tool arguments.
+- For a new row, column, or grid, use the structured layout below and let the engine compute child positions and Frame size. Choose membership, ordering, and cells rather than pixel insets.
+- In a free Frame, child `position` is **frame-relative** (parent-local). Use inspected positions for deliberate placement; Hug fitting may move the Frame origin and rewrite child-local coordinates while preserving their world positions. A manually sized Frame does not promise automatic fitting.
 - Give the frame a clear `data.label` so the group is identifiable when zoomed out.
 
 ### Structured frame layout (`column` / `row` / `grid`)

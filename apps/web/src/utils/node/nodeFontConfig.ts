@@ -4,13 +4,18 @@
 /**
  * Single source of truth for text-bearing node font configuration.
  *
- * `TextNode` and `QuestionNode` render text whose size is auto-fitted to
- * the node box (via `useTextNodeSurface` / `computeFontSizeForHeight`).
- * The frame-resize cascade ({@link ./fontFit}) re-derives that same font
- * for a node's new box. Both paths MUST agree on the font family stacks,
+ * TextNode and QuestionNode use proportional `data.style.fontSize` through
+ * useTextNodeSurface: defaults are 16px and QUESTION_NODE_DEFAULT_FONT_SIZE.
+ * Question chrome retains its 28px artwork basis independently of the default. Side grips
+ * preserve the font; corners and the Hug Frame/selection cascade ({@link ./fontFit})
+ * scale it by the new/start outer-width ratio without fitting or rounding.
+ * Existing fonts are respected without automatic persisted-data migration.
+ * Measurement and rendering MUST agree on the font family stacks,
  * paddings and line-height — so they all live here and are imported,
  * never re-declared.
  */
+
+import { NODE_TYPOGRAPHY } from '@/components/Nodes/design/nodeTypography';
 
 import type { FontOpts } from './textMeasure';
 import type { NodeFontFamily } from '@huabu/shared';
@@ -23,28 +28,38 @@ export const FONT_FAMILY_CSS: Record<NodeFontFamily, string> = {
   hand: '"Comic Sans MS", "Chalkboard SE", sans-serif',
 };
 
-/** Horizontal padding inside a TextNode (px on the left and right). */
-export const TEXT_NODE_PADDING_X = 12;
-/** Vertical padding inside a TextNode (px on the top and bottom). */
-export const TEXT_NODE_PADDING_Y = 4;
+/** Base horizontal TextNode padding (px per side), scaled by fontSize / 16. */
+export const TEXT_NODE_PADDING_X = 8;
+/** Base vertical TextNode padding (px per side), scaled by fontSize / 16. */
+export const TEXT_NODE_PADDING_Y = 3;
 
-/** Padding inside a QuestionNode (px on each side). */
-export const QUESTION_NODE_PADDING = 12;
-/** Font family for the question sticky-note style. */
-export const QUESTION_FONT_FAMILY =
-  '"Comic Sans MS", STXingkai, KaiTi, "Kaiti SC", cursive';
+export const QUESTION_NODE_DEFAULT_FONT_SIZE = 24;
+
+/** Symmetric horizontal inset shared by measurement and the C card. */
+export const QUESTION_NODE_PADDING = 24;
+export const QUESTION_NODE_PADDING_Y = QUESTION_NODE_PADDING;
+/** The avatar sets the row height; the status chip uses shared metadata type. */
+export const QUESTION_NODE_HEADER_HEIGHT = 32;
+export const QUESTION_NODE_STATUS_SIZE = NODE_TYPOGRAPHY.metadata.size;
+export const QUESTION_NODE_HEADER_GAP = 12;
+/** Half the base metadata-row-plus-gap height; scales with Question content. */
+export const QUESTION_NODE_HEADER_INSET =
+  (QUESTION_NODE_HEADER_HEIGHT + QUESTION_NODE_HEADER_GAP) / 2;
+/** Font family for the compact conversation card and its text measurement. */
+export const QUESTION_FONT_FAMILY = FONT_FAMILY_CSS.default;
+/** Medium weight shared by Question rendering and text measurement. */
+export const QUESTION_NODE_TITLE_WEIGHT = 500;
 
 /**
  * Placeholder text shown (and measured for auto-sizing) when a node has
- * no content yet. Both the node component and the frame-resize cascade
- * ({@link ./fontFit}) measure these strings when the content is empty, so
- * an empty node is sized to fit its placeholder rather than to fill its
- * whole height with a single oversized line.
+ * no content yet. useTextAutoSize measures these strings at the effective
+ * font size; Frame/selection scaling preserves that font/width ratio without
+ * measuring or fitting the placeholder to a dragged height.
  */
 export const TEXT_NODE_PLACEHOLDER = 'Type...';
 export const QUESTION_NODE_PLACEHOLDER = 'Ask a question…';
 
-/** Line-height used by every text-bearing node's measurement. */
+/** Unitless line-height used by TextNode measurement; Question uses cardTitle. */
 export const NODE_LINE_HEIGHT = 1.5;
 
 /** Style fields that influence a TextNode's measured font. */
@@ -66,12 +81,12 @@ export function getTextNodeFontOpts(style: TextNodeFontStyle): FontOpts {
   };
 }
 
-/** Build the pretext {@link FontOpts} for a QuestionNode (fixed style). */
+/** Question measurement family, weight and line-height; font size is proportional. */
 export function getQuestionFontOpts(): FontOpts {
   return {
     fontFamily: QUESTION_FONT_FAMILY,
-    fontWeight: 'normal',
+    fontWeight: String(QUESTION_NODE_TITLE_WEIGHT),
     fontStyle: 'normal',
-    lineHeight: NODE_LINE_HEIGHT,
+    lineHeight: NODE_TYPOGRAPHY.cardTitle.lineHeight,
   };
 }

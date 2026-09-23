@@ -209,6 +209,10 @@ const SortableRow = React.memo(
 SortableRow.displayName = 'SortableRow';
 
 export interface CanvasLayerTreeProps {
+  navigationState?: {
+    focusedId: string | null;
+    selectionAnchorId: string | null;
+  };
   items: DataSourceTreeItem[];
   getIcon: (node: DataSourceNodeLike) => React.ReactNode;
   getDisplayName: (node: DataSourceNodeLike) => string;
@@ -236,6 +240,7 @@ export const resolveCollisionY = (
 
 export const CanvasLayerTree = ({
   items,
+  navigationState,
   getIcon,
   getDisplayName,
   emptyText = 'No items',
@@ -323,11 +328,20 @@ export const CanvasLayerTree = ({
   // extend / re-extend the range from the same starting row (matches
   // Finder / VS Code behaviour). `null` until the user has clicked any
   // row in this tree session.
-  const selectionAnchorRef = useRef<string | null>(null);
+  const selectionAnchorRef = useRef<string | null>(
+    navigationState?.selectionAnchorId ?? null,
+  );
   const treeRef = useRef<HTMLDivElement>(null);
   const [focusedId, setFocusedId] = useState<string | null>(
-    () => items[0]?.id ?? null,
+    () => navigationState?.focusedId ?? items[0]?.id ?? null,
   );
+  useEffect(() => {
+    if (!navigationState) return;
+    navigationState.focusedId = focusedId;
+    return () => {
+      navigationState.selectionAnchorId = selectionAnchorRef.current;
+    };
+  }, [focusedId, navigationState]);
   useEffect(() => clearExpandTimer, [clearExpandTimer]);
 
   // Filter out children of collapsed frames.

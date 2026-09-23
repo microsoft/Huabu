@@ -13,9 +13,9 @@
 /** % of accent mixed into the default foreground for text/icon color. */
 const ACCENT_FG_MIX = 60;
 /** % of accent mixed over the surface for tinted backgrounds. */
-const ACCENT_BG_MIX = 10;
+const ACCENT_BG_MIX = 15;
 /** % of accent over transparent for very subtle section tints. */
-const ACCENT_SOFT_MIX = 4;
+const ACCENT_SOFT_MIX = 8;
 /**
  * % of accent over transparent for a solid node border.
  *
@@ -26,7 +26,7 @@ const ACCENT_SOFT_MIX = 4;
  */
 const ACCENT_BORDER_MIX = 75;
 /** % of accent over transparent for a thin accent divider. */
-const ACCENT_DIVIDER_MIX = 25;
+const ACCENT_DIVIDER_MIX = 30;
 /** % of accent over transparent for inline text highlights. */
 const ACCENT_HIGHLIGHT_BG_MIX = 25;
 
@@ -39,6 +39,10 @@ const ACCENT_HIGHLIGHT_BG_MIX = 25;
  * to the regular foreground color, which reads correctly in both themes.
  */
 const WHITE_ACCENT_RE = /^\s*(white|#fff|#ffffff)\s*$/i;
+
+export function isWhiteAccent(accent: string): boolean {
+  return WHITE_ACCENT_RE.test(accent);
+}
 
 export interface AccentTokens {
   /** Foreground color for text and icons on accent-tinted surfaces. */
@@ -58,7 +62,7 @@ export interface AccentTokens {
 export function getAccentTokens(accent: string): AccentTokens {
   // White accent: keep text at the regular foreground color so it reads as
   // black (light theme) / white (dark theme) instead of mid-gray.
-  const fg = WHITE_ACCENT_RE.test(accent)
+  const fg = isWhiteAccent(accent)
     ? 'var(--fg-default)'
     : `color-mix(in srgb, ${accent} ${ACCENT_FG_MIX}%, var(--fg-default))`;
 
@@ -70,9 +74,9 @@ export function getAccentTokens(accent: string): AccentTokens {
     // produced invalid strings like `white80` for non-hex inputs, which the
     // browser silently rejects -> the previous border color stayed in the
     // inline style and the swatch appeared to "stick".
-    border: `color-mix(in srgb, ${accent} ${ACCENT_BORDER_MIX}%, transparent)`,
-    divider: `color-mix(in srgb, ${accent} ${ACCENT_DIVIDER_MIX}%, transparent)`,
-    softBg: `color-mix(in srgb, ${accent} ${ACCENT_SOFT_MIX}%, transparent)`,
-    highlightBg: `color-mix(in srgb, ${accent} ${ACCENT_HIGHLIGHT_BG_MIX}%, transparent)`,
+    border: `color-mix(in srgb, ${accent} ${ACCENT_BORDER_MIX}%, var(--edge-default))`,
+    divider: `color-mix(in srgb, ${accent} ${ACCENT_DIVIDER_MIX}%, var(--bg-default))`,
+    softBg: `color-mix(in srgb, ${accent} ${ACCENT_SOFT_MIX}%, var(--fg-default))`,
+    highlightBg: `color-mix(in srgb, ${accent} ${ACCENT_HIGHLIGHT_BG_MIX}%, var(--bg-surface))`,
   };
 }

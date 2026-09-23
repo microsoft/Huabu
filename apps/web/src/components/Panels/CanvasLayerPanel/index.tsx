@@ -2,7 +2,14 @@
 // Licensed under the MIT license.
 
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { getQuestionNodeStatus } from '@huabu/shared';
@@ -41,6 +48,7 @@ import type {
 
 interface CanvasLayerPanelProps {
   isCollapsed?: boolean;
+  isContentMounted?: boolean;
   onToggle?: () => void;
 }
 
@@ -181,17 +189,10 @@ const isSameTreeItem = (
 
 export const CanvasLayerPanel = ({
   isCollapsed,
+  isContentMounted = true,
   onToggle,
 }: CanvasLayerPanelProps) => {
   const { t } = useTranslation();
-  // `MainLayout` keeps this subtree mounted while the column animates to
-  // width 0 (to avoid a content-swap flash mid-animation), so the local
-  // `isCollapsed` prop is always `false`. We read the real collapse state
-  // from `panelStore` and use it to freeze the `nodes` reference fed to
-  // `buildTreeItems`. While collapsed, selection bumps on the canvas
-  // (which rebuild `state.nodes` on every toggle) skip the O(N) tree
-  // walk — but no DOM is unmounted, so the 220ms width animation stays
-  // smooth.
   const isLeftCollapsed = usePanelStore((s) => s.isLeftCollapsed);
   const rawNodes = useCanvasStore(
     (s) => s.nodes,
@@ -209,14 +210,39 @@ export const CanvasLayerPanel = ({
     return () => disconnectExternal();
   }, [activeCanvasId, connectExternal, disconnectExternal]);
 
-  const frozenNodesRef = useRef(rawNodes);
-  if (!isLeftCollapsed) {
+  const frozenNodesRef = useRef({ canvasId: activeCanvasId, nodes: rawNodes });
+  if (!isLeftCollapsed || frozenNodesRef.current.canvasId !== activeCanvasId) {
     // Keep the cached reference in step with the live store whenever the
     // panel is visible. Writing the same ref value during render is safe
     // (no extra render scheduled).
-    frozenNodesRef.current = rawNodes;
+    frozenNodesRef.current = { canvasId: activeCanvasId, nodes: rawNodes };
   }
-  const nodes = isLeftCollapsed ? frozenNodesRef.current : rawNodes;
+  const nodes = isLeftCollapsed ? frozenNodesRef.current.nodes : rawNodes;
+  const listHostRef = useRef<HTMLDivElement>(null);
+  const listSessionRef = useRef({
+    canvasId: activeCanvasId,
+    scrollTop: 0,
+    navigation: {
+      focusedId: null as string | null,
+      selectionAnchorId: null as string | null,
+    },
+  });
+  if (listSessionRef.current.canvasId !== activeCanvasId) {
+    listSessionRef.current = {
+      canvasId: activeCanvasId,
+      scrollTop: 0,
+      navigation: {
+        focusedId: null,
+        selectionAnchorId: null,
+      },
+    };
+  }
+  const listSession = listSessionRef.current;
+  useLayoutEffect(() => {
+    if (isContentMounted && listHostRef.current) {
+      listHostRef.current.scrollTop = listSession.scrollTop;
+    }
+  }, [isContentMounted, listSession]);
 
   // ============================================================
   // Filter state — purely panel-local. The type-chip whitelist
@@ -506,11 +532,20 @@ export const CanvasLayerPanel = ({
             onClear={() => setShowMissingOnly(false)}
           />
         )}
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div
+          ref={listHostRef}
+          className="min-h-0 flex-1 overflow-y-auto"
+          onScroll={(event) => {
+            if (isContentMounted)
+              listSession.scrollTop = event.currentTarget.scrollTop;
+          }}
+        >
           {isSearchActive ? (
             <CanvasSearchResults />
-          ) : (
+          ) : !isContentMounted ? null : (
             <CanvasLayerTree
+              key={activeCanvasId}
+              navigationState={listSession.navigation}
               items={finalItems}
               getIcon={renderNodeIcon}
               getDisplayName={getNodeDisplayName}

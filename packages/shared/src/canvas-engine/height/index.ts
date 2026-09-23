@@ -27,6 +27,7 @@ export {
 
 export {
   HEIGHT_QUANTIZATION_STEP,
+  autoHeightContentWidth,
   contentScaleFor,
   intrinsicToLayoutHeight,
   quantizeHeight,

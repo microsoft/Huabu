@@ -13,6 +13,7 @@ import {
 } from '@huabu/shared/canvas-engine';
 
 import { resumeHeightCommits } from '@/components/Nodes/shared/height/commitSuspension';
+import { NODE_CONTROL_CHROME } from '@/config/nodeInteractionChrome';
 import { useIsNotMouse } from '@/hooks/useInputMode.ts';
 import useCanvasStore from '@/store/canvasStore';
 import {
@@ -20,6 +21,9 @@ import {
   refitFont,
   type NodeFontFit,
 } from '@/utils/node/fontFit';
+
+import { ResizeGrip } from './selectionChrome/ResizeGrip';
+import { SelectionOutline } from './selectionChrome/SelectionOutline';
 
 import type { CanvasNode } from '@/components/Nodes/types';
 import type { NodeStyle } from '@huabu/shared';
@@ -36,7 +40,7 @@ import type { NodeStyle } from '@huabu/shared';
  *  - Default: free-axis scaling — each axis tracks the cursor
  *    independently (W and H change with the dragged corner's actual
  *    offset from the anchor).
- *  - Shift held or Image/Video present: uniform (equiproportional)
+ *  - Shift held or Image/Video/Text/Question present: uniform (equiproportional)
  *    scaling — the dragged corner is constrained to the original
  *    bounding-box diagonal via projection so aspect ratios are preserved.
  *  - The OPPOSITE corner of the dragged handle acts as the anchor and
@@ -218,9 +222,11 @@ export const MultiSelectResizer = () => {
   // Uses the shared `getSelectionBounds` helper so the rendered box
   // stays consistent with the multi-select toolbar's anchor.
   const bounds = useMemo(() => {
-    if (eligibleNodes.length < 2) return null;
-    return getSelectionBounds(eligibleNodes, nodes);
-  }, [eligibleNodes, nodes]);
+    // Selection cardinality owns visibility; ancestor deduplication only
+    // owns the resize snapshot. A Frame plus its children is still multi-select.
+    if (selectedNodes.length < 2) return null;
+    return getSelectionBounds(selectedNodes, nodes);
+  }, [selectedNodes, nodes]);
 
   if (!bounds || !domNode) return null;
 
@@ -230,7 +236,8 @@ export const MultiSelectResizer = () => {
   const widthPx = Math.max(0, maxPx.x - minPx.x);
   const heightPx = Math.max(0, maxPx.y - minPx.y);
 
-  const handleSize = isDirectManipulation ? 12 : 8;
+  const handleSize =
+    NODE_CONTROL_CHROME.hitSize[isDirectManipulation ? 'touch' : 'mouse'];
 
   const startGesture = (corner: Corner, e: React.PointerEvent) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
@@ -279,6 +286,7 @@ export const MultiSelectResizer = () => {
         : { x: 0, y: 0 };
       const { width, height } = getNodeSize(node);
       const style = (node.data as { style?: NodeStyle } | undefined)?.style;
+      const fontFit = getNodeFontFit(node);
       snapNodes.push({
         id: node.id,
         parentId: node.parentId,
@@ -286,9 +294,10 @@ export const MultiSelectResizer = () => {
         parentAbs,
         pos0Abs: abs,
         size0: { width: width || 200, height: height || 100 },
-        preserveAspectRatio: node.type === 'image' || node.type === 'video',
+        preserveAspectRatio:
+          node.type === 'image' || node.type === 'video' || fontFit !== null,
         style,
-        fontFit: getNodeFontFit(node),
+        fontFit,
       });
       for (const child of childrenByParentId.get(node.id) ?? []) {
         addSnapshotSubtree(child, scaleRootId);
@@ -382,18 +391,19 @@ export const MultiSelectResizer = () => {
 
   const overlay = (
     <div
+      data-multi-selection
       className="pointer-events-none absolute z-999"
       style={{
         left: minPx.x,
         top: minPx.y,
         width: widthPx,
         height: heightPx,
-        // outline (not border) keeps the box dimensions exact so handle
-        // offsets stay aligned with the bounding box.
-        outline: '1px solid var(--color-info-light)',
-        outlineOffset: 0,
       }}
     >
+      <SelectionOutline
+        variant="dashed"
+        rect={{ x: 0, y: 0, width: widthPx, height: heightPx }}
+      />
       {corners.map(({ id: corner, cursor }) => {
         const left =
           corner === 'tl' || corner === 'bl'
@@ -406,15 +416,13 @@ export const MultiSelectResizer = () => {
         return (
           <div
             key={corner}
-            className="pointer-events-auto absolute"
+            data-multi-resize-control={corner}
+            className="pointer-events-auto absolute grid place-items-center"
             style={{
               left,
               top,
               width: handleSize,
               height: handleSize,
-              background: 'var(--color-info-light)',
-              border: '1px solid white',
-              boxSizing: 'border-box',
               cursor,
               touchAction: 'none',
             }}
@@ -422,7 +430,9 @@ export const MultiSelectResizer = () => {
             onPointerMove={moveGesture}
             onPointerUp={endGesture}
             onPointerCancel={endGesture}
-          />
+          >
+            <ResizeGrip isNotMouse={isDirectManipulation} />
+          </div>
         );
       })}
     </div>

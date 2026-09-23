@@ -66,12 +66,43 @@ beforeEach(() => {
 
 afterEach(() => {
   act(() => root?.unmount());
+  vi.restoreAllMocks();
   host?.remove();
   host = null;
   root = null;
 });
 
 describe('useSketchHoverRouting', () => {
+  it('restores hover after a descendant consumes pointerup', () => {
+    const wrapper = host?.querySelector<HTMLElement>('[data-testid="wrapper"]');
+    const sketch = host?.querySelector<HTMLElement>('[data-id="sketch-1"]');
+    if (!wrapper || !sketch) throw new Error('Expected mounted Sketch harness');
+    let frame: FrameRequestCallback | undefined;
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      frame = callback;
+      return 1;
+    });
+    sketch.addEventListener('pointerup', (event) => event.stopPropagation());
+
+    act(() => {
+      sketch.dispatchEvent(pointerDown('mouse'));
+      sketch.dispatchEvent(new Event('pointerup', { bubbles: true }));
+      wrapper.dispatchEvent(new Event('pointerleave'));
+      wrapper.dispatchEvent(
+        new PointerEvent('pointermove', {
+          bubbles: true,
+          pointerType: 'mouse',
+          clientX: 10,
+          clientY: 20,
+          buttons: 0,
+        }),
+      );
+      frame?.(0);
+    });
+
+    expect(sketch.getAttribute('data-sketch-hover')).toBe('true');
+  });
+
   it('does not activate or select a Sketch for touch input', () => {
     const wrapper = host?.querySelector<HTMLElement>('[data-testid="wrapper"]');
     const sketch = host?.querySelector<HTMLElement>('[data-id="sketch-1"]');
