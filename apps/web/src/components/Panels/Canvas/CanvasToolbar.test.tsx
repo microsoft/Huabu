@@ -8,6 +8,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NodeToolbar } from './CanvasToolbar';
 
 const { listCanvases } = vi.hoisted(() => ({ listCanvases: vi.fn() }));
+const toolState = vi.hoisted(() => ({
+  pendingNodeType: null as string | null,
+}));
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
@@ -30,13 +33,13 @@ vi.mock('@/hooks/useInputMode', () => ({ useIsNotMouse: () => false }));
 vi.mock('@/store/toolStore', () => ({
   useToolStore: (
     selector: (state: {
-      pendingNodeType: null;
+      pendingNodeType: string | null;
       setPendingNodeType: () => void;
       setSketchDraft: () => void;
     }) => unknown,
   ) =>
     selector({
-      pendingNodeType: null,
+      pendingNodeType: toolState.pendingNodeType,
       setPendingNodeType: vi.fn(),
       setSketchDraft: vi.fn(),
     }),
@@ -86,9 +89,57 @@ afterEach(() => {
   root = undefined;
   container = undefined;
   listCanvases.mockReset();
+  toolState.pendingNodeType = null;
 });
 
 describe('NodeToolbar', () => {
+  it.each(['select', 'pan', 'lasso'] as const)(
+    'uses the theme background for the active %s tool',
+    (activeTool) => {
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      act(() =>
+        root?.render(
+          <NodeToolbar activeTool={activeTool} onToolChange={vi.fn()} />,
+        ),
+      );
+      const selected = container.querySelector<HTMLButtonElement>(
+        `button[aria-label^="toolbar.tools.${activeTool}"]`,
+      );
+      expect(selected?.classList.contains('text-info')).toBe(true);
+      expect(selected?.classList.contains('bg-info-bg')).toBe(true);
+      expect(selected?.classList.contains('enabled:hover:bg-info-bg')).toBe(
+        true,
+      );
+      expect(container.querySelectorAll('button.bg-info-bg')).toHaveLength(1);
+    },
+  );
+
+  it.each(['note', 'text', 'frame', 'sketch', 'question'])(
+    'highlights only the pending %s placement button',
+    (nodeType) => {
+      toolState.pendingNodeType = nodeType;
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      act(() =>
+        root?.render(
+          <NodeToolbar activeTool="select" onToolChange={vi.fn()} />,
+        ),
+      );
+      const selected = container.querySelector<HTMLButtonElement>(
+        `button[aria-label^="toolbar.nodes.${nodeType === 'question' ? 'agent' : nodeType}"]`,
+      );
+      expect(selected?.classList.contains('text-info')).toBe(true);
+      expect(selected?.classList.contains('bg-info-bg')).toBe(true);
+      expect(selected?.classList.contains('enabled:hover:bg-info-bg')).toBe(
+        true,
+      );
+      expect(container.querySelectorAll('button.bg-info-bg')).toHaveLength(1);
+    },
+  );
+
   it('places Add Space Preview in the content dropdown', async () => {
     listCanvases.mockResolvedValue({ canvases: [] });
     container = document.createElement('div');

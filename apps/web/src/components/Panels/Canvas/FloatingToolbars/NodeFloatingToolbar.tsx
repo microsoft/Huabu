@@ -2,8 +2,21 @@
 // Licensed under the MIT license.
 
 import { useInternalNode } from '@xyflow/react';
-import { Link, MoveRight, Trash2 } from 'lucide-react';
-import { memo, useCallback, useMemo, useRef, type ReactNode } from 'react';
+import {
+  Ellipsis,
+  Link,
+  SquareArrowRightEnter,
+  Settings2,
+  Trash2,
+} from 'lucide-react';
+import {
+  memo,
+  useCallback,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { ACCENT_NONE_TOKEN, type FrameNodeData } from '@huabu/shared';
@@ -12,8 +25,13 @@ import { isAlwaysAutoHeightNodeType } from '@huabu/shared/canvas-engine';
 import { Button } from '@/components/Common/Button';
 import { CanvasFloatingPopover } from '@/components/Common/CanvasFloatingPopover';
 import {
+  DropdownMenu,
+  DropdownMenuItem,
+} from '@/components/Common/DropdownMenu';
+import {
   FloatingToolbar,
   FLOATING_TOOLBAR_CLASS,
+  FLOATING_TOOLBAR_POPOVER_CLASS,
 } from '@/components/Common/FloatingToolbar';
 import { toast } from '@/components/Common/Toast';
 import { Tooltip } from '@/components/Common/Tooltip';
@@ -46,8 +64,11 @@ import {
   nodeAccentPickerOptions,
   nodeAccentPickerValue,
 } from './nodeAccentPickerOptions';
+import { TextFontSizePicker } from './TextFontSizePicker';
 
 import type { CanvasNodeType, NodeData } from '@/components/Nodes/types';
+
+import './NodeToolbar.css';
 
 /** Sentinel token representing "no accent". */
 const ACCENT_NONE = ACCENT_NONE_TOKEN;
@@ -57,21 +78,14 @@ interface NodeFloatingToolbarProps {
   type: CanvasNodeType;
   data: NodeData;
   /**
-   * Group 3 — canvas display effects.
-   * Buttons/controls that change how the node renders on the canvas:
-   * text formatting (bold/italic/font), sketch stroke controls,
-   * frame layout, note height mode, etc.
-   * Rendered between the color+size group and the actions group.
+   * Primary display controls. Text and Sketch controls precede dimensions.
    */
   toolbar?: ReactNode;
   /**
-   * Group 4 — node actions.
-   * Buttons that trigger operations on the node: open large/fullscreen
-   * view, download, unframe, start/cancel AI runs, open conversation
-   * thread, etc.
-   * Rendered as the last group before the optional delete button.
+   * Primary node actions, rendered after dimensions and display controls.
    */
   actions?: ReactNode;
+  overflow?: ReactNode;
   dragEnabled: boolean;
   dragActive?: boolean;
   onDragActiveChange?: (active: boolean) => void;
@@ -98,7 +112,6 @@ function ToolbarTypeButton({
   onActiveChange?: (active: boolean) => void;
 }) {
   const { t } = useTranslation();
-  const isNotMouse = useIsNotMouse();
   const releasedNormally = useRef(false);
   const cancelledClick = useRef(false);
   const drag = useTakeoverMarkDrag(id, {
@@ -157,8 +170,8 @@ function ToolbarTypeButton({
           : 'text-fg-muted hover:bg-hover hover:text-fg-default'
       } ${dragEnabled && !disabled ? 'cursor-grab active:cursor-grabbing' : ''}`}
       style={{
-        width: isNotMouse ? 32 : 28,
-        height: isNotMouse ? 32 : 28,
+        width: 32,
+        height: 32,
         touchAction: dragEnabled && !disabled ? 'none' : undefined,
       }}
     >
@@ -175,20 +188,9 @@ function ToolbarTypeButton({
  * node subscriptions inside this component scoped to one canvas, not
  * one per node.
  *
- * Composes four groups separated by dividers:
- *  1. Type buttons double as drag surfaces when enabled. For `text` / `note`,
- *     clicking the alternate type converts; dragging never converts.
- *  2. Style: accent color picker (hidden for `question` / `sketch`) + size
- *     picker. Always present.
- *  3. Canvas display (`toolbar` prop). Controls that change how the node is
- *     rendered on the canvas — text formatting, sketch stroke controls, frame
- *     child layout, etc. Omitted when the prop is undefined.
- *  4. Actions (`actions` prop). Buttons that trigger operations — open
- *     large/fullscreen view, download, unframe, run / cancel AI question,
- *     etc. Omitted when the prop is undefined.
- *
- * A trailing delete button is appended for non-mouse input (mouse users have
- * keyboard Delete / Backspace).
+ * The current-type drag control precedes formatting, dimensions, and primary
+ * actions. Overflow contains conversion, secondary node actions, move, link,
+ * and delete commands for every input mode.
  *
  * Positioning, portal-into-body, and viewport clamping are delegated to
  * `CanvasFloatingPopover`.
@@ -200,11 +202,13 @@ export const NodeFloatingToolbar = memo(
     data,
     toolbar,
     actions,
+    overflow,
     dragEnabled,
     dragActive,
     onDragActiveChange,
   }: NodeFloatingToolbarProps) => {
     const { t } = useTranslation();
+    const [moreOpen, setMoreOpen] = useState(false);
     const internalNode = useInternalNode(id);
     // While the node is collapsed to its takeover mark the card has faded
     // out, so the toolbar anchors to the mark instead of hovering above the
@@ -378,57 +382,19 @@ export const NodeFloatingToolbar = memo(
         }}
       >
         {/* Leading type indicator. */}
-        {type === 'text' || type === 'note' ? (
-          <FloatingToolbar.Group>
-            <ToolbarTypeButton
-              id={id}
-              type="text"
-              dragEnabled={dragEnabled}
-              onActiveChange={onDragActiveChange}
-              active={type === 'text'}
-              disabled={isTypeToggleDisabled && type !== 'text'}
-              title={
-                (type !== 'text' ? typeToggleDisabledReason : null) ??
-                (type === 'text'
-                  ? t('layers.filterLabels.text')
-                  : t('toolbar.convertToText'))
-              }
-              onClick={
-                type === 'text'
-                  ? undefined
-                  : () => {
-                      if (!isTypeToggleDisabled) convertNodeType(id, 'text');
-                    }
-              }
-            />
-            <ToolbarTypeButton
-              id={id}
-              type="note"
-              dragEnabled={dragEnabled}
-              onActiveChange={onDragActiveChange}
-              active={type === 'note'}
-              disabled={isTypeToggleDisabled && type !== 'note'}
-              title={
-                (type !== 'note' ? typeToggleDisabledReason : null) ??
-                (type === 'note'
-                  ? t('layers.filterLabels.note')
-                  : t('toolbar.convertToNote'))
-              }
-              onClick={
-                type === 'note'
-                  ? undefined
-                  : () => {
-                      if (!isTypeToggleDisabled) convertNodeType(id, 'note');
-                    }
-              }
-            />
-          </FloatingToolbar.Group>
-        ) : dragEnabled ? (
+        {dragEnabled || type === 'text' || type === 'note' ? (
           <ToolbarTypeButton
             id={id}
             type={type}
             dragEnabled={dragEnabled}
             onActiveChange={onDragActiveChange}
+            title={
+              type === 'text'
+                ? t('layers.filterLabels.text')
+                : type === 'note'
+                  ? t('layers.filterLabels.note')
+                  : undefined
+            }
           />
         ) : (
           <Tooltip content={type}>
@@ -446,6 +412,8 @@ export const NodeFloatingToolbar = memo(
         {/* ── Group 2: Style — color + size ── */}
         {type !== 'question' && type !== 'sketch' && (
           <FloatingToolbar.ColorPicker
+            floating
+            triggerClassName="node-toolbar-color"
             colors={accentPickerOptions}
             value={nodeAccentPickerValue(type, data.style?.accent)}
             onSelect={(t) =>
@@ -460,77 +428,86 @@ export const NodeFloatingToolbar = memo(
           />
         )}
 
-        <FloatingToolbar.SizePicker
-          width={currentWidth}
-          height={isTextFlowNode ? null : currentHeight}
-          showHeight={!isTextFlowNode}
-          onApply={({ width, height }) => {
-            if (!internalNode) return;
-            const resolved = resolveGeometryEdit(internalNode, {
-              width,
-              height,
-            });
-            if (!resolved) return;
-            beginGesture('SET_NODE_GEOMETRY');
-            // Frame in hug mode: typing an explicit W or H is a
-            // direct-manipulation signal to switch the frame's sizing
-            // policy to manual. Dispatch the policy change first
-            // (inside the same gesture) so both intents fold into one
-            // undo entry and the geometry write isn't reverted by the
-            // engine's end-of-batch refit pass.
-            if (isFrameHug) {
-              dispatchUiIntent({
-                type: 'SET_FRAME_LAYOUT_MODE',
-                frameId: id,
-                mode: frameLayoutMode,
-                sizing: 'manual',
-              });
-            }
-            setNodeGeometry([
-              {
-                nodeId: id,
-                size: {
-                  width: resolved.width,
-                  height: resolved.height,
-                },
-              },
-            ]);
-          }}
-          autoSize={
-            isFrame
-              ? {
-                  dimensions: 'both',
-                  active: isFrameHug,
-                  onToggle: toggleFrameSizing,
-                }
-              : undefined
-          }
-          heightAuto={
-            type === 'note'
-              ? {
-                  active: isNoteAutoHeight,
-                  onToggle: toggleNoteAutoHeight,
-                }
-              : undefined
-          }
-        />
+        {type === 'sketch' && toolbar}
         {type === 'text' && (
-          <FloatingToolbar.NumberInput
-            label="Font"
-            ariaLabel="Font size"
-            name="font-size"
-            value={data.style?.fontSize ?? 16}
-            min={8}
-            max={160}
-            onApply={(fontSize) => {
-              updateNodeData(id, {
-                style: { ...(data.style ?? {}), fontSize },
-              });
-            }}
-          />
+          <>
+            <TextFontSizePicker
+              value={data.style?.fontSize ?? 16}
+              onApply={(fontSize) =>
+                updateNodeData(id, { style: { ...data.style, fontSize } })
+              }
+            />
+            {toolbar}
+            <FloatingToolbar.Divider />
+          </>
         )}
-        {type === 'question' && (
-          <FloatingToolbar.Group>
+
+        <DropdownMenu
+          floating
+          placement="bottom"
+          className={`${FLOATING_TOOLBAR_POPOVER_CLASS} node-toolbar-size-panel flex-row items-center gap-2`}
+          trigger={
+            <Button variant="ghost" iconOnly title={t('toolbar.size.title')}>
+              <Settings2 />
+            </Button>
+          }
+        >
+          <FloatingToolbar.SizePicker
+            width={currentWidth}
+            height={isTextFlowNode ? null : currentHeight}
+            showHeight={!isTextFlowNode}
+            onApply={({ width, height }) => {
+              if (!internalNode) return;
+              const resolved = resolveGeometryEdit(internalNode, {
+                width,
+                height,
+              });
+              if (!resolved) return;
+              beginGesture('SET_NODE_GEOMETRY');
+              // Frame in hug mode: typing an explicit W or H is a
+              // direct-manipulation signal to switch the frame's sizing
+              // policy to manual. Dispatch the policy change first
+              // (inside the same gesture) so both intents fold into one
+              // undo entry and the geometry write isn't reverted by the
+              // engine's end-of-batch refit pass.
+              if (isFrameHug) {
+                dispatchUiIntent({
+                  type: 'SET_FRAME_LAYOUT_MODE',
+                  frameId: id,
+                  mode: frameLayoutMode,
+                  sizing: 'manual',
+                });
+              }
+              setNodeGeometry([
+                {
+                  nodeId: id,
+                  size: {
+                    width: resolved.width,
+                    height: resolved.height,
+                  },
+                },
+              ]);
+            }}
+            autoSize={
+              isFrame
+                ? {
+                    dimensions: 'both',
+                    appearance: 'separate',
+                    active: isFrameHug,
+                    onToggle: toggleFrameSizing,
+                  }
+                : undefined
+            }
+            heightAuto={
+              type === 'note'
+                ? {
+                    active: isNoteAutoHeight,
+                    onToggle: toggleNoteAutoHeight,
+                  }
+                : undefined
+            }
+          />
+          {type === 'question' && (
             <FloatingToolbar.NumberInput
               label={t('toolbar.cardScale')}
               ariaLabel={t('toolbar.cardScale')}
@@ -547,72 +524,97 @@ export const NodeFloatingToolbar = memo(
               }
               onApply={applyQuestionScale}
             />
-          </FloatingToolbar.Group>
-        )}
+          )}
+        </DropdownMenu>
 
         {/* ── Group 3: Canvas display effects ── */}
-        {toolbar && (
-          <>
-            <FloatingToolbar.Divider />
-            {toolbar}
-          </>
-        )}
+        {type !== 'text' && type !== 'sketch' && toolbar}
 
         {/* ── Group 4: Actions ── */}
-        {actions && (
-          <>
-            <FloatingToolbar.Divider />
-            {actions}
-          </>
-        )}
-
-        {type !== 'spacePreview' && (
-          <>
-            <FloatingToolbar.Divider />
-            <FloatingToolbar.ActionButton
-              title={t('moveSelection.action')}
-              onClick={() => setMoveSelectionDialogOpen(true)}
-            >
-              <MoveRight />
-            </FloatingToolbar.ActionButton>
-          </>
-        )}
+        {actions}
 
         <FloatingToolbar.Divider />
-        <FloatingToolbar.ActionButton
-          title={t('node.copyLink')}
-          onClick={(event) => {
-            event.stopPropagation();
-            const href = buildNodeDeepLink(
-              window.location.origin,
-              canvasId,
-              id,
-            );
-            void copyToClipboard(href)
-              .then(() => {
-                toast(t('node.linkCopied'), { tone: 'success' });
-              })
-              .catch(() => {
-                toast(t('node.copyLinkFailed'), { tone: 'danger' });
-              });
-          }}
+        <DropdownMenu
+          floating
+          open={moreOpen}
+          onOpenChange={setMoreOpen}
+          className="node-toolbar-overflow"
+          align="bottom-left"
+          trigger={
+            <Button variant="ghost" iconOnly title={t('toolbar.more')}>
+              <Ellipsis />
+            </Button>
+          }
         >
-          <Link />
-        </FloatingToolbar.ActionButton>
+          <div
+            role="presentation"
+            onKeyDown={handleCanvasNavigationKey}
+            onClick={(event) => {
+              const item = (event.target as Element).closest(
+                '[role="menuitem"]',
+              );
+              if (
+                item &&
+                !item.hasAttribute('aria-haspopup') &&
+                !item.hasAttribute('disabled')
+              )
+                setMoreOpen(false);
+            }}
+          >
+            {(type === 'text' || type === 'note') && (
+              <DropdownMenuItem
+                disabled={isTypeToggleDisabled}
+                title={typeToggleDisabledReason ?? undefined}
+                icon={type === 'text' ? <NODE_ICON.note /> : <NODE_ICON.text />}
+                onClick={() => {
+                  if (!isTypeToggleDisabled)
+                    convertNodeType(id, type === 'text' ? 'note' : 'text');
+                }}
+              >
+                {type === 'text'
+                  ? t('toolbar.convertToNote')
+                  : t('toolbar.convertToText')}
+              </DropdownMenuItem>
+            )}
+            {overflow}
+            {type !== 'spacePreview' && (
+              <DropdownMenuItem
+                icon={<SquareArrowRightEnter />}
+                onClick={() => setMoveSelectionDialogOpen(true)}
+              >
+                {t('moveSelection.action')}
+              </DropdownMenuItem>
+            )}
 
-        {/* Non-mouse only: mouse users have keyboard Delete / Backspace. */}
-        {isNotMouse && (
-          <>
-            <FloatingToolbar.Divider />
-            <FloatingToolbar.ActionButton
-              title={t('actions.delete')}
-              tone="danger"
+            <DropdownMenuItem
+              icon={<Link />}
+              onClick={() => {
+                const href = buildNodeDeepLink(
+                  window.location.origin,
+                  canvasId,
+                  id,
+                );
+                void copyToClipboard(href)
+                  .then(() => {
+                    toast(t('node.linkCopied'), { tone: 'success' });
+                  })
+                  .catch(() => {
+                    toast(t('node.copyLinkFailed'), { tone: 'danger' });
+                  });
+              }}
+            >
+              {t('node.copyLink')}
+            </DropdownMenuItem>
+
+            <DropdownMenuItem
+              icon={<Trash2 />}
+              className="text-danger"
               onClick={() => deleteNodes([id])}
             >
-              <Trash2 />
-            </FloatingToolbar.ActionButton>
-          </>
-        )}
+              {t('actions.delete')}
+            </DropdownMenuItem>
+          </div>
+        </DropdownMenu>
       </CanvasFloatingPopover>
     );
   },

@@ -1,12 +1,23 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { Bold, Italic, Underline, Strikethrough } from 'lucide-react';
+import {
+  Bold,
+  Check,
+  Italic,
+  Type,
+  Underline,
+  Strikethrough,
+} from 'lucide-react';
 import { memo, useCallback, useEffect, useState, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { resolveAccent } from '@huabu/shared';
 
+import {
+  DropdownMenuItem,
+  DropdownMenuSubmenu,
+} from '@/components/Common/DropdownMenu';
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar.tsx';
 import { useTextNodeSurface } from '@/hooks/useTextNodeSurface';
 import useCanvasStore, { settleNodePreprocess } from '@/store/canvasStore.ts';
@@ -155,6 +166,7 @@ export const TextNode = memo(
       <>
         <FloatingToolbar.ToggleButton
           active={style.fontWeight === 'bold'}
+          className="node-toolbar-text-format"
           title={t('editor.inlineMarks.bold')}
           onClick={() =>
             updateStyle({
@@ -167,6 +179,7 @@ export const TextNode = memo(
 
         <FloatingToolbar.ToggleButton
           active={style.fontStyle === 'italic'}
+          className="node-toolbar-text-format"
           title={t('editor.inlineMarks.italic')}
           onClick={() =>
             updateStyle({
@@ -176,40 +189,68 @@ export const TextNode = memo(
         >
           <Italic />
         </FloatingToolbar.ToggleButton>
-
-        <FloatingToolbar.ToggleButton
-          active={textDecoration.includes('underline')}
-          title={t('node.underline')}
+      </>
+    );
+    const TextOverflow = (
+      <>
+        <DropdownMenuItem
+          icon={<Underline />}
+          trailing={
+            textDecoration.includes('underline') ? (
+              <Check size={14} />
+            ) : undefined
+          }
           onClick={() => toggleDecoration('underline')}
         >
-          <Underline />
-        </FloatingToolbar.ToggleButton>
+          {t('node.underline')}
+        </DropdownMenuItem>
 
-        <FloatingToolbar.ToggleButton
-          active={textDecoration.includes('line-through')}
-          title={t('editor.inlineMarks.strikethrough')}
+        <DropdownMenuItem
+          icon={<Strikethrough />}
+          trailing={
+            textDecoration.includes('line-through') ? (
+              <Check size={14} />
+            ) : undefined
+          }
           onClick={() => toggleDecoration('line-through')}
         >
-          <Strikethrough />
-        </FloatingToolbar.ToggleButton>
+          {t('editor.inlineMarks.strikethrough')}
+        </DropdownMenuItem>
 
-        <FloatingToolbar.Divider />
-
-        <FloatingToolbar.Select
-          options={FONT_FAMILY_OPTIONS.map((f) => ({
-            value: f.value,
-            label:
-              f.value === 'default'
+        <DropdownMenuSubmenu
+          className="node-toolbar-overflow node-toolbar-font-submenu"
+          label={
+            <span className="flex items-center gap-2">
+              <Type />
+              {t('toolbar.fontFamily')}
+            </span>
+          }
+        >
+          {FONT_FAMILY_OPTIONS.map((font) => (
+            <DropdownMenuItem
+              key={font.value}
+              aria-current={
+                (style.fontFamily ?? 'default') === font.value
+                  ? 'true'
+                  : undefined
+              }
+              trailing={
+                (style.fontFamily ?? 'default') === font.value ? (
+                  <Check size={14} />
+                ) : undefined
+              }
+              onClick={() => updateStyle({ fontFamily: font.value })}
+            >
+              {font.value === 'default'
                 ? t('node.fontDefault')
-                : f.value === 'serif'
+                : font.value === 'serif'
                   ? t('node.fontSerif')
-                  : f.value === 'mono'
+                  : font.value === 'mono'
                     ? t('node.fontMono')
-                    : t('node.fontHand'),
-          }))}
-          value={style.fontFamily ?? 'default'}
-          onChange={(v) => updateStyle({ fontFamily: v })}
-        />
+                    : t('node.fontHand')}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuSubmenu>
       </>
     );
 
@@ -220,6 +261,7 @@ export const TextNode = memo(
         type={'text'}
         selected={selected}
         toolbar={isContentMissing ? undefined : TextToolbar}
+        overflow={isContentMissing ? undefined : TextOverflow}
         keepAspectRatio={false}
         {...surface.nodeWrapperProps}
       >

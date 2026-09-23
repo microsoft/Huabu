@@ -199,6 +199,7 @@ export const MultiSelectResizer = () => {
     () => nodes.filter((n) => n.selected) as CanvasNode[],
     [nodes],
   );
+  const showHandles = !selectedNodes.some((node) => node.dragging);
 
   // Drop nodes whose ancestor is also selected so a frame and its child
   // selected together are not double-scaled.
@@ -404,37 +405,39 @@ export const MultiSelectResizer = () => {
         variant="dashed"
         rect={{ x: 0, y: 0, width: widthPx, height: heightPx }}
       />
-      {corners.map(({ id: corner, cursor }) => {
-        const left =
-          corner === 'tl' || corner === 'bl'
-            ? -handleSize / 2
-            : widthPx - handleSize / 2;
-        const top =
-          corner === 'tl' || corner === 'tr'
-            ? -handleSize / 2
-            : heightPx - handleSize / 2;
-        return (
-          <div
-            key={corner}
-            data-multi-resize-control={corner}
-            className="pointer-events-auto absolute grid place-items-center"
-            style={{
-              left,
-              top,
-              width: handleSize,
-              height: handleSize,
-              cursor,
-              touchAction: 'none',
-            }}
-            onPointerDown={(e) => startGesture(corner, e)}
-            onPointerMove={moveGesture}
-            onPointerUp={endGesture}
-            onPointerCancel={endGesture}
-          >
-            <ResizeGrip isNotMouse={isDirectManipulation} />
-          </div>
-        );
-      })}
+      {showHandles &&
+        corners.map(({ id: corner, cursor }) => {
+          const left =
+            corner === 'tl' || corner === 'bl'
+              ? -handleSize / 2
+              : widthPx - handleSize / 2;
+          const top =
+            corner === 'tl' || corner === 'tr'
+              ? -handleSize / 2
+              : heightPx - handleSize / 2;
+          return (
+            <div
+              key={corner}
+              data-multi-resize-control={corner}
+              className="pointer-events-auto absolute grid place-items-center"
+              style={{
+                left,
+                top,
+                width: handleSize,
+                height: handleSize,
+                cursor,
+                touchAction: 'none',
+              }}
+              onPointerDown={(e) => startGesture(corner, e)}
+              onPointerMove={moveGesture}
+              onPointerUp={endGesture}
+              onPointerCancel={endGesture}
+              onLostPointerCapture={endGesture}
+            >
+              <ResizeGrip isNotMouse={isDirectManipulation} />
+            </div>
+          );
+        })}
     </div>
   );
 

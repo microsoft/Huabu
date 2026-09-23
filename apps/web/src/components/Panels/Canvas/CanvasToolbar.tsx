@@ -61,6 +61,9 @@ interface NodeToolbarProps {
   onToolChange: (tool: 'select' | 'pan' | 'lasso') => void;
 }
 
+const MAIN_TOOL_BUTTON_CLASS =
+  'h-8 w-8 shrink-0 p-2 [&>span]:right-px [&>span]:bottom-0.5';
+
 export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
   const { t } = useTranslation();
   const addNodes = useCanvasStore((s) => s.addNodes);
@@ -393,7 +396,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
 
   return (
     <>
-      <div className="text-fg-muted shadow-bottom bg-surface pointer-events-auto relative flex w-max items-center gap-1.5 rounded-lg border-0 px-4 py-2">
+      <div className="text-fg-muted shadow-bottom bg-surface border-edge-default pointer-events-auto relative flex w-max items-center gap-1.5 rounded-xl border px-2 py-1.5">
         {/* Group 1: Tools */}
         <div className="flex items-center gap-1.5">
           <SplitSelect<'select' | 'pan' | 'lasso'>
@@ -436,9 +439,10 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             }
             primaryShortcutBadgeActive={!pendingNodeType}
             primaryButtonClassName={clsx(
+              MAIN_TOOL_BUTTON_CLASS,
               !pendingNodeType &&
                 displayedToolActive &&
-                'text-info bg-bg-default enabled:hover:bg-bg-default',
+                'text-info bg-info-bg enabled:hover:bg-info-bg',
             )}
             menuButtonClassName="enabled:hover:bg-bg-default"
           />
@@ -455,7 +459,9 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             shortcutBadge={isNotMouse ? undefined : '1'}
             shortcutBadgeActive={pendingNodeType === 'note'}
             className={clsx(
-              pendingNodeType === 'note' && 'text-info bg-bg-default',
+              MAIN_TOOL_BUTTON_CLASS,
+              pendingNodeType === 'note' &&
+                'text-info bg-info-bg enabled:hover:bg-info-bg',
             )}
             onClick={() => {
               onToolChange('select');
@@ -471,7 +477,9 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             shortcutBadge={isNotMouse ? undefined : '2'}
             shortcutBadgeActive={pendingNodeType === 'text'}
             className={clsx(
-              pendingNodeType === 'text' && 'text-info bg-bg-default',
+              MAIN_TOOL_BUTTON_CLASS,
+              pendingNodeType === 'text' &&
+                'text-info bg-info-bg enabled:hover:bg-info-bg',
             )}
             onClick={() => {
               onToolChange('select');
@@ -487,7 +495,9 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             shortcutBadge={isNotMouse ? undefined : '3'}
             shortcutBadgeActive={pendingNodeType === 'frame'}
             className={clsx(
-              pendingNodeType === 'frame' && 'text-info bg-bg-default',
+              MAIN_TOOL_BUTTON_CLASS,
+              pendingNodeType === 'frame' &&
+                'text-info bg-info-bg enabled:hover:bg-info-bg',
             )}
             onClick={() => {
               onToolChange('select');
@@ -520,7 +530,9 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
                 shortcutBadge="4"
                 shortcutBadgeActive={pendingNodeType === 'sketch'}
                 className={clsx(
-                  pendingNodeType === 'sketch' && 'text-info bg-bg-default',
+                  MAIN_TOOL_BUTTON_CLASS,
+                  pendingNodeType === 'sketch' &&
+                    'text-info bg-info-bg enabled:hover:bg-info-bg',
                 )}
                 onClick={() => {
                   // Clicking the Sketch button always resets the tool to draw
@@ -623,7 +635,9 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             shortcutBadge={isNotMouse ? undefined : 'A'}
             shortcutBadgeActive={pendingNodeType === 'question'}
             className={clsx(
-              pendingNodeType === 'question' && 'text-info bg-bg-default',
+              MAIN_TOOL_BUTTON_CLASS,
+              pendingNodeType === 'question' &&
+                'text-info bg-info-bg enabled:hover:bg-info-bg',
             )}
             onClick={() =>
               setPendingNodeType(
@@ -644,6 +658,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
                 variant="ghost"
                 iconOnly
                 title={t('actions.undo')}
+                className={MAIN_TOOL_BUTTON_CLASS}
                 disabled={!canUndo}
                 onClick={() => undo()}
               >
@@ -653,6 +668,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
                 variant="ghost"
                 iconOnly
                 title={t('actions.redo')}
+                className={MAIN_TOOL_BUTTON_CLASS}
                 disabled={!canRedo}
                 onClick={() => redo()}
               >

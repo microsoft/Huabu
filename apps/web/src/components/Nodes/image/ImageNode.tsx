@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { Fullscreen, Image as ImageIcon } from 'lucide-react';
+import { Maximize2, Image as ImageIcon } from 'lucide-react';
 import { memo, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -44,7 +44,7 @@ export const ImageNode = memo(
           openPreviewNode(id);
         }}
       >
-        <Fullscreen />
+        <Maximize2 />
       </FloatingToolbar.ActionButton>
     );
 

@@ -3,6 +3,7 @@
 
 import {
   ReactFlow,
+  ReactFlowProvider,
   Controls,
   ControlButton,
   MiniMap,
@@ -436,7 +437,22 @@ function CanvasFitControl() {
   );
 }
 
-export const Canvas: React.FC<CanvasProps> = ({
+export const Canvas: React.FC<CanvasProps> = (props) => {
+  const { nodes, edges } = useCanvasStore.getState();
+  return (
+    <ReactFlowProvider
+      initialNodes={nodes}
+      initialEdges={edges}
+      initialMinZoom={MIN_ZOOM}
+      initialMaxZoom={MAX_ZOOM}
+      zIndexMode="manual"
+    >
+      <CanvasContent {...props} />
+    </ReactFlowProvider>
+  );
+};
+
+const CanvasContent: React.FC<CanvasProps> = ({
   shortcutsDisabled = false,
 }) => {
   // ── Reactive state subscriptions ─────────────────────────────
@@ -501,9 +517,9 @@ export const Canvas: React.FC<CanvasProps> = ({
   } = useCanvasStore.getState();
   const { setPendingNodeType } = useToolStore.getState();
 
-  const [isNativeBoxSelecting, setIsNativeBoxSelecting] = useState(false);
+  const isBoxSelecting = useStore((state) => state.userSelectionActive);
+  // The custom marquee owns auto-pan; native selection must not run it twice.
   const [isMouseMarqueeSelecting, setIsMouseMarqueeSelecting] = useState(false);
-  const isBoxSelecting = isNativeBoxSelecting || isMouseMarqueeSelecting;
 
   const selectedNodeIds = useMemo(
     () => new Set(nodes.filter((node) => node.selected).map((node) => node.id)),
@@ -587,15 +603,9 @@ export const Canvas: React.FC<CanvasProps> = ({
     };
   }, []);
 
-  const handleSelectionStart = useCallback(() => {
-    if (tool !== 'select') return;
-    setIsNativeBoxSelecting(true);
-  }, [tool]);
-
   // Sync the box-selected nodes back through the standard SELECT_NODES intent
   // so action history and event buffer stay in step with the visible selection.
   const handleSelectionEnd = useCallback(() => {
-    setIsNativeBoxSelecting(false);
     if (tool !== 'select') return;
     selectNodes(nodes.filter((n) => n.selected).map((n) => n.id));
   }, [nodes, selectNodes, tool]);
@@ -1615,7 +1625,6 @@ export const Canvas: React.FC<CanvasProps> = ({
               : 'Shift'
           }
           selectionMode={SelectionMode.Partial}
-          onSelectionStart={handleSelectionStart}
           onSelectionEnd={handleSelectionEnd}
           nodesDraggable={
             !interactivityLocked && !pendingNodeType && tool !== 'lasso'
@@ -1668,7 +1677,9 @@ export const Canvas: React.FC<CanvasProps> = ({
             extraRecognizers={pointerRecognizers}
           />
           <SelectionAutoPan
-            active={isNativeBoxSelecting || isLassoActive}
+            active={
+              (isBoxSelecting && !isMouseMarqueeSelecting) || isLassoActive
+            }
             wrapperRef={wrapperRef}
             onPan={shiftLassoScreenPoints}
           />
@@ -1693,8 +1704,8 @@ export const Canvas: React.FC<CanvasProps> = ({
               <NodeToolbar activeTool={tool} onToolChange={setTool} />
             </Panel>
           )}
-          {!isBoxSelecting && <MultiSelectResizer />}
-          {!isBoxSelecting && <SelectionOutlines />}
+          <MultiSelectResizer />
+          <SelectionOutlines />
           {!isBoxSelecting && !hasStrokeSelection && <MultiSelectToolbar />}
           {!isBoxSelecting && <StrokeSelectionRegion />}
           {!isBoxSelecting && <StrokeSelectionToolbar />}

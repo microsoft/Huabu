@@ -51,9 +51,10 @@ async function placeTextNode(
   at: { x: number; y: number },
   content = 'hello',
 ): Promise<void> {
-  // Scope the tool button to the bottom-center toolbar panel so it stays
-  // unambiguous once placed Text nodes also match an accessible "Text" name.
-  const toolbar = page.locator('.react-flow__panel.bottom.center');
+  // Scope to the canvas toolbar, including its portalled overlay host.
+  const toolbar = page.locator(
+    '[data-canvas-main-toolbar], .react-flow__panel.bottom.center',
+  );
   await toolbar.getByRole('button', { name: /^Text/ }).click();
   await expect(page.locator('.canvas-pending-text').first()).toBeVisible();
   await page.mouse.click(at.x, at.y);
@@ -74,6 +75,25 @@ async function pasteNote(page: Page, markdown: string): Promise<void> {
     );
   }, markdown);
   await expect(page.locator('.react-flow__node-note')).toHaveCount(1);
+}
+
+async function boxSelectAllNodes(page: Page): Promise<void> {
+  const bounds = await page
+    .locator('.react-flow__node')
+    .evaluateAll((nodes) => {
+      const rects = nodes.map((node) => node.getBoundingClientRect());
+      if (rects.length === 0) throw new Error('no nodes to box-select');
+      return {
+        left: Math.min(...rects.map((rect) => rect.left)) - 50,
+        top: Math.min(...rects.map((rect) => rect.top)) - 50,
+        right: Math.max(...rects.map((rect) => rect.right)) + 50,
+        bottom: Math.max(...rects.map((rect) => rect.bottom)) + 50,
+      };
+    });
+  await page.mouse.move(bounds.left, bounds.top);
+  await page.mouse.down();
+  await page.mouse.move(bounds.right, bounds.bottom, { steps: 12 });
+  await page.mouse.up();
 }
 
 test.describe('canvas mouse mode', () => {
@@ -157,7 +177,14 @@ test.describe('canvas mouse mode', () => {
       before.y + before.height / 2 + 90,
       { steps: 10 },
     );
+    await expect(page.locator('[data-node-selection-outline]')).toBeVisible();
+    await expect(
+      page.locator('.react-flow__resize-control.handle'),
+    ).toHaveCount(0);
     await page.mouse.up();
+    await expect(
+      page.locator('.react-flow__resize-control.handle'),
+    ).toHaveCount(4);
 
     const after = await node.boundingBox();
     if (!after) throw new Error('moved node has no bounding box');
@@ -286,9 +313,157 @@ test.describe('canvas mouse mode', () => {
     await page.mouse.move(box.x + box.width + pad, box.y + box.height + pad, {
       steps: 12,
     });
+    await expect(page.locator('.react-flow__selection')).toBeVisible();
+    await expect(page.locator('[data-node-selection-outline]')).toHaveCount(1);
+    await expect(
+      page.locator('.react-flow__resize-control.handle'),
+    ).toHaveCount(0);
+    await expect(page.locator('[data-floating-chrome]')).toHaveCount(0);
+    await expect(
+      page.locator('.react-flow__handle .pointer-events-auto'),
+    ).toHaveCount(0);
     await page.mouse.up();
     await expect(page.locator('.react-flow__node.selected')).toHaveCount(1);
+    await expect(page.locator('[data-node-selection-outline]')).toBeVisible();
+    await expect(
+      page.locator('.react-flow__resize-control.handle'),
+    ).toHaveCount(4);
+    await expect(page.locator('[data-floating-chrome]').first()).toBeVisible();
+    await expect(
+      page.locator('.react-flow__handle.source [role="button"]'),
+    ).toHaveCount(4);
   });
+
+  for (const modifier of ['Control', 'Meta']) {
+    test(`${modifier} hides individual corners but keeps group corners`, async ({
+      page,
+    }) => {
+      const c = await paneCenter(page);
+      await placeTextNode(page, { x: c.x - 130, y: c.y }, 'a');
+      await placeTextNode(page, { x: c.x + 140, y: c.y }, 'b');
+      await page.mouse.click(c.x + 340, c.y + 240);
+      await page.keyboard.press('s');
+      const nodes = page.locator('.react-flow__node');
+      await nodes.nth(0).click({ position: { x: 3, y: 3 } });
+      await expect(page.locator('.react-flow__node.selected')).toHaveCount(1);
+
+      await page.keyboard.down(modifier);
+      await expect(page.locator('[data-node-selection-outline]')).toHaveCount(
+        1,
+      );
+      await expect(
+        page.locator('.react-flow__resize-control.handle'),
+      ).toHaveCount(0);
+      await expect(page.locator('[data-floating-chrome]')).toHaveCount(0);
+      await expect(
+        page.locator('.react-flow__handle .pointer-events-auto'),
+      ).toHaveCount(0);
+
+      await page.keyboard.up(modifier);
+      await expect(
+        page.locator('.react-flow__resize-control.handle'),
+      ).toHaveCount(4);
+
+      await page.mouse.click(c.x + 340, c.y + 240);
+      await expect(page.locator('.react-flow__node.selected')).toHaveCount(0);
+      await boxSelectAllNodes(page);
+      await expect(page.locator('.react-flow__node.selected')).toHaveCount(2);
+      await expect(page.locator('[data-multi-resize-control]')).toHaveCount(4);
+
+      await page.keyboard.down(modifier);
+      await expect(page.locator('[data-node-selection-outline]')).toHaveCount(
+        2,
+      );
+      await expect(page.locator('[data-multi-resize-control]')).toHaveCount(4);
+      await expect(page.locator('[data-multi-selection]')).toBeVisible();
+      await expect(
+        page.locator('.react-flow__resize-control.handle'),
+      ).toHaveCount(0);
+      await page.keyboard.up(modifier);
+      await expect(page.locator('[data-node-selection-outline]')).toHaveCount(
+        2,
+      );
+      await expect(page.locator('[data-multi-selection]')).toBeVisible();
+      await expect(page.locator('[data-multi-resize-control]')).toHaveCount(4);
+    });
+  }
+
+  for (const count of [1, 2]) {
+    for (const modifier of ['Control', 'Meta']) {
+      test(`${count}-node resize finishes when ${modifier} is pressed mid-gesture`, async ({
+        page,
+      }) => {
+        const c = await paneCenter(page);
+        await placeTextNode(page, { x: c.x - 130, y: c.y }, 'a');
+        if (count === 2) {
+          await placeTextNode(page, { x: c.x + 140, y: c.y }, 'b');
+        }
+        await page.mouse.click(c.x + 340, c.y + 240);
+        await page.keyboard.press('s');
+        await boxSelectAllNodes(page);
+        await expect(page.locator('.react-flow__node.selected')).toHaveCount(
+          count,
+        );
+        const nodes = page.locator('.react-flow__node');
+        await expect(nodes).toHaveCount(count);
+        const readWidths = () =>
+          nodes.evaluateAll((elements) =>
+            elements.map((element) => element.getBoundingClientRect().width),
+          );
+        const before = await readWidths();
+        const handles = page.locator(
+          count === 1
+            ? '.react-flow__resize-control.handle'
+            : '[data-multi-resize-control]',
+        );
+        await expect(handles).toHaveCount(4);
+        const corner = await handles.last().boundingBox();
+        if (!corner) throw new Error('resize corner has no bounding box');
+        const start = {
+          x: corner.x + corner.width / 2,
+          y: corner.y + corner.height / 2,
+        };
+        await page.mouse.move(start.x, start.y);
+        await page.mouse.down();
+        await page.mouse.move(start.x + 40, start.y + 20, { steps: 6 });
+        for (let index = 0; index < count; index++) {
+          await expect
+            .poll(async () => (await readWidths())[index])
+            .toBeGreaterThan(before[index] + 1);
+        }
+        const beforeModifier = await readWidths();
+        await page.keyboard.down(modifier);
+        await expect(handles).toHaveCount(4);
+        await page.mouse.move(start.x + 100, start.y + 40, { steps: 6 });
+        for (let index = 0; index < count; index++) {
+          await expect
+            .poll(async () => (await readWidths())[index])
+            .toBeGreaterThan(beforeModifier[index] + 5);
+        }
+        const duringModifier = await readWidths();
+        await page.mouse.up();
+        await expect(handles).toHaveCount(count === 1 ? 0 : 4);
+        await page.keyboard.up(modifier);
+        await expect(handles).toHaveCount(4);
+        for (let index = 0; index < count; index++) {
+          await expect
+            .poll(async () =>
+              Math.abs((await readWidths())[index] - duringModifier[index]),
+            )
+            .toBeLessThan(1);
+        }
+
+        await page.keyboard.press('ControlOrMeta+z');
+        for (let index = 0; index < count; index++) {
+          await expect
+            .poll(async () =>
+              Math.abs((await readWidths())[index] - before[index]),
+            )
+            .toBeLessThan(1);
+        }
+      });
+    }
+  }
 
   test('ctrl + wheel over the pane zooms the viewport', async ({ page }) => {
     const c = await paneCenter(page);
@@ -337,6 +512,17 @@ test.describe('canvas mouse mode', () => {
     await page.mouse.move(left, top);
     await page.mouse.down();
     await page.mouse.move(right, bottom, { steps: 14 });
+    await expect(page.locator('.react-flow__selection')).toBeVisible();
+    await expect(page.locator('[data-node-selection-outline]')).toHaveCount(2);
+    await expect(page.locator('[data-multi-selection]')).toBeVisible();
+    await expect(page.locator('[data-multi-resize-control]')).toHaveCount(4);
+    await expect(
+      page.locator('.react-flow__resize-control.handle'),
+    ).toHaveCount(0);
+    await expect(page.locator('[data-floating-chrome]')).toHaveCount(0);
+    await expect(
+      page.locator('.react-flow__handle .pointer-events-auto'),
+    ).toHaveCount(0);
     await page.mouse.up();
     await expect(page.locator('.react-flow__node.selected')).toHaveCount(2);
 
@@ -346,7 +532,11 @@ test.describe('canvas mouse mode', () => {
     await page.mouse.move(a0.x + a0.width / 2, a0.y + a0.height / 2 + 130, {
       steps: 12,
     });
+    await expect(page.locator('[data-node-selection-outline]')).toHaveCount(2);
+    await expect(page.locator('[data-multi-selection]')).toBeVisible();
+    await expect(page.locator('[data-multi-resize-control]')).toHaveCount(0);
     await page.mouse.up();
+    await expect(page.locator('[data-multi-resize-control]')).toHaveCount(4);
 
     const a1 = await nodes.nth(0).boundingBox();
     const b1 = await nodes.nth(1).boundingBox();

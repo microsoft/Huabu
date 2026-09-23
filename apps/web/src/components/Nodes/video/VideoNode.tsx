@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { Fullscreen, Play } from 'lucide-react';
+import { Maximize2, Play } from 'lucide-react';
 import { memo, useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -57,7 +57,7 @@ export const VideoNode = memo(
           openPreviewNode(id);
         }}
       >
-        <Fullscreen />
+        <Maximize2 />
       </FloatingToolbar.ActionButton>
     );
 

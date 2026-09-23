@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { MoveRight, Trash2 } from 'lucide-react';
+import { SquareArrowRightEnter, Settings2, Trash2 } from 'lucide-react';
 import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -14,10 +14,13 @@ import {
   resolveHeightMode,
 } from '@huabu/shared/canvas-engine';
 
+import { Button } from '@/components/Common/Button';
 import { CanvasFloatingPopover } from '@/components/Common/CanvasFloatingPopover';
+import { DropdownMenu } from '@/components/Common/DropdownMenu';
 import {
   FloatingToolbar,
   FLOATING_TOOLBAR_CLASS,
+  FLOATING_TOOLBAR_POPOVER_CLASS,
 } from '@/components/Common/FloatingToolbar';
 import { nodeUsesAccent } from '@/components/Nodes/design/nodeAccentPolicy';
 import { useIsNotMouse } from '@/hooks/useInputMode';
@@ -26,10 +29,13 @@ import useCanvasStore from '@/store/canvasStore';
 import { resolveGeometryEdit } from '@/utils/node/geometry';
 import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 
+import './NodeToolbar.css';
+
 import {
   nodeAccentPickerOptions,
   nodeAccentPickerValue,
 } from './nodeAccentPickerOptions';
+import { TextFontSizePicker } from './TextFontSizePicker';
 
 import type { CanvasNode } from '@/components/Nodes/types';
 import type { CanvasEdgeId, CanvasNodeId } from '@huabu/shared';
@@ -202,97 +208,111 @@ export const MultiSelectToolbar = () => {
       open={selectedNodes.length >= 2}
       offset={12}
       side="top"
-      className={FLOATING_TOOLBAR_CLASS}
+      className={`${FLOATING_TOOLBAR_CLASS} canvas-context-toolbar`}
     >
       {/* Align & distribute — collapsed into a single popover trigger
           to keep the multi-select toolbar compact. Houses the 6 align
           actions in a 3×2 grid plus the Spread Apart action. */}
       <FloatingToolbar.AlignPicker
+        floating
+        panelClassName="canvas-context-settings"
         onAlign={(direction) => alignSelectedNodes(direction)}
         onSpread={() => spreadSelectedNodes()}
       />
 
       <FloatingToolbar.Divider />
 
-      {/* Size editor: set width / height of every selected node. */}
-      <FloatingToolbar.SizePicker
-        width={commonSize.width}
-        height={textFlowSelection ? null : commonSize.height}
-        showHeight={!textFlowSelection && !hasMixedTextAndBoxSelection}
-        onApply={({ width, height }) => {
-          if (selectedNodes.length === 0) return;
-          if (width === undefined && height === undefined) return;
-          // Resolve per-node via the shared helper, which:
-          //  - falls back to each node's existing width when only height
-          //    was edited (and skips nodes whose width can't be resolved);
-          //  - reads each node's height *ownership* when the user didn't
-          //    enter a height, so a width-only edit never pins an auto
-          //    node (its `style.height` is a number in both modes).
-          const items = selectedNodes
-            .map((node): GeometryToolbarItem | null => {
-              const resolved = resolveGeometryEdit(node, {
-                width,
-                height,
-              });
-              if (!resolved) return null;
-              return {
-                nodeId: node.id as CanvasNodeId,
-                size: {
-                  width: resolved.width,
-                  height: resolved.height,
-                },
-              };
-            })
-            .filter((item): item is GeometryToolbarItem => item !== null);
-          if (items.length === 0) return;
-          // SET_NODE_GEOMETRY uses snapshot:'caller' — open a gesture so
-          // the resize folds into one undo entry and the store doesn't warn.
-          beginGesture('SET_NODE_GEOMETRY');
-          setNodeGeometry(
-            items.map(({ nodeId, size }) => ({
-              nodeId,
-              size,
-            })),
-          );
-        }}
-        heightAuto={
-          noteAutoState
-            ? {
-                active: noteAutoState.active,
-                onToggle: toggleNotesAutoHeight,
-              }
-            : undefined
-        }
-      />
       {textFlowSelection && (
-        <FloatingToolbar.NumberInput
-          label="Font"
-          ariaLabel="Font size"
-          name="font-size"
-          value={textFlowSelection.fontSize}
-          min={8}
-          max={160}
-          onApply={(fontSize) => {
-            executeCommands([
-              {
-                type: 'MERGE_NODE_DATA',
-                patches: selectedNodes.map((node) => ({
-                  nodeId: node.id as CanvasNodeId,
-                  patch: {
-                    style: { ...(node.data.style ?? {}), fontSize },
-                  },
-                })),
-              },
-            ]);
-          }}
-        />
+        <>
+          <TextFontSizePicker
+            value={textFlowSelection.fontSize}
+            onApply={(fontSize) => {
+              executeCommands([
+                {
+                  type: 'MERGE_NODE_DATA',
+                  patches: selectedNodes.map((node) => ({
+                    nodeId: node.id as CanvasNodeId,
+                    patch: {
+                      style: { ...(node.data.style ?? {}), fontSize },
+                    },
+                  })),
+                },
+              ]);
+            }}
+          />
+          <FloatingToolbar.Divider />
+        </>
       )}
+
+      {/* Size editor: set width / height of every selected node. */}
+      <DropdownMenu
+        floating
+        placement="bottom"
+        className={`${FLOATING_TOOLBAR_POPOVER_CLASS} node-toolbar-size-panel flex-row items-center gap-2`}
+        trigger={
+          <Button variant="ghost" iconOnly title={t('toolbar.size.title')}>
+            <Settings2 />
+          </Button>
+        }
+      >
+        <FloatingToolbar.SizePicker
+          width={commonSize.width}
+          height={textFlowSelection ? null : commonSize.height}
+          showHeight={!textFlowSelection && !hasMixedTextAndBoxSelection}
+          onApply={({ width, height }) => {
+            if (selectedNodes.length === 0) return;
+            if (width === undefined && height === undefined) return;
+            // Resolve per-node via the shared helper, which:
+            //  - falls back to each node's existing width when only height
+            //    was edited (and skips nodes whose width can't be resolved);
+            //  - reads each node's height *ownership* when the user didn't
+            //    enter a height, so a width-only edit never pins an auto
+            //    node (its `style.height` is a number in both modes).
+            const items = selectedNodes
+              .map((node): GeometryToolbarItem | null => {
+                const resolved = resolveGeometryEdit(node, {
+                  width,
+                  height,
+                });
+                if (!resolved) return null;
+                return {
+                  nodeId: node.id as CanvasNodeId,
+                  size: {
+                    width: resolved.width,
+                    height: resolved.height,
+                  },
+                };
+              })
+              .filter((item): item is GeometryToolbarItem => item !== null);
+            if (items.length === 0) return;
+            // SET_NODE_GEOMETRY uses snapshot:'caller' — open a gesture so
+            // the resize folds into one undo entry and the store doesn't warn.
+            beginGesture('SET_NODE_GEOMETRY');
+            setNodeGeometry(
+              items.map(({ nodeId, size }) => ({
+                nodeId,
+                size,
+              })),
+            );
+          }}
+          heightAuto={
+            noteAutoState
+              ? {
+                  active: noteAutoState.active,
+                  onToggle: toggleNotesAutoHeight,
+                }
+              : undefined
+          }
+        />
+      </DropdownMenu>
 
       <FloatingToolbar.Divider />
 
       {/* Accent color for selected nodes and the edges between them. */}
       {allSelectedUseAccent && (
         <FloatingToolbar.ColorPicker
+          floating
+          triggerClassName="node-toolbar-color"
           colors={accentPickerOptions}
           value={commonAccent}
           onSelect={(token) => {
@@ -335,7 +355,7 @@ export const MultiSelectToolbar = () => {
             title={t('moveSelection.action')}
             onClick={() => setMoveSelectionDialogOpen(true)}
           >
-            <MoveRight />
+            <SquareArrowRightEnter />
           </FloatingToolbar.ActionButton>
         </>
       )}

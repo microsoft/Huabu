@@ -4,6 +4,7 @@
 import { PropertySymbol, type Window as HappyWindow } from 'happy-dom';
 import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { WebNode, type WebNodeType } from './WebNode';
@@ -56,14 +57,21 @@ vi.mock('../NodeWrapper', () => ({
   NodeWrapper: ({
     children,
     actions,
+    overflow,
   }: {
     children: ReactNode;
     actions: ReactNode;
+    overflow: ReactNode;
   }) => (
-    <div>
-      <div data-node-actions>{actions}</div>
-      {children}
-    </div>
+    <MemoryRouter>
+      <div>
+        <div data-node-actions>
+          {actions}
+          {overflow}
+        </div>
+        {children}
+      </div>
+    </MemoryRouter>
   ),
 }));
 vi.mock('../previewCard/PreviewCard', () => ({

@@ -1,11 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { Fullscreen, ArrowUpRight } from 'lucide-react';
+import { Maximize2, ArrowUpRight } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { getWebPreview } from '@/api/web';
+import { DropdownMenuLink } from '@/components/Common/DropdownMenu';
 import { useNodePresentation } from '@/hooks/useNodePresentation';
 
 import { WebReadingView } from './WebReadingView';
@@ -164,18 +165,6 @@ export const WebNode = memo(
 
     const WebActions = (
       <>
-        {externalHref ? (
-          <a
-            href={externalHref}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={(e) => e.stopPropagation()}
-            className="nodrag text-fg-muted hover:text-info flex flex-1 cursor-pointer items-center gap-1 overflow-hidden text-xs font-medium transition-colors"
-          >
-            <span className="max-w-24 truncate">{shortenForToolbar(src)}</span>
-            <ArrowUpRight size={14} strokeWidth={2} />
-          </a>
-        ) : null}
         <FloatingToolbar.ActionButton
           title={t('node.openLargeView')}
           onClick={(e) => {
@@ -183,7 +172,7 @@ export const WebNode = memo(
             openPreviewNode(id);
           }}
         >
-          <Fullscreen />
+          <Maximize2 />
         </FloatingToolbar.ActionButton>
       </>
     );
@@ -195,6 +184,18 @@ export const WebNode = memo(
         type={'web'}
         selected={selected}
         actions={missingFileKind ? undefined : WebActions}
+        overflow={
+          !missingFileKind && externalHref ? (
+            <DropdownMenuLink
+              to={externalHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              icon={<ArrowUpRight />}
+            >
+              {t('toolbar.openOriginalUrl')}
+            </DropdownMenuLink>
+          ) : undefined
+        }
         resizable
         keepAspectRatio={false}
       >
