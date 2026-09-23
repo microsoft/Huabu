@@ -29,6 +29,9 @@ const freshContext = {
 };
 
 describe('acpDriverFactory (M5 FACTORY)', () => {
+  it('accepts Jobs as well as Deployments without selecting a different transport', () => {
+    expect(acpDriverFactory().workloadTypes).toEqual(['Job', 'Deployment']);
+  });
   it('preserves optional frozen Profile execution revisions outside the recipe', () => {
     const driver = acpDriverFactory();
     const binding = { alias: 'Agent', profileId: 'profile' };

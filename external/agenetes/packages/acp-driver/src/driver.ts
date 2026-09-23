@@ -79,7 +79,7 @@ export function acpDriverFactory<
 >(config: AcpDriverFactoryConfig = DEFAULT_RUNTIME_POLICY): MountedAgentDriver {
   return defineDriver({
     schemaVersion: 1,
-    workloadTypes: ['Deployment'],
+    workloadTypes: ['Job', 'Deployment'],
     specSchema: acpSpecSchema,
     stateSchema: acpDurableStateSchema,
     initialState: () => ({ initialPreambleDelivered: false }),

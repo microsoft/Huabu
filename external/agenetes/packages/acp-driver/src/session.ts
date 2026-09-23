@@ -373,6 +373,7 @@ export { hydrateSelectionsFromPersistedMeta };
 function seedInitialPreferences(
   entry: AcpSessionEntry,
   preferences: EnsureAcpSessionOptions['initialPreferences'],
+  logger?: AcpSessionLogger,
 ): void {
   if (!preferences) return;
 
@@ -421,6 +422,16 @@ function seedInitialPreferences(
     )
   ) {
     entry.selections[MODEL_SELECTION_ID] = preferences.model;
+  }
+  if (
+    preferences.model &&
+    !modelSeeded &&
+    entry.selections[MODEL_SELECTION_ID] !== preferences.model
+  ) {
+    logger?.warn(
+      { profileId: entry.profileId, model: preferences.model },
+      '[acp] requested initial model is not advertised; using the harness default',
+    );
   }
   seedConfigPreference('thought_level', preferences.thoughtLevel);
   if (Object.keys(entry.selections).length > 0) {
@@ -1047,7 +1058,7 @@ async function ensureAcpSessionInner(
   // the user's remembered choices.
   hydrateSelectionsFromPersistedMeta(created, priorState?.metadata);
   if (!priorState?.metadata) {
-    seedInitialPreferences(created, opts.initialPreferences);
+    seedInitialPreferences(created, opts.initialPreferences, logger);
   }
 
   // Installing the listener synchronously drains Gateway pre-attach messages

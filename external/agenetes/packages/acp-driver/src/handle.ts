@@ -1,6 +1,6 @@
 /**
  * `AcpAgentHandle` — the {@link AgentHandle} implementation for the
- * external, ACP-connected backend (the "Deployment" driver).
+ * external, ACP-connected backend.
  *
  * This is the canonical home for the external agent's *execution* logic:
  * the per-update callback → queue bridge, the `session/update` →
@@ -9,18 +9,15 @@
  * done/error frame. The host supplies a durable canonical submission and
  * the driver lowers it into one ACP prompt call.
  *
- * Lifecycle (§3.2 / M2.6): the ACP path is a **Deployment** — a
- * long-lived, stateful session that hosts *many* turns, carries
- * cross-turn `control`, and has a liveness dimension a Job never has. So
- * the handle itself is long-lived: `AgentRuntime` holds it across turns
- * keyed by `threadId`, and it is addressable out-of-turn for `control()`
- * / `close()`. It bakes its {@link AcpCreateSpec} at construction and
+ * Deployments are cached by thread; Jobs get fresh handles and private
+ * session identities. Both currently retain sessions after a run.
+ * The handle bakes its {@link AcpCreateSpec} at construction and
  * self-resolves its backing {@link AcpSessionEntry} *per turn* (via
  * `ensureAcpSession`, get-or-create) inside {@link run} — so the handle
  * owns its whole session lifecycle and the composition shell no longer
  * opens the session out-of-band and hands the entry in. Out-of-turn
  * (`control` / `close`) it resolves the live entry from
- * `acpSessionRegistry` by `threadId` (a precondition failure when no
+ * `acpSessionRegistry` by its session identity (a precondition failure when no
  * session is live — we do not lazily spawn one just to, e.g., set a mode).
  *
  * The heavy session-open logic lives in `ensureAcpSession` (this same
@@ -33,6 +30,8 @@
  *
  * See docs/proposals/layered-architecture.md §3.6 / §7 (M2 / M2.6 / M5).
  */
+
+import { randomUUID } from 'node:crypto';
 
 import { getSupervisedAgentletId } from '@agenetes/agentlet-host';
 import { resolveAgentInputs } from '@agenetes/protocol';
@@ -268,7 +267,7 @@ export interface AcpTurnCtx {
   onPrepared?: (serialized: string) => void;
 }
 
-/** The full control set an ACP Deployment honours. */
+/** The control set shared by ACP workloads. */
 const ACP_CONTROL_OPS: AgentCapabilities['supportedControlMessages'] = [
   'cancel',
   'set_mode',
@@ -278,9 +277,7 @@ const ACP_CONTROL_OPS: AgentCapabilities['supportedControlMessages'] = [
 ];
 
 /**
- * The capability descriptor every {@link AcpAgentHandle} advertises — a
- * Deployment with the full control set and session-load. Hoisted so the
- * ACP driver can advertise it before a handle instance exists.
+ * The shared capability descriptor for ACP Jobs and Deployments.
  */
 export const ACP_CAPABILITIES: AgentCapabilities = {
   supportedControlMessages: ACP_CONTROL_OPS,
@@ -289,11 +286,13 @@ export const ACP_CAPABILITIES: AgentCapabilities = {
 };
 
 /**
- * The ACP-backed {@link AgentHandle} — a long-lived Deployment. Bakes its
+ * The ACP-backed {@link AgentHandle}. Bakes its
  * {@link AcpCreateSpec} at construction and self-resolves the live
  * {@link AcpSessionEntry} for a turn inside {@link run} (get-or-create);
  * out-of-turn ops resolve the
- * live session from `acpSessionRegistry` by `threadId`.
+ * live session from `acpSessionRegistry` by its session identity.
+ * Jobs use a private identity but currently retain sessions after run,
+ * just like Deployments; automatic Job resource release is deferred.
  *
  * `TSubmission` specializes the opaque host source while retaining the
  * protocol-owned canonical input contract.
@@ -302,7 +301,7 @@ export class AcpAgentHandle<
   TSubmission extends AgentSubmission = AgentSubmission,
 > implements RuntimeAgentHandle<TSubmission, void, InStreamEvent, AcpTurnCtx> {
   /**
-   * A Deployment advertises the full control set and can resume a prior
+   * An ACP handle advertises the full control set and can resume a prior
    * session (`session/load`). It accepts turn input blocking (the ACP
    * baseline: `session/prompt` always elicits a model turn).
    */
@@ -322,9 +321,13 @@ export class AcpAgentHandle<
     },
   ) {
     this.agentletId = resolveAcpAgentletId(spec);
+    // Jobs may share a durable thread or have none. Their live sessions must not.
+    this.sessionThreadId =
+      spec.workloadType === 'Job' ? `acp-job-${randomUUID()}` : spec.threadId;
   }
 
   private readonly agentletId: string;
+  private readonly sessionThreadId: string;
 
   private async authorizeHistoryLoad(
     mode: 'recover' | 'fork',
@@ -387,7 +390,7 @@ export class AcpAgentHandle<
       await this.authorizeHistoryLoad('recover', turns);
       const harnessLaunchPlan =
         sourceState?.driverState.harnessLaunchPlan ??
-        acpSessionRegistry.get(this.agentletId, this.spec.threadId)
+        acpSessionRegistry.get(this.agentletId, this.sessionThreadId)
           ?.bindingRecipe?.launchPlan;
       const fallbackState =
         sourceState?.metadata || harnessLaunchPlan
@@ -416,7 +419,7 @@ export class AcpAgentHandle<
     );
     return ensureAcpSession({
       agentletId: this.agentletId,
-      threadId: this.spec.threadId,
+      threadId: this.sessionThreadId,
       binding: this.spec.spec.binding,
       profileExecutionRevision: this.spec.spec.profileExecutionRevision,
       namespace: this.spec.namespace,
@@ -446,7 +449,7 @@ export class AcpAgentHandle<
   ): () => void {
     return registerAcpStateListener(
       this.agentletId,
-      this.spec.threadId,
+      this.sessionThreadId,
       listener,
     );
   }
@@ -715,7 +718,7 @@ export class AcpAgentHandle<
     // Resolve the live session out-of-turn. A control op with no live
     // session to act on is a precondition failure — we do NOT lazily spawn
     // one just to, e.g., set a mode (§3.6.2 / M2.6).
-    const entry = acpSessionRegistry.get(this.agentletId, this.spec.threadId);
+    const entry = acpSessionRegistry.get(this.agentletId, this.sessionThreadId);
     if (!entry || entry.client.isClosed) {
       return {
         ok: false,
@@ -784,10 +787,10 @@ export class AcpAgentHandle<
 
   /**
    * Tear down the long-lived session: drop the live ACP entry for this
-   * `threadId` (which `shutdown()`s the client) and evict it from the
-   * registry. Idempotent — a no-op when no session is live.
+   * session identity (which `shutdown()`s the client) and evict it from the
+   * registry. Does not stop the Agentlet process. Idempotent.
    */
   close(): void {
-    acpSessionRegistry.remove(this.agentletId, this.spec.threadId);
+    acpSessionRegistry.remove(this.agentletId, this.sessionThreadId);
   }
 }
