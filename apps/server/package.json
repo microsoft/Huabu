@@ -63,7 +63,7 @@
   "devDependencies": {
     "@testcontainers/postgresql": "^12.1.0",
     "@types/archiver": "^7.0.0",
-    "@types/node": "^22.15.0",
+    "@types/node": "^24.13.3",
     "@types/pg": "^8.23.1",
     "@types/sanitize-html": "^2.16.0",
     "@types/turndown": "^5.0.6",
