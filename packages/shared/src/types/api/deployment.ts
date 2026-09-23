@@ -21,7 +21,7 @@ export const deploymentReadinessResponseSchema = z.object({
     basicAuthConfigured: z.boolean(),
   }),
   owner: z.object({
-    policy: z.literal('loopback-or-basic-auth'),
+    policy: z.enum(['loopback-or-basic-auth', 'bubble-system-owner']),
     allowedForRequest: z.boolean(),
   }),
   credentials: z.object({
