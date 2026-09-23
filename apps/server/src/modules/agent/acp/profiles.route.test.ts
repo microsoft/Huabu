@@ -5,6 +5,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import acpProfilesRoutes from './profiles.route.js';
+import { registerLocalTestIdentity } from '../../../test-support/local-identity.js';
 
 const mocks = vi.hoisted(() => ({
   registry: {
@@ -42,6 +43,7 @@ const source = { version: 1, agentletId: 'machine-a', harnessId: 'copilot' };
 let app: FastifyInstance | undefined;
 async function setup() {
   app = Fastify({ logger: false });
+  registerLocalTestIdentity(app);
   await app.register(acpProfilesRoutes, { prefix: '/api/acp' });
   return app;
 }

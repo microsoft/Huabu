@@ -50,4 +50,22 @@ describe('resolveDeploymentConfig', () => {
       bindScope: 'network',
     });
   });
+
+  it('accepts a network deployment protected by Bubble instead of Basic Auth', () => {
+    expect(
+      resolveDeploymentConfig({
+        HUABU_BIND_HOST: '0.0.0.0',
+        HUABU_ALLOWED_HOSTS: 'huabu.example',
+        HUABU_IDENTITY_PROVIDER: 'bubble',
+        HUABU_BUBBLE_URL: 'https://bubble.example',
+      }),
+    ).toMatchObject({ basicAuthConfigured: false, bindScope: 'network' });
+    expect(() =>
+      resolveDeploymentConfig({
+        HUABU_BIND_HOST: '0.0.0.0',
+        HUABU_IDENTITY_PROVIDER: 'bubble',
+        HUABU_BUBBLE_URL: 'https://bubble.example',
+      }),
+    ).toThrow(/HUABU_ALLOWED_HOSTS/);
+  });
 });
