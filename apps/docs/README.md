@@ -6,7 +6,7 @@ The landing page source lives in `landingpage/`. Its handbook links and local as
 
 ## Requirements
 
-- Node.js 22
+- Node.js 24.16.0 or later (see the repository `.nvmrc`)
 - pnpm 10.34.3
 
 ## Install dependencies
