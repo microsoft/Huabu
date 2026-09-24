@@ -7,7 +7,11 @@ import { acpSessionRegistry } from './session-registry.js';
 
 import type { AcpCreateSpec, AcpDurableState } from './handle.js';
 import type { AcpSessionEntry } from './session-registry.js';
-import type { AgentTurn, SessionId } from '@agenetes/protocol';
+import type {
+  AgentTurn,
+  SessionId,
+  AgentStreamEvent,
+} from '@agenetes/protocol';
 import type { AgentCreateContext } from '@agenetes/runtime';
 
 const sessionMocks = vi.hoisted(() => ({
@@ -98,6 +102,38 @@ describe('ACP durable history recovery', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     acpSessionRegistry.remove('machine-a', spec.threadId);
+  });
+
+  it('folds host side-channel events into the driver stream before termination', async () => {
+    const { entry } = sessionEntry();
+    sessionMocks.ensureAcpSession.mockResolvedValue(entry);
+    const handle = new AcpAgentHandle(spec, {
+      recovery: {
+        authorizeHistoryLoad: async () => ({ allowed: true, estimatedSize: 0 }),
+      },
+    });
+    const hostEvent = {
+      type: 'tool_call' as const,
+      data: {
+        toolCallId: 'host-report',
+        title: 'host report',
+        status: 'completed' as const,
+      },
+    };
+    const drainHostEvents = vi
+      .fn()
+      .mockReturnValueOnce([hostEvent])
+      .mockReturnValue([]);
+    const events: AgentStreamEvent[] = [];
+    for await (const event of handle.run(submission, {
+      overlay: emptyAcpOverlay(),
+      logger,
+      drainHostEvents,
+    }))
+      events.push(event);
+    expect(events).toContainEqual(hostEvent);
+    expect(events.at(-1)?.type).toBe('done');
+    expect(events.indexOf(hostEvent)).toBeLessThan(events.length - 1);
   });
 
   describe('ACP canonical input lowering', () => {

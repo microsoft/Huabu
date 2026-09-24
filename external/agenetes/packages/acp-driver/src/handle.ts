@@ -265,6 +265,8 @@ export interface AcpTurnCtx {
    * prompt-debug util. No-op when omitted.
    */
   onPrepared?: (serialized: string) => void;
+  /** Host-owned side-channel results, folded with the next driver event. */
+  drainHostEvents?: () => readonly InStreamEvent[];
 }
 
 /** The control set shared by ACP workloads. */
@@ -653,7 +655,10 @@ export class AcpAgentHandle<
           // The translator's return type is the full `AgentStreamEvent`
           // union, but `meta`/`end` are transport-synthesized by the route,
           // never emitted here — narrow to the in-stream union we advertise.
-          if (evt && evt.type !== 'meta' && evt.type !== 'end') yield evt;
+          if (evt && evt.type !== 'meta' && evt.type !== 'end') {
+            yield* ctx.drainHostEvents?.() ?? [];
+            yield evt;
+          }
         }
         if (done) break;
         await new Promise<void>((resolve) => {
@@ -684,6 +689,7 @@ export class AcpAgentHandle<
       }
     }
 
+    yield* ctx.drainHostEvents?.() ?? [];
     // Yield terminal event — error wins over done.
     if (promptError) {
       const msg =

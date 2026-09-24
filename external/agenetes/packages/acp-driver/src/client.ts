@@ -501,6 +501,19 @@ export class AcpAgentClient {
     onPermissionRequest?: PermissionNotifier,
   ): Promise<AcpPromptResult> {
     if (this._closed) throw new Error('AcpAgentClient is closed');
+    const promptCapabilities =
+      this._initializeResult?.agentCapabilities?.promptCapabilities;
+    if (
+      blocks.some((block) => block.type === 'image') &&
+      (!promptCapabilities ||
+        typeof promptCapabilities !== 'object' ||
+        !('image' in promptCapabilities) ||
+        promptCapabilities.image !== true)
+    ) {
+      throw new Error(
+        'The external Agent does not advertise ACP image input support; select an image-capable Agent and model',
+      );
+    }
     if (this.updateHandlers.has(sessionId)) {
       throw new Error(
         `AcpAgentClient: another prompt is already in flight for session ${sessionId}`,
