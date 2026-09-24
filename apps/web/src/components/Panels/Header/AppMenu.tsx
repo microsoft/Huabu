@@ -28,6 +28,7 @@ import {
   DropdownMenuLink,
   DropdownMenuSubmenu,
 } from '../../Common/DropdownMenu';
+import { MENU_SEPARATOR_CLASS } from '../../Common/menuStyles';
 
 interface AppMenuProps {
   /**
@@ -143,7 +144,7 @@ export const AppMenu: React.FC<AppMenuProps> = ({
             <DropdownMenuLink to="/spaces" onClick={() => setIsOpen(false)}>
               {t('canvasPage.backToList')}
             </DropdownMenuLink>
-            <div className="border-edge-default my-1 border-t" />
+            <div role="separator" className={MENU_SEPARATOR_CLASS} />
           </>
         )}
 
@@ -163,7 +164,7 @@ export const AppMenu: React.FC<AppMenuProps> = ({
           </DropdownMenuItem>
         )}
 
-        <div className="border-edge-default my-1 border-t" />
+        <div role="separator" className={MENU_SEPARATOR_CLASS} />
         <DropdownMenuItem
           shortcut={settingsHint}
           onClick={runAndClose(openSettings)}

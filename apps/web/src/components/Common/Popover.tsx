@@ -34,6 +34,28 @@ type FloatingPosition = { x: number; y: number };
 
 const PopoverContainerContext = createContext<Element | null>(null);
 
+interface EscapeLayer {
+  parent: EscapeLayer | null;
+}
+
+const EscapeLayerContext = createContext<EscapeLayer | null>(null);
+const escapeLayers = new Set<EscapeLayer>();
+
+function topEscapeLayer(): EscapeLayer | undefined {
+  const layers = [...escapeLayers];
+  return layers.reverse().find(
+    (candidate) =>
+      !layers.some((layer) => {
+        for (let parent = layer.parent; parent; parent = parent.parent) {
+          if (parent === candidate) return true;
+        }
+        return false;
+      }),
+  );
+}
+
+export type PopoverDismissReason = 'outside-press' | 'escape';
+
 /**
  * Tracks the latest mouse position so Popover can default to it
  * when no explicit `position` prop is provided.
@@ -79,7 +101,7 @@ export type PopoverProps = {
    * Called when the floating panel should close.
    * Triggers on outside pointer-down and (optionally) on Escape key.
    */
-  onDismiss?: () => void;
+  onDismiss?: (reason: PopoverDismissReason) => void;
 
   /** Whether pressing Escape dismisses the panel. Defaults to `true`. */
   dismissOnEscape?: boolean;
@@ -177,6 +199,14 @@ export const Popover: FC<PopoverProps> = ({
     null,
   );
   const parentContainer = useContext(PopoverContainerContext);
+  const parentEscapeLayer = useContext(EscapeLayerContext);
+  const escapeLayer = useMemo(
+    () => ({ parent: parentEscapeLayer }),
+    [parentEscapeLayer],
+  );
+  const onDismissRef = useRef(onDismiss);
+  onDismissRef.current = onDismiss;
+  const canDismissOnEscape = Boolean(onDismiss) && dismissOnEscape;
   const floating = useFloating({
     open: Boolean(reference),
     elements: { reference },
@@ -330,7 +360,7 @@ export const Popover: FC<PopoverProps> = ({
       ) {
         activeElement.blur();
       }
-      onDismiss();
+      onDismiss('outside-press');
     };
 
     // Delay listener to avoid catching the triggering event
@@ -347,19 +377,27 @@ export const Popover: FC<PopoverProps> = ({
 
   // Dismiss on Escape key
   useEffect(() => {
-    if (!onDismiss || !dismissOnEscape) return;
+    if (!canDismissOnEscape) return;
 
+    escapeLayers.add(escapeLayer);
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      if (
+        e.key === 'Escape' &&
+        !e.defaultPrevented &&
+        topEscapeLayer() === escapeLayer
+      ) {
         e.preventDefault();
         e.stopImmediatePropagation();
-        onDismiss();
+        onDismissRef.current?.('escape');
       }
     };
 
     window.addEventListener('keydown', handleKeyDown, true);
-    return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [onDismiss, dismissOnEscape]);
+    return () => {
+      escapeLayers.delete(escapeLayer);
+      window.removeEventListener('keydown', handleKeyDown, true);
+    };
+  }, [canDismissOnEscape, escapeLayer]);
 
   const isMeasuring = clamped === null;
   const visible = reference ? floating.isPositioned : !isMeasuring;
@@ -401,7 +439,9 @@ export const Popover: FC<PopoverProps> = ({
           zIndex,
         }}
       >
-        {children}
+        <EscapeLayerContext.Provider value={escapeLayer}>
+          {children}
+        </EscapeLayerContext.Provider>
       </div>
     </PopoverContainerContext.Provider>
   );

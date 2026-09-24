@@ -232,12 +232,8 @@
   height: 14px;
 }
 .nt-font-size-menu {
-  padding: 6px;
   max-height: min(280px, 60vh);
   overflow-y: auto;
-}
-.nt-menu {
-  padding: 5px 0;
 }
 .nt-layout-panel {
   width: max-content;
@@ -275,35 +271,6 @@
   flex: 1 1 0;
   min-width: max-content;
   justify-content: space-between;
-}
-.nt-overflow-menu {
-  padding: 6px 4px;
-  border-radius: 8px;
-  background: var(--bg-surface);
-}
-.nt-overflow-menu [role='menuitem'] {
-  min-height: 32px;
-  padding: 6px 8px;
-  gap: 10px;
-  border-radius: 6px;
-  font-size: 13px;
-  line-height: 20px;
-  font-weight: 400;
-  color: var(--fg-muted);
-}
-.nt-overflow-menu [role='menuitem'] svg {
-  width: 14px;
-  height: 14px;
-  stroke-width: 1.65;
-}
-.nt-overflow-menu [role='menuitem']:enabled:hover {
-  background: var(--bg-hover);
-}
-.nt-overflow-menu [role='menuitem'].text-danger {
-  color: var(--danger);
-}
-.nt-overflow-menu [role='menuitem'] > span:first-child:has(svg) {
-  color: inherit;
 }
 .nt-node {
   position: relative;

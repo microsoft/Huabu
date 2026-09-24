@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { act } from 'react-dom/test-utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -20,6 +21,77 @@ afterEach(() => {
 });
 
 describe('Popover', () => {
+  it.each([false, true])(
+    'dismisses only the deepest nested layer, including custom portal containers: %s',
+    async (customContainer) => {
+      container = document.createElement('div');
+      document.body.append(container);
+      root = createRoot(container);
+      const parentDismiss = vi.fn();
+      const childDismiss = vi.fn();
+      function Nested() {
+        const [childOpen, setChildOpen] = useState(true);
+        return (
+          <Popover onDismiss={parentDismiss}>
+            <Button>Parent</Button>
+            {childOpen && (
+              <Popover
+                container={customContainer ? document.body : undefined}
+                onDismiss={(reason) => {
+                  childDismiss(reason);
+                  setChildOpen(false);
+                }}
+              >
+                <Button>Child</Button>
+              </Popover>
+            )}
+          </Popover>
+        );
+      }
+      await act(async () => root?.render(<Nested />));
+      act(() =>
+        window.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Escape', cancelable: true }),
+        ),
+      );
+      expect(childDismiss).toHaveBeenCalledExactlyOnceWith('escape');
+      expect(parentDismiss).not.toHaveBeenCalled();
+      act(() =>
+        window.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Escape', cancelable: true }),
+        ),
+      );
+      expect(parentDismiss).toHaveBeenCalledExactlyOnceWith('escape');
+    },
+  );
+
+  it('preserves layer priority when dismissal callbacks change', async () => {
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+    const first = vi.fn();
+    const second = vi.fn();
+    const render = () => (
+      <>
+        <Popover onDismiss={() => first()}>
+          <span>First</span>
+        </Popover>
+        <Popover onDismiss={second}>
+          <span>Second</span>
+        </Popover>
+      </>
+    );
+    await act(async () => root?.render(render()));
+    await act(async () => root?.render(render()));
+    act(() =>
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', cancelable: true }),
+      ),
+    );
+    expect(first).not.toHaveBeenCalled();
+    expect(second).toHaveBeenCalledExactlyOnceWith('escape');
+  });
+
   it('dismisses before a canvas capture handler consumes an outside pointer press', async () => {
     container = document.createElement('div');
     document.body.appendChild(container);

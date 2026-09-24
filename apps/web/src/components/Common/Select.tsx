@@ -7,6 +7,15 @@ import { Fragment, useCallback, useRef, useState, type ReactNode } from 'react';
 
 import { Button, type ButtonProps } from './Button';
 import { cn } from './cn';
+import {
+  MENU_CHECK_CLASS,
+  MENU_ICON_CLASS,
+  MENU_ITEM_CLASS,
+  MENU_LABEL_CLASS,
+  MENU_SECTION_LABEL_CLASS,
+  MENU_SEPARATOR_CLASS,
+  MENU_SURFACE_CLASS,
+} from './menuStyles';
 import { Popover } from './Popover';
 import { Tooltip } from './Tooltip';
 
@@ -18,12 +27,14 @@ export interface SelectOption<T extends string = string> {
   icon?: ReactNode;
   description?: string;
   /**
-   * When set, a section header (`─── {sectionLabel} ───`) is rendered
+   * When set, a left-aligned section header is rendered
    * in the dropdown panel immediately ABOVE this option. Used to group
    * related entries. Has no effect on selection
    * behaviour or the trigger label.
    */
   sectionLabel?: string;
+  /** Render a separator immediately before this option's section or row. */
+  separatorBefore?: boolean;
   /**
    * When true, the option is rendered greyed out and cannot be selected.
    * Useful for placeholder states like "no agents connected".
@@ -40,6 +51,8 @@ type SelectProps<T extends string = string> = {
   placeholder?: string;
   /** Extra className on the trigger button. */
   className?: string;
+  /** Optional styling for the option panel, independent of the trigger. */
+  menuClassName?: string;
   /** Tooltip text wrapped around the trigger button via `Button`'s `title`. */
   title?: string;
   /** Accessible name when the visual row label is not a native label. */
@@ -107,6 +120,7 @@ export function Select<T extends string = string>({
   disabled = false,
   placeholder = 'Select…',
   className,
+  menuClassName,
   title,
   ariaLabel,
   variant = 'outline',
@@ -123,6 +137,7 @@ export function Select<T extends string = string>({
     undefined,
   );
   const triggerRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const justDismissedRef = useRef(false);
 
   const isRight = align === 'bottom-right' || align === 'top-right';
@@ -156,6 +171,9 @@ export function Select<T extends string = string>({
   }, [disabled, onOpen]);
 
   const handleDismiss = useCallback(() => {
+    if (menuRef.current?.contains(document.activeElement)) {
+      triggerRef.current?.querySelector<HTMLButtonElement>('button')?.focus();
+    }
     justDismissedRef.current = true;
     setIsOpen(false);
     requestAnimationFrame(() => {
@@ -167,6 +185,7 @@ export function Select<T extends string = string>({
     (optionValue: T) => {
       onChange(optionValue);
       setIsOpen(false);
+      triggerRef.current?.querySelector<HTMLButtonElement>('button')?.focus();
     },
     [onChange],
   );
@@ -214,6 +233,7 @@ export function Select<T extends string = string>({
       </div>
       {isOpen && (
         <Popover
+          contentRef={menuRef}
           position={computePosition()}
           onDismiss={handleDismiss}
           anchor={anchor}
@@ -240,19 +260,21 @@ export function Select<T extends string = string>({
           // option list is longer than the available space, so the
           // bottom rows remain reachable via scroll instead of being
           // clipped off-screen.
-          className="flex max-h-[min(28rem,calc(100vh-1.5rem))] w-max max-w-[min(24rem,var(--popover-available-width,calc(100vw-24px)))] flex-col overflow-hidden py-1"
+          className={cn(
+            MENU_SURFACE_CLASS,
+            'flex max-h-[min(28rem,calc(100vh-1.5rem))] w-max max-w-[min(24rem,var(--popover-available-width,calc(100vw-24px)))] flex-col overflow-hidden',
+            menuClassName,
+          )}
         >
           <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
             {options.map((option) => (
               <Fragment key={option.value}>
+                {option.separatorBefore && (
+                  <div role="separator" className={MENU_SEPARATOR_CLASS} />
+                )}
                 {option.sectionLabel && (
-                  <div
-                    role="presentation"
-                    className="text-fg-muted mt-1 flex items-center gap-2 px-3 pt-1 pb-0.5 text-[10px] tracking-wider uppercase select-none"
-                  >
-                    <span className="bg-edge-default h-px flex-1" />
-                    <span>{option.sectionLabel}</span>
-                    <span className="bg-edge-default h-px flex-1" />
+                  <div role="presentation" className={MENU_SECTION_LABEL_CLASS}>
+                    {option.sectionLabel}
                   </div>
                 )}
                 <Button
@@ -263,21 +285,12 @@ export function Select<T extends string = string>({
                   aria-selected={option.value === value}
                   disabled={option.disabled}
                   onClick={() => handleSelect(option.value)}
-                  className={cn(
-                    'w-full justify-start gap-2 rounded-none px-3 py-1.5 text-left',
-                    option.disabled
-                      ? 'text-fg-muted cursor-not-allowed'
-                      : option.value === value
-                        ? 'text-info'
-                        : 'text-fg-default',
-                  )}
+                  className={MENU_ITEM_CLASS}
                 >
                   {option.icon && (
-                    <span className="shrink-0">{option.icon}</span>
+                    <span className={MENU_ICON_CLASS}>{option.icon}</span>
                   )}
-                  <span className="min-w-0 [overflow-wrap:anywhere] whitespace-normal">
-                    {option.label}
-                  </span>
+                  <span className={MENU_LABEL_CLASS}>{option.label}</span>
                   {option.description && (
                     <Tooltip
                       content={option.description}
@@ -291,8 +304,10 @@ export function Select<T extends string = string>({
                   {/* Reserve a fixed-width slot for the check so the
                       description column stays aligned across rows whether
                       or not the row is selected. */}
-                  <span className="ml-auto flex w-3.5 shrink-0 justify-center">
-                    {option.value === value && <Check size={14} />}
+                  <span className={MENU_CHECK_CLASS}>
+                    {option.value === value && (
+                      <Check size={14} aria-hidden="true" />
+                    )}
                   </span>
                 </Button>
               </Fragment>
@@ -300,10 +315,7 @@ export function Select<T extends string = string>({
           </div>
           {footerSlot && (
             <>
-              <div
-                role="presentation"
-                className="bg-edge-default mt-1 h-px w-full shrink-0"
-              />
+              <div role="presentation" className={MENU_SEPARATOR_CLASS} />
               <div className="shrink-0 px-1 py-1">
                 {typeof footerSlot === 'function'
                   ? footerSlot({ dismiss: handleDismiss })

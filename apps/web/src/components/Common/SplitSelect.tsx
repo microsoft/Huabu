@@ -2,12 +2,20 @@
 // Licensed under the MIT license.
 
 import clsx from 'clsx';
-import { ChevronDown } from 'lucide-react';
+import { Check, ChevronDown } from 'lucide-react';
 import { useCallback, useRef, useState } from 'react';
 
 import { Button, type ButtonProps } from './Button';
 import { cn } from './cn';
-import { Popover } from './Popover';
+import {
+  MENU_CHECK_CLASS,
+  MENU_HINT_CLASS,
+  MENU_ICON_CLASS,
+  MENU_ITEM_CLASS,
+  MENU_LABEL_CLASS,
+  MENU_SURFACE_CLASS,
+} from './menuStyles';
+import { Popover, type PopoverDismissReason } from './Popover';
 
 export interface SplitSelectOption<T extends string = string> {
   value: T;
@@ -118,11 +126,16 @@ export function SplitSelect<T extends string = string>({
     setIsOpen((prev) => !prev);
   }, [disabled]);
 
-  const handleDismiss = useCallback(() => {
+  const handleDismiss = useCallback((reason: PopoverDismissReason) => {
     justDismissedRef.current = true;
     setIsOpen(false);
     requestAnimationFrame(() => {
       justDismissedRef.current = false;
+      if (reason === 'escape' && document.activeElement === document.body) {
+        triggerRef.current
+          ?.querySelector<HTMLButtonElement>('[aria-haspopup="listbox"]')
+          ?.focus({ preventScroll: true });
+      }
     });
   }, []);
 
@@ -223,7 +236,8 @@ export function SplitSelect<T extends string = string>({
           anchor={anchor}
           offset={{ x: 0, y: isTop ? -4 : 4 }}
           className={cn(
-            'flex w-max flex-col overflow-hidden py-1',
+            MENU_SURFACE_CLASS,
+            'flex w-max flex-col overflow-hidden',
             menuClassName,
           )}
         >
@@ -238,22 +252,20 @@ export function SplitSelect<T extends string = string>({
                 role="option"
                 aria-selected={isSelected}
                 onClick={() => handleSelect(option.value)}
-                className={cn(
-                  'w-full justify-start rounded-none px-3 py-1.5 text-left',
-                  isSelected ? 'text-info' : 'text-fg-muted',
-                )}
+                className={MENU_ITEM_CLASS}
               >
-                {option.icon && <span className="shrink-0">{option.icon}</span>}
-                <span className="min-w-0 flex-1 [overflow-wrap:anywhere] whitespace-normal">
-                  {option.label}
-                </span>
+                {option.icon && (
+                  <span className={MENU_ICON_CLASS}>{option.icon}</span>
+                )}
+                <span className={MENU_LABEL_CLASS}>{option.label}</span>
                 {option.shortcut !== null &&
                   option.shortcut !== undefined &&
                   option.shortcut !== '' && (
-                    <span className="text-fg-subtle ml-3 shrink-0 text-xs font-medium">
-                      {option.shortcut}
-                    </span>
+                    <span className={MENU_HINT_CLASS}>{option.shortcut}</span>
                   )}
+                <span className={MENU_CHECK_CLASS}>
+                  {isSelected && <Check size={14} aria-hidden="true" />}
+                </span>
               </Button>
             );
           })}

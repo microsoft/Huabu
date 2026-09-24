@@ -13,6 +13,7 @@ import { useWorkspaceStore } from '../../../store/workspaceStore.ts';
 import { formatShortcut } from '../../../utils/platform.ts';
 import { Button } from '../../Common/Button.tsx';
 import { DropdownMenu, DropdownMenuItem } from '../../Common/DropdownMenu.tsx';
+import { MENU_SEPARATOR_CLASS } from '../../Common/menuStyles';
 import { toast } from '../../Common/Toast.tsx';
 
 interface CanvasMenuProps {
@@ -177,7 +178,7 @@ export const CanvasMenu: React.FC<CanvasMenuProps> = ({ onOpenShortcuts }) => {
         >
           {t('actions.redo')}
         </DropdownMenuItem>
-        <div className="border-edge-default my-1 border-t" />
+        <div role="separator" className={MENU_SEPARATOR_CLASS} />
         <DropdownMenuItem onClick={() => void handleExport()}>
           {t('canvasHeader.exportCanvas')}
         </DropdownMenuItem>

@@ -133,13 +133,18 @@ test('menus fit localized content and constrain long labels within their boundar
     const item = page.getByRole('menuitem', { name: label, exact: true });
     const panel = panelFor(item);
     await fit(panel);
-    widths.push((await panel.boundingBox())!.width);
+    const bounds = await panel.boundingBox();
+    if (!bounds) throw new Error('Missing menu bounds');
+    widths.push(bounds.width);
     await page.getByRole('menuitem', { name: 'Fonts' }).hover();
     const nested = page.getByRole('menuitem', { name: 'Serif', exact: true });
     await fit(panelFor(nested));
     await nested.click();
     await expect(page.locator('[data-result]')).toHaveText('nested');
     await page.keyboard.press('Escape');
+    await expect(nested).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(item).toHaveCount(0);
   }
   expect(widths[0]).toBeLessThan(widths[1]);
   expect(widths[0]).toBeLessThan(160);
@@ -161,21 +166,28 @@ test('menus fit localized content and constrain long labels within their boundar
       const child = panelFor(nested);
       await fit(child);
       await expect
-        .poll(async () => {
-          const parentRect = await parent.boundingBox();
-          const childRect = await child.boundingBox();
-          if (!parentRect || !childRect) return false;
-          return side === 'left'
-            ? childRect.x >= parentRect.x + parentRect.width + 4
-            : childRect.x + childRect.width <= parentRect.x - 4;
-        })
-        .toBe(true);
+        .poll(
+          async () => {
+            const parentRect = await parent.boundingBox();
+            const childRect = await child.boundingBox();
+            if (!parentRect || !childRect) return -1;
+            // Expect a 3px gap after panel padding/border, allowing half-pixel positioning rounding.
+            return side === 'left'
+              ? childRect.x - parentRect.x - parentRect.width
+              : parentRect.x - childRect.x - childRect.width;
+          },
+          { message: `Submenu gap at ${width}px on ${side}` },
+        )
+        .toBeGreaterThanOrEqual(2.5);
       await page.screenshot({
         path: test.info().outputPath(`submenu-${width}-${side}.png`),
       });
       await nested.click();
       await expect(page.locator('[data-result]')).toHaveText('nested');
       await page.keyboard.press('Escape');
+      await expect(nested).toHaveCount(0);
+      await page.keyboard.press('Escape');
+      await expect(parent).toHaveCount(0);
       await trigger.evaluate((button) =>
         button.parentElement?.removeAttribute('style'),
       );

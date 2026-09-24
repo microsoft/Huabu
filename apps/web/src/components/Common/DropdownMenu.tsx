@@ -22,7 +22,11 @@ import {
   MENU_LABEL_CLASS,
   MENU_SURFACE_CLASS,
 } from './menuStyles';
-import { Popover, type PopoverProps } from './Popover';
+import {
+  Popover,
+  type PopoverDismissReason,
+  type PopoverProps,
+} from './Popover';
 
 import type { ButtonHTMLAttributes } from 'react';
 import type { LinkProps } from 'react-router-dom';
@@ -211,13 +215,21 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
     setIsOpen((prev) => !prev);
   }, [setIsOpen]);
 
-  const handleDismiss = useCallback(() => {
-    justDismissedRef.current = true;
-    setIsOpen(false);
-    requestAnimationFrame(() => {
-      justDismissedRef.current = false;
-    });
-  }, [setIsOpen]);
+  const handleDismiss = useCallback(
+    (reason: PopoverDismissReason) => {
+      justDismissedRef.current = true;
+      setIsOpen(false);
+      requestAnimationFrame(() => {
+        justDismissedRef.current = false;
+        if (reason === 'escape' && document.activeElement === document.body) {
+          triggerRef.current
+            ?.querySelector('button')
+            ?.focus({ preventScroll: true });
+        }
+      });
+    },
+    [setIsOpen],
+  );
 
   const opensSideways = align === 'right-top' || align === 'left-top';
   const isRight = align === 'bottom-right' || align === 'top-right';
