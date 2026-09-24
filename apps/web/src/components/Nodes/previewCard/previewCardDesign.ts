@@ -50,14 +50,16 @@ export function previewCardMetricsForSize(width: number, height: number) {
   const preferredTextHeight =
     textHeight + tier.descriptionGap + 2 * tier.descriptionLine;
   const textWidth = innerWidth - imageWidth - tier.imageTextGap;
+  const verticalCoverMinHeight = (width - 2 * NODE_BORDER_WIDTH) / 4;
   const crampedVerticalCover =
-    innerHeight - preferredTextHeight < (width - 2 * NODE_BORDER_WIDTH) / 4;
+    innerHeight - preferredTextHeight < verticalCoverMinHeight;
   return {
     ...tier,
     effectiveSize,
     innerWidth,
     innerHeight,
     imageWidth,
+    verticalCoverMinHeight,
     horizontal:
       innerHeight > 0 &&
       width / height >= 1.5 &&

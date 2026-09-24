@@ -23,9 +23,9 @@ function render(data: NodeData, active = true) {
 
 describe('Text-only minimal layer', () => {
   it.each(['中文标题', 'Long English title'])(
-    'renders %s within reduced horizontal insets at 8.5%%',
+    'renders %s within reduced horizontal insets at 9.5%%',
     (title) => {
-      const zoom = 0.085;
+      const zoom = 0.095;
       const container = document.createElement('div');
       container.innerHTML = renderToStaticMarkup(
         <SemanticPlaceholder
@@ -43,7 +43,7 @@ describe('Text-only minimal layer', () => {
       const width = parseFloat(label.style.width);
       expect(label.getAttribute('aria-hidden')).toBe('false');
       expect(left).toBeLessThan(6);
-      expect(width).toBeGreaterThanOrEqual(9);
+      expect(width).toBeGreaterThanOrEqual(12);
       expect(left * 2 + width).toBeCloseTo((240 - 6) * zoom);
       expect(container.querySelector('[data-study-title]')?.textContent).toBe(
         title,
@@ -51,12 +51,30 @@ describe('Text-only minimal layer', () => {
     },
   );
 
+  it('renders a 12px title with 16px lines before measuring the Note description', () => {
+    const html = renderToStaticMarkup(
+      <SemanticPlaceholder
+        type="note"
+        data={{ type: 'note', label: 'Title', content: 'Existing body' }}
+        label={{ title: 'Title', description: 'Existing body' }}
+        active
+        width={440}
+        height={350}
+        zoom={0.19}
+      />,
+    );
+    expect(html).toContain('font-size:12px');
+    expect(html).toContain('line-height:16px');
+    expect(html).not.toContain('data-study-description');
+    expect(html).not.toContain('Existing body');
+  });
+
   it.each([
-    [86, 3.5, true],
-    [78, 2.5, true],
-    [62, 0.5, true],
-    [58, 0, true],
-    [57, 0, false],
+    [98, 3.5, true],
+    [90, 2.5, true],
+    [74, 0.5, true],
+    [70, 0, true],
+    [69, 0, false],
   ])(
     'uses reduced screen-space vertical inset for a %spx high Note',
     (height, inset, visible) => {
@@ -98,7 +116,7 @@ describe('Text-only minimal layer', () => {
     },
   );
 
-  it.each(['web', 'pdf', 'office'] as const)(
+  it.each(['web', 'pdf', 'office', 'video'] as const)(
     'reuses %s shell styling and screen typography',
     (type) => {
       const html = render({
@@ -109,8 +127,8 @@ describe('Text-only minimal layer', () => {
         style: { accent: 'teal' },
       });
       expect(html).not.toContain('background:');
-      expect(html).toContain('font-size:9px');
-      expect(html).toContain('line-height:13px');
+      expect(html).toContain('font-size:12px');
+      expect(html).toContain('line-height:16px');
       expect(html).toContain('transform:scale(5)');
     },
   );

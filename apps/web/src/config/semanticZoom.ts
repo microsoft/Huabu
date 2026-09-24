@@ -40,8 +40,11 @@ export function resolveNodePresentation(
   screenHeight: number,
   previous: NodePresentationMode = 'overview',
   readingEnabled = true,
+  nodeType?: string,
 ): NodePresentationMode {
-  const { minimalZoom } = SEMANTIC_ZOOM_CONFIG;
+  const minimalZoom =
+    SEMANTIC_ZOOM_CONFIG.minimalZoomByType[nodeType ?? ''] ??
+    SEMANTIC_ZOOM_CONFIG.minimalZoom;
   if (
     zoom < minimalZoom.enter ||
     (previous === 'minimal' && zoom < minimalZoom.exit)
@@ -62,6 +65,7 @@ export function resolveNodePresentation(
 export interface SemanticZoomConfig {
   /** Enter strictly below enter; restore ordinary content at exit or above. */
   minimalZoom: { enter: number; exit: number };
+  minimalZoomByType: Record<string, SemanticZoomConfig['minimalZoom']>;
   /**
    * Per-node-type render mode at each opt-in LOD level. Node types not
    * listed here always render 'full'.
@@ -71,6 +75,7 @@ export interface SemanticZoomConfig {
 
 export const SEMANTIC_ZOOM_CONFIG: SemanticZoomConfig = {
   minimalZoom: { enter: 0.2, exit: 0.24 },
+  minimalZoomByType: { note: { enter: 0.25, exit: 0.28 } },
 
   nodeLOD: {
     // Only heavy node types — all others default to 'full' at every level.

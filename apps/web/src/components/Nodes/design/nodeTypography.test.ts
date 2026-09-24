@@ -27,14 +27,15 @@ describe('shared node typography', () => {
 
   it('pins the adopted far-label screen-pixel metrics', () => {
     expect(FAR_ZOOM_DESIGN).toEqual({
-      labelFont: 9,
-      labelLine: 13,
+      labelFont: 12,
+      labelLine: 16,
       labelWeight: 500,
       labelInset: 6,
       labelInsetInline: 6,
-      descriptionFont: 7,
-      descriptionLine: 10,
+      descriptionFont: 10,
+      descriptionLine: 16,
       descriptionGap: 2,
+      descriptionMinLines: 2,
     });
   });
 

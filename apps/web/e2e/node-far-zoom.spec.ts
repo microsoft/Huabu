@@ -283,7 +283,7 @@ async function frames(page: Page) {
   });
 }
 
-test('blank-gap regression: dense Note titles remain visible down to the Frame entry boundary', async ({
+test('dense Note titles require one complete 16px line without changing geometry', async ({
   page,
 }) => {
   const audit = await mountNodes(page, {
@@ -293,9 +293,15 @@ test('blank-gap regression: dense Note titles remain visible down to the Frame e
     title: '研究笔记',
   });
   const note = shell(page, 'note');
-  for (const zoom of [0.09, 0.085, 0.08]) {
+  const before = await page.evaluate(() => window.farZoomFixture.readState());
+  for (const zoom of [0.1, 0.095, 0.09, 0.085, 0.08, 0.095]) {
     await zoomTo(page, zoom, 'note');
     const label = note.locator('[data-study-label]');
+    if ((180 - 6) * zoom < 16) {
+      await expect(label).toHaveAttribute('aria-hidden', 'true');
+      await expect(label).toHaveCSS('opacity', '0');
+      continue;
+    }
     await expect(label).toHaveAttribute('aria-hidden', 'false');
     await expect(label).toHaveCSS('opacity', '1');
     await expect(label.locator('[data-study-title]')).toBeVisible();
@@ -304,20 +310,27 @@ test('blank-gap regression: dense Note titles remain visible down to the Frame e
       note.boundingBox(),
     ]);
     if (!labelBox || !nodeBox) throw new Error('Missing label geometry');
-    expect(labelBox.width).toBeGreaterThanOrEqual(FAR.labelFont - 0.1);
+    expect(labelBox.width).toBeGreaterThanOrEqual(12 - 0.1);
     expect(labelBox.x).toBeGreaterThanOrEqual(nodeBox.x);
     expect(labelBox.x + labelBox.width).toBeLessThanOrEqual(
       nodeBox.x + nodeBox.width + 0.1,
     );
   }
+  expect(await page.evaluate(() => window.farZoomFixture.readState())).toEqual(
+    before,
+  );
   expect(audit.writes).toEqual([]);
   expect(audit.errors).toEqual([]);
 });
 
-test('Note far-zoom labels retain typography and spacing without a divider', async ({
+test('Note far-zoom labels use 12px titles and fitting 10px descriptions in either theme', async ({
   page,
 }) => {
-  const audit = await mountNodes(page, { zoom: 0.2, title: 'Review notes' });
+  const audit = await mountNodes(page, {
+    zoom: 0.19,
+    height: 400,
+    title: 'Notes',
+  });
   const node = shell(page, 'note');
   const divider = node.locator('[data-far-description-divider]');
   const before = await page.evaluate(() => window.farZoomFixture.readState());
@@ -325,26 +338,37 @@ test('Note far-zoom labels retain typography and spacing without a divider', asy
     await page.evaluate((theme) => {
       document.documentElement.classList.toggle('dark', theme === 'dark');
     }, theme);
-    for (const zoom of [0.2, 0.24, 0.29]) {
+    for (const zoom of [0.19, 0.158, 0.157, 0.12, 0.1, 0.19, 0.23]) {
       await zoomTo(page, zoom, 'note');
       await expect(divider).toHaveCount(0);
       const title = node.locator('[data-study-title]');
       const description = node.locator('[data-study-description]');
-      await expect(title).toHaveCSS('font-size', `${FAR.labelFont}px`);
-      await expect(description).toHaveCSS(
-        'font-size',
-        `${FAR.descriptionFont}px`,
-      );
-      const [titleBox, descriptionBox] = await Promise.all([
-        title.boundingBox(),
-        description.boundingBox(),
-      ]);
-      if (!titleBox || !descriptionBox)
-        throw new Error('Missing thumbnail geometry');
-      expect(descriptionBox.y - titleBox.y - titleBox.height).toBeCloseTo(
-        FAR.descriptionGap,
-        1,
-      );
+      await expectLayers(node, true);
+      await expect(title).toHaveCSS('font-size', '12px');
+      await expect(title).toHaveCSS('line-height', '16px');
+      await expect(title).toHaveCSS('font-weight', '500');
+      if (zoom >= 0.158) {
+        await expect(description).toBeVisible();
+        await expect(description).toHaveText('Source details remain readable.');
+        await expect(description).toHaveCSS('font-size', '10px');
+        await expect(description).toHaveCSS('line-height', '16px');
+        const clamp = await description.evaluate((element) =>
+          Number(getComputedStyle(element).webkitLineClamp),
+        );
+        expect(clamp).toBeGreaterThanOrEqual(2);
+        await expect(description).toHaveCSS('font-weight', '400');
+        await expect(description).toHaveCSS('opacity', '1');
+        const titleBox = await title.boundingBox();
+        const descriptionBox = await description.boundingBox();
+        if (!titleBox || !descriptionBox)
+          throw new Error('Missing label geometry');
+        expect(descriptionBox.y - titleBox.y - titleBox.height).toBeCloseTo(
+          2,
+          1,
+        );
+      } else {
+        await expect(description).toHaveCount(0);
+      }
     }
     await test.info().attach(`note-far-label-${theme}`, {
       body: await node.screenshot(),
@@ -358,6 +382,9 @@ test('Note far-zoom labels retain typography and spacing without a divider', asy
   }
   await zoomTo(page, 0.3, 'note');
   await expect(divider).toHaveCount(0);
+  await expect(node.locator('.ProseMirror')).toContainText(
+    'Source details remain readable.',
+  );
   expect(await page.evaluate(() => window.farZoomFixture.readState())).toEqual(
     before,
   );
@@ -483,7 +510,7 @@ for (const [width, height] of [
         .locator('.preview-card__cover')
         .evaluate((el) => getComputedStyle(el).backgroundColor);
       expect(coverBackground).not.toBe(tint);
-      for (const zoom of [0.24, 0.2, 0.213, 0.231, 0.27, 0.299, 0.24]) {
+      for (const zoom of [0.19, 0.18, 0.2, 0.213, 0.231, 0.19]) {
         await zoomTo(page, zoom, type);
         await expectLayers(node, true);
         const card = node.locator('.preview-card');
@@ -536,6 +563,118 @@ for (const [width, height] of [
   });
 }
 
+for (const cover of [true, false]) {
+  test(`far media titles use more than two lines without losing covers (cover: ${cover})`, async ({
+    page,
+  }) => {
+    await page.routeWebSocket('**/*', (socket) => socket.close());
+    const audit = await mountNodes(page, {
+      width: 240,
+      height: 1000,
+      zoom: 0.5,
+      title:
+        'Research notes and supporting documents for our upcoming product review',
+      description: 'Secondary information.',
+      cover,
+    });
+    const before = await page.evaluate(() => window.farZoomFixture.readState());
+    for (const type of ['web', 'pdf'] as const) {
+      const node = shell(page, type);
+      const title = node.locator('.preview-card__title');
+      for (const zoom of [0.19, 0.14, 0.19]) {
+        await zoomTo(page, zoom, type);
+        await expect(title).toHaveCSS('font-size', '12px');
+        const lines = await title.evaluate((element) =>
+          Number(getComputedStyle(element).webkitLineClamp),
+        );
+        expect(lines).toBeGreaterThan(2);
+        const titleBox = await title.boundingBox();
+        const cardBox = await node.locator('.preview-card').boundingBox();
+        if (!titleBox || !cardBox) throw new Error('Missing title geometry');
+        expect(titleBox.height).toBeGreaterThan(32);
+        expect(titleBox.y + titleBox.height).toBeLessThanOrEqual(
+          cardBox.y + cardBox.height + 0.1,
+        );
+        await expect(node.locator('.preview-card__summary')).toBeHidden();
+        if (cover) {
+          const image = node.locator('.preview-card__image');
+          await expect(image).toBeVisible();
+          const imageBox = await image.boundingBox();
+          expect(imageBox?.height).toBeGreaterThanOrEqual(
+            ((240 - 6) * zoom) / 4 - 1,
+          );
+        }
+      }
+      await zoomTo(page, 0.5, type);
+      await expect(title).toHaveCSS('-webkit-line-clamp', '2');
+      await expect(title).toHaveCSS(
+        'font-size',
+        `${NODE_TYPOGRAPHY.cardTitle.size}px`,
+      );
+    }
+    expect(
+      await page.evaluate(() => window.farZoomFixture.readState()),
+    ).toEqual(before);
+    expect(audit.writes).toEqual([]);
+    expect(audit.errors).toEqual([]);
+  });
+
+  test(`far media summaries require two full lines (cover: ${cover})`, async ({
+    page,
+  }) => {
+    const audit = await mountNodes(page, {
+      width: 400,
+      height: 700,
+      zoom: 0.5,
+      title: 'Title',
+      description: 'Supporting details remain readable across zoom levels.',
+      cover,
+    });
+    for (const type of ['web', 'pdf'] as const) {
+      const node = shell(page, type);
+      let sawDescription = false;
+      let sawHidden = false;
+      for (const zoom of [0.19, 0.14, 0.1, 0.08, 0.06, 0.19]) {
+        await zoomTo(page, zoom, type);
+        const summary = node.locator('.preview-card__summary');
+        const card = node.locator('.preview-card');
+        await expect(card).toHaveAttribute('data-far', 'true');
+        await expect(node.locator('.preview-card__title')).toHaveCSS(
+          'font-size',
+          '12px',
+        );
+        await expect(summary).toHaveCSS('font-size', '10px');
+        await expect(summary).toHaveCSS('line-height', '16px');
+        await expect(summary).toHaveCSS('font-weight', '400');
+        const lines = await card.evaluate((element) =>
+          Number(
+            getComputedStyle(element).getPropertyValue('--card-summary-lines'),
+          ),
+        );
+        if (lines < 2) {
+          await expect(summary).toBeHidden();
+          sawHidden = true;
+        } else {
+          await expect(summary).toBeVisible();
+          sawDescription = true;
+          const summaryBox = await summary.boundingBox();
+          const cardBox = await card.boundingBox();
+          if (!summaryBox || !cardBox) throw new Error('Missing card geometry');
+          expect(summaryBox.y + summaryBox.height).toBeLessThanOrEqual(
+            cardBox.y + cardBox.height + 0.1,
+          );
+        }
+        if (cover)
+          await expect(node.locator('.preview-card__image')).toBeVisible();
+      }
+      expect(sawDescription).toBe(true);
+      expect(sawHidden).toBe(true);
+    }
+    expect(audit.errors).toEqual([]);
+    expect(audit.writes).toEqual([]);
+  });
+}
+
 test('far media cards preserve images and hide summaries behind clipped titles', async ({
   page,
 }) => {
@@ -548,7 +687,7 @@ test('far media cards preserve images and hide summaries behind clipped titles',
     shell(page, 'web').locator('.preview-card__image'),
   ).toBeVisible();
   for (const type of ['web', 'pdf'] as const) {
-    await zoomTo(page, 0.24, type);
+    await zoomTo(page, 0.19, type);
     const node = shell(page, type);
     await expect(node.locator('.preview-card__image')).toBeVisible();
     await expect(node.locator('.preview-card__summary')).toBeHidden();
@@ -869,20 +1008,21 @@ async function expectLabelFit(
   zoom: number,
   hasDescription = true,
 ) {
+  const design = FAR;
   await expect(node.locator('[data-study-label]')).toHaveCSS('opacity', '1');
   const box = await labelGeometry(node);
   expect(box.scale).toBeCloseTo(zoom, 4);
-  expect(box.title.font).toBeCloseTo(FAR.labelFont, 3);
-  expect(box.title.line).toBeCloseTo(FAR.labelLine, 3);
-  expect(box.probe.font).toBeCloseTo(FAR.labelFont, 3);
-  expect(box.probe.line).toBeCloseTo(FAR.labelLine, 3);
+  expect(box.title.font).toBeCloseTo(design.labelFont, 3);
+  expect(box.title.line).toBeCloseTo(design.labelLine, 3);
+  expect(box.probe.font).toBeCloseTo(design.labelFont, 3);
+  expect(box.probe.line).toBeCloseTo(design.labelLine, 3);
   expect(box.probeWidthDelta).toBeCloseTo(0, 2);
-  expect(box.probe.height / FAR.labelLine).toBeCloseTo(
-    Math.round(box.probe.height / FAR.labelLine),
+  expect(box.probe.height / design.labelLine).toBeCloseTo(
+    Math.round(box.probe.height / design.labelLine),
     2,
   );
   expect(box.title.height).toBeCloseTo(
-    Math.min(box.probe.height, box.title.clamp * FAR.labelLine),
+    Math.min(box.probe.height, box.title.clamp * design.labelLine),
     1,
   );
   // Screen-space layout rounds to Chromium's 1/64 CSS-pixel layout unit.
@@ -900,13 +1040,13 @@ async function expectLabelFit(
   const lines = Math.max(
     0,
     Math.floor(
-      (box.availableHeight - box.title.height - FAR.descriptionGap) /
-        FAR.descriptionLine,
+      (box.availableHeight - box.title.height - design.descriptionGap) /
+        design.descriptionLine,
     ),
   );
   if (
     hasDescription &&
-    lines > 0 &&
+    lines >= FAR.descriptionMinLines &&
     box.probe.height <= box.title.height + 0.1
   ) {
     expect(
@@ -914,15 +1054,18 @@ async function expectLabelFit(
       'A fitting description must not be suppressed by an unscaled title probe',
     ).not.toBeNull();
     if (!box.description) throw new Error('Missing fitting description');
-    expect(box.description.font).toBeCloseTo(FAR.descriptionFont, 3);
-    expect(box.description.line).toBeCloseTo(FAR.descriptionLine, 3);
+    expect(box.description.font).toBeCloseTo(design.descriptionFont, 3);
+    expect(box.description.line).toBeCloseTo(design.descriptionLine, 3);
     expect(box.description.clamp).toBe(lines);
-    expect(box.description.top - box.title.bottom).toBeCloseTo(4, 2);
-    expect(box.description.height).toBeLessThanOrEqual(
-      lines * FAR.descriptionLine + 0.1,
+    expect(box.description.top - box.title.bottom).toBeCloseTo(
+      design.descriptionGap,
+      2,
     );
-    expect(box.description.height / FAR.descriptionLine).toBeCloseTo(
-      Math.round(box.description.height / FAR.descriptionLine),
+    expect(box.description.height).toBeLessThanOrEqual(
+      lines * design.descriptionLine + 0.1,
+    );
+    expect(box.description.height / design.descriptionLine).toBeCloseTo(
+      Math.round(box.description.height / design.descriptionLine),
       2,
     );
   } else {
@@ -1147,10 +1290,11 @@ for (const [language, title, description] of [
         const node = shell(page, type);
         await expectLayers(node, true);
         const box = await expectLabelFit(node, zoom);
+        const design = FAR;
         expect(box.title.clamp).toBe(
-          Math.floor(box.availableHeight / FAR.labelLine),
+          Math.floor(box.availableHeight / design.labelLine),
         );
-        expect(box.title.height).toBeGreaterThan(3 * FAR.labelLine);
+        expect(box.title.height).toBeGreaterThan(3 * design.labelLine);
       }
       if (zoom === 0.27)
         await testInfo.attach(`${language}-35-percent`, {
@@ -1334,7 +1478,7 @@ for (const [width, height] of [
   [1000, 200],
   [2000, 1600],
 ]) {
-  test(`all four types use 25/30 percent hysteresis at ${width}x${height}`, async ({
+  test(`Note uses 25/28 percent while cards retain 20/24 percent at ${width}x${height}`, async ({
     page,
   }) => {
     const audit = await mountNodes(page, {
@@ -1342,18 +1486,32 @@ for (const [width, height] of [
       height,
       zoom: 0.25,
     });
-    for (const [zoom, minimal] of [
-      [0.25, false],
-      [0.249, true],
-      [0.25, true],
-      [0.299, true],
-      [0.3, false],
-      [0.27, false],
-      [0.24, true],
+    const before = await page.evaluate(() => window.farZoomFixture.readState());
+    for (const [zoom, noteMinimal, cardMinimal] of [
+      [0.25, false, false],
+      [0.249, true, false],
+      [0.25, true, false],
+      [0.279, true, false],
+      [0.28, false, false],
+      [0.26, false, false],
+      [0.25, false, false],
+      [0.249, true, false],
+      [0.2, true, false],
+      [0.199, true, true],
+      [0.239, true, true],
+      [0.24, true, false],
+      [0.28, false, false],
     ] as const) {
       await zoomTo(page, zoom);
-      for (const type of TYPES) await expectLayers(shell(page, type), minimal);
+      for (const type of TYPES)
+        await expectLayers(
+          shell(page, type),
+          type === 'note' ? noteMinimal : cardMinimal,
+        );
     }
+    expect(
+      await page.evaluate(() => window.farZoomFixture.readState()),
+    ).toEqual(before);
     expect(audit.writes).toEqual([]);
     expect(audit.errors).toEqual([]);
   });
@@ -1374,8 +1532,8 @@ test('shallow far Notes sacrifice vertical whitespace before hiding their title'
     [0.2, true],
     [0.19, true],
     [0.2, true],
-    [0.29, true],
-    [0.3, false],
+    [0.279, true],
+    [0.28, false],
     [0.27, false],
     [0.24, true],
   ] as const) {

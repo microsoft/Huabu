@@ -178,11 +178,16 @@ function PreviewCardContent({
   };
   const fitSummaryToHeight = textOnly || metrics.horizontal;
   const maxSummaryLines = textOnly ? 6 : Infinity;
+  const minSummaryLines = far ? FAR_ZOOM_DESIGN.descriptionMinLines : 1;
 
   useLayoutEffect(() => {
     const info = infoRef.current;
     const card = info?.parentElement;
     if (!info || !card) return;
+    const coverBudget =
+      far && !fitSummaryToHeight
+        ? baseMetrics.verticalCoverMinHeight * scale
+        : 0;
     let active = true;
     const measure = () => {
       if (!active || !info.clientHeight) return;
@@ -195,6 +200,7 @@ function PreviewCardContent({
           const headingStyle = getComputedStyle(heading);
           let titleHeight =
             (fitSummaryToHeight ? info.clientHeight : card.clientHeight) -
+            coverBudget -
             (parseFloat(infoStyle.paddingTop) || 0) -
             (parseFloat(infoStyle.paddingBottom) || 0) -
             (parseFloat(infoStyle.borderTopWidth) || 0) -
@@ -216,10 +222,7 @@ function PreviewCardContent({
           }
           const lines = Math.max(
             0,
-            Math.min(
-              metrics.horizontal && !textOnly ? Infinity : 2,
-              Math.floor(titleHeight / metrics.titleLine),
-            ),
+            Math.floor(titleHeight / metrics.titleLine),
           );
           heading.style.setProperty(
             '--card-title-lines',
@@ -244,7 +247,8 @@ function PreviewCardContent({
         (fitSummaryToHeight ? info.clientHeight : card.clientHeight) -
         (parseFloat(style.paddingTop) || 0) -
         (parseFloat(style.paddingBottom) || 0) -
-        metrics.descriptionGap;
+        metrics.descriptionGap -
+        coverBudget;
       for (const child of Array.from(info.children)) {
         if (!(child instanceof HTMLElement)) continue;
         if (child.classList.contains('preview-card__summary')) continue;
@@ -296,6 +300,8 @@ function PreviewCardContent({
     metrics.titleLine,
     textOnly,
     far,
+    baseMetrics.verticalCoverMinHeight,
+    scale,
   ]);
 
   const resolvedAccent = resolveNodeAccent(nodeType, accent);
@@ -416,7 +422,9 @@ function PreviewCardContent({
           <p
             className="preview-card__summary text-fg-muted"
             style={
-              !titleFits || summaryLines === 0 ? { display: 'none' } : undefined
+              !titleFits || summaryLines < minSummaryLines
+                ? { display: 'none' }
+                : undefined
             }
           >
             {summary}

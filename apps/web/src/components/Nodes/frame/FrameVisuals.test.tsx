@@ -66,7 +66,7 @@ describe('Frame visual primitives', () => {
       expect(count?.style.fontSize).toBe('7px');
       expect(count?.style.height).toBe('10px');
       expect(count?.style.minWidth).toBe('10px');
-      expect(count?.style.marginBlock).toBe('2.5px');
+      expect(count?.style.marginBlock).toBe('3px');
       const label = container.querySelector<HTMLElement>(
         '[data-frame-region-label]',
       );
@@ -74,8 +74,8 @@ describe('Frame visual primitives', () => {
       expect(label?.style.top).toBe('18px');
       expect(label?.style.transform).toBe('scale(10) translateX(-50%)');
       expect(label?.style.width).toBe('41.2px');
-      expect(label?.style.fontSize).toBe('10px');
-      expect(label?.style.lineHeight).toBe('15px');
+      expect(label?.style.fontSize).toBe('12px');
+      expect(label?.style.lineHeight).toBe('16px');
       expect(
         container.querySelector<HTMLElement>(
           '[data-frame-region-label] > div:not([aria-hidden])',
@@ -87,7 +87,7 @@ describe('Frame visual primitives', () => {
         )?.style.marginLeft,
       ).toBe('3px');
       expect(title?.contains(count)).toBe(false);
-      expect(title?.style.maxHeight).toBe('60px');
+      expect(title?.style.maxHeight).toBe('48px');
       expect(container.querySelector('[data-frame-region-marker]')).toBeNull();
       expect(
         container.querySelector(

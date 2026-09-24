@@ -52,6 +52,7 @@ export function createNodePresentationSelector(
           height * zoom,
           previous,
           nodeType !== 'office' && nodeType !== 'video',
+          nodeType,
         )
       : 'overview';
     previous = mode;

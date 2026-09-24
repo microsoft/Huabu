@@ -17,10 +17,14 @@ import type { FrameHeaderMetrics } from './frameHeaderMetrics';
 
 const TITLE_BADGE_GAP = 3;
 
-function contentCenterOffset(content: HTMLElement, width: number) {
+function contentCenterOffset(
+  content: HTMLElement,
+  width: number,
+  ellipsisWidth: number,
+) {
   const bounds = content.getBoundingClientRect();
   if (bounds.width <= 0) return 0;
-  const title = content.querySelector('[data-frame-region-title]');
+  const title = content.querySelector<HTMLElement>('[data-frame-region-title]');
   const badge = content.querySelector('[data-frame-region-count]');
   const rects: DOMRect[] = [];
   if (title) {
@@ -31,6 +35,18 @@ function contentCenterOffset(content: HTMLElement, width: number) {
     for (const rect of range.getClientRects()) {
       if (rect.bottom > titleBounds.top && rect.top < titleBounds.bottom)
         rects.push(rect);
+    }
+    // The final visible range fragment excludes the browser-painted ellipsis.
+    const last = rects.at(-1);
+    if (last && title.scrollHeight > title.clientHeight) {
+      rects.push(
+        new DOMRect(
+          last.right,
+          last.top,
+          Math.max(0, Math.min(ellipsisWidth, titleBounds.right - last.right)),
+          last.height,
+        ),
+      );
     }
   }
   if (badge) rects.push(badge.getBoundingClientRect());
@@ -72,13 +88,15 @@ export function FrameRegionLabel({
   const colors =
     accent && !isWhiteAccent(accent) ? getAccentTokens(accent) : null;
   const probe = useRef<HTMLDivElement>(null);
+  const ellipsis = useRef<HTMLSpanElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const [inlineFits, setInlineFits] = useState(false);
   const [centerOffset, setCenterOffset] = useState(0);
   useLayoutEffect(() => {
     const element = probe.current;
     const visibleContent = content.current;
-    if (!element || !visibleContent) return;
+    const ellipsisElement = ellipsis.current;
+    if (!element || !visibleContent || !ellipsisElement) return;
     const measure = () => {
       const text = element.firstElementChild;
       const badge = element.lastElementChild as HTMLElement | null;
@@ -89,9 +107,10 @@ export function FrameRegionLabel({
         (rect) => rect.width > 0,
       );
       const last = fragments.at(-1);
+      // Glyph centers avoid rounding a transformed line-top into the previous line.
       const textLine = last
         ? Math.floor(
-            (last.top - element.getBoundingClientRect().top) /
+            (last.top + last.height / 2 - element.getBoundingClientRect().top) /
               layout.lineHeight,
           )
         : 0;
@@ -100,7 +119,13 @@ export function FrameRegionLabel({
           element.offsetHeight <= box.availableHeight &&
           Math.round(badge.offsetTop / layout.lineHeight) === textLine,
       );
-      setCenterOffset(contentCenterOffset(visibleContent, box.availableWidth));
+      setCenterOffset(
+        contentCenterOffset(
+          visibleContent,
+          box.availableWidth,
+          ellipsisElement.getBoundingClientRect().width,
+        ),
+      );
     };
     measure();
     const observer = new ResizeObserver(measure);
@@ -173,6 +198,14 @@ export function FrameRegionLabel({
           {countBadge(true)}
         </span>
       </div>
+      <span
+        ref={ellipsis}
+        data-frame-region-ellipsis=""
+        aria-hidden="true"
+        className="invisible absolute top-0 left-0"
+      >
+        {'\u2026'}
+      </span>
       {inlineFits ? (
         <div
           ref={content}

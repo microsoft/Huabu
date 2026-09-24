@@ -35,10 +35,10 @@ const AT_EXIT = FRAME_ZOOM_THRESHOLDS.exit;
 const RETAINED_ZOOM = AT_EXIT - 0.001;
 
 describe('Frame region takeover', () => {
-  it('uses the configured 8% entry and 10% exit band', () => {
+  it('uses the configured 10% entry and 12% exit band', () => {
     expect(FRAME_ZOOM_THRESHOLDS).toMatchObject({
-      enter: 0.08,
-      exit: 0.1,
+      enter: 0.1,
+      exit: 0.12,
     });
   });
 
@@ -65,8 +65,8 @@ describe('Frame region takeover', () => {
       farFrameRegionPresentation(200, 49, ACTIVE_ZOOM, false),
     ).toMatchObject({
       visible: true,
-      fontSize: 10,
-      lineHeight: 15,
+      fontSize: 12,
+      lineHeight: 16,
       lines: 1,
     });
     expect(
@@ -96,7 +96,7 @@ describe('Frame region takeover', () => {
   });
 
   it('promotes a marginal nested Frame but keeps it as a best-effort root fallback', () => {
-    const inner = node('inner', 'frame', 300, 700);
+    const inner = node('inner', 'frame', 260, 700);
     const leaf = node('leaf', 'note', 200, 300, 'inner');
     expect([...resolveFrameZoom([inner, leaf], ACTIVE_ZOOM).visible]).toEqual([
       'inner',
@@ -117,7 +117,7 @@ describe('Frame region takeover', () => {
       visual.titleFontSize,
       visual.headerInset,
     );
-    const box = frameRegionContentBox(728 * 0.06, 0.06, header, 15);
+    const box = frameRegionContentBox(728 * 0.06, 0.06, header, 16);
     expect(box.availableWidth).toBeCloseTo(24.72);
     expect(box.availableHeight).toBeCloseTo(42.12);
     expect(box.lines).toBe(2);
@@ -152,7 +152,7 @@ describe('Frame region takeover', () => {
       maxWidth: 412,
     };
     const layout = farFrameRegionPresentation(26.4, 43.68, 0.06, false, header);
-    expect(frameRegionContentBox(43.68, 0.06, header, 15).lines).toBe(0);
+    expect(frameRegionContentBox(43.68, 0.06, header, 16).lines).toBe(0);
     expect(layout.fallbackVisible).toBe(false);
   });
 
@@ -160,17 +160,17 @@ describe('Frame region takeover', () => {
     for (const [height, lines] of [
       [69, 2],
       [70, 2],
-      [90, 4],
-      [91, 4],
-      [200, 11],
-      [448, 28],
+      [90, 3],
+      [92, 4],
+      [200, 10],
+      [448, 26],
     ]) {
       expect(
         farFrameRegionPresentation(200, height, RETAINED_ZOOM, true),
       ).toMatchObject({
         visible: true,
-        fontSize: 10,
-        lineHeight: 15,
+        fontSize: 12,
+        lineHeight: 16,
         lines,
       });
     }
@@ -194,7 +194,7 @@ describe('Frame region takeover', () => {
         true,
       );
       expect(layout.maxWidth).toBeGreaterThanOrEqual(8);
-      expect(layout.fontSize).toBe(10);
+      expect(layout.fontSize).toBe(12);
     }
     expect(resolveFrameZoom(nodes, 0.069, state).visible.has('frame')).toBe(
       true,
@@ -307,7 +307,9 @@ describe('Frame region takeover', () => {
       node('largeLeaf', 'note', 200, 100, 'large'),
     ];
     expect(resolveFrameZoom(nodes, AT_ENTER).visible.has('outer')).toBe(false);
-    const state = resolveFrameZoom(nodes, ACTIVE_ZOOM);
+    const initial = resolveFrameZoom(nodes, ACTIVE_ZOOM);
+    expect([...initial.visible]).toEqual(['small', 'large']);
+    const state = resolveFrameZoom(nodes, 0.079, initial);
     expect([...state.visible]).toEqual(['outer']);
     expect(state.suppressed.has('large')).toBe(true);
   });

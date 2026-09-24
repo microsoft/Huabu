@@ -16,6 +16,39 @@ describe('three-layer node presentation', () => {
   const belowEnter = enter - 0.0001;
   const belowExit = exit - 0.0001;
 
+  it.each([
+    [80, 80],
+    [400, 80],
+    [400, 320],
+    [2000, 1600],
+  ])('uses Note-only 25/28 percent hysteresis at %sx%s', (width, height) => {
+    expect(SEMANTIC_ZOOM_CONFIG.minimalZoomByType.note).toEqual({
+      enter: 0.25,
+      exit: 0.28,
+    });
+    let mode: NodePresentationMode = 'overview';
+    for (const [zoom, expected] of [
+      [0.28, 'overview'],
+      [0.26, 'overview'],
+      [0.25, 'overview'],
+      [0.2499, 'minimal'],
+      [0.25, 'minimal'],
+      [0.2799, 'minimal'],
+      [0.28, 'overview'],
+      [0.26, 'overview'],
+    ] as const) {
+      mode = resolveNodePresentation(
+        zoom,
+        width * zoom,
+        height * zoom,
+        mode,
+        false,
+        'note',
+      );
+      expect(mode).toBe(expected);
+    }
+  });
+
   it('uses the configured 20% entry and 24% exit band', () => {
     expect(SEMANTIC_ZOOM_CONFIG.minimalZoom).toEqual({
       enter: 0.2,
@@ -131,29 +164,30 @@ describe('far-label inner screen-space fit', () => {
       availableHeight: 68,
       horizontalInset: 6,
       verticalInset: 6,
-      lines: 5,
+      lines: 4,
       labelRetained: true,
     });
   });
 
   it.each([
     [-10, -10, 0, 0, 0, false],
-    [12, 12, 9, 12, 0, false],
+    [12, 12, 12, 12, 0, false],
     [200, 12.9, 188, 12.9, 0, false],
-    [200, 13, 188, 13, 1, true],
-    [200, 20, 188, 13, 1, true],
-    [200, 24.9, 188, 13, 1, true],
-    [50, 25, 38, 13, 1, true],
-    [8.9, 100, 8.9, 88, 6, false],
-    [9, 100, 9, 88, 6, true],
-    [20.9, 100, 9, 88, 6, true],
-    [21, 100, 9, 88, 6, true],
-    [35.9, 100, 23.9, 88, 6, true],
+    [200, 15.9, 188, 15.9, 0, false],
+    [200, 16, 188, 16, 1, true],
+    [200, 20, 188, 16, 1, true],
+    [200, 27.9, 188, 16, 1, true],
+    [50, 28, 38, 16, 1, true],
+    [11.9, 100, 11.9, 88, 5, false],
+    [12, 100, 12, 88, 5, true],
+    [23.9, 100, 12, 88, 5, true],
+    [24, 100, 12, 88, 5, true],
+    [35.9, 100, 23.9, 88, 5, true],
     [100, 37.9, 88, 25.9, 1, true],
-    [100, 38, 88, 26, 2, true],
-    [100, 50.9, 88, 38.9, 2, true],
-    [100, 51, 88, 39, 3, true],
-    [100, 500, 88, 488, 37, true],
+    [100, 44, 88, 32, 2, true],
+    [100, 59.9, 88, 47.9, 2, true],
+    [100, 60, 88, 48, 3, true],
+    [100, 500, 88, 488, 30, true],
   ] as const)(
     'fits %sx%s inner bounds',
     (width, height, availableWidth, availableHeight, lines, labelRetained) => {
@@ -168,26 +202,26 @@ describe('far-label inner screen-space fit', () => {
   it.each([undefined, false, true])(
     'lets CSS retain any label with one line and one glyph of width regardless of history (%s)',
     (previous) => {
-      expect(resolveFarLabelLayout(8.9, 100, previous).labelRetained).toBe(
+      expect(resolveFarLabelLayout(11.9, 100, previous).labelRetained).toBe(
         false,
       );
-      for (const width of [9, 12, 20.9, 21, 30, 35, 35.9])
+      for (const width of [12, 20.9, 21, 30, 35, 35.9])
         expect(resolveFarLabelLayout(width, 100, previous).labelRetained).toBe(
           true,
         );
       expect(resolveFarLabelLayout(50, 41, previous).labelRetained).toBe(true);
-      expect(resolveFarLabelLayout(100, 12.9, previous).labelRetained).toBe(
+      expect(resolveFarLabelLayout(100, 15.9, previous).labelRetained).toBe(
         false,
       );
     },
   );
-  it.each([0.09, 0.085, 0.08])(
-    'shrinks padding to retain a dense 240px Note at zoom %s before Frame takeover',
+  it.each([0.1, 0.095])(
+    'shrinks padding to retain 12px labels at zoom %s',
     (zoom) => {
       const width = (240 - 6) * zoom;
       const layout = resolveFarLabelLayout(width, (180 - 6) * zoom);
       expect(layout.labelRetained).toBe(true);
-      expect(layout.availableWidth).toBeGreaterThanOrEqual(9);
+      expect(layout.availableWidth).toBeGreaterThanOrEqual(12);
       expect(layout.horizontalInset).toBeLessThanOrEqual(6);
       expect(layout.availableWidth + layout.horizontalInset * 2).toBeCloseTo(
         width,
@@ -195,10 +229,25 @@ describe('far-label inner screen-space fit', () => {
     },
   );
   it.each([
-    [13, 0],
-    [17, 2],
-    [21, 4],
-    [25, 6],
+    [0.1, true],
+    [0.095, true],
+    [0.09, false],
+    [0.085, false],
+    [0.08, false],
+  ])(
+    'fits a 240x180 Note at zoom %s only when a complete 16px line fits',
+    (zoom, retained) => {
+      const layout = resolveFarLabelLayout((240 - 6) * zoom, (180 - 6) * zoom);
+      expect(layout.labelRetained).toBe(retained);
+      expect(layout.availableWidth).toBeGreaterThanOrEqual(12);
+      expect(layout.lines).toBe(retained ? 1 : 0);
+    },
+  );
+  it.each([
+    [16, 0],
+    [20, 2],
+    [24, 4],
+    [28, 6],
     [40, 6],
   ])(
     'reduces vertical insets at height %s to %s without changing horizontal insets',

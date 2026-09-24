@@ -8,13 +8,16 @@ import {
   getFrameHeaderMetrics,
   type FrameHeaderMetrics,
 } from './frameHeaderMetrics';
-import { farLabelContentBox } from '../design/farZoomDesign';
+import {
+  FAR_TITLE_TYPOGRAPHY,
+  farLabelContentBox,
+} from '../design/farZoomDesign';
 
 import type { Node } from '@xyflow/react';
 
 export const FRAME_ZOOM_THRESHOLDS = {
-  enter: 0.08,
-  exit: 0.1,
+  enter: 0.1,
+  exit: 0.12,
   fitRecoveryMargin: 2,
 } as const;
 
@@ -43,8 +46,8 @@ export function farFrameRegionPresentation(
 ) {
   const thresholds = FRAME_ZOOM_THRESHOLDS;
   const active = zoom < (previousActive ? thresholds.exit : thresholds.enter);
-  const fontSize = 10;
-  const lineHeight = 15;
+  const fontSize = FAR_TITLE_TYPOGRAPHY.labelFont;
+  const lineHeight = FAR_TITLE_TYPOGRAPHY.labelLine;
   const fitInset = 10;
   const maxWidth = Math.max(0, width - fitInset * 2);
   const lines = Math.max(

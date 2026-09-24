@@ -6,6 +6,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { PreviewCard, type PreviewCardProps } from './PreviewCard';
+import { previewCardMetricsForSize } from './previewCardDesign';
 import { FAR_ZOOM_DESIGN } from '../design/farZoomDesign';
 import { resolveNodeAccent } from '../design/nodeAccentPolicy';
 import { nodeContentSpacingForWidth } from '../design/nodeSpacing';
@@ -67,6 +68,73 @@ function cardElement(): HTMLElement {
 }
 
 describe('PreviewCard', () => {
+  it('retains a single summary line and original typography outside far zoom', () => {
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(60);
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(16);
+    render({ summary: 'Supporting details.' });
+    const card = cardElement();
+    expect(card.style.getPropertyValue('--card-summary-lines')).toBe('1');
+    expect(card.style.getPropertyValue('--card-description')).toBe(
+      `${NODE_CARD_TYPOGRAPHY.description}px`,
+    );
+    expect(
+      container.querySelector<HTMLElement>('.preview-card__summary')?.style
+        .display,
+    ).not.toBe('none');
+  });
+
+  it.each([
+    ['web', 400, 400, '/cover.jpg'],
+    ['pdf', 400, 400, '/cover.jpg'],
+    ['web', 800, 350, '/cover.jpg'],
+    ['pdf', 800, 350, '/cover.jpg'],
+    ['web', 240, 400, undefined],
+    ['pdf', 240, 400, undefined],
+  ] as const)(
+    'requires two far-summary lines for %s at %sx%s with image %s',
+    (nodeType, width, height, image) => {
+      let availableHeight = 50;
+      vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(
+        () =>
+          availableHeight +
+          (image && width / height < 1.5
+            ? previewCardMetricsForSize(width, height).verticalCoverMinHeight *
+              0.19
+            : 0),
+      );
+      vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(
+        16,
+      );
+      for (const [budget, visible] of [
+        [50, true],
+        [49, false],
+        [34, false],
+        [50, true],
+      ] as const) {
+        availableHeight = budget;
+        render({
+          nodeType,
+          width,
+          height: height + budget,
+          image,
+          summary: 'Supporting details.',
+          farZoom: 0.19,
+        });
+        const summary = container.querySelector<HTMLElement>(
+          '.preview-card__summary',
+        );
+        expect(summary?.style.display === 'none').toBe(!visible);
+        const card = cardElement();
+        expect(card.style.getPropertyValue('--card-title')).toBe('12px');
+        expect(card.style.getPropertyValue('--card-title-line')).toBe('16px');
+        expect(card.style.getPropertyValue('--card-description')).toBe('10px');
+        expect(card.style.getPropertyValue('--card-description-line')).toBe(
+          '16px',
+        );
+      }
+    },
+  );
+
   it.each(['web', 'pdf'])(
     'reuses Note tint for %s information without tinting media',
     (nodeType) => {
@@ -176,6 +244,41 @@ describe('PreviewCard', () => {
       );
     },
   );
+  it.each([
+    ['web', '/cover.jpg'],
+    ['pdf', '/cover.jpg'],
+    ['web', undefined],
+    ['pdf', undefined],
+  ] as const)(
+    'allocates all fitting far %s title lines with image %s and restores normal clamping',
+    (nodeType, image) => {
+      vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(
+        200,
+      );
+      vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(
+        16,
+      );
+      const props = { nodeType, image, width: 400, height: 700 };
+      render({ ...props, farZoom: 0.19 });
+      const heading = container.querySelector<HTMLElement>(
+        '.preview-card__title',
+      );
+      if (!heading) throw new Error('Missing heading');
+      const coverBudget = image
+        ? previewCardMetricsForSize(400, 700).verticalCoverMinHeight * 0.19
+        : 0;
+      expect(Number(heading.style.getPropertyValue('--card-title-lines'))).toBe(
+        Math.floor((200 - coverBudget) / 16),
+      );
+      expect(
+        Number(heading.style.getPropertyValue('--card-title-lines')),
+      ).toBeGreaterThan(2);
+      render(props);
+      expect(heading.style.getPropertyValue('--card-title-lines')).toBe('');
+      expect(heading.style.maxHeight).toBe('');
+    },
+  );
+
   it.each(['web', 'pdf'])(
     'allocates horizontal %s title lines before descriptions, even without a summary',
     (nodeType) => {

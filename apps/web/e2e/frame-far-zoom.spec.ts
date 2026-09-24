@@ -341,22 +341,22 @@ for (const contentSize of [
     page,
   }) => {
     const audit = await mountFrames(page, { contentSize });
-    await zoomTo(page, 0.24);
+    await zoomTo(page, 0.19);
     await expect(region(page, 'outer')).toHaveCount(0);
     await expect(shell(page, 'office').locator('[data-study-label]')).toHaveCSS(
       'opacity',
       '1',
     );
-    await zoomTo(page, 0.18);
+    await zoomTo(page, 0.12);
     await expect(region(page, 'outer')).toHaveCount(0);
-    await zoomTo(page, 0.16);
+    await zoomTo(page, 0.1);
     await expect(region(page, 'outer')).toHaveCount(0);
-    await zoomTo(page, 0.14);
+    await zoomTo(page, 0.099);
     await expect(region(page, 'outer')).toBeVisible();
     await expect(shell(page, 'note')).toHaveCSS('opacity', '1');
-    await zoomTo(page, 0.19);
+    await zoomTo(page, 0.119);
     await expect(region(page, 'outer')).toBeVisible();
-    await zoomTo(page, 0.2);
+    await zoomTo(page, 0.12);
     await expect(region(page, 'outer')).toHaveCount(0);
     await expect(shell(page, 'office').locator('[data-study-label]')).toHaveCSS(
       'opacity',
@@ -369,6 +369,47 @@ for (const contentSize of [
     expect(audit.errors).toEqual([]);
   });
 }
+
+test('Frame uses 10/12 percent hysteresis without a dense Note title gap', async ({
+  page,
+}) => {
+  const audit = await mountFrames(page, {
+    contentSize: { width: 240, height: 180 },
+    initialZoom: 0.13,
+  });
+  for (const [zoom, active] of [
+    [0.12, false],
+    [0.11, false],
+    [0.1, false],
+    [0.0999, true],
+    [0.1, true],
+    [0.1199, true],
+    [0.12, false],
+    [0.11, false],
+    [0.0999, true],
+  ] as const) {
+    await zoomTo(page, zoom);
+    const owner = region(page, 'outer');
+    if (active) {
+      await expect(owner).toBeVisible();
+      await expect(owner.locator('[data-frame-region-title]')).toBeVisible();
+    } else {
+      await expect(owner).toHaveCount(0);
+      await expect(shell(page, 'note').locator('[data-study-label]')).toHaveCSS(
+        'opacity',
+        '1',
+      );
+      await expect(
+        shell(page, 'note').locator('[data-study-title]'),
+      ).toBeVisible();
+    }
+  }
+  expect(await page.evaluate(() => window.frameZoomFixture.snapshot())).toEqual(
+    audit.snapshot,
+  );
+  expect(audit.writes).toEqual([]);
+  expect(audit.errors).toEqual([]);
+});
 
 test('Frame takeover retains the Question mark without restoring its card shell', async ({
   page,
@@ -661,8 +702,8 @@ for (const accent of ['white', 'teal']) {
           0,
         );
         await expect(title).toHaveCSS('text-align', 'left');
-        await expect(title).toHaveCSS('font-size', '10px');
-        await expect(title).toHaveCSS('line-height', '15px');
+        await expect(title).toHaveCSS('font-size', '12px');
+        await expect(title).toHaveCSS('line-height', '16px');
         await expect(title).toHaveCSS('font-weight', '500');
         const veil = owner.locator('[data-frame-region-veil]');
         await expect(veil).toHaveCSS('opacity', '0.6');
@@ -841,8 +882,8 @@ for (const [titleText, childCount, mobile] of [
         bounds.count.bottom + 0.1,
       );
       if ((childCount === 6 || childCount === 7) && zoom >= 0.09) {
-        expect(bounds.inline).toBe(true);
-        if (childCount === 7) expect(bounds.title.height).toBeGreaterThan(15);
+        expect(bounds.inline, JSON.stringify(bounds)).toBe(true);
+        if (childCount === 7) expect(bounds.title.height).toBeGreaterThan(16);
       }
       if (bounds.inline) {
         expect(
@@ -897,7 +938,9 @@ for (const [titleText, narrow, height, count] of [
       await expect
         .poll(() =>
           owner.evaluate((frame) => {
-            const title = frame.querySelector('[data-frame-region-title]');
+            const title = frame.querySelector<HTMLElement>(
+              '[data-frame-region-title]',
+            );
             const badge = frame.querySelector('[data-frame-region-count]');
             const label = frame.querySelector('[data-frame-region-label]');
             if (!title || !badge || !label)
@@ -913,6 +956,24 @@ for (const [titleText, narrow, height, count] of [
                 rect.bottom > titleBox.top &&
                 rect.top < titleBox.bottom,
             );
+            const last = rects.at(-1);
+            if (last && title.scrollHeight > title.clientHeight) {
+              const ellipsis = frame.querySelector(
+                '[data-frame-region-ellipsis]',
+              );
+              if (!ellipsis) throw new Error('Missing ellipsis measurement');
+              rects.push(
+                new DOMRect(
+                  last.right,
+                  last.top,
+                  Math.min(
+                    ellipsis.getBoundingClientRect().width,
+                    titleBox.right - last.right,
+                  ),
+                  last.height,
+                ),
+              );
+            }
             rects.push(badge.getBoundingClientRect());
             const left = Math.min(...rects.map((rect) => rect.left));
             const right = Math.max(
@@ -953,6 +1014,54 @@ for (const [titleText, narrow, height, count] of [
     expect(audit.errors).toEqual([]);
   });
 }
+
+test('centers the painted CJK ellipsis without clipping it', async ({
+  page,
+}) => {
+  const audit = await mountFrames(page, {
+    narrow: true,
+    regionTitle: '终端基础研究资料',
+  });
+  await zoomTo(page, 0.07);
+  await zoomTo(page, 0.085);
+  const owner = region(page, 'outer');
+  await expect(owner.locator('[data-frame-region-title]')).toBeVisible();
+  await expect
+    .poll(() =>
+      owner.evaluate((frame) => {
+        const title = frame.querySelector<HTMLElement>(
+          '[data-frame-region-title]',
+        );
+        const label = frame.querySelector('[data-frame-region-label]');
+        if (!title || !label) throw new Error('Missing clamped Frame title');
+        if (title.scrollHeight <= title.clientHeight)
+          throw new Error('Expected an overflowing title');
+        const reference = document.createElement('span');
+        reference.textContent = '基础\u2026';
+        reference.style.cssText = `position:absolute;visibility:hidden;white-space:nowrap;font:${getComputedStyle(title).font}`;
+        label.append(reference);
+        const paintedWidth = reference.getBoundingClientRect().width;
+        reference.remove();
+        const titleBox = title.getBoundingClientRect();
+        const frameBox = frame.getBoundingClientRect();
+        const labelBox = label.getBoundingClientRect();
+        return Math.max(
+          Math.abs(
+            titleBox.left +
+              paintedWidth / 2 -
+              (frameBox.left + frameBox.width / 2),
+          ),
+          titleBox.left + paintedWidth - labelBox.right,
+        );
+      }),
+    )
+    .toBeLessThan(0.15);
+  expect(await page.evaluate(() => window.frameZoomFixture.snapshot())).toEqual(
+    audit.snapshot,
+  );
+  expect(audit.writes).toEqual([]);
+  expect(audit.errors).toEqual([]);
+});
 
 test('blank-gap regression: root Frame fallback uses the rendered label area at six percent', async ({
   page,
@@ -1016,7 +1125,7 @@ test('single-column 440px Frames visibly take over before shrinking below readab
     await zoomTo(page, zoom);
     const label = region(page, 'outer').locator('[data-frame-region-label]');
     await expect(label).toBeVisible();
-    await expect(label).toHaveCSS('font-size', '10px');
+    await expect(label).toHaveCSS('font-size', '12px');
     const availableHeight = await label.evaluate((element) =>
       Number.parseFloat(getComputedStyle(element).maxHeight),
     );
@@ -1107,8 +1216,8 @@ test('Frame region replaces mixed child content, retains footprints and edges, a
     }
   });
   expect(paintedOnTop).toBe('outer');
-  await expect(label).toHaveCSS('font-size', '10px');
-  await expect(label).toHaveCSS('line-height', '15px');
+  await expect(label).toHaveCSS('font-size', '12px');
+  await expect(label).toHaveCSS('line-height', '16px');
   await expect(
     region(page, 'outer').locator('[data-frame-region-count]'),
   ).toHaveCount(1);
@@ -1163,7 +1272,7 @@ for (const innerSize of [
       await expect(owners).toHaveCount(1);
       await expect(owners).toBeVisible();
       const title = owners.locator('[data-frame-region-label]');
-      await expect(title).toHaveCSS('font-size', '10px');
+      await expect(title).toHaveCSS('font-size', '12px');
       expect(
         await title.evaluate((el) => {
           el.style.pointerEvents = 'auto';
