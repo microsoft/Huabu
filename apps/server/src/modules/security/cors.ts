@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { originHostname } from './host-guard.js';
+
 import type { FastifyCorsOptions } from '@fastify/cors';
 
 /**
@@ -18,18 +20,8 @@ export function createCorsOptions(
       // Origin entirely — allow them; the Host guard already validates
       // their target hostname.
       if (!origin) return cb(null, true);
-      try {
-        const parsed = new URL(origin);
-        // URL.hostname strips the port and lowercases; IPv6 literals
-        // come back without the brackets, so re-add them to match the
-        // allowlist's canonical form.
-        const hostname = parsed.hostname.includes(':')
-          ? `[${parsed.hostname}]`
-          : parsed.hostname;
-        cb(null, allowedHostnames.has(hostname));
-      } catch {
-        cb(null, false);
-      }
+      const hostname = originHostname(origin);
+      cb(null, hostname !== null && allowedHostnames.has(hostname));
     },
     // @fastify/cors v11 narrowed its default to the CORS-safelisted methods;
     // keep the v10 set, since the API uses PUT, PATCH, and DELETE.
