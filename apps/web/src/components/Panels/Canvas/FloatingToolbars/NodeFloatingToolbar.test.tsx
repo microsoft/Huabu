@@ -351,7 +351,8 @@ describe('NodeFloatingToolbar type-icon drag surface', () => {
     (type, icon) => {
       render({ type });
       const button = handle();
-      expect(button.getAttribute('aria-label')).toBe(`${type} · Drag to move`);
+      const label = type === 'question' ? 'layers.filterLabels.question' : type;
+      expect(button.getAttribute('aria-label')).toBe(`${label} · Drag to move`);
       expect(button.querySelector(`.lucide-${icon}`)).not.toBeNull();
       expect(container.querySelectorAll(`.lucide-${icon}`)).toHaveLength(1);
       expect(container.querySelector('.lucide-grip-vertical')).toBeNull();
@@ -377,6 +378,30 @@ describe('NodeFloatingToolbar type-icon drag surface', () => {
     render();
     expect(handle().style.width).toBe('32px');
     expect(handle().style.height).toBe('32px');
+  });
+
+  it('uses the translated Agent Node label when dragging is disabled', async () => {
+    vi.useFakeTimers();
+    try {
+      render({
+        type: 'question',
+        data: { type: 'question', content: '' },
+        dragEnabled: false,
+      });
+      const indicator = container.querySelector('.text-fg-subtle svg')
+        ?.parentElement?.parentElement;
+      if (!indicator) throw new Error('Missing Agent Node type indicator');
+      await act(async () => {
+        indicator.dispatchEvent(new MouseEvent('mouseenter'));
+        await vi.advanceTimersByTimeAsync(200);
+      });
+      expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(
+        'layers.filterLabels.question',
+      );
+      expect(container.querySelector('[data-node-drag-handle]')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it.each(['video', 'pdf', 'web', 'image'] as const)(

@@ -93,6 +93,26 @@ afterEach(() => {
 });
 
 describe('NodeToolbar', () => {
+  it('labels the outlined Sparkles tool with Agent and describes its placement action', () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() =>
+      root?.render(<NodeToolbar activeTool="select" onToolChange={vi.fn()} />),
+    );
+
+    const button = container.querySelector(
+      'button[aria-label="toolbar.nodes.addAgent (A)"]',
+    );
+    expect(button?.textContent).toContain('toolbar.nodes.agent');
+    expect(button?.getAttribute('aria-pressed')).toBe('false');
+    const icon = button?.querySelector('svg');
+    expect(icon?.getAttribute('aria-hidden')).toBe('true');
+    expect(icon?.classList.contains('lucide-sparkles')).toBe(true);
+    expect(icon?.getAttribute('fill')).toBe('none');
+    expect(icon?.getAttribute('stroke')).toBe('currentColor');
+  });
+
   it.each(['select', 'pan', 'lasso'] as const)(
     'uses the theme background for the active %s tool',
     (activeTool) => {
@@ -129,7 +149,7 @@ describe('NodeToolbar', () => {
         ),
       );
       const selected = container.querySelector<HTMLButtonElement>(
-        `button[aria-label^="toolbar.nodes.${nodeType === 'question' ? 'agent' : nodeType}"]`,
+        `button[aria-label^="toolbar.nodes.${nodeType === 'question' ? 'addAgent' : nodeType}"]`,
       );
       expect(selected?.classList.contains('text-info')).toBe(true);
       expect(selected?.classList.contains('bg-info-bg')).toBe(true);
@@ -137,6 +157,9 @@ describe('NodeToolbar', () => {
         true,
       );
       expect(container.querySelectorAll('button.bg-info-bg')).toHaveLength(1);
+      if (nodeType === 'question') {
+        expect(selected?.getAttribute('aria-pressed')).toBe('true');
+      }
     },
   );
 

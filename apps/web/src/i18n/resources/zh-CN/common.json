@@ -470,7 +470,7 @@
     "edgeLabel": "边标签",
     "createConnectedNode": "创建连接节点",
     "newNote": "新建笔记",
-    "newQuestion": "新建问题",
+    "newQuestion": "新建 Agent 节点",
     "removeNode": "移除节点",
     "removeFromCanvas": "从 Space 移除",
     "aiSummary": "AI 摘要",
@@ -655,7 +655,7 @@
       "frame": "框架",
       "spacePreview": "空间快捷入口",
       "sketch": "手绘",
-      "question": "问题"
+      "question": "Agent 节点"
     }
   },
   "chat": {
@@ -672,8 +672,8 @@
     "closePanel": "关闭聊天面板",
     "title": "聊天",
     "chatWith": "与 {{name}} 聊天",
-    "newQuestion": "新问题",
-    "question": "问题",
+    "newQuestion": "新建 Agent 节点",
+    "question": "Agent 节点",
     "backToChat": "返回聊天",
     "failedSwitchMode": "切换模式失败",
     "failedSwitchModeWithMessage": "切换模式失败：{{message}}",
@@ -917,7 +917,8 @@
       "text": "文本",
       "sketch": "手绘",
       "audio": "音频",
-      "agent": "Agent"
+      "agent": "Agent",
+      "addAgent": "添加 Agent 节点"
     },
     "resources": {
       "addContent": "添加内容",
@@ -953,10 +954,10 @@
     "deleteSelected": "删除所选项",
     "sendInkRequest": "发送笔迹请求",
     "sendingInkRequest": "正在发送笔迹请求",
-    "multipleQuestionTargets": "请只选择一个要继续的问题",
-    "invalidQuestionTarget": "此问题无法接收笔迹请求",
+    "multipleQuestionTargets": "请只选择一个要继续的 Agent 节点",
+    "invalidQuestionTarget": "此 Agent 节点无法接收笔迹请求",
     "newInkAgentTarget": "新建 · Huabu",
-    "newInkAgentTargetDescription": "使用 Huabu 新建问题",
+    "newInkAgentTargetDescription": "使用 Huabu 新建 Agent 节点",
     "inkAgentTarget": "目标 Agent：{{name}}",
     "multipleInkAgentTargets": "多个 Agent",
     "invalidInkAgentTarget": "Agent 不可用",

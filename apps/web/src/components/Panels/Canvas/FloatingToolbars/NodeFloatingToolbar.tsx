@@ -212,6 +212,14 @@ export const NodeFloatingToolbar = memo(
     onDragActiveChange,
   }: NodeFloatingToolbarProps) => {
     const { t } = useTranslation();
+    const typeLabel =
+      type === 'text'
+        ? t('layers.filterLabels.text')
+        : type === 'note'
+          ? t('layers.filterLabels.note')
+          : type === 'question'
+            ? t('layers.filterLabels.question')
+            : type;
     const [moreOpen, setMoreOpen] = useState(false);
     const internalNode = useInternalNode(id);
     // While the node is collapsed to its takeover mark the card has faded
@@ -392,16 +400,10 @@ export const NodeFloatingToolbar = memo(
             type={type}
             dragEnabled={dragEnabled}
             onActiveChange={onDragActiveChange}
-            title={
-              type === 'text'
-                ? t('layers.filterLabels.text')
-                : type === 'note'
-                  ? t('layers.filterLabels.note')
-                  : undefined
-            }
+            title={typeLabel}
           />
         ) : (
-          <Tooltip content={type}>
+          <Tooltip content={typeLabel}>
             <div className="text-fg-subtle flex items-center px-1">
               {(() => {
                 const TypeIcon = NODE_ICON[type];

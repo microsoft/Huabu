@@ -470,7 +470,7 @@
     "edgeLabel": "Edge label",
     "createConnectedNode": "Create connected node",
     "newNote": "New note",
-    "newQuestion": "New question",
+    "newQuestion": "New Agent Node",
     "removeNode": "Remove node",
     "removeFromCanvas": "Remove from Space",
     "aiSummary": "AI Summary",
@@ -487,7 +487,7 @@
     "frameLayoutGrid": "Grid",
     "columns": "Columns",
     "rows": "Rows",
-    "gridRowsMin": "Rows (minimum \u2014 more are added when needed)",
+    "gridRowsMin": "Rows (minimum — more are added when needed)",
     "columnsRange": "Columns (1–{{max}})",
     "rowsRange": "Rows (1–{{max}})",
     "unframe": "Unframe",
@@ -655,7 +655,7 @@
       "frame": "Frame",
       "spacePreview": "Space Shortcut",
       "sketch": "Sketch",
-      "question": "Question"
+      "question": "Agent Node"
     }
   },
   "chat": {
@@ -672,8 +672,8 @@
     "closePanel": "Close chat panel",
     "title": "Chat",
     "chatWith": "Chat with {{name}}",
-    "newQuestion": "New question",
-    "question": "Question",
+    "newQuestion": "New Agent Node",
+    "question": "Agent Node",
     "backToChat": "Back to chat",
     "failedSwitchMode": "Failed to switch mode",
     "failedSwitchModeWithMessage": "Failed to switch mode: {{message}}",
@@ -917,7 +917,8 @@
       "text": "Text",
       "sketch": "Sketch",
       "audio": "Audio",
-      "agent": "Agent"
+      "agent": "Agent",
+      "addAgent": "Add Agent Node"
     },
     "resources": {
       "addContent": "Add Content",
@@ -953,10 +954,10 @@
     "deleteSelected": "Delete selected",
     "sendInkRequest": "Send ink request",
     "sendingInkRequest": "Sending ink request",
-    "multipleQuestionTargets": "Select only one question to continue",
-    "invalidQuestionTarget": "This question cannot receive an ink request",
+    "multipleQuestionTargets": "Select only one Agent Node to continue",
+    "invalidQuestionTarget": "This Agent Node cannot receive an ink request",
     "newInkAgentTarget": "New · Huabu",
-    "newInkAgentTargetDescription": "Create a new question with Huabu",
+    "newInkAgentTargetDescription": "Create a new Agent Node with Huabu",
     "inkAgentTarget": "Target agent: {{name}}",
     "multipleInkAgentTargets": "Multiple agents",
     "invalidInkAgentTarget": "Agent unavailable",
