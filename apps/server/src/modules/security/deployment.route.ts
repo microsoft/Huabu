@@ -10,6 +10,7 @@ import {
 import { resolveDeploymentConfig } from './deployment-config.js';
 import { isOwnerRequest } from './owner.js';
 import { isSecretStoreWritable } from '../../security/secret-store.js';
+import { resolveIdentityConfig } from '../identity/config.js';
 
 import type { FastifyPluginAsync } from 'fastify';
 
@@ -20,6 +21,7 @@ export function buildDeploymentReadiness(input: {
   bindScope: 'loopback' | 'network';
   ownerAllowed: boolean;
   credentialStoreWritable: boolean;
+  ownerPolicy?: DeploymentReadinessResponse['owner']['policy'];
 }): DeploymentReadinessResponse {
   const issues: DeploymentReadinessResponse['issues'] = [];
   if (!input.credentialStoreWritable) {
@@ -45,7 +47,7 @@ export function buildDeploymentReadiness(input: {
       basicAuthConfigured: input.basicAuthConfigured,
     },
     owner: {
-      policy: 'loopback-or-basic-auth',
+      policy: input.ownerPolicy ?? 'loopback-or-basic-auth',
       allowedForRequest: input.ownerAllowed,
     },
     credentials: {
@@ -71,6 +73,10 @@ const deploymentRoutes: FastifyPluginAsync = async (app) => {
         ...config,
         ownerAllowed: isOwnerRequest(request),
         credentialStoreWritable: writable,
+        ownerPolicy:
+          resolveIdentityConfig().provider === 'bubble'
+            ? 'bubble-system-owner'
+            : 'loopback-or-basic-auth',
       });
     },
   );

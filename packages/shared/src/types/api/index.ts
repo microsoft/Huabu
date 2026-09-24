@@ -36,4 +36,5 @@ export * from './agent-profile.js';
 export * from './task.js';
 export * from './interactive-view.js';
 export * from './deployment.js';
+export * from './identity.js';
 export * from './agent-node.js';
