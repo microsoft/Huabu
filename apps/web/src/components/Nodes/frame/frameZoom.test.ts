@@ -65,8 +65,8 @@ describe('Frame region takeover', () => {
       farFrameRegionPresentation(200, 49, ACTIVE_ZOOM, false),
     ).toMatchObject({
       visible: true,
-      fontSize: 11,
-      lineHeight: 16,
+      fontSize: 10,
+      lineHeight: 15,
       lines: 1,
     });
     expect(
@@ -117,7 +117,7 @@ describe('Frame region takeover', () => {
       visual.titleFontSize,
       visual.headerInset,
     );
-    const box = frameRegionContentBox(728 * 0.06, 0.06, header, 16);
+    const box = frameRegionContentBox(728 * 0.06, 0.06, header, 15);
     expect(box.availableWidth).toBeCloseTo(24.72);
     expect(box.availableHeight).toBeCloseTo(42.12);
     expect(box.lines).toBe(2);
@@ -152,7 +152,7 @@ describe('Frame region takeover', () => {
       maxWidth: 412,
     };
     const layout = farFrameRegionPresentation(26.4, 43.68, 0.06, false, header);
-    expect(frameRegionContentBox(43.68, 0.06, header, 16).lines).toBe(0);
+    expect(frameRegionContentBox(43.68, 0.06, header, 15).lines).toBe(0);
     expect(layout.fallbackVisible).toBe(false);
   });
 
@@ -160,17 +160,17 @@ describe('Frame region takeover', () => {
     for (const [height, lines] of [
       [69, 2],
       [70, 2],
-      [90, 3],
-      [91, 3],
-      [200, 10],
-      [448, 26],
+      [90, 4],
+      [91, 4],
+      [200, 11],
+      [448, 28],
     ]) {
       expect(
         farFrameRegionPresentation(200, height, RETAINED_ZOOM, true),
       ).toMatchObject({
         visible: true,
-        fontSize: 11,
-        lineHeight: 16,
+        fontSize: 10,
+        lineHeight: 15,
         lines,
       });
     }
@@ -194,7 +194,7 @@ describe('Frame region takeover', () => {
         true,
       );
       expect(layout.maxWidth).toBeGreaterThanOrEqual(8);
-      expect(layout.fontSize).toBe(11);
+      expect(layout.fontSize).toBe(10);
     }
     expect(resolveFrameZoom(nodes, 0.069, state).visible.has('frame')).toBe(
       true,

@@ -43,8 +43,8 @@ export function farFrameRegionPresentation(
 ) {
   const thresholds = FRAME_ZOOM_THRESHOLDS;
   const active = zoom < (previousActive ? thresholds.exit : thresholds.enter);
-  const fontSize = 11;
-  const lineHeight = 16;
+  const fontSize = 10;
+  const lineHeight = 15;
   const fitInset = 10;
   const maxWidth = Math.max(0, width - fitInset * 2);
   const lines = Math.max(
