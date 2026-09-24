@@ -11,6 +11,18 @@ import {
 } from './semanticZoom';
 
 describe('three-layer node presentation', () => {
+  const enter = SEMANTIC_ZOOM_CONFIG.minimalZoom.enter;
+  const exit = SEMANTIC_ZOOM_CONFIG.minimalZoom.exit;
+  const belowEnter = enter - 0.0001;
+  const belowExit = exit - 0.0001;
+
+  it('uses the configured 20% entry and 24% exit band', () => {
+    expect(SEMANTIC_ZOOM_CONFIG.minimalZoom).toEqual({
+      enter: 0.2,
+      exit: 0.24,
+    });
+  });
+
   it.each([
     [80, 80],
     [400, 80],
@@ -19,12 +31,12 @@ describe('three-layer node presentation', () => {
   ])('uses identical zoom hysteresis at %sx%s', (width, height) => {
     let mode: NodePresentationMode = 'overview';
     for (const [zoom, expected] of [
-      [0.3, 'overview'],
-      [0.25, 'overview'],
-      [0.2499, 'minimal'],
-      [0.25, 'minimal'],
-      [0.2999, 'minimal'],
-      [0.3, 'overview'],
+      [exit, 'overview'],
+      [enter, 'overview'],
+      [belowEnter, 'minimal'],
+      [enter, 'minimal'],
+      [belowExit, 'minimal'],
+      [exit, 'overview'],
     ] as const) {
       mode = resolveNodePresentation(
         zoom,
@@ -36,7 +48,13 @@ describe('three-layer node presentation', () => {
       expect(mode).toBe(expected);
     }
     expect(
-      resolveNodePresentation(0.27, width, height, 'overview', false),
+      resolveNodePresentation(
+        (enter + exit) / 2,
+        width,
+        height,
+        'overview',
+        false,
+      ),
     ).toBe('overview');
   });
 
@@ -78,8 +96,10 @@ describe('three-layer node presentation', () => {
   });
 
   it('lets far zoom override even reader-sized geometry', () => {
-    expect(resolveNodePresentation(0.24, 1000, 800, 'reading')).toBe('minimal');
-    expect(resolveNodePresentation(0.3, 1000, 800, 'minimal')).toBe('reading');
+    expect(resolveNodePresentation(belowEnter, 1000, 800, 'reading')).toBe(
+      'minimal',
+    );
+    expect(resolveNodePresentation(exit, 1000, 800, 'minimal')).toBe('reading');
   });
 
   it('opts Office into minimal without requiring a reading renderer', () => {
@@ -91,44 +111,49 @@ describe('three-layer node presentation', () => {
       expect(resolveNodePresentation(1, 700, 500, previous, false)).toBe(
         'overview',
       );
-      expect(resolveNodePresentation(0.24, 800, 79, previous, false)).toBe(
-        'minimal',
-      );
+      expect(
+        resolveNodePresentation(belowEnter, 800, 79, previous, false),
+      ).toBe('minimal');
     }
-    expect(resolveNodePresentation(0.27, 110, 800, 'minimal', false)).toBe(
+    expect(resolveNodePresentation(belowExit, 110, 800, 'minimal', false)).toBe(
       'minimal',
     );
-    expect(resolveNodePresentation(0.27, 110, 800, 'overview', false)).toBe(
-      'overview',
-    );
+    expect(
+      resolveNodePresentation(belowExit, 110, 800, 'overview', false),
+    ).toBe('overview');
   });
 });
 
 describe('far-label inner screen-space fit', () => {
   it('subtracts only the shared insets, not another border', () => {
     expect(resolveFarLabelLayout(100, 80)).toEqual({
-      availableWidth: 84,
+      availableWidth: 88,
       availableHeight: 68,
+      horizontalInset: 6,
       verticalInset: 6,
-      lines: 4,
+      lines: 5,
       labelRetained: true,
     });
   });
 
   it.each([
     [-10, -10, 0, 0, 0, false],
-    [12, 12, 0, 12, 0, false],
-    [200, 13.9, 184, 13.9, 0, false],
-    [200, 14, 184, 14, 1, true],
-    [200, 20, 184, 14, 1, true],
-    [200, 25.9, 184, 14, 1, true],
-    [50, 26, 34, 14, 1, true],
-    [35.9, 100, 19.9, 88, 6, false],
-    [100, 39.9, 84, 27.9, 1, true],
-    [100, 40, 84, 28, 2, true],
-    [100, 53.9, 84, 41.9, 2, true],
-    [100, 54, 84, 42, 3, true],
-    [100, 500, 84, 488, 34, true],
+    [12, 12, 9, 12, 0, false],
+    [200, 12.9, 188, 12.9, 0, false],
+    [200, 13, 188, 13, 1, true],
+    [200, 20, 188, 13, 1, true],
+    [200, 24.9, 188, 13, 1, true],
+    [50, 25, 38, 13, 1, true],
+    [8.9, 100, 8.9, 88, 6, false],
+    [9, 100, 9, 88, 6, true],
+    [20.9, 100, 9, 88, 6, true],
+    [21, 100, 9, 88, 6, true],
+    [35.9, 100, 23.9, 88, 6, true],
+    [100, 37.9, 88, 25.9, 1, true],
+    [100, 38, 88, 26, 2, true],
+    [100, 50.9, 88, 38.9, 2, true],
+    [100, 51, 88, 39, 3, true],
+    [100, 500, 88, 488, 37, true],
   ] as const)(
     'fits %sx%s inner bounds',
     (width, height, availableWidth, availableHeight, lines, labelRetained) => {
@@ -141,32 +166,46 @@ describe('far-label inner screen-space fit', () => {
   );
 
   it.each([undefined, false, true])(
-    'never lets retention history (%s) override minimum fit',
+    'lets CSS retain any label with one line and one glyph of width regardless of history (%s)',
     (previous) => {
-      // The 20px text minimum must fit regardless of retention history.
-      for (const width of [20, 30, 35, 35.9]) {
+      expect(resolveFarLabelLayout(8.9, 100, previous).labelRetained).toBe(
+        false,
+      );
+      for (const width of [9, 12, 20.9, 21, 30, 35, 35.9])
         expect(resolveFarLabelLayout(width, 100, previous).labelRetained).toBe(
-          false,
+          true,
         );
-      }
       expect(resolveFarLabelLayout(50, 41, previous).labelRetained).toBe(true);
-      expect(resolveFarLabelLayout(100, 13.9, previous).labelRetained).toBe(
+      expect(resolveFarLabelLayout(100, 12.9, previous).labelRetained).toBe(
         false,
       );
     },
   );
+  it.each([0.09, 0.085, 0.08])(
+    'shrinks padding to retain a dense 240px Note at zoom %s before Frame takeover',
+    (zoom) => {
+      const width = (240 - 6) * zoom;
+      const layout = resolveFarLabelLayout(width, (180 - 6) * zoom);
+      expect(layout.labelRetained).toBe(true);
+      expect(layout.availableWidth).toBeGreaterThanOrEqual(9);
+      expect(layout.horizontalInset).toBeLessThanOrEqual(6);
+      expect(layout.availableWidth + layout.horizontalInset * 2).toBeCloseTo(
+        width,
+      );
+    },
+  );
   it.each([
-    [14, 0],
-    [18, 2],
-    [22, 4],
-    [26, 6],
+    [13, 0],
+    [17, 2],
+    [21, 4],
+    [25, 6],
     [40, 6],
   ])(
     'reduces vertical insets at height %s to %s without changing horizontal insets',
     (height, inset) => {
       const layout = resolveFarLabelLayout(80, height);
       expect(layout.verticalInset).toBe(inset);
-      expect(layout.availableWidth).toBe(64);
+      expect(layout.availableWidth).toBe(68);
       expect(layout.labelRetained).toBe(true);
       expect(layout.availableHeight + inset * 2).toBe(height);
     },

@@ -51,6 +51,7 @@ export function FarZoomLabel({
   visible,
   design = FAR_ZOOM_DESIGN,
   verticalInset = design.labelInset,
+  horizontalInset = design.labelInsetInline ?? design.labelInset,
 }: {
   title: string;
   description?: string;
@@ -61,6 +62,7 @@ export function FarZoomLabel({
   zoom: number;
   visible: boolean;
   verticalInset?: number;
+  horizontalInset?: number;
   design?: FarZoomDesign;
 }) {
   const probe = useRef<HTMLDivElement>(null);
@@ -111,7 +113,7 @@ export function FarZoomLabel({
       aria-hidden={!visible}
       className="pointer-events-none absolute overflow-hidden"
       style={{
-        left: (design.labelInsetInline ?? design.labelInset) / zoom,
+        left: horizontalInset / zoom,
         top: verticalInset / zoom,
         width,
         maxHeight: height,

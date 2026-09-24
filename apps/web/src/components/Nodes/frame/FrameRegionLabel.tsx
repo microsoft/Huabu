@@ -6,15 +6,10 @@ import { memo, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 
 import { getNodeSize } from '@huabu/shared/canvas-engine';
 
-import {
-  FRAME_DESIGN_CONFIG,
-  frameSurfaceStyle,
-  frameVisualMetricsForSize,
-} from './frameDesign';
-import { farFrameRegionPresentation } from './frameZoom';
+import { frameSurfaceStyle, frameVisualMetricsForSize } from './frameDesign';
+import { farFrameRegionPresentation, frameRegionContentBox } from './frameZoom';
 import { useFrameRegionVisible, useFrameRegionZ } from './FrameZoomContext';
 import { getAccentTokens, isWhiteAccent } from '../design/accentTokens';
-import { farLabelContentBox } from '../design/farZoomDesign';
 import { FarZoomText } from '../semanticZoom/FarZoomText';
 
 import type { FrameHeaderMetrics } from './frameHeaderMetrics';
@@ -35,12 +30,10 @@ export function FrameRegionLabel({
   layout: ReturnType<typeof farFrameRegionPresentation>;
   headerMetrics: FrameHeaderMetrics;
 }) {
-  const box = farLabelContentBox(
-    headerMetrics.maxWidth * zoom,
-    layout.screenHeight -
-      (headerMetrics.top + FRAME_DESIGN_CONFIG.header.edgeInset) * zoom,
-    0,
-    0,
+  const box = frameRegionContentBox(
+    layout.screenHeight,
+    zoom,
+    headerMetrics,
     layout.lineHeight,
   );
   const titleLines = Math.max(0, box.lines - 1);
@@ -217,6 +210,7 @@ export const FrameRegionOverlay = memo(function FrameRegionOverlay({
     size.height * zoom,
     zoom,
     true,
+    headerMetrics,
   );
   return (
     <ViewportPortal>

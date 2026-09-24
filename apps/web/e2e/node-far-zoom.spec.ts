@@ -283,6 +283,37 @@ async function frames(page: Page) {
   });
 }
 
+test('blank-gap regression: dense Note titles remain visible down to the Frame entry boundary', async ({
+  page,
+}) => {
+  const audit = await mountNodes(page, {
+    width: 240,
+    height: 180,
+    zoom: 0.18,
+    title: '研究笔记',
+  });
+  const note = shell(page, 'note');
+  for (const zoom of [0.09, 0.085, 0.08]) {
+    await zoomTo(page, zoom, 'note');
+    const label = note.locator('[data-study-label]');
+    await expect(label).toHaveAttribute('aria-hidden', 'false');
+    await expect(label).toHaveCSS('opacity', '1');
+    await expect(label.locator('[data-study-title]')).toBeVisible();
+    const [labelBox, nodeBox] = await Promise.all([
+      label.boundingBox(),
+      note.boundingBox(),
+    ]);
+    if (!labelBox || !nodeBox) throw new Error('Missing label geometry');
+    expect(labelBox.width).toBeGreaterThanOrEqual(FAR.labelFont - 0.1);
+    expect(labelBox.x).toBeGreaterThanOrEqual(nodeBox.x);
+    expect(labelBox.x + labelBox.width).toBeLessThanOrEqual(
+      nodeBox.x + nodeBox.width + 0.1,
+    );
+  }
+  expect(audit.writes).toEqual([]);
+  expect(audit.errors).toEqual([]);
+});
+
 test('Note far-zoom labels retain typography and spacing without a divider', async ({
   page,
 }) => {

@@ -17,14 +17,14 @@ export interface FarZoomDesign {
 
 /** Screen-pixel metrics for far-zoom text; visibility policy belongs to callers. */
 export const FAR_ZOOM_DESIGN = {
-  labelFont: 10,
-  labelLine: 14,
+  labelFont: 9,
+  labelLine: 13,
   labelWeight: NODE_TYPOGRAPHY.cardTitle.weight,
   labelInset: 6,
-  labelInsetInline: 8,
-  descriptionFont: 8,
-  descriptionLine: 11,
-  descriptionGap: 4,
+  labelInsetInline: 6,
+  descriptionFont: 7,
+  descriptionLine: 10,
+  descriptionGap: 2,
 } as const satisfies FarZoomDesign;
 
 export function farLabelContentBox(

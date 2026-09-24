@@ -874,6 +874,58 @@ for (const [titleText, childCount, mobile] of [
   });
 }
 
+test('blank-gap regression: root Frame fallback uses the rendered label area at six percent', async ({
+  page,
+}) => {
+  const audit = await mountFrames(page, { narrow: true });
+  await zoomTo(page, 0.06);
+  const label = region(page, 'outer').locator('[data-frame-region-label]');
+  await expect(label).toBeVisible();
+  await expect(label.locator('[data-frame-region-title]')).toBeVisible();
+  const [labelBox, frameBox] = await Promise.all([
+    label.boundingBox(),
+    shell(page, 'outer').boundingBox(),
+  ]);
+  if (!labelBox || !frameBox) throw new Error('Missing fallback geometry');
+  expect(labelBox.width).toBeCloseTo(24.72, 1);
+  expect(labelBox.x + labelBox.width).toBeLessThanOrEqual(
+    frameBox.x + frameBox.width + 0.1,
+  );
+  expect(labelBox.y + labelBox.height).toBeLessThanOrEqual(
+    frameBox.y + frameBox.height + 0.1,
+  );
+  await zoomTo(page, 0.1);
+  await expect(region(page, 'outer')).toHaveCount(0);
+  expect(await page.evaluate(() => window.frameZoomFixture.snapshot())).toEqual(
+    audit.snapshot,
+  );
+  expect(audit.writes).toEqual([]);
+  expect(audit.errors).toEqual([]);
+});
+
+test('blank-gap regression: standalone playground Frames share root fallback', async ({
+  page,
+}) => {
+  await page.goto('/playground/design#zoomed-overview');
+  const slider = page.getByRole('slider', {
+    name: 'Readability study zoom',
+    exact: true,
+  });
+  const regions = page.locator('#zoomed-overview [data-study-frame-region]');
+  await slider.fill('8');
+  await expect(regions).toHaveCount(3);
+  for (const region of await regions.all())
+    await expect(region).toHaveAttribute('aria-hidden', 'true');
+  await slider.fill('6');
+  for (const region of await regions.all()) {
+    await expect(region).toHaveAttribute('aria-hidden', 'false');
+    await expect(region.locator('[data-frame-region-label]')).toBeVisible();
+  }
+  await slider.fill('10');
+  for (const region of await regions.all())
+    await expect(region).toHaveAttribute('aria-hidden', 'true');
+});
+
 test('single-column 440px Frames visibly take over before shrinking below readable bounds', async ({
   page,
 }) => {

@@ -70,7 +70,7 @@ export interface SemanticZoomConfig {
 }
 
 export const SEMANTIC_ZOOM_CONFIG: SemanticZoomConfig = {
-  minimalZoom: { enter: 0.25, exit: 0.3 },
+  minimalZoom: { enter: 0.2, exit: 0.24 },
 
   nodeLOD: {
     // Only heavy node types — all others default to 'full' at every level.
@@ -94,27 +94,27 @@ export const SEMANTIC_ZOOM_CONFIG: SemanticZoomConfig = {
 export function resolveFarLabelLayout(
   screenWidth: number,
   screenHeight: number,
-  previousRetained?: boolean,
+  _previousRetained?: boolean,
   design: FarZoomDesign = FAR_ZOOM_DESIGN,
 ) {
   const { labelInset, labelLine, labelFont } = design;
+  const horizontalInset = Math.min(
+    design.labelInsetInline ?? labelInset,
+    Math.max(0, (screenWidth - labelFont) / 2),
+  );
   const { availableWidth, availableHeight, verticalInset, lines } =
     farLabelContentBox(
       screenWidth,
       screenHeight,
-      design.labelInsetInline ?? labelInset,
+      horizontalInset,
       labelInset,
       labelLine,
     );
-  const retentionWidth =
-    previousRetained === undefined ? 42 : previousRetained ? 38 : 46;
-  const labelRetained =
-    lines > 0 &&
-    availableWidth >= labelFont * 2 &&
-    screenWidth >= retentionWidth;
+  const labelRetained = lines > 0 && availableWidth >= labelFont;
   return {
     availableWidth,
     availableHeight,
+    horizontalInset,
     verticalInset,
     lines,
     labelRetained,
