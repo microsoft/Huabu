@@ -20,10 +20,6 @@ import {
 } from '@huabu/shared/canvas-engine';
 
 const DESTINATION_GAP = 160;
-const PREVIEW_MIN_WIDTH = 480;
-const PREVIEW_MIN_HEIGHT = 320;
-const PREVIEW_MAX_WIDTH = 2400;
-const PREVIEW_MAX_HEIGHT = 1600;
 const MOVABLE_TYPES = new Set<CanvasNodeType>(
   CANVAS_NODE_TYPES.filter((type) => type !== 'spacePreview'),
 );
@@ -62,18 +58,6 @@ function nodeSize(node: CanvasNode): { width: number; height?: number } | null {
   return {
     width,
     ...(typeof height === 'number' ? { height } : {}),
-  };
-}
-
-function occupiedSize(node: CanvasNode): { width: number; height: number } {
-  const defaults = getNodeDefaultSize(node.type ?? 'note');
-  return {
-    width:
-      typeof node.style?.width === 'number' ? node.style.width : defaults.width,
-    height:
-      typeof node.style?.height === 'number'
-        ? node.style.height
-        : (defaults.height ?? 100),
   };
 }
 
@@ -299,8 +283,6 @@ export function buildSpaceMovePlan(input: {
   if (createSourcePreview) {
     let minX = Infinity;
     let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
     for (const nodeId of movedIds) {
       const node = byId.get(nodeId);
       const position = getAbsolutePosition(
@@ -310,11 +292,8 @@ export function buildSpaceMovePlan(input: {
       if (!node || !position) {
         throw new SpaceMovePlanError('invalid-hierarchy', nodeId);
       }
-      const size = occupiedSize(node);
       minX = Math.min(minX, position.x);
       minY = Math.min(minY, position.y);
-      maxX = Math.max(maxX, position.x + size.width);
-      maxY = Math.max(maxY, position.y + size.height);
     }
     sourcePreviewNodeId = createId('node');
     sourceCommands.push({
@@ -325,16 +304,7 @@ export function buildSpaceMovePlan(input: {
           nodeType: 'spacePreview',
           data: { targetCanvasId: destinationCanvasId },
           position: { x: minX, y: minY },
-          size: {
-            width: Math.min(
-              PREVIEW_MAX_WIDTH,
-              Math.max(PREVIEW_MIN_WIDTH, maxX - minX),
-            ),
-            height: Math.min(
-              PREVIEW_MAX_HEIGHT,
-              Math.max(PREVIEW_MIN_HEIGHT, maxY - minY),
-            ),
-          },
+          size: getNodeDefaultSize('spacePreview'),
           selectOnCreate: false,
         },
       ],

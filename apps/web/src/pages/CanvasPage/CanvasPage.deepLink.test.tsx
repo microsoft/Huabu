@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   requestChatOpen: vi.fn(),
   connect: vi.fn(),
   disconnect: vi.fn(),
+  refreshSpaceTitles: vi.fn(async () => undefined),
 }));
 
 vi.mock('react-i18next', () => ({
@@ -91,7 +92,7 @@ vi.mock('../../store/workspaceStore', () => ({
   ) =>
     selector({
       worldCanvasId: null,
-      refreshSpaceTitles: async () => undefined,
+      refreshSpaceTitles: mocks.refreshSpaceTitles,
     }),
 }));
 
@@ -147,6 +148,7 @@ beforeEach(() => {
   mocks.openPreviewNode.mockClear();
   mocks.toast.mockClear();
   mocks.requestChatOpen.mockClear();
+  mocks.refreshSpaceTitles.mockClear();
   usePanelStore.setState({ isPreviewFullscreen: false });
 });
 
@@ -167,6 +169,18 @@ afterEach(() => {
 });
 
 describe('CanvasPage node deep-link navigation', () => {
+  it('refreshes shared Space metadata on ordinary canvas entry, focus, and workspace changes', async () => {
+    await renderAt(`/canvas/${CANVAS_ID}`, node('note'));
+    expect(mocks.refreshSpaceTitles).toHaveBeenCalledTimes(1);
+    act(() => window.dispatchEvent(new Event('focus')));
+    expect(mocks.refreshSpaceTitles).toHaveBeenCalledTimes(2);
+    act(() => window.dispatchEvent(new Event('workspace-changed')));
+    expect(mocks.refreshSpaceTitles).toHaveBeenCalledTimes(3);
+    await act(async () => root.render(null));
+    act(() => window.dispatchEvent(new Event('focus')));
+    expect(mocks.refreshSpaceTitles).toHaveBeenCalledTimes(3);
+  });
+
   it('selects, focuses, and permanently opens a hydrated preview once', async () => {
     const { selectNodes } = await renderAt(
       `/canvas/${CANVAS_ID}?node=node-1`,

@@ -20,7 +20,10 @@ import {
 import { useTranslation } from 'react-i18next';
 
 import { ACCENT_NONE_TOKEN, type FrameNodeData } from '@huabu/shared';
-import { isAlwaysAutoHeightNodeType } from '@huabu/shared/canvas-engine';
+import {
+  isAlwaysAutoHeightNodeType,
+  SPACE_SHORTCUT_SIZE,
+} from '@huabu/shared/canvas-engine';
 
 import { Button } from '@/components/Common/Button';
 import { CanvasFloatingPopover } from '@/components/Common/CanvasFloatingPopover';
@@ -36,6 +39,7 @@ import {
 import { toast } from '@/components/Common/Toast';
 import { Tooltip } from '@/components/Common/Tooltip';
 import { useHeightMode } from '@/components/Nodes/shared/height/useHeightMode';
+import { SpaceShortcutWidthSettings } from '@/components/Nodes/spacePreview/SpaceShortcutWidthSettings';
 import { NODE_ICON } from '@/config/nodeIcons';
 import { nodeToolbarOffset } from '@/config/nodeInteractionChrome';
 import { QUESTION_CARD_SCALE_RANGE } from '@/handler/canvasCommand/resolvers/resolveSetQuestionCardScale';
@@ -445,68 +449,96 @@ export const NodeFloatingToolbar = memo(
         <DropdownMenu
           floating
           placement="bottom"
-          className={`${FLOATING_TOOLBAR_POPOVER_CLASS} node-toolbar-size-panel flex-row items-center gap-2`}
+          className={`${FLOATING_TOOLBAR_POPOVER_CLASS} node-toolbar-size-panel ${type === 'spacePreview' ? '' : 'flex-row items-center gap-2'}`}
           trigger={
-            <Button variant="ghost" iconOnly title={t('toolbar.size.title')}>
+            <Button
+              variant="ghost"
+              iconOnly
+              title={t(
+                type === 'spacePreview'
+                  ? 'spacePreview.widthSettings'
+                  : 'toolbar.size.title',
+              )}
+            >
               <Settings2 />
             </Button>
           }
         >
-          <FloatingToolbar.SizePicker
-            width={currentWidth}
-            height={isTextFlowNode ? null : currentHeight}
-            showHeight={!isTextFlowNode}
-            onApply={({ width, height }) => {
-              if (!internalNode) return;
-              const resolved = resolveGeometryEdit(internalNode, {
-                width,
-                height,
-              });
-              if (!resolved) return;
-              beginGesture('SET_NODE_GEOMETRY');
-              // Frame in hug mode: typing an explicit W or H is a
-              // direct-manipulation signal to switch the frame's sizing
-              // policy to manual. Dispatch the policy change first
-              // (inside the same gesture) so both intents fold into one
-              // undo entry and the geometry write isn't reverted by the
-              // engine's end-of-batch refit pass.
-              if (isFrameHug) {
-                dispatchUiIntent({
-                  type: 'SET_FRAME_LAYOUT_MODE',
-                  frameId: id,
-                  mode: frameLayoutMode,
-                  sizing: 'manual',
-                });
+          {type === 'spacePreview' ? (
+            <SpaceShortcutWidthSettings
+              key={`${data.type === 'spacePreview' ? data.widthMode : ''}-${currentWidth}`}
+              width={currentWidth ?? SPACE_SHORTCUT_SIZE.defaultWidth}
+              automatic={
+                data.type === 'spacePreview' && data.widthMode === 'auto'
               }
-              setNodeGeometry([
-                {
-                  nodeId: id,
-                  size: {
-                    width: resolved.width,
-                    height: resolved.height,
+              onChange={(width) => {
+                if (width === null) {
+                  updateNodeData(id, { widthMode: 'auto' });
+                } else {
+                  beginGesture('SET_NODE_GEOMETRY');
+                  setNodeGeometry([
+                    { nodeId: id, size: { width, height: 'auto' } },
+                  ]);
+                }
+              }}
+            />
+          ) : (
+            <FloatingToolbar.SizePicker
+              width={currentWidth}
+              height={isTextFlowNode ? null : currentHeight}
+              showHeight={!isTextFlowNode}
+              onApply={({ width, height }) => {
+                if (!internalNode) return;
+                const resolved = resolveGeometryEdit(internalNode, {
+                  width,
+                  height,
+                });
+                if (!resolved) return;
+                beginGesture('SET_NODE_GEOMETRY');
+                // Frame in hug mode: typing an explicit W or H is a
+                // direct-manipulation signal to switch the frame's sizing
+                // policy to manual. Dispatch the policy change first
+                // (inside the same gesture) so both intents fold into one
+                // undo entry and the geometry write isn't reverted by the
+                // engine's end-of-batch refit pass.
+                if (isFrameHug) {
+                  dispatchUiIntent({
+                    type: 'SET_FRAME_LAYOUT_MODE',
+                    frameId: id,
+                    mode: frameLayoutMode,
+                    sizing: 'manual',
+                  });
+                }
+                setNodeGeometry([
+                  {
+                    nodeId: id,
+                    size: {
+                      width: resolved.width,
+                      height: resolved.height,
+                    },
                   },
-                },
-              ]);
-            }}
-            autoSize={
-              isFrame
-                ? {
-                    dimensions: 'both',
-                    appearance: 'separate',
-                    active: isFrameHug,
-                    onToggle: toggleFrameSizing,
-                  }
-                : undefined
-            }
-            heightAuto={
-              type === 'note'
-                ? {
-                    active: isNoteAutoHeight,
-                    onToggle: toggleNoteAutoHeight,
-                  }
-                : undefined
-            }
-          />
+                ]);
+              }}
+              autoSize={
+                isFrame
+                  ? {
+                      dimensions: 'both',
+                      appearance: 'separate',
+                      active: isFrameHug,
+                      onToggle: toggleFrameSizing,
+                    }
+                  : undefined
+              }
+              heightAuto={
+                type === 'note'
+                  ? {
+                      active: isNoteAutoHeight,
+                      onToggle: toggleNoteAutoHeight,
+                    }
+                  : undefined
+              }
+            />
+          )}
           {type === 'question' && (
             <FloatingToolbar.NumberInput
               label={t('toolbar.cardScale')}

@@ -47,6 +47,14 @@ const CanvasPage = lazy(() => import('./pages/CanvasPage/CanvasPage.tsx'));
 const playgroundRoutes = import.meta.env.DEV
   ? [
       {
+        path: '/playground/space-previews',
+        lazy: async () => ({
+          Component: (
+            await import('./pages/playground/SpacePreviewDesignPlaygroundPage')
+          ).default,
+        }),
+      },
+      {
         path: '/playground/node-toolbars',
         lazy: async () => ({
           Component: (

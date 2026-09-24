@@ -13,6 +13,7 @@ import { Select, type SelectOption } from '@/components/Common/Select';
 import { TextInput } from '@/components/Common/TextInput';
 import { toast } from '@/components/Common/Toast';
 import useCanvasStore, { drainPendingSaves } from '@/store/canvasStore';
+import { useWorkspaceStore } from '@/store/workspaceStore';
 
 import type { MoveSelectionErrorCode } from '@huabu/shared';
 
@@ -156,6 +157,7 @@ export function MoveSelectionModal() {
       return;
     }
     setSubmitting(true);
+    const workspaceId = useWorkspaceStore.getState().workspaceId;
     let moveRequested = false;
     try {
       await drainPendingSaves();
@@ -169,6 +171,14 @@ export function MoveSelectionModal() {
         createSourcePreview,
         expectedSourceVersion,
       });
+      if (useWorkspaceStore.getState().workspaceId === workspaceId) {
+        useWorkspaceStore
+          .getState()
+          .setSpaceTitle(result.destination.canvasId, result.destination.title);
+        void useWorkspaceStore
+          .getState()
+          .refreshSpaceTitles([canvasId, result.destination.canvasId]);
+      }
       setOpen(false);
       toast(
         t('moveSelection.success', {

@@ -3,18 +3,21 @@
 
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApiError } from '@/api/_client';
 import { dismissToast, toast, ToastContainer } from '@/components/Common/Toast';
 import en from '@/i18n/resources/en/common.json';
 import zhCN from '@/i18n/resources/zh-CN/common.json';
 import useCanvasStore from '@/store/canvasStore';
+import { useWorkspaceStore } from '@/store/workspaceStore';
 
 import { MoveSelectionModal } from './MoveSelectionModal';
 
 import type * as ToastModule from '@/components/Common/Toast';
 import type { MoveSelectionErrorCode } from '@huabu/shared';
+
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 const { drainPendingSaves, listCanvases, moveCanvasSelection, translate } =
   vi.hoisted(() => ({
@@ -27,7 +30,7 @@ const { drainPendingSaves, listCanvases, moveCanvasSelection, translate } =
 const moveResult = {
   movedNodeCount: 1,
   movedConversationCount: 0,
-  destination: { canvasId: 'destination' },
+  destination: { canvasId: 'destination', title: 'Server destination title' },
 };
 
 vi.mock('react-i18next', async (importOriginal) => ({
@@ -85,6 +88,18 @@ const knownErrors = {
 
 let root: Root | undefined;
 let container: HTMLDivElement | undefined;
+
+beforeEach(() => {
+  useWorkspaceStore.setState({
+    workspaceId: 'workspace-source',
+    isReady: true,
+    isSyncing: false,
+    spaceTitles: {},
+    spaceSummaries: {},
+    spaceTitlesStatus: 'ready',
+    spaceTitlesError: null,
+  });
+});
 
 afterEach(() => {
   act(() => root?.unmount());
@@ -319,63 +334,89 @@ describe('MoveSelectionModal', () => {
     );
   });
 
-  it('allows entering a name for a new destination Space when no existing target is available', async () => {
-    listCanvases.mockResolvedValue({ canvases: [] });
-    moveCanvasSelection.mockResolvedValue(moveResult);
-    useCanvasStore.setState({
-      canvasId: 'source',
-      version: 3,
-      nodes: [
-        {
-          id: 'node-selected',
-          type: 'note',
-          position: { x: 0, y: 0 },
-          data: { label: 'Selected' },
-          selected: true,
-        },
-      ],
-      moveSelectionDialogOpen: true,
-    });
-    container = document.createElement('div');
-    document.body.appendChild(container);
-    root = createRoot(container);
+  it.each([false, true])(
+    'publishes the created destination only in its own workspace (switched=%s)',
+    async (switchWorkspace) => {
+      listCanvases.mockResolvedValue({ canvases: [] });
+      moveCanvasSelection.mockImplementation(async () => {
+        if (switchWorkspace)
+          useWorkspaceStore.setState({ workspaceId: 'workspace-other' });
+        listCanvases.mockResolvedValue({
+          canvases: [
+            {
+              ...moveResult.destination,
+              nodeCount: 1,
+              createdAt: 1,
+              updatedAt: 2345,
+            },
+          ],
+        });
+        return moveResult;
+      });
+      useCanvasStore.setState({
+        canvasId: 'source',
+        version: 3,
+        nodes: [
+          {
+            id: 'node-selected',
+            type: 'note',
+            position: { x: 0, y: 0 },
+            data: { label: 'Selected' },
+            selected: true,
+          },
+        ],
+        moveSelectionDialogOpen: true,
+      });
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
 
-    await act(async () => root?.render(<MoveSelectionModal />));
-    const destinationSelect = document.querySelector<HTMLButtonElement>(
-      'button[aria-label="moveSelection.selectDestination"]',
-    );
-    act(() => destinationSelect?.click());
-    const newDestination = Array.from(
-      document.querySelectorAll<HTMLButtonElement>('[role="option"]'),
-    ).find((button) =>
-      button.textContent?.includes('moveSelection.createNewDestination'),
-    );
-    act(() => newDestination?.click());
+      await act(async () => root?.render(<MoveSelectionModal />));
+      const destinationSelect = document.querySelector<HTMLButtonElement>(
+        'button[aria-label="moveSelection.selectDestination"]',
+      );
+      act(() => destinationSelect?.click());
+      const newDestination = Array.from(
+        document.querySelectorAll<HTMLButtonElement>('[role="option"]'),
+      ).find((button) =>
+        button.textContent?.includes('moveSelection.createNewDestination'),
+      );
+      act(() => newDestination?.click());
 
-    const nameInput = document.querySelector<HTMLInputElement>(
-      'input[aria-label="moveSelection.newSpaceName"]',
-    );
-    expect(nameInput).not.toBeNull();
-    act(() => {
-      const setValue = Object.getOwnPropertyDescriptor(
-        HTMLInputElement.prototype,
-        'value',
-      )?.set;
-      setValue?.call(nameInput, 'New destination');
-      nameInput?.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-    const move = Array.from(document.querySelectorAll('button')).find(
-      (button) => button.textContent === 'moveSelection.confirm',
-    );
-    await act(async () => move?.click());
+      const nameInput = document.querySelector<HTMLInputElement>(
+        'input[aria-label="moveSelection.newSpaceName"]',
+      );
+      expect(nameInput).not.toBeNull();
+      act(() => {
+        const setValue = Object.getOwnPropertyDescriptor(
+          HTMLInputElement.prototype,
+          'value',
+        )?.set;
+        setValue?.call(nameInput, 'New destination');
+        nameInput?.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      const move = Array.from(document.querySelectorAll('button')).find(
+        (button) => button.textContent === 'moveSelection.confirm',
+      );
+      await act(async () => move?.click());
 
-    expect(moveCanvasSelection).toHaveBeenCalledWith('source', {
-      selectedNodeIds: ['node-selected'],
-      destination: { kind: 'new', title: 'New destination' },
-      createSourcePreview: true,
-      expectedSourceVersion: 3,
-    });
-  });
+      expect(moveCanvasSelection).toHaveBeenCalledWith('source', {
+        selectedNodeIds: ['node-selected'],
+        destination: { kind: 'new', title: 'New destination' },
+        createSourcePreview: true,
+        expectedSourceVersion: 3,
+      });
+      expect(useWorkspaceStore.getState().spaceTitles).toEqual(
+        switchWorkspace ? {} : { destination: 'Server destination title' },
+      );
+      expect(useWorkspaceStore.getState().spaceSummaries).toEqual(
+        switchWorkspace
+          ? {}
+          : { destination: { nodeCount: 1, updatedAt: 2345 } },
+      );
+      expect(listCanvases).toHaveBeenCalledTimes(switchWorkspace ? 1 : 2);
+    },
+  );
 
   it('submits the selected existing destination', async () => {
     listCanvases.mockResolvedValue({

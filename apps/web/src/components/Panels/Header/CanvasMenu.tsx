@@ -67,11 +67,20 @@ export const CanvasMenu: React.FC<CanvasMenuProps> = ({ onOpenShortcuts }) => {
   }, [draftTitle]);
 
   const commitTitle = useCallback(async () => {
+    const workspaceId = useWorkspaceStore.getState().workspaceId;
     const accepted = await tryRename('canvas', canvasId, draftTitle);
     if (!accepted) {
       // Restore the input to whatever the store currently holds — either
       // the previous title (if reverted) or unchanged.
       setDraftTitle(useCanvasStore.getState().canvasTitle);
+    } else if (
+      useWorkspaceStore.getState().workspaceId === workspaceId &&
+      useCanvasStore.getState().canvasId === canvasId
+    ) {
+      useWorkspaceStore
+        .getState()
+        .setSpaceTitle(canvasId, useCanvasStore.getState().canvasTitle);
+      void useWorkspaceStore.getState().refreshSpaceTitles([canvasId]);
     }
   }, [canvasId, draftTitle, tryRename]);
 

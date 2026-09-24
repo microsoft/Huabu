@@ -9,6 +9,10 @@ import {
   type MutableRefObject,
 } from 'react';
 
+import {
+  OPEN_SPACE_SHORTCUT_EVENT,
+  type OpenSpaceShortcutDetail,
+} from '@/components/Nodes/spacePreview/spaceShortcutEvents';
 import { isVideoControlTarget } from '@/components/Nodes/video/videoInteraction';
 import { EDIT_EDGE_LABEL_EVENT } from '@/components/Panels/Canvas/edges/LabelledEdge';
 
@@ -344,13 +348,28 @@ export function useCanvasShortcuts(
         return;
       }
 
-      // Enter — edit the selected edge's label. Canvas elements stay out of
+      // Enter — open a selected shortcut or edit the selected edge's label. Canvas elements stay out of
       // the DOM tab order, so selection acts as the keyboard's focus and
       // Enter is the way to descend into it (same pattern as tldraw/FigJam).
       // Requires exactly one edge and no nodes selected, so the target is
       // unambiguous.
       if (key === 'Enter' && !mod && !e.altKey && !e.shiftKey && !editable) {
         const { nodes: cur, edges: curEdges } = useCanvasStore.getState();
+        const selectedNodes = cur.filter((node) => node.selected);
+        if (
+          selectedNodes.length === 1 &&
+          selectedNodes[0].type === 'spacePreview' &&
+          !curEdges.some((edge) => edge.selected)
+        ) {
+          e.preventDefault();
+          const detail: OpenSpaceShortcutDetail = {
+            nodeId: selectedNodes[0].id,
+          };
+          window.dispatchEvent(
+            new CustomEvent(OPEN_SPACE_SHORTCUT_EVENT, { detail }),
+          );
+          return;
+        }
         if (cur.some((n) => n.selected)) return;
         const selectedEdges = curEdges.filter((edge) => edge.selected);
         if (selectedEdges.length !== 1) return;

@@ -315,9 +315,9 @@ Huabu chooses between those models by input ambiguity rather than adopting eithe
 
 The distinctive choice is the automatic split: with a pen, physical pointers provide separate drawing and selection channels; without a pen, explicit tools remove the ambiguity. This combines whiteboard predictability with pen-first directness without making a resting finger or pen create ink accidentally.
 
-## 8. Nested Space Preview ownership
+## 8. Space Shortcut interaction
 
-A Space Preview viewport is an explicit nested interaction region. Its scene surface captures pointer pan and non-passive wheel zoom, stops native propagation, and carries `nodrag`, `nopan`, and `nowheel`; host-node movement remains available only from the preview's outer chrome. Keyboard focus gives the viewport arrows, `+`, `-`, `0`, and Escape. See [space-preview.md](./space-preview.md).
+A Space Shortcut is an ordinary canvas node without a nested interaction region. Host selection, dragging, zoom, and connections retain their normal owners. Double click, Enter on the sole selected shortcut, and toolbar Open Space share a ready-target guard; toolbar width controls and left/right resizing author only width. Input and menu keyboard ownership still takes precedence over canvas Enter. See [space-preview.md](./space-preview.md).
 
 ## Code entry points
 

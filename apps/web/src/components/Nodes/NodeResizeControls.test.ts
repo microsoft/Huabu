@@ -6,6 +6,17 @@ import { describe, expect, it } from 'vitest';
 import { nodeResizePolicy } from './NodeResizeControls';
 
 describe('nodeResizePolicy', () => {
+  it('only exposes horizontal reflow edges for Space Shortcuts', () => {
+    expect(nodeResizePolicy('spacePreview')).toEqual(
+      ['left', 'right'].map((position) => ({
+        position,
+        edge: true,
+        mode: 'width',
+        lockAspect: false,
+        cursor: 'ew-resize',
+      })),
+    );
+  });
   it.each(['text', 'question'])(
     '%s exposes width reflow edges and proportional corners',
     (type) => {

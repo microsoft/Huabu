@@ -666,10 +666,12 @@ export interface FrameNodeData extends BaseNodeData {
   sizing?: FrameSizing;
 }
 
-/** A view-only projection of another ordinary Space. */
+/** A navigation shortcut to another ordinary Space. */
 export interface SpacePreviewNodeData extends BaseNodeData {
   type: 'spacePreview';
   targetCanvasId: string;
+  /** Missing on legacy previews, which retain a bounded fixed width. */
+  widthMode?: 'auto' | 'fixed';
 }
 
 /**

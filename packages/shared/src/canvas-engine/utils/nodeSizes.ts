@@ -16,6 +16,10 @@
  */
 
 import {
+  clampSpaceShortcutWidth,
+  SPACE_SHORTCUT_SIZE,
+} from './spaceShortcut.js';
+import {
   isAlwaysAutoHeightType,
   isAutoHeightByDefaultType,
 } from '../height/policy.js';
@@ -41,7 +45,10 @@ const DEFAULT_SIZES: Record<string, NodeSize> = {
   // Compact recorder: fits the recording controls on one row.
   audio: { width: 200, height: 56 },
   frame: { width: 400, height: 300 },
-  spacePreview: { width: 480, height: 320 },
+  spacePreview: {
+    width: SPACE_SHORTCUT_SIZE.defaultWidth,
+    height: SPACE_SHORTCUT_SIZE.defaultHeight,
+  },
   // Question nodes auto-size to content (height-driven by text), matching
   // the behaviour of text/note nodes. The width sets the wrap width when
   // a question is created with content. Use 80px as a nominal default for
@@ -89,6 +96,8 @@ export function getNodeCreationStyle(
   size: NodeSize,
   opts: { heightIsExplicit?: boolean } = {},
 ): NodeSize {
+  if (nodeType === 'spacePreview')
+    return { width: clampSpaceShortcutWidth(size.width) };
   const shouldWriteHeight =
     typeof size.height === 'number' &&
     (opts.heightIsExplicit

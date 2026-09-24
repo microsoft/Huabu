@@ -59,7 +59,7 @@
     "targetsUnavailable": "无法加载目标 Space。",
     "noTargets": "没有现有的目标 Space",
     "boundaryNotice": "与所选内容之外节点的连接将被移除。",
-    "createSourcePreview": "在原位置保留一个指向目标 Space 的预览。"
+    "createSourcePreview": "在原位置保留快捷入口。"
   },
   "canvasControls": {
     "resetZoom": "重置缩放至 100%",
@@ -248,7 +248,7 @@
     "hideMiniMap": "隐藏小地图",
     "miniMapDescription": "在 Space 右下角显示概览。",
     "worldCanvas": "World Canvas",
-    "worldCanvasDescription": "将 World 作为工作区入口，并显示 Space 预览。",
+    "worldCanvasDescription": "将 World 作为工作区入口，并显示 Space 快捷入口。",
     "showWorldCanvas": "显示 World Canvas",
     "hideWorldCanvas": "隐藏 World Canvas",
     "inputMode": "输入模式",
@@ -403,24 +403,29 @@
     "openWorld": "打开 World"
   },
   "spacePreview": {
-    "add": "添加 Space 预览",
+    "add": "添加空间快捷入口",
     "chooseTarget": "选择 Space",
-    "chooseTargetDescription": "选择要在此只读预览中显示的 Space。",
+    "chooseTargetDescription": "选择此快捷入口要打开的 Space。",
+    "shortcut": "空间快捷入口",
+    "loadingTarget": "正在加载目标 Space…",
+    "missingTarget": "当前工作区中已找不到此 Space。",
+    "widthSettings": "宽度设置",
+    "autoWidth": "自动",
+    "fixedWidth": "自定义",
+    "applyWidth": "应用宽度",
+    "widthError": "请输入不小于 {{min}} 的有限整数宽度。",
+    "widthHint": "自动：{{min}}–{{autoMax}}；自定义：至少 {{min}} 画布单位，不设上限。高度容纳最多两行标题及一行摘要。",
     "loadingTargets": "正在加载 Space…",
     "targetsUnavailable": "无法加载 Space。",
     "noTargets": "没有其他可用的 Space。",
     "openSpace": "打开 Space",
-    "loading": "正在加载 Space 预览…",
-    "unavailable": "预览不可用",
-    "unavailableDescription": "无法加载目标 Space。",
     "retry": "重试",
-    "stale": "已过期",
-    "partial": "部分内容",
     "untitledSpace": "未命名 Space",
-    "viewport": "{{title}} 的只读预览",
-    "zoomIn": "放大",
-    "zoomOut": "缩小",
-    "resetView": "重置预览视图"
+    "nodeCount_zero": "暂无节点",
+    "nodeCount_one": "{{count}} 个节点",
+    "nodeCount_other": "{{count}} 个节点",
+    "updatedNow": "刚刚更新",
+    "updatedRelative": "{{time}}更新"
   },
   "preview": {
     "tabStrip": "已打开的预览",
@@ -641,7 +646,7 @@
       "audio": "音频",
       "web": "网页",
       "frame": "框架",
-      "spacePreview": "Space 预览",
+      "spacePreview": "空间快捷入口",
       "sketch": "手绘",
       "question": "问题"
     }

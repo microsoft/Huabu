@@ -59,7 +59,7 @@
     "targetsUnavailable": "Destination Spaces could not be loaded.",
     "noTargets": "No existing destination Spaces",
     "boundaryNotice": "Connections to nodes outside the selection will be removed.",
-    "createSourcePreview": "Leave a preview linking to the destination in the original location."
+    "createSourcePreview": "Leave a shortcut in the original location."
   },
   "canvasControls": {
     "resetZoom": "Reset zoom to 100%",
@@ -248,7 +248,7 @@
     "hideMiniMap": "Hide MiniMap",
     "miniMapDescription": "Display an overview of the Space in the bottom-right corner.",
     "worldCanvas": "World Canvas",
-    "worldCanvasDescription": "Use World as the workspace landing page and show Space previews.",
+    "worldCanvasDescription": "Use World as the workspace landing page and show Space shortcuts.",
     "showWorldCanvas": "Show World Canvas",
     "hideWorldCanvas": "Hide World Canvas",
     "inputMode": "Input mode",
@@ -403,24 +403,29 @@
     "openWorld": "Open World"
   },
   "spacePreview": {
-    "add": "Add Space Preview",
+    "add": "Add Space Shortcut",
     "chooseTarget": "Choose a Space",
-    "chooseTargetDescription": "Select the Space to show in this view-only preview.",
+    "chooseTargetDescription": "Select the Space this shortcut opens.",
+    "shortcut": "Space Shortcut",
+    "loadingTarget": "Loading target Space…",
+    "missingTarget": "This Space no longer exists in the active workspace.",
+    "widthSettings": "Shortcut width",
+    "autoWidth": "Automatic",
+    "fixedWidth": "Custom",
+    "applyWidth": "Apply width",
+    "widthError": "Enter a finite integer of at least {{min}}.",
+    "widthHint": "Automatic: {{min}}–{{autoMax}}. Custom: at least {{min}} canvas units, with no upper limit. Height fits up to two title lines and a summary.",
     "loadingTargets": "Loading Spaces…",
     "targetsUnavailable": "Spaces could not be loaded.",
     "noTargets": "No other Spaces are available.",
     "openSpace": "Open Space",
-    "loading": "Loading Space preview…",
-    "unavailable": "Preview unavailable",
-    "unavailableDescription": "The target Space could not be loaded.",
     "retry": "Retry",
-    "stale": "Stale",
-    "partial": "Partial",
     "untitledSpace": "Untitled Space",
-    "viewport": "View-only preview of {{title}}",
-    "zoomIn": "Zoom in",
-    "zoomOut": "Zoom out",
-    "resetView": "Reset preview view"
+    "nodeCount_zero": "No nodes",
+    "nodeCount_one": "{{count}} node",
+    "nodeCount_other": "{{count}} nodes",
+    "updatedNow": "Updated now",
+    "updatedRelative": "Updated {{time}}"
   },
   "preview": {
     "tabStrip": "Open previews",
@@ -641,7 +646,7 @@
       "audio": "Audio",
       "web": "Website",
       "frame": "Frame",
-      "spacePreview": "Space Preview",
+      "spacePreview": "Space Shortcut",
       "sketch": "Sketch",
       "question": "Question"
     }

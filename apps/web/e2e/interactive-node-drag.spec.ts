@@ -185,7 +185,7 @@ async function seed(
       expect(target.ok(), await target.text()).toBe(true);
       const { canvasId: targetCanvasId } =
         (await target.json()) as CreateCanvasResponse;
-      data = { type, label, targetCanvasId };
+      data = { type, label, targetCanvasId, widthMode: 'fixed' };
       break;
     }
     case 'office':

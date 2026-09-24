@@ -90,7 +90,7 @@ export const NODE_TYPE_LABEL: Record<CanvasNodeType, string> = {
   audio: 'Audio',
   web: 'Website',
   frame: 'Frame',
-  spacePreview: 'Space Preview',
+  spacePreview: 'Space Shortcut',
   sketch: 'Sketch',
   question: 'Agent Node',
 };

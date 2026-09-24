@@ -84,7 +84,6 @@ export default function CanvasPage() {
   const loadCanvas = useStore((s) => s.loadCanvas);
   const isLoading = useStore((s) => s.isLoading);
   const canvasNotFound = useStore((s) => s.canvasNotFound);
-  const worldCanvasId = useWorkspaceStore((s) => s.worldCanvasId);
   const refreshSpaceTitles = useWorkspaceStore((s) => s.refreshSpaceTitles);
   const nodeCount = useStore((s) => s.nodes.length);
   // Subscribed so the very first render can detect a mismatch between the
@@ -247,12 +246,16 @@ export default function CanvasPage() {
   }, [canvasId, storeCanvasId, loadCanvas, switchCanvas, navigate]);
 
   useEffect(() => {
-    if (!canvasId || canvasId !== worldCanvasId) return;
-    void refreshSpaceTitles().catch((error) => {
-      console.error('Failed to load Space titles:', error);
-      toast(t('spacePreview.targetsUnavailable'), { tone: 'danger' });
-    });
-  }, [canvasId, refreshSpaceTitles, t, worldCanvasId]);
+    if (!canvasId) return;
+    const refresh = () => void refreshSpaceTitles();
+    refresh();
+    window.addEventListener('focus', refresh);
+    window.addEventListener('workspace-changed', refresh);
+    return () => {
+      window.removeEventListener('focus', refresh);
+      window.removeEventListener('workspace-changed', refresh);
+    };
+  }, [canvasId, refreshSpaceTitles]);
 
   // Only a newly created canvas may opt into its input-appropriate creation
   // tool (Note for mouse, Sketch for pen/finger).

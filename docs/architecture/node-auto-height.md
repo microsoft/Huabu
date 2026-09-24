@@ -29,11 +29,11 @@ Intrinsic → layout is one pure function, [`intrinsicToLayoutHeight`](../../pac
 
 [`getHeightPolicy`](../../packages/shared/src/canvas-engine/height/policy.ts) decides whether the field is even consulted:
 
-| `kind`       | Types              | Ownership                                                                                                          |
-| ------------ | ------------------ | ------------------------------------------------------------------------------------------------------------------ |
-| `content`    | `text`, `question` | Always the renderer. Sized by [`useTextAutoSize`](../../apps/web/src/hooks/useTextAutoSize.ts), not by this model. |
-| `toggleable` | `note`             | `data.heightMode`; the only type whose owner changes at runtime.                                                   |
-| `manual`     | everything else    | Always the user.                                                                                                   |
+| `kind`       | Types                              | Ownership                                                                                                                                                                                                     |
+| ------------ | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `content`    | `text`, `question`, `spacePreview` | Always the renderer. Text/Question use [`useTextAutoSize`](../../apps/web/src/hooks/useTextAutoSize.ts); Space Shortcut uses intrinsic title and metadata layout. Not governed by the Note measurement model. |
+| `toggleable` | `note`                             | `data.heightMode`; the only type whose owner changes at runtime.                                                                                                                                              |
+| `manual`     | everything else                    | Always the user.                                                                                                                                                                                              |
 
 [`resolveHeightMode`](../../packages/shared/src/canvas-engine/height/policy.ts) is the single judgement; no consumer re-derives it. Nodes predating the field fall back to the legacy encoding — "auto is the absence of a height" — which is consulted once and then written out explicitly by creation or load normalization. The fallback deliberately does **not** read the measurement hint: a pinned note can carry one too.
 

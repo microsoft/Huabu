@@ -800,9 +800,15 @@ export const NodeWrapper = memo(
             'semantic-lod-node group relative flex h-full w-full flex-col transition duration-120',
             paintsCardChrome && 'border-solid',
 
-            paintsCardChrome && 'hover:shadow-sm',
-            paintsCardChrome && editing && 'shadow-sm',
-            paintsCardChrome && isDragging && 'shadow-md',
+            paintsCardChrome && type !== 'spacePreview' && 'hover:shadow-sm',
+            paintsCardChrome &&
+              type !== 'spacePreview' &&
+              editing &&
+              'shadow-sm',
+            paintsCardChrome &&
+              type !== 'spacePreview' &&
+              isDragging &&
+              'shadow-md',
             type !== 'frame' &&
               type !== 'note' &&
               !accentTokens &&
@@ -835,6 +841,7 @@ export const NodeWrapper = memo(
               (fillColor
                 ? { backgroundColor: fillColor }
                 : type === 'note' ||
+                    type === 'spacePreview' ||
                     ((type === 'text' || type === 'web' || type === 'pdf') &&
                       accent)
                   ? noteSurfaceStyle(accent)

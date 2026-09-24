@@ -525,7 +525,7 @@ describe('World preview reconciliation', () => {
     const current = await previews();
     expect(current).toHaveLength(2);
     expect(current.every((node) => node.id !== 'node-old')).toBe(true);
-    expect(current[0]?.style).toMatchObject({ width: 480, height: 320 });
+    expect(current[0]?.style).toEqual({ width: 360 });
     expect(getCanvasStore('canvas-world').read()?.state.nodes).not.toEqual(
       JSON.parse(before).state.nodes,
     );
@@ -613,7 +613,7 @@ describe('World preview ownership', () => {
     expect((await previews())[0]).toMatchObject({
       id: 'node-preview',
       position: { x: 999, y: 888 },
-      style: { width: 900, height: 600 },
+      style: { width: 900 },
     });
   });
 

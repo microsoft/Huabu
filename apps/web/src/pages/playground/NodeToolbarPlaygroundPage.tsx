@@ -42,6 +42,7 @@ import {
 } from 'lucide-react';
 import { useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link as RouterLink } from 'react-router-dom';
 
 import { ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT } from '@huabu/shared';
 
@@ -107,15 +108,17 @@ function ToolButton({
   );
 }
 
-function SpecimenTypeHandle({
+export function SpecimenTypeHandle({
   type,
   position,
+  label = NODE_TYPE_LABEL[type],
   onMove,
   onActivate,
   active,
 }: {
   type: CanvasNodeType;
   position: { x: number; y: number };
+  label?: string;
   onMove: (position: { x: number; y: number }) => void;
   onActivate?: () => void;
   active?: boolean;
@@ -132,7 +135,7 @@ function SpecimenTypeHandle({
     <Button
       variant="ghost"
       iconOnly
-      title={`${NODE_TYPE_LABEL[type]} · 拖动节点`}
+      title={`${label} · 拖动节点`}
       className="nt-tool nt-type-handle"
       aria-pressed={active}
       onClick={() => {
@@ -1016,6 +1019,12 @@ export default function NodeToolbarPlaygroundPage() {
   return (
     <main className="nt-playground">
       <header className="nt-page-header">
+        <RouterLink
+          to="/playground/space-previews"
+          className="text-fg-muted hover:text-fg-default mt-2 inline-flex items-center gap-1 text-xs"
+        >
+          Space Shortcut 样式对比 <ArrowUpRight size={12} />
+        </RouterLink>
         <div>
           <span className="nt-eyebrow">HUABU / PLAYGROUND</span>
           <h1>Node toolbars</h1>

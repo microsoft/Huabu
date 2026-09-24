@@ -24,6 +24,25 @@ function node(overrides: Partial<Node> = {}): Node {
 }
 
 describe('normalizeNodeHeights', () => {
+  it('releases legacy Space preview heights and retains bounded width and identity', () => {
+    const original = node({
+      type: 'spacePreview',
+      parentId: 'frame',
+      data: { type: 'spacePreview', targetCanvasId: 'target' },
+      style: { width: 480, height: 320 },
+      measured: { width: 480, height: 320 },
+    });
+    const result = normalizeNodeHeights([original]);
+    expect(result[0]).toMatchObject({
+      id: original.id,
+      position: original.position,
+      parentId: 'frame',
+      data: { targetCanvasId: 'target', widthMode: 'fixed' },
+    });
+    expect(result[0].style).toEqual({ width: 480 });
+    expect(result[0].measured).toEqual({ width: 480 });
+    expect(normalizeNodeHeights(result)).toBe(result);
+  });
   it('keeps the persisted numeric seed for width-stale and legacy hints', () => {
     for (const measuredFor of [KEY, '10:legacy']) {
       const original = node({

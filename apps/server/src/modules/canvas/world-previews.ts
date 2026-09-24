@@ -7,14 +7,17 @@ import {
   type CanvasNodeCreateInput,
   type CanvasNodeId,
 } from '@huabu/shared';
-import { getNodeDefaultSize } from '@huabu/shared/canvas-engine';
+import {
+  getNodeDefaultSize,
+  SPACE_SHORTCUT_SIZE,
+} from '@huabu/shared/canvas-engine';
 
 import { executeOnServer } from './canvas-executor.js';
 import { getStructuredStore, space } from '../storage/index.js';
 
 const PREVIEW_SIZE = getNodeDefaultSize('spacePreview');
-const PREVIEW_WIDTH = PREVIEW_SIZE.width ?? 480;
-const PREVIEW_HEIGHT = PREVIEW_SIZE.height ?? 320;
+const PREVIEW_WIDTH = SPACE_SHORTCUT_SIZE.autoMaxWidth;
+const PREVIEW_HEIGHT = SPACE_SHORTCUT_SIZE.autoMaxHeight;
 const PREVIEW_GAP = 80;
 const PREVIEW_COLUMNS = 4;
 
@@ -152,8 +155,14 @@ async function planWorldPreviewReconciliation(): Promise<WorldPreviewReconciliat
     return {
       x: position.x,
       y: position.y,
-      width: dimension(node.style?.width, 200),
-      height: dimension(node.style?.height, 100),
+      width:
+        node.type === 'spacePreview' && node.data?.widthMode === 'auto'
+          ? PREVIEW_WIDTH
+          : dimension(node.style?.width, 200),
+      height: dimension(
+        node.style?.height,
+        node.type === 'spacePreview' ? PREVIEW_HEIGHT : 100,
+      ),
     };
   });
 
@@ -169,13 +178,11 @@ async function planWorldPreviewReconciliation(): Promise<WorldPreviewReconciliat
   const inputs: CanvasNodeCreateInput[] = members.flatMap((member) => {
     if (previewByTarget.has(member.canvasId)) return [];
     const position = findOpenPreviewSlot(occupied);
-    const size = {
-      width: PREVIEW_WIDTH,
-      height: PREVIEW_HEIGHT,
-    };
+    const size = PREVIEW_SIZE;
     occupied.push({
       ...position,
-      ...size,
+      width: PREVIEW_WIDTH,
+      height: PREVIEW_HEIGHT,
     });
     return [
       {
