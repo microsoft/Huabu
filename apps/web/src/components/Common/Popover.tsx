@@ -40,6 +40,25 @@ interface EscapeLayer {
 
 const EscapeLayerContext = createContext<EscapeLayer | null>(null);
 const escapeLayers = new Set<EscapeLayer>();
+const popoverRoots = new Map<
+  EscapeLayer,
+  { panel: HTMLDivElement; reference: Element | null | undefined }
+>();
+
+function isInsidePopoverTree(layer: EscapeLayer, target: Node): boolean {
+  for (const [candidate, root] of popoverRoots) {
+    if (!root.panel.contains(target) && !root.reference?.contains(target))
+      continue;
+    for (
+      let current: EscapeLayer | null = candidate;
+      current;
+      current = current.parent
+    ) {
+      if (current === layer) return true;
+    }
+  }
+  return false;
+}
 
 function topEscapeLayer(): EscapeLayer | undefined {
   const layers = [...escapeLayers];
@@ -207,6 +226,13 @@ export const Popover: FC<PopoverProps> = ({
   const onDismissRef = useRef(onDismiss);
   onDismissRef.current = onDismiss;
   const canDismissOnEscape = Boolean(onDismiss) && dismissOnEscape;
+  useLayoutEffect(() => {
+    if (!contentElement) return;
+    popoverRoots.set(escapeLayer, { panel: contentElement, reference });
+    return () => {
+      popoverRoots.delete(escapeLayer);
+    };
+  }, [contentElement, escapeLayer, reference]);
   const floating = useFloating({
     open: Boolean(reference),
     elements: { reference },
@@ -333,10 +359,8 @@ export const Popover: FC<PopoverProps> = ({
   // popover, unmounting the React tree that owns the portal —
   // making any dialog opened from a popover seem to vanish on click.
   //
-  // To handle that, we also treat the click as "inside" when it
-  // happens within any open `[role="dialog"]` or any element that
-  // explicitly opts out via `[data-popover-dismiss-ignore]`. Modal
-  // panels set `role="dialog"` so this covers them automatically.
+  // React descendants count as inside even when their portal roots are elsewhere.
+  // Newly opened dialogs and explicit dismissal-ignore regions also stay inside.
   useEffect(() => {
     if (!onDismiss) return;
 
@@ -348,6 +372,7 @@ export const Popover: FC<PopoverProps> = ({
       const target = e.target;
       if (!(target instanceof Node)) return;
       if (container.contains(target) || reference?.contains(target)) return;
+      if (isInsidePopoverTree(escapeLayer, target)) return;
       if (target instanceof Element) {
         if (target.closest('[data-popover-dismiss-ignore]')) return;
         const dialog = target.closest('[role="dialog"]');
@@ -373,7 +398,7 @@ export const Popover: FC<PopoverProps> = ({
       clearTimeout(timer);
       document.removeEventListener('pointerdown', handlePointerDown, true);
     };
-  }, [onDismiss, reference]);
+  }, [onDismiss, reference, escapeLayer]);
 
   // Dismiss on Escape key
   useEffect(() => {

@@ -22,6 +22,149 @@ afterEach(() => {
 
 describe('Popover', () => {
   it.each([false, true])(
+    'keeps descendant portal actions inside their ancestors with child dismissal enabled: %s',
+    async (childDismissible) => {
+      container = document.createElement('div');
+      document.body.append(container);
+      root = createRoot(container);
+      const parentDismiss = vi.fn();
+      const childDismiss = vi.fn();
+      const action = vi.fn();
+      function Nested() {
+        const [open, setOpen] = useState(true);
+        return open ? (
+          <Popover
+            onDismiss={(reason) => {
+              parentDismiss(reason);
+              setOpen(false);
+            }}
+          >
+            <Button data-testid="parent-action">Parent</Button>
+            <Popover
+              container={document.body}
+              onDismiss={childDismissible ? childDismiss : undefined}
+            >
+              <Popover container={document.body}>
+                <Button data-testid="child-action" onClick={action}>
+                  Child action
+                </Button>
+              </Popover>
+            </Popover>
+          </Popover>
+        ) : null;
+      }
+      await act(async () => root?.render(<Nested />));
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      const button = document.querySelector<HTMLButtonElement>(
+        '[data-testid="child-action"]',
+      );
+      if (!button) throw new Error('Missing child action');
+      act(() =>
+        button.dispatchEvent(
+          new PointerEvent('pointerdown', { bubbles: true }),
+        ),
+      );
+      act(() => button.click());
+      expect(action).toHaveBeenCalledOnce();
+      expect(parentDismiss).not.toHaveBeenCalled();
+      expect(childDismiss).not.toHaveBeenCalled();
+
+      const parent = document.querySelector('[data-testid="parent-action"]');
+      if (!parent) throw new Error('Missing parent action');
+      act(() =>
+        parent.dispatchEvent(
+          new PointerEvent('pointerdown', { bubbles: true }),
+        ),
+      );
+      expect(parentDismiss).not.toHaveBeenCalled();
+      if (childDismissible)
+        expect(childDismiss).toHaveBeenCalledExactlyOnceWith('outside-press');
+      else expect(childDismiss).not.toHaveBeenCalled();
+
+      act(() =>
+        document.body.dispatchEvent(
+          new PointerEvent('pointerdown', { bubbles: true }),
+        ),
+      );
+      expect(parentDismiss).toHaveBeenCalledExactlyOnceWith('outside-press');
+    },
+  );
+
+  it('does not treat unrelated portal panels as descendants', async () => {
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+    const firstDismiss = vi.fn();
+    const secondDismiss = vi.fn();
+    await act(async () =>
+      root?.render(
+        <>
+          <Popover onDismiss={firstDismiss}>
+            <Button>First</Button>
+          </Popover>
+          <Popover container={document.body} onDismiss={secondDismiss}>
+            <Button data-testid="second-action">Second</Button>
+          </Popover>
+        </>,
+      ),
+    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    const button = document.querySelector('[data-testid="second-action"]');
+    if (!button) throw new Error('Missing second action');
+    act(() =>
+      button.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })),
+    );
+    expect(firstDismiss).toHaveBeenCalledExactlyOnceWith('outside-press');
+    expect(secondDismiss).not.toHaveBeenCalled();
+  });
+
+  it('tracks descendant references only while the descendant is mounted', async () => {
+    container = document.createElement('div');
+    document.body.append(container);
+    const reference = document.createElement('button');
+    document.body.append(reference);
+    root = createRoot(container);
+    const parentDismiss = vi.fn();
+    const childDismiss = vi.fn();
+    const render = (childOpen: boolean) => (
+      <Popover onDismiss={parentDismiss}>
+        {childOpen && (
+          <Popover
+            container={document.body}
+            reference={reference}
+            onDismiss={childDismiss}
+          >
+            <Button>Child</Button>
+          </Popover>
+        )}
+      </Popover>
+    );
+    await act(async () => root?.render(render(true)));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    act(() =>
+      reference.dispatchEvent(
+        new PointerEvent('pointerdown', { bubbles: true }),
+      ),
+    );
+    expect(parentDismiss).not.toHaveBeenCalled();
+    expect(childDismiss).not.toHaveBeenCalled();
+    await act(async () => root?.render(render(false)));
+    act(() =>
+      reference.dispatchEvent(
+        new PointerEvent('pointerdown', { bubbles: true }),
+      ),
+    );
+    expect(parentDismiss).toHaveBeenCalledExactlyOnceWith('outside-press');
+    expect(childDismiss).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])(
     'dismisses only the deepest nested layer, including custom portal containers: %s',
     async (customContainer) => {
       container = document.createElement('div');
