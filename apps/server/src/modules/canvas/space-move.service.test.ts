@@ -264,7 +264,7 @@ describe('moveCanvasSelection', () => {
         type: 'spacePreview',
         position: originalFrame?.position,
         data: expect.objectContaining({ targetCanvasId: 'destination' }),
-        style: expect.objectContaining({ width: 480, height: 320 }),
+        style: { width: 360 },
       }),
     );
     expect(destination?.state.nodes).toHaveLength(2);
@@ -375,7 +375,7 @@ describe('moveCanvasSelection', () => {
         id: result.sourcePreviewNodeId,
         type: 'spacePreview',
         position: { x: 100, y: 200 },
-        style: expect.objectContaining({ width: 900, height: 700 }),
+        style: { width: 360 },
       }),
     );
   });

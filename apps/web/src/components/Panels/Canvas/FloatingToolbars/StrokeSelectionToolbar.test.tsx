@@ -323,7 +323,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
     );
   });
 
-  it('exposes a disabled explanation for multiple Question targets', async () => {
+  it('exposes a disabled explanation for multiple Agent Node targets', async () => {
     useCanvasStore.getState()._setStateNoAutosave({
       nodes: [
         {
@@ -352,11 +352,11 @@ describe('StrokeSelectionToolbar Ink submission', () => {
     await mountToolbar();
 
     const button = document.body.querySelector<HTMLButtonElement>(
-      'button[aria-label="Select only one question to continue"]',
+      'button[aria-label="Select only one Agent Node to continue"]',
     );
     expect(button?.disabled).toBe(true);
     expect(button?.getAttribute('aria-label')).toBe(
-      'Select only one question to continue',
+      'Select only one Agent Node to continue',
     );
     expect(document.body.textContent).toContain('Multiple agents');
   });

@@ -6,7 +6,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   marqueeStartTarget,
-  nodesInMarquee,
   rectangleBetween,
 } from '@/components/Panels/Canvas/marqueeSelection';
 import {
@@ -17,6 +16,8 @@ import {
 import { canTouchClaimViewport } from '@/handler/canvasInteractionOwner';
 import useCanvasStore from '@/store/canvasStore';
 
+import { createAreaSelectionSession } from './areaSelectionSession';
+import { useAreaSelectionClickGuard } from './useAreaSelectionClickGuard';
 import { useAutoPanDuringSelection } from './useAutoPanDuringSelection';
 
 import type { CanvasPointerRouterContext } from '@/handler/canvasPointerRouterContext';
@@ -38,8 +39,7 @@ interface Session {
   frameId: string | null;
   start: XYPosition;
   cursor: XYPosition;
-  nodeIds: string[];
-  edgeIds: string[];
+  selection: ReturnType<typeof createAreaSelectionSession>;
   nodesSelectionActive: boolean;
   toggle: boolean;
   locked: boolean;
@@ -51,40 +51,11 @@ export function useCanvasMarquee(options: Options) {
   const optionsRef = useRef(options);
   optionsRef.current = options;
   const sessionRef = useRef<Session | null>(null);
-  const suppressClickRef = useRef(false);
+  const suppressClick = useAreaSelectionClickGuard(
+    options.wrapperRef,
+    options.scopeKey,
+  );
   const [active, setActive] = useState(false);
-
-  const applySelection = useCallback((nodeIds: string[], edgeIds: string[]) => {
-    const state = useCanvasStore.getState();
-    const selected = new Set(nodeIds);
-    const selectedEdges = new Set(edgeIds);
-    state.onNodesChange(
-      state.nodes.flatMap((node) =>
-        Boolean(node.selected) === selected.has(node.id)
-          ? []
-          : [
-              {
-                id: node.id,
-                type: 'select' as const,
-                selected: selected.has(node.id),
-              },
-            ],
-      ),
-    );
-    state.onEdgesChange(
-      state.edges.flatMap((edge) =>
-        Boolean(edge.selected) === selectedEdges.has(edge.id)
-          ? []
-          : [
-              {
-                id: edge.id,
-                type: 'select' as const,
-                selected: selectedEdges.has(edge.id),
-              },
-            ],
-      ),
-    );
-  }, []);
 
   const refresh = useCallback(() => {
     const session = sessionRef.current;
@@ -94,22 +65,10 @@ export function useCanvasMarquee(options: Options) {
     const end = instance.screenToFlowPosition(session.cursor, {
       snapToGrid: false,
     });
-    const state = useCanvasStore.getState();
-    const ids = nodesInMarquee(
-      state.nodes,
-      rectangleBetween(session.start, end),
-    );
-    const selected = new Set(ids);
-    // Match native rectangle edge selection. Canvas derives its own between-node emphasis.
-    const edgeIds = state.edges
-      .filter(
-        (edge) =>
-          !edge.hidden &&
-          edge.selectable !== false &&
-          (selected.has(edge.source) || selected.has(edge.target)),
-      )
-      .map((edge) => edge.id);
-    applySelection(ids, edgeIds);
+    session.selection.preview({
+      kind: 'rectangle',
+      rect: rectangleBetween(session.start, end),
+    });
     const bounds = wrapper.getBoundingClientRect();
     const start = instance.flowToScreenPosition(session.start);
     const rect = rectangleBetween(start, session.cursor);
@@ -124,7 +83,7 @@ export function useCanvasMarquee(options: Options) {
         startY: session.start.y,
       },
     });
-  }, [applySelection, flowStore]);
+  }, [flowStore]);
 
   const finish = useCallback(
     (cancelled: boolean) => {
@@ -135,14 +94,22 @@ export function useCanvasMarquee(options: Options) {
       // Navigation must not restore IDs from the previous canvas into the new one.
       const sameCanvas = session.scopeKey === optionsRef.current.scopeKey;
       if (sameCanvas && cancelled) {
-        if (session.locked) applySelection(session.nodeIds, session.edgeIds);
+        session.selection.cancel();
       } else if (sameCanvas) {
         const state = useCanvasStore.getState();
-        if (session.locked)
-          state.selectNodes(
-            state.nodes.filter((n) => n.selected).map((n) => n.id),
-          );
-        else {
+        if (session.locked) {
+          const instance = rfInstanceRef.current;
+          if (instance)
+            session.selection.commit({
+              kind: 'rectangle',
+              rect: rectangleBetween(
+                session.start,
+                instance.screenToFlowPosition(session.cursor, {
+                  snapToGrid: false,
+                }),
+              ),
+            });
+        } else {
           state.selectNodes(
             session.frameId ? [session.frameId] : [],
             session.frameId !== null && session.toggle,
@@ -182,7 +149,7 @@ export function useCanvasMarquee(options: Options) {
           useCanvasStore.getState().setViewport(viewport);
       }
     },
-    [applySelection, flowStore],
+    [flowStore],
   );
   const cancel = useCallback(() => finish(true), [finish]);
 
@@ -193,7 +160,6 @@ export function useCanvasMarquee(options: Options) {
       id: 'mouse-marquee',
       canClaim: (event, ctx) =>
         optionsRef.current.enabled &&
-        !ctx.interactivityLocked &&
         !ctx.explicitToolActive &&
         event.pointerType === 'mouse' &&
         event.isPrimary &&
@@ -212,7 +178,6 @@ export function useCanvasMarquee(options: Options) {
         const cursor = { x: event.clientX, y: event.clientY };
         if (!beginCanvasGesture('marquee', event.pointerId, 'mouse', cursor))
           return 'pass';
-        const state = useCanvasStore.getState();
         sessionRef.current = {
           scopeKey: optionsRef.current.scopeKey,
           pointerId: event.pointerId,
@@ -221,17 +186,12 @@ export function useCanvasMarquee(options: Options) {
             snapToGrid: false,
           }),
           cursor,
-          nodeIds: state.nodes
-            .filter((node) => node.selected)
-            .map((node) => node.id),
-          edgeIds: state.edges
-            .filter((edge) => edge.selected)
-            .map((edge) => edge.id),
+          selection: createAreaSelectionSession(),
           nodesSelectionActive: flowStore.getState().nodesSelectionActive,
           toggle: event.metaKey || event.ctrlKey,
           locked: false,
         };
-        suppressClickRef.current = true;
+        suppressClick();
         ctx.wrapper.setPointerCapture(event.pointerId);
         ctx.wrapper.focus({ preventScroll: true });
         // Cancel compatibility mousedown before XYFlow can select/drag the Frame.
@@ -274,7 +234,7 @@ export function useCanvasMarquee(options: Options) {
       },
       onCancel: cancel,
     }),
-    [cancel, finish, refresh, flowStore],
+    [cancel, finish, refresh, flowStore, suppressClick],
   );
 
   const getPointerPosition = useCallback(
@@ -303,42 +263,20 @@ export function useCanvasMarquee(options: Options) {
     const hidden = () => {
       if (document.hidden) cancel();
     };
-    const mousedown = (event: MouseEvent) => {
-      if (sessionRef.current && event.button === 0) {
-        event.preventDefault();
-        event.stopPropagation();
-      }
-    };
-    const click = (event: MouseEvent) => {
-      if (!suppressClickRef.current || event.detail === 0) return;
-      suppressClickRef.current = false;
-      event.preventDefault();
-      event.stopPropagation();
-    };
-    // A new real press clears stale click suppression when cancellation produced no click.
-    const nextDown = () => {
-      suppressClickRef.current = false;
-    };
     const lostCapture = (event: PointerEvent) => {
       if (event.pointerId === sessionRef.current?.pointerId) cancel();
     };
-    window.addEventListener('pointerdown', nextDown, true);
     window.addEventListener('keydown', keydown, true);
     window.addEventListener('blur', cancel);
     document.addEventListener('visibilitychange', hidden);
-    wrapper.addEventListener('mousedown', mousedown, true);
-    wrapper.addEventListener('click', click, true);
     wrapper.addEventListener('lostpointercapture', lostCapture);
     const unsubscribe = flowStore.subscribe((state, previous) => {
       if (state.transform !== previous.transform) refresh();
     });
     return () => {
-      window.removeEventListener('pointerdown', nextDown, true);
       window.removeEventListener('keydown', keydown, true);
       window.removeEventListener('blur', cancel);
       document.removeEventListener('visibilitychange', hidden);
-      wrapper.removeEventListener('mousedown', mousedown, true);
-      wrapper.removeEventListener('click', click, true);
       wrapper.removeEventListener('lostpointercapture', lostCapture);
       unsubscribe();
       cancel();

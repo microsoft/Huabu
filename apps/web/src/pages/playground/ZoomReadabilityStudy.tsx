@@ -202,6 +202,7 @@ function StudyNode({
           visible={labelOpacity === 1}
           lines={presentation.lines}
           verticalInset={presentation.verticalInset}
+          horizontalInset={presentation.horizontalInset}
           width={presentation.availableWidth}
           height={presentation.availableHeight}
         />
@@ -290,11 +291,12 @@ function StudyFrame({
     size.height * zoom,
     zoom,
     previousRegionActive,
+    header,
   );
   if (previousRegionActive !== region.active)
     setPreviousRegionActive(region.active);
   const proposed = variant === 'proposal';
-  const regionVisible = proposed && region.visible;
+  const regionVisible = proposed && (region.visible || region.fallbackVisible);
   const headerOpacity = proposed ? (regionVisible ? 0 : name.opacity) : 1;
   return (
     <FrameSurface
@@ -491,19 +493,20 @@ export function ZoomReadabilityStudy() {
         </div>
         <p className="text-fg-subtle text-xs">
           Experimental screen-pixel budgets: content switches to titles below
-          25% viewport zoom and returns at 30%. Titles use 10px / 14px, weight
-          500, with 6px insets and up to three fitting lines. Descriptions use
-          8px / 11px with a 4px gap. Frame region names take over below a
-          viewport zoom of 15% and release at 20%, only if the name fits. Node
-          titles hide below 38px and return at 46px, subject to text fit. Text
-          is either fully visible or hidden, with no opacity fade. Existing
-          summaries or Note excerpts use the remaining space after the displayed
-          title and gap. One complete line is enough; there is no minimum text
-          width or fixed description line limit. Descriptions never displace
-          titles. Nothing extends beyond its node. These are starting values,
-          not established readability thresholds. This does not simulate
-          production LOD or reading activation. The Web cover is sample artwork;
-          PDF uses the existing no-cover card.
+          20% viewport zoom and returns at 24%. Titles use 9px / 13px, weight
+          500, with up to 6px insets and every complete fitting line.
+          Descriptions use 7px / 10px with a 2px gap. Frame region names take
+          over below a viewport zoom of 8% and release at 10%, with best-effort
+          root fallback. Node titles reduce padding before hiding when one em of
+          width or a complete line no longer fits. Text is either fully visible
+          or hidden, with no opacity fade. Existing summaries or Note excerpts
+          use the remaining space after the displayed title and gap. One
+          complete line is enough; there is no minimum text width or fixed
+          description line limit. Descriptions never displace titles. Nothing
+          extends beyond its node. These are starting values, not established
+          readability thresholds. This does not simulate production LOD or
+          reading activation. The Web cover is sample artwork; PDF uses the
+          existing no-cover card.
         </p>
       </div>
       <FarLabelTypographyComparison />

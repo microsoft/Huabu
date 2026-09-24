@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FarZoomLabel } from './FarZoomLabel';
 import { FAR_ZOOM_DESIGN } from '../design/farZoomDesign';
 import { NODE_TYPOGRAPHY } from '../design/nodeTypography';
+import { SemanticPlaceholder } from '../SemanticPlaceholder';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -98,6 +99,46 @@ describe('shared far-zoom renderer lifecycle', () => {
     );
   };
 
+  it.each([
+    [50, 16, true],
+    [49.9, 16, false],
+    [34, 16, false],
+    [66, 32, true],
+    [65.9, 32, false],
+    [48, 64, false],
+  ])(
+    'fits a Note description in %spx after a %spx title: %s',
+    (availableHeight, measuredTitleHeight, visible) => {
+      titleHeight = measuredTitleHeight;
+      act(() =>
+        root.render(
+          <SemanticPlaceholder
+            type="note"
+            data={{ type: 'note', label: 'Title', content: '' }}
+            label={{ title: 'Title', description: 'Existing description' }}
+            active
+            width={500}
+            height={(availableHeight + 12) / 0.2 + 6}
+            zoom={0.2}
+          />,
+        ),
+      );
+      const title = container.querySelector<HTMLElement>('[data-study-title]');
+      expect(title?.style.fontSize).toBe('12px');
+      expect(title?.style.lineHeight).toBe('16px');
+      if (visible) {
+        expect(description()?.textContent).toBe('Existing description');
+        expect(description()?.style.fontSize).toBe('10px');
+        expect(description()?.style.lineHeight).toBe('16px');
+        expect(description()?.style.maxHeight).toBe('32px');
+        expect(description()?.style.marginTop).toBe('2px');
+        expect(description()?.classList.contains('text-fg-muted')).toBe(true);
+      } else {
+        expect(description()).toBeNull();
+      }
+    },
+  );
+
   it('does not measure or subscribe while hidden and resumes with current geometry', () => {
     const add = vi.spyOn(fonts, 'addEventListener');
     const remove = vi.spyOn(fonts, 'removeEventListener');
@@ -107,7 +148,7 @@ describe('shared far-zoom renderer lifecycle', () => {
     expect(add).not.toHaveBeenCalled();
 
     render(true);
-    expect(description()?.style.maxHeight).toBe('55px');
+    expect(description()?.style.maxHeight).toBe('48px');
     expect(observers).toHaveLength(1);
     expect(add).toHaveBeenCalledTimes(1);
     render(false);
@@ -115,7 +156,7 @@ describe('shared far-zoom renderer lifecycle', () => {
     expect(observers[0].disconnect).toHaveBeenCalledTimes(1);
     expect(remove).toHaveBeenCalledTimes(1);
     measure.mockClear();
-    titleHeight = 63;
+    titleHeight = 52;
     act(() => {
       observers[0].notify([]);
       fonts.dispatchEvent(new Event('loadingdone'));
@@ -131,13 +172,13 @@ describe('shared far-zoom renderer lifecycle', () => {
 
   it('refreshes fit after resize, font readiness, and subsequent font loads', async () => {
     render(true);
-    expect(description()?.style.maxHeight).toBe('55px');
-    titleHeight = 42;
+    expect(description()?.style.maxHeight).toBe('48px');
+    titleHeight = 39;
     measure.mockClear();
-    notify(42);
+    notify(39);
     expect(measure).not.toHaveBeenCalled();
-    expect(description()?.style.maxHeight).toBe('33px');
-    titleHeight = 63;
+    expect(description()?.style.maxHeight).toBe('32px');
+    titleHeight = 52;
     await act(async () => {
       finishFonts();
       await fonts.ready;
@@ -145,7 +186,7 @@ describe('shared far-zoom renderer lifecycle', () => {
     expect(description()).toBeNull();
     titleHeight = 21;
     act(() => fonts.dispatchEvent(new Event('loadingdone')));
-    expect(description()?.style.maxHeight).toBe('55px');
+    expect(description()?.style.maxHeight).toBe('48px');
   });
 
   it('shares font observation and cleans up only after the last visible label', async () => {
@@ -197,9 +238,9 @@ describe('shared far-zoom renderer lifecycle', () => {
     expect(observers[0].disconnect).not.toHaveBeenCalled();
     expect(add).not.toHaveBeenCalled();
     expect(measure).not.toHaveBeenCalled();
-    expect(description()?.style.maxHeight).toBe('66px');
-    notify(42);
-    expect(description()?.style.maxHeight).toBe('44px');
+    expect(description()?.style.maxHeight).toBe('64px');
+    notify(39);
+    expect(description()?.style.maxHeight).toBe('48px');
     expect(measure).not.toHaveBeenCalled();
   });
 
@@ -261,17 +302,17 @@ describe('shared far-zoom renderer lifecycle', () => {
       expect(!!line).toBe(expected);
       if (expected) {
         expect(line?.parentElement?.getAttribute('aria-hidden')).toBe('true');
-        expect(line?.parentElement?.style.height).toBe('4px');
+        expect(line?.parentElement?.style.height).toBe('2px');
         expect(description()?.style.marginTop).toBe('0px');
-        expect(description()?.style.maxHeight).toBe('55px');
-        expect(description()?.style.fontSize).toBe('8px');
+        expect(description()?.style.maxHeight).toBe('48px');
+        expect(description()?.style.fontSize).toBe('10px');
       }
     },
   );
 
   it('remeasures changed text without reconnecting its observer', () => {
     render(true);
-    titleHeight = 42;
+    titleHeight = 39;
     measure.mockClear();
     act(() =>
       root.render(
@@ -289,7 +330,7 @@ describe('shared far-zoom renderer lifecycle', () => {
     );
     expect(measure).toHaveBeenCalledTimes(1);
     expect(observers).toHaveLength(1);
-    expect(description()?.style.maxHeight).toBe('33px');
+    expect(description()?.style.maxHeight).toBe('32px');
   });
 
   it.each([0.1, 0.25, 1])(
@@ -304,18 +345,18 @@ describe('shared far-zoom renderer lifecycle', () => {
       expect(parseFloat(label.style.width)).toBe(86);
       expect(parseFloat(label.style.maxHeight)).toBe(80);
       expect(label.style.transform).toBe(`scale(${1 / zoom})`);
-      expect(parseFloat(label.style.left) * zoom).toBe(8);
-      expect(parseFloat(title.style.fontSize)).toBe(10);
-      expect(parseFloat(title.style.lineHeight)).toBe(14);
+      expect(parseFloat(label.style.left) * zoom).toBe(6);
+      expect(parseFloat(title.style.fontSize)).toBe(12);
+      expect(parseFloat(title.style.lineHeight)).toBe(16);
       expect(FAR_ZOOM_DESIGN.labelWeight).toBe(
         NODE_TYPOGRAPHY.cardTitle.weight,
       );
       expect(title.style.fontWeight).toBe(
         String(NODE_TYPOGRAPHY.cardTitle.weight),
       );
-      expect(parseFloat(summary.style.fontSize)).toBe(8);
-      expect(parseFloat(summary.style.lineHeight)).toBe(11);
-      expect(parseFloat(summary.style.marginTop)).toBe(4);
+      expect(parseFloat(summary.style.fontSize)).toBe(10);
+      expect(parseFloat(summary.style.lineHeight)).toBe(16);
+      expect(parseFloat(summary.style.marginTop)).toBe(2);
     },
   );
 });

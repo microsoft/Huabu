@@ -35,6 +35,8 @@ const mocks = vi.hoisted(() => ({
     onNodesChange: vi.fn(),
     onNodeDragStop: vi.fn(),
     cancelActiveNodeDrag: vi.fn(),
+    setMoveSelectionDialogOpen: vi.fn(),
+    moveSelectionDialogOpen: false,
   },
 }));
 
@@ -66,7 +68,7 @@ vi.mock('@/hooks/useInputMode', () => ({
   readEffectiveInputMode: () => 'pen',
 }));
 vi.mock('@/hooks/useMultiSelectModifier', () => ({
-  useMultiSelectModifierHeld: () => mocks.modifierHeld,
+  useCanvasMultiSelectModifierHeld: () => mocks.modifierHeld,
 }));
 vi.mock('@/handler/canvasInteractionOwner', () => ({
   canTouchClaimViewport: () => true,
@@ -106,6 +108,7 @@ describe('NodeFloatingToolbar type-icon drag surface', () => {
     vi.clearAllMocks();
     mocks.isNotMouse = false;
     mocks.modifierHeld = false;
+    mocks.canvas.moveSelectionDialogOpen = false;
     mocks.previewOpen = false;
     mocks.connectable = true;
     mocks.canvas.ingestionByNodeId = {};
@@ -168,6 +171,25 @@ describe('NodeFloatingToolbar type-icon drag surface', () => {
     if (!trigger) throw new Error(`Missing ${label} trigger`);
     act(() => trigger.click());
   }
+
+  it('anchors Move to the persistent overflow trigger rather than its disappearing menu item', () => {
+    render();
+    const trigger = container.querySelector<HTMLButtonElement>(
+      '[aria-label="toolbar.more"]',
+    );
+    openPanel('toolbar.more');
+    const move = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+    ).find((button) => button.textContent === 'moveSelection.action');
+    expect(move).toBeDefined();
+    act(() => move?.click());
+    expect(mocks.canvas.setMoveSelectionDialogOpen).toHaveBeenCalledWith(
+      true,
+      trigger,
+    );
+    expect(trigger?.isConnected).toBe(true);
+    expect(document.querySelector('.node-toolbar-overflow')).toBeNull();
+  });
 
   it.each([
     { nested: false, detail: 1 },
@@ -351,7 +373,8 @@ describe('NodeFloatingToolbar type-icon drag surface', () => {
     (type, icon) => {
       render({ type });
       const button = handle();
-      expect(button.getAttribute('aria-label')).toBe(`${type} · Drag to move`);
+      const label = type === 'question' ? 'layers.filterLabels.question' : type;
+      expect(button.getAttribute('aria-label')).toBe(`${label} · Drag to move`);
       expect(button.querySelector(`.lucide-${icon}`)).not.toBeNull();
       expect(container.querySelectorAll(`.lucide-${icon}`)).toHaveLength(1);
       expect(container.querySelector('.lucide-grip-vertical')).toBeNull();
@@ -377,6 +400,30 @@ describe('NodeFloatingToolbar type-icon drag surface', () => {
     render();
     expect(handle().style.width).toBe('32px');
     expect(handle().style.height).toBe('32px');
+  });
+
+  it('uses the translated Agent Node label when dragging is disabled', async () => {
+    vi.useFakeTimers();
+    try {
+      render({
+        type: 'question',
+        data: { type: 'question', content: '' },
+        dragEnabled: false,
+      });
+      const indicator = container.querySelector('.text-fg-subtle svg')
+        ?.parentElement?.parentElement;
+      if (!indicator) throw new Error('Missing Agent Node type indicator');
+      await act(async () => {
+        indicator.dispatchEvent(new MouseEvent('mouseenter'));
+        await vi.advanceTimersByTimeAsync(200);
+      });
+      expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(
+        'layers.filterLabels.question',
+      );
+      expect(container.querySelector('[data-node-drag-handle]')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it.each(['video', 'pdf', 'web', 'image'] as const)(
@@ -597,6 +644,33 @@ describe('NodeFloatingToolbar type-icon drag surface', () => {
     act(() => button.dispatchEvent(click));
     expect(click.defaultPrevented).toBe(true);
     expect(focus).not.toHaveBeenCalled();
+  });
+
+  it('preserves the move anchor while modifiers are held, then restores normal toolbar hiding', () => {
+    render();
+    const trigger = container.querySelector('[aria-label="toolbar.more"]');
+    expect(trigger).not.toBeNull();
+    mocks.canvas.moveSelectionDialogOpen = true;
+    mocks.modifierHeld = true;
+    render();
+    expect(container.querySelector('[aria-label="toolbar.more"]')).toBe(
+      trigger,
+    );
+    expect(trigger?.isConnected).toBe(true);
+    mocks.modifierHeld = false;
+    render();
+    expect(container.querySelector('[aria-label="toolbar.more"]')).toBe(
+      trigger,
+    );
+    mocks.modifierHeld = true;
+    mocks.canvas.moveSelectionDialogOpen = false;
+    render();
+    expect(container.querySelector('[aria-label="toolbar.more"]')).toBeNull();
+    mocks.modifierHeld = false;
+    render();
+    expect(
+      container.querySelector('[aria-label="toolbar.more"]'),
+    ).not.toBeNull();
   });
 
   it('cancels an in-flight drag when the existing gate disables the control', () => {

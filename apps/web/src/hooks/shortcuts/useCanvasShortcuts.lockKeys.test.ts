@@ -44,6 +44,7 @@ import {
   useCanvasShortcuts,
   type CanvasShortcutRefs,
 } from './useCanvasShortcuts';
+import { OPEN_SPACE_SHORTCUT_EVENT } from '../../components/Nodes/spacePreview/spaceShortcutEvents';
 import { getCombo } from '../../config/shortcuts';
 
 // react-dom's `act` needs this flag set in a test environment.
@@ -74,6 +75,8 @@ describe('useCanvasShortcuts catalog key lock', () => {
   let root: Root;
 
   beforeEach(() => {
+    canvasActions.nodes = [];
+    canvasActions.edges = [];
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -116,6 +119,44 @@ describe('useCanvasShortcuts catalog key lock', () => {
 
     dispatchCombo('layer.bringFront');
     expect(canvasActions.sendSelectedToOrder).toHaveBeenLastCalledWith('top');
+  });
+
+  it('opens only a sole selected shortcut on Enter', () => {
+    const open = vi.fn();
+    window.addEventListener(OPEN_SPACE_SHORTCUT_EVENT, open);
+    const shortcut = { id: 'shortcut', type: 'spacePreview', selected: true };
+    const enter = () =>
+      act(() =>
+        window.dispatchEvent(
+          new KeyboardEvent('keydown', {
+            key: 'Enter',
+            bubbles: true,
+            cancelable: true,
+          }),
+        ),
+      );
+    try {
+      canvasActions.nodes = [shortcut];
+      enter();
+      expect(open).toHaveBeenCalledTimes(1);
+      expect(open.mock.calls[0][0].detail).toEqual({ nodeId: 'shortcut' });
+      act(() =>
+        window.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Delete', cancelable: true }),
+        ),
+      );
+      expect(canvasActions.deleteNodes).toHaveBeenCalledWith(['shortcut']);
+      expect(open).toHaveBeenCalledTimes(1);
+      canvasActions.nodes = [shortcut, { ...shortcut, id: 'second' }];
+      enter();
+      expect(open).toHaveBeenCalledTimes(1);
+      canvasActions.nodes = [shortcut];
+      canvasActions.edges = [{ id: 'edge', selected: true }];
+      enter();
+      expect(open).toHaveBeenCalledTimes(1);
+    } finally {
+      window.removeEventListener(OPEN_SPACE_SHORTCUT_EVENT, open);
+    }
   });
 
   it.each(['panel', 'menu', 'dialog', 'listbox'])(

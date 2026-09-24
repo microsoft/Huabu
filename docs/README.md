@@ -65,7 +65,7 @@ docs/
 | [node-preprocessing.md](./architecture/node-preprocessing.md)                   | Unified 6-stage preprocessing pipeline; per-node profiles decide extract / enrich / persist.             |     | [node-auto-height.md](./architecture/node-auto-height.md) | Who owns a node's height, how content height is measured, and how a derived height reaches geometry. |     | [sketch-node.md](./architecture/sketch-node.md) | Sketch nodes: data model, lifecycle, stroke-level editing, and how AI reads them as content. |
 | [note-node.md](./architecture/note-node.md)                                     | Note node: Markdown data model, save path, and in-document input (Tab indentation, link activation).     |
 | [preview-workspace.md](./architecture/preview-workspace.md)                     | Right-side node and Chat tabs, groups, session isolation, focus requests, persistence, and validation.   |
-| [space-preview.md](./architecture/space-preview.md)                             | View-only Space scene projection, isolated preview interaction, and preview-based World reconciliation.  |
+| [space-preview.md](./architecture/space-preview.md)                             | Space Shortcuts, shared metadata summaries, retained scene projection API, and managed World entries.    |
 | [web-architecture.md](./architecture/web-architecture.md)                       | Frontend (`apps/web/src/`) layout, dependency rules, and conventions.                                    |
 
 ---

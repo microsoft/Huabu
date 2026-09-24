@@ -39,6 +39,8 @@ export type KeyCombo = {
   shift?: boolean;
   alt?: boolean;
   key: string | string[];
+  /** Optional physical-key alias, e.g. Shift+Digit1 produces "!" on US keyboards. */
+  code?: string;
 };
 
 /**
@@ -169,6 +171,24 @@ export const SHORTCUTS: ShortcutDef[] = [
     id: 'view.zoomOut',
     combo: { mod: true, key: ['-', '_'] },
     descriptionKey: 'shortcuts.items.zoomOut',
+    section: SECTION.layout,
+  },
+  {
+    id: 'view.resetZoom',
+    combo: { mod: true, key: '0', code: 'Digit0' },
+    descriptionKey: 'canvasControls.resetZoom',
+    section: SECTION.layout,
+  },
+  {
+    id: 'view.fitAll',
+    combo: { shift: true, key: '1', code: 'Digit1' },
+    descriptionKey: 'canvasControls.fitAll',
+    section: SECTION.layout,
+  },
+  {
+    id: 'view.fitSelection',
+    combo: { shift: true, key: '2', code: 'Digit2' },
+    descriptionKey: 'canvasControls.fitSelection',
     section: SECTION.layout,
   },
   {
@@ -399,7 +419,8 @@ export function getCombo(id: string): KeyCombo | undefined {
  * Does a keyboard event match a {@link KeyCombo}? Pure comparison, no
  * string parsing. `key` is compared case-insensitively against
  * `KeyboardEvent.key`; an array matches any of its entries (aliases /
- * multi-bindings). `shift` / `alt` are compared strictly, so e.g. `⌘Z`
+ * multi-bindings). An optional `code` also matches the physical key when
+ * Shift or the keyboard layout changes its character. `shift` / `alt` are compared strictly, so e.g. `⌘Z`
  * does not also fire on `⌘⇧Z`.
  *
  * `mod` requires the platform accelerator modifier but accepts EITHER
@@ -419,7 +440,10 @@ export function matches(e: KeyboardEvent, combo: KeyCombo): boolean {
   if (e.altKey !== !!combo.alt) return false;
   const keys = Array.isArray(combo.key) ? combo.key : [combo.key];
   const eventKey = e.key.toLowerCase();
-  return keys.some((k) => k.toLowerCase() === eventKey);
+  return (
+    keys.some((k) => k.toLowerCase() === eventKey) ||
+    (combo.code !== undefined && e.code === combo.code)
+  );
 }
 
 /**

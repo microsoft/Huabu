@@ -9,6 +9,9 @@ import {
 } from '@huabu/shared/canvas-engine';
 
 import useCanvasStore from '@/store/canvasStore';
+import { isPointInFlowPolygon } from '@/utils/selectionGeometry';
+
+export { isPointInFlowPolygon } from '@/utils/selectionGeometry';
 
 import type { CanvasSketchNodeData } from '../types';
 
@@ -263,29 +266,6 @@ interface FlowPoint {
 }
 
 /**
- * Ray-cast point-in-polygon test (even-odd rule). `poly` is a closed
- * polygon given as an ordered vertex list; the closing edge is implied.
- */
-export function isPointInFlowPolygon(
-  px: number,
-  py: number,
-  poly: readonly FlowPoint[],
-): boolean {
-  let inside = false;
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const xi = poly[i].x;
-    const yi = poly[i].y;
-    const xj = poly[j].x;
-    const yj = poly[j].y;
-    const intersects =
-      yi > py !== yj > py &&
-      px < ((xj - xi) * (py - yi)) / (yj - yi || Number.EPSILON) + xi;
-    if (intersects) inside = !inside;
-  }
-  return inside;
-}
-
-/**
  * Find sketch strokes whose geometry falls inside a flow-space lasso
  * polygon (Stage 2 stroke-level selection). A stroke is captured when
  * at least one of its points lands inside the polygon — lenient, which
@@ -305,7 +285,8 @@ export function findSketchStrokesInPolygon(
   const { nodes, getAbs } = getSketchAbsResolver();
 
   for (const node of nodes) {
-    if (node.type !== 'sketch') continue;
+    if (node.type !== 'sketch' || node.hidden || node.selectable === false)
+      continue;
     const data = node.data as CanvasSketchNodeData;
     const strokes = data.strokes ?? [];
     if (strokes.length === 0) continue;

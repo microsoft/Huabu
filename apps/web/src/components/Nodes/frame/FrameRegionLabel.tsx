@@ -6,18 +6,61 @@ import { memo, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 
 import { getNodeSize } from '@huabu/shared/canvas-engine';
 
-import {
-  FRAME_DESIGN_CONFIG,
-  frameSurfaceStyle,
-  frameVisualMetricsForSize,
-} from './frameDesign';
-import { farFrameRegionPresentation } from './frameZoom';
+import { frameSurfaceStyle, frameVisualMetricsForSize } from './frameDesign';
+import { farFrameRegionPresentation, frameRegionContentBox } from './frameZoom';
 import { useFrameRegionVisible, useFrameRegionZ } from './FrameZoomContext';
 import { getAccentTokens, isWhiteAccent } from '../design/accentTokens';
-import { farLabelContentBox } from '../design/farZoomDesign';
 import { FarZoomText } from '../semanticZoom/FarZoomText';
+import { subscribeToFontChanges } from '../semanticZoom/fontObservation';
 
 import type { FrameHeaderMetrics } from './frameHeaderMetrics';
+
+const TITLE_BADGE_GAP = 3;
+
+function contentCenterOffset(
+  content: HTMLElement,
+  width: number,
+  ellipsisWidth: number,
+) {
+  const bounds = content.getBoundingClientRect();
+  if (bounds.width <= 0) return 0;
+  const title = content.querySelector<HTMLElement>('[data-frame-region-title]');
+  const badge = content.querySelector('[data-frame-region-count]');
+  const rects: DOMRect[] = [];
+  if (title) {
+    const titleBounds = title.getBoundingClientRect();
+    const range = document.createRange();
+    range.selectNodeContents(title);
+    // Line-clamped ranges include hidden lines; only measure the visible ones.
+    for (const rect of range.getClientRects()) {
+      if (rect.bottom > titleBounds.top && rect.top < titleBounds.bottom)
+        rects.push(rect);
+    }
+    // The final visible range fragment excludes the browser-painted ellipsis.
+    const last = rects.at(-1);
+    if (last && title.scrollHeight > title.clientHeight) {
+      rects.push(
+        new DOMRect(
+          last.right,
+          last.top,
+          Math.max(0, Math.min(ellipsisWidth, titleBounds.right - last.right)),
+          last.height,
+        ),
+      );
+    }
+  }
+  if (badge) rects.push(badge.getBoundingClientRect());
+  let left = bounds.right;
+  let right = bounds.left;
+  for (const rect of rects) {
+    if (rect.width <= 0) continue;
+    left = Math.min(left, Math.max(bounds.left, rect.left));
+    right = Math.max(right, Math.min(bounds.right, rect.right));
+  }
+  return right > left
+    ? ((bounds.left + bounds.right - left - right) / 2) * (width / bounds.width)
+    : 0;
+}
 
 /** Fixed-screen glyph metrics, inverse-scaled only at the outer container. */
 export function FrameRegionLabel({
@@ -35,22 +78,25 @@ export function FrameRegionLabel({
   layout: ReturnType<typeof farFrameRegionPresentation>;
   headerMetrics: FrameHeaderMetrics;
 }) {
-  const box = farLabelContentBox(
-    headerMetrics.maxWidth * zoom,
-    layout.screenHeight -
-      (headerMetrics.top + FRAME_DESIGN_CONFIG.header.edgeInset) * zoom,
-    0,
-    0,
+  const box = frameRegionContentBox(
+    layout.screenHeight,
+    zoom,
+    headerMetrics,
     layout.lineHeight,
   );
   const titleLines = Math.max(0, box.lines - 1);
   const colors =
     accent && !isWhiteAccent(accent) ? getAccentTokens(accent) : null;
   const probe = useRef<HTMLDivElement>(null);
+  const ellipsis = useRef<HTMLSpanElement>(null);
+  const content = useRef<HTMLDivElement>(null);
   const [inlineFits, setInlineFits] = useState(false);
+  const [centerOffset, setCenterOffset] = useState(0);
   useLayoutEffect(() => {
     const element = probe.current;
-    if (!element) return;
+    const visibleContent = content.current;
+    const ellipsisElement = ellipsis.current;
+    if (!element || !visibleContent || !ellipsisElement) return;
     const measure = () => {
       const text = element.firstElementChild;
       const badge = element.lastElementChild as HTMLElement | null;
@@ -61,9 +107,10 @@ export function FrameRegionLabel({
         (rect) => rect.width > 0,
       );
       const last = fragments.at(-1);
+      // Glyph centers avoid rounding a transformed line-top into the previous line.
       const textLine = last
         ? Math.floor(
-            (last.top - element.getBoundingClientRect().top) /
+            (last.top + last.height / 2 - element.getBoundingClientRect().top) /
               layout.lineHeight,
           )
         : 0;
@@ -72,17 +119,30 @@ export function FrameRegionLabel({
           element.offsetHeight <= box.availableHeight &&
           Math.round(badge.offsetTop / layout.lineHeight) === textLine,
       );
+      setCenterOffset(
+        contentCenterOffset(
+          visibleContent,
+          box.availableWidth,
+          ellipsisElement.getBoundingClientRect().width,
+        ),
+      );
     };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(element);
-    return () => observer.disconnect();
+    observer.observe(visibleContent);
+    const unsubscribeFonts = subscribeToFontChanges(measure);
+    return () => {
+      observer.disconnect();
+      unsubscribeFonts();
+    };
   }, [
     title,
     childCount,
     box.availableWidth,
     box.availableHeight,
     layout.lineHeight,
+    inlineFits,
   ]);
   const countBadge = (measurement = false) => (
     <span
@@ -110,9 +170,9 @@ export function FrameRegionLabel({
       data-frame-region-label=""
       className="text-fg-default pointer-events-none absolute overflow-hidden text-left"
       style={{
-        left: headerMetrics.left,
+        left: '50%',
         top: headerMetrics.top,
-        transform: `scale(${1 / zoom})`,
+        transform: `scale(${1 / zoom}) translateX(-50%)`,
         transformOrigin: 'top left',
         width: box.availableWidth,
         maxHeight: box.availableHeight,
@@ -131,21 +191,49 @@ export function FrameRegionLabel({
         <span>
           <FarZoomText text={title} />
         </span>
-        <span className="inline-block align-top" style={{ marginLeft: 6 }}>
+        <span
+          className="inline-block align-top"
+          style={{ marginLeft: TITLE_BADGE_GAP }}
+        >
           {countBadge(true)}
         </span>
       </div>
+      <span
+        ref={ellipsis}
+        data-frame-region-ellipsis=""
+        aria-hidden="true"
+        className="invisible absolute top-0 left-0"
+      >
+        {'\u2026'}
+      </span>
       {inlineFits ? (
-        <div data-frame-region-inline="" style={{ overflowWrap: 'anywhere' }}>
+        <div
+          ref={content}
+          data-frame-region-inline=""
+          style={{
+            overflowWrap: 'anywhere',
+            transform: `translateX(${centerOffset}px)`,
+          }}
+        >
           <span data-frame-region-title="">
             <FarZoomText text={title} />
           </span>
-          <span className="inline-block align-top" style={{ marginLeft: 6 }}>
+          <span
+            className="inline-block align-top"
+            style={{ marginLeft: TITLE_BADGE_GAP }}
+          >
             {countBadge()}
           </span>
         </div>
       ) : (
-        <div className="flex flex-wrap items-start" style={{ columnGap: 6 }}>
+        <div
+          ref={content}
+          className="flex flex-wrap items-start"
+          style={{
+            columnGap: TITLE_BADGE_GAP,
+            transform: `translateX(${centerOffset}px)`,
+          }}
+        >
           <span className="inline-block max-w-full align-top">
             <span
               data-frame-region-title=""
@@ -217,6 +305,7 @@ export const FrameRegionOverlay = memo(function FrameRegionOverlay({
     size.height * zoom,
     zoom,
     true,
+    headerMetrics,
   );
   return (
     <ViewportPortal>

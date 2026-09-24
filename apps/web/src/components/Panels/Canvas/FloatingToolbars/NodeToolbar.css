@@ -125,34 +125,8 @@
   height: 14px;
 }
 .node-toolbar-font-menu {
-  padding: 6px;
   max-height: min(280px, 60vh);
   overflow-y: auto;
-}
-.node-toolbar-overflow {
-  padding: 6px 4px;
-  border-radius: 8px;
-}
-.node-toolbar-overflow [role='menuitem'] {
-  min-height: 32px;
-  padding: 6px 8px;
-  gap: 10px;
-  border-radius: 6px;
-  font-size: 13px;
-  line-height: 20px;
-  font-weight: 400;
-  color: var(--fg-muted);
-}
-.node-toolbar-overflow [role='menuitem'].text-danger {
-  color: var(--danger);
-}
-.node-toolbar-overflow [role='menuitem'] svg {
-  width: 14px;
-  height: 14px;
-  stroke-width: 1.65;
-}
-.node-toolbar-overflow [role='menuitem'] > span:first-child:has(svg) {
-  color: inherit;
 }
 .node-toolbar-size-panel {
   border-radius: 8px;

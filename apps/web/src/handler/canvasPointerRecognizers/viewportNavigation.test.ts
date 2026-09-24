@@ -53,10 +53,9 @@ function pointer(pointerId: number, target?: Element): PointerEvent {
   } as unknown as PointerEvent;
 }
 
-function context(interactivityLocked: boolean): CanvasPointerRouterContext {
+function context(): CanvasPointerRouterContext {
   return {
     inputMode: 'pen',
-    interactivityLocked,
     explicitToolActive: false,
     onTouchTakeover: vi.fn(),
     onEmptyCanvasTap: vi.fn(),
@@ -90,7 +89,7 @@ describe('createViewportNavigationRecognizer', () => {
     'does not observe or claim a Sketch %s touch',
     (controlClass) => {
       const recognizer = createViewportNavigationRecognizer();
-      const ctx = context(false);
+      const ctx = context();
       const sketch = document.createElement('div');
       sketch.className = 'react-flow__node react-flow__node-sketch';
       const control = document.createElement('div');
@@ -111,21 +110,9 @@ describe('createViewportNavigationRecognizer', () => {
     },
   );
 
-  it('does not mutate selection on a touch tap while interactivity is locked', () => {
+  it('selects an ordinary node on a touch tap', () => {
     const recognizer = createViewportNavigationRecognizer();
-    const ctx = context(true);
-    const event = pointer(1);
-
-    expect(recognizer.onDown(event, ctx)).toBe('claim');
-    recognizer.onUp?.(event, ctx);
-
-    expect(ctx.onNodeTap).not.toHaveBeenCalled();
-    expect(ctx.onEmptyCanvasTap).not.toHaveBeenCalled();
-  });
-
-  it('retains touch tap selection while interactivity is unlocked', () => {
-    const recognizer = createViewportNavigationRecognizer();
-    const ctx = context(false);
+    const ctx = context();
     const event = pointer(2);
 
     expect(recognizer.onDown(event, ctx)).toBe('claim');

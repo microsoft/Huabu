@@ -13,18 +13,24 @@ export interface FarZoomDesign {
   descriptionFont: number;
   descriptionLine: number;
   descriptionGap: number;
+  descriptionMinLines?: number;
 }
 
-/** Screen-pixel metrics for far-zoom text; visibility policy belongs to callers. */
-export const FAR_ZOOM_DESIGN = {
-  labelFont: 10,
-  labelLine: 14,
+export const FAR_TITLE_TYPOGRAPHY = {
+  labelFont: 12,
+  labelLine: 16,
   labelWeight: NODE_TYPOGRAPHY.cardTitle.weight,
+} as const;
+
+/** Screen-pixel metrics shared by all far-zoom labels and preview cards. */
+export const FAR_ZOOM_DESIGN = {
+  ...FAR_TITLE_TYPOGRAPHY,
   labelInset: 6,
-  labelInsetInline: 8,
-  descriptionFont: 8,
-  descriptionLine: 11,
-  descriptionGap: 4,
+  labelInsetInline: 6,
+  descriptionFont: 10,
+  descriptionLine: 16,
+  descriptionGap: 2,
+  descriptionMinLines: 2,
 } as const satisfies FarZoomDesign;
 
 export function farLabelContentBox(
@@ -47,7 +53,7 @@ export function farLabelContentBox(
   };
 }
 
-/** Use every complete description line that fits after the displayed title. */
+/** Use complete description lines after the full title, once the minimum fits. */
 export function farDescriptionLines(
   width: number,
   height: number,
@@ -66,11 +72,12 @@ export function farDescriptionLines(
     titleHeight,
     titleLines * config.labelLine,
   );
-  return Math.max(
+  const lines = Math.max(
     0,
     Math.floor(
       (height - displayedTitleHeight - config.descriptionGap) /
         config.descriptionLine,
     ),
   );
+  return lines >= (config.descriptionMinLines ?? 1) ? lines : 0;
 }

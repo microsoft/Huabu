@@ -195,6 +195,8 @@ export function CanvasFloatingPopover({
       {...FLOATING_CHROME_PROPS}
       className={className}
       onKeyDown={onKeyDown}
+      // React portal events still bubble to the owning node's expand handler.
+      onDoubleClick={(event) => event.stopPropagation()}
       style={{
         ...floatingStyles,
         zIndex: 1000,

@@ -51,9 +51,9 @@ type GesturePreviewData = {
    * Sketch strokes currently selected by a stroke-level lasso (Stage 2),
    * keyed by sketch node id -> selected stroke ids. Unlike the other
    * entries in this store this is an ACTED-UPON selection (a floating
-   * toolbar deletes / operates on it), not a per-tick drag preview — but
-   * it shares the same transient, never-persisted, never-undone lifecycle,
-   * so it lives here to reuse the churn-free store.
+   * toolbar deletes / operates on it). Lasso updates it live while drawing;
+   * selection-in-progress chrome suppression hides those actions until release.
+   * It shares the transient, never-persisted, never-undone lifecycle here.
    */
   sketchStrokeSelection: Record<string, string[]>;
 
@@ -72,8 +72,8 @@ type GesturePreviewData = {
    * The retained lasso polygon (flow-space) for the current stroke
    * selection — GoodNotes-style: the loop stays after selection so the
    * user can drag inside it to move the strokes. `null` when there is no
-   * stroke selection. Point-in-polygon against this decides move vs.
-   * new-lasso.
+   * selection (strokes and/or whole nodes), or while drawing a fresh loop.
+   * Point-in-polygon against this decides move vs. new-lasso.
    */
   sketchSelectionPolygon: Array<{ x: number; y: number }> | null;
 

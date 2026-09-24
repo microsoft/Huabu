@@ -12,6 +12,7 @@ import {
   Undo2,
   Redo2,
   PanelsTopLeft,
+  Sparkles,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -630,12 +631,14 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
         <div ref={intentButtonRef} className="flex items-center gap-1.5">
           <Button
             variant="ghost"
-            iconOnly
-            title={toolTitle(t('toolbar.nodes.agent'), 'A')}
+            title={toolTitle(t('toolbar.nodes.addAgent'), 'A')}
+            aria-label={toolTitle(t('toolbar.nodes.addAgent'), 'A')}
+            aria-pressed={pendingNodeType === 'question'}
             shortcutBadge={isNotMouse ? undefined : 'A'}
             shortcutBadgeActive={pendingNodeType === 'question'}
             className={clsx(
-              MAIN_TOOL_BUTTON_CLASS,
+              'h-8 shrink-0 gap-1.5 px-2 py-0 font-normal whitespace-nowrap',
+              !isNotMouse && 'pr-4',
               pendingNodeType === 'question' &&
                 'text-info bg-info-bg enabled:hover:bg-info-bg',
             )}
@@ -645,7 +648,8 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
               )
             }
           >
-            <NODE_ICON.question />
+            <Sparkles aria-hidden />
+            {t('toolbar.nodes.agent')}
           </Button>
         </div>
 

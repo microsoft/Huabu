@@ -16,6 +16,11 @@
 
 // ── Executor + runtime types ──────────────────────────────────────────────
 export {
+  SPACE_SHORTCUT_SIZE,
+  clampSpaceShortcutWidth,
+  normalizeSpaceShortcut,
+} from './utils/spaceShortcut.js';
+export {
   AGENT_NODE_OWNED_DATA_KEYS,
   AGENT_NODE_PREPARATION_KEYS,
   hasAgentNodeOwnedData,

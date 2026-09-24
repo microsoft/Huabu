@@ -1758,7 +1758,7 @@ function FinalQuestionNodeLodReference({ icon }: { icon: AgentIconValue }) {
           value={Math.round(zoom * 100)}
           onChange={(event) => setZoom(Number(event.target.value) / 100)}
           className="accent-info flex-1"
-          aria-label="Final Question node LOD zoom"
+          aria-label="Final Agent Node LOD zoom"
         />
       </div>
 
@@ -1983,7 +1983,7 @@ function QuestionNodeLodLab({ icon }: { icon: AgentIconValue }) {
       <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
         <div>
           <h2 className="text-fg-default font-semibold">
-            Question node · 1:1 canvas fidelity + zoom LOD
+            Agent Node · 1:1 canvas fidelity + zoom LOD
           </h2>
           <p className="text-fg-muted mt-1 max-w-2xl text-sm">
             The sticky note is reproduced pixel-for-pixel. Drag the zoom to see
@@ -2273,7 +2273,7 @@ export default function AgentNodePlaygroundPage() {
       <header className="border-edge-default bg-bg-default/95 sticky top-0 z-20 flex flex-wrap items-center justify-between gap-4 border-b px-6 py-3 backdrop-blur-sm">
         <div>
           <h1 className="text-fg-default text-lg font-semibold">
-            Agent × Question Node playground
+            Agent Node playground
           </h1>
           <p className="text-fg-muted text-xs">
             Identity stays in the avatar; motion and the semantic ring express
@@ -2313,7 +2313,7 @@ export default function AgentNodePlaygroundPage() {
           href="/playground/question-nodes"
           className="border-edge-default bg-surface text-fg-default mb-8 block rounded-xl border p-5"
         >
-          <strong>Question Node · Compact reference study ↗</strong>
+          <strong>Agent Node · Compact reference study ↗</strong>
           <p className="text-fg-muted mt-1 text-sm">
             Compare compact status chips, a thin status edge, and one activity
             line across five states, with a separate semantic-zoom study.

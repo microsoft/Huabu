@@ -353,7 +353,9 @@ export const MultiSelectToolbar = () => {
           <FloatingToolbar.Divider />
           <FloatingToolbar.ActionButton
             title={t('moveSelection.action')}
-            onClick={() => setMoveSelectionDialogOpen(true)}
+            onClick={(event) =>
+              setMoveSelectionDialogOpen(true, event.currentTarget)
+            }
           >
             <SquareArrowRightEnter />
           </FloatingToolbar.ActionButton>

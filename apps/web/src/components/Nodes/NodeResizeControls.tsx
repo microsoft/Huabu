@@ -156,7 +156,7 @@ export function nodeResizePolicy(
       cursor:
         position === 'left' || position === 'right' ? 'ew-resize' : 'ns-resize',
     })),
-    ...corners.map((position) => ({
+    ...(type === 'spacePreview' ? [] : corners).map((position) => ({
       position,
       edge: false,
       mode: widthOnly ? ('scale' as const) : ('fit' as const),
@@ -287,7 +287,9 @@ export const NodeResizeControls = memo(function NodeResizeControls({
           geometry={geometry}
         />
       ))}
-      <CornerGripOverlay isNotMouse={props.isNotMouse} geometry={geometry} />
+      {type !== 'spacePreview' && (
+        <CornerGripOverlay isNotMouse={props.isNotMouse} geometry={geometry} />
+      )}
     </>
   );
 });

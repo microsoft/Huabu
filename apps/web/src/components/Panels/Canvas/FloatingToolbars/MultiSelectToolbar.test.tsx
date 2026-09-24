@@ -17,6 +17,7 @@ const state = vi.hoisted(() => ({
   })),
   edges: [],
   executeCommands: vi.fn(),
+  setMoveSelectionDialogOpen: vi.fn(),
 }));
 vi.mock('@/store/canvasStore', () => ({
   default: (select: (value: typeof state) => unknown) => select(state),
@@ -45,6 +46,11 @@ describe('MultiSelectToolbar font size', () => {
     const root = createRoot(container);
     try {
       await act(async () => root.render(<MultiSelectToolbar />));
+      const move = container.querySelector<HTMLButtonElement>(
+        '[aria-label="moveSelection.action"]',
+      );
+      act(() => move?.click());
+      expect(state.setMoveSelectionDialogOpen).toHaveBeenCalledWith(true, move);
       const input =
         container.querySelector<HTMLInputElement>('[name="font-size"]');
       expect(input?.value).toBe('');

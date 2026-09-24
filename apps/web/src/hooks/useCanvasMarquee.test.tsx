@@ -259,7 +259,6 @@ beforeEach(() => {
     wrapper,
     instance,
     inputMode: 'mouse',
-    interactivityLocked: false,
     explicitToolActive: false,
     onTouchTakeover: vi.fn(),
     onEmptyCanvasTap: vi.fn(),
@@ -504,14 +503,12 @@ describe('mouse rectangle owner', () => {
     'lasso',
     'sketch',
     'creation',
-    'locked',
     'competing',
     'middle',
     'secondary',
   ])('does not claim %s input', (reason) => {
     if (['pan', 'lasso', 'sketch', 'creation'].includes(reason))
       act(() => root.render(<Harness enabled={false} />));
-    if (reason === 'locked') context.interactivityLocked = true;
     if (reason === 'competing') mocks.available = false;
     const extra =
       reason === 'middle'

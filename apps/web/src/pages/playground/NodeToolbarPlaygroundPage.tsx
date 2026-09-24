@@ -42,6 +42,7 @@ import {
 } from 'lucide-react';
 import { useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link as RouterLink } from 'react-router-dom';
 
 import { ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT } from '@huabu/shared';
 
@@ -59,6 +60,7 @@ import { Modal } from '@/components/Common/Modal';
 import { Select } from '@/components/Common/Select';
 import { SketchControls } from '@/components/Nodes/sketch/SketchControls';
 import { SKETCH_COLOR_OPTIONS } from '@/components/Nodes/sketch/sketchPath';
+import { MoveSelectionPanel } from '@/components/Panels/Canvas/MoveSelectionPanel';
 import { NODE_ICON, NODE_TYPE_LABEL } from '@/config/nodeIcons';
 import { translateColorOptions } from '@/i18n/colors';
 
@@ -107,14 +109,16 @@ function ToolButton({
   );
 }
 
-function SpecimenTypeHandle({
+export function SpecimenTypeHandle({
   type,
+  label = NODE_TYPE_LABEL[type],
   position,
   onMove,
   onActivate,
   active,
 }: {
   type: CanvasNodeType;
+  label?: string;
   position: { x: number; y: number };
   onMove: (position: { x: number; y: number }) => void;
   onActivate?: () => void;
@@ -132,7 +136,7 @@ function SpecimenTypeHandle({
     <Button
       variant="ghost"
       iconOnly
-      title={`${NODE_TYPE_LABEL[type]} · 拖动节点`}
+      title={`${label} · 拖动节点`}
       className="nt-tool nt-type-handle"
       aria-pressed={active}
       onClick={() => {
@@ -241,7 +245,7 @@ function Specimen({ type: initialType }: { type: CanvasNodeType }) {
     sizeDismiss,
     sizeRole,
   ]);
-  const [destination, setDestination] = useState('Design notebook');
+  const moreButtonRef = useRef<HTMLButtonElement>(null);
   const [feedback, setFeedback] = useState('');
   const [width, setWidth] = useState(320);
   const [height, setHeight] = useState(180);
@@ -580,6 +584,7 @@ function Specimen({ type: initialType }: { type: CanvasNodeType }) {
                   onOpenChange={setMoreOpen}
                   trigger={
                     <Button
+                      ref={moreButtonRef}
                       variant="ghost"
                       iconOnly
                       title="更多"
@@ -845,36 +850,31 @@ function Specimen({ type: initialType }: { type: CanvasNodeType }) {
           </FloatingFocusManager>
         </FloatingPortal>
       )}
+      {dialog === 'move' && (
+        <MoveSelectionPanel
+          reference={moreButtonRef.current}
+          count={1}
+          includesFrames={type === 'frame'}
+          options={['Design notebook', 'Research archive'].map((value) => ({
+            value,
+            label: value,
+          }))}
+          onClose={() => setDialog(null)}
+          onSubmit={(destination) => {
+            setFeedback(
+              `样例目标：${destination.kind === 'new' ? destination.title : destination.canvasId}`,
+            );
+            setDialog(null);
+          }}
+        />
+      )}
       <Modal
-        isOpen={dialog !== null}
+        isOpen={dialog === 'preview'}
         onClose={() => setDialog(null)}
-        title={dialog === 'move' ? '移至其他 Space' : title}
+        title={title}
         className="nt-dialog"
       >
-        {dialog === 'move' ? (
-          <div className="nt-settings">
-            <Select
-              ariaLabel="目标 Space"
-              value={destination}
-              onChange={setDestination}
-              options={['Design notebook', 'Research archive'].map((value) => ({
-                value,
-                label: value,
-              }))}
-            />
-            <Button
-              variant="outline"
-              onClick={() => {
-                setFeedback(`样例目标：${destination}`);
-                setDialog(null);
-              }}
-            >
-              预览移动
-            </Button>
-          </div>
-        ) : (
-          content
-        )}
+        {content}
       </Modal>
     </section>
   );
@@ -1019,6 +1019,12 @@ export default function NodeToolbarPlaygroundPage() {
         <div>
           <span className="nt-eyebrow">HUABU / PLAYGROUND</span>
           <h1>Node toolbars</h1>
+          <RouterLink
+            to="/playground/space-previews"
+            className="text-fg-muted hover:text-fg-default mt-2 inline-flex items-center gap-1 text-xs"
+          >
+            Space Shortcut 样式对比 <ArrowUpRight size={12} />
+          </RouterLink>
         </div>
         <Button
           variant="outline"

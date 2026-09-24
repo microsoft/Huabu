@@ -303,6 +303,50 @@ test.afterEach(async ({ page }, testInfo) => {
   }
 });
 
+for (const tool of ['s', 'l']) {
+  test(`shared area policy and cancellation with ${tool === 's' ? 'rectangle' : 'lasso'}`, async ({
+    page,
+  }) => {
+    const ids = await seed(page, 1);
+    const before = await rects(page, ids);
+    await page.keyboard.press(tool);
+    const draw = async (start: Point, end: Point) => {
+      await press(page, start);
+      if (tool === 'l') {
+        await move(page, { x: end.x, y: start.y });
+        await move(page, end);
+        await move(page, { x: start.x, y: end.y });
+        await move(page, start);
+      } else {
+        await move(page, end);
+      }
+    };
+
+    await draw(blank(before, 1), center(before.second));
+    await selection(page, [ids.first, ids.second]);
+    await page.mouse.up();
+    await selection(page, [ids.first, ids.second]);
+
+    await draw(
+      { x: before.frame.x - 20, y: before.frame.y - 20 },
+      {
+        x: before.frame.x + before.frame.width + 20,
+        y: before.frame.y + before.frame.height + 20,
+      },
+    );
+    await selection(page, [ids.frame, ids.first, ids.second]);
+    await page.mouse.up();
+    await selection(page, [ids.frame, ids.first, ids.second]);
+
+    await draw({ x: 1500, y: 500 }, { x: 1600, y: 600 });
+    await selection(page, []);
+    await page.keyboard.press('Escape');
+    await page.mouse.up();
+    await selection(page, [ids.frame, ids.first, ids.second]);
+    await sameRects(page, ids, before);
+  });
+}
+
 for (const zoom of [0.5, 1, 2]) {
   test(`Frame blank live partial selection at ${zoom}`, async ({
     page,

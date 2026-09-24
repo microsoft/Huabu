@@ -76,6 +76,7 @@ export function SemanticPlaceholder({
         height={layout.availableHeight}
         lines={layout.lines}
         verticalInset={layout.verticalInset}
+        horizontalInset={layout.horizontalInset}
         zoom={zoom}
         visible={active && layout.labelRetained}
       />

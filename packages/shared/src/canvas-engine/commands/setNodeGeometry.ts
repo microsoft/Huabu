@@ -6,6 +6,7 @@ import { getFrameSizing } from '../frame/sizing.js';
 import { materializeAutoHeight } from '../height/materialize.js';
 import { getHeightPolicy } from '../height/policy.js';
 import { isAlwaysAutoHeightNodeType } from '../utils/nodeSizes.js';
+import { clampSpaceShortcutWidth } from '../utils/spaceShortcut.js';
 
 import type { CanvasCommand } from '../../index.js';
 import type { HeightMode } from '../../types/canvas/node.js';
@@ -72,9 +73,13 @@ const setNodeGeometry: CommandDefinition<Cmd> = {
         updated = { ...updated, position: update.position };
       }
       if (update.size) {
+        const width =
+          updated.type === 'spacePreview'
+            ? clampSpaceShortcutWidth(update.size.width)
+            : update.size.width;
         const nextStyle = {
           ...updated.style,
-          width: update.size.width,
+          width,
         };
 
         // A height is authored only when it arrives as a number on a type
@@ -108,7 +113,7 @@ const setNodeGeometry: CommandDefinition<Cmd> = {
         };
         const nextMeasured: { width?: number; height?: number } = {
           ...prevMeasured,
-          width: update.size.width,
+          width,
         };
         if (wantsAutoHeight) {
           // A content-driven type has no number to offer until it renders;
@@ -122,7 +127,10 @@ const setNodeGeometry: CommandDefinition<Cmd> = {
 
         updated = {
           ...updated,
-          data: withHeightMode(updated, wantsAutoHeight ? 'auto' : 'fixed'),
+          data: {
+            ...withHeightMode(updated, wantsAutoHeight ? 'auto' : 'fixed'),
+            ...(updated.type === 'spacePreview' && { widthMode: 'fixed' }),
+          },
           style: nextStyle,
           measured: nextMeasured,
         };

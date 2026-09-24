@@ -3,47 +3,37 @@
 
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import { nodesInSelection } from '@/components/Panels/Canvas/areaSelection';
 import { useNodeCollapseStore } from '@/store/nodeCollapseStore';
-
-import { getSelectedNodeIdsFromFlowPolygon } from './useCanvasLasso';
 
 import type { ReactFlowInstance } from '@xyflow/react';
 
-function instance(): ReactFlowInstance {
+function instance(): Pick<ReactFlowInstance, 'getNodes'> {
   return {
     getNodes: () => [
       {
         id: 'question-1',
         type: 'question',
         position: { x: 0, y: 0 },
+        measured: { width: 200, height: 100 },
         data: {},
       },
       {
         id: 'note-1',
         type: 'note',
         position: { x: 100, y: 100 },
+        measured: { width: 40, height: 40 },
         data: {},
       },
     ],
-    getInternalNode: (nodeId: string) => {
-      if (nodeId === 'question-1') {
-        return {
-          id: nodeId,
-          position: { x: 0, y: 0 },
-          data: {},
-          measured: { width: 200, height: 100 },
-          internals: { positionAbsolute: { x: 0, y: 0 } },
-        };
-      }
-      return {
-        id: nodeId,
-        position: { x: 100, y: 100 },
-        data: {},
-        measured: { width: 40, height: 40 },
-        internals: { positionAbsolute: { x: 100, y: 100 } },
-      };
-    },
-  } as unknown as ReactFlowInstance;
+  };
+}
+
+function getSelectedNodeIdsFromFlowPolygon(
+  points: Array<{ x: number; y: number }>,
+  flow: Pick<ReactFlowInstance, 'getNodes'>,
+) {
+  return nodesInSelection(flow.getNodes(), { kind: 'polygon', points });
 }
 
 beforeEach(() => {

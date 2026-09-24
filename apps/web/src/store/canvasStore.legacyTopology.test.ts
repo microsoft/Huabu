@@ -250,7 +250,12 @@ describe('legacy topology load boundary', () => {
       position: { x: 7, y: 8 },
       data: { content: 'Keep this note' },
     });
-    expect(loaded.nodes[2]).toEqual(graph.nodes[5]);
+    expect(loaded.nodes[2]).toEqual({
+      ...graph.nodes[5],
+      data: { ...graph.nodes[5].data, widthMode: 'fixed' },
+      style: { width: 480 },
+      measured: { width: 480 },
+    });
     expect(loaded.edges).toEqual([graph.edges[1]]);
     expect(loaded.version).toBe(9);
     expect(JSON.stringify(graph)).toBe(before);

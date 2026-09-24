@@ -117,6 +117,7 @@ const HEIGHT_POLICIES: Readonly<Record<string, HeightPolicy>> = {
   },
   text: { kind: 'content' },
   question: { kind: 'content' },
+  spacePreview: { kind: 'content' },
   // Manual-height types: the box is the user's, so the scale is purely a
   // rendering decision and a legibility floor costs nothing.
   web: { kind: 'manual', refWidth: 400, minContentScale: 0.5 },

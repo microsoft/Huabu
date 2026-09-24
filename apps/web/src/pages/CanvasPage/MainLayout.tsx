@@ -235,12 +235,16 @@ export const MainLayout = ({
   const effectiveRightWidthPx = isRightCollapsed
     ? COLLAPSED_RIGHT_WIDTH_PX
     : visibleRightWidth;
-  const toolbarSideSpace = ((layoutWidth ?? 0) - toolbarWidth) / 2;
+  const toolbarCenter =
+    ((layoutWidth ?? 0) + effectiveLeftWidthPx - effectiveRightWidthPx) / 2;
+  const toolbarLeft = toolbarCenter - toolbarWidth / 2;
+  const toolbarRight = toolbarCenter + toolbarWidth / 2;
   const toolbarHidden =
     toolbarWidth > 0 &&
     layoutWidth !== null &&
-    ((focusedPanel === 'left' && effectiveLeftWidthPx > toolbarSideSpace) ||
-      (focusedPanel === 'right' && effectiveRightWidthPx > toolbarSideSpace));
+    ((focusedPanel === 'left' && effectiveLeftWidthPx > toolbarLeft) ||
+      (focusedPanel === 'right' &&
+        layoutWidth - effectiveRightWidthPx < toolbarRight));
 
   const clamp = (value: number, min: number, max: number) =>
     Math.min(Math.max(value, min), max);

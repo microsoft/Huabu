@@ -20,6 +20,8 @@ Like sketch nodes, a question node has two independent relationships with AI:
 
 §1–§3 are the shared basics (goals, data model, lifecycle); §6 is the code index.
 
+User-facing node terminology is **Agent Node** in English and **Agent 节点** in Simplified Chinese, including creation actions, layer labels, chat fallback titles, toolbar tooltips, and ink-request feedback. The persisted `question` type, code identifiers, and translation keys remain unchanged; references to the user's question still describe prompt content.
+
 ---
 
 ## 1. Goals
@@ -64,6 +66,8 @@ Question naming uses the same `ConversationTitleService` as panel Chat, with one
 ---
 
 ## 3. Node lifecycle
+
+The Canvas Toolbar's Agent Node placement button pairs Lucide's outlined `Sparkles` icon with a persistent `Agent` label, matching the other toolbar icons and inheriting the button's semantic foreground color (including its active state). Its localized tooltip and accessible name describe the action as "Add Agent Node", with the `A` shortcut shown for mouse input; its pressed state reflects active placement. This toolbar mark does not change node avatars or the generic node-type icon mapping; node avatars continue to identify the bound agent.
 
 Automatic Question naming compares safe filenames to detect collisions but preserves the original display title, including punctuation. When a collision requires a suffix such as ` (2)`, the suffix is appended to the original title rather than replacing it with the sanitized filename. Storage path safety remains owned by the canonical persistence path.
 
@@ -130,7 +134,7 @@ thread exists.
 
 While actively viewing or composing a Question thread, the canvas uses a state-colored light fill and outline on its rounded card without a conversation tail, or a speech bubble on its far mark. This open presentation is independent of lifecycle: it never replaces running, permission, conflict or error status, selects the node, shows editing toolbars, or changes its content geometry.
 
-The chat panel header is the question node's rename surface in both compose and replay modes. Clicking the title (or focusing it and pressing Enter/Space) opens the same inline editor used by expanded content nodes; blur/Enter commits through `canvasStore.tryRename('node', ...)`, Escape cancels, and the shared rename path owns collision detection, persistence, and rollback. A fresh compose view continues to show the neutral “New question” title until the user assigns a name.
+The chat panel header is the question node's rename surface in both compose and replay modes. Clicking the title (or focusing it and pressing Enter/Space) opens the same inline editor used by expanded content nodes; blur/Enter commits through `canvasStore.tryRename('node', ...)`, Escape cancels, and the shared rename path owns collision detection, persistence, and rollback. A fresh compose view continues to show the neutral “New Agent Node” title until the user assigns a name.
 
 Opening an existing conversation from the Question body, toolbar or Agent mark defaults to latest in the recent-turn presentation window, including unread terminal results. Unread status still drives attention and the existing viewed acknowledgement; it no longer implicitly requests last-user positioning. Explicit search and best-effort reading return follow the [Preview Workspace navigation contract](./preview-workspace.md#6-focus-and-opening-position).
 

@@ -18,7 +18,6 @@ import type { ReactFlowInstance } from '@xyflow/react';
 
 interface CanvasPointerRouterOptions {
   inputMode: EffectiveInputMode;
-  interactivityLocked: boolean;
   explicitToolActive: boolean;
   onTouchTakeover: () => void;
   onEmptyCanvasTap: () => void;
@@ -78,7 +77,6 @@ export function useCanvasPointerRouter(
         wrapper,
         instance,
         inputMode: o.inputMode,
-        interactivityLocked: o.interactivityLocked,
         explicitToolActive: o.explicitToolActive,
         onTouchTakeover: o.onTouchTakeover,
         onEmptyCanvasTap: o.onEmptyCanvasTap,
@@ -113,10 +111,10 @@ export function useCanvasPointerRouter(
       if (shouldBlock(event)) return block(event);
       core.handleCancel(event);
     };
-    // The app-owned mouse marquee releases capture on Escape/blur as well
-    // as pointerup. Leave existing touch/pen takeover lifecycles unchanged.
+    // Area selections also release capture on Escape/blur, before pointerup.
     const onLostCapture = (event: PointerEvent) => {
-      if (core.ownerOf(event.pointerId)?.id === 'mouse-marquee') {
+      const owner = core.ownerOf(event.pointerId)?.id;
+      if (owner === 'mouse-marquee' || owner === 'lasso') {
         core.handleCancel(event);
       }
     };

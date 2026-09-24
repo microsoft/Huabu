@@ -26,10 +26,10 @@
   "moveSelection": {
     "action": "移至其他 Space",
     "title": "移至其他 Space",
-    "description": "移动选中的 {{count}} 个节点，包括 Frame 中的后代节点。",
+    "description": "已选 {{count}} 个节点",
+    "frameNotice": "包含 Frame 中的后代节点。",
     "selectDestination": "选择目标 Space",
     "createNewDestination": "新建 Space…",
-    "newDestinationSection": "新目标",
     "newSpaceName": "新 Space 名称",
     "untitledSpace": "未命名 Space",
     "confirm": "移动",
@@ -58,12 +58,19 @@
     "loadingTargets": "正在加载目标 Space…",
     "targetsUnavailable": "无法加载目标 Space。",
     "noTargets": "没有现有的目标 Space",
-    "boundaryNotice": "与所选内容之外节点的连接将被移除。",
-    "createSourcePreview": "在原位置保留一个指向目标 Space 的预览。"
+    "boundaryNotice": "与外部节点的连线将被移除。",
+    "createSourcePreview": "在原位置保留快捷入口。"
   },
   "canvasControls": {
     "resetZoom": "重置缩放至 100%",
-    "zoomAria": "画布缩放 {{percentage}}%。重置至 100%"
+    "zoomAria": "画布缩放 {{percentage}}%。打开缩放菜单",
+    "zoomMenu": "画布缩放",
+    "zoomLevel": "缩放比例",
+    "zoomIn": "放大",
+    "zoomOut": "缩小",
+    "fitAll": "适应全部内容",
+    "fitSelection": "适应选中内容",
+    "invalidZoom": "请输入 {{min}}% 至 {{max}}% 之间的缩放比例。"
   },
   "navigation": {
     "backHome": "返回首页",
@@ -268,7 +275,7 @@
     "hideMiniMap": "隐藏小地图",
     "miniMapDescription": "在 Space 右下角显示概览。",
     "worldCanvas": "World Canvas",
-    "worldCanvasDescription": "将 World 作为工作区入口，并显示 Space 预览。",
+    "worldCanvasDescription": "将 World 作为工作区入口，并显示 Space 快捷入口。",
     "showWorldCanvas": "显示 World Canvas",
     "hideWorldCanvas": "隐藏 World Canvas",
     "inputMode": "输入模式",
@@ -423,24 +430,29 @@
     "openWorld": "打开 World"
   },
   "spacePreview": {
-    "add": "添加 Space 预览",
+    "add": "添加空间快捷入口",
     "chooseTarget": "选择 Space",
-    "chooseTargetDescription": "选择要在此只读预览中显示的 Space。",
+    "chooseTargetDescription": "选择此快捷入口要打开的 Space。",
+    "shortcut": "空间快捷入口",
+    "loadingTarget": "正在加载目标 Space…",
+    "missingTarget": "当前工作区中已找不到此 Space。",
+    "widthSettings": "宽度设置",
+    "autoWidth": "自动",
+    "fixedWidth": "自定义",
+    "applyWidth": "应用宽度",
+    "widthError": "请输入不小于 {{min}} 的有限整数宽度。",
+    "widthHint": "自动：{{min}}–{{autoMax}}；自定义：至少 {{min}} 画布单位，不设上限。高度容纳最多两行标题及一行摘要。",
     "loadingTargets": "正在加载 Space…",
     "targetsUnavailable": "无法加载 Space。",
     "noTargets": "没有其他可用的 Space。",
     "openSpace": "打开 Space",
-    "loading": "正在加载 Space 预览…",
-    "unavailable": "预览不可用",
-    "unavailableDescription": "无法加载目标 Space。",
     "retry": "重试",
-    "stale": "已过期",
-    "partial": "部分内容",
     "untitledSpace": "未命名 Space",
-    "viewport": "{{title}} 的只读预览",
-    "zoomIn": "放大",
-    "zoomOut": "缩小",
-    "resetView": "重置预览视图"
+    "nodeCount_zero": "暂无节点",
+    "nodeCount_one": "{{count}} 个节点",
+    "nodeCount_other": "{{count}} 个节点",
+    "updatedNow": "刚刚更新",
+    "updatedRelative": "{{time}}更新"
   },
   "preview": {
     "tabStrip": "已打开的预览",
@@ -478,7 +490,7 @@
     "edgeLabel": "边标签",
     "createConnectedNode": "创建连接节点",
     "newNote": "新建笔记",
-    "newQuestion": "新建问题",
+    "newQuestion": "新建 Agent 节点",
     "removeNode": "移除节点",
     "removeFromCanvas": "从 Space 移除",
     "aiSummary": "AI 摘要",
@@ -661,9 +673,9 @@
       "audio": "音频",
       "web": "网页",
       "frame": "框架",
-      "spacePreview": "Space 预览",
+      "spacePreview": "空间快捷入口",
       "sketch": "手绘",
-      "question": "问题"
+      "question": "Agent 节点"
     }
   },
   "chat": {
@@ -680,8 +692,8 @@
     "closePanel": "关闭聊天面板",
     "title": "聊天",
     "chatWith": "与 {{name}} 聊天",
-    "newQuestion": "新问题",
-    "question": "问题",
+    "newQuestion": "新建 Agent 节点",
+    "question": "Agent 节点",
     "backToChat": "返回聊天",
     "failedSwitchMode": "切换模式失败",
     "failedSwitchModeWithMessage": "切换模式失败：{{message}}",
@@ -925,7 +937,8 @@
       "text": "文本",
       "sketch": "手绘",
       "audio": "音频",
-      "agent": "Agent"
+      "agent": "Agent",
+      "addAgent": "添加 Agent 节点"
     },
     "resources": {
       "addContent": "添加内容",
@@ -961,10 +974,10 @@
     "deleteSelected": "删除所选项",
     "sendInkRequest": "发送笔迹请求",
     "sendingInkRequest": "正在发送笔迹请求",
-    "multipleQuestionTargets": "请只选择一个要继续的问题",
-    "invalidQuestionTarget": "此问题无法接收笔迹请求",
+    "multipleQuestionTargets": "请只选择一个要继续的 Agent 节点",
+    "invalidQuestionTarget": "此 Agent 节点无法接收笔迹请求",
     "newInkAgentTarget": "新建 · Huabu",
-    "newInkAgentTargetDescription": "使用 Huabu 新建问题",
+    "newInkAgentTargetDescription": "使用 Huabu 新建 Agent 节点",
     "inkAgentTarget": "目标 Agent：{{name}}",
     "multipleInkAgentTargets": "多个 Agent",
     "invalidInkAgentTarget": "Agent 不可用",

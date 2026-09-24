@@ -74,8 +74,8 @@ export function easeToward(from: number, to: number, progress: number): number {
  * toward the mark's bounding square by the mark's {@link
  * CollapsedMarkGeometry.progress}.
  *
- * The node's own footprint still exists and is still selectable while collapsed,
- * but it has faded to zero opacity — chrome drawn against it reads as a
+ * The node's own footprint still exists while collapsed, but area selection
+ * targets the visible mark instead. Chrome drawn against the faded card reads as a
  * selection box, toolbar, and ports floating in empty canvas next to a small
  * mark they appear to have nothing to do with. The mark's own rect is only
  * correct at `progress === 1` though; before that the mark is still gliding in

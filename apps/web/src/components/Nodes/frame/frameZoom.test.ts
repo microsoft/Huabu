@@ -3,7 +3,14 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { farFrameRegionPresentation, resolveFrameZoom } from './frameZoom';
+import { frameVisualMetricsForSize } from './frameDesign';
+import { getFrameHeaderMetrics } from './frameHeaderMetrics';
+import {
+  farFrameRegionPresentation,
+  frameRegionContentBox,
+  FRAME_ZOOM_THRESHOLDS,
+  resolveFrameZoom,
+} from './frameZoom';
 
 import type { Node } from '@xyflow/react';
 
@@ -22,7 +29,19 @@ const node = (
   data: { label: id },
 });
 
+const AT_ENTER = FRAME_ZOOM_THRESHOLDS.enter;
+const ACTIVE_ZOOM = AT_ENTER - 0.001;
+const AT_EXIT = FRAME_ZOOM_THRESHOLDS.exit;
+const RETAINED_ZOOM = AT_EXIT - 0.001;
+
 describe('Frame region takeover', () => {
+  it('uses the configured 10% entry and 12% exit band', () => {
+    expect(FRAME_ZOOM_THRESHOLDS).toMatchObject({
+      enter: 0.1,
+      exit: 0.12,
+    });
+  });
+
   it('exposes actual visible region ownership for internal versus cross-region edges', () => {
     const nodes = [
       node('a', 'frame', 1400, 700),
@@ -32,36 +51,109 @@ describe('Frame region takeover', () => {
       node('other', 'note', 400, 320, 'b'),
       node('outside', 'note', 400, 320),
     ];
-    const state = resolveFrameZoom(nodes, 0.14);
+    const state = resolveFrameZoom(nodes, ACTIVE_ZOOM);
     expect(state.regionByNode.get('text')).toBe('a');
     expect(state.regionByNode.get('note')).toBe('a');
     expect(state.regionByNode.get('a')).toBe('a');
     expect(state.regionByNode.get('other')).toBe('b');
     expect(state.regionByNode.has('outside')).toBe(false);
-    expect(resolveFrameZoom(nodes, 0.2, state).regionByNode.size).toBe(0);
+    expect(resolveFrameZoom(nodes, AT_EXIT, state).regionByNode.size).toBe(0);
   });
 
   it('matches the shared screen budgets and never replaces children with an invisible name', () => {
-    expect(farFrameRegionPresentation(200, 49, 0.1, false)).toMatchObject({
+    expect(
+      farFrameRegionPresentation(200, 49, ACTIVE_ZOOM, false),
+    ).toMatchObject({
       visible: true,
-      fontSize: 11,
+      fontSize: 12,
       lineHeight: 16,
       lines: 1,
     });
-    expect(farFrameRegionPresentation(200, 48, 0.1, false)).toMatchObject({
+    expect(
+      farFrameRegionPresentation(200, 48, ACTIVE_ZOOM, false),
+    ).toMatchObject({
       active: true,
       visible: false,
+      fallbackVisible: true,
     });
-    expect(farFrameRegionPresentation(27.9, 100, 0.1, true).visible).toBe(
-      false,
-    );
-    expect(farFrameRegionPresentation(28, 100, 0.1, true)).toMatchObject({
+    expect(
+      farFrameRegionPresentation(27.9, 100, RETAINED_ZOOM, true),
+    ).toMatchObject({
+      visible: false,
+      fallbackVisible: true,
+    });
+    expect(
+      farFrameRegionPresentation(28, 100, RETAINED_ZOOM, true),
+    ).toMatchObject({
       visible: true,
     });
-    expect(farFrameRegionPresentation(74, 70, 0.1, true)).toMatchObject({
+    expect(
+      farFrameRegionPresentation(74, 70, RETAINED_ZOOM, true),
+    ).toMatchObject({
       visible: true,
       lines: 2,
     });
+  });
+
+  it('promotes a marginal nested Frame but keeps it as a best-effort root fallback', () => {
+    const inner = node('inner', 'frame', 260, 700);
+    const leaf = node('leaf', 'note', 200, 300, 'inner');
+    expect([...resolveFrameZoom([inner, leaf], ACTIVE_ZOOM).visible]).toEqual([
+      'inner',
+    ]);
+
+    const outer = node('outer', 'frame', 1400, 1000);
+    inner.parentId = 'outer';
+    expect([
+      ...resolveFrameZoom([outer, inner, leaf], ACTIVE_ZOOM).visible,
+    ]).toEqual(['outer']);
+  });
+
+  it('uses the rendered content box for root fallback and standalone playground regions', () => {
+    const visual = frameVisualMetricsForSize(440, 728);
+    const header = getFrameHeaderMetrics(
+      20,
+      440,
+      visual.titleFontSize,
+      visual.headerInset,
+    );
+    const box = frameRegionContentBox(728 * 0.06, 0.06, header, 16);
+    expect(box.availableWidth).toBeCloseTo(24.72);
+    expect(box.availableHeight).toBeCloseTo(42.12);
+    expect(box.lines).toBe(2);
+    const layout = farFrameRegionPresentation(
+      440 * 0.06,
+      728 * 0.06,
+      0.06,
+      false,
+      header,
+    );
+    expect(layout.visible).toBe(false);
+    expect(layout.fallbackVisible).toBe(true);
+
+    const nodes = [
+      node('frame', 'frame', 440, 728),
+      node('note', 'note', 240, 180, 'frame'),
+    ];
+    const state = resolveFrameZoom(nodes, 0.06);
+    expect(state.visible.has('frame')).toBe(
+      layout.visible || layout.fallbackVisible,
+    );
+    expect(state.suppressed.has('note')).toBe(true);
+    expect(resolveFrameZoom(nodes, AT_EXIT, state).visible.size).toBe(0);
+  });
+
+  it('does not claim fallback when the actual header leaves less than one line', () => {
+    const header = {
+      left: 20,
+      top: 500,
+      height: 29,
+      fontSize: 24,
+      maxWidth: 412,
+    };
+    const layout = farFrameRegionPresentation(26.4, 43.68, 0.06, false, header);
+    expect(frameRegionContentBox(43.68, 0.06, header, 16).lines).toBe(0);
+    expect(layout.fallbackVisible).toBe(false);
   });
 
   it('uses all complete lines that fit instead of imposing a fixed line cap', () => {
@@ -69,13 +161,15 @@ describe('Frame region takeover', () => {
       [69, 2],
       [70, 2],
       [90, 3],
-      [91, 3],
+      [92, 4],
       [200, 10],
       [448, 26],
     ]) {
-      expect(farFrameRegionPresentation(200, height, 0.1, true)).toMatchObject({
+      expect(
+        farFrameRegionPresentation(200, height, RETAINED_ZOOM, true),
+      ).toMatchObject({
         visible: true,
-        fontSize: 11,
+        fontSize: 12,
         lineHeight: 16,
         lines,
       });
@@ -87,9 +181,10 @@ describe('Frame region takeover', () => {
       node('frame', 'frame', 440, 728),
       node('note', 'note', 400, 644, 'frame'),
     ];
-    let state = resolveFrameZoom(nodes, 0.18);
+    let state = resolveFrameZoom(nodes, 0.14);
     expect(state.visible.size).toBe(0);
-    for (const zoom of [0.14, 0.13, 0.12, 0.1]) {
+    expect(resolveFrameZoom(nodes, AT_ENTER, state).visible.size).toBe(0);
+    for (const zoom of [ACTIVE_ZOOM, 0.07]) {
       state = resolveFrameZoom(nodes, zoom, state);
       expect(state.visible.has('frame')).toBe(true);
       const layout = farFrameRegionPresentation(
@@ -98,14 +193,17 @@ describe('Frame region takeover', () => {
         zoom,
         true,
       );
-      expect(layout.maxWidth).toBeGreaterThanOrEqual(24);
-      expect(layout.fontSize).toBe(11);
+      expect(layout.maxWidth).toBeGreaterThanOrEqual(8);
+      expect(layout.fontSize).toBe(12);
     }
-    expect(resolveFrameZoom(nodes, 0.09, state).visible.has('frame')).toBe(
+    expect(resolveFrameZoom(nodes, 0.069, state).visible.has('frame')).toBe(
       true,
     );
-    expect(resolveFrameZoom(nodes, 0.06, state).suppressed.size).toBe(0);
-    expect(resolveFrameZoom(nodes, 0.2, state).suppressed.size).toBe(0);
+    expect([...resolveFrameZoom(nodes, 0.06, state).visible]).toEqual([
+      'frame',
+    ]);
+    expect(resolveFrameZoom(nodes, 0.02, state).suppressed.size).toBe(0);
+    expect(resolveFrameZoom(nodes, AT_EXIT, state).suppressed.size).toBe(0);
   });
 
   it('uses viewport zoom, preserves geometry, and starts from normal presentation', () => {
@@ -115,16 +213,16 @@ describe('Frame region takeover', () => {
       node('large', 'web', 400, 320, 'frame'),
     ];
     const before = JSON.stringify(nodes);
-    let state = resolveFrameZoom(nodes, 0.18);
+    let state = resolveFrameZoom(nodes, 0.14);
     expect(state.visible.size).toBe(0);
-    state = resolveFrameZoom(nodes, 0.15, state);
+    state = resolveFrameZoom(nodes, AT_ENTER, state);
     expect(state.visible.size).toBe(0);
-    state = resolveFrameZoom(nodes, 0.149, state);
+    state = resolveFrameZoom(nodes, ACTIVE_ZOOM, state);
     expect([...state.visible]).toEqual(['frame']);
     expect([...state.suppressed]).toEqual(['small', 'large']);
-    state = resolveFrameZoom(nodes, 0.19, state);
+    state = resolveFrameZoom(nodes, RETAINED_ZOOM, state);
     expect(state.visible.has('frame')).toBe(true);
-    expect(resolveFrameZoom(nodes, 0.2, state).suppressed.size).toBe(0);
+    expect(resolveFrameZoom(nodes, AT_EXIT, state).suppressed.size).toBe(0);
     expect(JSON.stringify(nodes)).toBe(before);
   });
 
@@ -140,13 +238,13 @@ describe('Frame region takeover', () => {
         { ...node('hidden', 'frame', 1800, 1200, 'frame'), hidden: true },
       ];
       expect(resolveFrameZoom(nodes, 0.24).visible.size).toBe(0);
-      expect(resolveFrameZoom(nodes, 0.15).visible.size).toBe(0);
-      const active = resolveFrameZoom(nodes, 0.149);
+      expect(resolveFrameZoom(nodes, AT_ENTER).visible.size).toBe(0);
+      const active = resolveFrameZoom(nodes, ACTIVE_ZOOM);
       expect([...active.visible]).toEqual(['frame']);
-      expect(resolveFrameZoom(nodes, 0.199, active).visible.has('frame')).toBe(
-        true,
-      );
-      expect(resolveFrameZoom(nodes, 0.2, active).visible.size).toBe(0);
+      expect(
+        resolveFrameZoom(nodes, RETAINED_ZOOM, active).visible.has('frame'),
+      ).toBe(true);
+      expect(resolveFrameZoom(nodes, AT_EXIT, active).visible.size).toBe(0);
     }
   });
 
@@ -156,9 +254,9 @@ describe('Frame region takeover', () => {
       node('inner', 'frame', 440, 728, 'outer'),
       node('leaf', 'note', 400, 644, 'inner'),
     ];
-    let state = resolveFrameZoom(nodes, 0.14);
+    let state = resolveFrameZoom(nodes, ACTIVE_ZOOM);
     expect([...state.visible]).toEqual(['inner']);
-    for (const zoom of [0.12, 0.1, 0.07]) {
+    for (const zoom of [0.07]) {
       state = resolveFrameZoom(nodes, zoom, state);
       expect([...state.visible]).toEqual(['inner']);
     }
@@ -177,13 +275,13 @@ describe('Frame region takeover', () => {
     const nodes = [
       node('outer', 'frame', 4000, 2600),
       node('middle', 'frame', 1800, 1200, 'outer'),
-      node('inner', 'frame', 800, 600, 'middle'),
+      node('inner', 'frame', 800, 700, 'middle'),
       node('leaf', 'note', 400, 300, 'inner'),
       node('mixed', 'note', 1600, 1000, 'outer'),
     ];
-    const inner = resolveFrameZoom(nodes, 0.14);
+    const inner = resolveFrameZoom(nodes, ACTIVE_ZOOM);
     expect([...inner.visible]).toEqual(['inner']);
-    const middle = resolveFrameZoom(nodes, 0.079, inner);
+    const middle = resolveFrameZoom(nodes, 0.069, inner);
     expect([...middle.visible]).toEqual(['middle']);
     expect(middle.suppressed.has('mixed')).toBe(false);
     const outer = resolveFrameZoom(nodes, 0.039, middle);
@@ -192,7 +290,7 @@ describe('Frame region takeover', () => {
     expect([...resolveFrameZoom(nodes, 0.06, outer).visible]).toEqual([
       'middle',
     ]);
-    expect([...resolveFrameZoom(nodes, 0.16, outer).visible]).toEqual([
+    expect([...resolveFrameZoom(nodes, RETAINED_ZOOM, outer).visible]).toEqual([
       'inner',
     ]);
   });
@@ -208,8 +306,10 @@ describe('Frame region takeover', () => {
       node('smallLeaf', 'note', 200, 100, 'small'),
       node('largeLeaf', 'note', 200, 100, 'large'),
     ];
-    expect(resolveFrameZoom(nodes, 0.1).visible.has('outer')).toBe(false);
-    const state = resolveFrameZoom(nodes, 0.08);
+    expect(resolveFrameZoom(nodes, AT_ENTER).visible.has('outer')).toBe(false);
+    const initial = resolveFrameZoom(nodes, ACTIVE_ZOOM);
+    expect([...initial.visible]).toEqual(['small', 'large']);
+    const state = resolveFrameZoom(nodes, 0.079, initial);
     expect([...state.visible]).toEqual(['outer']);
     expect(state.suppressed.has('large')).toBe(true);
   });
@@ -221,10 +321,12 @@ describe('Frame region takeover', () => {
       node('inner', 'frame', 400, 300, 'middle'),
       node('leaf', 'note', 200, 100, 'inner'),
     ];
-    expect([...resolveFrameZoom(nodes, 0.1).visible]).toEqual(['outer']);
-    expect([...resolveFrameZoom([...nodes].reverse(), 0.1).visible]).toEqual([
+    expect([...resolveFrameZoom(nodes, ACTIVE_ZOOM).visible]).toEqual([
       'outer',
     ]);
+    expect([
+      ...resolveFrameZoom([...nodes].reverse(), ACTIVE_ZOOM).visible,
+    ]).toEqual(['outer']);
     expect(resolveFrameZoom(nodes, 0.01).suppressed.size).toBe(0);
   });
 
@@ -233,12 +335,14 @@ describe('Frame region takeover', () => {
       node('outer', 'frame', 1800, 1000),
       node('middle', 'frame', 100, 100, 'outer'),
       {
-        ...node('inner', 'frame', 800, 600, 'middle'),
+        ...node('inner', 'frame', 800, 700, 'middle'),
         data: { label: 'Long title '.repeat(100) },
       },
       node('leaf', 'note', 200, 100, 'inner'),
     ];
-    expect([...resolveFrameZoom(nodes, 0.1).visible]).toEqual(['inner']);
+    expect([...resolveFrameZoom(nodes, ACTIVE_ZOOM).visible]).toEqual([
+      'inner',
+    ]);
   });
 
   it('paints a region above its descendant band but below the next unrelated node', () => {
@@ -247,33 +351,36 @@ describe('Frame region takeover', () => {
       { ...node('child', 'note', 200, 200, 'frame'), zIndex: 3 },
       { ...node('sibling', 'note', 200, 200), zIndex: 4 },
     ];
-    expect(resolveFrameZoom(nodes, 0.1).regionZ.get('frame')).toBe(3);
+    expect(resolveFrameZoom(nodes, ACTIVE_ZOOM).regionZ.get('frame')).toBe(3);
     nodes[1].zIndex = 10;
-    expect(resolveFrameZoom(nodes, 0.1).regionZ.get('frame')).toBe(10);
+    expect(resolveFrameZoom(nodes, ACTIVE_ZOOM).regionZ.get('frame')).toBe(10);
   });
 
   it('gives the outer visible Frame priority and restores a nested region independently', () => {
     const nodes = [
       node('outer', 'frame', 1800, 1000),
-      node('inner', 'frame', 800, 600, 'outer'),
+      node('inner', 'frame', 800, 700, 'outer'),
       node('leaf', 'note', 200, 200, 'inner'),
     ];
-    const inner = resolveFrameZoom(nodes, 0.14);
+    const inner = resolveFrameZoom(nodes, ACTIVE_ZOOM);
     expect([...inner.visible]).toEqual(['inner']);
     expect([...inner.suppressed]).toEqual(['leaf']);
-    const outer = resolveFrameZoom(nodes, 0.079, inner);
+    const outer = resolveFrameZoom(nodes, 0.069, inner);
     expect([...outer.visible]).toEqual(['outer']);
     expect([...outer.suppressed]).toEqual(['inner', 'leaf']);
-    expect([...resolveFrameZoom(nodes, 0.12, outer).visible]).toEqual([
+    expect([...resolveFrameZoom(nodes, RETAINED_ZOOM, outer).visible]).toEqual([
       'inner',
     ]);
-    expect(resolveFrameZoom(nodes, 0.03, outer).suppressed.size).toBe(0);
+    expect([...resolveFrameZoom(nodes, 0.03, outer).visible]).toEqual([
+      'outer',
+    ]);
+    expect(resolveFrameZoom(nodes, 0.01, outer).suppressed.size).toBe(0);
   });
 
   it('handles empty, missing, hidden and deleted Frames without stale suppression', () => {
     const frame = node('frame', 'frame', 1400, 700);
     const child = node('child', 'note', 200, 200, 'frame');
-    const state = resolveFrameZoom([frame, child], 0.1);
+    const state = resolveFrameZoom([frame, child], ACTIVE_ZOOM);
     expect(state.visible.has('frame')).toBe(true);
     for (const nodes of [
       [frame],
@@ -282,33 +389,38 @@ describe('Frame region takeover', () => {
       [{ ...frame, data: { contentMissing: true } }, child],
       [frame, { ...child, hidden: true }],
     ]) {
-      expect(resolveFrameZoom(nodes, 0.1, state).visible.size).toBe(0);
-      expect(resolveFrameZoom(nodes, 0.1, state).suppressed.size).toBe(0);
+      expect(resolveFrameZoom(nodes, ACTIVE_ZOOM, state).visible.size).toBe(0);
+      expect(resolveFrameZoom(nodes, ACTIVE_ZOOM, state).suppressed.size).toBe(
+        0,
+      );
     }
   });
 
   it('ignores content resize, fits measured Frame bounds, and recomputes on reparent independent of node order', () => {
     const frame = node('frame', 'frame', 1400, 700);
     const child = node('child', 'note', 200, 200, 'frame');
-    const state = resolveFrameZoom([child, frame], 0.14);
+    const state = resolveFrameZoom([child, frame], ACTIVE_ZOOM);
     expect(state.suppressed.has('child')).toBe(true);
     expect(
       resolveFrameZoom(
         [frame, { ...child, measured: { width: 800, height: 800 } }],
-        0.15,
+        AT_ENTER,
         state,
       ).visible.size,
     ).toBe(1);
     expect(
       resolveFrameZoom(
         [{ ...frame, measured: { width: 100, height: 100 } }, child],
-        0.15,
+        AT_ENTER,
         state,
       ).visible.size,
     ).toBe(0);
     expect(
-      resolveFrameZoom([frame, { ...child, parentId: undefined }], 0.15, state)
-        .visible.size,
+      resolveFrameZoom(
+        [frame, { ...child, parentId: undefined }],
+        AT_ENTER,
+        state,
+      ).visible.size,
     ).toBe(0);
   });
 });

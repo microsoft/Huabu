@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   anchorViewportCentre,
   fitNodesOnCanvas,
+  fitCanvasContent,
   getReliableNodeBounds,
   revealBoundsInViewport,
   revealNodesOnCanvas,
@@ -46,6 +47,36 @@ const createInstance = () => {
 };
 
 describe('reliable canvas node bounds', () => {
+  it('shares visible-node and selection filtering between menu and shortcuts', async () => {
+    const { instance, fitBounds } = createInstance();
+    instance.getNodes = () => [
+      { id: 'first', position: { x: 1000, y: 500 }, data: {} },
+      { id: 'second', position: { x: 1400, y: 800 }, data: {}, selected: true },
+      {
+        id: 'hidden',
+        position: { x: -9000, y: 0 },
+        data: {},
+        selected: true,
+        hidden: true,
+      },
+    ];
+    await fitCanvasContent(instance, 'selection');
+    expect(fitBounds).toHaveBeenLastCalledWith(
+      { x: 1400, y: 800, width: 80, height: 60 },
+      { padding: 0.15 },
+    );
+    await fitCanvasContent(instance, 'all');
+    expect(fitBounds).toHaveBeenLastCalledWith(
+      { x: 1000, y: 500, width: 480, height: 360 },
+      { padding: 0.15 },
+    );
+    fitBounds.mockClear();
+    instance.getNodes = () => [];
+    await expect(fitCanvasContent(instance, 'selection')).resolves.toBe(false);
+    await expect(fitCanvasContent(instance, 'all')).resolves.toBe(false);
+    expect(fitBounds).not.toHaveBeenCalled();
+  });
+
   it('uses persisted style dimensions for unmeasured nodes', () => {
     const { instance } = createInstance();
 

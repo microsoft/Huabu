@@ -34,6 +34,47 @@ type FloatingPosition = { x: number; y: number };
 
 const PopoverContainerContext = createContext<Element | null>(null);
 
+interface EscapeLayer {
+  parent: EscapeLayer | null;
+}
+
+const EscapeLayerContext = createContext<EscapeLayer | null>(null);
+const escapeLayers = new Set<EscapeLayer>();
+const popoverRoots = new Map<
+  EscapeLayer,
+  { panel: HTMLDivElement; reference: Element | null | undefined }
+>();
+
+function isInsidePopoverTree(layer: EscapeLayer, target: Node): boolean {
+  for (const [candidate, root] of popoverRoots) {
+    if (!root.panel.contains(target) && !root.reference?.contains(target))
+      continue;
+    for (
+      let current: EscapeLayer | null = candidate;
+      current;
+      current = current.parent
+    ) {
+      if (current === layer) return true;
+    }
+  }
+  return false;
+}
+
+function topEscapeLayer(): EscapeLayer | undefined {
+  const layers = [...escapeLayers];
+  return layers.reverse().find(
+    (candidate) =>
+      !layers.some((layer) => {
+        for (let parent = layer.parent; parent; parent = parent.parent) {
+          if (parent === candidate) return true;
+        }
+        return false;
+      }),
+  );
+}
+
+export type PopoverDismissReason = 'outside-press' | 'escape';
+
 /**
  * Tracks the latest mouse position so Popover can default to it
  * when no explicit `position` prop is provided.
@@ -79,7 +120,7 @@ export type PopoverProps = {
    * Called when the floating panel should close.
    * Triggers on outside pointer-down and (optionally) on Escape key.
    */
-  onDismiss?: () => void;
+  onDismiss?: (reason: PopoverDismissReason) => void;
 
   /** Whether pressing Escape dismisses the panel. Defaults to `true`. */
   dismissOnEscape?: boolean;
@@ -136,6 +177,9 @@ export type PopoverProps = {
   /** Optional ref for accessing the rendered popover container element. */
   contentRef?: Ref<HTMLDivElement>;
 
+  /** Called once after the panel is positioned and visible, for initial focus. */
+  onOpenAutoFocus?: () => void;
+
   children: ReactNode;
 };
 
@@ -165,6 +209,7 @@ export const Popover: FC<PopoverProps> = ({
   style,
   container,
   contentRef,
+  onOpenAutoFocus,
   children,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -173,6 +218,21 @@ export const Popover: FC<PopoverProps> = ({
     null,
   );
   const parentContainer = useContext(PopoverContainerContext);
+  const parentEscapeLayer = useContext(EscapeLayerContext);
+  const escapeLayer = useMemo(
+    () => ({ parent: parentEscapeLayer }),
+    [parentEscapeLayer],
+  );
+  const onDismissRef = useRef(onDismiss);
+  onDismissRef.current = onDismiss;
+  const canDismissOnEscape = Boolean(onDismiss) && dismissOnEscape;
+  useLayoutEffect(() => {
+    if (!contentElement) return;
+    popoverRoots.set(escapeLayer, { panel: contentElement, reference });
+    return () => {
+      popoverRoots.delete(escapeLayer);
+    };
+  }, [contentElement, escapeLayer, reference]);
   const floating = useFloating({
     open: Boolean(reference),
     elements: { reference },
@@ -299,10 +359,8 @@ export const Popover: FC<PopoverProps> = ({
   // popover, unmounting the React tree that owns the portal —
   // making any dialog opened from a popover seem to vanish on click.
   //
-  // To handle that, we also treat the click as "inside" when it
-  // happens within any open `[role="dialog"]` or any element that
-  // explicitly opts out via `[data-popover-dismiss-ignore]`. Modal
-  // panels set `role="dialog"` so this covers them automatically.
+  // React descendants count as inside even when their portal roots are elsewhere.
+  // Newly opened dialogs and explicit dismissal-ignore regions also stay inside.
   useEffect(() => {
     if (!onDismiss) return;
 
@@ -314,6 +372,7 @@ export const Popover: FC<PopoverProps> = ({
       const target = e.target;
       if (!(target instanceof Node)) return;
       if (container.contains(target) || reference?.contains(target)) return;
+      if (isInsidePopoverTree(escapeLayer, target)) return;
       if (target instanceof Element) {
         if (target.closest('[data-popover-dismiss-ignore]')) return;
         const dialog = target.closest('[role="dialog"]');
@@ -326,37 +385,53 @@ export const Popover: FC<PopoverProps> = ({
       ) {
         activeElement.blur();
       }
-      onDismiss();
+      onDismiss('outside-press');
     };
 
     // Delay listener to avoid catching the triggering event
     const timer = setTimeout(() => {
-      document.addEventListener('pointerdown', handlePointerDown);
+      // Canvas gesture handlers can consume pointer events before they bubble.
+      document.addEventListener('pointerdown', handlePointerDown, true);
     }, 0);
 
     return () => {
       clearTimeout(timer);
-      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('pointerdown', handlePointerDown, true);
     };
-  }, [onDismiss, reference]);
+  }, [onDismiss, reference, escapeLayer]);
 
   // Dismiss on Escape key
   useEffect(() => {
-    if (!onDismiss || !dismissOnEscape) return;
+    if (!canDismissOnEscape) return;
 
+    escapeLayers.add(escapeLayer);
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      if (
+        e.key === 'Escape' &&
+        !e.defaultPrevented &&
+        topEscapeLayer() === escapeLayer
+      ) {
         e.preventDefault();
         e.stopImmediatePropagation();
-        onDismiss();
+        onDismissRef.current?.('escape');
       }
     };
 
     window.addEventListener('keydown', handleKeyDown, true);
-    return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [onDismiss, dismissOnEscape]);
+    return () => {
+      escapeLayers.delete(escapeLayer);
+      window.removeEventListener('keydown', handleKeyDown, true);
+    };
+  }, [canDismissOnEscape, escapeLayer]);
 
   const isMeasuring = clamped === null;
+  const visible = reference ? floating.isPositioned : !isMeasuring;
+  const initiallyFocused = useRef(false);
+  useLayoutEffect(() => {
+    if (!visible || initiallyFocused.current || !onOpenAutoFocus) return;
+    initiallyFocused.current = true;
+    onOpenAutoFocus();
+  }, [visible, onOpenAutoFocus]);
   const portalContainer = container ?? parentContainer ?? document.body;
 
   const contextValue = useMemo(() => contentElement, [contentElement]);
@@ -389,7 +464,9 @@ export const Popover: FC<PopoverProps> = ({
           zIndex,
         }}
       >
-        {children}
+        <EscapeLayerContext.Provider value={escapeLayer}>
+          {children}
+        </EscapeLayerContext.Provider>
       </div>
     </PopoverContainerContext.Provider>
   );

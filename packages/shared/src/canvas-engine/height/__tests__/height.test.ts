@@ -67,20 +67,20 @@ function node(partial: Partial<Node> & { type: string }): Node {
 }
 
 describe('height policy table', () => {
-  it('reproduces the legacy always-auto-height type set', () => {
+  it('adds shortcuts to the legacy always-auto-height type set', () => {
     for (const type of ALL_NODE_TYPES) {
       expect([type, isAlwaysAutoHeightType(type)]).toEqual([
         type,
-        LEGACY_ALWAYS_AUTO.has(type),
+        LEGACY_ALWAYS_AUTO.has(type) || type === 'spacePreview',
       ]);
     }
   });
 
-  it('reproduces the legacy auto-height-by-default type set', () => {
+  it('adds shortcuts to the legacy auto-height-by-default type set', () => {
     for (const type of ALL_NODE_TYPES) {
       expect([type, isAutoHeightByDefaultType(type)]).toEqual([
         type,
-        LEGACY_AUTO_BY_DEFAULT.has(type),
+        LEGACY_AUTO_BY_DEFAULT.has(type) || type === 'spacePreview',
       ]);
     }
   });
@@ -94,13 +94,13 @@ describe('height policy table', () => {
     }
   });
 
-  it('keeps nodeSizes behaviour unchanged', () => {
+  it('keeps legacy sizing except for content-height shortcuts', () => {
     for (const type of ALL_NODE_TYPES) {
       expect(isAlwaysAutoHeightNodeType(type)).toBe(
-        LEGACY_ALWAYS_AUTO.has(type),
+        LEGACY_ALWAYS_AUTO.has(type) || type === 'spacePreview',
       );
       expect(getNodeCreationStyle(type, { width: 400, height: 300 })).toEqual(
-        LEGACY_AUTO_BY_DEFAULT.has(type)
+        LEGACY_AUTO_BY_DEFAULT.has(type) || type === 'spacePreview'
           ? { width: 400 }
           : { width: 400, height: 300 },
       );
@@ -111,7 +111,7 @@ describe('height policy table', () => {
           { heightIsExplicit: true },
         ),
       ).toEqual(
-        LEGACY_ALWAYS_AUTO.has(type)
+        LEGACY_ALWAYS_AUTO.has(type) || type === 'spacePreview'
           ? { width: 400 }
           : { width: 400, height: 300 },
       );

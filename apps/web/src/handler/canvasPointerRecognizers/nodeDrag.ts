@@ -126,7 +126,6 @@ export function createNodeDragRecognizer(): PointerRecognizer<
     id: 'node-drag',
     canClaim: (event, ctx) =>
       pointerId === null &&
-      !ctx.interactivityLocked &&
       event.pointerType === 'touch' &&
       ctx.inputMode === 'pen' &&
       event.isPrimary &&
@@ -157,10 +156,6 @@ export function createNodeDragRecognizer(): PointerRecognizer<
     },
     onMove: (event, ctx) => {
       if (event.pointerId !== pointerId) return;
-      if (ctx.interactivityLocked) {
-        cancelDrag();
-        return;
-      }
       event.preventDefault();
       event.stopPropagation();
       if (!locked) {
@@ -183,10 +178,6 @@ export function createNodeDragRecognizer(): PointerRecognizer<
     },
     onUp: (event, ctx) => {
       if (event.pointerId !== pointerId) return;
-      if (ctx.interactivityLocked) {
-        cancelDrag();
-        return;
-      }
       event.preventDefault();
       event.stopPropagation();
       if (locked && primaryNode) {

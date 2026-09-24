@@ -484,6 +484,59 @@ describe('World preview reconciliation', () => {
     ).toEqual(['canvas-a', 'canvas-c']);
   });
 
+  it.each([undefined, 'fixed', 'auto'])(
+    'reserves compact height for a shortcut with width mode %s without rewriting its geometry',
+    async (widthMode) => {
+      const existing = {
+        ...preview(),
+        position: { x: 0, y: 0 },
+        style: { width: 480, height: 460 },
+        data: {
+          targetCanvasId: 'canvas-a',
+          ...(widthMode ? { widthMode } : {}),
+        },
+      };
+      writeCanvas('.world', 'canvas-world', [
+        existing,
+        {
+          id: 'node-blocker',
+          type: 'note',
+          position: { x: 560, y: 0 },
+          style: { width: 1600, height: 138 },
+          data: {},
+        },
+      ]);
+
+      await reconcileWorldPreviews();
+
+      const current = await previews();
+      expect(current).toContainEqual(existing);
+      expect(
+        current.find((node) => node.data.targetCanvasId === 'canvas-b')
+          ?.position,
+      ).toEqual({ x: 0, y: 218 });
+    },
+  );
+
+  it('still reserves the authored height of ordinary World nodes', async () => {
+    writeCanvas('.world', 'canvas-world', [
+      {
+        id: 'node-blocker',
+        type: 'note',
+        position: { x: 0, y: 0 },
+        style: { width: 2160, height: 460 },
+        data: {},
+      },
+    ]);
+
+    await reconcileWorldPreviews();
+
+    expect(
+      (await previews()).find((node) => node.data.targetCanvasId === 'canvas-a')
+        ?.position,
+    ).toEqual({ x: 0, y: 654 });
+  });
+
   it('ignores legacy topology on read without rewriting disk and never reuses its identity or geometry', async () => {
     writeCanvas(
       '.world',
@@ -525,7 +578,7 @@ describe('World preview reconciliation', () => {
     const current = await previews();
     expect(current).toHaveLength(2);
     expect(current.every((node) => node.id !== 'node-old')).toBe(true);
-    expect(current[0]?.style).toMatchObject({ width: 480, height: 320 });
+    expect(current[0]?.style).toEqual({ width: 360 });
     expect(getCanvasStore('canvas-world').read()?.state.nodes).not.toEqual(
       JSON.parse(before).state.nodes,
     );
@@ -613,7 +666,7 @@ describe('World preview ownership', () => {
     expect((await previews())[0]).toMatchObject({
       id: 'node-preview',
       position: { x: 999, y: 888 },
-      style: { width: 900, height: 600 },
+      style: { width: 900 },
     });
   });
 

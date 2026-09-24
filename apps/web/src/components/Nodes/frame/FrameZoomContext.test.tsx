@@ -6,6 +6,7 @@ import { createRoot } from 'react-dom/client';
 import { expect, it, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 
+import { FRAME_ZOOM_THRESHOLDS } from './frameZoom';
 import {
   FrameZoomController,
   FrameZoomProvider,
@@ -73,21 +74,23 @@ it('isolates canvases, updates only changed booleans, clears on navigation and u
     );
   const value = (name: string) =>
     container.querySelector(`[data-name="${name}"]`)?.textContent;
+  const activeZoom = FRAME_ZOOM_THRESHOLDS.enter - 0.001;
+  const retainedZoom = FRAME_ZOOM_THRESHOLDS.exit - 0.001;
   try {
     render('one');
     expect(value('active')).toBe('false/false');
-    act(() => flow.setState({ transform: [0, 0, 0.14] }));
+    act(() => flow.setState({ transform: [0, 0, activeZoom] }));
     expect(value('active')).toBe('true/true');
     expect(value('isolated')).toBe('false/false');
     const count = renders;
-    act(() => flow.setState({ transform: [500, 100, 0.14] }));
-    act(() => flow.setState({ transform: [500, 100, 0.18] }));
+    act(() => flow.setState({ transform: [500, 100, activeZoom] }));
+    act(() => flow.setState({ transform: [500, 100, retainedZoom] }));
     expect(renders).toBe(count);
     expect(value('active')).toBe('true/true');
     render('two');
     expect(value('active')).toBe('false/false');
     expect(unsubscribed).toHaveBeenCalledTimes(1);
-    act(() => flow.setState({ transform: [0, 0, 0.14] }));
+    act(() => flow.setState({ transform: [0, 0, activeZoom] }));
     act(() => flow.setState({ nodes: [] }));
     expect(value('active')).toBe('false/false');
   } finally {

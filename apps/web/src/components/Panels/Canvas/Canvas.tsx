@@ -4,12 +4,9 @@
 import {
   ReactFlow,
   ReactFlowProvider,
-  Controls,
-  ControlButton,
   MiniMap,
   ConnectionMode,
   SelectionMode,
-  useReactFlow,
   useStore,
   type ReactFlowInstance,
   type Connection,
@@ -17,7 +14,6 @@ import {
   Panel,
 } from '@xyflow/react';
 import clsx from 'clsx';
-import { Maximize } from 'lucide-react';
 import React, {
   useCallback,
   useEffect,
@@ -26,19 +22,15 @@ import React, {
   useState,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { useTranslation } from 'react-i18next';
 import '@xyflow/react/dist/style.css';
 
 import {
   assignNodeZIndices,
   edgeZIndex,
-  getAbsolutePosition,
-  getNodeSize,
   indexById,
 } from '@huabu/shared/canvas-engine';
 
 import { resolveArtifactUrl } from '@/api/artifact';
-import { Button } from '@/components/Common/Button';
 import { cn } from '@/components/Common/cn';
 import { Loading } from '@/components/Common/Loading';
 import { AudioNode } from '@/components/Nodes/audio/AudioNode';
@@ -106,6 +98,7 @@ import {
   resolveNodeDraggable,
 } from './canvasInputPolicy.ts';
 import { NodeToolbar } from './CanvasToolbar.tsx';
+import { CanvasZoomMenu } from './CanvasZoomMenu';
 import { ConnectedNodePicker } from './ConnectedNodePicker.tsx';
 import {
   EDIT_EDGE_LABEL_EVENT,
@@ -115,7 +108,7 @@ import {
 import { EdgeStyleToolbar } from './FloatingToolbars/EdgeStyleToolbar.tsx';
 import { MultiSelectToolbar } from './FloatingToolbars/MultiSelectToolbar.tsx';
 import { StrokeSelectionToolbar } from './FloatingToolbars/StrokeSelectionToolbar.tsx';
-import { MoveSelectionModal } from './MoveSelectionModal.tsx';
+import { MoveSelectionPopover } from './MoveSelectionPopover.tsx';
 import { MultiSelectResizer } from './MultiSelectResizer.tsx';
 import { SelectionOutlines } from './SelectionOutlines.tsx';
 import { selectionZOrder, withoutNodeStyleZIndex } from './selectionZOrder';
@@ -137,10 +130,7 @@ import { looksLikeUrl } from '../../../utils/io/media.ts';
 import { FrameNode } from '../../Nodes/frame/FrameNode.tsx';
 import { createQuestionNodeAndCompose } from '../../Nodes/question/questionCompose.ts';
 import { QuestionNode } from '../../Nodes/question/QuestionNode.tsx';
-import {
-  findSketchStrokesInPolygon,
-  isPointInFlowPolygon,
-} from '../../Nodes/sketch/sketchHitTest.ts';
+import { isPointInFlowPolygon } from '../../Nodes/sketch/sketchHitTest.ts';
 import { SketchNode } from '../../Nodes/sketch/SketchNode.tsx';
 import {
   CANCEL_SKETCH_GESTURE_EVENT,
@@ -149,16 +139,17 @@ import {
 import { SpacePreviewNode } from '../../Nodes/spacePreview/SpacePreviewNode.tsx';
 import { VideoNode } from '../../Nodes/video/VideoNode.tsx';
 import { WebNode } from '../../Nodes/web/WebNode.tsx';
-import {
-  anchorViewportCentre,
-  fitNodesOnCanvas,
-} from '../CanvasLayerPanel/focusNodesOnCanvas.ts';
+import { anchorViewportCentre } from '../CanvasLayerPanel/focusNodesOnCanvas.ts';
 
 import type { CanvasNode } from '@/components/Nodes/types';
 import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
 import type { CanvasPointerRouterContext } from '@/handler/canvasPointerRouterContext';
 import type { PointerRecognizer } from '@/handler/pointerRouter';
 import type { FrameFitResult, NestableNode } from '@huabu/shared/canvas-engine';
+
+const mainToolbarPosition: React.CSSProperties = {
+  left: 'calc((100% + var(--canvas-inset-left, 0px) - var(--canvas-inset-right, 0px)) / 2)',
+};
 
 const nodeTypes = {
   image: ImageNode,
@@ -282,7 +273,6 @@ const CanvasGestures: React.FC<{
   wrapperRef: React.MutableRefObject<HTMLDivElement | null>;
   rfInstanceRef: React.MutableRefObject<ReactFlowInstance | null>;
   inputMode: 'mouse' | 'pen' | 'finger';
-  interactivityLocked: boolean;
   explicitToolActive: boolean;
   mouseMarqueeEnabled: boolean;
   canvasId: string | null;
@@ -298,7 +288,6 @@ const CanvasGestures: React.FC<{
   wrapperRef,
   rfInstanceRef,
   inputMode,
-  interactivityLocked,
   explicitToolActive,
   mouseMarqueeEnabled,
   canvasId,
@@ -325,7 +314,6 @@ const CanvasGestures: React.FC<{
     rfInstanceRef,
     {
       inputMode,
-      interactivityLocked,
       explicitToolActive,
       onTouchTakeover: () => {
         marquee.cancel();
@@ -354,88 +342,9 @@ const SelectionAutoPan: React.FC<{
   return null;
 };
 
-/** Displays the live canvas zoom and resets the viewport to 100% on click. */
-const CanvasZoomLevel: React.FC = () => {
-  const { t } = useTranslation();
-  const { zoomTo } = useReactFlow();
-  const zoom = useStore((state) => state.transform[2]);
-  const percentage = Math.round(zoom * 100);
-  const multiplier = Math.round(zoom * 10) / 10;
-
-  return (
-    <ControlButton
-      className="w-6.5! p-0! text-[10px]! leading-none font-medium! tabular-nums"
-      title={t('canvasControls.resetZoom')}
-      aria-label={`${multiplier}×. ${t('canvasControls.zoomAria', { percentage })}`}
-      onClick={() => void zoomTo(1, { duration: 200 })}
-    >
-      {multiplier}×
-    </ControlButton>
-  );
-};
-
-const ReactFlowLockIcon: React.FC = () => (
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 25 32">
-    <path d="M21.333 10.667H19.81V7.619C19.81 3.429 16.38 0 12.19 0 8 0 4.571 3.429 4.571 7.619v3.048H3.048A3.056 3.056 0 000 13.714v15.238A3.056 3.056 0 003.048 32h18.285a3.056 3.056 0 003.048-3.048V13.714a3.056 3.056 0 00-3.048-3.047zM12.19 24.533a3.056 3.056 0 01-3.047-3.047 3.056 3.056 0 013.047-3.048 3.056 3.056 0 013.048 3.048 3.056 3.056 0 01-3.048 3.047zm4.724-13.866H7.467V7.619c0-2.59 2.133-4.724 4.723-4.724 2.591 0 4.724 2.133 4.724 4.724v3.048z" />
-  </svg>
-);
-
-const ReactFlowUnlockIcon: React.FC = () => (
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 25 32">
-    <path d="M21.333 10.667H19.81V7.619C19.81 3.429 16.38 0 12.19 0c-4.114 1.828-1.37 2.133.305 2.438 1.676.305 4.42 2.59 4.42 5.181v3.048H3.047A3.056 3.056 0 000 13.714v15.238A3.056 3.056 0 003.048 32h18.285a3.056 3.056 0 003.048-3.048V13.714a3.056 3.056 0 00-3.048-3.047zM12.19 24.533a3.056 3.056 0 01-3.047-3.047 3.056 3.056 0 013.047-3.048 3.056 3.056 0 013.048 3.048 3.056 3.056 0 01-3.048 3.047z" />
-  </svg>
-);
-
-/**
- * Mirrors React Flow's native interactivity toggle in a custom position.
- *
- * Driven by a single lifted `locked` state rather than mutating the React
- * Flow store directly: `nodesDraggable` / `elementsSelectable` are controlled
- * props on `<ReactFlow>`, so a direct store mutation would be re-applied (and
- * silently reverted) on the next render whenever the tool-derived prop value
- * changes. Gating both the props and this control from the same state keeps
- * the lock authoritative.
- */
-const CanvasInteractivityControl: React.FC<{
-  locked: boolean;
-  onToggle: () => void;
-}> = ({ locked, onToggle }) => {
-  const { t } = useTranslation();
-  const label = locked ? t('actions.unlock') : t('actions.lock');
-
-  return (
-    <ControlButton title={label} aria-label={label} onClick={onToggle}>
-      {locked ? <ReactFlowLockIcon /> : <ReactFlowUnlockIcon />}
-    </ControlButton>
-  );
-};
-
 type CanvasProps = {
   shortcutsDisabled?: boolean;
 };
-
-function CanvasFitControl() {
-  const instance = useReactFlow();
-  const label = useStore(
-    (state) => state.ariaLabelConfig['controls.fitView.ariaLabel'],
-  );
-  return (
-    <Button
-      variant="ghost"
-      iconOnly
-      title={label}
-      className="react-flow__controls-fitview !h-[26px] !w-[26px] !rounded-none !p-1"
-      onClick={() => {
-        void fitNodesOnCanvas(
-          instance,
-          instance.getNodes().map((node) => node.id),
-        );
-      }}
-    >
-      <Maximize />
-    </Button>
-  );
-}
 
 export const Canvas: React.FC<CanvasProps> = (props) => {
   const { nodes, edges } = useCanvasStore.getState();
@@ -553,12 +462,6 @@ const CanvasContent: React.FC<CanvasProps> = ({
     isPending: isInitialViewportPending,
   } = useInitialCanvasViewport();
 
-  // When locked, the user can neither drag, connect, nor select elements.
-  // Gating the controlled `<ReactFlow>` props from this single state (rather
-  // than mutating the React Flow store) keeps the lock from being reverted
-  // when a tool-derived prop value changes.
-  const [interactivityLocked, setInteractivityLocked] = useState(false);
-
   const isNotMouse = useIsNotMouse();
   const inputMode = useEffectiveInputMode();
   const lastPointer = useInputMode();
@@ -579,8 +482,7 @@ const CanvasContent: React.FC<CanvasProps> = ({
   );
   useCanvasPanReleaseGuard(wrapperRef, !isNotMouse && tool === 'pan');
 
-  const mouseMarqueeEnabled =
-    !interactivityLocked && !pendingNodeType && tool === 'select';
+  const mouseMarqueeEnabled = !pendingNodeType && tool === 'select';
 
   // Tap-vs-drag activation follows the pointer actually in use.
   const dragActivationDistance = isNotMouse
@@ -745,93 +647,14 @@ const CanvasContent: React.FC<CanvasProps> = ({
   const {
     pointerHandlers: lassoPointerHandlers,
     previewPath: lassoPreviewPath,
-    previewNodeIds,
-    previewEdgeIds,
     isActive: isLassoActive,
     shiftScreenPoints: shiftLassoScreenPoints,
     cancel: cancelLasso,
   } = useCanvasLasso({
     active: !pendingNodeType && tool === 'lasso',
+    scopeKey: canvasId,
     wrapperRef,
     rfInstanceRef,
-    edges,
-    // Stage 2 selection routing (D1=A), by node type:
-    //   - a sketch node is ALWAYS stroke-level — the lasso selects exactly
-    //     the strokes it captured. Capturing every stroke of a sketch just
-    //     means the whole thing is selected, but it stays a STROKE selection
-    //     (never a node selection); move a whole sketch as an object with
-    //     the Select tool instead.
-    //   - every other node type is selected whole (React Flow).
-    // The two can coexist in one lasso. A fresh drag calls this with empty
-    // args, clearing both.
-    onSelect: (nodeIds, flowPolygon) => {
-      const preview = useGesturePreviewStore.getState();
-      preview.clearSketchStrokeHighlight();
-      if (
-        nodeIds.length === 0 &&
-        flowPolygon.length === 0 &&
-        preview.inkSubmissionPreparing
-      ) {
-        return;
-      }
-      const strokeSelection =
-        flowPolygon.length >= 3 ? findSketchStrokesInPolygon(flowPolygon) : {};
-
-      // Lasso bbox in flow-space — used to drop "container" frames below.
-      let lassoBbox: {
-        x1: number;
-        y1: number;
-        x2: number;
-        y2: number;
-      } | null = null;
-      for (const p of flowPolygon) {
-        if (!lassoBbox) lassoBbox = { x1: p.x, y1: p.y, x2: p.x, y2: p.y };
-        else {
-          if (p.x < lassoBbox.x1) lassoBbox.x1 = p.x;
-          if (p.y < lassoBbox.y1) lassoBbox.y1 = p.y;
-          if (p.x > lassoBbox.x2) lassoBbox.x2 = p.x;
-          if (p.y > lassoBbox.y2) lassoBbox.y2 = p.y;
-        }
-      }
-
-      const sketchIdSet = new Set(
-        nodes.filter((n) => n.type === 'sketch').map((n) => n.id),
-      );
-      const nn = nodes as NestableNode[];
-      const nonSketchNodeIds = nodeIds.filter((id) => {
-        if (sketchIdSet.has(id)) return false;
-        // Lassoing INSIDE a frame selects its CONTENTS, not the frame
-        // itself: drop any frame whose bounds fully enclose the lasso (it
-        // is a container the loop was drawn within, not a target). A
-        // nested frame the loop actually encircles does NOT enclose the
-        // loop, so it stays selected.
-        const node = nodes.find((n) => n.id === id);
-        if (node?.type === 'frame' && lassoBbox) {
-          const abs = getAbsolutePosition(nn, id);
-          const size = getNodeSize(node);
-          if (
-            abs &&
-            abs.x <= lassoBbox.x1 &&
-            abs.y <= lassoBbox.y1 &&
-            abs.x + size.width >= lassoBbox.x2 &&
-            abs.y + size.height >= lassoBbox.y2
-          ) {
-            return false;
-          }
-        }
-        return true;
-      });
-
-      preview.setSketchStrokeSelection(strokeSelection);
-      // Retain the lasso loop for ANY non-empty selection (strokes and/or
-      // whole nodes) so the user can drag inside it to move the whole
-      // selection GoodNotes-style; drop it only when the lasso caught
-      // nothing.
-      const hasSelection =
-        Object.keys(strokeSelection).length > 0 || nonSketchNodeIds.length > 0;
-      preview.setSketchSelectionPolygon(hasSelection ? flowPolygon : null);
-      selectNodes(nonSketchNodeIds);
-    },
     inputMode,
   });
 
@@ -852,20 +675,6 @@ const CanvasContent: React.FC<CanvasProps> = ({
       useGesturePreviewStore.getState().clearSketchStrokeSelection();
     }
   }, [inkSubmissionPreparing, tool]);
-  // A sketch node is never whole-node selected by the lasso (it always
-  // yields stroke-level hits, R3), so it must not flash the whole-node
-  // preview box while the lasso passes over it — only its captured strokes
-  // highlight, and only on commit.
-  const lassoPreviewNodeIdSet = useMemo(() => {
-    const sketchIds = new Set(
-      nodes.filter((n) => n.type === 'sketch').map((n) => n.id),
-    );
-    return new Set(previewNodeIds.filter((id) => !sketchIds.has(id)));
-  }, [previewNodeIds, nodes]);
-  const lassoPreviewEdgeIdSet = useMemo(
-    () => new Set(previewEdgeIds),
-    [previewEdgeIds],
-  );
   const handleTouchTakeover = useCallback(() => {
     cancelLasso();
     window.dispatchEvent(new Event(CANCEL_SKETCH_GESTURE_EVENT));
@@ -902,11 +711,6 @@ const CanvasContent: React.FC<CanvasProps> = ({
     const previewById = new Map(previewNodes.map((node) => [node.id, node]));
     const result = nodes.map((node) => {
       const z = zByNode.get(node.id) ?? 0;
-      const wantsLassoClass = lassoPreviewNodeIdSet.has(node.id);
-      const baseClassName = node.className;
-      const nextClassName = wantsLassoClass
-        ? clsx(baseClassName, 'canvas-lasso-preview')
-        : baseClassName;
       // Transient slide-aside offset; absent for every node outside the
       // hovered structured frame, and for the dragged node itself.
       const previewedNode = previewById.get(node.id) ?? node;
@@ -924,7 +728,6 @@ const CanvasContent: React.FC<CanvasProps> = ({
       if (
         cached &&
         cached.zIndex === z &&
-        cached.className === nextClassName &&
         cached.draggable === touchDraggable &&
         cached.position === nextPosition &&
         cached.style === nextStyle &&
@@ -935,7 +738,6 @@ const CanvasContent: React.FC<CanvasProps> = ({
       }
 
       const needsWrap =
-        nextClassName !== baseClassName ||
         node.zIndex !== z ||
         node.draggable !== touchDraggable ||
         nextPosition !== node.position ||
@@ -944,7 +746,6 @@ const CanvasContent: React.FC<CanvasProps> = ({
       const wrapped = needsWrap
         ? {
             ...node,
-            className: nextClassName,
             zIndex: z,
             draggable: touchDraggable,
             position: nextPosition,
@@ -958,14 +759,7 @@ const CanvasContent: React.FC<CanvasProps> = ({
 
     zWrapCacheRef.current = nextCache;
     return result;
-  }, [
-    isNotMouse,
-    lassoPreviewNodeIdSet,
-    lastPointer,
-    nodes,
-    nodeGeometryPreviews,
-    zByNode,
-  ]);
+  }, [isNotMouse, lastPointer, nodes, nodeGeometryPreviews, zByNode]);
 
   // Override marker colors on selected edges so arrows match the selection
   // highlight color (--color-info). CSS cannot style SVG <marker> referenced
@@ -985,15 +779,12 @@ const CanvasContent: React.FC<CanvasProps> = ({
 
     const styleEdge = (e: (typeof edges)[number]): (typeof edges)[number] => {
       if (!infoColor) return e;
-      const isLassoPreviewSelected = lassoPreviewEdgeIdSet.has(e.id);
       const isNodeSelectionSelected = selectedEdgeIdSet.has(e.id);
       const shouldStaySelected =
-        !isBoxSelecting ||
+        (!isBoxSelecting && !isLassoActive) ||
         (selectedNodeIds.has(e.source) && selectedNodeIds.has(e.target));
       const isVisuallySelected =
-        isLassoPreviewSelected ||
-        isNodeSelectionSelected ||
-        (e.selected && shouldStaySelected);
+        isNodeSelectionSelected || (e.selected && shouldStaySelected);
 
       if (!isVisuallySelected) {
         if (!e.selected) return e;
@@ -1053,7 +844,7 @@ const CanvasContent: React.FC<CanvasProps> = ({
   }, [
     edges,
     isBoxSelecting,
-    lassoPreviewEdgeIdSet,
+    isLassoActive,
     selectedEdgeIdSet,
     selectedNodeIds,
     zByNode,
@@ -1173,7 +964,6 @@ const CanvasContent: React.FC<CanvasProps> = ({
             strokeMoveHandlersRef.current.onPointerCancel(e),
         }),
         (event, ctx) => {
-          if (ctx.interactivityLocked) return false;
           if (useToolStore.getState().pendingNodeType !== null) return false;
           if (toolRef.current !== 'lasso') return false;
           if (event.button !== 0 || !event.isPrimary) return false;
@@ -1209,7 +999,6 @@ const CanvasContent: React.FC<CanvasProps> = ({
             lassoHandlersRef.current.onPointerCancel(toReact(e)),
         }),
         (event, ctx) =>
-          !ctx.interactivityLocked &&
           useToolStore.getState().pendingNodeType === null &&
           toolRef.current === 'lasso' &&
           event.button === 0 &&
@@ -1626,13 +1415,10 @@ const CanvasContent: React.FC<CanvasProps> = ({
           }
           selectionMode={SelectionMode.Partial}
           onSelectionEnd={handleSelectionEnd}
-          nodesDraggable={
-            !interactivityLocked && !pendingNodeType && tool !== 'lasso'
-          }
+          nodesDraggable={!pendingNodeType && tool !== 'lasso'}
           nodeDragThreshold={dragActivationDistance}
           nodeClickDistance={dragActivationDistance}
-          nodesConnectable={!interactivityLocked}
-          elementsSelectable={!interactivityLocked && !pendingNodeType}
+          elementsSelectable={!pendingNodeType}
           panOnScroll={!isNotMouse}
           zoomOnScroll={true}
           // Touch/pen pinch is driven by the custom pointer router (via
@@ -1657,7 +1443,6 @@ const CanvasContent: React.FC<CanvasProps> = ({
             wrapperRef={wrapperRef}
             rfInstanceRef={rfInstanceRef}
             inputMode={inputMode}
-            interactivityLocked={interactivityLocked}
             explicitToolActive={tool === 'lasso' || Boolean(pendingNodeType)}
             mouseMarqueeEnabled={mouseMarqueeEnabled}
             canvasId={canvasId}
@@ -1687,7 +1472,8 @@ const CanvasContent: React.FC<CanvasProps> = ({
             createPortal(
               <div
                 data-canvas-main-toolbar
-                className="react-flow__panel nodrag nopan pointer-events-auto absolute !bottom-6 !left-1/2 !m-0 max-w-[calc(100%-24px)] -translate-x-1/2"
+                className="react-flow__panel nodrag nopan pointer-events-auto absolute !bottom-6 !m-0 max-w-[calc(100%-24px)] -translate-x-1/2"
+                style={mainToolbarPosition}
                 onPointerDown={(event) => event.stopPropagation()}
                 onDoubleClick={(event) => event.stopPropagation()}
                 onContextMenu={(event) => event.stopPropagation()}
@@ -1700,7 +1486,11 @@ const CanvasContent: React.FC<CanvasProps> = ({
               toolbarHost,
             )
           ) : (
-            <Panel position="bottom-center" className="mb-6">
+            <Panel
+              position="bottom-center"
+              className="mb-6"
+              style={mainToolbarPosition}
+            >
               <NodeToolbar activeTool={tool} onToolChange={setTool} />
             </Panel>
           )}
@@ -1710,7 +1500,7 @@ const CanvasContent: React.FC<CanvasProps> = ({
           {!isBoxSelecting && <StrokeSelectionRegion />}
           {!isBoxSelecting && <StrokeSelectionToolbar />}
           {!isBoxSelecting && <EdgeStyleToolbar />}
-          <MoveSelectionModal />
+          <MoveSelectionPopover />
           <ConnectedNodePicker
             anchor={connectPicker?.anchor ?? null}
             tether={
@@ -1727,18 +1517,7 @@ const CanvasContent: React.FC<CanvasProps> = ({
           />
           <CanvasGrid />
 
-          <Controls
-            position="bottom-left"
-            showInteractive={false}
-            showFitView={false}
-          >
-            <CanvasFitControl />
-            <CanvasZoomLevel />
-            <CanvasInteractivityControl
-              locked={interactivityLocked}
-              onToggle={() => setInteractivityLocked((prev) => !prev)}
-            />
-          </Controls>
+          <CanvasZoomMenu />
           {minimapEnabled && (
             <MiniMap
               pannable

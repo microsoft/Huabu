@@ -163,6 +163,18 @@ export const fitNodesOnCanvas = (
   return rfInstance.fitBounds(bounds, { padding });
 };
 
+export const fitCanvasContent = (
+  rfInstance: ReactFlowInstance,
+  scope: 'all' | 'selection',
+): Promise<boolean> =>
+  fitNodesOnCanvas(
+    rfInstance,
+    rfInstance
+      .getNodes()
+      .filter((node) => !node.hidden && (scope === 'all' || node.selected))
+      .map((node) => node.id),
+  );
+
 const pendingReveals = new WeakMap<HTMLElement, object>();
 
 /** Reveal after layout commits, preserving zoom and only the latest request. */

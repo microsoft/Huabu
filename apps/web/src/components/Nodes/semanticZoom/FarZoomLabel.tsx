@@ -4,40 +4,12 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 
 import { FarZoomText } from './FarZoomText';
+import { subscribeToFontChanges } from './fontObservation';
 import {
   FAR_ZOOM_DESIGN,
   farDescriptionLines,
   type FarZoomDesign,
 } from '../design/farZoomDesign';
-
-const fontSubscribers = new Set<() => void>();
-let stopFontObservation: (() => void) | undefined;
-
-/** Share one font listener across labels, releasing it when none need measurement. */
-function subscribeToFontChanges(measure: () => void) {
-  const fonts = document.fonts;
-  if (!fonts) return () => {};
-  fontSubscribers.add(measure);
-  if (!stopFontObservation) {
-    let active = true;
-    const refresh = () => {
-      if (active) fontSubscribers.forEach((subscriber) => subscriber());
-    };
-    fonts.addEventListener('loadingdone', refresh);
-    void fonts.ready.then(refresh);
-    stopFontObservation = () => {
-      active = false;
-      fonts.removeEventListener('loadingdone', refresh);
-    };
-  }
-  return () => {
-    fontSubscribers.delete(measure);
-    if (fontSubscribers.size === 0) {
-      stopFontObservation?.();
-      stopFontObservation = undefined;
-    }
-  };
-}
 
 /** Lay out text in screen pixels; only the outer transform cancels canvas zoom. */
 export function FarZoomLabel({
@@ -51,6 +23,7 @@ export function FarZoomLabel({
   visible,
   design = FAR_ZOOM_DESIGN,
   verticalInset = design.labelInset,
+  horizontalInset = design.labelInsetInline ?? design.labelInset,
 }: {
   title: string;
   description?: string;
@@ -61,6 +34,7 @@ export function FarZoomLabel({
   zoom: number;
   visible: boolean;
   verticalInset?: number;
+  horizontalInset?: number;
   design?: FarZoomDesign;
 }) {
   const probe = useRef<HTMLDivElement>(null);
@@ -111,7 +85,7 @@ export function FarZoomLabel({
       aria-hidden={!visible}
       className="pointer-events-none absolute overflow-hidden"
       style={{
-        left: (design.labelInsetInline ?? design.labelInset) / zoom,
+        left: horizontalInset / zoom,
         top: verticalInset / zoom,
         width,
         maxHeight: height,

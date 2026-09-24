@@ -26,10 +26,10 @@
   "moveSelection": {
     "action": "Move to another Space",
     "title": "Move to another Space",
-    "description": "Move {{count}} selected node(s), including Frame descendants.",
+    "description": "{{count}} node(s) selected",
+    "frameNotice": "Includes Frame descendants.",
     "selectDestination": "Select destination Space",
     "createNewDestination": "Create new Space…",
-    "newDestinationSection": "New destination",
     "newSpaceName": "New Space name",
     "untitledSpace": "Untitled Space",
     "confirm": "Move",
@@ -58,12 +58,19 @@
     "loadingTargets": "Loading destination Spaces…",
     "targetsUnavailable": "Destination Spaces could not be loaded.",
     "noTargets": "No existing destination Spaces",
-    "boundaryNotice": "Connections to nodes outside the selection will be removed.",
-    "createSourcePreview": "Leave a preview linking to the destination in the original location."
+    "boundaryNotice": "External connections will be removed.",
+    "createSourcePreview": "Leave a shortcut in the original location."
   },
   "canvasControls": {
     "resetZoom": "Reset zoom to 100%",
-    "zoomAria": "Canvas zoom {{percentage}}%. Reset to 100%"
+    "zoomAria": "Canvas zoom {{percentage}}%. Open zoom menu",
+    "zoomMenu": "Canvas zoom",
+    "zoomLevel": "Zoom level",
+    "zoomIn": "Zoom in",
+    "zoomOut": "Zoom out",
+    "fitAll": "Fit all content",
+    "fitSelection": "Fit selection",
+    "invalidZoom": "Enter a percentage between {{min}}% and {{max}}%."
   },
   "navigation": {
     "backHome": "Back to home",
@@ -268,7 +275,7 @@
     "hideMiniMap": "Hide MiniMap",
     "miniMapDescription": "Display an overview of the Space in the bottom-right corner.",
     "worldCanvas": "World Canvas",
-    "worldCanvasDescription": "Use World as the workspace landing page and show Space previews.",
+    "worldCanvasDescription": "Use World as the workspace landing page and show Space shortcuts.",
     "showWorldCanvas": "Show World Canvas",
     "hideWorldCanvas": "Hide World Canvas",
     "inputMode": "Input mode",
@@ -423,24 +430,29 @@
     "openWorld": "Open World"
   },
   "spacePreview": {
-    "add": "Add Space Preview",
+    "add": "Add Space Shortcut",
     "chooseTarget": "Choose a Space",
-    "chooseTargetDescription": "Select the Space to show in this view-only preview.",
+    "chooseTargetDescription": "Select the Space this shortcut opens.",
+    "shortcut": "Space Shortcut",
+    "loadingTarget": "Loading target Space…",
+    "missingTarget": "This Space no longer exists in the active workspace.",
+    "widthSettings": "Shortcut width",
+    "autoWidth": "Automatic",
+    "fixedWidth": "Custom",
+    "applyWidth": "Apply width",
+    "widthError": "Enter a finite integer of at least {{min}}.",
+    "widthHint": "Automatic: {{min}}–{{autoMax}}. Custom: at least {{min}} canvas units, with no upper limit. Height fits up to two title lines and a summary.",
     "loadingTargets": "Loading Spaces…",
     "targetsUnavailable": "Spaces could not be loaded.",
     "noTargets": "No other Spaces are available.",
     "openSpace": "Open Space",
-    "loading": "Loading Space preview…",
-    "unavailable": "Preview unavailable",
-    "unavailableDescription": "The target Space could not be loaded.",
     "retry": "Retry",
-    "stale": "Stale",
-    "partial": "Partial",
     "untitledSpace": "Untitled Space",
-    "viewport": "View-only preview of {{title}}",
-    "zoomIn": "Zoom in",
-    "zoomOut": "Zoom out",
-    "resetView": "Reset preview view"
+    "nodeCount_zero": "No nodes",
+    "nodeCount_one": "{{count}} node",
+    "nodeCount_other": "{{count}} nodes",
+    "updatedNow": "Updated now",
+    "updatedRelative": "Updated {{time}}"
   },
   "preview": {
     "tabStrip": "Open previews",
@@ -478,7 +490,7 @@
     "edgeLabel": "Edge label",
     "createConnectedNode": "Create connected node",
     "newNote": "New note",
-    "newQuestion": "New question",
+    "newQuestion": "New Agent Node",
     "removeNode": "Remove node",
     "removeFromCanvas": "Remove from Space",
     "aiSummary": "AI Summary",
@@ -661,9 +673,9 @@
       "audio": "Audio",
       "web": "Website",
       "frame": "Frame",
-      "spacePreview": "Space Preview",
+      "spacePreview": "Space Shortcut",
       "sketch": "Sketch",
-      "question": "Question"
+      "question": "Agent Node"
     }
   },
   "chat": {
@@ -680,8 +692,8 @@
     "closePanel": "Close chat panel",
     "title": "Chat",
     "chatWith": "Chat with {{name}}",
-    "newQuestion": "New question",
-    "question": "Question",
+    "newQuestion": "New Agent Node",
+    "question": "Agent Node",
     "backToChat": "Back to chat",
     "failedSwitchMode": "Failed to switch mode",
     "failedSwitchModeWithMessage": "Failed to switch mode: {{message}}",
@@ -925,7 +937,8 @@
       "text": "Text",
       "sketch": "Sketch",
       "audio": "Audio",
-      "agent": "Agent"
+      "agent": "Agent",
+      "addAgent": "Add Agent Node"
     },
     "resources": {
       "addContent": "Add Content",
@@ -961,10 +974,10 @@
     "deleteSelected": "Delete selected",
     "sendInkRequest": "Send ink request",
     "sendingInkRequest": "Sending ink request",
-    "multipleQuestionTargets": "Select only one question to continue",
-    "invalidQuestionTarget": "This question cannot receive an ink request",
+    "multipleQuestionTargets": "Select only one Agent Node to continue",
+    "invalidQuestionTarget": "This Agent Node cannot receive an ink request",
     "newInkAgentTarget": "New · Huabu",
-    "newInkAgentTargetDescription": "Create a new question with Huabu",
+    "newInkAgentTargetDescription": "Create a new Agent Node with Huabu",
     "inkAgentTarget": "Target agent: {{name}}",
     "multipleInkAgentTargets": "Multiple agents",
     "invalidInkAgentTarget": "Agent unavailable",
