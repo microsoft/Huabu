@@ -423,7 +423,11 @@ type RFState = {
   isSaving: boolean;
   pendingSave: boolean;
   moveSelectionDialogOpen: boolean;
-  setMoveSelectionDialogOpen: (open: boolean) => void;
+  moveSelectionAnchor: HTMLElement | null;
+  setMoveSelectionDialogOpen: (
+    open: boolean,
+    anchor?: HTMLElement | null,
+  ) => void;
 
   /**
    * True when the server has rejected a save with `CANVAS_VERSION_CONFLICT`
@@ -1442,8 +1446,12 @@ const useCanvasStore = create<RFState>()(
     isSaving: false,
     pendingSave: false,
     moveSelectionDialogOpen: false,
-    setMoveSelectionDialogOpen: (open) =>
-      set({ moveSelectionDialogOpen: open }),
+    moveSelectionAnchor: null,
+    setMoveSelectionDialogOpen: (open, anchor) =>
+      set({
+        moveSelectionDialogOpen: open,
+        moveSelectionAnchor: open ? (anchor ?? null) : null,
+      }),
     versionConflict: false,
     versionConflictServerVersion: null,
 

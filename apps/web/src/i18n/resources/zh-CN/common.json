@@ -26,10 +26,10 @@
   "moveSelection": {
     "action": "移至其他 Space",
     "title": "移至其他 Space",
-    "description": "移动选中的 {{count}} 个节点，包括 Frame 中的后代节点。",
+    "description": "已选 {{count}} 个节点",
+    "frameNotice": "包含 Frame 中的后代节点。",
     "selectDestination": "选择目标 Space",
     "createNewDestination": "新建 Space…",
-    "newDestinationSection": "新目标",
     "newSpaceName": "新 Space 名称",
     "untitledSpace": "未命名 Space",
     "confirm": "移动",
@@ -58,7 +58,7 @@
     "loadingTargets": "正在加载目标 Space…",
     "targetsUnavailable": "无法加载目标 Space。",
     "noTargets": "没有现有的目标 Space",
-    "boundaryNotice": "与所选内容之外节点的连接将被移除。",
+    "boundaryNotice": "与外部节点的连线将被移除。",
     "createSourcePreview": "在原位置保留快捷入口。"
   },
   "canvasControls": {

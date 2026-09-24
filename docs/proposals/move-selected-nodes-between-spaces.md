@@ -382,7 +382,7 @@ Run focused checks first:
 pnpm --filter @huabu/shared test -- src/types/api/space-move.test.ts
 pnpm --filter @agenetes/agenetes test -- src/instance.rehome.test.ts src/thread-store.test.ts src/event-log.test.ts src/turn-store.test.ts
 pnpm --filter @huabu/server test -- src/modules/canvas/space-move.service.test.ts src/modules/canvas/space-move.route.test.ts
-pnpm --filter @huabu/web test -- src/components/Panels/Canvas/MoveSelectionModal.test.tsx
+pnpm --filter @huabu/web exec vitest run src/components/Panels/Canvas/MoveSelectionPopover.test.tsx
 pnpm --filter @huabu/shared typecheck
 pnpm --filter @huabu/server typecheck
 pnpm --filter @huabu/web typecheck

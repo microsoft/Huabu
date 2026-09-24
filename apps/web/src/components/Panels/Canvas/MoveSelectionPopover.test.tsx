@@ -12,7 +12,7 @@ import zhCN from '@/i18n/resources/zh-CN/common.json';
 import useCanvasStore from '@/store/canvasStore';
 import { useWorkspaceStore } from '@/store/workspaceStore';
 
-import { MoveSelectionModal } from './MoveSelectionModal';
+import { MoveSelectionPopover } from './MoveSelectionPopover';
 
 import type * as ToastModule from '@/components/Common/Toast';
 import type { MoveSelectionErrorCode } from '@huabu/shared';
@@ -115,6 +115,7 @@ afterEach(() => {
     canvasId: '',
     nodes: [],
     moveSelectionDialogOpen: false,
+    moveSelectionAnchor: null,
     pendingSave: false,
   });
   listCanvases.mockReset();
@@ -148,7 +149,7 @@ async function submitFailure(error: unknown, duringSave = false) {
   await act(async () =>
     root?.render(
       <>
-        <MoveSelectionModal />
+        <MoveSelectionPopover />
         <ToastContainer />
       </>,
     ),
@@ -180,7 +181,251 @@ function expectSafeFailure(key: string, rawCode?: string) {
   }
 }
 
-describe('MoveSelectionModal', () => {
+describe('MoveSelectionPopover', () => {
+  async function openPanel() {
+    listCanvases.mockResolvedValue({
+      canvases: [{ canvasId: 'destination', title: 'Destination' }],
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    const trigger = document.createElement('button');
+    container.appendChild(trigger);
+    trigger.focus();
+    useCanvasStore.setState({
+      canvasId: 'source',
+      nodes: [
+        {
+          id: 'node-selected',
+          type: 'note',
+          position: { x: 0, y: 0 },
+          data: { label: 'Selected' },
+          selected: true,
+        },
+      ],
+    });
+    useCanvasStore.getState().setMoveSelectionDialogOpen(true, trigger);
+    const host = document.createElement('div');
+    container.appendChild(host);
+    root = createRoot(host);
+    await act(async () => root?.render(<MoveSelectionPopover />));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    return trigger;
+  }
+
+  function destinationSelector() {
+    const selector = document.querySelector<HTMLButtonElement>(
+      'button[aria-label="moveSelection.selectDestination"]',
+    );
+    if (!selector) throw new Error('Missing destination selector');
+    return selector;
+  }
+
+  function escape(target: EventTarget) {
+    target.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+    );
+  }
+
+  it('opens a non-modal anchored panel, focuses the selector and restores focus on Escape', async () => {
+    const trigger = await openPanel();
+    expect(useCanvasStore.getState().moveSelectionAnchor).toBe(trigger);
+    expect(document.querySelector('[aria-modal="true"]')).toBeNull();
+    expect(document.body.style.overflow).not.toBe('hidden');
+    expect(document.activeElement).toBe(destinationSelector());
+    expect(document.body.textContent).not.toContain(
+      'moveSelection.frameNotice',
+    );
+    act(() => escape(destinationSelector()));
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(useCanvasStore.getState().moveSelectionAnchor).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it('dismisses the nested selector before the panel and preserves focus', async () => {
+    const trigger = await openPanel();
+    const selector = destinationSelector();
+    await act(async () => selector.click());
+    const option = document.querySelector<HTMLButtonElement>('[role="option"]');
+    expect(option).not.toBeNull();
+    act(() => option?.focus());
+    act(() => option && escape(option));
+    expect(document.querySelector('[role="option"]')).toBeNull();
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(document.activeElement).toBe(selector);
+    act(() => escape(selector));
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it('keeps nested option presses inside the panel and focuses the new name field', async () => {
+    await openPanel();
+    await act(async () => destinationSelector().click());
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    const option = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('[role="option"]'),
+    ).find((button) =>
+      button.textContent?.includes('moveSelection.createNewDestination'),
+    );
+    await act(async () => {
+      option?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+      option?.click();
+    });
+    const input = document.querySelector<HTMLInputElement>(
+      '[name="new-space-title"]',
+    );
+    expect(input).not.toBeNull();
+    expect(document.activeElement).toBe(input);
+    expect(destinationSelector().classList.contains('h-8')).toBe(true);
+    expect(input?.classList.contains('h-8')).toBe(true);
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+  });
+
+  it('dismisses on outside press and resets the shortcut choice on reopening', async () => {
+    const trigger = await openPanel();
+    const checkbox =
+      document.querySelector<HTMLInputElement>('[type="checkbox"]');
+    act(() => checkbox?.click());
+    expect(checkbox?.checked).toBe(false);
+    act(() =>
+      document.body.dispatchEvent(
+        new PointerEvent('pointerdown', { bubbles: true }),
+      ),
+    );
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    await act(async () =>
+      useCanvasStore.getState().setMoveSelectionDialogOpen(true, trigger),
+    );
+    expect(
+      document.querySelector<HTMLInputElement>('[type="checkbox"]')?.checked,
+    ).toBe(true);
+  });
+
+  it('locks submission and keeps the captured selection while the move is pending', async () => {
+    await openPanel();
+    let finish: ((value: typeof moveResult) => void) | undefined;
+    moveCanvasSelection.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    await act(async () =>
+      document.querySelector<HTMLButtonElement>('[type="submit"]')?.click(),
+    );
+    act(() => {
+      const panel = document.querySelector('[role="dialog"]');
+      if (panel) escape(panel);
+      document.body.dispatchEvent(
+        new PointerEvent('pointerdown', { bubbles: true }),
+      );
+      useCanvasStore.setState({ nodes: [] });
+    });
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(
+      document.querySelector<HTMLButtonElement>('[type="submit"]')?.disabled,
+    ).toBe(true);
+    expect(moveCanvasSelection).toHaveBeenCalledExactlyOnceWith(
+      'source',
+      expect.objectContaining({
+        selectedNodeIds: ['node-selected'],
+        createSourcePreview: true,
+      }),
+    );
+    await act(async () => finish?.(moveResult));
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('does not send a move to a changed source after draining saves', async () => {
+    await openPanel();
+    drainPendingSaves.mockImplementation(async () => {
+      useCanvasStore.setState({ canvasId: 'other-source' });
+    });
+
+    await act(async () =>
+      document.querySelector<HTMLButtonElement>('[type="submit"]')?.click(),
+    );
+    expect(moveCanvasSelection).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledWith('moveSelection.errors.sourceStale', {
+      tone: 'danger',
+      duration: 0,
+    });
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('does not close a new panel when an old source request completes', async () => {
+    const trigger = await openPanel();
+    let finish: ((value: typeof moveResult) => void) | undefined;
+    moveCanvasSelection.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    await act(async () =>
+      document.querySelector<HTMLButtonElement>('[type="submit"]')?.click(),
+    );
+    await act(async () =>
+      useCanvasStore.setState({ canvasId: 'another-source' }),
+    );
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    await act(async () =>
+      useCanvasStore.getState().setMoveSelectionDialogOpen(true, trigger),
+    );
+    await act(async () => finish?.(moveResult));
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+  });
+
+  it.each(['clear', 'replace', 'extend'])(
+    'closes when the selected nodes change: %s',
+    async (change) => {
+      await openPanel();
+      act(() =>
+        useCanvasStore.setState((state) => ({
+          nodes:
+            change === 'clear'
+              ? state.nodes.map((node) => ({ ...node, selected: false }))
+              : change === 'replace'
+                ? state.nodes.map((node) => ({ ...node, id: 'different-node' }))
+                : [
+                    ...state.nodes,
+                    {
+                      id: 'additional-node',
+                      type: 'note',
+                      selected: true,
+                      position: { x: 100, y: 0 },
+                      data: {},
+                    },
+                  ],
+        })),
+      );
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
+      expect(useCanvasStore.getState().moveSelectionAnchor).toBeNull();
+      expect(moveCanvasSelection).not.toHaveBeenCalled();
+    },
+  );
+
+  it('preserves the form when selected node geometry or data changes', async () => {
+    await openPanel();
+    const checkbox =
+      document.querySelector<HTMLInputElement>('[type="checkbox"]');
+    act(() => checkbox?.click());
+    act(() =>
+      useCanvasStore.setState((state) => ({
+        nodes: state.nodes.map((node) => ({
+          ...node,
+          position: { x: 100, y: 100 },
+          data: { ...node.data, label: 'Updated' },
+        })),
+      })),
+    );
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(document.querySelector('[type="checkbox"]')).toBe(checkbox);
+    expect(checkbox?.checked).toBe(false);
+  });
+
   it.each(Object.entries(knownErrors))(
     'localizes %s without exposing error messages or details',
     async (code, suffix) => {
@@ -287,7 +532,7 @@ describe('MoveSelectionModal', () => {
     root = createRoot(container);
 
     expect(() => {
-      act(() => root?.render(<MoveSelectionModal />));
+      act(() => root?.render(<MoveSelectionPopover />));
     }).not.toThrow();
 
     act(() => useCanvasStore.setState({ pendingSave: true }));
@@ -315,7 +560,7 @@ describe('MoveSelectionModal', () => {
     document.body.appendChild(container);
     root = createRoot(container);
 
-    await act(async () => root?.render(<MoveSelectionModal />));
+    await act(async () => root?.render(<MoveSelectionPopover />));
     const destinationSelectors = document.querySelectorAll<HTMLButtonElement>(
       'button[aria-label="moveSelection.selectDestination"]',
     );
@@ -329,15 +574,28 @@ describe('MoveSelectionModal', () => {
       'Destination',
       'moveSelection.createNewDestination',
     ]);
-    expect(document.body.textContent).toContain(
+    expect(document.body.textContent).not.toContain(
       'moveSelection.newDestinationSection',
+    );
+    const separator = document.querySelector('[role="separator"]');
+    expect(separator).not.toBeNull();
+    expect(separator?.previousElementSibling?.textContent).toBe('Destination');
+    expect(separator?.nextElementSibling?.textContent).toBe(
+      'moveSelection.createNewDestination',
     );
   });
 
   it.each([false, true])(
     'publishes the created destination only in its own workspace (switched=%s)',
     async (switchWorkspace) => {
-      listCanvases.mockResolvedValue({ canvases: [] });
+      listCanvases.mockResolvedValueOnce({ canvases: [] }).mockResolvedValue({
+        canvases: [
+          {
+            canvasId: moveResult.destination.canvasId,
+            title: moveResult.destination.title,
+          },
+        ],
+      });
       moveCanvasSelection.mockImplementation(async () => {
         if (switchWorkspace)
           useWorkspaceStore.setState({ workspaceId: 'workspace-other' });
@@ -371,7 +629,7 @@ describe('MoveSelectionModal', () => {
       document.body.appendChild(container);
       root = createRoot(container);
 
-      await act(async () => root?.render(<MoveSelectionModal />));
+      await act(async () => root?.render(<MoveSelectionPopover />));
       const destinationSelect = document.querySelector<HTMLButtonElement>(
         'button[aria-label="moveSelection.selectDestination"]',
       );
@@ -441,7 +699,7 @@ describe('MoveSelectionModal', () => {
     document.body.appendChild(container);
     root = createRoot(container);
 
-    await act(async () => root?.render(<MoveSelectionModal />));
+    await act(async () => root?.render(<MoveSelectionPopover />));
     const destinationSelect = document.querySelector<HTMLButtonElement>(
       'button[aria-label="moveSelection.selectDestination"]',
     );
@@ -485,7 +743,7 @@ describe('MoveSelectionModal', () => {
     document.body.appendChild(container);
     root = createRoot(container);
 
-    await act(async () => root?.render(<MoveSelectionModal />));
+    await act(async () => root?.render(<MoveSelectionPopover />));
     const checkbox = document.querySelector<HTMLInputElement>(
       'input[type="checkbox"]',
     );

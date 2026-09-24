@@ -108,7 +108,7 @@ import {
 import { EdgeStyleToolbar } from './FloatingToolbars/EdgeStyleToolbar.tsx';
 import { MultiSelectToolbar } from './FloatingToolbars/MultiSelectToolbar.tsx';
 import { StrokeSelectionToolbar } from './FloatingToolbars/StrokeSelectionToolbar.tsx';
-import { MoveSelectionModal } from './MoveSelectionModal.tsx';
+import { MoveSelectionPopover } from './MoveSelectionPopover.tsx';
 import { MultiSelectResizer } from './MultiSelectResizer.tsx';
 import { SelectionOutlines } from './SelectionOutlines.tsx';
 import { selectionZOrder, withoutNodeStyleZIndex } from './selectionZOrder';
@@ -1500,7 +1500,7 @@ const CanvasContent: React.FC<CanvasProps> = ({
           {!isBoxSelecting && <StrokeSelectionRegion />}
           {!isBoxSelecting && <StrokeSelectionToolbar />}
           {!isBoxSelecting && <EdgeStyleToolbar />}
-          <MoveSelectionModal />
+          <MoveSelectionPopover />
           <ConnectedNodePicker
             anchor={connectPicker?.anchor ?? null}
             tether={

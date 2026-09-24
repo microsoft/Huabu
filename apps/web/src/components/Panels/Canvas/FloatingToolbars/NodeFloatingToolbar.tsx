@@ -233,6 +233,8 @@ export const NodeFloatingToolbar = memo(
     const setMoveSelectionDialogOpen = useCanvasStore(
       (s) => s.setMoveSelectionDialogOpen,
     );
+    const moveSelectionOpen = useCanvasStore((s) => s.moveSelectionDialogOpen);
+    const moreButtonRef = useRef<HTMLButtonElement>(null);
     const setNodeGeometry = useCanvasStore((s) => s.setNodeGeometry);
     const setNoteHeightMode = useCanvasStore((s) => s.setNoteHeightMode);
     const isOpenInPreview = usePreviewWorkspaceStore((s) =>
@@ -246,6 +248,7 @@ export const NodeFloatingToolbar = memo(
     // down for the duration of the hold; it returns the moment the key is
     // released (or once the multi-selection lands, at which point the
     // single-node toolbar is replaced by the multi-select one anyway).
+    // Keep the Move panel's trigger mounted while that Canvas-level panel is open.
     const multiSelectModifierHeld = useCanvasMultiSelectModifierHeld();
     const isTextFlowNode = isAlwaysAutoHeightNodeType(type);
     const accentPickerOptions = useMemo(
@@ -384,7 +387,7 @@ export const NodeFloatingToolbar = memo(
     return (
       <CanvasFloatingPopover
         anchor={anchor}
-        open={dragActive || !multiSelectModifierHeld}
+        open={dragActive || moveSelectionOpen || !multiSelectModifierHeld}
         offset={nodeToolbarOffset(isNotMouse)}
         side="top"
         className={`${FLOATING_TOOLBAR_CLASS} node-floating-toolbar`}
@@ -575,7 +578,12 @@ export const NodeFloatingToolbar = memo(
           className="node-toolbar-overflow"
           align="bottom-left"
           trigger={
-            <Button variant="ghost" iconOnly title={t('toolbar.more')}>
+            <Button
+              ref={moreButtonRef}
+              variant="ghost"
+              iconOnly
+              title={t('toolbar.more')}
+            >
               <Ellipsis />
             </Button>
           }
@@ -615,7 +623,9 @@ export const NodeFloatingToolbar = memo(
             {type !== 'spacePreview' && (
               <DropdownMenuItem
                 icon={<SquareArrowRightEnter />}
-                onClick={() => setMoveSelectionDialogOpen(true)}
+                onClick={() =>
+                  setMoveSelectionDialogOpen(true, moreButtonRef.current)
+                }
               >
                 {t('moveSelection.action')}
               </DropdownMenuItem>

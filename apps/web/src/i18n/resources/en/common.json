@@ -26,10 +26,10 @@
   "moveSelection": {
     "action": "Move to another Space",
     "title": "Move to another Space",
-    "description": "Move {{count}} selected node(s), including Frame descendants.",
+    "description": "{{count}} node(s) selected",
+    "frameNotice": "Includes Frame descendants.",
     "selectDestination": "Select destination Space",
     "createNewDestination": "Create new Space…",
-    "newDestinationSection": "New destination",
     "newSpaceName": "New Space name",
     "untitledSpace": "Untitled Space",
     "confirm": "Move",
@@ -58,7 +58,7 @@
     "loadingTargets": "Loading destination Spaces…",
     "targetsUnavailable": "Destination Spaces could not be loaded.",
     "noTargets": "No existing destination Spaces",
-    "boundaryNotice": "Connections to nodes outside the selection will be removed.",
+    "boundaryNotice": "External connections will be removed.",
     "createSourcePreview": "Leave a shortcut in the original location."
   },
   "canvasControls": {
@@ -487,7 +487,7 @@
     "frameLayoutGrid": "Grid",
     "columns": "Columns",
     "rows": "Rows",
-    "gridRowsMin": "Rows (minimum — more are added when needed)",
+    "gridRowsMin": "Rows (minimum \u2014 more are added when needed)",
     "columnsRange": "Columns (1–{{max}})",
     "rowsRange": "Rows (1–{{max}})",
     "unframe": "Unframe",
