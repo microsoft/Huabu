@@ -159,10 +159,10 @@ async function planWorldPreviewReconciliation(): Promise<WorldPreviewReconciliat
         node.type === 'spacePreview' && node.data?.widthMode === 'auto'
           ? PREVIEW_WIDTH
           : dimension(node.style?.width, 200),
-      height: dimension(
-        node.style?.height,
-        node.type === 'spacePreview' ? PREVIEW_HEIGHT : 100,
-      ),
+      height:
+        node.type === 'spacePreview'
+          ? PREVIEW_HEIGHT
+          : dimension(node.style?.height, 100),
     };
   });
 
