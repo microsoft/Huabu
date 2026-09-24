@@ -39,6 +39,7 @@ export const routes = {
 
   // ── Integrations (third-party API keys) ──────────────────────────
   integrationsConfig: '/integrations/config',
+  inkOcrConfig: '/integrations/ink-ocr/config',
 
   // ── Canvas ────────────────────────────────────────────────────────
   canvasList: '/canvas',

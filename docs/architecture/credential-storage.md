@@ -1,6 +1,6 @@
 # Credential Storage
 
-> Credential persistence for Electron and standalone server deployments. Last updated: 2026-07-27
+> Credential persistence for Electron and standalone server deployments. Last updated: 2026-09-22
 
 ## Runtime backends
 
@@ -31,6 +31,18 @@ Remote Server Basic Auth is separate from Huabu's `SecretStore`. Electron accept
 
 Settings API updates for optional capability credentials use an explicit three-state patch contract: omitting a key preserves the persisted value, a non-empty string sets or replaces it, and `null` removes the value stored by Huabu. Removing a persisted key preserves non-secret provider configuration and does not alter deployment-owned environment variables; an environment fallback may therefore keep the capability available at runtime.
 
+### Azure AI Vision handwriting OCR
+
+Settings > General exposes optional handwriting recognition as a compact Azure AI Vision row, matching the key icon and Set API Key / Update Key interaction used by other optional capabilities. One click opens visibly labeled Endpoint and API Key inputs in spaced, full-width field groups below the title and description, followed by Save and Cancel, without configuration-source paragraphs or instructional text. The row identifies Azure AI Vision and briefly discloses selected-stroke processing; the endpoint and key must belong to the same Azure resource. Errors and read-only restrictions remain explicit. There is no provider selector, connectivity probe, or generic OCR compatibility claim.
+
+Owner-only `GET` and `PUT /api/integrations/ink-ocr/config` use the shared OCR configuration schemas. Endpoint and API key overrides are stored together as one versioned JSON record under `integration:azure-vision:config` in the existing `SecretStore`. Serialized read-modify-write updates replace that single encrypted record, so recognition observes a complete old or new configuration rather than a partially written pair. This uses the existing standalone encrypted-file and Electron safeStorage backends; it does not depend on multi-secret desktop batching or a rollback across two files.
+
+Each field independently prefers its UI-saved override over `VISION_KEY` / `VISION_ENDPOINT`. Omission preserves an override, and `null` removes it to restore the corresponding environment fallback. Before the first successful record write, the legacy `<dataDir>/ink-ocr-config.json` endpoint and `integration:azure-vision:api-key` secret remain readable. The first successful update captures both overrides in the new record. Once that record exists, legacy values are never consulted, including when either override is explicitly null; legacy files and keys are left untouched rather than making cleanup a second required write. A malformed canonical record fails closed instead of restoring legacy credentials. Reads return only the validated effective endpoint, per-field source (`stored`, `environment`, or `none`), `hasStoredKey`, and `configured`; this last flag describes local configuration completeness, not tested provider connectivity. Invalid environment endpoints are not reflected back into the UI. Damaged stored configuration produces an explicit settings error and disables optional OCR with a redacted warning.
+
+Endpoint validation permits only HTTPS resource-root URLs at a single resource label under `cognitiveservices.azure.com` or a single regional label under `api.cognitive.microsoft.com`, with the default HTTPS port and no embedded credentials, query, or fragment. These are [Azure public-cloud endpoint forms](https://learn.microsoft.com/en-us/azure/ai-services/cognitive-services-custom-subdomains). Custom gateways, IP literals, unrelated hosts, sovereign-cloud endpoints, and API-path URLs are rejected both at settings validation and before recognition. A permitted Azure resource hostname may resolve through private networking; this policy restricts the host name, not Azure private-link DNS resolution.
+
+The UI saves changed fields together: an unchanged endpoint and a blank key are omitted, so endpoint-only edits never erase a saved credential. Saved keys are never prefilled; removing a stored key is an explicit separate action, not a side effect of saving a blank password field. Read-only secret stores reject all configuration updates, including endpoint-only changes, with `credential_store_read_only`; environment-only recognition remains available. Errors remain explicit, validation messages identify invalid inputs, and a failed acknowledgement triggers a status refresh without discarding the user's drafts. A persistence acknowledgement can be uncertain after the complete record is written, but no partial pair is published. Clearing a saved key does not disable OCR if a deployment-owned environment key remains. Saved settings take effect on the next submission without restarting and never rewrite `.env`; OCR already in flight keeps its captured request configuration.
+
 ## Electron encrypted store
 
 The encrypted file is versioned JSON whose values are Base64 representations of buffers returned by `safeStorage.encryptString()`; Base64 is transport encoding, while the security comes from the platform backend used by Electron.
@@ -53,16 +65,18 @@ The deployment readiness endpoint exposes only whether the selected backend is w
 
 ## Code entry points
 
-| File                                                                                                                       | Responsibility                                                                |
-| -------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| [`apps/desktop/src/secure-secrets.ts`](../../apps/desktop/src/secure-secrets.ts)                                           | Electron encrypted vault, secret-id shape validation, and write verification. |
-| [`apps/desktop/src/main.ts`](../../apps/desktop/src/main.ts)                                                               | `safeStorage` availability policy and utility-process secret bridge host.     |
-| [`apps/desktop/src/remote-basic-auth.ts`](../../apps/desktop/src/remote-basic-auth.ts)                                     | Session-only remote Server Basic Auth prompt and exact-origin policy.         |
-| [`apps/server/src/security/desktop-secret-bridge.ts`](../../apps/server/src/security/desktop-secret-bridge.ts)             | Server startup handshake, in-memory snapshot, and acknowledged mutation RPC.  |
-| [`apps/server/src/security/secret-store.ts`](../../apps/server/src/security/secret-store.ts)                               | Runtime backend selection, environment fallback, and module-facing facade.    |
-| [`apps/server/src/security/secret-ids.ts`](../../apps/server/src/security/secret-ids.ts)                                   | Canonical secret-id constants, provider-id derivation, and id validation.     |
-| [`apps/server/src/security/encrypted-file-secret-store.ts`](../../apps/server/src/security/encrypted-file-secret-store.ts) | Standalone AES-256-GCM persistence and authenticated read-back verification.  |
-| [`apps/server/src/security/environment-secret-store.ts`](../../apps/server/src/security/environment-secret-store.ts)       | Read-only deployment environment fallback.                                    |
-| [`apps/server/src/modules/agent/llm.ts`](../../apps/server/src/modules/agent/llm.ts)                                       | Chat, utility, and image API-key resolution.                                  |
-| [`apps/server/src/modules/agent/oauth.ts`](../../apps/server/src/modules/agent/oauth.ts)                                   | Copilot OAuth credential persistence.                                         |
-| [`apps/server/src/modules/integrations/integrations.ts`](../../apps/server/src/modules/integrations/integrations.ts)       | Tavily and RapidAPI credential persistence.                                   |
+| File                                                                                                                       | Responsibility                                                                         |
+| -------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| [`apps/desktop/src/secure-secrets.ts`](../../apps/desktop/src/secure-secrets.ts)                                           | Electron encrypted vault, secret-id shape validation, and write verification.          |
+| [`apps/desktop/src/main.ts`](../../apps/desktop/src/main.ts)                                                               | `safeStorage` availability policy and utility-process secret bridge host.              |
+| [`apps/desktop/src/remote-basic-auth.ts`](../../apps/desktop/src/remote-basic-auth.ts)                                     | Session-only remote Server Basic Auth prompt and exact-origin policy.                  |
+| [`apps/server/src/security/desktop-secret-bridge.ts`](../../apps/server/src/security/desktop-secret-bridge.ts)             | Server startup handshake, in-memory snapshot, and acknowledged mutation RPC.           |
+| [`apps/server/src/security/secret-store.ts`](../../apps/server/src/security/secret-store.ts)                               | Runtime backend selection, environment fallback, and module-facing facade.             |
+| [`apps/server/src/security/secret-ids.ts`](../../apps/server/src/security/secret-ids.ts)                                   | Canonical secret-id constants, provider-id derivation, and id validation.              |
+| [`apps/server/src/security/encrypted-file-secret-store.ts`](../../apps/server/src/security/encrypted-file-secret-store.ts) | Standalone AES-256-GCM persistence and authenticated read-back verification.           |
+| [`apps/server/src/security/environment-secret-store.ts`](../../apps/server/src/security/environment-secret-store.ts)       | Read-only deployment environment fallback.                                             |
+| [`apps/server/src/modules/agent/llm.ts`](../../apps/server/src/modules/agent/llm.ts)                                       | Chat, utility, and image API-key resolution.                                           |
+| [`apps/server/src/modules/agent/oauth.ts`](../../apps/server/src/modules/agent/oauth.ts)                                   | Copilot OAuth credential persistence.                                                  |
+| [`apps/server/src/modules/integrations/integrations.ts`](../../apps/server/src/modules/integrations/integrations.ts)       | Tavily and RapidAPI credential persistence.                                            |
+| [`apps/server/src/modules/integrations/ink-ocr-config.ts`](../../apps/server/src/modules/integrations/ink-ocr-config.ts)   | Azure Vision endpoint persistence, masked status, and effective credential resolution. |
+| [`packages/shared/src/types/api/ink-ocr-config.ts`](../../packages/shared/src/types/api/ink-ocr-config.ts)                 | Azure-specific OCR settings schemas and wire contracts.                                |

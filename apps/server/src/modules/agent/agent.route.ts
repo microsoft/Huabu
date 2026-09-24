@@ -763,6 +763,7 @@ const agentRoutes: FastifyPluginAsync = async (
         invokedSkills,
         canvasId: canvasId ?? null,
         logger: request.log,
+        signal: preparation.signal,
       });
     // Debug-prompt metadata forwarded to the dispatch layer (it assembles
     // the final prompt). No-op unless HUABU_DEBUG_PROMPT is set.

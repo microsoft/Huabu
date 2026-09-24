@@ -4,8 +4,15 @@
 import type { AssistantHistoryPart } from './assistant-parts.js';
 import type { AgentInputKind, VisibleCanvasGrounding } from '../api/agent.js';
 
-export { chatEnvelopeSchema } from '../api/chat-envelope.js';
-export type { ChatEnvelope, ResolvedSkill } from '../api/chat-envelope.js';
+export {
+  chatEnvelopeSchema,
+  inkRecognitionSchema,
+} from '../api/chat-envelope.js';
+export type {
+  ChatEnvelope,
+  InkRecognition,
+  ResolvedSkill,
+} from '../api/chat-envelope.js';
 
 /**
  * An attachment sent alongside a chat message — e.g. a captured PDF region or pasted file.

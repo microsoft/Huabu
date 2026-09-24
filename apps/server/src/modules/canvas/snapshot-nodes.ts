@@ -65,7 +65,10 @@ import {
   findClusters,
   resolveAccent,
 } from '@huabu/shared';
-import { getSketchRenderedSize } from '@huabu/shared/canvas-engine';
+import {
+  getAbsolutePosition,
+  getSketchRenderedSize,
+} from '@huabu/shared/canvas-engine';
 
 import { RASTERIZABLE_IMAGE_EXT_MIME } from '../../utils/mime.js';
 import { space } from '../storage/index.js';
@@ -146,6 +149,13 @@ const CLUSTER_PADDING = 16;
 const CLUSTER_MAX_PIXELS = SPACE_SNAPSHOT_DEFAULT_PIXELS;
 // Edge-to-edge clustering threshold (flow-space px).
 const CLUSTER_DISTANCE_THRESHOLD = 200;
+
+interface ClusterRenderProfile {
+  cropToStrokes?: boolean;
+  strokeColor?: string;
+  scale?: number;
+  minPixels?: number;
+}
 
 // ─── Node `data` access (loose, defensive) ─────────────────────────────────
 // Top-level node fields come from {@link CanvasNode} (= ReactFlow `Node`):
@@ -485,6 +495,7 @@ export function clusterToSvg(
   nodes: CanvasNode[],
   contextImages: ContextImage[] = [],
   maxEdge: number = CLUSTER_MAX_PIXELS,
+  profile: ClusterRenderProfile = {},
 ): { svg: string; width: number; height: number } | null {
   // World bbox = union of every contributing sketch + backdrop rect.
   let x1 = Infinity;
@@ -496,10 +507,28 @@ export function clusterToSvg(
     if (width <= 0 || height <= 0) continue;
     const px = n.position?.x ?? 0;
     const py = n.position?.y ?? 0;
-    x1 = Math.min(x1, px);
-    y1 = Math.min(y1, py);
-    x2 = Math.max(x2, px + width);
-    y2 = Math.max(y2, py + height);
+    if (profile.cropToStrokes) {
+      const data = getSketchData(n);
+      const init = data?.initialSize ?? { width: 1, height: 1 };
+      const scaleX = init.width > 0 ? width / init.width : 1;
+      const scaleY = init.height > 0 ? height / init.height : 1;
+      for (const stroke of data?.strokes ?? []) {
+        const margin = stroke.size ?? DEFAULT_STROKE_SIZE;
+        for (const point of stroke.points) {
+          const x = point[0] * scaleX + px;
+          const y = point[1] * scaleY + py;
+          x1 = Math.min(x1, x - margin);
+          y1 = Math.min(y1, y - margin);
+          x2 = Math.max(x2, x + margin);
+          y2 = Math.max(y2, y + margin);
+        }
+      }
+    } else {
+      x1 = Math.min(x1, px);
+      y1 = Math.min(y1, py);
+      x2 = Math.max(x2, px + width);
+      y2 = Math.max(y2, py + height);
+    }
   }
   for (const ci of contextImages) {
     if (ci.width <= 0 || ci.height <= 0) continue;
@@ -515,16 +544,24 @@ export function clusterToSvg(
   const bboxH = y2 - y1;
   if (bboxW <= 0 || bboxH <= 0) return null;
 
-  const vbX = x1 - CLUSTER_PADDING;
-  const vbY = y1 - CLUSTER_PADDING;
-  const vbW = bboxW + CLUSTER_PADDING * 2;
-  const vbH = bboxH + CLUSTER_PADDING * 2;
+  let vbX = x1 - CLUSTER_PADDING;
+  let vbY = y1 - CLUSTER_PADDING;
+  let vbW = bboxW + CLUSTER_PADDING * 2;
+  let vbH = bboxH + CLUSTER_PADDING * 2;
 
   // Fit-to-`maxEdge` so very large clusters do not produce
   // multi-megabyte PNGs. Defaults to `CLUSTER_MAX_PIXELS` (1280);
   // the agent can lower it via the tool's `maxPixels` parameter
   // when a previous turn returned an "image too large" placeholder.
-  const scale = Math.min(1, maxEdge / Math.max(vbW, vbH));
+  const scale = Math.min(profile.scale ?? 1, maxEdge / Math.max(vbW, vbH));
+  if (profile.minPixels) {
+    const paddedW = Math.max(vbW, profile.minPixels / scale);
+    const paddedH = Math.max(vbH, profile.minPixels / scale);
+    vbX -= (paddedW - vbW) / 2;
+    vbY -= (paddedH - vbH) / 2;
+    vbW = paddedW;
+    vbH = paddedH;
+  }
   const pxW = Math.max(1, Math.round(vbW * scale));
   const pxH = Math.max(1, Math.round(vbH * scale));
 
@@ -566,7 +603,8 @@ export function clusterToSvg(
       // Tokens like 'red' / 'blue' map through the accent palette;
       // anything else (hex literals, named CSS colours like 'black')
       // passes through unchanged.
-      const fill = resolveAccent(colorToken) ?? colorToken;
+      const fill =
+        profile.strokeColor ?? resolveAccent(colorToken) ?? colorToken;
       const size = stroke.size ?? DEFAULT_STROKE_SIZE;
       const d = pointsToPathD(worldPoints, size);
       if (!d) continue;
@@ -661,6 +699,49 @@ async function renderClusterPng(svg: string, width: number): Promise<Buffer> {
     background: '#ffffff',
   });
   return Buffer.from(resvg.render().asPng());
+}
+
+export async function renderInkOcrRaster(
+  nodes: CanvasNode[],
+  strokeSubsets: { nodeId: string; strokeIds: string[] }[],
+): Promise<{
+  png: Buffer;
+  width: number;
+  height: number;
+  originNodeIds: string[];
+}> {
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  const inkNodes = strokeSubsets.map(({ nodeId, strokeIds }) => {
+    const node = byId.get(nodeId);
+    if (!node || getNodeType(node) !== 'sketch' || strokeIds.length === 0) {
+      throw new SnapshotNodeError(
+        'OCR requires an explicit partial Sketch selection.',
+        'invalid_snapshot_request',
+      );
+    }
+    return {
+      ...filterSketchStrokes(node, new Set(strokeIds)),
+      position: getAbsolutePosition(nodes, nodeId) ?? node.position,
+    };
+  });
+  const built = clusterToSvg(inkNodes, [], 2048, {
+    cropToStrokes: true,
+    strokeColor: 'black',
+    scale: 2,
+    minPixels: 50,
+  });
+  if (!built) {
+    throw new SnapshotNodeError(
+      'The selected Ink cannot be rasterized for OCR.',
+      'invalid_snapshot_request',
+    );
+  }
+  return {
+    png: await renderClusterPng(built.svg, built.width),
+    width: built.width,
+    height: built.height,
+    originNodeIds: [...new Set(inkNodes.map((node) => node.id))],
+  };
 }
 
 // ─── Image dimension parsing ───────────────────────────────────────────────
@@ -848,6 +929,7 @@ async function maybeResizeImageArtifact(
  */
 export async function snapshotNodesToArtifacts(
   args: SnapshotNodesArgs,
+  preparedNodes?: CanvasNode[],
 ): Promise<SnapshotNodeResult[]> {
   const ids = args.nodeIds ?? [];
   if (ids.length === 0) return [];
@@ -862,14 +944,15 @@ export async function snapshotNodesToArtifacts(
   );
 
   const handle = space(args.canvasId);
-  const canvas = await handle.read();
-  if (!canvas) {
+  const canvas = preparedNodes ? undefined : await handle.read();
+  if (!preparedNodes && !canvas) {
     throw new SnapshotNodeError(
       `Canvas ${args.canvasId} not found`,
       'canvas_not_found',
     );
   }
-  const allNodes = (canvas.state.nodes ?? []) as CanvasNode[];
+  const allNodes =
+    preparedNodes ?? ((canvas?.state.nodes ?? []) as CanvasNode[]);
   const byId = new Map(allNodes.map((n) => [n.id, n] as const));
 
   // Per-node stroke subset requested by the caller (partial-selection
