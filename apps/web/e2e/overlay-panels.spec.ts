@@ -330,7 +330,10 @@ test('narrow layouts keep a full-size Canvas and bounded panels', async ({
     );
   });
   const toolbarBounds = (await toolbar.boundingBox())!;
-  expect(toolbarBounds.x + toolbarBounds.width / 2).toBeCloseTo(300, 0);
+  expect(toolbarBounds.x + toolbarBounds.width / 2).toBeCloseTo(
+    (left.x + left.width + right.x) / 2,
+    0,
+  );
   expect(
     await toolbar.evaluate((element) => {
       const rect = element.getBoundingClientRect();

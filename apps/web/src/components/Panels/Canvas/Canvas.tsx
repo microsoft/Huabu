@@ -147,6 +147,10 @@ import type { CanvasPointerRouterContext } from '@/handler/canvasPointerRouterCo
 import type { PointerRecognizer } from '@/handler/pointerRouter';
 import type { FrameFitResult, NestableNode } from '@huabu/shared/canvas-engine';
 
+const mainToolbarPosition: React.CSSProperties = {
+  left: 'calc((100% + var(--canvas-inset-left, 0px) - var(--canvas-inset-right, 0px)) / 2)',
+};
+
 const nodeTypes = {
   image: ImageNode,
   text: TextNode,
@@ -1468,7 +1472,8 @@ const CanvasContent: React.FC<CanvasProps> = ({
             createPortal(
               <div
                 data-canvas-main-toolbar
-                className="react-flow__panel nodrag nopan pointer-events-auto absolute !bottom-6 !left-1/2 !m-0 max-w-[calc(100%-24px)] -translate-x-1/2"
+                className="react-flow__panel nodrag nopan pointer-events-auto absolute !bottom-6 !m-0 max-w-[calc(100%-24px)] -translate-x-1/2"
+                style={mainToolbarPosition}
                 onPointerDown={(event) => event.stopPropagation()}
                 onDoubleClick={(event) => event.stopPropagation()}
                 onContextMenu={(event) => event.stopPropagation()}
@@ -1481,7 +1486,11 @@ const CanvasContent: React.FC<CanvasProps> = ({
               toolbarHost,
             )
           ) : (
-            <Panel position="bottom-center" className="mb-6">
+            <Panel
+              position="bottom-center"
+              className="mb-6"
+              style={mainToolbarPosition}
+            >
               <NodeToolbar activeTool={tool} onToolChange={setTool} />
             </Panel>
           )}

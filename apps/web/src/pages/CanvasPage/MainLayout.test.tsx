@@ -271,7 +271,8 @@ describe('MainLayout Chat motion', () => {
 
   it.each([
     { width: 1600, leftHidden: false, rightHidden: false },
-    { width: 1200, leftHidden: false, rightHidden: true },
+    { width: 1200, leftHidden: false, rightHidden: false },
+    { width: 1000, leftHidden: true, rightHidden: true },
   ])(
     'only hides for the overlapping focused panel at width $width',
     ({ width, leftHidden, rightHidden }) => {
