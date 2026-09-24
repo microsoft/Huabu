@@ -27,7 +27,11 @@
  * The CORS allowlist is derived from the same set — see `cors.ts`.
  */
 
-export { hostGuardPlugin, resolveAllowedHostnames } from './host-guard.js';
+export {
+  hostGuardPlugin,
+  originHostname,
+  resolveAllowedHostnames,
+} from './host-guard.js';
 export { originGuardPlugin } from './origin-guard.js';
 export { isLoopbackRequest } from './peer.js';
 export { isOwnerRequest, markBasicAuthenticated } from './owner.js';

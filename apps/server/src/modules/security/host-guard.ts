@@ -15,7 +15,7 @@
  * via `HUABU_ALLOWED_HOSTS`.
  */
 
-import type { FastifyPluginAsync } from 'fastify';
+import fp from 'fastify-plugin';
 
 /** Hostnames always accepted, even when `HUABU_ALLOWED_HOSTS` is empty. */
 const BUILTIN_HOSTNAMES = ['localhost', '127.0.0.1', '[::1]'] as const;
@@ -39,6 +39,22 @@ function extractHostname(host: string | undefined): string | null {
 }
 
 /**
+ * Extract the allowlist-comparable hostname from an `Origin` value such as
+ * `http://localhost:5173` or `https://[::1]:8080`. `URL.hostname` already
+ * lowercases and keeps IPv6 literals bracketed, matching the canonical form
+ * of the allowlist. Returns `null` for malformed input and for the literal
+ * `"null"` that browsers send from sandboxed iframes and `file://` pages.
+ */
+export function originHostname(origin: string): string | null {
+  if (origin === 'null') return null;
+  try {
+    return new URL(origin).hostname || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Read the merged allowlist (builtins + env extras).
  *
  * Exported so the CORS layer can reuse the same set of hostnames.
@@ -51,24 +67,29 @@ export function resolveAllowedHostnames(): Set<string> {
   return new Set<string>([...BUILTIN_HOSTNAMES, ...extra]);
 }
 
-export const hostGuardPlugin: FastifyPluginAsync = async (app) => {
-  const allowed = resolveAllowedHostnames();
-  app.addHook('onRequest', async (request, reply) => {
-    // CORS preflight must always pass — the actual request is checked.
-    if (request.method === 'OPTIONS') return;
-    const hostname = extractHostname(request.headers.host);
-    if (!hostname || !allowed.has(hostname)) {
-      return reply.status(403).send({
-        message: 'Invalid Host header',
-        code: 'INVALID_HOST',
-        details: {
-          received: hostname ?? null,
-          hint: 'Add the hostname to HUABU_ALLOWED_HOSTS if this is an intentional deployment.',
-        },
-      });
-    }
-  });
-  app.log.info(
-    `[security] Host allowlist active: [${[...allowed].join(', ')}]`,
-  );
-};
+// Wrapped with fastify-plugin so the hook applies to every route on the
+// instance that registers it, not only inside this plugin's own scope.
+export const hostGuardPlugin = fp(
+  async (app) => {
+    const allowed = resolveAllowedHostnames();
+    app.addHook('onRequest', async (request, reply) => {
+      // CORS preflight must always pass — the actual request is checked.
+      if (request.method === 'OPTIONS') return;
+      const hostname = extractHostname(request.headers.host);
+      if (!hostname || !allowed.has(hostname)) {
+        return reply.status(403).send({
+          message: 'Invalid Host header',
+          code: 'INVALID_HOST',
+          details: {
+            received: hostname ?? null,
+            hint: 'Add the hostname to HUABU_ALLOWED_HOSTS if this is an intentional deployment.',
+          },
+        });
+      }
+    });
+    app.log.info(
+      `[security] Host allowlist active: [${[...allowed].join(', ')}]`,
+    );
+  },
+  { name: 'huabu-host-guard', fastify: '5.x' },
+);
