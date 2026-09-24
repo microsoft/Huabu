@@ -47,7 +47,7 @@ import { resolveUiIntent } from '@/handler/canvasCommand/uiIntent';
 import { handleCanvasNavigationKey } from '@/hooks/shortcuts/handleCanvasNavigationKey';
 import { handleCanvasFocusEscape } from '@/hooks/useCanvasFocusEscape';
 import { useIsNotMouse } from '@/hooks/useInputMode';
-import { useMultiSelectModifierHeld } from '@/hooks/useMultiSelectModifier';
+import { useCanvasMultiSelectModifierHeld } from '@/hooks/useMultiSelectModifier';
 import { useTakeoverMarkDrag } from '@/hooks/useTakeoverMarkDrag';
 import { translateColorOptions } from '@/i18n/colors';
 import useCanvasStore from '@/store/canvasStore';
@@ -246,7 +246,7 @@ export const NodeFloatingToolbar = memo(
     // down for the duration of the hold; it returns the moment the key is
     // released (or once the multi-selection lands, at which point the
     // single-node toolbar is replaced by the multi-select one anyway).
-    const multiSelectModifierHeld = useMultiSelectModifierHeld();
+    const multiSelectModifierHeld = useCanvasMultiSelectModifierHeld();
     const isTextFlowNode = isAlwaysAutoHeightNodeType(type);
     const accentPickerOptions = useMemo(
       () => translateColorOptions(nodeAccentPickerOptions([type]), t),

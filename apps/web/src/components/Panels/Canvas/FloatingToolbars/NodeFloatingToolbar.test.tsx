@@ -66,7 +66,7 @@ vi.mock('@/hooks/useInputMode', () => ({
   readEffectiveInputMode: () => 'pen',
 }));
 vi.mock('@/hooks/useMultiSelectModifier', () => ({
-  useMultiSelectModifierHeld: () => mocks.modifierHeld,
+  useCanvasMultiSelectModifierHeld: () => mocks.modifierHeld,
 }));
 vi.mock('@/handler/canvasInteractionOwner', () => ({
   canTouchClaimViewport: () => true,

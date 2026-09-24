@@ -153,7 +153,7 @@ function ToggleButton({
 
 interface ActionButtonProps {
   title: string;
-  onClick: (e: React.MouseEvent) => void;
+  onClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
   children: ReactNode;
   className?: string;
   /** Visual tone — `danger` is used for destructive actions like Delete. */
@@ -674,6 +674,7 @@ function ToolbarNumberInput({
                 skipBlurCommit.current = false;
               }}
               onMouseDown={(e) => e.stopPropagation()}
+              onDoubleClick={(e) => e.currentTarget.select()}
               onKeyDown={(e) => {
                 e.stopPropagation();
                 if (e.key === 'Enter') {

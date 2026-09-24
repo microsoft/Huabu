@@ -5,6 +5,8 @@ import { useSyncExternalStore } from 'react';
 
 import { isMac } from '@/utils/platform';
 
+import { isKeyboardInteractiveTarget } from './shortcuts/isKeyboardInteractiveTarget';
+
 /**
  * Tracks whether the multi-selection modifier (Ctrl / Cmd) is currently
  * held down.
@@ -23,6 +25,7 @@ import { isMac } from '@/utils/platform';
 
 let held = false;
 let followHeld = false;
+let interactiveFocus = false;
 const listeners = new Set<() => void>();
 
 function emit(): void {
@@ -30,9 +33,19 @@ function emit(): void {
 }
 
 function setHeld(next: boolean, follow: boolean): void {
-  if (held === next && followHeld === follow) return;
+  // Removing a focused control does not always dispatch focusout.
+  const nextInteractiveFocus = isKeyboardInteractiveTarget(
+    document.activeElement,
+  );
+  if (
+    held === next &&
+    followHeld === follow &&
+    interactiveFocus === nextInteractiveFocus
+  )
+    return;
   held = next;
   followHeld = follow;
+  interactiveFocus = nextInteractiveFocus;
   emit();
 }
 
@@ -47,6 +60,15 @@ function syncFromEvent(event: KeyboardEvent | PointerEvent): void {
   );
 }
 
+function syncFocus(event?: FocusEvent): void {
+  const target =
+    event?.type === 'focusout' ? event.relatedTarget : document.activeElement;
+  const next = isKeyboardInteractiveTarget(target);
+  if (interactiveFocus === next) return;
+  interactiveFocus = next;
+  emit();
+}
+
 // Reset when focus leaves the window (Cmd+Tab, Alt+Tab): the matching
 // `keyup` is delivered to whichever window gained focus, never to us, so
 // the key would otherwise appear stuck-down forever.
@@ -56,12 +78,15 @@ function reset(): void {
 
 function subscribe(listener: () => void): () => void {
   if (listeners.size === 0) {
+    syncFocus();
     window.addEventListener('keydown', syncFromEvent, true);
     window.addEventListener('keyup', syncFromEvent, true);
     window.addEventListener('pointermove', syncFromEvent, true);
     window.addEventListener('pointerdown', syncFromEvent, true);
     window.addEventListener('focus', reset);
     window.addEventListener('blur', reset);
+    window.addEventListener('focusin', syncFocus, true);
+    window.addEventListener('focusout', syncFocus, true);
   }
   listeners.add(listener);
   return () => {
@@ -73,8 +98,11 @@ function subscribe(listener: () => void): () => void {
       window.removeEventListener('pointerdown', syncFromEvent, true);
       window.removeEventListener('focus', reset);
       window.removeEventListener('blur', reset);
+      window.removeEventListener('focusin', syncFocus, true);
+      window.removeEventListener('focusout', syncFocus, true);
       held = false;
       followHeld = false;
+      interactiveFocus = false;
     }
   };
 }
@@ -86,6 +114,13 @@ function getSnapshot(): boolean {
 /** Reactive "is the multi-select modifier (Ctrl / Cmd) held right now?" */
 export function useMultiSelectModifierHeld(): boolean {
   return useSyncExternalStore(subscribe, getSnapshot, () => false);
+}
+
+const getCanvasSnapshot = () => held && !interactiveFocus;
+
+/** Canvas chrome yields to selection modifiers, but not to focused control shortcuts. */
+export function useCanvasMultiSelectModifierHeld(): boolean {
+  return useSyncExternalStore(subscribe, getCanvasSnapshot, () => false);
 }
 
 const noSubscription = () => () => {};
