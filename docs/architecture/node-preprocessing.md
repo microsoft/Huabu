@@ -41,7 +41,7 @@ Text enrichment and Frame titles use the configured external default Profile thr
 
 Missing/deleted/offline Profiles, Agent errors, invalid or incomplete output, and timeouts propagate to the existing `ENRICH_FAILED` diagnostic without marking enrichment capabilities complete. Metadata must include all requested non-empty fields with the expected types; unrequested fields are not applied. Frame titles must be non-empty, single-line, and at most 60 characters. A five-minute task deadline bounds caller waiting and forwards cancellation; an interactive permission request aborts the background task rather than granting permission or waiting for unseen UI. These task instructions are behavioral guidance, not a sandbox. ACP Job process/client reclamation remains deferred, and tasks retain the current idle-suspension behavior.
 
-Image labeling still calls `llmComplete(ctx, { role: 'imageLabel', hasImage: true })` through the existing utility-model routing until the separate multimodal migration. Text tasks never fall back to this built-in path.
+Image labeling uses the same external functional runner with text plus canonical image parts. It reuses chat image resolution, supported MIME types, and the 4 MB decoded-image cap without introducing a separate renderer or file-transfer channel. Missing pixels, unsupported ACP image input, Agent errors, and invalid labels fail explicitly so enrichment remains retryable; there is no built-in inference fallback.
 
 ---
 
@@ -107,7 +107,7 @@ The task phases are `queued` (debounce), `blocked` (restore persistence), `runni
 | `dispatcher.ts`       | dirty-field analysis → execution plan                                              |
 | `pipeline.ts`         | ordered stage runner                                                               |
 | `profiles.ts`         | per-node capability registry                                                       |
-| `provider-manager.ts` | Text metadata through external ACP Jobs; transitional built-in image labeling      |
+| `provider-manager.ts` | Text and image metadata through external ACP Jobs                                  |
 | `types.ts`            | `Capability` / `NodeContentKind` / `NodePreprocessProfile` (incl. `bodyOwnership`) |
 | `stages/`             | input-resolve · cache-check · extract · normalize · enrich · persist · project     |
 | `loaders/`            | text · pdf · web · office · youtube                                                |

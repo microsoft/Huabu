@@ -8,13 +8,16 @@ import { withCanvasMutex } from '../../../canvas/write-coordinator.js';
 import { space } from '../../../storage/index.js';
 import {
   activeInkIntentOwnerNodeId,
+  isActiveExternalInkIntentTurn,
   isActiveInkIntentTurn,
+  publishExternalInkReport,
 } from '../../ink-intent-runtime.js';
 
 import type {
   CanvasCommand,
   CanvasNodeId,
   InkIntentReport,
+  RfsInkIntentResponse,
 } from '@huabu/shared';
 import type { CanvasNode } from '@huabu/shared/canvas-engine';
 
@@ -22,12 +25,30 @@ export type ReportInkIntentArgs = InkIntentReport;
 
 const INK_PLACEHOLDER_LABEL = 'New ink request';
 
+export class InkIntentTurnError extends Error {
+  readonly code = 'ink_turn_inactive';
+  constructor() {
+    super('Ink reports are available only during the matching active Ink turn');
+  }
+}
+
 async function settlePendingInkQuestion(
   canvasId: string,
   threadId: string,
   text?: string,
+  invocationToken?: string,
 ): Promise<boolean> {
+  const assertActive = () => {
+    if (
+      invocationToken !== undefined
+        ? !isActiveExternalInkIntentTurn(canvasId, threadId, invocationToken)
+        : !isActiveInkIntentTurn(canvasId, threadId)
+    ) {
+      throw new InkIntentTurnError();
+    }
+  };
   return withCanvasMutex(canvasId, async () => {
+    assertActive();
     const ownerNodeId = activeInkIntentOwnerNodeId(canvasId, threadId);
     if (!ownerNodeId) return false;
     const handle = space(canvasId);
@@ -44,6 +65,7 @@ async function settlePendingInkQuestion(
       text !== undefined &&
       record?.label === INK_PLACEHOLDER_LABEL &&
       record.labelSource !== 'user';
+    assertActive();
     const command: CanvasCommand = {
       type: 'MERGE_NODE_DATA',
       patches: [
@@ -63,8 +85,43 @@ async function settlePendingInkQuestion(
       commands: [command],
       originator: { source: 'agent', threadId },
     });
-    return canRename && output.results[0]?.applied === true;
+    if (output.results[0]?.applied !== true) {
+      throw new Error('Failed to settle the pending Ink Question');
+    }
+    return canRename;
   });
+}
+
+export async function reportInkIntent(
+  args: ReportInkIntentArgs,
+  context: { canvasId: string; threadId: string; invocationToken?: string },
+): Promise<RfsInkIntentResponse> {
+  const report = inkIntentReportSchema.parse(args);
+  const renamed = await settlePendingInkQuestion(
+    context.canvasId,
+    context.threadId,
+    report.status === 'inferred' ? report.text : undefined,
+    context.invocationToken,
+  );
+  if (
+    context.invocationToken &&
+    !isActiveExternalInkIntentTurn(
+      context.canvasId,
+      context.threadId,
+      context.invocationToken,
+    )
+  ) {
+    throw new InkIntentTurnError();
+  }
+  const result = { report, renamed };
+  if (context.invocationToken)
+    publishExternalInkReport(
+      context.canvasId,
+      context.threadId,
+      context.invocationToken,
+      result,
+    );
+  return result;
 }
 
 export async function handleReportInkIntent(
@@ -78,11 +135,9 @@ export async function handleReportInkIntent(
   ) {
     throw new Error('report_ink_intent is available only during an Ink turn');
   }
-  const report = inkIntentReportSchema.parse(args);
-  const renamed = await settlePendingInkQuestion(
-    context.canvasId,
-    context.threadId,
-    report.status === 'inferred' ? report.text : undefined,
-  );
+  const { report, renamed } = await reportInkIntent(args, {
+    canvasId: context.canvasId,
+    threadId: context.threadId,
+  });
   return JSON.stringify({ ...report, renamed });
 }

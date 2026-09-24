@@ -31,6 +31,7 @@ All endpoints are mounted under `/api/rfs/:canvasId`; `HUABU_RFS_URL` already co
 | `DELETE /upload/<name>`            | Remove one exact staged upload.                                                                                              |
 | `POST /agent`                      | Create a visible Agent Node and optionally start its first turn.                                                             |
 | `POST /agent/:threadId/prompt`     | Submit a turn to an existing Agent conversation over SSE.                                                                    |
+| `POST /agent/:threadId/ink-intent` | Submit a validated report for the matching active external Ink turn.                                                         |
 | `GET /agent/profiles`              | Return available Agent Profile IDs and aliases, marking the configured external default with `default: true` when available. |
 | `POST /task/create`                | Create a durable Task and its static Task Note.                                                                              |
 | `POST /task/:taskId/run/create`    | Create a Run, its visible root Agent Node, and start the first turn.                                                         |
@@ -81,6 +82,8 @@ Node downloads return raw bytes plus allow-listed `X-Huabu-*` metadata headers. 
 Uploads are inert payloads stored under `.upload/`. Names must be explicit and collision-free; the server returns `409` instead of overwriting an existing payload.
 
 ## Agent control plane
+
+`POST /agent/:threadId/ink-intent` accepts `{ invocationToken, report }` only for the matching active external Ink turn in this Space. The report is `{ status: "inferred", text }` (one line, at most 120 characters) or `{ status: "clarify" | "unsupported" }`. The authenticated turn prompt supplies the endpoint and a fresh invocation token; this token fences stale reports and is not a substitute for RFS authentication. Completion, cancellation, and failure invalidate it. The shared Ink writer preserves manual titles and only renames the untouched pending Ink Question; the response is `{ report, renamed }`, and an inactive or mismatched turn returns `409 ink_turn_inactive`. Confirmed reports enter the normal turn event stream and durable transcript through the ACP driver's host-event drain, preserving the existing inferred-intent Chat display without invoking an internal Agent.
 
 `POST /agent` always creates a visible Agent Node. A plain-text body uses the configured default external Profile plus an immediate first prompt; the full JSON form optionally selects another available Profile, position, launch options, optional parent thread, and optional prompt. Omitting `profileId` uses the same saved default and fails explicitly if it is unconfigured or unavailable. `X-Huabu-Agent-Start: false` creates an idle Agent from JSON without submitting a turn.
 

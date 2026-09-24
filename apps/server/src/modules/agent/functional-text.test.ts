@@ -107,6 +107,25 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 describe('external functional text', () => {
+  it('sends images as canonical multimodal parts and returns text without changing Job lifecycle', async () => {
+    const images = [
+      { type: 'image' as const, data: 'aGVsbG8=', mimeType: 'image/png' },
+    ];
+    await expect(
+      runFunctionalText('label the image', { ...context, images }),
+    ).resolves.toBe('answer');
+    expect(mocks.run.mock.calls[0][0].rendered).toEqual([
+      {
+        type: 'parts',
+        parts: [{ type: 'text', text: 'label the image' }, ...images],
+      },
+    ]);
+    expect(mocks.create.mock.calls[0][0]).toMatchObject({
+      workloadType: 'Job',
+      threadId: '',
+    });
+    expect(mocks.close).not.toHaveBeenCalled();
+  });
   it('passes the actual ACP driver validation through Agenetes without storing transient task history', async () => {
     const driver = acpDriverFactory();
     const create = driver.create.bind(driver);

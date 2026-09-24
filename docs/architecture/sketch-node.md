@@ -129,6 +129,8 @@ A stroke selection (§3.5) is a first-class **source**, not just an editing targ
 
 When a Lasso includes ordinary nodes as well as Ink, the browser additionally captures a bounded hidden relationship PNG from the currently rendered Canvas DOM. The capture preserves the current semantic zoom/LOD and Ink landing position, suppresses interaction chrome and selection highlighting, and is compressed before entering the request. It is durable Agent grounding rather than a Chat attachment: it does not add a source, chip, thumbnail, or download row. A built-in Ink turn may also report one structured inferred intent; Chat renders that text beside the Pen provenance while the original user content remains empty.
 
+External Ink turns reuse these same images and canonical ACP content blocks, with no additional rasterization or download requirement. A turn-specific RFS report endpoint replaces the built-in-only `report_ink_intent` call; its lifecycle is activated by external dispatch and invalidated on completion, failure, or cancellation. The shared writer protects user titles, and confirmed reports are folded into the existing inferred-intent Chat presentation. See [Agent Reachback](./agent-reachback.md#agent-control-plane) for the authenticated report contract. Image input requires the external Agent's advertised ACP image capability and a vision-capable model; no built-in model fallback is used.
+
 ---
 
 ## 5. Code entry points

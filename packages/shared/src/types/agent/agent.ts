@@ -89,16 +89,18 @@ export type AgentThinkingDeltaEventData = ProtocolEventData<'thinking_delta'>;
  * `internalToolName`. Render-variant dispatch happens client-side via
  * {@link variantForInternalTool} keyed on it — internal-agent turns set it
  * and materialise as their dedicated variant (`space_commands`,
- * `agent_tool`, …); external ACP turns leave it undefined and always render
- * as `generic`, so its presence is the wire-level discriminator between
- * internal and external tool calls.
+ * `agent_tool`, …); harness-originated ACP tool calls leave it undefined
+ * and render as `generic`, so its presence is the discriminator between
+ * host-recognized and generic tool calls. A validated external Ink report
+ * uses the same host-owned extension to preserve inferred-intent display.
  */
 export interface AgentToolCallEventData extends ProtocolEventData<'tool_call'> {
   /**
    * Stable tool name from the internal agent (`space_commands`,
    * `web_search`, `read`, `grep`, …). Drives client-side render-variant
    * dispatch via `variantForInternalTool()` and gates local side-effects
-   * (e.g. `space_commands` execution). Undefined for external ACP turns.
+   * (e.g. `space_commands` execution). External ACP tool calls never set it;
+   * a host-validated Ink report may set `report_ink_intent`.
    */
   internalToolName?: string;
 }

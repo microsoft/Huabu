@@ -20,6 +20,8 @@
  * translator and will be added incrementally.
  */
 
+import { randomUUID } from 'node:crypto';
+
 import {
   getAgentProfileRegistry,
   getSupervisedAgentletId,
@@ -42,7 +44,9 @@ import {
 } from '../agenetes/drivers.js';
 import { createChatSubmission } from '../agenetes/handle.js';
 import { dumpAssembledPrompt } from '../conversation/prompt/debug-prompt.js';
+import { renderInkReportEndpoint } from '../conversation/prompt/ink-intent.js';
 import { conversationTitleService } from '../conversation-title.service.js';
+import { beginActiveInkIntentTurn } from '../ink-intent-runtime.js';
 
 import type { HuabuSubmission } from '../agenetes/handle.js';
 import type { ChatEnvelope } from '../conversation/envelope.js';
@@ -126,6 +130,7 @@ export interface RunAcpAgentOptions {
   };
   /** Called after Agenetes has synchronously persisted this turn's start. */
   onTurnStarted?: (acceptance?: AgentTurnAccepted) => void;
+  inkIntentOwnerNodeId?: string;
 }
 
 /**
@@ -224,7 +229,7 @@ export async function* runAcpAgent(
 ): AsyncGenerator<AgentStreamEvent, void> {
   const { binding, overlay, signal, logger, handle } = opts;
   const canvasId = opts.canvasId ?? '';
-  const submission =
+  let submission =
     opts.submission ??
     createChatSubmission(
       opts.envelope,
@@ -269,18 +274,81 @@ export async function* runAcpAgent(
       opts.threadId,
       opts.envelope.user.text,
     );
-  const iterator = handle.run(submission, {
-    overlay,
-    signal,
-    logger,
-    onPrepared,
-  });
-  opts.onTurnStarted?.({
-    threadId: opts.threadId,
-    turnStartSeq: agenetes.logMetadata(
-      canvasAcpNamespace(canvasId),
-      opts.threadId,
-    ).eventCount,
-  });
-  yield* iterator;
+  const inkToken =
+    opts.envelope.user.inputKind === 'ink-intent' ? randomUUID() : undefined;
+  if (inkToken) {
+    if (!canvasId) throw new Error('Ink intent requires a Space');
+    if (!submission.rendered) throw new Error('Ink input was not rendered');
+    submission = {
+      ...submission,
+      rendered: [
+        ...submission.rendered,
+        {
+          type: 'text',
+          text: renderInkReportEndpoint(opts.threadId, inkToken),
+        },
+      ],
+    };
+  }
+  const reportEvents: Exclude<AgentStreamEvent, { type: 'meta' | 'end' }>[] =
+    [];
+  let reported = false;
+  const finishInk = inkToken
+    ? beginActiveInkIntentTurn(
+        canvasId,
+        opts.threadId,
+        opts.inkIntentOwnerNodeId,
+        inkToken,
+        (result) => {
+          if (reported) return;
+          reported = true;
+          const toolCallId = `huabu-ink-${inkToken}`;
+          reportEvents.push(
+            {
+              type: 'tool_call',
+              data: {
+                toolCallId,
+                title: 'report_ink_intent',
+                internalToolName: 'report_ink_intent',
+                rawInput: result.report,
+                status: 'in_progress',
+              },
+            },
+            {
+              type: 'tool_call_update',
+              data: {
+                toolCallId,
+                status: 'completed',
+                rawOutput: JSON.stringify({
+                  ...result.report,
+                  renamed: result.renamed,
+                }),
+              },
+            },
+          );
+        },
+      )
+    : () => {};
+  signal?.addEventListener('abort', finishInk, { once: true });
+  try {
+    signal?.throwIfAborted();
+    const iterator = handle.run(submission, {
+      overlay,
+      signal,
+      logger,
+      onPrepared,
+      ...(inkToken ? { drainHostEvents: () => reportEvents.splice(0) } : {}),
+    });
+    opts.onTurnStarted?.({
+      threadId: opts.threadId,
+      turnStartSeq: agenetes.logMetadata(
+        canvasAcpNamespace(canvasId),
+        opts.threadId,
+      ).eventCount,
+    });
+    yield* iterator;
+  } finally {
+    signal?.removeEventListener('abort', finishInk);
+    finishInk();
+  }
 }

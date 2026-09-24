@@ -798,6 +798,7 @@ export class AgentThreadService {
         logger: options.logger,
         debugPrompt: options.debugPrompt,
         onTurnStarted,
+        inkIntentOwnerNodeId: options.agentTarget?.nodeId,
       });
     }
 

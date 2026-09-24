@@ -1,15 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-/**
- * Transient-vs-genuine provider error classification.
- *
- * Transient failures (gateway down, OAuth refresh failed, network blip, rate
- * limit) must be rethrown so the pipeline records a retryable diagnostic
- * instead of silently persisting an empty enrich result — which would look
- * identical to "this node has nothing worth enriching".
- */
-
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const runText = vi.hoisted(() => vi.fn());
@@ -17,10 +8,8 @@ const complete = vi.hoisted(() => vi.fn());
 vi.mock('../agent/functional-text.js', () => ({ runFunctionalText: runText }));
 vi.mock('../agent/llm.js', () => ({ llmComplete: complete }));
 
-import {
-  isTransientProviderError,
-  ProviderManager,
-} from './provider-manager.js';
+import { ProviderManager } from './provider-manager.js';
+import { MAX_INLINE_IMAGE_BYTES } from '../agent/conversation/prompt/image-inlining.js';
 
 beforeEach(() => vi.clearAllMocks());
 
@@ -111,40 +100,48 @@ describe('external text enrichment', () => {
   );
 });
 
-describe('isTransientProviderError', () => {
-  it('classifies OAuth / auth failures as transient', () => {
-    expect(
-      isTransientProviderError(
-        new Error(
-          'Authentication failed for provider "github-copilot". Please log in via Settings.',
-        ),
-      ),
-    ).toBe(true);
-    expect(
-      isTransientProviderError(
-        new Error('OAuth refresh failed for github-copilot: 401 Unauthorized'),
-      ),
-    ).toBe(true);
-  });
+describe('external image enrichment', () => {
+  const provider = new ProviderManager();
+  const png = 'data:image/png;base64,aGVsbG8=';
 
-  it('classifies network / gateway failures as transient', () => {
-    expect(isTransientProviderError(new Error('fetch failed'))).toBe(true);
-    expect(
-      isTransientProviderError(
-        new Error('Connect Timeout Error (attempted address: github.com:443)'),
-      ),
-    ).toBe(true);
-    expect(isTransientProviderError(new Error('503 Service Unavailable'))).toBe(
-      true,
+  it('sends image bytes through the existing functional runner without built-in inference', async () => {
+    runText.mockResolvedValue('  A diagram  ');
+    await expect(provider.generateImageLabel(png, 'canvas-a')).resolves.toBe(
+      'A diagram',
     );
+    expect(runText).toHaveBeenCalledWith(expect.any(String), {
+      canvasId: 'canvas-a',
+      images: [{ type: 'image', data: 'aGVsbG8=', mimeType: 'image/png' }],
+    });
+    expect(complete).not.toHaveBeenCalled();
   });
 
-  it('treats a genuine "model returned unparseable output" as non-transient', () => {
-    expect(
-      isTransientProviderError(
-        new SyntaxError('Unexpected token < in JSON at position 0'),
-      ),
-    ).toBe(false);
-    expect(isTransientProviderError(new Error('empty response'))).toBe(false);
+  it.each(['', 'x'.repeat(61), 'Two\nlines'])(
+    'rejects invalid image titles: %j',
+    async (output) => {
+      runText.mockResolvedValue(output);
+      await expect(
+        provider.generateImageLabel(png, 'canvas-a'),
+      ).rejects.toThrow('invalid image title');
+    },
+  );
+
+  it.each([
+    'data:image/svg+xml;base64,aGVsbG8=',
+    'data:image/png;base64,',
+    `data:image/png;base64,${'A'.repeat(MAX_INLINE_IMAGE_BYTES * 2)}`,
+  ])('rejects unavailable image input without dispatch', async (src) => {
+    await expect(provider.generateImageLabel(src, 'canvas-a')).rejects.toThrow(
+      'Image label input unavailable',
+    );
+    expect(runText).not.toHaveBeenCalled();
+  });
+
+  it('propagates external vision failures for retry instead of marking enrichment complete', async () => {
+    runText.mockRejectedValueOnce(new Error('Agent does not support images'));
+    await expect(provider.generateImageLabel(png, 'canvas-a')).rejects.toThrow(
+      'does not support images',
+    );
+    expect(complete).not.toHaveBeenCalled();
   });
 });

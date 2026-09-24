@@ -136,6 +136,8 @@ Malformed request fields and malformed cursors return HTTP 400 with `code: "malf
 
 ## RFS Agent discovery
 
+`POST /api/rfs/:canvasId/agent/:threadId/ink-intent` uses `rfsInkIntentParamsSchema`, `rfsInkIntentRequestSchema`, and `rfsInkIntentResponseSchema` in `types/api/rfs.ts`, reusing `inkIntentReportSchema`. RFS decodes its raw JSON buffer, validates the target and body with `safeParse`, and delegates to the shared Ink writer. A per-turn invocation token must match the active external turn; inactive, expired, or wrong-scope reports return `409 ink_turn_inactive`. The token is a freshness guard, not a credential; the normal RFS Bearer requirement remains mandatory.
+
 `POST /api/rfs/:canvasId/query` with `type: "INSPECT_NODES"` uses the canonical response contract in [`space-operations.ts`](../../packages/shared/src/types/api/space-operations.ts). Each Question Node result includes its non-empty persisted `threadId` when associated; non-Question Nodes and unbound Questions omit the field. The mapping is scoped by the authenticated RFS URL's Canvas and is read-only: inspection does not create a thread, workload, binding, realization, or invocation. Callers continue the mapped conversation through the existing `POST /api/rfs/:canvasId/agent/:threadId/prompt` SSE endpoint.
 
 ## Anti-patterns

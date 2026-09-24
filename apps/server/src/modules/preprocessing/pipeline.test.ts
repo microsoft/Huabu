@@ -32,17 +32,22 @@ function deps(release: () => Promise<void>) {
   });
   const put = vi.fn().mockResolvedValue({ name: 'artifact_test.pdf' });
   const generateContentMeta = vi.fn();
+  const generateImageLabel = vi.fn();
   return {
     materialize,
     put,
     generateContentMeta,
+    generateImageLabel,
     value: {
       nodes: {
         canvasId: request.canvasId,
         read: async () => null,
       } as unknown as SpaceNodes,
       artifacts: { materialize, put } as unknown as BlobScope,
-      provider: { generateContentMeta } as unknown as ProviderManager,
+      provider: {
+        generateContentMeta,
+        generateImageLabel,
+      } as unknown as ProviderManager,
     },
   };
 }
@@ -160,6 +165,36 @@ describe('Question title delegation', () => {
 });
 
 describe('runPipeline artifact lease lifecycle', () => {
+  it('keeps external image-label failures retryable without marking enrichment complete', async () => {
+    const harness = deps(vi.fn());
+    harness.generateImageLabel.mockRejectedValueOnce(
+      new Error('Agent does not support image input'),
+    );
+    const result = await runPipeline(
+      {
+        ...request,
+        nodeType: 'image',
+        snapshot: { src: 'data:image/png;base64,aGVsbG8=' },
+      },
+      ['resolve_input', 'generate_label', 'build_patch'],
+      undefined,
+      undefined,
+      harness.value,
+    );
+    expect(harness.generateImageLabel).toHaveBeenCalledWith(
+      'data:image/png;base64,aGVsbG8=',
+      'canvas-test',
+    );
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: 'ENRICH_FAILED',
+        message: 'Agent does not support image input',
+      }),
+    );
+    expect(result.usedCapabilities).not.toContain('generate_label');
+    expect(result.patch).not.toHaveProperty('label');
+  });
+
   it('forwards Space identity to text tasks and keeps failed enrichment retryable', async () => {
     const harness = deps(vi.fn());
     harness.generateContentMeta.mockRejectedValueOnce(

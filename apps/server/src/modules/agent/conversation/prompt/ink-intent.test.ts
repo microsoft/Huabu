@@ -9,7 +9,10 @@ import {
   renderTurn,
 } from './build-prompt.js';
 import { MAX_INLINE_IMAGE_BYTES } from './image-inlining.js';
-import { INK_INTENT_DIRECTIVE } from './ink-intent.js';
+import {
+  INK_INTENT_DIRECTIVE,
+  EXTERNAL_INK_INTENT_DIRECTIVE,
+} from './ink-intent.js';
 import { ACP_PROFILE, ACP_SLASH_PROFILE, INTERNAL_PROFILE } from './profile.js';
 import { InkVisualPreparationError } from './required-ink-visuals.js';
 import * as artifactUtils from '../../../artifact/utils.js';
@@ -86,6 +89,19 @@ afterEach(() => {
 });
 
 describe('Ink-intent rendering', () => {
+  it('uses the external report procedure while preserving image bytes and grounding', async () => {
+    const parts = await renderTurn(
+      withGrounding(inkEnvelope()),
+      ACP_PROFILE,
+      OPTIONS,
+    );
+    expect(parts[0]).toEqual({
+      type: 'text',
+      text: EXTERNAL_INK_INTENT_DIRECTIVE,
+    });
+    expect(parts[0]).not.toEqual({ type: 'text', text: INK_INTENT_DIRECTIVE });
+    expect(parts.filter((part) => part.type === 'image')).toHaveLength(2);
+  });
   it.each([INTERNAL_PROFILE, ACP_PROFILE])(
     'renders hidden visible-Canvas grounding for %j',
     async (profile) => {
@@ -249,7 +265,7 @@ describe('Ink-intent rendering', () => {
       const parts = await renderTurn(inkEnvelope(), profile, OPTIONS);
       expect(parts).toContainEqual({
         type: 'text',
-        text: INK_INTENT_DIRECTIVE,
+        text: EXTERNAL_INK_INTENT_DIRECTIVE,
       });
       expect(parts).toContainEqual({
         type: 'image',
