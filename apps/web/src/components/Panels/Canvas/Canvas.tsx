@@ -32,8 +32,6 @@ import '@xyflow/react/dist/style.css';
 import {
   assignNodeZIndices,
   edgeZIndex,
-  getAbsolutePosition,
-  getNodeSize,
   indexById,
 } from '@huabu/shared/canvas-engine';
 
@@ -137,10 +135,7 @@ import { looksLikeUrl } from '../../../utils/io/media.ts';
 import { FrameNode } from '../../Nodes/frame/FrameNode.tsx';
 import { createQuestionNodeAndCompose } from '../../Nodes/question/questionCompose.ts';
 import { QuestionNode } from '../../Nodes/question/QuestionNode.tsx';
-import {
-  findSketchStrokesInPolygon,
-  isPointInFlowPolygon,
-} from '../../Nodes/sketch/sketchHitTest.ts';
+import { isPointInFlowPolygon } from '../../Nodes/sketch/sketchHitTest.ts';
 import { SketchNode } from '../../Nodes/sketch/SketchNode.tsx';
 import {
   CANCEL_SKETCH_GESTURE_EVENT,
@@ -745,93 +740,14 @@ const CanvasContent: React.FC<CanvasProps> = ({
   const {
     pointerHandlers: lassoPointerHandlers,
     previewPath: lassoPreviewPath,
-    previewNodeIds,
-    previewEdgeIds,
     isActive: isLassoActive,
     shiftScreenPoints: shiftLassoScreenPoints,
     cancel: cancelLasso,
   } = useCanvasLasso({
-    active: !pendingNodeType && tool === 'lasso',
+    active: !interactivityLocked && !pendingNodeType && tool === 'lasso',
+    scopeKey: canvasId,
     wrapperRef,
     rfInstanceRef,
-    edges,
-    // Stage 2 selection routing (D1=A), by node type:
-    //   - a sketch node is ALWAYS stroke-level — the lasso selects exactly
-    //     the strokes it captured. Capturing every stroke of a sketch just
-    //     means the whole thing is selected, but it stays a STROKE selection
-    //     (never a node selection); move a whole sketch as an object with
-    //     the Select tool instead.
-    //   - every other node type is selected whole (React Flow).
-    // The two can coexist in one lasso. A fresh drag calls this with empty
-    // args, clearing both.
-    onSelect: (nodeIds, flowPolygon) => {
-      const preview = useGesturePreviewStore.getState();
-      preview.clearSketchStrokeHighlight();
-      if (
-        nodeIds.length === 0 &&
-        flowPolygon.length === 0 &&
-        preview.inkSubmissionPreparing
-      ) {
-        return;
-      }
-      const strokeSelection =
-        flowPolygon.length >= 3 ? findSketchStrokesInPolygon(flowPolygon) : {};
-
-      // Lasso bbox in flow-space — used to drop "container" frames below.
-      let lassoBbox: {
-        x1: number;
-        y1: number;
-        x2: number;
-        y2: number;
-      } | null = null;
-      for (const p of flowPolygon) {
-        if (!lassoBbox) lassoBbox = { x1: p.x, y1: p.y, x2: p.x, y2: p.y };
-        else {
-          if (p.x < lassoBbox.x1) lassoBbox.x1 = p.x;
-          if (p.y < lassoBbox.y1) lassoBbox.y1 = p.y;
-          if (p.x > lassoBbox.x2) lassoBbox.x2 = p.x;
-          if (p.y > lassoBbox.y2) lassoBbox.y2 = p.y;
-        }
-      }
-
-      const sketchIdSet = new Set(
-        nodes.filter((n) => n.type === 'sketch').map((n) => n.id),
-      );
-      const nn = nodes as NestableNode[];
-      const nonSketchNodeIds = nodeIds.filter((id) => {
-        if (sketchIdSet.has(id)) return false;
-        // Lassoing INSIDE a frame selects its CONTENTS, not the frame
-        // itself: drop any frame whose bounds fully enclose the lasso (it
-        // is a container the loop was drawn within, not a target). A
-        // nested frame the loop actually encircles does NOT enclose the
-        // loop, so it stays selected.
-        const node = nodes.find((n) => n.id === id);
-        if (node?.type === 'frame' && lassoBbox) {
-          const abs = getAbsolutePosition(nn, id);
-          const size = getNodeSize(node);
-          if (
-            abs &&
-            abs.x <= lassoBbox.x1 &&
-            abs.y <= lassoBbox.y1 &&
-            abs.x + size.width >= lassoBbox.x2 &&
-            abs.y + size.height >= lassoBbox.y2
-          ) {
-            return false;
-          }
-        }
-        return true;
-      });
-
-      preview.setSketchStrokeSelection(strokeSelection);
-      // Retain the lasso loop for ANY non-empty selection (strokes and/or
-      // whole nodes) so the user can drag inside it to move the whole
-      // selection GoodNotes-style; drop it only when the lasso caught
-      // nothing.
-      const hasSelection =
-        Object.keys(strokeSelection).length > 0 || nonSketchNodeIds.length > 0;
-      preview.setSketchSelectionPolygon(hasSelection ? flowPolygon : null);
-      selectNodes(nonSketchNodeIds);
-    },
     inputMode,
   });
 
@@ -852,20 +768,6 @@ const CanvasContent: React.FC<CanvasProps> = ({
       useGesturePreviewStore.getState().clearSketchStrokeSelection();
     }
   }, [inkSubmissionPreparing, tool]);
-  // A sketch node is never whole-node selected by the lasso (it always
-  // yields stroke-level hits, R3), so it must not flash the whole-node
-  // preview box while the lasso passes over it — only its captured strokes
-  // highlight, and only on commit.
-  const lassoPreviewNodeIdSet = useMemo(() => {
-    const sketchIds = new Set(
-      nodes.filter((n) => n.type === 'sketch').map((n) => n.id),
-    );
-    return new Set(previewNodeIds.filter((id) => !sketchIds.has(id)));
-  }, [previewNodeIds, nodes]);
-  const lassoPreviewEdgeIdSet = useMemo(
-    () => new Set(previewEdgeIds),
-    [previewEdgeIds],
-  );
   const handleTouchTakeover = useCallback(() => {
     cancelLasso();
     window.dispatchEvent(new Event(CANCEL_SKETCH_GESTURE_EVENT));
@@ -902,11 +804,6 @@ const CanvasContent: React.FC<CanvasProps> = ({
     const previewById = new Map(previewNodes.map((node) => [node.id, node]));
     const result = nodes.map((node) => {
       const z = zByNode.get(node.id) ?? 0;
-      const wantsLassoClass = lassoPreviewNodeIdSet.has(node.id);
-      const baseClassName = node.className;
-      const nextClassName = wantsLassoClass
-        ? clsx(baseClassName, 'canvas-lasso-preview')
-        : baseClassName;
       // Transient slide-aside offset; absent for every node outside the
       // hovered structured frame, and for the dragged node itself.
       const previewedNode = previewById.get(node.id) ?? node;
@@ -924,7 +821,6 @@ const CanvasContent: React.FC<CanvasProps> = ({
       if (
         cached &&
         cached.zIndex === z &&
-        cached.className === nextClassName &&
         cached.draggable === touchDraggable &&
         cached.position === nextPosition &&
         cached.style === nextStyle &&
@@ -935,7 +831,6 @@ const CanvasContent: React.FC<CanvasProps> = ({
       }
 
       const needsWrap =
-        nextClassName !== baseClassName ||
         node.zIndex !== z ||
         node.draggable !== touchDraggable ||
         nextPosition !== node.position ||
@@ -944,7 +839,6 @@ const CanvasContent: React.FC<CanvasProps> = ({
       const wrapped = needsWrap
         ? {
             ...node,
-            className: nextClassName,
             zIndex: z,
             draggable: touchDraggable,
             position: nextPosition,
@@ -958,14 +852,7 @@ const CanvasContent: React.FC<CanvasProps> = ({
 
     zWrapCacheRef.current = nextCache;
     return result;
-  }, [
-    isNotMouse,
-    lassoPreviewNodeIdSet,
-    lastPointer,
-    nodes,
-    nodeGeometryPreviews,
-    zByNode,
-  ]);
+  }, [isNotMouse, lastPointer, nodes, nodeGeometryPreviews, zByNode]);
 
   // Override marker colors on selected edges so arrows match the selection
   // highlight color (--color-info). CSS cannot style SVG <marker> referenced
@@ -985,15 +872,12 @@ const CanvasContent: React.FC<CanvasProps> = ({
 
     const styleEdge = (e: (typeof edges)[number]): (typeof edges)[number] => {
       if (!infoColor) return e;
-      const isLassoPreviewSelected = lassoPreviewEdgeIdSet.has(e.id);
       const isNodeSelectionSelected = selectedEdgeIdSet.has(e.id);
       const shouldStaySelected =
-        !isBoxSelecting ||
+        (!isBoxSelecting && !isLassoActive) ||
         (selectedNodeIds.has(e.source) && selectedNodeIds.has(e.target));
       const isVisuallySelected =
-        isLassoPreviewSelected ||
-        isNodeSelectionSelected ||
-        (e.selected && shouldStaySelected);
+        isNodeSelectionSelected || (e.selected && shouldStaySelected);
 
       if (!isVisuallySelected) {
         if (!e.selected) return e;
@@ -1053,7 +937,7 @@ const CanvasContent: React.FC<CanvasProps> = ({
   }, [
     edges,
     isBoxSelecting,
-    lassoPreviewEdgeIdSet,
+    isLassoActive,
     selectedEdgeIdSet,
     selectedNodeIds,
     zByNode,

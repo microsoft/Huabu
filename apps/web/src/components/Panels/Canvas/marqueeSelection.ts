@@ -1,12 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import {
-  createAbsolutePositionGetter,
-  getNodeSize,
-  indexById,
-} from '@huabu/shared/canvas-engine';
-
+import { nodesInSelection } from './areaSelection';
 import {
   closestNodeElement,
   isEmptyPaneTarget,
@@ -49,30 +44,5 @@ export function rectangleBetween(start: XYPosition, end: XYPosition): Rect {
 
 /** Frames require full containment; other nodes require positive-area intersection. */
 export function nodesInMarquee(nodes: Node[], rect: Rect): string[] {
-  // This is the indexed implementation used by getAbsolutePosition, shared across the scan.
-  const absolutePosition = createAbsolutePositionGetter(indexById(nodes));
-  const right = rect.x + rect.width;
-  const bottom = rect.y + rect.height;
-  return nodes
-    .filter((node) => {
-      if (node.hidden || node.selectable === false) return false;
-      const position = absolutePosition(node.id);
-      const size = getNodeSize(node);
-      if (!position || size.width <= 0 || size.height <= 0) return false;
-      if (node.type === 'frame') {
-        return (
-          position.x >= rect.x &&
-          position.y >= rect.y &&
-          position.x + size.width <= right &&
-          position.y + size.height <= bottom
-        );
-      }
-      return (
-        position.x < right &&
-        position.x + size.width > rect.x &&
-        position.y < bottom &&
-        position.y + size.height > rect.y
-      );
-    })
-    .map((node) => node.id);
+  return nodesInSelection(nodes, { kind: 'rectangle', rect });
 }
