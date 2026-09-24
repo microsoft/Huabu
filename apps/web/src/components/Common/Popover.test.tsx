@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { act } from 'react-dom/test-utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { Button } from './Button';
 import { Popover } from './Popover';
 
 let root: Root | null = null;
@@ -19,6 +20,67 @@ afterEach(() => {
 });
 
 describe('Popover', () => {
+  it('dismisses before a canvas capture handler consumes an outside pointer press', async () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    const canvas = document.createElement('div');
+    document.body.appendChild(canvas);
+    const events: string[] = [];
+    canvas.addEventListener(
+      'pointerdown',
+      (event) => {
+        events.push('canvas');
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+      },
+      true,
+    );
+    root = createRoot(container);
+    await act(async () =>
+      root?.render(
+        <Popover onDismiss={() => events.push('dismiss')}>
+          <Button>Popover content</Button>
+        </Popover>,
+      ),
+    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    act(() =>
+      canvas.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })),
+    );
+    expect(events).toEqual(['dismiss', 'canvas']);
+  });
+
+  it('runs initial focus once after the anchored panel becomes visible', async () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    const reference = document.createElement('button');
+    container.appendChild(reference);
+    let panel: HTMLDivElement | null = null;
+    const focus = vi.fn(() => {
+      expect(panel?.style.visibility).toBe('visible');
+      panel?.querySelector('button')?.focus();
+    });
+    const renderPanel = () => (
+      <Popover
+        reference={reference}
+        contentRef={(element) => {
+          panel = element;
+        }}
+        onOpenAutoFocus={focus}
+      >
+        <Button>Destination</Button>
+      </Popover>
+    );
+    await act(async () => root?.render(renderPanel()));
+    expect(focus).toHaveBeenCalledOnce();
+    await act(async () => root?.render(renderPanel()));
+    expect(focus).toHaveBeenCalledOnce();
+    expect(document.activeElement?.textContent).toBe('Destination');
+  });
+
   it('updates the available width when a coordinate boundary changes', () => {
     container = document.createElement('div');
     document.body.appendChild(container);

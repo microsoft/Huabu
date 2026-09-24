@@ -160,7 +160,6 @@ export function useCanvasMarquee(options: Options) {
       id: 'mouse-marquee',
       canClaim: (event, ctx) =>
         optionsRef.current.enabled &&
-        !ctx.interactivityLocked &&
         !ctx.explicitToolActive &&
         event.pointerType === 'mouse' &&
         event.isPrimary &&

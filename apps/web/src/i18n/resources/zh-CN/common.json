@@ -63,7 +63,14 @@
   },
   "canvasControls": {
     "resetZoom": "重置缩放至 100%",
-    "zoomAria": "画布缩放 {{percentage}}%。重置至 100%"
+    "zoomAria": "画布缩放 {{percentage}}%。打开缩放菜单",
+    "zoomMenu": "画布缩放",
+    "zoomLevel": "缩放比例",
+    "zoomIn": "放大",
+    "zoomOut": "缩小",
+    "fitAll": "适应全部内容",
+    "fitSelection": "适应选中内容",
+    "invalidZoom": "请输入 {{min}}% 至 {{max}}% 之间的缩放比例。"
   },
   "navigation": {
     "backHome": "返回首页",

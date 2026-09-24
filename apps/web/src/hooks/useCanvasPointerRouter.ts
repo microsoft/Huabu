@@ -18,7 +18,6 @@ import type { ReactFlowInstance } from '@xyflow/react';
 
 interface CanvasPointerRouterOptions {
   inputMode: EffectiveInputMode;
-  interactivityLocked: boolean;
   explicitToolActive: boolean;
   onTouchTakeover: () => void;
   onEmptyCanvasTap: () => void;
@@ -78,7 +77,6 @@ export function useCanvasPointerRouter(
         wrapper,
         instance,
         inputMode: o.inputMode,
-        interactivityLocked: o.interactivityLocked,
         explicitToolActive: o.explicitToolActive,
         onTouchTakeover: o.onTouchTakeover,
         onEmptyCanvasTap: o.onEmptyCanvasTap,

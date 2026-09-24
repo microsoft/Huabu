@@ -136,6 +136,9 @@ export type PopoverProps = {
   /** Optional ref for accessing the rendered popover container element. */
   contentRef?: Ref<HTMLDivElement>;
 
+  /** Called once after the panel is positioned and visible, for initial focus. */
+  onOpenAutoFocus?: () => void;
+
   children: ReactNode;
 };
 
@@ -165,6 +168,7 @@ export const Popover: FC<PopoverProps> = ({
   style,
   container,
   contentRef,
+  onOpenAutoFocus,
   children,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -331,12 +335,13 @@ export const Popover: FC<PopoverProps> = ({
 
     // Delay listener to avoid catching the triggering event
     const timer = setTimeout(() => {
-      document.addEventListener('pointerdown', handlePointerDown);
+      // Canvas gesture handlers can consume pointer events before they bubble.
+      document.addEventListener('pointerdown', handlePointerDown, true);
     }, 0);
 
     return () => {
       clearTimeout(timer);
-      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('pointerdown', handlePointerDown, true);
     };
   }, [onDismiss, reference]);
 
@@ -357,6 +362,13 @@ export const Popover: FC<PopoverProps> = ({
   }, [onDismiss, dismissOnEscape]);
 
   const isMeasuring = clamped === null;
+  const visible = reference ? floating.isPositioned : !isMeasuring;
+  const initiallyFocused = useRef(false);
+  useLayoutEffect(() => {
+    if (!visible || initiallyFocused.current || !onOpenAutoFocus) return;
+    initiallyFocused.current = true;
+    onOpenAutoFocus();
+  }, [visible, onOpenAutoFocus]);
   const portalContainer = container ?? parentContainer ?? document.body;
 
   const contextValue = useMemo(() => contentElement, [contentElement]);

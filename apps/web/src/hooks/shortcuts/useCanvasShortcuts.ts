@@ -15,6 +15,8 @@ import {
 } from '@/components/Nodes/spacePreview/spaceShortcutEvents';
 import { isVideoControlTarget } from '@/components/Nodes/video/videoInteraction';
 import { EDIT_EDGE_LABEL_EVENT } from '@/components/Panels/Canvas/edges/LabelledEdge';
+import { fitCanvasContent } from '@/components/Panels/CanvasLayerPanel/focusNodesOnCanvas';
+import { matchesShortcut } from '@/config/shortcuts';
 
 import {
   isEditableTarget,
@@ -309,6 +311,23 @@ export function useCanvasShortcuts(
       if (e.target instanceof Element && isVideoControlTarget(e.target)) return;
       const mod = e.metaKey || e.ctrlKey;
       const editable = isEditableTarget(e.target);
+
+      if (!editable && !e.isComposing && rfInstanceRef.current) {
+        if (matchesShortcut(e, 'view.resetZoom')) {
+          e.preventDefault();
+          void rfInstanceRef.current.zoomTo(1);
+          return;
+        }
+        const fitAll = matchesShortcut(e, 'view.fitAll');
+        if (fitAll || matchesShortcut(e, 'view.fitSelection')) {
+          e.preventDefault();
+          void fitCanvasContent(
+            rfInstanceRef.current,
+            fitAll ? 'all' : 'selection',
+          );
+          return;
+        }
+      }
 
       // [ and ] for z-order — no modifier required
       if ((key === '[' || key === '【') && !editable) {

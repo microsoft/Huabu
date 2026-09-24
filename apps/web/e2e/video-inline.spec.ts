@@ -137,7 +137,6 @@ async function mountVideo(page: Page) {
       useCanvasShortcuts({ rfInstanceRef: rfRef, mousePositionRef });
       useCanvasPointerRouter(wrapperRef, rfRef, {
         inputMode: 'pen',
-        interactivityLocked: false,
         explicitToolActive: false,
         onTouchTakeover: () => {},
         onEmptyCanvasTap: () => {},
