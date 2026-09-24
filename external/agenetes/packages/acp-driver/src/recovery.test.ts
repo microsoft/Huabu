@@ -377,6 +377,37 @@ describe('ACP durable history recovery', () => {
     expect(sessionMocks.reportEntryState).not.toHaveBeenCalled();
   });
 
+  it('does not synthesize user-visible text for an empty turn', async () => {
+    const { entry } = sessionEntry();
+    sessionMocks.ensureAcpSession.mockResolvedValue(entry);
+    const handle = new AcpAgentHandle(spec, {
+      recovery: {
+        authorizeHistoryLoad: vi.fn(async () => ({
+          allowed: true as const,
+          estimatedSize: 0,
+        })),
+      },
+    });
+
+    const events = [];
+    for await (const event of handle.run(submission, {
+      overlay: emptyAcpOverlay(),
+      logger,
+    })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      {
+        type: 'done',
+        data: {
+          message: '',
+          meta: { stopReason: 'end_turn' },
+        },
+      },
+    ]);
+  });
+
   it('persists a command-created session without consuming its preamble', async () => {
     const { entry, prompt } = sessionEntry();
     sessionMocks.ensureAcpSession.mockResolvedValue(entry);
