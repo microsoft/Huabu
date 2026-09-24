@@ -59,8 +59,8 @@ export default defineConfig([
     // Cleaning here would race the parallel agentlet config below because
     // its output directory is nested under this one.
     clean: false,
-    // Target the Node version shipped with Electron 35 (~Node 22)
-    target: 'node22',
+    // Target the Node 24 baseline used by the server and Electron 43.
+    target: 'node24',
     // Many bundled CJS packages call require('fs'), require('path'), etc.
     // In an ESM output file, `require` is not defined. This banner injects a
     // real `require` function so those CJS-style dynamic requires work correctly.
@@ -117,7 +117,7 @@ export default defineConfig([
     splitting: false,
     sourcemap: false,
     clean: false,
-    target: 'node22',
+    target: 'node24',
     banner: BANNER,
     esbuildOptions(options) {
       options.platform = 'node';

@@ -24,7 +24,7 @@
  * via the `HUABU_ALLOWED_HOSTS` environment variable (comma-separated
  * hostnames, no port; e.g. `192.168.1.50,huabu.team-a.example`).
  *
- * The CORS allowlist is derived from the same set — see `app.ts`.
+ * The CORS allowlist is derived from the same set — see `cors.ts`.
  */
 
 export { hostGuardPlugin, resolveAllowedHostnames } from './host-guard.js';
