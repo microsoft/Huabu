@@ -81,13 +81,19 @@ function acceptsTitle(
 
 export interface ConversationTitleDependencies {
   questions?: typeof conversationTitleNodeStore;
-  readRecord: (canvasId: string, threadId: string) => ThreadRecord | undefined;
+  readRecord: (
+    canvasId: string,
+    threadId: string,
+  ) => ThreadRecord | undefined | Promise<ThreadRecord | undefined>;
   updateHostMetadata: (
     canvasId: string,
     threadId: string,
     patch: Record<string, unknown>,
-  ) => void;
-  firstPrompt: (canvasId: string, threadId: string) => string | undefined;
+  ) => void | Promise<void>;
+  firstPrompt: (
+    canvasId: string,
+    threadId: string,
+  ) => string | undefined | Promise<string | undefined>;
   generate: (prompt: string, canvasId: string) => Promise<string | undefined>;
   notifications: (
     canvasId: string,
@@ -99,17 +105,22 @@ export interface ConversationTitleDependencies {
 const provider = new ProviderManager();
 const defaults: ConversationTitleDependencies = {
   questions: conversationTitleNodeStore,
-  readRecord: (canvasId, threadId) =>
-    agenetes.record(canvasAcpNamespace(canvasId), threadId),
-  updateHostMetadata: (canvasId, threadId, patch) => {
-    agenetes.updateHostMetadata(canvasAcpNamespace(canvasId), threadId, patch);
+  readRecord: async (canvasId, threadId) =>
+    await agenetes.record(canvasAcpNamespace(canvasId), threadId),
+  updateHostMetadata: async (canvasId, threadId, patch) => {
+    await agenetes.updateHostMetadata(
+      canvasAcpNamespace(canvasId),
+      threadId,
+      patch,
+    );
   },
-  firstPrompt: (canvasId, threadId) => {
-    for (const turn of agenetes.history(
+  firstPrompt: async (canvasId, threadId) => {
+    const { turns } = await agenetes.history(
       canvasAcpNamespace(canvasId),
       threadId,
       { withTail: true },
-    ).turns) {
+    );
+    for (const turn of turns) {
       const text = chatEnvelopeFromSubmission(turn.request)?.user.text;
       if (text?.trim()) return text;
     }
@@ -148,11 +159,13 @@ export class ConversationTitleService {
   async get(canvasId: string, threadId: string): Promise<ConversationTitle> {
     const question = await this.deps.questions?.read(canvasId, threadId);
     if (question) return question.title;
-    const record = this.deps.readRecord(canvasId, threadId);
+    const record = await this.deps.readRecord(canvasId, threadId);
     const effective = effectiveConversationTitle(record);
     if (!record || effective.title) return effective;
     const title = normalizeConversationTitle(
-      extractTitleFromText(this.deps.firstPrompt(canvasId, threadId) ?? ''),
+      extractTitleFromText(
+        (await this.deps.firstPrompt(canvasId, threadId)) ?? '',
+      ),
     );
     return { title, source: title ? 'fallback' : null };
   }
@@ -274,7 +287,7 @@ export class ConversationTitleService {
     )
       return;
     const record = threadId
-      ? this.deps.readRecord(canvasId, threadId)
+      ? await this.deps.readRecord(canvasId, threadId)
       : undefined;
     if (!record && !question) return;
     const saved = question?.title ?? effectiveConversationTitle(record);
@@ -286,7 +299,7 @@ export class ConversationTitleService {
       return;
     const firstPrompt =
       (threadId && record
-        ? this.deps.firstPrompt(canvasId, threadId)
+        ? await this.deps.firstPrompt(canvasId, threadId)
         : undefined) ??
       (question?.content.trim() || prompt);
     if (!saved.title || (question && saved.source === 'fallback')) {
@@ -343,7 +356,7 @@ export class ConversationTitleService {
     void (async () => {
       try {
         const stream = this.deps.notifications(canvasId, threadId);
-        const record = this.deps.readRecord(canvasId, threadId);
+        const record = await this.deps.readRecord(canvasId, threadId);
         // Register before replaying persisted state so bootstrap updates are
         // buffered, including a blank update following a useful cached title.
         try {
@@ -420,13 +433,13 @@ export class ConversationTitleService {
       );
     }
     if (!threadId) return false;
-    const record = this.deps.readRecord(canvasId, threadId);
+    const record = await this.deps.readRecord(canvasId, threadId);
     if (!record) return false;
     const current = effectiveConversationTitle(record);
     if (!acceptsTitle(current, source)) return false;
     const saved = storedTitle(record);
     if (saved.title !== title || saved.source !== source) {
-      this.deps.updateHostMetadata(canvasId, threadId, {
+      await this.deps.updateHostMetadata(canvasId, threadId, {
         [CONVERSATION_TITLE_METADATA_KEY]: { title, source },
       });
     }

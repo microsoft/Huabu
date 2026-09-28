@@ -47,6 +47,22 @@ const CanvasPage = lazy(() => import('./pages/CanvasPage/CanvasPage.tsx'));
 const playgroundRoutes = import.meta.env.DEV
   ? [
       {
+        path: '/playground/space-previews',
+        lazy: async () => ({
+          Component: (
+            await import('./pages/playground/SpacePreviewDesignPlaygroundPage')
+          ).default,
+        }),
+      },
+      {
+        path: '/playground/node-toolbars',
+        lazy: async () => ({
+          Component: (
+            await import('./pages/playground/NodeToolbarPlaygroundPage')
+          ).default,
+        }),
+      },
+      {
         path: '/playground/components',
         lazy: async () => ({
           Component: (await import('./pages/playground/ComponentShowcasePage'))
@@ -61,10 +77,10 @@ const playgroundRoutes = import.meta.env.DEV
         }),
       },
       {
-        path: '/playground/chat-performance',
+        path: '/playground/question-nodes',
         lazy: async () => ({
           Component: (
-            await import('./pages/playground/ChatPerformancePlaygroundPage')
+            await import('./pages/playground/QuestionDesignPlaygroundPage')
           ).default,
         }),
       },
@@ -76,8 +92,31 @@ const playgroundRoutes = import.meta.env.DEV
           ).default,
         }),
       },
+      {
+        path: '/playground/design',
+        lazy: async () => ({
+          Component: (
+            await import('./pages/playground/FrameDesignPlaygroundPage')
+          ).default,
+        }),
+      },
     ]
   : [];
+
+const chatPerformanceRoutes =
+  import.meta.env.DEV ||
+  import.meta.env.VITE_CHAT_PERFORMANCE_FIXTURE === 'true'
+    ? [
+        {
+          path: '/playground/chat-performance',
+          lazy: async () => ({
+            Component: (
+              await import('./pages/playground/ChatPerformancePlaygroundPage')
+            ).default,
+          }),
+        },
+      ]
+    : [];
 
 /**
  * Carries the "still bootstrapping the workspace store" flag from the
@@ -296,6 +335,7 @@ export default function App() {
             // redirects to "/" in managed mode.
             { path: '/setup', element: <SetupRoute /> },
             ...playgroundRoutes,
+            ...chatPerformanceRoutes,
             {
               element: <WorkspaceGuardLayout />,
               children: [

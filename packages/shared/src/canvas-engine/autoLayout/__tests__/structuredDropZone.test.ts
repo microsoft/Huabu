@@ -180,7 +180,7 @@ describe('describeStructuredDropZone context', () => {
     const zone = describeStructuredDropZone(
       nodes,
       'frame',
-      { x: 30, y: 32 },
+      { x: 30, y: 80 },
       'row',
       2,
       dragged,
@@ -211,7 +211,7 @@ describe('describeStructuredDropZone context', () => {
     const zone = describeStructuredDropZone(
       nodes,
       'frame',
-      { x: 152, y: 80 },
+      { x: 152, y: 144 },
       'grid',
       2,
       movedDragged,
@@ -233,9 +233,12 @@ describe('describeStructuredDropZone context', () => {
       frameSize: solved?.frameSize,
     });
     expect(zone?.context.axis).toBe('grid');
+    const sameRowPosition = solved?.childPositions.get('same-row');
+    expect(sameRowPosition).toBeDefined();
+    if (!sameRowPosition) throw new Error('Expected same-row position');
     expect(zone?.reflow).toContainEqual({
       id: 'same-row',
-      ...solved!.childPositions.get('same-row')!,
+      ...sameRowPosition,
     });
   });
 
@@ -251,7 +254,7 @@ describe('describeStructuredDropZone context', () => {
     const zone = describeStructuredDropZone(
       nodes,
       'frame',
-      { x: 152, y: 80 },
+      { x: 152, y: 144 },
       'grid',
       2,
       movedDragged,
@@ -296,7 +299,7 @@ describe('describeStructuredDropZone context', () => {
     const zone = describeStructuredDropZone(
       nodes,
       'frame',
-      { x: 30, y: 32 },
+      { x: 30, y: 80 },
       'row',
       2,
       dragged,
@@ -317,7 +320,7 @@ describe('describeStructuredDropZone context', () => {
     const zone = describeStructuredDropZone(
       nodes,
       'frame',
-      { x: 152, y: 24 },
+      { x: 152, y: 72 },
       'grid',
       2,
       movedDragged,
@@ -351,7 +354,7 @@ describe('describeStructuredDropZone context', () => {
     const zone = describeStructuredDropZone(
       nodes,
       'frame',
-      { x: 152, y: 80 },
+      { x: 152, y: 144 },
       'grid',
       2,
       { ...dragged, x: 112, y: 72 },
@@ -359,7 +362,7 @@ describe('describeStructuredDropZone context', () => {
 
     // The swap is expressed by the reflow itself — the occupant slides
     // into the cell the dragged node vacated.
-    expect(zone?.reflow).toContainEqual({ id: 'occupant', x: 16, y: 16 });
+    expect(zone?.reflow).toContainEqual({ id: 'occupant', x: 20, y: 64 });
   });
 });
 
@@ -376,7 +379,7 @@ describe('describeStructuredDropZone reflow', () => {
     const zone = describeStructuredDropZone(
       nodes,
       'frame',
-      { x: 152, y: 80 },
+      { x: 152, y: 144 },
       'grid',
       2,
       movedDragged,

@@ -167,10 +167,13 @@ export type AcpSessionMetaStreamEvent = Extract<
 
 type AcpSessionMetaSink = (event: AcpSessionMetaStreamEvent) => void;
 const acpSessionMetaSinks = new Map<string, AcpSessionMetaSink>();
-const turnAcceptanceSinks = new Map<
-  string,
-  (accepted: AgentTurnAccepted) => void
->();
+interface TurnAcceptanceSink {
+  afterTurnStartSeq: number;
+  accept: (accepted: AgentTurnAccepted) => void;
+  reject: () => void;
+}
+const turnAcceptanceSinks = new Map<string, TurnAcceptanceSink>();
+const latestAcceptanceSeqByThread = new Map<string, number>();
 const hiddenInkIntentToolCalls = new Map<
   string,
   { messageId?: string; inferredIntent?: string }
@@ -200,6 +203,39 @@ export function parseInferredInkIntent(rawInput: unknown): string | undefined {
 
 function turnKey(canvasId: string, threadId: string): string {
   return `${canvasId}\0${threadId}`;
+}
+
+export function observeAgentTurnAcceptance(
+  canvasId: string,
+  accepted: AgentTurnAccepted,
+): void {
+  const key = turnKey(canvasId, accepted.threadId);
+  const latestSeq = latestAcceptanceSeqByThread.get(key) ?? 0;
+  if (accepted.turnStartSeq <= latestSeq) return;
+  latestAcceptanceSeqByThread.set(key, accepted.turnStartSeq);
+  const sink = turnAcceptanceSinks.get(key);
+  if (!sink || accepted.turnStartSeq <= sink.afterTurnStartSeq) return;
+  sink.accept(accepted);
+  if (turnAcceptanceSinks.get(key) === sink) {
+    turnAcceptanceSinks.delete(key);
+  }
+}
+
+function rejectAgentTurnAcceptance(canvasId: string, threadId: string): void {
+  const key = turnKey(canvasId, threadId);
+  const sink = turnAcceptanceSinks.get(key);
+  if (!sink) return;
+  turnAcceptanceSinks.delete(key);
+  try {
+    sink.reject();
+  } catch (error) {
+    console.error('Agent acceptance rejection callback failed', error);
+  }
+}
+
+export function resetAgentTurnAcceptanceObserversForTests(): void {
+  turnAcceptanceSinks.clear();
+  latestAcceptanceSeqByThread.clear();
 }
 
 export function registerAcpSessionMetaSink(
@@ -488,7 +524,9 @@ export function handleStreamEvent(
   // thread that issued the request.
   const ownerMessages = selectThreadMessages(state, ctx.threadId);
 
-  if (event.type === 'text_delta' || event.type === 'thinking_delta') {
+  if (event.type === 'done') {
+    state.markTurnCompleted(ctx.threadId, ctx.assistantId);
+  } else if (event.type === 'text_delta' || event.type === 'thinking_delta') {
     const delta = event.data.content;
     if (!delta) return;
     const kind: AssistantSegment['kind'] =
@@ -725,6 +763,7 @@ export interface AgentTurnCallbacks {
   canDispatch?: () => boolean;
   onStarted?: () => void;
   onAccepted?: (accepted: AgentTurnAccepted) => void;
+  onAcceptanceRejected?: () => void;
 }
 
 export interface AgentTurnResult {
@@ -910,6 +949,14 @@ export async function dispatchAgentTurn(
       selectedNodeIds: sentSelectedNodeIds,
       selectedStrokeIds: sentSelectedStrokeIds,
     } = sourceMessageMetadata(canvasContext);
+    const acceptanceKey = turnKey(requestScope.canvasId, threadId);
+    if (turnAcceptanceSinks.has(acceptanceKey)) {
+      result.status = 'busy';
+      result.error = new Error(
+        'The previous Agent turn is still awaiting acceptance reconciliation',
+      );
+      return;
+    }
     const streamClaim = claimAgentStream(
       requestScope.canvasId,
       threadId,
@@ -1035,8 +1082,12 @@ export async function dispatchAgentTurn(
         console.error('Agent acceptance callback failed', error);
       }
     };
-    const acceptanceKey = turnKey(requestScope.canvasId, threadId);
-    turnAcceptanceSinks.set(acceptanceKey, acceptTurn);
+    const acceptanceSink: TurnAcceptanceSink = {
+      afterTurnStartSeq: latestAcceptanceSeqByThread.get(acceptanceKey) ?? 0,
+      accept: acceptTurn,
+      reject: () => callbacks.onAcceptanceRejected?.(),
+    };
+    turnAcceptanceSinks.set(acceptanceKey, acceptanceSink);
     // Make sure any buffered behavioural events have hit the server
     // before the agent builds its request context. Failures are
     // swallowed inside the flush helper — we never want a transient
@@ -1068,7 +1119,7 @@ export async function dispatchAgentTurn(
         agentMode,
         {
           onAccepted: (accepted) => {
-            acceptTurn(accepted);
+            observeAgentTurnAcceptance(requestScope.canvasId, accepted);
           },
           onEvent: (event: AgentStreamEvent) => {
             if (streamClaim.signal.aborted) return;
@@ -1161,7 +1212,12 @@ export async function dispatchAgentTurn(
           error instanceof Error ? error : new Error(String(error));
       } finally {
         clearHiddenIntentCalls(threadId);
-        if (turnAcceptanceSinks.get(acceptanceKey) === acceptTurn) {
+        const retainForReconciliation =
+          result.status === 'unknown' && !result.accepted;
+        if (
+          !retainForReconciliation &&
+          turnAcceptanceSinks.get(acceptanceKey) === acceptanceSink
+        ) {
           turnAcceptanceSinks.delete(acceptanceKey);
         }
         setThreadLoading(threadId, false);
@@ -1190,9 +1246,9 @@ export function stopAgentTurn(session: ChatSession): void {
     .then((response) => {
       if (!response.stopped) return;
       if (response.acceptance) {
-        turnAcceptanceSinks.get(turnKey(scopedCanvasId, tid))?.(
-          response.acceptance,
-        );
+        observeAgentTurnAcceptance(scopedCanvasId, response.acceptance);
+      } else {
+        rejectAgentTurnAcceptance(scopedCanvasId, tid);
       }
       abortAgentStreamClaim(scopedCanvasId, tid);
       setThreadLoading(tid, false);

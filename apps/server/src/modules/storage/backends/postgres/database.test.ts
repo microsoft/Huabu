@@ -8,7 +8,12 @@ import { POSTGRES_MIGRATIONS } from './schema.js';
 const pg = vi.hoisted(() => {
   const query = vi.fn();
   const release = vi.fn();
-  const client = { query, release };
+  // A checked-out client is an EventEmitter in `pg`, and the adapter listens
+  // on it for the duration of the checkout so an unexpected disconnection
+  // cannot raise an unhandled 'error' event. The double models that surface.
+  const on = vi.fn();
+  const removeListener = vi.fn();
+  const client = { query, release, on, removeListener };
   const pool = { query: vi.fn(), connect: vi.fn(), end: vi.fn(), on: vi.fn() };
   return { query, release, client, pool };
 });

@@ -7,8 +7,8 @@
  *
  * This is the point where the ownership inversion becomes real. An auto
  * node's `style.height` is always a number, but on disk that number
- * carries no authority: it is re-derived from {@link AutoHeightHint} every
- * time the canvas is loaded, by whichever runtime loaded it. A client
+ * is re-derived from current {@link AutoHeightHint} values on load, or
+ * retained only as a stale seed until remeasurement. A client
  * that never renders the node still gets a usable footprint, and the
  * headless engine — which has no DOM to measure with — gets one too.
  *
@@ -34,7 +34,20 @@ import type { Node } from '@xyflow/react';
  */
 export function resolveAutoLayoutHeight(node: Node): number {
   const policy = getHeightPolicy(node.type);
-  const { hint } = readAutoHeightHint(node);
+  const { hint, freshness } = readAutoHeightHint(node);
+
+  // A width/content/layout-stale hint cannot predict reflow. Keep the last
+  // numeric footprint until a real measurement arrives, including on load.
+  const previousHeight = node.style?.height;
+  if (
+    policy.kind === 'toggleable' &&
+    freshness !== 'current' &&
+    typeof previousHeight === 'number' &&
+    Number.isFinite(previousHeight) &&
+    previousHeight > 0
+  ) {
+    return previousHeight;
+  }
 
   const intrinsic =
     hint?.intrinsicHeight ??

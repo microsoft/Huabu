@@ -13,7 +13,7 @@ import {
   type Request,
 } from '@playwright/test';
 
-import { openNewCanvas, paneCenter, readViewportTransform } from './helpers';
+import { openNewCanvas, paneCenter } from './helpers';
 import { parseHuabuClipboard } from '../src/utils/io/clipboard';
 
 import type {
@@ -60,6 +60,7 @@ const test = base.extend<{ audit: void }>({
         if (
           url.origin !== new URL(baseURL).origin ||
           (request.method() === 'POST' &&
+            url.pathname !== '/api/agent/threads/titles/query' &&
             /^\/api\/(agent(?:\/|$)|acp\/.*(?:prompt|run|invoke))/.test(
               url.pathname,
             ))
@@ -71,7 +72,9 @@ const test = base.extend<{ audit: void }>({
         if (url.pathname.startsWith('/api/'))
           requests.push(`${request.method()} ${url.pathname}`);
         if (
-          /\/api\/canvas\/[^/]+\/references(?:\/|$)/.test(url.pathname) ||
+          /\/api\/canvas\/[^/]+\/(?:references|preview-scene)(?:\/|$)/.test(
+            url.pathname,
+          ) ||
           request.postData()?.includes('SET_PORTAL_NODE_PINS')
         )
           forbidden.push(request.url());
@@ -139,7 +142,7 @@ const test = base.extend<{ audit: void }>({
       });
       expect(
         forbidden,
-        'No retired API, remote service, or Agent execution',
+        'No retired API, preview scene, remote service, or Agent execution',
       ).toEqual([]);
       expect(errors, 'No browser errors or failed HTTP responses').toEqual([]);
     },
@@ -208,7 +211,10 @@ async function pasteNote(page: Page, content: string) {
       }),
     );
   }, content);
-  const note = page.locator('.react-flow__node-note').last();
+  const note = page
+    .locator('.react-flow__node-note')
+    .filter({ hasText: content.split('\n')[0] })
+    .last();
   await expect(note).toBeVisible();
   await expect(note.locator('.ProseMirror')).toContainText(
     content.split('\n')[0],
@@ -232,19 +238,19 @@ async function drag(
   locator: Locator,
   dx: number,
   dy: number,
-  header = false,
+  offsetY?: number,
 ) {
   const box = await locator.boundingBox();
   if (!box) throw new Error('Drag target has no bounding box');
   const x = box.x + box.width / 2;
-  const y = box.y + (header ? 20 : box.height / 2);
+  const y = box.y + (offsetY ?? box.height / 2);
   await page.mouse.move(x, y);
   await page.mouse.down();
   await page.mouse.move(x + dx, y + dy, { steps: 14 });
   await page.mouse.up();
 }
 
-test('World membership, Open Space, live Note refresh, and test-Space deletion', async ({
+test('World membership, Open Space, shortcut metadata refresh, and test-Space deletion', async ({
   page,
 }, testInfo) => {
   await openNewCanvas(page);
@@ -257,6 +263,7 @@ test('World membership, Open Space, live Note refresh, and test-Space deletion',
   await expect
     .poll(async () => (await contentOf(page, sourceId, noteId)).content)
     .toContain('Before refresh marker');
+  const sourceTitle = (await snapshot(page, sourceId)).title;
   await openNewCanvas(page);
   const secondId = canvasId(page);
   const worldId = await goToWorld(page);
@@ -277,9 +284,14 @@ test('World membership, Open Space, live Note refresh, and test-Space deletion',
     (node) => node.data.targetCanvasId === sourceId,
   )!.id;
   const preview = page.locator(`.react-flow__node[data-id="${previewId}"]`);
-  await expect(preview.locator('[data-preview-adaptive-text]')).toContainText(
-    'Before refresh marker',
+  const body = preview.locator('[data-space-shortcut]');
+  await expect(body).toHaveAttribute('data-target-status', 'ready');
+  await expect(body).toContainText(sourceTitle);
+  await expect(body.locator('[data-space-shortcut-summary]')).toContainText(
+    '1 node',
   );
+  await expect(preview).not.toContainText('Before refresh marker');
+  await expect(preview.locator('[data-preview-adaptive-text]')).toHaveCount(0);
   await expect(
     preview.locator(
       '.ProseMirror, textarea, [contenteditable="true"], .react-flow__node',
@@ -288,20 +300,18 @@ test('World membership, Open Space, live Note refresh, and test-Space deletion',
   await assertNoRetiredControls(page);
   await page.getByRole('button', { name: 'Add Content', exact: true }).click();
   await expect(
-    page.getByText('Add Space Preview', { exact: true }),
+    page.getByText('Add Space Shortcut', { exact: true }),
   ).toHaveCount(0);
   await assertNoRetiredControls(page);
   await page.keyboard.press('Escape');
-  await preview
-    .getByRole('button', { name: 'Open Space', exact: true })
-    .click();
+  await body.click();
+  await page.getByRole('button', { name: 'Open Space', exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/canvas/${sourceId}$`));
   await expect(page.locator('.react-flow__node-note')).toContainText(
     'Before refresh marker',
   );
 
-  // Two actual tabs: edit the source while the World stays mounted so its
-  // polling cache, not navigation or injected store state, refreshes the scene.
+  // Refresh target metadata on focus without projecting source content.
   await goToWorld(page);
   const source = await page.context().newPage();
   await source.goto(`/canvas/${sourceId}`);
@@ -314,13 +324,20 @@ test('World membership, Open Space, live Note refresh, and test-Space deletion',
   await expect
     .poll(async () => (await contentOf(source, sourceId, noteId)).content)
     .toContain('After refresh marker');
+  await source.keyboard.press('Escape');
+  await source
+    .locator('.react-flow__pane')
+    .click({ position: { x: 40, y: 100 } });
+  await pasteNote(source, 'Second source note\n\nMetadata refresh marker');
   await page.bringToFront();
-  await expect(preview.locator('[data-preview-adaptive-text]')).toContainText(
-    'After refresh marker',
-    { timeout: 30_000 },
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await expect(body.locator('[data-space-shortcut-summary]')).toContainText(
+    '2 nodes',
   );
+  await expect(preview).not.toContainText('After refresh marker');
+  await expect(preview.locator('[data-preview-adaptive-text]')).toHaveCount(0);
   await page.screenshot({
-    path: testInfo.outputPath('world-live-source-update.png'),
+    path: testInfo.outputPath('world-shortcut-metadata-update.png'),
   });
   await source.close();
 
@@ -356,11 +373,11 @@ test('World membership, Open Space, live Note refresh, and test-Space deletion',
   testInfo.annotations.push({
     type: 'functional-checks',
     description:
-      'Membership, inert projection, Open Space, live source editing, deletion and reload completed.',
+      'Membership, shortcut metadata, Open Space, source-content isolation, deletion and reload completed without scene requests.',
   });
 });
 
-test('World preview move, resize, reload, and local viewport isolation', async ({
+test('World shortcut move, horizontal resize, reload, and source isolation', async ({
   page,
 }, testInfo) => {
   await openNewCanvas(page);
@@ -370,9 +387,15 @@ test('World preview move, resize, reload, and local viewport isolation', async (
   const initial = (await snapshot(page, worldId)).state.nodes.find(
     (node) => node.data.targetCanvasId === sourceId,
   )!;
+  const sourceBefore = await snapshot(page, sourceId);
   const preview = page.locator(`.react-flow__node[data-id="${initial.id}"]`);
-  await expect(preview.getByRole('application')).toBeVisible();
-  await drag(page, preview, 80, 45, true);
+  const body = preview.locator('[data-space-shortcut]');
+  await expect(body).toHaveAttribute('data-target-status', 'ready');
+  await page
+    .getByRole('button', { name: /Canvas zoom .*Open zoom menu/ })
+    .click();
+  await page.getByRole('menuitem', { name: 'Reset zoom to 100%' }).click();
+  await drag(page, body, 80, 45);
   await expect
     .poll(
       async () =>
@@ -384,11 +407,12 @@ test('World preview move, resize, reload, and local viewport isolation', async (
   const moved = (await snapshot(page, worldId)).state.nodes.find(
     (node) => node.id === initial.id,
   )!;
-  const handle = preview.locator(
-    '.react-flow__resize-control.bottom.right.handle',
-  );
+  await body.click();
+  await expect(preview.locator('.node-resize-edge')).toHaveCount(2);
+  await expect(preview.locator('.node-resize-corner')).toHaveCount(0);
+  const handle = preview.locator('.node-resize-edge.right');
   await expect(handle).toBeVisible();
-  await drag(page, handle, 90, 55);
+  await drag(page, handle, 90, 0, 20);
   await expect
     .poll(
       async () =>
@@ -403,12 +427,11 @@ test('World preview move, resize, reload, and local viewport isolation', async (
   expect(Number(resized.style!.width)).toBeGreaterThan(
     Number(moved.style!.width),
   );
-  expect(Number(resized.style!.height)).toBeGreaterThan(
-    Number(moved.style!.height),
-  );
+  expect(resized.data.widthMode).toBe('fixed');
+  expect(resized.style?.height).toBeUndefined();
   await waitForWrites(page);
   await page.reload();
-  await expect(preview.getByRole('application')).toBeVisible();
+  await expect(body).toHaveAttribute('data-target-status', 'ready');
   const persisted = (await snapshot(page, worldId)).state.nodes.find(
     (node) => node.id === initial.id,
   )!;
@@ -417,41 +440,20 @@ test('World preview move, resize, reload, and local viewport isolation', async (
     style: resized.style,
   });
   await expect(preview).toHaveCSS('width', `${resized.style!.width}px`);
-  await expect(preview).toHaveCSS('height', `${resized.style!.height}px`);
-
-  const hostBefore = await snapshot(page, worldId);
-  const sourceBefore = await snapshot(page, sourceId);
-  const hostTransform = await readViewportTransform(page);
-  const viewport = preview.getByRole('application');
-  const svg = viewport.locator('svg').first();
-  const originalView = await svg.getAttribute('viewBox');
-  await viewport.focus();
-  await page.keyboard.press('ArrowRight');
-  await page.keyboard.press('+');
-  await expect(svg).not.toHaveAttribute('viewBox', originalView!);
-  const changedView = await svg.getAttribute('viewBox');
-  await page.keyboard.press('Escape');
-  expect(await readViewportTransform(page)).toBe(hostTransform);
-  await expect
-    .poll(() =>
-      page.evaluate((key) => {
-        return JSON.parse(localStorage.getItem(key) ?? '{}').viewport?.zoom;
-      }, `huabu.spacePreviewViewport.${worldId}.${initial.id}`),
-    )
-    .toBe(1.2);
-  await waitForWrites(page);
-  await page.reload();
-  await expect(svg).toHaveAttribute('viewBox', changedView!);
+  expect(
+    await preview.evaluate((element) => element.clientHeight),
+  ).toBeLessThanOrEqual(138);
+  await expect(preview.getByRole('application')).toHaveCount(0);
+  await expect(preview.locator('[data-preview-adaptive-text]')).toHaveCount(0);
   expect(await snapshot(page, sourceId)).toEqual(sourceBefore);
-  expect(await snapshot(page, worldId)).toEqual(hostBefore);
   await assertNoRetiredControls(page);
   await page.screenshot({
-    path: testInfo.outputPath('preview-persisted-geometry.png'),
+    path: testInfo.outputPath('shortcut-persisted-geometry.png'),
   });
   testInfo.annotations.push({
     type: 'functional-checks',
     description:
-      'Move, resize, persisted geometry, keyboard pan/zoom, local viewport reload and unchanged source/host state completed.',
+      'Move, horizontal resize, fixed width reload, compact height and unchanged source state completed without a nested viewport.',
   });
 });
 
@@ -487,8 +489,7 @@ test('ordinary Note and Frame create, move, copy/paste, delete/undo, reload', as
         )!.position,
     )
     .not.toEqual(initial.position);
-  const toolbar = page.locator('.react-flow__panel.bottom.center');
-  await toolbar.getByRole('button', { name: /^Frame/ }).click();
+  await page.getByRole('button', { name: /^Frame/ }).click();
   await expect(page.locator('.canvas-pending-frame').first()).toBeVisible();
   const center = await paneCenter(page);
   // Start on empty canvas, away from the selected Note's floating toolbar.
@@ -506,7 +507,7 @@ test('ordinary Note and Frame create, move, copy/paste, delete/undo, reload', as
   const frameBefore = (await snapshot(page, id)).state.nodes.find(
     (node) => node.id === frameId,
   )!;
-  await drag(page, frame, 30, 70, true);
+  await drag(page, frame, 30, 70, 20);
   await expect
     .poll(
       async () =>
@@ -673,8 +674,14 @@ test('isolation evidence points to this worktree and disposable storage', async 
     const cwd = execFileSync('lsof', ['-a', '-p', pid, '-d', 'cwd', '-Fn'], {
       encoding: 'utf8',
     });
-    expect(cwd).toContain(realpathSync(meta.repoRoot));
-    expect(cwd).not.toMatch(/clean-main|conversation-titles/);
+    expect(cwd.split('\n')).toContain(
+      `n${realpathSync(
+        join(
+          meta.repoRoot,
+          port === meta.serverPort ? 'apps/server' : 'apps/web',
+        ),
+      )}`,
+    );
     return { port, pid, cwd };
   });
   await testInfo.attach('isolation-proof', {

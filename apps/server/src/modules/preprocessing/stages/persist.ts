@@ -6,7 +6,7 @@
  *
  * Writes canonical node content into the canvas store as
  * `<canvasId>/nodes/<nodeId>.md`. Skipped for node types that have no
- * `contentKind` (image, frame, video).
+ * `contentKind` (frame, sketch, question).
  *
  * Source identity is canvas-local: the persisted record is keyed by the
  * canvas node id rather than a global source id.
@@ -14,6 +14,7 @@
 
 import { getLogger } from '../../../utils/logger.js';
 import { updateNode } from '../../canvas/write-coordinator.js';
+import { canonicalVideoSrc } from '../video-source.js';
 
 import type { NodeContent, SpaceNodes } from '../../storage/index.js';
 import type {
@@ -21,6 +22,7 @@ import type {
   NodeContentKind,
   NormalizeResult,
   PersistResult,
+  VideoCoverReference,
 } from '../types.js';
 
 const log = getLogger('preprocessing.persist');
@@ -32,12 +34,62 @@ export async function persist(
   nodes: SpaceNodes,
   src?: string,
   requireExisting = false,
+  videoCover?: VideoCoverReference,
 ): Promise<PersistResult> {
   if (!contentKind) {
     return { skipped: true };
   }
 
   const nodeId = normalized.nodeId;
+
+  if (contentKind === 'video') {
+    // Videos are metadata-only. Keep authored/current fields and fence EVERY
+    // derived write (not only the cover) inside the coordinator's atomic read.
+    let accepted: VideoCoverReference | undefined;
+    let acceptedSrc: string | undefined;
+    const outcome = await updateNode(nodes, nodeId, {
+      apply: (existing) => {
+        if (
+          !existing ||
+          existing.type !== 'video' ||
+          canonicalVideoSrc(existing.src, nodes.canvasId) !==
+            canonicalVideoSrc(src, nodes.canvasId)
+        )
+          return null;
+        if (!videoCover) return null;
+        acceptedSrc = src;
+        accepted = {};
+        const next: NodeContent = { ...existing, src };
+        delete next.coverUrl;
+        delete next.coverSourceSrc;
+        if (videoCover.coverUrl && videoCover.coverSourceSrc === src) {
+          next.coverUrl = videoCover.coverUrl;
+          next.coverSourceSrc = src;
+          accepted = { coverUrl: videoCover.coverUrl, coverSourceSrc: src };
+        }
+        if (
+          next.src === existing.src &&
+          next.coverUrl === existing.coverUrl &&
+          next.coverSourceSrc === existing.coverSourceSrc
+        )
+          return null;
+        return next;
+      },
+    });
+    if (outcome.status !== 'ok' && outcome.status !== 'noop') {
+      throw new Error(
+        `persist: video metadata update was not accepted: ${outcome.status}`,
+      );
+    }
+    return {
+      nodeId,
+      isNew: false,
+      contentChanged: false,
+      skipped: acceptedSrc === undefined,
+      persistedSrc: acceptedSrc,
+      videoCover: accepted,
+    };
+  }
 
   // The read → decide → write critical section runs through `updateNode`, so
   // it is serialized under the shared per-canvas write lock: preprocess can no

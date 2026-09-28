@@ -97,7 +97,7 @@ beforeEach(() => {
     model: 'profile-model',
     thoughtLevel: 'high',
   });
-  mocks.create.mockReturnValue({ run: mocks.run, close: mocks.close });
+  mocks.create.mockResolvedValue({ run: mocks.run, close: mocks.close });
   mocks.run.mockImplementation(async function* () {
     yield { type: 'text_delta', data: { content: 'ans' } };
     yield { type: 'text_delta', data: { content: 'wer' } };
@@ -107,6 +107,46 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 describe('external functional text', () => {
+  it('propagates asynchronous creation failure without starting a turn', async () => {
+    mocks.create.mockRejectedValueOnce(new Error('Creation failed'));
+    await expect(runFunctionalText('task', context)).rejects.toThrow(
+      'Creation failed',
+    );
+    expect(mocks.run).not.toHaveBeenCalled();
+  });
+
+  it.each(['timeout', 'cancel'] as const)(
+    'bounds asynchronous creation on %s and never runs a late handle',
+    async (outcome) => {
+      vi.useFakeTimers();
+      const controller = new AbortController();
+      let resolveCreation!: (handle: { run: typeof mocks.run }) => void;
+      mocks.create.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveCreation = resolve;
+          }),
+      );
+      const result = expect(
+        runFunctionalText('task', {
+          ...context,
+          signal: controller.signal,
+        }),
+      ).rejects.toThrow(
+        outcome === 'timeout' ? 'timed out' : 'caller cancelled',
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mocks.create).toHaveBeenCalledOnce();
+      if (outcome === 'timeout')
+        await vi.advanceTimersByTimeAsync(FUNCTIONAL_TEXT_TIMEOUT_MS);
+      else controller.abort(new Error('caller cancelled'));
+      await result;
+      resolveCreation({ run: mocks.run });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mocks.run).not.toHaveBeenCalled();
+    },
+  );
+
   it('sends images as canonical multimodal parts and returns text without changing Job lifecycle', async () => {
     const images = [
       { type: 'image' as const, data: 'aGVsbG8=', mimeType: 'image/png' },
@@ -146,8 +186,8 @@ describe('external functional text', () => {
       'result',
     );
     expect(driver.create).toHaveBeenCalledTimes(2);
-    expect(runtime.records({ name: 'canvas-a' })).toEqual([]);
-    expect(runtime.history({ name: 'canvas-a' }, '').turns).toEqual([]);
+    expect(await runtime.records({ name: 'canvas-a' })).toEqual([]);
+    expect((await runtime.history({ name: 'canvas-a' }, '')).turns).toEqual([]);
     expect(runtime.get('')).toBeUndefined();
   });
   it('uses a transient Job and frozen Profile without changing chat preferences or creating a visible conversation', async () => {

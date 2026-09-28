@@ -97,6 +97,7 @@ export type ResizeContext = {
   startRect: Rect;
   startLocalPos: XYPosition;
   parentOffset: XYPosition;
+  mode?: 'width' | 'scale' | 'fit';
   /**
    * When `true`, the node's width/height ratio is locked (media
    * nodes rendered with `keepAspectRatio` — image/video). Smart-snap

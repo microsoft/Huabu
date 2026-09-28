@@ -104,7 +104,7 @@ async function dispatchBuiltinControl(
 ): Promise<
   { ok: true } | { ok: false; status: number; message: string; code: string }
 > {
-  const record = agenetes.record(namespace, threadId);
+  const record = await agenetes.record(namespace, threadId);
   if (namespace.name) {
     const target = await agentThreadResolver.resolveAgentNode(
       namespace.name,
@@ -142,7 +142,7 @@ async function dispatchBuiltinControl(
       code: 'not_builtin',
     };
   }
-  const handle = agenetes.get(threadId) ?? agenetes.create(record.spec);
+  const handle = agenetes.get(threadId) ?? (await agenetes.create(record.spec));
   const ack = await handle.control(msg);
   if (!ack.ok) {
     return {
@@ -156,11 +156,11 @@ async function dispatchBuiltinControl(
 }
 
 /** Read a built-in thread's per-thread selection from its durable record. */
-function readBuiltinThreadSettings(
+async function readBuiltinThreadSettings(
   namespace: Namespace,
   threadId: string,
-): ChatThreadSettingsResponse {
-  const driverState = (agenetes.record(namespace, threadId)?.state
+): Promise<ChatThreadSettingsResponse> {
+  const driverState = ((await agenetes.record(namespace, threadId))?.state
     ?.driverState ?? {}) as { modelId?: unknown; reasoningEffort?: unknown };
   return {
     modelId:
@@ -209,12 +209,12 @@ const agentRoutes: FastifyPluginAsync = async (
     }
 
     try {
-      const page = agenetes.historyPage(namespace, threadId, {
+      const page = await agenetes.historyPage(namespace, threadId, {
         limit,
         ...(before ? { before } : {}),
         withTail: before === undefined,
       });
-      const record = agenetes.record(namespace, threadId);
+      const record = await agenetes.record(namespace, threadId);
       const recoverInternalToolNames =
         (record?.spec as { kind?: unknown } | undefined)?.kind === 'internal';
       const turns = page.groups.map((group) => {
@@ -285,7 +285,7 @@ const agentRoutes: FastifyPluginAsync = async (
     if (agentThreadService.isActive(threadId, canvasId)) {
       await agentThreadService.waitForTurnStart(threadId, canvasId);
     }
-    const { turns } = agenetes.history(namespace, threadId, {
+    const { turns } = await agenetes.history(namespace, threadId, {
       withTail: true,
     });
     if (turns.length === 0) {
@@ -294,7 +294,7 @@ const agentRoutes: FastifyPluginAsync = async (
     }
 
     const messages: ChatHistoryItem[] = [];
-    const record = agenetes.record(namespace, threadId);
+    const record = await agenetes.record(namespace, threadId);
     const isInternalThread =
       (record?.spec as { kind?: unknown } | undefined)?.kind === 'internal';
     buildHistoryFromTurns(turns, messages, {
@@ -583,7 +583,7 @@ const agentRoutes: FastifyPluginAsync = async (
       /* keep fallback */
     }
 
-    const { turns } = agenetes.history(
+    const { turns } = await agenetes.history(
       canvasAcpNamespace(canvasId ?? ''),
       threadId,
     );
@@ -718,7 +718,7 @@ const agentRoutes: FastifyPluginAsync = async (
       });
     }
     const effectiveMode = agentTarget?.agentMode ?? mode;
-    const effectiveBinding = agentThreadService.resolveBinding({
+    const effectiveBinding = await agentThreadService.resolveBinding({
       canvasId,
       threadId: resolvedThreadId,
       requestBinding: agentBinding,
@@ -741,7 +741,7 @@ const agentRoutes: FastifyPluginAsync = async (
     // Read lightweight L2 log metadata only to number the optional debug
     // prompt dump. Recovery history flows from Agenetes into the selected
     // driver through AgentCreateContext; the host does not load or replay it.
-    const { turnCount } = agenetes.logMetadata(
+    const { turnCount } = await agenetes.logMetadata(
       canvasAcpNamespace(canvasId ?? ''),
       resolvedThreadId,
     );
@@ -763,6 +763,7 @@ const agentRoutes: FastifyPluginAsync = async (
         invokedSkills,
         canvasId: canvasId ?? null,
         logger: request.log,
+        signal: preparation.signal,
       });
     // Debug-prompt metadata forwarded to the dispatch layer (it assembles
     // the final prompt). No-op unless HUABU_DEBUG_PROMPT is set.

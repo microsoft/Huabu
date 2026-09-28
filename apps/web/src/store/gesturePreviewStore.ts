@@ -51,9 +51,9 @@ type GesturePreviewData = {
    * Sketch strokes currently selected by a stroke-level lasso (Stage 2),
    * keyed by sketch node id -> selected stroke ids. Unlike the other
    * entries in this store this is an ACTED-UPON selection (a floating
-   * toolbar deletes / operates on it), not a per-tick drag preview — but
-   * it shares the same transient, never-persisted, never-undone lifecycle,
-   * so it lives here to reuse the churn-free store.
+   * toolbar deletes / operates on it). Lasso updates it live while drawing;
+   * selection-in-progress chrome suppression hides those actions until release.
+   * It shares the transient, never-persisted, never-undone lifecycle here.
    */
   sketchStrokeSelection: Record<string, string[]>;
 
@@ -72,8 +72,8 @@ type GesturePreviewData = {
    * The retained lasso polygon (flow-space) for the current stroke
    * selection — GoodNotes-style: the loop stays after selection so the
    * user can drag inside it to move the strokes. `null` when there is no
-   * stroke selection. Point-in-polygon against this decides move vs.
-   * new-lasso.
+   * selection (strokes and/or whole nodes), or while drawing a fresh loop.
+   * Point-in-polygon against this decides move vs. new-lasso.
    */
   sketchSelectionPolygon: Array<{ x: number; y: number }> | null;
 
@@ -94,6 +94,9 @@ type GesturePreviewData = {
    * bake skips the same nodes for the same reason.
    */
   sketchStrokeMoveCarriedNodeIds: string[];
+
+  /** Whether the retained Ink selection is reserved by submission prep. */
+  inkSubmissionPreparing: boolean;
 
   /**
    * Previews of how frames would resize based on the current drag/resize.
@@ -164,6 +167,9 @@ type GesturePreviewState = GesturePreviewData & {
   /** Set / clear the carried-node ids for the current mixed move. */
   setSketchStrokeMoveCarriedNodeIds: (ids: string[]) => void;
 
+  /** Reserve or release the retained Ink selection for submission prep. */
+  setInkSubmissionPreparing: (preparing: boolean) => void;
+
   /**
    * Replace the preview list. Called by `canvasStore` after it has
    * computed the fit for each affected frame.
@@ -223,6 +229,7 @@ const INITIAL_PREVIEW_DATA: GesturePreviewData = {
   sketchSelectionPolygon: null,
   sketchStrokeMovePreview: null,
   sketchStrokeMoveCarriedNodeIds: [],
+  inkSubmissionPreparing: false,
   frameFitPreviews: [],
   snapGuides: [],
   structuredDropPreview: null,
@@ -281,6 +288,8 @@ export const useGesturePreviewStore = create<GesturePreviewState>()((set) => ({
     set({ sketchStrokeMovePreview }),
   setSketchStrokeMoveCarriedNodeIds: (sketchStrokeMoveCarriedNodeIds) =>
     set({ sketchStrokeMoveCarriedNodeIds }),
+  setInkSubmissionPreparing: (inkSubmissionPreparing) =>
+    set({ inkSubmissionPreparing }),
   setFrameFitPreviews: (previews) => set({ frameFitPreviews: previews }),
   clearFrameFitPreview: () => set({ frameFitPreviews: [] }),
   setSnapGuides: (guides) => set({ snapGuides: guides }),

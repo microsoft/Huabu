@@ -21,13 +21,14 @@ import {
   AgentModeIcon,
   ChatModeIcon,
 } from '@/components/Panels/ChatPanel/ModeIcon';
+import { lerp as lerpTakeover } from '@/config/nodeTakeover';
+
 import {
   badgeSizeForNode,
   collapseProgress,
   collapsedMarkSize,
-  lerp as lerpTakeover,
-  resolveQuestionStage,
-} from '@/config/nodeTakeover';
+  resolveLegacyQuestionStage,
+} from './legacyQuestionTakeover';
 
 import type {
   AgentIconColor,
@@ -1627,13 +1628,8 @@ function LodAgentChip({
 }
 
 /**
- * Final 1:1 Question-node LOD preview.
- *
- * Unlike the historical proposal lab below, this preview deliberately imports
- * the production takeover math and `QuestionTakeoverMark` itself. It therefore
- * stays an exact executable reference for the shipped mark geometry, status
- * chrome, avatar detail threshold, and open-bubble treatment instead of copying
- * those decisions into a second playground-only implementation.
+ * Historical Question-node LOD preview using archived screen-space geometry.
+ * The mark renderer is shared, but this is not the current production layout.
  */
 function FinalQuestionNodeLodReference({ icon }: { icon: AgentIconValue }) {
   const [zoom, setZoom] = useState(1);
@@ -1643,7 +1639,7 @@ function FinalQuestionNodeLodReference({ icon }: { icon: AgentIconValue }) {
 
   const screenW = LOD_NODE_W * zoom;
   const screenH = LOD_NODE_H * zoom;
-  const stage = resolveQuestionStage(previousStage.current, screenW);
+  const stage = resolveLegacyQuestionStage(previousStage.current, screenW);
   previousStage.current = stage;
 
   const t = collapseProgress(screenW);
@@ -1686,16 +1682,16 @@ function FinalQuestionNodeLodReference({ icon }: { icon: AgentIconValue }) {
         <div>
           <div className="mb-2 flex items-center gap-2">
             <h2 className="text-fg-default font-semibold">
-              Finalized · shipped Question-node states
+              Historical · Question-node states
             </h2>
             <span className="bg-info-bg text-info rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase">
-              1:1 production
+              Archived geometry
             </span>
           </div>
           <p className="text-fg-muted max-w-3xl text-sm">
-            Locked production references for semantic zoom, status marks, and
-            blocking permission requests. The earlier playground implementation
-            remains below as proposal history.
+            Historical screen-space zoom geometry with the shared status mark
+            renderer. This is not the current production layout; earlier
+            proposals remain below for comparison.
           </p>
         </div>
         <div className="text-fg-subtle text-right text-xs">
@@ -1762,7 +1758,7 @@ function FinalQuestionNodeLodReference({ icon }: { icon: AgentIconValue }) {
           value={Math.round(zoom * 100)}
           onChange={(event) => setZoom(Number(event.target.value) / 100)}
           className="accent-info flex-1"
-          aria-label="Final Question node LOD zoom"
+          aria-label="Final Agent Node LOD zoom"
         />
       </div>
 
@@ -1987,7 +1983,7 @@ function QuestionNodeLodLab({ icon }: { icon: AgentIconValue }) {
       <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
         <div>
           <h2 className="text-fg-default font-semibold">
-            Question node · 1:1 canvas fidelity + zoom LOD
+            Agent Node · 1:1 canvas fidelity + zoom LOD
           </h2>
           <p className="text-fg-muted mt-1 max-w-2xl text-sm">
             The sticky note is reproduced pixel-for-pixel. Drag the zoom to see
@@ -2277,7 +2273,7 @@ export default function AgentNodePlaygroundPage() {
       <header className="border-edge-default bg-bg-default/95 sticky top-0 z-20 flex flex-wrap items-center justify-between gap-4 border-b px-6 py-3 backdrop-blur-sm">
         <div>
           <h1 className="text-fg-default text-lg font-semibold">
-            Agent × Question Node playground
+            Agent Node playground
           </h1>
           <p className="text-fg-muted text-xs">
             Identity stays in the avatar; motion and the semantic ring express
@@ -2313,6 +2309,16 @@ export default function AgentNodePlaygroundPage() {
       </header>
 
       <main className="mx-auto max-w-7xl px-6 py-8">
+        <a
+          href="/playground/question-nodes"
+          className="border-edge-default bg-surface text-fg-default mb-8 block rounded-xl border p-5"
+        >
+          <strong>Agent Node · Compact reference study ↗</strong>
+          <p className="text-fg-muted mt-1 text-sm">
+            Compare compact status chips, a thin status edge, and one activity
+            line across five states, with a separate semantic-zoom study.
+          </p>
+        </a>
         <section className="mb-14">
           <FinalQuestionNodeLodReference icon={icon} />
         </section>

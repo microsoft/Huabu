@@ -30,6 +30,7 @@ import {
   INK_INTENT_DIRECTIVE,
   EXTERNAL_INK_INTENT_DIRECTIVE,
 } from './ink-intent.js';
+import { renderInkRecognition } from './ink-ocr.js';
 import { renderInvokedSkillsSection } from './invoked-skills.js';
 import { renderNeighbourhoodSection } from './neighbourhood.js';
 import { INTERNAL_PROFILE } from './profile.js';
@@ -188,6 +189,10 @@ export async function renderTurn(
     profile.includeSelectionVisuals && selectionParts.length > 0
       ? renderSketchRasterHint(selection, profile)
       : undefined;
+  const inkRecognitionSection =
+    isInkIntent && env.focus.selection.inkRecognition
+      ? renderInkRecognition(env.focus.selection.inkRecognition)
+      : undefined;
   const userText = env.user.text;
 
   // Empty turn → nothing to render.
@@ -214,6 +219,9 @@ export async function renderTurn(
           ? EXTERNAL_INK_INTENT_DIRECTIVE
           : INK_INTENT_DIRECTIVE,
     });
+  if (inkRecognitionSection) {
+    parts.push({ type: 'text', text: inkRecognitionSection });
+  }
   if (skillsSection) parts.push({ type: 'text', text: skillsSection });
   if (selectedNodesSection) {
     parts.push({ type: 'text', text: selectedNodesSection });

@@ -19,12 +19,13 @@ import type { Node } from '@xyflow/react';
 ).IS_REACT_ACT_ENVIRONMENT = true;
 
 const mocks = vi.hoisted(() => ({
-  focusNodesOnCanvas: vi.fn(),
+  revealNodesOnCanvas: vi.fn(),
   openPreviewNode: vi.fn(() => 'tab-1'),
   toast: vi.fn(),
   requestChatOpen: vi.fn(),
   connect: vi.fn(),
   disconnect: vi.fn(),
+  refreshSpaceTitles: vi.fn(async () => undefined),
 }));
 
 vi.mock('react-i18next', () => ({
@@ -39,7 +40,7 @@ vi.mock('../../components/Nodes/previews', () => ({
   hasNodePreview: (type: string) => type === 'note',
 }));
 vi.mock('../../components/Panels/CanvasLayerPanel/focusNodesOnCanvas', () => ({
-  focusNodesOnCanvas: mocks.focusNodesOnCanvas,
+  revealNodesOnCanvas: mocks.revealNodesOnCanvas,
 }));
 vi.mock('../../components/Panels/CanvasLayerPanel', () => ({
   CanvasLayerPanel: () => null,
@@ -91,7 +92,7 @@ vi.mock('../../store/workspaceStore', () => ({
   ) =>
     selector({
       worldCanvasId: null,
-      refreshSpaceTitles: async () => undefined,
+      refreshSpaceTitles: mocks.refreshSpaceTitles,
     }),
 }));
 
@@ -121,6 +122,7 @@ async function renderAt(
     isLoading: false,
     nodes: [canvasNode],
     rfInstance: rfInstance as never,
+    canvasWrapper: document.createElement('div'),
     selectNodes,
     loadCanvas,
   });
@@ -142,10 +144,11 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
-  mocks.focusNodesOnCanvas.mockClear();
+  mocks.revealNodesOnCanvas.mockClear();
   mocks.openPreviewNode.mockClear();
   mocks.toast.mockClear();
   mocks.requestChatOpen.mockClear();
+  mocks.refreshSpaceTitles.mockClear();
   usePanelStore.setState({ isPreviewFullscreen: false });
 });
 
@@ -156,6 +159,7 @@ afterEach(() => {
     canvasId: '',
     nodes: [],
     rfInstance: null,
+    canvasWrapper: null,
     isLoading: false,
   });
   usePreviewWorkspaceStore.setState({
@@ -165,6 +169,18 @@ afterEach(() => {
 });
 
 describe('CanvasPage node deep-link navigation', () => {
+  it('refreshes shared Space metadata on ordinary canvas entry, focus, and workspace changes', async () => {
+    await renderAt(`/canvas/${CANVAS_ID}`, node('note'));
+    expect(mocks.refreshSpaceTitles).toHaveBeenCalledTimes(1);
+    act(() => window.dispatchEvent(new Event('focus')));
+    expect(mocks.refreshSpaceTitles).toHaveBeenCalledTimes(2);
+    act(() => window.dispatchEvent(new Event('workspace-changed')));
+    expect(mocks.refreshSpaceTitles).toHaveBeenCalledTimes(3);
+    await act(async () => root.render(null));
+    act(() => window.dispatchEvent(new Event('focus')));
+    expect(mocks.refreshSpaceTitles).toHaveBeenCalledTimes(3);
+  });
+
   it('selects, focuses, and permanently opens a hydrated preview once', async () => {
     const { selectNodes } = await renderAt(
       `/canvas/${CANVAS_ID}?node=node-1`,
@@ -172,11 +188,18 @@ describe('CanvasPage node deep-link navigation', () => {
     );
 
     expect(selectNodes).toHaveBeenCalledWith(['node-1'], false);
-    expect(mocks.openPreviewNode).toHaveBeenCalledWith('node-1');
-    expect(mocks.focusNodesOnCanvas).toHaveBeenCalledOnce();
+    expect(mocks.openPreviewNode).toHaveBeenCalledWith('node-1', {
+      transient: false,
+    });
+    expect(mocks.revealNodesOnCanvas).toHaveBeenCalledWith(
+      useCanvasStore.getState().rfInstance,
+      useCanvasStore.getState().canvasWrapper,
+      ['node-1'],
+      400,
+    );
 
     act(() => useCanvasStore.setState({ version: 2 }));
-    expect(mocks.focusNodesOnCanvas).toHaveBeenCalledOnce();
+    expect(mocks.revealNodesOnCanvas).toHaveBeenCalledOnce();
   });
 
   it('waits for React Flow hydration before consuming the target', async () => {
@@ -190,7 +213,7 @@ describe('CanvasPage node deep-link navigation', () => {
     act(() => useCanvasStore.setState({ rfInstance: {} as never }));
 
     expect(selectNodes).toHaveBeenCalledWith(['node-1'], false);
-    expect(mocks.focusNodesOnCanvas).toHaveBeenCalledOnce();
+    expect(mocks.revealNodesOnCanvas).toHaveBeenCalledOnce();
   });
 
   it('reconsumes the retained target after browser back navigation', async () => {
@@ -198,13 +221,13 @@ describe('CanvasPage node deep-link navigation', () => {
       `/canvas/${CANVAS_ID}?node=node-1`,
       node('note'),
     );
-    expect(mocks.focusNodesOnCanvas).toHaveBeenCalledOnce();
+    expect(mocks.revealNodesOnCanvas).toHaveBeenCalledOnce();
 
     await act(async () => router.navigate(`/canvas/${CANVAS_ID}`));
     await act(async () => router.navigate(-1));
 
     expect(router.state.location.search).toBe('?node=node-1');
-    expect(mocks.focusNodesOnCanvas).toHaveBeenCalledTimes(2);
+    expect(mocks.revealNodesOnCanvas).toHaveBeenCalledTimes(2);
   });
 
   it('opens an existing Agent thread without requesting composer focus', async () => {
@@ -213,7 +236,9 @@ describe('CanvasPage node deep-link navigation', () => {
       node('question', { threadId: 'thread-1' }),
     );
 
-    expect(mocks.openPreviewNode).toHaveBeenCalledWith('node-1');
+    expect(mocks.openPreviewNode).toHaveBeenCalledWith('node-1', {
+      transient: false,
+    });
     expect(mocks.requestChatOpen).toHaveBeenCalledWith('tab-1', 'bottom');
     expect(usePanelStore.getState().focusChatInputRequest).toBeNull();
   });
@@ -225,7 +250,7 @@ describe('CanvasPage node deep-link navigation', () => {
     );
 
     expect(selectNodes).toHaveBeenCalledWith(['node-1'], false);
-    expect(mocks.focusNodesOnCanvas).toHaveBeenCalledOnce();
+    expect(mocks.revealNodesOnCanvas).toHaveBeenCalledOnce();
     expect(mocks.openPreviewNode).not.toHaveBeenCalled();
     expect(mocks.toast).toHaveBeenCalledWith(
       'canvasPage.nodeFocusedNoPreview',
@@ -239,7 +264,7 @@ describe('CanvasPage node deep-link navigation', () => {
       await renderAt(`/canvas/${CANVAS_ID}${search}`, node('note'));
 
       expect(mocks.openPreviewNode).not.toHaveBeenCalled();
-      expect(mocks.focusNodesOnCanvas).not.toHaveBeenCalled();
+      expect(mocks.revealNodesOnCanvas).not.toHaveBeenCalled();
       expect(mocks.toast).toHaveBeenCalledWith(
         'canvasPage.nodeTargetUnavailable',
         { tone: 'warning' },

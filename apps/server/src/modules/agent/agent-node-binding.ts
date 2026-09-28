@@ -19,11 +19,13 @@ import { canvasAcpNamespace } from '../workspace/paths.js';
 import type { AgentNodeTarget } from './agent-thread-resolver.js';
 import type { AgentBinding } from '@huabu/shared';
 
-type ExecutionRecord = NonNullable<ReturnType<typeof agenetes.record>>;
+type ExecutionRecord = NonNullable<Awaited<ReturnType<typeof agenetes.record>>>;
 
 interface BindingDependencies {
-  record: (target: AgentNodeTarget) => ExecutionRecord | undefined;
-  hasHistory: (target: AgentNodeTarget) => boolean;
+  record: (
+    target: AgentNodeTarget,
+  ) => ExecutionRecord | undefined | Promise<ExecutionRecord | undefined>;
+  hasHistory: (target: AgentNodeTarget) => boolean | Promise<boolean>;
   promote: (target: AgentNodeTarget, alreadyLocked?: boolean) => Promise<void>;
   acquireTurn: typeof acquireAgentTurn;
 }
@@ -54,12 +56,16 @@ export function sameAgentIdentity(
 }
 
 const DEFAULT_DEPENDENCIES: BindingDependencies = {
-  record: (target) =>
-    agenetes.record(canvasAcpNamespace(target.canvasId), target.threadId),
-  hasHistory: (target) =>
-    agenetes.history(canvasAcpNamespace(target.canvasId), target.threadId, {
-      withTail: true,
-    }).turns.length > 0,
+  record: async (target) =>
+    await agenetes.record(canvasAcpNamespace(target.canvasId), target.threadId),
+  hasHistory: async (target) =>
+    (
+      await agenetes.history(
+        canvasAcpNamespace(target.canvasId),
+        target.threadId,
+        { withTail: true },
+      )
+    ).turns.length > 0,
   promote: (target, alreadyLocked) =>
     agentNodeLifecycle.bind(target, alreadyLocked),
   acquireTurn: acquireAgentTurn,
@@ -81,13 +87,13 @@ export class AgentNodeBindingCoordinator {
   ): Promise<AgentBinding | null> {
     const record =
       options.record === undefined
-        ? this.dependencies.record(target)
+        ? await this.dependencies.record(target)
         : options.record;
     if (!record) {
       if (
         options.required ||
         target.bindingState === 'bound' ||
-        this.dependencies.hasHistory(target)
+        (await this.dependencies.hasHistory(target))
       ) {
         throw new AgentNodeBindingError(
           'execution_record_missing',

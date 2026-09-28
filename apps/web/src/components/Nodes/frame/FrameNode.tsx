@@ -1,55 +1,44 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { useInternalNode, useStore, useViewport } from '@xyflow/react';
+import { useInternalNode } from '@xyflow/react';
 import clsx from 'clsx';
 import { Columns3, Grid2x2, Move, Rows3, Ungroup } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useShallow } from 'zustand/react/shallow';
 
 import {
   FRAME_GRID_MAX_COUNT,
   FRAME_GRID_MIN_COUNT,
   classifySpaceInstructionFrame,
   directAgentNodeIdsForFrame,
+  resolveAccent,
   type FrameLayoutMode,
 } from '@huabu/shared';
-import { clampGridCount } from '@huabu/shared/canvas-engine';
+import { clampGridCount, frameAccentToken } from '@huabu/shared/canvas-engine';
 
+import { Button } from '@/components/Common/Button';
+import {
+  DropdownMenu,
+  DropdownMenuItem,
+} from '@/components/Common/DropdownMenu';
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar.tsx';
 import { Input } from '@/components/Common/Input.tsx';
 import { MissingFileBanner } from '@/components/Nodes/MissingFileBanner.tsx';
 import { NodeWrapper } from '@/components/Nodes/NodeWrapper.tsx';
 import useCanvasStore from '@/store/canvasStore.ts';
 
+import { FRAME_DESIGN_CONFIG, frameVisualMetricsForSize } from './frameDesign';
+import { FrameHeader } from './FrameHeader.tsx';
+import { getFrameHeaderMetrics } from './frameHeaderMetrics.ts';
+import { FrameRegionOverlay, FrameZoomHeader } from './FrameRegionLabel';
 import { shouldPreserveFrameAspectRatio } from './frameResizePolicy.ts';
-import { InstructionFrameBadge } from './InstructionFrameBadge.tsx';
 
 import type { CanvasFrameNodeData } from '@/components/Nodes/types.ts';
 import type { Node, NodeProps } from '@xyflow/react';
 
 export type FrameNodeType = Node<CanvasFrameNodeData, 'frame'>;
-
-const LABEL_MIN_VERTICAL_GAP = 22;
-const LABEL_COLLISION_HYSTERESIS = 4;
-const LABEL_MIN_SCREEN_WIDTH = 48;
-const INSTRUCTION_LABEL_MIN_SCREEN_WIDTH = 112;
-
-function shouldShowNestedLabel(
-  ancestorGap: number | null,
-  wasVisible: boolean | null,
-): boolean {
-  if (ancestorGap === null) return true;
-
-  const threshold =
-    wasVisible === null
-      ? LABEL_MIN_VERTICAL_GAP
-      : wasVisible
-        ? LABEL_MIN_VERTICAL_GAP - LABEL_COLLISION_HYSTERESIS
-        : LABEL_MIN_VERTICAL_GAP + LABEL_COLLISION_HYSTERESIS;
-
-  return Math.abs(ancestorGap) >= threshold;
-}
 
 // ── Toolbar metadata ───────────────────────────────────────────────────
 
@@ -59,8 +48,8 @@ const LAYOUT_MODE_OPTIONS: Array<{
   icon: React.ReactNode;
 }> = [
   { value: 'free', label: 'Free', icon: <Move /> },
-  { value: 'column', label: 'Column', icon: <Columns3 /> },
   { value: 'row', label: 'Row', icon: <Rows3 /> },
+  { value: 'column', label: 'Column', icon: <Columns3 /> },
   { value: 'grid', label: 'Grid', icon: <Grid2x2 /> },
 ];
 
@@ -69,8 +58,6 @@ const LAYOUT_MODE_OPTIONS: Array<{
  * the multi-select toolbar. Narrower (`w-8`) since the value is at most
  * two digits.
  */
-const COUNT_INPUT_CLASS =
-  'border-edge-default focus:border-info nodrag w-8 rounded border bg-transparent px-1.5 py-0.5 text-center text-xs outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none';
 
 // ── Component ──────────────────────────────────────────────────────────
 
@@ -92,19 +79,29 @@ export const FrameNode = memo(
     const flushFrameResizeScale = useCanvasStore(
       (state) => state.flushFrameResizeScale,
     );
-    // Subscribe to the live child count so the count input's upper
-    // bound tracks "items inside this frame". Returns a plain number,
-    // so this subscription only re-renders FrameNode when the count
-    // itself changes.
-    const childCount = useCanvasStore(
-      (state) => state.nodes.filter((n) => n.parentId === id).length,
-    );
-    const hasMediaChild = useCanvasStore((state) =>
-      state.nodes.some(
-        (node) =>
-          node.parentId === id &&
-          (node.type === 'image' || node.type === 'video'),
-      ),
+    const { childCount, hasMediaChild, contentInsetX } = useCanvasStore(
+      useShallow((state) => {
+        let childCount = 0;
+        let hasMediaChild = false;
+        let contentInsetX = Number.POSITIVE_INFINITY;
+
+        for (const node of state.nodes) {
+          if (node.parentId !== id) continue;
+          childCount += 1;
+          hasMediaChild ||=
+            node.type === 'image' ||
+            node.type === 'video' ||
+            node.type === 'text' ||
+            node.type === 'question';
+          contentInsetX = Math.min(contentInsetX, node.position.x);
+        }
+
+        return {
+          childCount,
+          hasMediaChild,
+          contentInsetX: Number.isFinite(contentInsetX) ? contentInsetX : null,
+        };
+      }),
     );
     const instructionFrameKind = classifySpaceInstructionFrame(
       data.label,
@@ -148,23 +145,6 @@ export const FrameNode = memo(
     // layout-mode + grid-count controls (rendered below as
     // `FrameActions`).
 
-    // Local draft for the count input so the user can type freely
-    // without the value reformatting on every keystroke. Re-synced
-    // from the canonical value when it changes externally.
-    const [countDraft, setCountDraft] = useState(String(count));
-    useEffect(() => {
-      setCountDraft(String(count));
-    }, [count]);
-
-    // Same pattern for the `grid` row input. It is re-synced from the
-    // RESOLVED row total, not from what was typed: asking for fewer
-    // rows than the children need cannot be honoured, and echoing the
-    // request back would claim otherwise.
-    const [rowDraft, setRowDraft] = useState(String(gridRowCount));
-    useEffect(() => {
-      setRowDraft(String(gridRowCount));
-    }, [gridRowCount]);
-
     /**
      * Effective upper bound for the count input:
      *  - At most `FRAME_GRID_MAX_COUNT` (12).
@@ -177,90 +157,28 @@ export const FrameNode = memo(
     );
 
     const internalNode = useInternalNode(id);
-    const { zoom } = useViewport();
-    const nearestFrameAncestorY = useStore((state) => {
-      let current = state.nodeLookup.get(id);
-      const visited = new Set<string>([id]);
-      while (current?.parentId && !visited.has(current.parentId)) {
-        visited.add(current.parentId);
-        const parent = state.nodeLookup.get(current.parentId);
-        if (!parent) return null;
-        if (parent.type === 'frame') {
-          return parent.internals.positionAbsolute?.y ?? null;
-        }
-        current = parent;
-      }
-      return null;
-    });
-    // Only a container frame (with at least one direct child) can hold a
-    // colliding selected descendant frame. A frame with zero children has an
-    // empty subtree, so it can skip the whole-graph scan entirely — this
-    // keeps the O(nodes) sweep off the vast majority of (leaf) frames and
-    // leaves it running only for the few frames that actually nest.
-    const isContainerFrame = childCount > 0;
-    const selectedDescendantFrameY = useStore((state) => {
-      if (!isContainerFrame) return null;
-      for (const candidate of state.nodeLookup.values()) {
-        if (
-          candidate.id === id ||
-          candidate.type !== 'frame' ||
-          !candidate.selected
-        ) {
-          continue;
-        }
-
-        let current = candidate;
-        const visited = new Set<string>([candidate.id]);
-        while (current.parentId && !visited.has(current.parentId)) {
-          visited.add(current.parentId);
-          if (current.parentId === id) {
-            return candidate.internals.positionAbsolute?.y ?? null;
-          }
-          const parent = state.nodeLookup.get(current.parentId);
-          if (!parent) break;
-          current = parent;
-        }
-      }
-      return null;
-    });
-
-    const absY = internalNode?.internals.positionAbsolute?.y ?? 0;
     const styleWidth = internalNode?.style?.width;
+    const styleHeight = internalNode?.style?.height;
     const nodeWidth =
       (typeof styleWidth === 'number' ? styleWidth : undefined) ??
       internalNode?.measured?.width ??
-      LABEL_MIN_SCREEN_WIDTH;
-    const ancestorGap =
-      nearestFrameAncestorY === null
-        ? null
-        : (absY - nearestFrameAncestorY) * zoom;
-    const previousLabelVisibilityRef = useRef<boolean | null>(null);
-    const collisionVisible = shouldShowNestedLabel(
-      ancestorGap,
-      previousLabelVisibilityRef.current,
+      FRAME_DESIGN_CONFIG.header.minWidth;
+    const nodeHeight =
+      (typeof styleHeight === 'number' ? styleHeight : undefined) ??
+      internalNode?.measured?.height ??
+      FRAME_DESIGN_CONFIG.header.minWidth;
+    const responsiveMetrics = frameVisualMetricsForSize(nodeWidth, nodeHeight);
+    const headerMetrics = getFrameHeaderMetrics(
+      contentInsetX,
+      nodeWidth,
+      responsiveMetrics.titleFontSize,
+      responsiveMetrics.headerInset,
     );
-    previousLabelVisibilityRef.current = collisionVisible;
-    const selectedDescendantCollides =
-      selectedDescendantFrameY !== null &&
-      !shouldShowNestedLabel((selectedDescendantFrameY - absY) * zoom, null);
-    const labelSemanticallyVisible =
-      collisionVisible && !selectedDescendantCollides;
 
-    const commitCount = () => {
-      const trimmed = countDraft.trim();
-      if (trimmed === '') {
-        setCountDraft(String(count));
-        return;
-      }
-      const parsed = Number.parseInt(trimmed, 10);
-      if (!Number.isFinite(parsed)) {
-        setCountDraft(String(count));
-        return;
-      }
+    const commitCount = (parsed: number) => {
       // Clamp to [min, maxCount] — exceeding child count is silently
       // capped so the "no empty track" invariant always holds.
       const next = Math.min(maxCount, Math.max(FRAME_GRID_MIN_COUNT, parsed));
-      setCountDraft(String(next));
       if (next === count) return;
       dispatchUiIntent({
         type: 'SET_FRAME_LAYOUT_MODE',
@@ -270,13 +188,7 @@ export const FrameNode = memo(
       });
     };
 
-    const commitRowCount = () => {
-      const trimmed = rowDraft.trim();
-      const parsed = Number.parseInt(trimmed, 10);
-      if (trimmed === '' || !Number.isFinite(parsed)) {
-        setRowDraft(String(gridRowCount));
-        return;
-      }
+    const commitRowCount = (parsed: number) => {
       const next = Math.min(
         FRAME_GRID_MAX_COUNT,
         Math.max(FRAME_GRID_MIN_COUNT, parsed),
@@ -287,8 +199,7 @@ export const FrameNode = memo(
       // the most natural request there is: "keep what I see now", i.e.
       // pin the current row count so later deletions cannot shrink it.
       if (next === data.gridRowCount) {
-        setRowDraft(String(gridRowCount));
-        return;
+        return gridRowCount;
       }
       dispatchUiIntent({
         type: 'SET_FRAME_LAYOUT_MODE',
@@ -296,9 +207,19 @@ export const FrameNode = memo(
         mode: layoutMode,
         gridRowCount: next,
       });
-      // Deliberately no optimistic draft update: the request is a floor,
-      // so the resolved total may be higher. The effect above re-syncs
-      // once the solver has spoken.
+      const nodes = useCanvasStore.getState().nodes;
+      const frame = nodes.find((node) => node.id === id);
+      return nodes.reduce(
+        (rows, node) => {
+          const row = node.data.frameRow;
+          return node.parentId === id && typeof row === 'number'
+            ? Math.max(rows, row + 1)
+            : rows;
+        },
+        typeof frame?.data.gridRowCount === 'number'
+          ? frame.data.gridRowCount
+          : 0,
+      );
     };
 
     const setMode = (next: FrameLayoutMode) => {
@@ -315,25 +236,45 @@ export const FrameNode = memo(
     };
 
     const FrameActions = (
-      <>
-        <FloatingToolbar.Select
-          options={LAYOUT_MODE_OPTIONS.map((option) => ({
-            ...option,
-            label:
-              option.value === 'free'
-                ? t('node.frameLayoutFree')
-                : option.value === 'column'
-                  ? t('node.frameLayoutColumn')
-                  : option.value === 'row'
-                    ? t('node.frameLayoutRow')
-                    : t('node.frameLayoutGrid'),
-          }))}
-          value={layoutMode}
-          onChange={setMode}
-        />
+      <DropdownMenu
+        floating
+        placement="bottom"
+        className="node-toolbar-layout"
+        trigger={
+          <Button variant="ghost" iconOnly title={t('node.frameLayout')}>
+            <Grid2x2 />
+          </Button>
+        }
+      >
+        <div
+          className="node-toolbar-layout-modes"
+          role="group"
+          aria-label={t('node.frameLayout')}
+        >
+          {LAYOUT_MODE_OPTIONS.map((option) => (
+            <Button
+              key={option.value}
+              variant="ghost"
+              iconOnly
+              aria-pressed={layoutMode === option.value}
+              title={
+                option.value === 'free'
+                  ? t('node.frameLayoutFree')
+                  : option.value === 'column'
+                    ? t('node.frameLayoutColumn')
+                    : option.value === 'row'
+                      ? t('node.frameLayoutRow')
+                      : t('node.frameLayoutGrid')
+              }
+              onClick={() => setMode(option.value)}
+            >
+              {option.icon}
+            </Button>
+          ))}
+        </div>
 
         {isStructuredLayout && (
-          <div className="flex items-center gap-1">
+          <div className="node-toolbar-layout-counts">
             {/*
               `grid` reads "rows x columns", matching how a matrix is
               written and how the pair is said out loud. The row box
@@ -344,82 +285,36 @@ export const FrameNode = memo(
             */}
             {layoutMode === 'grid' && (
               <>
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  aria-label={t('node.rows')}
-                  title={t('node.gridRowsMin')}
+                <FloatingToolbar.NumberInput
+                  label={t('node.frameLayoutRow')}
+                  ariaLabel={t('node.rows')}
+                  name="frame-rows"
                   min={FRAME_GRID_MIN_COUNT}
                   max={FRAME_GRID_MAX_COUNT}
                   step={1}
-                  value={rowDraft}
-                  onChange={(e) => setRowDraft(e.target.value)}
-                  onBlur={commitRowCount}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  onKeyDown={(e) => {
-                    e.stopPropagation();
-                    if (e.key === 'Enter') {
-                      commitRowCount();
-                      (e.target as HTMLInputElement).blur();
-                    } else if (e.key === 'Escape') {
-                      setRowDraft(String(gridRowCount));
-                      (e.target as HTMLInputElement).blur();
-                    }
-                  }}
-                  className={COUNT_INPUT_CLASS}
+                  value={gridRowCount}
+                  applyUnchanged
+                  onApply={commitRowCount}
                 />
-                <span
-                  className="text-fg-subtle text-xs select-none"
-                  aria-hidden="true"
-                >
-                  {'\u00d7'}
-                </span>
               </>
             )}
-            <input
-              type="number"
-              inputMode="numeric"
-              aria-label={countsRows ? t('node.rows') : t('node.columns')}
-              title={
+            <FloatingToolbar.NumberInput
+              label={
                 countsRows
-                  ? t('node.rowsRange', { max: maxCount })
-                  : t('node.columnsRange', { max: maxCount })
+                  ? t('node.frameLayoutRow')
+                  : t('node.frameLayoutColumn')
               }
+              ariaLabel={countsRows ? t('node.rows') : t('node.columns')}
+              name="frame-count"
               min={FRAME_GRID_MIN_COUNT}
               max={maxCount}
               step={1}
-              value={countDraft}
-              onChange={(e) => setCountDraft(e.target.value)}
-              onBlur={commitCount}
-              onMouseDown={(e) => e.stopPropagation()}
-              onKeyDown={(e) => {
-                e.stopPropagation();
-                if (e.key === 'Enter') {
-                  commitCount();
-                  (e.target as HTMLInputElement).blur();
-                } else if (e.key === 'Escape') {
-                  setCountDraft(String(count));
-                  (e.target as HTMLInputElement).blur();
-                }
-              }}
-              className={COUNT_INPUT_CLASS}
+              value={count}
+              onApply={commitCount}
             />
           </div>
         )}
-
-        <FloatingToolbar.Divider />
-
-        <FloatingToolbar.ActionButton
-          title={t('node.unframe')}
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            unframe(id);
-          }}
-        >
-          <Ungroup />
-        </FloatingToolbar.ActionButton>
-      </>
+      </DropdownMenu>
     );
 
     const label = useMemo(() => {
@@ -459,8 +354,8 @@ export const FrameNode = memo(
     // to the final layout at gesture end. All layout modes share the
     // same content-driven path:
     //
-    //  - At resize-start we snapshot every direct child's pre-gesture
-    //    position + size.
+    //  - At resize-start we snapshot the complete descendant subtree's
+    //    pre-gesture position + size, grouped by immediate parent.
     //  - On every tick we scale the children proportionally (both
     //    axes) to the frame's new dimensions and dispatch them in a
     //    single batch via `applyFrameResizeScale`, together with the
@@ -506,64 +401,63 @@ export const FrameNode = memo(
       clearFrameResizeSnapshot();
     }, [flushFrameResizeScale, clearFrameResizeSnapshot]);
 
-    // Rendered in the zoom-invariant overlay so the label keeps a fixed screen size
-    const labelOverlay = (
-      <div className="inline-flex max-w-full min-w-0 items-center gap-1">
-        {instructionFrameKind ? (
-          <InstructionFrameBadge
-            kind={instructionFrameKind}
-            directAgentCount={directAgentCount}
-          />
-        ) : null}
-        <div className="relative inline-grid min-w-0 flex-1 items-center">
-          <span className="invisible col-start-1 row-start-1 min-w-0 truncate px-1.5 text-xs font-medium whitespace-pre">
-            {draftLabel || ' '}
-          </span>
+    const frameAccent = resolveAccent(frameAccentToken(data.style?.accent));
+    const frameHeader = (
+      <FrameHeader
+        metrics={headerMetrics}
+        accent={frameAccent}
+        instructionKind={instructionFrameKind}
+        directAgentCount={directAgentCount}
+      >
+        <span className="invisible col-start-1 row-start-1 min-w-0 truncate font-semibold whitespace-pre">
+          {draftLabel || ' '}
+        </span>
 
-          <Input
-            ref={labelInputRef}
-            value={draftLabel}
-            readOnly={!isEditingLabel}
-            title={t('node.editFrameName')}
-            wrapperClassName="col-start-1 row-start-1 min-w-0 w-full"
-            tooltipOffset={0}
-            size={1}
-            className={clsx(
-              // `text-ellipsis` only paints on an unfocused input, so the
-              // idle label shows "…" while editing still scrolls normally.
-              'nodrag col-start-1 row-start-1 w-full min-w-0! bg-transparent px-1.5 text-xs font-medium text-ellipsis outline-none',
-              isEditingLabel
-                ? 'text-fg-default cursor-text'
-                : 'text-fg-muted hover:text-fg-default cursor-pointer',
-            )}
-            onChange={(e) => {
-              if (!isEditingLabel) return;
-              setDraftLabel(e.target.value);
-            }}
-            onClick={() => {
-              if (isEditingLabel) return;
-              setIsEditingLabel(true);
-            }}
-            onBlur={() => {
-              if (!isEditingLabel) return;
+        <Input
+          ref={labelInputRef}
+          value={draftLabel}
+          readOnly={!isEditingLabel}
+          title={t('node.editFrameName')}
+          wrapperClassName="col-start-1 row-start-1 min-w-0 w-full"
+          tooltipOffset={0}
+          size={1}
+          className={clsx(
+            'nodrag pointer-events-auto col-start-1 row-start-1 w-full min-w-0! bg-transparent font-semibold text-ellipsis outline-none',
+            isEditingLabel
+              ? 'text-fg-default cursor-text'
+              : 'text-fg-default cursor-pointer',
+          )}
+          style={{
+            fontSize: 'inherit',
+            lineHeight: `${headerMetrics.height}px`,
+          }}
+          onChange={(e) => {
+            if (!isEditingLabel) return;
+            setDraftLabel(e.target.value);
+          }}
+          onClick={() => {
+            if (isEditingLabel) return;
+            setIsEditingLabel(true);
+          }}
+          onBlur={() => {
+            if (!isEditingLabel) return;
+            commitLabel();
+          }}
+          onKeyDown={(e) => {
+            if (!isEditingLabel) return;
+            e.stopPropagation();
+            if (e.key === 'Enter') {
+              e.preventDefault();
               commitLabel();
-            }}
-            onKeyDown={(e) => {
-              if (!isEditingLabel) return;
-              e.stopPropagation();
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                commitLabel();
-              }
-              if (e.key === 'Escape') {
-                e.preventDefault();
-                setDraftLabel(label);
-                setIsEditingLabel(false);
-              }
-            }}
-          />
-        </div>
-      </div>
+            }
+            if (e.key === 'Escape') {
+              e.preventDefault();
+              setDraftLabel(label);
+              setIsEditingLabel(false);
+            }
+          }}
+        />
+      </FrameHeader>
     );
 
     return (
@@ -573,16 +467,14 @@ export const FrameNode = memo(
         type={'frame'}
         selected={selected && !isEditingLabel}
         actions={isContentMissing ? undefined : FrameActions}
-        overlayContent={isContentMissing ? undefined : labelOverlay}
-        overlayOffsetY={-24}
-        overlayVisible={labelSemanticallyVisible}
-        overlayInteractionPriority={isEditingLabel ? 3 : selected ? 2 : 0}
-        overlayMaxWidth={Math.max(
-          instructionFrameKind
-            ? INSTRUCTION_LABEL_MIN_SCREEN_WIDTH
-            : LABEL_MIN_SCREEN_WIDTH,
-          nodeWidth * zoom,
-        )}
+        overflow={
+          isContentMissing ? undefined : (
+            <DropdownMenuItem icon={<Ungroup />} onClick={() => unframe(id)}>
+              {t('node.unframe')}
+            </DropdownMenuItem>
+          )
+        }
+        borderRadius={responsiveMetrics.borderRadius}
         keepAspectRatio={shouldPreserveFrameAspectRatio({
           sizing: data.sizing,
           hasMediaChild,
@@ -604,7 +496,16 @@ export const FrameNode = memo(
         {isContentMissing ? (
           <MissingFileBanner nodeId={id} />
         ) : (
-          <div className="h-full w-full" />
+          <div className="relative h-full w-full">
+            <FrameZoomHeader id={id}>{frameHeader}</FrameZoomHeader>
+            <FrameRegionOverlay
+              id={id}
+              title={label}
+              childCount={childCount}
+              accent={frameAccent}
+              headerMetrics={headerMetrics}
+            />
+          </div>
         )}
       </NodeWrapper>
     );

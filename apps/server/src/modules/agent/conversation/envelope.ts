@@ -20,6 +20,7 @@
  *     (+ derived snapshots) and the anchor node (+ its neighbourhood).
  */
 
+import { isInkOcrConfigured, recognizeInk } from './ink-ocr.js';
 import { InkVisualPreparationError } from './prompt/required-ink-visuals.js';
 import { getSkill } from '../../../prompt/index.js';
 import { getNodeNeighbourhood } from '../../canvas/node-neighbourhood.js';
@@ -27,6 +28,7 @@ import { describeNode } from '../../canvas/node-prompt.js';
 import {
   clusterToSvg,
   filterSketchStrokes,
+  renderInkOcrRaster,
   snapshotNodesToArtifacts,
 } from '../../canvas/snapshot-nodes.js';
 import { space } from '../../storage/index.js';
@@ -81,6 +83,7 @@ export interface ChatEnvelopeParams {
   canvasId: string | null;
   /** Logger for non-fatal diagnostics (auto-snapshot failures, dropped skills). */
   logger: FastifyBaseLogger;
+  signal?: AbortSignal;
 }
 
 /**
@@ -279,9 +282,11 @@ async function deriveSnapshotAttachments(
 ): Promise<{
   snapshotAttachments: ChatAttachment[];
   consumedImageIds: Set<string>;
+  preparedNodes?: CanvasNode[];
 }> {
   const snapshotAttachments: ChatAttachment[] = [];
   const consumedImageIds = new Set<string>();
+  let preparedNodes: CanvasNode[] | undefined;
 
   const sketchIds = collectSketchNodeIds(selectedNodes);
   const strokeSubsets = collectSketchStrokeSubsets(selectedNodes);
@@ -297,12 +302,10 @@ async function deriveSnapshotAttachments(
   try {
     if (requireInkVisuals) {
       const canvas = await space(canvasId).read();
-      const nodes = new Map(
-        ((canvas?.state.nodes ?? []) as CanvasNode[]).map((node) => [
-          node.id,
-          node,
-        ]),
+      preparedNodes = structuredClone(
+        (canvas?.state.nodes ?? []) as CanvasNode[],
       );
+      const nodes = new Map(preparedNodes.map((node) => [node.id, node]));
       for (const subset of strokeSubsets) {
         const node = nodes.get(subset.nodeId);
         if (
@@ -314,11 +317,14 @@ async function deriveSnapshotAttachments(
         }
       }
     }
-    const rasterResults = await snapshotNodesToArtifacts({
-      nodeIds: snapshotIds,
-      canvasId,
-      ...(strokeSubsets.length > 0 ? { strokeSubsets } : {}),
-    });
+    const rasterResults = await snapshotNodesToArtifacts(
+      {
+        nodeIds: snapshotIds,
+        canvasId,
+        ...(strokeSubsets.length > 0 ? { strokeSubsets } : {}),
+      },
+      preparedNodes,
+    );
     const selectedImageIdSet = new Set(selectedImageIds);
     for (const r of rasterResults) {
       // `originNodeIds` are NODE ids; split them into the sketch nodes vs
@@ -385,7 +391,7 @@ async function deriveSnapshotAttachments(
     );
   }
 
-  return { snapshotAttachments, consumedImageIds };
+  return { snapshotAttachments, consumedImageIds, preparedNodes };
 }
 
 /**
@@ -407,6 +413,7 @@ export async function buildChatEnvelope(
     invokedSkills,
     canvasId,
     logger,
+    signal,
   } = params;
 
   const requireInkVisuals = inputKind === 'ink-intent';
@@ -450,6 +457,7 @@ export async function buildChatEnvelope(
 
   let snapshotAttachments: ChatAttachment[] = [];
   let consumedImageIds = new Set<string>();
+  let inkRecognition: ChatEnvelope['focus']['selection']['inkRecognition'];
   if (selectedNodes && canvasId) {
     const derived = await deriveSnapshotAttachments(
       selectedNodes,
@@ -460,6 +468,26 @@ export async function buildChatEnvelope(
     );
     snapshotAttachments = derived.snapshotAttachments;
     consumedImageIds = derived.consumedImageIds;
+    if (
+      requireInkVisuals &&
+      derived.preparedNodes &&
+      isInkOcrConfigured(logger)
+    ) {
+      signal?.throwIfAborted();
+      let raster: Awaited<ReturnType<typeof renderInkOcrRaster>> | undefined;
+      try {
+        raster = await renderInkOcrRaster(derived.preparedNodes, strokeSubsets);
+      } catch {
+        logger.warn(
+          { outcome: 'raster_error', nodeCount: strokeSubsets.length },
+          '[ink-ocr] optional raster preparation failed',
+        );
+      }
+      if (raster) {
+        inkRecognition = await recognizeInk({ raster, logger, signal });
+      }
+      signal?.throwIfAborted();
+    }
   }
 
   const dedupedImageAttachments =
@@ -486,6 +514,7 @@ export async function buildChatEnvelope(
         selectedIds: selectedNodes ? collectSelectedNodeIds(selectedNodes) : [],
         imageAttachments: dedupedImageAttachments,
         snapshotAttachments,
+        ...(inkRecognition ? { inkRecognition } : {}),
         strokeSubsets,
       },
       ...(anchor ? { anchor } : {}),

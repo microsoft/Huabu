@@ -90,7 +90,7 @@ export async function assertInkModelCapability(options: {
   const namespace = canvasAcpNamespace(options.canvasId ?? '');
   const durableRecord =
     workloadType === 'Deployment'
-      ? agenetes.record(namespace, threadId)
+      ? await agenetes.record(namespace, threadId)
       : undefined;
   const priorSelection = (durableRecord?.state?.driverState ?? {}) as {
     modelId?: unknown;
@@ -357,7 +357,7 @@ export async function* runAgent(
       : undefined;
   const durableRecord =
     workloadType === 'Deployment'
-      ? agenetes.record(namespace, deploymentThreadId)
+      ? await agenetes.record(namespace, deploymentThreadId)
       : undefined;
   const priorSelection = (durableRecord?.state?.driverState ?? {}) as {
     modelId?: unknown;
@@ -395,7 +395,7 @@ export async function* runAgent(
   // Static DriverMap construction guarantees that `internal` is the
   // pi-backed handle. Deployments get-or-create by `threadId`; Jobs mint a
   // fresh handle.
-  const handle = agenetes.create(spec) as BuiltinHandle;
+  const handle = (await agenetes.create(spec)) as BuiltinHandle;
   await options.onExecutionCreated?.();
   if (signal?.aborted) return [];
   if (
@@ -467,12 +467,20 @@ export async function* runAgent(
     onRendered,
     tools: turnTools,
   });
+  // The boundary is read after `run()` opened the turn, so it is whatever the
+  // log holds when the read answers rather than where this turn began. That is
+  // only the same number because the per-thread turn lease upstream in
+  // `AgentThreadService.invoke` keeps two turns on one thread from overlapping
+  // — two that did would both report the later boundary. The read also has to
+  // reach a failed `beginTurn`, which is what stops a turn whose Tier-1 start
+  // was never written from being announced as accepted.
   onTurnStarted?.(
     deploymentThreadId
       ? {
           threadId: deploymentThreadId,
-          turnStartSeq: agenetes.logMetadata(namespace, deploymentThreadId)
-            .eventCount,
+          turnStartSeq: (
+            await agenetes.logMetadata(namespace, deploymentThreadId)
+          ).eventCount,
         }
       : undefined,
   );

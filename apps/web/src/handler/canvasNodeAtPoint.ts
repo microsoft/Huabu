@@ -23,6 +23,7 @@
 export function nodeIdAtScreenPoint(
   clientX: number,
   clientY: number,
+  options: { excludeNodeIds?: ReadonlySet<string> } = {},
 ): string | null {
   const nodeEls = document.querySelectorAll<HTMLElement>('.react-flow__node');
   let bestId: string | null = null;
@@ -39,6 +40,7 @@ export function nodeIdAtScreenPoint(
     }
     const id = el.getAttribute('data-id');
     if (!id) continue;
+    if (options.excludeNodeIds?.has(id)) continue;
     const z = Number.parseInt(el.style.zIndex || '0', 10) || 0;
     if (z >= bestZ) {
       bestZ = z;

@@ -224,43 +224,111 @@ describe('FileEventLogStore — on-disk specifics', () => {
 });
 
 describe('EventLog — durable append + live pub/sub', () => {
-  it('persists via the store and fans out live entries to subscribers', () => {
+  it('persists via the store and fans out live entries to subscribers', async () => {
     const log = new EventLog(new InMemoryEventLogStore());
     const n = ns('canvas-1');
 
     // A pre-existing entry the subscriber must NOT receive (backfill is the
     // caller's read concern, not the live tail).
-    log.append(n, 'thread-1', text('before'));
+    await log.append(n, 'thread-1', text('before'));
 
     const seen: EventLogEntry[] = [];
     const unsub = log.subscribe('thread-1', (e) => seen.push(e));
 
-    log.beginTurn(n, 'thread-1', request);
-    log.append(n, 'thread-1', text('live-1'));
-    log.append(n, 'thread-1', text('live-2'));
+    await log.beginTurn(n, 'thread-1', request);
+    await log.append(n, 'thread-1', text('live-1'));
+    await log.append(n, 'thread-1', text('live-2'));
 
     expect(seen.map((e) => e.seq)).toEqual([3, 4]);
     // Backfill is served by read, gap-free with the live tail.
-    expect(log.read(n, 'thread-1').map((e) => e.seq)).toEqual([1, 3, 4]);
-    expect(log.readRecords(n, 'thread-1').map((e) => e.seq)).toEqual([
+    expect((await log.read(n, 'thread-1')).map((e) => e.seq)).toEqual([
+      1, 3, 4,
+    ]);
+    expect((await log.readRecords(n, 'thread-1')).map((e) => e.seq)).toEqual([
       1, 2, 3, 4,
     ]);
 
     unsub();
-    log.append(n, 'thread-1', text('after-unsub'));
+    await log.append(n, 'thread-1', text('after-unsub'));
     expect(seen.map((e) => e.seq)).toEqual([3, 4]);
   });
 
-  it('only notifies subscribers of the matching threadId', () => {
+  it('only notifies subscribers of the matching threadId', async () => {
     const log = new EventLog(new InMemoryEventLogStore());
     const n = ns('canvas-1');
     const seen: number[] = [];
     log.subscribe('thread-1', (e) => seen.push(e.seq));
 
-    log.append(n, 'thread-2', text('other'));
+    await log.append(n, 'thread-2', text('other'));
     expect(seen).toEqual([]);
 
-    log.append(n, 'thread-1', text('mine'));
+    await log.append(n, 'thread-1', text('mine'));
     expect(seen).toEqual([1]);
+  });
+});
+
+describe('asynchronous event persistence', () => {
+  it('orders concurrent appends and publishes only after the write commits', async () => {
+    const backing = new InMemoryEventLogStore();
+    const gate = Promise.withResolvers<void>();
+    const entered = Promise.withResolvers<void>();
+    const store: EventLogStore = new Proxy(backing, {
+      get(target, key) {
+        if (key === 'append')
+          return async (...args: Parameters<typeof target.append>) => {
+            entered.resolve();
+            await gate.promise;
+            return target.append(...args);
+          };
+        const value = Reflect.get(target, key);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const log = new EventLog(store);
+    const namespace = ns('async');
+    const seen: EventLogEntry[] = [];
+    log.subscribe('thread', (entry) => seen.push(entry));
+    const first = log.append(namespace, 'thread', text('first'));
+    const second = log.append(namespace, 'thread', text('second'));
+    await entered.promise;
+    expect(seen).toEqual([]);
+    expect(backing.read(namespace, 'thread')).toEqual([]);
+    gate.resolve();
+    expect(
+      (await Promise.all([first, second])).map((entry) => entry.seq),
+    ).toEqual([1, 2]);
+    expect(seen.map((entry) => entry.event)).toEqual([
+      text('first'),
+      text('second'),
+    ]);
+    expect(await log.read(namespace, 'thread')).toEqual(seen);
+  });
+
+  it('surfaces rejected writes without publishing phantom events and allows retry', async () => {
+    const backing = new InMemoryEventLogStore();
+    let fail = true;
+    const store: EventLogStore = new Proxy(backing, {
+      get(target, key) {
+        if (key === 'append')
+          return async (...args: Parameters<typeof target.append>) => {
+            await Promise.resolve();
+            if (fail) throw new Error('durability unavailable');
+            return target.append(...args);
+          };
+        const value = Reflect.get(target, key);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const log = new EventLog(store);
+    const namespace = ns('async');
+    const seen: EventLogEntry[] = [];
+    log.subscribe('thread', (entry) => seen.push(entry));
+    await expect(log.append(namespace, 'thread', text('lost'))).rejects.toThrow(
+      'durability unavailable',
+    );
+    expect(seen).toEqual([]);
+    fail = false;
+    await log.append(namespace, 'thread', text('saved'));
+    expect(seen).toMatchObject([{ seq: 1, event: text('saved') }]);
   });
 });

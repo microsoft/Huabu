@@ -14,7 +14,6 @@ import type {
   CanvasErrorCode,
   DeleteCanvasResponse,
   GetCanvasResponse,
-  GetSpacePreviewSceneResponse,
   GetNodeContentResponse,
   PutCanvasRequest,
   PutCanvasResponse,
@@ -166,17 +165,6 @@ export async function getCanvas(
     console.error('Failed to get canvas:', error);
     return null;
   }
-}
-
-export async function getSpacePreviewScene(
-  canvasId: string,
-): Promise<GetSpacePreviewSceneResponse> {
-  return apiFetch<GetSpacePreviewSceneResponse>(
-    routes.canvasPreviewScene(canvasId),
-    {
-      fallbackMessage: 'Failed to load Space preview',
-    },
-  );
 }
 
 export async function postCanvasExecute(

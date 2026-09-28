@@ -16,7 +16,7 @@ import { Loading } from '../../components/Common/Loading';
 import { toast } from '../../components/Common/Toast';
 import { hasNodePreview } from '../../components/Nodes/previews';
 import { CanvasLayerPanel } from '../../components/Panels/CanvasLayerPanel';
-import { focusNodesOnCanvas } from '../../components/Panels/CanvasLayerPanel/focusNodesOnCanvas';
+import { revealNodesOnCanvas } from '../../components/Panels/CanvasLayerPanel/focusNodesOnCanvas';
 import { CanvasHeader } from '../../components/Panels/Header/CanvasHeader.tsx';
 import { PreviewWorkspacePanel } from '../../components/Panels/PreviewWorkspace/PreviewWorkspacePanel';
 import { useGlobalSearchHotkey } from '../../hooks/useGlobalSearchHotkey';
@@ -84,7 +84,6 @@ export default function CanvasPage() {
   const loadCanvas = useStore((s) => s.loadCanvas);
   const isLoading = useStore((s) => s.isLoading);
   const canvasNotFound = useStore((s) => s.canvasNotFound);
-  const worldCanvasId = useWorkspaceStore((s) => s.worldCanvasId);
   const refreshSpaceTitles = useWorkspaceStore((s) => s.refreshSpaceTitles);
   const nodeCount = useStore((s) => s.nodes.length);
   // Subscribed so the very first render can detect a mismatch between the
@@ -200,7 +199,7 @@ export default function CanvasPage() {
     canvas.selectNodes([node.id], false);
     if (node.type === 'question') {
       if (typeof node.data.threadId === 'string' && node.data.threadId) {
-        const tabId = openPreviewNode(node.id);
+        const tabId = openPreviewNode(node.id, { transient: false });
         if (tabId) {
           usePreviewWorkspaceStore.getState().requestChatOpen(tabId, 'bottom');
         }
@@ -208,11 +207,13 @@ export default function CanvasPage() {
         toast(t('canvasPage.nodeFocusedNoPreview'), { tone: 'info' });
       }
     } else if (hasNodePreview(node.type ?? '')) {
-      openPreviewNode(node.id);
+      openPreviewNode(node.id, { transient: false });
     } else {
       toast(t('canvasPage.nodeFocusedNoPreview'), { tone: 'info' });
     }
-    focusNodesOnCanvas(rfInstance, [node.id], 400);
+    if (canvas.canvasWrapper) {
+      revealNodesOnCanvas(rfInstance, canvas.canvasWrapper, [node.id], 400);
+    }
   }, [
     canvasId,
     isLoading,
@@ -245,12 +246,16 @@ export default function CanvasPage() {
   }, [canvasId, storeCanvasId, loadCanvas, switchCanvas, navigate]);
 
   useEffect(() => {
-    if (!canvasId || canvasId !== worldCanvasId) return;
-    void refreshSpaceTitles().catch((error) => {
-      console.error('Failed to load Space titles:', error);
-      toast(t('spacePreview.targetsUnavailable'), { tone: 'danger' });
-    });
-  }, [canvasId, refreshSpaceTitles, t, worldCanvasId]);
+    if (!canvasId) return;
+    const refresh = () => void refreshSpaceTitles();
+    refresh();
+    window.addEventListener('focus', refresh);
+    window.addEventListener('workspace-changed', refresh);
+    return () => {
+      window.removeEventListener('focus', refresh);
+      window.removeEventListener('workspace-changed', refresh);
+    };
+  }, [canvasId, refreshSpaceTitles]);
 
   // Only a newly created canvas may opt into its input-appropriate creation
   // tool (Note for mouse, Sketch for pen/finger).

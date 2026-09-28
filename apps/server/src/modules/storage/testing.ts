@@ -21,22 +21,68 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
+import { inject } from 'vitest';
+
+import { prepareAzureTestEnvironment } from './backends/azure/test-support.js';
+import { preparePostgresTestEnvironment } from './backends/postgres/test-support.js';
 import { closeStorage, initStorage } from './storage.js';
 import { setWorkspacePath } from '../workspace.js';
 
 import type { StorageProfile } from './profile.js';
 import type { Storage } from './storage.js';
 
+/** Whether this run has the service the container-backed suite provisions. */
+function provisioned(key: 'postgresUrl' | 'azureConnectionString'): boolean {
+  try {
+    return Boolean(inject(key));
+  } catch {
+    return false;
+  }
+}
+
+const HAS_POSTGRES = provisioned('postgresUrl');
+const HAS_AZURE = provisioned('azureConnectionString');
+
 /**
  * Every profile the product suite must pass against.
  *
  * A backend joins this list when it claims to serve the product, not when its
  * adapter first compiles — an adapter may exist for isolated testing before
- * its profile is selectable.
+ * its profile is selectable. The service-backed pairings join only when
+ * `pnpm test:storage-backends` has provisioned PostgreSQL and Azurite, so the
+ * ordinary suite keeps running the two profiles that need no service.
  */
 export const PRODUCT_STORAGE_PROFILES: readonly StorageProfile[] = [
   { structured: { kind: 'disk' }, blobs: { kind: 'disk' } },
   { structured: { kind: 'sqlite' }, blobs: { kind: 'disk' } },
+  ...(HAS_POSTGRES
+    ? [
+        {
+          structured: { kind: 'postgres' as const },
+          blobs: { kind: 'disk' as const },
+        },
+        ...(HAS_AZURE
+          ? [
+              {
+                structured: { kind: 'postgres' as const },
+                blobs: { kind: 'azure' as const },
+              },
+            ]
+          : []),
+      ]
+    : []),
+  ...(HAS_AZURE
+    ? [
+        {
+          structured: { kind: 'disk' as const },
+          blobs: { kind: 'azure' as const },
+        },
+        {
+          structured: { kind: 'sqlite' as const },
+          blobs: { kind: 'azure' as const },
+        },
+      ]
+    : []),
 ];
 
 /** Readable name for a profile, for test titles. */
@@ -108,10 +154,41 @@ export async function mountTestWorkspace(
     process.env['HUABU_BLOB_ROOT'] = path.join(workspacePath, 'blobs');
   }
 
-  const storage = await initStorage(profile);
-  // A namespace nobody has opened before has no World, and a Workspace
-  // without one has no home view. Every backend meets that state once.
-  await storage.structured.spaces().ensureWorld();
+  let releasePostgres: (() => Promise<void>) | null = null;
+  let releaseAzure: (() => Promise<void>) | null = null;
+  const cleanup = async () => {
+    try {
+      await closeStorage();
+    } finally {
+      try {
+        await releaseAzure?.();
+      } finally {
+        try {
+          await releasePostgres?.();
+        } finally {
+          restoreEnv('HUABU_SQLITE_PATH', previousSqlitePath);
+          restoreEnv('HUABU_BLOB_ROOT', previousBlobRoot);
+          rmSync(workspacePath, { recursive: true, force: true });
+        }
+      }
+    }
+  };
+  let storage: Storage;
+  try {
+    releasePostgres =
+      profile.structured.kind === 'postgres'
+        ? await preparePostgresTestEnvironment()
+        : null;
+    releaseAzure =
+      profile.blobs.kind === 'azure'
+        ? await prepareAzureTestEnvironment()
+        : null;
+    storage = await initStorage(profile);
+    await storage.structured.spaces().ensureWorld();
+  } catch (error) {
+    await cleanup();
+    throw error;
+  }
 
   return {
     profile,
@@ -124,12 +201,7 @@ export async function mountTestWorkspace(
       await reopened.structured.spaces().ensureWorld();
       return reopened;
     },
-    async close(): Promise<void> {
-      await closeStorage();
-      restoreEnv('HUABU_SQLITE_PATH', previousSqlitePath);
-      restoreEnv('HUABU_BLOB_ROOT', previousBlobRoot);
-      rmSync(workspacePath, { recursive: true, force: true });
-    },
+    close: cleanup,
   };
 }
 

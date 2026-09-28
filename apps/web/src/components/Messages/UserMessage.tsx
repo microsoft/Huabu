@@ -70,7 +70,7 @@ export const UserMessage = memo(function UserMessage({
           <div className="leading-relaxed wrap-anywhere whitespace-pre-wrap">
             {inputKind === 'ink-intent' && (
               <span
-                className="inline-flex items-center gap-1.5 font-medium"
+                className="inline-flex items-center gap-1.5"
                 aria-label={
                   inferredIntent
                     ? t('messages.inferredInkRequest', {

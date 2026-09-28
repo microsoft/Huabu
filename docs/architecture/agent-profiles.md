@@ -2,6 +2,8 @@
 
 Ordinary external agents use persisted Profiles and the existing ACP runtime. Agentlet owns the supported harness catalogue, detection, capability descriptions, and structured launch compilation; Agenetes owns the generic Profile registry; Huabu owns automatic Profile creation, the application default, and the Settings/API projection.
 
+Profiles describe Agent harness providers, not standalone service APIs. Optional OCR, web search, and image generation integrations retain their own configuration and server-held credentials independently of the default Agent. Submission-time Ink OCR supplies auxiliary evidence to the chosen Agent; it is not an internal-Agent fallback. A future model-provider or function-provider abstraction is separate from the Profile contract.
+
 ## Discovery and provisioning
 
 ```text
@@ -73,7 +75,11 @@ Default Profile selection saves immediately; the functional-model input saves af
 
 Functional text tasks reuse Profile snapshot compilation and Agenetes event folding, without creating visible Agent Nodes or storing Agenetes conversations. No external default or an unavailable Profile is an explicit failure, never an internal fallback. A background permission request fails the task and forwards cancellation without escalating approval; the task deadline also bounds unresponsive harnesses. ACP Job automatic resource release is deferred independently of this migration. Per-workflow overrides, historical conversation migration, and internal-agent removal remain outside this step.
 
+Functional Jobs await the asynchronous Agenetes creation API inside the task deadline. Cancellation or timeout during creation returns promptly, and a handle that arrives afterward cannot dispatch the task. Creation failures propagate without fallback; this does not introduce automatic resource reclamation.
+
 New conversations and newly created Agent Nodes snapshot the configured default unless the caller supplies an explicit binding. Existing conversations, restored nodes, and explicit selections keep their original binding. A missing or deleted default produces an actionable error on new creation, not a silent switch to another Profile. Loading a Space and initializing a legacy thread association remain independent of default availability.
+
+Ink submission without an existing Question target also loads the canonical default before creating its Question. It reuses the shared default-binding loader and rejects a changed Space or selection after that await. Failed loading leaves the Ink selection intact and creates no node; an already selected Agent target and a retry of the same created Question keep their binding.
 
 `GET /api/acp/profiles` reads the canonical persisted list, selectable IDs, and saved `agentDefaults` without detecting harnesses, creating Profiles or starting sessions. Settings refreshes the shared Profile store on mount and after mutations; existing selectors refresh that same list when opened. There is no Web discovery store, selector-time materialization, or discovery polling.
 

@@ -25,6 +25,7 @@ import { refreshConversationTitleAfterStream } from '@/store/conversationTitleSt
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 
 import { claimAgentStream } from './agentStreamCoordinator';
+import { observeAgentTurnAcceptance } from './agentTurnController';
 import { handleStreamEvent } from './useAgentStream';
 
 import type { ChatSession } from './useChatSession';
@@ -483,6 +484,10 @@ export function useChatHistory(
         ownerThreadId,
         ownerCanvasId,
         {
+          onAccepted: (accepted) => {
+            if (cancelled) return;
+            observeAgentTurnAcceptance(ownerCanvasId, accepted);
+          },
           onEvent: (event: AgentStreamEvent) => {
             if (cancelled) return;
             if (!streaming) {

@@ -341,9 +341,8 @@ export async function* runAcpAgent(
     });
     opts.onTurnStarted?.({
       threadId: opts.threadId,
-      turnStartSeq: agenetes.logMetadata(
-        canvasAcpNamespace(canvasId),
-        opts.threadId,
+      turnStartSeq: (
+        await agenetes.logMetadata(canvasAcpNamespace(canvasId), opts.threadId)
       ).eventCount,
     });
     yield* iterator;

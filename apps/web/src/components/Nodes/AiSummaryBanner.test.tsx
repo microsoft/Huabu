@@ -29,13 +29,18 @@ describe('<AiSummaryBanner>', () => {
     container = undefined;
   });
 
-  it('can be dismissed without changing the summary data', () => {
+  it('starts collapsed and can be expanded or dismissed without changing the summary data', () => {
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
 
     act(() => root?.render(<AiSummaryBanner summary="A concise summary" />));
 
+    expect(container.textContent).toContain('AI Summary');
+    expect(container.textContent).not.toContain('A concise summary');
+    const toggleButton = container.querySelector<HTMLButtonElement>('button');
+    expect(toggleButton).not.toBeNull();
+    act(() => toggleButton?.click());
     expect(container.textContent).toContain('A concise summary');
     const closeButton = container.querySelector<HTMLButtonElement>(
       '[aria-label="Close AI summary"]',

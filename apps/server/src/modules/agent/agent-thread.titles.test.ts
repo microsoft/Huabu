@@ -87,10 +87,10 @@ describe('Question ownership at the real message adapters', () => {
           run,
           control: vi.fn().mockResolvedValue({ ok: true }),
         } as unknown as AcpHandle;
-        const create = vi.spyOn(agenetes, 'create').mockReturnValue(handle);
+        const create = vi.spyOn(agenetes, 'create').mockResolvedValue(handle);
         vi.spyOn(agenetes, 'get').mockReturnValue(undefined);
-        vi.spyOn(agenetes, 'record').mockReturnValue(undefined);
-        vi.spyOn(agenetes, 'logMetadata').mockReturnValue({
+        vi.spyOn(agenetes, 'record').mockResolvedValue(undefined);
+        vi.spyOn(agenetes, 'logMetadata').mockResolvedValue({
           eventCount: 1,
           turnCount: 1,
         });

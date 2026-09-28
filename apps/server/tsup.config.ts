@@ -7,6 +7,8 @@ import path from 'node:path';
 
 import { defineConfig } from 'tsup';
 
+import { prepareVideoMedia } from './scripts/prepare-video-media.mjs';
+
 // ESM bundles don't have `require`, `__dirname`, or `__filename` in
 // global scope, but plenty of bundled CJS packages assume they exist:
 // dynamic `require('fs')` calls need createRequire, while bundled runtime
@@ -57,8 +59,8 @@ export default defineConfig([
     // Cleaning here would race the parallel agentlet config below because
     // its output directory is nested under this one.
     clean: false,
-    // Target the Node version shipped with Electron 35 (~Node 22)
-    target: 'node22',
+    // Target the Node 24 baseline used by the server and Electron 43.
+    target: 'node24',
     // Many bundled CJS packages call require('fs'), require('path'), etc.
     // In an ESM output file, `require` is not defined. This banner injects a
     // real `require` function so those CJS-style dynamic requires work correctly.
@@ -84,6 +86,7 @@ export default defineConfig([
       const resvgWasmDst = path.resolve('dist-bundle/resvg-bg.wasm');
       cpSync(resvgWasmSrc, resvgWasmDst);
       console.log(`[tsup] copied resvg-bg.wasm -> ${resvgWasmDst}`);
+      await prepareVideoMedia({ serverRoot: path.resolve('.') });
     },
   },
   {
@@ -114,7 +117,7 @@ export default defineConfig([
     splitting: false,
     sourcemap: false,
     clean: false,
-    target: 'node22',
+    target: 'node24',
     banner: BANNER,
     esbuildOptions(options) {
       options.platform = 'node';

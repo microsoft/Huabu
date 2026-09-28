@@ -95,6 +95,12 @@ describe('buildHistoryFromTurns', () => {
         originNodeIds: ['ink-1'],
       },
     ];
+    envelope.focus.selection.inkRecognition = {
+      provider: 'azure-vision',
+      apiVersion: '2024-02-01',
+      originNodeIds: ['ink-1'],
+      lines: [{ text: 'hidden OCR evidence', confidence: 0.8 }],
+    };
     envelope.focus.groundingVisual = {
       kind: 'visible-canvas',
       dataUrl: 'data:image/png;base64,cG5n',

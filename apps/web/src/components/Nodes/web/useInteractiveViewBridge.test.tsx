@@ -18,7 +18,7 @@ vi.mock('@/api/interactiveView', () => ({
 }));
 
 vi.mock('@/components/Panels/CanvasLayerPanel/focusNodesOnCanvas', () => ({
-  focusNodesOnCanvas: vi.fn(),
+  revealNodesOnCanvas: vi.fn(),
 }));
 
 vi.mock('@/store/canvasStore', () => ({

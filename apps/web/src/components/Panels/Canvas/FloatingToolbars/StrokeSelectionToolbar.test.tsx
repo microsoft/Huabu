@@ -5,6 +5,9 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { agentRequestSchema } from '@huabu/shared';
+
+import { toast } from '@/components/Common/Toast';
 import { useAcpProfilesStore } from '@/store/acpProfilesStore';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
@@ -12,6 +15,7 @@ import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 
 import { StrokeSelectionToolbar } from './StrokeSelectionToolbar';
 
+import type * as AcpApi from '@/api/acp';
 import type {
   AgentTurnCallbacks,
   AgentTurnResult,
@@ -26,7 +30,15 @@ const mocks = vi.hoisted(() => ({
   captureGrounding: vi.fn(),
   blobToDataUrl: vi.fn(),
   getViewport: vi.fn(),
+  listProfiles: vi.fn(),
+  popoverAnchor: null as unknown,
 }));
+
+vi.mock('@/api/acp', async (original) => ({
+  ...(await original<typeof AcpApi>()),
+  listAcpProfiles: mocks.listProfiles,
+}));
+vi.mock('@/components/Common/Toast', () => ({ toast: vi.fn() }));
 
 vi.mock('@xyflow/react', async (original) => ({
   ...((await original()) as object),
@@ -41,12 +53,17 @@ vi.mock('@/components/Common/CanvasFloatingPopover', async () => {
   const { createElement } = await import('react');
   return {
     CanvasFloatingPopover: ({
+      anchor,
       open,
       children,
     }: {
+      anchor: unknown;
       open: boolean;
       children: React.ReactNode;
-    }) => (open ? createElement('div', null, children) : null),
+    }) => {
+      mocks.popoverAnchor = anchor;
+      return open ? createElement('div', null, children) : null;
+    },
   };
 });
 vi.mock('@/components/Nodes/sketch/SketchControls', async () => {
@@ -121,10 +138,39 @@ beforeEach(() => {
     settingsByThread: {},
     lastActionByThread: {},
   });
-  useAcpProfilesStore.setState({ profiles: [] });
+  const profiles = [
+    {
+      id: 'default-profile',
+      alias: 'Default Copilot',
+      agentletId: 'machine-1',
+      workingDirPath: '/tmp',
+      launch: { kind: 'acp-command' as const, command: 'copilot --acp' },
+    },
+  ];
+  useAcpProfilesStore.setState({
+    profiles,
+    agentDefaults: { profileId: 'default-profile', functionalModel: '' },
+    loaded: true,
+    error: null,
+  });
+  mocks.listProfiles.mockReset().mockResolvedValue({
+    profiles,
+    selectableProfileIds: ['default-profile'],
+    agentlet: null,
+    agentDefaults: { profileId: 'default-profile', functionalModel: '' },
+  });
   useGesturePreviewStore.setState({
     sketchStrokeSelection: { 'sketch-1': ['stroke-1'] },
+    sketchSelectionPolygon: [
+      { x: 20, y: 30 },
+      { x: 80, y: 30 },
+      { x: 80, y: 70 },
+      { x: 20, y: 70 },
+    ],
+    sketchStrokeMovePreview: null,
+    inkSubmissionPreparing: false,
   });
+  mocks.popoverAnchor = null;
   mocks.capture.mockReturnValue({
     canvasId: 'canvas-1',
     canvasContext: {
@@ -167,6 +213,91 @@ afterEach(() => {
 });
 
 describe('StrokeSelectionToolbar Ink submission', () => {
+  it('loads and snapshots the default external Profile for a new Ink Question', async () => {
+    mocks.dispatch.mockResolvedValueOnce({ status: 'completed' });
+    const button = await renderToolbar();
+    await act(async () => button.click());
+    expect(mocks.listProfiles).toHaveBeenCalledOnce();
+    expect(mocks.createQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        binding: {
+          kind: 'external',
+          profileId: 'default-profile',
+          alias: 'Default Copilot',
+        },
+        mode: 'ask',
+        pendingInkIntentLabel: true,
+      }),
+    );
+    expect(mocks.prepare).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: 'ask' }),
+    );
+  });
+
+  it('keeps the Ink selection and creates nothing when defaults are unavailable', async () => {
+    mocks.listProfiles.mockRejectedValueOnce(new Error('Server unavailable'));
+    const button = await renderToolbar();
+    await act(async () => button.click());
+    expect(mocks.createQuestion).not.toHaveBeenCalled();
+    expect(mocks.dispatch).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledWith(expect.any(String), { tone: 'danger' });
+    expect(useGesturePreviewStore.getState().sketchStrokeSelection).toEqual({
+      'sketch-1': ['stroke-1'],
+    });
+    expect(useGesturePreviewStore.getState().inkSubmissionPreparing).toBe(
+      false,
+    );
+  });
+
+  it('requires a configured default instead of falling back to the internal Agent', async () => {
+    mocks.listProfiles.mockResolvedValueOnce({
+      profiles: [],
+      selectableProfileIds: [],
+      agentlet: null,
+      agentDefaults: { profileId: null, functionalModel: '' },
+    });
+    const button = await renderToolbar();
+    await act(async () => button.click());
+    expect(mocks.createQuestion).not.toHaveBeenCalled();
+    expect(mocks.dispatch).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledWith(expect.any(String), { tone: 'danger' });
+  });
+
+  it.each(['selection', 'canvas'] as const)(
+    'does not create an Ink Question after %s changes during default loading',
+    async (change) => {
+      let resolveProfiles!: (value: unknown) => void;
+      mocks.listProfiles.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveProfiles = resolve;
+          }),
+      );
+      const button = await renderToolbar();
+      await act(async () => button.click());
+      expect(mocks.createQuestion).not.toHaveBeenCalled();
+      await act(async () => {
+        if (change === 'canvas') {
+          useCanvasStore
+            .getState()
+            ._setStateNoAutosave({ canvasId: 'canvas-2' });
+        } else {
+          useGesturePreviewStore.setState({
+            sketchStrokeSelection: { 'sketch-1': ['stroke-2'] },
+          });
+        }
+        resolveProfiles({
+          profiles: [],
+          selectableProfileIds: [],
+          agentlet: null,
+          agentDefaults: { profileId: 'default-profile', functionalModel: '' },
+        });
+      });
+      expect(mocks.createQuestion).not.toHaveBeenCalled();
+      expect(mocks.dispatch).not.toHaveBeenCalled();
+    },
+  );
+
   it('keeps submit and source count visible for a mixed selection', async () => {
     useCanvasStore.getState()._setStateNoAutosave({
       nodes: [
@@ -182,6 +313,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
           type: 'note',
           selected: true,
           position: { x: 120, y: 0 },
+          measured: { width: 3000, height: 2000 },
           data: {},
         },
       ],
@@ -190,7 +322,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
     await mountToolbar();
 
     expect(document.body.textContent).toContain('2 sources');
-    expect(document.body.textContent).toContain('New · Huabu');
+    expect(document.body.textContent).toContain('New · Default Copilot');
     expect(document.body.querySelector('[data-sketch-controls]')).toBeNull();
     const submit = document.body.querySelector<HTMLButtonElement>(
       'button[aria-label="Send ink request"]',
@@ -198,6 +330,12 @@ describe('StrokeSelectionToolbar Ink submission', () => {
     expect(submit?.disabled).toBe(false);
     expect(submit?.className).toContain('bg-inverse');
     expect(submit?.className).toContain('rounded-full');
+    expect(mocks.popoverAnchor).toEqual({
+      x: 20,
+      y: 30,
+      width: 60,
+      height: 40,
+    });
   });
 
   it('captures hidden grounding before dispatching mixed Ink and objects', async () => {
@@ -234,9 +372,72 @@ describe('StrokeSelectionToolbar Ink submission', () => {
         }),
       }),
     );
+    const input = mocks.prepare.mock.calls[0]?.[0];
+    expect(
+      agentRequestSchema.safeParse({
+        content: input.content,
+        inputKind: input.inputKind,
+        canvasId: input.sources.canvasId,
+        canvasContext: input.sources.canvasContext,
+        groundingVisual: input.groundingVisual,
+      }),
+    ).toMatchObject({ success: true });
   });
 
-  it('exposes a disabled explanation for multiple Question targets', async () => {
+  it('keeps Frame-nested Ink unique and grounds the final source tree', async () => {
+    useCanvasStore.getState()._setStateNoAutosave({
+      nodes: [
+        {
+          id: 'frame-1',
+          type: 'frame',
+          selected: true,
+          position: { x: 0, y: 0 },
+          measured: { width: 800, height: 600 },
+          data: {},
+        },
+        {
+          id: 'sketch-1',
+          type: 'sketch',
+          parentId: 'frame-1',
+          position: { x: 20, y: 20 },
+          data: {},
+        },
+      ],
+    });
+    mocks.dispatch.mockResolvedValueOnce({ status: 'completed' });
+    const button = await renderToolbar();
+
+    await act(async () => button.click());
+
+    expect(mocks.prepare).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sources: {
+          canvasId: 'canvas-1',
+          canvasContext: {
+            selectedNodes: [
+              {
+                id: 'frame-1',
+                type: 'frame',
+                children: [
+                  {
+                    id: 'sketch-1',
+                    type: 'sketch',
+                    strokeIds: ['stroke-1'],
+                  },
+                ],
+              },
+            ],
+          },
+        },
+        groundingVisual: expect.objectContaining({
+          selectedNodeIds: ['frame-1'],
+          strokeSubsets: [{ nodeId: 'sketch-1', strokeIds: ['stroke-1'] }],
+        }),
+      }),
+    );
+  });
+
+  it('exposes a disabled explanation for multiple Agent Node targets', async () => {
     useCanvasStore.getState()._setStateNoAutosave({
       nodes: [
         {
@@ -265,11 +466,11 @@ describe('StrokeSelectionToolbar Ink submission', () => {
     await mountToolbar();
 
     const button = document.body.querySelector<HTMLButtonElement>(
-      'button[aria-label="Select only one question to continue"]',
+      'button[aria-label="Select only one Agent Node to continue"]',
     );
     expect(button?.disabled).toBe(true);
     expect(button?.getAttribute('aria-label')).toBe(
-      'Select only one question to continue',
+      'Select only one Agent Node to continue',
     );
     expect(document.body.textContent).toContain('Multiple agents');
   });
@@ -384,6 +585,8 @@ describe('StrokeSelectionToolbar Ink submission', () => {
     expect(mocks.prepare).toHaveBeenCalledWith(
       expect.objectContaining({ mode: 'operate' }),
     );
+    expect(mocks.listProfiles).not.toHaveBeenCalled();
+    expect(mocks.createQuestion).not.toHaveBeenCalled();
   });
 
   it('continues an internal Question in its persisted ask mode', async () => {
@@ -428,6 +631,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
         }),
       }),
     );
+    expect(mocks.listProfiles).not.toHaveBeenCalled();
   });
 
   it('creates and dispatches at most once for rapid activation', async () => {
@@ -435,16 +639,40 @@ describe('StrokeSelectionToolbar Ink submission', () => {
     mocks.dispatch.mockReturnValueOnce(pending.promise);
     const button = await renderToolbar();
 
-    act(() => {
+    await act(async () => {
       button.click();
       button.click();
     });
 
     expect(mocks.createQuestion).toHaveBeenCalledTimes(1);
     expect(mocks.dispatch).toHaveBeenCalledTimes(1);
+    const pendingButton = document.body.querySelector<HTMLButtonElement>(
+      'button[aria-label="Sending ink request"]',
+    );
+    if (!pendingButton) throw new Error('Expected pending Ink button');
+    expect(pendingButton.disabled).toBe(true);
+    const spinner = pendingButton.querySelector<HTMLElement>(
+      '[data-loading-spinner]',
+    );
+    expect(spinner).not.toBeNull();
+    expect(spinner?.style.width).toBe('12px');
+    expect(spinner?.style.height).toBe('12px');
+    expect(spinner?.querySelector('.animate-spin')).not.toBeNull();
+    expect(document.body.querySelector('[role="tooltip"]')).toBeNull();
+    expect(useGesturePreviewStore.getState().inkSubmissionPreparing).toBe(true);
 
     pending.resolve({ status: 'rejected' });
     await act(async () => pending.promise);
+
+    const retryButton = document.body.querySelector<HTMLButtonElement>(
+      'button[aria-label="Send ink request"]',
+    );
+    if (!retryButton) throw new Error('Expected retryable Ink button');
+    expect(retryButton.disabled).toBe(false);
+    expect(retryButton.querySelector('[data-loading-spinner]')).toBeNull();
+    expect(useGesturePreviewStore.getState().inkSubmissionPreparing).toBe(
+      false,
+    );
   });
 
   it('reuses the created Question when a rejected selection is retried', async () => {
@@ -452,42 +680,99 @@ describe('StrokeSelectionToolbar Ink submission', () => {
     const button = await renderToolbar();
 
     await act(async () => button.click());
-    await act(async () => button.click());
+    const retryButton = document.body.querySelector<HTMLButtonElement>(
+      'button[aria-label="Send ink request"]',
+    );
+    if (!retryButton) throw new Error('Expected retryable Ink button');
+    await act(async () => retryButton.click());
 
     expect(mocks.createQuestion).toHaveBeenCalledTimes(1);
     expect(mocks.dispatch).toHaveBeenCalledTimes(2);
+    expect(mocks.listProfiles).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps a newer selection when an earlier turn is accepted', async () => {
-    const pending = deferredResult();
+  it('retains an ambiguous reservation until Stop confirms no acceptance', async () => {
     let callbacks: AgentTurnCallbacks | undefined;
     mocks.dispatch.mockImplementationOnce(
       (_input: unknown, received: AgentTurnCallbacks) => {
         callbacks = received;
-        return pending.promise;
+        return Promise.resolve({
+          status: 'unknown',
+          error: new Error('Connection lost'),
+        });
       },
     );
     const button = await renderToolbar();
 
-    act(() => button.click());
-    useGesturePreviewStore.setState({
-      sketchStrokeSelection: { 'sketch-1': ['stroke-2'] },
+    await act(async () => button.click());
+
+    expect(useGesturePreviewStore.getState().inkSubmissionPreparing).toBe(true);
+    const pendingButton = document.body.querySelector<HTMLButtonElement>(
+      'button[aria-label="Sending ink request"]',
+    );
+    expect(pendingButton?.disabled).toBe(true);
+
+    act(() => callbacks?.onAcceptanceRejected?.());
+
+    expect(useGesturePreviewStore.getState().inkSubmissionPreparing).toBe(
+      false,
+    );
+    expect(useGesturePreviewStore.getState().sketchStrokeSelection).toEqual({
+      'sketch-1': ['stroke-1'],
     });
+    const retryButton = document.body.querySelector<HTMLButtonElement>(
+      'button[aria-label="Send ink request"]',
+    );
+    expect(retryButton?.disabled).toBe(false);
+  });
+
+  it('preserves a newer Lasso when the older turn is accepted', async () => {
+    const olderPending = deferredResult();
+    let callbacks: AgentTurnCallbacks | undefined;
+    mocks.dispatch.mockImplementationOnce(
+      (_input: unknown, received: AgentTurnCallbacks) => {
+        callbacks = received;
+        return olderPending.promise;
+      },
+    );
+    const button = await renderToolbar();
+
+    await act(async () => button.click());
+    await act(async () => {
+      useGesturePreviewStore.setState({
+        sketchStrokeSelection: { 'sketch-1': ['stroke-2'] },
+        sketchSelectionPolygon: [
+          { x: 120, y: 130 },
+          { x: 180, y: 130 },
+          { x: 180, y: 170 },
+          { x: 120, y: 170 },
+        ],
+      });
+      await Promise.resolve();
+    });
+
+    expect(useGesturePreviewStore.getState().inkSubmissionPreparing).toBe(
+      false,
+    );
+
     act(() =>
       callbacks?.onAccepted?.({ threadId: 'thread-1', turnStartSeq: 1 }),
     );
+    olderPending.resolve({
+      status: 'completed',
+      accepted: { threadId: 'thread-1', turnStartSeq: 1 },
+    });
+    await act(async () => olderPending.promise);
 
     expect(useGesturePreviewStore.getState().sketchStrokeSelection).toEqual({
       'sketch-1': ['stroke-2'],
     });
-    pending.resolve({
-      status: 'completed',
-      accepted: { threadId: 'thread-1', turnStartSeq: 1 },
-    });
-    await act(async () => pending.promise);
+    expect(useGesturePreviewStore.getState().inkSubmissionPreparing).toBe(
+      false,
+    );
   });
 
-  it('keeps Ink when the whole-node source selection changed meanwhile', async () => {
+  it('clears the matching Lasso when only whole-node projection changed', async () => {
     const pending = deferredResult();
     let callbacks: AgentTurnCallbacks | undefined;
     mocks.dispatch.mockImplementationOnce(
@@ -498,7 +783,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
     );
     const button = await renderToolbar();
 
-    act(() => button.click());
+    await act(async () => button.click());
     useCanvasStore.getState()._setStateNoAutosave({
       nodes: [
         {
@@ -520,9 +805,10 @@ describe('StrokeSelectionToolbar Ink submission', () => {
       callbacks?.onAccepted?.({ threadId: 'thread-1', turnStartSeq: 1 }),
     );
 
-    expect(useGesturePreviewStore.getState().sketchStrokeSelection).toEqual({
-      'sketch-1': ['stroke-1'],
-    });
+    expect(useGesturePreviewStore.getState().sketchStrokeSelection).toEqual({});
+    expect(
+      document.body.querySelector('button[aria-label="Send ink request"]'),
+    ).toBeNull();
     pending.resolve({
       status: 'completed',
       accepted: { threadId: 'thread-1', turnStartSeq: 1 },
@@ -541,7 +827,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
     );
     const button = await renderToolbar();
 
-    act(() => button.click());
+    await act(async () => button.click());
     expect(useGesturePreviewStore.getState().sketchStrokeSelection).toEqual({
       'sketch-1': ['stroke-1'],
     });
@@ -550,6 +836,15 @@ describe('StrokeSelectionToolbar Ink submission', () => {
     );
 
     expect(useGesturePreviewStore.getState().sketchStrokeSelection).toEqual({});
+    expect(useGesturePreviewStore.getState().inkSubmissionPreparing).toBe(
+      false,
+    );
+    expect(
+      document.body.querySelector('button[aria-label="Sending ink request"]'),
+    ).toBeNull();
+    expect(
+      document.body.querySelector('button[aria-label="Send ink request"]'),
+    ).toBeNull();
     pending.resolve({
       status: 'completed',
       accepted: { threadId: 'thread-1', turnStartSeq: 1 },

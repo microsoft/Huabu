@@ -18,7 +18,7 @@ export const AiSummaryBanner = ({
   keywords,
 }: AiSummaryBannerProps) => {
   const { t } = useTranslation();
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
   const [dismissed, setDismissed] = useState(false);
 
   const hasSummary = typeof summary === 'string' && summary.trim().length > 0;

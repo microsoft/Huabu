@@ -1,0 +1,524 @@
+/*
+ * Copyright (c) Microsoft Corporation.
+ * Licensed under the MIT license.
+ */
+
+.qg-intro h2 {
+  font-size: 20px;
+  font-weight: 600;
+}
+.qg-intro p,
+.qg-help {
+  font-size: 12px;
+  line-height: 1.8;
+  color: var(--fg-muted);
+  margin: 8px 0 18px;
+}
+.qg-controls,
+.qg-controls > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.qg-controls {
+  gap: 16px;
+}
+.qg-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+}
+.qg-proposal {
+  border: 1px solid var(--edge-default);
+  border-radius: 14px;
+  overflow: hidden;
+  min-width: 0;
+  background: var(--bg-surface);
+}
+.qg-proposal-heading {
+  display: flex;
+  gap: 12px;
+  padding: 18px 20px 14px;
+}
+.qg-proposal-heading > span {
+  font-size: 12px;
+  color: var(--fg-subtle);
+  padding-top: 2px;
+}
+.qg-proposal-heading h3 {
+  font-size: 15px;
+  font-weight: 600;
+}
+.qg-proposal-heading p {
+  font-size: 11px;
+  color: var(--fg-muted);
+  margin-top: 4px;
+}
+.qg-stage,
+.qg-state-case {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: var(--bg-default);
+  background-image: radial-gradient(
+    circle,
+    var(--canvas-grid) 0.7px,
+    transparent 0.8px
+  );
+  background-size: 18px 18px;
+}
+.qg-stage {
+  min-height: 216px;
+  padding: 48px 18px 28px;
+}
+.qg-description {
+  margin: 14px 20px;
+  min-height: 40px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--fg-muted);
+}
+.qg-states {
+  border-top: 1px solid var(--edge-default);
+}
+.qg-states summary {
+  padding: 12px 20px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+.qg-state-case {
+  min-height: 155px;
+  padding: 42px 18px 20px;
+}
+.qg-state-case + .qg-state-case {
+  border-top: 1px solid var(--edge-default);
+}
+
+/* The same semantic content and interaction are reused for every reference. */
+.qi-card[data-appearance] {
+  --qg-fill: var(--bg-hover);
+  --qg-strong: var(--bg-hover);
+}
+.qi-card[data-appearance][data-tone='info'] {
+  --qg-fill: var(--info-bg);
+  --qg-strong: var(--info-bg-hover);
+}
+.qi-card[data-appearance][data-tone='warning'] {
+  --qg-fill: var(--warning-bg);
+  --qg-strong: var(--warning-bg-hover);
+}
+.qi-card[data-appearance][data-tone='success'] {
+  --qg-fill: var(--success-bg);
+  --qg-strong: var(--success-bg-hover);
+}
+.qi-card[data-appearance][data-tone='danger'] {
+  --qg-fill: var(--danger-bg);
+  --qg-strong: var(--danger-bg-hover);
+}
+.qi-card[data-appearance='compact'],
+.qi-card[data-appearance='tag'],
+.qi-card[data-appearance='external'],
+.qi-card[data-appearance='rounded-header'],
+.qi-card[data-appearance='divided-header'],
+.qi-card[data-appearance='notice'] {
+  background: var(--bg-surface);
+}
+.qi-card[data-appearance='compact'] {
+  padding: 6px;
+}
+.qi-card[data-appearance='compact'] .qi-content,
+.qi-card[data-appearance='tag'] .qi-content,
+.qi-card[data-appearance='notice'] .qi-content,
+.qi-card[data-appearance='rounded-header'] .qi-content,
+.qi-card[data-appearance='divided-header'] .qi-content {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+.qi-card[data-appearance='compact'] .qi-question {
+  padding-top: 6px;
+  padding-bottom: 9px;
+}
+.qi-card[data-appearance='colored-inset'] {
+  background: var(--question-bg);
+  border-color: var(--question-border);
+}
+.dark .qi-card[data-appearance='colored-inset'] .qi-agent {
+  color: var(--fg-inverse);
+}
+.qi-card[data-appearance='tag'] {
+  padding: 10px;
+  border-radius: 16px;
+}
+.qi-card[data-appearance='tag'] .qi-header {
+  padding: 0;
+}
+.qi-card[data-appearance='tag'] .qi-status {
+  padding: 6px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  background: var(--qg-strong);
+}
+.qi-card[data-appearance='tag'] .qi-question {
+  padding: 14px 2px 6px;
+}
+.qi-card[data-appearance='rounded-header'] .qi-status,
+.qi-card[data-appearance='divided-header'] .qi-status {
+  background: transparent;
+}
+.qi-card[data-appearance='rounded-header'] {
+  padding: 4px;
+  border-radius: 14px;
+}
+.qi-card[data-appearance='rounded-header'] .qi-header {
+  border-radius: 9px;
+  background: var(--bg-hover);
+  padding: 7px 8px;
+}
+.qi-card[data-appearance='rounded-header'][data-emphasized='true'] .qi-header {
+  background: var(--qg-strong);
+}
+.qi-card[data-appearance='rounded-header'] .qi-question {
+  padding: 14px 10px;
+}
+.qi-card[data-appearance='divided-header'] {
+  padding: 0;
+  border-radius: 10px;
+}
+.qi-card[data-appearance='divided-header'] .qi-header {
+  border-radius: 9px 9px 0 0;
+  padding: 9px 12px;
+  background: var(--bg-hover);
+  border-bottom: 1px solid var(--edge-default);
+}
+.qi-card[data-appearance='divided-header'][data-emphasized='true'] .qi-header {
+  background: var(--qg-strong);
+}
+.qi-card[data-appearance='divided-header'] .qi-question {
+  padding: 16px 12px;
+}
+.qi-card[data-appearance='external'] {
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  border-radius: 14px;
+}
+.qi-card[data-appearance='external'] .qi-header {
+  display: contents;
+}
+.qi-card[data-appearance='external'] .qi-content {
+  order: 0;
+  border: 0;
+}
+.qi-card[data-appearance='external'] .qi-agent {
+  order: 1;
+  margin: 4px 6px;
+  align-self: flex-start;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+.qi-card[data-appearance='external'] .qi-status {
+  position: absolute;
+  bottom: calc(100% + 7px);
+  right: 0;
+  border-radius: 10px;
+  padding: 4px 7px;
+  background: var(--qg-strong);
+  pointer-events: none;
+}
+/* Extend the single activation target over its attached external status. */
+.qi-card[data-appearance='external'] .qi-open {
+  top: -31px;
+  height: calc(100% + 31px);
+}
+.qi-card[data-appearance='external'] .qi-detail {
+  background: var(--bg-default);
+  border: 1px solid var(--edge-default);
+  border-radius: 8px;
+}
+
+.qi-card[data-appearance][data-size='small'] {
+  padding: 4px;
+}
+.qi-card[data-appearance][data-size='small'] .qi-question {
+  padding: 8px 4px;
+}
+.qi-card[data-appearance][data-size='small'] .qi-header {
+  padding: 3px 4px;
+}
+.qi-card[data-appearance][data-size='tiny'] {
+  padding: 0;
+  border-radius: 8px;
+}
+.qi-card[data-appearance][data-size='tiny'] .qi-header {
+  min-height: 30px;
+  padding: 3px 4px;
+  border-radius: 7px;
+}
+.qi-card[data-appearance][data-size='tiny'] .qi-status {
+  padding: 3px;
+}
+.qi-card[data-appearance='external'][data-size='tiny'] {
+  min-height: 32px;
+  justify-content: center;
+}
+.qi-card[data-appearance='external'][data-size='tiny'] .qi-agent {
+  align-self: center;
+}
+@media (max-width: 850px) {
+  .qg-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Notification reference: question first, state rail, identity as metadata. */
+.qg-notice-focus {
+  margin: 24px 0 32px;
+  border: 1px solid var(--edge-default);
+  border-radius: 16px;
+  overflow: hidden;
+}
+.qg-notice-focus > header {
+  padding: 20px 24px;
+  background: var(--bg-surface);
+}
+.qg-notice-focus > header > span {
+  font-size: 11px;
+  color: var(--fg-subtle);
+}
+.qg-notice-focus h3 {
+  margin-top: 6px;
+  font-size: 18px;
+  font-weight: 600;
+}
+.qg-notice-focus p {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+.qg-notice-preview {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 228px;
+  padding: 32px 20px;
+  background: var(--bg-default);
+}
+.qi-card[data-appearance='notice'] {
+  display: flex;
+  flex-direction: column;
+  padding: 16px 20px 14px 28px;
+  border-radius: 12px;
+  background: var(--bg-surface);
+  box-shadow: 0 4px 12px var(--edge-default);
+}
+.qi-card[data-appearance='notice']::before {
+  content: '';
+  position: absolute;
+  border-radius: 3px;
+  left: 10px;
+  top: 14px;
+  bottom: 14px;
+  width: 3px;
+  background: var(--qi-tone);
+}
+.qi-card[data-appearance='notice'] .qi-header {
+  display: contents;
+}
+.qi-card[data-appearance='notice'] .qi-content {
+  order: 1;
+}
+.qi-card[data-appearance='notice'] .qi-question {
+  padding: 0;
+}
+.qi-card[data-appearance='notice'] .qi-question h3 {
+  margin: 0;
+  font-size: 15px;
+  line-height: 22px;
+  font-weight: 500;
+  color: var(--fg-default);
+}
+.qi-card[data-appearance='notice'] .qi-agent {
+  order: 2;
+  margin-top: 10px;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--fg-muted);
+  gap: 5px;
+}
+.qi-card[data-appearance='notice'] .qi-detail {
+  border: 0;
+  padding: 10px 0 0;
+}
+.qi-card[data-appearance='notice'][data-size='small'] {
+  padding: 12px 10px 10px 20px;
+}
+.qi-card[data-appearance='notice'][data-size='small']::before {
+  left: 6px;
+  width: 3px;
+  top: 10px;
+  bottom: 10px;
+}
+.qi-card[data-appearance='notice'][data-size='small'] .qi-question {
+  padding: 0;
+}
+.qi-card[data-appearance='notice'][data-size='small'] .qi-question h3 {
+  font-size: 12px;
+  line-height: 18px;
+}
+.qi-card[data-appearance='notice'][data-size='small'] .qi-agent {
+  margin-top: 8px;
+}
+.qi-card[data-appearance='notice'][data-size='tiny'] {
+  min-height: 32px;
+  padding: 4px 4px 4px 8px;
+  flex-direction: row;
+  justify-content: center;
+  align-items: center;
+}
+.qi-card[data-appearance='notice'][data-size='tiny']::before {
+  left: 2px;
+  width: 2px;
+  top: 5px;
+  bottom: 5px;
+}
+.qi-card[data-appearance='notice'][data-size='tiny'] .qi-agent {
+  margin: 0;
+}
+
+/* Hybrid: compact metadata row with the notification's quiet state rail. */
+.qg-hybrid-states,
+.qg-hybrid-scales {
+  border-top: 1px solid var(--edge-default);
+  background: var(--bg-default);
+}
+.qg-hybrid-states h4,
+.qg-hybrid-scales h4 {
+  padding: 16px 20px 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fg-muted);
+}
+.qg-hybrid-state-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 310px), 1fr));
+}
+.qg-hybrid-state-grid .qg-state-case {
+  min-width: 0;
+  padding: 24px 16px;
+  border: 0;
+}
+.qg-hybrid-scales > p {
+  margin: 8px 20px;
+  font-size: 12px;
+  line-height: 1.8;
+  color: var(--fg-muted);
+}
+.qg-hybrid-scale-grid {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 24px;
+  padding: 20px;
+}
+.qg-hybrid-scale-case {
+  max-width: 100%;
+}
+.qg-hybrid-scale-case > span {
+  display: block;
+  margin-bottom: 12px;
+  color: var(--fg-muted);
+  font-size: 11px;
+}
+.qi-card[data-appearance='compact-notice'] {
+  padding: 12px 14px 14px 24px;
+  background: var(--bg-surface);
+}
+.qi-card[data-appearance='compact-notice']::before {
+  content: '';
+  position: absolute;
+  left: 8px;
+  top: 12px;
+  bottom: 12px;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--qi-tone);
+}
+.qi-card[data-appearance='compact-notice'] .qi-header {
+  min-height: 18px;
+  padding: 0;
+}
+.qi-card[data-appearance='compact-notice'] .qi-agent {
+  color: var(--fg-muted);
+  font-size: 11px;
+}
+.qi-card[data-appearance='compact-notice'] .qi-status {
+  flex: 0 1 auto;
+  min-width: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--qi-tone);
+  font-size: 10px;
+  font-weight: 400;
+}
+.qi-card[data-appearance='compact-notice'] .qi-status .qi-spin {
+  flex-shrink: 0;
+}
+.qi-card[data-appearance='compact-notice'] .qi-status .qi-status-label {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.qi-card[data-appearance='compact-notice'][data-size='small'] .qi-agent {
+  flex-shrink: 0;
+}
+.qi-card[data-appearance='compact-notice'] .qi-content {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.qi-card[data-appearance='compact-notice'] .qi-question {
+  padding: 9px 0 0;
+}
+.qi-card[data-appearance='compact-notice'] .qi-question h3 {
+  margin: 0;
+  color: var(--fg-default);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 21px;
+}
+.qi-card[data-appearance='compact-notice'] .qi-detail {
+  border: 0;
+  padding: 9px 0 0;
+}
+.qi-card[data-appearance='compact-notice'][data-size='small'] {
+  padding: 8px 10px 10px 20px;
+}
+.qi-card[data-appearance='compact-notice'][data-size='small'] .qi-question h3 {
+  font-size: 12px;
+  line-height: 18px;
+}
+.qi-card[data-appearance='compact-notice'][data-size='tiny'] {
+  min-height: 32px;
+  padding: 6px 5px 6px 9px;
+}
+.qi-card[data-appearance='compact-notice'][data-size='tiny'] .qi-header {
+  min-height: 18px;
+  padding: 0;
+  justify-content: center;
+}
+.qi-card[data-appearance='compact-notice'][data-size='tiny'][data-state='running']
+  .qi-header {
+  justify-content: space-between;
+  gap: 6px;
+}
+.qi-card[data-appearance='compact-notice'][data-size='tiny']::before {
+  left: 3px;
+  top: 5px;
+  bottom: 5px;
+  width: 2px;
+}

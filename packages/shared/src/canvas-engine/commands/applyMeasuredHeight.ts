@@ -59,7 +59,7 @@ const applyMeasuredHeight: CommandDefinition<Cmd> = {
       // type that never auto-sizes, describes a state that no longer
       // exists. Dropping it is correct, not an error.
       if (resolveHeightMode(node) !== 'auto') return node;
-      // Content may change while an offscreen or queued measurement is in
+      // Content or width may change while an offscreen or queued measurement is in
       // flight. Never stamp that old result with authority over the live
       // node: the next measurement will carry its current key.
       if (update.measuredFor !== autoHeightKey(node)) return node;

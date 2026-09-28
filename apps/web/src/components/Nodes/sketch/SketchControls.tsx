@@ -31,6 +31,8 @@ interface SketchControlsProps {
   onSizeDragStart?: () => void;
   onSizeDragEnd?: () => void;
   touch?: boolean;
+  colorTriggerClassName?: string;
+  floating?: boolean;
 }
 
 /**
@@ -53,20 +55,25 @@ export function SketchControls({
   onSizeDragStart,
   onSizeDragEnd,
   touch = false,
+  colorTriggerClassName,
+  floating = false,
 }: SketchControlsProps) {
   const { t } = useTranslation();
   const [openControl, setOpenControl] = useState<'color' | 'size' | null>(null);
   return (
     <>
       <FloatingToolbar.ColorPicker
+        floating={floating}
         colors={SKETCH_COLOR_OPTIONS}
         value={color}
         onSelect={onColorChange}
         title={t('node.strokeColor')}
+        triggerClassName={colorTriggerClassName}
         open={openControl === 'color'}
         onOpenChange={(open) => setOpenControl(open ? 'color' : null)}
       />
       <SketchSizePicker
+        floating={floating}
         value={size}
         min={SKETCH_SIZE_MIN}
         max={SKETCH_SIZE_MAX}

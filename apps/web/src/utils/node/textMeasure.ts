@@ -114,6 +114,7 @@ export function buildFontStr(
   let s = '';
   if (fontStyle === 'italic') s += 'italic ';
   if (fontWeight === 'bold') s += 'bold ';
+  else if (/^[1-9]\d{0,2}$|^1000$/.test(fontWeight)) s += `${fontWeight} `;
   return `${s}${fontSize}px ${resolveFamilyForCanvas(fontFamily)}`;
 }
 

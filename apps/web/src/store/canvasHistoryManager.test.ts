@@ -17,6 +17,34 @@ function node(id: string, x: number): Node {
 }
 
 describe('CanvasHistoryRegistry', () => {
+  it('restores fixed measurements with geometry while retaining selection', () => {
+    const history = new CanvasHistoryRegistry();
+    history.activate('nested-geometry');
+    const before: Node = {
+      ...node('frame', 0),
+      type: 'frame',
+      style: { width: 300, height: 200 },
+    };
+    history.takeSnapshot([before], []);
+    const current: Node = {
+      ...before,
+      selected: true,
+      style: { width: 600, height: 400 },
+      measured: { width: 590, height: 390 },
+    };
+    const undo = history.undo([current], []);
+    if (!undo) throw new Error('Missing undo snapshot');
+    const restored = undo.nodes;
+    expect(restored[0]).toMatchObject({
+      selected: true,
+      measured: { width: 300, height: 200 },
+    });
+    expect(history.redo(restored, [])?.nodes[0]).toMatchObject({
+      selected: true,
+      measured: { width: 600, height: 400 },
+    });
+  });
+
   it('undoes editable Question content and geometry while retaining the current FSM', () => {
     const history = new CanvasHistoryRegistry();
     const before: Node = {

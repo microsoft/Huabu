@@ -3,8 +3,7 @@
 
 import { afterEach, describe, it, expect, vi } from 'vitest';
 
-import { HEIGHT_LAYOUT_VERSION } from '@huabu/shared/canvas-engine';
-import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
+import { autoHeightKey } from '@huabu/shared/canvas-engine';
 
 import {
   __resetHeightCommitSuspension,
@@ -50,7 +49,7 @@ vi.mock('../../commitQueue', () => ({
 }));
 
 const CONTENT = '# hello';
-const KEY = `${HEIGHT_LAYOUT_VERSION}:${nodeRevisionOf({ content: CONTENT })}`;
+const KEY = autoHeightKey(note());
 const ORIGIN = { x: 0, y: 0 };
 
 function note(overrides: Partial<Node> = {}): Node {
@@ -162,6 +161,56 @@ describe('selectPrewarmCandidates', () => {
 });
 
 describe('height prewarm recovery', () => {
+  it('does not cache a rejected attempt when the width later returns', async () => {
+    vi.useFakeTimers();
+    mocks.state.nodes = [note()];
+    mocks.measure
+      .mockImplementationOnce(async () => {
+        mocks.state.nodes = [note({ style: { width: 800, height: 268 } })];
+        return { height: 400, provisional: false };
+      })
+      .mockImplementationOnce(async () => {
+        mocks.state.nodes = [note()];
+        return { height: 120, provisional: false };
+      })
+      .mockResolvedValueOnce({ height: 300, provisional: false });
+    startHeightPrewarm();
+    await vi.advanceTimersByTimeAsync(650);
+    expect(
+      mocks.measure.mock.calls.map(([request]) => request.contentWidth),
+    ).toEqual([394, 794, 394]);
+    expect(mocks.propose).toHaveBeenCalledOnce();
+    expect(mocks.propose).toHaveBeenCalledWith({
+      nodeId: 'n1',
+      intrinsicHeight: 300,
+      measuredFor: KEY,
+      provisional: false,
+    });
+  });
+
+  it('rejects a width-stale in-flight result and measures the new width', async () => {
+    vi.useFakeTimers();
+    mocks.state.nodes = [note()];
+    mocks.measure
+      .mockImplementationOnce(async () => {
+        mocks.state.nodes = [note({ style: { width: 800, height: 268 } })];
+        return { height: 400, provisional: false };
+      })
+      .mockResolvedValueOnce({ height: 120, provisional: false });
+    startHeightPrewarm();
+    await vi.advanceTimersByTimeAsync(600);
+    expect(
+      mocks.measure.mock.calls.map(([request]) => request.contentWidth),
+    ).toEqual([394, 794]);
+    expect(mocks.propose).toHaveBeenCalledOnce();
+    expect(mocks.propose).toHaveBeenCalledWith({
+      nodeId: 'n1',
+      intrinsicHeight: 120,
+      measuredFor: autoHeightKey(mocks.state.nodes[0]),
+      provisional: false,
+    });
+  });
+
   it('retries a transient measurement failure and commits the result', async () => {
     vi.useFakeTimers();
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);

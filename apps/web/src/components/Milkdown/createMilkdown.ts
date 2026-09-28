@@ -51,7 +51,11 @@ import { isAccentToken, resolveAccent, type AccentToken } from '@huabu/shared';
 import { fingerprintMarkdownKeys } from '@huabu/shared/canvas-engine';
 
 import { toast } from '@/components/Common/Toast';
-import { getAccentTokens } from '@/components/Nodes/accentTokens';
+import { getAccentTokens } from '@/components/Nodes/design/accentTokens';
+import {
+  NOTE_CONTENT_HOST_SCOPE_CLASS,
+  NOTE_FIRST_BLOCK_CLASS,
+} from '@/components/Nodes/note/noteContentHost';
 import { fingerprintBlocks, type BlockSnapshot } from '@/utils/blockProvenance';
 import {
   parseHuabuImageClipboard,
@@ -2518,6 +2522,32 @@ export async function createMilkdown(
   }
 
   await crepe.create();
+  let noteFirstBlockObserver: MutationObserver | null = null;
+  crepe.editor.action((ctx) => {
+    if (!root.closest(`.${NOTE_CONTENT_HOST_SCOPE_CLASS}`)) return;
+
+    const view = ctx.get(editorViewCtx);
+    const syncFirstBlock = () => {
+      for (const previous of view.dom.querySelectorAll(
+        `:scope > .${NOTE_FIRST_BLOCK_CLASS}`,
+      )) {
+        previous.classList.remove(NOTE_FIRST_BLOCK_CLASS);
+      }
+
+      const firstBlock = view.nodeDOM(0);
+      if (
+        firstBlock instanceof HTMLElement &&
+        firstBlock.parentElement === view.dom
+      ) {
+        firstBlock.classList.add(NOTE_FIRST_BLOCK_CLASS);
+      }
+    };
+
+    syncFirstBlock();
+    noteFirstBlockObserver = new MutationObserver(syncFirstBlock);
+    noteFirstBlockObserver.observe(view.dom, { childList: true });
+  });
+
   // Milkdown renders viewport coordinates into a fixed-position element.
   // Keep it outside transformed panel ancestors so those coordinates retain
   // their viewport reference frame (notably in split Preview Workspace).
@@ -3552,6 +3582,7 @@ export async function createMilkdown(
       listeners.clear();
       linkEditListener = null;
       formattingListeners.clear();
+      noteFirstBlockObserver?.disconnect();
       // Neutralise the EditorView's `dispatch` BEFORE we tear Crepe
       // down. Crepe internals schedule transactions through several
       // async paths (tooltip providers' debounced shouldShow that may

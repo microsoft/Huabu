@@ -179,6 +179,13 @@ async function ensurePostgresTables(database: Pool): Promise<void> {
   if (!pending) {
     pending = (async () => {
       const client = await database.connect();
+      // pg-pool drops its own idle listener while a client is checked out and
+      // `pg` emits `error` on an unexpected disconnection, so a backend that
+      // goes away mid-transaction would raise an unhandled 'error' event and
+      // take the process down. The statement's own rejection below is the
+      // signal this code acts on; the event only needs an ear.
+      const ignoreDisconnect = () => {};
+      client.on('error', ignoreDisconnect);
       let broken = false;
       try {
         await client.query('BEGIN');
@@ -195,6 +202,7 @@ async function ensurePostgresTables(database: Pool): Promise<void> {
         throw error;
       } finally {
         client.release(broken);
+        client.removeListener('error', ignoreDisconnect);
       }
     })();
     postgresPrepared.set(database, pending);

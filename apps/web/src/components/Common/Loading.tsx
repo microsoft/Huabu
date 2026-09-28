@@ -2,16 +2,16 @@
 // Licensed under the MIT license.
 
 import Lottie from 'lottie-react';
-import { Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import loadingAnimation from '@/assets/loading.json';
 
 import { cn } from './cn';
+import { Spinner, type SpinnerSize } from './Spinner';
 
 type LoadingVariant = 'spinner' | 'skeleton' | 'brand';
 type LoadingLayout = 'inline' | 'block' | 'overlay' | 'bare';
-type LoadingSize = 'xs' | 'sm' | 'md';
+type LoadingSize = SpinnerSize;
 
 interface LoadingProps {
   /** Visual treatment of the loading indicator. */
@@ -33,30 +33,6 @@ const sizeMap: Record<LoadingSize, number> = {
   sm: 16,
   md: 18,
 };
-
-function SpinnerLoadingIndicator({
-  size = 'sm',
-  className,
-}: {
-  size?: LoadingSize;
-  className?: string;
-}) {
-  const { t } = useTranslation();
-  // Rotate a plain HTML element instead of the SVG itself so Chromium can
-  // promote the transform animation to the compositor during canvas jank.
-  return (
-    <span
-      role="status"
-      aria-label={t('status.loading')}
-      className={cn(
-        'inline-flex animate-spin will-change-transform',
-        className,
-      )}
-    >
-      <Loader2 size={sizeMap[size]} />
-    </span>
-  );
-}
 
 function BrandLoadingIndicator({
   size = 'sm',
@@ -110,6 +86,7 @@ export function Loading({
   className,
   indicatorClassName,
 }: LoadingProps) {
+  const { t } = useTranslation();
   const isSkeleton = variant === 'skeleton';
   const Tag = layout === 'inline' ? 'span' : 'div';
 
@@ -130,8 +107,9 @@ export function Loading({
       )}
     />
   ) : (
-    <SpinnerLoadingIndicator
+    <Spinner
       size={size}
+      label={t('status.loading')}
       className={cn(
         (layout === 'inline' || layout === 'bare') && className,
         indicatorClassName,

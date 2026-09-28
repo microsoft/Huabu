@@ -26,8 +26,8 @@ import type { Readable } from 'node:stream';
  * Backends with a blob adapter today.
  *
  * Like {@link StructuredBackendKind}, this names implemented adapters. Profile
- * requests and validation belong to `profile.ts`; Azure is implemented as an
- * adapter foundation but is not yet selectable by the application.
+ * requests and validation belong to `profile.ts`, which is where a deployment
+ * selects one; both members are selectable today.
  *
  * Every member of that wider vocabulary is a **file system**: a local
  * directory or an object store. Bytes are not records, and a

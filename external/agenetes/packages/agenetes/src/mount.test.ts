@@ -31,9 +31,11 @@ const driver = defineDriver({
 });
 
 describe('mountAgenetes static driver map', () => {
-  it('mounts a complete host-constructed driver map', () => {
+  it('mounts a complete host-constructed driver map', async () => {
     const instance = mountAgenetes({ drivers: { external: driver } });
-    expect(() =>
+    // `create` is async, so the mount is only proven by the settled promise —
+    // a rejected realization never reaches a synchronous throw assertion.
+    await expect(
       instance.create({
         kind: 'external',
         workloadType: 'Deployment',
@@ -41,7 +43,7 @@ describe('mountAgenetes static driver map', () => {
         threadId: 'thread-1',
         spec: {},
       }),
-    ).not.toThrow();
+    ).resolves.toBeDefined();
   });
 
   it('does not provide mutable post-mount registration', () => {

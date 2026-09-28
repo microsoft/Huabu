@@ -4,9 +4,13 @@
 import { useStoreApi, type ReactFlowInstance } from '@xyflow/react';
 import { useEffect, type MutableRefObject } from 'react';
 
+import { isVideoControlTarget } from '@/components/Nodes/video/videoInteraction';
+
 import {
   isNodeTarget,
+  isNodeControlTarget,
   isPanelTarget,
+  isSketchNodeTarget,
 } from '../components/Panels/Canvas/canvasInputPolicy';
 import { MAX_ZOOM, MIN_ZOOM } from '../config/canvas';
 
@@ -102,8 +106,10 @@ export function shouldOwnSingleTouchNavigation(
   const { inputMode, explicitToolActive } = options;
   if (inputMode === 'mouse') return false;
   if (isPanelTarget(target)) return false;
+  if (isNodeControlTarget(target)) return false;
   if (inputMode === 'pen') return true;
   if (explicitToolActive) return false;
+  if (isSketchNodeTarget(target)) return true;
   return !isNodeTarget(target);
 }
 
@@ -151,6 +157,10 @@ function useTrackpadPinch(
 
     const handleWheel = (e: WheelEvent) => {
       if (!e.ctrlKey) return;
+      if (isVideoControlTarget(e.target as Element | null)) {
+        e.preventDefault();
+        return;
+      }
       const instance = rfInstanceRef.current;
       if (!instance) return;
 

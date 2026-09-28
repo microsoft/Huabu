@@ -11,6 +11,12 @@ export {
   restoreMessageListScrollPosition,
 } from '@/store/previewWorkspace/scrollMemory';
 
+export function isMessageListNearBottom(container: HTMLElement): boolean {
+  return (
+    container.scrollHeight - container.scrollTop - container.clientHeight <= 50
+  );
+}
+
 /** Position an opened conversation without scrolling any page ancestors. */
 export function positionMessageListOnOpen(
   container: HTMLElement,

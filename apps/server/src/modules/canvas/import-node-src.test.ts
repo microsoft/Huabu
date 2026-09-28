@@ -11,7 +11,7 @@ import {
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { importForeignNodeSources } from './import-node-src.js';
 import { createCanvas } from '../storage/compatibility/canvas.js';
@@ -33,8 +33,16 @@ function diskDirOf(canvasId: string): string {
 }
 
 let tmp: string;
+const fetchMock = vi.fn<typeof fetch>();
 
 beforeEach(() => {
+  fetchMock.mockReset().mockImplementation(
+    async () =>
+      new Response('downloaded bytes', {
+        headers: { 'content-type': 'text/html' },
+      }),
+  );
+  vi.stubGlobal('fetch', fetchMock);
   tmp = mkdtempSync(path.join(tmpdir(), 'huabu-import-node-src-'));
   setWorkspacePath(tmp);
   for (const canvasId of [
@@ -53,6 +61,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -186,6 +195,7 @@ describe('importForeignNodeSources — web nodes', () => {
 
     const out = await importForeignNodeSources(canvasId, commands);
     expect(firstSrc(out)).toBe(remote);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('leaves a data: URL untouched', async () => {
@@ -250,6 +260,7 @@ describe('importForeignNodeSources — web nodes', () => {
     const out = await importForeignNodeSources(canvasId, commands);
 
     expect(firstPatchedSrc(out)).toBe(remote);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('normalizes every entry in a multi-node MERGE_NODE_DATA command', async () => {
@@ -287,6 +298,125 @@ describe('importForeignNodeSources — web nodes', () => {
 });
 
 describe('importForeignNodeSources — media nodes (regression)', () => {
+  const youtubeUrls = [
+    'https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=42',
+    'https://youtu.be/dQw4w9WgXcQ?si=share',
+    'https://www.youtube.com/embed/dQw4w9WgXcQ',
+    'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ',
+    'https://m.youtube.com/shorts/dQw4w9WgXcQ',
+    'http://youtube.com/live/dQw4w9WgXcQ',
+  ];
+
+  describe.each(['CREATE_NODES', 'MERGE_NODE_DATA'] as const)('%s', (type) => {
+    async function importSrc(
+      src: string,
+      nodeType:
+        | 'video'
+        | 'image'
+        | 'audio'
+        | 'pdf'
+        | 'office'
+        | 'web' = 'video',
+    ): Promise<string | undefined> {
+      const canvasId = 'c-media-remote';
+      createCanvas(canvasId);
+      const nodeId = 'node-media-remote';
+      const store = getCanvasStore(canvasId);
+      const canvas = store.read();
+      if (!canvas) throw new Error('Expected a canvas');
+      store.write({
+        ...canvas,
+        state: {
+          nodes: [
+            { id: nodeId, type: nodeType, position: { x: 0, y: 0 }, data: {} },
+          ],
+          edges: [],
+        },
+      });
+      const commands: CanvasCommand[] =
+        type === 'CREATE_NODES'
+          ? [
+              {
+                type,
+                nodes: [{ nodeType, position: { x: 0, y: 0 }, data: { src } }],
+              },
+            ]
+          : [{ type, patches: [{ nodeId, patch: { src } }] }];
+      const out = await importForeignNodeSources(canvasId, commands);
+      return type === 'CREATE_NODES' ? firstSrc(out) : firstPatchedSrc(out);
+    }
+
+    it.each(youtubeUrls)(
+      'preserves validated video URL without fetching: %s',
+      async (src) => {
+        expect(await importSrc(src)).toBe(src);
+        expect(fetchMock).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([
+      'https://youtube.com.evil.example/watch?v=dQw4w9WgXcQ',
+      'https://notyoutube.com/watch?v=dQw4w9WgXcQ',
+      'https://youtu.be.evil.example/dQw4w9WgXcQ',
+      'https://youtube.com@evil.example/watch?v=dQw4w9WgXcQ',
+      'https://youtube.com/watch?v=invalid',
+      'https://youtube.com/playlist?list=dQw4w9WgXcQ',
+      'https://youtu.be/dQw4w9WgXcQ/extra',
+    ])(
+      'does not bypass downloads for lookalike or invalid video URL: %s',
+      async (src) => {
+        expect(await importSrc(src)).toMatch(/^artifact-[^/]+\.bin$/);
+        expect(fetchMock).toHaveBeenCalledExactlyOnceWith(
+          src,
+          expect.any(Object),
+        );
+      },
+    );
+
+    it.each(['image', 'audio', 'pdf', 'office'] as const)(
+      'still downloads YouTube URLs on %s nodes',
+      async (nodeType) => {
+        const src = youtubeUrls[0];
+        expect(await importSrc(src, nodeType)).toMatch(/^artifact-[^/]+\.bin$/);
+        expect(fetchMock).toHaveBeenCalledExactlyOnceWith(
+          src,
+          expect.any(Object),
+        );
+      },
+    );
+
+    it.each([
+      ['video', 'mp4'],
+      ['image', 'png'],
+      ['audio', 'mp3'],
+      ['pdf', 'pdf'],
+      ['office', 'docx'],
+    ] as const)(
+      'still imports direct remote %s bytes',
+      async (nodeType, extension) => {
+        const src = `https://example.com/media.${extension}`;
+        const imported = await importSrc(src, nodeType);
+        expect(imported).toMatch(new RegExp(`^artifact-[^/]+\\.${extension}$`));
+        expect(fetchMock).toHaveBeenCalledExactlyOnceWith(
+          src,
+          expect.any(Object),
+        );
+        if (!imported) throw new Error('Expected an imported artifact');
+        expect(await space('c-media-remote').artifacts.read(imported)).toEqual(
+          Buffer.from('downloaded bytes'),
+        );
+      },
+    );
+
+    it.each([
+      youtubeUrls[0],
+      'https://youtube.com.evil.example/watch?v=dQw4w9WgXcQ',
+    ])('preserves any remote web URL without fetching: %s', async (src) => {
+      expect(await importSrc(src, 'web')).toBe(src);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+  });
+
   it('still relocates a locally-staged image upload', async () => {
     const canvasId = 'c-image-local';
     stageUpload(canvasId, 'pic.png', 'not-a-real-png-but-bytes');

@@ -20,6 +20,7 @@ function keydown(init: {
   ctrlKey?: boolean;
   shiftKey?: boolean;
   altKey?: boolean;
+  code?: string;
 }): KeyboardEvent {
   return {
     key: init.key,
@@ -27,6 +28,7 @@ function keydown(init: {
     ctrlKey: init.ctrlKey ?? false,
     shiftKey: init.shiftKey ?? false,
     altKey: init.altKey ?? false,
+    code: init.code ?? '',
   } as KeyboardEvent;
 }
 
@@ -55,6 +57,26 @@ describe('matches', () => {
     expect(matches(keydown({ key: '【' }), combo)).toBe(true);
     expect(matches(keydown({ key: ']' }), combo)).toBe(false);
   });
+
+  it.each([
+    ['view.fitAll', '!', 'Digit1'],
+    ['view.fitSelection', '@', 'Digit2'],
+    ['view.fitSelection', '"', 'Digit2'],
+  ])(
+    'matches %s by physical digit while retaining modifier guards',
+    (id, key, code) => {
+      const combo = getCombo(id);
+      if (!combo) throw new Error(`Missing shortcut ${id}`);
+      expect(matches(keydown({ key, code, shiftKey: true }), combo)).toBe(true);
+      expect(matches(keydown({ key, code }), combo)).toBe(false);
+      expect(
+        matches(keydown({ key, code, shiftKey: true, metaKey: true }), combo),
+      ).toBe(false);
+      expect(
+        matches(keydown({ key, code, shiftKey: true, altKey: true }), combo),
+      ).toBe(false);
+    },
+  );
 
   it('every catalog combo matches a synthetic event for its primary key', () => {
     for (const def of [...SHORTCUTS, ...APP_SHORTCUTS]) {
@@ -91,6 +113,12 @@ describe('formatShortcutById', () => {
     expect(formatShortcutById('node.navigateUpstream')).toBe('←');
     expect(formatShortcutById('node.navigateDownstream')).toBe('→');
   });
+
+  it('displays digit shortcuts rather than their shifted punctuation', () => {
+    expect(formatShortcutById('view.fitAll')).toMatch(/^(⇧1|Shift\+1)$/);
+    expect(formatShortcutById('view.fitSelection')).toMatch(/^(⇧2|Shift\+2)$/);
+    expect(formatShortcutById('view.resetZoom')).toMatch(/^(⌘0|Ctrl\+0)$/);
+  });
 });
 
 describe('getKeyboardShortcutSections', () => {
@@ -103,5 +131,8 @@ describe('getKeyboardShortcutSections', () => {
 
     expect(getCombo('ai.submitQuestion')).toBeUndefined();
     expect(descriptions).not.toContain('shortcuts.items.submitQuestion');
+    expect(descriptions).toContain('canvasControls.resetZoom');
+    expect(descriptions).toContain('canvasControls.fitAll');
+    expect(descriptions).toContain('canvasControls.fitSelection');
   });
 });

@@ -29,6 +29,8 @@ const trackers = vi.hoisted(() => ({
       chatOpenRequest?: { nonce: number };
       hasFocusPriority: boolean;
       nodeFocusRequestNonce?: number;
+      isActive?: boolean;
+      activationId?: number;
     }
   >(),
   tabStripRenders: 0,
@@ -49,17 +51,23 @@ vi.mock('./PreviewRenderer', () => ({
     chatOpenRequest,
     hasFocusPriority,
     nodeFocusRequestNonce,
+    isActive,
+    activationId,
   }: {
     tabId: string;
     chatOpenRequest?: { nonce: number };
     hasFocusPriority: boolean;
     nodeFocusRequestNonce?: number;
+    isActive?: boolean;
+    activationId?: number;
   }) => {
     const [count, setCount] = useState(0);
     trackers.rendererProps.set(tabId, {
       chatOpenRequest,
       hasFocusPriority,
       nodeFocusRequestNonce,
+      isActive,
+      activationId,
     });
     useEffect(() => {
       trackers.effectEvents.push(`setup:${tabId}`);
@@ -210,7 +218,23 @@ describe('PreviewGroup retention', () => {
       chatOpenRequest: undefined,
       hasFocusPriority: false,
       nodeFocusRequestNonce: undefined,
+      isActive: false,
+      activationId: undefined,
     });
     expect(trackers.rendererProps.get('b')?.hasFocusPriority).toBe(true);
+  });
+
+  it('changes activation identity only after a real tab switch', async () => {
+    let workspace = workspaceWithTwoTabs();
+    await act(async () => renderGroup(workspace));
+    const original = trackers.rendererProps.get('b')?.activationId;
+    workspace = activateTab(workspace, 'b');
+    await act(async () => renderGroup(workspace));
+    expect(trackers.rendererProps.get('b')?.activationId).toBe(original);
+    workspace = activateTab(workspace, 'a');
+    await act(async () => renderGroup(workspace));
+    workspace = activateTab(workspace, 'b');
+    await act(async () => renderGroup(workspace));
+    expect(trackers.rendererProps.get('b')?.activationId).not.toBe(original);
   });
 });

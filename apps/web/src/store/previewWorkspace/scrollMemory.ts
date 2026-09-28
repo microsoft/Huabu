@@ -3,7 +3,7 @@
 
 import type { PreviewTarget } from './model';
 
-interface PreviewScrollPosition {
+export interface PreviewScrollPosition {
   scrollTop: number;
   messageAnchor?: {
     messageId: string;
@@ -17,6 +17,14 @@ const registrationByTarget = new Map<
   { canvasId: string; viewKey: string }
 >();
 const referenceCountByViewKey = new Map<string, number>();
+
+export function readMessageListScrollBookmark(
+  viewKey: string | undefined,
+): PreviewScrollPosition['messageAnchor'] {
+  return viewKey
+    ? scrollPositionByViewKey.get(viewKey)?.messageAnchor
+    : undefined;
+}
 
 export function previewTargetKey(target: PreviewTarget): string {
   return JSON.stringify(

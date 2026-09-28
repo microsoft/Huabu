@@ -43,15 +43,9 @@ const HOVER_HIT_PX_TOUCH = 16;
  *   - flips only the stroke-hit sketch back to `pointer-events: auto`
  *     plus a subtle hover ring, so the user can grab/select it normally
  *
- * Touch caveat: a touch screen has no hover phase — the very first
- * event from a finger tap is `pointerdown`, by which time the browser
- * has already done its hit test against the still-`none` sketch
- * wrapper. To compensate, we run the hit test synchronously on
- * `pointerdown` and, when the pointer type is `touch` and we hit a
- * stroke, we *manually* select the node and swallow the event so React
- * Flow's pane handler does not immediately clear the selection. Drag
- * still requires a second tap on touch (acceptable trade — most touch
- * users tap-then-drag anyway).
+ * Touch has no hover phase and deliberately never activates a Sketch
+ * wrapper. Finger input treats Ink as transparent for direct selection;
+ * the viewport recognizer or React Flow handles the ordinary content below.
  */
 export function useSketchHoverRouting(
   wrapperRef: React.RefObject<HTMLDivElement | null>,
@@ -125,6 +119,7 @@ export function useSketchHoverRouting(
     };
 
     const onPointerMove = (e: PointerEvent) => {
+      if (e.pointerType === 'mouse' && e.buttons === 0) isPointerDown = false;
       pendingClientX = e.clientX;
       pendingClientY = e.clientY;
       pendingPointerType = e.pointerType || 'mouse';
@@ -143,18 +138,11 @@ export function useSketchHoverRouting(
       // it's the only way to know what was tapped before React Flow
       // processes the event.
       const id = hitTest(e.clientX, e.clientY, pendingPointerType);
-      setHover(id);
-
-      // Touch lacks a hover phase, so by the time `pointerdown` was
-      // dispatched the sketch wrapper still had `pointer-events: none`
-      // and the browser routed the event to the pane. Compensate by
-      // selecting manually and stopping propagation so React Flow's
-      // pane handler doesn't immediately clear our selection.
-      if (id && e.pointerType === 'touch') {
-        e.preventDefault();
-        e.stopImmediatePropagation();
-        useCanvasStore.getState().selectNodes([id]);
+      if (e.pointerType === 'touch') {
+        clearHover();
+        return;
       }
+      setHover(id);
     };
 
     const onPointerUp = () => {
@@ -164,15 +152,12 @@ export function useSketchHoverRouting(
       clearHover();
     };
 
-    // Capture phase so our pointerdown handler runs before React Flow's
-    // delegated listener (which lives further down the tree). This lets
-    // the touch path call `stopImmediatePropagation` to keep React Flow
-    // from seeing a "clicked the pane" signal when we've just selected
-    // a sketch ourselves.
+    // Capture phase keeps the geometric hover state current before React
+    // Flow's delegated listener processes mouse or pen input.
     wrapper.addEventListener('pointermove', onPointerMove, { passive: true });
     wrapper.addEventListener('pointerdown', onPointerDown, { capture: true });
-    wrapper.addEventListener('pointerup', onPointerUp, { passive: true });
-    wrapper.addEventListener('pointercancel', onPointerUp, { passive: true });
+    wrapper.addEventListener('pointerup', onPointerUp, { capture: true });
+    wrapper.addEventListener('pointercancel', onPointerUp, { capture: true });
     wrapper.addEventListener('pointerleave', onPointerLeave, { passive: true });
 
     // Re-run the hit test whenever sketch geometry changes (new stroke,
@@ -190,8 +175,10 @@ export function useSketchHoverRouting(
       wrapper.removeEventListener('pointerdown', onPointerDown, {
         capture: true,
       } as EventListenerOptions);
-      wrapper.removeEventListener('pointerup', onPointerUp);
-      wrapper.removeEventListener('pointercancel', onPointerUp);
+      wrapper.removeEventListener('pointerup', onPointerUp, { capture: true });
+      wrapper.removeEventListener('pointercancel', onPointerUp, {
+        capture: true,
+      });
       wrapper.removeEventListener('pointerleave', onPointerLeave);
       unsubscribe();
       clearHover();

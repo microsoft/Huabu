@@ -1,14 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { MoveRight, Trash2 } from 'lucide-react';
+import { SquareArrowRightEnter, Settings2, Trash2 } from 'lucide-react';
 import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import {
-  ACCENT_NONE_TOKEN,
-  ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT,
-} from '@huabu/shared';
+import { ACCENT_NONE_TOKEN } from '@huabu/shared';
 import {
   DEFAULT_EDGE_STROKE_TOKEN,
   getSelectionBounds,
@@ -17,16 +14,28 @@ import {
   resolveHeightMode,
 } from '@huabu/shared/canvas-engine';
 
+import { Button } from '@/components/Common/Button';
 import { CanvasFloatingPopover } from '@/components/Common/CanvasFloatingPopover';
+import { DropdownMenu } from '@/components/Common/DropdownMenu';
 import {
   FloatingToolbar,
   FLOATING_TOOLBAR_CLASS,
+  FLOATING_TOOLBAR_POPOVER_CLASS,
 } from '@/components/Common/FloatingToolbar';
+import { nodeUsesAccent } from '@/components/Nodes/design/nodeAccentPolicy';
 import { useIsNotMouse } from '@/hooks/useInputMode';
 import { translateColorOptions } from '@/i18n/colors';
 import useCanvasStore from '@/store/canvasStore';
 import { resolveGeometryEdit } from '@/utils/node/geometry';
 import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
+
+import './NodeToolbar.css';
+
+import {
+  nodeAccentPickerOptions,
+  nodeAccentPickerValue,
+} from './nodeAccentPickerOptions';
+import { TextFontSizePicker } from './TextFontSizePicker';
 
 import type { CanvasNode } from '@/components/Nodes/types';
 import type { CanvasEdgeId, CanvasNodeId } from '@huabu/shared';
@@ -83,16 +92,22 @@ export const MultiSelectToolbar = () => {
   // Determine the common accent among selected nodes (empty string if mixed)
   const commonAccent = useMemo(() => {
     if (selectedNodes.length === 0) return ACCENT_NONE;
-    const first = selectedNodes[0].data?.style?.accent ?? null;
-    const allSame = selectedNodes.every(
-      (n) => (n.data?.style?.accent ?? null) === first,
+    const first = nodeAccentPickerValue(
+      selectedNodes[0].type,
+      selectedNodes[0].data?.style?.accent,
     );
-    return allSame ? (first ?? ACCENT_NONE) : ACCENT_NONE;
+    const allSame = selectedNodes.every(
+      (n) => nodeAccentPickerValue(n.type, n.data?.style?.accent) === first,
+    );
+    return allSame ? first : ACCENT_NONE;
   }, [selectedNodes]);
+  const allSelectedUseAccent = selectedNodes.every((node) =>
+    nodeUsesAccent(node.type),
+  );
 
   const textFlowSelection = useMemo(() => {
     if (selectedNodes.length === 0) return null;
-    if (!selectedNodes.every((n) => isAlwaysAutoHeightNodeType(n.type ?? ''))) {
+    if (!selectedNodes.every((n) => n.type === 'text')) {
       return null;
     }
     const first = selectedNodes[0].data?.style?.fontSize ?? 16;
@@ -112,16 +127,13 @@ export const MultiSelectToolbar = () => {
   );
   const hasMixedTextAndBoxSelection = hasTextFlowSelection && hasBoxSelection;
 
-  // Always include the "Transparent" swatch so users can revert a node
-  // back to the default (no-accent / neutral surface) state. Hiding it
-  // for non-text selections used to be the design (the assumption being
-  // that other types "need a solid background"), but in practice every
-  // node defaults to a null accent and the picker had no way to express
-  // that state — once a coloured swatch was clicked it could not be
-  // undone.
   const accentPickerOptions = useMemo(
-    () => translateColorOptions(ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT, t),
-    [t],
+    () =>
+      translateColorOptions(
+        nodeAccentPickerOptions(selectedNodes.map((node) => node.type)),
+        t,
+      ),
+    [selectedNodes, t],
   );
 
   // Common width / height across selected nodes. `null` when the
@@ -196,138 +208,156 @@ export const MultiSelectToolbar = () => {
       open={selectedNodes.length >= 2}
       offset={12}
       side="top"
-      className={FLOATING_TOOLBAR_CLASS}
+      className={`${FLOATING_TOOLBAR_CLASS} canvas-context-toolbar`}
     >
       {/* Align & distribute — collapsed into a single popover trigger
           to keep the multi-select toolbar compact. Houses the 6 align
           actions in a 3×2 grid plus the Spread Apart action. */}
       <FloatingToolbar.AlignPicker
+        floating
+        panelClassName="canvas-context-settings"
         onAlign={(direction) => alignSelectedNodes(direction)}
         onSpread={() => spreadSelectedNodes()}
       />
 
       <FloatingToolbar.Divider />
 
-      {/* Size editor: set width / height of every selected node. */}
-      <FloatingToolbar.SizePicker
-        width={commonSize.width}
-        height={textFlowSelection ? null : commonSize.height}
-        showHeight={!textFlowSelection && !hasMixedTextAndBoxSelection}
-        onApply={({ width, height }) => {
-          if (selectedNodes.length === 0) return;
-          if (width === undefined && height === undefined) return;
-          // Resolve per-node via the shared helper, which:
-          //  - falls back to each node's existing width when only height
-          //    was edited (and skips nodes whose width can't be resolved);
-          //  - reads each node's height *ownership* when the user didn't
-          //    enter a height, so a width-only edit never pins an auto
-          //    node (its `style.height` is a number in both modes).
-          const items = selectedNodes
-            .map((node): GeometryToolbarItem | null => {
-              const resolved = resolveGeometryEdit(node, {
-                width,
-                height,
-              });
-              if (!resolved) return null;
-              return {
-                nodeId: node.id as CanvasNodeId,
-                size: {
-                  width: resolved.width,
-                  height: resolved.height,
-                },
-              };
-            })
-            .filter((item): item is GeometryToolbarItem => item !== null);
-          if (items.length === 0) return;
-          // SET_NODE_GEOMETRY uses snapshot:'caller' — open a gesture so
-          // the resize folds into one undo entry and the store doesn't warn.
-          beginGesture('SET_NODE_GEOMETRY');
-          setNodeGeometry(
-            items.map(({ nodeId, size }) => ({
-              nodeId,
-              size,
-            })),
-          );
-        }}
-        heightAuto={
-          noteAutoState
-            ? {
-                active: noteAutoState.active,
-                onToggle: toggleNotesAutoHeight,
-              }
-            : undefined
-        }
-      />
       {textFlowSelection && (
-        <FloatingToolbar.NumberInput
-          label="Font"
-          ariaLabel="Font size"
-          name="font-size"
-          value={textFlowSelection.fontSize}
-          min={8}
-          max={160}
-          onApply={(fontSize) => {
+        <>
+          <TextFontSizePicker
+            value={textFlowSelection.fontSize}
+            onApply={(fontSize) => {
+              executeCommands([
+                {
+                  type: 'MERGE_NODE_DATA',
+                  patches: selectedNodes.map((node) => ({
+                    nodeId: node.id as CanvasNodeId,
+                    patch: {
+                      style: { ...(node.data.style ?? {}), fontSize },
+                    },
+                  })),
+                },
+              ]);
+            }}
+          />
+          <FloatingToolbar.Divider />
+        </>
+      )}
+
+      {/* Size editor: set width / height of every selected node. */}
+      <DropdownMenu
+        floating
+        placement="bottom"
+        className={`${FLOATING_TOOLBAR_POPOVER_CLASS} node-toolbar-size-panel flex-row items-center gap-2`}
+        trigger={
+          <Button variant="ghost" iconOnly title={t('toolbar.size.title')}>
+            <Settings2 />
+          </Button>
+        }
+      >
+        <FloatingToolbar.SizePicker
+          width={commonSize.width}
+          height={textFlowSelection ? null : commonSize.height}
+          showHeight={!textFlowSelection && !hasMixedTextAndBoxSelection}
+          onApply={({ width, height }) => {
+            if (selectedNodes.length === 0) return;
+            if (width === undefined && height === undefined) return;
+            // Resolve per-node via the shared helper, which:
+            //  - falls back to each node's existing width when only height
+            //    was edited (and skips nodes whose width can't be resolved);
+            //  - reads each node's height *ownership* when the user didn't
+            //    enter a height, so a width-only edit never pins an auto
+            //    node (its `style.height` is a number in both modes).
+            const items = selectedNodes
+              .map((node): GeometryToolbarItem | null => {
+                const resolved = resolveGeometryEdit(node, {
+                  width,
+                  height,
+                });
+                if (!resolved) return null;
+                return {
+                  nodeId: node.id as CanvasNodeId,
+                  size: {
+                    width: resolved.width,
+                    height: resolved.height,
+                  },
+                };
+              })
+              .filter((item): item is GeometryToolbarItem => item !== null);
+            if (items.length === 0) return;
+            // SET_NODE_GEOMETRY uses snapshot:'caller' — open a gesture so
+            // the resize folds into one undo entry and the store doesn't warn.
+            beginGesture('SET_NODE_GEOMETRY');
+            setNodeGeometry(
+              items.map(({ nodeId, size }) => ({
+                nodeId,
+                size,
+              })),
+            );
+          }}
+          heightAuto={
+            noteAutoState
+              ? {
+                  active: noteAutoState.active,
+                  onToggle: toggleNotesAutoHeight,
+                }
+              : undefined
+          }
+        />
+      </DropdownMenu>
+
+      <FloatingToolbar.Divider />
+
+      {/* Accent color for selected nodes and the edges between them. */}
+      {allSelectedUseAccent && (
+        <FloatingToolbar.ColorPicker
+          floating
+          triggerClassName="node-toolbar-color"
+          colors={accentPickerOptions}
+          value={commonAccent}
+          onSelect={(token) => {
+            const accent = token === ACCENT_NONE ? null : token;
+            if (selectedNodes.length === 0) return;
+
             executeCommands([
               {
                 type: 'MERGE_NODE_DATA',
                 patches: selectedNodes.map((node) => ({
                   nodeId: node.id as CanvasNodeId,
                   patch: {
-                    style: { ...(node.data.style ?? {}), fontSize },
+                    style: { ...node.data?.style, accent },
                   },
                 })),
               },
+              ...(selectedInternalEdges.length > 0
+                ? [
+                    {
+                      type: 'SET_EDGE_STYLE' as const,
+                      edges: selectedInternalEdges.map((edge) => ({
+                        edge: edge.id as CanvasEdgeId,
+                        style: {
+                          stroke: accent ?? DEFAULT_EDGE_STROKE_TOKEN,
+                        },
+                      })),
+                    },
+                  ]
+                : []),
             ]);
           }}
+          title={t('toolbar.accentColor')}
         />
       )}
-
-      <FloatingToolbar.Divider />
-
-      {/* Accent color for selected nodes and the edges between them. */}
-      <FloatingToolbar.ColorPicker
-        colors={accentPickerOptions}
-        value={commonAccent}
-        onSelect={(token) => {
-          const accent = token === ACCENT_NONE ? null : token;
-          if (selectedNodes.length === 0) return;
-
-          executeCommands([
-            {
-              type: 'MERGE_NODE_DATA',
-              patches: selectedNodes.map((node) => ({
-                nodeId: node.id as CanvasNodeId,
-                patch: {
-                  style: { ...node.data?.style, accent },
-                },
-              })),
-            },
-            ...(selectedInternalEdges.length > 0
-              ? [
-                  {
-                    type: 'SET_EDGE_STYLE' as const,
-                    edges: selectedInternalEdges.map((edge) => ({
-                      edge: edge.id as CanvasEdgeId,
-                      style: {
-                        stroke: accent ?? DEFAULT_EDGE_STROKE_TOKEN,
-                      },
-                    })),
-                  },
-                ]
-              : []),
-          ]);
-        }}
-        title={t('toolbar.accentColor')}
-      />
 
       {!hasNonMovableSelection && (
         <>
           <FloatingToolbar.Divider />
           <FloatingToolbar.ActionButton
             title={t('moveSelection.action')}
-            onClick={() => setMoveSelectionDialogOpen(true)}
+            onClick={(event) =>
+              setMoveSelectionDialogOpen(true, event.currentTarget)
+            }
           >
-            <MoveRight />
+            <SquareArrowRightEnter />
           </FloatingToolbar.ActionButton>
         </>
       )}

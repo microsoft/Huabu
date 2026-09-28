@@ -143,6 +143,67 @@ describe('storage capability matrix', () => {
     ).toBe(true);
   });
 
+  /**
+   * The matrix answers for every deployment, not only the two it was written
+   * against.
+   *
+   * Four pairings became selectable at once, and a row is only an acceptable
+   * limitation if an operator can read it when they choose the profile. So the
+   * claim is made for the whole matrix: Disk/Disk loses nothing, and every
+   * other deployment states what it loses in a line that names it.
+   */
+  it.each([
+    { structured: { kind: 'postgres' }, blobs: { kind: 'disk' } },
+    { structured: { kind: 'postgres' }, blobs: { kind: 'azure' } },
+    { structured: { kind: 'sqlite' }, blobs: { kind: 'azure' } },
+    { structured: { kind: 'disk' }, blobs: { kind: 'azure' } },
+  ] as const)('declares what the %j deployment cannot do', (profile) => {
+    const label = `${profile.structured.kind}/${profile.blobs.kind}`;
+    const missing = unavailableCapabilities(profile);
+
+    expect(missing.length).toBeGreaterThan(0);
+    for (const capability of missing) {
+      const line = describeUnavailableCapabilities(profile).find((entry) =>
+        entry.startsWith(`${capability.id}:`),
+      );
+      expect(line).toContain(label);
+      expect(line).toContain(capability.rationale);
+    }
+    // A limitation is not a misconfiguration: each of these still starts.
+    expect(() => validateStorageProfile(profile)).not.toThrow();
+  });
+
+  it('loses the same features for Postgres records as for SQLite ones', () => {
+    // Nothing on this list asks *which* database the rows are in — every row
+    // needs the Space to be a directory, and neither backend has one. A
+    // Postgres-shaped exception appearing here would mean a row had started
+    // describing an adapter rather than a product limitation.
+    const postgres: StorageProfile = {
+      structured: { kind: 'postgres' },
+      blobs: { kind: 'disk' },
+    };
+    expect(unavailableCapabilities(postgres)).toEqual(
+      unavailableCapabilities(TABLES),
+    );
+    expect(unavailableCapabilities(postgres)).toEqual(STORAGE_CAPABILITIES);
+  });
+
+  it('takes nothing further away when SQL records lose local bytes too', () => {
+    // The blob axis can only subtract, and every row is already unavailable
+    // once the records are rows. Worth pinning because it is the assumption a
+    // reader makes when they see the `and` across axes: pairing two limited
+    // backends does not compound into something unserveable, it is the same
+    // stated loss.
+    for (const structured of ['sqlite', 'postgres'] as const) {
+      expect(
+        unavailableCapabilities({
+          structured: { kind: structured },
+          blobs: { kind: 'azure' },
+        }),
+      ).toEqual(STORAGE_CAPABILITIES);
+    }
+  });
+
   it('treats an unknown id as available rather than guessing', () => {
     // The matrix is an exception list. A feature nobody wrote down is
     // portable by construction, and inventing a refusal for it would make

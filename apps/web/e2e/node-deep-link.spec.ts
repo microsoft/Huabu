@@ -15,7 +15,9 @@ test('copies and restores a Note deep link without repeated viewport takeover', 
   const canvasId = new URL(page.url()).pathname.split('/').pop();
   if (!canvasId) throw new Error('Canvas id was not present in the route');
   const center = await paneCenter(page);
-  const toolbar = page.locator('.react-flow__panel.bottom.center');
+  const toolbar = page.locator(
+    '[data-canvas-main-toolbar], .react-flow__panel.bottom.center',
+  );
   await toolbar.getByRole('button', { name: /^Note/ }).click();
   await page.mouse.click(center.x, center.y);
 
@@ -24,18 +26,20 @@ test('copies and restores a Note deep link without repeated viewport takeover', 
   const nodeId = await canvasNode.getAttribute('data-id');
   if (!nodeId) throw new Error('Created Note did not expose its stable id');
 
-  await page
-    .getByRole('button', { name: 'Collapse previews' })
-    .click({ force: true });
   await canvasNode.click();
-  await expect(
-    page.getByRole('button', { name: 'Copy link to node' }),
-  ).toBeVisible();
-  await page.getByRole('button', { name: 'Copy link to node' }).click();
-  const copied = await page.evaluate(() => navigator.clipboard.readText());
-  expect(copied).toBe(
-    `${new URL(page.url()).origin}/canvas/${canvasId}?node=${nodeId}`,
-  );
+  await page
+    .locator('.node-floating-toolbar')
+    .getByRole('button', { name: 'More', exact: true })
+    .click();
+  const copyLink = page.getByRole('menuitem', {
+    name: 'Copy link to node',
+    exact: true,
+  });
+  await copyLink.click();
+  await expect(copyLink).toHaveCount(0);
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toBe(`${new URL(page.url()).origin}/canvas/${canvasId}?node=${nodeId}`);
 
   await page.waitForTimeout(1_000);
   await page.goto(`/canvas/${canvasId}?node=${nodeId}`);

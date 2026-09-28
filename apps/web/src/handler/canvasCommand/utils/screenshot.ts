@@ -132,7 +132,6 @@ export async function captureVisibleCanvasGrounding(options: {
     skipAutoScale: true,
     cacheBust: true,
     style: {
-      '--canvas-grounding-stroke-filter': 'none',
       '--canvas-grounding-edge-filter': 'none',
       '--canvas-grounding-edge-stroke':
         'var(--xy-edge-stroke, var(--xy-edge-stroke-default))',

@@ -42,6 +42,80 @@ describe('buildPreprocessSnapshot', () => {
 });
 
 describe('preprocessNodeIfNeeded', () => {
+  it.each(['accepted', 'clear', 'stale', 'wrong-cover-source'] as const)(
+    'handles video cover response: %s',
+    async (scenario) => {
+      const node: Node = {
+        id: 'v',
+        type: 'video',
+        position: { x: 0, y: 0 },
+        data: { src: 'movie.mp4' },
+      };
+      const patchNodeSilent = vi.fn();
+      preprocessNode.mockResolvedValue({
+        success: true,
+        coverUrl: scenario === 'clear' ? null : 'cover.jpg',
+        coverSourceSrc:
+          scenario === 'clear'
+            ? null
+            : scenario === 'wrong-cover-source'
+              ? 'wrong.mp4'
+              : 'movie.mp4',
+      });
+      await preprocessNodeIfNeeded({
+        canvasId: 'c',
+        node,
+        getNode: () =>
+          scenario === 'stale' ? { ...node, data: { src: 'new.mp4' } } : node,
+        patchNodeSilent,
+        setNodeIngestion: vi.fn(),
+        clearNodeIngestion: vi.fn(),
+        getChildNodes: () => [],
+      });
+      if (scenario === 'accepted')
+        expect(patchNodeSilent).toHaveBeenCalledWith('v', {
+          coverUrl: 'cover.jpg',
+          coverSourceSrc: 'movie.mp4',
+        });
+      else if (scenario === 'clear')
+        expect(patchNodeSilent).toHaveBeenCalledWith('v', {
+          coverUrl: undefined,
+          coverSourceSrc: undefined,
+        });
+      else expect(patchNodeSilent).not.toHaveBeenCalled();
+    },
+  );
+
+  it('adopts canonical artifact src and its matching video cover together', async () => {
+    const node: Node = {
+      id: 'v',
+      type: 'video',
+      position: { x: 0, y: 0 },
+      data: { src: '/api/canvas/c/artifact/movie.mp4' },
+    };
+    preprocessNode.mockResolvedValue({
+      success: true,
+      src: 'movie.mp4',
+      coverUrl: 'cover.jpg',
+      coverSourceSrc: 'movie.mp4',
+    });
+    const patchNodeSilent = vi.fn();
+    await preprocessNodeIfNeeded({
+      canvasId: 'c',
+      node,
+      getNode: () => node,
+      patchNodeSilent,
+      setNodeIngestion: vi.fn(),
+      clearNodeIngestion: vi.fn(),
+      getChildNodes: () => [],
+    });
+    expect(patchNodeSilent).toHaveBeenCalledWith('v', {
+      src: 'movie.mp4',
+      coverUrl: 'cover.jpg',
+      coverSourceSrc: 'movie.mp4',
+    });
+  });
+
   it('does not overwrite a user label that was committed while preprocessing', async () => {
     const originalFrame: Node = {
       id: 'frame-1',

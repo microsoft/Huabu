@@ -14,9 +14,11 @@ import { createPortal } from 'react-dom';
 import { Button } from '@/components/Common/Button';
 import { cn } from '@/components/Common/cn';
 import { FLOATING_TOOLBAR_POPOVER_CLASS } from '@/components/Common/FloatingToolbar';
+import { Popover } from '@/components/Common/Popover';
 import { RangeSlider } from '@/components/Common/RangeSlider';
 
 interface SketchSizePickerProps {
+  floating?: boolean;
   value: number;
   min: number;
   max: number;
@@ -35,6 +37,7 @@ interface SketchSizePickerProps {
 }
 
 export function SketchSizePicker({
+  floating = false,
   value,
   min,
   max,
@@ -93,42 +96,59 @@ export function SketchSizePicker({
         />
       </Button>
 
-      {isOpen
-        ? createPortal(
-            <>
-              <div
-                className="fixed inset-0 z-40"
-                onPointerDown={(event) => {
-                  event.stopPropagation();
-                  setIsOpen(false);
-                }}
+      {isOpen && floating ? (
+        <Popover
+          reference={refs.domReference.current}
+          onDismiss={() => setIsOpen(false)}
+          className={`${FLOATING_TOOLBAR_POPOVER_CLASS} flex items-center`}
+        >
+          <RangeSlider
+            value={value}
+            min={min}
+            max={max}
+            label={label}
+            size={touch ? 'md' : 'sm'}
+            onChange={onChange}
+            onDragStart={onDragStart}
+            onDragEnd={onDragEnd}
+          />
+        </Popover>
+      ) : isOpen ? (
+        createPortal(
+          <>
+            <div
+              className="fixed inset-0 z-40"
+              onPointerDown={(event) => {
+                event.stopPropagation();
+                setIsOpen(false);
+              }}
+            />
+            <div
+              ref={refs.setFloating}
+              role="presentation"
+              className={`${FLOATING_TOOLBAR_POPOVER_CLASS} flex items-center`}
+              style={{
+                ...floatingStyles,
+                visibility: isPositioned ? 'visible' : 'hidden',
+              }}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <RangeSlider
+                value={value}
+                min={min}
+                max={max}
+                label={label}
+                size={touch ? 'md' : 'sm'}
+                onChange={onChange}
+                onDragStart={onDragStart}
+                onDragEnd={onDragEnd}
               />
-              <div
-                ref={refs.setFloating}
-                role="presentation"
-                className={`${FLOATING_TOOLBAR_POPOVER_CLASS} flex items-center`}
-                style={{
-                  ...floatingStyles,
-                  visibility: isPositioned ? 'visible' : 'hidden',
-                }}
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={(event) => event.stopPropagation()}
-              >
-                <RangeSlider
-                  value={value}
-                  min={min}
-                  max={max}
-                  label={label}
-                  size={touch ? 'md' : 'sm'}
-                  onChange={onChange}
-                  onDragStart={onDragStart}
-                  onDragEnd={onDragEnd}
-                />
-              </div>
-            </>,
-            document.body,
-          )
-        : null}
+            </div>
+          </>,
+          document.body,
+        )
+      ) : null}
     </div>
   );
 }

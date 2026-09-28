@@ -95,6 +95,10 @@ async function renderTree(
   options?: {
     isFilterActive?: boolean;
     liveItems?: DataSourceTreeItem[];
+    navigationState?: {
+      focusedId: string | null;
+      selectionAnchorId: string | null;
+    };
   },
 ) {
   const nodes = (options?.liveItems ?? items).map(
@@ -142,6 +146,7 @@ async function renderTree(
         getIcon={() => <span />}
         getDisplayName={(node) => node.data.label}
         isFilterActive={options?.isFilterActive}
+        navigationState={options?.navigationState}
       />,
     );
   });
@@ -180,14 +185,47 @@ afterEach(() => {
 });
 
 describe('CanvasLayerTree activation', () => {
-  it('selects, minimally reveals, and opens a preview-capable node', async () => {
+  it('restores roving focus and range selection after a list remount', async () => {
+    const items = [
+      item('first', 'note'),
+      item('middle', 'note'),
+      item('last', 'note'),
+    ];
+    const navigationState = {
+      focusedId: null as string | null,
+      selectionAnchorId: null as string | null,
+    };
+    await renderTree(items, { navigationState });
+    act(() => row('middle').click());
+    act(() => row('middle').focus());
+    act(() => root.render(null));
+    expect(navigationState).toEqual({
+      focusedId: 'middle',
+      selectionAnchorId: 'middle',
+    });
+    const { selectNodes } = await renderTree(items, { navigationState });
+    expect(row('middle').tabIndex).toBe(0);
+    act(() =>
+      row('last').dispatchEvent(
+        new MouseEvent('click', { bubbles: true, shiftKey: true }),
+      ),
+    );
+    expect(selectNodes).toHaveBeenLastCalledWith(['middle', 'last'], false);
+  });
+
+  it('selects, minimally reveals, and transiently opens a preview-capable node', async () => {
     const { selectNodes } = await renderTree([item('note-1', 'note')]);
 
     act(() => row('note-1').click());
 
     expect(selectNodes).toHaveBeenCalledWith(['note-1'], false);
     expect(mocks.revealNodesOnCanvas).toHaveBeenCalledOnce();
-    expect(mocks.openPreviewNode).toHaveBeenCalledWith('note-1');
+    expect(mocks.openPreviewNode).toHaveBeenCalledWith('note-1', {
+      transient: true,
+    });
+    expect(mocks.openPreviewNode.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.revealNodesOnCanvas.mock.invocationCallOrder[0],
+    );
   });
 
   it('opens Preview when Canvas is not mounted', async () => {
@@ -199,7 +237,9 @@ describe('CanvasLayerTree activation', () => {
     act(() => row('note-1').click());
 
     expect(mocks.revealNodesOnCanvas).not.toHaveBeenCalled();
-    expect(mocks.openPreviewNode).toHaveBeenCalledWith('note-1');
+    expect(mocks.openPreviewNode).toHaveBeenCalledWith('note-1', {
+      transient: true,
+    });
   });
 
   it('does not reopen a node already visible in Preview', async () => {
@@ -270,7 +310,9 @@ describe('CanvasLayerTree activation', () => {
     ]);
 
     act(() => row('question-1').click());
-    expect(mocks.openPreviewNode).toHaveBeenCalledWith('question-1');
+    expect(mocks.openPreviewNode).toHaveBeenCalledWith('question-1', {
+      transient: true,
+    });
     expect(mocks.requestChatOpen).toHaveBeenCalledWith('tab-1', 'bottom');
 
     mocks.openPreviewNode.mockClear();
@@ -300,7 +342,9 @@ describe('CanvasLayerTree activation', () => {
     act(() => row('note-1').click());
 
     expect(useCanvasStore.getState().collapsedFrameIds.size).toBe(0);
-    expect(mocks.openPreviewNode).toHaveBeenCalledWith('note-1');
+    expect(mocks.openPreviewNode).toHaveBeenCalledWith('note-1', {
+      transient: true,
+    });
   });
 
   it('does not announce a filtered Frame as empty when live children exist', async () => {
@@ -370,7 +414,9 @@ describe('CanvasLayerTree keyboard semantics', () => {
         new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
       ),
     );
-    expect(mocks.openPreviewNode).toHaveBeenCalledWith('note-1');
+    expect(mocks.openPreviewNode).toHaveBeenCalledWith('note-1', {
+      transient: true,
+    });
 
     mocks.openPreviewNode.mockClear();
     act(() =>
@@ -378,7 +424,9 @@ describe('CanvasLayerTree keyboard semantics', () => {
         new KeyboardEvent('keydown', { key: ' ', bubbles: true }),
       ),
     );
-    expect(mocks.openPreviewNode).toHaveBeenCalledWith('note-1');
+    expect(mocks.openPreviewNode).toHaveBeenCalledWith('note-1', {
+      transient: true,
+    });
 
     act(() =>
       row('note-1').dispatchEvent(

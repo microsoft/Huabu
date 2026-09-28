@@ -8,6 +8,9 @@ import { chatEnvelopeSchema } from '@huabu/shared';
 const readMany = vi.hoisted(() => vi.fn());
 const readCanvas = vi.hoisted(() => vi.fn());
 const rasterize = vi.hoisted(() => vi.fn());
+const rasterizeOcr = vi.hoisted(() => vi.fn());
+const isInkOcrConfigured = vi.hoisted(() => vi.fn());
+const recognizeInk = vi.hoisted(() => vi.fn());
 
 vi.mock('../../storage/index.js', () => ({
   space: () => ({
@@ -21,7 +24,13 @@ vi.mock('../../storage/index.js', () => ({
 
 vi.mock('../../canvas/snapshot-nodes.js', async (importOriginal) => ({
   ...(await importOriginal<typeof SnapshotNodesModule>()),
+  renderInkOcrRaster: rasterizeOcr,
   snapshotNodesToArtifacts: rasterize,
+}));
+
+vi.mock('./ink-ocr.js', () => ({
+  isInkOcrConfigured,
+  recognizeInk,
 }));
 
 import { buildChatEnvelope, InkVisualPreparationError } from './envelope.js';
@@ -55,6 +64,16 @@ describe('buildChatEnvelope selection records', () => {
     rasterize.mockResolvedValue([
       { src: 'ink.png', originNodeIds: ['ink-1', 'ink-2'] },
     ]);
+    rasterizeOcr.mockReset();
+    rasterizeOcr.mockResolvedValue({
+      png: Buffer.from('ocr'),
+      width: 200,
+      height: 100,
+      originNodeIds: ['ink-1', 'ink-2'],
+    });
+    isInkOcrConfigured.mockReset();
+    isInkOcrConfigured.mockReturnValue(false);
+    recognizeInk.mockReset();
     readCanvas.mockReset();
     readCanvas.mockResolvedValue({
       state: {
@@ -161,17 +180,96 @@ describe('buildChatEnvelope selection records', () => {
       logger,
     });
 
-    expect(rasterize).toHaveBeenCalledExactlyOnceWith({
-      canvasId: 'canvas-1',
-      nodeIds: ['ink-1', 'ink-2'],
-      strokeSubsets: [
-        { nodeId: 'ink-1', strokeIds: ['stroke-1'] },
-        { nodeId: 'ink-2', strokeIds: ['stroke-1'] },
-      ],
-    });
+    expect(rasterize).toHaveBeenCalledExactlyOnceWith(
+      {
+        canvasId: 'canvas-1',
+        nodeIds: ['ink-1', 'ink-2'],
+        strokeSubsets: [
+          { nodeId: 'ink-1', strokeIds: ['stroke-1'] },
+          { nodeId: 'ink-2', strokeIds: ['stroke-1'] },
+        ],
+      },
+      expect.any(Array),
+    );
     expect(envelope.focus.selection.snapshotAttachments).toEqual([
       expect.objectContaining({ originNodeIds: ['ink-1', 'ink-2'] }),
     ]);
+  });
+
+  it('attaches OCR derived from the same captured nodes as the required visual', async () => {
+    isInkOcrConfigured.mockReturnValue(true);
+    recognizeInk.mockResolvedValue({
+      provider: 'azure-vision',
+      apiVersion: '2024-02-01',
+      originNodeIds: ['ink-1'],
+      lines: [{ text: '手写问题', confidence: 0.9 }],
+    });
+
+    const envelope = await buildChatEnvelope({
+      content: '',
+      inputKind: 'ink-intent',
+      canvasId: 'canvas-1',
+      selectedNodes: [{ id: 'ink-1', type: 'sketch', strokeIds: ['stroke-1'] }],
+      logger,
+    });
+
+    expect(rasterizeOcr).toHaveBeenCalledExactlyOnceWith(
+      rasterize.mock.calls[0]?.[1],
+      [{ nodeId: 'ink-1', strokeIds: ['stroke-1'] }],
+    );
+    expect(recognizeInk).toHaveBeenCalledWith({
+      raster: expect.objectContaining({ originNodeIds: ['ink-1', 'ink-2'] }),
+      logger,
+      signal: undefined,
+    });
+    expect(envelope.focus.selection.inkRecognition).toEqual({
+      provider: 'azure-vision',
+      apiVersion: '2024-02-01',
+      originNodeIds: ['ink-1'],
+      lines: [{ text: '手写问题', confidence: 0.9 }],
+    });
+  });
+
+  it('continues image-only when optional OCR raster preparation fails', async () => {
+    isInkOcrConfigured.mockReturnValue(true);
+    rasterizeOcr.mockRejectedValue(new Error('private raster failure'));
+
+    const envelope = await buildChatEnvelope({
+      content: '',
+      inputKind: 'ink-intent',
+      canvasId: 'canvas-1',
+      selectedNodes: [{ id: 'ink-1', type: 'sketch', strokeIds: ['stroke-1'] }],
+      logger,
+    });
+
+    expect(envelope.focus.selection.inkRecognition).toBeUndefined();
+    expect(recognizeInk).not.toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalledWith(
+      { outcome: 'raster_error', nodeCount: 1 },
+      '[ink-ocr] optional raster preparation failed',
+    );
+  });
+
+  it('propagates user cancellation instead of starting image-only execution', async () => {
+    const controller = new AbortController();
+    isInkOcrConfigured.mockReturnValue(true);
+    recognizeInk.mockImplementation(async () => {
+      controller.abort();
+      return undefined;
+    });
+
+    await expect(
+      buildChatEnvelope({
+        content: '',
+        inputKind: 'ink-intent',
+        canvasId: 'canvas-1',
+        selectedNodes: [
+          { id: 'ink-1', type: 'sketch', strokeIds: ['stroke-1'] },
+        ],
+        logger,
+        signal: controller.signal,
+      }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
   });
 
   it.each([

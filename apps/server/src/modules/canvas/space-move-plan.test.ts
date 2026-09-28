@@ -55,7 +55,7 @@ describe('buildSpaceMovePlan', () => {
           nodeType: 'spacePreview',
           data: { targetCanvasId: 'destination' },
           position: { x: 50, y: 60 },
-          size: { width: 480, height: 320 },
+          size: { width: 360, height: 102 },
         },
       ],
     });
@@ -141,7 +141,7 @@ describe('buildSpaceMovePlan', () => {
     ).toThrow(SpaceMovePlanError);
   });
 
-  it('caps a breadcrumb preview created from a very large moved footprint', () => {
+  it('keeps a shortcut compact regardless of the moved footprint', () => {
     const large = node('large', 'frame', -100, -200);
     large.style = { width: 5000, height: 4000 };
 
@@ -159,7 +159,7 @@ describe('buildSpaceMovePlan', () => {
       nodes: [
         {
           position: { x: -100, y: -200 },
-          size: { width: 2400, height: 1600 },
+          size: { width: 360, height: 102 },
         },
       ],
     });

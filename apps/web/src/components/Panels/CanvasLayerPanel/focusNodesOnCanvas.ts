@@ -1,7 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import type { ReactFlowInstance, Viewport } from '@xyflow/react';
+import {
+  getViewportForBounds,
+  type ReactFlowInstance,
+  type Viewport,
+} from '@xyflow/react';
+
+import { MAX_ZOOM, MIN_ZOOM } from '@/config/canvas';
 
 type NodeBounds = {
   x: number;
@@ -11,6 +17,23 @@ type NodeBounds = {
 };
 
 type ViewportSize = { width: number; height: number };
+type VisibleArea = ViewportSize & { x: number; y: number };
+
+export function getCanvasVisibleArea(wrapper: HTMLElement): VisibleArea {
+  const style = wrapper instanceof Element ? getComputedStyle(wrapper) : null;
+  const left =
+    Number.parseFloat(style?.getPropertyValue('--canvas-inset-left') ?? '') ||
+    0;
+  const right =
+    Number.parseFloat(style?.getPropertyValue('--canvas-inset-right') ?? '') ||
+    0;
+  return {
+    x: left,
+    y: 0,
+    width: Math.max(0, wrapper.clientWidth - left - right),
+    height: wrapper.clientHeight,
+  };
+}
 
 /** Keep the same flow-space point at the centre when the canvas is resized. */
 export const anchorViewportCentre = (
@@ -25,37 +48,41 @@ export const anchorViewportCentre = (
 
 /**
  * Reveal flow-space bounds with the smallest screen-space pan possible.
- * Oversized bounds are centred on the axis that cannot fit without zooming.
+ * Oversized bounds align their leading edge without zooming.
  */
 export const revealBoundsInViewport = (
   viewport: Viewport,
-  viewportSize: ViewportSize,
+  viewportSize: VisibleArea,
   bounds: NodeBounds,
   padding = 24,
 ): Viewport => {
+  const originX = viewportSize.x;
+  const originY = viewportSize.y;
   const safeWidth = Math.max(0, viewportSize.width - padding * 2);
   const safeHeight = Math.max(0, viewportSize.height - padding * 2);
   const left = bounds.x * viewport.zoom + viewport.x;
   const top = bounds.y * viewport.zoom + viewport.y;
   const right = left + bounds.width * viewport.zoom;
   const bottom = top + bounds.height * viewport.zoom;
-  const safeRight = viewportSize.width - padding;
-  const safeBottom = viewportSize.height - padding;
+  const safeLeft = originX + padding;
+  const safeTop = originY + padding;
+  const safeRight = originX + viewportSize.width - padding;
+  const safeBottom = originY + viewportSize.height - padding;
 
   let dx = 0;
   if (right - left > safeWidth) {
-    dx = viewportSize.width / 2 - (left + right) / 2;
-  } else if (left < padding) {
-    dx = padding - left;
+    dx = safeLeft - left;
+  } else if (left < safeLeft) {
+    dx = safeLeft - left;
   } else if (right > safeRight) {
     dx = safeRight - right;
   }
 
   let dy = 0;
   if (bottom - top > safeHeight) {
-    dy = viewportSize.height / 2 - (top + bottom) / 2;
-  } else if (top < padding) {
-    dy = padding - top;
+    dy = safeTop - top;
+  } else if (top < safeTop) {
+    dy = safeTop - top;
   } else if (bottom > safeBottom) {
     dy = safeBottom - bottom;
   }
@@ -115,62 +142,66 @@ export const fitNodesOnCanvas = (
 ): Promise<boolean> => {
   const bounds = getReliableNodeBounds(rfInstance, nodeIds);
   if (!bounds) return Promise.resolve(false);
+  const wrapper = document.querySelector<HTMLElement>(
+    '[data-overlay-layout] [data-canvas-root]',
+  );
+  if (wrapper) {
+    const area = getCanvasVisibleArea(wrapper);
+    const viewport = getViewportForBounds(
+      bounds,
+      area.width,
+      area.height,
+      MIN_ZOOM,
+      MAX_ZOOM,
+      padding,
+    );
+    return rfInstance.setViewport({
+      ...viewport,
+      x: viewport.x + area.x,
+    });
+  }
   return rfInstance.fitBounds(bounds, { padding });
 };
 
-/**
- * Re-center the canvas viewport on a set of node ids.
- *
- * The Canvas runs with `onlyRenderVisibleElements`, so a target node that
- * is currently outside the viewport has never been measured by React
- * Flow. That breaks the obvious `rfInstance.fitView({ nodes })` call:
- * `fitView` derives its bounds from `node.measured.width|height`
- * (with fallbacks to `width` / `initialWidth`) and silently produces an
- * empty rect when none of those are set — leaving the viewport where it
- * was. That is the "click a row → canvas doesn't move" bug.
- *
- * This helper sidesteps the issue by computing the bounding rect from
- * `getInternalNode` (which always returns `internals.positionAbsolute`,
- * even for un-rendered nodes) and falling back to `style.width|height`
- * for the dimensions of nodes that haven't been mounted yet. We then
- * call `setCenter` directly. Zoom is capped at the current zoom (so we
- * never zoom IN past what the user has set) and at 1 (matching the
- * previous `maxZoom: 1` from the `fitView` callers).
- */
-export const focusNodesOnCanvas = (
+export const fitCanvasContent = (
   rfInstance: ReactFlowInstance,
-  nodeIds: string[],
-  duration = 800,
-): void => {
-  const bounds = getReliableNodeBounds(rfInstance, nodeIds);
-  if (!bounds) return;
+  scope: 'all' | 'selection',
+): Promise<boolean> =>
+  fitNodesOnCanvas(
+    rfInstance,
+    rfInstance
+      .getNodes()
+      .filter((node) => !node.hidden && (scope === 'all' || node.selected))
+      .map((node) => node.id),
+  );
 
-  const cx = bounds.x + bounds.width / 2;
-  const cy = bounds.y + bounds.height / 2;
-  const zoom = Math.min(rfInstance.getZoom(), 1);
-  void rfInstance.setCenter(cx, cy, { duration, zoom });
-};
+const pendingReveals = new WeakMap<HTMLElement, object>();
 
-/** Reveal nodes with the smallest pan needed, preserving the current zoom. */
+/** Reveal after layout commits, preserving zoom and only the latest request. */
 export const revealNodesOnCanvas = (
   rfInstance: ReactFlowInstance,
   canvasWrapper: HTMLElement,
   nodeIds: string[],
   duration = 400,
-): boolean => {
-  const bounds = getReliableNodeBounds(rfInstance, nodeIds);
-  if (!bounds) return false;
-
-  const currentViewport = rfInstance.getViewport();
-  const nextViewport = revealBoundsInViewport(
-    currentViewport,
-    {
-      width: canvasWrapper.clientWidth,
-      height: canvasWrapper.clientHeight,
-    },
-    bounds,
-  );
-  if (nextViewport === currentViewport) return false;
-  void rfInstance.setViewport(nextViewport, { duration });
-  return true;
+): void => {
+  const request = {};
+  const targets = [...nodeIds];
+  pendingReveals.set(canvasWrapper, request);
+  requestAnimationFrame(() => {
+    if (pendingReveals.get(canvasWrapper) !== request) return;
+    pendingReveals.delete(canvasWrapper);
+    if (!canvasWrapper.isConnected) return;
+    const bounds = getReliableNodeBounds(rfInstance, targets);
+    if (!bounds) return;
+    const area = getCanvasVisibleArea(canvasWrapper);
+    if (area.width <= 0 || area.height <= 0) return;
+    const currentViewport = rfInstance.getViewport();
+    const nextViewport = revealBoundsInViewport(currentViewport, area, bounds);
+    if (nextViewport === currentViewport) return;
+    void rfInstance.setViewport(nextViewport, {
+      duration,
+      interpolate: 'linear',
+      ease: (progress) => (1 - Math.cos(Math.PI * progress)) / 2,
+    });
+  });
 };

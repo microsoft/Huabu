@@ -61,6 +61,11 @@ describe('buildFontStr', () => {
     );
   });
 
+  it('preserves numeric title weight instead of measuring semibold as normal', async () => {
+    const buildFontStr = await loadBuildFontStr();
+    expect(buildFontStr(28, STACK, '600', 'normal')).toBe(`600 28px ${STACK}`);
+  });
+
   describe('on an engine that rejects ui-* generics', () => {
     beforeEach(() => {
       vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(

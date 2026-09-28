@@ -21,7 +21,7 @@ export interface AgentNodeProjection {
 
 export type AgentNodeTransition = (
   current: AgentNodeProjection,
-) => Record<string, unknown> | null;
+) => Record<string, unknown> | null | Promise<Record<string, unknown> | null>;
 
 interface AgentNodeTerminalOptions {
   consumePendingInkIntentLabel?: boolean;
@@ -33,7 +33,7 @@ interface LifecycleDependencies {
     update: AgentNodeTransition,
     alreadyLocked?: boolean,
   ) => Promise<void>;
-  hasSubmission: (target: AgentNodeTarget) => boolean;
+  hasSubmission: (target: AgentNodeTarget) => boolean | Promise<boolean>;
 }
 
 export class AgentNodeLifecycleError extends Error {
@@ -69,7 +69,10 @@ async function transitionAgentNode(
         `Agent Node ${target.nodeId} has no content record`,
       );
     }
-    const patch = update({ ...node.data, content: content.record.content });
+    const patch = await update({
+      ...node.data,
+      content: content.record.content,
+    });
     if (!patch) return;
     const { content: initialContent, ...metadata } = patch;
     const applied = await projectAgentNodeStateAlreadyLocked(
@@ -95,10 +98,14 @@ async function transitionAgentNode(
 
 const DEFAULT_DEPENDENCIES: LifecycleDependencies = {
   transition: transitionAgentNode,
-  hasSubmission: (target) =>
-    agenetes.history(canvasAcpNamespace(target.canvasId), target.threadId, {
-      withTail: true,
-    }).turns.length > 0,
+  hasSubmission: async (target) =>
+    (
+      await agenetes.history(
+        canvasAcpNamespace(target.canvasId),
+        target.threadId,
+        { withTail: true },
+      )
+    ).turns.length > 0,
 };
 
 /** Projects decisions only; admission and binding remain owned by their coordinators. */
@@ -112,11 +119,11 @@ export class AgentNodeLifecycle {
     prompt: string,
     invocationToken: string,
   ): Promise<void> {
-    return this.dependencies.transition(target, (current) => ({
+    return this.dependencies.transition(target, async (current) => ({
       ...(!current.invocationToken &&
       typeof current.content === 'string' &&
       current.content.trim().length === 0 &&
-      !this.dependencies.hasSubmission(target)
+      !(await this.dependencies.hasSubmission(target))
         ? { content: prompt }
         : {}),
       invocationToken,

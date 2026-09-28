@@ -10,7 +10,7 @@
 // source.
 
 import { AgenetesError, defineDriver } from '@agenetes/runtime';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { InMemoryEventLogStore, type EventLogStore } from './event-log.js';
 import { InMemoryThreadStore, type ThreadStore } from './thread-store.js';
@@ -143,7 +143,7 @@ const targetSpecFor = (
 });
 
 describe('Agenetes.rehome() — the destructive counterpart to fork()', () => {
-  it('relocates the thread record, Tier-1 events, and Tier-2 turns to the target namespace', () => {
+  it('relocates the thread record, Tier-1 events, and Tier-2 turns to the target namespace', async () => {
     const threadStore = new InMemoryThreadStore();
     const eventLogStore = new InMemoryEventLogStore();
     const turnStore = new InMemoryTurnStore();
@@ -172,11 +172,11 @@ describe('Agenetes.rehome() — the destructive counterpart to fork()', () => {
       sourceRecord.spec as StubSpec,
       targetNamespace,
     );
-    inst.rehome({ namespace: sourceNamespace, threadId }, targetSpec);
+    await inst.rehome({ namespace: sourceNamespace, threadId }, targetSpec);
 
     // Target: the visible durable owner with the rewritten namespace/spec,
     // preserved threadId, driver kind, workload type, and driver state.
-    expect(inst.record(targetNamespace, threadId)).toEqual({
+    expect(await inst.record(targetNamespace, threadId)).toEqual({
       driverSchemaVersion: 1,
       spec: targetSpec,
       state: sourceRecord.state,
@@ -186,12 +186,12 @@ describe('Agenetes.rehome() — the destructive counterpart to fork()', () => {
       sourceEvents,
     );
     expect(turnStore.list(targetNamespace, threadId)).toEqual(sourceTurns);
-    expect(inst.history(targetNamespace, threadId).turns).toEqual(
+    expect((await inst.history(targetNamespace, threadId)).turns).toEqual(
       sourceTurns.map((p) => p.turn),
     );
 
     // Source: fully removed — record, Tier-1 log, and Tier-2 log.
-    expect(inst.record(sourceNamespace, threadId)).toBeUndefined();
+    expect(await inst.record(sourceNamespace, threadId)).toBeUndefined();
     expect(eventLogStore.readRecords(sourceNamespace, threadId)).toEqual([]);
     expect(turnStore.list(sourceNamespace, threadId)).toEqual([]);
 
@@ -199,7 +199,7 @@ describe('Agenetes.rehome() — the destructive counterpart to fork()', () => {
     expect(inst.get(threadId)).toBeUndefined();
   });
 
-  it('rejects a source thread with a live handle, leaving source and target untouched', () => {
+  it('rejects a source thread with a live handle, leaving source and target untouched', async () => {
     const threadStore = new InMemoryThreadStore();
     const eventLogStore = new InMemoryEventLogStore();
     const turnStore = new InMemoryTurnStore();
@@ -220,18 +220,108 @@ describe('Agenetes.rehome() — the destructive counterpart to fork()', () => {
       spec: {},
     };
     // create() spawns a live Deployment handle and upserts the record.
-    inst.create(sourceSpec);
+    await inst.create(sourceSpec);
 
     const targetSpec = targetSpecFor(sourceSpec, targetNamespace);
-    expect(() =>
-      inst.rehome({ namespace: sourceNamespace, threadId }, targetSpec),
-    ).toThrow(/live handle/);
-    expect(inst.record(targetNamespace, threadId)).toBeUndefined();
-    expect(inst.record(sourceNamespace, threadId)).toBeDefined();
+    await expect(
+      async () =>
+        await inst.rehome({ namespace: sourceNamespace, threadId }, targetSpec),
+    ).rejects.toThrow(/live handle/);
+    expect(await inst.record(targetNamespace, threadId)).toBeUndefined();
+    expect(await inst.record(sourceNamespace, threadId)).toBeDefined();
     expect(inst.get(threadId)).toBeDefined();
   });
 
-  it('rejects a missing source thread', () => {
+  it('requires successful close before rehome and recovers the complete durable thread at the destination', async () => {
+    const threadStore = new InMemoryThreadStore();
+    const eventLogStore = new InMemoryEventLogStore();
+    const turnStore = new InMemoryTurnStore();
+    const sourceNamespace = ns('close_rehome_source');
+    const targetNamespace = ns('close_rehome_target');
+    const threadId = 'close_rehome_thread';
+    seedSource(
+      threadStore,
+      eventLogStore,
+      turnStore,
+      sourceNamespace,
+      threadId,
+    );
+    const sourceRecord = threadStore.get(sourceNamespace, threadId)!;
+    const sourceEvents = eventLogStore.readRecords(sourceNamespace, threadId);
+    const sourceTurns = turnStore.list(sourceNamespace, threadId);
+    const inst = mountAgenetes({
+      drivers: { external: stubDriver() },
+      threadStore,
+      eventLogStore,
+      turnStore,
+    });
+    const handle = (await inst.create(
+      sourceRecord.spec,
+    )) as unknown as StubHandle;
+    const targetSpec = targetSpecFor(
+      sourceRecord.spec as StubSpec,
+      targetNamespace,
+    );
+    const source = { namespace: sourceNamespace, threadId };
+    const failure = new Error('synthetic close failure');
+    const close = vi.spyOn(handle, 'close').mockImplementationOnce(() => {
+      throw failure;
+    });
+
+    await expect(inst.close(threadId)).rejects.toThrow(failure);
+    expect(inst.get(threadId)).toBe(handle);
+    await expect(inst.rehome(source, targetSpec)).rejects.toThrow(
+      /live handle/,
+    );
+    expect(await inst.record(sourceNamespace, threadId)).toEqual(sourceRecord);
+    expect(eventLogStore.readRecords(sourceNamespace, threadId)).toEqual(
+      sourceEvents,
+    );
+    expect(turnStore.list(sourceNamespace, threadId)).toEqual(sourceTurns);
+    expect(await inst.record(targetNamespace, threadId)).toBeUndefined();
+    expect(eventLogStore.readRecords(targetNamespace, threadId)).toEqual([]);
+    expect(turnStore.list(targetNamespace, threadId)).toEqual([]);
+
+    await inst.close(threadId);
+    await inst.close(threadId);
+    expect(close).toHaveBeenCalledTimes(2);
+    expect(handle.closed).toBe(true);
+    expect(inst.get(threadId)).toBeUndefined();
+    expect(await inst.record(sourceNamespace, threadId)).toEqual(sourceRecord);
+    expect(eventLogStore.readRecords(sourceNamespace, threadId)).toEqual(
+      sourceEvents,
+    );
+    expect(turnStore.list(sourceNamespace, threadId)).toEqual(sourceTurns);
+
+    await inst.rehome(source, targetSpec);
+    expect(inst.get(threadId)).toBeUndefined();
+    expect(await inst.record(sourceNamespace, threadId)).toBeUndefined();
+    expect(eventLogStore.readRecords(sourceNamespace, threadId)).toEqual([]);
+    expect(turnStore.list(sourceNamespace, threadId)).toEqual([]);
+
+    const recovered = (await inst.create(targetSpec)) as unknown as StubHandle;
+    expect(recovered).not.toBe(handle);
+    expect(inst.get(threadId)).toBe(recovered);
+    expect(recovered.spec).toEqual(targetSpec);
+    expect(recovered.createContext.recoveryInput).toMatchObject({
+      state: sourceRecord.state,
+      turns: sourceTurns.map(({ turn }) => turn),
+    });
+    expect(await inst.record(targetNamespace, threadId)).toEqual({
+      ...sourceRecord,
+      spec: targetSpec,
+    });
+    expect(eventLogStore.readRecords(targetNamespace, threadId)).toEqual(
+      sourceEvents,
+    );
+    expect(turnStore.list(targetNamespace, threadId)).toEqual(sourceTurns);
+    expect((await inst.history(targetNamespace, threadId)).turns).toEqual(
+      sourceTurns.map(({ turn }) => turn),
+    );
+    await inst.close(threadId);
+  });
+
+  it('rejects a missing source thread', async () => {
     const inst = mountAgenetes({ drivers: { external: stubDriver() } });
     const namespace = ns('canvas_1');
     const targetSpec: StubSpec = {
@@ -241,9 +331,10 @@ describe('Agenetes.rehome() — the destructive counterpart to fork()', () => {
       namespace: ns('canvas_2'),
       spec: {},
     };
-    expect(() =>
-      inst.rehome({ namespace, threadId: 'missing' }, targetSpec),
-    ).toThrow(/missing source thread/);
+    await expect(
+      async () =>
+        await inst.rehome({ namespace, threadId: 'missing' }, targetSpec),
+    ).rejects.toThrow(/missing source thread/);
   });
 
   it.each([
@@ -252,7 +343,7 @@ describe('Agenetes.rehome() — the destructive counterpart to fork()', () => {
     ['conflicting Tier-1 events', 'events'],
   ] as const)(
     'rejects a target namespace with %s, leaving source untouched',
-    (_label, conflictKind) => {
+    async (_label, conflictKind) => {
       const threadStore = new InMemoryThreadStore();
       const eventLogStore = new InMemoryEventLogStore();
       const turnStore = new InMemoryTurnStore();
@@ -296,11 +387,17 @@ describe('Agenetes.rehome() — the destructive counterpart to fork()', () => {
         sourceRecord.spec as StubSpec,
         targetNamespace,
       );
-      expect(() =>
-        inst.rehome({ namespace: sourceNamespace, threadId }, targetSpec),
-      ).toThrow(/already exists/);
+      await expect(
+        async () =>
+          await inst.rehome(
+            { namespace: sourceNamespace, threadId },
+            targetSpec,
+          ),
+      ).rejects.toThrow(/already exists/);
       // The source is completely untouched by a rejected precondition.
-      expect(inst.record(sourceNamespace, threadId)).toEqual(sourceRecord);
+      expect(await inst.record(sourceNamespace, threadId)).toEqual(
+        sourceRecord,
+      );
       expect(eventLogStore.readRecords(sourceNamespace, threadId).length).toBe(
         3,
       );
@@ -308,7 +405,7 @@ describe('Agenetes.rehome() — the destructive counterpart to fork()', () => {
     },
   );
 
-  it('rejects a target threadId, driver kind, or workload type that differs from the source', () => {
+  it('rejects a target threadId, driver kind, or workload type that differs from the source', async () => {
     const threadStore = new InMemoryThreadStore();
     const eventLogStore = new InMemoryEventLogStore();
     const turnStore = new InMemoryTurnStore();
@@ -331,33 +428,37 @@ describe('Agenetes.rehome() — the destructive counterpart to fork()', () => {
     });
     const base = targetSpecFor(sourceRecord.spec as StubSpec, targetNamespace);
 
-    expect(() =>
-      inst.rehome(
-        { namespace: sourceNamespace, threadId },
-        { ...base, threadId: 'renamed' },
-      ),
-    ).toThrow(/threadId must equal source/);
-    expect(() =>
-      inst.rehome(
-        { namespace: sourceNamespace, threadId },
-        { ...base, kind: 'internal' },
-      ),
-    ).toThrow(/driver kind must match source/);
-    expect(() =>
-      inst.rehome(
-        { namespace: sourceNamespace, threadId },
-        { ...base, workloadType: 'Job' },
-      ),
-    ).toThrow(/workload type must match source/);
-    expect(() =>
-      inst.rehome(
-        { namespace: sourceNamespace, threadId },
-        { ...base, namespace: sourceNamespace },
-      ),
-    ).toThrow(/namespace must differ from source/);
+    await expect(
+      async () =>
+        await inst.rehome(
+          { namespace: sourceNamespace, threadId },
+          { ...base, threadId: 'renamed' },
+        ),
+    ).rejects.toThrow(/threadId must equal source/);
+    await expect(
+      async () =>
+        await inst.rehome(
+          { namespace: sourceNamespace, threadId },
+          { ...base, kind: 'internal' },
+        ),
+    ).rejects.toThrow(/driver kind must match source/);
+    await expect(
+      async () =>
+        await inst.rehome(
+          { namespace: sourceNamespace, threadId },
+          { ...base, workloadType: 'Job' },
+        ),
+    ).rejects.toThrow(/workload type must match source/);
+    await expect(
+      async () =>
+        await inst.rehome(
+          { namespace: sourceNamespace, threadId },
+          { ...base, namespace: sourceNamespace },
+        ),
+    ).rejects.toThrow(/namespace must differ from source/);
   });
 
-  it('restores the source and removes every target write on a determinate failure', () => {
+  it('restores the source and removes every target write on a determinate failure', async () => {
     const threadStore = new InMemoryThreadStore();
     const eventLogStore = new InMemoryEventLogStore();
     const turnStore = new InMemoryTurnStore();
@@ -404,9 +505,10 @@ describe('Agenetes.rehome() — the destructive counterpart to fork()', () => {
       targetNamespace,
     );
 
-    expect(() =>
-      inst.rehome({ namespace: sourceNamespace, threadId }, targetSpec),
-    ).toThrow(/simulated target record write failure/);
+    await expect(
+      async () =>
+        await inst.rehome({ namespace: sourceNamespace, threadId }, targetSpec),
+    ).rejects.toThrow(/simulated target record write failure/);
     expect(upsertCalls).toBe(1);
 
     // Target logs written during the attempt are fully rolled back.
@@ -422,7 +524,7 @@ describe('Agenetes.rehome() — the destructive counterpart to fork()', () => {
     expect(turnStore.list(sourceNamespace, threadId)).toEqual(sourceTurns);
   });
 
-  it('reports a distinct unknown-outcome error when the rollback itself fails', () => {
+  it('reports a distinct unknown-outcome error when the rollback itself fails', async () => {
     const threadStore = new InMemoryThreadStore();
     const eventLogStore = new InMemoryEventLogStore();
     const realTurnStore = new InMemoryTurnStore();
@@ -472,7 +574,7 @@ describe('Agenetes.rehome() — the destructive counterpart to fork()', () => {
 
     let caught: unknown;
     try {
-      inst.rehome({ namespace: sourceNamespace, threadId }, targetSpec);
+      await inst.rehome({ namespace: sourceNamespace, threadId }, targetSpec);
     } catch (error) {
       caught = error;
     }

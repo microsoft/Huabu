@@ -65,6 +65,30 @@ describe('shouldOwnSingleTouchNavigation', () => {
     ).toBe(false);
   });
 
+  it('owns finger interaction on painted Sketch content', () => {
+    expect(
+      shouldOwnSingleTouchNavigation(
+        targetInside('react-flow__node react-flow__node-sketch'),
+        fingerOptions,
+      ),
+    ).toBe(true);
+  });
+
+  it.each(['react-flow__handle', 'react-flow__resize-control'])(
+    'does not steal finger interaction from a Sketch %s',
+    (controlClass) => {
+      const sketch = document.createElement('div');
+      sketch.className = 'react-flow__node react-flow__node-sketch';
+      const control = document.createElement('div');
+      control.className = controlClass;
+      sketch.append(control);
+
+      expect(shouldOwnSingleTouchNavigation(control, fingerOptions)).toBe(
+        false,
+      );
+    },
+  );
+
   it('owns touch over nodes in pen interaction mode', () => {
     expect(
       shouldOwnSingleTouchNavigation(targetInside('react-flow__node'), {
@@ -117,7 +141,8 @@ describe('touch viewport geometry', () => {
   });
 
   it('clamps touch zoom to the shared canvas range', () => {
-    expect(clampZoom(0.01)).toBe(0.05);
+    expect(clampZoom(0.001)).toBe(0.01);
+    expect(clampZoom(0.01)).toBe(0.01);
     expect(clampZoom(0.05)).toBe(0.05);
     expect(clampZoom(6)).toBe(5);
     expect(clampZoom(2)).toBe(2);

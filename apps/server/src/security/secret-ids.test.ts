@@ -1,12 +1,31 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
+import { EnvironmentSecretStore } from './environment-secret-store.js';
 import {
+  isSecretId,
   llmProviderApiKeySecretId,
   parseLlmProviderApiKeySecretId,
+  SECRET_IDS,
 } from './secret-ids.js';
+
+it('recognizes the dedicated OCR record id without mapping it to VISION_KEY', () => {
+  expect(SECRET_IDS.inkOcrConfig).toBe('integration:azure-vision:config');
+  expect(isSecretId(SECRET_IDS.inkOcrConfig)).toBe(true);
+  expect(isSecretId(SECRET_IDS.inkOcrApiKey)).toBe(true);
+  vi.stubEnv('VISION_KEY', 'fake-environment-key');
+  try {
+    const environment = new EnvironmentSecretStore();
+    expect(environment.get(SECRET_IDS.inkOcrConfig)).toBeNull();
+    expect(environment.get(SECRET_IDS.inkOcrApiKey)).toBe(
+      'fake-environment-key',
+    );
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});
 
 describe('LLM provider secret ids', () => {
   it('generates ids for valid provider names up to 64 characters', () => {

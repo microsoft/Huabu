@@ -7,8 +7,15 @@
  * Model:
  *   - Width: Fixed if the node has `style.width` (set by a resize gesture),
  *     else auto-fits the content at `baseFontSize`.
- *   - Font size: locked via `style.fontSize`. Captured at resize-end by
- *     binary-searching the box dimensions; absent value defaults to
+ *   - Fixed card policy: always uses `baseFontSize`, never migrates or writes
+ *     font size, and reflows height from width even during a resize.
+ *   - Proportional policy (Text/Question): corners multiply the starting font
+ *     by the outer-width ratio and scale content insets by font/default.
+ *     Side grips preserve typography and reflow content. Stored fonts are
+ *     respected; legacy height never implicitly authors a font in this policy.
+ *   - Resizable policy: locked via `style.fontSize`. Fit resize searches the box,
+ *     scale resize follows the content-width ratio, and width resize leaves
+ *     the persisted font untouched. An absent value defaults to
  *     `baseFontSize`. Typing / deleting / undo / external sync never
  *     change it — they only adjust the height.
  *   - Height: ALWAYS content-driven. Measured from the locked font size
@@ -21,6 +28,8 @@
 
 import { useStore } from '@xyflow/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+
+import { NODE_SHELL_INSET } from '@huabu/shared/canvas-engine';
 
 import useCanvasStore from '@/store/canvasStore';
 import {
@@ -41,6 +50,8 @@ const MAX_CHARS_PER_LINE = 18;
  */
 const WRAP_TOLERANCE = 4;
 
+export type TextResizeMode = 'fit' | 'width' | 'scale';
+
 export interface UseTextAutoSizeOpts {
   nodeId: string;
   text: string;
@@ -52,6 +63,10 @@ export interface UseTextAutoSizeOpts {
   placeholder?: string;
   /** Node width from NodeProps (only available once measured). */
   width?: number;
+  /** Minimum natural width for non-text chrome; never overrides authored width. */
+  minAutoWidth?: number;
+  /** Proportional scales all content metrics; fixed ignores authored fonts. */
+  fontSizing?: 'resizable' | 'fixed' | 'proportional';
 }
 
 export interface UseTextAutoSizeResult {
@@ -63,8 +78,11 @@ export interface UseTextAutoSizeResult {
   effectiveWidth: number;
   /** Height to apply to the inner content container. */
   effectiveHeight: number;
+  /** Proportional content insets, shared by measurement and rendering. */
+  effectivePaddingX: number;
+  effectivePaddingY: number;
   /** Callback for NodeWrapper onResizeStart. */
-  handleResizeStart: () => void;
+  handleResizeStart: (mode?: TextResizeMode) => void;
   /** Callback for NodeWrapper onResize. */
   handleResize: (width: number, height: number) => void;
   /** Callback for NodeWrapper onResizeEnd. */
@@ -80,6 +98,8 @@ export function useTextAutoSize({
   fontOpts,
   placeholder = 'Type...',
   width,
+  minAutoWidth = 30,
+  fontSizing = 'resizable',
 }: UseTextAutoSizeOpts): UseTextAutoSizeResult {
   // Subscribe to the persisted style so we react to undo/redo and external
   // edits. Selecting the whole style object is fine — React Flow's store
@@ -94,7 +114,19 @@ export function useTextAutoSize({
     (s) => s.nodeLookup.get(nodeId)?.style?.height as number | undefined,
   );
 
-  const lockedFontSize = style?.fontSize;
+  const fixedFont = fontSizing === 'fixed';
+  const proportional = fontSizing === 'proportional';
+  const lockedFontSize =
+    fixedFont ||
+    !Number.isFinite(style?.fontSize) ||
+    (style?.fontSize ?? 0) <= 0
+      ? undefined
+      : style?.fontSize;
+  const [liveFontSize, setLiveFontSize] = useState<number | null>(null);
+  const fontSize = fixedFont
+    ? baseFontSize
+    : (liveFontSize ?? lockedFontSize ?? baseFontSize);
+  const contentScale = proportional ? fontSize / baseFontSize : 1;
 
   const writeLockedFontSize = useCallback(
     (nextFontSize: number) => {
@@ -122,8 +154,14 @@ export function useTextAutoSize({
   // accent makes the border visible. Measuring at a narrower width than the
   // text renders at counts a line as wrapped that the browser keeps on one
   // line, and the node then reserves a line of height that renders empty.
-  const insetX = paddingX;
-  const insetY = paddingY;
+  const insetX = paddingX * contentScale;
+  const insetY = paddingY * contentScale;
+  const resizeRef = useRef<{
+    mode: TextResizeMode;
+    initialContentWidth: number;
+    initialWidth: number;
+    initialFontSize: number;
+  } | null>(null);
 
   // --------------------------------------------------------------------
   // @deprecated MIGRATION_FONTSIZE_FROM_HEIGHT
@@ -140,7 +178,8 @@ export function useTextAutoSize({
   // --------------------------------------------------------------------
   const migrationDoneRef = useRef(false);
   useEffect(() => {
-    if (migrationDoneRef.current) return;
+    if (fixedFont || proportional) return;
+    if (migrationDoneRef.current || resizeRef.current) return;
     if (lockedFontSize !== undefined) {
       migrationDoneRef.current = true;
       return;
@@ -160,44 +199,50 @@ export function useTextAutoSize({
     // Intentionally minimal deps — we want a one-shot migration using the
     // text/dims at mount time, not a reactive recomputation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lockedFontSize, persistedHeight, width, writeLockedFontSize]);
+  }, [
+    fixedFont,
+    proportional,
+    lockedFontSize,
+    persistedHeight,
+    width,
+    writeLockedFontSize,
+  ]);
 
   // --------------------------------------------------------------------
   // Live drag state — overrides locked size while user is dragging the
   // resize handle so feedback is instantaneous.
   // --------------------------------------------------------------------
-  const [liveFontSize, setLiveFontSize] = useState<number | null>(null);
   const [liveSize, setLiveSize] = useState<{
     width: number;
-    height: number;
+    height?: number;
   } | null>(null);
-  const isResizingRef = useRef(false);
 
   // --------------------------------------------------------------------
   // Auto-width fallback (used when no fixed width is set).
   // --------------------------------------------------------------------
-  const fontSize = liveFontSize ?? lockedFontSize ?? baseFontSize;
-  const maxAutoWidth = baseFontSize * MAX_CHARS_PER_LINE * 0.62;
+  const naturalFont = proportional ? fontSize : baseFontSize;
+  const maxAutoWidth = naturalFont * MAX_CHARS_PER_LINE * 0.62;
 
   const autoContent = useMemo(() => {
     const measuredText = text || placeholder;
     return measureTextContent(measuredText, {
       ...fontOpts,
-      fontSize: baseFontSize,
+      fontSize: naturalFont,
       maxWidth: maxAutoWidth,
     });
-  }, [text, baseFontSize, fontOpts, maxAutoWidth, placeholder]);
+  }, [text, naturalFont, fontOpts, maxAutoWidth, placeholder]);
 
   const autoWidth = Math.max(
-    autoContent.width + WRAP_TOLERANCE + insetX * 2,
-    30,
+    autoContent.width + WRAP_TOLERANCE * contentScale + insetX * 2,
+    minAutoWidth * contentScale,
   );
 
   // --------------------------------------------------------------------
   // Effective dimensions.
   //
   // - Width:  live drag value > fixed `style.width` > auto-measured
-  // - Height: live drag value > content-driven height at the current font
+  // - Height: content-driven for fixed/proportional policies and width drags;
+  //   resizable fit/scale modes use the dragged height until release.
   // - Font:   live drag value > locked `style.fontSize` > placeholder cap
   // --------------------------------------------------------------------
   const effectiveWidth =
@@ -226,45 +271,83 @@ export function useTextAutoSize({
   // --------------------------------------------------------------------
   // Resize callbacks.
   //
-  // During drag: compute a live fontSize from (w, h, text) and a live
-  // size so the container visually follows the handle exactly.
-  // On end:     write the final fontSize to `style.fontSize` (silent —
+  // During drag: fit uses the box, width reflows at the captured font,
+  // and proportional scaling preserves the outer-width/font ratio.
+  // On end:     fit/scale write the final fontSize to `style.fontSize` (silent —
   // no undo entry) and release the live state. NodeWrapper, configured
-  // with `resizeEndClearHeight`, has already persisted the width-only
-  // geometry change in its own undo entry.
+  // with `resizeEndClearHeight`, then commits width-only geometry in the
+  // same resize gesture's undo entry.
   // --------------------------------------------------------------------
-  const handleResizeStart = useCallback(() => {
-    isResizingRef.current = true;
-  }, []);
+  const handleResizeStart = useCallback(
+    (mode: TextResizeMode = 'fit') => {
+      resizeRef.current = {
+        mode,
+        initialContentWidth: contentWidth,
+        initialWidth: effectiveWidth,
+        initialFontSize: renderFontSize,
+      };
+    },
+    [contentWidth, effectiveWidth, renderFontSize],
+  );
 
-  const handleResize = useCallback(
+  const resolveResizeFontSize = useCallback(
     (w: number, h: number) => {
-      setLiveSize({ width: w, height: h });
+      if (fixedFont) return baseFontSize;
+      const resize = resizeRef.current;
+      if (resize?.mode === 'width') return resize.initialFontSize;
+      if (proportional && resize) {
+        return (resize.initialFontSize * Math.max(w, 1)) / resize.initialWidth;
+      }
+      if (resize?.mode === 'scale') {
+        // Match computeFontSizeForHeight's 1–200px bounds, but do not snap:
+        // rounding the ratio would introduce extra wrapping during scaling.
+        const scaled =
+          resize.initialFontSize *
+          (Math.max(w - insetX * 2, 1) / resize.initialContentWidth);
+        return Math.max(1, Math.min(200, scaled));
+      }
       // Use placeholder as the measurement target when empty, so dragging
       // on an empty node still scales the font naturally (same behaviour
       // and same final size as if the user had typed something).
       const target = text.trim() ? text : placeholder;
       const cw = w - insetX * 2;
       const ch = h - insetY * 2;
-      const fs = computeFontSizeForHeight(target, cw, ch, fontOpts);
-      setLiveFontSize(fs);
+      return computeFontSizeForHeight(target, cw, ch, fontOpts);
     },
-    [text, placeholder, fontOpts, insetX, insetY],
+    [
+      fixedFont,
+      proportional,
+      baseFontSize,
+      text,
+      placeholder,
+      fontOpts,
+      insetX,
+      insetY,
+    ],
+  );
+
+  const handleResize = useCallback(
+    (w: number, h: number) => {
+      setLiveSize({
+        width: w,
+        height:
+          fixedFont || proportional || resizeRef.current?.mode === 'width'
+            ? undefined
+            : Math.max(h - NODE_SHELL_INSET, 0),
+      });
+      setLiveFontSize(resolveResizeFontSize(w, h));
+    },
+    [fixedFont, proportional, resolveResizeFontSize],
   );
 
   const handleResizeEnd = useCallback(
     (w: number, h: number) => {
-      isResizingRef.current = false;
-      // Mirror handleResize: placeholder drives sizing when empty so the
-      // committed fontSize matches what the user saw during the drag.
-      const target = text.trim() ? text : placeholder;
-      const finalFontSize = computeFontSizeForHeight(
-        target,
-        w - insetX * 2,
-        h - insetY * 2,
-        fontOpts,
-      );
-      writeLockedFontSize(finalFontSize);
+      // Width-only gestures never author typography, including when the
+      // initial font is the implicit base size rather than a persisted value.
+      if (!fixedFont && resizeRef.current?.mode !== 'width') {
+        writeLockedFontSize(resolveResizeFontSize(w, h));
+      }
+      resizeRef.current = null;
       // Release live state. The next render uses the persisted fontSize
       // and recomputes height to wrap text exactly — visually this snaps
       // the bottom edge to content height, which is the intended UX:
@@ -272,7 +355,7 @@ export function useTextAutoSize({
       setLiveFontSize(null);
       setLiveSize(null);
     },
-    [text, placeholder, fontOpts, insetX, insetY, writeLockedFontSize],
+    [fixedFont, resolveResizeFontSize, writeLockedFontSize],
   );
 
   return {
@@ -280,6 +363,8 @@ export function useTextAutoSize({
     effectiveFontSize: renderFontSize,
     effectiveWidth,
     effectiveHeight,
+    effectivePaddingX: insetX,
+    effectivePaddingY: insetY,
     handleResizeStart,
     handleResize,
     handleResizeEnd,

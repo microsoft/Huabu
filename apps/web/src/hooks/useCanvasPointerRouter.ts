@@ -18,7 +18,6 @@ import type { ReactFlowInstance } from '@xyflow/react';
 
 interface CanvasPointerRouterOptions {
   inputMode: EffectiveInputMode;
-  interactivityLocked: boolean;
   explicitToolActive: boolean;
   onTouchTakeover: () => void;
   onEmptyCanvasTap: () => void;
@@ -78,7 +77,6 @@ export function useCanvasPointerRouter(
         wrapper,
         instance,
         inputMode: o.inputMode,
-        interactivityLocked: o.interactivityLocked,
         explicitToolActive: o.explicitToolActive,
         onTouchTakeover: o.onTouchTakeover,
         onEmptyCanvasTap: o.onEmptyCanvasTap,
@@ -113,17 +111,28 @@ export function useCanvasPointerRouter(
       if (shouldBlock(event)) return block(event);
       core.handleCancel(event);
     };
+    // Area selections also release capture on Escape/blur, before pointerup.
+    const onLostCapture = (event: PointerEvent) => {
+      const owner = core.ownerOf(event.pointerId)?.id;
+      if (owner === 'mouse-marquee' || owner === 'lasso') {
+        core.handleCancel(event);
+      }
+    };
 
     el.addEventListener('pointerdown', onDown, { capture: true });
     el.addEventListener('pointermove', onMove, { capture: true });
     el.addEventListener('pointerup', onUp, { capture: true });
     el.addEventListener('pointercancel', onCancel, { capture: true });
+    el.addEventListener('lostpointercapture', onLostCapture, { capture: true });
 
     return () => {
       el.removeEventListener('pointerdown', onDown, { capture: true });
       el.removeEventListener('pointermove', onMove, { capture: true });
       el.removeEventListener('pointerup', onUp, { capture: true });
       el.removeEventListener('pointercancel', onCancel, { capture: true });
+      el.removeEventListener('lostpointercapture', onLostCapture, {
+        capture: true,
+      });
     };
   }, [wrapperRef, rfInstanceRef, extraRecognizers]);
 }

@@ -30,21 +30,26 @@ import {
 } from '@agenetes/agenetes';
 
 import {
-  conversationTables,
+  PostgresThreadStore,
+  PostgresEventLogStore,
+  PostgresTurnStore,
+} from './postgres-stores.js';
+import {
   SqliteEventLogStore,
   SqliteThreadStore,
   SqliteTurnStore,
 } from './sqlite-stores.js';
-import { registerSpaceDirHandleOwner } from '../../storage/index.js';
+import {
+  getStructuredStore,
+  registerSpaceDirHandleOwner,
+} from '../../storage/index.js';
 
 import type {
-  EventLogEntry,
   EventLogRecord,
   EventLogStore,
   PersistedTurn,
   ThreadRecord,
   ThreadStore,
-  TurnStartLogEntry,
   TurnStore,
   TurnStorePageOptions,
 } from '@agenetes/agenetes';
@@ -78,6 +83,12 @@ function registerFileTurnOwner(namespace: Namespace): void {
   });
 }
 
+const postgres: Backing = {
+  threads: new PostgresThreadStore(),
+  events: new PostgresEventLogStore(),
+  turns: new PostgresTurnStore(),
+};
+
 const sqlite: Backing = {
   threads: new SqliteThreadStore(),
   events: new SqliteEventLogStore(),
@@ -102,8 +113,13 @@ function backingFor(namespace: Namespace): Backing {
     registerFileTurnOwner(namespace);
     return file;
   }
-  if (namespace.name && conversationTables(namespace) !== null) return sqlite;
-  return memory;
+  if (!namespace.name) return memory;
+  // Every other profile answers from the structured store it was selected
+  // with; a missing Space is each adapter's own case, not a fall-through.
+  const kind = getStructuredStore().kind;
+  if (kind === 'postgres') return postgres;
+  if (kind === 'sqlite') return sqlite;
+  throw new Error('A named Disk conversation requires a storage root');
 }
 
 export const conversationThreadStore: ThreadStore = {
@@ -117,13 +133,9 @@ export const conversationThreadStore: ThreadStore = {
 };
 
 export const conversationEventLogStore: EventLogStore = {
-  appendTurnStart: (
-    namespace,
-    threadId,
-    request: AgentSubmission | null,
-  ): TurnStartLogEntry =>
+  appendTurnStart: (namespace, threadId, request: AgentSubmission | null) =>
     backingFor(namespace).events.appendTurnStart(namespace, threadId, request),
-  append: (namespace, threadId, event): EventLogEntry =>
+  append: (namespace, threadId, event) =>
     backingFor(namespace).events.append(namespace, threadId, event),
   read: (namespace, threadId, sinceSeq) =>
     backingFor(namespace).events.read(namespace, threadId, sinceSeq),

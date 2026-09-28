@@ -51,6 +51,32 @@ const neighbourhoodSchema = z.object({
   ),
 });
 
+export const inkRecognitionSchema = z
+  .object({
+    provider: z.literal('azure-vision'),
+    apiVersion: z.string().min(1).max(40),
+    originNodeIds: z.array(z.string().min(1)).min(1).max(100),
+    lines: z
+      .array(
+        z.object({
+          text: z.string().trim().min(1).max(2000),
+          confidence: z.number().min(0).max(1).optional(),
+        }),
+      )
+      .min(1)
+      .max(100),
+  })
+  .refine(
+    (recognition) =>
+      recognition.lines.reduce(
+        (length, line) => length + line.text.length,
+        0,
+      ) <= 12000,
+    'Ink recognition exceeds the text budget',
+  );
+
+export type InkRecognition = z.infer<typeof inkRecognitionSchema>;
+
 export const chatEnvelopeSchema = z.object({
   user: z.object({
     text: z.string(),
@@ -68,6 +94,7 @@ export const chatEnvelopeSchema = z.object({
       selectedIds: z.array(z.string()),
       imageAttachments: z.array(chatAttachmentSchema),
       snapshotAttachments: z.array(chatAttachmentSchema),
+      inkRecognition: inkRecognitionSchema.optional(),
       strokeSubsets: z
         .array(
           z.object({

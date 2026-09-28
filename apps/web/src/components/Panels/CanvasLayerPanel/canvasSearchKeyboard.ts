@@ -1,10 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { isEditableTarget } from '../../../hooks/shortcuts/isEditableTarget';
-
-const INTERACTIVE_TARGET_SELECTOR =
-  'input, textarea, button, a[href], select, [contenteditable="true"], [role="textbox"], [role="button"], [role="menuitem"]';
+import { isKeyboardInteractiveTarget } from '../../../hooks/shortcuts/isKeyboardInteractiveTarget';
 
 export function shouldCanvasSearchOwnKeyboard(
   target: EventTarget | null,
@@ -15,7 +12,7 @@ export function shouldCanvasSearchOwnKeyboard(
   ) {
     return true;
   }
-  if (isEditableTarget(target) || target.closest(INTERACTIVE_TARGET_SELECTOR)) {
+  if (isKeyboardInteractiveTarget(target)) {
     return false;
   }
   return target.closest('[data-canvas-root]') !== null;

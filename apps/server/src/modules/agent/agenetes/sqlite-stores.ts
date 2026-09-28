@@ -18,9 +18,10 @@
  * conversations with it without storage knowing what a conversation is, and
  * without this module knowing where a Space is stored.
  *
- * The ports are synchronous, which is why they reach for `sqliteTree` rather
- * than the async `extension()`: `node:sqlite` is synchronous all the way down,
- * so nothing is lost by saying so.
+ * The ports accept an answer or a promise; these give an answer. That is why
+ * they reach for `sqliteTree` rather than the async `extension()`:
+ * `node:sqlite` is synchronous all the way down, so nothing is lost by saying
+ * so — the Postgres twin next door is the asynchronous case.
  */
 
 import {

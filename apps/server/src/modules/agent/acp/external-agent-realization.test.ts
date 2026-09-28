@@ -572,7 +572,9 @@ describe('ExternalAgentRealizationService', () => {
 
     const first = harness.service.realize(options);
     const second = harness.service.realize(options);
-    await Promise.resolve();
+    // Drain every microtask both calls can make before the gate: realization
+    // reads the durable record first, so one tick no longer reaches collection.
+    await new Promise((resolve) => setImmediate(resolve));
     expect(collect).toHaveBeenCalledOnce();
 
     releaseCollection();

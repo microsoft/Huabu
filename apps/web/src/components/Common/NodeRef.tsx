@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { Tooltip } from './Tooltip';
 import { NODE_ICON } from '../../config/nodeIcons';
 import useCanvasStore from '../../store/canvasStore';
+import { revealNodesOnCanvas } from '../Panels/CanvasLayerPanel/focusNodesOnCanvas';
 
 import type { CanvasNodeType, ChatAttachment } from '@huabu/shared';
 
@@ -92,11 +93,10 @@ export function NodeRef({
 
   const focusNode = (id: string) => {
     selectNodes([id]);
-    rfInstance?.fitView({
-      nodes: [{ id }],
-      duration: 300,
-      padding: 0.3,
-    });
+    const { canvasWrapper } = useCanvasStore.getState();
+    if (rfInstance && canvasWrapper) {
+      revealNodesOnCanvas(rfInstance, canvasWrapper, [id], 300);
+    }
   };
 
   const handleClick = (e: React.MouseEvent) => {

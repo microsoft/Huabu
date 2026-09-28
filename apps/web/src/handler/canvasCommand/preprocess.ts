@@ -131,9 +131,17 @@ export async function preprocessNodeIfNeeded({
     // the user may have renamed the node while this request was in flight.
     // Other projected fields can be applied directly.
     const patch: Record<string, unknown> = {};
-    const latestData = getNode(node.id)?.data as
-      | Record<string, unknown>
-      | undefined;
+    const latestNode = getNode(node.id);
+    const latestData = latestNode?.data as Record<string, unknown> | undefined;
+    // Queue freshness remains authoritative; also protect direct callers and
+    // clearing responses, which have no coverSourceSrc to validate themselves.
+    if (
+      nodeType === 'video' &&
+      (latestNode?.type !== 'video' || latestData?.src !== snapshot.src)
+    ) {
+      clearNodeIngestion(node.id);
+      return;
+    }
     const latestLabel =
       typeof latestData?.label === 'string' ? latestData.label.trim() : '';
     const latestLabelSource = latestData?.labelSource;
@@ -151,6 +159,18 @@ export async function preprocessNodeIfNeeded({
     // need to re-compare on the client.
     if (typeof response.src === 'string' && response.src.length > 0) {
       patch.src = response.src;
+    }
+    if (nodeType === 'video') {
+      if (response.coverUrl === null && response.coverSourceSrc === null) {
+        patch.coverUrl = undefined;
+        patch.coverSourceSrc = undefined;
+      } else if (
+        typeof response.coverUrl === 'string' &&
+        response.coverSourceSrc === (patch.src ?? latestData?.src)
+      ) {
+        patch.coverUrl = response.coverUrl;
+        patch.coverSourceSrc = response.coverSourceSrc;
+      }
     }
     // Adopt the freshly-extracted body for node types whose preview
     // reads `data.content` directly (currently only `office`). Without

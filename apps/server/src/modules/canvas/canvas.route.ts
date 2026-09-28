@@ -19,6 +19,7 @@ import {
   postCanvasEventsBodySchema,
   postCanvasExecuteBodySchema,
   moveSelectionBodySchema,
+  moveSelectionParamsSchema,
   preprocessNodeBodySchema,
   putCanvasBodySchema,
   canvasEditableNodeDataSchema,
@@ -112,6 +113,7 @@ import type {
   PostCanvasExecuteRequest,
   PostCanvasExecuteResponse,
   MoveSelectionResponse,
+  MoveSelectionParams,
   PreprocessNodeBody,
   PreprocessNodeRequest,
   PreprocessNodeResponse,
@@ -454,6 +456,20 @@ function hydrateOneNode(
   // `stripNodesForCanvas` removed it before persistence.
   if (typeof nodeContent.src === 'string' && nodeContent.src.length > 0) {
     data['src'] = nodeContent.src;
+  }
+
+  // Video covers are server-derived sidecar metadata, never structural state.
+  // Clear stale structural values as well as restoring accepted references.
+  if (nodeType === 'video') {
+    delete data['coverUrl'];
+    delete data['coverSourceSrc'];
+    if (
+      typeof nodeContent.coverUrl === 'string' &&
+      nodeContent.coverSourceSrc === nodeContent.src
+    ) {
+      data['coverUrl'] = nodeContent.coverUrl;
+      data['coverSourceSrc'] = nodeContent.coverSourceSrc;
+    }
   }
 
   // Rehydrate AI-edit block provenance. Same rationale as `src`: the
@@ -987,6 +1003,10 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     if (typeof existing.src === 'string') {
       response.src = existing.src;
     }
+    if (nodeType === 'video' && typeof data['coverUrl'] === 'string') {
+      response.coverUrl = data['coverUrl'];
+      response.coverSourceSrc = data['coverSourceSrc'] as string;
+    }
     const sum = existing['summary'];
     if (typeof sum === 'string' && sum.trim()) {
       response.summary = sum.trim();
@@ -1074,6 +1094,16 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         // the client never receives a redundant src write.
         src:
           typeof result.patch.src === 'string' ? result.patch.src : undefined,
+        coverUrl:
+          typeof result.patch.coverUrl === 'string' ||
+          result.patch.coverUrl === null
+            ? result.patch.coverUrl
+            : undefined,
+        coverSourceSrc:
+          typeof result.patch.coverSourceSrc === 'string' ||
+          result.patch.coverSourceSrc === null
+            ? result.patch.coverSourceSrc
+            : undefined,
         // For office nodes the in-canvas preview reads `data.content`
         // directly, so ship the freshly-extracted body back so the
         // client doesn't need a full canvas reload (or a follow-up
@@ -1325,7 +1355,11 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           canvasId,
           (rawState.nodes ?? []).flatMap((node) => {
             const current = currentById.get(node.id);
-            return current ? [{ current, patch: node.data ?? {} }] : [];
+            const patch = node.data ?? {};
+            return current &&
+              changesAgentNodePreparation(current.data ?? {}, patch)
+              ? [{ current, patch }]
+              : [];
           }),
         );
       } catch (error) {
@@ -1463,19 +1497,21 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
   // Idempotent no-op batches do not bump the version.
 
   fastify.post<{
-    Params: { canvasId: string };
+    Params: MoveSelectionParams;
     Body: unknown;
     Reply: ApiResult<MoveSelectionResponse>;
   }>('/:canvasId/move-selection', async function (request, reply) {
     const parsed = moveSelectionBodySchema.safeParse(request.body);
-    if (!parsed.success) {
+    const params = moveSelectionParamsSchema.safeParse(request.params);
+    if (!parsed.success || !params.success) {
       return reply.code(400).send({
-        message: parsed.error.issues[0]?.message ?? 'Invalid request body',
+        code: 'MOVE_FAILED',
+        message: 'Invalid move request',
       });
     }
     try {
       return reply.send(
-        await moveCanvasSelection(request.params.canvasId, parsed.data),
+        await moveCanvasSelection(params.data.canvasId, parsed.data),
       );
     } catch (error) {
       if (error instanceof SpaceMoveError) {
@@ -1484,7 +1520,15 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           message: error.message,
         });
       }
-      throw error;
+      request.log.error(
+        { code: 'MOVE_FAILED', phase: 'move-admission' },
+        'Move failed outside the compensated service boundary',
+      );
+      const failure = new SpaceMoveError('MOVE_FAILED', 500);
+      return reply.code(failure.statusCode).send({
+        code: failure.code,
+        message: failure.message,
+      });
     }
   });
 

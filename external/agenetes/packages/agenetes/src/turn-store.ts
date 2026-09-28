@@ -144,7 +144,9 @@ export function groupPersistedTurns(
  * sequence of {@link PersistedTurn}s (I9.8). Kept a narrow port, exactly
  * like {@link ThreadStore} / {@link EventLogStore}, so the in-memory default
  * and the on-disk backing are interchangeable and a host injects the Disk
- * variant at mount. Synchronous today (mirrors its siblings).
+ * variant at mount. Every method may answer synchronously or with a promise,
+ * so a remote backing (mirroring its siblings) is a store swap, not a port
+ * change.
  */
 export interface TurnStore {
   /** Append one folded turn record to the thread's Tier-2 log. */
@@ -152,23 +154,26 @@ export interface TurnStore {
     namespace: Namespace,
     threadId: string,
     persisted: PersistedTurn,
-  ): void;
+  ): void | Promise<void>;
   /** Read every folded turn for a thread, in fold (emission) order. */
-  list(namespace: Namespace, threadId: string): PersistedTurn[];
+  list(
+    namespace: Namespace,
+    threadId: string,
+  ): PersistedTurn[] | Promise<PersistedTurn[]>;
   /** Read bounded display-turn groups immediately before an opaque cursor. */
   page(
     namespace: Namespace,
     threadId: string,
     options: TurnStorePageOptions,
-  ): TurnStorePage;
+  ): TurnStorePage | Promise<TurnStorePage>;
   /** The number of folded turns persisted for a thread. */
-  count(namespace: Namespace, threadId: string): number;
+  count(namespace: Namespace, threadId: string): number | Promise<number>;
   /**
    * The `seqEnd` of the last folded turn — the Tier-1 fence a live tail
    * resumes from — or `0` when the thread has no folded turn yet (tail from
    * the very first event).
    */
-  fence(namespace: Namespace, threadId: string): number;
+  fence(namespace: Namespace, threadId: string): number | Promise<number>;
   /**
    * Overwrite a thread's ENTIRE Tier-2 log with `persisted` (already in fold
    * order), replacing whatever the target held before. A narrow capability
@@ -180,13 +185,13 @@ export interface TurnStore {
     namespace: Namespace,
     threadId: string,
     persisted: readonly PersistedTurn[],
-  ): void;
+  ): void | Promise<void>;
   /**
    * Remove a thread's Tier-2 log entirely (idempotent). Reserved for the
    * `rehome()` primitive: dropping the source log after its target twin is
    * durable, or compensating a target log written during a failed rehome.
    */
-  delete(namespace: Namespace, threadId: string): void;
+  delete(namespace: Namespace, threadId: string): void | Promise<void>;
 }
 
 /** Defensive shape-check for a persisted record read back from disk. */

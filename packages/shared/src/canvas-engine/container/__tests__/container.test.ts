@@ -99,6 +99,34 @@ describe('Container policy and reparenting', () => {
 });
 
 describe('Container fit', () => {
+  it('reserves a title band in the default Frame top inset', () => {
+    const nodes = [
+      node('frame', {
+        type: 'frame',
+        position: { x: 100, y: 100 },
+        style: { width: 10, height: 10 },
+      }),
+      node('child', {
+        parentId: 'frame',
+        position: { x: 20, y: 30 },
+      }),
+    ];
+
+    const fit = computeContainerFit(nodes, 'frame');
+    expect(fit).toEqual({
+      containerId: 'frame',
+      position: { x: 100, y: 66 },
+      width: 80,
+      height: 104,
+    });
+    if (!fit) throw new Error('Expected Container fit');
+
+    const applied = applyContainerFit(nodes, fit);
+    expect(
+      applied.find((candidate) => candidate.id === 'child')?.position,
+    ).toEqual({ x: 20, y: 64 });
+  });
+
   it('supports asymmetric insets and preserves child absolute position', () => {
     const nodes = [
       node('frame', {

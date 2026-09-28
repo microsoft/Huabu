@@ -12,13 +12,14 @@
  * corrected.
  *
  * Measuring offscreen sidesteps that entirely: the content is laid out
- * at the type's reference width with nothing constraining it. It also
+ * at the captured inner width with nothing constraining its height. It also
  * works for a note zoomed out far enough never to have hydrated, which
  * is precisely the case where the collapse-then-expand was most visible.
  */
 
 import {
   autoHeightKey,
+  autoHeightContentWidth,
   getHeightPolicy,
   readAutoHeightHint,
 } from '@huabu/shared/canvas-engine';
@@ -62,9 +63,20 @@ export async function measureMissingAutoHeights(
     try {
       const result = await measureNoteHeightOffscreen({
         markdown: target.markdown,
+        contentWidth: target.contentWidth,
         canvasId,
       });
       if (result.height <= 0) continue;
+      const live = getState();
+      const node = live.nodes.find(
+        (candidate) => candidate.id === target.nodeId,
+      );
+      if (
+        live.canvasId !== canvasId ||
+        !node ||
+        autoHeightKey(node) !== target.measuredFor
+      )
+        continue;
       measured.push({
         nodeId: target.nodeId as CanvasNodeId,
         intrinsicHeight: result.height,
@@ -73,7 +85,7 @@ export async function measureMissingAutoHeights(
       });
     } catch {
       // The toggle still applies; the node falls back to its policy
-      // minimum and the in-place measurer corrects it once mounted.
+      // previous numeric seed and is remeasured after the toggle.
     }
   }
 
@@ -83,6 +95,7 @@ export async function measureMissingAutoHeights(
 interface Target {
   nodeId: string;
   markdown: string;
+  contentWidth: number;
   measuredFor: string;
 }
 
@@ -101,6 +114,7 @@ function collectTargets(nodeIds: string[], nodes: Node[]): Target[] {
     targets.push({
       nodeId: node.id,
       markdown: content,
+      contentWidth: autoHeightContentWidth(node),
       measuredFor: autoHeightKey(node),
     });
   }

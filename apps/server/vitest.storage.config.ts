@@ -9,7 +9,7 @@ export default defineConfig({
   ...base,
   test: {
     ...base.test,
-    include: ['src/modules/storage/**/*.remote.test.ts'],
+    include: ['src/**/*.remote.test.ts'],
     exclude: [],
     globalSetup: ['./src/test-support/storage-containers.ts'],
     maxWorkers: 2,

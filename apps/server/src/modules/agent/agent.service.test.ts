@@ -310,7 +310,9 @@ describe('runAgent output delta', () => {
     try {
       await Promise.race([started, output]);
       expect(settled).toBe(false);
-      expect(agenetes.logMetadata(namespace, threadId).eventCount).toBe(1);
+      expect((await agenetes.logMetadata(namespace, threadId)).eventCount).toBe(
+        1,
+      );
       expect(onTurnStarted).toHaveBeenCalledExactlyOnceWith({
         threadId,
         turnStartSeq: 1,
@@ -318,7 +320,7 @@ describe('runAgent output delta', () => {
     } finally {
       releasePrompt();
       await output;
-      agenetes.close(threadId);
+      await agenetes.close(threadId);
     }
   });
 
@@ -379,7 +381,7 @@ describe('runAgent Ink model requirements', () => {
       const canvasId = 'ink-models';
       const threadId = `persisted-vision-${recover}`;
       const namespace = canvasAcpNamespace(canvasId);
-      const handle = agenetes.create(
+      const handle = await agenetes.create(
         buildHuabuPiWorkloadSpec({
           kind: 'internal',
           workloadType: 'Deployment',
@@ -389,7 +391,7 @@ describe('runAgent Ink model requirements', () => {
         }),
       );
       await handle.control({ type: 'set_model', data: { modelId: 'vision' } });
-      if (recover) agenetes.close(threadId);
+      if (recover) await agenetes.close(threadId);
       resolveModelByIdAsync.mockClear();
       const onTurnStarted = vi.fn();
       try {
@@ -410,7 +412,7 @@ describe('runAgent Ink model requirements', () => {
           turnStartSeq: 1,
         });
       } finally {
-        agenetes.close(threadId);
+        await agenetes.close(threadId);
       }
     },
   );
@@ -419,7 +421,7 @@ describe('runAgent Ink model requirements', () => {
     const canvasId = 'ink-models';
     const threadId = 'persisted-model-context';
     const namespace = canvasAcpNamespace(canvasId);
-    agenetes.create(
+    await agenetes.create(
       buildHuabuPiWorkloadSpec({
         kind: 'internal',
         workloadType: 'Deployment',
@@ -430,7 +432,7 @@ describe('runAgent Ink model requirements', () => {
         hasImage: false,
       }),
     );
-    agenetes.close(threadId);
+    await agenetes.close(threadId);
     resolveModelForRoleAsync.mockImplementation(async (role: string) => ({
       id: role,
       input: role === 'chat' ? ['text'] : ['text', 'image'],
@@ -483,11 +485,11 @@ describe('runAgent Ink model requirements', () => {
       });
       expect(resolveModelByIdAsync).not.toHaveBeenCalled();
       expect(
-        agenetes.record(canvasAcpNamespace(canvasId), threadId)?.state
+        (await agenetes.record(canvasAcpNamespace(canvasId), threadId))?.state
           .driverState,
       ).not.toHaveProperty('modelId');
     } finally {
-      agenetes.close(threadId);
+      await agenetes.close(threadId);
     }
   });
 
@@ -499,7 +501,7 @@ describe('runAgent Ink model requirements', () => {
         .fn()
         .mockResolvedValue({ ok: false, error: 'model rejected' }),
     } as unknown as BuiltinHandle;
-    vi.spyOn(agenetes, 'create').mockReturnValue(handle);
+    vi.spyOn(agenetes, 'create').mockResolvedValue(handle);
     const onTurnStarted = vi.fn();
     await expect(
       drain(
@@ -532,7 +534,7 @@ describe('runAgent Ink model requirements', () => {
       const threadId = `${source}-${scope}-${recover}`;
       const namespace = canvasAcpNamespace(canvasId);
       if (source === 'persisted') {
-        const handle = agenetes.create(
+        const handle = await agenetes.create(
           buildHuabuPiWorkloadSpec({
             kind: 'internal',
             workloadType: 'Deployment',
@@ -546,7 +548,7 @@ describe('runAgent Ink model requirements', () => {
           type: 'set_model',
           data: { modelId: 'stored-text' },
         });
-        if (recover) agenetes.close(threadId);
+        if (recover) await agenetes.close(threadId);
         resolveModelByIdAsync.mockClear();
         resolveModelForRoleAsync.mockResolvedValue({
           id: 'default-vision',
@@ -578,12 +580,14 @@ describe('runAgent Ink model requirements', () => {
                 : 'stored-text',
         });
         expect(onTurnStarted).not.toHaveBeenCalled();
-        expect(agenetes.logMetadata(namespace, threadId).eventCount).toBe(0);
+        expect(
+          (await agenetes.logMetadata(namespace, threadId)).eventCount,
+        ).toBe(0);
         if (source === 'persisted') {
           expect(resolveModelByIdAsync).toHaveBeenCalledWith('stored-text');
         }
       } finally {
-        agenetes.close(threadId);
+        await agenetes.close(threadId);
       }
     },
   );
@@ -611,11 +615,11 @@ describe('runAgent Ink model requirements', () => {
       });
       expect(resolveModelByIdAsync).toHaveBeenCalledWith('vision');
       expect(
-        agenetes.record(canvasAcpNamespace(canvasId), threadId)?.state
+        (await agenetes.record(canvasAcpNamespace(canvasId), threadId))?.state
           .driverState,
       ).toMatchObject({ modelId: 'vision' });
     } finally {
-      agenetes.close(threadId);
+      await agenetes.close(threadId);
     }
   });
 });
@@ -679,10 +683,11 @@ describe('runAgent durable acceptance failures', () => {
       ).resolves.toEqual([]);
       expect(onTurnStarted).not.toHaveBeenCalled();
       expect(
-        agenetes.logMetadata(canvasAcpNamespace(canvasId), threadId).eventCount,
+        (await agenetes.logMetadata(canvasAcpNamespace(canvasId), threadId))
+          .eventCount,
       ).toBe(0);
     } finally {
-      agenetes.close(threadId);
+      await agenetes.close(threadId);
     }
   });
 
@@ -712,7 +717,7 @@ describe('runAgent durable acceptance failures', () => {
       ).rejects.toBe(failure);
       expect(onTurnStarted).not.toHaveBeenCalled();
     } finally {
-      agenetes.close(threadId);
+      await agenetes.close(threadId);
     }
   });
 
@@ -730,7 +735,8 @@ describe('runAgent durable acceptance failures', () => {
     };
     try {
       await drain(runAgent(options));
-      const previousSeq = agenetes.logMetadata(namespace, threadId).eventCount;
+      const previousSeq = (await agenetes.logMetadata(namespace, threadId))
+        .eventCount;
       const onTurnStarted = vi.fn();
       await drain(runAgent({ ...options, onTurnStarted }));
       expect(onTurnStarted).toHaveBeenCalledExactlyOnceWith({
@@ -738,7 +744,7 @@ describe('runAgent durable acceptance failures', () => {
         turnStartSeq: previousSeq + 1,
       });
     } finally {
-      agenetes.close(threadId);
+      await agenetes.close(threadId);
     }
   });
 });

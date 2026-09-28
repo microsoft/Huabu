@@ -16,7 +16,7 @@ Two channels cooperate:
   staleness fingerprint) attributed to a `threadId`, rendered as a Keep/Revert
   card above the chat input.
 
-Space Preview does not open a target Canvas sync stream. It reads bounded snapshots through `GET /:canvasId/preview-scene`, shares them by target in a tab-local cache, and revalidates on a ten-second freshness interval and window focus. A target mutation therefore appears after revalidation rather than through the host Canvas SSE channel; see [space-preview.md](./space-preview.md).
+Space Shortcut does not open a target Canvas sync stream or fetch preview scenes. It shares workspace Space metadata for titles, target availability, node counts, and update timestamps, refreshed on entry and focus; local moves and renames also invalidate/refetch affected summaries. Inactive target content mutations appear on the next metadata refresh, not through live target subscriptions; see [space-preview.md](./space-preview.md).
 
 World preview reconciliation is a system-originated command batch against World and publishes through World's existing delta stream when topology changes. Portal Pin routing, batched source-reference refreshes, and World `nodeRef` conversation presentation are retired; previews add no cross-Space sync channel or source-conversation subscription.
 
@@ -87,6 +87,8 @@ batch — there is no per-caller broadcast flag. This unifies all writers:
   user hand-edits also broadcast (deferred — see the plan).
 
 ## Conflict model — version + dirty-node protection
+
+Loading a Space may attempt to persist a legacy Hug Frame header adjustment before displaying the adjusted geometry. This optional layout write is not a prerequisite for reading the Space: if it fails (including version conflicts or Agent execution-record validation), loading completes with the original loaded geometry, content, edges, and snapshot version. The failure is logged without a blocking or persistent toast, and neither the rejected geometry nor its warmup hints are automatically resubmitted by the load path. Normal save validation and SSE reconciliation remain in force; this fallback does not repair missing execution records or force an overwrite.
 
 `applyDeltasFromAgent` filters incoming deltas against the set of nodes with
 un-persisted local content edits (`nodeContentQueue.pendingNodeIds()` —

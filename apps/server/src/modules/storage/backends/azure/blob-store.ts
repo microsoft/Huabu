@@ -98,9 +98,19 @@ export class AzureBlobStore implements BlobStore {
       process.env['HUABU_AZURE_BLOB_PREFIX']?.trim() || 'huabu',
     );
   }
-  async init(): Promise<void> {
+  #assertNotClosed(): void {
     if (this.#state === 'closed') throw new Error('Azure blob store is closed');
+  }
+  async init(): Promise<void> {
+    this.#assertNotClosed();
     await this.container.getProperties();
+    // Checked again on the far side of the await: a `close()` landing while
+    // the container is being validated would otherwise be undone here,
+    // leaving a store that was closed reporting itself open. The adapter owns
+    // that invariant rather than leaning on whichever caller happens to
+    // sequence the two. (A method call, so the check is a fresh read of the
+    // field rather than the narrowing the first one left behind.)
+    this.#assertNotClosed();
     this.#state = 'open';
   }
   assertOpen(): void {

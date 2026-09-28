@@ -1,12 +1,23 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { Bold, Italic, Underline, Strikethrough } from 'lucide-react';
+import {
+  Bold,
+  Check,
+  Italic,
+  Type,
+  Underline,
+  Strikethrough,
+} from 'lucide-react';
 import { memo, useCallback, useEffect, useState, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { resolveAccent } from '@huabu/shared';
 
+import {
+  DropdownMenuItem,
+  DropdownMenuSubmenu,
+} from '@/components/Common/DropdownMenu';
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar.tsx';
 import { useTextNodeSurface } from '@/hooks/useTextNodeSurface';
 import useCanvasStore, { settleNodePreprocess } from '@/store/canvasStore.ts';
@@ -18,7 +29,7 @@ import {
   TEXT_NODE_PLACEHOLDER,
 } from '@/utils/node/nodeFontConfig';
 
-import { getAccentTokens } from '../accentTokens';
+import { getAccentTokens } from '../design/accentTokens';
 import { MissingFileBanner } from '../MissingFileBanner';
 import { NodeWrapper } from '../NodeWrapper';
 import { resolveTextBodyBox, TextNodeBody } from '../shared/TextNodeBody';
@@ -73,11 +84,9 @@ export const TextNode = memo(
     const isItalic = style.fontStyle === 'italic';
     const textDecoration = style.textDecoration || '';
 
-    // Accent is the single source of color styling. NodeWrapper paints
-    // both the border and the fill from `data.style.accent` (using the
-    // same `accentTokens` formulas as SemanticPlaceholder, so semantic
-    // zoom doesn't visibly shift the color). Locally we only need the
-    // foreground tint for the editable text body.
+    // NodeWrapper shares Note's subdued accent fill without a painted border;
+    // unaccented Text stays transparent. Locally we retain the foreground tint
+    // for the editable body independently of hover and selection outlines.
     const accent = resolveAccent(style.accent);
     const accentTokens = accent ? getAccentTokens(accent) : null;
     const textColor = accentTokens?.fg ?? undefined;
@@ -93,6 +102,7 @@ export const TextNode = memo(
       isEditing,
       content,
       baseFontSize: 16,
+      fontSizing: 'proportional',
       paddingX: NODE_PADDING_X,
       paddingY: NODE_PADDING_Y,
       fontOpts,
@@ -156,6 +166,7 @@ export const TextNode = memo(
       <>
         <FloatingToolbar.ToggleButton
           active={style.fontWeight === 'bold'}
+          className="node-toolbar-text-format"
           title={t('editor.inlineMarks.bold')}
           onClick={() =>
             updateStyle({
@@ -168,6 +179,7 @@ export const TextNode = memo(
 
         <FloatingToolbar.ToggleButton
           active={style.fontStyle === 'italic'}
+          className="node-toolbar-text-format"
           title={t('editor.inlineMarks.italic')}
           onClick={() =>
             updateStyle({
@@ -177,40 +189,68 @@ export const TextNode = memo(
         >
           <Italic />
         </FloatingToolbar.ToggleButton>
-
-        <FloatingToolbar.ToggleButton
-          active={textDecoration.includes('underline')}
-          title={t('node.underline')}
+      </>
+    );
+    const TextOverflow = (
+      <>
+        <DropdownMenuItem
+          icon={<Underline />}
+          trailing={
+            textDecoration.includes('underline') ? (
+              <Check size={14} />
+            ) : undefined
+          }
           onClick={() => toggleDecoration('underline')}
         >
-          <Underline />
-        </FloatingToolbar.ToggleButton>
+          {t('node.underline')}
+        </DropdownMenuItem>
 
-        <FloatingToolbar.ToggleButton
-          active={textDecoration.includes('line-through')}
-          title={t('editor.inlineMarks.strikethrough')}
+        <DropdownMenuItem
+          icon={<Strikethrough />}
+          trailing={
+            textDecoration.includes('line-through') ? (
+              <Check size={14} />
+            ) : undefined
+          }
           onClick={() => toggleDecoration('line-through')}
         >
-          <Strikethrough />
-        </FloatingToolbar.ToggleButton>
+          {t('editor.inlineMarks.strikethrough')}
+        </DropdownMenuItem>
 
-        <FloatingToolbar.Divider />
-
-        <FloatingToolbar.Select
-          options={FONT_FAMILY_OPTIONS.map((f) => ({
-            value: f.value,
-            label:
-              f.value === 'default'
+        <DropdownMenuSubmenu
+          className="node-toolbar-overflow node-toolbar-font-submenu"
+          label={
+            <span className="flex items-center gap-2">
+              <Type />
+              {t('toolbar.fontFamily')}
+            </span>
+          }
+        >
+          {FONT_FAMILY_OPTIONS.map((font) => (
+            <DropdownMenuItem
+              key={font.value}
+              aria-current={
+                (style.fontFamily ?? 'default') === font.value
+                  ? 'true'
+                  : undefined
+              }
+              trailing={
+                (style.fontFamily ?? 'default') === font.value ? (
+                  <Check size={14} />
+                ) : undefined
+              }
+              onClick={() => updateStyle({ fontFamily: font.value })}
+            >
+              {font.value === 'default'
                 ? t('node.fontDefault')
-                : f.value === 'serif'
+                : font.value === 'serif'
                   ? t('node.fontSerif')
-                  : f.value === 'mono'
+                  : font.value === 'mono'
                     ? t('node.fontMono')
-                    : t('node.fontHand'),
-          }))}
-          value={style.fontFamily ?? 'default'}
-          onChange={(v) => updateStyle({ fontFamily: v })}
-        />
+                    : t('node.fontHand')}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuSubmenu>
       </>
     );
 
@@ -221,8 +261,8 @@ export const TextNode = memo(
         type={'text'}
         selected={selected}
         toolbar={isContentMissing ? undefined : TextToolbar}
+        overflow={isContentMissing ? undefined : TextOverflow}
         keepAspectRatio={false}
-        className="transition-all duration-200"
         {...surface.nodeWrapperProps}
       >
         {isContentMissing ? (

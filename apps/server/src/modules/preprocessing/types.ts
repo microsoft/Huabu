@@ -17,7 +17,10 @@ import type { CanvasNodeType, TriggerReason } from '@huabu/shared';
 export type InputResolveCapability = 'resolve_input';
 
 /** Capabilities that belong to the Extract stage. */
-export type ExtractCapability = 'extract_text' | 'fetch_remote_content';
+export type ExtractCapability =
+  | 'extract_text'
+  | 'fetch_remote_content'
+  | 'extract_video_cover';
 
 /** Capabilities that belong to the Normalize stage. */
 export type NormalizeCapability = 'resolve_title' | 'merge_metadata';
@@ -274,6 +277,8 @@ export interface EnrichResult {
 
 /** Result produced by the Persist stage. */
 export interface PersistResult {
+  /** Only set after a video cover update (including clearing) was accepted. */
+  videoCover?: VideoCoverReference;
   /** Canvas node id under which content was persisted. */
   nodeId?: string;
   isNew?: boolean;
@@ -308,9 +313,16 @@ export interface PersistResult {
 
 /** Mutable context passed through the pipeline stages. */
 export interface PipelineContext {
+  videoCover?: VideoCoverReference;
   resolved?: ResolvedInput;
   extracted?: ExtractResult;
   normalized?: NormalizeResult;
   enriched?: EnrichResult;
   persisted?: PersistResult;
+}
+
+/** An empty reference clears obsolete cover fields; bytes never enter metadata. */
+export interface VideoCoverReference {
+  coverUrl?: string;
+  coverSourceSrc?: string;
 }

@@ -43,4 +43,16 @@ describe('visible Canvas grounding capture', () => {
     element.className = 'react-flow__node';
     expect(isVisibleCanvasGroundingChrome(element)).toBe(false);
   });
+
+  it('filters the selected-Ink SVG outline but keeps the authored path', () => {
+    const highlight = document.createElementNS(
+      'http://www.w3.org/2000/svg',
+      'path',
+    );
+    highlight.setAttribute('data-canvas-grounding-exclude', '');
+    const ink = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+
+    expect(isVisibleCanvasGroundingChrome(highlight)).toBe(true);
+    expect(isVisibleCanvasGroundingChrome(ink)).toBe(false);
+  });
 });

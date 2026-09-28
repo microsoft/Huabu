@@ -47,7 +47,7 @@
 
 import { useEffect, useState } from 'react';
 
-import { useTextAutoSize } from './useTextAutoSize';
+import { useTextAutoSize, type TextResizeMode } from './useTextAutoSize';
 
 import type { FontOpts } from '@/utils/node/textMeasure';
 
@@ -69,6 +69,8 @@ export interface UseTextNodeSurfaceOpts {
   paddingY: number;
   fontOpts: FontOpts;
   placeholder?: string;
+  minAutoWidth?: number;
+  fontSizing?: 'resizable' | 'fixed' | 'proportional';
 }
 
 export interface UseTextNodeSurfaceResult {
@@ -81,7 +83,7 @@ export interface UseTextNodeSurfaceResult {
   // -------- Props bundles --------
   /** Spread onto `<NodeWrapper>` to wire all resize behaviour. */
   nodeWrapperProps: {
-    onResizeStart: () => void;
+    onResizeStart: (mode?: TextResizeMode) => void;
     onResize: (w: number, h: number) => void;
     onResizeEnd: (w: number, h: number) => void;
     resizeEndClearHeight: true;
@@ -109,6 +111,8 @@ export function useTextNodeSurface(
     paddingY,
     fontOpts,
     placeholder = 'Type...',
+    minAutoWidth,
+    fontSizing,
   } = opts;
 
   // -------- Draft state --------
@@ -128,6 +132,8 @@ export function useTextNodeSurface(
     fontOpts,
     placeholder,
     width,
+    minAutoWidth,
+    fontSizing,
   });
 
   return {
@@ -143,8 +149,8 @@ export function useTextNodeSurface(
       effectiveWidth: autoSize.effectiveWidth,
       effectiveHeight: autoSize.effectiveHeight,
       effectiveFontSize: autoSize.effectiveFontSize,
-      paddingX,
-      paddingY,
+      paddingX: autoSize.effectivePaddingX,
+      paddingY: autoSize.effectivePaddingY,
     },
   };
 }

@@ -2,7 +2,7 @@
 // Licensed under the MIT license.
 
 /**
- * The Agenetes conversation stores against a real SQLite profile.
+ * The Agenetes conversation stores against a real SQL profiles.
  *
  * The claim under test is the one a user would notice: a conversation held in
  * a Space that has no directory survives a restart, and goes away with its
@@ -12,7 +12,7 @@
 
 import { mountAgenetes } from '@agenetes/agenetes';
 import { defineDriver } from '@agenetes/runtime';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
 import {
@@ -21,13 +21,19 @@ import {
   conversationTurnStore,
 } from './conversation-stores.js';
 import { conversationTables } from './sqlite-stores.js';
-import { deleteSpace } from '../../storage/index.js';
+import { deleteSpace, space } from '../../storage/index.js';
 import {
   mountTestWorkspace,
+  PRODUCT_STORAGE_PROFILES,
   type MountedTestStorage,
 } from '../../storage/testing.js';
 import { canvasAcpNamespace } from '../../workspace/paths.js';
 import { effectiveConversationTitle } from '../conversation-title.service.js';
+import {
+  readSubstrateDocument,
+  writeSubstrateDocument,
+  appendSubstrateLog,
+} from '../substrate-store.js';
 
 import type { StorageProfile } from '../../storage/profile.js';
 import type {
@@ -38,10 +44,7 @@ import type {
 import type { AgentStateSnapshot, WorkloadSpec } from '@agenetes/protocol';
 import type { AgentHandle } from '@agenetes/runtime';
 
-const SQLITE: StorageProfile = {
-  structured: { kind: 'sqlite' },
-  blobs: { kind: 'disk' },
-};
+let profile: StorageProfile;
 
 const CANVAS_ID = 'canvas-conversation';
 const THREAD_ID = 'thread-1';
@@ -55,7 +58,7 @@ afterEach(async () => {
 
 /** Open the profile and create the Space the conversation belongs to. */
 async function openWithSpace(): Promise<MountedTestStorage> {
-  const opened = await mountTestWorkspace(SQLITE, 'huabu-agenetes-sqlite-');
+  const opened = await mountTestWorkspace(profile, 'huabu-agenetes-sql-');
   mounted = opened;
   const created = await opened.storage.structured
     .spaces()
@@ -76,8 +79,59 @@ function threadRecord(threadId = THREAD_ID): ThreadRecord {
   };
 }
 
-describe('Agenetes conversation stores on SQLite', () => {
-  it('preserves host title metadata through driver snapshots, restart, and rehome on SQLite', async () => {
+async function conversationSubstrate(
+  namespace: ReturnType<typeof canvasAcpNamespace>,
+) {
+  // A store read creates its owner tables before fault injection.
+  await conversationThreadStore.list(namespace);
+  const value =
+    profile.structured.kind === 'sqlite'
+      ? conversationTables(namespace)
+      : await space(namespace.name).extension('agenetes.conversations');
+  if (value?.kind === 'disk')
+    throw new Error('Expected SQL conversation tables');
+  return value;
+}
+
+async function rejectWrite(
+  substrate: NonNullable<Awaited<ReturnType<typeof conversationSubstrate>>>,
+  name: string,
+  table: string,
+  operation: string,
+  condition: string,
+  message: string,
+): Promise<() => Promise<void>> {
+  if (substrate.kind === 'sqlite') {
+    substrate.database
+      .exec(`CREATE TRIGGER ${name} BEFORE ${operation} ON agenetes_${table}
+      WHEN ${condition} BEGIN SELECT RAISE(ABORT, '${message}'); END;`);
+    return async () => {
+      substrate.database.exec(`DROP TRIGGER ${name}`);
+    };
+  }
+  if (substrate.kind !== 'postgres')
+    throw new Error('Expected a SQL substrate');
+  await substrate.database
+    .query(`CREATE FUNCTION ${name}() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN IF ${condition} THEN RAISE EXCEPTION '${message}'; END IF;
+    RETURN ${operation === 'DELETE' ? 'OLD' : 'NEW'}; END $$;
+    CREATE TRIGGER ${name} BEFORE ${operation} ON agenetes_${table}
+    FOR EACH ROW EXECUTE FUNCTION ${name}();`);
+  return async () => {
+    await substrate.database.query(
+      `DROP TRIGGER ${name} ON agenetes_${table}; DROP FUNCTION ${name}()`,
+    );
+  };
+}
+
+describe.each(
+  PRODUCT_STORAGE_PROFILES.filter((p) => p.structured.kind !== 'disk'),
+)('Agenetes conversation stores on %j', (selected) => {
+  beforeEach(() => {
+    profile = selected;
+  });
+
+  it('preserves host title metadata through driver snapshots, restart, and rehome', async () => {
     const opened = await openWithSpace();
     const namespace = canvasAcpNamespace(CANVAS_ID);
     let report!: (snapshot: AgentStateSnapshot) => void;
@@ -104,14 +158,14 @@ describe('Agenetes conversation stores on SQLite', () => {
         turnStore: conversationTurnStore,
       });
     const instance = mount();
-    instance.create({
+    await instance.create({
       kind: 'test',
       workloadType: 'Deployment',
       namespace,
       threadId: THREAD_ID,
       spec: {},
     });
-    instance.updateHostMetadata(namespace, THREAD_ID, {
+    await instance.updateHostMetadata(namespace, THREAD_ID, {
       otherFeature: { kept: true },
       huabuConversationTitle: {
         title: 'Durable panel title',
@@ -122,17 +176,17 @@ describe('Agenetes conversation stores on SQLite', () => {
       driverState: {},
       metadata: { sessionInfo: { title: '', updatedAt: null } },
     });
-    const before = instance.record(namespace, THREAD_ID)!;
+    const before = (await instance.record(namespace, THREAD_ID))!;
     expect(effectiveConversationTitle(before)).toEqual({
       title: 'Durable panel title',
       source: 'user',
     });
-    instance.close(THREAD_ID);
+    await instance.close(THREAD_ID);
     const reopenedStorage = await opened.reopen();
     const restarted = mount();
-    expect(restarted.record(namespace, THREAD_ID)?.hostMetadata).toEqual(
-      before.hostMetadata,
-    );
+    expect(
+      (await restarted.record(namespace, THREAD_ID))?.hostMetadata,
+    ).toEqual(before.hostMetadata);
     expect(restarted.get(THREAD_ID)).toBeUndefined();
     const targetId = 'canvas-title-target';
     expect(
@@ -143,12 +197,12 @@ describe('Agenetes conversation stores on SQLite', () => {
       ).ok,
     ).toBe(true);
     const target = canvasAcpNamespace(targetId);
-    restarted.rehome(
+    await restarted.rehome(
       { namespace, threadId: THREAD_ID },
       { ...before.spec, namespace: target },
     );
-    expect(restarted.record(namespace, THREAD_ID)).toBeUndefined();
-    const moved = restarted.record(target, THREAD_ID)!;
+    expect(await restarted.record(namespace, THREAD_ID)).toBeUndefined();
+    const moved = (await restarted.record(target, THREAD_ID))!;
     expect(moved.hostMetadata).toEqual(before.hostMetadata);
     expect(effectiveConversationTitle(moved)).toEqual({
       title: 'Durable panel title',
@@ -162,11 +216,11 @@ describe('Agenetes conversation stores on SQLite', () => {
       async function setupReplacement() {
         const opened = await openWithSpace();
         const namespace = canvasAcpNamespace(CANVAS_ID);
-        const substrate = conversationTables(namespace);
+        const substrate = await conversationSubstrate(namespace);
         if (!substrate) throw new Error('Expected SQLite conversation tables');
-        const replace = (values: readonly number[]) => {
+        const replace = async (values: readonly number[]) => {
           if (kind === 'events') {
-            conversationEventLogStore.replace(
+            await conversationEventLogStore.replace(
               namespace,
               THREAD_ID,
               values.map((seq) => ({
@@ -177,7 +231,7 @@ describe('Agenetes conversation stores on SQLite', () => {
               })),
             );
           } else {
-            conversationTurnStore.replace(
+            await conversationTurnStore.replace(
               namespace,
               THREAD_ID,
               values.map((seq) => ({
@@ -188,57 +242,61 @@ describe('Agenetes conversation stores on SQLite', () => {
             );
           }
         };
-        const read = () =>
+        const read = async () =>
           kind === 'events'
-            ? conversationEventLogStore.readRecords(namespace, THREAD_ID)
-            : conversationTurnStore.list(namespace, THREAD_ID);
-        replace([1, 2]);
+            ? await conversationEventLogStore.readRecords(namespace, THREAD_ID)
+            : await conversationTurnStore.list(namespace, THREAD_ID);
+        await replace([1, 2]);
         return {
           opened,
           namespace,
-          database: substrate.database,
+          substrate,
           replace,
           read,
         };
       }
 
       it('restores the complete old log when a later replacement insert fails', async () => {
-        const { opened, database, replace, read } = await setupReplacement();
-        const before = read();
+        const { opened, substrate, replace, read } = await setupReplacement();
+        const before = await read();
         // Fail the second insert after the delete and first insert have run.
         const sequence = kind === 'events' ? 'seq' : 'seq_start';
-        database.exec(`
-          CREATE TRIGGER reject_replacement BEFORE INSERT ON agenetes_${kind}
-          WHEN NEW.${sequence} = 4
-          BEGIN SELECT RAISE(ABORT, 'replacement insert failed'); END;
-        `);
-        expect(() => replace([3, 4])).toThrow('replacement insert failed');
-        expect(read()).toEqual(before);
-        expect(database.isTransaction).toBe(false);
+        const remove = await rejectWrite(
+          substrate,
+          'reject_replacement',
+          kind,
+          'INSERT',
+          `NEW.${sequence} = 4`,
+          'replacement insert failed',
+        );
+        await expect(replace([3, 4])).rejects.toThrow(
+          'replacement insert failed',
+        );
+        expect(await read()).toEqual(before);
+        await remove();
 
-        database.exec('DROP TRIGGER reject_replacement');
         await opened.reopen();
-        expect(read()).toEqual(before);
-        replace([3, 4]);
-        expect(read()).toHaveLength(2);
-        expect(read()).not.toEqual(before);
-        replace([]);
-        expect(read()).toEqual([]);
+        expect(await read()).toEqual(before);
+        await replace([3, 4]);
+        expect(await read()).toHaveLength(2);
+        expect(await read()).not.toEqual(before);
+        await replace([]);
+        expect(await read()).toEqual([]);
       });
 
       it('leaves the old log intact when replacement serialization fails', async () => {
         const { namespace, read } = await setupReplacement();
-        const before = read();
+        const before = await read();
         const cyclic: Record<string, unknown> = {};
         cyclic.self = cyclic;
-        expect(() => {
+        await expect(async () => {
           if (kind === 'events') {
-            conversationEventLogStore.replace(namespace, THREAD_ID, [
+            await conversationEventLogStore.replace(namespace, THREAD_ID, [
               { seq: 3, ts: 1, kind: 'turn_start', request: null },
               { seq: 4, ts: 1, event: cyclic } as unknown as EventLogRecord,
             ]);
           } else {
-            conversationTurnStore.replace(namespace, THREAD_ID, [
+            await conversationTurnStore.replace(namespace, THREAD_ID, [
               { seqStart: 3, seqEnd: 3, turn: { id: 'turn-3' } as never },
               {
                 seqStart: 4,
@@ -247,8 +305,8 @@ describe('Agenetes conversation stores on SQLite', () => {
               } as unknown as PersistedTurn,
             ]);
           }
-        }).toThrow(/circular/i);
-        expect(read()).toEqual(before);
+        }).rejects.toThrow(/circular/i);
+        expect(await read()).toEqual(before);
       });
     });
   }
@@ -321,28 +379,42 @@ describe('Agenetes conversation stores on SQLite', () => {
         },
         state: { driverState: {} },
       };
-      conversationThreadStore.upsert(source, THREAD_ID, record);
+      await conversationThreadStore.upsert(source, THREAD_ID, record);
       for (let seq = 1; seq <= 2; seq++) {
-        conversationEventLogStore.appendTurnStart(source, THREAD_ID, null);
-        conversationTurnStore.append(source, THREAD_ID, {
+        await conversationEventLogStore.appendTurnStart(
+          source,
+          THREAD_ID,
+          null,
+        );
+        await conversationTurnStore.append(source, THREAD_ID, {
           seqStart: seq,
           seqEnd: seq,
           turn: { request: null, transcript: [] },
         });
       }
-      const snapshot = (namespace: typeof source, threadId = THREAD_ID) => ({
-        record: conversationThreadStore.get(namespace, threadId),
-        events: conversationEventLogStore.readRecords(namespace, threadId),
-        turns: conversationTurnStore.list(namespace, threadId),
+      const snapshot = async (
+        namespace: typeof source,
+        threadId = THREAD_ID,
+      ) => ({
+        record: await conversationThreadStore.get(namespace, threadId),
+        events: await conversationEventLogStore.readRecords(
+          namespace,
+          threadId,
+        ),
+        turns: await conversationTurnStore.list(namespace, threadId),
       });
-      const before = snapshot(source);
-      conversationEventLogStore.replace(
+      const before = await snapshot(source);
+      await conversationEventLogStore.replace(
         target,
         'unrelated-thread',
         before.events,
       );
-      conversationTurnStore.replace(target, 'unrelated-thread', before.turns);
-      const unrelated = snapshot(target, 'unrelated-thread');
+      await conversationTurnStore.replace(
+        target,
+        'unrelated-thread',
+        before.turns,
+      );
+      const unrelated = await snapshot(target, 'unrelated-thread');
       const empty = { record: undefined, events: [], turns: [] };
       const inst = mountAgenetes({
         drivers: {
@@ -361,41 +433,143 @@ describe('Agenetes conversation stores on SQLite', () => {
         eventLogStore: conversationEventLogStore,
         turnStore: conversationTurnStore,
       });
-      const substrate = conversationTables(
+      const substrate = await conversationSubstrate(
         stage.startsWith('target') ? target : source,
       );
       if (!substrate) throw new Error('Expected SQLite conversation tables');
-      // Fail a real SQLite write at each stage, including after source deletion
+      // Fail a real SQL write at each stage, including after source deletion
       // has begun. The rehome coordinator and every storage port remain real.
-      substrate.database.exec(`
-      CREATE TRIGGER reject_rehome BEFORE ${operation} ON agenetes_${table}
-      WHEN ${row}.extension_id = ${substrate.extensionId}
-        AND ${row}.thread_id = 'thread-1' ${sequence}
-      BEGIN SELECT RAISE(ABORT, 'rehome write failed'); END;
-    `);
+      const remove = await rejectWrite(
+        substrate,
+        'reject_rehome',
+        table,
+        operation,
+        `${row}.extension_id = ${substrate.extensionId} AND ${row}.thread_id = 'thread-1' ${sequence}`,
+        'rehome write failed',
+      );
       const targetSpec = { ...record.spec, namespace: target };
-      expect(() =>
-        inst.rehome({ namespace: source, threadId: THREAD_ID }, targetSpec),
-      ).toThrow('rehome write failed');
-      expect(snapshot(source)).toEqual(before);
-      expect(snapshot(target)).toEqual(empty);
-      expect(snapshot(target, 'unrelated-thread')).toEqual(unrelated);
-      expect(substrate.database.isTransaction).toBe(false);
-      substrate.database.exec('DROP TRIGGER reject_rehome');
+      await expect(
+        async () =>
+          await inst.rehome(
+            { namespace: source, threadId: THREAD_ID },
+            targetSpec,
+          ),
+      ).rejects.toThrow('rehome write failed');
+      expect(await snapshot(source)).toEqual(before);
+      expect(await snapshot(target)).toEqual(empty);
+      expect(await snapshot(target, 'unrelated-thread')).toEqual(unrelated);
+      await remove();
 
       await opened.reopen();
-      expect(snapshot(source)).toEqual(before);
-      expect(snapshot(target)).toEqual(empty);
-      inst.rehome({ namespace: source, threadId: THREAD_ID }, targetSpec);
+      expect(await snapshot(source)).toEqual(before);
+      expect(await snapshot(target)).toEqual(empty);
+      await inst.rehome({ namespace: source, threadId: THREAD_ID }, targetSpec);
       await opened.reopen();
-      expect(snapshot(source)).toEqual(empty);
-      expect(snapshot(target)).toEqual({
+      expect(await snapshot(source)).toEqual(empty);
+      expect(await snapshot(target)).toEqual({
         ...before,
         record: { ...record, spec: targetSpec },
       });
-      expect(snapshot(target, 'unrelated-thread')).toEqual(unrelated);
+      expect(await snapshot(target, 'unrelated-thread')).toEqual(unrelated);
     },
   );
+
+  it('runs a mounted agent, publishes a durable tail, and recovers folded history after restart', async () => {
+    const opened = await openWithSpace();
+    const namespace = canvasAcpNamespace(CANVAS_ID);
+    const frames = [
+      { type: 'text_delta' as const, data: { content: 'persisted answer' } },
+      { type: 'end' as const, data: {} },
+    ];
+    const instance = mountAgenetes({
+      drivers: {
+        test: defineDriver({
+          schemaVersion: 1,
+          workloadTypes: ['Deployment'],
+          specSchema: z.object({}),
+          stateSchema: z.object({}),
+          initialState: () => ({}),
+          create: () =>
+            ({
+              async *run() {
+                for (const frame of frames) yield frame;
+              },
+              close() {},
+            }) as unknown as AgentHandle,
+        }),
+      },
+      threadStore: conversationThreadStore,
+      eventLogStore: conversationEventLogStore,
+      turnStore: conversationTurnStore,
+    });
+    const handle = await instance.create({
+      kind: 'test',
+      workloadType: 'Deployment',
+      threadId: THREAD_ID,
+      namespace,
+      spec: {},
+    });
+    const tail = instance.tail(namespace, THREAD_ID)[Symbol.asyncIterator]();
+    const first = tail.next();
+    const received = [];
+    for await (const frame of handle.run(
+      { type: 'user_text', content: 'question' } as never,
+      {} as never,
+    ))
+      received.push(frame);
+    expect(received).toEqual(frames);
+    expect((await first).value).toEqual(frames[0]);
+    expect((await tail.next()).value).toEqual(frames[1]);
+    await tail.return?.();
+    const history = await instance.history(namespace, THREAD_ID);
+    expect(history.turns).toHaveLength(1);
+    expect(history.turns[0]).toMatchObject({
+      request: { type: 'user_text', content: 'question' },
+    });
+    expect(await instance.logMetadata(namespace, THREAD_ID)).toEqual({
+      eventCount: 3,
+      turnCount: 1,
+    });
+    await instance.close(THREAD_ID);
+    await opened.reopen();
+    expect(
+      await instance.history(canvasAcpNamespace(CANVAS_ID), THREAD_ID),
+    ).toEqual(history);
+  });
+
+  it('persists agent-owned documents and concurrent log appends through restart', async () => {
+    const opened = await openWithSpace();
+    const substrate = await space(CANVAS_ID).extension('test.documents');
+    if (!substrate || substrate.kind === 'disk')
+      throw new Error('Expected SQL extension');
+    await writeSubstrateDocument(substrate, 'state', { cursor: 42 });
+    expect(await readSubstrateDocument(substrate, 'state')).toEqual({
+      cursor: 42,
+    });
+    await Promise.all(
+      ['a', 'b', 'c'].map((value) =>
+        appendSubstrateLog(substrate, 'prompt', '.log', value),
+      ),
+    );
+    const rows =
+      substrate.kind === 'postgres'
+        ? (
+            await substrate.database.query(
+              'SELECT body FROM extension_documents WHERE extension_id=$1 AND name=$2',
+              [substrate.extensionId, 'prompt.log'],
+            )
+          ).rows
+        : substrate.database
+            .prepare(
+              'SELECT body FROM extension_documents WHERE extension_id=? AND name=?',
+            )
+            .all(substrate.extensionId, 'prompt.log');
+    expect(String(rows[0]?.body).split('').sort().join('')).toBe('abc');
+    await opened.reopen();
+    const fresh = await space(CANVAS_ID).extension('test.documents');
+    if (!fresh) throw new Error('Missing extension');
+    expect(await readSubstrateDocument(fresh, 'state')).toEqual({ cursor: 42 });
+  });
 
   it('keeps a Space with no directory out of the file stores', async () => {
     await openWithSpace();
@@ -411,50 +585,56 @@ describe('Agenetes conversation stores on SQLite', () => {
     await openWithSpace();
     const namespace = canvasAcpNamespace(CANVAS_ID);
 
-    conversationThreadStore.upsert(namespace, THREAD_ID, threadRecord());
-    expect(conversationThreadStore.get(namespace, THREAD_ID)).toEqual(
+    await conversationThreadStore.upsert(namespace, THREAD_ID, threadRecord());
+    expect(await conversationThreadStore.get(namespace, THREAD_ID)).toEqual(
       threadRecord(),
     );
-    expect(conversationThreadStore.list(namespace)).toHaveLength(1);
+    expect(await conversationThreadStore.list(namespace)).toHaveLength(1);
 
-    const start = conversationEventLogStore.appendTurnStart(
+    const start = await conversationEventLogStore.appendTurnStart(
       namespace,
       THREAD_ID,
       null,
     );
     expect(start).toMatchObject({ seq: 1, kind: 'turn_start', request: null });
-    const appended = conversationEventLogStore.append(namespace, THREAD_ID, {
-      type: 'text',
-      text: 'hello',
-    } as never);
+    const appended = await conversationEventLogStore.append(
+      namespace,
+      THREAD_ID,
+      {
+        type: 'text',
+        text: 'hello',
+      } as never,
+    );
     expect(appended.seq).toBe(2);
-    expect(conversationEventLogStore.maxSeq(namespace, THREAD_ID)).toBe(2);
+    expect(await conversationEventLogStore.maxSeq(namespace, THREAD_ID)).toBe(
+      2,
+    );
 
     // `read` is the streamed frames only; `readRecords` includes the internal
     // turn boundary.
-    expect(conversationEventLogStore.read(namespace, THREAD_ID)).toHaveLength(
-      1,
-    );
     expect(
-      conversationEventLogStore.readRecords(namespace, THREAD_ID),
+      await conversationEventLogStore.read(namespace, THREAD_ID),
+    ).toHaveLength(1);
+    expect(
+      await conversationEventLogStore.readRecords(namespace, THREAD_ID),
     ).toHaveLength(2);
     expect(
-      conversationEventLogStore.read(namespace, THREAD_ID, 2),
+      await conversationEventLogStore.read(namespace, THREAD_ID, 2),
     ).toHaveLength(0);
 
-    conversationTurnStore.append(namespace, THREAD_ID, {
+    await conversationTurnStore.append(namespace, THREAD_ID, {
       turn: { id: 'turn-1' } as never,
       seqStart: 1,
       seqEnd: 2,
     });
-    expect(conversationTurnStore.count(namespace, THREAD_ID)).toBe(1);
-    expect(conversationTurnStore.fence(namespace, THREAD_ID)).toBe(2);
-    expect(conversationTurnStore.list(namespace, THREAD_ID)).toEqual([
+    expect(await conversationTurnStore.count(namespace, THREAD_ID)).toBe(1);
+    expect(await conversationTurnStore.fence(namespace, THREAD_ID)).toBe(2);
+    expect(await conversationTurnStore.list(namespace, THREAD_ID)).toEqual([
       { turn: { id: 'turn-1' }, seqStart: 1, seqEnd: 2 },
     ]);
   });
 
-  it('pages SQLite display-turn ranges without splitting null-request continuations', async () => {
+  it('pages display-turn ranges without splitting null-request continuations', async () => {
     await openWithSpace();
     const namespace = canvasAcpNamespace(CANVAS_ID);
     const values = [
@@ -464,8 +644,8 @@ describe('Agenetes conversation stores on SQLite', () => {
       { request: null, content: 'resume-b' },
       { request: 'c', content: 'c' },
     ] as const;
-    values.forEach((value, index) => {
-      conversationTurnStore.append(namespace, THREAD_ID, {
+    for (const [index, value] of values.entries()) {
+      await conversationTurnStore.append(namespace, THREAD_ID, {
         turn: {
           request:
             value.request === null
@@ -476,9 +656,9 @@ describe('Agenetes conversation stores on SQLite', () => {
         seqStart: index + 1,
         seqEnd: index + 1,
       });
-    });
+    }
 
-    const newest = conversationTurnStore.page(namespace, THREAD_ID, {
+    const newest = await conversationTurnStore.page(namespace, THREAD_ID, {
       limit: 2,
     });
     expect(
@@ -491,7 +671,7 @@ describe('Agenetes conversation stores on SQLite', () => {
     ]);
     expect(newest.hasMore).toBe(true);
 
-    const older = conversationTurnStore.page(namespace, THREAD_ID, {
+    const older = await conversationTurnStore.page(namespace, THREAD_ID, {
       limit: 2,
       before: newest.before!,
     });
@@ -503,11 +683,11 @@ describe('Agenetes conversation stores on SQLite', () => {
     expect(older.hasMore).toBe(false);
   });
 
-  it('keeps a SQLite cursor stable across append and rejects it after replace', async () => {
+  it('keeps a history cursor stable across append and rejects it after replace', async () => {
     await openWithSpace();
     const namespace = canvasAcpNamespace(CANVAS_ID);
     for (let seq = 1; seq <= 2; seq += 1) {
-      conversationTurnStore.append(namespace, THREAD_ID, {
+      await conversationTurnStore.append(namespace, THREAD_ID, {
         turn: {
           request: { type: 'user_text', content: `q${seq}` },
           transcript: [],
@@ -516,10 +696,10 @@ describe('Agenetes conversation stores on SQLite', () => {
         seqEnd: seq,
       });
     }
-    const cursor = conversationTurnStore.page(namespace, THREAD_ID, {
-      limit: 1,
-    }).before!;
-    conversationTurnStore.append(namespace, THREAD_ID, {
+    const cursor = (
+      await conversationTurnStore.page(namespace, THREAD_ID, { limit: 1 })
+    ).before!;
+    await conversationTurnStore.append(namespace, THREAD_ID, {
       turn: {
         request: { type: 'user_text', content: 'q3' },
         transcript: [],
@@ -528,19 +708,23 @@ describe('Agenetes conversation stores on SQLite', () => {
       seqEnd: 3,
     });
     expect(
-      conversationTurnStore.page(namespace, THREAD_ID, {
-        limit: 1,
-        before: cursor,
-      }).groups[0]!.turns[0]!.turn.request,
+      (
+        await conversationTurnStore.page(namespace, THREAD_ID, {
+          limit: 1,
+          before: cursor,
+        })
+      ).groups[0]!.turns[0]!.turn.request,
     ).toMatchObject({ content: 'q1' });
 
-    conversationTurnStore.replace(namespace, THREAD_ID, []);
-    expect(() =>
+    await conversationTurnStore.replace(namespace, THREAD_ID, []);
+    // A synchronous store refuses the stale cursor by throwing, so the call
+    // is made inside the thunk rather than handed over as a promise.
+    await expect(async () =>
       conversationTurnStore.page(namespace, THREAD_ID, {
         limit: 1,
         before: cursor,
       }),
-    ).toThrow('stale');
+    ).rejects.toThrow('stale');
   });
 
   it('isolates one Space from another', async () => {
@@ -551,27 +735,29 @@ describe('Agenetes conversation stores on SQLite', () => {
       .create({ canvasId: other, title: 'Other Space' });
     if (!created.ok) throw new Error('Expected to create the second Space');
 
-    conversationThreadStore.upsert(
+    await conversationThreadStore.upsert(
       canvasAcpNamespace(CANVAS_ID),
       THREAD_ID,
       threadRecord(),
     );
 
     expect(
-      conversationThreadStore.get(canvasAcpNamespace(other), THREAD_ID),
+      await conversationThreadStore.get(canvasAcpNamespace(other), THREAD_ID),
     ).toBeUndefined();
-    expect(conversationThreadStore.list(canvasAcpNamespace(other))).toEqual([]);
+    expect(
+      await conversationThreadStore.list(canvasAcpNamespace(other)),
+    ).toEqual([]);
   });
 
   it('destroys a conversation with the Space that held it', async () => {
     await openWithSpace();
     const namespace = canvasAcpNamespace(CANVAS_ID);
-    conversationThreadStore.upsert(namespace, THREAD_ID, threadRecord());
-    conversationEventLogStore.append(namespace, THREAD_ID, {
+    await conversationThreadStore.upsert(namespace, THREAD_ID, threadRecord());
+    await conversationEventLogStore.append(namespace, THREAD_ID, {
       type: 'text',
       text: 'hello',
     } as never);
-    conversationTurnStore.append(namespace, THREAD_ID, {
+    await conversationTurnStore.append(namespace, THREAD_ID, {
       turn: { id: 'turn-1' } as never,
       seqStart: 1,
       seqEnd: 1,
@@ -584,21 +770,25 @@ describe('Agenetes conversation stores on SQLite', () => {
 
     // The Space is gone, so there is no substrate to answer from — which is
     // the port's rule, and is also what the foreign-key cascade leaves behind.
-    expect(conversationThreadStore.get(namespace, THREAD_ID)).toBeUndefined();
-    expect(conversationEventLogStore.maxSeq(namespace, THREAD_ID)).toBe(0);
-    expect(conversationTurnStore.count(namespace, THREAD_ID)).toBe(0);
+    expect(
+      await conversationThreadStore.get(namespace, THREAD_ID),
+    ).toBeUndefined();
+    expect(await conversationEventLogStore.maxSeq(namespace, THREAD_ID)).toBe(
+      0,
+    );
+    expect(await conversationTurnStore.count(namespace, THREAD_ID)).toBe(0);
   });
 
   it('survives a restart', async () => {
     const opened = await openWithSpace();
     const namespace = canvasAcpNamespace(CANVAS_ID);
-    conversationThreadStore.upsert(namespace, THREAD_ID, threadRecord());
-    conversationEventLogStore.appendTurnStart(namespace, THREAD_ID, null);
-    conversationEventLogStore.append(namespace, THREAD_ID, {
+    await conversationThreadStore.upsert(namespace, THREAD_ID, threadRecord());
+    await conversationEventLogStore.appendTurnStart(namespace, THREAD_ID, null);
+    await conversationEventLogStore.append(namespace, THREAD_ID, {
       type: 'text',
       text: 'hello',
     } as never);
-    conversationTurnStore.append(namespace, THREAD_ID, {
+    await conversationTurnStore.append(namespace, THREAD_ID, {
       turn: { id: 'turn-1' } as never,
       seqStart: 1,
       seqEnd: 2,
@@ -609,29 +799,33 @@ describe('Agenetes conversation stores on SQLite', () => {
     // Same namespace, new connection: this is the whole reason these stores
     // exist rather than the in-memory defaults.
     const after = canvasAcpNamespace(CANVAS_ID);
-    expect(conversationThreadStore.get(after, THREAD_ID)).toEqual(
+    expect(await conversationThreadStore.get(after, THREAD_ID)).toEqual(
       threadRecord(),
     );
-    expect(conversationEventLogStore.maxSeq(after, THREAD_ID)).toBe(2);
+    expect(await conversationEventLogStore.maxSeq(after, THREAD_ID)).toBe(2);
     expect(
-      conversationEventLogStore.readRecords(after, THREAD_ID),
+      await conversationEventLogStore.readRecords(after, THREAD_ID),
     ).toHaveLength(2);
-    expect(conversationTurnStore.fence(after, THREAD_ID)).toBe(2);
+    expect(await conversationTurnStore.fence(after, THREAD_ID)).toBe(2);
   });
 
   it('reports an unnamed namespace as having no durable place', async () => {
     await openWithSpace();
     const anonymous = canvasAcpNamespace('');
+    await conversationThreadStore.delete(anonymous, THREAD_ID);
 
     // Agenetes's own rule: a namespace with no name is non-persistent. It must
     // not fall through to some other Space's tables.
-    expect(conversationThreadStore.list(anonymous)).toEqual([]);
-    conversationThreadStore.upsert(anonymous, THREAD_ID, threadRecord());
-    expect(conversationThreadStore.get(anonymous, THREAD_ID)).toEqual(
+    expect(await conversationThreadStore.list(anonymous)).toEqual([]);
+    await conversationThreadStore.upsert(anonymous, THREAD_ID, threadRecord());
+    expect(await conversationThreadStore.get(anonymous, THREAD_ID)).toEqual(
       threadRecord(),
     );
     expect(
-      conversationThreadStore.get(canvasAcpNamespace(CANVAS_ID), THREAD_ID),
+      await conversationThreadStore.get(
+        canvasAcpNamespace(CANVAS_ID),
+        THREAD_ID,
+      ),
     ).toBeUndefined();
   });
 });

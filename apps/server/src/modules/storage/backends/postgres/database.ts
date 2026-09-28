@@ -78,6 +78,13 @@ export class PostgresStoreContext {
     if (this.#state === 'open') return;
     if (this.#state === 'closed') throw new Error('Postgres store is closed');
     const client = await this.#pool.connect();
+    // pg-pool drops its own idle listener while a client is checked out and
+    // `pg` emits `error` on an unexpected disconnection, so a backend that
+    // goes away mid-transaction would raise an unhandled 'error' event and
+    // take the process down. The statement's own rejection below is the
+    // signal this code acts on; the event only needs an ear.
+    const ignoreDisconnect = () => {};
+    client.on('error', ignoreDisconnect);
     let broken = false;
     try {
       await client.query('BEGIN');
@@ -138,6 +145,7 @@ export class PostgresStoreContext {
       throw error;
     } finally {
       client.release(broken);
+      client.removeListener('error', ignoreDisconnect);
     }
   }
 
@@ -218,6 +226,13 @@ export class PostgresStoreContext {
       if (bound !== this.#workspaceId)
         throw new Error('Postgres operation belongs to an inactive Workspace');
       const client = await this.#pool.connect();
+      // pg-pool drops its own idle listener while a client is checked out and
+      // `pg` emits `error` on an unexpected disconnection, so a backend that
+      // goes away mid-transaction would raise an unhandled 'error' event and
+      // take the process down. The statement's own rejection below is the
+      // signal this code acts on; the event only needs an ear.
+      const ignoreDisconnect = () => {};
+      client.on('error', ignoreDisconnect);
       let broken = false;
       try {
         await client.query('BEGIN');
@@ -239,6 +254,7 @@ export class PostgresStoreContext {
         throw error;
       } finally {
         client.release(broken);
+        client.removeListener('error', ignoreDisconnect);
       }
     });
     this.#tail = result;

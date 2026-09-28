@@ -566,7 +566,7 @@ describe('AgentThreadService', () => {
     expect(externalBindingFromWorkloadSpec({ binding: {} })).toBeNull();
   });
 
-  it('uses the same persisted binding resolution before preparation and invocation', () => {
+  it('uses the same persisted binding resolution before preparation and invocation', async () => {
     const persistedBinding = {
       kind: 'external' as const,
       profileId: 'profile-persisted',
@@ -578,7 +578,7 @@ describe('AgentThreadService', () => {
     });
 
     expect(
-      harness.service.resolveBinding({
+      await harness.service.resolveBinding({
         canvasId: 'canvas-a',
         threadId: 'thread-a',
         requestBinding: { kind: 'internal' },

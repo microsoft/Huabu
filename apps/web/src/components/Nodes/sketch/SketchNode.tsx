@@ -3,7 +3,6 @@
 
 import { memo, useMemo } from 'react';
 
-import { resolveAccent } from '@huabu/shared';
 import { getSketchRenderedSize } from '@huabu/shared/canvas-engine';
 
 import { MissingFileBanner } from '@/components/Nodes/MissingFileBanner';
@@ -12,46 +11,13 @@ import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 
 import { NodeWrapper } from '../NodeWrapper';
 import { SketchControls } from './SketchControls';
-import {
-  pointsToPath,
-  DEFAULT_STROKE_COLOR,
-  DEFAULT_STROKE_SIZE,
-} from './sketchPath';
+import { DEFAULT_STROKE_COLOR, DEFAULT_STROKE_SIZE } from './sketchPath';
+import { SketchStrokePath } from './SketchStrokePath';
 
 import type { CanvasSketchNodeData } from '../types';
-import type { SketchStroke } from '@huabu/shared';
 import type { Node, NodeProps } from '@xyflow/react';
 
 export type SketchNodeType = Node<CanvasSketchNodeData, 'sketch'>;
-
-/**
- * Render a single stroke as an SVG `<path>`. Pulled out so the parent
- * node can map across `data.strokes` without re-running the (relatively
- * expensive) `pointsToPath` for unchanged strokes when the user adds a
- * new one.
- */
-const StrokePath = memo(function StrokePath({
-  stroke,
-  scaleX,
-  scaleY,
-}: {
-  stroke: SketchStroke;
-  scaleX: number;
-  scaleY: number;
-}) {
-  const scaledPoints = useMemo(
-    () => stroke.points.map((pt) => [pt[0] * scaleX, pt[1] * scaleY, pt[2]]),
-    [stroke.points, scaleX, scaleY],
-  );
-  const pathD = useMemo(
-    () => pointsToPath(scaledPoints, 1, stroke.size),
-    [scaledPoints, stroke.size],
-  );
-  // Resolve the stored palette token to a CSS color for the SVG fill.
-  // `resolveAccent` passes legacy hex strings through unchanged.
-  const resolvedColor = resolveAccent(stroke.color) ?? stroke.color;
-  return <path d={pathD} fill={resolvedColor} className="cursor-pointer" />;
-});
 
 export const SketchNode = memo(
   ({ id, data, selected, width, height }: NodeProps<SketchNodeType>) => {
@@ -127,6 +93,8 @@ export const SketchNode = memo(
 
     const sketchToolbar = (
       <SketchControls
+        floating
+        colorTriggerClassName="node-toolbar-color"
         color={toolbarColor}
         size={toolbarSize}
         onColorChange={(color) =>
@@ -187,16 +155,19 @@ export const SketchNode = memo(
                       ? `translate(${movePreview.dx} ${movePreview.dy})`
                       : undefined
                   }
-                  style={
-                    isSelected || isHighlighted
-                      ? {
-                          filter:
-                            'var(--canvas-grounding-stroke-filter, drop-shadow(0 0 3px var(--color-info)))',
-                        }
-                      : undefined
-                  }
                 >
-                  <StrokePath stroke={s} scaleX={scaleX} scaleY={scaleY} />
+                  <SketchStrokePath
+                    stroke={s}
+                    scaleX={scaleX}
+                    scaleY={scaleY}
+                    emphasis={
+                      isSelected
+                        ? 'selected'
+                        : isHighlighted
+                          ? 'reference'
+                          : undefined
+                    }
+                  />
                 </g>
               );
             })}

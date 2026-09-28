@@ -40,11 +40,7 @@ export const CenterArea: React.FC<CenterAreaProps> = ({
 
   return (
     <div className="relative flex h-full w-full overflow-hidden">
-      {/* Canvas – always mounted; width controlled via CSS. Hosts the
-          floating top-right controls so they pin to the canvas's right
-          edge (not the whole CenterArea) — in split mode the buttons
-          stay over the canvas portion instead of bleeding into the
-          expanded preview panel on the right. */}
+      {/* Canvas fills the work area; floating controls respect overlay insets. */}
       <div className="relative h-full w-full overflow-hidden">
         <Canvas shortcutsDisabled={canvasShortcutsDisabled} />
 
@@ -56,7 +52,10 @@ export const CenterArea: React.FC<CenterAreaProps> = ({
             usual without being clipped by the title bar above.
             All visible buttons use the pill shape so they read as a
             uniform floating control group on top of the canvas. */}
-        <div className="pointer-events-auto absolute top-3 right-2 z-30 flex items-center gap-1">
+        <div
+          className="pointer-events-auto absolute top-3 z-30 flex items-center gap-1"
+          style={{ right: 'calc(var(--canvas-inset-right, 0px) + 8px)' }}
+        >
           {!isElectronApp && (
             <>
               {/* Handbook — opens the external site in a new browser tab so

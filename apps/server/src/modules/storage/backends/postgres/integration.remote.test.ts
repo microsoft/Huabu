@@ -7,12 +7,35 @@ import { PostgresStoreContext } from './database.js';
 import { PostgresStructuredStore } from './structured-store.js';
 import { openPostgresTestStore } from './test-support.js';
 import { PostgresWorkspaceRepository } from './workspace-repository.js';
-import {
-  appendSubstrateLog,
-  readSubstrateDocument,
-  writeSubstrateDocument,
-} from '../../../agent/substrate-store.js';
 import { event, note, task, run } from '../sql/test-fixtures.js';
+
+import type { SpaceSubstrate } from '../../ports/structured.js';
+
+/**
+ * Write one row into a table this test owns, through the substrate.
+ *
+ * The port hands an owner a place and nothing else, so proving that a place
+ * cascades means bringing a table. The agent module has helpers of its own
+ * over the same substrate; borrowing them here would point storage at a
+ * consumer, which is the direction this module does not import in.
+ */
+async function seedOwnedRow(
+  substrate: SpaceSubstrate | null,
+  body: string,
+): Promise<void> {
+  if (substrate?.kind !== 'postgres')
+    throw new Error('Expected a Postgres substrate');
+  await substrate.database.query(
+    `CREATE TABLE IF NOT EXISTS owner_rows (
+       extension_id INTEGER NOT NULL
+         REFERENCES space_extensions(extension_id) ON DELETE CASCADE,
+       body TEXT NOT NULL)`,
+  );
+  await substrate.database.query('INSERT INTO owner_rows VALUES ($1, $2)', [
+    substrate.extensionId,
+    body,
+  ]);
+}
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -288,43 +311,6 @@ it('rolls back real SQL failures and preserves the transaction queue for the nex
   ]);
 });
 
-it('persists extension documents and concurrent log appends across independent pools', async () => {
-  const h = await open();
-  const peer = new PostgresStoreContext(h.config);
-  cleanup.push(() => peer.close());
-  await peer.init();
-  peer.useWorkspace(h.workspaceId);
-  const a = await h.store.space('space').extension('agent.documents');
-  const b = await new PostgresStructuredStore(peer)
-    .space('space')
-    .extension('agent.documents');
-  const other = await h.store.space('space').extension('agent.other');
-  if (!a || !b || !other) throw new Error('Expected substrates');
-  // Simultaneous first use also races lazy table creation across independent pools.
-  await Promise.all([
-    writeSubstrateDocument(a, 'state', { count: 1 }),
-    writeSubstrateDocument(b, 'second', { count: 2 }),
-  ]);
-  expect(await readSubstrateDocument(b, 'state')).toEqual({ count: 1 });
-  expect(await readSubstrateDocument(other, 'state')).toBeNull();
-  await Promise.all(
-    Array.from({ length: 20 }, (_, i) =>
-      appendSubstrateLog(i % 2 ? a : b, 'debug', '.log', `${i},`),
-    ),
-  );
-  const body = (
-    await h.context
-      .connection()
-      .query(
-        'SELECT body FROM extension_documents WHERE extension_id = $1 AND name = $2',
-        [a.kind === 'postgres' ? a.extensionId : -1, 'debug.log'],
-      )
-  ).rows[0].body as string;
-  expect(body.split(',').filter(Boolean).sort()).toEqual(
-    Array.from({ length: 20 }, (_, i) => String(i)).sort(),
-  );
-});
-
 it('resolves an existing extension namespace without drawing identity values', async () => {
   const h = await open();
   const space = h.store.space('space');
@@ -349,11 +335,10 @@ it('deletes every owned row while preserving a neighboring space and its extensi
     await handle.events.append([event()]);
     await handle.changes.append('thread', []);
     await handle.tasks.create({ ...task(), canvasId: handle.canvasId });
-    const substrate = await handle.extension('agent.documents');
-    if (!substrate) throw new Error('Expected substrate');
-    await writeSubstrateDocument(substrate, 'state', {
-      private: handle.canvasId,
-    });
+    await seedOwnedRow(
+      await handle.extension('owner.rows'),
+      `private:${handle.canvasId}`,
+    );
     const record = (await handle.read())!;
     await handle.write({
       expectedVersion: 0,
@@ -392,8 +377,7 @@ it('deletes every owned row while preserving a neighboring space and its extensi
     ).toEqual([{ canvas_id: 'neighbor' }]);
   }
   expect(
-    (await h.context.connection().query('SELECT body FROM extension_documents'))
-      .rows,
-  ).toEqual([{ body: '{"private":"neighbor"}' }]);
+    (await h.context.connection().query('SELECT body FROM owner_rows')).rows,
+  ).toEqual([{ body: 'private:neighbor' }]);
   expect(await neighbor.nodes.read('node')).not.toBeNull();
 });

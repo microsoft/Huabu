@@ -46,6 +46,8 @@ function questionSession(node: Node, canvasId: string): ChatSession | null {
 
 export function PreviewRenderer({
   tabId,
+  isActive = true,
+  activationId,
   target,
   adjacentNodeTarget,
   onClose,
@@ -57,6 +59,8 @@ export function PreviewRenderer({
   hasFocusPriority,
 }: {
   tabId: string;
+  isActive?: boolean;
+  activationId?: number;
   target: PreviewTarget;
   /** Active node shown in the other split group, offered as a source. */
   adjacentNodeTarget?: Extract<PreviewTarget, { kind: 'node' }>;
@@ -111,6 +115,8 @@ export function PreviewRenderer({
       <ChatPanel
         session={session}
         previewTabId={tabId}
+        isActive={isActive}
+        activationId={activationId}
         adjacentNodeSourceId={adjacentNodeSourceId}
         onCommit={onCommit}
         openPositionRequest={chatOpenRequest}

@@ -9,7 +9,7 @@ import {
   replaceInteractiveViewState,
   submitInteractiveViewAction,
 } from '@/api/interactiveView';
-import { focusNodesOnCanvas } from '@/components/Panels/CanvasLayerPanel/focusNodesOnCanvas';
+import { revealNodesOnCanvas } from '@/components/Panels/CanvasLayerPanel/focusNodesOnCanvas';
 import useCanvasStore from '@/store/canvasStore';
 import { openPreviewNode } from '@/store/previewWorkspace/actions';
 
@@ -365,11 +365,16 @@ export function useInteractiveViewBridge(input: {
         }
 
         canvas.selectNodes([targetNode.id], false);
-        if (canvas.rfInstance) {
-          focusNodesOnCanvas(canvas.rfInstance, [targetNode.id], 400);
-        }
         if (grant.kind === 'navigation.open-thread') {
           openPreviewNode(targetNode.id);
+        }
+        if (canvas.rfInstance && canvas.canvasWrapper) {
+          revealNodesOnCanvas(
+            canvas.rfInstance,
+            canvas.canvasWrapper,
+            [targetNode.id],
+            400,
+          );
         }
         postOutcome(port, {
           type: 'huabu.view.outcome',

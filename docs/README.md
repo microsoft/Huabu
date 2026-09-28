@@ -65,7 +65,7 @@ docs/
 | [node-preprocessing.md](./architecture/node-preprocessing.md)                   | Unified 6-stage preprocessing pipeline; per-node profiles decide extract / enrich / persist.             |     | [node-auto-height.md](./architecture/node-auto-height.md) | Who owns a node's height, how content height is measured, and how a derived height reaches geometry. |     | [sketch-node.md](./architecture/sketch-node.md) | Sketch nodes: data model, lifecycle, stroke-level editing, and how AI reads them as content. |
 | [note-node.md](./architecture/note-node.md)                                     | Note node: Markdown data model, save path, and in-document input (Tab indentation, link activation).     |
 | [preview-workspace.md](./architecture/preview-workspace.md)                     | Right-side node and Chat tabs, groups, session isolation, focus requests, persistence, and validation.   |
-| [space-preview.md](./architecture/space-preview.md)                             | View-only Space scene projection, isolated preview interaction, and preview-based World reconciliation.  |
+| [space-preview.md](./architecture/space-preview.md)                             | Space Shortcuts, shared metadata summaries, retained scene projection API, and managed World entries.    |
 | [web-architecture.md](./architecture/web-architecture.md)                       | Frontend (`apps/web/src/`) layout, dependency rules, and conventions.                                    |
 
 ---
@@ -91,13 +91,13 @@ docs/
 | [direct-space-operations.md](./proposals/direct-space-operations.md)                                                 | In-Progress                 | #348 deterministic RFS query and mutation operations for external agents.            |
 | [external-agent-capability-cache-and-realization.md](./proposals/external-agent-capability-cache-and-realization.md) | Accepted                    | #160/#162 GET-only capability discovery and canonical first-interaction realization. |
 | [headless-executor-plan.md](./proposals/headless-executor-plan.md)                                                   | Partly shipped              | Server-side headless canvas executor and structure/content sync.                     |
-| [ink-lasso-question-flow.md](./proposals/ink-lasso-question-flow.md)                                                 | Proposed                    | Lasso-selected Ink intent submission through Question Nodes and the existing Agent.  |
+| [ink-lasso-question-flow.md](./proposals/ink-lasso-question-flow.md)                                                 | Partly shipped              | Ink submission shipped in #220; optional OCR in #234 is pending merge.               |
 | [interactive-agent-views.md](./proposals/interactive-agent-views.md)                                                 | In-Progress                 | Capability-bound HTML views for persistent external-Agent interaction.               |
 | [long-horizon-tasks.md](./proposals/long-horizon-tasks.md)                                                           | Partly shipped              | Canvas-scoped recursive Agent creation, invocation, and handoff pipeline.            |
 | [milkdown-custom-toolbar-plan.md](./proposals/milkdown-custom-toolbar-plan.md)                                       | In-Progress                 | Huabu-owned Milkdown toolbar and semantic editor commands.                           |
 | [model-role-routing.md](./proposals/model-role-routing.md)                                                           | Proposed                    | Model selection by runtime role.                                                     |
 | [move-selected-nodes-between-spaces.md](./proposals/move-selected-nodes-between-spaces.md)                           | Proposed                    | #142 selected-node and Frame-subtree moves between Spaces with bounded compensation. |
-| [multi-backend-storage.md](./proposals/multi-backend-storage.md)                                                     | Partly shipped              | Phases 1–3: Blob, structured repositories, catalogue, and bounded reads.             |
+| [multi-backend-storage.md](./proposals/multi-backend-storage.md)                                                     | Partly shipped              | Phases 1–6: Blob and structured ports, SQLite, Postgres, Azure, async agents.        |
 | [note-auto-height-stable-geometry.md](./proposals/note-auto-height-stable-geometry.md)                               | Proposed                    | Revision-aware offscreen Note measurement and stable auto-height geometry.           |
 | [space-prompt-topology-scoping.md](./proposals/space-prompt-topology-scoping.md)                                     | Shipped                     | Topology-derived global/direct-Agent targeting for Prompt Frames.                    |
 

@@ -3,7 +3,8 @@
 
 /**
  * Integrations routes — read/update third-party API keys (Tavily,
- * RapidAPI). Mounted under `/api/integrations`.
+ * RapidAPI), plus owner-only Azure Ink OCR settings under `/ink-ocr`.
+ * Mounted under `/api/integrations`.
  *
  * `GET /config` returns the masked read model (booleans only). `PUT
  * /config` requires the owner (same guard as the LLM routes) because it
@@ -12,6 +13,7 @@
 
 import { integrationsConfigUpdateSchema } from '@huabu/shared';
 
+import inkOcrConfigRoutes from './ink-ocr-config.route.js';
 import {
   getIntegrationsConfig,
   setIntegrationsConfig,
@@ -26,6 +28,7 @@ import type {
 import type { FastifyPluginAsync } from 'fastify';
 
 const integrationsRoutes: FastifyPluginAsync = async (app) => {
+  await app.register(inkOcrConfigRoutes, { prefix: '/ink-ocr' });
   // GET /api/integrations/config — masked status of stored keys
   app.get<{ Reply: ApiResult<IntegrationsConfig> }>('/config', async () => {
     return getIntegrationsConfig();

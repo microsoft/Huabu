@@ -77,7 +77,6 @@ export async function runFunctionalText(
       env: buildReachbackEnv(taskId, context.canvasId),
     },
   };
-  const handle = agenetes.create(spec);
   const controller = new AbortController();
   const signal = context.signal
     ? AbortSignal.any([context.signal, controller.signal])
@@ -94,6 +93,9 @@ export async function runFunctionalText(
     if (signal.aborted) onAbort();
   });
   const execute = async (): Promise<string> => {
+    signal.throwIfAborted();
+    const handle = await agenetes.create(spec);
+    signal.throwIfAborted();
     const folder = createTranscriptFolder();
     let completed = false;
     const turn: AcpTurnCtx = { overlay: emptyAcpOverlay(), signal, logger };

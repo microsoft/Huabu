@@ -83,14 +83,14 @@ forEachProductProfile((profile, label) => {
     });
 
     afterEach(async () => {
-      if (target) agenetes.close(target.threadId);
+      if (target) await agenetes.close(target.threadId);
       await mounted?.close();
     });
 
-    function createCanonicalExecution(
+    async function createCanonicalExecution(
       workloadType: 'Deployment' | 'Job' = 'Deployment',
     ) {
-      return agenetes.create(
+      return await agenetes.create(
         buildHuabuPiWorkloadSpec({
           kind: 'internal',
           workloadType,
@@ -115,14 +115,15 @@ forEachProductProfile((profile, label) => {
     it.each(['Deployment', 'Job'] as const)(
       'confirms a durable %s record before any run starts',
       async (workloadType) => {
-        createCanonicalExecution(workloadType);
+        await createCanonicalExecution(workloadType);
         const namespace = canvasAcpNamespace(target.canvasId);
         expect(
-          agenetes.record(namespace, target.threadId)?.spec.workloadType,
+          (await agenetes.record(namespace, target.threadId))?.spec
+            .workloadType,
         ).toBe(workloadType);
-        expect(agenetes.history(namespace, target.threadId).turns).toHaveLength(
-          0,
-        );
+        expect(
+          (await agenetes.history(namespace, target.threadId)).turns,
+        ).toHaveLength(0);
         await agentNodeBinding.confirm(target, { required: true });
         expect((await current()).data).toMatchObject({ bindingState: 'bound' });
         expect((await current()).data).not.toHaveProperty('invocationToken');
@@ -135,7 +136,7 @@ forEachProductProfile((profile, label) => {
     );
 
     it('persists both FSM projections through the portable writer and keeps stale terminals inert', async () => {
-      createCanonicalExecution();
+      await createCanonicalExecution();
       await agentNodeBinding.confirm(target, { required: true });
       await agentNodeLifecycle.start(target, 'First submitted intent', 'first');
       await agentNodeLifecycle.error(target, 'Preparation failed', 'first');
@@ -155,7 +156,7 @@ forEachProductProfile((profile, label) => {
       expect((await current()).data.viewed).toBe(false);
       await agentNodeLifecycle.acknowledge(target, 'second');
       expect((await current()).data.viewed).toBe(true);
-      agenetes.close(target.threadId);
+      await agenetes.close(target.threadId);
       await mounted.reopen();
       expect((await current()).data).toMatchObject({
         bindingState: 'bound',
@@ -174,7 +175,7 @@ forEachProductProfile((profile, label) => {
     });
 
     it('completes the partial record-to-Bound write inside the next guarded edit without rebinding', async () => {
-      createCanonicalExecution();
+      await createCanonicalExecution();
       const coordinator = new AgentNodeBindingCoordinator({
         record: () =>
           agenetes.record(canvasAcpNamespace(target.canvasId), target.threadId),
@@ -252,12 +253,18 @@ forEachProductProfile((profile, label) => {
     });
 
     it.each(['command', 'put', 'delta'] as const)(
-      'keeps same-config promotion and fresh CAS during %s Save',
+      'preserves the same-config binding and version policy during %s Save',
       async (operation) => {
-        createCanonicalExecution();
+        await createCanonicalExecution();
         const before = await space(target.canvasId).read();
         if (!before) throw new Error('Space disappeared');
         const node = await current();
+        expect(node.data.bindingState).toBe('editing');
+        const expectedBindingState = operation === 'put' ? 'editing' : 'bound';
+        const expectedVersion = before.version + (operation === 'put' ? 1 : 2);
+        const expectedLabel = operation === 'put' ? 'Agent' : 'Saved';
+        const expectedPosition =
+          operation === 'put' ? { x: 40, y: 60 } : node.position;
         if (operation === 'command') {
           const result = await executeOnServer({
             canvasId: target.canvasId,
@@ -294,6 +301,7 @@ forEachProductProfile((profile, label) => {
                   nodes: [
                     {
                       ...node,
+                      position: expectedPosition,
                       data: {
                         agentBinding: { kind: 'internal' },
                         label: 'Saved',
@@ -304,7 +312,7 @@ forEachProductProfile((profile, label) => {
               },
             });
             expect(response.statusCode, response.body).toBe(200);
-            expect(response.json().version).toBe(before.version + 2);
+            expect(response.json().version).toBe(expectedVersion);
           } finally {
             await app.close();
           }
@@ -326,20 +334,33 @@ forEachProductProfile((profile, label) => {
           expect(result.toVersion).toBe(before.version + 2);
         }
         expect((await current()).data).toMatchObject({
-          bindingState: 'bound',
+          bindingState: expectedBindingState,
           agentBinding: { kind: 'internal' },
         });
-        agenetes.close(target.threadId);
+        expect(
+          (await space(target.canvasId).nodes.read(target.nodeId))?.record
+            .label,
+        ).toBe(expectedLabel);
+        expect((await current()).position).toEqual(expectedPosition);
+        await agenetes.close(target.threadId);
         await mounted.reopen();
-        expect((await current()).data.bindingState).toBe('bound');
+        expect((await current()).data).toMatchObject({
+          bindingState: expectedBindingState,
+          agentBinding: { kind: 'internal' },
+        });
+        expect(
+          (await space(target.canvasId).nodes.read(target.nodeId))?.record
+            .label,
+        ).toBe(expectedLabel);
+        expect((await current()).position).toEqual(expectedPosition);
         expect((await space(target.canvasId).read())?.version).toBe(
-          before.version + 2,
+          expectedVersion,
         );
       },
     );
 
     it('keeps the promotion even when the rest of the command is a no-op', async () => {
-      createCanonicalExecution();
+      await createCanonicalExecution();
       const canvas = await space(target.canvasId).read();
       if (!canvas) throw new Error('Space disappeared');
       const before = canvas.version;

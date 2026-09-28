@@ -1,7 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { isPanelTarget } from '@/components/Panels/Canvas/canvasInputPolicy';
+import {
+  isNodeControlTarget,
+  isPanelTarget,
+} from '@/components/Panels/Canvas/canvasInputPolicy';
 import {
   beginCanvasGesture,
   cancelPendingCanvasGesture,
@@ -21,6 +24,7 @@ import {
   shouldSuppressTouchEnd,
   zoomAroundPoint,
 } from '@/hooks/useCanvasGestures';
+import useCanvasStore from '@/store/canvasStore';
 
 import type { CanvasPointerRouterContext } from '@/handler/canvasPointerRouterContext';
 import type {
@@ -75,6 +79,7 @@ export function createViewportNavigationRecognizer(): PointerRecognizer<
     if (event.pointerType !== 'touch') return;
     if (ctx.inputMode === 'mouse') return;
     if (isPanelTarget(event.target as Element | null)) return;
+    if (isNodeControlTarget(event.target as Element | null)) return;
     const point = { x: event.clientX, y: event.clientY };
     activeTouches.set(event.pointerId, point);
 
@@ -253,8 +258,16 @@ export function createViewportNavigationRecognizer(): PointerRecognizer<
       // works even when a full-screen tool overlay (Sketch) covers the
       // node and steals the DOM target — the pen keeps drawing while the
       // finger picks nodes.
-      if (phase === 'pending' && !ctx.interactivityLocked) {
-        const nodeId = nodeIdAtScreenPoint(panStart.x, panStart.y);
+      if (phase === 'pending') {
+        const sketchNodeIds = new Set(
+          useCanvasStore
+            .getState()
+            .nodes.filter((node) => node.type === 'sketch')
+            .map((node) => node.id),
+        );
+        const nodeId = nodeIdAtScreenPoint(panStart.x, panStart.y, {
+          excludeNodeIds: sketchNodeIds,
+        });
         if (nodeId) ctx.onNodeTap(nodeId);
         else ctx.onEmptyCanvasTap();
       }

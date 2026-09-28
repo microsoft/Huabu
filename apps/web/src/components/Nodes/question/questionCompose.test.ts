@@ -94,7 +94,6 @@ beforeEach(() => {
   });
   usePanelStore.setState({
     isRightCollapsed: true,
-    rightPanelAnchorNodeId: null,
     focusChatInputRequest: null,
   });
 });

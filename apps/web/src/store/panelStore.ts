@@ -10,9 +10,9 @@ interface PanelState {
    *
    * Hoisted out of `MainLayout`'s local `useState` so subtrees inside
    * the column (notably `CanvasLayerPanel`) can read it and skip
-   * expensive work while the column animates to 0 — `MainLayout` keeps
-   * the subtree mounted on purpose so its 220ms width animation runs
-   * without a content-swap flash.
+   * expensive work while the overlay is offscreen — `MainLayout` keeps
+   * the shell mounted and retains the ordinary tree through the 220ms
+   * slide animation before allowing it to unmount.
    */
   isLeftCollapsed: boolean;
   setLeftCollapsed: (collapsed: boolean) => void;
@@ -47,9 +47,6 @@ interface PanelState {
   isPreviewFullscreen: boolean;
   setPreviewFullscreen: (fullscreen: boolean) => void;
   togglePreviewFullscreen: () => void;
-  /** Node explicitly associated with the action that opened Chat. */
-  rightPanelAnchorNodeId: string | null;
-  clearRightPanelAnchor: () => void;
   setRightCollapsed: (collapsed: boolean) => void;
   toggleRightPanel: () => void;
   /**
@@ -59,7 +56,7 @@ interface PanelState {
    * can layer extra behaviour here later (focus, scroll, telemetry)
    * without touching callers.
    */
-  requestOpenRightPanel: (anchorNodeId?: string) => void;
+  requestOpenRightPanel: () => void;
 
   /**
    * The outstanding request to focus a composer, or `null` if none.
@@ -105,24 +102,19 @@ export const usePanelStore = create<PanelState>()(
           isPreviewFullscreen: !s.isPreviewFullscreen,
           ...(!s.isPreviewFullscreen ? { isRightCollapsed: false } : {}),
         })),
-      rightPanelAnchorNodeId: null,
-      clearRightPanelAnchor: () => set({ rightPanelAnchorNodeId: null }),
       setRightCollapsed: (collapsed) =>
         set({
           isRightCollapsed: collapsed,
           ...(collapsed ? { isPreviewFullscreen: false } : {}),
-          rightPanelAnchorNodeId: null,
         }),
       toggleRightPanel: () =>
         set((s) => ({
           isRightCollapsed: !s.isRightCollapsed,
           ...(!s.isRightCollapsed ? { isPreviewFullscreen: false } : {}),
-          rightPanelAnchorNodeId: null,
         })),
-      requestOpenRightPanel: (anchorNodeId) =>
+      requestOpenRightPanel: () =>
         set({
           isRightCollapsed: false,
-          rightPanelAnchorNodeId: anchorNodeId ?? null,
         }),
 
       focusChatInputRequest: null,

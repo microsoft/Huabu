@@ -44,7 +44,7 @@ async function* emptyEvents() {
 
 describe('runAcpAgent durable acceptance', () => {
   beforeEach(() => {
-    mocks.logMetadata.mockReset().mockReturnValue({ eventCount: 7 });
+    mocks.logMetadata.mockReset().mockResolvedValue({ eventCount: 7 });
   });
 
   it('reports the Tier-1 turn-start identity after invoking the handle', async () => {
@@ -59,7 +59,7 @@ describe('runAcpAgent durable acceptance', () => {
         return emptyEvents();
       }),
     } as unknown as AcpHandle;
-    mocks.logMetadata.mockImplementation(() => {
+    mocks.logMetadata.mockImplementation(async () => {
       expect(handleInvoked).toBe(true);
       return { eventCount: 7 };
     });

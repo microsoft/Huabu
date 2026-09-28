@@ -46,8 +46,14 @@ export function parseArtifactUrl(
  * any code path that needs to walk the artifact references attached to
  * a node. Kept narrow on purpose — adding a field here will broaden the
  * surface that the cross-canvas paste-clone treats as cloneable.
+ * Video coverSourceSrc aliases src and must receive the same cloned key;
+ * callers already memoize clones by source artifact identity.
  */
-export const ARTIFACT_DATA_FIELDS = ['src', 'coverUrl'] as const;
+export const ARTIFACT_DATA_FIELDS = [
+  'src',
+  'coverUrl',
+  'coverSourceSrc',
+] as const;
 
 /**
  * Node `data` field names, keyed by node type, whose value is a Markdown

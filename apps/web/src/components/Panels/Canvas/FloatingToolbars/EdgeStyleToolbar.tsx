@@ -20,6 +20,8 @@ import { useIsNotMouse } from '@/hooks/useInputMode';
 import { translateColorOptions } from '@/i18n/colors';
 import useCanvasStore from '@/store/canvasStore';
 
+import './NodeToolbar.css';
+
 import type { SelectOption } from '@/components/Common/Select';
 import type { CanvasEdgeId } from '@huabu/shared';
 import type {
@@ -314,52 +316,54 @@ export const EdgeStyleToolbar = () => {
       // pill height (~22px) plus visual breathing room.
       offset={36}
       side="top"
-      className={FLOATING_TOOLBAR_CLASS}
+      className={`${FLOATING_TOOLBAR_CLASS} canvas-context-toolbar edge-context-toolbar`}
     >
       <FloatingToolbar.Select
+        floating
+        menuClassName="node-toolbar-overflow"
         label={t('edgeToolbar.type')}
+        className="edge-toolbar-value"
         options={lineTypeOptions}
         value={currentLineType}
         onChange={(v) => setStyle({ lineType: v })}
-        iconOnly
       />
 
-      <FloatingToolbar.Divider />
-
       <FloatingToolbar.Select
+        floating
+        menuClassName="node-toolbar-overflow"
         label={t('edgeToolbar.style')}
+        className="edge-toolbar-value"
         options={lineStyleOptions}
         value={currentLineStyle}
         onChange={(v) => setStyle({ lineStyle: v })}
-        iconOnly
       />
 
-      <FloatingToolbar.Divider />
-
       <FloatingToolbar.Select
+        floating
+        menuClassName="node-toolbar-overflow"
         label={t('edgeToolbar.arrow')}
+        className="edge-toolbar-value"
         options={directionOptions}
         value={currentDirection}
         onChange={(v) => setStyle({ direction: v })}
-        iconOnly
       />
 
-      <FloatingToolbar.Divider />
-
       <FloatingToolbar.Select
+        floating
+        menuClassName="node-toolbar-overflow"
         label={t('edgeToolbar.width')}
+        className="edge-toolbar-value"
         options={STROKE_WIDTH_OPTIONS}
         value={`${currentWidth}`}
         onChange={(v) =>
           setStyle({ strokeWidth: Number(v) as EdgeStrokeWidth })
         }
-        iconOnly
       />
-
-      <FloatingToolbar.Divider />
 
       {/* Color picker */}
       <FloatingToolbar.ColorPicker
+        floating
+        triggerClassName="node-toolbar-color"
         colors={accentColors}
         value={currentStroke}
         onSelect={(token) => setStyle({ stroke: token })}
@@ -368,18 +372,15 @@ export const EdgeStyleToolbar = () => {
 
       {/* Non-mouse only: mouse users have keyboard Delete / Backspace. */}
       {isNotMouse && (
-        <>
-          <FloatingToolbar.Divider />
-          <FloatingToolbar.ActionButton
-            title={t('edgeToolbar.deleteEdge')}
-            tone="danger"
-            onClick={() => {
-              if (selectedEdge) disconnectEdges([selectedEdge.id]);
-            }}
-          >
-            <Trash2 />
-          </FloatingToolbar.ActionButton>
-        </>
+        <FloatingToolbar.ActionButton
+          title={t('edgeToolbar.deleteEdge')}
+          tone="danger"
+          onClick={() => {
+            if (selectedEdge) disconnectEdges([selectedEdge.id]);
+          }}
+        >
+          <Trash2 />
+        </FloatingToolbar.ActionButton>
       )}
     </CanvasFloatingPopover>
   );

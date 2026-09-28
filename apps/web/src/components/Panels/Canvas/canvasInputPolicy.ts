@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { isVideoControlTarget } from '@/components/Nodes/video/videoInteraction';
+
 import type { EffectiveInputMode } from '@/store/toolStore';
 
 export type CanvasTool = 'select' | 'pan' | 'lasso';
@@ -12,12 +14,19 @@ const REACT_FLOW_PANE = '.react-flow__pane';
 const REACT_FLOW_PANEL = '.react-flow__panel';
 const REACT_FLOW_NODE = '.react-flow__node';
 const REACT_FLOW_NODE_FRAME = '.react-flow__node-frame';
+const REACT_FLOW_NODE_SKETCH = '.react-flow__node-sketch';
+const REACT_FLOW_NODE_CONTROL =
+  '.react-flow__handle, .react-flow__resize-control';
 const REACT_FLOW_INTERACTIVE =
   '.react-flow__panel, .react-flow__node, .react-flow__edge, .react-flow__handle';
 
-/** True when the pointer target lives inside a floating panel or toolbar. */
+/** Panels and explicitly active video controls own native pointer interaction. */
 export function isPanelTarget(target: Element | null): boolean {
-  return Boolean(target?.closest(REACT_FLOW_PANEL));
+  return (
+    Boolean(
+      target?.closest(`${REACT_FLOW_PANEL}, [data-multi-resize-control]`),
+    ) || isVideoControlTarget(target)
+  );
 }
 
 /** Closest canvas node element for the pointer target, or `null`. */
@@ -28,6 +37,21 @@ export function closestNodeElement(target: Element | null): HTMLElement | null {
 /** True when the pointer target lives inside a canvas node. */
 export function isNodeTarget(target: Element | null): boolean {
   return closestNodeElement(target) !== null;
+}
+
+/** True when the pointer target lives on the painted surface of a Sketch. */
+export function isSketchNodeTarget(target: Element | null): boolean {
+  return Boolean(target?.closest(REACT_FLOW_NODE_SKETCH));
+}
+
+/** True when the pointer target is a React Flow node manipulation control. */
+export function isNodeControlTarget(target: Element | null): boolean {
+  return Boolean(target?.closest(REACT_FLOW_NODE_CONTROL));
+}
+
+/** Whether a retained Lasso move may claim this pointer target. */
+export function canStartRetainedSelectionMove(target: Element | null): boolean {
+  return !isNodeControlTarget(target);
 }
 
 /**
@@ -93,7 +117,9 @@ export function resolveNodeDraggable(
   draggable: boolean | undefined,
   selected: boolean | undefined,
   isNotMouse: boolean,
+  ignoreTouchDrag = false,
 ): boolean | undefined {
+  if (ignoreTouchDrag) return false;
   return isNotMouse && selected !== true ? false : draggable;
 }
 

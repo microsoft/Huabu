@@ -41,6 +41,7 @@ import {
   getHeightPolicy,
   materializeAutoHeight,
   resolveHeightMode,
+  normalizeSpaceShortcut,
 } from '@huabu/shared/canvas-engine';
 
 import type { Node } from '@xyflow/react';
@@ -55,6 +56,11 @@ import type { Node } from '@xyflow/react';
 export function normalizeNodeHeights(nodes: Node[]): Node[] {
   let changed = false;
   const next = nodes.map((node) => {
+    if (node.type === 'spacePreview') {
+      const normalized = normalizeSpaceShortcut(node);
+      if (normalized !== node) changed = true;
+      return normalized;
+    }
     if (getHeightPolicy(node.type).kind !== 'toggleable') return node;
 
     let updated = node;

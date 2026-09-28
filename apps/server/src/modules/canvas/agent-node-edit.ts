@@ -105,7 +105,10 @@ export async function initializeAgentNodeCreationAlreadyLocked(
     nodeId: node.id as CanvasNodeId,
     threadId: node.data.threadId,
   };
-  const record = agenetes.record(canvasAcpNamespace(canvasId), target.threadId);
+  const record = await agenetes.record(
+    canvasAcpNamespace(canvasId),
+    target.threadId,
+  );
   if (record) {
     // Conversion transfers authority at canonical creation, using the latest
     // backend value rather than a potentially stale browser title cache.

@@ -1317,6 +1317,8 @@ export async function applyDeltasOnServerAlreadyLocked(input: {
   runId?: string;
   /** Only the internal lifecycle writer may bypass editable inverse projection. */
   agentNodeProjection?: boolean;
+  /** Move compensation restores validated execution state after rehome-back. */
+  agentNodeMoveState?: ReadonlyMap<string, Record<string, unknown>>;
 }): Promise<{
   canvasId: string;
   fromVersion: number;
@@ -1418,6 +1420,18 @@ export async function applyDeltasOnServerAlreadyLocked(input: {
           final.nodes.map(async (node) => {
             const current = previousById.get(node.id);
             if (!current && node.type === 'question') {
+              const moved = input.agentNodeMoveState?.get(node.id);
+              if (moved) {
+                await initializeAgentNodeCreationAlreadyLocked(
+                  canvasId,
+                  node,
+                  moved.bindingState === 'bound',
+                );
+                return {
+                  ...node,
+                  data: preserveAgentNodeOwnedData(node.data, moved),
+                };
+              }
               return initializeAgentNodeCreationAlreadyLocked(
                 canvasId,
                 {

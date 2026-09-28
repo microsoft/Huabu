@@ -40,6 +40,7 @@ export const routes = {
 
   // ── Integrations (third-party API keys) ──────────────────────────
   integrationsConfig: '/integrations/config',
+  inkOcrConfig: '/integrations/ink-ocr/config',
 
   // ── Canvas ────────────────────────────────────────────────────────
   canvasList: '/canvas',
@@ -48,8 +49,6 @@ export const routes = {
   canvasExecute: (canvasId: string) => `/canvas/${enc(canvasId)}/execute`,
   canvasMoveSelection: (canvasId: string) =>
     `/canvas/${enc(canvasId)}/move-selection`,
-  canvasPreviewScene: (canvasId: string) =>
-    `/canvas/${enc(canvasId)}/preview-scene`,
   canvasExport: (canvasId: string) => `/canvas/${enc(canvasId)}/export`,
   canvasNode: (canvasId: string, nodeId: string) =>
     `/canvas/${enc(canvasId)}/nodes/${enc(nodeId)}`,

@@ -209,6 +209,10 @@ const SortableRow = React.memo(
 SortableRow.displayName = 'SortableRow';
 
 export interface CanvasLayerTreeProps {
+  navigationState?: {
+    focusedId: string | null;
+    selectionAnchorId: string | null;
+  };
   items: DataSourceTreeItem[];
   getIcon: (node: DataSourceNodeLike) => React.ReactNode;
   getDisplayName: (node: DataSourceNodeLike) => string;
@@ -236,6 +240,7 @@ export const resolveCollisionY = (
 
 export const CanvasLayerTree = ({
   items,
+  navigationState,
   getIcon,
   getDisplayName,
   emptyText = 'No items',
@@ -323,11 +328,20 @@ export const CanvasLayerTree = ({
   // extend / re-extend the range from the same starting row (matches
   // Finder / VS Code behaviour). `null` until the user has clicked any
   // row in this tree session.
-  const selectionAnchorRef = useRef<string | null>(null);
+  const selectionAnchorRef = useRef<string | null>(
+    navigationState?.selectionAnchorId ?? null,
+  );
   const treeRef = useRef<HTMLDivElement>(null);
   const [focusedId, setFocusedId] = useState<string | null>(
-    () => items[0]?.id ?? null,
+    () => navigationState?.focusedId ?? items[0]?.id ?? null,
   );
+  useEffect(() => {
+    if (!navigationState) return;
+    navigationState.focusedId = focusedId;
+    return () => {
+      navigationState.selectionAnchorId = selectionAnchorRef.current;
+    };
+  }, [focusedId, navigationState]);
   useEffect(() => clearExpandTimer, [clearExpandTimer]);
 
   // Filter out children of collapsed frames.
@@ -850,6 +864,30 @@ export const CanvasLayerTree = ({
       snapshot.selectNodes([id], false);
       selectionAnchorRef.current = id;
 
+      if (structural) {
+        if ((childrenByParent.get(id)?.length ?? 0) === 0) {
+          toast(t('layers.emptyFrame'), { tone: 'info' });
+        }
+      } else if (!previewVisibleIdSet.has(id)) {
+        if (node.type === 'question') {
+          const threadId = node.data.threadId;
+          if (typeof threadId === 'string' && threadId) {
+            const tabId = openPreviewNode(id, { transient: true });
+            if (tabId) {
+              usePreviewWorkspaceStore
+                .getState()
+                .requestChatOpen(tabId, 'bottom');
+            }
+          } else {
+            toast(t('layers.nodeFocusedNoPreview'), { tone: 'info' });
+          }
+        } else if (hasNodePreview(node.type ?? '')) {
+          openPreviewNode(id, { transient: true });
+        } else {
+          toast(t('layers.nodeFocusedNoPreview'), { tone: 'info' });
+        }
+      }
+
       if (snapshot.rfInstance && snapshot.canvasWrapper) {
         revealNodesOnCanvas(
           snapshot.rfInstance,
@@ -857,34 +895,6 @@ export const CanvasLayerTree = ({
           [id],
           400,
         );
-      }
-
-      if (structural) {
-        if ((childrenByParent.get(id)?.length ?? 0) === 0) {
-          toast(t('layers.emptyFrame'), { tone: 'info' });
-        }
-        return;
-      }
-
-      if (previewVisibleIdSet.has(id)) return;
-      if (node.type === 'question') {
-        const threadId = node.data.threadId;
-        if (typeof threadId === 'string' && threadId) {
-          const tabId = openPreviewNode(id);
-          if (tabId) {
-            usePreviewWorkspaceStore
-              .getState()
-              .requestChatOpen(tabId, 'bottom');
-          }
-        } else {
-          toast(t('layers.nodeFocusedNoPreview'), { tone: 'info' });
-        }
-        return;
-      }
-      if (hasNodePreview(node.type ?? '')) {
-        openPreviewNode(id);
-      } else {
-        toast(t('layers.nodeFocusedNoPreview'), { tone: 'info' });
       }
     },
     [

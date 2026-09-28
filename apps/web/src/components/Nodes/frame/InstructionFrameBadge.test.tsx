@@ -14,7 +14,9 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
-globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+(
+  globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
+).IS_REACT_ACT_ENVIRONMENT = true;
 
 describe('InstructionFrameBadge', () => {
   let container: HTMLDivElement | undefined;
@@ -39,6 +41,7 @@ describe('InstructionFrameBadge', () => {
           <InstructionFrameBadge
             kind={kind}
             directAgentCount={directAgentCount}
+            titleFontSize={36}
           />,
         ),
       );
@@ -48,9 +51,17 @@ describe('InstructionFrameBadge', () => {
       expect(badge?.classList.contains(tone)).toBe(true);
       expect(badge?.classList.contains('text-fg-inverse')).toBe(true);
       expect(badge?.classList.contains('rounded-full')).toBe(true);
-      expect(badge?.querySelector('svg')?.getAttribute('aria-hidden')).toBe(
-        'true',
+      expect(badge?.classList.contains('pointer-events-auto')).toBe(true);
+      expect(badge?.getAttribute('title')).toBe(
+        kind === 'skill'
+          ? 'node.skillFrameBadgeDescription'
+          : directAgentCount > 0
+            ? `node.promptFrameBadgeConnectedDescription:${directAgentCount}`
+            : 'node.promptFrameBadgeGlobalDescription',
       );
+      expect(badge?.style.fontSize).toBe('15px');
+      expect(badge?.style.height).toBe('27px');
+      expect(badge?.querySelector('svg')).toBeNull();
 
       act(() => root.unmount());
     },

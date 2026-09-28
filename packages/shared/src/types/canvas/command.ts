@@ -157,14 +157,14 @@ export interface CanvasNodeLockUpdate {
 export interface CanvasNodeMeasuredHeightUpdate {
   nodeId: CanvasNodeId;
   /**
-   * Content height in px at the node type's reference width, before
-   * width scaling and before node chrome.
+   * Note content height in canvas px at the measured inner width,
+   * including host padding and excluding shell chrome.
    */
   intrinsicHeight: number;
   /**
    * The `AutoHeightKey` this measurement was taken under (see
    * `canvas-engine/height/freshness.ts`). Stored with the hint so a later
-   * reader can prove whether it still describes the node's content.
+   * reader can prove whether it still describes the node's content and width.
    */
   measuredFor: string;
   /**

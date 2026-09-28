@@ -5,16 +5,15 @@ import { useInternalNode, useStore, useViewport } from '@xyflow/react';
 import { useEffect, useRef, useState } from 'react';
 
 import {
-  badgeSizeForNode,
   clamp01,
-  collapseProgress,
-  collapsedMarkSize,
-  lerp,
+  QUESTION_TAKEOVER_AVATAR_RATIO,
+  QUESTION_TAKEOVER_CARD_RATIO,
   resolveQuestionStage,
   TAKEOVER_GLIDE_MS,
   type QuestionLodStage,
   type TakeoverPoint,
 } from '@/config/nodeTakeover';
+import { QUESTION_NODE_DEFAULT_FONT_SIZE } from '@/utils/node/nodeFontConfig';
 
 import type { MarkAnchorRect } from '@/store/nodeCollapseStore';
 
@@ -25,24 +24,21 @@ export interface NodeTakeoverGeometry {
   /** Screen point (px) the mark centre should sit on this frame. */
   point: TakeoverPoint;
   /**
-   * Canvas-space centre of the mark this frame, or `null` while the mark is
-   * resting at the readable card's corner.
+   * Canvas-space centre of the visible mark, or null at settled readable.
    */
   collapsedCenter: TakeoverPoint | null;
   /**
-   * Canvas-space radius of the collapsed mark circle, or `null` while the mark
-   * is resting at the readable card's corner.
+   * Canvas-space radius enclosing the visible ring/bubble and satellites.
    */
   collapsedRadius: number | null;
   /**
-   * Glide progress `p ∈ [0,1]`: 0 with the mark at the card's corner, 1 with it
-   * standing in for the whole node at its centre. Published with the mark so
-   * interaction chrome can ease footprint → mark on the same curve.
+   * Blend progress: 0 is the card, 1 is its centered stand-in. Chrome follows
+   * the same fade; the mark itself stays centered throughout the handoff.
    */
   glideProgress: number;
   /**
-   * The node's canvas-space border box, or `null` while the mark rests at the
-   * card's corner. This is the `p = 0` end of every chrome blend, published
+   * The node's canvas-space border box, or null at settled readable.
+   * This is the `p = 0` end of every chrome blend, published
    * from here so ports, outlines, and the toolbar all measure the node the way
    * the takeover itself does.
    */
@@ -53,14 +49,8 @@ export interface NodeTakeoverGeometry {
  * Eases toward 1 while the card is hidden and back to 0 while it is showing,
  * over {@link TAKEOVER_GLIDE_MS}.
  *
- * The mark's POSITION cannot be a function of zoom the way its size is. Edges,
- * ports, and outlines all terminate on the node's own border box, and the card
- * is the only thing that makes that box visible — so the mark has to hang off
- * the card's corner for exactly as long as the card is drawn, and sit at the
- * centre those edges converge on for exactly as long as it is standing in for
- * the node. A zoom-driven glide is out of step with the card on both counts:
- * it strands the mark mid-flight over a card that is still there, and leaves it
- * parked at a corner of nothing once the card has gone.
+ * Retain the existing reversible fade and chrome blend. Position and authored
+ * geometry no longer glide or interpolate with viewport zoom.
  */
 function useGlideProgress(stage: QuestionLodStage | null): number {
   const target = stage === 'collapsed' ? 1 : 0;
@@ -109,7 +99,12 @@ function useGlideProgress(stage: QuestionLodStage | null): number {
  * point + size. It owns geometry + staging only; the mark decides what to draw.
  * Non-takeover nodes never mount it, so they pay nothing.
  */
-export function useNodeTakeover(nodeId: string): NodeTakeoverGeometry {
+export function useNodeTakeover(
+  nodeId: string,
+  boundsRatio = QUESTION_TAKEOVER_AVATAR_RATIO,
+  fontSize = QUESTION_NODE_DEFAULT_FONT_SIZE,
+  forceCollapsed = false,
+): NodeTakeoverGeometry {
   const { zoom, x: vpX, y: vpY } = useViewport();
   const internalNode = useInternalNode(nodeId);
   const width = useStore((s) => {
@@ -123,18 +118,18 @@ export function useNodeTakeover(nodeId: string): NodeTakeoverGeometry {
 
   const prevStage = useRef<QuestionLodStage>('readable');
   const abs = internalNode?.internals.positionAbsolute;
-  const screenW = abs ? width * zoom : 0;
-  const stage =
+  const fontStage =
     abs && width > 0 && height > 0
-      ? resolveQuestionStage(prevStage.current, screenW)
+      ? resolveQuestionStage(prevStage.current, zoom, fontSize)
       : null;
-  if (stage !== null) prevStage.current = stage;
+  if (fontStage !== null) prevStage.current = fontStage;
+  const stage = fontStage !== null && forceCollapsed ? 'collapsed' : fontStage;
   const p = useGlideProgress(stage);
 
   if (stage === null || !abs) {
     return {
       stage: 'readable',
-      size: badgeSizeForNode(0, 0),
+      size: 0,
       point: { x: 0, y: 0 },
       collapsedCenter: null,
       collapsedRadius: null,
@@ -143,33 +138,21 @@ export function useNodeTakeover(nodeId: string): NodeTakeoverGeometry {
     };
   }
 
-  const screenH = height * zoom;
-
-  const left = abs.x * zoom + vpX;
-  const top = abs.y * zoom + vpY;
-
-  // SIZE tracks the zoom continuously, so the badge shrinks with the card it is
-  // pinned to; POSITION does not (see `useGlideProgress`).
-  const t = collapseProgress(screenW);
-  const badge = badgeSizeForNode(screenW, screenH);
-  const mark = collapsedMarkSize(screenW, screenH);
-  const size = lerp(badge, mark, t);
-
-  // Endpoints: the readable badge hugs the node's top-left corner; the collapsed
-  // mark sits at the node centre, which is where the node's edges point.
-  const cornerX = left + badge * 0.3;
-  const cornerY = top + badge * 0.05;
-  const centreX = left + screenW / 2;
-  const centreY = top + screenH / 2;
+  const authoredSize =
+    (Math.min(width, height) * QUESTION_TAKEOVER_CARD_RATIO) /
+    QUESTION_TAKEOVER_AVATAR_RATIO;
+  const size = authoredSize * zoom;
+  // Presentation never changes the persisted footprint. Center the visible
+  // mark there, and derive canvas anchors directly so pure panning is stable.
+  const center = { x: abs.x + width / 2, y: abs.y + height / 2 };
   const point: TakeoverPoint = {
-    x: lerp(cornerX, centreX, p),
-    y: lerp(cornerY, centreY, p),
+    x: center.x * zoom + vpX,
+    y: center.y * zoom + vpY,
   };
 
-  // Chrome anchors to the mark only once it has left the corner, and eases back
-  // onto the card on the way in, so the glide is symmetric.
+  // Publish only while the mark participates in the reversible fade.
   const anchored = p > 0;
-  const collapsedRadius = anchored ? size / (2 * zoom) : null;
+  const collapsedRadius = anchored ? (authoredSize * boundsRatio) / 2 : null;
 
   // Canvas-space centre of the mark. Built from `abs` + a canvas-space offset
   // rather than by unprojecting `point`: `vp` cancels analytically, but `(a·z +
@@ -178,12 +161,7 @@ export function useNodeTakeover(nodeId: string): NodeTakeoverGeometry {
   // check reads as movement and re-renders every outline and port anchored to
   // the mark, during the one gesture React Flow otherwise handles with a CSS
   // transform alone.
-  const collapsedCenter = anchored
-    ? {
-        x: abs.x + lerp((badge * 0.3) / zoom, width / 2, p),
-        y: abs.y + lerp((badge * 0.05) / zoom, height / 2, p),
-      }
-    : null;
+  const collapsedCenter = anchored ? center : null;
 
   const collapsedFootprint = anchored
     ? { x: abs.x, y: abs.y, width, height }

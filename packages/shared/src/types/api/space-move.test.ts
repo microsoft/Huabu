@@ -5,8 +5,30 @@ import { describe, expect, it } from 'vitest';
 
 import {
   moveSelectionBodySchema,
+  moveSelectionErrorCodeSchema,
   moveSelectionResponseSchema,
 } from './space-move.js';
+
+describe('moveSelectionErrorCodeSchema', () => {
+  it.each([
+    'MOVE_AGENT_CLOSE_FAILED',
+    'MOVE_AGENT_REHOME_FAILED',
+    'MOVE_OUTCOME_UNKNOWN',
+    'MOVE_FAILED',
+  ])('accepts the bounded lifecycle code %s', (code) => {
+    expect(moveSelectionErrorCodeSchema.parse(code)).toBe(code);
+  });
+
+  it('rejects upstream and arbitrary error codes', () => {
+    for (const code of [
+      'rehome_conflict',
+      'rehome_unknown_outcome',
+      '<private-error>',
+    ]) {
+      expect(moveSelectionErrorCodeSchema.safeParse(code).success).toBe(false);
+    }
+  });
+});
 
 describe('moveSelectionBodySchema', () => {
   it('accepts a bounded move request', () => {

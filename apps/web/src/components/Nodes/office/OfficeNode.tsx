@@ -2,22 +2,22 @@
 // Licensed under the MIT license.
 
 import { clsx } from 'clsx';
-import { Download, Fullscreen } from 'lucide-react';
-import { memo, useCallback } from 'react';
+import { Download, Maximize2 } from 'lucide-react';
+import { memo, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { resolveAccent } from '@huabu/shared';
-
 import { resolveArtifactUrl } from '@/api/artifact';
+import { DropdownMenuItem } from '@/components/Common/DropdownMenu';
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
 import { OFFICE_FORMAT_ICON } from '@/config/nodeIcons';
-import { useNodeScale } from '@/hooks/useNodeScale';
 import useCanvasStore from '@/store/canvasStore';
 import { openPreviewNode } from '@/store/previewWorkspace/actions';
 
-import { getAccentTokens } from '../accentTokens';
+import { getAccentTokens } from '../design/accentTokens';
+import { resolveNodeAccent } from '../design/nodeAccentPolicy';
 import { getMissingFileKind, MissingFileBanner } from '../MissingFileBanner';
 import { NodeWrapper } from '../NodeWrapper';
+import { noteSurfaceStyle } from '../note/noteDesign';
 
 import type { CanvasOfficeNodeData } from '../types';
 import type { OfficeFormat } from '@huabu/shared';
@@ -78,7 +78,6 @@ function getFormatMeta(format: OfficeFormat | undefined): FormatMeta {
 export const OfficeNode = memo(
   ({ id, data, selected }: NodeProps<OfficeNodeType>) => {
     const { t } = useTranslation();
-    const scale = useNodeScale(id, 'office');
     const canvasId = useCanvasStore((s) => s.canvasId);
 
     const src = typeof data.src === 'string' ? data.src : '';
@@ -91,31 +90,33 @@ export const OfficeNode = memo(
     const format = (data.format as OfficeFormat | undefined) ?? 'docx';
     const meta = getFormatMeta(format);
     const FormatIcon = meta.icon;
+    const title =
+      (data.label as string) ||
+      t('node.untitledTypedDocument', { label: meta.label });
+    const farLabel = useMemo(
+      () => ({ title, description: summary }),
+      [title, summary],
+    );
 
     // Accent tokens — mirror PreviewCard so the office card sits
     // visually consistent next to the rest of the node types.
-    const resolvedAccent = resolveAccent(data.style?.accent ?? null);
+    const resolvedAccent = resolveNodeAccent('office', data.style?.accent);
     const accentTokens = resolvedAccent
       ? getAccentTokens(resolvedAccent)
       : null;
-    const coverBg = accentTokens?.softBg ?? 'var(--surface)';
     const iconColor = accentTokens?.fg ?? 'var(--fg-muted)';
     const borderColor = accentTokens?.divider ?? 'var(--edge-default)';
 
-    const handleDownload = useCallback(
-      (e: React.MouseEvent) => {
-        e.stopPropagation();
-        if (!src) return;
-        const link = document.createElement('a');
-        link.href = resolveArtifactUrl(src, canvasId);
-        link.download =
-          (data.label as string) || src.split('/').pop() || meta.fallbackName;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-      },
-      [src, data.label, canvasId, meta.fallbackName],
-    );
+    const handleDownload = useCallback(() => {
+      if (!src) return;
+      const link = document.createElement('a');
+      link.href = resolveArtifactUrl(src, canvasId);
+      link.download =
+        (data.label as string) || src.split('/').pop() || meta.fallbackName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }, [src, data.label, canvasId, meta.fallbackName]);
 
     const OfficeActions = (
       <>
@@ -126,13 +127,7 @@ export const OfficeNode = memo(
             openPreviewNode(id);
           }}
         >
-          <Fullscreen />
-        </FloatingToolbar.ActionButton>
-        <FloatingToolbar.ActionButton
-          title={t('node.download')}
-          onClick={handleDownload}
-        >
-          <Download />
+          <Maximize2 />
         </FloatingToolbar.ActionButton>
       </>
     );
@@ -143,7 +138,15 @@ export const OfficeNode = memo(
         data={data}
         type={'office'}
         selected={selected}
+        farLabel={farLabel}
         actions={missingFileKind ? undefined : OfficeActions}
+        overflow={
+          missingFileKind ? undefined : (
+            <DropdownMenuItem icon={<Download />} onClick={handleDownload}>
+              {t('node.download')}
+            </DropdownMenuItem>
+          )
+        }
         resizable
         keepAspectRatio={false}
         className={clsx(
@@ -154,25 +157,22 @@ export const OfficeNode = memo(
         {missingFileKind ? (
           <MissingFileBanner nodeId={id} />
         ) : (
-          <div className="relative flex h-full w-full flex-col overflow-hidden rounded-lg">
-            <div
-              style={{
-                transform: `scale(${scale})`,
-                transformOrigin: 'top left',
-                width: `${100 / scale}%`,
-                height: `${100 / scale}%`,
-              }}
-            >
+          <div className="relative flex h-full w-full flex-col overflow-hidden rounded-[inherit]">
+            <div className="h-full w-full" data-office-content="">
               {src ? (
-                <div className="bg-surface relative flex h-full w-full flex-col overflow-hidden">
+                <div
+                  className="bg-surface relative flex h-full w-full flex-col overflow-hidden"
+                  style={
+                    resolvedAccent
+                      ? noteSurfaceStyle(resolvedAccent)
+                      : undefined
+                  }
+                >
                   {/* Cover area: large centered format icon over an
                     accent-tinted background. Acts as the visual
                     counterpart to PreviewCard's image slot for nodes
                     that don't have a render-time thumbnail. */}
-                  <div
-                    className="flex min-h-0 flex-1 items-center justify-center"
-                    style={{ background: coverBg }}
-                  >
+                  <div className="flex min-h-0 flex-1 items-center justify-center">
                     <div
                       className="flex flex-col items-center gap-2"
                       style={{ color: iconColor }}
@@ -193,7 +193,6 @@ export const OfficeNode = memo(
                     className="flex flex-col px-4 pt-2 pb-2"
                     style={{
                       borderTop: `2px solid ${borderColor}`,
-                      background: accentTokens?.softBg ?? 'transparent',
                     }}
                   >
                     <div className="min-w-0 shrink-0">
@@ -207,10 +206,7 @@ export const OfficeNode = memo(
                         className="min-w-0 text-lg font-medium wrap-break-word"
                         style={{ color: iconColor }}
                       >
-                        {(data.label as string) ||
-                          t('node.untitledTypedDocument', {
-                            label: meta.label,
-                          })}
+                        {title}
                       </span>
                     </div>
                     {summary ? (

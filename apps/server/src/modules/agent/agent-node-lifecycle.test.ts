@@ -22,7 +22,7 @@ function harness(initial: AgentNodeProjection = {}, hasHistory = false) {
   let current: AgentNodeProjection = { content: '', ...initial };
   const transition = vi.fn(
     async (_target: AgentNodeTarget, update: AgentNodeTransition) => {
-      const patch = update(current);
+      const patch = await update(current);
       if (patch) current = { ...current, ...patch };
     },
   );

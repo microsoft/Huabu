@@ -29,12 +29,12 @@ export function openPreviewNode(
     }
   }
 
-  usePanelStore.getState().requestOpenRightPanel(nodeId);
+  usePanelStore.getState().requestOpenRightPanel();
   const tabId = usePreviewWorkspaceStore
     .getState()
     .openPreviewTarget(
       { kind: 'node', canvasId: canvas.canvasId, nodeId },
-      { transient: options?.transient },
+      { transient: options?.transient ?? true },
     );
   const openedNode = canvas.nodes.find((node) => node.id === nodeId);
   if (tabId && openedNode?.type === 'note') {

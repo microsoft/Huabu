@@ -184,6 +184,7 @@ export function scheduleScrollToMatch(
   let timer: ReturnType<typeof setTimeout> | null = null;
   let rafId = 0;
   let resolved = false;
+  const preparedChatRoots = new WeakSet<HTMLElement>();
 
   const cleanup = (): void => {
     observer?.disconnect();
@@ -203,6 +204,16 @@ export function scheduleScrollToMatch(
     if (cancelled) return true;
     const root = getRoot();
     if (!root) return false;
+    if (root.matches('[data-chat-thread-root]')) {
+      if (root.closest('[data-preview-active="false"]')) return false;
+      if (!preparedChatRoots.has(root)) {
+        const request = new Event('chat-reveal-search', { cancelable: true });
+        root.dispatchEvent(request);
+        if (!request.defaultPrevented) return false;
+        preparedChatRoots.add(root);
+      }
+      if (root.hasAttribute('data-chat-cached-earlier')) return false;
+    }
     // Prefer the requested ordinal; fall back to the first match if
     // the DOM has fewer occurrences than the indexed content (e.g.
     // markdown source has matches in syntax tokens that the rendered
@@ -240,6 +251,8 @@ export function scheduleScrollToMatch(
       childList: true,
       subtree: true,
       characterData: true,
+      attributes: true,
+      attributeFilter: ['data-chat-cached-earlier', 'data-preview-active'],
     });
     observedTarget = desired;
   };

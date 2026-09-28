@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import type { AgentBinding, AgentMode } from '@huabu/shared';
+import type { AgentBinding, AgentChatContext, AgentMode } from '@huabu/shared';
 import type { Node } from '@xyflow/react';
 
 export type InkQuestionTarget = {
@@ -144,6 +144,17 @@ export function inkStrokeSelectionIdentity(
   return JSON.stringify([canvasId, selectedStrokes]);
 }
 
+export function inkLassoIdentity(
+  canvasId: string,
+  selection: Record<string, readonly string[]>,
+  polygon: readonly { x: number; y: number }[] | null,
+): string {
+  return JSON.stringify([
+    inkStrokeSelectionIdentity(canvasId, selection),
+    polygon?.map((point) => [point.x, point.y]) ?? null,
+  ]);
+}
+
 export function unionSelectionBounds(
   left: { x: number; y: number; width: number; height: number } | null,
   right: { x: number; y: number; width: number; height: number } | null,
@@ -155,4 +166,52 @@ export function unionSelectionBounds(
   const maxX = Math.max(left.x + left.width, right.x + right.width);
   const maxY = Math.max(left.y + left.height, right.y + right.height);
   return { x, y, width: maxX - x, height: maxY - y };
+}
+
+export function retainedLassoBounds(
+  polygon: readonly { x: number; y: number }[] | null,
+  move: { dx: number; dy: number } | null = null,
+): { x: number; y: number; width: number; height: number } | null {
+  if (!polygon || polygon.length < 3) return null;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const point of polygon) {
+    minX = Math.min(minX, point.x);
+    minY = Math.min(minY, point.y);
+    maxX = Math.max(maxX, point.x);
+    maxY = Math.max(maxY, point.y);
+  }
+  const dx = move?.dx ?? 0;
+  const dy = move?.dy ?? 0;
+  return {
+    x: minX + dx,
+    y: minY + dy,
+    width: maxX - minX,
+    height: maxY - minY,
+  };
+}
+
+export function groundingOperandsFromContext(context: AgentChatContext): {
+  selectedNodeIds: string[];
+  strokeSubsets: Array<{ nodeId: string; strokeIds: string[] }>;
+} {
+  const selectedNodeIds: string[] = [];
+  const strokeSubsets: Array<{ nodeId: string; strokeIds: string[] }> = [];
+  const collect = (
+    nodes: AgentChatContext['selectedNodes'],
+    topLevel: boolean,
+  ): void => {
+    for (const node of nodes) {
+      if (node.type === 'sketch' && node.strokeIds?.length) {
+        strokeSubsets.push({ nodeId: node.id, strokeIds: [...node.strokeIds] });
+      } else if (topLevel && node.type !== 'question') {
+        selectedNodeIds.push(node.id);
+      }
+      if (node.children?.length) collect(node.children, false);
+    }
+  };
+  collect(context.selectedNodes, true);
+  return { selectedNodeIds, strokeSubsets };
 }

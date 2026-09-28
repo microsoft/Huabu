@@ -5,8 +5,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
   deriveInkSubmissionCandidate,
+  inkLassoIdentity,
   inkSelectionIdentity,
   inkStrokeSelectionIdentity,
+  retainedLassoBounds,
   unionSelectionBounds,
 } from './inkQuestionSubmission';
 
@@ -155,6 +157,25 @@ describe('Ink Question submission candidate', () => {
     );
   });
 
+  it('identifies a Lasso by its strokes and retained polygon', () => {
+    const selection = { 'sketch-1': ['stroke-1'] };
+    const polygon = [
+      { x: 0, y: 0 },
+      { x: 20, y: 0 },
+      { x: 20, y: 20 },
+    ];
+    const identity = inkLassoIdentity('canvas-1', selection, polygon);
+
+    expect(inkLassoIdentity('canvas-1', selection, polygon)).toBe(identity);
+    expect(
+      inkLassoIdentity('canvas-1', selection, [
+        { x: 0, y: 0 },
+        { x: 30, y: 0 },
+        { x: 30, y: 30 },
+      ]),
+    ).not.toBe(identity);
+  });
+
   it('unions partial-stroke and whole-node bounds', () => {
     expect(
       unionSelectionBounds(
@@ -162,5 +183,20 @@ describe('Ink Question submission candidate', () => {
         { x: 0, y: 60, width: 100, height: 20 },
       ),
     ).toEqual({ x: 0, y: 30, width: 100, height: 50 });
+  });
+
+  it('anchors to the retained Lasso bounds including its live move', () => {
+    expect(
+      retainedLassoBounds(
+        [
+          { x: 20, y: 30 },
+          { x: 80, y: 20 },
+          { x: 90, y: 70 },
+          { x: 10, y: 60 },
+        ],
+        { dx: 5, dy: -10 },
+      ),
+    ).toEqual({ x: 15, y: 10, width: 80, height: 50 });
+    expect(retainedLassoBounds(null)).toBeNull();
   });
 });

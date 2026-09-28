@@ -4,6 +4,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  canStartRetainedSelectionMove,
   canDirectlyManipulateWithPointer,
   canManipulateCanvasWithPointer,
   canPlaceNodeWithPointer,
@@ -36,6 +37,7 @@ describe('canvas input policy', () => {
     expect(resolveNodeDraggable(true, true, true)).toBe(true);
     expect(resolveNodeDraggable(undefined, true, true)).toBeUndefined();
     expect(resolveNodeDraggable(true, false, false)).toBe(true);
+    expect(resolveNodeDraggable(true, true, true, true)).toBe(false);
   });
 
   it('routes node placement through the active direct-manipulation pointer', () => {
@@ -131,5 +133,37 @@ describe('canvas input policy', () => {
     expect(isEmptyPaneTarget(node)).toBe(false);
     expect(isEmptyPaneTarget(panel)).toBe(false);
     expect(isEmptyPaneTarget(null)).toBe(false);
+  });
+
+  it.each(['react-flow__handle', 'react-flow__resize-control'])(
+    'reserves %s for its native control instead of retained Lasso movement',
+    (controlClass) => {
+      const control = document.createElement('div');
+      control.className = controlClass;
+
+      expect(canStartRetainedSelectionMove(control)).toBe(false);
+      expect(canStartRetainedSelectionMove(document.createElement('div'))).toBe(
+        true,
+      );
+    },
+  );
+  it('reserves multi-selection resize controls and their paint for direct manipulation', () => {
+    const control = document.createElement('div');
+    control.dataset.multiResizeControl = 'br';
+    const grip = document.createElement('span');
+    control.append(grip);
+    expect(isPanelTarget(control)).toBe(true);
+    expect(isPanelTarget(grip)).toBe(true);
+    expect(isPanelTarget(document.createElement('div'))).toBe(false);
+  });
+
+  it('treats active video controls as native interaction but not an inactive poster', () => {
+    const surface = document.createElement('div');
+    const video = document.createElement('video');
+    surface.append(video);
+    surface.dataset.videoControls = 'true';
+    expect(isPanelTarget(video)).toBe(true);
+    surface.dataset.videoControls = 'false';
+    expect(isPanelTarget(video)).toBe(false);
   });
 });

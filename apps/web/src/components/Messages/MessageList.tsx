@@ -12,14 +12,19 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { isEditableTarget } from '@/hooks/shortcuts/isEditableTarget';
+import { readMessageListScrollBookmark } from '@/store/previewWorkspace/scrollMemory';
+
 import { AIMessage } from './AIMessage';
 import {
+  isMessageListNearBottom,
   positionMessageListOnOpen,
   rememberMessageListScrollAnchor,
   rememberMessageListScrollPosition,
   restoreMessageListScrollPosition,
 } from './messageListScroll';
 import { StatusMessage } from './StatusMessage';
+import { useChatDisplayWindow } from './useChatDisplayWindow';
 import { UserMessage } from './UserMessage';
 import { Button } from '../Common/Button';
 import { Loading } from '../Common/Loading';
@@ -30,6 +35,10 @@ import type { ChatMessage } from '../../store/chatTypes';
 
 interface MessageListProps {
   messages: ChatMessage[];
+  recentTurnCount?: number;
+  activationId?: number;
+  completedTurnId?: string;
+  threadId?: string;
   isLoading: boolean;
   /**
    * True while the chat history is being hydrated from the server.
@@ -63,7 +72,11 @@ interface MessageListProps {
 }
 
 export const MessageList = memo(function MessageList({
-  messages,
+  messages: cachedMessages,
+  recentTurnCount,
+  activationId,
+  completedTurnId,
+  threadId,
   isLoading,
   isHistoryLoading,
   hideAIActions,
@@ -80,14 +93,45 @@ export const MessageList = memo(function MessageList({
   onOpenPositionHandled,
 }: MessageListProps) {
   const { t } = useTranslation();
+  const displayWindow = useChatDisplayWindow(
+    cachedMessages,
+    recentTurnCount,
+    viewKey,
+    activationId,
+  );
+  const messages = displayWindow.messages;
+  const [returnState, setReturnState] = useState(() => ({
+    viewKey,
+    activationId,
+    bookmark: readMessageListScrollBookmark(viewKey),
+  }));
+  if (
+    returnState.viewKey !== viewKey ||
+    returnState.activationId !== activationId
+  ) {
+    setReturnState({
+      viewKey,
+      activationId,
+      bookmark: readMessageListScrollBookmark(viewKey),
+    });
+  }
+  const [returnError, setReturnError] = useState(false);
+  const [pendingReturn, setPendingReturn] =
+    useState<ReturnType<typeof readMessageListScrollBookmark>>();
   const [hasNewMessage, setHasNewMessage] = useState(false);
+  const [isAwayFromBottom, setIsAwayFromBottom] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef(true);
-  const prevMessageCountRef = useRef(messages.length);
-  const currentMessageCountRef = useRef(messages.length);
+  const previousMessagesRef = useRef(messages);
+  const lastScrollTopRef = useRef(0);
+  const scrollInteractionRef = useRef(0);
+  const touchYRef = useRef<number | undefined>(undefined);
   const positionedViewKeyRef = useRef<string | undefined>(undefined);
   const hasPositionedViewRef = useRef(false);
+  const positionedActivationRef = useRef(activationId);
+  const observedCompletionRef = useRef(completedTurnId);
+  const explicitReadingRef = useRef(false);
   const handledOpenRequestRef = useRef<number | undefined>(undefined);
   const prependAnchorRef = useRef<{
     messageId: string;
@@ -95,7 +139,25 @@ export const MessageList = memo(function MessageList({
   } | null>(null);
   const prependObserverRef = useRef<ResizeObserver | null>(null);
   const prependSettleTimerRef = useRef<number | undefined>(undefined);
-  currentMessageCountRef.current = messages.length;
+
+  const canScroll = useCallback(() => {
+    const container = containerRef.current;
+    return (
+      !!container &&
+      isActive &&
+      !isHistoryLoading &&
+      container.closest('[data-preview-active="false"]') === null
+    );
+  }, [isActive, isHistoryLoading]);
+
+  const updateBottomAffordance = useCallback(() => {
+    const container = containerRef.current;
+    if (!container || !canScroll()) return;
+    const atBottom = isMessageListNearBottom(container);
+    setIsAwayFromBottom(!atBottom);
+    if (atBottom) setHasNewMessage(false);
+    lastScrollTopRef.current = container.scrollTop;
+  }, [canScroll]);
 
   const finishPrependAnchoring = useCallback(() => {
     prependAnchorRef.current = null;
@@ -121,7 +183,7 @@ export const MessageList = memo(function MessageList({
   // list before paint at the final user message (unread) or end (read / blocked).
   // Direct scrollTop writes keep movement scoped to this panel.
   useLayoutEffect(() => {
-    if (!isActive || isHistoryLoading) return;
+    if (!canScroll()) return;
     const container = containerRef.current;
     if (!container) return;
     const viewChanged =
@@ -129,14 +191,16 @@ export const MessageList = memo(function MessageList({
     const hasNewRequest =
       openPositionRequestNonce !== undefined &&
       handledOpenRequestRef.current !== openPositionRequestNonce;
-    if (!viewChanged && !hasNewRequest) return;
+    const activationChanged = positionedActivationRef.current !== activationId;
+    if (!viewChanged && !hasNewRequest && !activationChanged) return;
     finishPrependAnchoring();
+    explicitReadingRef.current = hasNewRequest && openPosition === 'last-user';
+    setReturnError(false);
 
-    const restored = restoreMessageListScrollPosition(container, viewKey);
-    const restoredAtBottom =
-      restored &&
-      container.scrollTop >=
-        container.scrollHeight - container.clientHeight - 50;
+    const restored =
+      recentTurnCount === undefined &&
+      restoreMessageListScrollPosition(container, viewKey);
+    const restoredAtBottom = restored && isMessageListNearBottom(container);
     const position = restored
       ? restoredAtBottom
         ? 'bottom'
@@ -150,20 +214,29 @@ export const MessageList = memo(function MessageList({
         hasNewRequest &&
         openPosition === 'last-user',
     );
-    prevMessageCountRef.current = currentMessageCountRef.current;
+    previousMessagesRef.current = messages;
+    updateBottomAffordance();
     positionedViewKeyRef.current = viewKey;
+    positionedActivationRef.current = activationId;
     hasPositionedViewRef.current = true;
     if (openPositionRequestNonce !== undefined) {
       handledOpenRequestRef.current = openPositionRequestNonce;
       onOpenPositionHandled?.(openPositionRequestNonce);
     }
     if (!restored) return;
+    const interaction = scrollInteractionRef.current;
     const frame = requestAnimationFrame(() => {
       const current = containerRef.current;
-      if (!current) return;
+      if (
+        !current ||
+        !canScroll() ||
+        interaction !== scrollInteractionRef.current
+      ) {
+        return;
+      }
       restoreMessageListScrollPosition(current, viewKey);
-      isAtBottomRef.current =
-        current.scrollTop >= current.scrollHeight - current.clientHeight - 50;
+      isAtBottomRef.current = isMessageListNearBottom(current);
+      updateBottomAffordance();
     });
     return () => cancelAnimationFrame(frame);
   }, [
@@ -174,7 +247,36 @@ export const MessageList = memo(function MessageList({
     openPositionRequestNonce,
     onOpenPositionHandled,
     finishPrependAnchoring,
+    canScroll,
+    messages,
+    updateBottomAffordance,
+    activationId,
+    recentTurnCount,
   ]);
+
+  useLayoutEffect(() => {
+    if (!pendingReturn || !canScroll()) return;
+    const container = containerRef.current;
+    if (!container) return;
+    const anchor = Array.from(
+      container.querySelectorAll<HTMLElement>('[data-chat-message-id]'),
+    ).find(
+      (element) => element.dataset.chatMessageId === pendingReturn.messageId,
+    );
+    if (anchor) {
+      const viewportTop =
+        container.getBoundingClientRect().top + pendingReturn.offsetTop;
+      container.scrollTop += anchor.getBoundingClientRect().top - viewportTop;
+      prependAnchorRef.current = {
+        messageId: pendingReturn.messageId,
+        viewportTop,
+      };
+      updateBottomAffordance();
+    } else {
+      setReturnError(true);
+    }
+    setPendingReturn(undefined);
+  }, [pendingReturn, messages, canScroll, updateBottomAffordance]);
 
   useLayoutEffect(() => {
     const pending = prependAnchorRef.current;
@@ -183,6 +285,7 @@ export const MessageList = memo(function MessageList({
     if (!pending || !container || !content) return;
 
     const restoreAnchor = () => {
+      if (!canScroll() || prependAnchorRef.current !== pending) return;
       const anchor = Array.from(
         content.querySelectorAll<HTMLElement>('[data-chat-message-id]'),
       ).find((element) => element.dataset.chatMessageId === pending.messageId);
@@ -196,6 +299,7 @@ export const MessageList = memo(function MessageList({
         rememberMessageListScrollPosition(viewKey, container.scrollTop);
       }
       schedulePrependAnchorSettlement();
+      updateBottomAffordance();
     };
 
     restoreAnchor();
@@ -212,6 +316,8 @@ export const MessageList = memo(function MessageList({
     viewKey,
     finishPrependAnchoring,
     schedulePrependAnchorSettlement,
+    canScroll,
+    updateBottomAffordance,
   ]);
 
   // Find the in-flight assistant message for the *current* turn.
@@ -240,18 +346,31 @@ export const MessageList = memo(function MessageList({
   // Track whether the user is scrolled near the bottom
   const handleScroll = useCallback(() => {
     const el = containerRef.current;
-    if (!el) return;
-    rememberMessageListScrollAnchor(el, viewKey);
-    const threshold = 50;
-    const atBottom =
-      el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
-    isAtBottomRef.current = atBottom;
-    if (atBottom) setHasNewMessage(false);
-  }, [viewKey]);
+    if (!el || !canScroll()) return;
+    // Layout growth can emit scroll events without a user leaving the bottom.
+    if (el.scrollTop !== lastScrollTopRef.current) {
+      scrollInteractionRef.current++;
+      isAtBottomRef.current = isMessageListNearBottom(el);
+    }
+    if (recentTurnCount === undefined || !isAtBottomRef.current) {
+      rememberMessageListScrollAnchor(el, viewKey);
+    }
+    updateBottomAffordance();
+  }, [viewKey, canScroll, updateBottomAffordance, recentTurnCount]);
+
+  const takeOverScroll = useCallback(() => {
+    if (!canScroll()) return;
+    scrollInteractionRef.current++;
+    isAtBottomRef.current = false;
+    finishPrependAnchoring();
+  }, [canScroll, finishPrependAnchoring]);
 
   const loadOlderHistory = useCallback(() => {
     const container = containerRef.current;
-    if (!container || !onLoadOlderHistory || isLoadingOlderHistory) return;
+    if (!container || isLoadingOlderHistory) return;
+    if (!displayWindow.hasCachedEarlier && !onLoadOlderHistory) return;
+    isAtBottomRef.current = false;
+    explicitReadingRef.current = true;
     const containerTop = container.getBoundingClientRect().top;
     const anchor = Array.from(
       container.querySelectorAll<HTMLElement>('[data-chat-message-id]'),
@@ -262,8 +381,9 @@ export const MessageList = memo(function MessageList({
         viewportTop: anchor.getBoundingClientRect().top,
       };
     }
-    onLoadOlderHistory();
-  }, [isLoadingOlderHistory, onLoadOlderHistory]);
+    if (displayWindow.hasCachedEarlier) displayWindow.showEarlier();
+    else onLoadOlderHistory?.();
+  }, [isLoadingOlderHistory, onLoadOlderHistory, displayWindow]);
 
   useEffect(() => {
     if (!isLoadingOlderHistory && olderHistoryError) {
@@ -275,36 +395,121 @@ export const MessageList = memo(function MessageList({
   // sentinel: that walks up every scrollable ancestor, and the app root is
   // `overflow: hidden`, so any bubbling scroll shifts the whole UI with no
   // scrollbar left to undo it.
-  const scrollThreadToBottom = useCallback((behavior: ScrollBehavior) => {
+  const scrollThreadToBottom = useCallback(() => {
     const el = containerRef.current;
-    if (!el) return;
-    el.scrollTo({ top: el.scrollHeight, behavior });
+    if (!el || !canScroll()) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: 'instant' });
+    updateBottomAffordance();
+  }, [canScroll, updateBottomAffordance]);
+
+  const observeNativeScroll = useCallback(() => {
+    const container = containerRef.current;
+    // Native movement can precede its scroll event, including at turn completion.
+    if (
+      container &&
+      container.scrollTop !== lastScrollTopRef.current &&
+      !prependAnchorRef.current
+    ) {
+      isAtBottomRef.current = isMessageListNearBottom(container);
+    }
   }, []);
 
-  // Auto-scroll when at bottom and content changes (including streaming tokens)
-  useEffect(() => {
-    if (isAtBottomRef.current && !prependAnchorRef.current) {
-      scrollThreadToBottom('smooth');
-    }
-  }, [messages, isLoading, scrollThreadToBottom]);
-
-  // Show "new message" indicator when messages are added while scrolled up
-  useEffect(() => {
+  useLayoutEffect(() => {
+    if (canScroll()) observeNativeScroll();
+    const previous = previousMessagesRef.current;
+    previousMessagesRef.current = messages;
+    const tail = messages[messages.length - 1];
     if (
-      messages.length > prevMessageCountRef.current &&
+      canScroll() &&
+      tail &&
+      tail !== previous[previous.length - 1] &&
       !isAtBottomRef.current &&
-      !prependAnchorRef.current
+      !prependAnchorRef.current &&
+      !isLoadingOlderHistory
     ) {
       setHasNewMessage(true);
     }
-    prevMessageCountRef.current = messages.length;
-  }, [messages.length]);
+    if (isAtBottomRef.current && !prependAnchorRef.current) {
+      scrollThreadToBottom();
+    } else {
+      updateBottomAffordance();
+    }
+  }, [
+    messages,
+    isLoading,
+    isLoadingOlderHistory,
+    canScroll,
+    scrollThreadToBottom,
+    updateBottomAffordance,
+    observeNativeScroll,
+  ]);
+
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    const content = contentRef.current;
+    if (!container || !content || !canScroll()) return;
+    const resize = () => {
+      if (!canScroll() || container.clientHeight === 0) return;
+      observeNativeScroll();
+      if (isAtBottomRef.current && !prependAnchorRef.current) {
+        scrollThreadToBottom();
+      } else {
+        updateBottomAffordance();
+      }
+    };
+    const observer =
+      typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(resize);
+    observer?.observe(content);
+    observer?.observe(container);
+    resize();
+    return () => observer?.disconnect();
+  }, [
+    viewKey,
+    canScroll,
+    scrollThreadToBottom,
+    updateBottomAffordance,
+    observeNativeScroll,
+  ]);
 
   const scrollToBottom = useCallback(() => {
     finishPrependAnchoring();
-    scrollThreadToBottom('smooth');
-    setHasNewMessage(false);
-  }, [finishPrependAnchoring, scrollThreadToBottom]);
+    scrollInteractionRef.current++;
+    isAtBottomRef.current = true;
+    explicitReadingRef.current = false;
+    displayWindow.compact();
+    scrollThreadToBottom();
+  }, [finishPrependAnchoring, scrollThreadToBottom, displayWindow]);
+
+  useLayoutEffect(() => {
+    const previous = observedCompletionRef.current;
+    observedCompletionRef.current = completedTurnId;
+    if (
+      completedTurnId !== previous &&
+      completedTurnId !== undefined &&
+      canScroll() &&
+      isAtBottomRef.current &&
+      !explicitReadingRef.current &&
+      !prependAnchorRef.current &&
+      !isLoadingOlderHistory
+    ) {
+      displayWindow.compact();
+    }
+  }, [completedTurnId, canScroll, isLoadingOlderHistory, displayWindow]);
+
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container || !canScroll()) return;
+    const revealForSearch = (event: Event) => {
+      event.preventDefault();
+      explicitReadingRef.current = true;
+      isAtBottomRef.current = false;
+      finishPrependAnchoring();
+      displayWindow.showAll();
+    };
+    container.addEventListener('chat-reveal-search', revealForSearch);
+    return () =>
+      container.removeEventListener('chat-reveal-search', revealForSearch);
+  }, [canScroll, finishPrependAnchoring, displayWindow]);
 
   useEffect(() => finishPrependAnchoring, [finishPrependAnchoring]);
 
@@ -313,8 +518,29 @@ export const MessageList = memo(function MessageList({
       <div
         ref={containerRef}
         onScroll={handleScroll}
-        onWheelCapture={finishPrependAnchoring}
-        onPointerDownCapture={finishPrependAnchoring}
+        onWheelCapture={(event) => {
+          finishPrependAnchoring();
+          if (event.deltaY < 0) takeOverScroll();
+        }}
+        onTouchStartCapture={(event) => {
+          touchYRef.current = event.touches[0]?.clientY;
+        }}
+        onTouchMoveCapture={(event) => {
+          const nextY = event.touches[0]?.clientY;
+          finishPrependAnchoring();
+          if (
+            nextY !== undefined &&
+            touchYRef.current !== undefined &&
+            nextY > touchYRef.current
+          ) {
+            takeOverScroll();
+          }
+          touchYRef.current = nextY;
+        }}
+        onPointerDownCapture={(event) => {
+          finishPrependAnchoring();
+          if (event.target === event.currentTarget) takeOverScroll();
+        }}
         onKeyDownCapture={(event) => {
           if (
             [
@@ -327,14 +553,73 @@ export const MessageList = memo(function MessageList({
               ' ',
             ].includes(event.key)
           ) {
-            finishPrependAnchoring();
+            const target = event.target;
+            if (
+              !isEditableTarget(target) &&
+              (!(target instanceof HTMLElement) ||
+                !target.closest('select, button'))
+            ) {
+              finishPrependAnchoring();
+              if (
+                ['ArrowUp', 'Home', 'PageUp'].includes(event.key) ||
+                (event.key === ' ' && event.shiftKey)
+              ) {
+                takeOverScroll();
+              }
+            }
           }
         }}
         data-chat-thread-root
+        data-chat-thread-id={threadId}
+        data-chat-cached-earlier={displayWindow.hasCachedEarlier || undefined}
+        tabIndex={-1}
         className="flex-1 overflow-x-visible overflow-y-auto px-3"
       >
         <div ref={contentRef} className="space-y-1">
-          {hasOlderHistory || olderHistoryError ? (
+          {recentTurnCount !== undefined && returnState.bookmark ? (
+            <div className="flex justify-center py-2" data-search-exclude>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={!isActive || isHistoryLoading}
+                onClick={(event) => {
+                  const bookmark = returnState.bookmark;
+                  if (!bookmark) return;
+                  if (document.activeElement === event.currentTarget) {
+                    containerRef.current?.focus({ preventScroll: true });
+                  }
+                  if (displayWindow.revealMessage(bookmark.messageId)) {
+                    finishPrependAnchoring();
+                    explicitReadingRef.current = true;
+                    isAtBottomRef.current = false;
+                    setPendingReturn(bookmark);
+                    setReturnError(false);
+                  } else {
+                    setReturnError(true);
+                  }
+                  setReturnState({
+                    viewKey,
+                    activationId,
+                    bookmark: undefined,
+                  });
+                }}
+              >
+                {t('chat.returnToReadingPosition')}
+              </Button>
+            </div>
+          ) : null}
+          {returnError ? (
+            <div
+              role="status"
+              className="text-fg-muted py-2 text-center text-xs"
+              data-search-exclude
+            >
+              {t('chat.readingPositionUnavailable')}
+            </div>
+          ) : null}
+          {displayWindow.hasCachedEarlier ||
+          hasOlderHistory ||
+          olderHistoryError ? (
             <div className="flex flex-col items-center gap-1 py-2">
               <Button
                 variant="ghost"
@@ -431,15 +716,20 @@ export const MessageList = memo(function MessageList({
         </div>
       </div>
 
-      {hasNewMessage && (
+      {isAwayFromBottom && (
         <Button
           variant="outline"
           shape="pill"
           tone="neutral"
-          onClick={scrollToBottom}
+          onClick={(event) => {
+            if (document.activeElement === event.currentTarget) {
+              containerRef.current?.focus({ preventScroll: true });
+            }
+            scrollToBottom();
+          }}
           className="absolute bottom-2 left-1/2 z-10 -translate-x-1/2 shadow-lg"
         >
-          New message
+          {t(hasNewMessage ? 'chat.newMessage' : 'chat.backToBottom')}
           <ArrowDown />
         </Button>
       )}

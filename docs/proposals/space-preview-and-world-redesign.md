@@ -4,6 +4,8 @@
 >
 > Status: **Shipped** · Last updated: 2026-09-14 · Tracks: [#109](https://github.com/microsoft/Huabu/issues/109)
 
+> **Nested preview UI superseded.** The original projection UI below is historical. Production now uses compact Space Shortcuts; the web SVG viewport, scene cache/client, local viewport persistence, and cover experiment have been retired. The server preview-scene API, shared wire contract, persisted `spacePreview` identity, and managed World membership remain. See [Space Shortcut and World](../architecture/space-preview.md) for the current contract.
+
 > **Compatibility clauses superseded.** This proposal preserves the shipped redesign's history, but its legacy readability, nested `canvasRef` projection, ID/geometry donation, and migration-test assumptions in §§2, 7, 9, and 11 no longer apply. Portal/Pin code, commands, references API, and World `nodeRef` conversations are retired. Current behavior is defined by [Space Preview and World](../architecture/space-preview.md): ignore legacy topology on load without disk cleanup or migration, preserve ordinary children, and create missing previews with fresh identity and placement. Normal later saves may omit ignored data. Gesture-driven zoom-through remains deferred.
 
 ---

@@ -120,6 +120,25 @@ test.describe('canvas touch tools', () => {
     ]);
 
     await expect(page.locator('.react-flow__node.selected')).toHaveCount(1);
+    const retainedLasso = page.locator('[data-stroke-selection-region]');
+    await expect(retainedLasso).toBeVisible();
+    expect(
+      await retainedLasso.evaluate((element) => ({
+        parentIsReactFlow:
+          element.parentElement?.classList.contains('react-flow'),
+        zIndex: getComputedStyle(element).zIndex,
+      })),
+    ).toEqual({ parentIsReactFlow: true, zIndex: '999' });
+    const floatingToolbar = page
+      .locator('body > [data-floating-chrome]:visible')
+      .first();
+    await expect(floatingToolbar).toBeVisible();
+    await expect(floatingToolbar).toHaveCSS('z-index', '1000');
+
+    await touchTap(client, { x: center.x + 300, y: center.y + 200 });
+
+    await expect(page.locator('.react-flow__node.selected')).toHaveCount(0);
+    await expect(page.locator('[data-stroke-selection-region]')).toHaveCount(0);
   });
 
   test('lasso keeps selected nodes draggable', async ({ page }) => {
@@ -161,5 +180,69 @@ test.describe('canvas touch tools', () => {
     ).toBeGreaterThan(50);
     await expect(page.locator('.react-flow__node.selected')).toHaveCount(1);
     await expect(page.locator('.cursor-crosshair')).toBeVisible();
+  });
+
+  test('finger tap on overlapping Ink does not select the Sketch', async ({
+    page,
+  }) => {
+    await openNewCanvas(page);
+    const client = await page.context().newCDPSession(page);
+    const center = await paneCenter(page);
+
+    await pickCreateTool(page, /^Text/, 'canvas-pending-text');
+    await touchTap(client, center);
+    await page.keyboard.type('x');
+    await page.keyboard.press('Escape');
+    await touchTap(client, { x: center.x + 300, y: center.y + 200 });
+    const text = page.locator('.react-flow__node-text');
+    const textBox = await text.boundingBox();
+    if (!textBox) throw new Error('Text node has no bounding box');
+    const overlapPoint = {
+      x: textBox.x + textBox.width / 2,
+      y: textBox.y + textBox.height / 2,
+    };
+
+    const pen = page.getByRole('button', { name: /^Pen$/ });
+    const penBox = await pen.boundingBox();
+    if (!penBox) throw new Error('Pen button has no bounding box');
+    await touchTap(client, {
+      x: penBox.x + penBox.width / 2,
+      y: penBox.y + penBox.height / 2,
+    });
+    await expect(pen).toHaveAttribute('aria-pressed', 'true');
+    await oneFingerPath(client, [
+      { x: overlapPoint.x - 30, y: overlapPoint.y },
+      overlapPoint,
+      { x: overlapPoint.x + 30, y: overlapPoint.y },
+    ]);
+    await expect(page.locator('.react-flow__node-sketch')).toHaveCount(1);
+    const inkPathBox = await page
+      .locator('.react-flow__node-sketch path')
+      .first()
+      .boundingBox();
+    if (!inkPathBox) throw new Error('Ink path has no bounding box');
+    const inkPoint = {
+      x: inkPathBox.x + inkPathBox.width / 2,
+      y: inkPathBox.y + inkPathBox.height / 2,
+    };
+    expect(inkPoint.x).toBeGreaterThanOrEqual(textBox.x);
+    expect(inkPoint.x).toBeLessThanOrEqual(textBox.x + textBox.width);
+    expect(inkPoint.y).toBeGreaterThanOrEqual(textBox.y);
+    expect(inkPoint.y).toBeLessThanOrEqual(textBox.y + textBox.height);
+
+    const select = page.getByRole('button', { name: /^Select/ });
+    const selectBox = await select.boundingBox();
+    if (!selectBox) throw new Error('Select button has no bounding box');
+    await touchTap(client, {
+      x: selectBox.x + selectBox.width / 2,
+      y: selectBox.y + selectBox.height / 2,
+    });
+    await expect(page.locator('.canvas-pending-sketch')).toHaveCount(0);
+    await expect(select).toBeVisible();
+    await touchTap(client, inkPoint);
+
+    await expect(page.locator('.react-flow__node-sketch.selected')).toHaveCount(
+      0,
+    );
   });
 });

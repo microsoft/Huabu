@@ -5,7 +5,11 @@ import { Copy } from 'lucide-react';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { groupByThinkingPhase, type SegmentGroup } from './groupParts';
+import {
+  groupByThinkingPhase,
+  projectTaskCompleteResults,
+  type SegmentGroup,
+} from './groupParts';
 import { MilkdownMessageCard } from './MilkdownMessageCard';
 import { PermissionCard } from './PermissionCard';
 import { PlanCard } from './PlanCard';
@@ -119,14 +123,15 @@ export const AIMessage = memo(function AIMessage({
 
   // Plain-text copy / "add as note" only includes visible text — thinking
   // is internal reasoning and shouldn't bleed into derived artifacts.
-  const plainText = assistantMessageText(segments);
-  const lastIdx = segments.length - 1;
+  const displaySegments = projectTaskCompleteResults(segments);
+  const plainText = assistantMessageText(displaySegments);
+  const lastIdx = displaySegments.length - 1;
 
   // Phase-group adjacent thinking + tool runs so each "agent intent"
   // becomes one collapsible card. Falls back to loose entries for
   // segments that don't belong to any phase (e.g. text segments or
   // tool calls that arrived before the first thinking).
-  const phases = groupByThinkingPhase(segments);
+  const phases = groupByThinkingPhase(displaySegments);
 
   // Show the "still generating" shimmer at the tail of a streaming
   // turn. This is distinct from `ThinkingCard` (which renders the
@@ -135,8 +140,8 @@ export const AIMessage = memo(function AIMessage({
   // thinking card, since that card already shows its own "Thinking…"
   // label + spinner and a second one would be redundant. An unresolved
   // permission also suppresses it because the agent is blocked on the user.
-  const lastSeg = segments[lastIdx];
-  const isAwaitingPermission = segments.some(
+  const lastSeg = displaySegments[lastIdx];
+  const isAwaitingPermission = displaySegments.some(
     (segment) => segment.kind === 'permission' && !segment.resolution,
   );
   const showStreamingIndicator =
@@ -159,7 +164,8 @@ export const AIMessage = memo(function AIMessage({
             // "expand to see tools" affordance.
             if (entry.toolGroups.length === 0) {
               const segStreaming =
-                isStreaming && segments.indexOf(entry.thinking) === lastIdx;
+                isStreaming &&
+                displaySegments.indexOf(entry.thinking) === lastIdx;
               return (
                 <ThinkingCard
                   key={`p${eIdx}`}
@@ -188,7 +194,7 @@ export const AIMessage = memo(function AIMessage({
           }
 
           const seg = group.segment;
-          const idx = segments.indexOf(seg);
+          const idx = displaySegments.indexOf(seg);
 
           if (seg.kind === 'plan') {
             return <PlanCard key={`l${eIdx}`} entries={seg.entries} />;

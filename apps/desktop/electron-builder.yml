@@ -62,6 +62,12 @@ extraResources:
   # throws "no such file" on first sketch rasterization.
   - from: ../server/dist-bundle/resvg-bg.wasm
     to: server/resvg-bg.wasm
+  # FFmpeg binaries, LGPL/GPL notices, audits, and macOS corresponding source.
+  # macOS carries both architectures; the server selects process.platform/arch.
+  - from: ../server/dist-bundle/media
+    to: server/media
+    filter:
+      - '**/*'
   - from: ../server/dist-bundle/prompt
     to: server/prompt
     filter:

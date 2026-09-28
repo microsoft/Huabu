@@ -179,6 +179,40 @@ describe('buildPlan — office enrich gating', () => {
   });
 });
 
+describe('buildPlan — video cover capability', () => {
+  it('extracts covers without text, paid providers or LLM capabilities', () => {
+    expect(planFor(req('video', { src: 'movie.mp4' }))).toEqual([
+      'resolve_input',
+      'extract_video_cover',
+      'persist_source',
+      'build_patch',
+    ]);
+  });
+
+  it('ignores label-only changes but extracts on source changes', () => {
+    expect(
+      planFor(
+        req(
+          'video',
+          { src: 'a.mp4', title: 'New' },
+          { src: 'a.mp4', title: 'Old' },
+        ),
+      ),
+    ).toEqual(['resolve_input', 'build_patch']);
+    expect(planFor(req('video', { src: 'b.mp4' }, { src: 'a.mp4' }))).toContain(
+      'extract_video_cover',
+    );
+  });
+
+  it('force retries even when the previous source is unchanged', () => {
+    expect(
+      planFor(
+        req('video', { src: 'a.mp4' }, { src: 'a.mp4' }, { force: true }),
+      ),
+    ).toContain('extract_video_cover');
+  });
+});
+
 describe('buildPlan — overrides & unchanged', () => {
   it('force runs the full profile regardless of gating', () => {
     const profile = getProfile('image')!;

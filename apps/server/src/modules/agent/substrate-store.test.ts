@@ -14,6 +14,11 @@ function harness() {
   const client = {
     query: vi.fn().mockResolvedValue({ rows: [] }),
     release: vi.fn(),
+    // A checked-out `pg` client is an EventEmitter, and the store listens on
+    // it for the duration of the checkout so an unexpected disconnection
+    // cannot raise an unhandled 'error' event and take the process down.
+    on: vi.fn(),
+    removeListener: vi.fn(),
   };
   const database = {
     connect: vi.fn().mockResolvedValue(client),

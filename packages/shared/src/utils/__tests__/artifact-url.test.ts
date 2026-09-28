@@ -4,11 +4,35 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  ARTIFACT_DATA_FIELDS,
   collectMarkdownArtifactRefs,
   markdownArtifactFields,
   parseArtifactRef,
   rewriteMarkdownArtifactRefs,
 } from '../artifact-url.js';
+
+describe('video artifact remapping', () => {
+  it('keeps cover source identity paired with src through the shared clone walk', () => {
+    const data: Record<string, unknown> = {
+      src: 'movie.mp4',
+      coverUrl: 'cover.jpg',
+      coverSourceSrc: 'movie.mp4',
+    };
+    const clones = new Map([
+      ['movie.mp4', 'copy.mp4'],
+      ['cover.jpg', 'copy.jpg'],
+    ]);
+    for (const field of ARTIFACT_DATA_FIELDS) {
+      const ref = parseArtifactRef(data[field]);
+      if (ref) data[field] = clones.get(ref.key) ?? data[field];
+    }
+    expect(data).toEqual({
+      src: 'copy.mp4',
+      coverUrl: 'copy.jpg',
+      coverSourceSrc: 'copy.mp4',
+    });
+  });
+});
 
 describe('markdownArtifactFields', () => {
   it('walks a note body', () => {

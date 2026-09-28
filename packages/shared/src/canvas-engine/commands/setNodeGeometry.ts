@@ -6,6 +6,7 @@ import { getFrameSizing } from '../frame/sizing.js';
 import { materializeAutoHeight } from '../height/materialize.js';
 import { getHeightPolicy } from '../height/policy.js';
 import { isAlwaysAutoHeightNodeType } from '../utils/nodeSizes.js';
+import { clampSpaceShortcutWidth } from '../utils/spaceShortcut.js';
 
 import type { CanvasCommand } from '../../index.js';
 import type { HeightMode } from '../../types/canvas/node.js';
@@ -55,8 +56,9 @@ const setNodeGeometry: CommandDefinition<Cmd> = {
     // && layoutMode === column|row` branch below so the grid solver
     // can re-flow.
     const resizedFrameIds = new Set<string>();
+    const nodeById = new Map(state.nodes.map((node) => [node.id, node]));
     for (const item of cmd.items) {
-      const node = state.nodes.find((n) => n.id === item.nodeId);
+      const node = nodeById.get(item.nodeId);
       if (node && node.type === 'frame') {
         resizedFrameIds.add(node.id);
       }
@@ -71,9 +73,13 @@ const setNodeGeometry: CommandDefinition<Cmd> = {
         updated = { ...updated, position: update.position };
       }
       if (update.size) {
+        const width =
+          updated.type === 'spacePreview'
+            ? clampSpaceShortcutWidth(update.size.width)
+            : update.size.width;
         const nextStyle = {
           ...updated.style,
-          width: update.size.width,
+          width,
         };
 
         // A height is authored only when it arrives as a number on a type
@@ -107,13 +113,13 @@ const setNodeGeometry: CommandDefinition<Cmd> = {
         };
         const nextMeasured: { width?: number; height?: number } = {
           ...prevMeasured,
-          width: update.size.width,
+          width,
         };
         if (wantsAutoHeight) {
           // A content-driven type has no number to offer until it renders;
           // leaving `measured.height` alone avoids briefly collapsing it.
           // For materializing types the height is filled in below.
-          delete nextStyle.height;
+          if (!materializes) delete nextStyle.height;
         } else {
           nextStyle.height = update.size.height as number;
           nextMeasured.height = update.size.height as number;
@@ -121,7 +127,10 @@ const setNodeGeometry: CommandDefinition<Cmd> = {
 
         updated = {
           ...updated,
-          data: withHeightMode(updated, wantsAutoHeight ? 'auto' : 'fixed'),
+          data: {
+            ...withHeightMode(updated, wantsAutoHeight ? 'auto' : 'fixed'),
+            ...(updated.type === 'spacePreview' && { widthMode: 'fixed' }),
+          },
           style: nextStyle,
           measured: nextMeasured,
         };
@@ -133,9 +142,8 @@ const setNodeGeometry: CommandDefinition<Cmd> = {
         // no hint exists yet the policy minimum stands in until a
         // measurement arrives.
         //
-        // This also covers a width-only change on an auto note: its
-        // content is transform-scaled by `width / refWidth`, so the
-        // layout height follows the new width.
+        // Width changes invalidate a Note's measurement. Keep its previous
+        // numeric height as a stale seed until the reflow is measured.
         if (materializes) {
           updated = materializeAutoHeight(updated);
         }
@@ -155,8 +163,7 @@ const setNodeGeometry: CommandDefinition<Cmd> = {
           !materializes &&
           updated.parentId &&
           !resizedFrameIds.has(updated.parentId) &&
-          getFrameSizing(state.nodes.find((n) => n.id === updated.parentId)) ===
-            'hug'
+          getFrameSizing(nodeById.get(updated.parentId)) === 'hug'
         ) {
           deferredFitFrameIds.add(updated.parentId);
         }

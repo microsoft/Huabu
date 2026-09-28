@@ -1,13 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import React, {
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import { Loading } from '@/components/Common/Loading';
 import { usePanelStore } from '@/store/panelStore';
@@ -22,6 +16,7 @@ interface MainLayoutProps {
 
 interface LayoutInjectedProps {
   isCollapsed?: boolean;
+  isContentMounted?: boolean;
   isHostCollapsed?: boolean;
   isFullscreen?: boolean;
   compact?: boolean;
@@ -29,18 +24,6 @@ interface LayoutInjectedProps {
   onToggle?: () => void;
   onToggleFullscreen?: () => void;
   onOpenChat?: typeof openChat;
-}
-
-export function resolveRightPanelVisible({
-  collapsed,
-  moving,
-  animatedVisible,
-}: {
-  collapsed: boolean;
-  moving: boolean;
-  animatedVisible: boolean;
-}): boolean {
-  return moving ? animatedVisible : !collapsed;
 }
 
 export const MainLayout = ({
@@ -65,11 +48,78 @@ export const MainLayout = ({
   );
 
   const contentRef = useRef<HTMLDivElement | null>(null);
+  const [focusedPanel, setFocusedPanel] = useState<string | null>(null);
+  useLayoutEffect(
+    () =>
+      usePanelStore.subscribe((state, previous) => {
+        const layout = contentRef.current;
+        const active = document.activeElement;
+        if (!layout || !(active instanceof HTMLElement)) return;
+        const panel = active.closest<HTMLElement>('[data-canvas-panel]');
+        if (!panel || !layout.contains(panel)) return;
+        const hidesLeft =
+          panel.dataset.canvasPanel === 'left' &&
+          !previous.isLeftCollapsed &&
+          state.isLeftCollapsed;
+        const hidesRight =
+          panel.dataset.canvasPanel === 'right' &&
+          (!previous.isRightCollapsed || previous.isPreviewFullscreen) &&
+          state.isRightCollapsed &&
+          !state.isPreviewFullscreen;
+        if (!hidesLeft && !hidesRight) return;
+        const destination =
+          layout.querySelector<HTMLElement>('[data-center-editor]') ??
+          (hidesLeft && (!state.isRightCollapsed || state.isPreviewFullscreen)
+            ? layout.querySelector<HTMLElement>('[data-canvas-panel="right"]')
+            : null);
+        (destination ?? layout).focus({ preventScroll: true });
+      }),
+    [],
+  );
+  useEffect(() => {
+    const updateOwner = (event: Event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const panel = target.closest<HTMLElement>('[data-canvas-panel]');
+      if (panel && contentRef.current?.contains(panel)) {
+        setFocusedPanel(panel.dataset.canvasPanel ?? null);
+      } else if (
+        !target.closest('[role="menu"], [role="dialog"], [role="listbox"]')
+      ) {
+        setFocusedPanel(null);
+        if (
+          event.type === 'pointerdown' &&
+          target.closest('[data-center-editor]') &&
+          !target.closest(
+            'input, textarea, select, button, a[href], [contenteditable="true"]',
+          )
+        ) {
+          target
+            .closest<HTMLElement>('[data-center-editor]')
+            ?.focus({ preventScroll: true });
+        }
+      }
+    };
+    document.addEventListener('focusin', updateOwner, true);
+    document.addEventListener('pointerdown', updateOwner, true);
+    return () => {
+      document.removeEventListener('focusin', updateOwner, true);
+      document.removeEventListener('pointerdown', updateOwner, true);
+    };
+  }, []);
+  const focusPanel = (event: React.PointerEvent<HTMLDivElement>) => {
+    const target = event.target;
+    const control =
+      target instanceof Element
+        ? target.closest(
+            'button, input, textarea, select, a[href], [contenteditable="true"], [tabindex]',
+          )
+        : null;
+    if (!control || control === event.currentTarget) {
+      event.currentTarget.focus({ preventScroll: true });
+    }
+  };
 
-  // Fixed pixel sizes to guarantee that collapsing side panels only affects
-  // the center panel width. Both sides collapse to 0 so the canvas takes
-  // over the full area; the Header and chat toggle are rendered as floating
-  // overlays in that mode.
   const COLLAPSED_LEFT_WIDTH_PX = 0;
   const COLLAPSED_RIGHT_WIDTH_PX = 0;
   const LEFT_MIN_WIDTH_PX = 200;
@@ -85,18 +135,60 @@ export const MainLayout = ({
 
   const [leftWidthPx, setLeftWidthPx] = useState(LEFT_DEFAULT_WIDTH_PX);
   const [rightWidthPx, setRightWidthPx] = useState(RIGHT_DEFAULT_WIDTH_PX);
-  // Suspends width transition while the user drags a resize handle so the
-  // panel tracks the cursor 1:1 instead of animating each pointer-move.
-  const [isResizing, setIsResizing] = useState(false);
-  const [isRightPanelVisible, setIsRightPanelVisible] =
-    useState(!isRightCollapsed);
-  const [isRightPanelMoving, setIsRightPanelMoving] = useState(false);
+  const [retainLeftContent, setRetainLeftContent] = useState(!isLeftCollapsed);
+  const leftContentMounted = !isLeftCollapsed || retainLeftContent;
+  useLayoutEffect(() => {
+    if (!isLeftCollapsed) {
+      setRetainLeftContent(true);
+      return;
+    }
+    const fallback = window.setTimeout(() => setRetainLeftContent(false), 300);
+    return () => window.clearTimeout(fallback);
+  }, [isLeftCollapsed]);
   const [isRestoringCanvas, setIsRestoringCanvas] = useState(false);
-  const committedRightCollapsedRef = useRef(isRightCollapsed);
-  const rightPanelMotionFallbackRef = useRef<number | null>(null);
   const restoreCanvasFrameRef = useRef<number | null>(null);
+  const [layoutWidth, setLayoutWidth] = useState<number | null>(null);
+  const resizeCleanupRef = useRef<(() => void) | null>(null);
+  useEffect(() => () => resizeCleanupRef.current?.(), []);
+
+  useLayoutEffect(() => {
+    const element = contentRef.current;
+    if (!element || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry.contentRect.width > 0) setLayoutWidth(entry.contentRect.width);
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
 
   const displayedPreviewFullscreen = isPreviewFullscreen && !isRestoringCanvas;
+  const [toolbarWidth, setToolbarWidth] = useState(0);
+  useLayoutEffect(() => {
+    const layout = contentRef.current;
+    if (!layout || typeof ResizeObserver === 'undefined') return;
+    let toolbar: HTMLElement | null = null;
+    const observer = new ResizeObserver(() => {
+      setToolbarWidth(toolbar?.getBoundingClientRect().width ?? 0);
+    });
+    const observeToolbar = () => {
+      const next = layout.querySelector<HTMLElement>(
+        '[data-canvas-main-toolbar]',
+      );
+      if (next === toolbar) return;
+      observer.disconnect();
+      toolbar = next;
+      setToolbarWidth(toolbar?.getBoundingClientRect().width ?? 0);
+      if (toolbar) observer.observe(toolbar);
+    };
+    const mutations = new MutationObserver(observeToolbar);
+    const host = layout.querySelector('[data-canvas-toolbar-layer]');
+    if (host) mutations.observe(host, { childList: true, subtree: true });
+    observeToolbar();
+    return () => {
+      observer.disconnect();
+      mutations.disconnect();
+    };
+  }, [displayedPreviewFullscreen]);
 
   const handleTogglePreviewFullscreen = () => {
     if (!isPreviewFullscreen) {
@@ -126,197 +218,146 @@ export const MainLayout = ({
     };
   }, [isPreviewFullscreen]);
 
-  const finishRightPanelMotion = () => {
-    if (rightPanelMotionFallbackRef.current !== null) {
-      window.clearTimeout(rightPanelMotionFallbackRef.current);
-      rightPanelMotionFallbackRef.current = null;
-    }
-    setIsRightPanelMoving(false);
-  };
-
-  // Commit the final flex layout immediately, then animate only compositor
-  // transforms. The zero-width closing slot right-aligns its absolute child,
-  // so the panel stays in its old visual position while it slides offscreen.
-  useLayoutEffect(() => {
-    if (committedRightCollapsedRef.current === isRightCollapsed) return;
-    committedRightCollapsedRef.current = isRightCollapsed;
-    setIsRightPanelMoving(true);
-
-    const frame = requestAnimationFrame(() => {
-      setIsRightPanelVisible(!isRightCollapsed);
-      // `transitionend` is authoritative. This only covers reduced motion,
-      // interrupted transitions, and environments that omit the event.
-      rightPanelMotionFallbackRef.current = window.setTimeout(
-        finishRightPanelMotion,
-        300,
-      );
-    });
-
-    return () => {
-      cancelAnimationFrame(frame);
-      if (rightPanelMotionFallbackRef.current !== null) {
-        window.clearTimeout(rightPanelMotionFallbackRef.current);
-        rightPanelMotionFallbackRef.current = null;
-      }
-      setIsRightPanelMoving(false);
-    };
-  }, [isRightCollapsed]);
-
-  const rightPanelVisible =
-    displayedPreviewFullscreen ||
-    resolveRightPanelVisible({
-      collapsed: isRightCollapsed,
-      moving: isRightPanelMoving,
-      animatedVisible: isRightPanelVisible,
-    });
-  const rightPanelMotionPending =
-    isRightPanelMoving ||
-    committedRightCollapsedRef.current !== isRightCollapsed;
-  const clipSettledRightPanel = isRightCollapsed && !rightPanelMotionPending;
-
+  const visibleLeftWidth =
+    layoutWidth === null
+      ? leftWidthPx
+      : Math.min(leftWidthPx, layoutWidth * LEFT_MAX_RATIO);
   const effectiveLeftWidthPx = isLeftCollapsed
     ? COLLAPSED_LEFT_WIDTH_PX
-    : leftWidthPx;
+    : visibleLeftWidth;
+  const visibleRightWidth =
+    layoutWidth === null
+      ? rightWidthPx
+      : Math.min(
+          rightWidthPx,
+          Math.max(0, layoutWidth - effectiveLeftWidthPx - CENTER_MIN_WIDTH_PX),
+        );
   const effectiveRightWidthPx = isRightCollapsed
     ? COLLAPSED_RIGHT_WIDTH_PX
-    : rightWidthPx;
+    : visibleRightWidth;
+  const toolbarCenter =
+    ((layoutWidth ?? 0) + effectiveLeftWidthPx - effectiveRightWidthPx) / 2;
+  const toolbarLeft = toolbarCenter - toolbarWidth / 2;
+  const toolbarRight = toolbarCenter + toolbarWidth / 2;
+  const toolbarHidden =
+    toolbarWidth > 0 &&
+    layoutWidth !== null &&
+    ((focusedPanel === 'left' && effectiveLeftWidthPx > toolbarLeft) ||
+      (focusedPanel === 'right' &&
+        layoutWidth - effectiveRightWidthPx < toolbarRight));
 
   const clamp = (value: number, min: number, max: number) =>
     Math.min(Math.max(value, min), max);
 
   const resizeHandleClassName =
-    'group flex w-1 shrink-0 items-center justify-center bg-transparent outline-none';
-  const resizeHandleInnerClassName =
-    'h-8 w-0.5 rounded-full bg-text-faded opacity-0 transition-all duration-300 group-hover:h-12 group-hover:opacity-100';
+    'absolute inset-y-0 z-10 w-1 touch-none bg-transparent outline-none';
 
   const leftHandleDisabled = isLeftCollapsed;
   const rightHandleDisabled =
     isRightCollapsed || displayedPreviewFullscreen || isRestoringCanvas;
 
-  const leftHandleClassName = `${resizeHandleClassName} ${
+  const leftHandleClassName = `${resizeHandleClassName} right-0 ${
     leftHandleDisabled ? 'hidden' : 'cursor-col-resize'
   }`;
 
-  const rightHandleClassName = `${resizeHandleClassName} ${
+  const rightHandleClassName = `${resizeHandleClassName} left-0 ${
     rightHandleDisabled ? 'hidden' : 'cursor-col-resize'
   }`;
 
-  const dragConstraints = useMemo(() => {
-    const totalWidth = contentRef.current?.getBoundingClientRect().width ?? 0;
-    return {
-      totalWidth,
-      minLeft: LEFT_MIN_WIDTH_PX,
-      minRight: RIGHT_MIN_WIDTH_PX,
-      minCenter: CENTER_MIN_WIDTH_PX,
-    };
-  }, [LEFT_MIN_WIDTH_PX, RIGHT_MIN_WIDTH_PX, CENTER_MIN_WIDTH_PX]);
+  const onResizePointerDown = (
+    side: 'left' | 'right',
+    event: React.PointerEvent<HTMLDivElement>,
+  ) => {
+    const isLeft = side === 'left';
+    const disabled = isLeft ? leftHandleDisabled : rightHandleDisabled;
+    const layout = contentRef.current;
+    if (disabled || event.button !== 0 || !layout) return;
+    resizeCleanupRef.current?.();
 
-  const onLeftHandlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (leftHandleDisabled) return;
+    const startX = event.clientX;
+    const startWidth =
+      event.currentTarget.parentElement?.getBoundingClientRect().width ??
+      (isLeft ? visibleLeftWidth : visibleRightWidth);
+    const pointerId = event.pointerId;
+    const setWidth = isLeft ? setLeftWidthPx : setRightWidthPx;
+    event.currentTarget.setPointerCapture(pointerId);
 
-    const startX = e.clientX;
-    const startLeft = leftWidthPx;
-
-    const target = e.currentTarget;
-    target.setPointerCapture(e.pointerId);
-    setIsResizing(true);
-
-    const onMove = (ev: PointerEvent) => {
-      const totalWidth =
-        contentRef.current?.getBoundingClientRect().width ??
-        dragConstraints.totalWidth;
-      const maxLeft = displayedPreviewFullscreen
-        ? totalWidth * LEFT_MAX_RATIO
-        : Math.min(
-            totalWidth - effectiveRightWidthPx - dragConstraints.minCenter,
-            totalWidth * LEFT_MAX_RATIO,
-          );
-      const nextLeft = clamp(
-        startLeft + (ev.clientX - startX),
-        dragConstraints.minLeft,
-        maxLeft,
+    const onMove = (move: PointerEvent) => {
+      if (move.pointerId !== pointerId) return;
+      const totalWidth = layout.getBoundingClientRect().width;
+      const maxWidth = isLeft
+        ? displayedPreviewFullscreen
+          ? totalWidth * LEFT_MAX_RATIO
+          : Math.min(
+              totalWidth - effectiveRightWidthPx - CENTER_MIN_WIDTH_PX,
+              totalWidth * LEFT_MAX_RATIO,
+            )
+        : totalWidth - effectiveLeftWidthPx - CENTER_MIN_WIDTH_PX;
+      setWidth(
+        clamp(
+          startWidth + (move.clientX - startX) * (isLeft ? 1 : -1),
+          isLeft ? LEFT_MIN_WIDTH_PX : RIGHT_MIN_WIDTH_PX,
+          maxWidth,
+        ),
       );
-      setLeftWidthPx(nextLeft);
     };
 
-    const onUp = () => {
+    const cleanup = () => {
       window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      setIsResizing(false);
+      window.removeEventListener('pointerup', onEnd);
+      window.removeEventListener('pointercancel', onEnd);
+      window.removeEventListener('blur', cleanup);
+      resizeCleanupRef.current = null;
+    };
+    const onEnd = (end: PointerEvent) => {
+      if (end.pointerId === pointerId) cleanup();
     };
 
     window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-  };
-
-  const onRightHandlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (rightHandleDisabled) return;
-
-    const startX = e.clientX;
-    const startRight = rightWidthPx;
-
-    const target = e.currentTarget;
-    target.setPointerCapture(e.pointerId);
-    setIsResizing(true);
-
-    const onMove = (ev: PointerEvent) => {
-      const totalWidth =
-        contentRef.current?.getBoundingClientRect().width ??
-        dragConstraints.totalWidth;
-      const maxRight =
-        totalWidth - effectiveLeftWidthPx - dragConstraints.minCenter;
-      // Dragging right handle to the right makes the right panel smaller.
-      const nextRight = clamp(
-        startRight - (ev.clientX - startX),
-        dragConstraints.minRight,
-        maxRight,
-      );
-      setRightWidthPx(nextRight);
-    };
-
-    const onUp = () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      setIsResizing(false);
-    };
-
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointerup', onEnd);
+    window.addEventListener('pointercancel', onEnd);
+    window.addEventListener('blur', cleanup);
+    resizeCleanupRef.current = cleanup;
   };
 
   return (
     <div
       ref={contentRef}
-      className="relative flex h-full w-full overflow-hidden"
+      className="relative flex h-full w-full overflow-clip"
+      data-overlay-layout
+      tabIndex={-1}
+      style={
+        {
+          '--canvas-inset-left': `${effectiveLeftWidthPx}px`,
+          '--canvas-inset-right': `${effectiveRightWidthPx}px`,
+        } as React.CSSProperties
+      }
       data-preview-fullscreen={displayedPreviewFullscreen ? 'true' : undefined}
       data-canvas-restoring={isRestoringCanvas ? 'true' : undefined}
     >
-      {/* Left Column: Header on top, Left Panel below — share the same width.
-          When collapsed the column shrinks to 0; the Header is rendered as a
-          floating overlay in the center area below. Children are kept mounted
-          but always in their expanded form so the parent's `overflow-hidden`
-          can cleanly clip them as the width animates to 0 — otherwise the
-          SidebarPanel's own collapsed 36px strip would briefly appear and
-          look like a vertical sliver pinned to the left edge.
-
-          The inner content is absolutely positioned at the natural expanded
-          width (`leftWidthPx`). Pinning the inner width decouples row
-          layout (truncate ellipsis, `ml-auto` action cluster, icon flex)
-          from the animated outer width — otherwise every frame of the
-          220ms transition would re-truncate labels and shift the action
-          cluster, producing visible jank. The outer simply clips the
-          inner via `overflow-hidden`. */}
       <div
-        className="relative shrink-0 overflow-hidden"
-        data-animate-width
-        data-resizing={isResizing ? 'true' : undefined}
+        className="bg-surface absolute inset-y-0 left-0 z-40 overflow-hidden outline-none"
+        data-canvas-panel="left"
+        data-collapsed={isLeftCollapsed ? 'true' : undefined}
+        tabIndex={-1}
+        onPointerDownCapture={focusPanel}
+        onTransitionEnd={(event) => {
+          if (
+            event.target === event.currentTarget &&
+            event.propertyName === 'transform' &&
+            usePanelStore.getState().isLeftCollapsed
+          ) {
+            setRetainLeftContent(false);
+          }
+        }}
         style={{
-          width: `${effectiveLeftWidthPx}px`,
+          width: `${visibleLeftWidth}px`,
         }}
       >
         <div
           className="absolute top-0 left-0 flex h-full flex-col"
-          style={{ width: `${leftWidthPx}px` }}
+          inert={isLeftCollapsed}
+          style={{ width: '100%' }}
         >
           <div className="shrink-0">
             {React.isValidElement(header)
@@ -336,22 +377,19 @@ export const MainLayout = ({
                   leftPanel as React.ReactElement<LayoutInjectedProps>,
                   {
                     isCollapsed: false,
+                    isContentMounted: leftContentMounted,
                     onToggle: toggleLeftPanel,
                   },
                 )
               : leftPanel}
           </div>
         </div>
-      </div>
-
-      {/* Left Resize Handle */}
-      <div
-        role="separator"
-        aria-orientation="vertical"
-        className={leftHandleClassName}
-        onPointerDown={onLeftHandlePointerDown}
-      >
-        <div className={resizeHandleInnerClassName} />
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          className={leftHandleClassName}
+          onPointerDown={(event) => onResizePointerDown('left', event)}
+        />
       </div>
 
       {/* Fullscreen Preview unmounts Canvas entirely. Hiding React Flow with
@@ -360,9 +398,9 @@ export const MainLayout = ({
           from canvasStore when this subtree mounts again. */}
       {!displayedPreviewFullscreen && (
         <div
-          className="relative min-w-0 flex-1"
+          className="absolute inset-0 isolate"
           data-center-editor
-          data-right-panel-motion={rightPanelMotionPending ? 'true' : undefined}
+          tabIndex={-1}
         >
           {isPreviewFullscreen ? (
             <Loading layout="block" className="bg-bg-default" />
@@ -394,7 +432,11 @@ export const MainLayout = ({
       {displayedPreviewFullscreen &&
         isLeftCollapsed &&
         React.isValidElement(header) && (
-          <div className="h-full w-12 shrink-0" data-fullscreen-header-rail>
+          <div
+            className="absolute inset-y-0 left-0 z-40 h-full w-12"
+            data-fullscreen-header-rail
+            data-canvas-panel="rail"
+          >
             {React.cloneElement(
               header as React.ReactElement<LayoutInjectedProps>,
               {
@@ -407,49 +449,27 @@ export const MainLayout = ({
           </div>
         )}
 
-      {/* Right Resize Handle */}
       <div
-        role="separator"
-        aria-orientation="vertical"
-        className={rightHandleClassName}
-        onPointerDown={onRightHandlePointerDown}
-      >
-        <div className={resizeHandleInnerClassName} />
-      </div>
-
-      {/* Right Panel — the outer slot jumps to its final width so Canvas only
-          resizes once. The fixed-width inner panel and React Flow viewport
-          then animate their compositor transforms to the same final layout.
-          While closing, the zero-width slot right-aligns the absolute inner
-          panel so it can slide offscreen instead of disappearing immediately. */}
-      <div
-        className={`relative ${
-          displayedPreviewFullscreen ? 'min-w-0 flex-1' : 'shrink-0'
-        } ${displayedPreviewFullscreen || clipSettledRightPanel ? 'overflow-hidden' : ''}`}
+        className="bg-surface absolute inset-y-0 right-0 z-40 overflow-hidden outline-none"
         data-right-panel-slot
-        data-collapsed={isRightCollapsed ? 'true' : undefined}
-        data-moving={isRightPanelMoving ? 'true' : undefined}
-        data-resizing={isResizing ? 'true' : undefined}
+        data-canvas-panel="right"
+        data-collapsed={
+          isRightCollapsed && !displayedPreviewFullscreen ? 'true' : undefined
+        }
+        tabIndex={-1}
+        onPointerDownCapture={focusPanel}
         style={{
           width: displayedPreviewFullscreen
-            ? undefined
-            : `${effectiveRightWidthPx}px`,
+            ? `calc(100% - ${isLeftCollapsed ? 48 : effectiveLeftWidthPx}px)`
+            : `${visibleRightWidth}px`,
         }}
       >
         <div
           className="absolute top-0 h-full"
           data-right-panel-content
-          data-visible={rightPanelVisible ? 'true' : undefined}
+          inert={isRightCollapsed && !displayedPreviewFullscreen}
           style={{
-            width: displayedPreviewFullscreen ? '100%' : `${rightWidthPx}px`,
-          }}
-          onTransitionEnd={(event) => {
-            if (
-              event.target === event.currentTarget &&
-              event.propertyName === 'transform'
-            ) {
-              finishRightPanelMotion();
-            }
+            width: '100%',
           }}
         >
           {React.isValidElement(rightPanel)
@@ -465,7 +485,22 @@ export const MainLayout = ({
               )
             : rightPanel}
         </div>
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          className={rightHandleClassName}
+          onPointerDown={(event) => onResizePointerDown('right', event)}
+        />
       </div>
+      {!displayedPreviewFullscreen && (
+        <div
+          data-canvas-toolbar-layer
+          data-hidden={toolbarHidden ? 'true' : undefined}
+          inert={toolbarHidden}
+          aria-hidden={toolbarHidden || undefined}
+          className="pointer-events-none absolute inset-0 z-50"
+        />
+      )}
     </div>
   );
 };

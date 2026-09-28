@@ -1,7 +1,7 @@
 # Multi-Backend Storage
 
-Status: Phases 1–5 implemented; Phase 6 adapter foundation implemented; activation follows
-Last updated: 2026-09-14
+Status: Phases 1–5 implemented; Phase 6 implemented — Postgres, Azure, and async agent persistence
+Last updated: 2026-09-20
 
 > **Scope and decision confidence.** This proposal records the two-port
 > `StructuredStore` / `BlobStore` split and their target backend families as
@@ -59,15 +59,7 @@ Last updated: 2026-09-14
 > harness, **implemented**). §12 is the authoritative plan;
 > the decision table in §2 marks what each step has actually settled.
 >
-> Phase 5 is specified in §12.9 and is **implemented by this branch**.
-> `HUABU_STRUCTURED_BACKEND=sqlite` is a real profile: Workspaces, Spaces,
-> nodes, logs, Tasks, and agent conversations are rows in one database file
-> under `<data dir>/storage/sqlite/`, and the deployment needs no Workspace
-> folder and no Space directories. The blob axis stays `disk`, because bytes
-> are always files — SQL records beside ordinary files is the profile, not a
-> compromise within it. What it does **not** serve is enumerated in §12.9.4
-> and declared in `storage/capabilities.ts`, which is the list an operator
-> sees at startup. Postgres and Azure adapters still do not exist.
+> Phase 5 is specified in §12.9 and is **merged to main in PR #92**. `HUABU_STRUCTURED_BACKEND=sqlite` is a real profile: Workspaces, Spaces, nodes, logs, Tasks, and agent conversations are rows in one database file under `<data dir>/storage/sqlite/`, and the deployment needs no Workspace folder and no Space directories. The blob axis may stay `disk`, because bytes are always files — SQL records beside ordinary files is the profile, not a compromise within it. What it does **not** serve is enumerated in §12.9.4 and declared in `storage/capabilities.ts`, which is the list an operator sees at startup. Phase 6 (§12.10) adds selectable Postgres and Azure adapters, including asynchronous Agenetes persistence; all six axis pairings are supported within the existing single-Server topology and capability declarations.
 
 ---
 
@@ -97,8 +89,8 @@ built above these ports, but its form is intentionally unresolved here.
 | Topic                                                  | Status                    | Current position                                                                                                                                                                                                                                                                                                                                                                                                 |
 | ------------------------------------------------------ | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Separate authoritative structured and blob ports       | **Accepted** (P1, merged) | Storage is composed from `StructuredStore` and `BlobStore`; there is no single backend interface that mixes both concerns.                                                                                                                                                                                                                                                                                       |
-| Structured backend family                              | **Settled direction**     | Support Disk, SQLite, and Postgres implementations. Disk and SQLite are selectable; Postgres has no adapter.                                                                                                                                                                                                                                                                                                     |
-| Blob backend family                                    | **Settled direction**     | Support Disk and Azure Blob implementations — both file systems. Only Disk exists. A structured backend never holds bytes, so the two axes share nothing and any implemented pairing is a valid deployment.                                                                                                                                                                                                      |
+| Structured backend family                              | **Settled direction**     | Support Disk, SQLite, and Postgres implementations. Disk, SQLite, and Postgres are selectable (§12.10).                                                                                                                                                                                                                                                                                                          |
+| Blob backend family                                    | **Settled direction**     | Disk and Azure Blob are implemented and selectable (§12.10). A structured backend never holds bytes, so the two axes share nothing and any implemented pairing is a valid deployment.                                                                                                                                                                                                                            |
 | Independent composition                                | **Accepted** (P1, merged) | `StorageProfile` has two env-parsed axes; `validateStorageProfile` fails fast on unimplemented kinds and is the extension point for combination rules. The lazy `getStorage()` path now rejects profiles whose adapters require awaited initialization (§12.1.1).                                                                                                                                                |
 | Blob port contract                                     | **Accepted** (P1, merged) | Connection → scope, stream-oriented, no permanent absolute path in the common contract; `materialize()` returns a bounded lease for the one consumer needing a file. Replacement atomicity and post-release lease semantics are contract terms, not adapter accidents (§6.2, §12.1.1).                                                                                                                           |
 | Concrete interface shape and async migration           | **Accepted** (P4)         | Blob and portable structured repositories are async. `StructuredStore` exposes catalogue/lifecycle and scoped Space handles; the structured mutations enumerated in §12.4 use those ports. Disk-only physical capabilities remain explicit blockers for selecting another profile.                                                                                                                               |
@@ -153,8 +145,7 @@ external-note discovery watches `nodes/`, and export archives the entire Space
 directory. Therefore wrapping `CanvasStore` in a database adapter would not by
 itself make the application backend-neutral.
 
-Runtime Canvas/Space persistence is Disk by default and SQLite by selection
-(§12.9). Postgres and Azure Blob adapters do not yet exist.
+Runtime Canvas/Space persistence defaults to Disk. SQLite (§12.9) and Postgres (§12.10) are selectable, and each structured backend composes with Disk or Azure Blob storage. Filesystem capabilities remain explicitly declared.
 
 ## 4. Goals
 
@@ -175,9 +166,7 @@ Runtime Canvas/Space persistence is Disk by default and SQLite by selection
 
 ## 5. Non-goals
 
-- Selecting a production ORM, SQL query builder, Postgres driver, or final
-  SQLite driver. The isolated Phase 5 preview uses built-in `node:sqlite`
-  without making that production choice.
+- Introducing an ORM or generic query builder. SQLite uses `node:sqlite`; Postgres uses `pg`, with native transaction ownership in each adapter.
 - Defining the final relational schema or migration framework.
 - Choosing a VFS, FUSE, materialization, cache, or write-back design.
 - Replacing RFS or the canonical `SpaceQuery` / `CanvasCommand` contracts in
@@ -228,9 +217,7 @@ move L2 persistence ownership back into `CanvasStore`.
 
 Every current Canvas structured port is asynchronous so a synchronous Disk or
 SQLite implementation does not constrain Postgres or another remote adapter.
-The corresponding migration for Agenetes ports that are synchronous today
-remains future work; a blocking compatibility facade over Postgres is not an
-acceptable end state.
+Phase 6 migrates Agenetes persistence and extension-document helpers to await asynchronous stores, preserving persist-before-notify and ordered writes.
 
 **As implemented**, Phase 1 landed `StructuredStore` as a backend-selection
 boundary whose handle was still synchronous and filename-shaped. Phase 2
@@ -960,10 +947,7 @@ explicitly:
 
 ## 12. Migration plan
 
-Phases 1–4.5 are implemented and merged. Phase 5 is implemented by this
-isolated contract preview. Phase 6 onward keeps the provisional character of
-the original outline: those entries record intended order, not approved
-designs.
+Phases 1–5 are implemented and merged. Phase 6 adds the remaining adapters, async agent persistence, and full Postgres profile activation. Phase 7 onward remains provisional: those entries record intended order, not approved designs.
 
 The current on-disk format remains readable throughout port extraction. A
 database adapter must not require Disk consumers to simulate tables, and the
@@ -2756,16 +2740,26 @@ across a switch, and forget-without-delete. The Agenetes conversation stores
 have their own suite against a mounted profile, covering round-trip,
 isolation, restart, and destruction with the Space.
 
-### 12.10 Phase 6 — adapter foundation and application activation
+### 12.10 Phase 6 — Postgres, Azure Blob, and async agent persistence — **implemented**
 
-Phase 6 is split into two reviewable steps. This foundation implements native Postgres structured repositories and Azure Blob storage, shared SQL codecs, validation, name allocation, and Task/Run rules, plus async extension-document helpers. Existing Disk and SQLite behavior remains covered by its tests. `pnpm test:storage-backends` uses Vitest global setup and Testcontainers to provision disposable PostgreSQL 18 and Azurite services and runs the adapter contracts, including rollback, independent connection CAS, Workspace isolation, staged-upload failure, and same-key upload serialization. The suite also exercises fresh and existing v1 schemas, migration failure recovery, database constraints, multi-batch reads, extension documents, and deletion cascades. Competing writes use independent PostgreSQL pools. Each test owns an isolated schema or blob container; Testcontainers owns service readiness and teardown, including partial startup failures. Docker is required and missing infrastructure fails the suite. CI runs the same command. Co-located unit suites run with the normal server test command and cover SQL rules, adapter validation and failures, and container lifecycle without Docker.
+Phase 6 was reviewed as two stacked changes: an independently verified adapter foundation (shared SQL logic, native adapters, extension documents, and CI), then async Agenetes persistence, application activation, and product coverage. Both are implemented, and the split now survives only in the commit history.
 
-This foundation does not select the new adapters for the application. The stacked follow-up migrates Agenetes persistence and its callers to async, activates all six structured/blob pairings, and adds conversation and product coverage to the same harness. The earlier phase sections below and above record their original scope; this section defines the current Phase 6 split.
+- **Postgres:** an asynchronous `pg` adapter for Workspaces, Space catalogue, lifecycle, nodes, ordered record/node/delta writes, events, changes, Tasks, and extension parent rows. Real PostgreSQL transactions preserve CAS, revision safety, name allocation, and rejected-batch rollback. Adapter transactions serialize under a database advisory lock, and contexts that resolve to the same database and schema share one process-local deletion gate and transaction queue so a peer pool cannot acknowledge a write that a pending deletion is about to remove. Neither mechanism claims multi-Server application support or a distributed deletion fence across blob I/O.
+- **Azure Blob:** streamed block staging with atomic publication, metadata, inclusive range reads, bounded existence queries, listing, temporary-file materialization leases, and deletion of all Space areas. Keys include a deployment prefix, Workspace identity, Space id, and area, and blob names escape what Azure would otherwise trim so distinct names cannot collapse. Operators own container provisioning and credentials; Space deletion never deletes the container. Same-key staging/commit uses the shared process-local keyed mutex because an Azure commit discards competing uncommitted blocks. Independent keys upload concurrently; distributed writer coordination remains future work.
+- **Shared SQL behavior:** SQLite and Postgres share JSON encoding/decoding, title and label allocation, validation, and Task/Run transitions. Synchronous SQLite transactions and asynchronous Postgres transactions remain separate owners; SQLite's immutable migration history is preserved.
+- **Async agent persistence and activation:** Agenetes accepts synchronous or asynchronous ThreadStore, EventLogStore, and TurnStore implementations. Its create/fork/rehome/close, host-metadata merge, and durable read surfaces return promises; callers await them. Event appends persist before publication, state reports queue before notifications, close drains pending reports, and lifecycle operations serialize across rehome's compensation boundary. Postgres conversation tables — threads, events, turns, and turn generations — are owned by Agenetes and cascade with their extension parent, and a history cursor is refused across a wholesale replacement exactly as it is on SQLite. Memory bookkeeping and debug prompt documents also persist on Postgres. All six structured/blob pairings are selectable, and Postgres never falls back to local conversation files or an in-memory named namespace.
+- **Verification:** `pnpm test:storage-backends` provisions disposable PostgreSQL 18 and Azurite services through Vitest global setup and Testcontainers, and CI runs the same command separately from ordinary tests. Each case owns an isolated schema or container; Testcontainers owns readiness and teardown, including partial startup failures, Docker is required, and missing infrastructure fails the suite. Coverage spans fresh and existing v1 schemas, migration failure recovery, database constraints, multi-batch reads, independent-connection CAS and name allocation, Workspace isolation and restart, peer deletion admission and draining, extension documents and deletion cascades, conversation round-trip, paging, and rehome compensation, staged-upload failure, multiblock and zero-byte uploads, ranges, temporary lease cleanup, and all six product profiles. Async runtime tests delay and reject persistence to verify ordering and notification behavior. Co-located unit suites run with the normal server test command and cover SQL rules, adapter validation and failures, and container lifecycle without Docker. Azurite evidence does not replace a cloud-account probe.
+
+Configuration (credentials belong in deployment environment/secret management):
+
+- `HUABU_STRUCTURED_BACKEND=disk|sqlite|postgres` (default `disk`).
+- `HUABU_BLOB_BACKEND=disk|azure` (default `disk`).
+- Postgres requires `HUABU_POSTGRES_URL`, a `pg` connection URL. The selected database/schema must be dedicated to Huabu and permit table, index, and extension-owner table creation. TLS is configured through the connection URL.
+- Azure requires `HUABU_AZURE_STORAGE_CONNECTION_STRING` and `HUABU_AZURE_BLOB_CONTAINER` for an existing private container. Optional `HUABU_AZURE_BLOB_PREFIX` defaults to `huabu`; use a distinct prefix/container for each deployment. The connection must permit read, list, write, and delete.
+- SQL records with Disk blobs still use `HUABU_BLOB_ROOT` (or the existing data-directory default). Local runtime state and temporary materializations require local disk even with Postgres and Azure.
 
 ### 12.11 Later phases — provisional
 
-6. Migrate the currently synchronous Agenetes persistence ports without
-   changing their persist-before-notify, sequence, and fencing semantics.
 7. Refactor RFS and built-in file tools only after a logical file-view contract
    is accepted, if that option is chosen.
 8. Prototype native CLI access separately and decide between protocol-only,

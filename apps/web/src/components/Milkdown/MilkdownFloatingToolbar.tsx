@@ -49,7 +49,7 @@ import { cn } from '@/components/Common/cn';
 import { FLOATING_CHROME_PROPS } from '@/components/Common/floatingChrome';
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
 import { Input } from '@/components/Common/Input';
-import { getAccentTokens } from '@/components/Nodes/accentTokens';
+import { getAccentTokens } from '@/components/Nodes/design/accentTokens';
 import { useCloseOnEscape } from '@/hooks/useCloseOnEscape';
 import { useTrackAttention } from '@/hooks/useTrackAttention';
 import { useAnyGlobalModalOpen } from '@/store/globalModalUi';

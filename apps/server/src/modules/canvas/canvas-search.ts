@@ -248,25 +248,25 @@ function buildThreadHaystack(
 
 /**
  * Emit all conversation matches for one threaded node. Reads the node's
- * chat thread synchronously (one `<threadId>.turns.jsonl` read), so the
- * caller must gate this on `fields.has('conversation')` and the global
- * limit before invoking. No-op when the node owns no thread or the
- * thread is empty.
+ * chat thread asynchronously through Agenetes and the configured storage
+ * backend. The caller must gate this on `fields.has('conversation')` and
+ * the global limit before invoking. No-op when the node owns no thread
+ * or the thread is empty.
  */
-function scanNodeConversation(
+async function scanNodeConversation(
   node: SearchableNode,
   canvasId: string,
   label: string | null,
   needleLower: string,
   needleLen: number,
   tryEmit: (match: CanvasSearchMatch) => boolean,
-): void {
+): Promise<void> {
   if (!node.threadId) return;
   const namespace = canvasAcpNamespace(canvasId);
-  const { turns } = agenetes.history(namespace, node.threadId);
+  const { turns } = await agenetes.history(namespace, node.threadId);
   if (turns.length === 0) return;
   const recoverInternalToolNames =
-    agenetes.record(namespace, node.threadId)?.spec.kind ===
+    (await agenetes.record(namespace, node.threadId))?.spec.kind ===
     INTERNAL_DRIVER_KIND;
   const haystack = buildThreadHaystack(turns, recoverInternalToolNames);
   if (haystack.length === 0) return;
@@ -694,7 +694,7 @@ export async function searchCanvas(
       }
       const content = contentByNodeId.get(node.id);
       const label = content?.label ?? null;
-      scanNodeConversation(
+      await scanNodeConversation(
         node,
         handle.canvasId,
         label,

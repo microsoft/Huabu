@@ -6,8 +6,8 @@
  *
  * A persisted intrinsic height is only meaningful together with proof of
  * *what it was measured against*. That proof is the {@link AutoHeightKey}:
- * the rendering-pipeline version plus the node's content revision. If
- * either has moved, the stored number is a usable footprint but not a
+ * the rendering-pipeline version, content revision, and inner width. If
+ * any has moved, the stored number is a usable footprint but not a
  * correct one.
  *
  * The rule this module exists to enforce: **freshness is never
@@ -17,6 +17,7 @@
  */
 
 import { nodeRevisionOf } from '../change.js';
+import { autoHeightContentWidth } from './compute.js';
 
 import type { AutoHeightHint } from '../../types/canvas/node.js';
 import type { Node } from '@xyflow/react';
@@ -29,17 +30,17 @@ import type { Node } from '@xyflow/react';
  * measurement rule itself. Every stored hint becomes `stale` on the next
  * load, which costs one re-measurement per node and nothing else.
  */
-export const HEIGHT_LAYOUT_VERSION = 4;
+export const HEIGHT_LAYOUT_VERSION = 14;
 
 /**
  * Identity of the thing an intrinsic height was measured against.
- * Format: `` `${HEIGHT_LAYOUT_VERSION}:${nodeRevisionOf({ content })}` ``.
+ * Format: `` `${HEIGHT_LAYOUT_VERSION}:${revision}:${contentWidth}` ``.
  *
  * Kept as one opaque string rather than separate fields because callers
  * only ever ask "does this still apply?", which is one comparison. The
- * node's width is deliberately *not* part of the key: it is a stored
- * property of the node, and the conversion from intrinsic to layout
- * height already accounts for it.
+ * content width is in canvas units, excluding shell borders but including
+ * host padding. Resizing reflows the document and invalidates the hint;
+ * viewport zoom and node height do not.
  */
 export type AutoHeightKey = string;
 
@@ -56,7 +57,7 @@ export function autoHeightKey(node: Node): AutoHeightKey {
     content: typeof data?.content === 'string' ? data.content : undefined,
     src: typeof data?.src === 'string' ? data.src : undefined,
   });
-  return `${HEIGHT_LAYOUT_VERSION}:${revision}`;
+  return `${HEIGHT_LAYOUT_VERSION}:${revision}:${autoHeightContentWidth(node)}`;
 }
 
 /**
@@ -64,7 +65,7 @@ export function autoHeightKey(node: Node): AutoHeightKey {
  *
  * - `current` — measured against the node as it is now. Usable as-is.
  * - `stale` — a real measurement, but of different content or a different
- *   rendering pipeline. Usable as a seed; must be re-measured.
+ *   rendering pipeline or width. Usable as a seed; must be re-measured.
  * - `missing` — nothing stored. The node has no footprint at all, which
  *   makes it the highest-value target for prewarming.
  */

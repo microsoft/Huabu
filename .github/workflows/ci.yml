@@ -73,3 +73,135 @@ jobs:
         env:
           DOCS_BASE_PATH: /Huabu/
           DOCS_CANONICAL_ORIGIN: https://microsoft.github.io
+
+  # The storage-profile acceptance suite is the only coverage that drives a
+  # real deployment: a Space made through the UI, bytes through the blob
+  # backend, and the server process replaced underneath it. It runs here
+  # rather than by hand so the Postgres/Azure pairing cannot rot unnoticed.
+  #
+  # The Agent half of the suite needs provider credentials and skips without
+  # them, so what this job proves is the storage half and the restart harness.
+  # See apps/web/e2e/storage-profiles-acceptance.md.
+  storage-profile-e2e:
+    name: Storage profile e2e (${{ matrix.structured }}/${{ matrix.blobs }})
+    needs: quality
+    runs-on: ubuntu-latest
+    env:
+      HUABU_AZURE_BLOB_CONTAINER: huabu-e2e
+    strategy:
+      # One red pairing should not hide the state of the other.
+      fail-fast: false
+      matrix:
+        include:
+          - structured: disk
+            blobs: disk
+          - structured: postgres
+            blobs: azure
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: huabutest
+          POSTGRES_PASSWORD: huabutest
+          POSTGRES_DB: huabu_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      # The backend runs from source under tsx, so it needs the workspace
+      # packages built for the same reason the typecheck step does.
+      - name: Build workspace protocol/runtime packages
+        run: pnpm run build:agentlet && pnpm run build:agenetes
+
+      # Mirrors the Testcontainers setup in
+      # `apps/server/src/test-support/storage-containers.ts`: the same pinned
+      # digest, the same `azurite-blob --blobHost 0.0.0.0
+      # --skipApiVersionCheck` command, and an account minted for the run. A
+      # `services:` container cannot express that command, and the flag is not
+      # optional — the Azure SDK here sends an API version stock Azurite
+      # rejects.
+      - name: Start Azurite
+        if: matrix.blobs == 'azure'
+        run: |
+          key="$(openssl rand -base64 32)"
+          docker run -d --name azurite -p 10000:10000 \
+            -e AZURITE_ACCOUNTS="huabutest:${key}" \
+            mcr.microsoft.com/azure-storage/azurite@sha256:830430c1da1a2d537e08f3e6764dd1f5ae00cf0346bcaf625b968ec3f0971fd5 \
+            azurite-blob --blobHost 0.0.0.0 --skipApiVersionCheck
+          for _ in $(seq 1 60); do
+            if docker logs azurite 2>&1 | grep -q 'successfully listens'; then
+              echo "HUABU_AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=http;AccountName=huabutest;AccountKey=${key};BlobEndpoint=http://127.0.0.1:10000/huabutest;" >> "$GITHUB_ENV"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo 'Azurite never reported a listening blob service'
+          docker logs azurite
+          exit 1
+
+      # `AzureBlobStore.init` validates the container rather than creating it —
+      # provisioning it is the operator's job, and a fresh Azurite has none.
+      # This is the step that stands in for the operator; the Testcontainers
+      # path does the same in `backends/azure/test-support.ts`.
+      - name: Create the blob container
+        if: matrix.blobs == 'azure'
+        working-directory: apps/server
+        run: |
+          node -e "
+          const { BlobServiceClient } = require('@azure/storage-blob');
+          BlobServiceClient.fromConnectionString(
+            process.env.HUABU_AZURE_STORAGE_CONNECTION_STRING,
+          )
+            .getContainerClient(process.env.HUABU_AZURE_BLOB_CONTAINER)
+            .createIfNotExists()
+            .then(() => console.log('blob container ready'))
+            .catch((error) => {
+              console.error(error);
+              process.exit(1);
+            });
+          "
+
+      - name: Install Chromium
+        run: pnpm --filter @huabu/web exec playwright install --with-deps chromium
+
+      - name: Storage profile acceptance
+        run: |
+          pnpm --filter @huabu/web exec playwright test \
+            --config playwright.storage-profiles.config.ts
+        env:
+          HUABU_STRUCTURED_BACKEND: ${{ matrix.structured }}
+          HUABU_BLOB_BACKEND: ${{ matrix.blobs }}
+          HUABU_POSTGRES_URL: postgresql://huabutest:huabutest@127.0.0.1:5432/huabu_test
+          HUABU_AZURE_BLOB_PREFIX: run-${{ github.run_id }}-${{ matrix.structured }}
+
+      # A browser failure is not readable from a log line. The config keeps a
+      # trace on failure and a screenshot per step; without them a red run
+      # here would be a bisect rather than a diagnosis.
+      - name: Upload Playwright artifacts
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: storage-profile-e2e-${{ matrix.structured }}-${{ matrix.blobs }}
+          path: apps/web/test-results/storage-profiles
+          retention-days: 7
+          if-no-files-found: ignore

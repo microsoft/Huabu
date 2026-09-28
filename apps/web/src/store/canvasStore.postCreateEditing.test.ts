@@ -49,7 +49,6 @@ function resetStore() {
   });
   usePanelStore.setState({
     isRightCollapsed: true,
-    rightPanelAnchorNodeId: null,
     focusChatInputRequest: null,
   });
 }
@@ -163,8 +162,41 @@ describe('post-create editing', () => {
     expect(expandedNodeId()).toBe('node-note');
     expect(usePanelStore.getState()).toMatchObject({
       isRightCollapsed: false,
-      rightPanelAnchorNodeId: 'node-note',
     });
+  });
+
+  it('browses nodes transiently by default without growing the tab strip', () => {
+    const first = openPreviewNode('node-first');
+    expect(
+      usePreviewWorkspaceStore.getState().workspace.tabs[first].transient,
+    ).toBe(true);
+    expect(openPreviewNode('node-first')).toBe(first);
+    expect(
+      usePreviewWorkspaceStore.getState().workspace.tabs[first].transient,
+    ).toBe(true);
+    const second = openPreviewNode('node-second', {});
+    expect(second).toBe(first);
+    expect(expandedNodeId()).toBe('node-second');
+    expect(
+      Object.keys(usePreviewWorkspaceStore.getState().workspace.tabs),
+    ).toHaveLength(1);
+  });
+
+  it('requires an explicit permanent open and preserves it during later browsing', () => {
+    const kept = openPreviewNode('node-kept');
+    expect(openPreviewNode('node-kept', { transient: false })).toBe(kept);
+    expect(
+      usePreviewWorkspaceStore.getState().workspace.tabs[kept].transient,
+    ).toBe(false);
+    expect(openPreviewNode('node-kept')).toBe(kept);
+    expect(
+      usePreviewWorkspaceStore.getState().workspace.tabs[kept].transient,
+    ).toBe(false);
+    const inspection = openPreviewNode('node-inspection');
+    expect(inspection).not.toBe(kept);
+    expect(
+      Object.keys(usePreviewWorkspaceStore.getState().workspace.tabs),
+    ).toHaveLength(2);
   });
 
   it('closes the node preview without collapsing the workspace', () => {

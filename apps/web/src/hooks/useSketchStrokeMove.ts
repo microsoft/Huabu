@@ -266,6 +266,9 @@ export function useSketchStrokeMove({
 
   const onPointerDown = useCallback(
     (event: PointerEvent): boolean => {
+      if (useGesturePreviewStore.getState().inkSubmissionPreparing) {
+        return false;
+      }
       const inst = rfInstanceRef.current;
       if (!inst) return false;
       // Drag any whole nodes the lasso also selected together with the
@@ -354,8 +357,25 @@ export function useSketchStrokeMove({
     [rfInstanceRef],
   );
 
+  const cancel = useCallback((event: PointerEvent) => {
+    const drag = dragRef.current;
+    if (drag?.pointerId !== event.pointerId) return;
+    dragRef.current = null;
+    endCanvasGesture(event.pointerId);
+    useGesturePreviewStore.getState().setSketchStrokeMovePreview(null);
+    useGesturePreviewStore.getState().setSketchStrokeMoveCarriedNodeIds([]);
+    useGesturePreviewStore.getState().clearFrameFitPreview();
+    if (drag.nodeDragStarted) {
+      useCanvasStore.getState().cancelActiveNodeDrag();
+    }
+  }, []);
+
   const onPointerMove = useCallback(
     (event: PointerEvent) => {
+      if (useGesturePreviewStore.getState().inkSubmissionPreparing) {
+        cancel(event);
+        return;
+      }
       const drag = dragRef.current;
       if (!drag || drag.pointerId !== event.pointerId) return;
       const inst = rfInstanceRef.current;
@@ -428,134 +448,138 @@ export function useSketchStrokeMove({
         updateFrameDropPreviewForStrokeDrag(cur, { dx, dy });
       }
     },
-    [rfInstanceRef],
+    [cancel, rfInstanceRef],
   );
 
-  const commit = useCallback((event: PointerEvent) => {
-    const drag = dragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
-    dragRef.current = null;
-    endCanvasGesture(event.pointerId);
+  const commit = useCallback(
+    (event: PointerEvent) => {
+      if (useGesturePreviewStore.getState().inkSubmissionPreparing) {
+        cancel(event);
+        return;
+      }
+      const drag = dragRef.current;
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      dragRef.current = null;
+      endCanvasGesture(event.pointerId);
 
-    const preview = useGesturePreviewStore.getState();
-    const offset = preview.sketchStrokeMovePreview;
-    preview.setSketchStrokeMovePreview(null);
-    preview.setSketchStrokeMoveCarriedNodeIds([]);
-    preview.clearFrameFitPreview();
-    const moved = !!offset && (offset.dx !== 0 || offset.dy !== 0);
-    const store = useCanvasStore.getState();
+      const preview = useGesturePreviewStore.getState();
+      const offset = preview.sketchStrokeMovePreview;
+      preview.setSketchStrokeMovePreview(null);
+      preview.setSketchStrokeMoveCarriedNodeIds([]);
+      preview.clearFrameFitPreview();
+      const moved = !!offset && (offset.dx !== 0 || offset.dy !== 0);
+      const store = useCanvasStore.getState();
 
-    // Stage 4B: a PURE stroke selection (no whole-node drag) dropped onto a
-    // DIFFERENT region or empty canvas is a cross-region transfer — split
-    // into a new region or merge into another — rather than a Stage-2
-    // in-node translate. Mixed selections keep the in-node behaviour below.
-    if (moved && offset && !drag.nodeDragStarted) {
-      const inst = rfInstanceRef.current;
-      const sel = preview.sketchStrokeSelection;
-      const sourceIds = Object.keys(sel).filter(
-        (id) => (sel[id]?.length ?? 0) > 0,
-      );
-      if (inst && sourceIds.length > 0) {
-        const dropFlow = inst.screenToFlowPosition({
-          x: event.clientX,
-          y: event.clientY,
-        });
-        const decision = resolveStrokeDropTarget(
-          store.nodes,
-          dropFlow,
-          sourceIds,
-        );
-        if (decision.kind !== 'in-node') {
-          const sources = sourceIds.map((id) => ({
-            nodeId: id,
-            strokeIds: sel[id],
-          }));
-          // The strokes are about to move to a new / other node, so the
-          // per-node selection map and retained lasso loop no longer
-          // describe them — clear the transient selection first.
+      if (!moved) {
+        preview.clearSketchStrokeHighlight();
+        if (!preview.inkSubmissionPreparing) {
           preview.clearSketchStrokeSelection();
-          store.moveSketchStrokesToRegion({
-            sources,
-            dropDelta: { dx: offset.dx, dy: offset.dy },
-            targetNodeId: decision.targetNodeId,
-            dropPoint: dropFlow,
+          store.selectNodes([]);
+        }
+        return;
+      }
+
+      // Stage 4B: a PURE stroke selection (no whole-node drag) dropped onto a
+      // DIFFERENT region or empty canvas is a cross-region transfer — split
+      // into a new region or merge into another — rather than a Stage-2
+      // in-node translate. Mixed selections keep the in-node behaviour below.
+      if (moved && offset && !drag.nodeDragStarted) {
+        const inst = rfInstanceRef.current;
+        const sel = preview.sketchStrokeSelection;
+        const sourceIds = Object.keys(sel).filter(
+          (id) => (sel[id]?.length ?? 0) > 0,
+        );
+        if (inst && sourceIds.length > 0) {
+          const dropFlow = inst.screenToFlowPosition({
+            x: event.clientX,
+            y: event.clientY,
           });
-          return;
+          const decision = resolveStrokeDropTarget(
+            store.nodes,
+            dropFlow,
+            sourceIds,
+          );
+          if (decision.kind !== 'in-node') {
+            const sources = sourceIds.map((id) => ({
+              nodeId: id,
+              strokeIds: sel[id],
+            }));
+            // The strokes are about to move to a new / other node, so the
+            // per-node selection map and retained lasso loop no longer
+            // describe them — clear the transient selection first.
+            preview.clearSketchStrokeSelection();
+            store.moveSketchStrokesToRegion({
+              sources,
+              dropDelta: { dx: offset.dx, dy: offset.dy },
+              targetNodeId: decision.targetNodeId,
+              dropPoint: dropFlow,
+            });
+            return;
+          }
         }
       }
-    }
 
-    // Bake the stroke subset move into each affected sketch node.
-    const strokeCommands: CanvasCommand[] = [];
-    if (moved) {
-      for (const [nodeId, strokeIds] of Object.entries(
-        preview.sketchStrokeSelection,
-      )) {
-        if (strokeIds.length === 0) continue;
-        // A sketch carried by a dragged ancestor already moves with it;
-        // baking the offset here would double-move its strokes.
-        if (drag.carriedSketchNodeIds.has(nodeId)) continue;
-        strokeCommands.push(
-          ...buildMoveStrokesCommands(
-            nodeId as CanvasNodeId,
-            new Set(strokeIds),
-            offset.dx,
-            offset.dy,
-          ),
-        );
+      // Bake the stroke subset move into each affected sketch node.
+      const strokeCommands: CanvasCommand[] = [];
+      if (moved) {
+        for (const [nodeId, strokeIds] of Object.entries(
+          preview.sketchStrokeSelection,
+        )) {
+          if (strokeIds.length === 0) continue;
+          // A sketch carried by a dragged ancestor already moves with it;
+          // baking the offset here would double-move its strokes.
+          if (drag.carriedSketchNodeIds.has(nodeId)) continue;
+          strokeCommands.push(
+            ...buildMoveStrokesCommands(
+              nodeId as CanvasNodeId,
+              new Set(strokeIds),
+              offset.dx,
+              offset.dy,
+            ),
+          );
+        }
       }
-    }
 
-    if (drag.nodeDragStarted) {
-      // Mixed move: settle the live node positions, then close the node
-      // drag lifecycle FIRST — its NODE_DRAG_STOP intent consumes the undo
-      // snapshot taken by onNodeDragStart (reparent + geometry as one undo
-      // entry). Only then fold the stroke bake into that SAME entry, so
-      // executeCommands neither warns ("caller command without
-      // beginGesture") nor pushes a second snapshot.
-      const dx = offset?.dx ?? 0;
-      const dy = offset?.dy ?? 0;
-      store.onNodesChange(positionChanges(drag.startPositions, dx, dy, false));
-      store.onNodeDragStop(
-        asDragMouseEvent(event),
-        drag.primaryNode as Node,
-        drag.draggedNodes,
-      );
-      commitStrokeCommands(strokeCommands, { foldIntoOpenGesture: true });
-    } else {
-      // Pure stroke move: own single-entry undo gesture.
-      commitStrokeCommands(strokeCommands);
-    }
-
-    // Keep the retained polygon around the moved strokes.
-    if (moved) {
-      const poly = preview.sketchSelectionPolygon;
-      if (poly) {
-        preview.setSketchSelectionPolygon(
-          poly.map((p) => ({ x: p.x + offset.dx, y: p.y + offset.dy })),
+      if (drag.nodeDragStarted) {
+        // Mixed move: settle the live node positions, then close the node
+        // drag lifecycle FIRST — its NODE_DRAG_STOP intent consumes the undo
+        // snapshot taken by onNodeDragStart (reparent + geometry as one undo
+        // entry). Only then fold the stroke bake into that SAME entry, so
+        // executeCommands neither warns ("caller command without
+        // beginGesture") nor pushes a second snapshot.
+        const dx = offset?.dx ?? 0;
+        const dy = offset?.dy ?? 0;
+        store.onNodesChange(
+          positionChanges(drag.startPositions, dx, dy, false),
         );
+        store.onNodeDragStop(
+          asDragMouseEvent(event),
+          drag.primaryNode as Node,
+          drag.draggedNodes,
+        );
+        commitStrokeCommands(strokeCommands, { foldIntoOpenGesture: true });
+      } else {
+        // Pure stroke move: own single-entry undo gesture.
+        commitStrokeCommands(strokeCommands);
       }
-    }
-  }, []);
 
-  const onPointerCancel = useCallback((event: PointerEvent) => {
-    const drag = dragRef.current;
-    if (drag?.pointerId !== event.pointerId) return;
-    dragRef.current = null;
-    endCanvasGesture(event.pointerId);
-    useGesturePreviewStore.getState().setSketchStrokeMovePreview(null);
-    useGesturePreviewStore.getState().setSketchStrokeMoveCarriedNodeIds([]);
-    useGesturePreviewStore.getState().clearFrameFitPreview();
-    // Abort the node drag lifecycle if it was opened.
-    if (drag.nodeDragStarted) {
-      useCanvasStore.getState().cancelActiveNodeDrag();
-    }
-  }, []);
+      // Keep the retained polygon around the moved strokes.
+      if (moved) {
+        const poly = preview.sketchSelectionPolygon;
+        if (poly) {
+          preview.setSketchSelectionPolygon(
+            poly.map((p) => ({ x: p.x + offset.dx, y: p.y + offset.dy })),
+          );
+        }
+      }
+    },
+    [cancel, rfInstanceRef],
+  );
 
   return {
     onPointerDown,
     onPointerMove,
     onPointerUp: commit,
-    onPointerCancel,
+    onPointerCancel: cancel,
   };
 }

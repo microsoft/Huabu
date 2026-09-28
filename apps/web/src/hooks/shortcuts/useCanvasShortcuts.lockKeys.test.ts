@@ -44,6 +44,7 @@ import {
   useCanvasShortcuts,
   type CanvasShortcutRefs,
 } from './useCanvasShortcuts';
+import { OPEN_SPACE_SHORTCUT_EVENT } from '../../components/Nodes/spacePreview/spaceShortcutEvents';
 import { getCombo } from '../../config/shortcuts';
 
 // react-dom's `act` needs this flag set in a test environment.
@@ -74,6 +75,8 @@ describe('useCanvasShortcuts catalog key lock', () => {
   let root: Root;
 
   beforeEach(() => {
+    canvasActions.nodes = [];
+    canvasActions.edges = [];
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -118,6 +121,89 @@ describe('useCanvasShortcuts catalog key lock', () => {
     expect(canvasActions.sendSelectedToOrder).toHaveBeenLastCalledWith('top');
   });
 
+  it('opens only a sole selected shortcut on Enter', () => {
+    const open = vi.fn();
+    window.addEventListener(OPEN_SPACE_SHORTCUT_EVENT, open);
+    const shortcut = { id: 'shortcut', type: 'spacePreview', selected: true };
+    const enter = () =>
+      act(() =>
+        window.dispatchEvent(
+          new KeyboardEvent('keydown', {
+            key: 'Enter',
+            bubbles: true,
+            cancelable: true,
+          }),
+        ),
+      );
+    try {
+      canvasActions.nodes = [shortcut];
+      enter();
+      expect(open).toHaveBeenCalledTimes(1);
+      expect(open.mock.calls[0][0].detail).toEqual({ nodeId: 'shortcut' });
+      act(() =>
+        window.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Delete', cancelable: true }),
+        ),
+      );
+      expect(canvasActions.deleteNodes).toHaveBeenCalledWith(['shortcut']);
+      expect(open).toHaveBeenCalledTimes(1);
+      canvasActions.nodes = [shortcut, { ...shortcut, id: 'second' }];
+      enter();
+      expect(open).toHaveBeenCalledTimes(1);
+      canvasActions.nodes = [shortcut];
+      canvasActions.edges = [{ id: 'edge', selected: true }];
+      enter();
+      expect(open).toHaveBeenCalledTimes(1);
+    } finally {
+      window.removeEventListener(OPEN_SPACE_SHORTCUT_EVENT, open);
+    }
+  });
+
+  it.each(['panel', 'menu', 'dialog', 'listbox'])(
+    'leaves keyboard and paste ownership with %s',
+    (kind) => {
+      const surface = document.createElement('div');
+      if (kind === 'panel') surface.dataset.canvasPanel = 'right';
+      else surface.setAttribute('role', kind);
+      const child = document.createElement('div');
+      surface.appendChild(child);
+      container.appendChild(surface);
+      canvasActions.nodes = [{ id: 'selected', selected: true }];
+      act(() => {
+        for (const key of ['Delete', 'Backspace', ' ', 'Enter', '[', ']']) {
+          const event = new KeyboardEvent('keydown', {
+            key,
+            bubbles: true,
+            cancelable: true,
+          });
+          child.dispatchEvent(event);
+          expect(event.defaultPrevented).toBe(false);
+        }
+        for (const key of ['c', 'v', 'z', 'g']) {
+          child.dispatchEvent(
+            new KeyboardEvent('keydown', {
+              key,
+              metaKey: true,
+              bubbles: true,
+              cancelable: true,
+            }),
+          );
+        }
+        child.dispatchEvent(
+          new ClipboardEvent('paste', { bubbles: true, cancelable: true }),
+        );
+      });
+      expect(canvasActions.deleteNodes).not.toHaveBeenCalled();
+      expect(canvasActions.copySelectedNodes).not.toHaveBeenCalled();
+      expect(canvasActions.undo).not.toHaveBeenCalled();
+      expect(canvasActions.frameSelectedNodes).not.toHaveBeenCalled();
+      expect(canvasActions.sendSelectedToOrder).not.toHaveBeenCalled();
+      expect(canvasActions.pasteNodes).not.toHaveBeenCalled();
+      expect(container.querySelector('[data-tool="select"]')).not.toBeNull();
+      canvasActions.nodes = [];
+    },
+  );
+
   it('copies selected nodes when an editor retains focus without selected text', () => {
     const editor = document.createElement('textarea');
     editor.value = 'Note text';
@@ -154,6 +240,79 @@ describe('useCanvasShortcuts catalog key lock', () => {
 
     expect(canvasActions.copySelectedNodes).not.toHaveBeenCalled();
     expect(event.defaultPrevented).toBe(false);
+  });
+
+  it.each([
+    '<button>Type</button>',
+    '<button><span>Nested icon</span></button>',
+    '<input type="checkbox">',
+    '<textarea></textarea>',
+    '<select><option>Type</option></select>',
+    '<a href="#">Link</a>',
+    '<div role="button" tabindex="0">Type</div>',
+    '<div role="menuitem" tabindex="0">Type</div>',
+    '<div data-keyboard-interactive tabindex="0"><span>Reader</span></div>',
+    '<div contenteditable="true"><span>Editor text</span></div>',
+  ])('leaves Space to the interactive target %s', (markup) => {
+    const host = document.createElement('div');
+    host.innerHTML = markup;
+    container.append(host);
+    const target = host.querySelector('span') ?? host.firstElementChild;
+    if (!target) throw new Error('Missing keyboard target');
+    const event = new KeyboardEvent('keydown', {
+      key: ' ',
+      bubbles: true,
+      cancelable: true,
+    });
+    act(() => target.dispatchEvent(event));
+    expect(event.defaultPrevented).toBe(false);
+    expect(container.querySelector('[data-tool="select"]')).not.toBeNull();
+    act(() =>
+      target.dispatchEvent(
+        new KeyboardEvent('keyup', {
+          key: ' ',
+          bubbles: true,
+        }),
+      ),
+    );
+    expect(container.querySelector('[data-tool="select"]')).not.toBeNull();
+  });
+
+  it('does not claim Space already handled by a child', () => {
+    const event = new KeyboardEvent('keydown', {
+      key: ' ',
+      bubbles: true,
+      cancelable: true,
+    });
+    event.preventDefault();
+    act(() => container.dispatchEvent(event));
+    expect(container.querySelector('[data-tool="select"]')).not.toBeNull();
+  });
+
+  it('restores canvas Space pan even if keyup moves to a button', () => {
+    const canvas = document.createElement('div');
+    canvas.tabIndex = -1;
+    const button = document.createElement('button');
+    container.append(canvas, button);
+    act(() =>
+      canvas.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: ' ',
+          bubbles: true,
+          cancelable: true,
+        }),
+      ),
+    );
+    expect(container.querySelector('[data-tool="pan"]')).not.toBeNull();
+    act(() =>
+      button.dispatchEvent(
+        new KeyboardEvent('keyup', {
+          key: ' ',
+          bubbles: true,
+        }),
+      ),
+    );
+    expect(container.querySelector('[data-tool="select"]')).not.toBeNull();
   });
 
   it('keeps temporary pan active until the primary pointer is released', () => {

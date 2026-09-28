@@ -43,7 +43,7 @@ Huabu does not provide an LLM service as part of the application. Use of a model
 
 ### Getting Started
 
-Requirements: Node.js 20+ and pnpm 10+.
+Requirements: Node.js 24.16.0+ and pnpm 10+. Use the version pinned in `.nvmrc` for development and CI.
 
 ```bash
 pnpm install

@@ -75,10 +75,10 @@ describe('projectAffectedFrameGeometry', () => {
       2,
     )?.childPositions.get('source');
 
-    expect(projectedSource?.style).toMatchObject({ width: 112, height: 92 });
+    expect(projectedSource?.style).toMatchObject({ width: 120, height: 144 });
     expect(projectedSource?.position).toEqual(expectedSourcePosition);
     expect(projected.find((node) => node.id === 'remaining')?.position).toEqual(
-      { x: 16, y: 16 },
+      { x: 20, y: 64 },
     );
   });
 

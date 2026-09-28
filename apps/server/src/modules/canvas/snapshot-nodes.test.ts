@@ -7,6 +7,7 @@ import {
   bundledResvgWasmPath,
   clusterToSvg,
   filterSketchStrokes,
+  renderInkOcrRaster,
   type ContextImage,
 } from './snapshot-nodes.js';
 
@@ -95,6 +96,21 @@ function makeSketch(opts: {
 }
 
 describe('clusterToSvg', () => {
+  it('crops the OCR profile to painted strokes while preserving the default profile', () => {
+    const sketch = makeSketch({ id: 'ink', x: 0, y: 0, w: 10000, h: 10000 });
+    const built = clusterToSvg([sketch], [], 2048, {
+      cropToStrokes: true,
+      scale: 2,
+      strokeColor: 'black',
+    });
+    expect(built?.width).toBe(120);
+    expect(built?.height).toBe(100);
+    expect(built?.svg).toContain('fill="black"');
+    expect(built?.svg).not.toContain('fill="red"');
+    expect(built?.svg).toContain('fill="#ffffff"');
+    expect(clusterToSvg([sketch])?.width).toBe(1280);
+  });
+
   it('produces a sketch-only SVG when no contextImages are given', () => {
     // Without explicit backdrops, the snapshot is strokes-only —
     // even if the canvas has neighbouring images, they are never
@@ -231,6 +247,141 @@ describe('clusterToSvg', () => {
     expect(built).not.toBeNull();
     expect(built!.width).toBe(512);
     expect(built!.svg).toContain('width="512"');
+  });
+});
+
+describe('renderInkOcrRaster', () => {
+  it('renders only selected strokes without modifying the captured nodes', async () => {
+    const selected = {
+      id: 'selected',
+      points: [
+        [10, 10],
+        [20, 20],
+      ],
+      color: 'white',
+    };
+    const ink = makeSketch({
+      id: 'ink',
+      x: 0,
+      y: 0,
+      w: 100,
+      h: 100,
+      strokes: [
+        selected,
+        {
+          id: 'unselected',
+          points: [
+            [90, 90],
+            [99, 99],
+          ],
+        },
+      ],
+    });
+    const nodes = [
+      ink,
+      makeImageNode({ id: 'image', x: -100, y: -100, w: 1000, h: 1000 }),
+      makeSketch({ id: 'other-ink', x: 300, y: 200, w: 100, h: 100 }),
+    ];
+    const before = structuredClone(nodes);
+    const subsets = [{ nodeId: 'ink', strokeIds: ['selected'] }];
+    const result = await renderInkOcrRaster(nodes, subsets);
+    const expected = await renderInkOcrRaster(
+      [
+        makeSketch({
+          id: 'ink',
+          x: 0,
+          y: 0,
+          w: 100,
+          h: 100,
+          strokes: [selected],
+        }),
+      ],
+      subsets,
+    );
+    expect(result).toEqual(expected);
+    expect(result.png.subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a');
+    expect(result.png.readUInt32BE(16)).toBe(result.width);
+    expect(result.png.readUInt32BE(20)).toBe(result.height);
+    expect(result.originNodeIds).toEqual(['ink']);
+    expect(nodes).toEqual(before);
+  });
+
+  it('uses absolute frame coordinates for selected Ink', async () => {
+    const strokes = [
+      {
+        id: 's',
+        points: [
+          [10, 10],
+          [20, 20],
+        ],
+      },
+    ];
+    const first = makeSketch({ id: 'a', x: 0, y: 0, w: 100, h: 100, strokes });
+    const second = makeSketch({
+      id: 'b',
+      x: 0,
+      y: 0,
+      w: 100,
+      h: 100,
+      strokes,
+      parentId: 'frame',
+    });
+    const frame: CanvasNode = {
+      id: 'frame',
+      type: 'frame',
+      position: { x: 200, y: 100 },
+      data: {},
+    };
+    const subsets = ['a', 'b'].map((nodeId) => ({
+      nodeId,
+      strokeIds: ['s'],
+    }));
+    const result = await renderInkOcrRaster([first, second, frame], subsets);
+    expect(result).toEqual(
+      await renderInkOcrRaster(
+        [
+          first,
+          { ...second, parentId: undefined, position: { x: 200, y: 100 } },
+        ],
+        subsets,
+      ),
+    );
+    expect(result.width).toBeGreaterThan(result.height);
+  });
+
+  it('rejects empty or stale stroke selections', async () => {
+    const nodes = [makeSketch({ id: 'ink', x: 0, y: 0, w: 100, h: 100 })];
+    for (const strokeIds of [[], ['gone']]) {
+      await expect(
+        renderInkOcrRaster(nodes, [{ nodeId: 'ink', strokeIds }]),
+      ).rejects.toThrow();
+    }
+  });
+
+  it('pads thin selections without exceeding the longest-edge cap', async () => {
+    const nodes = [
+      makeSketch({
+        id: 'ink',
+        x: 0,
+        y: 0,
+        w: 10000,
+        h: 100,
+        strokes: [
+          {
+            id: 'line',
+            points: [
+              [0, 10],
+              [9999, 10],
+            ],
+          },
+        ],
+      }),
+    ];
+    const raster = await renderInkOcrRaster(nodes, [
+      { nodeId: 'ink', strokeIds: ['line'] },
+    ]);
+    expect(raster.width).toBe(2048);
+    expect(raster.height).toBe(50);
   });
 });
 

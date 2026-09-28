@@ -22,6 +22,7 @@ import { inputResolve } from './stages/input-resolve.js';
 import { normalize } from './stages/normalize.js';
 import { persist } from './stages/persist.js';
 import { project } from './stages/project.js';
+import { extractVideoCover } from './video-cover.js';
 
 import type { ProviderManager } from './provider-manager.js';
 import type {
@@ -126,11 +127,10 @@ async function runPipelineStages(
   if (has('resolve_input')) {
     try {
       ctx.resolved = inputResolve(request);
-      // Artifact-backed nodes need a real filename for the document
-      // loaders in `extract`. This is the only consumer that does — every
-      // other blob reader takes bytes.
+      // Document loaders need a leased filename. Video leases are acquired
+      // later, after checking persistence policy and the cover cache.
       const artifactName = ctx.resolved.artifactName;
-      if (artifactName) {
+      if (artifactName && request.nodeType !== 'video') {
         const lease = await deps.artifacts.materialize(artifactName);
         if (lease) {
           leases.push(lease);
@@ -178,6 +178,18 @@ async function runPipelineStages(
       diagnostics,
       contentKind,
     );
+  }
+
+  // Video cover failures are warnings, not failures of the playable node.
+  if (has('extract_video_cover')) {
+    ctx.videoCover = await extractVideoCover(
+      request,
+      ctx.resolved,
+      deps,
+      leases,
+      diagnostics,
+    );
+    usedCapabilities.push('extract_video_cover');
   }
 
   // Stage 2 — Extract
@@ -431,6 +443,7 @@ async function runPipelineStages(
             deps.nodes,
             src,
             true,
+            ctx.videoCover,
           );
         }
         usedCapabilities.push('persist_source');

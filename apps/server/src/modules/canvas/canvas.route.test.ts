@@ -441,6 +441,108 @@ describe('GET /api/canvas', () => {
   });
 });
 
+describe('video cover GET hydration', () => {
+  describe.each(['full canvas', 'single-node content'] as const)(
+    '%s',
+    (read) => {
+      it.each([
+        {
+          name: 'restores the matching sidecar cover instead of structural metadata',
+          metadata: {
+            coverUrl: 'cover_current.jpg',
+            coverSourceSrc: 'current.webm',
+          },
+          accepted: true,
+        },
+        {
+          name: 'excludes a sidecar cover for a previous source and stale structural values',
+          metadata: {
+            coverUrl: 'cover_previous.jpg',
+            coverSourceSrc: 'previous.webm',
+          },
+          accepted: false,
+        },
+        {
+          name: 'excludes a sidecar cover without source provenance and stale structural values',
+          metadata: { coverUrl: 'cover_unverified.jpg' },
+          accepted: false,
+        },
+        {
+          name: 'excludes structural covers when the sidecar has no cover',
+          metadata: {},
+          accepted: false,
+        },
+      ])('$name', async ({ metadata, accepted }) => {
+        createCanvas('c1', 'Video hydration');
+        const store = getCanvasStore('c1');
+        const current = store.read();
+        if (!current) throw new Error('Missing seeded video canvas');
+        // Bypass the structural PUT stripper to represent legacy persisted data.
+        store.write({
+          ...current,
+          state: {
+            nodes: [
+              {
+                id: 'video',
+                type: 'video',
+                position: { x: 0, y: 0 },
+                data: {
+                  src: 'previous.webm',
+                  coverUrl: 'cover_structural.jpg',
+                  coverSourceSrc: 'previous.webm',
+                },
+              },
+            ],
+            edges: [],
+          },
+        });
+        expect(
+          store.writeNode('video', {
+            nodeId: 'video',
+            type: 'video',
+            label: 'Current video',
+            content: '',
+            src: 'current.webm',
+            ...metadata,
+          }),
+        ).toMatchObject({ ok: true });
+        const structureBefore = store.read();
+        const sidecarBefore = store.readNode('video');
+        resetStorageCache();
+
+        const app = await buildApp();
+        try {
+          const response = await app.inject({
+            method: 'GET',
+            url:
+              read === 'full canvas'
+                ? '/canvas/c1'
+                : '/canvas/c1/nodes/video/content',
+          });
+          expect(response.statusCode).toBe(200);
+          const body = response.json();
+          const data = read === 'full canvas' ? body.state.nodes[0].data : body;
+          expect(data).toMatchObject({
+            src: 'current.webm',
+            label: 'Current video',
+          });
+          // Hydration is a read projection, not a rewrite of legacy structure or metadata.
+          expect(getCanvasStore('c1').read()).toEqual(structureBefore);
+          expect(getCanvasStore('c1').readNode('video')).toEqual(sidecarBefore);
+          if (accepted) {
+            expect(data).toMatchObject(metadata);
+          } else {
+            expect(data).not.toHaveProperty('coverUrl');
+            expect(data).not.toHaveProperty('coverSourceSrc');
+          }
+        } finally {
+          await app.close();
+        }
+      });
+    },
+  );
+});
+
 describe('GET /api/canvas/:canvasId/events', () => {
   it('returns the events in chronological order', async () => {
     createCanvas('c1', 'Canvas One');

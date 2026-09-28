@@ -20,9 +20,28 @@ import {
 import { getElectronBridge } from '../hooks/useElectron';
 import { i18n } from '../i18n';
 
+import type { CanvasSummary } from '@huabu/shared';
+
+type SpaceSummary = Pick<CanvasSummary, 'nodeCount' | 'updatedAt'>;
+
 const WORLD_ENABLED_KEY = 'huabu:world-enabled';
 
 let workspaceInitInFlight: Promise<boolean> | null = null;
+let spaceTitlesInFlight: {
+  promise: Promise<void>;
+  overrides: Record<string, string | null>;
+  invalidated: Set<string>;
+} | null = null;
+
+function resetSpaceTitles() {
+  spaceTitlesInFlight = null;
+  return {
+    spaceTitles: {},
+    spaceSummaries: {},
+    spaceTitlesStatus: 'idle' as const,
+    spaceTitlesError: null,
+  };
+}
 
 interface WorkspaceState {
   /** Server operating mode. `null` until the first `init()` call. */
@@ -40,8 +59,11 @@ interface WorkspaceState {
   worldCanvasId: string | null;
   /** Whether World is exposed as the workspace landing page. */
   worldEnabled: boolean;
-  /** Derived ordinary Space titles used by Space Preview rendering. */
+  /** Derived ordinary Space titles used by Space Shortcut rendering. */
   spaceTitles: Record<string, string | null>;
+  spaceSummaries: Record<string, SpaceSummary | undefined>;
+  spaceTitlesStatus: 'idle' | 'loading' | 'ready' | 'error';
+  spaceTitlesError: string | null;
   /** Registered free-mode Workspaces (most recently used first). */
   recentWorkspaces: WorkspaceDescriptor[];
 
@@ -86,7 +108,8 @@ interface WorkspaceState {
    */
   setCanvasCount: (count: number | null) => void;
   setWorldEnabled: (enabled: boolean) => void;
-  refreshSpaceTitles: () => Promise<void>;
+  refreshSpaceTitles: (changedCanvasIds?: readonly string[]) => Promise<void>;
+  setSpaceTitle: (canvasId: string, title: string | null) => void;
 }
 
 /** Apply a fresh WorkspaceInfo snapshot to local state. */
@@ -98,7 +121,7 @@ function fromInfo(info: WorkspaceInfo): Partial<WorkspaceState> {
     workspacePath: info.path,
     workspaceName: info.name,
     worldCanvasId: info.worldCanvasId,
-    spaceTitles: {},
+    ...resetSpaceTitles(),
     isReady: info.configured,
   };
 }
@@ -148,6 +171,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       ? false
       : localStorage.getItem(WORLD_ENABLED_KEY) === 'true',
   spaceTitles: {},
+  spaceSummaries: {},
+  spaceTitlesStatus: 'idle',
+  spaceTitlesError: null,
   recentWorkspaces: [],
   isReady: false,
   isSyncing: false,
@@ -158,19 +184,90 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     localStorage.setItem(WORLD_ENABLED_KEY, String(worldEnabled));
     set({ worldEnabled });
   },
-  refreshSpaceTitles: async () => {
-    const { canvases } = await listCanvases();
-    set({
-      canvasCount: canvases.length,
-      spaceTitles: Object.fromEntries(
-        canvases.map((canvas) => [canvas.canvasId, canvas.title]),
-      ),
-    });
+  refreshSpaceTitles: (changedCanvasIds = []) => {
+    const { workspaceId, workspacePath, isReady, isSyncing } = get();
+    if (!isReady || isSyncing) return Promise.resolve();
+    if (changedCanvasIds.length > 0) {
+      set((state) => {
+        const spaceSummaries = { ...state.spaceSummaries };
+        for (const id of changedCanvasIds) delete spaceSummaries[id];
+        return { spaceSummaries };
+      });
+    }
+    if (spaceTitlesInFlight) {
+      for (const id of changedCanvasIds)
+        spaceTitlesInFlight.invalidated.add(id);
+      return spaceTitlesInFlight.promise;
+    }
+
+    const request = {
+      promise: Promise.resolve(),
+      overrides: {} as Record<string, string | null>,
+      invalidated: new Set<string>(),
+    };
+    const isCurrent = () =>
+      spaceTitlesInFlight === request &&
+      get().workspaceId === workspaceId &&
+      get().workspacePath === workspacePath &&
+      !get().isSyncing;
+    spaceTitlesInFlight = request;
+    request.promise = Promise.resolve()
+      .then(() => listCanvases())
+      .then(({ canvases }) => {
+        if (!isCurrent()) return;
+        set({
+          canvasCount: canvases.length,
+          spaceTitles: {
+            ...Object.fromEntries(
+              canvases.map((canvas) => [canvas.canvasId, canvas.title]),
+            ),
+            // An older list must not undo a confirmed local creation or rename.
+            ...request.overrides,
+          },
+          spaceSummaries: Object.fromEntries(
+            canvases
+              .filter((canvas) => !request.invalidated.has(canvas.canvasId))
+              .map(({ canvasId, nodeCount, updatedAt }) => [
+                canvasId,
+                { nodeCount, updatedAt },
+              ]),
+          ),
+          spaceTitlesStatus: 'ready',
+          spaceTitlesError: null,
+        });
+      })
+      .catch((error: unknown) => {
+        if (!isCurrent()) return;
+        set({
+          spaceTitlesStatus: 'error',
+          spaceTitlesError:
+            error instanceof Error
+              ? error.message
+              : i18n.t('spacePreview.targetsUnavailable'),
+        });
+      })
+      .finally(() => {
+        const refreshAgain = isCurrent() && request.invalidated.size > 0;
+        if (spaceTitlesInFlight === request) spaceTitlesInFlight = null;
+        // A mutation during the read needs one trailing request, not stale counts.
+        if (refreshAgain) return get().refreshSpaceTitles();
+      });
+    set({ spaceTitlesStatus: 'loading', spaceTitlesError: null });
+    return request.promise;
+  },
+  setSpaceTitle: (canvasId, title) => {
+    if (!get().isReady || get().isSyncing) return;
+    if (spaceTitlesInFlight) {
+      spaceTitlesInFlight.overrides[canvasId] = title;
+    }
+    set((state) => ({
+      spaceTitles: { ...state.spaceTitles, [canvasId]: title },
+    }));
   },
 
   init: () => {
     workspaceInitInFlight ??= (async () => {
-      set({ isSyncing: true, error: null });
+      set({ ...resetSpaceTitles(), isSyncing: true, error: null });
 
       let info: WorkspaceInfo;
       try {
@@ -258,7 +355,12 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     if (get().mode === 'managed') {
       throw new Error('Workspace is locked by the server (managed mode)');
     }
-    set({ isSyncing: true, error: null, canvasCount: null });
+    set({
+      ...resetSpaceTitles(),
+      isSyncing: true,
+      error: null,
+      canvasCount: null,
+    });
     try {
       const info = await putWorkspacePath(path);
       const recent = await listWorkspaces();
@@ -278,7 +380,12 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     const selected = get().recentWorkspaces.find(
       (workspace) => workspace.workspaceId === workspaceId,
     );
-    set({ isSyncing: true, error: null, canvasCount: null });
+    set({
+      ...resetSpaceTitles(),
+      isSyncing: true,
+      error: null,
+      canvasCount: null,
+    });
     try {
       await activateWorkspace(workspaceId);
       const [info, recent] = await Promise.all([

@@ -17,6 +17,7 @@ import {
   FloatingToolbar,
   FLOATING_TOOLBAR_CLASS,
 } from '@/components/Common/FloatingToolbar';
+import { Spinner } from '@/components/Common/Spinner';
 import { toast } from '@/components/Common/Toast';
 import { Tooltip } from '@/components/Common/Tooltip';
 import { computeAdjacentNodePlacement } from '@/components/Nodes/nodePlacement';
@@ -36,12 +37,15 @@ import {
   captureVisibleCanvasGrounding,
 } from '@/handler/canvasCommand/utils/screenshot';
 import {
-  captureAgentTurnSources,
   dispatchAgentTurn,
   prepareAgentTurn,
 } from '@/hooks/agentTurnController';
+import { isOutsideCanvasInteraction } from '@/hooks/shortcuts/isEditableTarget';
 import { useIsNotMouse } from '@/hooks/useInputMode';
-import { useAcpProfilesStore } from '@/store/acpProfilesStore';
+import {
+  loadDefaultAgentBinding,
+  useAcpProfilesStore,
+} from '@/store/acpProfilesStore';
 import useCanvasStore from '@/store/canvasStore';
 import {
   selectThreadBinding,
@@ -51,9 +55,14 @@ import {
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 import { resolveQuestionAgentPresentation } from '@/utils/questionAgentPresentation';
 
+import './NodeToolbar.css';
+
 import {
   deriveInkSubmissionCandidate,
+  groundingOperandsFromContext,
+  inkLassoIdentity,
   inkSelectionIdentity,
+  retainedLassoBounds,
   unionSelectionBounds,
 } from './inkQuestionSubmission';
 
@@ -95,12 +104,24 @@ export const StrokeSelectionToolbar = () => {
   const beginNodeDataGesture = useCanvasStore((s) => s.beginNodeDataGesture);
   const endNodeDataGesture = useCanvasStore((s) => s.endNodeDataGesture);
   const selection = useGesturePreviewStore((s) => s.sketchStrokeSelection);
+  const selectionPolygon = useGesturePreviewStore(
+    (s) => s.sketchSelectionPolygon,
+  );
+  const selectionMove = useGesturePreviewStore(
+    (s) => s.sketchStrokeMovePreview,
+  );
   const clearSelection = useGesturePreviewStore(
     (s) => s.clearSketchStrokeSelection,
   );
+  const setInkSubmissionPreparing = useGesturePreviewStore(
+    (s) => s.setInkSubmissionPreparing,
+  );
   const isNotMouse = useIsNotMouse();
   const attemptRef = useRef<InkSubmissionAttempt | null>(null);
-  const preparingRef = useRef(false);
+  const preparationRef = useRef<{
+    token: object;
+    lassoIdentity: string;
+  } | null>(null);
   const [isPreparing, setIsPreparing] = useState(false);
 
   const hasSelection = Object.keys(selection).length > 0;
@@ -112,19 +133,10 @@ export const StrokeSelectionToolbar = () => {
     void nodes; // recompute as sketches move / resize
     return getSketchStrokeSelectionBounds(selection);
   }, [selection, hasSelection, nodes]);
-  const anchor = useMemo(() => {
-    const selectedNodes = nodes.filter((node) => node.selected);
-    const bounds = getSelectionBounds(selectedNodes, nodes);
-    const nodeBounds = bounds
-      ? {
-          x: bounds.minX,
-          y: bounds.minY,
-          width: bounds.width,
-          height: bounds.height,
-        }
-      : null;
-    return unionSelectionBounds(strokeBounds, nodeBounds);
-  }, [nodes, strokeBounds]);
+  const anchor = useMemo(
+    () => retainedLassoBounds(selectionPolygon, selectionMove) ?? strokeBounds,
+    [selectionMove, selectionPolygon, strokeBounds],
+  );
   const candidate = useMemo(
     () => deriveInkSubmissionCandidate(nodes, selection),
     [nodes, selection],
@@ -138,18 +150,34 @@ export const StrokeSelectionToolbar = () => {
     targetThreadId ? selectThreadLastAction(state, targetThreadId) : null,
   );
   const agentProfiles = useAcpProfilesStore((state) => state.profiles);
+  const defaultProfileId = useAcpProfilesStore(
+    (state) => state.agentDefaults?.profileId,
+  );
 
-  const currentSelectionIdentity = useCallback(
+  const currentLassoIdentity = useCallback(
     () =>
-      inkSelectionIdentity(
+      inkLassoIdentity(
         useCanvasStore.getState().canvasId,
-        useCanvasStore.getState().nodes,
         useGesturePreviewStore.getState().sketchStrokeSelection,
+        useGesturePreviewStore.getState().sketchSelectionPolygon,
       ),
     [],
   );
+  const renderedLassoIdentity = inkLassoIdentity(
+    useCanvasStore.getState().canvasId,
+    selection,
+    selectionPolygon,
+  );
+  useEffect(() => {
+    const active = preparationRef.current;
+    if (!active || active.lassoIdentity === renderedLassoIdentity) return;
+    attemptRef.current = null;
+    preparationRef.current = null;
+    setInkSubmissionPreparing(false);
+    setIsPreparing(false);
+  }, [renderedLassoIdentity, setInkSubmissionPreparing]);
   const handleSubmit = useCallback(async () => {
-    if (preparingRef.current) return;
+    if (preparationRef.current) return;
     const canvas = useCanvasStore.getState();
     const strokeSelection =
       useGesturePreviewStore.getState().sketchStrokeSelection;
@@ -163,19 +191,44 @@ export const StrokeSelectionToolbar = () => {
       canvas.nodes,
       strokeSelection,
     );
-    preparingRef.current = true;
+    const lassoIdentity = inkLassoIdentity(
+      canvas.canvasId,
+      strokeSelection,
+      useGesturePreviewStore.getState().sketchSelectionPolygon,
+    );
+    const capturedSources = {
+      canvasId: canvas.canvasId,
+      canvasContext: canvas.getAgentChatContext({
+        nodeIds: freshCandidate.selectedNodeIds,
+        strokeSelection: freshCandidate.strokeSelection,
+        excludeNodeIds: freshCandidate.target
+          ? [freshCandidate.target.nodeId]
+          : undefined,
+      }),
+    };
+    const groundingOperands = groundingOperandsFromContext(
+      capturedSources.canvasContext,
+    );
+    const preparationToken = {};
+    preparationRef.current = {
+      token: preparationToken,
+      lassoIdentity,
+    };
+    setInkSubmissionPreparing(true);
     setIsPreparing(true);
+    const releasePreparation = () => {
+      if (preparationRef.current?.token !== preparationToken) return;
+      preparationRef.current = null;
+      setInkSubmissionPreparing(false);
+      setIsPreparing(false);
+    };
+    let retainReservation = false;
     try {
       let attempt =
         attemptRef.current?.identity === identity ? attemptRef.current : null;
       if (!attempt) {
         let groundingVisual: VisibleCanvasGrounding | undefined;
-        const strokeNodeIds = new Set(
-          Object.keys(freshCandidate.strokeSelection),
-        );
-        const groundingNodeIds = freshCandidate.selectedNodeIds.filter(
-          (nodeId) => !strokeNodeIds.has(nodeId),
-        );
+        const groundingNodeIds = groundingOperands.selectedNodeIds;
         if (groundingNodeIds.length > 0) {
           const ordinaryNodeIds = new Set(groundingNodeIds);
           const selectedNodes = canvas.nodes.filter((node) =>
@@ -207,7 +260,7 @@ export const StrokeSelectionToolbar = () => {
           });
           const currentViewport = getViewport();
           if (
-            currentSelectionIdentity() !== identity ||
+            currentLassoIdentity() !== lassoIdentity ||
             currentViewport.x !== viewport.x ||
             currentViewport.y !== viewport.y ||
             currentViewport.zoom !== viewport.zoom
@@ -230,9 +283,7 @@ export const StrokeSelectionToolbar = () => {
             },
             crop: captured.crop,
             selectedNodeIds: groundingNodeIds,
-            strokeSubsets: Object.entries(freshCandidate.strokeSelection).map(
-              ([nodeId, strokeIds]) => ({ nodeId, strokeIds }),
-            ),
+            strokeSubsets: groundingOperands.strokeSubsets,
           };
         }
         if (freshCandidate.target) {
@@ -257,6 +308,16 @@ export const StrokeSelectionToolbar = () => {
             },
           };
         } else {
+          const binding = await loadDefaultAgentBinding();
+          if (
+            preparationRef.current?.token !== preparationToken ||
+            currentLassoIdentity() !== lassoIdentity ||
+            useCanvasStore.getState().nodes !== canvas.nodes
+          ) {
+            throw new Error(
+              'Canvas selection changed while preparing the Ink Agent. Submit again.',
+            );
+          }
           const selectedNodes = canvas.nodes.filter((node) => node.selected);
           const nodeBounds = getSelectionBounds(selectedNodes, canvas.nodes);
           const currentStrokeBounds =
@@ -283,14 +344,14 @@ export const StrokeSelectionToolbar = () => {
             addNode,
             placementPoint,
             canvasId: canvas.canvasId,
-            binding: { kind: 'internal' },
-            mode: 'operate',
+            binding,
+            mode: 'ask',
             label: 'New ink request',
             pendingInkIntentLabel: true,
           });
           attempt = {
             identity,
-            mode: 'operate',
+            mode: 'ask',
             groundingVisual,
             session: {
               canvasId: canvas.canvasId,
@@ -309,31 +370,37 @@ export const StrokeSelectionToolbar = () => {
         content: '',
         mode: attempt.mode,
         groundingVisual: attempt.groundingVisual,
-        sources: captureAgentTurnSources(attempt.session, {
-          nodeIds: freshCandidate.selectedNodeIds,
-          strokeSelection: freshCandidate.strokeSelection,
-        }),
+        sources: capturedSources,
       });
       const result = await dispatchAgentTurn(prepared, {
-        canDispatch: () => currentSelectionIdentity() === identity,
+        canDispatch: () => currentLassoIdentity() === lassoIdentity,
         onAccepted: () => {
-          if (currentSelectionIdentity() !== identity) return;
+          releasePreparation();
+          if (currentLassoIdentity() !== lassoIdentity) return;
           attemptRef.current = null;
           clearSelection();
+          useCanvasStore.getState().selectNodes([]);
         },
+        onAcceptanceRejected: releasePreparation,
       });
       if (!result.accepted && result.error) {
         toast(result.error.message, { tone: 'danger' });
       }
+      retainReservation = result.status === 'unknown' && !result.accepted;
     } catch (error) {
       toast(error instanceof Error ? error.message : String(error), {
         tone: 'danger',
       });
     } finally {
-      preparingRef.current = false;
-      setIsPreparing(false);
+      if (!retainReservation) releasePreparation();
     }
-  }, [addNode, clearSelection, currentSelectionIdentity, getViewport]);
+  }, [
+    addNode,
+    clearSelection,
+    currentLassoIdentity,
+    getViewport,
+    setInkSubmissionPreparing,
+  ]);
 
   // Representative color / size for the swatches: the first selected stroke.
   const { color, size } = useMemo(() => {
@@ -415,6 +482,7 @@ export const StrokeSelectionToolbar = () => {
   useEffect(() => {
     if (!hasSelection) return;
     const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || isOutsideCanvasInteraction(e.target)) return;
       if (e.key !== 'Delete' && e.key !== 'Backspace') return;
       const el = document.activeElement as HTMLElement | null;
       if (
@@ -459,9 +527,12 @@ export const StrokeSelectionToolbar = () => {
           };
     }
     if (!candidate.target) {
+      const name =
+        agentProfiles.find((profile) => profile.id === defaultProfileId)
+          ?.alias ?? t('toolbar.defaultInkAgentTarget');
       return {
-        label: t('toolbar.newInkAgentTarget'),
-        description: t('toolbar.newInkAgentTargetDescription'),
+        label: t('toolbar.newInkAgentTarget', { name }),
+        description: t('toolbar.newInkAgentTargetDescription', { name }),
       };
     }
     const presentation = resolveQuestionAgentPresentation({
@@ -478,7 +549,14 @@ export const StrokeSelectionToolbar = () => {
         name: presentation.alias,
       }),
     };
-  }, [agentProfiles, cachedTargetBinding, cachedTargetMode, candidate, t]);
+  }, [
+    agentProfiles,
+    defaultProfileId,
+    cachedTargetBinding,
+    cachedTargetMode,
+    candidate,
+    t,
+  ]);
 
   return (
     <CanvasFloatingPopover
@@ -486,10 +564,12 @@ export const StrokeSelectionToolbar = () => {
       open={open}
       offset={12}
       side="top"
-      className={FLOATING_TOOLBAR_CLASS}
+      className={`${FLOATING_TOOLBAR_CLASS} canvas-context-toolbar`}
     >
       {showStyle && (
         <SketchControls
+          floating
+          colorTriggerClassName="node-toolbar-color"
           color={color}
           size={size}
           touch={isNotMouse}
@@ -536,11 +616,12 @@ export const StrokeSelectionToolbar = () => {
           )}
           <Button
             variant="solid"
+            className="canvas-context-submit"
             shape="pill"
             iconOnly
             size="sm"
             type="button"
-            title={submitTitle}
+            title={isPreparing ? undefined : submitTitle}
             aria-label={submitTitle}
             disabled={submitDisabled}
             onClick={(event) => {
@@ -548,7 +629,7 @@ export const StrokeSelectionToolbar = () => {
               void handleSubmit();
             }}
           >
-            <ArrowUp />
+            {isPreparing ? <Spinner size="xs" /> : <ArrowUp />}
           </Button>
         </>
       )}

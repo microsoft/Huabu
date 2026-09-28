@@ -16,3 +16,14 @@ export function isEditableTarget(target: EventTarget | null): boolean {
     el?.isContentEditable || el?.getAttribute?.('role') === 'textbox' || false
   );
 }
+
+export function isOutsideCanvasInteraction(
+  target: EventTarget | null,
+): boolean {
+  return (
+    target instanceof Element &&
+    !!target.closest(
+      '[data-canvas-panel], [role="dialog"], [role="menu"], [role="listbox"]',
+    )
+  );
+}
