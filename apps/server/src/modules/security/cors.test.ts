@@ -14,7 +14,7 @@ async function buildApp() {
   openApps.push(app);
   await app.register(
     cors,
-    createCorsOptions(new Set(['localhost', 'huabu.example'])),
+    createCorsOptions(new Set(['localhost', '[::1]', 'huabu.example'])),
   );
   app.put('/resource', async () => ({ ok: true }));
   await app.ready();
@@ -51,12 +51,13 @@ describe('CORS options', () => {
     },
   );
 
-  it('matches allowed hostnames on any scheme and port', async () => {
+  it('matches allowed hostnames on any scheme and port, including IPv6', async () => {
     const app = await buildApp();
 
     for (const origin of [
       'https://huabu.example',
       'http://huabu.example:8080',
+      'http://[::1]:5173',
     ]) {
       const response = await preflight(app, origin, 'PUT');
       expect(response.headers['access-control-allow-origin']).toBe(origin);
