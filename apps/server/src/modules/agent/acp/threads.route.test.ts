@@ -212,4 +212,89 @@ describe('ACP cached capability route', () => {
       data: { modeId: 'plan' },
     });
   });
+
+  it('warms a never-observed Profile by realizing and ensuring its session, with no control dispatched', async () => {
+    const realized = {
+      binding: {
+        kind: 'external',
+        alias: 'Fresh Agent',
+        profileId: 'profile-fresh',
+      },
+      fixedTarget: null,
+      spec: { spec: { initialPreamble: ['Bootstrap', 'Space', 'Node'] } },
+      handle: { control: mocks.control },
+    };
+    mocks.realize.mockResolvedValue(realized);
+    mocks.ensureSession.mockResolvedValue({
+      profileId: 'profile-fresh',
+      configOptions: [],
+    });
+    const server = await createApp();
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/api/acp/threads/thread-1/warm',
+      payload: {
+        binding: {
+          kind: 'external',
+          alias: 'Fresh Agent',
+          profileId: 'profile-fresh',
+        },
+        canvasId: 'canvas-1',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ ok: true });
+    expect(mocks.realize).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threadId: 'thread-1',
+        canvasId: 'canvas-1',
+        requestedBinding: {
+          kind: 'external',
+          alias: 'Fresh Agent',
+          profileId: 'profile-fresh',
+        },
+      }),
+    );
+    expect(mocks.ensureSession).toHaveBeenCalledWith(
+      realized,
+      expect.any(Object),
+    );
+    expect(mocks.control).not.toHaveBeenCalled();
+  });
+
+  it('surfaces realization failure from the warm route without dispatching a control', async () => {
+    mocks.realize.mockRejectedValue(new Error('spawn failed'));
+    const server = await createApp();
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/api/acp/threads/thread-1/warm',
+      payload: {
+        binding: {
+          kind: 'external',
+          alias: 'Fresh Agent',
+          profileId: 'profile-fresh',
+        },
+      },
+    });
+
+    expect(response.statusCode).toBe(503);
+    expect(mocks.control).not.toHaveBeenCalled();
+  });
+
+  it('rejects a warm request missing the required binding', async () => {
+    const server = await createApp();
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/api/acp/threads/thread-1/warm',
+      payload: {},
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ code: 'validation_failed' });
+    expect(mocks.realize).not.toHaveBeenCalled();
+  });
 });
