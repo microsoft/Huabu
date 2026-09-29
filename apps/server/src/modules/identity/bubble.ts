@@ -28,7 +28,16 @@ const whoamiSchema = z.object({
   ),
 });
 
-/** HTTP adapter now; an embedded adapter can implement the same host contract. */
+/** Huabu's single-owner policy maps only to Bubble's explicit system owner. */
+export function hasSystemOwnerGrant(
+  grants: ReadonlyArray<{ target: { type: string }; role: string }>,
+): boolean {
+  return grants.some(
+    (grant) => grant.target.type === 'system' && grant.role === 'owner',
+  );
+}
+
+/** Adapter for a separately deployed Bubble; see embedded.ts for in-process. */
 export function createBubbleIdentityService(baseUrl: string): IdentityService {
   const endpoint = `${validateBubbleUrl(baseUrl)}/v1/auth/whoami`;
   return {
@@ -65,9 +74,7 @@ export function createBubbleIdentityService(baseUrl: string): IdentityService {
         }
         return {
           principal: identityPrincipalSchema.parse(identity.principal),
-          owner: identity.grants.some(
-            (grant) => grant.target.type === 'system' && grant.role === 'owner',
-          ),
+          owner: hasSystemOwnerGrant(identity.grants),
         };
       } catch (error) {
         if (error instanceof IdentityError) throw error;
