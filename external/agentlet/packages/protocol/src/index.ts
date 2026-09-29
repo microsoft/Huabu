@@ -11,6 +11,19 @@ export {
   ErrorCodes,
 } from './constants.js'
 
+export { parseAcpHarnessLaunch, parseAgentProfileLaunch, parseBuildHarnessLaunchParams, parseHarnessLaunchPreview } from './harness.js'
+export { CUSTOM_COMMAND_WRAPPER_ID, CUSTOM_COMMAND_CAPABILITIES } from './harness.js'
+export type {
+  AgentProfileLaunch,
+  BuildHarnessLaunchParams,
+  HarnessLaunchPreview,
+  AcpHarnessLaunch,
+  HarnessCapabilities,
+  HarnessCapabilityStatus,
+  HarnessLaunchOptions,
+  HarnessLaunchPlan,
+} from './harness.js'
+
 export type {
   JsonRpcRequest,
   JsonRpcNotification,

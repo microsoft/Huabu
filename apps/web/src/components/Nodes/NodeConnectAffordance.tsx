@@ -27,6 +27,7 @@ import {
 } from '@huabu/shared/canvas-engine';
 
 import { cn } from '@/components/Common/cn.ts';
+import { toast } from '@/components/Common/Toast';
 import { Tooltip } from '@/components/Common/Tooltip.tsx';
 import { nodeLayoutBorderInset } from '@/components/Nodes/design/nodeBoundary.ts';
 import { FRAME_DESIGN_CONFIG } from '@/components/Nodes/frame/frameDesign.ts';
@@ -224,17 +225,29 @@ export function useCreateConnectedNode() {
             });
 
       if (kind === 'question') {
-        const { nodeId } = createQuestionNodeAndCompose({
+        void createQuestionNodeAndCompose({
           addNode,
           placementPoint,
           canvasId: state.canvasId,
-        });
-        dispatchUiIntent({
-          type: 'CONNECT_EDGE',
-          source: sourceId,
-          target: nodeId,
-          style: CONNECTED_NODE_EDGE_STYLE,
-        });
+          isCurrent: () =>
+            useCanvasStore
+              .getState()
+              .nodes.some((node) => node.id === sourceId),
+        })
+          .then((created) => {
+            if (!created) return;
+            dispatchUiIntent({
+              type: 'CONNECT_EDGE',
+              source: sourceId,
+              target: created.nodeId,
+              style: CONNECTED_NODE_EDGE_STYLE,
+            });
+          })
+          .catch((error) => {
+            toast(error instanceof Error ? error.message : String(error), {
+              tone: 'danger',
+            });
+          });
         return;
       }
 

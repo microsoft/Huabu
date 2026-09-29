@@ -25,6 +25,7 @@ import {
 import { scheduleScrollToMatch } from '@/hooks/searchDom';
 import { handleCanvasNavigationKey } from '@/hooks/shortcuts/handleCanvasNavigationKey';
 import { usePreviewScrollMemory } from '@/hooks/usePreviewScrollMemory';
+import { loadDefaultAgentBinding } from '@/store/acpProfilesStore';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 import { conversationViewForNode } from '@/store/conversationOwner';
@@ -50,6 +51,7 @@ import { usePdfDocumentLifecycle } from './usePdfDocumentLifecycle';
 import { usePdfTextIndex } from './usePdfTextIndex';
 import { Button } from '../../Common/Button';
 import { Loading } from '../../Common/Loading';
+import { toast } from '../../Common/Toast';
 import { containNoteWheel } from '../note/noteScroll';
 
 import type { AreaCapturedEvent, NormalizedRect } from './PDFPageWithOverlay';
@@ -288,8 +290,9 @@ export const PDFPreview = ({
           !anchor ||
           !el.contains(anchor as Node) ||
           !(anchor as Node).parentElement?.closest('.textLayer')
-        )
+        ) {
           return;
+        }
 
         setPendingTextSelection({
           text,
@@ -540,7 +543,7 @@ export const PDFPreview = ({
   // Send captured area to chat as a pending attachment
   // ---------------------------------------------------------------------------
   const handleSendToChat = useCallback(
-    (attachment: ChatAttachment) => {
+    async (attachment: ChatAttachment) => {
       if (!id) return;
 
       const chat = useChatStore.getState();
@@ -572,15 +575,32 @@ export const PDFPreview = ({
         return;
       }
 
-      const fallbackThreadId = chat.ensureCanvasThread(canvasId);
-      const pdfTab = findTabByTarget(preview.workspace, pdfTarget);
-      const pdfGroup = pdfTab ? groupOfTab(preview.workspace, pdfTab.id) : null;
-      chat.addPendingAttachment(fallbackThreadId, attachment);
-      preview.openPreviewTarget(
-        { kind: 'chat', canvasId, threadId: fallbackThreadId },
-        { groupId: pdfGroup?.id, openToSide: true },
-      );
-      usePanelStore.getState().requestFocusChatInput(fallbackThreadId);
+      try {
+        let fallbackThreadId = chat.threadMap[canvasId];
+        if (!fallbackThreadId) {
+          const binding = await loadDefaultAgentBinding();
+          if (
+            useCanvasStore.getState().canvasId !== canvasId ||
+            usePreviewWorkspaceStore.getState().workspace !== preview.workspace
+          )
+            return;
+          fallbackThreadId = chat.ensureCanvasThread(canvasId, binding);
+        }
+        const pdfTab = findTabByTarget(preview.workspace, pdfTarget);
+        const pdfGroup = pdfTab
+          ? groupOfTab(preview.workspace, pdfTab.id)
+          : null;
+        chat.addPendingAttachment(fallbackThreadId, attachment);
+        preview.openPreviewTarget(
+          { kind: 'chat', canvasId, threadId: fallbackThreadId },
+          { groupId: pdfGroup?.id, openToSide: true },
+        );
+        usePanelStore.getState().requestFocusChatInput(fallbackThreadId);
+      } catch (error) {
+        toast(error instanceof Error ? error.message : String(error), {
+          tone: 'danger',
+        });
+      }
     },
     [canvasId, id],
   );

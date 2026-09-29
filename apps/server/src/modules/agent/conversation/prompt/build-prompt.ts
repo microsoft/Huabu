@@ -26,7 +26,10 @@
  */
 
 import { buildAttachmentParts } from './attachments.js';
-import { INK_INTENT_DIRECTIVE } from './ink-intent.js';
+import {
+  INK_INTENT_DIRECTIVE,
+  EXTERNAL_INK_INTENT_DIRECTIVE,
+} from './ink-intent.js';
 import { renderInkRecognition } from './ink-ocr.js';
 import { renderInvokedSkillsSection } from './invoked-skills.js';
 import { renderNeighbourhoodSection } from './neighbourhood.js';
@@ -208,7 +211,14 @@ export async function renderTurn(
   }
 
   const parts: ContentPart[] = [];
-  if (isInkIntent) parts.push({ type: 'text', text: INK_INTENT_DIRECTIVE });
+  if (isInkIntent)
+    parts.push({
+      type: 'text',
+      text:
+        profile.toolset === 'reachback'
+          ? EXTERNAL_INK_INTENT_DIRECTIVE
+          : INK_INTENT_DIRECTIVE,
+    });
   if (inkRecognitionSection) {
     parts.push({ type: 'text', text: inkRecognitionSection });
   }

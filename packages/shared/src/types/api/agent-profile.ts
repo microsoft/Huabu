@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { acpHarnessLaunchSchema } from '@agenetes/protocol';
 import { z } from 'zod';
 
 const trimmedString = (max: number) =>
@@ -69,6 +70,8 @@ const profileBaseSchema = z.object({
   agentletId: trimmedString(255),
   workingDirPath: pathSchema,
   customData: customDataSchema.optional(),
+  revision: z.number().int().nonnegative().optional(),
+  executionRevision: z.number().int().nonnegative().optional(),
 });
 
 const commandLaunchSchema = z
@@ -92,18 +95,33 @@ export const acpCommandProfileSchema = profileBaseSchema
   .strict();
 export type AcpCommandProfileView = z.infer<typeof acpCommandProfileSchema>;
 
-export const agentProfileSchema = acpCommandProfileSchema;
+export const acpHarnessProfileSchema = profileBaseSchema
+  .extend({
+    launch: acpHarnessLaunchSchema,
+    metadata: commandMetadataSchema.optional(),
+  })
+  .strict();
+export type AcpHarnessProfileView = z.infer<typeof acpHarnessProfileSchema>;
+
+export const agentProfileSchema = profileBaseSchema
+  .extend({
+    launch: z.union([commandLaunchSchema, acpHarnessLaunchSchema]),
+    metadata: commandMetadataSchema.optional(),
+  })
+  .strict();
 export type AgentProfileView = z.infer<typeof agentProfileSchema>;
 
-export const createAgentProfileBodySchema = acpCommandProfileSchema
-  .omit({ id: true })
-  .strict();
+export const createAgentProfileBodySchema = agentProfileSchema.omit({
+  id: true,
+  revision: true,
+  executionRevision: true,
+});
 export type CreateAgentProfileBody = z.infer<
   typeof createAgentProfileBodySchema
 >;
 
 export const createAcpCommandProfileBodySchema = profileBaseSchema
-  .omit({ id: true, agentletId: true })
+  .omit({ id: true, agentletId: true, revision: true, executionRevision: true })
   .extend({
     launch: commandLaunchSchema,
     metadata: commandMetadataSchema.optional(),
@@ -113,17 +131,59 @@ export type CreateAcpCommandProfileBody = z.infer<
   typeof createAcpCommandProfileBodySchema
 >;
 
+export const createAcpProfileBodySchema = agentProfileSchema.omit({
+  id: true,
+  agentletId: true,
+  revision: true,
+  executionRevision: true,
+});
+export type CreateAcpProfileBody = z.infer<typeof createAcpProfileBodySchema>;
+
 export const patchAgentProfileBodySchema = z
   .object({
+    expectedRevision: z.number().int().nonnegative(),
     alias: trimmedString(255).optional(),
     customData: customDataSchema.nullable().optional(),
     metadata: commandMetadataSchema.nullable().optional(),
+    workingDirPath: pathSchema.optional(),
+    launch: agentProfileSchema.shape.launch.optional(),
   })
   .strict()
-  .refine((value) => Object.keys(value).length > 0, {
-    message: 'At least one Profile field is required',
-  });
+  .refine(
+    (value) => Object.keys(value).some((key) => key !== 'expectedRevision'),
+    {
+      message: 'At least one Profile field is required',
+    },
+  );
 export type PatchAgentProfileBody = z.infer<typeof patchAgentProfileBodySchema>;
+
+export const acpProfileLaunchPreviewBodySchema = z
+  .object({
+    profileId: trimmedString(255).optional(),
+    launch: agentProfileSchema.shape.launch,
+  })
+  .strict();
+export type AcpProfileLaunchPreviewBody = z.infer<
+  typeof acpProfileLaunchPreviewBodySchema
+>;
+
+export const acpProfileLaunchPreviewResponseSchema = z.discriminatedUnion(
+  'kind',
+  [
+    z
+      .object({
+        kind: z.literal('exec'),
+        executable: z.string().min(1),
+        argv: z.array(z.string()),
+        env: z.record(z.string(), z.string()),
+      })
+      .strict(),
+    z.object({ kind: z.literal('shell'), command: z.string().min(1) }).strict(),
+  ],
+);
+export type AcpProfileLaunchPreviewResponse = z.infer<
+  typeof acpProfileLaunchPreviewResponseSchema
+>;
 
 export const agentProfileParamsSchema = z.object({ id: z.string().min(1) });
 export type AgentProfileParams = z.infer<typeof agentProfileParamsSchema>;

@@ -47,6 +47,8 @@ const IMAGE_MODEL_FAMILY_OPTIONS = IMAGE_MODEL_FAMILIES.map((f) => ({
 export const ImageProviderSettings: React.FC = () => {
   const { t } = useTranslation();
   const llmImageConfig = useLLMStore((s) => s.imageConfig);
+  const loadImageConfig = useLLMStore((s) => s.loadImageConfig);
+  const imageError = useLLMStore((s) => s.imageError);
   const llmImageSaving = useLLMStore((s) => s.imageSaving);
   const llmUpdateImageConfig = useLLMStore((s) => s.updateImageConfig);
   const credentialWritesDisabled = useDeploymentReadinessStore(
@@ -62,6 +64,10 @@ export const ImageProviderSettings: React.FC = () => {
   const [imgQuality, setImgQuality] = useState<
     'low' | 'medium' | 'high' | 'auto'
   >('low');
+
+  useEffect(() => {
+    void loadImageConfig();
+  }, [loadImageConfig]);
 
   // Sync image fields with the persisted image config.
   //
@@ -110,6 +116,11 @@ export const ImageProviderSettings: React.FC = () => {
 
   return (
     <SettingSection title={t('settings.imageGeneration')} optional collapsible>
+      {imageError && (
+        <p className="text-danger px-3 py-2 text-xs" role="alert">
+          {imageError}
+        </p>
+      )}
       <SettingRow title={t('settings.provider')}>
         <SettingControl>
           <Select

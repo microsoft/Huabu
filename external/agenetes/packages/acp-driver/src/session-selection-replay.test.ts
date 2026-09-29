@@ -144,6 +144,14 @@ describe('initial profile preferences', () => {
     expect(e.selections).not.toHaveProperty('allow_all');
   });
 
+  it('warns when an initial model is not offered instead of guessing flags', () => {
+    const e = entry();
+    const warn = vi.fn();
+    seedInitialPreferences(e, { model: 'missing' }, { ...logger, warn });
+    expect(e.selections).toEqual({});
+    expect(warn).toHaveBeenCalledOnce();
+  });
+
   it('uses the legacy model channel and ignores retired values', () => {
     const e = entry({
       availableModels: [

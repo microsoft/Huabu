@@ -22,6 +22,7 @@ export type {
   AcpCommandProfile,
   AgentProfileSnapshot,
   CreateAcpCommandProfileInput,
+  CreateAcpHarnessProfileInput,
   CreateAgentProfileInput,
   PatchAgentProfileInput,
   AgentProfileRegistryState,

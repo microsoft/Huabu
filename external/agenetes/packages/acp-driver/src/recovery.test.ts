@@ -7,7 +7,11 @@ import { acpSessionRegistry } from './session-registry.js';
 
 import type { AcpCreateSpec, AcpDurableState } from './handle.js';
 import type { AcpSessionEntry } from './session-registry.js';
-import type { AgentTurn, SessionId } from '@agenetes/protocol';
+import type {
+  AgentTurn,
+  SessionId,
+  AgentStreamEvent,
+} from '@agenetes/protocol';
 import type { AgentCreateContext } from '@agenetes/runtime';
 
 const sessionMocks = vi.hoisted(() => ({
@@ -30,6 +34,7 @@ const spec: AcpCreateSpec = {
   spec: {
     agentletId: 'machine-a',
     binding: { alias: 'copilot', profileId: 'profile_1' },
+    profileExecutionRevision: 7,
     recipe: {
       alias: 'copilot',
       command: 'copilot --acp',
@@ -99,6 +104,38 @@ describe('ACP durable history recovery', () => {
     acpSessionRegistry.remove('machine-a', spec.threadId);
   });
 
+  it('folds host side-channel events into the driver stream before termination', async () => {
+    const { entry } = sessionEntry();
+    sessionMocks.ensureAcpSession.mockResolvedValue(entry);
+    const handle = new AcpAgentHandle(spec, {
+      recovery: {
+        authorizeHistoryLoad: async () => ({ allowed: true, estimatedSize: 0 }),
+      },
+    });
+    const hostEvent = {
+      type: 'tool_call' as const,
+      data: {
+        toolCallId: 'host-report',
+        title: 'host report',
+        status: 'completed' as const,
+      },
+    };
+    const drainHostEvents = vi
+      .fn()
+      .mockReturnValueOnce([hostEvent])
+      .mockReturnValue([]);
+    const events: AgentStreamEvent[] = [];
+    for await (const event of handle.run(submission, {
+      overlay: emptyAcpOverlay(),
+      logger,
+      drainHostEvents,
+    }))
+      events.push(event);
+    expect(events).toContainEqual(hostEvent);
+    expect(events.at(-1)?.type).toBe('done');
+    expect(events.indexOf(hostEvent)).toBeLessThan(events.length - 1);
+  });
+
   describe('ACP canonical input lowering', () => {
     it('flattens members into one ordered prompt while preserving commands', () => {
       expect(
@@ -123,6 +160,51 @@ describe('ACP durable history recovery', () => {
       });
     });
   });
+
+  it.each(['', 'thread_1'])(
+    'isolates Job sessions even with a shared durable thread (%j)',
+    async (threadId) => {
+      const context: AgentCreateContext<AcpDurableState> = {
+        recovery: {
+          authorizeHistoryLoad: async () => ({
+            allowed: true,
+            estimatedSize: 0,
+          }),
+        },
+      };
+      const first = new AcpAgentHandle(
+        { ...spec, workloadType: 'Job', threadId },
+        context,
+      );
+      const second = new AcpAgentHandle(
+        { ...spec, workloadType: 'Job', threadId },
+        context,
+      );
+      const { entry, prompt } = sessionEntry();
+      sessionMocks.ensureAcpSession.mockResolvedValue(entry);
+      const remove = vi.spyOn(acpSessionRegistry, 'remove');
+      for (const handle of [first, second, first]) {
+        for await (const _event of handle.run(submission, {
+          overlay: emptyAcpOverlay(),
+          logger,
+        })) {
+          // Drain both Jobs and prove that the handle retains its own session behavior.
+        }
+      }
+      const ids = sessionMocks.ensureAcpSession.mock.calls.map(
+        ([options]) => options.threadId,
+      );
+      expect(ids[0]).toMatch(/^acp-job-/);
+      expect(ids[0]).not.toBe(threadId);
+      expect(ids[1]).not.toBe(ids[0]);
+      expect(ids[2]).toBe(ids[0]);
+      expect(prompt).toHaveBeenCalledTimes(3);
+      expect(remove).not.toHaveBeenCalled();
+      first.close();
+      expect(remove).toHaveBeenCalledWith('machine-a', ids[0]);
+      remove.mockRestore();
+    },
+  );
 
   it('falls back only from structured native-resume unavailability', async () => {
     const authorizeHistoryLoad = vi.fn(async () => ({
@@ -152,6 +234,7 @@ describe('ACP durable history recovery', () => {
 
     expect(sessionMocks.ensureAcpSession).toHaveBeenCalledTimes(2);
     expect(sessionMocks.ensureAcpSession.mock.calls[0]?.[0]).toMatchObject({
+      profileExecutionRevision: 7,
       priorState: {
         driverState: {
           sessionId: 'stale_session',
@@ -160,6 +243,7 @@ describe('ACP durable history recovery', () => {
       },
     });
     expect(sessionMocks.ensureAcpSession.mock.calls[1]?.[0]).toMatchObject({
+      profileExecutionRevision: 7,
       priorState: {
         driverState: { initialPreambleDelivered: false },
         metadata: { currentModeId: 'ask' },

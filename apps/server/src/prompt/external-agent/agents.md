@@ -8,13 +8,13 @@ Load this guide when work should be handled by a visible Agent conversation inst
 curl -fsS -H "$AUTH" "$HUABU_RFS_URL/agent/profiles"
 ```
 
-The `huabu` Profile is the default. Use another returned Profile ID only when its specialization is useful.
+The entry marked `default: true` is the external Profile selected in Global Settings. If no entry is marked, configure a default or explicitly choose an available Profile; do not assume the first entry is the default.
 
 The `huabu` Profile uses Huabu's configured model provider. Other Profiles use their own configured runtimes and do not depend on that provider.
 
 ## 2. Create and start an Agent
 
-For a Huabu Agent, send the first prompt directly. This creates a visible Agent Node and immediately starts its first turn.
+To use the configured default Profile, send the first prompt directly. This creates a visible Agent Node and immediately starts its first turn. An unconfigured or deleted default produces an explicit error rather than selecting another Agent.
 
 ```bash
 curl -N -H "$AUTH" -H "Content-Type: text/plain" \

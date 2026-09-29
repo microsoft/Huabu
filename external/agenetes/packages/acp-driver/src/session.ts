@@ -87,8 +87,12 @@ export interface AcpProfileCachePort {
    * Read the warm-start slash-command list cached for a profile, or `null`
    * when none is cached. Used to paint the `/` menu on a fresh session
    * before the agent's authoritative `available_commands_update` arrives.
+   * Hosts fence this cache read against the frozen execution revision; absent means zero.
    */
-  readCommands(profileId: string): {
+  readCommands(
+    profileId: string,
+    profileExecutionRevision?: number,
+  ): {
     availableCommands: AvailableCommand[];
     commandsUpdatedAt: number;
   } | null;
@@ -168,6 +172,7 @@ export interface EnsureAcpSessionOptions {
   threadId: string;
   /** External binding for the thread (see {@link RunAcpAgentOptions.binding}). */
   binding: { alias: string; profileId: string };
+  profileExecutionRevision?: number;
   /**
    * `cwd` for `session/new`. When omitted, resolved from the bound
    * profile's `cwd` (see {@link RunAcpAgentOptions.cwd} for the full
@@ -299,6 +304,9 @@ export function snapshotEntryState(
         ? { sessionId: entry.sessionId as SessionId }
         : {}),
       initialPreambleDelivered: entry.initialPreambleDelivered,
+      ...(entry.bindingRecipe?.launchPlan
+        ? { harnessLaunchPlan: entry.bindingRecipe.launchPlan }
+        : {}),
     },
     metadata: snapshotEntryMeta(entry),
   };
@@ -365,6 +373,7 @@ export { hydrateSelectionsFromPersistedMeta };
 function seedInitialPreferences(
   entry: AcpSessionEntry,
   preferences: EnsureAcpSessionOptions['initialPreferences'],
+  logger?: AcpSessionLogger,
 ): void {
   if (!preferences) return;
 
@@ -413,6 +422,16 @@ function seedInitialPreferences(
     )
   ) {
     entry.selections[MODEL_SELECTION_ID] = preferences.model;
+  }
+  if (
+    preferences.model &&
+    !modelSeeded &&
+    entry.selections[MODEL_SELECTION_ID] !== preferences.model
+  ) {
+    logger?.warn(
+      { profileId: entry.profileId, model: preferences.model },
+      '[acp] requested initial model is not advertised; using the harness default',
+    );
   }
   seedConfigPreference('thought_level', preferences.thoughtLevel);
   if (Object.keys(entry.selections).length > 0) {
@@ -834,7 +853,7 @@ async function ensureAcpSessionInner(
   // returning thread's recipe stable; the driver no longer reads a
   // persisted `bindingRecipe`. When absent, the binding is unbound — fail
   // with a clear, user-actionable error.
-  const recipe: AcpBindingRecipe | null = opts.recipe ?? null;
+  let recipe: AcpBindingRecipe | null = opts.recipe ?? null;
   if (!recipe) {
     throw new AcpServiceError(
       'profile_missing',
@@ -901,6 +920,16 @@ async function ensureAcpSessionInner(
     );
   }
   const priorSessionId = priorState?.driverState.sessionId;
+  const savedPlan = priorState?.driverState.harnessLaunchPlan;
+  if (savedPlan) {
+    if (!recipe.launch) {
+      throw new AcpServiceError(
+        'spawn_failed',
+        'Persisted harness launch cannot be replaced by a shell command',
+      );
+    }
+    recipe = { ...recipe, launchPlan: savedPlan };
+  }
 
   // Resolve the thread to a live agentlet agent. Each thread owns its
   // own CLI process — the orchestrator either returns the cached spawn
@@ -909,7 +938,7 @@ async function ensureAcpSessionInner(
   // the daemon can resume a suspended session instead of creating new.
   // Failures here surface as a 503 from the caller with a user-actionable
   // hint pointing at Settings → External Agents.
-  const { sessionId: agentSessionId } = await ensureAgentForThread(
+  const { sessionId: agentSessionId, launchPlan } = await ensureAgentForThread(
     agentletId,
     threadId,
     recipe,
@@ -975,7 +1004,7 @@ async function ensureAcpSessionInner(
     namespace,
     cwd,
     createdAt: Date.now(),
-    bindingRecipe: recipe,
+    bindingRecipe: launchPlan ? { ...recipe, launchPlan } : recipe,
     // Resume path (`priorSessionId` was down-fed + agent accepted it)
     // already has a recoverable session, so the entry starts persisted and
     // the handle's first up-report refreshes the durable record. Fresh
@@ -1029,7 +1058,7 @@ async function ensureAcpSessionInner(
   // the user's remembered choices.
   hydrateSelectionsFromPersistedMeta(created, priorState?.metadata);
   if (!priorState?.metadata) {
-    seedInitialPreferences(created, opts.initialPreferences);
+    seedInitialPreferences(created, opts.initialPreferences, logger);
   }
 
   // Installing the listener synchronously drains Gateway pre-attach messages
@@ -1070,7 +1099,10 @@ async function ensureAcpSessionInner(
   // optimistic localStorage cache the web client maintains for the
   // same purpose.
   if (created.availableCommands.length === 0 && binding.profileId) {
-    const warm = profileCachePort?.readCommands(binding.profileId);
+    const warm = profileCachePort?.readCommands(
+      binding.profileId,
+      opts.profileExecutionRevision,
+    );
     if (warm) {
       created.availableCommands = warm.availableCommands;
       created.commandsUpdatedAt = warm.commandsUpdatedAt;

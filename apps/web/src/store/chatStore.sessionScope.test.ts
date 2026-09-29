@@ -3,6 +3,7 @@
 
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import { useAcpProfilesStore } from './acpProfilesStore';
 import {
   selectThreadBinding,
   selectThreadDraft,
@@ -19,11 +20,11 @@ import type { ChatMessage } from './chatTypes';
 import type { AgentBinding, ChatAttachment } from '@huabu/shared';
 
 const INTERNAL: AgentBinding = { kind: 'internal' };
-const EXTERNAL: AgentBinding = {
+const EXTERNAL = {
   kind: 'external',
   alias: 'Claude Code',
   profileId: 'profile-1',
-};
+} satisfies AgentBinding;
 const ATTACHMENT: ChatAttachment = {
   type: 'text',
   source: 'upload',
@@ -32,6 +33,15 @@ const ATTACHMENT: ChatAttachment = {
 };
 
 function resetStore() {
+  useAcpProfilesStore.setState({
+    loaded: true,
+    error: null,
+    profiles: [],
+    agentDefaults: {
+      profileId: EXTERNAL.profileId,
+      functionalModel: 'utility-only',
+    },
+  });
   useChatStore.setState({
     threadsById: {},
     lastActionByThread: {},
@@ -131,20 +141,77 @@ describe('chatStore thread creation', () => {
       'canvas-1': first,
       'canvas-2': second,
     });
-    expect(selectThreadBinding(useChatStore.getState(), first)).toEqual(
-      INTERNAL,
-    );
-    expect(selectThreadLastAction(useChatStore.getState(), first)).toBe(
-      'operate',
-    );
+    expect(selectThreadBinding(useChatStore.getState(), first)).toEqual({
+      kind: 'external',
+      profileId: EXTERNAL.profileId,
+      alias: EXTERNAL.profileId,
+    });
+    expect(selectThreadLastAction(useChatStore.getState(), first)).toBe('ask');
   });
 
-  it('defaults a new independent thread to the built-in Huabu Agent', () => {
+  it('defaults a new independent thread to the global external Profile without model bleed', () => {
     const created = useChatStore.getState().createThread();
     const state = useChatStore.getState();
 
-    expect(selectThreadBinding(state, created)).toEqual(INTERNAL);
-    expect(selectThreadLastAction(state, created)).toBe('operate');
+    expect(selectThreadBinding(state, created)).toMatchObject({
+      kind: 'external',
+      profileId: EXTERNAL.profileId,
+    });
+    expect(selectThreadLastAction(state, created)).toBe('ask');
+    expect(selectThreadSettings(state, created)).toEqual({
+      modelId: null,
+      reasoningEffort: null,
+    });
+  });
+
+  it('keeps an existing legacy Canvas identity even with no configured default', () => {
+    useChatStore.setState({
+      threadMap: { 'canvas-legacy': 'thread-legacy' },
+      bindingByThread: { 'thread-legacy': INTERNAL },
+    });
+    useAcpProfilesStore.setState({ agentDefaults: null, loaded: false });
+    expect(useChatStore.getState().ensureCanvasThread('canvas-legacy')).toBe(
+      'thread-legacy',
+    );
+    expect(
+      selectThreadBinding(useChatStore.getState(), 'thread-legacy'),
+    ).toEqual(INTERNAL);
+  });
+
+  it('refuses unconfigured creation without leaving an internal thread', () => {
+    useAcpProfilesStore.setState({
+      agentDefaults: { profileId: null, functionalModel: '' },
+    });
+    expect(() => useChatStore.getState().createThread()).toThrow();
+    expect(() =>
+      useChatStore.getState().ensureCanvasThread('canvas-new'),
+    ).toThrow();
+    expect(useChatStore.getState().threadsById).toEqual({});
+    expect(useChatStore.getState().threadMap).toEqual({});
+  });
+
+  it('keeps explicitly selected internal bindings and session preferences unchanged', () => {
+    const threadId = useChatStore
+      .getState()
+      .createThread({ binding: INTERNAL });
+    useChatStore.getState().setThreadSettings(threadId, {
+      modelId: 'chat-model',
+      reasoningEffort: 'high',
+    });
+    useAcpProfilesStore.setState({
+      agentDefaults: {
+        profileId: 'another',
+        functionalModel: 'changed-utility',
+      },
+    });
+    useChatStore.getState().createThread();
+    expect(selectThreadBinding(useChatStore.getState(), threadId)).toEqual(
+      INTERNAL,
+    );
+    expect(selectThreadSettings(useChatStore.getState(), threadId)).toEqual({
+      modelId: 'chat-model',
+      reasoningEffort: 'high',
+    });
   });
 
   it('defaults external Canvas and independent threads to ask', () => {

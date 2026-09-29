@@ -32,7 +32,28 @@
 
 import { z } from 'zod';
 
+import { inkIntentReportSchema } from './agent.js';
 import { CANVAS_NODE_TYPES } from '../canvas/node.js';
+
+export const rfsInkIntentParamsSchema = z.object({
+  canvasId: z.string().min(1).max(256),
+  threadId: z.string().min(1).max(256),
+});
+export type RfsInkIntentParams = z.infer<typeof rfsInkIntentParamsSchema>;
+
+export const rfsInkIntentRequestSchema = z
+  .object({
+    invocationToken: z.string().uuid(),
+    report: inkIntentReportSchema,
+  })
+  .strict();
+export type RfsInkIntentRequest = z.infer<typeof rfsInkIntentRequestSchema>;
+
+export const rfsInkIntentResponseSchema = z.object({
+  report: inkIntentReportSchema,
+  renamed: z.boolean(),
+});
+export type RfsInkIntentResponse = z.infer<typeof rfsInkIntentResponseSchema>;
 
 // ==================== Metadata allow-list ====================
 
@@ -235,7 +256,7 @@ export type RfsAgentPromptRequest = z.infer<typeof rfsAgentPromptRequestSchema>;
 
 /** Full JSON body for `POST /api/rfs/:canvasId/agent`. */
 export const rfsAgentCreateRequestSchema = z.object({
-  profileId: z.string().trim().min(1).default(HUABU_AGENT_PROFILE_ID),
+  profileId: z.string().trim().min(1).optional(),
   prompt: z.string().trim().min(1).optional(),
   position: z
     .object({

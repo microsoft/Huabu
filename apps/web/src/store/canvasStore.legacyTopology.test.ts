@@ -14,8 +14,10 @@ vi.mock('../api', async (importOriginal) => ({
   ...api,
 }));
 
+import { useAcpProfilesStore } from './acpProfilesStore';
 import { canvasHistoryManager } from './canvasHistoryManager';
 import useCanvasStore from './canvasStore';
+import { useChatStore } from './chatStore';
 import { CanvasConflictError } from '../api';
 import { usePreviewWorkspaceStore } from './previewWorkspace/store';
 import * as notifications from '../components/Common/Toast';
@@ -108,6 +110,53 @@ afterEach(() => {
 });
 
 describe('legacy topology load boundary', () => {
+  it('loads a non-AI Space without configuring or creating a Chat', async () => {
+    useChatStore.setState({ threadMap: {} });
+    useAcpProfilesStore.setState({ loaded: false, agentDefaults: null });
+    usePreviewWorkspaceStore.setState({ canvasId: '' });
+    api.getCanvas.mockResolvedValue({
+      canvasId: 'non-ai-space',
+      title: 'Non-AI',
+      version: 1,
+      state: { nodes: [], edges: [] },
+    });
+    await useCanvasStore.getState().loadCanvas('non-ai-space');
+    expect(useCanvasStore.getState().canvasId).toBe('non-ai-space');
+    expect(useCanvasStore.getState().isLoading).toBe(false);
+    expect(useChatStore.getState().threadMap).toEqual({});
+    expect(usePreviewWorkspaceStore.getState().workspace.tabs).toEqual({});
+  });
+
+  it('restores the legacy Chat identity without resolving new defaults', async () => {
+    useChatStore.setState({
+      threadMap: { 'legacy-chat-space': 'legacy-thread' },
+      bindingByThread: { 'legacy-thread': { kind: 'internal' } },
+    });
+    useAcpProfilesStore.setState({ loaded: false, agentDefaults: null });
+    usePreviewWorkspaceStore.setState({ canvasId: '' });
+    api.getCanvas.mockResolvedValue({
+      canvasId: 'legacy-chat-space',
+      title: 'Legacy',
+      version: 1,
+      state: { nodes: [], edges: [] },
+    });
+    await useCanvasStore.getState().loadCanvas('legacy-chat-space');
+    expect(useChatStore.getState().threadMap['legacy-chat-space']).toBe(
+      'legacy-thread',
+    );
+    expect(
+      Object.values(usePreviewWorkspaceStore.getState().workspace.tabs)[0]
+        ?.target,
+    ).toEqual({
+      kind: 'chat',
+      canvasId: 'legacy-chat-space',
+      threadId: 'legacy-thread',
+    });
+    expect(useChatStore.getState().bindingByThread['legacy-thread']).toEqual({
+      kind: 'internal',
+    });
+  });
+
   it('saves legacy Hug headers before completing load and does not save again on reopen', async () => {
     const graph = storedGraph();
     graph.nodes[3].data.sizing = 'hug';

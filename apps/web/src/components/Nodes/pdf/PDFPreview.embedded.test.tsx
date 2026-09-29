@@ -35,6 +35,9 @@ vi.mock('@/store/canvasStore', () => ({
     select({ canvasId: 'canvas-1' }),
 }));
 vi.mock('@/store/chatStore', () => ({ useChatStore: {} }));
+vi.mock('@/store/acpProfilesStore', () => ({
+  loadDefaultAgentBinding: vi.fn(),
+}));
 vi.mock('@/store/conversationOwner', () => ({
   conversationViewForNode: vi.fn(),
 }));

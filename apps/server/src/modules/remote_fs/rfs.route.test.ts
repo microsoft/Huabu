@@ -1649,13 +1649,17 @@ describe('POST /api/rfs/:canvasId/agent', () => {
     },
   );
 
-  it('uses text/plain to create and immediately start a Huabu Agent', async () => {
+  it('uses text/plain to create and immediately start the default Agent', async () => {
     seedNote('c1', 'node-anchor', 'Anchor', 'content');
     const target: FixedAgentNodeTarget = {
       canvasId: 'c1',
-      nodeId: 'node-huabu' as CanvasNodeId,
-      threadId: 'thread-huabu',
-      agentBinding: { kind: 'internal' },
+      nodeId: 'node-default' as CanvasNodeId,
+      threadId: 'thread-default',
+      agentBinding: {
+        kind: 'external',
+        profileId: 'profile-default',
+        alias: 'Default',
+      },
       status: 'idle',
       content: '',
     };
@@ -1663,7 +1667,7 @@ describe('POST /api/rfs/:canvasId/agent', () => {
       canvasId: 'c1',
       nodeId: target.nodeId,
       threadId: target.threadId,
-      profileId: 'huabu',
+      profileId: 'profile-default',
       parentConnection: 'not_requested',
     });
     vi.spyOn(agentThreadService, 'resolveFixedTarget').mockResolvedValue(
@@ -1692,14 +1696,14 @@ describe('POST /api/rfs/:canvasId/agent', () => {
 
       expect(res.statusCode).toBe(201);
       expect(res.headers['content-type']).toMatch(/text\/event-stream/);
-      expect(res.body).toContain(': threadId thread-huabu');
+      expect(res.body).toContain(': threadId thread-default');
       expect(res.body).toContain('event: created');
-      expect(res.body).toContain('"profileId":"huabu"');
+      expect(res.body).toContain('"profileId":"profile-default"');
       expect(res.body).toContain('data: first answer');
       expect(agentNodeService.create).toHaveBeenCalledWith(
         expect.objectContaining({
           canvasId: 'c1',
-          profileId: 'huabu',
+          profileId: undefined,
         }),
       );
       expect(agentThreadService.invoke).toHaveBeenCalledOnce();

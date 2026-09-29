@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { agentRequestSchema } from '@huabu/shared';
 
+import { toast } from '@/components/Common/Toast';
 import { useAcpProfilesStore } from '@/store/acpProfilesStore';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
@@ -28,8 +29,14 @@ const mocks = vi.hoisted(() => ({
   captureGrounding: vi.fn(),
   blobToDataUrl: vi.fn(),
   getViewport: vi.fn(),
+  getDefaults: vi.fn(),
   popoverAnchor: null as unknown,
 }));
+
+vi.mock('@/api/agentDefaults', () => ({
+  getAgentDefaults: mocks.getDefaults,
+}));
+vi.mock('@/components/Common/Toast', () => ({ toast: vi.fn() }));
 
 vi.mock('@xyflow/react', async (original) => ({
   ...((await original()) as object),
@@ -129,7 +136,27 @@ beforeEach(() => {
     settingsByThread: {},
     lastActionByThread: {},
   });
-  useAcpProfilesStore.setState({ profiles: [] });
+  const profiles = [
+    {
+      id: 'default-profile',
+      alias: 'Default Copilot',
+      agentletId: 'machine-1',
+      workingDirPath: '/tmp',
+      launch: { kind: 'acp-command' as const, command: 'copilot --acp' },
+    },
+  ];
+  useAcpProfilesStore.setState({
+    profiles,
+    agentDefaults: { profileId: 'default-profile', functionalModel: '' },
+    loaded: true,
+    error: null,
+    defaultsError: null,
+  });
+  mocks.getDefaults.mockReset().mockResolvedValue({
+    defaults: { profileId: 'default-profile', functionalModel: '' },
+    selectionState: 'available',
+    modelCapability: 'unknown',
+  });
   useGesturePreviewStore.setState({
     sketchStrokeSelection: { 'sketch-1': ['stroke-1'] },
     sketchSelectionPolygon: [
@@ -184,6 +211,109 @@ afterEach(() => {
 });
 
 describe('StrokeSelectionToolbar Ink submission', () => {
+  it('loads and snapshots the default external Profile for a new Ink Question', async () => {
+    mocks.dispatch.mockResolvedValueOnce({ status: 'completed' });
+    const button = await renderToolbar();
+    await act(async () => button.click());
+    expect(mocks.getDefaults).toHaveBeenCalledOnce();
+    expect(mocks.createQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        binding: {
+          kind: 'external',
+          profileId: 'default-profile',
+          alias: 'Default Copilot',
+        },
+        mode: 'ask',
+        pendingInkIntentLabel: true,
+      }),
+    );
+    expect(mocks.prepare).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: 'ask' }),
+    );
+  });
+
+  it('keeps the Ink selection and creates nothing when defaults are unavailable', async () => {
+    mocks.getDefaults.mockRejectedValueOnce(new Error('Server unavailable'));
+    const button = await renderToolbar();
+    await act(async () => button.click());
+    expect(mocks.createQuestion).not.toHaveBeenCalled();
+    expect(mocks.dispatch).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledWith(expect.any(String), { tone: 'danger' });
+    expect(useGesturePreviewStore.getState().sketchStrokeSelection).toEqual({
+      'sketch-1': ['stroke-1'],
+    });
+
+    expect(useGesturePreviewStore.getState().inkSubmissionPreparing).toBe(
+      false,
+    );
+  });
+
+  it('restores operate mode for new Ink Questions with a Built-In default', async () => {
+    mocks.getDefaults.mockResolvedValueOnce({
+      defaults: { profileId: 'huabu', functionalModel: '' },
+      selectionState: 'available',
+      modelCapability: 'supported',
+    });
+    const button = await renderToolbar();
+    await act(async () => button.click());
+    expect(mocks.createQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        binding: { kind: 'internal' },
+        mode: 'operate',
+      }),
+    );
+    expect(mocks.prepare).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: 'operate' }),
+    );
+  });
+
+  it('requires a configured default instead of falling back to the internal Agent', async () => {
+    mocks.getDefaults.mockResolvedValueOnce({
+      defaults: { profileId: null, functionalModel: '' },
+      selectionState: 'unconfigured',
+      modelCapability: 'unknown',
+    });
+    const button = await renderToolbar();
+    await act(async () => button.click());
+    expect(mocks.createQuestion).not.toHaveBeenCalled();
+    expect(mocks.dispatch).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledWith(expect.any(String), { tone: 'danger' });
+  });
+
+  it.each(['selection', 'canvas'] as const)(
+    'does not create an Ink Question after %s changes during default loading',
+    async (change) => {
+      let resolveDefaults!: (value: unknown) => void;
+      mocks.getDefaults.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveDefaults = resolve;
+          }),
+      );
+      const button = await renderToolbar();
+      await act(async () => button.click());
+      expect(mocks.createQuestion).not.toHaveBeenCalled();
+      await act(async () => {
+        if (change === 'canvas') {
+          useCanvasStore
+            .getState()
+            ._setStateNoAutosave({ canvasId: 'canvas-2' });
+        } else {
+          useGesturePreviewStore.setState({
+            sketchStrokeSelection: { 'sketch-1': ['stroke-2'] },
+          });
+        }
+        resolveDefaults({
+          defaults: { profileId: 'default-profile', functionalModel: '' },
+          selectionState: 'available',
+          modelCapability: 'unknown',
+        });
+      });
+      expect(mocks.createQuestion).not.toHaveBeenCalled();
+      expect(mocks.dispatch).not.toHaveBeenCalled();
+    },
+  );
+
   it('keeps submit and source count visible for a mixed selection', async () => {
     useCanvasStore.getState()._setStateNoAutosave({
       nodes: [
@@ -208,7 +338,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
     await mountToolbar();
 
     expect(document.body.textContent).toContain('2 sources');
-    expect(document.body.textContent).toContain('New · Huabu');
+    expect(document.body.textContent).toContain('New · Default Copilot');
     expect(document.body.querySelector('[data-sketch-controls]')).toBeNull();
     const submit = document.body.querySelector<HTMLButtonElement>(
       'button[aria-label="Send ink request"]',
@@ -471,6 +601,8 @@ describe('StrokeSelectionToolbar Ink submission', () => {
     expect(mocks.prepare).toHaveBeenCalledWith(
       expect.objectContaining({ mode: 'operate' }),
     );
+    expect(mocks.getDefaults).not.toHaveBeenCalled();
+    expect(mocks.createQuestion).not.toHaveBeenCalled();
   });
 
   it('continues an internal Question in its persisted ask mode', async () => {
@@ -515,6 +647,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
         }),
       }),
     );
+    expect(mocks.getDefaults).not.toHaveBeenCalled();
   });
 
   it('creates and dispatches at most once for rapid activation', async () => {
@@ -522,7 +655,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
     mocks.dispatch.mockReturnValueOnce(pending.promise);
     const button = await renderToolbar();
 
-    act(() => {
+    await act(async () => {
       button.click();
       button.click();
     });
@@ -571,6 +704,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
 
     expect(mocks.createQuestion).toHaveBeenCalledTimes(1);
     expect(mocks.dispatch).toHaveBeenCalledTimes(2);
+    expect(mocks.getDefaults).toHaveBeenCalledTimes(1);
   });
 
   it('retains an ambiguous reservation until Stop confirms no acceptance', async () => {
@@ -619,7 +753,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
     );
     const button = await renderToolbar();
 
-    act(() => button.click());
+    await act(async () => button.click());
     await act(async () => {
       useGesturePreviewStore.setState({
         sketchStrokeSelection: { 'sketch-1': ['stroke-2'] },
@@ -665,7 +799,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
     );
     const button = await renderToolbar();
 
-    act(() => button.click());
+    await act(async () => button.click());
     useCanvasStore.getState()._setStateNoAutosave({
       nodes: [
         {
@@ -709,7 +843,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
     );
     const button = await renderToolbar();
 
-    act(() => button.click());
+    await act(async () => button.click());
     expect(useGesturePreviewStore.getState().sketchStrokeSelection).toEqual({
       'sketch-1': ['stroke-1'],
     });

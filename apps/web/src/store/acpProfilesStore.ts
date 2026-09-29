@@ -8,8 +8,8 @@
  * Why a store and not per-component state? Several surfaces need the
  * profile list in lockstep: the Settings editor lets the user CRUD
  * profiles, the chat picker uses the same list to label "external"
- * binding options, and ChatPanel's stale-binding auto-reset needs to
- * see the latest profiles BEFORE flipping a binding. Centralising
+ * binding options, and new conversations snapshot the global default.
+ * Centralising
  * the list in a store means any caller can `await
  * useAcpProfilesStore.getState().refresh()` and be sure every
  * subscriber sees the new data on the next render.
@@ -40,10 +40,21 @@
 import { create } from 'zustand';
 
 import { listAcpProfiles } from '@/api/acp';
+import { getAgentDefaults, updateAgentDefaults } from '@/api/agentDefaults';
+import { toast } from '@/components/Common/Toast';
+import { i18n } from '@/i18n';
 
 import type { AcpAgentletStatus, AgentProfileView } from '@/api/acp';
+import type {
+  AgentBinding,
+  AgentDefaults,
+  AgentDefaultsResponse,
+} from '@huabu/shared';
 
 let inFlightRefresh: Promise<void> | null = null;
+let inFlightDefaults: Promise<AgentDefaultsResponse> | null = null;
+let defaultsSaveQueue = Promise.resolve();
+let defaultsRevision = 0;
 
 interface AcpProfilesState {
   /** Every profile the user has created. Empty until the first fetch. */
@@ -52,6 +63,9 @@ interface AcpProfilesState {
   selectableProfileIds: string[];
   /** Latest agentlet snapshot. `null` until the first fetch resolves. */
   agentlet: AcpAgentletStatus | null;
+  /** Absent on older servers; never infer a default from list ordering. */
+  agentDefaults: AgentDefaults | null;
+  defaultsError: Error | null;
   /**
    * `true` once a fetch has *succeeded* at least once. A failed initial
    * fetch leaves this `false` (and {@link profiles} empty), so consumers
@@ -70,12 +84,16 @@ interface AcpProfilesState {
   init: () => Promise<void>;
   /** Force a fresh GET. Safe to call concurrently. */
   refresh: () => Promise<void>;
+  loadDefaults: () => Promise<AgentDefaultsResponse>;
+  saveDefaults: (config: AgentDefaults) => Promise<AgentDefaultsResponse>;
 }
 
 export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
   profiles: [],
   selectableProfileIds: [],
   agentlet: null,
+  agentDefaults: null,
+  defaultsError: null,
   loaded: false,
   error: null,
   loading: false,
@@ -108,8 +126,67 @@ export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
     }
     await get().refresh();
   },
-  refresh: () => {
+  loadDefaults: async () => {
+    await defaultsSaveQueue;
+    if (inFlightDefaults) return inFlightDefaults;
+    const revision = defaultsRevision;
+    const request: Promise<AgentDefaultsResponse> = (async () => {
+      let response: AgentDefaultsResponse;
+      try {
+        response = await getAgentDefaults();
+      } catch (error) {
+        if (revision === defaultsRevision) {
+          set({
+            defaultsError:
+              error instanceof Error ? error : new Error(String(error)),
+          });
+        }
+        throw error;
+      }
+      if (revision !== defaultsRevision) {
+        inFlightDefaults = null;
+        return get().loadDefaults();
+      }
+      defaultsRevision++;
+      set({ agentDefaults: response.defaults, defaultsError: null });
+      return response;
+    })();
+    inFlightDefaults = request;
+    const clear = () => {
+      if (inFlightDefaults === request) inFlightDefaults = null;
+    };
+    void request.then(clear, clear);
+    return request;
+  },
+  saveDefaults: (config) => {
+    const request = defaultsSaveQueue.then(async () => {
+      try {
+        const response = await updateAgentDefaults(config);
+        defaultsRevision++;
+        set({ agentDefaults: response.defaults, defaultsError: null });
+        return response;
+      } catch (error) {
+        // Saves can finish after Settings closes; keep failures visible.
+        toast(
+          error instanceof Error
+            ? error.message
+            : i18n.t('settings.agentDefaultsSaveFailed'),
+          { tone: 'danger' },
+        );
+        throw error;
+      }
+    });
+    // A reported failure must not prevent later edits from being saved.
+    defaultsSaveQueue = request.then(
+      () => {},
+      () => {},
+    );
+    return request;
+  },
+  refresh: async () => {
+    await defaultsSaveQueue;
     if (inFlightRefresh) return inFlightRefresh;
+    const revision = defaultsRevision;
     const request = (async () => {
       set({ loading: true });
       try {
@@ -118,6 +195,9 @@ export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
           profiles: res.profiles,
           selectableProfileIds: res.selectableProfileIds,
           agentlet: res.agentlet,
+          ...(revision === defaultsRevision
+            ? { agentDefaults: res.agentDefaults ?? null, defaultsError: null }
+            : {}),
           loaded: true,
           error: null,
           loading: false,
@@ -138,3 +218,28 @@ export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
     return request;
   },
 }));
+
+/** Snapshot only the chat identity; functional-model routing is unrelated. */
+export function getDefaultAgentBinding(): AgentBinding {
+  const state = useAcpProfilesStore.getState();
+  if (!state.agentDefaults || state.defaultsError) {
+    throw new Error(i18n.t('errors.agentDefaultsUnavailable'));
+  }
+  const profileId = state.agentDefaults?.profileId;
+  if (!profileId) {
+    throw new Error(i18n.t('errors.agentDefaultUnconfigured'));
+  }
+  if (profileId === 'huabu') return { kind: 'internal' };
+  const profile = state.profiles.find((entry) => entry.id === profileId);
+  return {
+    kind: 'external',
+    profileId,
+    alias: profile?.alias ?? profileId,
+  };
+}
+
+/** User-initiated creation waits for the canonical server snapshot. */
+export async function loadDefaultAgentBinding(): Promise<AgentBinding> {
+  await useAcpProfilesStore.getState().loadDefaults();
+  return getDefaultAgentBinding();
+}

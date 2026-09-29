@@ -31,6 +31,28 @@ function entry(overrides: Partial<AcpSessionEntry> = {}): AcpSessionEntry {
 }
 
 describe('ACP durable state snapshot', () => {
+  it('persists authorized harness arguments even before an empty native session is recoverable', () => {
+    const launchPlan = {
+      version: 1 as const,
+      executable: 'copilot',
+      argv: ['--acp'],
+      env: {},
+    };
+    const state = snapshotEntryState(
+      entry({
+        persistedToDisk: false,
+        bindingRecipe: {
+          launch: { kind: 'acp-harness', harnessId: 'copilot' },
+          launchPlan,
+          alias: 'Typed',
+          autoRestart: true,
+        },
+      }),
+    );
+    expect(state.driverState.harnessLaunchPlan).toEqual(launchPlan);
+    expect(state.driverState.sessionId).toBeUndefined();
+  });
+
   it('persists preamble delivery independently from sessionId', () => {
     expect(snapshotEntryState(entry())).toMatchObject({
       driverState: {

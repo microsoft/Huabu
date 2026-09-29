@@ -4,12 +4,10 @@
 /**
  * Provider Manager
  *
- * Single entry point for all LLM and external-provider calls made by the
- * preprocessing pipeline. Wraps the existing `llmComplete` from `agent/llm.ts`
- * and the label prompts from `prompt/resolve-label.ts`.
- *
- * Future enhancements: caching, budget limits, batch support.
+ * Text and image metadata tasks use the explicitly selected global Agent.
  */
+
+import { z } from 'zod';
 
 import {
   buildContentEnrichPrompt,
@@ -19,121 +17,60 @@ import {
   IMAGE_LABEL_PROMPT,
   buildFrameLabelPrompt,
 } from '../../prompt/resolve-label.js';
-import { isVisionImageMime } from '../../utils/mime.js';
-import { llmComplete } from '../agent/llm.js';
-import { resolveArtifactImageUrl } from '../artifact/utils.js';
+import { resolveImageUrl } from '../agent/conversation/prompt/image-inlining.js';
+import { runFunctionalText } from '../agent/functional-text.js';
 
-import type { Context } from '@earendil-works/pi-ai';
+import type { FunctionalTextContext } from '../agent/functional-text.js';
 
-/**
- * Whether an error from an LLM / provider call is a transient connectivity or
- * auth-refresh failure (gateway down, OAuth token refresh failed, network
- * blip, rate limit) rather than a genuine "the model ran but produced nothing
- * usable" outcome.
- *
- * Transient failures are rethrown so the preprocessing pipeline records a
- * retryable `ENRICH_FAILED` diagnostic and does NOT mark the enrich
- * capabilities as done — instead of silently returning `undefined`, which is
- * indistinguishable from "this node has no content worth enriching" and would
- * permanently freeze the node without a label / summary. Genuine empty or
- * unparseable model output stays non-transient (returns `undefined`).
- */
-export function isTransientProviderError(err: unknown): boolean {
-  const message = err instanceof Error ? err.message : String(err);
-  return (
-    /please log in|authentication failed|oauth/i.test(message) ||
-    /fetch failed|network|socket hang up|timeout|timed out|econn|etimedout|enotfound|eai_again/i.test(
-      message,
-    ) ||
-    /\b(401|403|408|425|429|500|502|503|504)\b/.test(message)
-  );
-}
+const contentMetaSchema = z.object({
+  label: z.string().trim().min(1).optional(),
+  summary: z.string().trim().min(1).optional(),
+  keywords: z.array(z.string().trim().min(1)).min(1).optional(),
+});
 
 export class ProviderManager {
   /**
-   * Generate a short semantic label for an image using LLM vision.
-   * Returns undefined if generation fails or produces an invalid result.
-   *
-   * `defaultCanvasId` is used when `src` is a bare artifact key (the
-   * canonical form persisted by the front-end after the bare-key
-   * migration) instead of a full canvas-scoped URL.
+   * Reuse chat image resolution and ACP input blocks for image labeling.
+   * Failures propagate so preprocessing retains retryable diagnostics.
    */
-  async generateImageLabel(
-    src: string,
-    defaultCanvasId: string | null = null,
-  ): Promise<string | undefined> {
-    try {
-      // Resolve URL → data URL. The local artifact branch reads the bytes
-      // from blob storage; remote / data URLs are returned as-is.
-      const dataUrl = await resolveArtifactImageUrl(src, defaultCanvasId);
-      const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
-      if (!match) return undefined;
-
-      const [, mimeType, base64Data] = match;
-      if (!isVisionImageMime(mimeType)) return undefined;
-      const piContext: Context = {
-        systemPrompt: '',
-        messages: [
-          {
-            role: 'user',
-            content: [
-              { type: 'image', data: base64Data, mimeType },
-              { type: 'text', text: IMAGE_LABEL_PROMPT },
-            ],
-            timestamp: Date.now(),
-          },
-        ],
-      };
-      const result = await llmComplete(piContext, {
-        role: 'imageLabel',
-        hasImage: true,
-      });
-      const text = result.content
-        .filter((b) => b.type === 'text')
-        .map((b) => (b as { type: 'text'; text: string }).text)
-        .join('')
-        .trim();
-      if (text.length > 0 && text.length <= 60) {
-        return text;
-      }
-      return undefined;
-    } catch (err) {
-      // A transient outage must not be swallowed into a clean skip.
-      if (isTransientProviderError(err)) throw err;
-      return undefined;
+  async generateImageLabel(src: string, canvasId: string): Promise<string> {
+    const image = await resolveImageUrl(src, canvasId);
+    if (image.kind !== 'inline' || !image.data) {
+      throw new Error(
+        `Image label input unavailable: ${image.kind === 'skipped' ? image.reason : 'empty image'}`,
+      );
     }
+    const text = (
+      await runFunctionalText(IMAGE_LABEL_PROMPT, {
+        canvasId,
+        role: 'imageLabel',
+        images: [{ type: 'image', data: image.data, mimeType: image.mimeType }],
+      })
+    ).trim();
+    if (!text || text.length > 60 || /[\r\n]/.test(text)) {
+      throw new Error('Agent returned an invalid image title');
+    }
+    return text;
   }
 
   /**
    * Generate a short thematic label for a frame from its child labels.
-   * Returns undefined if generation fails or produces an invalid result.
+   * Rejects unavailable agents and invalid output so callers retain retryability.
    */
-  async generateFrameLabel(childLabels: string[]): Promise<string | undefined> {
-    try {
-      const piContext: Context = {
-        systemPrompt: '',
-        messages: [
-          {
-            role: 'user',
-            content: buildFrameLabelPrompt(childLabels),
-            timestamp: Date.now(),
-          },
-        ],
-      };
-      const result = await llmComplete(piContext, { role: 'frameLabel' });
-      const text = result.content
-        .filter((b) => b.type === 'text')
-        .map((b) => (b as { type: 'text'; text: string }).text)
-        .join('')
-        .trim();
-      if (text.length > 0 && text.length <= 60) {
-        return text;
-      }
-      return undefined;
-    } catch (err) {
-      if (isTransientProviderError(err)) throw err;
-      return undefined;
+  async generateFrameLabel(
+    childLabels: string[],
+    context: FunctionalTextContext,
+  ): Promise<string> {
+    const text = (
+      await runFunctionalText(buildFrameLabelPrompt(childLabels), {
+        ...context,
+        role: 'frameLabel',
+      })
+    ).trim();
+    if (!text || text.length > 60 || /[\r\n]/.test(text)) {
+      throw new Error('Agent returned an invalid Frame title');
     }
+    return text;
   }
 
   /**
@@ -142,64 +79,42 @@ export class ProviderManager {
    */
   async generateContentMeta(
     content: string,
-    opts?: {
+    opts: {
       title?: string;
       needLabel?: boolean;
       needSummary?: boolean;
       needKeywords?: boolean;
     },
+    context: FunctionalTextContext,
   ): Promise<ContentEnrichResult | undefined> {
-    try {
-      if (!content.trim()) return undefined;
-
-      const piContext: Context = {
-        systemPrompt: '',
-        messages: [
-          {
-            role: 'user',
-            content: buildContentEnrichPrompt(content, opts),
-            timestamp: Date.now(),
-          },
-        ],
-      };
-      const result = await llmComplete(piContext, { role: 'contentMeta' });
-      const text = result.content
-        .filter((b) => b.type === 'text')
-        .map((b) => (b as { type: 'text'; text: string }).text)
-        .join('')
-        .trim();
-      if (!text) return undefined;
-
-      // Strip markdown fences if the model wraps the JSON
-      const cleaned = text
-        .replace(/^```(?:json)?\s*/i, '')
-        .replace(/\s*```\s*$/, '')
-        .trim();
-
-      const parsed = JSON.parse(cleaned) as Record<string, unknown>;
-
-      const label =
-        typeof parsed.label === 'string' && parsed.label.trim()
-          ? parsed.label.trim()
-          : undefined;
-      const summary =
-        typeof parsed.summary === 'string' && parsed.summary.trim()
-          ? parsed.summary.trim()
-          : undefined;
-      const keywords = Array.isArray(parsed.keywords)
-        ? (parsed.keywords.filter(
-            (k): k is string => typeof k === 'string' && k.trim().length > 0,
-          ) as string[])
-        : undefined;
-
-      if (!label && !summary && (!keywords || keywords.length === 0)) {
-        return undefined;
-      }
-
-      return { label, summary, keywords };
-    } catch (err) {
-      if (isTransientProviderError(err)) throw err;
-      return undefined;
+    if (!content.trim()) return undefined;
+    const text = await runFunctionalText(
+      buildContentEnrichPrompt(content, opts),
+      context,
+    );
+    const cleaned = text
+      .trim()
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/\s*```\s*$/, '')
+      .trim();
+    const parsed = contentMetaSchema.safeParse(JSON.parse(cleaned));
+    if (!parsed.success) {
+      throw new Error(
+        `Agent returned invalid text metadata: ${parsed.error.message}`,
+      );
     }
+    const { label, summary, keywords } = parsed.data;
+    if (
+      (opts.needLabel !== false && !label) ||
+      (opts.needSummary !== false && !summary) ||
+      (opts.needKeywords !== false && !keywords)
+    ) {
+      throw new Error('Agent omitted requested text metadata');
+    }
+    return {
+      ...(opts.needLabel !== false ? { label } : {}),
+      ...(opts.needSummary !== false ? { summary } : {}),
+      ...(opts.needKeywords !== false ? { keywords } : {}),
+    };
   }
 }

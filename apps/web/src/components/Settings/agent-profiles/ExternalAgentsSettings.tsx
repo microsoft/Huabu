@@ -5,6 +5,7 @@ import { Pencil, Plus, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { ApiError } from '@/api/_client';
 import {
   deleteAcpProfile,
   restartAcpAgentlet,
@@ -26,11 +27,11 @@ import { ProfileFormFooterTarget } from './ProfileFormFooter';
 import { useDetectedClis } from './useDetectedClis';
 
 import type { AgentIconValue } from '@/components/Common/AgentIcon';
-import type { AcpCommandProfileView } from '@huabu/shared';
+import type { AgentProfileView } from '@huabu/shared';
 
 type EditorState =
   | { kind: 'create' }
-  | { kind: 'edit-command'; profile: AcpCommandProfileView };
+  | { kind: 'edit-command'; profile: AgentProfileView };
 
 interface PendingDelete {
   id: string;
@@ -178,22 +179,28 @@ export function ExternalAgentsSettings({
   );
 
   const needsCliNames = profiles.some(
-    (profile) => profile.metadata?.cliId && profile.metadata.cliId !== 'custom',
+    (profile) => profile.launch.kind === 'acp-harness',
   );
   const { detectedClis, loaded: detectionLoaded } = useDetectedClis(
     needsCliNames || editor !== null,
+    editor?.kind === 'edit-command' ? editor.profile.id : undefined,
   );
 
   const saveIcon = useCallback(
-    async (profile: AcpCommandProfileView, icon: AgentIconValue) => {
+    async (profile: AgentProfileView, icon: AgentIconValue) => {
       try {
         await updateAcpProfile(profile.id, {
+          expectedRevision: profile.revision ?? 0,
           customData: withAgentIcon(profile.customData, icon),
         });
         await refresh();
       } catch (err) {
         toast(
-          err instanceof Error ? err.message : t('settings.profileSaveFailed'),
+          err instanceof ApiError && err.status === 409
+            ? t('settings.profileEditConflict')
+            : err instanceof Error
+              ? err.message
+              : t('settings.profileSaveFailed'),
           { tone: 'danger' },
         );
         throw err;
@@ -202,12 +209,18 @@ export function ExternalAgentsSettings({
     [refresh, t],
   );
 
-  const describeProfile = (profile: AcpCommandProfileView): string => {
-    const cliId = profile.metadata?.cliId;
+  const describeProfile = (profile: AgentProfileView): string => {
+    const cliId =
+      profile.launch.kind === 'acp-harness'
+        ? profile.launch.harnessId
+        : 'custom';
     if (!cliId || cliId === 'custom') {
-      return [t('settings.agentCustomBadge'), profile.launch.command].join(
-        ' · ',
-      );
+      return [
+        t('settings.agentCustomBadge'),
+        profile.launch.kind === 'acp-command'
+          ? profile.launch.command
+          : profile.launch.harnessId,
+      ].join(' · ');
     }
     return detectedClis.find((cli) => cli.id === cliId)?.displayName ?? cliId;
   };

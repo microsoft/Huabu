@@ -44,7 +44,6 @@ import {
   createTaskRequestSchema,
   completeTaskRunRequestSchema,
   createInteractiveViewRequestSchema,
-  HUABU_AGENT_PROFILE_ID,
   interactiveViewLookupQuerySchema,
   interactiveViewResourceParamsSchema,
   rfsAgentCreateHeadersSchema,
@@ -53,6 +52,11 @@ import {
   rfsAgentPromptRequestSchema,
   rfsExecuteHeadersSchema,
   rfsExecuteRequestSchema,
+  rfsInkIntentParamsSchema,
+  rfsInkIntentRequestSchema,
+  type RfsInkIntentParams,
+  type RfsInkIntentResponse,
+  type ApiResult,
   replaceInteractiveViewStateRequestSchema,
   spaceQuerySchema,
   startTaskRunRequestSchema,
@@ -105,6 +109,10 @@ import {
   SelectableAgentProfileError,
 } from '../agent/selectable-agent-profile.js';
 import { safeResolve } from '../agent/tools/handlers/fs-sandbox.js';
+import {
+  InkIntentTurnError,
+  reportInkIntent,
+} from '../agent/tools/handlers/report-ink-intent.js';
 import { CanvasNotFoundError } from '../canvas/canvas-executor.js';
 import { executeSpaceQuery, SpaceQueryError } from '../canvas/space-query.js';
 import { WorldPreviewMutationError } from '../canvas/world-preview-policy.js';
@@ -658,6 +666,43 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
     },
   );
 
+  app.post<{
+    Params: RfsInkIntentParams;
+    Reply: ApiResult<RfsInkIntentResponse>;
+  }>('/:canvasId/agent/:threadId/ink-intent', async (request, reply) => {
+    const params = rfsInkIntentParamsSchema.safeParse(request.params);
+    let json: unknown;
+    try {
+      json = JSON.parse(
+        Buffer.isBuffer(request.body) ? request.body.toString('utf8') : '',
+      );
+    } catch {
+      return reply
+        .code(400)
+        .send(rfsError('Request body is not valid JSON.', 'invalid_json'));
+    }
+    const body = rfsInkIntentRequestSchema.safeParse(json);
+    if (!params.success || !body.success) {
+      return reply
+        .code(400)
+        .send(
+          rfsError('Invalid Ink report target or body.', 'validation_failed'),
+        );
+    }
+    try {
+      return await reportInkIntent(body.data.report, {
+        ...params.data,
+        invocationToken: body.data.invocationToken,
+      });
+    } catch (error) {
+      if (error instanceof InkIntentTurnError) {
+        return reply.code(409).send(rfsError(error.message, error.code));
+      }
+      request.log.error({ err: error }, 'rfs Ink intent report failed');
+      return reply.code(500).send(rfsError('Failed to report Ink intent.'));
+    }
+  });
+
   // ── GET /:canvasId/download/* ──
   app.get<{ Params: { canvasId: string; '*': string } }>(
     '/:canvasId/download/*',
@@ -1004,7 +1049,7 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
         : '';
       const contentType = request.headers['content-type'] ?? '';
       let creation: {
-        profileId: string;
+        profileId?: string;
         prompt?: string;
         position?: { x: number; y: number };
         parentThreadId?: string;
@@ -1040,7 +1085,7 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
             .code(400)
             .send(rfsError('A non-empty prompt is required.'));
         }
-        creation = { profileId: HUABU_AGENT_PROFILE_ID, prompt };
+        creation = { prompt };
       }
 
       const start = parsedHeaders.data['x-huabu-agent-start'] ?? true;
@@ -1139,21 +1184,23 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
           const status =
             error.code === 'canvas_not_found'
               ? 404
-              : error.code === 'profile_registry_unavailable'
-                ? 503
-                : error.code === 'profile_not_selectable'
-                  ? 404
-                  : ['invalid_launch_overrides', 'invalid_position'].includes(
-                        error.code,
-                      )
-                    ? 400
-                    : 500;
+              : error.code === 'default_profile_unconfigured'
+                ? 409
+                : error.code === 'profile_registry_unavailable'
+                  ? 503
+                  : error.code === 'profile_not_selectable'
+                    ? 404
+                    : ['invalid_launch_overrides', 'invalid_position'].includes(
+                          error.code,
+                        )
+                      ? 400
+                      : 500;
           const code =
             error.code === 'profile_not_selectable'
               ? 'profile_not_found'
               : error.code;
           const message =
-            error.code === 'profile_not_selectable'
+            error.code === 'profile_not_selectable' && creation.profileId
               ? `Agent Profile ${creation.profileId} is unavailable.`
               : error.message;
           return reply.code(status).send(rfsError(message, code));

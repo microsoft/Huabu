@@ -15,7 +15,8 @@
  *  - `GET /api/acp/agent-cli` — read the daemon's detected agent catalogue
  *     and populate the profile editor's picker with installation state.
  *  - `GET/POST/PATCH/DELETE /api/acp/profiles` — CRUD for spawn
- *     recipes with immutable command and working directory.
+ *     recipes with revision-checked launch and working-directory edits.
+ *  - `POST /api/acp/profile-launch-preview` — daemon-built launch preview.
  *  - `GET/POST /api/acp/daemon` — daemon liveness + manual restart.
  *  - `GET /api/acp/threads/:threadId/cached-meta` — cached capabilities.
  *  - thread control POSTs — canonical realization plus per-session knobs.
@@ -31,8 +32,10 @@ import type {
   AcpPermissionDecisionRequest,
   AcpPermissionDecisionResponse,
   AcpProfileMutationResponse,
+  AcpProfileLaunchPreviewBody,
+  AcpProfileLaunchPreviewResponse,
   AcpProfilesListResponse,
-  CreateAcpCommandProfileBody,
+  CreateAcpProfileBody,
   PatchAgentProfileBody,
   AcpThreadCachedMetaResponse,
   SetAcpSessionConfigOptionRequest,
@@ -52,8 +55,11 @@ export type {
   AcpAgentletStatusResponse,
   AcpModelInfo,
   AcpProfileMutationResponse,
+  AcpProfileLaunchPreviewBody,
+  AcpProfileLaunchPreviewResponse,
   AcpProfilesListResponse,
   CreateAcpCommandProfileBody,
+  CreateAcpProfileBody,
   PatchAgentProfileBody,
   AgentProfileView,
   AcpSessionConfigOption,
@@ -73,10 +79,12 @@ export type {
 // ── Agent CLI detection ──────────────────────────────────────────────
 
 /**
- * Read the local daemon's ACP-capable agent catalogue.
+ * Read the supervised daemon's catalogue, or the saved Profile's target daemon.
  */
-export async function listAcpAgentClis(): Promise<AcpAgentCliListResponse> {
-  return apiFetch<AcpAgentCliListResponse>(routes.acpAgentCli, {
+export async function listAcpAgentClis(
+  profileId?: string,
+): Promise<AcpAgentCliListResponse> {
+  return apiFetch<AcpAgentCliListResponse>(routes.acpAgentCli(profileId), {
     fallbackMessage: 'Failed to detect installed agent CLIs',
   });
 }
@@ -94,7 +102,7 @@ export async function listAcpProfiles(): Promise<AcpProfilesListResponse> {
  * Create a command Profile on the local agentlet. The server allocates its id.
  */
 export async function createAcpProfile(
-  payload: CreateAcpCommandProfileBody,
+  payload: CreateAcpProfileBody,
 ): Promise<AcpProfileMutationResponse> {
   return apiFetch<AcpProfileMutationResponse>(routes.acpProfiles, {
     method: 'POST',
@@ -103,8 +111,22 @@ export async function createAcpProfile(
   });
 }
 
+/** Resolve a launch on the target daemon without starting an execution. */
+export async function previewAcpProfileLaunch(
+  body: AcpProfileLaunchPreviewBody,
+): Promise<AcpProfileLaunchPreviewResponse> {
+  return apiFetch<AcpProfileLaunchPreviewResponse>(
+    routes.acpProfileLaunchPreview,
+    {
+      method: 'POST',
+      json: body,
+      fallbackMessage: 'Failed to preview agent launch',
+    },
+  );
+}
+
 /**
- * Patch mutable Profile display/metadata fields; omitted fields remain intact.
+ * Patch a Profile at its expected revision; omitted fields remain intact.
  */
 export async function updateAcpProfile(
   id: string,

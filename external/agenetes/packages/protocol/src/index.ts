@@ -160,3 +160,13 @@ export type { AgentStateSnapshot } from './agent-state.js';
 // @huabu/shared without depending on the fastify-bound host package.
 export { agentletStatusSchema } from './agentlet-status.js';
 export type { AgentletStatus } from './agentlet-status.js';
+export {
+  acpHarnessLaunchSchema,
+  agentProfileLaunchSchema,
+  harnessLaunchOptionsSchema,
+  harnessLaunchPlanSchema,
+  type AcpHarnessLaunch,
+  type AgentProfileLaunch,
+  type HarnessLaunchOptions,
+  type HarnessLaunchPlan,
+} from './harness.js';

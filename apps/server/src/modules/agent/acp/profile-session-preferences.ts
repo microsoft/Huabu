@@ -28,6 +28,7 @@ export function getProfileSessionPreferences(
   profileId: string,
 ): AcpProfileSessionPreferences {
   const profile = getAgentProfileRegistry()?.getProfile(profileId);
+  if (profile?.launch.kind !== 'acp-harness') return {};
   return parsePreferences(profile?.customData?.[CUSTOM_DATA_KEY]);
 }
 
@@ -35,10 +36,16 @@ export function rememberProfileSessionPreference(
   profileId: string,
   key: keyof AcpProfileSessionPreferences,
   value: string,
+  executionRevision = 0,
 ): void {
   const registry = getAgentProfileRegistry();
   const profile = registry?.getProfile(profileId);
   if (!registry || !profile) return;
+  if (
+    profile.launch.kind !== 'acp-harness' ||
+    (profile.executionRevision ?? 0) !== executionRevision
+  )
+    return;
 
   const customData: CustomData = { ...profile.customData };
   customData[CUSTOM_DATA_KEY] = {
@@ -53,6 +60,7 @@ export function rememberProfileConfigPreference(
   configOptions: readonly unknown[],
   optionId: string,
   value: string | boolean,
+  executionRevision = 0,
 ): void {
   if (typeof value !== 'string') return;
   const option = configOptions.find((candidate) => {
@@ -63,8 +71,18 @@ export function rememberProfileConfigPreference(
     .trim()
     .toLowerCase();
   if (category === 'model') {
-    rememberProfileSessionPreference(profileId, 'model', value);
+    rememberProfileSessionPreference(
+      profileId,
+      'model',
+      value,
+      executionRevision,
+    );
   } else if (category === 'thought_level') {
-    rememberProfileSessionPreference(profileId, 'thoughtLevel', value);
+    rememberProfileSessionPreference(
+      profileId,
+      'thoughtLevel',
+      value,
+      executionRevision,
+    );
   }
 }
