@@ -21,7 +21,7 @@
  * thrown error the parent reverts by dropping that selection again.
  */
 
-import { TriangleAlert } from 'lucide-react';
+import { RefreshCcw, TriangleAlert } from 'lucide-react';
 import { useId, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -56,6 +56,15 @@ interface AcpSessionSelectorsProps {
    * way instead of looking inert.
    */
   loading?: boolean;
+  /**
+   * Present only when the snapshot is a genuine cache miss (`source:
+   * 'none'` — this Profile has never been observed on this server, so
+   * there is no schema anywhere to render). Calling it triggers the
+   * user-opt-in warm-up RPC; omit it (or pass `undefined`) to keep the
+   * row silently hidden, e.g. while binding/canvas context isn't ready
+   * yet.
+   */
+  onWarm?: () => void | Promise<void>;
   onSelectMode: (modeId: string) => void | Promise<void>;
   onSelectModel: (modelId: string) => void | Promise<void>;
   onSelectConfigOption: (
@@ -69,6 +78,7 @@ export const AcpSessionSelectors = ({
   source = 'thread',
   disabled = false,
   loading = false,
+  onWarm,
   onSelectMode,
   onSelectModel,
   onSelectConfigOption,
@@ -130,6 +140,30 @@ export const AcpSessionSelectors = ({
           <Loading layout="inline" size="xs" />
           <span>{t('chat.loadingAgentOptionsProgress')}</span>
         </span>
+      );
+    }
+    // Genuine cache miss (`source: 'none'`) — this Profile has never
+    // been observed on this server, so there is no schema anywhere to
+    // render. Offer an explicit, user-opt-in warm-up pill instead of
+    // hiding the row outright: clicking it opens a real ACP session
+    // purely to seed the catalogue (see `onWarm` doc), so the cost is
+    // only ever paid when the user asks for it. Same visual language
+    // as every other pill in this row (ghost / ghost pill / neutral /
+    // sm) so it reads as "one more control", not a new affordance.
+    if (onWarm && source === 'none') {
+      return (
+        <Button
+          variant="ghost"
+          tone="neutral"
+          size="sm"
+          shape="pill"
+          className="text-fg-subtle gap-1 px-2 py-0.5 text-xs whitespace-nowrap"
+          title={t('chat.warmAgentOptionsTitle')}
+          onClick={() => void onWarm()}
+        >
+          <RefreshCcw aria-hidden="true" className="h-3 w-3" />
+          <span>{t('chat.warmAgentOptions')}</span>
+        </Button>
       );
     }
     return null;

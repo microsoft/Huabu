@@ -17,6 +17,7 @@ import {
   setAcpSessionConfigOption,
   setAcpSessionMode,
   setAcpSessionModel,
+  warmAcpSession,
 } from '@/api/acp';
 import { Button } from '@/components/Common/Button';
 import { InlineEditableTitle } from '@/components/Common/InlineEditableTitle';
@@ -636,6 +637,37 @@ export const ChatPanel = ({
     ],
   );
 
+  // User-opt-in warm-up for a Profile the cache has never observed
+  // (`source: 'none'`): pressing the control row's placeholder pill
+  // realizes the workload and opens a real ACP session purely to seed
+  // the mode/model/config-option catalogue, then re-reads the now-warm
+  // cache. Unlike the set-RPC handlers above there is no optimistic
+  // value to apply or revert — this call changes no selection, it only
+  // makes the selectors exist.
+  const [warmingAcpSession, setWarmingAcpSession] = useState(false);
+  const handleAcpWarmSession = useCallback(async () => {
+    if (!threadId || !acpControlTarget.binding) return;
+    setWarmingAcpSession(true);
+    try {
+      await warmAcpSession(threadId, {
+        binding: acpControlTarget.binding,
+        canvasId: acpControlTarget.canvasId,
+      });
+      await refreshAcpSessionMeta();
+    } catch (err) {
+      toast(
+        err instanceof Error
+          ? t('chat.failedWarmAgentOptionsWithMessage', {
+              message: err.message,
+            })
+          : t('chat.failedWarmAgentOptions'),
+        { tone: 'danger' },
+      );
+    } finally {
+      setWarmingAcpSession(false);
+    }
+  }, [threadId, acpControlTarget, refreshAcpSessionMeta, t]);
+
   useEffect(() => {
     if (agentBinding.kind === 'internal' && !llmConfig && !llmLoading) {
       void llmInit();
@@ -1038,7 +1070,12 @@ export const ChatPanel = ({
                   <AcpSessionSelectors
                     meta={acpSessionMeta}
                     source={acpSessionMetaSource}
-                    loading={acpSessionMetaLoading}
+                    loading={acpSessionMetaLoading || warmingAcpSession}
+                    onWarm={
+                      acpControlTarget.binding
+                        ? handleAcpWarmSession
+                        : undefined
+                    }
                     onSelectMode={handleAcpSelectMode}
                     onSelectModel={handleAcpSelectModel}
                     onSelectConfigOption={handleAcpSelectConfigOption}

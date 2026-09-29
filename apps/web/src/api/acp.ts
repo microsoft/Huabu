@@ -45,6 +45,8 @@ import type {
   SetAcpSessionModeRequest,
   SetAcpSessionModeResponse,
   ExternalAgentRuntimeConfig,
+  WarmAcpSessionRequest,
+  WarmAcpSessionResponse,
 } from '@huabu/shared';
 
 export type {
@@ -74,6 +76,8 @@ export type {
   SetAcpSessionModeRequest,
   SetAcpSessionModeResponse,
   ExternalAgentRuntimeConfig,
+  WarmAcpSessionRequest,
+  WarmAcpSessionResponse,
 } from '@huabu/shared';
 
 // ── Agent CLI detection ──────────────────────────────────────────────
@@ -276,4 +280,23 @@ export async function setAcpSessionConfigOption(
       fallbackMessage: 'Failed to update session config option',
     },
   );
+}
+
+/**
+ * User-triggered warm-up: realize the thread's workload and open its ACP
+ * session with no accompanying `set_*` control, purely to seed the
+ * mode/model/config-option catalogue for a Profile the cached-meta route
+ * reports as `source: 'none'` (never observed on this server). Only ever
+ * called from an explicit click on the control row's placeholder pill —
+ * see `AcpSessionSelectors`'s `onWarm`.
+ */
+export async function warmAcpSession(
+  threadId: string,
+  payload: WarmAcpSessionRequest,
+): Promise<WarmAcpSessionResponse> {
+  return apiFetch<WarmAcpSessionResponse>(routes.acpThreadWarm(threadId), {
+    method: 'POST',
+    json: payload,
+    fallbackMessage: 'Failed to load agent options',
+  });
 }

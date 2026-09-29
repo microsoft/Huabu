@@ -386,3 +386,88 @@ describe('AcpSessionSelectors Profile observations', () => {
     expect(permissionSelect?.textContent).toContain('Auto approve');
   });
 });
+
+describe('AcpSessionSelectors cache-miss warm-up pill', () => {
+  const emptyMeta: AcpSessionMetaSnapshot = {
+    availableModes: [],
+    currentModeId: null,
+    availableModels: [],
+    currentModelId: null,
+    configOptions: [],
+    selections: {},
+    sessionInfo: null,
+    usage: null,
+    updatedAt: 0,
+  };
+
+  it('renders a clickable warm-up pill for a genuine cache miss with onWarm', () => {
+    const onWarm = vi.fn();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() => {
+      root?.render(
+        <AcpSessionSelectors
+          source="none"
+          meta={emptyMeta}
+          onWarm={onWarm}
+          onSelectMode={vi.fn()}
+          onSelectModel={vi.fn()}
+          onSelectConfigOption={vi.fn()}
+        />,
+      );
+    });
+
+    const button = container.querySelector('button');
+    expect(button).not.toBeNull();
+    expect(button?.textContent).toContain('chat.warmAgentOptions');
+
+    act(() => {
+      button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(onWarm).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders nothing for a genuine cache miss when onWarm is not supplied', () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() => {
+      root?.render(
+        <AcpSessionSelectors
+          source="none"
+          meta={emptyMeta}
+          onSelectMode={vi.fn()}
+          onSelectModel={vi.fn()}
+          onSelectConfigOption={vi.fn()}
+        />,
+      );
+    });
+
+    expect(container.querySelector('button')).toBeNull();
+    expect(container.textContent).toBe('');
+  });
+
+  it('prefers the loading placeholder over the warm-up pill while a fetch is in flight', () => {
+    const onWarm = vi.fn();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() => {
+      root?.render(
+        <AcpSessionSelectors
+          source="none"
+          meta={emptyMeta}
+          loading
+          onWarm={onWarm}
+          onSelectMode={vi.fn()}
+          onSelectModel={vi.fn()}
+          onSelectConfigOption={vi.fn()}
+        />,
+      );
+    });
+
+    expect(container.querySelector('button')).toBeNull();
+    expect(container.querySelector('[role="status"]')).not.toBeNull();
+  });
+});
