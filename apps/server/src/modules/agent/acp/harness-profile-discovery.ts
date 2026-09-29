@@ -135,18 +135,27 @@ export function registerHarnessProfileDiscovery({
         continue;
       }
       // No await between the lookup and the synchronous registry commit.
-      const existing = registry.listProfiles().find((profile) => {
+      const profiles = registry.listProfiles();
+      const typed = harness.launchVersion === 1;
+      const existing = profiles.find((profile) => {
         const source = parseSource(profile.customData?.[SOURCE_KEY]);
         return (
           profile.agentletId === agentletId &&
           source?.agentletId === agentletId &&
-          source.harnessId === harness.id
+          source.harnessId === harness.id &&
+          (!typed ||
+            (profile.launch.kind === 'acp-harness' &&
+              profile.launch.harnessId === harness.id))
         );
       });
       if (existing) continue;
+      const defaultAlias = `${harness.displayName} (${agentletId})`;
       const common = {
         agentletId,
-        alias: `${harness.displayName} (${agentletId})`,
+        alias:
+          typed && profiles.some((profile) => profile.alias === defaultAlias)
+            ? `${defaultAlias} [${harness.id}]`
+            : defaultAlias,
         workingDirPath: harness.workingDirPath,
         metadata: { cliId: harness.id },
         customData: {
@@ -154,7 +163,7 @@ export function registerHarnessProfileDiscovery({
         },
       };
       const profile = registry.createProfile(
-        harness.launchVersion === 1
+        typed
           ? {
               ...common,
               launchKind: 'acp-harness',

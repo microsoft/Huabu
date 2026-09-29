@@ -9,6 +9,7 @@ import { createAgentProfileRegistry } from '@agenetes/agent-profile';
 import { describe, expect, it, vi } from 'vitest';
 
 import { registerHarnessProfileDiscovery } from './harness-profile-discovery.js';
+import { AgentDefaultsService } from '../agent-defaults.js';
 
 import type {
   AgentProfile,
@@ -221,7 +222,6 @@ describe('automatic ordinary Profile provisioning', () => {
   });
 
   it.each([
-    { kind: 'acp-command', command: 'copilot --acp' },
     { kind: 'acp-harness', harnessId: 'copilot' },
     {
       kind: 'acp-harness',
@@ -268,6 +268,119 @@ describe('automatic ordinary Profile provisioning', () => {
       dispose();
     },
   );
+
+  it('creates one typed successor without changing the legacy Profile, default, or execution snapshot', async () => {
+    const storageDir = mkdtempSync(join(tmpdir(), 'huabu-discovery-typed-'));
+    const context = setup();
+    let dispose: (() => void) | undefined;
+    try {
+      const registry = createAgentProfileRegistry({ storageDir });
+      const legacy = registry.createProfile({
+        launchKind: 'acp-command',
+        alias: 'GitHub Copilot (machine-a)',
+        agentletId: 'machine-a',
+        workingDirPath: '/custom/work',
+        command: 'copilot --acp --model old-model',
+        metadata: { cliId: 'copilot' },
+        customData: {
+          discoveredAgent: {
+            version: 1,
+            agentletId: 'machine-a',
+            harnessId: 'copilot',
+          },
+          preference: 'preserved',
+        },
+      });
+      const snapshot = registry.snapshotProfile(legacy.id);
+      const savedDefaults = {
+        profileId: legacy.id,
+        functionalModel: 'saved-model',
+      };
+      const write = vi.fn();
+      const defaults = new AgentDefaultsService({
+        read: () => savedDefaults,
+        write,
+      });
+      context.gateway.discoverHarnesses.mockResolvedValue({
+        harnesses: observation.harnesses.map((harness) => ({
+          ...harness,
+          launchVersion: 1,
+          capabilities: {
+            autoApprove: 'supported',
+            modelOverride: 'unknown',
+            sessionPersistence: 'unknown',
+          },
+        })),
+      });
+      const start = (current: typeof registry) =>
+        registerHarnessProfileDiscovery({
+          gateway: context.gateway,
+          getRegistry: () => current,
+          log: context.log,
+          onProfilesDiscovered: (profiles) =>
+            defaults.initializeAgentDefaults(profiles),
+        });
+      dispose = start(registry);
+      await flush();
+      expect(context.log.warn).not.toHaveBeenCalled();
+      expect(registry.listProfiles()).toHaveLength(2);
+      const typed = registry
+        .listProfiles()
+        .find((profile) => profile.launch.kind === 'acp-harness');
+      expect(typed).toMatchObject({
+        alias: 'GitHub Copilot (machine-a) [copilot]',
+        workingDirPath: observation.harnesses[0].workingDirPath,
+        launch: {
+          kind: 'acp-harness',
+          harnessId: 'copilot',
+          options: { autoApprove: true },
+        },
+        customData: { discoveredAgent: legacy.customData?.discoveredAgent },
+      });
+      expect(typed?.id).not.toBe(legacy.id);
+      expect(registry.getProfile(legacy.id)).toEqual(legacy);
+      expect(registry.snapshotProfile(legacy.id)).toEqual(snapshot);
+      if (!typed || typed.launch.kind !== 'acp-harness') {
+        throw new Error('Expected a typed Profile');
+      }
+      registry.patchProfile(typed.id, {
+        alias: legacy.alias,
+        launch: { ...typed.launch, options: { autoApprove: false } },
+      });
+      context.emit({ agentletId: 'machine-a', status: 'connected' });
+      context.emit({ agentletId: 'machine-a', status: 'connected' });
+      await flush();
+      expect(registry.listProfiles()).toHaveLength(2);
+      const beforeRestart = registry.listProfiles();
+      dispose();
+      const restored = createAgentProfileRegistry({ storageDir });
+      dispose = start(restored);
+      await flush();
+      expect(restored.listProfiles()).toEqual(beforeRestart);
+      expect(defaults.getAgentDefaults()).toEqual(savedDefaults);
+      expect(write).not.toHaveBeenCalled();
+    } finally {
+      dispose?.();
+      rmSync(storageDir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not create a compatibility duplicate when a daemon stops advertising typed launch', async () => {
+    const context = setup();
+    context.gateway.discoverHarnesses.mockResolvedValueOnce({
+      harnesses: observation.harnesses.map((harness) => ({
+        ...harness,
+        launchVersion: 1,
+      })),
+    });
+    const dispose = context.start();
+    await flush();
+    context.emit({ agentletId: 'machine-a', status: 'connected' });
+    await flush();
+    expect(context.registry.createProfile).toHaveBeenCalledOnce();
+    expect(context.profiles[0].launch.kind).toBe('acp-harness');
+    dispose();
+  });
 
   it('allows manual duplicates and isolates different machines', async () => {
     const context = setup(['machine-a', 'machine-b']);
