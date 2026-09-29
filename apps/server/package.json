@@ -41,6 +41,8 @@
     "@fastify/static": "^8.0.2",
     "@huabu/shared": "workspace:*",
     "@mozilla/readability": "^0.6.0",
+    "@octostaff/bubble": "0.7.3",
+    "@octostaff/sdk": "0.7.3",
     "@opendocsg/pdf2md": "^0.2.5",
     "@resvg/resvg-wasm": "^2.6.2",
     "archiver": "^7.0.1",

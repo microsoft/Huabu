@@ -41,4 +41,20 @@ describe('deployment readiness', () => {
       /password|token|secretKey|allowedHosts":\[/i,
     );
   });
+
+  it('reports the Bubble owner policy without disclosing its endpoint', () => {
+    const result = buildDeploymentReadiness({
+      allowedHostsConfigured: true,
+      basicAuthConfigured: false,
+      bindHost: '0.0.0.0',
+      bindScope: 'network',
+      ownerAllowed: true,
+      credentialStoreWritable: true,
+      ownerPolicy: 'bubble-system-owner',
+    });
+    expect(result.owner).toEqual({
+      policy: 'bubble-system-owner',
+      allowedForRequest: true,
+    });
+  });
 });

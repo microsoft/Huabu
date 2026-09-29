@@ -24,6 +24,7 @@ import {
 import integrationsRoutes from './integrations.route.js';
 import { EnvironmentSecretStore } from '../../security/environment-secret-store.js';
 import { SECRET_IDS } from '../../security/secret-ids.js';
+import { registerLocalTestIdentity } from '../../test-support/local-identity.js';
 import { recognizeInk } from '../agent/conversation/ink-ocr.js';
 
 import type { FastifyInstance } from 'fastify';
@@ -98,6 +99,7 @@ beforeEach(async () => {
       else secrets.set(id, value);
     });
   app = Fastify({ logger: false });
+  registerLocalTestIdentity(app);
   await app.register(integrationsRoutes, { prefix: '/api/integrations' });
 });
 
