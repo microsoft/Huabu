@@ -145,6 +145,26 @@ async function editModel(value: string) {
 }
 
 describe('Agent defaults Settings', () => {
+  it('allows Built-In while the external catalogue is unavailable, retaining the external model', async () => {
+    mocks.state.loaded = false;
+    mocks.state.error = new Error('Registry unavailable');
+    await render();
+    expect(container.querySelector('select')?.disabled).toBe(false);
+    await selectProfile('huabu');
+    expect(mocks.update).toHaveBeenCalledWith({
+      profileId: 'huabu',
+      functionalModel: 'fast',
+    });
+    expect(container.querySelector('input')).toBeNull();
+    expect(container.textContent).not.toContain(
+      'settings.agentDefaultsDeleted',
+    );
+    expect(container.textContent).not.toContain(
+      'settings.agentDefaultsModelUnknown',
+    );
+    await selectProfile('external');
+    expect(container.querySelector('input')?.value).toBe('fast');
+  });
   it('loads shared Profiles and warns that model support is unknown', async () => {
     await render();
     expect(mocks.state.refresh).toHaveBeenCalled();
@@ -223,7 +243,7 @@ describe('Agent defaults Settings', () => {
     expect(container.textContent).not.toContain(
       'settings.agentDefaultsDeleted',
     );
-    expect(container.querySelector('select')?.disabled).toBe(true);
+    expect(container.querySelector('select')?.disabled).toBe(false);
     expect(container.querySelector('input')?.disabled).toBe(true);
   });
 

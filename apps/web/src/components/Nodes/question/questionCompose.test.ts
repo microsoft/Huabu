@@ -5,10 +5,9 @@ import { assert, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const saveDraft = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 const associateNode = vi.hoisted(() => vi.fn());
-const listProfiles = vi.hoisted(() => vi.fn());
-vi.mock('@/api/acp', async (importOriginal) => ({
-  ...(await importOriginal<typeof AcpApi>()),
-  listAcpProfiles: listProfiles,
+const getDefaults = vi.hoisted(() => vi.fn());
+vi.mock('@/api/agentDefaults', () => ({
+  getAgentDefaults: getDefaults,
 }));
 vi.mock('@/components/Common/Toast', () => ({ toast: vi.fn() }));
 vi.mock('@/api/canvas', async (importOriginal) => ({
@@ -43,7 +42,6 @@ import {
   ensureQuestionThread,
 } from './questionCompose';
 
-import type * as AcpApi from '@/api/acp';
 import type * as CanvasApi from '@/api/canvas';
 import type * as ConversationOwner from '@/store/conversationOwner';
 
@@ -59,20 +57,20 @@ const view = {
 beforeEach(() => {
   saveDraft.mockClear();
   associateNode.mockReset();
-  listProfiles.mockReset().mockResolvedValue({
-    profiles: [],
-    selectableProfileIds: [],
-    agentlet: null,
-    agentDefaults: {
+  getDefaults.mockReset().mockResolvedValue({
+    defaults: {
       profileId: 'global-profile',
       functionalModel: 'utility-model',
     },
+    selectionState: 'available',
+    modelCapability: 'unknown',
   });
   useAcpProfilesStore.setState({
     loaded: false,
     error: null,
     profiles: [],
     agentDefaults: null,
+    defaultsError: null,
   });
   vi.mocked(toast).mockClear();
   useCanvasStore.getState()._setStateNoAutosave({
@@ -229,12 +227,12 @@ describe('Question conversation presentation', () => {
   });
 
   it('does not create or open a node when defaults are unconfigured', async () => {
-    listProfiles.mockResolvedValueOnce({
-      profiles: [],
-      selectableProfileIds: [],
-      agentlet: null,
-      agentDefaults: { profileId: null, functionalModel: '' },
+    getDefaults.mockResolvedValueOnce({
+      defaults: { profileId: null, functionalModel: '' },
+      selectionState: 'unconfigured',
+      modelCapability: 'unknown',
     });
+
     const addNode = vi.fn();
     expect(
       await createQuestionNodeAndCompose({
@@ -249,9 +247,32 @@ describe('Question conversation presentation', () => {
     expect(usePanelStore.getState().isRightCollapsed).toBe(true);
   });
 
+  it('creates a Built-In Question in operate mode without loading external Profiles', async () => {
+    getDefaults.mockResolvedValueOnce({
+      defaults: { profileId: 'huabu', functionalModel: '' },
+      selectionState: 'available',
+      modelCapability: 'supported',
+    });
+    const addNode = vi.fn().mockReturnValue('question-built-in');
+    const created = await createQuestionNodeAndCompose({
+      addNode,
+      canvasId: 'canvas-1',
+      placementPoint: { x: 0, y: 0 },
+    });
+    assert(created);
+    expect(addNode).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          agentBinding: { kind: 'internal' },
+          agentMode: 'operate',
+        }),
+      }),
+    );
+  });
+
   it('discards delayed creation after the Canvas changes', async () => {
     let resolve!: (value: unknown) => void;
-    listProfiles.mockReturnValueOnce(
+    getDefaults.mockReturnValueOnce(
       new Promise((done) => {
         resolve = done;
       }),
@@ -264,10 +285,9 @@ describe('Question conversation presentation', () => {
     });
     useCanvasStore.setState({ canvasId: 'canvas-2' });
     resolve({
-      profiles: [],
-      selectableProfileIds: [],
-      agentlet: null,
-      agentDefaults: { profileId: 'global-profile', functionalModel: '' },
+      defaults: { profileId: 'global-profile', functionalModel: '' },
+      selectionState: 'available',
+      modelCapability: 'unknown',
     });
     expect(await pending).toBeNull();
     expect(addNode).not.toHaveBeenCalled();
@@ -334,7 +354,7 @@ describe('Question conversation presentation', () => {
         'ask',
       );
       expect(saveDraft).not.toHaveBeenCalled();
-      expect(listProfiles).not.toHaveBeenCalled();
+      expect(getDefaults).not.toHaveBeenCalled();
     },
   );
 

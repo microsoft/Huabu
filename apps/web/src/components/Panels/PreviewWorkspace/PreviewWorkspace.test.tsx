@@ -79,6 +79,13 @@ vi.mock('@/api/acp', async (importOriginal) => ({
     agentDefaults: { profileId: 'global-profile', functionalModel: '' },
   }),
 }));
+vi.mock('@/api/agentDefaults', () => ({
+  getAgentDefaults: async () => ({
+    defaults: { profileId: 'global-profile', functionalModel: '' },
+    selectionState: 'available',
+    modelCapability: 'unknown',
+  }),
+}));
 
 vi.mock('../ChatPanel', () => ({
   ChatPanel: ({

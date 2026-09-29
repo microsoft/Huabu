@@ -24,6 +24,7 @@ export interface FunctionalTextContext {
   canvasId: string;
   signal?: AbortSignal;
   images?: readonly Extract<AgentInputPart, { type: 'image' }>[];
+  role?: 'contentMeta' | 'frameLabel' | 'imageLabel';
 }
 
 export const FUNCTIONAL_TEXT_TIMEOUT_MS = 300_000;
@@ -37,8 +38,46 @@ export async function runFunctionalText(
   if (!profileId) {
     throw new AgentDefaultsError(
       'default_profile_unconfigured',
-      'Select a default external Agent Profile in Settings to generate metadata',
+      'Select a default Agent in Settings to generate metadata',
     );
+  }
+  if (profileId === 'huabu') {
+    const { llmComplete } = await import('./llm.js');
+    context.signal?.throwIfAborted();
+    const result = await llmComplete(
+      {
+        systemPrompt: '',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: prompt },
+              ...(context.images ?? []),
+            ],
+            timestamp: Date.now(),
+          },
+        ],
+      },
+      {
+        role: context.role ?? 'contentMeta',
+        hasImage: Boolean(context.images?.length),
+        signal: context.signal,
+      },
+    );
+    context.signal?.throwIfAborted();
+    if (result.stopReason === 'error' || result.stopReason === 'aborted') {
+      throw new Error(
+        result.errorMessage ||
+          `Built-In text task stopped: ${result.stopReason}`,
+      );
+    }
+    const text = result.content
+      .filter((part) => part.type === 'text')
+      .map((part) => part.text)
+      .join('')
+      .trim();
+    if (!text) throw new Error('Built-In text task returned empty text');
+    return text;
   }
   const selected = requireSelectableAgentProfile(profileId);
   const profile = resolveProfileSnapshot(profileId);

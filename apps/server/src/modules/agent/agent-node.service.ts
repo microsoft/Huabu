@@ -223,7 +223,7 @@ export class AgentNodeService {
     if (!profileId) {
       throw new AgentNodeCreationError(
         'default_profile_unconfigured',
-        'Connect an external Agent and select a default Profile in Settings.',
+        'Connect an external Agent or select Built-In Pi as the default in Settings.',
       );
     }
     let binding: AgentBinding;

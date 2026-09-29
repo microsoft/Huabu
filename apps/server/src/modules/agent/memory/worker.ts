@@ -30,6 +30,7 @@
 
 import { runAnalysisPass } from './analyzer.js';
 import { markAnalyzed } from './trigger.js';
+import { getAgentDefaults } from '../agent-defaults.js';
 
 import type { MemoryLogger } from './index.js';
 import type { WriteResult } from './writers.js';
@@ -82,6 +83,12 @@ export function _waitForIdle(): Promise<void> {
 
 async function runOnce(canvasId: string, logger?: MemoryLogger): Promise<void> {
   try {
+    if (getAgentDefaults().profileId !== 'huabu') {
+      logger?.info(
+        `[memory] pass for canvas ${canvasId} skipped — Built-In is not the default`,
+      );
+      return;
+    }
     const outcome = await runAnalysisPass(canvasId, logger);
     if (outcome.status === 'skipped') {
       logger?.info(

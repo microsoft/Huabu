@@ -1,7 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { canvasEditableNodeDataSchema } from '@huabu/shared';
+import {
+  canvasEditableNodeDataSchema,
+  HUABU_AGENT_PROFILE_ID,
+} from '@huabu/shared';
 import {
   AGENT_NODE_PREPARATION_KEYS,
   projectAgentNodeEditableData,
@@ -43,8 +46,11 @@ export function withDefaultAgentBinding(
   const profileId = getAgentDefaults().profileId;
   if (!profileId) {
     throw new AgentNodeEditError(
-      'Connect an external Agent and select a default Profile in Settings.',
+      'Connect an external Agent or select Built-In Pi as the default in Settings.',
     );
+  }
+  if (profileId === HUABU_AGENT_PROFILE_ID) {
+    return { ...data, agentBinding: { kind: 'internal' } };
   }
   let profile: SelectableAgentProfile;
   try {

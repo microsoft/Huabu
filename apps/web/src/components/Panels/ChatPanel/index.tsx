@@ -637,10 +637,10 @@ export const ChatPanel = ({
   );
 
   useEffect(() => {
-    if (!llmConfig && !llmLoading) {
+    if (agentBinding.kind === 'internal' && !llmConfig && !llmLoading) {
       void llmInit();
     }
-  }, [llmConfig, llmLoading, llmInit]);
+  }, [agentBinding.kind, llmConfig, llmLoading, llmInit]);
 
   const panelTitle = useMemo(() => {
     if (activeConversationView) {

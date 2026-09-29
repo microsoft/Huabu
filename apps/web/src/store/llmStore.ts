@@ -48,6 +48,8 @@ interface LLMState {
   config: LLMConfig | null;
   /** Current image-generation configuration from the server. */
   imageConfig: LLMImageConfig | null;
+  imageLoading: boolean;
+  imageError: string | null;
   /** Current utility-tier model configuration from the server. */
   utilityConfig: LLMUtilityConfig | null;
   /** Available providers. */
@@ -77,6 +79,7 @@ interface LLMState {
 
   /** Load providers and current config from the server. */
   init: () => Promise<void>;
+  loadImageConfig: () => Promise<void>;
   /** Load models for a specific provider. */
   loadModels: (provider: string) => Promise<void>;
   /** Load models for the utility provider. */
@@ -98,6 +101,8 @@ interface LLMState {
 export const useLLMStore = create<LLMState>()((set, get) => ({
   config: null,
   imageConfig: null,
+  imageLoading: false,
+  imageError: null,
   utilityConfig: null,
   providers: [],
   models: [],
@@ -115,15 +120,13 @@ export const useLLMStore = create<LLMState>()((set, get) => ({
     if (get().loading) return;
     set({ loading: true, error: null });
     try {
-      const [config, imageConfig, utilityConfig, providers] = await Promise.all(
-        [
-          getLLMConfig(),
-          getLLMImageConfig(),
-          getLLMUtilityConfig(),
-          getLLMProviders(),
-        ],
-      );
-      set({ config, imageConfig, utilityConfig, providers, loading: false });
+      const [config, utilityConfig, providers] = await Promise.all([
+        getLLMConfig(),
+        getLLMUtilityConfig(),
+        getLLMProviders(),
+        get().loadImageConfig(),
+      ]);
+      set({ config, utilityConfig, providers, loading: false });
 
       // Pre-load models for the active provider
       if (config.provider) {
@@ -139,6 +142,21 @@ export const useLLMStore = create<LLMState>()((set, get) => ({
       set({
         error: err instanceof Error ? err.message : 'Failed to load LLM config',
         loading: false,
+      });
+    }
+  },
+
+  loadImageConfig: async () => {
+    if (get().imageLoading) return;
+    set({ imageLoading: true, imageError: null });
+    try {
+      const imageConfig = await getLLMImageConfig();
+      set({ imageConfig, imageLoading: false });
+    } catch (err) {
+      set({
+        imageLoading: false,
+        imageError:
+          err instanceof Error ? err.message : 'Failed to load image config',
       });
     }
   },
@@ -180,14 +198,16 @@ export const useLLMStore = create<LLMState>()((set, get) => ({
   },
 
   updateImageConfig: async (update) => {
-    set({ imageSaving: true, error: null });
+    set({ imageSaving: true, imageError: null, error: null });
     try {
       const imageConfig = await putLLMImageConfig(update);
       set({ imageConfig, imageSaving: false });
     } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Failed to update image config';
       set({
-        error:
-          err instanceof Error ? err.message : 'Failed to update image config',
+        error: message,
+        imageError: message,
         imageSaving: false,
       });
     }

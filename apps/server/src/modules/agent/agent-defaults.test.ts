@@ -3,9 +3,21 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { AgentDefaultsError, AgentDefaultsService } from './agent-defaults.js';
+import {
+  AgentDefaultsError,
+  AgentDefaultsService,
+  initializeAgentDefaults,
+} from './agent-defaults.js';
 
 import type { AgentDefaults, AgentProfileView } from '@huabu/shared';
+
+vi.mock('@agenetes/agentlet-host', () => ({
+  getAgentletGateway: () => ({
+    getAgentlet: (id: string) => ({
+      status: id === 'connected' ? 'connected' : 'disconnected',
+    }),
+  }),
+}));
 
 function profile(
   id: string,
@@ -34,6 +46,19 @@ function setup(initial?: unknown) {
 }
 
 describe('installation Agent defaults', () => {
+  it('offers only connected external candidates to automatic initialization', () => {
+    const initialize = vi
+      .spyOn(AgentDefaultsService.prototype, 'initializeAgentDefaults')
+      .mockReturnValue({ profileId: null, functionalModel: '' });
+    try {
+      const online = profile('online', 'connected');
+      initializeAgentDefaults([profile('offline', 'offline'), online]);
+      expect(initialize).toHaveBeenCalledWith([online]);
+    } finally {
+      initialize.mockRestore();
+    }
+  });
+
   it('requires an explicit external default instead of falling back to Huabu', () => {
     const { service, storage } = setup();
     expect(() => service.requireDefaultAgentProfileId()).toThrow(
@@ -127,7 +152,23 @@ describe('installation Agent defaults', () => {
     expect(storage.write).toHaveBeenCalledTimes(1);
   });
 
-  it.each([null, 'broken', { profileId: 2 }, { profileId: 'huabu' }])(
+  it('preserves explicit Built-In selection and the external model across discovery and restart', () => {
+    const { service, storage } = setup();
+    service.setAgentDefaults({
+      profileId: 'huabu',
+      functionalModel: 'external-model',
+    });
+    expect(service.initializeAgentDefaults([profile('external')])).toEqual({
+      profileId: 'huabu',
+      functionalModel: 'external-model',
+    });
+    expect(
+      new AgentDefaultsService(storage).requireDefaultAgentProfileId(),
+    ).toBe('huabu');
+    expect(storage.write).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([null, 'broken', { profileId: 2 }])(
     'fails explicitly for corrupt persisted configuration %j',
     (value) => {
       const { service, storage } = setup(value);

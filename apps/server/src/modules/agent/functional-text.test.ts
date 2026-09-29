@@ -30,8 +30,10 @@ const mocks = vi.hoisted(() => ({
   >(),
   close: vi.fn(),
   warn: vi.fn(),
+  complete: vi.fn(),
 }));
 
+vi.mock('./llm.js', () => ({ llmComplete: mocks.complete }));
 vi.mock('./agent-defaults.js', async (original) => ({
   ...(await original<typeof AgentDefaults>()),
   getAgentDefaults: mocks.defaults,
@@ -107,6 +109,85 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 describe('external functional text', () => {
+  it.each(['contentMeta', 'frameLabel', 'imageLabel'] as const)(
+    'uses Built-In %s role without resolving any external Profile or injecting its model',
+    async (role) => {
+      mocks.defaults.mockReturnValue({
+        profileId: 'huabu',
+        functionalModel: 'external-model',
+      });
+      mocks.complete.mockResolvedValue({
+        content: [{ type: 'text', text: ' result ' }],
+        stopReason: 'stop',
+      });
+      const controller = new AbortController();
+      const images =
+        role === 'imageLabel'
+          ? [{ type: 'image' as const, data: 'bytes', mimeType: 'image/png' }]
+          : [];
+      await expect(
+        runFunctionalText('task', {
+          ...context,
+          role,
+          images,
+          signal: controller.signal,
+        }),
+      ).resolves.toBe('result');
+      expect(mocks.complete).toHaveBeenCalledWith(
+        {
+          systemPrompt: '',
+          messages: [
+            {
+              role: 'user',
+              content: [{ type: 'text', text: 'task' }, ...images],
+              timestamp: expect.any(Number),
+            },
+          ],
+        },
+        { role, hasImage: images.length > 0, signal: controller.signal },
+      );
+      expect(mocks.create).not.toHaveBeenCalled();
+      expect(mocks.selectable).not.toHaveBeenCalled();
+      expect(mocks.snapshot).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps an admitted Built-In task on Pi after the default changes', async () => {
+    mocks.defaults.mockReturnValue({ profileId: 'huabu', functionalModel: '' });
+    const task = runFunctionalText('task', context);
+    mocks.defaults.mockReturnValue({
+      profileId: 'profile-a',
+      functionalModel: '',
+    });
+    mocks.complete.mockResolvedValue({
+      content: [{ type: 'text', text: 'answer' }],
+      stopReason: 'stop',
+    });
+    await expect(task).resolves.toBe('answer');
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { content: [], stopReason: 'stop' },
+    {
+      content: [{ type: 'text', text: 'partial' }],
+      stopReason: 'error',
+      errorMessage: 'Login required',
+    },
+    { content: [{ type: 'text', text: 'partial' }], stopReason: 'aborted' },
+  ])(
+    'rejects unsuccessful Built-In output without switching to ACP',
+    async (result) => {
+      mocks.defaults.mockReturnValue({
+        profileId: 'huabu',
+        functionalModel: '',
+      });
+      mocks.complete.mockResolvedValue(result);
+      await expect(runFunctionalText('task', context)).rejects.toThrow();
+      expect(mocks.create).not.toHaveBeenCalled();
+    },
+  );
+
   it('propagates asynchronous creation failure without starting a turn', async () => {
     mocks.create.mockRejectedValueOnce(new Error('Creation failed'));
     await expect(runFunctionalText('task', context)).rejects.toThrow(
@@ -194,6 +275,7 @@ describe('external functional text', () => {
     await expect(runFunctionalText('summarize', context)).resolves.toBe(
       'answer',
     );
+    expect(mocks.complete).not.toHaveBeenCalled();
     const spec: AcpCreateSpec = mocks.create.mock.calls[0][0];
     expect(spec).toMatchObject({
       workloadType: 'Job',

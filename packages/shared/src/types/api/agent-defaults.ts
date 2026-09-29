@@ -5,13 +5,7 @@ import { z } from 'zod';
 
 export const agentDefaultsSchema = z
   .object({
-    profileId: z
-      .string()
-      .trim()
-      .min(1)
-      .max(255)
-      .refine((value) => value !== 'huabu', 'Select an external Agent Profile')
-      .nullable(),
+    profileId: z.string().trim().min(1).max(255).nullable(),
     functionalModel: z.string().trim().max(500).default(''),
   })
   .strict();

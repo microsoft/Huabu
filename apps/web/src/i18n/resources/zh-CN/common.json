@@ -212,13 +212,16 @@
     "profileEditConflict": "此配置已在其他位置修改。请重新加载配置列表并重新打开编辑器后再保存；您的修改尚未覆盖新版本。",
     "profileSaveFailed": "保存配置失败",
     "agentDefaultsTitle": "全局 Agent 默认设置",
+    "builtInPi": "Built-In Pi",
+    "builtInPiSetup": "使用 Huabu 内的提供商凭据，可能需要配置。",
+    "builtInPiConfigure": "配置 Built-In Pi 提供商和模型",
     "structuredLaunchUnavailable": "此 Agentlet 无法通过结构化配置启动所有已发现的 harness。请使用兼容的可执行文件或自定义命令。",
     "agentDefaultsProfile": "默认 Agent 配置",
     "agentDefaultsDescription": "用于新建 Agent 节点、未绑定的聊天和文本／图片元数据任务。现有会话保持原有 Agent。",
     "agentDefaultsModel": "功能任务模型",
     "agentDefaultsModelDescription": "当 Agent 声明支持所选模型时，用于摘要、关键词、标题和图片标签生成；图片任务需要视觉能力。不修改 Agent 配置或聊天模型偏好。",
     "agentDefaultsInherit": "继承 Agent 配置的模型",
-    "agentDefaultsUnconfigured": "尚未选择默认 Agent",
+    "agentDefaultsUnconfigured": "连接外部 Agent 或选择 Built-In Pi",
     "agentDefaultsMissing": "配置已不存在（{{id}}）",
     "agentDefaultsDeleted": "所选配置已删除，请选择替代配置；默认选择不会自动切换。",
     "agentDefaultsOffline": "所选配置所在的机器已离线，仍保留此选择。",
@@ -1103,7 +1106,7 @@
     }
   },
   "errors": {
-    "agentDefaultUnconfigured": "请先连接 Agent 并在设置中选择默认配置，再开始新会话。",
+    "agentDefaultUnconfigured": "请先连接外部 Agent，或在设置中将 Built-In Pi 设为默认，再开始新会话。",
     "agentDefaultsUnavailable": "无法加载 Agent 默认设置。请检查服务器连接，并在设置中选择默认配置。",
     "nodeSaveFailed": "「{{name}}」写盘失败，可能文件被占用或没有写入权限。",
     "rateLimited": "请求过于频繁，请在 {{seconds}} 秒后重试。"

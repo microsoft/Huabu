@@ -13,6 +13,9 @@ const mocks = vi.hoisted(() => ({
   init: vi.fn(),
   load: vi.fn(),
   clear: vi.fn(),
+  llmInit: vi.fn(),
+  profileId: 'external',
+  requestedTab: null as 'builtIn' | null,
 }));
 
 vi.mock('react-i18next', () => ({
@@ -23,12 +26,19 @@ vi.mock('@/hooks/useElectron', () => ({
 }));
 vi.mock('@/store/acpProfilesStore', () => ({
   useAcpProfilesStore: (
-    selector: (state: { init: typeof mocks.init }) => unknown,
-  ) => selector({ init: mocks.init }),
+    selector: (state: {
+      init: typeof mocks.init;
+      agentDefaults: { profileId: string };
+    }) => unknown,
+  ) =>
+    selector({
+      init: mocks.init,
+      agentDefaults: { profileId: mocks.profileId },
+    }),
 }));
 vi.mock('@/store/llmStore', () => ({
   useLLMStore: (selector: (state: { init: typeof mocks.init }) => unknown) =>
-    selector({ init: mocks.init }),
+    selector({ init: mocks.llmInit }),
 }));
 vi.mock('@/store/deploymentReadinessStore', () => ({
   useDeploymentReadinessStore: (
@@ -38,10 +48,14 @@ vi.mock('@/store/deploymentReadinessStore', () => ({
 vi.mock('@/store/settingsUiStore', () => ({
   useSettingsUiStore: (
     selector: (state: {
-      requestedTab: null;
+      requestedTab: 'builtIn' | null;
       clearRequestedTab: typeof mocks.clear;
     }) => unknown,
-  ) => selector({ requestedTab: null, clearRequestedTab: mocks.clear }),
+  ) =>
+    selector({
+      requestedTab: mocks.requestedTab,
+      clearRequestedTab: mocks.clear,
+    }),
 }));
 vi.mock('./agent-profiles/AgentDefaultsSettings', () => ({
   AgentDefaultsSettings: () => <div data-testid="agent-defaults" />,
@@ -71,6 +85,8 @@ let container: HTMLDivElement;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.profileId = 'external';
+  mocks.requestedTab = null;
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -81,16 +97,15 @@ afterEach(() => {
 });
 
 describe('Settings default Agent placement', () => {
-  it('shows defaults only under Huabu Agent while retaining legacy providers and external Profile management', async () => {
+  it('hides Pi provider settings for external defaults while retaining Profile management', async () => {
     await act(async () => {
       root.render(<SettingsModal isOpen onClose={vi.fn()} />);
     });
     expect(
       container.querySelectorAll('[data-testid="agent-defaults"]'),
     ).toHaveLength(1);
-    expect(
-      container.querySelector('[data-testid="legacy-llm"]'),
-    ).not.toBeNull();
+    expect(container.querySelector('[data-testid="legacy-llm"]')).toBeNull();
+    expect(mocks.llmInit).not.toHaveBeenCalled();
     expect(
       container.querySelector('[data-testid="profile-management"]'),
     ).toBeNull();
@@ -114,8 +129,45 @@ describe('Settings default Agent placement', () => {
     expect(
       container.querySelectorAll('[data-testid="agent-defaults"]'),
     ).toHaveLength(1);
+    expect(container.querySelector('[data-testid="legacy-llm"]')).toBeNull();
+  });
+
+  it('hides Pi settings again after closing an explicit repair visit', async () => {
+    mocks.requestedTab = 'builtIn';
+    await act(async () =>
+      root.render(<SettingsModal isOpen onClose={vi.fn()} />),
+    );
     expect(
       container.querySelector('[data-testid="legacy-llm"]'),
     ).not.toBeNull();
+    expect(
+      container.querySelector('[data-testid="agent-defaults"]'),
+    ).toBeNull();
+    mocks.requestedTab = null;
+    await act(async () =>
+      root.render(<SettingsModal isOpen={false} onClose={vi.fn()} />),
+    );
+    await act(async () =>
+      root.render(<SettingsModal isOpen onClose={vi.fn()} />),
+    );
+    expect(container.querySelector('[data-testid="legacy-llm"]')).toBeNull();
+    expect(
+      container.querySelector('[data-testid="agent-defaults"]'),
+    ).not.toBeNull();
   });
+
+  it.each(['default', 'thread repair'])(
+    'shows Built-In providers for %s without changing the default',
+    async (source) => {
+      if (source === 'default') mocks.profileId = 'huabu';
+      else mocks.requestedTab = 'builtIn';
+      await act(async () =>
+        root.render(<SettingsModal isOpen onClose={vi.fn()} />),
+      );
+      expect(
+        container.querySelector('[data-testid="legacy-llm"]'),
+      ).not.toBeNull();
+      expect(mocks.llmInit).toHaveBeenCalled();
+    },
+  );
 });

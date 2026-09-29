@@ -60,6 +60,18 @@ describe('new Agent Node default binding', () => {
     expect(mocks.profile).not.toHaveBeenCalled();
   });
 
+  it('uses an explicit Built-In default without resolving external Profiles', () => {
+    mocks.defaults.mockReturnValue({
+      profileId: 'huabu',
+      functionalModel: 'external-model',
+    });
+    expect(withDefaultAgentBinding({ label: 'New Agent' })).toEqual({
+      label: 'New Agent',
+      agentBinding: { kind: 'internal' },
+    });
+    expect(mocks.profile).not.toHaveBeenCalled();
+  });
+
   it('reports an unconfigured default instead of silently choosing internal', () => {
     mocks.defaults.mockReturnValue({ profileId: null, functionalModel: '' });
     expect(() => withDefaultAgentBinding({})).toThrow(AgentNodeEditError);

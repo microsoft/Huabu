@@ -84,6 +84,20 @@ function createHarness(options?: {
 }
 
 describe('AgentNodeService', () => {
+  it('creates from an explicit Built-In default without requiring an external Profile', async () => {
+    const { service, execute } = createHarness({
+      defaultProfileId: 'huabu',
+      selectableIds: [],
+    });
+    const result = await service.create({
+      canvasId: 'canvas-a',
+      position: { x: 0, y: 0 },
+    });
+    expect(result.profileId).toBe('huabu');
+    expect(
+      execute.mock.calls[0][0].commands[0].nodes[0].data.agentBinding,
+    ).toEqual({ kind: 'internal' });
+  });
   it('creates one external Question Node and then its lineage edge', async () => {
     const { service, execute } = createHarness();
 

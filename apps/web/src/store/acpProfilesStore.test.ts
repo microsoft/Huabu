@@ -40,7 +40,11 @@ const snapshot = {
 
 beforeEach(() => {
   listProfiles.mockReset().mockResolvedValue(snapshot);
-  defaultsApi.get.mockReset();
+  defaultsApi.get.mockReset().mockResolvedValue({
+    defaults: snapshot.agentDefaults,
+    selectionState: 'available',
+    modelCapability: 'unknown',
+  });
   defaultsApi.toast.mockReset();
   defaultsApi.update.mockReset().mockImplementation(
     async (defaults: AgentDefaults): Promise<AgentDefaultsResponse> => ({
@@ -52,8 +56,9 @@ beforeEach(() => {
   useAcpProfilesStore.setState({
     loaded: false,
     error: null,
-    profiles: [],
+    profiles: [profile],
     agentDefaults: null,
+    defaultsError: null,
   });
 });
 
@@ -69,7 +74,8 @@ describe('default Agent snapshot', () => {
       alias: profile.alias,
     });
     expect(second).toEqual(first);
-    expect(listProfiles).toHaveBeenCalledOnce();
+    expect(defaultsApi.get).toHaveBeenCalledOnce();
+    expect(listProfiles).not.toHaveBeenCalled();
     expect(useAcpProfilesStore.getState().agentDefaults).toEqual(
       snapshot.agentDefaults,
     );
@@ -77,9 +83,10 @@ describe('default Agent snapshot', () => {
   });
 
   it('keeps a deleted default ID rather than selecting the remaining Profile', async () => {
-    listProfiles.mockResolvedValueOnce({
-      ...snapshot,
-      agentDefaults: { profileId: 'deleted', functionalModel: '' },
+    defaultsApi.get.mockResolvedValueOnce({
+      defaults: { profileId: 'deleted', functionalModel: '' },
+      selectionState: 'deleted',
+      modelCapability: 'unknown',
     });
     expect(await loadDefaultAgentBinding()).toEqual({
       kind: 'external',
@@ -88,10 +95,14 @@ describe('default Agent snapshot', () => {
     });
   });
 
-  it.each([undefined, { profileId: null, functionalModel: '' }])(
+  it.each([{ profileId: null, functionalModel: '' }])(
     'rejects unsupported or unconfigured defaults: %o',
     async (agentDefaults) => {
-      listProfiles.mockResolvedValueOnce({ ...snapshot, agentDefaults });
+      defaultsApi.get.mockResolvedValueOnce({
+        defaults: agentDefaults,
+        selectionState: 'unconfigured',
+        modelCapability: 'unknown',
+      });
       await expect(loadDefaultAgentBinding()).rejects.toThrow();
       expect(useAcpProfilesStore.getState().agentDefaults).toEqual(
         agentDefaults ?? null,
@@ -101,10 +112,53 @@ describe('default Agent snapshot', () => {
 
   it('does not use a previous snapshot after a failed refresh', async () => {
     await loadDefaultAgentBinding();
-    listProfiles.mockRejectedValueOnce(new Error('offline'));
+    defaultsApi.get.mockRejectedValueOnce(new Error('offline'));
     await expect(loadDefaultAgentBinding()).rejects.toThrow();
     expect(() => getDefaultAgentBinding()).toThrow();
     expect(useAcpProfilesStore.getState().profiles).toEqual([profile]);
+  });
+
+  it('loads Built-In without an external catalogue, even after catalogue errors', async () => {
+    useAcpProfilesStore.setState({
+      loaded: false,
+      error: new Error('registry offline'),
+    });
+    defaultsApi.get.mockResolvedValueOnce({
+      defaults: { profileId: 'huabu', functionalModel: 'external-model' },
+      selectionState: 'available',
+      modelCapability: 'supported',
+    });
+    await expect(loadDefaultAgentBinding()).resolves.toEqual({
+      kind: 'internal',
+    });
+    expect(listProfiles).not.toHaveBeenCalled();
+  });
+
+  it('does not let an in-flight defaults read undo a saved backend switch', async () => {
+    let finish!: (response: AgentDefaultsResponse) => void;
+    defaultsApi.get.mockImplementationOnce(
+      () =>
+        new Promise<AgentDefaultsResponse>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const state = useAcpProfilesStore.getState();
+    const loading = state.loadDefaults();
+    await Promise.resolve();
+    const defaults = { profileId: 'huabu', functionalModel: 'external-model' };
+    await state.saveDefaults(defaults);
+    defaultsApi.get.mockResolvedValue({
+      defaults,
+      selectionState: 'available',
+      modelCapability: 'supported',
+    });
+    finish({
+      defaults: snapshot.agentDefaults,
+      selectionState: 'available',
+      modelCapability: 'unknown',
+    });
+    expect((await loading).defaults).toEqual(defaults);
+    expect(getDefaultAgentBinding()).toEqual({ kind: 'internal' });
   });
 
   it('serializes saves and publishes the last confirmed default for new chats', async () => {

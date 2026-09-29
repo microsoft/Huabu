@@ -212,13 +212,16 @@
     "profileEditConflict": "This Profile changed elsewhere. Reload the Profiles list and reopen the editor before saving; your changes have not overwritten the newer version.",
     "profileSaveFailed": "Failed to save profile",
     "agentDefaultsTitle": "Global Agent defaults",
+    "builtInPi": "Built-In Pi",
+    "builtInPiSetup": "Uses Huabu provider credentials; setup may be required.",
+    "builtInPiConfigure": "Configure Built-In Pi providers and models",
     "structuredLaunchUnavailable": "This Agentlet cannot launch every detected harness with structured configuration. Use a compatible executable or a Custom command.",
     "agentDefaultsProfile": "Default Agent Profile",
     "agentDefaultsDescription": "Used for new Agent Nodes, unbound chats, and text/image metadata tasks. Existing conversations keep their Agent.",
     "agentDefaultsModel": "Functional-task model",
     "agentDefaultsModelDescription": "Used for summaries, keywords, titles, and image labels when the Agent advertises the model. Image tasks require vision support. Does not change Profile or chat model preferences.",
     "agentDefaultsInherit": "Inherit the Profile model",
-    "agentDefaultsUnconfigured": "No default Agent selected",
+    "agentDefaultsUnconfigured": "Connect an external Agent or select Built-In Pi",
     "agentDefaultsMissing": "Missing Profile ({{id}})",
     "agentDefaultsDeleted": "The selected Profile was deleted. Choose a replacement; the default will not switch automatically.",
     "agentDefaultsOffline": "The selected Profile's machine is offline. Its selection is retained.",
@@ -1103,7 +1106,7 @@
     }
   },
   "errors": {
-    "agentDefaultUnconfigured": "Connect an Agent and configure a default Profile in Settings before starting a new conversation.",
+    "agentDefaultUnconfigured": "Connect an external Agent or select Built-In Pi as the default in Settings before starting a new conversation.",
     "agentDefaultsUnavailable": "Agent defaults could not be loaded. Check the server connection and configure a default Profile in Settings.",
     "nodeSaveFailed": "Couldn't write \"{{name}}\" to disk — the file may be locked or not writable.",
     "rateLimited": "Too many requests. Try again in {{seconds}} seconds."

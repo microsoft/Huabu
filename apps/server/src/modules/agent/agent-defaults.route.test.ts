@@ -17,13 +17,15 @@ const mocks = vi.hoisted(() => ({
   getProfile: vi.fn(),
   getAgentlet: vi.fn(),
   getCache: vi.fn(),
+  registryReady: true,
 }));
 vi.mock('./agent-defaults.js', () => ({
   getAgentDefaults: mocks.get,
   setAgentDefaults: mocks.set,
 }));
 vi.mock('@agenetes/agentlet-host', () => ({
-  getAgentProfileRegistry: () => ({ getProfile: mocks.getProfile }),
+  getAgentProfileRegistry: () =>
+    mocks.registryReady ? { getProfile: mocks.getProfile } : null,
   getAgentletGateway: () => ({ getAgentlet: mocks.getAgentlet }),
 }));
 vi.mock('./acp/profile-schema-cache.js', () => ({
@@ -34,6 +36,7 @@ let app: FastifyInstance;
 const url = '/api/agent/defaults';
 beforeEach(async () => {
   vi.resetAllMocks();
+  mocks.registryReady = true;
   mocks.get.mockReturnValue({ profileId: null, functionalModel: '' });
   mocks.set.mockImplementation((value: AgentDefaults) => value);
   app = Fastify({ logger: false });
@@ -113,16 +116,53 @@ describe('owner-only Agent defaults', () => {
     },
   );
 
-  it('validates bodies and rejects unknown or internal Profiles', async () => {
+  it('validates bodies and rejects unknown Profiles', async () => {
     for (const payload of [
       { profileId: 'unknown', functionalModel: '' },
-      { profileId: 'huabu', functionalModel: '' },
       { profileId: 'external', functionalModel: 1 },
     ]) {
       expect(
         (await app.inject({ method: 'PUT', url, payload })).statusCode,
       ).toBe(400);
     }
+    expect(mocks.set).not.toHaveBeenCalled();
+  });
+
+  it('selects and reads Built-In without an external registry or credential side effects', async () => {
+    mocks.registryReady = false;
+    const defaults = {
+      profileId: 'huabu',
+      functionalModel: 'external-only-model',
+    };
+    mocks.get.mockReturnValue(defaults);
+    for (const method of ['GET', 'PUT'] as const) {
+      const response = await app.inject({
+        method,
+        url,
+        ...(method === 'PUT' ? { payload: defaults } : {}),
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({
+        defaults,
+        selectionState: 'available',
+        modelCapability: 'supported',
+      });
+    }
+    expect(mocks.getProfile).not.toHaveBeenCalled();
+    expect(mocks.getAgentlet).not.toHaveBeenCalled();
+    expect(mocks.getCache).not.toHaveBeenCalled();
+  });
+
+  it('retains external selections but rejects external writes while the registry is unavailable', async () => {
+    mocks.registryReady = false;
+    mocks.get.mockReturnValue({ profileId: 'external', functionalModel: '' });
+    expect((await app.inject(url)).json().selectionState).toBe('offline');
+    const response = await app.inject({
+      method: 'PUT',
+      url,
+      payload: { profileId: 'external', functionalModel: '' },
+    });
+    expect(response.statusCode).toBe(503);
     expect(mocks.set).not.toHaveBeenCalled();
   });
 

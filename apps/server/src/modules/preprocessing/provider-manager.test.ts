@@ -83,10 +83,10 @@ describe('external text enrichment', () => {
     await expect(
       provider.generateFrameLabel(['Child one', 'Child two'], context),
     ).resolves.toBe('Topic');
-    expect(runText).toHaveBeenCalledWith(
-      expect.stringContaining('Child one'),
-      context,
-    );
+    expect(runText).toHaveBeenCalledWith(expect.stringContaining('Child one'), {
+      ...context,
+      role: 'frameLabel',
+    });
   });
 
   it.each(['', 'x'.repeat(61), 'Two\nlines'])(
@@ -111,6 +111,7 @@ describe('external image enrichment', () => {
     );
     expect(runText).toHaveBeenCalledWith(expect.any(String), {
       canvasId: 'canvas-a',
+      role: 'imageLabel',
       images: [{ type: 'image', data: 'aGVsbG8=', mimeType: 'image/png' }],
     });
     expect(complete).not.toHaveBeenCalled();

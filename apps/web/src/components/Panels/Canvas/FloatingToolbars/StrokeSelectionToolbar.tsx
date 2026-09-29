@@ -340,18 +340,19 @@ export const StrokeSelectionToolbar = () => {
             nodeType: 'question',
             side: 'bottom',
           });
+          const mode = binding.kind === 'internal' ? 'operate' : 'ask';
           const created = createQuestionNode({
             addNode,
             placementPoint,
             canvasId: canvas.canvasId,
             binding,
-            mode: 'ask',
+            mode,
             label: 'New ink request',
             pendingInkIntentLabel: true,
           });
           attempt = {
             identity,
-            mode: 'ask',
+            mode,
             groundingVisual,
             session: {
               canvasId: canvas.canvasId,
@@ -528,8 +529,10 @@ export const StrokeSelectionToolbar = () => {
     }
     if (!candidate.target) {
       const name =
-        agentProfiles.find((profile) => profile.id === defaultProfileId)
-          ?.alias ?? t('toolbar.defaultInkAgentTarget');
+        defaultProfileId === 'huabu'
+          ? t('settings.builtInPi')
+          : (agentProfiles.find((profile) => profile.id === defaultProfileId)
+              ?.alias ?? t('toolbar.defaultInkAgentTarget'));
       return {
         label: t('toolbar.newInkAgentTarget', { name }),
         description: t('toolbar.newInkAgentTargetDescription', { name }),

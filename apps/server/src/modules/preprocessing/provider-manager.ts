@@ -4,7 +4,7 @@
 /**
  * Provider Manager
  *
- * Text and image metadata tasks use the default external Profile.
+ * Text and image metadata tasks use the explicitly selected global Agent.
  */
 
 import { z } from 'zod';
@@ -43,11 +43,12 @@ export class ProviderManager {
     const text = (
       await runFunctionalText(IMAGE_LABEL_PROMPT, {
         canvasId,
+        role: 'imageLabel',
         images: [{ type: 'image', data: image.data, mimeType: image.mimeType }],
       })
     ).trim();
     if (!text || text.length > 60 || /[\r\n]/.test(text)) {
-      throw new Error('External Agent returned an invalid image title');
+      throw new Error('Agent returned an invalid image title');
     }
     return text;
   }
@@ -61,10 +62,13 @@ export class ProviderManager {
     context: FunctionalTextContext,
   ): Promise<string> {
     const text = (
-      await runFunctionalText(buildFrameLabelPrompt(childLabels), context)
+      await runFunctionalText(buildFrameLabelPrompt(childLabels), {
+        ...context,
+        role: 'frameLabel',
+      })
     ).trim();
     if (!text || text.length > 60 || /[\r\n]/.test(text)) {
-      throw new Error('External Agent returned an invalid Frame title');
+      throw new Error('Agent returned an invalid Frame title');
     }
     return text;
   }
@@ -96,7 +100,7 @@ export class ProviderManager {
     const parsed = contentMetaSchema.safeParse(JSON.parse(cleaned));
     if (!parsed.success) {
       throw new Error(
-        `External Agent returned invalid text metadata: ${parsed.error.message}`,
+        `Agent returned invalid text metadata: ${parsed.error.message}`,
       );
     }
     const { label, summary, keywords } = parsed.data;
@@ -105,7 +109,7 @@ export class ProviderManager {
       (opts.needSummary !== false && !summary) ||
       (opts.needKeywords !== false && !keywords)
     ) {
-      throw new Error('External Agent omitted requested text metadata');
+      throw new Error('Agent omitted requested text metadata');
     }
     return {
       ...(opts.needLabel !== false ? { label } : {}),

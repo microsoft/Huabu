@@ -6,7 +6,11 @@ import {
   getAgentletGateway,
 } from '@agenetes/agentlet-host';
 
-import { agentDefaultsSchema, buildAcpSessionSelectors } from '@huabu/shared';
+import {
+  agentDefaultsSchema,
+  buildAcpSessionSelectors,
+  HUABU_AGENT_PROFILE_ID,
+} from '@huabu/shared';
 
 import { getProfileSchemaCache } from './acp/profile-schema-cache.js';
 import { getAgentDefaults, setAgentDefaults } from './agent-defaults.js';
@@ -20,8 +24,16 @@ import type {
 import type { FastifyPluginAsync } from 'fastify';
 
 function projectDefaults(defaults: AgentDefaults): AgentDefaultsResponse {
+  if (defaults.profileId === HUABU_AGENT_PROFILE_ID) {
+    return {
+      defaults,
+      selectionState: 'available',
+      modelCapability: 'supported',
+    };
+  }
+  const registry = getAgentProfileRegistry();
   const profile = defaults.profileId
-    ? getAgentProfileRegistry()?.getProfile(defaults.profileId)
+    ? registry?.getProfile(defaults.profileId)
     : undefined;
   const cached = profile ? getProfileSchemaCache(profile.id) : null;
   const modelSelector = cached
@@ -44,12 +56,14 @@ function projectDefaults(defaults: AgentDefaults): AgentDefaultsResponse {
     selectionState:
       defaults.profileId === null
         ? 'unconfigured'
-        : !profile
-          ? 'deleted'
-          : getAgentletGateway()?.getAgentlet(profile.agentletId)?.status ===
-              'connected'
-            ? 'available'
-            : 'offline',
+        : !registry
+          ? 'offline'
+          : !profile
+            ? 'deleted'
+            : getAgentletGateway()?.getAgentlet(profile.agentletId)?.status ===
+                'connected'
+              ? 'available'
+              : 'offline',
     // Missing observations and editable CLI labels do not prove lack of support.
     modelCapability:
       profile?.launch.kind === 'acp-command'
@@ -65,12 +79,6 @@ const agentDefaultsRoutes: FastifyPluginAsync = async (app) => {
     if (!isOwnerRequest(request)) {
       return reply.status(403).send({
         message: 'Forbidden: Agent defaults require owner authorization',
-      });
-    }
-    if (!getAgentProfileRegistry()) {
-      return reply.status(503).send({
-        message: 'Agent Profile registry is not ready',
-        code: 'profile_registry_unavailable',
       });
     }
   });
@@ -94,12 +102,21 @@ const agentDefaultsRoutes: FastifyPluginAsync = async (app) => {
       }
       if (
         parsed.data.profileId !== null &&
-        !getAgentProfileRegistry()?.getProfile(parsed.data.profileId)
+        parsed.data.profileId !== HUABU_AGENT_PROFILE_ID
       ) {
-        return reply.status(400).send({
-          message: 'Select an existing external Agent Profile',
-          code: 'profile_not_found',
-        });
+        const registry = getAgentProfileRegistry();
+        if (!registry) {
+          return reply.status(503).send({
+            message: 'Agent Profile registry is not ready',
+            code: 'profile_registry_unavailable',
+          });
+        }
+        if (!registry.getProfile(parsed.data.profileId)) {
+          return reply.status(400).send({
+            message: 'Select Built-In Pi or an existing external Agent Profile',
+            code: 'profile_not_found',
+          });
+        }
       }
       return projectDefaults(setAgentDefaults(parsed.data));
     },

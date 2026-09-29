@@ -74,7 +74,8 @@ export function listAvailableAgentProfiles(
 ): AvailableAgentProfileSummary[] {
   const huabu = {
     id: HUABU_AGENT_PROFILE_ID,
-    alias: 'Huabu',
+    alias: 'Built-In Pi',
+    ...(defaultProfileId === HUABU_AGENT_PROFILE_ID ? { default: true } : {}),
   } as const;
   if (!registry) {
     return [huabu];

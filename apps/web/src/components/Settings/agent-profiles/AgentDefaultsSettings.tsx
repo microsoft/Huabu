@@ -96,19 +96,30 @@ export function AgentDefaultsSettings() {
   }
 
   const externalProfiles = profiles.filter((profile) => profile.id !== 'huabu');
+  const isBuiltIn = draft?.profileId === 'huabu';
   const missing =
     profilesLoaded &&
+    !isBuiltIn &&
     draft !== null &&
     draft.profileId !== null &&
     !externalProfiles.some((profile) => profile.id === draft.profileId);
-  const options = externalProfiles.map((profile) => ({
-    value: profile.id,
-    label: profile.alias,
-  }));
+  const options = [
+    {
+      value: 'huabu',
+      label: t('settings.builtInPi'),
+      description: t('settings.builtInPiSetup'),
+    },
+    ...externalProfiles.map((profile) => ({
+      value: profile.id,
+      label: profile.alias,
+      description: undefined,
+    })),
+  ];
   if (missing && draft?.profileId) {
     options.unshift({
       value: draft.profileId,
       label: t('settings.agentDefaultsMissing', { id: draft.profileId }),
+      description: undefined,
     });
   }
   const modelCapability =
@@ -139,33 +150,34 @@ export function AgentDefaultsSettings() {
               options={options}
               value={draft.profileId ?? ''}
               placeholder={t('settings.agentDefaultsUnconfigured')}
-              disabled={!profilesLoaded}
               onOpen={() => void refresh()}
               onChange={(profileId) => {
                 edit({ ...draft, profileId }, true);
               }}
             />
           </SettingRow>
-          <SettingRow
-            title={t('settings.agentDefaultsModel')}
-            description={t('settings.agentDefaultsModelDescription')}
-            labelFor={modelId}
-          >
-            <TextInput
-              id={modelId}
-              value={draft.functionalModel}
-              placeholder={t('settings.agentDefaultsInherit')}
-              maxLength={500}
-              disabled={missing || !profilesLoaded}
-              onChange={(event) => {
-                edit({ ...draft, functionalModel: event.target.value });
-              }}
-              onBlur={() => {
-                if (error) edit(draft, true);
-                else debouncedSave.flush();
-              }}
-            />
-          </SettingRow>
+          {!isBuiltIn && (
+            <SettingRow
+              title={t('settings.agentDefaultsModel')}
+              description={t('settings.agentDefaultsModelDescription')}
+              labelFor={modelId}
+            >
+              <TextInput
+                id={modelId}
+                value={draft.functionalModel}
+                placeholder={t('settings.agentDefaultsInherit')}
+                maxLength={500}
+                disabled={missing || !profilesLoaded}
+                onChange={(event) => {
+                  edit({ ...draft, functionalModel: event.target.value });
+                }}
+                onBlur={() => {
+                  if (error) edit(draft, true);
+                  else debouncedSave.flush();
+                }}
+              />
+            </SettingRow>
+          )}
           <div className="space-y-2 px-3 py-2 text-xs">
             {missing ? (
               <p className="text-warning" role="status">
@@ -181,7 +193,8 @@ export function AgentDefaultsSettings() {
                 {t('settings.agentDefaultsOffline')}
               </p>
             ) : null}
-            {draft.functionalModel.trim() &&
+            {!isBuiltIn &&
+              draft.functionalModel.trim() &&
               modelCapability !== 'supported' && (
                 <p className="text-warning">
                   {modelCapability === 'unsupported'
