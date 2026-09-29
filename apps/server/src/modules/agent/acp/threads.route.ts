@@ -84,6 +84,59 @@ async function realizeControlThread(
   }
 }
 
+/** Tunable knobs for {@link awaitSchemaQuiescence}; overridable by tests. */
+interface SchemaQuiescenceOptions {
+  pollIntervalMs?: number;
+  quietWindowMs?: number;
+  maxWaitMs?: number;
+}
+
+/**
+ * Some agents disclose only part of their mode/model/config-option
+ * catalogue inline in the `session/new` response and push the rest a
+ * moment later via a trailing `session/update` notification (see
+ * `seedEntryFromNewSessionResult` in `@agenetes/acp-driver`, which
+ * documents that an agent may use either channel or both). A first
+ * real message has a live SSE stream open for the whole turn, so that
+ * straggler lands well before the turn completes and the client's next
+ * paint already has it. A warm-up dispatches no turn and opens no
+ * stream, so a single immediate `/cached-meta` refresh can win the race
+ * and render a control row missing exactly the knob the agent was
+ * still about to report — this is what surfaces as "mode appeared but
+ * model / reasoning effort didn't" for agents that resolve their model
+ * catalogue asynchronously.
+ *
+ * `entry` is the same object the driver mutates in place on every
+ * `session/update` (`acpSessionRegistry` holds this exact reference), so
+ * polling it directly observes those trailing pushes without a second
+ * RPC. Waits for the disclosed schema to stop growing/changing for a
+ * short quiet window, bounded by a hard cap so a slow or silent agent
+ * still returns promptly with whatever it disclosed inline.
+ */
+export async function awaitSchemaQuiescence(
+  entry: AcpSessionEntry,
+  options: SchemaQuiescenceOptions = {},
+): Promise<void> {
+  const pollIntervalMs = options.pollIntervalMs ?? 100;
+  const quietWindowMs = options.quietWindowMs ?? 300;
+  const maxWaitMs = options.maxWaitMs ?? 2000;
+  const fingerprint = () =>
+    `${entry.availableModes?.length ?? 0}:${entry.availableModels?.length ?? 0}:${entry.configOptions?.length ?? 0}:${entry.metaUpdatedAt ?? 0}`;
+  const start = Date.now();
+  let last = fingerprint();
+  let lastChangeAt = start;
+  while (Date.now() - start < maxWaitMs) {
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+    const next = fingerprint();
+    if (next !== last) {
+      last = next;
+      lastChangeAt = Date.now();
+      continue;
+    }
+    if (Date.now() - lastChangeAt >= quietWindowMs) return;
+  }
+}
+
 async function resolveThreadAgentletId(
   threadId: string,
   canvasId?: string,
@@ -522,10 +575,16 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
    * click on the control row's placeholder pill, never automatically,
    * so a fresh/idle thread never pays this cost unasked.
    *
-   * `session/new`'s response is folded into the profile/thread caches by
-   * the same session-meta pipeline the set-RPCs use, so the caller
-   * re-fetches `/cached-meta` after this resolves rather than this route
-   * projecting the snapshot itself.
+   * Before responding, it waits for the freshly-opened session's
+   * disclosed schema to go quiet (see `awaitSchemaQuiescence`): some
+   * agents push part of their catalogue via a `session/update`
+   * shortly after `session/new` resolves, and a warm-up — unlike a
+   * real message turn — has no open SSE stream to catch that straggler
+   * client-side. `session/new`'s response (and any trailing push) is
+   * folded into the profile/thread caches by the same session-meta
+   * pipeline the set-RPCs use, so the caller re-fetches `/cached-meta`
+   * after this resolves rather than this route projecting the snapshot
+   * itself.
    */
   app.post<{
     Params: ThreadParams;
@@ -551,6 +610,7 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
     if (!resolved.ok) {
       return reply.status(resolved.status).send(resolved.body);
     }
+    await awaitSchemaQuiescence(resolved.entry);
     return { ok: true as const };
   });
 };
