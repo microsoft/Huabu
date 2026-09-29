@@ -21,12 +21,27 @@ describe('Agent defaults contract', () => {
     );
   });
 
+  it.each(['huabu', ' huabu '])(
+    'accepts the explicit Built-In selection %j',
+    (profileId) => {
+      expect(agentDefaultsSchema.parse({ profileId })).toEqual({
+        profileId: 'huabu',
+        functionalModel: '',
+      });
+      expect(
+        agentDefaultsSchema.parse({
+          profileId,
+          functionalModel: ' saved-model ',
+        }),
+      ).toEqual({ profileId: 'huabu', functionalModel: 'saved-model' });
+    },
+  );
+
   it.each([
     null,
     {},
-    { profileId: 'huabu' },
-    { profileId: ' huabu ' },
     { profileId: '' },
+    { profileId: ' \t ' },
     { profileId: 1 },
     { profileId: 'external', functionalModel: null },
     { profileId: 'external', functionalModel: 123 },
