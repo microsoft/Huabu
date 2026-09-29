@@ -20,6 +20,8 @@
  * translator and will be added incrementally.
  */
 
+import { randomUUID } from 'node:crypto';
+
 import {
   getAgentProfileRegistry,
   getSupervisedAgentletId,
@@ -27,6 +29,10 @@ import {
 
 import { renderExternalAgentInputs } from './preprocessor.js';
 import { getProfileSessionPreferences } from './profile-session-preferences.js';
+import {
+  recipeFromProfileSnapshot,
+  resolveProfileSnapshot,
+} from './profile-snapshot.js';
 import { buildReachbackEnv } from './reachback-env.js';
 import { renderExternalAgentSystemPreamble } from '../../../prompt/external-agent/system-preamble.js';
 import { canvasAcpNamespace } from '../../workspace/paths.js';
@@ -38,12 +44,13 @@ import {
 } from '../agenetes/drivers.js';
 import { createChatSubmission } from '../agenetes/handle.js';
 import { dumpAssembledPrompt } from '../conversation/prompt/debug-prompt.js';
+import { renderInkReportEndpoint } from '../conversation/prompt/ink-intent.js';
 import { conversationTitleService } from '../conversation-title.service.js';
+import { beginActiveInkIntentTurn } from '../ink-intent-runtime.js';
 
 import type { HuabuSubmission } from '../agenetes/handle.js';
 import type { ChatEnvelope } from '../conversation/envelope.js';
 import type { AcpBindingRecipe, AcpTurnOverlay } from '@agenetes/acp-driver';
-import type { AgentProfileSnapshot } from '@agenetes/agent-profile';
 import type {
   AgentLaunchOverrides,
   AgentStreamEvent,
@@ -123,6 +130,7 @@ export interface RunAcpAgentOptions {
   };
   /** Called after Agenetes has synchronously persisted this turn's start. */
   onTurnStarted?: (acceptance?: AgentTurnAccepted) => void;
+  inkIntentOwnerNodeId?: string;
 }
 
 /**
@@ -136,38 +144,18 @@ export interface RunAcpAgentOptions {
  * when the profile no longer exists (deleted in Settings) — the
  * session-lifecycle code then falls back to any persisted
  * `bindingRecipe`, or throws if the thread was never bound. This is the
- * one place the ACP path reaches into the L1 profile store; keeping it in
- * the host composition layer lets the session-lifecycle helper stay
+ * host-side Profile projection; keeping it in the host composition layer lets the session-lifecycle helper stay
  * profile-store-free and its create-time spec fully serializable.
  */
 export function resolveBindingRecipe(
   profileId: string,
 ): AcpBindingRecipe | null {
-  const managed = getAgentProfileRegistry()?.getProfile(profileId);
-  if (managed?.launch.kind === 'acp-command') {
-    return {
-      command: managed.launch.command,
-      cwd: managed.workingDirPath,
-      autoRestart: true,
-      alias: managed.alias,
-    };
-  }
-
-  return null;
+  const profile = resolveProfileSnapshot(profileId);
+  const alias = getAgentProfileRegistry()?.getProfile(profileId)?.alias;
+  return profile && alias ? recipeFromProfileSnapshot(profile, alias) : null;
 }
 
-export function resolveProfileSnapshot(
-  profileId: string,
-): AgentProfileSnapshot | null {
-  const profile = getAgentProfileRegistry()?.getProfile(profileId);
-  if (!profile) return null;
-  return {
-    profileId: profile.id,
-    agentletId: profile.agentletId,
-    workingDirPath: profile.workingDirPath,
-    launch: profile.launch,
-  };
-}
+export { resolveProfileSnapshot } from './profile-snapshot.js';
 
 function applyWorkingDirectoryOverride(
   recipe: AcpBindingRecipe | null,
@@ -201,12 +189,7 @@ export function buildAcpWorkloadSpec(
   if (profile) {
     agentletId = profile.agentletId;
     cwd = profile.workingDirPath;
-    recipe = {
-      command: profile.launch.command,
-      cwd: profile.workingDirPath,
-      autoRestart: true,
-      alias: binding.alias,
-    };
+    recipe = recipeFromProfileSnapshot(profile, binding.alias);
   } else {
     agentletId = getSupervisedAgentletId();
     cwd = opts.cwd;
@@ -231,6 +214,7 @@ export function buildAcpWorkloadSpec(
           : []),
       ],
       initialPreferences: getProfileSessionPreferences(binding.profileId),
+      profileExecutionRevision: profile?.executionRevision ?? 0,
       binding,
       agentletId,
       ...(cwd !== undefined && { cwd }),
@@ -245,7 +229,7 @@ export async function* runAcpAgent(
 ): AsyncGenerator<AgentStreamEvent, void> {
   const { binding, overlay, signal, logger, handle } = opts;
   const canvasId = opts.canvasId ?? '';
-  const submission =
+  let submission =
     opts.submission ??
     createChatSubmission(
       opts.envelope,
@@ -290,17 +274,80 @@ export async function* runAcpAgent(
       opts.threadId,
       opts.envelope.user.text,
     );
-  const iterator = handle.run(submission, {
-    overlay,
-    signal,
-    logger,
-    onPrepared,
-  });
-  opts.onTurnStarted?.({
-    threadId: opts.threadId,
-    turnStartSeq: (
-      await agenetes.logMetadata(canvasAcpNamespace(canvasId), opts.threadId)
-    ).eventCount,
-  });
-  yield* iterator;
+  const inkToken =
+    opts.envelope.user.inputKind === 'ink-intent' ? randomUUID() : undefined;
+  if (inkToken) {
+    if (!canvasId) throw new Error('Ink intent requires a Space');
+    if (!submission.rendered) throw new Error('Ink input was not rendered');
+    submission = {
+      ...submission,
+      rendered: [
+        ...submission.rendered,
+        {
+          type: 'text',
+          text: renderInkReportEndpoint(opts.threadId, inkToken),
+        },
+      ],
+    };
+  }
+  const reportEvents: Exclude<AgentStreamEvent, { type: 'meta' | 'end' }>[] =
+    [];
+  let reported = false;
+  const finishInk = inkToken
+    ? beginActiveInkIntentTurn(
+        canvasId,
+        opts.threadId,
+        opts.inkIntentOwnerNodeId,
+        inkToken,
+        (result) => {
+          if (reported) return;
+          reported = true;
+          const toolCallId = `huabu-ink-${inkToken}`;
+          reportEvents.push(
+            {
+              type: 'tool_call',
+              data: {
+                toolCallId,
+                title: 'report_ink_intent',
+                internalToolName: 'report_ink_intent',
+                rawInput: result.report,
+                status: 'in_progress',
+              },
+            },
+            {
+              type: 'tool_call_update',
+              data: {
+                toolCallId,
+                status: 'completed',
+                rawOutput: JSON.stringify({
+                  ...result.report,
+                  renamed: result.renamed,
+                }),
+              },
+            },
+          );
+        },
+      )
+    : () => {};
+  signal?.addEventListener('abort', finishInk, { once: true });
+  try {
+    signal?.throwIfAborted();
+    const iterator = handle.run(submission, {
+      overlay,
+      signal,
+      logger,
+      onPrepared,
+      ...(inkToken ? { drainHostEvents: () => reportEvents.splice(0) } : {}),
+    });
+    opts.onTurnStarted?.({
+      threadId: opts.threadId,
+      turnStartSeq: (
+        await agenetes.logMetadata(canvasAcpNamespace(canvasId), opts.threadId)
+      ).eventCount,
+    });
+    yield* iterator;
+  } finally {
+    signal?.removeEventListener('abort', finishInk);
+    finishInk();
+  }
 }

@@ -9,6 +9,13 @@ import { markBasicAuthenticated } from '../../security/owner.js';
 
 import type { FastifyInstance } from 'fastify';
 
+const mocks = vi.hoisted(() => ({ getProfile: vi.fn(), discover: vi.fn() }));
+vi.mock('@agenetes/agentlet-host', () => ({
+  getAgentProfileRegistry: () => ({ getProfile: mocks.getProfile }),
+  getSupervisedAgentletId: () => 'supervised',
+  getAgentletGateway: () => ({ discoverHarnesses: mocks.discover }),
+}));
+
 let app: FastifyInstance | undefined;
 
 afterEach(async () => {
@@ -105,5 +112,47 @@ describe('ACP agent CLI route', () => {
     expect(response.statusCode).toBe(503);
     expect(response.json().code).toBe('harness_discovery_unavailable');
     expect(response.json()).not.toHaveProperty('agents');
+  });
+
+  it('queries the edited Profile machine and projects Custom for older catalogues', async () => {
+    mocks.getProfile.mockReturnValue({ agentletId: 'remote-machine' });
+    mocks.discover.mockResolvedValue({ harnesses: [] });
+    app = Fastify({ logger: false });
+    await app.register(createAcpAgentCliRoutes(), { prefix: '/api/acp' });
+    const response = await app.inject(
+      '/api/acp/agent-cli?profileId=remote-profile',
+    );
+    expect(response.statusCode).toBe(200);
+    expect(mocks.discover).toHaveBeenCalledWith('remote-machine', {
+      prepareWorkspaces: false,
+    });
+    expect(response.json().agents).toEqual([
+      expect.objectContaining({
+        id: 'custom',
+        capabilities: {
+          customLaunchCommand: 'supported',
+          autoApprove: 'unsupported',
+          modelOverride: 'unsupported',
+          sessionPersistence: 'unsupported',
+        },
+      }),
+    ]);
+  });
+
+  it('rejects invalid query fields and missing Profiles without detection', async () => {
+    const detect = vi.fn(async () => []);
+    mocks.getProfile.mockReturnValue(undefined);
+    app = Fastify({ logger: false });
+    await app.register(createAcpAgentCliRoutes(detect), { prefix: '/api/acp' });
+    expect((await app.inject('/api/acp/agent-cli?profileId=')).statusCode).toBe(
+      400,
+    );
+    expect(
+      (await app.inject('/api/acp/agent-cli?unexpected=value')).statusCode,
+    ).toBe(400);
+    expect(
+      (await app.inject('/api/acp/agent-cli?profileId=missing')).statusCode,
+    ).toBe(404);
+    expect(detect).not.toHaveBeenCalled();
   });
 });

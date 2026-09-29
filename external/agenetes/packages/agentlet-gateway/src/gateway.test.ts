@@ -160,6 +160,80 @@ afterEach(async () => {
 });
 
 describe('AgentletGateway', () => {
+  it('rejects structured launch before sending to a daemon without the versioned transport capability', async () => {
+    const { gateway, url } = await startHarness();
+    const client = await connect(url, {
+      role: 'agentlet',
+      queryId: 'machine-a',
+      token: 'token-a',
+      hello: agentletHello('machine-a'),
+    });
+    await expect(
+      gateway.spawnOnAgentlet('machine-a', {
+        appId: 'typed',
+        sessionSpec: { launch: { kind: 'acp-harness', harnessId: 'copilot' } },
+      }),
+    ).rejects.toMatchObject({ code: 'harness_launch_unsupported' });
+    expect(
+      client.messages.some(
+        (message) =>
+          'method' in message && message.method === ServerMethods.SPAWN,
+      ),
+    ).toBe(false);
+  });
+
+  it('routes structured launch unchanged only to a capable target daemon', async () => {
+    const { gateway, url } = await startHarness();
+    const hello = agentletHello('machine-a');
+    if ('params' in hello) {
+      (
+        hello.params as unknown as AgentletHelloParams
+      ).agentletProfile.capabilities.harnessLaunch = { version: 1 };
+    }
+    const client = await connect(url, {
+      role: 'agentlet',
+      queryId: 'machine-a',
+      token: 'token-a',
+      hello,
+    });
+    const params = {
+      appId: 'typed',
+      sessionSpec: {
+        launch: {
+          kind: 'acp-harness' as const,
+          harnessId: 'copilot',
+          options: { autoApprove: true },
+        },
+      },
+    };
+    const result = {
+      sessionId: 'typed-session',
+      pid: 456,
+      launchPlan: {
+        version: 1,
+        executable: 'copilot',
+        argv: ['--acp', '--allow-all'],
+        env: {},
+      },
+    };
+    client.socket.on('message', (data) => {
+      const message = JSON.parse(data.toString()) as JsonRpcMessage;
+      if (
+        'method' in message &&
+        message.method === ServerMethods.SPAWN &&
+        'id' in message
+      ) {
+        expect(message.params).toEqual(params);
+        client.socket.send(
+          JSON.stringify({ jsonrpc: '2.0', id: message.id, result }),
+        );
+      }
+    });
+    await expect(gateway.spawnOnAgentlet('machine-a', params)).resolves.toEqual(
+      result,
+    );
+  });
+
   it('surfaces session WebSocket closure as a connection lifecycle event', async () => {
     const { gateway, url } = await startHarness();
     const client = await connect(url, {
@@ -661,11 +735,117 @@ describe('AgentletGateway', () => {
       token: 'token-a',
       hello,
     });
+
     await expect(
       gateway.discoverHarnesses('machine-a', {}),
     ).rejects.toMatchObject({ code: 'harness_discovery_unsupported' });
   });
 
+  it('fails launch preview on old and disconnected daemons without sending requests', async () => {
+    const { gateway, url } = await startHarness();
+    const params = {
+      launch: { kind: 'acp-command' as const, command: 'agent --acp' },
+    };
+    await expect(
+      gateway.buildHarnessLaunch('machine-a', params),
+    ).rejects.toMatchObject({ code: 'agentlet_disconnected' });
+    const client = await connect(url, {
+      role: 'agentlet',
+      queryId: 'machine-a',
+      token: 'token-a',
+      hello: agentletHello('machine-a'),
+    });
+    await expect(
+      gateway.buildHarnessLaunch('machine-a', params),
+    ).rejects.toMatchObject({ code: 'harness_launch_preview_unsupported' });
+    expect(
+      client.messages.some(
+        (message) =>
+          'method' in message &&
+          message.method === ServerMethods.BUILD_HARNESS_LAUNCH,
+      ),
+    ).toBe(false);
+  });
+
+  it('routes preview to the explicit daemon and validates both request and reply', async () => {
+    const { gateway, url } = await startHarness();
+    const hello = agentletHello('machine-a');
+    (
+      hello as { params: AgentletHelloParams }
+    ).params.agentletProfile.capabilities.harnessLaunchPreview = { version: 1 };
+    const client = await connect(url, {
+      role: 'agentlet',
+      queryId: 'machine-a',
+      token: 'token-a',
+      hello,
+    });
+    const other = await connect(url, {
+      role: 'agentlet',
+      queryId: 'machine-b',
+      token: 'token-b',
+      hello: agentletHello('machine-b'),
+    });
+    let result: unknown = {
+      kind: 'exec',
+      executable: 'copilot',
+      argv: ['--acp', '--allow-all'],
+      env: {},
+    };
+    const requests: unknown[] = [];
+    client.socket.on('message', (data) => {
+      const message = JSON.parse(data.toString());
+      if (message.method === ServerMethods.BUILD_HARNESS_LAUNCH) {
+        requests.push(message.params);
+        client.socket.send(
+          JSON.stringify({ jsonrpc: '2.0', id: message.id, result }),
+        );
+      }
+    });
+    const params = {
+      launch: {
+        kind: 'acp-harness' as const,
+        harnessId: 'copilot',
+        options: { autoApprove: true },
+      },
+    };
+    await expect(
+      gateway.buildHarnessLaunch('machine-a', params),
+    ).resolves.toEqual(result);
+    expect(requests).toEqual([params]);
+    expect(
+      other.messages.some(
+        (message) =>
+          'method' in message &&
+          message.method === ServerMethods.BUILD_HARNESS_LAUNCH,
+      ),
+    ).toBe(false);
+    await expect(
+      gateway.buildHarnessLaunch('machine-a', {
+        launch: { ...params.launch, options: { argv: [] } },
+      } as never),
+    ).rejects.toThrow();
+    expect(requests).toHaveLength(1);
+    for (result of [
+      { kind: 'exec', executable: '', argv: [], env: {} },
+      { kind: 'exec', executable: 'copilot', argv: [1], env: {} },
+      { kind: 'exec', executable: 'copilot', argv: [], env: { VAR: 1 } },
+      { kind: 'exec', executable: 'copilot', argv: [], env: {}, shell: true },
+      { kind: 'shell', command: 'copilot --acp' },
+      null,
+    ]) {
+      await expect(
+        gateway.buildHarnessLaunch('machine-a', params),
+      ).rejects.toMatchObject({
+        code: 'invalid_harness_launch_preview_response',
+      });
+    }
+    result = { kind: 'shell', command: 'custom && echo trusted' };
+    await expect(
+      gateway.buildHarnessLaunch('machine-a', {
+        launch: { kind: 'acp-command', command: 'custom && echo trusted' },
+      }),
+    ).resolves.toEqual(result);
+  });
   it('rejects stale pending RPCs on replacement and routes new replies correctly', async () => {
     const { gateway, url } = await startHarness();
     const first = await connect(url, {

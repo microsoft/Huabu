@@ -3,21 +3,23 @@
 
 import { CommandProfileForm } from './CommandProfileForm';
 
-import type { AcpAgentCliInfo, AcpCommandProfileView } from '@huabu/shared';
+import type { AcpAgentCliInfo, AgentProfileView } from '@huabu/shared';
 
 type AgentProfileEditorProps = {
   detectedClis: AcpAgentCliInfo[];
   detectionLoaded: boolean;
   onClose: () => void;
   onSaved: () => Promise<void>;
-} & (
-  | { mode: 'create' }
-  | { mode: 'edit-command'; profile: AcpCommandProfileView }
-);
+} & ({ mode: 'create' } | { mode: 'edit-command'; profile: AgentProfileView });
 
 export function AgentProfileEditor(props: AgentProfileEditorProps) {
   return (
     <CommandProfileForm
+      key={
+        props.mode === 'create'
+          ? 'create'
+          : `${props.profile.id}:${props.profile.revision ?? 0}`
+      }
       editing={props.mode === 'create' ? null : props.profile}
       detectedClis={props.detectedClis}
       detectionLoaded={props.detectionLoaded}

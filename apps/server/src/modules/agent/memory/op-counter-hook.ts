@@ -33,6 +33,8 @@
  * "node-level granularity" semantics of the previous design).
  */
 
+import { getAgentDefaults } from '../agent-defaults.js';
+
 import { bumpOpCounter, enqueue as enqueueMemory } from './index.js';
 
 import type {
@@ -122,27 +124,27 @@ function extractWeight(request: FastifyRequest): number {
 
 // ─── Bump impl shared by both hook stages ─────────────────────────────────
 
-function safeBump(
+async function safeBump(
   canvasId: string,
   weight: number,
   url: string,
   logger: FastifyBaseLogger,
 ): Promise<void> {
-  return bumpOpCounter(canvasId, weight)
-    .then((shouldRun) => {
-      if (shouldRun) enqueueMemory(canvasId, logger);
-    })
-    .catch((err: unknown) => {
-      logger.warn(
-        {
-          canvasId,
-          weight,
-          url,
-          err: err instanceof Error ? err.message : String(err),
-        },
-        '[memory] op-counter hook failed (non-fatal)',
-      );
-    });
+  try {
+    if (getAgentDefaults().profileId !== 'huabu') return;
+    const shouldRun = await bumpOpCounter(canvasId, weight);
+    if (shouldRun) enqueueMemory(canvasId, logger);
+  } catch (err) {
+    logger.warn(
+      {
+        canvasId,
+        weight,
+        url,
+        err: err instanceof Error ? err.message : String(err),
+      },
+      '[memory] op-counter hook failed (non-fatal)',
+    );
+  }
 }
 
 // ─── Hook ──────────────────────────────────────────────────────────────────

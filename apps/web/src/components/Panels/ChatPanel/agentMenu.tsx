@@ -147,7 +147,7 @@ export function AgentMenuOptions({
             key={`mode:${m.mode}`}
             icon={m.icon}
             label={m.label}
-            hint="Huabu"
+            hint={t('settings.builtInPi')}
             current={isCurrent}
             disabled={busy}
             title={isCurrent ? currentRowTitle : undefined}

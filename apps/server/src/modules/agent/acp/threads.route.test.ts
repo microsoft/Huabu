@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   ensureSession: vi.fn(),
   control: vi.fn(),
   create: vi.fn(),
+  rememberModel: vi.fn(),
 }));
 
 vi.mock('@agenetes/acp-driver', () => ({
@@ -39,7 +40,7 @@ vi.mock('./profile-schema-cache.js', () => ({
 
 vi.mock('./profile-session-preferences.js', () => ({
   rememberProfileConfigPreference: vi.fn(),
-  rememberProfileSessionPreference: vi.fn(),
+  rememberProfileSessionPreference: mocks.rememberModel,
 }));
 
 vi.mock('../../workspace/paths.js', () => ({
@@ -68,6 +69,7 @@ afterEach(async () => {
   mocks.ensureSession.mockReset();
   mocks.control.mockReset();
   mocks.create.mockReset();
+  mocks.rememberModel.mockReset();
 });
 
 async function createApp(): Promise<FastifyInstance> {
@@ -154,6 +156,27 @@ describe('ACP cached capability route', () => {
       availableCommands: [{ name: 'review' }],
       commandsUpdatedAt: 11,
       sessionMeta: { updatedAt: 0 },
+    });
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
+
+  it('does not project a newer Profile cache into an already realized thread without metadata', async () => {
+    mocks.record = {
+      spec: { spec: { profileExecutionRevision: 0 } },
+      state: {},
+    };
+    mocks.profileCache = {
+      availableCommands: [{ name: 'new-profile-command' }],
+      commandsUpdatedAt: 10,
+    };
+    const server = await createApp();
+    const response = await server.inject(
+      '/api/acp/threads/thread-1/cached-meta?canvasId=canvas-1&profileId=profile-1',
+    );
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      source: 'thread',
+      availableCommands: [],
     });
     expect(mocks.create).not.toHaveBeenCalled();
   });
@@ -296,5 +319,37 @@ describe('ACP cached capability route', () => {
     expect(response.statusCode).toBe(400);
     expect(response.json()).toMatchObject({ code: 'validation_failed' });
     expect(mocks.realize).not.toHaveBeenCalled();
+  });
+
+  it('passes the frozen execution revision when remembering a successful live model control', async () => {
+    const binding = {
+      kind: 'external',
+      alias: 'Agent',
+      profileId: 'profile-fixed',
+    };
+    mocks.realize.mockResolvedValue({
+      binding,
+      fixedTarget: null,
+      spec: { spec: { profileExecutionRevision: 3 } },
+      handle: { control: mocks.control },
+    });
+    mocks.ensureSession.mockResolvedValue({
+      profileId: 'profile-fixed',
+      configOptions: [],
+    });
+    mocks.control.mockResolvedValue({ ok: true });
+    const server = await createApp();
+    const response = await server.inject({
+      method: 'POST',
+      url: '/api/acp/threads/thread-1/model',
+      payload: { modelId: 'new-model', canvasId: 'canvas-1', binding },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(mocks.rememberModel).toHaveBeenCalledWith(
+      'profile-fixed',
+      'model',
+      'new-model',
+      3,
+    );
   });
 });

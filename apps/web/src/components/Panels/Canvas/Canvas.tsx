@@ -880,10 +880,11 @@ const CanvasContent: React.FC<CanvasProps> = ({
       });
 
       if (pendingNodeType === 'question') {
-        createQuestionNodeAndCompose({
+        void createQuestionNodeAndCompose({
           addNode,
           placementPoint: position,
           canvasId,
+          isCurrent: () => useToolStore.getState().pendingNodeType === null,
         });
       } else {
         addNode({

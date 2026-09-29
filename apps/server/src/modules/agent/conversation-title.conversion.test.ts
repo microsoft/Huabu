@@ -85,6 +85,7 @@ forEachProductProfile((profile, label) => {
                 position: { x: 0, y: 0 },
                 data: {
                   threadId,
+                  agentBinding: { kind: 'internal' },
                   content: 'First user prompt',
                   label: 'Question',
                   labelSource: 'auto',

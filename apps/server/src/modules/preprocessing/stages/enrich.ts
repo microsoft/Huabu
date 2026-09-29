@@ -53,12 +53,16 @@ export async function enrich(
       return { skipped: true };
     }
 
-    const result = await provider.generateContentMeta(content, {
-      title: normalized?.label ?? resolved.title,
-      needLabel: needsLabel,
-      needSummary: needsSummary,
-      needKeywords: needsKeywords,
-    });
+    const result = await provider.generateContentMeta(
+      content,
+      {
+        title: normalized?.label ?? resolved.title,
+        needLabel: needsLabel,
+        needSummary: needsSummary,
+        needKeywords: needsKeywords,
+      },
+      { canvasId },
+    );
 
     if (!result) {
       return { skipped: true };
@@ -82,7 +86,9 @@ export async function enrich(
     } else if (nodeType === 'frame') {
       const childLabels = resolved.childLabels;
       if (childLabels && childLabels.length > 0) {
-        const label = await provider.generateFrameLabel(childLabels);
+        const label = await provider.generateFrameLabel(childLabels, {
+          canvasId,
+        });
         return label ? { suggestedLabel: label } : { skipped: true };
       }
     }

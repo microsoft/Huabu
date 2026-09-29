@@ -10,14 +10,16 @@ import { ProfileFormFooter } from './ProfileFormFooter';
 interface ProfileEditActionsProps {
   saving: boolean;
   saveDisabled?: boolean;
+  saveLabel?: string;
   onCancel: () => void;
   onSave: () => void;
 }
 
-/** Canonical actions shared by every Profile edit form. */
+/** Canonical actions shared by Profile creation and editing. */
 export function ProfileEditActions({
   saving,
   saveDisabled = false,
+  saveLabel,
   onCancel,
   onSave,
 }: ProfileEditActionsProps) {
@@ -41,7 +43,9 @@ export function ProfileEditActions({
         onClick={onSave}
         disabled={saving || saveDisabled}
       >
-        {saving ? t('settings.saving') : t('settings.saveChanges')}
+        {saving
+          ? t('settings.saving')
+          : (saveLabel ?? t('settings.saveChanges'))}
       </Button>
     </ProfileFormFooter>
   );

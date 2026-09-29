@@ -11,8 +11,12 @@ import { getElectronBridge } from '@/hooks/useElectron';
 import { useAcpProfilesStore } from '@/store/acpProfilesStore';
 import { useDeploymentReadinessStore } from '@/store/deploymentReadinessStore';
 import { useLLMStore } from '@/store/llmStore';
-import { useSettingsUiStore } from '@/store/settingsUiStore';
+import {
+  useSettingsUiStore,
+  type SettingsTabId,
+} from '@/store/settingsUiStore';
 
+import { AgentDefaultsSettings } from './agent-profiles/AgentDefaultsSettings';
 import {
   ExternalAgentsSettings,
   type ExternalAgentsNavigation,
@@ -25,7 +29,7 @@ import { IntegrationsSettings } from './sections/IntegrationsSettings';
 import { LLMSettings } from './sections/LLMSettings';
 
 /** Identifiers for the settings tabs (left-nav order). */
-type SettingsTab = 'general' | 'huabuAgent' | 'agents';
+type SettingsTab = SettingsTabId;
 
 interface TabDef {
   id: SettingsTab;
@@ -54,7 +58,7 @@ interface SettingsModalProps {
  *
  * Each tab renders the existing self-contained `*Settings` components:
  *  - **General** — language and canvas display preferences
- *  - **Huabu Agent** — chat LLM (required) + optional capabilities
+ *  - **Huabu Agent** — global defaults, backend-specific models and optional capabilities
  *    (image generation, web search, YouTube transcripts)
  *  - **External Agents** — ACP profile management
  *
@@ -68,10 +72,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const { t } = useTranslation();
   const llmInit = useLLMStore((s) => s.init);
   const acpInit = useAcpProfilesStore((s) => s.init);
+  const defaultProfileId = useAcpProfilesStore(
+    (s) => s.agentDefaults?.profileId,
+  );
   const loadDeploymentReadiness = useDeploymentReadinessStore((s) => s.load);
   const requestedTab = useSettingsUiStore((s) => s.requestedTab);
   const clearRequestedTab = useSettingsUiStore((s) => s.clearRequestedTab);
   const [activeTab, setActiveTab] = useState<SettingsTab>(TABS[0].id);
+  const showBuiltIn = activeTab === 'builtIn' || defaultProfileId === 'huabu';
   const [externalAgentsNavigation, setExternalAgentsNavigation] =
     useState<ExternalAgentsNavigation | null>(null);
   const titleId = useId();
@@ -102,6 +110,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   }, [isOpen, requestedTab, clearRequestedTab]);
 
   useEffect(() => {
+    if (!isOpen && activeTab === 'builtIn') setActiveTab('huabuAgent');
+  }, [isOpen, activeTab]);
+
+  useEffect(() => {
     if (!isOpen) return;
     void loadDeploymentReadiness();
   }, [isOpen, loadDeploymentReadiness]);
@@ -109,9 +121,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   // Load each registry only when its owning tab is visible.
   useEffect(() => {
     if (!isOpen) return;
-    if (activeTab === 'huabuAgent') void llmInit();
+    if ((activeTab === 'huabuAgent' || activeTab === 'builtIn') && showBuiltIn)
+      void llmInit();
     if (activeTab === 'agents') void acpInit();
-  }, [isOpen, activeTab, llmInit, acpInit]);
+  }, [isOpen, activeTab, showBuiltIn, llmInit, acpInit]);
 
   // Close on Escape.
   useEffect(() => {
@@ -141,7 +154,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const contentTitle =
     activeTab === 'agents' && externalAgentsNavigation
       ? externalAgentsNavigation.title
-      : t(activeLabelKey);
+      : activeTab === 'builtIn'
+        ? t('settings.builtInPi')
+        : t(activeLabelKey);
 
   // In the Electron shell keep the custom title bar (`WindowChrome`)
   // fully visible above the modal: offset the overlay below the
@@ -183,7 +198,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             {t('settings.title')}
           </h2>
           {TABS.map(({ id, labelKey }) => {
-            const active = id === activeTab;
+            const active =
+              id === activeTab ||
+              (id === 'huabuAgent' && activeTab === 'builtIn');
             return (
               <button
                 key={id}
@@ -257,9 +274,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <InkOcrSettings />
               </>
             )}
-            {activeTab === 'huabuAgent' && (
+            {(activeTab === 'huabuAgent' || activeTab === 'builtIn') && (
               <>
-                <LLMSettings />
+                {activeTab === 'huabuAgent' && <AgentDefaultsSettings />}
+                {showBuiltIn && <LLMSettings />}
                 <ImageProviderSettings />
                 <IntegrationsSettings />
               </>

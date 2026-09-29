@@ -40,6 +40,71 @@ afterEach(() => {
 });
 
 describe('explicit ACP placement', () => {
+  it('forwards a persisted structured plan and retains it when reusing the live process', async () => {
+    const launch = {
+      kind: 'acp-harness' as const,
+      harnessId: 'copilot',
+      options: { autoApprove: true },
+    };
+    const launchPlan = {
+      version: 1 as const,
+      executable: 'copilot',
+      argv: ['--acp', '--allow-all'],
+      env: {},
+    };
+    const spawnOnAgentlet = vi.fn(async () => ({
+      sessionId: 'structured-session',
+      pid: 404,
+      launchPlan,
+    }));
+    host.gateway = {
+      getAgentlet: () => ({ agentletId: 'machine-a', status: 'connected' }),
+      getSession: () => ({ status: 'connected' }),
+      spawnOnAgentlet,
+    };
+    const structured = {
+      alias: 'Typed',
+      autoRestart: true,
+      launch,
+      launchPlan,
+    };
+    const first = await ensureAgentForThread('machine-a', 'typed', structured);
+    expect(spawnOnAgentlet).toHaveBeenCalledWith('machine-a', {
+      appId: 'typed',
+      sessionSpec: {
+        launch,
+        launchPlan,
+        cwd: undefined,
+        autoRestart: true,
+        idleTimeoutSecs: 600,
+        env: undefined,
+      },
+    });
+    expect(first.launchPlan).toEqual(launchPlan);
+    expect(
+      await ensureAgentForThread('machine-a', 'typed', structured),
+    ).toEqual(first);
+    expect(spawnOnAgentlet).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not silently accept a structured spawn response without a resolved plan', async () => {
+    host.gateway = {
+      getAgentlet: () => ({ agentletId: 'machine-a', status: 'connected' }),
+      getSession: () => ({ status: 'connected' }),
+      spawnOnAgentlet: vi.fn(async () => ({
+        sessionId: 'wrong-daemon',
+        pid: 404,
+      })),
+    };
+    await expect(
+      ensureAgentForThread('machine-a', 'typed', {
+        alias: 'Typed',
+        autoRestart: true,
+        launch: { kind: 'acp-harness', harnessId: 'copilot' },
+      }),
+    ).rejects.toMatchObject({ code: 'spawn_failed' });
+  });
+
   it('isolates live session registry entries by placement and thread', () => {
     const entryA = {
       agentletId: 'machine-a',

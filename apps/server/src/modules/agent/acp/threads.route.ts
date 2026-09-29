@@ -246,8 +246,8 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
         canvasAcpNamespace(canvasId),
         threadId,
       );
-      const persistedMeta = record?.state?.metadata;
-      if (persistedMeta) {
+      if (record) {
+        const persistedMeta = record.state?.metadata ?? {};
         return {
           source: 'thread',
           availableCommands: persistedMeta.availableCommands ?? [],
@@ -439,6 +439,7 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
       resolved.entry.profileId,
       'model',
       parsed.data.modelId,
+      resolved.realized.spec.spec.profileExecutionRevision ?? 0,
     );
     return { ok: true as const, modelId: parsed.data.modelId };
   });
@@ -497,6 +498,7 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
       resolved.entry.configOptions,
       parsed.data.configOptionId,
       parsed.data.value,
+      resolved.realized.spec.spec.profileExecutionRevision ?? 0,
     );
     return {
       ok: true as const,

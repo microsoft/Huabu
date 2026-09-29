@@ -1,6 +1,7 @@
 import {
   agentSpecSchema,
   sessionIdSchema,
+  harnessLaunchPlanSchema,
   type AgentSubmission,
 } from '@agenetes/protocol';
 import { defineDriver } from '@agenetes/runtime';
@@ -43,6 +44,12 @@ const recipeResolverSchema = z.custom<
 >((value) => typeof value === 'function', 'Invalid ACP recipe resolver');
 
 export const acpSpecSchema = agentSpecSchema.extend({
+  profileExecutionRevision: z
+    .number()
+    .int()
+    .nonnegative()
+    .max(Number.MAX_SAFE_INTEGER)
+    .optional(),
   initialPreferences: z
     .object({
       model: z.string().optional(),
@@ -64,6 +71,7 @@ export const acpSpecSchema = agentSpecSchema.extend({
 export const acpDurableStateSchema = z.object({
   sessionId: sessionIdSchema.optional(),
   initialPreambleDelivered: z.boolean(),
+  harnessLaunchPlan: harnessLaunchPlanSchema.optional(),
 });
 
 export function acpDriverFactory<
@@ -71,7 +79,7 @@ export function acpDriverFactory<
 >(config: AcpDriverFactoryConfig = DEFAULT_RUNTIME_POLICY): MountedAgentDriver {
   return defineDriver({
     schemaVersion: 1,
-    workloadTypes: ['Deployment'],
+    workloadTypes: ['Job', 'Deployment'],
     specSchema: acpSpecSchema,
     stateSchema: acpDurableStateSchema,
     initialState: () => ({ initialPreambleDelivered: false }),

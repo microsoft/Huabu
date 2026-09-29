@@ -978,7 +978,7 @@ async function executePreparedOnServerAlreadyLocked(
       const moved = input.agentNodeMoveState?.get(node.id);
       return moved
         ? { ...node, data: preserveAgentNodeOwnedData(node.data, moved) }
-        : initializeAgentNodeCreationAlreadyLocked(canvasId, node);
+        : initializeAgentNodeCreationAlreadyLocked(canvasId, node, false, true);
     }),
   );
   const threadOwners = new Set<string>();

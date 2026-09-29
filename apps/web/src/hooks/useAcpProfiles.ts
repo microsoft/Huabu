@@ -33,9 +33,8 @@ export interface UseAcpProfilesResult {
   /** Latest agentlet snapshot, or `null` while the first fetch is in flight. */
   agentlet: AcpAgentletStatus | null;
   /**
-   * `true` once the initial fetch has resolved at least once. Consumers
-   * should treat the profile list as authoritative only after this flips
-   * — otherwise a stale binding may be cleared prematurely on mount.
+   * `true` once the initial fetch has succeeded at least once. Missing
+   * Profiles never authorize substituting a conversation's selected identity.
    */
   loaded: boolean;
   /** Last error from a fetch, or `null`. Cleared on the next successful fetch. */

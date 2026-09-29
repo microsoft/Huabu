@@ -19,11 +19,13 @@
  * keeps its slot (just hidden) in read-only mode.
  */
 
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, Settings } from 'lucide-react';
 import { useCallback, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { AgentIcon } from '@/components/Common/AgentIcon';
+import { Button } from '@/components/Common/Button';
+import { useSettingsUiStore } from '@/store/settingsUiStore';
 import { resolveQuestionAgentPresentation } from '@/utils/questionAgentPresentation';
 
 import {
@@ -121,6 +123,7 @@ export const AgentSelector = ({
   fallbackIcon,
 }: AgentSelectorProps) => {
   const { t } = useTranslation();
+  const openSettings = useSettingsUiStore((state) => state.open);
   const [isOpen, setIsOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const justDismissedRef = useRef(false);
@@ -206,6 +209,18 @@ export const AgentSelector = ({
           )}
         />
       </button>
+      {currentBinding.kind === 'internal' && (
+        <Button
+          variant="ghost"
+          size="sm"
+          iconOnly
+          title={t('settings.builtInPiConfigure')}
+          aria-label={t('settings.builtInPiConfigure')}
+          onClick={() => openSettings('builtIn')}
+        >
+          <Settings size={12} />
+        </Button>
+      )}
       {editable && isOpen && (
         <Popover
           position={computePosition()}

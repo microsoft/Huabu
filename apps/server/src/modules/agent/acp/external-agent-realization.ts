@@ -128,6 +128,7 @@ async function ensureSessionFromCanonicalSpec(
     threadId: spec.threadId,
     binding: spec.spec.binding,
     namespace: spec.namespace,
+    profileExecutionRevision: spec.spec.profileExecutionRevision ?? 0,
     ...(spec.spec.cwd !== undefined && { cwd: spec.spec.cwd }),
     ...(spec.spec.recipe !== undefined && { recipe: spec.spec.recipe }),
     ...(env !== undefined && { env }),
@@ -298,6 +299,7 @@ export class ExternalAgentRealizationService {
       this.dependencies.subscribeProfileCache(
         options.threadId,
         binding.profileId,
+        spec.spec.profileExecutionRevision ?? 0,
       );
       this.dependencies.subscribeTitles?.(
         options.canvasId ?? '',
@@ -390,6 +392,7 @@ export class ExternalAgentRealizationService {
     this.dependencies.subscribeProfileCache(
       options.threadId,
       binding.profileId,
+      spec.spec.profileExecutionRevision ?? 0,
     );
     this.dependencies.subscribeTitles?.(
       options.canvasId ?? '',

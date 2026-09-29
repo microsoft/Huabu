@@ -13,7 +13,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createAgentProfileRegistry } from './create.js';
 import { FileAgentProfileRegistryStore } from './store.js';
 
-import type { AgentProfile } from './types.js';
+import type { AcpCommandProfile } from './types.js';
 
 const directories: string[] = [];
 function directory(): string {
@@ -26,7 +26,7 @@ afterEach(() => {
   for (const path of directories.splice(0))
     rmSync(path, { recursive: true, force: true });
 });
-const profile: AgentProfile = {
+const profile: AcpCommandProfile = {
   id: 'stable',
   alias: 'User edited',
   agentletId: 'target',

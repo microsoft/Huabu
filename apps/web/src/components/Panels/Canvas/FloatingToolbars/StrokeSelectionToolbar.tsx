@@ -42,7 +42,10 @@ import {
 } from '@/hooks/agentTurnController';
 import { isOutsideCanvasInteraction } from '@/hooks/shortcuts/isEditableTarget';
 import { useIsNotMouse } from '@/hooks/useInputMode';
-import { useAcpProfilesStore } from '@/store/acpProfilesStore';
+import {
+  loadDefaultAgentBinding,
+  useAcpProfilesStore,
+} from '@/store/acpProfilesStore';
 import useCanvasStore from '@/store/canvasStore';
 import {
   selectThreadBinding,
@@ -147,6 +150,9 @@ export const StrokeSelectionToolbar = () => {
     targetThreadId ? selectThreadLastAction(state, targetThreadId) : null,
   );
   const agentProfiles = useAcpProfilesStore((state) => state.profiles);
+  const defaultProfileId = useAcpProfilesStore(
+    (state) => state.agentDefaults?.profileId,
+  );
 
   const currentLassoIdentity = useCallback(
     () =>
@@ -302,6 +308,16 @@ export const StrokeSelectionToolbar = () => {
             },
           };
         } else {
+          const binding = await loadDefaultAgentBinding();
+          if (
+            preparationRef.current?.token !== preparationToken ||
+            currentLassoIdentity() !== lassoIdentity ||
+            useCanvasStore.getState().nodes !== canvas.nodes
+          ) {
+            throw new Error(
+              'Canvas selection changed while preparing the Ink Agent. Submit again.',
+            );
+          }
           const selectedNodes = canvas.nodes.filter((node) => node.selected);
           const nodeBounds = getSelectionBounds(selectedNodes, canvas.nodes);
           const currentStrokeBounds =
@@ -324,18 +340,19 @@ export const StrokeSelectionToolbar = () => {
             nodeType: 'question',
             side: 'bottom',
           });
+          const mode = binding.kind === 'internal' ? 'operate' : 'ask';
           const created = createQuestionNode({
             addNode,
             placementPoint,
             canvasId: canvas.canvasId,
-            binding: { kind: 'internal' },
-            mode: 'operate',
+            binding,
+            mode,
             label: 'New ink request',
             pendingInkIntentLabel: true,
           });
           attempt = {
             identity,
-            mode: 'operate',
+            mode,
             groundingVisual,
             session: {
               canvasId: canvas.canvasId,
@@ -511,9 +528,14 @@ export const StrokeSelectionToolbar = () => {
           };
     }
     if (!candidate.target) {
+      const name =
+        defaultProfileId === 'huabu'
+          ? t('settings.builtInPi')
+          : (agentProfiles.find((profile) => profile.id === defaultProfileId)
+              ?.alias ?? t('toolbar.defaultInkAgentTarget'));
       return {
-        label: t('toolbar.newInkAgentTarget'),
-        description: t('toolbar.newInkAgentTargetDescription'),
+        label: t('toolbar.newInkAgentTarget', { name }),
+        description: t('toolbar.newInkAgentTargetDescription', { name }),
       };
     }
     const presentation = resolveQuestionAgentPresentation({
@@ -530,7 +552,14 @@ export const StrokeSelectionToolbar = () => {
         name: presentation.alias,
       }),
     };
-  }, [agentProfiles, cachedTargetBinding, cachedTargetMode, candidate, t]);
+  }, [
+    agentProfiles,
+    defaultProfileId,
+    cachedTargetBinding,
+    cachedTargetMode,
+    candidate,
+    t,
+  ]);
 
   return (
     <CanvasFloatingPopover

@@ -3,11 +3,21 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+const getDefaults = vi.hoisted(() => vi.fn());
+vi.mock('@/components/Common/Toast', () => ({ toast: vi.fn() }));
+vi.mock('@/api/agentDefaults', () => ({
+  getAgentDefaults: getDefaults,
+}));
+
+import { toast } from '@/components/Common/Toast';
+
 import useCanvasStore from './canvasStore';
+import { useChatStore } from './chatStore';
 import { usePanelStore } from './panelStore';
 import {
   closeActivePreviewNode,
   openChat,
+  openNewChat,
   openPreviewNode,
 } from './previewWorkspace/actions';
 import { createEmptyWorkspace } from './previewWorkspace/model';
@@ -42,6 +52,12 @@ function resetStore() {
 
 beforeEach(() => {
   vi.useFakeTimers();
+  vi.mocked(toast).mockClear();
+  getDefaults.mockResolvedValue({
+    defaults: { profileId: 'global-profile', functionalModel: '' },
+    selectionState: 'available',
+    modelCapability: 'unknown',
+  });
   resetStore();
 });
 
@@ -51,8 +67,8 @@ afterEach(() => {
 });
 
 describe('post-create editing', () => {
-  it('creates and focuses Chat without acting as a panel toggle', () => {
-    const tabId = openChat();
+  it('creates and focuses Chat without acting as a panel toggle', async () => {
+    const tabId = await openChat();
     const tab = usePreviewWorkspaceStore.getState().workspace.tabs[tabId];
 
     expect(tab.target.kind).toBe('chat');
@@ -63,7 +79,7 @@ describe('post-create editing', () => {
       },
     });
 
-    openChat();
+    await openChat();
 
     expect(usePanelStore.getState().isRightCollapsed).toBe(false);
     expect(
@@ -71,7 +87,8 @@ describe('post-create editing', () => {
     ).toHaveLength(1);
   });
 
-  it('focuses the most recently active existing Chat', () => {
+  it('focuses the most recently active existing Chat', async () => {
+    getDefaults.mockClear();
     const preview = usePreviewWorkspaceStore.getState();
     const first = preview.openPreviewTarget({
       kind: 'chat',
@@ -90,13 +107,48 @@ describe('post-create editing', () => {
       nodeId: 'node-note',
     });
 
-    expect(openChat()).toBe(first);
+    expect(await openChat()).toBe(first);
     expect(
       usePreviewWorkspaceStore.getState().workspace.groups[0].activeTabId,
     ).toBe(first);
     expect(
       usePreviewWorkspaceStore.getState().workspace.tabs[second],
     ).toBeDefined();
+    expect(getDefaults).not.toHaveBeenCalled();
+  });
+
+  it('prompts to configure defaults without creating a fallback Chat', async () => {
+    getDefaults.mockResolvedValueOnce({
+      defaults: { profileId: null, functionalModel: '' },
+      selectionState: 'unconfigured',
+      modelCapability: 'unknown',
+    });
+    const threads = useChatStore.getState().threadsById;
+    expect(await openChat()).toBe('');
+    expect(useChatStore.getState().threadsById).toBe(threads);
+    expect(usePreviewWorkspaceStore.getState().workspace.tabs).toEqual({});
+    expect(toast).toHaveBeenCalledWith(expect.any(String), { tone: 'danger' });
+    expect(usePanelStore.getState().isRightCollapsed).toBe(true);
+  });
+
+  it('does not open a delayed Chat in a different Canvas or changed workspace', async () => {
+    let resolve!: (value: unknown) => void;
+    getDefaults.mockReturnValueOnce(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    const threads = useChatStore.getState().threadsById;
+    const pending = openNewChat();
+    openPreviewNode('node-note');
+    resolve({
+      defaults: { profileId: 'global-profile', functionalModel: '' },
+      selectionState: 'available',
+      modelCapability: 'unknown',
+    });
+    expect(await pending).toBe('');
+    expect(useChatStore.getState().threadsById).toBe(threads);
+    expect(expandedNodeId()).toBe('node-note');
   });
 
   it('opens the right workspace with an explicitly expanded node', () => {

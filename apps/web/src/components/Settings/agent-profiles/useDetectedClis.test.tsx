@@ -33,8 +33,14 @@ vi.mock('@/api/acp', () => ({
   updateAcpProfile: vi.fn(),
 }));
 
-function Harness({ enabled }: { enabled: boolean }) {
-  const { detectedClis, loaded } = useDetectedClis(enabled);
+function Harness({
+  enabled,
+  profileId,
+}: {
+  enabled: boolean;
+  profileId?: string;
+}) {
+  const { detectedClis, loaded } = useDetectedClis(enabled, profileId);
   return (
     <span>
       {loaded ? 'loaded' : 'idle'}:{detectedClis.length}
@@ -135,5 +141,58 @@ describe('useDetectedClis', () => {
     await act(async () => resolveOld?.({ agents: [] }));
 
     expect(container.textContent).toBe('loaded:1');
+  });
+
+  it('reloads for the edited Profile target and fences responses from the previous machine', async () => {
+    let resolveOld:
+      | ((value: { agents: AcpAgentCliInfo[] }) => void)
+      | undefined;
+    apiMocks.listAgentClis
+      .mockImplementationOnce(
+        () =>
+          new Promise<{ agents: AcpAgentCliInfo[] }>((resolve) => {
+            resolveOld = resolve;
+          }),
+      )
+      .mockResolvedValueOnce({ agents: [] });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () =>
+      root?.render(<Harness enabled profileId="machine-a-profile" />),
+    );
+    await act(async () =>
+      root?.render(<Harness enabled profileId="machine-b-profile" />),
+    );
+    await act(async () => resolveOld?.({ agents: [detectedAgent] }));
+
+    expect(apiMocks.listAgentClis).toHaveBeenNthCalledWith(
+      1,
+      'machine-a-profile',
+    );
+    expect(apiMocks.listAgentClis).toHaveBeenNthCalledWith(
+      2,
+      'machine-b-profile',
+    );
+    expect(container.textContent).toBe('loaded:0');
+  });
+
+  it('clears a successful target catalogue when the next target is offline', async () => {
+    apiMocks.listAgentClis
+      .mockResolvedValueOnce({ agents: [detectedAgent] })
+      .mockRejectedValueOnce(new Error('Target offline'));
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => root?.render(<Harness enabled />));
+    expect(container.textContent).toBe('loaded:1');
+    await act(async () =>
+      root?.render(<Harness enabled profileId="remote-profile" />),
+    );
+    expect(container.textContent).toBe('loaded:0');
+    expect(apiMocks.listAgentClis).toHaveBeenLastCalledWith('remote-profile');
+    expect(apiMocks.toast).toHaveBeenCalledWith('Target offline', {
+      tone: 'danger',
+    });
   });
 });

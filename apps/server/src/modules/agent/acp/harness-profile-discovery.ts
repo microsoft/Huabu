@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { CUSTOM_COMMAND_WRAPPER_ID } from '@agentlet/protocol';
+
 import type {
   AgentProfile,
   AgentProfileRegistry,
@@ -96,12 +98,14 @@ interface DiscoveryOptions {
   gateway: DiscoveryGateway;
   getRegistry: () => ProfileRegistry | null;
   log: Pick<FastifyBaseLogger, 'info' | 'warn'>;
+  onProfilesDiscovered?: (profiles: AgentProfile[]) => void;
 }
 
 export function registerHarnessProfileDiscovery({
   gateway,
   getRegistry,
   log,
+  onProfilesDiscovered,
 }: DiscoveryOptions): () => void {
   const generations = new Map<string, number>();
   let disposed = false;
@@ -115,6 +119,7 @@ export function registerHarnessProfileDiscovery({
     if (!registry) throw new Error('Agent Profile registry is not ready');
 
     for (const harness of result.harnesses) {
+      if (harness.id === CUSTOM_COMMAND_WRAPPER_ID) continue;
       for (const diagnostic of harness.diagnostics ?? []) {
         log.warn(
           { agentletId, harnessId: harness.id, ...diagnostic },
@@ -130,31 +135,55 @@ export function registerHarnessProfileDiscovery({
         continue;
       }
       // No await between the lookup and the synchronous registry commit.
-      const existing = registry.listProfiles().find((profile) => {
+      const profiles = registry.listProfiles();
+      const typed = harness.launchVersion === 1;
+      const existing = profiles.find((profile) => {
         const source = parseSource(profile.customData?.[SOURCE_KEY]);
         return (
           profile.agentletId === agentletId &&
           source?.agentletId === agentletId &&
-          source.harnessId === harness.id
+          source.harnessId === harness.id &&
+          (!typed ||
+            (profile.launch.kind === 'acp-harness' &&
+              profile.launch.harnessId === harness.id))
         );
       });
       if (existing) continue;
-      const profile = registry.createProfile({
-        launchKind: 'acp-command',
+      const defaultAlias = `${harness.displayName} (${agentletId})`;
+      const common = {
         agentletId,
-        alias: `${harness.displayName} (${agentletId})`,
+        alias:
+          typed && profiles.some((profile) => profile.alias === defaultAlias)
+            ? `${defaultAlias} [${harness.id}]`
+            : defaultAlias,
         workingDirPath: harness.workingDirPath,
-        command: [harness.binary, ...harness.acpArgs].join(' '),
         metadata: { cliId: harness.id },
         customData: {
           [SOURCE_KEY]: { version: 1, agentletId, harnessId: harness.id },
         },
-      });
+      };
+      const profile = registry.createProfile(
+        typed
+          ? {
+              ...common,
+              launchKind: 'acp-harness',
+              harnessId: harness.id,
+              ...(harness.capabilities?.autoApprove === 'supported'
+                ? { options: { autoApprove: true } }
+                : {}),
+            }
+          : {
+              ...common,
+              launchKind: 'acp-command',
+              command: [harness.binary, ...harness.acpArgs].join(' '),
+            },
+      );
       log.info(
         { agentletId, harnessId: harness.id, profileId: profile.id },
         '[acp] automatically created Profile',
       );
     }
+    onProfilesDiscovered?.(registry.listProfiles());
   };
 
   const onChanged: Parameters<DiscoveryGateway['onAgentletsChanged']>[0] = ({

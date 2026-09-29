@@ -41,9 +41,12 @@ beforeEach(() => {
 describe('trusted harness discovery', () => {
   it('returns the complete stable catalogue without creating workspaces by default', async () => {
     const { harnesses } = await discoverHarnesses()
-    expect(harnesses.map((entry) => entry.id)).toEqual(KNOWN_CLIS.map((entry) => entry.id))
-    expect(harnesses).toHaveLength(10)
-    expect(harnesses.every((entry) => entry.installed)).toBe(true)
+    expect(harnesses.map((entry) => entry.id)).toEqual([...KNOWN_CLIS.map((entry) => entry.id), 'custom'])
+    expect(harnesses).toHaveLength(11)
+    expect(harnesses.filter((entry) => entry.id !== 'custom').every((entry) => entry.installed)).toBe(true)
+    expect(harnesses.filter((entry) => entry.id !== 'custom').every((entry) => entry.launchVersion === 1)).toBe(true)
+    expect(harnesses.at(-1)).toMatchObject({ id: 'custom', installed: false })
+    expect(mocks.probe.mock.calls.some(([, args]) => args.includes('custom'))).toBe(false)
     expect(harnesses.every((entry) => !('skipVersionProbe' in entry))).toBe(true)
     expect(harnesses.every((entry) => !entry.workingDirPath)).toBe(true)
     expect(harnesses[0]).toMatchObject({ executablePath: '/usr/local/bin/copilot', version: '1.2.3' })
@@ -72,6 +75,7 @@ describe('trusted harness discovery', () => {
     })
     const { harnesses } = await discoverHarnesses({ prepareWorkspaces: true })
     expect(harnesses.every((entry) => !entry.installed)).toBe(true)
+    expect(harnesses.every((entry) => entry.launchVersion === undefined)).toBe(true)
     expect(harnesses[0]?.diagnostics?.[0]?.code).toBe('binary_missing')
     expect(harnesses.find((entry) => entry.id === 'gemini')?.diagnostics?.[0]?.code).toBe('lookup_failed')
     expect(harnesses.find((entry) => entry.id === 'qwen')?.diagnostics?.[0]?.code).toBe('lookup_failed')
@@ -99,10 +103,28 @@ describe('trusted harness discovery', () => {
       stdout: file === 'where.exe' ? `C:\\Tools\\${args[0]}.exe\r\nD:\\Other\\${args[0]}.exe\r\n` : '2.0\r\n',
     }))
     expect((await discoverHarnesses()).harnesses[0]).toMatchObject({
-      executablePath: 'C:\\Tools\\copilot.exe', installed: true, version: '2.0',
+      executablePath: 'C:\\Tools\\copilot.exe', installed: true, version: '2.0', launchVersion: 1,
     })
     expect(mocks.probe).toHaveBeenCalledWith('C:\\Tools\\copilot.exe', ['--version'], expect.objectContaining({ shell: false }))
   })
+
+  it.each(['cmd', 'CMD', 'bat', 'BAT', 'ps1', ''])(
+    'preserves Windows shim discovery without opting %s into shell-free launch', async (extension) => {
+      mocks.platform.mockReturnValue('win32')
+      mocks.probe.mockImplementation(async (file: string, args: string[]) => ({
+        stdout: file === 'where.exe'
+          ? `C:\\Tools\\${args[0]}${extension ? `.${extension}` : ''}\r\n`
+          : '1.0\r\n',
+      }))
+      const { harnesses } = await discoverHarnesses()
+      expect(harnesses.filter((entry) => entry.id !== 'custom').every((entry) => entry.installed)).toBe(true)
+      expect(harnesses.every((entry) => entry.launchVersion === undefined)).toBe(true)
+      expect(harnesses[0]).toMatchObject({
+        binary: 'copilot', acpArgs: ['--acp'],
+        autoApprove: { args: ['--allow-all'], position: 'after-acp' },
+      })
+    },
+  )
 
   it('does not trust malformed lookup output', async () => {
     mocks.probe.mockResolvedValue({ stdout: 'relative-path' })
@@ -166,7 +188,7 @@ describe('daemon discovery RPC', () => {
         const response = await createDaemon().request(ServerMethods.DISCOVER_HARNESSES, params)
         expect(response).toHaveProperty('result')
         const result = ('result' in response ? response.result : undefined) as HarnessDiscoveryResult
-        expect(result.harnesses).toHaveLength(10)
+        expect(result.harnesses).toHaveLength(11)
         expect(mocks.mkdir).toHaveBeenCalledTimes(params && 'prepareWorkspaces' in params && params.prepareWorkspaces ? 10 : 0)
         expect(start).not.toHaveBeenCalled()
       } finally {
@@ -179,6 +201,53 @@ describe('daemon discovery RPC', () => {
     expect(await createDaemon().request(ServerMethods.DISCOVER_HARNESSES, { roots: ['/elsewhere'] }))
       .toMatchObject({ error: { code: -32602 } })
     expect(mocks.probe).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    [{ kind: 'acp-command', command: 'copilot --acp' }, { kind: 'shell', command: 'copilot --acp' }],
+    [{ kind: 'acp-harness', harnessId: 'copilot', options: { autoApprove: true } },
+      { kind: 'exec', executable: 'copilot', argv: ['--acp', '--allow-all'], env: {} }],
+  ])('previews %j without probing, workspace preparation or spawning', async (launch, result) => {
+    const start = vi.spyOn(AgentProcess.prototype, 'start')
+    try {
+      expect(await createDaemon().request(ServerMethods.BUILD_HARNESS_LAUNCH, { launch })).toMatchObject({ result })
+      expect(start).not.toHaveBeenCalled()
+      expect(mocks.probe).not.toHaveBeenCalled()
+      expect(mocks.mkdir).not.toHaveBeenCalled()
+    } finally { start.mockRestore() }
+  })
+
+  it.each([undefined, {}, { launch: { kind: 'acp-harness', harnessId: 'unknown' } },
+    { launch: { kind: 'acp-harness', harnessId: 'claude', options: { autoApprove: true } } },
+    { launch: { kind: 'acp-command', command: 'agent', options: {} } },
+    { launch: { kind: 'acp-command', command: 'agent' }, cwd: '/work' },
+  ])('rejects invalid preview %j without side effects', async (params) => {
+    expect(await createDaemon().request(ServerMethods.BUILD_HARNESS_LAUNCH, params)).toMatchObject({ error: { code: -32602 } })
+    expect(mocks.probe).not.toHaveBeenCalled()
+    expect(mocks.mkdir).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    null,
+    'not-an-object',
+    [],
+    { launch: { kind: 'acp-harness', harnessId: 'unknown' } },
+    { launch: { kind: 'acp-harness', harnessId: 'claude', options: { autoApprove: true } } },
+    { command: 'must-not-run', launch: { kind: 'acp-harness', harnessId: 'copilot' } },
+    { launch: { kind: 'acp-harness', harnessId: 'copilot', options: { env: { PATH: 'other' } } } },
+    { launch: { kind: 'acp-harness', harnessId: 'copilot' }, launchPlan: { executable: 'must-not-run' } },
+    { command: 'must-not-run', launchPlan: {} },
+    { launch: { kind: 'acp-harness', harnessId: 'copilot' }, argv: ['--injected'] },
+    { launch: { kind: 'acp-harness', harnessId: 'copilot' }, cwd: 42 },
+  ])('rejects invalid structured launch before starting a process %j', async (sessionSpec) => {
+    const start = vi.spyOn(AgentProcess.prototype, 'start')
+    try {
+      expect(await createDaemon().request(ServerMethods.SPAWN, { sessionSpec }))
+        .toMatchObject({ error: { code: -32602 } })
+      expect(start).not.toHaveBeenCalled()
+    } finally {
+      start.mockRestore()
+    }
   })
 
   it.each([undefined, null, {}])('refuses any retired agentTeam field, even alongside a command (%j)', async (agentTeam) => {

@@ -10,6 +10,7 @@ import type {
   AgentProfileRegistryStore,
   AgentProfileSnapshot,
   CreateAcpCommandProfileInput,
+  CreateAcpHarnessProfileInput,
   CreateAgentProfileInput,
   PatchAgentProfileInput,
   AgentProfileRegistryChangeHandler,
@@ -26,6 +27,25 @@ export function commandProfile(
     agentletId: input.agentletId,
     workingDirPath: input.workingDirPath,
     launch: { kind: 'acp-command', command: input.command },
+    ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
+    ...(input.customData === undefined ? {} : { customData: input.customData }),
+  });
+}
+
+export function harnessProfile(
+  input: CreateAcpHarnessProfileInput,
+  generateId: () => string = randomUUID,
+): AgentProfile {
+  return parseProfile({
+    id: input.id ?? generateId(),
+    alias: input.alias,
+    agentletId: input.agentletId,
+    workingDirPath: input.workingDirPath,
+    launch: {
+      kind: 'acp-harness',
+      harnessId: input.harnessId,
+      ...(input.options === undefined ? {} : { options: input.options }),
+    },
     ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
     ...(input.customData === undefined ? {} : { customData: input.customData }),
   });
@@ -65,16 +85,31 @@ export class AgentProfileRegistry {
     return this.state.profiles.map(({ id }) => id);
   }
   snapshotProfile(id: string): AgentProfileSnapshot {
-    const { agentletId, workingDirPath, launch } = this.requireProfile(id);
-    return { profileId: id, agentletId, workingDirPath, launch };
+    const { agentletId, workingDirPath, launch, executionRevision } =
+      this.requireProfile(id);
+    return {
+      profileId: id,
+      agentletId,
+      workingDirPath,
+      launch,
+      ...(executionRevision === undefined ? {} : { executionRevision }),
+    };
   }
   createProfile(input: CreateAgentProfileInput): AgentProfile {
-    if (input.launchKind !== 'acp-command')
+    if (
+      input.launchKind !== 'acp-command' &&
+      input.launchKind !== 'acp-harness'
+    )
       throw new AgentProfileError(
         'invalid_profile_kind',
-        'Only ACP command Profiles are supported',
+        'Only ACP command or harness Profiles are supported',
       );
-    const profile = commandProfile(input, this.generateId);
+    const profile =
+      input.launchKind === 'acp-command'
+        ? commandProfile(input, this.generateId)
+        : harnessProfile(input, this.generateId);
+    profile.revision = 0;
+    profile.executionRevision = 0;
     if (this.getProfile(profile.id))
       throw new AgentProfileError(
         'profile_conflict',
@@ -90,6 +125,10 @@ export class AgentProfileRegistry {
     );
     for (const profile of imported) {
       const existing = profiles.find(({ id }) => id === profile.id);
+      if (existing?.revision !== undefined)
+        profile.revision = existing.revision;
+      if (existing?.executionRevision !== undefined)
+        profile.executionRevision = existing.executionRevision;
       if (existing && !isDeepStrictEqual(existing, profile))
         throw new AgentProfileError(
           'profile_conflict',
@@ -104,20 +143,64 @@ export class AgentProfileRegistry {
   patchProfile(id: string, input: PatchAgentProfileInput): AgentProfile {
     if (
       Object.keys(input).some(
-        (key) => !['alias', 'metadata', 'customData'].includes(key),
+        (key) =>
+          ![
+            'alias',
+            'metadata',
+            'customData',
+            'workingDirPath',
+            'launch',
+            'expectedRevision',
+          ].includes(key),
       )
     )
       throw new AgentProfileError(
         'invalid_profile_patch',
         'Profile launch identity is immutable',
       );
-    const next = this.requireProfile(id);
+    const current = this.requireProfile(id);
+    if (input.expectedRevision !== undefined) {
+      if (
+        !Number.isSafeInteger(input.expectedRevision) ||
+        input.expectedRevision < 0
+      )
+        throw new AgentProfileError(
+          'invalid_profile_patch',
+          'expectedRevision must be a nonnegative safe integer',
+        );
+      if (input.expectedRevision !== (current.revision ?? 0))
+        throw new AgentProfileError(
+          'profile_conflict',
+          'Agent Profile changed; reload before editing',
+        );
+    }
+    const next = structuredClone(current);
+    if (input.workingDirPath !== undefined)
+      next.workingDirPath = input.workingDirPath;
+    if (input.launch !== undefined) next.launch = input.launch;
     if (input.alias !== undefined) next.alias = input.alias;
     if (input.metadata === null) delete next.metadata;
     else if (input.metadata !== undefined) next.metadata = input.metadata;
     if (input.customData === null) delete next.customData;
     else if (input.customData !== undefined) next.customData = input.customData;
     const profile = parseProfile(next);
+    if (
+      profile.launch.kind !== current.launch.kind ||
+      (profile.launch.kind === 'acp-harness' &&
+        current.launch.kind === 'acp-harness' &&
+        profile.launch.harnessId !== current.launch.harnessId)
+    )
+      throw new AgentProfileError(
+        'invalid_profile_patch',
+        'Profile wrapper identity is immutable',
+      );
+    if (isDeepStrictEqual(current, profile)) return structuredClone(current);
+    profile.revision = (current.revision ?? 0) + 1;
+    if (
+      profile.workingDirPath !== current.workingDirPath ||
+      !isDeepStrictEqual(profile.launch, current.launch)
+    )
+      profile.executionRevision = (current.executionRevision ?? 0) + 1;
     this.commit({
       profiles: this.state.profiles.map((entry) =>
         entry.id === id ? profile : entry,
