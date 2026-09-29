@@ -13,8 +13,11 @@ beforeEach(() => {
 })
 
 describe('process transport selection', () => {
-  it('preserves legacy trusted shell commands byte-for-byte', () => {
-    const command = '  ENV=value agent --acp "user flags" && echo trusted  '
+  it.each([
+    '  ENV=value agent --acp "user flags" && echo trusted  ',
+    'prepare-agent | custom-adapter --acp',
+    '"C:\\Program Files\\Custom Agent\\launch.cmd" --acp',
+  ])('preserves legacy trusted shell commands byte-for-byte: %s', (command) => {
     new AgentProcess({ command, cwd: '/work', env: { HOST: 'value' } }).start()
     expect(spawn).toHaveBeenCalledWith(command, expect.objectContaining({
       shell: true, cwd: '/work', env: expect.objectContaining({ HOST: 'value' }),

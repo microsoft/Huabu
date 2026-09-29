@@ -45,6 +45,8 @@ export class AgentProcess extends EventEmitter<AgentProcessEvents> {
       cwd: this.options.cwd,
       env: { ...process.env, ...this.options.env, ...this.options.launchPlan.env },
       stdio: ['pipe', 'pipe', 'pipe'],
+    // Legacy Custom commands intentionally execute shell code authorized by the host, not prompt data.
+    // codeql[js/command-line-injection]
     }) : spawn(this.options.command, {
       shell: true,
       cwd: this.options.cwd,

@@ -163,6 +163,8 @@ The native ACP `sessionId` is established by session bootstrap and is the routin
 - `sessionSpec.command` uses a shell and is trusted control-plane input.
 - Resource destinations are resolved through the daemon environment registry.
 
+The legacy Custom shell spawn carries a narrowly scoped `codeql[js/command-line-injection]` annotation because executing host-authorized shell code is its intended capability, including pipelines and custom launch scripts. This is not a sanitizer, an executable allow-list, a sandbox, or proof of interactive confirmation: the host must authorize commands for the target machine and must not interpolate prompts or other untrusted content into them. Structured harness launches remain shell-free. The annotation requires compatible alert-suppression analysis and alert handling; adding it alone does not guarantee dismissal in GitHub code scanning.
+
 ## 9. Resource distribution
 
 `server/sendResource` runs on the machine-level control channel and carries `{ destination, content }`.
