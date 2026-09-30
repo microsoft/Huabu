@@ -26,7 +26,7 @@ The runner persists `requested`, `running`, `succeeded`, or `failed` state under
 
 `scripts/start-huabu.sh` derives the repository root from its own tracked path, so the checkout may live anywhere. Direct operator use accepts a branch argument; the UI invocation is always fixed to `alpha`.
 
-The script requires a clean checkout, stops listeners on ports 3001–3005, removes the previous `app` tmux session, checks out and fast-forwards the selected branch, installs locked dependencies, and starts `pnpm start:web` in a new `app` session. Interactive use tails `/tmp/huabu-app.log`; `--non-interactive` exits after readiness succeeds or times out.
+The script requires a clean checkout, stops listeners on ports 3001–3005, removes the previous `app` tmux session, checks out and fast-forwards the selected branch, installs locked dependencies, and starts `pnpm start:web` in a new `app` session. Interactive use immediately tails `/tmp/huabu-app.log` while startup continues. `--non-interactive` instead waits for readiness and exits when it succeeds or when the configurable `HUABU_CANARY_READINESS_TIMEOUT_SECONDS` window expires; the default is 300 seconds.
 
 The script intentionally preserves the existing personal-development tradeoff: it updates one checkout in place and stops the old service before pull, install, and build complete. A failed redeployment can leave the Canary offline, and the port-range stop can affect another process using those ports. There is no rollback, immutable release directory, service preservation, self-restart supervisor, systemd unit, container deployment, or automatic installation. Inspect the persisted runner status and log, then repair manually through SSH when needed.
 
