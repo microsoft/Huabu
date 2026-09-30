@@ -133,6 +133,12 @@
     "title": "设置",
     "open": "打开设置",
     "general": "通用",
+    "agent": "Agent",
+    "capabilities": "能力",
+    "capabilitiesDescription": "配置由 Huabu 管理的服务。外部 Agent 能否使用这些服务，取决于该 Agent 自身支持的能力。",
+    "agentBehavior": "Agent 行为",
+    "externalAgentRuntime": "外部 Agent 运行时",
+    "agentProfiles": "Agent 配置",
     "inkOcr": {
       "title": "手写识别（Azure AI Vision）",
       "description": "提交 Ink Query 时，将所选笔画发送至 Azure 进行 OCR 识别。",

@@ -22,6 +22,8 @@ import {
   type ExternalAgentsNavigation,
 } from './agent-profiles/ExternalAgentsSettings';
 import { DeploymentReadinessNotice } from './DeploymentReadinessNotice';
+import { AgentBehaviorSettings } from './sections/AgentBehaviorSettings';
+import { ExternalAgentRuntimeSettings } from './sections/ExternalAgentRuntimeSettings';
 import { GeneralSettings } from './sections/GeneralSettings';
 import { ImageProviderSettings } from './sections/ImageProviderSettings';
 import { InkOcrSettings } from './sections/InkOcrSettings';
@@ -34,15 +36,12 @@ type SettingsTab = SettingsTabId;
 interface TabDef {
   id: SettingsTab;
   /** i18n key for the tab label. */
-  labelKey:
-    | 'settings.general'
-    | 'settings.huabuAgent'
-    | 'settings.externalAgents';
+  labelKey: 'settings.general' | 'settings.agent' | 'settings.capabilities';
 }
 
 const TABS: TabDef[] = [
-  { id: 'huabuAgent', labelKey: 'settings.huabuAgent' },
-  { id: 'agents', labelKey: 'settings.externalAgents' },
+  { id: 'agent', labelKey: 'settings.agent' },
+  { id: 'capabilities', labelKey: 'settings.capabilities' },
   { id: 'general', labelKey: 'settings.general' },
 ];
 
@@ -57,10 +56,9 @@ interface SettingsModalProps {
  * pane, so the panel height stays fixed as more settings are added.
  *
  * Each tab renders the existing self-contained `*Settings` components:
- *  - **General** — language and canvas display preferences
- *  - **Huabu Agent** — global defaults, backend-specific models and optional capabilities
- *    (image generation, web search, YouTube transcripts)
- *  - **External Agents** — ACP profile management
+ *  - **Agent** — global defaults, Built-In Pi setup, external Profiles, and behavior
+ *  - **Capabilities** — Huabu-owned image, search, transcript, and OCR services
+ *  - **General** — application, canvas, input, and update preferences
  *
  * The app version sits at the bottom of the left tab rail (a product-wide
  * fact, decoupled from any single tab).
@@ -80,6 +78,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const clearRequestedTab = useSettingsUiStore((s) => s.clearRequestedTab);
   const [activeTab, setActiveTab] = useState<SettingsTab>(TABS[0].id);
   const showBuiltIn = activeTab === 'builtIn' || defaultProfileId === 'huabu';
+  const isAgentTab = activeTab === 'agent' || activeTab === 'builtIn';
   const [externalAgentsNavigation, setExternalAgentsNavigation] =
     useState<ExternalAgentsNavigation | null>(null);
   const titleId = useId();
@@ -110,7 +109,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   }, [isOpen, requestedTab, clearRequestedTab]);
 
   useEffect(() => {
-    if (!isOpen && activeTab === 'builtIn') setActiveTab('huabuAgent');
+    if (!isOpen && activeTab === 'builtIn') setActiveTab('agent');
   }, [isOpen, activeTab]);
 
   useEffect(() => {
@@ -121,10 +120,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   // Load each registry only when its owning tab is visible.
   useEffect(() => {
     if (!isOpen) return;
-    if ((activeTab === 'huabuAgent' || activeTab === 'builtIn') && showBuiltIn)
+    const targetTab = requestedTab ?? activeTab;
+    if (targetTab === 'agent') void acpInit();
+    if (
+      targetTab === 'builtIn' ||
+      (targetTab === 'agent' && defaultProfileId === 'huabu')
+    ) {
       void llmInit();
-    if (activeTab === 'agents') void acpInit();
-  }, [isOpen, activeTab, showBuiltIn, llmInit, acpInit]);
+    }
+  }, [isOpen, requestedTab, activeTab, defaultProfileId, llmInit, acpInit]);
 
   // Close on Escape.
   useEffect(() => {
@@ -152,7 +156,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const activeLabelKey =
     TABS.find((tab) => tab.id === activeTab)?.labelKey ?? 'settings.general';
   const contentTitle =
-    activeTab === 'agents' && externalAgentsNavigation
+    activeTab === 'agent' && externalAgentsNavigation
       ? externalAgentsNavigation.title
       : activeTab === 'builtIn'
         ? t('settings.builtInPi')
@@ -199,8 +203,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </h2>
           {TABS.map(({ id, labelKey }) => {
             const active =
-              id === activeTab ||
-              (id === 'huabuAgent' && activeTab === 'builtIn');
+              id === activeTab || (id === 'agent' && activeTab === 'builtIn');
             return (
               <button
                 key={id}
@@ -234,7 +237,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         <div className="flex min-w-0 flex-1 flex-col">
           <header className="border-edge-default flex shrink-0 items-center justify-between border-b px-5 py-3">
             <div className="flex min-w-0 items-center gap-1.5">
-              {activeTab === 'agents' && externalAgentsNavigation && (
+              {activeTab === 'agent' && externalAgentsNavigation && (
                 <Button
                   variant="ghost"
                   tone="neutral"
@@ -267,25 +270,47 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
             <DeploymentReadinessNotice />
             {activeTab === 'general' && (
-              <>
-                <SettingSection>
-                  <GeneralSettings />
-                </SettingSection>
-                <InkOcrSettings />
-              </>
+              <SettingSection>
+                <GeneralSettings />
+              </SettingSection>
             )}
-            {(activeTab === 'huabuAgent' || activeTab === 'builtIn') && (
+            {isAgentTab &&
+              (activeTab === 'builtIn' ? (
+                <LLMSettings />
+              ) : (
+                <>
+                  {externalAgentsNavigation ? null : (
+                    <>
+                      <AgentDefaultsSettings />
+                      {showBuiltIn ? <LLMSettings /> : null}
+                    </>
+                  )}
+                  <ExternalAgentsSettings
+                    onNavigationChange={handleExternalAgentsNavigationChange}
+                  />
+                  {externalAgentsNavigation ? null : (
+                    <>
+                      <SettingSection title={t('settings.agentBehavior')}>
+                        <AgentBehaviorSettings />
+                      </SettingSection>
+                      <SettingSection
+                        title={t('settings.externalAgentRuntime')}
+                      >
+                        <ExternalAgentRuntimeSettings />
+                      </SettingSection>
+                    </>
+                  )}
+                </>
+              ))}
+            {activeTab === 'capabilities' && (
               <>
-                {activeTab === 'huabuAgent' && <AgentDefaultsSettings />}
-                {showBuiltIn && <LLMSettings />}
+                <p className="text-fg-muted mb-4 px-1 text-xs">
+                  {t('settings.capabilitiesDescription')}
+                </p>
                 <ImageProviderSettings />
                 <IntegrationsSettings />
+                <InkOcrSettings />
               </>
-            )}
-            {activeTab === 'agents' && (
-              <ExternalAgentsSettings
-                onNavigationChange={handleExternalAgentsNavigationChange}
-              />
             )}
           </div>
         </div>

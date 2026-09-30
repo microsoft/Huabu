@@ -184,9 +184,11 @@ The page orders Frame styling, Note styling, the current zoom-readability compar
 
 Space Shortcut retains the `spacePreview` node type and renders the canonical icon, current target title, and a muted node-count/update-time summary using shared node chrome. It reads shared workspace metadata, never a target scene or nested React Flow, and supports bounded automatic width and minimum-only custom width with content-owned height. See [space-preview.md](./space-preview.md).
 
-### External Agent Settings
+### Settings information architecture
 
-External Agents Settings uses `components/Settings/agent-profiles/` and the canonical `acpProfilesStore`. It has ordinary command Profile creation/editing/deletion and no Agent Team templates, Configs or setup lifecycle. The manual editor reads the agentlet-backed catalogue; automatic defaults arrive through the same persisted Profile list used by selectors. See [Agent Profiles](./agent-profiles.md).
+The tabbed Settings modal has three product-owned surfaces. **Agent** combines global Agent defaults, conditional Built-In Pi provider/model setup, ordinary external Profile management, Agent behavior, and external-Agent runtime controls while preserving each component's existing store and API ownership. **Capabilities** contains Huabu-managed image generation, Web Search, YouTube transcript, and Ink OCR configuration; its copy does not imply external-Agent tool parity. **General** contains application, Canvas, input, update, and deployment preferences that do not configure an Agent or service capability. The hidden Built-In repair deep link remains focused on Pi provider/model setup and returns to the Agent surface after closing.
+
+Agent Profile management uses `components/Settings/agent-profiles/` and the canonical `acpProfilesStore`. It has ordinary command Profile creation/editing/deletion and no Agent Team templates, Configs or setup lifecycle. The manual editor reads the agentlet-backed catalogue; automatic defaults arrive through the same persisted Profile list used by selectors. Opening an editor focuses the nested Agent view while retaining the existing Profile revision and save contracts. See [Agent Profiles](./agent-profiles.md).
 
 ### Toast duration contract
 
@@ -394,7 +396,7 @@ The handbook is owned, built, and deployed from the public [microsoft/Huabu repo
 
 Network deployment follows the single-owner boundary in [`deployment-security.md`](./deployment-security.md). Non-loopback `start:web` binds fail closed unless allowed hosts and complete Basic Auth are configured. Vite keeps zero-configuration loopback development but rejects non-loopback clients before serving assets or proxying APIs unless they pass the same Basic Auth gate. Settings reads the redacted deployment readiness endpoint and disables credential mutations when the standalone secret store is read-only.
 
-Settings → General also owns the server-persisted **Automatically accept Agent Space changes** preference. [`GeneralSettings.tsx`](../../apps/web/src/components/Settings/sections/GeneralSettings.tsx) loads and updates it through the owner-only Agent Change Review API, optimistically reflects a toggle, and restores the last confirmed value on write failure. The preference is application-global: it suppresses future pending Keep/Revert records but does not delete existing records or convert current-session Canvas undo into durable Revert.
+Settings → Agent → Agent behavior owns the server-persisted **Automatically accept Agent Space changes** preference. [`AgentBehaviorSettings.tsx`](../../apps/web/src/components/Settings/sections/AgentBehaviorSettings.tsx) loads and updates it through the owner-only Agent Change Review API, optimistically reflects a toggle, and restores the last confirmed value on write failure. The preference is application-global: it suppresses future pending Keep/Revert records but does not delete existing records or convert current-session Canvas undo into durable Revert.
 
 ## 9. Desktop troubleshooting actions
 
