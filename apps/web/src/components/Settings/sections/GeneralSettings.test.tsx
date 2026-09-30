@@ -44,6 +44,9 @@ vi.mock('@/api/agentChangeReview', () => ({
 }));
 
 vi.mock('@/components/Common/Toast', () => ({ toast }));
+vi.mock('@/components/Settings/CanaryRedeploySettings', () => ({
+  CanaryRedeploySettings: () => null,
+}));
 vi.mock('@/hooks/useAppUpdate', () => ({
   canCheckForUpdates: () => false,
   useAppUpdate: () => ({

@@ -17,6 +17,7 @@ import { Input } from '@/components/Common/Input';
 import { Select } from '@/components/Common/Select';
 import { toast } from '@/components/Common/Toast';
 import { Toggle } from '@/components/Common/Toggle';
+import { CanaryRedeploySettings } from '@/components/Settings/CanaryRedeploySettings';
 import { SettingRow } from '@/components/Settings/Common/SettingRow';
 import { canCheckForUpdates, useAppUpdate } from '@/hooks/useAppUpdate';
 import { getElectronBridge } from '@/hooks/useElectron';
@@ -300,6 +301,7 @@ export const GeneralSettings: React.FC = () => {
           </Button>
         </SettingRow>
       )}
+      {!updaterAvailable && <CanaryRedeploySettings />}
       <SettingRow
         title={t('settings.inputMode')}
         description={t('settings.inputModeDescription')}

@@ -9,6 +9,7 @@
  * launcher then points the bundled Fastify server at the compiled SPA so the
  * UI and API share one port, without Vite or file watchers.
  */
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -19,6 +20,12 @@ import { findAvailablePort } from './dev-ports.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..');
 const DEFAULT_SERVER_PORT = 3001;
+
+process.env.HUABU_REPO_ROOT = repoRoot;
+process.env.HUABU_DEPLOYED_SHA = execFileSync('git', ['rev-parse', 'HEAD'], {
+  cwd: repoRoot,
+  encoding: 'utf8',
+}).trim();
 
 // The bundled server's source-relative root `.env` lookup no longer points at
 // the repository, so load it here before importing the bundle. Existing shell
