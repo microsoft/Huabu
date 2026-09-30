@@ -52,6 +52,7 @@ import { acpBindingRecipeSchema } from './binding-recipe.js';
 import { AcpServiceError } from './errors.js';
 
 import type { AcpBindingRecipe } from './binding-recipe.js';
+import type { WorkloadType } from '@agenetes/protocol';
 
 export function isSessionResumeUnavailableError(error: unknown): boolean {
   if (!(error instanceof AgentletRequestError)) return false;
@@ -86,6 +87,7 @@ interface CachedAgent {
 }
 
 const threadToAgent = new Map<string, CachedAgent>();
+const releaseOperations = new Map<string, Promise<void>>();
 
 /** @deprecated Use threadId directly — kept for backwards compat during migration. */
 export function threadKey(_canvasId: string, threadId: string): string {
@@ -193,6 +195,7 @@ export async function ensureAgentForThread(
   existingSessionId?: string,
   env?: Record<string, string>,
   idleTimeoutSecs = 600,
+  workloadType: WorkloadType = 'Deployment',
 ): Promise<{
   agentletId: string;
   sessionId: string;
@@ -254,6 +257,7 @@ export async function ensureAgentForThread(
   try {
     const result = await gateway.spawnOnAgentlet(agentlet.agentletId, {
       appId: threadId,
+      workloadType,
       ...(existingSessionId ? { sessionId: existingSessionId } : {}),
       sessionSpec: {
         ...(recipe.launch
@@ -274,17 +278,47 @@ export async function ensureAgentForThread(
       launchPlan = harnessLaunchPlanSchema.parse(result.launchPlan);
     }
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
     if (existingSessionId && isSessionResumeUnavailableError(err)) {
       throw new AcpServiceError(
         'session_resume_unavailable',
         `External agent '${recipe.alias}' can no longer resume session '${existingSessionId}'`,
       );
     }
+    if (
+      err instanceof AgentletRequestError &&
+      err.data &&
+      typeof err.data === 'object' &&
+      (err.data as { code?: unknown }).code === 'capacity_exhausted'
+    ) {
+      const data = err.data as {
+        limit?: unknown;
+        active?: {
+          total?: unknown;
+          jobs?: unknown;
+          deployments?: unknown;
+          unknown?: unknown;
+          stopping?: unknown;
+        };
+      };
+      const diagnostic =
+        Number.isSafeInteger(data.limit) &&
+        Number.isSafeInteger(data.active?.total) &&
+        Number.isSafeInteger(data.active?.jobs) &&
+        Number.isSafeInteger(data.active?.deployments) &&
+        Number.isSafeInteger(data.active?.unknown) &&
+        Number.isSafeInteger(data.active?.stopping)
+          ? `limit ${String(data.limit)}; active ${String(data.active?.total)} (${String(data.active?.jobs)} Jobs, ${String(data.active?.deployments)} Deployments, ${String(data.active?.unknown)} unclassified, ${String(data.active?.stopping)} stopping)`
+          : message;
+      throw new AcpServiceError(
+        'capacity_exhausted',
+        `External agent capacity is exhausted: ${diagnostic}`,
+      );
+    }
     // The agentlet RPC itself rejected — typically a bad recipe
     // (command not found, cwd missing) or a daemon-side validation
     // failure. Preserve the daemon's message so the UI can surface
     // the specific reason (e.g. ENOENT path).
-    const message = err instanceof Error ? err.message : String(err);
     throw new AcpServiceError(
       'spawn_failed',
       `Failed to spawn external agent '${recipe.alias}': ${message}`,
@@ -302,6 +336,21 @@ export async function ensureAgentForThread(
     3000,
   );
   if (!connected) {
+    try {
+      const result = await gateway.stopOnAgentlet(agentlet.agentletId, {
+        sessionId,
+      });
+      if (!result.stopped) {
+        throw new Error('Agentlet did not confirm process reclamation');
+      }
+    } catch (error) {
+      throw new AcpServiceError(
+        'cleanup_failed',
+        `External agent '${recipe.alias}' did not connect and its process could not be reclaimed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
     throw new AcpServiceError(
       'connect_timeout',
       `External agent '${recipe.alias}' started but did not respond within 3s. The agent may need to re-authenticate (e.g. Copilot OAuth) or has crashed on startup.`,
@@ -323,30 +372,54 @@ export async function ensureAgentForThread(
 }
 
 /**
- * Drop the cached mapping for `threadId` and best-effort ask the
- * agentlet to stop the spawned agent. Called when a thread is deleted.
+ * Stop the exact spawned process and then drop the cached mapping.
+ * Concurrent calls share one stop operation; failures retain the mapping
+ * so the caller can retry instead of losing ownership.
  */
 export async function releaseThread(
   agentletId: string,
   threadId: string,
 ): Promise<void> {
   const key = agentletThreadKey(agentletId, threadId);
+  const inFlight = releaseOperations.get(key);
+  if (inFlight) return inFlight;
   const cached = threadToAgent.get(key);
-  threadToAgent.delete(key);
   if (!cached) return;
   const gateway = getAgentletGateway();
-  if (!gateway) return;
+  if (!gateway) {
+    throw new AcpServiceError(
+      'cleanup_failed',
+      `Cannot reclaim external agent for '${threadId}': Agentlet Gateway is not mounted`,
+    );
+  }
+  const operation = (async () => {
+    try {
+      const result = await gateway.stopOnAgentlet(cached.agentletId, {
+        sessionId: cached.sessionId,
+      });
+      if (!result.stopped) {
+        throw new Error('Agentlet did not confirm process reclamation');
+      }
+      if (threadToAgent.get(key) === cached) threadToAgent.delete(key);
+    } catch (error) {
+      throw new AcpServiceError(
+        'cleanup_failed',
+        `Failed to reclaim external agent for '${threadId}': ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  })();
+  releaseOperations.set(key, operation);
   try {
-    await gateway.stopOnAgentlet(cached.agentletId, {
-      sessionId: cached.sessionId,
-    });
-  } catch {
-    // Best-effort: a dying agentlet, already-stopped agent, or unknown
-    // id are all acceptable here. Caller already removed the thread.
+    await operation;
+  } finally {
+    if (releaseOperations.get(key) === operation) releaseOperations.delete(key);
   }
 }
 
 /** Test-only: clear the cache between vitest cases. */
 export function _resetSpawnOrchestratorForTests(): void {
   threadToAgent.clear();
+  releaseOperations.clear();
 }

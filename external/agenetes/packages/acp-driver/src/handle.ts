@@ -56,6 +56,7 @@ import {
   registerAcpStateListener,
   reportEntryState,
 } from './session.js';
+import { releaseThread } from './spawn-orchestrator.js';
 import { acpUpdateToStreamEvent } from './translator.js';
 
 import type { AcpTurnOverlay } from './overlay.js';
@@ -422,6 +423,7 @@ export class AcpAgentHandle<
     return ensureAcpSession({
       agentletId: this.agentletId,
       threadId: this.sessionThreadId,
+      workloadType: this.spec.workloadType,
       binding: this.spec.spec.binding,
       profileExecutionRevision: this.spec.spec.profileExecutionRevision,
       namespace: this.spec.namespace,
@@ -793,10 +795,11 @@ export class AcpAgentHandle<
 
   /**
    * Tear down the long-lived session: drop the live ACP entry for this
-   * session identity (which `shutdown()`s the client) and evict it from the
-   * registry. Does not stop the Agentlet process. Idempotent.
+   * session identity (which `shutdown()`s the client), evict it from the
+   * registry, and wait for the exact Agentlet process to be reclaimed.
    */
-  close(): void {
+  async close(): Promise<void> {
     acpSessionRegistry.remove(this.agentletId, this.sessionThreadId);
+    await releaseThread(this.agentletId, this.sessionThreadId);
   }
 }

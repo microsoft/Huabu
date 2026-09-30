@@ -232,6 +232,8 @@ export interface AttachOptions {
   dataDir: string;
   /** Machine identity shared by the daemon and Gateway authenticator. */
   agentletId?: string;
+  /** Resolve the host-owned process limit each time the daemon starts. */
+  getMaxAgents?: () => number;
   /**
    * Host-namespaced environment isolation for the forked daemon (and,
    * transitively, every agent it spawns). When `hostEnvPrefix` is set,
@@ -299,6 +301,7 @@ class DaemonSupervisor {
    */
   private dataDir = '';
   private agentletId = '';
+  private getMaxAgents: (() => number) | undefined;
   private hostEnvPrefix: string | undefined;
   private hostEnvAllowlist: readonly string[] | undefined;
 
@@ -312,6 +315,7 @@ class DaemonSupervisor {
     this.daemonEntryPath = opts.daemonEntryPath;
     this.dataDir = opts.dataDir;
     this.agentletId = opts.agentletId ?? hostname();
+    this.getMaxAgents = opts.getMaxAgents;
     this.hostEnvPrefix = opts.hostEnvPrefix;
     this.hostEnvAllowlist = opts.hostEnvAllowlist;
 
@@ -456,6 +460,7 @@ class DaemonSupervisor {
       return;
     }
     const serverUrl = `ws://127.0.0.1:${this.serverPort}/api/acp/agent`;
+    const maxAgents = this.getMaxAgents?.();
     const args = [
       'daemon',
       '--server',
@@ -464,6 +469,7 @@ class DaemonSupervisor {
       token,
       '--agentlet-id',
       this.agentletId,
+      ...(maxAgents === undefined ? [] : ['--max-agents', String(maxAgents)]),
       '--allow-insecure',
     ];
 
