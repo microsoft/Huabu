@@ -130,7 +130,7 @@ describe('agentlet daemon integration', () => {
     const daemon = new Agentlet({
       server: `ws://127.0.0.1:${port}/api/bridge`, token: 'test-token',
       reconnectMax: 1, bufferLimit: 1000, heartbeat: 0, allowInsecure: true,
-      logLevel: 'error', agentletId: 'machine-a', maxAgents: 10,
+      logLevel: 'error', agentletId: 'machine-a', maxAgents: 1,
     }, new Logger('error'))
     await daemon.start()
     await waitUntil(() => controlHello !== undefined)
@@ -156,7 +156,8 @@ describe('agentlet daemon integration', () => {
     })).toMatchObject({ error: { code: -32602 } })
 
     expect(await request(10, ServerMethods.SPAWN, {
-      appId: 'thread-a', sessionSpec: { command: `node ${JSON.stringify(mockAgentPath)}` },
+      appId: 'thread-a', workloadType: 'Job',
+      sessionSpec: { command: `node ${JSON.stringify(mockAgentPath)}` },
     })).toMatchObject({ result: { sessionId: 'native-bootstrap', pid: expect.any(Number) } })
     expect(sessionSocket).toBeUndefined()
     await waitUntil(() => sessionHello !== undefined)
@@ -167,7 +168,33 @@ describe('agentlet daemon integration', () => {
     await waitUntil(() => sessionMessages.some(
       (message) => 'method' in message && message.method === 'session/update',
     ))
-    expect(await request(11, ServerMethods.STOP, { sessionId: 'native-bootstrap' }))
+    expect(await request(11, ServerMethods.SPAWN, {
+      appId: 'thread-b', workloadType: 'Deployment',
+      sessionSpec: { command: `node ${JSON.stringify(mockAgentPath)}` },
+    })).toMatchObject({
+      error: {
+        data: {
+          code: 'capacity_exhausted',
+          limit: 1,
+          active: {
+            total: 1,
+            jobs: 1,
+            deployments: 0,
+            unknown: 0,
+            stopping: 0,
+          },
+        },
+      },
+    })
+    expect(await request(12, ServerMethods.STOP, { sessionId: 'native-bootstrap' }))
+      .toMatchObject({ result: { stopped: true, disposition: 'stopped' } })
+    expect(await request(13, ServerMethods.STOP, { sessionId: 'native-bootstrap' }))
+      .toMatchObject({ result: { stopped: true, disposition: 'already_absent' } })
+    expect(await request(14, ServerMethods.SPAWN, {
+      appId: 'thread-c', workloadType: 'Deployment',
+      sessionSpec: { command: `node ${JSON.stringify(mockAgentPath)}` },
+    })).toMatchObject({ result: { sessionId: 'native-bootstrap', pid: expect.any(Number) } })
+    expect(await request(15, ServerMethods.STOP, { sessionId: 'native-bootstrap' }))
       .toMatchObject({ result: { stopped: true } })
   }, 15_000)
 })

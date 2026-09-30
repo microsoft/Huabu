@@ -191,6 +191,8 @@ export interface ServerShutdownParams {
 export interface SpawnParams {
   /** Host-side correlation ID */
   appId: string
+  /** Workload lifecycle used only for aggregate capacity diagnostics. */
+  workloadType?: 'Job' | 'Deployment'
   /** If present, resume an existing session */
   sessionId?: string
   /** How to spawn the agent */
@@ -209,6 +211,25 @@ export interface SessionResumeUnavailableErrorData {
   code: 'session_resume_unavailable'
 }
 
+/** Structured daemon error data for capacity exhaustion. */
+export interface CapacityExhaustedErrorData {
+  code: 'capacity_exhausted'
+  limit: number
+  active: {
+    total: number
+    jobs: number
+    deployments: number
+    unknown: number
+    stopping: number
+  }
+}
+
+/** Structured daemon error data when a process could not be reclaimed. */
+export interface AgentStopFailedErrorData {
+  code: 'agent_stop_failed'
+  stillRunning: true
+}
+
 /** server/stop — stop agent session */
 export interface StopParams {
   sessionId: string
@@ -216,7 +237,8 @@ export interface StopParams {
 
 /** Successful stop result */
 export interface StopResult {
-  stopped: boolean
+  stopped: true
+  disposition: 'stopped' | 'already_absent'
 }
 
 /** server/list — list agent sessions */
@@ -230,7 +252,8 @@ export interface ListResult {
     command: string
     pid: number
     cwd: string
-    status: 'running' | 'starting'
+    workloadType?: 'Job' | 'Deployment'
+    status: 'running' | 'starting' | 'stopping'
   }>
 }
 
