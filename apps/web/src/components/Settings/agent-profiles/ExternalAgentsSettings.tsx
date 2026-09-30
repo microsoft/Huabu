@@ -290,7 +290,7 @@ export function ExternalAgentsSettings({
           </div>
         ) : (
           <div key="list" ref={activeViewRef}>
-            <SettingSection>
+            <SettingSection title={t('settings.agentProfiles')}>
               {loading ? (
                 <SettingRow title={t('settings.loadingAgents')}>
                   <Loading layout="inline" size="sm" />

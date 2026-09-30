@@ -1,21 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import {
-  getExternalAgentRuntimeConfig,
-  updateExternalAgentRuntimeConfig,
-} from '@/api/acp';
-import {
-  getAgentChangeReviewConfig,
-  updateAgentChangeReviewConfig,
-} from '@/api/agentChangeReview';
 import { Button } from '@/components/Common/Button';
-import { Input } from '@/components/Common/Input';
 import { Select } from '@/components/Common/Select';
-import { toast } from '@/components/Common/Toast';
 import { Toggle } from '@/components/Common/Toggle';
 import { CanaryRedeploySettings } from '@/components/Settings/CanaryRedeploySettings';
 import { SettingRow } from '@/components/Settings/Common/SettingRow';
@@ -24,11 +14,6 @@ import { getElectronBridge } from '@/hooks/useElectron';
 import { useEffectiveInputMode } from '@/hooks/useInputMode';
 import { supportedLngs, type SupportedLanguage } from '@/i18n';
 import useCanvasStore from '@/store/canvasStore';
-import {
-  MAX_RECENT_CHAT_TURNS,
-  MIN_RECENT_CHAT_TURNS,
-  useChatPreferencesStore,
-} from '@/store/chatPreferencesStore';
 import { useToolStore, type InputModePreference } from '@/store/toolStore';
 import { useWorkspaceStore } from '@/store/workspaceStore';
 
@@ -42,15 +27,6 @@ const LANGUAGE_OPTIONS = supportedLngs.map((lng) => ({
   value: lng,
   label: LANGUAGE_LABELS[lng],
 }));
-
-const IDLE_TIMEOUT_PRESETS = new Set(['0', '300', '600', '1800', '3600']);
-const RECENT_TURN_OPTIONS = Array.from(
-  { length: MAX_RECENT_CHAT_TURNS - MIN_RECENT_CHAT_TURNS + 1 },
-  (_, index) => {
-    const value = String(index + MIN_RECENT_CHAT_TURNS);
-    return { value, label: value };
-  },
-);
 
 /**
  * General application settings. Language changes persist to `localStorage`
@@ -73,23 +49,7 @@ export const GeneralSettings: React.FC = () => {
   const setInputModePreference = useToolStore(
     (state) => state.setInputModePreference,
   );
-  const recentTurnCount = useChatPreferencesStore(
-    (state) => state.recentTurnCount,
-  );
-  const setRecentTurnCount = useChatPreferencesStore(
-    (state) => state.setRecentTurnCount,
-  );
   const effectiveInputMode = useEffectiveInputMode();
-  const [idleTimeoutSecs, setIdleTimeoutSecs] = useState(600);
-  const [maxAgents, setMaxAgents] = useState(10);
-  const [maxAgentsInput, setMaxAgentsInput] = useState('10');
-  const [idleTimeoutSelection, setIdleTimeoutSelection] = useState('600');
-  const [customMinutes, setCustomMinutes] = useState('10');
-  const [idleTimeoutLoading, setIdleTimeoutLoading] = useState(true);
-  const [idleTimeoutSaving, setIdleTimeoutSaving] = useState(false);
-  const [autoAcceptSpaceChanges, setAutoAcceptSpaceChanges] = useState(false);
-  const [autoAcceptLoading, setAutoAcceptLoading] = useState(true);
-  const [autoAcceptSaving, setAutoAcceptSaving] = useState(false);
   const { status: updateStatus, check: checkForUpdates } = useAppUpdate();
   const updaterAvailable = !!getElectronBridge()?.updater;
 
@@ -101,170 +61,6 @@ export const GeneralSettings: React.FC = () => {
     },
     [i18n],
   );
-
-  useEffect(() => {
-    let active = true;
-    void getExternalAgentRuntimeConfig()
-      .then((config) => {
-        if (!active) return;
-        const value = String(config.idleTimeoutSecs);
-        setIdleTimeoutSecs(config.idleTimeoutSecs);
-        setMaxAgents(config.maxAgents);
-        setMaxAgentsInput(String(config.maxAgents));
-        setIdleTimeoutSelection(
-          IDLE_TIMEOUT_PRESETS.has(value) ? value : 'custom',
-        );
-        if (config.idleTimeoutSecs > 0) {
-          setCustomMinutes(String(config.idleTimeoutSecs / 60));
-        }
-      })
-      .catch((error) => {
-        if (!active) return;
-        toast(
-          error instanceof Error
-            ? error.message
-            : t('settings.externalAgentIdleTimeoutLoadFailed'),
-          { tone: 'danger' },
-        );
-      })
-      .finally(() => {
-        if (active) setIdleTimeoutLoading(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [t]);
-
-  useEffect(() => {
-    let active = true;
-    void getAgentChangeReviewConfig()
-      .then((config) => {
-        if (active) setAutoAcceptSpaceChanges(config.autoAcceptSpaceChanges);
-      })
-      .catch((error) => {
-        if (!active) return;
-        toast(
-          error instanceof Error
-            ? error.message
-            : t('settings.autoAcceptAgentChangesLoadFailed'),
-          { tone: 'danger' },
-        );
-      })
-      .finally(() => {
-        if (active) setAutoAcceptLoading(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [t]);
-
-  const saveAutoAccept = useCallback(
-    async (enabled: boolean) => {
-      const previous = autoAcceptSpaceChanges;
-      setAutoAcceptSpaceChanges(enabled);
-      setAutoAcceptSaving(true);
-      try {
-        const saved = await updateAgentChangeReviewConfig({
-          autoAcceptSpaceChanges: enabled,
-        });
-        setAutoAcceptSpaceChanges(saved.autoAcceptSpaceChanges);
-      } catch (error) {
-        setAutoAcceptSpaceChanges(previous);
-        toast(
-          error instanceof Error
-            ? error.message
-            : t('settings.autoAcceptAgentChangesSaveFailed'),
-          { tone: 'danger' },
-        );
-      } finally {
-        setAutoAcceptSaving(false);
-      }
-    },
-    [autoAcceptSpaceChanges, t],
-  );
-
-  const saveIdleTimeout = useCallback(
-    async (nextIdleTimeoutSecs: number) => {
-      setIdleTimeoutSaving(true);
-      try {
-        const saved = await updateExternalAgentRuntimeConfig({
-          idleTimeoutSecs: nextIdleTimeoutSecs,
-          maxAgents,
-        });
-        setIdleTimeoutSecs(saved.idleTimeoutSecs);
-        const value = String(saved.idleTimeoutSecs);
-        setIdleTimeoutSelection(
-          IDLE_TIMEOUT_PRESETS.has(value) ? value : 'custom',
-        );
-        toast(t('settings.externalAgentIdleTimeoutSaved'), {
-          tone: 'success',
-        });
-      } catch (error) {
-        const previous = String(idleTimeoutSecs);
-        setIdleTimeoutSelection(
-          IDLE_TIMEOUT_PRESETS.has(previous) ? previous : 'custom',
-        );
-        toast(
-          error instanceof Error
-            ? error.message
-            : t('settings.externalAgentIdleTimeoutSaveFailed'),
-          { tone: 'danger' },
-        );
-      } finally {
-        setIdleTimeoutSaving(false);
-      }
-    },
-    [idleTimeoutSecs, maxAgents, t],
-  );
-
-  const parsedMaxAgents = Number(maxAgentsInput);
-  const maxAgentsValid =
-    Number.isSafeInteger(parsedMaxAgents) && parsedMaxAgents >= 1;
-
-  const saveMaxAgents = useCallback(async () => {
-    if (!maxAgentsValid) return;
-    setIdleTimeoutSaving(true);
-    try {
-      const saved = await updateExternalAgentRuntimeConfig({
-        idleTimeoutSecs,
-        maxAgents: parsedMaxAgents,
-      });
-      setMaxAgents(saved.maxAgents);
-      setMaxAgentsInput(String(saved.maxAgents));
-      toast(t('settings.externalAgentMaxAgentsSaved'), { tone: 'success' });
-    } catch (error) {
-      setMaxAgentsInput(String(maxAgents));
-      toast(
-        error instanceof Error
-          ? error.message
-          : t('settings.externalAgentMaxAgentsSaveFailed'),
-        { tone: 'danger' },
-      );
-    } finally {
-      setIdleTimeoutSaving(false);
-    }
-  }, [
-    idleTimeoutSecs,
-    maxAgents,
-    maxAgentsInput,
-    maxAgentsValid,
-    parsedMaxAgents,
-    t,
-  ]);
-
-  const handleIdleTimeoutSelection = useCallback(
-    (value: string) => {
-      setIdleTimeoutSelection(value);
-      if (value !== 'custom') void saveIdleTimeout(Number(value));
-    },
-    [saveIdleTimeout],
-  );
-
-  const parsedCustomMinutes = Number(customMinutes);
-  const customMinutesValid =
-    Number.isInteger(parsedCustomMinutes) &&
-    parsedCustomMinutes >= 1 &&
-    parsedCustomMinutes <= 1440;
 
   return (
     <>
@@ -306,17 +102,6 @@ export const GeneralSettings: React.FC = () => {
               ? t('settings.hideWorldCanvas')
               : t('settings.showWorldCanvas')
           }
-        />
-      </SettingRow>
-      <SettingRow
-        title={t('settings.autoAcceptAgentChanges')}
-        description={t('settings.autoAcceptAgentChangesDescription')}
-      >
-        <Toggle
-          checked={autoAcceptSpaceChanges}
-          onChange={(enabled) => void saveAutoAccept(enabled)}
-          disabled={autoAcceptLoading || autoAcceptSaving}
-          label={t('settings.autoAcceptAgentChanges')}
         />
       </SettingRow>
       {updaterAvailable && (
@@ -363,108 +148,6 @@ export const GeneralSettings: React.FC = () => {
           title={t('settings.inputMode')}
           ariaLabel={t('settings.inputMode')}
         />
-      </SettingRow>
-      <SettingRow
-        title={t('settings.recentChatTurns')}
-        description={t('settings.recentChatTurnsDescription')}
-      >
-        <Select
-          options={RECENT_TURN_OPTIONS}
-          value={String(recentTurnCount)}
-          onChange={(value) => setRecentTurnCount(Number(value))}
-          title={t('settings.recentChatTurns')}
-          ariaLabel={t('settings.recentChatTurns')}
-        />
-      </SettingRow>
-      <SettingRow
-        title={t('settings.externalAgentIdleTimeout')}
-        description={t('settings.externalAgentIdleTimeoutDescription')}
-      >
-        <div className="flex shrink-0 items-center gap-2">
-          <Select
-            options={[
-              { value: '300', label: t('settings.fiveMinutes') },
-              {
-                value: '600',
-                label: t('settings.tenMinutesDefault'),
-              },
-              { value: '1800', label: t('settings.thirtyMinutes') },
-              { value: '3600', label: t('settings.oneHour') },
-              { value: '0', label: t('settings.never') },
-              { value: 'custom', label: t('settings.custom') },
-            ]}
-            value={idleTimeoutSelection}
-            onChange={handleIdleTimeoutSelection}
-            disabled={idleTimeoutLoading || idleTimeoutSaving}
-            title={t('settings.externalAgentIdleTimeout')}
-          />
-          {idleTimeoutSelection === 'custom' && (
-            <>
-              <Input
-                className="border-edge-default bg-surface text-fg-default focus:ring-info-light w-20 rounded-md border px-2 py-1.5 text-xs focus:ring-1 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-                type="number"
-                min={1}
-                max={1440}
-                step={1}
-                value={customMinutes}
-                onChange={(event) => setCustomMinutes(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' && customMinutesValid) {
-                    void saveIdleTimeout(parsedCustomMinutes * 60);
-                  }
-                }}
-                aria-label={t('settings.customIdleTimeoutMinutes')}
-                disabled={idleTimeoutSaving}
-              />
-              <span className="text-fg-muted text-xs">
-                {t('settings.minutes')}
-              </span>
-              <Button
-                variant="outline"
-                tone="info"
-                size="sm"
-                onClick={() => void saveIdleTimeout(parsedCustomMinutes * 60)}
-                disabled={!customMinutesValid || idleTimeoutSaving}
-              >
-                {t('settings.saveChanges')}
-              </Button>
-            </>
-          )}
-        </div>
-      </SettingRow>
-      <SettingRow
-        title={t('settings.externalAgentMaxAgents')}
-        description={t('settings.externalAgentMaxAgentsDescription')}
-      >
-        <div className="flex shrink-0 items-center gap-2">
-          <Input
-            className="border-edge-default bg-surface text-fg-default focus:ring-info-light w-24 rounded-md border px-2 py-1.5 text-xs focus:ring-1 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-            type="number"
-            min={1}
-            step={1}
-            value={maxAgentsInput}
-            onChange={(event) => setMaxAgentsInput(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') void saveMaxAgents();
-            }}
-            aria-label={t('settings.externalAgentMaxAgents')}
-            disabled={idleTimeoutLoading || idleTimeoutSaving}
-          />
-          <Button
-            variant="outline"
-            tone="info"
-            size="sm"
-            onClick={() => void saveMaxAgents()}
-            disabled={
-              !maxAgentsValid ||
-              parsedMaxAgents === maxAgents ||
-              idleTimeoutLoading ||
-              idleTimeoutSaving
-            }
-          >
-            {t('settings.saveChanges')}
-          </Button>
-        </div>
       </SettingRow>
     </>
   );
