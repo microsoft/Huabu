@@ -12,6 +12,7 @@ main() {
   local tmux_session='app'
   local log_file='/tmp/huabu-app.log'
   local server_port="${SERVER_PORT:-${PORT:-3001}}"
+  local readiness_timeout_seconds="${HUABU_CANARY_READINESS_TIMEOUT_SECONDS:-300}"
 
   for argument in "$@"; do
     case "$argument" in
@@ -34,6 +35,10 @@ main() {
 
   if [[ -z "$branch_name" ]]; then
     echo "Usage: $0 <branch_name> [--non-interactive]" >&2
+    return 2
+  fi
+  if [[ ! "$readiness_timeout_seconds" =~ ^[1-9][0-9]*$ ]]; then
+    echo "HUABU_CANARY_READINESS_TIMEOUT_SECONDS must be a positive integer." >&2
     return 2
   fi
   if [[ ! "$branch_name" =~ ^[A-Za-z0-9._/-]+$ ]] ||
@@ -128,8 +133,16 @@ main() {
     "set -o pipefail; pnpm start:web 2>&1 | tee '$log_file'"
   tmux set-option -t "$tmux_session" remain-on-exit on
 
-  echo "==> Waiting for Huabu readiness on port $server_port"
-  for attempt in {1..120}; do
+  if (( interactive )); then
+    echo "==> Watching startup logs"
+    echo "Session: $tmux_session"
+    echo "Log:     $log_file"
+    tail -f "$log_file"
+    return 0
+  fi
+
+  echo "==> Waiting up to ${readiness_timeout_seconds}s for Huabu readiness on port $server_port"
+  for ((attempt = 1; attempt <= readiness_timeout_seconds; attempt++)); do
     if node --input-type=module -e '
       const port = process.argv[1];
       const headers = {};
@@ -145,17 +158,12 @@ main() {
       if (!response.ok) process.exit(1);
     ' "$server_port" 2>/dev/null; then
       echo "==> Huabu is ready"
-      if (( interactive )); then
-        echo "Session: $tmux_session"
-        echo "Log:     $log_file"
-        tail -f "$log_file"
-      fi
       return 0
     fi
     sleep 1
   done
 
-  echo "ERROR: Huabu did not become ready within 120 seconds." >&2
+  echo "ERROR: Huabu did not become ready within ${readiness_timeout_seconds} seconds." >&2
   echo "Log: $log_file" >&2
   return 1
 }
