@@ -134,6 +134,9 @@ export async function runFunctionalText(
   const execute = async (): Promise<string> => {
     signal.throwIfAborted();
     const handle = await agenetes.create(spec);
+    if (signal.aborted) {
+      await handle.close();
+    }
     signal.throwIfAborted();
     const folder = createTranscriptFolder();
     let completed = false;

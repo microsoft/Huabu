@@ -140,6 +140,10 @@ Success returns `{ threadId, turns, before?, hasMore }`. Each `turns[]` entry is
 
 Malformed request fields and malformed cursors return HTTP 400 with `code: "malformed_history_request"` or `code: "malformed_history_cursor"`. A cursor whose thread generation was replaced or rehomed returns HTTP 409 with `code: "stale_history_cursor"`. The existing `GET /api/agent/history/:threadId` remains the unbounded compatibility endpoint for current consumers; pagination is not applied implicitly to model recovery or complete-history callers.
 
+## External-agent runtime configuration
+
+`GET/PUT /api/acp/runtime-config` uses `externalAgentRuntimeConfigSchema` from [`acp.ts`](../../packages/shared/src/types/api/acp.ts). The owner-only full replacement body contains `idleTimeoutSecs` and `maxAgents`; `maxAgents` is a positive JavaScript safe integer with default `10` and no product-defined upper bound. The value is persisted globally and supplied to the supervised Agentlet daemon as `--max-agents` on its next start; the API does not restart the daemon or configure manually launched remote daemons.
+
 ## RFS Agent discovery
 
 `POST /api/rfs/:canvasId/agent/:threadId/ink-intent` uses `rfsInkIntentParamsSchema`, `rfsInkIntentRequestSchema`, and `rfsInkIntentResponseSchema` in `types/api/rfs.ts`, reusing `inkIntentReportSchema`. RFS decodes its raw JSON buffer, validates the target and body with `safeParse`, and delegates to the shared Ink writer. A per-turn invocation token must match the active external turn; inactive, expired, or wrong-scope reports return `409 ink_turn_inactive`. The token is a freshness guard, not a credential; the normal RFS Bearer requirement remains mandatory.

@@ -13,6 +13,7 @@ import {
   type AgentHelloResult,
   type SpawnParams,
   type StopParams,
+  type StopResult,
   type SendResourceParams,
   type JsonRpcMessage,
   type JsonRpcError,
@@ -33,6 +34,7 @@ import type { AgentletOptions } from './cli.js'
 
 interface ManagedAgent {
   sessionId: string
+  workloadType?: 'Job' | 'Deployment'
   command: string
   cwd: string
   pid: number
@@ -74,6 +76,8 @@ export class Agentlet {
   private readonly daemonId: string
   private controlWs: WebSocket | null = null
   private readonly agents = new Map<string, ManagedAgent>()
+  private pendingSpawns = 0
+  private readonly stopOperations = new Map<string, Promise<StopResult>>()
   private handshakeComplete = false
 
   /**
@@ -310,6 +314,17 @@ export class Agentlet {
       this.sendDaemonResponse(requestId, undefined, { code: -32602, message: 'Missing required param: sessionSpec' })
       return
     }
+    if (
+      params.workloadType !== undefined &&
+      params.workloadType !== 'Job' &&
+      params.workloadType !== 'Deployment'
+    ) {
+      this.sendDaemonResponse(requestId, undefined, {
+        code: -32602,
+        message: 'Invalid workloadType',
+      })
+      return
+    }
 
     if (sessionSpec && typeof sessionSpec === 'object' && 'agentTeam' in sessionSpec) {
       this.sendDaemonResponse(requestId, undefined, {
@@ -357,11 +372,6 @@ export class Agentlet {
       return
     }
 
-    if (this.options.maxAgents && this.agents.size >= this.options.maxAgents) {
-      this.sendDaemonResponse(requestId, undefined, { code: -32000, message: `Max agents reached (${this.options.maxAgents})` })
-      return
-    }
-
     // Validate cwd: must be non-empty if provided, must exist on this machine
     let cwd: string
     if (sessionSpec.cwd && sessionSpec.cwd.trim()) {
@@ -378,6 +388,36 @@ export class Agentlet {
     }
 
     const autoRestart = sessionSpec.autoRestart ?? false
+
+    if (
+      this.options.maxAgents &&
+      this.agents.size + this.pendingSpawns >= this.options.maxAgents
+    ) {
+      const active = {
+        total: this.agents.size + this.pendingSpawns,
+        jobs: 0,
+        deployments: 0,
+        unknown: this.pendingSpawns,
+        stopping: 0,
+      }
+      for (const managed of this.agents.values()) {
+        if (managed.workloadType === 'Job') active.jobs++
+        else if (managed.workloadType === 'Deployment') active.deployments++
+        else active.unknown++
+        if (managed.status === 'stopping') active.stopping++
+      }
+      this.sendDaemonResponse(requestId, undefined, {
+        code: -32000,
+        message: `Max agents reached (${this.options.maxAgents})`,
+        data: {
+          code: 'capacity_exhausted',
+          limit: this.options.maxAgents,
+          active,
+        },
+      })
+      return
+    }
+    this.pendingSpawns++
 
     this.logger.info('spawning_agent', { command, cwd, sessionId: params.sessionId })
 
@@ -475,6 +515,7 @@ export class Agentlet {
 
       const managed: ManagedAgent = {
         sessionId,
+        ...(params.workloadType ? { workloadType: params.workloadType } : {}),
         command,
         cwd,
         pid,
@@ -489,6 +530,7 @@ export class Agentlet {
 
       agent.on('exit', (code, signal) => {
         this.logger.info('agent_exited', { sessionId, code, signal })
+        const wasStopping = managed.status === 'stopping'
         managed.status = 'stopped'
         // Drop the early-message buffer listener if the agent exits before
         // handshake_ok (idempotent if already detached).
@@ -499,13 +541,27 @@ export class Agentlet {
           const exitNotification: JsonRpcMessage = {
             jsonrpc: '2.0',
             method: AgentMethods.EXITED,
-            params: { code, signal, willRestart: autoRestart && code !== 0 && !managed.idleSuspending },
+            params: {
+              code,
+              signal,
+              willRestart:
+                autoRestart &&
+                code !== 0 &&
+                !managed.idleSuspending &&
+                !wasStopping,
+            },
           }
           managed.ws.send(exitNotification)
         }
 
         // Suppress autoRestart if this exit was caused by idle suspension
-        if (autoRestart && code !== 0 && !this.shutdownInProgress && !managed.idleSuspending) {
+        if (
+          autoRestart &&
+          code !== 0 &&
+          !this.shutdownInProgress &&
+          !managed.idleSuspending &&
+          !wasStopping
+        ) {
           this.logger.info('agent_restarting', { sessionId })
           setTimeout(() => {
             if (this.agents.has(sessionId) && !this.shutdownInProgress) {
@@ -595,6 +651,8 @@ export class Agentlet {
         code: -32000,
         message: `Failed to spawn agent: ${err instanceof Error ? err.message : String(err)}`,
       })
+    } finally {
+      this.pendingSpawns--
     }
   }
 
@@ -604,17 +662,43 @@ export class Agentlet {
       return
     }
 
-    const managed = this.agents.get(params.sessionId)
-    if (!managed) {
-      this.sendDaemonResponse(requestId, undefined, { code: -32000, message: `Agent not found for session: ${params.sessionId}` })
+    const inFlight = this.stopOperations.get(params.sessionId)
+    if (inFlight) {
+      try {
+        this.sendDaemonResponse(requestId, await inFlight)
+      } catch (error) {
+        this.sendStopFailure(requestId, error)
+      }
       return
     }
 
-    this.logger.info('stopping_agent', { sessionId: params.sessionId })
+    const managed = this.agents.get(params.sessionId)
+    if (!managed) {
+      this.sendDaemonResponse(requestId, {
+        stopped: true,
+        disposition: 'already_absent',
+      } satisfies StopResult)
+      return
+    }
+
+    const operation = this.stopManagedAgent(managed)
+    this.stopOperations.set(params.sessionId, operation)
+    try {
+      this.sendDaemonResponse(requestId, await operation)
+    } catch (error) {
+      this.sendStopFailure(requestId, error)
+    } finally {
+      if (this.stopOperations.get(params.sessionId) === operation) {
+        this.stopOperations.delete(params.sessionId)
+      }
+    }
+  }
+
+  private async stopManagedAgent(managed: ManagedAgent): Promise<StopResult> {
+    this.logger.info('stopping_agent', { sessionId: managed.sessionId })
     managed.status = 'stopping'
     managed.relay?.stop()
 
-    // Send goodbye on the agent's WS
     if (managed.ws?.connected) {
       const goodbye: JsonRpcMessage = {
         jsonrpc: '2.0',
@@ -624,7 +708,6 @@ export class Agentlet {
       managed.ws.send(goodbye)
     }
 
-    // Gracefully stop the agent
     managed.agent.closeStdin()
     await this.waitForAgentExit(managed.agent, 5000)
     if (managed.agent.running) {
@@ -633,12 +716,23 @@ export class Agentlet {
     }
     if (managed.agent.running) {
       managed.agent.kill()
+      await this.waitForAgentExit(managed.agent, 2000)
+    }
+    if (managed.agent.running) {
+      throw new Error(`Agent process did not exit for session: ${managed.sessionId}`)
     }
 
     managed.ws?.close()
-    this.agents.delete(params.sessionId)
+    this.agents.delete(managed.sessionId)
+    return { stopped: true, disposition: 'stopped' }
+  }
 
-    this.sendDaemonResponse(requestId, { stopped: true })
+  private sendStopFailure(requestId: string | number, error: unknown): void {
+    this.sendDaemonResponse(requestId, undefined, {
+      code: -32000,
+      message: error instanceof Error ? error.message : String(error),
+      data: { code: 'agent_stop_failed', stillRunning: true },
+    })
   }
 
   private handleList(requestId: string | number): void {
@@ -647,7 +741,12 @@ export class Agentlet {
       command: m.command,
       pid: m.pid,
       cwd: m.cwd,
-      status: m.status === 'running' ? 'running' as const : 'starting' as const,
+      ...(m.workloadType ? { workloadType: m.workloadType } : {}),
+      status: m.status === 'running'
+        ? 'running' as const
+        : m.status === 'stopping'
+          ? 'stopping' as const
+          : 'starting' as const,
     }))
     this.sendDaemonResponse(requestId, { agents })
   }

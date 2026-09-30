@@ -34,6 +34,7 @@ vi.mock('@/i18n', () => ({
 vi.mock('@/api/acp', () => ({
   getExternalAgentRuntimeConfig: vi.fn(async () => ({
     idleTimeoutSecs: 600,
+    maxAgents: 10,
   })),
   updateExternalAgentRuntimeConfig: vi.fn(),
 }));

@@ -22,6 +22,7 @@ import {
   acpProfilesRoutes,
   acpThreadsRoutes,
   externalAgentRuntimeConfigRoutes,
+  getExternalAgentRuntimeConfig,
   getAgentProfileRegistry,
   getSupervisedAgentletId,
   installAcpProfileCachePort,
@@ -301,6 +302,7 @@ const agentletGateway = mountAgenetes(app, {
   connectionToken: getConnectionToken(),
   dataDir: getDataDir(),
   daemonEntryPath: resolveDaemonEntry() ?? '',
+  getMaxAgents: () => getExternalAgentRuntimeConfig().maxAgents,
   // Host-namespaced env isolation: the agentlet daemon and every external
   // agent it spawns are host-agnostic and must receive their Huabu
   // coordinates only through explicit injection (per-agent reachback env),

@@ -1,3 +1,4 @@
+import { AgentletRequestError } from '@agenetes/agentlet-host';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const host = vi.hoisted(() => ({
@@ -21,6 +22,7 @@ import { acpSessionRegistry } from './session-registry.js';
 import {
   _resetSpawnOrchestratorForTests,
   ensureAgentForThread,
+  releaseThread,
 } from './spawn-orchestrator.js';
 
 import type { AcpBindingRecipe } from './binding-recipe.js';
@@ -71,6 +73,7 @@ describe('explicit ACP placement', () => {
     const first = await ensureAgentForThread('machine-a', 'typed', structured);
     expect(spawnOnAgentlet).toHaveBeenCalledWith('machine-a', {
       appId: 'typed',
+      workloadType: 'Deployment',
       sessionSpec: {
         launch,
         launchPlan,
@@ -103,6 +106,37 @@ describe('explicit ACP placement', () => {
         launch: { kind: 'acp-harness', harnessId: 'copilot' },
       }),
     ).rejects.toMatchObject({ code: 'spawn_failed' });
+  });
+
+  it('classifies redacted capacity diagnostics separately from spawn failures', async () => {
+    host.gateway = {
+      getAgentlet: () => ({ agentletId: 'machine-a', status: 'connected' }),
+      spawnOnAgentlet: vi.fn(async () => {
+        throw new AgentletRequestError({
+          code: -32000,
+          message: 'Max agents reached (10)',
+          data: {
+            code: 'capacity_exhausted',
+            limit: 10,
+            active: {
+              total: 10,
+              jobs: 7,
+              deployments: 2,
+              unknown: 1,
+              stopping: 1,
+            },
+          },
+        });
+      }),
+    };
+
+    await expect(
+      ensureAgentForThread('machine-a', 'capacity-thread', recipe),
+    ).rejects.toMatchObject({
+      code: 'capacity_exhausted',
+      message:
+        'External agent capacity is exhausted: limit 10; active 10 (7 Jobs, 2 Deployments, 1 unclassified, 1 stopping)',
+    });
   });
 
   it('isolates live session registry entries by placement and thread', () => {
@@ -184,6 +218,70 @@ describe('explicit ACP placement', () => {
         sessionSpec: expect.objectContaining({ idleTimeoutSecs: 0 }),
       }),
     );
+  });
+
+  it('reclaims the exact session once and treats repeated release as success', async () => {
+    const stopOnAgentlet = vi.fn(async () => ({
+      stopped: true,
+      disposition: 'stopped' as const,
+    }));
+    host.gateway = {
+      getAgentlet: () => ({ agentletId: 'machine-a', status: 'connected' }),
+      getSession: () => ({ status: 'connected' }),
+      spawnOnAgentlet: vi.fn(async () => ({
+        sessionId: 'native-session',
+        pid: 303,
+      })),
+      stopOnAgentlet,
+    };
+    await ensureAgentForThread(
+      'machine-a',
+      'job-thread',
+      recipe,
+      undefined,
+      undefined,
+      600,
+      'Job',
+    );
+
+    await Promise.all([
+      releaseThread('machine-a', 'job-thread'),
+      releaseThread('machine-a', 'job-thread'),
+    ]);
+    await releaseThread('machine-a', 'job-thread');
+
+    expect(stopOnAgentlet).toHaveBeenCalledOnce();
+    expect(stopOnAgentlet).toHaveBeenCalledWith('machine-a', {
+      sessionId: 'native-session',
+    });
+  });
+
+  it('retains ownership after stop failure so cleanup can be retried', async () => {
+    const stopOnAgentlet = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('still running'))
+      .mockResolvedValueOnce({
+        stopped: true,
+        disposition: 'already_absent',
+      });
+    host.gateway = {
+      getAgentlet: () => ({ agentletId: 'machine-a', status: 'connected' }),
+      getSession: () => ({ status: 'connected' }),
+      spawnOnAgentlet: vi.fn(async () => ({
+        sessionId: 'retry-session',
+        pid: 303,
+      })),
+      stopOnAgentlet,
+    };
+    await ensureAgentForThread('machine-a', 'retry-thread', recipe);
+
+    await expect(
+      releaseThread('machine-a', 'retry-thread'),
+    ).rejects.toMatchObject({ code: 'cleanup_failed' });
+    await expect(
+      releaseThread('machine-a', 'retry-thread'),
+    ).resolves.toBeUndefined();
+    expect(stopOnAgentlet).toHaveBeenCalledTimes(2);
   });
 
   it('returns a structured placement error when the target is absent', async () => {

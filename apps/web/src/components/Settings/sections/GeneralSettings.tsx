@@ -81,6 +81,8 @@ export const GeneralSettings: React.FC = () => {
   );
   const effectiveInputMode = useEffectiveInputMode();
   const [idleTimeoutSecs, setIdleTimeoutSecs] = useState(600);
+  const [maxAgents, setMaxAgents] = useState(10);
+  const [maxAgentsInput, setMaxAgentsInput] = useState('10');
   const [idleTimeoutSelection, setIdleTimeoutSelection] = useState('600');
   const [customMinutes, setCustomMinutes] = useState('10');
   const [idleTimeoutLoading, setIdleTimeoutLoading] = useState(true);
@@ -107,6 +109,8 @@ export const GeneralSettings: React.FC = () => {
         if (!active) return;
         const value = String(config.idleTimeoutSecs);
         setIdleTimeoutSecs(config.idleTimeoutSecs);
+        setMaxAgents(config.maxAgents);
+        setMaxAgentsInput(String(config.maxAgents));
         setIdleTimeoutSelection(
           IDLE_TIMEOUT_PRESETS.has(value) ? value : 'custom',
         );
@@ -185,6 +189,7 @@ export const GeneralSettings: React.FC = () => {
       try {
         const saved = await updateExternalAgentRuntimeConfig({
           idleTimeoutSecs: nextIdleTimeoutSecs,
+          maxAgents,
         });
         setIdleTimeoutSecs(saved.idleTimeoutSecs);
         const value = String(saved.idleTimeoutSecs);
@@ -209,8 +214,43 @@ export const GeneralSettings: React.FC = () => {
         setIdleTimeoutSaving(false);
       }
     },
-    [idleTimeoutSecs, t],
+    [idleTimeoutSecs, maxAgents, t],
   );
+
+  const parsedMaxAgents = Number(maxAgentsInput);
+  const maxAgentsValid =
+    Number.isSafeInteger(parsedMaxAgents) && parsedMaxAgents >= 1;
+
+  const saveMaxAgents = useCallback(async () => {
+    if (!maxAgentsValid) return;
+    setIdleTimeoutSaving(true);
+    try {
+      const saved = await updateExternalAgentRuntimeConfig({
+        idleTimeoutSecs,
+        maxAgents: parsedMaxAgents,
+      });
+      setMaxAgents(saved.maxAgents);
+      setMaxAgentsInput(String(saved.maxAgents));
+      toast(t('settings.externalAgentMaxAgentsSaved'), { tone: 'success' });
+    } catch (error) {
+      setMaxAgentsInput(String(maxAgents));
+      toast(
+        error instanceof Error
+          ? error.message
+          : t('settings.externalAgentMaxAgentsSaveFailed'),
+        { tone: 'danger' },
+      );
+    } finally {
+      setIdleTimeoutSaving(false);
+    }
+  }, [
+    idleTimeoutSecs,
+    maxAgents,
+    maxAgentsInput,
+    maxAgentsValid,
+    parsedMaxAgents,
+    t,
+  ]);
 
   const handleIdleTimeoutSelection = useCallback(
     (value: string) => {
@@ -390,6 +430,40 @@ export const GeneralSettings: React.FC = () => {
               </Button>
             </>
           )}
+        </div>
+      </SettingRow>
+      <SettingRow
+        title={t('settings.externalAgentMaxAgents')}
+        description={t('settings.externalAgentMaxAgentsDescription')}
+      >
+        <div className="flex shrink-0 items-center gap-2">
+          <Input
+            className="border-edge-default bg-surface text-fg-default focus:ring-info-light w-24 rounded-md border px-2 py-1.5 text-xs focus:ring-1 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+            type="number"
+            min={1}
+            step={1}
+            value={maxAgentsInput}
+            onChange={(event) => setMaxAgentsInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') void saveMaxAgents();
+            }}
+            aria-label={t('settings.externalAgentMaxAgents')}
+            disabled={idleTimeoutLoading || idleTimeoutSaving}
+          />
+          <Button
+            variant="outline"
+            tone="info"
+            size="sm"
+            onClick={() => void saveMaxAgents()}
+            disabled={
+              !maxAgentsValid ||
+              parsedMaxAgents === maxAgents ||
+              idleTimeoutLoading ||
+              idleTimeoutSaving
+            }
+          >
+            {t('settings.saveChanges')}
+          </Button>
         </div>
       </SettingRow>
     </>

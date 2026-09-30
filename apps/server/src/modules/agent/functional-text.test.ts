@@ -201,7 +201,10 @@ describe('external functional text', () => {
     async (outcome) => {
       vi.useFakeTimers();
       const controller = new AbortController();
-      let resolveCreation!: (handle: { run: typeof mocks.run }) => void;
+      let resolveCreation!: (handle: {
+        run: typeof mocks.run;
+        close: typeof mocks.close;
+      }) => void;
       mocks.create.mockImplementationOnce(
         () =>
           new Promise((resolve) => {
@@ -222,9 +225,10 @@ describe('external functional text', () => {
         await vi.advanceTimersByTimeAsync(FUNCTIONAL_TEXT_TIMEOUT_MS);
       else controller.abort(new Error('caller cancelled'));
       await result;
-      resolveCreation({ run: mocks.run });
+      resolveCreation({ run: mocks.run, close: mocks.close });
       await vi.advanceTimersByTimeAsync(0);
       expect(mocks.run).not.toHaveBeenCalled();
+      expect(mocks.close).toHaveBeenCalledOnce();
     },
   );
 

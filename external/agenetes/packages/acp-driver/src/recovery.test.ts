@@ -200,7 +200,7 @@ describe('ACP durable history recovery', () => {
       expect(ids[2]).toBe(ids[0]);
       expect(prompt).toHaveBeenCalledTimes(3);
       expect(remove).not.toHaveBeenCalled();
-      first.close();
+      await first.close();
       expect(remove).toHaveBeenCalledWith('machine-a', ids[0]);
       remove.mockRestore();
     },

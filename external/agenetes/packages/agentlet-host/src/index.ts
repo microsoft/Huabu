@@ -96,6 +96,8 @@ export interface MountAgenetesOptions {
    * owns this knowledge; this package never resolves paths.
    */
   daemonEntryPath: string;
+  /** Resolve the host-owned process limit on each supervised daemon start. */
+  getMaxAgents?: () => number;
   /**
    * Host-namespaced environment isolation for the forked daemon and
    * every agent it spawns. `hostEnvPrefix` names the host's env
@@ -148,6 +150,7 @@ export function mountAgenetes(
     daemonEntryPath: opts.daemonEntryPath,
     dataDir: opts.dataDir,
     agentletId,
+    getMaxAgents: opts.getMaxAgents,
     hostEnvPrefix: opts.hostEnvPrefix,
     hostEnvAllowlist: opts.hostEnvAllowlist,
   });

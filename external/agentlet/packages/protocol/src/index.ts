@@ -56,6 +56,8 @@ export type {
   SpawnParams,
   SpawnResult,
   SessionResumeUnavailableErrorData,
+  CapacityExhaustedErrorData,
+  AgentStopFailedErrorData,
   StopParams,
   StopResult,
   ListParams,

@@ -15,6 +15,7 @@ import type { ExternalAgentRuntimeConfig } from '@huabu/shared';
 export const DEFAULT_EXTERNAL_AGENT_RUNTIME_CONFIG: ExternalAgentRuntimeConfig =
   {
     idleTimeoutSecs: 600,
+    maxAgents: 10,
   };
 
 const log = getLogger('external-agent-runtime-config');

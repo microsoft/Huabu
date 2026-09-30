@@ -170,6 +170,7 @@ export interface EnsureAcpSessionOptions {
   /** Explicit execution-node placement for this session. */
   agentletId: string;
   threadId: string;
+  workloadType?: 'Job' | 'Deployment';
   /** External binding for the thread (see {@link RunAcpAgentOptions.binding}). */
   binding: { alias: string; profileId: string };
   profileExecutionRevision?: number;
@@ -945,6 +946,7 @@ async function ensureAcpSessionInner(
     priorSessionId,
     opts.env,
     opts.idleTimeoutSecs,
+    opts.workloadType ?? 'Deployment',
   );
   const conn = gateway.getSession(agentletId, agentSessionId);
   if (!conn || conn.status !== 'connected') {
