@@ -46,6 +46,7 @@ import integrationsRoutes from './modules/integrations/integrations.route.js';
 import interactiveViewRoutes from './modules/interactive-view/interactive-view.route.js';
 import { isPublicRfsSkillBootstrapRequest } from './modules/remote_fs/public-skill.js';
 import rfsRoutes from './modules/remote_fs/rfs.route.js';
+import canaryRedeployRoutes from './modules/security/canary-redeploy.route.js';
 import { createCorsOptions } from './modules/security/cors.js';
 import deploymentRoutes from './modules/security/deployment.route.js';
 import {
@@ -258,6 +259,9 @@ app.register(artifactRoute, { prefix: '/api/canvas' });
 app.register(llmRoutes, { prefix: '/api/llm' });
 app.register(integrationsRoutes, { prefix: '/api/integrations' });
 app.register(deploymentRoutes, { prefix: '/api/deployment' });
+app.register(canaryRedeployRoutes, {
+  prefix: '/api/deployment/canary',
+});
 app.register(interactiveViewRoutes, { prefix: '/api/interactive-views' });
 app.register(skillsRoutes, { prefix: '/api/skills' });
 app.register(workspaceRoutes, { prefix: '/api/workspace' });

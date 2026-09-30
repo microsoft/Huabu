@@ -16,6 +16,9 @@ const enc = encodeURIComponent;
 export const routes = {
   // ── Deployment ────────────────────────────────────────────────────
   deploymentReadiness: '/deployment/readiness',
+  canaryRedeployStatus: '/deployment/canary',
+  canaryRedeployCheck: '/deployment/canary/check',
+  canaryRedeploy: '/deployment/canary/redeploy',
   agentDefaults: '/agent/defaults',
 
   // ── Workspace ─────────────────────────────────────────────────────
