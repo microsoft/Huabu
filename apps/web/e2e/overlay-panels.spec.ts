@@ -108,6 +108,51 @@ test('overlays never resize or pan Canvas and isolate mouse, wheel, touch and ke
     .not.toBe(before.transform);
 });
 
+test('panel descendants chain vertical wheel to their outer scroller', async ({
+  page,
+}) => {
+  await openNewCanvas(page);
+  await page.getByRole('button', { name: /open chat panel/i }).click();
+  await settlePanels(page);
+  const before = await geometry(page);
+  const panel = page.locator('[data-canvas-panel="right"]');
+  const fixture = await panel.evaluateHandle((element) => {
+    const outer = document.createElement('div');
+    outer.dataset.testid = 'nested-scroll-outer';
+    Object.assign(outer.style, {
+      position: 'absolute',
+      inset: '80px 24px auto 24px',
+      zIndex: '100',
+      height: '120px',
+      overflowY: 'auto',
+    });
+    const target = document.createElement('div');
+    target.dataset.testid = 'nested-scroll-target';
+    Object.assign(target.style, {
+      height: '40px',
+      overflow: 'hidden',
+    });
+    target.textContent = 'Wheel target';
+    const spacer = document.createElement('div');
+    spacer.style.height = '600px';
+    outer.append(target, spacer);
+    element.append(outer);
+    return outer;
+  });
+
+  const target = page.getByTestId('nested-scroll-target');
+  await target.hover();
+  await page.mouse.wheel(0, 200);
+  await expect
+    .poll(() =>
+      fixture.evaluate((element) => (element as HTMLElement).scrollTop),
+    )
+    .toBeGreaterThan(0);
+  expect(await geometry(page)).toEqual(before);
+
+  await fixture.dispose();
+});
+
 test('node preview never moves Canvas even when the target is obstructed', async ({
   page,
 }, testInfo) => {
