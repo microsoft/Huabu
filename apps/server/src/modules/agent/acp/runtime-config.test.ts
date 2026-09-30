@@ -31,17 +31,23 @@ describe('external-agent runtime config', () => {
     rmSync(dataDir, { recursive: true, force: true });
   });
 
-  it('uses ten minutes when no config has been persisted', () => {
+  it('uses ten minutes and ten agents when no config has been persisted', () => {
     expect(getExternalAgentRuntimeConfig()).toEqual(
       DEFAULT_EXTERNAL_AGENT_RUNTIME_CONFIG,
     );
   });
 
   it('persists disabled idle suspension atomically', () => {
-    expect(setExternalAgentRuntimeConfig({ idleTimeoutSecs: 0 })).toEqual({
+    expect(
+      setExternalAgentRuntimeConfig({ idleTimeoutSecs: 0, maxAgents: 25 }),
+    ).toEqual({
       idleTimeoutSecs: 0,
+      maxAgents: 25,
     });
-    expect(getExternalAgentRuntimeConfig()).toEqual({ idleTimeoutSecs: 0 });
+    expect(getExternalAgentRuntimeConfig()).toEqual({
+      idleTimeoutSecs: 0,
+      maxAgents: 25,
+    });
     expect(
       JSON.parse(
         readFileSync(
@@ -49,18 +55,29 @@ describe('external-agent runtime config', () => {
           'utf8',
         ),
       ),
-    ).toEqual({ idleTimeoutSecs: 0 });
+    ).toEqual({ idleTimeoutSecs: 0, maxAgents: 25 });
   });
 
   it('rejects finite timeouts outside one minute through one day', () => {
     expect(() =>
-      setExternalAgentRuntimeConfig({ idleTimeoutSecs: 59 }),
+      setExternalAgentRuntimeConfig({ idleTimeoutSecs: 59, maxAgents: 10 }),
     ).toThrow();
     expect(() =>
-      setExternalAgentRuntimeConfig({ idleTimeoutSecs: 86_401 }),
+      setExternalAgentRuntimeConfig({
+        idleTimeoutSecs: 86_401,
+        maxAgents: 10,
+      }),
     ).toThrow();
     expect(() =>
-      setExternalAgentRuntimeConfig({ idleTimeoutSecs: 61 }),
+      setExternalAgentRuntimeConfig({ idleTimeoutSecs: 61, maxAgents: 10 }),
     ).toThrow();
+  });
+
+  it('rejects non-positive, fractional, and unsafe agent limits', () => {
+    for (const maxAgents of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(() =>
+        setExternalAgentRuntimeConfig({ idleTimeoutSecs: 600, maxAgents }),
+      ).toThrow();
+    }
   });
 });
