@@ -154,6 +154,21 @@ describe('Agent defaults Settings', () => {
     expect(description?.closest('.ring-1')).not.toBeNull();
   });
 
+  it('omits the status row when there is no status to show', async () => {
+    mocks.state.profiles = [
+      {
+        ...mocks.state.profiles[0],
+        launch: { kind: 'acp-harness', harnessId: 'copilot' },
+      },
+    ];
+    mocks.get.mockResolvedValueOnce({
+      ...initial,
+      defaults: { ...initial.defaults, functionalModel: '' },
+    });
+    await render();
+    expect(container.querySelectorAll('.ring-1 > *')).toHaveLength(2);
+  });
+
   it('allows Built-In while the external catalogue is unavailable, retaining the external model', async () => {
     mocks.state.loaded = false;
     mocks.state.error = new Error('Registry unavailable');

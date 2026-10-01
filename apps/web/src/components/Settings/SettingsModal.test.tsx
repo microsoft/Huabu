@@ -152,6 +152,7 @@ describe('Settings information architecture', () => {
       profiles.compareDocumentPosition(defaults) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+    expect(profiles.parentElement?.classList.contains('mb-4')).toBe(true);
     expect(mocks.init).toHaveBeenCalled();
     expect(mocks.llmInit).not.toHaveBeenCalled();
   });
