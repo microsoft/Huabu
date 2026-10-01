@@ -3,10 +3,10 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const getDefaults = vi.hoisted(() => vi.fn());
+const getConversationAgent = vi.hoisted(() => vi.fn());
 vi.mock('@/components/Common/Toast', () => ({ toast: vi.fn() }));
 vi.mock('@/api/agentDefaults', () => ({
-  getAgentDefaults: getDefaults,
+  getConversationAgentPreference: getConversationAgent,
 }));
 
 import { toast } from '@/components/Common/Toast';
@@ -53,10 +53,10 @@ function resetStore() {
 beforeEach(() => {
   vi.useFakeTimers();
   vi.mocked(toast).mockClear();
-  getDefaults.mockResolvedValue({
-    defaults: { profileId: 'global-profile', functionalModel: '' },
+  getConversationAgent.mockResolvedValue({
+    preference: { profileId: 'global-profile' },
+    effectiveProfileId: 'global-profile',
     selectionState: 'available',
-    modelCapability: 'unknown',
   });
   resetStore();
 });
@@ -88,7 +88,7 @@ describe('post-create editing', () => {
   });
 
   it('focuses the most recently active existing Chat', async () => {
-    getDefaults.mockClear();
+    getConversationAgent.mockClear();
     const preview = usePreviewWorkspaceStore.getState();
     const first = preview.openPreviewTarget({
       kind: 'chat',
@@ -114,14 +114,14 @@ describe('post-create editing', () => {
     expect(
       usePreviewWorkspaceStore.getState().workspace.tabs[second],
     ).toBeDefined();
-    expect(getDefaults).not.toHaveBeenCalled();
+    expect(getConversationAgent).not.toHaveBeenCalled();
   });
 
   it('prompts to configure defaults without creating a fallback Chat', async () => {
-    getDefaults.mockResolvedValueOnce({
-      defaults: { profileId: null, functionalModel: '' },
+    getConversationAgent.mockResolvedValueOnce({
+      preference: { profileId: null },
+      effectiveProfileId: null,
       selectionState: 'unconfigured',
-      modelCapability: 'unknown',
     });
     const threads = useChatStore.getState().threadsById;
     expect(await openChat()).toBe('');
@@ -133,7 +133,7 @@ describe('post-create editing', () => {
 
   it('does not open a delayed Chat in a different Canvas or changed workspace', async () => {
     let resolve!: (value: unknown) => void;
-    getDefaults.mockReturnValueOnce(
+    getConversationAgent.mockReturnValueOnce(
       new Promise((done) => {
         resolve = done;
       }),
@@ -142,9 +142,9 @@ describe('post-create editing', () => {
     const pending = openNewChat();
     openPreviewNode('node-note');
     resolve({
-      defaults: { profileId: 'global-profile', functionalModel: '' },
+      preference: { profileId: 'global-profile' },
+      effectiveProfileId: 'global-profile',
       selectionState: 'available',
-      modelCapability: 'unknown',
     });
     expect(await pending).toBe('');
     expect(useChatStore.getState().threadsById).toBe(threads);

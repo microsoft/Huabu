@@ -145,6 +145,13 @@ async function editModel(value: string) {
 }
 
 describe('Agent defaults Settings', () => {
+  it('explains that the default serves new conversations and utility tasks', async () => {
+    await render();
+    expect(container.textContent).toContain(
+      'settings.agentDefaultsSectionDescription',
+    );
+  });
+
   it('allows Built-In while the external catalogue is unavailable, retaining the external model', async () => {
     mocks.state.loaded = false;
     mocks.state.error = new Error('Registry unavailable');

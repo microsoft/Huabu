@@ -141,6 +141,17 @@ describe('Settings information architecture', () => {
     expect(
       container.querySelector('[data-testid="built-in-settings"]'),
     ).toBeNull();
+    const profiles = container.querySelector(
+      '[data-testid="profile-management"]',
+    );
+    const defaults = container.querySelector('[data-testid="agent-defaults"]');
+    if (!profiles || !defaults) {
+      throw new Error('Expected Agent Profiles and Utility Agent sections');
+    }
+    expect(
+      profiles.compareDocumentPosition(defaults) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
     expect(mocks.init).toHaveBeenCalled();
     expect(mocks.llmInit).not.toHaveBeenCalled();
   });

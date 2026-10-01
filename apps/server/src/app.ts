@@ -35,6 +35,7 @@ import { initializeAgentDefaults } from './modules/agent/agent-defaults.js';
 import agentDefaultsRoutes from './modules/agent/agent-defaults.route.js';
 import agentRoutes from './modules/agent/agent.route.js';
 import agentChangeReviewConfigRoutes from './modules/agent/change-review-config.route.js';
+import conversationAgentRoutes from './modules/agent/conversation-agent.route.js';
 import llmRoutes from './modules/agent/llm.route.js';
 import { registerOpCounterHook } from './modules/agent/memory/op-counter-hook.js';
 import skillsRoutes from './modules/agent/skills.route.js';
@@ -365,6 +366,9 @@ app.addHook('onListen', async () => {
 installAcpProfileCachePort();
 app.register(acpProfilesRoutes, { prefix: '/api/acp' });
 app.register(agentDefaultsRoutes, { prefix: '/api/agent/defaults' });
+app.register(conversationAgentRoutes, {
+  prefix: '/api/agent/conversation-profile',
+});
 app.register(acpAgentletRoutes, { prefix: '/api/acp' });
 app.register(acpAgentCliRoutes, { prefix: '/api/acp' });
 app.register(acpThreadsRoutes, { prefix: '/api/acp' });

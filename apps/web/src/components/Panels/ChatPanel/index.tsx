@@ -30,7 +30,10 @@ import { useActivelyViewingQuestionNode } from '@/hooks/useActivelyViewingQuesti
 import { useBuiltinThreadSettings } from '@/hooks/useBuiltinThreadSettings';
 import { ChatSessionProvider, type ChatSession } from '@/hooks/useChatSession';
 import { useInternalSlashCommands } from '@/hooks/useInternalSlashCommands';
-import { useAcpProfilesStore } from '@/store/acpProfilesStore';
+import {
+  rememberConversationAgentBinding,
+  useAcpProfilesStore,
+} from '@/store/acpProfilesStore';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatPreferencesStore } from '@/store/chatPreferencesStore';
@@ -844,6 +847,19 @@ export const ChatPanel = ({
           return;
         } finally {
           setSavingAgentDraft(false);
+        }
+      }
+      if (!activeConversationView) {
+        try {
+          await rememberConversationAgentBinding(choice.binding);
+        } catch (error) {
+          toast(
+            error instanceof Error
+              ? error.message
+              : 'Failed to save recent Agent selection',
+            { tone: 'danger' },
+          );
+          return;
         }
       }
       setAgentBinding(threadId, choice.binding, canvasId || undefined);

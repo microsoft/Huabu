@@ -5,9 +5,9 @@ import { assert, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const saveDraft = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 const associateNode = vi.hoisted(() => vi.fn());
-const getDefaults = vi.hoisted(() => vi.fn());
+const getConversationAgent = vi.hoisted(() => vi.fn());
 vi.mock('@/api/agentDefaults', () => ({
-  getAgentDefaults: getDefaults,
+  getConversationAgentPreference: getConversationAgent,
 }));
 vi.mock('@/components/Common/Toast', () => ({ toast: vi.fn() }));
 vi.mock('@/api/canvas', async (importOriginal) => ({
@@ -57,13 +57,10 @@ const view = {
 beforeEach(() => {
   saveDraft.mockClear();
   associateNode.mockReset();
-  getDefaults.mockReset().mockResolvedValue({
-    defaults: {
-      profileId: 'global-profile',
-      functionalModel: 'utility-model',
-    },
+  getConversationAgent.mockReset().mockResolvedValue({
+    preference: { profileId: 'global-profile' },
+    effectiveProfileId: 'global-profile',
     selectionState: 'available',
-    modelCapability: 'unknown',
   });
   useAcpProfilesStore.setState({
     loaded: false,
@@ -71,6 +68,8 @@ beforeEach(() => {
     profiles: [],
     agentDefaults: null,
     defaultsError: null,
+    conversationAgent: null,
+    conversationAgentError: null,
   });
   vi.mocked(toast).mockClear();
   useCanvasStore.getState()._setStateNoAutosave({
@@ -227,10 +226,10 @@ describe('Question conversation presentation', () => {
   });
 
   it('does not create or open a node when defaults are unconfigured', async () => {
-    getDefaults.mockResolvedValueOnce({
-      defaults: { profileId: null, functionalModel: '' },
+    getConversationAgent.mockResolvedValueOnce({
+      preference: { profileId: null },
+      effectiveProfileId: null,
       selectionState: 'unconfigured',
-      modelCapability: 'unknown',
     });
 
     const addNode = vi.fn();
@@ -248,10 +247,10 @@ describe('Question conversation presentation', () => {
   });
 
   it('creates a Built-In Question in operate mode without loading external Profiles', async () => {
-    getDefaults.mockResolvedValueOnce({
-      defaults: { profileId: 'huabu', functionalModel: '' },
+    getConversationAgent.mockResolvedValueOnce({
+      preference: { profileId: 'huabu' },
+      effectiveProfileId: 'huabu',
       selectionState: 'available',
-      modelCapability: 'supported',
     });
     const addNode = vi.fn().mockReturnValue('question-built-in');
     const created = await createQuestionNodeAndCompose({
@@ -272,7 +271,7 @@ describe('Question conversation presentation', () => {
 
   it('discards delayed creation after the Canvas changes', async () => {
     let resolve!: (value: unknown) => void;
-    getDefaults.mockReturnValueOnce(
+    getConversationAgent.mockReturnValueOnce(
       new Promise((done) => {
         resolve = done;
       }),
@@ -285,9 +284,9 @@ describe('Question conversation presentation', () => {
     });
     useCanvasStore.setState({ canvasId: 'canvas-2' });
     resolve({
-      defaults: { profileId: 'global-profile', functionalModel: '' },
+      preference: { profileId: 'global-profile' },
+      effectiveProfileId: 'global-profile',
       selectionState: 'available',
-      modelCapability: 'unknown',
     });
     expect(await pending).toBeNull();
     expect(addNode).not.toHaveBeenCalled();
@@ -354,7 +353,7 @@ describe('Question conversation presentation', () => {
         'ask',
       );
       expect(saveDraft).not.toHaveBeenCalled();
-      expect(getDefaults).not.toHaveBeenCalled();
+      expect(getConversationAgent).not.toHaveBeenCalled();
     },
   );
 

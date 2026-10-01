@@ -279,15 +279,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <LLMSettings />
               ) : (
                 <>
+                  <ExternalAgentsSettings
+                    onNavigationChange={handleExternalAgentsNavigationChange}
+                  />
                   {externalAgentsNavigation ? null : (
                     <>
                       <AgentDefaultsSettings />
                       {showBuiltIn ? <LLMSettings /> : null}
                     </>
                   )}
-                  <ExternalAgentsSettings
-                    onNavigationChange={handleExternalAgentsNavigationChange}
-                  />
                   {externalAgentsNavigation ? null : (
                     <>
                       <SettingSection title={t('settings.agentBehavior')}>

@@ -9,6 +9,7 @@ import {
 } from './agent-node-edit.js';
 import { SelectableAgentProfileError } from '../agent/selectable-agent-profile.js';
 
+import type * as ConversationAgent from '../agent/conversation-agent.js';
 import type * as SelectableProfiles from '../agent/selectable-agent-profile.js';
 
 const mocks = vi.hoisted(() => ({
@@ -16,8 +17,9 @@ const mocks = vi.hoisted(() => ({
   profile: vi.fn(),
 }));
 
-vi.mock('../agent/agent-defaults.js', () => ({
-  getAgentDefaults: mocks.defaults,
+vi.mock('../agent/conversation-agent.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof ConversationAgent>()),
+  getEffectiveConversationAgentProfileId: mocks.defaults,
 }));
 
 vi.mock('../agent/selectable-agent-profile.js', async (importOriginal) => ({
@@ -28,10 +30,7 @@ vi.mock('../agent/selectable-agent-profile.js', async (importOriginal) => ({
 describe('new Agent Node default binding', () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    mocks.defaults.mockReturnValue({
-      profileId: 'external-default',
-      functionalModel: '',
-    });
+    mocks.defaults.mockReturnValue('external-default');
     mocks.profile.mockReturnValue({
       id: 'external-default',
       alias: 'External',
@@ -61,10 +60,7 @@ describe('new Agent Node default binding', () => {
   });
 
   it('uses an explicit Built-In default without resolving external Profiles', () => {
-    mocks.defaults.mockReturnValue({
-      profileId: 'huabu',
-      functionalModel: 'external-model',
-    });
+    mocks.defaults.mockReturnValue('huabu');
     expect(withDefaultAgentBinding({ label: 'New Agent' })).toEqual({
       label: 'New Agent',
       agentBinding: { kind: 'internal' },
@@ -73,7 +69,7 @@ describe('new Agent Node default binding', () => {
   });
 
   it('reports an unconfigured default instead of silently choosing internal', () => {
-    mocks.defaults.mockReturnValue({ profileId: null, functionalModel: '' });
+    mocks.defaults.mockReturnValue(null);
     expect(() => withDefaultAgentBinding({})).toThrow(AgentNodeEditError);
     expect(mocks.profile).not.toHaveBeenCalled();
   });
