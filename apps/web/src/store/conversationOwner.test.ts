@@ -13,6 +13,17 @@ vi.mock('@/api/canvas', async (importOriginal) => ({
   postCanvasExecute,
   acknowledgeAgentNodeResult,
 }));
+vi.mock('@/api/agentDefaults', () => ({
+  updateConversationAgentPreference: async ({
+    profileId,
+  }: {
+    profileId: string | null;
+  }) => ({
+    preference: { profileId },
+    effectiveProfileId: profileId,
+    selectionState: profileId ? 'available' : 'unconfigured',
+  }),
+}));
 
 import useCanvasStore from './canvasStore';
 import { useChatStore } from './chatStore';

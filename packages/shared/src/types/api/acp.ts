@@ -48,6 +48,12 @@ export const externalAgentIdleTimeoutSecsSchema = z.union([
 
 export const externalAgentRuntimeConfigSchema = z.object({
   idleTimeoutSecs: externalAgentIdleTimeoutSecsSchema,
+  maxAgents: z
+    .number()
+    .int()
+    .positive()
+    .refine(Number.isSafeInteger, 'Maximum agents must be a safe integer')
+    .default(10),
 });
 
 export type ExternalAgentRuntimeConfig = z.infer<

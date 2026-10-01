@@ -234,5 +234,5 @@ export function useAddAgentEditor(
   _onRefreshProfiles?: () => void | Promise<void>,
 ): { openEditor: () => void; editor: ReactNode } {
   const openSettings = useSettingsUiStore((s) => s.open);
-  return { openEditor: () => openSettings('agents'), editor: null };
+  return { openEditor: () => openSettings('agent'), editor: null };
 }

@@ -18,6 +18,14 @@ export interface AgentletOptions {
 /** Result of parsing the generic `agentlet daemon` command. */
 export type CliResult = { mode: 'daemon'; options: AgentletOptions }
 
+function positiveSafeInteger(value: string, option: string): number {
+  const parsed = Number(value)
+  if (!Number.isSafeInteger(parsed) || parsed < 1) {
+    throw new Error(`${option} must be a positive safe integer`)
+  }
+  return parsed
+}
+
 export function parseCli(argv: string[]): CliResult {
   const program = new Command()
 
@@ -59,7 +67,7 @@ export function parseCli(argv: string[]): CliResult {
           logLevel: opts.logLevel as AgentletOptions['logLevel'],
           logFile: opts.logFile,
           agentletId: opts.agentletId?.trim() || undefined,
-          maxAgents: parseInt(opts.maxAgents, 10),
+          maxAgents: positiveSafeInteger(opts.maxAgents, '--max-agents'),
         },
       }
     })

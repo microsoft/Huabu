@@ -5,7 +5,7 @@ import { getAgentProfileRegistry } from '@agenetes/agentlet-host';
 
 import { HUABU_AGENT_PROFILE_ID } from '@huabu/shared';
 
-import { getAgentDefaults } from './agent-defaults.js';
+import { getEffectiveConversationAgentProfileId } from './conversation-agent.js';
 
 import type { CustomData } from '@huabu/shared';
 
@@ -70,7 +70,7 @@ export function requireAvailableAgentProfile(
 
 export function listAvailableAgentProfiles(
   registry: AgentProfileRegistryPort | null = getAgentProfileRegistry(),
-  defaultProfileId: string | null = getAgentDefaults().profileId,
+  defaultProfileId: string | null = getEffectiveConversationAgentProfileId(),
 ): AvailableAgentProfileSummary[] {
   const huabu = {
     id: HUABU_AGENT_PROFILE_ID,

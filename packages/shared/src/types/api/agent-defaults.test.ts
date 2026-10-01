@@ -3,7 +3,10 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { agentDefaultsSchema } from './agent-defaults.js';
+import {
+  agentDefaultsSchema,
+  conversationAgentPreferenceSchema,
+} from './agent-defaults.js';
 
 describe('Agent defaults contract', () => {
   it('trims model overrides and allows inheritance', () => {
@@ -19,6 +22,28 @@ describe('Agent defaults contract', () => {
     expect(agentDefaultsSchema.parse({ profileId: null }).functionalModel).toBe(
       '',
     );
+  });
+
+  describe('conversation Agent preference contract', () => {
+    it('accepts an explicit Profile or a never-selected state', () => {
+      expect(
+        conversationAgentPreferenceSchema.parse({ profileId: ' profile-a ' }),
+      ).toEqual({ profileId: 'profile-a' });
+      expect(
+        conversationAgentPreferenceSchema.parse({ profileId: null }),
+      ).toEqual({ profileId: null });
+    });
+
+    it.each([
+      {},
+      { profileId: '' },
+      { profileId: 1 },
+      { profileId: null, functionalModel: '' },
+    ])('rejects invalid preference %j', (value) => {
+      expect(conversationAgentPreferenceSchema.safeParse(value).success).toBe(
+        false,
+      );
+    });
   });
 
   it.each(['huabu', ' huabu '])(

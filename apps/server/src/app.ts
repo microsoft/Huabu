@@ -22,6 +22,7 @@ import {
   acpProfilesRoutes,
   acpThreadsRoutes,
   externalAgentRuntimeConfigRoutes,
+  getExternalAgentRuntimeConfig,
   getAgentProfileRegistry,
   getSupervisedAgentletId,
   installAcpProfileCachePort,
@@ -34,6 +35,7 @@ import { initializeAgentDefaults } from './modules/agent/agent-defaults.js';
 import agentDefaultsRoutes from './modules/agent/agent-defaults.route.js';
 import agentRoutes from './modules/agent/agent.route.js';
 import agentChangeReviewConfigRoutes from './modules/agent/change-review-config.route.js';
+import conversationAgentRoutes from './modules/agent/conversation-agent.route.js';
 import llmRoutes from './modules/agent/llm.route.js';
 import { registerOpCounterHook } from './modules/agent/memory/op-counter-hook.js';
 import skillsRoutes from './modules/agent/skills.route.js';
@@ -46,6 +48,7 @@ import integrationsRoutes from './modules/integrations/integrations.route.js';
 import interactiveViewRoutes from './modules/interactive-view/interactive-view.route.js';
 import { isPublicRfsSkillBootstrapRequest } from './modules/remote_fs/public-skill.js';
 import rfsRoutes from './modules/remote_fs/rfs.route.js';
+import canaryRedeployRoutes from './modules/security/canary-redeploy.route.js';
 import { createCorsOptions } from './modules/security/cors.js';
 import deploymentRoutes from './modules/security/deployment.route.js';
 import {
@@ -258,6 +261,9 @@ app.register(artifactRoute, { prefix: '/api/canvas' });
 app.register(llmRoutes, { prefix: '/api/llm' });
 app.register(integrationsRoutes, { prefix: '/api/integrations' });
 app.register(deploymentRoutes, { prefix: '/api/deployment' });
+app.register(canaryRedeployRoutes, {
+  prefix: '/api/deployment/canary',
+});
 app.register(interactiveViewRoutes, { prefix: '/api/interactive-views' });
 app.register(skillsRoutes, { prefix: '/api/skills' });
 app.register(workspaceRoutes, { prefix: '/api/workspace' });
@@ -297,6 +303,7 @@ const agentletGateway = mountAgenetes(app, {
   connectionToken: getConnectionToken(),
   dataDir: getDataDir(),
   daemonEntryPath: resolveDaemonEntry() ?? '',
+  getMaxAgents: () => getExternalAgentRuntimeConfig().maxAgents,
   // Host-namespaced env isolation: the agentlet daemon and every external
   // agent it spawns are host-agnostic and must receive their Huabu
   // coordinates only through explicit injection (per-agent reachback env),
@@ -359,6 +366,9 @@ app.addHook('onListen', async () => {
 installAcpProfileCachePort();
 app.register(acpProfilesRoutes, { prefix: '/api/acp' });
 app.register(agentDefaultsRoutes, { prefix: '/api/agent/defaults' });
+app.register(conversationAgentRoutes, {
+  prefix: '/api/agent/conversation-profile',
+});
 app.register(acpAgentletRoutes, { prefix: '/api/acp' });
 app.register(acpAgentCliRoutes, { prefix: '/api/acp' });
 app.register(acpThreadsRoutes, { prefix: '/api/acp' });

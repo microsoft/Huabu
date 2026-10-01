@@ -145,6 +145,15 @@ async function editModel(value: string) {
 }
 
 describe('Agent defaults Settings', () => {
+  it('places the Utility Agent explanation inside the Profile row card', async () => {
+    await render();
+    const description = [...container.querySelectorAll('p')].find(
+      (element) =>
+        element.textContent === 'settings.agentDefaultsSectionDescription',
+    );
+    expect(description?.closest('.ring-1')).not.toBeNull();
+  });
+
   it('allows Built-In while the external catalogue is unavailable, retaining the external model', async () => {
     mocks.state.loaded = false;
     mocks.state.error = new Error('Registry unavailable');

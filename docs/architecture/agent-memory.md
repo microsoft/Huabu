@@ -31,7 +31,7 @@ Two independent write paths:
 
 ### 2.1 Background curator (automatic)
 
-The legacy Pi curator is enabled only when the explicit global Agent default is Built-In Pi (`huabu`). An individual Built-In conversation does not enable it while the global default is external or unconfigured. The request hook does not accumulate new operations while disabled, and the worker checks the default again before starting queued or coalesced work. An already-started pass may finish after a default switch; new passes do not start. Existing memory, counters, credentials and explicit internal Skill authoring are preserved. A defaults-read failure is logged and does not start Pi. External Memory curation/consumption is tracked separately in #243.
+The legacy Pi curator is enabled only when the Utility Agent is Built-In Pi (`huabu`). An individual Built-In conversation does not enable it while the Utility Agent is external or unconfigured. The request hook does not accumulate new operations while disabled, and the worker checks the Utility Agent again before starting queued or coalesced work. An already-started pass may finish after a utility switch; new passes do not start. Existing memory, counters, credentials and explicit internal Skill authoring are preserved. A settings-read failure is logged and does not start Pi. External Memory curation/consumption is tracked separately in #243.
 
 - Each canvas keeps an op counter in `<canvas>/.memory/state.json`.
 - Every _mutating_ HTTP request (PUT / POST / PATCH / DELETE for that canvas) is counted by a Fastify hook ([memory/op-counter-hook.ts](../../apps/server/src/modules/agent/memory/op-counter-hook.ts)).

@@ -30,6 +30,25 @@ describe('agentlet daemon identity', () => {
       options: { agentletId: 'machine-a' },
     })
   })
+
+  it.each(['0', '-1', '1.5', 'Infinity', '9007199254740992', '10agents'])(
+    'rejects invalid max-agents value %s',
+    (maxAgents) => {
+      expect(() =>
+        parseCli([
+          'node',
+          'agentlet',
+          'daemon',
+          '--server',
+          'wss://example.test/api/bridge',
+          '--token',
+          'test-token',
+          '--max-agents',
+          maxAgents,
+        ]),
+      ).toThrow('--max-agents must be a positive safe integer')
+    },
+  )
 })
 
 describe('spawned agent environment', () => {

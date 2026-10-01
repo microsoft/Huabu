@@ -143,7 +143,7 @@ export function AgentDefaultsSettings() {
         <>
           <SettingRow
             title={t('settings.agentDefaultsProfile')}
-            description={t('settings.agentDefaultsDescription')}
+            description={t('settings.agentDefaultsSectionDescription')}
           >
             <Select
               ariaLabel={t('settings.agentDefaultsProfile')}

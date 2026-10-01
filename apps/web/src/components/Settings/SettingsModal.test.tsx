@@ -9,13 +9,15 @@ import { SettingsModal } from './SettingsModal';
 
 import type { Root } from 'react-dom/client';
 
+type RequestedTab = 'builtIn' | 'capabilities' | null;
+
 const mocks = vi.hoisted(() => ({
   init: vi.fn(),
   load: vi.fn(),
   clear: vi.fn(),
   llmInit: vi.fn(),
   profileId: 'external',
-  requestedTab: null as 'builtIn' | null,
+  requestedTab: null as RequestedTab,
 }));
 
 vi.mock('react-i18next', () => ({
@@ -48,7 +50,7 @@ vi.mock('@/store/deploymentReadinessStore', () => ({
 vi.mock('@/store/settingsUiStore', () => ({
   useSettingsUiStore: (
     selector: (state: {
-      requestedTab: 'builtIn' | null;
+      requestedTab: RequestedTab;
       clearRequestedTab: typeof mocks.clear;
     }) => unknown,
   ) =>
@@ -66,17 +68,26 @@ vi.mock('./agent-profiles/ExternalAgentsSettings', () => ({
 vi.mock('./DeploymentReadinessNotice', () => ({
   DeploymentReadinessNotice: () => null,
 }));
+vi.mock('./sections/AgentBehaviorSettings', () => ({
+  AgentBehaviorSettings: () => <div data-testid="agent-behavior" />,
+}));
+vi.mock('./sections/ExternalAgentRuntimeSettings', () => ({
+  ExternalAgentRuntimeSettings: () => <div data-testid="agent-runtime" />,
+}));
 vi.mock('./sections/GeneralSettings', () => ({
-  GeneralSettings: () => null,
+  GeneralSettings: () => <div data-testid="general-settings" />,
 }));
 vi.mock('./sections/LLMSettings', () => ({
-  LLMSettings: () => <div data-testid="legacy-llm" />,
+  LLMSettings: () => <div data-testid="built-in-settings" />,
 }));
 vi.mock('./sections/ImageProviderSettings', () => ({
-  ImageProviderSettings: () => null,
+  ImageProviderSettings: () => <div data-testid="image-settings" />,
 }));
 vi.mock('./sections/IntegrationsSettings', () => ({
-  IntegrationsSettings: () => null,
+  IntegrationsSettings: () => <div data-testid="integration-settings" />,
+}));
+vi.mock('./sections/InkOcrSettings', () => ({
+  InkOcrSettings: () => <div data-testid="ocr-settings" />,
 }));
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -91,83 +102,153 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
 });
+
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
 });
 
-describe('Settings default Agent placement', () => {
-  it('hides Pi provider settings for external defaults while retaining Profile management', async () => {
-    await act(async () => {
-      root.render(<SettingsModal isOpen onClose={vi.fn()} />);
-    });
-    expect(
-      container.querySelectorAll('[data-testid="agent-defaults"]'),
-    ).toHaveLength(1);
-    expect(container.querySelector('[data-testid="legacy-llm"]')).toBeNull();
-    expect(mocks.llmInit).not.toHaveBeenCalled();
-    expect(
-      container.querySelector('[data-testid="profile-management"]'),
-    ).toBeNull();
-
-    const tabs = [...container.querySelectorAll('nav button')];
-    const externalTab = tabs.find(
-      (tab) => tab.textContent === 'settings.externalAgents',
-    ) as HTMLButtonElement;
-    await act(async () => externalTab.click());
-    expect(
-      container.querySelector('[data-testid="agent-defaults"]'),
-    ).toBeNull();
-    expect(
-      container.querySelector('[data-testid="profile-management"]'),
-    ).not.toBeNull();
-
-    const huabuTab = tabs.find(
-      (tab) => tab.textContent === 'settings.huabuAgent',
-    ) as HTMLButtonElement;
-    await act(async () => huabuTab.click());
-    expect(
-      container.querySelectorAll('[data-testid="agent-defaults"]'),
-    ).toHaveLength(1);
-    expect(container.querySelector('[data-testid="legacy-llm"]')).toBeNull();
+async function renderModal(isOpen = true) {
+  await act(async () => {
+    root.render(<SettingsModal isOpen={isOpen} onClose={vi.fn()} />);
   });
+}
 
-  it('hides Pi settings again after closing an explicit repair visit', async () => {
-    mocks.requestedTab = 'builtIn';
-    await act(async () =>
-      root.render(<SettingsModal isOpen onClose={vi.fn()} />),
-    );
-    expect(
-      container.querySelector('[data-testid="legacy-llm"]'),
-    ).not.toBeNull();
-    expect(
-      container.querySelector('[data-testid="agent-defaults"]'),
-    ).toBeNull();
-    mocks.requestedTab = null;
-    await act(async () =>
-      root.render(<SettingsModal isOpen={false} onClose={vi.fn()} />),
-    );
-    await act(async () =>
-      root.render(<SettingsModal isOpen onClose={vi.fn()} />),
-    );
-    expect(container.querySelector('[data-testid="legacy-llm"]')).toBeNull();
-    expect(
-      container.querySelector('[data-testid="agent-defaults"]'),
-    ).not.toBeNull();
-  });
-
-  it.each(['default', 'thread repair'])(
-    'shows Built-In providers for %s without changing the default',
-    async (source) => {
-      if (source === 'default') mocks.profileId = 'huabu';
-      else mocks.requestedTab = 'builtIn';
-      await act(async () =>
-        root.render(<SettingsModal isOpen onClose={vi.fn()} />),
-      );
-      expect(
-        container.querySelector('[data-testid="legacy-llm"]'),
-      ).not.toBeNull();
-      expect(mocks.llmInit).toHaveBeenCalled();
-    },
+function findTab(label: string): HTMLButtonElement {
+  const tab = [...container.querySelectorAll('nav button')].find(
+    (button) => button.textContent === label,
   );
+  expect(tab).toBeDefined();
+  return tab as HTMLButtonElement;
+}
+
+describe('Settings information architecture', () => {
+  it('co-locates Agent defaults, Profiles, behavior, and runtime settings', async () => {
+    await renderModal();
+
+    expect(
+      container.querySelector('[data-testid="agent-defaults"]'),
+    ).not.toBeNull();
+    expect(
+      container.querySelector('[data-testid="profile-management"]'),
+    ).not.toBeNull();
+    expect(
+      container.querySelector('[data-testid="agent-behavior"]'),
+    ).not.toBeNull();
+    expect(
+      container.querySelector('[data-testid="agent-runtime"]'),
+    ).not.toBeNull();
+    expect(
+      container.querySelector('[data-testid="built-in-settings"]'),
+    ).toBeNull();
+    const profiles = container.querySelector(
+      '[data-testid="profile-management"]',
+    );
+    const defaults = container.querySelector('[data-testid="agent-defaults"]');
+    if (!profiles || !defaults) {
+      throw new Error('Expected Agent Profiles and Utility Agent sections');
+    }
+    expect(
+      profiles.compareDocumentPosition(defaults) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(mocks.init).toHaveBeenCalled();
+    expect(mocks.llmInit).not.toHaveBeenCalled();
+  });
+
+  it('keeps Huabu-owned capabilities separate from Agent configuration', async () => {
+    await renderModal();
+
+    await act(async () => {
+      findTab('settings.capabilities').click();
+    });
+
+    expect(container.textContent).toContain('settings.capabilitiesDescription');
+    expect(
+      container
+        .querySelector('[data-testid="capability-sections"]')
+        ?.classList.contains('space-y-4'),
+    ).toBe(true);
+    expect(
+      container.querySelector('[data-testid="image-settings"]'),
+    ).not.toBeNull();
+    expect(
+      container.querySelector('[data-testid="integration-settings"]'),
+    ).not.toBeNull();
+    expect(
+      container.querySelector('[data-testid="ocr-settings"]'),
+    ).not.toBeNull();
+    expect(
+      container.querySelector('[data-testid="agent-defaults"]'),
+    ).toBeNull();
+    expect(
+      container.querySelector('[data-testid="profile-management"]'),
+    ).toBeNull();
+    expect(mocks.llmInit).not.toHaveBeenCalled();
+  });
+
+  it('leaves only non-Agent preferences in General', async () => {
+    await renderModal();
+
+    await act(async () => {
+      findTab('settings.general').click();
+    });
+
+    expect(
+      container.querySelector('[data-testid="general-settings"]'),
+    ).not.toBeNull();
+    expect(
+      container.querySelector('[data-testid="agent-behavior"]'),
+    ).toBeNull();
+    expect(container.querySelector('[data-testid="agent-runtime"]')).toBeNull();
+    expect(container.querySelector('[data-testid="ocr-settings"]')).toBeNull();
+  });
+});
+
+describe('Built-In Pi placement', () => {
+  it('shows Built-In settings with the unified Agent surface when selected by default', async () => {
+    mocks.profileId = 'huabu';
+    await renderModal();
+
+    expect(
+      container.querySelector('[data-testid="built-in-settings"]'),
+    ).not.toBeNull();
+    expect(
+      container.querySelector('[data-testid="agent-defaults"]'),
+    ).not.toBeNull();
+    expect(
+      container.querySelector('[data-testid="profile-management"]'),
+    ).not.toBeNull();
+    expect(mocks.llmInit).toHaveBeenCalled();
+  });
+
+  it('preserves the focused Built-In repair visit without changing the default', async () => {
+    mocks.requestedTab = 'builtIn';
+    await renderModal();
+
+    expect(
+      container.querySelector('[data-testid="built-in-settings"]'),
+    ).not.toBeNull();
+    expect(
+      container.querySelector('[data-testid="agent-defaults"]'),
+    ).toBeNull();
+    expect(
+      container.querySelector('[data-testid="profile-management"]'),
+    ).toBeNull();
+    expect(mocks.init).not.toHaveBeenCalled();
+
+    mocks.requestedTab = null;
+    await renderModal(false);
+    await renderModal();
+
+    expect(
+      container.querySelector('[data-testid="built-in-settings"]'),
+    ).toBeNull();
+    expect(
+      container.querySelector('[data-testid="agent-defaults"]'),
+    ).not.toBeNull();
+    expect(
+      container.querySelector('[data-testid="profile-management"]'),
+    ).not.toBeNull();
+  });
 });

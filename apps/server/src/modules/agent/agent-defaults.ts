@@ -85,7 +85,7 @@ export class AgentDefaultsService {
     if (profileId === null) {
       throw new AgentDefaultsError(
         'default_profile_unconfigured',
-        'Select a default Agent in Settings',
+        'Select a Utility Agent in Settings',
       );
     }
     return profileId;
