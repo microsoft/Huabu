@@ -115,7 +115,12 @@ export const ImageProviderSettings: React.FC = () => {
   );
 
   return (
-    <SettingSection title={t('settings.imageGeneration')} optional collapsible>
+    <SettingSection
+      title={t('settings.imageGeneration')}
+      optional
+      collapsible
+      defaultCollapsed
+    >
       {imageError && (
         <p className="text-danger px-3 py-2 text-xs" role="alert">
           {imageError}

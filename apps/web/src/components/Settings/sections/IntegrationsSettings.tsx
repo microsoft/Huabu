@@ -35,11 +35,7 @@ export const IntegrationsSettings: React.FC = () => {
   }, [error]);
 
   return (
-    <SettingSection
-      title={t('settings.otherCapabilities')}
-      optional
-      collapsible
-    >
+    <SettingSection>
       <ApiKeyRow
         title={t('settings.webSearch')}
         description={t('settings.webSearchDescription')}
