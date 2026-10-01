@@ -459,7 +459,7 @@ describe('AgentletGateway', () => {
     });
   });
 
-  it('replaces a same-credential control socket and rejects another credential', async () => {
+  it('rejects a live duplicate identity and permits reconnect after disconnect', async () => {
     const onReconnection = vi.fn();
     const { gateway, url } = await startHarness({ onReconnection });
     const first = await connect(url, {
@@ -468,18 +468,34 @@ describe('AgentletGateway', () => {
       token: 'token-a',
       hello: agentletHello('machine-a'),
     });
-    const firstClosed = new Promise<number>((resolve) => {
-      first.socket.once('close', resolve);
-    });
 
+    const duplicate = await connect(url, {
+      role: 'agentlet',
+      queryId: 'machine-a',
+      token: 'token-a',
+      hello: agentletHello('machine-a'),
+    });
+    expect(duplicate.messages[0]).toMatchObject({
+      error: {
+        code: -32600,
+        message:
+          'Agentlet ID "machine-a" is already connected. Retry with --agentlet-id <unique-id>.',
+      },
+    });
+    expect(first.socket.readyState).toBe(WebSocket.OPEN);
+    expect(onReconnection).not.toHaveBeenCalled();
+    expect(gateway.getAgentlet('machine-a')?.status).toBe('connected');
+
+    first.socket.close();
+    await waitUntil(
+      () => gateway.getAgentlet('machine-a')?.status === 'disconnected',
+    );
     await connect(url, {
       role: 'agentlet',
       queryId: 'machine-a',
       token: 'token-a',
       hello: agentletHello('machine-a'),
     });
-
-    await expect(firstClosed).resolves.toBe(1000);
     expect(onReconnection).toHaveBeenCalledOnce();
     expect(gateway.getAgentlet('machine-a')?.status).toBe('connected');
 
@@ -670,7 +686,7 @@ describe('AgentletGateway', () => {
     ).resolves.toEqual({ harnesses: [] });
   });
 
-  it('emits only machine connection events, including replacement, and unsubscribes', async () => {
+  it('emits only machine connection events, including reconnect, and unsubscribes', async () => {
     const { gateway, url } = await startHarness();
     const changed = vi.fn();
     const unsubscribe = gateway.onAgentletsChanged(changed);
@@ -692,19 +708,23 @@ describe('AgentletGateway', () => {
         gateway.getSession('machine-a', 'session-a')?.status === 'disconnected',
     );
     expect(changed).toHaveBeenCalledTimes(1);
+    first.socket.close();
+    await waitUntil(
+      () => gateway.getAgentlet('machine-a')?.status === 'disconnected',
+    );
     const replacement = await connect(url, {
       role: 'agentlet',
       queryId: 'machine-a',
       token: 'token-a',
       hello: agentletHello('machine-a'),
     });
-    await waitUntil(() => first.socket.readyState === WebSocket.CLOSED);
     expect(changed.mock.calls).toEqual([
       [{ agentletId: 'machine-a', status: 'connected' }],
+      [{ agentletId: 'machine-a', status: 'disconnected' }],
       [{ agentletId: 'machine-a', status: 'connected' }],
     ]);
     replacement.socket.close();
-    await waitUntil(() => changed.mock.calls.length === 3);
+    await waitUntil(() => changed.mock.calls.length === 4);
     expect(changed).toHaveBeenLastCalledWith({
       agentletId: 'machine-a',
       status: 'disconnected',
@@ -716,7 +736,7 @@ describe('AgentletGateway', () => {
       token: 'token-a',
       hello: agentletHello('machine-a'),
     });
-    expect(changed).toHaveBeenCalledTimes(3);
+    expect(changed).toHaveBeenCalledTimes(4);
   });
 
   it('fails discovery for disconnected and unsupported targets without fallback', async () => {
@@ -846,7 +866,7 @@ describe('AgentletGateway', () => {
       }),
     ).resolves.toEqual(result);
   });
-  it('rejects stale pending RPCs on replacement and routes new replies correctly', async () => {
+  it('rejects stale pending RPCs on disconnect and routes replies after reconnect', async () => {
     const { gateway, url } = await startHarness();
     const first = await connect(url, {
       role: 'agentlet',
@@ -865,13 +885,14 @@ describe('AgentletGateway', () => {
           message.method === ServerMethods.DISCOVER_HARNESSES,
       ),
     );
+    first.socket.close();
+    await rejected;
     const replacement = await connect(url, {
       role: 'agentlet',
       queryId: 'machine-a',
       token: 'token-a',
       hello: agentletHello('machine-a'),
     });
-    await rejected;
     replacement.socket.on('message', (data) => {
       const message = JSON.parse(data.toString()) as JsonRpcMessage;
       if (
