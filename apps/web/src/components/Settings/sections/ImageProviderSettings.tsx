@@ -119,11 +119,7 @@ export const ImageProviderSettings: React.FC = () => {
 
   return (
     <SettingSection>
-      <SettingRow
-        title={
-          <SettingLabel optional>{t('settings.imageGeneration')}</SettingLabel>
-        }
-      >
+      <SettingRow title={t('settings.imageGeneration')}>
         <Button
           type="button"
           variant="ghost"

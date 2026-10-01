@@ -135,7 +135,7 @@
     "general": "General",
     "agent": "Agent",
     "capabilities": "Capabilities",
-    "capabilitiesDescription": "Configure services managed by Huabu. Availability to an external Agent depends on that Agent's own capabilities.",
+    "capabilitiesDescription": "These Huabu-managed services can be configured as needed. Availability to an external Agent depends on that Agent's own capabilities.",
     "agentBehavior": "Agent behavior",
     "externalAgentRuntime": "External Agent runtime",
     "agentProfiles": "Agent Profiles",
