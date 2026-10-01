@@ -146,7 +146,7 @@ describe('Settings information architecture', () => {
     );
     const defaults = container.querySelector('[data-testid="agent-defaults"]');
     if (!profiles || !defaults) {
-      throw new Error('Expected Agent Profiles and Default Agent sections');
+      throw new Error('Expected Agent Profiles and Utility Agent sections');
     }
     expect(
       profiles.compareDocumentPosition(defaults) &

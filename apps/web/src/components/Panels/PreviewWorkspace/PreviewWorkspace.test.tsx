@@ -80,10 +80,10 @@ vi.mock('@/api/acp', async (importOriginal) => ({
   }),
 }));
 vi.mock('@/api/agentDefaults', () => ({
-  getAgentDefaults: async () => ({
-    defaults: { profileId: 'global-profile', functionalModel: '' },
+  getConversationAgentPreference: async () => ({
+    preference: { profileId: 'global-profile' },
+    effectiveProfileId: 'global-profile',
     selectionState: 'available',
-    modelCapability: 'unknown',
   }),
 }));
 

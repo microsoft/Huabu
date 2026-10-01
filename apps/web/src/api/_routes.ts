@@ -20,6 +20,7 @@ export const routes = {
   canaryRedeployCheck: '/deployment/canary/check',
   canaryRedeploy: '/deployment/canary/redeploy',
   agentDefaults: '/agent/defaults',
+  conversationAgent: '/agent/conversation-profile',
 
   // ── Workspace ─────────────────────────────────────────────────────
   workspace: '/workspace',

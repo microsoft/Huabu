@@ -38,7 +38,7 @@ export async function runFunctionalText(
   if (!profileId) {
     throw new AgentDefaultsError(
       'default_profile_unconfigured',
-      'Select a default Agent in Settings to generate metadata',
+      'Select a Utility Agent in Settings to generate metadata',
     );
   }
   if (profileId === 'huabu') {

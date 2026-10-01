@@ -41,6 +41,12 @@ function resetStore() {
       profileId: EXTERNAL.profileId,
       functionalModel: 'utility-only',
     },
+    conversationAgent: {
+      preference: { profileId: EXTERNAL.profileId },
+      effectiveProfileId: EXTERNAL.profileId,
+      selectionState: 'available',
+    },
+    conversationAgentError: null,
   });
   useChatStore.setState({
     threadsById: {},
@@ -169,7 +175,10 @@ describe('chatStore thread creation', () => {
       threadMap: { 'canvas-legacy': 'thread-legacy' },
       bindingByThread: { 'thread-legacy': INTERNAL },
     });
-    useAcpProfilesStore.setState({ agentDefaults: null, loaded: false });
+    useAcpProfilesStore.setState({
+      conversationAgent: null,
+      loaded: false,
+    });
     expect(useChatStore.getState().ensureCanvasThread('canvas-legacy')).toBe(
       'thread-legacy',
     );
@@ -180,7 +189,11 @@ describe('chatStore thread creation', () => {
 
   it('refuses unconfigured creation without leaving an internal thread', () => {
     useAcpProfilesStore.setState({
-      agentDefaults: { profileId: null, functionalModel: '' },
+      conversationAgent: {
+        preference: { profileId: null },
+        effectiveProfileId: null,
+        selectionState: 'unconfigured',
+      },
     });
     expect(() => useChatStore.getState().createThread()).toThrow();
     expect(() =>

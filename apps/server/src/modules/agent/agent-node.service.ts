@@ -13,11 +13,14 @@ import {
   type Point,
 } from '@huabu/shared';
 
-import { getAgentDefaults } from './agent-defaults.js';
 import {
   InvalidAgentLaunchOverridesError,
   parseAgentLaunchOverrides,
 } from './agent-launch-overrides.js';
+import {
+  getEffectiveConversationAgentProfileId,
+  rememberConversationAgentProfileId,
+} from './conversation-agent.js';
 import {
   requireSelectableAgentProfile,
   SelectableAgentProfileError,
@@ -90,6 +93,7 @@ interface StoredNode {
 interface AgentNodeServiceDependencies {
   getProfileRegistry: () => AgentProfileRegistryPort | null;
   getDefaultProfileId?: () => string | null;
+  rememberProfileId?: (profileId: string) => void;
   readCanvasNodes: (canvasId: string) => Promise<StoredNode[] | null>;
   execute: (input: {
     canvasId: string;
@@ -108,6 +112,8 @@ async function defaultReadCanvasNodes(
 
 const DEFAULT_DEPENDENCIES: AgentNodeServiceDependencies = {
   getProfileRegistry: () => null,
+  getDefaultProfileId: getEffectiveConversationAgentProfileId,
+  rememberProfileId: rememberConversationAgentProfileId,
   readCanvasNodes: defaultReadCanvasNodes,
   execute: executeOnServer,
 };
@@ -219,11 +225,11 @@ export class AgentNodeService {
       input.profileId ??
       (this.dependencies.getDefaultProfileId
         ? this.dependencies.getDefaultProfileId()
-        : getAgentDefaults().profileId);
+        : getEffectiveConversationAgentProfileId());
     if (!profileId) {
       throw new AgentNodeCreationError(
         'default_profile_unconfigured',
-        'Connect an external Agent or select Built-In Pi as the default in Settings.',
+        'Connect an external Agent before creating a conversation.',
       );
     }
     let binding: AgentBinding;
@@ -298,6 +304,9 @@ export class AgentNodeService {
         'node_creation_failed',
         'Canvas rejected Agent Node creation',
       );
+    }
+    if (input.profileId) {
+      this.dependencies.rememberProfileId?.(profileId);
     }
     let parentConnection: CreateAgentNodeResult['parentConnection'] =
       input.anchor ? 'failed' : 'not_requested';

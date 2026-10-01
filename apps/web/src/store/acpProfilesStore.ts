@@ -40,7 +40,12 @@
 import { create } from 'zustand';
 
 import { listAcpProfiles } from '@/api/acp';
-import { getAgentDefaults, updateAgentDefaults } from '@/api/agentDefaults';
+import {
+  getAgentDefaults,
+  getConversationAgentPreference,
+  updateAgentDefaults,
+  updateConversationAgentPreference,
+} from '@/api/agentDefaults';
 import { toast } from '@/components/Common/Toast';
 import { i18n } from '@/i18n';
 
@@ -49,12 +54,17 @@ import type {
   AgentBinding,
   AgentDefaults,
   AgentDefaultsResponse,
+  ConversationAgentPreferenceResponse,
 } from '@huabu/shared';
 
 let inFlightRefresh: Promise<void> | null = null;
 let inFlightDefaults: Promise<AgentDefaultsResponse> | null = null;
+let inFlightConversationAgent: Promise<ConversationAgentPreferenceResponse> | null =
+  null;
 let defaultsSaveQueue = Promise.resolve();
 let defaultsRevision = 0;
+let conversationAgentSaveQueue = Promise.resolve();
+let conversationAgentRevision = 0;
 
 interface AcpProfilesState {
   /** Every profile the user has created. Empty until the first fetch. */
@@ -66,6 +76,8 @@ interface AcpProfilesState {
   /** Absent on older servers; never infer a default from list ordering. */
   agentDefaults: AgentDefaults | null;
   defaultsError: Error | null;
+  conversationAgent: ConversationAgentPreferenceResponse | null;
+  conversationAgentError: Error | null;
   /**
    * `true` once a fetch has *succeeded* at least once. A failed initial
    * fetch leaves this `false` (and {@link profiles} empty), so consumers
@@ -86,6 +98,10 @@ interface AcpProfilesState {
   refresh: () => Promise<void>;
   loadDefaults: () => Promise<AgentDefaultsResponse>;
   saveDefaults: (config: AgentDefaults) => Promise<AgentDefaultsResponse>;
+  loadConversationAgent: () => Promise<ConversationAgentPreferenceResponse>;
+  rememberConversationAgent: (
+    profileId: string,
+  ) => Promise<ConversationAgentPreferenceResponse>;
 }
 
 export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
@@ -94,6 +110,8 @@ export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
   agentlet: null,
   agentDefaults: null,
   defaultsError: null,
+  conversationAgent: null,
+  conversationAgentError: null,
   loaded: false,
   error: null,
   loading: false,
@@ -122,9 +140,18 @@ export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
       window.addEventListener('workspace-changed', () => {
         set({ error: null });
         void get().refresh();
+        void get()
+          .loadConversationAgent()
+          .catch(() => undefined);
       });
     }
-    await get().refresh();
+    await Promise.all([
+      get().refresh(),
+      get()
+        .loadConversationAgent()
+        .then(() => undefined)
+        .catch(() => undefined),
+    ]);
   },
   loadDefaults: async () => {
     await defaultsSaveQueue;
@@ -183,6 +210,58 @@ export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
     );
     return request;
   },
+  loadConversationAgent: async () => {
+    await conversationAgentSaveQueue;
+    if (inFlightConversationAgent) return inFlightConversationAgent;
+    const revision = conversationAgentRevision;
+    const request = getConversationAgentPreference().then(
+      async (response) => {
+        if (revision !== conversationAgentRevision) {
+          inFlightConversationAgent = null;
+          return get().loadConversationAgent();
+        }
+        conversationAgentRevision++;
+        set({
+          conversationAgent: response,
+          conversationAgentError: null,
+        });
+        return response;
+      },
+      (error) => {
+        if (revision === conversationAgentRevision) {
+          set({
+            conversationAgentError:
+              error instanceof Error ? error : new Error(String(error)),
+          });
+        }
+        throw error;
+      },
+    );
+    inFlightConversationAgent = request;
+    const clear = () => {
+      if (inFlightConversationAgent === request) {
+        inFlightConversationAgent = null;
+      }
+    };
+    void request.then(clear, clear);
+    return request;
+  },
+  rememberConversationAgent: (profileId) => {
+    const request = conversationAgentSaveQueue.then(async () => {
+      const response = await updateConversationAgentPreference({ profileId });
+      conversationAgentRevision++;
+      set({
+        conversationAgent: response,
+        conversationAgentError: null,
+      });
+      return response;
+    });
+    conversationAgentSaveQueue = request.then(
+      () => {},
+      () => {},
+    );
+    return request;
+  },
   refresh: async () => {
     await defaultsSaveQueue;
     if (inFlightRefresh) return inFlightRefresh;
@@ -222,12 +301,16 @@ export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
 /** Snapshot only the chat identity; functional-model routing is unrelated. */
 export function getDefaultAgentBinding(): AgentBinding {
   const state = useAcpProfilesStore.getState();
-  if (!state.agentDefaults || state.defaultsError) {
-    throw new Error(i18n.t('errors.agentDefaultsUnavailable'));
+  if (!state.conversationAgent || state.conversationAgentError) {
+    throw new Error(i18n.t('errors.conversationAgentUnavailable'));
   }
-  const profileId = state.agentDefaults?.profileId;
-  if (!profileId) {
-    throw new Error(i18n.t('errors.agentDefaultUnconfigured'));
+  const { effectiveProfileId: profileId, selectionState } =
+    state.conversationAgent;
+  if (!profileId || selectionState === 'unconfigured') {
+    throw new Error(i18n.t('errors.conversationAgentUnconfigured'));
+  }
+  if (selectionState !== 'available') {
+    throw new Error(i18n.t('errors.conversationAgentStale'));
   }
   if (profileId === 'huabu') return { kind: 'internal' };
   const profile = state.profiles.find((entry) => entry.id === profileId);
@@ -240,6 +323,13 @@ export function getDefaultAgentBinding(): AgentBinding {
 
 /** User-initiated creation waits for the canonical server snapshot. */
 export async function loadDefaultAgentBinding(): Promise<AgentBinding> {
-  await useAcpProfilesStore.getState().loadDefaults();
+  await useAcpProfilesStore.getState().loadConversationAgent();
   return getDefaultAgentBinding();
+}
+
+export async function rememberConversationAgentBinding(
+  binding: AgentBinding,
+): Promise<void> {
+  const profileId = binding.kind === 'internal' ? 'huabu' : binding.profileId;
+  await useAcpProfilesStore.getState().rememberConversationAgent(profileId);
 }
