@@ -28,9 +28,8 @@ export interface MountAgentletGatewayOptions {
   /**
    * Override the default authenticator. By default we delegate to
    * {@link getDaemonAuth}, which only accepts connections carrying the
-   * host-injected `connectionToken` set at `mountAgenetes` time. There
-   * is no persistence and no pairing UI: the only legitimate connection
-   * comes from the agentlet we just forked.
+   * host-injected `connectionToken` set at `mountAgenetes` time. Credential
+   * persistence and enrollment policy remain host responsibilities.
    */
   authenticate?: AgentletGatewayOptions['authenticateAgentlet'];
 }

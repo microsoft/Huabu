@@ -31,6 +31,12 @@ Remote Server Basic Auth is separate from Huabu's `SecretStore`. Electron accept
 
 Settings API updates for optional capability credentials use an explicit three-state patch contract: omitting a key preserves the persisted value, a non-empty string sets or replaces it, and `null` removes the value stored by Huabu. Removing a persisted key preserves non-secret provider configuration and does not alter deployment-owned environment variables; an environment fallback may therefore keep the capability available at runtime.
 
+### Agentlet connection token
+
+Settings > Agent > External Agent runtime stores an optional Agentlet connection-token override under `integration:agentlet:connection-token`. The effective value prefers that encrypted SecretStore entry, then non-empty `HUABU_CONNECTION_TOKEN`, then one random 256-bit hexadecimal token generated per server boot. Clearing the entry restores the next fallback and never rewrites deployment environment. Environment-only standalone deployments expose the active source as read-only and reject mutation.
+
+Ordinary reads return only the source (`stored`, `environment`, or `generated`) and SecretStore writability. Plaintext is returned only by the explicit owner-only connection-command action, which places a complete command directly on the clipboard without rendering the token. The response is non-cacheable, but the credential necessarily exists transiently in the HTTP response, renderer memory, clipboard, and the user's shell/process history.
+
 ### Azure AI Vision handwriting OCR
 
 Settings > Capabilities exposes optional handwriting recognition as a compact Azure AI Vision row alongside other Huabu-managed service capabilities, matching the key icon and Set API Key / Update Key interaction used by those services. One click opens visibly labeled Endpoint and API Key inputs in spaced, full-width field groups below the title and description, followed by Save and Cancel, without configuration-source paragraphs or instructional text. The row identifies Azure AI Vision and briefly discloses selected-stroke processing; the endpoint and key must belong to the same Azure resource. Errors and read-only restrictions remain explicit. There is no provider selector, connectivity probe, or generic OCR compatibility claim.

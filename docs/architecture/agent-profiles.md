@@ -23,6 +23,8 @@ Automatic discovery requests workspace preparation. The daemon resolves its own 
 
 Huabu subscribes to machine connection events, includes machines already connected at registration, and invalidates stale results on reconnect, disconnect, and shutdown. After each successful response it synchronously checks and creates automatic defaults through the registry. The check and commit contain no asynchronous gap.
 
+The Agentlet CLI defaults an omitted `--agentlet-id` to the machine hostname, so a copied connection command needs no identity argument for the common personal setup. Different hostnames may share the same Huabu connection token and connect concurrently. If an identity is already online, Gateway rejects the second live connection with guidance to retry using `--agentlet-id <unique-id>` instead of evicting the first machine; once the prior connection is disconnected, the same identity follows the normal reconnect path.
+
 ## Profile identity and customization
 
 A Profile has `id`, `alias`, `agentletId`, `workingDirPath`, a launch configuration, optional `metadata.cliId`, opaque `customData`, and configuration/execution revisions. Launch is either `{ kind: 'acp-command', command }` or a structured `{ kind: 'acp-harness', harnessId, options?: { autoApprove? } }`. Every Profile has exactly one wrapper, derived from this launch union: a command Profile uses the Custom command wrapper; a structured Profile uses its `harnessId`. Neither editable metadata nor command-text inspection determines capabilities. Profile ID, target machine, launch kind, and harness identity are immutable; alias, icon, cwd, and supported launch options are editable. Changing machine or wrapper requires a new Profile.
@@ -98,6 +100,8 @@ Owner-only `POST /api/acp/profile-launch-preview` accepts `{ launch, profileId? 
 The Agent Settings surface presents ordinary Profiles, their existing edit/delete actions, and the agentlet health banner alongside Utility Agent and backend-specific configuration. Opening a Profile editor temporarily focuses that nested view without duplicating or rewriting Profile state. Template/member Config/setup controls are removed. Catalogue, Profile, Utility Agent, and conversational preference endpoints remain owner-only. Shared HTTP contracts remain under `packages/shared/src/types/api/`, with type-only imports in the Web app.
 
 Owner-only `GET/PUT /api/acp/runtime-config` persists the external-agent idle timeout and supervised-daemon process limit in `<HUABU_DATA_DIR>/external-agent-runtime-config.json`; both controls appear under Settings > Agent > External Agent runtime. `maxAgents` defaults to `10` and accepts any positive JavaScript safe integer without a product-defined maximum. Huabu passes it as `--max-agents` whenever the supervised daemon starts; saving does not hot-update or automatically restart the daemon, and manually launched remote daemons continue to use their own CLI argument without a configuration handshake.
+
+The same runtime section owns the masked Agentlet connection-token setting and one-click remote connection command. `GET/PUT /api/acp/connection-token` reports the active source and saves or clears the encrypted override without returning plaintext. `POST /api/acp/connection-command` returns the current origin-derived daemon command only to an authorized owner; the Web app copies it directly and shows transport or loopback warnings without rendering the command.
 
 ## Code entry points
 

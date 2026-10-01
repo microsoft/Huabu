@@ -21,6 +21,7 @@ import {
   acpAgentletRoutes,
   acpProfilesRoutes,
   acpThreadsRoutes,
+  connectionTokenRoutes,
   externalAgentRuntimeConfigRoutes,
   getExternalAgentRuntimeConfig,
   getAgentProfileRegistry,
@@ -373,6 +374,7 @@ app.register(acpAgentletRoutes, { prefix: '/api/acp' });
 app.register(acpAgentCliRoutes, { prefix: '/api/acp' });
 app.register(acpThreadsRoutes, { prefix: '/api/acp' });
 app.register(externalAgentRuntimeConfigRoutes, { prefix: '/api/acp' });
+app.register(connectionTokenRoutes, { prefix: '/api/acp' });
 app.log.info(
   '[acp] agentlet Gateway mounted — embedded agentlet will start on server ready',
 );

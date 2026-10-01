@@ -1,9 +1,9 @@
 /**
  * Agentlet authentication for the embedded Gateway.
  *
- * One Agenetes host manages exactly one agentlet (forked as a child of
- * the server process — see {@link ./daemon-supervisor.ts}). The auth
- * model is correspondingly trivial:
+ * An Agenetes host supervises one local agentlet and may accept additional
+ * remote agentlets that present the same host-owned credential. The auth
+ * model is correspondingly simple:
  *
  *   1. The host supplies a single `connectionToken` at
  *      {@link ../index.ts mountAgenetes} time — a global, non-ephemeral
@@ -41,14 +41,12 @@ import type {
 /**
  * In-memory daemon token + handshake validator.
  *
- * Singleton because there is exactly one bridge per server process.
+ * Singleton because there is exactly one shared credential per host process.
  * The class shape (rather than module-level state) keeps it cheap to
  * instantiate fresh per-test.
  */
 class AcpDaemonAuth {
   private token: string | null = null;
-  private agentletId: string | null = null;
-
   /**
    * Set the active token. Called once by `mountAgenetes` with the
    * host-injected `connectionToken`.
@@ -58,8 +56,7 @@ class AcpDaemonAuth {
   }
 
   /** Configure the identity and token accepted for the supervised daemon. */
-  configure(agentletId: string, token: string): void {
-    this.agentletId = agentletId;
+  configure(_agentletId: string, token: string): void {
     this.token = token;
   }
 
@@ -108,17 +105,13 @@ class AcpDaemonAuth {
   }
 
   /** Validate the Gateway identity/token authentication port. */
-  validateAgentlet(agentletId: string, token: string): AuthResult {
-    if (this.agentletId && agentletId !== this.agentletId) {
-      throw new Error('Invalid supervised agentlet identity');
-    }
+  validateAgentlet(_agentletId: string, token: string): AuthResult {
     return this.validate(token, {} as AgentletHelloParams);
   }
 
   /** Test/teardown helper — drops the in-memory token. */
   close(): void {
     this.token = null;
-    this.agentletId = null;
   }
 }
 

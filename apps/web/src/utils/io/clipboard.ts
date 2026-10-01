@@ -192,8 +192,9 @@ export const copyToClipboard = async (text: string) => {
   textarea.style.left = '-1000px';
   document.body.appendChild(textarea);
   textarea.select();
-  document.execCommand('copy');
+  const copied = document.execCommand('copy');
   document.body.removeChild(textarea);
+  if (!copied) throw new Error('Clipboard write failed');
 };
 
 async function fetchImageAsPng(src: string): Promise<Blob> {

@@ -1,18 +1,26 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { Info } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import {
+  createAgentletConnectionCommand,
+  getConnectionTokenConfig,
   getExternalAgentRuntimeConfig,
+  updateConnectionToken,
   updateExternalAgentRuntimeConfig,
 } from '@/api/acp';
 import { Button } from '@/components/Common/Button';
 import { Input } from '@/components/Common/Input';
 import { Select } from '@/components/Common/Select';
+import { TextInput } from '@/components/Common/TextInput';
 import { toast } from '@/components/Common/Toast';
 import { SettingRow } from '@/components/Settings/Common/SettingRow';
+import { copyToClipboard } from '@/utils/io/clipboard';
+
+import type { ConnectionTokenConfig } from '@huabu/shared';
 
 const IDLE_TIMEOUT_PRESETS = new Set(['0', '300', '600', '1800', '3600']);
 
@@ -25,6 +33,13 @@ export function ExternalAgentRuntimeSettings() {
   const [customMinutes, setCustomMinutes] = useState('10');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [tokenConfig, setTokenConfig] = useState<ConnectionTokenConfig | null>(
+    null,
+  );
+  const [tokenInput, setTokenInput] = useState('');
+  const [tokenLoading, setTokenLoading] = useState(true);
+  const [tokenSaving, setTokenSaving] = useState(false);
+  const [copyingCommand, setCopyingCommand] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -53,6 +68,29 @@ export function ExternalAgentRuntimeSettings() {
       })
       .finally(() => {
         if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [t]);
+
+  useEffect(() => {
+    let active = true;
+    void getConnectionTokenConfig()
+      .then((config) => {
+        if (active) setTokenConfig(config);
+      })
+      .catch((error) => {
+        if (!active) return;
+        toast(
+          error instanceof Error
+            ? error.message
+            : t('settings.agentletTokenLoadFailed'),
+          { tone: 'danger' },
+        );
+      })
+      .finally(() => {
+        if (active) setTokenLoading(false);
       });
     return () => {
       active = false;
@@ -135,8 +173,153 @@ export function ExternalAgentRuntimeSettings() {
     parsedCustomMinutes >= 1 &&
     parsedCustomMinutes <= 1440;
 
+  const saveConnectionToken = useCallback(async () => {
+    const token = tokenInput.trim();
+    if (!token || !tokenConfig?.writable) return;
+    setTokenSaving(true);
+    try {
+      setTokenConfig(await updateConnectionToken({ token }));
+      setTokenInput('');
+      toast(t('settings.agentletTokenSaved'), { tone: 'success' });
+    } catch (error) {
+      toast(
+        error instanceof Error
+          ? error.message
+          : t('settings.agentletTokenSaveFailed'),
+        { tone: 'danger' },
+      );
+    } finally {
+      setTokenSaving(false);
+    }
+  }, [t, tokenConfig?.writable, tokenInput]);
+
+  const clearConnectionToken = useCallback(async () => {
+    if (!tokenConfig?.writable) return;
+    setTokenSaving(true);
+    try {
+      setTokenConfig(await updateConnectionToken({ token: null }));
+      setTokenInput('');
+      toast(t('settings.agentletTokenCleared'), { tone: 'success' });
+    } catch (error) {
+      toast(
+        error instanceof Error
+          ? error.message
+          : t('settings.agentletTokenSaveFailed'),
+        { tone: 'danger' },
+      );
+    } finally {
+      setTokenSaving(false);
+    }
+  }, [t, tokenConfig?.writable]);
+
+  const copyConnectionCommand = useCallback(async () => {
+    setCopyingCommand(true);
+    try {
+      const result = await createAgentletConnectionCommand();
+      await copyToClipboard(result.command);
+      const warningKey = result.warnings.includes('insecure')
+        ? 'settings.agentletCommandCopiedInsecure'
+        : result.warnings.includes('loopback')
+          ? 'settings.agentletCommandCopiedLoopback'
+          : 'settings.agentletCommandCopied';
+      toast(t(warningKey), {
+        tone: result.warnings.length > 0 ? 'warning' : 'success',
+      });
+    } catch (error) {
+      toast(
+        error instanceof Error
+          ? error.message
+          : t('settings.agentletCommandCopyFailed'),
+        { tone: 'danger' },
+      );
+    } finally {
+      setCopyingCommand(false);
+    }
+  }, [t]);
+
   return (
     <>
+      <SettingRow
+        title={
+          <span className="flex items-center gap-1">
+            {t('settings.agentletConnectionToken')}
+            <Button
+              variant="ghost"
+              size="sm"
+              iconOnly
+              title={t('settings.agentletConnectionTokenSecurityInfo')}
+              aria-label={t('settings.agentletConnectionTokenSecurityInfo')}
+            >
+              <Info />
+            </Button>
+          </span>
+        }
+        description={
+          tokenConfig
+            ? t('settings.agentletConnectionTokenDescription', {
+                source: t(`settings.agentletTokenSource.${tokenConfig.source}`),
+                access: tokenConfig.writable
+                  ? ''
+                  : t('settings.agentletTokenReadOnly'),
+              })
+            : t('settings.agentletConnectionTokenDescriptionLoading')
+        }
+      >
+        <div className="flex max-w-lg flex-wrap items-center justify-end gap-2">
+          <TextInput
+            id="agentlet-connection-token"
+            className="w-56"
+            type="password"
+            value={tokenInput}
+            onChange={(event) => setTokenInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') void saveConnectionToken();
+            }}
+            placeholder={t('settings.agentletConnectionTokenPlaceholder')}
+            aria-label={t('settings.agentletConnectionToken')}
+            autoComplete="new-password"
+            maxLength={512}
+            disabled={
+              tokenLoading || tokenSaving || tokenConfig?.writable !== true
+            }
+          />
+          <Button
+            variant="outline"
+            tone="info"
+            size="sm"
+            onClick={() => void saveConnectionToken()}
+            disabled={
+              !tokenInput.trim() ||
+              tokenLoading ||
+              tokenSaving ||
+              tokenConfig?.writable !== true
+            }
+          >
+            {t('settings.saveChanges')}
+          </Button>
+          {tokenConfig?.source === 'stored' ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void clearConnectionToken()}
+              disabled={tokenSaving || !tokenConfig.writable}
+            >
+              {t('settings.agentletTokenClear')}
+            </Button>
+          ) : null}
+          <Button
+            variant="outline"
+            tone="info"
+            size="sm"
+            onClick={() => void copyConnectionCommand()}
+            disabled={tokenLoading || copyingCommand || !tokenConfig}
+          >
+            {copyingCommand
+              ? t('settings.agentletCommandCopying')
+              : t('settings.agentletCommandCopy')}
+          </Button>
+        </div>
+      </SettingRow>
       <SettingRow
         title={t('settings.externalAgentIdleTimeout')}
         description={t('settings.externalAgentIdleTimeoutDescription')}

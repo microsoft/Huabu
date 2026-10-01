@@ -11,7 +11,9 @@ The owner may perform Settings, OAuth, credential, External Agent Profile and ha
 - the request's direct TCP peer is loopback;
 - the request passed Huabu's configured HTTP Basic Auth gate.
 
-The connection token is a separate machine credential used by RFS and the embedded Agentlet transport. Its generation and injection are independent of browser owner authentication.
+The connection token is a separate high-privilege machine credential shared by the complete read/write RFS surface and the embedded or remote Agentlet control and relay transports. Its generation and injection are independent of browser owner authentication; possession grants both Agentlet attachment and Space data access.
+
+Owner-only `GET/PUT /api/acp/connection-token` exposes masked source metadata and changes the encrypted override. Owner-only `POST /api/acp/connection-command` is the deliberate reveal boundary: it derives the Agentlet endpoint from the browser origin and returns a complete command with no-store headers for direct clipboard use. Copying makes the token available to the clipboard and later shell/process history. An HTTP-derived command requires `--allow-insecure` and is appropriate only on a trusted network; loopback commands remain available for same-host, Windows/WSL, container, virtual-machine, or forwarded setups and carry a warning.
 
 The global Agent Change Review configuration follows the same owner boundary. `GET` and `PUT /api/agent-change-review/config` are available only to loopback or Basic-authenticated owner requests; possession of the RFS connection token does not authorize reading or changing the automatic-acceptance policy.
 

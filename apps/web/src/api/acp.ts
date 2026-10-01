@@ -18,6 +18,8 @@
  *     recipes with revision-checked launch and working-directory edits.
  *  - `POST /api/acp/profile-launch-preview` — daemon-built launch preview.
  *  - `GET/POST /api/acp/daemon` — daemon liveness + manual restart.
+ *  - `GET/PUT /api/acp/connection-token` — masked credential configuration.
+ *  - `POST /api/acp/connection-command` — explicit owner-only command reveal.
  *  - `GET /api/acp/threads/:threadId/cached-meta` — cached capabilities.
  *  - thread control POSTs — canonical realization plus per-session knobs.
  */
@@ -45,6 +47,9 @@ import type {
   SetAcpSessionModeRequest,
   SetAcpSessionModeResponse,
   ExternalAgentRuntimeConfig,
+  ConnectionTokenConfig,
+  ConnectionTokenUpdate,
+  AgentletConnectionCommandResponse,
   WarmAcpSessionRequest,
   WarmAcpSessionResponse,
 } from '@huabu/shared';
@@ -76,6 +81,9 @@ export type {
   SetAcpSessionModeRequest,
   SetAcpSessionModeResponse,
   ExternalAgentRuntimeConfig,
+  ConnectionTokenConfig,
+  ConnectionTokenUpdate,
+  AgentletConnectionCommandResponse,
   WarmAcpSessionRequest,
   WarmAcpSessionResponse,
 } from '@huabu/shared';
@@ -197,6 +205,33 @@ export async function updateExternalAgentRuntimeConfig(
     json: config,
     fallbackMessage: 'Failed to update external-agent runtime settings',
   });
+}
+
+export async function getConnectionTokenConfig(): Promise<ConnectionTokenConfig> {
+  return apiFetch<ConnectionTokenConfig>(routes.acpConnectionToken, {
+    fallbackMessage: 'Failed to read the Agentlet connection token settings',
+  });
+}
+
+export async function updateConnectionToken(
+  update: ConnectionTokenUpdate,
+): Promise<ConnectionTokenConfig> {
+  return apiFetch<ConnectionTokenConfig>(routes.acpConnectionToken, {
+    method: 'PUT',
+    json: update,
+    fallbackMessage: 'Failed to update the Agentlet connection token',
+  });
+}
+
+export async function createAgentletConnectionCommand(): Promise<AgentletConnectionCommandResponse> {
+  return apiFetch<AgentletConnectionCommandResponse>(
+    routes.acpConnectionCommand,
+    {
+      method: 'POST',
+      json: { origin: window.location.origin },
+      fallbackMessage: 'Failed to create the Agentlet connection command',
+    },
+  );
 }
 
 /**

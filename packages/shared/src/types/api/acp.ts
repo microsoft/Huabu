@@ -534,6 +534,47 @@ export const acpAgentletStatusSchema = agentletStatusSchema;
 /** @deprecated Use {@link acpAgentletStatusSchema} instead. */
 export const acpDaemonStatusSchema = acpAgentletStatusSchema;
 
+export const connectionTokenSourceSchema = z.enum([
+  'stored',
+  'environment',
+  'generated',
+]);
+export type ConnectionTokenSource = z.infer<typeof connectionTokenSourceSchema>;
+
+export const connectionTokenConfigSchema = z.object({
+  source: connectionTokenSourceSchema,
+  writable: z.boolean(),
+});
+export type ConnectionTokenConfig = z.infer<typeof connectionTokenConfigSchema>;
+
+export const connectionTokenUpdateSchema = z.object({
+  token: z.string().trim().min(1).max(512).nullable(),
+});
+export type ConnectionTokenUpdate = z.infer<typeof connectionTokenUpdateSchema>;
+
+export const agentletConnectionCommandRequestSchema = z.object({
+  origin: z.url().max(2048),
+});
+export type AgentletConnectionCommandRequest = z.infer<
+  typeof agentletConnectionCommandRequestSchema
+>;
+
+export const agentletConnectionCommandWarningSchema = z.enum([
+  'loopback',
+  'insecure',
+]);
+export type AgentletConnectionCommandWarning = z.infer<
+  typeof agentletConnectionCommandWarningSchema
+>;
+
+export const agentletConnectionCommandResponseSchema = z.object({
+  command: z.string().min(1),
+  warnings: z.array(agentletConnectionCommandWarningSchema),
+});
+export type AgentletConnectionCommandResponse = z.infer<
+  typeof agentletConnectionCommandResponseSchema
+>;
+
 /** Schema mirror of {@link AcpProfilesListResponse}. */
 export const acpProfilesListResponseSchema = z.object({
   profiles: z.array(agentProfileSchema),
