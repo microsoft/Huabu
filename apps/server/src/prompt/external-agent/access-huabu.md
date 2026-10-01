@@ -242,7 +242,7 @@ Use an Agent when open-ended work benefits from interpretation or a durable visi
 
 ### 8.1 Create and start an Agent
 
-Plain text creates a visible Agent with the external Profile selected in Global Settings and immediately submits its first prompt. An unconfigured or deleted default produces an explicit error; no other Profile is substituted:
+Plain text creates a visible Agent with the first selectable external Profile and immediately submits its first prompt. This server-side fallback does not read the Web client's browser-local recent selection:
 
 ```bash
 SSE="$(curl -fsS -N -H "$AUTH" -H "Content-Type: text/plain" \

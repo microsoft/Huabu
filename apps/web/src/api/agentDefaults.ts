@@ -5,10 +5,6 @@ import { apiFetch } from './_client';
 import { routes } from './_routes';
 
 import type { AgentDefaults, AgentDefaultsResponse } from '@huabu/shared';
-import type {
-  ConversationAgentPreference,
-  ConversationAgentPreferenceResponse,
-} from '@huabu/shared';
 
 export function getAgentDefaults(): Promise<AgentDefaultsResponse> {
   return apiFetch(routes.agentDefaults, {
@@ -23,21 +19,5 @@ export function updateAgentDefaults(
     method: 'PUT',
     json: config,
     fallbackMessage: 'Failed to save Agent defaults',
-  });
-}
-
-export function getConversationAgentPreference(): Promise<ConversationAgentPreferenceResponse> {
-  return apiFetch(routes.conversationAgent, {
-    fallbackMessage: 'Failed to load conversation Agent preference',
-  });
-}
-
-export function updateConversationAgentPreference(
-  preference: ConversationAgentPreference,
-): Promise<ConversationAgentPreferenceResponse> {
-  return apiFetch(routes.conversationAgent, {
-    method: 'PUT',
-    json: preference,
-    fallbackMessage: 'Failed to save conversation Agent preference',
   });
 }

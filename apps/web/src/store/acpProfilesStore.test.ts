@@ -7,31 +7,24 @@ const listProfiles = vi.hoisted(() => vi.fn());
 const api = vi.hoisted(() => ({
   getDefaults: vi.fn(),
   updateDefaults: vi.fn(),
-  getConversation: vi.fn(),
-  updateConversation: vi.fn(),
   toast: vi.fn(),
 }));
 vi.mock('@/api/acp', () => ({ listAcpProfiles: listProfiles }));
 vi.mock('@/api/agentDefaults', () => ({
   getAgentDefaults: api.getDefaults,
   updateAgentDefaults: api.updateDefaults,
-  getConversationAgentPreference: api.getConversation,
-  updateConversationAgentPreference: api.updateConversation,
 }));
 vi.mock('@/components/Common/Toast', () => ({ toast: api.toast }));
 
 import {
   getDefaultAgentBinding,
   loadDefaultAgentBinding,
+  RECENT_CONVERSATION_AGENT_STORAGE_KEY,
   rememberConversationAgentBinding,
   useAcpProfilesStore,
 } from './acpProfilesStore';
 
-import type {
-  AgentDefaults,
-  AgentDefaultsResponse,
-  ConversationAgentPreferenceResponse,
-} from '@huabu/shared';
+import type { AgentDefaults, AgentDefaultsResponse } from '@huabu/shared';
 
 const profile = {
   id: 'profile-default',
@@ -47,22 +40,8 @@ const snapshot = {
   agentDefaults: { profileId: 'huabu', functionalModel: 'utility-only' },
 };
 
-function conversation(
-  profileId: string | null,
-  selectionState:
-    | 'unconfigured'
-    | 'deleted'
-    | 'offline'
-    | 'available' = profileId ? 'available' : 'unconfigured',
-): ConversationAgentPreferenceResponse {
-  return {
-    preference: { profileId },
-    effectiveProfileId: profileId,
-    selectionState,
-  };
-}
-
 beforeEach(() => {
+  localStorage.clear();
   listProfiles.mockReset().mockResolvedValue(snapshot);
   api.getDefaults.mockReset().mockResolvedValue({
     defaults: snapshot.agentDefaults,
@@ -76,26 +55,20 @@ beforeEach(() => {
       modelCapability: 'unknown',
     }),
   );
-  api.getConversation.mockReset().mockResolvedValue(conversation(profile.id));
-  api.updateConversation
-    .mockReset()
-    .mockImplementation(async ({ profileId }: { profileId: string | null }) =>
-      conversation(profileId),
-    );
   api.toast.mockReset();
   useAcpProfilesStore.setState({
     loaded: false,
     error: null,
     profiles: [profile],
+    selectableProfileIds: [profile.id],
     agentDefaults: null,
     defaultsError: null,
-    conversationAgent: null,
-    conversationAgentError: null,
+    recentConversationProfileId: null,
   });
 });
 
-describe('conversation Agent snapshot', () => {
-  it('deduplicates canonical preference loading and resolves the effective Profile', async () => {
+describe('browser-local recent conversation Agent', () => {
+  it('deduplicates Profile refresh and resolves the first selectable Profile', async () => {
     const [first, second] = await Promise.all([
       loadDefaultAgentBinding(),
       loadDefaultAgentBinding(),
@@ -106,26 +79,15 @@ describe('conversation Agent snapshot', () => {
       alias: profile.alias,
     });
     expect(second).toEqual(first);
-    expect(api.getConversation).toHaveBeenCalledOnce();
+    expect(listProfiles).toHaveBeenCalledOnce();
     expect(api.getDefaults).not.toHaveBeenCalled();
   });
 
-  it.each(['deleted', 'offline'] as const)(
-    'rejects a %s recently used Profile instead of silently falling back',
-    async (selectionState) => {
-      api.getConversation.mockResolvedValueOnce(
-        conversation('stale-profile', selectionState),
-      );
-      await expect(loadDefaultAgentBinding()).rejects.toThrow();
-      expect(() => getDefaultAgentBinding()).toThrow();
-    },
-  );
-
-  it('accepts the server-projected first Profile when no preference exists', async () => {
-    api.getConversation.mockResolvedValueOnce({
-      preference: { profileId: null },
-      effectiveProfileId: profile.id,
-      selectionState: 'available',
+  it('falls back to the first selectable Profile when the local cache is stale', async () => {
+    await rememberConversationAgentBinding({
+      kind: 'external',
+      profileId: 'stale-profile',
+      alias: 'Stale',
     });
     await expect(loadDefaultAgentBinding()).resolves.toMatchObject({
       kind: 'external',
@@ -134,7 +96,7 @@ describe('conversation Agent snapshot', () => {
   });
 
   it('supports Built-In Pi as an explicit conversational choice', async () => {
-    api.getConversation.mockResolvedValueOnce(conversation('huabu'));
+    await rememberConversationAgentBinding({ kind: 'internal' });
     await expect(loadDefaultAgentBinding()).resolves.toEqual({
       kind: 'internal',
     });
@@ -146,9 +108,9 @@ describe('conversation Agent snapshot', () => {
       profileId: profile.id,
       alias: profile.alias,
     });
-    expect(api.updateConversation).toHaveBeenCalledWith({
-      profileId: profile.id,
-    });
+    expect(localStorage.getItem(RECENT_CONVERSATION_AGENT_STORAGE_KEY)).toBe(
+      profile.id,
+    );
     expect(getDefaultAgentBinding()).toMatchObject({
       profileId: profile.id,
     });
@@ -167,28 +129,15 @@ describe('conversation Agent snapshot', () => {
     });
   });
 
-  it('serializes conversational choices so the last explicit selection wins', async () => {
-    let finish!: (response: ConversationAgentPreferenceResponse) => void;
-    api.updateConversation.mockImplementationOnce(
-      () =>
-        new Promise<ConversationAgentPreferenceResponse>((resolve) => {
-          finish = resolve;
-        }),
+  it('keeps the last explicit browser selection', () => {
+    useAcpProfilesStore.getState().rememberConversationAgent('first');
+    useAcpProfilesStore.getState().rememberConversationAgent('second');
+    expect(useAcpProfilesStore.getState().recentConversationProfileId).toBe(
+      'second',
     );
-    const first = useAcpProfilesStore
-      .getState()
-      .rememberConversationAgent('first');
-    const second = useAcpProfilesStore
-      .getState()
-      .rememberConversationAgent('second');
-    await Promise.resolve();
-    expect(api.updateConversation).toHaveBeenCalledTimes(1);
-    finish(conversation('first'));
-    await Promise.all([first, second]);
-    expect(
-      api.updateConversation.mock.calls.map(([value]) => value.profileId),
-    ).toEqual(['first', 'second']);
-    expect(getDefaultAgentBinding()).toMatchObject({ profileId: 'second' });
+    expect(localStorage.getItem(RECENT_CONVERSATION_AGENT_STORAGE_KEY)).toBe(
+      'second',
+    );
   });
 });
 

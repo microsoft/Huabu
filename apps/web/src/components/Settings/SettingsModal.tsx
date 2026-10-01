@@ -56,7 +56,7 @@ interface SettingsModalProps {
  * pane, so the panel height stays fixed as more settings are added.
  *
  * Each tab renders the existing self-contained `*Settings` components:
- *  - **Agent** — global defaults, Built-In Pi setup, external Profiles, and behavior
+ *  - **Agent** — Utility Agent, Built-In Pi setup, external Profiles, and behavior
  *  - **Capabilities** — Huabu-owned image, search, transcript, and OCR services
  *  - **General** — application, canvas, input, and update preferences
  *

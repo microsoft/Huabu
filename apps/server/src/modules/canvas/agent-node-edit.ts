@@ -14,9 +14,9 @@ import { agenetes } from '../agent/agenetes/drivers.js';
 import { parseAgentLaunchOverrides } from '../agent/agent-launch-overrides.js';
 import { agentNodeBinding } from '../agent/agent-node-binding.js';
 import { agentThreadResolver } from '../agent/agent-thread-resolver.js';
-import { getEffectiveConversationAgentProfileId } from '../agent/conversation-agent.js';
 import { effectiveConversationTitle } from '../agent/conversation-title.service.js';
 import {
+  getFirstSelectableAgentProfileId,
   requireSelectableAgentProfile,
   SelectableAgentProfileError,
   type SelectableAgentProfile,
@@ -43,7 +43,7 @@ export function withDefaultAgentBinding(
   data: Record<string, unknown>,
 ): Record<string, unknown> {
   if (data.agentBinding) return data;
-  const profileId = getEffectiveConversationAgentProfileId();
+  const profileId = getFirstSelectableAgentProfileId();
   if (!profileId) {
     throw new AgentNodeEditError(
       'Connect an external Agent before creating a conversation.',

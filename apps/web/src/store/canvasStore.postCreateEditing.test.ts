@@ -3,14 +3,13 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const getConversationAgent = vi.hoisted(() => vi.fn());
+const listProfiles = vi.hoisted(() => vi.fn());
 vi.mock('@/components/Common/Toast', () => ({ toast: vi.fn() }));
-vi.mock('@/api/agentDefaults', () => ({
-  getConversationAgentPreference: getConversationAgent,
-}));
+vi.mock('@/api/acp', () => ({ listAcpProfiles: listProfiles }));
 
 import { toast } from '@/components/Common/Toast';
 
+import { useAcpProfilesStore } from './acpProfilesStore';
 import useCanvasStore from './canvasStore';
 import { useChatStore } from './chatStore';
 import { usePanelStore } from './panelStore';
@@ -30,6 +29,21 @@ import {
 const expandedNodeId = () =>
   selectActiveNodeId(usePreviewWorkspaceStore.getState());
 
+const profileSnapshot = {
+  profiles: [
+    {
+      id: 'global-profile',
+      alias: 'Global Profile',
+      agentletId: 'machine',
+      workingDirPath: '/workspace',
+      launch: { kind: 'acp-command' as const, command: 'agent' },
+    },
+  ],
+  selectableProfileIds: ['global-profile'],
+  agentlet: null,
+  agentDefaults: null,
+};
+
 function resetStore() {
   useCanvasStore.getState()._setStateNoAutosave({
     nodes: [],
@@ -48,16 +62,19 @@ function resetStore() {
     isRightCollapsed: true,
     focusChatInputRequest: null,
   });
+  useAcpProfilesStore.setState({
+    profiles: [],
+    selectableProfileIds: [],
+    recentConversationProfileId: null,
+    loaded: false,
+    error: null,
+  });
 }
 
 beforeEach(() => {
   vi.useFakeTimers();
   vi.mocked(toast).mockClear();
-  getConversationAgent.mockResolvedValue({
-    preference: { profileId: 'global-profile' },
-    effectiveProfileId: 'global-profile',
-    selectionState: 'available',
-  });
+  listProfiles.mockReset().mockResolvedValue(profileSnapshot);
   resetStore();
 });
 
@@ -88,7 +105,7 @@ describe('post-create editing', () => {
   });
 
   it('focuses the most recently active existing Chat', async () => {
-    getConversationAgent.mockClear();
+    listProfiles.mockClear();
     const preview = usePreviewWorkspaceStore.getState();
     const first = preview.openPreviewTarget({
       kind: 'chat',
@@ -114,14 +131,14 @@ describe('post-create editing', () => {
     expect(
       usePreviewWorkspaceStore.getState().workspace.tabs[second],
     ).toBeDefined();
-    expect(getConversationAgent).not.toHaveBeenCalled();
+    expect(listProfiles).not.toHaveBeenCalled();
   });
 
   it('prompts to configure defaults without creating a fallback Chat', async () => {
-    getConversationAgent.mockResolvedValueOnce({
-      preference: { profileId: null },
-      effectiveProfileId: null,
-      selectionState: 'unconfigured',
+    listProfiles.mockResolvedValueOnce({
+      ...profileSnapshot,
+      profiles: [],
+      selectableProfileIds: [],
     });
     const threads = useChatStore.getState().threadsById;
     expect(await openChat()).toBe('');
@@ -133,7 +150,7 @@ describe('post-create editing', () => {
 
   it('does not open a delayed Chat in a different Canvas or changed workspace', async () => {
     let resolve!: (value: unknown) => void;
-    getConversationAgent.mockReturnValueOnce(
+    listProfiles.mockReturnValueOnce(
       new Promise((done) => {
         resolve = done;
       }),
@@ -141,11 +158,7 @@ describe('post-create editing', () => {
     const threads = useChatStore.getState().threadsById;
     const pending = openNewChat();
     openPreviewNode('node-note');
-    resolve({
-      preference: { profileId: 'global-profile' },
-      effectiveProfileId: 'global-profile',
-      selectionState: 'available',
-    });
+    resolve(profileSnapshot);
     expect(await pending).toBe('');
     expect(useChatStore.getState().threadsById).toBe(threads);
     expect(expandedNodeId()).toBe('node-note');

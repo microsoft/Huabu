@@ -850,17 +850,7 @@ export const ChatPanel = ({
         }
       }
       if (!activeConversationView) {
-        try {
-          await rememberConversationAgentBinding(choice.binding);
-        } catch (error) {
-          toast(
-            error instanceof Error
-              ? error.message
-              : 'Failed to save recent Agent selection',
-            { tone: 'danger' },
-          );
-          return;
-        }
+        rememberConversationAgentBinding(choice.binding);
       }
       setAgentBinding(threadId, choice.binding, canvasId || undefined);
       setThreadLastAction(threadId, choice.mode);

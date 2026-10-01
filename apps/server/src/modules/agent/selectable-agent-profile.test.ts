@@ -24,45 +24,24 @@ describe('listAvailableAgentProfiles', () => {
     ]);
 
     expect(
-      listAvailableAgentProfiles(
-        {
-          getProfile: (id: string) => profiles.get(id),
-          listSelectableProfileIds: () => ['profile-a', 'profile-b'],
-        },
-        'profile-b',
-      ),
+      listAvailableAgentProfiles({
+        getProfile: (id: string) => profiles.get(id),
+        listSelectableProfileIds: () => ['profile-a', 'profile-b'],
+      }),
     ).toEqual([
       { id: 'huabu', alias: 'Built-In Pi' },
-      { id: 'profile-a', alias: 'Researcher' },
-      { id: 'profile-b', alias: 'Builder', default: true },
+      { id: 'profile-a', alias: 'Researcher', default: true },
+      { id: 'profile-b', alias: 'Builder' },
     ]);
   });
 
   it('keeps the Huabu Profile available while the registry is unavailable', () => {
-    expect(listAvailableAgentProfiles(null, null)).toEqual([
+    expect(listAvailableAgentProfiles(null)).toEqual([
       { id: 'huabu', alias: 'Built-In Pi' },
-    ]);
-  });
-
-  it('does not mark another Profile as default when the selected one is missing', () => {
-    expect(
-      listAvailableAgentProfiles(
-        {
-          getProfile: () => ({ id: 'other', alias: 'Other' }),
-          listSelectableProfileIds: () => ['other'],
-        },
-        'deleted',
-      ),
-    ).toEqual([
-      { id: 'huabu', alias: 'Built-In Pi' },
-      { id: 'other', alias: 'Other' },
     ]);
   });
 
   it('accepts the Huabu Profile without an external registry', () => {
     expect(() => requireAvailableAgentProfile('huabu', null)).not.toThrow();
-    expect(listAvailableAgentProfiles(null, 'huabu')).toEqual([
-      { id: 'huabu', alias: 'Built-In Pi', default: true },
-    ]);
   });
 });

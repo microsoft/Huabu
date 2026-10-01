@@ -29,13 +29,11 @@ const mocks = vi.hoisted(() => ({
   captureGrounding: vi.fn(),
   blobToDataUrl: vi.fn(),
   getViewport: vi.fn(),
-  getConversationAgent: vi.fn(),
+  listProfiles: vi.fn(),
   popoverAnchor: null as unknown,
 }));
 
-vi.mock('@/api/agentDefaults', () => ({
-  getConversationAgentPreference: mocks.getConversationAgent,
-}));
+vi.mock('@/api/acp', () => ({ listAcpProfiles: mocks.listProfiles }));
 vi.mock('@/components/Common/Toast', () => ({ toast: vi.fn() }));
 
 vi.mock('@xyflow/react', async (original) => ({
@@ -147,21 +145,18 @@ beforeEach(() => {
   ];
   useAcpProfilesStore.setState({
     profiles,
+    selectableProfileIds: ['default-profile'],
     agentDefaults: { profileId: 'default-profile', functionalModel: '' },
-    conversationAgent: {
-      preference: { profileId: 'default-profile' },
-      effectiveProfileId: 'default-profile',
-      selectionState: 'available',
-    },
-    conversationAgentError: null,
+    recentConversationProfileId: 'default-profile',
     loaded: true,
     error: null,
     defaultsError: null,
   });
-  mocks.getConversationAgent.mockReset().mockResolvedValue({
-    preference: { profileId: 'default-profile' },
-    effectiveProfileId: 'default-profile',
-    selectionState: 'available',
+  mocks.listProfiles.mockReset().mockResolvedValue({
+    profiles,
+    selectableProfileIds: ['default-profile'],
+    agentlet: null,
+    agentDefaults: null,
   });
   useGesturePreviewStore.setState({
     sketchStrokeSelection: { 'sketch-1': ['stroke-1'] },
@@ -217,11 +212,11 @@ afterEach(() => {
 });
 
 describe('StrokeSelectionToolbar Ink submission', () => {
-  it('loads and snapshots the default external Profile for a new Ink Question', async () => {
+  it('loads and snapshots the browser fallback for a new Ink Question', async () => {
     mocks.dispatch.mockResolvedValueOnce({ status: 'completed' });
     const button = await renderToolbar();
     await act(async () => button.click());
-    expect(mocks.getConversationAgent).toHaveBeenCalledOnce();
+    expect(mocks.listProfiles).toHaveBeenCalledOnce();
     expect(mocks.createQuestion).toHaveBeenCalledWith(
       expect.objectContaining({
         binding: {
@@ -238,10 +233,8 @@ describe('StrokeSelectionToolbar Ink submission', () => {
     );
   });
 
-  it('keeps the Ink selection and creates nothing when defaults are unavailable', async () => {
-    mocks.getConversationAgent.mockRejectedValueOnce(
-      new Error('Server unavailable'),
-    );
+  it('keeps the Ink selection and creates nothing when Profiles are unavailable', async () => {
+    mocks.listProfiles.mockRejectedValueOnce(new Error('Server unavailable'));
     const button = await renderToolbar();
     await act(async () => button.click());
     expect(mocks.createQuestion).not.toHaveBeenCalled();
@@ -256,12 +249,8 @@ describe('StrokeSelectionToolbar Ink submission', () => {
     );
   });
 
-  it('restores operate mode for new Ink Questions with a Built-In default', async () => {
-    mocks.getConversationAgent.mockResolvedValueOnce({
-      preference: { profileId: 'huabu' },
-      effectiveProfileId: 'huabu',
-      selectionState: 'available',
-    });
+  it('restores operate mode for new Ink Questions with a recent Built-In selection', async () => {
+    useAcpProfilesStore.setState({ recentConversationProfileId: 'huabu' });
     const button = await renderToolbar();
     await act(async () => button.click());
     expect(mocks.createQuestion).toHaveBeenCalledWith(
@@ -275,11 +264,12 @@ describe('StrokeSelectionToolbar Ink submission', () => {
     );
   });
 
-  it('requires a configured default instead of falling back to the internal Agent', async () => {
-    mocks.getConversationAgent.mockResolvedValueOnce({
-      preference: { profileId: null },
-      effectiveProfileId: null,
-      selectionState: 'unconfigured',
+  it('requires an external Profile instead of falling back to the internal Agent', async () => {
+    mocks.listProfiles.mockResolvedValueOnce({
+      profiles: [],
+      selectableProfileIds: [],
+      agentlet: null,
+      agentDefaults: null,
     });
     const button = await renderToolbar();
     await act(async () => button.click());
@@ -292,7 +282,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
     'does not create an Ink Question after %s changes during default loading',
     async (change) => {
       let resolveDefaults!: (value: unknown) => void;
-      mocks.getConversationAgent.mockImplementationOnce(
+      mocks.listProfiles.mockImplementationOnce(
         () =>
           new Promise((resolve) => {
             resolveDefaults = resolve;
@@ -312,9 +302,10 @@ describe('StrokeSelectionToolbar Ink submission', () => {
           });
         }
         resolveDefaults({
-          preference: { profileId: 'default-profile' },
-          effectiveProfileId: 'default-profile',
-          selectionState: 'available',
+          profiles: useAcpProfilesStore.getState().profiles,
+          selectableProfileIds: ['default-profile'],
+          agentlet: null,
+          agentDefaults: null,
         });
       });
       expect(mocks.createQuestion).not.toHaveBeenCalled();
@@ -609,7 +600,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
     expect(mocks.prepare).toHaveBeenCalledWith(
       expect.objectContaining({ mode: 'operate' }),
     );
-    expect(mocks.getConversationAgent).not.toHaveBeenCalled();
+    expect(mocks.listProfiles).not.toHaveBeenCalled();
     expect(mocks.createQuestion).not.toHaveBeenCalled();
   });
 
@@ -655,7 +646,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
         }),
       }),
     );
-    expect(mocks.getConversationAgent).not.toHaveBeenCalled();
+    expect(mocks.listProfiles).not.toHaveBeenCalled();
   });
 
   it('creates and dispatches at most once for rapid activation', async () => {
@@ -712,7 +703,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
 
     expect(mocks.createQuestion).toHaveBeenCalledTimes(1);
     expect(mocks.dispatch).toHaveBeenCalledTimes(2);
-    expect(mocks.getConversationAgent).toHaveBeenCalledTimes(1);
+    expect(mocks.listProfiles).toHaveBeenCalledTimes(1);
   });
 
   it('retains an ambiguous reservation until Stop confirms no acceptance', async () => {

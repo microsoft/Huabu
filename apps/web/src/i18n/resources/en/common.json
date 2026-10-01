@@ -217,7 +217,7 @@
     "profileEditConflict": "This Profile changed elsewhere. Reload the Profiles list and reopen the editor before saving; your changes have not overwritten the newer version.",
     "profileSaveFailed": "Failed to save profile",
     "agentDefaultsTitle": "Utility Agent",
-    "agentDefaultsSectionDescription": "Used only for Huabu utility tasks such as summaries, titles, labels, and keywords. New conversations use the most recently selected conversational Agent.",
+    "agentDefaultsSectionDescription": "Used only for Huabu utility tasks such as summaries, titles, labels, and keywords. New conversations in this browser use the most recently selected conversational Agent.",
     "builtInPi": "Built-In Pi",
     "builtInPiSetup": "Uses Huabu provider credentials; setup may be required.",
     "builtInPiConfigure": "Configure Built-In Pi providers and models",
@@ -1163,8 +1163,6 @@
   },
   "errors": {
     "conversationAgentUnconfigured": "Connect an external Agent before starting a new conversation.",
-    "conversationAgentUnavailable": "The recent conversation Agent could not be loaded. Check the server connection and try again.",
-    "conversationAgentStale": "The recently used Agent is unavailable. Select an available Agent before starting a new conversation.",
     "nodeSaveFailed": "Couldn't write \"{{name}}\" to disk — the file may be locked or not writable.",
     "rateLimited": "Too many requests. Try again in {{seconds}} seconds."
   }

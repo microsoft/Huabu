@@ -5,8 +5,6 @@ import { getAgentProfileRegistry } from '@agenetes/agentlet-host';
 
 import { HUABU_AGENT_PROFILE_ID } from '@huabu/shared';
 
-import { getEffectiveConversationAgentProfileId } from './conversation-agent.js';
-
 import type { CustomData } from '@huabu/shared';
 
 export interface SelectableAgentProfile {
@@ -68,14 +66,19 @@ export function requireAvailableAgentProfile(
   requireSelectableAgentProfile(profileId, registry);
 }
 
+export function getFirstSelectableAgentProfileId(
+  registry: AgentProfileRegistryPort | null = getAgentProfileRegistry(),
+): string | null {
+  return registry?.listSelectableProfileIds()[0] ?? null;
+}
+
 export function listAvailableAgentProfiles(
   registry: AgentProfileRegistryPort | null = getAgentProfileRegistry(),
-  defaultProfileId: string | null = getEffectiveConversationAgentProfileId(),
 ): AvailableAgentProfileSummary[] {
+  const defaultProfileId = getFirstSelectableAgentProfileId(registry);
   const huabu = {
     id: HUABU_AGENT_PROFILE_ID,
     alias: 'Built-In Pi',
-    ...(defaultProfileId === HUABU_AGENT_PROFILE_ID ? { default: true } : {}),
   } as const;
   if (!registry) {
     return [huabu];

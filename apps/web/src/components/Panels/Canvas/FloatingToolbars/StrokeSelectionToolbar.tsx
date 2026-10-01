@@ -44,6 +44,7 @@ import { isOutsideCanvasInteraction } from '@/hooks/shortcuts/isEditableTarget';
 import { useIsNotMouse } from '@/hooks/useInputMode';
 import {
   loadDefaultAgentBinding,
+  selectDefaultConversationProfileId,
   useAcpProfilesStore,
 } from '@/store/acpProfilesStore';
 import useCanvasStore from '@/store/canvasStore';
@@ -151,7 +152,7 @@ export const StrokeSelectionToolbar = () => {
   );
   const agentProfiles = useAcpProfilesStore((state) => state.profiles);
   const recentProfileId = useAcpProfilesStore(
-    (state) => state.conversationAgent?.effectiveProfileId,
+    selectDefaultConversationProfileId,
   );
 
   const currentLassoIdentity = useCallback(

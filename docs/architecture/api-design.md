@@ -144,9 +144,9 @@ Malformed request fields and malformed cursors return HTTP 400 with `code: "malf
 
 `GET/PUT /api/acp/runtime-config` uses `externalAgentRuntimeConfigSchema` from [`acp.ts`](../../packages/shared/src/types/api/acp.ts). The owner-only full replacement body contains `idleTimeoutSecs` and `maxAgents`; `maxAgents` is a positive JavaScript safe integer with default `10` and no product-defined upper bound. The value is persisted globally and supplied to the supervised Agentlet daemon as `--max-agents` on its next start; the API does not restart the daemon or configure manually launched remote daemons.
 
-## Utility and conversation Agent selection
+## Utility Agent selection
 
-`GET/PUT /api/agent/defaults` uses `agentDefaultsSchema` for the Utility Agent only: its Profile and optional functional-model override serve Huabu-owned auxiliary work and never choose a conversational binding. `GET/PUT /api/agent/conversation-profile` uses `conversationAgentPreferenceSchema` and `conversationAgentPreferenceResponseSchema` for the separately persisted most recently selected conversational Agent. A null preference resolves to the first selectable external Profile without persisting that fallback; a stale persisted identity is returned with `deleted` or `offline` state and is never silently replaced.
+`GET/PUT /api/agent/defaults` uses `agentDefaultsSchema` for the Utility Agent only: its Profile and optional functional-model override serve Huabu-owned auxiliary work and never choose a conversational binding. The recent conversational Agent is browser-local UI state and has no HTTP contract.
 
 ## RFS Agent discovery
 

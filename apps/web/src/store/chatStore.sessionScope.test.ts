@@ -36,17 +36,21 @@ function resetStore() {
   useAcpProfilesStore.setState({
     loaded: true,
     error: null,
-    profiles: [],
+    profiles: [
+      {
+        id: EXTERNAL.profileId,
+        alias: EXTERNAL.alias,
+        agentletId: 'machine',
+        workingDirPath: '/workspace',
+        launch: { kind: 'acp-command', command: 'agent' },
+      },
+    ],
+    selectableProfileIds: [EXTERNAL.profileId],
     agentDefaults: {
       profileId: EXTERNAL.profileId,
       functionalModel: 'utility-only',
     },
-    conversationAgent: {
-      preference: { profileId: EXTERNAL.profileId },
-      effectiveProfileId: EXTERNAL.profileId,
-      selectionState: 'available',
-    },
-    conversationAgentError: null,
+    recentConversationProfileId: EXTERNAL.profileId,
   });
   useChatStore.setState({
     threadsById: {},
@@ -150,7 +154,7 @@ describe('chatStore thread creation', () => {
     expect(selectThreadBinding(useChatStore.getState(), first)).toEqual({
       kind: 'external',
       profileId: EXTERNAL.profileId,
-      alias: EXTERNAL.profileId,
+      alias: EXTERNAL.alias,
     });
     expect(selectThreadLastAction(useChatStore.getState(), first)).toBe('ask');
   });
@@ -170,13 +174,13 @@ describe('chatStore thread creation', () => {
     });
   });
 
-  it('keeps an existing legacy Canvas identity even with no configured default', () => {
+  it('keeps an existing legacy Canvas identity even with no selectable Profile', () => {
     useChatStore.setState({
       threadMap: { 'canvas-legacy': 'thread-legacy' },
       bindingByThread: { 'thread-legacy': INTERNAL },
     });
     useAcpProfilesStore.setState({
-      conversationAgent: null,
+      recentConversationProfileId: null,
       loaded: false,
     });
     expect(useChatStore.getState().ensureCanvasThread('canvas-legacy')).toBe(
@@ -189,11 +193,9 @@ describe('chatStore thread creation', () => {
 
   it('refuses unconfigured creation without leaving an internal thread', () => {
     useAcpProfilesStore.setState({
-      conversationAgent: {
-        preference: { profileId: null },
-        effectiveProfileId: null,
-        selectionState: 'unconfigured',
-      },
+      profiles: [],
+      selectableProfileIds: [],
+      recentConversationProfileId: null,
     });
     expect(() => useChatStore.getState().createThread()).toThrow();
     expect(() =>

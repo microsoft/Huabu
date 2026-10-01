@@ -18,10 +18,7 @@ import {
   parseAgentLaunchOverrides,
 } from './agent-launch-overrides.js';
 import {
-  getEffectiveConversationAgentProfileId,
-  rememberConversationAgentProfileId,
-} from './conversation-agent.js';
-import {
+  getFirstSelectableAgentProfileId,
   requireSelectableAgentProfile,
   SelectableAgentProfileError,
   type SelectableAgentProfile,
@@ -92,8 +89,7 @@ interface StoredNode {
 
 interface AgentNodeServiceDependencies {
   getProfileRegistry: () => AgentProfileRegistryPort | null;
-  getDefaultProfileId?: () => string | null;
-  rememberProfileId?: (profileId: string) => void;
+  getFallbackProfileId?: () => string | null;
   readCanvasNodes: (canvasId: string) => Promise<StoredNode[] | null>;
   execute: (input: {
     canvasId: string;
@@ -112,8 +108,7 @@ async function defaultReadCanvasNodes(
 
 const DEFAULT_DEPENDENCIES: AgentNodeServiceDependencies = {
   getProfileRegistry: () => null,
-  getDefaultProfileId: getEffectiveConversationAgentProfileId,
-  rememberProfileId: rememberConversationAgentProfileId,
+  getFallbackProfileId: getFirstSelectableAgentProfileId,
   readCanvasNodes: defaultReadCanvasNodes,
   execute: executeOnServer,
 };
@@ -223,9 +218,9 @@ export class AgentNodeService {
 
     const profileId =
       input.profileId ??
-      (this.dependencies.getDefaultProfileId
-        ? this.dependencies.getDefaultProfileId()
-        : getEffectiveConversationAgentProfileId());
+      (this.dependencies.getFallbackProfileId
+        ? this.dependencies.getFallbackProfileId()
+        : getFirstSelectableAgentProfileId());
     if (!profileId) {
       throw new AgentNodeCreationError(
         'default_profile_unconfigured',
@@ -304,9 +299,6 @@ export class AgentNodeService {
         'node_creation_failed',
         'Canvas rejected Agent Node creation',
       );
-    }
-    if (input.profileId) {
-      this.dependencies.rememberProfileId?.(profileId);
     }
     let parentConnection: CreateAgentNodeResult['parentConnection'] =
       input.anchor ? 'failed' : 'not_requested';

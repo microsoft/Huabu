@@ -217,7 +217,7 @@
     "profileEditConflict": "此配置已在其他位置修改。请重新加载配置列表并重新打开编辑器后再保存；您的修改尚未覆盖新版本。",
     "profileSaveFailed": "保存配置失败",
     "agentDefaultsTitle": "Utility Agent",
-    "agentDefaultsSectionDescription": "仅用于摘要、标题、标签和关键词等 Huabu 辅助任务。新对话使用最近选择的对话 Agent。",
+    "agentDefaultsSectionDescription": "仅用于摘要、标题、标签和关键词等 Huabu 辅助任务。此浏览器中的新对话使用最近选择的对话 Agent。",
     "builtInPi": "Built-In Pi",
     "builtInPiSetup": "使用 Huabu 内的提供商凭据，可能需要配置。",
     "builtInPiConfigure": "配置 Built-In Pi 提供商和模型",
@@ -1163,8 +1163,6 @@
   },
   "errors": {
     "conversationAgentUnconfigured": "请先连接外部 Agent，再开始新对话。",
-    "conversationAgentUnavailable": "无法加载最近使用的对话 Agent。请检查服务器连接后重试。",
-    "conversationAgentStale": "最近使用的 Agent 当前不可用。请先选择一个可用 Agent，再开始新对话。",
     "nodeSaveFailed": "「{{name}}」写盘失败，可能文件被占用或没有写入权限。",
     "rateLimited": "请求过于频繁，请在 {{seconds}} 秒后重试。"
   }
