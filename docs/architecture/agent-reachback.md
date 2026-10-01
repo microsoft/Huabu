@@ -73,6 +73,8 @@ The only anonymous exception is `GET /skill` with no Authorization header. It re
 
 The shipped token grants access to the complete RFS surface, including direct reads and writes, and `/capabilities` reports both permissions as enabled. The canvas ID scopes route resolution but is not an independent credential or security boundary.
 
+The active credential is the same high-privilege token used by the Agentlet control and relay WebSockets. Its precedence is a SecretStore value saved from Settings, then a non-empty `HUABU_CONNECTION_TOKEN`, then one random 256-bit hexadecimal value generated per server boot. A successful Settings mutation persists first, atomically switches RFS and Agentlet authentication in memory, disconnects existing Agentlets, and restarts the supervised daemon; clearing the saved override restores the environment or generated fallback. A failed persistence attempt leaves the active credential and connections unchanged.
+
 ## File projection
 
 Downloads expose only the public canvas projection: node Markdown sidecars, artifacts, and staged uploads. Private bookkeeping such as memory and history directories is rejected by the path resolver.
@@ -102,6 +104,8 @@ Skills explain when and how to compose workflows, but they do not duplicate the 
 The guide is direct-first: an external agent can discover, query, download, snapshot, upload, execute, and verify without creating another Agent. `POST /agent` remains an optional high-level interpretation and delegation path.
 
 RFS errors use the normal API error body and include a runnable `/skill` recovery command so a caller can reload the current usage contract after a malformed request.
+
+Settings > Agent > External Agent runtime can copy a complete `agentlet daemon` command for another machine. The owner-only command endpoint derives `ws:` or `wss:` from the current browser origin, includes the configured process limit and active token, and returns `Cache-Control: no-store`; the renderer writes the command directly to the clipboard without displaying it. HTTP origins add `--allow-insecure`, and loopback origins produce a contextual warning rather than being rejected because Windows/WSL, containers, virtual machines, and explicit forwarding can make them reachable.
 
 ## Interactive View resources
 

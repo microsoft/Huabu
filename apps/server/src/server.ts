@@ -5,6 +5,7 @@ import './load-env.js';
 import './setup-proxy.js';
 import { app } from './app.js';
 import { resolveBindHost } from './bind-host.js';
+import { initializeConnectionToken } from './connection-token.js';
 import { prewarmOAuthCredentials } from './modules/agent/oauth.js';
 import { resolveDeploymentConfig } from './modules/security/deployment-config.js';
 import {
@@ -53,6 +54,7 @@ async function start(): Promise<void> {
     }
 
     await initializeSecretStore();
+    initializeConnectionToken();
     await app.listen({ port: PORT, host: HOST });
     // When bound to a wildcard address, "localhost" is still the URL a
     // browser on this machine would use — but log both so operators on a
