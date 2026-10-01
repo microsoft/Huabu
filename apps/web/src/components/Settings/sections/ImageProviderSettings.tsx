@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { ChevronDown } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -11,6 +12,7 @@ import {
   getImageCapabilities,
 } from '@huabu/shared';
 
+import { Button } from '@/components/Common/Button';
 import { Select } from '@/components/Common/Select';
 import { TextInput } from '@/components/Common/TextInput';
 import { ApiKeyRow } from '@/components/Settings/Common/ApiKeyRow';
@@ -46,6 +48,7 @@ const IMAGE_MODEL_FAMILY_OPTIONS = IMAGE_MODEL_FAMILIES.map((f) => ({
  */
 export const ImageProviderSettings: React.FC = () => {
   const { t } = useTranslation();
+  const [collapsed, setCollapsed] = useState(true);
   const llmImageConfig = useLLMStore((s) => s.imageConfig);
   const loadImageConfig = useLLMStore((s) => s.loadImageConfig);
   const imageError = useLLMStore((s) => s.imageError);
@@ -115,135 +118,159 @@ export const ImageProviderSettings: React.FC = () => {
   );
 
   return (
-    <SettingSection
-      title={t('settings.imageGeneration')}
-      optional
-      collapsible
-      defaultCollapsed
-    >
-      {imageError && (
-        <p className="text-danger px-3 py-2 text-xs" role="alert">
-          {imageError}
-        </p>
-      )}
-      <SettingRow title={t('settings.provider')}>
-        <SettingControl>
-          <Select
-            options={imageProviderOptions}
-            value={llmImageConfig?.provider || 'azure-openai'}
-            onChange={(v) => saveImage({ provider: v })}
-            placeholder={t('settings.selectProvider')}
-            ariaLabel={t('settings.provider')}
-            className="w-full"
-          />
-        </SettingControl>
-      </SettingRow>
-
-      <SettingRow title={t('settings.endpoint')}>
-        <SettingControl>
-          <TextInput
-            type="text"
-            aria-label={t('settings.endpoint')}
-            placeholder="https://…cognitiveservices.azure.com"
-            value={imgEndpoint}
-            onChange={(e) => {
-              const v = e.target.value;
-              setImgEndpoint(v);
-              debouncedSaveImage({ baseUrl: v });
-            }}
-            className="w-full"
-          />
-        </SettingControl>
-      </SettingRow>
-
-      <SettingRow title={t('settings.model')}>
-        <SettingControl>
-          <Select
-            options={IMAGE_MODEL_FAMILY_OPTIONS}
-            value={imgModelFamily}
-            ariaLabel={t('settings.model')}
-            className="w-full"
-            onChange={(v) => {
-              const next = v as ImageModelFamily;
-              setImgModelFamily(next);
-              saveImage({ modelFamily: next });
-            }}
-          />
-        </SettingControl>
-      </SettingRow>
-
+    <SettingSection>
       <SettingRow
-        title={<SettingLabel optional>{t('settings.deployment')}</SettingLabel>}
-        description={t('settings.deploymentOptional')}
-      >
-        <SettingControl>
-          <TextInput
-            type="text"
-            aria-label={t('settings.deployment')}
-            placeholder={imgModelFamily}
-            value={imgDeployment}
-            onChange={(e) => {
-              const v = e.target.value;
-              setImgDeployment(v);
-              debouncedSaveImage({ model: v });
-            }}
-            className="w-full"
-          />
-        </SettingControl>
-      </SettingRow>
-
-      <SettingRow title={t('settings.apiVersion')}>
-        <SettingControl>
-          <TextInput
-            type="text"
-            aria-label={t('settings.apiVersion')}
-            placeholder={t('settings.imageApiVersionPlaceholder')}
-            value={imgApiVersion}
-            onChange={(e) => {
-              const v = e.target.value;
-              setImgApiVersion(v);
-              debouncedSaveImage({ apiVersion: v });
-            }}
-            className="w-full"
-          />
-        </SettingControl>
-      </SettingRow>
-
-      <SettingRow title={t('settings.imageQuality')}>
-        <SettingControl>
-          <Select
-            options={getImageCapabilities(imgModelFamily).qualities.map(
-              (q) => ({
-                value: q,
-                label: q,
-              }),
-            )}
-            value={imgQuality}
-            ariaLabel={t('settings.imageQuality')}
-            className="w-full"
-            onChange={(v) => {
-              const next = v as 'low' | 'medium' | 'high' | 'auto';
-              setImgQuality(next);
-              saveImage({ quality: next });
-            }}
-          />
-        </SettingControl>
-      </SettingRow>
-
-      <ApiKeyRow
-        title={t('settings.apiKey')}
-        description={
-          llmImageConfig?.authenticated
-            ? undefined
-            : t('settings.imageKeyRequired')
+        title={
+          <SettingLabel optional>{t('settings.imageGeneration')}</SettingLabel>
         }
-        saved={llmImageConfig?.authenticated ?? false}
-        placeholder="Azure key"
-        disabled={credentialWritesDisabled}
-        saving={llmImageSaving}
-        onSave={(key) => saveImage({ apiKey: key })}
-        onRemove={() => saveImage({ apiKey: null })}
-      />
+      >
+        <Button
+          type="button"
+          variant="ghost"
+          tone="neutral"
+          size="sm"
+          iconOnly
+          aria-label={t('settings.imageGeneration')}
+          aria-expanded={!collapsed}
+          onClick={() => setCollapsed((current) => !current)}
+        >
+          <ChevronDown
+            aria-hidden
+            className={`transition-transform motion-reduce:transition-none ${
+              collapsed ? '-rotate-90' : ''
+            }`}
+          />
+        </Button>
+      </SettingRow>
+      {!collapsed && (
+        <>
+          {imageError && (
+            <p className="text-danger px-3 py-2 text-xs" role="alert">
+              {imageError}
+            </p>
+          )}
+          <SettingRow title={t('settings.provider')}>
+            <SettingControl>
+              <Select
+                options={imageProviderOptions}
+                value={llmImageConfig?.provider || 'azure-openai'}
+                onChange={(v) => saveImage({ provider: v })}
+                placeholder={t('settings.selectProvider')}
+                ariaLabel={t('settings.provider')}
+                className="w-full"
+              />
+            </SettingControl>
+          </SettingRow>
+
+          <SettingRow title={t('settings.endpoint')}>
+            <SettingControl>
+              <TextInput
+                type="text"
+                aria-label={t('settings.endpoint')}
+                placeholder="https://…cognitiveservices.azure.com"
+                value={imgEndpoint}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setImgEndpoint(v);
+                  debouncedSaveImage({ baseUrl: v });
+                }}
+                className="w-full"
+              />
+            </SettingControl>
+          </SettingRow>
+
+          <SettingRow title={t('settings.model')}>
+            <SettingControl>
+              <Select
+                options={IMAGE_MODEL_FAMILY_OPTIONS}
+                value={imgModelFamily}
+                ariaLabel={t('settings.model')}
+                className="w-full"
+                onChange={(v) => {
+                  const next = v as ImageModelFamily;
+                  setImgModelFamily(next);
+                  saveImage({ modelFamily: next });
+                }}
+              />
+            </SettingControl>
+          </SettingRow>
+
+          <SettingRow
+            title={
+              <SettingLabel optional>{t('settings.deployment')}</SettingLabel>
+            }
+            description={t('settings.deploymentOptional')}
+          >
+            <SettingControl>
+              <TextInput
+                type="text"
+                aria-label={t('settings.deployment')}
+                placeholder={imgModelFamily}
+                value={imgDeployment}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setImgDeployment(v);
+                  debouncedSaveImage({ model: v });
+                }}
+                className="w-full"
+              />
+            </SettingControl>
+          </SettingRow>
+
+          <SettingRow title={t('settings.apiVersion')}>
+            <SettingControl>
+              <TextInput
+                type="text"
+                aria-label={t('settings.apiVersion')}
+                placeholder={t('settings.imageApiVersionPlaceholder')}
+                value={imgApiVersion}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setImgApiVersion(v);
+                  debouncedSaveImage({ apiVersion: v });
+                }}
+                className="w-full"
+              />
+            </SettingControl>
+          </SettingRow>
+
+          <SettingRow title={t('settings.imageQuality')}>
+            <SettingControl>
+              <Select
+                options={getImageCapabilities(imgModelFamily).qualities.map(
+                  (q) => ({
+                    value: q,
+                    label: q,
+                  }),
+                )}
+                value={imgQuality}
+                ariaLabel={t('settings.imageQuality')}
+                className="w-full"
+                onChange={(v) => {
+                  const next = v as 'low' | 'medium' | 'high' | 'auto';
+                  setImgQuality(next);
+                  saveImage({ quality: next });
+                }}
+              />
+            </SettingControl>
+          </SettingRow>
+
+          <ApiKeyRow
+            title={t('settings.apiKey')}
+            description={
+              llmImageConfig?.authenticated
+                ? undefined
+                : t('settings.imageKeyRequired')
+            }
+            saved={llmImageConfig?.authenticated ?? false}
+            placeholder="Azure key"
+            disabled={credentialWritesDisabled}
+            saving={llmImageSaving}
+            onSave={(key) => saveImage({ apiKey: key })}
+            onRemove={() => saveImage({ apiKey: null })}
+          />
+        </>
+      )}
     </SettingSection>
   );
 };

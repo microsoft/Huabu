@@ -223,7 +223,6 @@
     "builtInPiConfigure": "配置 Built-In Pi 提供商和模型",
     "structuredLaunchUnavailable": "此 Agentlet 无法通过结构化配置启动所有已发现的 harness。请使用兼容的可执行文件或自定义命令。",
     "agentDefaultsProfile": "Utility Agent 配置",
-    "agentDefaultsDescription": "为 Huabu 管理的后台任务选择低延迟 Agent，不会改变对话使用的 Agent。",
     "agentDefaultsModel": "功能任务模型",
     "agentDefaultsModelDescription": "当 Agent 声明支持所选模型时，用于摘要、关键词、标题和图片标签生成；图片任务需要视觉能力。不修改 Agent 配置或聊天模型偏好。",
     "agentDefaultsInherit": "继承 Agent 配置的模型",

@@ -131,97 +131,92 @@ export function AgentDefaultsSettings() {
         : 'unknown';
 
   return (
-    <>
-      <p className="text-fg-muted mb-1.5 px-1 text-xs">
-        {t('settings.agentDefaultsSectionDescription')}
-      </p>
-      <SettingSection title={t('settings.agentDefaultsTitle')}>
-        {!draft ? (
-          <p
-            className="text-fg-muted px-3 py-2 text-xs"
-            role={error ? 'alert' : undefined}
+    <SettingSection title={t('settings.agentDefaultsTitle')}>
+      {!draft ? (
+        <p
+          className="text-fg-muted px-3 py-2 text-xs"
+          role={error ? 'alert' : undefined}
+        >
+          {error ?? t('settings.loadingAgents')}
+        </p>
+      ) : (
+        <>
+          <SettingRow
+            title={t('settings.agentDefaultsProfile')}
+            description={t('settings.agentDefaultsSectionDescription')}
           >
-            {error ?? t('settings.loadingAgents')}
-          </p>
-        ) : (
-          <>
+            <Select
+              ariaLabel={t('settings.agentDefaultsProfile')}
+              options={options}
+              value={draft.profileId ?? ''}
+              placeholder={t('settings.agentDefaultsUnconfigured')}
+              onOpen={() => void refresh()}
+              onChange={(profileId) => {
+                edit({ ...draft, profileId }, true);
+              }}
+            />
+          </SettingRow>
+          {!isBuiltIn && (
             <SettingRow
-              title={t('settings.agentDefaultsProfile')}
-              description={t('settings.agentDefaultsDescription')}
+              title={t('settings.agentDefaultsModel')}
+              description={t('settings.agentDefaultsModelDescription')}
+              labelFor={modelId}
             >
-              <Select
-                ariaLabel={t('settings.agentDefaultsProfile')}
-                options={options}
-                value={draft.profileId ?? ''}
-                placeholder={t('settings.agentDefaultsUnconfigured')}
-                onOpen={() => void refresh()}
-                onChange={(profileId) => {
-                  edit({ ...draft, profileId }, true);
+              <TextInput
+                id={modelId}
+                value={draft.functionalModel}
+                placeholder={t('settings.agentDefaultsInherit')}
+                maxLength={500}
+                disabled={missing || !profilesLoaded}
+                onChange={(event) => {
+                  edit({ ...draft, functionalModel: event.target.value });
+                }}
+                onBlur={() => {
+                  if (error) edit(draft, true);
+                  else debouncedSave.flush();
                 }}
               />
             </SettingRow>
-            {!isBuiltIn && (
-              <SettingRow
-                title={t('settings.agentDefaultsModel')}
-                description={t('settings.agentDefaultsModelDescription')}
-                labelFor={modelId}
-              >
-                <TextInput
-                  id={modelId}
-                  value={draft.functionalModel}
-                  placeholder={t('settings.agentDefaultsInherit')}
-                  maxLength={500}
-                  disabled={missing || !profilesLoaded}
-                  onChange={(event) => {
-                    edit({ ...draft, functionalModel: event.target.value });
-                  }}
-                  onBlur={() => {
-                    if (error) edit(draft, true);
-                    else debouncedSave.flush();
-                  }}
-                />
-              </SettingRow>
-            )}
-            <div className="space-y-2 px-3 py-2 text-xs">
-              {missing ? (
-                <p className="text-warning" role="status">
-                  {t('settings.agentDefaultsDeleted')}
-                </p>
-              ) : draft.profileId === null ? (
-                <p className="text-fg-muted">
-                  {t('settings.agentDefaultsUnconfigured')}
-                </p>
-              ) : snapshot?.defaults.profileId === draft.profileId &&
-                snapshot.selectionState === 'offline' ? (
+          )}
+          <div className="space-y-2 px-3 py-2 text-xs">
+            {missing ? (
+              <p className="text-warning" role="status">
+                {t('settings.agentDefaultsDeleted')}
+              </p>
+            ) : draft.profileId === null ? (
+              <p className="text-fg-muted">
+                {t('settings.agentDefaultsUnconfigured')}
+              </p>
+            ) : snapshot?.defaults.profileId === draft.profileId &&
+              snapshot.selectionState === 'offline' ? (
+              <p className="text-warning">
+                {t('settings.agentDefaultsOffline')}
+              </p>
+            ) : null}
+            {!isBuiltIn &&
+              draft.functionalModel.trim() &&
+              modelCapability !== 'supported' && (
                 <p className="text-warning">
-                  {t('settings.agentDefaultsOffline')}
-                </p>
-              ) : null}
-              {!isBuiltIn &&
-                draft.functionalModel.trim() &&
-                modelCapability !== 'supported' && (
-                  <p className="text-warning">
-                    {modelCapability === 'unsupported'
-                      ? t('settings.agentDefaultsModelUnsupported')
-                      : t('settings.agentDefaultsModelUnknown')}
-                  </p>
-                )}
-              {(error || profilesError) && (
-                <p className="text-danger" role="alert">
-                  {error ?? profilesError?.message}
+                  {modelCapability === 'unsupported'
+                    ? t('settings.agentDefaultsModelUnsupported')
+                    : t('settings.agentDefaultsModelUnknown')}
                 </p>
               )}
-              {(saving || saved) && (
-                <p className="text-success" role="status">
-                  {saving
-                    ? t('settings.saving')
-                    : t('settings.agentDefaultsSaved')}
-                </p>
-              )}
-            </div>
-          </>
-        )}
-      </SettingSection>
-    </>
+            {(error || profilesError) && (
+              <p className="text-danger" role="alert">
+                {error ?? profilesError?.message}
+              </p>
+            )}
+            {(saving || saved) && (
+              <p className="text-success" role="status">
+                {saving
+                  ? t('settings.saving')
+                  : t('settings.agentDefaultsSaved')}
+              </p>
+            )}
+          </div>
+        </>
+      )}
+    </SettingSection>
   );
 }

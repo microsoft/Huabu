@@ -165,6 +165,11 @@ describe('Settings information architecture', () => {
 
     expect(container.textContent).toContain('settings.capabilitiesDescription');
     expect(
+      container
+        .querySelector('[data-testid="capability-sections"]')
+        ?.classList.contains('space-y-4'),
+    ).toBe(true);
+    expect(
       container.querySelector('[data-testid="image-settings"]'),
     ).not.toBeNull();
     expect(

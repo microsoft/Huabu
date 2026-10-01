@@ -145,11 +145,13 @@ async function editModel(value: string) {
 }
 
 describe('Agent defaults Settings', () => {
-  it('explains that the default serves new conversations and utility tasks', async () => {
+  it('places the Utility Agent explanation inside the Profile row card', async () => {
     await render();
-    expect(container.textContent).toContain(
-      'settings.agentDefaultsSectionDescription',
+    const description = [...container.querySelectorAll('p')].find(
+      (element) =>
+        element.textContent === 'settings.agentDefaultsSectionDescription',
     );
+    expect(description?.closest('.ring-1')).not.toBeNull();
   });
 
   it('allows Built-In while the external catalogue is unavailable, retaining the external model', async () => {

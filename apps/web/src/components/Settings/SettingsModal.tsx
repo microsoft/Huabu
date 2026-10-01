@@ -307,9 +307,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <p className="text-fg-muted mb-4 px-1 text-xs">
                   {t('settings.capabilitiesDescription')}
                 </p>
-                <ImageProviderSettings />
-                <IntegrationsSettings />
-                <InkOcrSettings />
+                <div
+                  className="space-y-4 [&_section]:mb-0"
+                  data-testid="capability-sections"
+                >
+                  <ImageProviderSettings />
+                  <IntegrationsSettings />
+                  <InkOcrSettings />
+                </div>
               </>
             )}
           </div>

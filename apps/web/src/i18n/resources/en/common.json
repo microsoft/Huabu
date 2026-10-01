@@ -223,7 +223,6 @@
     "builtInPiConfigure": "Configure Built-In Pi providers and models",
     "structuredLaunchUnavailable": "This Agentlet cannot launch every detected harness with structured configuration. Use a compatible executable or a Custom command.",
     "agentDefaultsProfile": "Utility Agent Profile",
-    "agentDefaultsDescription": "Choose a low-latency Agent for Huabu-managed background work without changing the Agent used by conversations.",
     "agentDefaultsModel": "Functional-task model",
     "agentDefaultsModelDescription": "Used for summaries, keywords, titles, and image labels when the Agent advertises the model. Image tasks require vision support. Does not change Profile or chat model preferences.",
     "agentDefaultsInherit": "Inherit the Profile model",
