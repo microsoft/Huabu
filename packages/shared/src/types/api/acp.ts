@@ -163,8 +163,18 @@ export const acpAgentCliInfoSchema = z.object({
 export type AcpAgentCliInfo = z.infer<typeof acpAgentCliInfoSchema>;
 
 export const acpAgentCliQuerySchema = z
-  .object({ profileId: z.string().min(1).optional() })
-  .strict();
+  .object({
+    profileId: z.string().min(1).optional(),
+    agentletId: z.string().min(1).optional(),
+  })
+  .strict()
+  .refine(
+    (value) =>
+      Number(value.profileId !== undefined) +
+        Number(value.agentletId !== undefined) ===
+      1,
+    { message: 'Exactly one Profile or Agentlet target is required' },
+  );
 export type AcpAgentCliQuery = z.infer<typeof acpAgentCliQuerySchema>;
 
 /** Response body for `GET /api/acp/agent-cli`, including unavailable entries. */
@@ -576,9 +586,23 @@ export type AgentletConnectionCommandResponse = z.infer<
 >;
 
 /** Schema mirror of {@link AcpProfilesListResponse}. */
+export const connectedAgentletDeviceSchema = z.object({
+  agentletId: z.string().min(1),
+  hostname: z.string().min(1).optional(),
+  platform: z.string().min(1).optional(),
+  arch: z.string().min(1).optional(),
+  version: z.string().min(1),
+  connectedAt: z.iso.datetime(),
+  profileCount: z.number().int().nonnegative(),
+});
+export type ConnectedAgentletDevice = z.infer<
+  typeof connectedAgentletDeviceSchema
+>;
+
 export const acpProfilesListResponseSchema = z.object({
   profiles: z.array(agentProfileSchema),
   selectableProfileIds: z.array(z.string().min(1)),
+  connectedDevices: z.array(connectedAgentletDeviceSchema),
   agentlet: acpAgentletStatusSchema,
   agentDefaults: agentDefaultsSchema.optional(),
 });

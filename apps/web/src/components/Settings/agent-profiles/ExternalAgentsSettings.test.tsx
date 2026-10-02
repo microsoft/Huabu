@@ -141,11 +141,23 @@ beforeEach(() => {
   apiMocks.list.mockImplementation(async () => ({
     profiles: [...profiles],
     selectableProfileIds: [],
+    connectedDevices: [
+      {
+        agentletId: 'local',
+        hostname: 'Local machine',
+        platform: 'linux',
+        arch: 'x64',
+        version: '1.0.0',
+        connectedAt: '2026-01-01T00:00:00.000Z',
+        profileCount: 1,
+      },
+    ],
     agentlet: null,
   }));
   useAcpProfilesStore.setState({
     profiles: [],
     selectableProfileIds: [],
+    connectedDevices: [],
     agentlet: null,
     loaded: true,
     loading: false,
@@ -222,7 +234,9 @@ describe('ExternalAgentsSettings', () => {
     });
     await renderSettings();
     await click('settings.editProfile');
-    expect(apiMocks.detection).toHaveBeenLastCalledWith(true, profile.id);
+    expect(apiMocks.detection).toHaveBeenLastCalledWith(true, {
+      profileId: profile.id,
+    });
     input('input[aria-label="settings.displayName"]', 'Renamed');
     await click('settings.saveChanges');
 

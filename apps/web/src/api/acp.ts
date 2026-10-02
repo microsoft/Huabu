@@ -29,6 +29,7 @@ import { routes } from './_routes';
 
 import type {
   AcpAgentCliListResponse,
+  AcpAgentCliQuery,
   AcpAgentletStatus,
   AcpAgentletStatusResponse,
   AcpPermissionDecisionRequest,
@@ -55,6 +56,7 @@ import type {
 } from '@huabu/shared';
 
 export type {
+  AcpAgentCliQuery,
   AcpAgentCliInfo,
   AcpAgentCliListResponse,
   AcpAgentProfile,
@@ -84,6 +86,7 @@ export type {
   ConnectionTokenConfig,
   ConnectionTokenUpdate,
   AgentletConnectionCommandResponse,
+  ConnectedAgentletDevice,
   WarmAcpSessionRequest,
   WarmAcpSessionResponse,
 } from '@huabu/shared';
@@ -91,12 +94,12 @@ export type {
 // ── Agent CLI detection ──────────────────────────────────────────────
 
 /**
- * Read the supervised daemon's catalogue, or the saved Profile's target daemon.
+ * Read the explicitly selected Agentlet's catalogue.
  */
 export async function listAcpAgentClis(
-  profileId?: string,
+  target: AcpAgentCliQuery,
 ): Promise<AcpAgentCliListResponse> {
-  return apiFetch<AcpAgentCliListResponse>(routes.acpAgentCli(profileId), {
+  return apiFetch<AcpAgentCliListResponse>(routes.acpAgentCli(target), {
     fallbackMessage: 'Failed to detect installed agent CLIs',
   });
 }
@@ -111,7 +114,7 @@ export async function listAcpProfiles(): Promise<AcpProfilesListResponse> {
 }
 
 /**
- * Create a command Profile on the local agentlet. The server allocates its id.
+ * Create a command Profile on its explicitly selected Agentlet.
  */
 export async function createAcpProfile(
   payload: CreateAcpProfileBody,

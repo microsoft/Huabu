@@ -29,7 +29,6 @@ import {
   getAgentProfileRegistry,
   getAgentletGateway,
   getDaemonSupervisor,
-  getSupervisedAgentletId,
 } from '@agenetes/agentlet-host';
 
 import {
@@ -50,6 +49,7 @@ import {
   initializeAgentDefaults,
 } from '../agent-defaults.js';
 
+import type { AgentletConnection } from '@agenetes/agentlet-host';
 import type {
   AcpProfileMutationResponse,
   AcpProfilesListResponse,
@@ -66,6 +66,16 @@ function denyRemote(request: FastifyRequest, reply: FastifyReply): boolean {
       'Forbidden: external agent profiles can only be managed from localhost',
   });
   return true;
+}
+
+function getConnectedAgentlets(): AgentletConnection[] {
+  return getAgentletGateway()?.getAgentlets({ status: 'connected' }) ?? [];
+}
+
+function isAgentletConnected(agentletId: string): boolean {
+  return getConnectedAgentlets().some(
+    (connection) => connection.agentletId === agentletId,
+  );
 }
 
 async function validateHarnessLaunch(
@@ -146,10 +156,16 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
       try {
         const gateway = getAgentletGateway();
         if (!gateway) throw new Error('Agentlet Gateway is not ready');
-        return await gateway.buildHarnessLaunch(
-          profile?.agentletId ?? getSupervisedAgentletId(),
-          { launch: parsed.data.launch },
-        );
+        const agentletId = profile?.agentletId ?? parsed.data.agentletId;
+        if (!agentletId || !isAgentletConnected(agentletId)) {
+          return reply.status(409).send({
+            code: 'agentlet_unavailable',
+            message: 'The selected Agentlet is not connected.',
+          });
+        }
+        return await gateway.buildHarnessLaunch(agentletId, {
+          launch: parsed.data.launch,
+        });
       } catch (error) {
         request.log.warn({ err: error }, 'Profile launch preview failed');
         return reply.status(503).send({
@@ -172,9 +188,46 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
           code: 'profile_registry_unavailable',
         });
       }
+      const profiles = registry.listProfiles();
+      const connected = getConnectedAgentlets();
+      const connectedIds = new Set(
+        connected.map((connection) => connection.agentletId),
+      );
+      const profileCounts = new Map<string, number>();
+      for (const profile of profiles) {
+        profileCounts.set(
+          profile.agentletId,
+          (profileCounts.get(profile.agentletId) ?? 0) + 1,
+        );
+      }
+      const connectedDevices = connected
+        .map((connection) => ({
+          agentletId: connection.agentletId,
+          ...(connection.agentletProfile?.machine?.hostname
+            ? { hostname: connection.agentletProfile.machine.hostname }
+            : {}),
+          ...(connection.agentletProfile?.machine?.platform
+            ? { platform: connection.agentletProfile.machine.platform }
+            : {}),
+          ...(connection.agentletProfile?.machine?.arch
+            ? { arch: connection.agentletProfile.machine.arch }
+            : {}),
+          version: connection.agentletProfile?.bridge.version ?? 'unknown',
+          connectedAt: connection.connectedAt.toISOString(),
+          profileCount: profileCounts.get(connection.agentletId) ?? 0,
+        }))
+        .sort(
+          (left, right) =>
+            (left.hostname ?? left.agentletId).localeCompare(
+              right.hostname ?? right.agentletId,
+            ) || left.agentletId.localeCompare(right.agentletId),
+        );
       return {
-        profiles: registry.listProfiles(),
-        selectableProfileIds: registry.listSelectableProfileIds(),
+        profiles,
+        selectableProfileIds: profiles
+          .filter((profile) => connectedIds.has(profile.agentletId))
+          .map((profile) => profile.id),
+        connectedDevices,
         agentlet: getDaemonSupervisor().getStatus(),
         agentDefaults: getAgentDefaults(),
       };
@@ -206,7 +259,13 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
           code: 'profile_registry_unavailable',
         });
       }
-      const agentletId = getSupervisedAgentletId();
+      const agentletId = parsed.data.agentletId;
+      if (!isAgentletConnected(agentletId)) {
+        return reply.status(409).send({
+          code: 'agentlet_unavailable',
+          message: 'The selected Agentlet is not connected.',
+        });
+      }
       const launch = parsed.data.launch;
       if (!(await validateHarnessLaunch(launch, agentletId, request, reply)))
         return;

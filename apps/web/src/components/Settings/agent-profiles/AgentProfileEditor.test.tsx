@@ -62,12 +62,18 @@ vi.mock('@/components/Common/Select', () => ({
     value,
     options,
     onChange,
+    ariaLabel,
   }: {
     value: string;
     options: { value: string; label: string; disabled?: boolean }[];
     onChange: (value: string) => void;
+    ariaLabel?: string;
   }) => (
-    <select value={value} onChange={(event) => onChange(event.target.value)}>
+    <select
+      aria-label={ariaLabel}
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+    >
       <option value="">Loading</option>
       {options.map((option) => (
         <option
@@ -156,6 +162,19 @@ function renderEditor(
           : ({ mode: 'create' } as const))}
         detectedClis={clis}
         detectionLoaded={loaded}
+        connectedDevices={[
+          {
+            agentletId: editing?.agentletId ?? 'device-1',
+            hostname: 'Test device',
+            platform: 'linux',
+            arch: 'x64',
+            version: '1.0.0',
+            connectedAt: '2026-01-01T00:00:00.000Z',
+            profileCount: 0,
+          },
+        ]}
+        agentletId={editing?.agentletId ?? 'device-1'}
+        onAgentletChange={vi.fn()}
         onClose={onClose}
         onSaved={onSaved}
       />,
@@ -188,7 +207,9 @@ async function settlePreview() {
   });
 }
 function chooseCustom() {
-  const select = container?.querySelector('select');
+  const select = container?.querySelector<HTMLSelectElement>(
+    'select[aria-label="settings.agent"]',
+  );
   act(() => {
     if (select) select.value = 'custom';
     select?.dispatchEvent(new Event('change', { bubbles: true }));
@@ -268,7 +289,9 @@ describe('AgentProfileEditor', () => {
 
   it('lists known wrappers with unsupported choices disabled and one Custom option', () => {
     renderEditor();
-    const select = container?.querySelector('select');
+    const select = container?.querySelector<HTMLSelectElement>(
+      'select[aria-label="settings.agent"]',
+    );
     expect(select?.value).toBe('copilot');
     expect(
       [...(select?.options ?? [])].filter(
@@ -293,6 +316,7 @@ describe('AgentProfileEditor', () => {
     expect(saveButton()?.disabled).toBe(true);
     await settlePreview();
     expect(api.preview).toHaveBeenCalledWith({
+      agentletId: 'device-1',
       launch: {
         kind: 'acp-harness',
         harnessId: 'copilot',
@@ -308,6 +332,7 @@ describe('AgentProfileEditor', () => {
     await act(async () => saveButton()?.click());
     expect(api.create).toHaveBeenCalledWith({
       alias: 'GitHub Copilot (project)',
+      agentletId: 'device-1',
       workingDirPath: 'C:\\work\\project',
       launch: {
         kind: 'acp-harness',
@@ -382,7 +407,11 @@ describe('AgentProfileEditor', () => {
       undefined,
       agents.map((agent) => ({ ...agent, launchPreviewVersion: undefined })),
     );
-    expect(container?.querySelector('select')?.value).toBe('custom');
+    expect(
+      container?.querySelector<HTMLSelectElement>(
+        'select[aria-label="settings.agent"]',
+      )?.value,
+    ).toBe('custom');
     expect(container?.textContent).toContain(
       'settings.structuredLaunchUnavailable',
     );

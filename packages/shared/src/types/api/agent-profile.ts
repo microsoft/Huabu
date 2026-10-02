@@ -133,7 +133,6 @@ export type CreateAcpCommandProfileBody = z.infer<
 
 export const createAcpProfileBodySchema = agentProfileSchema.omit({
   id: true,
-  agentletId: true,
   revision: true,
   executionRevision: true,
 });
@@ -160,9 +159,17 @@ export type PatchAgentProfileBody = z.infer<typeof patchAgentProfileBodySchema>;
 export const acpProfileLaunchPreviewBodySchema = z
   .object({
     profileId: trimmedString(255).optional(),
+    agentletId: trimmedString(255).optional(),
     launch: agentProfileSchema.shape.launch,
   })
-  .strict();
+  .strict()
+  .refine(
+    (value) =>
+      Number(value.profileId !== undefined) +
+        Number(value.agentletId !== undefined) ===
+      1,
+    { message: 'Exactly one Profile or Agentlet target is required' },
+  );
 export type AcpProfileLaunchPreviewBody = z.infer<
   typeof acpProfileLaunchPreviewBodySchema
 >;

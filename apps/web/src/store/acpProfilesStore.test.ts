@@ -36,6 +36,7 @@ const profile = {
 const snapshot = {
   profiles: [profile],
   selectableProfileIds: [profile.id],
+  connectedDevices: [],
   agentlet: null,
   agentDefaults: { profileId: 'huabu', functionalModel: 'utility-only' },
 };
@@ -61,6 +62,7 @@ beforeEach(() => {
     error: null,
     profiles: [profile],
     selectableProfileIds: [profile.id],
+    connectedDevices: [],
     agentDefaults: null,
     defaultsError: null,
     recentConversationProfileId: null,

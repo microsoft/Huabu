@@ -144,6 +144,8 @@ Malformed request fields and malformed cursors return HTTP 400 with `code: "malf
 
 `GET/PUT /api/acp/runtime-config` uses `externalAgentRuntimeConfigSchema` from [`acp.ts`](../../packages/shared/src/types/api/acp.ts). The owner-only full replacement body contains `idleTimeoutSecs` and `maxAgents`; `maxAgents` is a positive JavaScript safe integer with default `10` and no product-defined upper bound. The value is persisted globally and supplied to the supervised Agentlet daemon as `--max-agents` on its next start; the API does not restart the daemon or configure manually launched remote daemons.
 
+`GET /api/acp/profiles` returns persisted Profiles, active connected devices, connectivity-filtered `selectableProfileIds`, supervised-child health, and optional Agent defaults. `POST /api/acp/profiles` requires an explicit active `agentletId`. `GET /api/acp/agent-cli` and `POST /api/acp/profile-launch-preview` require exactly one explicit target: `agentletId` while creating or `profileId` while editing. The server validates every target against the live Gateway and never substitutes the supervised child or first connected device.
+
 ## Utility Agent selection
 
 `GET/PUT /api/agent/defaults` uses `agentDefaultsSchema` for the Utility Agent only: its Profile and optional functional-model override serve Huabu-owned auxiliary work and never choose a conversational binding. The recent conversational Agent is browser-local UI state and has no HTTP contract.
