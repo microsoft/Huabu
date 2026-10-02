@@ -155,7 +155,7 @@ The daemon uses bounded FIFO buffers for ACP notifications emitted during bootst
 
 ## 7. Identity and placement
 
-The daemon's `agentletId` defaults to the operating-system hostname and can be supplied explicitly with `--agentlet-id`. The same identity appears in the control query, `agentlet/hello`, session query context, and `sessionProfile.agentletId`.
+The daemon's `agentletId` defaults to the persistent UUID in `~/.agentlet/device.json` and can be supplied explicitly with `--agentlet-id`. The identity file is created atomically on first use; an invalid existing file is an error rather than a reason to rotate identity. An explicit override does not rewrite the default identity. The same identity appears in the control query, `agentlet/hello`, session query context, and `sessionProfile.agentletId`; hostname, platform, and architecture are separate informational metadata.
 
 The native ACP `sessionId` is established by session bootstrap and is the routing identity for one session connection. The embedding control plane selects the target `agentletId`; the daemon does not choose workload placement.
 
