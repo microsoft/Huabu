@@ -55,11 +55,6 @@ class AcpDaemonAuth {
     this.token = token;
   }
 
-  /** Configure the identity and token accepted for the supervised daemon. */
-  configure(_agentletId: string, token: string): void {
-    this.token = token;
-  }
-
   /**
    * Mint and store a fresh 256-bit hex token. Retained for tests /
    * fallback; the production path injects a stable token via

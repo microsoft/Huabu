@@ -48,7 +48,6 @@
 
 import { fork } from 'node:child_process';
 import { existsSync, unlinkSync } from 'node:fs';
-import { hostname } from 'node:os';
 import { join } from 'node:path';
 
 import { getDaemonAuth } from './daemon-auth.js';
@@ -230,8 +229,6 @@ export interface AttachOptions {
   daemonEntryPath: string;
   /** Absolute directory for host-owned persistent state. */
   dataDir: string;
-  /** Machine identity shared by the daemon and Gateway authenticator. */
-  agentletId?: string;
   /** Resolve the host-owned process limit each time the daemon starts. */
   getMaxAgents?: () => number;
   /**
@@ -300,7 +297,6 @@ class DaemonSupervisor {
    * {@link attach} time. Used only for legacy-ticket cleanup here.
    */
   private dataDir = '';
-  private agentletId = '';
   private getMaxAgents: (() => number) | undefined;
   private hostEnvPrefix: string | undefined;
   private hostEnvAllowlist: readonly string[] | undefined;
@@ -314,7 +310,6 @@ class DaemonSupervisor {
     this.app = app;
     this.daemonEntryPath = opts.daemonEntryPath;
     this.dataDir = opts.dataDir;
-    this.agentletId = opts.agentletId ?? hostname();
     this.getMaxAgents = opts.getMaxAgents;
     this.hostEnvPrefix = opts.hostEnvPrefix;
     this.hostEnvAllowlist = opts.hostEnvAllowlist;
@@ -467,8 +462,6 @@ class DaemonSupervisor {
       serverUrl,
       '--token',
       token,
-      '--agentlet-id',
-      this.agentletId,
       ...(maxAgents === undefined ? [] : ['--max-agents', String(maxAgents)]),
       '--allow-insecure',
     ];
