@@ -15,6 +15,7 @@ export interface AgentletProfile {
   machine?: {
     hostname: string
     platform: string
+    arch: string
   }
 
   /** Agentlet capabilities */
@@ -72,6 +73,7 @@ export interface SessionProfile {
   machine?: {
     hostname: string
     platform: string
+    arch: string
   }
 
   /** Agentlet capabilities */
