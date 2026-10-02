@@ -31,10 +31,10 @@
  *
  * ### Status reporting
  *
- * `getDaemonStatus()` combines the supervisor's view (last error,
- * backoff schedule) with the Gateway's view (is a daemon
- * actually registered right now?). The UI uses the merged snapshot
- * to decide whether to show the amber troubleshooting block.
+ * `getDaemonStatus()` reports only the supervised child lifecycle.
+ * Connected Agentlet devices are projected separately by the host,
+ * because the child owns its device identity and the supervisor must
+ * not infer it from an arbitrary Gateway connection.
  *
  * ### Entry resolution
  *
@@ -51,7 +51,6 @@ import { existsSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { getDaemonAuth } from './daemon-auth.js';
-import { getAgentletGateway } from './gateway-mount.js';
 
 import type { AgentletStatus } from '@agenetes/protocol';
 import type { FastifyInstance } from 'fastify';
@@ -404,24 +403,9 @@ class DaemonSupervisor {
     getDaemonAuth().close();
   }
 
-  /**
-   * Merge the supervisor's view with the Gateway's daemon
-   * registry to produce the wire snapshot consumed by the UI.
-   */
+  /** Project the supervised child lifecycle for the UI health surface. */
   getStatus(): AgentletStatus {
-    const gateway = getAgentletGateway();
-    const live = gateway?.getAgentlets({ status: 'connected' }) ?? [];
-    const agentlet = live[0];
-
-    if (agentlet) {
-      return {
-        online: true,
-        agentletId: agentlet.agentletId,
-        hostname: agentlet.agentletProfile?.machine?.hostname,
-        platform: agentlet.agentletProfile?.machine?.platform,
-        connectedAt: agentlet.connectedAt.toISOString(),
-      };
-    }
+    if (this.state.child && !this.state.child.killed) return { online: true };
 
     const status: AgentletStatus = { online: false };
     if (this.state.lastError) status.lastError = this.state.lastError;
