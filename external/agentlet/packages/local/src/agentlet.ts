@@ -1,4 +1,4 @@
-import { hostname, platform } from 'node:os'
+import { arch, hostname, platform } from 'node:os'
 import { join, resolve } from 'node:path'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import WebSocket from 'ws'
@@ -31,6 +31,7 @@ import {
   type SessionProfile,
 } from './session-bootstrap.js'
 import type { AgentletOptions } from './cli.js'
+import { resolveDeviceIdentity } from './device-identity.js'
 
 interface ManagedAgent {
   sessionId: string
@@ -57,9 +58,9 @@ const EARLY_MESSAGE_BUFFER_CAP = 1000
 
 export function resolveAgentletId(
   configuredId: string | undefined,
-  machineHostname = hostname(),
+  identityPath?: string,
 ): string {
-  return configuredId?.trim() || machineHostname
+  return configuredId?.trim() || resolveDeviceIdentity(identityPath)
 }
 
 /**
@@ -74,6 +75,11 @@ export class Agentlet {
   private shutdownInProgress = false
 
   private readonly daemonId: string
+  private readonly machine = {
+    hostname: hostname(),
+    platform: platform(),
+    arch: arch(),
+  }
   private controlWs: WebSocket | null = null
   private readonly agents = new Map<string, ManagedAgent>()
   private pendingSpawns = 0
@@ -201,7 +207,7 @@ export class Agentlet {
   private sendDaemonHello(): void {
     const agentletProfile: AgentletProfile = {
       bridge: { name: 'agentlet', version: PROTOCOL_VERSION },
-      machine: { hostname: this.daemonId, platform: platform() },
+      machine: this.machine,
       capabilities: {
         autoRestart: true,
         bufferLimit: this.options.bufferLimit,
@@ -597,7 +603,7 @@ export class Agentlet {
         capabilities: { autoRestart, bufferLimit: this.options.bufferLimit },
         heartbeatInterval: this.options.heartbeat,
         allowInsecure: this.options.allowInsecure,
-        machine: { hostname: this.daemonId, platform: platform() },
+        machine: this.machine,
       })
 
       managed.ws = agentWs

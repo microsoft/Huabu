@@ -33,7 +33,6 @@
 
 import { randomUUID } from 'node:crypto';
 
-import { getSupervisedAgentletId } from '@agenetes/agentlet-host';
 import { resolveAgentInputs } from '@agenetes/protocol';
 import {
   HistoryLoadDeniedError,
@@ -236,9 +235,15 @@ export async function resolveAcpRuntimeLaunch(
   };
 }
 
-/** Resolve explicit placement or the read-only legacy local fallback. */
+/** Resolve the immutable execution-node placement stored in the workload. */
 export function resolveAcpAgentletId(spec: AcpCreateSpec): string {
-  return spec.spec.agentletId ?? getSupervisedAgentletId();
+  if (!spec.spec.agentletId) {
+    throw new AcpServiceError(
+      'placement_unavailable',
+      'The workload has no Agentlet placement.',
+    );
+  }
+  return spec.spec.agentletId;
 }
 
 /** The per-turn context an {@link AcpAgentHandle.run} accepts. */

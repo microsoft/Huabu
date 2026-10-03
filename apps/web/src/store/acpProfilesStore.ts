@@ -47,7 +47,11 @@ import { getAgentDefaults, updateAgentDefaults } from '@/api/agentDefaults';
 import { toast } from '@/components/Common/Toast';
 import { i18n } from '@/i18n';
 
-import type { AcpAgentletStatus, AgentProfileView } from '@/api/acp';
+import type {
+  AcpAgentletStatus,
+  AgentProfileView,
+  ConnectedAgentletDevice,
+} from '@/api/acp';
 import type {
   AgentBinding,
   AgentDefaults,
@@ -88,6 +92,8 @@ interface AcpProfilesState {
   profiles: AgentProfileView[];
   /** Profile ids that are currently runtime-ready and safe to select. */
   selectableProfileIds: string[];
+  /** Active Agentlet control connections, sorted by the server. */
+  connectedDevices: ConnectedAgentletDevice[];
   /** Latest agentlet snapshot. `null` until the first fetch resolves. */
   agentlet: AcpAgentletStatus | null;
   /** Absent on older servers; never infer a default from list ordering. */
@@ -121,6 +127,7 @@ interface AcpProfilesState {
 export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
   profiles: [],
   selectableProfileIds: [],
+  connectedDevices: [],
   agentlet: null,
   agentDefaults: null,
   defaultsError: null,
@@ -229,6 +236,7 @@ export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
         set({
           profiles: res.profiles,
           selectableProfileIds: res.selectableProfileIds,
+          connectedDevices: res.connectedDevices,
           agentlet: res.agentlet,
           ...(revision === defaultsRevision
             ? { agentDefaults: res.agentDefaults ?? null, defaultsError: null }

@@ -10,11 +10,6 @@ vi.mock('@agenetes/agentlet-host', async (importOriginal) => {
   return {
     ...actual,
     getAgentletGateway: () => host.gateway,
-    getSupervisedAgentletId: () => 'machine-a',
-    getDaemonSupervisor: () => ({
-      getStatus: () => ({ online: false }),
-      hasGivenUp: () => false,
-    }),
   };
 });
 

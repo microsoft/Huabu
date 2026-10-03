@@ -12,8 +12,10 @@ import type { FastifyInstance } from 'fastify';
 const mocks = vi.hoisted(() => ({ getProfile: vi.fn(), discover: vi.fn() }));
 vi.mock('@agenetes/agentlet-host', () => ({
   getAgentProfileRegistry: () => ({ getProfile: mocks.getProfile }),
-  getSupervisedAgentletId: () => 'supervised',
-  getAgentletGateway: () => ({ discoverHarnesses: mocks.discover }),
+  getAgentletGateway: () => ({
+    getAgentlet: () => ({ status: 'connected' }),
+    discoverHarnesses: mocks.discover,
+  }),
 }));
 
 let app: FastifyInstance | undefined;
@@ -52,7 +54,7 @@ describe('ACP agent CLI route', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: '/api/acp/agent-cli',
+      url: '/api/acp/agent-cli?agentletId=machine-a',
     });
 
     expect(response.statusCode).toBe(200);
@@ -72,7 +74,7 @@ describe('ACP agent CLI route', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: '/api/acp/agent-cli',
+      url: '/api/acp/agent-cli?agentletId=machine-a',
       remoteAddress: '192.0.2.10',
     });
 
@@ -92,7 +94,7 @@ describe('ACP agent CLI route', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: '/api/acp/agent-cli',
+      url: '/api/acp/agent-cli?agentletId=machine-a',
       remoteAddress: '192.0.2.10',
     });
 
@@ -108,7 +110,9 @@ describe('ACP agent CLI route', () => {
       ),
       { prefix: '/api/acp' },
     );
-    const response = await app.inject('/api/acp/agent-cli');
+    const response = await app.inject(
+      '/api/acp/agent-cli?agentletId=machine-a',
+    );
     expect(response.statusCode).toBe(503);
     expect(response.json().code).toBe('harness_discovery_unavailable');
     expect(response.json()).not.toHaveProperty('agents');

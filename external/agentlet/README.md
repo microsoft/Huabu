@@ -61,7 +61,7 @@ Important options:
 
 | Option | Meaning |
 | --- | --- |
-| `--agentlet-id <id>` | Stable execution-node identity; defaults to the machine hostname. |
+| `--agentlet-id <id>` | Exact execution-node identity override; the default is the persistent UUID in `~/.agentlet/device.json`. |
 | `--max-agents <count>` | Maximum number of concurrently managed agent processes. |
 | `--buffer-limit <count>` | Buffer capacity advertised in daemon and session profiles. |
 | `--reconnect-max <seconds>` | Maximum exponential reconnect delay. |

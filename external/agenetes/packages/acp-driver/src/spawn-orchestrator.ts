@@ -39,9 +39,7 @@
 
 import {
   AgentletRequestError,
-  getDaemonSupervisor,
   getAgentletGateway,
-  getSupervisedAgentletId,
 } from '@agenetes/agentlet-host';
 import {
   harnessLaunchPlanSchema,
@@ -71,10 +69,8 @@ export function isSessionResumeUnavailableError(error: unknown): boolean {
  * Gatekeeper systems. Subsequent launches are usually subsecond
  * because the OS has the files cached.
  *
- * We still short-circuit the wait as soon as the supervisor reports
- * `hasGivenUp()` (agentlet entry missing, repeated crashes, …) so a
- * truly broken install does not make every UI affordance hang for
- * the full window.
+ * Placement is independent from process supervision, so every target
+ * receives the same connection grace period.
  */
 const AGENTLET_READY_TIMEOUT_MS = 20_000;
 
@@ -109,20 +105,15 @@ function readTargetAgentlet(agentletId: string): { agentletId: string } | null {
 /**
  * Poll {@link readTargetAgentlet} until the target agentlet is online or
  * `timeoutMs` elapses. Returns the resolved descriptor or `null` on
- * timeout (or as soon as the supervisor has stopped trying).
+ * timeout.
  */
 async function waitForTargetAgentlet(
   agentletId: string,
   timeoutMs: number,
 ): Promise<{ agentletId: string } | null> {
   const deadline = Date.now() + timeoutMs;
-  const supervisor = getDaemonSupervisor();
-  const supervisedAgentletId = getSupervisedAgentletId();
   let agentlet = readTargetAgentlet(agentletId);
   while (!agentlet && Date.now() < deadline) {
-    if (agentletId === supervisedAgentletId && supervisor.hasGivenUp()) {
-      return null;
-    }
     await new Promise((r) => setTimeout(r, 100));
     agentlet = readTargetAgentlet(agentletId);
   }
@@ -178,10 +169,10 @@ async function waitForAgentConnection(
  * Cold-start tolerance: we wait up to {@link AGENTLET_READY_TIMEOUT_MS}
  * for the agentlet to come online and up to 3 s for the freshly-spawned
  * agent to finish its handshake. Only after both windows expire (or the
- * supervisor reports it has given up) do we surface a user-facing error.
+ * target stays unavailable) do we surface a user-facing error.
  *
  * Throws when:
- *   • the supervisor never brings the agentlet online (truly offline),
+ *   • the target agentlet does not come online,
  *   • the agentlet RPC for spawn fails.
  *
  * Idempotent within a single agentlet's lifetime — repeat calls for
@@ -208,16 +199,9 @@ export async function ensureAgentForThread(
     AGENTLET_READY_TIMEOUT_MS,
   );
   if (!agentlet) {
-    const supervisorStatus =
-      agentletId === getSupervisedAgentletId()
-        ? getDaemonSupervisor().getStatus()
-        : null;
-    const hint = supervisorStatus?.lastError
-      ? ` (${supervisorStatus.lastError})`
-      : '';
     throw new AcpServiceError(
       'placement_unavailable',
-      `Target agentlet '${agentletId}' is not connected${hint}.`,
+      `Target agentlet '${agentletId}' is not connected.`,
     );
   }
 

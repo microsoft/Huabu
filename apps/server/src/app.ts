@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { existsSync, unlinkSync } from 'node:fs';
+import { unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -25,13 +25,10 @@ import {
   externalAgentRuntimeConfigRoutes,
   getExternalAgentRuntimeConfig,
   getAgentProfileRegistry,
-  getSupervisedAgentletId,
   installAcpProfileCachePort,
   mountAgenetes,
   resolveDaemonEntry,
 } from './modules/agent/acp/index.js';
-import { buildLegacyCommandProfiles } from './modules/agent/acp/legacy-profile-migration.js';
-import { listProfiles as listLegacyAcpProfiles } from './modules/agent/acp/profile-store.js';
 import { initializeAgentDefaults } from './modules/agent/agent-defaults.js';
 import agentDefaultsRoutes from './modules/agent/agent-defaults.route.js';
 import agentRoutes from './modules/agent/agent.route.js';
@@ -317,15 +314,7 @@ const agentletGateway = mountAgenetes(app, {
   profiles: {
     storageDir: join(getDataDir(), 'agent-profiles'),
     legacyStorageDir: join(getDataDir(), 'agent-team'),
-    legacyCommandProfiles: existsSync(
-      join(getDataDir(), 'agent-profiles', 'registry.json'),
-    )
-      ? []
-      : buildLegacyCommandProfiles(
-          listLegacyAcpProfiles(),
-          getSupervisedAgentletId(),
-          process.cwd(),
-        ),
+    legacyCommandProfiles: [],
   },
 });
 let unregisterHarnessDiscovery: (() => void) | undefined;

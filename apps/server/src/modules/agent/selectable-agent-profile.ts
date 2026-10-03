@@ -1,7 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { getAgentProfileRegistry } from '@agenetes/agentlet-host';
+import {
+  getAgentProfileRegistry,
+  getAgentletGateway,
+} from '@agenetes/agentlet-host';
 
 import { HUABU_AGENT_PROFILE_ID } from '@huabu/shared';
 
@@ -16,6 +19,25 @@ export interface SelectableAgentProfile {
 interface AgentProfileRegistryPort {
   getProfile(profileId: string): SelectableAgentProfile | null | undefined;
   listSelectableProfileIds(): string[];
+}
+
+function getConnectedProfileRegistry(): AgentProfileRegistryPort | null {
+  const registry = getAgentProfileRegistry();
+  if (!registry) return null;
+  return {
+    getProfile: (profileId) => registry.getProfile(profileId),
+    listSelectableProfileIds: () => {
+      const connectedIds = new Set(
+        (getAgentletGateway()?.getAgentlets({ status: 'connected' }) ?? []).map(
+          (connection) => connection.agentletId,
+        ),
+      );
+      return registry
+        .listProfiles()
+        .filter((profile) => connectedIds.has(profile.agentletId))
+        .map((profile) => profile.id);
+    },
+  };
 }
 
 export interface AvailableAgentProfileSummary {
@@ -36,7 +58,7 @@ export class SelectableAgentProfileError extends Error {
 
 export function requireSelectableAgentProfile(
   profileId: string,
-  registry: AgentProfileRegistryPort | null = getAgentProfileRegistry(),
+  registry: AgentProfileRegistryPort | null = getConnectedProfileRegistry(),
 ): SelectableAgentProfile {
   if (!registry) {
     throw new SelectableAgentProfileError(
@@ -60,20 +82,20 @@ export function requireSelectableAgentProfile(
 
 export function requireAvailableAgentProfile(
   profileId: string,
-  registry: AgentProfileRegistryPort | null = getAgentProfileRegistry(),
+  registry: AgentProfileRegistryPort | null = getConnectedProfileRegistry(),
 ): void {
   if (profileId === HUABU_AGENT_PROFILE_ID) return;
   requireSelectableAgentProfile(profileId, registry);
 }
 
 export function getFirstSelectableAgentProfileId(
-  registry: AgentProfileRegistryPort | null = getAgentProfileRegistry(),
+  registry: AgentProfileRegistryPort | null = getConnectedProfileRegistry(),
 ): string | null {
   return registry?.listSelectableProfileIds()[0] ?? null;
 }
 
 export function listAvailableAgentProfiles(
-  registry: AgentProfileRegistryPort | null = getAgentProfileRegistry(),
+  registry: AgentProfileRegistryPort | null = getConnectedProfileRegistry(),
 ): AvailableAgentProfileSummary[] {
   const defaultProfileId = getFirstSelectableAgentProfileId(registry);
   const huabu = {

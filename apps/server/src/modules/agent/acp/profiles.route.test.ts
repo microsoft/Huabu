@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   initializeDefaults: vi.fn(),
   discoverHarnesses: vi.fn(),
   buildHarnessLaunch: vi.fn(),
+  connectedIds: new Set(['machine-a', 'remote-machine']),
 }));
 
 vi.mock('../agent-defaults.js', () => ({
@@ -32,10 +33,23 @@ vi.mock('@agenetes/agentlet-host', () => ({
   getDaemonSupervisor: () => ({
     getStatus: () => ({ online: true, restartAttempt: 0 }),
   }),
-  getSupervisedAgentletId: () => 'machine-a',
   getAgentletGateway: () => ({
     discoverHarnesses: mocks.discoverHarnesses,
     buildHarnessLaunch: mocks.buildHarnessLaunch,
+    getAgentlets: () =>
+      [...mocks.connectedIds].map((agentletId) => ({
+        agentletId,
+        status: 'connected',
+        connectedAt: new Date('2026-01-01T00:00:00.000Z'),
+        agentletProfile: {
+          bridge: { name: 'agentlet', version: '1.0.0' },
+          machine: {
+            hostname: `${agentletId}-host`,
+            platform: 'linux',
+            arch: 'x64',
+          },
+        },
+      })),
   }),
 }));
 
@@ -92,7 +106,12 @@ describe('ordinary Profile catalog routes', () => {
     const response = await server.inject({
       method: 'POST',
       url: '/api/acp/profiles',
-      payload: { alias: 'Typed', workingDirPath: '/work', launch },
+      payload: {
+        alias: 'Typed',
+        agentletId: 'machine-a',
+        workingDirPath: '/work',
+        launch,
+      },
     });
     expect(response.statusCode).toBe(200);
     expect(mocks.discoverHarnesses).toHaveBeenCalledWith('machine-a', {
@@ -122,6 +141,7 @@ describe('ordinary Profile catalog routes', () => {
         url: '/api/acp/profiles',
         payload: {
           alias: 'Typed',
+          agentletId: 'machine-a',
           workingDirPath: '/work',
           launch: { kind: 'acp-harness', harnessId: 'copilot' },
         },
@@ -139,6 +159,7 @@ describe('ordinary Profile catalog routes', () => {
       url: '/api/acp/profiles',
       payload: {
         alias: 'Copilot',
+        agentletId: 'machine-a',
         workingDirPath: '/work/project',
         launch: commandProfile.launch,
         metadata: { cliId: 'copilot' },
@@ -166,6 +187,16 @@ describe('ordinary Profile catalog routes', () => {
     expect(response.json()).toMatchObject({
       profiles: [commandProfile],
       selectableProfileIds: ['command-1'],
+      connectedDevices: [
+        expect.objectContaining({
+          agentletId: 'machine-a',
+          profileCount: 1,
+        }),
+        expect.objectContaining({
+          agentletId: 'remote-machine',
+          profileCount: 0,
+        }),
+      ],
     });
     expect(mocks.registry.createProfile).not.toHaveBeenCalled();
     expect(mocks.initializeDefaults).not.toHaveBeenCalled();
@@ -179,6 +210,7 @@ describe('ordinary Profile catalog routes', () => {
       url: '/api/acp/profiles',
       payload: {
         alias: 'Forged',
+        agentletId: 'machine-a',
         workingDirPath: '/work',
         launch: commandProfile.launch,
         customData: { discoveredAgent: source },
@@ -419,7 +451,10 @@ describe('ordinary Profile catalog routes', () => {
     const response = await server.inject({
       method: 'POST',
       url: '/api/acp/profile-launch-preview',
-      payload: { launch: commandProfile.launch },
+      payload: {
+        agentletId: 'machine-a',
+        launch: commandProfile.launch,
+      },
     });
     expect(response.statusCode).toBe(503);
     expect(response.json().code).toBe('harness_preview_unavailable');

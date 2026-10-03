@@ -1,4 +1,5 @@
 import { createServer, type Server } from 'node:http'
+import { arch, hostname, platform } from 'node:os'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
@@ -137,7 +138,7 @@ describe('agentlet daemon integration', () => {
     expect(controlHello).toMatchObject({
       agentletId: 'machine-a',
       agentletProfile: {
-        machine: { hostname: 'machine-a' },
+        machine: { hostname: hostname(), platform: platform(), arch: arch() },
         capabilities: { harnessDiscovery: { version: 1 } },
       },
     })
@@ -163,7 +164,10 @@ describe('agentlet daemon integration', () => {
     await waitUntil(() => sessionHello !== undefined)
     expect(sessionHello).toMatchObject({
       sessionId: 'native-bootstrap',
-      sessionProfile: { agentletId: 'machine-a', machine: { hostname: 'machine-a' } },
+      sessionProfile: {
+        agentletId: 'machine-a',
+        machine: { hostname: hostname(), platform: platform(), arch: arch() },
+      },
     })
     await waitUntil(() => sessionMessages.some(
       (message) => 'method' in message && message.method === 'session/update',

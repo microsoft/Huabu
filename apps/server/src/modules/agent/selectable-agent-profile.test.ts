@@ -1,12 +1,33 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+const host = vi.hoisted(() => ({
+  profiles: [] as Array<{ id: string; alias: string; agentletId: string }>,
+  connectedIds: [] as string[],
+}));
+
+vi.mock('@agenetes/agentlet-host', () => ({
+  getAgentProfileRegistry: () => ({
+    getProfile: (profileId: string) =>
+      host.profiles.find((profile) => profile.id === profileId),
+    listProfiles: () => host.profiles,
+  }),
+  getAgentletGateway: () => ({
+    getAgentlets: () => host.connectedIds.map((agentletId) => ({ agentletId })),
+  }),
+}));
 
 import {
   listAvailableAgentProfiles,
   requireAvailableAgentProfile,
 } from './selectable-agent-profile.js';
+
+afterEach(() => {
+  host.profiles = [];
+  host.connectedIds = [];
+});
 
 describe('listAvailableAgentProfiles', () => {
   it('prepends Huabu and projects available Profile identities', () => {
@@ -38,6 +59,19 @@ describe('listAvailableAgentProfiles', () => {
   it('keeps the Huabu Profile available while the registry is unavailable', () => {
     expect(listAvailableAgentProfiles(null)).toEqual([
       { id: 'huabu', alias: 'Built-In Pi' },
+    ]);
+  });
+
+  it('projects only Profiles on currently connected Agentlets by default', () => {
+    host.profiles = [
+      { id: 'online', alias: 'Online', agentletId: 'device-a' },
+      { id: 'offline', alias: 'Offline', agentletId: 'device-b' },
+    ];
+    host.connectedIds = ['device-a'];
+
+    expect(listAvailableAgentProfiles()).toEqual([
+      { id: 'huabu', alias: 'Built-In Pi' },
+      { id: 'online', alias: 'Online', default: true },
     ]);
   });
 

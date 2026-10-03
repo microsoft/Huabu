@@ -7,41 +7,42 @@ import { useTranslation } from 'react-i18next';
 import { listAcpAgentClis } from '@/api/acp';
 import { toast } from '@/components/Common/Toast';
 
-import type { AcpAgentCliInfo } from '@huabu/shared';
+import type { AcpAgentCliInfo, AcpAgentCliQuery } from '@huabu/shared';
 
 /** Reads the daemon's catalogue for Settings without a browser discovery cache. */
 export function useDetectedClis(
   enabled = true,
-  profileId?: string,
+  target: AcpAgentCliQuery,
 ): {
   detectedClis: AcpAgentCliInfo[];
   loaded: boolean;
 } {
   const { t } = useTranslation();
   const [snapshot, setSnapshot] = useState<{
-    profileId?: string;
+    key: string;
     detectedClis: AcpAgentCliInfo[];
     loaded: boolean;
-  }>({ profileId, detectedClis: [], loaded: false });
+  }>({ key: JSON.stringify(target), detectedClis: [], loaded: false });
+  const key = JSON.stringify(target);
 
   useEffect(() => {
     if (!enabled) return;
     let generation = 0;
     const load = async () => {
       const current = ++generation;
-      setSnapshot({ profileId, loaded: false, detectedClis: [] });
+      setSnapshot({ key, loaded: false, detectedClis: [] });
       try {
-        const response = await listAcpAgentClis(profileId);
+        const response = await listAcpAgentClis(target);
         if (current === generation) {
           setSnapshot({
-            profileId,
+            key,
             loaded: true,
             detectedClis: response.agents,
           });
         }
       } catch (error) {
         if (current === generation) {
-          setSnapshot({ profileId, loaded: true, detectedClis: [] });
+          setSnapshot({ key, loaded: true, detectedClis: [] });
           toast(
             error instanceof Error
               ? error.message
@@ -58,9 +59,9 @@ export function useDetectedClis(
       generation++;
       window.removeEventListener('workspace-changed', handler);
     };
-  }, [enabled, profileId, t]);
+  }, [enabled, key, t]);
 
-  return snapshot.profileId === profileId
+  return snapshot.key === key
     ? { detectedClis: snapshot.detectedClis, loaded: snapshot.loaded }
     : { detectedClis: [], loaded: false };
 }

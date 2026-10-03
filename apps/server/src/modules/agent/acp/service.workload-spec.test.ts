@@ -20,7 +20,6 @@ vi.mock('@agenetes/agentlet-host', () => ({
   getAgentProfileRegistry: () => ({
     getProfile: () => mocks.profile,
   }),
-  getSupervisedAgentletId: () => 'supervised-agentlet',
 }));
 
 vi.mock('../agenetes/drivers.js', () => ({
@@ -136,5 +135,15 @@ describe('buildAcpWorkloadSpec', () => {
       '<space_prompt>Space rules</space_prompt>',
       'Node constraints',
     ]);
+  });
+
+  it('rejects a missing Profile instead of inventing a placement', () => {
+    expect(() =>
+      buildAcpWorkloadSpec({
+        binding: { profileId: 'missing', alias: 'Missing' },
+        threadId: 'thread-a',
+        canvasId: 'canvas-a',
+      }),
+    ).toThrow("Agent Profile 'missing' is unavailable.");
   });
 });
