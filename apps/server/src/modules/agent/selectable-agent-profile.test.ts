@@ -1,12 +1,33 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+const host = vi.hoisted(() => ({
+  profiles: [] as Array<{ id: string; alias: string; agentletId: string }>,
+  connectedIds: [] as string[],
+}));
+
+vi.mock('@agenetes/agentlet-host', () => ({
+  getAgentProfileRegistry: () => ({
+    getProfile: (profileId: string) =>
+      host.profiles.find((profile) => profile.id === profileId),
+    listProfiles: () => host.profiles,
+  }),
+  getAgentletGateway: () => ({
+    getAgentlets: () => host.connectedIds.map((agentletId) => ({ agentletId })),
+  }),
+}));
 
 import {
   listAvailableAgentProfiles,
   requireAvailableAgentProfile,
 } from './selectable-agent-profile.js';
+
+afterEach(() => {
+  host.profiles = [];
+  host.connectedIds = [];
+});
 
 describe('listAvailableAgentProfiles', () => {
   it('prepends Huabu and projects available Profile identities', () => {
@@ -24,45 +45,37 @@ describe('listAvailableAgentProfiles', () => {
     ]);
 
     expect(
-      listAvailableAgentProfiles(
-        {
-          getProfile: (id: string) => profiles.get(id),
-          listSelectableProfileIds: () => ['profile-a', 'profile-b'],
-        },
-        'profile-b',
-      ),
+      listAvailableAgentProfiles({
+        getProfile: (id: string) => profiles.get(id),
+        listSelectableProfileIds: () => ['profile-a', 'profile-b'],
+      }),
     ).toEqual([
       { id: 'huabu', alias: 'Built-In Pi' },
-      { id: 'profile-a', alias: 'Researcher' },
-      { id: 'profile-b', alias: 'Builder', default: true },
+      { id: 'profile-a', alias: 'Researcher', default: true },
+      { id: 'profile-b', alias: 'Builder' },
     ]);
   });
 
   it('keeps the Huabu Profile available while the registry is unavailable', () => {
-    expect(listAvailableAgentProfiles(null, null)).toEqual([
+    expect(listAvailableAgentProfiles(null)).toEqual([
       { id: 'huabu', alias: 'Built-In Pi' },
     ]);
   });
 
-  it('does not mark another Profile as default when the selected one is missing', () => {
-    expect(
-      listAvailableAgentProfiles(
-        {
-          getProfile: () => ({ id: 'other', alias: 'Other' }),
-          listSelectableProfileIds: () => ['other'],
-        },
-        'deleted',
-      ),
-    ).toEqual([
+  it('projects only Profiles on currently connected Agentlets by default', () => {
+    host.profiles = [
+      { id: 'online', alias: 'Online', agentletId: 'device-a' },
+      { id: 'offline', alias: 'Offline', agentletId: 'device-b' },
+    ];
+    host.connectedIds = ['device-a'];
+
+    expect(listAvailableAgentProfiles()).toEqual([
       { id: 'huabu', alias: 'Built-In Pi' },
-      { id: 'other', alias: 'Other' },
+      { id: 'online', alias: 'Online', default: true },
     ]);
   });
 
   it('accepts the Huabu Profile without an external registry', () => {
     expect(() => requireAvailableAgentProfile('huabu', null)).not.toThrow();
-    expect(listAvailableAgentProfiles(null, 'huabu')).toEqual([
-      { id: 'huabu', alias: 'Built-In Pi', default: true },
-    ]);
   });
 });

@@ -17,7 +17,6 @@
 
 import {
   getAgentletGateway,
-  getSupervisedAgentletId,
   getAgentProfileRegistry,
 } from '@agenetes/agentlet-host';
 import {
@@ -36,19 +35,25 @@ import type {
 } from '@huabu/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
-async function detectAgentClis(profileId?: string): Promise<AcpAgentCliInfo[]> {
+async function detectAgentClis(target: {
+  profileId?: string;
+  agentletId?: string;
+}): Promise<AcpAgentCliInfo[]> {
   const gateway = getAgentletGateway();
   if (!gateway) throw new Error('Agentlet Gateway is not ready');
-  const profile = profileId
-    ? getAgentProfileRegistry()?.getProfile(profileId)
+  const profile = target.profileId
+    ? getAgentProfileRegistry()?.getProfile(target.profileId)
     : undefined;
-  if (profileId && !profile) throw new Error('Agent Profile is unavailable');
-  const result = await gateway.discoverHarnesses(
-    profile?.agentletId ?? getSupervisedAgentletId(),
-    {
-      prepareWorkspaces: false,
-    },
-  );
+  if (target.profileId && !profile)
+    throw new Error('Agent Profile is unavailable');
+  const agentletId = profile?.agentletId ?? target.agentletId;
+  if (!agentletId) throw new Error('Agentlet target is required');
+  const connection = gateway.getAgentlet(agentletId);
+  if (connection?.status !== 'connected')
+    throw new Error('Agentlet is not connected');
+  const result = await gateway.discoverHarnesses(agentletId, {
+    prepareWorkspaces: false,
+  });
   if (result.harnesses.some((entry) => entry.id === CUSTOM_COMMAND_WRAPPER_ID))
     return result.harnesses;
   return [
@@ -96,7 +101,7 @@ export function createAcpAgentCliRoutes(
               message: 'Agent Profile is unavailable',
             });
           }
-          return { agents: await detect(parsed.data.profileId) };
+          return { agents: await detect(parsed.data) };
         } catch (error) {
           request.log.warn(
             { err: error },

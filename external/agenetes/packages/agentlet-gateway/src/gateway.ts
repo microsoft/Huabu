@@ -431,6 +431,14 @@ export class AgentletGateway {
 
     const existing = this.agentlets.get(params.agentletId);
     if (existing) {
+      if (existing.status === 'connected') {
+        this.rejectInvalidHello(
+          ws,
+          message.id,
+          `Agentlet ID "${params.agentletId}" is already connected. Retry with --agentlet-id <unique-id>.`,
+        );
+        return;
+      }
       this.rejectPendingRequests(params.agentletId);
       existing.handleReconnect(ws, {
         agentletProfile: params.agentletProfile,

@@ -58,8 +58,8 @@ import type {
  *     `@agenetes/protocol` `ControlMsg` vocabulary, gated by
  *     {@link AgentHandle.capabilities}. Usable out-of-turn on a Deployment.
  *   - `close()` — release this workload (teardown the session / drop the
- *     backing connection). A Job's `close` is a no-op (its run already
- *     ended it); a Deployment tears down its long-lived session.
+ *     backing connection). Teardown may be asynchronous when the driver
+ *     must confirm an external process has stopped.
  *   - `capabilities` — the advertised capability descriptor.
  *
  * The type parameters keep the framework host-agnostic: `TSubmission` is
@@ -113,11 +113,10 @@ export interface AgentHandle<
   control(msg: ControlMsg): Promise<ControlAck>;
 
   /**
-   * Release this workload. For a long-lived Deployment this tears down
-   * the session (drops the backing connection); for a one-shot Job it is
-   * a no-op (the single `run` already ended its life). Idempotent.
+   * Release this workload. Idempotent. Agenetes invokes this automatically
+   * when a one-shot Job run settles; Deployment callers close explicitly.
    */
-  close(): void;
+  close(): void | Promise<void>;
 
   /**
    * The **up-report seam** (README I9.7): subscribe to this handle's

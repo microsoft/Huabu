@@ -22,10 +22,8 @@
 
 import { randomUUID } from 'node:crypto';
 
-import {
-  getAgentProfileRegistry,
-  getSupervisedAgentletId,
-} from '@agenetes/agentlet-host';
+import { AcpServiceError } from '@agenetes/acp-driver';
+import { getAgentProfileRegistry } from '@agenetes/agentlet-host';
 
 import { renderExternalAgentInputs } from './preprocessor.js';
 import { getProfileSessionPreferences } from './profile-session-preferences.js';
@@ -183,18 +181,18 @@ export function buildAcpWorkloadSpec(
   const { binding, threadId } = opts;
   const canvasId = opts.canvasId ?? '';
   const profile = resolveProfileSnapshot(binding.profileId);
-  let agentletId: string;
-  let cwd: string | undefined;
-  let recipe: AcpBindingRecipe | null;
-  if (profile) {
-    agentletId = profile.agentletId;
-    cwd = profile.workingDirPath;
-    recipe = recipeFromProfileSnapshot(profile, binding.alias);
-  } else {
-    agentletId = getSupervisedAgentletId();
-    cwd = opts.cwd;
-    recipe = resolveBindingRecipe(binding.profileId);
+  if (!profile) {
+    throw new AcpServiceError(
+      'profile_missing',
+      `Agent Profile '${binding.profileId}' is unavailable.`,
+    );
   }
+  const agentletId = profile.agentletId;
+  let cwd: string | undefined = profile.workingDirPath;
+  let recipe: AcpBindingRecipe | null = recipeFromProfileSnapshot(
+    profile,
+    binding.alias,
+  );
 
   const workingDirPath = opts.launchOverrides?.workingDirPath;
   cwd = workingDirPath ?? cwd;

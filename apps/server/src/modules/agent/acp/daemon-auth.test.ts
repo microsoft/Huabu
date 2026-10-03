@@ -32,7 +32,7 @@ function makeAgentletHello(): AgentletHelloParams {
     agentletId: 'test:agentlet',
     agentletProfile: {
       bridge: { name: 'agentlet', version: '1.0.0' },
-      machine: { hostname: 'test', platform: 'linux' },
+      machine: { hostname: 'test', platform: 'linux', arch: 'x64' },
       capabilities: { autoRestart: true, bufferLimit: 1000 },
     },
   };

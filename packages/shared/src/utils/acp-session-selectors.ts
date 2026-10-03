@@ -114,14 +114,23 @@ const normalizeKey = (value: unknown): string =>
  * Flatten the many shapes an agent may use for a select option list:
  * bare strings, `{ name, value }` / `{ label, id }` records, and group
  * records (`{ name, options: [...] }`) which are inlined with a
- * `sectionLabel` on their first child.
+ * `sectionLabel` on their first child. Duplicate exact control values are
+ * removed in publish order because sending either entry invokes the same
+ * set-RPC value; equal labels with different values remain distinct.
  */
 function flattenOptions(raw: unknown): AcpSessionSelectorOption[] {
   if (!Array.isArray(raw)) return [];
   const flat: AcpSessionSelectorOption[] = [];
+  const seenValues = new Set<string>();
+  const append = (option: AcpSessionSelectorOption): boolean => {
+    if (seenValues.has(option.value)) return false;
+    seenValues.add(option.value);
+    flat.push(option);
+    return true;
+  };
   for (const entry of raw) {
     if (typeof entry === 'string') {
-      flat.push({ value: entry, label: entry });
+      append({ value: entry, label: entry });
       continue;
     }
     if (!entry || typeof entry !== 'object') continue;
@@ -134,7 +143,7 @@ function flattenOptions(raw: unknown): AcpSessionSelectorOption[] {
         const s = asRecord(sub);
         const value = String(s.value ?? s.id ?? '');
         if (!value) continue;
-        flat.push({
+        const appended = append({
           value,
           label: String(s.name ?? s.label ?? value),
           ...(isFirst ? { sectionLabel: groupLabel } : {}),
@@ -142,14 +151,14 @@ function flattenOptions(raw: unknown): AcpSessionSelectorOption[] {
             ? { description: s.description }
             : {}),
         });
-        isFirst = false;
+        if (appended) isFirst = false;
       }
       continue;
     }
 
     const value = String(e.value ?? e.id ?? '');
     if (!value) continue;
-    flat.push({
+    append({
       value,
       label: String(e.name ?? e.label ?? value),
       ...(typeof e.description === 'string'

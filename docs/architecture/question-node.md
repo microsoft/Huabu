@@ -126,7 +126,7 @@ Activating a `conversation` result row ([CanvasSearchResults.tsx](../../apps/web
 Double-click the node → `openInCompose()` ([QuestionNode.tsx](../../apps/web/src/components/Nodes/question/QuestionNode.tsx)). Creating a question through the toolbar placement flow or the connected-node picker also mints the thread and opens compose immediately. [`questionCompose.ts`](../../apps/web/src/components/Nodes/question/questionCompose.ts) opens the Question's Preview Workspace node tab and directs the input-focus request to that thread.
 
 - confirms server-acknowledged creation (or initializes a legacy node's missing thread association), opens the chat panel in **compose mode**, and defaults the built-in Huabu Agent to `operate`
-- new Questions snapshot the configured default Agent (external Profile or explicit Built-In Pi) unless a binding is supplied; existing Questions and legacy association repair retain their binding, and the user can switch an editable binding
+- new Questions snapshot the browser-local recent conversational Agent unless a binding is supplied, falling back to the first selectable external Profile when that cache is absent or stale; existing Questions, Utility Agent changes, and legacy association repair retain their binding, and the user can switch an editable binding
 - user types the question, hits send → first send writes `content` back to the node
 
 Toolbar (single action): **Ask** when idle, **View / Watch conversation** once a

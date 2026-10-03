@@ -21,17 +21,17 @@ afterEach(async () => {
 });
 
 describe('Agentlet Gateway mount', () => {
-  it('rejects a token presented for another machine identity', () => {
+  it('accepts the shared token from another machine identity', () => {
     const auth = getDaemonAuth();
-    auth.configure('machine-a', 'test-token');
+    auth.setDaemonToken('test-token');
 
-    expect(() => auth.validateAgentlet('machine-b', 'test-token')).toThrow(
-      'Invalid supervised agentlet identity',
-    );
+    expect(() =>
+      auth.validateAgentlet('machine-b', 'test-token'),
+    ).not.toThrow();
   });
 
   it('authenticates the supervised identity and closes upgraded sockets', async () => {
-    getDaemonAuth().configure('machine-a', 'test-token');
+    getDaemonAuth().setDaemonToken('test-token');
     app = Fastify({ logger: false });
     const gateway = mountAgentletGateway(app, {});
     await app.listen({ host: '127.0.0.1', port: 0 });

@@ -19,10 +19,6 @@ vi.mock('@agenetes/acp-driver', () => ({
   acpSessionRegistry: { get: () => mocks.live },
 }));
 
-vi.mock('@agenetes/agentlet-host', () => ({
-  getSupervisedAgentletId: () => 'agentlet-1',
-}));
-
 vi.mock('./external-agent-realization.js', () => ({
   externalAgentRealization: {
     realize: mocks.realize,

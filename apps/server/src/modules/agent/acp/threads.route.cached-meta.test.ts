@@ -29,10 +29,6 @@ vi.mock('@agenetes/acp-driver', () => ({
   },
 }));
 
-vi.mock('@agenetes/agentlet-host', () => ({
-  getSupervisedAgentletId: () => 'agentlet-supervised',
-}));
-
 vi.mock('./external-agent-realization.js', () => ({
   externalAgentRealization: { realize: vi.fn(), ensureSession: vi.fn() },
   realizationHttpError: () => ({
@@ -139,7 +135,7 @@ describe('ACP cached-meta across awaited persistence', () => {
     });
   });
 
-  it('falls back to the supervised agentlet for a thread with no record', async () => {
+  it('does not invent a placement for a thread with no record', async () => {
     mocks.live.set('agentlet-supervised\u0000thread-1', {
       availableCommands: [],
       commandsUpdatedAt: 3,
@@ -160,11 +156,7 @@ describe('ACP cached-meta across awaited persistence', () => {
       url: CACHED_META_URL,
     });
 
-    expect(response.json()).toMatchObject({
-      source: 'thread',
-      commandsUpdatedAt: 3,
-      sessionMeta: { updatedAt: 4 },
-    });
+    expect(response.json()).toMatchObject({ source: 'none' });
   });
 
   it('answers a dormant thread from the metadata its record kept', async () => {

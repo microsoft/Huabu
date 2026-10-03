@@ -129,6 +129,15 @@ export function AgentDefaultsSettings() {
             ?.launch.kind === 'acp-command'
         ? 'unsupported'
         : 'unknown';
+  const showStatus =
+    missing ||
+    draft?.profileId === null ||
+    (snapshot?.defaults.profileId === draft?.profileId &&
+      snapshot?.selectionState === 'offline') ||
+    (!isBuiltIn &&
+      Boolean(draft?.functionalModel.trim()) &&
+      modelCapability !== 'supported') ||
+    Boolean(error || profilesError || saving || saved);
 
   return (
     <SettingSection title={t('settings.agentDefaultsTitle')}>
@@ -143,7 +152,7 @@ export function AgentDefaultsSettings() {
         <>
           <SettingRow
             title={t('settings.agentDefaultsProfile')}
-            description={t('settings.agentDefaultsDescription')}
+            description={t('settings.agentDefaultsSectionDescription')}
           >
             <Select
               ariaLabel={t('settings.agentDefaultsProfile')}
@@ -178,43 +187,45 @@ export function AgentDefaultsSettings() {
               />
             </SettingRow>
           )}
-          <div className="space-y-2 px-3 py-2 text-xs">
-            {missing ? (
-              <p className="text-warning" role="status">
-                {t('settings.agentDefaultsDeleted')}
-              </p>
-            ) : draft.profileId === null ? (
-              <p className="text-fg-muted">
-                {t('settings.agentDefaultsUnconfigured')}
-              </p>
-            ) : snapshot?.defaults.profileId === draft.profileId &&
-              snapshot.selectionState === 'offline' ? (
-              <p className="text-warning">
-                {t('settings.agentDefaultsOffline')}
-              </p>
-            ) : null}
-            {!isBuiltIn &&
-              draft.functionalModel.trim() &&
-              modelCapability !== 'supported' && (
+          {showStatus && (
+            <div className="space-y-2 px-3 py-2 text-xs">
+              {missing ? (
+                <p className="text-warning" role="status">
+                  {t('settings.agentDefaultsDeleted')}
+                </p>
+              ) : draft.profileId === null ? (
+                <p className="text-fg-muted">
+                  {t('settings.agentDefaultsUnconfigured')}
+                </p>
+              ) : snapshot?.defaults.profileId === draft.profileId &&
+                snapshot.selectionState === 'offline' ? (
                 <p className="text-warning">
-                  {modelCapability === 'unsupported'
-                    ? t('settings.agentDefaultsModelUnsupported')
-                    : t('settings.agentDefaultsModelUnknown')}
+                  {t('settings.agentDefaultsOffline')}
+                </p>
+              ) : null}
+              {!isBuiltIn &&
+                draft.functionalModel.trim() &&
+                modelCapability !== 'supported' && (
+                  <p className="text-warning">
+                    {modelCapability === 'unsupported'
+                      ? t('settings.agentDefaultsModelUnsupported')
+                      : t('settings.agentDefaultsModelUnknown')}
+                  </p>
+                )}
+              {(error || profilesError) && (
+                <p className="text-danger" role="alert">
+                  {error ?? profilesError?.message}
                 </p>
               )}
-            {(error || profilesError) && (
-              <p className="text-danger" role="alert">
-                {error ?? profilesError?.message}
-              </p>
-            )}
-            {(saving || saved) && (
-              <p className="text-success" role="status">
-                {saving
-                  ? t('settings.saving')
-                  : t('settings.agentDefaultsSaved')}
-              </p>
-            )}
-          </div>
+              {(saving || saved) && (
+                <p className="text-success" role="status">
+                  {saving
+                    ? t('settings.saving')
+                    : t('settings.agentDefaultsSaved')}
+                </p>
+              )}
+            </div>
+          )}
         </>
       )}
     </SettingSection>

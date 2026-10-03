@@ -13,12 +13,12 @@ import {
   type Point,
 } from '@huabu/shared';
 
-import { getAgentDefaults } from './agent-defaults.js';
 import {
   InvalidAgentLaunchOverridesError,
   parseAgentLaunchOverrides,
 } from './agent-launch-overrides.js';
 import {
+  getFirstSelectableAgentProfileId,
   requireSelectableAgentProfile,
   SelectableAgentProfileError,
   type SelectableAgentProfile,
@@ -89,7 +89,7 @@ interface StoredNode {
 
 interface AgentNodeServiceDependencies {
   getProfileRegistry: () => AgentProfileRegistryPort | null;
-  getDefaultProfileId?: () => string | null;
+  getFallbackProfileId?: () => string | null;
   readCanvasNodes: (canvasId: string) => Promise<StoredNode[] | null>;
   execute: (input: {
     canvasId: string;
@@ -108,6 +108,7 @@ async function defaultReadCanvasNodes(
 
 const DEFAULT_DEPENDENCIES: AgentNodeServiceDependencies = {
   getProfileRegistry: () => null,
+  getFallbackProfileId: getFirstSelectableAgentProfileId,
   readCanvasNodes: defaultReadCanvasNodes,
   execute: executeOnServer,
 };
@@ -217,13 +218,13 @@ export class AgentNodeService {
 
     const profileId =
       input.profileId ??
-      (this.dependencies.getDefaultProfileId
-        ? this.dependencies.getDefaultProfileId()
-        : getAgentDefaults().profileId);
+      (this.dependencies.getFallbackProfileId
+        ? this.dependencies.getFallbackProfileId()
+        : getFirstSelectableAgentProfileId());
     if (!profileId) {
       throw new AgentNodeCreationError(
         'default_profile_unconfigured',
-        'Connect an external Agent or select Built-In Pi as the default in Settings.',
+        'Connect an external Agent before creating a conversation.',
       );
     }
     let binding: AgentBinding;

@@ -9,6 +9,7 @@ import {
   agentProfileParamsSchema,
   agentProfileSchema,
   createAcpCommandProfileBodySchema,
+  createAcpProfileBodySchema,
   createAgentProfileBodySchema,
   patchAgentProfileBodySchema,
 } from './agent-profile.js';
@@ -38,6 +39,18 @@ describe('ordinary command Profile contracts', () => {
         workingDirectory: { kind: 'default' },
       }).success,
     ).toBe(false);
+  });
+
+  it('requires explicit Agentlet placement for the ACP create API', () => {
+    expect(createAcpProfileBodySchema.safeParse(commandBody).success).toBe(
+      false,
+    );
+    expect(
+      createAcpProfileBodySchema.safeParse({
+        ...commandBody,
+        agentletId: 'device-1',
+      }).success,
+    ).toBe(true);
   });
 
   it.each(['/work/project', 'C:\\work\\project', '\\\\host\\share'])(

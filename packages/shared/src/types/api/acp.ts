@@ -48,6 +48,12 @@ export const externalAgentIdleTimeoutSecsSchema = z.union([
 
 export const externalAgentRuntimeConfigSchema = z.object({
   idleTimeoutSecs: externalAgentIdleTimeoutSecsSchema,
+  maxAgents: z
+    .number()
+    .int()
+    .positive()
+    .refine(Number.isSafeInteger, 'Maximum agents must be a safe integer')
+    .default(10),
 });
 
 export type ExternalAgentRuntimeConfig = z.infer<
@@ -157,8 +163,18 @@ export const acpAgentCliInfoSchema = z.object({
 export type AcpAgentCliInfo = z.infer<typeof acpAgentCliInfoSchema>;
 
 export const acpAgentCliQuerySchema = z
-  .object({ profileId: z.string().min(1).optional() })
-  .strict();
+  .object({
+    profileId: z.string().min(1).optional(),
+    agentletId: z.string().min(1).optional(),
+  })
+  .strict()
+  .refine(
+    (value) =>
+      Number(value.profileId !== undefined) +
+        Number(value.agentletId !== undefined) ===
+      1,
+    { message: 'Exactly one Profile or Agentlet target is required' },
+  );
 export type AcpAgentCliQuery = z.infer<typeof acpAgentCliQuerySchema>;
 
 /** Response body for `GET /api/acp/agent-cli`, including unavailable entries. */
@@ -528,10 +544,65 @@ export const acpAgentletStatusSchema = agentletStatusSchema;
 /** @deprecated Use {@link acpAgentletStatusSchema} instead. */
 export const acpDaemonStatusSchema = acpAgentletStatusSchema;
 
+export const connectionTokenSourceSchema = z.enum([
+  'stored',
+  'environment',
+  'generated',
+]);
+export type ConnectionTokenSource = z.infer<typeof connectionTokenSourceSchema>;
+
+export const connectionTokenConfigSchema = z.object({
+  source: connectionTokenSourceSchema,
+  writable: z.boolean(),
+});
+export type ConnectionTokenConfig = z.infer<typeof connectionTokenConfigSchema>;
+
+export const connectionTokenUpdateSchema = z.object({
+  token: z.string().trim().min(1).max(512).nullable(),
+});
+export type ConnectionTokenUpdate = z.infer<typeof connectionTokenUpdateSchema>;
+
+export const agentletConnectionCommandRequestSchema = z.object({
+  origin: z.url().max(2048),
+});
+export type AgentletConnectionCommandRequest = z.infer<
+  typeof agentletConnectionCommandRequestSchema
+>;
+
+export const agentletConnectionCommandWarningSchema = z.enum([
+  'loopback',
+  'insecure',
+]);
+export type AgentletConnectionCommandWarning = z.infer<
+  typeof agentletConnectionCommandWarningSchema
+>;
+
+export const agentletConnectionCommandResponseSchema = z.object({
+  command: z.string().min(1),
+  warnings: z.array(agentletConnectionCommandWarningSchema),
+});
+export type AgentletConnectionCommandResponse = z.infer<
+  typeof agentletConnectionCommandResponseSchema
+>;
+
 /** Schema mirror of {@link AcpProfilesListResponse}. */
+export const connectedAgentletDeviceSchema = z.object({
+  agentletId: z.string().min(1),
+  hostname: z.string().min(1).optional(),
+  platform: z.string().min(1).optional(),
+  arch: z.string().min(1).optional(),
+  version: z.string().min(1),
+  connectedAt: z.iso.datetime(),
+  profileCount: z.number().int().nonnegative(),
+});
+export type ConnectedAgentletDevice = z.infer<
+  typeof connectedAgentletDeviceSchema
+>;
+
 export const acpProfilesListResponseSchema = z.object({
   profiles: z.array(agentProfileSchema),
   selectableProfileIds: z.array(z.string().min(1)),
+  connectedDevices: z.array(connectedAgentletDeviceSchema),
   agentlet: acpAgentletStatusSchema,
   agentDefaults: agentDefaultsSchema.optional(),
 });

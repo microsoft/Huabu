@@ -12,26 +12,20 @@ import { SelectableAgentProfileError } from '../agent/selectable-agent-profile.j
 import type * as SelectableProfiles from '../agent/selectable-agent-profile.js';
 
 const mocks = vi.hoisted(() => ({
-  defaults: vi.fn(),
+  firstProfile: vi.fn(),
   profile: vi.fn(),
-}));
-
-vi.mock('../agent/agent-defaults.js', () => ({
-  getAgentDefaults: mocks.defaults,
 }));
 
 vi.mock('../agent/selectable-agent-profile.js', async (importOriginal) => ({
   ...(await importOriginal<typeof SelectableProfiles>()),
+  getFirstSelectableAgentProfileId: mocks.firstProfile,
   requireSelectableAgentProfile: mocks.profile,
 }));
 
 describe('new Agent Node default binding', () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    mocks.defaults.mockReturnValue({
-      profileId: 'external-default',
-      functionalModel: '',
-    });
+    mocks.firstProfile.mockReturnValue('external-default');
     mocks.profile.mockReturnValue({
       id: 'external-default',
       alias: 'External',
@@ -56,24 +50,12 @@ describe('new Agent Node default binding', () => {
   ])('preserves an explicitly supplied binding: %j', (agentBinding) => {
     const data = { agentBinding };
     expect(withDefaultAgentBinding(data)).toBe(data);
-    expect(mocks.defaults).not.toHaveBeenCalled();
+    expect(mocks.firstProfile).not.toHaveBeenCalled();
     expect(mocks.profile).not.toHaveBeenCalled();
   });
 
-  it('uses an explicit Built-In default without resolving external Profiles', () => {
-    mocks.defaults.mockReturnValue({
-      profileId: 'huabu',
-      functionalModel: 'external-model',
-    });
-    expect(withDefaultAgentBinding({ label: 'New Agent' })).toEqual({
-      label: 'New Agent',
-      agentBinding: { kind: 'internal' },
-    });
-    expect(mocks.profile).not.toHaveBeenCalled();
-  });
-
-  it('reports an unconfigured default instead of silently choosing internal', () => {
-    mocks.defaults.mockReturnValue({ profileId: null, functionalModel: '' });
+  it('reports that no external Profile is available', () => {
+    mocks.firstProfile.mockReturnValue(null);
     expect(() => withDefaultAgentBinding({})).toThrow(AgentNodeEditError);
     expect(mocks.profile).not.toHaveBeenCalled();
   });

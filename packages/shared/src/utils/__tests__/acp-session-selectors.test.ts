@@ -88,6 +88,67 @@ describe('buildAcpSessionSelectors', () => {
     expect(selectors[0].channel).toBe('config-option');
   });
 
+  it('deduplicates Copilot model options by their exact control value', () => {
+    const [selector] = buildAcpSessionSelectors(
+      source({
+        configOptions: [
+          {
+            id: 'model',
+            category: 'model',
+            name: 'Model',
+            type: 'select',
+            currentValue: 'gpt-5.6-sol',
+            options: [
+              {
+                value: 'auto',
+                name: 'Auto',
+                description: 'Let Copilot pick the best model',
+              },
+              { value: 'auto', name: 'Auto', description: 'Auto' },
+              { value: 'gpt-5.6-sol', name: 'GPT-5.6 Sol' },
+              { value: 'gpt-5.6-terra', name: 'GPT-5.6 Terra' },
+              { value: 'gpt-5.6-luna', name: 'GPT-5.6 Luna' },
+              { value: 'gpt-5.3-codex', name: 'GPT-5.3-Codex' },
+              { value: 'auto', name: 'Auto', description: 'Auto' },
+              { value: 'gpt-5.6-sol', name: 'GPT-5.6 Sol' },
+              { value: 'gpt-5.6-terra', name: 'GPT-5.6 Terra' },
+              { value: 'gpt-5.6-luna', name: 'GPT-5.6 Luna' },
+              { value: 'gpt-5.3-codex', name: 'GPT-5.3-Codex' },
+            ],
+          },
+        ],
+      }),
+    );
+
+    expect(selector.options).toEqual([
+      {
+        value: 'auto',
+        label: 'Auto',
+        description: 'Let Copilot pick the best model',
+      },
+      { value: 'gpt-5.6-sol', label: 'GPT-5.6 Sol' },
+      { value: 'gpt-5.6-terra', label: 'GPT-5.6 Terra' },
+      { value: 'gpt-5.6-luna', label: 'GPT-5.6 Luna' },
+      { value: 'gpt-5.3-codex', label: 'GPT-5.3-Codex' },
+    ]);
+  });
+
+  it('keeps distinct control values even when their labels match', () => {
+    const [selector] = buildAcpSessionSelectors(
+      source({
+        availableModels: [
+          { modelId: 'model-stable', name: 'Model' },
+          { modelId: 'model-preview', name: 'Model' },
+        ],
+      }),
+    );
+
+    expect(selector.options).toEqual([
+      { value: 'model-stable', label: 'Model' },
+      { value: 'model-preview', label: 'Model' },
+    ]);
+  });
+
   it('detects the twin by id when the agent publishes no category', () => {
     const selectors = buildAcpSessionSelectors(
       source({

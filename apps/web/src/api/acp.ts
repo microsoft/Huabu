@@ -18,6 +18,8 @@
  *     recipes with revision-checked launch and working-directory edits.
  *  - `POST /api/acp/profile-launch-preview` — daemon-built launch preview.
  *  - `GET/POST /api/acp/daemon` — daemon liveness + manual restart.
+ *  - `GET/PUT /api/acp/connection-token` — masked credential configuration.
+ *  - `POST /api/acp/connection-command` — explicit owner-only command reveal.
  *  - `GET /api/acp/threads/:threadId/cached-meta` — cached capabilities.
  *  - thread control POSTs — canonical realization plus per-session knobs.
  */
@@ -27,6 +29,7 @@ import { routes } from './_routes';
 
 import type {
   AcpAgentCliListResponse,
+  AcpAgentCliQuery,
   AcpAgentletStatus,
   AcpAgentletStatusResponse,
   AcpPermissionDecisionRequest,
@@ -45,11 +48,15 @@ import type {
   SetAcpSessionModeRequest,
   SetAcpSessionModeResponse,
   ExternalAgentRuntimeConfig,
+  ConnectionTokenConfig,
+  ConnectionTokenUpdate,
+  AgentletConnectionCommandResponse,
   WarmAcpSessionRequest,
   WarmAcpSessionResponse,
 } from '@huabu/shared';
 
 export type {
+  AcpAgentCliQuery,
   AcpAgentCliInfo,
   AcpAgentCliListResponse,
   AcpAgentProfile,
@@ -76,6 +83,10 @@ export type {
   SetAcpSessionModeRequest,
   SetAcpSessionModeResponse,
   ExternalAgentRuntimeConfig,
+  ConnectionTokenConfig,
+  ConnectionTokenUpdate,
+  AgentletConnectionCommandResponse,
+  ConnectedAgentletDevice,
   WarmAcpSessionRequest,
   WarmAcpSessionResponse,
 } from '@huabu/shared';
@@ -83,12 +94,12 @@ export type {
 // ── Agent CLI detection ──────────────────────────────────────────────
 
 /**
- * Read the supervised daemon's catalogue, or the saved Profile's target daemon.
+ * Read the explicitly selected Agentlet's catalogue.
  */
 export async function listAcpAgentClis(
-  profileId?: string,
+  target: AcpAgentCliQuery,
 ): Promise<AcpAgentCliListResponse> {
-  return apiFetch<AcpAgentCliListResponse>(routes.acpAgentCli(profileId), {
+  return apiFetch<AcpAgentCliListResponse>(routes.acpAgentCli(target), {
     fallbackMessage: 'Failed to detect installed agent CLIs',
   });
 }
@@ -103,7 +114,7 @@ export async function listAcpProfiles(): Promise<AcpProfilesListResponse> {
 }
 
 /**
- * Create a command Profile on the local agentlet. The server allocates its id.
+ * Create a command Profile on its explicitly selected Agentlet.
  */
 export async function createAcpProfile(
   payload: CreateAcpProfileBody,
@@ -197,6 +208,33 @@ export async function updateExternalAgentRuntimeConfig(
     json: config,
     fallbackMessage: 'Failed to update external-agent runtime settings',
   });
+}
+
+export async function getConnectionTokenConfig(): Promise<ConnectionTokenConfig> {
+  return apiFetch<ConnectionTokenConfig>(routes.acpConnectionToken, {
+    fallbackMessage: 'Failed to read the Agentlet connection token settings',
+  });
+}
+
+export async function updateConnectionToken(
+  update: ConnectionTokenUpdate,
+): Promise<ConnectionTokenConfig> {
+  return apiFetch<ConnectionTokenConfig>(routes.acpConnectionToken, {
+    method: 'PUT',
+    json: update,
+    fallbackMessage: 'Failed to update the Agentlet connection token',
+  });
+}
+
+export async function createAgentletConnectionCommand(): Promise<AgentletConnectionCommandResponse> {
+  return apiFetch<AgentletConnectionCommandResponse>(
+    routes.acpConnectionCommand,
+    {
+      method: 'POST',
+      json: { origin: window.location.origin },
+      fallbackMessage: 'Failed to create the Agentlet connection command',
+    },
+  );
 }
 
 /**

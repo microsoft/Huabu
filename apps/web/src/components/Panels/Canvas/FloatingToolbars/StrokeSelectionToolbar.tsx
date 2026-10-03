@@ -44,6 +44,7 @@ import { isOutsideCanvasInteraction } from '@/hooks/shortcuts/isEditableTarget';
 import { useIsNotMouse } from '@/hooks/useInputMode';
 import {
   loadDefaultAgentBinding,
+  selectDefaultConversationProfileId,
   useAcpProfilesStore,
 } from '@/store/acpProfilesStore';
 import useCanvasStore from '@/store/canvasStore';
@@ -150,8 +151,8 @@ export const StrokeSelectionToolbar = () => {
     targetThreadId ? selectThreadLastAction(state, targetThreadId) : null,
   );
   const agentProfiles = useAcpProfilesStore((state) => state.profiles);
-  const defaultProfileId = useAcpProfilesStore(
-    (state) => state.agentDefaults?.profileId,
+  const recentProfileId = useAcpProfilesStore(
+    selectDefaultConversationProfileId,
   );
 
   const currentLassoIdentity = useCallback(
@@ -529,9 +530,9 @@ export const StrokeSelectionToolbar = () => {
     }
     if (!candidate.target) {
       const name =
-        defaultProfileId === 'huabu'
+        recentProfileId === 'huabu'
           ? t('settings.builtInPi')
-          : (agentProfiles.find((profile) => profile.id === defaultProfileId)
+          : (agentProfiles.find((profile) => profile.id === recentProfileId)
               ?.alias ?? t('toolbar.defaultInkAgentTarget'));
       return {
         label: t('toolbar.newInkAgentTarget', { name }),
@@ -554,7 +555,7 @@ export const StrokeSelectionToolbar = () => {
     };
   }, [
     agentProfiles,
-    defaultProfileId,
+    recentProfileId,
     cachedTargetBinding,
     cachedTargetMode,
     candidate,

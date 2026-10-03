@@ -709,10 +709,44 @@ export function createAgenetesInstance(
     let needsUpReport = false;
     if (targetSpec.workloadType === 'Job') {
       const raw = driver.create(targetSpec, context);
-      handle =
+      const logged =
         targetSpec.threadId.length > 0
           ? decorateForLogging(raw, targetSpec.namespace, targetSpec.threadId)
           : raw;
+      let runStarted = false;
+      let closePromise: Promise<void> | undefined;
+      const closeOnce = (): Promise<void> => {
+        closePromise ??= Promise.resolve(logged.close());
+        return closePromise;
+      };
+      handle = new Proxy(logged, {
+        get(target, prop) {
+          if (prop === 'run') {
+            return function (
+              submission: AgentSubmission | null,
+              ctx: unknown,
+            ): AsyncGenerator<AgentStreamEvent, unknown> {
+              if (runStarted) {
+                throw new AgenetesError(
+                  'invalid_workload',
+                  'Job handles may run only once',
+                );
+              }
+              runStarted = true;
+              return (async function* () {
+                try {
+                  return yield* target.run(submission, ctx);
+                } finally {
+                  await closeOnce();
+                }
+              })();
+            };
+          }
+          if (prop === 'close') return closeOnce;
+          const value = Reflect.get(target, prop, target);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
     } else {
       const wasLive = runtime.get(targetSpec.threadId) !== undefined;
       handle = runtime.getOrCreate(targetSpec.threadId, () =>
@@ -1025,7 +1059,7 @@ export function createAgenetesInstance(
     },
     async close(threadId: string): Promise<void> {
       // Keep persistence and notifications wired if driver teardown fails.
-      runtime.close(threadId);
+      await runtime.close(threadId);
       try {
         // A snapshot reported during teardown is still this thread's. Persist
         // and deliver it before either notification scope ends — tearing the

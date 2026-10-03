@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
 
 import {
   buildAgentProcessEnv,
@@ -7,9 +10,33 @@ import {
 import { parseCli } from '../src/cli.js'
 
 describe('agentlet daemon identity', () => {
-  it('uses the current machine hostname when no identity is injected', () => {
-    expect(resolveAgentletId(undefined, 'machine-a')).toBe('machine-a')
-    expect(resolveAgentletId(undefined, 'machine-b')).toBe('machine-b')
+  const directories: string[] = []
+
+  afterEach(() => {
+    for (const directory of directories.splice(0)) {
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  function identityPath(): string {
+    const directory = mkdtempSync(join(tmpdir(), 'agentlet-device-'))
+    directories.push(directory)
+    return join(directory, 'device.json')
+  }
+
+  it('creates and reuses one persisted UUID by default', () => {
+    const path = identityPath()
+    const first = resolveAgentletId(undefined, path)
+    const second = resolveAgentletId(undefined, path)
+
+    expect(first).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    )
+    expect(second).toBe(first)
+    expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({
+      version: 1,
+      deviceId: first,
+    })
   })
 
   it('accepts an explicit identity from the supervising host', () => {
@@ -30,6 +57,40 @@ describe('agentlet daemon identity', () => {
       options: { agentletId: 'machine-a' },
     })
   })
+
+  it('does not read or rewrite the persisted default for an explicit override', () => {
+    const path = identityPath()
+    expect(resolveAgentletId('custom-id', path)).toBe('custom-id')
+    expect(() => readFileSync(path)).toThrow()
+  })
+
+  it('fails instead of rotating a damaged persisted identity', () => {
+    const path = identityPath()
+    writeFileSync(path, '{"version":1,"deviceId":"broken"}')
+
+    expect(() => resolveAgentletId(undefined, path)).toThrow(
+      'Agentlet device identity is invalid',
+    )
+  })
+
+  it.each(['0', '-1', '1.5', 'Infinity', '9007199254740992', '10agents'])(
+    'rejects invalid max-agents value %s',
+    (maxAgents) => {
+      expect(() =>
+        parseCli([
+          'node',
+          'agentlet',
+          'daemon',
+          '--server',
+          'wss://example.test/api/bridge',
+          '--token',
+          'test-token',
+          '--max-agents',
+          maxAgents,
+        ]),
+      ).toThrow('--max-agents must be a positive safe integer')
+    },
+  )
 })
 
 describe('spawned agent environment', () => {

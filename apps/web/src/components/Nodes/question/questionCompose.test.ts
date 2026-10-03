@@ -5,10 +5,8 @@ import { assert, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const saveDraft = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 const associateNode = vi.hoisted(() => vi.fn());
-const getDefaults = vi.hoisted(() => vi.fn());
-vi.mock('@/api/agentDefaults', () => ({
-  getAgentDefaults: getDefaults,
-}));
+const listProfiles = vi.hoisted(() => vi.fn());
+vi.mock('@/api/acp', () => ({ listAcpProfiles: listProfiles }));
 vi.mock('@/components/Common/Toast', () => ({ toast: vi.fn() }));
 vi.mock('@/api/canvas', async (importOriginal) => ({
   ...(await importOriginal<typeof CanvasApi>()),
@@ -54,23 +52,34 @@ const view = {
   },
 };
 
+const profileSnapshot = {
+  profiles: [
+    {
+      id: 'global-profile',
+      alias: 'Global Profile',
+      agentletId: 'machine',
+      workingDirPath: '/workspace',
+      launch: { kind: 'acp-command' as const, command: 'agent' },
+    },
+  ],
+  selectableProfileIds: ['global-profile'],
+  agentlet: null,
+  agentDefaults: null,
+};
+
 beforeEach(() => {
+  localStorage.clear();
   saveDraft.mockClear();
   associateNode.mockReset();
-  getDefaults.mockReset().mockResolvedValue({
-    defaults: {
-      profileId: 'global-profile',
-      functionalModel: 'utility-model',
-    },
-    selectionState: 'available',
-    modelCapability: 'unknown',
-  });
+  listProfiles.mockReset().mockResolvedValue(profileSnapshot);
   useAcpProfilesStore.setState({
     loaded: false,
     error: null,
     profiles: [],
+    selectableProfileIds: [],
     agentDefaults: null,
     defaultsError: null,
+    recentConversationProfileId: null,
   });
   vi.mocked(toast).mockClear();
   useCanvasStore.getState()._setStateNoAutosave({
@@ -187,7 +196,7 @@ describe('Question conversation presentation', () => {
     ).toEqual({ kind: 'internal' });
   });
 
-  it('creates and focuses the global default instead of inheriting the Canvas selection', async () => {
+  it('creates and focuses the browser fallback instead of inheriting the Canvas selection', async () => {
     const binding = {
       kind: 'external' as const,
       profileId: 'profile-1',
@@ -210,7 +219,7 @@ describe('Question conversation presentation', () => {
     ).toEqual({
       kind: 'external',
       profileId: 'global-profile',
-      alias: 'global-profile',
+      alias: 'Global Profile',
     });
     expect(addNode).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -218,7 +227,7 @@ describe('Question conversation presentation', () => {
           agentBinding: {
             kind: 'external',
             profileId: 'global-profile',
-            alias: 'global-profile',
+            alias: 'Global Profile',
           },
           agentMode: 'ask',
         }),
@@ -227,10 +236,10 @@ describe('Question conversation presentation', () => {
   });
 
   it('does not create or open a node when defaults are unconfigured', async () => {
-    getDefaults.mockResolvedValueOnce({
-      defaults: { profileId: null, functionalModel: '' },
-      selectionState: 'unconfigured',
-      modelCapability: 'unknown',
+    listProfiles.mockResolvedValueOnce({
+      ...profileSnapshot,
+      profiles: [],
+      selectableProfileIds: [],
     });
 
     const addNode = vi.fn();
@@ -248,11 +257,7 @@ describe('Question conversation presentation', () => {
   });
 
   it('creates a Built-In Question in operate mode without loading external Profiles', async () => {
-    getDefaults.mockResolvedValueOnce({
-      defaults: { profileId: 'huabu', functionalModel: '' },
-      selectionState: 'available',
-      modelCapability: 'supported',
-    });
+    useAcpProfilesStore.setState({ recentConversationProfileId: 'huabu' });
     const addNode = vi.fn().mockReturnValue('question-built-in');
     const created = await createQuestionNodeAndCompose({
       addNode,
@@ -272,7 +277,7 @@ describe('Question conversation presentation', () => {
 
   it('discards delayed creation after the Canvas changes', async () => {
     let resolve!: (value: unknown) => void;
-    getDefaults.mockReturnValueOnce(
+    listProfiles.mockReturnValueOnce(
       new Promise((done) => {
         resolve = done;
       }),
@@ -284,11 +289,7 @@ describe('Question conversation presentation', () => {
       placementPoint: { x: 0, y: 0 },
     });
     useCanvasStore.setState({ canvasId: 'canvas-2' });
-    resolve({
-      defaults: { profileId: 'global-profile', functionalModel: '' },
-      selectionState: 'available',
-      modelCapability: 'unknown',
-    });
+    resolve(profileSnapshot);
     expect(await pending).toBeNull();
     expect(addNode).not.toHaveBeenCalled();
   });
@@ -323,7 +324,7 @@ describe('Question conversation presentation', () => {
     { kind: 'internal' as const },
     { kind: 'external' as const, profileId: 'chosen', alias: 'Chosen Agent' },
   ])(
-    'preserves the existing node selection %o despite a different global default',
+    'preserves the existing node selection %o despite a different browser fallback',
     (binding) => {
       useAcpProfilesStore.setState({
         loaded: true,
@@ -354,7 +355,7 @@ describe('Question conversation presentation', () => {
         'ask',
       );
       expect(saveDraft).not.toHaveBeenCalled();
-      expect(getDefaults).not.toHaveBeenCalled();
+      expect(listProfiles).not.toHaveBeenCalled();
     },
   );
 

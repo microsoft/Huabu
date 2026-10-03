@@ -78,7 +78,8 @@ const agentDefaultsRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', async (request, reply) => {
     if (!isOwnerRequest(request)) {
       return reply.status(403).send({
-        message: 'Forbidden: Agent defaults require owner authorization',
+        message:
+          'Forbidden: Utility Agent settings require owner authorization',
       });
     }
   });
@@ -96,7 +97,8 @@ const agentDefaultsRoutes: FastifyPluginAsync = async (app) => {
       const parsed = agentDefaultsSchema.safeParse(request.body);
       if (!parsed.success) {
         return reply.status(400).send({
-          message: parsed.error.issues[0]?.message ?? 'Invalid Agent defaults',
+          message:
+            parsed.error.issues[0]?.message ?? 'Invalid Utility Agent settings',
           code: 'validation_failed',
         });
       }

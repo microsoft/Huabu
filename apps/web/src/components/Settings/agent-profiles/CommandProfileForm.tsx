@@ -25,12 +25,19 @@ import { ProfileEditActions } from './ProfileEditActions';
 import { ReadOnlyField } from './ReadOnlyField';
 import { useProfileLaunchPreview } from './useProfileLaunchPreview';
 
-import type { AcpAgentCliInfo, AgentProfileView } from '@huabu/shared';
+import type {
+  AcpAgentCliInfo,
+  AgentProfileView,
+  ConnectedAgentletDevice,
+} from '@huabu/shared';
 
 interface CommandProfileFormProps {
   editing: AgentProfileView | null;
   detectedClis: AcpAgentCliInfo[];
   detectionLoaded: boolean;
+  connectedDevices: ConnectedAgentletDevice[];
+  agentletId: string;
+  onAgentletChange: (agentletId: string) => void;
   onClose: () => void;
   onSaved: () => Promise<void>;
 }
@@ -73,6 +80,9 @@ export function CommandProfileForm({
   editing,
   detectedClis,
   detectionLoaded,
+  connectedDevices,
+  agentletId,
+  onAgentletChange,
   onClose,
   onSaved,
 }: CommandProfileFormProps) {
@@ -156,7 +166,10 @@ export function CommandProfileForm({
           };
   const preview = useProfileLaunchPreview(
     !custom && structuredSupported
-      ? { launch, ...(editing ? { profileId: editing.id } : {}) }
+      ? {
+          launch,
+          ...(editing ? { profileId: editing.id } : { agentletId }),
+        }
       : null,
   );
   const executionChanged = launchChanged || cwdChanged;
@@ -169,7 +182,12 @@ export function CommandProfileForm({
           !preview.plan ||
           !!preview.error ||
           (launchChanged && !approvalSupported && !!editing)));
-  const saveDisabled = saving || !cliId || invalidExecution;
+  const saveDisabled =
+    saving ||
+    !cliId ||
+    !agentletId ||
+    (!editing && !connectedDevices.length) ||
+    invalidExecution;
   const knownControlsDisabled =
     saving || !structuredSupported || !!preview.error;
   const options = [
@@ -198,6 +216,7 @@ export function CommandProfileForm({
       } else {
         await createAcpProfile({
           alias: displayName.trim() || defaultName,
+          agentletId,
           workingDirPath: cwd.trim(),
           launch,
           metadata: { cliId },
@@ -226,6 +245,27 @@ export function CommandProfileForm({
 
   return (
     <div className="divide-edge-default flex flex-col divide-y">
+      <SettingRow title={t('settings.profileMachine')}>
+        <SettingControl>
+          {editing ? (
+            <ReadOnlyField value={editing.agentletId} mono />
+          ) : (
+            <Select
+              value={agentletId}
+              onChange={onAgentletChange}
+              options={connectedDevices.map((device) => ({
+                value: device.agentletId,
+                label: device.hostname ?? device.agentletId,
+                description: device.agentletId,
+              }))}
+              placeholder={t('settings.noConnectedDevices')}
+              ariaLabel={t('settings.profileMachine')}
+              disabled={saving || connectedDevices.length === 0}
+              className="w-full"
+            />
+          )}
+        </SettingControl>
+      </SettingRow>
       <SettingRow title={t('settings.agent')}>
         <SettingControl>
           {editing ? (
@@ -246,13 +286,6 @@ export function CommandProfileForm({
           )}
         </SettingControl>
       </SettingRow>
-      {editing ? (
-        <SettingRow title={t('settings.profileMachine')}>
-          <SettingControl>
-            <ReadOnlyField value={editing.agentletId} mono />
-          </SettingControl>
-        </SettingRow>
-      ) : null}
       {custom ? (
         <SettingRow
           labelFor={commandId}

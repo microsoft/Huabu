@@ -3,11 +3,18 @@
 
 import { CommandProfileForm } from './CommandProfileForm';
 
-import type { AcpAgentCliInfo, AgentProfileView } from '@huabu/shared';
+import type {
+  AcpAgentCliInfo,
+  AgentProfileView,
+  ConnectedAgentletDevice,
+} from '@huabu/shared';
 
 type AgentProfileEditorProps = {
   detectedClis: AcpAgentCliInfo[];
   detectionLoaded: boolean;
+  connectedDevices: ConnectedAgentletDevice[];
+  agentletId: string;
+  onAgentletChange: (agentletId: string) => void;
   onClose: () => void;
   onSaved: () => Promise<void>;
 } & ({ mode: 'create' } | { mode: 'edit-command'; profile: AgentProfileView });
@@ -23,6 +30,9 @@ export function AgentProfileEditor(props: AgentProfileEditorProps) {
       editing={props.mode === 'create' ? null : props.profile}
       detectedClis={props.detectedClis}
       detectionLoaded={props.detectionLoaded}
+      connectedDevices={props.connectedDevices}
+      agentletId={props.agentletId}
+      onAgentletChange={props.onAgentletChange}
       onClose={props.onClose}
       onSaved={props.onSaved}
     />

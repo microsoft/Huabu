@@ -5,6 +5,7 @@ import { getQuestionNodeStatus } from '@huabu/shared';
 import { projectAgentNodeEditableData } from '@huabu/shared/canvas-engine';
 
 import { acknowledgeAgentNodeResult, postCanvasExecute } from '@/api/canvas';
+import { rememberConversationAgentBinding } from '@/store/acpProfilesStore';
 import useCanvasStore, { awaitQuestionCreation } from '@/store/canvasStore';
 
 import type { AgentBinding, AgentConversationView } from '@huabu/shared';
@@ -202,6 +203,7 @@ export function saveConversationDraft(
         'Agent selection changed before the draft was acknowledged',
       );
     }
+    rememberConversationAgentBinding(patch.agentBinding);
   });
   draftSaves.set(draftKey(view), save);
   // Keep a rejected save available to the send guard until an explicit retry.

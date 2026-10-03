@@ -40,7 +40,10 @@ function Harness({
   enabled: boolean;
   profileId?: string;
 }) {
-  const { detectedClis, loaded } = useDetectedClis(enabled, profileId);
+  const { detectedClis, loaded } = useDetectedClis(
+    enabled,
+    profileId ? { profileId } : { agentletId: 'local-device' },
+  );
   return (
     <span>
       {loaded ? 'loaded' : 'idle'}:{detectedClis.length}
@@ -166,14 +169,12 @@ describe('useDetectedClis', () => {
     );
     await act(async () => resolveOld?.({ agents: [detectedAgent] }));
 
-    expect(apiMocks.listAgentClis).toHaveBeenNthCalledWith(
-      1,
-      'machine-a-profile',
-    );
-    expect(apiMocks.listAgentClis).toHaveBeenNthCalledWith(
-      2,
-      'machine-b-profile',
-    );
+    expect(apiMocks.listAgentClis).toHaveBeenNthCalledWith(1, {
+      profileId: 'machine-a-profile',
+    });
+    expect(apiMocks.listAgentClis).toHaveBeenNthCalledWith(2, {
+      profileId: 'machine-b-profile',
+    });
     expect(container.textContent).toBe('loaded:0');
   });
 
@@ -190,7 +191,9 @@ describe('useDetectedClis', () => {
       root?.render(<Harness enabled profileId="remote-profile" />),
     );
     expect(container.textContent).toBe('loaded:0');
-    expect(apiMocks.listAgentClis).toHaveBeenLastCalledWith('remote-profile');
+    expect(apiMocks.listAgentClis).toHaveBeenLastCalledWith({
+      profileId: 'remote-profile',
+    });
     expect(apiMocks.toast).toHaveBeenCalledWith('Target offline', {
       tone: 'danger',
     });

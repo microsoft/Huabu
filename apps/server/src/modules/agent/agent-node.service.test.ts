@@ -39,7 +39,7 @@ function createHarness(options?: {
   nodeApplied?: boolean;
   edgeApplied?: boolean;
   edgeError?: Error;
-  defaultProfileId?: string | null;
+  fallbackProfileId?: string | null;
 }) {
   const execute = vi
     .fn()
@@ -50,10 +50,10 @@ function createHarness(options?: {
     execute.mockResolvedValueOnce(output(options?.edgeApplied ?? true));
   }
   const service = new AgentNodeService({
-    getDefaultProfileId: () =>
-      options?.defaultProfileId === undefined
+    getFallbackProfileId: () =>
+      options?.fallbackProfileId === undefined
         ? 'profile-a'
-        : options.defaultProfileId,
+        : options.fallbackProfileId,
     getProfileRegistry: () => ({
       getProfile: (profileId) =>
         profileId === 'profile-a'
@@ -84,20 +84,6 @@ function createHarness(options?: {
 }
 
 describe('AgentNodeService', () => {
-  it('creates from an explicit Built-In default without requiring an external Profile', async () => {
-    const { service, execute } = createHarness({
-      defaultProfileId: 'huabu',
-      selectableIds: [],
-    });
-    const result = await service.create({
-      canvasId: 'canvas-a',
-      position: { x: 0, y: 0 },
-    });
-    expect(result.profileId).toBe('huabu');
-    expect(
-      execute.mock.calls[0][0].commands[0].nodes[0].data.agentBinding,
-    ).toEqual({ kind: 'internal' });
-  });
   it('creates one external Question Node and then its lineage edge', async () => {
     const { service, execute } = createHarness();
 
@@ -283,7 +269,7 @@ describe('AgentNodeService', () => {
     );
   });
 
-  it('uses the configured default only when no Profile was supplied', async () => {
+  it('uses the first selectable fallback only when no Profile was supplied', async () => {
     const { service, execute } = createHarness();
     const result = await service.create({
       canvasId: 'canvas-a',
@@ -299,20 +285,14 @@ describe('AgentNodeService', () => {
     });
   });
 
-  it('does not fall back when the default is unconfigured or deleted', async () => {
-    for (const defaultProfileId of [null, 'deleted-profile']) {
-      const { service, execute } = createHarness({ defaultProfileId });
-      await expect(
-        service.create({
-          canvasId: 'canvas-a',
-          position: { x: 1, y: 2 },
-        }),
-      ).rejects.toMatchObject({
-        code: defaultProfileId
-          ? 'profile_not_selectable'
-          : 'default_profile_unconfigured',
-      });
-      expect(execute).not.toHaveBeenCalled();
-    }
+  it('rejects creation when no selectable fallback exists', async () => {
+    const { service, execute } = createHarness({ fallbackProfileId: null });
+    await expect(
+      service.create({
+        canvasId: 'canvas-a',
+        position: { x: 1, y: 2 },
+      }),
+    ).rejects.toMatchObject({ code: 'default_profile_unconfigured' });
+    expect(execute).not.toHaveBeenCalled();
   });
 });

@@ -180,7 +180,7 @@ export interface AgentRuntime {
   readonly kinds: readonly string[];
   get(threadId: string): AgentHandle | undefined;
   getOrCreate(threadId: string, createHandle: () => AgentHandle): AgentHandle;
-  close(threadId: string): void;
+  close(threadId: string): Promise<void>;
 }
 
 export function createAgentRuntime(drivers: DriverMap): AgentRuntime {
@@ -197,10 +197,10 @@ export function createAgentRuntime(drivers: DriverMap): AgentRuntime {
       handles.set(threadId, created);
       return created;
     },
-    close(threadId) {
+    async close(threadId) {
       const handle = handles.get(threadId);
       if (!handle) return;
-      handle.close();
+      await handle.close();
       handles.delete(threadId);
     },
   };

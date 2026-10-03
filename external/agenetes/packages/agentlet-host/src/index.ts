@@ -15,8 +15,6 @@
  *
  */
 
-import { hostname } from 'node:os';
-
 import { mountAgentProfileRegistry } from './agent-profile-mount.js';
 import { getDaemonAuth } from './daemon-auth.js';
 import { getDaemonSupervisor } from './daemon-supervisor.js';
@@ -29,13 +27,6 @@ import type {
   AgentletGatewayOptions,
 } from '@agenetes/agentlet-gateway';
 import type { FastifyInstance } from 'fastify';
-
-const supervisedAgentletId = hostname();
-
-/** Machine identity used by Sediment's supervised local daemon. */
-export function getSupervisedAgentletId(): string {
-  return supervisedAgentletId;
-}
 
 export { getAgentProfileRegistry } from './agent-profile-mount.js';
 export {
@@ -96,6 +87,8 @@ export interface MountAgenetesOptions {
    * owns this knowledge; this package never resolves paths.
    */
   daemonEntryPath: string;
+  /** Resolve the host-owned process limit on each supervised daemon start. */
+  getMaxAgents?: () => number;
   /**
    * Host-namespaced environment isolation for the forked daemon and
    * every agent it spawns. `hostEnvPrefix` names the host's env
@@ -133,8 +126,7 @@ export function mountAgenetes(
   app: FastifyInstance,
   opts: MountAgenetesOptions,
 ): AgentletGateway {
-  const agentletId = getSupervisedAgentletId();
-  getDaemonAuth().configure(agentletId, opts.connectionToken);
+  getDaemonAuth().setDaemonToken(opts.connectionToken);
 
   const gateway = mountAgentletGateway(app, {
     authenticate: opts.authenticate,
@@ -147,7 +139,7 @@ export function mountAgenetes(
   getDaemonSupervisor().attach(app, {
     daemonEntryPath: opts.daemonEntryPath,
     dataDir: opts.dataDir,
-    agentletId,
+    getMaxAgents: opts.getMaxAgents,
     hostEnvPrefix: opts.hostEnvPrefix,
     hostEnvAllowlist: opts.hostEnvAllowlist,
   });
