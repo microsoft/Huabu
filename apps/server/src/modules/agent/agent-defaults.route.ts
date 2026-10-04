@@ -3,7 +3,7 @@
 
 import {
   getAgentProfileRegistry,
-  getAgentletGateway,
+  resolveConnectedAgentletId,
 } from '@agenetes/agentlet-host';
 
 import {
@@ -60,8 +60,7 @@ function projectDefaults(defaults: AgentDefaults): AgentDefaultsResponse {
           ? 'offline'
           : !profile
             ? 'deleted'
-            : getAgentletGateway()?.getAgentlet(profile.agentletId)?.status ===
-                'connected'
+            : resolveConnectedAgentletId(profile.agentletId)
               ? 'available'
               : 'offline',
     // Missing observations and editable CLI labels do not prove lack of support.

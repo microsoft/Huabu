@@ -588,6 +588,7 @@ export type AgentletConnectionCommandResponse = z.infer<
 /** Schema mirror of {@link AcpProfilesListResponse}. */
 export const connectedAgentletDeviceSchema = z.object({
   agentletId: z.string().min(1),
+  displayName: z.string().min(1),
   hostname: z.string().min(1).optional(),
   platform: z.string().min(1).optional(),
   arch: z.string().min(1).optional(),

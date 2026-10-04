@@ -21,6 +21,7 @@ const clients = vi.hoisted(() => ({
 
 vi.mock('@agenetes/agentlet-host', () => ({
   getAgentletGateway: () => host.gateway,
+  resolveConnectedAgentletId: (agentletId: string) => agentletId,
 }));
 
 vi.mock('./spawn-orchestrator.js', () => orchestrator);

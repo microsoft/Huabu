@@ -118,7 +118,7 @@ interface AcpProfilesState {
   /** Idempotent first-load helper called by the hook on mount. */
   init: () => Promise<void>;
   /** Force a fresh GET. Safe to call concurrently. */
-  refresh: () => Promise<void>;
+  refresh: (options?: { background?: boolean }) => Promise<void>;
   loadDefaults: () => Promise<AgentDefaultsResponse>;
   saveDefaults: (config: AgentDefaults) => Promise<AgentDefaultsResponse>;
   rememberConversationAgent: (profileId: string) => void;
@@ -225,12 +225,13 @@ export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
     writeRecentConversationProfileId(profileId);
     set({ recentConversationProfileId: profileId });
   },
-  refresh: async () => {
+  refresh: async (options) => {
     await defaultsSaveQueue;
     if (inFlightRefresh) return inFlightRefresh;
+    const background = options?.background === true;
     const revision = defaultsRevision;
     const request = (async () => {
-      set({ loading: true });
+      if (!background) set({ loading: true });
       try {
         const res = await listAcpProfiles();
         set({
@@ -248,10 +249,14 @@ export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
       } catch (err) {
         // Leave the previous snapshot in place so transient errors
         // don't make the picker flicker between "available" and empty.
-        set({
-          error: err instanceof Error ? err : new Error(String(err)),
-          loading: false,
-        });
+        set(
+          background
+            ? { loading: false }
+            : {
+                error: err instanceof Error ? err : new Error(String(err)),
+                loading: false,
+              },
+        );
       }
     })();
     inFlightRefresh = request;

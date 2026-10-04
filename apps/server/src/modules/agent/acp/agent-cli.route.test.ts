@@ -16,6 +16,8 @@ vi.mock('@agenetes/agentlet-host', () => ({
     getAgentlet: () => ({ status: 'connected' }),
     discoverHarnesses: mocks.discover,
   }),
+  resolveConnectedAgentletId: (target: string) =>
+    target === 'legacy-host' ? 'remote-machine' : target,
 }));
 
 let app: FastifyInstance | undefined;
@@ -119,7 +121,7 @@ describe('ACP agent CLI route', () => {
   });
 
   it('queries the edited Profile machine and projects Custom for older catalogues', async () => {
-    mocks.getProfile.mockReturnValue({ agentletId: 'remote-machine' });
+    mocks.getProfile.mockReturnValue({ agentletId: 'legacy-host' });
     mocks.discover.mockResolvedValue({ harnesses: [] });
     app = Fastify({ logger: false });
     await app.register(createAcpAgentCliRoutes(), { prefix: '/api/acp' });

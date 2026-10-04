@@ -30,6 +30,10 @@ import type { FastifyInstance } from 'fastify';
 
 export { getAgentProfileRegistry } from './agent-profile-mount.js';
 export {
+  resolveConnectedAgentletId,
+  resolveConnectedAgentletIdFromConnections,
+} from './agentlet-resolution.js';
+export {
   ACP_UPGRADE_PATH,
   getAgentletGateway,
   getAgentletServer,

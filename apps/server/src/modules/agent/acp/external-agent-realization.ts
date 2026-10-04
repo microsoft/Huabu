@@ -6,6 +6,7 @@ import {
   ensureAcpSession,
   resolveAcpAgentletId,
 } from '@agenetes/acp-driver';
+import { resolveConnectedAgentletId } from '@agenetes/agentlet-host';
 
 import { canvasAcpNamespace } from '../../workspace/paths.js';
 import {
@@ -123,8 +124,10 @@ async function ensureSessionFromCanonicalSpec(
       ? { ...resolvedEnvironment, ...spec.spec.env }
       : undefined;
   const record = await agenetes.record(spec.namespace, spec.threadId);
+  const requestedAgentletId = resolveAcpAgentletId(spec);
   return ensureAcpSession({
-    agentletId: resolveAcpAgentletId(spec),
+    agentletId:
+      resolveConnectedAgentletId(requestedAgentletId) ?? requestedAgentletId,
     threadId: spec.threadId,
     binding: spec.spec.binding,
     namespace: spec.namespace,
