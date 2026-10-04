@@ -1,16 +1,18 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import {
   checkCanaryRedeploy,
   getCanaryRedeployStatus,
   requestCanaryRedeploy,
+  updateCanaryRedeployConfig,
 } from '@/api/deployment';
 import { Button } from '@/components/Common/Button';
 import { Modal } from '@/components/Common/Modal';
+import { TextInput } from '@/components/Common/TextInput';
 import { toast } from '@/components/Common/Toast';
 import { SettingRow } from '@/components/Settings/Common/SettingRow';
 
@@ -22,11 +24,14 @@ function shortSha(sha: string | null): string {
 
 export function CanaryRedeploySettings() {
   const { t } = useTranslation();
+  const branchInputId = useId();
   const [status, setStatus] = useState<CanaryRedeployStatusResponse | null>(
     null,
   );
+  const [branchDraft, setBranchDraft] = useState('');
   const [loading, setLoading] = useState(true);
   const [checking, setChecking] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [requesting, setRequesting] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const confirmRef = useRef<HTMLButtonElement>(null);
@@ -40,8 +45,8 @@ export function CanaryRedeploySettings() {
         if (showToast) {
           toast(
             next.updateAvailable
-              ? t('settings.canaryUpdateAvailable')
-              : t('settings.canaryUpToDate'),
+              ? t('settings.canaryUpdateAvailable', { branch: next.branch })
+              : t('settings.canaryUpToDate', { branch: next.branch }),
             { tone: next.updateAvailable ? 'info' : 'success' },
           );
         }
@@ -65,6 +70,7 @@ export function CanaryRedeploySettings() {
       .then((initial) => {
         if (!active) return;
         setStatus(initial);
+        setBranchDraft(initial.configuredBranch ?? '');
         if (initial.available) void check(false);
       })
       .catch((error: unknown) => {
@@ -85,13 +91,37 @@ export function CanaryRedeploySettings() {
     };
   }, [check, t]);
 
+  const saveBranch = useCallback(async () => {
+    setSaving(true);
+    try {
+      const next = await updateCanaryRedeployConfig({
+        branch: branchDraft.trim() || null,
+      });
+      setStatus(next);
+      setBranchDraft(next.configuredBranch ?? '');
+      toast(t('settings.canaryBranchSaved', { branch: next.branch }), {
+        tone: 'success',
+      });
+    } catch (error) {
+      toast(
+        error instanceof Error
+          ? error.message
+          : t('settings.canaryBranchSaveFailed'),
+        { tone: 'danger' },
+      );
+    } finally {
+      setSaving(false);
+    }
+  }, [branchDraft, t]);
+
   const redeploy = useCallback(async () => {
+    if (!status) return;
     setRequesting(true);
     try {
-      const next = await requestCanaryRedeploy();
+      const next = await requestCanaryRedeploy(status.branch);
       setStatus(next);
       setConfirming(false);
-      toast(t('settings.canaryRedeployStarted'), {
+      toast(t('settings.canaryRedeployStarted', { branch: next.branch }), {
         tone: 'info',
         duration: 10_000,
       });
@@ -105,7 +135,7 @@ export function CanaryRedeploySettings() {
     } finally {
       setRequesting(false);
     }
-  }, [t]);
+  }, [status, t]);
 
   if (loading || !status?.available) return null;
 
@@ -115,9 +145,12 @@ export function CanaryRedeploySettings() {
   const redeployInProgress =
     status.redeploy?.state === 'requested' ||
     status.redeploy?.state === 'running';
+  const busy = checking || saving || requesting || redeployInProgress;
   const description = t('settings.canaryDescription', {
+    branch: status.branch,
     running: shortSha(status.runningSha),
     remote: shortSha(status.remoteSha),
+    redeployBranch: status.redeploy?.branch ?? status.branch,
     outcome,
   });
 
@@ -133,7 +166,7 @@ export function CanaryRedeploySettings() {
             tone="neutral"
             size="sm"
             onClick={() => void check(true)}
-            disabled={checking || requesting}
+            disabled={busy}
           >
             {checking
               ? t('settings.canaryChecking')
@@ -144,9 +177,41 @@ export function CanaryRedeploySettings() {
             tone="warning"
             size="sm"
             onClick={() => setConfirming(true)}
-            disabled={checking || requesting || redeployInProgress}
+            disabled={busy}
           >
-            {t('settings.canaryRedeployAction')}
+            {t('settings.canaryRedeployAction', { branch: status.branch })}
+          </Button>
+        </div>
+      </SettingRow>
+      <SettingRow
+        title={t('settings.canaryBranch')}
+        description={t('settings.canaryBranchDescription')}
+        labelFor={branchInputId}
+        density="compact"
+      >
+        <div className="flex items-center gap-2">
+          <TextInput
+            id={branchInputId}
+            mono
+            className="w-40"
+            value={branchDraft}
+            placeholder="alpha"
+            disabled={busy}
+            onChange={(event) => setBranchDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !busy) void saveBranch();
+            }}
+          />
+          <Button
+            variant="outline"
+            tone="neutral"
+            size="sm"
+            onClick={() => void saveBranch()}
+            disabled={busy}
+          >
+            {saving
+              ? t('settings.canaryBranchSaving')
+              : t('settings.canaryBranchSave')}
           </Button>
         </div>
       </SettingRow>
@@ -155,8 +220,10 @@ export function CanaryRedeploySettings() {
         onClose={() => {
           if (!requesting) setConfirming(false);
         }}
-        title={t('settings.canaryConfirmTitle')}
-        description={t('settings.canaryConfirmDescription')}
+        title={t('settings.canaryConfirmTitle', { branch: status.branch })}
+        description={t('settings.canaryConfirmDescription', {
+          branch: status.branch,
+        })}
         initialFocusRef={confirmRef}
         closeOnBackdropClick={!requesting}
         closeOnEscape={!requesting}
@@ -181,7 +248,9 @@ export function CanaryRedeploySettings() {
             >
               {requesting
                 ? t('settings.canaryStarting')
-                : t('settings.canaryConfirmAction')}
+                : t('settings.canaryConfirmAction', {
+                    branch: status.branch,
+                  })}
             </Button>
           </>
         }

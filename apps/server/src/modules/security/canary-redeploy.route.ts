@@ -2,45 +2,109 @@
 // Licensed under the MIT license.
 
 import {
+  canaryCheckRequestSchema,
+  canaryRedeployConfigUpdateSchema,
   canaryRedeployRequestSchema,
   type ApiResult,
+  type CanaryCheckRequest,
+  type CanaryRedeployConfigUpdate,
   type CanaryRedeployRequest,
   type CanaryRedeployStatusResponse,
 } from '@huabu/shared';
 
 import {
+  CanaryRedeployError,
   checkCanaryRemote,
   getCanaryRedeployStatus,
   requestCanaryRedeploy,
+  setCanaryRedeployConfig,
 } from './canary-redeploy.js';
 import { isOwnerRequest } from './owner.js';
 
-import type { FastifyPluginAsync } from 'fastify';
+import type { FastifyPluginAsync, FastifyReply } from 'fastify';
+
+function sendCanaryError(
+  reply: FastifyReply,
+  error: unknown,
+  fallback: string,
+) {
+  if (error instanceof CanaryRedeployError) {
+    const status =
+      error.code === 'operation_in_progress' || error.code === 'stale_branch'
+        ? 409
+        : error.code === 'branch_invalid'
+          ? 400
+          : error.code === 'branch_unavailable'
+            ? 422
+            : error.code === 'config_invalid'
+              ? 500
+              : 503;
+    return reply.status(status).send({
+      message: error.message,
+      code: `canary_${error.code}`,
+    });
+  }
+  return reply.status(500).send({
+    message: fallback,
+    code: 'canary_internal_error',
+  });
+}
 
 const canaryRedeployRoutes: FastifyPluginAsync = async (app) => {
-  app.get<{ Reply: ApiResult<CanaryRedeployStatusResponse> }>(
-    '/',
-    async (request, reply) => {
-      if (!isOwnerRequest(request)) {
-        return reply.status(403).send({
-          message:
-            'Forbidden: Canary redeployment requires owner authorization',
-        });
-      }
-      return getCanaryRedeployStatus();
-    },
-  );
-
-  app.post<{
-    Body: CanaryRedeployRequest;
-    Reply: ApiResult<CanaryRedeployStatusResponse>;
-  }>('/check', async (request, reply) => {
+  app.addHook('preHandler', async (request, reply) => {
     if (!isOwnerRequest(request)) {
       return reply.status(403).send({
         message: 'Forbidden: Canary redeployment requires owner authorization',
       });
     }
-    const parsed = canaryRedeployRequestSchema.safeParse(request.body);
+  });
+
+  app.get<{ Reply: ApiResult<CanaryRedeployStatusResponse> }>(
+    '/',
+    async (request, reply) => {
+      try {
+        return await getCanaryRedeployStatus();
+      } catch (error) {
+        request.log.error({ err: error }, 'Unable to read Canary status');
+        return sendCanaryError(
+          reply,
+          error,
+          'Unable to load Canary redeployment status',
+        );
+      }
+    },
+  );
+
+  app.put<{
+    Body: CanaryRedeployConfigUpdate;
+    Reply: ApiResult<CanaryRedeployStatusResponse>;
+  }>('/config', async (request, reply) => {
+    const parsed = canaryRedeployConfigUpdateSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.status(400).send({
+        message:
+          parsed.error.issues[0]?.message ??
+          'Invalid Canary branch configuration',
+        code: 'validation_failed',
+      });
+    }
+    try {
+      return await setCanaryRedeployConfig(parsed.data);
+    } catch (error) {
+      request.log.warn({ err: error }, 'Unable to save Canary branch');
+      return sendCanaryError(
+        reply,
+        error,
+        'Unable to save Canary branch configuration',
+      );
+    }
+  });
+
+  app.post<{
+    Body: CanaryCheckRequest;
+    Reply: ApiResult<CanaryRedeployStatusResponse>;
+  }>('/check', async (request, reply) => {
+    const parsed = canaryCheckRequestSchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.status(400).send({
         message:
@@ -52,10 +116,7 @@ const canaryRedeployRoutes: FastifyPluginAsync = async (app) => {
       return await checkCanaryRemote();
     } catch (error) {
       request.log.warn({ err: error }, 'Canary update check failed');
-      return reply.status(502).send({
-        message: 'Unable to resolve origin/alpha',
-        code: 'canary_check_failed',
-      });
+      return sendCanaryError(reply, error, 'Unable to check Canary branch');
     }
   });
 
@@ -63,11 +124,6 @@ const canaryRedeployRoutes: FastifyPluginAsync = async (app) => {
     Body: CanaryRedeployRequest;
     Reply: ApiResult<CanaryRedeployStatusResponse>;
   }>('/redeploy', async (request, reply) => {
-    if (!isOwnerRequest(request)) {
-      return reply.status(403).send({
-        message: 'Forbidden: Canary redeployment requires owner authorization',
-      });
-    }
     const parsed = canaryRedeployRequestSchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.status(400).send({
@@ -77,21 +133,15 @@ const canaryRedeployRoutes: FastifyPluginAsync = async (app) => {
       });
     }
     try {
-      const status = await requestCanaryRedeploy();
+      const status = await requestCanaryRedeploy(parsed.data.expectedBranch);
       return reply.status(202).send(status);
     } catch (error) {
-      const message = error instanceof Error ? error.message : '';
-      if (message === 'Canary redeployment is already in progress') {
-        return reply.status(409).send({
-          message,
-          code: 'canary_redeploy_in_progress',
-        });
-      }
       request.log.error({ err: error }, 'Unable to start Canary redeployment');
-      return reply.status(503).send({
-        message: 'Canary redeployment is unavailable',
-        code: 'canary_redeploy_unavailable',
-      });
+      return sendCanaryError(
+        reply,
+        error,
+        'Canary redeployment is unavailable',
+      );
     }
   });
 };

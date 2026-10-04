@@ -18,8 +18,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   checkCanaryRemote,
   getCanaryRedeployStatus,
+  requestCanaryRedeploy,
   resetCanaryRedeployStateForTest,
   resolveCanaryCapability,
+  setCanaryRedeployConfig,
   writeCanaryRedeployResult,
 } from './canary-redeploy.js';
 
@@ -104,15 +106,89 @@ describe('Canary redeployment service', () => {
     expect(status).toMatchObject({
       available: true,
       branch: 'alpha',
+      configuredBranch: null,
       updateAvailable: false,
       runningSha: status.remoteSha,
     });
     expect(status.checkedAt).toEqual(expect.any(Number));
   });
 
+  it('persists and checks one exact nested origin branch', async () => {
+    execFileSync('git', ['branch', 'x/alpha'], { cwd: root });
+    execFileSync('git', ['push', 'origin', 'x/alpha'], { cwd: root });
+
+    await expect(
+      setCanaryRedeployConfig({ branch: 'x/alpha' }),
+    ).resolves.toMatchObject({
+      branch: 'x/alpha',
+      configuredBranch: 'x/alpha',
+      updateAvailable: false,
+    });
+    await expect(checkCanaryRemote()).resolves.toMatchObject({
+      branch: 'x/alpha',
+      configuredBranch: 'x/alpha',
+    });
+
+    expect(
+      JSON.parse(
+        readFileSync(join(dataDir, 'canary-redeploy-config.json'), 'utf8'),
+      ),
+    ).toEqual({ version: 1, branch: 'x/alpha' });
+  });
+
+  it('uses alpha only for an explicit reset and rejects invalid or unavailable refs', async () => {
+    await expect(
+      setCanaryRedeployConfig({ branch: '-bad' }),
+    ).rejects.toMatchObject({ code: 'branch_invalid' });
+    await expect(
+      setCanaryRedeployConfig({ branch: 'HEAD' }),
+    ).rejects.toMatchObject({ code: 'branch_invalid' });
+    await expect(
+      setCanaryRedeployConfig({ branch: 'missing' }),
+    ).rejects.toMatchObject({ code: 'branch_unavailable' });
+    await expect(
+      setCanaryRedeployConfig({ branch: null }),
+    ).resolves.toMatchObject({
+      branch: 'alpha',
+      configuredBranch: null,
+    });
+  });
+
+  it('fails explicitly for malformed persisted configuration', async () => {
+    writeFileSync(
+      join(dataDir, 'canary-redeploy-config.json'),
+      '{"version":1,"branch":"bad..branch"}',
+    );
+    await expect(getCanaryRedeployStatus()).rejects.toMatchObject({
+      code: 'config_invalid',
+    });
+  });
+
+  it('rejects stale confirmations and configuration changes during a persistent redeploy', async () => {
+    await expect(requestCanaryRedeploy('x/alpha')).rejects.toMatchObject({
+      code: 'stale_branch',
+    });
+
+    writeFileSync(
+      join(dataDir, 'canary-redeploy-status.json'),
+      JSON.stringify({
+        state: 'running',
+        branch: 'alpha',
+        startedAt: 10,
+        runnerPid: process.pid,
+      }),
+    );
+    await expect(
+      setCanaryRedeployConfig({ branch: null }),
+    ).rejects.toMatchObject({
+      code: 'operation_in_progress',
+    });
+  });
+
   it('persists only the bounded redeployment result contract', async () => {
     await writeCanaryRedeployResult({
       state: 'failed',
+      branch: 'x/alpha',
       startedAt: 10,
       completedAt: 20,
       exitCode: 1,
@@ -122,6 +198,7 @@ describe('Canary redeployment service', () => {
     await expect(getCanaryRedeployStatus()).resolves.toMatchObject({
       redeploy: {
         state: 'failed',
+        branch: 'x/alpha',
         exitCode: 1,
       },
     });
@@ -143,7 +220,7 @@ describe('Canary redeployment service', () => {
     );
     const result = spawnSync(
       process.execPath,
-      [runner, hook, statusPath, logPath, '100'],
+      [runner, hook, statusPath, logPath, '100', 'x/alpha'],
       { encoding: 'utf8' },
     );
 
@@ -151,10 +228,42 @@ describe('Canary redeployment service', () => {
     const status = readFileSync(statusPath, 'utf8');
     expect(JSON.parse(status)).toMatchObject({
       state: 'failed',
+      branch: 'x/alpha',
       startedAt: 100,
       exitCode: 7,
     });
     expect(status).not.toContain('private-output');
+    expect(readFileSync(logPath, 'utf8')).toContain('Redeploying x/alpha');
     expect(readFileSync(logPath, 'utf8')).toContain('private-output');
+  });
+
+  it('rejects malformed runner branch arguments before executing the hook', () => {
+    const marker = join(dataDir, 'unexpected-hook-run');
+    const hook = join(root, 'marker-hook.sh');
+    writeFileSync(hook, `#!/usr/bin/env bash\ntouch '${marker}'\n`);
+    chmodSync(hook, 0o755);
+    const runner = join(
+      process.cwd(),
+      '..',
+      '..',
+      'scripts',
+      'canary-redeploy-runner.mjs',
+    );
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        runner,
+        hook,
+        join(dataDir, 'invalid-status.json'),
+        join(dataDir, 'invalid.log'),
+        '100',
+        '-bad',
+      ],
+      { encoding: 'utf8' },
+    );
+
+    expect(result.status).toBe(2);
+    expect(() => readFileSync(marker)).toThrow();
   });
 });

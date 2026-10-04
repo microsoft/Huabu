@@ -94,7 +94,7 @@ Then run `pnpm start:web`. Huabu rejects a non-loopback bind when allowed hosts 
 
 Huabu currently serves HTTP. Use a trusted private network or terminate HTTPS with deployment infrastructure such as Caddy, Nginx, Tailscale Serve, or a cloud load balancer. Do not put a Basic Auth deployment on an untrusted network without transport encryption.
 
-For a personal Alpha Canary started from a repository checkout, set `HUABU_CANARY_REDEPLOY_ENABLED=1` before `pnpm start:web`. The authenticated owner can then compare the running commit with `origin/alpha` and invoke the checked-in `scripts/start-huabu.sh alpha --non-interactive` redeployment from Settings instead of connecting through SSH. This helper updates the checkout in place and does not provide rollback or service recovery; see [Alpha Canary deployment](docs/architecture/canary-deployment.md).
+For a personal Alpha Canary started from a repository checkout, set `HUABU_CANARY_REDEPLOY_ENABLED=1` before `pnpm start:web`. The authenticated owner can configure an exact branch from fixed remote `origin` in Settings, compare it with the running commit, and invoke the checked-in `scripts/start-huabu.sh <branch> --non-interactive` redeployment instead of connecting through SSH. An empty configuration uses `alpha`. This helper updates the checkout in place and does not provide rollback or service recovery; see [Alpha Canary deployment](docs/architecture/canary-deployment.md).
 
 ### Local quality checks (optional)
 

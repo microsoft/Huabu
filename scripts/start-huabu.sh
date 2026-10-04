@@ -41,9 +41,10 @@ main() {
     echo "HUABU_CANARY_READINESS_TIMEOUT_SECONDS must be a positive integer." >&2
     return 2
   fi
-  if [[ ! "$branch_name" =~ ^[A-Za-z0-9._/-]+$ ]] ||
+  if (( ${#branch_name} > 255 )) ||
     [[ "$branch_name" == -* ]] ||
-    [[ "$branch_name" == *..* ]]; then
+    ! git check-ref-format --branch "$branch_name" >/dev/null 2>&1 ||
+    ! git check-ref-format "refs/heads/$branch_name" >/dev/null 2>&1; then
     echo "Invalid branch name: $branch_name" >&2
     return 2
   fi
@@ -117,9 +118,16 @@ main() {
     tmux kill-session -t "$tmux_session"
   fi
 
-  echo "==> Updating $branch_name in $huabu_dir"
-  git -C "$huabu_dir" checkout "$branch_name"
-  git -C "$huabu_dir" pull --ff-only origin "$branch_name"
+  local branch_ref="refs/heads/$branch_name"
+  local remote_ref="refs/remotes/origin/$branch_name"
+  echo "==> Updating $branch_name from origin in $huabu_dir"
+  git -C "$huabu_dir" fetch --no-tags origin "$branch_ref:$remote_ref"
+  if git -C "$huabu_dir" show-ref --verify --quiet "$branch_ref"; then
+    git -C "$huabu_dir" checkout "$branch_name"
+    git -C "$huabu_dir" merge --ff-only "$remote_ref"
+  else
+    git -C "$huabu_dir" checkout -b "$branch_name" --track "$remote_ref"
+  fi
 
   echo "==> Installing dependencies"
   pnpm --dir "$huabu_dir" install --frozen-lockfile
