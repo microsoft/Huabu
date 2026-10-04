@@ -49,6 +49,7 @@ import {
   getAgentDefaults,
   initializeAgentDefaults,
 } from '../agent-defaults.js';
+import { formatAgentletDeviceDisplayName } from '../agentlet-device-display.js';
 
 import type { AgentletConnection } from '@agenetes/agentlet-host';
 import type {
@@ -205,6 +206,9 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
       const connectedDevices = connected
         .map((connection) => ({
           agentletId: connection.agentletId,
+          displayName: formatAgentletDeviceDisplayName(
+            connection.agentletProfile?.machine,
+          ),
           ...(connection.agentletProfile?.machine?.hostname
             ? { hostname: connection.agentletProfile.machine.hostname }
             : {}),

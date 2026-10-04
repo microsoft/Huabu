@@ -144,6 +144,7 @@ beforeEach(() => {
     connectedDevices: [
       {
         agentletId: 'local',
+        displayName: 'Local machine: linux x64',
         hostname: 'Local machine',
         platform: 'linux',
         arch: 'x64',
@@ -189,6 +190,7 @@ describe('ExternalAgentsSettings', () => {
   it('refreshes the singleton on every mount and lists all Profiles, including unavailable ones', async () => {
     await renderSettings();
     expect(container?.textContent).toContain('Reviewer');
+    expect(container?.textContent).toContain('Local machine: linux x64');
     expect(useAcpProfilesStore.getState().profiles).toEqual([profile]);
     profiles = [
       profile,

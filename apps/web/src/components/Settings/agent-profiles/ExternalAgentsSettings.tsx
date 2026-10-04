@@ -332,9 +332,8 @@ export function ExternalAgentsSettings({
                 connectedDevices.map((device) => (
                   <SettingRow
                     key={device.agentletId}
-                    title={device.hostname ?? device.agentletId}
+                    title={device.displayName}
                     description={[
-                      [device.platform, device.arch].filter(Boolean).join(' '),
                       t('settings.deviceProfileCount', {
                         count: device.profileCount,
                       }),

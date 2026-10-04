@@ -197,6 +197,7 @@ describe('ordinary Profile catalog routes', () => {
       connectedDevices: [
         expect.objectContaining({
           agentletId: 'machine-a',
+          displayName: 'machine-a-host: linux x64',
           profileCount: 1,
         }),
         expect.objectContaining({

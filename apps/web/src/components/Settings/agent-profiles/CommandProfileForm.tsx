@@ -75,6 +75,18 @@ function displayNameFor(agent: string, cwd: string) {
   return folder ? `${agent} (${folder})` : agent;
 }
 
+function resolveConnectedDevice(
+  target: string,
+  devices: ConnectedAgentletDevice[],
+): ConnectedAgentletDevice | undefined {
+  const exact = devices.find((device) => device.agentletId === target);
+  if (exact) return exact;
+  const hostnameMatches = devices.filter(
+    (device) => device.hostname === target,
+  );
+  return hostnameMatches.length === 1 ? hostnameMatches[0] : undefined;
+}
+
 /** One capability-driven form for both structured and raw-command Profiles. */
 export function CommandProfileForm({
   editing,
@@ -200,6 +212,12 @@ export function CommandProfileForm({
       })),
     { value: 'custom', label: t('settings.customCommand') },
   ];
+  const editingDevice = editing
+    ? resolveConnectedDevice(editing.agentletId, connectedDevices)
+    : undefined;
+  const editingDeviceLabel = editingDevice
+    ? `${editingDevice.displayName} (${editingDevice.agentletId})`
+    : `${t('settings.agentUnavailable')} (${editing?.agentletId ?? ''})`;
 
   async function save() {
     if (saveDisabled) return;
@@ -248,14 +266,14 @@ export function CommandProfileForm({
       <SettingRow title={t('settings.profileMachine')}>
         <SettingControl>
           {editing ? (
-            <ReadOnlyField value={editing.agentletId} mono />
+            <ReadOnlyField value={editingDeviceLabel} />
           ) : (
             <Select
               value={agentletId}
               onChange={onAgentletChange}
               options={connectedDevices.map((device) => ({
                 value: device.agentletId,
-                label: device.hostname ?? device.agentletId,
+                label: device.displayName,
                 description: device.agentletId,
               }))}
               placeholder={t('settings.noConnectedDevices')}
