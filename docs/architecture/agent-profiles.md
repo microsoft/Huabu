@@ -31,6 +31,8 @@ Multiple Agentlets may share one Huabu connection token and connect concurrently
 
 Device-facing UI uses one human-readable `hostname: platform arch` display name, such as `huabu: linux x64`. UUID-backed `agentletId` remains a secondary identity detail for disambiguation and routing; it is not part of automatic Profile aliases or the primary device label. New automatic aliases include the device display name, while existing and user-customized aliases are never rewritten.
 
+Gateway sends a WebSocket heartbeat every 15 seconds and terminates connections that do not answer before the next heartbeat. While Agent Settings is mounted and the browser page is visible, its Profile and connected-device snapshot refreshes every 5 seconds; this refresh is scoped to Agent settings and does not reload Space or Workspace data. Disconnected connection records remain available for reconnect but are excluded from connected-device and selectable-Profile projections.
+
 ## Profile identity and customization
 
 A Profile has `id`, `alias`, `agentletId`, `workingDirPath`, a launch configuration, optional `metadata.cliId`, opaque `customData`, and configuration/execution revisions. Launch is either `{ kind: 'acp-command', command }` or a structured `{ kind: 'acp-harness', harnessId, options?: { autoApprove? } }`. Every Profile has exactly one wrapper, derived from this launch union: a command Profile uses the Custom command wrapper; a structured Profile uses its `harnessId`. Neither editable metadata nor command-text inspection determines capabilities. Profile ID, target machine, launch kind, and harness identity are immutable; alias, icon, cwd, and supported launch options are editable. Changing machine or wrapper requires a new Profile.

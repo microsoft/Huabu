@@ -33,6 +33,8 @@ type EditorState =
   | { kind: 'create'; agentletId: string }
   | { kind: 'edit-command'; profile: AgentProfileView };
 
+const PROFILE_REFRESH_INTERVAL_MS = 5_000;
+
 interface PendingDelete {
   id: string;
   alias: string;
@@ -81,6 +83,15 @@ export function ExternalAgentsSettings({
     void init();
     void refresh();
   }, [init, refresh]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void refresh({ background: true });
+      }
+    }, PROFILE_REFRESH_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [refresh]);
 
   useEffect(() => {
     if (error) toast(error.message, { tone: 'danger' });

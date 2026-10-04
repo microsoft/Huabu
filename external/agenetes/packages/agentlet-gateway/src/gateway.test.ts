@@ -739,6 +739,44 @@ describe('AgentletGateway', () => {
     expect(changed).toHaveBeenCalledTimes(4);
   });
 
+  it('disconnects an Agentlet that stops answering heartbeats', async () => {
+    const { gateway, url } = await startHarness({ heartbeatInterval: 20 });
+    const changed = vi.fn();
+    gateway.onAgentletsChanged(changed);
+    const client = await connect(url, {
+      role: 'agentlet',
+      queryId: 'machine-a',
+      token: 'token-a',
+      hello: agentletHello('machine-a'),
+    });
+
+    client.socket.pause();
+    await waitUntil(
+      () => gateway.getAgentlet('machine-a')?.status === 'disconnected',
+    );
+    client.socket.resume();
+
+    expect(changed).toHaveBeenLastCalledWith({
+      agentletId: 'machine-a',
+      status: 'disconnected',
+    });
+    expect(gateway.getAgentlets({ status: 'connected' })).toEqual([]);
+  });
+
+  it('keeps an Agentlet connected while it answers heartbeats', async () => {
+    const { gateway, url } = await startHarness({ heartbeatInterval: 20 });
+    await connect(url, {
+      role: 'agentlet',
+      queryId: 'machine-a',
+      token: 'token-a',
+      hello: agentletHello('machine-a'),
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 80));
+
+    expect(gateway.getAgentlet('machine-a')?.status).toBe('connected');
+  });
+
   it('fails discovery for disconnected and unsupported targets without fallback', async () => {
     const { gateway, url } = await startHarness();
     await expect(
@@ -976,5 +1014,12 @@ describe('AgentletGateway', () => {
           inboundPreAttachBufferLimit: 0,
         }),
     ).toThrow('inboundPreAttachBufferLimit must be a positive integer');
+    expect(
+      () =>
+        new AgentletGateway({
+          authenticateAgentlet: () => ({}),
+          heartbeatInterval: 0,
+        }),
+    ).toThrow('heartbeatInterval must be a positive integer');
   });
 });
