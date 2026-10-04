@@ -51,6 +51,13 @@ vi.mock('@agenetes/agentlet-host', () => ({
         },
       })),
   }),
+  resolveConnectedAgentletId: (target: string) => {
+    if (mocks.connectedIds.has(target)) return target;
+    const matches = [...mocks.connectedIds].filter(
+      (agentletId) => `${agentletId}-host` === target,
+    );
+    return matches.length === 1 ? matches[0] : undefined;
+  },
 }));
 
 vi.mock('./profile-schema-cache.js', () => ({
@@ -198,9 +205,37 @@ describe('ordinary Profile catalog routes', () => {
         }),
       ],
     });
+
     expect(mocks.registry.createProfile).not.toHaveBeenCalled();
     expect(mocks.initializeDefaults).not.toHaveBeenCalled();
     expect(mocks.discoverHarnesses).not.toHaveBeenCalled();
+  });
+
+  it('maps one hostname-era Profile to the unique connected device', async () => {
+    const legacyProfile = {
+      ...commandProfile,
+      id: 'legacy-command',
+      agentletId: 'machine-a-host',
+    };
+    mocks.registry.listProfiles.mockReturnValue([legacyProfile]);
+    const server = await setup();
+    const response = await server.inject('/api/acp/profiles');
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      profiles: [legacyProfile],
+      selectableProfileIds: ['legacy-command'],
+      connectedDevices: [
+        expect.objectContaining({
+          agentletId: 'machine-a',
+          profileCount: 1,
+        }),
+        expect.objectContaining({
+          agentletId: 'remote-machine',
+          profileCount: 0,
+        }),
+      ],
+    });
   });
 
   it('rejects caller-created automatic provenance', async () => {

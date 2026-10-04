@@ -33,6 +33,7 @@
 
 import { randomUUID } from 'node:crypto';
 
+import { resolveConnectedAgentletId } from '@agenetes/agentlet-host';
 import { resolveAgentInputs } from '@agenetes/protocol';
 import {
   HistoryLoadDeniedError,
@@ -328,14 +329,24 @@ export class AcpAgentHandle<
       getIdleTimeoutSecs: () => 600,
     },
   ) {
-    this.agentletId = resolveAcpAgentletId(spec);
+    this.requestedAgentletId = resolveAcpAgentletId(spec);
+    this.agentletId =
+      resolveConnectedAgentletId(this.requestedAgentletId) ??
+      this.requestedAgentletId;
     // Jobs may share a durable thread or have none. Their live sessions must not.
     this.sessionThreadId =
       spec.workloadType === 'Job' ? `acp-job-${randomUUID()}` : spec.threadId;
   }
 
-  private readonly agentletId: string;
+  private readonly requestedAgentletId: string;
+  private agentletId: string;
   private readonly sessionThreadId: string;
+
+  private resolveAgentletId(): string {
+    this.agentletId =
+      resolveConnectedAgentletId(this.requestedAgentletId) ?? this.agentletId;
+    return this.agentletId;
+  }
 
   private async authorizeHistoryLoad(
     mode: 'recover' | 'fork',
@@ -425,8 +436,9 @@ export class AcpAgentHandle<
       this.spec.spec,
       this.runtimePolicy,
     );
+    const agentletId = this.resolveAgentletId();
     return ensureAcpSession({
-      agentletId: this.agentletId,
+      agentletId,
       threadId: this.sessionThreadId,
       workloadType: this.spec.workloadType,
       binding: this.spec.spec.binding,

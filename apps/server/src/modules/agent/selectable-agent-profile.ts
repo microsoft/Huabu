@@ -3,7 +3,7 @@
 
 import {
   getAgentProfileRegistry,
-  getAgentletGateway,
+  resolveConnectedAgentletId,
 } from '@agenetes/agentlet-host';
 
 import { HUABU_AGENT_PROFILE_ID } from '@huabu/shared';
@@ -26,17 +26,11 @@ function getConnectedProfileRegistry(): AgentProfileRegistryPort | null {
   if (!registry) return null;
   return {
     getProfile: (profileId) => registry.getProfile(profileId),
-    listSelectableProfileIds: () => {
-      const connectedIds = new Set(
-        (getAgentletGateway()?.getAgentlets({ status: 'connected' }) ?? []).map(
-          (connection) => connection.agentletId,
-        ),
-      );
-      return registry
+    listSelectableProfileIds: () =>
+      registry
         .listProfiles()
-        .filter((profile) => connectedIds.has(profile.agentletId))
-        .map((profile) => profile.id);
-    },
+        .filter((profile) => resolveConnectedAgentletId(profile.agentletId))
+        .map((profile) => profile.id),
   };
 }
 

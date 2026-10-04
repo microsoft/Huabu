@@ -18,6 +18,7 @@
 import {
   getAgentletGateway,
   getAgentProfileRegistry,
+  resolveConnectedAgentletId,
 } from '@agenetes/agentlet-host';
 import {
   CUSTOM_COMMAND_CAPABILITIES,
@@ -46,8 +47,12 @@ async function detectAgentClis(target: {
     : undefined;
   if (target.profileId && !profile)
     throw new Error('Agent Profile is unavailable');
-  const agentletId = profile?.agentletId ?? target.agentletId;
-  if (!agentletId) throw new Error('Agentlet target is required');
+  const requestedAgentletId = profile?.agentletId ?? target.agentletId;
+  if (!requestedAgentletId) throw new Error('Agentlet target is required');
+  const agentletId = profile
+    ? resolveConnectedAgentletId(requestedAgentletId)
+    : requestedAgentletId;
+  if (!agentletId) throw new Error('Agentlet is not connected');
   const connection = gateway.getAgentlet(agentletId);
   if (connection?.status !== 'connected')
     throw new Error('Agentlet is not connected');

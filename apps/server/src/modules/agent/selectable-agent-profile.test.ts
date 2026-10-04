@@ -14,9 +14,13 @@ vi.mock('@agenetes/agentlet-host', () => ({
       host.profiles.find((profile) => profile.id === profileId),
     listProfiles: () => host.profiles,
   }),
-  getAgentletGateway: () => ({
-    getAgentlets: () => host.connectedIds.map((agentletId) => ({ agentletId })),
-  }),
+  resolveConnectedAgentletId: (target: string) => {
+    if (host.connectedIds.includes(target)) return target;
+    const matches = host.connectedIds.filter(
+      (agentletId) => `${agentletId}-host` === target,
+    );
+    return matches.length === 1 ? matches[0] : undefined;
+  },
 }));
 
 import {
@@ -72,6 +76,18 @@ describe('listAvailableAgentProfiles', () => {
     expect(listAvailableAgentProfiles()).toEqual([
       { id: 'huabu', alias: 'Built-In Pi' },
       { id: 'online', alias: 'Online', default: true },
+    ]);
+  });
+
+  it('projects a hostname-era Profile when exactly one device reports that hostname', () => {
+    host.profiles = [
+      { id: 'legacy', alias: 'Legacy', agentletId: 'device-a-host' },
+    ];
+    host.connectedIds = ['device-a'];
+
+    expect(listAvailableAgentProfiles()).toEqual([
+      { id: 'huabu', alias: 'Built-In Pi' },
+      { id: 'legacy', alias: 'Legacy', default: true },
     ]);
   });
 

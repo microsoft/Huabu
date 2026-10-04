@@ -40,6 +40,7 @@
 import {
   AgentletRequestError,
   getAgentletGateway,
+  resolveConnectedAgentletId,
 } from '@agenetes/agentlet-host';
 import {
   harnessLaunchPlanSchema,
@@ -96,10 +97,8 @@ function agentletThreadKey(agentletId: string, threadId: string): string {
 
 /** Resolve one explicitly targeted execution node. */
 function readTargetAgentlet(agentletId: string): { agentletId: string } | null {
-  const gateway = getAgentletGateway();
-  if (!gateway) return null;
-  const agentlet = gateway.getAgentlet(agentletId);
-  return agentlet?.status === 'connected' ? { agentletId } : null;
+  const resolved = resolveConnectedAgentletId(agentletId);
+  return resolved ? { agentletId: resolved } : null;
 }
 
 /**
@@ -205,7 +204,7 @@ export async function ensureAgentForThread(
     );
   }
 
-  const cacheKey = agentletThreadKey(agentletId, threadId);
+  const cacheKey = agentletThreadKey(agentlet.agentletId, threadId);
   const cached = threadToAgent.get(cacheKey);
   if (cached) {
     const gateway = getAgentletGateway();

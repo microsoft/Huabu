@@ -29,6 +29,7 @@ import {
   getAgentProfileRegistry,
   getAgentletGateway,
   getDaemonSupervisor,
+  resolveConnectedAgentletId,
 } from '@agenetes/agentlet-host';
 
 import {
@@ -88,7 +89,10 @@ async function validateHarnessLaunch(
   try {
     const gateway = getAgentletGateway();
     if (!gateway) throw new Error('Agentlet Gateway is not ready');
-    const result = await gateway.discoverHarnesses(agentletId, {
+    const resolvedAgentletId = resolveConnectedAgentletId(agentletId);
+    if (!resolvedAgentletId)
+      throw new Error('The selected Agentlet is not connected');
+    const result = await gateway.discoverHarnesses(resolvedAgentletId, {
       prepareWorkspaces: false,
     });
     const harness = result.harnesses.find(
@@ -117,7 +121,7 @@ async function validateHarnessLaunch(
       });
       return false;
     }
-    await gateway.buildHarnessLaunch(agentletId, { launch });
+    await gateway.buildHarnessLaunch(resolvedAgentletId, { launch });
     return true;
   } catch (error) {
     request.log.warn(
@@ -156,7 +160,9 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
       try {
         const gateway = getAgentletGateway();
         if (!gateway) throw new Error('Agentlet Gateway is not ready');
-        const agentletId = profile?.agentletId ?? parsed.data.agentletId;
+        const agentletId = profile
+          ? resolveConnectedAgentletId(profile.agentletId)
+          : parsed.data.agentletId;
         if (!agentletId || !isAgentletConnected(agentletId)) {
           return reply.status(409).send({
             code: 'agentlet_unavailable',
@@ -190,15 +196,11 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
       }
       const profiles = registry.listProfiles();
       const connected = getConnectedAgentlets();
-      const connectedIds = new Set(
-        connected.map((connection) => connection.agentletId),
-      );
       const profileCounts = new Map<string, number>();
       for (const profile of profiles) {
-        profileCounts.set(
-          profile.agentletId,
-          (profileCounts.get(profile.agentletId) ?? 0) + 1,
-        );
+        const agentletId = resolveConnectedAgentletId(profile.agentletId);
+        if (!agentletId) continue;
+        profileCounts.set(agentletId, (profileCounts.get(agentletId) ?? 0) + 1);
       }
       const connectedDevices = connected
         .map((connection) => ({
@@ -225,7 +227,7 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
       return {
         profiles,
         selectableProfileIds: profiles
-          .filter((profile) => connectedIds.has(profile.agentletId))
+          .filter((profile) => resolveConnectedAgentletId(profile.agentletId))
           .map((profile) => profile.id),
         connectedDevices,
         agentlet: getDaemonSupervisor().getStatus(),

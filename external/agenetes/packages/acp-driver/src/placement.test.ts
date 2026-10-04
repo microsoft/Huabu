@@ -10,6 +10,28 @@ vi.mock('@agenetes/agentlet-host', async (importOriginal) => {
   return {
     ...actual,
     getAgentletGateway: () => host.gateway,
+    resolveConnectedAgentletId: (target: string) => {
+      const gateway = host.gateway as
+        | {
+            getAgentlet?: (
+              agentletId: string,
+            ) => { agentletId?: string; status?: string } | undefined;
+            getAgentlets?: () => Array<{
+              agentletId: string;
+              status: string;
+              agentletProfile?: { machine?: { hostname?: string } };
+            }>;
+          }
+        | undefined;
+      const exact = gateway?.getAgentlet?.(target);
+      if (exact?.status === 'connected') return exact.agentletId ?? target;
+      const matches = (gateway?.getAgentlets?.() ?? []).filter(
+        (connection) =>
+          connection.status === 'connected' &&
+          connection.agentletProfile?.machine?.hostname === target,
+      );
+      return matches.length === 1 ? matches[0]?.agentletId : undefined;
+    },
   };
 });
 
@@ -37,6 +59,40 @@ afterEach(() => {
 });
 
 describe('explicit ACP placement', () => {
+  it('routes a hostname-era workload to its unique connected device identity', async () => {
+    const sessions = new Map<string, { status: 'connected' }>();
+    const spawnOnAgentlet = vi.fn(
+      async (agentletId: string, params: { appId: string }) => {
+        const sessionId = `${agentletId}-${params.appId}`;
+        sessions.set(JSON.stringify([agentletId, sessionId]), {
+          status: 'connected',
+        });
+        return { sessionId, pid: 101 };
+      },
+    );
+    host.gateway = {
+      getAgentlet: () => undefined,
+      getAgentlets: () => [
+        {
+          agentletId: 'device-uuid',
+          status: 'connected',
+          agentletProfile: { machine: { hostname: 'legacy-host' } },
+        },
+      ],
+      getSession: (agentletId: string, sessionId: string) =>
+        sessions.get(JSON.stringify([agentletId, sessionId])),
+      spawnOnAgentlet,
+    };
+
+    await expect(
+      ensureAgentForThread('legacy-host', 'legacy-thread', recipe),
+    ).resolves.toMatchObject({ agentletId: 'device-uuid' });
+    expect(spawnOnAgentlet).toHaveBeenCalledWith(
+      'device-uuid',
+      expect.any(Object),
+    );
+  });
+
   it('forwards a persisted structured plan and retains it when reusing the live process', async () => {
     const launch = {
       kind: 'acp-harness' as const,

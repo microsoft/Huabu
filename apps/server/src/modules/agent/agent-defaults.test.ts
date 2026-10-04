@@ -12,11 +12,8 @@ import {
 import type { AgentDefaults, AgentProfileView } from '@huabu/shared';
 
 vi.mock('@agenetes/agentlet-host', () => ({
-  getAgentletGateway: () => ({
-    getAgentlet: (id: string) => ({
-      status: id === 'connected' ? 'connected' : 'disconnected',
-    }),
-  }),
+  resolveConnectedAgentletId: (id: string) =>
+    id === 'connected' || id === 'legacy-host' ? 'connected' : undefined,
 }));
 
 function profile(
@@ -54,6 +51,19 @@ describe('installation Agent defaults', () => {
       const online = profile('online', 'connected');
       initializeAgentDefaults([profile('offline', 'offline'), online]);
       expect(initialize).toHaveBeenCalledWith([online]);
+    } finally {
+      initialize.mockRestore();
+    }
+  });
+
+  it('offers a uniquely resolved hostname-era candidate to initialization', () => {
+    const initialize = vi
+      .spyOn(AgentDefaultsService.prototype, 'initializeAgentDefaults')
+      .mockReturnValue({ profileId: null, functionalModel: '' });
+    try {
+      const legacy = profile('legacy', 'legacy-host');
+      initializeAgentDefaults([legacy]);
+      expect(initialize).toHaveBeenCalledWith([legacy]);
     } finally {
       initialize.mockRestore();
     }

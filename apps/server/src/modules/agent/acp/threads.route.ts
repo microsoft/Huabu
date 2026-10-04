@@ -2,6 +2,7 @@
 // Licensed under the MIT license.
 
 import { acpSessionRegistry } from '@agenetes/acp-driver';
+import { resolveConnectedAgentletId } from '@agenetes/agentlet-host';
 
 import {
   acpPermissionDecisionSchema,
@@ -151,7 +152,8 @@ async function resolveThreadAgentletId(
       typeof driverSpec === 'object' &&
       typeof (driverSpec as { agentletId?: unknown }).agentletId === 'string'
     ) {
-      return (driverSpec as { agentletId: string }).agentletId;
+      const agentletId = (driverSpec as { agentletId: string }).agentletId;
+      return resolveConnectedAgentletId(agentletId) ?? agentletId;
     }
   }
   return undefined;
