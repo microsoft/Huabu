@@ -287,8 +287,9 @@ describe('MoveSelectionPopover', () => {
     const trigger = await openPanel();
     const checkbox =
       document.querySelector<HTMLInputElement>('[type="checkbox"]');
-    act(() => checkbox?.click());
     expect(checkbox?.checked).toBe(false);
+    act(() => checkbox?.click());
+    expect(checkbox?.checked).toBe(true);
     act(() =>
       document.body.dispatchEvent(
         new PointerEvent('pointerdown', { bubbles: true }),
@@ -300,7 +301,7 @@ describe('MoveSelectionPopover', () => {
     );
     expect(
       document.querySelector<HTMLInputElement>('[type="checkbox"]')?.checked,
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it('locks submission and keeps the captured selection while the move is pending', async () => {
@@ -331,7 +332,7 @@ describe('MoveSelectionPopover', () => {
       'source',
       expect.objectContaining({
         selectedNodeIds: ['node-selected'],
-        createSourcePreview: true,
+        createSourcePreview: false,
       }),
     );
     await act(async () => finish?.(moveResult));
@@ -423,7 +424,7 @@ describe('MoveSelectionPopover', () => {
     );
     expect(document.querySelector('[role="dialog"]')).not.toBeNull();
     expect(document.querySelector('[type="checkbox"]')).toBe(checkbox);
-    expect(checkbox?.checked).toBe(false);
+    expect(checkbox?.checked).toBe(true);
   });
 
   it.each(Object.entries(knownErrors))(
@@ -661,7 +662,7 @@ describe('MoveSelectionPopover', () => {
       expect(moveCanvasSelection).toHaveBeenCalledWith('source', {
         selectedNodeIds: ['node-selected'],
         destination: { kind: 'new', title: 'New destination' },
-        createSourcePreview: true,
+        createSourcePreview: false,
         expectedSourceVersion: 3,
       });
       expect(useWorkspaceStore.getState().spaceTitles).toEqual(
@@ -708,6 +709,11 @@ describe('MoveSelectionPopover', () => {
       document.querySelectorAll<HTMLButtonElement>('[role="option"]'),
     ).find((button) => button.textContent === 'Destination');
     act(() => destination?.click());
+    act(() =>
+      document
+        .querySelector<HTMLInputElement>('input[type="checkbox"]')
+        ?.click(),
+    );
     const move = Array.from(document.querySelectorAll('button')).find(
       (button) => button.textContent === 'moveSelection.confirm',
     );
@@ -721,7 +727,7 @@ describe('MoveSelectionPopover', () => {
     });
   });
 
-  it('defaults the source Preview checkbox on and allows disabling it', async () => {
+  it('defaults the source Preview checkbox off and allows enabling it', async () => {
     listCanvases.mockResolvedValue({
       canvases: [{ canvasId: 'destination', title: 'Destination' }],
     });
@@ -747,8 +753,8 @@ describe('MoveSelectionPopover', () => {
     const checkbox = document.querySelector<HTMLInputElement>(
       'input[type="checkbox"]',
     );
-    expect(checkbox?.checked).toBe(true);
-    act(() => checkbox?.click());
     expect(checkbox?.checked).toBe(false);
+    act(() => checkbox?.click());
+    expect(checkbox?.checked).toBe(true);
   });
 });

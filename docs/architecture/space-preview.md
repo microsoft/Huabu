@@ -59,7 +59,7 @@ Gesture-driven zoom-through remains deferred; viewport zoom, responsive layout, 
 
 Ordinary Spaces expose Add Space Shortcut from the Canvas toolbar's Add Content dropdown. World omits this action because its shortcut membership is server-managed.
 
-Moving content between Spaces can also create an ordinary source-owned `spacePreview` breadcrumb when the default-enabled Move option remains selected. It occupies the moved set's former absolute top-left and uses compact automatic sizing, independent of the moved content's footprint. It is created in the same source executor batch that deletes the moved roots, and a later move to the same target creates another breadcrumb rather than reusing one at a different historical location. Disabling the option leaves no breadcrumb and does not change boundary-edge removal or compensation.
+Moving content between Spaces can also create an ordinary source-owned `spacePreview` breadcrumb when the user explicitly enables the default-off Move option. The choice resets to off each time the Move panel opens. When enabled, the shortcut occupies the moved set's former absolute top-left and uses compact automatic sizing, independent of the moved content's footprint. It is created in the same source executor batch that deletes the moved roots, and a later move to the same target creates another breadcrumb rather than reusing one at a different historical location. Leaving the option disabled creates no breadcrumb and does not change boundary-edge removal or compensation.
 
 ## Development design comparison
 
