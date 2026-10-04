@@ -20,17 +20,14 @@ export function resolveConnectedAgentletIdFromConnections(
   if (exact) return exact.agentletId;
 
   const hostnameMatches = connected.filter(
-    (connection) =>
-      connection.agentletProfile?.machine?.hostname === target,
+    (connection) => connection.agentletProfile?.machine?.hostname === target,
   );
   return hostnameMatches.length === 1
     ? hostnameMatches[0]?.agentletId
     : undefined;
 }
 
-export function resolveConnectedAgentletId(
-  target: string,
-): string | undefined {
+export function resolveConnectedAgentletId(target: string): string | undefined {
   return resolveConnectedAgentletIdFromConnections(
     target,
     getAgentletGateway()?.getAgentlets({ status: 'connected' }) ?? [],
