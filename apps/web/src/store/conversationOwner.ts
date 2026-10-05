@@ -8,7 +8,11 @@ import { acknowledgeAgentNodeResult, postCanvasExecute } from '@/api/canvas';
 import { rememberConversationAgentBinding } from '@/store/acpProfilesStore';
 import useCanvasStore, { awaitQuestionCreation } from '@/store/canvasStore';
 
-import type { AgentBinding, AgentConversationView } from '@huabu/shared';
+import type {
+  AgentBinding,
+  AgentConversationView,
+  AgentLaunchOverrides,
+} from '@huabu/shared';
 import type { Delta } from '@huabu/shared/canvas-engine';
 import type { Node } from '@xyflow/react';
 
@@ -22,6 +26,7 @@ export type ConversationOwnerSource = {
   agentBinding?: AgentBinding;
   agentBindingPolicy?: 'selectable' | 'fixed';
   bindingState?: 'editing' | 'bound';
+  agentLaunchOverrides?: AgentLaunchOverrides;
   invocationToken?: string;
   pendingInkIntentLabel?: boolean;
   content?: unknown;
@@ -209,6 +214,32 @@ export function saveConversationDraft(
   // Keep a rejected save available to the send guard until an explicit retry.
   void save.catch(() => undefined);
   return save;
+}
+
+export async function saveConversationWorkingDirectoryOverride(
+  view: AgentConversationView,
+  workingDirPath: string | null,
+): Promise<void> {
+  const state = useCanvasStore.getState();
+  const source = resolveConversationOwnerSource(
+    state.canvasId,
+    state.nodes,
+    view,
+  );
+  if (!source) {
+    throw new ConversationIntegrityError(
+      'Conversation owner no longer matches the active Agent node',
+    );
+  }
+
+  const nextOverrides = { ...source.agentLaunchOverrides };
+  if (workingDirPath === null) delete nextOverrides.workingDirPath;
+  else nextOverrides.workingDirPath = workingDirPath.trim();
+
+  await patchConversationOwnerNode(view, {
+    agentLaunchOverrides:
+      Object.keys(nextOverrides).length > 0 ? nextOverrides : null,
+  });
 }
 
 export async function awaitConversationDraft(

@@ -27,6 +27,7 @@ import {
   shouldComposeConversationOwner,
   validateConversationView,
   saveConversationDraft,
+  saveConversationWorkingDirectoryOverride,
   awaitConversationDraft,
   acknowledgeConversationResult,
 } from './conversationOwner';
@@ -322,6 +323,61 @@ describe('conversation owner routing', () => {
     expect(
       resolveConversationAgentBinding(undefined, { kind: 'internal' }),
     ).toEqual({ kind: 'internal' });
+  });
+
+  it('persists only an explicit Node cwd and clears it back to inheritance', async () => {
+    useCanvasStore.getState()._setStateNoAutosave({
+      nodes: [
+        {
+          id: 'node-source',
+          type: 'question',
+          position: { x: 0, y: 0 },
+          data: {
+            type: 'question',
+            threadId: 'thread-source',
+            content: '',
+            agentLaunchOverrides: {
+              additionalInitialPreamble: 'Keep this instruction.',
+            },
+          },
+        },
+      ],
+    });
+
+    await saveConversationWorkingDirectoryOverride(
+      ownerView,
+      '  /work/project  ',
+    );
+    expect(
+      postCanvasExecute.mock.calls[0][1].commands[0].patches[0].patch,
+    ).toEqual({
+      agentLaunchOverrides: {
+        additionalInitialPreamble: 'Keep this instruction.',
+        workingDirPath: '/work/project',
+      },
+    });
+
+    useCanvasStore.getState()._setStateNoAutosave({
+      nodes: [
+        {
+          id: 'node-source',
+          type: 'question',
+          position: { x: 0, y: 0 },
+          data: {
+            type: 'question',
+            threadId: 'thread-source',
+            content: '',
+            agentLaunchOverrides: {
+              workingDirPath: '/work/project',
+            },
+          },
+        },
+      ],
+    });
+    await saveConversationWorkingDirectoryOverride(ownerView, null);
+    expect(
+      postCanvasExecute.mock.calls[1][1].commands[0].patches[0].patch,
+    ).toEqual({ agentLaunchOverrides: null });
   });
 
   it('omits server-owned fields regardless of binding policy', () => {

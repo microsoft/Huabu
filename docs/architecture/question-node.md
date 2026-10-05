@@ -40,23 +40,23 @@ User-facing node terminology is **Agent Node** in English and **Agent 节点** i
 
 `QuestionNodeData` ([node.ts](../../packages/shared/src/types/canvas/node.ts)):
 
-| Field                     | Persisted | Notes                                                                                                                                |
-| ------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `content`                 | sidecar   | The question text; stored in `nodes/<safeLabel>.md` body like text/note (`TEXT_BEARING_NODE_TYPES`), stripped from the structure PUT |
-| `status`                  | ✅        | Optional sparse status: absent means `idle`; non-default values are `running` / `done` / `error`                                     |
-| `threadId`                | ✅        | Owns one chat thread; minted on first compose                                                                                        |
-| `conversationTitleSource` | ✅        | Server-owned naming provenance (`user` / `generated` / `acp` / `fallback` / null); the title value remains the canonical `label`     |
-| `agentBinding`            | ✅        | Acknowledged preparation draft; driver/Profile identity becomes immutable after canonical execution binding                          |
-| `agentBindingPolicy`      | ✅        | Optional `selectable` / `fixed`; absent means selectable, while service-created Agent Nodes use fixed before first send              |
-| `agentIcon`               | ✅        | External Agent's bind-time avatar fallback; current Profile icon wins while that Profile still exists                                |
-| `agentLaunchOverrides`    | ✅        | Optional bounded cwd and additional-initial-preamble overrides for a service-created external Agent Node                             |
-| `agentMode`               | ✅        | `operate` (default) / `ask` for the internal agent                                                                                   |
-| `errorMessage`            | ✅        | Set on `status === 'error'`                                                                                                          |
-| `viewed`                  | ✅        | Drives unread terminal-state attention on the Agent avatar                                                                           |
-| `bindingState`            | ✅        | Server-owned `editing` / `bound`; Bound acknowledges a validated canonical Agenetes record and never demotes                         |
-| `invocationToken`         | ✅        | Server-owned current or last admitted prompt identity; fences terminal writes and viewed acknowledgements                            |
-| `responseSummary`         | reserved  | Teaser field; not yet written by the runner                                                                                          |
-| `pendingInkIntentLabel`   | ✅        | Marks only a newly created Ink Question whose placeholder may be replaced by the first structured inferred intent                    |
+| Field                     | Persisted | Notes                                                                                                                                     |
+| ------------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `content`                 | sidecar   | The question text; stored in `nodes/<safeLabel>.md` body like text/note (`TEXT_BEARING_NODE_TYPES`), stripped from the structure PUT      |
+| `status`                  | ✅        | Optional sparse status: absent means `idle`; non-default values are `running` / `done` / `error`                                          |
+| `threadId`                | ✅        | Owns one chat thread; minted on first compose                                                                                             |
+| `conversationTitleSource` | ✅        | Server-owned naming provenance (`user` / `generated` / `acp` / `fallback` / null); the title value remains the canonical `label`          |
+| `agentBinding`            | ✅        | Acknowledged preparation draft; driver/Profile identity becomes immutable after canonical execution binding                               |
+| `agentBindingPolicy`      | ✅        | Optional `selectable` / `fixed`; absent means selectable, while service-created Agent Nodes use fixed before first send                   |
+| `agentIcon`               | ✅        | External Agent's bind-time avatar fallback; current Profile icon wins while that Profile still exists                                     |
+| `agentLaunchOverrides`    | ✅        | Optional bounded cwd and additional-initial-preamble overrides for an external Agent Node; user-created Nodes may edit cwd before binding |
+| `agentMode`               | ✅        | `operate` (default) / `ask` for the internal agent                                                                                        |
+| `errorMessage`            | ✅        | Set on `status === 'error'`                                                                                                               |
+| `viewed`                  | ✅        | Drives unread terminal-state attention on the Agent avatar                                                                                |
+| `bindingState`            | ✅        | Server-owned `editing` / `bound`; Bound acknowledges a validated canonical Agenetes record and never demotes                              |
+| `invocationToken`         | ✅        | Server-owned current or last admitted prompt identity; fences terminal writes and viewed acknowledgements                                 |
+| `responseSummary`         | reserved  | Teaser field; not yet written by the runner                                                                                               |
+| `pendingInkIntentLabel`   | ✅        | Marks only a newly created Ink Question whose placeholder may be replaced by the first structured inferred intent                         |
 
 Not persisted: the server invocation phase and cancellation controller, plus the browser's stream controller and request feedback. The complete Node is a read model, not a writable snapshot: ordinary Canvas PUT, commands, and undo omit or preserve the server-owned fields and cannot replace the thread association.
 Question nodes are content nodes: preprocessing delegates their `content` to `ConversationTitleService.initializeQuestion()` rather than running a separate `generate_label` stage. The profile has no `persist_source`, so Questions do **not** enter the knowledge base. They remain visible to agents (`type: 'question'` in `get_space_outline`). See [node-preprocessing.md](./node-preprocessing.md) for the profile and option gates.
@@ -77,6 +77,7 @@ Created like any node via `CREATE_NODES` ([resolveAddNodes.ts](../../apps/web/sr
 
 - **Idle** → double-click opens compose (§5).
 - An idle node with `agentBindingPolicy: fixed` opens compose with its persisted binding and a read-only Agent selector. Ordinary Editing nodes retain the picker; Bound nodes cannot switch execution identity even when a first control created no messages.
+- An Editing Node bound to an external Profile exposes an optional Node-specific working-directory override below the Agent selector. Empty means inherit the selected Profile without persisting a copy; an explicit value survives Profile changes and applies only to that Node. The control has no server-local folder picker because the Profile's Agentlet may run on another machine. Binding locks the override with the rest of execution preparation; a locked explicit value remains visible as a read-only summary.
 - After sending: **running → done / error**.
 - `AgentThreadService` owns lifecycle for every node-backed invocation, regardless of policy. Admission publishes a new token and `running` before dispatch, installs cancellation before slow preparation, and keeps the turn lease through settlement. `AgentNodeLifecycle` fills only freshly read empty, never-submitted content and projects the matching terminal result. Existing content, previous submission tokens, and legacy conversation history prevent follow-ups from replacing authored text.
 - Loading and reconnect observe server state; they never infer success from old history or repair status in the browser. A persisted running node without live tracking after restart does not establish an outcome, introduce a new badge, or trigger replay. Existing retry/admission behavior remains unchanged.

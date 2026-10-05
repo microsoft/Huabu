@@ -771,6 +771,11 @@
     }
   },
   "chat": {
+    "workingDirectoryOverride": "工作目录覆盖",
+    "workingDirectoryInherited": "继承 Profile 目录：{{path}}",
+    "workingDirectoryNodeOnly": "仅应用于此 Agent 节点。",
+    "workingDirectoryNodeOnlyLocked": "此执行已固定使用该节点专属覆盖。",
+    "workingDirectoryOverrideSaveFailed": "保存工作目录覆盖失败",
     "showEarlierTurns": "显示更早的 {{count}} 个轮次",
     "loadingEarlierTurns": "正在加载更早的轮次…",
     "backToBottom": "回到底部",
