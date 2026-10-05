@@ -39,8 +39,6 @@ export function WorkingDirectoryOverride({
     setError(null);
   }, [workingDirPath]);
 
-  if (!editable && !workingDirPath) return null;
-
   const hasOverride = Boolean(workingDirPath);
   const effectivePath = workingDirPath ?? profileWorkingDirPath;
   const triggerTitle = hasOverride

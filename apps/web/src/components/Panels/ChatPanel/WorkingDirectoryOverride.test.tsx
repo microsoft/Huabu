@@ -125,7 +125,7 @@ describe('WorkingDirectoryOverride', () => {
     expect(onSave).toHaveBeenCalledWith(null);
   });
 
-  it('keeps a locked explicit override visible but hides locked inheritance', async () => {
+  it('keeps locked explicit and inherited directories available read-only', async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     await render({
       profileAlias: 'Default Profile',
@@ -147,7 +147,9 @@ describe('WorkingDirectoryOverride', () => {
       saving: false,
       onSave,
     });
-    expect(container.textContent).toBe('');
+    expect(container.querySelector('button')).not.toBeNull();
+    expect(document.body.textContent).toContain('/profiles/default');
+    expect(document.body.querySelector('input')).toBeNull();
   });
 
   it('surfaces server validation errors without replacing the draft', async () => {
