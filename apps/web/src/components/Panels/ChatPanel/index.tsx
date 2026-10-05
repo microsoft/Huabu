@@ -830,7 +830,8 @@ export const ChatPanel = ({
     conversationOwnerSource?.agentLaunchOverrides?.workingDirPath;
   const showWorkingDirectoryOverride =
     !!activeConversationView &&
-    ((!!selectedExternalProfile && preparationEditable) ||
+    agentBinding.kind === 'external' &&
+    ((!!selectedExternalProfile && !!selectedExternalProfile.workingDirPath) ||
       !!workingDirectoryOverride);
   const handleSaveWorkingDirectory = useCallback(
     async (workingDirPath: string | null) => {
