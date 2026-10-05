@@ -1090,21 +1090,25 @@ export const ChatPanel = ({
               slashLoading={slashLoading}
               onSlashMenuIntent={refreshSlashCommands}
               agentSelectorSlot={
-                <div className="w-full min-w-0">
-                  <div className="flex min-w-0 items-center">
-                    <AgentSelector
-                      currentBinding={agentBinding}
-                      currentMode={mode}
-                      profiles={acpProfiles}
-                      editable={agentSelectorEditable}
-                      onSelect={handleSelectAgent}
-                      onRefreshProfiles={refreshAcpProfiles}
-                      disabled={!isHistoryLoaded}
-                      fallbackIcon={viewingQuestionAgentIcon}
-                    />
-                  </div>
-                  {showWorkingDirectoryOverride && (
+                <div className="flex min-w-0 items-center">
+                  <AgentSelector
+                    currentBinding={agentBinding}
+                    currentMode={mode}
+                    profiles={acpProfiles}
+                    editable={agentSelectorEditable}
+                    onSelect={handleSelectAgent}
+                    onRefreshProfiles={refreshAcpProfiles}
+                    disabled={!isHistoryLoaded}
+                    fallbackIcon={viewingQuestionAgentIcon}
+                  />
+                  {showWorkingDirectoryOverride ? (
                     <WorkingDirectoryOverride
+                      profileAlias={
+                        selectedExternalProfile?.alias ??
+                        (agentBinding.kind === 'external'
+                          ? agentBinding.alias
+                          : '')
+                      }
                       profileWorkingDirPath={
                         selectedExternalProfile?.workingDirPath ?? ''
                       }
@@ -1115,7 +1119,7 @@ export const ChatPanel = ({
                       saving={savingWorkingDirectory}
                       onSave={handleSaveWorkingDirectory}
                     />
-                  )}
+                  ) : null}
                 </div>
               }
               acpSelectorsSlot={
