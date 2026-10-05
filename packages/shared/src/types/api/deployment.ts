@@ -45,8 +45,12 @@ export const canaryRedeployStateSchema = z.enum([
 ]);
 export type CanaryRedeployState = z.infer<typeof canaryRedeployStateSchema>;
 
+export const canaryBranchSchema = z.string().trim().min(1).max(255);
+export type CanaryBranch = z.infer<typeof canaryBranchSchema>;
+
 export const canaryRedeployResultSchema = z.object({
   state: canaryRedeployStateSchema,
+  branch: canaryBranchSchema,
   startedAt: z.number().int().nonnegative(),
   completedAt: z.number().int().nonnegative().optional(),
   exitCode: z.number().int().optional(),
@@ -62,7 +66,8 @@ export const canaryRedeployStatusResponseSchema = z.object({
     'repository-unavailable',
     'script-unavailable',
   ]),
-  branch: z.literal('alpha'),
+  branch: canaryBranchSchema,
+  configuredBranch: canaryBranchSchema.nullable(),
   runningSha: z
     .string()
     .regex(/^[0-9a-f]{40}$/)
@@ -79,5 +84,21 @@ export type CanaryRedeployStatusResponse = z.infer<
   typeof canaryRedeployStatusResponseSchema
 >;
 
-export const canaryRedeployRequestSchema = z.object({}).strict();
+export const canaryCheckRequestSchema = z.object({}).strict();
+export type CanaryCheckRequest = z.infer<typeof canaryCheckRequestSchema>;
+
+export const canaryRedeployConfigUpdateSchema = z
+  .object({
+    branch: canaryBranchSchema.nullable(),
+  })
+  .strict();
+export type CanaryRedeployConfigUpdate = z.infer<
+  typeof canaryRedeployConfigUpdateSchema
+>;
+
+export const canaryRedeployRequestSchema = z
+  .object({
+    expectedBranch: canaryBranchSchema,
+  })
+  .strict();
 export type CanaryRedeployRequest = z.infer<typeof canaryRedeployRequestSchema>;

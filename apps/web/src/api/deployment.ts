@@ -5,6 +5,7 @@ import { apiFetch } from './_client';
 import { routes } from './_routes';
 
 import type {
+  CanaryRedeployConfigUpdate,
   CanaryRedeployStatusResponse,
   DeploymentReadinessResponse,
 } from '@huabu/shared';
@@ -25,14 +26,26 @@ export function checkCanaryRedeploy(): Promise<CanaryRedeployStatusResponse> {
   return apiFetch<CanaryRedeployStatusResponse>(routes.canaryRedeployCheck, {
     method: 'POST',
     json: {},
-    fallbackMessage: 'Failed to check origin/alpha',
+    fallbackMessage: 'Failed to check the Canary branch',
   });
 }
 
-export function requestCanaryRedeploy(): Promise<CanaryRedeployStatusResponse> {
+export function updateCanaryRedeployConfig(
+  update: CanaryRedeployConfigUpdate,
+): Promise<CanaryRedeployStatusResponse> {
+  return apiFetch<CanaryRedeployStatusResponse>(routes.canaryRedeployConfig, {
+    method: 'PUT',
+    json: update,
+    fallbackMessage: 'Failed to save the Canary branch',
+  });
+}
+
+export function requestCanaryRedeploy(
+  expectedBranch: string,
+): Promise<CanaryRedeployStatusResponse> {
   return apiFetch<CanaryRedeployStatusResponse>(routes.canaryRedeploy, {
     method: 'POST',
-    json: {},
+    json: { expectedBranch },
     fallbackMessage: 'Failed to start Canary redeployment',
   });
 }

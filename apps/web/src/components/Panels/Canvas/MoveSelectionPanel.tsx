@@ -52,7 +52,7 @@ export function MoveSelectionPanel({
   const nameRef = useRef<HTMLInputElement>(null);
   const [selectedDestination, setSelectedDestination] = useState('');
   const [newSpaceTitle, setNewSpaceTitle] = useState('');
-  const [createSourcePreview, setCreateSourcePreview] = useState(true);
+  const [createSourcePreview, setCreateSourcePreview] = useState(false);
   const creatingNewSpace = selectedDestination === NEW_SPACE_DESTINATION;
   const destinationCanvasId = options.some(
     (option) => option.value === selectedDestination,

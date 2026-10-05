@@ -15,6 +15,7 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const mocks = vi.hoisted(() => ({
   getStatus: vi.fn(),
   check: vi.fn(),
+  save: vi.fn(),
   redeploy: vi.fn(),
   toast: vi.fn(),
   t: (key: string) => key,
@@ -23,6 +24,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/api/deployment', () => ({
   getCanaryRedeployStatus: mocks.getStatus,
   checkCanaryRedeploy: mocks.check,
+  updateCanaryRedeployConfig: mocks.save,
   requestCanaryRedeploy: mocks.redeploy,
 }));
 vi.mock('@/components/Common/Toast', () => ({ toast: mocks.toast }));
@@ -40,6 +42,7 @@ const availableStatus: CanaryRedeployStatusResponse = {
   available: true,
   reason: 'available',
   branch: 'alpha',
+  configuredBranch: null,
   runningSha: 'a'.repeat(40),
   remoteSha: 'b'.repeat(40),
   updateAvailable: true,
@@ -56,9 +59,14 @@ beforeEach(() => {
   root = createRoot(container);
   mocks.getStatus.mockResolvedValue(availableStatus);
   mocks.check.mockResolvedValue(availableStatus);
+  mocks.save.mockResolvedValue({
+    ...availableStatus,
+    branch: 'x/alpha',
+    configuredBranch: 'x/alpha',
+  });
   mocks.redeploy.mockResolvedValue({
     ...availableStatus,
-    redeploy: { state: 'requested', startedAt: 2 },
+    redeploy: { state: 'requested', branch: 'alpha', startedAt: 2 },
   });
 });
 
@@ -103,9 +111,36 @@ describe('CanaryRedeploySettings', () => {
     });
 
     expect(mocks.redeploy).toHaveBeenCalledOnce();
+    expect(mocks.redeploy).toHaveBeenCalledWith('alpha');
     expect(mocks.toast).toHaveBeenCalledWith('settings.canaryRedeployStarted', {
       tone: 'info',
       duration: 10_000,
     });
+  });
+
+  it('persists a configured branch and uses an empty value for the alpha default', async () => {
+    await renderSettings();
+    const input = container.querySelector<HTMLInputElement>('input');
+    expect(input?.placeholder).toBe('alpha');
+    expect(input?.value).toBe('');
+
+    act(() => {
+      const setValue = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        'value',
+      )?.set;
+      setValue?.call(input, 'x/alpha');
+      input?.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => button('settings.canaryBranchSave').click());
+
+    expect(mocks.save).toHaveBeenCalledWith({ branch: 'x/alpha' });
+    expect(input?.value).toBe('x/alpha');
+
+    act(() => button('settings.canaryRedeployAction').click());
+    await act(async () => {
+      button('settings.canaryConfirmAction').click();
+    });
+    expect(mocks.redeploy).toHaveBeenCalledWith('x/alpha');
   });
 });
