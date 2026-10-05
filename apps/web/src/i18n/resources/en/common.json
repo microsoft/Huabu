@@ -765,6 +765,11 @@
     }
   },
   "chat": {
+    "workingDirectoryOverride": "Working directory override",
+    "workingDirectoryInherited": "Inheriting Profile directory: {{path}}",
+    "workingDirectoryNodeOnly": "Applies only to this Agent Node.",
+    "workingDirectoryNodeOnlyLocked": "Node-only override captured for this execution.",
+    "workingDirectoryOverrideSaveFailed": "Failed to save working directory override",
     "showEarlierTurns": "Show {{count}} earlier turns",
     "loadingEarlierTurns": "Loading earlier turns…",
     "backToBottom": "Back to bottom",
