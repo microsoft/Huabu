@@ -78,6 +78,35 @@ afterEach(() => {
 });
 
 describe('ExternalAgentRuntimeSettings', () => {
+  it('places responsive token controls below the full-width description', async () => {
+    await act(async () => {
+      root.render(<ExternalAgentRuntimeSettings />);
+    });
+
+    const tokenInput = container.querySelector<HTMLInputElement>(
+      '#agentlet-connection-token',
+    );
+    if (!tokenInput) throw new Error('Connection token input not found');
+
+    const controls = tokenInput.parentElement;
+    const controlRow = controls?.parentElement;
+    const settingRow = controlRow?.parentElement;
+    expect(settingRow?.classList.contains('flex-col')).toBe(true);
+    expect(settingRow?.classList.contains('items-stretch')).toBe(true);
+    expect(controlRow?.classList.contains('w-full')).toBe(true);
+    expect(controls?.classList.contains('flex-wrap')).toBe(true);
+    expect(controls?.classList.contains('w-full')).toBe(true);
+    expect(tokenInput.classList.contains('flex-1')).toBe(true);
+    expect(tokenInput.classList.contains('basis-56')).toBe(true);
+
+    const buttons = controls?.querySelectorAll('button') ?? [];
+    expect(buttons.length).toBeGreaterThan(0);
+    for (const button of buttons) {
+      expect(button.classList.contains('shrink-0')).toBe(true);
+      expect(button.classList.contains('whitespace-nowrap')).toBe(true);
+    }
+  });
+
   it('preserves the process limit when saving the idle timeout', async () => {
     await act(async () => {
       root.render(<ExternalAgentRuntimeSettings />);

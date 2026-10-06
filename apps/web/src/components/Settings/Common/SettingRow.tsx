@@ -3,6 +3,8 @@
 
 import React from 'react';
 
+import { cn } from '@/components/Common/cn';
+
 interface SettingRowProps {
   /** Primary label for the setting. Omit when the section heading already names it. */
   title?: React.ReactNode;
@@ -18,12 +20,15 @@ interface SettingRowProps {
   className?: string;
   /** Reduces vertical padding for subordinate settings. */
   density?: 'default' | 'compact';
+  /** Places controls beside the label or in a full-width row below it. */
+  layout?: 'inline' | 'stacked';
 }
 
 /**
  * A single setting row inside a {@link SettingSection} card. Renders the
- * title (and optional description) on the left and a control on the right.
- * The row itself is borderless — dividers come from the parent section.
+ * title (and optional description) with its controls. Inline rows place the
+ * control on the right; stacked rows place it full-width below the text. The
+ * row itself is borderless — dividers come from the parent section.
  */
 export const SettingRow: React.FC<SettingRowProps> = ({
   title,
@@ -33,10 +38,18 @@ export const SettingRow: React.FC<SettingRowProps> = ({
   children,
   className = '',
   density = 'default',
+  layout = 'inline',
 }) => {
+  const stacked = layout === 'stacked';
+
   return (
     <div
-      className={`flex items-center justify-between gap-3 px-3 ${density === 'compact' ? 'py-1.5' : 'py-2.5'} ${className}`.trim()}
+      className={cn(
+        'flex gap-3 px-3',
+        stacked ? 'flex-col items-stretch' : 'items-center justify-between',
+        density === 'compact' ? 'py-1.5' : 'py-2.5',
+        className,
+      )}
     >
       <div className="flex min-w-0 flex-1 items-center gap-2">
         {leading && <div className="shrink-0">{leading}</div>}
@@ -59,7 +72,7 @@ export const SettingRow: React.FC<SettingRowProps> = ({
           )}
         </div>
       </div>
-      <div className="shrink-0">{children}</div>
+      <div className={stacked ? 'w-full min-w-0' : 'shrink-0'}>{children}</div>
     </div>
   );
 };

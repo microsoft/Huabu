@@ -240,6 +240,7 @@ export function ExternalAgentRuntimeSettings() {
   return (
     <>
       <SettingRow
+        layout="stacked"
         title={
           <span className="flex items-center gap-1">
             {t('settings.agentletConnectionToken')}
@@ -265,10 +266,10 @@ export function ExternalAgentRuntimeSettings() {
             : t('settings.agentletConnectionTokenDescriptionLoading')
         }
       >
-        <div className="flex max-w-lg flex-wrap items-center justify-end gap-2">
+        <div className="flex w-full flex-wrap items-center gap-2">
           <TextInput
             id="agentlet-connection-token"
-            className="w-56"
+            className="min-w-40 flex-1 basis-56"
             type="password"
             value={tokenInput}
             onChange={(event) => setTokenInput(event.target.value)}
@@ -287,6 +288,7 @@ export function ExternalAgentRuntimeSettings() {
             variant="outline"
             tone="info"
             size="sm"
+            className="shrink-0 whitespace-nowrap"
             onClick={() => void saveConnectionToken()}
             disabled={
               !tokenInput.trim() ||
@@ -301,6 +303,7 @@ export function ExternalAgentRuntimeSettings() {
             <Button
               variant="outline"
               size="sm"
+              className="shrink-0 whitespace-nowrap"
               onClick={() => void clearConnectionToken()}
               disabled={tokenSaving || !tokenConfig.writable}
             >
@@ -311,6 +314,7 @@ export function ExternalAgentRuntimeSettings() {
             variant="outline"
             tone="info"
             size="sm"
+            className="shrink-0 whitespace-nowrap"
             onClick={() => void copyConnectionCommand()}
             disabled={tokenLoading || copyingCommand || !tokenConfig}
           >
