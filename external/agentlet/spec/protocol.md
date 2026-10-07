@@ -107,7 +107,7 @@ All JSON-RPC envelopes and method payloads are defined in [`messages.ts`](../pac
 
 ## 4. Spawn and bootstrap
 
-`server/spawn` includes a host correlation `appId`, an optional native ACP `sessionId`, and a `sessionSpec`.
+`server/spawn` includes a host correlation `appId`, an optional `workloadType` (`Job` or `Deployment`) used only for aggregate diagnostics, an optional native ACP `sessionId`, and a `sessionSpec`.
 
 The daemon uses the required `sessionSpec.command` and optional `sessionSpec.cwd` directly, then launches the process with `shell: true`. The host must therefore send only trusted commands. Any `sessionSpec.agentTeam` field is explicitly rejected with `-32602`, including when a command is also supplied; there is no manifest resolution or silent fallback.
 
@@ -123,6 +123,10 @@ When `sessionId` is supplied, the daemon prefers `session/resume` and falls back
 The host must include the required spawn parameters in every request. Agentlet has no durable session store.
 
 Historical Team manifest data is described in [`agent-team.md`](agent-team.md); it is not a runtime launch contract.
+
+The daemon enforces its startup `--max-agents` value against the authoritative managed-process map. A rejected spawn returns JSON-RPC error data `{ code: "capacity_exhausted", limit, active: { total, jobs, deployments, unknown, stopping } }`; these counts reveal no session IDs, commands, or host correlation IDs.
+
+`server/stop` addresses one exact native `sessionId`. It is idempotent and returns `{ stopped: true, disposition: "stopped" | "already_absent" }`. For a present process, the daemon closes stdin, escalates through termination and kill with bounded exit waits, suppresses auto-restart, and removes the capacity slot only after exit is confirmed. Failure returns `data: { code: "agent_stop_failed", stillRunning: true }`.
 
 ## 5. ACP relay
 
@@ -151,7 +155,7 @@ The daemon uses bounded FIFO buffers for ACP notifications emitted during bootst
 
 ## 7. Identity and placement
 
-The daemon's `agentletId` defaults to the operating-system hostname and can be supplied explicitly with `--agentlet-id`. The same identity appears in the control query, `agentlet/hello`, session query context, and `sessionProfile.agentletId`.
+The daemon's `agentletId` defaults to the persistent UUID in `~/.agentlet/device.json` and can be supplied explicitly with `--agentlet-id`. The identity file is created atomically on first use; an invalid existing file is an error rather than a reason to rotate identity. An explicit override does not rewrite the default identity. The same identity appears in the control query, `agentlet/hello`, session query context, and `sessionProfile.agentletId`; hostname, platform, and architecture are separate informational metadata.
 
 The native ACP `sessionId` is established by session bootstrap and is the routing identity for one session connection. The embedding control plane selects the target `agentletId`; the daemon does not choose workload placement.
 

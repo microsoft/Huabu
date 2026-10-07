@@ -5,7 +5,6 @@
 // keyed by `workload.threadId` (I9.3). The driver payload is nested under
 // `workload.spec` and validated by the mounted driver.
 
-import { getSupervisedAgentletId } from '@agenetes/agentlet-host';
 import { describe, expect, it } from 'vitest';
 
 import { acpDriverFactory } from './driver.js';
@@ -104,7 +103,7 @@ describe('acpDriverFactory (M5 FACTORY)', () => {
     ).rejects.toThrow();
   });
 
-  it('preserves explicit placement and resolves legacy specs without mutation', () => {
+  it('preserves explicit placement and rejects legacy specs without placement', () => {
     const explicit: AcpCreateSpec = {
       kind: 'acp',
       workloadType: 'Deployment',
@@ -124,7 +123,9 @@ describe('acpDriverFactory (M5 FACTORY)', () => {
     };
 
     expect(resolveAcpAgentletId(explicit)).toBe('machine-b');
-    expect(resolveAcpAgentletId(legacy)).toBe(getSupervisedAgentletId());
+    expect(() => resolveAcpAgentletId(legacy)).toThrow(
+      'The workload has no Agentlet placement.',
+    );
     expect('agentletId' in legacy.spec).toBe(false);
   });
 
@@ -136,7 +137,10 @@ describe('acpDriverFactory (M5 FACTORY)', () => {
         workloadType: 'Deployment',
         threadId: 'thr_1',
         namespace: { name: 'canvas_1', storage: { root: '/data/c1' } },
-        spec: { binding: { alias: 'copilot', profileId: 'prof_1' } },
+        spec: {
+          agentletId: 'machine-a',
+          binding: { alias: 'copilot', profileId: 'prof_1' },
+        },
       },
       freshContext,
     );
@@ -188,6 +192,7 @@ describe('acpDriverFactory (M5 FACTORY)', () => {
         threadId: 'thr_2',
         namespace: { name: 'canvas_1', storage: { root: '/data/c1' } },
         spec: {
+          agentletId: 'machine-a',
           binding: { alias: 'claude', profileId: 'prof_2' },
           cwd: '/work',
           recipe: null,

@@ -43,7 +43,23 @@ class StubHandle {
     readonly spec: StubSpec,
     readonly createContext: AgentCreateContext<StubDriverState>,
   ) {}
+  async *run(): AsyncGenerator<
+    { type: 'text_delta'; data: { content: string } },
+    void
+  > {
+    if (this.spec.spec.note === 'run-fails') {
+      throw new Error('synthetic run failure');
+    }
+    yield { type: 'text_delta', data: { content: 'first' } };
+    yield { type: 'text_delta', data: { content: 'second' } };
+  }
+  async control() {
+    return { ok: false as const, code: 'unsupported' as const };
+  }
   close(): void {
+    if (this.spec.spec.note === 'close-fails') {
+      throw new Error('synthetic Job cleanup failure');
+    }
     this.closed = true;
   }
 }
@@ -626,6 +642,47 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
     expect((await inst.record(spec.namespace, 'thr_job'))?.spec.spec).toEqual(
       expect.objectContaining({ note: 'second' }),
     );
+
+    for await (const _ of h1.run()) {
+      // Drain the one-shot Job.
+    }
+    expect(h1.closed).toBe(true);
+    await expect(async () => {
+      for await (const _ of h1.run()) {
+        // A second run is rejected before reaching the driver.
+      }
+    }).rejects.toThrow('Job handles may run only once');
+  });
+
+  it('closes Jobs after run failure, early return, and surfaces cleanup failure', async () => {
+    const inst = mount();
+    const createJob = async (note: string) =>
+      (await inst.create({
+        threadId: `job-${note}`,
+        kind: 'external',
+        workloadType: 'Job',
+        namespace: ns('canvas_1'),
+        spec: { note },
+      })) as unknown as StubHandle;
+
+    const failed = await createJob('run-fails');
+    await expect(async () => {
+      for await (const _ of failed.run()) {
+        // The driver throws before yielding.
+      }
+    }).rejects.toThrow('synthetic run failure');
+    expect(failed.closed).toBe(true);
+
+    const abandoned = await createJob('early-return');
+    for await (const _ of abandoned.run()) break;
+    expect(abandoned.closed).toBe(true);
+
+    const cleanupFailure = await createJob('close-fails');
+    await expect(async () => {
+      for await (const _ of cleanupFailure.run()) {
+        // Drain the run so its automatic cleanup failure is observable.
+      }
+    }).rejects.toThrow('synthetic Job cleanup failure');
   });
 
   it('a transient Job (empty threadId) upserts no durable record (I9.4)', async () => {

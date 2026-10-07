@@ -13,6 +13,7 @@ import type {
   AcpAgentCliInfo,
   AcpProfileLaunchPreviewResponse,
   AgentProfileView,
+  ConnectedAgentletDevice,
 } from '@huabu/shared';
 
 declare global {
@@ -62,12 +63,23 @@ vi.mock('@/components/Common/Select', () => ({
     value,
     options,
     onChange,
+    ariaLabel,
   }: {
     value: string;
-    options: { value: string; label: string; disabled?: boolean }[];
+    options: {
+      value: string;
+      label: string;
+      description?: string;
+      disabled?: boolean;
+    }[];
     onChange: (value: string) => void;
+    ariaLabel?: string;
   }) => (
-    <select value={value} onChange={(event) => onChange(event.target.value)}>
+    <select
+      aria-label={ariaLabel}
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+    >
       <option value="">Loading</option>
       {options.map((option) => (
         <option
@@ -76,6 +88,7 @@ vi.mock('@/components/Common/Select', () => ({
           disabled={option.disabled}
         >
           {option.label}
+          {option.description ? ` (${option.description})` : ''}
         </option>
       ))}
     </select>
@@ -142,6 +155,18 @@ function renderEditor(
   editing?: AgentProfileView,
   clis = agents,
   loaded = true,
+  connectedDevices: ConnectedAgentletDevice[] = [
+    {
+      agentletId: editing?.agentletId ?? 'device-1',
+      displayName: 'Test device: linux x64',
+      hostname: 'Test device',
+      platform: 'linux',
+      arch: 'x64',
+      version: '1.0.0',
+      connectedAt: '2026-01-01T00:00:00.000Z',
+      profileCount: 0,
+    },
+  ],
 ) {
   if (!container) {
     container = document.createElement('div');
@@ -156,6 +181,9 @@ function renderEditor(
           : ({ mode: 'create' } as const))}
         detectedClis={clis}
         detectionLoaded={loaded}
+        connectedDevices={connectedDevices}
+        agentletId={editing?.agentletId ?? 'device-1'}
+        onAgentletChange={vi.fn()}
         onClose={onClose}
         onSaved={onSaved}
       />,
@@ -188,7 +216,9 @@ async function settlePreview() {
   });
 }
 function chooseCustom() {
-  const select = container?.querySelector('select');
+  const select = container?.querySelector<HTMLSelectElement>(
+    'select[aria-label="settings.agent"]',
+  );
   act(() => {
     if (select) select.value = 'custom';
     select?.dispatchEvent(new Event('change', { bubbles: true }));
@@ -235,7 +265,38 @@ describe('AgentProfileEditor', () => {
       alias: 'Renamed',
       customData: legacy.customData,
     });
+
     expect(api.preview).not.toHaveBeenCalled();
+  });
+
+  it('renders human-readable device labels while retaining UUID identity details', () => {
+    renderEditor();
+    const machine = container?.querySelector<HTMLSelectElement>(
+      'select[aria-label="settings.profileMachine"]',
+    );
+    expect(machine?.selectedOptions[0]?.textContent).toContain(
+      'Test device: linux x64',
+    );
+    expect(machine?.selectedOptions[0]?.textContent).toContain('device-1');
+  });
+
+  it('maps a hostname-era Profile to the unique connected device label', () => {
+    renderEditor({ ...legacy, agentletId: 'legacy-host' }, agents, true, [
+      {
+        agentletId: 'device-uuid',
+        displayName: 'legacy-host: linux x64',
+        hostname: 'legacy-host',
+        platform: 'linux',
+        arch: 'x64',
+        version: '1.0.0',
+        connectedAt: '2026-01-01T00:00:00.000Z',
+        profileCount: 1,
+      },
+    ]);
+
+    expect(container?.textContent).toContain(
+      'legacy-host: linux x64 (device-uuid)',
+    );
   });
 
   it('edits custom command and cwd without changing wrapper, machine, metadata, or custom data', async () => {
@@ -268,7 +329,9 @@ describe('AgentProfileEditor', () => {
 
   it('lists known wrappers with unsupported choices disabled and one Custom option', () => {
     renderEditor();
-    const select = container?.querySelector('select');
+    const select = container?.querySelector<HTMLSelectElement>(
+      'select[aria-label="settings.agent"]',
+    );
     expect(select?.value).toBe('copilot');
     expect(
       [...(select?.options ?? [])].filter(
@@ -293,6 +356,7 @@ describe('AgentProfileEditor', () => {
     expect(saveButton()?.disabled).toBe(true);
     await settlePreview();
     expect(api.preview).toHaveBeenCalledWith({
+      agentletId: 'device-1',
       launch: {
         kind: 'acp-harness',
         harnessId: 'copilot',
@@ -308,6 +372,7 @@ describe('AgentProfileEditor', () => {
     await act(async () => saveButton()?.click());
     expect(api.create).toHaveBeenCalledWith({
       alias: 'GitHub Copilot (project)',
+      agentletId: 'device-1',
       workingDirPath: 'C:\\work\\project',
       launch: {
         kind: 'acp-harness',
@@ -382,7 +447,11 @@ describe('AgentProfileEditor', () => {
       undefined,
       agents.map((agent) => ({ ...agent, launchPreviewVersion: undefined })),
     );
-    expect(container?.querySelector('select')?.value).toBe('custom');
+    expect(
+      container?.querySelector<HTMLSelectElement>(
+        'select[aria-label="settings.agent"]',
+      )?.value,
+    ).toBe('custom');
     expect(container?.textContent).toContain(
       'settings.structuredLaunchUnavailable',
     );

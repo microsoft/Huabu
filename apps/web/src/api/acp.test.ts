@@ -18,19 +18,19 @@ describe('ACP Profile editing API', () => {
   it('routes discovery to the saved Profile and encodes its identity', async () => {
     const fetch = vi.fn().mockResolvedValue(new Response('{"agents":[]}'));
     vi.stubGlobal('fetch', fetch);
-    await listAcpAgentClis('remote/#1');
+    await listAcpAgentClis({ profileId: 'remote/#1' });
     expect(fetch).toHaveBeenCalledWith(
       expect.stringMatching(/\/api\/acp\/agent-cli\?profileId=remote%2F%231$/),
       expect.any(Object),
     );
   });
 
-  it('uses supervised-daemon discovery for creation', async () => {
+  it('routes creation discovery to the selected Agentlet', async () => {
     const fetch = vi.fn().mockResolvedValue(new Response('{"agents":[]}'));
     vi.stubGlobal('fetch', fetch);
-    await listAcpAgentClis();
+    await listAcpAgentClis({ agentletId: 'device/#1' });
     expect(fetch).toHaveBeenCalledWith(
-      expect.stringMatching(/\/api\/acp\/agent-cli$/),
+      expect.stringMatching(/\/api\/acp\/agent-cli\?agentletId=device%2F%231$/),
       expect.any(Object),
     );
   });

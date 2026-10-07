@@ -42,6 +42,7 @@ import type { Duplex } from 'node:stream';
 const DEFAULT_HANDSHAKE_TIMEOUT_MS = 10_000;
 const DEFAULT_CONTROL_REQUEST_TIMEOUT_MS = 60_000;
 const DEFAULT_SPAWN_REQUEST_TIMEOUT_MS = 240_000;
+const DEFAULT_HEARTBEAT_INTERVAL_MS = 15_000;
 const DEFAULT_OUTBOUND_BUFFER_LIMIT = 100;
 const DEFAULT_INBOUND_PRE_ATTACH_BUFFER_LIMIT = 1_000;
 
@@ -82,6 +83,9 @@ export class AgentletGateway {
   private readonly handshakeTimeout: number;
   private readonly controlRequestTimeout: number;
   private readonly spawnRequestTimeout: number;
+  private readonly heartbeatInterval: number;
+  private readonly heartbeatTimer: NodeJS.Timeout;
+  private readonly heartbeatAlive = new WeakMap<WebSocket, boolean>();
   private readonly outboundBufferLimit: number;
   private readonly inboundPreAttachBufferLimit: number;
   private readonly logger: AgentletGatewayLogger;
@@ -96,17 +100,25 @@ export class AgentletGateway {
       options.controlRequestTimeout ?? DEFAULT_CONTROL_REQUEST_TIMEOUT_MS;
     this.spawnRequestTimeout =
       options.spawnRequestTimeout ?? DEFAULT_SPAWN_REQUEST_TIMEOUT_MS;
+    this.heartbeatInterval =
+      options.heartbeatInterval ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
     this.outboundBufferLimit =
       options.outboundBufferLimit ?? DEFAULT_OUTBOUND_BUFFER_LIMIT;
     this.inboundPreAttachBufferLimit =
       options.inboundPreAttachBufferLimit ??
       DEFAULT_INBOUND_PRE_ATTACH_BUFFER_LIMIT;
     this.logger = options.logger ?? noopLogger;
+    this.assertPositiveInteger(this.heartbeatInterval, 'heartbeatInterval');
     this.assertPositiveInteger(this.outboundBufferLimit, 'outboundBufferLimit');
     this.assertPositiveInteger(
       this.inboundPreAttachBufferLimit,
       'inboundPreAttachBufferLimit',
     );
+    this.heartbeatTimer = setInterval(
+      () => this.checkConnectionHeartbeats(),
+      this.heartbeatInterval,
+    );
+    this.heartbeatTimer.unref();
   }
 
   get connectionCount(): number {
@@ -282,6 +294,7 @@ export class AgentletGateway {
   close(): void {
     if (this.closed) return;
     this.closed = true;
+    clearInterval(this.heartbeatTimer);
     for (const connection of this.allConnections()) {
       connection.disconnect('server_shutting_down');
     }
@@ -305,6 +318,8 @@ export class AgentletGateway {
 
   private onWebSocket(ws: WebSocket, request: IncomingMessage): void {
     let handshakeComplete = false;
+    this.heartbeatAlive.set(ws, true);
+    ws.on('pong', () => this.heartbeatAlive.set(ws, true));
     const url = new URL(request.url ?? '', 'http://localhost');
     const token = url.searchParams.get('token') ?? '';
     const queryRole = url.searchParams.get('role');
@@ -396,6 +411,18 @@ export class AgentletGateway {
     });
   }
 
+  private checkConnectionHeartbeats(): void {
+    for (const ws of this.wss.clients) {
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      if (this.heartbeatAlive.get(ws) === false) {
+        ws.terminate();
+        continue;
+      }
+      this.heartbeatAlive.set(ws, false);
+      ws.ping();
+    }
+  }
+
   private async handleAgentletHello(
     ws: WebSocket,
     token: string,
@@ -431,6 +458,14 @@ export class AgentletGateway {
 
     const existing = this.agentlets.get(params.agentletId);
     if (existing) {
+      if (existing.status === 'connected') {
+        this.rejectInvalidHello(
+          ws,
+          message.id,
+          `Agentlet ID "${params.agentletId}" is already connected. Retry with --agentlet-id <unique-id>.`,
+        );
+        return;
+      }
       this.rejectPendingRequests(params.agentletId);
       existing.handleReconnect(ws, {
         agentletProfile: params.agentletProfile,

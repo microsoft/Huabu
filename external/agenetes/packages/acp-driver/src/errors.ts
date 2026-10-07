@@ -54,11 +54,15 @@ export type AcpEnsureErrorCode =
    *  typically a bad recipe (command not found, cwd missing) or a
    *  daemon-side validation failure. */
   | 'spawn_failed'
+  /** Agentlet rejected the spawn because its configured process capacity is full. */
+  | 'capacity_exhausted'
   /** The agent process was spawned but never opened its WS connection
    *  within the handshake window. Common for agents that need
    *  interactive auth (e.g. Copilot OAuth expired) or were killed
    *  immediately on startup. */
   | 'connect_timeout'
+  /** A spawned process could not be confirmed stopped during compensation or teardown. */
+  | 'cleanup_failed'
   /** Catch-all for unexpected throws — the route maps any non-
    *  {@link AcpServiceError} to this. */
   | 'internal';

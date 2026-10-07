@@ -22,24 +22,24 @@ The shipped design record is [`agent-reachback-rfs.md`](../proposals/agent-reach
 
 All endpoints are mounted under `/api/rfs/:canvasId`; `HUABU_RFS_URL` already contains that canvas-scoped base.
 
-| Endpoint                           | Responsibility                                                                                                                           |
-| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /skill`                       | Return the public bundled root guide; authenticated requests resolve the current root guide and append live Skill Frames.                |
-| `GET /skill/:skillId`              | Return an authenticated advanced guide: `layout`, `tasks`, or `agents`.                                                                  |
-| `GET /download/<path>`             | Stream a known node, artifact, or staged-upload file.                                                                                    |
-| `POST /upload/<name>`              | Stage bytes in the canvas `.upload/` directory without creating a node.                                                                  |
-| `DELETE /upload/<name>`            | Remove one exact staged upload.                                                                                                          |
-| `POST /agent`                      | Create a visible Agent Node and optionally start its first turn.                                                                         |
-| `POST /agent/:threadId/prompt`     | Submit a turn to an existing Agent conversation over SSE.                                                                                |
-| `POST /agent/:threadId/ink-intent` | Submit a validated report for the matching active external Ink turn.                                                                     |
-| `GET /agent/profiles`              | Return available Agent Profile IDs and aliases, marking the configured external or Built-In default with `default: true` when available. |
-| `POST /task/create`                | Create a durable Task and its static Task Note.                                                                                          |
-| `POST /task/:taskId/run/create`    | Create a Run, its visible root Agent Node, and start the first turn.                                                                     |
-| `GET /capabilities`                | Report the direct-operation protocol, limits, semantics, and supported operation types.                                                  |
-| `GET /capabilities/queries/:type`  | Return one query's generated JSON Schema, constraints, result description, and examples.                                                 |
-| `GET /capabilities/commands/:type` | Return one command's generated JSON Schema, constraints, result description, and examples.                                               |
-| `POST /query`                      | Validate and execute one bounded `SpaceQuery`, returning a query-discriminated JSON result.                                              |
-| `POST /execute`                    | Validate and execute an ordered batch of agent-allowed `CanvasCommand` variants.                                                         |
+| Endpoint                           | Responsibility                                                                                                                      |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /skill`                       | Return the public bundled root guide; authenticated requests resolve the current root guide and append live Skill Frames.           |
+| `GET /skill/:skillId`              | Return an authenticated advanced guide: `layout`, `tasks`, or `agents`.                                                             |
+| `GET /download/<path>`             | Stream a known node, artifact, or staged-upload file.                                                                               |
+| `POST /upload/<name>`              | Stage bytes in the canvas `.upload/` directory without creating a node.                                                             |
+| `DELETE /upload/<name>`            | Remove one exact staged upload.                                                                                                     |
+| `POST /agent`                      | Create a visible Agent Node and optionally start its first turn.                                                                    |
+| `POST /agent/:threadId/prompt`     | Submit a turn to an existing Agent conversation over SSE.                                                                           |
+| `POST /agent/:threadId/ink-intent` | Submit a validated report for the matching active external Ink turn.                                                                |
+| `GET /agent/profiles`              | Return available Agent Profile IDs and aliases, marking the first selectable external fallback with `default: true` when available. |
+| `POST /task/create`                | Create a durable Task and its static Task Note.                                                                                     |
+| `POST /task/:taskId/run/create`    | Create a Run, its visible root Agent Node, and start the first turn.                                                                |
+| `GET /capabilities`                | Report the direct-operation protocol, limits, semantics, and supported operation types.                                             |
+| `GET /capabilities/queries/:type`  | Return one query's generated JSON Schema, constraints, result description, and examples.                                            |
+| `GET /capabilities/commands/:type` | Return one command's generated JSON Schema, constraints, result description, and examples.                                          |
+| `POST /query`                      | Validate and execute one bounded `SpaceQuery`, returning a query-discriminated JSON result.                                         |
+| `POST /execute`                    | Validate and execute an ordered batch of agent-allowed `CanvasCommand` variants.                                                    |
 
 There is no directory-listing endpoint. External agents receive exact node paths in selected-node context or ask the internal agent to discover relevant files.
 
@@ -73,6 +73,8 @@ The only anonymous exception is `GET /skill` with no Authorization header. It re
 
 The shipped token grants access to the complete RFS surface, including direct reads and writes, and `/capabilities` reports both permissions as enabled. The canvas ID scopes route resolution but is not an independent credential or security boundary.
 
+The active credential is the same high-privilege token used by the Agentlet control and relay WebSockets. Its precedence is a SecretStore value saved from Settings, then a non-empty `HUABU_CONNECTION_TOKEN`, then one random 256-bit hexadecimal value generated per server boot. A successful Settings mutation persists first, atomically switches RFS and Agentlet authentication in memory, disconnects existing Agentlets, and restarts the supervised daemon; clearing the saved override restores the environment or generated fallback. A failed persistence attempt leaves the active credential and connections unchanged.
+
 ## File projection
 
 Downloads expose only the public canvas projection: node Markdown sidecars, artifacts, and staged uploads. Private bookkeeping such as memory and history directories is rejected by the path resolver.
@@ -85,13 +87,13 @@ Uploads are inert payloads stored under `.upload/`. Names must be explicit and c
 
 `POST /agent/:threadId/ink-intent` accepts `{ invocationToken, report }` only for the matching active external Ink turn in this Space. The report is `{ status: "inferred", text }` (one line, at most 120 characters) or `{ status: "clarify" | "unsupported" }`. The authenticated turn prompt supplies the endpoint and a fresh invocation token; this token fences stale reports and is not a substitute for RFS authentication. Completion, cancellation, and failure invalidate it. The shared Ink writer preserves manual titles and only renames the untouched pending Ink Question; the response is `{ report, renamed }`, and an inactive or mismatched turn returns `409 ink_turn_inactive`. Confirmed reports enter the normal turn event stream and durable transcript through the ACP driver's host-event drain, preserving the existing inferred-intent Chat display without invoking an internal Agent.
 
-`POST /agent` always creates a visible Agent Node. A plain-text body uses the configured global default plus an immediate first prompt; the full JSON form optionally selects another available Profile, position, launch options, optional parent thread, and optional prompt. Omitting `profileId` uses the same saved default (external Profile or explicit `huabu` for Built-In Pi) and fails explicitly if it is unconfigured or unavailable. `X-Huabu-Agent-Start: false` creates an idle Agent from JSON without submitting a turn.
+`POST /agent` always creates a visible Agent Node. A plain-text body uses the first selectable external Profile plus an immediate first prompt; the full JSON form optionally selects another available Profile, position, launch options, optional parent thread, and optional prompt. RFS has no access to the Web client's browser-local recent selection. Omitting `profileId` uses the first selectable external Profile without persisting that fallback. `X-Huabu-Agent-Start: false` creates an idle Agent from JSON without submitting a turn.
 
 Parent lineage is best effort. The route resolves `parentThreadId` or `X-Huabu-Host-Thread-Id` to any Question Node in the current Space and attempts an ordinary Canvas edge after creating the Agent Node. A missing parent or rejected edge is returned as non-blocking creation metadata and never rolls back or rejects the new Agent.
 
 `POST /agent/:threadId/prompt` addresses one existing Agent conversation directly and never creates a Node or changes its Profile. A caller that retained no creation response can query `INSPECT_NODES` for the Agent/Question Node and use its optional `threadId`; non-Question and unbound Question results omit the field. Both immediate creation and later prompts use SSE; creation streams begin with a `created` event carrying `nodeId`, `threadId`, effective `profileId`, parent-connection state, and warnings.
 
-`GET /agent/profiles` exposes the public available Profile catalogue. It includes `huabu` as the explicit Built-In Pi choice, marks the available saved default with `default: true`, and projects Profiles to stable `id` and `alias` fields without exposing commands, working directories, manifests, setup details, or registry eligibility state. Built-In remains selectable without an external registry; its presence does not prove provider authentication. List order is not a default-selection contract.
+`GET /agent/profiles` exposes the public available Profile catalogue. It includes `huabu` as the explicit Built-In Pi choice, marks the first selectable external fallback with `default: true`, and projects Profiles to stable `id` and `alias` fields without exposing commands, working directories, manifests, setup details, or registry eligibility state. Built-In remains selectable without an external registry; its presence does not prove provider authentication. The `default` marker, not list order alone, communicates the RFS fallback.
 
 ## External-agent bootstrap
 
@@ -102,6 +104,8 @@ Skills explain when and how to compose workflows, but they do not duplicate the 
 The guide is direct-first: an external agent can discover, query, download, snapshot, upload, execute, and verify without creating another Agent. `POST /agent` remains an optional high-level interpretation and delegation path.
 
 RFS errors use the normal API error body and include a runnable `/skill` recovery command so a caller can reload the current usage contract after a malformed request.
+
+Settings > Agent > External Agent runtime can copy a complete `agentlet daemon` command for another machine. The owner-only command endpoint derives `ws:` or `wss:` from the current browser origin, includes the configured process limit and active token, and returns `Cache-Control: no-store`; the renderer writes the command directly to the clipboard without displaying it. HTTP origins add `--allow-insecure`, and loopback origins produce a contextual warning rather than being rejected because Windows/WSL, containers, virtual machines, and explicit forwarding can make them reachable.
 
 ## Interactive View resources
 

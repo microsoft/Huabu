@@ -141,11 +141,24 @@ beforeEach(() => {
   apiMocks.list.mockImplementation(async () => ({
     profiles: [...profiles],
     selectableProfileIds: [],
+    connectedDevices: [
+      {
+        agentletId: 'local',
+        displayName: 'Local machine: linux x64',
+        hostname: 'Local machine',
+        platform: 'linux',
+        arch: 'x64',
+        version: '1.0.0',
+        connectedAt: '2026-01-01T00:00:00.000Z',
+        profileCount: 1,
+      },
+    ],
     agentlet: null,
   }));
   useAcpProfilesStore.setState({
     profiles: [],
     selectableProfileIds: [],
+    connectedDevices: [],
     agentlet: null,
     loaded: true,
     loading: false,
@@ -165,6 +178,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   act(() => root?.unmount());
   container?.remove();
   root = undefined;
@@ -174,9 +188,37 @@ afterEach(() => {
 });
 
 describe('ExternalAgentsSettings', () => {
+  it('refreshes Agent settings every five seconds only while visible and mounted', async () => {
+    vi.useFakeTimers();
+    let visibility: DocumentVisibilityState = 'visible';
+    vi.spyOn(document, 'visibilityState', 'get').mockImplementation(
+      () => visibility,
+    );
+    await renderSettings();
+    expect(apiMocks.list).toHaveBeenCalledOnce();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    expect(apiMocks.list).toHaveBeenCalledTimes(2);
+
+    visibility = 'hidden';
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    expect(apiMocks.list).toHaveBeenCalledTimes(2);
+
+    act(() => root?.unmount());
+    root = undefined;
+    visibility = 'visible';
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(apiMocks.list).toHaveBeenCalledTimes(2);
+  });
+
   it('refreshes the singleton on every mount and lists all Profiles, including unavailable ones', async () => {
     await renderSettings();
     expect(container?.textContent).toContain('Reviewer');
+    expect(container?.textContent).toContain('Local machine: linux x64');
     expect(useAcpProfilesStore.getState().profiles).toEqual([profile]);
     profiles = [
       profile,
@@ -222,7 +264,9 @@ describe('ExternalAgentsSettings', () => {
     });
     await renderSettings();
     await click('settings.editProfile');
-    expect(apiMocks.detection).toHaveBeenLastCalledWith(true, profile.id);
+    expect(apiMocks.detection).toHaveBeenLastCalledWith(true, {
+      profileId: profile.id,
+    });
     input('input[aria-label="settings.displayName"]', 'Renamed');
     await click('settings.saveChanges');
 

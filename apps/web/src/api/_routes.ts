@@ -16,6 +16,10 @@ const enc = encodeURIComponent;
 export const routes = {
   // ── Deployment ────────────────────────────────────────────────────
   deploymentReadiness: '/deployment/readiness',
+  canaryRedeployStatus: '/deployment/canary',
+  canaryRedeployConfig: '/deployment/canary/config',
+  canaryRedeployCheck: '/deployment/canary/check',
+  canaryRedeploy: '/deployment/canary/redeploy',
   agentDefaults: '/agent/defaults',
 
   // ── Workspace ─────────────────────────────────────────────────────
@@ -146,8 +150,12 @@ export const routes = {
   agentChangeReviewConfig: '/agent-change-review/config',
 
   // ── ACP (external agent bridge) ───────────────────────────────────
-  acpAgentCli: (profileId?: string) =>
-    `/acp/agent-cli${profileId ? `?profileId=${enc(profileId)}` : ''}`,
+  acpAgentCli: (target: { profileId?: string; agentletId?: string }) => {
+    const params = target.profileId
+      ? `profileId=${enc(target.profileId)}`
+      : `agentletId=${enc(target.agentletId ?? '')}`;
+    return `/acp/agent-cli?${params}`;
+  },
   // Profiles (loopback-only) — user-managed spawn recipes.
   acpProfiles: '/acp/profiles',
   acpProfileLaunchPreview: '/acp/profile-launch-preview',
@@ -156,6 +164,8 @@ export const routes = {
   acpAgentlet: '/acp/agentlet',
   acpAgentletRestart: '/acp/agentlet/restart',
   acpRuntimeConfig: '/acp/runtime-config',
+  acpConnectionToken: '/acp/connection-token',
+  acpConnectionCommand: '/acp/connection-command',
   acpThreadCachedMeta: (
     threadId: string,
     canvasId?: string,

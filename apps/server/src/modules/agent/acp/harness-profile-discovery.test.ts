@@ -63,7 +63,17 @@ function setup(initialMachines = ['machine-a']) {
     }),
   };
   const gateway = {
-    getAgentlets: () => initialMachines.map((agentletId) => ({ agentletId })),
+    getAgentlets: () =>
+      initialMachines.map((agentletId) => ({
+        agentletId,
+        agentletProfile: {
+          machine: {
+            hostname: agentletId,
+            platform: 'linux',
+            arch: 'x64',
+          },
+        },
+      })),
     onAgentletsChanged: (handler: (event: Event) => void) => {
       listener = handler;
       return vi.fn();
@@ -116,6 +126,7 @@ describe('automatic ordinary Profile provisioning', () => {
       },
     );
     expect(context.profiles[0]).toMatchObject({
+      alias: 'GitHub Copilot (machine-a: linux x64)',
       agentletId: 'machine-a',
       workingDirPath: '/home/user/.agentlet/workspace/copilot',
       launch: { kind: 'acp-command', command: 'copilot --acp' },
@@ -277,7 +288,7 @@ describe('automatic ordinary Profile provisioning', () => {
       const registry = createAgentProfileRegistry({ storageDir });
       const legacy = registry.createProfile({
         launchKind: 'acp-command',
-        alias: 'GitHub Copilot (machine-a)',
+        alias: 'GitHub Copilot (machine-a: linux x64)',
         agentletId: 'machine-a',
         workingDirPath: '/custom/work',
         command: 'copilot --acp --model old-model',
@@ -328,7 +339,7 @@ describe('automatic ordinary Profile provisioning', () => {
         .listProfiles()
         .find((profile) => profile.launch.kind === 'acp-harness');
       expect(typed).toMatchObject({
-        alias: 'GitHub Copilot (machine-a) [copilot]',
+        alias: 'GitHub Copilot (machine-a: linux x64) [copilot]',
         workingDirPath: observation.harnesses[0].workingDirPath,
         launch: {
           kind: 'acp-harness',

@@ -30,7 +30,10 @@ import { useActivelyViewingQuestionNode } from '@/hooks/useActivelyViewingQuesti
 import { useBuiltinThreadSettings } from '@/hooks/useBuiltinThreadSettings';
 import { ChatSessionProvider, type ChatSession } from '@/hooks/useChatSession';
 import { useInternalSlashCommands } from '@/hooks/useInternalSlashCommands';
-import { useAcpProfilesStore } from '@/store/acpProfilesStore';
+import {
+  rememberConversationAgentBinding,
+  useAcpProfilesStore,
+} from '@/store/acpProfilesStore';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatPreferencesStore } from '@/store/chatPreferencesStore';
@@ -47,6 +50,7 @@ import {
   acknowledgeConversationResult,
   awaitConversationDraft,
   saveConversationDraft,
+  saveConversationWorkingDirectoryOverride,
   resolveConversationAgentBinding,
   resolveConversationOwnerSource,
 } from '@/store/conversationOwner';
@@ -75,6 +79,7 @@ import { ChangeReviewCard } from './ChangeReviewCard';
 import { parseSlashInvocations } from './parseSlashInvocations';
 import { saveChatAsQuestion } from './saveChatAsQuestion';
 import { ThreadChatInput } from './ThreadChatInput';
+import { WorkingDirectoryOverride } from './WorkingDirectoryOverride';
 import { useAgentStream } from '../../../hooks/useAgentStream';
 import { useChatHistory } from '../../../hooks/useChatHistory';
 import { MessageList } from '../../Messages/MessageList';
@@ -166,6 +171,7 @@ export const ChatPanel = ({
     conversationOwnerSource?.agentBindingPolicy === 'fixed' ||
     conversationOwnerSource?.bindingState === 'bound';
   const [savingAgentDraft, setSavingAgentDraft] = useState(false);
+  const [savingWorkingDirectory, setSavingWorkingDirectory] = useState(false);
   const activelyViewingOwner = useActivelyViewingQuestionNode(
     activeConversationView?.presentationAnchor.nodeId ?? '',
   );
@@ -808,13 +814,41 @@ export const ChatPanel = ({
   // read-only. Picking an agent rebinds the *current* (empty) thread in
   // place; it never mints a new thread.
   const threadHasUserMessage = messages.some((m) => m.role === 'user');
-  const agentSelectorEditable =
+  const preparationEditable =
     !viewingQuestionBindingIsFixed &&
     (activeConversationView
       ? conversationOwnerSource?.bindingState !== 'bound'
       : !threadHasUserMessage) &&
     !savingAgentDraft &&
     !isLoading;
+  const agentSelectorEditable = preparationEditable && !savingWorkingDirectory;
+  const selectedExternalProfile =
+    agentBinding.kind === 'external'
+      ? acpProfiles.find((profile) => profile.id === agentBinding.profileId)
+      : undefined;
+  const workingDirectoryOverride =
+    conversationOwnerSource?.agentLaunchOverrides?.workingDirPath;
+  const showWorkingDirectoryOverride =
+    !!activeConversationView &&
+    agentBinding.kind === 'external' &&
+    ((!!selectedExternalProfile && !!selectedExternalProfile.workingDirPath) ||
+      !!workingDirectoryOverride);
+  const handleSaveWorkingDirectory = useCallback(
+    async (workingDirPath: string | null) => {
+      if (!activeConversationView) return;
+      setSavingWorkingDirectory(true);
+      try {
+        await saveConversationWorkingDirectoryOverride(
+          activeConversationView,
+          workingDirPath,
+        );
+        onCommit?.();
+      } finally {
+        setSavingWorkingDirectory(false);
+      }
+    },
+    [activeConversationView, onCommit],
+  );
   const handleSelectAgent = useCallback(
     async (choice: AgentChoice) => {
       // Agent binding is immutable once a turn starts (1 thread = 1 binding).
@@ -845,6 +879,9 @@ export const ChatPanel = ({
         } finally {
           setSavingAgentDraft(false);
         }
+      }
+      if (!activeConversationView) {
+        rememberConversationAgentBinding(choice.binding);
       }
       setAgentBinding(threadId, choice.binding, canvasId || undefined);
       setThreadLastAction(threadId, choice.mode);
@@ -1054,16 +1091,37 @@ export const ChatPanel = ({
               slashLoading={slashLoading}
               onSlashMenuIntent={refreshSlashCommands}
               agentSelectorSlot={
-                <AgentSelector
-                  currentBinding={agentBinding}
-                  currentMode={mode}
-                  profiles={acpProfiles}
-                  editable={agentSelectorEditable}
-                  onSelect={handleSelectAgent}
-                  onRefreshProfiles={refreshAcpProfiles}
-                  disabled={!isHistoryLoaded}
-                  fallbackIcon={viewingQuestionAgentIcon}
-                />
+                <div className="flex min-w-0 items-center">
+                  <AgentSelector
+                    currentBinding={agentBinding}
+                    currentMode={mode}
+                    profiles={acpProfiles}
+                    editable={agentSelectorEditable}
+                    onSelect={handleSelectAgent}
+                    onRefreshProfiles={refreshAcpProfiles}
+                    disabled={!isHistoryLoaded}
+                    fallbackIcon={viewingQuestionAgentIcon}
+                  />
+                  {showWorkingDirectoryOverride ? (
+                    <WorkingDirectoryOverride
+                      profileAlias={
+                        selectedExternalProfile?.alias ??
+                        (agentBinding.kind === 'external'
+                          ? agentBinding.alias
+                          : '')
+                      }
+                      profileWorkingDirPath={
+                        selectedExternalProfile?.workingDirPath ?? ''
+                      }
+                      workingDirPath={workingDirectoryOverride}
+                      editable={
+                        preparationEditable && !!selectedExternalProfile
+                      }
+                      saving={savingWorkingDirectory}
+                      onSave={handleSaveWorkingDirectory}
+                    />
+                  ) : null}
+                </div>
               }
               acpSelectorsSlot={
                 agentBinding.kind === 'external' ? (

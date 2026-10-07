@@ -8,7 +8,8 @@
  * Why a store and not per-component state? Several surfaces need the
  * profile list in lockstep: the Settings editor lets the user CRUD
  * profiles, the chat picker uses the same list to label "external"
- * binding options, and new conversations snapshot the global default.
+ * binding options, and new conversations resolve browser-local recency
+ * against the current selectable catalogue.
  * Centralising
  * the list in a store means any caller can `await
  * useAcpProfilesStore.getState().refresh()` and be sure every
@@ -39,12 +40,18 @@
 
 import { create } from 'zustand';
 
+import { HUABU_AGENT_PROFILE_ID } from '@huabu/shared';
+
 import { listAcpProfiles } from '@/api/acp';
 import { getAgentDefaults, updateAgentDefaults } from '@/api/agentDefaults';
 import { toast } from '@/components/Common/Toast';
 import { i18n } from '@/i18n';
 
-import type { AcpAgentletStatus, AgentProfileView } from '@/api/acp';
+import type {
+  AcpAgentletStatus,
+  AgentProfileView,
+  ConnectedAgentletDevice,
+} from '@/api/acp';
 import type {
   AgentBinding,
   AgentDefaults,
@@ -56,16 +63,44 @@ let inFlightDefaults: Promise<AgentDefaultsResponse> | null = null;
 let defaultsSaveQueue = Promise.resolve();
 let defaultsRevision = 0;
 
+export const RECENT_CONVERSATION_AGENT_STORAGE_KEY =
+  'huabu.recentConversationAgentProfile.v1';
+
+function readRecentConversationProfileId(): string | null {
+  if (typeof localStorage === 'undefined') return null;
+  try {
+    const profileId = localStorage.getItem(
+      RECENT_CONVERSATION_AGENT_STORAGE_KEY,
+    );
+    return profileId?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+function writeRecentConversationProfileId(profileId: string): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(RECENT_CONVERSATION_AGENT_STORAGE_KEY, profileId);
+  } catch {
+    // Unavailable browser storage keeps the preference session-local.
+  }
+}
+
 interface AcpProfilesState {
   /** Every profile the user has created. Empty until the first fetch. */
   profiles: AgentProfileView[];
   /** Profile ids that are currently runtime-ready and safe to select. */
   selectableProfileIds: string[];
+  /** Active Agentlet control connections, sorted by the server. */
+  connectedDevices: ConnectedAgentletDevice[];
   /** Latest agentlet snapshot. `null` until the first fetch resolves. */
   agentlet: AcpAgentletStatus | null;
   /** Absent on older servers; never infer a default from list ordering. */
   agentDefaults: AgentDefaults | null;
   defaultsError: Error | null;
+  /** Browser-local convenience preference; never persisted by the Server. */
+  recentConversationProfileId: string | null;
   /**
    * `true` once a fetch has *succeeded* at least once. A failed initial
    * fetch leaves this `false` (and {@link profiles} empty), so consumers
@@ -83,17 +118,20 @@ interface AcpProfilesState {
   /** Idempotent first-load helper called by the hook on mount. */
   init: () => Promise<void>;
   /** Force a fresh GET. Safe to call concurrently. */
-  refresh: () => Promise<void>;
+  refresh: (options?: { background?: boolean }) => Promise<void>;
   loadDefaults: () => Promise<AgentDefaultsResponse>;
   saveDefaults: (config: AgentDefaults) => Promise<AgentDefaultsResponse>;
+  rememberConversationAgent: (profileId: string) => void;
 }
 
 export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
   profiles: [],
   selectableProfileIds: [],
+  connectedDevices: [],
   agentlet: null,
   agentDefaults: null,
   defaultsError: null,
+  recentConversationProfileId: readRecentConversationProfileId(),
   loaded: false,
   error: null,
   loading: false,
@@ -183,17 +221,23 @@ export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
     );
     return request;
   },
-  refresh: async () => {
+  rememberConversationAgent: (profileId) => {
+    writeRecentConversationProfileId(profileId);
+    set({ recentConversationProfileId: profileId });
+  },
+  refresh: async (options) => {
     await defaultsSaveQueue;
     if (inFlightRefresh) return inFlightRefresh;
+    const background = options?.background === true;
     const revision = defaultsRevision;
     const request = (async () => {
-      set({ loading: true });
+      if (!background) set({ loading: true });
       try {
         const res = await listAcpProfiles();
         set({
           profiles: res.profiles,
           selectableProfileIds: res.selectableProfileIds,
+          connectedDevices: res.connectedDevices,
           agentlet: res.agentlet,
           ...(revision === defaultsRevision
             ? { agentDefaults: res.agentDefaults ?? null, defaultsError: null }
@@ -205,10 +249,14 @@ export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
       } catch (err) {
         // Leave the previous snapshot in place so transient errors
         // don't make the picker flicker between "available" and empty.
-        set({
-          error: err instanceof Error ? err : new Error(String(err)),
-          loading: false,
-        });
+        set(
+          background
+            ? { loading: false }
+            : {
+                error: err instanceof Error ? err : new Error(String(err)),
+                loading: false,
+              },
+        );
       }
     })();
     inFlightRefresh = request;
@@ -219,17 +267,32 @@ export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
   },
 }));
 
+export function selectDefaultConversationProfileId(
+  state: Pick<
+    AcpProfilesState,
+    'profiles' | 'selectableProfileIds' | 'recentConversationProfileId'
+  >,
+): string | null {
+  const recentProfileId = state.recentConversationProfileId;
+  if (recentProfileId === HUABU_AGENT_PROFILE_ID) return recentProfileId;
+  if (
+    recentProfileId &&
+    state.selectableProfileIds.includes(recentProfileId) &&
+    state.profiles.some((profile) => profile.id === recentProfileId)
+  ) {
+    return recentProfileId;
+  }
+  return state.selectableProfileIds[0] ?? null;
+}
+
 /** Snapshot only the chat identity; functional-model routing is unrelated. */
 export function getDefaultAgentBinding(): AgentBinding {
   const state = useAcpProfilesStore.getState();
-  if (!state.agentDefaults || state.defaultsError) {
-    throw new Error(i18n.t('errors.agentDefaultsUnavailable'));
-  }
-  const profileId = state.agentDefaults?.profileId;
+  const profileId = selectDefaultConversationProfileId(state);
   if (!profileId) {
-    throw new Error(i18n.t('errors.agentDefaultUnconfigured'));
+    throw new Error(i18n.t('errors.conversationAgentUnconfigured'));
   }
-  if (profileId === 'huabu') return { kind: 'internal' };
+  if (profileId === HUABU_AGENT_PROFILE_ID) return { kind: 'internal' };
   const profile = state.profiles.find((entry) => entry.id === profileId);
   return {
     kind: 'external',
@@ -238,8 +301,16 @@ export function getDefaultAgentBinding(): AgentBinding {
   };
 }
 
-/** User-initiated creation waits for the canonical server snapshot. */
+/** User-initiated creation refreshes the catalogue before applying local recency. */
 export async function loadDefaultAgentBinding(): Promise<AgentBinding> {
-  await useAcpProfilesStore.getState().loadDefaults();
+  await useAcpProfilesStore.getState().refresh();
+  const { error } = useAcpProfilesStore.getState();
+  if (error) throw error;
   return getDefaultAgentBinding();
+}
+
+export function rememberConversationAgentBinding(binding: AgentBinding): void {
+  const profileId =
+    binding.kind === 'internal' ? HUABU_AGENT_PROFILE_ID : binding.profileId;
+  useAcpProfilesStore.getState().rememberConversationAgent(profileId);
 }

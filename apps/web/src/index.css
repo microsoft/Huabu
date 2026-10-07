@@ -742,9 +742,6 @@ body.node-resize-active * {
 [data-canvas-panel='right'][data-collapsed='true'] {
   transform: translateX(100%);
 }
-[data-canvas-panel] * {
-  overscroll-behavior: contain;
-}
 [data-overlay-layout] .react-flow__panel.left {
   left: var(--canvas-inset-left, 0px);
 }

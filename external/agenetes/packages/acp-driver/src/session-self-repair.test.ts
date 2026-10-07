@@ -21,6 +21,7 @@ const clients = vi.hoisted(() => ({
 
 vi.mock('@agenetes/agentlet-host', () => ({
   getAgentletGateway: () => host.gateway,
+  resolveConnectedAgentletId: (agentletId: string) => agentletId,
 }));
 
 vi.mock('./spawn-orchestrator.js', () => orchestrator);
@@ -189,6 +190,7 @@ describe('ACP Handle session self-repair', () => {
       'original-session',
       undefined,
       undefined,
+      'Deployment',
     );
     expect(entry).toMatchObject({
       cwd: '/original',
@@ -250,6 +252,7 @@ describe('ACP Handle session self-repair', () => {
       'session-old',
       undefined,
       undefined,
+      'Deployment',
     );
 
     finishSpawn?.({ sessionId: 'session-repaired', pid: 42 });
@@ -287,6 +290,7 @@ describe('ACP Handle session self-repair', () => {
       undefined,
       undefined,
       undefined,
+      'Deployment',
     );
     expect(repaired.persistedToDisk).toBe(false);
   });

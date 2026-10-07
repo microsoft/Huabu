@@ -1,3 +1,4 @@
+import { AgentletRequestError } from '@agenetes/agentlet-host';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const host = vi.hoisted(() => ({
@@ -9,11 +10,28 @@ vi.mock('@agenetes/agentlet-host', async (importOriginal) => {
   return {
     ...actual,
     getAgentletGateway: () => host.gateway,
-    getSupervisedAgentletId: () => 'machine-a',
-    getDaemonSupervisor: () => ({
-      getStatus: () => ({ online: false }),
-      hasGivenUp: () => false,
-    }),
+    resolveConnectedAgentletId: (target: string) => {
+      const gateway = host.gateway as
+        | {
+            getAgentlet?: (
+              agentletId: string,
+            ) => { agentletId?: string; status?: string } | undefined;
+            getAgentlets?: () => Array<{
+              agentletId: string;
+              status: string;
+              agentletProfile?: { machine?: { hostname?: string } };
+            }>;
+          }
+        | undefined;
+      const exact = gateway?.getAgentlet?.(target);
+      if (exact?.status === 'connected') return exact.agentletId ?? target;
+      const matches = (gateway?.getAgentlets?.() ?? []).filter(
+        (connection) =>
+          connection.status === 'connected' &&
+          connection.agentletProfile?.machine?.hostname === target,
+      );
+      return matches.length === 1 ? matches[0]?.agentletId : undefined;
+    },
   };
 });
 
@@ -21,6 +39,7 @@ import { acpSessionRegistry } from './session-registry.js';
 import {
   _resetSpawnOrchestratorForTests,
   ensureAgentForThread,
+  releaseThread,
 } from './spawn-orchestrator.js';
 
 import type { AcpBindingRecipe } from './binding-recipe.js';
@@ -40,6 +59,40 @@ afterEach(() => {
 });
 
 describe('explicit ACP placement', () => {
+  it('routes a hostname-era workload to its unique connected device identity', async () => {
+    const sessions = new Map<string, { status: 'connected' }>();
+    const spawnOnAgentlet = vi.fn(
+      async (agentletId: string, params: { appId: string }) => {
+        const sessionId = `${agentletId}-${params.appId}`;
+        sessions.set(JSON.stringify([agentletId, sessionId]), {
+          status: 'connected',
+        });
+        return { sessionId, pid: 101 };
+      },
+    );
+    host.gateway = {
+      getAgentlet: () => undefined,
+      getAgentlets: () => [
+        {
+          agentletId: 'device-uuid',
+          status: 'connected',
+          agentletProfile: { machine: { hostname: 'legacy-host' } },
+        },
+      ],
+      getSession: (agentletId: string, sessionId: string) =>
+        sessions.get(JSON.stringify([agentletId, sessionId])),
+      spawnOnAgentlet,
+    };
+
+    await expect(
+      ensureAgentForThread('legacy-host', 'legacy-thread', recipe),
+    ).resolves.toMatchObject({ agentletId: 'device-uuid' });
+    expect(spawnOnAgentlet).toHaveBeenCalledWith(
+      'device-uuid',
+      expect.any(Object),
+    );
+  });
+
   it('forwards a persisted structured plan and retains it when reusing the live process', async () => {
     const launch = {
       kind: 'acp-harness' as const,
@@ -71,6 +124,7 @@ describe('explicit ACP placement', () => {
     const first = await ensureAgentForThread('machine-a', 'typed', structured);
     expect(spawnOnAgentlet).toHaveBeenCalledWith('machine-a', {
       appId: 'typed',
+      workloadType: 'Deployment',
       sessionSpec: {
         launch,
         launchPlan,
@@ -103,6 +157,37 @@ describe('explicit ACP placement', () => {
         launch: { kind: 'acp-harness', harnessId: 'copilot' },
       }),
     ).rejects.toMatchObject({ code: 'spawn_failed' });
+  });
+
+  it('classifies redacted capacity diagnostics separately from spawn failures', async () => {
+    host.gateway = {
+      getAgentlet: () => ({ agentletId: 'machine-a', status: 'connected' }),
+      spawnOnAgentlet: vi.fn(async () => {
+        throw new AgentletRequestError({
+          code: -32000,
+          message: 'Max agents reached (10)',
+          data: {
+            code: 'capacity_exhausted',
+            limit: 10,
+            active: {
+              total: 10,
+              jobs: 7,
+              deployments: 2,
+              unknown: 1,
+              stopping: 1,
+            },
+          },
+        });
+      }),
+    };
+
+    await expect(
+      ensureAgentForThread('machine-a', 'capacity-thread', recipe),
+    ).rejects.toMatchObject({
+      code: 'capacity_exhausted',
+      message:
+        'External agent capacity is exhausted: limit 10; active 10 (7 Jobs, 2 Deployments, 1 unclassified, 1 stopping)',
+    });
   });
 
   it('isolates live session registry entries by placement and thread', () => {
@@ -184,6 +269,70 @@ describe('explicit ACP placement', () => {
         sessionSpec: expect.objectContaining({ idleTimeoutSecs: 0 }),
       }),
     );
+  });
+
+  it('reclaims the exact session once and treats repeated release as success', async () => {
+    const stopOnAgentlet = vi.fn(async () => ({
+      stopped: true,
+      disposition: 'stopped' as const,
+    }));
+    host.gateway = {
+      getAgentlet: () => ({ agentletId: 'machine-a', status: 'connected' }),
+      getSession: () => ({ status: 'connected' }),
+      spawnOnAgentlet: vi.fn(async () => ({
+        sessionId: 'native-session',
+        pid: 303,
+      })),
+      stopOnAgentlet,
+    };
+    await ensureAgentForThread(
+      'machine-a',
+      'job-thread',
+      recipe,
+      undefined,
+      undefined,
+      600,
+      'Job',
+    );
+
+    await Promise.all([
+      releaseThread('machine-a', 'job-thread'),
+      releaseThread('machine-a', 'job-thread'),
+    ]);
+    await releaseThread('machine-a', 'job-thread');
+
+    expect(stopOnAgentlet).toHaveBeenCalledOnce();
+    expect(stopOnAgentlet).toHaveBeenCalledWith('machine-a', {
+      sessionId: 'native-session',
+    });
+  });
+
+  it('retains ownership after stop failure so cleanup can be retried', async () => {
+    const stopOnAgentlet = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('still running'))
+      .mockResolvedValueOnce({
+        stopped: true,
+        disposition: 'already_absent',
+      });
+    host.gateway = {
+      getAgentlet: () => ({ agentletId: 'machine-a', status: 'connected' }),
+      getSession: () => ({ status: 'connected' }),
+      spawnOnAgentlet: vi.fn(async () => ({
+        sessionId: 'retry-session',
+        pid: 303,
+      })),
+      stopOnAgentlet,
+    };
+    await ensureAgentForThread('machine-a', 'retry-thread', recipe);
+
+    await expect(
+      releaseThread('machine-a', 'retry-thread'),
+    ).rejects.toMatchObject({ code: 'cleanup_failed' });
+    await expect(
+      releaseThread('machine-a', 'retry-thread'),
+    ).resolves.toBeUndefined();
+    expect(stopOnAgentlet).toHaveBeenCalledTimes(2);
   });
 
   it('returns a structured placement error when the target is absent', async () => {

@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { existsSync, unlinkSync } from 'node:fs';
+import { unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -21,15 +21,14 @@ import {
   acpAgentletRoutes,
   acpProfilesRoutes,
   acpThreadsRoutes,
+  connectionTokenRoutes,
   externalAgentRuntimeConfigRoutes,
+  getExternalAgentRuntimeConfig,
   getAgentProfileRegistry,
-  getSupervisedAgentletId,
   installAcpProfileCachePort,
   mountAgenetes,
   resolveDaemonEntry,
 } from './modules/agent/acp/index.js';
-import { buildLegacyCommandProfiles } from './modules/agent/acp/legacy-profile-migration.js';
-import { listProfiles as listLegacyAcpProfiles } from './modules/agent/acp/profile-store.js';
 import { initializeAgentDefaults } from './modules/agent/agent-defaults.js';
 import agentDefaultsRoutes from './modules/agent/agent-defaults.route.js';
 import agentRoutes from './modules/agent/agent.route.js';
@@ -46,6 +45,7 @@ import integrationsRoutes from './modules/integrations/integrations.route.js';
 import interactiveViewRoutes from './modules/interactive-view/interactive-view.route.js';
 import { isPublicRfsSkillBootstrapRequest } from './modules/remote_fs/public-skill.js';
 import rfsRoutes from './modules/remote_fs/rfs.route.js';
+import canaryRedeployRoutes from './modules/security/canary-redeploy.route.js';
 import { createCorsOptions } from './modules/security/cors.js';
 import deploymentRoutes from './modules/security/deployment.route.js';
 import {
@@ -258,6 +258,9 @@ app.register(artifactRoute, { prefix: '/api/canvas' });
 app.register(llmRoutes, { prefix: '/api/llm' });
 app.register(integrationsRoutes, { prefix: '/api/integrations' });
 app.register(deploymentRoutes, { prefix: '/api/deployment' });
+app.register(canaryRedeployRoutes, {
+  prefix: '/api/deployment/canary',
+});
 app.register(interactiveViewRoutes, { prefix: '/api/interactive-views' });
 app.register(skillsRoutes, { prefix: '/api/skills' });
 app.register(workspaceRoutes, { prefix: '/api/workspace' });
@@ -297,6 +300,7 @@ const agentletGateway = mountAgenetes(app, {
   connectionToken: getConnectionToken(),
   dataDir: getDataDir(),
   daemonEntryPath: resolveDaemonEntry() ?? '',
+  getMaxAgents: () => getExternalAgentRuntimeConfig().maxAgents,
   // Host-namespaced env isolation: the agentlet daemon and every external
   // agent it spawns are host-agnostic and must receive their Huabu
   // coordinates only through explicit injection (per-agent reachback env),
@@ -310,15 +314,7 @@ const agentletGateway = mountAgenetes(app, {
   profiles: {
     storageDir: join(getDataDir(), 'agent-profiles'),
     legacyStorageDir: join(getDataDir(), 'agent-team'),
-    legacyCommandProfiles: existsSync(
-      join(getDataDir(), 'agent-profiles', 'registry.json'),
-    )
-      ? []
-      : buildLegacyCommandProfiles(
-          listLegacyAcpProfiles(),
-          getSupervisedAgentletId(),
-          process.cwd(),
-        ),
+    legacyCommandProfiles: [],
   },
 });
 let unregisterHarnessDiscovery: (() => void) | undefined;
@@ -363,6 +359,7 @@ app.register(acpAgentletRoutes, { prefix: '/api/acp' });
 app.register(acpAgentCliRoutes, { prefix: '/api/acp' });
 app.register(acpThreadsRoutes, { prefix: '/api/acp' });
 app.register(externalAgentRuntimeConfigRoutes, { prefix: '/api/acp' });
+app.register(connectionTokenRoutes, { prefix: '/api/acp' });
 app.log.info(
   '[acp] agentlet Gateway mounted — embedded agentlet will start on server ready',
 );

@@ -33,7 +33,7 @@
 
 import { randomUUID } from 'node:crypto';
 
-import { getSupervisedAgentletId } from '@agenetes/agentlet-host';
+import { resolveConnectedAgentletId } from '@agenetes/agentlet-host';
 import { resolveAgentInputs } from '@agenetes/protocol';
 import {
   HistoryLoadDeniedError,
@@ -56,6 +56,7 @@ import {
   registerAcpStateListener,
   reportEntryState,
 } from './session.js';
+import { releaseThread } from './spawn-orchestrator.js';
 import { acpUpdateToStreamEvent } from './translator.js';
 
 import type { AcpTurnOverlay } from './overlay.js';
@@ -235,9 +236,15 @@ export async function resolveAcpRuntimeLaunch(
   };
 }
 
-/** Resolve explicit placement or the read-only legacy local fallback. */
+/** Resolve the immutable execution-node placement stored in the workload. */
 export function resolveAcpAgentletId(spec: AcpCreateSpec): string {
-  return spec.spec.agentletId ?? getSupervisedAgentletId();
+  if (!spec.spec.agentletId) {
+    throw new AcpServiceError(
+      'placement_unavailable',
+      'The workload has no Agentlet placement.',
+    );
+  }
+  return spec.spec.agentletId;
 }
 
 /** The per-turn context an {@link AcpAgentHandle.run} accepts. */
@@ -322,14 +329,24 @@ export class AcpAgentHandle<
       getIdleTimeoutSecs: () => 600,
     },
   ) {
-    this.agentletId = resolveAcpAgentletId(spec);
+    this.requestedAgentletId = resolveAcpAgentletId(spec);
+    this.agentletId =
+      resolveConnectedAgentletId(this.requestedAgentletId) ??
+      this.requestedAgentletId;
     // Jobs may share a durable thread or have none. Their live sessions must not.
     this.sessionThreadId =
       spec.workloadType === 'Job' ? `acp-job-${randomUUID()}` : spec.threadId;
   }
 
-  private readonly agentletId: string;
+  private readonly requestedAgentletId: string;
+  private agentletId: string;
   private readonly sessionThreadId: string;
+
+  private resolveAgentletId(): string {
+    this.agentletId =
+      resolveConnectedAgentletId(this.requestedAgentletId) ?? this.agentletId;
+    return this.agentletId;
+  }
 
   private async authorizeHistoryLoad(
     mode: 'recover' | 'fork',
@@ -419,9 +436,11 @@ export class AcpAgentHandle<
       this.spec.spec,
       this.runtimePolicy,
     );
+    const agentletId = this.resolveAgentletId();
     return ensureAcpSession({
-      agentletId: this.agentletId,
+      agentletId,
       threadId: this.sessionThreadId,
+      workloadType: this.spec.workloadType,
       binding: this.spec.spec.binding,
       profileExecutionRevision: this.spec.spec.profileExecutionRevision,
       namespace: this.spec.namespace,
@@ -793,10 +812,11 @@ export class AcpAgentHandle<
 
   /**
    * Tear down the long-lived session: drop the live ACP entry for this
-   * session identity (which `shutdown()`s the client) and evict it from the
-   * registry. Does not stop the Agentlet process. Idempotent.
+   * session identity (which `shutdown()`s the client), evict it from the
+   * registry, and wait for the exact Agentlet process to be reclaimed.
    */
-  close(): void {
+  async close(): Promise<void> {
     acpSessionRegistry.remove(this.agentletId, this.sessionThreadId);
+    await releaseThread(this.agentletId, this.sessionThreadId);
   }
 }

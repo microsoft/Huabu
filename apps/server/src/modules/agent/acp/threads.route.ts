@@ -2,7 +2,7 @@
 // Licensed under the MIT license.
 
 import { acpSessionRegistry } from '@agenetes/acp-driver';
-import { getSupervisedAgentletId } from '@agenetes/agentlet-host';
+import { resolveConnectedAgentletId } from '@agenetes/agentlet-host';
 
 import {
   acpPermissionDecisionSchema,
@@ -140,7 +140,7 @@ export async function awaitSchemaQuiescence(
 async function resolveThreadAgentletId(
   threadId: string,
   canvasId?: string,
-): Promise<string> {
+): Promise<string | undefined> {
   if (canvasId) {
     const record = await agenetes.record(
       canvasAcpNamespace(canvasId),
@@ -152,10 +152,11 @@ async function resolveThreadAgentletId(
       typeof driverSpec === 'object' &&
       typeof (driverSpec as { agentletId?: unknown }).agentletId === 'string'
     ) {
-      return (driverSpec as { agentletId: string }).agentletId;
+      const agentletId = (driverSpec as { agentletId: string }).agentletId;
+      return resolveConnectedAgentletId(agentletId) ?? agentletId;
     }
   }
-  return getSupervisedAgentletId();
+  return undefined;
 }
 
 /**
@@ -285,7 +286,9 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
     }
     const { canvasId, profileId } = parsed.data;
     const agentletId = await resolveThreadAgentletId(threadId, canvasId);
-    const live = acpSessionRegistry.get(agentletId, threadId);
+    const live = agentletId
+      ? acpSessionRegistry.get(agentletId, threadId)
+      : undefined;
     if (live) {
       return {
         source: 'thread',

@@ -36,11 +36,21 @@ function resetStore() {
   useAcpProfilesStore.setState({
     loaded: true,
     error: null,
-    profiles: [],
+    profiles: [
+      {
+        id: EXTERNAL.profileId,
+        alias: EXTERNAL.alias,
+        agentletId: 'machine',
+        workingDirPath: '/workspace',
+        launch: { kind: 'acp-command', command: 'agent' },
+      },
+    ],
+    selectableProfileIds: [EXTERNAL.profileId],
     agentDefaults: {
       profileId: EXTERNAL.profileId,
       functionalModel: 'utility-only',
     },
+    recentConversationProfileId: EXTERNAL.profileId,
   });
   useChatStore.setState({
     threadsById: {},
@@ -144,7 +154,7 @@ describe('chatStore thread creation', () => {
     expect(selectThreadBinding(useChatStore.getState(), first)).toEqual({
       kind: 'external',
       profileId: EXTERNAL.profileId,
-      alias: EXTERNAL.profileId,
+      alias: EXTERNAL.alias,
     });
     expect(selectThreadLastAction(useChatStore.getState(), first)).toBe('ask');
   });
@@ -164,12 +174,15 @@ describe('chatStore thread creation', () => {
     });
   });
 
-  it('keeps an existing legacy Canvas identity even with no configured default', () => {
+  it('keeps an existing legacy Canvas identity even with no selectable Profile', () => {
     useChatStore.setState({
       threadMap: { 'canvas-legacy': 'thread-legacy' },
       bindingByThread: { 'thread-legacy': INTERNAL },
     });
-    useAcpProfilesStore.setState({ agentDefaults: null, loaded: false });
+    useAcpProfilesStore.setState({
+      recentConversationProfileId: null,
+      loaded: false,
+    });
     expect(useChatStore.getState().ensureCanvasThread('canvas-legacy')).toBe(
       'thread-legacy',
     );
@@ -180,7 +193,9 @@ describe('chatStore thread creation', () => {
 
   it('refuses unconfigured creation without leaving an internal thread', () => {
     useAcpProfilesStore.setState({
-      agentDefaults: { profileId: null, functionalModel: '' },
+      profiles: [],
+      selectableProfileIds: [],
+      recentConversationProfileId: null,
     });
     expect(() => useChatStore.getState().createThread()).toThrow();
     expect(() =>

@@ -30,7 +30,8 @@ vi.mock('@agenetes/acp-driver', () => ({
 }));
 
 vi.mock('@agenetes/agentlet-host', () => ({
-  getSupervisedAgentletId: () => 'agentlet-supervised',
+  resolveConnectedAgentletId: (agentletId: string) =>
+    agentletId === 'legacy-host' ? 'device-uuid' : agentletId,
 }));
 
 vi.mock('./external-agent-realization.js', () => ({
@@ -119,6 +120,7 @@ describe('ACP cached-meta across awaited persistence', () => {
       usage: null,
       metaUpdatedAt: 32,
     });
+
     const server = await createApp();
 
     const response = await server.inject({
@@ -139,7 +141,31 @@ describe('ACP cached-meta across awaited persistence', () => {
     });
   });
 
-  it('falls back to the supervised agentlet for a thread with no record', async () => {
+  it('finds a live session through unique hostname-era placement resolution', async () => {
+    mocks.record = externalRecord('legacy-host');
+    mocks.live.set('device-uuid\u0000thread-1', {
+      availableCommands: [{ name: 'review', description: 'Review changes' }],
+      commandsUpdatedAt: 5,
+      availableModes: [],
+      currentModeId: null,
+      availableModels: [],
+      currentModelId: null,
+      configOptions: [],
+      selections: {},
+      sessionInfo: null,
+      usage: null,
+      metaUpdatedAt: 6,
+    });
+    const response = await (await createApp()).inject(CACHED_META_URL);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      source: 'thread',
+      availableCommands: [{ name: 'review' }],
+    });
+  });
+
+  it('does not invent a placement for a thread with no record', async () => {
     mocks.live.set('agentlet-supervised\u0000thread-1', {
       availableCommands: [],
       commandsUpdatedAt: 3,
@@ -160,11 +186,7 @@ describe('ACP cached-meta across awaited persistence', () => {
       url: CACHED_META_URL,
     });
 
-    expect(response.json()).toMatchObject({
-      source: 'thread',
-      commandsUpdatedAt: 3,
-      sessionMeta: { updatedAt: 4 },
-    });
+    expect(response.json()).toMatchObject({ source: 'none' });
   });
 
   it('answers a dormant thread from the metadata its record kept', async () => {

@@ -28,6 +28,7 @@ export interface AgentletGatewayOptions {
   handshakeTimeout?: number;
   controlRequestTimeout?: number;
   spawnRequestTimeout?: number;
+  heartbeatInterval?: number;
   outboundBufferLimit?: number;
   inboundPreAttachBufferLimit?: number;
   logger?: AgentletGatewayLogger;

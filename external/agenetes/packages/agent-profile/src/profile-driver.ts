@@ -161,7 +161,7 @@ class AgentProfileHandle<
       this.context,
     ) as AgentHandle<TSubmission, TResult, TEvent, TTurnCtx>;
     if (this.closed) {
-      delegate.close();
+      await delegate.close();
       throw new Error('Agent Profile handle is closed');
     }
     this.delegate = delegate;
@@ -188,11 +188,11 @@ class AgentProfileHandle<
     return delegate.control(msg);
   }
 
-  close(): void {
+  async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
     this.unsubscribeDelegateState?.();
-    this.delegate?.close();
+    if (this.delegate) await this.delegate.close();
     this.stateListeners.clear();
   }
 

@@ -18,6 +18,14 @@ export interface AgentletOptions {
 /** Result of parsing the generic `agentlet daemon` command. */
 export type CliResult = { mode: 'daemon'; options: AgentletOptions }
 
+function positiveSafeInteger(value: string, option: string): number {
+  const parsed = Number(value)
+  if (!Number.isSafeInteger(parsed) || parsed < 1) {
+    throw new Error(`${option} must be a positive safe integer`)
+  }
+  return parsed
+}
+
 export function parseCli(argv: string[]): CliResult {
   const program = new Command()
 
@@ -35,7 +43,10 @@ export function parseCli(argv: string[]): CliResult {
     .option('--reconnect-max <seconds>', 'Maximum reconnection backoff in seconds', '300')
     .option('--buffer-limit <count>', 'Max messages buffered during disconnection', '1000')
     .option('--max-agents <count>', 'Maximum concurrent agents', '10')
-    .option('--agentlet-id <id>', 'Machine identity reported to the host (defaults to hostname)')
+    .option(
+      '--agentlet-id <id>',
+      'Device identity reported to the host (defaults to the persisted device UUID)',
+    )
     .option('--log-level <level>', 'Logging verbosity: debug, info, warn, error', 'info')
     .option('--log-file <path>', 'Path to write structured log output (JSON lines)')
     .option('--heartbeat <seconds>', 'WebSocket ping interval in seconds (0 to disable)', '30')
@@ -59,7 +70,7 @@ export function parseCli(argv: string[]): CliResult {
           logLevel: opts.logLevel as AgentletOptions['logLevel'],
           logFile: opts.logFile,
           agentletId: opts.agentletId?.trim() || undefined,
-          maxAgents: parseInt(opts.maxAgents, 10),
+          maxAgents: positiveSafeInteger(opts.maxAgents, '--max-agents'),
         },
       }
     })

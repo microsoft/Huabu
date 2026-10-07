@@ -30,8 +30,10 @@ import type { AgentIconValue } from '@/components/Common/AgentIcon';
 import type { AgentProfileView } from '@huabu/shared';
 
 type EditorState =
-  | { kind: 'create' }
+  | { kind: 'create'; agentletId: string }
   | { kind: 'edit-command'; profile: AgentProfileView };
+
+const PROFILE_REFRESH_INTERVAL_MS = 5_000;
 
 interface PendingDelete {
   id: string;
@@ -52,6 +54,12 @@ export function ExternalAgentsSettings({
 }: ExternalAgentsSettingsProps) {
   const { t } = useTranslation();
   const profiles = useAcpProfilesStore((state) => state.profiles);
+  const connectedDevices = useAcpProfilesStore(
+    (state) => state.connectedDevices,
+  );
+  const selectableProfileIds = useAcpProfilesStore(
+    (state) => state.selectableProfileIds,
+  );
   const loading = useAcpProfilesStore((state) => state.loading);
   const error = useAcpProfilesStore((state) => state.error);
   const agentlet = useAcpProfilesStore((state) => state.agentlet);
@@ -75,6 +83,15 @@ export function ExternalAgentsSettings({
     void init();
     void refresh();
   }, [init, refresh]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void refresh({ background: true });
+      }
+    }, PROFILE_REFRESH_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [refresh]);
 
   useEffect(() => {
     if (error) toast(error.message, { tone: 'danger' });
@@ -178,12 +195,20 @@ export function ExternalAgentsSettings({
     [],
   );
 
-  const needsCliNames = profiles.some(
-    (profile) => profile.launch.kind === 'acp-harness',
+  const catalogueProfile = profiles.find(
+    (profile) =>
+      profile.launch.kind === 'acp-harness' &&
+      selectableProfileIds.includes(profile.id),
   );
   const { detectedClis, loaded: detectionLoaded } = useDetectedClis(
-    needsCliNames || editor !== null,
-    editor?.kind === 'edit-command' ? editor.profile.id : undefined,
+    editor !== null || catalogueProfile !== undefined,
+    editor?.kind === 'edit-command'
+      ? { profileId: editor.profile.id }
+      : editor?.kind === 'create'
+        ? { agentletId: editor.agentletId }
+        : catalogueProfile
+          ? { profileId: catalogueProfile.id }
+          : { agentletId: '' },
   );
 
   const saveIcon = useCallback(
@@ -214,15 +239,18 @@ export function ExternalAgentsSettings({
       profile.launch.kind === 'acp-harness'
         ? profile.launch.harnessId
         : 'custom';
-    if (!cliId || cliId === 'custom') {
-      return [
-        t('settings.agentCustomBadge'),
-        profile.launch.kind === 'acp-command'
-          ? profile.launch.command
-          : profile.launch.harnessId,
-      ].join(' · ');
-    }
-    return detectedClis.find((cli) => cli.id === cliId)?.displayName ?? cliId;
+    const description =
+      !cliId || cliId === 'custom'
+        ? [
+            t('settings.agentCustomBadge'),
+            profile.launch.kind === 'acp-command'
+              ? profile.launch.command
+              : profile.launch.harnessId,
+          ].join(' · ')
+        : (detectedClis.find((cli) => cli.id === cliId)?.displayName ?? cliId);
+    return selectableProfileIds.includes(profile.id)
+      ? description
+      : `${description} · ${t('settings.agentUnavailable')}`;
   };
 
   const handleRestart = useCallback(async () => {
@@ -281,6 +309,19 @@ export function ExternalAgentsSettings({
                       })}
                   detectedClis={detectedClis}
                   detectionLoaded={detectionLoaded}
+                  connectedDevices={connectedDevices}
+                  agentletId={
+                    editor.kind === 'create'
+                      ? editor.agentletId
+                      : editor.profile.agentletId
+                  }
+                  onAgentletChange={(agentletId) =>
+                    setEditor((current) =>
+                      current?.kind === 'create'
+                        ? { ...current, agentletId }
+                        : current,
+                    )
+                  }
                   onClose={closeEditor}
                   onSaved={refresh}
                 />
@@ -290,7 +331,36 @@ export function ExternalAgentsSettings({
           </div>
         ) : (
           <div key="list" ref={activeViewRef}>
-            <SettingSection>
+            <SettingSection title={t('settings.connectedDevices')}>
+              {connectedDevices.length === 0 ? (
+                <SettingRow
+                  title={t('settings.noConnectedDevices')}
+                  description={t('settings.noConnectedDevicesDescription')}
+                >
+                  <span />
+                </SettingRow>
+              ) : (
+                connectedDevices.map((device) => (
+                  <SettingRow
+                    key={device.agentletId}
+                    title={device.displayName}
+                    description={[
+                      t('settings.deviceProfileCount', {
+                        count: device.profileCount,
+                      }),
+                      device.agentletId,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  >
+                    <span className="text-fg-subtle text-xs">
+                      {device.version}
+                    </span>
+                  </SettingRow>
+                ))
+              )}
+            </SettingSection>
+            <SettingSection title={t('settings.agentProfiles')}>
               {loading ? (
                 <SettingRow title={t('settings.loadingAgents')}>
                   <Loading layout="inline" size="sm" />
@@ -359,7 +429,12 @@ export function ExternalAgentsSettings({
                       size="sm"
                       ref={restoreTriggerFocus('create')}
                       data-editor-trigger="create"
-                      onClick={() => openEditor({ kind: 'create' }, 'create')}
+                      onClick={() => {
+                        const agentletId = connectedDevices[0]?.agentletId;
+                        if (agentletId)
+                          openEditor({ kind: 'create', agentletId }, 'create');
+                      }}
+                      disabled={connectedDevices.length === 0}
                     >
                       <Plus size={12} />
                       <span>{t('settings.addAgent')}</span>

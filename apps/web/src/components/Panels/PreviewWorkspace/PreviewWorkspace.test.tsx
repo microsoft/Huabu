@@ -73,17 +73,18 @@ vi.mock('@/api/conversationTitles', () => ({
 vi.mock('@/api/acp', async (importOriginal) => ({
   ...(await importOriginal<typeof AcpApi>()),
   listAcpProfiles: async () => ({
-    profiles: [],
-    selectableProfileIds: [],
+    profiles: [
+      {
+        id: 'global-profile',
+        alias: 'Global Profile',
+        agentletId: 'machine',
+        workingDirPath: '/workspace',
+        launch: { kind: 'acp-command', command: 'agent' },
+      },
+    ],
+    selectableProfileIds: ['global-profile'],
     agentlet: null,
     agentDefaults: { profileId: 'global-profile', functionalModel: '' },
-  }),
-}));
-vi.mock('@/api/agentDefaults', () => ({
-  getAgentDefaults: async () => ({
-    defaults: { profileId: 'global-profile', functionalModel: '' },
-    selectionState: 'available',
-    modelCapability: 'unknown',
   }),
 }));
 

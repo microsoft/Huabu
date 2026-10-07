@@ -126,6 +126,10 @@ Question `conversationTitleSource` is also server-owned and excluded from ordina
 
 `POST /api/canvas/:canvasId/move-selection` validates its params and body with the shared Move schemas. Errors expose only a bounded `MOVE_*` code and fixed English message. `MOVE_AGENT_CLOSE_FAILED`, `MOVE_AGENT_REHOME_FAILED`, and unexpected `MOVE_FAILED` return HTTP 500; eligibility/history and destination conflicts retain their existing 4xx behavior. Agenetes `rehome_unknown_outcome` and failed compensation become HTTP 500 `MOVE_OUTCOME_UNKNOWN` before cleanup decisions. No raw cause, namespace, thread identity, artifact name, or arbitrary exception message is serialized. Server diagnostics retain the operation phase, allowlisted upstream error code, failure category, and compensation/cleanup outcome; original causes remain internal and are not dumped into logs. Web Move presentation localizes the code and uses a safe generic fallback rather than displaying unknown error messages.
 
+## Canary branch configuration
+
+`GET /api/deployment/canary` returns the effective bounded `branch`, nullable `configuredBranch`, branch-bound remote check state, and a redeployment result carrying its own captured branch. `PUT /api/deployment/canary/config` accepts `{ branch: string | null }`, where null clears the override and resolves to `alpha`; the Server validates the full Git ref and exact fixed-`origin` availability before persisting. `POST /api/deployment/canary/check` retains a strict empty body. `POST /api/deployment/canary/redeploy` accepts `{ expectedBranch }` only as a freshness guard and rejects a mismatch rather than treating the request as a target selector. All bodies use the canonical schemas in `deployment.ts`, all routes remain owner-only, and operation conflicts are explicit HTTP 409 responses.
+
 ## Conversation titles
 
 [`conversation-title.ts`](../../packages/shared/src/types/api/conversation-title.ts) defines the shared schemas and inferred types for `ConversationTitle { title, source }`, batch queries, and manual renames. `POST /api/agent/threads/titles/query` validates `{ canvasId, threadIds }` (at most 100 thread IDs; an empty batch is valid) and returns `{ titles }` keyed by thread ID. `PUT /api/agent/threads/:threadId/title?canvasId=...` validates params, query, and a trimmed non-empty `{ title }` of at most 120 characters, returning the effective title or `404 thread_not_found` when no writable Question or durable thread exists.
@@ -139,6 +143,16 @@ Both routes await the shared `ConversationTitleService`: current Question owners
 Success returns `{ threadId, turns, before?, hasMore }`. Each `turns[]` entry is `{ id, messages, active?, activeMessageStart? }`: `id` is the stable display-group identity used to prepend/deduplicate and replace a completed active projection, `messages` are chronological `ChatHistoryItem`s for the whole group, and `active: true` marks a group containing the read-time incomplete Tier-1 projection. `activeMessageStart` identifies the first message from that projection when a continuation shares a group with persisted messages, allowing reconnect replay to replace only the active suffix. `before` addresses the page immediately older than the oldest returned group; older-page requests never include an active tail.
 
 Malformed request fields and malformed cursors return HTTP 400 with `code: "malformed_history_request"` or `code: "malformed_history_cursor"`. A cursor whose thread generation was replaced or rehomed returns HTTP 409 with `code: "stale_history_cursor"`. The existing `GET /api/agent/history/:threadId` remains the unbounded compatibility endpoint for current consumers; pagination is not applied implicitly to model recovery or complete-history callers.
+
+## External-agent runtime configuration
+
+`GET/PUT /api/acp/runtime-config` uses `externalAgentRuntimeConfigSchema` from [`acp.ts`](../../packages/shared/src/types/api/acp.ts). The owner-only full replacement body contains `idleTimeoutSecs` and `maxAgents`; `maxAgents` is a positive JavaScript safe integer with default `10` and no product-defined upper bound. The value is persisted globally and supplied to the supervised Agentlet daemon as `--max-agents` on its next start; the API does not restart the daemon or configure manually launched remote daemons.
+
+`GET /api/acp/profiles` returns persisted Profiles, active connected devices, connectivity-filtered `selectableProfileIds`, supervised-child health, and optional Agent defaults. `POST /api/acp/profiles` requires an explicit active `agentletId`. `GET /api/acp/agent-cli` and `POST /api/acp/profile-launch-preview` require exactly one explicit target: `agentletId` while creating or `profileId` while editing. The server validates every target against the live Gateway and never substitutes the supervised child or first connected device.
+
+## Utility Agent selection
+
+`GET/PUT /api/agent/defaults` uses `agentDefaultsSchema` for the Utility Agent only: its Profile and optional functional-model override serve Huabu-owned auxiliary work and never choose a conversational binding. The recent conversational Agent is browser-local UI state and has no HTTP contract.
 
 ## RFS Agent discovery
 

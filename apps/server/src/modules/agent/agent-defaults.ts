@@ -4,7 +4,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { getAgentletGateway } from '@agenetes/agentlet-host';
+import { resolveConnectedAgentletId } from '@agenetes/agentlet-host';
 
 import { agentDefaultsSchema } from '@huabu/shared';
 
@@ -85,7 +85,7 @@ export class AgentDefaultsService {
     if (profileId === null) {
       throw new AgentDefaultsError(
         'default_profile_unconfigured',
-        'Select a default Agent in Settings',
+        'Select a Utility Agent in Settings',
       );
     }
     return profileId;
@@ -134,9 +134,7 @@ export const initializeAgentDefaults = (
   profiles: readonly AgentProfileView[],
 ): AgentDefaults =>
   service.initializeAgentDefaults(
-    profiles.filter(
-      (profile) =>
-        getAgentletGateway()?.getAgentlet(profile.agentletId)?.status ===
-        'connected',
+    profiles.filter((profile) =>
+      resolveConnectedAgentletId(profile.agentletId),
     ),
   );

@@ -29,7 +29,7 @@ import {
   getAgentProfileRegistry,
   getAgentletGateway,
   getDaemonSupervisor,
-  getSupervisedAgentletId,
+  resolveConnectedAgentletId,
 } from '@agenetes/agentlet-host';
 
 import {
@@ -49,7 +49,9 @@ import {
   getAgentDefaults,
   initializeAgentDefaults,
 } from '../agent-defaults.js';
+import { formatAgentletDeviceDisplayName } from '../agentlet-device-display.js';
 
+import type { AgentletConnection } from '@agenetes/agentlet-host';
 import type {
   AcpProfileMutationResponse,
   AcpProfilesListResponse,
@@ -68,6 +70,16 @@ function denyRemote(request: FastifyRequest, reply: FastifyReply): boolean {
   return true;
 }
 
+function getConnectedAgentlets(): AgentletConnection[] {
+  return getAgentletGateway()?.getAgentlets({ status: 'connected' }) ?? [];
+}
+
+function isAgentletConnected(agentletId: string): boolean {
+  return getConnectedAgentlets().some(
+    (connection) => connection.agentletId === agentletId,
+  );
+}
+
 async function validateHarnessLaunch(
   launch: AgentProfileView['launch'],
   agentletId: string,
@@ -78,7 +90,10 @@ async function validateHarnessLaunch(
   try {
     const gateway = getAgentletGateway();
     if (!gateway) throw new Error('Agentlet Gateway is not ready');
-    const result = await gateway.discoverHarnesses(agentletId, {
+    const resolvedAgentletId = resolveConnectedAgentletId(agentletId);
+    if (!resolvedAgentletId)
+      throw new Error('The selected Agentlet is not connected');
+    const result = await gateway.discoverHarnesses(resolvedAgentletId, {
       prepareWorkspaces: false,
     });
     const harness = result.harnesses.find(
@@ -107,7 +122,7 @@ async function validateHarnessLaunch(
       });
       return false;
     }
-    await gateway.buildHarnessLaunch(agentletId, { launch });
+    await gateway.buildHarnessLaunch(resolvedAgentletId, { launch });
     return true;
   } catch (error) {
     request.log.warn(
@@ -146,10 +161,18 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
       try {
         const gateway = getAgentletGateway();
         if (!gateway) throw new Error('Agentlet Gateway is not ready');
-        return await gateway.buildHarnessLaunch(
-          profile?.agentletId ?? getSupervisedAgentletId(),
-          { launch: parsed.data.launch },
-        );
+        const agentletId = profile
+          ? resolveConnectedAgentletId(profile.agentletId)
+          : parsed.data.agentletId;
+        if (!agentletId || !isAgentletConnected(agentletId)) {
+          return reply.status(409).send({
+            code: 'agentlet_unavailable',
+            message: 'The selected Agentlet is not connected.',
+          });
+        }
+        return await gateway.buildHarnessLaunch(agentletId, {
+          launch: parsed.data.launch,
+        });
       } catch (error) {
         request.log.warn({ err: error }, 'Profile launch preview failed');
         return reply.status(503).send({
@@ -172,9 +195,45 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
           code: 'profile_registry_unavailable',
         });
       }
+      const profiles = registry.listProfiles();
+      const connected = getConnectedAgentlets();
+      const profileCounts = new Map<string, number>();
+      for (const profile of profiles) {
+        const agentletId = resolveConnectedAgentletId(profile.agentletId);
+        if (!agentletId) continue;
+        profileCounts.set(agentletId, (profileCounts.get(agentletId) ?? 0) + 1);
+      }
+      const connectedDevices = connected
+        .map((connection) => ({
+          agentletId: connection.agentletId,
+          displayName: formatAgentletDeviceDisplayName(
+            connection.agentletProfile?.machine,
+          ),
+          ...(connection.agentletProfile?.machine?.hostname
+            ? { hostname: connection.agentletProfile.machine.hostname }
+            : {}),
+          ...(connection.agentletProfile?.machine?.platform
+            ? { platform: connection.agentletProfile.machine.platform }
+            : {}),
+          ...(connection.agentletProfile?.machine?.arch
+            ? { arch: connection.agentletProfile.machine.arch }
+            : {}),
+          version: connection.agentletProfile?.bridge.version ?? 'unknown',
+          connectedAt: connection.connectedAt.toISOString(),
+          profileCount: profileCounts.get(connection.agentletId) ?? 0,
+        }))
+        .sort(
+          (left, right) =>
+            (left.hostname ?? left.agentletId).localeCompare(
+              right.hostname ?? right.agentletId,
+            ) || left.agentletId.localeCompare(right.agentletId),
+        );
       return {
-        profiles: registry.listProfiles(),
-        selectableProfileIds: registry.listSelectableProfileIds(),
+        profiles,
+        selectableProfileIds: profiles
+          .filter((profile) => resolveConnectedAgentletId(profile.agentletId))
+          .map((profile) => profile.id),
+        connectedDevices,
         agentlet: getDaemonSupervisor().getStatus(),
         agentDefaults: getAgentDefaults(),
       };
@@ -206,7 +265,13 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
           code: 'profile_registry_unavailable',
         });
       }
-      const agentletId = getSupervisedAgentletId();
+      const agentletId = parsed.data.agentletId;
+      if (!isAgentletConnected(agentletId)) {
+        return reply.status(409).send({
+          code: 'agentlet_unavailable',
+          message: 'The selected Agentlet is not connected.',
+        });
+      }
       const launch = parsed.data.launch;
       if (!(await validateHarnessLaunch(launch, agentletId, request, reply)))
         return;

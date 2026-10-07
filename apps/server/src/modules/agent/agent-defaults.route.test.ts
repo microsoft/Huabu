@@ -26,7 +26,8 @@ vi.mock('./agent-defaults.js', () => ({
 vi.mock('@agenetes/agentlet-host', () => ({
   getAgentProfileRegistry: () =>
     mocks.registryReady ? { getProfile: mocks.getProfile } : null,
-  getAgentletGateway: () => ({ getAgentlet: mocks.getAgentlet }),
+  resolveConnectedAgentletId: (target: string) =>
+    mocks.getAgentlet(target)?.status === 'connected' ? target : undefined,
 }));
 vi.mock('./acp/profile-schema-cache.js', () => ({
   getProfileSchemaCache: mocks.getCache,

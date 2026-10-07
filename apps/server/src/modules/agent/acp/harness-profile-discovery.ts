@@ -3,6 +3,8 @@
 
 import { CUSTOM_COMMAND_WRAPPER_ID } from '@agentlet/protocol';
 
+import { formatAgentletDeviceDisplayName } from '../agentlet-device-display.js';
+
 import type {
   AgentProfile,
   AgentProfileRegistry,
@@ -76,7 +78,16 @@ export function mergeProfileCustomData(
 }
 
 interface DiscoveryGateway {
-  getAgentlets(filter: { status: 'connected' }): Array<{ agentletId: string }>;
+  getAgentlets(filter: { status: 'connected' }): Array<{
+    agentletId: string;
+    agentletProfile?: {
+      machine?: {
+        hostname?: string;
+        platform?: string;
+        arch?: string;
+      };
+    };
+  }>;
   onAgentletsChanged(
     handler: (event: {
       agentletId: string;
@@ -149,7 +160,12 @@ export function registerHarnessProfileDiscovery({
         );
       });
       if (existing) continue;
-      const defaultAlias = `${harness.displayName} (${agentletId})`;
+      const connection = gateway
+        .getAgentlets({ status: 'connected' })
+        .find((candidate) => candidate.agentletId === agentletId);
+      const defaultAlias = `${harness.displayName} (${formatAgentletDeviceDisplayName(
+        connection?.agentletProfile?.machine,
+      )})`;
       const common = {
         agentletId,
         alias:

@@ -18,7 +18,7 @@ import type {
 
 /**
  * Compatibility binding for existing threads without persisted metadata.
- * New threads must resolve the configured default or supply a binding.
+ * New threads must resolve the browser-local recent selection or supply a binding.
  */
 const DEFAULT_BINDING: AgentBinding = { kind: 'internal' };
 const DEFAULT_ACTION: AgentMode = 'operate';
@@ -179,7 +179,7 @@ export interface ChatState {
     binding?: AgentBinding;
     lastAction?: AgentMode;
   }) => string;
-  /** Reuse legacy identity; new mappings require resolved global defaults. */
+  /** Reuse legacy identity; new mappings require a resolved browser selection. */
   ensureCanvasThread: (canvasId: string, binding?: AgentBinding) => string;
   /**
    * Change a thread's agent binding. Pass `canvasId` to also persist the

@@ -4,7 +4,6 @@
 export {
   mountAgenetes,
   getAgentProfileRegistry,
-  getSupervisedAgentletId,
   ACP_UPGRADE_PATH,
 } from '@agenetes/agentlet-host';
 export type {
@@ -17,6 +16,8 @@ export { default as acpAgentCliRoutes } from './agent-cli.route.js';
 export { default as acpProfilesRoutes } from './profiles.route.js';
 export { default as acpAgentletRoutes } from './daemon.route.js';
 export { default as externalAgentRuntimeConfigRoutes } from './runtime-config.route.js';
+export { default as connectionTokenRoutes } from './connection-token.route.js';
+export { getExternalAgentRuntimeConfig } from './runtime-config.js';
 /** @deprecated Use {@link acpAgentletRoutes} instead. */
 export { default as acpDaemonRoutes } from './daemon.route.js';
 

@@ -33,7 +33,7 @@ export interface WsClientOptions {
   capabilities: { autoRestart: boolean; bufferLimit: number; maxAgents?: number }
   heartbeatInterval?: number
   allowInsecure?: boolean
-  machine?: { hostname: string; platform: string }
+  machine?: { hostname: string; platform: string; arch: string }
 }
 
 export interface WsClientEvents {
