@@ -3,10 +3,6 @@ import {
   AgentMethods,
   ErrorCodes,
   ServerMethods,
-  parseBuildHarnessLaunchParams,
-  parseHarnessLaunchPreview,
-  type BuildHarnessLaunchParams,
-  type HarnessLaunchPreview,
   type AgentHelloParams,
   type AgentHelloResult,
   type AgentletHelloParams,
@@ -191,7 +187,7 @@ export class AgentletGateway {
     if (params.sessionSpec.launch !== undefined) {
       const connection = this.requireConnectedAgentlet(agentletId);
       if (
-        connection.agentletProfile?.capabilities?.harnessLaunch?.version !== 1
+        connection.agentletProfile?.capabilities?.harnessLaunch?.version !== 2
       ) {
         throw new AgentletGatewayError(
           'harness_launch_unsupported',
@@ -224,52 +220,17 @@ export class AgentletGateway {
     return this.sendControlRequest(agentletId, ServerMethods.LIST, {});
   }
 
-  async buildHarnessLaunch(
-    agentletId: string,
-    params: BuildHarnessLaunchParams,
-  ): Promise<HarnessLaunchPreview> {
-    const request = parseBuildHarnessLaunchParams(params);
-    const connection = this.requireConnectedAgentlet(agentletId);
-    if (
-      connection.agentletProfile?.capabilities?.harnessLaunchPreview
-        ?.version !== 1
-    )
-      throw new AgentletGatewayError(
-        'harness_launch_preview_unsupported',
-        `Agentlet does not support harness launch preview v1: ${agentletId}`,
-      );
-    const response = await this.sendControlRequest<unknown>(
-      agentletId,
-      ServerMethods.BUILD_HARNESS_LAUNCH,
-      request,
-    );
-    try {
-      const preview = parseHarnessLaunchPreview(response);
-      if (
-        (request.launch.kind === 'acp-command') !==
-        (preview.kind === 'shell')
-      )
-        throw new Error('Launch kind mismatch');
-      return preview;
-    } catch {
-      throw new AgentletGatewayError(
-        'invalid_harness_launch_preview_response',
-        'Agentlet returned malformed harness launch preview',
-      );
-    }
-  }
-
   async discoverHarnesses(
     agentletId: string,
     params: HarnessDiscoveryParams,
   ): Promise<HarnessDiscoveryResult> {
     const connection = this.requireConnectedAgentlet(agentletId);
     if (
-      connection.agentletProfile?.capabilities?.harnessDiscovery?.version !== 1
+      connection.agentletProfile?.capabilities?.harnessDiscovery?.version !== 2
     ) {
       throw new AgentletGatewayError(
         'harness_discovery_unsupported',
-        `Agentlet does not support harness discovery v1: ${agentletId}`,
+        `Agentlet does not support harness discovery v2: ${agentletId}`,
       );
     }
     return parseHarnessDiscoveryResult(

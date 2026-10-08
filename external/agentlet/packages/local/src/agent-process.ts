@@ -1,11 +1,9 @@
 import { createInterface } from 'node:readline'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { EventEmitter } from 'node:events'
-import type { HarnessLaunchPlan } from '@agentlet/protocol'
 
 export interface AgentProcessOptions {
   command: string
-  launchPlan?: HarnessLaunchPlan
   cwd?: string
   env?: Record<string, string>
 }
@@ -40,14 +38,9 @@ export class AgentProcess extends EventEmitter<AgentProcessEvents> {
       throw new Error('Agent process already running')
     }
 
-    this.process = this.options.launchPlan ? spawn(this.options.launchPlan.executable, this.options.launchPlan.argv, {
-      shell: false,
-      cwd: this.options.cwd,
-      env: { ...process.env, ...this.options.env, ...this.options.launchPlan.env },
-      stdio: ['pipe', 'pipe', 'pipe'],
-    // Legacy Custom commands intentionally execute shell code authorized by the host, not prompt data.
+    // Commands are either generated from daemon-owned harness definitions or explicitly authorized by the user.
     // codeql[js/command-line-injection]
-    }) : spawn(this.options.command, {
+    this.process = spawn(this.options.command, {
       shell: true,
       cwd: this.options.cwd,
       env: { ...process.env, ...this.options.env },

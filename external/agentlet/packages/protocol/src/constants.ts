@@ -27,7 +27,6 @@ export const ServerMethods = {
   LIST: 'server/list',
   SEND_RESOURCE: 'server/sendResource',
   DISCOVER_HARNESSES: 'server/discoverHarnesses',
-  BUILD_HARNESS_LAUNCH: 'server/buildHarnessLaunch',
 } as const
 
 /** Error codes used in agent/hello rejection */

@@ -20,7 +20,5 @@ export type {
   HarnessDiscoveryResult,
   HarnessDiscoveryEntry,
   HarnessCatalogueEntry,
-  BuildHarnessLaunchParams,
-  HarnessLaunchPreview,
   HarnessCapabilities,
 } from '@agentlet/protocol';

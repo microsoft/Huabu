@@ -4,13 +4,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ApiError } from './_client';
-import {
-  listAcpAgentClis,
-  previewAcpProfileLaunch,
-  updateAcpProfile,
-} from './acp';
-
-import type { AcpProfileLaunchPreviewBody } from '@huabu/shared';
+import { listAcpAgentClis, updateAcpProfile } from './acp';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -32,30 +26,6 @@ describe('ACP Profile editing API', () => {
     expect(fetch).toHaveBeenCalledWith(
       expect.stringMatching(/\/api\/acp\/agent-cli\?agentletId=device%2F%231$/),
       expect.any(Object),
-    );
-  });
-
-  it('posts a typed preview to the daemon route, including the saved target Profile', async () => {
-    const plan = {
-      kind: 'exec',
-      executable: '/bin/agent',
-      argv: ['--acp'],
-      env: {},
-    };
-    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify(plan)));
-    vi.stubGlobal('fetch', fetch);
-    const body: AcpProfileLaunchPreviewBody = {
-      profileId: 'saved',
-      launch: {
-        kind: 'acp-harness',
-        harnessId: 'copilot',
-        options: { autoApprove: false },
-      },
-    };
-    expect(await previewAcpProfileLaunch(body)).toEqual(plan);
-    expect(fetch).toHaveBeenCalledWith(
-      expect.stringMatching(/\/api\/acp\/profile-launch-preview$/),
-      expect.objectContaining({ method: 'POST', body: JSON.stringify(body) }),
     );
   });
 

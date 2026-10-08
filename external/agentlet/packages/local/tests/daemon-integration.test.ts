@@ -139,7 +139,10 @@ describe('agentlet daemon integration', () => {
       agentletId: 'machine-a',
       agentletProfile: {
         machine: { hostname: hostname(), platform: platform(), arch: arch() },
-        capabilities: { harnessDiscovery: { version: 1 } },
+        capabilities: {
+          harnessDiscovery: { version: 2 },
+          harnessLaunch: { version: 2 },
+        },
       },
     })
 

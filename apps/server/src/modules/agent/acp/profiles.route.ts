@@ -36,7 +36,6 @@ import {
   agentProfileParamsSchema,
   createAcpProfileBodySchema,
   patchAgentProfileBodySchema,
-  acpProfileLaunchPreviewBodySchema,
 } from '@huabu/shared';
 
 import {
@@ -55,7 +54,6 @@ import type { AgentletConnection } from '@agenetes/agentlet-host';
 import type {
   AcpProfileMutationResponse,
   AcpProfilesListResponse,
-  AcpProfileLaunchPreviewResponse,
   AgentProfileView,
   ApiResult,
 } from '@huabu/shared';
@@ -99,11 +97,7 @@ async function validateHarnessLaunch(
     const harness = result.harnesses.find(
       (entry) => entry.id === launch.harnessId,
     );
-    if (
-      !harness?.installed ||
-      harness.launchVersion !== 1 ||
-      harness.launchPreviewVersion !== 1
-    ) {
+    if (harness?.status !== 'ready') {
       reply.status(409).send({
         code: 'harness_launch_unavailable',
         message:
@@ -111,10 +105,7 @@ async function validateHarnessLaunch(
       });
       return false;
     }
-    if (
-      launch.options?.autoApprove &&
-      harness.capabilities?.autoApprove !== 'supported'
-    ) {
+    if (launch.options?.autoApprove && !harness.capabilities.autoApprove) {
       reply.status(400).send({
         code: 'harness_option_unsupported',
         message:
@@ -122,7 +113,6 @@ async function validateHarnessLaunch(
       });
       return false;
     }
-    await gateway.buildHarnessLaunch(resolvedAgentletId, { launch });
     return true;
   } catch (error) {
     request.log.warn(
@@ -138,51 +128,6 @@ async function validateHarnessLaunch(
 }
 
 const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
-  app.post<{ Reply: ApiResult<AcpProfileLaunchPreviewResponse> }>(
-    '/profile-launch-preview',
-    async (request, reply) => {
-      if (denyRemote(request, reply)) return;
-      const parsed = acpProfileLaunchPreviewBodySchema.safeParse(request.body);
-      if (!parsed.success) {
-        return reply.status(400).send({
-          code: 'validation_failed',
-          message: 'Invalid launch preview request',
-        });
-      }
-      const profile = parsed.data.profileId
-        ? getAgentProfileRegistry()?.getProfile(parsed.data.profileId)
-        : undefined;
-      if (parsed.data.profileId && !profile) {
-        return reply.status(404).send({
-          code: 'profile_not_found',
-          message: 'Agent Profile is unavailable',
-        });
-      }
-      try {
-        const gateway = getAgentletGateway();
-        if (!gateway) throw new Error('Agentlet Gateway is not ready');
-        const agentletId = profile
-          ? resolveConnectedAgentletId(profile.agentletId)
-          : parsed.data.agentletId;
-        if (!agentletId || !isAgentletConnected(agentletId)) {
-          return reply.status(409).send({
-            code: 'agentlet_unavailable',
-            message: 'The selected Agentlet is not connected.',
-          });
-        }
-        return await gateway.buildHarnessLaunch(agentletId, {
-          launch: parsed.data.launch,
-        });
-      } catch (error) {
-        request.log.warn({ err: error }, 'Profile launch preview failed');
-        return reply.status(503).send({
-          code: 'harness_preview_unavailable',
-          message:
-            'Agentlet could not preview this launch configuration. Check its availability and supported options.',
-        });
-      }
-    },
-  );
   // ── List ─────────────────────────────────────────────────────────────
   app.get<{ Reply: ApiResult<AcpProfilesListResponse> }>(
     '/profiles',

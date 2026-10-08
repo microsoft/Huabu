@@ -21,7 +21,7 @@ vi.mock('node:os', async (importOriginal) => ({
   ...await importOriginal<typeof import('node:os')>(), platform: mocks.platform, homedir: mocks.home,
 }))
 
-import { KNOWN_CLIS } from '../src/harnesses/catalogue.js'
+import { HARNESS_DEFINITIONS } from '../src/harnesses/registry.js'
 import { discoverHarnesses, parseHarnessDiscoveryParams } from '../src/harnesses/detect.js'
 import { prepareHarnessWorkspace } from '../src/harnesses/workspace.js'
 import { Agentlet } from '../src/agentlet.js'
@@ -41,15 +41,17 @@ beforeEach(() => {
 describe('trusted harness discovery', () => {
   it('returns the complete stable catalogue without creating workspaces by default', async () => {
     const { harnesses } = await discoverHarnesses()
-    expect(harnesses.map((entry) => entry.id)).toEqual([...KNOWN_CLIS.map((entry) => entry.id), 'custom'])
+    expect(harnesses.map((entry) => entry.id)).toEqual(HARNESS_DEFINITIONS.map((entry) => entry.id))
     expect(harnesses).toHaveLength(11)
-    expect(harnesses.filter((entry) => entry.id !== 'custom').every((entry) => entry.installed)).toBe(true)
-    expect(harnesses.filter((entry) => entry.id !== 'custom').every((entry) => entry.launchVersion === 1)).toBe(true)
-    expect(harnesses.at(-1)).toMatchObject({ id: 'custom', installed: false })
+    expect(harnesses.every((entry) => entry.status === 'ready')).toBe(true)
+    expect(harnesses.at(-1)).toMatchObject({
+      id: 'custom',
+      capabilities: { customLaunchCommand: true, autoApprove: false },
+    })
     expect(mocks.probe.mock.calls.some(([, args]) => args.includes('custom'))).toBe(false)
     expect(harnesses.every((entry) => !('skipVersionProbe' in entry))).toBe(true)
     expect(harnesses.every((entry) => !entry.workingDirPath)).toBe(true)
-    expect(harnesses[0]).toMatchObject({ executablePath: '/usr/local/bin/copilot', version: '1.2.3' })
+    expect(harnesses[0]).toMatchObject({ status: 'ready', version: '1.2.3' })
     expect(mocks.mkdir).not.toHaveBeenCalled()
     for (const [file, , options] of mocks.probe.mock.calls) {
       expect(file).not.toBe('sh')
@@ -59,12 +61,12 @@ describe('trusted harness discovery', () => {
 
   it('never invokes adapters that skip the optional version probe', async () => {
     const { harnesses } = await discoverHarnesses()
-    expect(KNOWN_CLIS.filter((entry) => entry.skipVersionProbe).map((entry) => entry.id))
-      .toEqual(['claude', 'codex', 'hermes'])
-    for (const cli of KNOWN_CLIS.filter((entry) => entry.skipVersionProbe)) {
-      expect(mocks.probe).not.toHaveBeenCalledWith(`/usr/local/bin/${cli.binary}`, ['--version'], expect.anything())
-      expect(harnesses.find((entry) => entry.id === cli.id)?.version).toBeUndefined()
+    for (const command of ['claude-agent-acp', 'codex-acp', 'hermes']) {
+      expect(mocks.probe).not.toHaveBeenCalledWith(`/usr/local/bin/${command}`, ['--version'], expect.anything())
     }
+    expect(harnesses.find((entry) => entry.id === 'claude')?.version).toBeUndefined()
+    expect(harnesses.find((entry) => entry.id === 'codex')?.version).toBeUndefined()
+    expect(harnesses.find((entry) => entry.id === 'hermes')?.version).toBeUndefined()
   })
 
   it('distinguishes a missing binary from a failed or timed-out PATH lookup', async () => {
@@ -74,8 +76,7 @@ describe('trusted harness discovery', () => {
       throw Object.assign(new Error('lookup executable missing'), { code: 'ENOENT' })
     })
     const { harnesses } = await discoverHarnesses({ prepareWorkspaces: true })
-    expect(harnesses.every((entry) => !entry.installed)).toBe(true)
-    expect(harnesses.every((entry) => entry.launchVersion === undefined)).toBe(true)
+    expect(harnesses.filter((entry) => entry.id !== 'custom').every((entry) => entry.status === 'not-found')).toBe(true)
     expect(harnesses[0]?.diagnostics?.[0]?.code).toBe('binary_missing')
     expect(harnesses.find((entry) => entry.id === 'gemini')?.diagnostics?.[0]?.code).toBe('lookup_failed')
     expect(harnesses.find((entry) => entry.id === 'qwen')?.diagnostics?.[0]?.code).toBe('lookup_failed')
@@ -90,26 +91,26 @@ describe('trusted harness discovery', () => {
     })
     const { harnesses } = await discoverHarnesses({ prepareWorkspaces: true })
     expect(harnesses[0]).toMatchObject({
-      installed: true,
+      status: 'ready',
       workingDirPath: join('/home/agentlet-test', '.agentlet', 'workspace', 'copilot'),
       diagnostics: [{ code: outcome ? 'version_probe_failed' : 'version_unknown', message: expect.any(String) }],
     })
     expect(harnesses[0]?.version).toBeUndefined()
   })
 
-  it('supports Windows lookup without a shell and probes the first absolute result', async () => {
+  it('supports Windows native executables and probes through the platform shell', async () => {
     mocks.platform.mockReturnValue('win32')
     mocks.probe.mockImplementation(async (file: string, args: string[]) => ({
       stdout: file === 'where.exe' ? `C:\\Tools\\${args[0]}.exe\r\nD:\\Other\\${args[0]}.exe\r\n` : '2.0\r\n',
     }))
     expect((await discoverHarnesses()).harnesses[0]).toMatchObject({
-      executablePath: 'C:\\Tools\\copilot.exe', installed: true, version: '2.0', launchVersion: 1,
+      status: 'ready', version: '2.0',
     })
-    expect(mocks.probe).toHaveBeenCalledWith('C:\\Tools\\copilot.exe', ['--version'], expect.objectContaining({ shell: false }))
+    expect(mocks.probe).toHaveBeenCalledWith('cmd.exe', ['/d', '/s', '/c', 'copilot --version'], expect.objectContaining({ shell: false }))
   })
 
-  it.each(['cmd', 'CMD', 'bat', 'BAT', 'ps1', ''])(
-    'preserves Windows shim discovery without opting %s into shell-free launch', async (extension) => {
+  it.each(['cmd', 'CMD', 'bat', 'BAT'])(
+    'treats Windows platform-shell .%s wrappers as ready', async (extension) => {
       mocks.platform.mockReturnValue('win32')
       mocks.probe.mockImplementation(async (file: string, args: string[]) => ({
         stdout: file === 'where.exe'
@@ -117,19 +118,28 @@ describe('trusted harness discovery', () => {
           : '1.0\r\n',
       }))
       const { harnesses } = await discoverHarnesses()
-      expect(harnesses.filter((entry) => entry.id !== 'custom').every((entry) => entry.installed)).toBe(true)
-      expect(harnesses.every((entry) => entry.launchVersion === undefined)).toBe(true)
+      expect(harnesses.filter((entry) => entry.id !== 'custom').every((entry) => entry.status === 'ready')).toBe(true)
       expect(harnesses[0]).toMatchObject({
-        binary: 'copilot', acpArgs: ['--acp'],
-        autoApprove: { args: ['--allow-all'], position: 'after-acp' },
+        status: 'ready',
+        capabilities: { autoApprove: true, customLaunchCommand: false },
       })
     },
   )
 
+  it('ignores a leading extensionless npm shim when a later .cmd target is shell-ready', async () => {
+    mocks.platform.mockReturnValue('win32')
+    mocks.probe.mockImplementation(async (file: string, args: string[]) => ({
+      stdout: file === 'where.exe'
+        ? `C:\\Tools\\${args[0]}\r\nC:\\Tools\\${args[0]}.cmd\r\n`
+        : '1.0\r\n',
+    }))
+    expect((await discoverHarnesses()).harnesses[0]).toMatchObject({ status: 'ready' })
+  })
+
   it('does not trust malformed lookup output', async () => {
     mocks.probe.mockResolvedValue({ stdout: 'relative-path' })
     expect((await discoverHarnesses()).harnesses[0]).toMatchObject({
-      installed: false, diagnostics: [{ code: 'lookup_failed', message: expect.any(String) }],
+      status: 'not-found', diagnostics: [{ code: 'lookup_failed', message: expect.any(String) }],
     })
   })
 
@@ -148,7 +158,7 @@ describe('trusted harness discovery', () => {
     mocks.mkdir.mockRejectedValue(Object.assign(new Error('access denied'), { code: 'EACCES' }))
     const { harnesses } = await discoverHarnesses({ prepareWorkspaces: true })
     expect(harnesses[0]).toMatchObject({
-      installed: true, diagnostics: [{ code: 'workspace_failed', message: 'access denied' }],
+      status: 'ready', diagnostics: [{ code: 'workspace_failed', message: 'access denied' }],
     })
     expect(harnesses[0]?.workingDirPath).toBeUndefined()
   })
@@ -163,7 +173,7 @@ describe('trusted harness discovery', () => {
 describe('daemon discovery RPC', () => {
   function createDaemon() {
     const daemon = new Agentlet({
-      server: 'wss://example.test', token: 'test', reconnectMax: 1,
+      server: 'wss://example.test', token: 'test', agentletId: 'test-agentlet', reconnectMax: 1,
       bufferLimit: 10, heartbeat: 0, allowInsecure: false, logLevel: 'error', maxAgents: 10,
     }, new Logger('error'))
     const responses: JsonRpcMessage[] = []
@@ -201,30 +211,6 @@ describe('daemon discovery RPC', () => {
     expect(await createDaemon().request(ServerMethods.DISCOVER_HARNESSES, { roots: ['/elsewhere'] }))
       .toMatchObject({ error: { code: -32602 } })
     expect(mocks.probe).not.toHaveBeenCalled()
-  })
-
-  it.each([
-    [{ kind: 'acp-command', command: 'copilot --acp' }, { kind: 'shell', command: 'copilot --acp' }],
-    [{ kind: 'acp-harness', harnessId: 'copilot', options: { autoApprove: true } },
-      { kind: 'exec', executable: 'copilot', argv: ['--acp', '--allow-all'], env: {} }],
-  ])('previews %j without probing, workspace preparation or spawning', async (launch, result) => {
-    const start = vi.spyOn(AgentProcess.prototype, 'start')
-    try {
-      expect(await createDaemon().request(ServerMethods.BUILD_HARNESS_LAUNCH, { launch })).toMatchObject({ result })
-      expect(start).not.toHaveBeenCalled()
-      expect(mocks.probe).not.toHaveBeenCalled()
-      expect(mocks.mkdir).not.toHaveBeenCalled()
-    } finally { start.mockRestore() }
-  })
-
-  it.each([undefined, {}, { launch: { kind: 'acp-harness', harnessId: 'unknown' } },
-    { launch: { kind: 'acp-harness', harnessId: 'claude', options: { autoApprove: true } } },
-    { launch: { kind: 'acp-command', command: 'agent', options: {} } },
-    { launch: { kind: 'acp-command', command: 'agent' }, cwd: '/work' },
-  ])('rejects invalid preview %j without side effects', async (params) => {
-    expect(await createDaemon().request(ServerMethods.BUILD_HARNESS_LAUNCH, params)).toMatchObject({ error: { code: -32602 } })
-    expect(mocks.probe).not.toHaveBeenCalled()
-    expect(mocks.mkdir).not.toHaveBeenCalled()
   })
 
   it.each([
