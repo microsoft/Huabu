@@ -9,8 +9,6 @@ export class AgentletGatewayError extends Error {
       | 'agentlet_disconnected'
       | 'harness_discovery_unsupported'
       | 'harness_launch_unsupported'
-      | 'harness_launch_preview_unsupported'
-      | 'invalid_harness_launch_preview_response'
       | 'invalid_harness_discovery_response',
     message: string,
   ) {
@@ -21,11 +19,6 @@ export class AgentletGatewayError extends Error {
 
 function object(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-function strings(value: unknown): value is string[] {
-  return (
-    Array.isArray(value) && value.every((entry) => typeof entry === 'string')
-  );
 }
 function invalid(): never {
   throw new AgentletGatewayError(
@@ -47,86 +40,28 @@ export function parseHarnessDiscoveryResult(
         typeof entry.id !== 'string' ||
         !entry.id.trim() ||
         typeof entry.displayName !== 'string' ||
-        typeof entry.binary !== 'string' ||
-        !entry.binary.trim() ||
         typeof entry.installHint !== 'string' ||
-        !strings(entry.acpArgs) ||
-        typeof entry.installed !== 'boolean'
+        !object(entry.capabilities) ||
+        typeof entry.capabilities.autoApprove !== 'boolean' ||
+        typeof entry.capabilities.customLaunchCommand !== 'boolean' ||
+        !['ready', 'adapter-missing', 'not-found'].includes(
+          String(entry.status),
+        )
       )
         return invalid();
       if (ids.has(entry.id)) return invalid();
       ids.add(entry.id);
-      let autoApprove: HarnessDiscoveryEntry['autoApprove'] = null;
-      if (entry.autoApprove !== null) {
-        if (
-          !object(entry.autoApprove) ||
-          !strings(entry.autoApprove.args) ||
-          (entry.autoApprove.position !== 'before-acp' &&
-            entry.autoApprove.position !== 'after-acp')
-        )
-          return invalid();
-        autoApprove = {
-          args: entry.autoApprove.args,
-          position: entry.autoApprove.position,
-        };
-      }
       const result: HarnessDiscoveryEntry = {
         id: entry.id,
         displayName: entry.displayName,
-        binary: entry.binary,
-        acpArgs: entry.acpArgs,
-        autoApprove,
         installHint: entry.installHint,
-        installed: entry.installed,
+        capabilities: {
+          autoApprove: entry.capabilities.autoApprove,
+          customLaunchCommand: entry.capabilities.customLaunchCommand,
+        },
+        status: entry.status as HarnessDiscoveryEntry['status'],
       };
-      if (entry.capabilities !== undefined) {
-        if (!object(entry.capabilities)) return invalid();
-        const capabilities = entry.capabilities;
-        const statuses = ['supported', 'unsupported', 'unknown'];
-        if (
-          ['autoApprove', 'modelOverride', 'sessionPersistence'].some(
-            (key) =>
-              typeof capabilities[key] !== 'string' ||
-              !statuses.includes(capabilities[key]),
-          )
-        )
-          return invalid();
-        result.capabilities = {
-          autoApprove: capabilities.autoApprove as NonNullable<
-            HarnessDiscoveryEntry['capabilities']
-          >['autoApprove'],
-          modelOverride: capabilities.modelOverride as NonNullable<
-            HarnessDiscoveryEntry['capabilities']
-          >['modelOverride'],
-          sessionPersistence: capabilities.sessionPersistence as NonNullable<
-            HarnessDiscoveryEntry['capabilities']
-          >['sessionPersistence'],
-        };
-        if (capabilities.customLaunchCommand !== undefined) {
-          if (
-            typeof capabilities.customLaunchCommand !== 'string' ||
-            !statuses.includes(capabilities.customLaunchCommand)
-          )
-            return invalid();
-          result.capabilities.customLaunchCommand =
-            capabilities.customLaunchCommand as NonNullable<
-              HarnessDiscoveryEntry['capabilities']
-            >['customLaunchCommand'];
-        }
-      }
-      if (entry.launchVersion !== undefined) {
-        if (entry.launchVersion !== 1) return invalid();
-        result.launchVersion = 1;
-      }
-      if (entry.launchPreviewVersion !== undefined) {
-        if (entry.launchPreviewVersion !== 1) return invalid();
-        result.launchPreviewVersion = 1;
-      }
-      for (const key of [
-        'executablePath',
-        'version',
-        'workingDirPath',
-      ] as const) {
+      for (const key of ['version', 'workingDirPath'] as const) {
         if (entry[key] !== undefined) {
           if (typeof entry[key] !== 'string') return invalid();
           result[key] = entry[key];

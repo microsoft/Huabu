@@ -42,10 +42,6 @@ import {
   getAgentletGateway,
   resolveConnectedAgentletId,
 } from '@agenetes/agentlet-host';
-import {
-  harnessLaunchPlanSchema,
-  type HarnessLaunchPlan,
-} from '@agenetes/protocol';
 
 import { acpBindingRecipeSchema } from './binding-recipe.js';
 import { AcpServiceError } from './errors.js';
@@ -80,7 +76,6 @@ interface CachedAgent {
   pid: number;
   /** Which agentlet instance owns this agent. */
   agentletId: string;
-  launchPlan?: HarnessLaunchPlan;
 }
 
 const threadToAgent = new Map<string, CachedAgent>();
@@ -190,7 +185,6 @@ export async function ensureAgentForThread(
   agentletId: string;
   sessionId: string;
   pid: number;
-  launchPlan?: HarnessLaunchPlan;
 }> {
   acpBindingRecipeSchema.parse(recipe);
   const agentlet = await waitForTargetAgentlet(
@@ -214,7 +208,6 @@ export async function ensureAgentForThread(
         agentletId: cached.agentletId,
         sessionId: cached.sessionId,
         pid: cached.pid,
-        ...(cached.launchPlan ? { launchPlan: cached.launchPlan } : {}),
       };
     }
     threadToAgent.delete(cacheKey);
@@ -236,7 +229,6 @@ export async function ensureAgentForThread(
 
   let sessionId: string;
   let pid: number;
-  let launchPlan: HarnessLaunchPlan | undefined;
   try {
     const result = await gateway.spawnOnAgentlet(agentlet.agentletId, {
       appId: threadId,
@@ -246,7 +238,6 @@ export async function ensureAgentForThread(
         ...(recipe.launch
           ? {
               launch: recipe.launch,
-              ...(recipe.launchPlan ? { launchPlan: recipe.launchPlan } : {}),
             }
           : { command: recipe.command }),
         cwd: recipe.cwd,
@@ -257,9 +248,6 @@ export async function ensureAgentForThread(
     });
     sessionId = result.sessionId;
     pid = result.pid;
-    if (recipe.launch) {
-      launchPlan = harnessLaunchPlanSchema.parse(result.launchPlan);
-    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (existingSessionId && isSessionResumeUnavailableError(err)) {
@@ -344,13 +332,11 @@ export async function ensureAgentForThread(
     sessionId,
     pid,
     agentletId: agentlet.agentletId,
-    ...(launchPlan ? { launchPlan } : {}),
   });
   return {
     agentletId: agentlet.agentletId,
     sessionId,
     pid,
-    ...(launchPlan ? { launchPlan } : {}),
   };
 }
 
