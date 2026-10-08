@@ -37,7 +37,7 @@ describe('Ink Question submission candidate', () => {
     });
   });
 
-  it('routes one internal Question without counting it as a source', () => {
+  it('routes an explicitly chosen internal Question without counting it as a source', () => {
     const candidate = deriveInkSubmissionCandidate(
       [
         node('question-1', 'question', {
@@ -48,6 +48,7 @@ describe('Ink Question submission candidate', () => {
         node('note-1', 'note'),
       ],
       { 'sketch-1': ['stroke-1'] },
+      'question-1',
     );
 
     expect(candidate).toMatchObject({
@@ -63,7 +64,7 @@ describe('Ink Question submission candidate', () => {
     });
   });
 
-  it('blocks multiple Questions and accepts an external Question target', () => {
+  it('ignores multiple selected Questions and accepts an explicit external Question target', () => {
     expect(
       deriveInkSubmissionCandidate(
         [
@@ -73,8 +74,9 @@ describe('Ink Question submission candidate', () => {
         { 'sketch-1': ['stroke-1'] },
       ),
     ).toMatchObject({
-      kind: 'blocked',
-      reason: 'multiple-question-targets',
+      kind: 'ready',
+      target: null,
+      sourceCount: 1,
     });
 
     expect(
@@ -90,6 +92,7 @@ describe('Ink Question submission candidate', () => {
           }),
         ],
         { 'sketch-1': ['stroke-1'] },
+        'question-1',
       ),
     ).toMatchObject({
       kind: 'ready',
@@ -115,11 +118,44 @@ describe('Ink Question submission candidate', () => {
           }),
         ],
         { 'sketch-1': ['stroke-1'] },
+        'question-1',
       ),
     ).toMatchObject({
       kind: 'blocked',
       reason: 'invalid-question-target',
     });
+  });
+
+  it('ignores selected malformed Questions unless explicitly targeted', () => {
+    const nodes = [
+      node('broken', 'question', { agentBinding: { kind: 'bad' } }),
+    ];
+    expect(
+      deriveInkSubmissionCandidate(nodes, { ink: ['stroke'] }),
+    ).toMatchObject({
+      kind: 'ready',
+      target: null,
+      sourceCount: 1,
+      excludedNodeIds: ['broken'],
+    });
+    expect(
+      deriveInkSubmissionCandidate(nodes, { ink: ['stroke'] }, 'missing'),
+    ).toMatchObject({
+      kind: 'blocked',
+      reason: 'invalid-question-target',
+    });
+  });
+
+  it('does not change source identity when Agent Node selection changes', () => {
+    const question = node('question', 'question');
+    const selection = { ink: ['stroke'] };
+    expect(inkSelectionIdentity('canvas', [question], selection)).toBe(
+      inkSelectionIdentity(
+        'canvas',
+        [{ ...question, selected: false }],
+        selection,
+      ),
+    );
   });
 
   it('changes identity when the Canvas, whole nodes, or strokes change', () => {

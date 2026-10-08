@@ -28,6 +28,7 @@ import {
   associateAgentNodeParamsSchema,
   putNodeContentBodySchema,
   stripLegacyPortalTopology,
+  recentCanvasConversationParamsSchema,
 } from '@huabu/shared';
 import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 import {
@@ -67,7 +68,9 @@ import {
 import { reconcileWorldPreviews } from './world-previews.js';
 import { withCanvasMutex } from './write-coordinator.js';
 import { MAX_UPLOAD_BYTES } from '../../upload-limits.js';
+import { conversationEventLogStore } from '../agent/agenetes/conversation-stores.js';
 import { AgentNodeBindingError } from '../agent/agent-node-binding.js';
+import { readRecentCanvasConversation } from '../agent/recent-conversation.js';
 import { ARTIFACT_URL_REGEX } from '../artifact/utils.js';
 import { getPreprocessDispatcher, getProfile } from '../preprocessing/index.js';
 import { isLabelProtected } from '../preprocessing/label-policy.js';
@@ -122,6 +125,8 @@ import type {
   PutNodeContentRequest,
   PutNodeContentResponse,
   RevealNodesFolderResponse,
+  RecentCanvasConversationParams,
+  RecentCanvasConversationResponse,
 } from '@huabu/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
@@ -577,6 +582,37 @@ async function hydrateNodeContent(
 }
 
 const canvasRoutes: FastifyPluginAsync = async (fastify) => {
+  fastify.get<{
+    Params: RecentCanvasConversationParams;
+    Reply: ApiResult<RecentCanvasConversationResponse>;
+  }>('/:canvasId/recent-conversation', async (request, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    const parsed = recentCanvasConversationParamsSchema.safeParse(
+      request.params,
+    );
+    if (!parsed.success) {
+      return reply.code(400).send({ message: 'Invalid canvas ID' });
+    }
+    const { canvasId } = parsed.data;
+    try {
+      if (!(await space(canvasId).read())) {
+        return reply.code(404).send({ message: 'Canvas not found' });
+      }
+      return reply.send(
+        await readRecentCanvasConversation(canvasId, conversationEventLogStore),
+      );
+    } catch (error) {
+      request.log.error(
+        { err: error, canvasId },
+        'Recent conversation read failed',
+      );
+      return reply.code(500).send({
+        message: 'Unable to read the recent conversation',
+        code: 'RECENT_CONVERSATION_READ_FAILED',
+      });
+    }
+  });
+
   // --- List all canvases ---
 
   fastify.get<{ Reply: ApiResult<ListCanvasesResponse> }>(

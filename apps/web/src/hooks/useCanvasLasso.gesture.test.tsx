@@ -189,6 +189,7 @@ beforeEach(() => {
       { x: 100, y: 85 },
       { x: 100, y: 100 },
     ],
+    sketchSelectionSession: {},
   });
   host = document.createElement('div');
   document.body.append(host);
@@ -248,7 +249,12 @@ describe('lasso shared selection lifecycle', () => {
   });
 
   it('selects nodes and strokes live, never a partially captured Frame or whole Sketch, and commits once', () => {
+    const previousSession =
+      useGesturePreviewStore.getState().sketchSelectionSession;
     draw();
+    expect(useGesturePreviewStore.getState().sketchSelectionSession).toBe(
+      previousSession,
+    );
     expect(selected()).toEqual(['note']);
     expect(useGesturePreviewStore.getState().sketchStrokeSelection).toEqual({
       ink: ['inside'],
@@ -257,6 +263,9 @@ describe('lasso shared selection lifecycle', () => {
     expect(mocks.flowState.userSelectionActive).toBe(true);
     expect(mocks.select).not.toHaveBeenCalled();
     dispatch('pointerup', 0, 0);
+    expect(useGesturePreviewStore.getState().sketchSelectionSession).not.toBe(
+      previousSession,
+    );
     expect(mocks.select).toHaveBeenCalledExactlyOnceWith(['note']);
     expect(
       useGesturePreviewStore.getState().sketchSelectionPolygon,
@@ -301,6 +310,9 @@ describe('lasso shared selection lifecycle', () => {
       expect(useGesturePreviewStore.getState().sketchSelectionPolygon).toEqual(
         before.sketchSelectionPolygon,
       );
+      expect(useGesturePreviewStore.getState().sketchSelectionSession).toBe(
+        before.sketchSelectionSession,
+      );
       expect(mocks.select).not.toHaveBeenCalled();
       expect(mocks.flowState.userSelectionActive).toBe(false);
     },
@@ -314,6 +326,7 @@ describe('lasso shared selection lifecycle', () => {
     act(() => root.render(<Harness scopeKey="next" />));
     expect(selected()).toEqual([]);
     expect(useGesturePreviewStore.getState().sketchStrokeSelection).toEqual({});
+    expect(useGesturePreviewStore.getState().sketchSelectionSession).toBeNull();
     expect(mocks.flowState.nodesSelectionActive).toBe(false);
   });
 
@@ -322,6 +335,7 @@ describe('lasso shared selection lifecycle', () => {
     dispatch('pointerup', 400, 400);
     expect(selected()).toEqual([]);
     expect(useGesturePreviewStore.getState().sketchStrokeSelection).toEqual({});
+    expect(useGesturePreviewStore.getState().sketchSelectionSession).toBeNull();
     expect(mocks.select).toHaveBeenCalledExactlyOnceWith([]);
   });
 

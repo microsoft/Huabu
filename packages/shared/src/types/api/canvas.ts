@@ -15,6 +15,25 @@ import { canvasEditableNodeSchema } from './agent-node.js';
 
 import type { videoCoverPatchSchema } from './preprocessing.js';
 
+export const recentCanvasConversationParamsSchema = z.object({
+  canvasId: z.string().regex(/^[a-zA-Z0-9_-]+$/, 'Invalid canvas ID'),
+});
+export type RecentCanvasConversationParams = z.infer<
+  typeof recentCanvasConversationParamsSchema
+>;
+
+export const recentCanvasConversationResponseSchema = z.object({
+  conversation: z
+    .object({
+      nodeId: z.string().min(1),
+      threadId: z.string().min(1),
+    })
+    .nullable(),
+});
+export type RecentCanvasConversationResponse = z.infer<
+  typeof recentCanvasConversationResponseSchema
+>;
+
 export interface GetCanvasResponse {
   canvasId: string;
   title: string | null;

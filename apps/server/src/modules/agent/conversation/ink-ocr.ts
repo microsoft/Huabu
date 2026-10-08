@@ -11,7 +11,7 @@ import type { InkRecognition } from '@huabu/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
 const API_VERSION = '2024-02-01';
-const DEADLINE_MS = 2000;
+const DEADLINE_MS = 3000;
 const SLOW_MS = 1500;
 const MAX_RESPONSE_BYTES = 1024 * 1024;
 
