@@ -57,11 +57,9 @@ let container: HTMLDivElement | undefined;
 const detectedAgent: AcpAgentCliInfo = {
   id: 'copilot',
   displayName: 'Copilot',
-  binary: 'copilot',
-  acpArgs: ['--acp'],
-  autoApprove: null,
-  installed: true,
+  status: 'ready',
   installHint: 'Install Copilot',
+  capabilities: { autoApprove: true, customLaunchCommand: false },
 };
 
 afterEach(() => {

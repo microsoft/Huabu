@@ -170,11 +170,12 @@ describe('ordinary command Profile contracts', () => {
         {
           id: 'future-cli',
           displayName: 'Future CLI',
-          binary: 'future-cli',
-          acpArgs: ['acp'],
-          autoApprove: null,
-          installed: false,
           installHint: 'Install the CLI',
+          status: 'not-found',
+          capabilities: {
+            autoApprove: false,
+            customLaunchCommand: false,
+          },
           diagnostics: [{ code: 'missing', message: 'Not on PATH' }],
         },
       ],

@@ -130,32 +130,14 @@ export type AcpDaemonRestartResponse = AcpAgentletRestartResponse;
 export const acpAgentCliInfoSchema = z.object({
   id: z.string().min(1),
   displayName: z.string().min(1),
-  binary: z.string().min(1),
-  acpArgs: z.array(z.string()),
-  /** `position` preserves CLIs whose global options precede ACP arguments. */
-  autoApprove: z
-    .object({
-      args: z.array(z.string()),
-      position: z.enum(['before-acp', 'after-acp']),
-    })
-    .nullable(),
+  status: z.enum(['ready', 'adapter-missing', 'not-found']),
   version: z.string().optional(),
-  installed: z.boolean(),
   installHint: z.string(),
-  executablePath: z.string().optional(),
   workingDirPath: z.string().optional(),
-  launchVersion: z.literal(1).optional(),
-  launchPreviewVersion: z.literal(1).optional(),
-  capabilities: z
-    .object({
-      autoApprove: z.enum(['supported', 'unsupported', 'unknown']),
-      modelOverride: z.enum(['supported', 'unsupported', 'unknown']),
-      sessionPersistence: z.enum(['supported', 'unsupported', 'unknown']),
-      customLaunchCommand: z
-        .enum(['supported', 'unsupported', 'unknown'])
-        .optional(),
-    })
-    .optional(),
+  capabilities: z.object({
+    autoApprove: z.boolean(),
+    customLaunchCommand: z.boolean(),
+  }),
   diagnostics: z
     .array(z.object({ code: z.string(), message: z.string() }))
     .optional(),

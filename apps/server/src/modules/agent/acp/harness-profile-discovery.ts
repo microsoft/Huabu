@@ -137,7 +137,7 @@ export function registerHarnessProfileDiscovery({
           '[acp] harness discovery diagnostic',
         );
       }
-      if (!harness.installed) continue;
+      if (harness.status !== 'ready') continue;
       if (!harness.workingDirPath) {
         log.warn(
           { agentletId, harnessId: harness.id },
@@ -147,16 +147,14 @@ export function registerHarnessProfileDiscovery({
       }
       // No await between the lookup and the synchronous registry commit.
       const profiles = registry.listProfiles();
-      const typed = harness.launchVersion === 1;
       const existing = profiles.find((profile) => {
         const source = parseSource(profile.customData?.[SOURCE_KEY]);
         return (
           profile.agentletId === agentletId &&
           source?.agentletId === agentletId &&
           source.harnessId === harness.id &&
-          (!typed ||
-            (profile.launch.kind === 'acp-harness' &&
-              profile.launch.harnessId === harness.id))
+          profile.launch.kind === 'acp-harness' &&
+          profile.launch.harnessId === harness.id
         );
       });
       if (existing) continue;
@@ -168,32 +166,23 @@ export function registerHarnessProfileDiscovery({
       )})`;
       const common = {
         agentletId,
-        alias:
-          typed && profiles.some((profile) => profile.alias === defaultAlias)
-            ? `${defaultAlias} [${harness.id}]`
-            : defaultAlias,
+        alias: profiles.some((profile) => profile.alias === defaultAlias)
+          ? `${defaultAlias} [${harness.id}]`
+          : defaultAlias,
         workingDirPath: harness.workingDirPath,
         metadata: { cliId: harness.id },
         customData: {
           [SOURCE_KEY]: { version: 1, agentletId, harnessId: harness.id },
         },
       };
-      const profile = registry.createProfile(
-        typed
-          ? {
-              ...common,
-              launchKind: 'acp-harness',
-              harnessId: harness.id,
-              ...(harness.capabilities?.autoApprove === 'supported'
-                ? { options: { autoApprove: true } }
-                : {}),
-            }
-          : {
-              ...common,
-              launchKind: 'acp-command',
-              command: [harness.binary, ...harness.acpArgs].join(' '),
-            },
-      );
+      const profile = registry.createProfile({
+        ...common,
+        launchKind: 'acp-harness',
+        harnessId: harness.id,
+        ...(harness.capabilities.autoApprove
+          ? { options: { autoApprove: true } }
+          : {}),
+      });
       log.info(
         { agentletId, harnessId: harness.id, profileId: profile.id },
         '[acp] automatically created Profile',
