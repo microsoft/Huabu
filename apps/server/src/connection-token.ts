@@ -10,6 +10,10 @@ import {
 } from '@agenetes/agentlet-host';
 
 import { getExternalAgentRuntimeConfig } from './modules/agent/acp/runtime-config.js';
+import {
+  normalizePublicOrigin,
+  resolveConfiguredPublicOrigin,
+} from './modules/security/public-origin.js';
 import { SECRET_IDS } from './security/secret-ids.js';
 import {
   getPersistedSecret,
@@ -145,19 +149,16 @@ export class InvalidAgentletConnectionOriginError extends Error {}
 export function buildAgentletConnectionCommand(
   originValue: string,
 ): AgentletConnectionCommandResponse {
-  const origin = new URL(originValue);
-  if (
-    !['http:', 'https:'].includes(origin.protocol) ||
-    origin.username ||
-    origin.password ||
-    origin.pathname !== '/' ||
-    origin.search ||
-    origin.hash
-  ) {
+  let normalizedOrigin: string;
+  try {
+    normalizedOrigin =
+      resolveConfiguredPublicOrigin() ?? normalizePublicOrigin(originValue);
+  } catch {
     throw new InvalidAgentletConnectionOriginError(
       'Origin must be an HTTP(S) origin without a path',
     );
   }
+  const origin = new URL(normalizedOrigin);
   const insecure = origin.protocol === 'http:';
   const endpoint = `${insecure ? 'ws:' : 'wss:'}//${origin.host}/api/acp/agent`;
   const maxAgents = getExternalAgentRuntimeConfig().maxAgents;

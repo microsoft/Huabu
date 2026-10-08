@@ -43,8 +43,10 @@ function extractHostname(host: string | undefined): string | null {
  *
  * Exported so the CORS layer can reuse the same set of hostnames.
  */
-export function resolveAllowedHostnames(): Set<string> {
-  const extra = (process.env.HUABU_ALLOWED_HOSTS ?? '')
+export function resolveAllowedHostnames(
+  env: NodeJS.ProcessEnv = process.env,
+): Set<string> {
+  const extra = (env.HUABU_ALLOWED_HOSTS ?? '')
     .split(',')
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);

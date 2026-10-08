@@ -341,10 +341,8 @@ app.addHook('onClose', async () => resetExternalNoteSessions());
 // a connection-holding backend will need — a pool nobody closes leaks on
 // every restart, and the lifecycle is where that is visible.
 app.addHook('onClose', async () => closeStorage());
-// Capture the bound TCP port for L1-owned reachback (RFS): the
-// canvas-scoped `HUABU_RFS_URL` base is built from this. RFS is
-// canvas-coupled and therefore a pure L1 concern, so the port lives in
-// L1 rather than being read back out of the L2 transport host.
+// Capture the bound TCP port for the local RFS reachback fallback. Public
+// deployments use their configured canonical origin instead.
 app.addHook('onListen', async () => {
   const addr = app.server.address();
   if (addr && typeof addr !== 'string') setHostServerPort(addr.port);

@@ -49,10 +49,12 @@ beforeEach(() => {
   mocks.setSecret.mockResolvedValue(undefined);
   vi.clearAllMocks();
   delete process.env.HUABU_CONNECTION_TOKEN;
+  delete process.env.HUABU_PUBLIC_ORIGIN;
 });
 
 afterEach(() => {
   delete process.env.HUABU_CONNECTION_TOKEN;
+  delete process.env.HUABU_PUBLIC_ORIGIN;
 });
 
 describe('connection token resolution', () => {
@@ -143,5 +145,19 @@ describe('Agentlet connection command', () => {
     expect(() => buildAgentletConnectionCommand('file:///tmp/huabu')).toThrow(
       'Origin must be an HTTP(S) origin without a path',
     );
+  });
+
+  it('uses the configured public origin instead of the browser origin', () => {
+    process.env.HUABU_CONNECTION_TOKEN = 'token';
+    process.env.HUABU_PUBLIC_ORIGIN = 'https://public.huabu.example:8443/';
+    initializeConnectionToken();
+
+    expect(
+      buildAgentletConnectionCommand('http://localhost:5173'),
+    ).toMatchObject({
+      command:
+        "agentlet daemon --server 'wss://public.huabu.example:8443/api/acp/agent' --max-agents 7 --token 'token'",
+      warnings: [],
+    });
   });
 });
