@@ -1,21 +1,13 @@
-/** Capabilities describe this catalogue entry's ACP transport, not its native CLI. */
-export type HarnessCapabilityStatus = 'supported' | 'unsupported' | 'unknown'
-
 export interface HarnessCapabilities {
-  /** Absent on older daemons; absence is not evidence of support. */
-  customLaunchCommand?: HarnessCapabilityStatus
-  autoApprove: HarnessCapabilityStatus
-  modelOverride: HarnessCapabilityStatus
-  sessionPersistence: HarnessCapabilityStatus
+  customLaunchCommand: boolean
+  autoApprove: boolean
 }
 
 export const CUSTOM_COMMAND_WRAPPER_ID = 'custom' as const
 
 export const CUSTOM_COMMAND_CAPABILITIES = Object.freeze({
-  customLaunchCommand: 'supported',
-  autoApprove: 'unsupported',
-  modelOverride: 'unsupported',
-  sessionPersistence: 'unsupported',
+  customLaunchCommand: true,
+  autoApprove: false,
 } as const satisfies HarnessCapabilities)
 
 export interface HarnessLaunchOptions {
@@ -30,15 +22,7 @@ export interface AcpHarnessLaunch {
 
 export type AgentProfileLaunch = AcpHarnessLaunch | { kind: 'acp-command'; command: string }
 
-export interface BuildHarnessLaunchParams {
-  launch: AgentProfileLaunch
-}
-
-export type HarnessLaunchPreview =
-  | { kind: 'exec'; executable: string; argv: string[]; env: Record<string, string> }
-  | { kind: 'shell'; command: string }
-
-/** Catalogue-resolved process arguments. Never interpreted by a shell. */
+/** Legacy persisted launch evidence. New executions compile from launch intent. */
 export interface HarnessLaunchPlan {
   version: 1
   executable: string
@@ -57,28 +41,6 @@ export function parseAgentProfileLaunch(value: unknown): AgentProfileLaunch {
     return { kind: 'acp-command', command: value.command }
   }
   return parseAcpHarnessLaunch(value)
-}
-
-export function parseBuildHarnessLaunchParams(value: unknown): BuildHarnessLaunchParams {
-  if (!object(value) || Object.keys(value).some((key) => key !== 'launch')) {
-    throw new Error('Expected only a Profile launch')
-  }
-  return { launch: parseAgentProfileLaunch(value.launch) }
-}
-
-export function parseHarnessLaunchPreview(value: unknown): HarnessLaunchPreview {
-  const text = (v: unknown): v is string => typeof v === 'string' && !v.includes('\0')
-  if (object(value)) {
-    if (value.kind === 'shell' && Object.keys(value).every((key) => ['kind', 'command'].includes(key)) &&
-      text(value.command) && value.command.trim()) return { kind: 'shell', command: value.command }
-    if (value.kind === 'exec' && Object.keys(value).every((key) => ['kind', 'executable', 'argv', 'env'].includes(key)) &&
-      text(value.executable) && value.executable.trim() && value.executable.length <= 4096 &&
-      Array.isArray(value.argv) && value.argv.length <= 128 && value.argv.every((arg) => text(arg) && arg.length <= 4096) &&
-      object(value.env) && Object.entries(value.env).every(([key, val]) => text(key) && key.length <= 256 && text(val) && val.length <= 4096)) {
-      return { kind: 'exec', executable: value.executable, argv: [...value.argv], env: { ...value.env } as Record<string, string> }
-    }
-  }
-  throw new Error('Invalid harness launch preview')
 }
 
 /** Strict portable validation; the daemon separately checks its own catalogue. */
