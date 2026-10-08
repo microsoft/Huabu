@@ -81,7 +81,7 @@ const env = loadEnv(
 );
 
 const HOST = '127.0.0.1';
-const SERVER_PORT = Number.parseInt(env.SERVER_PORT || env.PORT || '3001', 10);
+const SERVER_PORT = Number.parseInt(env.SERVER_PORT || '3001', 10);
 const VITE_PORT = Number.parseInt(env.VITE_PORT || env.WEB_PORT || '5173', 10);
 const HANDBOOK_URL =
   env.VITE_HANDBOOK_URL || 'https://microsoft.github.io/Huabu/docs/';

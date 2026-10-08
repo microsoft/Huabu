@@ -41,8 +41,8 @@ if [ ! -f "$cli" ]; then
   fi
 fi
 
-# Auto-load <repo>/.env so SERVER_PORT and ACP_URL (still legitimate
-# `.env` settings, read by the Fastify server too) are visible here.
+# Auto-load <repo>/.env so SERVER_PORT and HUABU_PUBLIC_ORIGIN (the same
+# canonical public origin read by the Fastify server) are visible here.
 # We strip CR before sourcing because the file may have CRLF line
 # endings (some editors do that), which POSIX `.` interprets as part
 # of the value and trips with `: not found` errors. `set -a` makes
@@ -85,10 +85,19 @@ fi
 #     embedded mount that `pnpm dev` exposes on the same port as the rest of
 #     Huabu's API. SERVER_PORT already lives in .env (see .env.example)
 #     and the server reads it from there too — single source of truth.
-#   - For non-local setups (different host, wss://, custom path) set
-#     ACP_URL to the full URL — it wins outright.
-if [ -n "$ACP_URL" ]; then
-  url="$ACP_URL"
+#   - For non-local setups, HUABU_PUBLIC_ORIGIN is the root HTTP(S) origin
+#     shared with RFS. The server validates it during startup; this wrapper
+#     maps its scheme and appends the fixed Agentlet endpoint.
+if [ -n "$HUABU_PUBLIC_ORIGIN" ]; then
+  public_origin=${HUABU_PUBLIC_ORIGIN%/}
+  case "$public_origin" in
+    https://*) url="wss://${public_origin#https://}/api/acp/agent" ;;
+    http://*) url="ws://${public_origin#http://}/api/acp/agent" ;;
+    *)
+      echo "start-agentlet-daemon: HUABU_PUBLIC_ORIGIN must use HTTP or HTTPS." >&2
+      exit 1
+      ;;
+  esac
 else
   url="ws://localhost:${SERVER_PORT:-3001}/api/acp/agent"
 fi

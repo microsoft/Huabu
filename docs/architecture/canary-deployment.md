@@ -10,7 +10,7 @@ Canary use is additional end-to-end evidence only. It does not replace pull-requ
 
 ## Supported workflow
 
-The supported helper runs from a source checkout through `pnpm start:web`. `scripts/start-web.mjs` captures the startup commit in `HUABU_DEPLOYED_SHA` and exports the resolved checkout root as `HUABU_REPO_ROOT` before loading the bundled Server.
+The supported helper runs from a source checkout through `pnpm start:web`. `scripts/start-web.mjs` captures the startup commit in `HUABU_DEPLOYED_SHA` and exports the resolved checkout root as `HUABU_REPO_ROOT` before loading the bundled Server. Production-style startup binds the fixed `SERVER_PORT` (default `3001`) and fails rather than selecting another port when it is unavailable.
 
 Setting `HUABU_CANARY_REDEPLOY_ENABLED=1` enables an owner-only Settings surface. The selected branch is persisted as an application-global versioned record under `HUABU_DATA_DIR`; a missing record or explicit cleared value resolves to `alpha`. Malformed stored configuration fails explicitly rather than silently using the default.
 
@@ -30,9 +30,9 @@ Only one check, configuration write, or redeployment admission may run at a time
 
 `scripts/start-huabu.sh` derives the repository root from its own tracked path, so the checkout may live anywhere. Direct operator and Settings use both accept exactly one validated branch argument.
 
-The script requires a clean checkout, stops listeners on ports 3001–3005, removes the previous `app` tmux session, fetches the exact `refs/heads/<branch>` from fixed remote `origin` into its matching remote-tracking ref, checks out or creates the matching local branch, and fast-forwards it without rewriting divergent work. It then installs locked dependencies and starts `pnpm start:web` in a new `app` session. Interactive use immediately tails `/tmp/huabu-app.log` while startup continues. `--non-interactive` instead waits for readiness and exits when it succeeds or when the configurable `HUABU_CANARY_READINESS_TIMEOUT_SECONDS` window expires; the default is 300 seconds.
+The script requires a clean checkout, resolves the fixed Server port from an exported `SERVER_PORT`, then the checkout's `.env`, then the default `3001`, and stops the listener on that port. It removes the previous `app` tmux session, fetches the exact `refs/heads/<branch>` from fixed remote `origin` into its matching remote-tracking ref, checks out or creates the matching local branch, and fast-forwards it without rewriting divergent work. It then installs locked dependencies and starts `pnpm start:web` in a new `app` session. Interactive use immediately tails `/tmp/huabu-app.log` while startup continues. `--non-interactive` instead waits for readiness on that same fixed port and exits when it succeeds or when the configurable `HUABU_CANARY_READINESS_TIMEOUT_SECONDS` window expires; the default is 300 seconds.
 
-The script intentionally preserves the existing personal-development tradeoff: it updates one checkout in place and stops the old service before pull, install, and build complete. A failed redeployment can leave the Canary offline, and the port-range stop can affect another process using those ports. There is no rollback, immutable release directory, service preservation, self-restart supervisor, systemd unit, container deployment, or automatic installation. Inspect the persisted runner status and log, then repair manually through SSH when needed.
+The script intentionally preserves the existing personal-development tradeoff: it updates one checkout in place and stops the old service before pull, install, and build complete. A failed redeployment can leave the Canary offline, and stopping the configured port can affect an unrelated process that owns it. There is no rollback, immutable release directory, service preservation, self-restart supervisor, systemd unit, container deployment, or automatic installation. Inspect the persisted runner status and log, then repair manually through SSH when needed.
 
 ## Security boundary
 

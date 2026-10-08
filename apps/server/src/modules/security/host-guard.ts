@@ -10,10 +10,16 @@
  * rebinding: even if an attacker resolves `evil.com` to 127.0.0.1, the
  * browser still writes `Host: evil.com`, which we can reject.
  *
- * Built-in entries cover the loopback aliases the bundled web client
- * uses out of the box. Operators add LAN IPs or reverse-proxy hostnames
- * via `HUABU_ALLOWED_HOSTS`.
+ * Built-in entries cover the loopback aliases the bundled web client uses out
+ * of the box. The canonical public origin contributes its hostname
+ * automatically; operators add only additional aliases through
+ * `HUABU_ALLOWED_HOSTS`.
  */
+
+import {
+  InvalidPublicOriginError,
+  resolveConfiguredPublicOrigin,
+} from './public-origin.js';
 
 import type { FastifyPluginAsync } from 'fastify';
 
@@ -39,16 +45,35 @@ function extractHostname(host: string | undefined): string | null {
 }
 
 /**
- * Read the merged allowlist (builtins + env extras).
+ * Read the merged allowlist (builtins + canonical public host + env extras).
  *
  * Exported so the CORS layer can reuse the same set of hostnames.
  */
-export function resolveAllowedHostnames(): Set<string> {
-  const extra = (process.env.HUABU_ALLOWED_HOSTS ?? '')
+export function resolveAllowedHostnames(
+  env: NodeJS.ProcessEnv = process.env,
+): Set<string> {
+  const extra = (env.HUABU_ALLOWED_HOSTS ?? '')
     .split(',')
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
-  return new Set<string>([...BUILTIN_HOSTNAMES, ...extra]);
+  let publicOrigin: string | undefined;
+  try {
+    publicOrigin = resolveConfiguredPublicOrigin(env);
+  } catch (error) {
+    // app.ts resolves the CORS allowlist during module initialization, before
+    // server.ts can report deployment validation failures. Defer this one
+    // known configuration error to resolveDeploymentConfig(); the Server never
+    // listens with an invalid origin.
+    if (!(error instanceof InvalidPublicOriginError)) throw error;
+  }
+  const publicHostname = publicOrigin
+    ? new URL(publicOrigin).hostname.toLowerCase()
+    : undefined;
+  return new Set<string>([
+    ...BUILTIN_HOSTNAMES,
+    ...(publicHostname ? [publicHostname] : []),
+    ...extra,
+  ]);
 }
 
 export const hostGuardPlugin: FastifyPluginAsync = async (app) => {
@@ -63,7 +88,7 @@ export const hostGuardPlugin: FastifyPluginAsync = async (app) => {
         code: 'INVALID_HOST',
         details: {
           received: hostname ?? null,
-          hint: 'Add the hostname to HUABU_ALLOWED_HOSTS if this is an intentional deployment.',
+          hint: 'Use HUABU_PUBLIC_ORIGIN or add the hostname to HUABU_ALLOWED_HOSTS if this is an intentional alias.',
         },
       });
     }
