@@ -147,7 +147,8 @@ it('keeps a Space that has a directory on the file stores, whatever the structur
     ).ok,
   ).toBe(true);
   const root = mkdtempSync(path.join(tmpdir(), 'huabu-agenetes-history-'));
-  const namespace: Namespace = { name: CANVAS_ID, storage: { root } };
+  const namespace = canvasAcpNamespace(CANVAS_ID);
+  namespace.storage = { root };
   disposals.push(async () => {
     // The file turn store holds an open database under `root`; the handle
     // arbitration point is how a Space's owners are asked to let go.

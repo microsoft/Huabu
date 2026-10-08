@@ -196,6 +196,13 @@ export function resolveCanvasAcpNamespace(namespace: Namespace): Namespace {
       throw new Error('Conversation namespace is no longer active');
     }
   }
+  if (!namespace.storage?.root) {
+    const resolved = { name: namespace.name };
+    namespaceWorkspaceIds.set(resolved, workspace.workspaceId);
+    return resolved;
+  }
   namespaceWorkspaceIds.set(namespace, workspace.workspaceId);
-  return canvasAcpNamespace(namespace.name);
+  const resolved = canvasAcpNamespace(namespace.name);
+  if (!resolved.storage?.root) resolved.storage = namespace.storage;
+  return resolved;
 }
