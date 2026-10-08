@@ -1,0 +1,176 @@
+trigger:
+  branches:
+    exclude:
+      - '*'
+  tags:
+    include:
+      - 'v*.*.*'
+
+pr: none
+
+parameters:
+  - name: releaseTag
+    displayName: 'Release tag for manual branch runs (e.g. v0.1.0-rc.1)'
+    type: string
+    default: ''
+
+jobs:
+  - job: Windows
+    displayName: Build Windows desktop
+    timeoutInMinutes: '120'
+    pool:
+      vmImage: windows-latest
+    steps:
+      - checkout: self
+
+      - pwsh: |
+          $nodeVersion = (Get-Content -LiteralPath (Join-Path $env:BUILD_SOURCESDIRECTORY '.nvmrc') -Raw -ErrorAction Stop).Trim()
+          if ([string]::IsNullOrWhiteSpace($nodeVersion)) { throw '.nvmrc must specify a Node.js version' }
+          Write-Host "##vso[task.setvariable variable=nodeVersion]$nodeVersion"
+        displayName: Read Node.js version from .nvmrc
+
+      - task: UseNode@1
+        displayName: Set up Node.js from .nvmrc
+        inputs:
+          version: '$(nodeVersion)'
+
+      - pwsh: |
+          corepack enable
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pnpm --version
+        displayName: Enable pnpm from packageManager
+
+      - pwsh: |
+          @'
+          const fs = require('node:fs');
+          const path = 'apps/desktop/package.json';
+          const ref = process.env.BUILD_SOURCEBRANCH ?? '';
+          const tag = ref.startsWith('refs/tags/') ? ref.slice('refs/tags/'.length) : (process.env.RELEASE_TAG ?? '');
+          const version = tag.startsWith('v') ? tag.slice(1) : '';
+          const semver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+          if (!semver.test(version)) {
+            console.error(`Release tag must be valid semver prefixed with v: ${tag}`);
+            process.exit(1);
+          }
+          const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
+          pkg.version = version;
+          fs.writeFileSync(path, `${JSON.stringify(pkg, null, 2)}\n`);
+          console.log(`Desktop version: ${version}`);
+          '@ | node
+        displayName: Set app version from release tag
+        env:
+          RELEASE_TAG: ${{ parameters.releaseTag }}
+
+      - pwsh: pnpm install --frozen-lockfile
+        displayName: Install dependencies
+
+      - pwsh: pnpm run build:agentlet
+        displayName: Build agentlet workspace packages
+
+      - pwsh: pnpm run build:desktop:win
+        displayName: Build desktop installer
+
+      # TODO: Windows build -> ESRP Sign -> Publish artifact
+      # Insert the separately configured ESRP signing task here, before validation
+      # and publishing. If signing changes installer bytes, regenerate the update
+      # metadata and blockmaps to match the final signed files before publishing.
+
+      - pwsh: |
+          $output = Join-Path $env:BUILD_SOURCESDIRECTORY '../huabu-electron-out'
+          foreach ($pattern in @('*.exe', '*.exe.blockmap', 'latest.yml')) {
+            $files = @(Get-ChildItem -Path $output -Filter $pattern -File -ErrorAction Stop)
+            if ($files.Count -eq 0) { throw "Missing required release asset: $pattern" }
+            $files | Select-Object Name, Length
+          }
+        displayName: Validate Windows release assets
+
+      - task: PublishPipelineArtifact@1
+        displayName: Publish complete Windows release output
+        inputs:
+          targetPath: '$(Build.SourcesDirectory)/../huabu-electron-out'
+          artifact: huabu-windows
+          publishLocation: pipeline
+
+  - job: macOS
+    displayName: Build macOS desktop
+    timeoutInMinutes: '120'
+    pool:
+      vmImage: macos-latest
+    steps:
+      - checkout: self
+
+      - pwsh: |
+          $nodeVersion = (Get-Content -LiteralPath (Join-Path $env:BUILD_SOURCESDIRECTORY '.nvmrc') -Raw -ErrorAction Stop).Trim()
+          if ([string]::IsNullOrWhiteSpace($nodeVersion)) { throw '.nvmrc must specify a Node.js version' }
+          Write-Host "##vso[task.setvariable variable=nodeVersion]$nodeVersion"
+        displayName: Read Node.js version from .nvmrc
+
+      - task: UseNode@1
+        displayName: Set up Node.js from .nvmrc
+        inputs:
+          version: '$(nodeVersion)'
+
+      - pwsh: |
+          corepack enable
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pnpm --version
+        displayName: Enable pnpm from packageManager
+
+      - pwsh: |
+          @'
+          const fs = require('node:fs');
+          const path = 'apps/desktop/package.json';
+          const ref = process.env.BUILD_SOURCEBRANCH ?? '';
+          const tag = ref.startsWith('refs/tags/') ? ref.slice('refs/tags/'.length) : (process.env.RELEASE_TAG ?? '');
+          const version = tag.startsWith('v') ? tag.slice(1) : '';
+          const semver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+          if (!semver.test(version)) {
+            console.error(`Release tag must be valid semver prefixed with v: ${tag}`);
+            process.exit(1);
+          }
+          const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
+          pkg.version = version;
+          fs.writeFileSync(path, `${JSON.stringify(pkg, null, 2)}\n`);
+          console.log(`Desktop version: ${version}`);
+          '@ | node
+        displayName: Set app version from release tag
+        env:
+          RELEASE_TAG: ${{ parameters.releaseTag }}
+
+      - pwsh: pnpm install --frozen-lockfile
+        displayName: Install dependencies
+
+      - pwsh: pnpm run build:agentlet
+        displayName: Build agentlet workspace packages
+
+      - pwsh: |
+          foreach ($name in @('CSC_LINK', 'CSC_KEY_PASSWORD', 'APPLE_ID', 'APPLE_APP_SPECIFIC_PASSWORD', 'APPLE_TEAM_ID')) {
+            $value = [Environment]::GetEnvironmentVariable($name)
+            if ([string]::IsNullOrWhiteSpace($value) -or $value.StartsWith('$(')) {
+              throw "Configure the Azure Pipelines secret variable: $name"
+            }
+          }
+          pnpm run build:desktop:mac
+        displayName: Build desktop installer (signed + notarized)
+        env:
+          CSC_LINK: $(CSC_LINK)
+          CSC_KEY_PASSWORD: $(CSC_KEY_PASSWORD)
+          APPLE_ID: $(APPLE_ID)
+          APPLE_APP_SPECIFIC_PASSWORD: $(APPLE_APP_SPECIFIC_PASSWORD)
+          APPLE_TEAM_ID: $(APPLE_TEAM_ID)
+
+      - pwsh: |
+          $output = Join-Path $env:BUILD_SOURCESDIRECTORY '../huabu-electron-out'
+          foreach ($pattern in @('*.dmg', '*.zip', '*.blockmap', 'latest-mac.yml')) {
+            $files = @(Get-ChildItem -Path $output -Filter $pattern -File -ErrorAction Stop)
+            if ($files.Count -eq 0) { throw "Missing required release asset: $pattern" }
+            $files | Select-Object Name, Length
+          }
+        displayName: Validate macOS release assets
+
+      - task: PublishPipelineArtifact@1
+        displayName: Publish complete macOS release output
+        inputs:
+          targetPath: '$(Build.SourcesDirectory)/../huabu-electron-out'
+          artifact: huabu-macos
+          publishLocation: pipeline
