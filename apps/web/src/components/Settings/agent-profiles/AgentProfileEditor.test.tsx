@@ -491,6 +491,9 @@ describe('AgentProfileEditor', () => {
     expect(container?.textContent).toContain(
       'settings.profileExecutionEditingUnavailable',
     );
+    expect(container?.textContent).not.toContain(
+      'settings.profileApprovalUnsupported',
+    );
     input('settings.displayName', 'Offline alias');
     await act(async () => saveButton()?.click());
     expect(api.update.mock.calls[0]?.[1]).not.toHaveProperty('launch');

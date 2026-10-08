@@ -317,7 +317,7 @@ export function CommandProfileForm({
               onChange={(event) => setAllowAll(event.target.checked)}
             />
           </SettingRow>
-          {!approvalSupported ? (
+          {structuredSupported && !approvalSupported ? (
             <p className="text-fg-muted px-3 py-2 text-xs">
               {t('settings.profileApprovalUnsupported')}
             </p>
