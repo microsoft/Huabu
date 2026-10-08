@@ -3,7 +3,6 @@
 
 import { isIP } from 'node:net';
 
-import { resolveAllowedHostnames } from './host-guard.js';
 import { resolveConfiguredPublicOrigin } from './public-origin.js';
 
 export interface DeploymentConfig {
@@ -41,14 +40,11 @@ export function resolveDeploymentConfig(
     );
   }
 
-  const allowedHostsConfigured = Boolean(env.HUABU_ALLOWED_HOSTS?.trim());
-  const bindScope = isLoopbackHost(bindHost) ? 'loopback' : 'network';
   const publicOrigin = resolveConfiguredPublicOrigin(env);
-  if (bindScope === 'network' && !allowedHostsConfigured) {
-    throw new Error(
-      'HUABU_ALLOWED_HOSTS is required when HUABU_BIND_HOST is not loopback',
-    );
-  }
+  const allowedHostsConfigured = Boolean(
+    publicOrigin || env.HUABU_ALLOWED_HOSTS?.trim(),
+  );
+  const bindScope = isLoopbackHost(bindHost) ? 'loopback' : 'network';
   if (bindScope === 'network' && !userConfigured) {
     throw new Error(
       'HUABU_BASIC_AUTH_USER and HUABU_BASIC_AUTH_PASS are required when HUABU_BIND_HOST is not loopback',
@@ -68,15 +64,6 @@ export function resolveDeploymentConfig(
       'HUABU_PUBLIC_ORIGIN must be reachable beyond loopback when HUABU_BIND_HOST is not loopback',
     );
   }
-  if (bindScope === 'network' && publicOrigin) {
-    const publicHostname = new URL(publicOrigin).hostname.toLowerCase();
-    if (!resolveAllowedHostnames(env).has(publicHostname)) {
-      throw new Error(
-        'HUABU_PUBLIC_ORIGIN hostname must be included in HUABU_ALLOWED_HOSTS',
-      );
-    }
-  }
-
   return {
     allowedHostsConfigured,
     basicAuthConfigured: userConfigured,

@@ -7,7 +7,7 @@
  *
  * Operators who explicitly want LAN / remote access set
  * `HUABU_BIND_HOST=0.0.0.0` (or a specific interface IP) and pair that
- * with `HUABU_ALLOWED_HOSTS` and `HUABU_BASIC_AUTH_*` — see README.
+ * with `HUABU_PUBLIC_ORIGIN` and `HUABU_BASIC_AUTH_*` — see README.
  *
  * Lives in its own module (not inlined into `server.ts`) so the default
  * can be regression-tested without booting Fastify. The Electron

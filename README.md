@@ -85,13 +85,14 @@ The remote address must be an origin without credentials, a query, fragment, or 
 
 ```dotenv
 HUABU_BIND_HOST=0.0.0.0
-HUABU_ALLOWED_HOSTS=huabu.example.com
 HUABU_PUBLIC_ORIGIN=https://huabu.example.com
 HUABU_BASIC_AUTH_USER=owner
 HUABU_BASIC_AUTH_PASS=<strong-password>
 ```
 
-Then run `pnpm start:web`. `HUABU_PUBLIC_ORIGIN` is the root HTTP(S) origin that remote Agentlets use to reach this deployment; Huabu derives both the Canvas RFS URL and Agentlet WebSocket endpoint from it. Its hostname must appear in `HUABU_ALLOWED_HOSTS`. Huabu rejects paths, credentials, queries, fragments, unsupported schemes, a Host-allowlist mismatch, and a missing or loopback public origin for non-loopback binds. It also rejects a non-loopback bind when allowed hosts or either Basic Auth value is missing. The authenticated owner can use all features, including Settings, OAuth, and External Agents. `pnpm dev` applies the same requirement to non-loopback browser clients while preserving zero-configuration local development.
+Then run `pnpm start:web`. `HUABU_PUBLIC_ORIGIN` is the root HTTP(S) origin that remote Agentlets use to reach this deployment; Huabu derives both the Canvas RFS URL and Agentlet WebSocket endpoint from it and automatically trusts its hostname in the Host, CORS, and Origin guards. Set optional `HUABU_ALLOWED_HOSTS` only for additional browser aliases. Huabu rejects paths, credentials, queries, fragments, unsupported schemes, and a missing or loopback public origin for non-loopback binds. It also rejects a non-loopback bind when either Basic Auth value is missing. The authenticated owner can use all features, including Settings, OAuth, and External Agents. `pnpm dev` applies the same requirement to non-loopback browser clients while preserving zero-configuration local development.
+
+`pnpm start:web` binds the fixed `SERVER_PORT` (default `3001`) and fails if that port is invalid or unavailable; it never advances to another port. Development launchers may advance from their preferred ports so intentional parallel instances remain possible.
 
 Huabu currently serves HTTP. Use a trusted private network or terminate HTTPS with deployment infrastructure such as Caddy, Nginx, Tailscale Serve, or a cloud load balancer. Do not put a Basic Auth deployment on an untrusted network without transport encryption.
 

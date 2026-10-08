@@ -13,22 +13,16 @@ import {
   initStorage,
 } from './modules/storage/index.js';
 import { initializeSecretStore } from './security/secret-store.js';
+import { resolveServerPort } from './server-port.js';
 import { getLogger } from './utils/logger.js';
 
 const log = getLogger('server');
-
-const DEFAULT_PORT = 3001;
-const parsedPort = Number.parseInt(
-  process.env.SERVER_PORT ?? process.env.PORT ?? '',
-  10,
-);
-const PORT =
-  Number.isFinite(parsedPort) && parsedPort > 0 ? parsedPort : DEFAULT_PORT;
 
 const HOST = resolveBindHost();
 
 async function start(): Promise<void> {
   try {
+    const port = resolveServerPort();
     const deployment = resolveDeploymentConfig();
     if (deployment.bindScope === 'network') {
       log.warn(
@@ -55,7 +49,7 @@ async function start(): Promise<void> {
 
     await initializeSecretStore();
     initializeConnectionToken();
-    await app.listen({ port: PORT, host: HOST });
+    await app.listen({ port, host: HOST });
     // When bound to a wildcard address, "localhost" is still the URL a
     // browser on this machine would use — but log both so operators on a
     // remote machine know how to reach the server.
@@ -63,7 +57,7 @@ async function start(): Promise<void> {
       HOST === '0.0.0.0' || HOST === '::'
         ? `localhost (bound on ${HOST})`
         : HOST;
-    log.info(`Server running at http://${displayHost}:${PORT}`);
+    log.info(`Server running at http://${displayHost}:${port}`);
 
     // Warm up OAuth tokens off the request path so the first chat/Settings
     // action doesn't pay pi-ai's one-time lazy OAuth load + token refresh.

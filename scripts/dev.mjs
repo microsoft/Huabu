@@ -58,7 +58,7 @@ const env = loadEnv(
   path.join(repoRoot, 'apps/web/.env'),
 );
 
-const SERVER_PORT = Number.parseInt(env.SERVER_PORT || env.PORT || '3001', 10);
+const SERVER_PORT = Number.parseInt(env.SERVER_PORT || '3001', 10);
 const WEB_PORT = Number.parseInt(env.WEB_PORT || env.VITE_PORT || '5173', 10);
 const SERVER_HOST = '127.0.0.1';
 const HANDBOOK_URL =

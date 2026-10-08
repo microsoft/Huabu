@@ -24,20 +24,13 @@ describe('resolveDeploymentConfig', () => {
     ).toThrow(/configured together/);
   });
 
-  it('requires allowed hosts and Basic Auth for a network bind', () => {
+  it('requires Basic Auth and a public origin for a network bind', () => {
     expect(() =>
       resolveDeploymentConfig({ HUABU_BIND_HOST: '0.0.0.0' }),
-    ).toThrow(/HUABU_ALLOWED_HOSTS/);
-    expect(() =>
-      resolveDeploymentConfig({
-        HUABU_BIND_HOST: '0.0.0.0',
-        HUABU_ALLOWED_HOSTS: 'huabu.example',
-      }),
     ).toThrow(/HUABU_BASIC_AUTH/);
     expect(() =>
       resolveDeploymentConfig({
         HUABU_BIND_HOST: '0.0.0.0',
-        HUABU_ALLOWED_HOSTS: 'huabu.example',
         HUABU_BASIC_AUTH_USER: 'owner',
         HUABU_BASIC_AUTH_PASS: 'secret',
       }),
@@ -48,7 +41,6 @@ describe('resolveDeploymentConfig', () => {
     expect(
       resolveDeploymentConfig({
         HUABU_BIND_HOST: '0.0.0.0',
-        HUABU_ALLOWED_HOSTS: 'huabu.example',
         HUABU_BASIC_AUTH_USER: 'owner',
         HUABU_BASIC_AUTH_PASS: 'secret',
         HUABU_PUBLIC_ORIGIN: 'https://huabu.example:8443/',
@@ -77,8 +69,8 @@ describe('resolveDeploymentConfig', () => {
     ).toThrow(/beyond loopback/);
   });
 
-  it('requires the public hostname in the Host allowlist', () => {
-    expect(() =>
+  it('accepts optional additional Host aliases', () => {
+    expect(
       resolveDeploymentConfig({
         HUABU_BIND_HOST: '0.0.0.0',
         HUABU_ALLOWED_HOSTS: 'internal.huabu.example',
@@ -86,6 +78,6 @@ describe('resolveDeploymentConfig', () => {
         HUABU_BASIC_AUTH_PASS: 'secret',
         HUABU_PUBLIC_ORIGIN: 'https://public.huabu.example',
       }),
-    ).toThrow(/included in HUABU_ALLOWED_HOSTS/);
+    ).toMatchObject({ allowedHostsConfigured: true });
   });
 });

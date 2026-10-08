@@ -68,7 +68,7 @@ export default defineConfig(({ mode }) => {
     ...process.env,
   };
 
-  const apiPort = env.SERVER_PORT || env.PORT || '3001';
+  const apiPort = env.SERVER_PORT || '3001';
   const apiTarget = env.VITE_API_PROXY_TARGET || `http://localhost:${apiPort}`;
   const parsedDevPort = Number.parseInt(
     env.WEB_PORT || env.VITE_PORT || '',

@@ -19,9 +19,9 @@
  *   2. **`Origin` allowlist** — fallback for older browsers / WebViews
  *      that don't emit `Sec-Fetch-*`. `Origin` is also browser-set and
  *      not forgeable by JS, but lacks the explicit cross-site signal.
- *      We reuse {@link resolveAllowedHostnames} so a single env var
- *      (`HUABU_ALLOWED_HOSTS`) drives Host guard, CORS, and this
- *      check.
+ *      We reuse {@link resolveAllowedHostnames} so the canonical public
+ *      origin and optional additional aliases drive Host guard, CORS, and
+ *      this check.
  *   3. **Loopback peer fallback** — non-browser callers (curl, native
  *      apps, CI scripts) routinely emit neither header. For a local
  *      developer tool we allow them *only* when the TCP peer is a
@@ -82,7 +82,7 @@ export const originGuardPlugin: FastifyPluginAsync = async (app) => {
         code: 'CROSS_SITE_BLOCKED',
         details: {
           secFetchSite: site,
-          hint: 'Open the app from one of the allowed origins (HUABU_ALLOWED_HOSTS) or use a trusted client.',
+          hint: 'Open the app from HUABU_PUBLIC_ORIGIN or an additional HUABU_ALLOWED_HOSTS alias, or use a trusted client.',
         },
       });
     }
@@ -97,7 +97,7 @@ export const originGuardPlugin: FastifyPluginAsync = async (app) => {
         code: 'BAD_ORIGIN',
         details: {
           receivedOrigin: origin,
-          hint: 'Add the hostname to HUABU_ALLOWED_HOSTS if this is an intentional deployment.',
+          hint: 'Use HUABU_PUBLIC_ORIGIN or add the hostname to HUABU_ALLOWED_HOSTS if this is an intentional alias.',
         },
       });
     }
