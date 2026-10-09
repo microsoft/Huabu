@@ -63,7 +63,7 @@ interface NodeToolbarProps {
 }
 
 const MAIN_TOOL_BUTTON_CLASS =
-  'h-8 w-8 shrink-0 p-2 [&>span]:right-px [&>span]:bottom-0.5';
+  'h-9 w-9 shrink-0 p-2.5 [&>span]:right-1 [&>span]:bottom-1';
 
 export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
   const { t } = useTranslation();
@@ -637,7 +637,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             shortcutBadge={isNotMouse ? undefined : 'A'}
             shortcutBadgeActive={pendingNodeType === 'question'}
             className={clsx(
-              'h-8 shrink-0 gap-1.5 px-2 py-0 font-normal whitespace-nowrap',
+              'h-9 shrink-0 gap-1.5 px-2 py-0 font-normal whitespace-nowrap [&>span]:right-1 [&>span]:bottom-1',
               !isNotMouse && 'pr-4',
               pendingNodeType === 'question' &&
                 'text-info bg-info-bg enabled:hover:bg-info-bg',

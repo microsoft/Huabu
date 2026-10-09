@@ -5,7 +5,7 @@ import { expect, test } from '@playwright/test';
 
 import { openNewCanvas, readViewportTransform } from './helpers';
 
-test('shorter zoom control aligns with the unchanged main toolbar bottom', async ({
+test('shorter zoom control aligns with the roomier main toolbar bottom', async ({
   page,
 }) => {
   await openNewCanvas(page);
@@ -13,9 +13,9 @@ test('shorter zoom control aligns with the unchanged main toolbar bottom', async
   const toolbar = page.locator('[data-canvas-main-toolbar] > div').first();
   const zoom = page.locator('.react-flow__controls');
   const layout = page.locator('[data-overlay-layout]');
-  const assertGeometry = async () => {
+  const assertGeometry = async (showShortcuts = true) => {
     await expect(toolbar).toBeVisible();
-    await expect(toolbar).toHaveCSS('height', '46px');
+    await expect(toolbar).toHaveCSS('height', '50px');
     await expect(toolbar).toHaveCSS('padding', '6px 8px');
     await expect(toolbar).toHaveCSS('gap', '6px');
     await expect(zoom).toHaveCSS('height', '34px');
@@ -31,10 +31,38 @@ test('shorter zoom control aligns with the unchanged main toolbar bottom', async
     expect(zoomBox.y + zoomBox.height).toBeCloseTo(bottom, 1);
     expect(zoomBox.y).toBeGreaterThan(toolbarBox.y);
     const note = toolbar.getByRole('button', { name: /^Note/ });
-    await expect(note).toHaveCSS('width', '32px');
-    await expect(note).toHaveCSS('height', '32px');
+    await expect(note).toHaveCSS('width', '36px');
+    await expect(note).toHaveCSS('height', '36px');
     await expect(note.locator('svg')).toHaveCSS('width', '16px');
     await expect(note.locator('svg')).toHaveCSS('height', '16px');
+    const agent = toolbar.getByRole('button', { name: /^Add Agent/ });
+    await expect(agent).toHaveCSS('height', '36px');
+    if (showShortcuts) {
+      for (const shortcut of ['S', '1', '2', '3', '4']) {
+        const button = toolbar.getByRole('button').filter({
+          has: page.locator('span').filter({
+            hasText: new RegExp(`^${shortcut}$`),
+          }),
+        });
+        await expect(button).toHaveCSS('width', '36px');
+        await expect(button).toHaveCSS('height', '36px');
+        await expect(button).toHaveCSS('padding', '10px');
+        await expect(button.locator('svg')).toHaveCSS('width', '16px');
+        await expect(button.locator('svg')).toHaveCSS('height', '16px');
+        await expect(button.locator('span')).toHaveCSS('right', '4px');
+        await expect(button.locator('span')).toHaveCSS('bottom', '4px');
+      }
+      await expect(agent.locator('span')).toHaveCSS('right', '4px');
+      await expect(agent.locator('span')).toHaveCSS('bottom', '4px');
+    } else {
+      await expect(note.locator('span')).toHaveCount(0);
+      await expect(agent.locator('span')).toHaveCount(0);
+      for (const name of ['Undo', 'Redo']) {
+        const button = toolbar.getByRole('button', { name, exact: true });
+        await expect(button).toHaveCSS('width', '36px');
+        await expect(button).toHaveCSS('height', '36px');
+      }
+    }
   };
 
   await assertGeometry();
@@ -46,7 +74,7 @@ test('shorter zoom control aligns with the unchanged main toolbar bottom', async
   await zoom.getByRole('button').tap();
   await expect(page.getByRole('dialog', { name: 'Canvas zoom' })).toBeVisible();
   await page.keyboard.press('Escape');
-  await assertGeometry();
+  await assertGeometry(false);
 });
 
 test('main toolbar stays centered in the uncovered canvas without changing its size or viewport', async ({

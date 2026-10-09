@@ -20,7 +20,6 @@
   min-width: 32px;
   padding: 7px;
   border-radius: 6px;
-  background: transparent;
 }
 :is(.node-floating-toolbar, .canvas-context-toolbar) button svg,
 .node-toolbar-layout button svg {
@@ -29,9 +28,9 @@
   stroke-width: 1.65;
 }
 :is(.node-floating-toolbar, .canvas-context-toolbar)
-  button:not(.canvas-context-submit):hover,
+  button:where(:not(.canvas-context-submit)):hover,
 :is(.node-floating-toolbar, .canvas-context-toolbar)
-  button[aria-expanded='true']:not(.canvas-context-submit) {
+  button[aria-expanded='true']:where(:not(.canvas-context-submit)) {
   background: var(--bg-hover);
 }
 :is(.node-floating-toolbar, .canvas-context-toolbar)
