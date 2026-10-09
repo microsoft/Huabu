@@ -105,6 +105,9 @@ describe('spawned agent environment', () => {
     ).toEqual({
       AGENTLET_SERVER: 'ws://127.0.0.1:3001/api/acp/agent',
       AGENTLET_TOKEN: 'cli-token',
+      AGENTLET_CAPABILITY_SDK_URL: expect.stringMatching(
+        /\/capability-sdk\/index\.js$/,
+      ),
       AGENTLET_REACHBACK_DIR: '/tmp/reachback',
       HUABU_RFS_URL: 'http://127.0.0.1:3001/api/rfs/canvas-1',
     })
@@ -115,10 +118,12 @@ describe('spawned agent environment', () => {
       buildAgentProcessEnv('ws://daemon.test', 'daemon-token', {}, {
         AGENTLET_SERVER: 'ws://host.test',
         AGENTLET_TOKEN: 'host-token',
+        AGENTLET_CAPABILITY_SDK_URL: 'file:///tmp/untrusted.js',
       }),
     ).toMatchObject({
       AGENTLET_SERVER: 'ws://host.test',
       AGENTLET_TOKEN: 'daemon-token',
+      AGENTLET_CAPABILITY_SDK_URL: expect.not.stringContaining('untrusted'),
     })
   })
 })

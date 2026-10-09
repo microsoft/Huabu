@@ -900,5 +900,9 @@ export function buildAgentProcessEnv(
     ...envRegistry,
     ...sessionEnv,
     AGENTLET_TOKEN: token,
+    AGENTLET_CAPABILITY_SDK_URL: new URL(
+      './capability-sdk/index.js',
+      import.meta.url,
+    ).href,
   }
 }
