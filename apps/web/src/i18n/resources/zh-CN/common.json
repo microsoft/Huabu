@@ -842,6 +842,7 @@
     "stop": "停止",
     "sendMessage": "发送消息",
     "send": "发送",
+    "aiContentDisclaimer": "AI 生成的内容可能不准确。",
     "slashCommands": "斜杠命令",
     "loadingCommands": "正在加载命令…",
     "loadingAgentOptions": "正在加载 Agent 选项",

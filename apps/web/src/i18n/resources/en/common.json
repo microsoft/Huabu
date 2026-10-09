@@ -842,6 +842,7 @@
     "stop": "Stop",
     "sendMessage": "Send Message",
     "send": "Send",
+    "aiContentDisclaimer": "AI Generated Content May Be Inaccurate.",
     "slashCommands": "Slash commands",
     "loadingCommands": "Loading commands…",
     "loadingAgentOptions": "Loading agent options",

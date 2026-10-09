@@ -681,9 +681,7 @@ export const ChatInput = ({
           </div>
         </div>
 
-        {/* Agent + context-usage row — rendered OUTSIDE the input box, on
-            its own line below it: the inline agent selector on the left,
-            the context-usage ring on the right. */}
+        {/* Agent and context usage sit below the input box. */}
         <div className="mt-1 flex items-center justify-between gap-3 px-1">
           <div className="flex min-w-0 flex-1 items-center overflow-hidden">
             {agentSelectorSlot}

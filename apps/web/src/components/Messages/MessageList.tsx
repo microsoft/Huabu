@@ -716,6 +716,15 @@ export const MessageList = memo(function MessageList({
         </div>
       </div>
 
+      {!isHistoryLoading && !isLoading && messages.length === 0 ? (
+        <div
+          className="text-fg-subtle pointer-events-none absolute inset-0 flex items-center justify-center px-6 text-center text-xs"
+          data-chat-empty-disclaimer
+        >
+          {t('chat.aiContentDisclaimer')}
+        </div>
+      ) : null}
+
       {isAwayFromBottom && (
         <Button
           variant="outline"
