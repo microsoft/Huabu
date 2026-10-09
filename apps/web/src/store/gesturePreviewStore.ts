@@ -77,6 +77,9 @@ type GesturePreviewData = {
    */
   sketchSelectionPolygon: Array<{ x: number; y: number }> | null;
 
+  /** Identity of the committed Lasso, preserved through moves and cancelled previews. */
+  sketchSelectionSession: object | null;
+
   /**
    * Live translation (flow-space) applied to the selected strokes while a
    * move drag is in progress; `null` when not moving. Baked into node data
@@ -159,6 +162,11 @@ type GesturePreviewState = GesturePreviewData & {
     polygon: Array<{ x: number; y: number }> | null,
   ) => void;
 
+  /** Commit a new Lasso even when it captures the same strokes and polygon. */
+  commitSketchSelection: (
+    polygon: Array<{ x: number; y: number }> | null,
+  ) => void;
+
   /** Set / clear the live move-preview offset. */
   setSketchStrokeMovePreview: (
     offset: { dx: number; dy: number } | null,
@@ -227,6 +235,7 @@ const INITIAL_PREVIEW_DATA: GesturePreviewData = {
   sketchStrokeSelection: {},
   sketchStrokeHighlight: {},
   sketchSelectionPolygon: null,
+  sketchSelectionSession: null,
   sketchStrokeMovePreview: null,
   sketchStrokeMoveCarriedNodeIds: [],
   inkSubmissionPreparing: false,
@@ -276,6 +285,7 @@ export const useGesturePreviewStore = create<GesturePreviewState>()((set) => ({
     set({
       sketchStrokeSelection: {},
       sketchSelectionPolygon: null,
+      sketchSelectionSession: null,
       sketchStrokeMovePreview: null,
       sketchStrokeMoveCarriedNodeIds: [],
     }),
@@ -284,6 +294,11 @@ export const useGesturePreviewStore = create<GesturePreviewState>()((set) => ({
   clearSketchStrokeHighlight: () => set({ sketchStrokeHighlight: {} }),
   setSketchSelectionPolygon: (sketchSelectionPolygon) =>
     set({ sketchSelectionPolygon }),
+  commitSketchSelection: (sketchSelectionPolygon) =>
+    set({
+      sketchSelectionPolygon,
+      sketchSelectionSession: sketchSelectionPolygon ? {} : null,
+    }),
   setSketchStrokeMovePreview: (sketchStrokeMovePreview) =>
     set({ sketchStrokeMovePreview }),
   setSketchStrokeMoveCarriedNodeIds: (sketchStrokeMoveCarriedNodeIds) =>

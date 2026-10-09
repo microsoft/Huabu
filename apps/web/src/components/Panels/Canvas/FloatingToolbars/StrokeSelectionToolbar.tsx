@@ -1,10 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { useReactFlow } from '@xyflow/react';
-import { ArrowUp, Trash2 } from 'lucide-react';
+import { useReactFlow, useStore } from '@xyflow/react';
+import { ArrowUp, Square, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useShallow } from 'zustand/react/shallow';
 
 import {
   getSelectionBounds,
@@ -17,9 +18,7 @@ import {
   FloatingToolbar,
   FLOATING_TOOLBAR_CLASS,
 } from '@/components/Common/FloatingToolbar';
-import { Spinner } from '@/components/Common/Spinner';
 import { toast } from '@/components/Common/Toast';
-import { Tooltip } from '@/components/Common/Tooltip';
 import { computeAdjacentNodePlacement } from '@/components/Nodes/nodePlacement';
 import { createQuestionNode } from '@/components/Nodes/question/questionCompose';
 import { SketchControls } from '@/components/Nodes/sketch/SketchControls';
@@ -43,34 +42,47 @@ import {
 import { isOutsideCanvasInteraction } from '@/hooks/shortcuts/isEditableTarget';
 import { useIsNotMouse } from '@/hooks/useInputMode';
 import {
+  getDefaultAgentBinding,
   loadDefaultAgentBinding,
+  rememberConversationAgentBinding,
   selectDefaultConversationProfileId,
   useAcpProfilesStore,
 } from '@/store/acpProfilesStore';
 import useCanvasStore from '@/store/canvasStore';
 import {
   selectThreadBinding,
+  selectThreadIsLoading,
   selectThreadLastAction,
   useChatStore,
 } from '@/store/chatStore';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
-import { resolveQuestionAgentPresentation } from '@/utils/questionAgentPresentation';
 
 import './NodeToolbar.css';
 
+import {
+  InkAgentDestinationPicker,
+  type InkAgentConversationOption,
+} from './InkAgentDestinationPicker';
 import {
   deriveInkSubmissionCandidate,
   groundingOperandsFromContext,
   inkLassoIdentity,
   inkSelectionIdentity,
   retainedLassoBounds,
+  resolveInkQuestionTarget,
   unionSelectionBounds,
 } from './inkQuestionSubmission';
+import {
+  useInkConversationDestination,
+  type InkDestination,
+} from './useInkConversationDestination';
 
 import type { CanvasSketchNodeData } from '@/components/Nodes/types';
 import type { ChatSession } from '@/hooks/useChatSession';
 import type {
   AgentMode,
+  AgentBinding,
+  AgentIcon,
   CanvasCommand,
   CanvasNodeId,
   SketchStroke,
@@ -82,6 +94,42 @@ interface InkSubmissionAttempt {
   session: ChatSession;
   mode: AgentMode;
   groundingVisual?: VisibleCanvasGrounding;
+}
+
+function inkDestinationIdentity(
+  destination: InkDestination,
+  defaultProfileId: string | null,
+): string {
+  if (destination.kind === 'unresolved') return 'unresolved';
+  if (destination.kind === 'continue')
+    return JSON.stringify([
+      'continue',
+      destination.nodeId,
+      destination.threadId,
+    ]);
+  const binding = destination.choice?.binding;
+  const profileId = binding
+    ? binding.kind === 'internal'
+      ? 'huabu'
+      : binding.profileId
+    : defaultProfileId;
+  const mode =
+    destination.choice?.mode ?? (profileId === 'huabu' ? 'operate' : 'ask');
+  return JSON.stringify(['new', profileId, mode]);
+}
+
+function isInkTargetBusy(nodeId: string): boolean {
+  const node = useCanvasStore
+    .getState()
+    .nodes.find((entry) => entry.id === nodeId);
+  const threadId = node?.data.threadId;
+  const chat = useChatStore.getState();
+  return (
+    node?.data.status === 'running' ||
+    (typeof threadId === 'string' &&
+      (selectThreadIsLoading(chat, threadId) ||
+        useCanvasStore.getState().pendingForkThreadIds[threadId] === true))
+  );
 }
 
 /**
@@ -97,8 +145,11 @@ interface InkSubmissionAttempt {
 export const StrokeSelectionToolbar = () => {
   const { t } = useTranslation();
   const { getViewport } = useReactFlow();
+  const selecting = useStore((state) => state.userSelectionActive);
   // Subscribe to `nodes` so the anchor + representative style track edits.
   const nodes = useCanvasStore((s) => s.nodes);
+  const canvasId = useCanvasStore((s) => s.canvasId);
+  const pendingForks = useCanvasStore((s) => s.pendingForkThreadIds);
   const addNode = useCanvasStore((s) => s.addNode);
   const executeCommands = useCanvasStore((s) => s.executeCommands);
   const deleteNodes = useCanvasStore((s) => s.deleteNodes);
@@ -107,6 +158,9 @@ export const StrokeSelectionToolbar = () => {
   const selection = useGesturePreviewStore((s) => s.sketchStrokeSelection);
   const selectionPolygon = useGesturePreviewStore(
     (s) => s.sketchSelectionPolygon,
+  );
+  const selectionSession = useGesturePreviewStore(
+    (s) => s.sketchSelectionSession,
   );
   const selectionMove = useGesturePreviewStore(
     (s) => s.sketchStrokeMovePreview,
@@ -118,7 +172,8 @@ export const StrokeSelectionToolbar = () => {
     (s) => s.setInkSubmissionPreparing,
   );
   const isNotMouse = useIsNotMouse();
-  const attemptRef = useRef<InkSubmissionAttempt | null>(null);
+  const attemptsRef = useRef(new Map<string, InkSubmissionAttempt>());
+  const attemptScopeRef = useRef({ canvasId, selectionSession });
   const preparationRef = useRef<{
     token: object;
     lassoIdentity: string;
@@ -138,22 +193,165 @@ export const StrokeSelectionToolbar = () => {
     () => retainedLassoBounds(selectionPolygon, selectionMove) ?? strokeBounds,
     [selectionMove, selectionPolygon, strokeBounds],
   );
-  const candidate = useMemo(
-    () => deriveInkSubmissionCandidate(nodes, selection),
-    [nodes, selection],
-  );
-  const targetThreadId =
-    candidate.kind === 'ready' ? candidate.target?.threadId : undefined;
-  const cachedTargetBinding = useChatStore((state) =>
-    targetThreadId ? selectThreadBinding(state, targetThreadId) : null,
-  );
-  const cachedTargetMode = useChatStore((state) =>
-    targetThreadId ? selectThreadLastAction(state, targetThreadId) : null,
+  const chatState = useChatStore(
+    useShallow((state) => {
+      const values: Array<boolean | AgentBinding | AgentMode> = [];
+      if (!hasSelection) return values;
+      for (const node of nodes) {
+        if (node.type !== 'question' || typeof node.data.threadId !== 'string')
+          continue;
+        values.push(
+          selectThreadIsLoading(state, node.data.threadId),
+          selectThreadBinding(state, node.data.threadId),
+          selectThreadLastAction(state, node.data.threadId),
+        );
+      }
+      return values;
+    }),
   );
   const agentProfiles = useAcpProfilesStore((state) => state.profiles);
+  const selectableProfileIds = useAcpProfilesStore(
+    (state) => state.selectableProfileIds,
+  );
+  const profileError = useAcpProfilesStore((state) => state.error);
   const recentProfileId = useAcpProfilesStore(
     selectDefaultConversationProfileId,
   );
+  const selectableProfiles = useMemo(
+    () =>
+      agentProfiles.filter((profile) =>
+        selectableProfileIds.includes(profile.id),
+      ),
+    [agentProfiles, selectableProfileIds],
+  );
+  const defaultBinding = recentProfileId ? getDefaultAgentBinding() : null;
+  const conversations = useMemo<InkAgentConversationOption[]>(() => {
+    void chatState;
+    void pendingForks;
+    if (!hasSelection) return [];
+    const chat = useChatStore.getState();
+    return nodes
+      .filter((node) => node.type === 'question')
+      .map((node) => {
+        const target = resolveInkQuestionTarget(node);
+        const binding =
+          target?.binding ??
+          (target
+            ? selectThreadBinding(chat, target.threadId)
+            : ({ kind: 'internal' } as const));
+        return {
+          nodeId: node.id,
+          title:
+            typeof node.data.label === 'string' && node.data.label.trim()
+              ? node.data.label
+              : t('chat.newQuestion'),
+          binding,
+          mode:
+            target?.mode ??
+            (target ? selectThreadLastAction(chat, target.threadId) : 'ask'),
+          fallbackIcon: node.data.agentIcon as AgentIcon | undefined,
+          disabledReason: !target
+            ? t('toolbar.inkAgentPicker.unavailable')
+            : isInkTargetBusy(node.id)
+              ? t('toolbar.inkAgentPicker.busy')
+              : undefined,
+        };
+      });
+  }, [nodes, chatState, pendingForks, hasSelection, t]);
+  const {
+    destination,
+    loading: loadingDestination,
+    error: destinationError,
+    choose: chooseDestination,
+    retryDefault,
+  } = useInkConversationDestination({
+    canvasId,
+    hasSelection,
+    selecting,
+    selectionSession,
+    conversations: conversations.map((conversation) => ({
+      nodeId: conversation.nodeId,
+      threadId: resolveInkQuestionTarget(
+        nodes.find((node) => node.id === conversation.nodeId),
+      )?.threadId,
+      available: !conversation.disabledReason,
+    })),
+  });
+  const selectedTargetId =
+    destination.kind === 'continue' ? destination.nodeId : undefined;
+  const candidate = useMemo(
+    () => deriveInkSubmissionCandidate(nodes, selection, selectedTargetId),
+    [nodes, selection, selectedTargetId],
+  );
+  const destinationIdentity = inkDestinationIdentity(
+    destination,
+    recentProfileId,
+  );
+  const destinationIdentityRef = useRef(destinationIdentity);
+  destinationIdentityRef.current = destinationIdentity;
+  const selectedConversation = conversations.find(
+    (entry) => entry.nodeId === selectedTargetId,
+  );
+  const currentBinding =
+    destination.kind === 'continue'
+      ? (selectedConversation?.binding ?? null)
+      : destination.kind === 'new'
+        ? (destination.choice?.binding ?? defaultBinding)
+        : null;
+  const currentMode =
+    destination.kind === 'continue'
+      ? (selectedConversation?.mode ?? 'ask')
+      : ((destination.kind === 'new' ? destination.choice?.mode : undefined) ??
+        (currentBinding?.kind === 'internal' ? 'operate' : 'ask'));
+  const unavailableReason =
+    destination.kind === 'unresolved'
+      ? loadingDestination
+        ? t('toolbar.inkAgentPicker.loadingConversation')
+        : destinationError
+          ? t('toolbar.inkAgentPicker.loadFailed', {
+              message: destinationError.message,
+            })
+          : t('toolbar.inkAgentPicker.chooseConversation')
+      : destination.kind === 'continue'
+        ? (selectedConversation?.disabledReason ??
+          (!selectedConversation ||
+          resolveInkQuestionTarget(
+            nodes.find((node) => node.id === selectedTargetId),
+          )?.threadId !== destination.threadId
+            ? t('toolbar.inkAgentPicker.unavailable')
+            : undefined))
+        : destination.choice?.binding.kind === 'external' &&
+            !selectableProfileIds.includes(destination.choice.binding.profileId)
+          ? t('toolbar.inkAgentPicker.unavailable')
+          : undefined;
+
+  useEffect(() => {
+    if (hasSelection && !useAcpProfilesStore.getState().loaded) {
+      void useAcpProfilesStore.getState().init();
+    }
+    if (selecting) return;
+    const previous = attemptScopeRef.current;
+    if (
+      !hasSelection ||
+      previous.canvasId !== canvasId ||
+      previous.selectionSession !== selectionSession
+    ) {
+      attemptsRef.current.clear();
+    }
+    attemptScopeRef.current = { canvasId, selectionSession };
+  }, [hasSelection, selecting, selectionSession, canvasId]);
+
+  const changeDestination = (next: InkDestination) => {
+    if (preparationRef.current) return;
+    if (next.kind === 'new' && next.choice) {
+      rememberConversationAgentBinding(next.choice.binding);
+    }
+    destinationIdentityRef.current = inkDestinationIdentity(
+      next,
+      recentProfileId,
+    );
+    chooseDestination(next);
+  };
 
   const currentLassoIdentity = useCallback(
     () =>
@@ -172,7 +370,7 @@ export const StrokeSelectionToolbar = () => {
   useEffect(() => {
     const active = preparationRef.current;
     if (!active || active.lassoIdentity === renderedLassoIdentity) return;
-    attemptRef.current = null;
+    attemptsRef.current.clear();
     preparationRef.current = null;
     setInkSubmissionPreparing(false);
     setIsPreparing(false);
@@ -185,13 +383,25 @@ export const StrokeSelectionToolbar = () => {
     const freshCandidate = deriveInkSubmissionCandidate(
       canvas.nodes,
       strokeSelection,
+      selectedTargetId,
     );
-    if (freshCandidate.kind !== 'ready') return;
-    const identity = inkSelectionIdentity(
+    if (
+      destination.kind === 'unresolved' ||
+      (destination.kind === 'continue' &&
+        (freshCandidate.kind !== 'ready' ||
+          freshCandidate.target?.threadId !== destination.threadId)) ||
+      freshCandidate.kind !== 'ready' ||
+      (selectedTargetId && isInkTargetBusy(selectedTargetId))
+    ) {
+      toast(t('toolbar.inkAgentPicker.unavailable'), { tone: 'danger' });
+      return;
+    }
+    const sourceIdentity = inkSelectionIdentity(
       canvas.canvasId,
       canvas.nodes,
       strokeSelection,
     );
+    const identity = JSON.stringify([sourceIdentity, destinationIdentity]);
     const lassoIdentity = inkLassoIdentity(
       canvas.canvasId,
       strokeSelection,
@@ -202,15 +412,22 @@ export const StrokeSelectionToolbar = () => {
       canvasContext: canvas.getAgentChatContext({
         nodeIds: freshCandidate.selectedNodeIds,
         strokeSelection: freshCandidate.strokeSelection,
-        excludeNodeIds: freshCandidate.target
-          ? [freshCandidate.target.nodeId]
-          : undefined,
+        excludeNodeIds: freshCandidate.excludedNodeIds,
       }),
     };
     const groundingOperands = groundingOperandsFromContext(
       capturedSources.canvasContext,
     );
     const preparationToken = {};
+    const isCurrentAttempt = () =>
+      preparationRef.current?.token === preparationToken &&
+      destinationIdentityRef.current === destinationIdentity &&
+      currentLassoIdentity() === lassoIdentity &&
+      inkSelectionIdentity(
+        useCanvasStore.getState().canvasId,
+        useCanvasStore.getState().nodes,
+        useGesturePreviewStore.getState().sketchStrokeSelection,
+      ) === sourceIdentity;
     preparationRef.current = {
       token: preparationToken,
       lassoIdentity,
@@ -225,8 +442,7 @@ export const StrokeSelectionToolbar = () => {
     };
     let retainReservation = false;
     try {
-      let attempt =
-        attemptRef.current?.identity === identity ? attemptRef.current : null;
+      let attempt = attemptsRef.current.get(identity);
       if (!attempt) {
         let groundingVisual: VisibleCanvasGrounding | undefined;
         const groundingNodeIds = groundingOperands.selectedNodeIds;
@@ -287,7 +503,12 @@ export const StrokeSelectionToolbar = () => {
             strokeSubsets: groundingOperands.strokeSubsets,
           };
         }
+        if (!isCurrentAttempt())
+          throw new Error(t('toolbar.inkAgentPicker.changed'));
         if (freshCandidate.target) {
+          if (isInkTargetBusy(freshCandidate.target.nodeId)) {
+            throw new Error(t('toolbar.inkAgentPicker.busy'));
+          }
           const { nodeId, threadId, mode } = freshCandidate.target;
           attempt = {
             identity,
@@ -309,17 +530,29 @@ export const StrokeSelectionToolbar = () => {
             },
           };
         } else {
-          const binding = await loadDefaultAgentBinding();
-          if (
-            preparationRef.current?.token !== preparationToken ||
-            currentLassoIdentity() !== lassoIdentity ||
-            useCanvasStore.getState().nodes !== canvas.nodes
-          ) {
+          let binding: AgentBinding;
+          if (destination.kind === 'new' && destination.choice) {
+            await useAcpProfilesStore.getState().refresh();
+            const profiles = useAcpProfilesStore.getState();
+            if (profiles.error) throw profiles.error;
+            binding = destination.choice.binding;
+            if (
+              binding.kind === 'external' &&
+              !profiles.selectableProfileIds.includes(binding.profileId)
+            ) {
+              throw new Error(t('toolbar.inkAgentPicker.unavailable'));
+            }
+          } else {
+            binding = await loadDefaultAgentBinding();
+          }
+          if (!isCurrentAttempt()) {
             throw new Error(
               'Canvas selection changed while preparing the Ink Agent. Submit again.',
             );
           }
-          const selectedNodes = canvas.nodes.filter((node) => node.selected);
+          const selectedNodes = canvas.nodes.filter((node) =>
+            freshCandidate.selectedNodeIds.includes(node.id),
+          );
           const nodeBounds = getSelectionBounds(selectedNodes, canvas.nodes);
           const currentStrokeBounds =
             getSketchStrokeSelectionBounds(strokeSelection);
@@ -341,7 +574,12 @@ export const StrokeSelectionToolbar = () => {
             nodeType: 'question',
             side: 'bottom',
           });
-          const mode = binding.kind === 'internal' ? 'operate' : 'ask';
+          const mode =
+            destination.kind === 'new' && destination.choice
+              ? destination.choice.mode
+              : binding.kind === 'internal'
+                ? 'operate'
+                : 'ask';
           const created = createQuestionNode({
             addNode,
             placementPoint,
@@ -363,7 +601,7 @@ export const StrokeSelectionToolbar = () => {
             },
           };
         }
-        attemptRef.current = attempt;
+        attemptsRef.current.set(identity, attempt);
       }
 
       const prepared = prepareAgentTurn({
@@ -374,12 +612,37 @@ export const StrokeSelectionToolbar = () => {
         groundingVisual: attempt.groundingVisual,
         sources: capturedSources,
       });
+      let dispatchInvalidReason: string | undefined;
       const result = await dispatchAgentTurn(prepared, {
-        canDispatch: () => currentLassoIdentity() === lassoIdentity,
+        canDispatch: () => {
+          if (!isCurrentAttempt()) {
+            dispatchInvalidReason = t('toolbar.inkAgentPicker.changed');
+            return false;
+          }
+          if (selectedTargetId) {
+            const current = deriveInkSubmissionCandidate(
+              useCanvasStore.getState().nodes,
+              useGesturePreviewStore.getState().sketchStrokeSelection,
+              selectedTargetId,
+            );
+            const eligible =
+              current.kind === 'ready' &&
+              current.target?.threadId === attempt.session.threadId &&
+              !isInkTargetBusy(selectedTargetId);
+            if (!eligible)
+              dispatchInvalidReason = t('toolbar.inkAgentPicker.unavailable');
+            return eligible;
+          }
+          return true;
+        },
         onAccepted: () => {
+          const stillCurrent =
+            preparationRef.current?.token === preparationToken &&
+            destinationIdentityRef.current === destinationIdentity &&
+            currentLassoIdentity() === lassoIdentity;
           releasePreparation();
-          if (currentLassoIdentity() !== lassoIdentity) return;
-          attemptRef.current = null;
+          if (!stillCurrent) return;
+          attemptsRef.current.clear();
           clearSelection();
           useCanvasStore.getState().selectNodes([]);
         },
@@ -387,6 +650,16 @@ export const StrokeSelectionToolbar = () => {
       });
       if (!result.accepted && result.error) {
         toast(result.error.message, { tone: 'danger' });
+      } else if (!result.accepted && dispatchInvalidReason) {
+        toast(dispatchInvalidReason, { tone: 'warning' });
+      } else if (!result.accepted && result.status === 'busy') {
+        toast(t('toolbar.inkAgentPicker.busy'), { tone: 'warning' });
+      } else if (
+        !result.accepted &&
+        result.status === 'rejected' &&
+        !isCurrentAttempt()
+      ) {
+        toast(t('toolbar.inkAgentPicker.changed'), { tone: 'warning' });
       }
       retainReservation = result.status === 'unknown' && !result.accepted;
     } catch (error) {
@@ -402,6 +675,10 @@ export const StrokeSelectionToolbar = () => {
     currentLassoIdentity,
     getViewport,
     setInkSubmissionPreparing,
+    destination,
+    destinationIdentity,
+    selectedTargetId,
+    t,
   ]);
 
   // Representative color / size for the swatches: the first selected stroke.
@@ -503,64 +780,17 @@ export const StrokeSelectionToolbar = () => {
 
   const showStyle = !isMixed; // style controls only for a pure stroke selection
   const showDelete = isNotMouse; // delete button is touch-only
-  const showSubmit =
-    candidate.kind === 'ready' || candidate.reason !== 'no-ink';
+  const showSubmit = hasSelection;
   const open =
     hasSelection && anchor !== null && (showStyle || showDelete || showSubmit);
-  const submitDisabled = candidate.kind !== 'ready' || isPreparing;
+  const submitDisabled =
+    candidate.kind !== 'ready' || isPreparing || Boolean(unavailableReason);
   const submitTitle = isPreparing
     ? t('toolbar.sendingInkRequest')
-    : candidate.kind === 'ready'
-      ? t('toolbar.sendInkRequest')
-      : candidate.reason === 'multiple-question-targets'
-        ? t('toolbar.multipleQuestionTargets')
-        : t('toolbar.invalidQuestionTarget');
-  const agentTargetHint = useMemo(() => {
-    if (candidate.kind === 'blocked') {
-      if (candidate.reason === 'no-ink') return null;
-      return candidate.reason === 'multiple-question-targets'
-        ? {
-            label: t('toolbar.multipleInkAgentTargets'),
-            description: t('toolbar.multipleQuestionTargets'),
-          }
-        : {
-            label: t('toolbar.invalidInkAgentTarget'),
-            description: t('toolbar.invalidQuestionTarget'),
-          };
-    }
-    if (!candidate.target) {
-      const name =
-        recentProfileId === 'huabu'
-          ? t('settings.builtInPi')
-          : (agentProfiles.find((profile) => profile.id === recentProfileId)
-              ?.alias ?? t('toolbar.defaultInkAgentTarget'));
-      return {
-        label: t('toolbar.newInkAgentTarget', { name }),
-        description: t('toolbar.newInkAgentTargetDescription', { name }),
-      };
-    }
-    const presentation = resolveQuestionAgentPresentation({
-      binding:
-        candidate.target.binding ??
-        cachedTargetBinding ??
-        ({ kind: 'internal' } as const),
-      profiles: agentProfiles,
-      agentMode: candidate.target.mode ?? cachedTargetMode ?? 'ask',
-    });
-    return {
-      label: presentation.alias,
-      description: t('toolbar.inkAgentTarget', {
-        name: presentation.alias,
-      }),
-    };
-  }, [
-    agentProfiles,
-    recentProfileId,
-    cachedTargetBinding,
-    cachedTargetMode,
-    candidate,
-    t,
-  ]);
+    : (unavailableReason ??
+      (candidate.kind === 'ready'
+        ? t('toolbar.sendInkRequest')
+        : t('toolbar.invalidQuestionTarget')));
 
   return (
     <CanvasFloatingPopover
@@ -568,7 +798,7 @@ export const StrokeSelectionToolbar = () => {
       open={open}
       offset={12}
       side="top"
-      className={`${FLOATING_TOOLBAR_CLASS} canvas-context-toolbar`}
+      className={`${FLOATING_TOOLBAR_CLASS} canvas-context-toolbar ink-context-toolbar`}
     >
       {showStyle && (
         <SketchControls
@@ -597,9 +827,9 @@ export const StrokeSelectionToolbar = () => {
       )}
       {(showStyle || showDelete) && showSubmit && <FloatingToolbar.Divider />}
       {showSubmit && (
-        <>
+        <div className="flex min-w-0 items-center gap-1">
           <span
-            className="text-fg-subtle px-1 text-xs tabular-nums"
+            className="text-fg-subtle shrink-0 px-1 text-xs whitespace-nowrap tabular-nums"
             aria-label={t('toolbar.inkSourceCount', {
               count: candidate.sourceCount,
             })}
@@ -607,21 +837,49 @@ export const StrokeSelectionToolbar = () => {
             {candidate.sourceCount}{' '}
             {t('chat.sourceLabel', { count: candidate.sourceCount })}
           </span>
-          {agentTargetHint && (
-            <Tooltip content={agentTargetHint.description}>
-              <span
-                className="text-fg-muted inline-block max-w-28 min-w-0 truncate px-1 text-xs"
-                aria-label={agentTargetHint.description}
-                role="status"
-              >
-                {agentTargetHint.label}
-              </span>
-            </Tooltip>
-          )}
+          <InkAgentDestinationPicker
+            unresolved={destination.kind === 'unresolved'}
+            loading={loadingDestination}
+            binding={currentBinding}
+            mode={currentMode}
+            profiles={selectableProfiles}
+            conversations={conversations}
+            selectedNodeId={selectedTargetId}
+            disabled={isPreparing}
+            unavailableReason={
+              destination.kind === 'unresolved' && !destinationError
+                ? undefined
+                : (unavailableReason ?? profileError?.message)
+            }
+            onNewConversation={(choice) =>
+              changeDestination({ kind: 'new', choice })
+            }
+            onContinueConversation={(nodeId) => {
+              const target = resolveInkQuestionTarget(
+                useCanvasStore
+                  .getState()
+                  .nodes.find((node) => node.id === nodeId),
+              );
+              if (!target) {
+                toast(t('toolbar.inkAgentPicker.unavailable'), {
+                  tone: 'danger',
+                });
+                return;
+              }
+              changeDestination({
+                kind: 'continue',
+                nodeId,
+                threadId: target.threadId,
+              });
+            }}
+            onRefreshProfiles={() => {
+              if (destinationError) retryDefault();
+              return useAcpProfilesStore.getState().refresh();
+            }}
+          />
           <Button
             variant="solid"
             className="canvas-context-submit"
-            shape="pill"
             iconOnly
             size="sm"
             type="button"
@@ -633,9 +891,9 @@ export const StrokeSelectionToolbar = () => {
               void handleSubmit();
             }}
           >
-            {isPreparing ? <Spinner size="xs" /> : <ArrowUp />}
+            {isPreparing ? <Square /> : <ArrowUp />}
           </Button>
-        </>
+        </div>
       )}
     </CanvasFloatingPopover>
   );

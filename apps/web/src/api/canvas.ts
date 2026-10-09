@@ -31,7 +31,22 @@ import type {
   PostCanvasExecuteResponse,
   MoveSelectionBody,
   MoveSelectionResponse,
+  RecentCanvasConversationResponse,
 } from '@huabu/shared';
+
+export async function getRecentCanvasConversation(
+  canvasId: string,
+  signal?: AbortSignal,
+): Promise<RecentCanvasConversationResponse> {
+  return apiFetch<RecentCanvasConversationResponse>(
+    routes.recentCanvasConversation(canvasId),
+    {
+      signal,
+      cache: 'no-store',
+      fallbackMessage: 'Failed to load the recent conversation',
+    },
+  );
+}
 
 export async function associateAgentNode(
   canvasId: string,

@@ -43,6 +43,12 @@ import {
   getStructuredStore,
   registerSpaceDirHandleOwner,
 } from '../../storage/index.js';
+import { resolveCanvasAcpNamespace } from '../../workspace/paths.js';
+import { acquireWorkspaceOperationLease } from '../../workspace.js';
+import {
+  appendRecentConversationTurn,
+  preserveRecentConversationBeforeHistoryDelete,
+} from '../recent-conversation.js';
 
 import type {
   EventLogRecord,
@@ -122,46 +128,107 @@ function backingFor(namespace: Namespace): Backing {
   throw new Error('A named Disk conversation requires a storage root');
 }
 
+async function inNamespace<T>(
+  namespace: Namespace,
+  action: (current: Namespace, backing: Backing) => T | Promise<T>,
+): Promise<T> {
+  if (!namespace.name) return action(namespace, memory);
+  const lease = acquireWorkspaceOperationLease();
+  try {
+    const current = resolveCanvasAcpNamespace(namespace);
+    return await action(current, backingFor(current));
+  } finally {
+    lease.release();
+  }
+}
+
 export const conversationThreadStore: ThreadStore = {
   upsert: (namespace, threadId, record: ThreadRecord) =>
-    backingFor(namespace).threads.upsert(namespace, threadId, record),
+    inNamespace(namespace, (current, backing) =>
+      backing.threads.upsert(
+        current,
+        threadId,
+        current.name
+          ? { ...record, spec: { ...record.spec, namespace: current } }
+          : record,
+      ),
+    ),
   get: (namespace, threadId) =>
-    backingFor(namespace).threads.get(namespace, threadId),
-  list: (namespace) => backingFor(namespace).threads.list(namespace),
+    inNamespace(namespace, (current, backing) =>
+      backing.threads.get(current, threadId),
+    ),
+  list: (namespace) =>
+    inNamespace(namespace, (current, backing) => backing.threads.list(current)),
   delete: (namespace, threadId) =>
-    backingFor(namespace).threads.delete(namespace, threadId),
+    inNamespace(namespace, (current, backing) =>
+      backing.threads.delete(current, threadId),
+    ),
 };
 
 export const conversationEventLogStore: EventLogStore = {
   appendTurnStart: (namespace, threadId, request: AgentSubmission | null) =>
-    backingFor(namespace).events.appendTurnStart(namespace, threadId, request),
+    inNamespace(namespace, (current, backing) =>
+      appendRecentConversationTurn(current, threadId, request, backing.events),
+    ),
   append: (namespace, threadId, event) =>
-    backingFor(namespace).events.append(namespace, threadId, event),
+    inNamespace(namespace, (current, backing) =>
+      backing.events.append(current, threadId, event),
+    ),
   read: (namespace, threadId, sinceSeq) =>
-    backingFor(namespace).events.read(namespace, threadId, sinceSeq),
+    inNamespace(namespace, (current, backing) =>
+      backing.events.read(current, threadId, sinceSeq),
+    ),
   readRecords: (namespace, threadId, sinceSeq) =>
-    backingFor(namespace).events.readRecords(namespace, threadId, sinceSeq),
+    inNamespace(namespace, (current, backing) =>
+      backing.events.readRecords(current, threadId, sinceSeq),
+    ),
   maxSeq: (namespace, threadId) =>
-    backingFor(namespace).events.maxSeq(namespace, threadId),
+    inNamespace(namespace, (current, backing) =>
+      backing.events.maxSeq(current, threadId),
+    ),
   replace: (namespace, threadId, records: readonly EventLogRecord[]) =>
-    backingFor(namespace).events.replace(namespace, threadId, records),
+    inNamespace(namespace, (current, backing) =>
+      backing.events.replace(current, threadId, records),
+    ),
   delete: (namespace, threadId) =>
-    backingFor(namespace).events.delete(namespace, threadId),
+    inNamespace(namespace, async (current, backing) => {
+      const events = backing.events;
+      await preserveRecentConversationBeforeHistoryDelete(
+        current,
+        threadId,
+        events,
+      );
+      await events.delete(current, threadId);
+    }),
 };
 
 export const conversationTurnStore: TurnStore = {
   append: (namespace, threadId, persisted: PersistedTurn) =>
-    backingFor(namespace).turns.append(namespace, threadId, persisted),
+    inNamespace(namespace, (current, backing) =>
+      backing.turns.append(current, threadId, persisted),
+    ),
   list: (namespace, threadId) =>
-    backingFor(namespace).turns.list(namespace, threadId),
+    inNamespace(namespace, (current, backing) =>
+      backing.turns.list(current, threadId),
+    ),
   page: (namespace, threadId, options: TurnStorePageOptions) =>
-    backingFor(namespace).turns.page(namespace, threadId, options),
+    inNamespace(namespace, (current, backing) =>
+      backing.turns.page(current, threadId, options),
+    ),
   count: (namespace, threadId) =>
-    backingFor(namespace).turns.count(namespace, threadId),
+    inNamespace(namespace, (current, backing) =>
+      backing.turns.count(current, threadId),
+    ),
   fence: (namespace, threadId) =>
-    backingFor(namespace).turns.fence(namespace, threadId),
+    inNamespace(namespace, (current, backing) =>
+      backing.turns.fence(current, threadId),
+    ),
   replace: (namespace, threadId, persisted: readonly PersistedTurn[]) =>
-    backingFor(namespace).turns.replace(namespace, threadId, persisted),
+    inNamespace(namespace, (current, backing) =>
+      backing.turns.replace(current, threadId, persisted),
+    ),
   delete: (namespace, threadId) =>
-    backingFor(namespace).turns.delete(namespace, threadId),
+    inNamespace(namespace, (current, backing) =>
+      backing.turns.delete(current, threadId),
+    ),
 };

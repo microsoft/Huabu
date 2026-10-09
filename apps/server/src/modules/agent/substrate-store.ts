@@ -22,7 +22,13 @@
 import { appendFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 
-import { atomicWriteJson, readJson, sanitizeId } from '../../utils/fs.js';
+import {
+  atomicWriteJson,
+  readJson,
+  readJsonStrict,
+  resolveDirectChildPath,
+  sanitizeId,
+} from '../../utils/fs.js';
 
 import type { SpaceSubstrate } from '../storage/index.js';
 import type { DatabaseSync } from 'node:sqlite';
@@ -51,17 +57,18 @@ function ensureTables(database: DatabaseSync): void {
 /**
  * Read one JSON document from a namespace, or `null` when it is not there.
  *
- * Absence and damage are the same answer on purpose: both callers treat a
- * missing document as "start from nothing", and a bookkeeping file a user can
- * corrupt by hand must not be able to fail a request.
+ * Bookkeeping callers default to treating damage as absence. Routing state
+ * opts into strict reads: only a missing document means absence.
  */
 export async function readSubstrateDocument<T>(
   substrate: SpaceSubstrate,
   name: string,
+  options?: { strict: boolean },
 ): Promise<T | null> {
   const safe = sanitizeId(name, 'document name');
   if (substrate.kind === 'disk') {
-    return readJson<T>(path.join(substrate.directory, `${safe}.json`));
+    const file = resolveDirectChildPath(substrate.directory, `${safe}.json`);
+    return options?.strict ? readJsonStrict<T>(file) : readJson<T>(file);
   }
   if (substrate.kind === 'postgres') {
     await ensurePostgresTables(substrate.database);
@@ -73,8 +80,15 @@ export async function readSubstrateDocument<T>(
     ).rows[0];
     if (!row) return null;
     try {
-      return JSON.parse(row.body) as T;
-    } catch {
+      const value = JSON.parse(row.body) as T;
+      if (options?.strict && value === null) {
+        throw new SyntaxError(
+          'Expected a persisted JSON document, received null',
+        );
+      }
+      return value;
+    } catch (error) {
+      if (options?.strict) throw error;
       return null;
     }
   }
@@ -85,10 +99,21 @@ export async function readSubstrateDocument<T>(
        WHERE extension_id = ? AND name = ?`,
     )
     .get(substrate.extensionId, safe);
-  if (row === undefined || typeof row['body'] !== 'string') return null;
+  if (row === undefined) return null;
+  if (typeof row['body'] !== 'string') {
+    if (options?.strict) throw new TypeError('Invalid persisted document body');
+    return null;
+  }
   try {
-    return JSON.parse(row['body']) as T;
-  } catch {
+    const value = JSON.parse(row['body']) as T;
+    if (options?.strict && value === null) {
+      throw new SyntaxError(
+        'Expected a persisted JSON document, received null',
+      );
+    }
+    return value;
+  } catch (error) {
+    if (options?.strict) throw error;
     return null;
   }
 }

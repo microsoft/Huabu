@@ -100,7 +100,7 @@ export function createAreaSelectionSession(strokeLevel = false) {
         const hasSelection =
           selected.length > 0 ||
           Object.keys(preview.sketchStrokeSelection).length > 0;
-        preview.setSketchSelectionPolygon(
+        preview.commitSketchSelection(
           hasSelection && area?.kind === 'polygon' ? [...area.points] : null,
         );
       }
@@ -113,6 +113,7 @@ export function createAreaSelectionSession(strokeLevel = false) {
         useGesturePreviewStore.setState({
           sketchStrokeSelection: initialInk.sketchStrokeSelection,
           sketchSelectionPolygon: initialInk.sketchSelectionPolygon,
+          sketchSelectionSession: initialInk.sketchSelectionSession,
           sketchStrokeHighlight: initialInk.sketchStrokeHighlight,
         });
       }

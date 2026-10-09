@@ -50,6 +50,8 @@ export const routes = {
   canvasList: '/canvas',
   canvasImport: '/canvas/import',
   canvas: (canvasId: string) => `/canvas/${enc(canvasId)}`,
+  recentCanvasConversation: (canvasId: string) =>
+    `/canvas/${enc(canvasId)}/recent-conversation`,
   canvasExecute: (canvasId: string) => `/canvas/${enc(canvasId)}/execute`,
   canvasMoveSelection: (canvasId: string) =>
     `/canvas/${enc(canvasId)}/move-selection`,
