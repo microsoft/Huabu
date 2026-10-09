@@ -6,11 +6,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { isInkOcrConfigured, recognizeInk } from './ink-ocr.js';
 
-vi.mock('../../integrations/ink-ocr-config.js', () => ({
-  resolveInkOcrConfiguration: () => ({
-    key: process.env.VISION_KEY?.trim() || null,
-    endpoint: process.env.VISION_ENDPOINT?.trim() || null,
-  }),
+vi.mock('../../capabilities/index.js', () => ({
+  capabilityProvisionService: {
+    getConfig: () => {
+      const apiKey = process.env.VISION_KEY?.trim() || '';
+      const endpoint = process.env.VISION_ENDPOINT?.trim() || '';
+      const configuredFields = [
+        ...(apiKey ? ['apiKey'] : []),
+        ...(endpoint ? ['endpoint'] : []),
+      ];
+      return {
+        configured: configuredFields.length === 2,
+        configuredFields,
+      };
+    },
+    resolveForServer: () => ({
+      apiKey: process.env.VISION_KEY?.trim() || '',
+      endpoint: process.env.VISION_ENDPOINT?.trim() || '',
+    }),
+  },
 }));
 
 const logger = pino({ enabled: false });

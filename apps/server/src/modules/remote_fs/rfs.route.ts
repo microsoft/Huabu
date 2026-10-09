@@ -44,6 +44,7 @@ import {
   createTaskRequestSchema,
   completeTaskRunRequestSchema,
   createInteractiveViewRequestSchema,
+  capabilityParamsSchema,
   interactiveViewLookupQuerySchema,
   interactiveViewResourceParamsSchema,
   rfsAgentCreateHeadersSchema,
@@ -69,6 +70,7 @@ import {
   type RfsUploadResponse,
   type AgentStreamEvent,
   type StartTaskRunResponse,
+  type CapabilityParams,
 } from '@huabu/shared';
 
 import { mimeForPath } from './mime.js';
@@ -116,6 +118,12 @@ import {
 import { CanvasNotFoundError } from '../canvas/canvas-executor.js';
 import { executeSpaceQuery, SpaceQueryError } from '../canvas/space-query.js';
 import { WorldPreviewMutationError } from '../canvas/world-preview-policy.js';
+import {
+  capabilityProvisionService,
+  CapabilityServiceError,
+  getBundledCapabilityPackage,
+  readCapabilityPackageFile,
+} from '../capabilities/index.js';
 import {
   InteractiveViewServiceError,
   interactiveViewService,
@@ -521,6 +529,118 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
   // ── Direct Space operation discovery ──
   app.get('/:canvasId/capabilities', async (_request, reply) =>
     reply.send(getRfsCapabilities()),
+  );
+
+  // ── Capability Packages ──
+  //
+  // `/capabilities` already owns direct Space-operation discovery. Keep the
+  // portable provider packages under a separate unambiguous resource root.
+  app.get('/:canvasId/capability-packages', async (_request, reply) =>
+    reply.send({ capabilities: capabilityProvisionService.list() }),
+  );
+
+  app.get<{
+    Params: CapabilityParams & { canvasId: string };
+  }>(
+    '/:canvasId/capability-packages/:capabilityId/manifest',
+    async (request, reply) => {
+      const parsed = capabilityParamsSchema.safeParse({
+        capabilityId: request.params.capabilityId,
+      });
+      if (!parsed.success) {
+        return reply.code(400).send(rfsError('Invalid Capability id'));
+      }
+      const capability = getBundledCapabilityPackage(parsed.data.capabilityId);
+      if (!capability) {
+        return reply
+          .code(404)
+          .send(rfsError('Capability not found', 'capability_not_found'));
+      }
+      return reply.send(capability.manifest);
+    },
+  );
+
+  app.get<{
+    Params: CapabilityParams & { canvasId: string };
+  }>(
+    '/:canvasId/capability-packages/:capabilityId/skill',
+    async (request, reply) => {
+      const parsed = capabilityParamsSchema.safeParse({
+        capabilityId: request.params.capabilityId,
+      });
+      if (!parsed.success) {
+        return reply.code(400).send(rfsError('Invalid Capability id'));
+      }
+      const capability = getBundledCapabilityPackage(parsed.data.capabilityId);
+      const skill = capability?.manifest.agent?.skill;
+      const content = skill
+        ? readCapabilityPackageFile(parsed.data.capabilityId, skill)
+        : null;
+      if (!content) {
+        return reply
+          .code(404)
+          .send(rfsError('Capability Skill not found', 'skill_not_found'));
+      }
+      return reply.type('text/markdown; charset=utf-8').send(content);
+    },
+  );
+
+  app.get<{
+    Params: CapabilityParams & { canvasId: string };
+  }>(
+    '/:canvasId/capability-packages/:capabilityId/client',
+    async (request, reply) => {
+      const parsed = capabilityParamsSchema.safeParse({
+        capabilityId: request.params.capabilityId,
+      });
+      if (!parsed.success) {
+        return reply.code(400).send(rfsError('Invalid Capability id'));
+      }
+      const capability = getBundledCapabilityPackage(parsed.data.capabilityId);
+      const client = capability?.manifest.agent?.client;
+      const content = client
+        ? readCapabilityPackageFile(parsed.data.capabilityId, client)
+        : null;
+      if (!content) {
+        return reply
+          .code(404)
+          .send(rfsError('Capability client not found', 'client_not_found'));
+      }
+      return reply
+        .header('Cache-Control', 'public, max-age=300')
+        .type('text/javascript; charset=utf-8')
+        .send(content);
+    },
+  );
+
+  app.post<{
+    Params: CapabilityParams & { canvasId: string };
+  }>(
+    '/:canvasId/capability-packages/:capabilityId/lease',
+    async (request, reply) => {
+      const parsed = capabilityParamsSchema.safeParse({
+        capabilityId: request.params.capabilityId,
+      });
+      if (!parsed.success) {
+        return reply.code(400).send(rfsError('Invalid Capability id'));
+      }
+      try {
+        return reply
+          .header('Cache-Control', 'no-store')
+          .send(capabilityProvisionService.lease(parsed.data.capabilityId));
+      } catch (error) {
+        if (error instanceof CapabilityServiceError) {
+          const status =
+            error.code === 'capability_not_found'
+              ? 404
+              : error.code === 'capability_not_external'
+                ? 403
+                : 409;
+          return reply.code(status).send(rfsError(error.message, error.code));
+        }
+        throw error;
+      }
+    },
   );
 
   app.get<{ Params: { canvasId: string; type: string } }>(

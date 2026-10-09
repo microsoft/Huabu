@@ -1,0 +1,21 @@
+schema: huabu-capability/v1
+id: ink-ocr
+version: 1.0.0
+name: Handwriting Recognition
+description: Recognize selected handwriting with Azure AI Vision.
+storage:
+  namespace: integration.azureVisionInkOcr
+consumers:
+  internal: true
+  pipeline: false
+  external: false
+configuration:
+  - id: endpoint
+    label: Endpoint
+    type: url
+    required: true
+    placeholder: https://resource.cognitiveservices.azure.com
+  - id: apiKey
+    label: API key
+    type: secret
+    required: true

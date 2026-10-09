@@ -6,6 +6,7 @@ These environment variables are already set:
 
 - `HUABU_RFS_URL` — the base URL for this Space, with no trailing slash.
 - `AGENTLET_TOKEN` — the RFS bearer credential.
+- `AGENTLET_CAPABILITY_SDK_URL` — the daemon-owned `file://` URL for loading configured provider Capabilities.
 - `HUABU_THREAD_ID` — your conversation ID. Pass it on `execute` (see §6) to attribute your edits.
 
 Prefer deterministic direct operations:
@@ -16,6 +17,7 @@ Prefer deterministic direct operations:
 4. Use the `SNAPSHOT_NODES` query to render image, sketch, or frame nodes into PNG artifacts you can inspect.
 5. Use `execute` for validated Space commands.
 6. Use `agent` only when you deliberately want the optional internal Huabu agent to interpret an open-ended request.
+7. Discover configured provider services through `capability-packages` and follow the selected Package Skill before loading it through the Agentlet SDK.
 
 ## 1. Discover operations
 
@@ -278,6 +280,35 @@ For available Profile discovery, launch configuration, create-only requests, opt
 ```bash
 curl -fsS -H "$AUTH" "$HUABU_RFS_URL/skill/agents"
 ```
+
+## Provider Capability Packages
+
+List the bundled provider services that Huabu can provision:
+
+```bash
+curl -fsS -H "$AUTH" "$HUABU_RFS_URL/capability-packages"
+```
+
+Before using one, fetch and follow its Skill:
+
+```bash
+curl -fsS -H "$AUTH" "$HUABU_RFS_URL/capability-packages/image-gen/skill"
+```
+
+Agent-facing packages can then be loaded from a short-lived `.mjs` script:
+
+```js
+const { withCapability } = await import(
+  process.env.AGENTLET_CAPABILITY_SDK_URL
+);
+
+await withCapability('image-gen', async ({ client }) => {
+  if (!client) throw new Error('Capability client is unavailable');
+  console.log(await client.generate({ prompt: 'A watercolor landscape' }));
+});
+```
+
+The SDK obtains current configuration on demand. Never print, persist, or forward returned credentials. A package without an Agent Skill/client is intentionally unavailable for direct External Agent use; do not construct provider calls from its Settings manifest.
 
 ## Advanced workflows
 

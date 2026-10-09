@@ -22,24 +22,27 @@ The shipped design record is [`agent-reachback-rfs.md`](../proposals/agent-reach
 
 All endpoints are mounted under `/api/rfs/:canvasId`; `HUABU_RFS_URL` already contains that canvas-scoped base.
 
-| Endpoint                           | Responsibility                                                                                                                      |
-| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /skill`                       | Return the public bundled root guide; authenticated requests resolve the current root guide and append live Skill Frames.           |
-| `GET /skill/:skillId`              | Return an authenticated advanced guide: `layout`, `tasks`, or `agents`.                                                             |
-| `GET /download/<path>`             | Stream a known node, artifact, or staged-upload file.                                                                               |
-| `POST /upload/<name>`              | Stage bytes in the canvas `.upload/` directory without creating a node.                                                             |
-| `DELETE /upload/<name>`            | Remove one exact staged upload.                                                                                                     |
-| `POST /agent`                      | Create a visible Agent Node and optionally start its first turn.                                                                    |
-| `POST /agent/:threadId/prompt`     | Submit a turn to an existing Agent conversation over SSE.                                                                           |
-| `POST /agent/:threadId/ink-intent` | Submit a validated report for the matching active external Ink turn.                                                                |
-| `GET /agent/profiles`              | Return available Agent Profile IDs and aliases, marking the first selectable external fallback with `default: true` when available. |
-| `POST /task/create`                | Create a durable Task and its static Task Note.                                                                                     |
-| `POST /task/:taskId/run/create`    | Create a Run, its visible root Agent Node, and start the first turn.                                                                |
-| `GET /capabilities`                | Report the direct-operation protocol, limits, semantics, and supported operation types.                                             |
-| `GET /capabilities/queries/:type`  | Return one query's generated JSON Schema, constraints, result description, and examples.                                            |
-| `GET /capabilities/commands/:type` | Return one command's generated JSON Schema, constraints, result description, and examples.                                          |
-| `POST /query`                      | Validate and execute one bounded `SpaceQuery`, returning a query-discriminated JSON result.                                         |
-| `POST /execute`                    | Validate and execute an ordered batch of agent-allowed `CanvasCommand` variants.                                                    |
+| Endpoint                              | Responsibility                                                                                                                      |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /skill`                          | Return the public bundled root guide; authenticated requests resolve the current root guide and append live Skill Frames.           |
+| `GET /skill/:skillId`                 | Return an authenticated advanced guide: `layout`, `tasks`, or `agents`.                                                             |
+| `GET /download/<path>`                | Stream a known node, artifact, or staged-upload file.                                                                               |
+| `POST /upload/<name>`                 | Stage bytes in the canvas `.upload/` directory without creating a node.                                                             |
+| `DELETE /upload/<name>`               | Remove one exact staged upload.                                                                                                     |
+| `POST /agent`                         | Create a visible Agent Node and optionally start its first turn.                                                                    |
+| `POST /agent/:threadId/prompt`        | Submit a turn to an existing Agent conversation over SSE.                                                                           |
+| `POST /agent/:threadId/ink-intent`    | Submit a validated report for the matching active external Ink turn.                                                                |
+| `GET /agent/profiles`                 | Return available Agent Profile IDs and aliases, marking the first selectable external fallback with `default: true` when available. |
+| `POST /task/create`                   | Create a durable Task and its static Task Note.                                                                                     |
+| `POST /task/:taskId/run/create`       | Create a Run, its visible root Agent Node, and start the first turn.                                                                |
+| `GET /capabilities`                   | Report the direct-operation protocol, limits, semantics, and supported operation types.                                             |
+| `GET /capabilities/queries/:type`     | Return one query's generated JSON Schema, constraints, result description, and examples.                                            |
+| `GET /capabilities/commands/:type`    | Return one command's generated JSON Schema, constraints, result description, and examples.                                          |
+| `GET /capability-packages`            | List bundled provider Capability Packages and masked availability.                                                                  |
+| `GET /capability-packages/:id/*`      | Return one Package's Manifest, Skill, or client source.                                                                             |
+| `POST /capability-packages/:id/lease` | Return the declared effective configuration for one configured External Package with `Cache-Control: no-store`.                     |
+| `POST /query`                         | Validate and execute one bounded `SpaceQuery`, returning a query-discriminated JSON result.                                         |
+| `POST /execute`                       | Validate and execute an ordered batch of agent-allowed `CanvasCommand` variants.                                                    |
 
 There is no directory-listing endpoint. External agents receive exact node paths in selected-node context or ask the internal agent to discover relevant files.
 
@@ -98,6 +101,8 @@ Parent lineage is best effort. The route resolves `parentThreadId` or `X-Huabu-H
 ## External-agent bootstrap
 
 Huabu injects `HUABU_RFS_URL` and `AGENTLET_TOKEN` into the external agent environment. `HUABU_RFS_URL` is derived from the deployment-owned root `HUABU_PUBLIC_ORIGIN` plus `/api/rfs/<canvasId>`; a loopback deployment with no configured public origin uses its actual bound port as the explicit local fallback. Network binds require a non-loopback public origin before the Server listens, so a remote Agentlet never receives a success-shaped Server-local loopback URL. Every external-agent Deployment persists the bootstrap as its initial preamble, including Deployments first created by mode, model, or configuration control requests; startup repair backfills older undelivered records that omitted it. The preamble owns the authentication contract and curl header setup because every external Agent needs them before loading any Skill. The public basic guide is loaded without credentials from `GET /skill`; repeating that request with authentication adds the current root override and live Space Skill Frames. Advanced layout, Task, recursive-Agent, and Interactive View procedures are loaded on demand from authenticated `GET /skill/layout`, `/skill/tasks`, `/skill/agents`, and `/skill/interactive-views`.
+
+Agentlet additionally injects its daemon-owned `AGENTLET_CAPABILITY_SDK_URL`, an absolute `file://` URL for the SDK shipped in Agentlet's `dist/capability-sdk`. Session or Profile environment cannot override this value. The SDK wraps `/capability-packages` discovery, lease, and trusted client loading; provider credentials remain absent from startup environment and are resolved on demand.
 
 Skills explain when and how to compose workflows, but they do not duplicate the wire protocol. `GET /capabilities` and its per-operation endpoints remain the canonical, schema-derived source for current query and command fields, limits, and semantics.
 

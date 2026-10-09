@@ -15,7 +15,7 @@
  */
 
 import { getLogger } from '../../../../utils/logger.js';
-import { getTavilyApiKey } from '../../../integrations/integrations.js';
+import { capabilityProvisionService } from '../../../capabilities/index.js';
 
 import type { webSearchParamsSchema } from '../definitions.js';
 import type { Static } from '@earendil-works/pi-ai';
@@ -25,12 +25,8 @@ const log = getLogger('tool.web-search');
 export type WebSearchArgs = Static<typeof webSearchParamsSchema>;
 
 export async function handleWebSearch(args: WebSearchArgs): Promise<string> {
-  const apiKey = getTavilyApiKey();
-  if (!apiKey) {
-    throw new Error(
-      'Missing Tavily API key. Add it in Settings → Integrations (or set TAVILY_API_KEY) to enable web_search.',
-    );
-  }
+  const resolved = capabilityProvisionService.resolveForServer('web-search');
+  const apiKey = typeof resolved.apiKey === 'string' ? resolved.apiKey : '';
 
   const controller = new AbortController();
   const timeoutMs = 15_000;

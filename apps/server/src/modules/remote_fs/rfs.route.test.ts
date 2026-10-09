@@ -35,6 +35,11 @@ const agentMocks = vi.hoisted(() => ({
   handleRun: vi.fn(),
 }));
 
+const capabilityMocks = vi.hoisted(() => ({
+  lease: vi.fn(),
+  list: vi.fn(),
+}));
+
 vi.mock('../agent/agent.service.js', () => ({
   runAgent: agentMocks.runAgent,
 }));
@@ -47,6 +52,14 @@ vi.mock('../agent/agenetes/drivers.js', () => ({
   },
 }));
 
+vi.mock('../capabilities/index.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof CapabilityModule>();
+  return {
+    ...actual,
+    capabilityProvisionService: capabilityMocks,
+  };
+});
+
 import rfsRoutes from './rfs.route.js';
 import { toSafeFilename } from '../../utils/naming.js';
 import { agentNodeService } from '../agent/agent-node.service.js';
@@ -56,6 +69,7 @@ import {
   agentThreadService,
 } from '../agent/agent-thread.service.js';
 import * as selectableProfiles from '../agent/selectable-agent-profile.js';
+import { CapabilityServiceError } from '../capabilities/index.js';
 import { getCanvasStore, resetStorageCache, space } from '../storage/index.js';
 import {
   RunCompletionError,
@@ -66,6 +80,7 @@ import { taskService } from '../task/task.service.js';
 import { setWorkspacePath } from '../workspace.js';
 
 import type { FixedAgentNodeTarget } from '../agent/agent-thread-resolver.js';
+import type * as CapabilityModule from '../capabilities/index.js';
 import type { CanvasNodeId } from '@huabu/shared';
 
 /**
@@ -172,6 +187,8 @@ beforeEach(() => {
   agentMocks.record.mockReset();
   agentMocks.get.mockReset();
   agentMocks.handleRun.mockReset();
+  capabilityMocks.lease.mockReset();
+  capabilityMocks.list.mockReset();
   agentMocks.runAgent.mockImplementation(async function* () {
     yield { type: 'done', data: { message: 'first answer' } };
     return [];
@@ -199,6 +216,8 @@ describe('GET /api/rfs/:canvasId/skill', () => {
         );
       }
       expect(res.body).toContain('/capabilities/commands/$COMMAND');
+      expect(res.body).toContain('AGENTLET_CAPABILITY_SDK_URL');
+      expect(res.body).toContain('/capability-packages');
       expect(res.body).toContain('$HUABU_RFS_URL/skill/tasks');
       expect(res.body).toContain('**parent-local**');
       expect(res.body).toContain('read-only `absolutePosition`');
@@ -569,6 +588,127 @@ describe('Task RFS adapters', () => {
       expect(res.json().message).toContain('Run: run-partial.');
       expect(res.json().message).toContain('Root node: node-root.');
       expect(res.json().message).toContain('Root thread: thread-root.');
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe('provider Capability Packages', () => {
+  it('publishes discovery and package files without configuration secrets', async () => {
+    capabilityMocks.list.mockReturnValue([
+      {
+        id: 'image-gen',
+        version: '1.0.0',
+        name: 'Image Generation',
+        description: 'Generate images.',
+        configured: true,
+        availableToInternalAgent: true,
+        availableToPipeline: false,
+        availableToExternalAgent: true,
+      },
+    ]);
+    const app = await buildApp();
+    try {
+      const discovery = await app.inject({
+        method: 'GET',
+        url: '/rfs/c1/capability-packages',
+      });
+      const manifest = await app.inject({
+        method: 'GET',
+        url: '/rfs/c1/capability-packages/image-gen/manifest',
+      });
+      const skill = await app.inject({
+        method: 'GET',
+        url: '/rfs/c1/capability-packages/image-gen/skill',
+      });
+      const client = await app.inject({
+        method: 'GET',
+        url: '/rfs/c1/capability-packages/image-gen/client',
+      });
+
+      expect(discovery.statusCode).toBe(200);
+      expect(discovery.json()).toMatchObject({
+        capabilities: [{ id: 'image-gen', configured: true }],
+      });
+      expect(manifest.statusCode).toBe(200);
+      expect(manifest.json()).toMatchObject({
+        id: 'image-gen',
+        storage: { namespace: 'llm.imageConfig' },
+      });
+      expect(skill.statusCode).toBe(200);
+      expect(skill.headers['content-type']).toMatch(/text\/markdown/);
+      expect(client.statusCode).toBe(200);
+      expect(client.headers['content-type']).toMatch(/text\/javascript/);
+      expect(client.headers['cache-control']).toBe('public, max-age=300');
+
+      for (const response of [discovery, manifest, skill]) {
+        expect(response.body).not.toContain('test-secret');
+        expect(response.body).not.toContain('api-key');
+      }
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('rejects Package files that are absent or use invalid ids', async () => {
+    const app = await buildApp();
+    try {
+      const noSkill = await app.inject({
+        method: 'GET',
+        url: '/rfs/c1/capability-packages/ink-ocr/skill',
+      });
+      const noClient = await app.inject({
+        method: 'GET',
+        url: '/rfs/c1/capability-packages/youtube-transcripts/client',
+      });
+      const invalid = await app.inject({
+        method: 'GET',
+        url: '/rfs/c1/capability-packages/INVALID/manifest',
+      });
+
+      expect(noSkill.statusCode).toBe(404);
+      expect(noSkill.json()).toMatchObject({ code: 'skill_not_found' });
+      expect(noClient.statusCode).toBe(404);
+      expect(noClient.json()).toMatchObject({ code: 'client_not_found' });
+      expect(invalid.statusCode).toBe(400);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('returns a no-store lease and maps provisioning failures', async () => {
+    capabilityMocks.lease.mockReturnValueOnce({
+      capabilityId: 'image-gen',
+      config: { apiKey: 'test-secret' },
+    });
+    const app = await buildApp();
+    try {
+      const lease = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/capability-packages/image-gen/lease',
+      });
+      expect(lease.statusCode).toBe(200);
+      expect(lease.headers['cache-control']).toBe('no-store');
+      expect(lease.json()).toMatchObject({
+        capabilityId: 'image-gen',
+        config: { apiKey: 'test-secret' },
+      });
+
+      capabilityMocks.lease.mockImplementationOnce(() => {
+        throw new CapabilityServiceError(
+          'capability_not_external',
+          'Capability is not available to External Agents',
+        );
+      });
+      const rejected = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/capability-packages/ink-ocr/lease',
+      });
+      expect(rejected.statusCode).toBe(403);
+      expect(rejected.json()).toMatchObject({
+        code: 'capability_not_external',
+      });
     } finally {
       await app.close();
     }

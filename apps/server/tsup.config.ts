@@ -80,6 +80,10 @@ export default defineConfig([
       const dst = path.resolve('dist-bundle/prompt');
       cpSync(src, dst, { recursive: true });
       console.log(`[tsup] copied prompt templates -> ${dst}`);
+      const capabilitiesSrc = path.resolve('src/capabilities');
+      const capabilitiesDst = path.resolve('dist-bundle/capabilities');
+      cpSync(capabilitiesSrc, capabilitiesDst, { recursive: true });
+      console.log(`[tsup] copied Capability packages -> ${capabilitiesDst}`);
       // @resvg/resvg-wasm — copied next to server.js so the
       // snapshot_nodes tool's bundle-layout fallback finds it via
       // bundled server module's file URL.
@@ -107,6 +111,9 @@ export default defineConfig([
     entry: {
       index: path.resolve(
         '../../external/agentlet/packages/local/src/index.ts',
+      ),
+      'capability-sdk/index': path.resolve(
+        '../../external/agentlet/packages/local/src/capability-sdk/index.ts',
       ),
     },
     format: ['esm'],

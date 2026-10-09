@@ -38,3 +38,4 @@ export * from './task.js';
 export * from './interactive-view.js';
 export * from './deployment.js';
 export * from './agent-node.js';
+export * from './capability-package.js';

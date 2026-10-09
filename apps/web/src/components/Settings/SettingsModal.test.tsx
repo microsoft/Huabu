@@ -80,14 +80,8 @@ vi.mock('./sections/GeneralSettings', () => ({
 vi.mock('./sections/LLMSettings', () => ({
   LLMSettings: () => <div data-testid="built-in-settings" />,
 }));
-vi.mock('./sections/ImageProviderSettings', () => ({
-  ImageProviderSettings: () => <div data-testid="image-settings" />,
-}));
-vi.mock('./sections/IntegrationsSettings', () => ({
-  IntegrationsSettings: () => <div data-testid="integration-settings" />,
-}));
-vi.mock('./sections/InkOcrSettings', () => ({
-  InkOcrSettings: () => <div data-testid="ocr-settings" />,
+vi.mock('./sections/CapabilitiesSettings', () => ({
+  CapabilitiesSettings: () => <div data-testid="capabilities-settings" />,
 }));
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -171,13 +165,7 @@ describe('Settings information architecture', () => {
         ?.classList.contains('space-y-4'),
     ).toBe(true);
     expect(
-      container.querySelector('[data-testid="image-settings"]'),
-    ).not.toBeNull();
-    expect(
-      container.querySelector('[data-testid="integration-settings"]'),
-    ).not.toBeNull();
-    expect(
-      container.querySelector('[data-testid="ocr-settings"]'),
+      container.querySelector('[data-testid="capabilities-settings"]'),
     ).not.toBeNull();
     expect(
       container.querySelector('[data-testid="agent-defaults"]'),

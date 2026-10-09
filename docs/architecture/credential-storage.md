@@ -31,6 +31,8 @@ Remote Server Basic Auth is separate from Huabu's `SecretStore`. Electron accept
 
 Settings API updates for optional capability credentials use an explicit three-state patch contract: omitting a key preserves the persisted value, a non-empty string sets or replaces it, and `null` removes the value stored by Huabu. Removing a persisted key preserves non-secret provider configuration and does not alter deployment-owned environment variables; an environment fallback may therefore keep the capability available at runtime.
 
+Settings > Capabilities is rendered from bundled `huabu-capability/v1` manifests and writes through `CapabilityProvisionService`. Each manifest names a code-registered opaque storage namespace whose adapter delegates to the existing owner and SecretStore IDs. This compatibility layer performs no read-time migration and creates no generic duplicate record: Image, Tavily, RapidAPI, and Ink OCR retain their existing storage, fallback, masking, and update semantics. See [`capability-packages.md`](./capability-packages.md).
+
 ### Agentlet connection token
 
 Settings > Agent > External Agent runtime stores an optional Agentlet connection-token override under `integration:agentlet:connection-token`. The effective value prefers that encrypted SecretStore entry, then non-empty `HUABU_CONNECTION_TOKEN`, then one random 256-bit hexadecimal token generated per server boot. Clearing the entry restores the next fallback and never rewrites deployment environment. Environment-only standalone deployments expose the active source as read-only and reject mutation.

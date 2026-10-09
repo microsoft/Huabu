@@ -1,0 +1,20 @@
+schema: huabu-capability/v1
+id: web-search
+version: 1.0.0
+name: Web Search
+description: Search the web with Tavily.
+storage:
+  namespace: integration.tavily
+consumers:
+  internal: true
+  pipeline: false
+  external: true
+agent:
+  skill: SKILL.md
+  client: client.mjs
+configuration:
+  - id: apiKey
+    label: API key
+    type: secret
+    required: true
+    placeholder: tvly-...

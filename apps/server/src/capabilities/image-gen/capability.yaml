@@ -1,0 +1,65 @@
+schema: huabu-capability/v1
+id: image-gen
+version: 1.0.0
+name: Image Generation
+description: Generate images with the configured Azure OpenAI deployment.
+storage:
+  namespace: llm.imageConfig
+consumers:
+  internal: true
+  pipeline: false
+  external: true
+agent:
+  skill: SKILL.md
+  client: client.mjs
+configuration:
+  - id: provider
+    label: Provider
+    type: enum
+    required: true
+    options:
+      - value: azure-openai
+        label: Azure OpenAI
+  - id: baseUrl
+    label: Endpoint
+    type: url
+    required: true
+    placeholder: https://resource.cognitiveservices.azure.com
+  - id: modelFamily
+    label: Model
+    type: enum
+    required: true
+    options:
+      - value: gpt-image-1
+        label: gpt-image-1
+      - value: gpt-image-1-mini
+        label: gpt-image-1-mini
+      - value: gpt-image-2
+        label: gpt-image-2
+  - id: model
+    label: Deployment
+    description: Optional Azure deployment name. Defaults to the model name.
+    type: text
+    required: false
+  - id: apiVersion
+    label: API version
+    type: text
+    required: true
+  - id: quality
+    label: Image quality
+    type: enum
+    required: true
+    options:
+      - value: low
+        label: low
+      - value: medium
+        label: medium
+      - value: high
+        label: high
+      - value: auto
+        label: auto
+  - id: apiKey
+    label: API key
+    type: secret
+    required: true
+    placeholder: Azure key
