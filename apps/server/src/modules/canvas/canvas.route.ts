@@ -595,12 +595,14 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     }
     const { canvasId } = parsed.data;
     try {
-      if (!(await space(canvasId).read())) {
+      const recent = await readRecentCanvasConversation(
+        canvasId,
+        conversationEventLogStore,
+      );
+      if (!recent) {
         return reply.code(404).send({ message: 'Canvas not found' });
       }
-      return reply.send(
-        await readRecentCanvasConversation(canvasId, conversationEventLogStore),
-      );
+      return reply.send(recent);
     } catch (error) {
       request.log.error(
         { err: error, canvasId },

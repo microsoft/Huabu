@@ -161,7 +161,7 @@ export function InkAgentDestinationPicker({
         open={open}
         onOpenChange={handleOpenChange}
         onOpenAutoFocus={() => {
-          if (keyboardOpen.current) focusMenu(keyboardOpen.current);
+          focusMenu(keyboardOpen.current ?? 'first');
         }}
         className="w-80 max-w-[calc(100vw-24px)]"
         trigger={

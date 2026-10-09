@@ -125,14 +125,29 @@ async function resolveIndex(
   namespace: Namespace,
   events: EventLogStore,
   handle: Space,
+  options?: { requireRepair: boolean },
 ): Promise<Index> {
   const index = await readIndex(handle);
   if (!index.pending) return index;
-  return {
+  const resolved = {
     conversation: (await findAcceptedStart(namespace, index.pending, events))
       ? index.pending.conversation
       : index.conversation,
   };
+  try {
+    await writeIndex(handle, resolved);
+  } catch (error) {
+    logger.error(
+      {
+        err: error,
+        canvasId: namespace.name,
+        threadId: index.pending.conversation.threadId,
+      },
+      'Recent conversation reconciliation could not be persisted',
+    );
+    if (options?.requireRepair) throw error;
+  }
+  return resolved;
 }
 
 /**
@@ -213,14 +228,16 @@ export async function appendRecentConversationTurn(
   }
 }
 
+/** A null result means the Space is missing, not an absent conversation. */
 export async function readRecentCanvasConversation(
   canvasId: string,
   events: EventLogStore,
-): Promise<RecentCanvasConversationResponse> {
+): Promise<RecentCanvasConversationResponse | null> {
   const lease = acquireWorkspaceOperationLease();
   try {
     const handle = space(canvasId);
     return await withCanvasMutex(canvasId, async () => {
+      if (!(await handle.read())) return null;
       const index = await resolveIndex(
         canvasAcpNamespace(canvasId),
         events,
@@ -247,7 +264,7 @@ export async function preserveRecentConversationBeforeHistoryDelete(
     if (!(await handle.read())) return;
     const index = await readIndex(handle);
     if (index.pending?.conversation.threadId !== threadId) return;
-    await writeIndex(handle, await resolveIndex(namespace, events, handle));
+    await resolveIndex(namespace, events, handle, { requireRepair: true });
   } finally {
     lease.release();
   }

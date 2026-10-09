@@ -352,6 +352,50 @@ describe('InkAgentDestinationPicker', () => {
     expect(document.activeElement).toBe(trigger());
   });
 
+  it.each(['mouse', 'touch'])(
+    'moves focus into a %s-opened menu and restores it after keyboard dismissal or choice',
+    async (pointerType) => {
+      await render();
+      const previousFocus = document.createElement('div');
+      previousFocus.tabIndex = 0;
+      required(container).append(previousFocus);
+      previousFocus.focus();
+      await act(async () => {
+        trigger().dispatchEvent(
+          new PointerEvent('pointerdown', {
+            bubbles: true,
+            cancelable: true,
+            pointerType,
+          }),
+        );
+      });
+      await openMenu();
+      expect(document.activeElement).toBe(
+        menu()?.querySelector('[role="menuitem"]'),
+      );
+      await key(document.activeElement, 'End');
+      expect(document.activeElement).toBe(row('Second review'));
+      await key(document.activeElement, 'ArrowUp');
+      expect(document.activeElement).toBe(row('First review'));
+      await key(document.activeElement, 'Escape');
+      await act(async () => {
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+      });
+      expect(menu()).toBeNull();
+      expect(document.activeElement).toBe(trigger());
+      await openMenu();
+      expect(document.activeElement).toBe(
+        menu()?.querySelector('[role="menuitem"]'),
+      );
+      await act(async () => row('First review').click());
+      expect(props.onContinueConversation).toHaveBeenCalledExactlyOnceWith(
+        'first',
+      );
+      expect(menu()).toBeNull();
+      expect(document.activeElement).toBe(trigger());
+    },
+  );
+
   it('preserves pointer selection, marks portalled chrome, and does not cancel touch activation', async () => {
     await render();
     const mouseDown = new MouseEvent('mousedown', {

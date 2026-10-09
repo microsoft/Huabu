@@ -3,6 +3,53 @@
 
 import { expect, test } from '@playwright/test';
 
+for (const pointerOpen of ['click', 'tap'] as const) {
+  test(`${pointerOpen}-opened destination menu supports immediate keyboard navigation and focus return`, async ({
+    page,
+  }) => {
+    await page.route(
+      '**/api/canvas/ink-layout-fixture/recent-conversation',
+      (route) => route.fulfill({ json: { conversation: null } }),
+    );
+    await page.goto('/playground/node-toolbars');
+    await expect(page.locator('.nt-toolbar')).toHaveCount(12);
+    await page.evaluate(async () => {
+      const load = (path: string) => import(/* @vite-ignore */ path);
+      const { mountInkToolbar } = await load('/e2e/fixtures/ink-toolbar.tsx');
+      await mountInkToolbar('en', 2);
+    });
+    const toolbar = page.locator('.ink-context-toolbar');
+    const trigger = toolbar.locator('.ink-agent-destination-trigger');
+    const previousFocus = toolbar.getByRole('button', {
+      name: 'Delete selected',
+    });
+    await previousFocus.focus();
+    await expect(previousFocus).toBeFocused();
+    await trigger[pointerOpen]();
+    const menu = page.getByRole('menu');
+    await expect(menu.getByRole('menuitem').first()).toBeFocused();
+    await page.keyboard.press('End');
+    await expect(
+      menu.getByRole('menuitem', { name: /Conversation 2/ }),
+    ).toBeFocused();
+    await page.keyboard.press('ArrowUp');
+    await expect(
+      menu.getByRole('menuitem', { name: /Conversation 1/ }),
+    ).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(menu).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+    await expect(trigger).toContainText('Conversation 1');
+    await expect(toolbar.getByLabel('1 ink source')).toBeVisible();
+    await trigger[pointerOpen]();
+    await expect(menu.getByRole('menuitem').first()).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+    await expect(trigger).toContainText('Conversation 1');
+  });
+}
+
 test('canceling a replacement Lasso restores its manual conversation destination', async ({
   page,
 }) => {

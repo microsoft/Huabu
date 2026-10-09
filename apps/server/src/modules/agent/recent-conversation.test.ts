@@ -28,8 +28,10 @@ import {
 } from './recent-conversation.js';
 import * as documents from './substrate-store.js';
 import { resolveDirectChildPath, safeJoin } from '../../utils/fs.js';
+import { logger } from '../../utils/logger.js';
 import canvasRoutes from '../canvas/canvas.route.js';
 import { withCanvasMutex } from '../canvas/write-coordinator.js';
+import * as storage from '../storage/index.js';
 import { getStructuredStore, space } from '../storage/index.js';
 import {
   mountTestWorkspace,
@@ -94,9 +96,235 @@ async function seed(canvasId = 'canvas-recent') {
   return canvasAcpNamespace(canvasId);
 }
 
+async function seedPendingConversation(outcome: 'accepted' | 'rejected') {
+  const ns = await seed();
+  await conversationEventLogStore.appendTurnStart(
+    ns,
+    'thread-a',
+    submission('a'),
+  );
+  if (outcome === 'accepted') {
+    const originalWrite = documents.writeSubstrateDocument;
+    let writes = 0;
+    const write = vi
+      .spyOn(documents, 'writeSubstrateDocument')
+      .mockImplementation(async (...args) => {
+        if (++writes === 2) throw new Error('Finalization unavailable');
+        return originalWrite(...args);
+      });
+    try {
+      await conversationEventLogStore.appendTurnStart(
+        ns,
+        'thread-b',
+        submission('b', 'ink-intent'),
+      );
+    } finally {
+      write.mockRestore();
+    }
+  } else {
+    const rejected = new InMemoryEventLogStore();
+    vi.spyOn(rejected, 'appendTurnStart').mockImplementation(() => {
+      throw new Error('Rejected before acceptance');
+    });
+    await expect(
+      appendRecentConversationTurn(
+        ns,
+        'thread-b',
+        submission('b', 'ink-intent'),
+        rejected,
+      ),
+    ).rejects.toThrow('Rejected before acceptance');
+  }
+  return ns;
+}
+
 describe.each(PRODUCT_STORAGE_PROFILES)(
   'recent conversation on %j',
   (profile) => {
+    it.each(['accepted', 'rejected'] as const)(
+      'persists %s pending reconciliation so the next read skips history',
+      async (outcome) => {
+        mounted = await mountTestWorkspace(profile, 'huabu-recent-repair-');
+        const ns = await seedPendingConversation(outcome);
+        const id = outcome === 'accepted' ? 'b' : 'a';
+        const expected = {
+          conversation: { nodeId: id, threadId: `thread-${id}` },
+        };
+        const substrate = await space(ns.name).extension(
+          'huabu.recentconversation',
+        );
+        if (!substrate) throw new Error('Expected the extension to exist');
+        expect(
+          await documents.readSubstrateDocument(substrate, 'target'),
+        ).toHaveProperty('pending');
+        expect(
+          await readRecentCanvasConversation(
+            ns.name,
+            conversationEventLogStore,
+          ),
+        ).toEqual(expected);
+        expect(
+          await documents.readSubstrateDocument(substrate, 'target'),
+        ).toEqual(expected);
+        const read = vi
+          .spyOn(conversationEventLogStore, 'readRecords')
+          .mockRejectedValue(new Error('History must not be read again'));
+        if (ns.storage?.root) {
+          await writeFile(
+            resolveDirectChildPath(
+              safeJoin(ns.storage.root, 'chat_v2'),
+              'thread-b.events.jsonl',
+            ),
+            '{corrupt',
+          );
+        }
+        expect(
+          await readRecentCanvasConversation(
+            ns.name,
+            conversationEventLogStore,
+          ),
+        ).toEqual(expected);
+        expect(read).not.toHaveBeenCalled();
+      },
+    );
+
+    it('logs repair-write failure, returns proven acceptance, and retries repair on the next read', async () => {
+      mounted = await mountTestWorkspace(profile, 'huabu-recent-repair-');
+      const ns = await seedPendingConversation('accepted');
+      const expected = { conversation: { nodeId: 'b', threadId: 'thread-b' } };
+      const failure = new Error('Repair storage unavailable');
+      const write = vi
+        .spyOn(documents, 'writeSubstrateDocument')
+        .mockRejectedValueOnce(failure);
+      const log = vi.spyOn(logger, 'error').mockImplementation(() => {});
+      const substrate = await space(ns.name).extension(
+        'huabu.recentconversation',
+      );
+      if (!substrate) throw new Error('Expected the extension to exist');
+      expect(
+        await readRecentCanvasConversation(ns.name, conversationEventLogStore),
+      ).toEqual(expected);
+      expect(log).toHaveBeenCalledWith(
+        { err: failure, canvasId: ns.name, threadId: 'thread-b' },
+        'Recent conversation reconciliation could not be persisted',
+      );
+      expect(
+        await documents.readSubstrateDocument(substrate, 'target'),
+      ).toHaveProperty('pending');
+      expect(
+        await readRecentCanvasConversation(ns.name, conversationEventLogStore),
+      ).toEqual(expected);
+      expect(
+        await documents.readSubstrateDocument(substrate, 'target'),
+      ).toEqual(expected);
+      expect(write).toHaveBeenCalledTimes(2);
+    });
+
+    it('requires a durable repair before deleting the history that proves pending acceptance', async () => {
+      mounted = await mountTestWorkspace(profile, 'huabu-recent-repair-');
+      const ns = await seedPendingConversation('accepted');
+      const write = vi
+        .spyOn(documents, 'writeSubstrateDocument')
+        .mockRejectedValueOnce(new Error('Repair unavailable'));
+      await expect(
+        conversationEventLogStore.delete(ns, 'thread-b'),
+      ).rejects.toThrow('Repair unavailable');
+      expect(
+        await conversationEventLogStore.readRecords(ns, 'thread-b'),
+      ).toHaveLength(1);
+      await conversationEventLogStore.delete(ns, 'thread-b');
+      expect(write).toHaveBeenCalledTimes(2);
+      expect(
+        await conversationEventLogStore.readRecords(ns, 'thread-b'),
+      ).toEqual([]);
+      expect(
+        await readRecentCanvasConversation(ns.name, conversationEventLogStore),
+      ).toEqual({
+        conversation: { nodeId: 'b', threadId: 'thread-b' },
+      });
+    });
+
+    it('leases the actual route across a delayed Space existence check and recency read', async () => {
+      mounted = await mountTestWorkspace(profile, 'huabu-recent-route-lease-');
+      const ns = await seed();
+      await conversationEventLogStore.appendTurnStart(
+        ns,
+        'thread-a',
+        submission('a'),
+      );
+      const workspaceA = mounted.workspacePath;
+      const workspaceB = path.join(workspaceA, 'another-workspace');
+      if (profile.structured.kind === 'disk') {
+        setWorkspacePath(workspaceB);
+        const other = await seed();
+        await conversationEventLogStore.appendTurnStart(
+          other,
+          'thread-b',
+          submission('b'),
+        );
+        setWorkspacePath(workspaceA);
+      }
+      const app = fastify();
+      await app.register(canvasRoutes, { prefix: '/api/canvas' });
+      await app.ready();
+      const entered = deferred();
+      const resume = deferred();
+      const originalSpace = storage.space;
+      const captured = originalSpace(ns.name);
+      const read = vi.fn(async () => {
+        const record = await captured.read();
+        entered.resolve();
+        await resume.promise;
+        return record;
+      });
+      const extension = vi.fn(captured.extension);
+      vi.spyOn(storage, 'space').mockImplementation((canvasId) =>
+        canvasId === ns.name
+          ? { ...captured, read, extension }
+          : originalSpace(canvasId),
+      );
+      const response = app
+        .inject({ url: `/api/canvas/${ns.name}/recent-conversation` })
+        .then((result) => result);
+      try {
+        await entered.promise;
+        expect(() => {
+          const reservation = beginWorkspaceActivation(workspaceB);
+          reservation.release();
+        }).toThrow(WorkspaceOperationInProgressError);
+        if (profile.structured.kind === 'disk') {
+          expect(() => setWorkspacePath(workspaceB)).toThrow(
+            WorkspaceOperationInProgressError,
+          );
+        }
+        resume.resolve();
+        const result = await response;
+        expect(result.statusCode).toBe(200);
+        expect(result.json()).toEqual({
+          conversation: { nodeId: 'a', threadId: 'thread-a' },
+        });
+        expect(read).toHaveBeenCalledTimes(1);
+        expect(extension).toHaveBeenCalled();
+      } finally {
+        resume.resolve();
+        await response;
+        vi.restoreAllMocks();
+        await app.close();
+      }
+      const reservation = beginWorkspaceActivation(workspaceB);
+      reservation.release();
+      if (profile.structured.kind === 'disk') {
+        setWorkspacePath(workspaceB);
+        expect(
+          await readRecentCanvasConversation(
+            ns.name,
+            conversationEventLogStore,
+          ),
+        ).toEqual({ conversation: { nodeId: 'b', threadId: 'thread-b' } });
+        setWorkspacePath(workspaceA);
+      }
+    });
+
     it('keeps a reused live Agent handle and all canonical history on the renamed Space', async () => {
       mounted = await mountTestWorkspace(profile, 'huabu-recent-rename-');
       const original = await seed();
@@ -589,7 +817,9 @@ describe.each(PRODUCT_STORAGE_PROFILES)(
           app.inject({ url: `/api/canvas/${id}/recent-conversation` });
         expect((await get(ns.name)).json()).toEqual({ conversation: null });
         expect((await get('canvas%2Fbad')).statusCode).toBe(400);
-        expect((await get('missing')).statusCode).toBe(404);
+        const missing = await get('missing');
+        expect(missing.statusCode).toBe(404);
+        expect(missing.json()).toEqual({ message: 'Canvas not found' });
         await conversationEventLogStore.appendTurnStart(
           ns,
           'thread-a',
@@ -607,7 +837,8 @@ describe.each(PRODUCT_STORAGE_PROFILES)(
         });
         const failed = await get(ns.name);
         expect(failed.statusCode).toBe(500);
-        expect(failed.json()).toMatchObject({
+        expect(failed.json()).toEqual({
+          message: 'Unable to read the recent conversation',
           code: 'RECENT_CONVERSATION_READ_FAILED',
         });
       } finally {
