@@ -33,9 +33,8 @@ export const CenterArea: React.FC<CenterAreaProps> = ({
     (state) => selectActiveTab(state)?.target.kind === 'chat',
   );
 
-  // The custom Electron title bar already exposes Handbook + Settings
-  // globally — suppress the duplicate floating versions on the canvas
-  // when running inside the desktop shell.
+  // Electron exposes Handbook + Settings in the title bar and canvas app
+  // menu, which remains available when fullscreen hides the title bar.
   const isElectronApp = isElectron();
 
   return (
