@@ -98,6 +98,7 @@ export async function mountInkToolbar(locale: string, conversationCount = 0) {
     sketchSelectionSession: {},
   });
   const host = document.createElement('div');
+  host.dataset.inkToolbarCanvas = '';
   host.style.cssText =
     'position:fixed;inset:0;background:var(--bg-default);z-index:900';
   document.body.append(host);

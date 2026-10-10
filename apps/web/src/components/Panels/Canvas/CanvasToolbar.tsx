@@ -45,6 +45,12 @@ import {
   getVideoDimensionsFromBlob,
 } from '../../../utils/io/media.ts';
 import { Button } from '../../Common/Button.tsx';
+import {
+  MENU_ICON_CLASS,
+  MENU_ITEM_CLASS,
+  MENU_LABEL_CLASS,
+  MENU_SURFACE_CLASS,
+} from '../../Common/menuStyles.ts';
 import { Modal } from '../../Common/Modal.tsx';
 import { Popover } from '../../Common/Popover.tsx';
 import {
@@ -599,7 +605,10 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
               }}
               anchor="bottom-left"
               offset={{ x: 0, y: -8 }}
-              className="flex flex-col overflow-hidden py-1"
+              className={clsx(
+                MENU_SURFACE_CLASS,
+                'flex flex-col overflow-hidden',
+              )}
             >
               {resourceOptions.map((opt) => (
                 <Button
@@ -608,7 +617,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
                   tone="neutral"
                   size="md"
                   role="menuitem"
-                  className="w-full justify-start rounded-none px-3 py-1.5 text-left"
+                  className={MENU_ITEM_CLASS}
                   onClick={() => {
                     setResourceMenuOpen(false);
                     if (opt.value === 'spacePreview') {
@@ -618,8 +627,8 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
                     }
                   }}
                 >
-                  <span className="shrink-0">{opt.icon}</span>
-                  <span className="flex-1">{opt.label}</span>
+                  <span className={MENU_ICON_CLASS}>{opt.icon}</span>
+                  <span className={MENU_LABEL_CLASS}>{opt.label}</span>
                 </Button>
               ))}
             </Popover>

@@ -63,6 +63,22 @@ describe('selectionZOrder', () => {
     }
   });
 
+  it('keeps forest order when Lasso selects one ordinary node beside partial Ink', () => {
+    const nodes = [
+      node('text', { type: 'text', selected: true }),
+      node('ink', { type: 'sketch' }),
+    ];
+    const base = assignNodeZIndices(nodes);
+
+    expect(base.get('ink')).toBeGreaterThan(base.get('text') ?? 0);
+    expect(selectionZOrder(nodes, base, { elevateSelectedNode: false })).toBe(
+      base,
+    );
+    expect(selectionZOrder(nodes, base).get('text')).toBeGreaterThan(
+      base.get('ink') ?? 0,
+    );
+  });
+
   it('raises a deeply nested child without raising its ancestors or siblings', () => {
     const nodes = select(forest(), 'child');
     const base = assignNodeZIndices(nodes);

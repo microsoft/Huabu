@@ -149,6 +149,17 @@ function row(title: string) {
   return item;
 }
 
+function newConversationRow(title: string) {
+  const group = document.querySelector(
+    '[role="group"][aria-label="New conversation"]',
+  );
+  const item = [
+    ...required(group).querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+  ].find((button) => button.textContent?.startsWith(title));
+  if (!item) throw new Error(`Missing new-conversation menu item: ${title}`);
+  return item;
+}
+
 async function openMenu() {
   await act(async () => {
     trigger().click();
@@ -169,6 +180,25 @@ async function key(target: Element | null, value: string) {
 }
 
 describe('InkAgentDestinationPicker', () => {
+  it('renders external Agents as a subordinate label within New conversation', async () => {
+    await render();
+    await openMenu();
+    const groups = required(menu()).querySelectorAll('[role="group"]');
+    expect(groups).toHaveLength(2);
+    const newGroup = required(groups[1]);
+    const externalHeading = [...newGroup.querySelectorAll('div')].find(
+      (element) => element.textContent === en.chat.externalAgents,
+    );
+    expect(externalHeading?.classList.contains('text-fg-subtle')).toBe(true);
+    expect(externalHeading?.classList.contains('px-3')).toBe(true);
+    expect(externalHeading?.classList.contains('uppercase')).toBe(false);
+    expect(externalHeading?.querySelector('.bg-edge-default')).toBeNull();
+    const continueHeading = required(groups[0]).firstElementChild;
+    const newHeading = newGroup.firstElementChild;
+    expect(continueHeading?.classList.contains('uppercase')).toBe(true);
+    expect(newHeading?.classList.contains('uppercase')).toBe(true);
+  });
+
   it('shows unresolved conversation choice without implying a new conversation', async () => {
     await render({ binding: null, unresolved: true });
     expect(trigger().textContent).toBe('Choose conversation');
@@ -194,16 +224,44 @@ describe('InkAgentDestinationPicker', () => {
     expect(props.onRefreshProfiles).toHaveBeenCalledOnce();
     await act(async () => trigger().click());
     expect(menu()).toBeNull();
+    expect(trigger().getAttribute('aria-expanded')).toBe('false');
     await openMenu();
     expect(props.onRefreshProfiles).toHaveBeenCalledTimes(2);
     expect(props.onNewConversation).not.toHaveBeenCalled();
     expect(props.onContinueConversation).not.toHaveBeenCalled();
   });
 
+  it('does not treat its trigger as an outside press before toggling closed', async () => {
+    await render({ binding: null, conversations: [] });
+
+    const activatePointer = async () => {
+      await act(async () => {
+        trigger().dispatchEvent(
+          new PointerEvent('pointerdown', {
+            bubbles: true,
+            cancelable: true,
+            pointerType: 'touch',
+          }),
+        );
+        trigger().click();
+      });
+    };
+
+    await activatePointer();
+    expect(menu()).not.toBeNull();
+    expect(trigger().getAttribute('aria-expanded')).toBe('true');
+
+    await activatePointer();
+    expect(menu()).toBeNull();
+    expect(trigger().getAttribute('aria-expanded')).toBe('false');
+    expect(trigger().hasAttribute('data-popover-dismiss-ignore')).toBe(true);
+    expect(props.onRefreshProfiles).toHaveBeenCalledOnce();
+  });
+
   it('reuses shared new-Agent choices and reports the choice without mutating controlled state', async () => {
     await render({ binding: null });
     await openMenu();
-    await act(async () => row('Reviewer').click());
+    await act(async () => newConversationRow('Reviewer').click());
     expect(props.onNewConversation).toHaveBeenCalledExactlyOnceWith({
       mode: 'operate',
       binding: { kind: 'external', profileId: 'reviewer', alias: 'Reviewer' },
@@ -219,7 +277,10 @@ describe('InkAgentDestinationPicker', () => {
   it('retains an all-busy continuation group and hides it only after its last conversation is removed', async () => {
     await render({ conversations: [required(conversations[1])] });
     await openMenu();
-    expect(menu()?.querySelectorAll('[role="group"]')).toHaveLength(2);
+    const groups = menu()?.querySelectorAll('[role="group"]');
+    expect(groups).toHaveLength(2);
+    expect(groups?.[0]?.textContent).toContain('Continue conversation');
+    expect(groups?.[1]?.textContent).toContain('New conversation');
     expect(row('Busy review').disabled).toBe(true);
     await render({ conversations: [] });
     expect(menu()?.querySelectorAll('[role="group"]')).toHaveLength(1);
@@ -326,19 +387,15 @@ describe('InkAgentDestinationPicker', () => {
     await render();
     trigger().focus();
     await key(trigger(), 'ArrowDown');
-    expect(document.activeElement).toBe(
-      menu()?.querySelector('[role="menuitem"]'),
-    );
-    await key(document.activeElement, 'End');
-    expect(document.activeElement).toBe(row('Second review'));
-    await key(document.activeElement, 'ArrowUp');
     expect(document.activeElement).toBe(row('First review'));
+    await key(document.activeElement, 'End');
+    expect(document.activeElement).toBe(newConversationRow('Reviewer'));
+    await key(document.activeElement, 'ArrowUp');
+    expect(document.activeElement).toBe(newConversationRow('Agent'));
     await key(document.activeElement, 'ArrowDown');
-    expect(document.activeElement).toBe(row('Second review'));
+    expect(document.activeElement).toBe(newConversationRow('Reviewer'));
     await key(document.activeElement, 'Home');
-    expect(document.activeElement).toBe(
-      menu()?.querySelector('[role="menuitem"]'),
-    );
+    expect(document.activeElement).toBe(row('First review'));
     await key(document.activeElement, 'Escape');
     await act(async () => {
       await new Promise((resolve) => requestAnimationFrame(resolve));
@@ -346,7 +403,7 @@ describe('InkAgentDestinationPicker', () => {
     expect(menu()).toBeNull();
     expect(document.activeElement).toBe(trigger());
     await key(trigger(), 'ArrowUp');
-    expect(document.activeElement).toBe(row('Second review'));
+    expect(document.activeElement).toBe(newConversationRow('Reviewer'));
     await key(document.activeElement, 'Tab');
     expect(menu()).toBeNull();
     expect(document.activeElement).toBe(trigger());
@@ -370,13 +427,11 @@ describe('InkAgentDestinationPicker', () => {
         );
       });
       await openMenu();
-      expect(document.activeElement).toBe(
-        menu()?.querySelector('[role="menuitem"]'),
-      );
-      await key(document.activeElement, 'End');
-      expect(document.activeElement).toBe(row('Second review'));
-      await key(document.activeElement, 'ArrowUp');
       expect(document.activeElement).toBe(row('First review'));
+      await key(document.activeElement, 'End');
+      expect(document.activeElement).toBe(newConversationRow('Reviewer'));
+      await key(document.activeElement, 'ArrowUp');
+      expect(document.activeElement).toBe(newConversationRow('Agent'));
       await key(document.activeElement, 'Escape');
       await act(async () => {
         await new Promise((resolve) => requestAnimationFrame(resolve));
@@ -384,9 +439,7 @@ describe('InkAgentDestinationPicker', () => {
       expect(menu()).toBeNull();
       expect(document.activeElement).toBe(trigger());
       await openMenu();
-      expect(document.activeElement).toBe(
-        menu()?.querySelector('[role="menuitem"]'),
-      );
+      expect(document.activeElement).toBe(row('First review'));
       await act(async () => row('First review').click());
       expect(props.onContinueConversation).toHaveBeenCalledExactlyOnceWith(
         'first',

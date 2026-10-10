@@ -90,6 +90,8 @@ export function AgentMenuRow({
 interface AgentMenuOptionsProps {
   /** Small uppercase heading shown above the rows. */
   heading: string;
+  /** Use a subordinate label when these options are nested under a menu section. */
+  externalHeadingStyle?: 'divider' | 'subheading';
   currentBinding: AgentBinding;
   currentMode: AgentMode;
   profiles: AgentProfileView[];
@@ -109,6 +111,7 @@ interface AgentMenuOptionsProps {
  */
 export function AgentMenuOptions({
   heading,
+  externalHeadingStyle = 'divider',
   currentBinding,
   currentMode,
   profiles,
@@ -163,11 +166,20 @@ export function AgentMenuOptions({
           <>
             <div
               role="presentation"
-              className="text-fg-muted mt-1 flex items-center gap-2 px-3 pt-1 pb-0.5 text-[10px] tracking-wider uppercase select-none"
+              className={cn(
+                'mt-1 flex items-center gap-2 pt-1 pb-0.5 text-[10px] select-none',
+                externalHeadingStyle === 'subheading'
+                  ? 'text-fg-subtle px-3'
+                  : 'text-fg-muted px-3 tracking-wider uppercase',
+              )}
             >
-              <span className="bg-edge-default h-px flex-1" />
+              {externalHeadingStyle === 'divider' && (
+                <span className="bg-edge-default h-px flex-1" />
+              )}
               <span>{t('chat.externalAgents')}</span>
-              <span className="bg-edge-default h-px flex-1" />
+              {externalHeadingStyle === 'divider' && (
+                <span className="bg-edge-default h-px flex-1" />
+              )}
             </div>
             {profiles.map((profile) => {
               const binding: AgentBinding = {

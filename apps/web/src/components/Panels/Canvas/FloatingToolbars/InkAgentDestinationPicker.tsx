@@ -174,10 +174,12 @@ export function InkAgentDestinationPicker({
             aria-controls={open ? `${id}-menu` : undefined}
             aria-label={accessibleLabel}
             aria-describedby={reason ? `${id}-reason` : undefined}
-            title={reason ?? accessibleLabel}
+            data-popover-dismiss-ignore=""
+            title={t('toolbar.inkAgentPicker.chooseSession')}
             className="ink-agent-destination-trigger max-w-[min(15rem,45vw)] min-w-0"
-            onPointerDown={() => {
+            onPointerDown={(event) => {
               keyboardOpen.current = null;
+              event.stopPropagation();
             }}
             onKeyDown={(event) => {
               if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
@@ -265,37 +267,11 @@ export function InkAgentDestinationPicker({
               {reason}
             </p>
           )}
-          <div
-            role="group"
-            aria-label={t('toolbar.inkAgentPicker.newConversation')}
-            className="[&_[role=menuitem]>span:nth-child(2)]:min-w-0 [&_[role=menuitem]>span:nth-child(2)]:shrink [&_[role=menuitem]>span:nth-child(2)]:truncate"
-          >
-            <AgentMenuOptions
-              heading={t('toolbar.inkAgentPicker.newConversation')}
-              currentBinding={
-                continuing
-                  ? NO_CURRENT_BINDING
-                  : (binding ?? NO_CURRENT_BINDING)
-              }
-              currentMode={mode}
-              profiles={profiles}
-              busy={disabled}
-              onSelect={(choice) => {
-                if (disabled) return;
-                onNewConversation(choice);
-                closeAfterChoice();
-              }}
-            />
-          </div>
           {conversations.length > 0 && (
-            <div
-              role="group"
-              aria-labelledby={`${id}-continue`}
-              className="border-edge-default mt-1 border-t"
-            >
+            <div role="group" aria-labelledby={`${id}-continue`}>
               <div
                 id={`${id}-continue`}
-                className="text-fg-muted px-3 pt-2 pb-1 text-[10px] tracking-wider uppercase"
+                className="text-fg-muted px-3 pt-1.5 pb-1 text-[10px] tracking-wider uppercase"
               >
                 {t('toolbar.inkAgentPicker.continueCanvas')}
               </div>
@@ -352,6 +328,32 @@ export function InkAgentDestinationPicker({
               })}
             </div>
           )}
+          <div
+            role="group"
+            aria-label={t('toolbar.inkAgentPicker.newConversation')}
+            className={cn(
+              '[&_[role=menuitem]>span:nth-child(2)]:min-w-0 [&_[role=menuitem]>span:nth-child(2)]:shrink [&_[role=menuitem]>span:nth-child(2)]:truncate',
+              conversations.length > 0 && 'border-edge-default mt-1 border-t',
+            )}
+          >
+            <AgentMenuOptions
+              heading={t('toolbar.inkAgentPicker.newConversation')}
+              externalHeadingStyle="subheading"
+              currentBinding={
+                continuing
+                  ? NO_CURRENT_BINDING
+                  : (binding ?? NO_CURRENT_BINDING)
+              }
+              currentMode={mode}
+              profiles={profiles}
+              busy={disabled}
+              onSelect={(choice) => {
+                if (disabled) return;
+                onNewConversation(choice);
+                closeAfterChoice();
+              }}
+            />
+          </div>
         </div>
       </DropdownMenu>
       {reason && (

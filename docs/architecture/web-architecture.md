@@ -115,6 +115,8 @@ Toolbar settings panels (size, layout, color, and stroke thickness) use 8px padd
 
 CanvasFloatingPopover stops double-click bubbling from toolbar controls and their nested portals to the owning React Flow node, without preventing native defaults or child handlers. Common FloatingToolbar.NumberInput selects its entire numeric value on double-click, consistently covering dimensions, font size, and layout counts. Double-clicking these controls never opens a node preview or dismisses the settings panel; double-clicking the node itself retains its existing activation behavior.
 
+CanvasFloatingPopover exposes `--canvas-popover-available-width` using Floating UI size middleware with the same React Flow boundary and padding as flip/shift. Its existing boundary ResizeObserver updates this width when adjacent panels resize the canvas without resizing the browser. Consumers opt into width constraints through the property; publishing it does not resize unrelated toolbar surfaces. The retained-Lasso toolbar uses it both for capsule wrapping and the destination trigger's maximum width, reserving space for Send.
+
 Single-node toolbar visibility uses the shared modifier tracker's canvas-specific snapshot: Ctrl/Cmd suppresses chrome only when focus is not owned by an editor or interactive control. This preserves numeric drafts, focus, and native shortcuts inside the toolbar and nested panels; the raw modifier and link-follow snapshots remain unchanged for their other consumers. Returning focus to the canvas while still holding the modifier restores normal suppression.
 
 Common Popover arbitrates Escape by its React nesting hierarchy and opening order: only the topmost dismissible leaf handles a keypress, including nested panels using an explicit portal container. Changing a dismissal callback does not reorder layers. Its dismissal callback distinguishes `escape` from `outside-press`. DropdownMenu and SplitSelect return keyboard-dismissed focus to their trigger after the panel unmounts, avoiding blur commits of cancelled numeric drafts; outside presses retain focus on the user's new target. Nested menu Escape returns to the submenu trigger before a second Escape closes the parent.
@@ -355,7 +357,7 @@ product starts relying on complex plural/select/date message patterns.
 
 ## 6. Node & edge stacking (z-order)
 
-The **Layers panel / `nodes` array order is the persisted stacking authority.** At rest, later in the forest means painted on top. A plain node ordered after a Frame covers that Frame **and its entire subtree**; ordered before, it is covered by the whole subtree. Sole node selection temporarily elevates that node and its descendants for interaction; deselection or multi-selection restores the normal forest mapping without changing array order or stored z values.
+The **Layers panel / `nodes` array order is the persisted stacking authority.** At rest, later in the forest means painted on top. A plain node ordered after a Frame covers that Frame **and its entire subtree**; ordered before, it is covered by the whole subtree. Sole node selection with the Select tool temporarily elevates that node and its descendants for interaction; deselection or multi-selection restores the normal forest mapping without changing array order or stored z values. Lasso never applies this elevation because partial Ink is selected below the node layer: elevating the one ordinary node in a mixed Lasso would let that node cover selected Ink that is persistently above it.
 
 React Flow's default `zIndexMode: 'auto'` does **not** honour this: it forces
 every child above its parent and lifts framed top-level frames by a fixed band,
@@ -369,7 +371,7 @@ and derive every `zIndex` ourselves in the **render layer**:
   siblings in array order) assigns each node a contiguous z. Children land
   immediately above their frame; a later sibling out-ranks the whole preceding
   subtree.
-- [`selectionZOrder`](../../apps/web/src/components/Panels/Canvas/selectionZOrder.ts) — when exactly one node is selected, offsets its subtree above the maximum base z while retaining relative forest order. Selecting a nested child does not elevate its ancestors or sibling branches; selecting a Frame includes its descendants so its background cannot cover them. Zero or multiple selected nodes reuse the base map unchanged. React Flow keeps `elevateNodesOnSelect={false}`; its implicit selection bump is not used.
+- [`selectionZOrder`](../../apps/web/src/components/Panels/Canvas/selectionZOrder.ts) — when exactly one node is selected by the Select tool, offsets its subtree above the maximum base z while retaining relative forest order. Selecting a nested child does not elevate its ancestors or sibling branches; selecting a Frame includes its descendants so its background cannot cover them. Lasso, zero selection, and multiple selected nodes reuse the base map unchanged. React Flow keeps `elevateNodesOnSelect={false}`; its implicit selection bump is not used.
 - [`edgeZIndex`](../../packages/shared/src/canvas-engine/container/zorder.ts) — an
   edge floats at the z of its highest **framed** endpoint (0 when both endpoints
   are top-level), mirroring React Flow's old auto-mode edge behaviour, which

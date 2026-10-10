@@ -5,7 +5,10 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { agentRequestSchema } from '@huabu/shared';
+import {
+  agentRequestSchema,
+  type RecentCanvasConversationResponse,
+} from '@huabu/shared';
 
 import { Button } from '@/components/Common/Button';
 import { toast } from '@/components/Common/Toast';
@@ -98,14 +101,16 @@ vi.mock('@/components/Common/CanvasFloatingPopover', async () => {
     CanvasFloatingPopover: ({
       anchor,
       open,
+      className,
       children,
     }: {
       anchor: unknown;
       open: boolean;
+      className?: string;
       children: React.ReactNode;
     }) => {
       mocks.popoverAnchor = anchor;
-      return open ? createElement('div', null, children) : null;
+      return open ? createElement('div', { className }, children) : null;
     },
   };
 });
@@ -147,9 +152,9 @@ function sendButton() {
   return button;
 }
 
-function deferredResult() {
-  let resolve!: (result: AgentTurnResult) => void;
-  const promise = new Promise<AgentTurnResult>((done) => {
+function deferredResult<T = AgentTurnResult>() {
+  let resolve!: (result: T) => void;
+  const promise = new Promise<T>((done) => {
     resolve = done;
   });
   return { promise, resolve };
@@ -321,6 +326,78 @@ afterEach(() => {
 });
 
 describe('StrokeSelectionToolbar Ink submission', () => {
+  it('previews cached recency but waits for the current server target before sending', async () => {
+    addQuestion();
+    const state = useCanvasStore.getState();
+    state._setStateNoAutosave({
+      nodes: [
+        ...state.nodes,
+        {
+          id: 'question-2',
+          type: 'question',
+          position: { x: 400, y: 0 },
+          data: {
+            threadId: 'thread-second',
+            agentBinding: { kind: 'internal' },
+          },
+        },
+      ],
+    });
+    useGesturePreviewStore.setState({
+      sketchStrokeSelection: {},
+      sketchSelectionPolygon: null,
+      sketchSelectionSession: null,
+    });
+    mocks.recentConversation.mockResolvedValueOnce({
+      conversation: { nodeId: 'question-1', threadId: 'thread-existing' },
+    });
+    await mountToolbar();
+    expect(mocks.recentConversation).toHaveBeenCalledTimes(1);
+
+    const refresh = deferredResult<RecentCanvasConversationResponse>();
+    mocks.recentConversation.mockReturnValueOnce(refresh.promise);
+    await act(async () => {
+      useGesturePreviewStore.setState({
+        sketchStrokeSelection: { 'sketch-1': ['stroke-1'] },
+        sketchSelectionPolygon: [
+          { x: 20, y: 30 },
+          { x: 80, y: 30 },
+          { x: 80, y: 70 },
+          { x: 20, y: 70 },
+        ],
+        sketchSelectionSession: {},
+      });
+      root.render(createElement(StrokeSelectionToolbar));
+    });
+
+    expect(mocks.recentConversation).toHaveBeenCalledTimes(2);
+    expect(document.querySelector('[data-picker-target]')?.textContent).toBe(
+      'question-1',
+    );
+    expect(document.body.textContent).not.toContain('Loading conversation');
+    expect(sendButton().disabled).toBe(true);
+    await act(async () => sendButton().click());
+    expect(mocks.dispatch).not.toHaveBeenCalled();
+
+    await act(async () =>
+      refresh.resolve({
+        conversation: { nodeId: 'question-2', threadId: 'thread-second' },
+      }),
+    );
+    expect(document.querySelector('[data-picker-target]')?.textContent).toBe(
+      'question-2',
+    );
+    expect(sendButton().disabled).toBe(false);
+    mocks.dispatch.mockResolvedValueOnce({ status: 'completed' });
+    await act(async () => sendButton().click());
+    expect(mocks.prepare).toHaveBeenCalledWith(
+      expect.objectContaining({
+        session: expect.objectContaining({ threadId: 'thread-second' }),
+      }),
+    );
+    expect(mocks.dispatch).toHaveBeenCalledOnce();
+  });
+
   it('waits for Lasso completion and refreshes when a new gesture replaces a retained selection', async () => {
     addQuestion();
     mocks.selecting = true;
@@ -540,6 +617,21 @@ describe('StrokeSelectionToolbar Ink submission', () => {
 
   it('blocks unresolved loading and ignores a late response after an explicit choice', async () => {
     addQuestion();
+    const state = useCanvasStore.getState();
+    state._setStateNoAutosave({
+      nodes: [
+        ...state.nodes,
+        {
+          id: 'question-2',
+          type: 'question',
+          position: { x: 400, y: 0 },
+          data: {
+            threadId: 'thread-second',
+            agentBinding: { kind: 'internal' },
+          },
+        },
+      ],
+    });
     let resolve!: (value: { conversation: null }) => void;
     const pending = new Promise<{ conversation: null }>((done) => {
       resolve = done;
@@ -561,6 +653,66 @@ describe('StrokeSelectionToolbar Ink submission', () => {
     expect(document.querySelector('[data-picker-target]')?.textContent).toBe(
       'new',
     );
+  });
+
+  it('shows the default Agent immediately while an empty Space refreshes', async () => {
+    mocks.recentConversation.mockReturnValue(new Promise(() => {}));
+
+    await mountToolbar();
+
+    expect(document.querySelector('[data-picker-target]')?.textContent).toBe(
+      'new',
+    );
+    expect(document.body.textContent).not.toContain('Loading conversation');
+    expect(sendButton().disabled).toBe(true);
+  });
+
+  it('keeps a manually confirmed destination stable when recency returns during grounding', async () => {
+    addQuestion();
+    const state = useCanvasStore.getState();
+    state._setStateNoAutosave({
+      nodes: [
+        ...state.nodes,
+        {
+          id: 'note-1',
+          type: 'note',
+          selected: true,
+          position: { x: 120, y: 0 },
+          data: {},
+        },
+      ],
+    });
+    const recent = deferredResult<RecentCanvasConversationResponse>();
+    mocks.recentConversation.mockReturnValueOnce(recent.promise);
+    mocks.captureGrounding.mockImplementationOnce(async () => {
+      recent.resolve({
+        conversation: {
+          nodeId: 'deleted-question',
+          threadId: 'deleted-thread',
+        },
+      });
+      await recent.promise;
+      return {
+        blob: new Blob(['png'], { type: 'image/png' }),
+        crop: { x: 0, y: 0, width: 220, height: 100 },
+        devicePixelRatio: 2,
+        viewport: { width: 1200, height: 800 },
+      };
+    });
+    mocks.dispatch.mockResolvedValueOnce({ status: 'completed' });
+    await mountToolbar();
+    expect(sendButton().disabled).toBe(true);
+    await selectConversation();
+    expect(sendButton().disabled).toBe(false);
+    await act(async () => sendButton().click());
+    expect(mocks.captureGrounding).toHaveBeenCalledOnce();
+    expect(mocks.dispatch).toHaveBeenCalledOnce();
+    expect(mocks.prepare).toHaveBeenCalledWith(
+      expect.objectContaining({
+        session: expect.objectContaining({ threadId: 'thread-existing' }),
+      }),
+    );
+    expect(toast).not.toHaveBeenCalled();
   });
 
   it('shows read failures without silently creating a conversation', async () => {
@@ -985,7 +1137,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
     },
   );
 
-  it('keeps submit and source count visible for a mixed selection', async () => {
+  it('keeps submit visible without a source count for a mixed selection', async () => {
     useCanvasStore.getState()._setStateNoAutosave({
       nodes: [
         {
@@ -1008,14 +1160,20 @@ describe('StrokeSelectionToolbar Ink submission', () => {
 
     await mountToolbar();
 
-    expect(document.body.textContent).toContain('2 sources');
+    expect(document.body.textContent).not.toContain('2 sources');
     expect(
       document.body.querySelector('[data-picker-binding]')?.textContent,
     ).toContain('Default Copilot');
-    expect(document.body.querySelector('[data-sketch-controls]')).toBeNull();
     const submit = document.body.querySelector<HTMLButtonElement>(
       'button[aria-label="Send ink request"]',
     );
+    expect(submit).not.toBeNull();
+    expect(
+      document.body.querySelector('.ink-agent-group')?.contains(submit),
+    ).toBe(true);
+    expect(document.body.querySelector('.lucide-shapes')).not.toBeNull();
+    expect(document.body.querySelector('.lucide-pencil')).toBeNull();
+    expect(document.body.querySelector('[data-sketch-controls]')).toBeNull();
     expect(submit?.disabled).toBe(false);
     expect(submit?.className).toContain('bg-inverse');
     expect(submit?.className).toContain('rounded-md');
@@ -1025,6 +1183,93 @@ describe('StrokeSelectionToolbar Ink submission', () => {
       width: 60,
       height: 40,
     });
+  });
+
+  it('keeps Delete in an always-visible overflow menu', async () => {
+    const state = useCanvasStore.getState();
+    state._setStateNoAutosave({
+      nodes: state.nodes.map((node) =>
+        node.id === 'sketch-1'
+          ? {
+              ...node,
+              data: {
+                strokes: [
+                  {
+                    id: 'stroke-1',
+                    points: [[0, 0]],
+                    color: 'teal',
+                    size: 4,
+                    createdAt: 1,
+                  },
+                ],
+              },
+            }
+          : node,
+      ),
+    });
+    await mountToolbar();
+    const more = document.body
+      .querySelector('.lucide-ellipsis')
+      ?.closest<HTMLButtonElement>('button');
+    expect(more).not.toBeNull();
+    const editGroup = document.body.querySelector('.ink-edit-group');
+    const agentGroup = document.body.querySelector('.ink-agent-group');
+    const toolbarContainer = document.body.querySelector(
+      '.ink-context-toolbar',
+    );
+    expect(editGroup?.contains(more ?? null)).toBe(true);
+    expect(editGroup?.className).toContain('bg-surface');
+    expect(agentGroup?.className).toContain('bg-surface');
+    expect(editGroup?.parentElement).toBe(toolbarContainer);
+    expect(agentGroup?.parentElement).toBe(toolbarContainer);
+    expect(editGroup?.querySelector('.lucide-pencil')).not.toBeNull();
+    expect(editGroup?.querySelector('.lucide-shapes')).toBeNull();
+    expect(editGroup?.querySelectorAll('.bg-edge-default')).toHaveLength(2);
+    expect(agentGroup?.querySelector('.bg-edge-default')).toBeNull();
+    expect(
+      [...(toolbarContainer?.children ?? [])].some((child) =>
+        child.classList.contains('bg-edge-default'),
+      ),
+    ).toBe(false);
+    expect(
+      Boolean(
+        (editGroup && agentGroup
+          ? editGroup.compareDocumentPosition(agentGroup)
+          : 0) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ),
+    ).toBe(true);
+    expect(document.body.querySelector('.lucide-trash-2')).toBeNull();
+
+    await act(async () => more?.click());
+
+    const deleteItem = [
+      ...document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+    ].find((item) => item.textContent === 'Delete');
+    expect(deleteItem?.className).toContain('text-danger');
+    await act(async () => deleteItem?.click());
+    expect(useGesturePreviewStore.getState().sketchStrokeSelection).toEqual({});
+  });
+
+  it('keeps only the identity divider when a mixed selection has no style controls', async () => {
+    useCanvasStore.getState()._setStateNoAutosave({
+      nodes: [
+        ...useCanvasStore.getState().nodes,
+        {
+          id: 'note-1',
+          type: 'note',
+          selected: true,
+          position: { x: 120, y: 0 },
+          data: {},
+        },
+      ],
+    });
+
+    await mountToolbar();
+
+    const editGroup = document.body.querySelector('.ink-edit-group');
+    expect(editGroup?.querySelector('.lucide-shapes')).not.toBeNull();
+    expect(editGroup?.querySelectorAll('.bg-edge-default')).toHaveLength(1);
+    expect(editGroup?.querySelector('.lucide-ellipsis')).not.toBeNull();
   });
 
   it('captures hidden grounding before dispatching mixed Ink and objects', async () => {
@@ -1071,6 +1316,71 @@ describe('StrokeSelectionToolbar Ink submission', () => {
         groundingVisual: input.groundingVisual,
       }),
     ).toMatchObject({ success: true });
+  });
+
+  it('tolerates an imperceptible viewport correction during grounding capture', async () => {
+    useCanvasStore.getState()._setStateNoAutosave({
+      nodes: [
+        {
+          id: 'sketch-1',
+          type: 'sketch',
+          selected: true,
+          position: { x: 0, y: 0 },
+          data: {},
+        },
+        {
+          id: 'note-1',
+          type: 'note',
+          selected: true,
+          position: { x: 120, y: 0 },
+          data: {},
+        },
+      ],
+    });
+    mocks.getViewport
+      .mockReturnValueOnce({ x: 0, y: 0, zoom: 1 })
+      .mockReturnValueOnce({ x: 0.25, y: -0.25, zoom: 1 });
+    mocks.dispatch.mockResolvedValueOnce({ status: 'completed' });
+    const button = await renderToolbar();
+
+    await act(async () => button.click());
+
+    expect(mocks.prepare).toHaveBeenCalledOnce();
+    expect(mocks.dispatch).toHaveBeenCalledOnce();
+  });
+
+  it('rejects a visible viewport change during grounding capture', async () => {
+    useCanvasStore.getState()._setStateNoAutosave({
+      nodes: [
+        {
+          id: 'sketch-1',
+          type: 'sketch',
+          selected: true,
+          position: { x: 0, y: 0 },
+          data: {},
+        },
+        {
+          id: 'note-1',
+          type: 'note',
+          selected: true,
+          position: { x: 120, y: 0 },
+          data: {},
+        },
+      ],
+    });
+    mocks.getViewport
+      .mockReturnValueOnce({ x: 0, y: 0, zoom: 1 })
+      .mockReturnValueOnce({ x: 1, y: 0, zoom: 1 });
+    const button = await renderToolbar();
+
+    await act(async () => button.click());
+
+    expect(mocks.prepare).not.toHaveBeenCalled();
+    expect(mocks.dispatch).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledWith(
+      'Canvas view changed during Ink grounding capture. Submit again.',
+      { tone: 'danger' },
+    );
   });
 
   it('keeps Frame-nested Ink unique and grounds the final source tree', async () => {

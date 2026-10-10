@@ -171,6 +171,33 @@ export function unionSelectionBounds(
   return { x, y, width: maxX - x, height: maxY - y };
 }
 
+export function isViewportStableForBounds(
+  before: { x: number; y: number; zoom: number },
+  after: { x: number; y: number; zoom: number },
+  bounds: { x: number; y: number; width: number; height: number },
+  epsilon = 0.5,
+): boolean {
+  const project = (
+    viewport: { x: number; y: number; zoom: number },
+    point: { x: number; y: number },
+  ) => ({
+    x: point.x * viewport.zoom + viewport.x,
+    y: point.y * viewport.zoom + viewport.y,
+  });
+  const points = [
+    { x: bounds.x, y: bounds.y },
+    { x: bounds.x + bounds.width, y: bounds.y + bounds.height },
+  ];
+  return points.every((point) => {
+    const previous = project(before, point);
+    const current = project(after, point);
+    return (
+      Math.abs(current.x - previous.x) < epsilon &&
+      Math.abs(current.y - previous.y) < epsilon
+    );
+  });
+}
+
 export function retainedLassoBounds(
   polygon: readonly { x: number; y: number }[] | null,
   move: { dx: number; dy: number } | null = null,

@@ -10,7 +10,9 @@ import type { CSSProperties } from 'react';
 export function selectionZOrder(
   nodes: NestableNode[],
   baseZ: ReadonlyMap<string, number>,
+  options: { elevateSelectedNode?: boolean } = {},
 ): ReadonlyMap<string, number> {
+  if (options.elevateSelectedNode === false) return baseZ;
   let selected: NestableNode | undefined;
   for (const node of nodes) {
     if (!node.selected) continue;

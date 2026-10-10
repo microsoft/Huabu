@@ -679,17 +679,18 @@ const CanvasContent: React.FC<CanvasProps> = ({
     cancelLasso();
     window.dispatchEvent(new Event(CANCEL_SKETCH_GESTURE_EVENT));
   }, [cancelLasso]);
-  // Forest order remains authoritative at rest. Sole selection temporarily
-  // raises a node/subtree (including its actual in-node controls), without
-  // changing store order or persisted z. Manual mode uses this map verbatim.
+  // Forest order remains authoritative at rest and throughout Lasso, where
+  // partial Ink is not a selected node. Select-tool sole selection temporarily
+  // raises a node/subtree without changing store order or persisted z.
   const nodesById = useMemo(() => indexById(nodes as NestableNode[]), [nodes]);
   const zByNode = useMemo(
     () =>
       selectionZOrder(
         nodes as NestableNode[],
         assignNodeZIndices(nodes as NestableNode[]),
+        { elevateSelectedNode: tool !== 'lasso' },
       ),
-    [nodes],
+    [nodes, tool],
   );
 
   // Cache of the wrapped node objects emitted last render, keyed by their

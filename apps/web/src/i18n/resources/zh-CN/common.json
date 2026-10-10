@@ -1034,6 +1034,7 @@
   },
   "toolbar": {
     "inkAgentPicker": {
+      "chooseSession": "选择会话",
       "chooseConversation": "选择会话",
       "loadingConversation": "正在加载会话…",
       "loadFailed": "无法加载最近会话：{{message}}。请选择目标，或重新打开菜单重试。",
@@ -1052,6 +1053,8 @@
       "unavailableConversation": "会话不可用"
     },
     "more": "更多",
+    "inkSelection": "选中的笔迹",
+    "multipleSelectedObjects": "多个选中对象",
     "fontSize": "字号",
     "fontFamily": "字体",
     "openOriginalUrl": "打开原网址",

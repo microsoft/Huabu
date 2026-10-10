@@ -6,6 +6,7 @@ import {
   flip,
   offset as offsetMiddleware,
   shift,
+  size,
   useFloating,
 } from '@floating-ui/react';
 import { useStore, useViewport } from '@xyflow/react';
@@ -45,7 +46,7 @@ export interface CanvasFloatingPopoverProps {
   open: boolean;
   /** Screen-pixel gap between the popover and the anchor. Default `12`. */
   offset?: number;
-  /** Minimum gap to the visible browser viewport edges. Default `8`. */
+  /** Minimum gap to the visible canvas boundary edges. Default `8`. */
   viewportPadding?: number;
   /** Preferred placement relative to the anchor. Default `'top'`. */
   side?: 'top' | 'bottom';
@@ -154,6 +155,16 @@ export function CanvasFloatingPopover({
       offsetMiddleware(offset),
       flip({ boundary: domNode ?? undefined, padding: viewportPadding }),
       shift({ boundary: domNode ?? undefined, padding: viewportPadding }),
+      size({
+        boundary: domNode ?? undefined,
+        padding: viewportPadding,
+        apply({ availableWidth, elements }) {
+          elements.floating.style.setProperty(
+            '--canvas-popover-available-width',
+            `${Math.max(0, availableWidth)}px`,
+          );
+        },
+      }),
     ],
     whileElementsMounted: autoUpdate,
   });
