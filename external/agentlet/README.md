@@ -127,7 +127,7 @@ The standard environment includes:
 
 Agentlet transports opaque resources and environment values; it does not interpret the host-specific tool protocol.
 
-The optional Service SDK exports `leaseService(id)` and `withServiceConfig(id, callback)`. It uses host-injected reachback coordinates to obtain current configuration without downloading Package code or persisting credentials. Downloaded Service Package entries import the SDK through `AGENTLET_SERVICE_SDK_URL`; the daemon writes that variable after workload environment values so a session cannot replace the SDK module location.
+The optional Service SDK exports `leaseService(id)` and `withServiceContext(id, callback)`. It uses host-injected reachback coordinates to obtain one version-coherent runtime context containing the validated Service Manifest and current configuration without downloading Package code or persisting credentials. Downloaded Service Package entries import the SDK through `AGENTLET_SERVICE_SDK_URL`; the daemon writes that variable after workload environment values so a session cannot replace the SDK module location.
 
 ## Repository layout
 

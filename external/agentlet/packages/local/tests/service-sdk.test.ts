@@ -2,8 +2,33 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   leaseService,
-  withServiceConfig,
+  withServiceContext,
 } from '../src/service-sdk/index.js'
+
+const manifest = {
+  schema: 'huabu-service/v1',
+  id: 'example',
+  version: '1.0.0',
+  name: 'Example',
+  description: 'Example Service',
+  storage: { namespace: 'integration.example' },
+  package: { files: ['SKILL.md', 'entry.mjs'] },
+  configuration: [
+    {
+      id: 'quality',
+      label: 'Quality',
+      type: 'enum',
+      required: true,
+      options: [{ value: 'high', label: 'high' }],
+    },
+    {
+      id: 'apiKey',
+      label: 'API key',
+      type: 'secret',
+      required: true,
+    },
+  ],
+} as const
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -22,6 +47,7 @@ describe('Service SDK', () => {
           JSON.stringify({
             id: 'example',
             version: '1.0.0',
+            manifest,
             config: { apiKey: 'provider-secret' },
           }),
           { status: 200 },
@@ -32,6 +58,7 @@ describe('Service SDK', () => {
     const lease = await leaseService('example')
 
     expect(lease.config).toEqual({ apiKey: 'provider-secret' })
+    expect(lease.manifest.configuration[0]?.id).toBe('quality')
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
@@ -53,6 +80,7 @@ describe('Service SDK', () => {
           JSON.stringify({
             id: 'example',
             version: '1.0.0',
+            manifest,
             config: { apiKey: 'provider-secret' },
           }),
         ),
@@ -60,11 +88,11 @@ describe('Service SDK', () => {
     )
 
     await expect(
-      withServiceConfig('example', ({ config, lease }) => ({
+      withServiceContext('example', ({ config, manifest: serviceManifest }) => ({
         configured: Boolean(config.apiKey),
-        version: lease.version,
+        name: serviceManifest.name,
       })),
-    ).resolves.toEqual({ configured: true, version: '1.0.0' })
+    ).resolves.toEqual({ configured: true, name: 'Example' })
   })
 
   it('does not include response bodies in provider-facing errors', async () => {

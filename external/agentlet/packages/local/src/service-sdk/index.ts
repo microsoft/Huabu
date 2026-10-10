@@ -1,12 +1,34 @@
+export interface ServiceFieldOption {
+  value: string
+  label: string
+}
+
+export interface ServiceConfigurationField {
+  id: string
+  label: string
+  description?: string
+  type: 'text' | 'secret' | 'url' | 'boolean' | 'enum'
+  required: boolean
+  options?: ServiceFieldOption[]
+  placeholder?: string
+}
+
+export interface ServiceManifest {
+  schema: 'huabu-service/v1'
+  id: string
+  version: string
+  name: string
+  description: string
+  storage: { namespace: string }
+  package: { files: string[] }
+  configuration: ServiceConfigurationField[]
+}
+
 export interface ServiceLease {
   id: string
   version: string
+  manifest: ServiceManifest
   config: Record<string, string | boolean | null>
-}
-
-export interface ServiceConfigContext {
-  config: ServiceLease['config']
-  lease: ServiceLease
 }
 
 function requiredEnvironment(name: 'HUABU_RFS_URL' | 'AGENTLET_TOKEN'): string {
@@ -40,16 +62,28 @@ export async function leaseService(serviceId: string): Promise<ServiceLease> {
     { method: 'POST' },
   )
   const lease = (await response.json()) as ServiceLease
-  if (lease.id !== serviceId || typeof lease.version !== 'string') {
+  const declaredFields = new Set(
+    lease.manifest?.configuration?.map((field) => field.id) ?? [],
+  )
+  if (
+    lease.id !== serviceId ||
+    typeof lease.version !== 'string' ||
+    lease.manifest?.id !== serviceId ||
+    lease.manifest.version !== lease.version ||
+    !Array.isArray(lease.manifest.configuration) ||
+    !lease.config ||
+    typeof lease.config !== 'object' ||
+    Array.isArray(lease.config) ||
+    Object.keys(lease.config).some((fieldId) => !declaredFields.has(fieldId))
+  ) {
     throw new Error('Invalid Service lease')
   }
   return lease
 }
 
-export async function withServiceConfig<T>(
+export async function withServiceContext<T>(
   serviceId: string,
-  run: (context: ServiceConfigContext) => Promise<T> | T,
+  run: (service: ServiceLease) => Promise<T> | T,
 ): Promise<T> {
-  const lease = await leaseService(serviceId)
-  return run({ lease, config: lease.config })
+  return run(await leaseService(serviceId))
 }
