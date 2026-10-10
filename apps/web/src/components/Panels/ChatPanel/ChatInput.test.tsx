@@ -18,26 +18,11 @@ const chatState = {
   removePendingAttachment: vi.fn(),
 };
 
-const canvasState = {
-  canvasId: null as string | null,
-  nodes: [] as Array<{
-    id: string;
-    type: string;
-    position: { x: number; y: number };
-    data: { label: string };
-  }>,
-};
-
 const panelState: {
   focusChatInputRequest: { threadId: string; nonce: number } | null;
 } = {
   focusChatInputRequest: null,
 };
-
-vi.mock('@/store/canvasStore', () => ({
-  default: (selector: (state: typeof canvasState) => unknown) =>
-    selector(canvasState),
-}));
 
 vi.mock('@/store/chatStore', () => {
   const useChatStore = Object.assign(
@@ -61,7 +46,15 @@ vi.mock('react-i18next', () => ({
 }));
 
 vi.mock('./ContextUsageRing', () => ({ ContextUsageRing: () => null }));
-vi.mock('./SelectedNodeRefs', () => ({ SourceCount: () => null }));
+vi.mock('./ChatContextSources', () => ({
+  ChatContextSources: ({
+    adjacentNodeSourceId,
+  }: {
+    adjacentNodeSourceId?: string;
+  }) => (
+    <div data-chat-context-sources data-adjacent-node={adjacentNodeSourceId} />
+  ),
+}));
 vi.mock('./SlashCommandMenu', () => ({ SlashCommandMenu: () => null }));
 vi.mock('./useSlashCommandTypeahead', () => ({
   useSlashCommandTypeahead: () => ({
@@ -82,7 +75,6 @@ afterEach(() => {
   root = undefined;
   container = undefined;
   panelState.focusChatInputRequest = null;
-  canvasState.nodes = [];
   chatState.pendingAttachments = [];
   chatState.addPendingAttachment.mockClear();
   vi.restoreAllMocks();
@@ -182,17 +174,7 @@ describe('ChatInput', () => {
     expect(container.querySelector('textarea')?.value).toBe('Keep this draft');
   });
 
-  it('stages the node in the other preview group on explicit confirmation', () => {
-    canvasState.nodes = [
-      {
-        id: 'node-adjacent',
-        type: 'note',
-        position: { x: 0, y: 0 },
-        data: { label: 'Adjacent note' },
-      },
-    ];
-    const onCommit = vi.fn();
-
+  it('places the unified source display before the textarea, not beside Send', () => {
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -210,7 +192,6 @@ describe('ChatInput', () => {
             value=""
             onChange={vi.fn()}
             onSubmit={vi.fn()}
-            onCommit={onCommit}
             onStop={vi.fn()}
             mode="ask"
             adjacentNodeSourceId="node-adjacent"
@@ -219,78 +200,16 @@ describe('ChatInput', () => {
       ),
     );
 
-    const candidate = container.querySelector<HTMLElement>(
-      '[role="button"][aria-label="chat.addAdjacentNodeSource"]',
-    );
-    expect(candidate?.textContent).toContain('Adjacent note');
-    expect(candidate?.classList.contains('border-dashed')).toBe(true);
-    const candidatePreview = candidate?.firstElementChild;
-    expect(candidatePreview?.classList.contains('h-12')).toBe(true);
-    expect(candidatePreview?.classList.contains('w-12')).toBe(true);
-    expect(candidatePreview?.querySelector('span')?.classList).toContain(
-      'line-clamp-3',
-    );
-
-    act(() => candidate?.click());
-
-    expect(chatState.addPendingAttachment).toHaveBeenCalledWith('thread-test', {
-      type: 'text',
-      source: 'selection',
-      originNodeId: 'node-adjacent',
-      label: 'Adjacent note',
-    });
-    expect(onCommit).toHaveBeenCalledOnce();
-
-    chatState.pendingAttachments = [
-      {
-        type: 'text',
-        source: 'selection',
-        originNodeId: 'node-adjacent',
-        label: 'Adjacent note',
-      },
-    ];
-    act(() =>
-      root?.render(
-        <ChatSessionProvider
-          value={{
-            threadId: 'thread-test',
-            canvasId: 'canvas-test',
-            ownerCanvasId: 'canvas-test',
-            conversationView: null,
-          }}
-        >
-          <ChatInput
-            value=""
-            onChange={vi.fn()}
-            onSubmit={vi.fn()}
-            onCommit={onCommit}
-            onStop={vi.fn()}
-            mode="ask"
-            adjacentNodeSourceId="node-adjacent"
-          />
-        </ChatSessionProvider>,
-      ),
-    );
-
+    const sources = container.querySelector('[data-chat-context-sources]');
+    const textarea = container.querySelector('textarea');
+    expect(sources?.getAttribute('data-adjacent-node')).toBe('node-adjacent');
     expect(
-      container.querySelector(
-        '[role="button"][aria-label="chat.addAdjacentNodeSource"]',
-      ),
-    ).toBeNull();
-    const confirmedTile = container.querySelector(
-      '.group.border-edge-default:not(.border-dashed)',
-    );
-    expect(confirmedTile?.firstElementChild?.classList.contains('h-12')).toBe(
-      true,
-    );
-    expect(confirmedTile?.firstElementChild?.classList.contains('w-12')).toBe(
-      true,
-    );
+      sources?.parentElement?.hasAttribute('data-chat-input-surface'),
+    ).toBe(true);
+    expect(sources?.nextElementSibling?.contains(textarea)).toBe(true);
     expect(
-      confirmedTile?.querySelector(
-        'button[aria-label="chat.removeAttachment"]',
-      ),
-    ).not.toBeNull();
+      container.querySelectorAll('[data-chat-context-sources]'),
+    ).toHaveLength(1);
   });
 
   it('updates a Chinese IME composition without submitting it', () => {
