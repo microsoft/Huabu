@@ -90,6 +90,34 @@ afterEach(() => {
 
 describe('Ink-intent rendering', () => {
   it.each([INTERNAL_PROFILE, ACP_PROFILE])(
+    'steers report text toward a direct summary without changing communicative intent for %j',
+    async (profile) => {
+      const parts = await renderTurn(inkEnvelope(), profile, OPTIONS);
+      const directive = parts[0]?.type === 'text' ? parts[0].text : '';
+      expect(directive).toContain(
+        'direct, natural summary of the input in its language',
+      );
+      expect(directive).toContain('not as an agent addressing the user');
+      expect(directive).toContain(
+        'Omit framing such as "You mentioned", "You are asking", "The user wants", or "I understand", including equivalents in other languages',
+      );
+      expect(directive).toContain('do not invent a first-person quote');
+      expect(directive).toContain(
+        'a question stays a question, a discussion stays a discussion',
+      );
+      expect(directive).toContain(
+        'Do not force an imperative or add unsupported goals, facts, or certainty',
+      );
+      expect(directive).toContain(
+        'use "Why was the previous reply not written to Canvas?", not "Write the previous reply to Canvas"',
+      );
+      expect(directive).toContain(
+        'use "Discuss how recent AI mathematics results affect mathematical research", not "You mentioned',
+      );
+    },
+  );
+
+  it.each([INTERNAL_PROFILE, ACP_PROFILE])(
     'requests an unclassified historical interpretation after necessary context reads for %j',
     async (profile) => {
       const parts = await renderTurn(inkEnvelope(), profile, OPTIONS);
@@ -111,22 +139,29 @@ describe('Ink-intent rendering', () => {
   );
 
   it.each([INTERNAL_PROFILE, ACP_PROFILE])(
-    'prefers allowed Canvas results without forcing discussion or clarification Notes for %j',
+    'requires Canvas delivery with host fallback without granting agent write permissions for %j',
     async (profile) => {
       const parts = await renderTurn(inkEnvelope(), profile, OPTIONS);
       const directive = parts[0]?.type === 'text' ? parts[0].text : '';
       expect(directive).toContain(
-        'prefer an appropriate Canvas result when useful',
-      );
-      expect(directive).toContain(
-        'both your current mode and tool permissions allow it',
+        'Canvas delivery is required for every Ink turn',
       );
       expect(directive).toContain('Ask/read-only stays read-only');
       expect(directive).toContain(
         'a request for discussion or planning does not authorize execution',
       );
-      expect(directive).toContain('may be answered in chat');
-      expect(directive).toContain('do not force a Note for every reply');
+      expect(directive).toContain(
+        'Huabu will publish that answer as a Note linked to this conversation',
+      );
+      expect(directive).toContain(
+        'including discussion, research findings, plans, or clarification questions',
+      );
+      expect(directive).toContain(
+        'does not authorize you to execute discussed work',
+      );
+      expect(directive).toContain(
+        'Do not omit the answer or leave it only in reasoning or tool output',
+      );
       expect(directive).toContain('ask one focused clarification question');
       expect(directive).toContain('do not execute the uncertain task');
       expect(directive).toContain('do not create a duplicate reply Note');

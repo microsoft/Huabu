@@ -6,7 +6,7 @@
 
 **§18 supersedes the original three-status intent report.** New reports are human-readable interpretation records for conversation history and transparency, not semantic classifications or execution gates.
 
-**§19 defines mode-independent Ink input and capability-aware presentation.** Ask, Operate, and external conversations can receive Ink while retaining their current mode and permissions. Canvas presentation is encouraged when useful and permitted, not required for every answer or clarification. Ink used in discussion or planning never implicitly authorizes execution. See [Sketch Node's current Ink contract](../architecture/sketch-node.md#41-partial-stroke-selection-as-ai-context).
+**§19 defines mode-independent Ink input; §20 requires Canvas-visible responses.** Ask, Operate, and external conversations can receive Ink while retaining their current mode and permissions. Every Ink turn must deliver a visible Canvas response: a substantive Canvas result or a host-created answer Note linked to the conversation. Ink used in discussion or planning never implicitly authorizes execution. See [Sketch Node's current Ink contract](../architecture/sketch-node.md#41-partial-stroke-selection-as-ai-context).
 
 Huabu should let a user lasso handwritten Sketch strokes together with optional Canvas nodes and explicitly submit that bounded selection as an Agent request. The selected Ink is a source that carries the user's intent. The chosen Agent interprets the partial-stroke image and responds within its current mode and permissions. A new conversation retains its explicit Agent/mode choice, with `operate` as the implicit built-in default; an existing Question thread retains its internal or external binding and effective mode.
 
@@ -891,7 +891,9 @@ An Ink report lets a user revisit a conversation, identify the handwritten reque
 
 Replace the `inferred` / `clarify` / `unsupported` input union with `{ text, explanation? }`. `text` is required, nonempty, one line, and at most 120 characters; `explanation` is optional, nonempty when provided, and at most 600 characters. The summary describes the current understanding, including partial understanding or inability to interpret the input. The explanation briefly communicates relevant ambiguity, grounding, or limitations. Do not invent a definite intent, classify the request into a fixed semantic category, or add confidence/can-execute/needs-clarification flags.
 
-The Agent may first read the context needed to understand the selected Ink, then reports its initial interpretation before substantive edits or a formal answer. The report is a per-turn historical snapshot, not a continuously rewritten final-answer summary. It does not grant execution permission or determine whether clarification is required. The user's request, current conversation mode, and ordinary Agent permissions determine subsequent action; §19 describes the Canvas presentation preference.
+Write the summary as the input's content, not as an Agent explaining its understanding to the user. Use the input's language and omit "You mentioned", "You are asking", "The user wants", "I understand", and equivalent framing; do not replace them with invented first-person quotations. Preserve the communicative intent rather than forcing every summary into an imperative. "Why was the previous reply not written to Canvas?" must not become "Write the previous reply to Canvas". A discussion request can read "Discuss how recent AI mathematics results affect mathematical research" without a "You want to discuss" preamble, but only if that discussion intent is grounded in the input. Apply this guidance in the shared internal/external Ink directive; do not strip prefixes in the UI or rewrite historical reports.
+
+The Agent may first read the context needed to understand the selected Ink, then reports its initial interpretation before substantive edits or a formal answer. The report is a per-turn historical snapshot, not a continuously rewritten final-answer summary. It does not grant execution permission or determine whether clarification is required. The user's request, current conversation mode, and ordinary Agent permissions determine subsequent action; §20 describes host-owned Canvas response delivery.
 
 ### 18.2 Presentation and durability
 
@@ -907,16 +909,34 @@ Historical `inferred` reports retain their saved text; historical `clarify` / `u
 
 Validate new report text and explanation limits, reject semantic status fields on new writes, and retain historical read compatibility. Cover internal/external reports, useful summaries expressing uncertainty, title protection, failed and retried report calls, ordinary text-message isolation, per-turn/per-thread ownership, no-report terminal states, interrupted turns, partial event updates, and equality of live versus reloaded interpretation content. UI coverage must preserve source provenance, accessible Agent attribution, the Ink-identifying pen icon, and a single normal-color summary paragraph without visible headings or explanation text. When a report is absent, its delivery fallback occupies the same inline position.
 
+Assert that both internal and external rendered directives include the direct-summary voice, language preservation, and question-versus-command examples. These tests guard prompt delivery, not real-model style compliance; validate generated summaries with actual Ink turns during user trial.
+
 ## 19. Mode-independent Ink input
 
-Status: **Approved; implemented in the current change** · Last updated: 2026-10-10
+Status: **Approved; presentation preference superseded by §20** · Last updated: 2026-10-10
 
-Ink is another way to supply user content, alongside typed text and selected Canvas sources. Input format, conversation mode, and answer presentation are separate concerns. Remove the proposed built-in Ask exclusion and mandatory Canvas reply rule: neither is necessary to interpret Ink or retain a readable interpretation report.
+Ink is another way to supply user content, alongside typed text and selected Canvas sources. Input format, conversation mode, and answer presentation are separate concerns. Remove the proposed built-in Ask exclusion: write capability is not necessary to interpret Ink or retain a readable interpretation report.
 
 The picker offers existing and new Ask, Operate, and external conversations through the normal conversation selection flow. Continuation and submission preserve the selected conversation's effective mode and permissions. This amendment does not introduce a new built-in Plan mode; it respects discussion/planning instructions and any planning mode supplied by an external session. Ink never changes those constraints or grants write access.
 
-When the current mode, permissions, and user request allow Canvas operations, encourage the Agent to present useful results on Canvas through its existing tools. Do not create a duplicate Note after a successful requested edit or require a Note for every discussion answer, clarification, or interpretation failure. Read-only and planning turns may answer in Chat without treating the lack of a Canvas write as a failure. If an attempted or explicitly requested write is blocked or fails, explain that limitation and never claim it succeeded.
+This amendment initially only encouraged Canvas presentation and allowed chat-only discussion/planning replies. User trials showed that capable Agents could still leave all useful output in an unopened ChatPanel. §20 replaces that preference with a host-owned delivery requirement, without broadening Agent permissions.
 
-The interpretation report remains required before substantive edits or a formal answer, after any necessary read-only grounding. It records initial understanding, not permission to act or an execution decision. Preserve source Ink unless the user asks to change it. Existing Question-to-conversation access remains unchanged; automatic reply mirroring, automatic Chat opening, and new reply-notification UI are outside this amendment.
+The interpretation report remains required before substantive edits or a formal answer, after any necessary read-only grounding. It records initial understanding, not permission to act or an execution decision. Preserve source Ink unless the user asks to change it. Automatic Chat opening and new reply-notification UI remain outside this amendment; host answer Notes are specified in §20.
 
-Acceptance covers Ask in new, existing, cached-recent, and server-resolved destinations; unchanged effective modes on submission; ordinary busy/invalid-target protection; mode changes during preparation; internal and external interpretation reporting; and prompt guidance that prefers permitted Canvas presentation without imposing writes on discussion/planning turns. Prompt assertions validate steering text, not real-model compliance.
+Acceptance covers Ask in new, existing, cached-recent, and server-resolved destinations; unchanged effective modes on submission; ordinary busy/invalid-target protection; mode changes during preparation; and internal and external interpretation reporting. Agent write restrictions remain unchanged when the host presents a discussion or planning answer.
+
+## 20. Canvas-visible Ink responses
+
+Status: **Implemented; process-crash recovery remains out of scope** · Last updated: 2026-10-10
+
+An Ink-initiated query is a Canvas interaction whose user is not expected to open ChatPanel. Every accepted Ink turn must visibly respond on Canvas, regardless of answer category or Agent mode. Discussion, research, planning, clarification, and inability to interpret are responses, not exceptions to Canvas delivery.
+
+If the Agent already produced a substantive visible Canvas result, do not create a duplicate answer Note. Otherwise Huabu publishes the completed answer as a Note linked to the originating conversation. Interpretation reporting, placeholder naming, read-only tools, and internal metadata updates do not count as delivering the answer. Incomplete or failed turns must not fabricate a completed answer.
+
+This is host-owned response presentation, not permission for the Agent to execute the discussed task. Ask and externally restricted Plan sessions retain their tool and permission boundaries; they provide a complete final answer for Huabu to display. Existing normal text Chat behavior remains unchanged. Source Ink remains intact unless the user explicitly requests an edit.
+
+Delivery belongs to the server-side turn lifecycle and canonical Canvas persistence/sync path, not to a mounted ChatPanel or a second browser-side stream consumer. It must tolerate a closed panel, disconnection, and repeated delivery attempts without creating duplicate Notes. Delivery errors must be explicit rather than reporting a successfully delivered response.
+
+The implementation observes committed updates attributed to the active thread and retains one Note ID per invocation for duplicate delivery attempts. Notes link through the existing chat-origin metadata and an edge from the live Agent Node. The full final post-tool answer is preserved; failed/interrupted and empty-answer outcomes are explicitly labeled. The controller lives with the running server invocation: it does not backfill historical turns or recover a pending Note after a server process crash.
+
+Acceptance covers built-in Ask and Operate, external Agents, discussion/research/clarification responses, suppression after actual Canvas changes but not title/report writes, connection-independent delivery, conversation linkage, duplicate prevention, and explicit failure handling. Prompt tests alone do not establish this guarantee; host delivery requires behavioral tests.

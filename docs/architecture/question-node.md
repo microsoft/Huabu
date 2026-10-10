@@ -22,6 +22,8 @@ Like sketch nodes, a question node has two independent relationships with AI:
 
 User-facing node terminology is **Agent Node** in English and **Agent 节点** in Simplified Chinese, including creation actions, layer labels, chat fallback titles, toolbar tooltips, and ink-request feedback. The persisted `question` type, code identifiers, and translation keys remain unchanged; references to the user's question still describe prompt content.
 
+For an Ink-initiated turn, the server delivers a visible Canvas response without requiring the user to open this Node's ChatPanel. When the Agent has not produced a substantive Canvas result, the host creates an adjacent answer Note with chat-origin thread metadata and an edge from this Agent Node. Ask/read-only tools remain unchanged; the host presents the answer rather than authorizing the Agent to execute a task. See [Ink response delivery](./sketch-node.md#41-partial-stroke-selection-as-ai-context).
+
 ---
 
 ## 1. Goals
