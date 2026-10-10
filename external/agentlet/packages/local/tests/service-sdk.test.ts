@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { loadCapability } from '../src/capability-sdk/index.js'
+import { loadService } from '../src/service-sdk/index.js'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -8,7 +8,7 @@ afterEach(() => {
   delete process.env.AGENTLET_TOKEN
 })
 
-describe('Capability SDK', () => {
+describe('Service SDK', () => {
   it('leases config and loads the trusted package client without logging secrets', async () => {
     process.env.HUABU_RFS_URL = 'https://huabu.example/api/rfs/canvas-1'
     process.env.AGENTLET_TOKEN = 'agentlet-token'
@@ -33,12 +33,12 @@ describe('Capability SDK', () => {
       )
     vi.stubGlobal('fetch', fetchMock)
 
-    const capability = await loadCapability('example')
+    const service = await loadService('example')
 
-    expect(capability.client).toEqual({ configured: true })
+    expect(service.client).toEqual({ configured: true })
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
-      'https://huabu.example/api/rfs/canvas-1/capability-packages/example/lease',
+      'https://huabu.example/api/rfs/canvas-1/services/example/lease',
       expect.objectContaining({
         method: 'POST',
         headers: { Authorization: 'Bearer agentlet-token' },
@@ -56,8 +56,8 @@ describe('Capability SDK', () => {
       ),
     )
 
-    await expect(loadCapability('example')).rejects.toThrow(
-      'Capability request failed (409)',
+    await expect(loadService('example')).rejects.toThrow(
+      'Service request failed (409)',
     )
   })
 })
