@@ -3,11 +3,11 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { readCapabilityPackageFile } from '../../modules/capabilities/package-loader.js';
+import { readServicePackageFile } from '../../modules/services/package-loader.js';
 
 async function loadClient() {
-  const source = readCapabilityPackageFile('image-gen', 'client.mjs');
-  if (!source) throw new Error('Image Capability client is missing');
+  const source = readServicePackageFile('image-gen', 'client.mjs');
+  if (!source) throw new Error('Image Service client is missing');
   return import(
     `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`
   ) as Promise<{
@@ -21,7 +21,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('Image Capability client', () => {
+describe('Image Service client', () => {
   it('uses classic Azure deployment routing', async () => {
     const fetchMock = vi
       .fn<typeof fetch>()

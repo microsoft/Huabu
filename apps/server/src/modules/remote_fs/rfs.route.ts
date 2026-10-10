@@ -44,7 +44,7 @@ import {
   createTaskRequestSchema,
   completeTaskRunRequestSchema,
   createInteractiveViewRequestSchema,
-  capabilityParamsSchema,
+  serviceParamsSchema,
   interactiveViewLookupQuerySchema,
   interactiveViewResourceParamsSchema,
   rfsAgentCreateHeadersSchema,
@@ -70,7 +70,7 @@ import {
   type RfsUploadResponse,
   type AgentStreamEvent,
   type StartTaskRunResponse,
-  type CapabilityParams,
+  type ServiceParams,
 } from '@huabu/shared';
 
 import { mimeForPath } from './mime.js';
@@ -119,15 +119,15 @@ import { CanvasNotFoundError } from '../canvas/canvas-executor.js';
 import { executeSpaceQuery, SpaceQueryError } from '../canvas/space-query.js';
 import { WorldPreviewMutationError } from '../canvas/world-preview-policy.js';
 import {
-  capabilityProvisionService,
-  CapabilityServiceError,
-  getBundledCapabilityPackage,
-  readCapabilityPackageFile,
-} from '../capabilities/index.js';
-import {
   InteractiveViewServiceError,
   interactiveViewService,
 } from '../interactive-view/interactive-view.service.js';
+import {
+  serviceProvisioner,
+  ServiceProvisionError,
+  getBundledServicePackage,
+  readServicePackageFile,
+} from '../services/index.js';
 import {
   storageServes,
   unavailableCapabilityMessage,
@@ -531,117 +531,105 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
     reply.send(getRfsCapabilities()),
   );
 
-  // ── Capability Packages ──
+  // ── Service Packages ──
   //
   // `/capabilities` already owns direct Space-operation discovery. Keep the
-  // portable provider packages under a separate unambiguous resource root.
-  app.get('/:canvasId/capability-packages', async (_request, reply) =>
-    reply.send({ capabilities: capabilityProvisionService.list() }),
+  // configured third-party services under a separate unambiguous root.
+  app.get('/:canvasId/services', async (_request, reply) =>
+    reply.send({ services: serviceProvisioner.list() }),
   );
 
   app.get<{
-    Params: CapabilityParams & { canvasId: string };
-  }>(
-    '/:canvasId/capability-packages/:capabilityId/manifest',
-    async (request, reply) => {
-      const parsed = capabilityParamsSchema.safeParse({
-        capabilityId: request.params.capabilityId,
-      });
-      if (!parsed.success) {
-        return reply.code(400).send(rfsError('Invalid Capability id'));
-      }
-      const capability = getBundledCapabilityPackage(parsed.data.capabilityId);
-      if (!capability) {
-        return reply
-          .code(404)
-          .send(rfsError('Capability not found', 'capability_not_found'));
-      }
-      return reply.send(capability.manifest);
-    },
-  );
-
-  app.get<{
-    Params: CapabilityParams & { canvasId: string };
-  }>(
-    '/:canvasId/capability-packages/:capabilityId/skill',
-    async (request, reply) => {
-      const parsed = capabilityParamsSchema.safeParse({
-        capabilityId: request.params.capabilityId,
-      });
-      if (!parsed.success) {
-        return reply.code(400).send(rfsError('Invalid Capability id'));
-      }
-      const capability = getBundledCapabilityPackage(parsed.data.capabilityId);
-      const skill = capability?.manifest.agent?.skill;
-      const content = skill
-        ? readCapabilityPackageFile(parsed.data.capabilityId, skill)
-        : null;
-      if (!content) {
-        return reply
-          .code(404)
-          .send(rfsError('Capability Skill not found', 'skill_not_found'));
-      }
-      return reply.type('text/markdown; charset=utf-8').send(content);
-    },
-  );
-
-  app.get<{
-    Params: CapabilityParams & { canvasId: string };
-  }>(
-    '/:canvasId/capability-packages/:capabilityId/client',
-    async (request, reply) => {
-      const parsed = capabilityParamsSchema.safeParse({
-        capabilityId: request.params.capabilityId,
-      });
-      if (!parsed.success) {
-        return reply.code(400).send(rfsError('Invalid Capability id'));
-      }
-      const capability = getBundledCapabilityPackage(parsed.data.capabilityId);
-      const client = capability?.manifest.agent?.client;
-      const content = client
-        ? readCapabilityPackageFile(parsed.data.capabilityId, client)
-        : null;
-      if (!content) {
-        return reply
-          .code(404)
-          .send(rfsError('Capability client not found', 'client_not_found'));
-      }
+    Params: ServiceParams & { canvasId: string };
+  }>('/:canvasId/services/:serviceId/manifest', async (request, reply) => {
+    const parsed = serviceParamsSchema.safeParse({
+      serviceId: request.params.serviceId,
+    });
+    if (!parsed.success) {
+      return reply.code(400).send(rfsError('Invalid Service id'));
+    }
+    const service = getBundledServicePackage(parsed.data.serviceId);
+    if (!service) {
       return reply
-        .header('Cache-Control', 'public, max-age=300')
-        .type('text/javascript; charset=utf-8')
-        .send(content);
-    },
-  );
+        .code(404)
+        .send(rfsError('Service not found', 'service_not_found'));
+    }
+    return reply.send(service.manifest);
+  });
+
+  app.get<{
+    Params: ServiceParams & { canvasId: string };
+  }>('/:canvasId/services/:serviceId/skill', async (request, reply) => {
+    const parsed = serviceParamsSchema.safeParse({
+      serviceId: request.params.serviceId,
+    });
+    if (!parsed.success) {
+      return reply.code(400).send(rfsError('Invalid Service id'));
+    }
+    const service = getBundledServicePackage(parsed.data.serviceId);
+    const skill = service?.manifest.agent?.skill;
+    const content = skill
+      ? readServicePackageFile(parsed.data.serviceId, skill)
+      : null;
+    if (!content) {
+      return reply
+        .code(404)
+        .send(rfsError('Service Skill not found', 'skill_not_found'));
+    }
+    return reply.type('text/markdown; charset=utf-8').send(content);
+  });
+
+  app.get<{
+    Params: ServiceParams & { canvasId: string };
+  }>('/:canvasId/services/:serviceId/client', async (request, reply) => {
+    const parsed = serviceParamsSchema.safeParse({
+      serviceId: request.params.serviceId,
+    });
+    if (!parsed.success) {
+      return reply.code(400).send(rfsError('Invalid Service id'));
+    }
+    const service = getBundledServicePackage(parsed.data.serviceId);
+    const client = service?.manifest.agent?.client;
+    const content = client
+      ? readServicePackageFile(parsed.data.serviceId, client)
+      : null;
+    if (!content) {
+      return reply
+        .code(404)
+        .send(rfsError('Service client not found', 'client_not_found'));
+    }
+    return reply
+      .header('Cache-Control', 'public, max-age=300')
+      .type('text/javascript; charset=utf-8')
+      .send(content);
+  });
 
   app.post<{
-    Params: CapabilityParams & { canvasId: string };
-  }>(
-    '/:canvasId/capability-packages/:capabilityId/lease',
-    async (request, reply) => {
-      const parsed = capabilityParamsSchema.safeParse({
-        capabilityId: request.params.capabilityId,
-      });
-      if (!parsed.success) {
-        return reply.code(400).send(rfsError('Invalid Capability id'));
+    Params: ServiceParams & { canvasId: string };
+  }>('/:canvasId/services/:serviceId/lease', async (request, reply) => {
+    const parsed = serviceParamsSchema.safeParse({
+      serviceId: request.params.serviceId,
+    });
+    if (!parsed.success) {
+      return reply.code(400).send(rfsError('Invalid Service id'));
+    }
+    try {
+      return reply
+        .header('Cache-Control', 'no-store')
+        .send(serviceProvisioner.lease(parsed.data.serviceId));
+    } catch (error) {
+      if (error instanceof ServiceProvisionError) {
+        const status =
+          error.code === 'service_not_found'
+            ? 404
+            : error.code === 'service_not_agent_accessible'
+              ? 403
+              : 409;
+        return reply.code(status).send(rfsError(error.message, error.code));
       }
-      try {
-        return reply
-          .header('Cache-Control', 'no-store')
-          .send(capabilityProvisionService.lease(parsed.data.capabilityId));
-      } catch (error) {
-        if (error instanceof CapabilityServiceError) {
-          const status =
-            error.code === 'capability_not_found'
-              ? 404
-              : error.code === 'capability_not_external'
-                ? 403
-                : 409;
-          return reply.code(status).send(rfsError(error.message, error.code));
-        }
-        throw error;
-      }
-    },
-  );
+      throw error;
+    }
+  });
 
   app.get<{ Params: { canvasId: string; type: string } }>(
     '/:canvasId/capabilities/queries/:type',

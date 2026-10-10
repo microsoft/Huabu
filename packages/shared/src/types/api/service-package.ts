@@ -3,26 +3,26 @@
 
 import { z } from 'zod';
 
-const capabilityIdSchema = z
+const serviceIdSchema = z
   .string()
-  .regex(/^[a-z][a-z0-9-]{0,63}$/, 'Invalid capability id');
-const capabilityFieldIdSchema = z
+  .regex(/^[a-z][a-z0-9-]{0,63}$/, 'Invalid service id');
+const serviceFieldIdSchema = z
   .string()
-  .regex(/^[a-z][a-zA-Z0-9]{0,63}$/, 'Invalid capability field id');
+  .regex(/^[a-z][a-zA-Z0-9]{0,63}$/, 'Invalid service field id');
 
-export const capabilityFieldOptionSchema = z.object({
+export const serviceFieldOptionSchema = z.object({
   value: z.string().min(1).max(256),
   label: z.string().min(1).max(256),
 });
 
-export const capabilityConfigurationFieldSchema = z
+export const serviceConfigurationFieldSchema = z
   .object({
-    id: capabilityFieldIdSchema,
+    id: serviceFieldIdSchema,
     label: z.string().min(1).max(256),
     description: z.string().max(1024).optional(),
     type: z.enum(['text', 'secret', 'url', 'boolean', 'enum']),
     required: z.boolean().default(false),
-    options: z.array(capabilityFieldOptionSchema).min(1).max(100).optional(),
+    options: z.array(serviceFieldOptionSchema).min(1).max(100).optional(),
     placeholder: z.string().max(512).optional(),
   })
   .strict()
@@ -43,10 +43,10 @@ export const capabilityConfigurationFieldSchema = z
     }
   });
 
-export const capabilityManifestSchema = z
+export const serviceManifestSchema = z
   .object({
-    schema: z.literal('huabu-capability/v1'),
-    id: capabilityIdSchema,
+    schema: z.literal('huabu-service/v1'),
+    id: serviceIdSchema,
     version: z.string().regex(/^\d+\.\d+\.\d+$/, 'Invalid package version'),
     name: z.string().min(1).max(256),
     description: z.string().min(1).max(1024),
@@ -65,7 +65,7 @@ export const capabilityManifestSchema = z
       .strict()
       .optional(),
     configuration: z
-      .array(capabilityConfigurationFieldSchema)
+      .array(serviceConfigurationFieldSchema)
       .max(100)
       .default([]),
   })
@@ -84,48 +84,46 @@ export const capabilityManifestSchema = z
     }
   });
 
-export type CapabilityManifest = z.infer<typeof capabilityManifestSchema>;
-export type CapabilityConfigurationField = z.infer<
-  typeof capabilityConfigurationFieldSchema
+export type ServiceManifest = z.infer<typeof serviceManifestSchema>;
+export type ServiceConfigurationField = z.infer<
+  typeof serviceConfigurationFieldSchema
 >;
 
-export const capabilityFieldValueSchema = z.union([
+export const serviceFieldValueSchema = z.union([
   z.string().max(8192),
   z.boolean(),
   z.null(),
 ]);
-export type CapabilityFieldValue = z.infer<typeof capabilityFieldValueSchema>;
+export type ServiceFieldValue = z.infer<typeof serviceFieldValueSchema>;
 
-export const capabilityConfigUpdateSchema = z
+export const serviceConfigUpdateSchema = z
   .object({
-    values: z.record(capabilityFieldIdSchema, capabilityFieldValueSchema),
+    values: z.record(serviceFieldIdSchema, serviceFieldValueSchema),
   })
   .strict()
   .refine((body) => Object.keys(body.values).length > 0, {
-    message: 'Provide at least one capability configuration value',
+    message: 'Provide at least one service configuration value',
   });
-export type CapabilityConfigUpdate = z.infer<
-  typeof capabilityConfigUpdateSchema
->;
+export type ServiceConfigUpdate = z.infer<typeof serviceConfigUpdateSchema>;
 
-export const capabilityParamsSchema = z
-  .object({ capabilityId: capabilityIdSchema })
+export const serviceParamsSchema = z
+  .object({ serviceId: serviceIdSchema })
   .strict();
-export type CapabilityParams = z.infer<typeof capabilityParamsSchema>;
+export type ServiceParams = z.infer<typeof serviceParamsSchema>;
 
-export const capabilityConfigSchema = z
+export const serviceConfigSchema = z
   .object({
-    manifest: capabilityManifestSchema,
-    values: z.record(capabilityFieldIdSchema, capabilityFieldValueSchema),
-    configuredFields: z.array(capabilityFieldIdSchema),
+    manifest: serviceManifestSchema,
+    values: z.record(serviceFieldIdSchema, serviceFieldValueSchema),
+    configuredFields: z.array(serviceFieldIdSchema),
     configured: z.boolean(),
   })
   .strict();
-export type CapabilityConfig = z.infer<typeof capabilityConfigSchema>;
+export type ServiceConfig = z.infer<typeof serviceConfigSchema>;
 
-export const capabilitySummarySchema = z
+export const serviceSummarySchema = z
   .object({
-    id: capabilityIdSchema,
+    id: serviceIdSchema,
     version: z.string(),
     name: z.string(),
     description: z.string(),
@@ -133,21 +131,19 @@ export const capabilitySummarySchema = z
     availableToExternalAgent: z.boolean(),
   })
   .strict();
-export type CapabilitySummary = z.infer<typeof capabilitySummarySchema>;
+export type ServiceSummary = z.infer<typeof serviceSummarySchema>;
 
-export const capabilityListResponseSchema = z
-  .object({ capabilities: z.array(capabilitySummarySchema) })
+export const serviceListResponseSchema = z
+  .object({ services: z.array(serviceSummarySchema) })
   .strict();
-export type CapabilityListResponse = z.infer<
-  typeof capabilityListResponseSchema
->;
+export type ServiceListResponse = z.infer<typeof serviceListResponseSchema>;
 
-export const capabilityLeaseSchema = z
+export const serviceLeaseSchema = z
   .object({
-    id: capabilityIdSchema,
+    id: serviceIdSchema,
     version: z.string(),
-    config: z.record(capabilityFieldIdSchema, capabilityFieldValueSchema),
+    config: z.record(serviceFieldIdSchema, serviceFieldValueSchema),
     client: z.string().optional(),
   })
   .strict();
-export type CapabilityLease = z.infer<typeof capabilityLeaseSchema>;
+export type ServiceLease = z.infer<typeof serviceLeaseSchema>;

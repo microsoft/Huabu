@@ -4,16 +4,16 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  capabilityConfigUpdateSchema,
-  capabilityManifestSchema,
-} from './capability-package.js';
+  serviceConfigUpdateSchema,
+  serviceManifestSchema,
+} from './service-package.js';
 
 const manifest = {
-  schema: 'huabu-capability/v1',
+  schema: 'huabu-service/v1',
   id: 'example',
   version: '1.0.0',
   name: 'Example',
-  description: 'Example Capability',
+  description: 'Example Service',
   storage: { namespace: 'integration.example' },
   configuration: [
     {
@@ -25,15 +25,15 @@ const manifest = {
   ],
 };
 
-describe('Capability Package contract', () => {
+describe('Service Package contract', () => {
   it('accepts a Server-consumed package without Agent files', () => {
-    expect(capabilityManifestSchema.parse(manifest)).toMatchObject({
+    expect(serviceManifestSchema.parse(manifest)).toMatchObject({
       id: 'example',
     });
   });
 
   it('requires a Skill whenever the package declares Agent behavior', () => {
-    const result = capabilityManifestSchema.safeParse({
+    const result = serviceManifestSchema.safeParse({
       ...manifest,
       agent: { client: 'client.mjs' },
     });
@@ -42,7 +42,7 @@ describe('Capability Package contract', () => {
 
   it('rejects duplicate field ids and empty updates', () => {
     expect(
-      capabilityManifestSchema.safeParse({
+      serviceManifestSchema.safeParse({
         ...manifest,
         configuration: [
           ...manifest.configuration,
@@ -50,7 +50,7 @@ describe('Capability Package contract', () => {
         ],
       }).success,
     ).toBe(false);
-    expect(capabilityConfigUpdateSchema.safeParse({ values: {} }).success).toBe(
+    expect(serviceConfigUpdateSchema.safeParse({ values: {} }).success).toBe(
       false,
     );
   });

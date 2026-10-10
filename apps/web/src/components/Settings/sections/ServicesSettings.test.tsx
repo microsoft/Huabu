@@ -5,19 +5,19 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { CapabilitiesSettings } from './CapabilitiesSettings';
+import { ServicesSettings } from './ServicesSettings';
 
-import type { CapabilityConfig } from '@huabu/shared';
+import type { ServiceConfig } from '@huabu/shared';
 
 const mocks = vi.hoisted(() => ({
-  getCapabilities: vi.fn(),
-  getCapability: vi.fn(),
+  getServices: vi.fn(),
+  getService: vi.fn(),
 }));
 
-vi.mock('@/api/capabilities', () => ({
-  getCapabilities: mocks.getCapabilities,
-  getCapability: mocks.getCapability,
-  putCapability: vi.fn(),
+vi.mock('@/api/services', () => ({
+  getServices: mocks.getServices,
+  getService: mocks.getService,
+  putService: vi.fn(),
 }));
 
 vi.mock('@/store/deploymentReadinessStore', () => ({
@@ -37,10 +37,10 @@ const ids = [
   'ink-ocr',
 ] as const;
 
-function config(id: (typeof ids)[number]): CapabilityConfig {
+function config(id: (typeof ids)[number]): ServiceConfig {
   return {
     manifest: {
-      schema: 'huabu-capability/v1',
+      schema: 'huabu-service/v1',
       id,
       version: '1.0.0',
       name: id,
@@ -68,8 +68,8 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
-  mocks.getCapabilities.mockResolvedValue({
-    capabilities: ids.map((id) => ({
+  mocks.getServices.mockResolvedValue({
+    services: ids.map((id) => ({
       id,
       version: '1.0.0',
       name: id,
@@ -78,7 +78,7 @@ beforeEach(() => {
       availableToExternalAgent: false,
     })),
   });
-  mocks.getCapability.mockImplementation(async (id: (typeof ids)[number]) =>
+  mocks.getService.mockImplementation(async (id: (typeof ids)[number]) =>
     config(id),
   );
 });
@@ -89,13 +89,13 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe('CapabilitiesSettings', () => {
-  it('renders every current Capability from server manifests', async () => {
+describe('ServicesSettings', () => {
+  it('renders every current Service from server manifests', async () => {
     await act(async () => {
-      root.render(<CapabilitiesSettings />);
+      root.render(<ServicesSettings />);
     });
 
-    expect(mocks.getCapability).toHaveBeenCalledTimes(4);
+    expect(mocks.getService).toHaveBeenCalledTimes(4);
     for (const id of ids) {
       expect(container.textContent).toContain(id);
     }

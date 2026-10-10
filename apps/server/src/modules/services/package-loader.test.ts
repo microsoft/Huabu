@@ -4,13 +4,13 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  getBundledCapabilityPackages,
-  readCapabilityPackageFile,
+  getBundledServicePackages,
+  readServicePackageFile,
 } from './package-loader.js';
 
-describe('bundled Capability packages', () => {
-  it('loads all current Settings capabilities from validated YAML', () => {
-    const packages = getBundledCapabilityPackages();
+describe('bundled Service packages', () => {
+  it('loads all current Settings services from validated YAML', () => {
+    const packages = getBundledServicePackages();
     expect([...packages.keys()]).toEqual([
       'image-gen',
       'web-search',
@@ -25,14 +25,14 @@ describe('bundled Capability packages', () => {
   });
 
   it('exposes real Agent files only when the manifest declares Agent behavior', () => {
-    expect(readCapabilityPackageFile('image-gen', 'SKILL.md')).toContain(
+    expect(readServicePackageFile('image-gen', 'SKILL.md')).toContain(
       '# Image Generation',
     );
-    expect(readCapabilityPackageFile('web-search', 'client.mjs')).toContain(
+    expect(readServicePackageFile('web-search', 'client.mjs')).toContain(
       'createClient',
     );
     expect(
-      readCapabilityPackageFile('youtube-transcripts', 'SKILL.md'),
+      readServicePackageFile('youtube-transcripts', 'SKILL.md'),
     ).toBeNull();
   });
 });

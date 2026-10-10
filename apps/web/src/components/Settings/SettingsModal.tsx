@@ -23,10 +23,10 @@ import {
 } from './agent-profiles/ExternalAgentsSettings';
 import { DeploymentReadinessNotice } from './DeploymentReadinessNotice';
 import { AgentBehaviorSettings } from './sections/AgentBehaviorSettings';
-import { CapabilitiesSettings } from './sections/CapabilitiesSettings';
 import { ExternalAgentRuntimeSettings } from './sections/ExternalAgentRuntimeSettings';
 import { GeneralSettings } from './sections/GeneralSettings';
 import { LLMSettings } from './sections/LLMSettings';
+import { ServicesSettings } from './sections/ServicesSettings';
 
 /** Identifiers for the settings tabs (left-nav order). */
 type SettingsTab = SettingsTabId;
@@ -34,12 +34,12 @@ type SettingsTab = SettingsTabId;
 interface TabDef {
   id: SettingsTab;
   /** i18n key for the tab label. */
-  labelKey: 'settings.general' | 'settings.agent' | 'settings.capabilities';
+  labelKey: 'settings.general' | 'settings.agent' | 'settings.services';
 }
 
 const TABS: TabDef[] = [
   { id: 'agent', labelKey: 'settings.agent' },
-  { id: 'capabilities', labelKey: 'settings.capabilities' },
+  { id: 'services', labelKey: 'settings.services' },
   { id: 'general', labelKey: 'settings.general' },
 ];
 
@@ -55,7 +55,7 @@ interface SettingsModalProps {
  *
  * Each tab renders its owned Settings surface:
  *  - **Agent** — Utility Agent, Built-In Pi setup, external Profiles, and behavior
- *  - **Capabilities** — manifest-driven image, search, transcript, and OCR services
+ *  - **Services** — manifest-driven image, search, transcript, and OCR providers
  *  - **General** — application, canvas, input, and update preferences
  *
  * The app version sits at the bottom of the left tab rail (a product-wide
@@ -302,16 +302,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   )}
                 </>
               ))}
-            {activeTab === 'capabilities' && (
+            {activeTab === 'services' && (
               <>
                 <p className="text-fg-muted mb-4 px-1 text-xs">
-                  {t('settings.capabilitiesDescription')}
+                  {t('settings.servicesDescription')}
                 </p>
                 <div
                   className="space-y-4 [&_section]:mb-0"
-                  data-testid="capability-sections"
+                  data-testid="service-sections"
                 >
-                  <CapabilitiesSettings />
+                  <ServicesSettings />
                 </div>
               </>
             )}

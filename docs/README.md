@@ -54,7 +54,7 @@ docs/
 | [canvas-input-interactions.md](./architecture/canvas-input-interactions.md)     | Mouse, touch, and pen preference resolution, gesture ownership, and multi-touch arbitration.             |
 | [canvas-zoom-rendering.md](./architecture/canvas-zoom-rendering.md)             | Node LOD, Frame/edge label readability, and interaction chrome across canvas zoom.                       |
 | [canvas-storage.md](./architecture/canvas-storage.md)                           | Disk layout plus Blob/structured ports, catalogue, compatibility, and `.memory/`.                        |
-| [capability-packages.md](./architecture/capability-packages.md)                 | Manifest-driven provider configuration, storage bindings, Agent declarations, RFS leases, and SDK.       |
+| [service-packages.md](./architecture/service-packages.md)                       | Manifest-driven third-party Services, storage bindings, Agent declarations, RFS leases, and SDK.         |
 | [canary-deployment.md](./architecture/canary-deployment.md)                     | Personal Alpha Canary status, owner-triggered redeployment, and explicit reliability limits.             |
 | [canvas-action-log.md](./architecture/canvas-action-log.md)                     | Persistent `events.jsonl` user-action trail; consumed by the memory curator.                             |
 | [canvas-realtime-sync.md](./architecture/canvas-realtime-sync.md)               | Multi-agent real-time sync: SSE broadcast, dirty-node conflict model, per-thread change-review card.     |
@@ -90,7 +90,7 @@ docs/
 | [canvas-realtime-sync-plan.md](./proposals/canvas-realtime-sync-plan.md)                                             | In-Progress                 | Roadmap from multi-agent sync to multi-user co-editing.                              |
 | [content-before-ai-design.md](./proposals/content-before-ai-design.md)                                               | Needs review                | Block-level and inline authorship provenance.                                        |
 | [credential-storage-hardening-followups.md](./proposals/credential-storage-hardening-followups.md)                   | Draft                       | Follow-up credential storage hardening.                                              |
-| [capability-packages.md](./proposals/capability-packages.md)                                                         | Accepted                    | #110 portable Capability Packages and zero-migration configuration bindings.         |
+| [service-packages.md](./proposals/service-packages.md)                                                               | Accepted                    | #110 portable Service Packages and zero-migration configuration bindings.            |
 | [direct-space-operations.md](./proposals/direct-space-operations.md)                                                 | In-Progress                 | #348 deterministic RFS query and mutation operations for external agents.            |
 | [external-agent-capability-cache-and-realization.md](./proposals/external-agent-capability-cache-and-realization.md) | Accepted                    | #160/#162 GET-only capability discovery and canonical first-interaction realization. |
 | [headless-executor-plan.md](./proposals/headless-executor-plan.md)                                                   | Partly shipped              | Server-side headless canvas executor and structure/content sync.                     |

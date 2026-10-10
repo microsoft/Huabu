@@ -15,7 +15,7 @@
  */
 
 import { getLogger } from '../../../../utils/logger.js';
-import { capabilityProvisionService } from '../../../capabilities/index.js';
+import { serviceProvisioner } from '../../../services/index.js';
 
 import type { webSearchParamsSchema } from '../definitions.js';
 import type { Static } from '@earendil-works/pi-ai';
@@ -25,7 +25,7 @@ const log = getLogger('tool.web-search');
 export type WebSearchArgs = Static<typeof webSearchParamsSchema>;
 
 export async function handleWebSearch(args: WebSearchArgs): Promise<string> {
-  const resolved = capabilityProvisionService.resolveForServer('web-search');
+  const resolved = serviceProvisioner.resolveForServer('web-search');
   const apiKey = typeof resolved.apiKey === 'string' ? resolved.apiKey : '';
 
   const controller = new AbortController();

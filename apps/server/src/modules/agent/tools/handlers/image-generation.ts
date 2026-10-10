@@ -52,7 +52,7 @@ import {
 } from '@huabu/shared';
 
 import { getLogger } from '../../../../utils/logger.js';
-import { capabilityProvisionService } from '../../../capabilities/index.js';
+import { serviceProvisioner } from '../../../services/index.js';
 import { space } from '../../../storage/index.js';
 
 import type { generateImageParamsSchema } from '../definitions.js';
@@ -97,7 +97,7 @@ export async function handleGenerateImage(
   }
 
   const refs = args.referenceArtifactSrcs ?? [];
-  const resolved = capabilityProvisionService.resolveForServer('image-gen');
+  const resolved = serviceProvisioner.resolveForServer('image-gen');
   const azure = {
     endpoint: String(resolved.baseUrl),
     deployment: String(resolved.model),

@@ -160,11 +160,11 @@ Malformed request fields and malformed cursors return HTTP 400 with `code: "malf
 
 `POST /api/rfs/:canvasId/query` with `type: "INSPECT_NODES"` uses the canonical response contract in [`space-operations.ts`](../../packages/shared/src/types/api/space-operations.ts). Each Question Node result includes its non-empty persisted `threadId` when associated; non-Question Nodes and unbound Questions omit the field. The mapping is scoped by the authenticated RFS URL's Canvas and is read-only: inspection does not create a thread, workload, binding, realization, or invocation. Callers continue the mapped conversation through the existing `POST /api/rfs/:canvasId/agent/:threadId/prompt` SSE endpoint.
 
-## Capability Packages
+## Service Packages
 
-`packages/shared/src/types/api/capability-package.ts` defines the strict manifest, Generic Settings update, masked configuration, summary, and External lease contracts. Owner Settings uses `GET /api/capabilities`, `GET /api/capabilities/:capabilityId`, and `PUT /api/capabilities/:capabilityId`; every path/body value is validated with the shared schemas before selecting a code-registered storage namespace.
+`packages/shared/src/types/api/service-package.ts` defines the strict manifest, Generic Settings update, masked configuration, summary, and External lease contracts. Owner Settings uses `GET /api/services`, `GET /api/services/:serviceId`, and `PUT /api/services/:serviceId`; every path/body value is validated with the shared schemas before selecting a code-registered storage namespace.
 
-Canvas-scoped RFS keeps the existing `/capabilities` path for Space-operation discovery and exposes provider packages under `/capability-packages`. Manifest, Skill, and client reads contain no credentials. `POST /capability-packages/:id/lease` rejects unknown, unconfigured, and non-External packages, returns only declared fields, and is non-cacheable. See [`capability-packages.md`](./capability-packages.md).
+Canvas-scoped RFS keeps the existing `/capabilities` path for Space-operation discovery and exposes third-party services under `/services`. Manifest, Skill, and client reads contain no credentials. `POST /services/:id/lease` rejects unknown, unconfigured, and packages without an Agent interface, returns only declared fields, and is non-cacheable. See [`service-packages.md`](./service-packages.md).
 
 ## Anti-patterns
 

@@ -4,7 +4,7 @@
 import fastify, { type FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type * as CapabilityModule from './index.js';
+import type * as ServiceModule from './index.js';
 
 const mocks = vi.hoisted(() => ({
   getConfig: vi.fn(),
@@ -14,10 +14,10 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('./index.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof CapabilityModule>();
+  const actual = await importOriginal<typeof ServiceModule>();
   return {
     ...actual,
-    capabilityProvisionService: {
+    serviceProvisioner: {
       getConfig: mocks.getConfig,
       list: mocks.list,
       updateConfig: mocks.updateConfig,
@@ -29,20 +29,20 @@ vi.mock('../security/owner.js', () => ({
   isOwnerRequest: mocks.isOwner,
 }));
 
-const { default: capabilityRoutes } = await import('./capabilities.route.js');
+const { default: serviceRoutes } = await import('./services.route.js');
 
 let app: FastifyInstance | undefined;
 
 async function buildApp(): Promise<FastifyInstance> {
   const instance = fastify();
-  await instance.register(capabilityRoutes, { prefix: '/capabilities' });
+  await instance.register(serviceRoutes, { prefix: '/services' });
   await instance.ready();
   return instance;
 }
 
 const maskedConfig = {
   manifest: {
-    schema: 'huabu-capability/v1',
+    schema: 'huabu-service/v1',
     id: 'web-search',
     version: '1.0.0',
     name: 'Web Search',
@@ -75,7 +75,7 @@ afterEach(async () => {
   app = undefined;
 });
 
-describe('Capability settings routes', () => {
+describe('Service settings routes', () => {
   it('returns discovery and masked configuration', async () => {
     mocks.list.mockReturnValue([
       {
@@ -92,16 +92,16 @@ describe('Capability settings routes', () => {
 
     const discovery = await app.inject({
       method: 'GET',
-      url: '/capabilities',
+      url: '/services',
     });
     const config = await app.inject({
       method: 'GET',
-      url: '/capabilities/web-search',
+      url: '/services/web-search',
     });
 
     expect(discovery.statusCode).toBe(200);
     expect(discovery.json()).toMatchObject({
-      capabilities: [{ id: 'web-search', configured: true }],
+      services: [{ id: 'web-search', configured: true }],
     });
     expect(config.statusCode).toBe(200);
     expect(config.json()).toMatchObject({
@@ -119,7 +119,7 @@ describe('Capability settings routes', () => {
 
     const response = await app.inject({
       method: 'PUT',
-      url: '/capabilities/web-search',
+      url: '/services/web-search',
       payload: { values: { apiKey: 'test-secret' } },
     });
 
@@ -133,7 +133,7 @@ describe('Capability settings routes', () => {
 
     const invalid = await app.inject({
       method: 'PUT',
-      url: '/capabilities/web-search',
+      url: '/services/web-search',
       payload: { values: { apiKey: { nested: true } } },
     });
     expect(invalid.statusCode).toBe(400);
@@ -141,7 +141,7 @@ describe('Capability settings routes', () => {
 
     const updated = await app.inject({
       method: 'PUT',
-      url: '/capabilities/web-search',
+      url: '/services/web-search',
       payload: { values: { apiKey: 'test-secret' } },
     });
     expect(updated.statusCode).toBe(200);

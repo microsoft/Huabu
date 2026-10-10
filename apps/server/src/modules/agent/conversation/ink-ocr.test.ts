@@ -6,8 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { isInkOcrConfigured, recognizeInk } from './ink-ocr.js';
 
-vi.mock('../../capabilities/index.js', () => ({
-  capabilityProvisionService: {
+vi.mock('../../services/index.js', () => ({
+  serviceProvisioner: {
     getConfig: () => {
       const apiKey = process.env.VISION_KEY?.trim() || '';
       const endpoint = process.env.VISION_ENDPOINT?.trim() || '';

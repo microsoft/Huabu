@@ -28,42 +28,42 @@ import {
 } from '../integrations/integrations.js';
 
 import type {
-  CapabilityConfig,
-  CapabilityFieldValue,
-  CapabilityLease,
-  CapabilityManifest,
-  CapabilitySummary,
+  ServiceConfig,
+  ServiceFieldValue,
+  ServiceLease,
+  ServiceManifest,
+  ServiceSummary,
   ImageModelFamily,
   LLMImageConfigUpdate,
 } from '@huabu/shared';
 
 interface AdapterSnapshot {
-  values: Record<string, CapabilityFieldValue>;
+  values: Record<string, ServiceFieldValue>;
   configuredFields: string[];
 }
 
-interface CapabilityStorageAdapter {
+interface ServiceStorageAdapter {
   read(): AdapterSnapshot;
-  update(values: Readonly<Record<string, CapabilityFieldValue>>): Promise<void>;
-  resolve(): Record<string, CapabilityFieldValue>;
+  update(values: Readonly<Record<string, ServiceFieldValue>>): Promise<void>;
+  resolve(): Record<string, ServiceFieldValue>;
 }
 
-export class CapabilityServiceError extends Error {
+export class ServiceProvisionError extends Error {
   constructor(
     readonly code:
-      | 'capability_not_found'
-      | 'capability_not_external'
-      | 'capability_not_configured'
-      | 'invalid_capability_config',
+      | 'service_not_found'
+      | 'service_not_agent_accessible'
+      | 'service_not_configured'
+      | 'invalid_service_config',
     message: string,
   ) {
     super(message);
-    this.name = 'CapabilityServiceError';
+    this.name = 'ServiceProvisionError';
   }
 }
 
 function presentFields(
-  values: Readonly<Record<string, CapabilityFieldValue>>,
+  values: Readonly<Record<string, ServiceFieldValue>>,
 ): string[] {
   return Object.entries(values)
     .filter(([, value]) =>
@@ -75,7 +75,7 @@ function presentFields(
 function imageSnapshot(): AdapterSnapshot {
   const stored = getImageConfig();
   const modelFamily = stored.modelFamily ?? DEFAULT_IMAGE_MODEL_FAMILY;
-  const values: Record<string, CapabilityFieldValue> = {
+  const values: Record<string, ServiceFieldValue> = {
     provider: stored.provider || 'azure-openai',
     baseUrl: stored.baseUrl ?? '',
     modelFamily,
@@ -91,7 +91,7 @@ function imageSnapshot(): AdapterSnapshot {
   return { values, configuredFields };
 }
 
-const imageAdapter: CapabilityStorageAdapter = {
+const imageAdapter: ServiceStorageAdapter = {
   read: imageSnapshot,
   async update(values) {
     const update: LLMImageConfigUpdate = {};
@@ -120,8 +120,8 @@ const imageAdapter: CapabilityStorageAdapter = {
     }
     const parsed = llmImageConfigUpdateSchema.safeParse(update);
     if (!parsed.success) {
-      throw new CapabilityServiceError(
-        'invalid_capability_config',
+      throw new ServiceProvisionError(
+        'invalid_service_config',
         parsed.error.issues[0]?.message ?? 'Invalid image configuration',
       );
     }
@@ -146,7 +146,7 @@ const imageAdapter: CapabilityStorageAdapter = {
 function secretAdapter(options: {
   read: () => string | undefined;
   update: (value: string | null) => Promise<unknown>;
-}): CapabilityStorageAdapter {
+}): ServiceStorageAdapter {
   return {
     read() {
       const configured = Boolean(options.read());
@@ -167,7 +167,7 @@ function secretAdapter(options: {
   };
 }
 
-const inkOcrAdapter: CapabilityStorageAdapter = {
+const inkOcrAdapter: ServiceStorageAdapter = {
   read() {
     const config = getInkOcrConfig();
     return {
@@ -199,8 +199,8 @@ const inkOcrAdapter: CapabilityStorageAdapter = {
     };
     const parsed = inkOcrConfigUpdateSchema.safeParse(update);
     if (!parsed.success) {
-      throw new CapabilityServiceError(
-        'invalid_capability_config',
+      throw new ServiceProvisionError(
+        'invalid_service_config',
         parsed.error.issues[0]?.message ?? 'Invalid Ink OCR configuration',
       );
     }
@@ -212,7 +212,7 @@ const inkOcrAdapter: CapabilityStorageAdapter = {
   },
 };
 
-const adapters = new Map<string, CapabilityStorageAdapter>([
+const adapters = new Map<string, ServiceStorageAdapter>([
   ['llm.imageConfig', imageAdapter],
   [
     'integration.tavily',
@@ -231,18 +231,18 @@ const adapters = new Map<string, CapabilityStorageAdapter>([
   ['integration.azureVisionInkOcr', inkOcrAdapter],
 ]);
 
-function adapterFor(manifest: CapabilityManifest): CapabilityStorageAdapter {
+function adapterFor(manifest: ServiceManifest): ServiceStorageAdapter {
   const adapter = adapters.get(manifest.storage.namespace);
   if (!adapter) {
     throw new Error(
-      `Unknown Capability storage namespace: ${manifest.storage.namespace}`,
+      `Unknown Service storage namespace: ${manifest.storage.namespace}`,
     );
   }
   return adapter;
 }
 
 function isConfigured(
-  manifest: CapabilityManifest,
+  manifest: ServiceManifest,
   configuredFields: readonly string[],
 ): boolean {
   const configured = new Set(configuredFields);
@@ -252,8 +252,8 @@ function isConfigured(
 }
 
 function validateUpdate(
-  manifest: CapabilityManifest,
-  values: Readonly<Record<string, CapabilityFieldValue>>,
+  manifest: ServiceManifest,
+  values: Readonly<Record<string, ServiceFieldValue>>,
 ): void {
   const fields = new Map(
     manifest.configuration.map((field) => [field.id, field]),
@@ -261,24 +261,24 @@ function validateUpdate(
   for (const [id, value] of Object.entries(values)) {
     const field = fields.get(id);
     if (!field) {
-      throw new CapabilityServiceError(
-        'invalid_capability_config',
+      throw new ServiceProvisionError(
+        'invalid_service_config',
         `Unknown configuration field: ${id}`,
       );
     }
     if (value === null) continue;
     if (field.type === 'boolean') {
       if (typeof value !== 'boolean') {
-        throw new CapabilityServiceError(
-          'invalid_capability_config',
+        throw new ServiceProvisionError(
+          'invalid_service_config',
           `${field.label} must be a boolean`,
         );
       }
       continue;
     }
     if (typeof value !== 'string') {
-      throw new CapabilityServiceError(
-        'invalid_capability_config',
+      throw new ServiceProvisionError(
+        'invalid_service_config',
         `${field.label} must be text`,
       );
     }
@@ -287,8 +287,8 @@ function validateUpdate(
         const url = new URL(value);
         if (url.protocol !== 'https:') throw new Error();
       } catch {
-        throw new CapabilityServiceError(
-          'invalid_capability_config',
+        throw new ServiceProvisionError(
+          'invalid_service_config',
           `${field.label} must be an HTTPS URL`,
         );
       }
@@ -298,31 +298,31 @@ function validateUpdate(
       value &&
       !field.options?.some((option) => option.value === value)
     ) {
-      throw new CapabilityServiceError(
-        'invalid_capability_config',
+      throw new ServiceProvisionError(
+        'invalid_service_config',
         `Invalid ${field.label}`,
       );
     }
   }
 }
 
-export class CapabilityProvisionService {
+export class ServiceProvisioner {
   constructor(
-    private readonly manifests: ReadonlyMap<string, CapabilityManifest>,
+    private readonly manifests: ReadonlyMap<string, ServiceManifest>,
   ) {}
 
-  private manifest(capabilityId: string): CapabilityManifest {
-    const manifest = this.manifests.get(capabilityId);
+  private manifest(serviceId: string): ServiceManifest {
+    const manifest = this.manifests.get(serviceId);
     if (!manifest) {
-      throw new CapabilityServiceError(
-        'capability_not_found',
-        `Unknown Capability: ${capabilityId}`,
+      throw new ServiceProvisionError(
+        'service_not_found',
+        `Unknown Service: ${serviceId}`,
       );
     }
     return manifest;
   }
 
-  list(): CapabilitySummary[] {
+  list(): ServiceSummary[] {
     return [...this.manifests.values()].map((manifest) => {
       const snapshot = adapterFor(manifest).read();
       const configured = isConfigured(manifest, snapshot.configuredFields);
@@ -337,8 +337,8 @@ export class CapabilityProvisionService {
     });
   }
 
-  getConfig(capabilityId: string): CapabilityConfig {
-    const manifest = this.manifest(capabilityId);
+  getConfig(serviceId: string): ServiceConfig {
+    const manifest = this.manifest(serviceId);
     const snapshot = adapterFor(manifest).read();
     return {
       manifest,
@@ -349,40 +349,40 @@ export class CapabilityProvisionService {
   }
 
   async updateConfig(
-    capabilityId: string,
-    values: Readonly<Record<string, CapabilityFieldValue>>,
-  ): Promise<CapabilityConfig> {
-    const manifest = this.manifest(capabilityId);
+    serviceId: string,
+    values: Readonly<Record<string, ServiceFieldValue>>,
+  ): Promise<ServiceConfig> {
+    const manifest = this.manifest(serviceId);
     validateUpdate(manifest, values);
     await adapterFor(manifest).update(values);
-    return this.getConfig(capabilityId);
+    return this.getConfig(serviceId);
   }
 
-  resolveForServer(capabilityId: string): Record<string, CapabilityFieldValue> {
-    const manifest = this.manifest(capabilityId);
+  resolveForServer(serviceId: string): Record<string, ServiceFieldValue> {
+    const manifest = this.manifest(serviceId);
     const adapter = adapterFor(manifest);
     const snapshot = adapter.read();
     if (!isConfigured(manifest, snapshot.configuredFields)) {
-      throw new CapabilityServiceError(
-        'capability_not_configured',
-        `Capability "${capabilityId}" is not configured`,
+      throw new ServiceProvisionError(
+        'service_not_configured',
+        `Service "${serviceId}" is not configured`,
       );
     }
     return adapter.resolve();
   }
 
-  lease(capabilityId: string): CapabilityLease {
-    const manifest = this.manifest(capabilityId);
+  lease(serviceId: string): ServiceLease {
+    const manifest = this.manifest(serviceId);
     if (!manifest.agent) {
-      throw new CapabilityServiceError(
-        'capability_not_external',
-        `Capability "${capabilityId}" is not available to External Agents`,
+      throw new ServiceProvisionError(
+        'service_not_agent_accessible',
+        `Service "${serviceId}" is not available to External Agents`,
       );
     }
     return {
       id: manifest.id,
       version: manifest.version,
-      config: this.resolveForServer(capabilityId),
+      config: this.resolveForServer(serviceId),
       ...(manifest.agent?.client ? { client: manifest.agent.client } : {}),
     };
   }

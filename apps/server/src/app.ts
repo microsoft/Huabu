@@ -41,7 +41,6 @@ import canvasRoutes from './modules/canvas/canvas.route.js';
 import { resetExternalNoteSessions } from './modules/canvas/external-watcher.js';
 import externalNoteRoutes from './modules/canvas/external.route.js';
 import syncRoutes from './modules/canvas/sync.route.js';
-import capabilityRoutes from './modules/capabilities/capabilities.route.js';
 import integrationsRoutes from './modules/integrations/integrations.route.js';
 import interactiveViewRoutes from './modules/interactive-view/interactive-view.route.js';
 import { isPublicRfsSkillBootstrapRequest } from './modules/remote_fs/public-skill.js';
@@ -56,6 +55,7 @@ import {
   resolveAllowedHostnames,
 } from './modules/security/index.js';
 import { createApplicationRateLimitOptions } from './modules/security/rate-limit.js';
+import serviceRoutes from './modules/services/services.route.js';
 import { closeStorage } from './modules/storage/index.js';
 import webRoutes from './modules/web/web.route.js';
 import {
@@ -238,7 +238,7 @@ app.addHook('preHandler', async (request, reply) => {
     !url.startsWith('/api/deployment') &&
     !url.startsWith('/api/llm') &&
     !url.startsWith('/api/integrations') &&
-    !url.startsWith('/api/capabilities')
+    !url.startsWith('/api/services')
   ) {
     return reply.status(503).send({
       message:
@@ -259,7 +259,7 @@ app.register(artifactRoute, { prefix: '/api/canvas' });
 
 app.register(llmRoutes, { prefix: '/api/llm' });
 app.register(integrationsRoutes, { prefix: '/api/integrations' });
-app.register(capabilityRoutes, { prefix: '/api/capabilities' });
+app.register(serviceRoutes, { prefix: '/api/services' });
 app.register(deploymentRoutes, { prefix: '/api/deployment' });
 app.register(canaryRedeployRoutes, {
   prefix: '/api/deployment/canary',

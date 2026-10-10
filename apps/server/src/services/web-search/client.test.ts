@@ -3,11 +3,11 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { readCapabilityPackageFile } from '../../modules/capabilities/package-loader.js';
+import { readServicePackageFile } from '../../modules/services/package-loader.js';
 
 async function loadClient() {
-  const source = readCapabilityPackageFile('web-search', 'client.mjs');
-  if (!source) throw new Error('Web Search Capability client is missing');
+  const source = readServicePackageFile('web-search', 'client.mjs');
+  if (!source) throw new Error('Web Search Service client is missing');
   return import(
     `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`
   ) as Promise<{
@@ -21,7 +21,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('Web Search Capability client', () => {
+describe('Web Search Service client', () => {
   it('sends the configured Tavily key and normalized query', async () => {
     const fetchMock = vi
       .fn<typeof fetch>()

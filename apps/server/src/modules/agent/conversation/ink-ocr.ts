@@ -5,7 +5,7 @@ import { z } from 'zod';
 
 import { inkOcrEndpointSchema, inkRecognitionSchema } from '@huabu/shared';
 
-import { capabilityProvisionService } from '../../capabilities/index.js';
+import { serviceProvisioner } from '../../services/index.js';
 
 import type { InkRecognition } from '@huabu/shared';
 import type { FastifyBaseLogger } from 'fastify';
@@ -73,14 +73,14 @@ class InvalidResultError extends Error {}
 
 function readConfiguration(): Configuration {
   try {
-    const snapshot = capabilityProvisionService.getConfig('ink-ocr');
+    const snapshot = serviceProvisioner.getConfig('ink-ocr');
     if (!snapshot.configured) {
       return {
         outcome:
           snapshot.configuredFields.length === 0 ? 'disabled' : 'config_error',
       };
     }
-    const resolved = capabilityProvisionService.resolveForServer('ink-ocr');
+    const resolved = serviceProvisioner.resolveForServer('ink-ocr');
     const key = typeof resolved.apiKey === 'string' ? resolved.apiKey : '';
     const endpoint =
       typeof resolved.endpoint === 'string' ? resolved.endpoint : '';

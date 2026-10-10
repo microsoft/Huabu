@@ -3,16 +3,14 @@
 
 import { extractYoutubeVideoId } from './youtube-id.js';
 import { getLogger } from '../../../utils/logger.js';
-import { capabilityProvisionService } from '../../capabilities/index.js';
+import { serviceProvisioner } from '../../services/index.js';
 
 import type { IDocumentLoader, LoadResult } from './loader.interface.js';
 
 const log = getLogger('preprocessing.youtube');
 
 function resolveRapidApiKey(): string {
-  const resolved = capabilityProvisionService.resolveForServer(
-    'youtube-transcripts',
-  );
+  const resolved = serviceProvisioner.resolveForServer('youtube-transcripts');
   return typeof resolved.apiKey === 'string' ? resolved.apiKey : '';
 }
 

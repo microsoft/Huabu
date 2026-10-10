@@ -56,15 +56,15 @@ vi.mock('../../security/secret-store.js', () => ({
   getSecret: () => 'image-secret',
 }));
 
-import { getBundledCapabilityPackages } from './package-loader.js';
-import { CapabilityProvisionService } from './provision-service.js';
+import { getBundledServicePackages } from './package-loader.js';
+import { ServiceProvisioner } from './provisioner.js';
 
 function service() {
-  return new CapabilityProvisionService(
+  return new ServiceProvisioner(
     new Map(
-      [...getBundledCapabilityPackages()].map(([id, capability]) => [
+      [...getBundledServicePackages()].map(([id, service]) => [
         id,
-        capability.manifest,
+        service.manifest,
       ]),
     ),
   );
@@ -74,7 +74,7 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-describe('Capability Provision Service storage bindings', () => {
+describe('Service Provision Service storage bindings', () => {
   it('reads every existing owner without causing a persistence write', () => {
     const provision = service();
 

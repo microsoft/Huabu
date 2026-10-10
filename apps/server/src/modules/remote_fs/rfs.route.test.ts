@@ -35,7 +35,7 @@ const agentMocks = vi.hoisted(() => ({
   handleRun: vi.fn(),
 }));
 
-const capabilityMocks = vi.hoisted(() => ({
+const serviceMocks = vi.hoisted(() => ({
   lease: vi.fn(),
   list: vi.fn(),
 }));
@@ -52,11 +52,11 @@ vi.mock('../agent/agenetes/drivers.js', () => ({
   },
 }));
 
-vi.mock('../capabilities/index.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof CapabilityModule>();
+vi.mock('../services/index.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof ServiceModule>();
   return {
     ...actual,
-    capabilityProvisionService: capabilityMocks,
+    serviceProvisioner: serviceMocks,
   };
 });
 
@@ -69,7 +69,7 @@ import {
   agentThreadService,
 } from '../agent/agent-thread.service.js';
 import * as selectableProfiles from '../agent/selectable-agent-profile.js';
-import { CapabilityServiceError } from '../capabilities/index.js';
+import { ServiceProvisionError } from '../services/index.js';
 import { getCanvasStore, resetStorageCache, space } from '../storage/index.js';
 import {
   RunCompletionError,
@@ -80,7 +80,7 @@ import { taskService } from '../task/task.service.js';
 import { setWorkspacePath } from '../workspace.js';
 
 import type { FixedAgentNodeTarget } from '../agent/agent-thread-resolver.js';
-import type * as CapabilityModule from '../capabilities/index.js';
+import type * as ServiceModule from '../services/index.js';
 import type { CanvasNodeId } from '@huabu/shared';
 
 /**
@@ -187,8 +187,8 @@ beforeEach(() => {
   agentMocks.record.mockReset();
   agentMocks.get.mockReset();
   agentMocks.handleRun.mockReset();
-  capabilityMocks.lease.mockReset();
-  capabilityMocks.list.mockReset();
+  serviceMocks.lease.mockReset();
+  serviceMocks.list.mockReset();
   agentMocks.runAgent.mockImplementation(async function* () {
     yield { type: 'done', data: { message: 'first answer' } };
     return [];
@@ -216,8 +216,8 @@ describe('GET /api/rfs/:canvasId/skill', () => {
         );
       }
       expect(res.body).toContain('/capabilities/commands/$COMMAND');
-      expect(res.body).toContain('AGENTLET_CAPABILITY_SDK_URL');
-      expect(res.body).toContain('/capability-packages');
+      expect(res.body).toContain('AGENTLET_SERVICE_SDK_URL');
+      expect(res.body).toContain('/services');
       expect(res.body).toContain('$HUABU_RFS_URL/skill/tasks');
       expect(res.body).toContain('**parent-local**');
       expect(res.body).toContain('read-only `absolutePosition`');
@@ -594,9 +594,9 @@ describe('Task RFS adapters', () => {
   });
 });
 
-describe('provider Capability Packages', () => {
+describe('third-party Services', () => {
   it('publishes discovery and package files without configuration secrets', async () => {
-    capabilityMocks.list.mockReturnValue([
+    serviceMocks.list.mockReturnValue([
       {
         id: 'image-gen',
         version: '1.0.0',
@@ -610,24 +610,24 @@ describe('provider Capability Packages', () => {
     try {
       const discovery = await app.inject({
         method: 'GET',
-        url: '/rfs/c1/capability-packages',
+        url: '/rfs/c1/services',
       });
       const manifest = await app.inject({
         method: 'GET',
-        url: '/rfs/c1/capability-packages/image-gen/manifest',
+        url: '/rfs/c1/services/image-gen/manifest',
       });
       const skill = await app.inject({
         method: 'GET',
-        url: '/rfs/c1/capability-packages/image-gen/skill',
+        url: '/rfs/c1/services/image-gen/skill',
       });
       const client = await app.inject({
         method: 'GET',
-        url: '/rfs/c1/capability-packages/image-gen/client',
+        url: '/rfs/c1/services/image-gen/client',
       });
 
       expect(discovery.statusCode).toBe(200);
       expect(discovery.json()).toMatchObject({
-        capabilities: [{ id: 'image-gen', configured: true }],
+        services: [{ id: 'image-gen', configured: true }],
       });
       expect(manifest.statusCode).toBe(200);
       expect(manifest.json()).toMatchObject({
@@ -654,15 +654,15 @@ describe('provider Capability Packages', () => {
     try {
       const noSkill = await app.inject({
         method: 'GET',
-        url: '/rfs/c1/capability-packages/ink-ocr/skill',
+        url: '/rfs/c1/services/ink-ocr/skill',
       });
       const noClient = await app.inject({
         method: 'GET',
-        url: '/rfs/c1/capability-packages/youtube-transcripts/client',
+        url: '/rfs/c1/services/youtube-transcripts/client',
       });
       const invalid = await app.inject({
         method: 'GET',
-        url: '/rfs/c1/capability-packages/INVALID/manifest',
+        url: '/rfs/c1/services/INVALID/manifest',
       });
 
       expect(noSkill.statusCode).toBe(404);
@@ -676,36 +676,37 @@ describe('provider Capability Packages', () => {
   });
 
   it('returns a no-store lease and maps provisioning failures', async () => {
-    capabilityMocks.lease.mockReturnValueOnce({
-      capabilityId: 'image-gen',
+    serviceMocks.lease.mockReturnValueOnce({
+      id: 'image-gen',
+      version: '1.0.0',
       config: { apiKey: 'test-secret' },
     });
     const app = await buildApp();
     try {
       const lease = await app.inject({
         method: 'POST',
-        url: '/rfs/c1/capability-packages/image-gen/lease',
+        url: '/rfs/c1/services/image-gen/lease',
       });
       expect(lease.statusCode).toBe(200);
       expect(lease.headers['cache-control']).toBe('no-store');
       expect(lease.json()).toMatchObject({
-        capabilityId: 'image-gen',
+        id: 'image-gen',
         config: { apiKey: 'test-secret' },
       });
 
-      capabilityMocks.lease.mockImplementationOnce(() => {
-        throw new CapabilityServiceError(
-          'capability_not_external',
-          'Capability is not available to External Agents',
+      serviceMocks.lease.mockImplementationOnce(() => {
+        throw new ServiceProvisionError(
+          'service_not_agent_accessible',
+          'Service is not available to External Agents',
         );
       });
       const rejected = await app.inject({
         method: 'POST',
-        url: '/rfs/c1/capability-packages/ink-ocr/lease',
+        url: '/rfs/c1/services/ink-ocr/lease',
       });
       expect(rejected.statusCode).toBe(403);
       expect(rejected.json()).toMatchObject({
-        code: 'capability_not_external',
+        code: 'service_not_agent_accessible',
       });
     } finally {
       await app.close();

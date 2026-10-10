@@ -4,11 +4,7 @@
 import { ChevronDown, Key, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
-import {
-  getCapabilities,
-  getCapability,
-  putCapability,
-} from '@/api/capabilities';
+import { getServices, getService, putService } from '@/api/services';
 import { Button } from '@/components/Common/Button';
 import { Select } from '@/components/Common/Select';
 import { TextInput } from '@/components/Common/TextInput';
@@ -19,12 +15,12 @@ import { SettingSection } from '@/components/Settings/Common/SettingSection';
 import { useDeploymentReadinessStore } from '@/store/deploymentReadinessStore';
 
 import type {
-  CapabilityConfig,
-  CapabilityConfigurationField,
-  CapabilityFieldValue,
+  ServiceConfig,
+  ServiceConfigurationField,
+  ServiceFieldValue,
 } from '@huabu/shared';
 
-function CapabilityField({
+function ServiceField({
   field,
   value,
   configured,
@@ -32,11 +28,11 @@ function CapabilityField({
   onChange,
   onRemove,
 }: {
-  field: CapabilityConfigurationField;
-  value: CapabilityFieldValue | undefined;
+  field: ServiceConfigurationField;
+  value: ServiceFieldValue | undefined;
   configured: boolean;
   disabled: boolean;
-  onChange: (value: CapabilityFieldValue) => void;
+  onChange: (value: ServiceFieldValue) => void;
   onRemove: () => void;
 }) {
   if (field.type === 'enum') {
@@ -101,16 +97,16 @@ function CapabilityField({
   );
 }
 
-function CapabilityForm({
+function ServiceForm({
   initial,
   writesDisabled,
 }: {
-  initial: CapabilityConfig;
+  initial: ServiceConfig;
   writesDisabled: boolean;
 }) {
   const [config, setConfig] = useState(initial);
   const [expanded, setExpanded] = useState(false);
-  const [draft, setDraft] = useState<Record<string, CapabilityFieldValue>>(
+  const [draft, setDraft] = useState<Record<string, ServiceFieldValue>>(
     initial.values,
   );
   const [dirty, setDirty] = useState<Set<string>>(new Set());
@@ -136,15 +132,15 @@ function CapabilityForm({
     [config.manifest, dirty, writesDisabled],
   );
 
-  function change(id: string, value: CapabilityFieldValue) {
+  function change(id: string, value: ServiceFieldValue) {
     setDraft((current) => ({ ...current, [id]: value }));
     setDirty((current) => new Set(current).add(id));
   }
 
-  async function update(values: Record<string, CapabilityFieldValue>) {
+  async function update(values: Record<string, ServiceFieldValue>) {
     setSaving(true);
     try {
-      const next = await putCapability(config.manifest.id, { values });
+      const next = await putService(config.manifest.id, { values });
       setConfig(next);
       setDraft(next.values);
       setDirty(new Set());
@@ -217,7 +213,7 @@ function CapabilityForm({
               description={field.description}
             >
               <SettingControl>
-                <CapabilityField
+                <ServiceField
                   field={field}
                   value={draft[field.id]}
                   configured={configured.has(field.id)}
@@ -266,8 +262,8 @@ function CapabilityForm({
   );
 }
 
-export function CapabilitiesSettings() {
-  const [configs, setConfigs] = useState<CapabilityConfig[]>([]);
+export function ServicesSettings() {
+  const [configs, setConfigs] = useState<ServiceConfig[]>([]);
   const [error, setError] = useState<string | null>(null);
   const writesDisabled = useDeploymentReadinessStore(
     (state) => state.readiness?.credentials.writable === false,
@@ -275,9 +271,9 @@ export function CapabilitiesSettings() {
 
   useEffect(() => {
     let cancelled = false;
-    void getCapabilities()
-      .then(({ capabilities }) =>
-        Promise.all(capabilities.map(({ id }) => getCapability(id))),
+    void getServices()
+      .then(({ services }) =>
+        Promise.all(services.map(({ id }) => getService(id))),
       )
       .then((next) => {
         if (!cancelled) setConfigs(next);
@@ -285,9 +281,7 @@ export function CapabilitiesSettings() {
       .catch((cause) => {
         if (!cancelled) {
           setError(
-            cause instanceof Error
-              ? cause.message
-              : 'Failed to load Capabilities',
+            cause instanceof Error ? cause.message : 'Failed to load Services',
           );
         }
       });
@@ -306,12 +300,12 @@ export function CapabilitiesSettings() {
   if (configs.length === 0) {
     return (
       <p role="status" className="text-fg-muted px-1 text-xs">
-        Loading Capabilities...
+        Loading Services...
       </p>
     );
   }
   return configs.map((config) => (
-    <CapabilityForm
+    <ServiceForm
       key={config.manifest.id}
       initial={config}
       writesDisabled={writesDisabled}
