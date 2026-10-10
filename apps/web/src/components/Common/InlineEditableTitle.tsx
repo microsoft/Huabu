@@ -2,6 +2,7 @@
 // Licensed under the MIT license.
 
 import { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 
 import { Button } from './Button';
 import { cn } from './cn';
@@ -15,6 +16,8 @@ interface InlineEditableTitleProps {
   className?: string;
   /** Fill the host title slot, or size to content beside inline status controls. */
   width?: 'content' | 'fill';
+  /** Undefined renders in place; null waits for the host's editor slot. */
+  editorContainer?: HTMLElement | null;
   /** Omit for a non-interactive title. Persistence remains caller-owned. */
   editor?: {
     active: boolean;
@@ -25,6 +28,7 @@ interface InlineEditableTitleProps {
     onChange: (value: string) => void;
     onCommit: () => void;
     onCancel: () => void;
+    onKeyboardEditEnd?: () => void;
   };
 }
 
@@ -38,6 +42,7 @@ export function InlineEditableTitle({
   ariaLabel,
   className,
   width = 'content',
+  editorContainer,
   editor,
 }: InlineEditableTitleProps) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -49,7 +54,7 @@ export function InlineEditableTitle({
     if (!active) return;
     inputRef.current?.focus();
     inputRef.current?.select();
-  }, [active]);
+  }, [active, editorContainer]);
 
   if (editor?.active) {
     const commit = () => {
@@ -58,7 +63,7 @@ export function InlineEditableTitle({
       settled.current = true;
       editor.onCommit();
     };
-    return (
+    const input = (
       <TextInput
         ref={inputRef}
         size="md"
@@ -80,14 +85,21 @@ export function InlineEditableTitle({
           if (event.key === 'Enter') {
             event.preventDefault();
             commit();
+            editor.onKeyboardEditEnd?.();
           } else if (event.key === 'Escape') {
             event.preventDefault();
             settled.current = true;
             editor.onCancel();
+            editor.onKeyboardEditEnd?.();
           }
         }}
       />
     );
+    return editorContainer === undefined
+      ? input
+      : editorContainer
+        ? createPortal(input, editorContainer)
+        : null;
   }
 
   if (!editor) {

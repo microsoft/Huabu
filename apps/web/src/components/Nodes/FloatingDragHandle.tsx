@@ -2,7 +2,7 @@
 // Licensed under the MIT license.
 
 import clsx from 'clsx';
-import { MessageSquare, Plus, Star } from 'lucide-react';
+import { MessageCircle, Plus, Star } from 'lucide-react';
 import { useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -178,7 +178,7 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
         >
           {/* Plus icon matching the GripVertical icon width in DragToCanvasHandleButton */}
           <Plus size={10} className="shrink-0" />
-          <MessageSquare size={14} className="shrink-0" />
+          <MessageCircle size={14} className="shrink-0" />
         </Button>
       )}
 

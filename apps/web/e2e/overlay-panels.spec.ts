@@ -352,6 +352,42 @@ test('toolbar stays visible without overlap and updates while a panel remains fo
   await expect(toolbar).toBeVisible();
 });
 
+test('fullscreen rail aligns its layer control with Preview header controls', async ({
+  page,
+}) => {
+  await openNewCanvas(page);
+  await page.keyboard.press('Escape');
+  await createChatPreview(page);
+  await settlePanels(page);
+  const fullscreen = page.getByTestId('toggle-preview-fullscreen');
+  await fullscreen.click();
+  const rail = page.locator('[data-fullscreen-header-rail]');
+  const toggle = rail.getByRole('button', {
+    name: 'Show layers panel',
+    exact: true,
+  });
+  await expect(toggle).toBeVisible();
+  await expect(page.locator('[data-canvas-root]')).toHaveCount(0);
+  const left = await toggle.boundingBox();
+  const right = await fullscreen.boundingBox();
+  if (!left || !right)
+    throw new Error('Fullscreen header controls are missing');
+  expect(left.height).toBe(28);
+  expect(left.height).toBe(right.height);
+  expect(left.y).toBeCloseTo(right.y, 1);
+  const railBounds = await rail.boundingBox();
+  if (!railBounds) throw new Error('Fullscreen rail is missing');
+  expect(left.y + left.height / 2 - railBounds.y).toBe(22);
+  await toggle.click();
+  await page
+    .getByRole('button', { name: 'Collapse layers panel', exact: true })
+    .click();
+  await expect(toggle).toBeVisible();
+  await fullscreen.click();
+  await expect(rail).toHaveCount(0);
+  await expect(page.locator('[data-canvas-root]')).toBeVisible();
+});
+
 test('narrow layouts keep a full-size Canvas and bounded panels', async ({
   page,
 }, testInfo) => {

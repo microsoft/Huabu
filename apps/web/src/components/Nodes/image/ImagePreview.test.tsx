@@ -48,5 +48,10 @@ describe('<ImagePreview>', () => {
     expect(
       header.querySelector('button[aria-label="Download image"]'),
     ).not.toBeNull();
+    for (const button of header.querySelectorAll('button')) {
+      expect(button.classList.contains('[&_svg]:h-3.25')).toBe(true);
+      expect(button.classList.contains('min-h-6')).toBe(true);
+      expect(button.classList.contains('text-fg-muted')).toBe(true);
+    }
   });
 });

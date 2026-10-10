@@ -36,6 +36,9 @@ export function PreviewWorkspacePanel({
   const isEmpty = usePreviewWorkspaceStore(
     (s) => Object.keys(s.workspace.tabs).length === 0,
   );
+  const isSplit = usePreviewWorkspaceStore(
+    (s) => s.workspace.groups.length > 1,
+  );
   const openPreviewTarget = usePreviewWorkspaceStore(
     (s) => s.openPreviewTarget,
   );
@@ -51,14 +54,15 @@ export function PreviewWorkspacePanel({
       seededEmptyWorkspace.current = false;
       return;
     }
-    if (!canvasId || isHostCollapsed || seededEmptyWorkspace.current) return;
+    if (!canvasId || isHostCollapsed || isSplit || seededEmptyWorkspace.current)
+      return;
     seededEmptyWorkspace.current = true;
     openPreviewTarget({
       kind: 'chat',
       canvasId,
       threadId: createId('thread'),
     });
-  }, [canvasId, isEmpty, isHostCollapsed, openPreviewTarget]);
+  }, [canvasId, isEmpty, isHostCollapsed, isSplit, openPreviewTarget]);
 
   useEffect(() => {
     if (!isFullscreen || !onToggleFullscreen) return;

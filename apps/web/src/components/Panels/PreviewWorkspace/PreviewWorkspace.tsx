@@ -57,6 +57,7 @@ import { resolveTabDropDestination, resolveTabDropIndicator } from './tabDnd';
 
 import type {
   CanvasPreviewWorkspace,
+  ClosePreviewTabsScope,
   PreviewTarget,
 } from '@/store/previewWorkspace/model';
 import type { Node } from '@xyflow/react';
@@ -161,7 +162,15 @@ const tabCollisionDetection: CollisionDetection = (args) => {
     return tabCollision ? [tabCollision] : pointerCollisions;
   }
 
-  return closestCenter({ ...args, droppableContainers: tabContainers });
+  return closestCenter({
+    ...args,
+    droppableContainers: args.droppableContainers.filter(
+      (container) =>
+        container.data.current?.type === 'preview-tab' ||
+        (container.data.current?.type === 'preview-group' &&
+          container.data.current.isEmpty),
+    ),
+  });
 };
 
 export function PreviewWorkspace({
@@ -188,10 +197,13 @@ export function PreviewWorkspace({
   );
   const activateTab = usePreviewWorkspaceStore((s) => s.activateTab);
   const closeTab = usePreviewWorkspaceStore((s) => s.closeTab);
+  const closeTabs = usePreviewWorkspaceStore((s) => s.closeTabs);
   const promoteTab = usePreviewWorkspaceStore((s) => s.promoteTab);
   const moveTab = usePreviewWorkspaceStore((s) => s.moveTab);
   const setActiveGroup = usePreviewWorkspaceStore((s) => s.setActiveGroup);
   const setSplitRatio = usePreviewWorkspaceStore((s) => s.setSplitRatio);
+  const splitGroup = usePreviewWorkspaceStore((s) => s.splitGroup);
+  const closeEmptyGroup = usePreviewWorkspaceStore((s) => s.closeEmptyGroup);
 
   const scrollTargets = useMemo(
     () => Object.values(workspace.tabs).map(({ target }) => target),
@@ -264,30 +276,17 @@ export function PreviewWorkspace({
     closeTab(tabId, settleTab);
     if (isFinalTab) onCollapse?.();
   };
-  const openPreviewTarget = usePreviewWorkspaceStore(
-    (s) => s.openPreviewTarget,
-  );
-
-  const openToSide = useCallback(
-    (tabId: string) => {
-      const tab = usePreviewWorkspaceStore.getState().workspace.tabs[tabId];
-      // Open to Side relocates the one tab rather than duplicating the
-      // target, so it goes through the same open path (§8).
-      if (tab) {
-        settleTab(tabId);
-        openPreviewTarget(
-          tab.target,
-          {
-            openToSide: true,
-            transient: tab.transient,
-          },
-          settleTab,
-        );
-      }
-    },
-    [openPreviewTarget, settleTab],
-  );
-
+  const closeWorkspaceTabs = (tabId: string, scope: ClosePreviewTabsScope) => {
+    const before = usePreviewWorkspaceStore.getState().workspace;
+    closeTabs(tabId, scope, settleTab);
+    const after = usePreviewWorkspaceStore.getState().workspace;
+    if (
+      Object.keys(before.tabs).length > 0 &&
+      Object.keys(after.tabs).length === 0
+    ) {
+      onCollapse?.();
+    }
+  };
   const openNewChat = useCallback(
     (groupId: string) => {
       if (!canvasId) return;
@@ -408,14 +407,6 @@ export function PreviewWorkspace({
     setSplitRatio(current + delta);
   };
 
-  if (workspace.groups.every((g) => g.tabIds.length === 0)) {
-    return (
-      <div className="text-fg-subtle flex h-full items-center justify-center p-6 text-center text-sm">
-        {t('preview.emptyWorkspace')}
-      </div>
-    );
-  }
-
   return (
     <DndContext
       sensors={sensors}
@@ -479,12 +470,14 @@ export function PreviewWorkspace({
                 onFocus={() => setActiveGroup(group.id)}
                 onActivate={activateWorkspaceTab}
                 onClose={closeWorkspaceTab}
+                onCloseTabs={closeWorkspaceTabs}
                 onPromote={promoteTab}
                 nodeFocusRequest={nodeFocusRequest}
                 onNodeFocusRequestHandled={consumeNodeFocusRequest}
                 chatOpenRequest={chatOpenRequest}
                 onChatOpenRequestHandled={consumeChatOpenRequest}
-                onOpenToSide={openToSide}
+                onSplit={splitGroup}
+                onCloseEmptyGroup={() => closeEmptyGroup(group.id)}
                 onNewChat={() => openNewChat(group.id)}
                 tabDropIndicator={tabDropIndicator}
                 isFullscreen={isFullscreen}

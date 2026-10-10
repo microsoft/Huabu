@@ -21,6 +21,8 @@ import { createContext, useContext } from 'react';
 export interface PreviewHeaderSlotValue {
   /** Header DOM element to portal action buttons into, or null. */
   el: HTMLElement | null;
+  /** Leading tools, beside connected-node navigation. Null waits for the host. */
+  leadingEl?: HTMLElement | null;
 }
 
 export const PreviewHeaderSlotContext = createContext<PreviewHeaderSlotValue>({

@@ -1,0 +1,110 @@
+/*
+ * Copyright (c) Microsoft Corporation.
+ * Licensed under the MIT license.
+ */
+
+.preview-tab-slot {
+  --preview-tab-chrome: 66px;
+  --preview-tab-action-space: 30px;
+
+  display: inline-flex;
+  flex: 0 1 auto;
+  width: max-content;
+  min-width: calc(4em + var(--preview-tab-chrome));
+  max-width: 20rem;
+  height: 28px;
+  margin-block: 8px;
+  font-size: var(--text-sm);
+}
+
+.preview-tab-slot-active {
+  flex-shrink: 0.25;
+  min-width: calc(6em + var(--preview-tab-chrome));
+}
+
+.preview-tab-slot:has(.preview-tab-editor > input) {
+  min-width: 16rem;
+}
+
+.preview-tab-slot:has(.preview-tab-editor > input) .preview-tab-title,
+.preview-tab-slot:has(.preview-tab-editor > input) .preview-tab-actions {
+  display: none;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .preview-tab-actions {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .preview-tab-slot:not(.preview-tab-slot-active) .preview-tab-actions {
+    position: absolute;
+    right: 8px;
+  }
+
+  /* Reveal controls over the title's trailing edge without resizing the tab. */
+  .preview-tab-slot:not(.preview-tab-slot-active):hover .preview-tab-title,
+  .preview-tab-slot:not(.preview-tab-slot-active):has(:focus-visible)
+    .preview-tab-title {
+    mask-image: linear-gradient(
+      to right,
+      black calc(100% - var(--preview-tab-action-space) - 8px),
+      transparent calc(100% - var(--preview-tab-action-space))
+    );
+  }
+
+  .preview-tab-slot-active .preview-tab-actions,
+  .preview-tab-slot:hover .preview-tab-actions,
+  .preview-tab-slot:has(:focus-visible) .preview-tab-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+/* The 4px native lane fits in the pills' bottom margin without moving them. */
+.preview-tab-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+.preview-tab-scrollbar:hover,
+.preview-tab-scrollbar:has(:focus-visible) {
+  scrollbar-color: var(--fg-subtle) transparent;
+}
+
+/* Standard scrollbar styling overrides pixel sizing in Chromium/Electron. */
+@supports selector(::-webkit-scrollbar) {
+  .preview-tab-scrollbar,
+  .preview-tab-scrollbar:hover,
+  .preview-tab-scrollbar:has(:focus-visible) {
+    scrollbar-width: auto;
+    scrollbar-color: auto;
+  }
+
+  .preview-tab-scrollbar::-webkit-scrollbar {
+    height: 4px;
+  }
+
+  .preview-tab-scrollbar::-webkit-scrollbar-track,
+  .preview-tab-scrollbar::-webkit-scrollbar-track:hover {
+    background: transparent;
+  }
+
+  .preview-tab-scrollbar::-webkit-scrollbar-thumb {
+    background-color: transparent;
+    border-radius: 999px;
+  }
+
+  .preview-tab-scrollbar:hover::-webkit-scrollbar-thumb,
+  .preview-tab-scrollbar:has(:focus-visible)::-webkit-scrollbar-thumb {
+    background-color: var(--fg-subtle);
+  }
+
+  .preview-tab-scrollbar::-webkit-scrollbar-thumb:active {
+    background-color: var(--fg-muted);
+  }
+
+  .preview-tab-scrollbar::-webkit-scrollbar-button {
+    display: none;
+  }
+}

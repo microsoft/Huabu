@@ -3,7 +3,13 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createEmptyWorkspace, openTarget, type PreviewTarget } from './model';
+import {
+  createEmptyWorkspace,
+  openTarget,
+  splitGroup,
+  validateWorkspace,
+  type PreviewTarget,
+} from './model';
 import {
   MAX_PERSISTED_CANVASES,
   deleteWorkspace,
@@ -56,6 +62,23 @@ beforeEach(() => {
 });
 
 describe('workspace round trip', () => {
+  it.each([true, false])(
+    'restores an empty right group (empty workspace: %s)',
+    (empty) => {
+      const workspace = splitGroup(
+        empty ? createEmptyWorkspace('g1') : sampleWorkspace(),
+        'g2',
+      );
+      writeWorkspace(CANVAS, workspace);
+      const restored = readWorkspace(CANVAS);
+      expect(restored).toEqual(workspace);
+      if (!restored) throw new Error('Expected restored workspace');
+      expect(validateWorkspace(restored, CANVAS, new Set(['a', 'b']))).toEqual(
+        workspace,
+      );
+    },
+  );
+
   it('restores canonical URL tabs alongside Notes and Chat and deduplicates reopened URLs', () => {
     let ws = sampleWorkspace();
     ws = openTarget(ws, {

@@ -206,11 +206,16 @@ describe('ExpandedNodePanel edge navigation', () => {
     );
     const trigger = titleGroup?.querySelector('[aria-haspopup="menu"]');
     expect(trigger?.classList.contains('min-w-6')).toBe(true);
-    expect(trigger?.classList.contains('[&_svg]:w-3.5')).toBe(true);
-    expect(titleGroup?.children.length).toBe(2);
+    expect(trigger?.classList.contains('[&_svg]:w-3.25')).toBe(true);
+    expect(titleGroup?.children.length).toBe(3);
     expect(titleGroup?.querySelector('[aria-haspopup="menu"]')).not.toBeNull();
     act(() => useCanvasStore.setState({ edges: [] }));
-    expect(titleGroup?.children.length).toBe(1);
+    expect(titleGroup?.children.length).toBe(2);
+    expect(
+      titleGroup
+        ?.querySelector('[data-preview-header-leading-actions]')
+        ?.classList.contains('empty:hidden'),
+    ).toBe(true);
     expect(titleGroup?.querySelector('[aria-haspopup="menu"]')).toBeNull();
     expect(titleGroup?.textContent).toBe('Alpha');
   });

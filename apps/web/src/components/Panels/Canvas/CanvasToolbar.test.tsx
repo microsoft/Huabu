@@ -236,10 +236,9 @@ describe('NodeToolbar', () => {
     expect(previewAction?.parentElement?.classList.contains('rounded-lg')).toBe(
       true,
     );
-    expect(previewAction?.parentElement?.classList.contains('px-1')).toBe(true);
-    expect(previewAction?.parentElement?.classList.contains('py-1.5')).toBe(
-      true,
-    );
+    expect(previewAction?.parentElement?.classList.contains('p-1')).toBe(true);
+    expect(previewAction?.classList.contains('min-h-7')).toBe(true);
+    expect(previewAction?.classList.contains('py-1')).toBe(true);
 
     await act(async () => previewAction?.click());
 

@@ -289,6 +289,24 @@ function ensureSideGroup(
   };
 }
 
+/** Adds and focuses an empty right group without redistributing tabs. */
+export function splitGroup(
+  workspace: CanvasPreviewWorkspace,
+  newGroupId: string = createId('previewgroup'),
+): CanvasPreviewWorkspace {
+  if (workspace.groups.length >= MAX_PREVIEW_GROUPS) return workspace;
+  const { workspace: next, sideGroupId } = ensureSideGroup(
+    workspace,
+    workspace.activeGroupId,
+    newGroupId,
+  );
+  return {
+    ...next,
+    activeGroupId: sideGroupId,
+    splitRatio: DEFAULT_SPLIT_RATIO,
+  };
+}
+
 /**
  * Opens a target, honouring the one-tab-per-target rule.
  *
@@ -404,12 +422,24 @@ export function replaceTabTarget(
   };
 }
 
-function withoutEmptyGroups(
+function withoutEmptiedGroups(
+  previous: CanvasPreviewWorkspace,
   workspace: CanvasPreviewWorkspace,
 ): CanvasPreviewWorkspace {
   if (workspace.groups.length <= 1) return workspace;
 
-  const remaining = workspace.groups.filter((g) => g.tabIds.length > 0);
+  const remaining = workspace.groups.filter(
+    (g) =>
+      g.tabIds.length > 0 ||
+      !previous.groups.find((group) => group.id === g.id)?.tabIds.length,
+  );
+  return retainGroups(workspace, remaining);
+}
+
+function retainGroups(
+  workspace: CanvasPreviewWorkspace,
+  remaining: PreviewGroup[],
+): CanvasPreviewWorkspace {
   if (remaining.length === workspace.groups.length) return workspace;
   // Never drop the last group: an empty workspace still needs a focus target.
   const groups = remaining.length > 0 ? remaining : [workspace.groups[0]];
@@ -423,6 +453,19 @@ function withoutEmptyGroups(
     splitRatio:
       groups.length === 1 ? DEFAULT_SPLIT_RATIO : workspace.splitRatio,
   };
+}
+
+export function closeEmptyGroup(
+  workspace: CanvasPreviewWorkspace,
+  groupId: string,
+): CanvasPreviewWorkspace {
+  if (workspace.groups.length <= 1) return workspace;
+  return retainGroups(
+    workspace,
+    workspace.groups.filter(
+      (group) => group.id !== groupId || group.tabIds.length > 0,
+    ),
+  );
 }
 
 /**
@@ -446,7 +489,7 @@ export function closeTab(
       ? (tabIds[Math.min(index, tabIds.length - 1)] ?? null)
       : group.activeTabId;
 
-  return withoutEmptyGroups({
+  return withoutEmptiedGroups(workspace, {
     ...workspace,
     tabs,
     groups: mapGroup(workspace, group.id, (g) => ({
@@ -455,6 +498,25 @@ export function closeTab(
       activeTabId: nextActiveTabId,
     })),
   });
+}
+
+export type ClosePreviewTabsScope = 'others' | 'to-right' | 'group';
+
+/** Resolves the batch against the clicked tab's group before closing anything. */
+export function closeTabs(
+  workspace: CanvasPreviewWorkspace,
+  tabId: string,
+  scope: ClosePreviewTabsScope,
+): CanvasPreviewWorkspace {
+  const group = groupOfTab(workspace, tabId);
+  if (!group) return workspace;
+  const tabIds =
+    scope === 'group'
+      ? group.tabIds
+      : scope === 'others'
+        ? group.tabIds.filter((id) => id !== tabId)
+        : group.tabIds.slice(group.tabIds.indexOf(tabId) + 1);
+  return tabIds.reduce(closeTab, workspace);
 }
 
 /** Reorders a tab within its group or moves it to the other group. */
@@ -495,10 +557,7 @@ export function moveTab(
     return g;
   });
 
-  return repairTransientTabs(
-    withoutEmptyGroups({ ...workspace, groups }),
-    tabId,
-  );
+  return repairTransientTabs({ ...workspace, groups }, tabId);
 }
 
 /** Folds every tab back into the first group. */
@@ -571,7 +630,7 @@ export function validateWorkspace(
     return { ...g, tabIds, activeTabId };
   });
 
-  next = withoutEmptyGroups({
+  next = withoutEmptiedGroups(next, {
     ...next,
     groups,
     activeGroupId: groups.some((g) => g.id === next.activeGroupId)

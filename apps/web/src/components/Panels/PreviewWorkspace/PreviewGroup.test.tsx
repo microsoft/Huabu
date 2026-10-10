@@ -11,9 +11,12 @@ import {
   createEmptyWorkspace,
   openTarget,
 } from '@/store/previewWorkspace/model';
+import { previewTargetKey } from '@/store/previewWorkspace/scrollMemory';
 
 import { PreviewGroup } from './PreviewGroup';
 
+import type { ChatConnectionChangeHandler } from './PreviewRenderer';
+import type { AcpConnectionInfo } from '../ChatPanel/AcpConnectionBadge';
 import type { CanvasPreviewWorkspace } from '@/store/previewWorkspace/model';
 import type { Node } from '@xyflow/react';
 
@@ -34,13 +37,20 @@ const trackers = vi.hoisted(() => ({
     }
   >(),
   tabStripRenders: 0,
+  stripConnection: null as AcpConnectionInfo | null,
+  connectionHandlers: new Map<string, ChatConnectionChangeHandler>(),
 }));
 
 vi.mock('./PreviewTabStrip', () => ({
   panelElementId: (groupId: string) => `panel-${groupId}`,
   tabElementId: (groupId: string, tabId: string) => `tab-${groupId}-${tabId}`,
-  PreviewTabStrip: () => {
+  PreviewTabStrip: ({
+    activeChatConnection,
+  }: {
+    activeChatConnection?: AcpConnectionInfo;
+  }) => {
     trackers.tabStripRenders += 1;
+    trackers.stripConnection = activeChatConnection ?? null;
     return <div data-testid="tab-strip" />;
   },
 }));
@@ -53,6 +63,7 @@ vi.mock('./PreviewRenderer', () => ({
     nodeFocusRequestNonce,
     isActive,
     activationId,
+    onChatConnectionChange,
   }: {
     tabId: string;
     chatOpenRequest?: { nonce: number };
@@ -60,8 +71,10 @@ vi.mock('./PreviewRenderer', () => ({
     nodeFocusRequestNonce?: number;
     isActive?: boolean;
     activationId?: number;
+    onChatConnectionChange: ChatConnectionChangeHandler;
   }) => {
     const [count, setCount] = useState(0);
+    trackers.connectionHandlers.set(tabId, onChatConnectionChange);
     trackers.rendererProps.set(tabId, {
       chatOpenRequest,
       hasFocusPriority,
@@ -134,12 +147,14 @@ function renderGroup(
       onFocus={vi.fn()}
       onActivate={vi.fn()}
       onClose={vi.fn()}
+      onCloseTabs={vi.fn()}
       onPromote={vi.fn()}
       nodeFocusRequest={requests.nodeFocusRequest ?? null}
       onNodeFocusRequestHandled={vi.fn()}
       chatOpenRequest={requests.chatOpenRequest ?? null}
       onChatOpenRequestHandled={vi.fn()}
-      onOpenToSide={vi.fn()}
+      onSplit={vi.fn()}
+      onCloseEmptyGroup={vi.fn()}
       onNewChat={vi.fn()}
       tabDropIndicator={null}
       isFullscreen={false}
@@ -151,6 +166,8 @@ beforeEach(() => {
   trackers.effectEvents.length = 0;
   trackers.rendererProps.clear();
   trackers.tabStripRenders = 0;
+  trackers.stripConnection = null;
+  trackers.connectionHandlers.clear();
   useCanvasStore.setState({
     canvasId: 'canvas',
     nodes: [node('a'), node('b')],
@@ -167,6 +184,47 @@ afterEach(() => {
 });
 
 describe('PreviewGroup retention', () => {
+  it('scopes reported status to the active semantic target and ignores old cleanup', async () => {
+    let workspace = workspaceWithTwoTabs();
+    await act(async () => renderGroup(workspace));
+    const report = trackers.connectionHandlers.get('b');
+    expect(report).toBeDefined();
+    const aKey = previewTargetKey(workspace.tabs.a.target);
+    const bKey = previewTargetKey(workspace.tabs.b.target);
+    const connection: AcpConnectionInfo = {
+      status: 'connected',
+      alias: 'Agent B',
+    };
+    act(() => report?.('b', bKey, connection));
+    expect(trackers.stripConnection).toEqual(connection);
+    workspace = activateTab(workspace, 'a');
+    await act(async () => renderGroup(workspace));
+    expect(trackers.stripConnection).toBeNull();
+    act(() => report?.('a', aKey, { ...connection, alias: 'Agent A' }));
+    act(() => report?.('b', bKey, null));
+    expect(trackers.stripConnection?.alias).toBe('Agent A');
+    workspace = {
+      ...workspace,
+      tabs: {
+        ...workspace.tabs,
+        a: {
+          ...workspace.tabs.a,
+          target: { kind: 'chat', canvasId: 'canvas', threadId: 'replacement' },
+        },
+      },
+    };
+    await act(async () => renderGroup(workspace));
+    expect(trackers.stripConnection).toBeNull();
+    act(() =>
+      report?.('a', previewTargetKey(workspace.tabs.a.target), {
+        ...connection,
+        alias: 'Replacement',
+      }),
+    );
+    act(() => report?.('a', aKey, null));
+    expect(trackers.stripConnection?.alias).toBe('Replacement');
+  });
+
   it('does not rerender the group when only node positions change', async () => {
     const workspace = workspaceWithTwoTabs();
     await act(async () => renderGroup(workspace));

@@ -13,19 +13,27 @@
  * current.
  */
 
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import useCanvasStore from '@/store/canvasStore';
 import { conversationViewForNode } from '@/store/conversationOwner';
+import { previewTargetKey } from '@/store/previewWorkspace/scrollMemory';
 
 import { ChatPanel } from '../ChatPanel';
 import { UrlPreview } from './UrlPreview';
 import { ExpandedNodePanel } from '../ExpandedNodePanel/ExpandedNodePanel';
 
+import type { AcpConnectionInfo } from '../ChatPanel/AcpConnectionBadge';
 import type { ChatSession } from '@/hooks/useChatSession';
 import type { PreviewTarget } from '@/store/previewWorkspace/model';
 import type { Node } from '@xyflow/react';
+
+export type ChatConnectionChangeHandler = (
+  tabId: string,
+  targetKey: string,
+  connection: AcpConnectionInfo | null,
+) => void;
 
 /**
  * The conversation a Question node owns, or `null` when it has no thread
@@ -52,6 +60,11 @@ export function PreviewRenderer({
   adjacentNodeTarget,
   onClose,
   onCommit,
+  renameRequestNonce,
+  onRenameRequestHandled,
+  titleEditorHost,
+  onChatConnectionChange,
+  onRenameKeyboardEnd,
   nodeFocusRequestNonce,
   onNodeFocusRequestHandled,
   chatOpenRequest,
@@ -68,6 +81,11 @@ export function PreviewRenderer({
   onClose: () => void;
   /** Promotes this tab after its target receives a persistent mutation. */
   onCommit: () => void;
+  renameRequestNonce?: number;
+  onRenameRequestHandled?: (nonce: number) => void;
+  titleEditorHost?: HTMLElement | null;
+  onChatConnectionChange?: ChatConnectionChangeHandler;
+  onRenameKeyboardEnd?: () => void;
   /** One-shot request for this tab's editable node surface. */
   nodeFocusRequestNonce?: number;
   onNodeFocusRequestHandled: (nonce: number) => void;
@@ -80,6 +98,12 @@ export function PreviewRenderer({
   hasFocusPriority: boolean;
 }) {
   const { t } = useTranslation();
+  const targetKey = previewTargetKey(target);
+  const handleConnectionChange = useCallback(
+    (connection: AcpConnectionInfo | null) =>
+      onChatConnectionChange?.(tabId, targetKey, connection),
+    [onChatConnectionChange, tabId, targetKey],
+  );
   const node = useCanvasStore((s) =>
     target.kind === 'node'
       ? s.nodes.find((n) => n.id === target.nodeId)
@@ -119,6 +143,14 @@ export function PreviewRenderer({
         activationId={activationId}
         adjacentNodeSourceId={adjacentNodeSourceId}
         onCommit={onCommit}
+        hideDuplicateTitle
+        titleEditorHost={titleEditorHost}
+        onConnectionChange={
+          onChatConnectionChange ? handleConnectionChange : undefined
+        }
+        renameRequestNonce={renameRequestNonce}
+        onRenameRequestHandled={onRenameRequestHandled}
+        onRenameKeyboardEnd={onRenameKeyboardEnd}
         openPositionRequest={chatOpenRequest}
         onOpenPositionHandled={onChatOpenRequestHandled}
       />
@@ -145,6 +177,11 @@ export function PreviewRenderer({
       onClose={onClose}
       onCommit={onCommit}
       embedded
+      hideDuplicateTitle
+      titleEditorHost={titleEditorHost}
+      renameRequestNonce={renameRequestNonce}
+      onRenameRequestHandled={onRenameRequestHandled}
+      onRenameKeyboardEnd={onRenameKeyboardEnd}
       hasFocusPriority={hasFocusPriority}
       nodeFocusRequestNonce={nodeFocusRequestNonce}
       onNodeFocusRequestHandled={onNodeFocusRequestHandled}

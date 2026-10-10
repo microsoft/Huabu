@@ -19,11 +19,11 @@ test('shared menus keep default metrics, states and behaviors without toolbar ov
     await expect(row).toHaveCSS('font-size', '13px');
     await expect(row).toHaveCSS('line-height', '20px');
     await expect(row).toHaveCSS('font-weight', '400');
-    await expect(row).toHaveCSS('padding', '6px 8px');
+    await expect(row).toHaveCSS('padding', '4px 8px');
     await expect(row).toHaveCSS('border-radius', '6px');
-    await expect(row).toHaveCSS('min-height', '32px');
+    await expect(row).toHaveCSS('min-height', '28px');
     const panel = row.locator('xpath=ancestor::*[@data-floating-chrome][1]');
-    await expect(panel).toHaveCSS('padding', '6px 4px');
+    await expect(panel).toHaveCSS('padding', '4px');
     await expect(panel).toHaveCSS('border-radius', '8px');
     for (const icon of await row.locator('svg').all()) {
       await expect(icon).toHaveCSS('width', '14px');
@@ -34,6 +34,7 @@ test('shared menus keep default metrics, states and behaviors without toolbar ov
   await page.getByRole('button', { name: 'Select sample' }).click();
   const selected = page.getByRole('option', { name: /First option/ });
   await checkRow(selected);
+  await expect(selected).toHaveCSS('height', '28px');
   await expect(selected).toHaveAttribute('aria-selected', 'true');
   const label = page.getByText('New destination', { exact: true });
   await expect(label).toHaveCSS('font-size', '12px');
@@ -72,6 +73,8 @@ test('shared menus keep default metrics, states and behaviors without toolbar ov
   await page.getByRole('button', { name: 'Menu sample' }).click();
   const action = page.getByRole('menuitem', { name: 'Action Ctrl+2' });
   await checkRow(action);
+  await expect(action).toHaveCSS('height', '28px');
+  await expect(action.getByText('Ctrl+2')).toHaveCSS('margin-left', '8px');
   await checkRow(page.getByRole('menuitem', { name: 'Link', exact: true }));
   await expect(
     page.getByRole('menuitem', { name: 'Link', exact: true }),

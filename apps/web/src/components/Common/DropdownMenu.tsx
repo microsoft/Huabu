@@ -132,6 +132,7 @@ export const DropdownMenuLink: React.FC<DropdownMenuLinkProps> = ({
 // ─── DropdownMenu (container) ─────────────────────────────────────────────────
 
 type DropdownMenuProps = {
+  'aria-describedby'?: string;
   floating?: boolean;
   placement?: PopoverProps['placement'];
   onOpenAutoFocus?: PopoverProps['onOpenAutoFocus'];
@@ -139,6 +140,7 @@ type DropdownMenuProps = {
   trigger: ReactElement<{
     onClick?: (e: React.MouseEvent) => void;
     'aria-expanded'?: boolean;
+    'aria-describedby'?: string;
   }>;
   /** Menu content — typically `<DropdownMenuItem>` elements and dividers. */
   children: ReactNode;
@@ -146,6 +148,8 @@ type DropdownMenuProps = {
   className?: string;
   /** Offset from the trigger edge (px). Defaults to `{ x: 0, y: 4 }`. */
   offset?: Partial<{ x: number; y: number }>;
+  /** Layout classes for the trigger wrapper, without changing menu styling. */
+  triggerWrapperClassName?: string;
   /**
    * Which edge of the trigger to align the panel to.
    * `"bottom-left"` (default) opens below, left-aligned.
@@ -182,6 +186,7 @@ type DropdownMenuProps = {
  * ```
  */
 export const DropdownMenu: React.FC<DropdownMenuProps> = ({
+  'aria-describedby': describedBy,
   floating = false,
   placement,
   onOpenAutoFocus,
@@ -189,6 +194,7 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
   children,
   className,
   offset,
+  triggerWrapperClassName,
   align = 'bottom-left',
   open: controlledOpen,
   onOpenChange,
@@ -223,7 +229,7 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
         justDismissedRef.current = false;
         if (reason === 'escape' && document.activeElement === document.body) {
           triggerRef.current
-            ?.querySelector('button')
+            ?.querySelector<HTMLElement>('[role="tab"], button')
             ?.focus({ preventScroll: true });
         }
       });
@@ -258,6 +264,13 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
   }, [align, isRight, isTop, opensSideways]);
 
   const clonedTrigger = cloneElement(trigger, {
+    ...(describedBy
+      ? {
+          'aria-describedby': [trigger.props['aria-describedby'], describedBy]
+            .filter(Boolean)
+            .join(' '),
+        }
+      : {}),
     onClick: (event) => {
       if (typeof trigger.props.onClick === 'function') {
         trigger.props.onClick(event);
@@ -271,7 +284,9 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
 
   return (
     <>
-      <div ref={triggerRef}>{clonedTrigger}</div>
+      <div ref={triggerRef} className={triggerWrapperClassName}>
+        {clonedTrigger}
+      </div>
       {isOpen && (
         <Popover
           onOpenAutoFocus={onOpenAutoFocus}
@@ -349,7 +364,7 @@ export const DropdownMenuSubmenu: React.FC<DropdownMenuSubmenuProps> = ({
               <ChevronRight
                 aria-hidden="true"
                 size={14}
-                className="text-fg-subtle ml-4 shrink-0"
+                className="text-fg-subtle ml-2 shrink-0"
               />
             }
             onKeyDown={(event) => {

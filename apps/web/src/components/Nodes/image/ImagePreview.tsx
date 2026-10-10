@@ -6,8 +6,8 @@ import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
 import { resolveArtifactUrl } from '@/api/artifact';
-import { Button } from '@/components/Common/Button';
 import { toast } from '@/components/Common/Toast';
+import { PreviewHeaderButton } from '@/components/Nodes/PreviewHeaderButton';
 import { usePreviewHeaderSlot } from '@/components/Nodes/PreviewHeaderSlot';
 import useCanvasStore from '@/store/canvasStore';
 import { copyImageToClipboard } from '@/utils/io/clipboard';
@@ -55,30 +55,20 @@ export const ImagePreview = ({ data }: PreviewComponentProps) => {
 
   const headerActions = src ? (
     <>
-      <Button
-        variant="ghost"
-        tone="neutral"
-        size="sm"
-        iconOnly
+      <PreviewHeaderButton
         title={t('node.copyImage')}
-        tooltipPlacement="bottom"
         aria-label={t('node.copyImage')}
         onClick={copyImage}
       >
         <Copy />
-      </Button>
-      <Button
-        variant="ghost"
-        tone="neutral"
-        size="sm"
-        iconOnly
+      </PreviewHeaderButton>
+      <PreviewHeaderButton
         title={t('node.downloadImage')}
-        tooltipPlacement="bottom"
         aria-label={t('node.downloadImage')}
         onClick={downloadImage}
       >
         <Download />
-      </Button>
+      </PreviewHeaderButton>
     </>
   ) : null;
 

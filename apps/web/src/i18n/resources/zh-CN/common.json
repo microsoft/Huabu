@@ -557,10 +557,15 @@
     "closeTab": "关闭“{{title}}”",
     "resizeGroups": "调整预览分组宽度",
     "openToSide": "在旁边打开",
+    "splitGroup": "分栏：在右侧创建空栏",
+    "closeEmptyGroup": "关闭空栏",
+    "closeOtherTabs": "关闭其他标签",
+    "closeTabsToRight": "关闭右侧标签",
+    "closeGroupTabs": "关闭本栏所有标签",
     "expand": "展开预览",
     "collapse": "收起预览",
-    "enterFullscreen": "全屏打开预览",
-    "exitFullscreen": "退出预览全屏",
+    "enterFullscreen": "全屏",
+    "exitFullscreen": "退出全屏",
     "emptyGroup": "此分组没有打开的预览",
     "emptyWorkspace": "在 Space 上双击节点即可在此预览",
     "nodeUnavailable": "此节点已不存在"
@@ -869,6 +874,11 @@
     "off": "关闭",
     "connecting": "正在连接…",
     "connected": "已连接",
+    "capabilityStatus": {
+      "connecting": "加载中…",
+      "connected": "正常",
+      "failed": "加载失败"
+    },
     "connectionLabel": {
       "worker": "Worker",
       "profile": "配置",

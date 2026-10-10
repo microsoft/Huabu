@@ -6,6 +6,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AgentMenuOptions } from './agentMenu';
+import { AgentSelector } from './AgentSelector';
 
 import type { AgentProfileView } from '@huabu/shared';
 
@@ -127,4 +128,42 @@ describe('AgentMenuOptions', () => {
       },
     });
   });
+});
+
+describe('AgentSelector', () => {
+  it.each([true, false])(
+    'omits the chevron while preserving editable=%s behavior',
+    async (editable) => {
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(() => {
+        root?.render(
+          <AgentSelector
+            currentBinding={{
+              kind: 'external',
+              profileId: 'reviewer',
+              alias: 'Reviewer',
+            }}
+            currentMode="operate"
+            profiles={profiles}
+            editable={editable}
+            onSelect={vi.fn()}
+          />,
+        );
+      });
+
+      const trigger = container.querySelector('button');
+      expect(trigger?.textContent).toBe('Reviewer');
+      expect(container.querySelector('.lucide-chevron-down')).toBeNull();
+      expect(trigger?.disabled).toBe(!editable);
+      await act(() => trigger?.click());
+      expect(trigger?.getAttribute('aria-expanded')).toBe(
+        editable ? 'true' : null,
+      );
+      if (editable) {
+        expect(document.body.textContent).toContain('External Command');
+      }
+    },
+  );
 });

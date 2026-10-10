@@ -7,11 +7,11 @@ import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
 import { resolveArtifactUrl } from '@/api/artifact';
-import { Button } from '@/components/Common/Button';
 import { MilkdownPreview } from '@/components/Milkdown';
 import { usePreviewScrollMemory } from '@/hooks/usePreviewScrollMemory';
 import useCanvasStore from '@/store/canvasStore';
 
+import { PreviewHeaderButton } from '../PreviewHeaderButton';
 import { usePreviewHeaderSlot } from '../PreviewHeaderSlot';
 
 import type { PreviewComponentProps } from '../note/NotePreview';
@@ -52,17 +52,13 @@ export const OfficePreview = ({
   };
 
   const headerActions = src ? (
-    <Button
-      variant="ghost"
-      tone="neutral"
-      size="sm"
-      iconOnly
+    <PreviewHeaderButton
       title={t('node.downloadOriginalFile')}
       aria-label={t('node.downloadOriginalFile')}
       onClick={handleDownload}
     >
       <Download />
-    </Button>
+    </PreviewHeaderButton>
   ) : null;
 
   return (

@@ -557,10 +557,15 @@
     "closeTab": "Close {{title}}",
     "resizeGroups": "Resize preview groups",
     "openToSide": "Open to the side",
+    "splitGroup": "Split: create an empty group on the right",
+    "closeEmptyGroup": "Close empty group",
+    "closeOtherTabs": "Close other tabs",
+    "closeTabsToRight": "Close tabs to the right",
+    "closeGroupTabs": "Close all tabs in this group",
     "expand": "Expand previews",
     "collapse": "Collapse previews",
-    "enterFullscreen": "Open previews fullscreen",
-    "exitFullscreen": "Exit preview fullscreen",
+    "enterFullscreen": "Fullscreen",
+    "exitFullscreen": "Exit fullscreen",
     "emptyGroup": "No preview open in this group",
     "emptyWorkspace": "Double-click a node on the Space to preview it here",
     "nodeUnavailable": "This node is no longer available"
@@ -869,6 +874,11 @@
     "off": "Off",
     "connecting": "Connecting…",
     "connected": "Connected",
+    "capabilityStatus": {
+      "connecting": "Loading…",
+      "connected": "Normal",
+      "failed": "Load failed"
+    },
     "connectionLabel": {
       "worker": "Worker",
       "profile": "Profile",
