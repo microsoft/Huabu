@@ -36,17 +36,35 @@ const { resolveModelForRoleAsync, resolveModelByIdAsync } = vi.hoisted(() => ({
 // `prompt()` / `continue()`.
 let mockOutputTail: Array<Record<string, unknown>> = [];
 let mockPromptWait: Promise<void> | undefined;
+let mockToolSets: string[][] = [];
 
 vi.mock('@earendil-works/pi-agent-core', () => {
   class FakeAgent {
-    state: { messages: Array<Record<string, unknown>>; errorMessage?: string };
+    state: {
+      messages: Array<Record<string, unknown>>;
+      tools: Array<{ name: string }>;
+      errorMessage?: string;
+    };
     private cb?: (event: Record<string, unknown>) => void;
 
     constructor(opts: {
-      initialState: { messages: Array<Record<string, unknown>> };
+      initialState: {
+        messages: Array<Record<string, unknown>>;
+        tools?: Array<{ name: string }>;
+      };
     }) {
       // Mirror the real setter: copy the array, keep element identities.
-      this.state = { messages: [...opts.initialState.messages] };
+      let tools = opts.initialState.tools ?? [];
+      this.state = {
+        messages: [...opts.initialState.messages],
+        get tools() {
+          return tools;
+        },
+        set tools(value: Array<{ name: string }>) {
+          tools = value;
+          mockToolSets.push(value.map((tool) => tool.name));
+        },
+      };
     }
 
     subscribe(cb: (event: Record<string, unknown>) => void): () => void {
@@ -94,7 +112,7 @@ vi.mock('./llm.js', () => ({
 
 vi.mock('./tools/index.js', () => ({
   buildToolsForScope: () => [],
-  buildAgentToolsByNames: () => [],
+  buildAgentToolsByNames: vi.fn(() => []),
 }));
 
 // Deterministic per-turn render: one user message, no canvas / I/O.
@@ -115,6 +133,9 @@ import { runAgent, syncDeploymentSystemPrompt } from './agent.service.js';
 import { InkVisualPreparationError } from './conversation/envelope.js';
 import { canvasAcpNamespace } from '../workspace/paths.js';
 import { renderInternalAgentInputs } from './conversation/prompt/build-prompt.js';
+import { reportInkIntentTool } from './tools/definitions.js';
+import { buildAgentToolsByNames } from './tools/index.js';
+import { loadAgent } from '../../prompt/index.js';
 
 import type { BuiltinHandle } from './agenetes/drivers.js';
 import type { ChatEnvelope } from './conversation/envelope.js';
@@ -168,6 +189,8 @@ beforeEach(() => {
   setWorkspacePath(workspacePath);
   mockOutputTail = [{ ...ASSISTANT_REPLY }];
   mockPromptWait = undefined;
+  mockToolSets = [];
+  vi.mocked(buildAgentToolsByNames).mockClear();
   resolveModelForRoleAsync.mockReset().mockResolvedValue({
     id: 'default-text',
     input: ['text'],
@@ -375,6 +398,72 @@ describe('runAgent output delta', () => {
 });
 
 describe('runAgent Ink model requirements', () => {
+  it('overlays reporting for Ask Ink only without granting persistent write tools', async () => {
+    const canvasId = 'ink-models';
+    const threadId = 'ask-ink-report-overlay';
+    resolveModelForRoleAsync.mockResolvedValue({
+      id: 'default-vision',
+      input: ['text', 'image'],
+    });
+    vi.mocked(buildAgentToolsByNames).mockImplementation((names) =>
+      names.includes('report_ink_intent')
+        ? [
+            {
+              ...reportInkIntentTool,
+              execute: vi.fn(async () => ({ content: [], details: undefined })),
+            },
+          ]
+        : [],
+    );
+    const ask = loadAgent('ask');
+    expect(ask.toolNames).not.toContain('report_ink_intent');
+    expect(ask.toolNames).not.toContain('space_commands');
+    expect(ask.toolNames).not.toContain('fs_write');
+    try {
+      await drain(
+        runAgent({
+          scope: 'ask',
+          canvasId,
+          threadId,
+          workloadType: 'Deployment',
+          context: priorContext([]),
+          envelope: {
+            ...ENVELOPE,
+            user: { ...ENVELOPE.user, inputKind: 'ink-intent' },
+          },
+        }),
+      );
+      expect(buildAgentToolsByNames).toHaveBeenCalledWith(
+        ['report_ink_intent'],
+        expect.objectContaining({ canvasId, threadId }),
+      );
+      expect(mockToolSets).toContainEqual(['report_ink_intent']);
+      expect(mockToolSets.at(-1)).toEqual([]);
+
+      mockToolSets = [];
+      vi.mocked(buildAgentToolsByNames).mockClear();
+      await drain(
+        runAgent({
+          scope: 'ask',
+          canvasId,
+          threadId,
+          workloadType: 'Deployment',
+          context: priorContext([]),
+          envelope: ENVELOPE,
+        }),
+      );
+      expect(mockToolSets.flat()).not.toContain('report_ink_intent');
+      expect(
+        vi
+          .mocked(buildAgentToolsByNames)
+          .mock.calls.some(([names]) => names.includes('report_ink_intent')),
+      ).toBe(false);
+    } finally {
+      vi.mocked(buildAgentToolsByNames).mockImplementation(() => []);
+      await agenetes.close(threadId);
+    }
+  });
+
   it.each([false, true])(
     'uses a persisted vision selection (recover: %s)',
     async (recover) => {

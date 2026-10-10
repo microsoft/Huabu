@@ -2,7 +2,7 @@
 // Licensed under the MIT license.
 
 import { useReactFlow, useStore } from '@xyflow/react';
-import { ArrowUp, Ellipsis, Shapes, Square, Trash2 } from 'lucide-react';
+import { ArrowUp, Ellipsis, Shapes, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useShallow } from 'zustand/react/shallow';
@@ -22,6 +22,7 @@ import {
   FloatingToolbar,
   FLOATING_TOOLBAR_CLASS,
 } from '@/components/Common/FloatingToolbar';
+import { Spinner } from '@/components/Common/Spinner';
 import { toast } from '@/components/Common/Toast';
 import { Tooltip } from '@/components/Common/Tooltip';
 import { computeAdjacentNodePlacement } from '@/components/Nodes/nodePlacement';
@@ -68,6 +69,7 @@ import './NodeToolbar.css';
 import {
   InkAgentDestinationPicker,
   type InkAgentConversationOption,
+  type InkAgentDestinationIssue,
 } from './InkAgentDestinationPicker';
 import {
   deriveInkSubmissionCandidate,
@@ -78,6 +80,7 @@ import {
   retainedLassoBounds,
   resolveInkQuestionTarget,
   unionSelectionBounds,
+  type InkQuestionTarget,
 } from './inkQuestionSubmission';
 import {
   useInkConversationDestination,
@@ -139,6 +142,14 @@ function isInkTargetBusy(nodeId: string): boolean {
   );
 }
 
+function inkTargetAgent(target: InkQuestionTarget) {
+  const chat = useChatStore.getState();
+  return {
+    binding: target.binding ?? selectThreadBinding(chat, target.threadId),
+    mode: target.mode ?? selectThreadLastAction(chat, target.threadId),
+  };
+}
+
 /**
  * Floating toolbar for a Stage 2 stroke-level lasso selection. Aligns with
  * the sketch node's own controls: color + thickness edit the selected
@@ -187,6 +198,10 @@ export const StrokeSelectionToolbar = () => {
     lassoIdentity: string;
   } | null>(null);
   const [isPreparing, setIsPreparing] = useState(false);
+  const [startedDestination, setStartedDestination] = useState<{
+    nodeId: string;
+    threadId: string;
+  } | null>(null);
 
   const hasSelection = Object.keys(selection).length > 0;
   const hasNodeSelection = nodes.some((n) => n.selected);
@@ -237,16 +252,13 @@ export const StrokeSelectionToolbar = () => {
     void chatState;
     void pendingForks;
     if (!hasSelection) return [];
-    const chat = useChatStore.getState();
     return nodes
       .filter((node) => node.type === 'question')
       .map((node) => {
         const target = resolveInkQuestionTarget(node);
-        const binding =
-          target?.binding ??
-          (target
-            ? selectThreadBinding(chat, target.threadId)
-            : ({ kind: 'internal' } as const));
+        const { binding, mode } = target
+          ? inkTargetAgent(target)
+          : { binding: { kind: 'internal' } as const, mode: 'ask' as const };
         return {
           nodeId: node.id,
           title:
@@ -254,14 +266,15 @@ export const StrokeSelectionToolbar = () => {
               ? node.data.label
               : t('chat.newQuestion'),
           binding,
-          mode:
-            target?.mode ??
-            (target ? selectThreadLastAction(chat, target.threadId) : 'ask'),
+          mode,
           fallbackIcon: node.data.agentIcon as AgentIcon | undefined,
           disabledReason: !target
-            ? t('toolbar.inkAgentPicker.unavailable')
+            ? {
+                kind: 'unavailable',
+                message: t('toolbar.inkAgentPicker.unavailable'),
+              }
             : isInkTargetBusy(node.id)
-              ? t('toolbar.inkAgentPicker.busy')
+              ? { kind: 'busy', message: t('toolbar.inkAgentPicker.busy') }
               : undefined,
         };
       });
@@ -312,27 +325,52 @@ export const StrokeSelectionToolbar = () => {
       ? (selectedConversation?.mode ?? 'ask')
       : ((destination.kind === 'new' ? destination.choice?.mode : undefined) ??
         (currentBinding?.kind === 'internal' ? 'operate' : 'ask'));
-  const unavailableReason =
+  const unavailableReason: InkAgentDestinationIssue | undefined =
     destination.kind === 'unresolved'
-      ? loadingDestination
-        ? t('toolbar.inkAgentPicker.loadingConversation')
-        : destinationError
-          ? t('toolbar.inkAgentPicker.loadFailed', {
-              message: destinationError.message,
-            })
-          : t('toolbar.inkAgentPicker.chooseConversation')
+      ? {
+          kind: 'unavailable',
+          message: loadingDestination
+            ? t('toolbar.inkAgentPicker.loadingConversation')
+            : destinationError
+              ? t('toolbar.inkAgentPicker.loadFailed', {
+                  message: destinationError.message,
+                })
+              : t('toolbar.inkAgentPicker.chooseConversation'),
+        }
       : destination.kind === 'continue'
-        ? (selectedConversation?.disabledReason ??
-          (!selectedConversation ||
+        ? !selectedConversation ||
           resolveInkQuestionTarget(
             nodes.find((node) => node.id === selectedTargetId),
           )?.threadId !== destination.threadId
-            ? t('toolbar.inkAgentPicker.unavailable')
-            : undefined))
+          ? {
+              kind: 'unavailable',
+              message: t('toolbar.inkAgentPicker.unavailable'),
+            }
+          : selectedConversation.disabledReason
         : destination.choice?.binding.kind === 'external' &&
             !selectableProfileIds.includes(destination.choice.binding.profileId)
-          ? t('toolbar.inkAgentPicker.unavailable')
+          ? {
+              kind: 'unavailable',
+              message: t('toolbar.inkAgentPicker.unavailable'),
+            }
           : undefined;
+  const isOwnSubmission =
+    isPreparing &&
+    destination.kind === 'continue' &&
+    startedDestination?.nodeId === destination.nodeId &&
+    startedDestination.threadId === destination.threadId;
+  const pickerConversations = isOwnSubmission
+    ? conversations.map((conversation) =>
+        conversation.nodeId === startedDestination.nodeId &&
+        conversation.disabledReason?.kind === 'busy'
+          ? { ...conversation, disabledReason: undefined }
+          : conversation,
+      )
+    : conversations;
+  const pickerIssue =
+    isOwnSubmission && unavailableReason?.kind === 'busy'
+      ? undefined
+      : unavailableReason;
 
   useEffect(() => {
     if (hasSelection && !useAcpProfilesStore.getState().loaded) {
@@ -381,6 +419,7 @@ export const StrokeSelectionToolbar = () => {
     if (!active || active.lassoIdentity === renderedLassoIdentity) return;
     attemptsRef.current.clear();
     preparationRef.current = null;
+    setStartedDestination(null);
     setInkSubmissionPreparing(false);
     setIsPreparing(false);
   }, [renderedLassoIdentity, setInkSubmissionPreparing]);
@@ -450,6 +489,7 @@ export const StrokeSelectionToolbar = () => {
     const releasePreparation = () => {
       if (preparationRef.current?.token !== preparationToken) return;
       preparationRef.current = null;
+      setStartedDestination(null);
       setInkSubmissionPreparing(false);
       setIsPreparing(false);
     };
@@ -520,11 +560,10 @@ export const StrokeSelectionToolbar = () => {
           if (isInkTargetBusy(freshCandidate.target.nodeId)) {
             throw new Error(t('toolbar.inkAgentPicker.busy'));
           }
-          const { nodeId, threadId, mode } = freshCandidate.target;
+          const { nodeId, threadId } = freshCandidate.target;
           attempt = {
             identity,
-            mode:
-              mode ?? selectThreadLastAction(useChatStore.getState(), threadId),
+            mode: inkTargetAgent(freshCandidate.target).mode,
             groundingVisual,
             session: {
               canvasId: canvas.canvasId,
@@ -625,6 +664,15 @@ export const StrokeSelectionToolbar = () => {
       });
       let dispatchInvalidReason: string | undefined;
       const result = await dispatchAgentTurn(prepared, {
+        onStarted: () => {
+          const owner = attempt.session.conversationView?.conversationOwner;
+          if (owner && isCurrentAttempt()) {
+            setStartedDestination({
+              nodeId: owner.nodeId,
+              threadId: owner.threadId,
+            });
+          }
+        },
         canDispatch: () => {
           if (!isCurrentAttempt()) {
             dispatchInvalidReason = t('toolbar.inkAgentPicker.changed');
@@ -636,6 +684,15 @@ export const StrokeSelectionToolbar = () => {
               useGesturePreviewStore.getState().sketchStrokeSelection,
               selectedTargetId,
             );
+            if (
+              current.kind === 'ready' &&
+              current.target &&
+              inkTargetAgent(current.target).mode !== attempt.mode
+            ) {
+              attemptsRef.current.delete(identity);
+              dispatchInvalidReason = t('toolbar.inkAgentPicker.changed');
+              return false;
+            }
             const eligible =
               current.kind === 'ready' &&
               current.target?.threadId === attempt.session.threadId &&
@@ -664,7 +721,7 @@ export const StrokeSelectionToolbar = () => {
       } else if (!result.accepted && dispatchInvalidReason) {
         toast(dispatchInvalidReason, { tone: 'warning' });
       } else if (!result.accepted && result.status === 'busy') {
-        toast(t('toolbar.inkAgentPicker.busy'), { tone: 'warning' });
+        toast(t('toolbar.inkAgentPicker.busy'), { tone: 'info' });
       } else if (
         !result.accepted &&
         result.status === 'rejected' &&
@@ -806,7 +863,7 @@ export const StrokeSelectionToolbar = () => {
     ? t('toolbar.sendingInkRequest')
     : confirmingDestination
       ? t('toolbar.inkAgentPicker.loadingConversation')
-      : (unavailableReason ??
+      : (unavailableReason?.message ??
         (candidate.kind === 'ready'
           ? t('toolbar.sendInkRequest')
           : t('toolbar.invalidQuestionTarget')));
@@ -880,13 +937,16 @@ export const StrokeSelectionToolbar = () => {
             binding={currentBinding}
             mode={currentMode}
             profiles={selectableProfiles}
-            conversations={conversations}
+            conversations={pickerConversations}
             selectedNodeId={selectedTargetId}
             disabled={isPreparing}
             unavailableReason={
               destination.kind === 'unresolved' && !destinationError
                 ? undefined
-                : (unavailableReason ?? profileError?.message)
+                : (pickerIssue ??
+                  (profileError
+                    ? { kind: 'unavailable', message: profileError.message }
+                    : undefined))
             }
             onNewConversation={(choice) =>
               changeDestination({ kind: 'new', choice })
@@ -922,13 +982,14 @@ export const StrokeSelectionToolbar = () => {
             type="button"
             title={isPreparing ? undefined : submitTitle}
             aria-label={submitTitle}
+            aria-busy={isPreparing || undefined}
             disabled={submitDisabled}
             onClick={(event) => {
               event.stopPropagation();
               void handleSubmit();
             }}
           >
-            {isPreparing ? <Square /> : <ArrowUp />}
+            {isPreparing ? <Spinner size="sm" /> : <ArrowUp />}
           </Button>
         </FloatingToolbar.Group>
       )}

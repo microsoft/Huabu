@@ -55,9 +55,19 @@ afterEach(() => {
 });
 
 describe('RFS active Ink reports', () => {
-  it.each(['inferred', 'clarify', 'unsupported'] as const)(
-    'accepts %s for the active external turn and consumes the pending label',
-    async (status) => {
+  it.each([
+    { text: 'Explain this diagram' },
+    {
+      text: 'Adjust the reply layout',
+      explanation: 'The exact position is unclear.',
+    },
+    {
+      text: 'I cannot reliably interpret this handwriting',
+      explanation: 'The letters overlap the diagram.',
+    },
+  ])(
+    'records %j for the active external turn and consumes the pending label',
+    async (report) => {
       const server = app();
       const invocationToken = randomUUID();
       const finish = beginActiveInkIntentTurn(
@@ -67,10 +77,6 @@ describe('RFS active Ink reports', () => {
         invocationToken,
       );
       try {
-        const report =
-          status === 'inferred'
-            ? { status, text: 'Explain this diagram' }
-            : { status };
         const response = await server.inject({
           method: 'POST',
           url: '/rfs/c1/agent/thread-1/ink-intent',
@@ -79,14 +85,14 @@ describe('RFS active Ink reports', () => {
         expect(response.statusCode).toBe(200);
         expect(rfsInkIntentResponseSchema.parse(response.json())).toEqual({
           report,
-          renamed: status === 'inferred',
+          renamed: true,
         });
         const record = await space('c1').read();
         expect(record?.state.nodes[0]).toMatchObject({
           data: { pendingInkIntentLabel: false },
         });
         expect((await space('c1').nodes.read('question-1'))?.record.label).toBe(
-          status === 'inferred' ? 'Explain this diagram' : 'New ink request',
+          report.text,
         );
       } finally {
         finish();
@@ -117,7 +123,7 @@ describe('RFS active Ink reports', () => {
         url: '/rfs/c1/agent/thread-1/ink-intent',
         payload: {
           invocationToken,
-          report: { status: 'inferred', text: 'Generated title' },
+          report: { text: 'Generated title' },
         },
       });
       expect(response.statusCode).toBe(200);
@@ -136,7 +142,7 @@ describe('RFS active Ink reports', () => {
     const invocationToken = randomUUID();
     const payload = {
       invocationToken,
-      report: { status: 'inferred', text: 'Stale title' },
+      report: { text: 'Stale title' },
     };
     let finish = beginActiveInkIntentTurn(
       'c1',
@@ -197,16 +203,24 @@ describe('RFS active Ink reports', () => {
 
   it.each([
     {},
-    { invocationToken: 'invalid', report: { status: 'clarify' } },
+    { invocationToken: 'invalid', report: { text: 'Interpretation' } },
     {
       invocationToken: randomUUID(),
-      report: { status: 'inferred', text: 'two\nlines' },
+      report: { text: 'two\nlines' },
     },
     {
       invocationToken: randomUUID(),
-      report: { status: 'inferred', text: 'x'.repeat(121) },
+      report: { text: 'x'.repeat(121) },
     },
     { invocationToken: randomUUID(), report: { status: 'other' } },
+    {
+      invocationToken: randomUUID(),
+      report: { status: 'inferred', text: 'Legacy input' },
+    },
+    {
+      invocationToken: randomUUID(),
+      report: { text: 'Summary', explanation: 'x'.repeat(601) },
+    },
   ])('validates report input before mutation: %j', async (payload) => {
     const server = app();
     try {

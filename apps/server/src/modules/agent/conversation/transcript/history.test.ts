@@ -66,7 +66,191 @@ function buildInternal(turns: AgentTurn[]): ChatHistoryItem[] {
   return messages;
 }
 
+function inkTurn(
+  transcript: FoldedMessage[],
+  meta?: AgentTurn['meta'],
+): AgentTurn {
+  const envelope = makeEnvelope('');
+  envelope.user.inputKind = 'ink-intent';
+  return {
+    request: createChatSubmission(envelope),
+    transcript,
+    ...(meta ? { meta } : {}),
+  };
+}
+
+function reportMessage(
+  rawInput: unknown,
+  status: 'completed' | 'failed' | 'in_progress' = 'completed',
+  rawOutput?: unknown,
+): FoldedMessage {
+  return {
+    type: 'tool_call',
+    data: {
+      toolCallId: 'report',
+      title: 'report_ink_intent',
+      status,
+      rawInput,
+      ...(rawOutput !== undefined ? { rawOutput } : {}),
+    },
+  };
+}
+
 describe('buildHistoryFromTurns', () => {
+  it('uses wrapped canonical outputs and does not confirm rejected input', () => {
+    const report = {
+      text: 'Adjust the layout',
+      explanation: 'The position is uncertain.',
+    };
+    const output = JSON.stringify({
+      tool: 'report_ink_intent',
+      status: 'success',
+      data: report,
+    });
+    expect(
+      buildInternal([inkTurn([reportMessage({}, 'completed', output)])])[0],
+    ).toMatchObject({
+      inkInterpretation: { state: 'reported', ...report },
+    });
+    const failedOutput = JSON.stringify({
+      tool: 'report_ink_intent',
+      status: 'error',
+      error: 'Rejected',
+    });
+    expect(
+      buildInternal([
+        inkTurn([reportMessage(report, 'completed', failedOutput)]),
+      ])[0],
+    ).toMatchObject({
+      inkInterpretation: { state: 'failed' },
+    });
+  });
+
+  it('restores a complete interpretation and uses canonical tool output when input is partial', () => {
+    const report = {
+      text: 'Adjust the layout',
+      explanation: 'The target position is unclear.',
+    };
+    expect(
+      buildInternal([
+        inkTurn([
+          reportMessage(
+            {},
+            'completed',
+            JSON.stringify({ ...report, renamed: false }),
+          ),
+        ]),
+      ]),
+    ).toEqual([
+      {
+        role: 'user',
+        content: '',
+        inputKind: 'ink-intent',
+        inkInterpretation: { state: 'reported', ...report },
+      },
+    ]);
+  });
+
+  it.each(['clarify', 'unsupported'])(
+    'reads legacy %s without fabricating interpretation text',
+    (status) => {
+      expect(
+        buildInternal([inkTurn([reportMessage({ status })])])[0],
+      ).toMatchObject({
+        inkInterpretation: { state: 'legacy' },
+      });
+    },
+  );
+
+  it('allows a successful report retry but preserves the first confirmed interpretation', () => {
+    expect(
+      buildInternal([
+        inkTurn([
+          reportMessage({ text: 'Failed attempt' }, 'failed'),
+          reportMessage({
+            text: 'First success',
+            explanation: 'Some uncertainty remains.',
+          }),
+          reportMessage({ text: 'Later replacement' }),
+        ]),
+      ])[0],
+    ).toMatchObject({
+      inkInterpretation: {
+        state: 'reported',
+        text: 'First success',
+        explanation: 'Some uncertainty remains.',
+      },
+    });
+  });
+
+  it('keeps interpretation records on their own Ink requests and ignores text-only reports', () => {
+    const out = buildInternal([
+      inkTurn([reportMessage({ text: 'First request' })]),
+      inkTurn([reportMessage({ text: 'Second request' })]),
+      makeTurn('Typed request', [reportMessage({ text: 'Not an Ink report' })]),
+    ]);
+    expect(out).toEqual([
+      {
+        role: 'user',
+        content: '',
+        inputKind: 'ink-intent',
+        inkInterpretation: { state: 'reported', text: 'First request' },
+      },
+      {
+        role: 'user',
+        content: '',
+        inputKind: 'ink-intent',
+        inkInterpretation: { state: 'reported', text: 'Second request' },
+      },
+      { role: 'user', content: 'Typed request' },
+    ]);
+  });
+
+  it('leaves only the active turn pending, even if an unfinished tool already has output', () => {
+    const out: ChatHistoryItem[] = [];
+    buildHistoryFromTurns(
+      [
+        inkTurn([]),
+        inkTurn([reportMessage({}, 'in_progress', { text: 'Not confirmed' })]),
+      ],
+      out,
+      { recoverInternalToolNames: true, activeTurnIndex: 1 },
+    );
+    expect(out[0]).toMatchObject({ inkInterpretation: { state: 'missing' } });
+    expect(out[1]).toMatchObject({ inkInterpretation: { state: 'pending' } });
+  });
+
+  it.each(['aborted', 'cancelled'])(
+    'settles an unreported %s turn without erasing a received report',
+    (stopReason) => {
+      expect(buildInternal([inkTurn([], { stopReason })])[0]).toMatchObject({
+        inkInterpretation: { state: 'interrupted' },
+      });
+      expect(
+        buildInternal([
+          inkTurn([reportMessage({ text: 'Saved interpretation' })], {
+            stopReason,
+          }),
+        ])[0],
+      ).toMatchObject({
+        inkInterpretation: { state: 'reported', text: 'Saved interpretation' },
+      });
+    },
+  );
+
+  it('distinguishes an errored unreported turn from a successful turn without a report', () => {
+    expect(
+      buildInternal([
+        inkTurn([{ type: 'error', data: { error: 'Backend failed' } }]),
+      ])[0],
+    ).toMatchObject({
+      inkInterpretation: { state: 'failed' },
+    });
+    expect(buildInternal([inkTurn([])])[0]).toMatchObject({
+      inkInterpretation: { state: 'missing' },
+    });
+  });
+
   it.each([undefined, 'text'] as const)(
     'keeps honest text history for %s',
     (inputKind) => {
@@ -125,6 +309,7 @@ describe('buildHistoryFromTurns', () => {
         role: 'user',
         content: '',
         inputKind: 'ink-intent',
+        inkInterpretation: { state: 'missing' },
         groundingVisual: envelope.focus.groundingVisual,
         selectedNodeIds: ['ink-1', 'note-1'],
         selectedStrokeIds: [{ nodeId: 'ink-1', strokeIds: ['stroke-1'] }],
@@ -137,10 +322,17 @@ describe('buildHistoryFromTurns', () => {
     envelope.user.inputKind = 'ink-intent';
     expect(
       build([{ request: createChatSubmission(envelope), transcript: [] }]),
-    ).toStrictEqual([{ role: 'user', content: '', inputKind: 'ink-intent' }]);
+    ).toStrictEqual([
+      {
+        role: 'user',
+        content: '',
+        inputKind: 'ink-intent',
+        inkInterpretation: { state: 'missing' },
+      },
+    ]);
   });
 
-  it('projects inferred intent from a hidden built-in tool call', () => {
+  it('retains historical inferred text from a hidden built-in tool call', () => {
     const envelope = makeEnvelope('');
     envelope.user.inputKind = 'ink-intent';
     const report = {
@@ -165,7 +357,10 @@ describe('buildHistoryFromTurns', () => {
         role: 'user',
         content: '',
         inputKind: 'ink-intent',
-        inferredIntent: 'Expand the third comparison step',
+        inkInterpretation: {
+          state: 'reported',
+          text: 'Expand the third comparison step',
+        },
       },
     ]);
   });
@@ -187,7 +382,14 @@ describe('buildHistoryFromTurns', () => {
       buildInternal([
         { request: createChatSubmission(envelope), transcript: [report] },
       ]),
-    ).toEqual([{ role: 'user', content: '', inputKind: 'ink-intent' }]);
+    ).toEqual([
+      {
+        role: 'user',
+        content: '',
+        inputKind: 'ink-intent',
+        inkInterpretation: { state: 'failed' },
+      },
+    ]);
   });
 
   it('rebuilds the user bubble from the envelope and assistant text from the transcript', () => {

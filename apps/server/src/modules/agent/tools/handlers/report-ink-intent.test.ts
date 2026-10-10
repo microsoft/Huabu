@@ -46,24 +46,32 @@ describe('handleReportInkIntent', () => {
     mocks.execute.mockResolvedValue({ results: [{ applied: true }] });
   });
 
-  it('returns a normalized inferred intent', async () => {
+  it('returns a normalized interpretation and explanation', async () => {
     expect(
       JSON.parse(
         await report({
-          status: 'inferred',
           text: '  Expand the third comparison step  ',
+          explanation: '  The arrow points to that step.  ',
         }),
       ),
     ).toEqual({
-      status: 'inferred',
       text: 'Expand the third comparison step',
+      explanation: 'The arrow points to that step.',
       renamed: false,
     });
   });
 
-  it('accepts clarify without inventing text', async () => {
-    expect(JSON.parse(await report({ status: 'clarify' }))).toEqual({
-      status: 'clarify',
+  it('records uncertainty without a semantic category', async () => {
+    expect(
+      JSON.parse(
+        await report({
+          text: 'Adjust the reply layout',
+          explanation: 'The requested position is not clear.',
+        }),
+      ),
+    ).toEqual({
+      text: 'Adjust the reply layout',
+      explanation: 'The requested position is not clear.',
       renamed: false,
     });
   });
@@ -88,12 +96,9 @@ describe('handleReportInkIntent', () => {
     });
     mocks.execute.mockResolvedValue({ results: [{ applied: true }] });
 
-    const result = JSON.parse(
-      await report({ status: 'inferred', text: 'Expand the third step' }),
-    );
+    const result = JSON.parse(await report({ text: 'Expand the third step' }));
 
     expect(result).toEqual({
-      status: 'inferred',
       text: 'Expand the third step',
       renamed: true,
     });
@@ -137,9 +142,7 @@ describe('handleReportInkIntent', () => {
       record: { label: 'New ink request', labelSource: 'user' },
     });
 
-    const result = JSON.parse(
-      await report({ status: 'inferred', text: 'Expand the third step' }),
-    );
+    const result = JSON.parse(await report({ text: 'Expand the third step' }));
 
     expect(result.renamed).toBe(false);
     expect(mocks.execute).toHaveBeenCalledWith(
@@ -173,9 +176,7 @@ describe('handleReportInkIntent', () => {
       },
     });
 
-    const result = JSON.parse(
-      await report({ status: 'inferred', text: 'Expand the third step' }),
-    );
+    const result = JSON.parse(await report({ text: 'Expand the third step' }));
 
     expect(result.renamed).toBe(false);
     expect(mocks.readNode).not.toHaveBeenCalled();
@@ -185,7 +186,7 @@ describe('handleReportInkIntent', () => {
   it('rejects calls outside the active Ink turn', async () => {
     await expect(
       handleReportInkIntent(
-        { status: 'inferred', text: 'Unexpected' },
+        { text: 'Unexpected' },
         { canvasId: 'canvas-1', threadId: 'thread-1' },
       ),
     ).rejects.toThrow('available only during an Ink turn');
@@ -219,7 +220,7 @@ describe('handleReportInkIntent', () => {
     try {
       await expect(
         reportInkIntent(
-          { status: 'inferred', text: 'Too late' },
+          { text: 'Too late' },
           {
             canvasId: 'canvas-1',
             threadId: 'thread-1',
@@ -250,8 +251,8 @@ describe('handleReportInkIntent', () => {
       record: { label: 'New ink request' },
     });
     mocks.execute.mockResolvedValue({ results: [{ applied: false }] });
-    await expect(
-      report({ status: 'inferred', text: 'A new title' }),
-    ).rejects.toThrow('Failed to settle');
+    await expect(report({ text: 'A new title' })).rejects.toThrow(
+      'Failed to settle',
+    );
   });
 });

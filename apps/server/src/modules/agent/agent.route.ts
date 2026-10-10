@@ -226,6 +226,10 @@ const agentRoutes: FastifyPluginAsync = async (
           }
           buildHistoryFromTurns([turn], messages, {
             recoverInternalToolNames,
+            ...(index === group.activeTurnIndex &&
+            agentThreadService.isActive(threadId, canvasId)
+              ? { activeTurnIndex: 0 }
+              : {}),
           });
         });
         return {
@@ -299,6 +303,10 @@ const agentRoutes: FastifyPluginAsync = async (
       (record?.spec as { kind?: unknown } | undefined)?.kind === 'internal';
     buildHistoryFromTurns(turns, messages, {
       recoverInternalToolNames: isInternalThread,
+      ...(turns.at(-1)?.isIncomplete &&
+      agentThreadService.isActive(threadId, canvasId)
+        ? { activeTurnIndex: turns.length - 1 }
+        : {}),
     });
 
     return reply.send({ threadId, messages });

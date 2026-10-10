@@ -100,7 +100,7 @@ export async function reportInkIntent(
   const renamed = await settlePendingInkQuestion(
     context.canvasId,
     context.threadId,
-    report.status === 'inferred' ? report.text : undefined,
+    report.text,
     context.invocationToken,
   );
   if (

@@ -119,6 +119,66 @@ afterEach(() => {
 });
 
 describe('POST /agent', () => {
+  it('admits Ink in Ask mode and streams acceptance without upgrading the request', async () => {
+    mocks.beginPreparation.mockReturnValue({
+      signal: new AbortController().signal,
+      finish: vi.fn(),
+    });
+    mocks.resolveFixedTarget.mockResolvedValue(null);
+    mocks.resolveTarget.mockResolvedValue(null);
+    mocks.buildChatEnvelope.mockResolvedValue(ENVELOPE);
+    mocks.invoke.mockImplementationOnce(async (options) => {
+      await options.envelope();
+      return {
+        binding: { kind: 'internal' },
+        fixedTarget: null,
+        signal: new AbortController().signal,
+        acceptance: Promise.resolve({
+          threadId: 'thread-a',
+          turnStartSeq: 1,
+        }),
+        events: events(),
+        dispose: vi.fn().mockResolvedValue(undefined),
+      };
+    });
+    const app = Fastify();
+    await app.register(agentRoutes, { prefix: '/agent' });
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/agent',
+        payload: {
+          inputKind: 'ink-intent',
+          content: '',
+          threadId: 'thread-a',
+          canvasId: 'canvas-a',
+          mode: 'ask',
+          canvasContext: {
+            selectedNodes: [
+              {
+                id: 'sketch-a',
+                type: 'sketch',
+                strokeIds: ['stroke-a'],
+              },
+            ],
+          },
+        },
+      });
+      expect(response.statusCode, response.body).toBe(200);
+      expect(mocks.invoke).toHaveBeenCalledWith(
+        expect.objectContaining({ mode: 'ask' }),
+      );
+      expect(mocks.buildChatEnvelope).toHaveBeenCalledWith(
+        expect.objectContaining({ inputKind: 'ink-intent', content: '' }),
+      );
+      expect(response.headers['content-type']).toContain('text/event-stream');
+      expect(response.body).toContain('event: accepted');
+      expect(response.body).toContain('event: done');
+    } finally {
+      await app.close();
+    }
+  });
+
   it('returns durable acceptance from the shared stop path', async () => {
     mocks.stopAndWait.mockResolvedValue({
       stopped: true,

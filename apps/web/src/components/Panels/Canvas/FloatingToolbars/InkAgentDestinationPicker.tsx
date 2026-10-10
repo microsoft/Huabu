@@ -26,13 +26,18 @@ import type {
   AgentProfileView,
 } from '@huabu/shared';
 
+export interface InkAgentDestinationIssue {
+  kind: 'busy' | 'unavailable';
+  message: string;
+}
+
 export interface InkAgentConversationOption {
   nodeId: string;
   title: string;
   binding: AgentBinding;
   mode: AgentMode;
   fallbackIcon?: AgentIcon;
-  disabledReason?: string;
+  disabledReason?: InkAgentDestinationIssue;
 }
 
 export interface InkAgentDestinationPickerProps {
@@ -44,7 +49,7 @@ export interface InkAgentDestinationPickerProps {
   unresolved?: boolean;
   loading?: boolean;
   disabled?: boolean;
-  unavailableReason?: string;
+  unavailableReason?: InkAgentDestinationIssue;
   onNewConversation: (choice: AgentChoice) => void;
   onContinueConversation: (nodeId: string) => void;
   onRefreshProfiles: () => void | Promise<void>;
@@ -108,7 +113,10 @@ export function InkAgentDestinationPicker({
     unavailableReason ??
     selected?.disabledReason ??
     (continuing && !selected
-      ? t('toolbar.inkAgentPicker.unavailableConversation')
+      ? {
+          kind: 'unavailable' as const,
+          message: t('toolbar.inkAgentPicker.unavailableConversation'),
+        }
       : undefined);
   const accessibleLabel = unresolved
     ? label
@@ -212,7 +220,7 @@ export function InkAgentDestinationPicker({
                 )}
               </span>
             )}
-            {reason && (
+            {reason?.kind === 'unavailable' && (
               <AlertCircle size={12} className="text-warning" aria-hidden />
             )}
             <ChevronDown size={12} aria-hidden />
@@ -263,8 +271,14 @@ export function InkAgentDestinationPicker({
           }}
         >
           {reason && (
-            <p role="status" className="text-warning px-3 py-2 text-xs">
-              {reason}
+            <p
+              role="status"
+              className={cn(
+                'px-3 py-2 text-xs',
+                reason.kind === 'busy' ? 'text-fg-muted' : 'text-warning',
+              )}
+            >
+              {reason.message}
             </p>
           )}
           {conversations.length > 0 && (
@@ -320,7 +334,7 @@ export function InkAgentDestinationPicker({
                     </span>
                     {conversation.disabledReason && (
                       <span className="text-fg-muted block text-xs whitespace-normal">
-                        {conversation.disabledReason}
+                        {conversation.disabledReason.message}
                       </span>
                     )}
                   </DropdownMenuItem>
@@ -358,7 +372,7 @@ export function InkAgentDestinationPicker({
       </DropdownMenu>
       {reason && (
         <span id={`${id}-reason`} className="sr-only">
-          {reason}
+          {reason.message}
         </span>
       )}
     </div>

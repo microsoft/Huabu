@@ -11,6 +11,10 @@ import {
   type ToolResponse,
   type WebSearchToolResponse,
 } from '@huabu/shared';
+import {
+  readInkInterpretation,
+  settleInkInterpretation,
+} from '@huabu/shared/ink-interpretation';
 
 import { ApiError } from '@/api/_client';
 import { agentApi, type AgentStreamCallbacks } from '@/api/agent';
@@ -145,6 +149,8 @@ interface StreamEventContext {
    */
   threadId: string;
   assistantId: string;
+  /** Captured at dispatch or attach; never inferred from the visible thread. */
+  userMessageId?: string;
   /** Only unbound chats mirror ACP title metadata; Questions use node labels. */
   titleCanvasId?: string;
 }
@@ -176,11 +182,11 @@ const turnAcceptanceSinks = new Map<string, TurnAcceptanceSink>();
 const latestAcceptanceSeqByThread = new Map<string, number>();
 const hiddenInkIntentToolCalls = new Map<
   string,
-  { messageId?: string; inferredIntent?: string }
+  { messageId?: string; rawInput?: unknown; rawOutput?: unknown }
 >();
 
-function hiddenToolKey(threadId: string, toolCallId: string): string {
-  return `${threadId}\0${toolCallId}`;
+function hiddenToolKey(ctx: StreamEventContext, toolCallId: string): string {
+  return `${ctx.threadId}\0${ctx.assistantId}\0${toolCallId}`;
 }
 
 function clearHiddenIntentCalls(threadId: string): void {
@@ -190,15 +196,94 @@ function clearHiddenIntentCalls(threadId: string): void {
   }
 }
 
-export function parseInferredInkIntent(rawInput: unknown): string | undefined {
-  if (!rawInput || typeof rawInput !== 'object') return undefined;
-  const report = rawInput as Record<string, unknown>;
-  if (report.status !== 'inferred' || typeof report.text !== 'string')
-    return undefined;
-  const text = report.text.trim();
-  return text.length > 0 && text.length <= 120 && !/[\r\n]/.test(text)
-    ? text
-    : undefined;
+export function clearInkInterpretationStream(ctx: StreamEventContext): void {
+  const prefix = `${ctx.threadId}\0${ctx.assistantId}\0`;
+  for (const key of hiddenInkIntentToolCalls.keys()) {
+    if (key.startsWith(prefix)) hiddenInkIntentToolCalls.delete(key);
+  }
+}
+
+function owningUserMessage(ctx: StreamEventContext) {
+  const messages = selectThreadMessages(useChatStore.getState(), ctx.threadId);
+  if (ctx.userMessageId) {
+    return messages.find(
+      (message) => message.id === ctx.userMessageId && message.role === 'user',
+    );
+  }
+  const assistantIndex = messages.findIndex(
+    (message) => message.id === ctx.assistantId,
+  );
+  const preceding =
+    assistantIndex < 0 ? messages : messages.slice(0, assistantIndex);
+  return [...preceding].reverse().find((message) => message.role === 'user');
+}
+
+export function settleTurnInkInterpretation(
+  ctx: StreamEventContext,
+  outcome: 'done' | 'error' | 'interrupted',
+): void {
+  const owner = owningUserMessage(ctx);
+  if (owner?.role !== 'user' || owner.inputKind !== 'ink-intent') return;
+  useChatStore.getState().updateMessage(ctx.threadId, owner.id, (message) => {
+    if (message.role !== 'user') return message;
+    const inkInterpretation = settleInkInterpretation(
+      message.inkInterpretation,
+      outcome,
+    );
+    return inkInterpretation === message.inkInterpretation
+      ? message
+      : { ...message, inkInterpretation };
+  });
+}
+
+export function inkTurnOutcome(
+  stopReason: string | undefined,
+): 'done' | 'error' | 'interrupted' {
+  return stopReason === 'aborted' || stopReason === 'cancelled'
+    ? 'interrupted'
+    : stopReason === 'error'
+      ? 'error'
+      : 'done';
+}
+
+function updateHiddenInkReport(
+  ctx: StreamEventContext,
+  toolCallId: string,
+  data: { rawOutput?: unknown; status?: string },
+): boolean {
+  const hidden = hiddenInkIntentToolCalls.get(hiddenToolKey(ctx, toolCallId));
+  if (!hidden) return false;
+  hidden.rawOutput = data.rawOutput ?? hidden.rawOutput;
+  if (data.status !== 'completed' && data.status !== 'failed') return true;
+  const output =
+    hidden.rawOutput === undefined
+      ? null
+      : parseToolResponse(
+          'report_ink_intent',
+          typeof hidden.rawOutput === 'string'
+            ? hidden.rawOutput
+            : JSON.stringify(hidden.rawOutput),
+        );
+  const report =
+    readInkInterpretation(hidden.rawOutput) ??
+    readInkInterpretation(hidden.rawInput);
+  const interpretation =
+    data.status === 'completed' && output?.status !== 'error' && report
+      ? report
+      : { state: 'failed' as const };
+  if (hidden.messageId) {
+    useChatStore
+      .getState()
+      .updateMessage(ctx.threadId, hidden.messageId, (message) =>
+        message.role === 'user' &&
+        message.inkInterpretation?.state !== 'reported' &&
+        message.inkInterpretation?.state !== 'legacy'
+          ? { ...message, inkInterpretation: interpretation }
+          : message,
+      );
+  }
+  // Retain the hidden identity until turn cleanup, including late output updates.
+  return true;
 }
 
 function turnKey(canvasId: string, threadId: string): string {
@@ -236,6 +321,7 @@ function rejectAgentTurnAcceptance(canvasId: string, threadId: string): void {
 export function resetAgentTurnAcceptanceObserversForTests(): void {
   turnAcceptanceSinks.clear();
   latestAcceptanceSeqByThread.clear();
+  hiddenInkIntentToolCalls.clear();
 }
 
 export function registerAcpSessionMetaSink(
@@ -525,7 +611,13 @@ export function handleStreamEvent(
   const ownerMessages = selectThreadMessages(state, ctx.threadId);
 
   if (event.type === 'done') {
+    settleTurnInkInterpretation(
+      ctx,
+      inkTurnOutcome(event.data.meta?.stopReason),
+    );
     state.markTurnCompleted(ctx.threadId, ctx.assistantId);
+  } else if (event.type === 'error') {
+    settleTurnInkInterpretation(ctx, 'error');
   } else if (event.type === 'text_delta' || event.type === 'thinking_delta') {
     const delta = event.data.content;
     if (!delta) return;
@@ -561,20 +653,14 @@ export function handleStreamEvent(
   } else if (event.type === 'tool_call') {
     const data = event.data;
     if (data.internalToolName === 'report_ink_intent') {
-      const inferredIntent = parseInferredInkIntent(data.rawInput);
-      const inkMessage = [...ownerMessages]
-        .reverse()
-        .find(
-          (message) =>
-            message.role === 'user' && message.inputKind === 'ink-intent',
-        );
-      hiddenInkIntentToolCalls.set(
-        hiddenToolKey(ctx.threadId, data.toolCallId),
-        {
-          ...(inkMessage ? { messageId: inkMessage.id } : {}),
-          ...(inferredIntent ? { inferredIntent } : {}),
-        },
-      );
+      const owner = owningUserMessage(ctx);
+      hiddenInkIntentToolCalls.set(hiddenToolKey(ctx, data.toolCallId), {
+        rawInput: data.rawInput,
+        ...(owner?.role === 'user' && owner.inputKind === 'ink-intent'
+          ? { messageId: owner.id }
+          : {}),
+      });
+      updateHiddenInkReport(ctx, data.toolCallId, data);
       return;
     }
     // Internal pi-ai tools carry `internalToolName` → resolve the rich
@@ -609,29 +695,7 @@ export function handleStreamEvent(
     }
   } else if (event.type === 'tool_call_update') {
     const data = event.data;
-    const hiddenKey = hiddenToolKey(ctx.threadId, data.toolCallId);
-    const hiddenIntent = hiddenInkIntentToolCalls.get(hiddenKey);
-    if (hiddenIntent) {
-      if (
-        data.status === 'completed' &&
-        hiddenIntent.messageId &&
-        hiddenIntent.inferredIntent
-      ) {
-        updateMessage(ctx.threadId, hiddenIntent.messageId, (message) =>
-          message.role === 'user' && !message.inferredIntent
-            ? { ...message, inferredIntent: hiddenIntent.inferredIntent }
-            : message,
-        );
-      }
-      if (
-        data.rawOutput !== undefined ||
-        data.status === 'completed' ||
-        data.status === 'failed'
-      ) {
-        hiddenInkIntentToolCalls.delete(hiddenKey);
-      }
-      return;
-    }
+    if (updateHiddenInkReport(ctx, data.toolCallId, data)) return;
     ensureAssistantMessage(ctx);
     // An internal tool's completion arrives as a `tool_call_update`
     // carrying `rawOutput` (the JSON-stringified `ToolResponse`). The
@@ -1018,11 +1082,15 @@ export async function dispatchAgentTurn(
     setThreadLastAction(threadId, agentMode);
     callbacks.onStarted?.();
 
+    const userMessageId = createId('message');
     addMessage(threadId, {
-      id: createId('message'),
+      id: userMessageId,
       role: 'user',
       content: prompt,
       inputKind,
+      ...(inputKind === 'ink-intent'
+        ? { inkInterpretation: { state: 'pending' as const } }
+        : {}),
       groundingVisual: prepared.groundingVisual,
       attachments,
       ...(sentSelectedNodeIds.length > 0
@@ -1037,6 +1105,7 @@ export async function dispatchAgentTurn(
     setThreadLoading(threadId, true);
 
     const assistantId = createId('message');
+    const streamContext = { threadId, assistantId, userMessageId };
 
     // Guard: ensure only one of onError / catch adds an error status
     let errorHandled = false;
@@ -1131,8 +1200,7 @@ export async function dispatchAgentTurn(
               );
             }
             handleStreamEvent(event, {
-              threadId,
-              assistantId,
+              ...streamContext,
               titleCanvasId: conversationView
                 ? undefined
                 : session.ownerCanvasId,
@@ -1142,6 +1210,7 @@ export async function dispatchAgentTurn(
             if (isPageUnloading() || errorHandled || streamClaim.signal.aborted)
               return;
             errorHandled = true;
+            settleTurnInkInterpretation(streamContext, 'error');
             result.error = err;
             result.status = result.accepted
               ? 'failed'
@@ -1158,6 +1227,10 @@ export async function dispatchAgentTurn(
           },
           onComplete: () => {
             if (errorHandled) return;
+            settleTurnInkInterpretation(
+              streamContext,
+              streamClaim.signal.aborted ? 'interrupted' : 'done',
+            );
             result.status = streamClaim.signal.aborted
               ? 'stopped'
               : 'completed';
@@ -1201,6 +1274,16 @@ export async function dispatchAgentTurn(
         detail: err instanceof Error ? err.message : 'Unknown error',
       });
     } finally {
+      settleTurnInkInterpretation(
+        streamContext,
+        streamClaim.signal.aborted
+          ? 'interrupted'
+          : errorHandled
+            ? 'error'
+            : result.status === 'completed'
+              ? 'done'
+              : 'interrupted',
+      );
       try {
         if (!conversationView) {
           refreshConversationTitleAfterStream(session.ownerCanvasId, threadId);
@@ -1237,6 +1320,9 @@ export function stopAgentTurn(session: ChatSession): void {
   // until the server confirms the outcome: a transport failure is ambiguous
   // and the original stream is then the reconciliation channel.
   const tid = threadId;
+  const userMessageId = [...selectThreadMessages(useChatStore.getState(), tid)]
+    .reverse()
+    .find((message) => message.role === 'user')?.id;
   const scopedCanvasId = conversationRequestScope(
     conversationView,
     ownerCanvasId,
@@ -1251,6 +1337,13 @@ export function stopAgentTurn(session: ChatSession): void {
         rejectAgentTurnAcceptance(scopedCanvasId, tid);
       }
       abortAgentStreamClaim(scopedCanvasId, tid);
+      if (userMessageId) {
+        settleTurnInkInterpretation(
+          { threadId: tid, assistantId: '', userMessageId },
+          'interrupted',
+        );
+      }
+      clearHiddenIntentCalls(tid);
       setThreadLoading(tid, false);
 
       addMessage(tid, {

@@ -19,6 +19,10 @@
 import { z } from 'zod';
 
 import { REASONING_EFFORT_VALUES } from './llm.js';
+import {
+  INK_INTERPRETATION_TEXT_LIMIT,
+  INK_INTERPRETATION_EXPLANATION_LIMIT,
+} from '../../utils/ink-interpretation.js';
 import { CANVAS_NODE_TYPES } from '../canvas/node.js';
 
 import type { AgentBinding } from './acp.js';
@@ -180,19 +184,33 @@ export const agentBindingSchema = z.discriminatedUnion('kind', [
 export const agentInputKindSchema = z.enum(['text', 'ink-intent']);
 export type AgentInputKind = z.infer<typeof agentInputKindSchema>;
 
-const inferredIntentTextSchema = z
+const inkInterpretationTextSchema = z
   .string()
   .trim()
   .min(1)
-  .max(120)
+  .max(INK_INTERPRETATION_TEXT_LIMIT)
   .refine((value) => !/[\r\n]/.test(value), {
-    message: 'Inferred intent must be one line',
+    message: 'Ink interpretation must be one line',
   });
-export const inkIntentReportSchema = z.discriminatedUnion('status', [
-  z.object({ status: z.literal('inferred'), text: inferredIntentTextSchema }),
-  z.object({ status: z.enum(['clarify', 'unsupported']) }),
-]);
+export const inkIntentReportSchema = z.strictObject({
+  text: inkInterpretationTextSchema,
+  explanation: z
+    .string()
+    .trim()
+    .min(1)
+    .max(INK_INTERPRETATION_EXPLANATION_LIMIT)
+    .optional(),
+});
 export type InkIntentReport = z.infer<typeof inkIntentReportSchema>;
+
+/** Host-owned delivery state, not an Agent-authored semantic classification. */
+export const inkInterpretationSchema = z.discriminatedUnion('state', [
+  inkIntentReportSchema.extend({ state: z.literal('reported') }),
+  z.object({
+    state: z.enum(['pending', 'missing', 'failed', 'interrupted', 'legacy']),
+  }),
+]);
+export type InkInterpretation = z.infer<typeof inkInterpretationSchema>;
 
 const finiteNumberSchema = z.number().finite();
 const positiveNumberSchema = finiteNumberSchema.positive();

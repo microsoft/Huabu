@@ -4,6 +4,7 @@
 import { useCallback, useEffect } from 'react';
 
 import { createId } from '@huabu/shared';
+import { settleInkInterpretation } from '@huabu/shared/ink-interpretation';
 
 import { ApiError } from '@/api/_client';
 import { agentApi } from '@/api/agent';
@@ -25,7 +26,12 @@ import { refreshConversationTitleAfterStream } from '@/store/conversationTitleSt
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 
 import { claimAgentStream } from './agentStreamCoordinator';
-import { observeAgentTurnAcceptance } from './agentTurnController';
+import {
+  clearInkInterpretationStream,
+  inkTurnOutcome,
+  observeAgentTurnAcceptance,
+  settleTurnInkInterpretation,
+} from './agentTurnController';
 import { handleStreamEvent } from './useAgentStream';
 
 import type { ChatSession } from './useChatSession';
@@ -116,8 +122,14 @@ function historyItemsToMessages(
         role: 'user',
         content: message.content || '',
         ...(message.inputKind ? { inputKind: message.inputKind } : {}),
-        ...(message.inferredIntent
-          ? { inferredIntent: message.inferredIntent }
+        ...(message.inputKind === 'ink-intent'
+          ? {
+              inkInterpretation: historyTurnActive
+                ? (message.inkInterpretation ?? { state: 'pending' as const })
+                : message.inkInterpretation
+                  ? settleInkInterpretation(message.inkInterpretation, 'done')
+                  : { state: 'legacy' as const },
+            }
           : {}),
         ...(message.groundingVisual
           ? { groundingVisual: message.groundingVisual }
@@ -451,8 +463,19 @@ export function useChatHistory(
       applyLatestHistoryWindow(refreshed);
 
       const assistantId = createId('message');
+      const userMessageId = [
+        ...selectThreadMessages(useChatStore.getState(), ownerThreadId),
+      ]
+        .reverse()
+        .find((message) => message.role === 'user')?.id;
+      const streamContext = {
+        threadId: ownerThreadId,
+        assistantId,
+        userMessageId,
+      };
       // Flag set to true once we know the server has an active run
       let streaming = false;
+      let outcome: 'done' | 'error' | 'interrupted' | undefined;
       const refreshObservation = () => {
         if (!ownerView) return;
         void Promise.all([
@@ -480,56 +503,71 @@ export function useChatHistory(
         );
       };
 
-      const result = await agentApi.reconnectStream(
-        ownerThreadId,
-        ownerCanvasId,
-        {
-          onAccepted: (accepted) => {
-            if (cancelled) return;
-            observeAgentTurnAcceptance(ownerCanvasId, accepted);
-          },
-          onEvent: (event: AgentStreamEvent) => {
-            if (cancelled) return;
-            if (!streaming) {
-              streaming = true;
+      const result = await agentApi
+        .reconnectStream(
+          ownerThreadId,
+          ownerCanvasId,
+          {
+            onAccepted: (accepted) => {
+              if (cancelled) return;
+              observeAgentTurnAcceptance(ownerCanvasId, accepted);
+            },
+            onEvent: (event: AgentStreamEvent) => {
+              if (cancelled) return;
+              if (event.type === 'done') {
+                outcome = inkTurnOutcome(event.data.meta?.stopReason);
+              }
+              if (!streaming) {
+                streaming = true;
+                if (!effectiveConversationView)
+                  refreshConversationTitleAfterStream(
+                    ownerCanvasId,
+                    ownerThreadId,
+                  );
+                setIsLoading(ownerThreadId, true);
+                clearStaleMessages();
+              }
+              handleStreamEvent(event, {
+                ...streamContext,
+                titleCanvasId: effectiveConversationView
+                  ? undefined
+                  : ownerCanvasId,
+              });
+            },
+            onError: (err) => {
+              if (cancelled) return;
+              outcome = 'error';
+              settleTurnInkInterpretation(streamContext, 'error');
+              addMessage(ownerThreadId, {
+                id: createId('status'),
+                role: 'status',
+                status: 'error',
+                detail: err.message,
+              });
+              setIsLoading(ownerThreadId, false);
+              refreshObservation();
+            },
+            onComplete: () => {
+              if (cancelled) return;
+              outcome ??= 'done';
+              settleTurnInkInterpretation(streamContext, outcome);
               if (!effectiveConversationView)
                 refreshConversationTitleAfterStream(
                   ownerCanvasId,
                   ownerThreadId,
                 );
-              setIsLoading(ownerThreadId, true);
-              clearStaleMessages();
-            }
-            handleStreamEvent(event, {
-              threadId: ownerThreadId,
-              assistantId,
-              titleCanvasId: effectiveConversationView
-                ? undefined
-                : ownerCanvasId,
-            });
+              setIsLoading(ownerThreadId, false);
+              refreshObservation();
+            },
           },
-          onError: (err) => {
-            if (cancelled) return;
-            addMessage(ownerThreadId, {
-              id: createId('status'),
-              role: 'status',
-              status: 'error',
-              detail: err.message,
-            });
-            setIsLoading(ownerThreadId, false);
-            refreshObservation();
-          },
-          onComplete: () => {
-            if (cancelled) return;
-            if (!effectiveConversationView)
-              refreshConversationTitleAfterStream(ownerCanvasId, ownerThreadId);
-            setIsLoading(ownerThreadId, false);
-            refreshObservation();
-          },
-        },
-        claim.signal,
-      );
+          claim.signal,
+        )
+        .finally(() => clearInkInterpretationStream(streamContext));
 
+      if (result.status === 'inactive' && !cancelled) {
+        outcome = 'interrupted';
+        settleTurnInkInterpretation(streamContext, 'interrupted');
+      }
       if (result.status !== 'aborted' && !cancelled) {
         const finalHistory = await fetchLatestHistoryWindow(
           ownerThreadId,
@@ -538,6 +576,7 @@ export function useChatHistory(
         );
         if (!cancelled) {
           applyLatestHistoryWindow(finalHistory);
+          if (outcome) settleTurnInkInterpretation(streamContext, outcome);
           setIsLoading(ownerThreadId, false);
         }
       }

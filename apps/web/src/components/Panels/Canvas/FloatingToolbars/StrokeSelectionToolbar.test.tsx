@@ -57,7 +57,16 @@ vi.mock('./InkAgentDestinationPicker', () => ({
       <span data-picker-target>
         {props.selectedNodeId ?? (props.unresolved ? 'unresolved' : 'new')}
       </span>
-      <span data-picker-reason>{props.unavailableReason}</span>
+      <span data-picker-reason={props.unavailableReason?.kind ?? ''}>
+        {props.unavailableReason?.message}
+      </span>
+      <span data-selected-reason>
+        {
+          props.conversations.find(
+            (item) => item.nodeId === props.selectedNodeId,
+          )?.disabledReason?.message
+        }
+      </span>
       {props.conversations.map((item) => (
         <Button
           key={item.nodeId}
@@ -71,6 +80,17 @@ vi.mock('./InkAgentDestinationPicker', () => ({
       <Button
         data-new-agent
         disabled={props.disabled}
+        onClick={() =>
+          props.onNewConversation({
+            binding: { kind: 'internal' },
+            mode: 'operate',
+          })
+        }
+      >
+        New internal Agent
+      </Button>
+      <Button
+        data-new-chat
         onClick={() =>
           props.onNewConversation({
             binding: { kind: 'internal' },
@@ -214,7 +234,7 @@ function addQuestion(data: Record<string, unknown> = {}) {
           threadId: 'thread-existing',
           label: 'Existing conversation',
           agentBinding: { kind: 'internal' },
-          agentMode: 'ask',
+          agentMode: 'operate',
           ...data,
         },
       },
@@ -326,6 +346,78 @@ afterEach(() => {
 });
 
 describe('StrokeSelectionToolbar Ink submission', () => {
+  it('previews and confirms a cached read-only recent conversation without changing its mode', async () => {
+    mocks.dispatch.mockResolvedValueOnce({ status: 'completed' });
+    addQuestion({ agentMode: 'ask' });
+    mocks.recentConversation.mockResolvedValue({
+      conversation: { nodeId: 'question-1', threadId: 'thread-existing' },
+    });
+    useGesturePreviewStore.setState({ sketchStrokeSelection: {} });
+    await mountToolbar();
+    await act(async () => {
+      useGesturePreviewStore.setState({
+        sketchStrokeSelection: { 'sketch-1': ['stroke-1'] },
+      });
+    });
+    expect(document.querySelector('[data-picker-target]')?.textContent).toBe(
+      'question-1',
+    );
+    expect(sendButton().disabled).toBe(false);
+    await act(async () => sendButton().click());
+    expect(mocks.prepare).toHaveBeenCalledWith(
+      expect.objectContaining({ inputKind: 'ink-intent', mode: 'ask' }),
+    );
+  });
+
+  it('creates a new read-only conversation when Chat is explicitly chosen', async () => {
+    mocks.dispatch.mockResolvedValueOnce({ status: 'completed' });
+    await renderToolbar();
+    await act(async () =>
+      document.querySelector<HTMLButtonElement>('[data-new-chat]')?.click(),
+    );
+    await act(async () => sendButton().click());
+    expect(mocks.createQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ binding: { kind: 'internal' }, mode: 'ask' }),
+    );
+    expect(mocks.prepare).toHaveBeenCalledWith(
+      expect.objectContaining({ inputKind: 'ink-intent', mode: 'ask' }),
+    );
+    expect(toast).not.toHaveBeenCalled();
+  });
+
+  it('requires fresh preparation if the conversation mode changes before dispatch', async () => {
+    addQuestion();
+    let callbacks: AgentTurnCallbacks | undefined;
+    const completion = deferredResult();
+    mocks.dispatch.mockImplementationOnce((_input, options) => {
+      callbacks = options;
+      return completion.promise;
+    });
+    const button = await renderToolbar();
+    await act(async () => button.click());
+    expect(callbacks?.canDispatch?.()).toBe(true);
+    await act(async () => {
+      const state = useCanvasStore.getState();
+      state._setStateNoAutosave({
+        nodes: state.nodes.map((node) =>
+          node.id === 'question-1'
+            ? { ...node, data: { ...node.data, agentMode: 'ask' } }
+            : node,
+        ),
+      });
+    });
+    expect(callbacks?.canDispatch?.()).toBe(false);
+    await act(async () => completion.resolve({ status: 'rejected' }));
+    expect(useGesturePreviewStore.getState().sketchStrokeSelection).toEqual({
+      'sketch-1': ['stroke-1'],
+    });
+    mocks.dispatch.mockResolvedValueOnce({ status: 'completed' });
+    await act(async () => sendButton().click());
+    expect(mocks.prepare).toHaveBeenLastCalledWith(
+      expect.objectContaining({ inputKind: 'ink-intent', mode: 'ask' }),
+    );
+  });
+
   it('previews cached recency but waits for the current server target before sending', async () => {
     addQuestion();
     const state = useCanvasStore.getState();
@@ -851,7 +943,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
     expect(mocks.createQuestion).toHaveBeenCalledWith(
       expect.objectContaining({
         binding: { kind: 'internal' },
-        mode: 'ask',
+        mode: 'operate',
       }),
     );
   });
@@ -868,6 +960,9 @@ describe('StrokeSelectionToolbar Ink submission', () => {
     );
     expect(send?.disabled).toBe(true);
     expect(
+      document.querySelector('[data-picker-reason="busy"]')?.textContent,
+    ).toBe('Processing the previous request');
+    expect(
       document.querySelector<HTMLButtonElement>('[data-continue]')?.disabled,
     ).toBe(true);
     await act(async () =>
@@ -878,6 +973,92 @@ describe('StrokeSelectionToolbar Ink submission', () => {
       'question-1',
     );
   });
+
+  it('shows own dispatch as submission progress rather than a busy destination', async () => {
+    addQuestion();
+    const pending = deferredResult();
+    mocks.dispatch.mockImplementationOnce(
+      (_input: unknown, callbacks: AgentTurnCallbacks) => {
+        expect(callbacks.canDispatch?.()).toBe(true);
+        callbacks.onStarted?.();
+        useChatStore.getState().setThreadLoading('thread-existing', true);
+        return pending.promise;
+      },
+    );
+    await mountToolbar();
+    await selectConversation();
+    await act(async () => sendButton().click());
+    expect(sendButton().disabled).toBe(true);
+    expect(sendButton().getAttribute('aria-busy')).toBe('true');
+    expect(document.querySelector('[data-picker-reason]')?.textContent).toBe(
+      '',
+    );
+    expect(document.querySelector('[data-selected-reason]')?.textContent).toBe(
+      '',
+    );
+    expect(
+      document.querySelector<HTMLButtonElement>('[data-continue]')?.disabled,
+    ).toBe(true);
+    await act(async () => sendButton().click());
+    expect(mocks.dispatch).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      pending.resolve({ status: 'rejected' });
+      await pending.promise;
+    });
+    expect(sendButton().getAttribute('aria-busy')).toBeNull();
+    expect(
+      document.querySelector('[data-picker-reason="busy"]')?.textContent,
+    ).toBe('Processing the previous request');
+    expect(sendButton().disabled).toBe(true);
+  });
+
+  it.each(['deleted', 'replaced-thread'])(
+    'keeps %s destination errors visible during own submission',
+    async (change) => {
+      addQuestion();
+      const pending = deferredResult();
+      mocks.dispatch.mockImplementationOnce(
+        (_input: unknown, callbacks: AgentTurnCallbacks) => {
+          callbacks.onStarted?.();
+          useChatStore.getState().setThreadLoading('thread-existing', true);
+          return pending.promise;
+        },
+      );
+      await mountToolbar();
+      await selectConversation();
+      await act(async () => sendButton().click());
+      await act(async () => {
+        const state = useCanvasStore.getState();
+        state._setStateNoAutosave({
+          nodes:
+            change === 'deleted'
+              ? state.nodes.filter((node) => node.id !== 'question-1')
+              : state.nodes.map((node) =>
+                  node.id !== 'question-1'
+                    ? node
+                    : {
+                        ...node,
+                        data: {
+                          ...node.data,
+                          status: 'running',
+                          threadId: 'replacement-thread',
+                        },
+                      },
+                ),
+        });
+      });
+      expect(
+        document.querySelector('[data-picker-reason="unavailable"]')
+          ?.textContent,
+      ).toBe('Conversation unavailable. Choose another destination.');
+      expect(sendButton().disabled).toBe(true);
+      await act(async () => {
+        pending.resolve({ status: 'rejected' });
+        await pending.promise;
+      });
+    },
+  );
 
   it('keeps a deleted destination selected but unavailable until explicit reselection', async () => {
     addQuestion();
@@ -1589,6 +1770,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
   });
 
   it('continues an internal Question in its persisted ask mode', async () => {
+    mocks.dispatch.mockResolvedValueOnce({ status: 'completed' });
     useCanvasStore.getState()._setStateNoAutosave({
       nodes: [
         {
@@ -1610,8 +1792,8 @@ describe('StrokeSelectionToolbar Ink submission', () => {
         },
       ],
     });
-    mocks.dispatch.mockResolvedValueOnce({ status: 'completed' });
-    const button = await renderToolbar();
+    await mountToolbar();
+    const button = sendButton();
 
     await selectConversation();
     await act(async () => button.click());
@@ -1631,6 +1813,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
         }),
       }),
     );
+    expect(mocks.dispatch).toHaveBeenCalledTimes(1);
     expect(mocks.listProfiles).not.toHaveBeenCalled();
   });
 
@@ -1652,8 +1835,11 @@ describe('StrokeSelectionToolbar Ink submission', () => {
     if (!pendingButton) throw new Error('Expected pending Ink button');
     expect(pendingButton.disabled).toBe(true);
     expect(pendingButton.className).toContain('disabled:opacity-50');
-    expect(pendingButton.querySelector('.lucide-square')).not.toBeNull();
-    expect(pendingButton.querySelector('[data-loading-spinner]')).toBeNull();
+    expect(pendingButton.getAttribute('aria-busy')).toBe('true');
+    expect(pendingButton.querySelector('.lucide-square')).toBeNull();
+    expect(
+      pendingButton.querySelector('[data-loading-spinner]'),
+    ).not.toBeNull();
     expect(document.body.querySelector('[role="tooltip"]')).toBeNull();
     expect(useGesturePreviewStore.getState().inkSubmissionPreparing).toBe(true);
 

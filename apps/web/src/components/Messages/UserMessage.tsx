@@ -12,13 +12,14 @@ import { NodeRef } from '../Common/NodeRef';
 import type {
   AgentInputKind,
   ChatAttachment,
+  InkInterpretation,
   SelectedStrokeSubset,
 } from '@huabu/shared';
 
 interface UserMessageProps {
   content: string;
   inputKind?: AgentInputKind;
-  inferredIntent?: string;
+  inkInterpretation?: InkInterpretation;
   attachments?: ChatAttachment[];
   selectedNodeIds?: string[];
   /**
@@ -40,7 +41,7 @@ interface UserMessageProps {
 export const UserMessage = memo(function UserMessage({
   content,
   inputKind,
-  inferredIntent,
+  inkInterpretation,
   attachments,
   selectedNodeIds,
   selectedStrokeIds,
@@ -69,19 +70,11 @@ export const UserMessage = memo(function UserMessage({
         <div className="bg-bg-default text-fg-default overflow-hidden rounded-md border border-none px-4 py-2 text-sm">
           <div className="leading-relaxed wrap-anywhere whitespace-pre-wrap">
             {inputKind === 'ink-intent' && (
-              <span
-                className="inline-flex items-center gap-1.5"
-                aria-label={
-                  inferredIntent
-                    ? t('messages.inferredInkRequest', {
-                        intent: inferredIntent,
-                      })
-                    : undefined
-                }
-              >
-                <PenLine className="size-3.5" aria-hidden="true" />
-                {inferredIntent ?? t('messages.inkRequest')}
-              </span>
+              <PenLine
+                className="mr-1.5 inline-block size-3.5 align-text-bottom"
+                role="img"
+                aria-label={t('messages.inkRequest')}
+              />
             )}
             {hasSkills &&
               invokedSkills.map((id) => (
@@ -93,6 +86,21 @@ export const UserMessage = memo(function UserMessage({
                   /{id}
                 </span>
               ))}
+            {inputKind === 'ink-intent' && (
+              <span
+                data-ink-interpretation
+                aria-description={t('messages.inkInterpretation.agent')}
+                role={
+                  inkInterpretation?.state === 'reported' ? undefined : 'status'
+                }
+              >
+                {inkInterpretation?.state === 'reported'
+                  ? inkInterpretation.text
+                  : t(
+                      `messages.inkInterpretation.${inkInterpretation?.state ?? 'legacy'}`,
+                    )}
+              </span>
+            )}
             {inputKind === 'ink-intent' && content ? ' ' : null}
             {content}
           </div>

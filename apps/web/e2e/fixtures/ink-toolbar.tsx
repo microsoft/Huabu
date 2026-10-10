@@ -5,6 +5,7 @@ import { ReactFlow, useStoreApi } from '@xyflow/react';
 import { useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 
+import { UserMessage } from '@/components/Messages/UserMessage';
 import { StrokeSelectionToolbar } from '@/components/Panels/Canvas/FloatingToolbars/StrokeSelectionToolbar';
 import { createAreaSelectionSession } from '@/hooks/areaSelectionSession';
 import { useInputModeStore } from '@/hooks/useInputMode';
@@ -15,6 +16,27 @@ import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 
 import '@xyflow/react/dist/style.css';
 import '@/components/Panels/Canvas/FloatingToolbars/NodeToolbar.css';
+
+import type { AgentChoice } from '@/components/Panels/ChatPanel/agentMenu';
+import type { InkInterpretation } from '@huabu/shared';
+
+export async function mountInkUserMessage(
+  locale: string,
+  interpretation: InkInterpretation,
+) {
+  await i18n.changeLanguage(locale);
+  const host = document.createElement('div');
+  host.style.cssText =
+    'position:fixed;inset:0;background:var(--bg-default);z-index:900';
+  document.body.append(host);
+  createRoot(host).render(
+    <UserMessage
+      content=""
+      inputKind="ink-intent"
+      inkInterpretation={interpretation}
+    />,
+  );
+}
 
 let flowStore: ReturnType<typeof useStoreApi> | null = null;
 
@@ -29,7 +51,11 @@ function ToolbarHarness() {
   return <StrokeSelectionToolbar />;
 }
 
-export async function mountInkToolbar(locale: string, conversationCount = 0) {
+export async function mountInkToolbar(
+  locale: string,
+  conversationCount = 0,
+  conversationAgents: readonly AgentChoice[] = [],
+) {
   await i18n.changeLanguage(locale);
   useInputModeStore.setState({ mode: 'touch' });
   useAcpProfilesStore.setState({
@@ -78,8 +104,10 @@ export async function mountInkToolbar(locale: string, conversationCount = 0) {
         data: {
           label: `Conversation ${index + 1}`,
           threadId: `ink-thread-${index}`,
-          agentBinding: { kind: 'internal' },
-          agentMode: 'ask',
+          agentBinding: conversationAgents[index]?.binding ?? {
+            kind: 'internal',
+          },
+          agentMode: conversationAgents[index]?.mode ?? 'operate',
         },
       })),
     ],

@@ -52,7 +52,7 @@ const conversations: InkAgentConversationOption[] = [
     title: 'Busy review',
     binding,
     mode: 'ask',
-    disabledReason: 'Running',
+    disabledReason: { kind: 'busy', message: 'Running' },
   },
   { nodeId: 'second', title: 'Second review', binding, mode: 'operate' },
 ];
@@ -180,6 +180,28 @@ async function key(target: Element | null, value: string) {
 }
 
 describe('InkAgentDestinationPicker', () => {
+  it('offers built-in Ask and Operate alongside external Agents', async () => {
+    await render({ conversations: [] });
+    await openMenu();
+    const items = [...required(menu()).querySelectorAll('[role="menuitem"]')];
+    expect(
+      items.some((item) => item.textContent?.startsWith(en.chat.modeChat)),
+    ).toBe(true);
+    expect(newConversationRow(en.chat.modeAgent).disabled).toBe(false);
+    expect(newConversationRow('Reviewer').disabled).toBe(false);
+    await act(async () => newConversationRow(en.chat.modeAgent).click());
+    expect(props.onNewConversation).toHaveBeenCalledWith({
+      binding: { kind: 'internal' },
+      mode: 'operate',
+    });
+    await openMenu();
+    await act(async () => newConversationRow(en.chat.modeChat).click());
+    expect(props.onNewConversation).toHaveBeenLastCalledWith({
+      binding: { kind: 'internal' },
+      mode: 'ask',
+    });
+  });
+
   it('renders external Agents as a subordinate label within New conversation', async () => {
     await render();
     await openMenu();
@@ -311,12 +333,16 @@ describe('InkAgentDestinationPicker', () => {
     await render({ selectedNodeId: 'busy' });
     expect(trigger().textContent).toContain('Busy reviewContinue');
     expect(trigger().disabled).toBe(false);
+    expect(trigger().querySelector('.text-warning')).toBeNull();
     expect(
       document.getElementById(
         required(trigger().getAttribute('aria-describedby')),
       )?.textContent,
     ).toBe('Running');
     await openMenu();
+    expect(menu()?.querySelector('[role="status"]')?.className).toContain(
+      'text-fg-muted',
+    );
     expect(row('Busy review').disabled).toBe(true);
     expect(row('Busy review').textContent).toContain('Running');
     expect(row('Reviewer').disabled).toBe(false);
@@ -337,9 +363,13 @@ describe('InkAgentDestinationPicker', () => {
   it('does not silently turn a disappeared continuation into a new conversation', async () => {
     await render({
       selectedNodeId: 'gone',
-      unavailableReason: 'The destination was removed',
+      unavailableReason: {
+        kind: 'unavailable',
+        message: 'The destination was removed',
+      },
     });
     expect(trigger().textContent).toContain('Conversation unavailableContinue');
+    expect(trigger().querySelector('.text-warning')).not.toBeNull();
     await openMenu();
     expect(menu()?.textContent).toContain('The destination was removed');
     expect(props.onNewConversation).not.toHaveBeenCalled();

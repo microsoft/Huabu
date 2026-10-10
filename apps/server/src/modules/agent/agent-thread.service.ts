@@ -398,6 +398,7 @@ export class AgentThreadService {
     let agentTarget: AgentNodeTarget | null = null;
     let fixedTarget: FixedAgentNodeTarget | null = null;
     let binding: AgentBinding = options.requestBinding ?? { kind: 'internal' };
+    let effectiveMode = options.mode;
     let externalRealization: RealizedExternalAgentThread | undefined;
     let envelope =
       typeof options.envelope === 'function' ? undefined : options.envelope;
@@ -480,6 +481,9 @@ export class AgentThreadService {
         options.canvasId,
         options.threadId,
       );
+      effectiveMode = !agentTarget?.invocationToken
+        ? (agentTarget?.agentMode ?? options.mode)
+        : options.mode;
       if (agentTarget) {
         binding =
           agentTarget.agentBinding ?? fixedTarget?.agentBinding ?? binding;
@@ -610,9 +614,7 @@ export class AgentThreadService {
       signal,
       spacePrompt,
       externalRealization,
-      mode: !agentTarget?.invocationToken
-        ? (agentTarget?.agentMode ?? options.mode)
-        : options.mode,
+      mode: effectiveMode,
       onExecutionCreated: agentTarget
         ? async () => {
             await this.dependencies.confirmBinding?.(agentTarget, {

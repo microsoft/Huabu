@@ -659,55 +659,106 @@ describe('searchCanvas — conversation tier', () => {
     expect(hitTool.filter((e) => e.type === 'match')).toHaveLength(0);
   });
 
-  it('indexes only the validated inferred intent from its hidden tool call', async () => {
-    turnsByThread.clear();
-    const envelope = {
-      user: { text: '', inputKind: 'ink-intent', attachments: [] },
-      skills: { invokedIds: [], resolved: [] },
-      focus: {
-        selection: {
-          refs: [],
-          selectedIds: [],
-          imageAttachments: [],
-          snapshotAttachments: [],
+  it.each([true, false])(
+    'indexes the first confirmed interpretation, with legacy=%s',
+    async (legacy) => {
+      turnsByThread.clear();
+      const envelope = {
+        user: { text: '', inputKind: 'ink-intent', attachments: [] },
+        skills: { invokedIds: [], resolved: [] },
+        focus: {
+          selection: {
+            refs: [],
+            selectedIds: [],
+            imageAttachments: [],
+            snapshotAttachments: [],
+          },
         },
-      },
-    } as unknown as ChatEnvelope;
-    turnsByThread.set('t1', [
-      {
-        request: createChatSubmission(envelope),
-        transcript: [
-          {
-            type: 'tool_call',
-            data: {
-              toolCallId: 'intent-1',
-              title: 'report_ink_intent',
-              status: 'completed',
-              rawInput: {
-                status: 'inferred',
-                text: 'Expand the third comparison step',
+      } as unknown as ChatEnvelope;
+      turnsByThread.set('t1', [
+        {
+          request: createChatSubmission(envelope),
+          transcript: [
+            {
+              type: 'tool_call',
+              data: {
+                toolCallId: 'failed-report',
+                title: 'report_ink_intent',
+                status: 'completed',
+                rawInput: { text: 'DO_NOT_INDEX_REJECTED_REPORT' },
+                rawOutput: JSON.stringify({
+                  tool: 'report_ink_intent',
+                  status: 'error',
+                  error: 'Report rejected',
+                }),
               },
-              rawOutput: 'DO_NOT_INDEX_OUTPUT',
             },
-          } as unknown as AgentTurn['transcript'][number],
-        ],
-      },
-    ]);
+            {
+              type: 'tool_call',
+              data: {
+                toolCallId: 'intent-1',
+                title: 'report_ink_intent',
+                status: 'completed',
+                rawInput: {
+                  ...(legacy ? { status: 'inferred' } : {}),
+                  text: 'Expand the third comparison step',
+                  ...(!legacy
+                    ? { explanation: 'The arrow points to the diagram.' }
+                    : {}),
+                },
+                rawOutput: 'DO_NOT_INDEX_OUTPUT',
+              },
+            } as unknown as AgentTurn['transcript'][number],
+            {
+              type: 'tool_call',
+              data: {
+                toolCallId: 'intent-2',
+                title: 'report_ink_intent',
+                status: 'completed',
+                rawInput: { text: 'DO_NOT_INDEX_REPLACEMENT' },
+              },
+            },
+          ],
+        },
+      ]);
 
-    const hitIntent = await collect(
-      [mkNode('q1', 'question', 't1')],
-      [mkContent('q1', 'question', { content: '' })],
-      { query: 'comparison', fields: ['conversation'] },
-    );
-    expect(hitIntent.filter((event) => event.type === 'match')).toHaveLength(1);
+      const hitIntent = await collect(
+        [mkNode('q1', 'question', 't1')],
+        [mkContent('q1', 'question', { content: '' })],
+        { query: 'comparison', fields: ['conversation'] },
+      );
+      expect(hitIntent.filter((event) => event.type === 'match')).toHaveLength(
+        1,
+      );
 
-    const hitOutput = await collect(
-      [mkNode('q1', 'question', 't1')],
-      [mkContent('q1', 'question', { content: '' })],
-      { query: 'DO_NOT_INDEX_OUTPUT', fields: ['conversation'] },
-    );
-    expect(hitOutput.filter((event) => event.type === 'match')).toHaveLength(0);
-  });
+      const hitOutput = await collect(
+        [mkNode('q1', 'question', 't1')],
+        [mkContent('q1', 'question', { content: '' })],
+        { query: 'DO_NOT_INDEX_OUTPUT', fields: ['conversation'] },
+      );
+      expect(hitOutput.filter((event) => event.type === 'match')).toHaveLength(
+        0,
+      );
+      const hitReplacement = await collect(
+        [mkNode('q1', 'question', 't1')],
+        [mkContent('q1', 'question', { content: '' })],
+        { query: 'DO_NOT_INDEX_REPLACEMENT', fields: ['conversation'] },
+      );
+      expect(
+        hitReplacement.filter((event) => event.type === 'match'),
+      ).toHaveLength(0);
+      if (!legacy) {
+        const hitExplanation = await collect(
+          [mkNode('q1', 'question', 't1')],
+          [mkContent('q1', 'question', { content: '' })],
+          { query: 'arrow', fields: ['conversation'] },
+        );
+        expect(
+          hitExplanation.filter((event) => event.type === 'match'),
+        ).toHaveLength(1);
+      }
+    },
+  );
 
   it('does not treat an external tool with the same title as inferred intent', async () => {
     turnsByThread.clear();
