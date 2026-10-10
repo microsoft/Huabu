@@ -76,16 +76,6 @@ export const UserMessage = memo(function UserMessage({
                 aria-label={t('messages.inkRequest')}
               />
             )}
-            {hasSkills &&
-              invokedSkills.map((id) => (
-                <span
-                  key={id}
-                  className="mr-1 font-mono"
-                  title={t('messages.invokedSkill', { id })}
-                >
-                  /{id}
-                </span>
-              ))}
             {inputKind === 'ink-intent' && (
               <span
                 data-ink-interpretation
@@ -101,6 +91,17 @@ export const UserMessage = memo(function UserMessage({
                     )}
               </span>
             )}
+            {inputKind === 'ink-intent' && hasSkills ? ' ' : null}
+            {hasSkills &&
+              invokedSkills.map((id) => (
+                <span
+                  key={id}
+                  className="mr-1 font-mono"
+                  title={t('messages.invokedSkill', { id })}
+                >
+                  /{id}
+                </span>
+              ))}
             {inputKind === 'ink-intent' && content ? ' ' : null}
             {content}
           </div>

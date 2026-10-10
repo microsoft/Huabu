@@ -20,12 +20,12 @@ function inkIntentDirective(
 
 export const INK_INTENT_DIRECTIVE = inkIntentDirective(
   'Before substantive edits or a formal answer, use report_ink_intent to record one successful interpretation for this turn; correct a rejected report rather than silently omitting it.',
-  'When Canvas writing is appropriate and allowed, use space_commands if available, following the Space skill for placement and editing.',
+  'When the user requests a Canvas change and your current mode allows it, use space_commands if available, following the Space skill for placement and editing.',
 );
 
 export const EXTERNAL_INK_INTENT_DIRECTIVE = inkIntentDirective(
   'Before substantive edits or a formal answer, record one successful interpretation using the turn-specific <ink_report_endpoint> instructions. Do not call an internal report_ink_intent tool.',
-  'When Canvas writing is appropriate and allowed, use the authenticated Space guide and direct Space operations within your current permissions.',
+  'When the user requests a Canvas change and your current mode allows it, use the authenticated Space guide and direct Space operations within your current permissions.',
 );
 
 export function renderInkReportEndpoint(

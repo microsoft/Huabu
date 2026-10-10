@@ -101,6 +101,7 @@ for (const { pointerType, preference } of [
   { pointerType: 'touch', preference: 'finger' },
   { pointerType: 'touch', preference: 'pen' },
   { pointerType: 'pen', preference: 'pen' },
+  { pointerType: 'pen', preference: 'auto' },
 ] as const) {
   test(`${pointerType} in ${preference} mode: select, move, enter reading, scroll, and tap to deselect`, async ({
     page,
@@ -109,8 +110,21 @@ for (const { pointerType, preference } of [
     await page.evaluate(async (preference) => {
       const load = (path: string) => import(/* @vite-ignore */ path);
       const { useToolStore } = await load('/src/store/toolStore.ts');
+      if (preference === 'auto') {
+        useToolStore.setState({ penObserved: false });
+      }
       useToolStore.getState().setInputModePreference(preference);
     }, preference);
+    if (preference === 'auto') {
+      expect(
+        await page.evaluate(async () => {
+          const load = (path: string) => import(/* @vite-ignore */ path);
+          return (
+            await load('/src/hooks/useInputMode.ts')
+          ).readEffectiveInputMode();
+        }),
+      ).toBe('finger');
+    }
     const note = page.locator('.react-flow__node-note');
     const viewport = note.locator('[data-note-content-viewport]');
     const scrollbar = note.locator('[data-note-touch-scrollbar]');

@@ -42,6 +42,8 @@ Key runtime characteristics:
 
 ## 2. Entry points & agents
 
+Operate's discussion-only path returns a complete final chat answer without calling Space-mutation tools to execute discussed work or create a presentation. For Ink, Huabu owns publication of that answer under the delivery contract above. The brief action-summary guidance applies only after a successful requested Space change, not to discussion or planning answers.
+
 Three built-in agents, each with a
 [prompt/agents/<id>/AGENT.md](../../apps/server/src/prompt/agents) (frontmatter
 declares `tools` / `skillScope` / `runtime`; loader in

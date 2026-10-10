@@ -72,6 +72,7 @@ describe('UserMessage', () => {
           }}
           selectedNodeIds={['sketch-1']}
           selectedStrokeIds={[{ nodeId: 'sketch-1', strokeIds: ['s1', 's2'] }]}
+          invokedSkills={['research']}
         />,
       );
     });
@@ -91,6 +92,13 @@ describe('UserMessage', () => {
       'Agent interpretation',
     );
     expect(interpretation?.parentElement?.querySelector('svg')).not.toBeNull();
+    expect(interpretation?.previousElementSibling?.tagName.toLowerCase()).toBe(
+      'svg',
+    );
+    expect(interpretation?.nextElementSibling?.textContent).toBe('/research');
+    expect(interpretation?.parentElement?.textContent).toBe(
+      'Expand the third comparison step /research My original words',
+    );
     expect(
       container.querySelector('.text-fg-muted, .text-fg-subtle'),
     ).toBeNull();
@@ -138,8 +146,10 @@ describe('UserMessage', () => {
   it('does not add Ink feedback to ordinary text', () => {
     container = document.createElement('div');
     const root = createRoot(container);
-    act(() => root.render(<UserMessage content="Hello" />));
-    expect(container.textContent).toBe('Hello');
+    act(() =>
+      root.render(<UserMessage content="Hello" invokedSkills={['research']} />),
+    );
+    expect(container.textContent).toBe('/researchHello');
     expect(container.querySelector('[data-ink-interpretation]')).toBeNull();
     act(() => root.unmount());
   });

@@ -13,6 +13,8 @@ import { createViewportNavigationRecognizer } from '@/handler/canvasPointerRecog
 import { PointerRouterCore } from '@/handler/pointerRouter';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 
+import { readEffectiveInputMode } from './useInputMode';
+
 import type { CanvasPointerRouterContext } from '@/handler/canvasPointerRouterContext';
 import type { PointerRecognizer } from '@/handler/pointerRouter';
 import type { EffectiveInputMode } from '@/store/toolStore';
@@ -84,7 +86,7 @@ export function useCanvasPointerRouter(
       return {
         wrapper,
         instance,
-        inputMode: o.inputMode,
+        inputMode: readEffectiveInputMode(),
         explicitToolActive: o.explicitToolActive,
         onTouchTakeover: o.onTouchTakeover,
         onEmptyCanvasTap: o.onEmptyCanvasTap,
@@ -96,7 +98,7 @@ export function useCanvasPointerRouter(
       !isPanelTarget(event.target as Element | null) &&
       !canManipulateCanvasWithPointer(
         event.pointerType,
-        optionsRef.current.inputMode,
+        readEffectiveInputMode(),
       );
     const block = (event: PointerEvent) => {
       event.preventDefault();

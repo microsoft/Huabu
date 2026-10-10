@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { readFileSync } from 'node:fs';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -89,6 +91,29 @@ afterEach(() => {
 });
 
 describe('Ink-intent rendering', () => {
+  it('keeps Operate discussion chat-only while the host publishes Ink answers', () => {
+    const prompt = readFileSync(
+      new URL('../../../../prompt/agents/operate/AGENT.md', import.meta.url),
+      'utf8',
+    );
+    const discussion = prompt
+      .split('2. **Discussion-only path**')[1]
+      ?.split('3. **Space-change path**')[0];
+    expect(discussion).toContain('provide a complete final answer in chat');
+    expect(discussion).toContain(
+      'Do not call `space_commands` or other mutation tools',
+    );
+    expect(discussion).toContain('leave answer publication to Huabu');
+    expect(discussion).not.toContain('prefer a useful Canvas presentation');
+    expect(prompt).toContain(
+      'after a successful requested Space change, a brief summary is enough',
+    );
+    expect(prompt).toContain(
+      'For discussion or planning, provide the complete answer',
+    );
+    expect(prompt).not.toContain('a line or two is enough');
+  });
+
   it.each([INTERNAL_PROFILE, ACP_PROFILE])(
     'steers report text toward a direct summary without changing communicative intent for %j',
     async (profile) => {
@@ -149,6 +174,9 @@ describe('Ink-intent rendering', () => {
       expect(directive).toContain('Ask/read-only stays read-only');
       expect(directive).toContain(
         'a request for discussion or planning does not authorize execution',
+      );
+      expect(directive).toContain(
+        'When the user requests a Canvas change and your current mode allows it',
       );
       expect(directive).toContain(
         'Huabu will publish that answer as a Note linked to this conversation',

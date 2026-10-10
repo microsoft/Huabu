@@ -19,6 +19,6 @@ Deselecting or selecting another node exits reading but preserves the local docu
 
 ## Validation
 
-Cover finger input in both Finger and Pen preferences, pen input in Pen preference, the three-state tap cycle, moving a selected node before reading, internal scroll and boundary containment without node/Canvas movement, retained reading position, cancellation, pending pinch takeover, explicit-tool exclusion, and mouse wheel regressions. Browser automation establishes the routing baseline; real iPad/Apple Pencil and large-touchscreen testing is still required before declaring the device pain point resolved.
+Cover finger input in both Finger and Pen preferences, pen input in Pen and Auto preferences (including the first observed pen contact before a React re-render), the three-state tap cycle, moving a selected node before reading, internal scroll and boundary containment without node/Canvas movement, retained reading position, cancellation, pending pinch takeover, explicit-tool exclusion, and mouse wheel regressions. Browser automation establishes the routing baseline; real iPad/Apple Pencil and large-touchscreen testing is still required before declaring the device pain point resolved.
 
 Leaving the Canvas during a held scroll must cancel its gesture ownership even if React has already detached the live DOM refs. A regression test navigates away before pointer release, returns without reloading the app, and verifies that Canvas pinch navigation still works.

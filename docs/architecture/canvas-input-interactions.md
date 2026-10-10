@@ -15,6 +15,8 @@ Canvas input uses one persisted preference in `toolStore`, plus a reactive signa
 
 Auto resolves to Pen after a trusted `pointerdown` reports `pointerType === 'pen'`; the resulting `penObserved` flag persists for the browser profile and origin. Before a pen is observed, Auto resolves to Finger when the browser reports touch capability or observes touch or pen input, and Mouse otherwise. Explicit Mouse, Pen, and Finger preferences always win and are never rewritten by observation.
 
+The Canvas pointer router reads the effective mode from live input stores for both its blocking policy and recognizer context. The global capture listener can observe the first pen before React has rendered the new mode; that same contact must already route as Pen in Auto, without an ignored activation tap. Explicit Mouse and Finger preferences still block pen input.
+
 ```mermaid
 flowchart TD
   P{Explicit preference?}
