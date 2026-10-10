@@ -566,6 +566,7 @@
     "nodeUnavailable": "This node is no longer available"
   },
   "node": {
+    "noteTouchReading": "Swipe to scroll · Tap to deselect",
     "frameLayout": "Layout",
     "untitled": "Untitled",
     "rename": "Rename node",

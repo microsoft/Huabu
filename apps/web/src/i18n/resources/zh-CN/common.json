@@ -566,6 +566,7 @@
     "nodeUnavailable": "此节点已不存在"
   },
   "node": {
+    "noteTouchReading": "滑动阅读 · 轻点取消选择",
     "frameLayout": "布局",
     "untitled": "未命名",
     "rename": "重命名节点",

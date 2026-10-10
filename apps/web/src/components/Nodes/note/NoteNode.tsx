@@ -24,9 +24,12 @@ import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
 import { Loading } from '@/components/Common/Loading';
 import { MilkdownPreview } from '@/components/Milkdown';
 import { NODE_TYPE_LABEL } from '@/config/nodeIcons';
+import { useIsNotMouse } from '@/hooks/useInputMode';
 import { useNodePresentation } from '@/hooks/useNodePresentation';
 import useCanvasStore from '@/store/canvasStore';
+import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 import { openPreviewNode } from '@/store/previewWorkspace/actions';
+import { useToolStore } from '@/store/toolStore';
 import {
   canMoveHuabuPayload,
   canReadHuabuPayload,
@@ -40,7 +43,11 @@ import { NodeWrapper } from '../NodeWrapper';
 import { useTrackNoteFixedHeight } from './heightMemory';
 import { readNoteIntrinsicHeight } from './noteContentHost';
 import { NoteContentViewport } from './NoteContentViewport';
-import { canScrollNote, containNoteWheel } from './noteScroll';
+import {
+  canScrollNote,
+  containNoteWheel,
+  noteScrollIndicator,
+} from './noteScroll';
 import { NoteTruncationOverlay } from './NoteTruncationOverlay';
 import { useAutoHeightInvariant } from './useAutoHeightInvariant';
 import { noteFarDescription } from '../semanticZoom/noteFarDescription';
@@ -116,12 +123,44 @@ export const NoteNode = memo(
     });
     const scrollViewportRef = useRef<HTMLDivElement>(null);
     const [scrollTop, setScrollTop] = useState(0);
+    const isNotMouse = useIsNotMouse();
+    const readingRequested = useGesturePreviewStore(
+      (s) => s.noteReadingNodeId === id,
+    );
+    const pendingNodeType = useToolStore((s) => s.pendingNodeType);
+    const touchReading =
+      readingRequested && scrollingEnabled && isNotMouse && !pendingNodeType;
+    const preserveReadingOffset = useRef(false);
+
+    useLayoutEffect(() => {
+      if (touchReading) preserveReadingOffset.current = true;
+      if (!isNotMouse) preserveReadingOffset.current = false;
+      if (readingRequested && !touchReading) {
+        useGesturePreviewStore.setState({ noteReadingNodeId: null });
+      }
+    }, [touchReading, readingRequested, isNotMouse]);
+
+    useEffect(
+      () => () => {
+        if (useGesturePreviewStore.getState().noteReadingNodeId === id) {
+          useGesturePreviewStore.setState({ noteReadingNodeId: null });
+        }
+      },
+      [id],
+    );
 
     useLayoutEffect(() => {
       const viewport = scrollViewportRef.current;
       if (!scrollingEnabled) {
-        if (viewport) viewport.scrollTop = 0;
-        setScrollTop(0);
+        if (
+          !preserveReadingOffset.current ||
+          !isFixedHeight ||
+          isMinimalLOD ||
+          data.contentMissing
+        ) {
+          if (viewport) viewport.scrollTop = 0;
+          setScrollTop(0);
+        }
         return;
       }
       if (!viewport) return;
@@ -133,7 +172,13 @@ export const NoteNode = memo(
         viewport.removeEventListener('wheel', containNoteWheel, {
           capture: true,
         });
-    }, [scrollingEnabled]);
+    }, [
+      scrollingEnabled,
+      isFixedHeight,
+      isMinimalLOD,
+      data.contentMissing,
+      isNotMouse,
+    ]);
 
     // The wrapper hosts the height-measurement infrastructure and the
     // layout shell; `MilkdownPreview` mounts the editor
@@ -293,6 +338,19 @@ export const NoteNode = memo(
     // less than it holds right now.
     const isTruncated =
       contentHeight > 0 && hostHeight > 0 && contentHeight - hostHeight > 1;
+    const scrollIndicator = touchReading
+      ? noteScrollIndicator(scrollTop, hostHeight, contentHeight)
+      : null;
+    useLayoutEffect(() => {
+      const viewport = scrollViewportRef.current;
+      if (
+        readingRequested &&
+        viewport &&
+        viewport.scrollHeight <= viewport.clientHeight + 1
+      ) {
+        useGesturePreviewStore.setState({ noteReadingNodeId: null });
+      }
+    }, [readingRequested, contentHeight, hostHeight]);
 
     // Report the measured intrinsic height as a *proposal*. The queue
     // decides whether it is worth committing and when; the engine owns
@@ -494,6 +552,8 @@ export const NoteNode = memo(
             >
               <NoteContentViewport
                 scrollingEnabled={scrollingEnabled}
+                nativeScrollbarVisible={scrollingEnabled && !isNotMouse}
+                touchReading={touchReading}
                 viewportRef={scrollViewportRef}
                 contentHostRef={previewHostRef}
                 onScroll={(event) =>
@@ -539,6 +599,23 @@ export const NoteNode = memo(
                   </div>
                 )}
               </NoteContentViewport>
+              {touchReading && (
+                <span role="status" className="sr-only">
+                  {t('node.noteTouchReading')}
+                </span>
+              )}
+              {scrollIndicator && (
+                <div
+                  data-note-touch-scrollbar
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-y-2 right-0.5 z-10 w-1"
+                >
+                  <div
+                    className="bg-fg-subtle/45 absolute w-full rounded-full"
+                    style={scrollIndicator}
+                  />
+                </div>
+              )}
               {isTruncated && contentHeight - hostHeight - scrollTop > 1 && (
                 <NoteTruncationOverlay counterZoomScale={counterZoomScale} />
               )}

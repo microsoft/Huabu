@@ -17,6 +17,26 @@ export function canScrollNote({
   return selected && selectedCount === 1 && fixed && bodyVisible && !missing;
 }
 
+/** Match the native lane's 8px end insets and 24px minimum thumb. */
+export function noteScrollIndicator(
+  scrollTop: number,
+  viewportHeight: number,
+  contentHeight: number,
+) {
+  const trackHeight = viewportHeight - 16;
+  const maxScroll = contentHeight - viewportHeight;
+  if (trackHeight <= 0 || maxScroll <= 1) return null;
+  const height = Math.min(
+    trackHeight,
+    Math.max(24, (trackHeight * viewportHeight) / contentHeight),
+  );
+  const progress = Math.min(1, Math.max(0, scrollTop / maxScroll));
+  return {
+    height: `${(height / trackHeight) * 100}%`,
+    top: `${((progress * (trackHeight - height)) / trackHeight) * 100}%`,
+  };
+}
+
 /** Native capture listener runs before React Flow's bubbling wheel handler.
  * Keep pinch/modifier gestures canvas-owned; contain plain scrolling even
  * at the document edges without cancelling the browser's native scroll. */
