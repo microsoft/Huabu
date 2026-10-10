@@ -81,7 +81,7 @@
   justify-content: center;
   gap: 8px;
   width: max-content;
-  max-width: calc(100vw - 16px);
+  max-width: var(--canvas-popover-available-width, calc(100vw - 16px));
 }
 .ink-context-toolbar > .ink-toolbar-surface {
   flex-shrink: 0;
@@ -89,6 +89,12 @@
 }
 .canvas-context-toolbar button.ink-agent-destination-trigger {
   width: auto;
+  /* Reserve the capsule's 18px chrome, 2px gap, and 32px Send control. */
+  max-width: min(
+    15rem,
+    45vw,
+    calc(var(--canvas-popover-available-width, 100vw) - 52px)
+  );
   height: 32px;
   padding: 6px;
   gap: 4px;

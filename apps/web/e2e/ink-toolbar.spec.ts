@@ -171,6 +171,62 @@ test('conversation default reads server recency only for a fresh Lasso', async (
 });
 
 for (const locale of ['zh-CN', 'en']) {
+  test(`Ink toolbar respects a resizing canvas boundary in a wide ${locale} viewport`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1100, height: 768 });
+    await page.route(
+      '**/api/canvas/ink-layout-fixture/recent-conversation',
+      (route) => route.fulfill({ json: { conversation: null } }),
+    );
+    await page.goto('/playground/node-toolbars');
+    await expect(page.locator('.nt-toolbar')).toHaveCount(12);
+    await page.evaluate(async (language) => {
+      const load = (path: string) => import(/* @vite-ignore */ path);
+      const { mountInkToolbar } = await load('/e2e/fixtures/ink-toolbar.tsx');
+      await mountInkToolbar(language);
+    }, locale);
+    const canvasHost = page.locator('[data-ink-toolbar-canvas]');
+    const toolbar = page.locator('.ink-context-toolbar');
+    await expect(toolbar).toBeVisible();
+    for (const width of [800, 320, 280, 800]) {
+      await canvasHost.evaluate((host, width) => {
+        host.style.left = '120px';
+        host.style.right = 'auto';
+        host.style.width = `${width}px`;
+      }, width);
+      await expect
+        .poll(() =>
+          toolbar.evaluate((element) => {
+            const canvas = document.querySelector(
+              '[data-ink-toolbar-canvas] .react-flow',
+            );
+            const edit = element.querySelector('.ink-edit-group');
+            const agent = element.querySelector('.ink-agent-group');
+            const send = element.querySelector('.canvas-context-submit');
+            if (!canvas || !edit || !agent || !send)
+              throw new Error('Missing toolbar fixture');
+            const boundary = canvas.getBoundingClientRect();
+            const bounds = element.getBoundingClientRect();
+            const editBounds = edit.getBoundingClientRect();
+            const agentBounds = agent.getBoundingClientRect();
+            const sendBounds = send.getBoundingClientRect();
+            return (
+              bounds.left >= boundary.left + 7 &&
+              bounds.right <= boundary.right - 7 &&
+              element.scrollWidth <= element.clientWidth &&
+              sendBounds.right <= agentBounds.right &&
+              sendBounds.right <= boundary.right - 7 &&
+              (boundary.width <= 320
+                ? editBounds.bottom + 7 <= agentBounds.top
+                : editBounds.top === agentBounds.top)
+            );
+          }),
+        )
+        .toBe(true);
+    }
+  });
+
   test(`Ink toolbar keeps Ink and Agent identity separate in ${locale}`, async ({
     page,
   }) => {
