@@ -2,7 +2,7 @@
 // Licensed under the MIT license.
 
 import { DndContext } from '@dnd-kit/core';
-import { act } from 'react';
+import { act, useState, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import {
   afterEach,
@@ -47,6 +47,7 @@ import {
 
 import { ChatPanel } from './index';
 
+import type { AcpConnectionInfo } from './AcpConnectionBadge';
 import type { ChatSession } from '@/hooks/useChatSession';
 import type * as CanvasStore from '@/store/canvasStore';
 import type {
@@ -62,6 +63,12 @@ import type { ConversationTitle, AgentStreamEvent } from '@huabu/shared';
 const saveCanvasForSubmission = vi.hoisted(() =>
   vi.fn().mockResolvedValue(undefined),
 );
+const sessionMetaState = vi.hoisted(() => ({
+  loading: false,
+  error: null as Error | null,
+  updatedAt: 0,
+  refresh: vi.fn(),
+}));
 
 // Keep real panel, editor, tab, stores, and stream hook; replace unrelated UI
 // and network boundaries with complete, stable fixtures.
@@ -74,11 +81,15 @@ vi.mock('@/hooks/useAcpProfiles', () => ({
 }));
 vi.mock('@/hooks/useAcpSessionMeta', () => ({
   useAcpSessionMeta: () => ({
-    meta: { selections: {}, usage: null, updatedAt: 0 },
+    meta: {
+      selections: {},
+      usage: null,
+      updatedAt: sessionMetaState.updatedAt,
+    },
     source: 'none',
-    loading: false,
-    error: null,
-    refresh: vi.fn(),
+    loading: sessionMetaState.loading,
+    error: sessionMetaState.error,
+    refresh: sessionMetaState.refresh,
     applyOptimistic: vi.fn(),
   }),
 }));
@@ -172,7 +183,15 @@ const baseTab: TabModel = {
   lastActiveSeq: 1,
 };
 
-function Tab({ tab = baseTab }: { tab?: TabModel }) {
+function Tab({
+  tab = baseTab,
+  onTitleEditorHostChange,
+  chatConnection,
+}: {
+  tab?: TabModel;
+  onTitleEditorHostChange?: (element: HTMLSpanElement | null) => void;
+  chatConnection?: AcpConnectionInfo;
+}) {
   return (
     <PreviewTab
       tab={tab}
@@ -184,6 +203,8 @@ function Tab({ tab = baseTab }: { tab?: TabModel }) {
       onClose={vi.fn()}
       onPromote={vi.fn()}
       onNavigate={vi.fn()}
+      onTitleEditorHostChange={onTitleEditorHostChange}
+      chatConnection={chatConnection}
     />
   );
 }
@@ -197,10 +218,45 @@ function ColdWorkspace({ workspace }: { workspace: CanvasPreviewWorkspace }) {
     </DndContext>
   );
 }
+function PanelFixture({
+  session,
+  tab,
+  onCommit,
+  props,
+}: {
+  session: ChatSession;
+  tab: TabModel;
+  onCommit: () => void;
+  props: Partial<ComponentProps<typeof ChatPanel>>;
+}) {
+  const [host, setHost] = useState<HTMLSpanElement | null>(null);
+  const [connection, setConnection] = useState<AcpConnectionInfo | null>(null);
+  return (
+    <DndContext>
+      <Tab
+        tab={tab}
+        onTitleEditorHostChange={setHost}
+        chatConnection={connection ?? undefined}
+      />
+      <PreviewTabDragOverlay tab={tab} />
+      <ChatPanel
+        session={session}
+        previewTabId="tab"
+        onCommit={onCommit}
+        titleEditorHost={host}
+        onConnectionChange={
+          props.hideDuplicateTitle ? setConnection : undefined
+        }
+        {...props}
+      />
+    </DndContext>
+  );
+}
 async function renderPanel(
   session = baseSession,
   tab = baseTab,
   onCommit = vi.fn(),
+  props: Partial<ComponentProps<typeof ChatPanel>> = {},
 ) {
   usePreviewWorkspaceStore.setState({
     canvasId: session.canvasId,
@@ -211,11 +267,12 @@ async function renderPanel(
   });
   await act(async () =>
     root.render(
-      <DndContext>
-        <Tab tab={tab} />
-        <PreviewTabDragOverlay tab={tab} />
-        <ChatPanel session={session} previewTabId="tab" onCommit={onCommit} />
-      </DndContext>,
+      <PanelFixture
+        session={session}
+        tab={tab}
+        onCommit={onCommit}
+        props={props}
+      />,
     ),
   );
 }
@@ -234,14 +291,19 @@ async function edit(value: string) {
     'input[aria-label="Rename conversation"], input[aria-label="Rename node"]',
   )!;
   expect(input.maxLength).toBe(120);
+  await fillTitle(input, value);
+  return input;
+}
+async function fillTitle(input: HTMLInputElement, value: string) {
   await act(async () => {
-    Object.getOwnPropertyDescriptor(
+    const setValue = Object.getOwnPropertyDescriptor(
       HTMLInputElement.prototype,
       'value',
-    )!.set!.call(input, value);
+    )?.set;
+    assert(setValue);
+    setValue.call(input, value);
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
-  return input;
 }
 async function enter(input: HTMLInputElement) {
   await act(async () => {
@@ -254,6 +316,9 @@ async function enter(input: HTMLInputElement) {
 
 beforeEach(async () => {
   vi.resetAllMocks();
+  sessionMetaState.loading = false;
+  sessionMetaState.error = null;
+  sessionMetaState.updatedAt = 0;
   serverTitles.clear();
   await i18n.changeLanguage('en');
   useConversationTitleStore.setState({
@@ -313,6 +378,197 @@ afterEach(async () => {
 });
 
 describe('rendered conversation titles', () => {
+  it.each(['connected', 'connecting', 'failed'] as const)(
+    'moves the %s capability status to the tab without losing failure recovery',
+    async (status) => {
+      useChatStore.getState().setAgentBinding('thread', {
+        kind: 'external',
+        profileId: 'fixture',
+        alias: 'Fixture',
+      });
+      sessionMetaState.loading = status === 'connecting';
+      sessionMetaState.error =
+        status === 'failed' ? new Error('Cache unavailable') : null;
+      await renderPanel(baseSession, baseTab, vi.fn(), {
+        hideDuplicateTitle: true,
+      });
+      const dot = container.querySelector(
+        `[data-acp-connection-status="${status}"]`,
+      );
+      assert(dot);
+      expect(dot.closest('[role="tab"]')).not.toBeNull();
+      expect(
+        dot.parentElement?.querySelector('[data-testid="preview-tab-icon"]'),
+      ).not.toBeNull();
+      expect(
+        container.querySelectorAll('[data-acp-connection-status]'),
+      ).toHaveLength(1);
+      expect(dot.classList.contains('absolute')).toBe(true);
+      const alert = container.querySelector('[role="alert"]');
+      if (status === 'failed') {
+        expect(alert?.textContent).toContain('Fixture');
+        expect(alert?.textContent).toContain('Cache unavailable');
+        await act(async () =>
+          alert?.querySelector<HTMLButtonElement>('button')?.click(),
+        );
+        expect(sessionMetaState.refresh).toHaveBeenCalledOnce();
+      } else {
+        expect(alert).toBeNull();
+      }
+      await act(async () => {
+        useChatStore.getState().setAgentBinding('thread', { kind: 'internal' });
+      });
+      expect(
+        container.querySelector('[data-acp-connection-status]'),
+      ).toBeNull();
+      expect(container.querySelector('[role="alert"]')).toBeNull();
+    },
+  );
+
+  it('removes an otherwise empty Question header after moving its status to the tab', async () => {
+    const node = {
+      id: 'question',
+      type: 'question',
+      position: { x: 0, y: 0 },
+      data: {
+        label: 'External question',
+        status: 'done',
+        threadId: 'thread',
+        agentBinding: {
+          kind: 'external',
+          profileId: 'fixture',
+          alias: 'Fixture',
+        },
+      },
+    };
+    useCanvasStore.setState({ nodes: [node] });
+    await renderPanel(
+      {
+        ...baseSession,
+        conversationView: conversationViewForNode(node, 'canvas'),
+      },
+      {
+        ...baseTab,
+        target: { kind: 'node', canvasId: 'canvas', nodeId: node.id },
+      },
+      vi.fn(),
+      { hideDuplicateTitle: true },
+    );
+    expect(
+      container.querySelector('[role="tab"] [data-acp-connection-status]'),
+    ).not.toBeNull();
+    expect(container.querySelector('.h-9')).toBeNull();
+  });
+
+  it('hides the duplicate title but retains connection and save controls, and waits for hydration before renaming', async () => {
+    useChatStore.getState().setHistoryLoaded('thread', false);
+    useChatStore.getState().setAgentBinding('thread', {
+      kind: 'external',
+      profileId: 'fixture',
+      alias: 'Fixture',
+    });
+    await loadTitle('Existing topic');
+    const handled = vi.fn();
+    const props = {
+      hideDuplicateTitle: true,
+      renameRequestNonce: 1,
+      onRenameRequestHandled: handled,
+    };
+    await renderPanel(baseSession, baseTab, vi.fn(), props);
+    expect(header()).toBeNull();
+    expect(
+      container.querySelector('input[aria-label="Rename conversation"]'),
+    ).toBeNull();
+    expect(handled).not.toHaveBeenCalled();
+    const saveButton = container.querySelector(
+      `button[aria-label="${i18n.t('chat.saveAsQuestion')}"]`,
+    );
+    expect(saveButton).not.toBeNull();
+    expect(saveButton?.classList.contains('[&_svg]:h-3.25')).toBe(true);
+    expect(saveButton?.classList.contains('min-h-6')).toBe(true);
+    expect(saveButton?.classList.contains('text-fg-muted')).toBe(true);
+    expect(
+      container.querySelector(
+        '[role="tab"] [data-acp-connection-status="connected"]',
+      ),
+    ).not.toBeNull();
+    await act(async () =>
+      useChatStore.getState().setHistoryLoaded('thread', true),
+    );
+    const input = container.querySelector<HTMLInputElement>(
+      'input[aria-label="Rename conversation"]',
+    );
+    assert(input);
+    expect(input.value).toBe('Existing topic');
+    expect(handled).toHaveBeenCalledExactlyOnceWith(1);
+    expect(document.activeElement).toBe(input);
+    await act(async () =>
+      input.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+      ),
+    );
+    expect(header()).toBeNull();
+    expect(save).not.toHaveBeenCalled();
+    await renderPanel(baseSession, baseTab, vi.fn(), props);
+    expect(
+      container.querySelector('input[aria-label="Rename conversation"]'),
+    ).toBeNull();
+  });
+
+  it('uses the existing durable conversation save and promotion for a tab rename request', async () => {
+    useChatStore
+      .getState()
+      .addMessage('thread', { id: 'u', role: 'user', content: 'Question' });
+    await loadTitle('Existing topic');
+    const onCommit = vi.fn();
+    await renderPanel(baseSession, baseTab, onCommit, {
+      hideDuplicateTitle: true,
+      renameRequestNonce: 1,
+    });
+    const input = container.querySelector<HTMLInputElement>(
+      'input[aria-label="Rename conversation"]',
+    );
+    assert(input);
+    await fillTitle(input, 'Updated topic');
+    await enter(input);
+    expect(save).toHaveBeenCalledWith('canvas', 'thread', {
+      title: 'Updated topic',
+    });
+    expect(onCommit).toHaveBeenCalledOnce();
+    expect(title()).toBe('Updated topic');
+    expect(header()).toBeNull();
+  });
+
+  it('retains failure feedback and retry when the display title is hidden', async () => {
+    useChatStore
+      .getState()
+      .addMessage('thread', { id: 'u', role: 'user', content: 'Question' });
+    await loadTitle('Original');
+    await renderPanel(baseSession, baseTab, vi.fn(), {
+      hideDuplicateTitle: true,
+      renameRequestNonce: 1,
+    });
+    save.mockRejectedValueOnce(new Error('Offline'));
+    const input = container.querySelector<HTMLInputElement>(
+      'input[aria-label="Rename conversation"]',
+    );
+    assert(input);
+    await fillTitle(input, 'Attempted');
+    await enter(input);
+    expect(title()).toBe('Original');
+    expect(header()).toBeNull();
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      'Offline',
+    );
+    const retry = container.querySelector<HTMLButtonElement>(
+      '[role="alert"] button',
+    );
+    assert(retry);
+    await act(async () => retry.click());
+    expect(title()).toBe('Attempted');
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+  });
+
   it('preserves a missing external Profile on an empty standalone conversation', async () => {
     const binding = {
       kind: 'external' as const,
@@ -417,7 +673,7 @@ describe('rendered conversation titles', () => {
     assert(tabText?.parentElement);
     expect(tabText.classList.contains('truncate')).toBe(true);
     expect(tabText.parentElement.classList.contains('min-w-0')).toBe(true);
-    expect(tabText.parentElement.classList.contains('max-w-full')).toBe(true);
+    expect(tabText.parentElement.classList.contains('flex-1')).toBe(true);
     const input = await edit('Shorter topic');
     expect(input.classList.contains('min-w-0')).toBe(true);
     expect(input.classList.contains('shrink')).toBe(true);
@@ -685,44 +941,67 @@ describe('rendered conversation titles', () => {
     );
   });
 
-  it('keeps Questions on canonical node labels and uses tryRename without a title PUT', async () => {
-    const node = {
-      id: 'question',
-      type: 'question',
-      position: { x: 0, y: 0 },
-      data: {
-        label: 'Canonical',
-        labelSource: 'user',
-        status: 'done',
-        threadId: 'thread',
-      },
-    };
-    const tryRename = vi.fn(async (_kind, _id, label) => {
-      useCanvasStore.setState({
-        nodes: [{ ...node, data: { ...node.data, label } }],
+  it.each([false, true])(
+    'keeps Questions on canonical node labels without a title PUT (tab editor: %s)',
+    async (hideDuplicateTitle) => {
+      const node = {
+        id: 'question',
+        type: 'question',
+        position: { x: 0, y: 0 },
+        data: {
+          label: 'Canonical',
+          labelSource: 'user',
+          status: 'done',
+          threadId: 'thread',
+        },
+      };
+      const tryRename = vi.fn(async (_kind, _id, label) => {
+        useCanvasStore.setState({
+          nodes: [{ ...node, data: { ...node.data, label } }],
+        });
+        return true;
       });
-      return true;
-    });
-    useCanvasStore.setState({ nodes: [node], tryRename });
-    await loadTitle('Irrelevant cached title');
-    await renderPanel(
-      {
-        ...baseSession,
-        conversationView: conversationViewForNode(node, 'canvas'),
-      },
-      {
-        ...baseTab,
-        target: { kind: 'node', canvasId: 'canvas', nodeId: 'question' },
-      },
-    );
-    expect(header().textContent).toBe('Canonical');
-    expect(title()).toBe('Canonical');
-    await enter(await edit('Renamed node'));
-    expect(tryRename).toHaveBeenCalledWith('node', 'question', 'Renamed node');
-    expect(save).not.toHaveBeenCalled();
-    expect(header().textContent).toBe('Renamed node');
-    expect(title()).toBe('Renamed node');
-  });
+      useCanvasStore.setState({ nodes: [node], tryRename });
+      await loadTitle('Irrelevant cached title');
+      await renderPanel(
+        {
+          ...baseSession,
+          conversationView: conversationViewForNode(node, 'canvas'),
+        },
+        {
+          ...baseTab,
+          target: { kind: 'node', canvasId: 'canvas', nodeId: 'question' },
+        },
+        vi.fn(),
+        {
+          hideDuplicateTitle,
+          renameRequestNonce: hideDuplicateTitle ? 1 : undefined,
+        },
+      );
+      expect(title()).toBe('Canonical');
+      if (hideDuplicateTitle) {
+        expect(header()).toBeNull();
+        const input =
+          container.querySelector<HTMLInputElement>('[role="tab"] input');
+        assert(input);
+        expect(input.value).toBe('Canonical');
+        await fillTitle(input, 'Renamed node');
+        await enter(input);
+      } else {
+        expect(header().textContent).toBe('Canonical');
+        await enter(await edit('Renamed node'));
+      }
+      expect(tryRename).toHaveBeenCalledWith(
+        'node',
+        'question',
+        'Renamed node',
+      );
+      expect(save).not.toHaveBeenCalled();
+      if (hideDuplicateTitle) expect(header()).toBeNull();
+      else expect(header().textContent).toBe('Renamed node');
+      expect(title()).toBe('Renamed node');
+    },
+  );
 
   it('transfers the effective manual name when the actual panel saves a Question', async () => {
     const addNode = vi.fn((input) =>

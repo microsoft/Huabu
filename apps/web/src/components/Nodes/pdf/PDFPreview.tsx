@@ -16,6 +16,7 @@ import { useTranslation } from 'react-i18next';
 import { Document } from 'react-pdf';
 
 import { resolveArtifactUrl, uploadImage } from '@/api/artifact';
+import { PreviewHeaderButton } from '@/components/Nodes/PreviewHeaderButton';
 import { usePreviewHeaderSlot } from '@/components/Nodes/PreviewHeaderSlot';
 import { useRegisterPreviewSearchAdapter } from '@/components/Panels/ExpandedNodePanel/PreviewSearchAdapterContext';
 import {
@@ -625,13 +626,8 @@ export const PDFPreview = ({
   const { el: headerSlotEl } = usePreviewHeaderSlot();
   const headerActions = (
     <>
-      <Button
-        variant="ghost"
-        tone="neutral"
-        size="sm"
-        iconOnly
+      <PreviewHeaderButton
         title={t('node.selectArea')}
-        tooltipPlacement="bottom"
         aria-label={t('node.selectAreaToCapture')}
         aria-pressed={captureMode}
         className={clsx(captureMode && 'text-info bg-bg-default')}
@@ -643,14 +639,9 @@ export const PDFPreview = ({
         }}
       >
         <Scan />
-      </Button>
-      <Button
-        variant="ghost"
-        tone="neutral"
-        size="sm"
-        iconOnly
+      </PreviewHeaderButton>
+      <PreviewHeaderButton
         title={t('node.highlightText')}
-        tooltipPlacement="bottom"
         aria-label={t('node.highlightText')}
         aria-pressed={highlightMode}
         className={clsx(highlightMode && 'bg-bg-default text-warning-light')}
@@ -664,7 +655,7 @@ export const PDFPreview = ({
         }}
       >
         <Highlighter />
-      </Button>
+      </PreviewHeaderButton>
     </>
   );
 
@@ -705,8 +696,7 @@ export const PDFPreview = ({
         // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- The selected document viewport supports native keyboard scrolling.
         tabIndex={embedded && interactive ? 0 : undefined}
         className={clsx(
-          'bg-surface min-h-0 flex-1 overflow-x-hidden p-1',
-          embedded && !interactive ? 'overflow-y-hidden' : 'overflow-y-auto',
+          'bg-surface min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-1',
           embedded && interactive && 'overscroll-contain',
         )}
       >

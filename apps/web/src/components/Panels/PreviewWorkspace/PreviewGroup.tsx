@@ -8,7 +8,7 @@
  * Older and resource-heavy tabs are unmounted (§4).
  */
 
-import { Activity, useState } from 'react';
+import { Activity, useCallback, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useShallow } from 'zustand/react/shallow';
 
@@ -26,9 +26,12 @@ import {
   selectRetainedPreviewTabs,
 } from './retainedPreviewTabs';
 
+import type { ChatConnectionChangeHandler } from './PreviewRenderer';
 import type { TabDropIndicator } from './tabDnd';
+import type { AcpConnectionInfo } from '../ChatPanel/AcpConnectionBadge';
 import type {
   CanvasPreviewWorkspace,
+  ClosePreviewTabsScope,
   PreviewGroup as PreviewGroupModel,
   PreviewTarget,
 } from '@/store/previewWorkspace/model';
@@ -41,6 +44,7 @@ type PreviewGroupProps = {
   onFocus: () => void;
   onActivate: (tabId: string) => void;
   onClose: (tabId: string) => void;
+  onCloseTabs: (tabId: string, scope: ClosePreviewTabsScope) => void;
   onPromote: (tabId: string) => void;
   nodeFocusRequest: { tabId: string; nonce: number } | null;
   onNodeFocusRequestHandled: (tabId: string, nonce: number) => void;
@@ -50,7 +54,8 @@ type PreviewGroupProps = {
     nonce: number;
   } | null;
   onChatOpenRequestHandled: (tabId: string, nonce: number) => void;
-  onOpenToSide: (tabId: string) => void;
+  onSplit: () => void;
+  onCloseEmptyGroup: () => void;
   onNewChat: () => void;
   tabDropIndicator: TabDropIndicator | null;
   isFullscreen: boolean;
@@ -67,12 +72,14 @@ export function PreviewGroup({
   onFocus,
   onActivate,
   onClose,
+  onCloseTabs,
   onPromote,
   nodeFocusRequest,
   onNodeFocusRequestHandled,
   chatOpenRequest,
   onChatOpenRequestHandled,
-  onOpenToSide,
+  onSplit,
+  onCloseEmptyGroup,
   onNewChat,
   tabDropIndicator,
   isFullscreen,
@@ -80,6 +87,46 @@ export function PreviewGroup({
   onCollapse,
 }: PreviewGroupProps) {
   const { t } = useTranslation();
+  const nextRenameNonce = useRef(0);
+  const [titleEditorHost, setTitleEditorHost] =
+    useState<HTMLSpanElement | null>(null);
+  const [chatConnection, setChatConnection] = useState<{
+    tabId: string;
+    targetKey: string;
+    connection: AcpConnectionInfo;
+  } | null>(null);
+  const handleChatConnectionChange = useCallback<ChatConnectionChangeHandler>(
+    (tabId, targetKey, connection) => {
+      setChatConnection((current) =>
+        connection
+          ? { tabId, targetKey, connection }
+          : current?.tabId === tabId && current.targetKey === targetKey
+            ? null
+            : current,
+      );
+    },
+    [],
+  );
+  const [renameRequest, setRenameRequest] = useState<{
+    tabId: string;
+    nonce: number;
+    targetKey: string;
+  } | null>(null);
+  const handleRenameRequest = (tabId: string) => {
+    // Renaming supersedes a deferred content-focus request for the same tab.
+    if (nodeFocusRequest?.tabId === tabId) {
+      onNodeFocusRequestHandled(tabId, nodeFocusRequest.nonce);
+    }
+    onActivate(tabId);
+    setRenameRequest({
+      tabId,
+      nonce: ++nextRenameNonce.current,
+      targetKey: previewTargetKey(workspace.tabs[tabId].target),
+    });
+  };
+  const handleRenameRequestHandled = useCallback((nonce: number) => {
+    setRenameRequest((current) => (current?.nonce === nonce ? null : current));
+  }, []);
   const [activation, setActivation] = useState({
     tabId: group.activeTabId,
     id: 0,
@@ -93,6 +140,14 @@ export function PreviewGroup({
   const activeTab = group.activeTabId
     ? workspace.tabs[group.activeTabId]
     : undefined;
+  if (
+    renameRequest &&
+    (!isFocused ||
+      activeTab?.id !== renameRequest.tabId ||
+      previewTargetKey(activeTab.target) !== renameRequest.targetKey)
+  ) {
+    setRenameRequest(null);
+  }
   const retainableTabIds = useCanvasStore(
     useShallow((state) =>
       group.tabIds.flatMap((tabId) => {
@@ -127,10 +182,24 @@ export function PreviewGroup({
         activeTabId={group.activeTabId}
         onActivate={onActivate}
         onClose={onClose}
+        onCloseTabs={onCloseTabs}
         onPromote={onPromote}
-        onOpenToSide={onOpenToSide}
+        onRename={handleRenameRequest}
+        onTitleEditorHostChange={setTitleEditorHost}
+        activeChatConnection={
+          activeTab &&
+          chatConnection?.tabId === activeTab.id &&
+          chatConnection.targetKey === previewTargetKey(activeTab.target)
+            ? chatConnection.connection
+            : undefined
+        }
+        onSplit={workspace.groups.length === 1 ? onSplit : undefined}
+        onCloseEmptyGroup={
+          workspace.groups.length > 1 && tabs.length === 0
+            ? onCloseEmptyGroup
+            : undefined
+        }
         onNewChat={onNewChat}
-        canOpenToSide={workspace.groups.length < 2 && tabs.length > 1}
         tabDropIndicator={tabDropIndicator}
         isFullscreen={isFullscreen}
         onToggleFullscreen={onToggleFullscreen}
@@ -163,6 +232,25 @@ export function PreviewGroup({
                     }
                     onClose={() => onClose(tab.id)}
                     onCommit={() => onPromote(tab.id)}
+                    renameRequestNonce={
+                      isActive && renameRequest?.tabId === tab.id
+                        ? renameRequest.nonce
+                        : undefined
+                    }
+                    onRenameRequestHandled={handleRenameRequestHandled}
+                    onChatConnectionChange={handleChatConnectionChange}
+                    titleEditorHost={
+                      isActive &&
+                      titleEditorHost?.dataset.previewTitleEditorTabId ===
+                        tab.id
+                        ? titleEditorHost
+                        : null
+                    }
+                    onRenameKeyboardEnd={() =>
+                      document
+                        .getElementById(tabElementId(group.id, tab.id))
+                        ?.focus({ preventScroll: true })
+                    }
                     nodeFocusRequestNonce={
                       isActive && nodeFocusRequest?.tabId === tab.id
                         ? nodeFocusRequest.nonce
@@ -186,7 +274,7 @@ export function PreviewGroup({
             );
           })
         ) : (
-          <div className="text-fg-subtle flex h-full items-center justify-center text-sm">
+          <div className="text-fg-subtle flex h-full items-center justify-center p-6 text-center text-sm">
             {t('preview.emptyGroup')}
           </div>
         )}

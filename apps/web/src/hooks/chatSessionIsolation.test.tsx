@@ -24,6 +24,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ChatPanel } from '@/components/Panels/ChatPanel';
+import en from '@/i18n/resources/en/common.json';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import {
   selectThreadBinding,
@@ -357,11 +358,11 @@ describe('two mounted ChatPanels', () => {
       container
         ?.querySelector('[data-panel="a"] textarea')
         ?.getAttribute('placeholder'),
-    ).toBe('Describe the Space change you want…');
+    ).toBe(en.chat.operatePlaceholder);
     expect(
       container
         ?.querySelector('[data-panel="b"] textarea')
         ?.getAttribute('placeholder'),
-    ).toBe('Asking anything here…');
+    ).toBe(en.chat.inputPlaceholder);
   });
 });

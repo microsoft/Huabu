@@ -396,6 +396,18 @@ describe('NodeWrapper radius contract', () => {
     },
   );
 
+  it.each(['note', 'image', 'video', 'pdf', 'web', 'office'] as const)(
+    'keeps %s hover flat and selection independent of layout borders',
+    (type) => {
+      const { shell } = render({ type, selected: false });
+      const borderWidth = shell.style.borderWidth;
+      expect(shell.classList.contains('hover:shadow-sm')).toBe(false);
+      const selectedShell = render({ type, selected: true }).shell;
+      expect(selectedShell.style.borderWidth).toBe(borderWidth);
+      expect(selectedShell.classList.contains('hover:shadow-sm')).toBe(false);
+    },
+  );
+
   it.each(['pdf', 'web'] as const)(
     'removes %s card chrome while reading and restores it in overview',
     (type) => {
@@ -412,7 +424,7 @@ describe('NodeWrapper radius contract', () => {
         overview.style.getPropertyValue('--note-surface-background'),
       ).toContain('color-mix(');
       expect(overview.style.borderWidth).toBe('3px');
-      expect(overview.classList.contains('hover:shadow-sm')).toBe(true);
+      expect(overview.classList.contains('hover:shadow-sm')).toBe(false);
     },
   );
 

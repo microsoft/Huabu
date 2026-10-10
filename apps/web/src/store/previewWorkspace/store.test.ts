@@ -313,6 +313,36 @@ describe('actions delegate to the model', () => {
   });
 });
 
+describe('batch closing tabs', () => {
+  it('settles removed tabs against the original snapshot and commits runtime cleanup once', () => {
+    const first = store().openPreviewTarget(node('a'));
+    const second = store().openPreviewTarget(node('b'));
+    const other = store().openPreviewTarget(chat('thread'), {
+      openToSide: true,
+    });
+    store().requestNodeFocus(first);
+    store().requestChatOpen(second, 'bottom');
+    const original = store().workspace;
+    const beforeTabRemoved = vi.fn((tabId: string) => {
+      expect(store().workspace).toBe(original);
+      expect(original.tabs[tabId]).toBeDefined();
+    });
+    const notified = vi.fn();
+    const unsubscribe = usePreviewWorkspaceStore.subscribe(notified);
+    try {
+      store().closeTabs(first, 'group', beforeTabRemoved);
+    } finally {
+      unsubscribe();
+    }
+    expect(beforeTabRemoved.mock.calls).toEqual([[first], [second]]);
+    expect(notified).toHaveBeenCalledOnce();
+    expect(store().workspace.groups).toEqual([original.groups[1]]);
+    expect(Object.keys(store().workspace.tabs)).toEqual([other]);
+    expect(store().nodeFocusRequest).toBeNull();
+    expect(store().chatOpenRequest).toBeNull();
+  });
+});
+
 describe('node focus requests', () => {
   it('reissues focus for the same tab and consumes only the matching request', () => {
     store().requestNodeFocus('tab-1');

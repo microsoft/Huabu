@@ -12,6 +12,9 @@ import type {
 } from '@huabu/shared';
 import type { Node } from '@xyflow/react';
 
+// Headless scrollbar hiding would mask selection-dependent document width changes.
+test.use({ launchOptions: { ignoreDefaultArgs: ['--hide-scrollbars'] } });
+
 // Real Canvas, storage, drag callbacks and pointer router; only remote documents
 // are served locally. Never inject a store or replace production components.
 function tallPdf() {
@@ -424,6 +427,93 @@ for (const type of ['web', 'pdf', 'question'] as const) {
     });
   }
 }
+
+test.describe('desktop hover and selection layout', () => {
+  test.use({
+    hasTouch: false,
+  });
+  for (const zoom of [0.5, 1]) {
+    test(`mouse hover uses a layout-free outline instead of elevation at ${zoom} zoom`, async ({
+      page,
+    }) => {
+      const { node } = await seed(page, 'image', zoom, { inputMode: 'mouse' });
+      const id = await node.getAttribute('data-id');
+      const surface = node.locator('[data-node-surface]');
+      const before = await box(surface);
+      const hover = page.locator(`[data-node-hover-outline="${id}"]`);
+      const selected = page.locator(`[data-node-selection-outline="${id}"]`);
+      await node.hover();
+      await expect(hover).toBeVisible();
+      await expect(hover).toHaveCSS('opacity', '0.5');
+      await expect(surface).toHaveCSS('box-shadow', 'none');
+      expect(await box(surface)).toEqual(before);
+      expect(await box(hover)).toEqual(before);
+      await expect(node).not.toHaveClass(/selected/);
+      await expect(selected).toHaveCount(0);
+      await expect(page.locator('[data-node-resize-grip]')).toHaveCount(0);
+      await page.mouse.move(1100, 650);
+      await expect(hover).toHaveCount(0);
+      await node.click();
+      await expect(selected).toBeVisible();
+      await expect(selected).toHaveCSS('opacity', '1');
+      await expect(hover).toHaveCount(0);
+      expect(await box(surface)).toEqual(before);
+      await node.dispatchEvent('pointerover', {
+        pointerType: 'touch',
+        buttons: 0,
+      });
+      await expect(hover).toHaveCount(0);
+    });
+
+    test(`PDF selection keeps viewport width and page scale stable at ${zoom} zoom`, async ({
+      page,
+    }) => {
+      const { node } = await seed(page, 'pdf', zoom, { inputMode: 'mouse' });
+      const reader = node.locator('[data-pdf-reader="embedded"]');
+      const viewport = node.locator('[data-pdf-scroll-viewport]');
+      const bitmap = node.locator('.react-pdf__Page canvas').first();
+      await expect(bitmap).toBeVisible();
+      await expect(reader).toHaveAttribute('inert');
+      await expect
+        .poll(() =>
+          viewport.evaluate(
+            (element) => element.scrollHeight > element.clientHeight,
+          ),
+        )
+        .toBe(true);
+      const originalBitmap = await bitmap.elementHandle();
+      const layout = () =>
+        viewport.evaluate((element) => {
+          const canvas = element.querySelector('canvas');
+          if (!canvas) throw new Error('Missing PDF bitmap');
+          return {
+            viewportWidth: element.clientWidth,
+            pageWidth: canvas.getBoundingClientRect().width,
+            bitmapWidth: canvas.width,
+            bitmapHeight: canvas.height,
+          };
+        });
+      const before = await layout();
+      await node.hover();
+      await expect(node.locator('[data-node-surface]')).toHaveCSS(
+        'box-shadow',
+        'none',
+      );
+      expect(await layout()).toEqual(before);
+      await node.click({ position: { x: 25, y: 25 } });
+      await expect(node).toHaveClass(/selected/);
+      await expect(reader).not.toHaveAttribute('inert');
+      await expect.poll(layout).toEqual(before);
+      await page.mouse.click(1100, 650);
+      await expect(node).not.toHaveClass(/selected/);
+      await expect(reader).toHaveAttribute('inert');
+      await expect.poll(layout).toEqual(before);
+      expect(
+        await originalBitmap?.evaluate((element) => element.isConnected),
+      ).toBe(true);
+    });
+  }
+});
 
 for (const type of ['web', 'pdf'] as const) {
   for (const zoom of [0.5, 1]) {

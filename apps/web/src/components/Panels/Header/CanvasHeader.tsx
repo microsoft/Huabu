@@ -60,14 +60,16 @@ export const CanvasHeader: React.FC<CanvasHeaderProps> = ({
       className={clsx(
         'bg-surface flex items-center overflow-hidden',
         vertical
-          ? 'border-edge-default h-full w-12 flex-col gap-1 border-r px-2 py-1'
+          ? 'border-edge-default h-full w-12 flex-col gap-1 border-r px-2 py-2'
           : compact
             ? 'gap-0.5'
             : 'gap-1',
         !vertical &&
           (isCollapsed
             ? 'shadow-bottom h-10 max-w-[18rem] rounded-lg border-0 px-2'
-            : 'border-edge-default h-12 border-r px-3 py-1'),
+            : compact
+              ? 'border-edge-default h-11 border-r px-3'
+              : 'border-edge-default h-12 border-r px-3 py-1'),
       )}
     >
       {!vertical && (
@@ -88,7 +90,7 @@ export const CanvasHeader: React.FC<CanvasHeaderProps> = ({
         <Button
           variant="ghost"
           iconOnly
-          size="sm"
+          size={vertical ? 'md' : 'sm'}
           className="text-fg-subtle enabled:hover:text-fg-default"
           tooltipWrapperClassName={clsx(
             'inline-flex shrink-0',

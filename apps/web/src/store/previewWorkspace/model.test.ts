@@ -7,6 +7,8 @@ import {
   activateTab,
   activeTabOfGroup,
   closeTab,
+  closeTabs,
+  closeEmptyGroup,
   conversationInOtherGroup,
   createEmptyWorkspace,
   findTabByTarget,
@@ -19,6 +21,7 @@ import {
   replaceTabTarget,
   setActiveGroup,
   setSplitRatio,
+  splitGroup,
   validateWorkspace,
   type CanvasPreviewWorkspace,
   type PreviewTarget,
@@ -48,6 +51,98 @@ function open(
 function emptyWorkspace() {
   return createEmptyWorkspace('g1');
 }
+
+describe('empty groups', () => {
+  it.each(['g1', 'g2'])(
+    'closes empty %s without changing the surviving group or tabs',
+    (emptyId) => {
+      let ws = splitGroup(emptyWorkspace(), 'g2');
+      const survivingId = emptyId === 'g1' ? 'g2' : 'g1';
+      ws = open(ws, node('a'), 'a', { groupId: survivingId }).workspace;
+      ws = setSplitRatio(setActiveGroup(ws, emptyId), 0.7);
+      const surviving = ws.groups.find((group) => group.id === survivingId);
+      const closed = closeEmptyGroup(ws, emptyId);
+      expect(closed.groups).toEqual([surviving]);
+      expect(closed.groups[0]).toBe(surviving);
+      expect(closed.tabs).toBe(ws.tabs);
+      expect(closed.activeGroupId).toBe(survivingId);
+      expect(closed.splitRatio).toBe(0.5);
+    },
+  );
+
+  it('can close one of two empty groups but never the sole group or a nonempty group', () => {
+    const empty = emptyWorkspace();
+    expect(closeEmptyGroup(empty, 'g1')).toBe(empty);
+    const split = splitGroup(empty, 'g2');
+    const closed = closeEmptyGroup(split, 'g1');
+    expect(closed.groups).toEqual([
+      { id: 'g2', tabIds: [], activeTabId: null },
+    ]);
+    expect(closeEmptyGroup(closed, 'g2')).toBe(closed);
+    const opened = open(split, node('a'), 'a').workspace;
+    expect(closeEmptyGroup(opened, 'g2')).toBe(opened);
+    expect(closeEmptyGroup(opened, 'missing')).toBe(opened);
+  });
+
+  it.each([0, 1, 3])(
+    'splits with %i tabs without redistributing them',
+    (count) => {
+      let ws = emptyWorkspace();
+      for (let index = 0; index < count; index++) {
+        ws = open(ws, node(`n${index}`), `t${index}`).workspace;
+      }
+      const split = splitGroup(ws, 'g2');
+      expect(split.groups).toEqual([
+        ws.groups[0],
+        { id: 'g2', tabIds: [], activeTabId: null },
+      ]);
+      expect(split.tabs).toBe(ws.tabs);
+      expect(split.activeGroupId).toBe('g2');
+      expect(splitGroup(split)).toBe(split);
+      expect(
+        validateWorkspace(
+          split,
+          CANVAS,
+          new Set(Array.from({ length: count }, (_, index) => `n${index}`)),
+        ),
+      ).toEqual(split);
+    },
+  );
+
+  it('opens new nodes in the active empty group and reveals existing nodes in place', () => {
+    const first = open(emptyWorkspace(), node('a'), 'a', {
+      transient: true,
+    }).workspace;
+    const split = splitGroup(first, 'g2');
+    const second = open(split, node('b'), 'b', { transient: true }).workspace;
+    expect(second.groups[0].tabIds).toEqual(['a']);
+    expect(second.groups[1].tabIds).toEqual(['b']);
+    const reopened = open(second, node('a'), 'unused', { transient: true });
+    expect(reopened.tabId).toBe('a');
+    expect(reopened.workspace.activeGroupId).toBe('g1');
+    expect(reopened.workspace.groups).toEqual(second.groups);
+    expect(Object.keys(reopened.workspace.tabs)).toEqual(['a', 'b']);
+    const replaced = open(reopened.workspace, node('c'), 'unused', {
+      transient: true,
+    }).workspace;
+    expect(replaced.tabs.a.target).toEqual(node('c'));
+    expect(replaced.tabs.b.target).toEqual(node('b'));
+  });
+
+  it('keeps an intentional empty group when closing a non-final tab in its neighbor', () => {
+    let ws = open(emptyWorkspace(), node('a'), 'a').workspace;
+    ws = open(ws, node('b'), 'b').workspace;
+    ws = splitGroup(ws, 'g2');
+    const closed = closeTab(ws, 'b');
+    expect(closed.groups).toHaveLength(2);
+    expect(closed.groups[1].tabIds).toEqual([]);
+    const emptied = closeTab(closed, 'a');
+    expect(emptied.groups).toEqual([
+      { id: 'g2', tabIds: [], activeTabId: null },
+    ]);
+    expect(emptied.activeGroupId).toBe('g2');
+  });
+});
 
 describe('URL targets', () => {
   const url = (value = 'https://example.com/'): PreviewTarget => ({
@@ -116,7 +211,8 @@ describe('URL targets', () => {
     ws = validateWorkspace(again.workspace, CANVAS, new Set());
     expect(Object.keys(ws.tabs)).toEqual(['chat', 'url']);
     ws = moveTab(ws, 'url', { groupId: 'g1', index: 0 });
-    expect(ws.groups).toHaveLength(1);
+    expect(ws.groups).toHaveLength(2);
+    expect(ws.groups[1].tabIds).toEqual([]);
     expect(ws.groups[0].tabIds).toEqual(['url', 'chat']);
     ws = open(ws, url('https://other.com'), 'other', {
       openToSide: true,
@@ -418,6 +514,124 @@ describe('closeTab', () => {
   });
 });
 
+describe('closeTabs', () => {
+  it('matches ordered single closes for every scope, clicked tab and active tab', () => {
+    const scopes = ['others', 'to-right', 'group'] as const;
+    for (const count of [1, 2, 6]) {
+      let base = emptyWorkspace();
+      for (let i = 0; i < count; i++)
+        base = open(base, node(String(i)), String(i)).workspace;
+      for (const split of [false, true]) {
+        const workspace = split ? splitGroup(base, 'g2') : base;
+        const ids = workspace.groups[0].tabIds;
+        for (const active of ids) {
+          const ws = activateTab(workspace, active);
+          for (const clicked of ids) {
+            for (const scope of scopes) {
+              const removed =
+                scope === 'group'
+                  ? ids
+                  : scope === 'others'
+                    ? ids.filter((id) => id !== clicked)
+                    : ids.slice(ids.indexOf(clicked) + 1);
+              expect(closeTabs(ws, clicked, scope)).toEqual(
+                removed.reduce(closeTab, ws),
+              );
+            }
+          }
+        }
+      }
+    }
+  });
+
+  it('copies each tab once when closing a large group', () => {
+    const ws = emptyWorkspace();
+    const ids = Array.from({ length: 2000 }, (_, i) => `t${i}`);
+    let reads = 0;
+    for (const id of ids) {
+      Object.defineProperty(ws.tabs, id, {
+        enumerable: true,
+        get: () => {
+          reads++;
+          return { id, target: node(id), transient: false, lastActiveSeq: 0 };
+        },
+      });
+    }
+    ws.groups[0] = { id: 'g1', tabIds: ids, activeTabId: ids[0] };
+    const closed = closeTabs(ws, ids[0], 'group');
+    expect(reads).toBe(ids.length);
+    expect(closed.tabs).toEqual({});
+    expect(closed.groups[0].tabIds).toEqual([]);
+    expect(Object.keys(ws.tabs)).toHaveLength(ids.length);
+  });
+
+  function workspaceWithTwoGroups() {
+    let ws = open(emptyWorkspace(), node('a'), 'a').workspace;
+    ws = open(ws, node('b'), 'b', { transient: true }).workspace;
+    ws = open(ws, chat('c'), 'c').workspace;
+    return open(ws, node('d'), 'd', { openToSide: true }, 'g2').workspace;
+  }
+
+  it.each([
+    ['others', ['b']],
+    ['to-right', ['a', 'b']],
+  ] as const)('closes %s only in the clicked tab group', (scope, expected) => {
+    const ws = workspaceWithTwoGroups();
+    const closed = closeTabs(ws, 'b', scope);
+    expect(closed.groups[0].tabIds).toEqual(expected);
+    expect(closed.groups[0].activeTabId).toBe('b');
+    expect(closed.groups[1]).toBe(ws.groups[1]);
+    expect(closed.activeGroupId).toBe('g2');
+    expect(closed.tabs.b).toBe(ws.tabs.b);
+    expect(closed.tabs.d).toBe(ws.tabs.d);
+  });
+
+  it('uses current tab order after reordering', () => {
+    const ws = moveTab(workspaceWithTwoGroups(), 'a', {
+      groupId: 'g1',
+      index: 2,
+    });
+    const closed = closeTabs(ws, 'b', 'to-right');
+    expect(closed.groups[0].tabIds).toEqual(['b']);
+    expect(Object.keys(closed.tabs).sort()).toEqual(['b', 'd']);
+  });
+
+  it.each(['a', 'd'])(
+    'removes only the group containing %s when closing that group',
+    (tabId) => {
+      const ws = workspaceWithTwoGroups();
+      const survivor = ws.groups[tabId === 'a' ? 1 : 0];
+      const closed = closeTabs(ws, tabId, 'group');
+      expect(closed.groups).toEqual([survivor]);
+      expect(closed.activeGroupId).toBe(survivor.id);
+      expect(closed.splitRatio).toBe(0.5);
+      expect(Object.keys(closed.tabs)).toEqual(survivor.tabIds);
+    },
+  );
+
+  it('retains one empty group when closing all tabs in the sole group', () => {
+    let ws = open(emptyWorkspace(), node('a'), 'a').workspace;
+    ws = open(ws, node('b'), 'b').workspace;
+    const closed = closeTabs(ws, 'a', 'group');
+    expect(closed.tabs).toEqual({});
+    expect(closed.groups).toEqual([
+      { id: 'g1', tabIds: [], activeTabId: null },
+    ]);
+  });
+
+  it('does not close an intentional empty neighbor or mutate an empty batch', () => {
+    const ws = splitGroup(
+      open(emptyWorkspace(), node('a'), 'a').workspace,
+      'g2',
+    );
+    expect(closeTabs(ws, 'a', 'others')).toBe(ws);
+    expect(closeTabs(ws, 'a', 'to-right')).toBe(ws);
+    expect(closeTabs(ws, 'missing', 'group')).toBe(ws);
+    const closed = closeTabs(ws, 'a', 'group');
+    expect(closed.groups).toEqual([ws.groups[1]]);
+  });
+});
+
 describe('moveTab', () => {
   it('reorders within a group', () => {
     let ws = open(emptyWorkspace(), node('a'), 't1').workspace;
@@ -453,20 +667,22 @@ describe('moveTab', () => {
 
     const moved = moveTab(split, 't1', { groupId: sideGroupId });
 
-    expect(moved.groups).toHaveLength(1);
+    expect(moved.groups).toHaveLength(2);
     expect(moved.tabs['t1'].transient).toBe(true);
     expect(moved.tabs['t2']).toBeUndefined();
-    expect(moved.groups[0].tabIds).toEqual(['t1']);
+    expect(moved.groups[0].tabIds).toEqual([]);
+    expect(moved.groups[1].tabIds).toEqual(['t1']);
   });
 
-  it('collapses the source group when its last tab leaves', () => {
+  it('keeps an empty source group when its last tab moves', () => {
     const a = open(emptyWorkspace(), node('a'), 't1').workspace;
     const b = open(a, node('b'), 't2', { openToSide: true }).workspace;
     const sideGroupId = b.groups[1].id;
 
     const moved = moveTab(b, 't1', { groupId: sideGroupId });
-    expect(moved.groups).toHaveLength(1);
-    expect(moved.groups[0].tabIds).toEqual(['t2', 't1']);
+    expect(moved.groups).toHaveLength(2);
+    expect(moved.groups[0].tabIds).toEqual([]);
+    expect(moved.groups[1].tabIds).toEqual(['t2', 't1']);
   });
 
   it('ignores an unknown destination group', () => {

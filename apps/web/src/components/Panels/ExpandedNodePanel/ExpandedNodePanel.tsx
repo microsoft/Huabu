@@ -35,10 +35,10 @@ import {
   selectActiveNodeId,
   usePreviewWorkspaceStore,
 } from '../../../store/previewWorkspace/store.ts';
-import { Button } from '../../Common/Button.tsx';
 import { DropdownMenu, DropdownMenuItem } from '../../Common/DropdownMenu.tsx';
 import { InlineEditableTitle } from '../../Common/InlineEditableTitle';
 import { NodePreviewContent } from '../../Nodes/NodePreviewContent.tsx';
+import { PreviewHeaderButton } from '../../Nodes/PreviewHeaderButton';
 import { PreviewHeaderSlotContext } from '../../Nodes/PreviewHeaderSlot.tsx';
 
 import type { Node } from '@xyflow/react';
@@ -62,6 +62,12 @@ type ExpandedNodePanelProps = {
   onNodeFocusRequestHandled?: (nonce: number) => void;
   /** Uses the compact chrome shared by Preview Workspace renderers. */
   embedded?: boolean;
+  /** Preview tabs own the display title; keep editing and content actions. */
+  hideDuplicateTitle?: boolean;
+  titleEditorHost?: HTMLElement | null;
+  renameRequestNonce?: number;
+  onRenameRequestHandled?: (nonce: number) => void;
+  onRenameKeyboardEnd?: () => void;
   /**
    * Whether this instance owns the window-level shortcuts. With two panes
    * mounted only the focused group's may, or Escape would close both
@@ -154,20 +160,16 @@ const ConnectedNodeMenu = ({
       align="bottom-left"
       className="min-w-56"
       trigger={
-        <Button
+        <PreviewHeaderButton
           ref={triggerRef}
-          variant="ghost"
-          size="sm"
-          iconOnly
           title={title}
-          tooltipPlacement="bottom"
           aria-label={title}
           aria-haspopup="menu"
           tooltipWrapperClassName="inline-flex shrink-0"
-          className="shrink-0 [&_svg]:h-3.5 [&_svg]:w-3.5"
+          className="shrink-0"
         >
           <TableOfContents />
-        </Button>
+        </PreviewHeaderButton>
       }
     >
       <div
@@ -216,7 +218,7 @@ const ConnectedNodeMenu = ({
                 return (
                   <DropdownMenuItem
                     key={neighbor.id}
-                    icon={<NodeTypeIcon size={13} strokeWidth={1.5} />}
+                    icon={<NodeTypeIcon size={13} />}
                     autoFocus={
                       group.direction === focusDirection && index === 0
                     }
@@ -244,6 +246,11 @@ export const ExpandedNodePanel = ({
   nodeFocusRequestNonce,
   onNodeFocusRequestHandled,
   embedded = false,
+  hideDuplicateTitle = false,
+  titleEditorHost,
+  renameRequestNonce,
+  onRenameRequestHandled,
+  onRenameKeyboardEnd,
   hasFocusPriority = true,
 }: ExpandedNodePanelProps = {}) => {
   const { t } = useTranslation();
@@ -427,7 +434,12 @@ export const ExpandedNodePanel = ({
   // `tooltipPlacement="bottom"` — the header sits flush against the top
   // of the panel, so the default `'top'` tooltip would escape upward.
   const [headerSlotEl, setHeaderSlotEl] = useState<HTMLDivElement | null>(null);
-  const headerSlotValue = useMemo(() => ({ el: headerSlotEl }), [headerSlotEl]);
+  const [leadingHeaderSlotEl, setLeadingHeaderSlotEl] =
+    useState<HTMLDivElement | null>(null);
+  const headerSlotValue = useMemo(
+    () => ({ el: headerSlotEl, leadingEl: leadingHeaderSlotEl }),
+    [headerSlotEl, leadingHeaderSlotEl],
+  );
 
   // ─── Inline title editor ─────────────────────────────────────────
   // Single source of truth for the displayed label, regardless of
@@ -441,6 +453,7 @@ export const ExpandedNodePanel = ({
   }, [node]);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [draftTitle, setDraftTitle] = useState(liveLabel);
+  const handledRenameNonce = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     if (isEditingTitle) return;
@@ -452,6 +465,26 @@ export const ExpandedNodePanel = ({
   useEffect(() => {
     setIsEditingTitle(false);
   }, [expandedNodeId]);
+
+  useEffect(() => {
+    if (
+      renameRequestNonce === undefined ||
+      handledRenameNonce.current === renameRequestNonce ||
+      !expandedNodeId ||
+      !activeItem
+    )
+      return;
+    handledRenameNonce.current = renameRequestNonce;
+    setDraftTitle(liveLabel);
+    setIsEditingTitle(true);
+    onRenameRequestHandled?.(renameRequestNonce);
+  }, [
+    renameRequestNonce,
+    expandedNodeId,
+    activeItem,
+    liveLabel,
+    onRenameRequestHandled,
+  ]);
 
   // Listen for text selection inside the panel and auto-attach as pending
   const handleSelectionChange = useCallback(() => {
@@ -538,7 +571,14 @@ export const ExpandedNodePanel = ({
       {/* Header bar */}
       <div
         data-testid="expanded-node-header"
-        className={`bg-surface flex shrink-0 items-center justify-between px-2.5 ${embedded ? 'h-9 gap-2' : 'border-edge-default h-12 gap-3 border-b'}`}
+        className={clsx(
+          'bg-surface flex shrink-0 items-center justify-between px-2.5',
+          embedded ? 'h-9 gap-2' : 'border-edge-default h-12 gap-3 border-b',
+          embedded &&
+            hideDuplicateTitle &&
+            connectedNodeGroups.length === 0 &&
+            '[&:not(:has([data-preview-header-actions]:not(:empty),[data-preview-header-leading-actions]:not(:empty)))]:hidden',
+        )}
       >
         {/* Left: connected-node navigation and the shared inline title. */}
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
@@ -565,38 +605,54 @@ export const ExpandedNodePanel = ({
             </div>
           )}
 
-          <div className="flex min-w-0 flex-1 items-center gap-2">
-            <InlineEditableTitle
-              // Align the text, not the control's 4px padding + 1px border.
-              className="-ml-1.25"
-              width="fill"
-              key={expandedNodeId}
-              title={liveLabel}
-              ariaLabel={t('node.rename')}
-              placeholder={t('node.untitled')}
-              editor={
-                canEditTitle
-                  ? {
-                      active: isEditingTitle,
-                      draft: draftTitle,
-                      onChange: setDraftTitle,
-                      onCommit: commitTitle,
-                      onStart: () => setIsEditingTitle(true),
-                      onCancel: () => {
-                        setDraftTitle(liveLabel);
-                        setIsEditingTitle(false);
-                      },
-                    }
-                  : undefined
-              }
-            />
-          </div>
+          <div
+            ref={setLeadingHeaderSlotEl}
+            data-preview-header-leading-actions
+            className="flex shrink-0 items-center gap-1 empty:hidden"
+          />
+          {(!hideDuplicateTitle || isEditingTitle) && (
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <InlineEditableTitle
+                editorContainer={
+                  hideDuplicateTitle ? (titleEditorHost ?? null) : undefined
+                }
+                // Align the text, not the control's 4px padding + 1px border.
+                className={
+                  hideDuplicateTitle
+                    ? 'h-6 py-0 text-sm not-italic'
+                    : '-ml-1.25'
+                }
+                width="fill"
+                key={expandedNodeId}
+                title={liveLabel}
+                ariaLabel={t('node.rename')}
+                placeholder={t('node.untitled')}
+                editor={
+                  canEditTitle
+                    ? {
+                        active: isEditingTitle,
+                        draft: draftTitle,
+                        onChange: setDraftTitle,
+                        onCommit: commitTitle,
+                        onKeyboardEditEnd: onRenameKeyboardEnd,
+                        onStart: () => setIsEditingTitle(true),
+                        onCancel: () => {
+                          setDraftTitle(liveLabel);
+                          setIsEditingTitle(false);
+                        },
+                      }
+                    : undefined
+                }
+              />
+            </div>
+          )}
         </div>
 
         {/* Right: node-specific actions followed by view-level controls. */}
         <div className="text-fg-muted flex shrink-0 items-center gap-1">
           <div
             ref={setHeaderSlotEl}
+            data-preview-header-actions
             className="peer flex items-center gap-1 empty:hidden"
           />
           {!embedded && (
@@ -607,19 +663,15 @@ export const ExpandedNodePanel = ({
           )}
 
           {!embedded && (
-            <Button
-              variant="ghost"
-              iconOnly
-              size="sm"
+            <PreviewHeaderButton
               title={t('actions.close')}
-              tooltipPlacement="bottom"
               onClick={(e) => {
                 e.stopPropagation();
                 activeItem.close();
               }}
             >
               <X />
-            </Button>
+            </PreviewHeaderButton>
           )}
         </div>
       </div>

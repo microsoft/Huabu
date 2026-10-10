@@ -1,27 +1,22 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { ArrowUp, Square, X } from 'lucide-react';
+import { ArrowUp, Square } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { resolveArtifactUrl, uploadImage, uploadPdf } from '@/api/artifact';
+import { uploadImage, uploadPdf } from '@/api/artifact';
 import { useChatSession } from '@/hooks/useChatSession';
-import useCanvasStore from '@/store/canvasStore';
-import {
-  selectThreadMessages,
-  selectThreadPendingAttachments,
-  useChatStore,
-} from '@/store/chatStore';
+import { selectThreadMessages, useChatStore } from '@/store/chatStore';
 import { usePanelStore } from '@/store/panelStore';
 
+import { ChatContextSources } from './ChatContextSources';
 import { ContextUsageRing } from './ContextUsageRing';
-import { SourceCount } from './SelectedNodeRefs';
+import { NodeMentionMenu } from './NodeMentionMenu';
 import { SlashCommandMenu } from './SlashCommandMenu';
+import { useNodeMentionTypeahead } from './useNodeMentionTypeahead';
 import { useSlashCommandTypeahead } from './useSlashCommandTypeahead';
 import { Button } from '../../Common/Button';
-import { NodeRef } from '../../Common/NodeRef';
-import { Tooltip } from '../../Common/Tooltip';
 
 import type { ContextUsageOverride } from './ContextUsageRing';
 import type { AgentMode, AvailableCommand } from '@huabu/shared';
@@ -97,14 +92,6 @@ export interface ChatInputProps {
   connectedTop?: boolean;
 }
 
-const AttachmentTextPreview = ({ text }: { text: string }) => (
-  <div className="bg-surface flex h-12 w-12 items-center justify-center rounded-md px-1">
-    <span className="text-fg-subtle line-clamp-3 w-full text-center text-[8px] leading-tight">
-      {text}
-    </span>
-  </div>
-);
-
 export const ChatInput = ({
   value,
   onChange,
@@ -132,19 +119,7 @@ export const ChatInput = ({
 
   // Pending attachments belong to the thread this composer is sending to.
   const { threadId, canvasId } = useChatSession();
-  const pendingAttachments = useChatStore((s) =>
-    selectThreadPendingAttachments(s, threadId),
-  );
-  const selectionAttachment = useChatStore((s) => s.selectionAttachment);
-  const adjacentNode = useCanvasStore((s) =>
-    adjacentNodeSourceId
-      ? s.nodes.find((node) => node.id === adjacentNodeSourceId)
-      : undefined,
-  );
   const addPendingAttachment = useChatStore((s) => s.addPendingAttachment);
-  const removePendingAttachment = useChatStore(
-    (s) => s.removePendingAttachment,
-  );
   const [isDragOver, setIsDragOver] = useState(false);
 
   // Focus the textarea when a surface asks for *this* thread's composer.
@@ -182,6 +157,17 @@ export const ChatInput = ({
     loading: slashLoading,
     onSlashMenuIntent,
   });
+  const mention = useNodeMentionTypeahead({
+    value,
+    onChange,
+    onCommit,
+    textareaRef,
+    disabled,
+  });
+  const syncCaret = () => {
+    slash.syncCaret();
+    mention.syncCaret();
+  };
 
   // Upload a file and add it as a pending attachment
   const attachFile = useCallback(
@@ -282,7 +268,8 @@ export const ChatInput = ({
     e,
   ) => {
     if (disabled) return;
-    if (e.nativeEvent.isComposing) return;
+    if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
+    if (mention.handleKeyDown(e)) return;
 
     // Slash menu owns ArrowUp/Down/Tab/Enter/Esc while open; bail
     // out the moment it consumes the event so submission and history
@@ -357,251 +344,13 @@ export const ChatInput = ({
       <form onSubmit={handleSubmit} className="w-full">
         <div
           data-chat-input-surface
-          className={`border p-3 transition-colors ${connectedTop ? 'rounded-t-none rounded-b-2xl' : 'rounded-2xl'} ${isDragOver ? 'border-edge-default bg-info-bg' : 'border-edge-default bg-surface'}`}
+          className={`group/composer focus-within:border-info focus-within:ring-info/15 relative border px-3 pt-3 pb-2 transition-colors focus-within:ring-2 ${connectedTop ? 'rounded-t-none rounded-b-2xl' : 'rounded-2xl'} ${isDragOver ? 'border-edge-default bg-info-bg' : 'border-edge-default bg-surface'}`}
         >
-          {/* ── Pending attachment thumbnails ── */}
-          {(pendingAttachments.length > 0 ||
-            selectionAttachment ||
-            adjacentNode) && (
-            <div className="mb-2 flex flex-wrap gap-2">
-              {adjacentNode &&
-                !pendingAttachments.some(
-                  (attachment) =>
-                    attachment.originNodeId === adjacentNode.id &&
-                    !attachment.content &&
-                    !attachment.url,
-                ) && (
-                  <Tooltip content={t('chat.addAdjacentNodeSource')}>
-                    <div
-                      role="button"
-                      tabIndex={0}
-                      aria-label={t('chat.addAdjacentNodeSource')}
-                      className="group border-edge-default relative flex cursor-pointer items-center justify-center rounded-md border border-dashed"
-                      onClick={() => {
-                        const label =
-                          typeof adjacentNode.data.label === 'string'
-                            ? adjacentNode.data.label
-                            : t('chat.attachmentFallbackText');
-                        addPendingAttachment(threadId, {
-                          type: 'text',
-                          source: 'selection',
-                          originNodeId: adjacentNode.id,
-                          label,
-                        });
-                        onCommit?.();
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.key !== 'Enter' && event.key !== ' ') return;
-                        event.preventDefault();
-                        event.currentTarget.click();
-                      }}
-                    >
-                      <AttachmentTextPreview
-                        text={
-                          typeof adjacentNode.data.label === 'string'
-                            ? adjacentNode.data.label
-                            : t('chat.attachmentFallbackText')
-                        }
-                      />
-                    </div>
-                  </Tooltip>
-                )}
-              {/* Selection attachment (from text highlight in expanded panel) */}
-              {selectionAttachment &&
-                (() => {
-                  const att = selectionAttachment;
-                  const sourceNodeId = att.originNodeId;
-                  const previewText =
-                    att.content ??
-                    att.label ??
-                    t('chat.attachmentFallbackText');
-
-                  const tooltipParts: React.ReactNode[] = [];
-                  if (sourceNodeId) {
-                    tooltipParts.push(
-                      <div key="src" className="flex items-center gap-1">
-                        <span className="text-fg-subtle">
-                          {t('chat.attachmentSource')}
-                        </span>
-                        <span className="[&>div]:text-fg-inverse [&>div]:border-fg-inverse/30 [&>div:hover]:bg-fg-inverse/10">
-                          <NodeRef nodeId={sourceNodeId} />
-                        </span>
-                      </div>,
-                    );
-                  }
-                  if (att.content) {
-                    const maxLen = 240;
-                    const truncated =
-                      att.content.length > maxLen
-                        ? att.content.slice(0, maxLen) + '…'
-                        : att.content;
-                    tooltipParts.push(
-                      <div key="content" className="mt-1 max-w-[360px]">
-                        <span className="text-fg-subtle">
-                          {t('chat.attachmentContent')}{' '}
-                        </span>
-                        <span className="break-words whitespace-pre-wrap">
-                          {truncated}
-                        </span>
-                      </div>,
-                    );
-                  }
-
-                  const lockSelectionAttachment = () => {
-                    // Lock the selection: promote to a regular pending attachment
-                    const locked = { ...att };
-                    useChatStore.getState().setSelectionAttachment(null);
-                    addPendingAttachment(threadId, locked);
-                    onCommit?.();
-                  };
-
-                  const tile = (
-                    <div
-                      key="selection-att"
-                      role="button"
-                      tabIndex={0}
-                      aria-label={t('chat.lockSelectionAttachment')}
-                      className="group border-edge-default relative flex cursor-pointer items-center justify-center rounded-md border border-dashed"
-                      onClick={lockSelectionAttachment}
-                      onKeyDown={(e) => {
-                        if (e.key !== 'Enter' && e.key !== ' ') return;
-                        e.preventDefault();
-                        lockSelectionAttachment();
-                      }}
-                    >
-                      <AttachmentTextPreview text={previewText} />
-                      <Button
-                        variant="ghost"
-                        shape="pill"
-                        iconOnly
-                        size="sm"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          useChatStore.getState().setSelectionAttachment(null);
-                        }}
-                        tooltipWrapperClassName="absolute top-0.5 right-0.5 inline-flex opacity-0 transition-opacity group-hover:opacity-100"
-                        className="text-fg-inverse bg-inverse/50 enabled:hover:bg-inverse/70 p-0.5"
-                        title={t('chat.removeAttachment')}
-                      >
-                        <X />
-                      </Button>
-                      {/* TODO: redundant attachment component, should replace with one common attachment component with pending attribute */}
-                    </div>
-                  );
-
-                  if (tooltipParts.length > 0) {
-                    return (
-                      <Tooltip
-                        key="selection-att"
-                        content={
-                          <div className="flex flex-col">{tooltipParts}</div>
-                        }
-                      >
-                        {tile}
-                      </Tooltip>
-                    );
-                  }
-                  return tile;
-                })()}
-
-              {/* Regular pending attachments */}
-              {pendingAttachments.map((att, idx) => {
-                const sourceNodeId = att.originNodeId;
-
-                // Text preview for the tile
-                const previewText =
-                  att.content ??
-                  att.label ??
-                  att.filename ??
-                  t('chat.attachmentFallbackFileLower');
-
-                // Build tooltip content: source + content
-                const tooltipParts: React.ReactNode[] = [];
-                if (sourceNodeId) {
-                  tooltipParts.push(
-                    <div key="src" className="flex items-center gap-1">
-                      <span className="text-fg-subtle">
-                        {t('chat.attachmentSource')}
-                      </span>
-                      <span className="[&>div]:text-fg-inverse [&>div]:border-fg-inverse/30 [&>div:hover]:bg-fg-inverse/10">
-                        <NodeRef nodeId={sourceNodeId} />
-                      </span>
-                    </div>,
-                  );
-                }
-                if (att.content) {
-                  const maxLen = 240;
-                  const truncated =
-                    att.content.length > maxLen
-                      ? att.content.slice(0, maxLen) + '…'
-                      : att.content;
-                  tooltipParts.push(
-                    <div key="content" className="mt-1 max-w-[360px]">
-                      <span className="text-fg-subtle">
-                        {t('chat.attachmentContent')}{' '}
-                      </span>
-                      <span className="break-words whitespace-pre-wrap">
-                        {truncated}
-                      </span>
-                    </div>,
-                  );
-                } else if (att.filename || att.label) {
-                  if (!sourceNodeId) {
-                    tooltipParts.push(
-                      <span key="label">{att.filename ?? att.label}</span>,
-                    );
-                  }
-                }
-
-                const tile = (
-                  <div
-                    key={att.url || `att-${idx}`}
-                    className="group border-edge-default relative flex items-center justify-center rounded-md border"
-                  >
-                    {att.type === 'image' && att.url ? (
-                      <img
-                        src={resolveArtifactUrl(att.url, canvasId ?? undefined)}
-                        alt={att.label ?? t('chat.attachedImageAlt')}
-                        className="h-12 w-12 rounded-md object-contain"
-                      />
-                    ) : (
-                      <AttachmentTextPreview text={previewText} />
-                    )}
-                    <Button
-                      variant="ghost"
-                      iconOnly
-                      size="sm"
-                      shape="pill"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        removePendingAttachment(threadId, idx);
-                        onCommit?.();
-                      }}
-                      tooltipWrapperClassName="absolute top-0.5 right-0.5 inline-flex opacity-0 transition-opacity group-hover:opacity-100"
-                      className="text-fg-inverse bg-inverse/50 enabled:hover:bg-inverse/70 p-0.5"
-                      title={t('chat.removeAttachment')}
-                    >
-                      <X />
-                    </Button>
-                  </div>
-                );
-
-                if (tooltipParts.length > 0) {
-                  return (
-                    <Tooltip
-                      key={att.url || `att-${idx}`}
-                      content={
-                        <div className="flex flex-col">{tooltipParts}</div>
-                      }
-                    >
-                      {tile}
-                    </Tooltip>
-                  );
-                }
-                return tile;
-              })}
-            </div>
-          )}
+          {mention.open ? <NodeMentionMenu mention={mention} /> : null}
+          <ChatContextSources
+            adjacentNodeSourceId={adjacentNodeSourceId}
+            onCommit={onCommit}
+          />
 
           <div className="relative">
             <textarea
@@ -609,24 +358,31 @@ export const ChatInput = ({
               name="agent-message"
               autoComplete="off"
               aria-label={currentPlaceholder}
+              aria-autocomplete="list"
+              aria-controls={mention.open ? mention.menuId : undefined}
+              aria-activedescendant={mention.activeOptionId}
               value={value}
               onChange={(e) => {
                 onChange(e.target.value);
                 // Caret reads must run AFTER onChange so the slash
                 // activation parser sees the committed value.
-                slash.syncCaret();
+                syncCaret();
               }}
               onKeyDown={handleKeyDown}
-              onKeyUp={slash.syncCaret}
-              onClick={slash.syncCaret}
-              onSelect={slash.syncCaret}
+              onKeyUp={syncCaret}
+              onClick={syncCaret}
+              onSelect={syncCaret}
+              onFocus={mention.onFocus}
+              onBlur={mention.onBlur}
+              onCompositionStart={mention.onCompositionStart}
+              onCompositionEnd={mention.onCompositionEnd}
               onPaste={handlePaste}
               placeholder={currentPlaceholder}
               disabled={disabled}
               rows={2}
               className="text-fg-default placeholder:text-fg-subtle w-full resize-none bg-transparent text-sm focus:outline-none disabled:cursor-not-allowed"
             />
-            {slash.slashState && (
+            {!mention.open && slash.slashState && (
               <SlashCommandMenu
                 ref={slash.slashMenuRef}
                 commands={slashCommands}
@@ -637,16 +393,12 @@ export const ChatInput = ({
             )}
           </div>
 
-          {/* Send row (inside the input box): ACP session selectors
-              (model / mode / config) on the left, selected-node sources +
-              the send / stop button on the right. */}
+          {/* ACP selectors and send / stop stay separate from source context. */}
           <div className="flex items-center justify-between gap-3">
             <div className="flex min-w-0 flex-1 items-center overflow-hidden">
               {acpSelectorsSlot}
             </div>
             <div className="flex shrink-0 items-center gap-2">
-              <SourceCount />
-
               {isStreaming ? (
                 <Button
                   variant="solid"

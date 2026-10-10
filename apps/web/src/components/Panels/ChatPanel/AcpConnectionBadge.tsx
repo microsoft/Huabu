@@ -2,8 +2,8 @@
 // Licensed under the MIT license.
 
 /**
- * `AcpConnectionBadge` — three-state pill summarising the live
- * transport health of the thread's bound external agent.
+ * `AcpConnectionBadge` describes capability-cache loading, not live
+ * transport health. Preview tabs reuse its dot and description.
  *
  * **Optimistic-green design**: opening a thread no longer triggers a
  * real ensure-session — the chat panel hydrates selectors from a
@@ -30,78 +30,57 @@
 
 import { useTranslation } from 'react-i18next';
 
+import { cn } from '@/components/Common/cn';
 import { Tooltip } from '@/components/Common/Tooltip';
 
 import type { FC } from 'react';
 
 export type AcpConnectionStatus = 'connecting' | 'connected' | 'failed';
 
-interface AcpConnectionBadgeProps {
+export interface AcpConnectionInfo {
   status: AcpConnectionStatus;
-  /** Display name of the bound external agent — shown in tooltips. */
+  /** Display name of the bound external agent. */
   alias: string;
   /**
-   * Last capability-cache read error. Used by the failed-state tooltip.
+   * Last capability-cache read error.
    */
   errorMessage?: string | null;
 }
 
-export const AcpConnectionBadge: FC<AcpConnectionBadgeProps> = ({
-  status,
-  alias,
-  errorMessage,
-}) => {
+export function useAcpConnectionDescription(
+  connection?: AcpConnectionInfo | null,
+) {
   const { t } = useTranslation();
-  if (status === 'connecting') {
-    return (
-      <Tooltip
-        content={t('chat.connecting')}
-        placement="bottom"
-        wrapperClassName="inline-flex shrink-0"
-      >
-        <span
-          className="inline-flex shrink-0 items-center gap-1 px-0.5 py-0.5"
-          aria-label={t('chat.connecting')}
-        >
-          <span
-            aria-hidden
-            className="bg-info h-1.5 w-1.5 shrink-0 animate-pulse rounded-full"
-          />
-        </span>
-      </Tooltip>
-    );
-  }
+  if (!connection) return null;
+  return t(`chat.capabilityStatus.${connection.status}`);
+}
 
-  if (status === 'connected') {
-    return (
-      <Tooltip
-        content={t('chat.connected')}
-        placement="bottom"
-        wrapperClassName="inline-flex shrink-0"
-      >
-        <span
-          className="inline-flex shrink-0 items-center gap-1 px-0.5 py-0.5"
-          aria-label={t('chat.connected')}
-        >
-          <span
-            aria-hidden
-            className="bg-success h-1.5 w-1.5 shrink-0 rounded-full opacity-50"
-          />
-        </span>
-      </Tooltip>
-    );
-  }
+export function AcpConnectionDot({
+  status,
+  className,
+}: {
+  status: AcpConnectionStatus;
+  className?: string;
+}) {
+  return (
+    <span
+      aria-hidden
+      data-acp-connection-status={status}
+      className={cn(
+        'size-1.5 shrink-0 rounded-full',
+        status === 'connected' && 'bg-success/50',
+        status === 'connecting' &&
+          'bg-info animate-pulse motion-reduce:animate-none',
+        status === 'failed' && 'bg-danger',
+        className,
+      )}
+    />
+  );
+}
 
-  // failed
-  // Categorical headline drives the user to the right remediation
-  // without needing to read the raw error. The detail message is
-  // appended on a second line so power users can still see the
-  // underlying server text.
-  const headline = t('chat.connectionHeadline.fallback', { alias });
-  const tooltipText =
-    errorMessage && errorMessage.length > 0
-      ? `${headline}\n\n${errorMessage}`
-      : headline;
+export const AcpConnectionBadge: FC<AcpConnectionInfo> = (connection) => {
+  const { t } = useTranslation();
+  const tooltipText = useAcpConnectionDescription(connection);
   return (
     <Tooltip
       content={tooltipText}
@@ -110,14 +89,15 @@ export const AcpConnectionBadge: FC<AcpConnectionBadgeProps> = ({
       contentClassName="whitespace-pre-line"
     >
       <span
-        className="text-danger inline-flex shrink-0 items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium tracking-wide uppercase"
-        aria-label={tooltipText}
+        className={cn(
+          'inline-flex shrink-0 items-center gap-1 px-0.5 py-0.5',
+          connection.status === 'failed' &&
+            'text-danger text-[10px] font-medium',
+        )}
+        aria-label={tooltipText ?? undefined}
       >
-        <span
-          aria-hidden
-          className="bg-danger h-1.5 w-1.5 shrink-0 rounded-full"
-        />
-        {t('chat.connectionLabel.failed')}
+        <AcpConnectionDot status={connection.status} />
+        {connection.status === 'failed' && t('chat.connectionLabel.failed')}
       </span>
     </Tooltip>
   );

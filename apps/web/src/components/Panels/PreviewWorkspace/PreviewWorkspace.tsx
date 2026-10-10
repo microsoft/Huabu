@@ -29,6 +29,7 @@ import {
   Fragment,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -53,10 +54,12 @@ import {
 
 import { PreviewGroup } from './PreviewGroup';
 import { PreviewTabDragOverlay } from './PreviewTab';
+import { newChatElementId, tabElementId } from './PreviewTabStrip';
 import { resolveTabDropDestination, resolveTabDropIndicator } from './tabDnd';
 
 import type {
   CanvasPreviewWorkspace,
+  ClosePreviewTabsScope,
   PreviewTarget,
 } from '@/store/previewWorkspace/model';
 import type { Node } from '@xyflow/react';
@@ -137,10 +140,7 @@ export function settleActivePreviewTab(
   tabId: string,
   settle: (nodeId: string) => void = settleNodePreprocess,
 ): void {
-  const group = workspace.groups.find((candidate) =>
-    candidate.tabIds.includes(tabId),
-  );
-  if (group?.activeTabId !== tabId) return;
+  if (!workspace.groups.some((group) => group.activeTabId === tabId)) return;
 
   const target = workspace.tabs[tabId]?.target;
   if (target?.kind !== 'node') return;
@@ -161,7 +161,15 @@ const tabCollisionDetection: CollisionDetection = (args) => {
     return tabCollision ? [tabCollision] : pointerCollisions;
   }
 
-  return closestCenter({ ...args, droppableContainers: tabContainers });
+  return closestCenter({
+    ...args,
+    droppableContainers: args.droppableContainers.filter(
+      (container) =>
+        container.data.current?.type === 'preview-tab' ||
+        (container.data.current?.type === 'preview-group' &&
+          container.data.current.isEmpty),
+    ),
+  });
 };
 
 export function PreviewWorkspace({
@@ -188,10 +196,37 @@ export function PreviewWorkspace({
   );
   const activateTab = usePreviewWorkspaceStore((s) => s.activateTab);
   const closeTab = usePreviewWorkspaceStore((s) => s.closeTab);
+  const closeTabs = usePreviewWorkspaceStore((s) => s.closeTabs);
   const promoteTab = usePreviewWorkspaceStore((s) => s.promoteTab);
   const moveTab = usePreviewWorkspaceStore((s) => s.moveTab);
   const setActiveGroup = usePreviewWorkspaceStore((s) => s.setActiveGroup);
   const setSplitRatio = usePreviewWorkspaceStore((s) => s.setSplitRatio);
+  const splitGroup = usePreviewWorkspaceStore((s) => s.splitGroup);
+  const closeEmptyGroup = usePreviewWorkspaceStore((s) => s.closeEmptyGroup);
+  const closingFocusRef = useRef<Element | null>(null);
+
+  useLayoutEffect(() => {
+    const previousFocus = closingFocusRef.current;
+    closingFocusRef.current = null;
+    if (
+      !previousFocus ||
+      previousFocus.isConnected ||
+      document.activeElement !== document.body
+    ) {
+      return;
+    }
+    const group = workspace.groups.find(
+      (candidate) => candidate.id === workspace.activeGroupId,
+    );
+    if (!group) return;
+    document
+      .getElementById(
+        group.activeTabId
+          ? tabElementId(group.id, group.activeTabId)
+          : newChatElementId(group.id),
+      )
+      ?.focus({ preventScroll: true });
+  }, [workspace]);
 
   const scrollTargets = useMemo(
     () => Object.values(workspace.tabs).map(({ target }) => target),
@@ -258,36 +293,41 @@ export function PreviewWorkspace({
     [activateTab, settleTab],
   );
 
+  const collapseAfterClose = () => {
+    if (!onCollapse) return;
+    // Portal menus live outside the panel; hand focus back before its host hides it.
+    if (closingFocusRef.current?.closest('[role="menu"]')) {
+      containerRef.current
+        ?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')
+        ?.focus({ preventScroll: true });
+    }
+    closingFocusRef.current = null;
+    onCollapse();
+  };
+
   const closeWorkspaceTab = (tabId: string) => {
+    closingFocusRef.current = document.activeElement;
     const currentWorkspace = usePreviewWorkspaceStore.getState().workspace;
     const isFinalTab = Object.keys(currentWorkspace.tabs).length === 1;
     closeTab(tabId, settleTab);
-    if (isFinalTab) onCollapse?.();
+    if (isFinalTab) collapseAfterClose();
   };
-  const openPreviewTarget = usePreviewWorkspaceStore(
-    (s) => s.openPreviewTarget,
-  );
-
-  const openToSide = useCallback(
-    (tabId: string) => {
-      const tab = usePreviewWorkspaceStore.getState().workspace.tabs[tabId];
-      // Open to Side relocates the one tab rather than duplicating the
-      // target, so it goes through the same open path (§8).
-      if (tab) {
-        settleTab(tabId);
-        openPreviewTarget(
-          tab.target,
-          {
-            openToSide: true,
-            transient: tab.transient,
-          },
-          settleTab,
-        );
-      }
-    },
-    [openPreviewTarget, settleTab],
-  );
-
+  const closeWorkspaceTabs = (tabId: string, scope: ClosePreviewTabsScope) => {
+    closingFocusRef.current = document.activeElement;
+    const before = usePreviewWorkspaceStore.getState().workspace;
+    closeTabs(tabId, scope, settleTab);
+    const after = usePreviewWorkspaceStore.getState().workspace;
+    if (
+      Object.keys(before.tabs).length > 0 &&
+      Object.keys(after.tabs).length === 0
+    ) {
+      collapseAfterClose();
+    }
+  };
+  const closeWorkspaceEmptyGroup = (groupId: string) => {
+    closingFocusRef.current = document.activeElement;
+    closeEmptyGroup(groupId);
+  };
   const openNewChat = useCallback(
     (groupId: string) => {
       if (!canvasId) return;
@@ -408,14 +448,6 @@ export function PreviewWorkspace({
     setSplitRatio(current + delta);
   };
 
-  if (workspace.groups.every((g) => g.tabIds.length === 0)) {
-    return (
-      <div className="text-fg-subtle flex h-full items-center justify-center p-6 text-center text-sm">
-        {t('preview.emptyWorkspace')}
-      </div>
-    );
-  }
-
   return (
     <DndContext
       sensors={sensors}
@@ -479,12 +511,14 @@ export function PreviewWorkspace({
                 onFocus={() => setActiveGroup(group.id)}
                 onActivate={activateWorkspaceTab}
                 onClose={closeWorkspaceTab}
+                onCloseTabs={closeWorkspaceTabs}
                 onPromote={promoteTab}
                 nodeFocusRequest={nodeFocusRequest}
                 onNodeFocusRequestHandled={consumeNodeFocusRequest}
                 chatOpenRequest={chatOpenRequest}
                 onChatOpenRequestHandled={consumeChatOpenRequest}
-                onOpenToSide={openToSide}
+                onSplit={splitGroup}
+                onCloseEmptyGroup={() => closeWorkspaceEmptyGroup(group.id)}
                 onNewChat={() => openNewChat(group.id)}
                 tabDropIndicator={tabDropIndicator}
                 isFullscreen={isFullscreen}

@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { ArrowUpRight, MessageSquare } from 'lucide-react';
+import { ArrowUpRight, MessageCircle } from 'lucide-react';
 import { useState } from 'react';
 
 import { AgentAvatarMark } from '@/components/Common/AgentAvatarMark';
@@ -131,7 +131,7 @@ export function NewQuestionSpecimen({
               <AgentAvatarMark agent={agent} size={20} detail="full" />
             </span>
             <span>{agent.alias}</span>
-            <MessageSquare size={13} aria-hidden />
+            <MessageCircle size={13} aria-hidden />
           </footer>
         ) : null}
         <Button

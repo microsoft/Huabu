@@ -150,6 +150,16 @@ function parseGroups(
       : [];
     for (const id of tabIds) seenTabIds.add(id);
 
+    // Keep intentional empty groups, but not a secondary group emptied by repair.
+    if (
+      groups.length > 0 &&
+      tabIds.length === 0 &&
+      Array.isArray(candidate.tabIds) &&
+      candidate.tabIds.length > 0
+    ) {
+      continue;
+    }
+
     const activeTabId =
       typeof candidate.activeTabId === 'string' &&
       tabIds.includes(candidate.activeTabId)
@@ -178,9 +188,7 @@ function parseWorkspace(
     if (!source) return null;
 
     const tabs = parseTabs(source.tabs, canvasId);
-    const groups = parseGroups(source.groups, tabs).filter(
-      (group, index) => index === 0 || group.tabIds.length > 0,
-    );
+    const groups = parseGroups(source.groups, tabs);
     if (groups.length === 0) return null;
 
     // Tabs orphaned by group repair would otherwise be unreachable state.

@@ -20,6 +20,8 @@ import { create } from 'zustand';
 import {
   activateTab,
   closeTab,
+  closeTabs,
+  closeEmptyGroup,
   createEmptyWorkspace,
   findTabByTarget,
   groupOfTab,
@@ -30,8 +32,10 @@ import {
   replaceTabTarget,
   setActiveGroup,
   setSplitRatio,
+  splitGroup,
   validateWorkspace,
   type CanvasPreviewWorkspace,
+  type ClosePreviewTabsScope,
   type OpenPreviewTargetOptions,
   type PreviewTab,
   type PreviewTarget,
@@ -103,6 +107,11 @@ export type PreviewWorkspaceState = {
     beforeTabRemoved?: BeforePreviewTabRemoved,
   ) => string;
   closeTab: (tabId: string, beforeTabRemoved?: BeforePreviewTabRemoved) => void;
+  closeTabs: (
+    tabId: string,
+    scope: ClosePreviewTabsScope,
+    beforeTabRemoved?: BeforePreviewTabRemoved,
+  ) => void;
   activateTab: (tabId: string) => void;
   promoteTab: (tabId: string) => void;
   moveTab: (
@@ -112,6 +121,8 @@ export type PreviewWorkspaceState = {
   ) => void;
   replaceTabTarget: (tabId: string, target: PreviewTarget) => void;
   mergeGroups: (beforeTabRemoved?: BeforePreviewTabRemoved) => void;
+  splitGroup: () => void;
+  closeEmptyGroup: (groupId: string) => void;
   setActiveGroup: (groupId: string) => void;
   setSplitRatio: (ratio: number) => void;
   requestNodeFocus: (tabId: string) => void;
@@ -168,6 +179,12 @@ export const usePreviewWorkspaceStore = create<PreviewWorkspaceState>(
       set(commitWorkspace(state, workspace, beforeTabRemoved));
     },
 
+    closeTabs: (tabId, scope, beforeTabRemoved) => {
+      const state = get();
+      const workspace = closeTabs(state.workspace, tabId, scope);
+      set(commitWorkspace(state, workspace, beforeTabRemoved));
+    },
+
     activateTab: (tabId) =>
       set({ workspace: activateTab(get().workspace, tabId) }),
 
@@ -189,6 +206,10 @@ export const usePreviewWorkspaceStore = create<PreviewWorkspaceState>(
       const workspace = mergeGroups(state.workspace);
       set(commitWorkspace(state, workspace, beforeTabRemoved));
     },
+
+    splitGroup: () => set({ workspace: splitGroup(get().workspace) }),
+    closeEmptyGroup: (groupId) =>
+      set({ workspace: closeEmptyGroup(get().workspace, groupId) }),
 
     setActiveGroup: (groupId) =>
       set({ workspace: setActiveGroup(get().workspace, groupId) }),

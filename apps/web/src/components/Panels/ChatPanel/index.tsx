@@ -23,6 +23,7 @@ import { Button } from '@/components/Common/Button';
 import { InlineEditableTitle } from '@/components/Common/InlineEditableTitle';
 import { toast } from '@/components/Common/Toast';
 import { PermissionTray } from '@/components/Messages/AIMessage/PermissionCard';
+import { PreviewHeaderButton } from '@/components/Nodes/PreviewHeaderButton';
 import { useAcpProfiles } from '@/hooks/useAcpProfiles';
 import { useAcpSessionMeta } from '@/hooks/useAcpSessionMeta';
 import { useAcpSlashCommands } from '@/hooks/useAcpSlashCommands';
@@ -69,6 +70,8 @@ import { snapshotAgentIcon } from '@/utils/agentIcon';
 
 import {
   AcpConnectionBadge,
+  useAcpConnectionDescription,
+  type AcpConnectionInfo,
   type AcpConnectionStatus,
 } from './AcpConnectionBadge';
 import { AcpSessionSelectors } from './AcpSessionSelectors';
@@ -106,6 +109,13 @@ interface ChatPanelProps {
     nonce: number;
   };
   onOpenPositionHandled?: (nonce: number) => void;
+  /** Preview tabs own the display title; retain the editor and status tools. */
+  hideDuplicateTitle?: boolean;
+  titleEditorHost?: HTMLElement | null;
+  onConnectionChange?: (connection: AcpConnectionInfo | null) => void;
+  renameRequestNonce?: number;
+  onRenameRequestHandled?: (nonce: number) => void;
+  onRenameKeyboardEnd?: () => void;
 }
 
 export const ChatPanel = ({
@@ -119,6 +129,12 @@ export const ChatPanel = ({
   onCommit,
   openPositionRequest,
   onOpenPositionHandled,
+  hideDuplicateTitle = false,
+  titleEditorHost,
+  onConnectionChange,
+  renameRequestNonce,
+  onRenameRequestHandled,
+  onRenameKeyboardEnd,
 }: ChatPanelProps) => {
   const { t } = useTranslation();
   const canvasId = useCanvasStore((state) => state.canvasId);
@@ -456,31 +472,8 @@ export const ChatPanel = ({
       : messages.length > 0,
   });
 
-  // Three-state connection summary for the header badge, derived from
-  // `useAcpSessionMeta`. **Optimistic green by default** — opening a
-  // thread is no longer a "connection in flight" event because we
-  // hydrate selectors from the server's cached meta snapshot without
-  // spawning the agentlet (see `useAcpSessionMeta`'s mount effect).
-  // The badge only deviates from `connected` when there is positive
-  // evidence of trouble:
-  //
-  //   connecting: the GET-only capability cache read is in flight
-  //   failed:     the cache read failed and there is no cached snapshot
-  //   connected:  everything else — cache hit, post-success steady
-  //               state, or transient ensure failure that still leaves
-  //               us with a valid (if possibly stale) snapshot. We
-  //               degrade gracefully here: showing red just because a
-  //               background refresh failed while the cached state is
-  //               perfectly usable would be noise.
-  //
-  // Internal bindings get `null` — the parent only renders the badge
-  // for `agentBinding.kind === 'external'`.
-  //
-  // Profile deletion is intentionally NOT an input here: after the
-  // thread-binding-snapshot refactor each thread carries its own
-  // recipe, so removing the profile in Settings has no effect on a
-  // running thread's transport health. The only signal that matters
-  // for "is this thread usable right now" is the live meta pipeline.
+  // Legacy status names describe cache reads, not live transport health.
+  // A failed refresh with a usable snapshot keeps the optimistic green state.
   const acpConnectionStatus: AcpConnectionStatus | null =
     agentBinding.kind !== 'external'
       ? null
@@ -489,6 +482,36 @@ export const ChatPanel = ({
         : acpSessionMetaError && acpSessionMeta.updatedAt === 0
           ? 'failed'
           : 'connected';
+  const agentAlias = agentBinding.kind === 'external' ? agentBinding.alias : '';
+  const connectionError = acpSessionMetaError?.message ?? null;
+  const connectionDescription = useAcpConnectionDescription(
+    acpConnectionStatus
+      ? {
+          status: acpConnectionStatus,
+          alias: agentAlias,
+          errorMessage: connectionError,
+        }
+      : null,
+  );
+  useEffect(() => {
+    onConnectionChange?.(
+      isActive && acpConnectionStatus
+        ? {
+            status: acpConnectionStatus,
+            alias: agentAlias,
+            errorMessage: connectionError,
+          }
+        : null,
+    );
+    return () => onConnectionChange?.(null);
+  }, [
+    onConnectionChange,
+    isActive,
+    acpConnectionStatus,
+    agentAlias,
+    connectionError,
+  ]);
+  const connectionInTab = hideDuplicateTitle && !!onConnectionChange;
 
   // Optimistic onChange handlers for the ACP selectors: merge the
   // chosen value into the local snapshot immediately, then fire the
@@ -753,6 +776,32 @@ export const ChatPanel = ({
     viewingQuestionNodeId,
   ]);
 
+  const handledRenameNonce = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (
+      renameRequestNonce === undefined ||
+      handledRenameNonce.current === renameRequestNonce ||
+      !isActive ||
+      !canRenameQuestion ||
+      isSavingTitle ||
+      !isHistoryLoaded
+    )
+      return;
+    handledRenameNonce.current = renameRequestNonce;
+    setDraftQuestionTitle(editableTitle ?? '');
+    titleEditActive.current = true;
+    setIsEditingQuestionTitle(true);
+    onRenameRequestHandled?.(renameRequestNonce);
+  }, [
+    renameRequestNonce,
+    isActive,
+    canRenameQuestion,
+    isSavingTitle,
+    isHistoryLoaded,
+    editableTitle,
+    onRenameRequestHandled,
+  ]);
+
   const handleSubmit = useCallback(
     async (e: React.FormEvent, agentMode: AgentMode, draft: string) => {
       e.preventDefault();
@@ -955,46 +1004,65 @@ export const ChatPanel = ({
     ownerCanvasId,
   ]);
 
+  const titleControl = (
+    <InlineEditableTitle
+      editorContainer={
+        hideDuplicateTitle ? (titleEditorHost ?? null) : undefined
+      }
+      width={hideDuplicateTitle ? 'fill' : 'content'}
+      className={hideDuplicateTitle ? 'h-6 py-0 text-sm not-italic' : undefined}
+      key={titleIdentity}
+      title={panelTitle}
+      ariaLabel={renameTitleLabel}
+      placeholder={t('node.untitled')}
+      editor={
+        canRenameQuestion
+          ? {
+              active: isEditingQuestionTitle,
+              draft: draftQuestionTitle,
+              maxLength: 120,
+              disabled: isSavingTitle || !isHistoryLoaded,
+              onChange: setDraftQuestionTitle,
+              onCommit: commitQuestionTitle,
+              onKeyboardEditEnd: onRenameKeyboardEnd,
+              onStart: () => {
+                titleEditActive.current = true;
+                setIsEditingQuestionTitle(true);
+              },
+              onCancel: () => {
+                titleEditActive.current = false;
+                setDraftQuestionTitle(editableTitle ?? '');
+                setIsEditingQuestionTitle(false);
+              },
+            }
+          : undefined
+      }
+    />
+  );
+
   return (
     <ChatSessionProvider value={session}>
+      {hideDuplicateTitle && isEditingQuestionTitle && titleControl}
       <SidebarPanel
         title={panelTitle}
+        hideHeader={
+          hideDuplicateTitle &&
+          (!acpConnectionStatus || connectionInTab) &&
+          !!activeConversationView &&
+          !onToggle
+        }
         tabs={
           <span className="flex max-w-full min-w-0 flex-1 items-center gap-1">
-            <InlineEditableTitle
-              key={titleIdentity}
-              title={panelTitle}
-              ariaLabel={renameTitleLabel}
-              placeholder={t('node.untitled')}
-              editor={
-                canRenameQuestion
-                  ? {
-                      active: isEditingQuestionTitle,
-                      draft: draftQuestionTitle,
-                      maxLength: 120,
-                      disabled: isSavingTitle || !isHistoryLoaded,
-                      onChange: setDraftQuestionTitle,
-                      onCommit: commitQuestionTitle,
-                      onStart: () => {
-                        titleEditActive.current = true;
-                        setIsEditingQuestionTitle(true);
-                      },
-                      onCancel: () => {
-                        titleEditActive.current = false;
-                        setDraftQuestionTitle(editableTitle ?? '');
-                        setIsEditingQuestionTitle(false);
-                      },
-                    }
-                  : undefined
-              }
-            />
-            {acpConnectionStatus && agentBinding.kind === 'external' && (
-              <AcpConnectionBadge
-                status={acpConnectionStatus}
-                alias={agentBinding.alias}
-                errorMessage={acpSessionMetaError?.message ?? null}
-              />
-            )}
+            {!hideDuplicateTitle && titleControl}
+            {!connectionInTab &&
+              acpConnectionStatus &&
+              agentBinding.kind === 'external' && (
+                <AcpConnectionBadge
+                  status={acpConnectionStatus}
+                  alias={agentBinding.alias}
+                  errorMessage={acpSessionMetaError?.message ?? null}
+                />
+              )}
           </span>
         }
         isCollapsed={isCollapsed}
@@ -1004,24 +1072,38 @@ export const ChatPanel = ({
         compactHeader
         tools={
           activeConversationView ? null : (
-            <Button
-              variant="ghost"
-              tone="neutral"
-              size="md"
-              iconOnly
+            <PreviewHeaderButton
               onClick={handleSaveChat}
               disabled={
                 !isHistoryLoaded || isLoading || isSavingTitle || !canSave
               }
               title={t('chat.saveAsQuestion')}
-              tooltipPlacement="bottom"
             >
               <Bookmark />
-            </Button>
+            </PreviewHeaderButton>
           )
         }
       >
         <div className="flex h-full flex-col gap-2 overflow-visible pt-3">
+          {acpConnectionStatus === 'failed' && (
+            <div
+              role="alert"
+              className="text-danger flex items-start gap-2 px-3 text-xs"
+            >
+              <span className="min-w-0 flex-1 wrap-anywhere whitespace-pre-line">
+                {[agentAlias, connectionDescription, connectionError]
+                  .filter(Boolean)
+                  .join('\n')}
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => void refreshAcpSessionMeta()}
+              >
+                {t('messages.retry')}
+              </Button>
+            </div>
+          )}
           {!activeConversationView && titleError && (
             <div
               role="alert"

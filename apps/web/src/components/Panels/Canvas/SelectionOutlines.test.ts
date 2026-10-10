@@ -40,6 +40,24 @@ describe('selectOutlinedNodes', () => {
       ]).map((candidate) => candidate.id),
     ).toEqual(['selected', 'dragged']);
   });
+
+  it('adds only the hovered visible node without duplicating a selected node', () => {
+    const nodes = [
+      node('selected', { selected: true }),
+      node('hovered'),
+      node('idle'),
+      { ...node('hidden'), hidden: true },
+    ];
+    expect(
+      selectOutlinedNodes(nodes, 'hovered').map((entry) => entry.id),
+    ).toEqual(['selected', 'hovered']);
+    expect(
+      selectOutlinedNodes(nodes, 'selected').map((entry) => entry.id),
+    ).toEqual(['selected']);
+    expect(
+      selectOutlinedNodes(nodes, 'hidden').map((entry) => entry.id),
+    ).toEqual(['selected']);
+  });
 });
 
 describe('selectionOutlineRadius', () => {

@@ -14,12 +14,10 @@
  *     lifetime, so the control renders as a read-only chip showing which
  *     agent owns the conversation.
  *
- * Both states occupy the same fixed footprint so the toolbar never
- * shifts when a thread transitions from composing to locked: the chevron
- * keeps its slot (just hidden) in read-only mode.
+ * Both states use the same icon-and-label footprint without a chevron.
  */
 
-import { ChevronDown, Settings } from 'lucide-react';
+import { Settings } from 'lucide-react';
 import { useCallback, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -200,14 +198,6 @@ export const AgentSelector = ({
         <span className="min-w-0 flex-1 truncate text-left">
           {current.label}
         </span>
-        <ChevronDown
-          size={12}
-          className={cn(
-            'shrink-0 transition-transform',
-            !editable && 'invisible',
-            isOpen && 'rotate-180',
-          )}
-        />
       </button>
       {currentBinding.kind === 'internal' && (
         <Button

@@ -4,7 +4,7 @@
 import { ArrowUpRight, Globe } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
-import { Button } from '@/components/Common/Button';
+import { PreviewHeaderButton } from '@/components/Nodes/PreviewHeaderButton';
 import { normalizeSafeLinkHref } from '@/utils/safeLink';
 
 /** A bridge-free remote page, independent of node ingestion and artifacts. */
@@ -32,19 +32,14 @@ export function UrlPreview({ url }: { url: string }) {
             <span className="text-fg-subtle">{location}</span>
           </span>
         </div>
-        <Button
-          variant="ghost"
-          tone="neutral"
-          size="sm"
-          iconOnly
-          className="h-7 w-7 shrink-0"
+        <PreviewHeaderButton
+          className="shrink-0"
           title={t('node.openPageExternal')}
-          tooltipPlacement="bottom"
           aria-label={t('node.openPageExternal')}
           onClick={() => window.open(href, '_blank', 'noopener,noreferrer')}
         >
           <ArrowUpRight aria-hidden="true" />
-        </Button>
+        </PreviewHeaderButton>
       </div>
       <iframe
         key={href}

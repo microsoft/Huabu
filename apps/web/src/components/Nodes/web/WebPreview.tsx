@@ -13,8 +13,8 @@ import { usePreviewScrollMemory } from '@/hooks/usePreviewScrollMemory';
 import { useInteractiveViewBridge } from './useInteractiveViewBridge';
 import { isElectron } from '../../../hooks/useElectron.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
-import { Button } from '../../Common/Button';
 import { Loading } from '../../Common/Loading';
+import { PreviewHeaderButton } from '../PreviewHeaderButton';
 import { usePreviewHeaderSlot } from '../PreviewHeaderSlot';
 
 import type { PreviewComponentProps } from '../note/NotePreview';
@@ -380,32 +380,22 @@ export const WebPreview = ({
     pageSrc || externalHref ? (
       <>
         {pageSrc ? (
-          <Button
-            variant="ghost"
-            tone="neutral"
-            size="sm"
-            iconOnly
+          <PreviewHeaderButton
             title={t('node.reload')}
-            tooltipPlacement="bottom"
             aria-label={t('node.reloadPage')}
             onClick={handleReload}
           >
             <RotateCw />
-          </Button>
+          </PreviewHeaderButton>
         ) : null}
         {externalHref ? (
-          <Button
-            variant="ghost"
-            tone="neutral"
-            size="sm"
-            iconOnly
+          <PreviewHeaderButton
             title={t('node.openExternally')}
-            tooltipPlacement="bottom"
             aria-label={t('node.openPageExternal')}
             onClick={() => window.open(externalHref, '_blank', 'noopener')}
           >
             <ArrowUpRight />
-          </Button>
+          </PreviewHeaderButton>
         ) : null}
       </>
     ) : null;

@@ -38,6 +38,7 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/Common/Button';
 import { MilkdownEditor } from '@/components/Milkdown';
 import { MilkdownFloatingToolbar } from '@/components/Milkdown/MilkdownFloatingToolbar';
+import { PreviewHeaderButton } from '@/components/Nodes/PreviewHeaderButton';
 import { usePreviewHeaderSlot } from '@/components/Nodes/PreviewHeaderSlot';
 import { usePreviewScrollMemory } from '@/hooks/usePreviewScrollMemory';
 import useCanvasStore from '@/store/canvasStore';
@@ -563,11 +564,7 @@ export const NotePreview = ({
   // instead of floating over the editor content.
   const { el: headerSlotEl } = usePreviewHeaderSlot();
   const toggleButton = !readOnly ? (
-    <Button
-      variant="ghost"
-      tone="neutral"
-      size="sm"
-      iconOnly
+    <PreviewHeaderButton
       className={
         editMode === 'raw'
           ? 'text-info bg-info-bg enabled:hover:bg-info-bg-hover'
@@ -578,7 +575,6 @@ export const NotePreview = ({
           ? t('node.editRawMarkdown')
           : t('node.editRichText')
       }
-      tooltipPlacement="bottom"
       aria-label={
         editMode === 'wysiwyg'
           ? t('node.switchToRawMarkdown')
@@ -588,7 +584,7 @@ export const NotePreview = ({
       onClick={() => setEditMode((m) => (m === 'wysiwyg' ? 'raw' : 'wysiwyg'))}
     >
       {editMode === 'wysiwyg' ? <Code2 /> : <FileText />}
-    </Button>
+    </PreviewHeaderButton>
   ) : null;
 
   return (

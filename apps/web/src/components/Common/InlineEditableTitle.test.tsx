@@ -25,7 +25,11 @@ afterEach(() => {
   container.remove();
 });
 
-function render(active = false, disabled = false) {
+function render(
+  active = false,
+  disabled = false,
+  editorContainer?: HTMLElement | null,
+) {
   const editor = {
     active,
     disabled,
@@ -35,6 +39,7 @@ function render(active = false, disabled = false) {
     onChange: vi.fn(),
     onCommit: vi.fn(),
     onCancel: vi.fn(),
+    onKeyboardEditEnd: vi.fn(),
   };
   act(() =>
     root.render(
@@ -43,6 +48,7 @@ function render(active = false, disabled = false) {
         ariaLabel="Rename"
         placeholder="Untitled"
         editor={editor}
+        editorContainer={editorContainer}
       />,
     ),
   );
@@ -71,6 +77,27 @@ function control<K extends 'input' | 'button'>(
 }
 
 describe('InlineEditableTitle', () => {
+  it('waits for a portal host and focuses the input there without rendering another title row', () => {
+    render(true, false, null);
+    expect(container.querySelector('input')).toBeNull();
+    const host = document.createElement('span');
+    document.body.appendChild(host);
+    try {
+      const editor = render(true, false, host);
+      const input = host.querySelector('input');
+      if (!input) throw new Error('Missing portalled editor');
+      expect(container.textContent).toBe('');
+      expect(document.activeElement).toBe(input);
+      expect(input.selectionEnd).toBe(input.value.length);
+      key(input, 'Enter');
+      act(() => input.blur());
+      expect(editor.onCommit).toHaveBeenCalledOnce();
+    } finally {
+      act(() => root.render(null));
+      host.remove();
+    }
+  });
+
   it('shares typography and spacing across display and editing and reuses TextInput focus styling', () => {
     const editor = render();
     const button = control('button');
@@ -105,12 +132,14 @@ describe('InlineEditableTitle', () => {
     key(input, 'Enter');
     act(() => input.blur());
     expect(editor.onCommit).toHaveBeenCalledOnce();
+    expect(editor.onKeyboardEditEnd).toHaveBeenCalledOnce();
   });
 
   it('commits on blur without requiring Enter', () => {
     const editor = render(true);
     act(() => control('input').blur());
     expect(editor.onCommit).toHaveBeenCalledOnce();
+    expect(editor.onKeyboardEditEnd).not.toHaveBeenCalled();
   });
 
   it('cancels without committing on blur or bubbling Escape to the panel', () => {
@@ -122,6 +151,7 @@ describe('InlineEditableTitle', () => {
     act(() => input.blur());
     window.removeEventListener('keydown', parentKey);
     expect(editor.onCancel).toHaveBeenCalledOnce();
+    expect(editor.onKeyboardEditEnd).toHaveBeenCalledOnce();
     expect(editor.onCommit).not.toHaveBeenCalled();
     expect(parentKey).not.toHaveBeenCalled();
   });
@@ -133,6 +163,7 @@ describe('InlineEditableTitle', () => {
     key(input, 'Escape', true);
     expect(editor.onCommit).not.toHaveBeenCalled();
     expect(editor.onCancel).not.toHaveBeenCalled();
+    expect(editor.onKeyboardEditEnd).not.toHaveBeenCalled();
     key(input, 'Enter');
     expect(editor.onCommit).toHaveBeenCalledOnce();
   });

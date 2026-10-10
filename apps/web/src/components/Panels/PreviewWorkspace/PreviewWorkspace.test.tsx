@@ -13,7 +13,15 @@
 import { PropertySymbol, type Window as HappyWindow } from 'happy-dom';
 import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  afterEach,
+  assert,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
 
 import {
   rememberMessageListScrollPosition,
@@ -21,7 +29,10 @@ import {
 } from '@/components/Messages/messageListScroll';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
-import { openPreviewUrl } from '@/store/previewWorkspace/actions';
+import {
+  openPreviewNode,
+  openPreviewUrl,
+} from '@/store/previewWorkspace/actions';
 import { createEmptyWorkspace } from '@/store/previewWorkspace/model';
 import { messageListViewKey } from '@/store/previewWorkspace/scrollMemory';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
@@ -93,15 +104,18 @@ vi.mock('../ChatPanel', () => ({
     session,
     onCommit,
     adjacentNodeSourceId,
+    renameRequestNonce,
   }: {
     session?: { threadId: string };
     onCommit?: () => void;
     adjacentNodeSourceId?: string;
+    renameRequestNonce?: number;
   }) => (
     <div
       data-testid="chat-panel"
       data-thread-id={session?.threadId}
       data-adjacent-node-source-id={adjacentNodeSourceId}
+      data-rename-request-nonce={renameRequestNonce}
     >
       <button type="button" data-testid="commit-chat" onClick={onCommit} />
     </div>
@@ -124,6 +138,7 @@ vi.mock('../../Nodes/NodePreviewContent', () => ({
 }));
 
 const CANVAS_ID = 'canvas-1';
+const originalTryRename = useCanvasStore.getState().tryRename;
 
 let container: HTMLDivElement | null = null;
 let root: Root | null = null;
@@ -182,7 +197,171 @@ afterEach(() => {
   container?.remove();
   root = null;
   container = null;
-  useCanvasStore.setState({ nodes: [], canvasId: '' });
+  useCanvasStore.setState({
+    nodes: [],
+    canvasId: '',
+    tryRename: originalTryRename,
+  });
+});
+
+describe('tab-owned titles', () => {
+  const titleInput = () =>
+    container?.querySelector<HTMLInputElement>(
+      'input[aria-label="Rename node"]',
+    );
+  const press = (target: Element, key: string) =>
+    act(() =>
+      target.dispatchEvent(
+        new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }),
+      ),
+    );
+
+  it('shows the title only in its tab and cancels F2 editing back to that tab', () => {
+    const tabId = openNode('a', true);
+    render([canvasNode('a', 'Alpha')]);
+    expect(
+      container?.querySelector('button[aria-label="Rename node"]'),
+    ).toBeNull();
+    expect(container?.textContent?.match(/Alpha/g)).toHaveLength(1);
+    press(tabs()[0], 'F2');
+    const input = titleInput();
+    assert(input);
+    expect(input?.value).toBe('Alpha');
+    expect(document.activeElement).toBe(input);
+    expect(input?.selectionEnd).toBe(5);
+    press(input, 'Escape');
+    expect(titleInput()).toBeNull();
+    expect(document.activeElement).toBe(tabs()[0]);
+    expect(store().workspace.tabs[tabId].transient).toBe(true);
+  });
+
+  it('activates an inactive tab from its rename menu and uses the canonical node mutation', async () => {
+    const tabId = openNode('a', true);
+    openNode('b');
+    store().requestNodeFocus(tabId);
+    render([canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')]);
+    const rename = vi.fn(async (_kind: string, id: string, label: string) => {
+      useCanvasStore.setState((state) => ({
+        nodes: state.nodes.map((node) =>
+          node.id === id ? { ...node, data: { ...node.data, label } } : node,
+        ),
+      }));
+      return true;
+    });
+    act(() => useCanvasStore.setState({ tryRename: rename }));
+    await act(async () =>
+      tabs()[0].dispatchEvent(
+        new MouseEvent('contextmenu', {
+          bubbles: true,
+          cancelable: true,
+          clientX: 20,
+          clientY: 20,
+        }),
+      ),
+    );
+    const item = document.querySelector<HTMLButtonElement>('[role="menuitem"]');
+    expect(item?.textContent).toContain('Rename node');
+    await act(async () => item?.click());
+    expect(mountedNodeId()).toBe('a');
+    expect(store().nodeFocusRequest).toBeNull();
+    const input = titleInput();
+    assert(input);
+    expect(input.value).toBe('Alpha');
+    act(() => {
+      const setValue = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        'value',
+      )?.set;
+      assert(setValue);
+      setValue.call(input, 'Renamed');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => press(input, 'Enter'));
+    expect(rename).toHaveBeenCalledExactlyOnceWith('node', 'a', 'Renamed');
+    expect(activeTabName()).toBe('Renamed (note)');
+    expect(store().workspace.tabs[tabId].transient).toBe(false);
+    expect(document.activeElement).toBe(tabs()[0]);
+    expect(titleInput()).toBeNull();
+  });
+
+  it('keeps rename requests scoped to the addressed group', () => {
+    openNode('a');
+    store().openPreviewTarget(
+      { kind: 'node', canvasId: CANVAS_ID, nodeId: 'b' },
+      { openToSide: true },
+    );
+    render([canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')]);
+    press(tabs()[1], 'F2');
+    expect(titleInput()?.value).toBe('Beta');
+    expect(
+      container?.querySelectorAll('input[aria-label="Rename node"]'),
+    ).toHaveLength(1);
+    const input = titleInput();
+    assert(input);
+    press(input, 'Escape');
+    press(tabs()[0], 'F2');
+    expect(titleInput()?.value).toBe('Alpha');
+  });
+
+  it('offers no rename action for URL targets or deleted nodes', () => {
+    openNode('missing');
+    store().openPreviewTarget({
+      kind: 'url',
+      canvasId: CANVAS_ID,
+      url: 'https://example.com',
+    });
+    render([]);
+    for (const tab of tabs()) {
+      expect(tab.hasAttribute('aria-keyshortcuts')).toBe(false);
+      press(tab, 'F2');
+      act(() =>
+        tab.dispatchEvent(
+          new MouseEvent('contextmenu', { bubbles: true, cancelable: true }),
+        ),
+      );
+    }
+    const menuLabels = Array.from(
+      document.querySelectorAll('[role="menuitem"]'),
+    ).map((item) => item.textContent);
+    expect(menuLabels.filter((label) => label === 'Close')).toHaveLength(2);
+    expect(menuLabels.some((label) => label?.startsWith('Rename'))).toBe(false);
+    expect(titleInput()).toBeNull();
+  });
+
+  it('discards deferred rename when a transient tab is replaced or another tab is activated', () => {
+    const first = store().openPreviewTarget(
+      { kind: 'chat', canvasId: CANVAS_ID, threadId: 'first' },
+      { transient: true },
+    );
+    render([]);
+    press(tabs()[0], 'F2');
+    expect(
+      container
+        ?.querySelector('[data-rename-request-nonce]')
+        ?.getAttribute('data-thread-id'),
+    ).toBe('first');
+    act(() =>
+      store().openPreviewTarget(
+        { kind: 'chat', canvasId: CANVAS_ID, threadId: 'replacement' },
+        { transient: true },
+      ),
+    );
+    expect(tabs()).toHaveLength(1);
+    expect(container?.querySelector('[data-rename-request-nonce]')).toBeNull();
+    press(tabs()[0], 'F2');
+    expect(
+      container?.querySelector('[data-rename-request-nonce]'),
+    ).not.toBeNull();
+    act(() =>
+      store().openPreviewTarget({
+        kind: 'chat',
+        canvasId: CANVAS_ID,
+        threadId: 'other',
+      }),
+    );
+    act(() => store().activateTab(first));
+    expect(container?.querySelector('[data-rename-request-nonce]')).toBeNull();
+  });
 });
 
 describe('tab strip', () => {
@@ -392,7 +571,8 @@ describe('tab strip', () => {
     );
     expect(overlay?.textContent).toContain('Alpha');
     expect(overlay?.classList.contains('shadow-md')).toBe(true);
-    expect(overlay?.classList.contains('max-w-48')).toBe(true);
+    expect(overlay?.classList.contains('max-w-80')).toBe(true);
+    expect(overlay?.classList.contains('h-7')).toBe(true);
     const text = overlay?.querySelector('span');
     expect(text?.classList.contains('truncate')).toBe(true);
     expect(text?.classList.contains('min-w-0')).toBe(true);
@@ -430,27 +610,44 @@ describe('tab strip', () => {
         ?.querySelector('[data-testid="chat-panel"]')
         ?.getAttribute('data-thread-id'),
     ).toBe('thread-1');
-    expect(tabs()[0].classList.contains('h-9')).toBe(true);
+    const strip = container?.querySelector('[role="tablist"]');
+    expect(strip?.classList.contains('preview-tab-scrollbar')).toBe(true);
+    expect(strip?.parentElement?.classList.contains('h-11')).toBe(true);
+    expect(
+      tabs()[0]
+        .closest('.preview-tab-slot')
+        ?.classList.contains('preview-tab-slot'),
+    ).toBe(true);
+    expect(tabs()[0].classList.contains('h-9')).toBe(false);
   });
 
-  it('sizes tabs to content without shrinking their controls', () => {
+  it('prioritizes the active pill width without shrinking tab controls', () => {
     openNode('a');
     openNode('b');
     render([canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')]);
 
     const [inactiveTab, activeTab] = tabs();
-    expect(inactiveTab.classList.contains('min-w-20')).toBe(true);
-    expect(inactiveTab.classList.contains('w-fit')).toBe(true);
-    expect(inactiveTab.classList.contains('flex-none')).toBe(true);
-    expect(inactiveTab.classList.contains('flex-[0_1_auto]')).toBe(false);
+    expect(
+      inactiveTab
+        .closest('.preview-tab-slot')
+        ?.classList.contains('preview-tab-slot-active'),
+    ).toBe(false);
+    expect(
+      activeTab
+        .closest('.preview-tab-slot')
+        ?.classList.contains('preview-tab-slot-active'),
+    ).toBe(true);
     for (const tab of [inactiveTab, activeTab]) {
-      expect(tab.classList.contains('max-w-48')).toBe(true);
+      expect(
+        tab
+          .closest('.preview-tab-slot')
+          ?.classList.contains('preview-tab-slot'),
+      ).toBe(true);
+      expect(tab.classList.contains('rounded-lg')).toBe(true);
       const title = tab.querySelector('[data-testid="preview-tab-title"]');
       expect(title?.classList.contains('truncate')).toBe(true);
       expect(title?.classList.contains('min-w-0')).toBe(true);
-      expect(title?.parentElement?.classList.contains('min-w-0')).toBe(true);
-      expect(title?.parentElement?.classList.contains('max-w-full')).toBe(true);
-      expect(title?.parentElement?.classList.contains('flex-1')).toBe(true);
+      expect(title?.classList.contains('flex-1')).toBe(true);
       const actionRail = tab.querySelector<HTMLElement>(
         '[data-testid="preview-tab-actions"]',
       );
@@ -462,20 +659,12 @@ describe('tab strip', () => {
         actionRail?.querySelector('[aria-label^="Close "]'),
       ).not.toBeNull();
     }
-    expect(activeTab.classList.contains('border-r')).toBe(true);
-    expect(activeTab.classList.contains('last:border-r-0')).toBe(false);
-    expect(activeTab.classList.contains('bg-surface')).toBe(true);
-    expect(activeTab.classList.contains('after:bg-info-light')).toBe(true);
-    expect(activeTab.classList.contains('after:top-0')).toBe(true);
-    expect(activeTab.classList.contains('after:bottom-0')).toBe(false);
-    expect(activeTab.classList.contains('before:bg-surface')).toBe(false);
-    expect(activeTab.classList.contains('bg-bg-default')).toBe(false);
-    expect(activeTab.parentElement?.classList.contains('overflow-x-auto')).toBe(
-      true,
-    );
-    expect(
-      activeTab.parentElement?.classList.contains('overflow-y-hidden'),
-    ).toBe(true);
+    expect(activeTab.classList.contains('border-r')).toBe(false);
+    expect(activeTab.classList.contains('after:bg-info-light')).toBe(false);
+    expect(activeTab.classList.contains('bg-bg-default')).toBe(true);
+    const strip = activeTab.closest('[role="tablist"]');
+    expect(strip?.classList.contains('overflow-x-auto')).toBe(true);
+    expect(strip?.classList.contains('overflow-y-hidden')).toBe(true);
   });
 
   it('renders a Question node through its own Chat session', () => {
@@ -768,14 +957,15 @@ describe('activation', () => {
     expect(store().workspace.tabs[tabId].transient).toBe(false);
   });
 
-  it('promotes a transient tab with its Pin action', () => {
+  it('keeps only Close on the tab and promotes through the text-only context menu', () => {
     const tabId = openNode('a', true);
     render([canvasNode('a', 'Alpha')]);
 
-    const keepButton = container?.querySelector<HTMLButtonElement>(
-      '[aria-label="Keep Alpha open"]',
-    );
-    expect(keepButton).not.toBeNull();
+    expect(
+      container?.querySelector<HTMLButtonElement>(
+        '[aria-label="Keep Alpha open"]',
+      ),
+    ).toBeNull();
     const closeButton = container?.querySelector<HTMLButtonElement>(
       '[aria-label="Close Alpha"]',
     );
@@ -788,10 +978,9 @@ describe('activation', () => {
     const icon = tabs()[0].querySelector<HTMLElement>(
       '[data-testid="preview-tab-icon"]',
     );
-    expect(title?.classList.contains('group-hover:text-fg-subtle')).toBe(true);
-    expect(title?.classList.contains('transition-colors')).toBe(true);
-    expect(icon?.classList.contains('group-hover:text-fg-subtle')).toBe(true);
-    expect(icon?.classList.contains('transition-colors')).toBe(true);
+    expect(title?.classList.contains('group-hover:text-fg-subtle')).toBe(false);
+    expect(icon?.getAttribute('aria-hidden')).toBe('true');
+    expect(tabs()[0].classList.contains('text-fg-default')).toBe(true);
     expect(actionRail?.classList.contains('absolute')).toBe(false);
     expect(actionRail?.classList.contains('shrink-0')).toBe(true);
     expect(actionRail?.classList.contains('opacity-0')).toBe(false);
@@ -799,10 +988,19 @@ describe('activation', () => {
     expect(actionRail?.classList.contains('group-hover:opacity-100')).toBe(
       false,
     );
-    expect(actionRail?.contains(keepButton ?? null)).toBe(true);
     expect(actionRail?.contains(closeButton ?? null)).toBe(true);
-    expect(keepButton?.classList.contains('shadow-sm')).toBe(false);
+    expect(actionRail?.querySelectorAll('button')).toHaveLength(1);
     expect(closeButton?.classList.contains('shadow-sm')).toBe(false);
+    act(() =>
+      tabs()[0].dispatchEvent(
+        new MouseEvent('contextmenu', { bubbles: true, cancelable: true }),
+      ),
+    );
+    const keepButton = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+    ).find((item) => item.textContent === 'Keep tab');
+    expect(keepButton).toBeDefined();
+    expect(keepButton?.querySelector('svg')).toBeNull();
     act(() => keepButton?.click());
 
     expect(store().workspace.tabs[tabId].transient).toBe(false);
@@ -811,17 +1009,18 @@ describe('activation', () => {
     ).toBeNull();
   });
 
-  it('keeps a transient tab transient when opening it to the side', () => {
+  it('keeps a transient tab transient when moving it to an empty group', () => {
     const transientTabId = openNode('a', true);
     openNode('b');
     store().activateTab(transientTabId);
+    store().splitGroup();
     render([canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')]);
 
-    const openToSideButton = container?.querySelector<HTMLButtonElement>(
-      '[aria-label="Open to the side"]',
+    act(() =>
+      store().moveTab(transientTabId, {
+        groupId: store().workspace.groups[1].id,
+      }),
     );
-    expect(openToSideButton).not.toBeNull();
-    act(() => openToSideButton?.click());
 
     expect(store().workspace.groups).toHaveLength(2);
     expect(store().workspace.tabs[transientTabId].transient).toBe(true);
@@ -951,7 +1150,287 @@ describe('keyboard', () => {
   });
 });
 
+describe('tab batch close menu', () => {
+  const menuItem = (label: string) =>
+    Array.from(
+      document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+    ).find((item) => item.textContent === label);
+  const openMenu = async (tabId: string) => {
+    const tab = container?.querySelector(`[data-preview-tab-id="${tabId}"]`);
+    expect(tab).not.toBeNull();
+    await act(async () =>
+      tab?.dispatchEvent(
+        new MouseEvent('contextmenu', {
+          bubbles: true,
+          cancelable: true,
+        }),
+      ),
+    );
+  };
+
+  it.each([
+    { label: 'Close other tabs', expected: ['b'] },
+    { label: 'Close tabs to the right', expected: ['a', 'b'] },
+    { label: 'Close all tabs in this group', expected: [] },
+  ])(
+    'routes "$label" through the clicked tab, not the active tab in another group',
+    async ({ label, expected }) => {
+      openNode('a');
+      const clicked = openNode('b', true);
+      openNode('c');
+      store().splitGroup();
+      const other = openNode('d');
+      render(['a', 'b', 'c', 'd'].map((id) => canvasNode(id, id)));
+      const onCollapse = vi.fn();
+      act(() => root?.render(<PreviewWorkspace onCollapse={onCollapse} />));
+      await openMenu(clicked);
+      const action = menuItem(label);
+      expect(action?.disabled).toBe(false);
+      await act(async () => action?.click());
+      const remaining = Object.values(store().workspace.tabs)
+        .filter((tab) => tab.id !== other)
+        .map((tab) => (tab.target.kind === 'node' ? tab.target.nodeId : ''));
+      expect(remaining).toEqual(expected);
+      expect(store().workspace.tabs[other]).toBeDefined();
+      expect(store().workspace.groups).toHaveLength(expected.length ? 2 : 1);
+      expect(onCollapse).not.toHaveBeenCalled();
+      expect(useCanvasStore.getState().nodes).toHaveLength(4);
+    },
+  );
+
+  it('disables empty batches and skips disabled menu items with keyboard navigation', async () => {
+    const tabId = openNode('a');
+    store().splitGroup();
+    openNode('b');
+    render([canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')]);
+    await openMenu(tabId);
+    expect(menuItem('Close other tabs')?.disabled).toBe(true);
+    expect(menuItem('Close tabs to the right')?.disabled).toBe(true);
+    const close = menuItem('Close');
+    await act(async () => {
+      close?.focus();
+      close?.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }),
+      );
+    });
+    expect(document.activeElement).toBe(
+      menuItem('Close all tabs in this group'),
+    );
+  });
+
+  it.each([
+    'Close',
+    'Close other tabs',
+    'Close tabs to the right',
+    'Close all tabs in this group',
+  ])('restores focus to the repaired active tab after "%s"', async (label) => {
+    openNode('a');
+    const clicked = openNode('b');
+    openNode('c');
+    store().splitGroup();
+    openNode('d');
+    render(['a', 'b', 'c', 'd'].map((id) => canvasNode(id, id)));
+    await openMenu(clicked);
+    const action = menuItem(label);
+    assert(action);
+    await act(async () => action.focus());
+    expect(document.activeElement).toBe(action);
+    await act(async () => action.click());
+    const workspace = store().workspace;
+    const group = workspace.groups.find(
+      (candidate) => candidate.id === workspace.activeGroupId,
+    );
+    assert(group?.activeTabId);
+    expect(document.activeElement).toBe(
+      container?.querySelector(`[data-preview-tab-id="${group.activeTabId}"]`),
+    );
+  });
+
+  it('preserves focus in retained content when an unfocused close control is invoked', () => {
+    openNode('a');
+    openNode('b');
+    render([canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')]);
+    const retainedInput = document.createElement('input');
+    container?.append(retainedInput);
+    act(() => retainedInput.focus());
+    act(() => tabs()[0].querySelector('button')?.click());
+    expect(document.activeElement).toBe(retainedInput);
+  });
+
+  it('hands portal-menu focus to the host when the final tabs collapse', async () => {
+    const first = openNode('a');
+    render([canvasNode('a', 'Alpha')]);
+    const destination = document.createElement('input');
+    container?.append(destination);
+    const onCollapse = vi.fn(() => {
+      expect(document.activeElement?.getAttribute('role')).toBe('tab');
+      destination.focus();
+    });
+    act(() => root?.render(<PreviewWorkspace onCollapse={onCollapse} />));
+    await openMenu(first);
+    const action = menuItem('Close all tabs in this group');
+    assert(action);
+    await act(async () => action.focus());
+    await act(async () => action.click());
+    expect(onCollapse).toHaveBeenCalledOnce();
+    expect(document.activeElement).toBe(destination);
+  });
+
+  it('collapses the panel once when closing its last group of tabs', async () => {
+    const first = openNode('a');
+    openNode('b');
+    render([canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')]);
+    const onCollapse = vi.fn();
+    act(() => root?.render(<PreviewWorkspace onCollapse={onCollapse} />));
+    await openMenu(first);
+    await act(async () => menuItem('Close all tabs in this group')?.click());
+    expect(store().workspace.tabs).toEqual({});
+    expect(store().workspace.groups).toHaveLength(1);
+    expect(onCollapse).toHaveBeenCalledOnce();
+  });
+});
+
 describe('split', () => {
+  it.each([false, true])(
+    'uses group-specific empty copy regardless of focus with fullscreen=%s',
+    (isFullscreen) => {
+      const tabId = openNode('a');
+      store().splitGroup();
+      render([canvasNode('a', 'Alpha')]);
+      act(() => root?.render(<PreviewWorkspace isFullscreen={isFullscreen} />));
+      expect(container?.textContent).toContain('No preview open in this group');
+      expect(container?.textContent).not.toContain('Double-click a node');
+      act(() => store().activateTab(tabId));
+      expect(container?.textContent).toContain('No preview open in this group');
+      expect(container?.textContent).not.toContain('Double-click a node');
+    },
+  );
+
+  it.each([0, 1])(
+    'closes an empty group on side %i without collapsing the panel',
+    (emptyIndex) => {
+      store().splitGroup();
+      const emptyId = store().workspace.groups[emptyIndex].id;
+      const survivingId = store().workspace.groups[1 - emptyIndex].id;
+      store().setActiveGroup(survivingId);
+      const tabId = openNode('a');
+      render([canvasNode('a', 'Alpha')]);
+      const onCollapse = vi.fn();
+      act(() => root?.render(<PreviewWorkspace onCollapse={onCollapse} />));
+      const close = container?.querySelectorAll<HTMLButtonElement>(
+        '[aria-label="Close empty group"]',
+      );
+      expect(close).toHaveLength(1);
+      act(() => {
+        store().setActiveGroup(emptyId);
+        close?.[0].focus();
+        close?.[0].click();
+      });
+      expect(store().workspace.groups).toHaveLength(1);
+      expect(store().workspace.groups[0].id).toBe(survivingId);
+      expect(store().workspace.groups[0].activeTabId).toBe(tabId);
+      expect(store().workspace.activeGroupId).toBe(survivingId);
+      expect(document.activeElement).toBe(tabs()[0]);
+      expect(onCollapse).not.toHaveBeenCalled();
+      expect(
+        container?.querySelector('[aria-label="Close empty group"]'),
+      ).toBeNull();
+    },
+  );
+
+  it('keeps one empty group after explicitly closing the other', () => {
+    store().splitGroup();
+    render([]);
+    const close = container?.querySelectorAll<HTMLButtonElement>(
+      '[aria-label="Close empty group"]',
+    );
+    expect(close).toHaveLength(2);
+    act(() => {
+      close?.[1].focus();
+      close?.[1].click();
+    });
+    expect(container?.querySelectorAll('[role="tablist"]')).toHaveLength(1);
+    expect(
+      container?.querySelector('[aria-label="Close empty group"]'),
+    ).toBeNull();
+    expect(store().workspace.groups[0].tabIds).toEqual([]);
+    expect(document.activeElement).toBe(
+      container?.querySelector('button[aria-label="New conversation"]'),
+    );
+  });
+
+  it.each([0, 1, 3])(
+    'creates an empty right group from the toolbar with %i tabs',
+    (count) => {
+      const nodes = Array.from({ length: count }, (_, index) =>
+        canvasNode(`n${index}`, `Node ${index}`),
+      );
+      nodes.forEach((node) => openNode(node.id));
+      render(nodes);
+      const original = store().workspace.groups[0];
+      const split = container?.querySelector<HTMLButtonElement>(
+        '[aria-label="Split: create an empty group on the right"]',
+      );
+      expect(split).not.toBeNull();
+      act(() => split?.click());
+      expect(store().workspace.groups[0]).toEqual(original);
+      expect(store().workspace.groups[1].tabIds).toEqual([]);
+      expect(store().workspace.activeGroupId).toBe(
+        store().workspace.groups[1].id,
+      );
+      expect(container?.querySelectorAll('[role="tablist"]')).toHaveLength(2);
+      expect(container?.querySelector('[role="separator"]')).not.toBeNull();
+      expect(container?.textContent).toContain('No preview open in this group');
+      expect(
+        container?.querySelector('[aria-label="Merge groups"]'),
+      ).toBeNull();
+      expect(
+        container?.querySelector('[aria-label="Move tab to the other group"]'),
+      ).toBeNull();
+      expect(Object.keys(store().workspace.tabs)).toHaveLength(count);
+    },
+  );
+
+  it('routes canvas node opens to the last interacted group, reusing existing targets', () => {
+    render([
+      canvasNode('a', 'Alpha'),
+      canvasNode('b', 'Beta'),
+      canvasNode('c', 'Gamma'),
+    ]);
+    act(() => store().splitGroup());
+    const [left, right] = store().workspace.groups;
+    let firstTab = '';
+    act(() => {
+      firstTab = openPreviewNode('a');
+    });
+    expect(store().workspace.groups[1].tabIds).toEqual([firstTab]);
+    const leftPanel = container?.querySelectorAll('[role="tabpanel"]')[0];
+    act(() =>
+      leftPanel?.dispatchEvent(
+        new PointerEvent('pointerdown', { bubbles: true }),
+      ),
+    );
+    expect(store().workspace.activeGroupId).toBe(left.id);
+    let secondTab = '';
+    act(() => {
+      secondTab = openPreviewNode('b');
+    });
+    expect(store().workspace.groups[0].tabIds).toEqual([secondTab]);
+    act(() => {
+      expect(openPreviewNode('a')).toBe(firstTab);
+    });
+    expect(store().workspace.activeGroupId).toBe(right.id);
+    act(() => {
+      expect(openPreviewNode('c')).toBe(firstTab);
+    });
+    expect(store().workspace.tabs[secondTab].target).toMatchObject({
+      nodeId: 'b',
+    });
+    expect(store().workspace.tabs[firstTab].target).toMatchObject({
+      nodeId: 'c',
+    });
+  });
+
   it('renders one group until a tab is opened to the side', () => {
     openNode('a');
     openNode('b');
@@ -1269,6 +1748,7 @@ describe('target resolution', () => {
     });
     render([]);
 
+    expect(tabs()[0].querySelector('.lucide-message-circle')).not.toBeNull();
     expect(
       container?.querySelector('[data-testid="chat-panel"]'),
     ).not.toBeNull();
@@ -1284,11 +1764,22 @@ describe('target resolution', () => {
   it('shows the empty state when nothing is open', () => {
     render([]);
 
-    expect(container?.textContent).toContain('Double-click a node');
+    expect(container?.textContent).toContain('No preview open in this group');
   });
 });
 
 describe('right panel host', () => {
+  it('does not seed a Chat into a restored empty split', () => {
+    store().splitGroup();
+    useCanvasStore.setState({ nodes: [], canvasId: CANVAS_ID });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() => root?.render(<PreviewWorkspacePanel />));
+    expect(Object.keys(store().workspace.tabs)).toHaveLength(0);
+    expect(container.querySelectorAll('[role="tablist"]')).toHaveLength(2);
+  });
+
   it('seeds one Chat only when the host becomes visible', () => {
     useCanvasStore.setState({ nodes: [], canvasId: CANVAS_ID });
     const onToggle = vi.fn();
@@ -1360,7 +1851,8 @@ describe('right panel host', () => {
     const toggle = container.querySelector<HTMLElement>(
       '[data-testid="toggle-preview-fullscreen"]',
     );
-    expect(toggle?.getAttribute('aria-label')).toContain('Exit');
+    expect(toggle?.getAttribute('aria-label')).toBe('Exit fullscreen');
+    expect(toggle?.querySelector('.lucide-minimize')).not.toBeNull();
 
     act(() =>
       toggle?.dispatchEvent(new MouseEvent('click', { bubbles: true })),
@@ -1388,5 +1880,20 @@ describe('right panel host', () => {
       ),
     );
     expect(onToggleFullscreen).toHaveBeenCalledTimes(2);
+
+    act(() =>
+      root?.render(
+        <PreviewWorkspacePanel
+          isHostCollapsed={false}
+          isFullscreen={false}
+          onToggleFullscreen={onToggleFullscreen}
+        />,
+      ),
+    );
+    const enterToggle = container.querySelector<HTMLElement>(
+      '[data-testid="toggle-preview-fullscreen"]',
+    );
+    expect(enterToggle?.getAttribute('aria-label')).toBe('Fullscreen');
+    expect(enterToggle?.querySelector('.lucide-maximize')).not.toBeNull();
   });
 });

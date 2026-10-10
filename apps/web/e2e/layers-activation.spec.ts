@@ -1803,12 +1803,12 @@ test.describe('mouse header controls', () => {
           };
         }),
       ).toEqual({
-        height: collapsed ? 40 : 48,
+        height: collapsed ? 40 : 44,
         paddingLeft: collapsed ? '8px' : '12px',
         paddingRight: collapsed ? '8px' : '12px',
-        paddingTop: collapsed ? '0px' : '4px',
-        paddingBottom: collapsed ? '0px' : '4px',
-        titleTopInset: collapsed ? 6 : 10,
+        paddingTop: '0px',
+        paddingBottom: '0px',
+        titleTopInset: collapsed ? 6 : 8,
         gap: '2px',
         logoWidth: 24,
         logoHeight: 24,

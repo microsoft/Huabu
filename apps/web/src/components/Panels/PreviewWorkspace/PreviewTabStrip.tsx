@@ -19,12 +19,13 @@ import {
 } from '@dnd-kit/sortable';
 import {
   Columns2,
-  Maximize2,
-  Minimize2,
+  Maximize,
+  Minimize,
   PanelRightClose,
   Plus,
+  X,
 } from 'lucide-react';
-import { useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { PreviewTab } from './PreviewTab';
@@ -32,7 +33,13 @@ import { groupDropId } from './tabDnd';
 import { Button } from '../../Common/Button';
 
 import type { TabDropIndicator } from './tabDnd';
-import type { PreviewTab as PreviewTabModel } from '@/store/previewWorkspace/model';
+import type { AcpConnectionInfo } from '../ChatPanel/AcpConnectionBadge';
+import type {
+  ClosePreviewTabsScope,
+  PreviewTab as PreviewTabModel,
+} from '@/store/previewWorkspace/model';
+
+import './previewTabStrip.css';
 
 type PreviewTabStripProps = {
   groupId: string;
@@ -40,11 +47,13 @@ type PreviewTabStripProps = {
   activeTabId: string | null;
   onActivate: (tabId: string) => void;
   onClose: (tabId: string) => void;
+  onCloseTabs?: (tabId: string, scope: ClosePreviewTabsScope) => void;
   onPromote: (tabId: string) => void;
-  /** Moves the active tab into the other group, creating it when absent. */
-  onOpenToSide: (tabId: string) => void;
-  /** Hidden once both groups exist, since there is no third to open into. */
-  canOpenToSide: boolean;
+  onRename?: (tabId: string) => void;
+  onTitleEditorHostChange?: (element: HTMLSpanElement | null) => void;
+  activeChatConnection?: AcpConnectionInfo;
+  onSplit?: () => void;
+  onCloseEmptyGroup?: () => void;
   /** Creates a fresh Chat tab in this group. */
   onNewChat: () => void;
   tabDropIndicator: TabDropIndicator | null;
@@ -57,6 +66,8 @@ type PreviewTabStripProps = {
 export const tabElementId = (groupId: string, tabId: string) =>
   `preview-tab-${groupId}-${tabId}`;
 export const panelElementId = (groupId: string) => `preview-panel-${groupId}`;
+export const newChatElementId = (groupId: string) =>
+  `preview-new-chat-${groupId}`;
 
 export function PreviewTabStrip({
   groupId,
@@ -64,9 +75,13 @@ export function PreviewTabStrip({
   activeTabId,
   onActivate,
   onClose,
+  onCloseTabs,
   onPromote,
-  onOpenToSide,
-  canOpenToSide,
+  onRename,
+  onTitleEditorHostChange,
+  activeChatConnection,
+  onSplit,
+  onCloseEmptyGroup,
   onNewChat,
   tabDropIndicator,
   isFullscreen,
@@ -76,20 +91,41 @@ export function PreviewTabStrip({
   const { t } = useTranslation();
   const { setNodeRef } = useDroppable({
     id: groupDropId(groupId),
-    data: { type: 'preview-group', groupId },
+    data: { type: 'preview-group', groupId, isEmpty: tabs.length === 0 },
   });
+  const stripRef = useRef<HTMLDivElement | null>(null);
+  const setStripRef = useCallback(
+    (element: HTMLDivElement | null) => {
+      stripRef.current = element;
+      setNodeRef(element);
+    },
+    [setNodeRef],
+  );
   const isAppendTarget =
     tabDropIndicator?.type === 'group-end' &&
     tabDropIndicator.groupId === groupId;
 
   useEffect(() => {
-    if (!activeTabId) return;
-    const frame = requestAnimationFrame(() => {
-      document
-        .getElementById(tabElementId(groupId, activeTabId))
-        ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-    });
-    return () => cancelAnimationFrame(frame);
+    const strip = stripRef.current;
+    const activeTab = activeTabId
+      ? document.getElementById(tabElementId(groupId, activeTabId))
+      : null;
+    if (!strip || !activeTab) return;
+    let frame = 0;
+    const revealActiveTab = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        activeTab.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      });
+    };
+    revealActiveTab();
+    const observer = new ResizeObserver(revealActiveTab);
+    observer.observe(strip);
+    observer.observe(activeTab);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
   }, [activeTabId, groupId]);
 
   const focusTab = (tabId: string) => {
@@ -97,9 +133,10 @@ export function PreviewTabStrip({
     // The activated tab becomes the only one in the tab order, so move DOM
     // focus with it or the strip would lose focus entirely.
     requestAnimationFrame(() => {
-      document
-        .getElementById(tabElementId(groupId, tabId))
-        ?.focus({ preventScroll: false });
+      const tab = document.getElementById(tabElementId(groupId, tabId));
+      tab?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      // Let the native scroll settle before focus opens the tab's tooltip.
+      requestAnimationFrame(() => tab?.focus({ preventScroll: true }));
     });
   };
 
@@ -129,29 +166,49 @@ export function PreviewTabStrip({
   };
 
   return (
-    <div className="bg-surface after:bg-edge-default relative flex h-9 shrink-0 items-stretch after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:z-20 after:h-px">
+    <div className="bg-surface after:bg-edge-default relative flex h-11 shrink-0 items-stretch after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:h-px">
       <div
-        ref={setNodeRef}
+        ref={setStripRef}
         role="tablist"
         aria-label={t('preview.tabStrip')}
         aria-orientation="horizontal"
-        className="flex min-w-0 flex-1 overflow-x-auto overflow-y-hidden"
+        className="preview-tab-scrollbar flex min-w-0 flex-1 gap-1 overflow-x-auto overflow-y-hidden px-2"
       >
         <SortableContext
           items={tabs.map((tab) => tab.id)}
           strategy={horizontalListSortingStrategy}
         >
-          {tabs.map((tab) => (
+          {tabs.map((tab, index) => (
             <PreviewTab
               key={tab.id}
               tab={tab}
               groupId={groupId}
               isActive={tab.id === activeTabId}
+              chatConnection={
+                tab.id === activeTabId ? activeChatConnection : undefined
+              }
               tabElementId={tabElementId(groupId, tab.id)}
               panelElementId={panelElementId(groupId)}
               onActivate={() => onActivate(tab.id)}
               onClose={() => onClose(tab.id)}
+              onCloseOthers={
+                onCloseTabs && tabs.length > 1
+                  ? () => onCloseTabs(tab.id, 'others')
+                  : undefined
+              }
+              onCloseToRight={
+                onCloseTabs && index < tabs.length - 1
+                  ? () => onCloseTabs(tab.id, 'to-right')
+                  : undefined
+              }
+              onCloseGroup={
+                onCloseTabs ? () => onCloseTabs(tab.id, 'group') : undefined
+              }
               onPromote={() => onPromote(tab.id)}
+              onRename={onRename ? () => onRename(tab.id) : undefined}
+              onTitleEditorHostChange={
+                tab.id === activeTabId ? onTitleEditorHostChange : undefined
+              }
               onNavigate={handleKeyDown}
               dropIndicatorEdge={
                 tabDropIndicator?.type === 'tab' &&
@@ -169,8 +226,9 @@ export function PreviewTabStrip({
           />
         )}
       </div>
-      <div className="flex shrink-0 items-center px-1">
+      <div className="flex shrink-0 items-center pr-2">
         <Button
+          id={newChatElementId(groupId)}
           variant="ghost"
           iconOnly
           size="md"
@@ -196,39 +254,48 @@ export function PreviewTabStrip({
             tooltipPlacement="bottom"
             onClick={onToggleFullscreen}
           >
-            {isFullscreen ? <Minimize2 /> : <Maximize2 />}
+            {isFullscreen ? <Minimize /> : <Maximize />}
           </Button>
         )}
-        {(canOpenToSide || onCollapse) && (
-          <>
-            {canOpenToSide && activeTabId && (
-              <Button
-                variant="ghost"
-                iconOnly
-                size="md"
-                className="text-fg-subtle enabled:hover:text-fg-default"
-                title={t('preview.openToSide')}
-                tooltipPlacement="bottom"
-                onClick={() => onOpenToSide(activeTabId)}
-              >
-                <Columns2 />
-              </Button>
-            )}
-            {onCollapse && (
-              <Button
-                variant="ghost"
-                iconOnly
-                size="md"
-                className="text-fg-subtle enabled:hover:text-fg-default"
-                data-testid="collapse-preview"
-                title={t('preview.collapse')}
-                tooltipPlacement="bottom"
-                onClick={onCollapse}
-              >
-                <PanelRightClose aria-hidden />
-              </Button>
-            )}
-          </>
+        {onSplit && (
+          <Button
+            variant="ghost"
+            iconOnly
+            size="md"
+            className="text-fg-subtle enabled:hover:text-fg-default"
+            title={t('preview.splitGroup')}
+            tooltipPlacement="bottom"
+            onClick={onSplit}
+          >
+            <Columns2 aria-hidden />
+          </Button>
+        )}
+        {onCloseEmptyGroup && (
+          <Button
+            variant="ghost"
+            iconOnly
+            size="md"
+            className="text-fg-subtle enabled:hover:text-fg-default"
+            title={t('preview.closeEmptyGroup')}
+            tooltipPlacement="bottom"
+            onClick={onCloseEmptyGroup}
+          >
+            <X aria-hidden />
+          </Button>
+        )}
+        {onCollapse && (
+          <Button
+            variant="ghost"
+            iconOnly
+            size="md"
+            className="text-fg-subtle enabled:hover:text-fg-default"
+            data-testid="collapse-preview"
+            title={t('preview.collapse')}
+            tooltipPlacement="bottom"
+            onClick={onCollapse}
+          >
+            <PanelRightClose aria-hidden />
+          </Button>
         )}
       </div>
     </div>
