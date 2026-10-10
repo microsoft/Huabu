@@ -34,7 +34,7 @@ The reactive current-pointer signal (`useIsNotMouse`) follows the most recent `p
 
 ## 2. Tool mapping
 
-While the mouse is the current pointer, the toolbar keeps the Select, Pan, and Lasso tools and their existing mouse and keyboard behavior, including shortcut hints and badges.
+While the mouse is the current pointer, the toolbar keeps the Select, Pan, and Lasso tools and their existing mouse and keyboard behavior, including shortcut hints and badges. The adjacent resource foldout reuses the same shared menu surface, 13px normal-weight row typography, 14px icons, spacing, hover, and focus treatment as the Select/Pan/Lasso menu rather than inheriting the default medium Button style.
 
 Holding Space temporarily selects Pan. `useCanvasShortcuts` is the sole Space-pan keyboard owner; React Flow's `panActivationKeyCode` is disabled so its default listener cannot consume Space before Huabu updates the tool state used by the pointer router. If Space is released during an active mouse pan, Pan remains selected until the gesture's `mouseup` has completed so React Flow can tear down its native viewport-drag session before `panOnDrag` is reconfigured; releasing the mouse first keeps Pan selected until Space is released. Window blur and page hiding cancel this temporary tool state so a swallowed `keyup` cannot leave the canvas in Pan.
 

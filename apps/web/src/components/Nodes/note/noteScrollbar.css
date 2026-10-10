@@ -17,6 +17,8 @@
 
 .huabu-note-scroll-viewport > [data-note-content-host] {
   width: 100cqw;
+  /* Keep text rasterization stable when selection enables native scrolling. */
+  will-change: transform;
 }
 
 .huabu-note-scroll-viewport[data-note-scroll-enabled='true'] {

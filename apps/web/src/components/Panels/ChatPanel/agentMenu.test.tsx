@@ -85,6 +85,13 @@ describe('AgentMenuOptions', () => {
     expect(container.textContent).toContain('Reviewer');
     expect(container.textContent).toContain('chat.externalAgents');
     expect(container.textContent).toContain('External Command');
+    const externalHeading = container.querySelector(
+      '[role="presentation"]:last-of-type',
+    );
+    expect(externalHeading?.className).toContain('uppercase');
+    expect(externalHeading?.querySelectorAll('.bg-edge-default')).toHaveLength(
+      2,
+    );
   });
 
   it('selects the chosen Profile identity without changing the current mode', () => {

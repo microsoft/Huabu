@@ -1,6 +1,6 @@
 # Ink Lasso Question Flow
 
-> Status: **Partly shipped** — V1 and §14 shipped in [#220](https://github.com/microsoft/Huabu/pull/220); §15 is implemented in [#234](https://github.com/microsoft/Huabu/pull/234). §17's destination picker and Stage 1 shared conversation-first defaults are implemented on `feat/ink-agent-picker`, pending merge. Stage 2 resource recommendations remain deferred. · Last updated: 2026-10-08
+> Status: **Partly shipped** — V1 and §14 shipped in [#220](https://github.com/microsoft/Huabu/pull/220); §15 is implemented in [#234](https://github.com/microsoft/Huabu/pull/234). §17's destination picker and Stage 1 shared conversation-first defaults shipped in [#285](https://github.com/microsoft/Huabu/pull/285). Current toolbar, destination-confirmation, and selection behavior is documented in [Sketch Node](../architecture/sketch-node.md#41-partial-stroke-selection-as-ai-context). Stage 2 resource recommendations remain deferred. · Last updated: 2026-10-10
 
 ## 1. Summary
 

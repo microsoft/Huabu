@@ -132,6 +132,117 @@ async function restoreTestViewport(page: Page, item: FixtureNode, zoom = 1) {
   await page.reload();
 }
 
+test('Text content geometry stays fixed when selection chrome appears', async ({
+  page,
+}) => {
+  const item = fixture('text');
+  const [node] = await seed(page, [item]);
+  await restoreTestViewport(page, item, 0.51);
+  await expect(node.locator('textarea')).toBeVisible();
+  await page.mouse.click(1000, 700);
+  await expect(node).not.toHaveClass(/\bselected\b/);
+  const measure = () =>
+    node.evaluate((element) => {
+      const shell = element.querySelector('[data-node-surface]');
+      const text = element.querySelector('textarea');
+      if (!shell || !text) throw new Error('Missing Text surface');
+      const css = getComputedStyle(shell);
+      return {
+        node: element.getBoundingClientRect().toJSON(),
+        text: text.getBoundingClientRect().toJSON(),
+        border: css.borderWidth,
+        padding: css.padding,
+        fontSize: getComputedStyle(text).fontSize,
+        scrollTop: text.scrollTop,
+      };
+    });
+  const before = await measure();
+  const beforeImage = await node.locator('textarea').screenshot();
+  await node.click();
+  await expect(node).toHaveClass(/\bselected\b/);
+  expect(await measure()).toEqual(before);
+  const afterImage = await node.locator('textarea').screenshot();
+  await test.info().attach('text-before-selection', {
+    body: beforeImage,
+    contentType: 'image/png',
+  });
+  await test.info().attach('text-after-selection', {
+    body: afterImage,
+    contentType: 'image/png',
+  });
+  expect(afterImage.equals(beforeImage)).toBe(true);
+  await page.mouse.click(1000, 700);
+  await expect(node).not.toHaveClass(/\bselected\b/);
+  expect(await measure()).toEqual(before);
+});
+
+for (const zoom of [0.25, 0.51, 1]) {
+  test(`Note document pixels stay fixed across selection at ${zoom * 100}% zoom`, async ({
+    page,
+  }) => {
+    const item = fixture('note');
+    item.size = { width: 823.35, height: 952.5 };
+    item.position = { x: 180.3, y: 200.7 };
+    item.data.content =
+      '# Nobel Prize news\n\nA paragraph with enough text to fill the document.\n\n' +
+      '| Day | Topic | Winners | Details |\n| --- | --- | --- | --- |\n' +
+      '| Monday | Science | Several names | A long description of the research and its significance. |\n'.repeat(
+        16,
+      );
+    const [node] = await seed(page, [item]);
+    await restoreTestViewport(page, item, zoom);
+    await expect(node.locator('.ProseMirror')).toBeVisible();
+    await page.mouse.click(120, 700);
+    await expect(node).not.toHaveClass(/\bselected\b/);
+    const viewport = node.locator('[data-note-content-viewport]');
+    await expect(viewport).toHaveAttribute('data-note-scroll-enabled', 'false');
+    const measure = () =>
+      node.evaluate((element) => {
+        const prose = element.querySelector('.ProseMirror');
+        const heading = prose?.querySelector('h1');
+        if (!prose || !heading) throw new Error('Missing Note document');
+        const range = document.createRange();
+        range.selectNodeContents(heading);
+        return {
+          node: element.getBoundingClientRect().toJSON(),
+          prose: prose.getBoundingClientRect().toJSON(),
+          heading: range.getBoundingClientRect().toJSON(),
+        };
+      });
+    const before = await measure();
+    const proseBox = await box(node.locator('.ProseMirror'));
+    const viewportBox = await box(viewport);
+    // Crop the document at fixed app coordinates, excluding the scrollbar and fade.
+    const clip = {
+      ...proseBox,
+      height: Math.min(
+        proseBox.height,
+        (viewportBox.y + viewportBox.height - proseBox.y) * 0.75,
+      ),
+    };
+    const beforeImage = await page.screenshot({ clip });
+    await node.click({ position: { x: 50, y: 30 } });
+    await expect(node).toHaveClass(/\bselected\b/);
+    await expect(viewport).toHaveAttribute('data-note-scroll-enabled', 'true');
+    expect(await measure()).toEqual(before);
+    const afterImage = await page.screenshot({ clip });
+    await test.info().attach('note-before-selection', {
+      body: beforeImage,
+      contentType: 'image/png',
+    });
+    await test.info().attach('note-after-selection', {
+      body: afterImage,
+      contentType: 'image/png',
+    });
+    expect(afterImage.equals(beforeImage)).toBe(true);
+    await page.mouse.click(120, 700);
+    await expect(node).not.toHaveClass(/\bselected\b/);
+    await expect(viewport).toHaveAttribute('data-note-scroll-enabled', 'false');
+    expect(await measure()).toEqual(before);
+    expect((await page.screenshot({ clip })).equals(beforeImage)).toBe(true);
+  });
+}
+
 function widthEdge(node: Locator, side: string) {
   return node.locator(
     `.react-flow__resize-control.line.node-resize-edge.${side}`,

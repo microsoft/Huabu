@@ -2,7 +2,7 @@
 // Licensed under the MIT license.
 
 import { useReactFlow, useStore } from '@xyflow/react';
-import { ArrowUp, Square, Trash2 } from 'lucide-react';
+import { ArrowUp, Ellipsis, Shapes, Square, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useShallow } from 'zustand/react/shallow';
@@ -15,10 +15,15 @@ import {
 import { Button } from '@/components/Common/Button';
 import { CanvasFloatingPopover } from '@/components/Common/CanvasFloatingPopover';
 import {
+  DropdownMenu,
+  DropdownMenuItem,
+} from '@/components/Common/DropdownMenu';
+import {
   FloatingToolbar,
   FLOATING_TOOLBAR_CLASS,
 } from '@/components/Common/FloatingToolbar';
 import { toast } from '@/components/Common/Toast';
+import { Tooltip } from '@/components/Common/Tooltip';
 import { computeAdjacentNodePlacement } from '@/components/Nodes/nodePlacement';
 import { createQuestionNode } from '@/components/Nodes/question/questionCompose';
 import { SketchControls } from '@/components/Nodes/sketch/SketchControls';
@@ -31,6 +36,7 @@ import {
   DEFAULT_STROKE_COLOR,
   DEFAULT_STROKE_SIZE,
 } from '@/components/Nodes/sketch/sketchPath';
+import { NODE_ICON } from '@/config/nodeIcons';
 import {
   blobToDataUrl,
   captureVisibleCanvasGrounding,
@@ -68,6 +74,7 @@ import {
   groundingOperandsFromContext,
   inkLassoIdentity,
   inkSelectionIdentity,
+  isViewportStableForBounds,
   retainedLassoBounds,
   resolveInkQuestionTarget,
   unionSelectionBounds,
@@ -135,10 +142,11 @@ function isInkTargetBusy(nodeId: string): boolean {
 /**
  * Floating toolbar for a Stage 2 stroke-level lasso selection. Aligns with
  * the sketch node's own controls: color + thickness edit the selected
- * strokes. Delete is **touch-only** (desktop uses the keyboard). Toolbar
- * arbitration guarantees at most one floating toolbar:
- *   - pure stroke selection → color + size (+ delete on touch) + submit;
- *   - mixed (strokes + nodes) → submit metadata (+ delete on touch), while
+ * strokes. Secondary actions live in the shared overflow menu, while desktop
+ * also retains its keyboard Delete shortcut. Toolbar arbitration guarantees at
+ * most one floating toolbar:
+ *   - pure stroke selection → color + size + overflow, then Agent submit;
+ *   - mixed (strokes + nodes) → overflow, then Agent submit, while
  *     style controls and node toolbars stay suppressed;
  *   - pure node selection → the node toolbars own the surface.
  */
@@ -261,6 +269,7 @@ export const StrokeSelectionToolbar = () => {
   const {
     destination,
     loading: loadingDestination,
+    confirming: confirmingDestination,
     error: destinationError,
     choose: chooseDestination,
     retryDefault,
@@ -377,6 +386,10 @@ export const StrokeSelectionToolbar = () => {
   }, [renderedLassoIdentity, setInkSubmissionPreparing]);
   const handleSubmit = useCallback(async () => {
     if (preparationRef.current) return;
+    if (confirmingDestination) {
+      toast(t('toolbar.inkAgentPicker.loadingConversation'), { tone: 'info' });
+      return;
+    }
     const canvas = useCanvasStore.getState();
     const strokeSelection =
       useGesturePreviewStore.getState().sketchStrokeSelection;
@@ -478,9 +491,7 @@ export const StrokeSelectionToolbar = () => {
           const currentViewport = getViewport();
           if (
             currentLassoIdentity() !== lassoIdentity ||
-            currentViewport.x !== viewport.x ||
-            currentViewport.y !== viewport.y ||
-            currentViewport.zoom !== viewport.zoom
+            !isViewportStableForBounds(viewport, currentViewport, sourceBounds)
           ) {
             throw new Error(
               'Canvas view changed during Ink grounding capture. Submit again.',
@@ -672,6 +683,7 @@ export const StrokeSelectionToolbar = () => {
   }, [
     addNode,
     clearSelection,
+    confirmingDestination,
     currentLassoIdentity,
     getViewport,
     setInkSubmissionPreparing,
@@ -779,18 +791,25 @@ export const StrokeSelectionToolbar = () => {
   }, [hasSelection, handleDelete]);
 
   const showStyle = !isMixed; // style controls only for a pure stroke selection
-  const showDelete = isNotMouse; // delete button is touch-only
+  const selectionTypeLabel = t(
+    isMixed ? 'toolbar.multipleSelectedObjects' : 'toolbar.inkSelection',
+  );
+  const InkIcon = NODE_ICON.sketch;
   const showSubmit = hasSelection;
-  const open =
-    hasSelection && anchor !== null && (showStyle || showDelete || showSubmit);
+  const open = hasSelection && anchor !== null && (showStyle || showSubmit);
   const submitDisabled =
-    candidate.kind !== 'ready' || isPreparing || Boolean(unavailableReason);
+    candidate.kind !== 'ready' ||
+    confirmingDestination ||
+    isPreparing ||
+    Boolean(unavailableReason);
   const submitTitle = isPreparing
     ? t('toolbar.sendingInkRequest')
-    : (unavailableReason ??
-      (candidate.kind === 'ready'
-        ? t('toolbar.sendInkRequest')
-        : t('toolbar.invalidQuestionTarget')));
+    : confirmingDestination
+      ? t('toolbar.inkAgentPicker.loadingConversation')
+      : (unavailableReason ??
+        (candidate.kind === 'ready'
+          ? t('toolbar.sendInkRequest')
+          : t('toolbar.invalidQuestionTarget')));
 
   return (
     <CanvasFloatingPopover
@@ -798,45 +817,63 @@ export const StrokeSelectionToolbar = () => {
       open={open}
       offset={12}
       side="top"
-      className={`${FLOATING_TOOLBAR_CLASS} canvas-context-toolbar ink-context-toolbar`}
+      className="ink-context-toolbar"
     >
-      {showStyle && (
-        <SketchControls
-          floating
-          colorTriggerClassName="node-toolbar-color"
-          color={color}
-          size={size}
-          touch={isNotMouse}
-          onColorChange={(c) => patchSelected({ color: c })}
-          onSizeChange={(s) => patchSelected({ size: s })}
-          onSizeDragStart={beginNodeDataGesture}
-          onSizeDragEnd={endNodeDataGesture}
-        />
-      )}
-      {showStyle && showDelete && <FloatingToolbar.Divider />}
-      {showDelete && (
-        <FloatingToolbar.ActionButton
-          title={t('toolbar.deleteSelected')}
-          onClick={(e) => {
-            e.stopPropagation();
-            handleDelete();
-          }}
-        >
-          <Trash2 />
-        </FloatingToolbar.ActionButton>
-      )}
-      {(showStyle || showDelete) && showSubmit && <FloatingToolbar.Divider />}
-      {showSubmit && (
-        <div className="flex min-w-0 items-center gap-1">
-          <span
-            className="text-fg-subtle shrink-0 px-1 text-xs whitespace-nowrap tabular-nums"
-            aria-label={t('toolbar.inkSourceCount', {
-              count: candidate.sourceCount,
-            })}
+      <FloatingToolbar.Group
+        className={`${FLOATING_TOOLBAR_CLASS} canvas-context-toolbar ink-toolbar-surface ink-edit-group`}
+      >
+        <Tooltip content={selectionTypeLabel}>
+          <div
+            role="img"
+            aria-label={selectionTypeLabel}
+            className="text-fg-subtle flex shrink-0 items-center px-1"
           >
-            {candidate.sourceCount}{' '}
-            {t('chat.sourceLabel', { count: candidate.sourceCount })}
-          </span>
+            {isMixed ? <Shapes size={14} /> : <InkIcon size={14} />}
+          </div>
+        </Tooltip>
+        <FloatingToolbar.Divider />
+        {showStyle && (
+          <SketchControls
+            floating
+            colorTriggerClassName="node-toolbar-color"
+            color={color}
+            size={size}
+            touch={isNotMouse}
+            onColorChange={(c) => patchSelected({ color: c })}
+            onSizeChange={(s) => patchSelected({ size: s })}
+            onSizeDragStart={beginNodeDataGesture}
+            onSizeDragEnd={endNodeDataGesture}
+          />
+        )}
+        {showStyle && <FloatingToolbar.Divider />}
+        <DropdownMenu
+          floating
+          align="bottom-left"
+          className="node-toolbar-overflow"
+          trigger={
+            <Button
+              variant="ghost"
+              iconOnly
+              size="sm"
+              title={t('toolbar.more')}
+            >
+              <Ellipsis />
+            </Button>
+          }
+        >
+          <DropdownMenuItem
+            icon={<Trash2 />}
+            className="text-danger"
+            onClick={handleDelete}
+          >
+            {t('actions.delete')}
+          </DropdownMenuItem>
+        </DropdownMenu>
+      </FloatingToolbar.Group>
+      {showSubmit && (
+        <FloatingToolbar.Group
+          className={`${FLOATING_TOOLBAR_CLASS} canvas-context-toolbar ink-toolbar-surface ink-agent-group min-w-0`}
+        >
           <InkAgentDestinationPicker
             unresolved={destination.kind === 'unresolved'}
             loading={loadingDestination}
@@ -893,7 +930,7 @@ export const StrokeSelectionToolbar = () => {
           >
             {isPreparing ? <Square /> : <ArrowUp />}
           </Button>
-        </div>
+        </FloatingToolbar.Group>
       )}
     </CanvasFloatingPopover>
   );

@@ -8,6 +8,7 @@ import {
   inkLassoIdentity,
   inkSelectionIdentity,
   inkStrokeSelectionIdentity,
+  isViewportStableForBounds,
   retainedLassoBounds,
   unionSelectionBounds,
 } from './inkQuestionSubmission';
@@ -219,6 +220,44 @@ describe('Ink Question submission candidate', () => {
         { x: 0, y: 60, width: 100, height: 20 },
       ),
     ).toEqual({ x: 0, y: 30, width: 100, height: 50 });
+  });
+
+  it('ignores imperceptible viewport corrections during grounding capture', () => {
+    const bounds = { x: 100, y: 50, width: 200, height: 100 };
+
+    expect(
+      isViewportStableForBounds(
+        { x: 0, y: 0, zoom: 1 },
+        { x: 0.25, y: -0.25, zoom: 1 },
+        bounds,
+      ),
+    ).toBe(true);
+    expect(
+      isViewportStableForBounds(
+        { x: 0, y: 0, zoom: 1 },
+        { x: -0.1, y: -0.05, zoom: 1.001 },
+        bounds,
+      ),
+    ).toBe(true);
+  });
+
+  it('detects viewport changes that visibly move grounding sources', () => {
+    const bounds = { x: 100, y: 50, width: 200, height: 100 };
+
+    expect(
+      isViewportStableForBounds(
+        { x: 0, y: 0, zoom: 1 },
+        { x: 0.5, y: 0, zoom: 1 },
+        bounds,
+      ),
+    ).toBe(false);
+    expect(
+      isViewportStableForBounds(
+        { x: 0, y: 0, zoom: 1 },
+        { x: 0, y: 0, zoom: 1.01 },
+        bounds,
+      ),
+    ).toBe(false);
   });
 
   it('anchors to the retained Lasso bounds including its live move', () => {

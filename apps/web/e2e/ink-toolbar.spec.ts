@@ -21,14 +21,41 @@ for (const pointerOpen of ['click', 'tap'] as const) {
     const toolbar = page.locator('.ink-context-toolbar');
     const trigger = toolbar.locator('.ink-agent-destination-trigger');
     const previousFocus = toolbar.getByRole('button', {
-      name: 'Delete selected',
+      name: 'More',
     });
     await previousFocus.focus();
     await expect(previousFocus).toBeFocused();
     await trigger[pointerOpen]();
     const menu = page.getByRole('menu');
+    await expect(menu).toBeVisible();
+    const newGroup = menu.getByRole('group', { name: 'New conversation' });
+    const externalHeading = newGroup.getByText('External Agents', {
+      exact: true,
+    });
+    await expect(externalHeading).toBeVisible();
+    await expect(externalHeading).toHaveCSS('text-transform', 'none');
+    await expect(externalHeading.locator('..')).toHaveCSS(
+      'padding-left',
+      '12px',
+    );
+    await expect(
+      externalHeading.locator('..').locator('.bg-edge-default'),
+    ).toHaveCount(0);
+    await menu.screenshot({
+      path: test.info().outputPath(`agent-menu-hierarchy-${pointerOpen}.png`),
+    });
+    await expect
+      .poll(() =>
+        trigger.evaluate(
+          (element) => getComputedStyle(element).backgroundColor,
+        ),
+      )
+      .toBe('rgba(0, 0, 0, 0)');
+    await trigger[pointerOpen]();
+    await expect(menu).toHaveCount(0);
+    await trigger[pointerOpen]();
     await expect(menu.getByRole('menuitem').first()).toBeFocused();
-    await page.keyboard.press('End');
+    await page.keyboard.press('ArrowDown');
     await expect(
       menu.getByRole('menuitem', { name: /Conversation 2/ }),
     ).toBeFocused();
@@ -40,7 +67,14 @@ for (const pointerOpen of ['click', 'tap'] as const) {
     await expect(menu).toHaveCount(0);
     await expect(trigger).toBeFocused();
     await expect(trigger).toContainText('Conversation 1');
-    await expect(toolbar.getByLabel('1 ink source')).toBeVisible();
+    await trigger.evaluate((element) => element.blur());
+    await page.mouse.move(0, 0);
+    await trigger.hover();
+    await expect(page.getByRole('tooltip')).toHaveText('Choose Agent session');
+    await expect(trigger).toHaveAttribute(
+      'aria-label',
+      /Continue Conversation 1/,
+    );
     await trigger[pointerOpen]();
     await expect(menu.getByRole('menuitem').first()).toBeFocused();
     await page.keyboard.press('Escape');
@@ -137,7 +171,7 @@ test('conversation default reads server recency only for a fresh Lasso', async (
 });
 
 for (const locale of ['zh-CN', 'en']) {
-  test(`Ink toolbar keeps source count and Agent identity separate in ${locale}`, async ({
+  test(`Ink toolbar keeps Ink and Agent identity separate in ${locale}`, async ({
     page,
   }) => {
     await page.route(
@@ -156,17 +190,25 @@ for (const locale of ['zh-CN', 'en']) {
     const trigger = toolbar.locator('.ink-agent-destination-trigger');
     await expect(trigger).toContainText('GitHub Copilot');
     await expect(toolbar.locator('.node-toolbar-color')).toBeVisible();
+    await expect(toolbar.locator('.lucide-pencil')).toBeVisible();
+    await trigger.hover();
+    await expect(page.getByRole('tooltip')).toHaveText(
+      locale === 'zh-CN' ? '选择会话' : 'Choose Agent session',
+    );
 
-    for (const width of [1100, 320]) {
+    for (const width of [1100, 320, 359, 360, 375, 390, 414, 768]) {
       await page.setViewportSize({ width, height: 768 });
       await expect
         .poll(() =>
           trigger.evaluate((button) => {
             const toolbar = button.closest('.ink-context-toolbar');
-            const source = toolbar?.querySelector('span[aria-label]');
+            const edit = toolbar?.querySelector('.ink-edit-group');
+            const agent = toolbar?.querySelector('.ink-agent-group');
             const send = toolbar?.querySelector('.canvas-context-submit');
-            if (!toolbar || !source || !send) return false;
+            if (!toolbar || !edit || !agent || !send) return false;
             const bounds = toolbar.getBoundingClientRect();
+            const editBounds = edit.getBoundingClientRect();
+            const agentBounds = agent.getBoundingClientRect();
             const rect = button.getBoundingClientRect();
             const children = [...button.children].map((child) =>
               child.getBoundingClientRect(),
@@ -176,8 +218,12 @@ for (const locale of ['zh-CN', 'en']) {
               bounds.left >= 7 &&
               bounds.right <= innerWidth - 7 &&
               toolbar.scrollWidth <= toolbar.clientWidth &&
-              source.getBoundingClientRect().right + 4 <= rect.left &&
-              rect.right + 4 <= send.getBoundingClientRect().left &&
+              (editBounds.right + 4 <= agentBounds.left ||
+                editBounds.bottom + 4 <= agentBounds.top) &&
+              rect.left >= agentBounds.left &&
+              send.getBoundingClientRect().right <= agentBounds.right &&
+              send.getBoundingClientRect().right <= innerWidth - 7 &&
+              rect.right <= send.getBoundingClientRect().left &&
               label.width >= 40 &&
               children.every(
                 (child, index) =>

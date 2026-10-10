@@ -188,6 +188,20 @@ describe('NodeToolbar', () => {
       document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
     ).find((button) => button.textContent?.includes('spacePreview.add'));
     expect(previewAction).toBeDefined();
+    expect(previewAction?.classList.contains('text-[13px]')).toBe(true);
+    expect(previewAction?.classList.contains('font-normal')).toBe(true);
+    expect(previewAction?.classList.contains('leading-5')).toBe(true);
+    expect(previewAction?.classList.contains('gap-2')).toBe(true);
+    expect(previewAction?.querySelector('svg')?.parentElement?.className).toBe(
+      'shrink-0 text-inherit',
+    );
+    expect(previewAction?.parentElement?.classList.contains('rounded-lg')).toBe(
+      true,
+    );
+    expect(previewAction?.parentElement?.classList.contains('px-1')).toBe(true);
+    expect(previewAction?.parentElement?.classList.contains('py-1.5')).toBe(
+      true,
+    );
 
     await act(async () => previewAction?.click());
 
