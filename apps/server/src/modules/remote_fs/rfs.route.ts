@@ -36,6 +36,8 @@ import { createReadStream, existsSync, statSync } from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
+import archiver from 'archiver';
+
 import {
   AGENT_SSE_EVENTS,
   RFS_HEARTBEAT_DEFAULT_SEC,
@@ -126,6 +128,7 @@ import {
   serviceProvisioner,
   ServiceProvisionError,
   getBundledServicePackage,
+  isAgentFacingService,
   readServicePackageFile,
 } from '../services/index.js';
 import {
@@ -566,11 +569,7 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
     if (!parsed.success) {
       return reply.code(400).send(rfsError('Invalid Service id'));
     }
-    const service = getBundledServicePackage(parsed.data.serviceId);
-    const skill = service?.manifest.agent?.skill;
-    const content = skill
-      ? readServicePackageFile(parsed.data.serviceId, skill)
-      : null;
+    const content = readServicePackageFile(parsed.data.serviceId, 'SKILL.md');
     if (!content) {
       return reply
         .code(404)
@@ -581,7 +580,7 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
 
   app.get<{
     Params: ServiceParams & { canvasId: string };
-  }>('/:canvasId/services/:serviceId/client', async (request, reply) => {
+  }>('/:canvasId/download/services/:serviceId.zip', async (request, reply) => {
     const parsed = serviceParamsSchema.safeParse({
       serviceId: request.params.serviceId,
     });
@@ -589,19 +588,55 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
       return reply.code(400).send(rfsError('Invalid Service id'));
     }
     const service = getBundledServicePackage(parsed.data.serviceId);
-    const client = service?.manifest.agent?.client;
-    const content = client
-      ? readServicePackageFile(parsed.data.serviceId, client)
-      : null;
-    if (!content) {
+    if (!service) {
       return reply
         .code(404)
-        .send(rfsError('Service client not found', 'client_not_found'));
+        .send(rfsError('Service not found', 'service_not_found'));
     }
-    return reply
-      .header('Cache-Control', 'public, max-age=300')
-      .type('text/javascript; charset=utf-8')
-      .send(content);
+    if (!isAgentFacingService(service.manifest)) {
+      return reply
+        .code(403)
+        .send(
+          rfsError(
+            'Service is not available to External Agents',
+            'service_not_agent_accessible',
+          ),
+        );
+    }
+    const etag = `"${service.contentHash}"`;
+    reply.header('ETag', etag);
+    if (ifNoneMatchSatisfied(request.headers['if-none-match'], etag)) {
+      return reply.code(304).send();
+    }
+    const filename = `${service.manifest.id}-${service.manifest.version}.zip`;
+    reply
+      .header('Cache-Control', 'private, max-age=300')
+      .header('Content-Disposition', `attachment; filename="${filename}"`)
+      .type('application/zip');
+    const archive = archiver('zip', { zlib: { level: 6 } });
+    archive.on('warning', (error) => {
+      request.log.warn(
+        { err: error, serviceId: service.manifest.id },
+        'Service package archive warning',
+      );
+    });
+    archive.on('error', (error) => {
+      request.log.error(
+        { err: error, serviceId: service.manifest.id },
+        'Service package archive failed',
+      );
+    });
+    const archiveRoot = `${service.manifest.id}/`;
+    archive.file(service.manifestPath, {
+      name: `${archiveRoot}service.yaml`,
+    });
+    for (const file of service.files) {
+      archive.file(file.absolutePath, {
+        name: `${archiveRoot}${file.relativePath}`,
+      });
+    }
+    void archive.finalize();
+    return reply.send(archive);
   });
 
   app.post<{

@@ -6,7 +6,7 @@ These environment variables are already set:
 
 - `HUABU_RFS_URL` — the base URL for this Space, with no trailing slash.
 - `AGENTLET_TOKEN` — the RFS bearer credential.
-- `AGENTLET_SERVICE_SDK_URL` — the daemon-owned `file://` URL for loading configured provider Services.
+- `AGENTLET_SERVICE_SDK_URL` — the daemon-owned `file://` URL used internally by downloaded Service Package entries to lease current configuration.
 - `HUABU_THREAD_ID` — your conversation ID. Pass it on `execute` (see §6) to attribute your edits.
 
 Prefer deterministic direct operations:
@@ -17,7 +17,7 @@ Prefer deterministic direct operations:
 4. Use the `SNAPSHOT_NODES` query to render image, sketch, or frame nodes into PNG artifacts you can inspect.
 5. Use `execute` for validated Space commands.
 6. Use `agent` only when you deliberately want the optional internal Huabu agent to interpret an open-ended request.
-7. Discover configured provider services through `services` and follow the selected Package Skill before loading it through the Agentlet SDK.
+7. Discover configured provider services through `services`, read the selected Package Skill, and download its complete Package before running or extending its entry.
 
 ## 1. Discover operations
 
@@ -295,18 +295,21 @@ Before using one, fetch and follow its Skill:
 curl -fsS -H "$AUTH" "$HUABU_RFS_URL/services/image-gen/skill"
 ```
 
-Agent-facing packages can then be loaded from a short-lived `.mjs` script:
+Download the complete Package to a path in your working directory:
 
-```js
-const { withService } = await import(process.env.AGENTLET_SERVICE_SDK_URL);
-
-await withService('image-gen', async ({ client }) => {
-  if (!client) throw new Error('Service client is unavailable');
-  console.log(await client.generate({ prompt: 'A watercolor landscape' }));
-});
+```bash
+curl -fsS -H "$AUTH" \
+  "$HUABU_RFS_URL/download/services/image-gen.zip" \
+  -o image-gen.zip
+unzip image-gen.zip
+cd image-gen
 ```
 
-The SDK obtains current configuration on demand. Never print, persist, or forward returned credentials. A Service Package without an Agent Skill is intentionally unavailable for direct External Agent use; do not construct provider calls from its Settings manifest.
+Every archive contains one top-level directory named after the Service, so extracting `image-gen.zip` creates `image-gen/` rather than placing files directly in the current directory. `service.yaml` and every file declared by `package.files` are included; undeclared development files are not.
+
+Read the extracted `SKILL.md`, then run the optional `entry.mjs` with Node as documented there. The entry obtains current configuration on demand through `AGENTLET_SERVICE_SDK_URL`; you normally do not need to import or call that SDK yourself. An entry is a modifiable starting point rather than a complete provider SDK: when the task needs another provider endpoint, follow the official documentation linked by the Skill and modify only your local Package copy.
+
+Never print, persist, or forward leased credentials. A Service Package without `SKILL.md` is intentionally unavailable for direct External Agent use; do not construct provider calls from its Settings manifest.
 
 ## Advanced workflows
 

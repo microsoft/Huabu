@@ -5,6 +5,8 @@ name: Handwriting Recognition
 description: Recognize selected handwriting with Azure AI Vision.
 storage:
   namespace: integration.azureVisionInkOcr
+package:
+  files: []
 configuration:
   - id: endpoint
     label: Endpoint

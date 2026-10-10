@@ -12,18 +12,18 @@ The bundled packages live under `apps/server/src/services/<id>/`:
 <service>/
 ├── service.yaml
 ├── SKILL.md           # required only when External Agent-facing
-└── client.mjs         # required only for a direct Agent-side provider call
+└── entry.mjs          # optional executable and modifiable starting point
 ```
 
 Phase 1 packages are trusted files shipped with Huabu. User upload, installation, remote registries, and Server execution of uploaded code are not supported.
 
 ## Manifest contract
 
-`huabu-service/v1` is defined by `serviceManifestSchema` in `packages/shared/src/types/api/service-package.ts`. Unknown properties, malformed IDs, duplicate configuration IDs, invalid enum declarations, and an `agent` block without a Skill fail validation.
+`huabu-service/v1` is defined by `serviceManifestSchema` in `packages/shared/src/types/api/service-package.ts`. Unknown properties, malformed IDs, duplicate configuration IDs, invalid enum declarations, ambiguous Package paths, duplicate Package files, and `entry.mjs` without `SKILL.md` fail validation.
 
-Every package declares a stable ID and version, display metadata, one registered storage namespace, optional Agent files, and constrained configuration fields. Supported field types are text, secret, HTTPS URL, boolean, and bounded enum. `configuration[].id` directly names a stable logical key exposed by the namespace adapter; `label` is display text and can change without changing the storage or client contract.
+Every package declares a stable ID and version, display metadata, one registered storage namespace, an exact `package.files` allowlist, and constrained configuration fields. `service.yaml` is included implicitly; every other distributable file must be listed as a portable ASCII Package-root-relative regular-file path using `/` separators. Directories, glob patterns, exclusions, symlinks, duplicate paths, platform-specific paths, and traversal are not supported. Supported configuration field types are text, secret, HTTPS URL, boolean, and bounded enum. `configuration[].id` directly names a stable logical key exposed by the namespace adapter; `label` is display text and can change without changing the storage or entry contract.
 
-The manifest does not declare Internal Agent or Pipeline consumers. Those execution paths are reviewed Huabu code and cannot be enabled by package metadata. The presence of an `agent` block is the complete declaration that a package supports External Agent use; its `skill` is required and its direct-provider `client` is optional. A package without `agent` cannot be leased to an External Agent.
+The manifest does not declare consumers. Internal Agent and Pipeline execution paths are reviewed Huabu code and cannot be enabled by package metadata. A root `SKILL.md` in `package.files` declares External Agent support; an optional root `entry.mjs` provides a directly executable and modifiable starting point. A Package without `SKILL.md` cannot be leased or downloaded through External RFS, and `entry.mjs` cannot be published without `SKILL.md`.
 
 ## Provision Service and storage bindings
 
@@ -46,9 +46,9 @@ Masked Settings responses return `null` for secret values and identify configure
 
 Internal Agent tools keep their high-level Huabu integrations. `generate_image` still owns typed tool arguments, model capability validation, reference artifact reads, provider SDK behavior, image decoding, and artifact persistence; it obtains provider configuration through `resolveForServer('image-gen')`.
 
-Product pipelines also retain reviewed Server adapters. The YouTube loader and Ink OCR request path resolve their registered Service configuration but do not import package `client.mjs`.
+Product pipelines also retain reviewed Server adapters. The YouTube loader and Ink OCR request path resolve their registered Service configuration but do not import Package entries.
 
-External Agent packages provide a real `SKILL.md` and, when direct provider execution is needed, a `client.mjs` exporting `createClient({ config })`. The bundled Image and Tavily packages are Agent-facing. YouTube Transcripts and Ink OCR are not Agent-facing and therefore ship neither placeholder file.
+External Agent Packages provide a real `SKILL.md` and may provide an `entry.mjs` that imports `AGENTLET_SERVICE_SDK_URL`, leases current configuration, and implements only a useful baseline provider workflow. The entry is not a complete provider SDK: the Skill links official provider documentation, and an Agent may modify its downloaded local copy for additional endpoints. The bundled Image and Tavily Packages are Agent-facing. YouTube Transcripts and Ink OCR are not Agent-facing and therefore publish neither placeholder file.
 
 ## Owner Settings API
 
@@ -70,32 +70,34 @@ The canvas-scoped RFS retains `/capabilities` for direct Space-operation discove
 GET  /services
 GET  /services/:id/manifest
 GET  /services/:id/skill
-GET  /services/:id/client
 POST /services/:id/lease
+GET  /download/services/:id.zip
 ```
 
-Manifest and Skill responses contain no credentials. Client source is a versioned bundled asset. Lease requires the normal authenticated RFS context, rejects unknown, unconfigured, and packages without an `agent` declaration explicitly, returns only fields declared by the selected package, and uses `Cache-Control: no-store`.
+Manifest and Skill responses contain no credentials. Lease requires the normal authenticated RFS context, rejects unknown, unconfigured, and Packages without `SKILL.md` explicitly, returns only fields declared by the selected Package, and uses `Cache-Control: no-store`.
+
+Package download streams a ZIP on demand from the validated Package record without a temporary file or ZIP cache. The archive contains one `<serviceId>/` root directory, `service.yaml`, and exactly the files declared by `package.files`; undeclared tests and development files are excluded. The response uses the Package content hash as its ETag. Phase 1 resolves records from bundled directories; a future validated custom-Service installation can expose the same immutable root, exact file list, and hash without changing the route.
 
 ## Agentlet SDK
 
 Agentlet publishes `dist/service-sdk/index.js`. The daemon computes its absolute `file://` URL relative to its own `import.meta.url` and injects it as the authoritative `AGENTLET_SERVICE_SDK_URL` after workload environment values, so a Profile or session cannot replace it.
 
-`loadService(id)` obtains a fresh lease and loads the trusted package client from Huabu without writing credentials to disk. `withService(id, callback)` is the convenience wrapper. The SDK reports bounded status-only request failures and does not include response bodies that could contain credentials.
+`leaseService(id)` obtains a fresh configuration lease without downloading or loading Package code. `withServiceConfig(id, callback)` is the scoped convenience wrapper used by `entry.mjs`. The SDK reports bounded status-only request failures and does not include response bodies that could contain credentials.
 
 The SDK reduces accidental persistence but is not a sandbox. A trusted External Agent and loaded client share the Agent process's filesystem, network, RFS bearer, and provider credentials. Static provider credentials cannot be revoked after disclosure except by provider-side rotation.
 
 ## Build and packaging
 
-Server development reads packages from `apps/server/src/services`. The Server bundle copies that directory to `dist-bundle/services`. The bundled Agentlet build emits both `agentlet/index.js` and `agentlet/service-sdk/index.js`; the published Agentlet npm package already includes its complete `dist` tree.
+Server development reads Packages from `apps/server/src/services`. The Server bundle copies that directory to `dist-bundle/services`, while RFS distribution still selects only Manifest-declared files. The bundled Agentlet build emits both `agentlet/index.js` and `agentlet/service-sdk/index.js`; the published Agentlet npm package already includes its complete `dist` tree.
 
 ## Code entry points
 
-| File                                                             | Responsibility                                         |
-| ---------------------------------------------------------------- | ------------------------------------------------------ |
-| `packages/shared/src/types/api/service-package.ts`               | Manifest, Generic Settings, summary, and lease schemas |
-| `apps/server/src/modules/services/package-loader.ts`             | Bundled YAML parsing, validation, and path confinement |
-| `apps/server/src/modules/services/provisioner.ts`                | Namespace adapters and trusted/masked projections      |
-| `apps/server/src/modules/services/services.route.ts`             | Owner Generic Settings API                             |
-| `apps/server/src/modules/remote_fs/rfs.route.ts`                 | Authenticated Service discovery, files, and lease      |
-| `apps/web/src/components/Settings/sections/ServicesSettings.tsx` | Manifest-driven Services UI                            |
-| `external/agentlet/packages/local/src/service-sdk/index.ts`      | External Agent SDK                                     |
+| File                                                             | Responsibility                                                             |
+| ---------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `packages/shared/src/types/api/service-package.ts`               | Manifest, Generic Settings, summary, and lease schemas                     |
+| `apps/server/src/modules/services/package-loader.ts`             | Bundled YAML parsing, exact file validation, hashing, and path confinement |
+| `apps/server/src/modules/services/provisioner.ts`                | Namespace adapters and trusted/masked projections                          |
+| `apps/server/src/modules/services/services.route.ts`             | Owner Generic Settings API                                                 |
+| `apps/server/src/modules/remote_fs/rfs.route.ts`                 | Authenticated Service discovery, files, and lease                          |
+| `apps/web/src/components/Settings/sections/ServicesSettings.tsx` | Manifest-driven Services UI                                                |
+| `external/agentlet/packages/local/src/service-sdk/index.ts`      | External Agent SDK                                                         |

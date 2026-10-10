@@ -18,6 +18,7 @@ import { join } from 'node:path';
 
 import fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import yauzl from 'yauzl';
 
 import {
   AGENT_CANVAS_COMMAND_TYPES,
@@ -102,6 +103,25 @@ async function buildApp() {
   await app.register(rfsRoutes, { prefix: '/rfs' });
   await app.ready();
   return app;
+}
+
+async function zipEntries(buffer: Buffer): Promise<string[]> {
+  return new Promise((resolve, reject) => {
+    yauzl.fromBuffer(buffer, { lazyEntries: true }, (error, zip) => {
+      if (error || !zip) {
+        reject(error ?? new Error('Failed to open ZIP'));
+        return;
+      }
+      const entries: string[] = [];
+      zip.on('entry', (entry) => {
+        entries.push(entry.fileName);
+        zip.readEntry();
+      });
+      zip.on('end', () => resolve(entries));
+      zip.on('error', reject);
+      zip.readEntry();
+    });
+  });
 }
 
 /**
@@ -620,9 +640,9 @@ describe('third-party Services', () => {
         method: 'GET',
         url: '/rfs/c1/services/image-gen/skill',
       });
-      const client = await app.inject({
+      const packageDownload = await app.inject({
         method: 'GET',
-        url: '/rfs/c1/services/image-gen/client',
+        url: '/rfs/c1/download/services/image-gen.zip',
       });
 
       expect(discovery.statusCode).toBe(200);
@@ -636,11 +656,30 @@ describe('third-party Services', () => {
       });
       expect(skill.statusCode).toBe(200);
       expect(skill.headers['content-type']).toMatch(/text\/markdown/);
-      expect(client.statusCode).toBe(200);
-      expect(client.headers['content-type']).toMatch(/text\/javascript/);
-      expect(client.headers['cache-control']).toBe('public, max-age=300');
+      expect(packageDownload.statusCode).toBe(200);
+      expect(packageDownload.headers['content-type']).toMatch(
+        /application\/zip/,
+      );
+      expect(packageDownload.headers['content-disposition']).toContain(
+        'image-gen-1.0.0.zip',
+      );
+      expect(packageDownload.headers['cache-control']).toBe(
+        'private, max-age=300',
+      );
+      expect(await zipEntries(packageDownload.rawPayload)).toEqual([
+        'image-gen/service.yaml',
+        'image-gen/SKILL.md',
+        'image-gen/entry.mjs',
+      ]);
 
-      for (const response of [discovery, manifest, skill]) {
+      const notModified = await app.inject({
+        method: 'GET',
+        url: '/rfs/c1/download/services/image-gen.zip',
+        headers: { 'if-none-match': packageDownload.headers.etag },
+      });
+      expect(notModified.statusCode).toBe(304);
+
+      for (const response of [discovery, manifest, skill, packageDownload]) {
         expect(response.body).not.toContain('test-secret');
         expect(response.body).not.toContain('api-key');
       }
@@ -656,9 +695,9 @@ describe('third-party Services', () => {
         method: 'GET',
         url: '/rfs/c1/services/ink-ocr/skill',
       });
-      const noClient = await app.inject({
+      const noPackage = await app.inject({
         method: 'GET',
-        url: '/rfs/c1/services/youtube-transcripts/client',
+        url: '/rfs/c1/download/services/youtube-transcripts.zip',
       });
       const invalid = await app.inject({
         method: 'GET',
@@ -667,8 +706,10 @@ describe('third-party Services', () => {
 
       expect(noSkill.statusCode).toBe(404);
       expect(noSkill.json()).toMatchObject({ code: 'skill_not_found' });
-      expect(noClient.statusCode).toBe(404);
-      expect(noClient.json()).toMatchObject({ code: 'client_not_found' });
+      expect(noPackage.statusCode).toBe(403);
+      expect(noPackage.json()).toMatchObject({
+        code: 'service_not_agent_accessible',
+      });
       expect(invalid.statusCode).toBe(400);
     } finally {
       await app.close();

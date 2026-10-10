@@ -48,7 +48,7 @@ const maskedConfig = {
     name: 'Web Search',
     description: 'Search the web.',
     storage: { namespace: 'integration.tavily' },
-    agent: { skill: 'SKILL.md', client: 'client.mjs' },
+    package: { files: ['SKILL.md', 'entry.mjs'] },
     configuration: [
       {
         id: 'apiKey',

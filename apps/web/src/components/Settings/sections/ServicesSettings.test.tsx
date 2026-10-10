@@ -46,6 +46,7 @@ function config(id: (typeof ids)[number]): ServiceConfig {
       name: id,
       description: `${id} description`,
       storage: { namespace: `integration.${id}` },
+      package: { files: [] },
       configuration: [
         {
           id: 'apiKey',

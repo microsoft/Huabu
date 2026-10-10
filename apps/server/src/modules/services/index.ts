@@ -15,6 +15,7 @@ export const serviceProvisioner = new ServiceProvisioner(
 
 export {
   getBundledServicePackage,
+  isAgentFacingService,
   readServicePackageFile,
 } from './package-loader.js';
 export { ServiceProvisionError } from './provisioner.js';

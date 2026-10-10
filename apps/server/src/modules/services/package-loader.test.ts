@@ -20,17 +20,20 @@ describe('bundled Service packages', () => {
     expect(packages.get('image-gen')?.manifest.storage.namespace).toBe(
       'llm.imageConfig',
     );
-    expect(packages.get('youtube-transcripts')?.manifest.agent).toBeUndefined();
-    expect(packages.get('ink-ocr')?.manifest.agent).toBeUndefined();
+    expect(packages.get('youtube-transcripts')?.manifest.package.files).toEqual(
+      [],
+    );
+    expect(packages.get('ink-ocr')?.manifest.package.files).toEqual([]);
   });
 
-  it('exposes real Agent files only when the manifest declares Agent behavior', () => {
+  it('exposes only exact files declared by the package', () => {
     expect(readServicePackageFile('image-gen', 'SKILL.md')).toContain(
       '# Image Generation',
     );
-    expect(readServicePackageFile('web-search', 'client.mjs')).toContain(
-      'createClient',
+    expect(readServicePackageFile('web-search', 'entry.mjs')).toContain(
+      'search',
     );
+    expect(readServicePackageFile('image-gen', 'entry.test.ts')).toBeNull();
     expect(
       readServicePackageFile('youtube-transcripts', 'SKILL.md'),
     ).toBeNull();

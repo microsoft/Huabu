@@ -113,7 +113,6 @@ describe('Service Provision Service storage bindings', () => {
 
     expect(lease).toMatchObject({
       id: 'image-gen',
-      client: 'client.mjs',
       config: {
         baseUrl: 'https://images.example.com',
         apiKey: 'image-secret',

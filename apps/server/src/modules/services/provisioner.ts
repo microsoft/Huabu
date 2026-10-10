@@ -9,6 +9,7 @@ import {
   llmImageConfigUpdateSchema,
 } from '@huabu/shared';
 
+import { isAgentFacingService } from './package-loader.js';
 import { SECRET_IDS } from '../../security/secret-ids.js';
 import { getSecret } from '../../security/secret-store.js';
 import {
@@ -332,7 +333,7 @@ export class ServiceProvisioner {
         name: manifest.name,
         description: manifest.description,
         configured,
-        availableToExternalAgent: configured && Boolean(manifest.agent),
+        availableToExternalAgent: configured && isAgentFacingService(manifest),
       };
     });
   }
@@ -373,7 +374,7 @@ export class ServiceProvisioner {
 
   lease(serviceId: string): ServiceLease {
     const manifest = this.manifest(serviceId);
-    if (!manifest.agent) {
+    if (!isAgentFacingService(manifest)) {
       throw new ServiceProvisionError(
         'service_not_agent_accessible',
         `Service "${serviceId}" is not available to External Agents`,
@@ -383,7 +384,6 @@ export class ServiceProvisioner {
       id: manifest.id,
       version: manifest.version,
       config: this.resolveForServer(serviceId),
-      ...(manifest.agent?.client ? { client: manifest.agent.client } : {}),
     };
   }
 }

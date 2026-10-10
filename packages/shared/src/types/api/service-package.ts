@@ -9,6 +9,20 @@ const serviceIdSchema = z
 const serviceFieldIdSchema = z
   .string()
   .regex(/^[a-z][a-zA-Z0-9]{0,63}$/, 'Invalid service field id');
+const servicePackageFileSchema = z
+  .string()
+  .min(1)
+  .max(512)
+  .refine(
+    (value) =>
+      !value.startsWith('/') &&
+      !value.endsWith('/') &&
+      !value.includes('\\') &&
+      value
+        .split('/')
+        .every((segment) => /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(segment)),
+    'Package files must be portable exact relative file paths',
+  );
 
 export const serviceFieldOptionSchema = z.object({
   value: z.string().min(1).max(256),
@@ -57,13 +71,12 @@ export const serviceManifestSchema = z
           .regex(/^[a-z][a-zA-Z0-9.]{0,127}$/, 'Invalid storage namespace'),
       })
       .strict(),
-    agent: z
+    package: z
       .object({
-        skill: z.string().min(1).max(256),
-        client: z.string().min(1).max(256).optional(),
+        files: z.array(servicePackageFileSchema).max(256).default([]),
       })
       .strict()
-      .optional(),
+      .default({ files: [] }),
     configuration: z
       .array(serviceConfigurationFieldSchema)
       .max(100)
@@ -71,6 +84,31 @@ export const serviceManifestSchema = z
   })
   .strict()
   .superRefine((manifest, ctx) => {
+    const files = new Set<string>();
+    for (const [index, file] of manifest.package.files.entries()) {
+      if (file === 'service.yaml') {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['package', 'files', index],
+          message: 'service.yaml is included automatically',
+        });
+      }
+      if (files.has(file)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['package', 'files', index],
+          message: `Duplicate package file: ${file}`,
+        });
+      }
+      files.add(file);
+    }
+    if (files.has('entry.mjs') && !files.has('SKILL.md')) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['package', 'files'],
+        message: 'entry.mjs requires SKILL.md',
+      });
+    }
     const ids = new Set<string>();
     for (const [index, field] of manifest.configuration.entries()) {
       if (ids.has(field.id)) {
@@ -143,7 +181,6 @@ export const serviceLeaseSchema = z
     id: serviceIdSchema,
     version: z.string(),
     config: z.record(serviceFieldIdSchema, serviceFieldValueSchema),
-    client: z.string().optional(),
   })
   .strict();
 export type ServiceLease = z.infer<typeof serviceLeaseSchema>;

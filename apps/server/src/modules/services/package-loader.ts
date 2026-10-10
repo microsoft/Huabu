@@ -1,7 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { existsSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -23,6 +24,14 @@ const PACKAGE_IDS = [
 export interface BundledServicePackage {
   root: string;
   manifest: ServiceManifest;
+  manifestPath: string;
+  files: readonly ServicePackageFile[];
+  contentHash: string;
+}
+
+export interface ServicePackageFile {
+  relativePath: string;
+  absolutePath: string;
 }
 
 function packageRoot(): string {
@@ -35,9 +44,8 @@ function packageRoot(): string {
 function readPackage(packageId: (typeof PACKAGE_IDS)[number]) {
   const root = resolveDirectChildPath(packageRoot(), packageId);
   const manifestPath = resolveDirectChildPath(root, 'service.yaml');
-  const parsed = serviceManifestSchema.safeParse(
-    parse(readFileSync(manifestPath, 'utf8')),
-  );
+  const manifestSource = readFileSync(manifestPath, 'utf8');
+  const parsed = serviceManifestSchema.safeParse(parse(manifestSource));
   if (!parsed.success) {
     throw new Error(
       `Invalid bundled Service manifest "${packageId}": ${parsed.error.issues[0]?.message ?? 'unknown error'}`,
@@ -46,16 +54,31 @@ function readPackage(packageId: (typeof PACKAGE_IDS)[number]) {
   if (parsed.data.id !== packageId) {
     throw new Error(`Service package directory must match id "${packageId}"`);
   }
-  for (const file of [
-    parsed.data.agent?.skill,
-    parsed.data.agent?.client,
-  ].filter((value): value is string => Boolean(value))) {
-    const filePath = safeJoin(root, file);
-    if (!existsSync(filePath)) {
-      throw new Error(`Service "${packageId}" references missing file`);
+  const files = parsed.data.package.files.map((relativePath) => {
+    const absolutePath = safeJoin(root, relativePath);
+    if (!existsSync(absolutePath) || !lstatSync(absolutePath).isFile()) {
+      throw new Error(
+        `Service "${packageId}" references missing or non-regular file "${relativePath}"`,
+      );
     }
+    return { relativePath, absolutePath };
+  });
+  const hash = createHash('sha256');
+  hash.update('service.yaml\0').update(manifestSource).update('\0');
+  for (const file of files) {
+    hash
+      .update(file.relativePath)
+      .update('\0')
+      .update(readFileSync(file.absolutePath))
+      .update('\0');
   }
-  return { root, manifest: parsed.data };
+  return {
+    root,
+    manifest: parsed.data,
+    manifestPath,
+    files,
+    contentHash: hash.digest('hex'),
+  };
 }
 
 let packages: ReadonlyMap<string, BundledServicePackage> | null = null;
@@ -80,6 +103,12 @@ export function readServicePackageFile(
 ): string | null {
   const service = getBundledServicePackage(serviceId);
   if (!service) return null;
-  const filePath = safeJoin(service.root, file);
-  return existsSync(filePath) ? readFileSync(filePath, 'utf8') : null;
+  const packageFile = service.files.find(
+    (candidate) => candidate.relativePath === file,
+  );
+  return packageFile ? readFileSync(packageFile.absolutePath, 'utf8') : null;
+}
+
+export function isAgentFacingService(manifest: ServiceManifest): boolean {
+  return manifest.package.files.includes('SKILL.md');
 }

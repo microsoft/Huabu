@@ -32,15 +32,34 @@ describe('Service Package contract', () => {
     });
   });
 
-  it('requires a Skill whenever the package declares Agent behavior', () => {
+  it('requires SKILL.md whenever the package publishes entry.mjs', () => {
     const result = serviceManifestSchema.safeParse({
       ...manifest,
-      agent: { client: 'client.mjs' },
+      package: { files: ['entry.mjs'] },
     });
     expect(result.success).toBe(false);
   });
 
-  it('rejects duplicate field ids and empty updates', () => {
+  it('rejects ambiguous package paths, duplicate field ids, and empty updates', () => {
+    for (const file of [
+      'scripts/',
+      '../entry.mjs',
+      'scripts\\entry.mjs',
+      'C:/entry.mjs',
+    ]) {
+      expect(
+        serviceManifestSchema.safeParse({
+          ...manifest,
+          package: { files: [file] },
+        }).success,
+      ).toBe(false);
+    }
+    expect(
+      serviceManifestSchema.safeParse({
+        ...manifest,
+        package: { files: ['SKILL.md', 'SKILL.md'] },
+      }).success,
+    ).toBe(false);
     expect(
       serviceManifestSchema.safeParse({
         ...manifest,

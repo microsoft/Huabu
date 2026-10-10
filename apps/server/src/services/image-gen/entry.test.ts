@@ -5,31 +5,34 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { readServicePackageFile } from '../../modules/services/package-loader.js';
 
-async function loadClient() {
-  const source = readServicePackageFile('image-gen', 'client.mjs');
-  if (!source) throw new Error('Image Service client is missing');
+async function loadEntry() {
+  const source = readServicePackageFile('image-gen', 'entry.mjs');
+  if (!source) throw new Error('Image Service entry is missing');
   return import(
     `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`
   ) as Promise<{
-    createClient(input: { config: Record<string, string> }): {
-      generate(input: Record<string, string>): Promise<unknown>;
-    };
+    generate(input: {
+      config: Record<string, string>;
+      input: Record<string, string>;
+    }): Promise<unknown>;
+    main(argv: string[]): Promise<void>;
   }>;
 }
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  delete process.env.AGENTLET_SERVICE_SDK_URL;
 });
 
-describe('Image Service client', () => {
+describe('Image Service entry', () => {
   it('uses classic Azure deployment routing', async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValue(new Response(JSON.stringify({ data: [] })));
     vi.stubGlobal('fetch', fetchMock);
-    const { createClient } = await loadClient();
+    const { generate } = await loadEntry();
 
-    await createClient({
+    await generate({
       config: {
         apiKey: 'test-secret',
         apiVersion: '2025-04-01-preview',
@@ -38,7 +41,8 @@ describe('Image Service client', () => {
         modelFamily: 'gpt-image-1',
         quality: 'high',
       },
-    }).generate({ prompt: '  a fox  ' });
+      input: { prompt: '  a fox  ' },
+    });
 
     const [url, init] = fetchMock.mock.calls[0] ?? [];
     expect(String(url)).toBe(
@@ -56,9 +60,9 @@ describe('Image Service client', () => {
       .fn<typeof fetch>()
       .mockResolvedValue(new Response(JSON.stringify({ data: [] })));
     vi.stubGlobal('fetch', fetchMock);
-    const { createClient } = await loadClient();
+    const { generate } = await loadEntry();
 
-    await createClient({
+    await generate({
       config: {
         apiKey: 'test-secret',
         apiVersion: 'unused',
@@ -67,7 +71,8 @@ describe('Image Service client', () => {
         modelFamily: 'gpt-image-1',
         quality: 'medium',
       },
-    }).generate({ prompt: 'a fox' });
+      input: { prompt: 'a fox' },
+    });
 
     const [url, init] = fetchMock.mock.calls[0] ?? [];
     expect(String(url)).toBe(
@@ -80,5 +85,40 @@ describe('Image Service client', () => {
       model: 'image-deployment',
       prompt: 'a fox',
     });
+  });
+
+  it('runs as an executable entry using leased configuration', async () => {
+    const bytes = Buffer.from('generated-image');
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [{ b64_json: bytes.toString('base64') }],
+        }),
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const sdkSource = `
+      export async function withServiceConfig(id, run) {
+        if (id !== 'image-gen') throw new Error('Unexpected Service');
+        return run({ config: {
+          apiKey: 'test-secret',
+          apiVersion: '2025-04-01-preview',
+          baseUrl: 'https://example.test',
+          model: 'image-deployment',
+          modelFamily: 'gpt-image-1',
+          quality: 'medium'
+        } });
+      }
+    `;
+    process.env.AGENTLET_SERVICE_SDK_URL = `data:text/javascript;base64,${Buffer.from(sdkSource).toString('base64')}`;
+    const output = `${process.env.TMPDIR ?? '/tmp'}/huabu-image-entry-${process.pid}.png`;
+    const { main } = await loadEntry();
+
+    await main(['--prompt', 'a fox', '--output', output]);
+
+    await expect(
+      import('node:fs/promises').then((fs) => fs.readFile(output)),
+    ).resolves.toEqual(bytes);
+    await import('node:fs/promises').then((fs) => fs.rm(output));
   });
 });
