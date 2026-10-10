@@ -515,6 +515,56 @@ describe('closeTab', () => {
 });
 
 describe('closeTabs', () => {
+  it('matches ordered single closes for every scope, clicked tab and active tab', () => {
+    const scopes = ['others', 'to-right', 'group'] as const;
+    for (const count of [1, 2, 6]) {
+      let base = emptyWorkspace();
+      for (let i = 0; i < count; i++)
+        base = open(base, node(String(i)), String(i)).workspace;
+      for (const split of [false, true]) {
+        const workspace = split ? splitGroup(base, 'g2') : base;
+        const ids = workspace.groups[0].tabIds;
+        for (const active of ids) {
+          const ws = activateTab(workspace, active);
+          for (const clicked of ids) {
+            for (const scope of scopes) {
+              const removed =
+                scope === 'group'
+                  ? ids
+                  : scope === 'others'
+                    ? ids.filter((id) => id !== clicked)
+                    : ids.slice(ids.indexOf(clicked) + 1);
+              expect(closeTabs(ws, clicked, scope)).toEqual(
+                removed.reduce(closeTab, ws),
+              );
+            }
+          }
+        }
+      }
+    }
+  });
+
+  it('copies each tab once when closing a large group', () => {
+    const ws = emptyWorkspace();
+    const ids = Array.from({ length: 2000 }, (_, i) => `t${i}`);
+    let reads = 0;
+    for (const id of ids) {
+      Object.defineProperty(ws.tabs, id, {
+        enumerable: true,
+        get: () => {
+          reads++;
+          return { id, target: node(id), transient: false, lastActiveSeq: 0 };
+        },
+      });
+    }
+    ws.groups[0] = { id: 'g1', tabIds: ids, activeTabId: ids[0] };
+    const closed = closeTabs(ws, ids[0], 'group');
+    expect(reads).toBe(ids.length);
+    expect(closed.tabs).toEqual({});
+    expect(closed.groups[0].tabIds).toEqual([]);
+    expect(Object.keys(ws.tabs)).toHaveLength(ids.length);
+  });
+
   function workspaceWithTwoGroups() {
     let ws = open(emptyWorkspace(), node('a'), 'a').workspace;
     ws = open(ws, node('b'), 'b', { transient: true }).workspace;

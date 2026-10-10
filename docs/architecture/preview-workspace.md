@@ -147,6 +147,10 @@ Ordinary Question sessions retain `AgentConversationView`: presentation and owne
 
 An authored Question node remains authoritative for persisted agent mode and fixed binding. A new selectable Question snapshots the browser-local recent conversational Agent unless the caller supplies an explicit binding; a missing or stale local external identity falls back to the first selectable external Profile. Existing Questions do not inherit later conversational, Utility Agent, or Canvas selection changes.
 
+Attachment preview text is keyboard-focusable independently of its remove action, so pinned excerpts and uploads expose the same content tooltip on focus as on hover.
+
+The node mention picker preserves every match without a result cap. Matching partitions prefix and substring results in a single pass, preserving Canvas order within each tier. Its 28px rows use a fixed-height virtual window with eight visible rows and three overscan rows on either side; the active option remains mounted for `aria-activedescendant` even when scrolled out of view. Arrow navigation scrolls the selected result into view, and option position and total-count ARIA metadata describe the full result set.
+
 ## 5. Groups, tabs, and bounds
 
 The workspace contains one or two horizontal groups. Each nonempty group owns one active tab, and only the active group receives group-scoped keyboard actions. The Split control is available with zero, one, or many tabs: it creates and activates an empty right group without moving or redistributing existing tabs. Both empty groups retain their tab strips, New Chat controls, and node-opening hint. Empty groups survive persistence and routine validation. The panel host retains its lazy Chat seed for an empty single group but does not populate a restored empty split.
@@ -168,6 +172,8 @@ When a close action removes the focused tab, menu item, or empty-group control, 
 Permanent tabs are never closed automatically. A group may retain any number of permanent tabs; users close them explicitly, while transient browsing continues to reuse the group's inspection slot.
 
 The activation sequence is an integer stored with the workspace rather than a wall-clock timestamp, making recent-target ordering deterministic in tests and persistence. Rendering also uses this sequence as the per-group LRU order for the single inactive warm slot; it does not add a second recency model.
+
+Single and batch tab closing share one removal primitive: resolve the removed IDs, copy the tab record once, filter the affected group once, and repair its active tab and empty-group topology once. Batch computation is linear in the workspace's tab count; editor settlement and runtime-request cleanup still run before the single store commit.
 
 ## 6. Focus and opening position
 

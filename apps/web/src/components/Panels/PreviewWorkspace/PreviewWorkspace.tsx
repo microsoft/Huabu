@@ -140,10 +140,7 @@ export function settleActivePreviewTab(
   tabId: string,
   settle: (nodeId: string) => void = settleNodePreprocess,
 ): void {
-  const group = workspace.groups.find((candidate) =>
-    candidate.tabIds.includes(tabId),
-  );
-  if (group?.activeTabId !== tabId) return;
+  if (!workspace.groups.some((group) => group.activeTabId === tabId)) return;
 
   const target = workspace.tabs[tabId]?.target;
   if (target?.kind !== 'node') return;

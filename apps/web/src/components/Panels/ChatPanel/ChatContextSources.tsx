@@ -112,7 +112,12 @@ function AttachmentSource({
             {previewContent}
           </Button>
         ) : (
-          <div className="flex h-6 min-w-0 items-center gap-1 pr-1.5">
+          <div
+            // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
+            tabIndex={0}
+            aria-label={previewText}
+            className="focus-visible:outline-info flex h-6 min-w-0 items-center gap-1 rounded-sm pr-1.5 focus-visible:outline-1"
+          >
             {previewContent}
           </div>
         )}

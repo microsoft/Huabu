@@ -200,3 +200,58 @@ test('dismissal, no matches, IME and chip removal do not corrupt the draft', asy
   await expect(textbox).toHaveValue('@研究笔记 ');
   await expect(host.locator('[data-context-attachment]')).toHaveCount(0);
 });
+
+test('large mention lists keep DOM bounded and preserve scrolling, wrapping and search', async ({
+  page,
+}) => {
+  await page.evaluate(async () => {
+    const path = '/src/store/canvasStore.ts';
+    const { default: canvas } = (await import(path)) as {
+      default: typeof CanvasStore;
+    };
+    canvas.getState()._setStateNoAutosave({
+      nodes: Array.from({ length: 2000 }, (_, index) => ({
+        id: `large-${index}`,
+        type: 'note',
+        position: { x: 0, y: 0 },
+        data: { label: `Entry ${index}` },
+      })),
+    });
+  });
+  const host = page.locator('#mentions-fixture');
+  const textbox = host.getByRole('textbox');
+  const listbox = host.getByRole('listbox');
+  const options = listbox.getByRole('option');
+  await textbox.fill('@');
+  await expect(listbox).toBeVisible();
+  expect(await options.count()).toBeLessThanOrEqual(16);
+  await expect(options.first()).toHaveAttribute('aria-setsize', '2000');
+  expect((await options.first().boundingBox())?.height).toBe(28);
+  await textbox.press('ArrowUp');
+  await expect(listbox.locator('[aria-selected="true"]')).toHaveText(
+    'Entry 1999Note',
+  );
+  await expect(listbox.locator('[aria-selected="true"]')).toBeInViewport();
+  expect(await options.count()).toBeLessThanOrEqual(16);
+  await textbox.press('ArrowDown');
+  await expect(listbox.locator('[aria-selected="true"]')).toHaveText(
+    'Entry 0Note',
+  );
+  await listbox.evaluate((element) => {
+    element.scrollTop = 1000 * 28;
+  });
+  await expect(
+    listbox.getByRole('option', { name: 'Entry 1000 Note', exact: true }),
+  ).toBeInViewport();
+  expect(await options.count()).toBeLessThanOrEqual(16);
+  const activeId = await textbox.getAttribute('aria-activedescendant');
+  expect(await page.locator(`[id="${activeId}"]`).count()).toBe(1);
+  await listbox
+    .getByRole('option', { name: 'Entry 1000 Note', exact: true })
+    .click();
+  await expect(textbox).toHaveValue('@Entry 1000 ');
+  await textbox.fill('@1999');
+  await expect(options).toHaveCount(1);
+  await textbox.press('Enter');
+  await expect(textbox).toHaveValue('@Entry 1999 ');
+});

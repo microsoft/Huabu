@@ -478,15 +478,25 @@ export function closeTab(
 ): CanvasPreviewWorkspace {
   const group = groupOfTab(workspace, tabId);
   if (!group) return workspace;
+  return closeGroupTabs(workspace, group, new Set([tabId]));
+}
 
-  const index = group.tabIds.indexOf(tabId);
-  const tabIds = group.tabIds.filter((id) => id !== tabId);
+function closeGroupTabs(
+  workspace: CanvasPreviewWorkspace,
+  group: PreviewGroup,
+  removed: ReadonlySet<string>,
+): CanvasPreviewWorkspace {
+  if (removed.size === 0) return workspace;
+  const tabIds = group.tabIds.filter((id) => !removed.has(id));
   const tabs = { ...workspace.tabs };
-  delete tabs[tabId];
+  for (const id of removed) delete tabs[id];
 
+  const activeIndex = group.tabIds.indexOf(group.activeTabId ?? '');
   const nextActiveTabId =
-    group.activeTabId === tabId
-      ? (tabIds[Math.min(index, tabIds.length - 1)] ?? null)
+    group.activeTabId && removed.has(group.activeTabId)
+      ? (group.tabIds.slice(activeIndex + 1).find((id) => !removed.has(id)) ??
+        tabIds.at(-1) ??
+        null)
       : group.activeTabId;
 
   return withoutEmptiedGroups(workspace, {
@@ -516,7 +526,7 @@ export function closeTabs(
       : scope === 'others'
         ? group.tabIds.filter((id) => id !== tabId)
         : group.tabIds.slice(group.tabIds.indexOf(tabId) + 1);
-  return tabIds.reduce(closeTab, workspace);
+  return closeGroupTabs(workspace, group, new Set(tabIds));
 }
 
 /** Reorders a tab within its group or moves it to the other group. */

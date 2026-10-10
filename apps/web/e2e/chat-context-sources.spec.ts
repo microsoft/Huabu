@@ -21,7 +21,7 @@ async function expectSharedChipTone(sources: Locator, textbox: Locator) {
       '[data-chat-input-surface], [data-chat-context-sources] * { transition: none !important; }',
   });
   const chips = sources.locator(
-    '[data-context-attachment], button:has(.lucide-plus), [tabindex="0"]',
+    '[data-context-attachment], button:has(.lucide-plus), [tabindex="0"]:not([data-context-attachment] *)',
   );
   const tones = () =>
     chips.evaluateAll((elements) =>
@@ -182,6 +182,15 @@ for (const width of [320, 520]) {
     expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth);
     await page.mouse.move(0, 0);
     await expectSharedChipTone(sources, page.getByRole('textbox'));
+    const uploadedPreview = included
+      .locator('[data-context-attachment]')
+      .filter({ hasText: 'research-notes.md' })
+      .locator('[tabindex="0"]');
+    await uploadedPreview.focus();
+    await expect(page.getByRole('tooltip')).toContainText(
+      'File body should be in the attachment, not replace its name.',
+    );
+    await uploadedPreview.press('Tab');
 
     const excerptChip = included
       .locator('[data-context-attachment]')
@@ -208,6 +217,8 @@ for (const width of [320, 520]) {
       name: 'Remove attachment',
     });
     await expect(remove).toBeVisible();
+    await excerptChip.locator('[tabindex="0"]').focus();
+    await expect(page.getByRole('tooltip')).toContainText(excerpt);
     const removeBounds = await remove.boundingBox();
     const textBounds = await excerptChip
       .getByText(excerpt, { exact: true })

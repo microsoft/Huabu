@@ -69,20 +69,18 @@ export function useNodeMentionTypeahead({
   const matches = useMemo(() => {
     if (!nodes) return [];
     const needle = query.toLocaleLowerCase();
-    const items = nodes.map((node) => ({
-      node,
-      label:
+    const prefixes: { node: (typeof nodes)[number]; label: string }[] = [];
+    const substrings: typeof prefixes = [];
+    for (const node of nodes) {
+      const label =
         typeof node.data.label === 'string' && node.data.label.trim()
           ? node.data.label
-          : t('node.untitled'),
-    }));
-    return items
-      .filter((item) => item.label.toLocaleLowerCase().includes(needle))
-      .sort(
-        (a, b) =>
-          Number(b.label.toLocaleLowerCase().startsWith(needle)) -
-          Number(a.label.toLocaleLowerCase().startsWith(needle)),
-      );
+          : t('node.untitled');
+      const normalized = label.toLocaleLowerCase();
+      if (normalized.startsWith(needle)) prefixes.push({ node, label });
+      else if (normalized.includes(needle)) substrings.push({ node, label });
+    }
+    return prefixes.concat(substrings);
   }, [nodes, query, t]);
   const activeIndex = Math.min(
     highlight.queryKey === queryKey ? highlight.index : 0,

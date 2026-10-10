@@ -116,6 +116,28 @@ afterEach(() => {
 });
 
 describe('ChatContextSources', () => {
+  it('makes pinned and uploaded preview text focusable separately from removal', () => {
+    useChatStore.getState().addPendingAttachment(session.threadId, excerpt);
+    useChatStore.getState().addPendingAttachment(session.threadId, {
+      type: 'file',
+      source: 'upload',
+      filename: 'notes.md',
+      content: 'Uploaded text',
+    });
+    render();
+    const previews = container.querySelectorAll<HTMLElement>(
+      '[data-context-attachment] [tabindex="0"]:not(button)',
+    );
+    expect(previews).toHaveLength(2);
+    act(() => previews[0].focus());
+    expect(document.activeElement).toBe(previews[0]);
+    expect(previews[0].getAttribute('aria-label')).toBe(excerpt.content);
+    expect(previews[1].getAttribute('aria-label')).toBe('notes.md');
+    expect(
+      container.querySelectorAll('button[aria-label="Remove attachment"]'),
+    ).toHaveLength(2);
+  });
+
   it('renders nothing when no explicit context is available', () => {
     render();
     expect(container.childElementCount).toBe(0);

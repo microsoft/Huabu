@@ -168,6 +168,39 @@ describe('parseNodeMention', () => {
 });
 
 describe('node mention typeahead', () => {
+  it('keeps all matches accessible while mounting a bounded window', () => {
+    useCanvasStore.getState()._setStateNoAutosave({
+      nodes: Array.from({ length: 2000 }, (_, index) => ({
+        id: `large-${index}`,
+        type: 'note',
+        position: { x: 0, y: 0 },
+        data: { label: `Entry ${index}` },
+      })),
+    });
+    render();
+    type('@');
+    expect(mention.matches).toHaveLength(2000);
+    expect(
+      container.querySelectorAll('[role="option"]').length,
+    ).toBeLessThanOrEqual(16);
+    key('ArrowUp');
+    expect(mention.activeIndex).toBe(1999);
+    const active = document.getElementById(mention.activeOptionId ?? '');
+    expect(active?.getAttribute('aria-posinset')).toBe('2000');
+    expect(active?.getAttribute('aria-setsize')).toBe('2000');
+    expect(
+      container.querySelectorAll('[role="option"]').length,
+    ).toBeLessThanOrEqual(16);
+    key('ArrowDown');
+    expect(mention.activeIndex).toBe(0);
+    type('@Entry1999');
+    expect(mention.matches).toHaveLength(0);
+    type('@1999');
+    expect(mention.matches.map(({ node }) => node.id)).toEqual(['large-1999']);
+    key('Enter');
+    expect(input().value).toBe('@Entry 1999 ');
+  });
+
   it('ranks title prefixes first, keeps the full mention and stages an exact node reference', () => {
     render();
     type('Compare @her');
