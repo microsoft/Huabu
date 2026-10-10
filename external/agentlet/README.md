@@ -123,11 +123,11 @@ The standard environment includes:
 | `AGENTLET_REACHBACK_DIR` | Directory containing host-provided resources. |
 | `AGENTLET_SERVER` | Gateway URL supplied to the daemon. |
 | `AGENTLET_TOKEN` | Authentication token available to host-provided reachback tools. |
-| `AGENTLET_SERVICE_SDK_URL` | Daemon-owned absolute `file://` URL for the ESM Service SDK published under `dist/service-sdk`. |
+| `AGENTLET_SERVICE_SDK_URL` | Daemon-owned absolute `file://` URL used by Service Package entries to lease current configuration through the ESM Service SDK published under `dist/service-sdk`. |
 
 Agentlet transports opaque resources and environment values; it does not interpret the host-specific tool protocol.
 
-The optional Service SDK exports `loadService(id)` and `withService(id, callback)`. It uses host-injected reachback coordinates to obtain an on-demand configuration lease and load a trusted host-provided client without persisting credentials. The daemon writes `AGENTLET_SERVICE_SDK_URL` after workload environment values so a session cannot replace the SDK module location.
+The optional Service SDK exports `leaseService(id)` and `withServiceConfig(id, callback)`. It uses host-injected reachback coordinates to obtain current configuration without downloading Package code or persisting credentials. Downloaded Service Package entries import the SDK through `AGENTLET_SERVICE_SDK_URL`; the daemon writes that variable after workload environment values so a session cannot replace the SDK module location.
 
 ## Repository layout
 

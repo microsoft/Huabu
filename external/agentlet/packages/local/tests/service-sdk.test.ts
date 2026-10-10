@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { loadService } from '../src/service-sdk/index.js'
+import {
+  leaseService,
+  withServiceConfig,
+} from '../src/service-sdk/index.js'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -9,7 +12,7 @@ afterEach(() => {
 })
 
 describe('Service SDK', () => {
-  it('leases config and loads the trusted package client without logging secrets', async () => {
+  it('leases config without loading package code', async () => {
     process.env.HUABU_RFS_URL = 'https://huabu.example/api/rfs/canvas-1'
     process.env.AGENTLET_TOKEN = 'agentlet-token'
     const fetchMock = vi
@@ -20,22 +23,16 @@ describe('Service SDK', () => {
             id: 'example',
             version: '1.0.0',
             config: { apiKey: 'provider-secret' },
-            client: 'client.mjs',
           }),
-          { status: 200 },
-        ),
-      )
-      .mockResolvedValueOnce(
-        new Response(
-          'export function createClient({ config }) { return { configured: Boolean(config.apiKey) }; }',
           { status: 200 },
         ),
       )
     vi.stubGlobal('fetch', fetchMock)
 
-    const service = await loadService('example')
+    const lease = await leaseService('example')
 
-    expect(service.client).toEqual({ configured: true })
+    expect(lease.config).toEqual({ apiKey: 'provider-secret' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
       'https://huabu.example/api/rfs/canvas-1/services/example/lease',
@@ -44,6 +41,30 @@ describe('Service SDK', () => {
         headers: { Authorization: 'Bearer agentlet-token' },
       }),
     )
+  })
+
+  it('provides config and lease metadata to a scoped callback', async () => {
+    process.env.HUABU_RFS_URL = 'https://huabu.example/api/rfs/canvas-1'
+    process.env.AGENTLET_TOKEN = 'agentlet-token'
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            id: 'example',
+            version: '1.0.0',
+            config: { apiKey: 'provider-secret' },
+          }),
+        ),
+      ),
+    )
+
+    await expect(
+      withServiceConfig('example', ({ config, lease }) => ({
+        configured: Boolean(config.apiKey),
+        version: lease.version,
+      })),
+    ).resolves.toEqual({ configured: true, version: '1.0.0' })
   })
 
   it('does not include response bodies in provider-facing errors', async () => {
@@ -56,7 +77,7 @@ describe('Service SDK', () => {
       ),
     )
 
-    await expect(loadService('example')).rejects.toThrow(
+    await expect(leaseService('example')).rejects.toThrow(
       'Service request failed (409)',
     )
   })

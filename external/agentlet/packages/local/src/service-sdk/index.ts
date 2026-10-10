@@ -2,19 +2,11 @@ export interface ServiceLease {
   id: string
   version: string
   config: Record<string, string | boolean | null>
-  client?: string
 }
 
-export interface ServiceContext {
+export interface ServiceConfigContext {
   config: ServiceLease['config']
-  client: Record<string, unknown> | null
   lease: ServiceLease
-}
-
-type ServiceClientModule = {
-  createClient?: (context: {
-    config: ServiceLease['config']
-  }) => Record<string, unknown>
 }
 
 function requiredEnvironment(name: 'HUABU_RFS_URL' | 'AGENTLET_TOKEN'): string {
@@ -39,26 +31,7 @@ async function serviceFetch(path: string, init?: RequestInit): Promise<Response>
   return response
 }
 
-async function loadClient(
-  serviceId: string,
-  lease: ServiceLease,
-): Promise<Record<string, unknown> | null> {
-  if (!lease.client) return null
-  const response = await serviceFetch(
-    `/services/${encodeURIComponent(serviceId)}/client`,
-  )
-  const source = await response.text()
-  const moduleUrl = `data:text/javascript;base64,${Buffer.from(source, 'utf8').toString('base64')}`
-  const module = (await import(moduleUrl)) as ServiceClientModule
-  if (typeof module.createClient !== 'function') {
-    throw new Error('Service client must export createClient()')
-  }
-  return module.createClient({ config: lease.config })
-}
-
-export async function loadService(
-  serviceId: string,
-): Promise<ServiceContext> {
+export async function leaseService(serviceId: string): Promise<ServiceLease> {
   if (!/^[a-z][a-z0-9-]{0,63}$/.test(serviceId)) {
     throw new Error('Invalid Service id')
   }
@@ -70,16 +43,13 @@ export async function loadService(
   if (lease.id !== serviceId || typeof lease.version !== 'string') {
     throw new Error('Invalid Service lease')
   }
-  return {
-    lease,
-    config: lease.config,
-    client: await loadClient(serviceId, lease),
-  }
+  return lease
 }
 
-export async function withService<T>(
+export async function withServiceConfig<T>(
   serviceId: string,
-  run: (context: ServiceContext) => Promise<T> | T,
+  run: (context: ServiceConfigContext) => Promise<T> | T,
 ): Promise<T> {
-  return run(await loadService(serviceId))
+  const lease = await leaseService(serviceId)
+  return run({ lease, config: lease.config })
 }
