@@ -603,8 +603,6 @@ describe('provider Capability Packages', () => {
         name: 'Image Generation',
         description: 'Generate images.',
         configured: true,
-        availableToInternalAgent: true,
-        availableToPipeline: false,
         availableToExternalAgent: true,
       },
     ]);

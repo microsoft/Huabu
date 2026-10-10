@@ -24,7 +24,7 @@ describe('bundled Capability packages', () => {
     expect(packages.get('ink-ocr')?.manifest.agent).toBeUndefined();
   });
 
-  it('exposes real Agent files only for External packages', () => {
+  it('exposes real Agent files only when the manifest declares Agent behavior', () => {
     expect(readCapabilityPackageFile('image-gen', 'SKILL.md')).toContain(
       '# Image Generation',
     );

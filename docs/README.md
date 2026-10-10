@@ -54,7 +54,7 @@ docs/
 | [canvas-input-interactions.md](./architecture/canvas-input-interactions.md)     | Mouse, touch, and pen preference resolution, gesture ownership, and multi-touch arbitration.             |
 | [canvas-zoom-rendering.md](./architecture/canvas-zoom-rendering.md)             | Node LOD, Frame/edge label readability, and interaction chrome across canvas zoom.                       |
 | [canvas-storage.md](./architecture/canvas-storage.md)                           | Disk layout plus Blob/structured ports, catalogue, compatibility, and `.memory/`.                        |
-| [capability-packages.md](./architecture/capability-packages.md)                 | Manifest-driven provider configuration, storage bindings, consumers, RFS leases, and Agentlet SDK.       |
+| [capability-packages.md](./architecture/capability-packages.md)                 | Manifest-driven provider configuration, storage bindings, Agent declarations, RFS leases, and SDK.       |
 | [canary-deployment.md](./architecture/canary-deployment.md)                     | Personal Alpha Canary status, owner-triggered redeployment, and explicit reliability limits.             |
 | [canvas-action-log.md](./architecture/canvas-action-log.md)                     | Persistent `events.jsonl` user-action trail; consumed by the memory curator.                             |
 | [canvas-realtime-sync.md](./architecture/canvas-realtime-sync.md)               | Multi-agent real-time sync: SSE broadcast, dirty-node conflict model, per-thread change-review card.     |

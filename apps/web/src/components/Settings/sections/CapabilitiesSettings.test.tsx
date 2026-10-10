@@ -46,7 +46,6 @@ function config(id: (typeof ids)[number]): CapabilityConfig {
       name: id,
       description: `${id} description`,
       storage: { namespace: `integration.${id}` },
-      consumers: { internal: false, pipeline: true, external: false },
       configuration: [
         {
           id: 'apiKey',
@@ -76,8 +75,6 @@ beforeEach(() => {
       name: id,
       description: id,
       configured: false,
-      availableToInternalAgent: false,
-      availableToPipeline: true,
       availableToExternalAgent: false,
     })),
   });

@@ -5,10 +5,6 @@ name: YouTube Transcripts
 description: Load YouTube transcripts through the existing RapidAPI preprocessing integration.
 storage:
   namespace: integration.rapidapi
-consumers:
-  internal: false
-  pipeline: true
-  external: false
 configuration:
   - id: apiKey
     label: API key

@@ -1,6 +1,6 @@
 # Capability Packages
 
-> Current architecture for Huabu-managed provider capabilities. Last updated: 2026-10-09
+> Current architecture for Huabu-managed provider capabilities. Last updated: 2026-10-10
 
 ## Scope
 
@@ -19,11 +19,11 @@ Phase 1 packages are trusted files shipped with Huabu. User upload, installation
 
 ## Manifest contract
 
-`huabu-capability/v1` is defined by `capabilityManifestSchema` in `packages/shared/src/types/api/capability-package.ts`. Unknown properties, malformed IDs, duplicate configuration IDs, invalid enum declarations, and an External consumer without a Skill fail validation.
+`huabu-capability/v1` is defined by `capabilityManifestSchema` in `packages/shared/src/types/api/capability-package.ts`. Unknown properties, malformed IDs, duplicate configuration IDs, invalid enum declarations, and an `agent` block without a Skill fail validation.
 
-Every package declares a stable ID and version, display metadata, one registered storage namespace, supported consumer classes, optional Agent files, and constrained configuration fields. Supported field types are text, secret, HTTPS URL, boolean, and bounded enum. `configuration[].id` directly names a stable logical key exposed by the namespace adapter; `label` is display text and can change without changing the storage or client contract.
+Every package declares a stable ID and version, display metadata, one registered storage namespace, optional Agent files, and constrained configuration fields. Supported field types are text, secret, HTTPS URL, boolean, and bounded enum. `configuration[].id` directly names a stable logical key exposed by the namespace adapter; `label` is display text and can change without changing the storage or client contract.
 
-The manifest cannot register Server tools, choose arbitrary persistence paths or SecretStore IDs, provide custom Settings components, or execute expressions. Agent files are forbidden when `consumers.external` is false, so a Server-only or Pipeline-only package cannot accidentally advertise placeholder Agent behavior.
+The manifest does not declare Internal Agent or Pipeline consumers. Those execution paths are reviewed Huabu code and cannot be enabled by package metadata. The presence of an `agent` block is the complete declaration that a package supports External Agent use; its `skill` is required and its direct-provider `client` is optional. A package without `agent` cannot be leased to an External Agent.
 
 ## Provision Service and storage bindings
 
@@ -42,7 +42,7 @@ This is a zero-persistent-data-migration compatibility layer. Reading Capability
 
 Masked Settings responses return `null` for secret values and identify configured fields separately. Trusted `resolveForServer()` and authenticated External leases resolve effective values, including environment fallbacks, only at the point of use.
 
-## Consumers
+## Execution paths
 
 Internal Agent tools keep their high-level Huabu integrations. `generate_image` still owns typed tool arguments, model capability validation, reference artifact reads, provider SDK behavior, image decoding, and artifact persistence; it obtains provider configuration through `resolveForServer('image-gen')`.
 
@@ -74,7 +74,7 @@ GET  /capability-packages/:id/client
 POST /capability-packages/:id/lease
 ```
 
-Manifest and Skill responses contain no credentials. Client source is a versioned bundled asset. Lease requires the normal authenticated RFS context, rejects unknown, unconfigured, and non-External packages explicitly, returns only fields declared by the selected package, and uses `Cache-Control: no-store`.
+Manifest and Skill responses contain no credentials. Client source is a versioned bundled asset. Lease requires the normal authenticated RFS context, rejects unknown, unconfigured, and packages without an `agent` declaration explicitly, returns only fields declared by the selected package, and uses `Cache-Control: no-store`.
 
 ## Agentlet SDK
 

@@ -5,10 +5,6 @@ name: Web Search
 description: Search the web with Tavily.
 storage:
   namespace: integration.tavily
-consumers:
-  internal: true
-  pipeline: false
-  external: true
 agent:
   skill: SKILL.md
   client: client.mjs

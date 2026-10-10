@@ -57,16 +57,9 @@ export const capabilityManifestSchema = z
           .regex(/^[a-z][a-zA-Z0-9.]{0,127}$/, 'Invalid storage namespace'),
       })
       .strict(),
-    consumers: z
-      .object({
-        internal: z.boolean().default(false),
-        pipeline: z.boolean().default(false),
-        external: z.boolean().default(false),
-      })
-      .strict(),
     agent: z
       .object({
-        skill: z.string().min(1).max(256).optional(),
+        skill: z.string().min(1).max(256),
         client: z.string().min(1).max(256).optional(),
       })
       .strict()
@@ -88,20 +81,6 @@ export const capabilityManifestSchema = z
         });
       }
       ids.add(field.id);
-    }
-    if (manifest.consumers.external && !manifest.agent?.skill) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['agent', 'skill'],
-        message: 'External capabilities require a Skill',
-      });
-    }
-    if (!manifest.consumers.external && manifest.agent) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['agent'],
-        message: 'Only external capabilities may declare Agent files',
-      });
     }
   });
 
@@ -151,8 +130,6 @@ export const capabilitySummarySchema = z
     name: z.string(),
     description: z.string(),
     configured: z.boolean(),
-    availableToInternalAgent: z.boolean(),
-    availableToPipeline: z.boolean(),
     availableToExternalAgent: z.boolean(),
   })
   .strict();

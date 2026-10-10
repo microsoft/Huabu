@@ -5,10 +5,6 @@ name: Image Generation
 description: Generate images with the configured Azure OpenAI deployment.
 storage:
   namespace: llm.imageConfig
-consumers:
-  internal: true
-  pipeline: false
-  external: true
 agent:
   skill: SKILL.md
   client: client.mjs

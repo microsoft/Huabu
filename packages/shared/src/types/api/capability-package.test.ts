@@ -15,7 +15,6 @@ const manifest = {
   name: 'Example',
   description: 'Example Capability',
   storage: { namespace: 'integration.example' },
-  consumers: { internal: false, pipeline: true, external: false },
   configuration: [
     {
       id: 'apiKey',
@@ -27,17 +26,16 @@ const manifest = {
 };
 
 describe('Capability Package contract', () => {
-  it('accepts a pipeline-only package without Agent files', () => {
+  it('accepts a Server-consumed package without Agent files', () => {
     expect(capabilityManifestSchema.parse(manifest)).toMatchObject({
       id: 'example',
-      consumers: { external: false },
     });
   });
 
-  it('requires a Skill for an External Agent package', () => {
+  it('requires a Skill whenever the package declares Agent behavior', () => {
     const result = capabilityManifestSchema.safeParse({
       ...manifest,
-      consumers: { internal: false, pipeline: false, external: true },
+      agent: { client: 'client.mjs' },
     });
     expect(result.success).toBe(false);
   });

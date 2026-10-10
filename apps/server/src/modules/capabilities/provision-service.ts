@@ -332,9 +332,7 @@ export class CapabilityProvisionService {
         name: manifest.name,
         description: manifest.description,
         configured,
-        availableToInternalAgent: configured && manifest.consumers.internal,
-        availableToPipeline: configured && manifest.consumers.pipeline,
-        availableToExternalAgent: configured && manifest.consumers.external,
+        availableToExternalAgent: configured && Boolean(manifest.agent),
       };
     });
   }
@@ -375,7 +373,7 @@ export class CapabilityProvisionService {
 
   lease(capabilityId: string): CapabilityLease {
     const manifest = this.manifest(capabilityId);
-    if (!manifest.consumers.external) {
+    if (!manifest.agent) {
       throw new CapabilityServiceError(
         'capability_not_external',
         `Capability "${capabilityId}" is not available to External Agents`,

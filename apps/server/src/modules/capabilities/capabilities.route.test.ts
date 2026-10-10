@@ -48,7 +48,6 @@ const maskedConfig = {
     name: 'Web Search',
     description: 'Search the web.',
     storage: { namespace: 'integration.tavily' },
-    consumers: { internal: true, pipeline: false, external: true },
     agent: { skill: 'SKILL.md', client: 'client.mjs' },
     configuration: [
       {
@@ -85,8 +84,6 @@ describe('Capability settings routes', () => {
         name: 'Web Search',
         description: 'Search the web.',
         configured: true,
-        availableToInternalAgent: true,
-        availableToPipeline: false,
         availableToExternalAgent: true,
       },
     ]);

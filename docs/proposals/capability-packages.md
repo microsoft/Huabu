@@ -2,11 +2,11 @@
 
 Status: Accepted
 
-Last updated: 2026-10-09
+Last updated: 2026-10-10
 
 ## 摘要
 
-本 Proposal 定义统一的 Capability Package，用一个受严格校验的 YAML Manifest 描述配置字段、存储 namespace、消费者类型以及可选的 Agent Skill/client，同时让 Internal Agent Tool、External Agent 与产品 Pipeline 保留适合各自信任边界的执行路径。
+本 Proposal 定义统一的 Capability Package，用一个受严格校验的 YAML Manifest 描述配置字段、存储 namespace 以及可选的 Agent Skill/client，同时让 Internal Agent Tool、External Agent 与产品 Pipeline 保留适合各自信任边界的执行路径。
 
 Phase 1 将当前 Settings > Capabilities 中的 Image Generation、Tavily Web Search、YouTube Transcripts 与 Azure Vision Ink OCR 全部迁入 Package、Manifest-driven Settings 和统一 Provision Service。Phase 1 不开放用户上传。
 
@@ -21,7 +21,7 @@ Phase 1 将当前 Settings > Capabilities 中的 Image Generation、Tavily Web S
 └── assets/            # 可选
 ```
 
-不创建 placeholder Skill 或 client。一个 Capability 如果只有 Server-native 或 Pipeline consumer，就在 Manifest 中明确声明并省略 Agent 文件，避免 External Agent 发现一个实际上不可用的能力。
+不创建 placeholder Skill 或 client。Manifest 不声明 Internal Agent 或 Pipeline consumer；这些执行路径只由 reviewed Huabu code 接线。存在 `agent` block 就表示 Package 提供 External Agent 行为，其中 `skill` 必须存在，直接调用 provider 时才需要可选的 `client`。没有 `agent` block 的 Package 不能被 External Agent lease。
 
 ## 配置与零迁移
 
@@ -35,7 +35,7 @@ Internal Pi 继续使用高层 Server Tool。`generate_image` 仍负责参数、
 
 Pipeline 继续使用 reviewed Server-side Adapter。YouTube transcript loader 与 Ink OCR 不导入 `client.mjs`。
 
-External Agent 通过 Agentlet 注入的 `AGENTLET_CAPABILITY_SDK_URL` 加载 SDK，经 authenticated RFS 按需取得当前 Package 配置，并在 Agentlet 设备执行受信任的 `client.mjs`。Image Generation 与 Tavily Web Search 提供真实 Skill/client；YouTube Transcripts 与 Ink OCR 在 Phase 1 不声明 External consumer。
+External Agent 通过 Agentlet 注入的 `AGENTLET_CAPABILITY_SDK_URL` 加载 SDK，经 authenticated RFS 按需取得当前 Package 配置，并在 Agentlet 设备执行受信任的 `client.mjs`。Image Generation 与 Tavily Web Search 提供真实 `agent.skill`/`agent.client`；YouTube Transcripts 与 Ink OCR 没有 `agent` block。
 
 ## API 与安全
 
