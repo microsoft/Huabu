@@ -14,7 +14,7 @@
 :is(.node-floating-toolbar, .canvas-context-toolbar)
   button:not(.node-toolbar-font-trigger):not(.canvas-context-submit):not(
     .edge-toolbar-value
-  ) {
+  ):not(.ink-agent-destination-trigger) {
   width: 32px;
   height: 32px;
   min-width: 32px;
@@ -71,6 +71,20 @@
   min-width: 32px;
   height: 32px;
   padding: 7px;
+  border-radius: 6px;
+}
+.canvas-context-toolbar.ink-context-toolbar {
+  width: max-content;
+  max-width: calc(100vw - 16px);
+  height: auto;
+  min-height: 46px;
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+.canvas-context-toolbar button.ink-agent-destination-trigger {
+  width: auto;
+  height: 32px;
+  padding: 6px;
   border-radius: 6px;
 }
 .node-toolbar-color > div {

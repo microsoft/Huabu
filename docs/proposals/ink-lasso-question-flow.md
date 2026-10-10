@@ -1,6 +1,6 @@
 # Ink Lasso Question Flow
 
-> Status: **Partly shipped** — V1 and §14 shipped in [#220](https://github.com/microsoft/Huabu/pull/220); §15 is implemented in [#234](https://github.com/microsoft/Huabu/pull/234), pending merge. · Last updated: 2026-09-22
+> Status: **Partly shipped** — V1 and §14 shipped in [#220](https://github.com/microsoft/Huabu/pull/220); §15 is implemented in [#234](https://github.com/microsoft/Huabu/pull/234). §17's destination picker and Stage 1 shared conversation-first defaults are implemented on `feat/ink-agent-picker`, pending merge. Stage 2 resource recommendations remain deferred. · Last updated: 2026-10-08
 
 ## 1. Summary
 
@@ -12,12 +12,14 @@ The Post-V1 amendments add interaction polish in §14 and optional submission-ti
 
 The earlier interactive HTML concept was a visual exploration and is not included in this branch. This Markdown proposal is the self-contained implementation contract and records the deliberate differences from that concept in §3.
 
+The destination picker in §17 separates Lasso source selection from Agent/conversation targeting: Agent Node selection does not participate in destination resolution; only the toolbar picker determines the destination. This amendment supersedes the earlier selection-driven targeting rules on this branch; §3 retains the historical V1 decisions.
+
 ## 2. Goals
 
 1. Turn an existing retained Lasso selection into an explicit, inspectable Agent submission.
 2. Require at least one selected Sketch stroke so every V1 submission has an Ink intent source.
 3. Let ordinary selected Canvas nodes accompany the Ink as additional sources.
-4. Create a visible Question Node for a new task or continue one existing Question thread when the selection names it.
+4. Create a visible Question Node for a new task or continue one existing Question thread chosen through the destination picker (§17).
 5. Let the Question's bound Agent infer a clear intent and act through its existing capabilities, or ask a focused clarification question when the intent is materially ambiguous.
 6. Reuse Huabu's existing material-consistency boundary: materialize visual sources while building the envelope, persist canonical rendered inputs, expose revisions on referenced nodes, and protect Agent writes through read-set CAS.
 7. Keep Chat available through the Question Node without opening it automatically for a normal submission.
@@ -27,6 +29,8 @@ The earlier interactive HTML concept was a visual exploration and is not include
 11. Optionally improve Chinese and mixed-language handwriting comprehension through bounded server-side OCR without adding another user message, Agent turn, or durable Sketch transcription.
 
 ## 3. Approved V1 Product Decisions
+
+These are the historical V1 decisions. The implemented §17 amendment replaces the selection-only target rules, the multiple-Question submission block, and the absence of an Agent picker. Earlier sections preserve the original design record where they describe those superseded behaviors; current targeting follows §17 and the architecture documents.
 
 | Topic                               | Decision                                                                                                                                                                                                                                                                                                                        |
 | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -47,7 +51,7 @@ The earlier interactive HTML concept was a visual exploration and is not include
 | Missing or ambiguous inference      | Keep the generic `Ink request` / `New ink request` presentation. Clarification remains an assistant response, and Huabu never derives intent by parsing arbitrary reply text.                                                                                                                                                   |
 | Request semantics                   | Persist a structured `ink-intent` marker. Do not pretend the user typed a synthetic text message.                                                                                                                                                                                                                               |
 | Submission-time OCR                 | When Azure Vision credentials are configured, derive an approximate transcription from a pure-Ink raster after the required partial-stroke visual is prepared and before canonical rendering. A successful non-empty result enters the same envelope and turn; it never replaces the required Ink image or becomes `user.text`. |
-| OCR deadline and fallback           | Wait at most 2,000 ms for OCR in the initial implementation. Disabled, empty, failed, malformed, or timed-out recognition continues image-only; a result arriving after the attempt deadline is discarded and never appended to a running or completed turn.                                                                    |
+| OCR deadline and fallback           | Wait at most 3,000 ms for OCR. Disabled, empty, failed, malformed, or timed-out recognition continues image-only; a result arriving after the attempt deadline is discarded and never appended to a running or completed turn.                                                                                                  |
 | OCR presentation                    | OCR is hidden Agent input and does not appear as a Chat message, attachment, source chip, Question title, inferred intent, or Sketch transcription. The prompt identifies it as approximate evidence that must be checked against the Ink image.                                                                                |
 | Successful submission               | Clear the retained Lasso selection only after the server accepts the turn. The original Canvas content remains.                                                                                                                                                                                                                 |
 | Failed submission                   | A rejection before acceptance keeps the selection and any created Question for retry. A transport failure with unknown acceptance requires reconciliation before resubmission. An accepted turn's later runtime failure uses normal Chat recovery.                                                                              |
@@ -382,7 +386,7 @@ The accepted boundary must be explicit and shared with text Chat. The current in
 
 At acknowledgement, retire the retained selection only if the originating Canvas and Lasso gesture identity still match the captured attempt. That identity is derived from the retained polygon plus its partial-stroke subsets, not React Flow's whole-node `selected` projection, because Question creation and Canvas lifecycle synchronization may refresh that projection before acceptance without creating a new Lasso. A different polygon or stroke subset, undo/reset, or Canvas switch must not be cleared by a delayed callback. Once a turn has been accepted, a later Agent error does not restore an obsolete selection over the user's current work.
 
-OCR does not add another state machine. The server waits only during pre-acceptance preparation. A 1,500 ms threshold is observability-only; the initial 2,000 ms hard deadline is the sole flow-control timeout. The OCR fetch should consume the request/preparation `AbortSignal` when one is available and must always enforce its own deadline. Physical cancellation is an optimization, not the correctness boundary: after timeout, abort, or attempt completion, a late promise result is logically ineligible and cannot mutate the envelope, rendered inputs, history, Question, inferred intent, or any active turn.
+OCR does not add another state machine. The server waits only during pre-acceptance preparation. A 1,500 ms threshold is observability-only; the 3,000 ms hard deadline is the sole flow-control timeout. The OCR fetch should consume the request/preparation `AbortSignal` when one is available and must always enforce its own deadline. Physical cancellation is an optimization, not the correctness boundary: after timeout, abort, or attempt completion, a late promise result is logically ineligible and cannot mutate the envelope, rendered inputs, history, Question, inferred intent, or any active turn.
 
 ### 9.1 Retry Is Not Replay
 
@@ -578,7 +582,7 @@ This amendment is planned after the V1 submission path and contains only local i
 | ----- | ------------------------------------------------------------------------------------------ | ------------------------------------------------ | ----------------------------------------------------- |
 | P0    | Characterize retained-selection dismissal, submission pending state, and touch hit-testing | Existing Ink submission and pointer-router tests | Tests only; no product behavior change                |
 | P1    | Empty-Canvas tap dismisses the complete retained Lasso result                              | P0                                               | Canvas interaction change                             |
-| P2    | Stable spinner feedback during pre-acceptance submission                                   | P0                                               | Toolbar presentation change                           |
+| P2    | Stable disabled-square feedback during pre-acceptance submission                           | P0                                               | Toolbar presentation change                           |
 | P3    | Finger input does not select or drag Ink                                                   | P0                                               | Pointer-policy change; mouse and pen remain unchanged |
 | P4    | Retained Lasso loop renders in the topmost Canvas HUD                                      | P1                                               | Canvas presentation and hit-target change             |
 | P5    | Selected Ink strokes render an explicit semantic highlight                                 | P0                                               | Sketch paint-only change                              |
@@ -599,9 +603,9 @@ P1 should reuse the current pane/viewport-navigation selection-clear boundary an
 
 ### 14.3 Pre-acceptance submission feedback
 
-The send control keeps its position and dimensions after activation, becomes disabled, and replaces the Send icon with the shared `Spinner` primitive at the icon-only button's `xs` indicator size. `Spinner` owns a fixed square layout box and rotates a centred Lucide indicator through the common loading animation, so business components do not hand-roll animation classes, the indicator shares the circular button's visual centre, and its intrinsic size cannot enlarge the button or toolbar. Its accessible name changes to `Sending ink request`, but the pending state exposes no tooltip or visible status text because the Spinner is sufficient feedback; source count and Agent target hint remain stable so the toolbar does not resize. Repeated activation is ignored by the same local preparation guard.
+The send control keeps its position and dimensions after activation, becomes disabled with the same reduced-opacity treatment as ChatPanel's disabled Send control, and replaces the Send icon with the same Lucide `Square` glyph used inside ChatPanel's Stop control. The Ink control retains its square toolbar button shape; only the inner glyph is shared, so this state communicates pending work without presenting a circular Chat control or an active cancellation affordance. Its accessible name changes to `Sending ink request`, but the pending state exposes no tooltip or visible status text; source count and Agent target hint remain stable so the toolbar does not resize. Repeated activation is ignored by the same local preparation guard.
 
-The spinner begins synchronously when activation reserves the local attempt and ends at one of three boundaries: durable acceptance always releases the local preparation state, then clears the matching selection and removes its toolbar; a known pre-acceptance rejection restores the Send icon for retry; an unresolved transport outcome retains its acceptance observer and remains non-actionable for the same Canvas/thread, preventing a duplicate POST. The controller retains that observer after an unknown result; a later acceptance replayed by Chat stream reconnect or returned by Stop reconciles it, while a confirmed Stop with no acceptance rejects the observer and restores retry without clearing the Lasso or Question. Switching tools does not clear a reserved Lasso; after a definitive rejection, the normal tool-scoped cleanup may run. If the user creates a newer Lasso, its polygon/stroke identity supersedes the old local presentation immediately, so the newer toolbar returns to its normal Send state and an older acceptance/finally callback cannot clear or disable it. The older observer is not discarded: until reconciliation resolves it, the shared turn controller rejects another dispatch to the same Canvas/thread instead of replacing the observer, while submissions targeting another thread remain independent. The toolbar does not show Chat's square Stop control because capture, save, snapshot, and pre-turn preparation do not yet identify a durable Agent run that Stop can authoritatively cancel. Once accepted, the Lasso surface is finished: the Question Node owns `running` feedback, and ChatPanel owns the shared Stop action for that accepted turn.
+The disabled-square state begins synchronously when activation reserves the local attempt and ends at one of three boundaries: durable acceptance always releases the local preparation state, then clears the matching selection and removes its toolbar; a known pre-acceptance rejection restores the Send icon for retry; an unresolved transport outcome retains its acceptance observer and remains non-actionable for the same Canvas/thread, preventing a duplicate POST. The controller retains that observer after an unknown result; a later acceptance replayed by Chat stream reconnect or returned by Stop reconciles it, while a confirmed Stop with no acceptance rejects the observer and restores retry without clearing the Lasso or Question. Switching tools does not clear a reserved Lasso; after a definitive rejection, the normal tool-scoped cleanup may run. If the user creates a newer Lasso, its polygon/stroke identity supersedes the old local presentation immediately, so the newer toolbar returns to its normal Send state and an older acceptance/finally callback cannot clear or disable it. The older observer is not discarded: until reconciliation resolves it, the shared turn controller rejects another dispatch to the same Canvas/thread instead of replacing the observer, while submissions targeting another thread remain independent. Although the pending icon matches the square inside ChatPanel's Stop control, the disabled Ink button does not claim Stop semantics because capture, save, snapshot, and pre-turn preparation do not yet identify a durable Agent run that Stop can authoritatively cancel. Once accepted, the Lasso surface is finished: the Question Node owns `running` feedback, and ChatPanel owns the shared Stop action for that accepted turn.
 
 ### 14.4 Finger input does not select Ink
 
@@ -641,7 +645,7 @@ The polish work is complete when all of the following hold:
 
 - Mouse, pen, and touch empty-Canvas taps clear the retained Lasso polygon and its complete mixed selection, while drags, pinch, controls, nodes, and panels do not.
 - Empty-Canvas dismissal cannot invalidate an attempt during pre-acceptance preparation, and acceptance still clears only the captured matching selection.
-- Send changes to a stable disabled spinner immediately, cannot dispatch twice, restores retry feedback on known rejection, and never claims Stop semantics before durable acceptance.
+- Send changes immediately to a stable disabled square glyph with ChatPanel's disabled-button treatment, cannot dispatch twice, restores retry feedback on known rejection, and never claims Stop semantics before durable acceptance.
 - Finger taps and drags never select or move Sketch nodes, can still reach ordinary nodes under Ink, and otherwise navigate or clear as empty Canvas; mouse, pen, drawing, erasing, and Lasso behavior do not regress.
 - The retained Lasso loop is portalled above the viewport renderer, remains aligned through pan/zoom and stroke movement, and cannot be obscured by Frames, Images, or manually reordered nodes.
 - Every selected Ink stroke visibly retains its authored color with a screen-stable semantic outline; unselected strokes have no outline, and grounding capture excludes the highlight path.
@@ -682,7 +686,7 @@ A pure Ink Agent snapshot may be byte-reused only when it already satisfies this
 
 ### 15.3 Deadline, fallback, and cancellation
 
-Recognition has one initial hard deadline of 2,000 ms. A 1,500 ms slow-call threshold exists only for measurement and does not settle the attempt. Missing configuration disables OCR without error; an empty valid result also continues normally. Timeout, provider error, or malformed output is reported through structured diagnostics and falls back to the required image-only turn. User Stop or parent preparation cancellation is different: it aborts OCR and stops the entire submission before Agent execution and durable acceptance, rather than continuing image-only.
+Recognition has one hard deadline of 3,000 ms. A 1,500 ms slow-call threshold exists only for measurement and does not settle the attempt. Missing configuration disables OCR without error; an empty valid result also continues normally. Timeout, provider error, or malformed output is reported through structured diagnostics and falls back to the required image-only turn. User Stop or parent preparation cancellation is different: it aborts OCR and stops the entire submission before Agent execution and durable acceptance, rather than continuing image-only.
 
 Where the request pipeline exposes a reliable preparation `AbortSignal`, the Azure request consumes it together with its own deadline. Correctness does not depend on physical network cancellation: attempt identity and deadline settlement make every later completion ineligible. Huabu never posts the result as a second user message, opens another Agent turn, updates an already running turn, or rewrites persisted history.
 
@@ -698,7 +702,7 @@ Canonical rendering happens only after OCR has succeeded, produced no text, fail
 
 Configuring an Azure AI Vision endpoint and key in Settings > General or through `VISION_ENDPOINT` / `VISION_KEY` opts the server into sending the selected pure-Ink raster to that resource. Newly entered keys travel only to the owner-authorized settings endpoint for secure persistence; saved keys are never returned by read APIs or included in Agent requests, envelopes, logs, or Web bundles. Product documentation and deployment guidance disclose this external processing boundary.
 
-Structured telemetry distinguishes `disabled`, `success`, `empty`, `timeout`, `remote_error`, `invalid_result`, and `aborted`, and records only operational metadata such as duration, HTTP status where applicable, raster dimensions, and node/stroke counts. Normal logs must not include credentials, image bytes, data URLs, or recognized text. The implementation should measure p50, p95, timeout rate, non-empty recognition rate, and downstream intent success before changing the initial deadline.
+Structured telemetry distinguishes `disabled`, `success`, `empty`, `timeout`, `remote_error`, `invalid_result`, and `aborted`, and records only operational metadata such as duration, HTTP status where applicable, raster dimensions, and node/stroke counts. Normal logs must not include credentials, image bytes, data URLs, or recognized text. The deadline was raised from 2,000 ms to 3,000 ms after an observed timeout on a Chinese handwriting submission. Measure p50, p95, timeout rate, non-empty recognition rate, and downstream intent success to evaluate this budget before changing it again.
 
 ### 15.6 Validation and rollout
 
@@ -748,3 +752,127 @@ The owner-only settings API uses shared schemas, restricts HTTPS resource-root e
 | Image inlining and fallback policy        | [`apps/server/src/modules/agent/conversation/prompt/image-inlining.ts`](../../apps/server/src/modules/agent/conversation/prompt/image-inlining.ts)                             |
 | Partial snapshot implementation           | [`apps/server/src/modules/canvas/snapshot-nodes.ts`](../../apps/server/src/modules/canvas/snapshot-nodes.ts)                                                                   |
 | Azure Vision local probe                  | [`scripts/test-azure-vision.mjs`](../../scripts/test-azure-vision.mjs)                                                                                                         |
+
+## 17. Explicit Agent conversation destination picker
+
+Status: **Picker and conversation-first Stage 1 implemented on the feature branch, pending merge; Stage 2 deferred.** Last updated: 2026-10-08.
+
+The initial implementation reset each new Lasso to new-conversation mode. The later 2026-10-08 decision and Stage 1 implementation supersede that default: the user is choosing an Agent conversation, not merely an Agent Profile. Sections 17.7–17.9 distinguish the implemented continuity behavior from deferred resource recommendations.
+
+The production picker reuses Common toolbar/menu primitives and ChatPanel's Agent menu rows with real Profiles and current-Space conversations. The standalone design study and its dedicated tests are excluded from this feature's PR; production unit and browser regression tests remain included.
+
+### 17.1 Confirmed product decisions
+
+- Replace the current Agent target hint in the retained-Lasso toolbar with an interactive dropdown showing an avatar and Agent name, following the ChatPanel Agent picker presentation.
+- Support two destination modes: create a new Agent Node/conversation using a chosen Agent, or continue an existing Agent Node/conversation. Agent identity and conversation identity are distinct: multiple conversations can use the same Agent.
+- Agent Node selection does not participate in destination resolution; only the toolbar picker determines the destination. Continuing a conversation does not require including its Agent Node in the Lasso selection.
+- Selecting zero, one, or multiple Agent Nodes neither preselects nor changes the destination. Selecting multiple Agent Nodes is not a multiple-destination submission error.
+- In this first iteration, lassoed Agent Nodes have no Ink-submission role: they are neither implicit destinations nor reference sources. Do not attach their node content, conversation history, summaries, or memory because they were selected. Exclude them from submission source counts and source metadata, including Agent Nodes nested inside selected Frames.
+- Each Ink submission targets exactly one conversation, either newly created or visibly selected for continuation through the picker, including a default initialized under §17.7. Implicit broadcast or multi-Agent dispatch is out of scope.
+- Busy existing Agent Nodes remain visible in the menu but are disabled and cannot be selected.
+- New Agent conversations follow ChatPanel's existing new-conversation behavior for Profile defaults, binding initialization, and Profile preference persistence. Separately, remember the current Space's last accepted anchored conversation target for continuity under §17.7, updated by both Ink Inquiry and ChatPanel submissions. This target identifier is not a second Profile preference or a context-management layer; it neither copies another conversation's history nor changes shared Agent memory behavior.
+
+The 2026-10-08 decision supersedes the earlier 2026-09-24 proposal to automatically preselect a single lassoed Agent Node. Lassoed Agent Node membership remains irrelevant to targeting. The later conversation-first amendment adds recent-conversation defaults and, in a second stage, ordinary-resource recommendations without restoring Agent Node selection-based targeting.
+
+This amendment changes destination selection and explicitly excludes selected Agent Nodes as reference sources. It preserves the Ink source requirement, required visual evidence, OCR enrichment, and same-turn submission model. Selecting a continuation destination in the picker still uses that conversation's normal history; this is distinct from importing another selected node's history. No new reference-memory feature or change to shared Agent memory is introduced. Ordinary Canvas selection, movement, and deletion remain unchanged.
+
+### 17.2 Presentation and submission semantics
+
+The implementation follows the reviewed grouped-menu design. The conversation-first lifecycle is specified below and does not require a separate context selector.
+
+Use one dropdown with two groups, `New conversation` and `Continue conversation`, rather than a separate mode switch followed by another picker. The new-conversation group lists configured Agents using their existing avatars and names. The continuation group initially lists Agent Nodes on the current Space, showing conversation title plus Agent identity so two conversations using the same Profile are distinguishable.
+
+In new-conversation mode, the collapsed trigger shows avatar, Agent name, and a `New` indicator. In continuation mode, it shows avatar, conversation title, and a `Continue` indicator; the Agent name remains available in the menu and accessible description. Long labels must not displace the send action.
+
+When multiple conversations exist and no default can be resolved under §17.7, show an explicit `Choose conversation` state and disable Send until the user chooses an existing conversation or explicitly selects New. Do not disguise an unresolved target as new-conversation mode.
+
+Selecting a menu entry only changes the destination draft. Sending in new-conversation mode creates an adjacent Agent Node through the existing creation and placement path and binds it to the selected Agent, without inheriting another conversation's history. Sending in continuation mode uses the existing node/thread and its history, preserves its Agent binding, and neither creates nor moves a node. Changing Agent identity for a bound conversation is not part of this proposal.
+
+### 17.3 Confirmed selection independence
+
+| Situation                                                      | Confirmed behavior                                                                                                                                                                |
+| -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Zero, one, or multiple Agent Nodes are lassoed                 | Do not derive or change the destination from node selection; use the toolbar picker only.                                                                                         |
+| An Agent Node enters or leaves the retained Lasso              | Preserve the picker destination; membership changes do not retarget the submission.                                                                                               |
+| Agent Nodes are selected alongside Ink or other sources        | Omit the Agent Nodes from submitted reference sources and source counts; keep selected Ink and ordinary sources. Do not fetch or attach the selected nodes' conversation history. |
+| A lassoed Agent Node is busy but is not the picker destination | Its busy state does not affect the chosen destination or block submission to another eligible conversation; its continuation menu entry remains disabled.                         |
+
+### 17.4 Shared creation policy and edge cases
+
+The new-conversation Profile policy is confirmed: use the same defaults, existing Profile preference retention, and creation semantics as ChatPanel. Do not hard-code a separate first-use Profile. The transient destination draft is separate from the server-owned last accepted conversation target: dismissal discards the draft without changing that target, while durable submission acceptance from either Ink Inquiry or anchored ChatPanel records the actual destination for the next Lasso. Merely selecting a continuation does not write either conversation recency or Profile recency. Explicit new-Profile choices continue to reuse ChatPanel's Profile-recency writer.
+
+| Situation                                               | Behavior                                                                                                                                                              |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A picker session begins without an explicit destination | Initialize the visible conversation target using §17.7, independently of which Agent Nodes are selected.                                                              |
+| The user manually changes the destination               | Preserve that choice for the current retained Lasso across unrelated updates.                                                                                         |
+| A selected destination becomes busy before sending      | Keep it visible as the selected destination, show its busy state, and disable sending until it is available or the user changes destination; never silently retarget. |
+| A busy destination becomes available                    | Restore menu selectability.                                                                                                                                           |
+| A target disappears or becomes unavailable              | Surface the reason and require an explicit destination change rather than silently creating or redirecting a conversation.                                            |
+
+Busy entries should retain their avatar and identity, use disabled styling, and show a `Running` status. Busy status applies to a node/thread, not automatically to its entire Agent Profile: another conversation using the same Profile may still be eligible. This proposal does not introduce queued submissions. The exact busy predicate must reuse the canonical conversation lifecycle, and send-time validation must still reject a destination that became unavailable after the menu rendered.
+
+### 17.5 Scope and lifecycle
+
+- Continue only Question/Agent Nodes on the current Space. Cross-Space and panel-only conversation targeting are out of scope.
+- Hide the continuation group, divider, and heading when there are no conversations on the current Space. Busy conversations still count as entries and remain visible but disabled.
+- Keep the destination across updates within a retained Lasso. After dismissal, initialize the next draft from the current Space's last accepted conversation rather than the abandoned draft. New-conversation Profile defaults and preference lifetime still follow ChatPanel.
+- A replacement gesture is only a preview until committed. Cancelling it restores the previous destination and rejected-send reservation alongside the previous selection. A committed replacement starts a fresh draft even when it captures identical strokes; moving the retained selection does not.
+- Lock destination changes during preparation and unresolved acceptance. Rejected new-node reservations are scoped by source selection and destination, allowing a same-attempt retry without another node or accidental dispatch to an earlier target.
+
+### 17.6 Implementation and validation direction
+
+Keep this iteration limited to a visible single-conversation destination and the existing new/continued conversation paths. Stage 1 adds only recent-conversation defaults; Stage 2 adds bounded, explainable resource recommendations. Do not add selected-Agent reference extraction, history merging, cross-conversation memory, hidden semantic routing, or multi-Agent dispatch. Apply the Agent Node source exclusion consistently to source counts, canonical selected-node context, and grounding metadata, including nested Frame children. Do not create extra Agent Node snapshots or history attachments as reference evidence; incidental pixels in the existing visible-Canvas grounding capture do not authorize conversation-history retrieval. This is an Ink-submission rule, not a global change to ChatPanel references or ordinary Canvas interactions.
+
+Trace and reuse ChatPanel's canonical new-conversation initialization and Profile preference policy before wiring the picker. If that policy needs extraction for reuse, keep one shared implementation rather than reproducing it in Lasso-specific state. Verify equivalent new-conversation Profile defaults and binding behavior across the two entry points; conversation-target recency is separate minimal routing state, not a duplicate Profile preference. Submission retries and reservations must remain scoped to the visible destination so changing it cannot dispatch to an earlier target or create duplicate nodes.
+
+Reuse the avatar/name resolution and Agent options behind [ChatPanel's AgentSelector](../../apps/web/src/components/Panels/ChatPanel/AgentSelector.tsx), but do not copy its per-thread binding-edit semantics into the Lasso picker: this control chooses a destination as well as an Agent. Extend [StrokeSelectionToolbar](../../apps/web/src/components/Panels/Canvas/FloatingToolbars/StrokeSelectionToolbar.tsx) and separate source derivation from explicit destination resolution in [inkQuestionSubmission](../../apps/web/src/components/Panels/Canvas/FloatingToolbars/inkQuestionSubmission.ts). Remove selected-Question target inference and the multiple-selected-Question target block; validate the picker destination instead. Reuse canonical node creation, submission preparation, thread binding, and server admission rather than adding another dispatch path.
+
+Validation covers new versus continued conversations, unchanged picker destinations across zero/one/multiple selected Agent Nodes, continuation of a non-selected Agent Node, exactly one destination per submission, identical Agent Profiles with distinct conversation titles, busy-entry mouse/keyboard behavior, live availability transitions, destination changes during preparation/retry, and source/grounding exclusion including nested Frames. Selecting a busy non-target node must not block a valid picker destination. Picker interactions preserve the retained Lasso and do not create nodes before submission. Current behavior is documented in [Sketch context](../architecture/sketch-node.md#41-partial-stroke-selection-as-ai-context) and [Agent context](../architecture/agent-context.md).
+
+### 17.7 Conversation-first defaults — Stage 1
+
+Status: **Implemented on the feature branch, pending merge.**
+
+The remembered destination identifies a particular current-Space Agent Node/thread, not just its Profile. Two conversations using Copilot remain distinct targets. Reuse the selected thread's normal history and fixed binding; do not materialize a separate Ink context, branch, summary, memory, or copied conversation history.
+
+Resolve a fresh retained-Lasso draft in this order:
+
+| Condition                                                                                 | Visible destination                                                                                                                                     |
+| ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The current draft already has a manual choice                                             | Preserve it; background updates and recommendations must not override it.                                                                               |
+| This Space has a last accepted conversation target from Ink Inquiry or anchored ChatPanel | Continue that exact target. If busy or unavailable, retain its identity and show the blocking reason instead of falling through to another destination. |
+| There is no remembered target and exactly one available conversation                      | Preselect that conversation for continuation.                                                                                                           |
+| There is no remembered target and multiple available conversations                        | Require a choice in Stage 1. Stage 2 may preselect a unique strong resource match under §17.8.                                                          |
+| Conversations exist, but none is available                                                | Require an explicit choice or explicit New; retain disabled conversation entries with their reasons.                                                    |
+| The Space has no conversations and no invalid remembered target requiring resolution      | Enter New mode using the shared ChatPanel Profile default policy; create the node only on Send.                                                         |
+
+Record the actual destination only after durable submission acceptance, including a newly created node/thread. A successful new conversation A becomes the next default continuation A; explicitly submitting to B changes the next default to B. Menu selection, dismissal, known rejection, and unresolved transport acceptance do not advance conversation recency. Accepted turns count even if their later execution fails: the turn already belongs to that conversation.
+
+The remembered target is scoped to the current Space, never carried into another Space. Validate the node/thread association before using it and again before dispatch. Busy targets remain the default with Send disabled until they become available or the user explicitly switches; deleted or invalid targets require explicit resolution rather than silent fallback or replacement creation. Keep the existing retry and preparation protections, including preventing callbacks from an older attempt from changing a newer Lasso's active draft.
+
+The 2026-10-08 implementation decision is server persistence, scoped to the active Workspace and Space, shared by desktop and iPad clients of that Server and surviving browser reloads. Both Ink Inquiry and ChatPanel submissions to a current-Space Agent Node/thread update the same recency; node-less Chat does not establish an Agent Node destination. The server is the sole writer at acceptance, so there is no competing browser-local last-conversation preference or client-side timestamp ordering. This records only routing identity and acceptance ordering, not memory or excerpts of history; continuation uses the same existing session/thread.
+
+The implementation uses a minimal Space extension pointer linked to canonical durable turn acceptance; pending acceptance recovery preserves correctness across acknowledgement/finalization failures. Existing Spaces start without a remembered target until their next qualifying acceptance; no historical timestamp inference or history migration is performed. Deleted/moved targets remain explicit unavailable identifiers. Persistence and admission ordering reuse existing Workspace-operation leases and the single-Server Space mutex, not a new distributed coordination layer. Acceptance keeps its Workspace lease while queued and through recovery, reservation, canonical append, and finalization. Namespace identity remains stable across Space renames while canonical storage operations resolve the current history location.
+
+Each completed Lasso reads the server's recent target before defaulting. Loading or read failure cannot be interpreted as absence: keep Send disabled until resolution or an explicit destination choice, expose read errors, and allow retry by reopening the selector. New acceptance on another device is observed on the next Lasso, not pushed into a draft already initialized or manually chosen. Existing ChatPanel conversation selection and new-Profile policy remain unchanged; its accepted anchored submissions simply participate in the shared recency.
+
+### 17.8 Explainable resource recommendations — Stage 2
+
+Status: **Confirmed direction; evidence contract and implementation deferred until after Stage 1.**
+
+Resources may help identify a relevant existing conversation without becoming owned by it. Keep default continuity distinct from recommendation: when a recent conversation already supplies the default, show other resource-related conversations as optional recommendations with a concise reason, such as `Discussed 2 selected resources`. Never silently replace a recent or manually chosen destination merely because the user adds another resource.
+
+When no recent target or manual choice exists, a unique, available conversation supported by strong, unambiguous resource evidence may initialize the picker. Conflicting evidence across conversations, weak evidence, or multiple plausible candidates should produce suggestions requiring a choice, not automatic context merging, broadcasting, or a new conversation. Once a draft is initialized, new evidence must not silently reroute it.
+
+Consider evidence in this order: explicit user-authored resource-to-conversation relationships, verified output provenance, then a resource's recorded use as a submission source. Creation alone is not permanent ownership, and one prior discussion is not exclusive relevance. Content similarity is not part of the first two stages; do not introduce an extra model call or inspect/summarize other threads to guess a target.
+
+Before implementation, audit existing node provenance, accepted submission sources, and action records for reliable resource/thread identifiers. Do not assume every AI-created node contains its originating thread, infer identity from names or proximity, or invent missing relationships. Any new relationship index must contain routing evidence only, not a parallel context store. Define ambiguity and eligibility rules with tests before enabling automatic preselection.
+
+The reference [Ink Lab context router](https://github.com/LiangweiOIO/ink-lab-standalone/blob/HEAD/apps/server/src/modules/ink-agent/ink-context-router.ts) motivates explicit overrides, output provenance, and shared-source evidence. Huabu does not adopt its context-branch registry, branch materialization, similarity-based routing, or automatic new-branch fallback.
+
+### 17.9 Delivery and acceptance
+
+1. **Stage 1 — continuity:** implement server-persisted current-Space last-accepted conversation defaults shared by Inquiry and anchored ChatPanel, singleton fallback, unresolved-choice UI, and explicit New. Keep ChatPanel Profile policy and normal thread history unchanged.
+2. **Stage 2 — relevance:** after verifying available evidence and resolving the recommendation contract, add explainable resource suggestions and unique-strong-match initialization only when Stage 1 has no remembered target.
+
+Stage 1 validation must cover consecutive Ink submissions reusing one node/thread, explicit New followed by continuation, switching between two conversations on the same Profile, current-Space and Workspace isolation, cross-client reads and reload persistence, Ink and anchored ChatPanel acceptance updating the same target, abandoned choices and rejected sends not replacing recency, busy/deleted defaults not silently falling back, no-conversation versus ambiguous-conversation behavior, failed reads remaining distinct from no target, and stale requests/acceptance callbacks not retargeting an active draft. Stage 2 additionally requires conflicting-resource evidence, shared resources across threads, missing provenance, recommendation explanations, and preservation of manual/recent destinations. Neither stage may attach another conversation's history or restore lassoed Agent Node targeting.

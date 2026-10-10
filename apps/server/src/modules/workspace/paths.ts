@@ -39,7 +39,11 @@
 import path from 'node:path';
 
 import { materializesWorkspaces, space } from '../storage/index.js';
-import { getWorkspacePath } from '../workspace.js';
+import {
+  getWorkspaceDirectory,
+  getWorkspaceHandle,
+  getWorkspacePath,
+} from '../workspace.js';
 
 import type { Namespace } from '@agenetes/protocol';
 
@@ -50,6 +54,7 @@ import type { Namespace } from '@agenetes/protocol';
  * it is, rather than binding this module to the backend's layout (§12.5.3).
  */
 const LEGACY_HISTORY_DIR_NAME = '.history';
+const namespaceWorkspaceIds = new WeakMap<Namespace, string>();
 
 /**
  * The Space's real directory, or a refusal.
@@ -155,10 +160,49 @@ export function canvasAcpNamespace(canvasId: string): Namespace {
   // conversation stores learn that this Space keeps its threads somewhere
   // other than a folder (`agent/agenetes/conversation-stores.ts`).
   const root = optionalSpaceRoot(canvasId);
-  return root === null
-    ? { name: canvasId }
-    : {
-        name: canvasId,
-        storage: { root: path.join(root, LEGACY_HISTORY_DIR_NAME) },
-      };
+  const namespace =
+    root === null
+      ? { name: canvasId }
+      : {
+          name: canvasId,
+          storage: { root: path.join(root, LEGACY_HISTORY_DIR_NAME) },
+        };
+  const workspace = getWorkspaceHandle();
+  if (workspace) namespaceWorkspaceIds.set(namespace, workspace.workspaceId);
+  return namespace;
+}
+
+/**
+ * Rebind a live or persisted namespace to its Space's current location without
+ * allowing a captured namespace to cross the immutable Workspace boundary.
+ */
+export function resolveCanvasAcpNamespace(namespace: Namespace): Namespace {
+  if (!namespace.name) return namespace;
+  const workspace = getWorkspaceHandle();
+  if (!workspace) throw new Error('Conversation Workspace is unavailable');
+  const owner = namespaceWorkspaceIds.get(namespace);
+  if (owner !== undefined && owner !== workspace.workspaceId) {
+    throw new Error('Conversation namespace is no longer active');
+  }
+  if (owner === undefined && namespace.storage?.root) {
+    // Restored workload records have no process-local binding. A Space rename
+    // changes the middle directory, not the containing Workspace directory.
+    const directory = getWorkspaceDirectory();
+    if (
+      !directory ||
+      path.dirname(path.dirname(path.resolve(namespace.storage.root))) !==
+        path.resolve(directory)
+    ) {
+      throw new Error('Conversation namespace is no longer active');
+    }
+  }
+  if (!namespace.storage?.root) {
+    const resolved = { name: namespace.name };
+    namespaceWorkspaceIds.set(resolved, workspace.workspaceId);
+    return resolved;
+  }
+  namespaceWorkspaceIds.set(namespace, workspace.workspaceId);
+  const resolved = canvasAcpNamespace(namespace.name);
+  if (!resolved.storage?.root) resolved.storage = namespace.storage;
+  return resolved;
 }

@@ -17,14 +17,12 @@ export type InkSubmissionCandidate =
       sourceCount: number;
       selectedNodeIds: string[];
       strokeSelection: Record<string, string[]>;
+      excludedNodeIds: string[];
       target: InkQuestionTarget | null;
     }
   | {
       kind: 'blocked';
-      reason:
-        | 'no-ink'
-        | 'multiple-question-targets'
-        | 'invalid-question-target';
+      reason: 'no-ink' | 'invalid-question-target';
       sourceCount: number;
     };
 
@@ -54,15 +52,34 @@ function isValidPersistedBinding(
   );
 }
 
+export function resolveInkQuestionTarget(
+  question: Node | undefined,
+): InkQuestionTarget | null {
+  if (question?.type !== 'question') return null;
+  const data = question.data;
+  const threadId =
+    typeof data.threadId === 'string' ? data.threadId.trim() : '';
+  if (!threadId || !isValidPersistedBinding(data.agentBinding)) return null;
+  return {
+    nodeId: question.id,
+    threadId,
+    ...(data.agentMode === 'operate' || data.agentMode === 'ask'
+      ? { mode: data.agentMode }
+      : {}),
+    ...(data.agentBinding ? { binding: data.agentBinding } : {}),
+  };
+}
+
 export function deriveInkSubmissionCandidate(
   nodes: readonly Node[],
   selection: Record<string, readonly string[]>,
+  targetNodeId?: string,
 ): InkSubmissionCandidate {
   const strokeSelection = copyStrokeSelection(selection);
   const selectedNodes = nodes.filter((node) => node.selected);
-  const questionTargets = selectedNodes.filter(
-    (node) => node.type === 'question',
-  );
+  const excludedNodeIds = nodes
+    .filter((node) => node.type === 'question')
+    .map((node) => node.id);
   const selectedNodeIds = selectedNodes
     .filter((node) => node.type !== 'question')
     .map((node) => node.id);
@@ -74,29 +91,21 @@ export function deriveInkSubmissionCandidate(
   if (Object.keys(strokeSelection).length === 0) {
     return { kind: 'blocked', reason: 'no-ink', sourceCount };
   }
-  if (questionTargets.length > 1) {
-    return {
-      kind: 'blocked',
-      reason: 'multiple-question-targets',
-      sourceCount,
-    };
-  }
-
-  const question = questionTargets[0];
-  if (!question) {
+  if (!targetNodeId) {
     return {
       kind: 'ready',
       sourceCount,
       selectedNodeIds,
       strokeSelection,
+      excludedNodeIds,
       target: null,
     };
   }
 
-  const data = question.data as Record<string, unknown>;
-  const threadId =
-    typeof data.threadId === 'string' ? data.threadId.trim() : '';
-  if (!threadId || !isValidPersistedBinding(data.agentBinding)) {
+  const target = resolveInkQuestionTarget(
+    nodes.find((node) => node.id === targetNodeId),
+  );
+  if (!target) {
     return {
       kind: 'blocked',
       reason: 'invalid-question-target',
@@ -108,14 +117,8 @@ export function deriveInkSubmissionCandidate(
     sourceCount,
     selectedNodeIds,
     strokeSelection,
-    target: {
-      nodeId: question.id,
-      threadId,
-      ...(data.agentMode === 'operate' || data.agentMode === 'ask'
-        ? { mode: data.agentMode }
-        : {}),
-      ...(data.agentBinding ? { binding: data.agentBinding } : {}),
-    },
+    excludedNodeIds,
+    target,
   };
 }
 
@@ -125,7 +128,7 @@ export function inkSelectionIdentity(
   selection: Record<string, readonly string[]>,
 ): string {
   const selectedNodeIds = nodes
-    .filter((node) => node.selected)
+    .filter((node) => node.selected && node.type !== 'question')
     .map((node) => node.id)
     .sort();
   const selectedStrokes = Object.entries(copyStrokeSelection(selection))

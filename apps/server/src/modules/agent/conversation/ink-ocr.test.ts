@@ -274,6 +274,9 @@ describe('Ink OCR deadline and cancellation', () => {
     { durationMs: 1499, slow: false },
     { durationMs: 1500, slow: true },
     { durationMs: 1999, slow: true },
+    { durationMs: 2000, slow: true },
+    { durationMs: 2500, slow: true },
+    { durationMs: 2999, slow: true },
   ])(
     'uses 1500ms only for telemetry, allowing success at $durationMs ms',
     async ({ durationMs, slow }) => {
@@ -292,17 +295,20 @@ describe('Ink OCR deadline and cancellation', () => {
   );
 
   it.each(['resolve', 'reject'] as const)(
-    'settles at exactly 2000ms and discards a late %s',
+    'settles at exactly 3000ms and discards a late %s',
     async (completion) => {
       const pending = deferred<Response>();
       fetchMock.mockReturnValue(pending.promise);
       const result = recognizeInk(params);
-      await vi.advanceTimersByTimeAsync(1999);
+      await vi.advanceTimersByTimeAsync(2999);
+      expect(debug).not.toHaveBeenCalled();
+      expect(warn).not.toHaveBeenCalled();
+      expect(fetchMock.mock.calls[0]?.[1]?.signal?.aborted).toBe(false);
       await vi.advanceTimersByTimeAsync(1);
       expect(await result).toBeUndefined();
       expect(lastOutcome()).toMatchObject({
         outcome: 'timeout',
-        durationMs: 2000,
+        durationMs: 3000,
       });
       expect(fetchMock.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
       if (completion === 'resolve') pending.resolve(response());
@@ -358,11 +364,11 @@ describe('Ink OCR deadline and cancellation', () => {
     });
 
     const result = recognizeInk(params);
-    await vi.advanceTimersByTimeAsync(2000);
+    await vi.advanceTimersByTimeAsync(3000);
     expect(await result).toBeUndefined();
     expect(lastOutcome()).toMatchObject({
       outcome: 'timeout',
-      durationMs: 2000,
+      durationMs: 3000,
     });
     expect(cancel).toHaveBeenCalled();
     pendingRead.resolve({ done: true, value: undefined });

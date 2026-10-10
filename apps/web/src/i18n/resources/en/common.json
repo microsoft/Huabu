@@ -1033,6 +1033,24 @@
     "invokedSkill": "Invoked skill: {{id}}"
   },
   "toolbar": {
+    "inkAgentPicker": {
+      "chooseConversation": "Choose conversation",
+      "loadingConversation": "Loading conversation…",
+      "loadFailed": "Could not load the recent conversation: {{message}}. Choose a destination or reopen the menu to retry.",
+      "chooseAgent": "Choose an Agent",
+      "new": "New",
+      "busy": "Conversation is running",
+      "unavailable": "Conversation unavailable. Choose another destination.",
+      "changed": "Ink selection or destination changed. Submit again.",
+      "continue": "Continue",
+      "newConversation": "New conversation",
+      "continueCanvas": "Continue conversation · Current canvas",
+      "emptyConversations": "No conversations to continue on this canvas",
+      "menuLabel": "Ink request destination",
+      "newDestinationLabel": "Choose destination: New conversation with {{agent}}",
+      "continueDestinationLabel": "Choose destination: Continue {{title}} with {{agent}}",
+      "unavailableConversation": "Conversation unavailable"
+    },
     "more": "More",
     "fontSize": "Font size",
     "fontFamily": "Font",

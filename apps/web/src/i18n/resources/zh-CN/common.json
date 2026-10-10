@@ -1033,6 +1033,24 @@
     "invokedSkill": "调用的技能：{{id}}"
   },
   "toolbar": {
+    "inkAgentPicker": {
+      "chooseConversation": "选择会话",
+      "loadingConversation": "正在加载会话…",
+      "loadFailed": "无法加载最近会话：{{message}}。请选择目标，或重新打开菜单重试。",
+      "chooseAgent": "选择 Agent",
+      "new": "新建",
+      "busy": "会话正在运行",
+      "unavailable": "会话不可用，请选择其他接收目标。",
+      "changed": "所选笔迹或接收目标已更改，请重新提交。",
+      "continue": "继续",
+      "newConversation": "新建会话",
+      "continueCanvas": "继续会话 · 当前画布",
+      "emptyConversations": "当前画布暂无可继续的会话",
+      "menuLabel": "笔迹请求接收目标",
+      "newDestinationLabel": "选择接收目标：使用 {{agent}} 新建会话",
+      "continueDestinationLabel": "选择接收目标：使用 {{agent}} 继续 {{title}}",
+      "unavailableConversation": "会话不可用"
+    },
     "more": "更多",
     "fontSize": "字号",
     "fontFamily": "字体",
