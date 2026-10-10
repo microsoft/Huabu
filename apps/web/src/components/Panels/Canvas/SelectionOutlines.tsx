@@ -2,7 +2,7 @@
 // Licensed under the MIT license.
 
 import { useInternalNode, useStore, useViewport } from '@xyflow/react';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import {
@@ -31,8 +31,14 @@ import type { InternalNode } from '@xyflow/react';
 
 export function selectOutlinedNodes(
   nodes: readonly CanvasNode[],
+  hoveredNodeId: string | null = null,
 ): CanvasNode[] {
-  return nodes.filter((node) => node.selected || node.dragging);
+  return nodes.filter(
+    (node) =>
+      node.selected ||
+      node.dragging ||
+      (!node.hidden && node.id === hoveredNodeId),
+  );
 }
 
 export function selectionOutlineSize(
@@ -65,6 +71,7 @@ interface SelectionOutlineForNodeProps {
   zoom: number;
   viewportX: number;
   viewportY: number;
+  hoveredOnly: boolean;
 }
 
 function SelectionOutlineForNode({
@@ -74,6 +81,7 @@ function SelectionOutlineForNode({
   zoom,
   viewportX,
   viewportY,
+  hoveredOnly,
 }: SelectionOutlineForNodeProps) {
   const internalNode = useInternalNode(node.id);
   const internalPosition = internalNode?.internals.positionAbsolute;
@@ -126,8 +134,9 @@ function SelectionOutlineForNode({
   return (
     <SelectionOutline
       data-canvas-grounding-exclude
-      data-node-selection-outline={node.id}
-      className="pointer-events-none absolute z-998"
+      data-node-selection-outline={hoveredOnly ? undefined : node.id}
+      data-node-hover-outline={hoveredOnly ? node.id : undefined}
+      className={`pointer-events-none absolute z-998 ${hoveredOnly ? 'opacity-50' : ''}`}
       rect={{
         x: renderedRect.x,
         y: renderedRect.y,
@@ -175,14 +184,63 @@ export const SelectionOutlines = () => {
   );
   const { zoom, x: vpX, y: vpY } = useViewport();
   const domNode = useStore((s) => s.domNode);
+  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!domNode) return;
+    let current: string | null = null;
+    const update = (target: EventTarget | null) => {
+      const element =
+        target instanceof Element && domNode.contains(target) ? target : null;
+      const owner = element?.closest<HTMLElement>(
+        '[data-takeover-node], [data-frame-region-owner], .react-flow__node[data-id]',
+      );
+      const next =
+        owner?.dataset.takeoverNode ??
+        owner?.dataset.frameRegionOwner ??
+        owner?.dataset.id ??
+        null;
+      if (next === current) return;
+      current = next;
+      setHoveredNodeId(next);
+    };
+    const move = (event: PointerEvent) =>
+      update(
+        event.pointerType === 'mouse' && event.buttons === 0
+          ? event.target
+          : null,
+      );
+    const leave = (event: PointerEvent) =>
+      update(
+        event.pointerType === 'mouse' && event.buttons === 0
+          ? event.relatedTarget
+          : null,
+      );
+    const clear = () => update(null);
+    domNode.addEventListener('pointerover', move, true);
+    domNode.addEventListener('pointermove', move, true);
+    domNode.addEventListener('pointerout', leave, true);
+    domNode.addEventListener('pointerdown', clear, true);
+    domNode.addEventListener('pointercancel', clear, true);
+    domNode.addEventListener('pointerleave', clear);
+    window.addEventListener('blur', clear);
+    return () => {
+      domNode.removeEventListener('pointerover', move, true);
+      domNode.removeEventListener('pointermove', move, true);
+      domNode.removeEventListener('pointerout', leave, true);
+      domNode.removeEventListener('pointerdown', clear, true);
+      domNode.removeEventListener('pointercancel', clear, true);
+      domNode.removeEventListener('pointerleave', clear);
+      window.removeEventListener('blur', clear);
+    };
+  }, [domNode]);
   const previewNodes = useMemo(
     () =>
       applyNodeGeometryPreviews(nodes as CanvasNode[], nodeGeometryPreviews),
     [nodeGeometryPreviews, nodes],
   );
   const outlinedNodes = useMemo(
-    () => selectOutlinedNodes(previewNodes),
-    [previewNodes],
+    () => selectOutlinedNodes(previewNodes, hoveredNodeId),
+    [previewNodes, hoveredNodeId],
   );
 
   if (outlinedNodes.length === 0 || !domNode) return null;
@@ -196,6 +254,7 @@ export const SelectionOutlines = () => {
       zoom={zoom}
       viewportX={vpX}
       viewportY={vpY}
+      hoveredOnly={!node.selected && !node.dragging}
     />
   ));
 

@@ -684,9 +684,8 @@ export const NodeWrapper = memo(
     // Media borders overlay the content; Sketch has no layout border.
     const borderInset = nodeLayoutBorderInset(type);
     const innerRadius = Math.max(0, shellRadius - borderInset);
-    // Accent controls colour only. Elevation is interaction-driven and only
-    // applies to card-like content nodes; text, sketch, question, and frame
-    // nodes retain their deliberately flat visual language.
+    // Accent controls colour only. Editing and dragging can elevate cards;
+    // hover and selection are painted by the Canvas HUD without layout changes.
     const hasCardSurface =
       type !== 'text' &&
       type !== 'sketch' &&
@@ -800,7 +799,6 @@ export const NodeWrapper = memo(
             'semantic-lod-node group relative flex h-full w-full flex-col transition duration-120',
             paintsCardChrome && 'border-solid',
 
-            paintsCardChrome && type !== 'spacePreview' && 'hover:shadow-sm',
             paintsCardChrome &&
               type !== 'spacePreview' &&
               editing &&
@@ -814,7 +812,7 @@ export const NodeWrapper = memo(
               !accentTokens &&
               !fillColor &&
               'bg-transparent',
-            // Selection outline is rendered as a screen-space HUD overlay
+            // Hover and selection outlines are rendered as a screen-space HUD overlay
             // by `<SelectionOutlines />` (Canvas-level), not as a ring on
             // the node DOM. Canvas temporarily elevates the sole selection
             // and its controls without changing persisted stacking order.

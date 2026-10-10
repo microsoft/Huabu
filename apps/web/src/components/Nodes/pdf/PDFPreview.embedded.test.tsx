@@ -251,7 +251,7 @@ describe('embedded PDF reader', () => {
     expect(
       container
         .querySelector('[data-pdf-scroll-viewport]')
-        ?.classList.contains('overflow-y-hidden'),
+        ?.classList.contains('overflow-y-auto'),
     ).toBe(true);
 
     const page = container.querySelector('[data-pdf-page-shell="10"]');
@@ -303,7 +303,11 @@ describe('embedded PDF reader', () => {
     render(false);
     viewport.dispatchEvent(new WheelEvent('wheel', { bubbles: true }));
     expect(canvasWheel).toHaveBeenCalledTimes(5);
-    expect(viewport.classList.contains('overflow-y-hidden')).toBe(true);
+    expect(viewport.classList.contains('overflow-y-auto')).toBe(true);
+    expect(
+      container.querySelector('[data-pdf-reader]')?.hasAttribute('inert'),
+    ).toBe(true);
+    expect(viewport.hasAttribute('tabindex')).toBe(false);
     container.removeEventListener('wheel', canvasWheel);
   });
 

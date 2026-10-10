@@ -696,8 +696,7 @@ export const PDFPreview = ({
         // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- The selected document viewport supports native keyboard scrolling.
         tabIndex={embedded && interactive ? 0 : undefined}
         className={clsx(
-          'bg-surface min-h-0 flex-1 overflow-x-hidden p-1',
-          embedded && !interactive ? 'overflow-y-hidden' : 'overflow-y-auto',
+          'bg-surface min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-1',
           embedded && interactive && 'overscroll-contain',
         )}
       >
