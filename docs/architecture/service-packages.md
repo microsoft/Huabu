@@ -48,7 +48,7 @@ Internal Agent tools keep their high-level Huabu integrations. `generate_image` 
 
 Product pipelines also retain reviewed Server adapters. The YouTube loader and Ink OCR request path resolve their registered Service configuration but do not import Package entries.
 
-External Agent Packages provide a real `SKILL.md` and may provide an `entry.mjs` that imports `AGENTLET_SERVICE_SDK_URL`, leases current configuration, and implements only a useful baseline provider workflow. The entry is not a complete provider SDK: the Skill links official provider documentation, and an Agent may modify its downloaded local copy for additional endpoints. The bundled Image and Tavily Packages are Agent-facing. YouTube Transcripts and Ink OCR are not Agent-facing and therefore publish neither placeholder file.
+External Agent Packages provide a real `SKILL.md` and may provide an `entry.mjs` that imports `AGENTLET_SERVICE_SDK_URL`, leases one coherent runtime context containing the current Manifest and configuration, and implements only a useful baseline provider workflow. Every executable entry supports `-h` and `--help`; an Agent runs help before invocation because runtime Manifest constraints and configured defaults may not be derivable from the source alone. Entries define their own CLI mapping, use Manifest enum options as the authoritative choices, use explicitly mapped configuration fields as defaults, and let an explicit operation argument override only those defaults. The entry is not a complete provider SDK: the Skill links official provider documentation, and an Agent may modify its downloaded local copy for additional endpoints. The bundled Image and Tavily Packages are Agent-facing. YouTube Transcripts and Ink OCR are not Agent-facing and therefore publish neither placeholder file.
 
 ## Owner Settings API
 
@@ -74,7 +74,7 @@ POST /services/:id/lease
 GET  /download/services/:id.zip
 ```
 
-Manifest and Skill responses contain no credentials. Lease requires the normal authenticated RFS context, rejects unknown, unconfigured, and Packages without `SKILL.md` explicitly, returns only fields declared by the selected Package, and uses `Cache-Control: no-store`.
+Manifest and Skill responses contain no credentials. Lease requires the normal authenticated RFS context, rejects unknown, unconfigured, and Packages without `SKILL.md` explicitly, returns the exact validated Manifest together with only configuration fields declared by that Package, and uses `Cache-Control: no-store`. Returning both in one response keeps runtime choices, defaults, and Package version coherent.
 
 Package download streams a ZIP on demand from the validated Package record without a temporary file or ZIP cache. The archive contains one `<serviceId>/` root directory, `service.yaml`, and exactly the files declared by `package.files`; undeclared tests and development files are excluded. The response uses the Package content hash as its ETag. Phase 1 resolves records from bundled directories; a future validated custom-Service installation can expose the same immutable root, exact file list, and hash without changing the route.
 
@@ -82,7 +82,7 @@ Package download streams a ZIP on demand from the validated Package record witho
 
 Agentlet publishes `dist/service-sdk/index.js`. The daemon computes its absolute `file://` URL relative to its own `import.meta.url` and injects it as the authoritative `AGENTLET_SERVICE_SDK_URL` after workload environment values, so a Profile or session cannot replace it.
 
-`leaseService(id)` obtains a fresh configuration lease without downloading or loading Package code. `withServiceConfig(id, callback)` is the scoped convenience wrapper used by `entry.mjs`. The SDK reports bounded status-only request failures and does not include response bodies that could contain credentials.
+`leaseService(id)` obtains a fresh `{ id, version, manifest, config }` context without downloading or loading Package code. `withServiceContext(id, callback)` is the scoped convenience wrapper used by `entry.mjs`. The SDK verifies that the leased Manifest identity and version match the enclosing context, reports bounded status-only request failures, and does not include response bodies that could contain credentials.
 
 The SDK reduces accidental persistence but is not a sandbox. A trusted External Agent and loaded client share the Agent process's filesystem, network, RFS bearer, and provider credentials. Static provider credentials cannot be revoked after disclosure except by provider-side rotation.
 

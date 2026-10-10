@@ -180,7 +180,36 @@ export const serviceLeaseSchema = z
   .object({
     id: serviceIdSchema,
     version: z.string(),
+    manifest: serviceManifestSchema,
     config: z.record(serviceFieldIdSchema, serviceFieldValueSchema),
   })
-  .strict();
+  .strict()
+  .superRefine((lease, ctx) => {
+    if (lease.manifest.id !== lease.id) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['manifest', 'id'],
+        message: 'Lease Manifest id must match the Service id',
+      });
+    }
+    if (lease.manifest.version !== lease.version) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['manifest', 'version'],
+        message: 'Lease Manifest version must match the Service version',
+      });
+    }
+    const fieldIds = new Set(
+      lease.manifest.configuration.map((field) => field.id),
+    );
+    for (const fieldId of Object.keys(lease.config)) {
+      if (!fieldIds.has(fieldId)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['config', fieldId],
+          message: `Lease config field is not declared: ${fieldId}`,
+        });
+      }
+    }
+  });
 export type ServiceLease = z.infer<typeof serviceLeaseSchema>;

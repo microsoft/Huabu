@@ -383,6 +383,7 @@ export class ServiceProvisioner {
     return {
       id: manifest.id,
       version: manifest.version,
+      manifest,
       config: this.resolveForServer(serviceId),
     };
   }

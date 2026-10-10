@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   serviceConfigUpdateSchema,
+  serviceLeaseSchema,
   serviceManifestSchema,
 } from './service-package.js';
 
@@ -72,5 +73,24 @@ describe('Service Package contract', () => {
     expect(serviceConfigUpdateSchema.safeParse({ values: {} }).success).toBe(
       false,
     );
+  });
+
+  it('requires a version-coherent Manifest in each lease', () => {
+    expect(
+      serviceLeaseSchema.safeParse({
+        id: 'example',
+        version: '1.0.0',
+        manifest: { ...manifest, version: '2.0.0' },
+        config: { apiKey: 'secret' },
+      }).success,
+    ).toBe(false);
+    expect(
+      serviceLeaseSchema.safeParse({
+        id: 'example',
+        version: '1.0.0',
+        manifest,
+        config: { undeclared: 'value' },
+      }).success,
+    ).toBe(false);
   });
 });

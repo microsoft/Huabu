@@ -720,6 +720,16 @@ describe('third-party Services', () => {
     serviceMocks.lease.mockReturnValueOnce({
       id: 'image-gen',
       version: '1.0.0',
+      manifest: {
+        schema: 'huabu-service/v1',
+        id: 'image-gen',
+        version: '1.0.0',
+        name: 'Image Generation (AOAI)',
+        description: 'Generate images.',
+        storage: { namespace: 'llm.imageConfig' },
+        package: { files: ['SKILL.md', 'entry.mjs'] },
+        configuration: [],
+      },
       config: { apiKey: 'test-secret' },
     });
     const app = await buildApp();
@@ -732,6 +742,7 @@ describe('third-party Services', () => {
       expect(lease.headers['cache-control']).toBe('no-store');
       expect(lease.json()).toMatchObject({
         id: 'image-gen',
+        manifest: { id: 'image-gen', version: '1.0.0' },
         config: { apiKey: 'test-secret' },
       });
 

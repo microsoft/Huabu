@@ -307,7 +307,7 @@ cd image-gen
 
 Every archive contains one top-level directory named after the Service, so extracting `image-gen.zip` creates `image-gen/` rather than placing files directly in the current directory. `service.yaml` and every file declared by `package.files` are included; undeclared development files are not.
 
-Read the extracted `SKILL.md`, then run the optional `entry.mjs` with Node as documented there. The entry obtains current configuration on demand through `AGENTLET_SERVICE_SDK_URL`; you normally do not need to import or call that SDK yourself. An entry is a modifiable starting point rather than a complete provider SDK: when the task needs another provider endpoint, follow the official documentation linked by the Skill and modify only your local Package copy.
+Read the extracted `SKILL.md`, then run `node entry.mjs --help` before invoking the optional entry. Runtime help uses the leased Manifest and configuration to show current choices and configured defaults that may not be visible from the source alone. The entry obtains that coherent Service context on demand through `AGENTLET_SERVICE_SDK_URL`; you normally do not need to import or call the SDK yourself. An entry is a modifiable starting point rather than a complete provider SDK: when the task needs another provider endpoint, follow the official documentation linked by the Skill and modify only your local Package copy.
 
 Never print, persist, or forward leased credentials. A Service Package without `SKILL.md` is intentionally unavailable for direct External Agent use; do not construct provider calls from its Settings manifest.
 

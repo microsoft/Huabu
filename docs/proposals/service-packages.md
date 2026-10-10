@@ -41,7 +41,7 @@ External Agent 经 authenticated RFS 下载完整 Package ZIP，在任意工作�
 
 Owner Settings 使用 `/api/services` generic API。RFS 保留 `/capabilities` 用作 Space operation discovery，并使用独立的 `/services` 提供第三方服务列表、Manifest、Skill 与 POST lease；`GET /download/services/:id.zip` on-the-fly 流式打包一个 `<serviceId>/` 根目录，其中只包含 `service.yaml` 和 `package.files` 声明的文件。
 
-Lease 使用现有 canvas-scoped RFS bearer，响应 `Cache-Control: no-store`，只返回目标 Package 声明的配置。Manifest、Skill、ZIP、Settings read 和日志不返回 secret。Agentlet SDK 只提供 `leaseService()` 与 `withServiceConfig()`，不下载 Package code；它降低意外落盘和日志泄露，但不是 sandbox。Agent 与其修改的 entry 拥有同一进程权限，静态 provider key 一旦交付只能通过 provider rotation 真正撤销。
+Lease 使用现有 canvas-scoped RFS bearer，响应 `Cache-Control: no-store`，并将 exact validated Manifest 与目标 Package 声明的配置作为同一 version-coherent runtime context 返回。Manifest、Skill、ZIP、Settings read 和日志不返回 secret。Agentlet SDK 提供 `leaseService()` 与 `withServiceContext()`，不下载 Package code；entry 必须支持 `--help`，从 runtime Manifest 读取 choices、从显式映射的 config 字段读取 default，并只允许 CLI operation input 覆盖这些 default。SDK 降低意外落盘和日志泄露，但不是 sandbox。Agent 与其修改的 entry 拥有同一进程权限，静态 provider key 一旦交付只能通过 provider rotation 真正撤销。
 
 ## Phase 1
 

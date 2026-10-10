@@ -20,6 +20,7 @@ async function loadEntry() {
 }
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   delete process.env.AGENTLET_SERVICE_SDK_URL;
 });
@@ -98,16 +99,31 @@ describe('Image Service entry', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
     const sdkSource = `
-      export async function withServiceConfig(id, run) {
+      export async function withServiceContext(id, run) {
         if (id !== 'image-gen') throw new Error('Unexpected Service');
-        return run({ config: {
-          apiKey: 'test-secret',
-          apiVersion: '2025-04-01-preview',
-          baseUrl: 'https://example.test',
-          model: 'image-deployment',
-          modelFamily: 'gpt-image-1',
-          quality: 'medium'
-        } });
+        return run({
+          manifest: {
+            name: 'Image Generation (AOAI)',
+            configuration: [{
+              id: 'quality',
+              type: 'enum',
+              options: [
+                { value: 'low', label: 'low' },
+                { value: 'medium', label: 'medium' },
+                { value: 'high', label: 'high' },
+                { value: 'auto', label: 'auto' }
+              ]
+            }]
+          },
+          config: {
+            apiKey: 'test-secret',
+            apiVersion: '2025-04-01-preview',
+            baseUrl: 'https://example.test',
+            model: 'image-deployment',
+            modelFamily: 'gpt-image-1',
+            quality: 'medium'
+          }
+        });
       }
     `;
     process.env.AGENTLET_SERVICE_SDK_URL = `data:text/javascript;base64,${Buffer.from(sdkSource).toString('base64')}`;
@@ -120,5 +136,40 @@ describe('Image Service entry', () => {
       import('node:fs/promises').then((fs) => fs.readFile(output)),
     ).resolves.toEqual(bytes);
     await import('node:fs/promises').then((fs) => fs.rm(output));
+  });
+
+  it('renders runtime quality choices and configured default in help', async () => {
+    const sdkSource = `
+      export async function withServiceContext(id, run) {
+        return run({
+          manifest: {
+            name: 'Image Generation (AOAI)',
+            configuration: [{
+              id: 'quality',
+              type: 'enum',
+              options: [
+                { value: 'draft', label: 'Draft' },
+                { value: 'final', label: 'Final' }
+              ]
+            }]
+          },
+          config: { quality: 'draft' }
+        });
+      }
+    `;
+    process.env.AGENTLET_SERVICE_SDK_URL = `data:text/javascript;base64,${Buffer.from(sdkSource).toString('base64')}`;
+    const stdout = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(() => true);
+    const { main } = await loadEntry();
+
+    await main(['--help']);
+
+    expect(stdout).toHaveBeenCalledWith(
+      expect.stringContaining('Choices: draft, final'),
+    );
+    expect(stdout).toHaveBeenCalledWith(
+      expect.stringContaining('Default: draft (config.quality)'),
+    );
   });
 });

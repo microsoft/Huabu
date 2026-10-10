@@ -113,6 +113,12 @@ describe('Service Provision Service storage bindings', () => {
 
     expect(lease).toMatchObject({
       id: 'image-gen',
+      manifest: {
+        id: 'image-gen',
+        configuration: expect.arrayContaining([
+          expect.objectContaining({ id: 'quality', type: 'enum' }),
+        ]),
+      },
       config: {
         baseUrl: 'https://images.example.com',
         apiKey: 'image-secret',

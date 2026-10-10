@@ -10,17 +10,33 @@ function parseCliArgs(argv) {
   const { values } = parseArgs({
     args: argv,
     options: {
+      help: { type: 'boolean', short: 'h' },
       query: { type: 'string', short: 'q' },
       output: { type: 'string', short: 'o' },
     },
     strict: true,
     allowPositionals: false,
   });
-  const options = { query: values.query, output: values.output };
+  return { help: values.help, query: values.query, output: values.output };
+}
+
+function validateOptions(options) {
   if (!options.query?.trim()) {
     throw new Error('Web search requires --query');
   }
-  return options;
+}
+
+function printHelp(manifest) {
+  process.stdout.write(`${manifest.name}
+
+Usage:
+  node entry.mjs --query <text> [options]
+
+Options:
+  -q, --query <text>   Search query
+  -o, --output <path>  Write JSON results to a file instead of stdout
+  -h, --help           Show this help
+`);
 }
 
 export async function search({ config, input }) {
@@ -50,8 +66,13 @@ export async function main(argv = process.argv.slice(2)) {
   const options = parseCliArgs(argv);
   const sdkUrl = process.env.AGENTLET_SERVICE_SDK_URL;
   if (!sdkUrl) throw new Error('AGENTLET_SERVICE_SDK_URL is unavailable');
-  const { withServiceConfig } = await import(sdkUrl);
-  await withServiceConfig('web-search', async ({ config }) => {
+  const { withServiceContext } = await import(sdkUrl);
+  await withServiceContext('web-search', async ({ manifest, config }) => {
+    if (options.help) {
+      printHelp(manifest);
+      return;
+    }
+    validateOptions(options);
     const result = await search({ config, input: options.query });
     const output = `${JSON.stringify(result, null, 2)}\n`;
     if (options.output) {

@@ -164,7 +164,7 @@ Malformed request fields and malformed cursors return HTTP 400 with `code: "malf
 
 `packages/shared/src/types/api/service-package.ts` defines the strict manifest, Generic Settings update, masked configuration, summary, and External lease contracts. Owner Settings uses `GET /api/services`, `GET /api/services/:serviceId`, and `PUT /api/services/:serviceId`; every path/body value is validated with the shared schemas before selecting a code-registered storage namespace.
 
-Canvas-scoped RFS keeps the existing `/capabilities` path for Space-operation discovery and exposes third-party services under `/services`. Manifest and Skill reads contain no credentials. `POST /services/:id/lease` rejects unknown, unconfigured, and Packages without `SKILL.md`, returns only declared fields, and is non-cacheable. `GET /download/services/:id.zip` streams the validated `service.yaml + package.files` set beneath one `<serviceId>/` archive root and uses the Package content hash as its ETag. See [`service-packages.md`](./service-packages.md).
+Canvas-scoped RFS keeps the existing `/capabilities` path for Space-operation discovery and exposes third-party services under `/services`. Manifest and Skill reads contain no credentials. `POST /services/:id/lease` rejects unknown, unconfigured, and Packages without `SKILL.md`, returns the exact validated Manifest and only its declared configuration fields as one version-coherent runtime context, and is non-cacheable. `GET /download/services/:id.zip` streams the validated `service.yaml + package.files` set beneath one `<serviceId>/` archive root and uses the Package content hash as its ETag. See [`service-packages.md`](./service-packages.md).
 
 ## Anti-patterns
 

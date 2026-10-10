@@ -20,6 +20,7 @@ async function loadEntry() {
 }
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   delete process.env.AGENTLET_SERVICE_SDK_URL;
 });
@@ -75,9 +76,12 @@ describe('Web Search Service entry', () => {
         .mockResolvedValue(new Response(JSON.stringify(result))),
     );
     const sdkSource = `
-      export async function withServiceConfig(id, run) {
+      export async function withServiceContext(id, run) {
         if (id !== 'web-search') throw new Error('Unexpected Service');
-        return run({ config: { apiKey: 'test-secret' } });
+        return run({
+          manifest: { name: 'Tavily Web Search' },
+          config: { apiKey: 'test-secret' }
+        });
       }
     `;
     process.env.AGENTLET_SERVICE_SDK_URL = `data:text/javascript;base64,${Buffer.from(sdkSource).toString('base64')}`;
@@ -90,5 +94,27 @@ describe('Web Search Service entry', () => {
       import('node:fs/promises').then((fs) => fs.readFile(output, 'utf8')),
     ).resolves.toBe(`${JSON.stringify(result, null, 2)}\n`);
     await import('node:fs/promises').then((fs) => fs.rm(output));
+  });
+
+  it('renders entry help without requiring a query', async () => {
+    const sdkSource = `
+      export async function withServiceContext(id, run) {
+        return run({
+          manifest: { name: 'Tavily Web Search' },
+          config: { apiKey: 'test-secret' }
+        });
+      }
+    `;
+    process.env.AGENTLET_SERVICE_SDK_URL = `data:text/javascript;base64,${Buffer.from(sdkSource).toString('base64')}`;
+    const stdout = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(() => true);
+    const { main } = await loadEntry();
+
+    await main(['-h']);
+
+    expect(stdout).toHaveBeenCalledWith(
+      expect.stringContaining('node entry.mjs --query <text>'),
+    );
   });
 });
