@@ -194,7 +194,7 @@ export const ChatContextSources = memo(function ChatContextSources({
   return (
     <div
       data-chat-context-sources
-      className="mb-1.5 flex min-w-0 flex-wrap items-center gap-1"
+      className="mb-2.5 flex min-w-0 flex-wrap items-center gap-1"
     >
       {hasAttachments ? (
         <div
@@ -229,12 +229,12 @@ export const ChatContextSources = memo(function ChatContextSources({
       ) : null}
       {showCandidate ? (
         <Button
-          variant="ghost"
+          variant="outline"
           size="sm"
           title={t('chat.addNodeSource', { name: adjacentNodeLabel })}
           aria-label={t('chat.addNodeSource', { name: adjacentNodeLabel })}
           tooltipWrapperClassName="max-w-40 min-w-0"
-          className={`${chipSurfaceClassName} group-focus-within/composer:enabled:hover:bg-info-bg-hover h-6 max-w-full justify-start gap-1 px-1.5 py-0 [&_svg]:h-3 [&_svg]:w-3`}
+          className="group-focus-within/composer:border-info/40 group-focus-within/composer:text-info h-6 max-w-full justify-start gap-1 border-dashed bg-transparent px-1.5 py-0 enabled:hover:bg-transparent [&_svg]:h-3 [&_svg]:w-3"
           onClick={() => {
             addPendingAttachment(threadId, {
               type: 'text',

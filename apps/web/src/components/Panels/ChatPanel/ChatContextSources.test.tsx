@@ -220,8 +220,8 @@ describe('ChatContextSources', () => {
     expect(add.type).toBe('button');
     expect(add.textContent).toBe('Adjacent note');
     expect(add.querySelector('svg.lucide-plus')).not.toBeNull();
-    expect(add.classList.contains('border-none')).toBe(true);
-    expect(add.classList.contains('bg-hover')).toBe(true);
+    expect(add.classList.contains('border-dashed')).toBe(true);
+    expect(add.classList.contains('bg-transparent')).toBe(true);
     expect(add.classList.contains('px-1.5')).toBe(true);
     act(() => add.click());
     expect(

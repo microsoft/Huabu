@@ -41,6 +41,11 @@ vi.mock('@/store/panelStore', () => ({
     selector(panelState),
 }));
 
+vi.mock('@/store/canvasStore', () => ({
+  default: (selector: (state: { canvasId: null; nodes: never[] }) => unknown) =>
+    selector({ canvasId: null, nodes: [] }),
+}));
+
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));

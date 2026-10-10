@@ -147,7 +147,8 @@ for (const width of [320, 520]) {
       const row = surface.querySelector<HTMLElement>(
         '[data-chat-context-sources]',
       );
-      if (!row) throw new Error('Missing context row');
+      const textarea = surface.querySelector('textarea');
+      if (!row || !textarea) throw new Error('Missing context row or textarea');
       const rowBounds = row.getBoundingClientRect();
       const chips = [
         ...row.querySelectorAll<HTMLElement>(
@@ -160,6 +161,11 @@ for (const width of [320, 520]) {
       return {
         fits: rowBounds.left >= bounds.left && rowBounds.right <= bounds.right,
         rowHeight: rowBounds.height,
+        topInset:
+          rowBounds.top -
+          bounds.top -
+          parseFloat(getComputedStyle(surface).borderTopWidth),
+        textGap: textarea.getBoundingClientRect().top - rowBounds.bottom,
         rows: rows.size,
         widths: chips.map((element) => element.getBoundingClientRect().width),
         scrollWidth: surface.scrollWidth,
@@ -167,6 +173,8 @@ for (const width of [320, 520]) {
       };
     });
     expect(layout.fits).toBe(true);
+    expect(layout.topInset).toBe(12);
+    expect(layout.textGap).toBe(10);
     expect(layout.rows).toBe(width === 320 ? 2 : 1);
     expect(layout.rowHeight).toBe(layout.rows * 24 + (layout.rows - 1) * 4);
     for (const chipWidth of layout.widths)
@@ -248,7 +256,7 @@ for (const width of [320, 520]) {
   });
 }
 
-test('adjacent source shares chip styling and keeps the Canvas summary last', async ({
+test('adjacent source stays dashed and transparent until added, with Canvas summary last', async ({
   page,
 }) => {
   await page.addInitScript(() => performance.setResourceTimingBufferSize(2000));
@@ -371,8 +379,8 @@ test('adjacent source shares chip styling and keeps the Canvas summary last', as
     });
     expect(Math.abs(layout.left - layout.right)).toBeLessThanOrEqual(1);
     expect(layout.chipLeft).toBe(layout.textLeft);
-    expect(layout.border).toBe('none');
-    expect(layout.borderWidth).toBe(0);
+    expect(layout.border).toBe('dashed');
+    expect(layout.borderWidth).toBe(1);
     expect(layout.height).toBe(24);
     expect(layout.width).toBeLessThanOrEqual(160);
     const summaryBounds = await host
@@ -382,10 +390,12 @@ test('adjacent source shares chip styling and keeps the Canvas summary last', as
     expect(summaryBounds?.y).toBe(candidateBounds?.y);
     expect(summaryBounds?.x).toBeGreaterThan(candidateBounds?.x ?? 0);
   }
-  await expectSharedChipTone(
-    host.locator('[data-chat-context-sources]'),
-    host.getByRole('textbox'),
-  );
+  await expect(candidate).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+  await host.getByRole('textbox').focus();
+  await expect(candidate).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+  await candidate.hover();
+  await expect(candidate).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+  await expect(candidate).toHaveCSS('border-top-style', 'dashed');
   await candidate.press('Enter');
   await expect(candidate).toHaveCount(0);
   await expect(
@@ -397,5 +407,10 @@ test('adjacent source shares chip styling and keeps the Canvas summary last', as
   ).toBeVisible();
   await expect(host.locator('[data-chat-context-sources]')).toHaveText(
     `${label}1 selected node`,
+  );
+  await page.mouse.move(1000, 700);
+  await expectSharedChipTone(
+    host.locator('[data-chat-context-sources]'),
+    host.getByRole('textbox'),
   );
 });

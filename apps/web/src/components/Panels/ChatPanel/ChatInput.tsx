@@ -12,7 +12,9 @@ import { usePanelStore } from '@/store/panelStore';
 
 import { ChatContextSources } from './ChatContextSources';
 import { ContextUsageRing } from './ContextUsageRing';
+import { NodeMentionMenu } from './NodeMentionMenu';
 import { SlashCommandMenu } from './SlashCommandMenu';
+import { useNodeMentionTypeahead } from './useNodeMentionTypeahead';
 import { useSlashCommandTypeahead } from './useSlashCommandTypeahead';
 import { Button } from '../../Common/Button';
 
@@ -155,6 +157,17 @@ export const ChatInput = ({
     loading: slashLoading,
     onSlashMenuIntent,
   });
+  const mention = useNodeMentionTypeahead({
+    value,
+    onChange,
+    onCommit,
+    textareaRef,
+    disabled,
+  });
+  const syncCaret = () => {
+    slash.syncCaret();
+    mention.syncCaret();
+  };
 
   // Upload a file and add it as a pending attachment
   const attachFile = useCallback(
@@ -255,7 +268,8 @@ export const ChatInput = ({
     e,
   ) => {
     if (disabled) return;
-    if (e.nativeEvent.isComposing) return;
+    if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
+    if (mention.handleKeyDown(e)) return;
 
     // Slash menu owns ArrowUp/Down/Tab/Enter/Esc while open; bail
     // out the moment it consumes the event so submission and history
@@ -330,8 +344,9 @@ export const ChatInput = ({
       <form onSubmit={handleSubmit} className="w-full">
         <div
           data-chat-input-surface
-          className={`group/composer focus-within:border-info focus-within:ring-info/15 border px-3 pt-3 pb-2 transition-colors focus-within:ring-2 ${connectedTop ? 'rounded-t-none rounded-b-2xl' : 'rounded-2xl'} ${isDragOver ? 'border-edge-default bg-info-bg' : 'border-edge-default bg-surface'}`}
+          className={`group/composer focus-within:border-info focus-within:ring-info/15 relative border px-3 pt-3 pb-2 transition-colors focus-within:ring-2 ${connectedTop ? 'rounded-t-none rounded-b-2xl' : 'rounded-2xl'} ${isDragOver ? 'border-edge-default bg-info-bg' : 'border-edge-default bg-surface'}`}
         >
+          {mention.open ? <NodeMentionMenu mention={mention} /> : null}
           <ChatContextSources
             adjacentNodeSourceId={adjacentNodeSourceId}
             onCommit={onCommit}
@@ -343,24 +358,31 @@ export const ChatInput = ({
               name="agent-message"
               autoComplete="off"
               aria-label={currentPlaceholder}
+              aria-autocomplete="list"
+              aria-controls={mention.open ? mention.menuId : undefined}
+              aria-activedescendant={mention.activeOptionId}
               value={value}
               onChange={(e) => {
                 onChange(e.target.value);
                 // Caret reads must run AFTER onChange so the slash
                 // activation parser sees the committed value.
-                slash.syncCaret();
+                syncCaret();
               }}
               onKeyDown={handleKeyDown}
-              onKeyUp={slash.syncCaret}
-              onClick={slash.syncCaret}
-              onSelect={slash.syncCaret}
+              onKeyUp={syncCaret}
+              onClick={syncCaret}
+              onSelect={syncCaret}
+              onFocus={mention.onFocus}
+              onBlur={mention.onBlur}
+              onCompositionStart={mention.onCompositionStart}
+              onCompositionEnd={mention.onCompositionEnd}
               onPaste={handlePaste}
               placeholder={currentPlaceholder}
               disabled={disabled}
               rows={2}
               className="text-fg-default placeholder:text-fg-subtle w-full resize-none bg-transparent text-sm focus:outline-none disabled:cursor-not-allowed"
             />
-            {slash.slashState && (
+            {!mention.open && slash.slashState && (
               <SlashCommandMenu
                 ref={slash.slashMenuRef}
                 commands={slashCommands}
