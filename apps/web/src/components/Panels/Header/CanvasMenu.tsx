@@ -13,6 +13,7 @@ import { useWorkspaceStore } from '../../../store/workspaceStore.ts';
 import { formatShortcut } from '../../../utils/platform.ts';
 import { Button } from '../../Common/Button.tsx';
 import { DropdownMenu, DropdownMenuItem } from '../../Common/DropdownMenu.tsx';
+import { Input } from '../../Common/Input';
 import { MENU_SEPARATOR_CLASS } from '../../Common/menuStyles';
 import { toast } from '../../Common/Toast.tsx';
 
@@ -105,25 +106,29 @@ export const CanvasMenu: React.FC<CanvasMenuProps> = ({ onOpenShortcuts }) => {
   }, [canvasId, t]);
 
   return (
-    <div className="flex w-full min-w-0 items-center">
+    <div
+      role="group"
+      aria-label={t('canvasHeader.titleAria')}
+      className="group hover:bg-hover flex w-fit max-w-full min-w-0 items-center overflow-hidden rounded-md transition-colors"
+    >
       {/* Hidden sizer span — mirrors input text to measure natural width */}
       <span
         ref={sizerRef}
         aria-hidden
-        className="invisible absolute px-1 text-base font-medium whitespace-pre"
+        className="invisible absolute pr-0.5 pl-1.5 text-[15px] leading-6 font-medium whitespace-pre"
       >
         {draftTitle || '\u00a0'}
       </span>
       {isWorld ? (
-        <span className="text-fg-default truncate px-1 py-1 text-base font-medium">
+        <span className="text-fg-default h-7 truncate py-0.5 pr-0.5 pl-1.5 text-[15px] leading-6 font-medium">
           {t('world.title')}
         </span>
       ) : (
-        <input
+        <Input
           ref={inputRef}
           name="space-title"
           autoComplete="off"
-          className="text-fg-default focus:shadow-bottom m-0 max-w-full min-w-8 overflow-hidden bg-transparent px-1 py-1 text-base font-medium text-ellipsis outline-none focus:rounded-md"
+          className="text-fg-default focus:shadow-bottom m-0 h-7 max-w-full min-w-8 overflow-hidden bg-transparent py-0.5 pr-0.5 pl-1.5 text-[15px] leading-6 font-medium text-ellipsis outline-none"
           value={draftTitle}
           onChange={(e) => setDraftTitle(e.target.value)}
           onBlur={() => void commitTitle()}
@@ -139,61 +144,64 @@ export const CanvasMenu: React.FC<CanvasMenuProps> = ({ onOpenShortcuts }) => {
         />
       )}
 
-      <DropdownMenu
-        open={isOpen}
-        onOpenChange={setIsOpen}
-        trigger={
-          <Button
-            variant="ghost"
-            size="sm"
-            iconOnly
-            aria-label={t('canvasHeader.menuAria')}
-          >
-            <ChevronDown
-              className={clsx(
-                'text-fg-subtle transition-transform duration-150',
-                isOpen && 'rotate-180',
-              )}
-            />
-          </Button>
-        }
-      >
-        <DropdownMenuItem
-          shortcut={formatShortcut('Ctrl/Cmd+Z')}
-          disabled={!canUndo}
-          onClick={() => {
-            setIsOpen(false);
-            undo();
-          }}
+      <div className="group-hover:border-edge-default h-7 shrink-0 border-l border-transparent transition-colors">
+        <DropdownMenu
+          open={isOpen}
+          onOpenChange={setIsOpen}
+          trigger={
+            <Button
+              variant="ghost"
+              size="sm"
+              iconOnly
+              className="text-fg-subtle enabled:hover:text-fg-default enabled:hover:bg-inverse/10 h-7 w-6 justify-start rounded-none pr-1.5 pl-0.5"
+              aria-label={t('canvasHeader.menuAria')}
+            >
+              <ChevronDown
+                className={clsx(
+                  'h-4! w-4! transition-transform duration-150',
+                  isOpen && 'rotate-180',
+                )}
+              />
+            </Button>
+          }
         >
-          {t('actions.undo')}
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          shortcut={formatShortcut('Ctrl/Cmd+Shift+Z')}
-          disabled={!canRedo}
-          onClick={() => {
-            setIsOpen(false);
-            redo();
-          }}
-        >
-          {t('actions.redo')}
-        </DropdownMenuItem>
-        <div role="separator" className={MENU_SEPARATOR_CLASS} />
-        <DropdownMenuItem onClick={() => void handleExport()}>
-          {t('canvasHeader.exportCanvas')}
-        </DropdownMenuItem>
-        {onOpenShortcuts && (
           <DropdownMenuItem
-            shortcut="?"
+            shortcut={formatShortcut('Ctrl/Cmd+Z')}
+            disabled={!canUndo}
             onClick={() => {
               setIsOpen(false);
-              onOpenShortcuts();
+              undo();
             }}
           >
-            {t('shortcuts.title')}
+            {t('actions.undo')}
           </DropdownMenuItem>
-        )}
-      </DropdownMenu>
+          <DropdownMenuItem
+            shortcut={formatShortcut('Ctrl/Cmd+Shift+Z')}
+            disabled={!canRedo}
+            onClick={() => {
+              setIsOpen(false);
+              redo();
+            }}
+          >
+            {t('actions.redo')}
+          </DropdownMenuItem>
+          <div role="separator" className={MENU_SEPARATOR_CLASS} />
+          <DropdownMenuItem onClick={() => void handleExport()}>
+            {t('canvasHeader.exportCanvas')}
+          </DropdownMenuItem>
+          {onOpenShortcuts && (
+            <DropdownMenuItem
+              shortcut="?"
+              onClick={() => {
+                setIsOpen(false);
+                onOpenShortcuts();
+              }}
+            >
+              {t('shortcuts.title')}
+            </DropdownMenuItem>
+          )}
+        </DropdownMenu>
+      </div>
     </div>
   );
 };

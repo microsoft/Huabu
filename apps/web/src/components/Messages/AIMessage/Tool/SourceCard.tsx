@@ -88,7 +88,7 @@ export const SourceCard = ({ source }: { source: Source }) => {
               <ArrowUpRight
                 className="text-fg-muted flex-none"
                 size={14}
-                strokeWidth={2}
+                style={{ strokeWidth: 2 }}
               />
             </div>
             {hostname ? (

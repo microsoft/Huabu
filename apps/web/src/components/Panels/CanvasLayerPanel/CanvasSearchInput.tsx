@@ -2,57 +2,39 @@
 // Licensed under the MIT license.
 
 /**
- * Canvas-wide search input, hosted at the top of the left layer
- * panel and only mounted while `panelStore.isSearchOpen` is true.
- *
- * Toggleable on purpose: the panel chrome stays quiet for users
- * who never search; the input is revealed by the search icon in
- * `LayerFilterBar` or by the global `Cmd+F` hotkey, and dismissed
- * by clicking the icon again, by `Esc`, or by closing the parent
- * panel. While mounted it replaces nothing else — the chip row
- * below stays visible so chip toggles can narrow / widen the
- * search request live (see `searchStore.nodeTypes`).
- *
- * Wiring:
- *   - Writes go to `searchStore.setQuery`. On the first non-empty
- *     character (or on Cmd+F focus) we ensure the store's `scope`
- *     is `{kind:'canvas', canvasId}` so the streamed request is
- *     scoped to the active canvas.
- *   - Mount: auto-focuses the input so both the icon-click and the
- *     Cmd+F hotkey paths land the caret in the right place without
- *     each having to chase the DOM separately.
- *   - Esc: cancels in-flight request, clears query, flips
- *     `isSearchOpen=false` (unmounts this component), and returns
- *     keyboard focus to the React Flow canvas so the next key goes
- *     where the user expects.
- *   - Unmount: also closes the store scope, so a future re-open
- *     starts from an empty query without stale results lingering
- *     under the hidden component.
- *   - Switching canvases closes the store scope (effect below),
- *     which collapses the result list and restores the layer tree
- *     without an extra keystroke.
+ * Permanent Canvas-wide search field above the Layers filters.
+ * Mounting or manually expanding Layers never steals focus; explicit
+ * Cmd/Ctrl+F requests focus after the panel becomes interactive.
+ * Escape clears the search and returns focus to Canvas without hiding
+ * the field. Collapse retains the session; Space changes and unmount
+ * close the scope and cancel pending requests.
  */
 
 import { Loader2, Search, X } from 'lucide-react';
 import { useCallback, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { formatShortcutById } from '../../../config/shortcuts';
+import { formatShortcutById, getShortcutKeys } from '../../../config/shortcuts';
 import useCanvasStore from '../../../store/canvasStore';
 import { usePanelStore } from '../../../store/panelStore';
 import { useSearchStore } from '../../../store/searchStore';
+import { isMac, shortcutTokens } from '../../../utils/platform';
 import { Button } from '../../Common/Button';
 import { cn } from '../../Common/cn';
+import { TextInput } from '../../Common/TextInput';
 
 interface CanvasSearchInputProps {
   inputRef?: React.RefObject<HTMLInputElement>;
 }
 
+const searchShortcutKeys = getShortcutKeys('search.open');
+if (!searchShortcutKeys)
+  throw new Error('Missing search.open shortcut definition');
+const searchShortcutTokens = shortcutTokens(searchShortcutKeys);
+
 /**
  * Centralised "make sure the search store is scoped to the active
- * canvas" guard. Re-entering an active canvas scope is a no-op so
- * this is safe to call before every mutation that depends on scope
- * being set (typing, Cmd+F focus).
+ * canvas" guard. Re-entering an active canvas scope is a no-op.
  */
 export function ensureCanvasSearchScope(canvasId: string | null): void {
   if (!canvasId) return;
@@ -76,7 +58,8 @@ export const CanvasSearchInput = ({
   const error = useSearchStore((s) => s.error);
   const setQuery = useSearchStore((s) => s.setQuery);
   const close = useSearchStore((s) => s.close);
-  const setSearchOpen = usePanelStore((s) => s.setSearchOpen);
+  const isLeftCollapsed = usePanelStore((s) => s.isLeftCollapsed);
+  const focusRequest = usePanelStore((s) => s.focusCanvasSearchRequest);
 
   // The store's scope is per-canvas. If the user switches canvases
   // while a search is active, drop scope (which also cancels the
@@ -87,27 +70,15 @@ export const CanvasSearchInput = ({
     if (scope && scope.canvasId !== canvasId) close();
   }, [scope, canvasId, close]);
 
-  // Auto-focus + select on mount. Both entry points (toolbar icon
-  // click via `toggleSearchOpen`, and the global `Cmd+F` hotkey)
-  // converge on "mount the component" — letting the component
-  // itself drive focus means neither caller has to chase the DOM
-  // separately, and there's no race between the React render and
-  // the imperative focus() call.
   useEffect(() => {
+    if (focusRequest === null || isLeftCollapsed) return;
     const input = inputRef.current;
     if (!input) return;
-    input.focus();
+    input.focus({ preventScroll: true });
     input.select();
-    // Intentionally run-once on mount: subsequent re-renders
-    // shouldn't yank focus away if the user has tabbed elsewhere.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    usePanelStore.setState({ focusCanvasSearchRequest: null });
+  }, [focusRequest, isLeftCollapsed, inputRef]);
 
-  // Unmount cleanup: dismissing the input (via Esc or icon toggle)
-  // should also reset the store scope so the next reveal starts
-  // from an empty query rather than re-running a stale request the
-  // moment the component re-mounts. Safe to call unconditionally
-  // because `close()` on an already-closed store is a no-op.
   useEffect(() => {
     return () => {
       useSearchStore.getState().close();
@@ -123,11 +94,8 @@ export const CanvasSearchInput = ({
   );
 
   const handleClear = useCallback(() => {
-    // Mirror Esc: clear query + close scope; leave focus on the
-    // input so the user can keep typing in the (now empty) input
-    // or tab away as they wish.
     close();
-    inputRef.current?.focus();
+    inputRef.current?.focus({ preventScroll: true });
   }, [close, inputRef]);
 
   const handleKeyDown = useCallback(
@@ -135,24 +103,17 @@ export const CanvasSearchInput = ({
       if (e.key === 'Escape') {
         e.preventDefault();
         e.stopPropagation();
-        // Dismiss the input entirely: clear store state + flip the
-        // panel-side `isSearchOpen` so this component unmounts. The
-        // unmount cleanup above will also call `close()` — calling
-        // it here first is harmless and keeps the visual reset
-        // synchronous (results disappear before the unmount
-        // animation runs, avoiding a one-frame flash).
         close();
-        setSearchOpen(false);
-        // Return keyboard focus to the canvas so the next key
-        // (e.g. arrow nav, Space to pan) goes where the user
-        // expects after dismissing search. `data-canvas-root` is
-        // tagged on the React Flow wrapper for exactly this kind
-        // of focus hand-off.
-        const root = document.querySelector<HTMLElement>('[data-canvas-root]');
-        root?.focus();
+        const root =
+          document.querySelector<HTMLElement>('[data-canvas-root]') ??
+          document.querySelector<HTMLElement>('[data-center-editor]') ??
+          document.querySelector<HTMLElement>(
+            '[data-canvas-panel="right"]:not([data-collapsed])',
+          );
+        root?.focus({ preventScroll: true });
       }
     },
-    [close, setSearchOpen],
+    [close],
   );
 
   // The "count" badge mirrors the centred overlay's UX: while the
@@ -166,22 +127,28 @@ export const CanvasSearchInput = ({
   return (
     <div
       className={cn(
-        'bg-bg-default flex items-center gap-1.5 rounded-md border px-1.5 transition-colors',
-        error ? 'border-danger' : 'focus-within:border-info border-transparent',
+        'bg-surface flex h-8 items-center gap-2 rounded-lg border px-2 transition-colors',
+        error
+          ? 'border-danger'
+          : 'border-edge-default focus-within:border-info',
       )}
     >
-      <Search size={12} className="text-fg-subtle shrink-0" />
-      <input
+      <Search size={14} className="text-fg-subtle shrink-0" />
+      <TextInput
         ref={inputRef}
         type="text"
+        name="canvas-search"
+        autoComplete="off"
         value={query}
         onChange={handleChange}
         onKeyDown={handleKeyDown}
         placeholder={t('layers.searchPlaceholder')}
         spellCheck={false}
-        className="text-fg-default placeholder:text-fg-subtle min-w-0 flex-1 bg-transparent py-1 text-xs outline-none"
+        className="min-w-0 flex-1 rounded-none border-0 bg-transparent px-0 py-1 text-sm font-normal placeholder:text-xs placeholder:font-normal focus:ring-0"
         data-canvas-search-input="true"
+        data-search-scope="canvas"
         aria-label={t('layers.searchAria')}
+        aria-invalid={!!error}
       />
       {isStreaming && (
         <Loader2
@@ -191,9 +158,18 @@ export const CanvasSearchInput = ({
         />
       )}
       {showCount && (
-        <span className="text-fg-subtle shrink-0 text-[11px] tabular-nums">
+        <span className="text-fg-subtle shrink-0 text-xs font-normal tabular-nums">
           {results.length}
         </span>
+      )}
+      {query.length === 0 && (
+        <kbd className="bg-bg-default text-fg-subtle inline-flex shrink-0 items-center gap-0.5 rounded px-1 text-xs font-normal">
+          {isMac
+            ? searchShortcutTokens.map((token, index) => (
+                <span key={`${index}-${token}`}>{token}</span>
+              ))
+            : formatShortcutById('search.open')}
+        </kbd>
       )}
       {query.length > 0 && (
         <Button

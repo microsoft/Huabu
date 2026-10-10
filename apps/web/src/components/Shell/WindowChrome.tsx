@@ -45,7 +45,9 @@ const LEFT_GUTTER_MAC_PX = 76;
  *
  * Rendered **only inside the Electron shell** — in a plain browser the
  * component returns `null` and the existing in-page headers stay
- * unchanged. The main process configures `titleBarStyle` / overlay so
+ * unchanged. Fullscreen canvas routes also omit the strip; the canvas
+ * app menu retains navigation, handbook, and settings actions.
+ * The main process configures `titleBarStyle` / overlay so
  * the OS-drawn caption controls float above the right edge of this row.
  */
 export function WindowChrome() {
@@ -117,6 +119,8 @@ export function WindowChrome() {
   const onWorkspaceSetupRoute = location.pathname === '/setup';
   const showAppMenu = onCanvasListRoute || onWorkspaceSetupRoute;
   const onCanvasRoute = location.pathname.startsWith('/canvas/');
+  if (isFullScreen && onCanvasRoute) return null;
+
   const showWorkspaceSwitcher = onCanvasListRoute && !!workspaceLabel;
   const centerLabel = showWorkspaceSwitcher
     ? workspaceLabel

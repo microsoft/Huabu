@@ -18,22 +18,10 @@ interface PanelState {
   setLeftCollapsed: (collapsed: boolean) => void;
   toggleLeftPanel: () => void;
 
-  /**
-   * Whether the canvas-wide search input is revealed in the left
-   * layer panel. Default `false` so the panel chrome stays quiet
-   * for users who never search; flipped to `true` by the search
-   * icon in `LayerFilterBar`, by `Cmd+F`, or by any other entry
-   * point that needs the input focused. Lives in this global store
-   * because the toggle is driven from multiple, non-adjacent
-   * surfaces (toolbar button, hotkey, future API), and the
-   * `CanvasSearchInput` component is mounted only while this is
-   * `true` so its auto-focus / cleanup run on every reveal. Opening
-   * search expands the panel once; later manual collapse is respected
-   * without closing or clearing the search session.
-   */
-  isSearchOpen: boolean;
-  setSearchOpen: (open: boolean) => void;
-  toggleSearchOpen: () => void;
+  /** Pending focus nonce for the permanent Canvas search field. */
+  focusCanvasSearchRequest: number | null;
+  /** Expand Layers and request search focus after the DOM leaves its inert state. */
+  requestFocusCanvasSearch: () => void;
 
   /**
    * Collapse state for the right (chat) panel. Hoisted out of
@@ -78,16 +66,11 @@ export const usePanelStore = create<PanelState>()(
       toggleLeftPanel: () =>
         set((s) => ({ isLeftCollapsed: !s.isLeftCollapsed })),
 
-      isSearchOpen: false,
-      setSearchOpen: (open) =>
-        set({
-          isSearchOpen: open,
-          ...(open ? { isLeftCollapsed: false } : {}),
-        }),
-      toggleSearchOpen: () =>
+      focusCanvasSearchRequest: null,
+      requestFocusCanvasSearch: () =>
         set((s) => ({
-          isSearchOpen: !s.isSearchOpen,
-          ...(!s.isSearchOpen ? { isLeftCollapsed: false } : {}),
+          isLeftCollapsed: false,
+          focusCanvasSearchRequest: (s.focusCanvasSearchRequest ?? 0) + 1,
         })),
 
       isRightCollapsed: true,
@@ -130,8 +113,7 @@ export const usePanelStore = create<PanelState>()(
       name: 'huabu-panel',
       // Only the chat panel's open state is persisted. `isLeftCollapsed`
       // stays per-session (always collapsed on fresh load — matches the
-      // pre-persist default) and `isSearchOpen` is intentionally
-      // transient.
+      // pre-persist default), and focus requests stay transient.
       partialize: (state) => ({
         isRightCollapsed: state.isRightCollapsed,
       }),

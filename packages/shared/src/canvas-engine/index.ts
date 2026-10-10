@@ -191,6 +191,7 @@ export {
   createAbsolutePositionGetter,
   indexById,
   getDescendantIds,
+  getAncestorIds,
   canParentNode,
   isContainerNode,
   moveNodeIntoContainer,

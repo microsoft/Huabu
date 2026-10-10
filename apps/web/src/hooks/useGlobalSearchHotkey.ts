@@ -15,14 +15,8 @@
  *     the search store has a `{kind:'canvas', canvasId}` scope so
  *     typing immediately fires a query.
  *
- * Bypass:
- *   When focus is inside a native `<input>` / `<textarea>` /
- *   contenteditable, browser's built-in find-in-text is the wrong
- *   target — we still steal Cmd+F because our search subsumes the
- *   browser one for the canvas surface, and the native one would
- *   only find DOM text (not PDF body, not collapsed nodes). The
- *   user can hit Esc to dismiss ours and fall back to the page
- *   native if they really need it.
+ * Editable targets still route through this dispatcher; native browser
+ * find cannot search PDF bodies or collapsed Canvas content.
  */
 
 import { useEffect } from 'react';
@@ -34,9 +28,6 @@ import { usePanelStore } from '../store/panelStore';
 import { usePreviewSearchStore } from '../store/previewSearchStore';
 
 type SearchScopeAttr = 'canvas' | 'node';
-
-/** DOM hook the in-panel `CanvasSearchInput` tags on its `<input>`. */
-const CANVAS_SEARCH_INPUT_SELECTOR = 'input[data-canvas-search-input="true"]';
 
 function resolveScopeFromFocus(active: Element | null): SearchScopeAttr | null {
   if (!active) return null;
@@ -71,38 +62,9 @@ function findMountedNodeScope(): {
   return { scope: 'node', nodeId: el.getAttribute('data-search-node-id') };
 }
 
-/**
- * Auto-expand the left panel (if collapsed), reveal the canvas-
- * wide search input (panel-side `isSearchOpen=true` triggers its
- * mount), and as a safety net focus the input once it has rendered.
- *
- * `CanvasSearchInput` auto-focuses itself on mount so this rAF
- * focus retry is only needed when the component was already
- * mounted (re-press of Cmd+F while open) or when the panel was
- * still animating open at the moment React rendered.
- */
 function focusCanvasSearchInput(canvasId: string): void {
-  usePanelStore.getState().setLeftCollapsed(false);
-  usePanelStore.getState().setSearchOpen(true);
   ensureCanvasSearchScope(canvasId);
-  const tryFocus = (): boolean => {
-    const input = document.querySelector<HTMLInputElement>(
-      CANVAS_SEARCH_INPUT_SELECTOR,
-    );
-    if (!input) return false;
-    input.focus();
-    input.select();
-    return true;
-  };
-  if (!tryFocus()) {
-    // The panel column animates open over ~220ms; rAF on the next
-    // frame is usually enough because the inner subtree is already
-    // mounted (only the column width animates). One retry, no loop
-    // — if both attempts fail the user can just press Cmd+F again.
-    requestAnimationFrame(() => {
-      tryFocus();
-    });
-  }
+  usePanelStore.getState().requestFocusCanvasSearch();
 }
 
 export function useGlobalSearchHotkey(): void {

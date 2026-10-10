@@ -48,7 +48,7 @@ export const MissingNodesSummary = ({
         className="w-full min-w-0 justify-start px-1.5!"
       >
         <FileWarning />
-        <span className="truncate">
+        <span className="truncate text-xs font-normal">
           {t('layers.missingNodesCount', { count })}
         </span>
       </Button>

@@ -58,31 +58,47 @@ describe('panel store preview fullscreen', () => {
   });
 });
 
-describe('panel store canvas search visibility', () => {
+describe('panel store canvas search focus', () => {
   beforeEach(() => {
     usePanelStore.setState({
       isLeftCollapsed: true,
-      isSearchOpen: false,
+      focusCanvasSearchRequest: null,
     });
   });
 
-  it('expands the Layers panel when canvas search opens', () => {
-    usePanelStore.getState().setSearchOpen(true);
+  it('expands the Layers panel on an explicit search focus request', () => {
+    usePanelStore.getState().requestFocusCanvasSearch();
 
     expect(usePanelStore.getState()).toMatchObject({
       isLeftCollapsed: false,
-      isSearchOpen: true,
+      focusCanvasSearchRequest: 1,
     });
   });
 
-  it('allows the Layers panel to stay collapsed while search remains open', () => {
-    usePanelStore.getState().setSearchOpen(true);
+  it('allows manual collapse without replaying the focus request', () => {
+    usePanelStore.getState().requestFocusCanvasSearch();
     usePanelStore.getState().setLeftCollapsed(true);
 
     expect(usePanelStore.getState()).toMatchObject({
       isLeftCollapsed: true,
-      isSearchOpen: true,
+      focusCanvasSearchRequest: 1,
     });
+  });
+
+  it('advances the nonce for repeated focus requests', () => {
+    usePanelStore.getState().requestFocusCanvasSearch();
+    const first = usePanelStore.getState().focusCanvasSearchRequest;
+    usePanelStore.getState().requestFocusCanvasSearch();
+
+    expect(usePanelStore.getState().focusCanvasSearchRequest).toBeGreaterThan(
+      first ?? 0,
+    );
+  });
+
+  it('does not request search focus on manual panel expansion', () => {
+    usePanelStore.getState().setLeftCollapsed(false);
+
+    expect(usePanelStore.getState().focusCanvasSearchRequest).toBeNull();
   });
 });
 

@@ -12,6 +12,7 @@ import { createEmptyWorkspace } from '../../../store/previewWorkspace/model';
 import { usePreviewWorkspaceStore } from '../../../store/previewWorkspace/store';
 
 import type { DataSourceTreeItem } from './types';
+import type { DndContextProps, DragEndEvent } from '@dnd-kit/core';
 import type { Node } from '@xyflow/react';
 
 (
@@ -23,6 +24,11 @@ const mocks = vi.hoisted(() => ({
   requestChatOpen: vi.fn(),
   revealNodesOnCanvas: vi.fn(),
   toast: vi.fn(),
+  startPointerDrag: vi.fn(),
+  reorderNodes: vi.fn(),
+  moveNodeIntoFrame: vi.fn(),
+  moveNodeOutOfFrame: vi.fn(),
+  dnd: {} as DndContextProps,
 }));
 
 vi.mock('react-i18next', () => ({
@@ -31,22 +37,25 @@ vi.mock('react-i18next', () => ({
 }));
 vi.mock('lottie-react', () => ({ default: () => null }));
 vi.mock('@dnd-kit/core', () => ({
-  DndContext: ({ children }: { children: React.ReactNode }) => children,
-  KeyboardSensor: class KeyboardSensor {},
-  PointerSensor: class PointerSensor {},
+  DndContext: ({ children, ...props }: DndContextProps) => {
+    Object.assign(mocks.dnd, props);
+    return children;
+  },
+  MouseSensor: class MouseSensor {},
+  TouchSensor: class TouchSensor {},
   useSensor: () => ({}),
   useSensors: (...sensors: unknown[]) => sensors,
 }));
 vi.mock('@dnd-kit/sortable', () => ({
   SortableContext: ({ children }: { children: React.ReactNode }) => children,
   useSortable: () => ({
-    attributes: {},
-    listeners: {},
-    setActivatorNodeRef: vi.fn(),
+    listeners: {
+      onMouseDown: mocks.startPointerDrag,
+      onTouchStart: mocks.startPointerDrag,
+    },
     setNodeRef: vi.fn(),
     isDragging: false,
   }),
-  sortableKeyboardCoordinates: vi.fn(),
   verticalListSortingStrategy: {},
 }));
 vi.mock('../../../store/previewWorkspace/actions', () => ({
@@ -61,6 +70,11 @@ vi.mock('../../Common/EmptyState', () => ({
 }));
 
 const CANVAS_ID = 'canvas-1';
+const {
+  reorderNodes: reorderLiveNodes,
+  moveNodeIntoFrame: moveLiveNodesIntoFrame,
+  moveNodeOutOfFrame: moveLiveNodesOutOfFrame,
+} = useCanvasStore.getState();
 let container: HTMLDivElement;
 let root: Root;
 
@@ -88,6 +102,29 @@ function row(id: string): HTMLElement {
   );
   if (!element) throw new Error(`Missing layer row ${id}`);
   return element;
+}
+
+function dragEvent(
+  activeId: string,
+  overId: string,
+  intent: 'before' | 'after' | 'into' = 'before',
+): DragEndEvent {
+  return {
+    activatorEvent: new MouseEvent('mousedown'),
+    active: {
+      id: activeId,
+      data: { current: {} },
+      rect: { current: { initial: null, translated: null } },
+    },
+    over: {
+      id: overId,
+      data: { current: {} },
+      rect: { top: 0, bottom: 34, left: 0, right: 200, width: 200, height: 34 },
+      disabled: false,
+    },
+    delta: { x: 0, y: 34 },
+    collisions: [{ id: overId, data: { intent } }],
+  };
 }
 
 async function renderTree(
@@ -128,6 +165,9 @@ async function renderTree(
     rfInstance: {} as never,
     canvasWrapper,
     selectNodes,
+    reorderNodes: mocks.reorderNodes,
+    moveNodeIntoFrame: mocks.moveNodeIntoFrame,
+    moveNodeOutOfFrame: mocks.moveNodeOutOfFrame,
   });
   usePanelStore.setState({
     isRightCollapsed: false,
@@ -165,6 +205,10 @@ beforeEach(() => {
   mocks.requestChatOpen.mockClear();
   mocks.revealNodesOnCanvas.mockClear();
   mocks.toast.mockClear();
+  mocks.startPointerDrag.mockClear();
+  mocks.reorderNodes.mockClear();
+  mocks.moveNodeIntoFrame.mockClear();
+  mocks.moveNodeOutOfFrame.mockClear();
 });
 
 afterEach(() => {
@@ -185,6 +229,12 @@ afterEach(() => {
 });
 
 describe('CanvasLayerTree activation', () => {
+  it('leaves vertical list padding to its host instead of adding a second inset', async () => {
+    await renderTree([item('note-1', 'note')]);
+    const tree = container.querySelector('[role="tree"]');
+    expect(tree?.className).toBe('flex flex-col');
+  });
+
   it('restores roving focus and range selection after a list remount', async () => {
     const items = [
       item('first', 'note'),
@@ -255,7 +305,9 @@ describe('CanvasLayerTree activation', () => {
     act(() => row('note-1').click());
 
     expect(mocks.openPreviewNode).not.toHaveBeenCalled();
-    expect(row('note-1').querySelector('.ring-info.ring-1')).not.toBeNull();
+    expect(row('note-1').getAttribute('aria-selected')).toBe('true');
+    expect(row('note-1').querySelector('.bg-info-bg')).not.toBeNull();
+    expect(row('note-1').querySelector('.ring-info.ring-1')).toBeNull();
   });
 
   it('expands a Frame and collapses it on repeated primary activation', async () => {
@@ -397,9 +449,7 @@ describe('CanvasLayerTree keyboard semantics', () => {
     expect(row('frame-1').getAttribute('role')).toBe('treeitem');
     expect(row('frame-1').getAttribute('aria-expanded')).toBe('true');
     expect(row('frame-1').tabIndex).toBe(0);
-    expect(
-      row('frame-1').querySelector('button[aria-label="layers.reorderNode"]'),
-    ).not.toBeNull();
+    expect(row('frame-1').querySelector('.lucide-grip-vertical')).toBeNull();
 
     act(() => row('frame-1').focus());
     act(() =>
@@ -444,5 +494,393 @@ describe('CanvasLayerTree keyboard semantics', () => {
       true,
     );
     expect(row('frame-1').getAttribute('aria-expanded')).toBe('false');
+  });
+});
+
+describe('CanvasLayerTree row drag restrictions', () => {
+  it.each(['mousedown', 'touchstart'])(
+    'starts %s dragging an ordinary row but not a filtered row',
+    async (eventType) => {
+      const items = [item('note-1', 'note')];
+      await renderTree(items);
+      act(() =>
+        row('note-1').dispatchEvent(new Event(eventType, { bubbles: true })),
+      );
+      expect(mocks.startPointerDrag).toHaveBeenCalledOnce();
+
+      await renderTree(items, { isFilterActive: true });
+      mocks.startPointerDrag.mockClear();
+      act(() =>
+        row('note-1').dispatchEvent(new Event(eventType, { bubbles: true })),
+      );
+      expect(mocks.startPointerDrag).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['mousedown', 'touchstart'])(
+    'does not start %s dragging a descendant of a locked Frame',
+    async (eventType) => {
+      await renderTree([
+        item('frame-1', 'frame', undefined, { locked: true }),
+        item('note-1', 'note', 'frame-1'),
+      ]);
+      act(() =>
+        row('note-1').dispatchEvent(new Event(eventType, { bubbles: true })),
+      );
+      expect(mocks.startPointerDrag).not.toHaveBeenCalled();
+    },
+  );
+});
+
+describe('CanvasLayerTree drag selection and same-parent groups', () => {
+  function select(ids: string[]) {
+    act(() => {
+      useCanvasStore.setState((state) => ({
+        nodes: state.nodes.map((node) => ({
+          ...node,
+          selected: ids.includes(node.id),
+        })),
+      }));
+    });
+  }
+
+  it('selects an unselected drag source without preview, reveal or disclosure', async () => {
+    const { selectNodes } = await renderTree([
+      item('frame', 'frame'),
+      item('other', 'note'),
+    ]);
+    select(['other']);
+    act(() => mocks.dnd.onDragStart?.(dragEvent('frame', 'other')));
+    expect(selectNodes).toHaveBeenCalledWith(['frame'], false);
+    expect(row('frame').getAttribute('aria-selected')).toBe('true');
+    expect(row('frame').getAttribute('data-layer-dragging')).toBe('true');
+    expect(row('frame').style.opacity).toBe('');
+    expect(mocks.openPreviewNode).not.toHaveBeenCalled();
+    expect(mocks.revealNodesOnCanvas).not.toHaveBeenCalled();
+    expect(useCanvasStore.getState().collapsedFrameIds.size).toBe(0);
+    act(() => mocks.dnd.onDragCancel?.(dragEvent('frame', 'other')));
+    expect(row('frame').hasAttribute('data-layer-dragging')).toBe(false);
+    expect(row('frame').getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('preserves multi-selection and sends all sources in one reorder call', async () => {
+    const { selectNodes } = await renderTree(
+      ['a', 'target', 'b'].map((id) => item(id, 'note')),
+    );
+    select(['a', 'b']);
+    const event = dragEvent('b', 'target', 'after');
+    act(() => mocks.dnd.onDragStart?.(event));
+    expect(selectNodes).not.toHaveBeenCalled();
+    expect(row('a').getAttribute('data-layer-dragging')).toBe('true');
+    expect(row('b').getAttribute('data-layer-dragging')).toBe('true');
+    act(() => mocks.dnd.onDragMove?.(event));
+    act(() => mocks.dnd.onDragEnd?.(event));
+    expect(mocks.reorderNodes).toHaveBeenCalledExactlyOnceWith(
+      ['a', 'b'],
+      'target',
+      'before',
+    );
+    expect(row('a').hasAttribute('data-layer-dragging')).toBe(false);
+    expect(row('b').hasAttribute('data-layer-dragging')).toBe(false);
+    expect(mocks.moveNodeIntoFrame).not.toHaveBeenCalled();
+    expect(mocks.moveNodeOutOfFrame).not.toHaveBeenCalled();
+  });
+
+  it('keeps multi-row drops below the last sibling inside their current Frame', async () => {
+    await renderTree([
+      item('frame', 'frame'),
+      item('a', 'note', 'frame'),
+      item('b', 'note', 'frame'),
+      item('target', 'note', 'frame'),
+    ]);
+    select(['a', 'b']);
+    const event = dragEvent('a', 'target', 'after');
+    act(() => mocks.dnd.onDragStart?.(event));
+    act(() => mocks.dnd.onDragMove?.(event));
+    act(() => mocks.dnd.onDragEnd?.(event));
+    expect(mocks.reorderNodes).toHaveBeenCalledExactlyOnceWith(
+      ['a', 'b'],
+      'target',
+      'before',
+    );
+    expect(mocks.moveNodeOutOfFrame).not.toHaveBeenCalled();
+  });
+
+  it.each(['before', 'after'] as const)(
+    'moves all selected siblings out to the root with a %s drop',
+    async (intent) => {
+      await renderTree([
+        item('frame', 'frame'),
+        item('a', 'note', 'frame'),
+        item('b', 'note', 'frame'),
+        item('target', 'note'),
+      ]);
+      select(['a', 'b']);
+      const event = dragEvent('b', 'target', intent);
+      act(() => mocks.dnd.onDragStart?.(event));
+      act(() => mocks.dnd.onDragMove?.(event));
+      expect(row('target').querySelector('span.right-2')).not.toBeNull();
+      act(() => mocks.dnd.onDragEnd?.(event));
+      expect(mocks.moveNodeOutOfFrame).toHaveBeenCalledExactlyOnceWith(
+        ['a', 'b'],
+        {
+          nodeId: 'target',
+          position: intent === 'before' ? 'after' : 'before',
+        },
+      );
+      expect(mocks.moveNodeIntoFrame).not.toHaveBeenCalled();
+      expect(mocks.reorderNodes).not.toHaveBeenCalled();
+      expect(mocks.toast).not.toHaveBeenCalled();
+    },
+  );
+
+  it('revalidates source ancestor locks when releasing a grouped root exit', async () => {
+    await renderTree([
+      item('frame', 'frame'),
+      item('a', 'note', 'frame'),
+      item('b', 'note', 'frame'),
+      item('target', 'note'),
+    ]);
+    select(['a', 'b']);
+    const event = dragEvent('a', 'target', 'before');
+    act(() => mocks.dnd.onDragStart?.(event));
+    act(() => mocks.dnd.onDragMove?.(event));
+    act(() =>
+      useCanvasStore.setState((state) => ({
+        moveNodeOutOfFrame: moveLiveNodesOutOfFrame,
+        nodes: state.nodes.map((node) =>
+          node.id === 'frame'
+            ? { ...node, data: { ...node.data, locked: true } }
+            : node,
+        ),
+      })),
+    );
+    const before = useCanvasStore.getState().nodes;
+    act(() => mocks.dnd.onDragEnd?.(event));
+    expect(useCanvasStore.getState().nodes).toBe(before);
+    expect(mocks.toast).toHaveBeenCalledWith(expect.any(String), {
+      tone: 'warning',
+    });
+  });
+
+  it.each([1, 2])(
+    'revalidates same-parent sorting after an ancestor locks for %s source(s)',
+    async (count) => {
+      await renderTree([
+        item('frame', 'frame'),
+        item('a', 'note', 'frame'),
+        item('b', 'note', 'frame'),
+        item('target', 'note', 'frame'),
+      ]);
+      select(count === 1 ? ['a'] : ['a', 'b']);
+      const event = dragEvent('a', 'target', 'before');
+      act(() => mocks.dnd.onDragStart?.(event));
+      act(() => mocks.dnd.onDragMove?.(event));
+      expect(row('target').querySelector('span.right-2')).not.toBeNull();
+      act(() =>
+        useCanvasStore.setState((state) => ({
+          reorderNodes: reorderLiveNodes,
+          nodes: state.nodes.map((node) =>
+            node.id === 'frame'
+              ? { ...node, data: { ...node.data, locked: true } }
+              : node,
+          ),
+        })),
+      );
+      const before = useCanvasStore.getState().nodes;
+      act(() => mocks.dnd.onDragEnd?.(event));
+      expect(useCanvasStore.getState().nodes).toBe(before);
+      expect(mocks.toast).toHaveBeenCalledWith(expect.any(String), {
+        tone: 'warning',
+      });
+    },
+  );
+
+  it.each(['before', 'after', 'into'] as const)(
+    'moves all same-parent sources into another Frame with one %s drop',
+    async (intent) => {
+      await renderTree([
+        item('a', 'note'),
+        item('b', 'note'),
+        item('frame', 'frame'),
+        item('child', 'note', 'frame'),
+      ]);
+      select(['a', 'b']);
+      const event = dragEvent(
+        'a',
+        intent === 'into' ? 'frame' : 'child',
+        intent,
+      );
+      act(() => mocks.dnd.onDragStart?.(event));
+      act(() => mocks.dnd.onDragMove?.(event));
+      expect(container.querySelector('.outline-solid')).toBeNull();
+      expect(container.querySelector('span.right-2')).not.toBeNull();
+      act(() => mocks.dnd.onDragEnd?.(event));
+      expect(mocks.reorderNodes).not.toHaveBeenCalled();
+      expect(mocks.moveNodeIntoFrame).toHaveBeenCalledExactlyOnceWith(
+        ['a', 'b'],
+        'frame',
+        { nodeId: 'child', position: intent === 'after' ? 'before' : 'after' },
+      );
+      expect(mocks.moveNodeOutOfFrame).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([1, 2])(
+    'keeps a collapsed target closed during sustained hovering and after a drop for %s source(s)',
+    async (count) => {
+      vi.useFakeTimers();
+      try {
+        await renderTree([
+          item('source', 'frame'),
+          item('a', 'note', 'source'),
+          item('b', 'note', 'source'),
+          item('target', 'frame'),
+          item('child', 'note', 'target'),
+        ]);
+        act(() =>
+          useCanvasStore.setState({ collapsedFrameIds: new Set(['target']) }),
+        );
+        select(count === 1 ? ['a'] : ['a', 'b']);
+        const event = dragEvent('a', 'target', 'into');
+        act(() => mocks.dnd.onDragStart?.(event));
+        act(() => mocks.dnd.onDragMove?.(event));
+        expect(row('target').querySelector('.outline-solid')).not.toBeNull();
+        expect(row('target').querySelector('.bg-info-bg')).toBeNull();
+        act(() => vi.advanceTimersByTime(350));
+        expect(row('target').getAttribute('aria-expanded')).toBe('false');
+        expect(row('target').querySelector('.outline-solid')).not.toBeNull();
+        expect(row('target').querySelector('span.right-2')).toBeNull();
+        act(() => mocks.dnd.onDragEnd?.(event));
+        expect(mocks.moveNodeIntoFrame).toHaveBeenCalledExactlyOnceWith(
+          count === 1 ? 'a' : ['a', 'b'],
+          'target',
+          { nodeId: 'child', position: 'after' },
+        );
+        expect(row('target').getAttribute('aria-expanded')).toBe('false');
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it('moves saved and newly created root siblings into a Frame together', async () => {
+    await renderTree([
+      item('a', 'note'),
+      item('b', 'note'),
+      item('frame', 'frame'),
+    ]);
+    act(() =>
+      useCanvasStore.setState((state) => ({
+        nodes: JSON.parse(
+          JSON.stringify(
+            state.nodes.map((node) =>
+              node.id === 'a' ? { ...node, parentId: null } : node,
+            ),
+          ),
+        ),
+      })),
+    );
+    select(['a', 'b']);
+    const event = dragEvent('b', 'frame', 'into');
+    act(() => mocks.dnd.onDragStart?.(event));
+    act(() => mocks.dnd.onDragMove?.(event));
+    expect(row('frame').querySelector('span.right-2')).not.toBeNull();
+    act(() => mocks.dnd.onDragEnd?.(event));
+    expect(mocks.moveNodeIntoFrame).toHaveBeenCalledExactlyOnceWith(
+      ['a', 'b'],
+      'frame',
+      undefined,
+    );
+    expect(mocks.toast).not.toHaveBeenCalled();
+  });
+
+  it('disables ordinary row hover during the entire drag and restores it on cancellation', async () => {
+    await renderTree(['a', 'b', 'target'].map((id) => item(id, 'note')));
+    const surface = () => row('target').querySelector('.group');
+    expect(surface()?.classList.contains('hover:bg-hover')).toBe(true);
+    select(['a', 'b']);
+    const event = dragEvent('a', 'target');
+    act(() => mocks.dnd.onDragStart?.(event));
+    act(() => mocks.dnd.onDragMove?.(event));
+    expect(surface()?.classList.contains('hover:bg-hover')).toBe(false);
+    act(() => mocks.dnd.onDragCancel?.(event));
+    expect(surface()?.classList.contains('hover:bg-hover')).toBe(true);
+  });
+
+  it.each(['locked', 'locked-ancestor', 'cycle', 'stale-lock'] as const)(
+    'rejects an invalid grouped destination (%s) without a partial move',
+    async (reason) => {
+      await renderTree([
+        item('source', 'frame'),
+        item('a', 'frame', 'source'),
+        item('b', 'note', 'source'),
+        item('outer', 'frame', undefined, {
+          locked: reason === 'locked-ancestor',
+        }),
+        item('target', 'frame', reason === 'cycle' ? 'a' : 'outer', {
+          locked: reason === 'locked',
+        }),
+      ]);
+      select(['a', 'b']);
+      const event = dragEvent('a', 'target', 'into');
+      act(() => mocks.dnd.onDragStart?.(event));
+      act(() => mocks.dnd.onDragMove?.(event));
+      if (reason === 'stale-lock') {
+        act(() =>
+          useCanvasStore.setState((state) => ({
+            moveNodeIntoFrame: moveLiveNodesIntoFrame,
+            nodes: state.nodes.map((node) =>
+              node.id === 'target'
+                ? { ...node, data: { ...node.data, locked: true } }
+                : node,
+            ),
+          })),
+        );
+      }
+      const before = useCanvasStore.getState().nodes;
+      act(() => mocks.dnd.onDragEnd?.(event));
+      expect(useCanvasStore.getState().nodes).toBe(before);
+      expect(mocks.moveNodeIntoFrame).not.toHaveBeenCalled();
+      expect(mocks.reorderNodes).not.toHaveBeenCalled();
+      expect(mocks.toast).toHaveBeenCalledWith(expect.any(String), {
+        tone: 'warning',
+      });
+    },
+  );
+
+  it('announces unsupported mixed-parent selections without partially moving them', async () => {
+    await renderTree([
+      item('root', 'note'),
+      item('frame', 'frame'),
+      item('child', 'note', 'frame'),
+    ]);
+    select(['root', 'child']);
+    const event = dragEvent('root', 'frame', 'before');
+    act(() => mocks.dnd.onDragStart?.(event));
+    expect(mocks.toast).toHaveBeenCalledWith('layers.multiDragSameParentOnly', {
+      tone: 'info',
+    });
+    expect(row('root').hasAttribute('data-layer-dragging')).toBe(false);
+    act(() => mocks.dnd.onDragEnd?.(event));
+    expect(mocks.reorderNodes).not.toHaveBeenCalled();
+  });
+
+  it('rejects stale group members rather than moving a partial group', async () => {
+    await renderTree(['a', 'b', 'target'].map((id) => item(id, 'note')));
+    select(['a', 'b']);
+    const event = dragEvent('a', 'target');
+    act(() => mocks.dnd.onDragStart?.(event));
+    act(() => mocks.dnd.onDragMove?.(event));
+    act(() =>
+      useCanvasStore.setState((state) => ({
+        nodes: state.nodes.filter((node) => node.id !== 'b'),
+      })),
+    );
+    act(() => mocks.dnd.onDragEnd?.(event));
+    expect(mocks.reorderNodes).not.toHaveBeenCalled();
+    expect(mocks.toast).toHaveBeenCalledWith('layers.nodeUnavailable', {
+      tone: 'warning',
+    });
   });
 });

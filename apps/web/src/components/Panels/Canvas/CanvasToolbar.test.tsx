@@ -93,6 +93,44 @@ afterEach(() => {
 });
 
 describe('NodeToolbar', () => {
+  it('uses roomier primary buttons without enlarging icons or compact dropdowns', () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() =>
+      root?.render(<NodeToolbar activeTool="select" onToolChange={vi.fn()} />),
+    );
+
+    for (const label of [
+      'toolbar.tools.select',
+      'toolbar.nodes.note',
+      'toolbar.nodes.text',
+      'toolbar.nodes.frame',
+      'toolbar.nodes.sketch',
+    ]) {
+      const button = container.querySelector<HTMLButtonElement>(
+        `button[aria-label^="${label}"]`,
+      );
+      expect(button).not.toBeNull();
+      for (const className of [
+        'h-9',
+        'w-9',
+        'p-2.5',
+        '[&_svg]:h-4',
+        '[&_svg]:w-4',
+        '[&>span]:right-1',
+        '[&>span]:bottom-1',
+      ]) {
+        expect(button?.classList.contains(className)).toBe(true);
+      }
+    }
+    const dropdown = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="toolbar.resources.addContent"]',
+    );
+    expect(dropdown?.classList.contains('h-9')).toBe(false);
+    expect(dropdown?.classList.contains('w-9')).toBe(false);
+  });
+
   it('labels the outlined Sparkles tool with Agent and describes its placement action', () => {
     container = document.createElement('div');
     document.body.appendChild(container);

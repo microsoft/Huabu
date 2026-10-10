@@ -32,24 +32,10 @@ import type {
 import type { FrameAxis } from '@huabu/shared/canvas-engine';
 import type { Node } from '@xyflow/react';
 
-/**
- * Description of changes about to land in the same command batch as
- * the relayout — used to pre-apply them to a working copy so the
- * structured layout pass sees the same world the executor will see.
- *
- * Without this, the relayout would read stale `parentId` / `frameSlot`
- * values from `ui.nodes` and miss newly-arrived children or assign
- * them to the wrong track.
- */
 /** The cell fields a structured relayout may write on a child. */
 export type FrameCellPatch = { frameColumn?: number; frameRow?: number };
 
 export interface PendingFrameMutations {
-  /**
-   * Direct child → new parent. Pass `null` to detach. Mirrors the
-   * `SET_NODE_PARENT` command emitted by callers.
-   */
-  parentChanges?: ReadonlyMap<string, string | null>;
   /**
    * Direct child → new cell. Deliberately shaped as the exact patch the
    * caller hands to `MERGE_NODE_DATA`, so the mirror used for the
@@ -57,8 +43,7 @@ export interface PendingFrameMutations {
    */
   cellPatches?: ReadonlyArray<{ nodeId: string; patch: FrameCellPatch }>;
   /**
-   * Frame → layout-mode + gridCount patch. Mirrors the
-   * `MERGE_NODE_DATA` emitted by `SET_FRAME_LAYOUT_MODE`.
+   * Frame data patches emitted by structured drag/drop planning.
    */
   frameDataPatches?: ReadonlyArray<{
     nodeId: string;
@@ -70,8 +55,8 @@ export interface PendingFrameMutations {
  * Apply a set of pending mutations to a node array and return a fresh
  * copy. Pure / non-mutating: the input is left untouched.
  *
- * Only mutates the fields the caller explicitly named (parentId, the
- * cell fields, layoutMode/gridCount). Everything else is preserved by
+ * Only mutates the cell and Frame data fields the caller named.
+ * Everything else is preserved by
  * reference — this is intentionally lighter than `executor.execute`
  * because we only need enough fidelity for the grid layout pass.
  */
@@ -79,9 +64,8 @@ function applyPendingMutations(
   nodes: Node[],
   pending: PendingFrameMutations,
 ): Node[] {
-  const { parentChanges, cellPatches, frameDataPatches } = pending;
+  const { cellPatches, frameDataPatches } = pending;
   if (
-    (!parentChanges || parentChanges.size === 0) &&
     (!cellPatches || cellPatches.length === 0) &&
     (!frameDataPatches || frameDataPatches.length === 0)
   ) {
@@ -99,13 +83,6 @@ function applyPendingMutations(
 
   return nodes.map((n) => {
     let next = n;
-    if (parentChanges?.has(n.id)) {
-      const nextParent = parentChanges.get(n.id);
-      next = {
-        ...next,
-        ...(nextParent ? { parentId: nextParent } : { parentId: undefined }),
-      };
-    }
     const cellPatch = cellById.get(n.id);
     if (cellPatch) {
       next = {
@@ -140,12 +117,9 @@ export function getFrameLayoutMode(node: Node | undefined): FrameLayoutMode {
  * `frameIds`. Free-mode frames are skipped (they manage their own
  * positioning).
  *
- * When the caller is about to emit other commands in the same batch
- * (parent changes, slot patches, frame mode changes), pass them via
- * `pending` so the layout pass sees the post-batch world — otherwise
- * the relayout reads stale `parentId` / `frameSlot` / `layoutMode`
- * from `nodes` and either misses newly-arrived children or assigns
- * them to the wrong track.
+ * Callers pass nodes with parent changes and coordinate conversion already
+ * applied. Pending cell and Frame data patches mirror the remaining
+ * structured-drop commands so the layout sees their final track assignments.
  *
  * Returns a single `MERGE_NODE_DATA` (slot patches) and a single
  * `SET_NODE_GEOMETRY` (child positions + frame sizes) command — one

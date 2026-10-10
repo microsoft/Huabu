@@ -98,6 +98,30 @@ afterEach(() => {
 });
 
 describe('AppMenu', () => {
+  it.each([
+    { triggerClassName: undefined, padding: 'p-0.5' },
+    { triggerClassName: 'p-0', padding: 'p-0' },
+  ])(
+    'allows compact trigger alignment with $padding',
+    ({ triggerClassName, padding }) => {
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      act(() =>
+        root?.render(
+          <MemoryRouter initialEntries={['/canvas/c1']}>
+            <AppMenu compact triggerClassName={triggerClassName} />
+          </MemoryRouter>,
+        ),
+      );
+      const trigger = container.querySelector(
+        'button[aria-label="navigation.appMenu"]',
+      );
+      expect(trigger?.classList.contains(padding)).toBe(true);
+      expect(trigger?.querySelector('img')?.className).toBe('h-6 w-6');
+    },
+  );
+
   it('gives the hidden Space-import field a stable form name', () => {
     container = document.createElement('div');
     document.body.appendChild(container);

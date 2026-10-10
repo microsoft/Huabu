@@ -28,6 +28,7 @@ test('shared menus keep default metrics, states and behaviors without toolbar ov
     for (const icon of await row.locator('svg').all()) {
       await expect(icon).toHaveCSS('width', '14px');
       await expect(icon).toHaveCSS('height', '14px');
+      await expect(icon).toHaveCSS('stroke-width', '2px');
     }
   };
   await page.getByRole('button', { name: 'Select sample' }).click();

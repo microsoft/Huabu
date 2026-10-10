@@ -22,6 +22,8 @@ import { useSettingsUiStore } from '../../../store/settingsUiStore';
 import { useShortcutsUiStore } from '../../../store/shortcutsUiStore';
 import { useWorkspaceStore } from '../../../store/workspaceStore';
 import { formatShortcut } from '../../../utils/platform';
+import { Button } from '../../Common/Button';
+import { cn } from '../../Common/cn';
 import {
   DropdownMenu,
   DropdownMenuItem,
@@ -41,6 +43,8 @@ interface AppMenuProps {
    * 28px hit area to line up with the caption buttons).
    */
   logoClassName?: string;
+  /** Allows the host header to align the trigger with its other controls. */
+  triggerClassName?: string;
 }
 
 /**
@@ -56,6 +60,7 @@ interface AppMenuProps {
 export const AppMenu: React.FC<AppMenuProps> = ({
   compact = false,
   logoClassName,
+  triggerClassName,
 }) => {
   const { t } = useTranslation();
   const location = useLocation();
@@ -119,17 +124,19 @@ export const AppMenu: React.FC<AppMenuProps> = ({
         open={isOpen}
         onOpenChange={setIsOpen}
         trigger={
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            iconOnly
+            size="sm"
             aria-label={t('navigation.appMenu')}
-            className="hover:bg-hover flex shrink-0 items-center justify-center rounded-md p-0.5 transition-colors"
+            className={cn('shrink-0 p-0.5', triggerClassName)}
           >
             <img
               src="/favicon.svg"
               alt={t('app.logoAlt')}
               className={logoClassName ?? (compact ? 'h-6 w-6' : 'h-8 w-8')}
             />
-          </button>
+          </Button>
         }
       >
         {worldEnabled && worldCanvasId && !onWorld && (

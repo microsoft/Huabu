@@ -190,14 +190,14 @@ const ConnectedNodeMenu = ({
                   (group.direction === 'incoming' ? (
                     <ArrowLeft
                       size={14}
-                      strokeWidth={2}
+                      style={{ strokeWidth: 2 }}
                       className="text-fg-subtle shrink-0"
                       aria-label={group.shortcut}
                     />
                   ) : group.direction === 'outgoing' ? (
                     <ArrowRight
                       size={14}
-                      strokeWidth={2}
+                      style={{ strokeWidth: 2 }}
                       className="text-fg-subtle shrink-0"
                       aria-label={group.shortcut}
                     />

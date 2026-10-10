@@ -129,6 +129,27 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe('MessageList empty state', () => {
+  it('shows the disclaimer only while the conversation is empty', () => {
+    mount(<MessageList messages={[]} isLoading={false} />);
+
+    expect(
+      container?.querySelector('[data-chat-empty-disclaimer]')?.textContent,
+    ).toBe('chat.aiContentDisclaimer');
+
+    act(() =>
+      root?.render(
+        <MessageList
+          messages={[{ id: 'user-1', role: 'user', content: 'Hello' }]}
+          isLoading={false}
+        />,
+      ),
+    );
+
+    expect(container?.querySelector('[data-chat-empty-disclaimer]')).toBeNull();
+  });
+});
+
 describe('MessageList bottom navigation', () => {
   const scrollTopDescriptor = Object.getOwnPropertyDescriptor(
     HTMLElement.prototype,

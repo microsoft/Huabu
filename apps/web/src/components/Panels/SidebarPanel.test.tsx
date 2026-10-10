@@ -18,10 +18,12 @@ function render({
   compactHeader = false,
   hideTitle = false,
   tools = false,
+  isCollapsed = false,
 }: {
   compactHeader?: boolean;
   hideTitle?: boolean;
   tools?: boolean;
+  isCollapsed?: boolean;
 } = {}) {
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -35,6 +37,7 @@ function render({
         compactHeader={compactHeader}
         hideTitle={hideTitle}
         tools={tools ? <span data-testid="tools">Tools</span> : undefined}
+        isCollapsed={isCollapsed}
       />,
     ),
   );
@@ -48,6 +51,20 @@ afterEach(() => {
 });
 
 describe('SidebarPanel', () => {
+  it.each([false, true])(
+    'uses medium 14px section titles when collapsed=%s',
+    (isCollapsed) => {
+      render({ isCollapsed });
+      const title = container?.querySelector(
+        isCollapsed ? 'span.text-sm.font-medium' : 'span[title="Chat"]',
+      );
+      const typography = isCollapsed ? title : title?.parentElement;
+      expect(title?.textContent).toBe('Chat');
+      expect(typography?.classList.contains('text-sm')).toBe(true);
+      expect(typography?.classList.contains('font-medium')).toBe(true);
+    },
+  );
+
   it('keeps the default header height', () => {
     render();
     expect(container?.querySelector('.h-12')).not.toBeNull();

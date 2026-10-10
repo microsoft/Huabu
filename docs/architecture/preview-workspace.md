@@ -24,6 +24,8 @@ Newest-page refreshes after reconnect or stream completion merge from stable ser
 
 Within a mounted Chat renderer, the thread-scoped composer owns the draft subscription. Draft updates therefore rerender the composer without invalidating `MessageList`; unchanged historical message cards are memoized, while message-array updates and streaming changes continue through the history tree normally.
 
+After history hydration, a conversation with no messages displays a single subdued, localized AI-content accuracy disclaimer centered in the otherwise empty message area. The disclaimer disappears as soon as loading starts or any message exists, and the composer retains no persistent disclaimer text or icon.
+
 `panelStore` owns and persists the outer right-column collapse state, owns the transient Preview fullscreen state, and owns thread-addressed composer focus requests. Opening a Preview target expands the right column; closing a tab does not delete its underlying node or conversation history. `MainLayout` treats the persisted collapse state as authoritative whenever no panel motion is active. A settled collapsed slot is zero-width and clips overflow, while an active open/close motion temporarily releases that clipping; interrupted startup hydration therefore cannot leave translated panel content visible over the Canvas in either persisted state. Fullscreen is intentionally not persisted across reloads.
 
 ```text

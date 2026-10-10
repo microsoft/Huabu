@@ -11,6 +11,8 @@
   Naming: fg-* (text), bg-* (surfaces), edge-* (borders).
   =================================================================== */
 :root {
+  --icon-stroke-width: 2;
+
   /* Text hierarchy */
   --fg-default: #191919;
   --fg-muted: #515151;
@@ -217,6 +219,13 @@
   }
   50% {
     opacity: 0.3;
+  }
+}
+
+@layer base {
+  /* Lucide emits 2 even when strokeWidth is omitted; retain non-default strokes. */
+  :where(svg.lucide[stroke-width='2']) {
+    stroke-width: var(--icon-stroke-width);
   }
 }
 

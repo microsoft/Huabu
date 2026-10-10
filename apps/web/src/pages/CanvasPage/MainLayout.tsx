@@ -5,7 +5,7 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import { Loading } from '@/components/Common/Loading';
 import { usePanelStore } from '@/store/panelStore';
-import { openChat } from '@/store/previewWorkspace/actions';
+import { openNewChat } from '@/store/previewWorkspace/actions';
 
 interface MainLayoutProps {
   header: React.ReactNode;
@@ -23,7 +23,9 @@ interface LayoutInjectedProps {
   vertical?: boolean;
   onToggle?: () => void;
   onToggleFullscreen?: () => void;
-  onOpenChat?: typeof openChat;
+  isRightPanelCollapsed?: boolean;
+  onToggleRightPanel?: () => void;
+  onNewChat?: typeof openNewChat;
 }
 
 export const MainLayout = ({
@@ -408,7 +410,9 @@ export const MainLayout = ({
             React.cloneElement(
               children as React.ReactElement<LayoutInjectedProps>,
               {
-                onOpenChat: openChat,
+                isRightPanelCollapsed: isRightCollapsed,
+                onToggleRightPanel: toggleRightPanel,
+                onNewChat: openNewChat,
               },
             )
           ) : (
