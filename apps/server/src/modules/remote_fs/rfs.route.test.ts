@@ -666,10 +666,10 @@ describe('third-party Services', () => {
       expect(packageDownload.headers['cache-control']).toBe(
         'private, max-age=300',
       );
-      expect(await zipEntries(packageDownload.rawPayload)).toEqual([
-        'image-gen/service.yaml',
+      expect((await zipEntries(packageDownload.rawPayload)).sort()).toEqual([
         'image-gen/SKILL.md',
         'image-gen/entry.mjs',
+        'image-gen/service.yaml',
       ]);
 
       const notModified = await app.inject({

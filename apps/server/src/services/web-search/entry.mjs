@@ -4,29 +4,19 @@
 import { writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { parseArgs } from 'node:util';
 
-function valueAfter(argv, index, option) {
-  const value = argv[index + 1];
-  if (!value || value.startsWith('-')) {
-    throw new Error(`${option} requires a value`);
-  }
-  return value;
-}
-
-function parseArgs(argv) {
-  const options = {};
-  for (let index = 0; index < argv.length; index += 1) {
-    const argument = argv[index];
-    if (argument === '--query' || argument === '-q') {
-      options.query = valueAfter(argv, index, argument);
-      index += 1;
-    } else if (argument === '--output' || argument === '-o') {
-      options.output = valueAfter(argv, index, argument);
-      index += 1;
-    } else {
-      throw new Error(`Unknown argument: ${argument}`);
-    }
-  }
+function parseCliArgs(argv) {
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      query: { type: 'string', short: 'q' },
+      output: { type: 'string', short: 'o' },
+    },
+    strict: true,
+    allowPositionals: false,
+  });
+  const options = { query: values.query, output: values.output };
   if (!options.query?.trim()) {
     throw new Error('Web search requires --query');
   }
@@ -57,7 +47,7 @@ export async function search({ config, input }) {
 }
 
 export async function main(argv = process.argv.slice(2)) {
-  const options = parseArgs(argv);
+  const options = parseCliArgs(argv);
   const sdkUrl = process.env.AGENTLET_SERVICE_SDK_URL;
   if (!sdkUrl) throw new Error('AGENTLET_SERVICE_SDK_URL is unavailable');
   const { withServiceConfig } = await import(sdkUrl);

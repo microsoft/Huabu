@@ -1,7 +1,7 @@
 schema: huabu-service/v1
 id: image-gen
 version: 1.0.0
-name: Image Generation
+name: Image Generation (AOAI)
 description: Generate images with the configured Azure OpenAI deployment.
 storage:
   namespace: llm.imageConfig

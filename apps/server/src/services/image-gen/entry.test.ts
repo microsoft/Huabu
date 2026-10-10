@@ -114,7 +114,7 @@ describe('Image Service entry', () => {
     const output = `${process.env.TMPDIR ?? '/tmp'}/huabu-image-entry-${process.pid}.png`;
     const { main } = await loadEntry();
 
-    await main(['--prompt', 'a fox', '--output', output]);
+    await main(['-p', 'a fox', '-o', output]);
 
     await expect(
       import('node:fs/promises').then((fs) => fs.readFile(output)),

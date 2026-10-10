@@ -28,7 +28,7 @@ describe('bundled Service packages', () => {
 
   it('exposes only exact files declared by the package', () => {
     expect(readServicePackageFile('image-gen', 'SKILL.md')).toContain(
-      '# Image Generation',
+      '# Azure OpenAI Image Generation',
     );
     expect(readServicePackageFile('web-search', 'entry.mjs')).toContain(
       'search',

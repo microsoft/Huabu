@@ -11,6 +11,7 @@ async function loadEntry() {
   return import(
     `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`
   ) as Promise<{
+    main(argv: string[]): Promise<void>;
     search(input: {
       config: Record<string, string>;
       input: string | Record<string, unknown>;
@@ -20,6 +21,7 @@ async function loadEntry() {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  delete process.env.AGENTLET_SERVICE_SDK_URL;
 });
 
 describe('Web Search Service entry', () => {
@@ -62,5 +64,31 @@ describe('Web Search Service entry', () => {
     await expect(
       search({ config: { apiKey: 'test-secret' }, input: 'Huabu' }),
     ).rejects.toThrow('Web search provider request failed (401)');
+  });
+
+  it('runs as an executable entry using leased configuration', async () => {
+    const result = { results: [{ title: 'Huabu' }] };
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(new Response(JSON.stringify(result))),
+    );
+    const sdkSource = `
+      export async function withServiceConfig(id, run) {
+        if (id !== 'web-search') throw new Error('Unexpected Service');
+        return run({ config: { apiKey: 'test-secret' } });
+      }
+    `;
+    process.env.AGENTLET_SERVICE_SDK_URL = `data:text/javascript;base64,${Buffer.from(sdkSource).toString('base64')}`;
+    const output = `${process.env.TMPDIR ?? '/tmp'}/huabu-web-search-entry-${process.pid}.json`;
+    const { main } = await loadEntry();
+
+    await main(['-q', 'Huabu', '-o', output]);
+
+    await expect(
+      import('node:fs/promises').then((fs) => fs.readFile(output, 'utf8')),
+    ).resolves.toBe(`${JSON.stringify(result, null, 2)}\n`);
+    await import('node:fs/promises').then((fs) => fs.rm(output));
   });
 });
