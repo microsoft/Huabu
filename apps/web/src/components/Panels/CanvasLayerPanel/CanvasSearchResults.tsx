@@ -32,13 +32,19 @@
  *     the empty-state copy is just "No matches".
  */
 
-import { Spline, ChevronDown, ChevronRight, TriangleAlert } from 'lucide-react';
+import { ChevronDown, ChevronRight, TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 
 import { shouldCanvasSearchOwnKeyboard } from './canvasSearchKeyboard';
 import { revealNodesOnCanvas } from './focusNodesOnCanvas';
-import { getNodeIcon } from '../../../config/nodeIcons';
+import { CanvasSearchNodeIcon } from './LayerNodeIcon';
+import {
+  LAYER_ROW_ICON_CLASS,
+  LAYER_ROW_SELECTED_FOREGROUND_CLASS,
+  LAYER_ROW_SURFACE_CLASS,
+  layerRowBackground,
+} from './layerRowStyles';
 import { scheduleScrollToMatch } from '../../../hooks/searchDom';
 import { useTextHighlight } from '../../../hooks/useTextHighlight';
 import useCanvasStore from '../../../store/canvasStore';
@@ -51,11 +57,12 @@ import {
   useSearchStore,
   type SearchResultRow,
 } from '../../../store/searchStore';
+import { Button } from '../../Common/Button';
 import { cn } from '../../Common/cn';
 import { toast } from '../../Common/Toast';
 import { hasNodePreview } from '../../Nodes/previews';
 
-const ROW_HEIGHT = 52;
+const ROW_HEIGHT = 40;
 
 export const CanvasSearchResults = (): React.JSX.Element => {
   const query = useSearchStore((s) => s.query);
@@ -430,7 +437,10 @@ export const CanvasSearchResults = (): React.JSX.Element => {
     !isStreaming && query.trim().length > 0 && results.length === 0 && !error;
 
   return (
-    <div className="flex h-full min-h-0 flex-col" data-canvas-search-results="">
+    <div
+      className="flex h-full min-h-0 flex-col font-normal"
+      data-canvas-search-results=""
+    >
       {/* Truncation banner. VS Code-style: lives at the TOP so the
           user spots the warning before scrolling and knows the list
           is incomplete. */}
@@ -448,7 +458,7 @@ export const CanvasSearchResults = (): React.JSX.Element => {
         </div>
       )}
 
-      {error && <div className="text-danger px-3 py-3 text-sm">{error}</div>}
+      {error && <div className="text-danger px-3 py-3 text-xs">{error}</div>}
 
       {!error && nodeGroups.length > 0 && (
         <Virtuoso
@@ -466,6 +476,7 @@ export const CanvasSearchResults = (): React.JSX.Element => {
             v.kind === 'header' ? (
               <NodeHeaderItem
                 group={v.group}
+                hasPreviousGroup={index > 0}
                 collapsed={collapsedNodeIds.has(v.group.nodeId)}
                 active={index === activeIdx}
                 onClick={() => {
@@ -494,7 +505,7 @@ export const CanvasSearchResults = (): React.JSX.Element => {
       )}
 
       {!error && isStreaming && contentPhase && (
-        <div className="text-fg-subtle border-edge-default border-t px-3 py-1.5 text-[11px]">
+        <div className="text-fg-subtle border-edge-default border-t px-3 py-1.5 text-xs">
           Searching note contents…
         </div>
       )}
@@ -522,6 +533,7 @@ type VisibleRow =
 
 interface NodeHeaderItemProps {
   group: NodeGroup;
+  hasPreviousGroup: boolean;
   collapsed: boolean;
   active: boolean;
   onClick: () => void;
@@ -529,46 +541,68 @@ interface NodeHeaderItemProps {
 
 const NodeHeaderItem = ({
   group,
+  hasPreviousGroup,
   collapsed,
   active,
   onClick,
 }: NodeHeaderItemProps): React.JSX.Element => {
-  // Edge groups: render the connection glyph; node groups: per-type icon.
-  // `getNodeIcon` falls back to the frame icon for unknown types, which
-  // would mis-represent an edge as a frame in the list — short-circuit.
-  const Icon = group.edgeEndpoints ? Spline : getNodeIcon(group.nodeType);
   const displayLabel = group.label || group.nodeId;
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-expanded={!collapsed}
-      className={cn(
-        'border-edge-default hover:bg-hover flex w-full items-center gap-1.5 border-b px-2 py-1.5 text-left text-xs',
-        active && 'bg-info-bg',
+    <div className="px-2">
+      {hasPreviousGroup && (
+        <div role="separator" className="border-edge-default my-0.5 border-t" />
       )}
-    >
-      {collapsed ? (
-        <ChevronRight
-          size={12}
-          className="text-fg-subtle shrink-0"
-          aria-hidden
-        />
-      ) : (
-        <ChevronDown
-          size={12}
-          className="text-fg-subtle shrink-0"
-          aria-hidden
-        />
-      )}
-      <Icon size={14} strokeWidth={1.5} className="text-fg-muted shrink-0" />
-      <span className="text-fg-default min-w-0 flex-1 truncate font-medium">
-        {displayLabel}
-      </span>
-      <span className="text-fg-subtle shrink-0 tabular-nums">
-        {group.rows.length}
-      </span>
-    </button>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={onClick}
+        aria-expanded={!collapsed}
+        className={cn(
+          'flex h-7 w-full items-center justify-start gap-2 px-2 py-0 text-left text-xs font-normal',
+          LAYER_ROW_SURFACE_CLASS,
+          layerRowBackground({ selected: active }),
+        )}
+      >
+        <span className="flex h-6 w-4 shrink-0 items-center justify-center">
+          {collapsed ? (
+            <ChevronRight
+              size={12}
+              className="text-fg-subtle h-3! w-3! shrink-0"
+              aria-hidden
+            />
+          ) : (
+            <ChevronDown
+              size={12}
+              className="text-fg-subtle h-3! w-3! shrink-0"
+              aria-hidden
+            />
+          )}
+        </span>
+        <span
+          className={cn(
+            'flex shrink-0 [&_svg]:h-3.5! [&_svg]:w-3.5!',
+            active ? LAYER_ROW_SELECTED_FOREGROUND_CLASS : LAYER_ROW_ICON_CLASS,
+          )}
+        >
+          <CanvasSearchNodeIcon
+            nodeId={group.nodeId}
+            nodeType={group.nodeType}
+            isEdge={!!group.edgeEndpoints}
+          />
+        </span>
+        <span
+          className={cn(
+            'min-w-0 flex-1 truncate text-sm font-normal',
+            active ? LAYER_ROW_SELECTED_FOREGROUND_CLASS : 'text-fg-default',
+          )}
+        >
+          {displayLabel}
+        </span>
+        <span className="text-fg-subtle shrink-0 tabular-nums">
+          {group.rows.length}
+        </span>
+      </Button>
+    </div>
   );
 };
 
@@ -583,27 +617,31 @@ const NodeMatchItem = ({
   active,
   onClick,
 }: NodeMatchItemProps): React.JSX.Element => (
-  <button
-    type="button"
-    tabIndex={-1}
-    style={{ minHeight: ROW_HEIGHT }}
-    className={cn(
-      'border-edge-default hover:bg-hover flex w-full cursor-pointer flex-col gap-0.5 border-b px-3 py-2 pl-7 text-left',
-      active && 'bg-info-bg',
-    )}
-    onClick={onClick}
-  >
-    <div className="flex items-center gap-2 text-xs">
-      <span className="text-fg-subtle shrink-0 uppercase">
-        {row.match.field}
-      </span>
-    </div>
-    <SnippetLine
-      text={row.match.snippet}
-      matchStart={row.match.matchStart}
-      matchLength={row.match.matchLength}
-    />
-  </button>
+  <div className="px-2">
+    <Button
+      variant="ghost"
+      size="sm"
+      tabIndex={-1}
+      style={{ minHeight: ROW_HEIGHT }}
+      className={cn(
+        'flex w-full cursor-pointer flex-col items-stretch justify-start gap-0 px-3 py-1 pl-[54px] text-left font-normal',
+        LAYER_ROW_SURFACE_CLASS,
+        layerRowBackground({ selected: active }),
+      )}
+      onClick={onClick}
+    >
+      <div className="flex items-center gap-2 text-xs">
+        <span className="text-fg-subtle shrink-0 uppercase">
+          {row.match.field}
+        </span>
+      </div>
+      <SnippetLine
+        text={row.match.snippet}
+        matchStart={row.match.matchStart}
+        matchLength={row.match.matchLength}
+      />
+    </Button>
+  </div>
 );
 
 /**

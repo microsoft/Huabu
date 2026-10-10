@@ -5,7 +5,7 @@
 export const MENU_SURFACE_CLASS = 'rounded-lg px-1 py-1.5';
 
 export const MENU_ITEM_CLASS =
-  'text-fg-muted flex min-h-8 w-full items-center justify-start gap-2 rounded-md px-2 py-1.5 text-left text-[13px] leading-5 font-normal transition-colors enabled:hover:bg-hover focus-visible:bg-hover focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-info-light disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:size-3.5 [&_svg]:shrink-0 [&_svg]:stroke-[1.65]';
+  'text-fg-muted flex min-h-8 w-full items-center justify-start gap-2 rounded-md px-2 py-1.5 text-left text-[13px] leading-5 font-normal transition-colors enabled:hover:bg-hover focus-visible:bg-hover focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-info-light disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:size-3.5 [&_svg]:shrink-0';
 
 export const MENU_LABEL_CLASS =
   'min-w-0 flex-1 text-left [overflow-wrap:anywhere] whitespace-normal';

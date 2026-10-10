@@ -306,7 +306,15 @@ export function useCanvasShortcuts(
     if (disabled) return;
 
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || isOutsideCanvasInteraction(e.target)) return;
+      if (e.defaultPrevented) return;
+      const layerHistoryShortcut =
+        !e.isComposing &&
+        !isEditableTarget(e.target) &&
+        e.target instanceof Element &&
+        !!e.target.closest('[data-canvas-panel="left"] [role="tree"]') &&
+        !e.target.closest('[role="dialog"], [role="menu"], [role="listbox"]') &&
+        (matchesShortcut(e, 'edit.undo') || matchesShortcut(e, 'edit.redo'));
+      if (isOutsideCanvasInteraction(e.target) && !layerHistoryShortcut) return;
       const key = e.key;
       if (e.target instanceof Element && isVideoControlTarget(e.target)) return;
       const mod = e.metaKey || e.ctrlKey;

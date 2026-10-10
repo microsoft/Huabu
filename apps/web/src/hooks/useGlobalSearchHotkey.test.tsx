@@ -51,7 +51,10 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   useCanvasStore.setState({ canvasId: 'canvas-1' });
-  usePanelStore.setState({ isLeftCollapsed: true, isSearchOpen: false });
+  usePanelStore.setState({
+    isLeftCollapsed: true,
+    focusCanvasSearchRequest: null,
+  });
   usePreviewSearchStore.getState().close();
   useSearchStore.getState().close();
 });
@@ -76,7 +79,7 @@ describe('useGlobalSearchHotkey search layers', () => {
     expect(useSearchStore.getState().scope).toBeNull();
     expect(usePanelStore.getState()).toMatchObject({
       isLeftCollapsed: true,
-      isSearchOpen: false,
+      focusCanvasSearchRequest: null,
     });
   });
 
@@ -95,7 +98,7 @@ describe('useGlobalSearchHotkey search layers', () => {
     });
     expect(usePanelStore.getState()).toMatchObject({
       isLeftCollapsed: false,
-      isSearchOpen: true,
+      focusCanvasSearchRequest: 1,
     });
     expect(usePreviewSearchStore.getState()).toMatchObject({
       nodeId: 'pdf-1',

@@ -207,6 +207,38 @@ async function tick() {
 }
 
 describe('undo/redo persistence ordering', () => {
+  it('persists grouped root exits with explicit null parents through undo and redo', async () => {
+    const frame: Node = {
+      id: 'node-source-frame',
+      type: 'frame',
+      position: { x: 500, y: 600 },
+      style: { width: 1200, height: 800 },
+      data: { label: 'Source', sizing: 'manual', layoutMode: 'free' },
+    };
+    const child = { ...note, parentId: frame.id, selected: true };
+    const other = { ...child, id: 'node-other', position: { x: 400, y: 0 } };
+    state()._setStateNoAutosave({ nodes: [frame, child, other] });
+    const parentValues = () => {
+      const request = api.putCanvas.mock.lastCall?.[1] as
+        | PutCanvasRequest
+        | undefined;
+      return request?.state.nodes
+        .filter((node) => node.id === child.id || node.id === other.id)
+        .map((node) => node.parentId);
+    };
+    state().moveNodeOutOfFrame([other.id, child.id]);
+    await state().saveCanvas();
+    expect(parentValues()).toEqual([null, null]);
+    expect(state().canUndo).toBe(true);
+    state().undo();
+    await state().saveCanvas();
+    expect(parentValues()).toEqual([frame.id, frame.id]);
+    expect(state().canRedo).toBe(true);
+    state().redo();
+    await state().saveCanvas();
+    expect(parentValues()).toEqual([null, null]);
+  });
+
   it('retains a new edit-settle during restored content PUT even without interrupted work', async () => {
     await deleted();
     const gate = (contentGate = deferred());

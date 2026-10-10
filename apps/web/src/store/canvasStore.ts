@@ -15,6 +15,7 @@ import {
   type ReactFlowInstance,
 } from '@xyflow/react';
 import deepEqual from 'fast-deep-equal';
+import { t } from 'i18next';
 import { create, type StateCreator } from 'zustand';
 
 import {
@@ -147,6 +148,7 @@ import type {
   AgentChatContext,
   CanvasCommand,
   CanvasCommandType,
+  CanvasEditableNode,
   CanvasExecution,
   CanvasExecutionSource,
   CanvasNodeId,
@@ -378,17 +380,20 @@ export function dismissVersionConflictToast(): void {
  * `data` before sending a structure PUT — those fields live in the
  * `.md` sidecar now and are persisted exclusively via the per-node
  * content endpoint. Structure-only fields (`id`, `type`, geometry,
- * `parentId`, custom data) are preserved verbatim. Returns the
- * original `node` reference when nothing was stripped so the array
- * stays identity-stable for downstream diffing.
+ * custom data) are preserved. Root nodes explicitly send `parentId: null`
+ * because omission in the editable PUT contract preserves the old parent.
  */
-function stripNodeContentForStructurePut(nodes: readonly Node[]): Node[] {
+function stripNodeContentForStructurePut(
+  nodes: readonly Node[],
+): CanvasEditableNode[] {
   return nodes.map((node) => {
+    const structureNode =
+      node.parentId === undefined ? { ...node, parentId: null } : node;
     const data =
       node.type === 'question'
         ? projectAgentNodeEditableData(node.data)
         : node.data;
-    if (!data) return node;
+    if (!data) return structureNode;
     let mutated = false;
     const slim: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(data)) {
@@ -398,7 +403,9 @@ function stripNodeContentForStructurePut(nodes: readonly Node[]): Node[] {
       }
       slim[k] = v;
     }
-    return mutated || data !== node.data ? { ...node, data: slim } : node;
+    return mutated || data !== node.data
+      ? { ...structureNode, data: slim }
+      : structureNode;
   });
 }
 
@@ -724,7 +731,7 @@ type RFState = {
   selectNodes: (ids: string[], multiSelect?: boolean) => void;
 
   reorderNodes: (
-    activeId: string,
+    activeId: string | string[],
     overId: string,
     position?: 'before' | 'after',
   ) => void;
@@ -775,12 +782,12 @@ type RFState = {
   toggleMinimap: () => void;
 
   moveNodeIntoFrame: (
-    nodeId: string,
+    nodeId: string | string[],
     frameId: string,
     reorderTarget?: { nodeId: string; position: 'before' | 'after' },
   ) => void;
   moveNodeOutOfFrame: (
-    nodeId: string,
+    nodeId: string | string[],
     reorderTarget?: { nodeId: string; position: 'before' | 'after' },
   ) => void;
 
@@ -1997,6 +2004,10 @@ const useCanvasStore = create<RFState>()(
         ...(viewportCenter ? { viewportCenter } : {}),
       };
       const execution = resolveUiIntent(intent, uiState);
+      if (execution.rejectionKey) {
+        toast(t(execution.rejectionKey), { tone: 'warning' });
+        return;
+      }
       const editNodeId = execution.editNodeId;
       const editTargetAlreadyExists =
         editNodeId !== undefined &&
@@ -3890,13 +3901,13 @@ const useCanvasStore = create<RFState>()(
     },
 
     reorderNodes: (
-      activeId: string,
+      activeId: string | string[],
       overId: string,
       position?: 'before' | 'after',
     ) => {
       get().dispatchUiIntent({
-        type: 'REORDER_NODE',
-        activeId,
+        type: 'REORDER_NODES_RELATIVE',
+        nodeIds: typeof activeId === 'string' ? [activeId] : activeId,
         overId,
         position,
       });
@@ -3983,8 +3994,8 @@ const useCanvasStore = create<RFState>()(
 
     moveNodeIntoFrame: (nodeId, frameId, reorderTarget) => {
       get().dispatchUiIntent({
-        type: 'MOVE_NODE_INTO_FRAME',
-        nodeId,
+        type: 'MOVE_NODES_INTO_FRAME',
+        nodeIds: Array.isArray(nodeId) ? nodeId : [nodeId],
         frameId,
         reorderTarget,
       });
@@ -3992,8 +4003,8 @@ const useCanvasStore = create<RFState>()(
 
     moveNodeOutOfFrame: (nodeId, reorderTarget) => {
       get().dispatchUiIntent({
-        type: 'MOVE_NODE_OUT_OF_FRAME',
-        nodeId,
+        type: 'MOVE_NODES_OUT_OF_FRAME',
+        nodeIds: Array.isArray(nodeId) ? nodeId : [nodeId],
         reorderTarget,
       });
     },

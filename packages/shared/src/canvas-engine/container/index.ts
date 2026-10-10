@@ -6,6 +6,7 @@ export {
   createAbsolutePositionGetter,
   getAbsolutePosition,
   getDescendantIds,
+  getAncestorIds,
   indexById,
   normalizeTreeOrder,
 } from './tree.js';

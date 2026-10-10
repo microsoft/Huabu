@@ -209,9 +209,8 @@ export interface ResolvedDrop {
   effectiveIntent: DropIntent;
   /**
    * Optional. Set when the drop lands as a child of a frame /
-   * group. The row with this id gets a soft fill + dashed outline
-   * so the destination frame is unambiguous regardless of where
-   * the caret is drawn.
+   * group. Only a collapsed destination draws a solid outline;
+   * expanded destinations rely on the insertion caret.
    */
   intoHighlightId?: string;
 }
@@ -233,8 +232,8 @@ export interface ResolveInput {
  *
  *   1. `'into'` over a frame / group → drop as first child of the
  *      frame. EXPANDED frame → caret at frame row's bottom edge,
- *      indented to child depth. COLLAPSED frame → no caret, soft
- *      fill on the frame row is the sole drop signal.
+ *      indented to child depth. COLLAPSED frame → no caret, a solid
+ *      outline on the frame row is the sole drop signal.
  *
  *   2. `'after'` over a NON-container row that is the panel-bottom
  *      direct child of its parent frame → drop as sibling-below

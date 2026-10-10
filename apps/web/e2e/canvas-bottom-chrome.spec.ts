@@ -5,6 +5,48 @@ import { expect, test } from '@playwright/test';
 
 import { openNewCanvas, readViewportTransform } from './helpers';
 
+test('collapsed controls create fresh Chats while expanding Preview preserves existing tabs', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      'huabu-panel',
+      JSON.stringify({ state: { isRightCollapsed: true }, version: 0 }),
+    );
+  });
+  await openNewCanvas(page);
+  await page.keyboard.press('Escape');
+  const panel = page.locator('[data-canvas-panel="right"]');
+  const tabs = panel.getByRole('tab');
+  const newChat = page.getByRole('button', {
+    name: 'New conversation',
+    exact: true,
+  });
+
+  await newChat.click();
+  await expect(tabs).toHaveCount(1);
+  await expect(tabs.first()).toHaveAttribute('aria-selected', 'true');
+  const firstTabId = await tabs.first().getAttribute('id');
+  if (!firstTabId)
+    throw new Error('Expected the created Chat tab to have an ID');
+  await page.getByTestId('collapse-preview').click();
+  await expect(panel).toBeHidden();
+
+  await page
+    .getByRole('button', { name: 'Expand previews', exact: true })
+    .click();
+  await expect(tabs).toHaveCount(1);
+  await expect(tabs.first()).toHaveAttribute('id', firstTabId);
+  await page.getByTestId('collapse-preview').click();
+  await expect(panel).toBeHidden();
+
+  await newChat.click();
+  await expect(tabs).toHaveCount(2);
+  const activeTab = panel.locator('[role="tab"][aria-selected="true"]');
+  await expect(activeTab).toHaveCount(1);
+  await expect(activeTab).not.toHaveAttribute('id', firstTabId);
+});
+
 test('shorter zoom control aligns with the roomier main toolbar bottom', async ({
   page,
 }) => {
@@ -135,7 +177,12 @@ test('main toolbar stays centered in the uncovered canvas without changing its s
   await assertCentered();
   await page.getByRole('button', { name: /show layers panel/i }).click();
   await assertCentered();
-  await page.getByRole('button', { name: /open chat panel/i }).click();
+  await page
+    .getByRole('button', { name: 'New conversation', exact: true })
+    .click();
+  await expect(
+    page.locator('[data-canvas-panel="right"]').getByRole('tab'),
+  ).toBeVisible();
   await assertCentered();
 
   for (const side of ['left', 'right']) {

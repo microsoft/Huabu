@@ -5,6 +5,15 @@ import { expect, test, type Page } from '@playwright/test';
 
 import { openNewCanvas, readViewportTransform, oneFingerDrag } from './helpers';
 
+async function createChatPreview(page: Page) {
+  await page
+    .getByRole('button', { name: 'New conversation', exact: true })
+    .click();
+  await expect(
+    page.locator('[data-canvas-panel="right"]').getByRole('tab'),
+  ).toBeVisible();
+}
+
 async function settlePanels(page: Page) {
   await page.evaluate(async () => {
     const animations = Array.from(
@@ -56,7 +65,7 @@ test('overlays never resize or pan Canvas and isolate mouse, wheel, touch and ke
   await openNewCanvas(page);
   await page.keyboard.press('Escape');
   const before = await geometry(page);
-  await page.getByRole('button', { name: /open chat panel/i }).click();
+  await createChatPreview(page);
   await settlePanels(page);
   expect(await geometry(page)).toEqual(before);
   await page.getByRole('button', { name: /show layers panel/i }).click();
@@ -112,7 +121,7 @@ test('panel descendants chain vertical wheel to their outer scroller', async ({
   page,
 }) => {
   await openNewCanvas(page);
-  await page.getByRole('button', { name: /open chat panel/i }).click();
+  await createChatPreview(page);
   await settlePanels(page);
   const before = await geometry(page);
   const panel = page.locator('[data-canvas-panel="right"]');
@@ -316,7 +325,7 @@ test('toolbar stays visible without overlap and updates while a panel remains fo
   await page.setViewportSize({ width: 1800, height: 850 });
   await openNewCanvas(page);
   await page.getByRole('button', { name: /show layers panel/i }).click();
-  await page.getByRole('button', { name: /open chat panel/i }).click();
+  await createChatPreview(page);
   await settlePanels(page);
   const toolbar = page.locator('[data-canvas-main-toolbar]');
   const host = page.locator('[data-canvas-toolbar-layer]');
@@ -351,7 +360,7 @@ test('narrow layouts keep a full-size Canvas and bounded panels', async ({
   const before = await geometry(page);
   await page.keyboard.press('p');
   await page.getByRole('button', { name: /show layers panel/i }).click();
-  await page.getByRole('button', { name: /open chat panel/i }).click();
+  await createChatPreview(page);
   await settlePanels(page);
   const left = (await page
     .locator('[data-canvas-panel="left"]')
@@ -494,7 +503,7 @@ for (const zoom of [0.5, 1]) {
       };
       requestAnimationFrame(take);
     });
-    await page.getByRole('button', { name: /open chat panel/i }).click();
+    await createChatPreview(page);
     await page.getByRole('button', { name: /show layers panel/i }).click();
     await settlePanels(page);
     expect(await page.evaluate(sample)).toEqual(before);

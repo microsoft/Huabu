@@ -12,6 +12,8 @@
  * happens uniformly at the intent level (not inside command handlers).
  */
 
+import { canParentNode, getAncestorIds } from '@huabu/shared/canvas-engine';
+
 import {
   resolveAddNodes,
   resolveDisconnectEdge,
@@ -26,10 +28,10 @@ import {
 } from './resolvers';
 import { resolveSetQuestionCardScale } from './resolvers/resolveSetQuestionCardScale';
 import {
-  buildStructuredFrameRelayoutCommands,
   computeNodeEditDiff,
   extractNodeRef,
   extractSnippet,
+  getDescendantIds,
   getSelectedNodeIds,
 } from './utils';
 
@@ -235,8 +237,8 @@ export type CanvasUiIntent =
       frozenStructuredGutters?: ReadonlyMap<string, StructuredGutterSizes>;
     }
   | {
-      type: 'REORDER_NODE';
-      activeId: string;
+      type: 'REORDER_NODES_RELATIVE';
+      nodeIds: string[];
       overId: string;
       position?: 'before' | 'after';
     }
@@ -267,14 +269,14 @@ export type CanvasUiIntent =
       sizing?: FrameSizing;
     }
   | {
-      type: 'MOVE_NODE_INTO_FRAME';
-      nodeId: string;
+      type: 'MOVE_NODES_INTO_FRAME';
+      nodeIds: string[];
       frameId: string;
       reorderTarget?: { nodeId: string; position: 'before' | 'after' };
     }
   | {
-      type: 'MOVE_NODE_OUT_OF_FRAME';
-      nodeId: string;
+      type: 'MOVE_NODES_OUT_OF_FRAME';
+      nodeIds: string[];
       reorderTarget?: { nodeId: string; position: 'before' | 'after' };
     }
   | {
@@ -307,6 +309,8 @@ export type CanvasUiIntent =
 
 export interface UiIntentResolution {
   commands: CanvasCommand[];
+  /** Rejected gestures must notify the user without executing commands. */
+  rejectionKey?: 'layers.invalidFrameDrop';
   /** Trace entries to record for this intent. */
   trace: RecentAction[];
   /**
@@ -412,18 +416,18 @@ export function resolveUiIntent(
       return resolveDisconnectEdge(intent, ui);
     case 'RESIZE_NODE':
       return resolveResizeNode(intent, ui);
-    case 'REORDER_NODE':
-      return resolveReorderNode(intent, ui);
+    case 'REORDER_NODES_RELATIVE':
+      return resolveReorderNodesRelative(intent, ui);
     case 'DISSOLVE_FRAME':
       return resolveDissolveFrame(intent, ui);
     case 'TOGGLE_NODE_LOCK':
       return resolveToggleNodeLock(intent, ui);
     case 'SET_FRAME_LAYOUT_MODE':
       return resolveSetFrameLayoutMode(intent, ui);
-    case 'MOVE_NODE_INTO_FRAME':
-      return resolveMoveNodeIntoFrame(intent, ui);
-    case 'MOVE_NODE_OUT_OF_FRAME':
-      return resolveMoveNodeOutOfFrame(intent, ui);
+    case 'MOVE_NODES_INTO_FRAME':
+      return resolveMoveNodesIntoFrame(intent, ui);
+    case 'MOVE_NODES_OUT_OF_FRAME':
+      return resolveMoveNodesOutOfFrame(intent, ui);
     case 'CONVERT_NODE_TYPE': {
       const node = ui.nodes.find((n) => n.id === intent.nodeId);
       if (!node) return { commands: [], trace: [] };
@@ -606,26 +610,49 @@ function resolveResizeNode(
   };
 }
 
-function resolveReorderNode(
-  intent: Extract<CanvasUiIntent, { type: 'REORDER_NODE' }>,
+function movingSubtreeIds(allNodes: Node[], nodeIds: string[]): Set<string> {
+  const ids = new Set(nodeIds);
+  const nodes = allNodes.filter((n) => ids.has(n.id));
+  for (const node of nodes) {
+    if (node.type === 'frame' || node.type === 'group') {
+      for (const descendantId of getDescendantIds(allNodes, node.id)) {
+        ids.add(descendantId);
+      }
+    }
+  }
+  return ids;
+}
+
+function resolveReorderNodesRelative(
+  intent: Extract<CanvasUiIntent, { type: 'REORDER_NODES_RELATIVE' }>,
   ui: UiResolverState,
 ): UiIntentResolution {
-  const node = ui.nodes.find((n) => n.id === intent.activeId);
+  const ids = movingSubtreeIds(ui.nodes, intent.nodeIds);
+  const sourceIds = new Set(intent.nodeIds);
+  const nodes = ui.nodes.filter((n) => sourceIds.has(n.id));
+  const target = ui.nodes.find((node) => node.id === intent.overId);
+  const parentId = nodes[0]?.parentId ?? null;
+  if (
+    !target ||
+    ids.has(target.id) ||
+    (target.parentId ?? null) !== parentId ||
+    !canMoveNodesToParent(ui.nodes, intent.nodeIds, parentId)
+  ) {
+    return { commands: [], trace: [], rejectionKey: 'layers.invalidFrameDrop' };
+  }
   const pos = intent.position ?? 'before';
   return {
     commands: [
       {
         type: 'REORDER_NODES',
-        nodeIds: [intent.activeId as CanvasNodeId],
+        nodeIds: [...ids] as CanvasNodeId[],
         to:
           pos === 'after'
             ? { after: intent.overId as CanvasNodeId }
             : { before: intent.overId as CanvasNodeId },
       },
     ],
-    trace: node
-      ? [{ action: 'nodes_reordered', nodes: [extractNodeRef(node)] }]
-      : [],
+    trace: [{ action: 'nodes_reordered', nodes: nodes.map(extractNodeRef) }],
   };
 }
 
@@ -675,106 +702,140 @@ function resolveToggleNodeLock(
   };
 }
 
-function resolveMoveNodeIntoFrame(
-  intent: Extract<CanvasUiIntent, { type: 'MOVE_NODE_INTO_FRAME' }>,
+export function canMoveNodesToParent(
+  nodes: Node[],
+  nodeIds: string[],
+  frameId: string | null,
+): boolean {
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  const frame = frameId === null ? undefined : byId.get(frameId);
+  const moving = nodeIds.map((id) => byId.get(id));
+  if (
+    moving.length === 0 ||
+    moving.some(
+      (node) =>
+        !node ||
+        node.data.locked ||
+        (frameId !== null && !canParentNode(frame, node)),
+    )
+  )
+    return false;
+  const destinationAncestors = new Set(
+    frameId === null ? [] : [frameId, ...getAncestorIds(byId, frameId)],
+  );
+  if (
+    [...destinationAncestors].some(
+      (id) => !byId.has(id) || byId.get(id)?.data.locked,
+    )
+  )
+    return false;
+  const parentId = moving[0]?.parentId ?? null;
+  return moving.every(
+    (node) =>
+      node !== undefined &&
+      (node.parentId ?? null) === parentId &&
+      !destinationAncestors.has(node.id) &&
+      !getAncestorIds(byId, node.id).some(
+        (id) => !byId.has(id) || byId.get(id)?.data.locked,
+      ),
+  );
+}
+
+function resolveMoveNodesIntoFrame(
+  intent: Extract<CanvasUiIntent, { type: 'MOVE_NODES_INTO_FRAME' }>,
   ui: UiResolverState,
 ): UiIntentResolution {
-  const node = ui.nodes.find((n) => n.id === intent.nodeId);
+  const ids = new Set(intent.nodeIds);
+  const nodes = ui.nodes.filter((n) => ids.has(n.id));
   const frame = ui.nodes.find((n) => n.id === intent.frameId);
+  const subtreeIds = movingSubtreeIds(ui.nodes, intent.nodeIds);
+  const target = intent.reorderTarget
+    ? ui.nodes.find((node) => node.id === intent.reorderTarget?.nodeId)
+    : undefined;
+  if (
+    !canMoveNodesToParent(ui.nodes, intent.nodeIds, intent.frameId) ||
+    (intent.reorderTarget &&
+      (!target ||
+        target.parentId !== intent.frameId ||
+        subtreeIds.has(target.id)))
+  ) {
+    return { commands: [], trace: [], rejectionKey: 'layers.invalidFrameDrop' };
+  }
   const commands: CanvasCommand[] = [
     {
       type: 'SET_NODE_PARENT',
-      nodeIds: [intent.nodeId as CanvasNodeId],
+      nodeIds: nodes.map((node) => node.id as CanvasNodeId),
       parentId: intent.frameId as CanvasNodeId,
     },
-  ];
-  if (intent.reorderTarget) {
-    commands.push({
+    {
       type: 'REORDER_NODES',
-      nodeIds: [intent.nodeId as CanvasNodeId],
-      to:
-        intent.reorderTarget.position === 'after'
+      nodeIds: [...subtreeIds] as CanvasNodeId[],
+      to: intent.reorderTarget
+        ? intent.reorderTarget.position === 'after'
           ? { after: intent.reorderTarget.nodeId as CanvasNodeId }
-          : { before: intent.reorderTarget.nodeId as CanvasNodeId },
-    });
-  }
-  // Re-flow the destination frame when it opted into a structured
-  // layout. Also re-flow the source frame (if any) since it just lost
-  // a child.
-  const affectedFrameIds = [intent.frameId];
-  if (node?.parentId && node.parentId !== intent.frameId) {
-    affectedFrameIds.push(node.parentId);
-  }
-  commands.push(
-    ...buildStructuredFrameRelayoutCommands(affectedFrameIds, ui.nodes, {
-      // SET_NODE_PARENT was just emitted above — mirror it so the
-      // layout pass sees the moved child as a member of the new frame.
-      parentChanges: new Map([[intent.nodeId, intent.frameId]]),
-    }),
-  );
+          : { before: intent.reorderTarget.nodeId as CanvasNodeId }
+        : 'top',
+    },
+  ];
+  // SET_NODE_PARENT marks both frames for the executor's final layout pass,
+  // which sees all moved children with their converted parent-local geometry.
   return {
     commands,
-    trace:
-      node && frame
-        ? [
-            {
-              action: 'node_framed',
-              node: extractNodeRef(node),
-              frame: extractNodeRef(frame),
-            },
-          ]
-        : [],
+    trace: frame
+      ? nodes.map((node) => ({
+          action: 'node_framed' as const,
+          node: extractNodeRef(node),
+          frame: extractNodeRef(frame),
+        }))
+      : [],
   };
 }
 
-function resolveMoveNodeOutOfFrame(
-  intent: Extract<CanvasUiIntent, { type: 'MOVE_NODE_OUT_OF_FRAME' }>,
+function resolveMoveNodesOutOfFrame(
+  intent: Extract<CanvasUiIntent, { type: 'MOVE_NODES_OUT_OF_FRAME' }>,
   ui: UiResolverState,
 ): UiIntentResolution {
-  const node = ui.nodes.find((n) => n.id === intent.nodeId);
-  const frame = node?.parentId
-    ? ui.nodes.find((n) => n.id === node.parentId)
+  const ids = new Set(intent.nodeIds);
+  const nodes = ui.nodes.filter((node) => ids.has(node.id));
+  const frame = nodes[0]?.parentId
+    ? ui.nodes.find((node) => node.id === nodes[0].parentId)
     : undefined;
+  const subtreeIds = movingSubtreeIds(ui.nodes, intent.nodeIds);
+  const target = intent.reorderTarget
+    ? ui.nodes.find((node) => node.id === intent.reorderTarget?.nodeId)
+    : undefined;
+  if (
+    !frame ||
+    !canMoveNodesToParent(ui.nodes, intent.nodeIds, null) ||
+    (intent.reorderTarget &&
+      (!target || target.parentId || subtreeIds.has(target.id)))
+  ) {
+    return { commands: [], trace: [], rejectionKey: 'layers.invalidFrameDrop' };
+  }
   const commands: CanvasCommand[] = [
     {
       type: 'SET_NODE_PARENT',
-      nodeIds: [intent.nodeId as CanvasNodeId],
+      nodeIds: nodes.map((node) => node.id as CanvasNodeId),
       parentId: null,
     },
   ];
   if (intent.reorderTarget) {
     commands.push({
       type: 'REORDER_NODES',
-      nodeIds: [intent.nodeId as CanvasNodeId],
+      nodeIds: [...subtreeIds] as CanvasNodeId[],
       to:
         intent.reorderTarget.position === 'after'
           ? { after: intent.reorderTarget.nodeId as CanvasNodeId }
           : { before: intent.reorderTarget.nodeId as CanvasNodeId },
     });
   }
-  // Re-flow the source frame when it opted into a structured layout —
-  // it just lost a child and the remaining slots should reflow.
-  if (node?.parentId) {
-    commands.push(
-      ...buildStructuredFrameRelayoutCommands([node.parentId], ui.nodes, {
-        // SET_NODE_PARENT was just emitted above — mirror the detach
-        // so the layout pass no longer counts this child.
-        parentChanges: new Map([[intent.nodeId, null]]),
-      }),
-    );
-  }
   return {
     commands,
-    trace:
-      node && frame
-        ? [
-            {
-              action: 'node_unframed',
-              node: extractNodeRef(node),
-              frame: extractNodeRef(frame),
-            },
-          ]
-        : [],
+    trace: nodes.map((node) => ({
+      action: 'node_unframed' as const,
+      node: extractNodeRef(node),
+      frame: extractNodeRef(frame),
+    })),
   };
 }
 

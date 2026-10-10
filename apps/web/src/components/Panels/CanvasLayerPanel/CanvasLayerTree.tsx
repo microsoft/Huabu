@@ -3,14 +3,13 @@
 
 import {
   DndContext,
-  KeyboardSensor,
-  PointerSensor,
+  MouseSensor,
+  TouchSensor,
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
 import {
   SortableContext,
-  sortableKeyboardCoordinates,
   verticalListSortingStrategy,
   useSortable,
 } from '@dnd-kit/sortable';
@@ -25,6 +24,7 @@ import { useTranslation } from 'react-i18next';
 
 import { getMissingFileKind } from '@/components/Nodes/missingFile';
 import { hasNodePreview } from '@/components/Nodes/previews';
+import { canMoveNodesToParent } from '@/handler/canvasCommand/uiIntent';
 import useCanvasStore from '@/store/canvasStore.ts';
 import { useExternalImportsStore } from '@/store/externalImportsStore';
 import { usePanelStore } from '@/store/panelStore';
@@ -47,6 +47,7 @@ import type {
   CollisionDetection,
   DragEndEvent,
   DragMoveEvent,
+  DragStartEvent,
 } from '@dnd-kit/core';
 
 /**
@@ -66,7 +67,7 @@ import type {
  *     - `'into'`: NO caret on this row — used when the destination
  *       is a COLLAPSED frame (the children aren't visible so the
  *       caret would have no meaningful slot to land in). The row
- *       still renders the dashed `outline-info` frame around its
+ *       still renders the solid `outline-info` frame around its
  *       pill via the same branch as `isIntoFrameHighlight`. For an
  *       EXPANDED frame the drop is encoded as `anchorIntent='after'`
  *       with `depth` bumped one level deeper, so the caret visibly
@@ -81,26 +82,29 @@ interface DropTarget {
   intent: DropIntent;
   depth: number;
   /**
-   * When the drop will land as a child of an expanded frame, this is
-   * that frame's id. The frame row gets a soft `bg-info/15` fill on
-   * its pill so the caret-at-bottom (= "new first-child slot") is
-   * unambiguously attributed to it — instead of reading as "after
-   * this frame as a sibling". Same row as the caret for Rules 1+2;
-   * the panel-previous row (parent frame) for Rule 3.
+   * Destination parent id. Collapsed Frames draw a solid outline;
+   * expanded Frames use only the indented insertion caret.
    */
   highlightFrameId?: string;
+}
+
+interface LayerDragSession {
+  ids: Set<string>;
+  parentId: string | null;
+  blocked: boolean;
 }
 
 interface SortableRowProps {
   item: DataSourceTreeItem;
   isDirectlySelected: boolean;
   isHighlighted: boolean;
-  isPreviewOpen: boolean;
   tabIndex: 0 | -1;
   isCollapsible: boolean;
   isCollapsed: boolean;
   isLocked: boolean;
   isDraggingDisabled: boolean;
+  isDragging: boolean;
+  isDragActive: boolean;
   dropIntent: 'before' | 'after' | 'into' | null;
   dropIntentDepth: number | undefined;
   isIntoFrameHighlight: boolean;
@@ -119,12 +123,13 @@ const SortableRow = React.memo(
     item,
     isDirectlySelected,
     isHighlighted,
-    isPreviewOpen,
     tabIndex,
     isCollapsible,
     isCollapsed,
     isLocked,
     isDraggingDisabled,
+    isDragging,
+    isDragActive,
     dropIntent,
     dropIntentDepth,
     isIntoFrameHighlight,
@@ -138,13 +143,7 @@ const SortableRow = React.memo(
     onToggleLock,
   }: SortableRowProps) => {
     const { t } = useTranslation();
-    const {
-      attributes,
-      listeners,
-      setActivatorNodeRef,
-      setNodeRef,
-      isDragging,
-    } = useSortable({
+    const { listeners, setNodeRef } = useSortable({
       id: item.id,
     });
     const missingFileKind = getMissingFileKind(item.node.data);
@@ -157,8 +156,8 @@ const SortableRow = React.memo(
 
     // Intentionally drop BOTH the active row's drag transform AND the
     // sibling rows' strategy transform: the dragged row stays in its
-    // original slot (just dimmed via `isDragging` → `opacity 0.3` on
-    // `TreeRowItem`), and the rest of the list does not "open a gap".
+    // original slot with its selection styling, and the rest of the
+    // list does not "open a gap".
     // The insertion caret is the sole signal for where the drop will
     // land — matching the file-explorer style — so the user never
     // loses the dragged row from view, and the visual gap can't
@@ -174,8 +173,8 @@ const SortableRow = React.memo(
         label={getDisplayName(item.node)}
         isSelected={isDirectlySelected}
         isHighlighted={isHighlighted}
-        isPreviewOpen={isPreviewOpen}
         isDragging={isDragging}
+        isDragActive={isDragActive}
         missingFileLabel={missingFileLabel}
         isCollapsible={isCollapsible}
         isCollapsed={isCollapsed}
@@ -198,9 +197,7 @@ const SortableRow = React.memo(
         onToggleLock={() => onToggleLock(item.id)}
         // DnD plumbing - disabled if dragging is disabled
         forwardedRef={setNodeRef}
-        forwardedDragHandleRef={setActivatorNodeRef}
         style={style}
-        dndAttributes={isDraggingDisabled ? undefined : attributes}
         dndListeners={isDraggingDisabled ? undefined : listeners}
       />
     );
@@ -268,9 +265,9 @@ export const CanvasLayerTree = ({
   const isFrameCollapsed = (frameId: string) => collapsedFrameIds.has(frameId);
 
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
+    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, {
+      activationConstraint: { delay: 250, tolerance: 5 },
     }),
   );
 
@@ -292,6 +289,10 @@ export const CanvasLayerTree = ({
   // cache is always in sync with the current zone.
   // ============================================================
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
+  const dragSessionRef = useRef<LayerDragSession | null>(null);
+  const [draggingIds, setDraggingIds] = useState<ReadonlySet<string>>(
+    new Set(),
+  );
 
   // Snapshot of the most recent `resolveDrop` result from
   // `onDragMove`, keyed by `activeId`. `onDragEnd` reuses this
@@ -307,21 +308,6 @@ export const CanvasLayerTree = ({
     activeId: string;
     resolved: ResolvedDrop;
   } | null>(null);
-
-  // Auto-expand collapsed frames after the cursor lingers on them.
-  // Mirrors the file-explorer pattern so the user can target
-  // descendants without first clicking the chevron. Cancelled on every
-  // `onDragMove` tick that changes the target.
-  const expandTimerRef = useRef<{
-    timeout: ReturnType<typeof setTimeout>;
-    targetId: string;
-  } | null>(null);
-  const clearExpandTimer = useCallback(() => {
-    if (expandTimerRef.current) {
-      clearTimeout(expandTimerRef.current.timeout);
-      expandTimerRef.current = null;
-    }
-  }, []);
 
   // Anchor row for Shift+click range selection. Updated on every plain
   // or Cmd/Ctrl+click; preserved across Shift+clicks so the user can
@@ -342,7 +328,6 @@ export const CanvasLayerTree = ({
       navigationState.selectionAnchorId = selectionAnchorRef.current;
     };
   }, [focusedId, navigationState]);
-  useEffect(() => clearExpandTimer, [clearExpandTimer]);
 
   // Filter out children of collapsed frames.
   // In filter mode the parent already produced a flat result set; we
@@ -565,7 +550,19 @@ export const CanvasLayerTree = ({
       active,
     }) => {
       const candidates = [];
+      const session = dragSessionRef.current;
+      if (session?.blocked) return [];
+      const excludedIds = new Set(session?.ids);
+      if (session && session.ids.size > 1) {
+        for (const id of session.ids) {
+          for (const descendant of descendantsByFrameId.get(id) ?? []) {
+            excludedIds.add(descendant);
+          }
+        }
+      }
       for (const c of droppableContainers) {
+        const id = String(c.id);
+        if (excludedIds.has(id)) continue;
         const rect = droppableRects.get(c.id);
         if (!rect) continue;
         candidates.push({
@@ -607,7 +604,7 @@ export const CanvasLayerTree = ({
    * Rules (in order):
    *
    *   1. `'into'` over a frame / group → drop as first child of the
-   *      frame. Indicator: COLLAPSED frame → soft-fill on the frame
+   *      frame. Indicator: COLLAPSED frame → solid outline on the frame
    *      row's pill (caret would have nowhere meaningful to sit since
    *      the children aren't visible). EXPANDED frame → caret on the
    *      bottom edge of the frame row, indented to child depth (it
@@ -627,10 +624,8 @@ export const CanvasLayerTree = ({
    *
    *   3. Default → pass through: indicator on `overId` at its own
    *      depth, drop dispatched against `overId` with `rawIntent`.
-   *      If `overId` sits inside a frame, that parent frame gets
-   *      the destination highlight (caret on the child row + fill
-   *      on the parent reads as "inside this frame, between these
-   *      two children").
+   *      If `overId` sits inside a frame, the caret's indentation
+   *      identifies that parent without outlining its expanded row.
    */
   /**
    * Adapter around the pure {@link resolveDropPure}. Closes over
@@ -641,16 +636,117 @@ export const CanvasLayerTree = ({
    * See `./dropResolver` for the rules.
    */
   const resolveDrop = useCallback(
-    (_activeId: string, overId: string, rawIntent: DropIntent): ResolvedDrop =>
-      resolveDropPure({
-        overId,
-        rawIntent,
-        itemById,
-        visibleItemMap,
-        visibleItems,
-        collapsedFrameIds,
-      }),
-    [collapsedFrameIds, itemById, visibleItemMap, visibleItems],
+    (
+      activeId: string,
+      overId: string,
+      rawIntent: DropIntent,
+      session = dragSessionRef.current,
+    ): ResolvedDrop | null => {
+      if (session?.blocked) return null;
+      let resolved: ResolvedDrop;
+      if (session && session.ids.size > 1) {
+        const target = itemById.get(overId);
+        if (
+          !target ||
+          session.ids.has(overId) ||
+          [...session.ids].some((id) =>
+            descendantsByFrameId.get(id)?.has(overId),
+          )
+        )
+          return null;
+        if (rawIntent !== 'into') {
+          // Group insertion stays inside the hovered sibling's parent,
+          // including its final child; it does not escape a nesting level.
+          resolved = {
+            anchorId: overId,
+            anchorIntent: rawIntent,
+            anchorDepth: target.depth,
+            effectiveOverId: overId,
+            effectiveIntent: rawIntent,
+            intoHighlightId: target.node.parentId,
+          };
+        } else {
+          resolved = resolveDropPure({
+            overId,
+            rawIntent,
+            itemById,
+            visibleItemMap,
+            visibleItems,
+            collapsedFrameIds,
+          });
+        }
+      } else {
+        resolved = resolveDropPure({
+          overId,
+          rawIntent,
+          itemById,
+          visibleItemMap,
+          visibleItems,
+          collapsedFrameIds,
+        });
+      }
+      const liveNodes = useCanvasStore.getState().nodes;
+      const target = liveNodes.find(
+        (node) => node.id === resolved.effectiveOverId,
+      );
+      const destination =
+        resolved.effectiveIntent === 'into'
+          ? resolved.effectiveOverId
+          : target?.parentId;
+      if (
+        !target ||
+        !canMoveNodesToParent(
+          liveNodes,
+          [...(session?.ids ?? [activeId])],
+          destination ?? null,
+        )
+      )
+        return null;
+      return resolved;
+    },
+    [
+      collapsedFrameIds,
+      descendantsByFrameId,
+      itemById,
+      visibleItemMap,
+      visibleItems,
+    ],
+  );
+
+  const handleDragStart = useCallback(
+    (event: DragStartEvent) => {
+      setDraggingIds(new Set());
+      lastResolvedRef.current = null;
+      setDropTarget(null);
+      const liveNodes = useCanvasStore.getState().nodes;
+      const activeId = String(event.active.id);
+      const active = liveNodes.find((node) => node.id === activeId);
+      if (!active) {
+        dragSessionRef.current = {
+          ids: new Set(),
+          parentId: null,
+          blocked: true,
+        };
+        toast(t('layers.nodeUnavailable'), { tone: 'warning' });
+        return;
+      }
+      const moving = active.selected
+        ? liveNodes.filter((node) => node.selected)
+        : [active];
+      const parentId = active.parentId ?? null;
+      const blocked = moving.some(
+        (node) => (node.parentId ?? null) !== parentId,
+      );
+      const ids = new Set(moving.map((node) => node.id));
+      dragSessionRef.current = { ids, parentId, blocked };
+      if (blocked) {
+        toast(t('layers.multiDragSameParentOnly'), { tone: 'info' });
+        return;
+      }
+      if (!active.selected) selectNodes([activeId], false);
+      setDraggingIds(ids);
+    },
+    [selectNodes, t],
   );
 
   const handleDragMove = useCallback(
@@ -663,11 +759,15 @@ export const CanvasLayerTree = ({
       if (!overId || !rawIntent) {
         setDropTarget(null);
         lastResolvedRef.current = null;
-        clearExpandTimer();
         return;
       }
 
       const resolved = resolveDrop(activeId, overId, rawIntent);
+      if (!resolved) {
+        setDropTarget(null);
+        lastResolvedRef.current = null;
+        return;
+      }
       lastResolvedRef.current = { activeId, resolved };
       setDropTarget((prev) =>
         prev &&
@@ -683,50 +783,26 @@ export const CanvasLayerTree = ({
               highlightFrameId: resolved.intoHighlightId,
             },
       );
-
-      // Auto-expand: hover for 350ms over a collapsed frame with raw
-      // `'into'` intent → expand so the user can drop on its children.
-      // Cancel as soon as the target / intent changes.
-      const overItem = visibleItemMap.get(overId);
-      const shouldArm =
-        overItem &&
-        (overItem.node.type === 'frame' || overItem.node.type === 'group') &&
-        rawIntent === 'into' &&
-        collapsedFrameIds.has(overId);
-      if (!shouldArm) {
-        clearExpandTimer();
-        return;
-      }
-      if (expandTimerRef.current?.targetId === overId) return;
-      clearExpandTimer();
-      const tid = setTimeout(() => {
-        toggleFrameCollapse(overId);
-        expandTimerRef.current = null;
-      }, 350);
-      expandTimerRef.current = { timeout: tid, targetId: overId };
     },
-    [
-      clearExpandTimer,
-      collapsedFrameIds,
-      resolveDrop,
-      toggleFrameCollapse,
-      visibleItemMap,
-    ],
+    [resolveDrop],
   );
 
   const handleDragCancel = useCallback(() => {
+    dragSessionRef.current = null;
+    setDraggingIds(new Set());
     setDropTarget(null);
     lastResolvedRef.current = null;
-    clearExpandTimer();
-  }, [clearExpandTimer]);
+  }, []);
 
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
+      const session = dragSessionRef.current;
+      dragSessionRef.current = null;
+      setDraggingIds(new Set());
       setDropTarget(null);
-      clearExpandTimer();
 
       const { active, over } = event;
-      if (!over) {
+      if (!over || session?.blocked) {
         lastResolvedRef.current = null;
         return;
       }
@@ -758,16 +834,44 @@ export const CanvasLayerTree = ({
       const resolved =
         cached && cached.activeId === activeId
           ? cached.resolved
-          : resolveDrop(activeId, rawOverId, rawIntent);
+          : resolveDrop(activeId, rawOverId, rawIntent, session);
       lastResolvedRef.current = null;
+      if (!resolved) {
+        toast(t('layers.invalidFrameDrop'), { tone: 'warning' });
+        return;
+      }
       const { effectiveOverId, effectiveIntent } = resolved;
       if (activeId === effectiveOverId) return;
 
-      const activeItem = itemById.get(activeId);
-      const targetItem = itemById.get(effectiveOverId);
-      if (!activeItem || !targetItem) return;
+      const liveNodes = useCanvasStore.getState().nodes;
+      const activeItem = liveNodes.find((node) => node.id === activeId);
+      const targetItem = liveNodes.find((node) => node.id === effectiveOverId);
+      if (!activeItem || !targetItem) {
+        toast(t('layers.nodeUnavailable'), { tone: 'warning' });
+        return;
+      }
 
-      const activeParentId = activeItem.node.parentId ?? null;
+      const activeParentId = activeItem.parentId ?? null;
+      const sourceIds = session?.ids ?? new Set([activeId]);
+      const moving = liveNodes.filter((node) => sourceIds.has(node.id));
+      const movingIds = moving.map((node) => node.id);
+      const dragOperand = sourceIds.size > 1 ? movingIds : activeId;
+
+      if (session && session.ids.size > 1) {
+        if (
+          moving.length !== session.ids.size ||
+          session.ids.has(targetItem.id)
+        ) {
+          toast(t('layers.nodeUnavailable'), { tone: 'warning' });
+          return;
+        }
+        if (
+          moving.some((node) => (node.parentId ?? null) !== session.parentId)
+        ) {
+          toast(t('layers.multiDragSameParentOnly'), { tone: 'info' });
+          return;
+        }
+      }
 
       // `into` → make `activeId` a child of the target frame, placed
       // as the topmost visible (top-of-panel) child. The tree is built
@@ -778,11 +882,14 @@ export const CanvasLayerTree = ({
       // visual list. If the frame is empty we pass no reorderTarget
       // and let the store decide the default placement.
       if (effectiveIntent === 'into') {
-        const topmostChild = items.find(
-          (i) => i.node.parentId === effectiveOverId && i.id !== activeId,
-        );
+        const topmostChild = liveNodes
+          .filter(
+            (node) =>
+              node.parentId === effectiveOverId && !sourceIds.has(node.id),
+          )
+          .at(-1);
         moveNodeIntoFrame(
-          activeId,
+          dragOperand,
           effectiveOverId,
           topmostChild
             ? { nodeId: topmostChild.id, position: 'after' }
@@ -802,17 +909,17 @@ export const CanvasLayerTree = ({
       // HIGHER z = AFTER the target in the nodes array, and vice versa.
       const position: 'before' | 'after' =
         effectiveIntent === 'before' ? 'after' : 'before';
-      const targetParentId = targetItem.node.parentId ?? null;
+      const targetParentId = targetItem.parentId ?? null;
 
       if (targetParentId === activeParentId) {
-        reorderNodes(activeId, effectiveOverId, position);
+        reorderNodes(dragOperand, effectiveOverId, position);
         return;
       }
 
       if (targetParentId === null) {
         // Move out of the current frame and land next to the target
         // top-level row.
-        moveNodeOutOfFrame(activeId, {
+        moveNodeOutOfFrame(dragOperand, {
           nodeId: effectiveOverId,
           position,
         });
@@ -820,20 +927,12 @@ export const CanvasLayerTree = ({
       }
 
       // Move into the target's frame at this slot.
-      moveNodeIntoFrame(activeId, targetParentId, {
+      moveNodeIntoFrame(dragOperand, targetParentId, {
         nodeId: effectiveOverId,
         position,
       });
     },
-    [
-      clearExpandTimer,
-      items,
-      itemById,
-      moveNodeIntoFrame,
-      moveNodeOutOfFrame,
-      reorderNodes,
-      resolveDrop,
-    ],
+    [moveNodeIntoFrame, moveNodeOutOfFrame, reorderNodes, resolveDrop, t],
   );
 
   // Stable handlers — these read fresh state from the store inside the
@@ -1112,6 +1211,7 @@ export const CanvasLayerTree = ({
     <DndContext
       sensors={sensors}
       collisionDetection={collisionDetection}
+      onDragStart={handleDragStart}
       onDragOver={handleDragMove}
       onDragMove={handleDragMove}
       onDragCancel={handleDragCancel}
@@ -1123,7 +1223,7 @@ export const CanvasLayerTree = ({
           role="tree"
           aria-label={t('layers.title')}
           aria-multiselectable="true"
-          className="flex flex-col py-1"
+          className="flex flex-col"
         >
           <SortableContext
             items={sortableIds}
@@ -1167,12 +1267,13 @@ export const CanvasLayerTree = ({
                   item={item}
                   isDirectlySelected={selectedIdSet.has(item.id)}
                   isHighlighted={highlightedIdSet.has(item.id)}
-                  isPreviewOpen={previewVisibleIdSet.has(item.id)}
                   tabIndex={focusedId === item.id ? 0 : -1}
                   isCollapsible={isCollapsible}
                   isCollapsed={isCollapsed}
                   isLocked={isLocked}
                   isDraggingDisabled={isDraggingDisabled}
+                  isDragging={draggingIds.has(item.id)}
+                  isDragActive={draggingIds.size > 0}
                   dropIntent={rowDropIntent}
                   dropIntentDepth={rowDropIntentDepth}
                   isIntoFrameHighlight={isIntoFrameHighlight}
@@ -1198,6 +1299,7 @@ export const CanvasLayerTree = ({
                 icon={getIcon(item.node)}
                 label={getDisplayName(item.node)}
                 isExternal
+                isDragActive={draggingIds.size > 0}
                 role="treeitem"
                 aria-level={1}
                 aria-disabled

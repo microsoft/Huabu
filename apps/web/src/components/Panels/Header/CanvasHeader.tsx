@@ -2,7 +2,7 @@
 // Licensed under the MIT license.
 
 import clsx from 'clsx';
-import { ListIndentDecrease, ListIndentIncrease } from 'lucide-react';
+import { PanelLeft, PanelLeftClose } from 'lucide-react';
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -24,7 +24,7 @@ interface CanvasHeaderProps {
    */
   onToggle?: () => void;
   /**
-   * Uses a smaller logo (`h-6 w-6`) suited for in-canvas use. The default
+   * Uses a smaller logo (`h-5 w-5`) suited for in-canvas use. The default
    * (`h-8 w-8`) is used on standalone pages such as the canvas list.
    */
   compact?: boolean;
@@ -58,23 +58,25 @@ export const CanvasHeader: React.FC<CanvasHeaderProps> = ({
   return (
     <header
       className={clsx(
-        'bg-surface flex items-center gap-1 overflow-hidden',
-        // In-column variant connects to the left panel below via shared
-        // borders. Floating variant matches the CanvasToolbar chrome
-        // (soft bottom shadow, no border, lg-rounded card) and caps its
-        // width so long canvas titles don't stretch the overlay across
-        // the canvas.
+        'bg-surface flex items-center overflow-hidden',
         vertical
-          ? 'border-edge-default h-full w-12 flex-col border-r px-2 py-1'
-          : isCollapsed
-            ? 'shadow-bottom h-10 max-w-[18rem] rounded-lg border-0'
-            : 'border-edge-default h-12 border-r border-b',
-        !vertical && 'px-2',
+          ? 'border-edge-default h-full w-12 flex-col gap-1 border-r px-2 py-1'
+          : compact
+            ? 'gap-0.5'
+            : 'gap-1',
+        !vertical &&
+          (isCollapsed
+            ? 'shadow-bottom h-10 max-w-[18rem] rounded-lg border-0 px-2'
+            : 'border-edge-default h-12 border-r px-3 py-1'),
       )}
     >
       {!vertical && (
         <>
-          <AppMenu compact={compact} />
+          <AppMenu
+            compact={compact}
+            logoClassName={compact ? 'h-5 w-5' : undefined}
+            triggerClassName={compact ? 'h-6 w-6 p-0' : undefined}
+          />
 
           <div className="min-w-0 flex-1">
             {children ?? <CanvasMenu onOpenShortcuts={onOpenShortcuts} />}
@@ -86,6 +88,12 @@ export const CanvasHeader: React.FC<CanvasHeaderProps> = ({
         <Button
           variant="ghost"
           iconOnly
+          size="sm"
+          className="text-fg-subtle enabled:hover:text-fg-default"
+          tooltipWrapperClassName={clsx(
+            'inline-flex shrink-0',
+            !vertical && (compact ? 'ml-2.5' : 'ml-2'),
+          )}
           onClick={onToggle}
           title={isCollapsed ? t('layers.show') : t('layers.collapse')}
           aria-label={
@@ -93,9 +101,9 @@ export const CanvasHeader: React.FC<CanvasHeaderProps> = ({
           }
         >
           {isCollapsed ? (
-            <ListIndentIncrease size={16} />
+            <PanelLeft className="h-4! w-4!" />
           ) : (
-            <ListIndentDecrease size={16} />
+            <PanelLeftClose className="h-4! w-4!" />
           )}
         </Button>
       )}

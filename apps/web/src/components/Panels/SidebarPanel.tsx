@@ -60,7 +60,7 @@ export const SidebarPanel = ({
         >
           {iconCollapsed}
         </Button>
-        <span className="text-fg-muted mt-3 text-xs font-semibold select-none [text-orientation:mixed] [writing-mode:vertical-rl]">
+        <span className="text-fg-muted mt-3 text-sm font-medium select-none [text-orientation:mixed] [writing-mode:vertical-rl]">
           {title}
         </span>
       </div>
@@ -83,7 +83,7 @@ export const SidebarPanel = ({
             compactHeader ? 'h-9 px-2' : 'h-12 px-3',
           )}
         >
-          <div className="text-fg-muted flex max-w-full min-w-0 flex-1 items-center text-sm font-semibold">
+          <div className="text-fg-muted flex max-w-full min-w-0 flex-1 items-center text-sm font-medium">
             {hideTitle ? (
               <span className="sr-only">{title}</span>
             ) : tabs ? (

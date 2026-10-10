@@ -204,6 +204,67 @@ describe('useCanvasShortcuts catalog key lock', () => {
     },
   );
 
+  it.each(['metaKey', 'ctrlKey'] as const)(
+    'allows only undo and redo from the Layers tree with %s',
+    (modifier) => {
+      const panel = document.createElement('div');
+      panel.dataset.canvasPanel = 'left';
+      const tree = document.createElement('div');
+      tree.setAttribute('role', 'tree');
+      const row = document.createElement('div');
+      row.setAttribute('role', 'treeitem');
+      tree.appendChild(row);
+      panel.appendChild(tree);
+      container.appendChild(panel);
+      const press = (target: HTMLElement, key: string, shiftKey = false) => {
+        const event = new KeyboardEvent('keydown', {
+          key,
+          [modifier]: true,
+          shiftKey,
+          bubbles: true,
+          cancelable: true,
+        });
+        act(() => target.dispatchEvent(event));
+        return event;
+      };
+      expect(press(row, 'z').defaultPrevented).toBe(true);
+      expect(canvasActions.undo).toHaveBeenCalledTimes(1);
+      expect(press(row, 'z', true).defaultPrevented).toBe(true);
+      expect(canvasActions.redo).toHaveBeenCalledTimes(1);
+      for (const key of ['c', 'v', 'g', '[', ']'])
+        expect(press(row, key).defaultPrevented).toBe(false);
+      expect(canvasActions.copySelectedNodes).not.toHaveBeenCalled();
+      expect(canvasActions.pasteNodes).not.toHaveBeenCalled();
+      expect(canvasActions.frameSelectedNodes).not.toHaveBeenCalled();
+      expect(canvasActions.sendSelectedToOrder).not.toHaveBeenCalled();
+
+      for (const tag of ['input', 'textarea']) {
+        const editor = document.createElement(tag);
+        row.appendChild(editor);
+        expect(press(editor, 'z').defaultPrevented).toBe(false);
+        expect(press(editor, 'z', true).defaultPrevented).toBe(false);
+      }
+      for (const role of ['textbox', 'menu', 'dialog', 'listbox']) {
+        const control = document.createElement('div');
+        control.setAttribute('role', role);
+        row.appendChild(control);
+        expect(press(control, 'z').defaultPrevented).toBe(false);
+        expect(press(control, 'z', true).defaultPrevented).toBe(false);
+      }
+      const composing = new KeyboardEvent('keydown', {
+        key: 'z',
+        [modifier]: true,
+        isComposing: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      act(() => row.dispatchEvent(composing));
+      expect(composing.defaultPrevented).toBe(false);
+      expect(canvasActions.undo).toHaveBeenCalledTimes(1);
+      expect(canvasActions.redo).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it('copies selected nodes when an editor retains focus without selected text', () => {
     const editor = document.createElement('textarea');
     editor.value = 'Note text';

@@ -2,14 +2,23 @@
 // Licensed under the MIT license.
 
 import clsx from 'clsx';
-import { ChevronsDownUp, ChevronsUpDown, Search } from 'lucide-react';
+import {
+  Check,
+  ChevronsDownUp,
+  ChevronsUpDown,
+  MoreHorizontal,
+} from 'lucide-react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { getFilterKeyLabelKey, getFilterKeyMeta } from './layerFilterKey';
-import { formatShortcutById } from '../../../config/shortcuts';
 import { Button } from '../../Common/Button';
+import { DropdownMenu, DropdownMenuItem } from '../../Common/DropdownMenu';
 
 import type { LayerFilterKey } from './layerFilterKey';
+
+const FILTER_BUTTON_WIDTH_PX = 24;
+const FILTER_BUTTON_GAP_PX = 2;
 
 interface LayerFilterBarProps {
   /**
@@ -51,14 +60,6 @@ interface LayerFilterBarProps {
    * because they additionally feed `nodeTypes` to the search.
    */
   isSearchActive: boolean;
-  /**
-   * Drives the search toggle button's pressed state + tooltip.
-   * `true` while the canvas search input is revealed (mounted in
-   * the panel above this bar), `false` while it's hidden.
-   */
-  isSearchOpen: boolean;
-  /** Toggle the canvas search input's visibility (panel state). */
-  onToggleSearch: () => void;
 }
 
 /**
@@ -83,32 +84,58 @@ export const LayerFilterBar = ({
   hasAnyExpandedFrame,
   onToggleAllFrames,
   isSearchActive,
-  isSearchOpen,
-  onToggleSearch,
 }: LayerFilterBarProps) => {
   const { t } = useTranslation();
   const showChipRow = availableKeys.length >= 2;
   const showCollapseAll = hasAnyFrame && !isSearchActive;
+  const chipRowRef = useRef<HTMLDivElement>(null);
+  const [chipRowWidth, setChipRowWidth] = useState(0);
+  useLayoutEffect(() => {
+    const row = chipRowRef.current;
+    if (!row) return;
+    const measure = () => setChipRowWidth(row.clientWidth);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(row);
+    return () => observer.disconnect();
+  }, [showChipRow]);
+
+  const capacity = Math.floor(
+    (chipRowWidth + FILTER_BUTTON_GAP_PX) /
+      (FILTER_BUTTON_WIDTH_PX + FILTER_BUTTON_GAP_PX),
+  );
+  const visibleCount =
+    availableKeys.length <= capacity
+      ? availableKeys.length
+      : Math.max(0, capacity - 1);
+  const visibleKeys = availableKeys.slice(0, visibleCount);
+  const overflowKeys = availableKeys.slice(visibleCount);
+  const activeOverflowCount = overflowKeys.filter((key) =>
+    selectedKeys.has(key),
+  ).length;
   const CollapseAllIcon = hasAnyExpandedFrame ? ChevronsDownUp : ChevronsUpDown;
   const collapseAllTitle = hasAnyExpandedFrame
     ? t('layers.collapseAllFrames')
     : t('layers.expandAllFrames');
 
-  // The search toggle is the bar's permanent anchor — once the
-  // toggle moved into this row, the bar always has at least one
-  // affordance to render, so the previous empty-state early-return
-  // would only fire on the (impossible) "toggle missing" path. The
-  // chip row and collapse-all toggle remain conditional alongside it.
+  if (!showChipRow && !showCollapseAll) return null;
 
   return (
-    <div className="bg-surface border-edge-default/40 flex shrink-0 items-center gap-1.5 border-b px-2 py-1.5">
-      <div className="flex flex-1 flex-wrap items-center gap-0.5">
+    <div
+      className="bg-surface flex shrink-0 items-center gap-1.5 px-3 py-1"
+      data-layer-filter-bar
+    >
+      <div
+        ref={chipRowRef}
+        className="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden"
+        data-layer-filter-chips
+      >
         {showChipRow &&
           // No text label by design — "Filter" is jargon and adds a
           // language barrier; the chips themselves carry the
           // affordance (icon-only buttons with per-type tooltips like
           // "Filter by Image").
-          availableKeys.map((key) => {
+          visibleKeys.map((key) => {
             const { icon: Icon } = getFilterKeyMeta(key);
             const label = t(getFilterKeyLabelKey(key));
             const isSelected = selectedKeys.has(key);
@@ -119,7 +146,6 @@ export const LayerFilterBar = ({
                 tone={isSelected ? 'info' : 'neutral'}
                 iconOnly
                 size="sm"
-                shape="pill"
                 onClick={() => onToggleKey(key)}
                 title={
                   isSelected
@@ -127,15 +153,76 @@ export const LayerFilterBar = ({
                     : t('layers.filterBy', { label })
                 }
                 className={clsx(
-                  'p-1!',
-                  isSelected ? 'bg-info-bg!' : 'text-fg-muted',
+                  'h-6 w-6 shrink-0 p-1!',
+                  isSelected ? 'bg-info-bg!' : 'text-fg-subtle',
                 )}
                 aria-pressed={isSelected}
+                data-layer-filter-key={key}
               >
-                <Icon size={12} />
+                <Icon size={14} className="h-3.5! w-3.5!" />
               </Button>
             );
           })}
+        {showChipRow && overflowKeys.length > 0 && (
+          <DropdownMenu
+            floating
+            trigger={
+              <Button
+                variant="ghost"
+                tone={activeOverflowCount > 0 ? 'info' : 'neutral'}
+                iconOnly
+                size="sm"
+                tooltipWrapperClassName="flex"
+                className={clsx(
+                  'h-6 w-6 shrink-0 p-1!',
+                  activeOverflowCount > 0 ? 'bg-info-bg!' : 'text-fg-subtle',
+                )}
+                title={
+                  activeOverflowCount > 0
+                    ? t('layers.moreFiltersActive', {
+                        count: activeOverflowCount,
+                      })
+                    : t('layers.moreFilters')
+                }
+              >
+                <MoreHorizontal size={14} className="h-3.5! w-3.5!" />
+              </Button>
+            }
+          >
+            {overflowKeys.map((key) => {
+              const { icon: Icon } = getFilterKeyMeta(key);
+              const label = t(getFilterKeyLabelKey(key));
+              const isSelected = selectedKeys.has(key);
+              return (
+                <DropdownMenuItem
+                  key={key}
+                  icon={
+                    <Icon
+                      size={14}
+                      className={clsx(
+                        'h-3.5! w-3.5!',
+                        isSelected ? 'text-info' : 'text-fg-subtle',
+                      )}
+                    />
+                  }
+                  trailing={
+                    isSelected ? (
+                      <Check size={14} className="text-info" aria-hidden />
+                    ) : undefined
+                  }
+                  aria-label={
+                    isSelected
+                      ? t('layers.stopFilteringBy', { label })
+                      : t('layers.filterBy', { label })
+                  }
+                  onClick={() => onToggleKey(key)}
+                >
+                  {label}
+                </DropdownMenuItem>
+              );
+            })}
+          </DropdownMenu>
+        )}
       </div>
       {showCollapseAll && (
         <div className="flex shrink-0 items-center gap-0.5">
@@ -145,33 +232,12 @@ export const LayerFilterBar = ({
             size="sm"
             onClick={onToggleAllFrames}
             title={collapseAllTitle}
-            className="text-fg-muted p-1!"
+            className="text-fg-subtle p-1!"
           >
-            <CollapseAllIcon size={12} />
+            <CollapseAllIcon size={14} className="h-3.5! w-3.5!" />
           </Button>
         </div>
       )}
-      <div className="flex shrink-0 items-center gap-0.5">
-        <Button
-          variant="ghost"
-          tone={isSearchOpen ? 'info' : 'neutral'}
-          iconOnly
-          size="sm"
-          onClick={onToggleSearch}
-          title={
-            isSearchOpen
-              ? `${t('layers.closeSearch')} (${formatShortcutById('search.close')})`
-              : `${t('layers.searchCanvas')} (${formatShortcutById('search.open')})`
-          }
-          className={clsx(
-            'p-1!',
-            isSearchOpen ? 'bg-info-bg!' : 'text-fg-muted',
-          )}
-          aria-pressed={isSearchOpen}
-        >
-          <Search size={12} />
-        </Button>
-      </div>
     </div>
   );
 };

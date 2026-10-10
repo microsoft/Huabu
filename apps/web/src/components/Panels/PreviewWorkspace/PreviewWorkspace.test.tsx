@@ -1315,11 +1315,25 @@ describe('right panel host', () => {
 
     expect(Object.values(store().workspace.tabs)).toHaveLength(1);
     expect(Object.values(store().workspace.tabs)[0].target.kind).toBe('chat');
-    expect(
-      container
-        ?.querySelector('[data-testid="collapse-preview"]')
-        ?.classList.contains('p-1.5'),
-    ).toBe(true);
+    const collapse = container?.querySelector<HTMLButtonElement>(
+      '[data-testid="collapse-preview"]',
+    );
+    const newChat = container?.querySelector<HTMLButtonElement>(
+      'button[aria-label="New conversation"]:not([role="tab"])',
+    );
+    expect(collapse?.classList.contains('p-1.5')).toBe(true);
+    expect(collapse?.className).toBe(newChat?.className);
+    expect(collapse?.querySelector('.lucide-panel-right-close')).not.toBeNull();
+    expect(newChat?.querySelector('.lucide-plus')).not.toBeNull();
+    for (const button of [newChat, collapse]) {
+      expect(button?.classList.contains('text-fg-subtle')).toBe(true);
+      expect(button?.classList.contains('enabled:hover:text-fg-default')).toBe(
+        true,
+      );
+      expect(button?.classList.contains('[&_svg]:h-4')).toBe(true);
+      expect(button?.classList.contains('[&_svg]:w-4')).toBe(true);
+      expect(button?.querySelector('svg')?.matches('.lucide')).toBe(true);
+    }
   });
 
   it('toggles fullscreen from the tab strip and exits with Escape', () => {

@@ -12,8 +12,6 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { getQuestionNodeStatus } from '@huabu/shared';
-
 import { CanvasLayerTree } from './CanvasLayerTree';
 import { CanvasSearchInput } from './CanvasSearchInput';
 import { CanvasSearchResults } from './CanvasSearchResults';
@@ -23,19 +21,17 @@ import {
   isOfficeFilterKey,
   type LayerFilterKey,
 } from './layerFilterKey';
+import { LayerNodeIcon } from './LayerNodeIcon';
 import {
   isLayerNodeVisibleByDefault,
   nodeMatchesLayerFilters,
 } from './missingNodeFilter';
 import { MissingNodesSummary } from './MissingNodesSummary';
-import { QuestionStatusDot } from './QuestionStatusDot';
-import { getNodeIcon } from '../../../config/nodeIcons';
 import useCanvasStore from '../../../store/canvasStore';
 import { useExternalImportsStore } from '../../../store/externalImportsStore';
 import { usePanelStore } from '../../../store/panelStore';
 import { useSearchStore } from '../../../store/searchStore';
 import { hasMissingFile } from '../../Nodes/missingFile';
-import { SketchIcon } from '../../Nodes/sketch/SketchIcon';
 import { SidebarPanel } from '../SidebarPanel';
 
 import type { DataSourceNodeLike, DataSourceTreeItem } from './types';
@@ -43,7 +39,6 @@ import type {
   CanvasNodeType,
   ExternalNoteItem,
   OfficeFormat,
-  SketchStroke,
 } from '@huabu/shared';
 
 interface CanvasLayerPanelProps {
@@ -52,53 +47,9 @@ interface CanvasLayerPanelProps {
   onToggle?: () => void;
 }
 
-const ICON_SIZE = 14;
-const ICON_STROKE_WIDTH = 1.5;
-
-const renderNodeIcon = (node: DataSourceNodeLike) => {
-  // Sketch nodes render a tiny polyline preview of their strokes so the
-  // layer panel reflects each drawing's actual shape. Falls back to the
-  // lucide Pencil icon if the node has no strokes yet (legacy / empty).
-  if (node.type === 'sketch') {
-    const strokes = node.data.strokes as SketchStroke[] | undefined;
-    const initialSize = node.data.initialSize as
-      | { width: number; height: number }
-      | undefined;
-    if (strokes && strokes.length > 0 && initialSize) {
-      return (
-        <SketchIcon
-          strokes={strokes}
-          initialSize={initialSize}
-          size={ICON_SIZE}
-        />
-      );
-    }
-  }
-
-  const Icon = getNodeIcon(node.type, node.data);
-  const iconEl = <Icon size={ICON_SIZE} strokeWidth={ICON_STROKE_WIDTH} />;
-
-  // Question nodes carry an execution lifecycle (pending → running →
-  // done | error). We overlay a tiny status dot so the layer panel
-  // doubles as an "ambient" status board for in-flight conversations,
-  // mirroring what the on-canvas question badge shows.
-  if (node.type === 'question') {
-    const status = getQuestionNodeStatus(node.data);
-    if (status === 'idle') return iconEl;
-    return (
-      <span className="relative inline-flex">
-        {iconEl}
-        <QuestionStatusDot
-          status={status}
-          viewed={node.data.viewed as boolean | undefined}
-          errorMessage={node.data.errorMessage as string | undefined}
-        />
-      </span>
-    );
-  }
-
-  return iconEl;
-};
+const renderNodeIcon = (node: DataSourceNodeLike) => (
+  <LayerNodeIcon node={node} />
+);
 
 const getNodeDisplayName = (node: DataSourceNodeLike): string => {
   return node.data.label;
@@ -268,14 +219,6 @@ export const CanvasLayerPanel = ({
   // list in their place; when empty the tree comes back.
   const searchQuery = useSearchStore((s) => s.query);
   const isSearchActive = searchQuery.trim().length > 0;
-
-  // Reveal / dismiss state for the search input row itself. Lives
-  // in `panelStore` so the toggle button in `LayerFilterBar` and
-  // the global `Cmd+F` hotkey can both flip it, and so a future
-  // entry point (command palette, etc.) can drop in without
-  // threading new props through this component.
-  const isSearchOpen = usePanelStore((s) => s.isSearchOpen);
-  const toggleSearchOpen = usePanelStore((s) => s.toggleSearchOpen);
 
   // Mirror the chip whitelist into the search store so chip
   // toggles also narrow the canvas-wide search request (the
@@ -493,25 +436,10 @@ export const CanvasLayerPanel = ({
       className="border-edge-default border-r"
       hideHeader
     >
-      {/* Three-row split inside the panel so the scrollbar lane only
-          spans the tree / result list, not the toolbars above. The
-          search input row is mounted only while `panelStore.isSearchOpen`
-          is true — entered via the search icon in the chip toolbar
-          or the global `Cmd+F` hotkey, dismissed via `Esc` or by
-          re-clicking the icon. The chip toolbar stays mounted in
-          both modes so chip toggles can narrow / widen the search
-          request live (selected chips feed `searchStore.nodeTypes`).
-          The tree below is replaced by the streamed result list once
-          the query is non-empty. SidebarPanel's content wrapper still
-          has `overflow-y-auto`, but the inner column here is `h-full`
-          with its own scrolling region — the outer wrapper has no
-          overflow to manage. */}
-      <div className="flex h-full flex-col">
-        {isSearchOpen && (
-          <div className="bg-surface border-edge-default/40 shrink-0 border-b px-2 py-1.5">
-            <CanvasSearchInput />
-          </div>
-        )}
+      <div className="flex h-full flex-col" data-search-scope="canvas">
+        <div className="bg-surface shrink-0 px-3 pb-1">
+          <CanvasSearchInput />
+        </div>
         <LayerFilterBar
           availableKeys={availableKeys}
           selectedKeys={selectedKeys}
@@ -520,8 +448,6 @@ export const CanvasLayerPanel = ({
           hasAnyExpandedFrame={hasAnyExpandedFrame}
           onToggleAllFrames={handleToggleAllFrames}
           isSearchActive={isSearchActive}
-          isSearchOpen={isSearchOpen}
-          onToggleSearch={toggleSearchOpen}
         />
         {missingNodeCount > 0 && (
           <MissingNodesSummary
@@ -534,7 +460,7 @@ export const CanvasLayerPanel = ({
         )}
         <div
           ref={listHostRef}
-          className="min-h-0 flex-1 overflow-y-auto"
+          className="min-h-0 flex-1 overflow-y-auto py-1"
           onScroll={(event) => {
             if (isContentMounted)
               listSession.scrollTop = event.currentTarget.scrollTop;

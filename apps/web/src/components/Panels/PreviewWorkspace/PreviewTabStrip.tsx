@@ -19,9 +19,9 @@ import {
 } from '@dnd-kit/sortable';
 import {
   Columns2,
-  ListIndentIncrease,
   Maximize2,
   Minimize2,
+  PanelRightClose,
   Plus,
 } from 'lucide-react';
 import { useEffect } from 'react';
@@ -174,17 +174,19 @@ export function PreviewTabStrip({
           variant="ghost"
           iconOnly
           size="md"
+          className="text-fg-subtle enabled:hover:text-fg-default"
           title={t('chat.newConversation')}
           tooltipPlacement="bottom"
           onClick={onNewChat}
         >
-          <Plus />
+          <Plus aria-hidden />
         </Button>
         {onToggleFullscreen && (
           <Button
             variant="ghost"
             iconOnly
             size="md"
+            className="text-fg-subtle enabled:hover:text-fg-default"
             data-testid="toggle-preview-fullscreen"
             title={t(
               isFullscreen
@@ -204,6 +206,7 @@ export function PreviewTabStrip({
                 variant="ghost"
                 iconOnly
                 size="md"
+                className="text-fg-subtle enabled:hover:text-fg-default"
                 title={t('preview.openToSide')}
                 tooltipPlacement="bottom"
                 onClick={() => onOpenToSide(activeTabId)}
@@ -216,12 +219,13 @@ export function PreviewTabStrip({
                 variant="ghost"
                 iconOnly
                 size="md"
+                className="text-fg-subtle enabled:hover:text-fg-default"
                 data-testid="collapse-preview"
                 title={t('preview.collapse')}
                 tooltipPlacement="bottom"
                 onClick={onCollapse}
               >
-                <ListIndentIncrease size={16} />
+                <PanelRightClose aria-hidden />
               </Button>
             )}
           </>
