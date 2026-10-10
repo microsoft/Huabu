@@ -9,7 +9,7 @@ import { SettingsModal } from './SettingsModal';
 
 import type { Root } from 'react-dom/client';
 
-type RequestedTab = 'builtIn' | 'capabilities' | null;
+type RequestedTab = 'builtIn' | 'services' | null;
 
 const mocks = vi.hoisted(() => ({
   init: vi.fn(),
@@ -80,14 +80,8 @@ vi.mock('./sections/GeneralSettings', () => ({
 vi.mock('./sections/LLMSettings', () => ({
   LLMSettings: () => <div data-testid="built-in-settings" />,
 }));
-vi.mock('./sections/ImageProviderSettings', () => ({
-  ImageProviderSettings: () => <div data-testid="image-settings" />,
-}));
-vi.mock('./sections/IntegrationsSettings', () => ({
-  IntegrationsSettings: () => <div data-testid="integration-settings" />,
-}));
-vi.mock('./sections/InkOcrSettings', () => ({
-  InkOcrSettings: () => <div data-testid="ocr-settings" />,
+vi.mock('./sections/ServicesSettings', () => ({
+  ServicesSettings: () => <div data-testid="services-settings" />,
 }));
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -157,27 +151,21 @@ describe('Settings information architecture', () => {
     expect(mocks.llmInit).not.toHaveBeenCalled();
   });
 
-  it('keeps Huabu-owned capabilities separate from Agent configuration', async () => {
+  it('keeps Huabu-managed services separate from Agent configuration', async () => {
     await renderModal();
 
     await act(async () => {
-      findTab('settings.capabilities').click();
+      findTab('settings.services').click();
     });
 
-    expect(container.textContent).toContain('settings.capabilitiesDescription');
+    expect(container.textContent).toContain('settings.servicesDescription');
     expect(
       container
-        .querySelector('[data-testid="capability-sections"]')
+        .querySelector('[data-testid="service-sections"]')
         ?.classList.contains('space-y-4'),
     ).toBe(true);
     expect(
-      container.querySelector('[data-testid="image-settings"]'),
-    ).not.toBeNull();
-    expect(
-      container.querySelector('[data-testid="integration-settings"]'),
-    ).not.toBeNull();
-    expect(
-      container.querySelector('[data-testid="ocr-settings"]'),
+      container.querySelector('[data-testid="services-settings"]'),
     ).not.toBeNull();
     expect(
       container.querySelector('[data-testid="agent-defaults"]'),

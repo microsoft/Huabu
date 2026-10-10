@@ -38,6 +38,11 @@ All endpoints are mounted under `/api/rfs/:canvasId`; `HUABU_RFS_URL` already co
 | `GET /capabilities`                | Report the direct-operation protocol, limits, semantics, and supported operation types.                                             |
 | `GET /capabilities/queries/:type`  | Return one query's generated JSON Schema, constraints, result description, and examples.                                            |
 | `GET /capabilities/commands/:type` | Return one command's generated JSON Schema, constraints, result description, and examples.                                          |
+| `GET /services`                    | List configured third-party Services and masked availability.                                                                       |
+| `GET /services/:id/manifest`       | Return one Service Package's validated Manifest without credentials.                                                                |
+| `GET /services/:id/skill`          | Return an Agent-facing Service Package's root `SKILL.md`.                                                                           |
+| `POST /services/:id/lease`         | Return the declared effective configuration for one configured Agent-facing Service with `Cache-Control: no-store`.                 |
+| `GET /download/services/:id.zip`   | Stream one Agent-facing Package as `<serviceId>/service.yaml` plus its exact Manifest-declared files.                               |
 | `POST /query`                      | Validate and execute one bounded `SpaceQuery`, returning a query-discriminated JSON result.                                         |
 | `POST /execute`                    | Validate and execute an ordered batch of agent-allowed `CanvasCommand` variants.                                                    |
 
@@ -98,6 +103,8 @@ Parent lineage is best effort. The route resolves `parentThreadId` or `X-Huabu-H
 ## External-agent bootstrap
 
 Huabu injects `HUABU_RFS_URL` and `AGENTLET_TOKEN` into the external agent environment. `HUABU_RFS_URL` is derived from the deployment-owned root `HUABU_PUBLIC_ORIGIN` plus `/api/rfs/<canvasId>`; a loopback deployment with no configured public origin uses its actual bound port as the explicit local fallback. Network binds require a non-loopback public origin before the Server listens, so a remote Agentlet never receives a success-shaped Server-local loopback URL. Every external-agent Deployment persists the bootstrap as its initial preamble, including Deployments first created by mode, model, or configuration control requests; startup repair backfills older undelivered records that omitted it. The preamble owns the authentication contract and curl header setup because every external Agent needs them before loading any Skill. The public basic guide is loaded without credentials from `GET /skill`; repeating that request with authentication adds the current root override and live Space Skill Frames. Advanced layout, Task, recursive-Agent, and Interactive View procedures are loaded on demand from authenticated `GET /skill/layout`, `/skill/tasks`, `/skill/agents`, and `/skill/interactive-views`.
+
+Agentlet additionally injects its daemon-owned `AGENTLET_SERVICE_SDK_URL`, an absolute `file://` URL for the SDK shipped in Agentlet's `dist/service-sdk`. Session or Profile environment cannot override this value. Downloaded Service Package entries use the SDK only to obtain current configuration leases; the SDK does not discover or load Package code, and provider credentials remain absent from startup environment until an entry requests them.
 
 Skills explain when and how to compose workflows, but they do not duplicate the wire protocol. `GET /capabilities` and its per-operation endpoints remain the canonical, schema-derived source for current query and command fields, limits, and semantics.
 

@@ -55,6 +55,7 @@ import {
   resolveAllowedHostnames,
 } from './modules/security/index.js';
 import { createApplicationRateLimitOptions } from './modules/security/rate-limit.js';
+import serviceRoutes from './modules/services/services.route.js';
 import { closeStorage } from './modules/storage/index.js';
 import webRoutes from './modules/web/web.route.js';
 import {
@@ -236,7 +237,8 @@ app.addHook('preHandler', async (request, reply) => {
     !url.startsWith('/api/workspace') &&
     !url.startsWith('/api/deployment') &&
     !url.startsWith('/api/llm') &&
-    !url.startsWith('/api/integrations')
+    !url.startsWith('/api/integrations') &&
+    !url.startsWith('/api/services')
   ) {
     return reply.status(503).send({
       message:
@@ -257,6 +259,7 @@ app.register(artifactRoute, { prefix: '/api/canvas' });
 
 app.register(llmRoutes, { prefix: '/api/llm' });
 app.register(integrationsRoutes, { prefix: '/api/integrations' });
+app.register(serviceRoutes, { prefix: '/api/services' });
 app.register(deploymentRoutes, { prefix: '/api/deployment' });
 app.register(canaryRedeployRoutes, {
   prefix: '/api/deployment/canary',

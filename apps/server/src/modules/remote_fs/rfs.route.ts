@@ -36,6 +36,8 @@ import { createReadStream, existsSync, statSync } from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
+import archiver from 'archiver';
+
 import {
   AGENT_SSE_EVENTS,
   RFS_HEARTBEAT_DEFAULT_SEC,
@@ -44,6 +46,7 @@ import {
   createTaskRequestSchema,
   completeTaskRunRequestSchema,
   createInteractiveViewRequestSchema,
+  serviceParamsSchema,
   interactiveViewLookupQuerySchema,
   interactiveViewResourceParamsSchema,
   rfsAgentCreateHeadersSchema,
@@ -69,6 +72,7 @@ import {
   type RfsUploadResponse,
   type AgentStreamEvent,
   type StartTaskRunResponse,
+  type ServiceParams,
 } from '@huabu/shared';
 
 import { mimeForPath } from './mime.js';
@@ -120,6 +124,13 @@ import {
   InteractiveViewServiceError,
   interactiveViewService,
 } from '../interactive-view/interactive-view.service.js';
+import {
+  serviceProvisioner,
+  ServiceProvisionError,
+  getBundledServicePackage,
+  isAgentFacingService,
+  readServicePackageFile,
+} from '../services/index.js';
 import {
   storageServes,
   unavailableCapabilityMessage,
@@ -522,6 +533,138 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
   app.get('/:canvasId/capabilities', async (_request, reply) =>
     reply.send(getRfsCapabilities()),
   );
+
+  // ── Service Packages ──
+  //
+  // `/capabilities` already owns direct Space-operation discovery. Keep the
+  // configured third-party services under a separate unambiguous root.
+  app.get('/:canvasId/services', async (_request, reply) =>
+    reply.send({ services: serviceProvisioner.list() }),
+  );
+
+  app.get<{
+    Params: ServiceParams & { canvasId: string };
+  }>('/:canvasId/services/:serviceId/manifest', async (request, reply) => {
+    const parsed = serviceParamsSchema.safeParse({
+      serviceId: request.params.serviceId,
+    });
+    if (!parsed.success) {
+      return reply.code(400).send(rfsError('Invalid Service id'));
+    }
+    const service = getBundledServicePackage(parsed.data.serviceId);
+    if (!service) {
+      return reply
+        .code(404)
+        .send(rfsError('Service not found', 'service_not_found'));
+    }
+    return reply.send(service.manifest);
+  });
+
+  app.get<{
+    Params: ServiceParams & { canvasId: string };
+  }>('/:canvasId/services/:serviceId/skill', async (request, reply) => {
+    const parsed = serviceParamsSchema.safeParse({
+      serviceId: request.params.serviceId,
+    });
+    if (!parsed.success) {
+      return reply.code(400).send(rfsError('Invalid Service id'));
+    }
+    const content = readServicePackageFile(parsed.data.serviceId, 'SKILL.md');
+    if (!content) {
+      return reply
+        .code(404)
+        .send(rfsError('Service Skill not found', 'skill_not_found'));
+    }
+    return reply.type('text/markdown; charset=utf-8').send(content);
+  });
+
+  app.get<{
+    Params: ServiceParams & { canvasId: string };
+  }>('/:canvasId/download/services/:serviceId.zip', async (request, reply) => {
+    const parsed = serviceParamsSchema.safeParse({
+      serviceId: request.params.serviceId,
+    });
+    if (!parsed.success) {
+      return reply.code(400).send(rfsError('Invalid Service id'));
+    }
+    const service = getBundledServicePackage(parsed.data.serviceId);
+    if (!service) {
+      return reply
+        .code(404)
+        .send(rfsError('Service not found', 'service_not_found'));
+    }
+    if (!isAgentFacingService(service.manifest)) {
+      return reply
+        .code(403)
+        .send(
+          rfsError(
+            'Service is not available to External Agents',
+            'service_not_agent_accessible',
+          ),
+        );
+    }
+    const etag = `"${service.contentHash}"`;
+    reply.header('ETag', etag);
+    if (ifNoneMatchSatisfied(request.headers['if-none-match'], etag)) {
+      return reply.code(304).send();
+    }
+    const filename = `${service.manifest.id}-${service.manifest.version}.zip`;
+    reply
+      .header('Cache-Control', 'private, max-age=300')
+      .header('Content-Disposition', `attachment; filename="${filename}"`)
+      .type('application/zip');
+    const archive = archiver('zip', { zlib: { level: 6 } });
+    archive.on('warning', (error) => {
+      request.log.warn(
+        { err: error, serviceId: service.manifest.id },
+        'Service package archive warning',
+      );
+    });
+    archive.on('error', (error) => {
+      request.log.error(
+        { err: error, serviceId: service.manifest.id },
+        'Service package archive failed',
+      );
+    });
+    const archiveRoot = `${service.manifest.id}/`;
+    archive.file(service.manifestPath, {
+      name: `${archiveRoot}service.yaml`,
+    });
+    for (const file of service.files) {
+      archive.file(file.absolutePath, {
+        name: `${archiveRoot}${file.relativePath}`,
+      });
+    }
+    void archive.finalize();
+    return reply.send(archive);
+  });
+
+  app.post<{
+    Params: ServiceParams & { canvasId: string };
+  }>('/:canvasId/services/:serviceId/lease', async (request, reply) => {
+    const parsed = serviceParamsSchema.safeParse({
+      serviceId: request.params.serviceId,
+    });
+    if (!parsed.success) {
+      return reply.code(400).send(rfsError('Invalid Service id'));
+    }
+    try {
+      return reply
+        .header('Cache-Control', 'no-store')
+        .send(serviceProvisioner.lease(parsed.data.serviceId));
+    } catch (error) {
+      if (error instanceof ServiceProvisionError) {
+        const status =
+          error.code === 'service_not_found'
+            ? 404
+            : error.code === 'service_not_agent_accessible'
+              ? 403
+              : 409;
+        return reply.code(status).send(rfsError(error.message, error.code));
+      }
+      throw error;
+    }
+  });
 
   app.get<{ Params: { canvasId: string; type: string } }>(
     '/:canvasId/capabilities/queries/:type',
