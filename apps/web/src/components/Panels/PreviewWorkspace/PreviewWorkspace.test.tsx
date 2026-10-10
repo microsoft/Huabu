@@ -1218,6 +1218,64 @@ describe('tab batch close menu', () => {
     );
   });
 
+  it.each([
+    'Close',
+    'Close other tabs',
+    'Close tabs to the right',
+    'Close all tabs in this group',
+  ])('restores focus to the repaired active tab after "%s"', async (label) => {
+    openNode('a');
+    const clicked = openNode('b');
+    openNode('c');
+    store().splitGroup();
+    openNode('d');
+    render(['a', 'b', 'c', 'd'].map((id) => canvasNode(id, id)));
+    await openMenu(clicked);
+    const action = menuItem(label);
+    assert(action);
+    await act(async () => action.focus());
+    expect(document.activeElement).toBe(action);
+    await act(async () => action.click());
+    const workspace = store().workspace;
+    const group = workspace.groups.find(
+      (candidate) => candidate.id === workspace.activeGroupId,
+    );
+    assert(group?.activeTabId);
+    expect(document.activeElement).toBe(
+      container?.querySelector(`[data-preview-tab-id="${group.activeTabId}"]`),
+    );
+  });
+
+  it('preserves focus in retained content when an unfocused close control is invoked', () => {
+    openNode('a');
+    openNode('b');
+    render([canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')]);
+    const retainedInput = document.createElement('input');
+    container?.append(retainedInput);
+    act(() => retainedInput.focus());
+    act(() => tabs()[0].querySelector('button')?.click());
+    expect(document.activeElement).toBe(retainedInput);
+  });
+
+  it('hands portal-menu focus to the host when the final tabs collapse', async () => {
+    const first = openNode('a');
+    render([canvasNode('a', 'Alpha')]);
+    const destination = document.createElement('input');
+    container?.append(destination);
+    const onCollapse = vi.fn(() => {
+      expect(document.activeElement?.getAttribute('role')).toBe('tab');
+      destination.focus();
+    });
+    act(() => root?.render(<PreviewWorkspace onCollapse={onCollapse} />));
+    await openMenu(first);
+    const action = menuItem('Close all tabs in this group');
+    assert(action);
+    await act(async () => action.focus());
+    await act(async () => action.click());
+    expect(onCollapse).toHaveBeenCalledOnce();
+    expect(document.activeElement).toBe(destination);
+  });
+
   it('collapses the panel once when closing its last group of tabs', async () => {
     const first = openNode('a');
     openNode('b');
@@ -1250,12 +1308,14 @@ describe('split', () => {
       expect(close).toHaveLength(1);
       act(() => {
         store().setActiveGroup(emptyId);
+        close?.[0].focus();
         close?.[0].click();
       });
       expect(store().workspace.groups).toHaveLength(1);
       expect(store().workspace.groups[0].id).toBe(survivingId);
       expect(store().workspace.groups[0].activeTabId).toBe(tabId);
       expect(store().workspace.activeGroupId).toBe(survivingId);
+      expect(document.activeElement).toBe(tabs()[0]);
       expect(onCollapse).not.toHaveBeenCalled();
       expect(
         container?.querySelector('[aria-label="Close empty group"]'),
@@ -1270,12 +1330,18 @@ describe('split', () => {
       '[aria-label="Close empty group"]',
     );
     expect(close).toHaveLength(2);
-    act(() => close?.[1].click());
+    act(() => {
+      close?.[1].focus();
+      close?.[1].click();
+    });
     expect(container?.querySelectorAll('[role="tablist"]')).toHaveLength(1);
     expect(
       container?.querySelector('[aria-label="Close empty group"]'),
     ).toBeNull();
     expect(store().workspace.groups[0].tabIds).toEqual([]);
+    expect(document.activeElement).toBe(
+      container?.querySelector('button[aria-label="New conversation"]'),
+    );
   });
 
   it.each([0, 1, 3])(

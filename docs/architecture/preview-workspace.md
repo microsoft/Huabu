@@ -161,6 +161,8 @@ A transient tab is one reusable inspection slot per group. Opening another trans
 
 The tab context menu offers Close other tabs, Close tabs to the right, and Close all tabs in this group. Each command is anchored to the clicked tab's current group, even when that tab is inactive; right-side targets follow the current tab order and never include another group. Empty batches are disabled and skipped by menu keyboard navigation. The store resolves and closes the entire batch in one state update, settling removed authored tabs against the original workspace before clearing their runtime focus/opening requests. Empty-group cleanup follows ordinary close behavior, and closing the final workspace tabs collapses the outer panel once. These commands only close presentation tabs, not their underlying nodes or conversations.
 
+When a close action removes the focused tab, menu item, or empty-group control, DOM focus returns to the repaired active tab, or to New Chat when the surviving group is empty. Focus already retained in another control is not moved. Closing the final workspace tabs hands portal-menu focus back to the panel before the host performs its normal Canvas focus handoff and collapse.
+
 Permanent tabs are never closed automatically. A group may retain any number of permanent tabs; users close them explicitly, while transient browsing continues to reuse the group's inspection slot.
 
 The activation sequence is an integer stored with the workspace rather than a wall-clock timestamp, making recent-target ordering deterministic in tests and persistence. Rendering also uses this sequence as the per-group LRU order for the single inactive warm slot; it does not add a second recency model.

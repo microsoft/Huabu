@@ -22,6 +22,7 @@ test('empty splits persist and canvas double-clicks follow the last interacted g
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: 'Select (S)', exact: true }).click();
   const canvasId = new URL(page.url()).pathname.split('/').pop();
+  if (!canvasId) throw new Error('Canvas ID is missing');
   const positions = await page
     .locator('.react-flow__viewport')
     .evaluate((viewport) => {
@@ -123,6 +124,7 @@ test('empty splits persist and canvas double-clicks follow the last interacted g
     })
     .click();
   await expect(strips).toHaveCount(1);
+  await expect(strips.getByRole('tab')).toBeFocused();
   await page
     .getByRole('button', {
       name: 'Split: create an empty group on the right',
@@ -152,6 +154,7 @@ test('empty splits persist and canvas double-clicks follow the last interacted g
   await closeEmpty.press('Enter');
   await expect(strips).toHaveCount(1);
   expect((await snapshot()).groups[0].id).toBe(survivingId);
+  await expect(strips.getByRole('tab')).toBeFocused();
   await expect(
     page.getByRole('button', { name: 'Close empty group', exact: true }),
   ).toHaveCount(0);
@@ -182,4 +185,44 @@ test('empty splits persist and canvas double-clicks follow the last interacted g
     .click();
   await expect(strips).toHaveCount(1);
   await expect(strips.getByRole('tab')).toHaveCount(1);
+
+  for (const label of [
+    'Close other tabs',
+    'Close tabs to the right',
+    'Close',
+  ]) {
+    await page.evaluate(
+      async ({ canvasId, nodeId }) => {
+        const path = '/src/store/previewWorkspace/store.ts';
+        const { usePreviewWorkspaceStore } = (await import(
+          path
+        )) as typeof WorkspaceStore;
+        usePreviewWorkspaceStore.getState().openPreviewTarget({
+          kind: 'node',
+          canvasId,
+          nodeId,
+        });
+      },
+      { canvasId, nodeId: secondId },
+    );
+    await expect(strips.getByRole('tab')).toHaveCount(2);
+    await strips
+      .getByRole('tab')
+      .nth(label === 'Close' ? 1 : 0)
+      .focus();
+    await page.keyboard.press('Shift+F10');
+    await page
+      .getByRole('menuitem', { name: label, exact: true })
+      .press('Enter');
+    await expect(strips.getByRole('tab')).toHaveCount(1);
+    await expect(strips.getByRole('tab')).toBeFocused();
+  }
+  await page.keyboard.press('Shift+F10');
+  await page
+    .getByRole('menuitem', {
+      name: 'Close all tabs in this group',
+      exact: true,
+    })
+    .press('Enter');
+  await expect(page.locator('[data-center-editor]')).toBeFocused();
 });

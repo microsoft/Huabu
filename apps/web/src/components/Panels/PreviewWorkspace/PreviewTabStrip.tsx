@@ -66,6 +66,8 @@ type PreviewTabStripProps = {
 export const tabElementId = (groupId: string, tabId: string) =>
   `preview-tab-${groupId}-${tabId}`;
 export const panelElementId = (groupId: string) => `preview-panel-${groupId}`;
+export const newChatElementId = (groupId: string) =>
+  `preview-new-chat-${groupId}`;
 
 export function PreviewTabStrip({
   groupId,
@@ -226,6 +228,7 @@ export function PreviewTabStrip({
       </div>
       <div className="flex shrink-0 items-center pr-2">
         <Button
+          id={newChatElementId(groupId)}
           variant="ghost"
           iconOnly
           size="md"
