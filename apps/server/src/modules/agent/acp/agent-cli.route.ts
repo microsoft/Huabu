@@ -66,10 +66,7 @@ async function detectAgentClis(target: {
     {
       id: CUSTOM_COMMAND_WRAPPER_ID,
       displayName: 'Custom command',
-      binary: CUSTOM_COMMAND_WRAPPER_ID,
-      acpArgs: [],
-      autoApprove: null,
-      installed: false,
+      status: 'ready',
       installHint: '',
       capabilities: CUSTOM_COMMAND_CAPABILITIES,
     },

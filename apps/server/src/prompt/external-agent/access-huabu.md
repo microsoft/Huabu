@@ -6,6 +6,7 @@ These environment variables are already set:
 
 - `HUABU_RFS_URL` — the base URL for this Space, with no trailing slash.
 - `AGENTLET_TOKEN` — the RFS bearer credential.
+- `AGENTLET_SERVICE_SDK_URL` — the daemon-owned `file://` URL used internally by downloaded Service Package entries to lease current configuration.
 - `HUABU_THREAD_ID` — your conversation ID. Pass it on `execute` (see §6) to attribute your edits.
 
 Prefer deterministic direct operations:
@@ -16,6 +17,7 @@ Prefer deterministic direct operations:
 4. Use the `SNAPSHOT_NODES` query to render image, sketch, or frame nodes into PNG artifacts you can inspect.
 5. Use `execute` for validated Space commands.
 6. Use `agent` only when you deliberately want the optional internal Huabu agent to interpret an open-ended request.
+7. Discover configured provider services through `services`, read the selected Package Skill, and download its complete Package before running or extending its entry.
 
 ## 1. Discover operations
 
@@ -278,6 +280,36 @@ For available Profile discovery, launch configuration, create-only requests, opt
 ```bash
 curl -fsS -H "$AUTH" "$HUABU_RFS_URL/skill/agents"
 ```
+
+## Provider Services
+
+List the bundled provider services that Huabu can provision:
+
+```bash
+curl -fsS -H "$AUTH" "$HUABU_RFS_URL/services"
+```
+
+Before using one, fetch and follow its Skill:
+
+```bash
+curl -fsS -H "$AUTH" "$HUABU_RFS_URL/services/image-gen/skill"
+```
+
+Download the complete Package to a path in your working directory:
+
+```bash
+curl -fsS -H "$AUTH" \
+  "$HUABU_RFS_URL/download/services/image-gen.zip" \
+  -o image-gen.zip
+unzip image-gen.zip
+cd image-gen
+```
+
+Every archive contains one top-level directory named after the Service, so extracting `image-gen.zip` creates `image-gen/` rather than placing files directly in the current directory. `service.yaml` and every file declared by `package.files` are included; undeclared development files are not.
+
+Read the extracted `SKILL.md`, then run `node entry.mjs --help` before invoking the optional entry. Runtime help uses the leased Manifest and configuration to show current choices and configured defaults that may not be visible from the source alone. The entry obtains that coherent Service context on demand through `AGENTLET_SERVICE_SDK_URL`; you normally do not need to import or call the SDK yourself. An entry is a modifiable starting point rather than a complete provider SDK: when the task needs another provider endpoint, follow the official documentation linked by the Skill and modify only your local Package copy.
+
+Never print, persist, or forward leased credentials. A Service Package without `SKILL.md` is intentionally unavailable for direct External Agent use; do not construct provider calls from its Settings manifest.
 
 ## Advanced workflows
 

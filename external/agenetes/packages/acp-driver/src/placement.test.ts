@@ -93,7 +93,7 @@ describe('explicit ACP placement', () => {
     );
   });
 
-  it('forwards a persisted structured plan and retains it when reusing the live process', async () => {
+  it('ignores a persisted structured plan and reuses the live process by frozen launch intent', async () => {
     const launch = {
       kind: 'acp-harness' as const,
       harnessId: 'copilot',
@@ -127,21 +127,20 @@ describe('explicit ACP placement', () => {
       workloadType: 'Deployment',
       sessionSpec: {
         launch,
-        launchPlan,
         cwd: undefined,
         autoRestart: true,
         idleTimeoutSecs: 600,
         env: undefined,
       },
     });
-    expect(first.launchPlan).toEqual(launchPlan);
+    expect(first).not.toHaveProperty('launchPlan');
     expect(
       await ensureAgentForThread('machine-a', 'typed', structured),
     ).toEqual(first);
     expect(spawnOnAgentlet).toHaveBeenCalledTimes(1);
   });
 
-  it('does not silently accept a structured spawn response without a resolved plan', async () => {
+  it('accepts structured spawn responses without a compiled plan', async () => {
     host.gateway = {
       getAgentlet: () => ({ agentletId: 'machine-a', status: 'connected' }),
       getSession: () => ({ status: 'connected' }),
@@ -156,7 +155,7 @@ describe('explicit ACP placement', () => {
         autoRestart: true,
         launch: { kind: 'acp-harness', harnessId: 'copilot' },
       }),
-    ).rejects.toMatchObject({ code: 'spawn_failed' });
+    ).resolves.toMatchObject({ sessionId: 'wrong-daemon', pid: 404 });
   });
 
   it('classifies redacted capacity diagnostics separately from spawn failures', async () => {

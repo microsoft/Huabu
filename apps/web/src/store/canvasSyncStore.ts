@@ -49,6 +49,7 @@ interface CanvasSyncState {
 let abortController: AbortController | null = null;
 const INITIAL_RECONNECT_DELAY_MS = 500;
 const MAX_RECONNECT_DELAY_MS = 10_000;
+const STREAM_INACTIVITY_TIMEOUT_MS = 45_000;
 
 type SyncPendingEffects = {
   mutatedNodes: Node[];
@@ -264,6 +265,7 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
               );
             },
             signal,
+            { inactivityTimeoutMs: STREAM_INACTIVITY_TIMEOUT_MS },
           );
           if (!signal.aborted) {
             throw new Error('Canvas sync stream ended unexpectedly');

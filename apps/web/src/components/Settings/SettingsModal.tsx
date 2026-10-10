@@ -25,10 +25,8 @@ import { DeploymentReadinessNotice } from './DeploymentReadinessNotice';
 import { AgentBehaviorSettings } from './sections/AgentBehaviorSettings';
 import { ExternalAgentRuntimeSettings } from './sections/ExternalAgentRuntimeSettings';
 import { GeneralSettings } from './sections/GeneralSettings';
-import { ImageProviderSettings } from './sections/ImageProviderSettings';
-import { InkOcrSettings } from './sections/InkOcrSettings';
-import { IntegrationsSettings } from './sections/IntegrationsSettings';
 import { LLMSettings } from './sections/LLMSettings';
+import { ServicesSettings } from './sections/ServicesSettings';
 
 /** Identifiers for the settings tabs (left-nav order). */
 type SettingsTab = SettingsTabId;
@@ -36,12 +34,12 @@ type SettingsTab = SettingsTabId;
 interface TabDef {
   id: SettingsTab;
   /** i18n key for the tab label. */
-  labelKey: 'settings.general' | 'settings.agent' | 'settings.capabilities';
+  labelKey: 'settings.general' | 'settings.agent' | 'settings.services';
 }
 
 const TABS: TabDef[] = [
   { id: 'agent', labelKey: 'settings.agent' },
-  { id: 'capabilities', labelKey: 'settings.capabilities' },
+  { id: 'services', labelKey: 'settings.services' },
   { id: 'general', labelKey: 'settings.general' },
 ];
 
@@ -55,9 +53,9 @@ interface SettingsModalProps {
  * `ShortcutsModal`) with a left-hand tab rail and a scrollable content
  * pane, so the panel height stays fixed as more settings are added.
  *
- * Each tab renders the existing self-contained `*Settings` components:
+ * Each tab renders its owned Settings surface:
  *  - **Agent** — Utility Agent, Built-In Pi setup, external Profiles, and behavior
- *  - **Capabilities** — Huabu-owned image, search, transcript, and OCR services
+ *  - **Services** — manifest-driven image, search, transcript, and OCR providers
  *  - **General** — application, canvas, input, and update preferences
  *
  * The app version sits at the bottom of the left tab rail (a product-wide
@@ -304,18 +302,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   )}
                 </>
               ))}
-            {activeTab === 'capabilities' && (
+            {activeTab === 'services' && (
               <>
                 <p className="text-fg-muted mb-4 px-1 text-xs">
-                  {t('settings.capabilitiesDescription')}
+                  {t('settings.servicesDescription')}
                 </p>
                 <div
                   className="space-y-4 [&_section]:mb-0"
-                  data-testid="capability-sections"
+                  data-testid="service-sections"
                 >
-                  <ImageProviderSettings />
-                  <IntegrationsSettings />
-                  <InkOcrSettings />
+                  <ServicesSettings />
                 </div>
               </>
             )}

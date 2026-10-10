@@ -6,7 +6,6 @@ import { useTranslation } from 'react-i18next';
 
 import { ApiError } from '@/api/_client';
 import { createAcpProfile, updateAcpProfile } from '@/api/acp';
-import { Button } from '@/components/Common/Button';
 import { PathInput } from '@/components/Common/PathInput';
 import { Select } from '@/components/Common/Select';
 import { TextInput } from '@/components/Common/TextInput';
@@ -23,7 +22,6 @@ import {
 import { AgentIconField } from './AgentIconField';
 import { ProfileEditActions } from './ProfileEditActions';
 import { ReadOnlyField } from './ReadOnlyField';
-import { useProfileLaunchPreview } from './useProfileLaunchPreview';
 
 import type {
   AcpAgentCliInfo,
@@ -43,19 +41,12 @@ interface CommandProfileFormProps {
 }
 
 const CUSTOM_CAPABILITIES = {
-  customLaunchCommand: 'supported',
-  autoApprove: 'unsupported',
-  modelOverride: 'unsupported',
-  sessionPersistence: 'unsupported',
+  customLaunchCommand: true,
+  autoApprove: false,
 } as const;
 
 function supportsStructuredEditing(cli: AcpAgentCliInfo | undefined) {
-  return (
-    cli?.installed === true &&
-    cli.launchVersion === 1 &&
-    cli.launchPreviewVersion === 1 &&
-    cli.capabilities !== undefined
-  );
+  return cli?.status === 'ready';
 }
 
 function defaultWrapper(clis: AcpAgentCliInfo[]) {
@@ -139,10 +130,9 @@ export function CommandProfileForm({
     descriptor?.capabilities ??
     (custom && !descriptor ? CUSTOM_CAPABILITIES : undefined);
   const structuredSupported = supportsStructuredEditing(descriptor);
-  const commandSupported =
-    custom && capabilities?.customLaunchCommand === 'supported';
+  const commandSupported = custom && capabilities?.customLaunchCommand === true;
   const approvalSupported =
-    !custom && structuredSupported && capabilities?.autoApprove === 'supported';
+    !custom && structuredSupported && capabilities?.autoApprove === true;
   const agentName = custom
     ? t('settings.customCommand')
     : (descriptor?.displayName ?? cliId);
@@ -176,14 +166,6 @@ export function CommandProfileForm({
                 }
               : {}),
           };
-  const preview = useProfileLaunchPreview(
-    !custom && structuredSupported
-      ? {
-          launch,
-          ...(editing ? { profileId: editing.id } : { agentletId }),
-        }
-      : null,
-  );
   const executionChanged = launchChanged || cwdChanged;
   const invalidExecution =
     executionChanged &&
@@ -191,8 +173,6 @@ export function CommandProfileForm({
       (custom
         ? launchChanged && (!commandSupported || !command.trim())
         : !structuredSupported ||
-          !preview.plan ||
-          !!preview.error ||
           (launchChanged && !approvalSupported && !!editing)));
   const saveDisabled =
     saving ||
@@ -200,8 +180,7 @@ export function CommandProfileForm({
     !agentletId ||
     (!editing && !connectedDevices.length) ||
     invalidExecution;
-  const knownControlsDisabled =
-    saving || !structuredSupported || !!preview.error;
+  const knownControlsDisabled = saving || !structuredSupported;
   const options = [
     ...detectedClis
       .filter((cli) => cli.id !== 'custom')
@@ -326,49 +305,6 @@ export function CommandProfileForm({
       ) : cliId ? (
         <>
           <SettingRow
-            title={t('settings.launchCommand')}
-            description={t('settings.profileLaunchPreviewHint')}
-          >
-            <SettingControl>
-              {preview.plan ? (
-                <ReadOnlyField
-                  value={
-                    preview.plan.kind === 'shell'
-                      ? preview.plan.command
-                      : JSON.stringify([
-                          preview.plan.executable,
-                          ...preview.plan.argv,
-                        ])
-                  }
-                  mono
-                />
-              ) : (
-                <span className="text-fg-muted text-xs">
-                  {t(
-                    preview.pending
-                      ? 'settings.profilePreviewLoading'
-                      : 'settings.profilePreviewUnavailable',
-                  )}
-                </span>
-              )}
-              {preview.error ? (
-                <>
-                  <p className="text-danger text-xs" role="alert">
-                    {preview.error}
-                  </p>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={preview.retry}
-                    disabled={saving}
-                  >
-                    {t('settings.profilePreviewRetry')}
-                  </Button>
-                </>
-              ) : null}
-            </SettingControl>
-          </SettingRow>
-          <SettingRow
             title={t('settings.autoApproveAllToolCalls')}
             description={t('settings.autoApproveAllToolCallsHint')}
           >
@@ -404,7 +340,7 @@ export function CommandProfileForm({
       detectedClis.some(
         (cli) =>
           cli.id !== 'custom' &&
-          cli.installed &&
+          cli.status !== 'not-found' &&
           !supportsStructuredEditing(cli),
       ) ? (
         <p className="text-warning px-3 py-2 text-xs">

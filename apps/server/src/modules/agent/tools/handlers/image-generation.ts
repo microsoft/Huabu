@@ -52,11 +52,12 @@ import {
 } from '@huabu/shared';
 
 import { getLogger } from '../../../../utils/logger.js';
+import { serviceProvisioner } from '../../../services/index.js';
 import { space } from '../../../storage/index.js';
-import { getAzureImageConfig } from '../../llm.js';
 
 import type { generateImageParamsSchema } from '../definitions.js';
 import type { Static } from '@earendil-works/pi-ai';
+import type { ImageModelFamily } from '@huabu/shared';
 
 const log = getLogger('tool.generate-image');
 
@@ -96,7 +97,15 @@ export async function handleGenerateImage(
   }
 
   const refs = args.referenceArtifactSrcs ?? [];
-  const azure = getAzureImageConfig(); // throws with actionable message
+  const resolved = serviceProvisioner.resolveForServer('image-gen');
+  const azure = {
+    endpoint: String(resolved.baseUrl),
+    deployment: String(resolved.model),
+    apiKey: String(resolved.apiKey),
+    apiVersion: String(resolved.apiVersion),
+    modelFamily: resolved.modelFamily as ImageModelFamily,
+    quality: resolved.quality as 'low' | 'medium' | 'high' | 'auto',
+  };
   const caps = getImageCapabilities(azure.modelFamily);
 
   // ── Capability validation ────────────────────────────────────────────

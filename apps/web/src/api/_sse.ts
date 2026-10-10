@@ -22,6 +22,37 @@ export interface SSEEvent<T = unknown> {
 
 export type SSEEventHandler<T = unknown> = (event: SSEEvent<T>) => void;
 
+export interface SSEReadOptions {
+  inactivityTimeoutMs?: number;
+}
+
+async function readWithInactivityTimeout(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  inactivityTimeoutMs: number | undefined,
+): Promise<ReadableStreamReadResult<Uint8Array>> {
+  if (inactivityTimeoutMs === undefined) {
+    return reader.read();
+  }
+
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      reader.read(),
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => {
+          reject(
+            new Error(
+              `SSE stream received no data for ${inactivityTimeoutMs} ms`,
+            ),
+          );
+        }, inactivityTimeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+  }
+}
+
 /**
  * Read an SSE response body to completion, invoking `onEvent` for every
  * fully-formed event. Returns when the stream ends or `signal` aborts.
@@ -30,6 +61,7 @@ export async function readSSEStream<T = Record<string, unknown>>(
   response: Response,
   onEvent: SSEEventHandler<T>,
   signal?: AbortSignal,
+  options: SSEReadOptions = {},
 ): Promise<void> {
   if (!response.body) return;
   const reader = response.body.getReader();
@@ -39,7 +71,10 @@ export async function readSSEStream<T = Record<string, unknown>>(
   try {
     while (true) {
       if (signal?.aborted) return;
-      const { done, value } = await reader.read();
+      const { done, value } = await readWithInactivityTimeout(
+        reader,
+        options.inactivityTimeoutMs,
+      );
       if (done) break;
 
       buffer += decoder.decode(value, { stream: true });
@@ -57,6 +92,11 @@ export async function readSSEStream<T = Record<string, unknown>>(
       }
     }
   } finally {
+    try {
+      await reader.cancel();
+    } catch {
+      // The fetch signal may already have closed the stream.
+    }
     reader.releaseLock?.();
   }
 }
@@ -102,10 +142,12 @@ export async function readTypedSSEStream<
   response: Response,
   onEvent: (event: E) => void,
   signal?: AbortSignal,
+  options?: SSEReadOptions,
 ): Promise<void> {
   await readSSEStream<unknown>(
     response,
     (event) => onEvent(event as unknown as E),
     signal,
+    options,
   );
 }

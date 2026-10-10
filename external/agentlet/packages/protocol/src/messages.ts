@@ -23,9 +23,8 @@ export interface AgentletProfile {
     autoRestart: boolean
     bufferLimit: number
     maxAgents?: number
-    harnessDiscovery?: { version: 1 }
-    harnessLaunch?: { version: 1 }
-    harnessLaunchPreview?: { version: 1 }
+    harnessDiscovery?: { version: 1 | 2 }
+    harnessLaunch?: { version: 1 | 2 }
   }
 }
 
@@ -90,7 +89,7 @@ export interface SessionSpec {
   command?: string
   /** Structured alternative to command; requires harnessLaunch v1. */
   launch?: AcpHarnessLaunch
-  /** Previously authorized plan. A mismatch with the local catalogue fails closed. */
+  /** Legacy persisted evidence. Version 2 daemons validate then ignore it. */
   launchPlan?: HarnessLaunchPlan
   /** Working directory for the agent subprocess */
   cwd?: string
@@ -278,20 +277,12 @@ export interface SendResourceParams {
 export interface HarnessCatalogueEntry {
   id: string
   displayName: string
-  binary: string
-  acpArgs: string[]
-  autoApprove: { args: string[]; position: 'before-acp' | 'after-acp' } | null
   installHint: string
+  capabilities: HarnessCapabilities
 }
 
 export interface HarnessDiscoveryEntry extends HarnessCatalogueEntry {
-  /** Structured ACP launch support; absent on older daemons. */
-  launchVersion?: 1
-  launchPreviewVersion?: 1
-  /** Absent on older daemons; absence is not evidence of support. */
-  capabilities?: HarnessCapabilities
-  installed: boolean
-  executablePath?: string
+  status: 'ready' | 'adapter-missing' | 'not-found'
   version?: string
   workingDirPath?: string
   diagnostics?: Array<{ code: string; message: string }>

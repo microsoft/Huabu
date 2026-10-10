@@ -229,7 +229,9 @@ The auto-accept preference still suppresses new Agent review records only. It do
 
 The sync route subscribes before reading the initial Canvas version, buffers updates committed during that read, sends the snapshot first, and then flushes the buffered updates. This closes the snapshot/subscribe loss window while preserving snapshot-before-update ordering.
 
-The server emits a heartbeat comment every 15 seconds. `canvasSyncStore.connect()` treats non-OK responses, malformed events, network errors, and unexpected EOF as failures and reconnects with exponential backoff capped at 10 seconds. An intentional Canvas switch or disconnect aborts the current request and pending delay, while every successful event resets the backoff. The reconnect snapshot/version handshake remains the convergence mechanism.
+The server emits a heartbeat comment every 15 seconds. Canvas Sync applies a 45-second byte-activity watchdog to the shared SSE reader; every received chunk, including a heartbeat comment that does not produce an application event, resets the timeout. Three missed heartbeat windows terminate a silently stalled or half-open stream so the existing retry loop can recover without a manual page refresh. The timeout is opt-in and does not affect other SSE consumers.
+
+`canvasSyncStore.connect()` treats inactivity timeouts, non-OK responses, malformed events, network errors, and unexpected EOF as failures and reconnects with exponential backoff capped at 10 seconds. An intentional Canvas switch or disconnect aborts the current request and pending delay, while every successful event resets the backoff. The reconnect snapshot/version handshake remains the convergence mechanism.
 
 ## Known reliability gap
 

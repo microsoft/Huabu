@@ -19,7 +19,6 @@ const mocks = vi.hoisted(() => ({
   invalidate: vi.fn(),
   initializeDefaults: vi.fn(),
   discoverHarnesses: vi.fn(),
-  buildHarnessLaunch: vi.fn(),
   connectedIds: new Set(['machine-a', 'remote-machine']),
 }));
 
@@ -35,7 +34,6 @@ vi.mock('@agenetes/agentlet-host', () => ({
   }),
   getAgentletGateway: () => ({
     discoverHarnesses: mocks.discoverHarnesses,
-    buildHarnessLaunch: mocks.buildHarnessLaunch,
     getAgentlets: () =>
       [...mocks.connectedIds].map((agentletId) => ({
         agentletId,
@@ -97,14 +95,11 @@ describe('ordinary Profile catalog routes', () => {
       harnesses: [
         {
           id: 'copilot',
-          installed: true,
-          launchVersion: 1,
-          launchPreviewVersion: 1,
+          status: 'ready',
           capabilities: {
-            autoApprove: 'supported',
-            customLaunchCommand: 'unsupported',
+            autoApprove: true,
+            customLaunchCommand: false,
           },
-          autoApprove: { args: ['--allow-all'], position: 'after-acp' },
         },
       ],
     });
@@ -356,10 +351,11 @@ describe('ordinary Profile catalog routes', () => {
       harnesses: [
         {
           id: 'copilot',
-          installed: true,
-          launchVersion: 1,
-          launchPreviewVersion: 1,
-          capabilities: { autoApprove: 'supported' },
+          status: 'ready',
+          capabilities: {
+            autoApprove: true,
+            customLaunchCommand: false,
+          },
         },
       ],
     });
@@ -375,9 +371,6 @@ describe('ordinary Profile catalog routes', () => {
       payload: { expectedRevision: 2, launch },
     });
     expect(response.statusCode).toBe(200);
-    expect(mocks.buildHarnessLaunch).toHaveBeenCalledWith('remote-machine', {
-      launch,
-    });
     expect(mocks.registry.patchProfile).toHaveBeenCalledWith('command-1', {
       expectedRevision: 2,
       launch,
@@ -411,26 +404,19 @@ describe('ordinary Profile catalog routes', () => {
       harnesses: [
         {
           id: 'copilot',
-          installed: true,
-          launchVersion: 1,
-          launchPreviewVersion: 1,
-          capabilities: { autoApprove: 'supported' },
+          status: 'ready',
+          capabilities: {
+            autoApprove: true,
+            customLaunchCommand: false,
+          },
         },
       ],
     });
-    mocks.buildHarnessLaunch.mockImplementation(async () => {
-      mocks.registry.patchProfile.mockImplementation(() => {
-        throw new AgentProfileError(
-          'profile_conflict',
-          'Profile changed during validation',
-        );
-      });
-      return {
-        kind: 'exec',
-        executable: '/bin/copilot',
-        argv: ['--acp'],
-        env: {},
-      };
+    mocks.registry.patchProfile.mockImplementation(() => {
+      throw new AgentProfileError(
+        'profile_conflict',
+        'Profile changed during validation',
+      );
     });
     const server = await setup();
     const response = await server.inject({
@@ -457,42 +443,5 @@ describe('ordinary Profile catalog routes', () => {
     expect(response.statusCode).toBe(400);
     expect(response.json().code).toBe('profile_wrapper_immutable');
     expect(mocks.registry.patchProfile).not.toHaveBeenCalled();
-  });
-
-  it('previews on the Profile machine without creating or mutating a Profile', async () => {
-    mocks.registry.getProfile.mockReturnValue({
-      ...commandProfile,
-      agentletId: 'remote-machine',
-    });
-    const plan = { kind: 'shell', command: commandProfile.launch.command };
-    mocks.buildHarnessLaunch.mockResolvedValue(plan);
-    const server = await setup();
-    const response = await server.inject({
-      method: 'POST',
-      url: '/api/acp/profile-launch-preview',
-      payload: { profileId: commandProfile.id, launch: commandProfile.launch },
-    });
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual(plan);
-    expect(mocks.buildHarnessLaunch).toHaveBeenCalledWith('remote-machine', {
-      launch: commandProfile.launch,
-    });
-    expect(mocks.registry.createProfile).not.toHaveBeenCalled();
-    expect(mocks.registry.patchProfile).not.toHaveBeenCalled();
-  });
-
-  it('reports unavailable preview instead of a fabricated command', async () => {
-    mocks.buildHarnessLaunch.mockRejectedValue(new Error('unsupported'));
-    const server = await setup();
-    const response = await server.inject({
-      method: 'POST',
-      url: '/api/acp/profile-launch-preview',
-      payload: {
-        agentletId: 'machine-a',
-        launch: commandProfile.launch,
-      },
-    });
-    expect(response.statusCode).toBe(503);
-    expect(response.json().code).toBe('harness_preview_unavailable');
   });
 });

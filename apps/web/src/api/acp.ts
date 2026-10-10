@@ -16,7 +16,6 @@
  *     and populate the profile editor's picker with installation state.
  *  - `GET/POST/PATCH/DELETE /api/acp/profiles` — CRUD for spawn
  *     recipes with revision-checked launch and working-directory edits.
- *  - `POST /api/acp/profile-launch-preview` — daemon-built launch preview.
  *  - `GET/POST /api/acp/daemon` — daemon liveness + manual restart.
  *  - `GET/PUT /api/acp/connection-token` — masked credential configuration.
  *  - `POST /api/acp/connection-command` — explicit owner-only command reveal.
@@ -35,8 +34,6 @@ import type {
   AcpPermissionDecisionRequest,
   AcpPermissionDecisionResponse,
   AcpProfileMutationResponse,
-  AcpProfileLaunchPreviewBody,
-  AcpProfileLaunchPreviewResponse,
   AcpProfilesListResponse,
   CreateAcpProfileBody,
   PatchAgentProfileBody,
@@ -64,8 +61,6 @@ export type {
   AcpAgentletStatusResponse,
   AcpModelInfo,
   AcpProfileMutationResponse,
-  AcpProfileLaunchPreviewBody,
-  AcpProfileLaunchPreviewResponse,
   AcpProfilesListResponse,
   CreateAcpCommandProfileBody,
   CreateAcpProfileBody,
@@ -124,20 +119,6 @@ export async function createAcpProfile(
     json: payload,
     fallbackMessage: 'Failed to create agent profile',
   });
-}
-
-/** Resolve a launch on the target daemon without starting an execution. */
-export async function previewAcpProfileLaunch(
-  body: AcpProfileLaunchPreviewBody,
-): Promise<AcpProfileLaunchPreviewResponse> {
-  return apiFetch<AcpProfileLaunchPreviewResponse>(
-    routes.acpProfileLaunchPreview,
-    {
-      method: 'POST',
-      json: body,
-      fallbackMessage: 'Failed to preview agent launch',
-    },
-  );
 }
 
 /**

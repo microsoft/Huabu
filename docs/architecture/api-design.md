@@ -154,7 +154,7 @@ Malformed request fields and malformed cursors return HTTP 400 with `code: "malf
 
 `GET/PUT /api/acp/runtime-config` uses `externalAgentRuntimeConfigSchema` from [`acp.ts`](../../packages/shared/src/types/api/acp.ts). The owner-only full replacement body contains `idleTimeoutSecs` and `maxAgents`; `maxAgents` is a positive JavaScript safe integer with default `10` and no product-defined upper bound. The value is persisted globally and supplied to the supervised Agentlet daemon as `--max-agents` on its next start; the API does not restart the daemon or configure manually launched remote daemons.
 
-`GET /api/acp/profiles` returns persisted Profiles, active connected devices, connectivity-filtered `selectableProfileIds`, supervised-child health, and optional Agent defaults. `POST /api/acp/profiles` requires an explicit active `agentletId`. `GET /api/acp/agent-cli` and `POST /api/acp/profile-launch-preview` require exactly one explicit target: `agentletId` while creating or `profileId` while editing. The server validates every target against the live Gateway and never substitutes the supervised child or first connected device.
+`GET /api/acp/profiles` returns persisted Profiles, active connected devices, connectivity-filtered `selectableProfileIds`, supervised-child health, and optional Agent defaults. `POST /api/acp/profiles` requires an explicit active `agentletId`. `GET /api/acp/agent-cli` requires exactly one explicit target: `agentletId` while creating or `profileId` while editing. The server validates every target against the live Gateway and never substitutes the supervised child or first connected device. Harness commands are compiled by the target Agentlet during spawn; there is no HTTP launch-preview contract.
 
 ## Utility Agent selection
 
@@ -165,6 +165,12 @@ Malformed request fields and malformed cursors return HTTP 400 with `code: "malf
 `POST /api/rfs/:canvasId/agent/:threadId/ink-intent` uses `rfsInkIntentParamsSchema`, `rfsInkIntentRequestSchema`, and `rfsInkIntentResponseSchema` in `types/api/rfs.ts`, reusing `inkIntentReportSchema`. RFS decodes its raw JSON buffer, validates the target and body with `safeParse`, and delegates to the shared Ink writer. A per-turn invocation token must match the active external turn; inactive, expired, or wrong-scope reports return `409 ink_turn_inactive`. The token is a freshness guard, not a credential; the normal RFS Bearer requirement remains mandatory.
 
 `POST /api/rfs/:canvasId/query` with `type: "INSPECT_NODES"` uses the canonical response contract in [`space-operations.ts`](../../packages/shared/src/types/api/space-operations.ts). Each Question Node result includes its non-empty persisted `threadId` when associated; non-Question Nodes and unbound Questions omit the field. The mapping is scoped by the authenticated RFS URL's Canvas and is read-only: inspection does not create a thread, workload, binding, realization, or invocation. Callers continue the mapped conversation through the existing `POST /api/rfs/:canvasId/agent/:threadId/prompt` SSE endpoint.
+
+## Service Packages
+
+`packages/shared/src/types/api/service-package.ts` defines the strict manifest, Generic Settings update, masked configuration, summary, and External lease contracts. Owner Settings uses `GET /api/services`, `GET /api/services/:serviceId`, and `PUT /api/services/:serviceId`; every path/body value is validated with the shared schemas before selecting a code-registered storage namespace.
+
+Canvas-scoped RFS keeps the existing `/capabilities` path for Space-operation discovery and exposes third-party services under `/services`. Manifest and Skill reads contain no credentials. `POST /services/:id/lease` rejects unknown, unconfigured, and Packages without `SKILL.md`, returns the exact validated Manifest and only its declared configuration fields as one version-coherent runtime context, and is non-cacheable. `GET /download/services/:id.zip` streams the validated `service.yaml + package.files` set beneath one `<serviceId>/` archive root and uses the Package content hash as its ETag. See [`service-packages.md`](./service-packages.md).
 
 ## Anti-patterns
 

@@ -9,7 +9,7 @@
  * host over the canvas-scoped Remote File System (RFS) and attribute its
  * change-review activity to the right conversation:
  *
- *   - `HUABU_RFS_URL`   — `http://127.0.0.1:<hostPort>/api/rfs/<canvasId>`,
+ *   - `HUABU_RFS_URL`   — `<publicOrigin>/api/rfs/<canvasId>`,
  *                          the canvas-scoped RFS base (capabilities / query /
  *                          download / upload / execute / agent / skill). Bakes the canvasId into the path
  *                          so the agent needs no separate canvas variable.
@@ -26,6 +26,7 @@
  */
 
 import { getHostServerPort } from '../../../host-port.js';
+import { resolveConfiguredPublicOrigin } from '../../security/public-origin.js';
 
 /**
  * Build the reachback env for an agent serving `threadId` in `canvasId`.
@@ -38,9 +39,16 @@ export function buildReachbackEnv(
 ): Record<string, string> {
   const env: Record<string, string> = {};
   if (canvasId) {
-    const port = getHostServerPort();
-    if (port > 0) {
-      env.HUABU_RFS_URL = `http://127.0.0.1:${port}/api/rfs/${canvasId}`;
+    let origin = resolveConfiguredPublicOrigin();
+    if (!origin) {
+      const port = getHostServerPort();
+      if (port > 0) origin = `http://127.0.0.1:${port}`;
+    }
+    if (origin) {
+      env.HUABU_RFS_URL = new URL(
+        `/api/rfs/${encodeURIComponent(canvasId)}`,
+        origin,
+      ).toString();
     }
   }
   env.HUABU_THREAD_ID = threadId;

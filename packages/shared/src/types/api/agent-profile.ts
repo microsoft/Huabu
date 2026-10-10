@@ -156,42 +156,6 @@ export const patchAgentProfileBodySchema = z
   );
 export type PatchAgentProfileBody = z.infer<typeof patchAgentProfileBodySchema>;
 
-export const acpProfileLaunchPreviewBodySchema = z
-  .object({
-    profileId: trimmedString(255).optional(),
-    agentletId: trimmedString(255).optional(),
-    launch: agentProfileSchema.shape.launch,
-  })
-  .strict()
-  .refine(
-    (value) =>
-      Number(value.profileId !== undefined) +
-        Number(value.agentletId !== undefined) ===
-      1,
-    { message: 'Exactly one Profile or Agentlet target is required' },
-  );
-export type AcpProfileLaunchPreviewBody = z.infer<
-  typeof acpProfileLaunchPreviewBodySchema
->;
-
-export const acpProfileLaunchPreviewResponseSchema = z.discriminatedUnion(
-  'kind',
-  [
-    z
-      .object({
-        kind: z.literal('exec'),
-        executable: z.string().min(1),
-        argv: z.array(z.string()),
-        env: z.record(z.string(), z.string()),
-      })
-      .strict(),
-    z.object({ kind: z.literal('shell'), command: z.string().min(1) }).strict(),
-  ],
-);
-export type AcpProfileLaunchPreviewResponse = z.infer<
-  typeof acpProfileLaunchPreviewResponseSchema
->;
-
 export const agentProfileParamsSchema = z.object({ id: z.string().min(1) });
 export type AgentProfileParams = z.infer<typeof agentProfileParamsSchema>;
 

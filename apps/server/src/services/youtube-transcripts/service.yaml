@@ -1,0 +1,15 @@
+schema: huabu-service/v1
+id: youtube-transcripts
+version: 1.0.0
+name: YouTube Transcripts
+description: Load YouTube transcripts through the existing RapidAPI preprocessing integration.
+storage:
+  namespace: integration.rapidapi
+package:
+  files: []
+configuration:
+  - id: apiKey
+    label: API key
+    type: secret
+    required: true
+    placeholder: rapidapi-...

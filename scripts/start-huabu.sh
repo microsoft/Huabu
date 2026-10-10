@@ -11,7 +11,7 @@ main() {
   local huabu_dir
   local tmux_session='app'
   local log_file='/tmp/huabu-app.log'
-  local server_port="${SERVER_PORT:-${PORT:-3001}}"
+  local server_port=''
   local readiness_timeout_seconds="${HUABU_CANARY_READINESS_TIMEOUT_SECONDS:-300}"
 
   for argument in "$@"; do
@@ -58,6 +58,38 @@ main() {
     pwd -P
   )"
 
+  if [[ -n "${SERVER_PORT:-}" ]]; then
+    server_port="$SERVER_PORT"
+  elif [[ -f "$huabu_dir/.env" ]]; then
+    server_port="$(
+      node --input-type=module - "$huabu_dir/.env" <<'NODE'
+import fs from 'node:fs';
+
+const source = fs.readFileSync(process.argv[2], 'utf8');
+let value = '';
+for (const line of source.split(/\r?\n/u)) {
+  const assignment = line.match(
+    /^\s*(?:export\s+)?SERVER_PORT\s*=\s*(.*)$/u,
+  );
+  if (!assignment) continue;
+
+  const rawValue = assignment[1].trim();
+  const quotedValue = rawValue.match(/^(["'])(.*?)\1\s*(?:#.*)?$/u);
+  value = quotedValue
+    ? quotedValue[2]
+    : rawValue.replace(/\s*#.*$/u, '').trim();
+}
+process.stdout.write(value);
+NODE
+    )"
+  fi
+  server_port="${server_port:-3001}"
+  if [[ ! "$server_port" =~ ^[1-9][0-9]*$ ]] ||
+    ((10#$server_port > 65535)); then
+    echo "SERVER_PORT must be an integer between 1 and 65535." >&2
+    return 2
+  fi
+
   if [[ "$(git -C "$huabu_dir" rev-parse --show-toplevel)" != "$huabu_dir" ]]; then
     echo "ERROR: $huabu_dir is not the Huabu repository root." >&2
     return 1
@@ -100,15 +132,15 @@ main() {
     command kill -TERM "${pids[@]}"
   }
 
-  echo "==> Stopping services on ports 3001-3005"
-  portlisten -k 3001-3005
+  echo "==> Stopping the service on port $server_port"
+  portlisten -k "$server_port"
   for attempt in {1..20}; do
-    if [[ -z "$(portlisten 3001-3005)" ]]; then
+    if [[ -z "$(portlisten "$server_port")" ]]; then
       break
     fi
     if [[ "$attempt" -eq 20 ]]; then
-      echo "ERROR: Ports 3001-3005 are still in use." >&2
-      portlisten 3001-3005
+      echo "ERROR: Port $server_port is still in use." >&2
+      portlisten "$server_port"
       return 1
     fi
     sleep 0.5

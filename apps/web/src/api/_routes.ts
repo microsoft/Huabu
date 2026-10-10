@@ -45,6 +45,8 @@ export const routes = {
   // ── Integrations (third-party API keys) ──────────────────────────
   integrationsConfig: '/integrations/config',
   inkOcrConfig: '/integrations/ink-ocr/config',
+  services: '/services',
+  service: (serviceId: string) => `/services/${enc(serviceId)}`,
 
   // ── Canvas ────────────────────────────────────────────────────────
   canvasList: '/canvas',
@@ -160,7 +162,6 @@ export const routes = {
   },
   // Profiles (loopback-only) — user-managed spawn recipes.
   acpProfiles: '/acp/profiles',
-  acpProfileLaunchPreview: '/acp/profile-launch-preview',
   acpProfileItem: (id: string) => `/acp/profiles/${enc(id)}`,
   // Embedded agentlet daemon — health + manual restart.
   acpAgentlet: '/acp/agentlet',

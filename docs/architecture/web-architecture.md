@@ -431,7 +431,7 @@ Production requires `VITE_HANDBOOK_URL`; the checked-in [`apps/web/.env.producti
 
 The handbook is owned, built, and deployed from the public [microsoft/Huabu repository](https://github.com/microsoft/Huabu/tree/main/apps/docs); Huabu does not carry a second user-handbook application.
 
-`pnpm start:web` serves the compiled SPA and API from one production-style Fastify process. Before importing the Server bundle, its launcher selects the first available port at or above `SERVER_PORT`/`PORT` (default 3001) and writes the resolved value to `SERVER_PORT`; the shared port probe also protects `dev` and `dev:desktop` from loopback-versus-wildcard binding conflicts.
+`pnpm start:web` serves the compiled SPA and API from one production-style Fastify process. It binds the fixed `SERVER_PORT` (default 3001), rejects invalid values, and fails on conflicts rather than advancing to another port. The shared port probe remains limited to `dev` and `dev:desktop`, where parallel local instances are intentional and the resolved port is propagated to every consumer.
 
 Network deployment follows the single-owner boundary in [`deployment-security.md`](./deployment-security.md). Non-loopback `start:web` binds fail closed unless allowed hosts and complete Basic Auth are configured. Vite keeps zero-configuration loopback development but rejects non-loopback clients before serving assets or proxying APIs unless they pass the same Basic Auth gate. Settings reads the redacted deployment readiness endpoint and disables credential mutations when the standalone secret store is read-only.
 

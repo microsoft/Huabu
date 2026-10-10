@@ -126,7 +126,7 @@ afterEach(() => {
 });
 
 describe('ACP Handle session self-repair', () => {
-  it('recovers the frozen recipe and resolved plan after the Profile template changes', async () => {
+  it('recovers the frozen recipe while ignoring the legacy resolved plan', async () => {
     const profile = {
       executionRevision: 1,
       workingDirPath: '/original',
@@ -186,7 +186,7 @@ describe('ACP Handle session self-repair', () => {
     expect(orchestrator.ensureAgentForThread).toHaveBeenCalledWith(
       agentletId,
       threadId,
-      { ...frozenRecipe, launchPlan },
+      frozenRecipe,
       'original-session',
       undefined,
       undefined,
@@ -194,7 +194,7 @@ describe('ACP Handle session self-repair', () => {
     );
     expect(entry).toMatchObject({
       cwd: '/original',
-      bindingRecipe: { launch: { options: { autoApprove: true } }, launchPlan },
+      bindingRecipe: { launch: { options: { autoApprove: true } } },
       availableCommands: [],
     });
     expect(readCommands).toHaveBeenCalledWith(binding.profileId, 1);

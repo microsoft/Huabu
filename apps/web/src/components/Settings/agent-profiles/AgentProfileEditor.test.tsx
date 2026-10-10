@@ -11,7 +11,6 @@ import { AgentProfileEditor } from './AgentProfileEditor';
 
 import type {
   AcpAgentCliInfo,
-  AcpProfileLaunchPreviewResponse,
   AgentProfileView,
   ConnectedAgentletDevice,
 } from '@huabu/shared';
@@ -24,7 +23,6 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const api = vi.hoisted(() => ({
   create: vi.fn(),
   update: vi.fn(),
-  preview: vi.fn(),
   toast: vi.fn(),
 }));
 vi.mock('react-i18next', () => {
@@ -34,7 +32,6 @@ vi.mock('react-i18next', () => {
 vi.mock('@/api/acp', () => ({
   createAcpProfile: api.create,
   updateAcpProfile: api.update,
-  previewAcpProfileLaunch: api.preview,
 }));
 vi.mock('@/components/Common/Toast', () => ({ toast: api.toast }));
 vi.mock('@/components/Common/PathInput', () => ({
@@ -99,28 +96,19 @@ const agents: AcpAgentCliInfo[] = [
   {
     id: 'copilot',
     displayName: 'GitHub Copilot',
-    binary: 'copilot',
-    acpArgs: ['--acp'],
-    autoApprove: { args: ['--allow-all'], position: 'after-acp' },
-    installed: true,
-    launchVersion: 1,
-    launchPreviewVersion: 1,
+    status: 'ready',
     capabilities: {
-      autoApprove: 'supported',
-      customLaunchCommand: 'unsupported',
-      modelOverride: 'unknown',
-      sessionPersistence: 'unknown',
+      autoApprove: true,
+      customLaunchCommand: false,
     },
     installHint: 'Install Copilot',
   },
   {
     id: 'claude',
     displayName: 'Claude Agent',
-    binary: 'claude-agent-acp',
-    acpArgs: [],
-    autoApprove: null,
-    installed: false,
+    status: 'adapter-missing',
     installHint: 'Install Claude',
+    capabilities: { autoApprove: false, customLaunchCommand: false },
   },
 ];
 
@@ -139,13 +127,6 @@ const structured: AgentProfileView = {
   executionRevision: 4,
   launch: { kind: 'acp-harness', harnessId: 'copilot' },
 };
-const plan: AcpProfileLaunchPreviewResponse = {
-  kind: 'exec',
-  executable: '/daemon/copilot',
-  argv: ['--acp', 'daemon-owned-argument'],
-  env: { SECRET: 'must-not-render' },
-};
-
 let root: Root | undefined;
 let container: HTMLDivElement | undefined;
 const onSaved = vi.fn<() => Promise<void>>();
@@ -210,11 +191,6 @@ function saveButton() {
 function approval() {
   return container?.querySelector<HTMLInputElement>('input[type="checkbox"]');
 }
-async function settlePreview() {
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(300);
-  });
-}
 function chooseCustom() {
   const select = container?.querySelector<HTMLSelectElement>(
     'select[aria-label="settings.agent"]',
@@ -230,7 +206,6 @@ beforeEach(() => {
   onSaved.mockResolvedValue(undefined);
   api.create.mockResolvedValue(legacy);
   api.update.mockResolvedValue(legacy);
-  api.preview.mockResolvedValue(plan);
 });
 afterEach(() => {
   act(() => root?.unmount());
@@ -265,8 +240,6 @@ describe('AgentProfileEditor', () => {
       alias: 'Renamed',
       customData: legacy.customData,
     });
-
-    expect(api.preview).not.toHaveBeenCalled();
   });
 
   it('renders human-readable device labels while retaining UUID identity details', () => {
@@ -346,26 +319,14 @@ describe('AgentProfileEditor', () => {
     expect(saveButton()?.disabled).toBe(true);
   });
 
-  it('requires a daemon preview and explicit checkbox for elevated permissions', async () => {
+  it('requires an explicit checkbox for elevated permissions', async () => {
     renderEditor();
     input('path', 'C:\\work\\project');
     act(() => approval()?.click());
     expect(container?.textContent).toContain(
       'settings.profilePermissionIncrease',
     );
-    expect(saveButton()?.disabled).toBe(true);
-    await settlePreview();
-    expect(api.preview).toHaveBeenCalledWith({
-      agentletId: 'device-1',
-      launch: {
-        kind: 'acp-harness',
-        harnessId: 'copilot',
-        options: { autoApprove: true },
-      },
-    });
-    expect(container?.textContent).toContain('daemon-owned-argument');
-    expect(container?.textContent).not.toContain('must-not-render');
-    expect(container?.textContent).not.toContain('SECRET');
+    expect(saveButton()?.disabled).toBe(false);
     expect(
       container?.querySelector('[aria-label="settings.launchCommand"]'),
     ).toBeNull();
@@ -388,20 +349,11 @@ describe('AgentProfileEditor', () => {
     expect(onClose).toHaveBeenCalledOnce();
   });
 
-  it('targets edit preview by saved Profile and patches only changed execution fields', async () => {
+  it('patches only changed execution fields', async () => {
     renderEditor(structured);
     act(() => approval()?.click());
     input('path', '/different/work');
-    expect(saveButton()?.disabled).toBe(true);
-    await settlePreview();
-    expect(api.preview).toHaveBeenCalledWith({
-      profileId: 'profile-1',
-      launch: {
-        kind: 'acp-harness',
-        harnessId: 'copilot',
-        options: { autoApprove: true },
-      },
-    });
+    expect(saveButton()?.disabled).toBe(false);
     await act(async () => saveButton()?.click());
     expect(api.update).toHaveBeenCalledWith('profile-1', {
       expectedRevision: 7,
@@ -419,7 +371,6 @@ describe('AgentProfileEditor', () => {
   it('saves cwd alone without rewriting launch options', async () => {
     renderEditor(structured);
     input('path', '/different/work');
-    await settlePreview();
     await act(async () => saveButton()?.click());
     expect(api.update.mock.calls[0]?.[1]).toMatchObject({
       workingDirPath: '/different/work',
@@ -439,22 +390,18 @@ describe('AgentProfileEditor', () => {
         metadata: { cliId: 'custom' },
       }),
     );
-    expect(api.preview).not.toHaveBeenCalled();
   });
 
-  it('falls back to manual creation for older daemons', () => {
+  it('falls back to manual creation when known harnesses are unavailable', () => {
     renderEditor(
       undefined,
-      agents.map((agent) => ({ ...agent, launchPreviewVersion: undefined })),
+      agents.map((agent) => ({ ...agent, status: 'not-found' })),
     );
     expect(
       container?.querySelector<HTMLSelectElement>(
         'select[aria-label="settings.agent"]',
       )?.value,
     ).toBe('custom');
-    expect(container?.textContent).toContain(
-      'settings.structuredLaunchUnavailable',
-    );
     expect(approval()).toBeNull();
   });
 
@@ -464,10 +411,8 @@ describe('AgentProfileEditor', () => {
         ...agents[0],
         id: 'custom',
         capabilities: {
-          autoApprove: 'supported',
-          modelOverride: 'supported',
-          sessionPersistence: 'supported',
-          customLaunchCommand: 'unknown',
+          autoApprove: false,
+          customLaunchCommand: false,
         },
       },
     ]);
@@ -488,14 +433,12 @@ describe('AgentProfileEditor', () => {
       {
         ...agents[0],
         capabilities: {
-          autoApprove: 'unsupported',
-          modelOverride: 'unknown',
-          sessionPersistence: 'unknown',
+          autoApprove: false,
+          customLaunchCommand: false,
         },
       },
     ]);
     input('path', '/work/project');
-    await settlePreview();
     await act(async () => saveButton()?.click());
     expect(api.create.mock.calls[0]?.[0].launch).toEqual({
       kind: 'acp-harness',
@@ -503,55 +446,28 @@ describe('AgentProfileEditor', () => {
     });
   });
 
-  it('debounces rapid option changes into one preview request', async () => {
-    renderEditor();
-    act(() => approval()?.click());
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(100);
-    });
-    act(() => approval()?.click());
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(100);
-    });
-    act(() => approval()?.click());
-    expect(api.preview).not.toHaveBeenCalled();
-    await settlePreview();
-    expect(api.preview).toHaveBeenCalledOnce();
-    expect(api.preview.mock.calls[0]?.[0].launch.options.autoApprove).toBe(
-      true,
-    );
+  it('does not enable approval when the definition does not support it', async () => {
+    renderEditor(structured, [
+      {
+        ...agents[0],
+        capabilities: {
+          autoApprove: false,
+          customLaunchCommand: false,
+        },
+      },
+    ]);
+    expect(approval()?.disabled).toBe(true);
+    input('settings.displayName', 'Alias only');
+    await act(async () => saveButton()?.click());
+    expect(api.update.mock.calls[0]?.[1]).not.toHaveProperty('launch');
   });
 
-  it.each(['unknown', 'unsupported', undefined] as const)(
-    'does not infer approval capability %s from catalogue arguments',
-    async (status) => {
-      renderEditor(structured, [
-        {
-          ...agents[0],
-          capabilities: status
-            ? {
-                autoApprove: status,
-                modelOverride: 'unknown',
-                sessionPersistence: 'unknown',
-              }
-            : undefined,
-        },
-      ]);
-      expect(approval()?.disabled).toBe(true);
-      input('settings.displayName', 'Alias only');
-      await act(async () => saveButton()?.click());
-      expect(api.update.mock.calls[0]?.[1]).not.toHaveProperty('launch');
-    },
-  );
-
-  it('supports approval from capabilities even without legacy argument catalogue data', async () => {
-    renderEditor(structured, [{ ...agents[0], autoApprove: null }]);
+  it('supports approval from definition capabilities', async () => {
+    renderEditor(structured);
     expect(approval()?.disabled).toBe(false);
     act(() => approval()?.click());
-    await settlePreview();
-    expect(api.preview.mock.calls[0]?.[0].launch.options.autoApprove).toBe(
-      true,
-    );
+    await act(async () => saveButton()?.click());
+    expect(api.update.mock.calls[0]?.[1].launch.options.autoApprove).toBe(true);
   });
 
   it('keeps alias editing available offline and preserves saved approval defaults', async () => {
@@ -578,69 +494,6 @@ describe('AgentProfileEditor', () => {
     input('settings.displayName', 'Offline alias');
     await act(async () => saveButton()?.click());
     expect(api.update.mock.calls[0]?.[1]).not.toHaveProperty('launch');
-  });
-
-  it('shows preview errors, prevents execution saves, and supports retry', async () => {
-    api.preview.mockRejectedValueOnce(new Error('Target daemon offline'));
-    renderEditor();
-    input('path', '/work/project');
-    await settlePreview();
-    expect(container?.textContent).toContain('Target daemon offline');
-    expect(saveButton()?.disabled).toBe(true);
-    const retry = [...(container?.querySelectorAll('button') ?? [])].find(
-      (button) => button.textContent === 'settings.profilePreviewRetry',
-    );
-    act(() => retry?.click());
-    await settlePreview();
-    expect(saveButton()?.disabled).toBe(false);
-  });
-
-  it('allows alias saves despite failed previews when execution fields are untouched', async () => {
-    api.preview.mockRejectedValueOnce(new Error('Target daemon offline'));
-    renderEditor(structured);
-    await settlePreview();
-    input('settings.displayName', 'Offline rename');
-    expect(saveButton()?.disabled).toBe(false);
-    await act(async () => saveButton()?.click());
-    expect(api.update.mock.calls[0]?.[1]).not.toHaveProperty('launch');
-  });
-
-  it('debounces edits and ignores late preview results from an older draft', async () => {
-    let oldResolve!: (value: AcpProfileLaunchPreviewResponse) => void;
-    api.preview.mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          oldResolve = resolve;
-        }),
-    );
-    renderEditor();
-    input('path', '/work/project');
-    await settlePreview();
-    act(() => approval()?.click());
-    expect(saveButton()?.disabled).toBe(true);
-    await settlePreview();
-    expect(api.preview).toHaveBeenCalledTimes(2);
-    await act(async () =>
-      oldResolve({ kind: 'shell', command: 'stale-preview' }),
-    );
-    expect(container?.textContent).not.toContain('stale-preview');
-    expect(container?.textContent).toContain('daemon-owned-argument');
-  });
-
-  it('ignores stale preview failures after changing to custom', async () => {
-    let reject!: (error: Error) => void;
-    api.preview.mockImplementationOnce(
-      () =>
-        new Promise((_resolve, failure) => {
-          reject = failure;
-        }),
-    );
-    renderEditor();
-    await settlePreview();
-    chooseCustom();
-    await act(async () => reject(new Error('Stale failure')));
-    expect(container?.textContent).not.toContain('Stale failure');
-    expect(approval()).toBeNull();
   });
 
   it('does not reset unsaved edits when discovery changes', () => {

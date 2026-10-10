@@ -83,23 +83,20 @@ Both hello methods are requests and require a matching JSON-RPC response before 
 | `server/stop` | Request | Stop one managed agent session. |
 | `server/list` | Request | List the daemon's active agents. |
 | `server/discoverHarnesses` | Request | Discover the daemon's static ACP harness catalogue, optionally preparing local workspaces. |
-| `server/buildHarnessLaunch` | Request | Compile a Profile launch without probing, spawning, or preparing workspaces. |
 | `server/sendResource` | Notification | Write a host-provided resource through the daemon environment registry. |
 | `server/replay` | Notification | Replay Gateway-to-daemon messages buffered during disconnection. |
 | `server/ping` | Notification | Application-level heartbeat request. |
 | `server/shutdown` | Notification | Ask the daemon to stop gracefully. |
 
-`server/discoverHarnesses` accepts omitted params, `{}`, or `{ "prepareWorkspaces": boolean }`; every other option and invalid request shape is rejected with `-32602`. The advertised `AgentletProfile.capabilities.harnessDiscovery` is `{ version: 1 }`. Unsupported daemons must not be inferred to support discovery.
+`server/discoverHarnesses` accepts omitted params, `{}`, or `{ "prepareWorkspaces": boolean }`; every other option and invalid request shape is rejected with `-32602`. The advertised `AgentletProfile.capabilities.harnessDiscovery` is `{ version: 2 }`. Unsupported daemons must not be inferred to support discovery.
 
-Discovery includes a final `custom` descriptor for manual selection, with `installed: false` and no executable probe or workspace preparation. Hosts must not auto-provision it. Entries may include `launchPreviewVersion: 1` and `capabilities.customLaunchCommand` (`supported`, `unsupported`, or `unknown`); older responses may omit these fields. Custom supports only custom commands, while known wrappers do not support command overrides.
+Discovery includes a final `custom` descriptor for manual selection, with `status: "ready"` and no executable probe or workspace preparation. Hosts must not auto-provision it. Capabilities are required booleans: Custom supports only `customLaunchCommand`, while known Definitions may support `autoApprove` and do not support command overrides.
 
-`server/buildHarnessLaunch` requires `AgentletProfile.capabilities.harnessLaunchPreview: { version: 1 }`. Its only parameter is `{ launch }`, where launch is the unchanged Profile union `{ kind: 'acp-command', command }` or `{ kind: 'acp-harness', harnessId, options?: { autoApprove?: boolean } }`. A legacy command maps to Custom without inspecting its text or metadata. A structured launch maps to its known catalogue wrapper; `harnessId: 'custom'` is invalid. The response is `{ kind: 'exec', executable, argv, env }` or `{ kind: 'shell', command }`. Compilation is pure and shares runtime wrapper logic; it does not resolve PATH, create directories, test credentials, or start ACP. Unknown fields, malformed input, unknown wrappers, and unsupported options fail with `-32602`. No model launch option is introduced. Gateways validate request and response and reject old daemons explicitly rather than computing a local fallback.
+The result is `{ harnesses: HarnessDiscoveryEntry[] }`, including the complete Definition registry in stable order. Each entry contains `id`, `displayName`, `installHint`, `capabilities: { autoApprove, customLaunchCommand }`, and `status: "ready" | "adapter-missing" | "not-found"`, with optional `version`, `workingDirPath`, and `diagnostics: Array<{ code, message }>`.
 
-The result is `{ harnesses: HarnessDiscoveryEntry[] }`, including the complete catalogue in stable order. Each entry contains `id`, `displayName`, `binary`, `acpArgs`, `autoApprove`, `installHint`, and `installed`, with optional `executablePath`, `version`, `workingDirPath`, and `diagnostics: Array<{ code, message }>`. `autoApprove` is either `null` or `{ args: string[], position: "before-acp" | "after-acp" }`. Skip-version rules are internal catalogue data and are not returned.
+Discovery is read-only unless `prepareWorkspaces` is explicitly true. PATH lookup uses bounded `execFile` calls. Windows scans every `where.exe` result and accepts absolute `.exe`, `.com`, `.cmd`, and `.bat` candidates; Unix requires an absolute `which` result. Optional version probing uses `cmd.exe` for Windows wrappers and shell-free execution on Unix. Version failures produce `version_unknown` or `version_probe_failed` while retaining `status: "ready"`. Discovery never installs tools, copies skills or prompts, provisions credentials, or starts an ACP session.
 
-Discovery is read-only unless `prepareWorkspaces` is explicitly true. Probes use shell-free `execFile` calls with a 2.5-second timeout and bounded output. PATH lookup distinguishes `binary_missing` from `lookup_failed`; optional version failures produce `version_unknown` or `version_probe_failed` while retaining `installed: true`. Known interactive adapters are never invoked for version detection. Discovery never installs tools, copies skills or prompts, provisions credentials, or starts an ACP session.
-
-With preparation enabled, only installed entries receive reusable directories under the daemon's own `homedir()/.agentlet/workspace/<static-catalogue-id>`. Neither roots nor IDs are supplied remotely. Directory creation never clears existing data; failure returns `workspace_failed` without `workingDirPath` and without a fallback path. Installation state remains independent of workspace readiness.
+With preparation enabled, only ready non-Custom entries receive reusable directories under the daemon's own `homedir()/.agentlet/workspace/<definition-id>`. Neither roots nor IDs are supplied remotely. Directory creation never clears existing data; failure returns `workspace_failed` without `workingDirPath` and without a fallback path.
 
 The retired `agent-team/*` RPCs return unknown-method errors; there is no setup worker or progress notification.
 
@@ -107,9 +104,9 @@ All JSON-RPC envelopes and method payloads are defined in [`messages.ts`](../pac
 
 ## 4. Spawn and bootstrap
 
-`server/spawn` includes a host correlation `appId`, an optional `workloadType` (`Job` or `Deployment`) used only for aggregate diagnostics, an optional native ACP `sessionId`, and a `sessionSpec`.
+`server/spawn` includes a host correlation `appId`, an optional `workloadType` (`Job` or `Deployment`) used only for aggregate diagnostics, an optional native ACP `sessionId`, and a `sessionSpec`. The daemon advertises `capabilities.harnessLaunch: { version: 2 }`.
 
-The daemon uses the required `sessionSpec.command` and optional `sessionSpec.cwd` directly, then launches the process with `shell: true`. The host must therefore send only trusted commands. Any `sessionSpec.agentTeam` field is explicitly rejected with `-32602`, including when a command is also supplied; there is no manifest resolution or silent fallback.
+The daemon accepts either trusted `sessionSpec.command` or structured `sessionSpec.launch`. Structured launch selects a registered Definition by `harnessId`, validates bounded options, and compiles a trusted shell command immediately before execution; command launch remains explicit host-authorized shell code. Both use the target platform shell. Historical optional `sessionSpec.launchPlan` data is validated then ignored and is never executable input. Any `sessionSpec.agentTeam` field is explicitly rejected with `-32602`; there is no manifest resolution or silent fallback.
 
 For a fresh session the daemon performs:
 
@@ -164,10 +161,10 @@ The native ACP `sessionId` is established by session bootstrap and is the routin
 - Production connections require `wss://`; `--allow-insecure` permits `ws://` only when explicitly requested.
 - The Gateway authenticates both control and session connections before accepting hello.
 - Agent commands run with the daemon process's operating-system permissions.
-- `sessionSpec.command` uses a shell and is trusted control-plane input.
+- Both compiled known-harness commands and explicit Custom commands use the target platform shell. Known commands are built only from trusted static Definition tokens and bounded options; Custom commands are trusted control-plane input.
 - Resource destinations are resolved through the daemon environment registry.
 
-The legacy Custom shell spawn carries a narrowly scoped `codeql[js/command-line-injection]` annotation because executing host-authorized shell code is its intended capability, including pipelines and custom launch scripts. This is not a sanitizer, an executable allow-list, a sandbox, or proof of interactive confirmation: the host must authorize commands for the target machine and must not interpolate prompts or other untrusted content into them. Structured harness launches remain shell-free. The annotation requires compatible alert-suppression analysis and alert handling; adding it alone does not guarantee dismissal in GitHub code scanning.
+The Custom shell spawn carries a narrowly scoped `codeql[js/command-line-injection]` annotation because executing host-authorized shell code is its intended capability, including pipelines and custom launch scripts. This is not a sanitizer, an executable allow-list, a sandbox, or proof of interactive confirmation: the host must authorize commands for the target machine and must not interpolate prompts or other untrusted content into them. Known Definitions share shell execution but compile only trusted fixed tokens and bounded options. The annotation requires compatible alert-suppression analysis and alert handling; adding it alone does not guarantee dismissal in GitHub code scanning.
 
 ## 9. Resource distribution
 
@@ -188,6 +185,6 @@ The host-agnostic Reachback contract is documented in [`agent-reachback.md`](age
 | Hello, lifecycle, spawn, replay, and resource payloads | [`packages/protocol/src/messages.ts`](../packages/protocol/src/messages.ts) |
 | Shared Gateway-facing connection types | [`packages/protocol/src/gateway-types.ts`](../packages/protocol/src/gateway-types.ts) |
 | Daemon implementation | [`packages/local/src/agentlet.ts`](../packages/local/src/agentlet.ts) |
-| Trusted harness catalogue and probes | [`packages/local/src/harnesses/catalogue.ts`](../packages/local/src/harnesses/catalogue.ts), [`detect.ts`](../packages/local/src/harnesses/detect.ts) |
+| Harness Definitions, registry, and probes | [`packages/local/src/harnesses/registry.ts`](../packages/local/src/harnesses/registry.ts), [`detect.ts`](../packages/local/src/harnesses/detect.ts), [`common/command-discovery.ts`](../packages/local/src/harnesses/common/command-discovery.ts) |
 | Daemon-owned reusable workspaces | [`packages/local/src/harnesses/workspace.ts`](../packages/local/src/harnesses/workspace.ts) |
 | WebSocket client and reconnect behavior | [`packages/local/src/ws-client.ts`](../packages/local/src/ws-client.ts) |

@@ -1,143 +1,38 @@
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT license.
+import { describe, expect, it } from 'vitest'
+import { HARNESS_DEFINITIONS } from '../src/harnesses/registry.js'
+import { compileHarnessLaunch } from '../src/harnesses/harness.js'
 
-import { describe, expect, it } from 'vitest';
+describe('harness definitions', () => {
+  it('exposes the supported agents in stable UI order', () => {
+    expect(HARNESS_DEFINITIONS.map(({ id, displayName }) => ({ id, displayName }))).toEqual([
+      { id: 'copilot', displayName: 'GitHub Copilot' },
+      { id: 'claude', displayName: 'Claude Agent' },
+      { id: 'gemini', displayName: 'Gemini' },
+      { id: 'codex', displayName: 'Codex' },
+      { id: 'qwen', displayName: 'Qwen Code' },
+      { id: 'kimi', displayName: 'Kimi Code' },
+      { id: 'opencode', displayName: 'OpenCode' },
+      { id: 'cursor', displayName: 'Cursor' },
+      { id: 'codebuddy', displayName: 'CodeBuddy' },
+      { id: 'hermes', displayName: 'Hermes Agent' },
+      { id: 'custom', displayName: 'Custom command' },
+    ])
+  })
 
-import { KNOWN_CLIS } from '../src/harnesses/catalogue.js';
-
-describe('KNOWN_CLIS', () => {
-  it('exposes the supported agents in UI order with their ACP commands', () => {
-    expect(
-      KNOWN_CLIS.map(({ id, displayName, binary, acpArgs }) => ({
-        id,
-        displayName,
-        binary,
-        acpArgs,
-      })),
-    ).toEqual([
-      {
-        id: 'copilot',
-        displayName: 'GitHub Copilot',
-        binary: 'copilot',
-        acpArgs: ['--acp'],
-      },
-      {
-        id: 'claude',
-        displayName: 'Claude Agent',
-        binary: 'claude-agent-acp',
-        acpArgs: [],
-      },
-      {
-        id: 'gemini',
-        displayName: 'Gemini',
-        binary: 'gemini',
-        acpArgs: ['--acp'],
-      },
-      {
-        id: 'codex',
-        displayName: 'Codex',
-        binary: 'codex-acp',
-        acpArgs: [],
-      },
-      {
-        id: 'qwen',
-        displayName: 'Qwen Code',
-        binary: 'qwen',
-        acpArgs: ['--acp'],
-      },
-      {
-        id: 'kimi',
-        displayName: 'Kimi Code',
-        binary: 'kimi',
-        acpArgs: ['acp'],
-      },
-      {
-        id: 'opencode',
-        displayName: 'OpenCode',
-        binary: 'opencode',
-        acpArgs: ['acp'],
-      },
-      {
-        id: 'cursor',
-        displayName: 'Cursor',
-        binary: 'agent',
-        acpArgs: ['acp'],
-      },
-      {
-        id: 'codebuddy',
-        displayName: 'CodeBuddy',
-        binary: 'codebuddy',
-        acpArgs: ['--acp'],
-      },
-      {
-        id: 'hermes',
-        displayName: 'Hermes Agent',
-        binary: 'hermes',
-        acpArgs: ['acp'],
-      },
-    ]);
-  });
-
-  it('uses unique ids and binary names', () => {
-    expect(new Set(KNOWN_CLIS.map((cli) => cli.id)).size).toBe(
-      KNOWN_CLIS.length,
-    );
-    expect(new Set(KNOWN_CLIS.map((cli) => cli.binary)).size).toBe(
-      KNOWN_CLIS.length,
-    );
-  });
-
-  it('defines official argument-based auto-approval recipes', () => {
-    expect(
-      Object.fromEntries(
-        KNOWN_CLIS.map(({ id, autoApprove }) => [id, autoApprove]),
-      ),
-    ).toEqual({
-      copilot: {
-        args: ['--allow-all'],
-        position: 'after-acp',
-      },
-      claude: null,
-      gemini: {
-        args: ['--approval-mode=yolo'],
-        position: 'after-acp',
-      },
-      codex: null,
-      qwen: {
-        args: ['--approval-mode=yolo'],
-        position: 'after-acp',
-      },
-      kimi: {
-        args: ['--yolo'],
-        position: 'before-acp',
-      },
-      opencode: null,
-      cursor: {
-        args: ['--yolo'],
-        position: 'before-acp',
-      },
-      codebuddy: null,
-      hermes: null,
-    });
-
-    expect(
-      Object.fromEntries(
-        KNOWN_CLIS.filter((cli) => cli.autoApprove).map((cli) => {
-          const approval = cli.autoApprove;
-          if (!approval) throw new Error(`Missing recipe for ${cli.id}`);
-          const args =
-            approval.position === 'before-acp'
-              ? [...approval.args, ...cli.acpArgs]
-              : [...cli.acpArgs, ...approval.args];
-          return [cli.id, [cli.binary, ...args].join(' ')];
-        }),
-      ),
-    ).toEqual({
-      copilot: 'copilot --acp --allow-all',
-      gemini: 'gemini --acp --approval-mode=yolo',
-      qwen: 'qwen --acp --approval-mode=yolo',
-      kimi: 'kimi --yolo acp',
-      cursor: 'agent --yolo acp',
-    });
-  });
-});
+  it('compiles trusted terminal-style commands', () => {
+    expect(compileHarnessLaunch({
+      kind: 'acp-harness',
+      harnessId: 'copilot',
+      options: { autoApprove: true },
+    })).toEqual({ kind: 'shell', command: 'copilot --acp --allow-all' })
+    expect(compileHarnessLaunch({
+      kind: 'acp-harness',
+      harnessId: 'kimi',
+      options: { autoApprove: true },
+    })).toEqual({ kind: 'shell', command: 'kimi --yolo acp' })
+    expect(compileHarnessLaunch({
+      kind: 'acp-harness',
+      harnessId: 'claude',
+    })).toEqual({ kind: 'shell', command: 'claude-agent-acp' })
+  })
+})

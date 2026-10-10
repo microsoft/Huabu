@@ -33,20 +33,16 @@ describe('ACP agent CLI route', () => {
       {
         id: 'copilot',
         displayName: 'GitHub Copilot',
-        binary: 'copilot',
-        acpArgs: ['--acp'],
-        autoApprove: null,
-        installed: true,
+        status: 'ready' as const,
         installHint: 'Install Copilot',
+        capabilities: { autoApprove: true, customLaunchCommand: false },
       },
       {
         id: 'claude',
         displayName: 'Claude Agent',
-        binary: 'claude-agent-acp',
-        acpArgs: [],
-        autoApprove: null,
-        installed: false,
+        status: 'adapter-missing' as const,
         installHint: 'Install Claude Agent ACP',
+        capabilities: { autoApprove: false, customLaunchCommand: false },
       },
     ]);
     app = Fastify({ logger: false });
@@ -63,7 +59,7 @@ describe('ACP agent CLI route', () => {
     expect(response.json().agents).toEqual(await detect.mock.results[0]?.value);
     expect(response.json().agents[1]).toMatchObject({
       id: 'claude',
-      installed: false,
+      status: 'adapter-missing',
     });
   });
 
@@ -136,10 +132,8 @@ describe('ACP agent CLI route', () => {
       expect.objectContaining({
         id: 'custom',
         capabilities: {
-          customLaunchCommand: 'supported',
-          autoApprove: 'unsupported',
-          modelOverride: 'unsupported',
-          sessionPersistence: 'unsupported',
+          customLaunchCommand: true,
+          autoApprove: false,
         },
       }),
     ]);

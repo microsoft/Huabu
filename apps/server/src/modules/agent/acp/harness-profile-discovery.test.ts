@@ -22,11 +22,12 @@ const observation: HarnessDiscoveryResult = {
     {
       id: 'copilot',
       displayName: 'GitHub Copilot',
-      binary: 'copilot',
-      acpArgs: ['--acp'],
-      autoApprove: { args: ['--allow-all'], position: 'after-acp' },
       installHint: 'Install Copilot',
-      installed: true,
+      status: 'ready',
+      capabilities: {
+        autoApprove: false,
+        customLaunchCommand: false,
+      },
       workingDirPath: '/home/user/.agentlet/workspace/copilot',
     },
   ],
@@ -115,7 +116,7 @@ describe('automatic ordinary Profile provisioning', () => {
     dispose();
   });
 
-  it('creates a persisted command Profile with the daemon workspace and no auto-approval flags', async () => {
+  it('creates a persisted typed Profile with the daemon workspace and no auto-approval option', async () => {
     const context = setup();
     const dispose = context.start();
     await flush();
@@ -129,7 +130,11 @@ describe('automatic ordinary Profile provisioning', () => {
       alias: 'GitHub Copilot (machine-a: linux x64)',
       agentletId: 'machine-a',
       workingDirPath: '/home/user/.agentlet/workspace/copilot',
-      launch: { kind: 'acp-command', command: 'copilot --acp' },
+      launch: {
+        kind: 'acp-harness',
+        harnessId: 'copilot',
+        options: undefined,
+      },
       customData: {
         discoveredAgent: {
           version: 1,
@@ -159,12 +164,11 @@ describe('automatic ordinary Profile provisioning', () => {
     dispose();
   });
 
-  it('uses structured harness configuration only when the daemon advertises it', async () => {
+  it('uses structured harness configuration for ready definitions', async () => {
     const context = setup();
     context.gateway.discoverHarnesses.mockResolvedValue({
       harnesses: observation.harnesses.map((harness) => ({
         ...harness,
-        launchVersion: 1,
       })),
     });
     const dispose = context.start();
@@ -180,23 +184,17 @@ describe('automatic ordinary Profile provisioning', () => {
     dispose();
   });
 
-  it.each(['supported', 'unsupported', 'unknown', undefined] as const)(
-    'defaults structured auto-approval only for explicitly supported capabilities (%s)',
+  it.each([true, false] as const)(
+    'defaults structured auto-approval only when the definition supports it (%s)',
     async (autoApprove) => {
       const context = setup();
       context.gateway.discoverHarnesses.mockResolvedValue({
         harnesses: observation.harnesses.map((harness) => ({
           ...harness,
-          launchVersion: 1,
-          ...(autoApprove === undefined
-            ? {}
-            : {
-                capabilities: {
-                  autoApprove,
-                  modelOverride: 'unknown',
-                  sessionPersistence: 'unknown',
-                },
-              }),
+          capabilities: {
+            autoApprove,
+            customLaunchCommand: false,
+          },
         })),
       });
       const dispose = context.start();
@@ -204,33 +202,11 @@ describe('automatic ordinary Profile provisioning', () => {
       expect(context.profiles[0]?.launch).toEqual({
         kind: 'acp-harness',
         harnessId: 'copilot',
-        options:
-          autoApprove === 'supported' ? { autoApprove: true } : undefined,
+        options: autoApprove ? { autoApprove: true } : undefined,
       });
       dispose();
     },
   );
-
-  it('does not inject approval options into compatibility command Profiles', async () => {
-    const context = setup();
-    context.gateway.discoverHarnesses.mockResolvedValue({
-      harnesses: observation.harnesses.map((harness) => ({
-        ...harness,
-        capabilities: {
-          autoApprove: 'supported',
-          modelOverride: 'unknown',
-          sessionPersistence: 'unknown',
-        },
-      })),
-    });
-    const dispose = context.start();
-    await flush();
-    expect(context.profiles[0]?.launch).toEqual({
-      kind: 'acp-command',
-      command: 'copilot --acp',
-    });
-    dispose();
-  });
 
   it.each([
     { kind: 'acp-harness', harnessId: 'copilot' },
@@ -262,11 +238,9 @@ describe('automatic ordinary Profile provisioning', () => {
       context.gateway.discoverHarnesses.mockResolvedValue({
         harnesses: observation.harnesses.map((harness) => ({
           ...harness,
-          launchVersion: 1,
           capabilities: {
-            autoApprove: 'supported',
-            modelOverride: 'unknown',
-            sessionPersistence: 'unknown',
+            autoApprove: true,
+            customLaunchCommand: false,
           },
         })),
       });
@@ -315,11 +289,9 @@ describe('automatic ordinary Profile provisioning', () => {
       context.gateway.discoverHarnesses.mockResolvedValue({
         harnesses: observation.harnesses.map((harness) => ({
           ...harness,
-          launchVersion: 1,
           capabilities: {
-            autoApprove: 'supported',
-            modelOverride: 'unknown',
-            sessionPersistence: 'unknown',
+            autoApprove: true,
+            customLaunchCommand: false,
           },
         })),
       });
@@ -376,12 +348,11 @@ describe('automatic ordinary Profile provisioning', () => {
     }
   });
 
-  it('does not create a compatibility duplicate when a daemon stops advertising typed launch', async () => {
+  it('does not create a duplicate on repeated ready discovery', async () => {
     const context = setup();
     context.gateway.discoverHarnesses.mockResolvedValueOnce({
       harnesses: observation.harnesses.map((harness) => ({
         ...harness,
-        launchVersion: 1,
       })),
     });
     const dispose = context.start();
@@ -453,11 +424,9 @@ describe('automatic ordinary Profile provisioning', () => {
     context.gateway.discoverHarnesses.mockResolvedValue({
       harnesses: observation.harnesses.map((harness) => ({
         ...harness,
-        launchVersion: 1,
         capabilities: {
-          autoApprove: 'supported',
-          modelOverride: 'unknown',
-          sessionPersistence: 'unknown',
+          autoApprove: true,
+          customLaunchCommand: false,
         },
       })),
     });
@@ -599,7 +568,7 @@ describe('automatic ordinary Profile provisioning', () => {
     const context = setup();
     context.gateway.discoverHarnesses.mockResolvedValueOnce({
       harnesses: [
-        { ...observation.harnesses[0]!, installed: false },
+        { ...observation.harnesses[0]!, status: 'not-found' },
         {
           ...observation.harnesses[0]!,
           workingDirPath: undefined,

@@ -2,9 +2,8 @@
 // Licensed under the MIT license.
 
 import type { HarnessDiscoveryParams, HarnessDiscoveryResult } from '@agentlet/protocol'
-import { CUSTOM_COMMAND_WRAPPER_ID } from '@agentlet/protocol'
-import { KNOWN_CLIS } from './catalogue.js'
-import { Harness } from './harness.js'
+import { HARNESS_DEFINITIONS } from './registry.js'
+import { prepareHarnessWorkspace } from './workspace.js'
 
 export function parseHarnessDiscoveryParams(params: unknown): HarnessDiscoveryParams {
   if (params === undefined) return {}
@@ -23,6 +22,31 @@ export function parseHarnessDiscoveryParams(params: unknown): HarnessDiscoveryPa
 /** Probe only the daemon's trusted catalogue; no install, bootstrap, or credential changes. */
 export async function discoverHarnesses(params: HarnessDiscoveryParams = {}): Promise<HarnessDiscoveryResult> {
   const options = parseHarnessDiscoveryParams(params)
-  const ids = [...KNOWN_CLIS.map(({ id }) => id), CUSTOM_COMMAND_WRAPPER_ID]
-  return { harnesses: await Promise.all(ids.map((id) => Harness.get(id).detect(options))) }
+  return {
+    harnesses: await Promise.all(HARNESS_DEFINITIONS.map(async (definition) => {
+      const observation = await definition.discover()
+      const diagnostics = [...(observation.diagnostics ?? [])]
+      let workingDirPath: string | undefined
+      if (options.prepareWorkspaces && observation.status === 'ready' && definition.id !== 'custom') {
+        try {
+          workingDirPath = await prepareHarnessWorkspace(definition.id)
+        } catch (error) {
+          diagnostics.push({
+            code: 'workspace_failed',
+            message: error instanceof Error ? error.message : String(error),
+          })
+        }
+      }
+      return {
+        id: definition.id,
+        displayName: definition.displayName,
+        installHint: definition.installHint,
+        capabilities: { ...definition.capabilities },
+        status: observation.status,
+        ...(observation.version ? { version: observation.version } : {}),
+        ...(workingDirPath ? { workingDirPath } : {}),
+        ...(diagnostics.length ? { diagnostics } : {}),
+      }
+    })),
+  }
 }
