@@ -269,6 +269,31 @@ describe('ChatContextSources', () => {
     expect(button('Add Adjacent note')).toBeDefined();
   });
 
+  it.each([{ label: '' }, {}, { label: 42 }])(
+    'preserves the adjacent candidate fallback when adding node data %j',
+    (data) => {
+      setNodes([node('untitled-node', { data })]);
+      render({ adjacentNodeSourceId: 'untitled-node' });
+      act(() => button('Add Untitled').click());
+      expect(
+        selectThreadPendingAttachments(
+          useChatStore.getState(),
+          session.threadId,
+        ),
+      ).toEqual([
+        {
+          type: 'text',
+          source: 'selection',
+          originNodeId: 'untitled-node',
+          label: 'Untitled',
+        },
+      ]);
+      expect(
+        container.querySelector('[data-context-attachment]')?.textContent,
+      ).toBe('Untitled');
+    },
+  );
+
   it('keeps the Canvas summary after excerpts, attachments and the adjacent candidate', () => {
     setNodes([node('selected', { selected: true }), node('Adjacent note')]);
     useChatStore.getState().setSelectionAttachment(excerpt);

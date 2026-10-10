@@ -275,7 +275,7 @@ export function PreviewGroup({
           })
         ) : (
           <div className="text-fg-subtle flex h-full items-center justify-center p-6 text-center text-sm">
-            {t('preview.emptyWorkspace')}
+            {t('preview.emptyGroup')}
           </div>
         )}
       </div>

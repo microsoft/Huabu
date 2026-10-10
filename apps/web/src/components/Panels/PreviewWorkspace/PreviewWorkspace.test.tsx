@@ -1291,6 +1291,21 @@ describe('tab batch close menu', () => {
 });
 
 describe('split', () => {
+  it.each([false, true])(
+    'uses group-specific empty copy regardless of focus with fullscreen=%s',
+    (isFullscreen) => {
+      const tabId = openNode('a');
+      store().splitGroup();
+      render([canvasNode('a', 'Alpha')]);
+      act(() => root?.render(<PreviewWorkspace isFullscreen={isFullscreen} />));
+      expect(container?.textContent).toContain('No preview open in this group');
+      expect(container?.textContent).not.toContain('Double-click a node');
+      act(() => store().activateTab(tabId));
+      expect(container?.textContent).toContain('No preview open in this group');
+      expect(container?.textContent).not.toContain('Double-click a node');
+    },
+  );
+
   it.each([0, 1])(
     'closes an empty group on side %i without collapsing the panel',
     (emptyIndex) => {
@@ -1365,7 +1380,7 @@ describe('split', () => {
       );
       expect(container?.querySelectorAll('[role="tablist"]')).toHaveLength(2);
       expect(container?.querySelector('[role="separator"]')).not.toBeNull();
-      expect(container?.textContent).toContain('Double-click a node');
+      expect(container?.textContent).toContain('No preview open in this group');
       expect(
         container?.querySelector('[aria-label="Merge groups"]'),
       ).toBeNull();
@@ -1749,7 +1764,7 @@ describe('target resolution', () => {
   it('shows the empty state when nothing is open', () => {
     render([]);
 
-    expect(container?.textContent).toContain('Double-click a node');
+    expect(container?.textContent).toContain('No preview open in this group');
   });
 });
 

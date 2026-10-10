@@ -84,6 +84,19 @@ test('empty splits persist and canvas double-clicks follow the last interacted g
   const split = await snapshot();
   expect(split.activeGroupId).toBe(split.groups[1].id);
 
+  await page.getByRole('button', { name: 'Fullscreen', exact: true }).click();
+  await expect(page.locator('.react-flow')).toHaveCount(0);
+  await expect(
+    page.getByText('No preview open in this group', { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText('Double-click a node on the Space to preview it here'),
+  ).toHaveCount(0);
+  await page
+    .getByRole('button', { name: 'Exit fullscreen', exact: true })
+    .click();
+  await expect(page.locator('.react-flow')).toBeVisible();
+
   await page.reload();
   await expect(strips).toHaveCount(2);
   await expect(strips.nth(1).getByRole('tab')).toHaveCount(0);

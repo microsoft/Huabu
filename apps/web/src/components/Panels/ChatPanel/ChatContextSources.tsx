@@ -245,10 +245,7 @@ export const ChatContextSources = memo(function ChatContextSources({
               type: 'text',
               source: 'selection',
               originNodeId: adjacentNode.id,
-              label:
-                typeof adjacentNode.data.label === 'string'
-                  ? adjacentNode.data.label
-                  : t('chat.attachmentFallbackText'),
+              label: adjacentNodeLabel,
             });
             onCommit?.();
           }}
