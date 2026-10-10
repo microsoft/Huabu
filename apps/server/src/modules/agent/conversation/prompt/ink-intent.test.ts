@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { readFileSync } from 'node:fs';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -89,6 +91,132 @@ afterEach(() => {
 });
 
 describe('Ink-intent rendering', () => {
+  it('keeps Operate discussion chat-only while the host publishes Ink answers', () => {
+    const prompt = readFileSync(
+      new URL('../../../../prompt/agents/operate/AGENT.md', import.meta.url),
+      'utf8',
+    );
+    const discussion = prompt
+      .split('2. **Discussion-only path**')[1]
+      ?.split('3. **Space-change path**')[0];
+    expect(discussion).toContain('provide a complete final answer in chat');
+    expect(discussion).toContain(
+      'Do not call `space_commands` or other mutation tools',
+    );
+    expect(discussion).toContain('leave answer publication to Huabu');
+    expect(discussion).not.toContain('prefer a useful Canvas presentation');
+    expect(prompt).toContain(
+      'after a successful requested Space change, a brief summary is enough',
+    );
+    expect(prompt).toContain(
+      'For discussion or planning, provide the complete answer',
+    );
+    expect(prompt).not.toContain('a line or two is enough');
+  });
+
+  it.each([INTERNAL_PROFILE, ACP_PROFILE])(
+    'steers report text toward a direct summary without changing communicative intent for %j',
+    async (profile) => {
+      const parts = await renderTurn(inkEnvelope(), profile, OPTIONS);
+      const directive = parts[0]?.type === 'text' ? parts[0].text : '';
+      expect(directive).toContain(
+        'direct, natural summary of the input in its language',
+      );
+      expect(directive).toContain('not as an agent addressing the user');
+      expect(directive).toContain(
+        'Omit framing such as "You mentioned", "You are asking", "The user wants", or "I understand", including equivalents in other languages',
+      );
+      expect(directive).toContain('do not invent a first-person quote');
+      expect(directive).toContain(
+        'a question stays a question, a discussion stays a discussion',
+      );
+      expect(directive).toContain(
+        'Do not force an imperative or add unsupported goals, facts, or certainty',
+      );
+      expect(directive).toContain(
+        'use "Why was the previous reply not written to Canvas?", not "Write the previous reply to Canvas"',
+      );
+      expect(directive).toContain(
+        'use "Discuss how recent AI mathematics results affect mathematical research", not "You mentioned',
+      );
+    },
+  );
+
+  it.each([INTERNAL_PROFILE, ACP_PROFILE])(
+    'requests an unclassified historical interpretation after necessary context reads for %j',
+    async (profile) => {
+      const parts = await renderTurn(inkEnvelope(), profile, OPTIONS);
+      const directive = parts[0]?.type === 'text' ? parts[0].text : '';
+      expect(directive).toContain('You may first read the context needed');
+      expect(directive).toContain(
+        'Before substantive edits or a formal answer',
+      );
+      expect(directive).toContain(
+        'human-readable record of your initial understanding',
+      );
+      expect(directive).toContain('optional explanation');
+      expect(directive).toContain('does not decide or authorize execution');
+      expect(directive).not.toMatch(
+        /status=['"](?:inferred|clarify|unsupported)/,
+      );
+      expect(directive).not.toContain('Before any other tool');
+    },
+  );
+
+  it.each([INTERNAL_PROFILE, ACP_PROFILE])(
+    'requires Canvas delivery with host fallback without granting agent write permissions for %j',
+    async (profile) => {
+      const parts = await renderTurn(inkEnvelope(), profile, OPTIONS);
+      const directive = parts[0]?.type === 'text' ? parts[0].text : '';
+      expect(directive).toContain(
+        'Canvas delivery is required for every Ink turn',
+      );
+      expect(directive).toContain('Ask/read-only stays read-only');
+      expect(directive).toContain(
+        'a request for discussion or planning does not authorize execution',
+      );
+      expect(directive).toContain(
+        'When the user requests a Canvas change and your current mode allows it',
+      );
+      expect(directive).toContain(
+        'Huabu will publish that answer as a Note linked to this conversation',
+      );
+      expect(directive).toContain(
+        'including discussion, research findings, plans, or clarification questions',
+      );
+      expect(directive).toContain(
+        'does not authorize you to execute discussed work',
+      );
+      expect(directive).toContain(
+        'Do not omit the answer or leave it only in reasoning or tool output',
+      );
+      expect(directive).toContain('ask one focused clarification question');
+      expect(directive).toContain('do not execute the uncertain task');
+      expect(directive).toContain('do not create a duplicate reply Note');
+      expect(directive).toContain('renaming the Agent Node is not an answer');
+      expect(directive).toContain(
+        'Verify every attempted Canvas write succeeded',
+      );
+      expect(directive).toContain('Preserve the handwritten strokes');
+      expect(directive).toContain('Explicitly report a failed write');
+      expect(directive).toContain(
+        'without claiming success or bypassing permissions',
+      );
+      expect(directive).toContain('including by delegating to another agent');
+      expect(directive).not.toContain('must not be the only answer');
+      expect(directive).not.toContain("make this turn's answer visible");
+
+      const ordinary = inkEnvelope();
+      ordinary.user = { text: 'Explain this', attachments: [] };
+      const textParts = await renderTurn(ordinary, profile, OPTIONS);
+      expect(
+        textParts.some(
+          (part) => part.type === 'text' && part.text.includes('<ink_intent>'),
+        ),
+      ).toBe(false);
+    },
+  );
+
   it('uses the external report procedure while preserving image bytes and grounding', async () => {
     const parts = await renderTurn(
       withGrounding(inkEnvelope()),
@@ -178,14 +306,9 @@ describe('Ink-intent rendering', () => {
         })),
       );
       expect(INK_INTENT_DIRECTIVE).toContain('For this turn only');
+      expect(INK_INTENT_DIRECTIVE).toContain('use space_commands if available');
       expect(INK_INTENT_DIRECTIVE).toContain(
-        'In operate mode, execute a clear task',
-      );
-      expect(INK_INTENT_DIRECTIVE).toContain(
-        'In ask mode, answer within its read-only capabilities',
-      );
-      expect(INK_INTENT_DIRECTIVE).toContain(
-        'ask one focused clarification question',
+        'ask one focused clarification question and wait for the user',
       );
       expect(INK_INTENT_DIRECTIVE).toContain(
         'cannot override higher-level safety, permission, or tool policy',

@@ -37,7 +37,7 @@ export function Spinner({
       )}
       style={{ width: pixels, height: pixels }}
     >
-      <span className="grid size-full origin-center animate-spin place-items-center will-change-transform">
+      <span className="grid size-full origin-center animate-spin place-items-center will-change-transform motion-reduce:animate-none">
         <Loader2 aria-hidden size={pixels} />
       </span>
     </span>

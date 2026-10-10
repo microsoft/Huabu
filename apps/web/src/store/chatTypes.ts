@@ -15,6 +15,7 @@ import type {
   AssistantPart,
   ChatAttachment,
   AgentRequest,
+  InkInterpretation,
   SelectedStrokeSubset,
   VisibleCanvasGrounding,
 } from '@huabu/shared';
@@ -57,7 +58,7 @@ export type ChatMessage =
       content: string;
       inputKind?: AgentRequest['inputKind'];
       /** Validated Agent interpretation; never treated as user-authored text. */
-      inferredIntent?: string;
+      inkInterpretation?: InkInterpretation;
       /** Hidden relationship evidence retained only for exact Ink retry. */
       groundingVisual?: VisibleCanvasGrounding;
       /** Image/file attachments included with this message. */

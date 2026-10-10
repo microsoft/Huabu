@@ -113,9 +113,9 @@ export const reportInkIntentParamsSchema = zodToToolSchema(
 
 export const reportInkIntentTool: ToolDefinition = {
   name: 'report_ink_intent',
-  label: 'Interpret Ink request',
+  label: 'Record Ink interpretation',
   description:
-    'Report the concise actionable intent you infer from an Ink request before acting. Use status="inferred" with one plain-text line (max 120 characters), status="clarify" before asking a clarification question, or status="unsupported" when the Ink cannot be interpreted. Call only for an <ink_intent> turn.',
+    "Record your understanding of this Ink input for readable conversation history. Provide a one-line text summary (max 120 characters) and optional explanation of ambiguity, grounding, or limitations (max 600 characters). Partial understanding or inability to interpret is valid; do not invent certainty. Report after necessary read-only context gathering, before substantive edits or a formal answer. This records an interpretation, not an execution decision or permission. Call only for an <ink_intent> turn; keep the first successful report as this turn's snapshot.",
   parameters: reportInkIntentParamsSchema,
   executionMode: 'sequential',
 };

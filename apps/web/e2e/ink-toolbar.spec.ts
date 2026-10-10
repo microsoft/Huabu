@@ -3,6 +3,138 @@
 
 import { expect, test } from '@playwright/test';
 
+test('Ink submission spinner stays centered throughout rotation and respects reduced motion', async ({
+  page,
+}) => {
+  await page.route(
+    '**/api/canvas/ink-layout-fixture/recent-conversation',
+    (route) => route.fulfill({ json: { conversation: null } }),
+  );
+  await page.goto('/playground/node-toolbars');
+  await expect(page.locator('.nt-toolbar')).toHaveCount(12);
+  await page.evaluate(async () => {
+    const load = (path: string) => import(/* @vite-ignore */ path);
+    const { mountInkToolbar } = await load('/e2e/fixtures/ink-toolbar.tsx');
+    await mountInkToolbar('en');
+    // Hold the catalogue refresh so the real toolbar stays in preparation.
+    const { useAcpProfilesStore } = await load(
+      '/src/store/acpProfilesStore.ts',
+    );
+    useAcpProfilesStore.setState({ refresh: () => new Promise(() => {}) });
+  });
+  const send = page.locator('.ink-context-toolbar .canvas-context-submit');
+  const picker = page.locator('.ink-agent-destination-trigger');
+  await expect(send).toBeEnabled();
+  const idleBox = await send.boundingBox();
+  await send.click();
+  await expect(send).toHaveAttribute('aria-busy', 'true');
+  await expect(send).toBeDisabled();
+  await expect(picker).toBeDisabled();
+  await expect(picker.locator('.text-warning')).toHaveCount(0);
+  const spinner = send.locator('[data-loading-spinner]');
+  await expect(spinner).toBeVisible();
+  await expect(send.locator('.lucide-square')).toHaveCount(0);
+  expect(await send.boundingBox()).toEqual(idleBox);
+
+  const samples = await spinner.evaluate(async (element) => {
+    const rotating = element.firstElementChild;
+    const svg = element.querySelector('svg');
+    const button = element.closest('button');
+    if (!rotating || !svg || !button)
+      throw new Error('Spinner structure missing');
+    const animation = rotating.getAnimations()[0];
+    if (!animation) throw new Error('Spinner animation missing');
+    animation.pause();
+    const center = (rect: DOMRect) => ({
+      x: rect.x + rect.width / 2,
+      y: rect.y + rect.height / 2,
+    });
+    const buttonCenter = center(button.getBoundingClientRect());
+    const result = [];
+    for (const time of [0, 125, 250, 375, 500, 625, 750, 875]) {
+      animation.currentTime = time;
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => resolve()),
+      );
+      result.push({
+        buttonCenter,
+        wrapper: center(rotating.getBoundingClientRect()),
+        icon: center(svg.getBoundingClientRect()),
+        transform: getComputedStyle(rotating).transform,
+      });
+    }
+    return result;
+  });
+  expect(new Set(samples.map((sample) => sample.transform)).size).toBe(8);
+  for (const sample of samples) {
+    for (const center of [sample.wrapper, sample.icon]) {
+      expect(Math.abs(center.x - sample.buttonCenter.x)).toBeLessThan(0.1);
+      expect(Math.abs(center.y - sample.buttonCenter.y)).toBeLessThan(0.1);
+    }
+  }
+  await page.screenshot({ path: test.info().outputPath('ink-submitting.png') });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await expect(spinner.locator(':scope > span')).toHaveCSS(
+    'animation-name',
+    'none',
+  );
+  await expect(send).toHaveAttribute('aria-label', 'Sending ink request');
+});
+
+test('Ink supports read-only Chat in new and recent destinations alongside external bindings', async ({
+  page,
+}) => {
+  await page.route(
+    '**/api/canvas/ink-layout-fixture/recent-conversation',
+    (route) =>
+      route.fulfill({
+        json: {
+          conversation: {
+            nodeId: 'ink-conversation-0',
+            threadId: 'ink-thread-0',
+          },
+        },
+      }),
+  );
+  await page.goto('/playground/node-toolbars');
+  await expect(page.locator('.nt-toolbar')).toHaveCount(12);
+  await page.evaluate(async () => {
+    const load = (path: string) => import(/* @vite-ignore */ path);
+    const { mountInkToolbar } = await load('/e2e/fixtures/ink-toolbar.tsx');
+    await mountInkToolbar('en', 2, [
+      { binding: { kind: 'internal' }, mode: 'ask' },
+      {
+        binding: {
+          kind: 'external',
+          profileId: 'ink-layout-profile',
+          alias: 'Copilot',
+        },
+        mode: 'ask',
+      },
+    ]);
+  });
+  const trigger = page.locator('.ink-agent-destination-trigger');
+  await expect(trigger).toContainText('Conversation 1');
+  const send = page.locator('.ink-context-toolbar .canvas-context-submit');
+  await expect(send).toBeEnabled();
+  await trigger.tap();
+  const menu = page.getByRole('menu');
+  await expect(
+    menu.getByRole('menuitem', { name: /Conversation 1/ }),
+  ).toBeEnabled();
+  await expect(
+    menu.getByRole('menuitem', { name: /Conversation 2/ }),
+  ).toBeEnabled();
+  const newGroup = menu.getByRole('group', { name: 'New conversation' });
+  await expect(newGroup.getByRole('menuitem', { name: /^Chat/ })).toBeEnabled();
+  await expect(
+    newGroup.getByRole('menuitem', { name: /^Agent/ }),
+  ).toBeEnabled();
+  await menu.getByRole('menuitem', { name: /Conversation 2/ }).tap();
+  await expect(trigger).toContainText('Conversation 2');
+  await expect(send).toBeEnabled();
+});
+
 for (const pointerOpen of ['click', 'tap'] as const) {
   test(`${pointerOpen}-opened destination menu supports immediate keyboard navigation and focus return`, async ({
     page,

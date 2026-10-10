@@ -13,12 +13,16 @@ import './noteScrollbar.css';
 /** Store-free geometry shared by canvas Notes and read-only specimens. */
 export function NoteContentViewport({
   scrollingEnabled,
+  nativeScrollbarVisible = scrollingEnabled,
+  touchReading = false,
   viewportRef,
   contentHostRef,
   onScroll,
   children,
 }: {
   scrollingEnabled: boolean;
+  nativeScrollbarVisible?: boolean;
+  touchReading?: boolean;
   viewportRef: Ref<HTMLDivElement>;
   contentHostRef: Ref<HTMLDivElement>;
   onScroll: UIEventHandler<HTMLDivElement>;
@@ -31,6 +35,8 @@ export function NoteContentViewport({
           ref={viewportRef}
           data-note-content-viewport=""
           data-note-scroll-enabled={scrollingEnabled}
+          data-note-native-scrollbar={nativeScrollbarVisible}
+          data-note-touch-reading={touchReading}
           className="huabu-note-scroll-viewport h-full"
           style={{
             overflowY: scrollingEnabled ? 'auto' : 'hidden',

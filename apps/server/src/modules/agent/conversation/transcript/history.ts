@@ -15,11 +15,11 @@
  * is unit-testable in isolation.
  */
 
+import { commandFromRawInput, variantForInternalTool } from '@huabu/shared';
 import {
-  commandFromRawInput,
-  inkIntentReportSchema,
-  variantForInternalTool,
-} from '@huabu/shared';
+  readInkInterpretation,
+  settleInkInterpretation,
+} from '@huabu/shared/ink-interpretation';
 
 import { projectUserVisibleAttachments } from './attachment-chips.js';
 import {
@@ -34,6 +34,7 @@ import type {
   ChatAttachment,
   ChatHistoryItem,
   ImageGenerationData,
+  InkInterpretation,
   SnapshotNodesData,
   ToolResponse,
   WebSearchToolResponse,
@@ -51,26 +52,18 @@ type FoldedToolCallData = Extract<
   rawOutput?: unknown;
 };
 
-export function inferredIntentFromFoldedToolCall(
+export function inkInterpretationFromFoldedToolCall(
   message: FoldedMessage,
   recoverInternalToolName: boolean,
-): string | undefined {
+): InkInterpretation | undefined {
   if (!isInkIntentReportToolCall(message, recoverInternalToolName))
     return undefined;
   const data = message.data as FoldedToolCallData;
   if (data.status !== 'completed') return undefined;
-  let input = data.rawInput;
-  if (typeof input === 'string') {
-    try {
-      input = JSON.parse(input) as unknown;
-    } catch {
-      return undefined;
-    }
-  }
-  const report = inkIntentReportSchema.safeParse(input);
-  return report.success && report.data.status === 'inferred'
-    ? report.data.text
-    : undefined;
+  return (
+    readInkInterpretation(data.rawOutput) ??
+    readInkInterpretation(data.rawInput)
+  );
 }
 
 export function isInkIntentReportToolCall(
@@ -294,9 +287,12 @@ function envelopeOf(turn: AgentTurn): ChatEnvelope | null {
 export function buildHistoryFromTurns(
   turns: readonly AgentTurn[],
   messages: ChatHistoryItem[],
-  options: { recoverInternalToolNames?: boolean } = {},
+  options: {
+    recoverInternalToolNames?: boolean;
+    activeTurnIndex?: number;
+  } = {},
 ): void {
-  for (const turn of turns) {
+  for (const [turnIndex, turn] of turns.entries()) {
     const envelope = envelopeOf(turn);
     const viewEvent = interactiveViewEventFromSubmission(turn.request);
     let inkUserItem: Extract<ChatHistoryItem, { role: 'user' }> | null = null;
@@ -326,6 +322,9 @@ export function buildHistoryFromTurns(
           content: envelope.user.text,
           ...(envelope.user.inputKind && {
             inputKind: envelope.user.inputKind,
+          }),
+          ...(envelope.user.inputKind === 'ink-intent' && {
+            inkInterpretation: { state: 'pending' as const },
           }),
           ...(envelope.focus.groundingVisual && {
             groundingVisual: envelope.focus.groundingVisual,
@@ -388,12 +387,23 @@ export function buildHistoryFromTurns(
               options.recoverInternalToolNames === true,
             )
           ) {
-            const inferredIntent = inferredIntentFromFoldedToolCall(
+            const interpretation = inkInterpretationFromFoldedToolCall(
               msg,
               options.recoverInternalToolNames === true,
             );
-            if (inkUserItem && inferredIntent && !inkUserItem.inferredIntent) {
-              inkUserItem.inferredIntent = inferredIntent;
+            if (
+              inkUserItem &&
+              inkUserItem.inkInterpretation?.state !== 'reported' &&
+              inkUserItem.inkInterpretation?.state !== 'legacy'
+            ) {
+              if (interpretation) {
+                inkUserItem.inkInterpretation = interpretation;
+              } else if (
+                msg.data.status === 'failed' ||
+                msg.data.status === 'completed'
+              ) {
+                inkUserItem.inkInterpretation = { state: 'failed' };
+              }
             }
             break;
           }
@@ -431,6 +441,16 @@ export function buildHistoryFromTurns(
     // Both the built-in (`aborted`) and ACP (`cancelled`) backends signal a
     // user interruption via `meta.stopReason`.
     const stopReason = turn.meta?.stopReason;
+    if (inkUserItem && turnIndex !== options.activeTurnIndex) {
+      inkUserItem.inkInterpretation = settleInkInterpretation(
+        inkUserItem.inkInterpretation,
+        stopReason === 'aborted' || stopReason === 'cancelled'
+          ? 'interrupted'
+          : errorDetail
+            ? 'error'
+            : 'done',
+      );
+    }
     if (stopReason === 'aborted' || stopReason === 'cancelled') {
       messages.push({ role: 'status', status: 'interrupted' });
     } else if (errorDetail) {

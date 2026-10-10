@@ -44,7 +44,7 @@ import {
 
 import { agenetes, INTERNAL_DRIVER_KIND } from '../agent/agenetes/drivers.js';
 import { chatEnvelopeFromSubmission } from '../agent/agenetes/handle.js';
-import { inferredIntentFromFoldedToolCall } from '../agent/conversation/transcript/history.js';
+import { inkInterpretationFromFoldedToolCall } from '../agent/conversation/transcript/history.js';
 import { canvasAcpNamespace } from '../workspace/paths.js';
 
 import type { NodeContent, Space } from '../storage/index.js';
@@ -226,16 +226,29 @@ function buildThreadHaystack(
 ): string {
   const segments: string[] = [];
   for (const turn of turns) {
-    const userText = chatEnvelopeFromSubmission(turn.request)?.user?.text;
+    const user = chatEnvelopeFromSubmission(turn.request)?.user;
+    const userText = user?.text;
     if (typeof userText === 'string' && userText.length > 0) {
       segments.push(userText);
     }
+    let interpretationIndexed = false;
     for (const msg of turn.transcript) {
-      const inferredIntent = inferredIntentFromFoldedToolCall(
-        msg,
-        recoverInternalToolNames,
-      );
-      if (inferredIntent) segments.push(inferredIntent);
+      if (user?.inputKind === 'ink-intent' && !interpretationIndexed) {
+        const interpretation = inkInterpretationFromFoldedToolCall(
+          msg,
+          recoverInternalToolNames,
+        );
+        if (
+          interpretation?.state === 'reported' ||
+          interpretation?.state === 'legacy'
+        )
+          interpretationIndexed = true;
+        if (interpretation?.state === 'reported') {
+          segments.push(interpretation.text);
+          if (interpretation.explanation)
+            segments.push(interpretation.explanation);
+        }
+      }
       // Only assistant prose contributes model speech; `tool_call`,
       // `thinking`, `plan`, and `error` fragments are excluded.
       if (msg.type !== 'text') continue;

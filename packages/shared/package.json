@@ -14,6 +14,10 @@
       "types": "./src/canvas-engine/index.ts",
       "import": "./src/canvas-engine/index.ts"
     },
+    "./ink-interpretation": {
+      "types": "./src/utils/ink-interpretation.ts",
+      "import": "./src/utils/ink-interpretation.ts"
+    },
     "./conversation-title": {
       "types": "./src/utils/conversation-title.ts",
       "import": "./src/utils/conversation-title.ts"

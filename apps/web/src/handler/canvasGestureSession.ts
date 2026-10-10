@@ -8,6 +8,7 @@ import {
 } from '@/config/canvas';
 
 export type CanvasGestureKind =
+  | 'note-scroll'
   | 'touch-pan'
   | 'marquee'
   | 'lasso'

@@ -3,9 +3,34 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { canScrollNote, containNoteWheel } from './noteScroll';
+import {
+  canScrollNote,
+  containNoteWheel,
+  noteScrollIndicator,
+} from './noteScroll';
 
 describe('Note scroll ownership', () => {
+  it('shows proportional thumb travel with a minimum size and clamped edges', () => {
+    expect(noteScrollIndicator(0, 200, 400)).toEqual({
+      height: '50%',
+      top: '0%',
+    });
+    expect(noteScrollIndicator(100, 200, 400)).toEqual({
+      height: '50%',
+      top: '25%',
+    });
+    expect(noteScrollIndicator(400, 200, 400)).toEqual({
+      height: '50%',
+      top: '50%',
+    });
+    expect(noteScrollIndicator(-10, 200, 400)?.top).toBe('0%');
+    expect(
+      (parseFloat(noteScrollIndicator(0, 200, 10000)?.height ?? '0') * 184) /
+        100,
+    ).toBeCloseTo(24);
+    expect(noteScrollIndicator(0, 200, 200)).toBeNull();
+    expect(noteScrollIndicator(0, 10, 400)).toBeNull();
+  });
   const active = {
     selected: true,
     selectedCount: 1,

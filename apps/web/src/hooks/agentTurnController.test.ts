@@ -172,6 +172,376 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe('Ink interpretation lifecycle', () => {
+  const ctx = {
+    threadId: 'thread-1',
+    assistantId: 'assistant-1',
+    userMessageId: 'ink-user',
+  };
+  const startReport = (
+    id: string,
+    rawInput: unknown,
+    internalToolName: string | undefined = 'report_ink_intent',
+  ) =>
+    handleStreamEvent(
+      {
+        type: 'tool_call',
+        data: {
+          toolCallId: id,
+          title: 'report_ink_intent',
+          internalToolName,
+          status: 'pending',
+          rawInput,
+        },
+      },
+      ctx,
+    );
+  const updateReport = (
+    id: string,
+    data: {
+      status?: 'pending' | 'in_progress' | 'completed' | 'failed';
+      rawOutput?: unknown;
+    },
+  ) =>
+    handleStreamEvent(
+      {
+        type: 'tool_call_update',
+        data: { toolCallId: id, ...data },
+      },
+      ctx,
+    );
+  const interpretation = () => {
+    const message = selectThreadMessages(
+      useChatStore.getState(),
+      ctx.threadId,
+    ).find((message) => message.id === ctx.userMessageId);
+    return message?.role === 'user' ? message.inkInterpretation : undefined;
+  };
+  beforeEach(() => {
+    useChatStore.getState().addMessage(ctx.threadId, {
+      id: ctx.userMessageId,
+      role: 'user',
+      content: '',
+      inputKind: 'ink-intent',
+      inkInterpretation: { state: 'pending' },
+      selectedNodeIds: ['sketch-1'],
+      selectedStrokeIds: [{ nodeId: 'sketch-1', strokeIds: ['stroke-1'] }],
+    });
+  });
+
+  it('retains report output without confirming it before terminal status', () => {
+    startReport('report-1', { text: '  Explain this arrow  ' });
+    updateReport('report-1', {
+      status: 'in_progress',
+      rawOutput: {
+        text: '  Explain this arrow  ',
+        explanation: '  It connects the two notes.  ',
+      },
+    });
+    expect(interpretation()).toEqual({ state: 'pending' });
+    updateReport('report-1', { status: 'completed' });
+    expect(interpretation()).toEqual({
+      state: 'reported',
+      text: 'Explain this arrow',
+      explanation: 'It connects the two notes.',
+    });
+    updateReport('report-1', { rawOutput: '{}' });
+    expect(selectThreadMessages(useChatStore.getState(), ctx.threadId)).toEqual(
+      [expect.objectContaining({ content: '', selectedNodeIds: ['sketch-1'] })],
+    );
+  });
+
+  it.each([
+    ['failed', { status: 'failed' as const }],
+    [
+      'error envelope',
+      {
+        status: 'completed' as const,
+        rawOutput: {
+          tool: 'report_ink_intent',
+          status: 'error',
+          error: 'Rejected',
+        },
+      },
+    ],
+    [
+      'malformed result',
+      { status: 'completed' as const, rawOutput: 'not JSON' },
+    ],
+  ])(
+    'does not confirm a %s report; a successful retry wins once',
+    (_label, terminal) => {
+      startReport('report-1', { text: 'Rejected summary' });
+      updateReport('report-1', terminal);
+      expect(interpretation()).toEqual({ state: 'failed' });
+      startReport('report-2', {
+        text: 'Accepted summary',
+        explanation: 'Verified in context.',
+      });
+      updateReport('report-2', { status: 'completed' });
+      startReport('report-3', { text: 'Later summary' });
+      updateReport('report-3', { status: 'completed' });
+      updateReport('report-2', { status: 'failed' });
+      expect(interpretation()).toEqual({
+        state: 'reported',
+        text: 'Accepted summary',
+        explanation: 'Verified in context.',
+      });
+    },
+  );
+
+  it('keeps reports in the captured user message and owner thread', () => {
+    startReport('report-1', { text: 'First Ink request' });
+    for (const threadId of ['thread-1', 'thread-2']) {
+      useChatStore.getState().addMessage(threadId, {
+        id: 'new-user',
+        role: 'user',
+        content: '',
+        inputKind: 'ink-intent',
+        inkInterpretation: { state: 'pending' },
+      });
+    }
+    updateReport('report-1', { status: 'completed' });
+    expect(interpretation()).toEqual({
+      state: 'reported',
+      text: 'First Ink request',
+    });
+    for (const threadId of ['thread-1', 'thread-2']) {
+      expect(
+        selectThreadMessages(useChatStore.getState(), threadId).find(
+          (message) => message.id === 'new-user',
+        ),
+      ).toMatchObject({
+        inkInterpretation: { state: 'pending' },
+      });
+    }
+  });
+
+  it('retains the original owner when missing args are followed by output after a newer user message', () => {
+    const streamContext = {
+      threadId: ctx.threadId,
+      assistantId: ctx.assistantId,
+    };
+    handleStreamEvent(
+      {
+        type: 'tool_call',
+        data: {
+          toolCallId: 'delayed-report',
+          title: 'report_ink_intent',
+          internalToolName: 'report_ink_intent',
+          status: 'pending',
+        },
+      },
+      streamContext,
+    );
+    useChatStore.getState().addMessage(ctx.threadId, {
+      id: 'newer-ink-user',
+      role: 'user',
+      content: '',
+      inputKind: 'ink-intent',
+      inkInterpretation: { state: 'pending' },
+    });
+    handleStreamEvent(
+      {
+        type: 'tool_call_update',
+        data: {
+          toolCallId: 'delayed-report',
+          status: 'in_progress',
+          rawOutput: { text: 'Original request interpretation' },
+        },
+      },
+      streamContext,
+    );
+    expect(interpretation()).toEqual({ state: 'pending' });
+    handleStreamEvent(
+      {
+        type: 'tool_call_update',
+        data: { toolCallId: 'delayed-report', status: 'completed' },
+      },
+      streamContext,
+    );
+    expect(interpretation()).toEqual({
+      state: 'reported',
+      text: 'Original request interpretation',
+    });
+    expect(
+      selectThreadMessages(useChatStore.getState(), ctx.threadId).at(-1),
+    ).toMatchObject({
+      id: 'newer-ink-user',
+      inkInterpretation: { state: 'pending' },
+    });
+  });
+
+  it('ignores a generic external tool with the same title', () => {
+    startReport('external-report', { text: 'Not host owned' }, '');
+    updateReport('external-report', { status: 'completed' });
+    expect(interpretation()).toEqual({ state: 'pending' });
+  });
+
+  it('does not attach a text turn report to the preceding Ink request', () => {
+    useChatStore.getState().addMessage(ctx.threadId, {
+      id: 'text-user',
+      role: 'user',
+      content: 'Ordinary text',
+    });
+    const textCtx = { threadId: ctx.threadId, assistantId: 'text-assistant' };
+    handleStreamEvent(
+      {
+        type: 'tool_call',
+        data: {
+          toolCallId: 'text-report',
+          title: 'report_ink_intent',
+          internalToolName: 'report_ink_intent',
+          rawInput: { text: 'Wrong owner' },
+        },
+      },
+      textCtx,
+    );
+    handleStreamEvent(
+      {
+        type: 'tool_call_update',
+        data: { toolCallId: 'text-report', status: 'completed' },
+      },
+      textCtx,
+    );
+    handleStreamEvent({ type: 'done', data: { message: '' } }, textCtx);
+    expect(interpretation()).toEqual({ state: 'pending' });
+    expect(
+      selectThreadMessages(useChatStore.getState(), ctx.threadId)[1],
+    ).not.toHaveProperty('inkInterpretation');
+  });
+
+  it.each([
+    [undefined, 'missing'],
+    ['aborted', 'interrupted'],
+    ['cancelled', 'interrupted'],
+    ['error', 'failed'],
+  ])('settles a no-report turn ending with %s as %s', (stopReason, state) => {
+    handleStreamEvent(
+      {
+        type: 'done',
+        data: { message: '', meta: { stopReason } },
+      },
+      ctx,
+    );
+    expect(interpretation()).toEqual({ state });
+  });
+
+  it.each([
+    [
+      { status: 'inferred', text: 'Old summary' },
+      { state: 'reported', text: 'Old summary' },
+    ],
+    [{ status: 'clarify', text: 'Old question' }, { state: 'legacy' }],
+    [{ status: 'unsupported', text: 'Old limitation' }, { state: 'legacy' }],
+    [{ text: 'Invalid\nsummary' }, { state: 'failed' }],
+  ])(
+    'normalizes historical and malformed report payloads %j',
+    (rawInput, expected) => {
+      startReport('report-1', rawInput);
+      updateReport('report-1', { status: 'completed' });
+      handleStreamEvent({ type: 'done', data: { message: '' } }, ctx);
+      expect(interpretation()).toEqual(expected);
+    },
+  );
+
+  it.each([
+    {
+      text: '  Canonical summary  ',
+      explanation: '  Confirmed context.  ',
+      renamed: true,
+    },
+    {
+      tool: 'report_ink_intent',
+      status: 'success',
+      data: {
+        text: '  Canonical summary  ',
+        explanation: '  Confirmed context.  ',
+        renamed: true,
+      },
+    },
+  ])('prefers canonical confirmed output over report input %j', (rawOutput) => {
+    startReport('canonical-report', {
+      text: 'Draft summary',
+      explanation: 'Draft explanation.',
+    });
+    updateReport('canonical-report', { rawOutput });
+    expect(interpretation()).toEqual({ state: 'pending' });
+    updateReport('canonical-report', { status: 'completed' });
+    expect(interpretation()).toEqual({
+      state: 'reported',
+      text: 'Canonical summary',
+      explanation: 'Confirmed context.',
+    });
+  });
+
+  it('retains the first successful legacy record through subsequent reports', () => {
+    startReport('legacy-report', {
+      status: 'clarify',
+      text: 'An old question',
+    });
+    updateReport('legacy-report', { status: 'completed' });
+    startReport('new-report', { text: 'New interpretation' });
+    updateReport('new-report', { status: 'completed' });
+    updateReport('new-report', { status: 'failed' });
+    expect(interpretation()).toEqual({ state: 'legacy' });
+  });
+
+  it('allows a successful report to supersede a missing-report fallback', () => {
+    handleStreamEvent({ type: 'done', data: { message: '' } }, ctx);
+    expect(interpretation()).toEqual({ state: 'missing' });
+    startReport('late-report', { text: 'Confirmed interpretation' });
+    updateReport('late-report', { status: 'completed' });
+    expect(interpretation()).toEqual({
+      state: 'reported',
+      text: 'Confirmed interpretation',
+    });
+  });
+
+  it('initializes optimistic Ink as pending and settles no-report completion', async () => {
+    mocks.stream.mockImplementationOnce(
+      async (_a, _b, _c, callbacks: AgentStreamCallbacks) => {
+        expect(
+          selectThreadMessages(useChatStore.getState(), ctx.threadId).at(-1),
+        ).toMatchObject({
+          role: 'user',
+          content: '',
+          inkInterpretation: { state: 'pending' },
+        });
+        callbacks.onComplete();
+      },
+    );
+    await dispatchAgentTurn(request('ink-intent'));
+    expect(
+      selectThreadMessages(useChatStore.getState(), ctx.threadId).at(-1),
+    ).toMatchObject({ inkInterpretation: { state: 'missing' } });
+  });
+
+  it('settles optimistic Ink after stream rejection', async () => {
+    mocks.stream.mockRejectedValueOnce(new Error('Offline'));
+    await dispatchAgentTurn(request('ink-intent'));
+    expect(
+      selectThreadMessages(useChatStore.getState(), ctx.threadId)
+        .filter((message) => message.role === 'user')
+        .at(-1),
+    ).toMatchObject({ inkInterpretation: { state: 'failed' } });
+  });
+
+  it('settles Ink only after stop is confirmed', async () => {
+    const gate = deferred();
+    mocks.stop.mockImplementationOnce(async () => {
+      await gate.promise;
+      return { stopped: true, acceptance: null };
+    });
+    stopAgentTurn(session);
+    expect(interpretation()).toEqual({ state: 'pending' });
+    gate.resolve();
+    await vi.waitFor(() =>
+      expect(interpretation()).toEqual({ state: 'interrupted' }),
+    );
+  });
+});
+
 describe('shared Agent turn input', () => {
   it('deduplicates Frame-nested Ink while excluding its Question anchor', () => {
     useCanvasStore.getState()._setStateNoAutosave({
@@ -220,7 +590,7 @@ describe('shared Agent turn input', () => {
     ]);
   });
 
-  it('projects inferred Ink intent without rendering its tool call', () => {
+  it('projects an Agent interpretation without rendering its tool call', () => {
     useChatStore.getState().addMessage('thread-1', {
       id: 'ink-user',
       role: 'user',
@@ -236,8 +606,8 @@ describe('shared Agent turn input', () => {
           title: 'report_ink_intent',
           status: 'pending',
           rawInput: {
-            status: 'inferred',
             text: 'Expand the third comparison step',
+            explanation: 'The arrow points to the third step.',
           },
           internalToolName: 'report_ink_intent',
         },
@@ -259,7 +629,11 @@ describe('shared Agent turn input', () => {
     expect(selectThreadMessages(useChatStore.getState(), 'thread-1')).toEqual([
       expect.objectContaining({
         id: 'ink-user',
-        inferredIntent: 'Expand the third comparison step',
+        inkInterpretation: {
+          state: 'reported',
+          text: 'Expand the third comparison step',
+          explanation: 'The arrow points to the third step.',
+        },
       }),
     ]);
   });
@@ -293,7 +667,7 @@ describe('shared Agent turn input', () => {
     );
 
     expect(selectThreadMessages(useChatStore.getState(), 'thread-1')).toEqual([
-      expect.not.objectContaining({ inferredIntent: expect.anything() }),
+      expect.objectContaining({ inkInterpretation: { state: 'failed' } }),
     ]);
   });
 

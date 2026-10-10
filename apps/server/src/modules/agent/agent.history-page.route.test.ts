@@ -9,6 +9,7 @@ import Fastify from 'fastify';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
+  history: vi.fn(),
   historyPage: vi.fn(),
   record: vi.fn(() => undefined),
   isActive: vi.fn(() => false),
@@ -18,6 +19,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../agent/agenetes/drivers.js', () => ({
   INTERNAL_DRIVER_KIND: 'internal',
   agenetes: {
+    history: mocks.history,
     historyPage: mocks.historyPage,
     record: mocks.record,
   },
@@ -35,6 +37,7 @@ vi.mock('../workspace/paths.js', () => ({
   canvasAcpNamespace: (canvasId: string) => ({ name: canvasId }),
 }));
 
+import { createChatSubmission } from './agenetes/handle.js';
 import agentRoutes from './agent.route.js';
 
 async function request(url: string) {
@@ -47,11 +50,52 @@ async function request(url: string) {
 
 describe('GET /agent/history/:threadId/page', () => {
   beforeEach(() => {
+    mocks.history.mockReset();
     mocks.historyPage.mockReset();
     mocks.record.mockReset();
     mocks.record.mockReturnValue(undefined);
     mocks.isActive.mockReturnValue(false);
   });
+
+  it.each([true, false])(
+    'projects pending only for a currently running incomplete Ink turn (running=%s)',
+    async (running) => {
+      const turn = {
+        request: createChatSubmission({
+          user: { text: '', inputKind: 'ink-intent', attachments: [] },
+          skills: { invokedIds: [], resolved: [] },
+          focus: {
+            selection: {
+              refs: [],
+              selectedIds: [],
+              imageAttachments: [],
+              snapshotAttachments: [],
+            },
+          },
+        }),
+        transcript: [],
+        isIncomplete: true,
+      };
+      mocks.isActive.mockReturnValue(running);
+      mocks.history.mockResolvedValue({ turns: [turn] });
+      mocks.historyPage.mockResolvedValue({
+        groups: [
+          { id: 'turn-1', turns: [turn], isActive: true, activeTurnIndex: 0 },
+        ],
+        hasMore: false,
+      });
+      const full = await request('/agent/history/thread-1?canvasId=canvas-1');
+      const paged = await request(
+        '/agent/history/thread-1/page?canvasId=canvas-1&limit=3',
+      );
+      expect(full.statusCode).toBe(200);
+      expect(paged.statusCode).toBe(200);
+      expect(full.json().messages[0].inkInterpretation).toEqual({
+        state: running ? 'pending' : 'missing',
+      });
+      expect(paged.json().turns[0].messages).toEqual(full.json().messages);
+    },
+  );
 
   it.each([
     '/agent/history/thread-1/page?limit=3',

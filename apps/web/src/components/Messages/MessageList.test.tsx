@@ -13,13 +13,14 @@ import {
 } from './messageListScroll';
 
 import type { ChatMessage } from '../../store/chatTypes';
+import type { InkInterpretation } from '@huabu/shared';
 
 const renderCounts = vi.hoisted(() => ({
   assistant: new Map<string, number>(),
   assistantEffects: [] as string[],
   user: 0,
   userInputKinds: [] as Array<string | undefined>,
-  userInferredIntents: [] as Array<string | undefined>,
+  userInterpretations: [] as Array<InkInterpretation | undefined>,
   userGroundingValues: [] as unknown[],
 }));
 
@@ -48,16 +49,16 @@ vi.mock('./UserMessage', async () => {
   return {
     UserMessage: memo(function MockUserMessage({
       inputKind,
-      inferredIntent,
+      inkInterpretation,
       groundingVisual,
     }: {
       inputKind?: string;
-      inferredIntent?: string;
+      inkInterpretation?: InkInterpretation;
       groundingVisual?: unknown;
     }) {
       renderCounts.user++;
       renderCounts.userInputKinds.push(inputKind);
-      renderCounts.userInferredIntents.push(inferredIntent);
+      renderCounts.userInterpretations.push(inkInterpretation);
       renderCounts.userGroundingValues.push(groundingVisual);
       return <div data-user-message />;
     }),
@@ -115,7 +116,7 @@ beforeEach(() => {
   renderCounts.assistantEffects = [];
   renderCounts.user = 0;
   renderCounts.userInputKinds = [];
-  renderCounts.userInferredIntents = [];
+  renderCounts.userInterpretations = [];
   renderCounts.userGroundingValues = [];
   vi.spyOn(HTMLElement.prototype, 'scrollTo').mockImplementation(() => {});
 });
@@ -813,7 +814,11 @@ describe('MessageList render isolation', () => {
             role: 'user',
             content: '',
             inputKind: 'ink-intent',
-            inferredIntent: 'Expand the third step',
+            inkInterpretation: {
+              state: 'reported',
+              text: 'Expand the third step',
+              explanation: 'The arrow points at step three.',
+            },
             groundingVisual: {
               kind: 'visible-canvas',
               dataUrl: 'data:image/png;base64,cG5n',
@@ -836,7 +841,13 @@ describe('MessageList render isolation', () => {
     );
 
     expect(renderCounts.userInputKinds).toEqual(['ink-intent']);
-    expect(renderCounts.userInferredIntents).toEqual(['Expand the third step']);
+    expect(renderCounts.userInterpretations).toEqual([
+      {
+        state: 'reported',
+        text: 'Expand the third step',
+        explanation: 'The arrow points at step three.',
+      },
+    ]);
     expect(renderCounts.userGroundingValues).toEqual([undefined]);
   });
 

@@ -54,6 +54,7 @@ function spyRecognizer(
               if (opts.preemptOnMove) ctx.preempt();
             },
             onUp: (e) => calls.push(`obs-up:${e.pointerId}`),
+            onCancel: (e) => calls.push(`obs-cancel:${e.pointerId}`),
           },
         }
       : {}),
@@ -63,6 +64,40 @@ function spyRecognizer(
 const ctx: Ctx = { tag: 'ctx' };
 
 describe('PointerRouterCore', () => {
+  it('cancels every owner and observer after the live context is detached', () => {
+    const owner = spyRecognizer('owner');
+    const observer = spyRecognizer('observer', {
+      canClaim: false,
+      observe: true,
+    });
+    let live: Ctx | null = ctx;
+    const router = new PointerRouterCore([owner, observer], () => live);
+    router.handleDown(ev(1));
+    router.handleDown(ev(2));
+    router.handleMove(ev(1));
+    live = null;
+    router.cancelAll();
+    router.cancelAll();
+    expect(owner.calls).toEqual([
+      'down:1',
+      'down:2',
+      'move:1',
+      'cancel:1',
+      'cancel:2',
+    ]);
+    expect(observer.calls).toEqual([
+      'obs-down:1',
+      'obs-down:2',
+      'obs-move:1',
+      'obs-cancel:1',
+      'obs-cancel:2',
+    ]);
+    expect(router.ownerOf(1)).toBeNull();
+    expect(router.ownerOf(2)).toBeNull();
+    live = ctx;
+    router.handleDown(ev(1));
+    expect(router.ownerOf(1)?.id).toBe('owner');
+  });
   it('offers pointerdown in order and stops at the first claimant', () => {
     const a = spyRecognizer('a', { canClaim: false });
     const b = spyRecognizer('b', { claims: true });

@@ -21,21 +21,21 @@
   will-change: transform;
 }
 
-.huabu-note-scroll-viewport[data-note-scroll-enabled='true'] {
+.huabu-note-scroll-viewport[data-note-native-scrollbar='true'] {
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--fg-subtle) 45%, transparent)
     transparent;
 }
 
-.huabu-note-scroll-viewport[data-note-scroll-enabled='true']:hover {
+.huabu-note-scroll-viewport[data-note-native-scrollbar='true']:hover {
   scrollbar-color: var(--fg-subtle) transparent;
 }
 
 /* Chromium/Electron and WebKit: opt out of the standard styling override
    so the native thumb can have an inset capsule shape and no arrow buttons. */
 @supports selector(::-webkit-scrollbar) {
-  .huabu-note-scroll-viewport[data-note-scroll-enabled='true'],
-  .huabu-note-scroll-viewport[data-note-scroll-enabled='true']:hover {
+  .huabu-note-scroll-viewport[data-note-native-scrollbar='true'],
+  .huabu-note-scroll-viewport[data-note-native-scrollbar='true']:hover {
     scrollbar-width: auto;
     scrollbar-color: auto;
   }
@@ -45,7 +45,7 @@
     height: 0;
   }
 
-  .huabu-note-scroll-viewport[data-note-scroll-enabled='true']::-webkit-scrollbar {
+  .huabu-note-scroll-viewport[data-note-native-scrollbar='true']::-webkit-scrollbar {
     width: 8px;
   }
 

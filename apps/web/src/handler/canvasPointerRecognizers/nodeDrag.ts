@@ -42,13 +42,19 @@ import type { Node, NodeChange } from '@xyflow/react';
  * natively, and under Sketch the finger draws; in Mouse mode the pointer
  * is never touch.
  */
-export function createNodeDragRecognizer(): PointerRecognizer<
-  PointerEvent,
-  CanvasPointerRouterContext
-> {
+export function createNodeDragRecognizer(options?: {
+  acceptsPointer: (
+    event: PointerEvent,
+    ctx: CanvasPointerRouterContext,
+  ) => boolean;
+  onTap: (nodeId: string) => void;
+  canDrag?: (node: Node) => boolean;
+}): PointerRecognizer<PointerEvent, CanvasPointerRouterContext> {
   let pointerId: number | null = null;
   let startClient = { x: 0, y: 0 };
   let locked = false;
+  let activationDistance = getDragActivationDistance('touch');
+  let movementAllowed = true;
   let gestureIds: string[] = [];
   let primaryNode: Node | null = null;
   let draggedNodes: Node[] = [];
@@ -64,7 +70,7 @@ export function createNodeDragRecognizer(): PointerRecognizer<
   };
 
   const cancelDrag = (): void => {
-    if (locked && primaryNode) {
+    if (locked && movementAllowed && primaryNode) {
       useCanvasStore.getState().cancelActiveNodeDrag();
     }
     reset();
@@ -126,8 +132,9 @@ export function createNodeDragRecognizer(): PointerRecognizer<
     id: 'node-drag',
     canClaim: (event, ctx) =>
       pointerId === null &&
-      event.pointerType === 'touch' &&
-      ctx.inputMode === 'pen' &&
+      (options
+        ? options.acceptsPointer(event, ctx)
+        : event.pointerType === 'touch' && ctx.inputMode === 'pen') &&
       event.isPrimary &&
       !isPanelTarget(event.target as Element | null) &&
       !isNodeControlTarget(event.target as Element | null) &&
@@ -144,10 +151,14 @@ export function createNodeDragRecognizer(): PointerRecognizer<
       draggedNodes = selected;
       primaryNode =
         selected.find((n) => n.id === primaryId) ?? selected[0] ?? null;
+      movementAllowed = primaryNode
+        ? (options?.canDrag?.(primaryNode) ?? true)
+        : false;
       startPositions = new Map(
         selected.map((n) => [n.id, { x: n.position.x, y: n.position.y }]),
       );
       pointerId = event.pointerId;
+      activationDistance = getDragActivationDistance(event.pointerType);
       startClient = { x: event.clientX, y: event.clientY };
       locked = false;
       event.preventDefault();
@@ -163,16 +174,17 @@ export function createNodeDragRecognizer(): PointerRecognizer<
           event.clientX - startClient.x,
           event.clientY - startClient.y,
         );
-        if (moved < getDragActivationDistance('touch')) return;
+        if (moved < activationDistance) return;
         locked = true;
         // Snapshots pre-drag positions + begins the snap session (same
         // as a mouse/pen drag start).
-        if (primaryNode) {
+        if (movementAllowed && primaryNode) {
           useCanvasStore
             .getState()
             .onNodeDragStart(dragEvent(), primaryNode, draggedNodes);
         }
       }
+      if (!movementAllowed) return;
       const { dx, dy } = flowDelta(ctx, event.clientX, event.clientY);
       useCanvasStore.getState().onNodesChange(positionChanges(dx, dy, true));
     },
@@ -180,7 +192,7 @@ export function createNodeDragRecognizer(): PointerRecognizer<
       if (event.pointerId !== pointerId) return;
       event.preventDefault();
       event.stopPropagation();
-      if (locked && primaryNode) {
+      if (locked && movementAllowed && primaryNode) {
         const { dx, dy } = flowDelta(ctx, event.clientX, event.clientY);
         const store = useCanvasStore.getState();
         // Final `dragging:false` commit ends the snap session; then the
@@ -192,6 +204,15 @@ export function createNodeDragRecognizer(): PointerRecognizer<
           primaryNode,
           draggedNodes,
         );
+      } else if (
+        !locked &&
+        primaryNode &&
+        Math.hypot(
+          event.clientX - startClient.x,
+          event.clientY - startClient.y,
+        ) < activationDistance
+      ) {
+        options?.onTap(primaryNode.id);
       }
       reset();
     },

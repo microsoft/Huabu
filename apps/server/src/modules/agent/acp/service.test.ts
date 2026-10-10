@@ -19,7 +19,7 @@ vi.mock('../../workspace/paths.js', () => ({
 }));
 
 import { runAcpAgent } from './service.js';
-import { inferredIntentFromFoldedToolCall } from '../conversation/transcript/history.js';
+import { inkInterpretationFromFoldedToolCall } from '../conversation/transcript/history.js';
 import {
   activeInkIntentOwnerNodeId,
   isActiveInkIntentTurn,
@@ -142,7 +142,10 @@ describe('runAcpAgent durable acceptance', () => {
           'question-1',
         );
         publishExternalInkReport('canvas-1', 'thread-1', token, {
-          report: { status: 'inferred', text: 'Explain the drawing' },
+          report: {
+            text: 'Explain the drawing',
+            explanation: 'The arrow refers to the second shape.',
+          },
           renamed: true,
         });
         const events = ctx.drainHostEvents?.() ?? [];
@@ -151,8 +154,14 @@ describe('runAcpAgent durable acceptance', () => {
         expect(
           folder
             .result()
-            .map((message) => inferredIntentFromFoldedToolCall(message, false)),
-        ).toContain('Explain the drawing');
+            .map((message) =>
+              inkInterpretationFromFoldedToolCall(message, false),
+            ),
+        ).toContainEqual({
+          state: 'reported',
+          text: 'Explain the drawing',
+          explanation: 'The arrow refers to the second shape.',
+        });
         expect(ctx.drainHostEvents?.()).toEqual([]);
         if (outcome === 'error') throw new Error('Agent failed');
         if (outcome === 'cancel') {

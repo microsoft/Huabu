@@ -21,6 +21,7 @@ import {
 import { runAgent } from './agent.service.js';
 import { envelopeHasImage } from './conversation/envelope.js';
 import { conversationTitleService } from './conversation-title.service.js';
+import { createInkResponse } from './ink-response.js';
 import { readWorkspaceMemory } from './memory/index.js';
 import { planSkillDispatch } from './skill-model-routing.js';
 import { resolveSpacePrompt } from './space-instruction-frames.js';
@@ -87,6 +88,7 @@ interface AgentThreadServiceDependencies {
   runInternal: typeof runAgent;
   closeHandle: (threadId: string) => void | Promise<void>;
   confirmBinding?: typeof agentNodeBinding.confirm;
+  createInkResponse?: typeof createInkResponse;
 }
 
 export function externalBindingFromWorkloadSpec(
@@ -156,6 +158,7 @@ const DEFAULT_DEPENDENCIES: AgentThreadServiceDependencies = {
   runInternal: runAgent,
   closeHandle: async (threadId) => await agenetes.close(threadId),
   confirmBinding: (...args) => agentNodeBinding.confirm(...args),
+  createInkResponse,
 };
 
 export class AgentThreadBusyError extends Error {
@@ -398,6 +401,7 @@ export class AgentThreadService {
     let agentTarget: AgentNodeTarget | null = null;
     let fixedTarget: FixedAgentNodeTarget | null = null;
     let binding: AgentBinding = options.requestBinding ?? { kind: 'internal' };
+    let effectiveMode = options.mode;
     let externalRealization: RealizedExternalAgentThread | undefined;
     let envelope =
       typeof options.envelope === 'function' ? undefined : options.envelope;
@@ -480,6 +484,9 @@ export class AgentThreadService {
         options.canvasId,
         options.threadId,
       );
+      effectiveMode = !agentTarget?.invocationToken
+        ? (agentTarget?.agentMode ?? options.mode)
+        : options.mode;
       if (agentTarget) {
         binding =
           agentTarget.agentBinding ?? fixedTarget?.agentBinding ?? binding;
@@ -610,9 +617,7 @@ export class AgentThreadService {
       signal,
       spacePrompt,
       externalRealization,
-      mode: !agentTarget?.invocationToken
-        ? (agentTarget?.agentMode ?? options.mode)
-        : options.mode,
+      mode: effectiveMode,
       onExecutionCreated: agentTarget
         ? async () => {
             await this.dependencies.confirmBinding?.(agentTarget, {
@@ -727,6 +732,15 @@ export class AgentThreadService {
     let runError: unknown;
     let eventError: string | null = null;
     let sawDone = false;
+    let doneEvent: AgentStreamEvent | undefined;
+    let responseText = '';
+    const inkResponse =
+      options.envelope?.user.inputKind === 'ink-intent' && options.canvasId
+        ? this.dependencies.createInkResponse?.(
+            options.canvasId,
+            options.threadId,
+          )
+        : undefined;
 
     try {
       if (isSettled()) return;
@@ -743,9 +757,16 @@ export class AgentThreadService {
       );
       try {
         for await (const event of stream) {
+          if (event.type === AGENT_SSE_EVENTS.TextDelta)
+            responseText += event.data.content;
+          if (event.type === AGENT_SSE_EVENTS.ToolCall) responseText = '';
           if (event.type === AGENT_SSE_EVENTS.Done) {
             sawDone = true;
             active.outcome = 'done';
+            if (inkResponse) {
+              doneEvent = event;
+              continue;
+            }
           }
           if (event.type === AGENT_SSE_EVENTS.Error) {
             eventError = event.data.error || 'Internal Error';
@@ -768,13 +789,31 @@ export class AgentThreadService {
         !sawDone &&
         (active.outcome === 'error' ||
           (!options.signal.aborted && (runError || eventError)));
+      if (inkResponse && active.turnStartState?.started) {
+        try {
+          await inkResponse.deliver({
+            text: responseText,
+            error: runError
+              ? errorMessage(runError)
+              : (eventError ?? undefined),
+            interrupted: options.signal.aborted && !sawDone,
+          });
+        } catch (error) {
+          active.outcome = 'error';
+          active.errorMessage = `Ink response delivery failed: ${errorMessage(error)}`;
+          await settle('error', active.errorMessage);
+          throw error;
+        }
+      }
       await settle(
         failed ? 'error' : 'done',
         runError ? errorMessage(runError) : (eventError ?? undefined),
       );
 
       if (runError) throw runError;
+      if (doneEvent) yield doneEvent;
     } finally {
+      inkResponse?.stop();
       await settle(
         options.signal.aborted ? 'done' : 'error',
         'Invocation stream was not drained',

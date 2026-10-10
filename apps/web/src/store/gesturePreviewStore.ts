@@ -44,6 +44,8 @@ export type FrameFitPreview = FrameFitResult & { role: FrameFitPreviewRole };
  * default, so a new field can never be silently omitted from the reset.
  */
 type GesturePreviewData = {
+  /** Sole-selected Note whose body owns touch/pen content scrolling. */
+  noteReadingNodeId: string | null;
   /** Stroke ids hidden while an eraser gesture is still uncommitted. */
   sketchErasePreview: Record<string, string[]>;
 
@@ -231,6 +233,7 @@ export type StructuredDropPreview = {
  * two can never drift and a newly-added field is reset automatically.
  */
 const INITIAL_PREVIEW_DATA: GesturePreviewData = {
+  noteReadingNodeId: null,
   sketchErasePreview: {},
   sketchStrokeSelection: {},
   sketchStrokeHighlight: {},

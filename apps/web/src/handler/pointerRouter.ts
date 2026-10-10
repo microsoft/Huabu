@@ -80,6 +80,7 @@ type ObserveHook = 'onDown' | 'onMove' | 'onUp' | 'onCancel';
 export class PointerRouterCore<E extends RoutablePointerEvent, C> {
   private readonly owners = new Map<number, PointerRecognizer<E, C>>();
   private readonly events = new Map<number, E>();
+  private lastContext: C | null = null;
 
   constructor(
     private readonly recognizers: readonly PointerRecognizer<E, C>[],
@@ -91,8 +92,29 @@ export class PointerRouterCore<E extends RoutablePointerEvent, C> {
     return this.owners.get(pointerId) ?? null;
   }
 
-  handleDown(event: E): void {
+  private liveContext(): C | null {
     const ctx = this.getContext();
+    if (ctx !== null) this.lastContext = ctx;
+    return ctx;
+  }
+
+  /** Teardown still needs cancellation after React has detached DOM refs. */
+  cancelAll(): void {
+    const ctx = this.lastContext;
+    if (ctx !== null) {
+      for (const event of [...this.events.values()]) {
+        this.broadcast('onCancel', event, ctx);
+        this.cancelPointer(event.pointerId, ctx);
+        this.events.delete(event.pointerId);
+      }
+    }
+    this.owners.clear();
+    this.events.clear();
+    this.lastContext = null;
+  }
+
+  handleDown(event: E): void {
+    const ctx = this.liveContext();
     if (ctx === null) return;
     this.events.set(event.pointerId, event);
 
@@ -110,7 +132,7 @@ export class PointerRouterCore<E extends RoutablePointerEvent, C> {
   }
 
   handleMove(event: E): void {
-    const ctx = this.getContext();
+    const ctx = this.liveContext();
     if (ctx === null) return;
     this.events.set(event.pointerId, event);
     this.broadcast('onMove', event, ctx);
@@ -118,7 +140,7 @@ export class PointerRouterCore<E extends RoutablePointerEvent, C> {
   }
 
   handleUp(event: E): void {
-    const ctx = this.getContext();
+    const ctx = this.liveContext();
     if (ctx === null) return;
     this.broadcast('onUp', event, ctx);
     const owner = this.owners.get(event.pointerId);
@@ -130,7 +152,7 @@ export class PointerRouterCore<E extends RoutablePointerEvent, C> {
   }
 
   handleCancel(event: E): void {
-    const ctx = this.getContext();
+    const ctx = this.liveContext();
     if (ctx === null) return;
     this.broadcast('onCancel', event, ctx);
     const owner = this.owners.get(event.pointerId);

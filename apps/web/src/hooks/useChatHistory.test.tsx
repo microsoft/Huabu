@@ -25,7 +25,11 @@ import { claimAgentStream } from './agentStreamCoordinator';
 import { useChatHistory } from './useChatHistory';
 
 import type { ChatSession } from './useChatSession';
-import type { AgentStreamAttachResult } from '@/api/agent';
+import type {
+  AgentStreamAttachResult,
+  AgentStreamCallbacks,
+} from '@/api/agent';
+import type { InkInterpretation } from '@huabu/shared';
 
 const apiMocks = vi.hoisted(() => ({
   fetchHistoryPage: vi.fn(),
@@ -33,7 +37,7 @@ const apiMocks = vi.hoisted(() => ({
     async (
       _threadId: string,
       _canvasId: string,
-      _callbacks: { onComplete: () => void },
+      _callbacks: AgentStreamCallbacks,
     ): Promise<AgentStreamAttachResult> => ({ status: 'inactive' }),
   ),
   patchOwner: vi.fn(),
@@ -321,6 +325,127 @@ describe('useChatHistory paging', () => {
 });
 
 describe('useChatHistory reconnect', () => {
+  it.each([
+    [
+      {
+        state: 'reported',
+        text: 'Summarize the diagram',
+        explanation: 'The circle encloses both notes.',
+      },
+      {
+        state: 'reported',
+        text: 'Summarize the diagram',
+        explanation: 'The circle encloses both notes.',
+      },
+    ],
+    [{ state: 'missing' }, { state: 'missing' }],
+    [{ state: 'failed' }, { state: 'failed' }],
+    [{ state: 'interrupted' }, { state: 'interrupted' }],
+    [{ state: 'legacy' }, { state: 'legacy' }],
+    [{ state: 'pending' }, { state: 'missing' }],
+    [undefined, { state: 'legacy' }],
+  ] as Array<[InkInterpretation | undefined, InkInterpretation]>)(
+    'hydrates terminal Ink interpretation %j without false pending',
+    async (inkInterpretation, expected) => {
+      useChatStore.getState().setMessages(THREAD_ID, []);
+      useChatStore.getState().setHistoryLoaded(THREAD_ID, false);
+      apiMocks.fetchHistoryPage.mockResolvedValue({
+        threadId: THREAD_ID,
+        turns: [
+          {
+            id: 'turn-ink',
+            messages: [
+              {
+                role: 'user',
+                content: '',
+                inputKind: 'ink-intent',
+                inkInterpretation,
+                selectedNodeIds: ['sketch-1'],
+                selectedStrokeIds: [{ nodeId: 'sketch-1', strokeIds: ['s1'] }],
+              },
+              { role: 'assistant', parts: [{ kind: 'text', text: 'Done' }] },
+            ],
+          },
+        ],
+        hasMore: false,
+      });
+      await renderHarness();
+      expect(
+        useChatStore.getState().threadsById[THREAD_ID].messages[0],
+      ).toMatchObject({
+        content: '',
+        inkInterpretation: expected,
+        selectedNodeIds: ['sketch-1'],
+        selectedStrokeIds: [{ nodeId: 'sketch-1', strokeIds: ['s1'] }],
+      });
+      expect(apiMocks.reconnectStream).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ['inactive', 'interrupted'],
+    ['done', 'missing'],
+    ['error', 'failed'],
+    ['cancelled', 'interrupted'],
+  ])(
+    'settles active Ink after reconnect ends with %s',
+    async (terminal, expectedState) => {
+      useChatStore.getState().setMessages(THREAD_ID, []);
+      useChatStore.getState().setHistoryLoaded(THREAD_ID, false);
+      apiMocks.fetchHistoryPage.mockResolvedValue({
+        threadId: THREAD_ID,
+        turns: [
+          {
+            id: 'active-ink',
+            active: true,
+            messages: [
+              {
+                role: 'user',
+                content: '',
+                inputKind: 'ink-intent',
+                inkInterpretation: { state: 'pending' },
+              },
+            ],
+          },
+        ],
+        hasMore: false,
+      });
+      apiMocks.reconnectStream.mockImplementationOnce(
+        async (_thread, _canvas, callbacks) => {
+          expect(
+            useChatStore.getState().threadsById[THREAD_ID].messages[0],
+          ).toMatchObject({ inkInterpretation: { state: 'pending' } });
+          if (terminal === 'inactive') return { status: 'inactive' };
+          if (terminal === 'error')
+            callbacks.onError(new Error('Report stream failed'));
+          else {
+            callbacks.onEvent({
+              type: 'done',
+              data: {
+                message: '',
+                meta: {
+                  stopReason:
+                    terminal === 'cancelled' ? 'cancelled' : 'end_turn',
+                },
+              },
+            });
+            callbacks.onComplete();
+          }
+          return { status: 'completed' };
+        },
+      );
+      await renderHarness();
+      await vi.waitFor(() =>
+        expect(
+          useChatStore.getState().threadsById[THREAD_ID].messages[0],
+        ).toMatchObject({
+          content: '',
+          inkInterpretation: { state: expectedState },
+        }),
+      );
+    },
+  );
+
   it('hydrates the durable Ink input kind and retry metadata', async () => {
     useChatStore.getState().setMessages(THREAD_ID, []);
     useChatStore.getState().setHistoryLoaded(THREAD_ID, false);
@@ -334,6 +459,7 @@ describe('useChatHistory reconnect', () => {
               role: 'user',
               content: '',
               inputKind: 'ink-intent',
+              inkInterpretation: { state: 'legacy' },
               selectedNodeIds: ['sketch-1'],
               selectedStrokeIds: [
                 { nodeId: 'sketch-1', strokeIds: ['stroke-1'] },

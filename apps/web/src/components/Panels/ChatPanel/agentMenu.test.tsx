@@ -83,6 +83,8 @@ describe('AgentMenuOptions', () => {
     });
 
     expect(container.textContent).toContain('Reviewer');
+    expect(container.textContent).toContain('chat.modeChat');
+    expect(container.textContent).toContain('chat.modeAgent');
     expect(container.textContent).toContain('chat.externalAgents');
     expect(container.textContent).toContain('External Command');
     const externalHeading = container.querySelector(
