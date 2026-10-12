@@ -116,6 +116,9 @@ export const ChatInput = ({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const historyIndexRef = useRef(-1);
   const draftRef = useRef('');
+  const focusComposer = useCallback(() => {
+    textareaRef.current?.focus({ preventScroll: true });
+  }, []);
 
   // Pending attachments belong to the thread this composer is sending to.
   const { threadId, canvasId } = useChatSession();
@@ -350,6 +353,7 @@ export const ChatInput = ({
           <ChatContextSources
             adjacentNodeSourceId={adjacentNodeSourceId}
             onCommit={onCommit}
+            onActionComplete={focusComposer}
           />
 
           <div className="relative">

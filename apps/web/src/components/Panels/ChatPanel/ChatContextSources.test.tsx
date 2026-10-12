@@ -66,10 +66,12 @@ function render({
   owner = session,
   adjacentNodeSourceId,
   onCommit = vi.fn(),
+  onActionComplete = vi.fn(),
 }: {
   owner?: ChatSession;
   adjacentNodeSourceId?: string;
   onCommit?: () => void;
+  onActionComplete?: () => void;
 } = {}) {
   act(() =>
     root.render(
@@ -78,6 +80,7 @@ function render({
           <ChatContextSources
             adjacentNodeSourceId={adjacentNodeSourceId}
             onCommit={onCommit}
+            onActionComplete={onActionComplete}
           />
         </ChatSessionProvider>
       </I18nextProvider>,
@@ -216,24 +219,32 @@ describe('ChatContextSources', () => {
   it('offers one leading action: pin the temporary excerpt, then remove it', () => {
     useChatStore.getState().setSelectionAttachment(excerpt);
     const onCommit = vi.fn();
-    render({ onCommit });
+    const onActionComplete = vi.fn();
+    render({ onCommit, onActionComplete });
     expect(
       container.querySelector('[aria-label="Remove attachment"]'),
     ).toBeNull();
     act(() => button('Pin this excerpt to this chat').click());
+    expect(onActionComplete).toHaveBeenCalledOnce();
     act(() => button('Remove attachment').click());
     expect(useChatStore.getState().selectionAttachment).toBeNull();
     expect(
       selectThreadPendingAttachments(useChatStore.getState(), session.threadId),
     ).toEqual([]);
     expect(onCommit).toHaveBeenCalledTimes(2);
+    expect(onActionComplete).toHaveBeenCalledTimes(2);
     expect(container.childElementCount).toBe(0);
   });
 
   it('offers an adjacent node outside the included group until explicitly added', () => {
     setNodes([node('Adjacent note')]);
     const onCommit = vi.fn();
-    render({ adjacentNodeSourceId: 'Adjacent note', onCommit });
+    const onActionComplete = vi.fn();
+    render({
+      adjacentNodeSourceId: 'Adjacent note',
+      onCommit,
+      onActionComplete,
+    });
     expect(container.querySelector('[role="group"]')).toBeNull();
     expect(
       selectThreadPendingAttachments(useChatStore.getState(), session.threadId),
@@ -263,8 +274,10 @@ describe('ChatContextSources', () => {
     expect(container.querySelector('svg.lucide-x')).not.toBeNull();
     expect(container.textContent).not.toContain('Add Adjacent note');
     expect(onCommit).toHaveBeenCalledOnce();
+    expect(onActionComplete).toHaveBeenCalledOnce();
 
     act(() => button('Remove attachment').click());
+    expect(onActionComplete).toHaveBeenCalledTimes(2);
     expect(container.querySelector('[role="group"]')).toBeNull();
     expect(button('Add Adjacent note')).toBeDefined();
   });

@@ -129,9 +129,11 @@ function AttachmentSource({
 export const ChatContextSources = memo(function ChatContextSources({
   adjacentNodeSourceId,
   onCommit,
+  onActionComplete,
 }: {
   adjacentNodeSourceId?: string;
   onCommit?: () => void;
+  onActionComplete?: () => void;
 }) {
   const { t } = useTranslation();
   const { threadId, canvasId, conversationView } = useChatSession();
@@ -215,6 +217,7 @@ export const ChatContextSources = memo(function ChatContextSources({
                 addPendingAttachment(threadId, { ...selectionAttachment });
                 setSelectionAttachment(null);
                 onCommit?.();
+                onActionComplete?.();
               }}
               onRemove={() => setSelectionAttachment(null)}
             />
@@ -227,6 +230,7 @@ export const ChatContextSources = memo(function ChatContextSources({
               onRemove={() => {
                 removePendingAttachment(threadId, index);
                 onCommit?.();
+                onActionComplete?.();
               }}
             />
           ))}
@@ -248,6 +252,7 @@ export const ChatContextSources = memo(function ChatContextSources({
               label: adjacentNodeLabel,
             });
             onCommit?.();
+            onActionComplete?.();
           }}
         >
           <Plus aria-hidden />

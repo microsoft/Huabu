@@ -15,6 +15,180 @@ const excerpt =
 
 test.use({ hasTouch: false });
 
+for (const interaction of ['mouse', 'keyboard'] as const) {
+  test(`source actions preserve composer focus and selection via ${interaction}`, async ({
+    page,
+  }) => {
+    await page.addInitScript(() =>
+      performance.setResourceTimingBufferSize(2000),
+    );
+    await page.goto('/playground/chat-performance?messages=0');
+    await expect(page.getByRole('textbox')).toBeVisible();
+    await page.evaluate(async (excerpt) => {
+      const loaded = (suffix: string) => {
+        const entry = performance
+          .getEntriesByType('resource')
+          .find((resource) => new URL(resource.name).pathname.endsWith(suffix));
+        if (!entry) throw new Error(`Missing loaded module: ${suffix}`);
+        return entry.name;
+      };
+      const [
+        { default: React },
+        { default: ReactDOM },
+        { ChatInput },
+        { ChatSessionProvider },
+        { default: canvas },
+        { useChatStore: chat },
+      ] = await Promise.all([
+        import(loaded('/deps/react.js')) as Promise<{
+          default: typeof ReactModule;
+        }>,
+        import(loaded('/deps/react-dom_client.js')) as Promise<{
+          default: typeof ReactDOMModule;
+        }>,
+        import(loaded('/ChatInput.tsx')) as Promise<typeof InputModule>,
+        import(loaded('/useChatSession.ts')) as Promise<typeof SessionModule>,
+        import(loaded('/src/store/canvasStore.ts')) as Promise<{
+          default: typeof CanvasStore;
+        }>,
+        import(loaded('/src/store/chatStore.ts')) as Promise<typeof ChatStore>,
+      ]);
+      canvas.getState()._setStateNoAutosave({
+        canvasId: 'source-focus-canvas',
+        nodes: [
+          {
+            id: 'source',
+            type: 'note',
+            position: { x: 0, y: 0 },
+            data: { label: 'Source note' },
+          },
+        ],
+        edges: [],
+      });
+      chat.getState().setSelectionAttachment({
+        type: 'text',
+        source: 'excerpt',
+        content: excerpt,
+        originNodeId: 'source',
+      });
+      const original = document.querySelector<HTMLElement>(
+        '[data-chat-performance-fixture]',
+      );
+      if (!original) throw new Error('Missing original fixture');
+      original.style.display = 'none';
+      for (const [index, id] of ['focus-left', 'focus-right'].entries()) {
+        const host = document.createElement('div');
+        host.id = id;
+        Object.assign(host.style, {
+          position: 'fixed',
+          top: '160px',
+          left: `${24 + index * 380}px`,
+          width: '360px',
+        });
+        document.body.append(host);
+        function Composer() {
+          const [value, onChange] = React.useState('Keep this draft');
+          return React.createElement(ChatInput, {
+            value,
+            onChange,
+            onSubmit: () => undefined,
+            onStop: () => undefined,
+            mode: 'ask',
+            adjacentNodeSourceId: 'source',
+          });
+        }
+        ReactDOM.createRoot(host).render(
+          React.createElement(
+            ChatSessionProvider,
+            {
+              value: {
+                canvasId: 'source-focus-canvas',
+                ownerCanvasId: 'source-focus-canvas',
+                threadId: id,
+                conversationView: null,
+              },
+            },
+            React.createElement(Composer),
+          ),
+        );
+      }
+    }, excerpt);
+    await page.addStyleTag({
+      content:
+        '[data-chat-input-surface], [data-chat-context-sources] * { transition: none !important; }',
+    });
+    const left = page.locator('#focus-left');
+    const right = page.locator('#focus-right');
+    const textarea = right.getByRole('textbox');
+    const surface = right.locator('[data-chat-input-surface]');
+    const border = () =>
+      surface.evaluate((element) => getComputedStyle(element).borderTopColor);
+    const restingBorder = await border();
+    await textarea.focus();
+    await textarea.evaluate((element: HTMLTextAreaElement) =>
+      element.setSelectionRange(2, 7, 'backward'),
+    );
+    const focusedBorder = await border();
+    expect(focusedBorder).not.toBe(restingBorder);
+    const scrollY = await page.evaluate(() => window.scrollY);
+    const selection = () =>
+      textarea.evaluate((element: HTMLTextAreaElement) => [
+        element.selectionStart,
+        element.selectionEnd,
+        element.selectionDirection,
+      ]);
+    const actions = [
+      right.getByRole('button', { name: 'Add Source note', exact: true }),
+      right.getByRole('button', {
+        name: 'Pin this excerpt to this chat',
+        exact: true,
+      }),
+      right
+        .getByRole('button', { name: 'Remove attachment', exact: true })
+        .first(),
+      right
+        .getByRole('button', { name: 'Remove attachment', exact: true })
+        .first(),
+    ];
+    for (const action of actions) {
+      if (interaction === 'mouse') await action.click();
+      else {
+        await action.focus();
+        await expect.poll(border).toBe(focusedBorder);
+        await action.press('Enter');
+      }
+      await expect(textarea).toBeFocused();
+      await expect(left.getByRole('textbox')).not.toBeFocused();
+      await expect(textarea).toHaveValue('Keep this draft');
+      expect(await selection()).toEqual([2, 7, 'backward']);
+      expect(await page.evaluate(() => window.scrollY)).toBe(scrollY);
+      await expect.poll(border).toBe(focusedBorder);
+      const chips = right.locator('[data-context-attachment]');
+      expect(
+        await chips.evaluateAll((elements) =>
+          elements.map((element) => getComputedStyle(element).color),
+        ),
+      ).toEqual(
+        Array.from({ length: await chips.count() }, () => focusedBorder),
+      );
+    }
+    await expect(right.locator('[data-context-attachment]')).toHaveCount(0);
+    await expect(left.locator('[data-context-attachment]')).toHaveCount(0);
+    await expect(
+      left.getByRole('button', { name: 'Add Source note', exact: true }),
+    ).toBeVisible();
+    const candidate = right.getByRole('button', {
+      name: 'Add Source note',
+      exact: true,
+    });
+    await candidate.focus();
+    await expect(candidate).toBeFocused();
+    await expect.poll(border).toBe(focusedBorder);
+    await left.getByRole('textbox').click();
+    await expect.poll(border).toBe(restingBorder);
+  });
+}
+
 async function expectSharedChipTone(sources: Locator, textbox: Locator) {
   await textbox.page().addStyleTag({
     content:
