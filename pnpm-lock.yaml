@@ -218,11 +218,11 @@ importers:
         specifier: ^0.6.0
         version: 0.6.0
       '@octostaff/bubble':
-        specifier: 0.7.3
-        version: 0.7.3
+        specifier: 0.7.4
+        version: 0.7.4
       '@octostaff/sdk':
-        specifier: 0.7.3
-        version: 0.7.3
+        specifier: 0.7.4
+        version: 0.7.4
       '@opendocsg/pdf2md':
         specifier: ^0.2.5
         version: 0.2.7(@napi-rs/canvas@0.1.100)
@@ -2304,13 +2304,13 @@ packages:
   '@ocavue/utils@1.7.0':
     resolution: {integrity: sha512-yEk9ATNBjTZTtuVFMB/MAIF6zJBvJ2+lVNQvK2+O+ggEBGTgx2tp27d4FPgmD5bRsNHHP3D0SleQia/bvIeV8w==}
 
-  '@octostaff/bubble@0.7.3':
-    resolution: {integrity: sha512-eMZN9xhyLWbaig8v4MIBd/kEeRWD4eP1yMqpvvkNIKUG8ZlmTg69JcuvoYHRd+Q8WgAHtAkqvc1IR7YwmSrb6A==}
+  '@octostaff/bubble@0.7.4':
+    resolution: {integrity: sha512-0LbLjP7WZxZzswArWDBp86uu5ti75/bW7khx2LnSytgJBkpXoTpvjAN2foWQkHLvGhH3xmbMnTgMCuR8zljKBA==}
     engines: {node: '>=24'}
     hasBin: true
 
-  '@octostaff/sdk@0.7.3':
-    resolution: {integrity: sha512-4JQBUr9kZSVIXok2ru7ZN70eaIc65BKyk2g7Pcudge+z29wRJ14INxt7MtrTHpC6lvAT2EvkykB7neQEevVBMg==}
+  '@octostaff/sdk@0.7.4':
+    resolution: {integrity: sha512-sQGNHT06LLuuwdiMkONTU0m0r8P5MfABqiUBakRB7+9Q6rbXmttUnDL3d2kotPYwjOLvhBAHMN9qffeQLr+NLg==}
 
   '@opendocsg/pdf2md@0.2.7':
     resolution: {integrity: sha512-bOhYUklfOBKk/DdYBDiH2EFghfcXIm30phTGt86Naj6zl4ORPXVpe8WTs72f7+PLwC+G2cEcT+oMcI69hDU79g==}
@@ -9174,13 +9174,13 @@ snapshots:
 
   '@ocavue/utils@1.7.0': {}
 
-  '@octostaff/bubble@0.7.3':
+  '@octostaff/bubble@0.7.4':
     dependencies:
       '@azure/identity': 4.13.3
       '@azure/storage-blob': 12.33.0
       '@fastify/cors': 11.3.0
       '@fastify/websocket': 11.3.1
-      '@octostaff/sdk': 0.7.3
+      '@octostaff/sdk': 0.7.4
       ai: 6.0.296(zod@4.4.3)
       fastify: 5.12.1
       postgres: 3.4.9
@@ -9190,7 +9190,7 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@octostaff/sdk@0.7.3':
+  '@octostaff/sdk@0.7.4':
     dependencies:
       ai: 6.0.296(zod@4.4.3)
       js-yaml: 5.4.2

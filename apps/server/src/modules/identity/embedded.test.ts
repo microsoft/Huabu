@@ -23,7 +23,7 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
-/** Stands in for an OIDC verifier until Bubble exports its production ones. */
+/** Stands in for an OIDC verifier; the production ones need a live JWKS. */
 const verifier: BubbleAuthenticator & { failing: boolean } = {
   failing: false,
   authenticate(request) {
