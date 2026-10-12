@@ -132,6 +132,7 @@ describe('ACP agent CLI route', () => {
     mocks.getProfile.mockReturnValue({ agentletId: 'legacy-host' });
     mocks.discover.mockResolvedValue({ harnesses: [] });
     app = Fastify({ logger: false });
+    registerLocalTestIdentity(app);
     await app.register(createAcpAgentCliRoutes(), { prefix: '/api/acp' });
     const response = await app.inject(
       '/api/acp/agent-cli?profileId=remote-profile',
@@ -157,6 +158,7 @@ describe('ACP agent CLI route', () => {
     const detect = vi.fn(async () => []);
     mocks.getProfile.mockReturnValue(undefined);
     app = Fastify({ logger: false });
+    registerLocalTestIdentity(app);
     await app.register(createAcpAgentCliRoutes(detect), { prefix: '/api/acp' });
     expect((await app.inject('/api/acp/agent-cli?profileId=')).statusCode).toBe(
       400,
