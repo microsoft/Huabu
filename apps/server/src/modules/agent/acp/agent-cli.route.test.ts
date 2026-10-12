@@ -94,6 +94,7 @@ describe('ACP agent CLI route', () => {
     app.addHook('onRequest', async (request) => {
       setRequestIdentity(request, {
         principal: { principalId: 'test-owner', kind: 'user' },
+        member: true,
         owner: true,
       });
     });

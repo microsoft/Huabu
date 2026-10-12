@@ -42,6 +42,7 @@ export function createLocalIdentityService(
           kind: 'user',
           displayName: 'Local owner',
         },
+        member: true,
         owner: true,
       };
     },

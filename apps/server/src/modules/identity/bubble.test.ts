@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { openBubbleIdentity } from './bubble.js';
 import { registerIdentity } from './http.js';
+import { isOwnerRequest } from '../security/owner.js';
 
 import type { FastifyInstance } from 'fastify';
 import type { AddressInfo } from 'node:net';
@@ -58,6 +59,9 @@ async function host(
   });
   void app.register(bubble.plugin, { prefix: '/bubble' });
   app.get('/api/data', async () => ({ private: true }));
+  app.get('/api/settings', async (request, reply) =>
+    isOwnerRequest(request) ? { private: true } : reply.code(403).send({}),
+  );
   app.get('/api/events', (_request, reply) => {
     reply.hijack();
     reply.raw.writeHead(200, { 'Content-Type': 'text/event-stream' });
@@ -95,6 +99,7 @@ describe('Bubble identity', () => {
     expect(identity.json()).toEqual({
       provider: 'bubble',
       principal: { principalId: 'admin', kind: 'user' },
+      member: true,
       owner: true,
     });
     expect(
@@ -108,7 +113,31 @@ describe('Bubble identity', () => {
     }
     const denied = await app.inject({ url: '/api/data', headers: as('bob') });
     expect(denied.statusCode).toBe(403);
-    expect(denied.json()).toMatchObject({ code: 'OWNER_REQUIRED' });
+    expect(denied.json()).toMatchObject({ code: 'ACCESS_REQUIRED' });
+  });
+
+  it('lets a system member use Huabu without owner authority, and no other role', async () => {
+    const { app, store } = await host();
+    const carol = { headers: as('carol') };
+    const identity = async () =>
+      (await app.inject({ url: '/api/identity', ...carol })).json();
+    const statuses = async () =>
+      Promise.all(
+        ['/api/data', '/api/settings'].map(
+          async (url) => (await app.inject({ url, ...carol })).statusCode,
+        ),
+      );
+    expect(await statuses()).toEqual([403, 403]);
+
+    await store.grants.grant({ type: 'system' }, 'carol', 'member');
+    expect(await identity()).toMatchObject({ member: true, owner: false });
+    expect(await statuses()).toEqual([200, 403]);
+
+    // Roles carry Huabu access only on the system target, and only these two.
+    await store.grants.grant({ type: 'system' }, 'carol', 'system_manager');
+    expect(await identity()).toMatchObject({ member: false, owner: false });
+    await store.grants.grant({ type: 'system' }, 'carol', 'owner');
+    expect(await statuses()).toEqual([200, 200]);
   });
 
   it('accepts a bot local token minted through the mounted Bubble API until it is revoked', async () => {
@@ -219,7 +248,6 @@ describe('Bubble identity', () => {
     expect((await app.inject(alice)).statusCode).toBe(403);
     await store.grants.grant({ type: 'system' }, 'alice', 'owner');
     expect((await app.inject(alice)).statusCode).toBe(200);
-    // Owning a thread or a principal is not owning the system.
     await store.grants.revoke({ type: 'system' }, 'alice');
     expect((await app.inject(alice)).statusCode).toBe(403);
 

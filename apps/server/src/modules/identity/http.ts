@@ -68,6 +68,7 @@ export function registerIdentity(
     ) {
       setRequestIdentity(request, {
         principal: { principalId: 'huabu-agentlet', kind: 'bot' },
+        member: true,
         owner: false,
       });
       return;
@@ -100,15 +101,15 @@ export function registerIdentity(
           });
       }
       setRequestIdentity(request, identity);
-      // Huabu has one access level, owner; the local principal always holds
-      // it. Anyone else Bubble admits may inspect only their own identity.
+      // A login alone is not Huabu access. Without it a principal may inspect
+      // only their own identity; routes that need an owner check that themselves.
       if (
-        !identity.owner &&
+        !identity.member &&
         !(['GET', 'HEAD'].includes(request.method) && identityRoute)
       ) {
         return reply.code(403).send({
-          message: 'Huabu owner access required',
-          code: 'OWNER_REQUIRED',
+          message: 'Huabu access required',
+          code: 'ACCESS_REQUIRED',
         });
       }
       if (
@@ -138,7 +139,8 @@ export function registerIdentity(
                 (!current ||
                   current.principal.principalId !==
                     identity.principal.principalId ||
-                  (!identityRoute && !current.owner))
+                  (!identityRoute &&
+                    (!current.member || current.owner !== identity.owner)))
               )
                 close();
             })

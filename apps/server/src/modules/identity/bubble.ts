@@ -27,6 +27,16 @@ import type {
 } from '@octostaff/bubble';
 import type { FastifyPluginAsync } from 'fastify';
 
+/**
+ * Huabu's permissions, added to Bubble's roles and granted on Bubble's system
+ * target: a system `member` may use Huabu, a system `owner` may also manage it.
+ */
+const USE = 'huabu.use';
+const MANAGE = 'huabu.manage';
+const HUABU_ROLES = {
+  capabilitiesByRole: { member: [USE], owner: [USE, MANAGE] },
+} as const;
+
 /** Bubble's records live beside Huabu's, in a schema of their own. */
 export async function openBubblePostgresStore(
   url: string,
@@ -60,6 +70,7 @@ export async function openBubbleIdentity(options: {
     authenticator: options.authenticator,
     // Huabu owners are provisioned, never whoever logs in first.
     autoGrantFirstUserSystemOwner: false,
+    authzContributions: [HUABU_ROLES],
   }).catch(async (error: unknown) => {
     await store.close?.();
     throw error;
@@ -101,13 +112,11 @@ export async function openBubbleIdentity(options: {
             { actorPrincipalId: registered.principalId },
             bubbleAuthContextToPrincipal(registered),
           );
+          const authz = runtime.policy.forCaller(registered.principalId);
           return {
             principal: identityPrincipalSchema.parse(whoami.principal),
-            // Huabu's owner is exactly Bubble's system owner.
-            owner: whoami.grants.some(
-              (grant) =>
-                grant.target.type === 'system' && grant.role === 'owner',
-            ),
+            member: await authz.can(USE, { type: 'system' }),
+            owner: await authz.can(MANAGE, { type: 'system' }),
           };
         } catch (error) {
           if (isBubbleProtocolError(error)) {
@@ -130,7 +139,7 @@ export async function openBubbleIdentity(options: {
     },
     plugin: async (app) => {
       // Bubble authenticates and authorizes each of its own routes, including
-      // for bots and non-owners that Huabu's routes turn away.
+      // for principals that hold no Huabu permission.
       app.addHook('onRoute', (route) => {
         route.config = { ...route.config, identity: 'route-owned' };
       });

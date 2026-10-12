@@ -13,7 +13,9 @@ export interface IdentityCredentials {
 
 export interface ResolvedIdentity {
   principal: IdentityPrincipal;
-  /** Huabu's existing single-owner policy, not a general permission model. */
+  /** May use Huabu; every owner is a member. */
+  member: boolean;
+  /** May also change settings, credentials and agent configuration. */
   owner: boolean;
 }
 

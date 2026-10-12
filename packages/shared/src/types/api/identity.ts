@@ -16,6 +16,9 @@ export type IdentityPrincipal = z.infer<typeof identityPrincipalSchema>;
 export const identityResponseSchema = z.object({
   provider: z.enum(['local', 'bubble']),
   principal: identityPrincipalSchema,
+  /** May use Huabu at all. */
+  member: z.boolean(),
+  /** May also change settings, credentials and agent configuration. */
   owner: z.boolean(),
 });
 export type IdentityResponse = z.infer<typeof identityResponseSchema>;

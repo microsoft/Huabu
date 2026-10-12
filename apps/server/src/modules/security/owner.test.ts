@@ -25,6 +25,7 @@ describe('owner request authorization', () => {
     const remote = request('192.0.2.10');
     setRequestIdentity(remote, {
       principal: { principalId: 'owner', kind: 'user' },
+      member: true,
       owner: true,
     });
     expect(isOwnerRequest(remote)).toBe(true);
@@ -34,6 +35,7 @@ describe('owner request authorization', () => {
     const local = request('127.0.0.1');
     setRequestIdentity(local, {
       principal: { principalId: 'agent', kind: 'bot' },
+      member: true,
       owner: false,
     });
     expect(isOwnerRequest(local)).toBe(false);

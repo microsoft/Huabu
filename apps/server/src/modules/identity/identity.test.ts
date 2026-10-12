@@ -109,6 +109,7 @@ describe('local identity admission', () => {
           kind: 'user',
           displayName: 'Local owner',
         },
+        member: true,
         owner: true,
       });
       expect(response.headers['cache-control']).toBe('no-store');

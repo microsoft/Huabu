@@ -78,6 +78,7 @@ it('keeps principals, grants and local tokens across a restart, in a schema of i
   });
   expect(response.json()).toMatchObject({
     principal: { principalId: 'ci-bot', kind: 'bot' },
+    member: true,
     owner: true,
   });
   expect(
