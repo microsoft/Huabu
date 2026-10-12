@@ -55,7 +55,11 @@ import {
 import { PreviewGroup } from './PreviewGroup';
 import { PreviewTabDragOverlay } from './PreviewTab';
 import { newChatElementId, tabElementId } from './PreviewTabStrip';
-import { resolveTabDropDestination, resolveTabDropIndicator } from './tabDnd';
+import {
+  groupDropId,
+  resolveTabDropDestination,
+  resolveTabDropIndicator,
+} from './tabDnd';
 
 import type {
   CanvasPreviewWorkspace,
@@ -110,7 +114,11 @@ class PreviewTabPointerSensor extends PointerSensor {
           | null
       )?.ownerDocument ?? document;
     unsubscribe = subscribeToTabDragInterruption(
-      onCancel,
+      () => {
+        // Use the sensor's pointercancel handler to detach listeners before
+        // notifying DndContext, including when activation is still pending.
+        ownerDocument.dispatchEvent(new Event('pointercancel'));
+      },
       ownerDocument,
       ownerDocument.defaultView ?? window,
     );
@@ -154,11 +162,24 @@ const tabCollisionDetection: CollisionDetection = (args) => {
   );
 
   if (args.pointerCoordinates) {
-    const pointerCollisions = pointerWithin(args);
-    const tabCollision = pointerCollisions.find((collision) =>
-      tabContainers.some((container) => container.id === collision.id),
-    );
-    return tabCollision ? [tabCollision] : pointerCollisions;
+    const groupCollisions = pointerWithin({
+      ...args,
+      droppableContainers: args.droppableContainers.filter(
+        (container) => container.data.current?.type === 'preview-group',
+      ),
+    });
+    const hoveredGroups = new Set(groupCollisions.map(({ id }) => id));
+    // Overflowing tab rectangles can extend into another group's viewport.
+    const tabCollisions = pointerWithin({
+      ...args,
+      droppableContainers: tabContainers.filter((container) => {
+        const groupId = container.data.current?.groupId;
+        return (
+          typeof groupId === 'string' && hoveredGroups.has(groupDropId(groupId))
+        );
+      }),
+    });
+    return tabCollisions.length ? [tabCollisions[0]] : groupCollisions;
   }
 
   return closestCenter({
