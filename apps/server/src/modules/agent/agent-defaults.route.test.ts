@@ -6,6 +6,7 @@ import Fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import agentDefaultsRoutes from './agent-defaults.route.js';
+import { registerLocalTestIdentity } from '../../test-support/local-identity.js';
 import { createApplicationRateLimitOptions } from '../security/rate-limit.js';
 
 import type { AgentDefaults } from '@huabu/shared';
@@ -41,6 +42,7 @@ beforeEach(async () => {
   mocks.get.mockReturnValue({ profileId: null, functionalModel: '' });
   mocks.set.mockImplementation((value: AgentDefaults) => value);
   app = Fastify({ logger: false });
+  registerLocalTestIdentity(app);
   await app.register(rateLimit, createApplicationRateLimitOptions({ max: 10 }));
   await app.register(agentDefaultsRoutes, { prefix: url });
 });

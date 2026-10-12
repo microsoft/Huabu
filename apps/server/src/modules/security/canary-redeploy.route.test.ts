@@ -9,6 +9,7 @@ import Fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import canaryRedeployRoutes from './canary-redeploy.route.js';
+import { registerLocalTestIdentity } from '../../test-support/local-identity.js';
 
 import type { FastifyInstance } from 'fastify';
 
@@ -23,6 +24,7 @@ describe('Canary redeployment routes', () => {
     dataDir = mkdtempSync(join(tmpdir(), 'huabu-canary-route-'));
     process.env.HUABU_DATA_DIR = dataDir;
     app = Fastify({ logger: false });
+    registerLocalTestIdentity(app);
     await app.register(canaryRedeployRoutes, {
       prefix: '/api/deployment/canary',
     });

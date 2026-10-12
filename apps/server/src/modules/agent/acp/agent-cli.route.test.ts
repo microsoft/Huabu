@@ -5,7 +5,8 @@ import Fastify from 'fastify';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createAcpAgentCliRoutes } from './agent-cli.route.js';
-import { markBasicAuthenticated } from '../../security/owner.js';
+import { registerLocalTestIdentity } from '../../../test-support/local-identity.js';
+import { setRequestIdentity } from '../../identity/request.js';
 
 import type { FastifyInstance } from 'fastify';
 
@@ -50,6 +51,7 @@ describe('ACP agent CLI route', () => {
       },
     ]);
     app = Fastify({ logger: false });
+    registerLocalTestIdentity(app);
     await app.register(createAcpAgentCliRoutes(detect), {
       prefix: '/api/acp',
     });
@@ -70,6 +72,7 @@ describe('ACP agent CLI route', () => {
   it('rejects remote callers before contacting the agentlet', async () => {
     const detect = vi.fn(async () => []);
     app = Fastify({ logger: false });
+    registerLocalTestIdentity(app);
     await app.register(createAcpAgentCliRoutes(detect), {
       prefix: '/api/acp',
     });
@@ -87,8 +90,13 @@ describe('ACP agent CLI route', () => {
   it('allows the authenticated remote owner to request agentlet detection', async () => {
     const detect = vi.fn(async () => []);
     app = Fastify({ logger: false });
+    registerLocalTestIdentity(app);
     app.addHook('onRequest', async (request) => {
-      markBasicAuthenticated(request);
+      setRequestIdentity(request, {
+        principal: { principalId: 'test-owner', kind: 'user' },
+        member: true,
+        owner: true,
+      });
     });
     await app.register(createAcpAgentCliRoutes(detect), {
       prefix: '/api/acp',
@@ -106,6 +114,7 @@ describe('ACP agent CLI route', () => {
 
   it('returns an explicit failure instead of an empty installed catalogue', async () => {
     app = Fastify({ logger: false });
+    registerLocalTestIdentity(app);
     await app.register(
       createAcpAgentCliRoutes(
         vi.fn().mockRejectedValue(new Error('agentlet offline')),
@@ -124,6 +133,7 @@ describe('ACP agent CLI route', () => {
     mocks.getProfile.mockReturnValue({ agentletId: 'legacy-host' });
     mocks.discover.mockResolvedValue({ harnesses: [] });
     app = Fastify({ logger: false });
+    registerLocalTestIdentity(app);
     await app.register(createAcpAgentCliRoutes(), { prefix: '/api/acp' });
     const response = await app.inject(
       '/api/acp/agent-cli?profileId=remote-profile',
@@ -149,6 +159,7 @@ describe('ACP agent CLI route', () => {
     const detect = vi.fn(async () => []);
     mocks.getProfile.mockReturnValue(undefined);
     app = Fastify({ logger: false });
+    registerLocalTestIdentity(app);
     await app.register(createAcpAgentCliRoutes(detect), { prefix: '/api/acp' });
     expect((await app.inject('/api/acp/agent-cli?profileId=')).statusCode).toBe(
       400,
