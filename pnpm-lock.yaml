@@ -211,6 +211,9 @@ importers:
       '@fastify/static':
         specifier: ^8.0.2
         version: 8.3.0
+      '@fastify/websocket':
+        specifier: ^11.3.1
+        version: 11.3.1
       '@huabu/shared':
         specifier: workspace:*
         version: link:../../packages/shared

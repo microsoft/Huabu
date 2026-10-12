@@ -1,90 +1,163 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { z } from 'zod';
+import { EventEmitter } from 'node:events';
+
+import websocket from '@fastify/websocket';
+import { bubblePlugin, createBubbleRuntime } from '@octostaff/bubble';
+import {
+  PostgresBubbleStore,
+  PostgresConnection,
+} from '@octostaff/bubble/postgres';
+import {
+  authenticateBubbleRequest,
+  bubbleAuthContextToPrincipal,
+  BubbleErrorCode,
+  isBubbleProtocolError,
+} from '@octostaff/sdk';
 
 import { identityPrincipalSchema } from '@huabu/shared';
 
-import { validateBubbleUrl } from './config.js';
 import { IdentityError } from './service.js';
 
 import type { IdentityService } from './service.js';
+import type {
+  BubbleStore,
+  CreateBubbleRuntimeOptions,
+} from '@octostaff/bubble';
+import type { FastifyPluginAsync } from 'fastify';
 
-// Decode only the public whoami fields this adapter consumes. Neither Bubble
-// grants nor transport details escape into Huabu's identity contract.
-const whoamiSchema = z.object({
-  principal: identityPrincipalSchema.extend({
-    disabledAt: z.string().optional(),
-  }),
-  grants: z.array(
-    z.object({
-      target: z.discriminatedUnion('type', [
-        z.object({ type: z.literal('system') }),
-        z.object({ type: z.literal('thread'), threadId: z.string() }),
-        z.object({ type: z.literal('principal'), principalId: z.string() }),
-      ]),
-      role: z.string(),
-    }),
-  ),
-});
-
-/** Huabu's single-owner policy maps only to Bubble's explicit system owner. */
-export function hasSystemOwnerGrant(
-  grants: ReadonlyArray<{ target: { type: string }; role: string }>,
-): boolean {
-  return grants.some(
-    (grant) => grant.target.type === 'system' && grant.role === 'owner',
+/** Bubble's records live beside Huabu's, in a schema of their own. */
+export async function openBubblePostgresStore(
+  url: string,
+): Promise<BubbleStore> {
+  const store = new PostgresBubbleStore(
+    PostgresConnection.open({ url, schema: 'bubble' }),
   );
+  try {
+    await store.init();
+  } catch (error) {
+    await store.close();
+    throw error;
+  }
+  return store;
 }
 
-/** Adapter for a separately deployed Bubble; see embedded.ts for in-process. */
-export function createBubbleIdentityService(baseUrl: string): IdentityService {
-  const endpoint = `${validateBubbleUrl(baseUrl)}/v1/auth/whoami`;
+/**
+ * Run Bubble inside the Huabu server: one runtime backs both Huabu's admission
+ * and Bubble's own API, so a credential resolves to the same principal through
+ * either. The store is closed with the plugin.
+ */
+export async function openBubbleIdentity(options: {
+  authenticator: NonNullable<CreateBubbleRuntimeOptions['authenticator']>;
+  /** Principal provisioned as Bubble system owner. */
+  owner?: string;
+  store: BubbleStore;
+}): Promise<{ service: IdentityService; plugin: FastifyPluginAsync }> {
+  const { store, owner } = options;
+  const runtime = await createBubbleRuntime({
+    store,
+    authenticator: options.authenticator,
+    // Huabu owners are provisioned, never whoever logs in first.
+    autoGrantFirstUserSystemOwner: false,
+  }).catch(async (error: unknown) => {
+    await store.close?.();
+    throw error;
+  });
+  if (owner) {
+    // Created without an external identity, which suits master-key callers; a
+    // federated user is granted ownership through Bubble after first login.
+    if (!(await store.principals.get(owner))) {
+      await store.principals.upsert({ principalId: owner, kind: 'user' });
+      await store.grants.grant(
+        { type: 'principal', principalId: owner },
+        owner,
+        'owner',
+      );
+    }
+    await store.grants.grant({ type: 'system' }, owner, 'owner');
+  }
+  const { identity } = runtime.application;
+
   return {
-    provider: 'bubble',
-    challenge: 'Bearer realm="Huabu"',
-    async authenticate({ authorization }) {
-      if (!authorization || !/^Bearer\s+\S+$/i.test(authorization)) return null;
-      try {
-        const response = await fetch(endpoint, {
-          headers: { authorization },
-          redirect: 'error',
-          signal: AbortSignal.timeout(5_000),
-        });
-        if (response.status === 401 || response.status === 403) {
-          await response.body?.cancel();
-          if (response.status === 401) return null;
+    service: {
+      provider: 'bubble',
+      challenge: 'Bearer realm="Huabu"',
+      async authenticate({ authorization, header }) {
+        if (!authorization || !/^Bearer\s+\S+$/i.test(authorization))
+          return null;
+        try {
+          // The verifier sees the headers Bubble's own routes would give it,
+          // so the master-key principal override resolves identically.
+          const auth = await authenticateBubbleRequest(runtime.authenticator, {
+            authorization,
+            method: 'GET',
+            url: '/v1/auth/whoami',
+            getHeader: (name) => header?.(name.toLowerCase()),
+          });
+          // Registration binds (issuer, subject) and refuses disabled accounts.
+          const registered = await identity.register(auth, 'http');
+          const whoami = await identity.whoAmIFor(
+            { actorPrincipalId: registered.principalId },
+            bubbleAuthContextToPrincipal(registered),
+          );
+          return {
+            principal: identityPrincipalSchema.parse(whoami.principal),
+            // Huabu's owner is exactly Bubble's system owner.
+            owner: whoami.grants.some(
+              (grant) =>
+                grant.target.type === 'system' && grant.role === 'owner',
+            ),
+          };
+        } catch (error) {
+          if (isBubbleProtocolError(error)) {
+            if (error.code === BubbleErrorCode.Unauthenticated) return null;
+            if (error.code === BubbleErrorCode.Forbidden)
+              throw new IdentityError(
+                403,
+                'IDENTITY_FORBIDDEN',
+                'Identity access denied',
+              );
+          }
+          // Store and verifier failures must never appear in a response.
           throw new IdentityError(
-            403,
-            'IDENTITY_FORBIDDEN',
-            'Identity access denied',
+            503,
+            'IDENTITY_UNAVAILABLE',
+            'Identity service unavailable',
           );
         }
-        if (!response.ok) {
-          await response.body?.cancel();
-          throw new Error('Bubble identity request failed');
-        }
-        const identity = whoamiSchema.parse(await response.json());
-        if (identity.principal.disabledAt) {
-          throw new IdentityError(
-            403,
-            'IDENTITY_FORBIDDEN',
-            'Identity access denied',
-          );
-        }
-        return {
-          principal: identityPrincipalSchema.parse(identity.principal),
-          owner: hasSystemOwnerGrant(identity.grants),
-        };
-      } catch (error) {
-        if (error instanceof IdentityError) throw error;
-        // Upstream URLs, errors and credentials must never appear in a response.
-        throw new IdentityError(
-          503,
-          'IDENTITY_UNAVAILABLE',
-          'Identity service unavailable',
-        );
-      }
+      },
+    },
+    plugin: async (app) => {
+      // Bubble authenticates and authorizes each of its own routes, including
+      // for bots and non-owners that Huabu's routes turn away.
+      app.addHook('onRoute', (route) => {
+        route.config = { ...route.config, identity: 'route-owned' };
+      });
+
+      // @fastify/websocket would otherwise route every upgrade on the server,
+      // answering the Agentlet gateway's own upgrade path with a 404.
+      const upgrades = new EventEmitter();
+      const forward = (...args: unknown[]) => {
+        const url = (args[0] as { url?: string }).url ?? '';
+        if (url.startsWith(`${app.prefix}/`)) upgrades.emit('upgrade', ...args);
+      };
+      app.server.on('upgrade', forward);
+      await app.register(websocket, {
+        options: {
+          server: upgrades as never,
+          maxPayload: runtime.ctx.application.events.appendBodyLimit,
+        },
+      });
+      await app.register(bubblePlugin(runtime, { healthCheck: false }));
+
+      app.addHook('onReady', () => runtime.start());
+      // Stop Bubble's workers before releasing the storage they query.
+      app.addHook('onClose', async () => {
+        app.server.off('upgrade', forward);
+        await runtime.stop();
+        await store.close?.();
+      });
     },
   };
 }

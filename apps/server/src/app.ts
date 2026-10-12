@@ -41,10 +41,7 @@ import canvasRoutes from './modules/canvas/canvas.route.js';
 import { resetExternalNoteSessions } from './modules/canvas/external-watcher.js';
 import externalNoteRoutes from './modules/canvas/external.route.js';
 import syncRoutes from './modules/canvas/sync.route.js';
-import {
-  createIdentityService,
-  registerIdentity,
-} from './modules/identity/index.js';
+import { createIdentity, registerIdentity } from './modules/identity/index.js';
 import integrationsRoutes from './modules/integrations/integrations.route.js';
 import interactiveViewRoutes from './modules/interactive-view/interactive-view.route.js';
 import { isPublicRfsSkillBootstrapRequest } from './modules/remote_fs/public-skill.js';
@@ -137,7 +134,11 @@ app.register(multipart, {
 });
 
 // Identity is selected once; a failed Bubble lookup never becomes local access.
-registerIdentity(app, { service: createIdentityService(), getConnectionToken });
+const identity = createIdentity();
+registerIdentity(app, { service: identity.service, getConnectionToken });
+// An embedded Bubble serves its own API beside Huabu's, behind the same host,
+// origin and rate-limit guards; clients address it as `<origin>/bubble`.
+if (identity.bubble) app.register(identity.bubble, { prefix: '/bubble' });
 
 // Register @fastify/static to enable `reply.sendFile()`.
 // Actual artifact serving uses a dynamic root resolved at request time

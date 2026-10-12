@@ -8,9 +8,16 @@ import { IdentityError } from './service.js';
 import { isPublicRfsSkillBootstrapRequest } from '../remote_fs/public-skill.js';
 import { isLoopbackRequest } from '../security/peer.js';
 
-import type { IdentityService } from './service.js';
+import type { IdentityCredentials, IdentityService } from './service.js';
 import type { IdentityResponse } from '@huabu/shared';
 import type { FastifyInstance } from 'fastify';
+
+declare module 'fastify' {
+  interface FastifyContextConfig {
+    /** Set by a mounted service that authenticates its own callers. */
+    identity?: 'route-owned';
+  }
+}
 
 /** Install on the host scope before routes; machine credentials stay host-owned. */
 export function registerIdentity(
@@ -35,6 +42,8 @@ export function registerIdentity(
     const identityRoute = request.url.split('?', 1)[0] === '/api/identity';
     if (identityRoute) reply.header('Cache-Control', 'no-store');
     if (request.method === 'OPTIONS') return;
+    // Matched by route, not URL, so no path spelling can borrow the exemption.
+    if (request.routeOptions.config?.identity === 'route-owned') return;
     const authorization = request.headers.authorization;
     if (
       isPublicRfsSkillBootstrapRequest({
@@ -64,13 +73,18 @@ export function registerIdentity(
       return;
     }
 
+    const credentials: IdentityCredentials = {
+      authorization,
+      loopback: isLoopbackRequest(request),
+      header: (name) => {
+        const value = request.headers[name];
+        return Array.isArray(value) ? value[0] : value;
+      },
+    };
     try {
       // In the zero-config local mode the RFS surface still requires its
       // machine token. Basic-authenticated owners retain their current access.
-      const identity = await service.authenticate({
-        authorization,
-        loopback: isLoopbackRequest(request),
-      });
+      const identity = await service.authenticate(credentials);
       if (
         !identity ||
         (service.provider === 'local' &&
@@ -86,10 +100,9 @@ export function registerIdentity(
           });
       }
       setRequestIdentity(request, identity);
-      // Until Space permissions exist, a Bubble login alone must not expose
-      // Huabu's shared Workspace. Non-owners may inspect only their own identity.
+      // Huabu has one access level, owner; the local principal always holds
+      // it. Anyone else Bubble admits may inspect only their own identity.
       if (
-        service.provider === 'bubble' &&
         !identity.owner &&
         !(['GET', 'HEAD'].includes(request.method) && identityRoute)
       ) {
@@ -118,10 +131,7 @@ export function registerIdentity(
           if (closed || checking) return;
           checking = true;
           void service
-            .authenticate({
-              authorization,
-              loopback: isLoopbackRequest(request),
-            })
+            .authenticate(credentials)
             .then((current) => {
               if (
                 !closed &&

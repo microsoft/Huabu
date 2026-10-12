@@ -7,6 +7,8 @@ import type { IdentityPrincipal, IdentityResponse } from '@huabu/shared';
 export interface IdentityCredentials {
   authorization?: string;
   loopback: boolean;
+  /** Other request headers, for verifiers that read more than Authorization. */
+  header?: (name: string) => string | undefined;
 }
 
 export interface ResolvedIdentity {

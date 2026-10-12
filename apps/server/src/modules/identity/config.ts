@@ -1,19 +1,29 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { parseStorageProfile } from '../storage/index.js';
+
+/** One entry of Bubble's ordered authenticator list; Bubble validates the rest. */
+export type BubbleAuthenticatorEntry = { driver: string } & Record<
+  string,
+  unknown
+>;
+
 export type IdentityConfig =
   | { provider: 'local'; username?: string; password?: string }
-  | { provider: 'bubble'; baseUrl: string };
+  | {
+      provider: 'bubble';
+      authenticators: BubbleAuthenticatorEntry[];
+      /** Principal provisioned as Bubble system owner at startup. */
+      owner?: string;
+      postgresUrl: string;
+    };
 
 export function resolveIdentityConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): IdentityConfig {
   const provider = env.HUABU_IDENTITY_PROVIDER ?? 'local';
   if (provider === 'local') {
-    if (env.HUABU_BUBBLE_URL)
-      throw new Error(
-        'HUABU_BUBBLE_URL requires HUABU_IDENTITY_PROVIDER=bubble',
-      );
     if (
       Boolean(env.HUABU_BASIC_AUTH_USER) !== Boolean(env.HUABU_BASIC_AUTH_PASS)
     ) {
@@ -34,27 +44,44 @@ export function resolveIdentityConfig(
       'Bubble identity cannot be combined with HUABU_BASIC_AUTH_USER or HUABU_BASIC_AUTH_PASS',
     );
   }
-  return { provider, baseUrl: validateBubbleUrl(env.HUABU_BUBBLE_URL) };
-}
-
-export function validateBubbleUrl(raw: string | undefined): string {
-  let url: URL;
-  try {
-    url = new URL(raw ?? '');
-  } catch {
-    throw new Error('HUABU_BUBBLE_URL must be an absolute Bubble base URL');
-  }
-  const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
-  if (
-    (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback)) ||
-    url.username ||
-    url.password ||
-    url.search ||
-    url.hash
-  ) {
+  // Bubble has no durable store other than Postgres.
+  const postgresUrl = env.HUABU_POSTGRES_URL;
+  if (parseStorageProfile(env).structured.kind !== 'postgres' || !postgresUrl) {
     throw new Error(
-      'HUABU_BUBBLE_URL requires HTTPS (or loopback HTTP), without credentials, query, or fragment',
+      'HUABU_IDENTITY_PROVIDER=bubble requires HUABU_STRUCTURED_BACKEND=postgres and HUABU_POSTGRES_URL',
     );
   }
-  return url.toString().replace(/\/$/, '');
+  const owner = env.HUABU_BUBBLE_OWNER?.trim();
+  return {
+    provider,
+    authenticators: parseBubbleAuthenticators(env.HUABU_BUBBLE_AUTH),
+    ...(owner ? { owner } : {}),
+    postgresUrl,
+  };
+}
+
+/** Only the list shape is checked; Bubble validates each driver's options. */
+function parseBubbleAuthenticators(
+  raw: string | undefined,
+): BubbleAuthenticatorEntry[] {
+  if (!raw?.trim()) return [{ driver: 'local-token' }];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    parsed = undefined;
+  }
+  if (
+    !Array.isArray(parsed) ||
+    parsed.length === 0 ||
+    !parsed.every(
+      (entry): entry is BubbleAuthenticatorEntry =>
+        typeof entry?.driver === 'string',
+    )
+  ) {
+    throw new Error(
+      'HUABU_BUBBLE_AUTH must be a non-empty JSON list of Bubble authenticators, each with a driver',
+    );
+  }
+  return parsed;
 }

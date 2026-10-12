@@ -52,20 +52,31 @@ describe('resolveDeploymentConfig', () => {
   });
 
   it('accepts a network deployment protected by Bubble instead of Basic Auth', () => {
+    const bubble = {
+      HUABU_BIND_HOST: '0.0.0.0',
+      HUABU_IDENTITY_PROVIDER: 'bubble',
+      HUABU_STRUCTURED_BACKEND: 'postgres',
+      HUABU_POSTGRES_URL: 'postgres://huabu@db.example/huabu',
+    };
+    const allowed = { ...bubble, HUABU_ALLOWED_HOSTS: 'huabu.example' };
+    expect(resolveDeploymentConfig(allowed)).toMatchObject({
+      basicAuthConfigured: false,
+      bindScope: 'network',
+    });
+    expect(() => resolveDeploymentConfig(bubble)).toThrow(
+      /HUABU_ALLOWED_HOSTS/,
+    );
+    // Bubble's `default` driver trusts the bearer text as the principal id.
+    const unverified = { HUABU_BUBBLE_AUTH: '[{"driver":"default"}]' };
+    expect(() =>
+      resolveDeploymentConfig({ ...allowed, ...unverified }),
+    ).toThrow(/default/);
     expect(
       resolveDeploymentConfig({
-        HUABU_BIND_HOST: '0.0.0.0',
-        HUABU_ALLOWED_HOSTS: 'huabu.example',
-        HUABU_IDENTITY_PROVIDER: 'bubble',
-        HUABU_BUBBLE_URL: 'https://bubble.example',
+        ...bubble,
+        ...unverified,
+        HUABU_BIND_HOST: '127.0.0.1',
       }),
-    ).toMatchObject({ basicAuthConfigured: false, bindScope: 'network' });
-    expect(() =>
-      resolveDeploymentConfig({
-        HUABU_BIND_HOST: '0.0.0.0',
-        HUABU_IDENTITY_PROVIDER: 'bubble',
-        HUABU_BUBBLE_URL: 'https://bubble.example',
-      }),
-    ).toThrow(/HUABU_ALLOWED_HOSTS/);
+    ).toMatchObject({ bindScope: 'loopback' });
   });
 });

@@ -45,6 +45,17 @@ export function resolveDeploymentConfig(
     );
   }
 
+  // Bubble's `default` driver trusts the bearer text as the principal id.
+  if (
+    bindScope === 'network' &&
+    identity.provider === 'bubble' &&
+    identity.authenticators.some((entry) => entry.driver === 'default')
+  ) {
+    throw new Error(
+      'The Bubble "default" authenticator verifies nothing and is not allowed when HUABU_BIND_HOST is not loopback',
+    );
+  }
+
   return {
     allowedHostsConfigured,
     basicAuthConfigured: userConfigured,
