@@ -5,6 +5,14 @@ import type { PreviewTarget } from './model';
 
 export interface PreviewScrollPosition {
   scrollTop: number;
+  pdfView?: {
+    source: string;
+    mode: 'width' | 'page' | 'custom';
+    scale: number;
+    scrollLeft: number;
+    naturalWidth: number;
+    aspectRatio: number;
+  };
   messageAnchor?: {
     messageId: string;
     offsetTop: number;
@@ -17,6 +25,25 @@ const registrationByTarget = new Map<
   { canvasId: string; viewKey: string }
 >();
 const referenceCountByViewKey = new Map<string, number>();
+
+export function readPdfPreviewView(
+  viewKey: string | undefined,
+): PreviewScrollPosition['pdfView'] {
+  return viewKey ? scrollPositionByViewKey.get(viewKey)?.pdfView : undefined;
+}
+
+export function rememberPdfPreviewView(
+  viewKey: string | undefined,
+  pdfView: NonNullable<PreviewScrollPosition['pdfView']>,
+): void {
+  if (!viewKey) return;
+  const previous = scrollPositionByViewKey.get(viewKey);
+  scrollPositionByViewKey.set(viewKey, {
+    ...previous,
+    scrollTop: previous?.scrollTop ?? 0,
+    pdfView,
+  });
+}
 
 export function readMessageListScrollBookmark(
   viewKey: string | undefined,

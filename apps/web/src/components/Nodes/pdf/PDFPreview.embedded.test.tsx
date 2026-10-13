@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   page: vi.fn(),
   header: null as HTMLElement | null,
   intersection: null as IntersectionObserverCallback | null,
+  resize: null as ResizeObserverCallback | null,
 }));
 
 vi.mock('react-i18next', () => ({
@@ -71,15 +72,6 @@ vi.mock('../FloatingDragHandle', () => ({
 vi.mock('@/components/Common/Loading', () => ({
   Loading: () => <div data-loading />,
 }));
-vi.mock('@/components/Common/Button', () => ({
-  Button: ({
-    children,
-    onClick,
-  }: {
-    children: ReactNode;
-    onClick?: () => void;
-  }) => <button onClick={onClick}>{children}</button>,
-}));
 vi.mock('react-pdf', () => ({
   Document: (props: DocumentProps) => {
     mocks.document(props);
@@ -111,11 +103,15 @@ let container: HTMLDivElement;
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.intersection = null;
+  mocks.resize = null;
   mocks.header = document.createElement('div');
   document.body.append(mocks.header);
   vi.stubGlobal(
     'ResizeObserver',
     class {
+      constructor(callback: ResizeObserverCallback) {
+        mocks.resize = callback;
+      }
       observe() {}
       disconnect() {}
     },
@@ -147,6 +143,7 @@ function render(
   embedded = true,
   onDoubleClick?: () => void,
   onKeyDown?: KeyboardEventHandler,
+  scrollViewKey?: string,
 ) {
   act(() =>
     root.render(
@@ -157,6 +154,7 @@ function render(
           data={{ src: 'document.pdf' }}
           embedded={embedded}
           interactive={interactive}
+          scrollViewKey={scrollViewKey}
         />
       </div>,
     ),
@@ -168,6 +166,147 @@ function load() {
 }
 
 describe('embedded PDF reader', () => {
+  it('remembers resolved page dimensions so cold remounts do not shift custom zoom', () => {
+    const key = 'node:pdf-preview-test:natural-size';
+    render(true, false, undefined, undefined, key);
+    load();
+    act(() =>
+      mocks.resize?.(
+        [{ contentRect: { width: 612, height: 400 } }] as ResizeObserverEntry[],
+        {} as ResizeObserver,
+      ),
+    );
+    act(() =>
+      mocks.page.mock.lastCall?.[0].onAspectRatioResolved(0, 0.75, 600),
+    );
+    act(() =>
+      mocks.header
+        ?.querySelector<HTMLButtonElement>(
+          'button[aria-label="canvasControls.zoomIn"]',
+        )
+        ?.click(),
+    );
+    const width = container.querySelector<HTMLElement>(
+      '[data-pdf-page-shell="0"]',
+    )?.style.width;
+    expect(width).toBe('762px');
+    act(() => root.render(null));
+    render(true, false, undefined, undefined, key);
+    load();
+    expect(
+      container.querySelector<HTMLElement>('[data-pdf-page-shell="0"]')?.style
+        .width,
+    ).toBe(width);
+  });
+
+  it('places compact zoom in the host header and exposes fit modes only in the percentage menu', async () => {
+    render(true, false);
+    load();
+    act(() =>
+      mocks.resize?.(
+        [{ contentRect: { width: 612, height: 400 } }] as ResizeObserverEntry[],
+        {} as ResizeObserver,
+      ),
+    );
+    const button = (label: string) => {
+      const element = mocks.header?.querySelector<HTMLButtonElement>(
+        `button[aria-label="${label}"]`,
+      );
+      if (!element) throw new Error(`Missing ${label} button`);
+      return element;
+    };
+    const shell = container.querySelector<HTMLElement>(
+      '[data-pdf-page-shell="0"]',
+    );
+    expect(shell?.style.width).toBe('612px');
+    expect(container.querySelector('[role="group"]')).toBeNull();
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    expect(mocks.header?.textContent).not.toContain('node.pdfFitWidth');
+    expect(button('node.pdfZoomMenu').textContent).toBe('100%');
+    act(() => button('canvasControls.zoomIn').click());
+    expect(shell?.style.width).toBe('765px');
+    expect(button('node.pdfZoomMenu').textContent).toBe('125%');
+    await act(async () => button('node.pdfZoomMenu').click());
+    const fitPage = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+    ).find((element) => element.textContent === 'node.pdfFitPage');
+    act(() => fitPage?.click());
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    expect(document.activeElement).toBe(button('node.pdfZoomMenu'));
+    expect(Number.parseFloat(shell?.style.width ?? '')).toBeLessThan(400);
+    expect(
+      container
+        .querySelector('[data-pdf-scroll-viewport]')
+        ?.classList.contains('overflow-x-auto'),
+    ).toBe(true);
+    expect(mocks.registerSearch).toHaveBeenCalled();
+    await act(async () => button('node.pdfZoomMenu').click());
+    const activeMode = document.querySelector(
+      '[role="menuitem"][aria-current="true"]',
+    );
+    expect(activeMode?.textContent).toBe('node.pdfFitPage');
+    const reset = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+    ).find((element) => element.textContent === 'node.pdfResetZoom');
+    act(() => reset?.click());
+    expect(button('node.pdfZoomMenu').textContent).toBe('100%');
+    expect(shell?.style.width).toBe('612px');
+  });
+
+  it('supports keyboard opening, menu navigation and Escape without changing zoom', async () => {
+    render(true, false);
+    load();
+    const trigger = mocks.header?.querySelector<HTMLButtonElement>(
+      'button[aria-label="node.pdfZoomMenu"]',
+    );
+    if (!trigger) throw new Error('Missing zoom menu trigger');
+    act(() => trigger.focus());
+    await act(async () =>
+      trigger.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'ArrowDown',
+          bubbles: true,
+          cancelable: true,
+        }),
+      ),
+    );
+    const items = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+    );
+    expect(items).toHaveLength(3);
+    act(() => items[0].focus());
+    act(() =>
+      items[0].dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'ArrowDown',
+          bubbles: true,
+          cancelable: true,
+        }),
+      ),
+    );
+    expect(document.activeElement).toBe(items[1]);
+    act(() =>
+      items[1].dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'End',
+          bubbles: true,
+          cancelable: true,
+        }),
+      ),
+    );
+    expect(document.activeElement).toBe(items[2]);
+    act(() =>
+      items[2].dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Escape',
+          bubbles: true,
+          cancelable: true,
+        }),
+      ),
+    );
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+  });
+
   it.each([true, false])(
     'claims navigation keys only while embedded reader is interactive: %s',
     (interactive) => {
@@ -326,7 +465,7 @@ describe('embedded PDF reader', () => {
   it('preserves header actions and search integration for expanded previews', () => {
     render(true, false);
     load();
-    expect(mocks.header?.querySelectorAll('button')).toHaveLength(2);
+    expect(mocks.header?.querySelectorAll('button')).toHaveLength(5);
     expect(mocks.registerSearch).toHaveBeenCalled();
     expect(mocks.index).toHaveBeenLastCalledWith(
       expect.objectContaining({ enabled: true }),

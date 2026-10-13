@@ -37,6 +37,7 @@ import {
   findTabByTarget,
   groupOfTab,
 } from '@/store/previewWorkspace/model';
+import { readPdfPreviewView } from '@/store/previewWorkspace/scrollMemory';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 
 import { FloatingDragHandle } from '../FloatingDragHandle';
@@ -48,8 +49,10 @@ import {
 import { PDFPageWithOverlay } from './PDFPageWithOverlay';
 import { findPdfTextMatches } from './pdfTextIndex';
 import { PDF_DOCUMENT_OPTIONS } from './pdfWorker';
+import { PDFZoomControls } from './PDFZoomControls';
 import { usePdfDocumentLifecycle } from './usePdfDocumentLifecycle';
 import { usePdfTextIndex } from './usePdfTextIndex';
+import { usePdfZoom } from './usePdfZoom';
 import { Button } from '../../Common/Button';
 import { Loading } from '../../Common/Loading';
 import { toast } from '../../Common/Toast';
@@ -59,15 +62,6 @@ import type { AreaCapturedEvent, NormalizedRect } from './PDFPageWithOverlay';
 import type { PreviewComponentProps } from '../note/NotePreview';
 import type { PreviewSearchAdapter } from '@/components/Panels/ExpandedNodePanel/PreviewSearchAdapterContext';
 import type { ChatAttachment, PdfHighlight } from '@huabu/shared';
-
-/**
- * When CSS scale-up exceeds this ratio the canvas is re-rendered at the
- * current container width so the PDF stays crisp.  CSS transform bridges
- * the visual gap until the new canvas is ready → no flash.
- */
-const UPSCALE_THRESHOLD = 1.15;
-/** Debounce delay (ms) before committing a high-res re-render. */
-const RERENDER_DEBOUNCE_MS = 400;
 
 type PendingCaptureDrag = {
   /** Text extracted from the captured region (empty string = none found) */
@@ -134,15 +128,28 @@ export const PDFPreview = ({
   >(() => new Set([0]));
   const [pageAspectRatios, setPageAspectRatios] = useState<
     ReadonlyMap<number, number>
-  >(() => new Map());
+  >(() => {
+    const saved = readPdfPreviewView(embedded ? undefined : scrollViewKey);
+    return saved?.source === src
+      ? new Map([[0, saved.aspectRatio]])
+      : new Map();
+  });
+  const [naturalPageWidth, setNaturalPageWidth] = useState(() => {
+    const saved = readPdfPreviewView(embedded ? undefined : scrollViewKey);
+    return saved?.source === src ? saved.naturalWidth : 612;
+  });
   // Reset loading state when the PDF source changes.
   useEffect(() => {
     setLoadError(false);
     setForcedPageIndex(null);
     setVisiblePageIndexes(new Set([0]));
     setRetainedPageIndexes(new Set([0]));
-    setPageAspectRatios(new Map());
-  }, [src]);
+    const saved = readPdfPreviewView(embedded ? undefined : scrollViewKey);
+    setPageAspectRatios(
+      saved?.source === src ? new Map([[0, saved.aspectRatio]]) : new Map(),
+    );
+    setNaturalPageWidth(saved?.source === src ? saved.naturalWidth : 612);
+  }, [src, embedded, scrollViewKey]);
   const [captureMode, setCaptureMode] = useState(false);
   const [highlightMode, setHighlightMode] = useState(false);
   const [pendingCapture, setPendingCapture] =
@@ -166,12 +173,15 @@ export const PDFPreview = ({
     scrollContainerRef,
     embedded ? undefined : scrollViewKey,
   );
-  const [containerWidth, setContainerWidth] = useState<number>(0);
-  // The width at which the PDF canvas is actually rendered.  Starts at 0 and
-  // is updated when the container is first measured *and* whenever the
-  // container grows significantly (debounced) so the canvas stays sharp.
-  const [renderedWidth, setRenderedWidth] = useState<number>(0);
-  const rerenderTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const zoom = usePdfZoom({
+    containerRef: scrollContainerRef,
+    source: src,
+    viewKey: scrollViewKey,
+    embedded,
+    naturalWidth: naturalPageWidth,
+    aspectRatio: pageAspectRatios.get(0) ?? DEFAULT_PDF_PAGE_ASPECT_RATIO,
+  });
+  const { pageWidth, renderedWidth, scaleFactor } = zoom;
 
   useEffect(() => {
     const viewport = scrollContainerRef.current;
@@ -182,19 +192,6 @@ export const PDFPreview = ({
     });
     return () => viewport.removeEventListener('wheel', containNoteWheel, true);
   }, [embedded, interactive]);
-
-  useEffect(() => {
-    const el = scrollContainerRef.current;
-    if (!el) return;
-    const observer = new ResizeObserver(([entry]) => {
-      const available = entry.contentRect.width;
-      if (available > 0) {
-        setContainerWidth(available);
-      }
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
 
   useEffect(() => {
     const root = scrollContainerRef.current;
@@ -227,36 +224,6 @@ export const PDFPreview = ({
       .forEach((page) => observer.observe(page));
     return () => observer.disconnect();
   }, [numPages]);
-
-  // Debounced re-render: when the container is significantly larger than the
-  // rendered canvas, schedule a state update so react-pdf re-renders at full
-  // resolution.  CSS scale bridges the visual gap during the debounce window.
-  useEffect(() => {
-    // First measurement — render immediately without debounce.
-    if (renderedWidth === 0 && containerWidth > 0) {
-      setRenderedWidth(containerWidth);
-      return;
-    }
-
-    if (containerWidth <= 0 || renderedWidth <= 0) return;
-
-    const ratio = containerWidth / renderedWidth;
-    if (ratio > UPSCALE_THRESHOLD) {
-      // Clear any pending timer and schedule a new one
-      if (rerenderTimerRef.current) clearTimeout(rerenderTimerRef.current);
-      rerenderTimerRef.current = setTimeout(() => {
-        setRenderedWidth(containerWidth);
-        rerenderTimerRef.current = null;
-      }, RERENDER_DEBOUNCE_MS);
-    }
-
-    return () => {
-      if (rerenderTimerRef.current) {
-        clearTimeout(rerenderTimerRef.current);
-        rerenderTimerRef.current = null;
-      }
-    };
-  }, [containerWidth, renderedWidth]);
 
   // Dismiss the floating drag handle on scroll
   useEffect(() => {
@@ -399,16 +366,9 @@ export const PDFPreview = ({
     return () => el.removeEventListener('mouseup', handleMouseUp);
   }, [highlightMode, onDataChange]);
 
-  // CSS transform scales the already-rendered canvas in real-time.
-  // Once the debounced re-render fires, scaleFactor returns to ~1 and the
-  // canvas is at native resolution again → no visual jump.
-  const scaleFactor =
-    renderedWidth > 0 && containerWidth > 0
-      ? containerWidth / renderedWidth
-      : 1;
-
   const handlePageAspectRatioResolved = useCallback(
-    (pageIndex: number, aspectRatio: number) => {
+    (pageIndex: number, aspectRatio: number, naturalWidth?: number) => {
+      if (pageIndex === 0 && naturalWidth) setNaturalPageWidth(naturalWidth);
       setPageAspectRatios((current) => {
         if (current.get(pageIndex) === aspectRatio) return current;
         const next = new Map(current);
@@ -617,7 +577,7 @@ export const PDFPreview = ({
   );
 
   // Host header slot — rendered by `ExpandedNodePanel`. When present
-  // we portal the capture / highlight toggles into the shared header
+  // we portal zoom / capture / highlight controls into the shared header
   // (same pattern as NotePreview / WebPreview / OfficePreview) so they
   // sit next to the universal Split view / Close buttons instead of
   // floating over the PDF content. In surfaces that don't provide a
@@ -626,6 +586,11 @@ export const PDFPreview = ({
   const { el: headerSlotEl } = usePreviewHeaderSlot();
   const headerActions = (
     <>
+      <PDFZoomControls zoom={zoom} disabled={!docLoaded} />
+      <div
+        aria-hidden="true"
+        className="bg-edge-default mx-1 h-4 w-px shrink-0"
+      />
       <PreviewHeaderButton
         title={t('node.selectArea')}
         aria-label={t('node.selectAreaToCapture')}
@@ -696,16 +661,15 @@ export const PDFPreview = ({
         // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- The selected document viewport supports native keyboard scrolling.
         tabIndex={embedded && interactive ? 0 : undefined}
         className={clsx(
-          'bg-surface min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-1',
+          'bg-surface min-h-0 flex-1 overflow-x-auto overflow-y-auto p-1',
           embedded && interactive && 'overscroll-contain',
         )}
       >
         {src ? (
           <div
             style={{
-              transformOrigin: 'top left',
-              transform: `scale(${scaleFactor})`,
-              width: renderedWidth > 0 ? renderedWidth : undefined,
+              width: pageWidth > 0 ? pageWidth : undefined,
+              minWidth: '100%',
             }}
           >
             <Document
@@ -737,8 +701,9 @@ export const PDFPreview = ({
                 <div
                   key={`page_${index + 1}`}
                   data-pdf-page-shell={index}
-                  className="bg-bg-default w-full"
+                  className="bg-bg-default shrink-0 overflow-hidden"
                   style={{
+                    width: pageWidth > 0 ? pageWidth : '100%',
                     aspectRatio:
                       pageAspectRatios.get(index) ??
                       pageAspectRatios.get(0) ??
@@ -748,22 +713,32 @@ export const PDFPreview = ({
                   {visiblePageIndexes.has(index) ||
                   retainedPageIndexes.has(index) ||
                   forcedPageIndex === index ? (
-                    <PDFPageWithOverlay
-                      pageNumber={index + 1}
-                      pageIndex={index}
-                      pageWidth={renderedWidth > 0 ? renderedWidth : undefined}
-                      captureEnabled={!embedded && captureMode}
-                      onAreaCaptured={handleAreaCaptured}
-                      persistedRect={
-                        pendingCapture && pendingCapture.pageIndex === index
-                          ? pendingCapture.captureRect
-                          : undefined
-                      }
-                      highlights={highlights.filter(
-                        (h) => h.pageIndex === index,
-                      )}
-                      onAspectRatioResolved={handlePageAspectRatioResolved}
-                    />
+                    <div
+                      style={{
+                        width: renderedWidth > 0 ? renderedWidth : undefined,
+                        transformOrigin: 'top left',
+                        transform: `scale(${scaleFactor})`,
+                      }}
+                    >
+                      <PDFPageWithOverlay
+                        pageNumber={index + 1}
+                        pageIndex={index}
+                        pageWidth={
+                          renderedWidth > 0 ? renderedWidth : undefined
+                        }
+                        captureEnabled={!embedded && captureMode}
+                        onAreaCaptured={handleAreaCaptured}
+                        persistedRect={
+                          pendingCapture && pendingCapture.pageIndex === index
+                            ? pendingCapture.captureRect
+                            : undefined
+                        }
+                        highlights={highlights.filter(
+                          (h) => h.pageIndex === index,
+                        )}
+                        onAspectRatioResolved={handlePageAspectRatioResolved}
+                      />
+                    </div>
                   ) : null}
                 </div>
               ))}

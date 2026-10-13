@@ -64,7 +64,11 @@ type PDFPageWithOverlayProps = {
   persistedRect?: NormalizedRect;
   /** Persistent highlights to render on this page. */
   highlights?: PdfHighlight[];
-  onAspectRatioResolved?: (pageIndex: number, aspectRatio: number) => void;
+  onAspectRatioResolved?: (
+    pageIndex: number,
+    aspectRatio: number,
+    naturalWidth?: number,
+  ) => void;
 };
 
 export const PDFPageWithOverlay = ({
@@ -280,7 +284,11 @@ export const PDFPageWithOverlay = ({
         onLoadSuccess={(page) => {
           pageProxyRef.current = page as unknown as PdfPageProxy;
           const viewport = page.getViewport({ scale: 1 });
-          onAspectRatioResolved?.(pageIndex, viewport.width / viewport.height);
+          onAspectRatioResolved?.(
+            pageIndex,
+            viewport.width / viewport.height,
+            viewport.width,
+          );
         }}
         onRenderSuccess={(p) => {
           pageProxyRef.current = p as unknown as PdfPageProxy;
