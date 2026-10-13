@@ -14,8 +14,10 @@ import { useTranslation } from 'react-i18next';
 
 import { partIsExecuting, truncate, type ToolPart } from './helpers';
 import { ToolKindIcon } from './ToolKindIcon';
+import { Button } from '../../../Common/Button';
 import { Loading } from '../../../Common/Loading';
 import { NodeRef } from '../../../Common/NodeRef';
+import { ASSISTANT_ROW_CLASS_NAME } from '../../AssistantDisclosure';
 
 import type { AgentToolPart } from '@huabu/shared';
 
@@ -127,9 +129,11 @@ function callSummary(
 export function MergedAgentToolRow({
   tool,
   entries,
+  showIcon = false,
 }: {
   tool: string;
   entries: ToolPart<AgentToolPart>[];
+  showIcon?: boolean;
 }) {
   const { t } = useTranslation();
   const [isExpanded, setIsExpanded] = useState(false);
@@ -425,17 +429,28 @@ export function MergedAgentToolRow({
     return { title: tool, nodeRefs: emptyRefs };
   }, [tool, entries, count, t]);
 
-  const statusIcon = isExecuting ? (
-    <Loading layout="inline" size="xs" className="text-info" />
-  ) : isError ? (
-    <XIcon size={12} className="text-danger" />
-  ) : (
-    <Check size={12} className="text-fg-muted" />
-  );
-
-  // Derive the icon from the first part — all parts in a merged row
-  // share the same toolName by construction.
   const iconPart = entries[0]?.part;
+  const statusIcon =
+    isExecuting || isError || showIcon ? (
+      <span
+        className={
+          showIcon
+            ? 'flex shrink-0 items-center gap-1.5'
+            : 'absolute top-1/2 left-0 flex size-3 -translate-y-1/2 items-center justify-center'
+        }
+      >
+        {isExecuting ? (
+          <Loading layout="inline" size="xs" className="text-info" />
+        ) : isError ? (
+          <XIcon size={12} className="text-danger" />
+        ) : (
+          <Check size={12} className="text-fg-muted" />
+        )}
+        {showIcon && iconPart ? (
+          <ToolKindIcon part={iconPart} className="text-fg-muted/60" />
+        ) : null}
+      </span>
+    ) : null;
 
   // Single inspect_nodes call that matched a single node → inline badge
   if (
@@ -447,11 +462,10 @@ export function MergedAgentToolRow({
     return (
       <div className="flex justify-start">
         <div className="w-full">
-          <div className="text-fg-muted hover:bg-hover flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs transition-colors">
+          <div
+            className={`${ASSISTANT_ROW_CLASS_NAME} hover:bg-hover flex items-center gap-1.5 rounded-md text-left transition-colors`}
+          >
             {statusIcon}
-            {iconPart && (
-              <ToolKindIcon part={iconPart} className="text-fg-muted/60" />
-            )}
             <span className="flex-1 truncate">
               {t('messages.inspected')}{' '}
               <NodeRef
@@ -472,11 +486,10 @@ export function MergedAgentToolRow({
     return (
       <div className="flex justify-start">
         <div className="w-full">
-          <div className="text-fg-muted hover:bg-hover flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs transition-colors">
+          <div
+            className={`${ASSISTANT_ROW_CLASS_NAME} hover:bg-hover flex items-center gap-1.5 rounded-md text-left transition-colors`}
+          >
             {statusIcon}
-            {iconPart && (
-              <ToolKindIcon part={iconPart} className="text-fg-muted/60" />
-            )}
             <span className="flex-1 truncate">
               {t('messages.read')}{' '}
               {entry.ok && entry.nodeId ? (
@@ -513,11 +526,10 @@ export function MergedAgentToolRow({
     return (
       <div className="flex justify-start">
         <div className="w-full">
-          <div className="text-fg-muted hover:bg-hover flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs transition-colors">
+          <div
+            className={`${ASSISTANT_ROW_CLASS_NAME} hover:bg-hover flex items-center gap-1.5 rounded-md text-left transition-colors`}
+          >
             {statusIcon}
-            {iconPart && (
-              <ToolKindIcon part={iconPart} className="text-fg-muted/60" />
-            )}
             <span className="flex-1 truncate">{title}</span>
           </div>
         </div>
@@ -529,22 +541,23 @@ export function MergedAgentToolRow({
   return (
     <div className="flex justify-start">
       <div className="w-full">
-        <div className="text-fg-muted hover:bg-hover flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors">
+        <div
+          className={`${ASSISTANT_ROW_CLASS_NAME} hover:bg-hover flex items-center gap-1.5 rounded-md text-left transition-colors`}
+        >
           {statusIcon}
-          {iconPart && (
-            <ToolKindIcon part={iconPart} className="text-fg-muted/60" />
-          )}
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-expanded={isExpanded}
             onClick={() => setIsExpanded(!isExpanded)}
-            className="flex flex-1 items-center gap-1 truncate text-left"
+            className="min-w-0 flex-1 justify-start rounded-none p-0 text-left font-normal"
           >
-            <span>{title}</span>
+            <span className="min-w-0 truncate">{title}</span>
             <ChevronRight
               size={10}
               className={`text-fg-muted/50 shrink-0 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
             />
-          </button>
+          </Button>
         </div>
         {isExpanded && (
           <div className="border-edge-default/40 ml-4 flex flex-col gap-1 border-l py-1 pl-3">

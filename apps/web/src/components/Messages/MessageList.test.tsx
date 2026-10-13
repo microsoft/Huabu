@@ -29,8 +29,10 @@ vi.mock('./AIMessage', async () => {
   return {
     AIMessage: memo(function MockAIMessage({
       messageId,
+      endStatus,
     }: {
       messageId: string;
+      endStatus?: 'interrupted' | 'error';
     }) {
       renderCounts.assistant.set(
         messageId,
@@ -39,7 +41,9 @@ vi.mock('./AIMessage', async () => {
       useEffect(() => {
         renderCounts.assistantEffects.push(messageId);
       }, [messageId]);
-      return <div data-assistant-message={messageId} />;
+      return (
+        <div data-assistant-message={messageId} data-end-status={endStatus} />
+      );
     }),
   };
 });
@@ -805,6 +809,40 @@ describe('MessageList bottom navigation', () => {
 });
 
 describe('MessageList render isolation', () => {
+  it.each(['interrupted', 'error'] as const)(
+    'forwards %s only to the immediately preceding assistant message',
+    (status) => {
+      mount(
+        <MessageList
+          messages={[
+            { id: 'user-1', role: 'user', content: 'First request' },
+            { id: 'earlier', role: 'assistant', segments: [] },
+            { id: 'stopped', role: 'assistant', segments: [] },
+            { id: 'status-1', role: 'status', status },
+            { id: 'user-2', role: 'user', content: 'Next request' },
+            { id: 'next', role: 'assistant', segments: [] },
+          ]}
+          isLoading={false}
+        />,
+      );
+      expect(
+        container
+          ?.querySelector('[data-assistant-message="stopped"]')
+          ?.getAttribute('data-end-status'),
+      ).toBe(status);
+      expect(
+        container
+          ?.querySelector('[data-assistant-message="earlier"]')
+          ?.hasAttribute('data-end-status'),
+      ).toBe(false);
+      expect(
+        container
+          ?.querySelector('[data-assistant-message="next"]')
+          ?.hasAttribute('data-end-status'),
+      ).toBe(false);
+    },
+  );
+
   it('forwards the persisted input kind to user-message rendering', () => {
     mount(
       <MessageList

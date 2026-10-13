@@ -1,13 +1,18 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { Copy } from 'lucide-react';
-import { memo } from 'react';
+import { Copy, Loader2 } from 'lucide-react';
+import { memo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import {
-  groupByThinkingPhase,
+  groupByActivity,
+  describeActivity,
+  getActivityStatus,
   projectTaskCompleteResults,
+  type ActivitySummary,
+  type ActivityEndStatus,
+  type ActivityStatus,
   type SegmentGroup,
 } from './groupParts';
 import { MilkdownMessageCard } from './MilkdownMessageCard';
@@ -30,27 +35,24 @@ import {
 import { copyToClipboard } from '../../../utils/io/clipboard';
 import { Button } from '../../Common/Button';
 import { ThinkingIndicator } from '../../Common/ThinkingIndicator';
+import { AssistantDisclosure } from '../AssistantDisclosure';
 
 interface AIMessageProps {
   messageId: string;
   segments: AssistantSegment[];
   isStreaming?: boolean;
+  endStatus?: ActivityEndStatus;
   hideActions?: boolean;
   enableComments?: boolean;
 }
 
 const NoteIcon = NODE_ICON.note;
 
-/**
- * Render one `tool-group` from `groupAdjacentToolParts`. Extracted
- * so both the phase body (tool calls under a thinking) and the
- * loose-group path (legacy: no thinking opened a phase) share the
- * exact same dispatch.
- */
 function renderToolGroup(
   group: Extract<SegmentGroup, { kind: 'tool-group' }>,
   messageId: string,
   key: string,
+  showIcon = false,
 ): React.ReactNode {
   switch (group.variant) {
     case 'space_commands':
@@ -99,23 +101,94 @@ function renderToolGroup(
           key={key}
           tool={group.toolName}
           entries={group.parts.map((p) => ({ messageId, part: p }))}
+          showIcon={showIcon}
         />
       );
     case 'generic':
       return (
         <div key={key} className="flex flex-col gap-1">
           {group.parts.map((p) => (
-            <ToolCallCard key={p.toolCallId} part={p} />
+            <ToolCallCard key={p.toolCallId} part={p} showIcon={showIcon} />
           ))}
         </div>
       );
   }
 }
 
+function ActivityDisclosure({
+  status,
+  summary,
+  variant = 'activity',
+  children,
+}: {
+  status: ActivityStatus;
+  summary: ActivitySummary;
+  variant?: 'activity' | 'tools' | 'inline-tools';
+  children: ReactNode;
+}) {
+  const { t } = useTranslation();
+  const [userCollapsed, setUserCollapsed] = useState<boolean | null>(null);
+  const active = status === 'running';
+  const grouped = variant !== 'inline-tools' && summary.visibleGroupCount > 1;
+  const steps = t(
+    variant !== 'activity'
+      ? 'messages.activityToolCalls'
+      : status === 'completed'
+        ? 'messages.activityCompletedSteps'
+        : status === 'interrupted'
+          ? 'messages.activityInterruptedSteps'
+          : status === 'error'
+            ? 'messages.activityErrorSteps'
+            : 'messages.activitySteps',
+    { count: summary.stepCount },
+  );
+  const title = active
+    ? variant === 'activity'
+      ? `${t('messages.activityRunning')} · ${steps}`
+      : steps
+    : summary.changedFileCount > 0
+      ? `${t('messages.activityFilesChanged', { count: summary.changedFileCount })} · ${steps}`
+      : steps;
+
+  return (
+    <div
+      data-assistant-activity={
+        grouped && variant === 'activity' ? '' : undefined
+      }
+      data-assistant-tools={grouped && variant === 'tools' ? '' : undefined}
+      data-activity-running={active}
+    >
+      <AssistantDisclosure
+        icon={
+          active && variant === 'activity' ? (
+            <Loader2 size={12} className="motion-safe:animate-spin" />
+          ) : null
+        }
+        title={title}
+        showHeader={grouped}
+        collapsed={userCollapsed ?? !active}
+        onCollapsedChange={setUserCollapsed}
+        bodyClassName={
+          grouped ? 'border-edge-default/40 ml-2 border-l pl-3' : ''
+        }
+      >
+        <div
+          className="flex flex-col gap-1"
+          onPointerDownCapture={() => setUserCollapsed(false)}
+          onFocusCapture={() => setUserCollapsed(false)}
+        >
+          {children}
+        </div>
+      </AssistantDisclosure>
+    </div>
+  );
+}
+
 export const AIMessage = memo(function AIMessage({
   messageId,
   segments,
   isStreaming,
+  endStatus,
   hideActions,
   enableComments = false,
 }: AIMessageProps) {
@@ -127,29 +200,25 @@ export const AIMessage = memo(function AIMessage({
   // is internal reasoning and shouldn't bleed into derived artifacts.
   const displaySegments = projectTaskCompleteResults(segments);
   const plainText = assistantMessageText(displaySegments);
-  const lastIdx = displaySegments.length - 1;
-
-  // Phase-group adjacent thinking + tool runs so each "agent intent"
-  // becomes one collapsible card. Falls back to loose entries for
-  // segments that don't belong to any phase (e.g. text segments or
-  // tool calls that arrived before the first thinking).
-  const phases = groupByThinkingPhase(displaySegments);
-
-  // Show the "still generating" shimmer at the tail of a streaming
-  // turn. This is distinct from `ThinkingCard` (which renders the
-  // reasoning content): the indicator signals that more output is on
-  // the way. Suppressed when the trailing segment is a streaming
-  // thinking card, since that card already shows its own "Thinking…"
-  // label + spinner and a second one would be redundant. An unresolved
-  // permission also suppresses it because the agent is blocked on the user.
-  const lastSeg = displaySegments[lastIdx];
+  const groups = groupByActivity(displaySegments).map((entry) =>
+    entry.kind === 'activity'
+      ? { ...entry, ...describeActivity(entry.groups) }
+      : entry,
+  );
   const isAwaitingPermission = displaySegments.some(
     (segment) => segment.kind === 'permission' && !segment.resolution,
   );
+  const lastSegment = displaySegments.at(-1);
+  const terminalStatus =
+    endStatus ??
+    (lastSegment?.kind === 'status' ? lastSegment.status : undefined);
+  const lastGroup = groups.at(-1);
   const showStreamingIndicator =
     isStreaming &&
+    !terminalStatus &&
     !isAwaitingPermission &&
-    !(lastSeg && lastSeg.kind === 'thinking');
+    (lastGroup?.kind !== 'activity' ||
+      lastGroup.summary.visibleGroupCount <= 1);
   const showMessageActions =
     !isStreaming &&
     !isAwaitingPermission &&
@@ -159,57 +228,75 @@ export const AIMessage = memo(function AIMessage({
   return (
     <div className="flex justify-start">
       <div className="flex w-full flex-col gap-1">
-        {phases.map((entry, eIdx) => {
-          if (entry.kind === 'phase') {
-            // A phase with zero tool groups is just a bare thinking
-            // segment — render without children so there's no empty
-            // "expand to see tools" affordance.
-            if (entry.toolGroups.length === 0) {
-              const segStreaming =
-                isStreaming &&
-                displaySegments.indexOf(entry.thinking) === lastIdx;
-              return (
-                <ThinkingCard
-                  key={`p${eIdx}`}
-                  text={entry.thinking.text}
-                  isStreaming={segStreaming}
-                />
-              );
-            }
+        {groups.map((entry, groupIndex) => {
+          if (entry.kind === 'activity') {
+            const showChildIcons = entry.summary.visibleGroupCount > 1;
+            const status = getActivityStatus(groups[groupIndex + 1], {
+              isStreaming: Boolean(isStreaming),
+              endStatus: terminalStatus,
+              isAwaitingPermission,
+            });
+            const { details } = entry;
+            const hasThinking = details.some(
+              (detail) => detail.kind === 'thinking',
+            );
             return (
-              <ThinkingCard
-                key={`p${eIdx}`}
-                text={entry.thinking.text}
-                closed={entry.closed}
-                isStreaming={isStreaming}
+              <ActivityDisclosure
+                key={entry.startIndex}
+                summary={entry.summary}
+                status={status}
               >
-                {entry.toolGroups.map((g, gIdx) =>
-                  renderToolGroup(g, messageId, `p${eIdx}-g${gIdx}`),
+                {details.map((detail, index) =>
+                  detail.kind === 'thinking' ? (
+                    <ThinkingCard
+                      key={detail.startIndex}
+                      plainText={detail.plainText}
+                      inActivity={showChildIcons}
+                    />
+                  ) : (
+                    <ActivityDisclosure
+                      key={detail.startIndex}
+                      variant={hasThinking ? 'tools' : 'inline-tools'}
+                      summary={detail.summary}
+                      status={
+                        index === details.length - 1 ? status : 'completed'
+                      }
+                    >
+                      {detail.groups.map((group, toolIndex) =>
+                        renderToolGroup(
+                          group,
+                          messageId,
+                          `tool-${toolIndex}`,
+                          showChildIcons,
+                        ),
+                      )}
+                    </ActivityDisclosure>
+                  ),
                 )}
-              </ThinkingCard>
+              </ActivityDisclosure>
             );
           }
 
           const group = entry.group;
+          const idx = entry.startIndex;
           if (group.kind === 'tool-group') {
-            return renderToolGroup(group, messageId, `l${eIdx}`);
+            return renderToolGroup(group, messageId, `content-${idx}`);
           }
 
           const seg = group.segment;
-          const idx = displaySegments.indexOf(seg);
 
           if (seg.kind === 'plan') {
-            return <PlanCard key={`l${eIdx}`} entries={seg.entries} />;
+            return <PlanCard key={idx} entries={seg.entries} />;
           }
 
           if (seg.kind === 'permission') {
-            return <PermissionCard key={`l${eIdx}`} part={seg} />;
+            return <PermissionCard key={idx} part={seg} />;
           }
 
           if (seg.kind === 'status') {
             return (
               <div
-                key={`l${eIdx}`}
+                key={idx}
                 className="text-fg-subtle ml-1 px-4 text-xs italic"
               >
                 {seg.detail ?? seg.status}
@@ -217,27 +304,10 @@ export const AIMessage = memo(function AIMessage({
             );
           }
 
-          // Loose thinking segments (no following tool runs in their
-          // own phase) take the simple `ThinkingCard` path. This
-          // branch only fires for thinking segments that weren't
-          // absorbed by `groupByThinkingPhase` — currently
-          // unreachable (every thinking opens a phase), but kept for
-          // type-exhaustiveness.
-          if (seg.kind === 'thinking') {
-            const segStreaming = isStreaming && idx === lastIdx;
-            return (
-              <ThinkingCard
-                key={`l${eIdx}`}
-                text={seg.text}
-                isStreaming={segStreaming}
-              />
-            );
-          }
-
           // text segment
           return (
             <div
-              key={`l${eIdx}`}
+              key={idx}
               className="text-fg-default bg-surface ml-1 rounded-2xl border border-none px-4 text-sm"
             >
               <div className="leading-relaxed">

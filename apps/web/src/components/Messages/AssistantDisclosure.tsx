@@ -10,22 +10,26 @@
  *   - the same 12 × 12 leading-icon slot, so titles align across cards
  *     regardless of whether the consumer passes a small dot, a
  *     `Loader2`, or a full lucide icon;
- *   - the same chevron treatment (10 px, rotates 90° when expanded);
+ *   - the same chevron treatment (rotates 90° when expanded);
  *   - the same hover / spacing / typography (`text-xs`, `py-0.5`,
  *     `gap-1.5`, `text-fg-muted` …);
  *   - the same click-to-toggle behaviour, including the "no body →
  *     render as a non-interactive row (no chevron, no button)" rule.
  *
  * Consumers stay declarative: pass `icon`, `title`, optional `trailing`
- * (extra controls rendered after the chevron — used by
- * `SpaceCommandCard`'s revert/keep buttons), and `children` for the
+ * (extra controls rendered after the chevron), and `children` for the
  * expanded body. Body styling is configurable via `bodyClassName` so
  * the few cards that want a left rule / different indent can opt in
  * without forking the shell.
  */
 
 import { ChevronRight } from 'lucide-react';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+
+import { Button } from '../Common/Button';
+
+export const ASSISTANT_ROW_CLASS_NAME =
+  'text-fg-muted relative ml-1 px-4 py-0.5 text-xs';
 
 interface AssistantDisclosureProps {
   /**
@@ -56,6 +60,11 @@ interface AssistantDisclosureProps {
   children?: ReactNode;
   /** Initial collapsed state. Defaults to `true`. */
   defaultCollapsed?: boolean;
+  /** Controlled state for a caller-owned expansion policy. */
+  collapsed?: boolean;
+  onCollapsedChange?: (collapsed: boolean) => void;
+  /** Show only the body without remounting it when a summary becomes necessary. */
+  showHeader?: boolean;
   /**
    * When this prop transitions from `false` → `true`, the disclosure
    * auto-collapses. The user can still re-expand manually afterwards.
@@ -74,10 +83,15 @@ export function AssistantDisclosure({
   trailing,
   children,
   defaultCollapsed = true,
+  collapsed,
+  onCollapsedChange,
+  showHeader = true,
   collapseSignal,
   bodyClassName = '',
 }: AssistantDisclosureProps) {
-  const [isCollapsed, setIsCollapsed] = useState(defaultCollapsed);
+  const [internalCollapsed, setInternalCollapsed] = useState(defaultCollapsed);
+  const isCollapsed = collapsed ?? internalCollapsed;
+  const bodyId = useId();
 
   // Auto-collapse once when collapseSignal transitions false → true (e.g. a
   // tool card that was open while executing and should fold on completion).
@@ -86,19 +100,19 @@ export function AssistantDisclosure({
   const prevCollapseRef = useRef(collapseSignal);
   useEffect(() => {
     if (collapseSignal && !prevCollapseRef.current) {
-      setIsCollapsed(true);
+      setInternalCollapsed(true);
     }
     prevCollapseRef.current = collapseSignal;
   }, [collapseSignal]);
   const expandable = children !== undefined && children !== null;
 
-  const iconSlot = (
-    <span className="flex size-3 shrink-0 items-center justify-center">
+  const iconSlot = icon ? (
+    <span className="absolute top-1/2 left-0 flex size-3 -translate-y-1/2 items-center justify-center">
       {icon}
     </span>
-  );
+  ) : null;
   const titleText = (
-    <span className="min-w-0 flex-1 truncate" title={titleTooltip}>
+    <span className="min-w-0 truncate" title={titleTooltip}>
       {title}
     </span>
   );
@@ -114,27 +128,42 @@ export function AssistantDisclosure({
   return (
     <div className="flex justify-start">
       <div className="w-full min-w-0">
-        <div className="text-fg-muted hover:bg-hover flex w-full items-center gap-1.5 rounded-md px-2 py-0.5 text-xs transition-colors">
-          {expandable ? (
-            <button
-              type="button"
-              onClick={() => setIsCollapsed((prev) => !prev)}
-              className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
-            >
-              {iconSlot}
-              {titleText}
-              {chevron}
-            </button>
-          ) : (
-            <div className="flex min-w-0 flex-1 items-center gap-1.5">
-              {iconSlot}
-              {titleText}
-            </div>
-          )}
-          {trailing}
-        </div>
-        {expandable && !isCollapsed && (
-          <div className={`text-fg-muted mt-1 text-xs ${bodyClassName}`}>
+        {showHeader && (
+          <div
+            className={`${ASSISTANT_ROW_CLASS_NAME} hover:bg-hover flex items-center gap-1.5 rounded-md transition-colors`}
+          >
+            {expandable ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-expanded={!isCollapsed}
+                aria-controls={bodyId}
+                onClick={() => {
+                  if (collapsed === undefined) {
+                    setInternalCollapsed(!isCollapsed);
+                  }
+                  onCollapsedChange?.(!isCollapsed);
+                }}
+                className="focus-visible:outline-info min-w-0 flex-1 justify-start rounded-none p-0 text-left font-normal focus-visible:outline-1"
+              >
+                {iconSlot}
+                {titleText}
+                {chevron}
+              </Button>
+            ) : (
+              <div className="flex min-w-0 flex-1 items-center gap-1.5">
+                {iconSlot}
+                {titleText}
+              </div>
+            )}
+            {trailing}
+          </div>
+        )}
+        {expandable && (!showHeader || !isCollapsed) && (
+          <div
+            id={bodyId}
+            className={`text-fg-muted text-xs ${showHeader ? 'mt-1' : ''} ${bodyClassName}`}
+          >
             {children}
           </div>
         )}

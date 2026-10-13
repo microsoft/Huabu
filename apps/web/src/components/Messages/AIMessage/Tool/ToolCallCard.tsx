@@ -35,6 +35,7 @@ import type {
 
 interface ToolCallCardProps {
   part: GenericToolPart;
+  showIcon?: boolean;
 }
 
 function renderContentBlock(
@@ -98,7 +99,7 @@ function blockText(wrap: AcpToolCallContent): string | undefined {
   return undefined;
 }
 
-export function ToolCallCard({ part }: ToolCallCardProps) {
+export function ToolCallCard({ part, showIcon = false }: ToolCallCardProps) {
   const hasContent = (part.content?.length ?? 0) > 0;
   const hasLocations = (part.locations?.length ?? 0) > 0;
   const hasCommand = !!part.command;
@@ -149,9 +150,9 @@ export function ToolCallCard({ part }: ToolCallCardProps) {
   const icon =
     part.status === 'failed' ? (
       <XIcon size={12} className="text-danger" />
-    ) : (
+    ) : showIcon ? (
       <ToolKindIcon part={part} className="text-fg-muted/60" />
-    );
+    ) : null;
 
   const body = isExpandable ? (
     <>

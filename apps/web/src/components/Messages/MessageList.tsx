@@ -667,12 +667,18 @@ export const MessageList = memo(function MessageList({
               }
 
               if (msg.role === 'assistant') {
+                const nextMessage = messages[i + 1];
                 elements.push(
                   <div key={msg.id} data-chat-message-id={msg.id}>
                     <AIMessage
                       messageId={msg.id}
                       segments={msg.segments}
                       isStreaming={msg.id === streamingAssistantId}
+                      endStatus={
+                        nextMessage?.role === 'status'
+                          ? nextMessage.status
+                          : undefined
+                      }
                       hideActions={hideAIActions}
                       enableComments={isActive && !isHistoryLoading}
                     />

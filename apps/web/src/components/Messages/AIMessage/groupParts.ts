@@ -18,10 +18,11 @@
  * Non-tool segments (text/thinking/plan/status) become singleton
  * groups so the dispatch in `AIMessage` only iterates once.
  *
- * Higher-level phase grouping (a `thinking` followed by its tool
- * runs) lives in {@link groupByThinkingPhase} so this primitive
+ * Higher-level activity grouping lives in {@link groupByActivity} so this primitive
  * stays focused on tool-call coalescing.
  */
+
+import { stripMarkdown } from '@huabu/shared/canvas-engine';
 
 import type { AssistantSegment } from '../../../store/chatTypes';
 import type {
@@ -196,87 +197,193 @@ export function groupAdjacentToolParts(
   return groups;
 }
 
-/**
- * A "thinking phase" — a thinking segment together with all the
- * tool runs that immediately follow it. Models the typical agent
- * loop "say what I'm about to do → do it (tool calls) → ...".
- *
- * Phase boundary rules:
- *  - A `thinking` segment OPENS a phase.
- *  - A phase swallows trailing `tool-group` entries until either:
- *      • another `thinking` arrives → that thinking opens a new
- *        phase, the previous phase is "closed" (auto-collapses);
- *      • any non-tool, non-thinking segment arrives (text, plan,
- *        permission, status) → the phase closes BEFORE that
- *        segment, which then renders as its own loose group.
- *  - Tool groups / loose segments that appear BEFORE any thinking
- *    in the message render as their own loose entries with no
- *    surrounding phase — preserves backward-compat for agents that
- *    never emit thinking chunks.
- *  - A text segment projected from `task_complete` closes the phase by
- *    the same ordinary non-tool boundary rule as any final answer.
- *
- * A phase is "closed" iff another phase or any loose segment exists
- * after it in the same message. Callers use `closed` to drive the
- * auto-collapse signal: while the latest phase is still the tail of
- * the message, its body stays visible.
- */
-export type ThinkingPhase = {
-  kind: 'phase';
-  thinking: Extract<AssistantSegment, { kind: 'thinking' }>;
-  toolGroups: Extract<SegmentGroup, { kind: 'tool-group' }>[];
-  /** True once another phase or loose segment follows it. */
-  closed: boolean;
-};
+export type ActivityOrContent =
+  | { kind: 'activity'; startIndex: number; groups: SegmentGroup[] }
+  | {
+      kind: 'content';
+      startIndex: number;
+      group:
+        | Extract<SegmentGroup, { kind: 'tool-group' }>
+        | {
+            kind: 'segment';
+            segment: Exclude<AssistantSegment, { kind: 'tool' | 'thinking' }>;
+          };
+    };
 
-export type PhaseOrLoose =
-  | ThinkingPhase
-  | { kind: 'loose'; group: SegmentGroup };
+export type ActivityDetail =
+  | { kind: 'thinking'; startIndex: number; plainText: string }
+  | {
+      kind: 'tools';
+      startIndex: number;
+      groups: Extract<SegmentGroup, { kind: 'tool-group' }>[];
+      summary: ActivitySummary;
+    };
 
-/**
- * Pure helper. Wraps {@link groupAdjacentToolParts}'s output into a
- * phase list. See {@link ThinkingPhase} for the boundary rules.
- */
-export function groupByThinkingPhase(
-  segments: AssistantSegment[],
-): PhaseOrLoose[] {
-  const groups = groupAdjacentToolParts(segments);
-  const out: PhaseOrLoose[] = [];
-  let current: ThinkingPhase | null = null;
+export interface ActivitySummary {
+  visibleGroupCount: number;
+  stepCount: number;
+  changedFileCount: number;
+}
 
-  for (const g of groups) {
-    if (g.kind === 'segment' && g.segment.kind === 'thinking') {
-      if (current) out.push(current);
-      current = {
-        kind: 'phase',
-        thinking: g.segment,
-        toolGroups: [],
-        closed: false,
-      };
-      continue;
+export type ActivityStatus =
+  | 'running'
+  | 'completed'
+  | 'waiting'
+  | 'interrupted'
+  | 'error';
+export type ActivityEndStatus = Extract<
+  ActivityStatus,
+  'interrupted' | 'error'
+>;
+
+export function getActivityStatus(
+  next: ActivityOrContent | undefined,
+  context: {
+    isStreaming: boolean;
+    endStatus?: ActivityEndStatus;
+    isAwaitingPermission: boolean;
+  },
+): ActivityStatus {
+  if (next) {
+    if (next.kind === 'content' && next.group.kind === 'segment') {
+      const segment = next.group.segment;
+      if (segment.kind === 'status') return segment.status;
+      if (segment.kind === 'permission' && !segment.resolution) {
+        return context.endStatus ?? 'waiting';
+      }
     }
-    if (g.kind === 'tool-group' && current) {
-      current.toolGroups.push(g);
-      continue;
-    }
-    // Non-tool, non-thinking segment (text, plan, permission,
-    // status) closes the open phase before rendering as a loose entry.
-    if (current) {
-      current.closed = true;
-      out.push(current);
-      current = null;
-    }
-    out.push({ kind: 'loose', group: g });
+    return 'completed';
   }
-  if (current) out.push(current);
+  if (context.endStatus) return context.endStatus;
+  if (context.isAwaitingPermission) return 'waiting';
+  return context.isStreaming ? 'running' : 'completed';
+}
 
-  // A trailing phase is "closed" only if anything followed it; the
-  // construction above already enforces that (a closed phase was
-  // flushed before the following entry). Mark every non-tail phase
-  // closed as a final sweep so callers can rely on the flag alone.
-  for (let i = 0; i < out.length - 1; i++) {
-    const entry = out[i]!;
-    if (entry.kind === 'phase') entry.closed = true;
+/** Derive display text, tool runs, and both summary levels in one pass. */
+export function describeActivity(groups: SegmentGroup[]): {
+  details: ActivityDetail[];
+  summary: ActivitySummary;
+} {
+  const details: ActivityDetail[] = [];
+  let visibleGroupCount = 0;
+  let stepCount = 0;
+  const changedPaths = new Set<string>();
+  const runChangedPaths = new Set<string>();
+  const recordChangedPath = (path: string) => {
+    changedPaths.add(path);
+    runChangedPaths.add(path);
+  };
+
+  for (const [startIndex, group] of groups.entries()) {
+    if (group.kind === 'segment') {
+      if (group.segment.kind !== 'thinking') continue;
+      const plainText = stripMarkdown(group.segment.text);
+      if (plainText) {
+        details.push({ kind: 'thinking', startIndex, plainText });
+        visibleGroupCount++;
+        stepCount++;
+      }
+      continue;
+    }
+    if (group.parts.length === 0) continue;
+    const previous = details.at(-1);
+    const run: Extract<ActivityDetail, { kind: 'tools' }> =
+      previous?.kind === 'tools'
+        ? previous
+        : {
+            kind: 'tools',
+            startIndex,
+            groups: [],
+            summary: {
+              visibleGroupCount: 0,
+              stepCount: 0,
+              changedFileCount: 0,
+            },
+          };
+    if (previous?.kind !== 'tools') {
+      runChangedPaths.clear();
+      details.push(run);
+    }
+    run.groups.push(group);
+    run.summary.visibleGroupCount++;
+    run.summary.stepCount += group.parts.length;
+    visibleGroupCount++;
+    stepCount += group.parts.length;
+    for (const part of group.parts) {
+      if (part.variant === 'generic') {
+        if (part.status !== 'completed' || part.toolKind !== 'edit') continue;
+        for (const content of part.content ?? []) {
+          if (
+            content.type === 'diff' &&
+            content.path.trim() &&
+            content.oldText !== content.newText
+          ) {
+            recordChangedPath(content.path);
+          }
+        }
+      } else if (
+        part.variant === 'agent_tool' &&
+        part.toolName === 'fs_write' &&
+        (part.status === 'completed' || part.status === undefined) &&
+        part.data?.status === 'success'
+      ) {
+        const result = part.data.data;
+        if (
+          typeof result === 'object' &&
+          result !== null &&
+          'ok' in result &&
+          result.ok === true &&
+          'target' in result &&
+          typeof result.target === 'string' &&
+          result.target.trim()
+        ) {
+          recordChangedPath(result.target);
+        }
+      }
+    }
+    run.summary.changedFileCount = runChangedPaths.size;
+  }
+  return {
+    details,
+    summary: {
+      visibleGroupCount,
+      stepCount,
+      changedFileCount: changedPaths.size,
+    },
+  };
+}
+
+/**
+ * Group contiguous thinking and ordinary tools without requiring a thinking
+ * preamble. Keep rich result cards, task_complete fallbacks, and non-thinking
+ * content outside. Original segment indices preserve comment addressing and
+ * stable group identity as the tail receives streaming updates.
+ */
+export function groupByActivity(
+  segments: AssistantSegment[],
+): ActivityOrContent[] {
+  const out: ActivityOrContent[] = [];
+  let startIndex = 0;
+  for (const group of groupAdjacentToolParts(segments)) {
+    const contentGroup =
+      group.kind === 'segment'
+        ? group.segment.kind === 'thinking'
+          ? undefined
+          : { kind: 'segment' as const, segment: group.segment }
+        : group.variant === 'agent_tool' ||
+            (group.variant === 'generic' &&
+              group.parts[0]?.title !== 'task_complete')
+          ? undefined
+          : group;
+    const previous = out.at(-1);
+    if (contentGroup) {
+      out.push({ kind: 'content', startIndex, group: contentGroup });
+    } else if (previous?.kind === 'activity') {
+      previous.groups.push(group);
+    } else {
+      out.push({ kind: 'activity', startIndex, groups: [group] });
+    }
+    startIndex += group.kind === 'tool-group' ? group.parts.length : 1;
   }
   return out;
 }
