@@ -869,7 +869,10 @@ export const NodeWrapper = memo(
               borderColor: 'transparent',
               borderWidth: 0,
             }),
-            ...(type !== 'frame' && { borderRadius: shellRadius }),
+            ...(type !== 'frame' && {
+              borderRadius: shellRadius,
+              '--node-shell-radius': `${shellRadius}px`,
+            }),
           }}
           data-lod={renderMode}
           data-frame-suppressed={frameSuppressed || undefined}

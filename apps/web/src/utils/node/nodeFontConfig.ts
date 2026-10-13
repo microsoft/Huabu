@@ -6,7 +6,7 @@
  *
  * TextNode and QuestionNode use proportional `data.style.fontSize` through
  * useTextNodeSurface: defaults are 16px and QUESTION_NODE_DEFAULT_FONT_SIZE.
- * Question chrome retains its 28px artwork basis independently of the default. Side grips
+ * Question insets and header geometry retain their 28px artwork basis; header text and status icons use the default font basis. Side grips
  * preserve the font; corners and the Hug Frame/selection cascade ({@link ./fontFit})
  * scale it by the new/start outer-width ratio without fitting or rounding.
  * Existing fonts are respected without automatic persisted-data migration.
@@ -38,9 +38,10 @@ export const QUESTION_NODE_DEFAULT_FONT_SIZE = 24;
 /** Symmetric horizontal inset shared by measurement and the C card. */
 export const QUESTION_NODE_PADDING = 24;
 export const QUESTION_NODE_PADDING_Y = QUESTION_NODE_PADDING;
-/** The avatar sets the row height; the status chip uses shared metadata type. */
+/** Avatar/row geometry uses the artwork basis; status icon size uses the default font basis. */
 export const QUESTION_NODE_HEADER_HEIGHT = 32;
 export const QUESTION_NODE_STATUS_SIZE = NODE_TYPOGRAPHY.metadata.size;
+export const QUESTION_NODE_STATUS_PADDING_X = 6;
 export const QUESTION_NODE_HEADER_GAP = 12;
 /** Half the base metadata-row-plus-gap height; scales with Question content. */
 export const QUESTION_NODE_HEADER_INSET =

@@ -9,7 +9,6 @@
   --question-bg: var(--bg-hover);
   --question-fill: var(--bg-surface);
   --question-edge: var(--edge-default);
-  --question-edge-width: 1px;
 }
 .question-tone-info {
   --question-tone: var(--info);
@@ -32,9 +31,10 @@
   --question-bg: var(--danger-bg);
 }
 .question-open {
-  --question-fill: var(--question-bg);
   --question-edge: var(--question-light);
-  --question-edge-width: 2px;
+}
+.question-open .question-conversation-card {
+  --question-edge-width: var(--question-open-edge-width);
 }
 .question-conversation-card::before {
   content: '';
@@ -42,7 +42,7 @@
   inset: 0;
   border-radius: inherit;
   box-shadow: inset 0 0 0
-    calc(var(--question-edge-width, 1px) * var(--question-scale))
+    var(--question-edge-width, calc(1px * var(--question-scale)))
     var(--question-edge, var(--edge-default));
   pointer-events: none;
 }
@@ -62,7 +62,7 @@
 }
 .question-conversation-card {
   position: relative;
-  border-radius: calc(12px * var(--question-scale));
+  border-radius: var(--node-shell-radius, 12px);
   color: var(--fg-default);
   container-type: inline-size;
 }
@@ -103,13 +103,22 @@
   color: var(--question-tone);
   border-radius: calc(4px * var(--question-scale));
   background: var(--question-bg);
-  box-shadow: 0 0 0 calc(3px * var(--question-scale)) var(--question-bg);
+  padding: calc(3px * var(--question-scale))
+    var(--question-status-padding-x, calc(6px * var(--question-scale)));
   font-size: var(--question-status-size);
   line-height: var(--question-meta-line);
   font-weight: 400;
 }
 .question-conversation-status svg {
   flex-shrink: 0;
+}
+.question-conversation-card:is(
+    [data-state='idle'],
+    [data-state='open'],
+    [data-state='viewed']
+  )
+  .question-conversation-status {
+  background: transparent;
 }
 .question-conversation-status > span {
   white-space: nowrap;

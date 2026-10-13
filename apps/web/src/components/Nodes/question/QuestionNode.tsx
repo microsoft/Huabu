@@ -356,10 +356,6 @@ export const QuestionNode = memo(
         keepAspectRatio={false}
         allowOverflow
         fillColor="var(--question-fill)"
-        borderRadius={
-          12 *
-          (surface.bodyProps.effectiveFontSize / NODE_TYPOGRAPHY.cardTitle.size)
-        }
         className={[
           'question-compact',
           `question-tone-${tone}`,

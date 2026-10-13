@@ -179,6 +179,9 @@ describe('NodeWrapper radius contract', () => {
         radius -
         (type === 'image' || type === 'video' || type === 'sketch' ? 0 : 3);
       expect(shell.style.borderRadius).toBe(`${radius}px`);
+      expect(shell.style.getPropertyValue('--node-shell-radius')).toBe(
+        `${radius}px`,
+      );
       expect(content.style.borderRadius).toBe(`${inner}px`);
       expect(content.style.getPropertyValue('--node-inner-radius')).toBe(
         `${inner}px`,

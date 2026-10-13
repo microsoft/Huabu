@@ -16,10 +16,12 @@ import { NODE_SHELL_INSET } from '@huabu/shared/canvas-engine';
 import { AgentAvatarMark } from '@/components/Common/AgentAvatarMark';
 import {
   QUESTION_FONT_FAMILY,
+  QUESTION_NODE_DEFAULT_FONT_SIZE,
   QUESTION_NODE_HEADER_HEIGHT,
   QUESTION_NODE_HEADER_GAP,
   QUESTION_NODE_HEADER_INSET,
   QUESTION_NODE_STATUS_SIZE,
+  QUESTION_NODE_STATUS_PADDING_X,
   QUESTION_NODE_TITLE_WEIGHT,
 } from '@/utils/node/nodeFontConfig';
 
@@ -37,7 +39,9 @@ export function resolveQuestionCardState(
   status: QuestionAgentBadgeStatus | 'idle',
   unread: boolean,
   conflictCount: number,
+  isOpen = false,
 ) {
+  if (status === 'idle' && isOpen) return 'open';
   if (status === 'done') {
     if (conflictCount > 0) return 'conflict';
     return unread ? 'unread' : 'viewed';
@@ -78,7 +82,10 @@ export function QuestionConversationCard({
 }) {
   const { t } = useTranslation();
   const scale = effectiveFontSize / NODE_TYPOGRAPHY.cardTitle.size;
-  const state = resolveQuestionCardState(status, unread, conflictCount);
+  const headerScale = effectiveFontSize / QUESTION_NODE_DEFAULT_FONT_SIZE;
+  const statusIconSize = QUESTION_NODE_STATUS_SIZE * headerScale;
+  const statusPaddingX = QUESTION_NODE_STATUS_PADDING_X * headerScale;
+  const state = resolveQuestionCardState(status, unread, conflictCount, isOpen);
   const tone = resolveQuestionTakeoverTone(status, unread, conflictCount);
   const box = resolveTextBodyBox({
     width: effectiveWidth,
@@ -102,9 +109,10 @@ export function QuestionConversationCard({
   const { fit, headerRef, aliasRef, labelRef } = useQuestionHeaderFit(
     QUESTION_NODE_HEADER_HEIGHT * scale,
     8 * scale,
-    QUESTION_NODE_STATUS_SIZE * scale,
+    statusIconSize,
     agent.alias,
     label,
+    statusPaddingX,
   );
   const description =
     state === 'unread'
@@ -131,8 +139,10 @@ export function QuestionConversationCard({
           padding: `${box.paddingY - QUESTION_NODE_HEADER_INSET * scale}px ${paddingX}px`,
           fontFamily: QUESTION_FONT_FAMILY,
           '--question-scale': scale,
-          '--question-meta-size': `${NODE_TYPOGRAPHY.body.size * scale}px`,
-          '--question-status-size': `${NODE_TYPOGRAPHY.body.size * scale}px`,
+          '--question-open-edge-width': `${headerScale}px`,
+          '--question-meta-size': `${NODE_TYPOGRAPHY.body.size * headerScale}px`,
+          '--question-status-size': `${NODE_TYPOGRAPHY.body.size * headerScale}px`,
+          '--question-status-padding-x': `${statusPaddingX}px`,
           '--question-meta-line': NODE_TYPOGRAPHY.body.lineHeight,
           '--question-title-line': NODE_TYPOGRAPHY.cardTitle.lineHeight,
           '--question-title-weight': QUESTION_NODE_TITLE_WEIGHT,
@@ -157,7 +167,7 @@ export function QuestionConversationCard({
           style={{ display: fit.status ? undefined : 'none' }}
         >
           <Icon
-            size={QUESTION_NODE_STATUS_SIZE * scale}
+            size={statusIconSize}
             aria-hidden
             className={
               state === 'running' ? 'question-conversation-loading' : undefined

@@ -18,6 +18,7 @@ import {
   QuestionConversationCard,
   resolveQuestionCardState,
 } from './QuestionConversationCard';
+import { resolveQuestionHeaderFit } from './useQuestionHeaderFit';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -123,17 +124,19 @@ describe('QuestionConversationCard', () => {
       host.querySelector('.question-conversation-status svg'),
     ).not.toBeNull();
     expect(host.querySelector('.question-conversation-rail')).toBeNull();
-    expect(card.style.getPropertyValue('--question-status-size')).toBe('18px');
+    expect(card.style.getPropertyValue('--question-status-size')).toBe('21px');
     expect(card.style.getPropertyValue('--question-header-height')).toBe(
       '32px',
     );
-    expect(card.style.getPropertyValue('--question-meta-size')).toBe('18px');
+    expect(card.style.getPropertyValue('--question-meta-size')).toBe('21px');
     expect(card.style.getPropertyValue('--question-meta-line')).toBe('1.4');
     expect(
-      host
-        .querySelector('.question-conversation-status svg')
-        ?.getAttribute('width'),
-    ).toBe('16');
+      Number(
+        host
+          .querySelector('.question-conversation-status svg')
+          ?.getAttribute('width'),
+      ),
+    ).toBeCloseTo((16 * 28) / 24);
     expect(card.style.getPropertyValue('--question-title-line')).toBe('1.3');
     expect(card.style.getPropertyValue('--question-title-weight')).toBe('500');
     expect(
@@ -145,6 +148,87 @@ describe('QuestionConversationCard', () => {
       lineHeight: 1.3,
     });
   });
+
+  it.each([24, 28, 35, 48])(
+    'scales header text and status icons from the default font basis at %spx',
+    (fontSize) => {
+      const scale = fontSize / NODE_TYPOGRAPHY.cardTitle.size;
+      const host = document.createElement('div');
+      host.innerHTML = renderToStaticMarkup(
+        <QuestionConversationCard
+          agent={{ kind: 'internal', alias: 'Huabu', mode: 'ask' }}
+          status="idle"
+          isOpen
+          unread={false}
+          conflictCount={0}
+          text="Question"
+          placeholder="Ask"
+          effectiveWidth={550}
+          effectiveHeight={150}
+          effectiveFontSize={fontSize}
+          paddingX={QUESTION_NODE_PADDING * scale}
+          paddingY={
+            (QUESTION_NODE_PADDING_Y + QUESTION_NODE_HEADER_INSET) * scale
+          }
+        />,
+      );
+      const card = host.firstElementChild as HTMLElement;
+      const headerScale = fontSize / QUESTION_NODE_DEFAULT_FONT_SIZE;
+      expect(
+        parseFloat(card.style.getPropertyValue('--question-open-edge-width')),
+      ).toBeCloseTo(headerScale);
+      expect(
+        parseFloat(card.style.getPropertyValue('--question-status-padding-x')),
+      ).toBeCloseTo(6 * headerScale);
+      for (const variable of [
+        '--question-meta-size',
+        '--question-status-size',
+      ]) {
+        expect(parseFloat(card.style.getPropertyValue(variable))).toBeCloseTo(
+          18 * headerScale,
+        );
+      }
+      const icon = host.querySelector('.question-conversation-status svg');
+      for (const dimension of ['width', 'height']) {
+        expect(Number(icon?.getAttribute(dimension))).toBeCloseTo(
+          16 * headerScale,
+        );
+      }
+      expect(
+        parseFloat(card.style.getPropertyValue('--question-header-height')),
+      ).toBeCloseTo(32 * scale);
+      expect(
+        (host.querySelector('.question-conversation-question') as HTMLElement)
+          .style.fontSize,
+      ).toBe(`${fontSize}px`);
+    },
+  );
+
+  it.each([
+    [148, true, true, true],
+    [147.99, false, true, true],
+    [132, false, true, true],
+    [131.99, true, true, false],
+    [84, true, true, false],
+    [83.99, false, true, false],
+    [68, false, true, false],
+    [67.99, true, false, false],
+  ])(
+    'reserves pill padding at header width %s',
+    (width, alias, status, statusText) => {
+      expect(
+        resolveQuestionHeaderFit({
+          width,
+          avatar: 32,
+          gap: 8,
+          alias: 8,
+          label: 60,
+          icon: 16,
+          statusPaddingX: 6,
+        }),
+      ).toEqual({ alias, status, statusText });
+    },
+  );
 
   it.each(['idle', 'running', 'approval', 'done', 'error'] as const)(
     'keeps %s lifecycle and content geometry when open, at fractional scale',
@@ -177,6 +261,27 @@ describe('QuestionConversationCard', () => {
         closed.firstElementChild?.getAttribute('style'),
       );
       expect(open.firstElementChild?.getAttribute('data-state')).toBe(
+        status === 'done' ? 'unread' : status === 'idle' ? 'open' : status,
+      );
+      expect(
+        open.querySelector('.question-conversation-status')?.textContent,
+      ).toBe(
+        status === 'idle'
+          ? zh.node.questionCard.open
+          : closed.querySelector('.question-conversation-status')?.textContent,
+      );
+      expect(
+        open
+          .querySelector('.question-conversation-status')
+          ?.getAttribute('title'),
+      ).toBe(
+        status === 'idle'
+          ? zh.node.questionCard.open
+          : closed
+              .querySelector('.question-conversation-status')
+              ?.getAttribute('title'),
+      );
+      expect(closed.firstElementChild?.getAttribute('data-state')).toBe(
         status === 'done' ? 'unread' : status,
       );
       expect(open.querySelector('.question-conversation-tail')).toBeNull();
@@ -188,6 +293,25 @@ describe('QuestionConversationCard', () => {
         open.querySelector('.question-conversation-question')?.outerHTML,
       ).toBe(
         closed.querySelector('.question-conversation-question')?.outerHTML,
+      );
+    },
+  );
+
+  it.each([
+    ['idle', false, 0, 'open'],
+    ['running', false, 0, 'running'],
+    ['approval', true, 2, 'approval'],
+    ['done', true, 0, 'unread'],
+    ['done', false, 0, 'viewed'],
+    ['done', true, 2, 'conflict'],
+    ['done', false, 2, 'conflict'],
+    ['error', true, 0, 'error'],
+    ['error', false, 0, 'error'],
+  ] as const)(
+    'maps actively open %s without hiding lifecycle or attention',
+    (status, unread, conflicts, expected) => {
+      expect(resolveQuestionCardState(status, unread, conflicts, true)).toBe(
+        expected,
       );
     },
   );

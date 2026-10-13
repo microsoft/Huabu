@@ -11,6 +11,7 @@ export function resolveQuestionHeaderFit({
   alias,
   label,
   icon,
+  statusPaddingX = 0,
 }: {
   width: number;
   avatar: number;
@@ -18,12 +19,14 @@ export function resolveQuestionHeaderFit({
   alias: number;
   label: number;
   icon: number;
+  statusPaddingX?: number;
 }) {
   const available = Math.max(0, width - avatar - gap);
-  const fullStatus = label + (icon > 0 ? icon + gap / 2 : 0);
+  const padding = 2 * statusPaddingX;
+  const fullStatus = label + (icon > 0 ? icon + gap / 2 : 0) + padding;
   const statusText = label > 0 && fullStatus <= available;
-  const status = statusText || (icon > 0 && icon <= available);
-  const statusWidth = statusText ? fullStatus : status ? icon : 0;
+  const status = statusText || (icon > 0 && icon + padding <= available);
+  const statusWidth = statusText ? fullStatus : status ? icon + padding : 0;
   return {
     status,
     statusText,
@@ -38,6 +41,7 @@ export function useQuestionHeaderFit(
   icon: number,
   alias: string,
   label: string,
+  statusPaddingX = 0,
 ) {
   const headerRef = useRef<HTMLDivElement>(null);
   const aliasRef = useRef<HTMLSpanElement>(null);
@@ -60,6 +64,7 @@ export function useQuestionHeaderFit(
         avatar,
         gap,
         icon,
+        statusPaddingX,
         alias: Number.parseFloat(getComputedStyle(aliasProbe).width) || 0,
         label: Number.parseFloat(getComputedStyle(labelProbe).width) || 0,
       });
@@ -83,6 +88,6 @@ export function useQuestionHeaderFit(
       active = false;
       observer.disconnect();
     };
-  }, [avatar, gap, icon, alias, label]);
+  }, [avatar, gap, icon, alias, label, statusPaddingX]);
   return { fit, headerRef, aliasRef, labelRef };
 }

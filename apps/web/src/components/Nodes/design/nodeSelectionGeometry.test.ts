@@ -9,7 +9,7 @@ import {
 } from './nodeSelectionGeometry';
 
 describe('resizeCornerInset', () => {
-  for (const type of ['note', 'frame']) {
+  for (const type of ['note', 'question', 'frame']) {
     for (const [width, height] of [
       [200, 100],
       [600, 400],
