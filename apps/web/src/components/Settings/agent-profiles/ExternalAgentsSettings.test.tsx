@@ -188,6 +188,24 @@ afterEach(() => {
 });
 
 describe('ExternalAgentsSettings', () => {
+  it.each([false, true])(
+    'only replaces the catalogue with a loading row before its first load (loaded: %s)',
+    async (loaded) => {
+      await renderSettings();
+      await act(async () =>
+        useAcpProfilesStore.setState({ loading: true, loaded }),
+      );
+      expect(container?.textContent?.includes('Reviewer')).toBe(loaded);
+      expect(container?.textContent?.includes('settings.loadingAgents')).toBe(
+        !loaded,
+      );
+      await act(async () =>
+        useAcpProfilesStore.setState({ loading: false, loaded: true }),
+      );
+      expect(container?.textContent).toContain('Reviewer');
+    },
+  );
+
   it('refreshes Agent settings every five seconds only while visible and mounted', async () => {
     vi.useFakeTimers();
     let visibility: DocumentVisibilityState = 'visible';

@@ -239,7 +239,6 @@
     "agentDefaultsModelUnknown": "模型选择支持情况未知。此设置会保存，但尚未通过所选 Agent 验证。",
     "agentDefaultsModelUnsupported": "所选 Agent 不支持模型选择，无法应用此模型覆盖设置。",
     "agentDefaultsSaveFailed": "保存 Utility Agent 设置失败",
-    "agentDefaultsSaved": "Utility Agent 设置已保存",
     "agentDirectoryRequired": "必须填写 Agent 目录",
     "commandRequired": "必须填写命令",
     "workingDirectoryRequired": "必须填写工作目录",

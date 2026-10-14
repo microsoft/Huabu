@@ -61,6 +61,7 @@ export function ExternalAgentsSettings({
     (state) => state.selectableProfileIds,
   );
   const loading = useAcpProfilesStore((state) => state.loading);
+  const loaded = useAcpProfilesStore((state) => state.loaded);
   const error = useAcpProfilesStore((state) => state.error);
   const agentlet = useAcpProfilesStore((state) => state.agentlet);
   const init = useAcpProfilesStore((state) => state.init);
@@ -361,7 +362,7 @@ export function ExternalAgentsSettings({
               )}
             </SettingSection>
             <SettingSection title={t('settings.agentProfiles')}>
-              {loading ? (
+              {loading && !loaded ? (
                 <SettingRow title={t('settings.loadingAgents')}>
                   <Loading layout="inline" size="sm" />
                 </SettingRow>

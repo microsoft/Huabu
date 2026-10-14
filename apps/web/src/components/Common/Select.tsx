@@ -143,32 +143,22 @@ export function Select<T extends string = string>({
   const isRight = align === 'bottom-right' || align === 'top-right';
   const isTop = align === 'top-left' || align === 'top-right';
 
-  // Map Select align → Popover anchor (vertical direction inverts)
-  const anchor =
-    `${isTop ? 'bottom' : 'top'}-${isRight ? 'right' : 'left'}` as const;
+  const placement =
+    `${isTop ? 'top' : 'bottom'}-${isRight ? 'end' : 'start'}` as const;
 
   const current = options.find((o) => o.value === value);
 
   const handleToggle = useCallback(() => {
     if (disabled) return;
     if (justDismissedRef.current) return;
-    setIsOpen((prev) => {
-      const next = !prev;
-      // Snapshot the trigger width on open so the panel can adopt it as
-      // a `minWidth` — keeps the dropdown at least as wide as the trigger
-      // (often `w-full`) instead of shrinking to fit-content. Measured
-      // here (event time) rather than during render to avoid a
-      // setState-in-render loop.
-      if (next && triggerRef.current) {
+    if (!isOpen) {
+      if (triggerRef.current) {
         setTriggerWidth(triggerRef.current.getBoundingClientRect().width);
       }
-      // Only fire on the closed → open transition. Fired *outside* the
-      // setState updater would also work but this keeps the logic
-      // co-located with the state change that triggers it.
-      if (next && onOpen) onOpen();
-      return next;
-    });
-  }, [disabled, onOpen]);
+      onOpen?.();
+    }
+    setIsOpen(!isOpen);
+  }, [disabled, isOpen, onOpen]);
 
   const handleDismiss = useCallback(() => {
     if (menuRef.current?.contains(document.activeElement)) {
@@ -189,15 +179,6 @@ export function Select<T extends string = string>({
     },
     [onChange],
   );
-
-  const computePosition = useCallback(() => {
-    if (!triggerRef.current) return { x: 0, y: 0 };
-    const rect = triggerRef.current.getBoundingClientRect();
-    return {
-      x: isRight ? rect.right : rect.left,
-      y: isTop ? rect.top : rect.bottom,
-    };
-  }, [isRight, isTop]);
 
   return (
     <>
@@ -234,10 +215,9 @@ export function Select<T extends string = string>({
       {isOpen && (
         <Popover
           contentRef={menuRef}
-          position={computePosition()}
+          reference={triggerRef.current}
+          placement={placement}
           onDismiss={handleDismiss}
-          anchor={anchor}
-          offset={{ x: 0, y: isTop ? -4 : 4 }}
           // Match the panel's minimum width to the trigger so a
           // full-width trigger (`w-full`) gets a dropdown of the same
           // width instead of one that shrinks to its longest option.

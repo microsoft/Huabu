@@ -232,10 +232,10 @@ describe('Agent defaults Settings', () => {
     await blurModel();
     expect(mocks.update).toHaveBeenCalledTimes(2);
     expect(container.querySelector('[role="alert"]')).toBeNull();
-    expect(container.textContent).toContain('settings.agentDefaultsSaved');
+    expect(container.textContent).not.toContain('settings.agentDefaultsSaved');
   });
 
-  it('saves an empty model as inheritance and reports success', async () => {
+  it('saves an empty model as inheritance without a save status row', async () => {
     mocks.update.mockResolvedValue({
       ...initial,
       defaults: { profileId: 'external', functionalModel: '' },
@@ -247,7 +247,8 @@ describe('Agent defaults Settings', () => {
       profileId: 'external',
       functionalModel: '',
     });
-    expect(container.textContent).toContain('settings.agentDefaultsSaved');
+    expect(container.textContent).not.toContain('settings.agentDefaultsSaved');
+    expect(container.querySelectorAll('.ring-1 > *')).toHaveLength(2);
     expect(container.textContent).not.toContain(
       'settings.agentDefaultsModelUnknown',
     );
@@ -371,7 +372,7 @@ describe('Agent defaults Settings', () => {
     await render();
     await editModel('first');
     await blurModel();
-    expect(container.textContent).toContain('settings.saving');
+    expect(container.textContent).not.toContain('settings.saving');
     expect(container.querySelector('input')?.disabled).toBe(false);
     await editModel('latest');
     await act(async () =>
@@ -387,6 +388,6 @@ describe('Agent defaults Settings', () => {
       profileId: 'external',
       functionalModel: 'latest',
     });
-    expect(container.textContent).toContain('settings.agentDefaultsSaved');
+    expect(container.textContent).not.toContain('settings.agentDefaultsSaved');
   });
 });

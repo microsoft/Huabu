@@ -239,7 +239,6 @@
     "agentDefaultsModelUnknown": "Model-selection support is unknown. This override is saved but has not been verified with the selected Agent.",
     "agentDefaultsModelUnsupported": "The selected Agent does not support model selection. This override cannot be applied.",
     "agentDefaultsSaveFailed": "Failed to save Utility Agent settings",
-    "agentDefaultsSaved": "Utility Agent settings saved",
     "agentDirectoryRequired": "Agent directory is required",
     "commandRequired": "Command is required",
     "workingDirectoryRequired": "Working directory is required",

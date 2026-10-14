@@ -24,8 +24,6 @@ export function AgentDefaultsSettings() {
   const [snapshot, setSnapshot] = useState<AgentDefaultsResponse | null>(null);
   const [draft, setDraft] = useState<AgentDefaults | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
   const modelId = useId();
   const active = useRef(false);
   const editRevision = useRef(0);
@@ -61,7 +59,6 @@ export function AgentDefaultsSettings() {
       revision: number;
     }) => {
       if (active.current) {
-        setSaving(true);
         setError(null);
       }
       try {
@@ -69,7 +66,6 @@ export function AgentDefaultsSettings() {
         if (active.current && revision === editRevision.current) {
           setSnapshot(response);
           setDraft(response.defaults);
-          setSaved(true);
         }
       } catch (cause) {
         if (active.current && revision === editRevision.current) {
@@ -79,17 +75,12 @@ export function AgentDefaultsSettings() {
               : t('settings.agentDefaultsSaveFailed'),
           );
         }
-      } finally {
-        if (active.current && revision === editRevision.current) {
-          setSaving(false);
-        }
       }
     },
   );
 
   function edit(config: AgentDefaults, immediate = false) {
     setDraft(config);
-    setSaved(false);
     setError(null);
     debouncedSave({ config, revision: ++editRevision.current });
     if (immediate) debouncedSave.flush();
@@ -137,7 +128,7 @@ export function AgentDefaultsSettings() {
     (!isBuiltIn &&
       Boolean(draft?.functionalModel.trim()) &&
       modelCapability !== 'supported') ||
-    Boolean(error || profilesError || saving || saved);
+    Boolean(error || profilesError);
 
   return (
     <SettingSection title={t('settings.agentDefaultsTitle')}>
@@ -215,13 +206,6 @@ export function AgentDefaultsSettings() {
               {(error || profilesError) && (
                 <p className="text-danger" role="alert">
                   {error ?? profilesError?.message}
-                </p>
-              )}
-              {(saving || saved) && (
-                <p className="text-success" role="status">
-                  {saving
-                    ? t('settings.saving')
-                    : t('settings.agentDefaultsSaved')}
                 </p>
               )}
             </div>
