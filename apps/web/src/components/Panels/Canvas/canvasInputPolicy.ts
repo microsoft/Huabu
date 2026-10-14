@@ -98,12 +98,12 @@ export function isLassoStartTarget(target: Element | null): boolean {
 // over. The `inputMode` preference below only gates which non-mouse pointers
 // may reach the canvas and disambiguates pen vs finger.
 //
-// Touch keeps Select as the safe default home base (tap-select + drag via
-// React Flow, no accidental ink) alongside Lasso. Pan collapses into the
-// internal direct-manipulation state and is hidden from the touch toolbar;
-// Sketch is an explicit sticky tool listed among the creation nodes.
+// Touch keeps Select as the safe internal home base (tap-select + drag via
+// React Flow, no accidental ink), while only Lasso is exposed in the toolbar.
+// Pan collapses into the same direct-manipulation state; Sketch is an explicit
+// sticky tool listed among the creation nodes.
 export function getAvailableCanvasTools(isNotMouse: boolean): CanvasTool[] {
-  return isNotMouse ? ['select', 'lasso'] : ['select', 'pan', 'lasso'];
+  return isNotMouse ? ['lasso'] : ['select', 'pan', 'lasso'];
 }
 
 export function resolveCanvasToolShortcut(

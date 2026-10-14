@@ -11,6 +11,7 @@ const { listCanvases } = vi.hoisted(() => ({ listCanvases: vi.fn() }));
 const toolState = vi.hoisted(() => ({
   pendingNodeType: null as string | null,
 }));
+const inputState = vi.hoisted(() => ({ isNotMouse: false }));
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
@@ -28,7 +29,9 @@ vi.mock('@/api/canvas', () => ({ listCanvases }));
 
 vi.mock('@/config/shortcuts', () => ({ matchesShortcut: () => false }));
 
-vi.mock('@/hooks/useInputMode', () => ({ useIsNotMouse: () => false }));
+vi.mock('@/hooks/useInputMode', () => ({
+  useIsNotMouse: () => inputState.isNotMouse,
+}));
 
 vi.mock('@/store/toolStore', () => ({
   useToolStore: (
@@ -90,6 +93,7 @@ afterEach(() => {
   container = undefined;
   listCanvases.mockReset();
   toolState.pendingNodeType = null;
+  inputState.isNotMouse = false;
 });
 
 describe('NodeToolbar', () => {
@@ -162,6 +166,7 @@ describe('NodeToolbar', () => {
           <NodeToolbar activeTool={activeTool} onToolChange={vi.fn()} />,
         ),
       );
+
       const selected = container.querySelector<HTMLButtonElement>(
         `button[aria-label^="toolbar.tools.${activeTool}"]`,
       );
@@ -173,6 +178,64 @@ describe('NodeToolbar', () => {
       expect(container.querySelectorAll('button.bg-info-bg')).toHaveLength(1);
     },
   );
+
+  it('shows a fixed leading Lasso button for touch and pen input', () => {
+    inputState.isNotMouse = true;
+    const onToolChange = vi.fn();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() =>
+      root?.render(
+        <NodeToolbar activeTool="select" onToolChange={onToolChange} />,
+      ),
+    );
+
+    const buttons = Array.from(
+      container.querySelectorAll<HTMLButtonElement>('button'),
+    );
+    const lasso = buttons.find(
+      (button) => button.getAttribute('aria-label') === 'toolbar.tools.lasso',
+    );
+    expect(lasso).toBe(buttons[0]);
+    expect(lasso?.getAttribute('aria-pressed')).toBe('false');
+    expect(
+      container.querySelector('button[aria-label^="toolbar.tools.select"]'),
+    ).toBeNull();
+    expect(
+      container.querySelector('button[aria-label^="toolbar.tools.pan"]'),
+    ).toBeNull();
+    expect(
+      container.querySelector('button[aria-label="toolbar.tools.moreTools"]'),
+    ).toBeNull();
+
+    act(() => lasso?.click());
+    expect(onToolChange).toHaveBeenCalledWith('lasso');
+  });
+
+  it('keeps the touch Lasso button active when pressed again', () => {
+    inputState.isNotMouse = true;
+    const onToolChange = vi.fn();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() =>
+      root?.render(
+        <NodeToolbar activeTool="lasso" onToolChange={onToolChange} />,
+      ),
+    );
+
+    const lasso = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="toolbar.tools.lasso"]',
+    );
+    expect(lasso?.getAttribute('aria-pressed')).toBe('true');
+    expect(lasso?.classList.contains('text-info')).toBe(true);
+    expect(lasso?.classList.contains('bg-info-bg')).toBe(true);
+
+    act(() => lasso?.click());
+    expect(onToolChange).toHaveBeenCalledWith('lasso');
+    expect(onToolChange).not.toHaveBeenCalledWith('select');
+  });
 
   it.each(['note', 'text', 'frame', 'sketch', 'question'])(
     'highlights only the pending %s placement button',

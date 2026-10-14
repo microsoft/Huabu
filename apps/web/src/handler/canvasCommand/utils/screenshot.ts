@@ -33,6 +33,159 @@ export interface VisibleCanvasGroundingCapture {
   viewport: { width: number; height: number };
 }
 
+export interface PreparedVisibleCanvasGrounding {
+  capture: () => Promise<VisibleCanvasGroundingCapture>;
+  dispose: () => void;
+}
+
+export class GroundingSelectionOutsideViewportError extends Error {
+  constructor() {
+    super('Grounding selection is outside the visible Canvas');
+    this.name = 'GroundingSelectionOutsideViewportError';
+  }
+}
+
+function canMaterializeImage(image: HTMLImageElement): boolean {
+  if (!image.complete || image.naturalWidth <= 0 || image.naturalHeight <= 0) {
+    return false;
+  }
+  const src = image.currentSrc || image.src;
+  if (!src) return false;
+  if (src.startsWith('data:') || src.startsWith('blob:')) return true;
+  return new URL(src, window.location.href).origin === window.location.origin;
+}
+
+function copyPresentationState(
+  sourceRoot: HTMLElement,
+  snapshotRoot: HTMLElement,
+): void {
+  const sourceElements = [sourceRoot, ...sourceRoot.querySelectorAll('*')];
+  const snapshotElements = [
+    snapshotRoot,
+    ...snapshotRoot.querySelectorAll('*'),
+  ];
+  if (sourceElements.length !== snapshotElements.length) {
+    throw new Error('Canvas grounding snapshot structure changed');
+  }
+  sourceElements.forEach((source, index) => {
+    const snapshot = snapshotElements[index];
+    snapshot.scrollLeft = source.scrollLeft;
+    snapshot.scrollTop = source.scrollTop;
+  });
+
+  const sourceCanvases = sourceRoot.querySelectorAll('canvas');
+  const snapshotCanvases = snapshotRoot.querySelectorAll('canvas');
+  if (sourceCanvases.length !== snapshotCanvases.length) {
+    throw new Error('Canvas grounding snapshot structure changed');
+  }
+  sourceCanvases.forEach((source, index) => {
+    const snapshot = snapshotCanvases[index];
+    snapshot.width = source.width;
+    snapshot.height = source.height;
+    const context = snapshot.getContext('2d');
+    if (!context) {
+      throw new Error('Canvas grounding snapshot could not preserve Canvas');
+    }
+    context.drawImage(source, 0, 0);
+  });
+
+  const sourceImages = sourceRoot.querySelectorAll('img');
+  const snapshotImages = snapshotRoot.querySelectorAll('img');
+  if (sourceImages.length !== snapshotImages.length) {
+    throw new Error('Canvas grounding snapshot structure changed');
+  }
+  sourceImages.forEach((source, index) => {
+    const snapshot = snapshotImages[index];
+    if (!snapshot || !canMaterializeImage(source)) return;
+    const frame = document.createElement('canvas');
+    frame.width = source.naturalWidth;
+    frame.height = source.naturalHeight;
+    frame.className = snapshot.className;
+    frame.style.cssText = snapshot.style.cssText;
+    if (source.clientWidth > 0) frame.style.width = `${source.clientWidth}px`;
+    if (source.clientHeight > 0)
+      frame.style.height = `${source.clientHeight}px`;
+    const context = frame.getContext('2d');
+    if (!context) {
+      throw new Error('Canvas grounding snapshot could not preserve image');
+    }
+    context.drawImage(source, 0, 0, frame.width, frame.height);
+    snapshot.replaceWith(frame);
+  });
+
+  const sourceVideos = sourceRoot.querySelectorAll('video');
+  const snapshotVideos = snapshotRoot.querySelectorAll('video');
+  sourceVideos.forEach((source, index) => {
+    const snapshot = snapshotVideos[index];
+    if (
+      !snapshot ||
+      source.readyState < HTMLMediaElement.HAVE_CURRENT_DATA ||
+      source.clientWidth <= 0 ||
+      source.clientHeight <= 0
+    ) {
+      return;
+    }
+    const frame = document.createElement('canvas');
+    frame.width = source.videoWidth || source.clientWidth;
+    frame.height = source.videoHeight || source.clientHeight;
+    frame.className = snapshot.className;
+    frame.style.cssText = snapshot.style.cssText;
+    frame.style.width = `${source.clientWidth}px`;
+    frame.style.height = `${source.clientHeight}px`;
+    const context = frame.getContext('2d');
+    if (!context) {
+      throw new Error('Canvas grounding snapshot could not preserve video');
+    }
+    context.drawImage(source, 0, 0, frame.width, frame.height);
+    snapshot.replaceWith(frame);
+  });
+
+  const sourceInputs = sourceRoot.querySelectorAll('input');
+  const snapshotInputs = snapshotRoot.querySelectorAll('input');
+  sourceInputs.forEach((source, index) => {
+    const snapshot = snapshotInputs[index];
+    if (!snapshot) return;
+    snapshot.value = source.value;
+    snapshot.checked = source.checked;
+  });
+  const sourceTextareas = sourceRoot.querySelectorAll('textarea');
+  const snapshotTextareas = snapshotRoot.querySelectorAll('textarea');
+  sourceTextareas.forEach((source, index) => {
+    const snapshot = snapshotTextareas[index];
+    if (snapshot) snapshot.value = source.value;
+  });
+  const sourceSelects = sourceRoot.querySelectorAll('select');
+  const snapshotSelects = snapshotRoot.querySelectorAll('select');
+  sourceSelects.forEach((source, index) => {
+    const snapshot = snapshotSelects[index];
+    if (snapshot) snapshot.value = source.value;
+  });
+}
+
+export function freezeVisibleCanvasPresentation(
+  root: HTMLElement,
+  viewport: { width: number; height: number },
+): HTMLElement {
+  const snapshot = root.cloneNode(true) as HTMLElement;
+  snapshot.setAttribute('data-canvas-grounding-snapshot', '');
+  snapshot.setAttribute('aria-hidden', 'true');
+  snapshot.style.position = 'fixed';
+  snapshot.style.left = `${-Math.ceil(viewport.width) - 100}px`;
+  snapshot.style.top = '0';
+  snapshot.style.width = `${viewport.width}px`;
+  snapshot.style.height = `${viewport.height}px`;
+  snapshot.style.margin = '0';
+  snapshot.style.pointerEvents = 'none';
+  document.body.appendChild(snapshot);
+  try {
+    copyPresentationState(root, snapshot);
+  } catch (error) {
+    snapshot.remove();
+    throw error;
+  }
+  return snapshot;
+}
+
 const GROUNDING_CHROME_SELECTORS = [
   '.react-flow__panel',
   '.react-flow__controls',
@@ -108,76 +261,107 @@ export function blobToDataUrl(blob: Blob): Promise<string> {
   });
 }
 
-/** Capture the visible Canvas at its current DOM LOD, then crop its pixels. */
-export async function captureVisibleCanvasGrounding(options: {
+/** Freeze the visible Canvas synchronously for later rasterization. */
+export function prepareVisibleCanvasGrounding(options: {
   bounds: VisibleCanvasCrop;
-}): Promise<VisibleCanvasGroundingCapture> {
-  const root = document.querySelector<HTMLElement>('.react-flow');
+}): PreparedVisibleCanvasGrounding {
+  const root = document.querySelector<HTMLElement>(
+    '.react-flow:not([data-canvas-grounding-snapshot])',
+  );
   if (!root) throw new Error('Canvas is not available for grounding capture');
   const rootRect = root.getBoundingClientRect();
   const crop = clampVisibleCanvasCrop(options.bounds, {
     width: rootRect.width,
     height: rootRect.height,
   });
-  if (!crop)
-    throw new Error('Grounding selection is outside the visible Canvas');
+  if (!crop) throw new GroundingSelectionOutsideViewportError();
   const devicePixelRatio = Math.min(
     GROUNDING_CAPTURE_MAX_RATIO,
     Math.max(1, window.devicePixelRatio || 1),
   );
-  const dataUrl = await toPng(root, {
+  const snapshot = freezeVisibleCanvasPresentation(root, {
     width: rootRect.width,
     height: rootRect.height,
-    pixelRatio: devicePixelRatio,
-    skipAutoScale: true,
-    cacheBust: true,
-    style: {
-      '--canvas-grounding-edge-filter': 'none',
-      '--canvas-grounding-edge-stroke':
-        'var(--xy-edge-stroke, var(--xy-edge-stroke-default))',
-    } as Partial<CSSStyleDeclaration>,
-    filter: (node: HTMLElement) => {
-      if (isVisibleCanvasGroundingChrome(node)) return false;
-      if (node instanceof HTMLImageElement) {
-        const src = node.src ?? '';
-        if (
-          src &&
-          !src.startsWith('data:') &&
-          !src.startsWith('blob:') &&
-          new URL(src, window.location.href).origin !== window.location.origin
-        ) {
-          return false;
-        }
-      }
-      return true;
-    },
   });
-  const image = await loadImage(dataUrl);
-  const scaleX = image.naturalWidth / rootRect.width;
-  const scaleY = image.naturalHeight / rootRect.height;
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.max(1, Math.round(crop.width * scaleX));
-  canvas.height = Math.max(1, Math.round(crop.height * scaleY));
-  const context = canvas.getContext('2d');
-  if (!context) throw new Error('Canvas grounding capture is unavailable');
-  context.drawImage(
-    image,
-    crop.x * scaleX,
-    crop.y * scaleY,
-    crop.width * scaleX,
-    crop.height * scaleY,
-    0,
-    0,
-    canvas.width,
-    canvas.height,
-  );
-  const bounded = await boundedCanvasBlob(canvas);
+  let disposed = false;
   return {
-    blob: bounded.blob,
-    crop,
-    devicePixelRatio: bounded.width / crop.width,
-    viewport: { width: rootRect.width, height: rootRect.height },
+    async capture() {
+      if (disposed) {
+        throw new Error('Canvas grounding snapshot is no longer available');
+      }
+      const dataUrl = await toPng(snapshot, {
+        width: rootRect.width,
+        height: rootRect.height,
+        pixelRatio: devicePixelRatio,
+        skipAutoScale: true,
+        cacheBust: true,
+        style: {
+          '--canvas-grounding-edge-filter': 'none',
+          '--canvas-grounding-edge-stroke':
+            'var(--xy-edge-stroke, var(--xy-edge-stroke-default))',
+        } as Partial<CSSStyleDeclaration>,
+        filter: (node: HTMLElement) => {
+          if (isVisibleCanvasGroundingChrome(node)) return false;
+          if (node instanceof HTMLImageElement) {
+            const src = node.src ?? '';
+            if (
+              src &&
+              !src.startsWith('data:') &&
+              !src.startsWith('blob:') &&
+              new URL(src, window.location.href).origin !==
+                window.location.origin
+            ) {
+              return false;
+            }
+          }
+          return true;
+        },
+      });
+      const image = await loadImage(dataUrl);
+      const scaleX = image.naturalWidth / rootRect.width;
+      const scaleY = image.naturalHeight / rootRect.height;
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(crop.width * scaleX));
+      canvas.height = Math.max(1, Math.round(crop.height * scaleY));
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('Canvas grounding capture is unavailable');
+      context.drawImage(
+        image,
+        crop.x * scaleX,
+        crop.y * scaleY,
+        crop.width * scaleX,
+        crop.height * scaleY,
+        0,
+        0,
+        canvas.width,
+        canvas.height,
+      );
+      const bounded = await boundedCanvasBlob(canvas);
+      return {
+        blob: bounded.blob,
+        crop,
+        devicePixelRatio: bounded.width / crop.width,
+        viewport: { width: rootRect.width, height: rootRect.height },
+      };
+    },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      snapshot.remove();
+    },
   };
+}
+
+/** Capture the visible Canvas at its current DOM LOD, then crop its pixels. */
+export async function captureVisibleCanvasGrounding(options: {
+  bounds: VisibleCanvasCrop;
+}): Promise<VisibleCanvasGroundingCapture> {
+  const prepared = prepareVisibleCanvasGrounding(options);
+  try {
+    return await prepared.capture();
+  } finally {
+    prepared.dispose();
+  }
 }
 
 /**

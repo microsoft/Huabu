@@ -1,6 +1,6 @@
 # Ink Lasso Question Flow
 
-> Status: **Partly shipped** — V1 and §14 shipped in [#220](https://github.com/microsoft/Huabu/pull/220); §15 is implemented in [#234](https://github.com/microsoft/Huabu/pull/234). §17's destination picker and Stage 1 shared conversation-first defaults shipped in [#285](https://github.com/microsoft/Huabu/pull/285). Current toolbar, destination-confirmation, and selection behavior is documented in [Sketch Node](../architecture/sketch-node.md#41-partial-stroke-selection-as-ai-context). Stage 2 resource recommendations remain deferred. · Last updated: 2026-10-10
+> Status: **Partly shipped** — V1 and the original §14 shipped in [#220](https://github.com/microsoft/Huabu/pull/220); §14.9's immutable submission snapshot is implemented on the current branch and pending review. §15 is implemented in [#234](https://github.com/microsoft/Huabu/pull/234). §17's destination picker and Stage 1 shared conversation-first defaults shipped in [#285](https://github.com/microsoft/Huabu/pull/285). Current toolbar, destination-confirmation, and selection behavior is documented in [Sketch Node](../architecture/sketch-node.md#41-partial-stroke-selection-as-ai-context). Stage 2 resource recommendations remain deferred. · Last updated: 2026-10-12
 
 ## 1. Summary
 
@@ -643,7 +643,21 @@ The final captured `AgentChatContext.selectedNodes` tree is the canonical operan
 
 The client captures this tree before asynchronous screenshotting or Question creation and reuses it for dispatch. A selected Question anchor remains excluded even when nested in a selected Frame. This prevents Frame expansion, duplicate nested Ink, or later selection changes from producing `Visible Canvas grounding does not match the selection` while preserving strict server rejection of genuinely inconsistent metadata.
 
-### 14.9 Validation and acceptance
+### 14.9 Immutable submission snapshot
+
+Activating Send is the ownership boundary for an Ink submission. After synchronous eligibility checks confirm the current source selection and destination, the client creates one immutable attempt snapshot containing the Canvas and destination identities, frozen source tree, selected stroke subsets, source bounds, viewport transform, visible Canvas dimensions, and visual grounding input at the exact presentation state the user submitted. Every asynchronous preparation step, Question creation step, retry, and dispatch step consumes this snapshot rather than re-reading live Canvas presentation state to redefine the request.
+
+The visual grounding image represents what was visible when the user activated Send, including the submitted zoom-dependent LOD and the spatial relationship between Ink and ordinary sources. Its pixel content, crop, viewport metadata, operand metadata, and semantic source tree must come from the same frozen presentation snapshot. The implementation may synchronously clone or otherwise retain the required rendered input before continuing asynchronously, but it must not repeatedly sample the live Canvas until the viewport happens to remain stable. A DOM clone must materialize mutable URL-backed media that is already loaded at activation, including same-origin, data-URL, and blob-URL image pixels, rather than fetching those URLs during later rasterization.
+
+Once the snapshot owns the attempt, the user may pan, zoom, change selection, move or edit nodes, dismiss the retained Lasso, navigate to another Canvas, or continue working while capture and dispatch proceed. Those later UI changes do not cancel, recrop, retarget, or otherwise mutate the submitted attempt. They also do not cause `Canvas view changed during Ink grounding capture`, `Grounding selection is outside the visible Canvas`, or selection-changed failures. Acceptance clears the retained Lasso only when the current selection identity still matches the captured identity; it never clears a newer selection.
+
+The snapshot boundary does not weaken genuine validation. Submission may still fail when the candidate or destination is invalid at activation, the selected visual cannot be represented from the activation-time presentation, snapshot creation itself fails, the destination cannot reserve or accept a turn, transport acceptance is uncertain, or the server rejects inconsistent request metadata. A source becoming hidden, moved, edited, deleted, or off-screen only after snapshot ownership is not such a failure: the attempt retains its captured point-in-time evidence and existing revision semantics.
+
+Retry reuses the same immutable attempt snapshot, captured semantic sources, and any already-created Question rather than silently capturing the then-current Canvas. Starting a genuinely new submission creates a new snapshot. Temporary live-viewport stabilization retries may remain as a compatibility fallback only before snapshot ownership is complete; they are not the final submission consistency model.
+
+This boundary applies beyond the two observed iPad Safari symptoms. Any preparation code shaped as “read live UI state, await, read live UI state again, then cancel if it changed” must classify the second read explicitly: source and presentation changes after snapshot ownership are irrelevant to the frozen attempt, while destination reservation and server/transport validity remain legitimate asynchronous failure boundaries.
+
+### 14.10 Validation and acceptance
 
 The polish work is complete when all of the following hold:
 
@@ -655,14 +669,19 @@ The polish work is complete when all of the following hold:
 - Every selected Ink stroke visibly retains its authored color with a screen-stable semantic outline; unselected strokes have no outline, and grounding capture excludes the highlight path.
 - The Ink toolbar remains centred above the retained Lasso range even when the Lasso also selects a much larger Frame or Image; source and grounding bounds remain unchanged.
 - Frame-nested partial Ink appears once in the final source tree, grounding metadata is derived from that tree, nested Question anchors remain excluded, and the resulting request passes the shared schema without weakening mismatch validation.
+- Send freezes one semantic source tree, viewport, crop, and rendered-presentation snapshot before asynchronous preparation; subsequent pan, zoom, selection, node edits or movement, Lasso dismissal, and Canvas navigation do not mutate or cancel that attempt.
+- Grounding pixels and metadata always describe the same activation-time snapshot. A user moving the live Canvas after Send never produces a viewport-changed or outside-visible-Canvas rejection.
+- Acceptance clears only a retained selection whose identity still matches the snapshot. A later selection remains untouched, and retry reuses the original semantic sources and visual snapshot instead of recapturing current UI state.
+- Focused tests hold screenshot preparation open while independently changing viewport, selection, node geometry, and active Canvas, then verify one dispatch with the original operands and grounding metadata. Tests also preserve real activation-time snapshot failures, destination failures, uncertain transport handling, and duplicate-submit prevention.
 - Unit coverage exercises pointer type rather than device detection, and touch-emulated Playwright coverage verifies the iPad-shaped workflows.
 
-### 14.10 Suggested commits
+### 14.11 Suggested commits
 
 1. `fix(canvas): polish lasso interactions`
 2. `fix(canvas): polish ink query submission`
+3. `fix(canvas): freeze ink submission grounding`
 
-The first commit owns empty-Canvas dismissal, finger-on-Ink routing, retained-Lasso stacking, selected-stroke paint, and their focused tests and architecture updates. The second owns submission preparation feedback and guards, Lasso-relative toolbar placement, Ink Query integration coverage, and this proposal update. Files that contain both concerns must be staged by hunk so each commit builds and its focused tests pass independently. Tailnet proxy, local development-server configuration, and environment-only changes remain uncommitted local workspace state.
+The first commit owns empty-Canvas dismissal, finger-on-Ink routing, retained-Lasso stacking, selected-stroke paint, and their focused tests and architecture updates. The second owns submission preparation feedback and guards, Lasso-relative toolbar placement, and the original Ink Query integration coverage. The third replaces live-viewport revalidation with the immutable snapshot boundary in §14.9 and adds delayed-preparation interaction coverage. Files that contain multiple concerns must be staged by hunk so each commit builds and its focused tests pass independently. Tailnet proxy, local development-server configuration, and environment-only changes remain uncommitted local workspace state.
 
 ## 15. Submission-Time Ink OCR Enrichment
 

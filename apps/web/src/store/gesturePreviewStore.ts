@@ -100,7 +100,7 @@ type GesturePreviewData = {
    */
   sketchStrokeMoveCarriedNodeIds: string[];
 
-  /** Whether the retained Ink selection is reserved by submission prep. */
+  /** Whether Ink is synchronously freezing its activation-time snapshot. */
   inkSubmissionPreparing: boolean;
 
   /**

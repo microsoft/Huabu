@@ -40,17 +40,18 @@ import {
 import { NODE_ICON } from '@/config/nodeIcons';
 import {
   blobToDataUrl,
-  captureVisibleCanvasGrounding,
+  prepareVisibleCanvasGrounding,
+  type PreparedVisibleCanvasGrounding,
 } from '@/handler/canvasCommand/utils/screenshot';
 import {
   dispatchAgentTurn,
   prepareAgentTurn,
+  type CapturedAgentTurnSources,
 } from '@/hooks/agentTurnController';
 import { isOutsideCanvasInteraction } from '@/hooks/shortcuts/isEditableTarget';
 import { useIsNotMouse } from '@/hooks/useInputMode';
 import {
   getDefaultAgentBinding,
-  loadDefaultAgentBinding,
   rememberConversationAgentBinding,
   selectDefaultConversationProfileId,
   useAcpProfilesStore,
@@ -76,7 +77,6 @@ import {
   groundingOperandsFromContext,
   inkLassoIdentity,
   inkSelectionIdentity,
-  isViewportStableForBounds,
   retainedLassoBounds,
   resolveInkQuestionTarget,
   unionSelectionBounds,
@@ -103,7 +103,19 @@ interface InkSubmissionAttempt {
   identity: string;
   session: ChatSession;
   mode: AgentMode;
+  sources: CapturedAgentTurnSources;
   groundingVisual?: VisibleCanvasGrounding;
+  pendingGrounding?: {
+    snapshot: PreparedVisibleCanvasGrounding;
+    viewport: { x: number; y: number; zoom: number };
+    selectedNodeIds: string[];
+    strokeSubsets: Array<{ nodeId: string; strokeIds: string[] }>;
+  };
+}
+
+function disposePendingGrounding(attempt: InkSubmissionAttempt): void {
+  attempt.pendingGrounding?.snapshot.dispose();
+  delete attempt.pendingGrounding;
 }
 
 function inkDestinationIdentity(
@@ -192,11 +204,12 @@ export const StrokeSelectionToolbar = () => {
   );
   const isNotMouse = useIsNotMouse();
   const attemptsRef = useRef(new Map<string, InkSubmissionAttempt>());
-  const attemptScopeRef = useRef({ canvasId, selectionSession });
-  const preparationRef = useRef<{
-    token: object;
-    lassoIdentity: string;
-  } | null>(null);
+  const selectionSessionIdsRef = useRef({
+    next: 1,
+    values: new WeakMap<object, number>(),
+  });
+  const mountedRef = useRef(true);
+  const preparationRef = useRef<{ token: object } | null>(null);
   const [isPreparing, setIsPreparing] = useState(false);
   const [startedDestination, setStartedDestination] = useState<{
     nodeId: string;
@@ -309,8 +322,6 @@ export const StrokeSelectionToolbar = () => {
     destination,
     recentProfileId,
   );
-  const destinationIdentityRef = useRef(destinationIdentity);
-  destinationIdentityRef.current = destinationIdentity;
   const selectedConversation = conversations.find(
     (entry) => entry.nodeId === selectedTargetId,
   );
@@ -376,27 +387,19 @@ export const StrokeSelectionToolbar = () => {
     if (hasSelection && !useAcpProfilesStore.getState().loaded) {
       void useAcpProfilesStore.getState().init();
     }
-    if (selecting) return;
-    const previous = attemptScopeRef.current;
-    if (
-      !hasSelection ||
-      previous.canvasId !== canvasId ||
-      previous.selectionSession !== selectionSession
-    ) {
-      attemptsRef.current.clear();
-    }
-    attemptScopeRef.current = { canvasId, selectionSession };
-  }, [hasSelection, selecting, selectionSession, canvasId]);
+  }, [hasSelection]);
+  useEffect(
+    () => () => {
+      mountedRef.current = false;
+    },
+    [],
+  );
 
   const changeDestination = (next: InkDestination) => {
     if (preparationRef.current) return;
     if (next.kind === 'new' && next.choice) {
       rememberConversationAgentBinding(next.choice.binding);
     }
-    destinationIdentityRef.current = inkDestinationIdentity(
-      next,
-      recentProfileId,
-    );
     chooseDestination(next);
   };
 
@@ -409,20 +412,6 @@ export const StrokeSelectionToolbar = () => {
       ),
     [],
   );
-  const renderedLassoIdentity = inkLassoIdentity(
-    useCanvasStore.getState().canvasId,
-    selection,
-    selectionPolygon,
-  );
-  useEffect(() => {
-    const active = preparationRef.current;
-    if (!active || active.lassoIdentity === renderedLassoIdentity) return;
-    attemptsRef.current.clear();
-    preparationRef.current = null;
-    setStartedDestination(null);
-    setInkSubmissionPreparing(false);
-    setIsPreparing(false);
-  }, [renderedLassoIdentity, setInkSubmissionPreparing]);
   const handleSubmit = useCallback(async () => {
     if (preparationRef.current) return;
     if (confirmingDestination) {
@@ -453,205 +442,212 @@ export const StrokeSelectionToolbar = () => {
       canvas.nodes,
       strokeSelection,
     );
-    const identity = JSON.stringify([sourceIdentity, destinationIdentity]);
+    let selectionSessionId: number | null = null;
+    if (selectionSession) {
+      const sessionIds = selectionSessionIdsRef.current;
+      selectionSessionId = sessionIds.values.get(selectionSession) ?? null;
+      if (selectionSessionId === null) {
+        selectionSessionId = sessionIds.next;
+        sessionIds.next += 1;
+        sessionIds.values.set(selectionSession, selectionSessionId);
+      }
+    }
+    const identity = JSON.stringify([
+      sourceIdentity,
+      destinationIdentity,
+      selectionSessionId,
+    ]);
     const lassoIdentity = inkLassoIdentity(
       canvas.canvasId,
       strokeSelection,
       useGesturePreviewStore.getState().sketchSelectionPolygon,
     );
-    const capturedSources = {
-      canvasId: canvas.canvasId,
-      canvasContext: canvas.getAgentChatContext({
-        nodeIds: freshCandidate.selectedNodeIds,
-        strokeSelection: freshCandidate.strokeSelection,
-        excludeNodeIds: freshCandidate.excludedNodeIds,
-      }),
-    };
-    const groundingOperands = groundingOperandsFromContext(
-      capturedSources.canvasContext,
-    );
     const preparationToken = {};
     const isCurrentAttempt = () =>
-      preparationRef.current?.token === preparationToken &&
-      destinationIdentityRef.current === destinationIdentity &&
-      currentLassoIdentity() === lassoIdentity &&
-      inkSelectionIdentity(
-        useCanvasStore.getState().canvasId,
-        useCanvasStore.getState().nodes,
-        useGesturePreviewStore.getState().sketchStrokeSelection,
-      ) === sourceIdentity;
-    preparationRef.current = {
-      token: preparationToken,
-      lassoIdentity,
-    };
+      preparationRef.current?.token === preparationToken;
+    preparationRef.current = { token: preparationToken };
     setInkSubmissionPreparing(true);
     setIsPreparing(true);
+    let interactionReserved = true;
+    const releaseInteractionReservation = () => {
+      if (!interactionReserved) return;
+      interactionReserved = false;
+      setInkSubmissionPreparing(false);
+    };
     const releasePreparation = () => {
       if (preparationRef.current?.token !== preparationToken) return;
       preparationRef.current = null;
       setStartedDestination(null);
-      setInkSubmissionPreparing(false);
+      releaseInteractionReservation();
       setIsPreparing(false);
     };
     let retainReservation = false;
     try {
+      for (const [attemptIdentity, previous] of attemptsRef.current) {
+        if (attemptIdentity === identity || !previous.pendingGrounding)
+          continue;
+        disposePendingGrounding(previous);
+        attemptsRef.current.delete(attemptIdentity);
+      }
       let attempt = attemptsRef.current.get(identity);
       if (!attempt) {
-        let groundingVisual: VisibleCanvasGrounding | undefined;
+        const capturedSources = {
+          canvasId: canvas.canvasId,
+          canvasContext: canvas.getAgentChatContext({
+            nodeIds: freshCandidate.selectedNodeIds,
+            strokeSelection: freshCandidate.strokeSelection,
+            excludeNodeIds: freshCandidate.excludedNodeIds,
+          }),
+        };
+        const groundingOperands = groundingOperandsFromContext(
+          capturedSources.canvasContext,
+        );
         const groundingNodeIds = groundingOperands.selectedNodeIds;
-        if (groundingNodeIds.length > 0) {
-          const ordinaryNodeIds = new Set(groundingNodeIds);
-          const selectedNodes = canvas.nodes.filter((node) =>
-            ordinaryNodeIds.has(node.id),
-          );
-          const nodeBounds = getSelectionBounds(selectedNodes, canvas.nodes);
-          const currentStrokeBounds =
-            getSketchStrokeSelectionBounds(strokeSelection);
-          const sourceBounds = unionSelectionBounds(
-            currentStrokeBounds,
-            nodeBounds
-              ? {
-                  x: nodeBounds.minX,
-                  y: nodeBounds.minY,
-                  width: nodeBounds.width,
-                  height: nodeBounds.height,
-                }
-              : null,
-          );
-          if (!sourceBounds) return;
-          const viewport = getViewport();
-          const captured = await captureVisibleCanvasGrounding({
-            bounds: {
-              x: sourceBounds.x * viewport.zoom + viewport.x,
-              y: sourceBounds.y * viewport.zoom + viewport.y,
-              width: sourceBounds.width * viewport.zoom,
-              height: sourceBounds.height * viewport.zoom,
-            },
-          });
-          const currentViewport = getViewport();
-          if (
-            currentLassoIdentity() !== lassoIdentity ||
-            !isViewportStableForBounds(viewport, currentViewport, sourceBounds)
-          ) {
-            throw new Error(
-              'Canvas view changed during Ink grounding capture. Submit again.',
-            );
+        const ordinaryNodeIds = new Set(groundingNodeIds);
+        const selectedNodes = canvas.nodes.filter((node) =>
+          ordinaryNodeIds.has(node.id),
+        );
+        const nodeBounds = getSelectionBounds(selectedNodes, canvas.nodes);
+        const currentStrokeBounds =
+          getSketchStrokeSelectionBounds(strokeSelection);
+        const sourceBounds = unionSelectionBounds(
+          currentStrokeBounds,
+          nodeBounds
+            ? {
+                x: nodeBounds.minX,
+                y: nodeBounds.minY,
+                width: nodeBounds.width,
+                height: nodeBounds.height,
+              }
+            : null,
+        );
+        if (!sourceBounds) return;
+        let pendingGrounding: InkSubmissionAttempt['pendingGrounding'];
+        try {
+          if (groundingNodeIds.length > 0) {
+            const viewport = getViewport();
+            pendingGrounding = {
+              snapshot: prepareVisibleCanvasGrounding({
+                bounds: {
+                  x: sourceBounds.x * viewport.zoom + viewport.x,
+                  y: sourceBounds.y * viewport.zoom + viewport.y,
+                  width: sourceBounds.width * viewport.zoom,
+                  height: sourceBounds.height * viewport.zoom,
+                },
+              }),
+              viewport,
+              selectedNodeIds: groundingNodeIds,
+              strokeSubsets: groundingOperands.strokeSubsets,
+            };
           }
-          const dataUrl = await blobToDataUrl(captured.blob);
-          groundingVisual = {
-            kind: 'visible-canvas',
-            dataUrl,
-            viewport: {
-              x: viewport.x,
-              y: viewport.y,
-              zoom: viewport.zoom,
-              width: captured.viewport.width,
-              height: captured.viewport.height,
-              devicePixelRatio: captured.devicePixelRatio,
-            },
-            crop: captured.crop,
-            selectedNodeIds: groundingNodeIds,
-            strokeSubsets: groundingOperands.strokeSubsets,
-          };
-        }
-        if (!isCurrentAttempt())
-          throw new Error(t('toolbar.inkAgentPicker.changed'));
-        if (freshCandidate.target) {
-          if (isInkTargetBusy(freshCandidate.target.nodeId)) {
-            throw new Error(t('toolbar.inkAgentPicker.busy'));
-          }
-          const { nodeId, threadId } = freshCandidate.target;
-          attempt = {
-            identity,
-            mode: inkTargetAgent(freshCandidate.target).mode,
-            groundingVisual,
-            session: {
-              canvasId: canvas.canvasId,
-              ownerCanvasId: canvas.canvasId,
-              threadId,
-              conversationView: {
-                presentationAnchor: { canvasId: canvas.canvasId, nodeId },
-                conversationOwner: {
-                  canvasId: canvas.canvasId,
-                  nodeId,
-                  threadId,
+          if (freshCandidate.target) {
+            if (isInkTargetBusy(freshCandidate.target.nodeId)) {
+              throw new Error(t('toolbar.inkAgentPicker.busy'));
+            }
+            const { nodeId, threadId } = freshCandidate.target;
+            attempt = {
+              identity,
+              mode: inkTargetAgent(freshCandidate.target).mode,
+              pendingGrounding,
+              sources: capturedSources,
+              session: {
+                canvasId: canvas.canvasId,
+                ownerCanvasId: canvas.canvasId,
+                threadId,
+                conversationView: {
+                  presentationAnchor: { canvasId: canvas.canvasId, nodeId },
+                  conversationOwner: {
+                    canvasId: canvas.canvasId,
+                    nodeId,
+                    threadId,
+                  },
                 },
               },
-            },
-          };
-        } else {
-          let binding: AgentBinding;
-          if (destination.kind === 'new' && destination.choice) {
-            await useAcpProfilesStore.getState().refresh();
+            };
+          } else {
+            const binding =
+              destination.kind === 'new' && destination.choice
+                ? destination.choice.binding
+                : getDefaultAgentBinding();
             const profiles = useAcpProfilesStore.getState();
-            if (profiles.error) throw profiles.error;
-            binding = destination.choice.binding;
             if (
               binding.kind === 'external' &&
               !profiles.selectableProfileIds.includes(binding.profileId)
             ) {
               throw new Error(t('toolbar.inkAgentPicker.unavailable'));
             }
-          } else {
-            binding = await loadDefaultAgentBinding();
-          }
-          if (!isCurrentAttempt()) {
-            throw new Error(
-              'Canvas selection changed while preparing the Ink Agent. Submit again.',
-            );
-          }
-          const selectedNodes = canvas.nodes.filter((node) =>
-            freshCandidate.selectedNodeIds.includes(node.id),
-          );
-          const nodeBounds = getSelectionBounds(selectedNodes, canvas.nodes);
-          const currentStrokeBounds =
-            getSketchStrokeSelectionBounds(strokeSelection);
-          const sourceBounds = unionSelectionBounds(
-            currentStrokeBounds,
-            nodeBounds
-              ? {
-                  x: nodeBounds.minX,
-                  y: nodeBounds.minY,
-                  width: nodeBounds.width,
-                  height: nodeBounds.height,
-                }
-              : null,
-          );
-          if (!sourceBounds) return;
-          const placementPoint = computeAdjacentNodePlacement({
-            nodes: canvas.nodes as NestableNode[],
-            source: sourceBounds,
-            nodeType: 'question',
-            side: 'bottom',
-          });
-          const mode =
-            destination.kind === 'new' && destination.choice
-              ? destination.choice.mode
-              : binding.kind === 'internal'
-                ? 'operate'
-                : 'ask';
-          const created = createQuestionNode({
-            addNode,
-            placementPoint,
-            canvasId: canvas.canvasId,
-            binding,
-            mode,
-            label: 'New ink request',
-            pendingInkIntentLabel: true,
-          });
-          attempt = {
-            identity,
-            mode,
-            groundingVisual,
-            session: {
+            const placementPoint = computeAdjacentNodePlacement({
+              nodes: canvas.nodes as NestableNode[],
+              source: sourceBounds,
+              nodeType: 'question',
+              side: 'bottom',
+            });
+            const mode =
+              destination.kind === 'new' && destination.choice
+                ? destination.choice.mode
+                : binding.kind === 'internal'
+                  ? 'operate'
+                  : 'ask';
+            const created = createQuestionNode({
+              addNode,
+              placementPoint,
               canvasId: canvas.canvasId,
-              ownerCanvasId: canvas.canvasId,
-              threadId: created.threadId,
-              conversationView: created.conversationView,
-            },
-          };
+              binding,
+              mode,
+              label: 'New ink request',
+              pendingInkIntentLabel: true,
+            });
+            attempt = {
+              identity,
+              mode,
+              pendingGrounding,
+              sources: capturedSources,
+              session: {
+                canvasId: canvas.canvasId,
+                ownerCanvasId: canvas.canvasId,
+                threadId: created.threadId,
+                conversationView: created.conversationView,
+              },
+            };
+          }
+        } catch (error) {
+          pendingGrounding?.snapshot.dispose();
+          throw error;
         }
         attemptsRef.current.set(identity, attempt);
+      }
+      releaseInteractionReservation();
+      if (attempt.pendingGrounding && !attempt.groundingVisual) {
+        const pendingGrounding = attempt.pendingGrounding;
+        let captured: Awaited<
+          ReturnType<PreparedVisibleCanvasGrounding['capture']>
+        >;
+        try {
+          captured = await pendingGrounding.snapshot.capture();
+        } catch (error) {
+          if (!mountedRef.current) {
+            disposePendingGrounding(attempt);
+            attemptsRef.current.delete(identity);
+          }
+          throw error;
+        }
+        const dataUrl = await blobToDataUrl(captured.blob);
+        attempt.groundingVisual = {
+          kind: 'visible-canvas',
+          dataUrl,
+          viewport: {
+            x: pendingGrounding.viewport.x,
+            y: pendingGrounding.viewport.y,
+            zoom: pendingGrounding.viewport.zoom,
+            width: captured.viewport.width,
+            height: captured.viewport.height,
+            devicePixelRatio: captured.devicePixelRatio,
+          },
+          crop: captured.crop,
+          selectedNodeIds: pendingGrounding.selectedNodeIds,
+          strokeSubsets: pendingGrounding.strokeSubsets,
+        };
+        disposePendingGrounding(attempt);
       }
 
       const prepared = prepareAgentTurn({
@@ -660,7 +656,7 @@ export const StrokeSelectionToolbar = () => {
         content: '',
         mode: attempt.mode,
         groundingVisual: attempt.groundingVisual,
-        sources: capturedSources,
+        sources: attempt.sources,
       });
       let dispatchInvalidReason: string | undefined;
       const result = await dispatchAgentTurn(prepared, {
@@ -678,38 +674,22 @@ export const StrokeSelectionToolbar = () => {
             dispatchInvalidReason = t('toolbar.inkAgentPicker.changed');
             return false;
           }
-          if (selectedTargetId) {
-            const current = deriveInkSubmissionCandidate(
-              useCanvasStore.getState().nodes,
-              useGesturePreviewStore.getState().sketchStrokeSelection,
-              selectedTargetId,
-            );
-            if (
-              current.kind === 'ready' &&
-              current.target &&
-              inkTargetAgent(current.target).mode !== attempt.mode
-            ) {
-              attemptsRef.current.delete(identity);
-              dispatchInvalidReason = t('toolbar.inkAgentPicker.changed');
-              return false;
-            }
-            const eligible =
-              current.kind === 'ready' &&
-              current.target?.threadId === attempt.session.threadId &&
-              !isInkTargetBusy(selectedTargetId);
-            if (!eligible)
-              dispatchInvalidReason = t('toolbar.inkAgentPicker.unavailable');
-            return eligible;
-          }
           return true;
         },
         onAccepted: () => {
-          const stillCurrent =
-            preparationRef.current?.token === preparationToken &&
-            destinationIdentityRef.current === destinationIdentity &&
-            currentLassoIdentity() === lassoIdentity;
+          const stillCurrent = isCurrentAttempt();
+          const stillCapturedSelection =
+            currentLassoIdentity() === lassoIdentity &&
+            inkSelectionIdentity(
+              useCanvasStore.getState().canvasId,
+              useCanvasStore.getState().nodes,
+              useGesturePreviewStore.getState().sketchStrokeSelection,
+            ) === sourceIdentity;
           releasePreparation();
-          if (!stillCurrent) return;
+          if (!stillCurrent || !stillCapturedSelection) return;
+          for (const pendingAttempt of attemptsRef.current.values()) {
+            disposePendingGrounding(pendingAttempt);
+          }
           attemptsRef.current.clear();
           clearSelection();
           useCanvasStore.getState().selectNodes([]);
@@ -746,6 +726,7 @@ export const StrokeSelectionToolbar = () => {
     setInkSubmissionPreparing,
     destination,
     destinationIdentity,
+    selectionSession,
     selectedTargetId,
     t,
   ]);
