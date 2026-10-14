@@ -70,7 +70,7 @@ describe('chatStore composer drafts', () => {
     );
   });
 
-  it('consumes only the accepted draft snapshot and retains additions and edits', () => {
+  it('consumes only the submitted draft snapshot and retains additions and edits', () => {
     const store = useChatStore.getState();
     const comment = {
       quote: 'Passage',
@@ -102,6 +102,53 @@ describe('chatStore composer drafts', () => {
     expect(selectThreadDraft(useChatStore.getState(), 'a')).toBe('');
     expect(selectThreadQuotedComments(useChatStore.getState(), 'a')).toEqual(
       [],
+    );
+  });
+
+  it('restores a rejected submission and preserves its quoted-comment identities', () => {
+    const store = useChatStore.getState();
+    store.setDraft('a', 'Original draft');
+    store.addQuotedComment('a', {
+      quote: 'Passage',
+      contextBefore: '',
+      contextAfter: '',
+      comment: 'Explain.',
+    });
+    const sent = selectThreadQuotedComments(useChatStore.getState(), 'a');
+    store.consumeDraft('a', 'Original draft', sent);
+    store.restoreDraftIfEmpty('a', 'Original draft', sent);
+    expect(selectThreadDraft(useChatStore.getState(), 'a')).toBe(
+      'Original draft',
+    );
+    expect(selectThreadQuotedComments(useChatStore.getState(), 'a')).toEqual(
+      sent,
+    );
+    expect(selectThreadDraft(useChatStore.getState(), 'b')).toBe('');
+  });
+
+  it.each(['Next message', ' '])(
+    'does not overwrite newer text %j when restoring a rejected submission',
+    (text) => {
+      const store = useChatStore.getState();
+      store.setDraft('a', text);
+      store.restoreDraftIfEmpty('a', 'Original draft', []);
+      expect(selectThreadDraft(useChatStore.getState(), 'a')).toBe(text);
+    },
+  );
+
+  it('does not overwrite a newer quote-only draft when restoring a rejected submission', () => {
+    const store = useChatStore.getState();
+    store.addQuotedComment('a', {
+      quote: 'New passage',
+      contextBefore: '',
+      contextAfter: '',
+      comment: 'New comment.',
+    });
+    const next = selectThreadQuotedComments(useChatStore.getState(), 'a');
+    store.restoreDraftIfEmpty('a', 'Original draft', []);
+    expect(selectThreadDraft(useChatStore.getState(), 'a')).toBe('');
+    expect(selectThreadQuotedComments(useChatStore.getState(), 'a')).toEqual(
+      next,
     );
   });
 

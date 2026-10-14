@@ -963,6 +963,33 @@ function sourceMessageMetadata(context: AgentChatContext): {
   };
 }
 
+export function createAgentTurnUserMessage(
+  prepared: PreparedAgentTurn,
+): Extract<ChatMessage, { role: 'user' }> {
+  const { selectedNodeIds, selectedStrokeIds } = sourceMessageMetadata(
+    prepared.sources.canvasContext,
+  );
+  return {
+    id: createId('message'),
+    role: 'user',
+    content: prepared.content,
+    ...(prepared.quotedComments?.length
+      ? { quotedComments: prepared.quotedComments }
+      : {}),
+    inputKind: prepared.inputKind,
+    ...(prepared.inputKind === 'ink-intent'
+      ? { inkInterpretation: { state: 'pending' as const } }
+      : {}),
+    groundingVisual: prepared.groundingVisual,
+    attachments: prepared.attachments,
+    ...(selectedNodeIds.length > 0 ? { selectedNodeIds } : {}),
+    ...(selectedStrokeIds.length > 0 ? { selectedStrokeIds } : {}),
+    ...(prepared.invokedSkills?.length
+      ? { invokedSkills: prepared.invokedSkills }
+      : {}),
+  };
+}
+
 export async function dispatchAgentTurn(
   input: PreparedAgentTurn,
   callbacks: AgentTurnCallbacks = {},
@@ -1012,10 +1039,8 @@ export async function dispatchAgentTurn(
     // selection, in gesturePreviewStore) so the chip matches what was
     // actually sent as context.
     const canvasContext = prepared.sources.canvasContext;
-    const {
-      selectedNodeIds: sentSelectedNodeIds,
-      selectedStrokeIds: sentSelectedStrokeIds,
-    } = sourceMessageMetadata(canvasContext);
+    const { selectedStrokeIds: sentSelectedStrokeIds } =
+      sourceMessageMetadata(canvasContext);
     const acceptanceKey = turnKey(requestScope.canvasId, threadId);
     if (turnAcceptanceSinks.has(acceptanceKey)) {
       result.status = 'busy';
@@ -1085,26 +1110,9 @@ export async function dispatchAgentTurn(
     setThreadLastAction(threadId, agentMode);
     callbacks.onStarted?.();
 
-    const userMessageId = createId('message');
-    addMessage(threadId, {
-      id: userMessageId,
-      role: 'user',
-      content: prompt,
-      ...(quotedComments?.length ? { quotedComments } : {}),
-      inputKind,
-      ...(inputKind === 'ink-intent'
-        ? { inkInterpretation: { state: 'pending' as const } }
-        : {}),
-      groundingVisual: prepared.groundingVisual,
-      attachments,
-      ...(sentSelectedNodeIds.length > 0
-        ? { selectedNodeIds: sentSelectedNodeIds }
-        : {}),
-      ...(sentSelectedStrokeIds.length > 0
-        ? { selectedStrokeIds: sentSelectedStrokeIds }
-        : {}),
-      ...(invokedSkills && invokedSkills.length > 0 ? { invokedSkills } : {}),
-    });
+    const userMessage = createAgentTurnUserMessage(prepared);
+    const userMessageId = userMessage.id;
+    addMessage(threadId, userMessage);
 
     setThreadLoading(threadId, true);
 

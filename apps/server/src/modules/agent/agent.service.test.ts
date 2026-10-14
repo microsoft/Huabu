@@ -491,7 +491,10 @@ describe('runAgent Ink model requirements', () => {
             threadId,
             workloadType: 'Deployment',
             context: priorContext([]),
-            envelope: { user: { inputKind: 'ink-intent' } } as ChatEnvelope,
+            envelope: {
+              ...ENVELOPE,
+              user: { ...ENVELOPE.user, inputKind: 'ink-intent', text: '' },
+            },
             onTurnStarted,
           }),
         );
@@ -535,7 +538,10 @@ describe('runAgent Ink model requirements', () => {
           threadId,
           workloadType: 'Deployment',
           context: priorContext([]),
-          envelope: { user: { inputKind: 'ink-intent' } } as ChatEnvelope,
+          envelope: {
+            ...ENVELOPE,
+            user: { ...ENVELOPE.user, inputKind: 'ink-intent', text: '' },
+          },
           modelRole: 'skill',
           hasImage: true,
           onTurnStarted,
@@ -564,7 +570,10 @@ describe('runAgent Ink model requirements', () => {
           threadId,
           workloadType: 'Deployment',
           context: priorContext([]),
-          envelope: { user: { inputKind: 'ink-intent' } } as ChatEnvelope,
+          envelope: {
+            ...ENVELOPE,
+            user: { ...ENVELOPE.user, inputKind: 'ink-intent', text: '' },
+          },
           onTurnStarted,
         }),
       );
@@ -600,7 +609,10 @@ describe('runAgent Ink model requirements', () => {
           threadId: 'rejected-model-control',
           workloadType: 'Deployment',
           context: priorContext([]),
-          envelope: { user: { inputKind: 'ink-intent' } } as ChatEnvelope,
+          envelope: {
+            ...ENVELOPE,
+            user: { ...ENVELOPE.user, inputKind: 'ink-intent', text: '' },
+          },
           modelId: 'vision',
           onTurnStarted,
         }),
@@ -654,7 +666,10 @@ describe('runAgent Ink model requirements', () => {
               threadId,
               workloadType: 'Deployment',
               context: priorContext([]),
-              envelope: { user: { inputKind: 'ink-intent' } } as ChatEnvelope,
+              envelope: {
+                ...ENVELOPE,
+                user: { ...ENVELOPE.user, inputKind: 'ink-intent', text: '' },
+              },
               modelId: source === 'request' ? 'chosen-text' : undefined,
               onTurnStarted,
             }),
@@ -693,7 +708,10 @@ describe('runAgent Ink model requirements', () => {
           threadId,
           workloadType: 'Deployment',
           context: priorContext([]),
-          envelope: { user: { inputKind: 'ink-intent' } } as ChatEnvelope,
+          envelope: {
+            ...ENVELOPE,
+            user: { ...ENVELOPE.user, inputKind: 'ink-intent', text: '' },
+          },
           modelId: 'vision',
           onTurnStarted,
         }),

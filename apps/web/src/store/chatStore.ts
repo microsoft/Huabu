@@ -227,12 +227,18 @@ export interface ChatState {
     comment: string,
   ) => void;
   removeQuotedComment: (threadId: string, index: number) => void;
-  /** Consume accepted text and unchanged entries from the captured draft. */
+  /** Consume submitted text and unchanged entries from the captured draft. */
   consumeDraft: (
     threadId: string,
     text: string,
     comments: readonly DraftQuotedComment[],
   ) => void;
+  /** Restore a rejected submission only if the composer has no newer draft. */
+  restoreDraftIfEmpty: (
+    threadId: string,
+    text: string,
+    comments: readonly DraftQuotedComment[],
+  ) => boolean;
 
   /** Set/replace the text-selection-based attachment (auto-managed by ExpandedNodePanel). */
   setSelectionAttachment: (attachment: ChatAttachment | null) => void;
@@ -690,6 +696,20 @@ export const useChatStore = create<ChatState>()(
             ),
           });
         }),
+
+      restoreDraftIfEmpty: (threadId, text, comments) => {
+        let restored = false;
+        set((state) => {
+          const thread = threadOf(state, threadId);
+          if (thread.draft || thread.pendingQuotedComments.length) return {};
+          restored = true;
+          return patchThread(state, threadId, {
+            draft: text,
+            pendingQuotedComments: [...comments],
+          });
+        });
+        return restored;
+      },
 
       setSelectionAttachment: (attachment) =>
         set({ selectionAttachment: attachment }),

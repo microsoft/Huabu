@@ -5,6 +5,7 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { ApiError } from '@/api/_client';
 import useCanvasStore from '@/store/canvasStore';
 import { selectThreadMessages, useChatStore } from '@/store/chatStore';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
@@ -38,6 +39,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/api/agent', () => ({
   agentApi: { streamMessage: mocks.stream, stopThread: mocks.stop },
+}));
+vi.mock('@/api/conversationTitles', () => ({
+  queryConversationTitles: vi.fn(async () => ({ titles: {} })),
+  setConversationTitle: vi.fn(),
 }));
 vi.mock('@/store/canvasStore', async (original) => ({
   ...((await original()) as object),
@@ -1067,7 +1072,7 @@ describe('shared Agent turn input', () => {
   });
 
   it.each([true, false])(
-    'consumes quoted drafts only after durable acceptance: %s',
+    'clears quoted drafts before transport and restores only a rejected submission: %s',
     async (accepted) => {
       const store = useChatStore.getState();
       store.setDraft(session.threadId, 'General instructions');
@@ -1081,11 +1086,11 @@ describe('shared Agent turn input', () => {
         async (_content, _thread, _mode, callbacks: AgentStreamCallbacks) => {
           expect(
             useChatStore.getState().threadsById[session.threadId].draft,
-          ).toBe('General instructions');
+          ).toBe('');
           expect(
             useChatStore.getState().threadsById[session.threadId]
               .pendingQuotedComments,
-          ).toHaveLength(1);
+          ).toHaveLength(0);
           if (accepted) {
             callbacks.onAccepted?.({
               threadId: session.threadId,
@@ -1093,7 +1098,9 @@ describe('shared Agent turn input', () => {
             });
             callbacks.onComplete();
           } else {
-            callbacks.onError(new Error('Request failed before acceptance'));
+            callbacks.onError(
+              new ApiError(400, {}, 'Request rejected before acceptance'),
+            );
           }
         },
       );
@@ -1121,6 +1128,215 @@ describe('shared Agent turn input', () => {
       ]);
     },
   );
+
+  describe('optimistic composer clearing', () => {
+    let hook: UseAgentStreamReturn;
+    const quote = {
+      quote: 'Original reply',
+      contextBefore: '',
+      contextAfter: '',
+      comment: 'Explain this.',
+    };
+    beforeEach(async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const store = useChatStore.getState();
+      store.setDraft(session.threadId, 'Hello');
+      store.addQuotedComment(session.threadId, quote);
+      function Harness() {
+        hook = useAgentStream(session);
+        return null;
+      }
+      container = document.createElement('div');
+      root = createRoot(container);
+      await act(async () => root?.render(createElement(Harness)));
+    });
+
+    it('clears synchronously before saving and never clears a newer identical draft on acceptance', async () => {
+      const saved = deferred();
+      mocks.save.mockReturnValueOnce(saved.promise);
+      mocks.stream.mockImplementationOnce(
+        async (_content, _thread, _mode, callbacks: AgentStreamCallbacks) => {
+          const store = useChatStore.getState();
+          store.setDraft(session.threadId, 'Hello');
+          store.addQuotedComment(session.threadId, quote);
+          callbacks.onAccepted?.({
+            threadId: session.threadId,
+            turnStartSeq: 5,
+          });
+          callbacks.onComplete();
+        },
+      );
+      await act(async () => {
+        const running = hook.startStream('Hello', 'operate');
+        const current = useChatStore.getState().threadsById[session.threadId];
+        expect(current.draft).toBe('');
+        expect(current.pendingQuotedComments).toEqual([]);
+        expect(mocks.stream).not.toHaveBeenCalled();
+        saved.resolve();
+        await running;
+      });
+      const current = useChatStore.getState().threadsById[session.threadId];
+      expect(current.draft).toBe('Hello');
+      expect(current.pendingQuotedComments).toHaveLength(1);
+    });
+
+    it('restores the exact snapshot when preparation rejects before transport', async () => {
+      const snapshot = useChatStore.getState().threadsById[session.threadId];
+      mocks.save.mockRejectedValueOnce(new Error('Save conflict'));
+      await act(async () => hook.startStream('Hello', 'operate'));
+      const current = useChatStore.getState().threadsById[session.threadId];
+      expect(current.draft).toBe(snapshot.draft);
+      expect(current.pendingQuotedComments).toEqual(
+        snapshot.pendingQuotedComments,
+      );
+      expect(mocks.stream).not.toHaveBeenCalled();
+    });
+
+    it('clears a quote-only submission immediately', async () => {
+      act(() => useChatStore.getState().setDraft(session.threadId, ''));
+      await act(async () => {
+        const running = hook.startStream('', 'operate');
+        expect(
+          useChatStore.getState().threadsById[session.threadId]
+            .pendingQuotedComments,
+        ).toEqual([]);
+        await running;
+      });
+      expect(mocks.stream.mock.calls[0][0]).toBe('');
+      expect(mocks.stream.mock.calls[0][4].quotedComments).toEqual([quote]);
+    });
+
+    it('restores a busy submission without changing the active stream claim', async () => {
+      const claim = claimAgentStream('canvas-1', 'thread-1', 'post');
+      if (!claim) throw new Error('Missing stream claim');
+      try {
+        await act(async () => hook.startStream('Hello', 'operate'));
+        const current = useChatStore.getState().threadsById[session.threadId];
+        expect(current.draft).toBe('Hello');
+        expect(current.pendingQuotedComments).toHaveLength(1);
+        expect(mocks.stream).not.toHaveBeenCalled();
+        expect(hasAgentStreamClaim('canvas-1', 'thread-1')).toBe(true);
+      } finally {
+        claim.release();
+      }
+    });
+
+    it('keeps a preflight-rejected snapshot retryable when the user has already started a new draft', async () => {
+      mocks.save.mockImplementationOnce(async () => {
+        useChatStore.getState().setDraft(session.threadId, 'Next draft');
+        throw new Error('Save conflict');
+      });
+      await act(async () => hook.startStream('Hello', 'operate'));
+      expect(useChatStore.getState().threadsById[session.threadId].draft).toBe(
+        'Next draft',
+      );
+      const message = selectThreadMessages(
+        useChatStore.getState(),
+        session.threadId,
+      ).find((item) => item.role === 'user');
+      expect(message).toMatchObject({
+        content: 'Hello',
+        quotedComments: [quote],
+        selectedNodeIds: ['note-1', 'sketch-1'],
+      });
+      if (message?.role !== 'user') throw new Error('Missing retry snapshot');
+      const retry = prepareAgentTurnRetry(session, message, 'operate');
+      expect(retry.content).toBe('Hello');
+      expect(retry.quotedComments).toEqual([quote]);
+      expect(
+        selectThreadMessages(useChatStore.getState(), session.threadId).at(-1),
+      ).toMatchObject({
+        role: 'status',
+        status: 'error',
+        detail: 'Save conflict',
+      });
+      expect(mocks.stream).not.toHaveBeenCalled();
+    });
+
+    it.each(['text', 'quote'])(
+      'keeps a newer %s draft instead of restoring a rejected submission',
+      async (kind) => {
+        mocks.stream.mockImplementationOnce(
+          async (_content, _thread, _mode, callbacks: AgentStreamCallbacks) => {
+            const store = useChatStore.getState();
+            if (kind === 'text') store.setDraft(session.threadId, 'Next draft');
+            else
+              store.addQuotedComment(session.threadId, {
+                ...quote,
+                comment: 'Next comment.',
+              });
+            callbacks.onError(new ApiError(400, {}, 'Rejected'));
+          },
+        );
+        await act(async () => hook.startStream('Hello', 'operate'));
+        const current = useChatStore.getState().threadsById[session.threadId];
+        expect(current.draft).toBe(kind === 'text' ? 'Next draft' : '');
+        expect(
+          current.pendingQuotedComments.map((item) => item.comment),
+        ).toEqual(kind === 'quote' ? ['Next comment.'] : []);
+        expect(
+          selectThreadMessages(useChatStore.getState(), session.threadId),
+        ).toContainEqual(
+          expect.objectContaining({
+            role: 'user',
+            content: 'Hello',
+            quotedComments: [quote],
+          }),
+        );
+      },
+    );
+
+    it('does not restore an accepted submission after a runtime failure', async () => {
+      mocks.stream.mockImplementationOnce(
+        async (_content, _thread, _mode, callbacks: AgentStreamCallbacks) => {
+          callbacks.onAccepted?.({
+            threadId: session.threadId,
+            turnStartSeq: 5,
+          });
+          callbacks.onError(new Error('Agent failed after acceptance'));
+        },
+      );
+      await act(async () => hook.startStream('Hello', 'operate'));
+      const current = useChatStore.getState().threadsById[session.threadId];
+      expect(current.draft).toBe('');
+      expect(current.pendingQuotedComments).toEqual([]);
+    });
+
+    it.each([true, false])(
+      'waits for ambiguous acceptance to reconcile before deciding restoration: %s',
+      async (accepted) => {
+        mocks.stream.mockRejectedValueOnce(new Error('Connection lost'));
+        await act(async () => hook.startStream('Hello', 'operate'));
+        expect(
+          useChatStore.getState().threadsById[session.threadId].draft,
+        ).toBe('');
+        expect(
+          useChatStore.getState().threadsById[session.threadId]
+            .pendingQuotedComments,
+        ).toEqual([]);
+        if (accepted) {
+          act(() =>
+            observeAgentTurnAcceptance('canvas-1', {
+              threadId: session.threadId,
+              turnStartSeq: 5,
+            }),
+          );
+        } else {
+          await act(async () => {
+            stopAgentTurn(session);
+            await vi.waitFor(() =>
+              expect(
+                useChatStore.getState().threadsById[session.threadId].draft,
+              ).toBe('Hello'),
+            );
+          });
+        }
+        const current = useChatStore.getState().threadsById[session.threadId];
+        expect(current.draft).toBe(accepted ? '' : 'Hello');
+        expect(current.pendingQuotedComments).toHaveLength(accepted ? 0 : 1);
+      },
+    );
+  });
 
   it('keeps a text run alive after Chat unmount and permits a new Chat to stop it', async () => {
     let hook!: UseAgentStreamReturn;
