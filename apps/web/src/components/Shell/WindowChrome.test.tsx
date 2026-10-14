@@ -64,6 +64,12 @@ function NavigationProbe() {
   return null;
 }
 
+function chromeHeight() {
+  return document.documentElement.style.getPropertyValue(
+    '--window-chrome-height',
+  );
+}
+
 async function renderChrome(route = '/canvas/c1') {
   await act(async () => {
     root.render(
@@ -112,6 +118,7 @@ describe('WindowChrome fullscreen visibility', () => {
     expect((container.firstElementChild as HTMLDivElement).style.height).toBe(
       '36px',
     );
+    expect(chromeHeight()).toBe('36px');
   });
 
   it.each(['darwin', 'win32', 'linux'] as const)(
@@ -125,6 +132,7 @@ describe('WindowChrome fullscreen visibility', () => {
       await renderChrome();
 
       expect(container.childElementCount).toBe(0);
+      expect(chromeHeight()).toBe('0px');
       expect(isFullScreen).toHaveBeenCalledOnce();
     },
   );
@@ -135,9 +143,11 @@ describe('WindowChrome fullscreen visibility', () => {
 
     act(() => fullScreenListener?.(true));
     expect(container.childElementCount).toBe(0);
+    expect(chromeHeight()).toBe('0px');
 
     act(() => fullScreenListener?.(false));
     expect(container.textContent).toContain('Test Canvas');
+    expect(chromeHeight()).toBe('36px');
   });
 
   it.each(['/spaces', '/setup', '/playground/design'])(
@@ -148,6 +158,7 @@ describe('WindowChrome fullscreen visibility', () => {
       await renderChrome(route);
 
       expect(container.childElementCount).toBe(1);
+      expect(chromeHeight()).toBe('36px');
     },
   );
 
@@ -155,12 +166,15 @@ describe('WindowChrome fullscreen visibility', () => {
     isFullScreen.mockResolvedValue(true);
     await renderChrome();
     expect(container.childElementCount).toBe(0);
+    expect(chromeHeight()).toBe('0px');
 
     await act(async () => navigate('/spaces'));
     expect(container.textContent).toContain('Test Workspace');
+    expect(chromeHeight()).toBe('36px');
 
     await act(async () => navigate('/canvas/c2'));
     expect(container.childElementCount).toBe(0);
+    expect(chromeHeight()).toBe('0px');
   });
 
   it('does not render title-bar chrome in the browser', async () => {
@@ -169,6 +183,7 @@ describe('WindowChrome fullscreen visibility', () => {
     await renderChrome();
 
     expect(container.childElementCount).toBe(0);
+    expect(chromeHeight()).toBe('0px');
     expect(isFullScreen).not.toHaveBeenCalled();
   });
 
@@ -183,6 +198,7 @@ describe('WindowChrome fullscreen visibility', () => {
     await renderChrome();
 
     expect(container.textContent).toContain('Test Canvas');
+    expect(chromeHeight()).toBe('36px');
   });
 
   it('unsubscribes even while the fullscreen title bar is hidden', async () => {
@@ -192,6 +208,7 @@ describe('WindowChrome fullscreen visibility', () => {
     act(() => root.unmount());
 
     expect(unsubscribe).toHaveBeenCalledOnce();
+    expect(chromeHeight()).toBe('');
     root = createRoot(container);
   });
 });

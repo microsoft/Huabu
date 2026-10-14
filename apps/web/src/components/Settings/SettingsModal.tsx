@@ -7,7 +7,6 @@ import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/components/Common/Button';
 import { SettingSection } from '@/components/Settings/Common/SettingSection';
-import { getElectronBridge } from '@/hooks/useElectron';
 import { useAcpProfilesStore } from '@/store/acpProfilesStore';
 import { useDeploymentReadinessStore } from '@/store/deploymentReadinessStore';
 import { useLLMStore } from '@/store/llmStore';
@@ -162,22 +161,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         ? t('settings.builtInPi')
         : t(activeLabelKey);
 
-  // In the Electron shell keep the custom title bar (`WindowChrome`)
-  // fully visible above the modal: offset the overlay below the
-  // title-bar strip so the backdrop never covers it. Otherwise the OS
-  // caption-button overlay stays opaque while the HTML chrome is dimmed,
-  // leaving a visibly half-covered, "incomplete" header.
-  const titleBarInset = getElectronBridge()?.titleBarHeight ?? 0;
-
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center"
-      style={titleBarInset ? { top: titleBarInset } : undefined}
-    >
+    <div className="fixed inset-0 top-[var(--window-chrome-height,0px)] z-50 flex items-center justify-center">
       {/* Backdrop */}
       {/* Backdrop: a soft, token-based frosted scrim (theme-aware) rather
           than a flat dark wash, so it harmonises with the bright title
-          bar left uncovered above and the white dialog panel. */}
+          bar (when visible) and the white dialog panel. */}
       <div
         role="presentation"
         className="animate-in fade-in bg-bg-default/80 absolute inset-0 backdrop-blur-sm duration-200"

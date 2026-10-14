@@ -2,7 +2,7 @@
 // Licensed under the MIT license.
 
 import { BookOpen, House } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useLocation } from 'react-router-dom';
 
@@ -63,6 +63,18 @@ export function WindowChrome() {
   const canvasCount = useWorkspaceStore((s) => s.canvasCount);
 
   const [isFullScreen, setIsFullScreen] = useState(false);
+  const onCanvasRoute = location.pathname.startsWith('/canvas/');
+  const titleBarHeight =
+    bridge && !(isFullScreen && onCanvasRoute) ? bridge.titleBarHeight : 0;
+
+  useLayoutEffect(() => {
+    const style = document.documentElement.style;
+    style.setProperty('--window-chrome-height', `${titleBarHeight}px`);
+    return () => {
+      style.removeProperty('--window-chrome-height');
+    };
+  }, [titleBarHeight]);
+
   useEffect(() => {
     const windowApi = bridge?.window;
     if (!windowApi) return;
@@ -118,7 +130,6 @@ export function WindowChrome() {
   const onCanvasListRoute = location.pathname === '/spaces';
   const onWorkspaceSetupRoute = location.pathname === '/setup';
   const showAppMenu = onCanvasListRoute || onWorkspaceSetupRoute;
-  const onCanvasRoute = location.pathname.startsWith('/canvas/');
   if (isFullScreen && onCanvasRoute) return null;
 
   const showWorkspaceSwitcher = onCanvasListRoute && !!workspaceLabel;

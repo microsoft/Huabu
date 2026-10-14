@@ -23,9 +23,6 @@ const mocks = vi.hoisted(() => ({
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
-vi.mock('@/hooks/useElectron', () => ({
-  getElectronBridge: () => undefined,
-}));
 vi.mock('@/store/acpProfilesStore', () => ({
   useAcpProfilesStore: (
     selector: (state: {
@@ -123,6 +120,16 @@ function findTab(label: string): HTMLButtonElement {
 }
 
 describe('Settings information architecture', () => {
+  it('uses the visible window chrome height for the backdrop inset', async () => {
+    await renderModal();
+
+    const overlay =
+      container.querySelector<HTMLElement>('[role="dialog"]')?.parentElement;
+    expect(
+      overlay?.classList.contains('top-[var(--window-chrome-height,0px)]'),
+    ).toBe(true);
+  });
+
   it('co-locates Agent defaults, Profiles, behavior, and runtime settings', async () => {
     await renderModal();
 
