@@ -612,6 +612,53 @@ describe('searchCanvas — conversation tier', () => {
     expect(matches[0].match.nodeId).toBe('q1');
   });
 
+  it.each(['quoted-original', 'authored-comment'])(
+    'indexes quoted comments in conversation search: %s',
+    async (query) => {
+      turnsByThread.clear();
+      const envelope: ChatEnvelope = {
+        user: {
+          text: '',
+          attachments: [],
+          quotedComments: [
+            {
+              quote: 'quoted-original',
+              contextBefore: 'not-indexed-context',
+              contextAfter: '',
+              comment: 'authored-comment',
+            },
+          ],
+        },
+        skills: { invokedIds: [], resolved: [] },
+        focus: {
+          selection: {
+            refs: [],
+            selectedIds: [],
+            imageAttachments: [],
+            snapshotAttachments: [],
+          },
+        },
+      };
+      turnsByThread.set('quoted-thread', [
+        { request: createChatSubmission(envelope), transcript: [] },
+      ]);
+      const events = await collect(
+        [mkNode('quoted-question', 'question', 'quoted-thread')],
+        [mkContent('quoted-question', 'question', { label: 'Q' })],
+        { query, fields: ['conversation'] },
+      );
+      expect(events.filter((event) => event.type === 'match')).toHaveLength(1);
+      const contextEvents = await collect(
+        [mkNode('quoted-question', 'question', 'quoted-thread')],
+        [mkContent('quoted-question', 'question', { label: 'Q' })],
+        { query: 'not-indexed-context', fields: ['conversation'] },
+      );
+      expect(
+        contextEvents.filter((event) => event.type === 'match'),
+      ).toHaveLength(0);
+    },
+  );
+
   it('excludes tool-call blocks from conversation matches', async () => {
     turnsByThread.clear();
     turnsByThread.set('t1', [

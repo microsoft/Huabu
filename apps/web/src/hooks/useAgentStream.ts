@@ -7,6 +7,8 @@ import { toast } from '@/components/Common/Toast';
 import {
   selectThreadIsLoading,
   selectThreadPendingAttachments,
+  selectThreadDraft,
+  selectThreadQuotedComments,
   useChatStore,
 } from '@/store/chatStore';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
@@ -67,12 +69,14 @@ export function useAgentStream(
   }, [previewTabId, session]);
   const startStream = useCallback(
     async (prompt: string, mode: AgentMode, invokedSkills?: string[]) => {
+      const chat = useChatStore.getState();
+      const quotedComments = selectThreadQuotedComments(chat, session.threadId);
       if (
-        !prompt.trim() ||
-        selectThreadIsLoading(useChatStore.getState(), session.threadId)
+        (!prompt.trim() && !quotedComments.length) ||
+        selectThreadIsLoading(chat, session.threadId)
       )
         return;
-      const chat = useChatStore.getState();
+      const draft = selectThreadDraft(chat, session.threadId);
       const pending = selectThreadPendingAttachments(chat, session.threadId);
       const excerpt = chat.selectionAttachment;
       try {
@@ -82,13 +86,24 @@ export function useAgentStream(
           content: prompt,
           mode,
           invokedSkills,
+          quotedComments: quotedComments.length
+            ? quotedComments.map(
+                ({ quote, contextBefore, contextAfter, comment }) => ({
+                  quote,
+                  contextBefore,
+                  contextAfter,
+                  comment,
+                }),
+              )
+            : undefined,
           sources: captureAgentTurnSources(session),
           attachments: [...pending, ...(excerpt ? [excerpt] : [])],
         });
         await dispatchAgentTurn(prepared, {
           canDispatch,
-          onStarted: () => {
+          onAccepted: () => {
             const current = useChatStore.getState();
+            current.consumeDraft(session.threadId, draft, quotedComments);
             if (
               selectThreadPendingAttachments(current, session.threadId) ===
               pending

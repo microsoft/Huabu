@@ -3,7 +3,11 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { selectThreadDraft, useChatStore } from './chatStore';
+import {
+  selectThreadDraft,
+  selectThreadQuotedComments,
+  useChatStore,
+} from './chatStore';
 
 const testStorage = vi.hoisted(() => {
   const values = new Map<string, string>();
@@ -30,6 +34,105 @@ describe('chatStore composer drafts', () => {
     useChatStore.setState({
       threadsById: {},
     });
+  });
+
+  it('keeps quoted comments thread-local and supports editing and removal', () => {
+    const store = useChatStore.getState();
+    const comment = {
+      quote: ' \nPassage  one\n\n    indented\nEnd. ',
+      contextBefore: 'Before ',
+      contextAfter: ' after',
+      comment: ' Explain. ',
+    };
+    store.setDraft('a', 'General instructions');
+    store.addQuotedComment('a', comment);
+    expect(selectThreadQuotedComments(useChatStore.getState(), 'a')[0]).toEqual(
+      {
+        ...comment,
+        draftId: expect.any(String),
+        quote: comment.quote.trim(),
+        comment: 'Explain.',
+      },
+    );
+    expect(selectThreadQuotedComments(useChatStore.getState(), 'b')).toEqual(
+      [],
+    );
+    store.updateQuotedComment('a', 0, 'More detail.');
+    expect(
+      selectThreadQuotedComments(useChatStore.getState(), 'a')[0]?.comment,
+    ).toBe('More detail.');
+    store.removeQuotedComment('a', 0);
+    expect(selectThreadQuotedComments(useChatStore.getState(), 'a')).toEqual(
+      [],
+    );
+    expect(selectThreadDraft(useChatStore.getState(), 'a')).toBe(
+      'General instructions',
+    );
+  });
+
+  it('consumes only the accepted draft snapshot and retains additions and edits', () => {
+    const store = useChatStore.getState();
+    const comment = {
+      quote: 'Passage',
+      contextBefore: '',
+      contextAfter: '',
+      comment: 'Explain.',
+    };
+    store.setDraft('a', 'Original draft');
+    store.addQuotedComment('a', comment);
+    store.addQuotedComment('a', { ...comment, comment: 'Second.' });
+    const sent = selectThreadQuotedComments(useChatStore.getState(), 'a');
+    store.setDraft('a', 'Next message');
+    store.updateQuotedComment('a', 1, 'Edited while sending');
+    store.addQuotedComment('a', { ...comment, comment: 'New comment.' });
+    store.consumeDraft('a', 'Original draft', sent);
+    expect(selectThreadDraft(useChatStore.getState(), 'a')).toBe(
+      'Next message',
+    );
+    expect(
+      selectThreadQuotedComments(useChatStore.getState(), 'a').map(
+        (item) => item.comment,
+      ),
+    ).toEqual(['Edited while sending', 'New comment.']);
+    store.consumeDraft(
+      'a',
+      'Next message',
+      selectThreadQuotedComments(useChatStore.getState(), 'a'),
+    );
+    expect(selectThreadDraft(useChatStore.getState(), 'a')).toBe('');
+    expect(selectThreadQuotedComments(useChatStore.getState(), 'a')).toEqual(
+      [],
+    );
+  });
+
+  it('consumes unchanged restored entries by draft identity while preserving edits and new copies', () => {
+    const store = useChatStore.getState();
+    const comment = {
+      quote: 'Passage',
+      contextBefore: '',
+      contextAfter: '',
+      comment: 'Explain.',
+    };
+    store.addQuotedComment('a', comment);
+    store.addQuotedComment('a', { ...comment, comment: 'Second.' });
+    const submitted = selectThreadQuotedComments(useChatStore.getState(), 'a');
+    store.setQuotedComments('a', []);
+    store.setQuotedComments('a', submitted);
+    const restored = selectThreadQuotedComments(useChatStore.getState(), 'a');
+    expect(restored[0]).not.toBe(submitted[0]);
+    expect(restored.map((item) => item.draftId)).toEqual(
+      submitted.map((item) => item.draftId),
+    );
+    store.updateQuotedComment('a', 1, 'Edited after restoring.');
+    store.addQuotedComment('a', comment);
+    store.consumeDraft('a', '', submitted);
+    const remaining = selectThreadQuotedComments(useChatStore.getState(), 'a');
+    expect(remaining.map((item) => item.comment)).toEqual([
+      'Edited after restoring.',
+      'Explain.',
+    ]);
+    expect(remaining[0].draftId).toBe(submitted[1].draftId);
+    expect(remaining[1].draftId).not.toBe(submitted[0].draftId);
   });
 
   describe('chatStore paged history', () => {

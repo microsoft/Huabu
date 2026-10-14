@@ -2,24 +2,35 @@
 // Licensed under the MIT license.
 
 import { ArrowUp, Square } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { uploadImage, uploadPdf } from '@/api/artifact';
 import { useChatSession } from '@/hooks/useChatSession';
-import { selectThreadMessages, useChatStore } from '@/store/chatStore';
+import {
+  selectThreadMessages,
+  selectThreadQuotedComments,
+  useChatStore,
+} from '@/store/chatStore';
 import { usePanelStore } from '@/store/panelStore';
 
 import { ChatContextSources } from './ChatContextSources';
 import { ContextUsageRing } from './ContextUsageRing';
 import { NodeMentionMenu } from './NodeMentionMenu';
+import { QuotedCommentDraft } from './QuotedCommentDraft';
 import { SlashCommandMenu } from './SlashCommandMenu';
 import { useNodeMentionTypeahead } from './useNodeMentionTypeahead';
 import { useSlashCommandTypeahead } from './useSlashCommandTypeahead';
 import { Button } from '../../Common/Button';
 
 import type { ContextUsageOverride } from './ContextUsageRing';
-import type { AgentMode, AvailableCommand } from '@huabu/shared';
+import type { AgentMode, AvailableCommand, QuotedComment } from '@huabu/shared';
 
 export interface ChatInputProps {
   value: string;
@@ -112,16 +123,55 @@ export const ChatInput = ({
   connectedTop = false,
 }: ChatInputProps) => {
   const { t } = useTranslation();
-  const isSubmitDisabled = disabled || !value.trim();
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const historyIndexRef = useRef(-1);
-  const draftRef = useRef('');
+  const draftRef = useRef<{ text: string; quotedComments: QuotedComment[] }>({
+    text: '',
+    quotedComments: [],
+  });
   const focusComposer = useCallback(() => {
     textareaRef.current?.focus({ preventScroll: true });
   }, []);
+  const resizeComposer = useCallback(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    textarea.style.overflowY = 'hidden';
+    textarea.style.height = 'auto';
+    textarea.style.height = textarea.value ? `${textarea.scrollHeight}px` : '';
+    textarea.style.overflowY = '';
+  }, []);
+
+  useLayoutEffect(resizeComposer, [resizeComposer, value]);
+
+  useLayoutEffect(() => {
+    const parent = textareaRef.current?.parentElement;
+    if (!parent || typeof ResizeObserver === 'undefined') return;
+    let width = parent.getBoundingClientRect().width;
+    const observer = new ResizeObserver(([entry]) => {
+      if (!entry || entry.contentRect.width === width) return;
+      width = entry.contentRect.width;
+      resizeComposer();
+    });
+    observer.observe(parent);
+    return () => observer.disconnect();
+  }, [resizeComposer]);
 
   // Pending attachments belong to the thread this composer is sending to.
   const { threadId, canvasId } = useChatSession();
+  const quotedComments = useChatStore((state) =>
+    selectThreadQuotedComments(state, threadId),
+  );
+  const updateQuotedComment = useChatStore(
+    (state) => state.updateQuotedComment,
+  );
+  const removeQuotedComment = useChatStore(
+    (state) => state.removeQuotedComment,
+  );
+  const setQuotedComments = useChatStore((state) => state.setQuotedComments);
+  const isSubmitDisabled =
+    disabled ||
+    (!value.trim() && quotedComments.length === 0) ||
+    quotedComments.some((item) => !item.comment.trim());
   const addPendingAttachment = useChatStore((s) => s.addPendingAttachment);
   const [isDragOver, setIsDragOver] = useState(false);
 
@@ -290,18 +340,24 @@ export const ChatInput = ({
       ) {
         const history = selectThreadMessages(useChatStore.getState(), threadId)
           .filter((m) => m.role === 'user')
-          .map((m) => (m.role === 'user' ? m.content : ''));
+          .map((m) => ({
+            text: m.content,
+            quotedComments: m.quotedComments ?? [],
+          }));
         if (history.length === 0) return;
 
         e.preventDefault();
         if (e.key === 'ArrowUp') {
-          if (historyIndexRef.current === -1) draftRef.current = value;
+          if (historyIndexRef.current === -1)
+            draftRef.current = { text: value, quotedComments };
           const next = Math.min(
             historyIndexRef.current + 1,
             history.length - 1,
           );
           historyIndexRef.current = next;
-          onChange(history[history.length - 1 - next]);
+          const previous = history[history.length - 1 - next];
+          onChange(previous.text);
+          setQuotedComments(threadId, previous.quotedComments);
           requestAnimationFrame(() => {
             ta.selectionStart = 0;
             ta.selectionEnd = 0;
@@ -310,9 +366,10 @@ export const ChatInput = ({
           if (historyIndexRef.current <= -1) return;
           const next = historyIndexRef.current - 1;
           historyIndexRef.current = next;
-          onChange(
-            next < 0 ? draftRef.current : history[history.length - 1 - next],
-          );
+          const previous =
+            next < 0 ? draftRef.current : history[history.length - 1 - next];
+          onChange(previous.text);
+          setQuotedComments(threadId, previous.quotedComments);
         }
         return;
       }
@@ -333,7 +390,7 @@ export const ChatInput = ({
   // Handle form submission
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isSubmitDisabled) {
+    if (!isStreaming && !isSubmitDisabled) {
       onSubmit(e, mode);
     }
   };
@@ -355,6 +412,32 @@ export const ChatInput = ({
             onCommit={onCommit}
             onActionComplete={focusComposer}
           />
+
+          {quotedComments.length > 0 ? (
+            <div
+              className="mb-3 flex max-h-80 flex-col gap-2 overflow-auto overscroll-contain"
+              role="group"
+              aria-label={t('messages.quotedComments')}
+            >
+              {quotedComments.map((comment, index) => (
+                <QuotedCommentDraft
+                  key={comment.draftId}
+                  comment={comment}
+                  disabled={disabled}
+                  onChange={(text) => {
+                    updateQuotedComment(threadId, index, text);
+                    onCommit?.();
+                  }}
+                  onRemove={() => {
+                    removeQuotedComment(threadId, index);
+                    onCommit?.();
+                    focusComposer();
+                  }}
+                  onKeyboardEditEnd={focusComposer}
+                />
+              ))}
+            </div>
+          ) : null}
 
           <div className="relative">
             <textarea
@@ -384,7 +467,7 @@ export const ChatInput = ({
               placeholder={currentPlaceholder}
               disabled={disabled}
               rows={2}
-              className="text-fg-default placeholder:text-fg-subtle w-full resize-none bg-transparent text-sm focus:outline-none disabled:cursor-not-allowed"
+              className="text-fg-default placeholder:text-fg-subtle max-h-[10lh] min-h-[2lh] w-full resize-none overflow-y-auto overscroll-contain bg-transparent text-sm focus:outline-none disabled:cursor-not-allowed"
             />
             {!mention.open && slash.slashState && (
               <SlashCommandMenu

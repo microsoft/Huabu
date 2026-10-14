@@ -40,6 +40,7 @@ import type {
   AgentInputKind,
   ChatAttachment,
   ChatEnvelope,
+  QuotedComment,
   ResolvedSkill,
   VisibleCanvasGrounding,
   WireSelectionNode,
@@ -69,6 +70,7 @@ export function envelopeHasImage(envelope: ChatEnvelope): boolean {
 export interface ChatEnvelopeParams {
   /** Raw user prompt text. */
   content: string;
+  quotedComments?: QuotedComment[];
   inputKind?: AgentInputKind;
   /** User-uploaded (off-canvas) attachments from the request body. */
   attachments?: ChatAttachment[];
@@ -405,6 +407,7 @@ export async function buildChatEnvelope(
 ): Promise<ChatEnvelope> {
   const {
     content,
+    quotedComments,
     inputKind,
     attachments,
     groundingVisual,
@@ -500,6 +503,7 @@ export async function buildChatEnvelope(
   return {
     user: {
       text: content,
+      ...(quotedComments?.length ? { quotedComments } : {}),
       ...(inputKind ? { inputKind } : {}),
       attachments: attachments ?? [],
     },

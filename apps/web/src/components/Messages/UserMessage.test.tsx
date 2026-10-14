@@ -37,6 +37,55 @@ afterEach(() => {
 });
 
 describe('UserMessage', () => {
+  it.each(['', 'Overall instructions'])(
+    'renders quoted comments as cards alongside user text %j',
+    (content) => {
+      container = document.createElement('div');
+      const root = createRoot(container);
+      act(() =>
+        root.render(
+          <UserMessage
+            content={content}
+            quotedComments={[
+              {
+                quote: 'First passage',
+                contextBefore: 'Before ',
+                contextAfter: ' after',
+                comment: 'Explain this.',
+              },
+              {
+                quote: 'Second passage',
+                contextBefore: '',
+                contextAfter: '',
+                comment: 'Compare it.',
+              },
+            ]}
+          />,
+        ),
+      );
+      expect(container.querySelectorAll('[data-quoted-comment]')).toHaveLength(
+        2,
+      );
+      expect(
+        [...container.querySelectorAll('blockquote')].map(
+          (item) => item.textContent,
+        ),
+      ).toEqual(['First passage', 'Second passage']);
+      expect(container.textContent).toContain('Explain this.');
+      expect(container.textContent).toContain('Compare it.');
+      if (content) expect(container.textContent).toContain(content);
+      expect(container.textContent).not.toContain(
+        'Quote from an earlier reply:',
+      );
+      expect(container.textContent).not.toContain('<quoted_comments>');
+      expect(container.querySelector('input')).toBeNull();
+      expect(container.querySelector('details')).toBeNull();
+      expect(container.textContent).not.toContain('Before');
+      expect(container.textContent).not.toContain(' after');
+      act(() => root.unmount());
+    },
+  );
+
   it('renders an honest label for an empty Ink request', () => {
     container = document.createElement('div');
     document.body.appendChild(container);

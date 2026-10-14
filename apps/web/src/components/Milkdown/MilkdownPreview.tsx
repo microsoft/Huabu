@@ -222,6 +222,13 @@ export function MilkdownPreview(
     if (!reportsTextSelection || !mountRoot) return;
     let frame: number | undefined;
     let hasReportedSelection = false;
+    let mousePosition: { x: number; y: number } | null = null;
+    let mouseSelectionRect: DOMRect | null = null;
+    let selectingWithMouse = false;
+    const clearMousePosition = () => {
+      mousePosition = null;
+      mouseSelectionRect = null;
+    };
     const report = () => {
       frame = undefined;
       const instance = instanceRef.current;
@@ -239,17 +246,36 @@ export function MilkdownPreview(
         !editor.contains(native.focusNode)
       ) {
         hasReportedSelection = false;
+        clearMousePosition();
         onTextSelectionRef.current?.(null);
         return;
       }
       const snapshot = instance.getTextSelection();
       const rect = instance.getSelectionClientRect();
       hasReportedSelection = !!snapshot && !!rect;
-      onTextSelectionRef.current?.(
-        snapshot && rect
-          ? { ...snapshot, position: { x: rect.left, y: rect.bottom } }
-          : null,
-      );
+      if (!snapshot || !rect) {
+        clearMousePosition();
+        onTextSelectionRef.current?.(null);
+        return;
+      }
+      let position: { x: number; y: number };
+      if (mousePosition) {
+        mouseSelectionRect ??= rect;
+        position = {
+          x: mousePosition.x + rect.left - mouseSelectionRect.left,
+          y: mousePosition.y + rect.top - mouseSelectionRect.top,
+        };
+      } else {
+        const focusRange = mountRoot.ownerDocument.createRange();
+        focusRange.setStart(native.focusNode, native.focusOffset);
+        focusRange.collapse(true);
+        const focusRect = focusRange.getBoundingClientRect();
+        position =
+          focusRect.height > 0
+            ? { x: focusRect.left, y: focusRect.bottom }
+            : { x: rect.right, y: rect.bottom };
+      }
+      onTextSelectionRef.current?.({ ...snapshot, position });
     };
     const schedule = () => {
       const native = mountRoot.ownerDocument.getSelection();
@@ -263,17 +289,41 @@ export function MilkdownPreview(
       if (frame !== undefined) cancelAnimationFrame(frame);
       frame = requestAnimationFrame(report);
     };
+    const handleMouseDown = (event: MouseEvent) => {
+      if (event.button !== 0) return;
+      selectingWithMouse = true;
+      clearMousePosition();
+    };
+    const handleMouseUp = (event: MouseEvent) => {
+      if (event.button !== 0) return;
+      if (
+        !selectingWithMouse &&
+        (!(event.target instanceof Node) || !mountRoot.contains(event.target))
+      ) {
+        return;
+      }
+      selectingWithMouse = false;
+      mousePosition = { x: event.clientX, y: event.clientY };
+      mouseSelectionRect = null;
+      schedule();
+    };
+    const handleKeyUp = () => {
+      clearMousePosition();
+      schedule();
+    };
     const doc = mountRoot.ownerDocument;
     doc.addEventListener('selectionchange', schedule);
-    mountRoot.addEventListener('mouseup', schedule);
-    mountRoot.addEventListener('keyup', schedule);
+    mountRoot.addEventListener('mousedown', handleMouseDown);
+    doc.addEventListener('mouseup', handleMouseUp);
+    mountRoot.addEventListener('keyup', handleKeyUp);
     window.addEventListener('scroll', schedule, true);
     window.addEventListener('resize', schedule);
     return () => {
       if (frame !== undefined) cancelAnimationFrame(frame);
       doc.removeEventListener('selectionchange', schedule);
-      mountRoot.removeEventListener('mouseup', schedule);
-      mountRoot.removeEventListener('keyup', schedule);
+      mountRoot.removeEventListener('mousedown', handleMouseDown);
+      doc.removeEventListener('mouseup', handleMouseUp);
+      mountRoot.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('scroll', schedule, true);
       window.removeEventListener('resize', schedule);
       onTextSelectionRef.current?.(null);

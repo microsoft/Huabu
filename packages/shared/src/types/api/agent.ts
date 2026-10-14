@@ -309,11 +309,20 @@ function sameStringSet(left: readonly string[], right: readonly string[]) {
   );
 }
 
+export const quotedCommentSchema = z.object({
+  quote: z.string().trim().min(1),
+  contextBefore: z.string(),
+  contextAfter: z.string(),
+  comment: z.string().trim().min(1),
+});
+export type QuotedComment = z.infer<typeof quotedCommentSchema>;
+
 /** Body for `POST /api/agent`. */
 export const agentRequestSchema = z
   .object({
     inputKind: agentInputKindSchema.optional(),
     content: z.string(),
+    quotedComments: z.array(quotedCommentSchema).optional(),
     threadId: z.string().min(1).optional(),
     mode: z.enum(['ask', 'operate']).optional(),
     canvasContext: agentChatContextSchema.optional(),
@@ -380,7 +389,7 @@ export const agentRequestSchema = z
           message: 'Visible Canvas grounding is only valid for Ink requests',
         });
       }
-      if (request.content.length === 0) {
+      if (request.content.length === 0 && !request.quotedComments?.length) {
         context.addIssue({
           code: 'custom',
           path: ['content'],

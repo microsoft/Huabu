@@ -269,6 +269,7 @@ export const agentApi = {
        * as authoritative. Capped server-side at 8.
        */
       invokedSkills?: string[];
+      quotedComments?: AgentRequest['quotedComments'];
       /**
        * Built-in agent per-thread capability selection carried with this
        * turn so a model / reasoning effort picked before the thread's
@@ -291,6 +292,9 @@ export const agentApi = {
         ? options.attachments
         : undefined,
       groundingVisual: options?.groundingVisual,
+      quotedComments: options?.quotedComments?.length
+        ? options.quotedComments
+        : undefined,
       anchorNodeId: options?.anchorNodeId,
       agentBinding: options?.agentBinding,
       invokedSkills: options?.invokedSkills?.length

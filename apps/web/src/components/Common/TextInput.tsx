@@ -30,6 +30,19 @@ const SIZE_CLASSES = {
   md: 'px-2.5 py-1.5 text-sm',
 } as const;
 
+export function textInputClassName({
+  className,
+  mono = false,
+  size = 'sm',
+}: Pick<TextInputProps, 'className' | 'mono' | 'size'>): string {
+  return cn(
+    'border-edge-default bg-surface text-fg-default placeholder:text-fg-subtle focus:ring-info-light rounded-md border focus:ring-1 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50',
+    SIZE_CLASSES[size],
+    mono && 'font-mono',
+    className,
+  );
+}
+
 /**
  * Standard design-system text field.
  *
@@ -42,12 +55,7 @@ export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(
     <Input
       ref={ref}
       type={type}
-      className={cn(
-        'border-edge-default bg-surface text-fg-default placeholder:text-fg-subtle focus:ring-info-light rounded-md border focus:ring-1 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50',
-        SIZE_CLASSES[size],
-        mono && 'font-mono',
-        className,
-      )}
+      className={textInputClassName({ className, mono, size })}
       {...props}
     />
   ),

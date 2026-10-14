@@ -5,8 +5,10 @@ import { PenLine } from 'lucide-react';
 import { memo, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { cn } from '@/components/Common/cn';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 
+import { QuotedCommentCard } from './QuotedCommentCard';
 import { NodeRef } from '../Common/NodeRef';
 
 import type {
@@ -14,10 +16,12 @@ import type {
   ChatAttachment,
   InkInterpretation,
   SelectedStrokeSubset,
+  QuotedComment,
 } from '@huabu/shared';
 
 interface UserMessageProps {
   content: string;
+  quotedComments?: QuotedComment[];
   inputKind?: AgentInputKind;
   inkInterpretation?: InkInterpretation;
   attachments?: ChatAttachment[];
@@ -40,6 +44,7 @@ interface UserMessageProps {
 
 export const UserMessage = memo(function UserMessage({
   content,
+  quotedComments,
   inputKind,
   inkInterpretation,
   attachments,
@@ -66,46 +71,65 @@ export const UserMessage = memo(function UserMessage({
 
   return (
     <div data-chat-user-message className="my-3 flex flex-col items-end">
-      <div className="mt-2 flex max-w-[80%] flex-col items-end gap-1">
-        <div className="bg-bg-default text-fg-default overflow-hidden rounded-md border border-none px-4 py-2 text-sm">
-          <div className="leading-relaxed wrap-anywhere whitespace-pre-wrap">
-            {inputKind === 'ink-intent' && (
-              <PenLine
-                className="mr-1.5 inline-block size-3.5 align-text-bottom"
-                role="img"
-                aria-label={t('messages.inkRequest')}
-              />
-            )}
-            {inputKind === 'ink-intent' && (
-              <span
-                data-ink-interpretation
-                aria-description={t('messages.inkInterpretation.agent')}
-                role={
-                  inkInterpretation?.state === 'reported' ? undefined : 'status'
-                }
-              >
-                {inkInterpretation?.state === 'reported'
-                  ? inkInterpretation.text
-                  : t(
-                      `messages.inkInterpretation.${inkInterpretation?.state ?? 'legacy'}`,
-                    )}
-              </span>
-            )}
-            {inputKind === 'ink-intent' && hasSkills ? ' ' : null}
-            {hasSkills &&
-              invokedSkills.map((id) => (
-                <span
-                  key={id}
-                  className="mr-1 font-mono"
-                  title={t('messages.invokedSkill', { id })}
-                >
-                  /{id}
-                </span>
-              ))}
-            {inputKind === 'ink-intent' && content ? ' ' : null}
-            {content}
+      <div
+        className={cn(
+          'mt-2 flex max-w-[80%] min-w-0 flex-col items-end gap-1',
+          quotedComments?.length && 'w-full',
+        )}
+      >
+        {quotedComments?.length ? (
+          <div className="flex w-full min-w-0 flex-col gap-2">
+            {quotedComments.map((comment, index) => (
+              <QuotedCommentCard key={index} comment={comment} />
+            ))}
           </div>
-        </div>
+        ) : null}
+        {content ||
+        inputKind === 'ink-intent' ||
+        hasSkills ||
+        !quotedComments?.length ? (
+          <div className="bg-bg-default text-fg-default overflow-hidden rounded-md border border-none px-4 py-2 text-sm">
+            <div className="leading-relaxed wrap-anywhere whitespace-pre-wrap">
+              {inputKind === 'ink-intent' && (
+                <PenLine
+                  className="mr-1.5 inline-block size-3.5 align-text-bottom"
+                  role="img"
+                  aria-label={t('messages.inkRequest')}
+                />
+              )}
+              {inputKind === 'ink-intent' && (
+                <span
+                  data-ink-interpretation
+                  aria-description={t('messages.inkInterpretation.agent')}
+                  role={
+                    inkInterpretation?.state === 'reported'
+                      ? undefined
+                      : 'status'
+                  }
+                >
+                  {inkInterpretation?.state === 'reported'
+                    ? inkInterpretation.text
+                    : t(
+                        `messages.inkInterpretation.${inkInterpretation?.state ?? 'legacy'}`,
+                      )}
+                </span>
+              )}
+              {inputKind === 'ink-intent' && hasSkills ? ' ' : null}
+              {hasSkills &&
+                invokedSkills.map((id) => (
+                  <span
+                    key={id}
+                    className="mr-1 font-mono"
+                    title={t('messages.invokedSkill', { id })}
+                  >
+                    /{id}
+                  </span>
+                ))}
+              {inputKind === 'ink-intent' && content ? ' ' : null}
+              {content}
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {hasRefs && (

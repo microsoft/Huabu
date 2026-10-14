@@ -34,6 +34,7 @@ import { renderInkRecognition } from './ink-ocr.js';
 import { renderInvokedSkillsSection } from './invoked-skills.js';
 import { renderNeighbourhoodSection } from './neighbourhood.js';
 import { INTERNAL_PROFILE } from './profile.js';
+import { renderQuotedComments } from './quoted-comments.js';
 import { InkVisualPreparationError } from './required-ink-visuals.js';
 import { renderSelectedNodesSection } from './selected-nodes.js';
 import { renderSketchRasterHint } from './sketch-hint.js';
@@ -125,6 +126,7 @@ export async function renderTurn(
   }
 
   const skillsSection = renderInvokedSkillsSection(env.skills.resolved);
+  const quotedCommentsSection = renderQuotedComments(env.user.quotedComments);
   const selectedNodesSection = renderSelectedNodesSection(
     env.focus.selection.refs,
     profile,
@@ -141,6 +143,7 @@ export async function renderTurn(
     : undefined;
   const hasContext = Boolean(
     isInkIntent ||
+    quotedCommentsSection ||
     skillsSection ||
     selectedNodesSection ||
     neighbourhoodSection,
@@ -260,6 +263,9 @@ export async function renderTurn(
     });
     parts.push(...uploadParts);
     parts.push({ type: 'text', text: '</attachments>' });
+  }
+  if (quotedCommentsSection) {
+    parts.push({ type: 'text', text: quotedCommentsSection });
   }
   // Slash-command turns lead with the BARE task (no <user_request>
   // wrapper) so ACP still recognises `/cmd`; everyone else wraps + trails.

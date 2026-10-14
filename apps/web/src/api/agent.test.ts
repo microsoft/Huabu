@@ -41,6 +41,29 @@ afterEach(() => {
 });
 
 describe('agent API host acceptance', () => {
+  it('sends quoted comments as structured input rather than interpolating the prompt', async () => {
+    const fetchMock = respond([{ type: 'end', data: {} }]);
+    const quotedComments = [
+      {
+        quote: 'Original reply',
+        contextBefore: 'Before ',
+        contextAfter: ' after',
+        comment: 'Explain this.',
+      },
+    ];
+    await agentApi.streamMessage('', 'thread-a', 'operate', callbacks(), {
+      quotedComments,
+    });
+    const options = fetchMock.mock.calls[0]?.[1];
+    if (typeof options?.body !== 'string')
+      throw new Error('Missing request body');
+    expect(JSON.parse(options.body)).toMatchObject({
+      content: '',
+      quotedComments,
+    });
+    expect(options.body).not.toContain('<quoted_comments>');
+  });
+
   it('sends hidden visible-Canvas grounding with an Ink request', async () => {
     const fetchMock = respond([{ type: 'end', data: {} }]);
     const groundingVisual = {

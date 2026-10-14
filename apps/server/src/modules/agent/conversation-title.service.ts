@@ -3,6 +3,7 @@
 
 import {
   conversationTitleSchema,
+  chatInputText,
   setConversationTitleBodySchema,
 } from '@huabu/shared';
 import {
@@ -121,7 +122,8 @@ const defaults: ConversationTitleDependencies = {
       { withTail: true },
     );
     for (const turn of turns) {
-      const text = chatEnvelopeFromSubmission(turn.request)?.user.text;
+      const user = chatEnvelopeFromSubmission(turn.request)?.user;
+      const text = user ? chatInputText(user) : undefined;
       if (text?.trim()) return text;
     }
     return undefined;

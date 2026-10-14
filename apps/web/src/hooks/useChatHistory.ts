@@ -121,6 +121,9 @@ function historyItemsToMessages(
         historyTurnActive,
         role: 'user',
         content: message.content || '',
+        ...(message.quotedComments?.length
+          ? { quotedComments: message.quotedComments }
+          : {}),
         ...(message.inputKind ? { inputKind: message.inputKind } : {}),
         ...(message.inputKind === 'ink-intent'
           ? {

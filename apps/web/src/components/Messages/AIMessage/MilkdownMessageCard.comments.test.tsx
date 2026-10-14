@@ -6,7 +6,11 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { i18n } from '@/i18n';
-import { selectThreadDraft, useChatStore } from '@/store/chatStore';
+import {
+  selectThreadDraft,
+  selectThreadQuotedComments,
+  useChatStore,
+} from '@/store/chatStore';
 import { usePanelStore } from '@/store/panelStore';
 import { copyToClipboard } from '@/utils/io/clipboard';
 
@@ -158,6 +162,72 @@ describe('AI response comments', () => {
     expect(document.querySelector('button[aria-label="Comment"]')).toBeNull();
   });
 
+  it('uses compact action buttons in the comment editor', () => {
+    render();
+    select();
+    for (const name of ['Cancel', 'Add to input']) {
+      expect(button(name).classList.contains('text-xs')).toBe(true);
+      expect(button(name).classList.contains('py-1')).toBe(true);
+      expect(button(name).classList.contains('px-2.5')).toBe(true);
+    }
+  });
+
+  it('trims quote boundaries in the editor and draft without changing copied text', async () => {
+    const text = ' \t\nselected  text\n\n    indented\npassage\n ';
+    render();
+    act(() => preview.onTextSelection?.({ ...selection, text }));
+    await act(async () => button('Copy').click());
+    expect(copyToClipboard).toHaveBeenCalledExactlyOnceWith(text);
+    act(() => preview.onTextSelection?.({ ...selection, text }));
+    click('Comment');
+    expect(document.querySelector('blockquote')?.textContent).toBe(text.trim());
+    type('Keep it.');
+    click('Add to input');
+    expect(
+      selectThreadQuotedComments(useChatStore.getState(), 'thread-a'),
+    ).toEqual([
+      {
+        quote: text.trim(),
+        draftId: expect.any(String),
+        contextBefore: selection.contextBefore,
+        contextAfter: selection.contextAfter,
+        comment: 'Keep it.',
+      },
+    ]);
+    expect(selectThreadDraft(useChatStore.getState(), 'thread-a')).toBe('');
+  });
+
+  it.each([
+    ['en', 'Quoted passage', 'Add a comment…'],
+    ['zh-CN', '引用内容', '添加评论…'],
+  ])(
+    'labels the quoted passage and uses a concise placeholder in %s',
+    async (language, label, placeholder) => {
+      await i18n.changeLanguage(language);
+      render();
+      act(() => preview.onTextSelection?.(selection));
+      click(i18n.t('messages.fragmentComment'));
+      expect(
+        document.querySelector('figcaption svg.lucide-quote'),
+      ).not.toBeNull();
+      expect(
+        document.querySelector('figcaption svg')?.getAttribute('aria-hidden'),
+      ).toBe('true');
+      expect(document.querySelector('figcaption .sr-only')?.textContent).toBe(
+        label,
+      );
+      const quote = document.querySelector('figure blockquote');
+      expect(quote?.textContent).toBe(selection.text);
+      expect(quote?.classList.contains('text-xs')).toBe(true);
+      expect(quote?.classList.contains('wrap-anywhere')).toBe(true);
+      expect(quote?.classList.contains('border-l-2')).toBe(false);
+      expect(document.querySelector('figure')?.classList.contains('flex')).toBe(
+        true,
+      );
+      expect(document.querySelector('input')?.placeholder).toBe(placeholder);
+    },
+  );
+
   it('opens a snapshot editor, requires a comment and cancels without changing the draft', () => {
     render();
     select();
@@ -173,7 +243,7 @@ describe('AI response comments', () => {
     expect(document.querySelector('blockquote')).toBeNull();
   });
 
-  it('appends to the latest owning-thread draft and supports multiple comments without sending', () => {
+  it('stages multiple quoted comments in the owning thread without rewriting text or sending', () => {
     const addMessage = vi.spyOn(useChatStore.getState(), 'addMessage');
     useChatStore.getState().setDraft('thread-a', 'Before opening');
     useChatStore.getState().setDraft('thread-b', 'Other thread');
@@ -185,7 +255,7 @@ describe('AI response comments', () => {
     );
     click('Add to input');
     expect(selectThreadDraft(useChatStore.getState(), 'thread-a')).toBe(
-      'Edited while commenting\n\nQuote from an earlier reply:\n> selected\n> \n> passage\n\nNearby context ([…] marks the quoted passage):\nBefore […] after\n\nComment:\nKeep it.',
+      'Edited while commenting',
     );
     expect(usePanelStore.getState().focusChatInputRequest?.threadId).toBe(
       'thread-a',
@@ -193,9 +263,14 @@ describe('AI response comments', () => {
     select();
     type('请展开');
     click('Add to input');
-    expect(selectThreadDraft(useChatStore.getState(), 'thread-a')).toContain(
-      '评论：\n请展开',
-    );
+    expect(
+      selectThreadQuotedComments(useChatStore.getState(), 'thread-a').map(
+        (item) => item.comment,
+      ),
+    ).toEqual(['Keep it.', '请展开']);
+    expect(
+      selectThreadQuotedComments(useChatStore.getState(), 'thread-b'),
+    ).toEqual([]);
     expect(selectThreadDraft(useChatStore.getState(), 'thread-b')).toBe(
       'Other thread',
     );
@@ -209,9 +284,9 @@ describe('AI response comments', () => {
     render(true, 'Replaced answer');
     type('Explore this.');
     click('Add to input');
-    expect(selectThreadDraft(useChatStore.getState(), 'thread-a')).toContain(
-      '> selected',
-    );
+    expect(
+      selectThreadQuotedComments(useChatStore.getState(), 'thread-a')[0]?.quote,
+    ).toBe(selection.text);
     act(() =>
       useChatStore
         .getState()
@@ -221,6 +296,9 @@ describe('AI response comments', () => {
     expect(selectThreadDraft(useChatStore.getState(), 'thread-a')).toBe(
       'Manually edited comment\nFinal instruction',
     );
+    expect(
+      selectThreadQuotedComments(useChatStore.getState(), 'thread-a')[0]?.quote,
+    ).toBe(selection.text);
   });
 
   it('does not emit during Chinese IME composition', () => {

@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { Copy, MessageSquare } from 'lucide-react';
+import { Copy, MessageSquare, Quote } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -40,6 +40,7 @@ export function FragmentCommentPopover({
   return (
     <Popover
       position={selection.position}
+      offset={{ x: 4, y: 8 }}
       onDismiss={onDismiss}
       className={editing ? 'w-80 p-3' : 'p-1'}
       onOpenAutoFocus={
@@ -56,9 +57,17 @@ export function FragmentCommentPopover({
             if (comment.trim()) onAdd(comment);
           }}
         >
-          <blockquote className="border-edge-default text-fg-muted max-h-32 overflow-auto border-l-2 pl-2 text-sm whitespace-pre-wrap">
-            {selection.text}
-          </blockquote>
+          <figure className="bg-hover flex min-w-0 items-start gap-2 rounded-md p-2">
+            <figcaption className="text-fg-subtle mt-0.5 shrink-0">
+              <Quote aria-hidden="true" className="h-3 w-3" />
+              <span className="sr-only">
+                {t('messages.fragmentQuotedPassage')}
+              </span>
+            </figcaption>
+            <blockquote className="text-fg-muted max-h-24 min-w-0 flex-1 overflow-auto overscroll-contain text-xs wrap-anywhere whitespace-pre-wrap">
+              {selection.text.trim()}
+            </blockquote>
+          </figure>
           <TextInput
             ref={inputRef}
             aria-label={t('messages.fragmentComment')}
@@ -72,10 +81,10 @@ export function FragmentCommentPopover({
             }}
           />
           <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={onDismiss}>
+            <Button size="sm" variant="ghost" onClick={onDismiss}>
               {t('actions.cancel')}
             </Button>
-            <Button type="submit" disabled={!comment.trim()}>
+            <Button size="sm" type="submit" disabled={!comment.trim()}>
               {t('messages.addCommentToInput')}
             </Button>
           </div>

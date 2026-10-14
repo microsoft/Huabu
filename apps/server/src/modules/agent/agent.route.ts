@@ -680,6 +680,7 @@ const agentRoutes: FastifyPluginAsync = async (
       anchorNodeId,
       agentBinding,
       invokedSkills,
+      quotedComments,
       modelId,
       reasoningEffort,
     } = parsed.data;
@@ -769,6 +770,7 @@ const agentRoutes: FastifyPluginAsync = async (
         selectedNodes: canvasContext?.selectedNodes,
         anchorNodeId: agentTarget?.nodeId ?? anchorNodeId,
         invokedSkills,
+        quotedComments,
         canvasId: canvasId ?? null,
         logger: request.log,
         signal: preparation.signal,

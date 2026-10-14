@@ -134,6 +134,32 @@ describe('buildChatEnvelope selection records', () => {
     expect(envelope.focus.selection.selectedIds).toEqual(['frame-1']);
   });
 
+  it('persists quoted comments through the validated envelope without changing ordinary text', async () => {
+    const quotedComments = [
+      {
+        quote: 'Original reply',
+        contextBefore: 'Before ',
+        contextAfter: ' after',
+        comment: 'Explain this.',
+      },
+    ];
+    const envelope = await buildChatEnvelope({
+      content: '',
+      quotedComments,
+      canvasId: null,
+      logger,
+    });
+    const restored = chatEnvelopeSchema.parse(
+      JSON.parse(JSON.stringify(envelope)),
+    );
+    expect(restored.user).toEqual({
+      text: '',
+      attachments: [],
+      quotedComments,
+    });
+    expect(readMany).not.toHaveBeenCalled();
+  });
+
   it.each([undefined, 'text', 'ink-intent'] as const)(
     'preserves the optional input kind %s without changing legacy user fields',
     async (inputKind) => {

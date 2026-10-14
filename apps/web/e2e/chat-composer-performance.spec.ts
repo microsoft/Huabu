@@ -3,6 +3,8 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
+import type * as ChatStoreModule from '../src/store/chatStore';
+
 type InputMode = 'direct' | 'composition';
 
 async function measureInputToPaint(page: Page, mode: InputMode) {
@@ -109,4 +111,110 @@ test('input-to-paint remains stable with 200 historical messages', async ({
 
   expect(longDirect.p95 - freshDirect.p95).toBeLessThanOrEqual(8);
   expect(longComposition.p95 - freshComposition.p95).toBeLessThanOrEqual(8);
+});
+
+test('composer grows from two to ten lines and shrinks when the draft is cleared', async ({
+  page,
+}) => {
+  await page.goto('/playground/chat-performance?messages=0');
+  const input = page.locator('textarea[name="agent-message"]');
+  const rows = () =>
+    input.evaluate(
+      (element) =>
+        element.getBoundingClientRect().height /
+        parseFloat(getComputedStyle(element).lineHeight),
+    );
+  await expect.poll(rows).toBe(2);
+  for (const lines of [1, 2, 3, 9, 10, 11, 20]) {
+    await input.fill(
+      Array.from({ length: lines }, (_, index) => `Line ${index + 1}`).join(
+        '\n',
+      ),
+    );
+    await expect.poll(rows).toBe(Math.min(10, Math.max(2, lines)));
+  }
+  expect(
+    await input.evaluate(
+      (element) => element.scrollHeight > element.clientHeight,
+    ),
+  ).toBe(true);
+  await expect(input).toHaveCSS('overflow-y', 'auto');
+  await input.fill('Short draft');
+  await expect.poll(rows).toBe(2);
+  await input.fill('');
+  await expect.poll(rows).toBe(2);
+});
+
+test('composer remeasures wrapped text when its width changes and when drafts are restored', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('/playground/chat-performance?messages=0');
+  const input = page.locator('textarea[name="agent-message"]');
+  const height = () =>
+    input.evaluate((element) => element.getBoundingClientRect().height);
+  await input.fill('Wrapped words '.repeat(30));
+  const wideHeight = await height();
+  await page.setViewportSize({ width: 320, height: 800 });
+  await expect.poll(height).toBeGreaterThan(wideHeight);
+  expect(
+    await input.evaluate(
+      (element) =>
+        element.getBoundingClientRect().height /
+        parseFloat(getComputedStyle(element).lineHeight),
+    ),
+  ).toBeLessThanOrEqual(10);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await expect.poll(height).toBe(wideHeight);
+  await input.fill('unbroken'.repeat(500));
+  await expect
+    .poll(() =>
+      input.evaluate(
+        (element) =>
+          element.getBoundingClientRect().height /
+          parseFloat(getComputedStyle(element).lineHeight),
+      ),
+    )
+    .toBe(10);
+  await page.evaluate(async () => {
+    const storePath = '/src/store/chatStore.ts';
+    const { useChatStore } = (await import(
+      storePath
+    )) as typeof ChatStoreModule;
+    useChatStore
+      .getState()
+      .setDraft(
+        'chat-performance-thread',
+        Array.from(
+          { length: 6 },
+          (_, index) => `Restored line ${index + 1}`,
+        ).join('\n'),
+      );
+  });
+  await expect
+    .poll(() =>
+      input.evaluate(
+        (element) =>
+          element.getBoundingClientRect().height /
+          parseFloat(getComputedStyle(element).lineHeight),
+      ),
+    )
+    .toBe(6);
+  await page.evaluate(async () => {
+    const storePath = '/src/store/chatStore.ts';
+    const { useChatStore } = (await import(
+      storePath
+    )) as typeof ChatStoreModule;
+    useChatStore.getState().setDraft('chat-performance-thread', '');
+  });
+  await expect(input).toHaveValue('');
+  await expect
+    .poll(() =>
+      input.evaluate(
+        (element) =>
+          element.getBoundingClientRect().height /
+          parseFloat(getComputedStyle(element).lineHeight),
+      ),
+    )
+    .toBe(2);
 });

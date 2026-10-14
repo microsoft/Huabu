@@ -129,6 +129,7 @@ function seedStore(isStreaming: boolean) {
       [THREAD_ID]: {
         messages: [{ id: 'm1', role: 'user', content: 'hi' }],
         draft: '',
+        pendingQuotedComments: [],
         historyLoaded: true,
         historyBefore: null,
         hasOlderHistory: false,
@@ -195,6 +196,42 @@ afterEach(() => {
 });
 
 describe('useChatHistory paging', () => {
+  it('rehydrates quote-only user messages without regenerating template text', async () => {
+    useChatStore.setState({ threadsById: {} });
+    const quotedComments = [
+      {
+        quote: 'Original reply',
+        contextBefore: 'Before ',
+        contextAfter: ' after',
+        comment: 'Explain this.',
+      },
+    ];
+    apiMocks.fetchHistoryPage.mockResolvedValueOnce({
+      threadId: THREAD_ID,
+      turns: [
+        {
+          id: 'quoted-turn',
+          messages: [
+            { role: 'user', content: '', quotedComments },
+            {
+              role: 'assistant',
+              parts: [{ kind: 'text', text: 'Explanation' }],
+            },
+          ],
+        },
+      ],
+      hasMore: false,
+    });
+    await renderHarness();
+    expect(
+      useChatStore.getState().threadsById[THREAD_ID]?.messages[0],
+    ).toMatchObject({
+      role: 'user',
+      content: '',
+      quotedComments,
+    });
+  });
+
   it.each([null, 'Backend title'])(
     'does not derive a title from hydrated user messages with cached title %s',
     async (title) => {

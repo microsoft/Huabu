@@ -47,6 +47,55 @@ describe('agentRequestSchema input kinds', () => {
     },
   );
 
+  it('accepts a quote-only request and trims quote and comment boundaries', () => {
+    const parsed = agentRequestSchema.parse({
+      content: '',
+      quotedComments: [
+        {
+          quote: ' \nOriginal  passage\n\n    indentation\nEnd. \n',
+          contextBefore: 'Before ',
+          contextAfter: ' after',
+          comment: '  Explain this.  ',
+        },
+      ],
+    });
+    expect(parsed.quotedComments).toEqual([
+      {
+        quote: 'Original  passage\n\n    indentation\nEnd.',
+        contextBefore: 'Before ',
+        contextAfter: ' after',
+        comment: 'Explain this.',
+      },
+    ]);
+  });
+
+  it.each([
+    { quotedComments: [] },
+    {
+      quotedComments: [
+        {
+          quote: ' ',
+          contextBefore: '',
+          contextAfter: '',
+          comment: 'Explain.',
+        },
+      ],
+    },
+    {
+      quotedComments: [
+        { quote: 'Passage', contextBefore: '', contextAfter: '', comment: ' ' },
+      ],
+    },
+    { quotedComments: [{ quote: 'Passage', comment: 'Explain.' }] },
+  ])(
+    'rejects quote-only requests without complete usable comments: %j',
+    ({ quotedComments }) => {
+      expect(
+        agentRequestSchema.safeParse({ content: '', quotedComments }).success,
+      ).toBe(false);
+    },
+  );
+
   it.each(['ask', 'operate'])(
     'accepts selected Ink with empty text in %s mode',
     (mode) => {

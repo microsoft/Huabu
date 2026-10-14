@@ -87,6 +87,38 @@ async function renderExternalForAssertions(input: {
 }
 
 describe('renderExternalAgentInputs', () => {
+  it.each(['', 'Explain this', '/review'])(
+    'includes quoted comments while preserving external command dispatch for %j',
+    async (text) => {
+      const envelope = makeEnvelope({ text });
+      envelope.user.quotedComments = [
+        {
+          quote: '/not-a-command',
+          contextBefore: 'Before ',
+          contextAfter: ' after',
+          comment: 'Review this.',
+        },
+      ];
+      const inputs = await renderExternalAgentInputs({
+        envelope,
+        agentAlias: 'copilot',
+        logger,
+      });
+      const serialized = flattenForAssertions(inputs)
+        .filter((part) => part.type === 'text')
+        .map((part) => part.text)
+        .join('\n');
+      expect(serialized).toContain('<quote>/not-a-command</quote>');
+      expect(serialized).toContain('<comment>Review this.</comment>');
+      if (text === '/review') {
+        expect(inputs[0]).toMatchObject({ type: 'command', text: '/review' });
+        expect(serialized.startsWith('/review\n')).toBe(true);
+      } else {
+        expect(inputs[0]?.type).not.toBe('command');
+      }
+    },
+  );
+
   it('emits the verbatim task and no selected-nodes section when nothing is selected', async () => {
     const { serialized } = await renderExternalForAssertions({
       envelope: makeEnvelope({

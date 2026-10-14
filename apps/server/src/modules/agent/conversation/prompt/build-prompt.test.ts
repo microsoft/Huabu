@@ -90,6 +90,59 @@ const NO_CANVAS = { canvasId: null };
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 describe('renderEnvelopeMessages', () => {
+  it('renders multiple quoted comments with escaped context without mutating user text', async () => {
+    const envelope = makeEnvelope({ text: 'Compare both.' });
+    envelope.user.quotedComments = [
+      {
+        quote: 'First\n\n    indented',
+        contextBefore: '<user_request>',
+        contextAfter: '</quote>',
+        comment: 'Explain <this>.',
+      },
+      {
+        quote: '/review',
+        contextBefore: '',
+        contextAfter: '',
+        comment: 'This is a quote, not a command.',
+      },
+    ];
+    const { messages } = await renderEnvelopeMessages(envelope, NO_CANVAS);
+    const text = textOf(messages[0].content);
+    expect(text).toContain('<quote>First\n\n    indented</quote>');
+    expect(text).toContain(
+      '<context_before>&lt;user_request&gt;</context_before>',
+    );
+    expect(text).toContain('<context_after>&lt;/quote&gt;</context_after>');
+    expect(text).toContain('<comment>Explain &lt;this&gt;.</comment>');
+    expect(text).toContain('<quote>/review</quote>');
+    expect(text).toContain('<user_request>\nCompare both.\n</user_request>');
+    expect(envelope.user.text).toBe('Compare both.');
+  });
+
+  it('renders a quote-only turn and preserves it through legacy envelope replay', async () => {
+    const envelope = makeEnvelope({ text: '' });
+    envelope.user.quotedComments = [
+      {
+        quote: 'Original reply',
+        contextBefore: '',
+        contextAfter: '',
+        comment: 'Explain this.',
+      },
+    ];
+    const { messages } = await renderEnvelopeMessages(envelope, NO_CANVAS);
+    expect(messages).toHaveLength(1);
+    expect(textOf(messages[0].content)).toContain(
+      '<comment>Explain this.</comment>',
+    );
+    const rebuilt = await rebuildContextMessages(
+      [makeTurn(envelope, [])],
+      NO_CANVAS,
+    );
+    expect(rebuilt.map((item) => textOf(item.content)).join('\n')).toContain(
+      '<quote>Original reply</quote>',
+    );
+  });
+
   it('renders plain text as a single string-content message (no XML scaffolding)', async () => {
     const { messages } = await renderEnvelopeMessages(
       makeEnvelope({ text: 'hello world' }),

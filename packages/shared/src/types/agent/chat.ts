@@ -5,6 +5,7 @@ import type { AssistantHistoryPart } from './assistant-parts.js';
 import type {
   AgentInputKind,
   InkInterpretation,
+  QuotedComment,
   VisibleCanvasGrounding,
 } from '../api/agent.js';
 
@@ -68,6 +69,7 @@ export type ChatHistoryItem =
   | {
       role: 'user';
       content: string;
+      quotedComments?: QuotedComment[];
       inputKind?: AgentInputKind;
       inkInterpretation?: InkInterpretation;
       /** Hidden retry metadata; never rendered as a Chat attachment. */

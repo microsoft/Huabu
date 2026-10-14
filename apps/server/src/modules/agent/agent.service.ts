@@ -18,6 +18,8 @@
  *    themselves and pull the relevant `tool_result` payload.
  */
 
+import { chatInputText } from '@huabu/shared';
+
 import {
   agenetes,
   INTERNAL_DRIVER_KIND,
@@ -407,7 +409,7 @@ export async function* runAgent(
     await conversationTitleService.start(
       canvasId,
       deploymentThreadId,
-      envelope.user.text,
+      chatInputText(envelope.user),
     );
   }
 

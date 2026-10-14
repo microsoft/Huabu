@@ -314,12 +314,16 @@ export function buildHistoryFromTurns(
       if (
         envelope.user.inputKind === 'ink-intent' ||
         envelope.user.text.trim() ||
+        envelope.user.quotedComments?.length ||
         attachments.length > 0 ||
         selectedNodeIds.length > 0
       ) {
         const userItem: Extract<ChatHistoryItem, { role: 'user' }> = {
           role: 'user',
           content: envelope.user.text,
+          ...(envelope.user.quotedComments?.length
+            ? { quotedComments: envelope.user.quotedComments }
+            : {}),
           ...(envelope.user.inputKind && {
             inputKind: envelope.user.inputKind,
           }),

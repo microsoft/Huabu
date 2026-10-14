@@ -97,6 +97,30 @@ function reportMessage(
 }
 
 describe('buildHistoryFromTurns', () => {
+  it.each(['', 'General instructions'])(
+    'restores quoted comments with user text %j from persisted submissions',
+    (text) => {
+      const envelope = makeEnvelope(text);
+      envelope.user.quotedComments = [
+        {
+          quote: 'Original reply',
+          contextBefore: 'Before ',
+          contextAfter: ' after',
+          comment: 'Explain this.',
+        },
+      ];
+      const messages = build([
+        { request: createChatSubmission(envelope), transcript: [] },
+      ]);
+      expect(messages[0]).toMatchObject({
+        role: 'user',
+        content: text,
+        quotedComments: envelope.user.quotedComments,
+      });
+      expect(JSON.stringify(messages)).not.toContain('<quoted_comments>');
+    },
+  );
+
   it('uses wrapped canonical outputs and does not confirm rejected input', () => {
     const report = {
       text: 'Adjust the layout',

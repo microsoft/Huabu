@@ -36,6 +36,7 @@
 
 import {
   META_SEARCH_FIELDS,
+  chatInputText,
   type CanvasSearchEvent,
   type CanvasSearchMatch,
   type CanvasSearchRequest,
@@ -210,7 +211,7 @@ function scanNodeContent(
 
 /**
  * Flatten one chat thread into a single searchable haystack: every
- * user message (`envelope.user.text`) followed by every assistant
+ * user message (ordinary text and quoted comments) followed by every assistant
  * *text* block, turn by turn. Tool calls / tool results, thinking
  * blocks, and the ACP `plan` overlay are intentionally dropped — the
  * `conversation` tier searches what the human and the model *said*,
@@ -227,7 +228,7 @@ function buildThreadHaystack(
   const segments: string[] = [];
   for (const turn of turns) {
     const user = chatEnvelopeFromSubmission(turn.request)?.user;
-    const userText = user?.text;
+    const userText = user ? chatInputText(user) : undefined;
     if (typeof userText === 'string' && userText.length > 0) {
       segments.push(userText);
     }

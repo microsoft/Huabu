@@ -812,6 +812,7 @@ export interface AgentTurnInput {
   attachments?: ChatAttachment[];
   groundingVisual?: VisibleCanvasGrounding;
   invokedSkills?: string[];
+  quotedComments?: AgentRequest['quotedComments'];
 }
 
 export interface PreparedAgentTurn extends AgentTurnInput {
@@ -935,6 +936,7 @@ export function prepareAgentTurnRetry(
     inputKind: message.inputKind ?? 'text',
     attachments: message.attachments,
     invokedSkills: message.invokedSkills,
+    quotedComments: message.quotedComments,
     groundingVisual: message.groundingVisual,
   });
 }
@@ -971,6 +973,7 @@ export async function dispatchAgentTurn(
     content: prompt,
     mode: agentMode,
     invokedSkills,
+    quotedComments,
     attachments,
     inputKind,
   } = prepared;
@@ -983,7 +986,7 @@ export async function dispatchAgentTurn(
     // thread's. The user may already have a stream running in a
     // different chat (canvas chat + question node both active).
     if (
-      (inputKind === 'text' && !prompt.trim()) ||
+      (inputKind === 'text' && !prompt.trim() && !quotedComments?.length) ||
       selectThreadIsLoading(useChatStore.getState(), threadId)
     ) {
       result.status = selectThreadIsLoading(useChatStore.getState(), threadId)
@@ -1087,6 +1090,7 @@ export async function dispatchAgentTurn(
       id: userMessageId,
       role: 'user',
       content: prompt,
+      ...(quotedComments?.length ? { quotedComments } : {}),
       inputKind,
       ...(inputKind === 'ink-intent'
         ? { inkInterpretation: { state: 'pending' as const } }
@@ -1245,6 +1249,7 @@ export async function dispatchAgentTurn(
           agentBinding,
           anchorNodeId: requestScope.anchorNodeId,
           invokedSkills,
+          quotedComments,
           // Carry this thread's built-in selection so a model /
           // reasoning effort picked before the first message is applied
           // when the thread is created. Ignored server-side for external

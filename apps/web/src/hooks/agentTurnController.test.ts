@@ -1035,6 +1035,93 @@ describe('shared Agent turn input', () => {
     });
   });
 
+  it('sends and retries quote-only messages with the same structured snapshot', async () => {
+    const quotedComments = [
+      {
+        quote: 'Original reply',
+        contextBefore: 'Before ',
+        contextAfter: ' after',
+        comment: 'Explain this.',
+      },
+    ];
+    const prepared = request();
+    prepared.content = '';
+    prepared.quotedComments = quotedComments;
+    await dispatchAgentTurn(prepared);
+    expect(mocks.stream.mock.calls[0][0]).toBe('');
+    expect(mocks.stream.mock.calls[0][4].quotedComments).toEqual(
+      quotedComments,
+    );
+    const message = selectThreadMessages(
+      useChatStore.getState(),
+      session.threadId,
+    ).find((item) => item.role === 'user');
+    expect(message).toMatchObject({ content: '', quotedComments });
+    if (message?.role !== 'user') throw new Error('Missing user message');
+    const retry = prepareAgentTurnRetry(session, message, 'operate');
+    expect(retry.quotedComments).toEqual(quotedComments);
+    await dispatchAgentTurn(retry);
+    expect(mocks.stream.mock.calls[1][4].quotedComments).toEqual(
+      quotedComments,
+    );
+  });
+
+  it.each([true, false])(
+    'consumes quoted drafts only after durable acceptance: %s',
+    async (accepted) => {
+      const store = useChatStore.getState();
+      store.setDraft(session.threadId, 'General instructions');
+      store.addQuotedComment(session.threadId, {
+        quote: 'Original reply',
+        contextBefore: '',
+        contextAfter: '',
+        comment: 'Explain this.',
+      });
+      mocks.stream.mockImplementationOnce(
+        async (_content, _thread, _mode, callbacks: AgentStreamCallbacks) => {
+          expect(
+            useChatStore.getState().threadsById[session.threadId].draft,
+          ).toBe('General instructions');
+          expect(
+            useChatStore.getState().threadsById[session.threadId]
+              .pendingQuotedComments,
+          ).toHaveLength(1);
+          if (accepted) {
+            callbacks.onAccepted?.({
+              threadId: session.threadId,
+              turnStartSeq: 5,
+            });
+            callbacks.onComplete();
+          } else {
+            callbacks.onError(new Error('Request failed before acceptance'));
+          }
+        },
+      );
+      let hook!: UseAgentStreamReturn;
+      function Harness() {
+        hook = useAgentStream(session);
+        return null;
+      }
+      container = document.createElement('div');
+      root = createRoot(container);
+      await act(async () => root?.render(createElement(Harness)));
+      await act(async () =>
+        hook.startStream('General instructions', 'operate'),
+      );
+      const current = useChatStore.getState().threadsById[session.threadId];
+      expect(current.draft).toBe(accepted ? '' : 'General instructions');
+      expect(current.pendingQuotedComments).toHaveLength(accepted ? 0 : 1);
+      expect(mocks.stream.mock.calls[0][4].quotedComments).toEqual([
+        {
+          quote: 'Original reply',
+          contextBefore: '',
+          contextAfter: '',
+          comment: 'Explain this.',
+        },
+      ]);
+    },
+  );
+
   it('keeps a text run alive after Chat unmount and permits a new Chat to stop it', async () => {
     let hook!: UseAgentStreamReturn;
     function Harness() {

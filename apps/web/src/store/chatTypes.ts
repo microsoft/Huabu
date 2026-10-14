@@ -16,6 +16,7 @@ import type {
   ChatAttachment,
   AgentRequest,
   InkInterpretation,
+  QuotedComment,
   SelectedStrokeSubset,
   VisibleCanvasGrounding,
 } from '@huabu/shared';
@@ -56,6 +57,7 @@ export type ChatMessage =
       historyTurnActive?: boolean;
       role: 'user';
       content: string;
+      quotedComments?: QuotedComment[];
       inputKind?: AgentRequest['inputKind'];
       /** Validated Agent interpretation; never treated as user-authored text. */
       inkInterpretation?: InkInterpretation;

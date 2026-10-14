@@ -822,12 +822,10 @@ export const ChatPanel = ({
       // message text — matches the typeahead UX (no menu hit → no
       // recognition).
       const raw = draft;
-      useChatStore.getState().setDraft(threadId, '');
       const isSkillInvocationAllowed =
         agentBinding.kind === 'internal' && agentMode === 'operate';
       if (!isSkillInvocationAllowed) {
         const prompt = raw.trim();
-        if (!prompt) return;
         onCommit?.();
         await startStream(prompt, agentMode);
         return;
@@ -837,7 +835,6 @@ export const ChatPanel = ({
         knownSlashIds,
       );
       const prompt = message.trim();
-      if (!prompt) return;
       onCommit?.();
       await startStream(
         prompt,
@@ -845,7 +842,7 @@ export const ChatPanel = ({
         invokedSkills.length > 0 ? invokedSkills : undefined,
       );
     },
-    [agentBinding.kind, knownSlashIds, onCommit, startStream, threadId],
+    [agentBinding.kind, knownSlashIds, onCommit, startStream],
   );
 
   const handleRetry = useCallback(() => {

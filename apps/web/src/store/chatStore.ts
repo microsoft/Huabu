@@ -14,6 +14,7 @@ import type {
   AgentMode,
   AssistantToolPart,
   ChatAttachment,
+  QuotedComment,
 } from '@huabu/shared';
 
 /**
@@ -35,10 +36,14 @@ function defaultActionForBinding(binding: AgentBinding): AgentMode {
  * drift — messages present with the history flag already cleared, say — and
  * every such combination is a state nobody designed.
  */
+/** Stable inline-edit row identity, omitted from agent requests and history. */
+export type DraftQuotedComment = QuotedComment & { draftId: string };
+
 export interface ChatThreadState {
   messages: ChatMessage[];
-  /** Composer draft; '' means an empty composer. */
+  /** Free-form composer text; quoted comments are staged separately. */
   draft: string;
+  pendingQuotedComments: DraftQuotedComment[];
   /** Whether history has been fetched from the server at least once. */
   historyLoaded: boolean;
   /** Exclusive cursor for the next older server history page. */
@@ -212,11 +217,22 @@ export interface ChatState {
   /** Clear a thread's staged attachments (called after its message is sent). */
   clearPendingAttachments: (threadId: string) => void;
 
-  /**
-   * Set (or clear) the current thread's composer draft. Sending a message
-   * clears the draft through this same path.
-   */
+  /** Set free-form draft text without modifying staged quoted comments. */
   setDraft: (threadId: string, text: string) => void;
+  addQuotedComment: (threadId: string, comment: QuotedComment) => void;
+  setQuotedComments: (threadId: string, comments: QuotedComment[]) => void;
+  updateQuotedComment: (
+    threadId: string,
+    index: number,
+    comment: string,
+  ) => void;
+  removeQuotedComment: (threadId: string, index: number) => void;
+  /** Consume accepted text and unchanged entries from the captured draft. */
+  consumeDraft: (
+    threadId: string,
+    text: string,
+    comments: readonly DraftQuotedComment[],
+  ) => void;
 
   /** Set/replace the text-selection-based attachment (auto-managed by ExpandedNodePanel). */
   setSelectionAttachment: (attachment: ChatAttachment | null) => void;
@@ -252,6 +268,7 @@ const EMPTY_MESSAGES: ChatMessage[] = [];
 const EMPTY_THREAD: ChatThreadState = {
   messages: EMPTY_MESSAGES,
   draft: '',
+  pendingQuotedComments: [],
   historyLoaded: false,
   historyBefore: null,
   hasOlderHistory: false,
@@ -605,6 +622,75 @@ export const useChatStore = create<ChatState>()(
           return patchThread(state, threadId, { draft: text });
         }),
 
+      addQuotedComment: (threadId, comment) =>
+        set((state) =>
+          patchThread(state, threadId, {
+            pendingQuotedComments: [
+              ...threadOf(state, threadId).pendingQuotedComments,
+              {
+                ...comment,
+                draftId: createId('quoted-comment'),
+                quote: comment.quote.trim(),
+                comment: comment.comment.trim(),
+              },
+            ],
+          }),
+        ),
+
+      setQuotedComments: (threadId, comments) =>
+        set((state) =>
+          patchThread(state, threadId, {
+            pendingQuotedComments: comments.map((comment) => ({
+              ...comment,
+              draftId:
+                'draftId' in comment && typeof comment.draftId === 'string'
+                  ? comment.draftId
+                  : createId('quoted-comment'),
+            })),
+          }),
+        ),
+
+      updateQuotedComment: (threadId, index, comment) =>
+        set((state) =>
+          patchThread(state, threadId, {
+            pendingQuotedComments: threadOf(
+              state,
+              threadId,
+            ).pendingQuotedComments.map((item, i) =>
+              i === index ? { ...item, comment } : item,
+            ),
+          }),
+        ),
+
+      removeQuotedComment: (threadId, index) =>
+        set((state) =>
+          patchThread(state, threadId, {
+            pendingQuotedComments: threadOf(
+              state,
+              threadId,
+            ).pendingQuotedComments.filter((_, i) => i !== index),
+          }),
+        ),
+
+      consumeDraft: (threadId, text, comments) =>
+        set((state) => {
+          const thread = threadOf(state, threadId);
+          return patchThread(state, threadId, {
+            draft: thread.draft === text ? '' : thread.draft,
+            pendingQuotedComments: thread.pendingQuotedComments.filter(
+              (item) =>
+                !comments.some(
+                  (sent) =>
+                    sent.draftId === item.draftId &&
+                    sent.quote === item.quote &&
+                    sent.contextBefore === item.contextBefore &&
+                    sent.contextAfter === item.contextAfter &&
+                    sent.comment === item.comment,
+                ),
+            ),
+          });
+        }),
+
       setSelectionAttachment: (attachment) =>
         set({ selectionAttachment: attachment }),
 
@@ -699,6 +785,11 @@ export const selectThreadMessages = (
 /** A thread's composer draft ('' when none). */
 export const selectThreadDraft = (state: ChatState, threadId: string): string =>
   threadOf(state, threadId).draft;
+
+export const selectThreadQuotedComments = (
+  state: ChatState,
+  threadId: string,
+): DraftQuotedComment[] => threadOf(state, threadId).pendingQuotedComments;
 
 /** True if a thread has been hydrated from the server. */
 export const selectThreadHistoryLoaded = (

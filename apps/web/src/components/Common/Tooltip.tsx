@@ -6,6 +6,7 @@ import {
   flip,
   FloatingPortal,
   offset as offsetMiddleware,
+  safePolygon,
   shift,
   useDelayGroup,
   useDismiss,
@@ -28,6 +29,8 @@ export type TooltipProps = {
   wrapperClassName?: string;
   /** Extra classes applied to the floating tooltip bubble. */
   contentClassName?: string;
+  /** Keeps scrollable content open while the pointer crosses into the bubble. */
+  interactive?: boolean;
   /** Distance in px between the trigger and the tooltip. Defaults to 8. */
   offset?: number;
   /**
@@ -58,14 +61,15 @@ export type TooltipProps = {
  *     trigger moves, scrolls, or reaches a viewport edge, so we no
  *     longer have to clamp coordinates manually.
  *
- * Public API is intentionally identical to the previous version so no
- * callsite has to change.
+ * Existing callers retain non-interactive behavior. Scrollable content can
+ * opt into safe pointer travel between the trigger and bubble.
  */
 export const Tooltip = ({
   content,
   children,
   wrapperClassName,
   contentClassName,
+  interactive = false,
   offset: offsetProp = 8,
   placement = 'auto',
 }: TooltipProps) => {
@@ -99,7 +103,11 @@ export const Tooltip = ({
   // every Tooltip participates in the same singleton group.
   useDelayGroup(context, { id: tooltipId });
 
-  const hover = useHover(context, { move: false, delay: { open: 150 } });
+  const hover = useHover(context, {
+    move: false,
+    delay: { open: 150 },
+    handleClose: interactive ? safePolygon() : undefined,
+  });
   const focus = useFocus(context);
   const dismiss = useDismiss(context, {
     escapeKey: true,
@@ -160,6 +168,7 @@ export const Tooltip = ({
             {...getFloatingProps({
               className: cn(
                 'shadow-bottom bg-inverse text-fg-inverse pointer-events-none z-10001 max-w-[90vw] rounded-md px-2 py-1 text-xs',
+                interactive && 'pointer-events-auto',
                 contentClassName,
               ),
               style: floatingStyles,

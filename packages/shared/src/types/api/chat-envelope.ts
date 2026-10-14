@@ -6,6 +6,7 @@ import { z } from 'zod';
 import {
   agentInputKindSchema,
   chatAttachmentSchema,
+  quotedCommentSchema,
   visibleCanvasGroundingSchema,
   wireNodeRefSchema,
 } from './agent.js';
@@ -80,6 +81,7 @@ export type InkRecognition = z.infer<typeof inkRecognitionSchema>;
 export const chatEnvelopeSchema = z.object({
   user: z.object({
     text: z.string(),
+    quotedComments: z.array(quotedCommentSchema).optional(),
     inputKind: agentInputKindSchema.optional(),
     attachments: z.array(chatAttachmentSchema),
   }),

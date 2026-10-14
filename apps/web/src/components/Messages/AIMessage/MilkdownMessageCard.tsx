@@ -6,23 +6,17 @@
  */
 
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { useTranslation } from 'react-i18next';
 
 import { parseArtifactUrl } from '@huabu/shared';
 
 import { MilkdownPreview } from '@/components/Milkdown';
 import useCanvasStore from '@/store/canvasStore';
-import { selectThreadDraft, useChatStore } from '@/store/chatStore';
+import { useChatStore } from '@/store/chatStore';
 import { usePanelStore } from '@/store/panelStore';
 import { copyToClipboard } from '@/utils/io/clipboard';
 import { setDragPayload } from '@/utils/io/dragDrop';
 import { openDocumentLink } from '@/utils/openDocumentLink';
 
-import {
-  appendFragmentComment,
-  commentTemplateLanguage,
-  renderFragmentComment,
-} from './fragmentComment';
 import { FragmentCommentPopover } from './FragmentCommentPopover';
 
 import type { MilkdownPreviewSelection } from '@/components/Milkdown/MilkdownPreview';
@@ -108,10 +102,8 @@ export const MilkdownMessageCard = memo(function MilkdownMessageCard({
   content,
   threadId,
   messageId,
-  segmentIndex = 0,
   enableComments = false,
 }: MilkdownMessageCardProps) {
-  const { i18n } = useTranslation();
   const canvasId = useCanvasStore((s) => s.canvasId);
   const [selection, setSelection] = useState<MilkdownPreviewSelection | null>(
     null,
@@ -177,33 +169,12 @@ export const MilkdownMessageCard = memo(function MilkdownMessageCard({
           }}
           onDismiss={dismissComment}
           onAdd={(comment) => {
-            const templateT = i18n.getFixedT(
-              commentTemplateLanguage(
-                comment,
-                i18n.resolvedLanguage ?? i18n.language,
-              ),
-            );
-            const rendered = renderFragmentComment(
-              {
-                ...selection,
-                sourceMessageId: messageId,
-                segmentIndex,
-                comment,
-              },
-              {
-                quote: templateT('messages.fragmentQuoteLabel'),
-                comment: templateT('messages.fragmentCommentLabel'),
-                context: templateT('messages.fragmentContextLabel'),
-              },
-            );
-            const chat = useChatStore.getState();
-            chat.setDraft(
-              threadId,
-              appendFragmentComment(
-                selectThreadDraft(chat, threadId),
-                rendered,
-              ),
-            );
+            useChatStore.getState().addQuotedComment(threadId, {
+              quote: selection.text,
+              contextBefore: selection.contextBefore,
+              contextAfter: selection.contextAfter,
+              comment,
+            });
             dismissComment();
             usePanelStore.getState().requestFocusChatInput(threadId);
           }}

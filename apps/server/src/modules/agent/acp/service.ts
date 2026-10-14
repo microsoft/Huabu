@@ -25,6 +25,8 @@ import { randomUUID } from 'node:crypto';
 import { AcpServiceError } from '@agenetes/acp-driver';
 import { getAgentProfileRegistry } from '@agenetes/agentlet-host';
 
+import { chatInputText } from '@huabu/shared';
+
 import { renderExternalAgentInputs } from './preprocessor.js';
 import { getProfileSessionPreferences } from './profile-session-preferences.js';
 import {
@@ -270,7 +272,7 @@ export async function* runAcpAgent(
     await conversationTitleService.start(
       canvasId,
       opts.threadId,
-      opts.envelope.user.text,
+      chatInputText(opts.envelope.user),
     );
   const inkToken =
     opts.envelope.user.inputKind === 'ink-intent' ? randomUUID() : undefined;
