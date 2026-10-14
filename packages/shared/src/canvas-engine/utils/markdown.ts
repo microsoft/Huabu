@@ -18,7 +18,14 @@ const BLOCK_CONTAINERS = new Set(['root', 'blockquote', 'list', 'listItem']);
 
 function plainText(node: MarkdownNode): string {
   if (node.type === 'html') {
-    return (node.value ?? '').replace(/<\/?[a-z][^>]*>/gi, '');
+    let text = node.value ?? '';
+    let previous: string;
+    // Removing a tag can join its surrounding text into another tag.
+    do {
+      previous = text;
+      text = text.replace(/<\/?[a-z][^>]*>/gi, '');
+    } while (text !== previous);
+    return text;
   }
   if (node.type === 'definition' || node.type === 'thematicBreak') return '';
   if (node.type === 'break') return '\n';
@@ -53,6 +60,7 @@ function plainText(node: MarkdownNode): string {
  * Parse code separately so identifiers, generics, and literal Markdown inside
  * code are not mistaken for formatting. Preserve source block spacing up to
  * one blank line; code content itself is left intact.
+ * This is not an HTML sanitizer: literal code can contain HTML tags.
  */
 export function stripMarkdown(input: string): string {
   if (!input) return '';
