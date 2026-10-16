@@ -61,6 +61,7 @@ docs/
 | [credential-storage.md](./architecture/credential-storage.md)                   | Electron OS-protected credentials, utility-process bridge, migration, and standalone fallback.           |
 | [desktop-auto-update.md](./architecture/desktop-auto-update.md)                 | Desktop auto-update: electron-updater lifecycle, env-driven update feed, required release artifacts.     |
 | [desktop-startup.md](./architecture/desktop-startup.md)                         | Cold start: splash window, main-window reveal, and the first-screen bundle boundary.                     |
+| [desktop-tabs.md](./architecture/desktop-tabs.md)                               | Desktop Space Tabs: independent content views, navigation, saving, background status and recovery.       |
 | [deployment-security.md](./architecture/deployment-security.md)                 | Bind policy, single-owner authentication, readiness, and transport boundary.                             |
 | [agent-memory.md](./architecture/agent-memory.md)                               | Three-layer memory (workspace / canvas / skill); **Shipped**.                                            |
 | [question-node.md](./architecture/question-node.md)                             | Question node: a content node that anchors a chat thread, runs the agent with its spatial neighbourhood. |

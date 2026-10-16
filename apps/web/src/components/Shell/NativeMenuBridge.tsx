@@ -19,6 +19,7 @@ import { useRunDiagnostic } from '../../hooks/useRunDiagnostic';
 import { useSettingsUiStore } from '../../store/settingsUiStore';
 import { useShortcutsUiStore } from '../../store/shortcutsUiStore';
 import { useWorkspaceStore } from '../../store/workspaceStore';
+import { isDesktopInputFrozen } from '../../utils/desktopInput';
 
 /**
  * Bridges the native macOS menu bar to the in-app action handlers.
@@ -88,7 +89,7 @@ export function NativeMenuBridge() {
         minimize: t('menu.minimize'),
         zoom: t('menu.zoom'),
         front: t('menu.front'),
-        close: t('menu.close'),
+        close: bridge?.tabs ? t('desktopTabs.closeTab') : t('menu.close'),
         toggleFullScreen: t('menu.toggleFullScreen'),
         newCanvas: t('actions.newCanvas'),
         import: t('actions.importCanvas'),
@@ -107,12 +108,21 @@ export function NativeMenuBridge() {
     });
     // `i18n.language` is an explicit dependency so a language switch
     // re-pushes labels even though `t` is a stable reference.
-  }, [enabled, menu, t, i18n.language, canChangeWorkspace, updateCheckEnabled]);
+  }, [
+    enabled,
+    menu,
+    t,
+    i18n.language,
+    canChangeWorkspace,
+    updateCheckEnabled,
+    bridge?.tabs,
+  ]);
 
   // Dispatch native menu commands to the matching in-app handler.
   useEffect(() => {
     if (!enabled) return;
     return menu.onCommand((command) => {
+      if (isDesktopInputFrozen()) return;
       switch (command) {
         case 'new-canvas':
           void create();

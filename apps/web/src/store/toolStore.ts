@@ -2,9 +2,10 @@
 // Licensed under the MIT license.
 
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { createJSONStorage, persist } from 'zustand/middleware';
 
 import { SKETCH_ERASER_RADIUS_SCREEN_PX } from '@/config/canvas';
+import { applicationPreferenceStorage } from '@/utils/desktopStorage';
 
 import type { CanvasNodeType } from '@huabu/shared';
 
@@ -206,6 +207,7 @@ export const useToolStore = create<ToolState>()(
     }),
     {
       name: 'huabu-sketch-tools',
+      storage: createJSONStorage(applicationPreferenceStorage),
       version: 3,
       migrate: (persistedState, version) => {
         if (!persistedState) return persistedState as ToolState;

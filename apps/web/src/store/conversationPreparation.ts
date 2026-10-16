@@ -2,12 +2,14 @@
 // Licensed under the MIT license.
 
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { createJSONStorage, persist } from 'zustand/middleware';
 
 import {
   isAgentWorkingDirectory,
   MAX_AGENT_WORKING_DIR_PATH_LENGTH,
 } from '@huabu/shared/agent-working-directory';
+
+import { desktopSpaceStorage } from '@/utils/desktopStorage';
 
 import { rememberConversationAgentBinding } from './acpProfilesStore';
 import useCanvasStore from './canvasStore';
@@ -62,6 +64,7 @@ export const useConversationPreparationStore = create<PreparationState>()(
     }),
     {
       name: 'huabu-conversation-preparation',
+      storage: createJSONStorage(desktopSpaceStorage),
       partialize: ({ directories }) => ({ directories }),
       merge: (persisted, current) => {
         const raw = (persisted as Partial<PreparationState> | undefined)

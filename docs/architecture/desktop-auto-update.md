@@ -26,6 +26,8 @@ The explicit `update:install` action lets the user restart and install immediate
 
 The main process owns a single `UpdateStatus` snapshot, pushes every transition over the `update:status` channel, and answers `update:get-state` so a freshly-mounted renderer syncs immediately. The renderer never talks to `electron-updater` directly — only through the sandboxed `electronBridge.updater` surface.
 
+In the tabbed desktop window, status is broadcast to the Shell and all loaded content views. The Shell reuses `UpdateButton` with inline feedback rather than an offscreen content-overlapping tooltip or toast. Explicit restart installation first awaits the same all-page save barrier as application quit; a rejected save prevents installation and resumes input. An installation error cancels a prepared quit. See [Desktop Space Tabs](./desktop-tabs.md).
+
 **The persistent "Update failed" badge means a _download_ failed, not a _check_.** Failing to reach the release feed is not the same as an update failing, so the two are surfaced differently:
 
 - **Download / install failure** (an explicit `update:download` or `update:install` the user started) → snapshot transitions to `error`, and the header shows the persistent red "Update failed" badge (click to retry).

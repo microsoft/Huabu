@@ -7,6 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   check: vi.fn(),
+  download: vi.fn(),
+  install: vi.fn(),
   dismissToast: vi.fn(),
   toast: vi.fn(() => 'checking-toast'),
 }));
@@ -24,8 +26,8 @@ vi.mock('./useElectron', () => ({
   getElectronBridge: () => ({
     updater: {
       check: mocks.check,
-      download: vi.fn(),
-      install: vi.fn(),
+      download: mocks.download,
+      install: mocks.install,
       getState: vi.fn().mockResolvedValue({ state: 'idle' }),
       onStatus: vi.fn(() => vi.fn()),
     },
@@ -125,4 +127,57 @@ describe('useAppUpdate manual check feedback', () => {
       tone: 'danger',
     });
   });
+
+  it('uses inline Shell feedback instead of an invisible cross-view toast', async () => {
+    const feedback = vi.fn();
+    mocks.check.mockResolvedValue({
+      ok: true,
+      status: { state: 'not-available', version: '1.0.0' },
+    });
+    function Harness() {
+      const { check } = useAppUpdate(feedback);
+      return createElement('button', { onClick: check }, 'check');
+    }
+    await act(async () => root.render(createElement(Harness)));
+    await act(async () => {
+      container.querySelector('button')?.click();
+      await Promise.resolve();
+    });
+    expect(feedback).toHaveBeenNthCalledWith(1, 'update.checking', 'info');
+    expect(feedback).toHaveBeenNthCalledWith(
+      2,
+      'update.currentVersion',
+      'success',
+    );
+    expect(mocks.toast).not.toHaveBeenCalled();
+    expect(mocks.dismissToast).not.toHaveBeenCalled();
+  });
+
+  it.each(['download', 'install'] as const)(
+    'surfaces a refused %s operation',
+    async (operation) => {
+      const feedback = vi.fn();
+      mocks[operation].mockResolvedValue({
+        ok: false,
+        error: 'Space could not be saved',
+      });
+      function Harness() {
+        const actions = useAppUpdate(feedback);
+        return createElement(
+          'button',
+          { onClick: actions[operation] },
+          operation,
+        );
+      }
+      await act(async () => root.render(createElement(Harness)));
+      await act(async () => {
+        container.querySelector('button')?.click();
+        await Promise.resolve();
+      });
+      expect(feedback).toHaveBeenCalledWith(
+        'Space could not be saved',
+        'danger',
+      );
+    },
+  );
 });

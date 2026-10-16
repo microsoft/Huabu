@@ -1,7 +1,7 @@
 # Desktop Cold Start
 
 > What the user sees between double-clicking Huabu and the canvas list appearing, and which parts of the system own each phase.
-> Last updated: 2026-07-31
+> Last updated: 2026-10-15
 
 ---
 
@@ -12,18 +12,18 @@ app.whenReady()
   ├─ splash window opens                 ← first thing on screen
   ├─ local: shell-PATH probe, port allocation, server fork + TCP readiness
   ├─ remote: validate --server + probe /api/deployment/readiness
-  ├─ main window created (show: false), loadURL(selected server origin)
-  ├─ renderer parses the entry graph     ← nothing paints during this
+  ├─ main window created (show: false), load Shell + Home content view
+  ├─ renderers parse their entry graphs  ← nothing paints during this
   ├─ 'ready-to-show'  → main window shown, splash closed
-  └─ renderer: init() → GET /api/workspace → PUT /api/workspace (activation)
-                                           ← WorkspaceLoadingScreen covers this
+  └─ Home: init() → GET /api/workspace → activate remembered Workspace
+           └─ restore Tab identities; load only the active Space
 ```
 
 `pnpm start:desktop --server <URL>` selects a remote Huabu Server for the unpackaged production-bundle smoke test; packaged executables accept the same Electron process argument. The launcher forwards both `--server <URL>` and `--server=<URL>` to the main process, which accepts one credential-free HTTP or HTTPS origin and canonicalizes hostname case, default ports, and the trailing root slash. Query strings, fragments, repeated options, and path prefixes are rejected because the shipped SPA, `/api` routes, assets, SSE streams, and deep-link fallback share one root origin.
 
 When `--server` is omitted, startup retains the local utility-process Server, Electron `safeStorage` secret bridge, port retries, native local-folder picker, and graceful shutdown lifecycle. Remote mode starts or exposes none of those local-Server resources: the remote deployment owns its data, workspace paths, and credentials, while Electron loads its SPA so existing same-origin-relative API, streaming, and artifact URLs require no renderer configuration bridge. The preload marks this mode explicitly so the renderer never falls back to a Server-side native picker and instead accepts paths meaningful on the remote host. Startup probes `/api/deployment/readiness`; `401` with a Basic challenge means the Server is reachable and the subsequent navigation may request credentials, while network, TLS, Host-guard, incompatible authentication/response, and other HTTP failures stop startup without falling back locally.
 
-Electron handles remote Basic Auth in the main process. After the unauthenticated readiness probe returns a Basic challenge, a sandboxed credential window collects the username and password and the main process repeats the readiness request with those credentials; only a valid Huabu response may proceed to SPA navigation. The validated credentials satisfy Chromium's first exact-origin challenge and remain only in the current network session. URL-embedded credentials are rejected, the renderer never receives the username or password, and later challenges must be non-proxy Basic challenges from the same parsed origin. The response-header exemption and top-level navigation guard use the same exact-origin comparison rather than a string prefix.
+Electron handles remote Basic Auth in the main process. After the unauthenticated readiness probe returns a Basic challenge, a sandboxed credential window collects the username and password and the main process repeats the readiness request with those credentials; only a valid Huabu response may proceed to SPA navigation. Validated credentials remain in main-process memory and satisfy the first exact-origin challenge of each content renderer, including independent Space network partitions. A repeated challenge from the same renderer prompts for replacement credentials rather than retrying indefinitely. URL-embedded credentials are rejected, the renderer never receives the username or password, and later challenges must be non-proxy Basic challenges from the same parsed origin. The response-header exemption and top-level navigation guard use the same exact-origin comparison rather than a string prefix.
 
 ### Optional local Agents in remote mode
 
@@ -37,12 +37,12 @@ Credential requests explicitly send the normalized configured Server `Origin`, i
 
 Disconnect requires native confirmation, removes the saved authorization, and cooperatively stops the worker and its managed Agents even if vault deletion fails. Quit normally preserves authorization for the next launch. After 12 seconds, main requests forceful tree-wide cleanup through a separate IPC operation that bypasses any stalled cooperative shutdown. After another 3 seconds, main sends `SIGKILL` directly to the utility PID rather than Electron's cooperative `UtilityProcess.kill()` and waits up to 2 seconds for exit confirmation. Timeout or failed cleanup is never reported as successful; without verified process-tree cleanup, authorization is removed and replacement is blocked because detached task groups can survive the worker. Shutdown failures exit nonzero. Window close follows the shell's existing platform lifecycle. Interrupted turns are not replayed. Local Server mode retains its existing Server-owned supervisor and never starts this additional worker.
 
-When no remembered workspace can be activated, the workspace guard redirects to the stable `/setup` route instead of rendering the setup page inside the guard. This keeps the route that owns the post-activation navigation mounted while `selectWorkspace()` publishes `isReady`; after activation it navigates through `/` to `/spaces` (or World when enabled).
+When no remembered workspace can be activated, Home's workspace guard redirects to the stable `/setup` route instead of rendering the setup page inside the guard. This keeps the route that owns the post-activation navigation mounted while `selectWorkspace()` publishes `isReady`; after activation Home navigates through `/` to `/spaces`. Browser mode can still land on World when enabled. Independent Space content views initialize against the already-active Workspace; see [Desktop Space Tabs](./desktop-tabs.md).
 
 Two independent costs dominate a cold start:
 
 1. **Entry-graph evaluation.** One long synchronous task in the renderer. Its cost is the size of the first-screen JavaScript graph, and it is paid in full on the first launch after an install or an update, when Chromium's per-origin code cache is empty. (It is also paid on _every_ launch when the shell cannot get its preferred port, because the origin — and therefore the cache — changes with the port.)
-2. **Workspace activation.** The server always boots with no workspace; the remembered path lives in the main process, so the renderer has to `PUT /api/workspace` after it loads. Activation forks the preparation worker and runs the migration chain over the workspace root, which is sub-second on local disk and seconds on a cloud-sync mount (Google Drive, iCloud, OneDrive).
+2. **Workspace activation.** A free-mode local Server boots without an active Workspace. Home activates the most-recently-used server-registered Workspace after it loads; subsequent content views reuse that activation. Activation forks the preparation worker and runs the migration chain over the workspace root, which is sub-second on local disk and seconds on a cloud-sync mount (Google Drive, iCloud, OneDrive).
 
 ## 2. Why the splash is a separate window
 

@@ -2,9 +2,11 @@
 // Licensed under the MIT license.
 
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { createJSONStorage, persist } from 'zustand/middleware';
 
 import { createId } from '@huabu/shared';
+
+import { desktopSpaceStorage } from '@/utils/desktopStorage';
 
 import { getDefaultAgentBinding } from './acpProfilesStore';
 
@@ -823,6 +825,7 @@ export const useChatStore = create<ChatState>()(
     }),
     {
       name: 'huabu-chat',
+      storage: createJSONStorage(desktopSpaceStorage),
       version: 5,
       migrate: (persisted) => {
         const state = persisted as Partial<ChatState> & {

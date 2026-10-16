@@ -2,13 +2,15 @@
 // Licensed under the MIT license.
 
 import { Download, Plus, Search, Trash2, Upload } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 
+import { WorkspaceLoadingScreen } from './WorkspaceLoadingScreen';
 import { ApiError } from '../api/_client';
 import { listCanvases, exportCanvas } from '../api/canvas';
 import { Button } from '../components/Common/Button';
+import { cn } from '../components/Common/cn';
 import { EmptyState } from '../components/Common/EmptyState';
 import { Loading } from '../components/Common/Loading';
 import { TabGroup } from '../components/Common/TabGroup';
@@ -19,7 +21,7 @@ import { Header } from '../components/Panels/Header/Header';
 import { SpaceDeletionDialog } from '../components/Space/SpaceDeletionDialog';
 import { APP_NAME } from '../config/app';
 import { useCanvasActions } from '../hooks/useCanvasActions';
-import { isElectron } from '../hooks/useElectron';
+import { getElectronBridge, isElectron } from '../hooks/useElectron';
 import { i18n as translations } from '../i18n';
 import { useWorkspaceLabel, useWorkspaceStore } from '../store/workspaceStore';
 import { spaceAncestorIds } from '../utils/spaceHierarchy';
@@ -51,6 +53,7 @@ export default function CanvasListPage() {
       .map((id) => byId[id]?.title || t('canvasList.untitled'))
       .join(' / ');
   const [exportingId, setExportingId] = useState<string | null>(null);
+  const listRequestRef = useRef({ version: 0 });
   const {
     create: handleCreate,
     isCreating,
@@ -66,36 +69,74 @@ export default function CanvasListPage() {
   );
   const setCanvasCount = useWorkspaceStore((s) => s.setCanvasCount);
   const setSpaceTitle = useWorkspaceStore((s) => s.setSpaceTitle);
-  const isElectronApp = isElectron();
+  const workspaceSyncing = useWorkspaceStore((s) => s.isSyncing);
+  const isElectronApp = isElectron() && !getElectronBridge()?.tabs;
+  const isDesktopHome = getElectronBridge()?.tabs?.context.role === 'home';
 
-  const fetchCanvases = useCallback(async () => {
-    try {
-      setIsLoading(true);
-      const response = await listCanvases();
-      setCanvases(response.canvases);
-      setCanvasCount(response.canvases.length);
-    } catch (error) {
-      console.error('Failed to list canvases:', error);
-      toast(
-        error instanceof Error
-          ? error.message
-          : translations.t('spaceHierarchy.failed'),
-        { tone: 'danger' },
-      );
-    } finally {
-      setIsLoading(false);
-    }
-  }, [setCanvasCount]);
+  const fetchCanvases = useCallback(
+    async (showLoading = true) => {
+      const workspace = useWorkspaceStore.getState();
+      if (workspace.isSyncing) return;
+      const requestId = ++listRequestRef.current.version;
+      const isCurrent = () => {
+        const current = useWorkspaceStore.getState();
+        return (
+          requestId === listRequestRef.current.version &&
+          !current.isSyncing &&
+          current.workspaceId === workspace.workspaceId &&
+          current.workspacePath === workspace.workspacePath
+        );
+      };
+      try {
+        if (showLoading) setIsLoading(true);
+        const response = await listCanvases();
+        if (!isCurrent()) return;
+        setCanvases(response.canvases);
+        setCanvasCount(response.canvases.length);
+      } catch (error) {
+        if (isCurrent()) {
+          console.error('Failed to list canvases:', error);
+          toast(
+            error instanceof Error ? error.message : translations.t('spaceHierarchy.failed'),
+            { tone: 'danger' },
+          );
+        }
+      } finally {
+        if (isCurrent()) setIsLoading(false);
+      }
+    },
+    [setCanvasCount],
+  );
 
   useEffect(() => {
+    const requests = listRequestRef.current;
     void fetchCanvases();
+    return () => {
+      requests.version++;
+    };
   }, [fetchCanvases]);
 
   // Re-fetch when workspace changes
   useEffect(() => {
     const handler = () => void fetchCanvases();
+    const refresh = () => void fetchCanvases(false);
     window.addEventListener('workspace-changed', handler);
-    return () => window.removeEventListener('workspace-changed', handler);
+    window.addEventListener('canvas-list-changed', refresh);
+    return () => {
+      window.removeEventListener('workspace-changed', handler);
+      window.removeEventListener('canvas-list-changed', refresh);
+    };
+  }, [fetchCanvases]);
+
+  useEffect(() => {
+    const tabs = getElectronBridge()?.tabs;
+    if (!tabs || tabs.context.role !== 'home') return;
+    let active = true;
+    return tabs.onState((state) => {
+      const nextActive = state.activeId === 'home' && !state.busy;
+      if (nextActive && !active) void fetchCanvases(false);
+      active = nextActive;
+    });
   }, [fetchCanvases]);
 
   const handleExport = async (canvasId: string) => {
@@ -134,6 +175,52 @@ export default function CanvasListPage() {
     });
   };
 
+  const workspaceName = (
+    <>
+      <span>
+        {workspacePath
+          ? t('workspace.pathPrefix')
+          : t('workspace.workspacePrefix')}
+        {workspaceLabel}
+      </span>
+    </>
+  );
+  const workspaceSwitcher =
+    !isDesktopHome && workspaceLabel ? (
+      <Tooltip
+        content={
+          <div className="text-center">
+            <div>
+              {workspacePath
+                ? t('workspace.path', { path: workspacePath })
+                : t('workspace.workspace', { workspace: workspaceLabel })}
+            </div>
+            <div>{t('canvasList.canvasCount', { count: canvases.length })}</div>
+            {canChangeWorkspace && (
+              <div className="text-fg-subtle mt-1">
+                {t('workspace.clickToSwitch')}
+              </div>
+            )}
+          </div>
+        }
+      >
+        {canChangeWorkspace ? (
+          <Link
+            to="/setup"
+            className="text-fg-subtle hover:text-fg-default mt-0.5 ml-1 truncate text-xs transition-colors"
+          >
+            {workspaceName}
+          </Link>
+        ) : (
+          <span className="text-fg-subtle mt-0.5 ml-1 cursor-default truncate text-xs">
+            {workspaceName}
+          </span>
+        )}
+      </Tooltip>
+    ) : null;
+
+  if (isDesktopHome && workspaceSyncing) return <WorkspaceLoadingScreen />;
+
   return (
     <div className="bg-bg-default flex h-full flex-col">
       {pendingDelete && (
@@ -159,53 +246,12 @@ export default function CanvasListPage() {
         onChange={(e) => void handleFileChange(e)}
       />
 
-      {/* Header — hidden in Electron, where WindowChrome already shows the
-          workspace folder name + switcher tooltip in the title bar. */}
-      {!isElectronApp && (
+      {!isElectronApp && !isDesktopHome && (
         <Header>
           <h1 className="text-fg-default -ml-1 text-lg font-semibold">
             {APP_NAME}
           </h1>
-          {workspaceLabel && (
-            <Tooltip
-              content={
-                <div className="text-center">
-                  <div>
-                    {workspacePath
-                      ? t('workspace.path', { path: workspacePath })
-                      : t('workspace.workspace', { workspace: workspaceLabel })}
-                  </div>
-                  <div>
-                    {t('canvasList.canvasCount', { count: canvases.length })}
-                  </div>
-                  {canChangeWorkspace && (
-                    <div className="text-fg-subtle mt-1">
-                      {t('workspace.clickToSwitch')}
-                    </div>
-                  )}
-                </div>
-              }
-            >
-              {canChangeWorkspace ? (
-                <Link
-                  to="/setup"
-                  className="text-fg-subtle hover:text-fg-default mt-0.5 ml-1 truncate text-xs transition-colors"
-                >
-                  {workspacePath
-                    ? t('workspace.pathPrefix')
-                    : t('workspace.workspacePrefix')}
-                  {workspaceLabel}
-                </Link>
-              ) : (
-                <span className="text-fg-subtle mt-0.5 ml-1 cursor-default truncate text-xs">
-                  {workspacePath
-                    ? t('workspace.pathPrefix')
-                    : t('workspace.workspacePrefix')}
-                  {workspaceLabel}
-                </span>
-              )}
-            </Tooltip>
-          )}
+          {workspaceSwitcher}
         </Header>
       )}
 
@@ -214,9 +260,15 @@ export default function CanvasListPage() {
         <main className="mx-auto w-full max-w-7xl px-6 py-8 sm:px-8">
           <div className="mb-8 flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <h2 className="text-fg-default text-3xl font-semibold tracking-tight">
-                {t('canvasList.title')}
-              </h2>
+              {isDesktopHome ? (
+                <h1 className="text-fg-default text-3xl font-semibold tracking-tight">
+                  {t('canvasList.title')}
+                </h1>
+              ) : (
+                <h2 className="text-fg-default text-3xl font-semibold tracking-tight">
+                  {t('canvasList.title')}
+                </h2>
+              )}
               <p className="text-fg-muted mt-1 text-sm">
                 {t('canvasList.subtitle')}
               </p>

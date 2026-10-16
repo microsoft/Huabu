@@ -25,6 +25,11 @@
     "tooMany": "Select at most 32 # references per request.",
     "finishBinding": "Choose a resource or close the # picker before sending."
   },
+  "desktopTabs": {
+    "label": "Open Spaces",
+    "openSpace": "Open a Space",
+    "closeTab": "Close Tab"
+  },
   "app": {
     "loadingWorkspace": "Loading your Home folder…",
     "savingCanvas": "Saving Space…",
@@ -615,6 +620,9 @@
     }
   },
   "workspace": {
+    "switcher": "Switch Workspace",
+    "open": "Open Workspace…",
+    "switchFailed": "Could not open the Workspace. Please try again.",
     "welcome": "Welcome to {{appName}}",
     "intro": "Choose a Home folder to store your Spaces, notes, and artifacts.",
     "folder": "Home folder",

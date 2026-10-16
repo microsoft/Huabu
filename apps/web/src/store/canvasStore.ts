@@ -101,6 +101,10 @@ import {
   isVisibleWorldNode,
   REQUEST_DELETE_SPACE,
 } from '@/utils/spaceHierarchy';
+import {
+  desktopStorageKey,
+  writeApplicationPreference,
+} from '@/utils/desktopStorage';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
 import { useWorkspaceStore } from './workspaceStore';
@@ -226,7 +230,9 @@ function readViewportFromStorage(canvasId: string): CanvasViewport | null {
   const key = viewportStorageKey(canvasId);
 
   try {
-    return parseStoredViewport(localStorage.getItem(key));
+    return parseStoredViewport(
+      localStorage.getItem(desktopStorageKey(key)) ?? localStorage.getItem(key),
+    );
   } catch {
     // Private mode / disabled storage falls back to fitView.
     return null;
@@ -266,17 +272,23 @@ function flushViewportWrite(): void {
     clearTimeout(viewportWriteTimer);
     viewportWriteTimer = null;
   }
+
   const pending = pendingViewportWrite;
   pendingViewportWrite = null;
   if (!pending) return;
   try {
     localStorage.setItem(
-      viewportStorageKey(pending.canvasId),
+      desktopStorageKey(viewportStorageKey(pending.canvasId)),
       JSON.stringify(pending.viewport),
     );
   } catch {
     // Viewport persistence must never block interaction.
   }
+}
+
+export function flushCanvasViewState(): void {
+  flushViewportWrite();
+  usePreviewWorkspaceStore.getState().flush();
 }
 
 function writeViewportToStorage(
@@ -315,9 +327,12 @@ function readMinimapEnabledFromStorage(): boolean {
 
 function writeMinimapEnabledToStorage(value: boolean): void {
   try {
-    localStorage.setItem(MINIMAP_STORAGE_KEY, String(value));
-  } catch {
-    // Ignore quota / private-mode errors; in-memory state still toggles.
+    writeApplicationPreference(MINIMAP_STORAGE_KEY, String(value));
+  } catch (error) {
+    console.error('Could not save MiniMap visibility:', error);
+    toast(error instanceof Error ? error.message : String(error), {
+      tone: 'danger',
+    });
   }
 }
 
