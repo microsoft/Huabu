@@ -27,6 +27,8 @@ const mocks = vi.hoisted(() => ({
   finish: vi.fn(),
   navigate: vi.fn(),
   toast: vi.fn(),
+  setWorldEnabled: vi.fn(),
+  setWorkspaceState: vi.fn(),
 }));
 
 vi.mock('react-router-dom', () => ({ useNavigate: () => mocks.navigate }));
@@ -65,7 +67,11 @@ vi.mock('@/store/workspaceStore', () => ({
     (selector: (state: { isReady: boolean; isSyncing: boolean }) => unknown) =>
       selector({ isReady: false, isSyncing: false }),
     {
-      getState: () => ({ workspaceName: 'Workspace' }),
+      getState: () => ({
+        workspaceName: 'Workspace',
+        setWorldEnabled: mocks.setWorldEnabled,
+      }),
+      setState: mocks.setWorkspaceState,
       subscribe: () => () => {},
     },
   ),
@@ -138,6 +144,23 @@ describe('desktop save presentation', () => {
     await act(async () => vi.advanceTimersByTime(1000));
     expectPresentation(false, false);
     expect(mocks.save).not.toHaveBeenCalled();
+  });
+
+  it('hydrates queued World preference notifications without echoing writes to main', async () => {
+    await render();
+    for (const value of ['true', 'false']) {
+      window.dispatchEvent(
+        new StorageEvent('storage', {
+          key: 'huabu:world-enabled',
+          newValue: value,
+        }),
+      );
+    }
+    expect(mocks.setWorldEnabled).not.toHaveBeenCalled();
+    expect(mocks.setWorkspaceState.mock.calls).toEqual([
+      [{ worldEnabled: true }],
+      [{ worldEnabled: false }],
+    ]);
   });
 
   it('never shows saving on Home, including while waiting for Workspace activation', async () => {

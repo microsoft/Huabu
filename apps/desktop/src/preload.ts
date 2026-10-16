@@ -81,8 +81,11 @@ const tabs: DesktopTabsApi | undefined =
         onState: (callback) => subscribe('tabs:state', callback),
         open: (target) =>
           ipcRenderer.invoke('tabs:open', target) as Promise<DesktopTabResult>,
-        activate: (id) =>
-          ipcRenderer.invoke('tabs:activate', id) as Promise<DesktopTabResult>,
+        activate: (target) =>
+          ipcRenderer.invoke(
+            'tabs:activate',
+            target,
+          ) as Promise<DesktopTabResult>,
         close: (id) =>
           ipcRenderer.invoke('tabs:close', id) as Promise<DesktopTabResult>,
         reload: (id) =>

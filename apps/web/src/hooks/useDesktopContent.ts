@@ -199,7 +199,7 @@ export function useDesktopContent(): {
       if (event.key === 'huabu-chat-preferences')
         void useChatPreferencesStore.persist.rehydrate();
       if (event.key === 'huabu:world-enabled')
-        useWorkspaceStore.getState().setWorldEnabled(event.newValue === 'true');
+        useWorkspaceStore.setState({ worldEnabled: event.newValue === 'true' });
       if (event.key === 'huabu.minimapEnabled')
         useCanvasStore.setState({ minimapEnabled: event.newValue === 'true' });
     };

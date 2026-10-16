@@ -67,6 +67,13 @@ const isLegacyStorageKey = (key: string) =>
     (key.startsWith('huabu.viewport.') ||
       key.startsWith('huabu.previewWorkspace.')));
 
+export class DesktopCloseCancelledError extends Error {
+  constructor() {
+    super('Closing was cancelled. Unavailable Tabs were kept open.');
+    this.name = 'DesktopCloseCancelledError';
+  }
+}
+
 export class DesktopTabs {
   private tabs: ContentTab[] = [];
   private activeId = HOME_ID;
@@ -389,7 +396,7 @@ export class DesktopTabs {
     this.sessions = sessions;
   }
 
-  activate(id: string): void {
+  activate(id: string, focus: 'content' | 'shell' = 'content'): void {
     if (this.busy)
       throw new Error('Tabs are saving. Try again after saving finishes.');
     const tab = this.tabs.find((entry) => entry.state.id === id);
@@ -400,7 +407,8 @@ export class DesktopTabs {
     this.setHomeMenu(null);
     tab.state.unread = false;
     this.layout();
-    tab.view?.webContents.focus();
+    if (focus === 'shell') this.win.webContents.focus();
+    else tab.view?.webContents.focus();
     this.publish();
   }
 
@@ -573,7 +581,7 @@ export class DesktopTabs {
     this.publish();
   }
 
-  async prepareCloseAll(): Promise<void> {
+  async prepareCloseAll(allowDiscardUnavailable = false): Promise<void> {
     if (this.busy) throw new Error('Another Tab operation is in progress');
     this.setHomeMenu(null);
     this.busy = true;
@@ -582,8 +590,32 @@ export class DesktopTabs {
       const results = await Promise.allSettled(
         this.tabs.map((tab) => this.drain(tab)),
       );
-      const failed = results.find((result) => result.status === 'rejected');
-      if (failed?.status === 'rejected') throw failed.reason;
+      const failed: { tab: ContentTab; error: unknown }[] = results.flatMap(
+        (result, index) =>
+          result.status === 'rejected'
+            ? [{ tab: this.tabs[index], error: result.reason }]
+            : [],
+      );
+      const blocking = failed.find(
+        ({ tab }) => !allowDiscardUnavailable || tab.ready,
+      );
+      if (blocking) throw blocking.error;
+      if (failed.length > 0) {
+        const { response } = await dialog.showMessageBox(this.win, {
+          type: 'warning',
+          message: 'Close without saving unavailable pages?',
+          detail: `${failed.map(({ tab }) => tab.state.title).join('\n')}\n\nThese pages cannot acknowledge saving. Unsaved changes may be lost. All other pages have been saved.`,
+          buttons: ['Cancel', 'Discard unavailable pages and close'],
+          defaultId: 0,
+          cancelId: 0,
+          noLink: true,
+        });
+        if (response !== 1) throw new DesktopCloseCancelledError();
+        // A page that recovered during the dialog must acknowledge its save.
+        for (const { tab } of failed) {
+          if (tab.ready) await this.drain(tab);
+        }
+      }
       this.persist();
     } catch (error) {
       this.resume();
@@ -901,10 +933,20 @@ export function registerDesktopTabsIpc(
   action('tabs:open', (tabs, _event, value) => tabs.open(value));
   for (const operation of ['activate', 'close', 'reload'] as const) {
     action(`tabs:${operation}`, (tabs, event, value) => {
-      if (typeof value !== 'string') throw new Error('Invalid Tab identity');
       if (!tabs.isShell(event.sender)) {
         throw new Error('Only the desktop shell can address another Tab');
       }
+      if (
+        operation === 'activate' &&
+        value &&
+        typeof value === 'object' &&
+        'id' in value &&
+        typeof value.id === 'string' &&
+        'focus' in value &&
+        value.focus === 'shell'
+      )
+        return tabs.activate(value.id, 'shell');
+      if (typeof value !== 'string') throw new Error('Invalid Tab identity');
       return tabs[operation](value);
     });
   }
