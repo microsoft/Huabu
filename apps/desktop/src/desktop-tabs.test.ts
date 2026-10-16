@@ -101,7 +101,7 @@ describe('desktop Space Tab lifecycle', () => {
     mocks.options.length = 0;
     mocks.handlers.clear();
     mocks.listeners.clear();
-    mocks.showMessageBox.mockResolvedValue({ response: 1 });
+    mocks.showMessageBox.mockReset().mockResolvedValue({ response: 1 });
     directory = mkdtempSync(join(tmpdir(), 'huabu-tabs-test-'));
     shell = {
       webContents: {
@@ -159,6 +159,17 @@ describe('desktop Space Tab lifecycle', () => {
       message![1],
       ok ? { ok: true } : { ok: false, error: 'Disk full' },
     );
+  }
+
+  function crash(view: TestView): void {
+    const handler = view.webContents.callbacks.get('render-process-gone');
+    if (!handler) throw new Error('Missing renderer failure handler');
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      handler({} as never, { reason: 'crashed' } as never);
+    } finally {
+      log.mockRestore();
+    }
   }
 
   const report = (patch: Partial<DesktopTabReport> = {}): DesktopTabReport => ({
@@ -328,6 +339,72 @@ describe('desktop Space Tab lifecycle', () => {
     });
     expect(tabs.snapshot.tabs).toHaveLength(1);
     expect(tabs.snapshot.activeId).toBe('home');
+  });
+
+  it('keeps native Shell focus during keyboard-driven Tab activation', () => {
+    const a = open('a');
+    a.webContents.focus.mockClear();
+    shell.webContents.focus.mockClear();
+    tabs.activate(tabs.snapshot.activeId, 'shell');
+    expect(shell.webContents.focus).toHaveBeenCalledOnce();
+    expect(a.webContents.focus).not.toHaveBeenCalled();
+    tabs.activate(tabs.snapshot.activeId);
+    expect(a.webContents.focus).toHaveBeenCalledOnce();
+  });
+
+  it('allows shutdown to discard failed Home only after explicit confirmation and healthy saves', async () => {
+    const a = open('a');
+    crash(mocks.views[0]);
+    const save = tabs.prepareCloseAll(true);
+    expect(mocks.showMessageBox).not.toHaveBeenCalled();
+    finish(a);
+    await expect(save).resolves.toBeUndefined();
+    expect(mocks.showMessageBox).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        type: 'warning',
+        detail: expect.stringContaining('Home'),
+        defaultId: 0,
+        cancelId: 0,
+      }),
+    );
+    expect(tabs.snapshot.busy).toBe(true);
+    expect(a.webContents.close).not.toHaveBeenCalled();
+  });
+
+  it('retains pages and resumes input when unavailable-renderer discard is cancelled', async () => {
+    const a = open('a');
+    crash(mocks.views[0]);
+    mocks.showMessageBox.mockResolvedValueOnce({ response: 0 });
+    const save = tabs.prepareCloseAll(true);
+    finish(a);
+    await expect(save).rejects.toThrow('cancelled');
+    expect(tabs.snapshot.busy).toBe(false);
+    expect(a.webContents.close).not.toHaveBeenCalled();
+    expect(a.webContents.send).toHaveBeenCalledWith('tabs:resume');
+  });
+
+  it('does not discard a healthy page whose save fails alongside failed Home', async () => {
+    const a = open('a');
+    crash(mocks.views[0]);
+    const save = tabs.prepareCloseAll(true);
+    finish(a, false);
+    await expect(save).rejects.toThrow('Disk full');
+    expect(mocks.showMessageBox).not.toHaveBeenCalled();
+    expect(tabs.snapshot.busy).toBe(false);
+    expect(a.webContents.close).not.toHaveBeenCalled();
+  });
+
+  it('never offers to discard unavailable pages while changing Workspace', async () => {
+    const a = open('a');
+    const home = mocks.views[0];
+    crash(home);
+    const change = tabs.beginWorkspaceChange(home.webContents as never);
+    finish(a);
+    await expect(change).rejects.toThrow('not ready');
+    expect(mocks.showMessageBox).not.toHaveBeenCalled();
+    expect(tabs.snapshot.workspaceId).toBe('workspace');
+    expect(a.webContents.close).not.toHaveBeenCalled();
   });
 
   it('does not navigate again when activating an existing Space without a link intent', () => {

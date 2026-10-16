@@ -15,6 +15,11 @@ export interface DesktopTabNavigation {
   homePath?: '/spaces' | '/setup';
 }
 
+export interface DesktopTabActivation {
+  id: string;
+  focus: 'shell';
+}
+
 export interface DesktopTab {
   id: string;
   canvasId: string | null;
@@ -80,7 +85,9 @@ export interface DesktopTabsApi {
   getState: () => Promise<DesktopTabsSnapshot>;
   onState: (callback: (state: DesktopTabsSnapshot) => void) => () => void;
   open: (target: DesktopTabNavigation) => Promise<DesktopTabResult>;
-  activate: (id: string) => Promise<DesktopTabResult>;
+  activate: (
+    target: string | DesktopTabActivation,
+  ) => Promise<DesktopTabResult>;
   close: (id: string) => Promise<DesktopTabResult>;
   reload: (id: string) => Promise<DesktopTabResult>;
   command: (command: DesktopTabCommand) => Promise<DesktopTabResult>;

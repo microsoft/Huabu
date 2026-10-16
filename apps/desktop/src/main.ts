@@ -52,7 +52,11 @@ import {
 } from 'electron';
 import { utilityProcess, type UtilityProcess } from 'electron';
 
-import { DesktopTabs, registerDesktopTabsIpc } from './desktop-tabs.js';
+import {
+  DesktopCloseCancelledError,
+  DesktopTabs,
+  registerDesktopTabsIpc,
+} from './desktop-tabs.js';
 import { applyApplicationMenu, registerMenuIpc } from './mac-menu.js';
 import {
   promptForRemoteBasicAuth,
@@ -1099,6 +1103,7 @@ function createWindow(url: string): void {
         win.close();
       })
       .catch((error: unknown) => {
+        if (error instanceof DesktopCloseCancelledError) return;
         dialog.showErrorBox(
           'Could not save Spaces',
           error instanceof Error ? error.message : String(error),
@@ -1422,7 +1427,7 @@ let quitPreparation: Promise<void> | null = null;
 function prepareDesktopQuit(): Promise<void> {
   if (quitPrepared) return Promise.resolve();
   quitPreparation ??= (async () => {
-    await desktopTabs?.prepareCloseAll();
+    await desktopTabs?.prepareCloseAll(true);
     quitPrepared = true;
   })().finally(() => {
     quitPreparation = null;
@@ -1431,6 +1436,7 @@ function prepareDesktopQuit(): Promise<void> {
 }
 
 function cancelDesktopQuit(): void {
+  if (!quitPrepared) return;
   quitPrepared = false;
   desktopTabs?.resume();
 }
@@ -1447,6 +1453,7 @@ app.on('before-quit', (event) => {
     .catch((error: unknown) => {
       quitInFlight = false;
       cancelDesktopQuit();
+      if (error instanceof DesktopCloseCancelledError) return;
       console.error('[desktop] Could not save before quitting:', error);
       dialog.showErrorBox(
         'Could not save Spaces',

@@ -121,10 +121,19 @@ export default function DesktopTabShell() {
         : event.key === 'End'
           ? count - 1
           : (index + (event.key === 'ArrowLeft' ? -1 : 1) + count) % count;
-    run(tabs.activate(snapshot.tabs[next].id));
-    tabList.current
-      ?.querySelectorAll<HTMLButtonElement>('[role="tab"]')
-      [next]?.focus();
+    const nextButton =
+      tabList.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[
+        next
+      ];
+    run(
+      tabs
+        .activate({ id: snapshot.tabs[next].id, focus: 'shell' })
+        .then((result) => {
+          if (result.ok && nextButton?.isConnected) nextButton.focus();
+          return result;
+        }),
+    );
+    nextButton?.focus();
   };
 
   return (

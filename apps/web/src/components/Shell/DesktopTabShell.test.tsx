@@ -118,6 +118,28 @@ describe('DesktopTabShell minimal Tab presentation', () => {
     expect(mocks.close).toHaveBeenCalledWith('space-a');
   });
 
+  it('restores the selected Tab focus after asynchronous keyboard activation', async () => {
+    let complete!: (result: { ok: true }) => void;
+    mocks.activate.mockReturnValueOnce(
+      new Promise((resolve) => {
+        complete = resolve;
+      }),
+    );
+    await render();
+    const space = button('Space A');
+    const home = button('navigation.home');
+    space.focus();
+    await act(async () =>
+      space.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }),
+      ),
+    );
+    expect(mocks.activate).toHaveBeenCalledWith({ id: 'home', focus: 'shell' });
+    space.focus();
+    await act(async () => complete({ ok: true }));
+    expect(document.activeElement).toBe(home);
+  });
+
   it('shows Home as an accessible icon-only Tab', async () => {
     await render();
     const home = button('navigation.home');

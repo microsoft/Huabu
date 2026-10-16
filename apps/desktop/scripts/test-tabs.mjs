@@ -589,9 +589,74 @@ try {
       }),
     'synchronizing preferences across partitions',
   );
-  await a.evaluate(async () => {
+  await electron.evaluate(({ app, BrowserWindow }) => {
+    const win = BrowserWindow.getAllWindows().find((window) =>
+      window.webContents.getURL().includes('/_desktop'),
+    );
+    app.focus({ steal: true });
+    win.show();
+    win.focus();
+    win.webContents.focus();
+  });
+  const nativeFocusAvailable = await electron.evaluate(
+    ({ BrowserWindow }) => BrowserWindow.getFocusedWindow() !== null,
+  );
+  if (!nativeFocusAvailable)
+    console.log(
+      'Native focus assertions skipped: the test environment did not activate the fixture window.',
+    );
+  await shell.getByRole('tab', { name: 'Tabs smoke A', exact: true }).focus();
+  for (const [key, label] of [
+    ['End', 'Tabs smoke B'],
+    ['ArrowLeft', 'Tabs smoke A'],
+    ['Home', workspaceLabels.home],
+    ['ArrowRight', 'Tabs smoke A'],
+  ]) {
+    await shell.keyboard.press(key);
+    await waitFor(
+      () =>
+        shell
+          .getByRole('tab', { name: label, exact: true })
+          .evaluate(
+            (button) =>
+              button.getAttribute('aria-selected') === 'true' &&
+              document.activeElement === button,
+          ),
+      `keeping keyboard focus after ${key}`,
+    );
+    if (nativeFocusAvailable)
+      await waitFor(
+        () =>
+          electron.evaluate(({ BrowserWindow, webContents }) =>
+            BrowserWindow.getAllWindows().some(
+              (win) =>
+                win.webContents.getURL().includes('/_desktop') &&
+                win.webContents === webContents.getFocusedWebContents(),
+            ),
+          ),
+        `retaining native Shell focus after ${key}`,
+      );
+  }
+  await shell.getByRole('tab', { name: 'Tabs smoke A', exact: true }).click();
+  const languageLabel = await a.evaluate(async () => {
     const { i18n } = await import('/src/i18n/index.ts');
-    await i18n.changeLanguage('en');
+    return i18n.t('settings.language');
+  });
+  const generalLabel = await a.evaluate(async () => {
+    const { i18n } = await import('/src/i18n/index.ts');
+    return i18n.t('settings.general');
+  });
+  await shell
+    .getByRole('button', { name: settingsLabels.open, exact: true })
+    .click();
+  await a.getByRole('dialog').waitFor({ state: 'visible' });
+  await a.getByRole('button', { name: generalLabel, exact: true }).click();
+  await a.getByRole('button', { name: languageLabel, exact: true }).click();
+  await a.getByRole('option', { name: 'English', exact: true }).click();
+  await a.evaluate(async () => {
+    const { useSettingsUiStore } =
+      await import('/src/store/settingsUiStore.ts');
+    useSettingsUiStore.getState().close();
   });
   for (const page of [b, shell]) {
     await waitFor(
@@ -602,6 +667,80 @@ try {
         }),
       'synchronizing language into background content and Shell',
     );
+  }
+  await electron.evaluate(({ ipcMain }) => {
+    globalThis.tabsSmokePreferenceWrites = [];
+    globalThis.tabsSmokePreferenceListener = (_event, key, value) => {
+      if (key === 'huabu.language' || key === 'huabu:world-enabled')
+        globalThis.tabsSmokePreferenceWrites.push({ key, value });
+    };
+    ipcMain.on('tabs:set-preference', globalThis.tabsSmokePreferenceListener);
+  });
+  await b.evaluate(() => {
+    globalThis.tabsSmokePreferenceEvents = [];
+    globalThis.tabsSmokeStorageListener = (event) => {
+      if (event.key === 'huabu.language' || event.key === 'huabu:world-enabled')
+        globalThis.tabsSmokePreferenceEvents.push({
+          key: event.key,
+          value: event.newValue,
+        });
+    };
+    window.addEventListener('storage', globalThis.tabsSmokeStorageListener);
+  });
+  try {
+    await a.evaluate(async () => {
+      const { useWorkspaceStore } =
+        await import('/src/store/workspaceStore.ts');
+      const { writeApplicationPreference } =
+        await import('/src/utils/desktopStorage.ts');
+      useWorkspaceStore.getState().setWorldEnabled(true);
+      useWorkspaceStore.getState().setWorldEnabled(false);
+      writeApplicationPreference('huabu.language', 'zh-CN');
+      writeApplicationPreference('huabu.language', 'en');
+    });
+    await waitFor(
+      () => b.evaluate(() => globalThis.tabsSmokePreferenceEvents.length >= 4),
+      'applying queued preference notifications',
+    );
+    assert.deepEqual(
+      await electron.evaluate(() => globalThis.tabsSmokePreferenceWrites),
+      [
+        { key: 'huabu:world-enabled', value: 'true' },
+        { key: 'huabu:world-enabled', value: 'false' },
+        { key: 'huabu.language', value: 'zh-CN' },
+        { key: 'huabu.language', value: 'en' },
+      ],
+      'Incoming notifications must not write preferences back to main',
+    );
+    assert.deepEqual(
+      await b.evaluate(async () => {
+        const { i18n } = await import('/src/i18n/index.ts');
+        const { useWorkspaceStore } =
+          await import('/src/store/workspaceStore.ts');
+        return {
+          world: useWorkspaceStore.getState().worldEnabled,
+          language: i18n.language,
+        };
+      }),
+      { world: false, language: 'en' },
+    );
+  } finally {
+    await electron.evaluate(({ ipcMain }) => {
+      ipcMain.removeListener(
+        'tabs:set-preference',
+        globalThis.tabsSmokePreferenceListener,
+      );
+      delete globalThis.tabsSmokePreferenceListener;
+      delete globalThis.tabsSmokePreferenceWrites;
+    });
+    await b.evaluate(() => {
+      window.removeEventListener(
+        'storage',
+        globalThis.tabsSmokeStorageListener,
+      );
+      delete globalThis.tabsSmokeStorageListener;
+      delete globalThis.tabsSmokePreferenceEvents;
+    });
   }
   let state = await shell.evaluate(() => window.electronBridge.tabs.getState());
   assert.equal(
@@ -788,6 +927,37 @@ try {
       .locator('div.bg-surface.absolute.inset-0')
       .filter({ hasText: 'Saving Space' });
     await overlay.waitFor({ state: 'visible' });
+    await electron.evaluate(({ app, dialog }) => {
+      globalThis.tabsSmokeShowErrorBox = dialog.showErrorBox;
+      globalThis.tabsSmokeQuitErrors = [];
+      dialog.showErrorBox = (title, message) =>
+        globalThis.tabsSmokeQuitErrors.push({ title, message });
+      app.emit('before-quit', { preventDefault() {} });
+    });
+    try {
+      await waitFor(
+        () =>
+          electron.evaluate(() => globalThis.tabsSmokeQuitErrors.length > 0),
+        'rejecting quit while a Tab close owns the save barrier',
+      );
+      assert.equal(
+        (await shell.evaluate(() => window.electronBridge.tabs.getState()))
+          .busy,
+        true,
+        'A rejected quit must not release a Tab close save barrier',
+      );
+      assert.equal(
+        await a.evaluate(() => document.body.inert),
+        true,
+        'A rejected quit must not unfreeze the Tab being saved',
+      );
+    } finally {
+      await electron.evaluate(({ dialog }) => {
+        dialog.showErrorBox = globalThis.tabsSmokeShowErrorBox;
+        delete globalThis.tabsSmokeShowErrorBox;
+        delete globalThis.tabsSmokeQuitErrors;
+      });
+    }
     savingPresentation = await overlay.evaluate((element) => {
       const context = document.createElement('canvas').getContext('2d');
       if (!context) throw new Error('Cannot measure saving overlay opacity');
@@ -945,6 +1115,86 @@ try {
     await electron.evaluate(() => globalThis.tabsSmokeUnexpectedErrors),
     [],
     'Unexpected native errors must fail the smoke test rather than block it',
+  );
+  const shutdownSpace = await request('/canvas', 'POST', {
+    title: 'Shutdown recovery',
+  });
+  const healthy = await open(shell, shutdownSpace.canvasId);
+  await healthy.evaluate(async () => {
+    const { default: canvas } = await import('/src/store/canvasStore.ts');
+    canvas.getState().addNode({
+      id: 'tabs-smoke-shutdown-note',
+      nodeType: 'note',
+      data: {
+        label: 'Shutdown recovery',
+        content: 'Saved despite Home failure',
+      },
+      placementPoint: { x: 100, y: 100 },
+    });
+  });
+  await electron.evaluate(({ webContents }) => {
+    const home = webContents
+      .getAllWebContents()
+      .find((contents) => contents.getURL().endsWith('/spaces'));
+    if (!home) throw new Error('Missing Home renderer');
+    home.forcefullyCrashRenderer();
+  });
+  await waitFor(
+    async () =>
+      (
+        await shell.evaluate(() => window.electronBridge.tabs.getState())
+      ).tabs.find((tab) => tab.id === 'home')?.error,
+    'detecting failed Home',
+  );
+  assert.equal(
+    (
+      await electron.evaluate(() =>
+        globalThis.tabsSmokeUnexpectedErrors.splice(0),
+      )
+    ).length,
+    1,
+    'The intentional Home crash must produce one native failure notification',
+  );
+  await electron.evaluate(({ app, dialog }) => {
+    globalThis.tabsSmokeShutdownDialog = null;
+    dialog.showMessageBox = async (_win, options) => {
+      globalThis.tabsSmokeShutdownDialog = options;
+      return { response: 0, checkboxChecked: false };
+    };
+    app.emit('before-quit', { preventDefault() {} });
+  });
+  await waitFor(
+    async () =>
+      (await electron.evaluate(() => globalThis.tabsSmokeShutdownDialog)) &&
+      !(await shell.evaluate(() => window.electronBridge.tabs.getState())).busy,
+    'cancelling unavailable-Home shutdown',
+  );
+  await waitFor(
+    () => healthy.evaluate(() => !document.body.inert),
+    'resuming the healthy Space',
+  );
+  assert.equal(healthy.isClosed(), false);
+  assert.equal(
+    (
+      await request(
+        `/canvas/${shutdownSpace.canvasId}/nodes/tabs-smoke-shutdown-note/content`,
+      )
+    ).content,
+    'Saved despite Home failure',
+  );
+  assert.deepEqual(
+    await electron.evaluate(() => globalThis.tabsSmokeUnexpectedErrors),
+    [],
+  );
+  await electron.evaluate(({ dialog }) => {
+    dialog.showMessageBox = async () => ({
+      response: 1,
+      checkboxChecked: false,
+    });
+  });
+  await closeElectron();
+  console.log(
+    'Unavailable Home shutdown was cancelled safely, then explicitly confirmed',
   );
   console.log(
     JSON.stringify(
