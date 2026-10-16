@@ -109,6 +109,36 @@ describe('desktop updater IPC', () => {
     expect(mocks.autoUpdater.on).not.toHaveBeenCalled();
   });
 
+  it('does not install when a content page refuses the save barrier', async () => {
+    const { registerUpdaterIpc } = await import('./updater.js');
+    const cancelInstall = vi.fn();
+    registerUpdaterIpc(() => null, {
+      broadcast: vi.fn(),
+      prepareInstall: vi.fn().mockRejectedValue(new Error('Disk full')),
+      cancelInstall,
+    });
+    await expect(mocks.handlers.get('update:install')?.()).resolves.toEqual({
+      ok: false,
+      error: 'Disk full',
+    });
+    expect(mocks.autoUpdater.quitAndInstall).not.toHaveBeenCalled();
+    expect(cancelInstall).toHaveBeenCalledTimes(1);
+  });
+
+  it('broadcasts update state to the tabbed desktop host', async () => {
+    const { registerUpdaterIpc } = await import('./updater.js');
+    const broadcast = vi.fn();
+    registerUpdaterIpc(() => null, {
+      broadcast,
+      prepareInstall: vi.fn().mockResolvedValue(undefined),
+      cancelInstall: vi.fn(),
+    });
+    mocks.listeners.get('update-available')?.({ version: '1.2.3' });
+    expect(broadcast).toHaveBeenCalledWith(
+      expect.objectContaining({ state: 'available', version: '1.2.3' }),
+    );
+  });
+
   it('a failed check clears checking and is claimed so the shared error never badges it', async () => {
     const checkError = new Error('offline');
     mocks.autoUpdater.checkForUpdates.mockRejectedValueOnce(checkError);

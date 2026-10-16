@@ -1,4 +1,9 @@
 {
+  "desktopTabs": {
+    "label": "已打开的 Space",
+    "openSpace": "打开 Space",
+    "closeTab": "关闭标签页"
+  },
   "app": {
     "loadingWorkspace": "正在加载你的 Home 文件夹…",
     "savingCanvas": "正在保存 Space…",
@@ -557,6 +562,9 @@
     }
   },
   "workspace": {
+    "switcher": "切换工作区",
+    "open": "打开工作区…",
+    "switchFailed": "无法打开工作区，请重试。",
     "welcome": "欢迎使用 {{appName}}",
     "intro": "选择一个 Home 文件夹来保存你的 Space、笔记和产物。",
     "folder": "Home 文件夹",

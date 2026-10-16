@@ -11,6 +11,8 @@
  * bounded by a capped most-recently-used index of Canvas IDs.
  */
 
+import { desktopStorageKey } from '@/utils/desktopStorage';
+
 import {
   DEFAULT_SPLIT_RATIO,
   MAX_PREVIEW_GROUPS,
@@ -45,7 +47,9 @@ type PersistedWorkspace = {
 
 function readRaw(key: string): string | null {
   try {
-    return localStorage.getItem(key);
+    return (
+      localStorage.getItem(desktopStorageKey(key)) ?? localStorage.getItem(key)
+    );
   } catch {
     // Private mode / disabled storage behaves as "no stored layout".
     return null;
@@ -54,7 +58,7 @@ function readRaw(key: string): string | null {
 
 function writeRaw(key: string, value: string): void {
   try {
-    localStorage.setItem(key, value);
+    localStorage.setItem(desktopStorageKey(key), value);
   } catch {
     // A full or unavailable quota must never break the workspace.
   }
@@ -62,7 +66,7 @@ function writeRaw(key: string, value: string): void {
 
 function removeRaw(key: string): void {
   try {
-    localStorage.removeItem(key);
+    localStorage.removeItem(desktopStorageKey(key));
   } catch {
     // Nothing to do if storage is unavailable.
   }

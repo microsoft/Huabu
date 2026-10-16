@@ -6,6 +6,9 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": {
+    "./desktop-tabs": {
+      "types": "./src/types/desktop-tabs.ts"
+    },
     "./service-package": {
       "types": "./src/types/api/service-package.ts",
       "import": "./src/types/api/service-package.ts"

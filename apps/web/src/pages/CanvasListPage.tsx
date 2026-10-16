@@ -6,9 +6,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 
+import { WorkspaceLoadingScreen } from './WorkspaceLoadingScreen';
 import { ApiError } from '../api/_client';
 import { listCanvases, exportCanvas, deleteCanvasById } from '../api/canvas';
 import { Button } from '../components/Common/Button';
+import { cn } from '../components/Common/cn';
 import { EmptyState } from '../components/Common/EmptyState';
 import { Loading } from '../components/Common/Loading';
 import { Modal } from '../components/Common/Modal';
@@ -17,7 +19,7 @@ import { Tooltip } from '../components/Common/Tooltip';
 import { Header } from '../components/Panels/Header/Header';
 import { APP_NAME } from '../config/app';
 import { useCanvasActions } from '../hooks/useCanvasActions';
-import { isElectron } from '../hooks/useElectron';
+import { getElectronBridge, isElectron } from '../hooks/useElectron';
 import { deleteWorkspace } from '../store/previewWorkspace/persistence';
 import { useWorkspaceLabel, useWorkspaceStore } from '../store/workspaceStore';
 
@@ -38,6 +40,7 @@ export default function CanvasListPage() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [exportingId, setExportingId] = useState<string | null>(null);
   const confirmDeleteButtonRef = useRef<HTMLButtonElement>(null);
+  const listRequestRef = useRef({ version: 0 });
   const {
     create: handleCreate,
     isCreating,
@@ -52,30 +55,68 @@ export default function CanvasListPage() {
     (s) => s.capabilities?.canChangeWorkspace ?? true,
   );
   const setCanvasCount = useWorkspaceStore((s) => s.setCanvasCount);
-  const isElectronApp = isElectron();
+  const workspaceSyncing = useWorkspaceStore((s) => s.isSyncing);
+  const isElectronApp = isElectron() && !getElectronBridge()?.tabs;
+  const isDesktopHome = getElectronBridge()?.tabs?.context.role === 'home';
 
-  const fetchCanvases = useCallback(async () => {
-    try {
-      setIsLoading(true);
-      const response = await listCanvases();
-      setCanvases(response.canvases);
-      setCanvasCount(response.canvases.length);
-    } catch (error) {
-      console.error('Failed to list canvases:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [setCanvasCount]);
+  const fetchCanvases = useCallback(
+    async (showLoading = true) => {
+      const workspace = useWorkspaceStore.getState();
+      if (workspace.isSyncing) return;
+      const requestId = ++listRequestRef.current.version;
+      const isCurrent = () => {
+        const current = useWorkspaceStore.getState();
+        return (
+          requestId === listRequestRef.current.version &&
+          !current.isSyncing &&
+          current.workspaceId === workspace.workspaceId &&
+          current.workspacePath === workspace.workspacePath
+        );
+      };
+      try {
+        if (showLoading) setIsLoading(true);
+        const response = await listCanvases();
+        if (!isCurrent()) return;
+        setCanvases(response.canvases);
+        setCanvasCount(response.canvases.length);
+      } catch (error) {
+        if (isCurrent()) console.error('Failed to list canvases:', error);
+      } finally {
+        if (isCurrent()) setIsLoading(false);
+      }
+    },
+    [setCanvasCount],
+  );
 
   useEffect(() => {
+    const requests = listRequestRef.current;
     void fetchCanvases();
+    return () => {
+      requests.version++;
+    };
   }, [fetchCanvases]);
 
   // Re-fetch when workspace changes
   useEffect(() => {
     const handler = () => void fetchCanvases();
+    const refresh = () => void fetchCanvases(false);
     window.addEventListener('workspace-changed', handler);
-    return () => window.removeEventListener('workspace-changed', handler);
+    window.addEventListener('canvas-list-changed', refresh);
+    return () => {
+      window.removeEventListener('workspace-changed', handler);
+      window.removeEventListener('canvas-list-changed', refresh);
+    };
+  }, [fetchCanvases]);
+
+  useEffect(() => {
+    const tabs = getElectronBridge()?.tabs;
+    if (!tabs || tabs.context.role !== 'home') return;
+    let active = true;
+    return tabs.onState((state) => {
+      const nextActive = state.activeId === 'home' && !state.busy;
+      if (nextActive && !active) void fetchCanvases(false);
+      active = nextActive;
+    });
   }, [fetchCanvases]);
 
   const handleExport = async (canvasId: string) => {
@@ -138,6 +179,52 @@ export default function CanvasListPage() {
       minute: '2-digit',
     });
   };
+
+  const workspaceName = (
+    <>
+      <span>
+        {workspacePath
+          ? t('workspace.pathPrefix')
+          : t('workspace.workspacePrefix')}
+        {workspaceLabel}
+      </span>
+    </>
+  );
+  const workspaceSwitcher =
+    !isDesktopHome && workspaceLabel ? (
+      <Tooltip
+        content={
+          <div className="text-center">
+            <div>
+              {workspacePath
+                ? t('workspace.path', { path: workspacePath })
+                : t('workspace.workspace', { workspace: workspaceLabel })}
+            </div>
+            <div>{t('canvasList.canvasCount', { count: canvases.length })}</div>
+            {canChangeWorkspace && (
+              <div className="text-fg-subtle mt-1">
+                {t('workspace.clickToSwitch')}
+              </div>
+            )}
+          </div>
+        }
+      >
+        {canChangeWorkspace ? (
+          <Link
+            to="/setup"
+            className="text-fg-subtle hover:text-fg-default mt-0.5 ml-1 truncate text-xs transition-colors"
+          >
+            {workspaceName}
+          </Link>
+        ) : (
+          <span className="text-fg-subtle mt-0.5 ml-1 cursor-default truncate text-xs">
+            {workspaceName}
+          </span>
+        )}
+      </Tooltip>
+    ) : null;
+
+  if (isDesktopHome && workspaceSyncing) return <WorkspaceLoadingScreen />;
 
   return (
     <div className="bg-bg-default flex h-full flex-col">
@@ -206,69 +293,44 @@ export default function CanvasListPage() {
         onChange={(e) => void handleFileChange(e)}
       />
 
-      {/* Header — hidden in Electron, where WindowChrome already shows the
-          workspace folder name + switcher tooltip in the title bar. */}
-      {!isElectronApp && (
+      {!isElectronApp && !isDesktopHome && (
         <Header>
           <h1 className="text-fg-default -ml-1 text-lg font-semibold">
             {APP_NAME}
           </h1>
-          {workspaceLabel && (
-            <Tooltip
-              content={
-                <div className="text-center">
-                  <div>
-                    {workspacePath
-                      ? t('workspace.path', { path: workspacePath })
-                      : t('workspace.workspace', { workspace: workspaceLabel })}
-                  </div>
-                  <div>
-                    {t('canvasList.canvasCount', { count: canvases.length })}
-                  </div>
-                  {canChangeWorkspace && (
-                    <div className="text-fg-subtle mt-1">
-                      {t('workspace.clickToSwitch')}
-                    </div>
-                  )}
-                </div>
-              }
-            >
-              {canChangeWorkspace ? (
-                <Link
-                  to="/setup"
-                  className="text-fg-subtle hover:text-fg-default mt-0.5 ml-1 truncate text-xs transition-colors"
-                >
-                  {workspacePath
-                    ? t('workspace.pathPrefix')
-                    : t('workspace.workspacePrefix')}
-                  {workspaceLabel}
-                </Link>
-              ) : (
-                <span className="text-fg-subtle mt-0.5 ml-1 cursor-default truncate text-xs">
-                  {workspacePath
-                    ? t('workspace.pathPrefix')
-                    : t('workspace.workspacePrefix')}
-                  {workspaceLabel}
-                </span>
-              )}
-            </Tooltip>
-          )}
+          {workspaceSwitcher}
         </Header>
       )}
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto">
         <main className="mx-auto w-full max-w-4xl px-6 py-10">
-          <div className="mb-8 flex items-center justify-between">
-            <div>
-              <h2 className="text-fg-default text-2xl font-bold">
-                {t('canvasList.title')}
-              </h2>
+          <div
+            className={cn(
+              'mb-8 flex items-center justify-between',
+              isDesktopHome && 'gap-4',
+            )}
+          >
+            <div className={isDesktopHome ? 'min-w-0' : undefined}>
+              {isDesktopHome ? (
+                <h1 className="text-fg-default text-2xl font-bold">
+                  {t('canvasList.title')}
+                </h1>
+              ) : (
+                <h2 className="text-fg-default text-2xl font-bold">
+                  {t('canvasList.title')}
+                </h2>
+              )}
               <p className="text-fg-muted mt-1 text-sm">
                 {t('canvasList.subtitle')}
               </p>
             </div>
-            <div className="flex items-center gap-2">
+            <div
+              className={cn(
+                'flex items-center gap-2',
+                isDesktopHome && 'shrink-0',
+              )}
+            >
               <Button
                 variant="outline"
                 tone="neutral"

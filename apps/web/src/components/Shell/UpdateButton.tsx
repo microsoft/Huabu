@@ -3,7 +3,7 @@
 
 import { useTranslation } from 'react-i18next';
 
-import { useAppUpdate } from '../../hooks/useAppUpdate';
+import { useAppUpdate, type UpdateFeedback } from '../../hooks/useAppUpdate';
 import { Button } from '../Common/Button';
 
 /**
@@ -22,9 +22,15 @@ import { Button } from '../Common/Button';
  * only inside the Electron shell — its parent (`WindowChrome`) already
  * returns `null` in the browser.
  */
-export function UpdateButton() {
+export function UpdateButton({
+  onFeedback,
+  showTooltips = true,
+}: {
+  onFeedback?: UpdateFeedback;
+  showTooltips?: boolean;
+} = {}) {
   const { t } = useTranslation();
-  const { status, download, install, check } = useAppUpdate();
+  const { status, download, install, check } = useAppUpdate(onFeedback);
 
   switch (status.state) {
     case 'available':
@@ -35,7 +41,11 @@ export function UpdateButton() {
           size="sm"
           shape="pill"
           tooltipPlacement="bottom"
-          title={t('update.availableVersion', { version: status.version })}
+          title={
+            showTooltips
+              ? t('update.availableVersion', { version: status.version })
+              : undefined
+          }
           onClick={download}
         >
           {t('update.available')}
@@ -50,9 +60,13 @@ export function UpdateButton() {
           size="sm"
           shape="pill"
           disabled
-          title={t('update.downloading', {
-            percent: Math.round(status.percent),
-          })}
+          title={
+            showTooltips
+              ? t('update.downloading', {
+                  percent: Math.round(status.percent),
+                })
+              : undefined
+          }
           tooltipPlacement="bottom"
         >
           {`${Math.round(status.percent)}%`}
@@ -67,7 +81,11 @@ export function UpdateButton() {
           size="sm"
           shape="pill"
           tooltipPlacement="bottom"
-          title={t('update.restartReady', { version: status.version })}
+          title={
+            showTooltips
+              ? t('update.restartReady', { version: status.version })
+              : undefined
+          }
           onClick={install}
         >
           {t('update.restart')}
@@ -82,7 +100,11 @@ export function UpdateButton() {
           size="sm"
           shape="pill"
           tooltipPlacement="bottom"
-          title={t('update.errorRetry', { message: status.message })}
+          title={
+            showTooltips
+              ? t('update.errorRetry', { message: status.message })
+              : undefined
+          }
           onClick={check}
         >
           {t('update.error')}

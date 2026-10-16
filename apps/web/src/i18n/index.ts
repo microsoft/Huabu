@@ -5,6 +5,8 @@ import i18n from 'i18next';
 import LanguageDetector from 'i18next-browser-languagedetector';
 import { initReactI18next } from 'react-i18next';
 
+import '@/utils/desktopStorage';
+
 import enCommon from './resources/en/common.json';
 import zhCNCommon from './resources/zh-CN/common.json';
 
@@ -41,3 +43,14 @@ void i18n
   });
 
 export { i18n };
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (event) => {
+    if (
+      event.key === 'huabu.language' &&
+      supportedLngs.includes(event.newValue as SupportedLanguage)
+    ) {
+      void i18n.changeLanguage(event.newValue as SupportedLanguage);
+    }
+  });
+}

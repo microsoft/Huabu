@@ -52,6 +52,11 @@ import {
 } from 'electron';
 import { utilityProcess, type UtilityProcess } from 'electron';
 
+import {
+  DesktopCloseCancelledError,
+  DesktopTabs,
+  registerDesktopTabsIpc,
+} from './desktop-tabs.js';
 import { applyApplicationMenu, registerMenuIpc } from './mac-menu.js';
 import {
   promptForRemoteBasicAuth,
@@ -750,12 +755,15 @@ function registerDiagnosticsIpc(): void {
 
   ipcMain.handle(
     'diagnostics:open-developer-tools',
-    (): { ok: true } | { ok: false; error: string } => {
+    (event): { ok: true } | { ok: false; error: string } => {
       const win = BrowserWindow.getFocusedWindow() ?? mainWindow;
       if (!win || win.webContents.isDestroyed()) {
         return { ok: false, error: 'No application window is available.' };
       }
-      win.webContents.openDevTools();
+      const target = desktopTabs?.owns(event.sender)
+        ? (desktopTabs.activeContents ?? event.sender)
+        : win.webContents;
+      target.openDevTools();
       return { ok: true };
     },
   );
@@ -826,6 +834,7 @@ function registerDialogIpc(): void {
 // ── BrowserWindow ────────────────────────────────────────────────────
 
 let mainWindow: BrowserWindow | null = null;
+let desktopTabs: DesktopTabs | null = null;
 let splashWindow: BrowserWindow | null = null;
 
 /**
@@ -917,38 +926,36 @@ function closeSplashWindow(): void {
  * Same-origin requests (our own `/api/*`, the SPA chunks) are filtered
  * out so we never weaken our own security headers.
  */
-function configureWebSession(serverOrigin: string): void {
+function configureWebSession(
+  serverOrigin: string,
+  webSession = session.defaultSession,
+): void {
   const filter = { urls: ['<all_urls>'] };
-  session.defaultSession.webRequest.onHeadersReceived(
-    filter,
-    (details, callback) => {
-      // Leave our own origin alone — stripping CSP from our SPA would be
-      // a self-inflicted XSS expansion. Match the runtime origin so HMR
-      // dev servers and the loopback server are both covered.
-      if (isSameOrigin(details.url, serverOrigin)) {
-        callback({});
-        return;
-      }
+  webSession.webRequest.onHeadersReceived(filter, (details, callback) => {
+    // Leave our own origin alone — stripping CSP from our SPA would be
+    // a self-inflicted XSS expansion. Match the runtime origin so HMR
+    // dev servers and the loopback server are both covered.
+    if (isSameOrigin(details.url, serverOrigin)) {
+      callback({});
+      return;
+    }
 
-      const headers: Record<string, string[] | string> = {};
-      for (const [name, value] of Object.entries(
-        details.responseHeaders ?? {},
-      )) {
-        const lower = name.toLowerCase();
-        if (lower === 'x-frame-options') continue;
-        if (lower === 'content-security-policy') {
-          const values = Array.isArray(value) ? value : [value];
-          const cleaned = values
-            .map((v) => v.replace(/frame-ancestors[^;]*;?/gi, '').trim())
-            .filter((v) => v.length > 0);
-          if (cleaned.length > 0) headers[name] = cleaned;
-          continue;
-        }
-        headers[name] = value as string | string[];
+    const headers: Record<string, string[] | string> = {};
+    for (const [name, value] of Object.entries(details.responseHeaders ?? {})) {
+      const lower = name.toLowerCase();
+      if (lower === 'x-frame-options') continue;
+      if (lower === 'content-security-policy') {
+        const values = Array.isArray(value) ? value : [value];
+        const cleaned = values
+          .map((v) => v.replace(/frame-ancestors[^;]*;?/gi, '').trim())
+          .filter((v) => v.length > 0);
+        if (cleaned.length > 0) headers[name] = cleaned;
+        continue;
       }
-      callback({ responseHeaders: headers });
-    },
-  );
+      headers[name] = value as string | string[];
+    }
+    callback({ responseHeaders: headers });
+  });
 }
 
 function createWindow(url: string): void {
@@ -1004,7 +1011,10 @@ function createWindow(url: string): void {
     ...platformChrome,
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
-      additionalArguments: remoteServerOrigin ? ['--huabu-remote-server'] : [],
+      additionalArguments: [
+        ...(remoteServerOrigin ? ['--huabu-remote-server'] : []),
+        '--huabu-desktop-role=shell',
+      ],
       contextIsolation: true,
       nodeIntegration: false,
       // The preload script only touches `contextBridge`, `process.versions`
@@ -1035,32 +1045,17 @@ function createWindow(url: string): void {
   win.webContents.on('did-fail-load', () => reveal());
   win.once('closed', () => clearTimeout(revealTimer));
 
-  void mainWindow.loadURL(url);
-
-  // Open external links in the user's default browser, not inside Electron.
-  mainWindow.webContents.setWindowOpenHandler(({ url: targetUrl }) => {
-    if (targetUrl.startsWith('http')) {
-      void shell.openExternal(targetUrl);
-      return { action: 'deny' };
-    }
-    return { action: 'allow' };
-  });
-
-  // Belt-and-braces navigation guard. `setWindowOpenHandler` covers
-  // `target=_blank` / `window.open`; this catches the case where some
-  // in-page script (or a stray <a href> without a click-handler) tries
-  // to navigate the top-level frame off our loopback origin. We allow
-  // same-origin navigations (so React Router's `history.pushState` and
-  // a full-page reload during dev HMR continue to work) and shell out
-  // anything else to the OS browser. Without this, a compromised page
-  // could redirect the renderer at `file://` or an attacker-controlled
-  // HTTP origin while keeping the Electron preload context alive.
-  mainWindow.webContents.on('will-navigate', (event, targetUrl) => {
-    if (isSameOrigin(targetUrl, new URL(url).origin)) return;
-    event.preventDefault();
-    if (/^https?:/i.test(targetUrl)) {
-      void shell.openExternal(targetUrl);
-    }
+  desktopTabs = new DesktopTabs(
+    win,
+    url,
+    app.getPath('userData'),
+    Boolean(remoteServerOrigin),
+    (webSession) => configureWebSession(new URL(url).origin, webSession),
+  );
+  desktopTabs.guard(win.webContents);
+  void win.loadURL(new URL('/_desktop', url).href).catch((error: unknown) => {
+    console.error('[desktop] Could not load Tab shell:', error);
+    dialog.showErrorBox('Could not load Huabu', String(error));
   });
 
   // Keyboard shortcuts scoped to *this* window's webContents instead
@@ -1071,31 +1066,8 @@ function createWindow(url: string): void {
   // register global accelerators at all). `before-input-event` fires
   // only when our window already has keyboard focus, which is exactly
   // what we want for DevTools / reload accelerators.
-  mainWindow.webContents.on('before-input-event', (_event, input) => {
-    if (input.type !== 'keyDown') return;
-    const win = mainWindow;
-    if (!win) return;
-
-    const isReload =
-      input.key === 'F5' ||
-      ((input.control || input.meta) && input.key.toLowerCase() === 'r');
-    if (isReload) {
-      win.webContents.reload();
-      return;
-    }
-
-    const isToggleDevTools =
-      input.key === 'F12' ||
-      (process.platform === 'darwin'
-        ? (input.control || input.meta) &&
-          input.alt &&
-          input.key.toLowerCase() === 'i'
-        : (input.control || input.meta) &&
-          input.shift &&
-          input.key.toLowerCase() === 'i');
-    if (isToggleDevTools) {
-      win.webContents.toggleDevTools();
-    }
+  win.webContents.on('before-input-event', (event, input) => {
+    desktopTabs?.handleInput(event, input);
   });
 
   // Auto-open DevTools only for real UI development (Vite HMR via
@@ -1111,15 +1083,41 @@ function createWindow(url: string): void {
   }
 
   const sendFullScreen = (fullScreen: boolean): void => {
-    if (mainWindow && !mainWindow.webContents.isDestroyed()) {
-      mainWindow.webContents.send('window:fullscreen', fullScreen);
-    }
+    desktopTabs?.broadcast('window:fullscreen', fullScreen);
+    desktopTabs?.layout();
   };
   mainWindow.on('enter-full-screen', () => sendFullScreen(true));
   mainWindow.on('leave-full-screen', () => sendFullScreen(false));
 
+  let closeApproved = false;
+  let closePending = false;
+  win.on('close', (event) => {
+    if (closeApproved || quitPrepared) return;
+    event.preventDefault();
+    if (closePending || quitInFlight) return;
+    closePending = true;
+    void prepareDesktopQuit()
+      .then(() => {
+        closeApproved = true;
+        desktopTabs?.dispose();
+        win.close();
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DesktopCloseCancelledError) return;
+        dialog.showErrorBox(
+          'Could not save Spaces',
+          error instanceof Error ? error.message : String(error),
+        );
+      })
+      .finally(() => {
+        closePending = false;
+      });
+  });
   mainWindow.on('closed', () => {
+    desktopTabs?.dispose();
+    desktopTabs = null;
     mainWindow = null;
+    if (!quitInFlight) quitPrepared = false;
   });
 }
 
@@ -1161,7 +1159,17 @@ app.whenReady().then(async () => {
   // usual editing keyboard accelerators, and our DevTools / reload
   // accelerators are re-bound per window via `before-input-event`
   // inside `createWindow`.
-  applyApplicationMenu(() => mainWindow);
+  applyApplicationMenu(
+    () => mainWindow,
+    () => desktopTabs?.activeContents ?? mainWindow?.webContents ?? null,
+    () => {
+      const tabs = desktopTabs;
+      if (!tabs) return;
+      void tabs.close(tabs.snapshot.activeId).catch((error: unknown) => {
+        dialog.showErrorBox('Could not close Tab', String(error));
+      });
+    },
+  );
 
   // Register IPC handlers before any window is created so every preload
   // bridge is ready on the first render.
@@ -1171,10 +1179,15 @@ app.whenReady().then(async () => {
     registerDialogIpc();
   }
   registerMenuIpc(() => mainWindow);
+  registerDesktopTabsIpc(() => desktopTabs);
   // Auto-update IPC must exist before the first render so the preload
   // bridge's `update:get-state` / `update:check` calls always resolve.
   // The actual GitHub-feed checks only run in a packaged app.
-  registerUpdaterIpc(() => mainWindow);
+  registerUpdaterIpc(() => mainWindow, {
+    broadcast: (status) => desktopTabs?.broadcast('update:status', status),
+    prepareInstall: prepareDesktopQuit,
+    cancelInstall: cancelDesktopQuit,
+  });
 
   // macOS Dock icon. In a packaged .app this comes from the bundle's
   // .icns automatically, but in dev (`electron .`) the Dock would show
@@ -1408,12 +1421,53 @@ app.on('window-all-closed', () => {
 //      a healthy machine, and a wedged filesystem still exits via the
 //      hard `kill()` fallback below.
 let quitInFlight = false;
+let quitPrepared = false;
+let quitPreparation: Promise<void> | null = null;
+
+function prepareDesktopQuit(): Promise<void> {
+  if (quitPrepared) return Promise.resolve();
+  quitPreparation ??= (async () => {
+    await desktopTabs?.prepareCloseAll(true);
+    quitPrepared = true;
+  })().finally(() => {
+    quitPreparation = null;
+  });
+  return quitPreparation;
+}
+
+function cancelDesktopQuit(): void {
+  if (!quitPrepared) return;
+  quitPrepared = false;
+  desktopTabs?.resume();
+}
+
 app.on('before-quit', (event) => {
-  if (quitInFlight) return;
-  const proc = serverProcess;
-  if (!proc) return;
-  quitInFlight = true;
   event.preventDefault();
+  if (quitInFlight) return;
+  quitInFlight = true;
+  void prepareDesktopQuit()
+    .then(() => {
+      desktopTabs?.dispose();
+      shutdownServerAndExit();
+    })
+    .catch((error: unknown) => {
+      quitInFlight = false;
+      cancelDesktopQuit();
+      if (error instanceof DesktopCloseCancelledError) return;
+      console.error('[desktop] Could not save before quitting:', error);
+      dialog.showErrorBox(
+        'Could not save Spaces',
+        error instanceof Error ? error.message : String(error),
+      );
+    });
+});
+
+function shutdownServerAndExit(): void {
+  const proc = serverProcess;
+  if (!proc) {
+    app.exit(0);
+    return;
+  }
   serverProcess = null;
   let exited = false;
   proc.once('exit', () => {
@@ -1453,7 +1507,7 @@ app.on('before-quit', (event) => {
       app.exit(0);
     }
   }, 3000);
-});
+}
 
 // Terminal-launched dev runs (`pnpm start:desktop`) deliver SIGINT on
 // Ctrl+C / SIGTERM when the parent orchestrator tears down. Electron

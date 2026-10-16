@@ -17,8 +17,12 @@ import {
   type WorkspaceInfo,
   type WorkspaceMode,
 } from '../api/workspace';
-import { getElectronBridge } from '../hooks/useElectron';
+import {
+  getElectronBridge,
+  requireDesktopTabSuccess,
+} from '../hooks/useElectron';
 import { i18n } from '../i18n';
+import { writeApplicationPreference } from '../utils/desktopStorage';
 
 import type { CanvasSummary } from '@huabu/shared';
 
@@ -159,6 +163,60 @@ function workspaceActivationError(error: unknown, path: string): string {
     : i18n.t('workspace.openPathFailed');
 }
 
+async function changeWorkspace(
+  activate: () => Promise<WorkspaceInfo>,
+  label: string,
+): Promise<void> {
+  const { getState: get, setState: set } = useWorkspaceStore;
+  const tabs = getElectronBridge()?.tabs;
+  if (tabs) requireDesktopTabSuccess(await tabs.beginWorkspaceChange());
+  set({
+    ...resetSpaceTitles(),
+    workspaceId: null,
+    workspacePath: null,
+    workspaceName: null,
+    worldCanvasId: null,
+    isReady: false,
+    isSyncing: true,
+    error: null,
+    canvasCount: null,
+  });
+  let confirmed = false;
+  try {
+    const info = await activate();
+    set(fromInfo(info));
+    confirmed = true;
+    set({ recentWorkspaces: await listWorkspaces() });
+  } catch (err) {
+    if (!confirmed) {
+      try {
+        // A rejected response does not prove that Server activation failed.
+        set(fromInfo(await getWorkspaceInfo()));
+        confirmed = true;
+      } catch (confirmationError) {
+        console.error(
+          'Could not confirm the active Workspace:',
+          confirmationError,
+        );
+      }
+    }
+    set({ error: workspaceActivationError(err, label) });
+    throw err;
+  } finally {
+    try {
+      if (tabs) requireDesktopTabSuccess(await tabs.endWorkspaceChange());
+    } finally {
+      set({ isSyncing: false });
+    }
+    const workspaceId = get().workspaceId;
+    if (confirmed && get().isReady && workspaceId) {
+      if (tabs)
+        requireDesktopTabSuccess(await tabs.workspaceReady(workspaceId));
+      emitWorkspaceChanged();
+    }
+  }
+}
+
 export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   mode: null,
   capabilities: null,
@@ -181,7 +239,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   canvasCount: null,
 
   setWorldEnabled: (worldEnabled) => {
-    localStorage.setItem(WORLD_ENABLED_KEY, String(worldEnabled));
+    writeApplicationPreference(WORLD_ENABLED_KEY, String(worldEnabled));
     set({ worldEnabled });
   },
   refreshSpaceTitles: (changedCanvasIds = []) => {
@@ -355,22 +413,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     if (get().mode === 'managed') {
       throw new Error('Workspace is locked by the server (managed mode)');
     }
-    set({
-      ...resetSpaceTitles(),
-      isSyncing: true,
-      error: null,
-      canvasCount: null,
-    });
-    try {
-      const info = await putWorkspacePath(path);
-      const recent = await listWorkspaces();
-      set({ ...fromInfo(info), recentWorkspaces: recent, isSyncing: false });
-      emitWorkspaceChanged();
-    } catch (err) {
-      const message = workspaceActivationError(err, path);
-      set({ error: message, isSyncing: false });
-      throw err;
-    }
+    await changeWorkspace(() => putWorkspacePath(path), path);
   },
 
   activateRecentWorkspace: async (workspaceId: string) => {
@@ -380,28 +423,13 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     const selected = get().recentWorkspaces.find(
       (workspace) => workspace.workspaceId === workspaceId,
     );
-    set({
-      ...resetSpaceTitles(),
-      isSyncing: true,
-      error: null,
-      canvasCount: null,
-    });
-    try {
-      await activateWorkspace(workspaceId);
-      const [info, recent] = await Promise.all([
-        getWorkspaceInfo(),
-        listWorkspaces(),
-      ]);
-      set({ ...fromInfo(info), recentWorkspaces: recent, isSyncing: false });
-      emitWorkspaceChanged();
-    } catch (err) {
-      const message = workspaceActivationError(
-        err,
-        selected?.path ?? selected?.name ?? workspaceId,
-      );
-      set({ error: message, isSyncing: false });
-      throw err;
-    }
+    await changeWorkspace(
+      async () => {
+        await activateWorkspace(workspaceId);
+        return getWorkspaceInfo();
+      },
+      selected?.path ?? selected?.name ?? workspaceId,
+    );
   },
 
   removeRecentWorkspace: (workspaceId: string) => {

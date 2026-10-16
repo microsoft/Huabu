@@ -9,6 +9,7 @@
     "build": "tsc -p tsconfig.json && node scripts/build-splash.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run src",
+    "test:tabs": "pnpm run build && node scripts/test-tabs.mjs",
     "icons:build": "node scripts/build-icons.mjs",
     "dist": "pnpm run build && electron-builder --publish never",
     "dist:mac": "pnpm run build && electron-builder --mac --publish never",
@@ -17,6 +18,7 @@
     "dev": "pnpm run build && node scripts/dev.mjs"
   },
   "dependencies": {
+    "@huabu/shared": "workspace:*",
     "electron-updater": "^6.3.9",
     "get-port": "^7.1.0"
   },

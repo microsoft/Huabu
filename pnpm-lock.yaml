@@ -65,6 +65,9 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@huabu/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       electron-updater:
         specifier: ^6.3.9
         version: 6.8.9
