@@ -24,16 +24,23 @@ import {
 import { RATE_LIMITED_EVENT, type RateLimitedEventDetail } from './api/_client';
 import { Loading } from './components/Common/Loading';
 import { dismissToast, toast, ToastContainer } from './components/Common/Toast';
+import { DesktopHomeMenu } from './components/Shell/DesktopHomeMenu';
 import { GlobalModals } from './components/Shell/GlobalModals';
 import { NativeMenuBridge } from './components/Shell/NativeMenuBridge';
 import { WindowChrome } from './components/Shell/WindowChrome';
+import {
+  requireDesktopTabSuccess,
+  useDesktopContent,
+} from './hooks/useDesktopContent';
 import { useDisableBrowserZoom } from './hooks/useDisableBrowserZoom';
+import { getElectronBridge } from './hooks/useElectron';
 import { useInputModeListener } from './hooks/useInputMode';
 import CanvasListPage from './pages/CanvasListPage';
 import { WorkspaceLoadingScreen } from './pages/WorkspaceLoadingScreen';
 import WorkspaceSetupPage from './pages/WorkspaceSetupPage';
 import { drainPendingSaves } from './store/canvasStore.ts';
 import { useWorkspaceStore } from './store/workspaceStore';
+import { desktopNavigation } from './utils/desktopNavigation';
 
 /**
  * Loaded on demand so the editor, PDF and KaTeX vendor chunks — roughly 3 MB
@@ -146,6 +153,8 @@ const InitialisingContext = createContext(true);
  */
 function RootLayout() {
   const { t } = useTranslation();
+  const { saving: desktopSaving, preparingClose } = useDesktopContent();
+  const tabs = getElectronBridge()?.tabs;
   // Block any pathname change that's *leaving* a canvas route, so
   // pending debounced editor edits and the canvas-level structure
   // PUT have time to land before the captured `canvasId` becomes
@@ -155,11 +164,26 @@ function RootLayout() {
   const [isDraining, setIsDraining] = useState(false);
   const blocker = useBlocker(
     ({ currentLocation, nextLocation }) =>
-      currentLocation.pathname.startsWith('/canvas/') &&
-      currentLocation.pathname !== nextLocation.pathname,
+      desktopNavigation(tabs?.context, nextLocation) !== null ||
+      (currentLocation.pathname.startsWith('/canvas/') &&
+        currentLocation.pathname !== nextLocation.pathname),
   );
   useEffect(() => {
     if (blocker.state !== 'blocked') return;
+    const target = desktopNavigation(tabs?.context, blocker.location);
+    if (tabs && target) {
+      void tabs
+        .open(target)
+        .then(requireDesktopTabSuccess)
+        .catch((error: unknown) => {
+          console.error('[desktop-tabs] Could not open Space:', error);
+          toast(error instanceof Error ? error.message : String(error), {
+            tone: 'danger',
+          });
+        })
+        .finally(() => blocker.reset?.());
+      return;
+    }
     let cancelled = false;
     // Defer the overlay by a short grace window so a drain that
     // finishes in well under perceptible time (the common case —
@@ -197,7 +221,7 @@ function RootLayout() {
       cancelled = true;
       window.clearTimeout(overlayTimer);
     };
-  }, [blocker]);
+  }, [blocker, tabs]);
 
   return (
     // `h-full` (not `h-screen`/`100vh`) so the app tracks the *visible*
@@ -206,31 +230,37 @@ function RootLayout() {
     // visible viewport) and clipping the bottom toolbar. Desktop is
     // unaffected since both values match there.
     <div className="flex h-full flex-col">
-      <WindowChrome />
-      {/* Bridges the native macOS menu bar to the in-app action
+      <div inert={preparingClose} className="flex min-h-0 flex-1 flex-col">
+        <WindowChrome />
+        {tabs?.context.role === 'home' &&
+          typeof tabs.onHomeMenu === 'function' && <DesktopHomeMenu />}
+        {/* Bridges the native macOS menu bar to the in-app action
           handlers. Renders nothing off macOS. */}
-      <NativeMenuBridge />
-      <div className="relative min-h-0 flex-1">
-        <Outlet />
-      </div>
-      {/* App-wide singleton modals (Settings + Keyboard Shortcuts) and
+        <NativeMenuBridge />
+        <div className="relative min-h-0 flex-1">
+          <Outlet />
+        </div>
+        {/* App-wide singleton modals (Settings + Keyboard Shortcuts) and
           the global `?` hotkey. Mounted here on the never-unmounting
           router root so every trigger (title-bar gear, floating canvas
           gear, AppMenu, canvas menu) drives one shared instance. */}
-      <GlobalModals />
+        <GlobalModals />
+      </div>
       {/* Full-screen overlay shown while pending saves drain before a
           blocked route change proceeds. `Loading layout="block"`
           already provides the centered loading state. Rendered as a sibling
           of the page area so it stacks on top of whatever route is
           currently mounted. */}
-      {isDraining && (
-        <Loading
-          variant="spinner"
-          layout="block"
-          size="md"
-          message={t('app.savingCanvas')}
-          indicatorClassName="text-fg-subtle"
-        />
+      {(isDraining || desktopSaving) && (
+        <div className="bg-surface absolute inset-0 z-[1000]">
+          <Loading
+            variant="spinner"
+            layout="block"
+            size="md"
+            message={t('app.savingCanvas')}
+            indicatorClassName="text-fg-subtle"
+          />
+        </div>
       )}
     </div>
   );
@@ -265,9 +295,10 @@ function SetupRoute() {
 }
 
 function WorkspaceLanding() {
+  const desktopHome = getElectronBridge()?.tabs?.context.role === 'home';
   const worldEnabled = useWorkspaceStore((state) => state.worldEnabled);
   const worldCanvasId = useWorkspaceStore((state) => state.worldCanvasId);
-  return worldEnabled && worldCanvasId ? (
+  return !desktopHome && worldEnabled && worldCanvasId ? (
     <Navigate to={`/canvas/${worldCanvasId}`} replace />
   ) : (
     <Navigate to="/spaces" replace />

@@ -2,7 +2,9 @@
 // Licensed under the MIT license.
 
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { createJSONStorage, persist } from 'zustand/middleware';
+
+import { desktopSpaceStorage } from '@/utils/desktopStorage';
 
 interface PanelState {
   /**
@@ -111,6 +113,7 @@ export const usePanelStore = create<PanelState>()(
     }),
     {
       name: 'huabu-panel',
+      storage: createJSONStorage(desktopSpaceStorage),
       // Only the chat panel's open state is persisted. `isLeftCollapsed`
       // stays per-session (always collapsed on fresh load — matches the
       // pre-persist default), and focus requests stay transient.

@@ -2,13 +2,14 @@
 // Licensed under the MIT license.
 
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { createJSONStorage, persist } from 'zustand/middleware';
 
 import { ApiError } from '@/api/_client';
 import {
   queryConversationTitles,
   setConversationTitle,
 } from '@/api/conversationTitles';
+import { desktopSpaceStorage } from '@/utils/desktopStorage';
 
 import type { ConversationTitle } from '@huabu/shared';
 
@@ -36,6 +37,7 @@ const EMPTY_TITLE: ConversationTitle = { title: null, source: null };
 export const useConversationTitleStore = create<TitleState>()(
   persist(() => ({ entries: {}, pending: {}, refreshEpoch: 0 }), {
     name: 'huabu.conversationTitleDrafts',
+    storage: createJSONStorage(desktopSpaceStorage),
     version: 1,
     partialize: (state) => ({ pending: state.pending }),
     merge: (persisted, current) => {

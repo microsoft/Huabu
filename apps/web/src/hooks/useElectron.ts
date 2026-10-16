@@ -21,9 +21,18 @@
 import { APP_NAME } from '@/config/app';
 import { copyToClipboard } from '@/utils/io/clipboard';
 
+import type {
+  DesktopTabResult,
+  DesktopTabsApi,
+} from '@huabu/shared/desktop-tabs';
+
 interface ElectronWindowApi {
   isFullScreen: () => Promise<boolean>;
   onFullScreenChange: (cb: (fullScreen: boolean) => void) => () => void;
+}
+
+export function requireDesktopTabSuccess(result: DesktopTabResult): void {
+  if (!result.ok) throw new Error(result.error);
 }
 
 export interface ElectronSystemInfo {
@@ -200,6 +209,7 @@ interface ElectronBridge {
   dialog?: ElectronDialogApi;
   menu?: ElectronMenuApi;
   updater?: ElectronUpdaterApi;
+  tabs?: DesktopTabsApi;
 }
 declare global {
   interface Window {

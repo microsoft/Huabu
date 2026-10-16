@@ -9,7 +9,7 @@ import { SettingsPopover } from '@/components/Settings/SettingsPopover';
 
 import { AppMenu } from './AppMenu';
 import { CanvasMenu } from './CanvasMenu.tsx';
-import { isElectron } from '../../../hooks/useElectron';
+import { getElectronBridge, isElectron } from '../../../hooks/useElectron';
 import { Button } from '../../Common/Button';
 
 interface HeaderProps {
@@ -27,7 +27,7 @@ export const Header: React.FC<HeaderProps> = ({ children, onOpenHelp }) => {
   // In Electron the custom title bar (`WindowChrome`) already provides a
   // Home button and the global settings popover, so we hide the duplicates
   // here to keep the inner header focused on the canvas menu.
-  const isElectronApp = isElectron();
+  const isElectronApp = isElectron() && !getElectronBridge()?.tabs;
 
   return (
     <header className="border-edge-default bg-surface flex h-12 items-center gap-3 border-b px-3">

@@ -42,6 +42,7 @@ export function useCanvasActions(): UseCanvasActionsResult {
     try {
       setIsCreating(true);
       const response = await createCanvas();
+      window.dispatchEvent(new Event('canvas-list-changed'));
       navigate(`/canvas/${response.canvasId}`, {
         state: {
           newCanvasPlacement: {
@@ -72,6 +73,7 @@ export function useCanvasActions(): UseCanvasActionsResult {
       setIsImporting(true);
       try {
         const result = await importCanvas(file);
+        window.dispatchEvent(new Event('canvas-list-changed'));
         navigate(`/canvas/${result.canvasId}`);
       } catch (err) {
         toast(

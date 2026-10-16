@@ -3,7 +3,7 @@
 > Structure, dependency rules, and conventions for the frontend. The point of
 > this doc is the **layering rules** below — not an exhaustive file listing
 > (those rot fast; `ls` the dir for the current files).
-> Last updated: 2026-10-09
+> Last updated: 2026-10-15
 
 ---
 
@@ -48,6 +48,8 @@ config → (leaf — imports nothing internal)
 ---
 
 ## 3. Where the canvas engine lives
+
+Desktop launches render a dedicated `DesktopTabShell` in the BrowserWindow and the existing App independently inside Home and Space content views. The router root diverts cross-Space navigation through the preload Tab API instead of replacing a content page's singleton Stores. Browser routing remains unchanged. Space-local persisted Stores use Workspace/Space-scoped keys, while application preferences synchronize between pages; see [Desktop Space Tabs](./desktop-tabs.md).
 
 The canvas-command **executor, command handlers, post-effects, and delta logic
 are NOT in the web app** — they were extracted to the shared package

@@ -65,7 +65,9 @@ export function WindowChrome() {
   const [isFullScreen, setIsFullScreen] = useState(false);
   const onCanvasRoute = location.pathname.startsWith('/canvas/');
   const titleBarHeight =
-    bridge && !(isFullScreen && onCanvasRoute) ? bridge.titleBarHeight : 0;
+    bridge && !bridge.tabs && !(isFullScreen && onCanvasRoute)
+      ? bridge.titleBarHeight
+      : 0;
 
   useLayoutEffect(() => {
     const style = document.documentElement.style;
@@ -111,7 +113,7 @@ export function WindowChrome() {
   }, [isMacBridge]);
 
   // Browser mode: leave the page chrome untouched.
-  if (!bridge) return null;
+  if (!bridge || bridge.tabs) return null;
 
   const isMac = bridge.platform === 'darwin';
   // macOS hides the traffic-lights in immersive fullscreen, so the

@@ -33,14 +33,92 @@
 
 import { contextBridge, ipcRenderer } from 'electron';
 
+import type {
+  DesktopTabNavigation,
+  DesktopTabReport,
+  DesktopTabResult,
+  DesktopTabsApi,
+  DesktopTabsSnapshot,
+} from '@huabu/shared/desktop-tabs' with { 'resolution-mode': 'import' };
+
 /**
  * Height (CSS pixels) of the HTML title bar strip. MUST match
  * `TITLE_BAR_HEIGHT` in `./title-bar.ts` — see header comment.
  */
 const TITLE_BAR_HEIGHT = 36;
 const isRemoteServer = process.argv.includes('--huabu-remote-server');
+const readArgument = (name: string): string =>
+  decodeURIComponent(
+    process.argv
+      .find((arg) => arg.startsWith(`${name}=`))
+      ?.slice(name.length + 1) ?? '',
+  );
+const desktopRole = readArgument('--huabu-desktop-role');
+const subscribe = <T>(
+  channel: string,
+  callback: (value: T) => void,
+): (() => void) => {
+  const listener = (_event: unknown, value: T): void => callback(value);
+  ipcRenderer.on(channel, listener);
+  return () => ipcRenderer.removeListener(channel, listener);
+};
+const tabs: DesktopTabsApi | undefined =
+  desktopRole === 'shell' || desktopRole === 'home' || desktopRole === 'space'
+    ? {
+        context: {
+          role: desktopRole,
+          workspaceId: readArgument('--huabu-workspace-id') || null,
+          canvasId: readArgument('--huabu-canvas-id') || null,
+        },
+        storageSnapshot: (legacy) =>
+          ipcRenderer.sendSync('tabs:storage-snapshot', legacy),
+        setPreference: (key, value) =>
+          ipcRenderer.sendSync('tabs:set-preference', key, value),
+        onPreference: (callback) => subscribe('tabs:preference', callback),
+        getState: () =>
+          ipcRenderer.invoke('tabs:get-state') as Promise<DesktopTabsSnapshot>,
+        onState: (callback) => subscribe('tabs:state', callback),
+        open: (target) =>
+          ipcRenderer.invoke('tabs:open', target) as Promise<DesktopTabResult>,
+        activate: (id) =>
+          ipcRenderer.invoke('tabs:activate', id) as Promise<DesktopTabResult>,
+        close: (id) =>
+          ipcRenderer.invoke('tabs:close', id) as Promise<DesktopTabResult>,
+        reload: (id) =>
+          ipcRenderer.invoke('tabs:reload', id) as Promise<DesktopTabResult>,
+        command: (command) =>
+          ipcRenderer.invoke(
+            'tabs:command',
+            command,
+          ) as Promise<DesktopTabResult>,
+        onHomeMenu: (callback) => subscribe('tabs:home-menu', callback),
+        ready: () => ipcRenderer.send('tabs:ready'),
+        report: (report: DesktopTabReport) =>
+          ipcRenderer.send('tabs:report', report),
+        workspaceReady: (id) =>
+          ipcRenderer.invoke(
+            'tabs:workspace-ready',
+            id,
+          ) as Promise<DesktopTabResult>,
+        beginWorkspaceChange: () =>
+          ipcRenderer.invoke(
+            'tabs:begin-workspace-change',
+          ) as Promise<DesktopTabResult>,
+        endWorkspaceChange: () =>
+          ipcRenderer.invoke(
+            'tabs:end-workspace-change',
+          ) as Promise<DesktopTabResult>,
+        onNavigate: (callback: (target: DesktopTabNavigation) => void) =>
+          subscribe('tabs:navigate', callback),
+        onPrepareClose: (callback) => subscribe('tabs:prepare-close', callback),
+        finishPrepareClose: (id, result) =>
+          ipcRenderer.send('tabs:finish-close', id, result),
+        onResume: (callback) => subscribe('tabs:resume', callback),
+      }
+    : undefined;
 
 contextBridge.exposeInMainWorld('electronBridge', {
+  ...(tabs ? { tabs } : {}),
   versions: {
     node: process.versions.node,
     chrome: process.versions.chrome,
