@@ -20,6 +20,8 @@ jobs:
     timeoutInMinutes: '120'
     pool:
       vmImage: windows-latest
+    variables:
+      HUABU_ESRP_STATE: '$(Agent.TempDirectory)\huabu-esrp-$(Build.BuildId)-$(System.JobAttempt)'
     steps:
       - checkout: self
 
@@ -64,16 +66,83 @@ jobs:
       - pwsh: pnpm install --frozen-lockfile
         displayName: Install dependencies
 
+      - pwsh: node --test .\apps\desktop\scripts\esrp-sign.test.mjs
+        displayName: Test ESRP signing handoffs and release validation
+
       - pwsh: pnpm run build:agentlet
         displayName: Build agentlet workspace packages
 
-      - pwsh: pnpm run build:desktop:win
-        displayName: Build desktop installer
+      - pwsh: |
+          foreach ($name in @('CodeSignAuthSignCertificateName', 'CodeSignAppRegistrationTenantId', 'CodeSignAppRegistrationClientId', 'CodeSignEsrpClientId', 'CodeSignConnectedServiceName', 'CodeSignKeyVaultName')) {
+            $value = [Environment]::GetEnvironmentVariable($name)
+            if ([string]::IsNullOrWhiteSpace($value) -or $value.StartsWith('$(')) {
+              throw "Configure the Azure Pipelines variable: $name"
+            }
+          }
+          & .\apps\desktop\scripts\esrp-build.ps1 -Action Start
+        displayName: Start desktop packaging with ESRP signing hooks
+        env:
+          CodeSignAuthSignCertificateName: $(CodeSignAuthSignCertificateName)
+          CodeSignAppRegistrationTenantId: $(CodeSignAppRegistrationTenantId)
+          CodeSignAppRegistrationClientId: $(CodeSignAppRegistrationClientId)
+          CodeSignEsrpClientId: $(CodeSignEsrpClientId)
+          CodeSignConnectedServiceName: $(CodeSignConnectedServiceName)
+          CodeSignKeyVaultName: $(CodeSignKeyVaultName)
 
-      # TODO: Windows build -> ESRP Sign -> Publish artifact
-      # Insert the separately configured ESRP signing task here, before validation
-      # and publishing. If signing changes installer bytes, regenerate the update
-      # metadata and blockmaps to match the final signed files before publishing.
+      # These handoffs follow electron-builder's NSIS signing order.
+      - ${{ each stage in split('app,elevate,uninstaller,installer', ',') }}:
+          - pwsh: '& .\apps\desktop\scripts\esrp-build.ps1 -Action Wait -Stage ${{ stage }}'
+            displayName: Wait for ${{ stage }} signing input
+
+          - task: EsrpCodeSigning@6
+            displayName: ESRP sign and verify ${{ stage }} using WIF
+            timeoutInMinutes: 25
+            inputs:
+              ConnectedServiceName: $(CodeSignConnectedServiceName)
+              AppRegistrationClientId: $(CodeSignAppRegistrationClientId)
+              AppRegistrationTenantId: $(CodeSignAppRegistrationTenantId)
+              AuthAKVName: $(CodeSignKeyVaultName)
+              useMsiAuthentication: true
+              esrpClientId: $(CodeSignEsrpClientId)
+              AuthSignCertName: $(CodeSignAuthSignCertificateName)
+              FolderPath: '$(HUABU_ESRP_STATE)\${{ stage }}'
+              Pattern: artifact.exe
+              UseMinimatch: true
+              ServiceEndpointUrl: 'https://api.esrp.microsoft.com/api/v2'
+              signConfigType: inlineSignParams
+              inlineOperation: |
+                [
+                  {
+                    "keyCode": "CP-230012",
+                    "operationCode": "SigntoolSign",
+                    "parameters": {
+                      "OpusName": "Microsoft",
+                      "OpusInfo": "http://www.microsoft.com",
+                      "FileDigest": "/fd \"SHA256\"",
+                      "PageHash": "/NPH",
+                      "TimeStamp": "/tr \"http://rfc3161.gtm.corp.microsoft.com/TSS/HttpTspServer\" /td sha256"
+                    },
+                    "toolName": "sign",
+                    "toolVersion": "1.0"
+                  },
+                  {
+                    "keyCode": "CP-230012",
+                    "operationCode": "SigntoolVerify",
+                    "parameters": {},
+                    "toolName": "sign",
+                    "toolVersion": "1.0"
+                  }
+                ]
+
+          - pwsh: '& .\apps\desktop\scripts\esrp-build.ps1 -Action Resume -Stage ${{ stage }}'
+            displayName: Verify ${{ stage }} signature and resume packaging
+
+      - pwsh: '& .\apps\desktop\scripts\esrp-build.ps1 -Action Finish'
+        displayName: Finish packaging and verify signed release metadata
+
+      - pwsh: '& .\apps\desktop\scripts\esrp-build.ps1 -Action Stop'
+        displayName: Clean up ESRP packaging process
+        condition: always()
 
       - pwsh: |
           $output = Join-Path $env:BUILD_SOURCESDIRECTORY '../huabu-electron-out'

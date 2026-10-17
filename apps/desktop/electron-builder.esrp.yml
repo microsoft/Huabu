@@ -1,0 +1,10 @@
+extends: ./electron-builder.yml
+
+# Opt-in Azure Pipelines configuration; normal local and GitHub builds are unchanged.
+forceCodeSigning: true
+win:
+  signtoolOptions:
+    signingHashAlgorithms:
+      - sha256
+    sign: ./scripts/esrp-sign.mjs
+afterSign: ./scripts/esrp-sign.mjs
