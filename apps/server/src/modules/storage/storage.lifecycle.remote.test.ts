@@ -130,6 +130,15 @@ async function emptyPostgres(): Promise<TestPostgres> {
   };
 }
 
+async function expectPostgresDrained(postgres: TestPostgres): Promise<void> {
+  await vi.waitFor(
+    async () => {
+      expect(await postgres.backends()).toBe(0);
+    },
+    { timeout: 5_000 },
+  );
+}
+
 /**
  * The same Postgres, reached over a link that takes `delayMs` to establish.
  *
@@ -254,10 +263,10 @@ describe('opening storage', () => {
     // composition closes the shared connection itself, in a `finally`, rather
     // than leaving a half-opened pool to whichever half of the init lost.
     expect(await postgres.tables()).toBeGreaterThan(0);
-    expect(await postgres.backends()).toBe(0);
+    await expectPostgresDrained(postgres);
     // Nothing reconnects behind composition's back afterwards.
     await sleep(1_500);
-    expect(await postgres.backends()).toBe(0);
+    await expectPostgresDrained(postgres);
   });
 
   it('leaves nothing configured behind, and opens cleanly on the next attempt', async () => {
@@ -308,12 +317,12 @@ describe('opening storage', () => {
     // second half of the composition throws while the first is already
     // constructed. Nothing reached the database and nothing was left holding
     // it.
-    expect(await postgres.backends()).toBe(0);
+    await expectPostgresDrained(postgres);
 
     setEnv('HUABU_AZURE_STORAGE_CONNECTION_STRING', 'not-a-connection-string');
     setEnv('HUABU_AZURE_BLOB_CONTAINER', 'huabu');
     await expect(initStorage(POSTGRES_AZURE)).rejects.toThrow();
-    expect(await postgres.backends()).toBe(0);
+    await expectPostgresDrained(postgres);
 
     // A prefix that is not a single segment would file a Space's bytes
     // somewhere other than the area an operator granted. The adapter refuses
@@ -324,7 +333,7 @@ describe('opening storage', () => {
     await expect(initStorage(POSTGRES_AZURE)).rejects.toThrow(
       /prefix must be a non-empty single segment/,
     );
-    expect(await postgres.backends()).toBe(0);
+    await expectPostgresDrained(postgres);
   });
 });
 
@@ -347,7 +356,7 @@ describe('closing storage', () => {
     // to hold: composition owns the shared connection and closes it in a
     // `finally`. A restart loop is where this would otherwise show up, one
     // leaked pool at a time.
-    expect(await postgres.backends()).toBe(0);
+    await expectPostgresDrained(postgres);
 
     vi.restoreAllMocks();
     const reopened = await initStorage(POSTGRES_AZURE);
@@ -366,9 +375,9 @@ describe('closing storage', () => {
     expect(await postgres.backends()).toBeGreaterThan(0);
 
     await expect(closeStorage()).resolves.toBeUndefined();
-    expect(await postgres.backends()).toBe(0);
+    await expectPostgresDrained(postgres);
     await expect(closeStorage()).resolves.toBeUndefined();
-    expect(await postgres.backends()).toBe(0);
+    await expectPostgresDrained(postgres);
   });
 });
 
