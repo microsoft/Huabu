@@ -1164,6 +1164,61 @@ try {
   const shutdownSpace = await request('/canvas', 'POST', {
     title: 'Shutdown recovery',
   });
+  await open(shell, shutdownSpace.canvasId);
+  const transition = await restoredHome.evaluate(() =>
+    window.electronBridge.tabs.beginWorkspaceChange(),
+  );
+  assert.equal(transition.ok, true);
+  assert.equal(
+    (await shell.evaluate(() => window.electronBridge.tabs.getState())).busy,
+    true,
+  );
+  await electron.evaluate(({ webContents }) => {
+    const home = webContents
+      .getAllWebContents()
+      .find((contents) => contents.getURL().endsWith('/spaces'));
+    if (!home) throw new Error('Missing Home transition owner');
+    home.forcefullyCrashRenderer();
+  });
+  await waitFor(async () => {
+    const state = await shell.evaluate(() =>
+      window.electronBridge.tabs.getState(),
+    );
+    return !state.busy && state.tabs.find((tab) => tab.id === 'home')?.error;
+  }, 'releasing the abandoned Workspace transition');
+  const abandoned = await shell.evaluate(() =>
+    window.electronBridge.tabs.getState(),
+  );
+  assert.equal(abandoned.workspaceId, null);
+  assert.deepEqual(
+    abandoned.tabs.map((tab) => tab.canvasId),
+    [null],
+  );
+  assert.equal(
+    (
+      await electron.evaluate(() =>
+        globalThis.tabsSmokeUnexpectedErrors.splice(0),
+      )
+    ).length,
+    1,
+  );
+  const reloaded = await shell.evaluate(() =>
+    window.electronBridge.tabs.reload('home'),
+  );
+  assert.equal(reloaded.ok, true);
+  await waitFor(async () => {
+    const state = await shell.evaluate(() =>
+      window.electronBridge.tabs.getState(),
+    );
+    return (
+      !state.busy &&
+      state.workspaceId === switched.workspaceId &&
+      state.tabs.some((tab) => tab.canvasId === shutdownSpace.canvasId)
+    );
+  }, 'confirming Server identity and restoring saved Tabs after Home recovery');
+  console.log(
+    'Home recovered an abandoned Workspace transition without guessing identity',
+  );
   const healthy = await open(shell, shutdownSpace.canvasId);
   await healthy.evaluate(async () => {
     const { default: canvas } = await import('/src/store/canvasStore.ts');

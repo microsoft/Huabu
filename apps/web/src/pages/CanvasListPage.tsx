@@ -165,6 +165,33 @@ export default function CanvasListPage() {
     setPendingDelete({ canvasId, title });
   };
 
+  const closeDeleteModal = () => {
+    if (isDeleting) return;
+    setPendingDelete(null);
+  };
+
+  const confirmDelete = async () => {
+    if (!pendingDelete) return;
+
+    try {
+      setIsDeleting(true);
+      await deleteCanvasById(pendingDelete.canvasId);
+      listRequestRef.current.version++;
+      deleteWorkspace(pendingDelete.canvasId);
+      setCanvases((prev) => {
+        const next = prev.filter((c) => c.canvasId !== pendingDelete.canvasId);
+        setCanvasCount(next.length);
+        return next;
+      });
+      setPendingDelete(null);
+      void fetchCanvases(false);
+    } catch (error) {
+      console.error('Failed to delete canvas:', error);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   const formatDate = (timestamp: number) => {
     return new Date(timestamp).toLocaleDateString(i18n.language, {
       year: 'numeric',

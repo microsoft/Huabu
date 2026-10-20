@@ -53,6 +53,10 @@ Workspace changes are initiated from Home, save all content pages, retain the ol
 
 If the initial Workspace save barrier fails, the Store retains the current Workspace identity and records the failure for inline feedback. Both path selection and recent-Workspace selection on `/setup` also show the existing danger toast, matching the Home Workspace menu.
 
+If Home fails after the Workspace save barrier has completed, main releases only the abandoned Workspace transition's lock and keeps the Workspace identity unset. Reload and confirmed shutdown remain available. Home must become ready and confirm the active Workspace through Server initialization before registering an identity and restoring its session; main never guesses the previous identity. A Home failure during the save barrier does not release that barrier early, and readiness is rechecked before destroying Space views. Home failures never unlock an unrelated Tab close, reload or shutdown operation.
+
+Successful Space deletion invalidates pending list requests before removing the card and starts a background refresh. Responses captured before deletion cannot restore the deleted card or overwrite the updated count.
+
 ## 4. Persistence and status
 
 The main process atomically replaces a fixed `desktop-tabs.json` file under Electron `userData`. Session records are keyed by Server identity and Workspace identity; local Server identity deliberately excludes the ephemeral loopback port. Session records contain only ordered Space identities and the active Space; application preferences have a separate top-level record. Activation and closing persist the intended session before committing destructive runtime changes, so a filesystem error keeps the original Tab and surfaces the failure. Restoration follows successful Home Workspace initialization and creates lazy entries; only the active Space view is loaded until another Tab is selected.

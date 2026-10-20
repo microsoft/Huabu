@@ -678,6 +678,66 @@ describe('desktop Space Tab lifecycle', () => {
     expect(tabs.snapshot.busy).toBe(false);
   });
 
+  it('releases an abandoned Home transition and restores only a newly confirmed Workspace', async () => {
+    const a = open('a');
+    const home = mocks.views[0];
+    const change = tabs.beginWorkspaceChange(home.webContents as never);
+    finish(home);
+    finish(a);
+    await change;
+    crash(home);
+    expect(tabs.snapshot.busy).toBe(false);
+    expect(tabs.snapshot.workspaceId).toBeNull();
+    expect(tabs.snapshot.tabs.map((tab) => tab.canvasId)).toEqual([null]);
+    expect(() =>
+      tabs.workspaceReady(home.webContents as never, 'workspace'),
+    ).toThrow('not ready');
+    await tabs.reload('home');
+    expect(home.webContents.reload).toHaveBeenCalledOnce();
+    expect(tabs.snapshot.workspaceId).toBeNull();
+    tabs.ready(home.webContents as never);
+    tabs.workspaceReady(home.webContents as never, 'new-workspace');
+    expect(tabs.snapshot.workspaceId).toBe('new-workspace');
+    expect(tabs.snapshot.tabs.map((tab) => tab.canvasId)).toEqual([null]);
+  });
+
+  it('allows shutdown after Home abandons a Workspace transition', async () => {
+    const home = mocks.views[0];
+    const change = tabs.beginWorkspaceChange(home.webContents as never);
+    finish(home);
+    await change;
+    crash(home);
+    await tabs.prepareCloseAll(true);
+    expect(mocks.showMessageBox).toHaveBeenCalledOnce();
+    expect(tabs.snapshot.busy).toBe(true);
+    tabs.resume();
+  });
+
+  it('does not start a transition if Home crashes after acknowledging its save', async () => {
+    const a = open('a');
+    const home = mocks.views[0];
+    const change = tabs.beginWorkspaceChange(home.webContents as never);
+    finish(home);
+    crash(home);
+    expect(tabs.snapshot.busy).toBe(true);
+    finish(a);
+    await expect(change).rejects.toThrow('Home');
+    expect(tabs.snapshot.busy).toBe(false);
+    expect(tabs.snapshot.workspaceId).toBe('workspace');
+    expect(a.webContents.close).not.toHaveBeenCalled();
+  });
+
+  it('does not unlock a Space close when unrelated Home crashes', async () => {
+    const a = open('a');
+    const closing = tabs.close(tabs.snapshot.activeId);
+    crash(mocks.views[0]);
+    expect(tabs.snapshot.busy).toBe(true);
+    expect(() => tabs.open({ canvasId: 'b' })).toThrow('saving');
+    finish(a);
+    await closing;
+    expect(tabs.snapshot.busy).toBe(false);
+  });
+
   it('reloads only after save acknowledgement', async () => {
     const a = open('a');
     const reload = tabs.reload(tabs.snapshot.activeId);

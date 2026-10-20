@@ -337,9 +337,13 @@ export class DesktopTabs {
     console.error('[desktop-tabs]', message);
     const notify = !tab.failureNotified;
     tab.failureNotified = true;
+    tab.ready = false;
     tab.state.error = message;
     tab.state.loading = false;
-    this.publish();
+    if (tab.state.id === HOME_ID && this.workspaceChanging) {
+      this.workspaceChanging = false;
+      this.resume();
+    } else this.publish();
     if (notify)
       dialog.showErrorBox(
         'Space unavailable',
@@ -492,6 +496,8 @@ export class DesktopTabs {
     const tab = this.contentTab(contents);
     if (tab.state.id !== HOME_ID)
       throw new Error('Only Home can activate a Workspace');
+    if (!tab.ready)
+      throw new Error('Home is not ready to activate a Workspace');
     if (
       typeof workspaceId !== 'string' ||
       !workspaceId ||
@@ -628,6 +634,12 @@ export class DesktopTabs {
       throw new Error('Switch Workspace from Home');
     }
     await this.prepareCloseAll();
+    if (!this.contentTab(contents).ready) {
+      this.resume();
+      throw new Error(
+        'Home became unavailable while preparing Workspace change',
+      );
+    }
     this.workspaceChanging = true;
     for (const tab of this.tabs.slice(1)) this.destroyTab(tab);
     this.tabs = this.tabs.slice(0, 1);

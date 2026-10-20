@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import CanvasListPage from './CanvasListPage';
 import { ApiError } from '../api/_client';
-import { exportCanvas, listCanvases } from '../api/canvas';
+import { deleteCanvasById, exportCanvas, listCanvases } from '../api/canvas';
 import { toast } from '../components/Common/Toast';
 import { DesktopHomeMenu } from '../components/Shell/DesktopHomeMenu';
 import { APP_NAME } from '../config/app';
@@ -67,7 +67,8 @@ vi.mock('../api/canvas', () => ({
 vi.mock('../components/Common/Toast', () => ({ toast: vi.fn() }));
 
 vi.mock('../components/Common/Modal', () => ({
-  Modal: () => null,
+  Modal: ({ isOpen, footer }: { isOpen: boolean; footer: ReactNode }) =>
+    isOpen ? <div role="dialog">{footer}</div> : null,
 }));
 
 vi.mock('../components/Common/Loading', () => ({
@@ -331,6 +332,61 @@ describe('CanvasListPage navigation', () => {
     ).toContain('Space One /');
     expect(localStorage.getItem('huabu.spaces.showAll')).toBe('true');
   });
+  it('does not resurrect a deleted Space from an older background refresh', async () => {
+    await renderPage();
+    let resolveOld!: (value: Awaited<ReturnType<typeof listCanvases>>) => void;
+    let resolveFresh!: (
+      value: Awaited<ReturnType<typeof listCanvases>>,
+    ) => void;
+    vi.mocked(listCanvases)
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveOld = resolve;
+        }),
+      )
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveFresh = resolve;
+        }),
+      );
+    act(() => window.dispatchEvent(new Event('canvas-list-changed')));
+    const remove =
+      container.querySelector<HTMLButtonElement>(
+        'button[title="canvasList.deleteCanvas"]',
+      ) ??
+      container.querySelector<HTMLButtonElement>(
+        'button[aria-label="canvasList.deleteCanvas"]',
+      );
+    if (!remove) throw new Error('Missing Space delete button');
+    await act(async () => remove.click());
+    const confirm = Array.from(
+      container.querySelectorAll<HTMLButtonElement>('[role="dialog"] button'),
+    ).find((button) => button.textContent === 'actions.delete');
+    if (!confirm) throw new Error('Missing delete confirmation');
+    await act(async () => confirm.click());
+    expect(deleteCanvasById).toHaveBeenCalledWith('space-1');
+    expect(container.querySelector('a[href="/canvas/space-1"]')).toBeNull();
+    await act(async () =>
+      resolveOld({
+        canvases: [
+          {
+            canvasId: 'space-1',
+            title: 'Deleted',
+            nodeCount: 0,
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        ],
+      }),
+    );
+    expect(container.querySelector('a[href="/canvas/space-1"]')).toBeNull();
+    expect(setCanvasCount).toHaveBeenLastCalledWith(0);
+    expect(listCanvases).toHaveBeenCalledTimes(3);
+    await act(async () => resolveFresh({ canvases: [] }));
+    expect(container.querySelector('a[href="/canvas/space-1"]')).toBeNull();
+    expect(setCanvasCount).toHaveBeenLastCalledWith(0);
+  });
+
   it('refreshes the retained list after creation/import without leaving Home', async () => {
     environment.desktopHome = true;
     await renderPage();
