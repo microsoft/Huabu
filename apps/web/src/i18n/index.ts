@@ -5,7 +5,10 @@ import i18n from 'i18next';
 import LanguageDetector from 'i18next-browser-languagedetector';
 import { initReactI18next } from 'react-i18next';
 
-import '@/utils/desktopStorage';
+import {
+  readApplicationPreference,
+  subscribeApplicationPreferences,
+} from '@/utils/desktopStorage';
 
 import enCommon from './resources/en/common.json';
 import zhCNCommon from './resources/zh-CN/common.json';
@@ -15,8 +18,15 @@ export type SupportedLanguage = (typeof supportedLngs)[number];
 
 export const defaultNS = 'common';
 
+const detector = new LanguageDetector();
+detector.addDetector({
+  name: 'applicationPreference',
+  lookup: () => readApplicationPreference('huabu.language') ?? undefined,
+});
+const desktop = typeof window !== 'undefined' && !!window.electronBridge?.tabs;
+
 void i18n
-  .use(LanguageDetector)
+  .use(detector)
   .use(initReactI18next)
   .init({
     resources: {
@@ -31,8 +41,8 @@ void i18n
       escapeValue: false,
     },
     detection: {
-      order: ['localStorage', 'navigator', 'htmlTag'],
-      caches: ['localStorage'],
+      order: ['applicationPreference', 'navigator', 'htmlTag'],
+      caches: desktop ? [] : ['localStorage'],
       lookupLocalStorage: 'huabu.language',
       convertDetectedLanguage: (lng) =>
         lng.toLowerCase().startsWith('zh') ? 'zh-CN' : lng,
@@ -44,11 +54,9 @@ void i18n
 
 export { i18n };
 
-if (typeof window !== 'undefined') {
-  window.addEventListener('storage', (event) => {
-    if (event.key !== 'huabu.language') return;
-    const language = localStorage.getItem(event.key);
-    if (language && supportedLngs.some((supported) => supported === language))
-      void i18n.changeLanguage(language);
-  });
-}
+subscribeApplicationPreferences((key) => {
+  if (key !== 'huabu.language') return;
+  const language = readApplicationPreference(key);
+  if (language && supportedLngs.some((supported) => supported === language))
+    void i18n.changeLanguage(language);
+});

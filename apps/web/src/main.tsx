@@ -7,7 +7,6 @@ import ReactDOM from 'react-dom/client';
 import './index.css';
 import './i18n';
 
-import App from './App';
 import { APP_NAME } from './config/app';
 import { getElectronBridge } from './hooks/useElectron';
 import { installDesktopInputGuard } from './utils/desktopInput';
@@ -15,6 +14,7 @@ import { installDesktopInputGuard } from './utils/desktopInput';
 const DesktopTabShell = lazy(
   () => import('./components/Shell/DesktopTabShell'),
 );
+const App = lazy(() => import('./App'));
 
 document.title = APP_NAME;
 
@@ -54,7 +54,9 @@ root.render(
         <DesktopTabShell />
       </Suspense>
     ) : (
-      <App />
+      <Suspense fallback={null}>
+        <App />
+      </Suspense>
     )}
   </React.StrictMode>,
 );

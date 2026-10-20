@@ -22,7 +22,10 @@ import {
   requireDesktopTabSuccess,
 } from '../hooks/useElectron';
 import { i18n } from '../i18n';
-import { writeApplicationPreference } from '../utils/desktopStorage';
+import {
+  readApplicationPreference,
+  writeApplicationPreference,
+} from '../utils/desktopStorage';
 
 import type { CanvasSummary } from '@huabu/shared';
 
@@ -236,10 +239,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   workspaceId: null,
   workspaceName: null,
   worldCanvasId: null,
-  worldEnabled:
-    typeof localStorage === 'undefined'
-      ? false
-      : localStorage.getItem(WORLD_ENABLED_KEY) === 'true',
+  worldEnabled: readApplicationPreference(WORLD_ENABLED_KEY) === 'true',
   spaceTitles: {},
   spaceSummaries: {},
   spaceTitlesStatus: 'idle',

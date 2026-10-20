@@ -6,9 +6,12 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import { i18n } from './index';
 
 const mocks = vi.hoisted(() => ({ write: vi.fn() }));
-vi.mock('@/utils/desktopStorage', () => ({
+vi.mock('@/utils/desktopStorage', async (importOriginal) => ({
+  ...(await importOriginal<typeof DesktopStorage>()),
   writeApplicationPreference: mocks.write,
 }));
+
+import type * as DesktopStorage from '@/utils/desktopStorage';
 
 beforeEach(async () => {
   await i18n.changeLanguage('en');

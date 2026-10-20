@@ -36,6 +36,11 @@ export const useChatPreferencesStore = create<ChatPreferencesState>()(
       name: 'huabu-chat-preferences',
       storage: createJSONStorage(applicationPreferenceStorage),
       version: 1,
+      merge: (persisted, current) => ({
+        ...current,
+        recentTurnCount: DEFAULT_RECENT_CHAT_TURNS,
+        ...(persisted as Partial<ChatPreferencesState> | undefined),
+      }),
       migrate: (persisted) => {
         const state = persisted as Partial<ChatPreferencesState> | undefined;
         return {

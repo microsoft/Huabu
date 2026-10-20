@@ -742,14 +742,24 @@ export class DesktopTabs {
       ) {
         throw new Error('Invalid legacy desktop storage');
       }
-      this.legacyStorage = legacy as Record<string, string>;
+      const legacyStorage = legacy as Record<string, string>;
+      const preferences = { ...this.preferences };
+      const migrated: string[] = [];
       for (const key of PREFERENCE_KEYS) {
         if (
-          this.preferences[key] === undefined &&
-          this.legacyStorage[key] !== undefined
-        )
-          this.preferences[key] = this.legacyStorage[key];
+          preferences[key] === undefined &&
+          legacyStorage[key] !== undefined
+        ) {
+          preferences[key] = legacyStorage[key];
+          migrated.push(key);
+        }
       }
+      if (migrated.length > 0)
+        this.persist(this.tabs, this.activeId, preferences);
+      this.preferences = preferences;
+      this.legacyStorage = legacyStorage;
+      for (const key of migrated)
+        this.broadcast('tabs:preference', { key, value: preferences[key] });
     }
     return {
       ...Object.fromEntries(

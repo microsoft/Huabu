@@ -12,10 +12,14 @@ const preferenceKeys = [
   'huabu.minimapEnabled',
 ];
 
+function isPreferenceKey(key: string): key is DesktopPreferenceKey {
+  return preferenceKeys.includes(key);
+}
+
 function bootstrapDesktopStorage(): void {
   const tabs =
     typeof window === 'undefined' ? undefined : window.electronBridge?.tabs;
-  if (!tabs?.storageSnapshot) return;
+  if (!tabs?.storageSnapshot || tabs.context.role === 'shell') return;
   const legacy =
     tabs.context.role === 'home'
       ? Object.fromEntries(
@@ -47,39 +51,47 @@ function bootstrapDesktopStorage(): void {
     );
     throw new Error(snapshot.error);
   }
-  for (const key of preferenceKeys) {
-    if (snapshot.values[key] === undefined) localStorage.removeItem(key);
-  }
   for (const [key, value] of Object.entries(snapshot.values)) {
-    if (preferenceKeys.includes(key) || localStorage.getItem(key) === null)
+    if (!preferenceKeys.includes(key) && localStorage.getItem(key) === null)
       localStorage.setItem(key, value);
   }
-  tabs.onPreference(({ key }) => {
-    const current = tabs.storageSnapshot();
-    if (!current.ok) {
-      console.error(
-        '[desktop-tabs] Could not refresh preference:',
-        current.error,
-      );
-      throw new Error(current.error);
-    }
-    const value = current.values[key] ?? null;
-    const oldValue = localStorage.getItem(key);
-    if (value === oldValue) return;
-    if (value === null) localStorage.removeItem(key);
-    else localStorage.setItem(key, value);
-    window.dispatchEvent(
-      new StorageEvent('storage', {
-        key,
-        oldValue,
-        newValue: value,
-        storageArea: localStorage,
-      }),
-    );
-  });
+  for (const key of preferenceKeys) localStorage.removeItem(key);
 }
 
 bootstrapDesktopStorage();
+
+export function readApplicationPreference(
+  key: DesktopPreferenceKey,
+): string | null {
+  const tabs =
+    typeof window === 'undefined' ? undefined : window.electronBridge?.tabs;
+  if (tabs) {
+    const snapshot = tabs.storageSnapshot();
+    if (!snapshot.ok) {
+      console.error(
+        '[desktop-tabs] Could not read preference:',
+        snapshot.error,
+      );
+      throw new Error(snapshot.error);
+    }
+    return snapshot.values[key] ?? null;
+  }
+  return typeof localStorage === 'undefined' ? null : localStorage.getItem(key);
+}
+
+export function subscribeApplicationPreferences(
+  listener: (key: DesktopPreferenceKey) => void,
+): () => void {
+  const tabs =
+    typeof window === 'undefined' ? undefined : window.electronBridge?.tabs;
+  if (tabs) return tabs.onPreference(({ key }) => listener(key));
+  if (typeof window === 'undefined') return () => {};
+  const onStorage = (event: StorageEvent) => {
+    if (event.key && isPreferenceKey(event.key)) listener(event.key);
+  };
+  window.addEventListener('storage', onStorage);
+  return () => window.removeEventListener('storage', onStorage);
+}
 
 export function writeApplicationPreference(
   key: DesktopPreferenceKey,
@@ -87,12 +99,13 @@ export function writeApplicationPreference(
 ): void {
   const tabs =
     typeof window === 'undefined' ? undefined : window.electronBridge?.tabs;
-  if (tabs?.setPreference && tabs.context.role !== 'shell') {
+  if (tabs) {
     const result = tabs.setPreference(key, value);
     if (!result.ok) {
       console.error('[desktop-tabs] Could not save preference:', result.error);
       throw new Error(result.error);
     }
+    return;
   }
   if (value === null) localStorage.removeItem(key);
   else localStorage.setItem(key, value);
@@ -100,12 +113,12 @@ export function writeApplicationPreference(
 
 export function applicationPreferenceStorage(): StateStorage {
   const preferenceKey = (key: string): DesktopPreferenceKey => {
-    if (!preferenceKeys.includes(key))
+    if (!isPreferenceKey(key))
       throw new Error(`Unknown application preference: ${key}`);
-    return key as DesktopPreferenceKey;
+    return key;
   };
   return {
-    getItem: (key) => localStorage.getItem(key),
+    getItem: (key) => readApplicationPreference(preferenceKey(key)),
     setItem: (key, value) =>
       writeApplicationPreference(preferenceKey(key), value),
     removeItem: (key) => writeApplicationPreference(preferenceKey(key), null),

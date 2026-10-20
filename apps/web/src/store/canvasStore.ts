@@ -103,6 +103,7 @@ import {
 } from '@/utils/spaceHierarchy';
 import {
   desktopStorageKey,
+  readApplicationPreference,
   writeApplicationPreference,
 } from '@/utils/desktopStorage';
 
@@ -307,10 +308,10 @@ function writeViewportToStorage(
   );
 }
 
-// ─── MiniMap-visibility localStorage ──────────────────────────────────────
+// ─── MiniMap-visibility preference ────────────────────────────────────────
 //
 // Whether the canvas MiniMap overlay is shown is a global UI preference
-// (not per-canvas), so it uses a single localStorage key. Defaults to off so
+// (not per-canvas), persisted by the application preference adapter. Defaults to off so
 // first-time users get the cleaner canvas; once toggled in Settings the choice
 // survives refreshes / restarts.
 
@@ -318,7 +319,7 @@ const MINIMAP_STORAGE_KEY = 'huabu.minimapEnabled';
 
 function readMinimapEnabledFromStorage(): boolean {
   try {
-    return localStorage.getItem(MINIMAP_STORAGE_KEY) === 'true';
+    return readApplicationPreference(MINIMAP_STORAGE_KEY) === 'true';
   } catch {
     // Private mode / disabled storage — treat as off.
     return false;

@@ -112,6 +112,18 @@ const DEFAULT_ERASER_SIZE_PRESETS: SketchSizePresets = [
 ];
 const DEFAULT_COLOR_PRESETS: SketchColorPresets = ['black', 'red', 'blue'];
 
+const DEFAULT_TOOL_PREFERENCES = {
+  sketchDraft: DEFAULT_SKETCH_DRAFT,
+  colorPresets: DEFAULT_COLOR_PRESETS,
+  strokeSizePresets: DEFAULT_STROKE_SIZE_PRESETS,
+  eraserSizePresets: DEFAULT_ERASER_SIZE_PRESETS,
+  activeColorPreset: 0,
+  activeStrokeSizePreset: 1,
+  activeEraserSizePreset: 0,
+  inputModePreference: 'auto',
+  penObserved: false,
+} satisfies Partial<ToolState>;
+
 /**
  * Toolbar / tool-settings store.
  *
@@ -130,15 +142,7 @@ export const useToolStore = create<ToolState>()(
   persist(
     (set) => ({
       pendingNodeType: null,
-      sketchDraft: DEFAULT_SKETCH_DRAFT,
-      colorPresets: DEFAULT_COLOR_PRESETS,
-      strokeSizePresets: DEFAULT_STROKE_SIZE_PRESETS,
-      eraserSizePresets: DEFAULT_ERASER_SIZE_PRESETS,
-      activeColorPreset: 0,
-      activeStrokeSizePreset: 1,
-      activeEraserSizePreset: 0,
-      inputModePreference: 'auto',
-      penObserved: false,
+      ...DEFAULT_TOOL_PREFERENCES,
       setPendingNodeType: (type) => set({ pendingNodeType: type }),
       setSketchDraft: (patch) =>
         set((state) => ({ sketchDraft: { ...state.sketchDraft, ...patch } })),
@@ -209,6 +213,11 @@ export const useToolStore = create<ToolState>()(
       name: 'huabu-sketch-tools',
       storage: createJSONStorage(applicationPreferenceStorage),
       version: 3,
+      merge: (persisted, current) => ({
+        ...current,
+        ...DEFAULT_TOOL_PREFERENCES,
+        ...(persisted as Partial<ToolState> | undefined),
+      }),
       migrate: (persistedState, version) => {
         if (!persistedState) return persistedState as ToolState;
         const state = persistedState as Partial<ToolState>;

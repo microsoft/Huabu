@@ -22,6 +22,10 @@ import {
   setDesktopInputFrozen,
 } from '@/utils/desktopInput';
 import { desktopNavigationPath } from '@/utils/desktopNavigation';
+import {
+  readApplicationPreference,
+  subscribeApplicationPreferences,
+} from '@/utils/desktopStorage';
 
 import { getElectronBridge, requireDesktopTabSuccess } from './useElectron';
 
@@ -238,22 +242,19 @@ export function useDesktopContent(): {
 
   useEffect(() => {
     if (!tabs) return;
-    const syncPreferences = (event: StorageEvent) => {
-      if (event.key === 'huabu-sketch-tools')
-        void useToolStore.persist.rehydrate();
-      if (event.key === 'huabu-chat-preferences')
+    return subscribeApplicationPreferences((key) => {
+      if (key === 'huabu-sketch-tools') void useToolStore.persist.rehydrate();
+      if (key === 'huabu-chat-preferences')
         void useChatPreferencesStore.persist.rehydrate();
-      if (event.key === 'huabu:world-enabled')
+      if (key === 'huabu:world-enabled')
         useWorkspaceStore.setState({
-          worldEnabled: localStorage.getItem(event.key) === 'true',
+          worldEnabled: readApplicationPreference(key) === 'true',
         });
-      if (event.key === 'huabu.minimapEnabled')
+      if (key === 'huabu.minimapEnabled')
         useCanvasStore.setState({
-          minimapEnabled: localStorage.getItem(event.key) === 'true',
+          minimapEnabled: readApplicationPreference(key) === 'true',
         });
-    };
-    window.addEventListener('storage', syncPreferences);
-    return () => window.removeEventListener('storage', syncPreferences);
+    });
   }, [tabs]);
 
   return { saving, preparingClose };

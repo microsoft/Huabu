@@ -481,6 +481,7 @@ describe('desktop Space Tab lifecycle', () => {
       'huabu-chat': 'legacy',
       'huabu.language': 'en',
     });
+
     const a = open('a');
     const b = open('b');
     expect(
@@ -508,6 +509,51 @@ describe('desktop Space Tab lifecycle', () => {
       tabs.storageSnapshot(b.webContents as never, undefined)['huabu.language'],
     ).toBe('zh-CN');
   });
+  it('persists migrated preferences before returning and notifies an already loaded Shell', () => {
+    const home = mocks.views[0];
+    expect(tabs.storageSnapshot(shell.webContents as never, undefined)).toEqual(
+      {},
+    );
+    tabs.storageSnapshot(home.webContents as never, {
+      'huabu.language': 'zh-CN',
+      'huabu:world-enabled': 'true',
+    });
+    expect(
+      JSON.parse(readFileSync(join(directory, 'desktop-tabs.json'), 'utf8'))
+        .preferences,
+    ).toEqual({
+      'huabu.language': 'zh-CN',
+      'huabu:world-enabled': 'true',
+    });
+    expect(shell.webContents.send).toHaveBeenCalledWith('tabs:preference', {
+      key: 'huabu.language',
+      value: 'zh-CN',
+    });
+    tabs.setPreference(home.webContents as never, 'huabu.language', null);
+    tabs.storageSnapshot(home.webContents as never, {});
+    expect(
+      tabs.storageSnapshot(home.webContents as never, undefined)[
+        'huabu.language'
+      ],
+    ).toBeUndefined();
+  });
+
+  it('does not acknowledge migration or change authoritative preferences when persistence fails', () => {
+    const path = join(directory, 'desktop-tabs.json');
+    rmSync(path, { force: true });
+    mkdirSync(path);
+    expect(() =>
+      tabs.storageSnapshot(mocks.views[0].webContents as never, {
+        'huabu.language': 'zh-CN',
+      }),
+    ).toThrow();
+    expect(
+      tabs.storageSnapshot(shell.webContents as never, undefined)[
+        'huabu.language'
+      ],
+    ).toBeUndefined();
+  });
+
   it('keeps the Tab and resumes input if saving fails', async () => {
     const a = open('a');
     const close = tabs.close(tabs.snapshot.activeId);

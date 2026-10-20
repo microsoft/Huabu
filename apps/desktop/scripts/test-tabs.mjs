@@ -6,7 +6,13 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -242,6 +248,46 @@ try {
     'loading Home',
   );
   await home.locator('main h1').waitFor({ state: 'visible' });
+  await home.evaluate(() => {
+    localStorage.setItem('huabu.language', 'zh-CN');
+    localStorage.setItem(
+      'huabu-sketch-tools',
+      JSON.stringify({
+        state: { inputModePreference: 'finger' },
+        version: 2,
+      }),
+    );
+  });
+  assert.equal(
+    (await shell.evaluate(() => window.electronBridge.tabs.reload('home'))).ok,
+    true,
+  );
+  await home.locator('main h1').waitFor({ state: 'visible' });
+  await waitFor(
+    () =>
+      shell.evaluate(async () => {
+        const { i18n } = await import('/src/i18n/index.ts');
+        return i18n.language === 'zh-CN';
+      }),
+    'notifying an already loaded Shell after legacy preference migration',
+  );
+  assert.equal(
+    JSON.parse(readFileSync(join(userData, 'desktop-tabs.json'), 'utf8'))
+      .preferences['huabu.language'],
+    'zh-CN',
+    'Migration must persist before legacy storage is cleared',
+  );
+  assert.deepEqual(
+    await home.evaluate(async () => {
+      const { useToolStore } = await import('/src/store/toolStore.ts');
+      return {
+        input: useToolStore.getState().inputModePreference,
+        languageReplica: localStorage.getItem('huabu.language'),
+        toolsReplica: localStorage.getItem('huabu-sketch-tools'),
+      };
+    }),
+    { input: 'finger', languageReplica: null, toolsReplica: null },
+  );
   assert.equal(
     await home.locator('header').count(),
     0,
@@ -695,20 +741,11 @@ try {
     ipcMain.on('tabs:set-preference', globalThis.tabsSmokePreferenceListener);
   });
   await b.evaluate(() => {
-    globalThis.tabsSmokePreferenceEvents = [];
     globalThis.tabsSmokePreferenceNotifications = 0;
     globalThis.tabsSmokeUnsubscribePreferences =
       window.electronBridge.tabs.onPreference(() => {
         globalThis.tabsSmokePreferenceNotifications++;
       });
-    globalThis.tabsSmokeStorageListener = (event) => {
-      if (event.key === 'huabu.language' || event.key === 'huabu:world-enabled')
-        globalThis.tabsSmokePreferenceEvents.push({
-          key: event.key,
-          value: event.newValue,
-        });
-    };
-    window.addEventListener('storage', globalThis.tabsSmokeStorageListener);
   });
   try {
     await a.evaluate(async () => {
@@ -769,14 +806,32 @@ try {
     assert.deepEqual(
       await b.evaluate(async () => {
         const { i18n } = await import('/src/i18n/index.ts');
+        const { readApplicationPreference } =
+          await import('/src/utils/desktopStorage.ts');
         return {
-          stored: localStorage.getItem('huabu.language'),
+          stored: readApplicationPreference('huabu.language'),
+          replica: localStorage.getItem('huabu.language'),
           language: i18n.language,
         };
       }),
-      { stored: 'en', language: 'en' },
+      { stored: 'en', replica: null, language: 'en' },
       'A stale notification must reread main instead of reverting the local preference',
     );
+    for (const page of [a, b, shell]) {
+      assert.deepEqual(
+        await page.evaluate(() =>
+          [
+            'huabu.language',
+            'huabu-sketch-tools',
+            'huabu-chat-preferences',
+            'huabu:world-enabled',
+            'huabu.minimapEnabled',
+          ].filter((key) => localStorage.getItem(key) !== null),
+        ),
+        [],
+        'Desktop preference synchronization must not create localStorage replicas',
+      );
+    }
     assert.equal(
       await electron.evaluate(
         () => globalThis.tabsSmokePreferenceWrites.length,
@@ -795,12 +850,6 @@ try {
     });
     await b.evaluate(() => {
       globalThis.tabsSmokeUnsubscribePreferences();
-      window.removeEventListener(
-        'storage',
-        globalThis.tabsSmokeStorageListener,
-      );
-      delete globalThis.tabsSmokeStorageListener;
-      delete globalThis.tabsSmokePreferenceEvents;
       delete globalThis.tabsSmokePreferenceNotifications;
       delete globalThis.tabsSmokeUnsubscribePreferences;
     });
@@ -1106,7 +1155,21 @@ try {
     restored.tabs.find((tab) => tab.id === restored.activeId).canvasId,
     spaces[4].canvasId,
   );
-  await content(spaces[4].canvasId);
+  const restoredSpace = await content(spaces[4].canvasId);
+  assert.deepEqual(
+    await restoredSpace.evaluate(async () => {
+      const { useChatPreferencesStore } =
+        await import('/src/store/chatPreferencesStore.ts');
+      const { i18n } = await import('/src/i18n/index.ts');
+      return {
+        recentTurnCount: useChatPreferencesStore.getState().recentTurnCount,
+        language: i18n.language,
+        replica: localStorage.getItem('huabu-chat-preferences'),
+      };
+    }),
+    { recentTurnCount: 7, language: 'en', replica: null },
+    'Restart must hydrate in-memory preferences from main, without renderer replicas',
+  );
   const loaded = await electron.evaluate(
     ({ webContents }) =>
       webContents
@@ -1260,10 +1323,19 @@ try {
     )`);
   });
   healthy = await open(shell, shutdownSpace.canvasId);
-  assert.equal(
-    await healthy.evaluate(() => localStorage.getItem('huabu.minimapEnabled')),
-    null,
-    'Reopening a closed partition must remove preferences absent from main',
+  assert.deepEqual(
+    await healthy.evaluate(async () => {
+      const { default: canvas } = await import('/src/store/canvasStore.ts');
+      const { readApplicationPreference } =
+        await import('/src/utils/desktopStorage.ts');
+      return {
+        stored: readApplicationPreference('huabu.minimapEnabled'),
+        enabled: canvas.getState().minimapEnabled,
+        replica: localStorage.getItem('huabu.minimapEnabled'),
+      };
+    }),
+    { stored: null, enabled: false, replica: null },
+    'Reopening a closed partition must use main defaults for deleted preferences',
   );
   await healthy.evaluate(async () => {
     const { default: canvas } = await import('/src/store/canvasStore.ts');
