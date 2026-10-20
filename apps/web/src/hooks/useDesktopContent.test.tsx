@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => ({
   toast: vi.fn(),
   setWorldEnabled: vi.fn(),
   setWorkspaceState: vi.fn(),
+  setCanvasState: vi.fn(),
 }));
 
 vi.mock('react-router-dom', () => ({ useNavigate: () => mocks.navigate }));
@@ -52,7 +53,11 @@ vi.mock('./useElectron', () => {
 });
 vi.mock('@/components/Common/Toast', () => ({ toast: mocks.toast }));
 vi.mock('@/store/canvasStore', () => ({
-  default: { getState: () => mocks.canvas, subscribe: () => () => {} },
+  default: {
+    getState: () => mocks.canvas,
+    setState: mocks.setCanvasState,
+    subscribe: () => () => {},
+  },
   saveCanvasForSubmission: mocks.save,
   flushCanvasViewState: mocks.flush,
 }));
@@ -98,6 +103,7 @@ describe('desktop save presentation', () => {
   beforeEach(async () => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    localStorage.clear();
     mocks.context.role = 'space';
     mocks.canvas.canvasId = 'space-a';
     mocks.canvas.isLoading = false;
@@ -149,6 +155,7 @@ describe('desktop save presentation', () => {
   it('hydrates queued World preference notifications without echoing writes to main', async () => {
     await render();
     for (const value of ['true', 'false']) {
+      localStorage.setItem('huabu:world-enabled', value);
       window.dispatchEvent(
         new StorageEvent('storage', {
           key: 'huabu:world-enabled',
@@ -161,6 +168,42 @@ describe('desktop save presentation', () => {
       [{ worldEnabled: true }],
       [{ worldEnabled: false }],
     ]);
+  });
+
+  it.each(['true', 'false'])(
+    'uses current World and MiniMap preferences instead of stale native event values (%s)',
+    async (current) => {
+      mocks.context.role = 'home';
+      await render();
+      const stale = current === 'true' ? 'false' : 'true';
+      for (const key of ['huabu:world-enabled', 'huabu.minimapEnabled']) {
+        localStorage.setItem(key, current);
+        window.dispatchEvent(
+          new StorageEvent('storage', { key, newValue: stale }),
+        );
+      }
+      expect(mocks.setWorkspaceState).toHaveBeenCalledExactlyOnceWith({
+        worldEnabled: current === 'true',
+      });
+      expect(mocks.setCanvasState).toHaveBeenCalledExactlyOnceWith({
+        minimapEnabled: current === 'true',
+      });
+      expect(mocks.setWorldEnabled).not.toHaveBeenCalled();
+    },
+  );
+
+  it('applies removed preferences as disabled despite a queued enabled event', async () => {
+    await render();
+    for (const key of ['huabu:world-enabled', 'huabu.minimapEnabled'])
+      window.dispatchEvent(
+        new StorageEvent('storage', { key, newValue: 'true' }),
+      );
+    expect(mocks.setWorkspaceState).toHaveBeenCalledExactlyOnceWith({
+      worldEnabled: false,
+    });
+    expect(mocks.setCanvasState).toHaveBeenCalledExactlyOnceWith({
+      minimapEnabled: false,
+    });
   });
 
   it('never shows saving on Home, including while waiting for Workspace activation', async () => {

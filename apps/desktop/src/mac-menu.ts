@@ -289,8 +289,12 @@ function buildMacMenu(config: MenuConfig): Menu {
         {
           label: labels.close,
           accelerator: 'CmdOrCtrl+W',
-          click: () =>
-            closeActiveTab ? closeActiveTab() : getMainWindow()?.close(),
+          click: (_item, focusedWindow) => {
+            if (!focusedWindow) return;
+            if (focusedWindow === getMainWindow() && closeActiveTab)
+              closeActiveTab();
+            else focusedWindow.close();
+          },
         },
       ],
     },

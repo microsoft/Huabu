@@ -46,11 +46,9 @@ export { i18n };
 
 if (typeof window !== 'undefined') {
   window.addEventListener('storage', (event) => {
-    if (
-      event.key === 'huabu.language' &&
-      supportedLngs.includes(event.newValue as SupportedLanguage)
-    ) {
-      void i18n.changeLanguage(event.newValue as SupportedLanguage);
-    }
+    if (event.key !== 'huabu.language') return;
+    const language = localStorage.getItem(event.key);
+    if (language && supportedLngs.some((supported) => supported === language))
+      void i18n.changeLanguage(language);
   });
 }

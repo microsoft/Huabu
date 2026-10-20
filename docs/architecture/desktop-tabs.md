@@ -37,6 +37,8 @@ Native macOS menu commands and diagnostics target the active content renderer. E
 
 ## 3. Saving and lifetime
 
+The native macOS Close menu action closes the active Space Tab only when the main window is focused. A focused auxiliary window, including the remote sign-in prompt, closes normally without touching the main window's Tabs; without a focused window the action does nothing.
+
 Closing a Tab is an acknowledged operation, not a fire-and-forget renderer destruction. The main process sends an identity-fenced save request to the owning page. The page freezes user input, blurs the active editor, uses `saveCanvasForSubmission` to flush and verify structural/content writes, and flushes viewport and Preview Workspace state. Only a successful acknowledgement permits destroying the view. This reuses the existing save pipeline and its version-conflict and restored-content checks.
 
 The saving overlay is shown only while a Space's save is pending for more than 150 ms, and disappears as soon as that save settles. Home has no Space to save and never shows this overlay. Opening or activating a Tab does not initiate a save. Input freezes synchronously before editor blur and remains frozen independently until the main process resumes or destroys the page, so hiding the overlay does not reopen an editing window after acknowledgement. A capture-phase guard installed before React's global shortcuts blocks user input, the entire document body is inert to include portals, and native menu callbacks consult the same freeze flag. Workspace activation after the save barrier uses its existing loading UI rather than retaining a misleading saving message. When visible, the overlay is opaque and covers the content viewport, so an underlying Workspace/Space loading screen cannot show a second overlapping progress message. The underlying page stays mounted and retains its runtime state.
@@ -62,6 +64,8 @@ Chat messages, unsent drafts, pending attachments, selection and undo caches rem
 Content reports still carry internal activity/error metadata and keep Space titles synchronized, but the Shell does not present those summaries as Tab status. Existing Question nodes and Chat views own task progress, completion and error presentation. Lifecycle errors remain available to the main process for safe close/reload handling; they are not conflated with task errors in the Tab strip.
 
 ## 5. Verification
+
+Both native and IPC-generated storage events hydrate World visibility, MiniMap visibility and language from current localStorage rather than the event's historical value. This also covers queued native events between Home and Shell, which share a storage partition. Missing toggle values are disabled, and missing or unsupported language values do not replace the active language.
 
 `pnpm --filter @huabu/desktop test` covers identity deduplication, lazy recovery, save failure/timeout handling, Workspace transitions, completion signals, and IPC ownership. The web tests cover navigation-state preservation, scoped persistence, and existing save/Store compatibility.
 

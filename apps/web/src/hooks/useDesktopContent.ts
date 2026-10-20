@@ -199,9 +199,13 @@ export function useDesktopContent(): {
       if (event.key === 'huabu-chat-preferences')
         void useChatPreferencesStore.persist.rehydrate();
       if (event.key === 'huabu:world-enabled')
-        useWorkspaceStore.setState({ worldEnabled: event.newValue === 'true' });
+        useWorkspaceStore.setState({
+          worldEnabled: localStorage.getItem(event.key) === 'true',
+        });
       if (event.key === 'huabu.minimapEnabled')
-        useCanvasStore.setState({ minimapEnabled: event.newValue === 'true' });
+        useCanvasStore.setState({
+          minimapEnabled: localStorage.getItem(event.key) === 'true',
+        });
     };
     window.addEventListener('storage', syncPreferences);
     return () => window.removeEventListener('storage', syncPreferences);
