@@ -69,6 +69,10 @@ Content reports still carry internal activity/error metadata and keep Space titl
 
 ## 5. Verification
 
+The content root tracks Space activation from the existing main-process Tab snapshots in a renderer-local Store. Both reactive and imperative question-view predicates require this activation in addition to an expanded Preview panel and matching inner tab. Background completion remains unread until the Space is activated, without unmounting retained previews; browser behavior is unchanged. Activation starts unconfirmed and an older initial snapshot cannot override a newer subscription event.
+
+Desktop save failures retain the original error in logging and show an Error cause's message in both the toast and main-process acknowledgement, falling back to the outer message when no Error cause exists. Storage bootstrap removes recognized preference keys missing from the authoritative snapshot before Store hydration, so reopening a closed partition cannot restore deleted preferences. Home supplies its legacy migration snapshot before this cleanup; Space-scoped metadata is preserved.
+
 Both native and IPC-generated storage events hydrate World visibility, MiniMap visibility and language from current localStorage rather than the event's historical value. This also covers queued native events between Home and Shell, which share a storage partition. Missing toggle values are disabled, and missing or unsupported language values do not replace the active language.
 
 `pnpm --filter @huabu/desktop test` covers identity deduplication, lazy recovery, save failure/timeout handling, Workspace transitions, completion signals, and IPC ownership. The web tests cover navigation-state preservation, scoped persistence, and existing save/Store compatibility.

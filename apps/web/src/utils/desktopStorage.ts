@@ -47,6 +47,9 @@ function bootstrapDesktopStorage(): void {
     );
     throw new Error(snapshot.error);
   }
+  for (const key of preferenceKeys) {
+    if (snapshot.values[key] === undefined) localStorage.removeItem(key);
+  }
   for (const [key, value] of Object.entries(snapshot.values)) {
     if (preferenceKeys.includes(key) || localStorage.getItem(key) === null)
       localStorage.setItem(key, value);

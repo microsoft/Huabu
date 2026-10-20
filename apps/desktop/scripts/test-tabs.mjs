@@ -519,6 +519,15 @@ try {
   assert.ok(authored.ids.includes('tabs-smoke-note'), JSON.stringify(authored));
   assert.equal(authored.isLoading, false, JSON.stringify(authored));
   const b = await open(shell, spaces[1].canvasId);
+  await waitFor(
+    () =>
+      a.evaluate(async () => {
+        const { useDesktopTabStore } =
+          await import('/src/store/desktopTabStore.ts');
+        return !useDesktopTabStore.getState().isActive;
+      }),
+    'marking retained Space A inactive while Space B is selected',
+  );
   await b.evaluate(async () => {
     const { useChatStore } = await import('/src/store/chatStore.ts');
     useChatStore
@@ -528,6 +537,15 @@ try {
   const beforeSwitch = performance.now();
   await open(shell, spaces[0].canvasId);
   const switchMs = performance.now() - beforeSwitch;
+  await waitFor(
+    () =>
+      a.evaluate(async () => {
+        const { useDesktopTabStore } =
+          await import('/src/store/desktopTabStore.ts');
+        return useDesktopTabStore.getState().isActive;
+      }),
+    'reactivating retained Space A for result acknowledgement',
+  );
   const retained = await a.evaluate(async () => {
     const { default: canvas } = await import('/src/store/canvasStore.ts');
     const { useChatStore, selectThreadDraft } =
@@ -1219,7 +1237,34 @@ try {
   console.log(
     'Home recovered an abandoned Workspace transition without guessing identity',
   );
-  const healthy = await open(shell, shutdownSpace.canvasId);
+  let healthy = await open(shell, shutdownSpace.canvasId);
+  await healthy.evaluate(async () => {
+    const { writeApplicationPreference } =
+      await import('/src/utils/desktopStorage.ts');
+    writeApplicationPreference('huabu.minimapEnabled', 'true');
+  });
+  const closingPreferenceSpace = await shell.evaluate(async (canvasId) => {
+    const state = await window.electronBridge.tabs.getState();
+    const tab = state.tabs.find((entry) => entry.canvasId === canvasId);
+    if (!tab) throw new Error('Missing preference test Space');
+    return window.electronBridge.tabs.close(tab.id);
+  }, shutdownSpace.canvasId);
+  assert.equal(closingPreferenceSpace.ok, true);
+  await electron.evaluate(async ({ webContents }) => {
+    const home = webContents
+      .getAllWebContents()
+      .find((contents) => contents.getURL().endsWith('/spaces'));
+    if (!home) throw new Error('Missing recovered Home renderer');
+    await home.executeJavaScript(`import('/src/utils/desktopStorage.ts').then(
+      ({ writeApplicationPreference }) => writeApplicationPreference('huabu.minimapEnabled', null)
+    )`);
+  });
+  healthy = await open(shell, shutdownSpace.canvasId);
+  assert.equal(
+    await healthy.evaluate(() => localStorage.getItem('huabu.minimapEnabled')),
+    null,
+    'Reopening a closed partition must remove preferences absent from main',
+  );
   await healthy.evaluate(async () => {
     const { default: canvas } = await import('/src/store/canvasStore.ts');
     canvas.getState().addNode({

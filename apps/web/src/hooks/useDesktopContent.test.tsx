@@ -5,6 +5,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { useDesktopTabStore } from '@/store/desktopTabStore';
 import {
   installDesktopInputGuard,
   isDesktopInputFrozen,
@@ -12,8 +13,13 @@ import {
 
 import { useDesktopContent } from './useDesktopContent';
 
+import type { DesktopTabsSnapshot } from '@huabu/shared/desktop-tabs';
+
 const mocks = vi.hoisted(() => ({
-  context: { role: 'space', canvasId: 'space-a' },
+  context: { role: 'space', canvasId: 'space-a', workspaceId: 'workspace' },
+  state: vi.fn<() => Promise<DesktopTabsSnapshot>>(),
+  onState:
+    vi.fn<(listener: (state: DesktopTabsSnapshot) => void) => () => void>(),
   canvas: {
     canvasId: 'space-a' as string | null,
     canvasTitle: 'Space A',
@@ -44,6 +50,8 @@ vi.mock('./useElectron', () => {
       finishPrepareClose: mocks.finish,
       ready: vi.fn(),
       report: vi.fn(),
+      getState: mocks.state,
+      onState: mocks.onState,
     },
   };
   return {
@@ -104,6 +112,14 @@ describe('desktop save presentation', () => {
     vi.useFakeTimers();
     vi.clearAllMocks();
     localStorage.clear();
+    useDesktopTabStore.setState({ isActive: false });
+    mocks.state.mockResolvedValue({
+      tabs: [],
+      activeId: 'home',
+      workspaceId: 'workspace',
+      busy: false,
+    });
+    mocks.onState.mockReturnValue(vi.fn());
     mocks.context.role = 'space';
     mocks.canvas.canvasId = 'space-a';
     mocks.canvas.isLoading = false;
@@ -151,6 +167,75 @@ describe('desktop save presentation', () => {
     expectPresentation(false, false);
     expect(mocks.save).not.toHaveBeenCalled();
   });
+
+  it('tracks desktop activation and ignores an older initial snapshot', async () => {
+    let resolve!: (state: DesktopTabsSnapshot) => void;
+    mocks.state.mockReturnValue(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    await render();
+    const update = mocks.onState.mock.calls.at(-1)?.[0];
+    if (!update) throw new Error('Missing activation listener');
+    const active: DesktopTabsSnapshot = {
+      tabs: [
+        {
+          id: 'a',
+          canvasId: 'space-a',
+          title: 'A',
+          loading: false,
+          running: false,
+          unread: false,
+          error: null,
+        },
+      ],
+      activeId: 'a',
+      workspaceId: 'workspace',
+      busy: false,
+    };
+    await act(async () => update(active));
+    expect(useDesktopTabStore.getState().isActive).toBe(true);
+    await act(async () => resolve({ ...active, activeId: 'home' }));
+    expect(useDesktopTabStore.getState().isActive).toBe(true);
+    await act(async () => update({ ...active, activeId: 'home' }));
+    expect(useDesktopTabStore.getState().isActive).toBe(false);
+    await act(async () => update({ ...active, workspaceId: 'other' }));
+    expect(useDesktopTabStore.getState().isActive).toBe(false);
+  });
+
+  it.each([
+    [
+      new Error('Cannot submit before Canvas space-a is saved', {
+        cause: new Error('Network offline'),
+      }),
+      'Network offline',
+    ],
+    [
+      new Error('Cannot submit before Canvas space-a is saved', {
+        cause: 'unknown',
+      }),
+      'Cannot submit before Canvas space-a is saved',
+    ],
+  ])(
+    'reports the underlying save cause when available',
+    async (error, message) => {
+      mocks.save.mockRejectedValue(error);
+      const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        await render();
+        await prepare();
+        expect(mocks.toast).toHaveBeenCalledWith(message, { tone: 'danger' });
+        expect(mocks.finish).toHaveBeenCalledWith('save-request', {
+          ok: false,
+          error: message,
+        });
+        expect(isDesktopInputFrozen()).toBe(true);
+      } finally {
+        log.mockRestore();
+      }
+    },
+  );
 
   it('hydrates queued World preference notifications without echoing writes to main', async () => {
     await render();

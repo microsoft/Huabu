@@ -13,6 +13,7 @@ import useCanvasStore, {
 } from '@/store/canvasStore';
 import { useChatPreferencesStore } from '@/store/chatPreferencesStore';
 import { useChatStore } from '@/store/chatStore';
+import { useDesktopTabStore } from '@/store/desktopTabStore';
 import { useSettingsUiStore } from '@/store/settingsUiStore';
 import { useToolStore } from '@/store/toolStore';
 import { useWorkspaceStore } from '@/store/workspaceStore';
@@ -23,6 +24,8 @@ import {
 import { desktopNavigationPath } from '@/utils/desktopNavigation';
 
 import { getElectronBridge, requireDesktopTabSuccess } from './useElectron';
+
+import type { DesktopTabsSnapshot } from '@huabu/shared/desktop-tabs';
 
 export { requireDesktopTabSuccess } from './useElectron';
 
@@ -38,6 +41,44 @@ export function useDesktopContent(): {
     state.isReady ? state.workspaceId : null,
   );
   const workspaceSyncing = useWorkspaceStore((state) => state.isSyncing);
+
+  useEffect(() => {
+    if (!tabs || tabs.context.role !== 'space') return;
+    let live = true;
+    let received = false;
+    const update = (snapshot: DesktopTabsSnapshot) => {
+      useDesktopTabStore.setState({
+        isActive:
+          snapshot.workspaceId === tabs.context.workspaceId &&
+          snapshot.tabs.some(
+            (tab) =>
+              tab.id === snapshot.activeId &&
+              tab.canvasId === tabs.context.canvasId,
+          ),
+      });
+    };
+    const unsubscribe = tabs.onState((snapshot) => {
+      received = true;
+      update(snapshot);
+    });
+    void tabs
+      .getState()
+      .then((snapshot) => {
+        if (live && !received) update(snapshot);
+      })
+      .catch((error: unknown) => {
+        if (!live) return;
+        console.error('[desktop-tabs] Could not read Tab activation:', error);
+        toast(error instanceof Error ? error.message : String(error), {
+          tone: 'danger',
+        });
+      });
+    return () => {
+      live = false;
+      unsubscribe();
+      useDesktopTabStore.setState({ isActive: false });
+    };
+  }, [tabs]);
 
   useEffect(() => {
     if (!tabs || tabs.context.role === 'shell') return;
@@ -64,7 +105,11 @@ export function useDesktopContent(): {
           tabs.finishPrepareClose(requestId, { ok: true });
         } catch (error) {
           const message =
-            error instanceof Error ? error.message : String(error);
+            error instanceof Error
+              ? error.cause instanceof Error
+                ? error.cause.message
+                : error.message
+              : String(error);
           console.error('[desktop-tabs] Could not save Space:', error);
           toast(message, { tone: 'danger' });
           tabs.finishPrepareClose(requestId, { ok: false, error: message });

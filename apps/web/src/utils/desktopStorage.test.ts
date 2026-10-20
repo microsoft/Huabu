@@ -230,6 +230,44 @@ describe('desktop Space storage isolation', () => {
     expect(storage.getItem('huabu-chat')).toBe('legacy');
   });
 
+  it('clears deleted preferences from a reopened Space partition without deleting Space metadata', async () => {
+    setContext({ role: 'space', workspaceId: 'w', canvasId: 'a' });
+    localStorage.setItem('huabu.language', 'zh-CN');
+    localStorage.setItem('huabu:world-enabled', 'true');
+    localStorage.setItem('huabu-sketch-tools', 'stale tools');
+    localStorage.setItem('huabu-chat', 'Space metadata');
+    const tabs = window.electronBridge?.tabs;
+    if (!tabs) throw new Error('Missing test bridge');
+    vi.mocked(tabs.storageSnapshot).mockReturnValue({
+      ok: true,
+      values: { 'huabu.language': 'en' },
+    });
+    vi.resetModules();
+    await import('./desktopStorage');
+    expect(localStorage.getItem('huabu.language')).toBe('en');
+    expect(localStorage.getItem('huabu:world-enabled')).toBeNull();
+    expect(localStorage.getItem('huabu-sketch-tools')).toBeNull();
+    expect(localStorage.getItem('huabu-chat')).toBe('Space metadata');
+    expect(tabs.setPreference).not.toHaveBeenCalled();
+  });
+
+  it('keeps Home legacy preference migration before applying the authoritative snapshot', async () => {
+    setContext({ role: 'home', workspaceId: null, canvasId: null });
+    localStorage.setItem('huabu.language', 'zh-CN');
+    const tabs = window.electronBridge?.tabs;
+    if (!tabs) throw new Error('Missing test bridge');
+    vi.mocked(tabs.storageSnapshot).mockReturnValue({
+      ok: true,
+      values: { 'huabu.language': 'zh-CN' },
+    });
+    vi.resetModules();
+    await import('./desktopStorage');
+    expect(tabs.storageSnapshot).toHaveBeenCalledWith({
+      'huabu.language': 'zh-CN',
+    });
+    expect(localStorage.getItem('huabu.language')).toBe('zh-CN');
+  });
+
   it('deletes only the addressed Space record', () => {
     const storage = desktopSpaceStorage();
     localStorage.setItem('huabu-panel', 'legacy');
