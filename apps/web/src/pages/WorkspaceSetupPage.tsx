@@ -9,6 +9,7 @@ import { Navigate, useNavigate } from 'react-router-dom';
 import { WorkspaceLoadingScreen } from './WorkspaceLoadingScreen';
 import { Button } from '../components/Common/Button';
 import { PathInput } from '../components/Common/PathInput';
+import { toast } from '../components/Common/Toast';
 import { APP_NAME } from '../config/app';
 import { useWorkspaceStore } from '../store/workspaceStore';
 
@@ -109,6 +110,13 @@ function FreeSetup({
 
   const isLoading = isSyncing;
 
+  const reportError = (error: unknown) => {
+    console.error('[workspace-setup] Could not open Workspace:', error);
+    toast(useWorkspaceStore.getState().error ?? t('workspace.switchFailed'), {
+      tone: 'danger',
+    });
+  };
+
   /** Activate a path (typed, picked or recent) and navigate on success. */
   const activate = async (path: string) => {
     const p = path.trim();
@@ -117,8 +125,8 @@ function FreeSetup({
     try {
       await selectWorkspace(p);
       onActivated();
-    } catch {
-      // The workspace store localizes and exposes activation failures.
+    } catch (error) {
+      reportError(error);
     }
   };
 
@@ -131,8 +139,8 @@ function FreeSetup({
     try {
       await activateRecentWorkspace(workspaceId);
       onActivated();
-    } catch {
-      // The workspace store localizes and exposes activation failures.
+    } catch (error) {
+      reportError(error);
     }
   };
 

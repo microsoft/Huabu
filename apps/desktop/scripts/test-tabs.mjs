@@ -678,6 +678,11 @@ try {
   });
   await b.evaluate(() => {
     globalThis.tabsSmokePreferenceEvents = [];
+    globalThis.tabsSmokePreferenceNotifications = 0;
+    globalThis.tabsSmokeUnsubscribePreferences =
+      window.electronBridge.tabs.onPreference(() => {
+        globalThis.tabsSmokePreferenceNotifications++;
+      });
     globalThis.tabsSmokeStorageListener = (event) => {
       if (event.key === 'huabu.language' || event.key === 'huabu:world-enabled')
         globalThis.tabsSmokePreferenceEvents.push({
@@ -699,7 +704,7 @@ try {
       writeApplicationPreference('huabu.language', 'en');
     });
     await waitFor(
-      () => b.evaluate(() => globalThis.tabsSmokePreferenceEvents.length >= 4),
+      () => b.evaluate(() => globalThis.tabsSmokePreferenceNotifications >= 4),
       'applying queued preference notifications',
     );
     assert.deepEqual(
@@ -724,6 +729,43 @@ try {
       }),
       { world: false, language: 'en' },
     );
+    await b.evaluate(async () => {
+      const { writeApplicationPreference } =
+        await import('/src/utils/desktopStorage.ts');
+      writeApplicationPreference('huabu.language', 'en');
+    });
+    await electron.evaluate(({ webContents }, canvasId) => {
+      const target = webContents
+        .getAllWebContents()
+        .find((contents) => contents.getURL().includes(`/canvas/${canvasId}`));
+      if (!target) throw new Error('Missing preference recipient');
+      target.send('tabs:preference', {
+        key: 'huabu.language',
+        value: 'zh-CN',
+      });
+    }, spaces[1].canvasId);
+    await waitFor(
+      () => b.evaluate(() => globalThis.tabsSmokePreferenceNotifications >= 5),
+      'processing a stale notification after a successful local write',
+    );
+    assert.deepEqual(
+      await b.evaluate(async () => {
+        const { i18n } = await import('/src/i18n/index.ts');
+        return {
+          stored: localStorage.getItem('huabu.language'),
+          language: i18n.language,
+        };
+      }),
+      { stored: 'en', language: 'en' },
+      'A stale notification must reread main instead of reverting the local preference',
+    );
+    assert.equal(
+      await electron.evaluate(
+        () => globalThis.tabsSmokePreferenceWrites.length,
+      ),
+      5,
+      'Refreshing a stale notification must not echo another write',
+    );
   } finally {
     await electron.evaluate(({ ipcMain }) => {
       ipcMain.removeListener(
@@ -734,12 +776,15 @@ try {
       delete globalThis.tabsSmokePreferenceWrites;
     });
     await b.evaluate(() => {
+      globalThis.tabsSmokeUnsubscribePreferences();
       window.removeEventListener(
         'storage',
         globalThis.tabsSmokeStorageListener,
       );
       delete globalThis.tabsSmokeStorageListener;
       delete globalThis.tabsSmokePreferenceEvents;
+      delete globalThis.tabsSmokePreferenceNotifications;
+      delete globalThis.tabsSmokeUnsubscribePreferences;
     });
   }
   let state = await shell.evaluate(() => window.electronBridge.tabs.getState());

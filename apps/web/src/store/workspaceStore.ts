@@ -174,7 +174,14 @@ async function changeWorkspace(
 ): Promise<void> {
   const { getState: get, setState: set } = useWorkspaceStore;
   const tabs = getElectronBridge()?.tabs;
-  if (tabs) requireDesktopTabSuccess(await tabs.beginWorkspaceChange());
+  if (tabs) {
+    try {
+      requireDesktopTabSuccess(await tabs.beginWorkspaceChange());
+    } catch (error) {
+      set({ error: workspaceActivationError(error, label) });
+      throw error;
+    }
+  }
   set({
     ...resetSpaceTitles(),
     workspaceId: null,

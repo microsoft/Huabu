@@ -116,6 +116,10 @@ describe('desktop Space storage isolation', () => {
     if (!listener) throw new Error('Missing preference listener');
     const storageEvent = vi.fn();
     window.addEventListener('storage', storageEvent, { once: true });
+    vi.mocked(tabs.storageSnapshot).mockReturnValue({
+      ok: true,
+      values: { 'huabu.language': 'en' },
+    });
     listener({ key: 'huabu.language', value: 'en' });
     expect(localStorage.getItem('huabu.language')).toBe('en');
     expect(storageEvent).toHaveBeenCalledWith(
@@ -125,6 +129,89 @@ describe('desktop Space storage isolation', () => {
         newValue: 'en',
       }),
     );
+  });
+
+  it.each(['huabu.language', 'huabu-sketch-tools'] as const)(
+    'does not overwrite a newer local write with a queued old notification (%s)',
+    async (key) => {
+      setContext({ role: 'space', workspaceId: 'w', canvasId: 'b' });
+      const tabs = window.electronBridge?.tabs;
+      if (!tabs) throw new Error('Missing test bridge');
+      vi.resetModules();
+      const storage = await import('./desktopStorage');
+      storage.writeApplicationPreference(key, 'new');
+      vi.mocked(tabs.storageSnapshot).mockReturnValue({
+        ok: true,
+        values: { [key]: 'new' },
+      });
+      const listener = vi.mocked(tabs.onPreference).mock.calls.at(-1)?.[0];
+      if (!listener) throw new Error('Missing preference listener');
+      const storageEvent = vi.fn();
+      window.addEventListener('storage', storageEvent);
+      try {
+        listener({ key, value: 'old' });
+        expect(localStorage.getItem(key)).toBe('new');
+        expect(storageEvent).not.toHaveBeenCalled();
+        expect(tabs.setPreference).toHaveBeenCalledExactlyOnceWith(key, 'new');
+        expect(tabs.storageSnapshot).toHaveBeenLastCalledWith();
+      } finally {
+        window.removeEventListener('storage', storageEvent);
+      }
+    },
+  );
+
+  it('reads current deletions instead of restoring a queued old value', async () => {
+    setContext({ role: 'space', workspaceId: 'w', canvasId: 'b' });
+    const tabs = window.electronBridge?.tabs;
+    if (!tabs) throw new Error('Missing test bridge');
+    vi.mocked(tabs.storageSnapshot).mockReturnValueOnce({
+      ok: true,
+      values: { 'huabu.language': 'zh-CN' },
+    });
+    vi.resetModules();
+    await import('./desktopStorage');
+    const listener = vi.mocked(tabs.onPreference).mock.calls.at(-1)?.[0];
+    if (!listener) throw new Error('Missing preference listener');
+    const storageEvent = vi.fn();
+    window.addEventListener('storage', storageEvent, { once: true });
+    listener({ key: 'huabu.language', value: 'zh-CN' });
+    expect(localStorage.getItem('huabu.language')).toBeNull();
+    expect(storageEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        key: 'huabu.language',
+        oldValue: 'zh-CN',
+        newValue: null,
+      }),
+    );
+    expect(tabs.setPreference).not.toHaveBeenCalled();
+  });
+
+  it('reports refresh failures without applying the notification value', async () => {
+    setContext({ role: 'space', workspaceId: 'w', canvasId: 'b' });
+    const tabs = window.electronBridge?.tabs;
+    if (!tabs) throw new Error('Missing test bridge');
+    vi.resetModules();
+    await import('./desktopStorage');
+    localStorage.setItem('huabu.language', 'en');
+    vi.mocked(tabs.storageSnapshot).mockReturnValue({
+      ok: false,
+      error: 'Snapshot unavailable',
+    });
+    const listener = vi.mocked(tabs.onPreference).mock.calls.at(-1)?.[0];
+    if (!listener) throw new Error('Missing preference listener');
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      expect(() => listener({ key: 'huabu.language', value: 'zh-CN' })).toThrow(
+        'Snapshot unavailable',
+      );
+      expect(localStorage.getItem('huabu.language')).toBe('en');
+      expect(log).toHaveBeenCalledWith(
+        '[desktop-tabs] Could not refresh preference:',
+        'Snapshot unavailable',
+      );
+    } finally {
+      log.mockRestore();
+    }
   });
 
   it('migrates legacy metadata without overwriting shared or sibling records', () => {

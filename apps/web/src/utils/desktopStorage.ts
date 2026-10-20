@@ -51,7 +51,16 @@ function bootstrapDesktopStorage(): void {
     if (preferenceKeys.includes(key) || localStorage.getItem(key) === null)
       localStorage.setItem(key, value);
   }
-  tabs.onPreference(({ key, value }) => {
+  tabs.onPreference(({ key }) => {
+    const current = tabs.storageSnapshot();
+    if (!current.ok) {
+      console.error(
+        '[desktop-tabs] Could not refresh preference:',
+        current.error,
+      );
+      throw new Error(current.error);
+    }
+    const value = current.values[key] ?? null;
     const oldValue = localStorage.getItem(key);
     if (value === oldValue) return;
     if (value === null) localStorage.removeItem(key);

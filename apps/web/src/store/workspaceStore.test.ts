@@ -439,6 +439,30 @@ describe('workspaceStore registry persistence', () => {
         : useWorkspaceStore.getState().activateRecentWorkspace(SECOND_ID);
 
     it.each(['path', 'recent'] as const)(
+      'exposes save-barrier failures without changing the current Workspace (%s)',
+      async (method) => {
+        desktop.tabs.beginWorkspaceChange.mockRejectedValueOnce(
+          new Error('Background Space could not save'),
+        );
+        await expect(activate(method)).rejects.toThrow(
+          'Background Space could not save',
+        );
+        expect(useWorkspaceStore.getState()).toMatchObject({
+          workspaceId: FIRST_ID,
+          workspacePath: '/tmp/first',
+          workspaceName: 'First',
+          isReady: true,
+          isSyncing: false,
+          error: 'Background Space could not save',
+        });
+        expect(apiMocks.activateWorkspace).not.toHaveBeenCalled();
+        expect(apiMocks.putWorkspacePath).not.toHaveBeenCalled();
+        expect(desktop.tabs.endWorkspaceChange).not.toHaveBeenCalled();
+        expect(desktop.tabs.workspaceReady).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(['path', 'recent'] as const)(
       'keeps the confirmed new identity when the registry refresh fails (%s)',
       async (method) => {
         apiMocks.listWorkspaces.mockRejectedValueOnce(
