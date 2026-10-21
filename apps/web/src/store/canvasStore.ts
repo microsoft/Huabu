@@ -95,6 +95,7 @@ import {
   setSnapStructuredSuppressed,
   writeDragDecision,
 } from '@/handler/snap/snapSession';
+import { getElectronBridge } from '@/hooks/useElectron';
 import { getCanvasVisibleArea } from '@/utils/canvasViewport';
 import {
   changedSpaceEntries,
@@ -334,6 +335,7 @@ function writeMinimapEnabledToStorage(value: boolean): void {
     toast(error instanceof Error ? error.message : String(error), {
       tone: 'danger',
     });
+    if (getElectronBridge()?.tabs) throw error;
   }
 }
 

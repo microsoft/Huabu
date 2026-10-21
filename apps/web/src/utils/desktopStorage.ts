@@ -96,11 +96,15 @@ export function subscribeApplicationPreferences(
 export function writeApplicationPreference(
   key: DesktopPreferenceKey,
   value: string | null,
+  expectedValue?: string | null,
 ): void {
   const tabs =
     typeof window === 'undefined' ? undefined : window.electronBridge?.tabs;
   if (tabs) {
-    const result = tabs.setPreference(key, value);
+    const result =
+      expectedValue === undefined
+        ? tabs.setPreference(key, value)
+        : tabs.setPreference(key, value, expectedValue);
     if (!result.ok) {
       console.error('[desktop-tabs] Could not save preference:', result.error);
       throw new Error(result.error);

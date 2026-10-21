@@ -29,7 +29,10 @@ import {
 
 import { getElectronBridge, requireDesktopTabSuccess } from './useElectron';
 
-import type { DesktopTabsSnapshot } from '@huabu/shared/desktop-tabs';
+import type {
+  DesktopTabReport,
+  DesktopTabsSnapshot,
+} from '@huabu/shared/desktop-tabs';
 
 export { requireDesktopTabSuccess } from './useElectron';
 
@@ -169,6 +172,7 @@ export function useDesktopContent(): {
 
   useEffect(() => {
     if (!tabs || tabs.context.role === 'shell') return;
+    let previous: DesktopTabReport | undefined;
     const report = () => {
       const canvas = useCanvasStore.getState();
       if (
@@ -188,7 +192,7 @@ export function useDesktopContent(): {
         return last?.role === 'status' && last.status === 'error';
       });
       const errorMessage = errorThread?.[1].messages.at(-1);
-      tabs.report({
+      const next: DesktopTabReport = {
         title:
           tabs.context.role === 'home'
             ? (useWorkspaceStore.getState().workspaceName ?? 'Home')
@@ -218,7 +222,17 @@ export function useDesktopContent(): {
             : errorMessage?.role === 'status'
               ? (errorMessage.detail ?? 'Agent execution failed')
               : null,
-      });
+      };
+      if (
+        previous &&
+        previous.title === next.title &&
+        previous.running === next.running &&
+        previous.completion === next.completion &&
+        previous.error === next.error
+      )
+        return;
+      previous = next;
+      tabs.report(next);
     };
     let timer: ReturnType<typeof setTimeout> | undefined;
     const schedule = () => {

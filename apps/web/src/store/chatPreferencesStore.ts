@@ -2,9 +2,8 @@
 // Licensed under the MIT license.
 
 import { create } from 'zustand';
-import { createJSONStorage, persist } from 'zustand/middleware';
 
-import { applicationPreferenceStorage } from '@/utils/desktopStorage';
+import { persistApplicationPreferences } from '@/utils/applicationPreferenceStore';
 
 export const DEFAULT_RECENT_CHAT_TURNS = 3;
 export const MIN_RECENT_CHAT_TURNS = 1;
@@ -26,7 +25,7 @@ interface ChatPreferencesState {
 }
 
 export const useChatPreferencesStore = create<ChatPreferencesState>()(
-  persist(
+  persistApplicationPreferences(
     (set) => ({
       recentTurnCount: DEFAULT_RECENT_CHAT_TURNS,
       setRecentTurnCount: (count) =>
@@ -34,7 +33,6 @@ export const useChatPreferencesStore = create<ChatPreferencesState>()(
     }),
     {
       name: 'huabu-chat-preferences',
-      storage: createJSONStorage(applicationPreferenceStorage),
       version: 1,
       merge: (persisted, current) => ({
         ...current,

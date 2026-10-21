@@ -73,8 +73,13 @@ const tabs: DesktopTabsApi | undefined =
         },
         storageSnapshot: (legacy) =>
           ipcRenderer.sendSync('tabs:storage-snapshot', legacy),
-        setPreference: (key, value) =>
-          ipcRenderer.sendSync('tabs:set-preference', key, value),
+        setPreference: (key, value, expectedValue) =>
+          ipcRenderer.sendSync(
+            'tabs:set-preference',
+            key,
+            value,
+            expectedValue,
+          ),
         onPreference: (callback) => subscribe('tabs:preference', callback),
         getState: () =>
           ipcRenderer.invoke('tabs:get-state') as Promise<DesktopTabsSnapshot>,

@@ -10,6 +10,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  rmdirSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -714,6 +715,26 @@ try {
     .getByRole('button', { name: settingsLabels.open, exact: true })
     .click();
   await a.getByRole('dialog').waitFor({ state: 'visible' });
+  if (nativeFocusAvailable) {
+    assert.equal(
+      await electron.evaluate(({ webContents }, canvasId) => {
+        return (
+          webContents
+            .getFocusedWebContents()
+            ?.getURL()
+            .includes(`/canvas/${canvasId}`) ?? false
+        );
+      }, spaces[0].canvasId),
+      true,
+      'Opening Settings must transfer native focus before any content click',
+    );
+    await a.keyboard.press('Escape');
+    await a.getByRole('dialog').waitFor({ state: 'hidden' });
+    await shell
+      .getByRole('button', { name: settingsLabels.open, exact: true })
+      .click();
+    await a.getByRole('dialog').waitFor({ state: 'visible' });
+  }
   await a.getByRole('button', { name: generalLabel, exact: true }).click();
   await a.getByRole('button', { name: languageLabel, exact: true }).click();
   await a.getByRole('option', { name: 'English', exact: true }).click();
@@ -831,6 +852,79 @@ try {
         [],
         'Desktop preference synchronization must not create localStorage replicas',
       );
+    }
+    assert.deepEqual(
+      await b.evaluate(() => {
+        const tabs = window.electronBridge.tabs;
+        const snapshot = tabs.storageSnapshot();
+        if (!snapshot.ok) throw new Error(snapshot.error);
+        const before = snapshot.values['huabu-sketch-tools'];
+        const result = tabs.setPreference(
+          'huabu-sketch-tools',
+          JSON.stringify({ state: { inputModePreference: 'pen' }, version: 3 }),
+          'stale snapshot',
+        );
+        const after = tabs.storageSnapshot();
+        if (!after.ok) throw new Error(after.error);
+        return {
+          rejected: !result.ok,
+          unchanged: after.values['huabu-sketch-tools'] === before,
+        };
+      }),
+      { rejected: true, unchanged: true },
+      'The native IPC boundary must reject conflicting preference replacements',
+    );
+    const blockedPreferencePath = join(userData, 'desktop-tabs.json.tmp');
+    mkdirSync(blockedPreferencePath);
+    try {
+      assert.deepEqual(
+        await b.evaluate(async () => {
+          const { useChatPreferencesStore } =
+            await import('/src/store/chatPreferencesStore.ts');
+          const { useToolStore } = await import('/src/store/toolStore.ts');
+          const { default: canvas } = await import('/src/store/canvasStore.ts');
+          const actions = [
+            () => useChatPreferencesStore.getState().setRecentTurnCount(9),
+            () =>
+              useToolStore
+                .getState()
+                .setInputModePreference(
+                  useToolStore.getState().inputModePreference === 'mouse'
+                    ? 'finger'
+                    : 'mouse',
+                ),
+            () => canvas.getState().toggleMinimap(),
+          ];
+          const before = [
+            useChatPreferencesStore.getState().recentTurnCount,
+            useToolStore.getState().inputModePreference,
+            canvas.getState().minimapEnabled,
+          ];
+          const rejected = actions.map((action) => {
+            try {
+              action();
+              return false;
+            } catch (error) {
+              if (!(error instanceof Error)) throw error;
+              return true;
+            }
+          });
+          return {
+            rejected,
+            unchanged:
+              JSON.stringify(before) ===
+              JSON.stringify([
+                useChatPreferencesStore.getState().recentTurnCount,
+                useToolStore.getState().inputModePreference,
+                canvas.getState().minimapEnabled,
+              ]),
+          };
+        }),
+        { rejected: [true, true, true], unchanged: true },
+        'Real main-process persistence failures must not change renderer preferences',
+      );
+    } finally {
+      rmdirSync(blockedPreferencePath);
     }
     assert.equal(
       await electron.evaluate(

@@ -5,6 +5,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import useCanvasStore from '@/store/canvasStore';
 import { useDesktopTabStore } from '@/store/desktopTabStore';
 import {
   installDesktopInputGuard,
@@ -12,6 +13,7 @@ import {
 } from '@/utils/desktopInput';
 
 import { useDesktopContent } from './useDesktopContent';
+import { getElectronBridge } from './useElectron';
 
 import type { DesktopTabsSnapshot } from '@huabu/shared/desktop-tabs';
 
@@ -159,6 +161,38 @@ describe('desktop save presentation', () => {
       String(frozen),
     );
   }
+
+  it('deduplicates irrelevant Store updates while reporting a real title change', async () => {
+    let changed: (() => void) | undefined;
+    const subscription = vi
+      .spyOn(useCanvasStore, 'subscribe')
+      .mockImplementation((listener) => {
+        changed = () =>
+          listener(useCanvasStore.getState(), useCanvasStore.getState());
+        return () => {};
+      });
+    const title = mocks.canvas.canvasTitle;
+    try {
+      await render();
+      const report = getElectronBridge()?.tabs?.report;
+      expect(report).toHaveBeenCalledOnce();
+      for (let i = 0; i < 5; i++) {
+        changed?.();
+        await act(async () => vi.advanceTimersByTime(100));
+      }
+      expect(report).toHaveBeenCalledOnce();
+      mocks.canvas.canvasTitle = 'Renamed';
+      changed?.();
+      await act(async () => vi.advanceTimersByTime(100));
+      expect(report).toHaveBeenCalledTimes(2);
+      expect(report).toHaveBeenLastCalledWith(
+        expect.objectContaining({ title: 'Renamed' }),
+      );
+    } finally {
+      mocks.canvas.canvasTitle = title;
+      subscription.mockRestore();
+    }
+  });
 
   it('does not show a saving message when a Space is loading', async () => {
     mocks.canvas.isLoading = true;

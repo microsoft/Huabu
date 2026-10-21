@@ -69,7 +69,11 @@ Only Home supplies legacy global preferences. Main atomically persists previousl
 
 The entry point loads the content application lazily, so Shell does not initialize content Stores or attempt persisted-version migrations through the content-only writer. Incoming tool or chat preference deletion resets only persisted fields to defaults without resetting transient tool selection or writing those defaults back to main.
 
+Tool and chat preferences reuse Zustand persistence for hydration, version migration, and browser storage. Desktop mutations use a shared write-before-notify boundary: read and migrate the current main-process value, apply the requested update to that authoritative state, persist changed preference fields, and only then notify local Store subscribers. Writes include the previously read serialized value; main atomically rejects a conflicting replacement with explicit retry feedback instead of overwriting a concurrent edit. No revision counter or additional persistent metadata is needed. Transient tool selection is applied locally without persisting a preference record. A pending invalidation therefore cannot let an unrelated tool action overwrite newer settings, and failed writes preserve the previous renderer state and show an error toast. MiniMap write failures likewise preserve desktop visibility; browsers retain their existing in-memory fallback when localStorage is unavailable.
+
 Content reports still carry internal activity/error metadata and keep Space titles synchronized, but the Shell does not present those summaries as Tab status. Existing Question nodes and Chat views own task progress, completion and error presentation. Lifecycle errors remain available to the main process for safe close/reload handling; they are not conflated with task errors in the Tab strip.
+
+Content renderers compare computed report fields before sending, so dragging, panning, or streamed message updates that do not change title, running state, completion identity, or error do not produce duplicate reports. Main also skips unchanged reports before broadcasting snapshots. Opening Settings from Shell explicitly focuses the active content WebContents before dispatching the modal command, handing native keyboard input to the content view.
 
 ## 5. Verification
 

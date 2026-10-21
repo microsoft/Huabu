@@ -2,10 +2,9 @@
 // Licensed under the MIT license.
 
 import { create } from 'zustand';
-import { createJSONStorage, persist } from 'zustand/middleware';
 
 import { SKETCH_ERASER_RADIUS_SCREEN_PX } from '@/config/canvas';
-import { applicationPreferenceStorage } from '@/utils/desktopStorage';
+import { persistApplicationPreferences } from '@/utils/applicationPreferenceStore';
 
 import type { CanvasNodeType } from '@huabu/shared';
 
@@ -139,7 +138,7 @@ const DEFAULT_TOOL_PREFERENCES = {
  * on persisted nodes/edges.
  */
 export const useToolStore = create<ToolState>()(
-  persist(
+  persistApplicationPreferences(
     (set) => ({
       pendingNodeType: null,
       ...DEFAULT_TOOL_PREFERENCES,
@@ -211,7 +210,6 @@ export const useToolStore = create<ToolState>()(
     }),
     {
       name: 'huabu-sketch-tools',
-      storage: createJSONStorage(applicationPreferenceStorage),
       version: 3,
       merge: (persisted, current) => ({
         ...current,

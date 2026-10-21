@@ -352,6 +352,76 @@ describe('desktop Space Tab lifecycle', () => {
     expect(a.webContents.focus).toHaveBeenCalledOnce();
   });
 
+  it('focuses active content before opening Settings from Shell', () => {
+    const a = open('a');
+    a.webContents.focus.mockClear();
+    a.webContents.send.mockClear();
+    tabs.command('open-settings', shell.webContents as never);
+    expect(a.webContents.focus).toHaveBeenCalledOnce();
+    expect(a.webContents.send).toHaveBeenCalledWith(
+      'menu:command',
+      'open-settings',
+    );
+    expect(a.webContents.focus.mock.invocationCallOrder[0]).toBeLessThan(
+      a.webContents.send.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('skips unchanged reports but broadcasts changed fields', () => {
+    const a = open('a');
+    tabs.report(a.webContents as never, report());
+    shell.webContents.send.mockClear();
+    tabs.report(a.webContents as never, report());
+    expect(shell.webContents.send).not.toHaveBeenCalled();
+    tabs.report(a.webContents as never, report({ title: 'Renamed' }));
+    tabs.report(
+      a.webContents as never,
+      report({ title: 'Renamed', running: true }),
+    );
+    tabs.report(
+      a.webContents as never,
+      report({ title: 'Renamed', completion: 'turn1' }),
+    );
+    tabs.report(
+      a.webContents as never,
+      report({ title: 'Renamed', completion: 'turn1', error: 'Failed' }),
+    );
+    expect(shell.webContents.send).toHaveBeenCalledTimes(4);
+  });
+
+  it('rejects a competing preference replacement without overwriting the newer value', () => {
+    const a = open('a');
+    const b = open('b');
+    tabs.setPreference(a.webContents as never, 'huabu-sketch-tools', 'initial');
+    tabs.setPreference(
+      b.webContents as never,
+      'huabu-sketch-tools',
+      'newer',
+      'initial',
+    );
+    expect(() =>
+      tabs.setPreference(
+        a.webContents as never,
+        'huabu-sketch-tools',
+        'stale replacement',
+        'initial',
+      ),
+    ).toThrow('changed in another Tab');
+    expect(
+      tabs.storageSnapshot(a.webContents as never, undefined)[
+        'huabu-sketch-tools'
+      ],
+    ).toBe('newer');
+    expect(() =>
+      tabs.setPreference(
+        a.webContents as never,
+        'huabu-sketch-tools',
+        'newer',
+        'initial',
+      ),
+    ).not.toThrow();
+  });
+
   it('allows shutdown to discard failed Home only after explicit confirmation and healthy saves', async () => {
     const a = open('a');
     crash(mocks.views[0]);

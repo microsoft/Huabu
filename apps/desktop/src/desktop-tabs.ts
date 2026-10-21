@@ -476,6 +476,13 @@ export class DesktopTabs {
       (report.error !== null && typeof report.error !== 'string')
     )
       throw new Error('Invalid Tab status');
+    if (
+      tab.completion === report.completion &&
+      tab.state.title === report.title &&
+      tab.state.running === report.running &&
+      (!tab.ready || tab.state.error === report.error)
+    )
+      return;
     const previous = new Set(tab.completion?.split('\0'));
     if (
       tab.completion !== null &&
@@ -771,16 +778,30 @@ export class DesktopTabs {
     };
   }
 
-  setPreference(contents: WebContents, key: unknown, value: unknown): void {
+  setPreference(
+    contents: WebContents,
+    key: unknown,
+    value: unknown,
+    expectedValue?: unknown,
+  ): void {
     if (this.isShell(contents))
       throw new Error('Only content pages can update preferences');
     if (
       typeof key !== 'string' ||
       !PREFERENCE_KEYS.includes(key) ||
-      (value !== null && (typeof value !== 'string' || value.length > 65_536))
+      (value !== null &&
+        (typeof value !== 'string' || value.length > 65_536)) ||
+      (expectedValue !== undefined &&
+        expectedValue !== null &&
+        (typeof expectedValue !== 'string' || expectedValue.length > 65_536))
     )
       throw new Error('Invalid application preference');
     if ((this.preferences[key] ?? null) === value) return;
+    if (
+      expectedValue !== undefined &&
+      (this.preferences[key] ?? null) !== expectedValue
+    )
+      throw new Error('Preferences changed in another Tab. Please try again.');
     const preferences = { ...this.preferences };
     if (value === null) delete preferences[key];
     else preferences[key] = value;
@@ -875,6 +896,7 @@ export class DesktopTabs {
     const contents = this.activeContents;
     if (!contents) throw new Error('No active content page is available');
     this.setHomeMenu(null);
+    contents.focus();
     contents.send('menu:command', raw);
   }
 
@@ -941,7 +963,7 @@ export function registerDesktopTabsIpc(
         event.returnValue =
           name === 'storage-snapshot'
             ? { ok: true, values: tabs.storageSnapshot(event.sender, args[0]) }
-            : (tabs.setPreference(event.sender, args[0], args[1]),
+            : (tabs.setPreference(event.sender, args[0], args[1], args[2]),
               { ok: true });
       } catch (error) {
         console.error(`[desktop-tabs] ${name}:`, error);

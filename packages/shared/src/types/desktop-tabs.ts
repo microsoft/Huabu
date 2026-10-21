@@ -78,6 +78,7 @@ export interface DesktopTabsApi {
   setPreference: (
     key: DesktopPreferenceKey,
     value: string | null,
+    expectedValue?: string | null,
   ) => DesktopTabResult;
   onPreference: (
     callback: (change: DesktopPreferenceChange) => void,
