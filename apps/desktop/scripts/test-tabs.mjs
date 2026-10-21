@@ -1169,6 +1169,16 @@ try {
   );
   const aId = state.tabs.find((tab) => tab.canvasId === spaces[0].canvasId).id;
   const bId = state.tabs.find((tab) => tab.canvasId === spaces[1].canvasId).id;
+  await shell.getByRole('tab', { name: 'Tabs smoke B', exact: true }).click();
+  const dismissLabel = await b.evaluate(async () => {
+    const { i18n } = await import('/src/i18n/index.ts');
+    return i18n.t('actions.dismiss');
+  });
+  const oldFeedback = b.getByRole('status').getByRole('button', {
+    name: dismissLabel,
+    exact: true,
+  });
+  while (await oldFeedback.count()) await oldFeedback.first().click();
   const titleRoute = '**/agent/threads/tabs-smoke-title/title**';
   let releaseTitle;
   let titleStarted = false;
@@ -1203,6 +1213,14 @@ try {
       const { renameConversationTitle } =
         await import('/src/store/conversationTitleStore.ts');
       const { default: canvas } = await import('/src/store/canvasStore.ts');
+      const { usePreviewWorkspaceStore } =
+        await import('/src/store/previewWorkspace/store.ts');
+      const preview = usePreviewWorkspaceStore.getState();
+      const tabId = preview.openPreviewTarget({
+        kind: 'chat',
+        canvasId: canvas.getState().canvasId,
+        threadId: 'tabs-smoke-title',
+      });
       globalThis.tabsSmokeTitleRename = renameConversationTitle(
         canvas.getState().canvasId,
         'tabs-smoke-title',
@@ -1212,6 +1230,9 @@ try {
         () => null,
         (error) => error.message,
       );
+      preview.closeTab(tabId);
+      if (usePreviewWorkspaceStore.getState().workspace.tabs[tabId])
+        throw new Error('Inner Chat should remain closable during title write');
     });
     await waitFor(() => titleStarted, 'holding a conversation title write');
     let titleCloseSettled = false;
@@ -1247,17 +1268,100 @@ try {
       false,
       'Reload must also reject the unresolved title failure',
     );
+    await shell.getByRole('tab', { name: 'Tabs smoke B', exact: true }).click();
+    const retryTitleLabel = await b.evaluate(async () => {
+      const { i18n } = await import('/src/i18n/index.ts');
+      return i18n.t('chat.retryTitleSave');
+    });
+    const titleFeedback = b.getByRole('status').filter({
+      hasText: 'Delayed title write failed',
+    });
+    if (process.env.HUABU_TABS_SCREENSHOT) {
+      await titleFeedback
+        .last()
+        .getByRole('button', {
+          name: retryTitleLabel,
+          exact: true,
+        })
+        .waitFor({ state: 'visible' });
+      await waitFor(
+        () =>
+          titleFeedback
+            .last()
+            .evaluate((element) => getComputedStyle(element).opacity === '1'),
+        'title recovery feedback animation',
+      );
+      await b.screenshot({
+        path: process.env.HUABU_TABS_SCREENSHOT.replace(
+          /\.png$/,
+          '-title-retry.png',
+        ),
+      });
+    }
+    await titleFeedback
+      .last()
+      .getByRole('button', { name: retryTitleLabel, exact: true })
+      .click();
+    await waitFor(
+      async () =>
+        b.evaluate(async () => {
+          const { useConversationTitleStore, conversationTitleKey } =
+            await import('/src/store/conversationTitleStore.ts');
+          const { default: canvas } = await import('/src/store/canvasStore.ts');
+          const entry =
+            useConversationTitleStore.getState().entries[
+              conversationTitleKey(
+                canvas.getState().canvasId,
+                'tabs-smoke-title',
+              )
+            ];
+          return !entry.renaming && !!entry.failedTitle;
+        }),
+      'failed title retry retaining recovery',
+    );
+    await titleFeedback
+      .last()
+      .getByRole('button', { name: retryTitleLabel, exact: true })
+      .waitFor();
     titleRetry = true;
+    await titleFeedback
+      .last()
+      .getByRole('button', { name: retryTitleLabel, exact: true })
+      .click();
+    await waitFor(
+      async () =>
+        b.evaluate(async () => {
+          const { useConversationTitleStore, conversationTitleKey } =
+            await import('/src/store/conversationTitleStore.ts');
+          const { default: canvas } = await import('/src/store/canvasStore.ts');
+          return !useConversationTitleStore.getState().entries[
+            conversationTitleKey(canvas.getState().canvasId, 'tabs-smoke-title')
+          ]?.error;
+        }),
+      'successful title retry from desktop save-error UI',
+    );
     assert.deepEqual(
       await b.evaluate(async () => {
         const {
-          retryConversationTitle,
           conversationTitleKey,
           useConversationTitleStore,
+          drainConversationTitleWrites,
         } = await import('/src/store/conversationTitleStore.ts');
         const { default: canvas } = await import('/src/store/canvasStore.ts');
         const canvasId = canvas.getState().canvasId;
-        await retryConversationTitle(canvasId, 'tabs-smoke-title');
+        await drainConversationTitleWrites();
+        const { usePreviewWorkspaceStore } =
+          await import('/src/store/previewWorkspace/store.ts');
+        if (
+          Object.values(
+            usePreviewWorkspaceStore.getState().workspace.tabs,
+          ).some(
+            (tab) =>
+              tab.target.kind === 'chat' &&
+              tab.target.threadId === 'tabs-smoke-title',
+          )
+        )
+          throw new Error('Title recovery must not reopen the closed Chat');
         const entry =
           useConversationTitleStore.getState().entries[
             conversationTitleKey(canvasId, 'tabs-smoke-title')
@@ -1269,8 +1373,9 @@ try {
       { title: 'Delayed title', error: null },
     );
     console.log(
-      'Title writes held close until settlement, rejected failure and recovered on retry',
+      'Closed Chat title failure retained desktop retry access and recovered after another failed retry',
     );
+    await shell.getByRole('tab', { name: 'Tabs smoke A', exact: true }).click();
   } finally {
     releaseTitle();
     await titleClose;

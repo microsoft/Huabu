@@ -8,9 +8,12 @@ import {
   queryConversationTitles,
   setConversationTitle,
 } from '@/api/conversationTitles';
+import { createEmptyWorkspace } from '@/store/previewWorkspace/model';
+import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 
 import {
   clearPendingConversationTitle,
+  ConversationTitleSaveError,
   conversationTitleKey,
   drainConversationTitleWrites,
   flushPendingConversationTitle,
@@ -91,6 +94,74 @@ beforeEach(() => {
 });
 
 describe('conversation titles', () => {
+  it.each(['pending', 'failed'])(
+    'retains retry access after an unbound Chat closes while its title write is %s',
+    async (phase) => {
+      usePreviewWorkspaceStore.setState({
+        canvasId: 'canvas',
+        workspace: createEmptyWorkspace(),
+      });
+      const preview = () => usePreviewWorkspaceStore.getState();
+      const tabId = preview().openPreviewTarget({
+        kind: 'chat',
+        canvasId: 'canvas',
+        threadId: 'thread',
+      });
+      const request = deferred<ConversationTitle>();
+      save.mockReturnValueOnce(request.promise);
+      const rename = renameConversationTitle(
+        'canvas',
+        'thread',
+        'Unsaved title',
+        false,
+      ).catch((error: unknown) => error);
+      if (phase === 'pending') preview().closeTab(tabId);
+      request.reject(new Error('Offline'));
+      await rename;
+      if (phase === 'failed') preview().closeTab(tabId);
+      expect(preview().workspace.tabs).toEqual({});
+      await refreshConversationTitles('canvas', ['thread']);
+      const error: unknown = await drainConversationTitleWrites().catch(
+        (failure: unknown) => failure,
+      );
+      expect(error).toBeInstanceOf(ConversationTitleSaveError);
+      if (!(error instanceof ConversationTitleSaveError))
+        throw new Error('Missing title recovery');
+      save.mockRejectedValueOnce(new Error('Still offline'));
+      await expect(error.retry()).rejects.toThrow('Still offline');
+      expect(
+        useConversationTitleStore.getState().entries[key].failedTitle,
+      ).toBe('Unsaved title');
+      await error.retry();
+      await expect(drainConversationTitleWrites()).resolves.toBeUndefined();
+      expect(current().title).toBe('Unsaved title');
+      expect(preview().workspace.tabs).toEqual({});
+    },
+  );
+
+  it('retries all current failures, including pending flushes, without replacing newer intent', async () => {
+    save.mockRejectedValueOnce(new Error('First offline'));
+    await renameConversationTitle('canvas', 'first', 'Old intent', false).catch(
+      () => {},
+    );
+    await renameConversationTitle('canvas', 'pending', 'Pending intent', true);
+    save.mockRejectedValueOnce(new Error('Flush offline'));
+    await flushPendingConversationTitle('canvas', 'pending');
+    const error: unknown = await drainConversationTitleWrites().catch(
+      (failure: unknown) => failure,
+    );
+    if (!(error instanceof ConversationTitleSaveError))
+      throw new Error('Missing title recovery');
+    await renameConversationTitle('canvas', 'first', 'Newer intent', false);
+    save.mockClear();
+    await error.retry();
+    expect(getConversationTitle('canvas', 'first').title).toBe('Newer intent');
+    expect(save).toHaveBeenCalledExactlyOnceWith('canvas', 'pending', {
+      title: 'Pending intent',
+    });
+    await expect(drainConversationTitleWrites()).resolves.toBeUndefined();
+  });
+
   it('drains durable title writes, including writes started while draining', async () => {
     const first = deferred<ConversationTitle>();
     const second = deferred<ConversationTitle>();

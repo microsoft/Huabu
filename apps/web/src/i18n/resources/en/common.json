@@ -1048,6 +1048,7 @@
     "currentAgentThread": "Current agent for this conversation",
     "newConversation": "New conversation",
     "titleSaveFailed": "Could not sync conversation title",
+    "retryTitleSave": "Retry title save",
     "renameTitle": "Rename conversation",
     "newChatWith": "New chat with {{name}}",
     "saveAsQuestion": "Save chat as Agent Node",

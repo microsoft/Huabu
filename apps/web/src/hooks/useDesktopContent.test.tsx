@@ -20,6 +20,7 @@ import {
 import { useDesktopContent } from './useDesktopContent';
 import { getElectronBridge } from './useElectron';
 
+import type { toast } from '@/components/Common/Toast';
 import type { DesktopTabsSnapshot } from '@huabu/shared/desktop-tabs';
 
 const mocks = vi.hoisted(() => ({
@@ -39,7 +40,7 @@ const mocks = vi.hoisted(() => ({
   resume: vi.fn<(listener: () => void) => () => void>(),
   finish: vi.fn(),
   navigate: vi.fn(),
-  toast: vi.fn(),
+  toast: vi.fn<typeof toast>(),
   setWorldEnabled: vi.fn(),
   setWorkspaceState: vi.fn(),
   setCanvasState: vi.fn(),
@@ -505,6 +506,10 @@ describe('desktop save presentation', () => {
           expect(mocks.flush).not.toHaveBeenCalled();
           expect(mocks.toast).toHaveBeenCalledWith('Title write offline', {
             tone: 'danger',
+            action: {
+              label: 'Retry title save',
+              onClick: expect.any(Function),
+            },
           });
         }
       } finally {
@@ -515,4 +520,49 @@ describe('desktop save presentation', () => {
       }
     },
   );
+
+  it('offers repeatable title recovery from save feedback without acknowledging or discarding the page', async () => {
+    vi.mocked(setConversationTitle).mockRejectedValueOnce(new Error('Offline'));
+    await renameConversationTitle(
+      'space-a',
+      'closed-chat',
+      'Retained title',
+      false,
+    ).catch(() => {});
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await render();
+      await prepare();
+      expect(mocks.finish).toHaveBeenLastCalledWith('save-request', {
+        ok: false,
+        error: 'Offline',
+      });
+      await resume();
+      const firstRetry = mocks.toast.mock.lastCall?.[1]?.action;
+      if (!firstRetry) throw new Error('Missing save-error retry action');
+      vi.mocked(setConversationTitle).mockRejectedValueOnce(
+        new Error('Still offline'),
+      );
+      await act(async () => firstRetry.onClick());
+      expect(mocks.toast).toHaveBeenLastCalledWith('Still offline', {
+        tone: 'danger',
+        action: { label: 'Retry title save', onClick: expect.any(Function) },
+      });
+      const retry = mocks.toast.mock.lastCall?.[1]?.action;
+      if (!retry) throw new Error('Missing repeated retry action');
+      vi.mocked(setConversationTitle).mockResolvedValueOnce({
+        title: 'Retained title',
+        source: 'user',
+      });
+      await act(async () => retry.onClick());
+      expect(mocks.finish).toHaveBeenCalledTimes(1);
+      expect(isDesktopInputFrozen()).toBe(false);
+      await prepare();
+      expect(mocks.finish).toHaveBeenLastCalledWith('save-request', {
+        ok: true,
+      });
+    } finally {
+      log.mockRestore();
+    }
+  });
 });

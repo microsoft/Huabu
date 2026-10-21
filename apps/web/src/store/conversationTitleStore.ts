@@ -118,14 +118,30 @@ function trackTitleWrite(request: Promise<void>): Promise<void> {
   return request;
 }
 
-export async function drainConversationTitleWrites(): Promise<void> {
-  while (writes.size) await Promise.allSettled([...writes]);
+function failedTitleWrites() {
   const { entries, pending } = useConversationTitleStore.getState();
-  // Only failures of the latest intent block closing, not superseded requests.
-  const failed = Object.entries(entries).find(
+  return Object.entries(entries).filter(
     ([key, value]) => value.error && (value.failedTitle || pending[key]),
   );
-  if (failed) throw new Error(failed[1].error);
+}
+
+export class ConversationTitleSaveError extends Error {
+  async retry(): Promise<void> {
+    await Promise.all(
+      failedTitleWrites().map(([key]) => {
+        const [canvasId, threadId]: [string, string] = JSON.parse(key);
+        return retryConversationTitle(canvasId, threadId);
+      }),
+    );
+    await drainConversationTitleWrites();
+  }
+}
+
+export async function drainConversationTitleWrites(): Promise<void> {
+  while (writes.size) await Promise.allSettled([...writes]);
+  // Only failures of the latest intent block closing, not superseded requests.
+  const failed = failedTitleWrites()[0];
+  if (failed) throw new ConversationTitleSaveError(failed[1].error);
 }
 
 /** Refetch backend facts; events arriving during a read queue one fresh read. */

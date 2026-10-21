@@ -10,6 +10,7 @@ import { GeneralSettings } from './GeneralSettings';
 import type { SupportedLanguage } from '@/i18n';
 
 const mocks = vi.hoisted(() => ({
+  desktop: true,
   write: vi.fn(),
   changeLanguage: vi.fn(),
   toast: vi.fn(),
@@ -46,7 +47,9 @@ vi.mock('@/hooks/useAppUpdate', () => ({
   useAppUpdate: () => ({ status: { state: 'idle' }, check: vi.fn() }),
   canCheckForUpdates: () => false,
 }));
-vi.mock('@/hooks/useElectron', () => ({ getElectronBridge: () => null }));
+vi.mock('@/hooks/useElectron', () => ({
+  getElectronBridge: () => (mocks.desktop ? { tabs: {} } : null),
+}));
 vi.mock('@/hooks/useInputMode', () => ({
   useEffectiveInputMode: () => 'mouse',
 }));
@@ -82,6 +85,7 @@ let root: Root;
 let container: HTMLDivElement;
 
 beforeEach(async () => {
+  mocks.desktop = true;
   mocks.write.mockReset();
   mocks.changeLanguage.mockReset().mockResolvedValue(undefined);
   mocks.toast.mockReset();
@@ -124,6 +128,54 @@ it('reports persistence failure without applying an uncommitted language change'
   await selectLanguage();
   expect(mocks.changeLanguage).not.toHaveBeenCalled();
   expect(mocks.toast).toHaveBeenCalledWith('Disk full', { tone: 'danger' });
+  expect(log).toHaveBeenCalledWith(
+    '[settings] Could not change language:',
+    error,
+  );
+});
+
+it('keeps browser language changes on the existing i18next caching path', async () => {
+  mocks.desktop = false;
+  await selectLanguage();
+  expect(mocks.write).not.toHaveBeenCalled();
+  expect(mocks.changeLanguage).toHaveBeenCalledExactlyOnceWith('zh-CN');
+  expect(mocks.toast).not.toHaveBeenCalled();
+});
+
+it('changes browser language in memory when localStorage is unavailable', async () => {
+  mocks.desktop = false;
+  const blocked = vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
+    throw new DOMException('Quota exceeded', 'QuotaExceededError');
+  });
+  const { createInstance } = await import('i18next');
+  const { default: LanguageDetector } =
+    await import('i18next-browser-languagedetector');
+  const browserI18n = createInstance();
+  await browserI18n.use(new LanguageDetector()).init({
+    lng: 'en',
+    resources: { en: { translation: {} }, 'zh-CN': { translation: {} } },
+    detection: {
+      caches: ['localStorage'],
+      lookupLocalStorage: 'huabu.language',
+    },
+  });
+  mocks.changeLanguage.mockImplementation((language: string) =>
+    browserI18n.changeLanguage(language),
+  );
+  await selectLanguage();
+  expect(blocked).toHaveBeenCalled();
+  expect(mocks.write).not.toHaveBeenCalled();
+  expect(browserI18n.language).toBe('zh-CN');
+  expect(mocks.toast).not.toHaveBeenCalled();
+});
+
+it('still reports browser i18next failures', async () => {
+  mocks.desktop = false;
+  const error = new Error('Language load failed');
+  mocks.changeLanguage.mockRejectedValueOnce(error);
+  const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+  await selectLanguage();
+  expect(mocks.toast).toHaveBeenCalledWith(error.message, { tone: 'danger' });
   expect(log).toHaveBeenCalledWith(
     '[settings] Could not change language:',
     error,

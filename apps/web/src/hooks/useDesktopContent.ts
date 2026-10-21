@@ -7,13 +7,17 @@ import { useNavigate } from 'react-router-dom';
 import { getQuestionNodeStatus } from '@huabu/shared';
 
 import { toast } from '@/components/Common/Toast';
+import { i18n } from '@/i18n';
 import useCanvasStore, {
   flushCanvasViewState,
   saveCanvasForSubmission,
 } from '@/store/canvasStore';
 import { useChatPreferencesStore } from '@/store/chatPreferencesStore';
 import { useChatStore } from '@/store/chatStore';
-import { drainConversationTitleWrites } from '@/store/conversationTitleStore';
+import {
+  ConversationTitleSaveError,
+  drainConversationTitleWrites,
+} from '@/store/conversationTitleStore';
 import { useDesktopTabStore } from '@/store/desktopTabStore';
 import { useSettingsUiStore } from '@/store/settingsUiStore';
 import { useToolStore } from '@/store/toolStore';
@@ -92,6 +96,29 @@ export function useDesktopContent(): {
   useEffect(() => {
     if (!tabs || tabs.context.role === 'shell') return;
     let activeRequestId: string | null = null;
+    const reportSaveError = (error: unknown): string => {
+      const message =
+        error instanceof Error
+          ? error.cause instanceof Error
+            ? error.cause.message
+            : error.message
+          : String(error);
+      console.error('[desktop-tabs] Could not save Space:', error);
+      toast(message, {
+        tone: 'danger',
+        ...(error instanceof ConversationTitleSaveError
+          ? {
+              action: {
+                label: i18n.t('chat.retryTitleSave'),
+                onClick: () => {
+                  void error.retry().catch(reportSaveError);
+                },
+              },
+            }
+          : {}),
+      });
+      return message;
+    };
     const unsubscribeNavigate = tabs.onNavigate((target) => {
       navigate(desktopNavigationPath(target), { state: target.state });
     });
@@ -114,14 +141,7 @@ export function useDesktopContent(): {
           flushCanvasViewState();
           tabs.finishPrepareClose(requestId, { ok: true });
         } catch (error) {
-          const message =
-            error instanceof Error
-              ? error.cause instanceof Error
-                ? error.cause.message
-                : error.message
-              : String(error);
-          console.error('[desktop-tabs] Could not save Space:', error);
-          toast(message, { tone: 'danger' });
+          const message = reportSaveError(error);
           tabs.finishPrepareClose(requestId, { ok: false, error: message });
         } finally {
           window.clearTimeout(overlayTimer);

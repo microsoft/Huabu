@@ -31,9 +31,9 @@ const LANGUAGE_OPTIONS = supportedLngs.map((lng) => ({
 }));
 
 /**
- * General application settings. User language changes persist through the
- * application preference writer before updating i18next; incoming hydration
- * never writes back to main. The canvas store persists minimap independently.
+ * General application settings. Desktop language changes persist before
+ * updating i18next; browsers retain i18next's best-effort caching. Incoming
+ * hydration never writes back to main. Minimap persists independently.
  *
  * Renders bare {@link SettingRow} entries; the parent supplies the card
  * wrapper so the General tab shows one flat list rather than redundant
@@ -60,7 +60,8 @@ export const GeneralSettings: React.FC = () => {
   const handleChange = useCallback(
     async (value: SupportedLanguage) => {
       try {
-        writeApplicationPreference('huabu.language', value);
+        if (getElectronBridge()?.tabs)
+          writeApplicationPreference('huabu.language', value);
         await i18n.changeLanguage(value);
       } catch (error) {
         console.error('[settings] Could not change language:', error);
