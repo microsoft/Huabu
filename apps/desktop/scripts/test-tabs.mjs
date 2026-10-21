@@ -1381,6 +1381,87 @@ try {
     await titleClose;
     if (!b.isClosed()) await b.unroute(titleRoute);
   }
+  await shell.getByRole('tab', { name: 'Tabs smoke B', exact: true }).click();
+  try {
+    const localFailure = await b.evaluate(async () => {
+      const { renameConversationTitle } =
+        await import('/src/store/conversationTitleStore.ts');
+      const { default: canvas } = await import('/src/store/canvasStore.ts');
+      const original = localStorage.setItem;
+      globalThis.tabsSmokeRestoreTitleStorage = () => {
+        localStorage.setItem = original;
+      };
+      localStorage.setItem = function (key, value) {
+        if (key.startsWith('huabu.conversationTitleDrafts'))
+          throw new DOMException('Draft quota exceeded', 'QuotaExceededError');
+        return original.call(this, key, value);
+      };
+      try {
+        await renameConversationTitle(
+          canvas.getState().canvasId,
+          'quota-draft',
+          'Latest local intent',
+          true,
+        );
+        return null;
+      } catch (error) {
+        return error.message;
+      }
+    });
+    assert.equal(localFailure, 'Draft quota exceeded');
+    const refused = await shell.evaluate(
+      (id) => window.electronBridge.tabs.close(id),
+      bId,
+    );
+    assert.equal(refused.ok, false);
+    assert.match(refused.error, /Draft quota exceeded/);
+    assert.equal(b.isClosed(), false);
+    await b.evaluate(() => globalThis.tabsSmokeRestoreTitleStorage());
+    const retryLabel = await b.evaluate(async () => {
+      const { i18n } = await import('/src/i18n/index.ts');
+      return i18n.t('chat.retryTitleSave');
+    });
+    await b
+      .getByRole('status')
+      .filter({ hasText: 'Draft quota exceeded' })
+      .last()
+      .getByRole('button', { name: retryLabel, exact: true })
+      .click();
+    await waitFor(
+      () =>
+        b.evaluate(async () => {
+          const { desktopStorageKey } =
+            await import('/src/utils/desktopStorage.ts');
+          const { default: canvas } = await import('/src/store/canvasStore.ts');
+          const record = JSON.parse(
+            localStorage.getItem(
+              desktopStorageKey('huabu.conversationTitleDrafts'),
+            ) ?? '{}',
+          );
+          return (
+            record.state?.pending?.[
+              JSON.stringify([canvas.getState().canvasId, 'quota-draft'])
+            ] === 'Latest local intent'
+          );
+        }),
+      'persisting latest title intent after quota recovery',
+    );
+    await b.evaluate(async () => {
+      const { drainConversationTitleWrites } =
+        await import('/src/store/conversationTitleStore.ts');
+      await drainConversationTitleWrites();
+    });
+    console.log(
+      'Local title persistence failure refused close and recovered through the save-error action',
+    );
+  } finally {
+    if (!b.isClosed())
+      await b.evaluate(() => {
+        globalThis.tabsSmokeRestoreTitleStorage?.();
+        delete globalThis.tabsSmokeRestoreTitleStorage;
+      });
+    await shell.getByRole('tab', { name: 'Tabs smoke A', exact: true }).click();
+  }
   await a.evaluate(async () => {
     const { default: store } = await import('/src/store/canvasStore.ts');
     store.setState({ versionConflict: true });

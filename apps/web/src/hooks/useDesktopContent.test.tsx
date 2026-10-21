@@ -5,10 +5,14 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { setConversationTitle } from '@/api/conversationTitles';
+import {
+  queryConversationTitles,
+  setConversationTitle,
+} from '@/api/conversationTitles';
 import useCanvasStore from '@/store/canvasStore';
 import {
   renameConversationTitle,
+  refreshConversationTitles,
   useConversationTitleStore,
 } from '@/store/conversationTitleStore';
 import { useDesktopTabStore } from '@/store/desktopTabStore';
@@ -521,6 +525,55 @@ describe('desktop save presentation', () => {
     },
   );
 
+  it('rejects close after a local draft write fails and exposes retry that persists it before the next close', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const storage = vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
+      throw new Error('Draft storage full');
+    });
+    try {
+      await expect(
+        renameConversationTitle('space-a', 'draft', 'Keep draft', true),
+      ).rejects.toThrow('Draft storage full');
+      await render();
+      await prepare();
+      expect(mocks.finish).toHaveBeenLastCalledWith('save-request', {
+        ok: false,
+        error: 'Draft storage full',
+      });
+      expect(mocks.flush).not.toHaveBeenCalled();
+      await resume();
+      const retry = mocks.toast.mock.lastCall?.[1]?.action;
+      if (!retry) throw new Error('Missing local persistence retry');
+      storage.mockRestore();
+      await act(async () => retry.onClick());
+      const persisted = JSON.parse(
+        localStorage.getItem('huabu.conversationTitleDrafts') ?? '{}',
+      );
+      expect(
+        persisted.state.pending[JSON.stringify(['space-a', 'draft'])],
+      ).toBe('Keep draft');
+      await prepare();
+      expect(mocks.finish).toHaveBeenLastCalledWith('save-request', {
+        ok: true,
+      });
+    } finally {
+      storage.mockRestore();
+      log.mockRestore();
+    }
+  });
+
+  it('acknowledges close after a read-only title query fails for a safely persisted draft', async () => {
+    await renameConversationTitle('space-a', 'draft', 'Safe draft', true);
+    vi.mocked(queryConversationTitles).mockRejectedValueOnce(
+      new Error('Query offline'),
+    );
+    await refreshConversationTitles('space-a', ['draft']);
+    await render();
+    await prepare();
+    expect(mocks.finish).toHaveBeenLastCalledWith('save-request', { ok: true });
+    expect(mocks.toast).not.toHaveBeenCalled();
+  });
+
   it('offers repeatable title recovery from save feedback without acknowledging or discarding the page', async () => {
     vi.mocked(setConversationTitle).mockRejectedValueOnce(new Error('Offline'));
     await renameConversationTitle(
@@ -537,6 +590,7 @@ describe('desktop save presentation', () => {
         ok: false,
         error: 'Offline',
       });
+
       await resume();
       const firstRetry = mocks.toast.mock.lastCall?.[1]?.action;
       if (!firstRetry) throw new Error('Missing save-error retry action');

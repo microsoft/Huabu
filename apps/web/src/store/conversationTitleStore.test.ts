@@ -94,6 +94,121 @@ beforeEach(() => {
 });
 
 describe('conversation titles', () => {
+  it('does not block closing a persisted draft after a read-only title query fails', async () => {
+    await renameConversationTitle('canvas', 'thread', 'Safe draft', true);
+    const persisted = localStorage.getItem('huabu.conversationTitleDrafts');
+    query.mockRejectedValueOnce(new Error('Query offline'));
+    await refreshConversationTitles('canvas', ['thread']);
+    expect(save).not.toHaveBeenCalled();
+    expect(useConversationTitleStore.getState().entries[key].error).toBe(
+      'Query offline',
+    );
+    expect(
+      useConversationTitleStore.getState().entries[key].writeError,
+    ).toBeUndefined();
+    expect(localStorage.getItem('huabu.conversationTitleDrafts')).toBe(
+      persisted,
+    );
+    await expect(drainConversationTitleWrites()).resolves.toBeUndefined();
+  });
+
+  it('does not let a query failure replace or clear a pending PUT failure', async () => {
+    await renameConversationTitle('canvas', 'thread', 'Pending', true);
+    save.mockRejectedValueOnce(new Error('PUT offline'));
+    await flushPendingConversationTitle('canvas', 'thread');
+    query.mockRejectedValueOnce(new Error('GET offline'));
+    await refreshConversationTitles('canvas', ['thread']);
+    await expect(drainConversationTitleWrites()).rejects.toThrow('PUT offline');
+    expect(useConversationTitleStore.getState().entries[key].error).toBe(
+      'PUT offline',
+    );
+  });
+
+  it.each(['draft', 'creation-race'] as const)(
+    'blocks close on %s local persistence failure and retries the latest pending snapshot',
+    async (kind) => {
+      const original = localStorage.getItem('huabu.conversationTitleDrafts');
+      const storage = vi
+        .spyOn(localStorage, 'setItem')
+        .mockImplementation(() => {
+          throw new DOMException('Quota exceeded', 'QuotaExceededError');
+        });
+      try {
+        if (kind === 'creation-race')
+          save.mockRejectedValueOnce(
+            new ApiError(404, { code: 'thread_not_found' }, 'Missing thread'),
+          );
+        await expect(
+          renameConversationTitle(
+            'canvas',
+            'thread',
+            'First',
+            kind === 'draft',
+          ),
+        ).rejects.toThrow('Quota exceeded');
+        expect(localStorage.getItem('huabu.conversationTitleDrafts')).toBe(
+          original,
+        );
+        const failure: unknown = await drainConversationTitleWrites().catch(
+          (error: unknown) => error,
+        );
+        if (!(failure instanceof ConversationTitleSaveError))
+          throw new Error('Missing persistence recovery');
+        await expect(failure.retry()).rejects.toThrow('Quota exceeded');
+        await expect(
+          renameConversationTitle('canvas', 'thread', 'Latest', true),
+        ).rejects.toThrow('Quota exceeded');
+        storage.mockRestore();
+        await failure.retry();
+        await expect(drainConversationTitleWrites()).resolves.toBeUndefined();
+        const record = JSON.parse(
+          localStorage.getItem('huabu.conversationTitleDrafts') ?? '{}',
+        );
+        expect(record.state.pending[key]).toBe('Latest');
+        expect(current().title).toBe('Latest');
+      } finally {
+        storage.mockRestore();
+      }
+    },
+  );
+
+  it('does not rewrite safe pending state on read-only cache updates when storage is full', async () => {
+    await renameConversationTitle('canvas', 'thread', 'Safe draft', true);
+    const storage = vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
+      throw new DOMException('Quota exceeded', 'QuotaExceededError');
+    });
+    try {
+      query.mockRejectedValueOnce(new Error('Query offline'));
+      await refreshConversationTitles('canvas', ['thread']);
+      expect(storage).not.toHaveBeenCalled();
+      await expect(drainConversationTitleWrites()).resolves.toBeUndefined();
+    } finally {
+      storage.mockRestore();
+    }
+  });
+
+  it('a successful later draft write clears an earlier persistence failure without replaying stale intent', async () => {
+    const storage = vi
+      .spyOn(localStorage, 'setItem')
+      .mockImplementationOnce(() => {
+        throw new Error('Storage offline');
+      });
+    try {
+      await expect(
+        renameConversationTitle('canvas', 'thread', 'Old', true),
+      ).rejects.toThrow('Storage offline');
+      await renameConversationTitle('canvas', 'thread', 'New', true);
+      await expect(drainConversationTitleWrites()).resolves.toBeUndefined();
+      expect(
+        JSON.parse(
+          localStorage.getItem('huabu.conversationTitleDrafts') ?? '{}',
+        ).state.pending[key],
+      ).toBe('New');
+    } finally {
+      storage.mockRestore();
+    }
+  });
+
   it.each(['pending', 'failed'])(
     'retains retry access after an unbound Chat closes while its title write is %s',
     async (phase) => {
