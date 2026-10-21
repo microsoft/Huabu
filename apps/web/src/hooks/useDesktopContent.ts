@@ -30,6 +30,7 @@ import {
 import { getElectronBridge, requireDesktopTabSuccess } from './useElectron';
 
 import type {
+  DesktopPreferenceKey,
   DesktopTabReport,
   DesktopTabsSnapshot,
 } from '@huabu/shared/desktop-tabs';
@@ -256,19 +257,36 @@ export function useDesktopContent(): {
 
   useEffect(() => {
     if (!tabs) return;
-    return subscribeApplicationPreferences((key) => {
-      if (key === 'huabu-sketch-tools') void useToolStore.persist.rehydrate();
-      if (key === 'huabu-chat-preferences')
-        void useChatPreferencesStore.persist.rehydrate();
-      if (key === 'huabu:world-enabled')
-        useWorkspaceStore.setState({
-          worldEnabled: readApplicationPreference(key) === 'true',
+    const hydratePreference = (key: DesktopPreferenceKey) => {
+      try {
+        if (key === 'huabu-sketch-tools') void useToolStore.persist.rehydrate();
+        if (key === 'huabu-chat-preferences')
+          void useChatPreferencesStore.persist.rehydrate();
+        if (key === 'huabu:world-enabled')
+          useWorkspaceStore.setState({
+            worldEnabled: readApplicationPreference(key) === 'true',
+          });
+        if (key === 'huabu.minimapEnabled')
+          useCanvasStore.setState({
+            minimapEnabled: readApplicationPreference(key) === 'true',
+          });
+      } catch (error) {
+        console.error(
+          '[desktop-tabs] Could not hydrate preference:',
+          key,
+          error,
+        );
+        toast(error instanceof Error ? error.message : String(error), {
+          tone: 'danger',
         });
-      if (key === 'huabu.minimapEnabled')
-        useCanvasStore.setState({
-          minimapEnabled: readApplicationPreference(key) === 'true',
-        });
-    });
+      }
+    };
+    const unsubscribe = subscribeApplicationPreferences(hydratePreference);
+    hydratePreference('huabu-sketch-tools');
+    hydratePreference('huabu-chat-preferences');
+    hydratePreference('huabu:world-enabled');
+    hydratePreference('huabu.minimapEnabled');
+    return unsubscribe;
   }, [tabs]);
 
   return { saving, preparingClose };

@@ -92,9 +92,11 @@ vi.mock('@/store/workspaceStore', () => ({
   ),
 }));
 vi.mock('@/store/chatPreferencesStore', () => ({
-  useChatPreferencesStore: {},
+  useChatPreferencesStore: { persist: { rehydrate: vi.fn() } },
 }));
-vi.mock('@/store/toolStore', () => ({ useToolStore: {} }));
+vi.mock('@/store/toolStore', () => ({
+  useToolStore: { persist: { rehydrate: vi.fn() } },
+}));
 
 (
   globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -273,6 +275,7 @@ describe('desktop save presentation', () => {
 
   it('hydrates queued World preference notifications without echoing writes to main', async () => {
     await render();
+    mocks.setWorkspaceState.mockClear();
     for (const value of ['true', 'false']) {
       localStorage.setItem('huabu:world-enabled', value);
       window.dispatchEvent(
@@ -294,6 +297,8 @@ describe('desktop save presentation', () => {
     async (current) => {
       mocks.context.role = 'home';
       await render();
+      mocks.setWorkspaceState.mockClear();
+      mocks.setCanvasState.mockClear();
       const stale = current === 'true' ? 'false' : 'true';
       for (const key of ['huabu:world-enabled', 'huabu.minimapEnabled']) {
         localStorage.setItem(key, current);
@@ -313,6 +318,8 @@ describe('desktop save presentation', () => {
 
   it('applies removed preferences as disabled despite a queued enabled event', async () => {
     await render();
+    mocks.setWorkspaceState.mockClear();
+    mocks.setCanvasState.mockClear();
     for (const key of ['huabu:world-enabled', 'huabu.minimapEnabled'])
       window.dispatchEvent(
         new StorageEvent('storage', { key, newValue: 'true' }),
