@@ -13,6 +13,7 @@ import useCanvasStore, {
 } from '@/store/canvasStore';
 import { useChatPreferencesStore } from '@/store/chatPreferencesStore';
 import { useChatStore } from '@/store/chatStore';
+import { drainConversationTitleWrites } from '@/store/conversationTitleStore';
 import { useDesktopTabStore } from '@/store/desktopTabStore';
 import { useSettingsUiStore } from '@/store/settingsUiStore';
 import { useToolStore } from '@/store/toolStore';
@@ -109,6 +110,7 @@ export function useDesktopContent(): {
       void (async () => {
         try {
           if (canvasId) await saveCanvasForSubmission(canvasId);
+          await drainConversationTitleWrites();
           flushCanvasViewState();
           tabs.finishPrepareClose(requestId, { ok: true });
         } catch (error) {

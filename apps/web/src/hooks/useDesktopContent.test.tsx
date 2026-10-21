@@ -5,7 +5,12 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { setConversationTitle } from '@/api/conversationTitles';
 import useCanvasStore from '@/store/canvasStore';
+import {
+  renameConversationTitle,
+  useConversationTitleStore,
+} from '@/store/conversationTitleStore';
 import { useDesktopTabStore } from '@/store/desktopTabStore';
 import {
   installDesktopInputGuard,
@@ -41,6 +46,10 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('react-router-dom', () => ({ useNavigate: () => mocks.navigate }));
+vi.mock('@/api/conversationTitles', () => ({
+  setConversationTitle: vi.fn(),
+  queryConversationTitles: vi.fn(),
+}));
 vi.mock('./useElectron', () => {
   const bridge = {
     platform: 'darwin',
@@ -116,6 +125,7 @@ describe('desktop save presentation', () => {
     vi.useFakeTimers();
     vi.clearAllMocks();
     localStorage.clear();
+    useConversationTitleStore.setState({ entries: {}, pending: {} });
     useDesktopTabStore.setState({ isActive: false });
     mocks.state.mockResolvedValue({
       tabs: [],
@@ -436,4 +446,73 @@ describe('desktop save presentation', () => {
       log.mockRestore();
     }
   });
+
+  it.each([
+    ['already-running', true],
+    ['already-running', false],
+    ['started-by-blur', true],
+    ['started-by-blur', false],
+  ] as const)(
+    'waits for a %s title rename and acknowledges its result (success=%s)',
+    async (timing, success) => {
+      let resolve!: (value: { title: string; source: 'user' }) => void;
+      let reject!: (error: Error) => void;
+      let result: Promise<unknown> | undefined;
+      vi.mocked(setConversationTitle).mockReturnValueOnce(
+        new Promise((yes, no) => {
+          resolve = yes;
+          reject = no;
+        }),
+      );
+      const start = () => {
+        result = renameConversationTitle(
+          'space-a',
+          'title-thread',
+          'Renamed title',
+          false,
+        ).catch((error: unknown) => error);
+      };
+      const input = document.createElement('input');
+      document.body.appendChild(input);
+      if (timing === 'started-by-blur') {
+        input.addEventListener('blur', start);
+        input.focus();
+      } else start();
+      const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        await render();
+        await prepare();
+        expect(result).toBeDefined();
+        expect(setConversationTitle).toHaveBeenCalledWith(
+          'space-a',
+          'title-thread',
+          { title: 'Renamed title' },
+        );
+        expect(mocks.finish).not.toHaveBeenCalled();
+        expect(mocks.flush).not.toHaveBeenCalled();
+        expect(isDesktopInputFrozen()).toBe(true);
+        await act(async () => {
+          if (success) resolve({ title: 'Renamed title', source: 'user' });
+          else reject(new Error('Title write offline'));
+          await result;
+        });
+        expect(mocks.finish).toHaveBeenCalledExactlyOnceWith(
+          'save-request',
+          success ? { ok: true } : { ok: false, error: 'Title write offline' },
+        );
+        if (success) expect(mocks.flush).toHaveBeenCalledOnce();
+        else {
+          expect(mocks.flush).not.toHaveBeenCalled();
+          expect(mocks.toast).toHaveBeenCalledWith('Title write offline', {
+            tone: 'danger',
+          });
+        }
+      } finally {
+        input.remove();
+        reject?.(new Error('Test cleanup'));
+        await result;
+        log.mockRestore();
+      }
+    },
+  );
 });

@@ -107,8 +107,26 @@ export function getConversationTitle(
 const queries = new Map<string, Promise<void>>();
 const invalidated = new Set<string>();
 const saves = new Map<string, Promise<void>>();
+const writes = new Set<Promise<void>>();
 const errorMessage = (error: unknown) =>
   error instanceof Error ? error.message : 'Failed to save conversation title';
+
+function trackTitleWrite(request: Promise<void>): Promise<void> {
+  writes.add(request);
+  const clear = () => writes.delete(request);
+  void request.then(clear, clear);
+  return request;
+}
+
+export async function drainConversationTitleWrites(): Promise<void> {
+  while (writes.size) await Promise.allSettled([...writes]);
+  const { entries, pending } = useConversationTitleStore.getState();
+  // Only failures of the latest intent block closing, not superseded requests.
+  const failed = Object.entries(entries).find(
+    ([key, value]) => value.error && (value.failedTitle || pending[key]),
+  );
+  if (failed) throw new Error(failed[1].error);
+}
 
 /** Refetch backend facts; events arriving during a read queue one fresh read. */
 export function invalidateConversationTitle(
@@ -204,7 +222,18 @@ export async function refreshConversationTitles(
   await Promise.all(waiting);
 }
 
-export async function renameConversationTitle(
+export function renameConversationTitle(
+  canvasId: string,
+  threadId: string,
+  raw: string,
+  isDraft: boolean,
+): Promise<void> {
+  return trackTitleWrite(
+    performConversationTitleRename(canvasId, threadId, raw, isDraft),
+  );
+}
+
+async function performConversationTitleRename(
   canvasId: string,
   threadId: string,
   raw: string,
@@ -274,35 +303,39 @@ export function flushPendingConversationTitle(
   if (active) return active;
   if (!useConversationTitleStore.getState().pending[key])
     return Promise.resolve();
-  const request = (async () => {
-    while (useConversationTitleStore.getState().pending[key]) {
-      const title = useConversationTitleStore.getState().pending[key];
-      try {
-        const value = await setConversationTitle(canvasId, threadId, { title });
-        if (useConversationTitleStore.getState().pending[key] !== title)
-          continue;
-        patch(key, {
-          value,
-          durable: true,
-          error: undefined,
-          revision: entry(key).revision + 1,
-        });
-        useConversationTitleStore.setState((state) => {
-          const pending = { ...state.pending };
-          delete pending[key];
-          return { pending };
-        });
-      } catch (error) {
-        patch(key, {
-          error:
-            error instanceof ApiError && error.status === 404
-              ? undefined
-              : errorMessage(error),
-        });
-        break;
+  const request = trackTitleWrite(
+    (async () => {
+      while (useConversationTitleStore.getState().pending[key]) {
+        const title = useConversationTitleStore.getState().pending[key];
+        try {
+          const value = await setConversationTitle(canvasId, threadId, {
+            title,
+          });
+          if (useConversationTitleStore.getState().pending[key] !== title)
+            continue;
+          patch(key, {
+            value,
+            durable: true,
+            error: undefined,
+            revision: entry(key).revision + 1,
+          });
+          useConversationTitleStore.setState((state) => {
+            const pending = { ...state.pending };
+            delete pending[key];
+            return { pending };
+          });
+        } catch (error) {
+          patch(key, {
+            error:
+              error instanceof ApiError && error.status === 404
+                ? undefined
+                : errorMessage(error),
+          });
+          break;
+        }
       }
-    }
-  })().finally(() => saves.delete(key));
+    })().finally(() => saves.delete(key)),
+  );
   saves.set(key, request);
   return request;
 }

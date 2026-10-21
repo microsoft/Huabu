@@ -12,6 +12,7 @@ import {
 import {
   clearPendingConversationTitle,
   conversationTitleKey,
+  drainConversationTitleWrites,
   flushPendingConversationTitle,
   getConversationTitle,
   invalidateConversationTitle,
@@ -90,6 +91,122 @@ beforeEach(() => {
 });
 
 describe('conversation titles', () => {
+  it('drains durable title writes, including writes started while draining', async () => {
+    const first = deferred<ConversationTitle>();
+    const second = deferred<ConversationTitle>();
+    save.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    const renameFirst = renameConversationTitle(
+      'canvas',
+      'first',
+      'First',
+      false,
+    );
+    let finished = false;
+    const drain = drainConversationTitleWrites().then(() => {
+      finished = true;
+    });
+    const renameSecond = renameConversationTitle(
+      'canvas',
+      'second',
+      'Second',
+      false,
+    );
+    first.resolve({ title: 'First', source: 'user' });
+    await renameFirst;
+    expect(finished).toBe(false);
+    second.resolve({ title: 'Second', source: 'user' });
+    await Promise.all([renameSecond, drain]);
+    expect(finished).toBe(true);
+  });
+
+  it('blocks draining after a failed durable rename until explicit retry succeeds', async () => {
+    save.mockRejectedValueOnce(new Error('Title write offline'));
+    await expect(
+      renameConversationTitle('canvas', 'thread', 'Keep this rename', false),
+    ).rejects.toThrow('Title write offline');
+    await expect(drainConversationTitleWrites()).rejects.toThrow(
+      'Title write offline',
+    );
+    await retryConversationTitle('canvas', 'thread');
+    await expect(drainConversationTitleWrites()).resolves.toBeUndefined();
+    expect(current().title).toBe('Keep this rename');
+  });
+
+  it('waits for every write before rejecting a failed drain', async () => {
+    const first = deferred<ConversationTitle>();
+    const second = deferred<ConversationTitle>();
+    save.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    const renameFirst = renameConversationTitle(
+      'canvas',
+      'first',
+      'First',
+      false,
+    ).catch((error: unknown) => error);
+    const renameSecond = renameConversationTitle(
+      'canvas',
+      'second',
+      'Second',
+      false,
+    );
+    let finished = false;
+    const drain = drainConversationTitleWrites().catch((error: unknown) => {
+      finished = true;
+      return error;
+    });
+    first.reject(new Error('First write failed'));
+    await renameFirst;
+    expect(finished).toBe(false);
+    second.resolve({ title: 'Second', source: 'user' });
+    await renameSecond;
+    expect(await drain).toEqual(new Error('First write failed'));
+  });
+
+  it('does not let a superseded rename failure block a newer successful title', async () => {
+    const old = deferred<ConversationTitle>();
+    save.mockReturnValueOnce(old.promise);
+    const previous = renameConversationTitle(
+      'canvas',
+      'thread',
+      'Old',
+      false,
+    ).catch((error: unknown) => error);
+    await renameConversationTitle('canvas', 'thread', 'Latest', false);
+    const drain = drainConversationTitleWrites();
+    old.reject(new Error('Superseded failure'));
+    await previous;
+    await expect(drain).resolves.toBeUndefined();
+    expect(current().title).toBe('Latest');
+  });
+
+  it('drains pending flushes and retains their non-404 errors until retry', async () => {
+    await renameConversationTitle('canvas', 'thread', 'Pending', true);
+    const request = deferred<ConversationTitle>();
+    save.mockReturnValueOnce(request.promise);
+    const flush = flushPendingConversationTitle('canvas', 'thread');
+    const drain = expect(drainConversationTitleWrites()).rejects.toThrow(
+      'Flush offline',
+    );
+    request.reject(new Error('Flush offline'));
+    await Promise.all([flush, drain]);
+    expect(useConversationTitleStore.getState().pending[key]).toBe('Pending');
+    await flushPendingConversationTitle('canvas', 'thread');
+    await expect(drainConversationTitleWrites()).resolves.toBeUndefined();
+    expect(useConversationTitleStore.getState().pending[key]).toBeUndefined();
+  });
+
+  it('allows locally persisted pre-send intent and recognized creation races to close', async () => {
+    await renameConversationTitle('canvas', 'draft', 'Before first send', true);
+    save.mockRejectedValueOnce(
+      new ApiError(404, { code: 'thread_not_found' }, 'Not durable yet'),
+    );
+    await renameConversationTitle('canvas', 'thread', 'Creation race', false);
+    await expect(drainConversationTitleWrites()).resolves.toBeUndefined();
+    expect(useConversationTitleStore.getState().pending).toEqual({
+      [conversationTitleKey('canvas', 'draft')]: 'Before first send',
+      [key]: 'Creation race',
+    });
+  });
+
   it('remains untitled until the backend supplies a title', async () => {
     expect(current()).toEqual({ title: null, source: null });
     await loadTitle('Backend fallback');

@@ -82,3 +82,27 @@ it('closes the focused main window normally when Tabs are not configured', () =>
   closeMenuItem()({} as Electron.MenuItem, main, {} as Electron.KeyboardEvent);
   expect(main.close).toHaveBeenCalledOnce();
 });
+
+it('focuses active content before dispatching native Settings', () => {
+  const main = new BrowserWindow();
+  const contents = {
+    isDestroyed: () => false,
+    focus: vi.fn(),
+    send: vi.fn(),
+  };
+  applyApplicationMenu(
+    () => main,
+    () => contents as never,
+  );
+  const template = vi.mocked(Menu.buildFromTemplate).mock.calls.at(-1)?.[0];
+  const submenu = template?.[0].submenu;
+  if (!Array.isArray(submenu)) throw new Error('Missing application menu');
+  const settings = submenu.find((item) => item.accelerator === 'CmdOrCtrl+,');
+  if (!settings?.click) throw new Error('Missing Settings action');
+  settings.click({} as Electron.MenuItem, main, {} as Electron.KeyboardEvent);
+  expect(contents.focus).toHaveBeenCalledOnce();
+  expect(contents.send).toHaveBeenCalledWith('menu:command', 'open-settings');
+  expect(contents.focus.mock.invocationCallOrder[0]).toBeLessThan(
+    contents.send.mock.invocationCallOrder[0],
+  );
+});

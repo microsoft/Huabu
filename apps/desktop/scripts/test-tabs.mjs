@@ -873,6 +873,40 @@ try {
       );
   }
   await shell.getByRole('tab', { name: 'Tabs smoke A', exact: true }).click();
+  if (process.platform === 'darwin' && nativeFocusAvailable) {
+    const beforeMenu = await electron.evaluate(
+      ({ BrowserWindow, webContents, Menu }) => {
+        const win = BrowserWindow.getAllWindows().find((window) =>
+          window.webContents.getURL().includes('/_desktop'),
+        );
+        const settings = Menu.getApplicationMenu()
+          ?.items.flatMap((item) => item.submenu?.items ?? [])
+          .find((item) => item.accelerator === 'CmdOrCtrl+,');
+        if (!win || !settings) throw new Error('Missing native Settings menu');
+        win.webContents.focus();
+        const before = webContents.getFocusedWebContents()?.getURL();
+        settings.click(settings, win, {});
+        return before;
+      },
+    );
+    await a.getByRole('dialog').waitFor({ state: 'visible' });
+    assert.equal(beforeMenu?.includes('/_desktop'), true);
+    assert.equal(
+      await electron.evaluate(
+        ({ webContents }, canvasId) =>
+          webContents
+            .getFocusedWebContents()
+            ?.getURL()
+            .includes(`/canvas/${canvasId}`),
+        spaces[0].canvasId,
+      ),
+      true,
+      'Native Settings must focus content before receiving keyboard input',
+    );
+    await a.keyboard.press('Escape');
+    await a.getByRole('dialog').waitFor({ state: 'hidden' });
+    console.log('Native Settings menu transferred focus from Shell to content');
+  }
   const languageLabel = await a.evaluate(async () => {
     const { i18n } = await import('/src/i18n/index.ts');
     return i18n.t('settings.language');
@@ -1134,6 +1168,114 @@ try {
     'Opening the same Space must not create another Tab',
   );
   const aId = state.tabs.find((tab) => tab.canvasId === spaces[0].canvasId).id;
+  const bId = state.tabs.find((tab) => tab.canvasId === spaces[1].canvasId).id;
+  const titleRoute = '**/agent/threads/tabs-smoke-title/title**';
+  let releaseTitle;
+  let titleStarted = false;
+  let titleRetry = false;
+  const titleGate = new Promise((resolve) => {
+    releaseTitle = resolve;
+  });
+  await b.route(titleRoute, async (route) => {
+    if (route.request().method() !== 'PUT') {
+      await route.continue();
+      return;
+    }
+    titleStarted = true;
+    if (!titleRetry) {
+      await titleGate;
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({ message: 'Delayed title write failed' }),
+      });
+    } else {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ title: 'Delayed title', source: 'user' }),
+      });
+    }
+  });
+  let titleClose;
+  try {
+    await b.evaluate(async () => {
+      const { renameConversationTitle } =
+        await import('/src/store/conversationTitleStore.ts');
+      const { default: canvas } = await import('/src/store/canvasStore.ts');
+      globalThis.tabsSmokeTitleRename = renameConversationTitle(
+        canvas.getState().canvasId,
+        'tabs-smoke-title',
+        'Delayed title',
+        false,
+      ).then(
+        () => null,
+        (error) => error.message,
+      );
+    });
+    await waitFor(() => titleStarted, 'holding a conversation title write');
+    let titleCloseSettled = false;
+    titleClose = shell
+      .evaluate((id) => window.electronBridge.tabs.close(id), bId)
+      .then((result) => {
+        titleCloseSettled = true;
+        return result;
+      });
+    await b
+      .locator('div.bg-surface.absolute.inset-0')
+      .filter({ hasText: 'Saving Space' })
+      .waitFor({ state: 'visible' });
+    assert.equal(
+      titleCloseSettled,
+      false,
+      'A pending title rename must hold the native close barrier',
+    );
+    assert.equal(b.isClosed(), false);
+    releaseTitle();
+    const titleRefused = await titleClose;
+    assert.equal(titleRefused.ok, false);
+    assert.match(titleRefused.error, /Delayed title write failed/);
+    assert.equal(
+      b.isClosed(),
+      false,
+      'A title failure must keep its renderer available for explicit retry',
+    );
+    assert.equal(await b.evaluate(() => document.body.inert), false);
+    assert.equal(
+      (await shell.evaluate((id) => window.electronBridge.tabs.reload(id), bId))
+        .ok,
+      false,
+      'Reload must also reject the unresolved title failure',
+    );
+    titleRetry = true;
+    assert.deepEqual(
+      await b.evaluate(async () => {
+        const {
+          retryConversationTitle,
+          conversationTitleKey,
+          useConversationTitleStore,
+        } = await import('/src/store/conversationTitleStore.ts');
+        const { default: canvas } = await import('/src/store/canvasStore.ts');
+        const canvasId = canvas.getState().canvasId;
+        await retryConversationTitle(canvasId, 'tabs-smoke-title');
+        const entry =
+          useConversationTitleStore.getState().entries[
+            conversationTitleKey(canvasId, 'tabs-smoke-title')
+          ];
+        await globalThis.tabsSmokeTitleRename;
+        delete globalThis.tabsSmokeTitleRename;
+        return { title: entry.value.title, error: entry.error ?? null };
+      }),
+      { title: 'Delayed title', error: null },
+    );
+    console.log(
+      'Title writes held close until settlement, rejected failure and recovered on retry',
+    );
+  } finally {
+    releaseTitle();
+    await titleClose;
+    if (!b.isClosed()) await b.unroute(titleRoute);
+  }
   await a.evaluate(async () => {
     const { default: store } = await import('/src/store/canvasStore.ts');
     store.setState({ versionConflict: true });

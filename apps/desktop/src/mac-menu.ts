@@ -154,6 +154,7 @@ const DEFAULT_MENU_CONFIG: MenuConfig = {
 function sendMenuCommand(command: string): void {
   const contents = getActiveContents();
   if (contents && !contents.isDestroyed()) {
+    if (command === 'open-settings') contents.focus();
     contents.send('menu:command', command);
   }
 }
