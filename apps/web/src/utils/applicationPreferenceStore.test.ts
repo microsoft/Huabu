@@ -39,7 +39,14 @@ beforeEach(async () => {
     versions: { electron: '43', chrome: '', node: '' },
     tabs: {
       context: { role: 'space', workspaceId: 'w', canvasId: 'a' },
-      storageSnapshot: () => ({ ok: true, values: { ...values } }),
+      getPreference: vi.fn<DesktopTabsApi['getPreference']>((key) => ({
+        ok: true,
+        value: values[key] ?? null,
+      })),
+      storageSnapshot: vi.fn<DesktopTabsApi['storageSnapshot']>(() => ({
+        ok: true,
+        values: { ...values },
+      })),
       setPreference: write,
       onPreference: vi.fn(() => vi.fn()),
       getState: vi.fn(),
@@ -183,6 +190,20 @@ it('can change transient tool state without writing to a full disk', () => {
   useToolStore.getState().setPendingNodeType('frame');
   useToolStore.getState().resetForCanvasSwitch();
   expect(useToolStore.getState().pendingNodeType).toBeNull();
+  expect(write).not.toHaveBeenCalled();
+});
+
+it('does not read or persist preferences on repeated known pen input', () => {
+  useToolStore.getState().observePen();
+  const tabs = window.electronBridge?.tabs;
+  if (!tabs) throw new Error('Missing desktop bridge');
+  const read = vi.spyOn(tabs, 'getPreference').mockClear();
+  write.mockClear();
+  for (let stroke = 0; stroke < 100; stroke++) {
+    useToolStore.getState().observePen();
+  }
+  expect(read).not.toHaveBeenCalled();
+  expect(tabs.storageSnapshot).not.toHaveBeenCalled();
   expect(write).not.toHaveBeenCalled();
 });
 

@@ -8,6 +8,7 @@ const preferenceKeys = [
   'huabu.language',
   'huabu-sketch-tools',
   'huabu-chat-preferences',
+  'huabu.recentConversationAgentProfile.v1',
   'huabu:world-enabled',
   'huabu.minimapEnabled',
 ];
@@ -66,15 +67,12 @@ export function readApplicationPreference(
   const tabs =
     typeof window === 'undefined' ? undefined : window.electronBridge?.tabs;
   if (tabs) {
-    const snapshot = tabs.storageSnapshot();
-    if (!snapshot.ok) {
-      console.error(
-        '[desktop-tabs] Could not read preference:',
-        snapshot.error,
-      );
-      throw new Error(snapshot.error);
+    const result = tabs.getPreference(key);
+    if (!result.ok) {
+      console.error('[desktop-tabs] Could not read preference:', result.error);
+      throw new Error(result.error);
     }
-    return snapshot.values[key] ?? null;
+    return result.value;
   }
   return typeof localStorage === 'undefined' ? null : localStorage.getItem(key);
 }

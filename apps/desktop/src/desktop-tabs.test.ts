@@ -15,7 +15,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DesktopTabs, registerDesktopTabsIpc } from './desktop-tabs.js';
 
-import type { DesktopTabReport } from '@huabu/shared/desktop-tabs' with {
+import type {
+  DesktopPreferenceKey,
+  DesktopTabReport,
+} from '@huabu/shared/desktop-tabs' with {
   'resolution-mode': 'import',
 };
 
@@ -606,6 +609,75 @@ describe('desktop Space Tab lifecycle', () => {
         'huabu.language'
       ],
     ).toBeUndefined();
+  });
+
+  it('migrates and restores the recent conversational Agent preference', () => {
+    const key = 'huabu.recentConversationAgentProfile.v1';
+    tabs.storageSnapshot(mocks.views[0].webContents as never, {
+      [key]: 'huabu',
+    });
+    expect(
+      JSON.parse(readFileSync(join(directory, 'desktop-tabs.json'), 'utf8'))
+        .preferences[key],
+    ).toBe('huabu');
+    const a = open('a');
+    expect(tabs.storageSnapshot(a.webContents as never, undefined)[key]).toBe(
+      'huabu',
+    );
+    tabs.dispose();
+    tabs = makeTabs();
+    expect(
+      tabs.storageSnapshot(mocks.views[0].webContents as never, undefined)[key],
+    ).toBe('huabu');
+  });
+
+  it('returns only the requested preference even with megabytes of legacy metadata', () => {
+    tabs.storageSnapshot(mocks.views[0].webContents as never, {
+      'huabu-chat': 'x'.repeat(2_000_000),
+      'huabu.language': 'en',
+      'huabu.recentConversationAgentProfile.v1': 'huabu',
+    });
+    const snapshot = vi.spyOn(tabs, 'storageSnapshot');
+    registerDesktopTabsIpc(() => tabs);
+    const handler = mocks.listeners.get('tabs:get-preference');
+    if (!handler) throw new Error('Missing preference read handler');
+    const event = {
+      sender: shell.webContents,
+      senderFrame: shell.webContents.mainFrame,
+      returnValue: undefined as unknown,
+    };
+    handler(event as never, 'huabu.language' as never);
+    expect(event.returnValue).toEqual({ ok: true, value: 'en' });
+    expect(JSON.stringify(event.returnValue).length).toBeLessThan(100);
+    expect(snapshot).not.toHaveBeenCalled();
+    expect(tabs.getPreference('huabu.minimapEnabled')).toBeNull();
+    expect(() => tabs.getPreference('huabu-chat')).toThrow('Invalid');
+    expect(() => tabs.getPreference({})).toThrow('Invalid');
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const subframe = { ...event, senderFrame: {} };
+    handler(subframe as never, 'huabu.language' as never);
+    expect(subframe.returnValue).toMatchObject({ ok: false });
+    expect(log).toHaveBeenCalled();
+    log.mockRestore();
+    snapshot.mockRestore();
+  });
+
+  it('accepts every shared preference key for migration, reads and writes', () => {
+    const preferences: Record<DesktopPreferenceKey, string> = {
+      'huabu.language': 'en',
+      'huabu-sketch-tools': '{}',
+      'huabu-chat-preferences': '{}',
+      'huabu.recentConversationAgentProfile.v1': 'huabu',
+      'huabu:world-enabled': 'true',
+      'huabu.minimapEnabled': 'false',
+    };
+    const home = mocks.views[0].webContents;
+    tabs.storageSnapshot(home as never, preferences);
+    for (const [key, value] of Object.entries(preferences)) {
+      expect(tabs.getPreference(key)).toBe(value);
+      tabs.setPreference(home as never, key, null, value);
+      expect(tabs.getPreference(key)).toBeNull();
+    }
   });
 
   it('does not acknowledge migration or change authoritative preferences when persistence fails', () => {

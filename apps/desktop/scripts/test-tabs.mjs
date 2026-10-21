@@ -251,6 +251,7 @@ try {
   await home.locator('main h1').waitFor({ state: 'visible' });
   await home.evaluate(() => {
     localStorage.setItem('huabu.language', 'zh-CN');
+    localStorage.setItem('huabu.recentConversationAgentProfile.v1', 'huabu');
     localStorage.setItem(
       'huabu-sketch-tools',
       JSON.stringify({
@@ -281,13 +282,25 @@ try {
   assert.deepEqual(
     await home.evaluate(async () => {
       const { useToolStore } = await import('/src/store/toolStore.ts');
+      const { getDefaultAgentBinding } =
+        await import('/src/store/acpProfilesStore.ts');
       return {
         input: useToolStore.getState().inputModePreference,
+        binding: getDefaultAgentBinding(),
+        agentReplica: localStorage.getItem(
+          'huabu.recentConversationAgentProfile.v1',
+        ),
         languageReplica: localStorage.getItem('huabu.language'),
         toolsReplica: localStorage.getItem('huabu-sketch-tools'),
       };
     }),
-    { input: 'finger', languageReplica: null, toolsReplica: null },
+    {
+      input: 'finger',
+      binding: { kind: 'internal' },
+      agentReplica: null,
+      languageReplica: null,
+      toolsReplica: null,
+    },
   );
   assert.equal(
     await home.locator('header').count(),
@@ -706,6 +719,111 @@ try {
       }),
     'synchronizing preferences across partitions',
   );
+  assert.deepEqual(
+    await b.evaluate(async () => {
+      const { getDefaultAgentBinding } =
+        await import('/src/store/acpProfilesStore.ts');
+      return getDefaultAgentBinding();
+    }),
+    { kind: 'internal' },
+    'Fresh Space partitions must retain the migrated Built-In Agent selection',
+  );
+  await a.evaluate(async () => {
+    const { useAcpProfilesStore } =
+      await import('/src/store/acpProfilesStore.ts');
+    useAcpProfilesStore
+      .getState()
+      .rememberConversationAgent('tabs-smoke-profile');
+  });
+  await waitFor(
+    () =>
+      b.evaluate(async () => {
+        const { useAcpProfilesStore } =
+          await import('/src/store/acpProfilesStore.ts');
+        return (
+          useAcpProfilesStore.getState().recentConversationProfileId ===
+          'tabs-smoke-profile'
+        );
+      }),
+    'synchronizing the recent conversational Agent across Space partitions',
+  );
+  await a.evaluate(async () => {
+    const { rememberConversationAgentBinding } =
+      await import('/src/store/acpProfilesStore.ts');
+    rememberConversationAgentBinding({ kind: 'internal' });
+  });
+  await waitFor(
+    () =>
+      b.evaluate(async () => {
+        const { getDefaultAgentBinding } =
+          await import('/src/store/acpProfilesStore.ts');
+        return getDefaultAgentBinding().kind === 'internal';
+      }),
+    'restoring the explicit Built-In Agent choice across partitions',
+  );
+  await b.evaluate(async () => {
+    const { useToolStore } = await import('/src/store/toolStore.ts');
+    useToolStore.getState().observePen();
+  });
+  await electron.evaluate(({ ipcMain }, canvasId) => {
+    globalThis.tabsSmokeLegacyReads = 0;
+    globalThis.tabsSmokeToolReads = 0;
+    globalThis.tabsSmokeLegacyReadListener = () => {
+      globalThis.tabsSmokeLegacyReads++;
+    };
+    globalThis.tabsSmokeToolReadListener = (event, key) => {
+      if (
+        key === 'huabu-sketch-tools' &&
+        event.sender.getURL().includes(`/canvas/${canvasId}`)
+      )
+        globalThis.tabsSmokeToolReads++;
+    };
+    ipcMain.on('tabs:storage-snapshot', globalThis.tabsSmokeLegacyReadListener);
+    ipcMain.on('tabs:get-preference', globalThis.tabsSmokeToolReadListener);
+  }, spaces[1].canvasId);
+  try {
+    await b.evaluate(async () => {
+      const { useToolStore } = await import('/src/store/toolStore.ts');
+      for (let stroke = 0; stroke < 100; stroke++) {
+        useToolStore.getState().observePen();
+      }
+    });
+    assert.deepEqual(
+      await electron.evaluate(() => ({
+        legacy: globalThis.tabsSmokeLegacyReads,
+        tools: globalThis.tabsSmokeToolReads,
+      })),
+      { legacy: 0, tools: 0 },
+      'Repeated known pen input must not perform synchronous preference IPC',
+    );
+    await b.evaluate(async () => {
+      const { useToolStore } = await import('/src/store/toolStore.ts');
+      const next =
+        useToolStore.getState().inputModePreference === 'pen'
+          ? 'finger'
+          : 'pen';
+      useToolStore.getState().setInputModePreference(next);
+    });
+    assert.deepEqual(
+      await electron.evaluate(() => ({
+        legacy: globalThis.tabsSmokeLegacyReads,
+        tools: globalThis.tabsSmokeToolReads,
+      })),
+      { legacy: 0, tools: 1 },
+      'A preference edit must read one key rather than the full legacy snapshot',
+    );
+  } finally {
+    await electron.evaluate(({ ipcMain }) => {
+      ipcMain.removeListener(
+        'tabs:storage-snapshot',
+        globalThis.tabsSmokeLegacyReadListener,
+      );
+      ipcMain.removeListener(
+        'tabs:get-preference',
+        globalThis.tabsSmokeToolReadListener,
+      );
+    });
+  }
   await electron.evaluate(({ app, BrowserWindow }) => {
     const win = BrowserWindow.getAllWindows().find((window) =>
       window.webContents.getURL().includes('/_desktop'),
@@ -897,6 +1015,7 @@ try {
             'huabu.language',
             'huabu-sketch-tools',
             'huabu-chat-preferences',
+            'huabu.recentConversationAgentProfile.v1',
             'huabu:world-enabled',
             'huabu.minimapEnabled',
           ].filter((key) => localStorage.getItem(key) !== null),
@@ -908,19 +1027,19 @@ try {
     assert.deepEqual(
       await b.evaluate(() => {
         const tabs = window.electronBridge.tabs;
-        const snapshot = tabs.storageSnapshot();
+        const snapshot = tabs.getPreference('huabu-sketch-tools');
         if (!snapshot.ok) throw new Error(snapshot.error);
-        const before = snapshot.values['huabu-sketch-tools'];
+        const before = snapshot.value;
         const result = tabs.setPreference(
           'huabu-sketch-tools',
           JSON.stringify({ state: { inputModePreference: 'pen' }, version: 3 }),
           'stale snapshot',
         );
-        const after = tabs.storageSnapshot();
+        const after = tabs.getPreference('huabu-sketch-tools');
         if (!after.ok) throw new Error(after.error);
         return {
           rejected: !result.ok,
-          unchanged: after.values['huabu-sketch-tools'] === before,
+          unchanged: after.value === before,
         };
       }),
       { rejected: true, unchanged: true },
@@ -935,6 +1054,8 @@ try {
             await import('/src/store/chatPreferencesStore.ts');
           const { useToolStore } = await import('/src/store/toolStore.ts');
           const { default: canvas } = await import('/src/store/canvasStore.ts');
+          const { useAcpProfilesStore } =
+            await import('/src/store/acpProfilesStore.ts');
           const actions = [
             () => useChatPreferencesStore.getState().setRecentTurnCount(9),
             () =>
@@ -946,11 +1067,16 @@ try {
                     : 'mouse',
                 ),
             () => canvas.getState().toggleMinimap(),
+            () =>
+              useAcpProfilesStore
+                .getState()
+                .rememberConversationAgent('failed-profile'),
           ];
           const before = [
             useChatPreferencesStore.getState().recentTurnCount,
             useToolStore.getState().inputModePreference,
             canvas.getState().minimapEnabled,
+            useAcpProfilesStore.getState().recentConversationProfileId,
           ];
           const rejected = actions.map((action) => {
             try {
@@ -969,10 +1095,11 @@ try {
                 useChatPreferencesStore.getState().recentTurnCount,
                 useToolStore.getState().inputModePreference,
                 canvas.getState().minimapEnabled,
+                useAcpProfilesStore.getState().recentConversationProfileId,
               ]),
           };
         }),
-        { rejected: [true, true, true], unchanged: true },
+        { rejected: [true, true, true, true], unchanged: true },
         'Real main-process persistence failures must not change renderer preferences',
       );
     } finally {
@@ -1307,13 +1434,21 @@ try {
       const { useChatPreferencesStore } =
         await import('/src/store/chatPreferencesStore.ts');
       const { i18n } = await import('/src/i18n/index.ts');
+      const { getDefaultAgentBinding } =
+        await import('/src/store/acpProfilesStore.ts');
       return {
         recentTurnCount: useChatPreferencesStore.getState().recentTurnCount,
+        binding: getDefaultAgentBinding(),
         language: i18n.language,
         replica: localStorage.getItem('huabu-chat-preferences'),
       };
     }),
-    { recentTurnCount: 7, language: 'en', replica: null },
+    {
+      recentTurnCount: 7,
+      binding: { kind: 'internal' },
+      language: 'en',
+      replica: null,
+    },
     'Restart must hydrate in-memory preferences from main, without renderer replicas',
   );
   const loaded = await electron.evaluate(

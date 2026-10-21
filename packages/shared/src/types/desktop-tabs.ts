@@ -62,6 +62,7 @@ export type DesktopPreferenceKey =
   | 'huabu.language'
   | 'huabu-sketch-tools'
   | 'huabu-chat-preferences'
+  | 'huabu.recentConversationAgentProfile.v1'
   | 'huabu:world-enabled'
   | 'huabu.minimapEnabled';
 
@@ -72,6 +73,9 @@ export interface DesktopPreferenceChange {
 
 export interface DesktopTabsApi {
   context: DesktopTabContext;
+  getPreference: (
+    key: DesktopPreferenceKey,
+  ) => { ok: true; value: string | null } | { ok: false; error: string };
   storageSnapshot: (
     legacy?: Record<string, string>,
   ) =>

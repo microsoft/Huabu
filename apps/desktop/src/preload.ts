@@ -71,6 +71,8 @@ const tabs: DesktopTabsApi | undefined =
           workspaceId: readArgument('--huabu-workspace-id') || null,
           canvasId: readArgument('--huabu-canvas-id') || null,
         },
+        getPreference: (key) =>
+          ipcRenderer.sendSync('tabs:get-preference', key),
         storageSnapshot: (legacy) =>
           ipcRenderer.sendSync('tabs:storage-snapshot', legacy),
         setPreference: (key, value, expectedValue) =>

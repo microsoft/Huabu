@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const listProfiles = vi.hoisted(() => vi.fn());
 const api = vi.hoisted(() => ({
@@ -68,6 +68,8 @@ beforeEach(() => {
     recentConversationProfileId: null,
   });
 });
+
+afterEach(() => vi.restoreAllMocks());
 
 describe('browser-local recent conversation Agent', () => {
   it('keeps picker identity explicit and clears it for older server responses', async () => {
@@ -152,6 +154,44 @@ describe('browser-local recent conversation Agent', () => {
     expect(localStorage.getItem(RECENT_CONVERSATION_AGENT_STORAGE_KEY)).toBe(
       'second',
     );
+  });
+
+  it('rereads incoming recency changes without echoing or trusting stale event values', () => {
+    localStorage.setItem(RECENT_CONVERSATION_AGENT_STORAGE_KEY, 'huabu');
+    const write = vi.spyOn(localStorage, 'setItem');
+    window.dispatchEvent(
+      new StorageEvent('storage', {
+        key: RECENT_CONVERSATION_AGENT_STORAGE_KEY,
+        newValue: 'stale-profile',
+      }),
+    );
+    expect(getDefaultAgentBinding()).toEqual({ kind: 'internal' });
+    expect(write).not.toHaveBeenCalled();
+    localStorage.removeItem(RECENT_CONVERSATION_AGENT_STORAGE_KEY);
+    window.dispatchEvent(
+      new StorageEvent('storage', {
+        key: RECENT_CONVERSATION_AGENT_STORAGE_KEY,
+        newValue: 'huabu',
+      }),
+    );
+    expect(
+      useAcpProfilesStore.getState().recentConversationProfileId,
+    ).toBeNull();
+    expect(getDefaultAgentBinding()).toMatchObject({ profileId: profile.id });
+    write.mockRestore();
+  });
+
+  it('keeps the browser selection session-local and reports unavailable storage', () => {
+    vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
+      throw new Error('Storage unavailable');
+    });
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    useAcpProfilesStore.getState().rememberConversationAgent('huabu');
+    expect(getDefaultAgentBinding()).toEqual({ kind: 'internal' });
+    expect(api.toast).toHaveBeenCalledWith('Storage unavailable', {
+      tone: 'danger',
+    });
+    expect(log).toHaveBeenCalled();
   });
 });
 

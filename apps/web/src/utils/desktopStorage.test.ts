@@ -22,6 +22,10 @@ let authoritative: Record<string, string>;
 function setContext(context: DesktopTabContext) {
   const tabs: DesktopTabsApi = {
     context,
+    getPreference: vi.fn((key) => ({
+      ok: true as const,
+      value: authoritative[key] ?? null,
+    })),
     storageSnapshot: vi.fn((legacy?: Record<string, string>) => {
       if (legacy) {
         for (const [key, value] of Object.entries(legacy))
@@ -94,6 +98,8 @@ it('reads and writes desktop preferences only through main', () => {
   storage.setItem('huabu.language', 'en');
   expect(tabs.setPreference).toHaveBeenCalledWith('huabu.language', 'en');
   expect(readApplicationPreference('huabu.language')).toBe('en');
+  expect(tabs.getPreference).toHaveBeenCalledWith('huabu.language');
+  expect(tabs.storageSnapshot).not.toHaveBeenCalled();
   expect(localStorage.getItem('huabu.language')).toBeNull();
   storage.removeItem('huabu.language');
   expect(storage.getItem('huabu.language')).toBeNull();
@@ -118,7 +124,7 @@ it('does not commit a failed write or silently fall back to localStorage', () =>
 it('reports authoritative read failures rather than using stale local values', () => {
   const tabs = setContext({ role: 'space', workspaceId: 'w', canvasId: 'a' });
   localStorage.setItem('huabu.language', 'zh-CN');
-  vi.mocked(tabs.storageSnapshot).mockReturnValue({
+  vi.mocked(tabs.getPreference).mockReturnValue({
     ok: false,
     error: 'Snapshot unavailable',
   });
@@ -137,6 +143,7 @@ it.each(['shell-first', 'home-first'])(
   async (order) => {
     localStorage.setItem('huabu.language', 'zh-CN');
     localStorage.setItem('huabu:world-enabled', 'true');
+    localStorage.setItem('huabu.recentConversationAgentProfile.v1', 'huabu');
     localStorage.setItem('huabu-chat', 'legacy metadata');
     async function start(role: 'shell' | 'home') {
       const tabs = setContext({ role, workspaceId: null, canvasId: null });
@@ -153,11 +160,18 @@ it.each(['shell-first', 'home-first'])(
     expect(home.storageSnapshot).toHaveBeenCalledWith({
       'huabu.language': 'zh-CN',
       'huabu:world-enabled': 'true',
+      'huabu.recentConversationAgentProfile.v1': 'huabu',
       'huabu-chat': 'legacy metadata',
     });
     expect(authoritative['huabu.language']).toBe('zh-CN');
     expect(localStorage.getItem('huabu.language')).toBeNull();
     expect(localStorage.getItem('huabu:world-enabled')).toBeNull();
+    expect(
+      readApplicationPreference('huabu.recentConversationAgentProfile.v1'),
+    ).toBe('huabu');
+    expect(
+      localStorage.getItem('huabu.recentConversationAgentProfile.v1'),
+    ).toBeNull();
     expect(localStorage.getItem('huabu-chat')).toBe('legacy metadata');
     if (order === 'home-first') await start('shell');
     expect(readApplicationPreference('huabu.language')).toBe('zh-CN');
@@ -244,6 +258,44 @@ it('hydrates desktop language in memory without i18next localStorage caching', a
   await vi.waitFor(() => expect(i18n.language).toBe('en'));
   expect(localStorage.getItem('huabu.language')).toBeNull();
   expect(tabs.setPreference).not.toHaveBeenCalled();
+});
+
+it('hydrates and synchronizes the recent Agent without local replicas or notification echoes', async () => {
+  const key = 'huabu.recentConversationAgentProfile.v1';
+  const tabs = setContext({ role: 'space', workspaceId: 'w', canvasId: 'a' });
+  authoritative[key] = 'huabu';
+  localStorage.setItem(key, 'obsolete-profile');
+  vi.resetModules();
+  const { getDefaultAgentBinding, useAcpProfilesStore } =
+    await import('../store/acpProfilesStore');
+  expect(getDefaultAgentBinding()).toEqual({ kind: 'internal' });
+  expect(localStorage.getItem(key)).toBeNull();
+  const listener = vi.mocked(tabs.onPreference).mock.calls.at(-1)?.[0];
+  if (!listener) throw new Error('Missing recent Agent subscription');
+  authoritative[key] = 'new-profile';
+  listener({ key, value: 'obsolete-profile' });
+  expect(useAcpProfilesStore.getState().recentConversationProfileId).toBe(
+    'new-profile',
+  );
+  delete authoritative[key];
+  listener({ key, value: 'huabu' });
+  expect(useAcpProfilesStore.getState().recentConversationProfileId).toBeNull();
+  expect(tabs.setPreference).not.toHaveBeenCalled();
+  const before = useAcpProfilesStore.getState();
+  vi.mocked(tabs.setPreference).mockReturnValue({
+    ok: false,
+    error: 'Disk full',
+  });
+  const feedback = vi.spyOn(
+    await import('../components/Common/Toast'),
+    'toast',
+  );
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+  expect(() =>
+    useAcpProfilesStore.getState().rememberConversationAgent('huabu'),
+  ).toThrow('Disk full');
+  expect(useAcpProfilesStore.getState()).toBe(before);
+  expect(feedback).toHaveBeenCalledWith('Disk full', { tone: 'danger' });
 });
 
 it('preserves browser keys and isolates Space metadata without changing sibling records', () => {

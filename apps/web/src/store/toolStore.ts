@@ -139,7 +139,7 @@ const DEFAULT_TOOL_PREFERENCES = {
  */
 export const useToolStore = create<ToolState>()(
   persistApplicationPreferences(
-    (set) => ({
+    (set, get) => ({
       pendingNodeType: null,
       ...DEFAULT_TOOL_PREFERENCES,
       setPendingNodeType: (type) => set({ pendingNodeType: type }),
@@ -147,8 +147,9 @@ export const useToolStore = create<ToolState>()(
         set((state) => ({ sketchDraft: { ...state.sketchDraft, ...patch } })),
       setInputModePreference: (inputModePreference) =>
         set({ inputModePreference }),
-      observePen: () =>
-        set((state) => (state.penObserved ? state : { penObserved: true })),
+      observePen: () => {
+        if (!get().penObserved) set({ penObserved: true });
+      },
       selectSketchColorPreset: (index) =>
         set((state) => {
           const color = state.colorPresets[index];

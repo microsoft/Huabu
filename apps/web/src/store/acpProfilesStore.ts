@@ -8,7 +8,7 @@
  * Why a store and not per-component state? Several surfaces need the
  * profile list in lockstep: the Settings editor lets the user CRUD
  * profiles, the chat picker uses the same list to label "external"
- * binding options, and new conversations resolve browser-local recency
+ * binding options, and new conversations resolve client-local recency
  * against the current selectable catalogue.
  * Centralising
  * the list in a store means any caller can `await
@@ -46,6 +46,11 @@ import { listAcpProfiles } from '@/api/acp';
 import { getAgentDefaults, updateAgentDefaults } from '@/api/agentDefaults';
 import { toast } from '@/components/Common/Toast';
 import { i18n } from '@/i18n';
+import {
+  readApplicationPreference,
+  subscribeApplicationPreferences,
+  writeApplicationPreference,
+} from '@/utils/desktopStorage';
 
 import type {
   AcpAgentletStatus,
@@ -67,13 +72,20 @@ export const RECENT_CONVERSATION_AGENT_STORAGE_KEY =
   'huabu.recentConversationAgentProfile.v1';
 
 function readRecentConversationProfileId(): string | null {
-  if (typeof localStorage === 'undefined') return null;
   try {
-    const profileId = localStorage.getItem(
+    const profileId = readApplicationPreference(
       RECENT_CONVERSATION_AGENT_STORAGE_KEY,
     );
     return profileId?.trim() || null;
-  } catch {
+  } catch (error) {
+    console.error(
+      '[preferences] Could not read recent conversation Agent:',
+      error,
+    );
+    toast(error instanceof Error ? error.message : String(error), {
+      tone: 'danger',
+    });
+    if (window.electronBridge?.tabs) throw error;
     return null;
   }
 }
@@ -81,8 +93,19 @@ function readRecentConversationProfileId(): string | null {
 function writeRecentConversationProfileId(profileId: string): void {
   if (typeof localStorage === 'undefined') return;
   try {
-    localStorage.setItem(RECENT_CONVERSATION_AGENT_STORAGE_KEY, profileId);
-  } catch {
+    writeApplicationPreference(
+      RECENT_CONVERSATION_AGENT_STORAGE_KEY,
+      profileId,
+    );
+  } catch (error) {
+    console.error(
+      '[preferences] Could not save recent conversation Agent:',
+      error,
+    );
+    toast(error instanceof Error ? error.message : String(error), {
+      tone: 'danger',
+    });
+    if (window.electronBridge?.tabs) throw error;
     // Unavailable browser storage keeps the preference session-local.
   }
 }
@@ -100,7 +123,7 @@ interface AcpProfilesState {
   /** Absent on older servers; never infer a default from list ordering. */
   agentDefaults: AgentDefaults | null;
   defaultsError: Error | null;
-  /** Browser-local convenience preference; never persisted by the Server. */
+  /** Client-local convenience preference; never persisted by the Server. */
   recentConversationProfileId: string | null;
   /**
    * `true` once a fetch has *succeeded* at least once. A failed initial
@@ -269,6 +292,14 @@ export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
     return request;
   },
 }));
+
+const unsubscribePreferences = subscribeApplicationPreferences((key) => {
+  if (key !== RECENT_CONVERSATION_AGENT_STORAGE_KEY) return;
+  useAcpProfilesStore.setState({
+    recentConversationProfileId: readRecentConversationProfileId(),
+  });
+});
+import.meta.hot?.dispose(unsubscribePreferences);
 
 export function selectDefaultConversationProfileId(
   state: Pick<

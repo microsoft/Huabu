@@ -52,6 +52,7 @@ const PREFERENCE_KEYS = [
   'huabu.language',
   'huabu-sketch-tools',
   'huabu-chat-preferences',
+  'huabu.recentConversationAgentProfile.v1',
   'huabu:world-enabled',
   'huabu.minimapEnabled',
 ];
@@ -783,6 +784,12 @@ export class DesktopTabs {
     };
   }
 
+  getPreference(key: unknown): string | null {
+    if (typeof key !== 'string' || !PREFERENCE_KEYS.includes(key))
+      throw new Error('Invalid application preference');
+    return this.preferences[key] ?? null;
+  }
+
   setPreference(
     contents: WebContents,
     key: unknown,
@@ -988,15 +995,32 @@ export function registerDesktopTabsIpc(
     );
   };
   ipcMain.handle('tabs:get-state', (event) => requireOwner(event).snapshot);
-  for (const name of ['storage-snapshot', 'set-preference'] as const) {
+  for (const name of [
+    'storage-snapshot',
+    'get-preference',
+    'set-preference',
+  ] as const) {
     ipcMain.on(`tabs:${name}`, (event, ...args: unknown[]) => {
       try {
         const tabs = requireOwner(event);
-        event.returnValue =
-          name === 'storage-snapshot'
-            ? { ok: true, values: tabs.storageSnapshot(event.sender, args[0]) }
-            : (tabs.setPreference(event.sender, args[0], args[1], args[2]),
-              { ok: true });
+        switch (name) {
+          case 'storage-snapshot':
+            event.returnValue = {
+              ok: true,
+              values: tabs.storageSnapshot(event.sender, args[0]),
+            };
+            break;
+          case 'get-preference':
+            event.returnValue = {
+              ok: true,
+              value: tabs.getPreference(args[0]),
+            };
+            break;
+          case 'set-preference':
+            tabs.setPreference(event.sender, args[0], args[1], args[2]);
+            event.returnValue = { ok: true };
+            break;
+        }
       } catch (error) {
         console.error(`[desktop-tabs] ${name}:`, error);
         event.returnValue = {
