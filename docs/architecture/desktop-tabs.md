@@ -57,6 +57,8 @@ If Home fails after the Workspace save barrier has completed, main releases only
 
 Successful Space deletion invalidates pending list requests before removing the card and starts a background refresh. Responses captured before deletion cannot restore the deleted card or overwrite the updated count.
 
+Home refuses to delete a Space that still has a desktop Tab, including a lazy restored Tab, and shows a localized instruction to close that Tab first. The current main-process snapshot is checked both before showing confirmation and again on confirmation. For a closed Space, Home acquires the existing main-process operation lock before sending the delete request; main rechecks that the Space has no Tab and blocks opening Tabs or changing Workspaces until the request settles. Home releases the lock on success or failure, and a Home failure releases an abandoned deletion lock. Deletion never closes or discards an open Space automatically. Browser deletion retains its existing behavior.
+
 ## 4. Persistence and status
 
 The main process atomically replaces a fixed `desktop-tabs.json` file under Electron `userData`. Session records are keyed by Server identity and Workspace identity; local Server identity deliberately excludes the ephemeral loopback port. Session records contain only ordered Space identities and the active Space; application preferences have a separate top-level record. Activation and closing persist the intended session before committing destructive runtime changes, so a filesystem error keeps the original Tab and surfaces the failure. Restoration follows successful Home Workspace initialization and creates lazy entries; only the active Space view is loaded until another Tab is selected.

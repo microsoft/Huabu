@@ -13,7 +13,10 @@ import { toast } from '../components/Common/Toast';
 import { DesktopHomeMenu } from '../components/Shell/DesktopHomeMenu';
 import { APP_NAME } from '../config/app';
 
-import type { DesktopTabsSnapshot } from '@huabu/shared/desktop-tabs';
+import type {
+  DesktopTabResult,
+  DesktopTabsSnapshot,
+} from '@huabu/shared/desktop-tabs';
 import type { ReactNode } from 'react';
 
 const setCanvasCount = vi.fn();
@@ -37,6 +40,7 @@ const environment = vi.hoisted(() => ({
   onHomeMenu:
     vi.fn<(listener: (position: { x: number } | null) => void) => () => void>(),
   command: vi.fn(),
+  getState: vi.fn<() => Promise<DesktopTabsSnapshot>>(),
   onState:
     vi.fn<(listener: (state: DesktopTabsSnapshot) => void) => () => void>(),
 }));
@@ -105,12 +109,15 @@ vi.mock('../hooks/useElectron', () => {
       onHomeMenu: environment.onHomeMenu,
       command: environment.command,
       onState: environment.onState,
+      getState: environment.getState,
     },
   };
   return {
     isElectron: () => environment.electron,
     getElectronBridge: () => (environment.desktopHome ? bridge : undefined),
-    requireDesktopTabSuccess: vi.fn(),
+    requireDesktopTabSuccess: (result: DesktopTabResult) => {
+      if (!result.ok) throw new Error(result.error);
+    },
   };
 });
 
@@ -180,6 +187,12 @@ beforeEach(() => {
   environment.onHomeMenu.mockReturnValue(vi.fn());
   environment.command.mockResolvedValue({ ok: true });
   environment.onState.mockReturnValue(vi.fn());
+  environment.getState.mockResolvedValue({
+    tabs: [],
+    activeId: 'home',
+    workspaceId: 'workspace-1',
+    busy: false,
+  });
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -332,6 +345,154 @@ describe('CanvasListPage navigation', () => {
     ).toContain('Space One /');
     expect(localStorage.getItem('huabu.spaces.showAll')).toBe('true');
   });
+  async function requestDeletion() {
+    const remove = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="canvasList.deleteCanvas"], button[title="canvasList.deleteCanvas"]',
+    );
+    if (!remove) throw new Error('Missing Space delete button');
+    await act(async () => remove.click());
+  }
+
+  async function confirmDeletion() {
+    const confirm = Array.from(
+      container.querySelectorAll<HTMLButtonElement>('[role="dialog"] button'),
+    ).find((button) => button.textContent === 'actions.delete');
+    if (!confirm) throw new Error('Missing delete confirmation');
+    await act(async () => confirm.click());
+  }
+
+  function markSpaceOpen(loading = false) {
+    environment.getState.mockResolvedValue({
+      activeId: 'home',
+      workspaceId: 'workspace-1',
+      busy: false,
+      tabs: [
+        {
+          id: 'space-tab',
+          canvasId: 'space-1',
+          title: 'Space One',
+          loading,
+          running: false,
+          unread: false,
+          error: null,
+        },
+      ],
+    });
+  }
+
+  it.each([false, true])(
+    'blocks deleting an open desktop Space, including lazy restored Tabs (loading=%s)',
+    async (loading) => {
+      environment.desktopHome = true;
+      markSpaceOpen(loading);
+      await renderPage();
+      await requestDeletion();
+      expect(toast).toHaveBeenCalledWith('desktopTabs.closeBeforeDeleting', {
+        tone: 'warning',
+      });
+      expect(container.querySelector('[role="dialog"]')).toBeNull();
+      expect(deleteCanvasById).not.toHaveBeenCalled();
+      expect(environment.command).not.toHaveBeenCalled();
+    },
+  );
+
+  it('allows deletion after the desktop Tab is closed', async () => {
+    environment.desktopHome = true;
+    markSpaceOpen();
+    await renderPage();
+    await requestDeletion();
+    environment.getState.mockResolvedValue({
+      tabs: [],
+      activeId: 'home',
+      workspaceId: 'workspace-1',
+      busy: false,
+    });
+    await requestDeletion();
+    await confirmDeletion();
+    expect(deleteCanvasById).toHaveBeenCalledExactlyOnceWith('space-1');
+    expect(environment.command.mock.calls).toEqual([
+      [{ type: 'begin-space-deletion', canvasId: 'space-1' }],
+      ['end-space-deletion'],
+    ]);
+  });
+
+  it('rechecks the current desktop Tabs when deletion is confirmed', async () => {
+    environment.desktopHome = true;
+    await renderPage();
+    await requestDeletion();
+    markSpaceOpen();
+    await confirmDeletion();
+    expect(deleteCanvasById).not.toHaveBeenCalled();
+    expect(environment.command).not.toHaveBeenCalled();
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    expect(toast).toHaveBeenCalledWith('desktopTabs.closeBeforeDeleting', {
+      tone: 'warning',
+    });
+  });
+
+  it('does not delete if current Tab state cannot be read', async () => {
+    environment.desktopHome = true;
+    await renderPage();
+    environment.getState.mockRejectedValueOnce(
+      new Error('Tab state unavailable'),
+    );
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await requestDeletion();
+      expect(deleteCanvasById).not.toHaveBeenCalled();
+      expect(container.querySelector('[role="dialog"]')).toBeNull();
+      expect(toast).toHaveBeenCalledWith('Tab state unavailable', {
+        tone: 'danger',
+      });
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it('releases the desktop deletion guard if the HTTP deletion fails', async () => {
+    environment.desktopHome = true;
+    await renderPage();
+    await requestDeletion();
+    vi.mocked(deleteCanvasById).mockRejectedValueOnce(
+      new Error('Delete failed'),
+    );
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await confirmDeletion();
+      expect(environment.command).toHaveBeenLastCalledWith(
+        'end-space-deletion',
+      );
+      expect(
+        container.querySelector('a[href="/canvas/space-1"]'),
+      ).not.toBeNull();
+      expect(toast).toHaveBeenCalledWith('Delete failed', { tone: 'danger' });
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it('does not send the deletion request or release another operation when main rejects preparation', async () => {
+    environment.desktopHome = true;
+    await renderPage();
+    await requestDeletion();
+    environment.command.mockResolvedValueOnce({
+      ok: false,
+      error: 'Another Tab operation is in progress',
+    });
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await confirmDeletion();
+      expect(deleteCanvasById).not.toHaveBeenCalled();
+      expect(environment.command).toHaveBeenCalledTimes(1);
+      expect(toast).toHaveBeenCalledWith(
+        'Another Tab operation is in progress',
+        { tone: 'danger' },
+      );
+    } finally {
+      log.mockRestore();
+    }
+  });
+
   it('does not resurrect a deleted Space from an older background refresh', async () => {
     await renderPage();
     let resolveOld!: (value: Awaited<ReturnType<typeof listCanvases>>) => void;

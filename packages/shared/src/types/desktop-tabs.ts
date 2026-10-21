@@ -47,6 +47,8 @@ export type DesktopTabCommand =
   | 'open-settings'
   | 'close-home-menu'
   | 'dismiss-home-menu'
+  | 'end-space-deletion'
+  | { type: 'begin-space-deletion'; canvasId: string }
   | ({ type: 'open-home-menu' } & DesktopHomeMenuPosition);
 
 export interface DesktopTabReport {

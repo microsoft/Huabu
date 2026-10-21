@@ -21,8 +21,13 @@ import { Header } from '../components/Panels/Header/Header';
 import { SpaceDeletionDialog } from '../components/Space/SpaceDeletionDialog';
 import { APP_NAME } from '../config/app';
 import { useCanvasActions } from '../hooks/useCanvasActions';
-import { getElectronBridge, isElectron } from '../hooks/useElectron';
 import { i18n as translations } from '../i18n';
+import {
+  getElectronBridge,
+  isElectron,
+  requireDesktopTabSuccess,
+} from '../hooks/useElectron';
+import { deleteWorkspace } from '../store/previewWorkspace/persistence';
 import { useWorkspaceLabel, useWorkspaceStore } from '../store/workspaceStore';
 import { spaceAncestorIds } from '../utils/spaceHierarchy';
 
@@ -161,8 +166,28 @@ export default function CanvasListPage() {
     }
   };
 
-  const requestDelete = (canvasId: string, title: string | null) => {
-    setPendingDelete({ canvasId, title });
+  const reportDeleteError = (error: unknown) => {
+    console.error('Failed to delete canvas:', error);
+    toast(error instanceof Error ? error.message : String(error), {
+      tone: 'danger',
+    });
+  };
+
+  const canDeleteSpace = async (canvasId: string): Promise<boolean> => {
+    const tabs = getElectronBridge()?.tabs;
+    if (!tabs) return true;
+    const state = await tabs.getState();
+    if (!state.tabs.some((tab) => tab.canvasId === canvasId)) return true;
+    toast(t('desktopTabs.closeBeforeDeleting'), { tone: 'warning' });
+    return false;
+  };
+
+  const requestDelete = async (canvasId: string, title: string | null) => {
+    try {
+      if (await canDeleteSpace(canvasId)) setPendingDelete({ canvasId, title });
+    } catch (error) {
+      reportDeleteError(error);
+    }
   };
 
   const closeDeleteModal = () => {
@@ -172,9 +197,24 @@ export default function CanvasListPage() {
 
   const confirmDelete = async () => {
     if (!pendingDelete) return;
+    const tabs = getElectronBridge()?.tabs;
+    let deletionPrepared = false;
 
     try {
       setIsDeleting(true);
+      if (!(await canDeleteSpace(pendingDelete.canvasId))) {
+        setPendingDelete(null);
+        return;
+      }
+      if (tabs) {
+        requireDesktopTabSuccess(
+          await tabs.command({
+            type: 'begin-space-deletion',
+            canvasId: pendingDelete.canvasId,
+          }),
+        );
+        deletionPrepared = true;
+      }
       await deleteCanvasById(pendingDelete.canvasId);
       listRequestRef.current.version++;
       deleteWorkspace(pendingDelete.canvasId);
@@ -186,8 +226,15 @@ export default function CanvasListPage() {
       setPendingDelete(null);
       void fetchCanvases(false);
     } catch (error) {
-      console.error('Failed to delete canvas:', error);
+      reportDeleteError(error);
     } finally {
+      if (tabs && deletionPrepared) {
+        try {
+          requireDesktopTabSuccess(await tabs.command('end-space-deletion'));
+        } catch (error) {
+          reportDeleteError(error);
+        }
+      }
       setIsDeleting(false);
     }
   };

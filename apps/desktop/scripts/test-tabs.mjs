@@ -495,6 +495,36 @@ try {
   await home
     .locator(`a[href="/canvas/${createdTab.canvasId}"]`)
     .waitFor({ state: 'visible' });
+  const deletionLabels = await home.evaluate(async () => {
+    const { i18n } = await import('/src/i18n/index.ts');
+    return {
+      remove: i18n.t('canvasList.deleteCanvas'),
+      confirm: i18n.t('actions.delete'),
+      blocked: i18n.t('desktopTabs.closeBeforeDeleting'),
+    };
+  });
+  const createdCard = home
+    .locator(`a[href="/canvas/${createdTab.canvasId}"]`)
+    .locator('..');
+  await createdCard.hover();
+  await createdCard
+    .getByRole('button', { name: deletionLabels.remove, exact: true })
+    .click();
+  await home
+    .getByText(deletionLabels.blocked, { exact: true })
+    .waitFor({ state: 'visible' });
+  assert.equal(
+    await home.getByRole('dialog').count(),
+    0,
+    'An open Space must not enter delete confirmation',
+  );
+  assert.ok(
+    (
+      await shell.evaluate(() => window.electronBridge.tabs.getState())
+    ).tabs.some((tab) => tab.id === createdTab.id),
+    'Refusing deletion must keep the open Space Tab',
+  );
+  await request(`/canvas/${createdTab.canvasId}`);
   assert.equal(
     (
       await shell.evaluate(
@@ -504,6 +534,28 @@ try {
     ).ok,
     true,
     'The Space created from Home must save and close normally',
+  );
+  await createdCard.hover();
+  await createdCard
+    .getByRole('button', { name: deletionLabels.remove, exact: true })
+    .click();
+  const deleteDialog = home.getByRole('dialog');
+  await deleteDialog.waitFor({ state: 'visible' });
+  await deleteDialog
+    .getByRole('button', { name: deletionLabels.confirm, exact: true })
+    .click();
+  await home
+    .locator(`a[href="/canvas/${createdTab.canvasId}"]`)
+    .waitFor({ state: 'detached' });
+  await waitFor(
+    async () =>
+      !(await shell.evaluate(() => window.electronBridge.tabs.getState())).busy,
+    'releasing the closed-Space deletion guard',
+  );
+  assert.equal(
+    (await fetch(`${serverOrigin}/api/canvas/${createdTab.canvasId}`)).status,
+    404,
+    'Closing the Tab must allow deleting the Space from Home',
   );
   if (process.env.HUABU_TABS_SCREENSHOT) {
     await home.screenshot({

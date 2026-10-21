@@ -786,6 +786,79 @@ describe('desktop Space Tab lifecycle', () => {
     expect(tabs.snapshot.tabs.map((tab) => tab.canvasId)).toEqual([null]);
   });
 
+  it('requires an open Space to be closed before deletion', () => {
+    const a = open('a');
+    expect(() =>
+      tabs.command(
+        { type: 'begin-space-deletion', canvasId: 'a' },
+        mocks.views[0].webContents as never,
+      ),
+    ).toThrow('Close its Tab before deleting');
+    expect(tabs.snapshot.busy).toBe(false);
+    expect(a.webContents.close).not.toHaveBeenCalled();
+  });
+
+  it('blocks opening Tabs and changing Workspace until a closed-Space deletion finishes', async () => {
+    const home = mocks.views[0].webContents;
+    tabs.command(
+      { type: 'begin-space-deletion', canvasId: 'closed' },
+      home as never,
+    );
+    expect(tabs.snapshot.busy).toBe(true);
+    expect(() => tabs.open({ canvasId: 'closed' })).toThrow('saving');
+    await expect(tabs.beginWorkspaceChange(home as never)).rejects.toThrow(
+      'in progress',
+    );
+    await expect(tabs.prepareCloseAll(true)).rejects.toThrow('in progress');
+    expect(tabs.snapshot.busy).toBe(true);
+    tabs.command('end-space-deletion', home as never);
+    expect(tabs.snapshot.busy).toBe(false);
+    expect(() => tabs.open({ canvasId: 'another' })).not.toThrow();
+  });
+
+  it('does not allow a Space renderer to acquire or release Home deletion guards', () => {
+    const a = open('a');
+    expect(() =>
+      tabs.command(
+        { type: 'begin-space-deletion', canvasId: 'closed' },
+        a.webContents as never,
+      ),
+    ).toThrow('Only Home');
+    tabs.command(
+      { type: 'begin-space-deletion', canvasId: 'closed' },
+      mocks.views[0].webContents as never,
+    );
+    expect(() =>
+      tabs.command('end-space-deletion', a.webContents as never),
+    ).toThrow('Only Home');
+    expect(tabs.snapshot.busy).toBe(true);
+    tabs.command('end-space-deletion', mocks.views[0].webContents as never);
+  });
+
+  it('releases an abandoned deletion guard when Home crashes without dropping healthy Space Tabs', () => {
+    open('a');
+    tabs.command(
+      { type: 'begin-space-deletion', canvasId: 'closed' },
+      mocks.views[0].webContents as never,
+    );
+    crash(mocks.views[0]);
+    expect(tabs.snapshot.busy).toBe(false);
+    expect(tabs.snapshot.workspaceId).toBe('workspace');
+    expect(tabs.snapshot.tabs.map((tab) => tab.canvasId)).toEqual([null, 'a']);
+  });
+
+  it('does not release a deletion guard when an unrelated Space crashes', () => {
+    const a = open('a');
+    tabs.command(
+      { type: 'begin-space-deletion', canvasId: 'closed' },
+      mocks.views[0].webContents as never,
+    );
+    crash(a);
+    expect(tabs.snapshot.busy).toBe(true);
+    tabs.command('end-space-deletion', mocks.views[0].webContents as never);
+    expect(tabs.snapshot.busy).toBe(false);
+  });
+
   it('requires Home to switch Workspaces', async () => {
     const a = open('a');
     await expect(

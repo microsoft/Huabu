@@ -1,4 +1,10 @@
 {
+  "desktopTabs": {
+    "label": "已打开的 Space",
+    "openSpace": "打开 Space",
+    "closeTab": "关闭标签页",
+    "closeBeforeDeleting": "此 Space 正在打开，请关闭标签页后再删除。"
+  },
   "sigil": {
     "chooseResource": "选择资源",
     "bindingHint": "点击画布对象，或从列表选择资源",
@@ -24,11 +30,6 @@
     "partialSelection": "未完整圈选的 # 引用不会被包含。",
     "tooMany": "每次请求最多圈选 32 个 # 引用。",
     "finishBinding": "请先选择资源或关闭 # 选择器，再发送。"
-  },
-  "desktopTabs": {
-    "label": "已打开的 Space",
-    "openSpace": "打开 Space",
-    "closeTab": "关闭标签页"
   },
   "app": {
     "loadingWorkspace": "正在加载你的 Home 文件夹…",

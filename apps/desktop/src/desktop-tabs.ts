@@ -86,6 +86,7 @@ export class DesktopTabs {
   private origin: string;
   private sessionPath: string;
   private workspaceChanging = false;
+  private spaceDeleting = false;
   private legacyStorage: Record<string, string> = {};
   private preferences: Record<string, string> = {};
 
@@ -340,8 +341,12 @@ export class DesktopTabs {
     tab.ready = false;
     tab.state.error = message;
     tab.state.loading = false;
-    if (tab.state.id === HOME_ID && this.workspaceChanging) {
+    if (
+      tab.state.id === HOME_ID &&
+      (this.workspaceChanging || this.spaceDeleting)
+    ) {
       this.workspaceChanging = false;
+      this.spaceDeleting = false;
       this.resume();
     } else this.publish();
     if (notify)
@@ -852,6 +857,33 @@ export class DesktopTabs {
   }
 
   command(raw: unknown, sender?: WebContents): void {
+    if (
+      raw === 'end-space-deletion' ||
+      (raw &&
+        typeof raw === 'object' &&
+        'type' in raw &&
+        raw.type === 'begin-space-deletion')
+    ) {
+      if (!sender || this.contentTab(sender).state.id !== HOME_ID)
+        throw new Error('Only Home can delete a Space');
+      if (raw === 'end-space-deletion') {
+        if (!this.spaceDeleting)
+          throw new Error('No Space deletion is in progress');
+        this.spaceDeleting = false;
+        this.resume();
+        return;
+      }
+      if (this.busy) throw new Error('Another Tab operation is in progress');
+      const { canvasId } = parseTabNavigation(raw);
+      if (!canvasId) throw new Error('Invalid Space identity');
+      if (this.tabs.some((tab) => tab.state.canvasId === canvasId))
+        throw new Error('This Space is open. Close its Tab before deleting.');
+      this.spaceDeleting = true;
+      this.busy = true;
+      this.setHomeMenu(null);
+      this.publish();
+      return;
+    }
     if (raw === 'close-home-menu' || raw === 'dismiss-home-menu') {
       if (
         !sender ||

@@ -1,4 +1,10 @@
 {
+  "desktopTabs": {
+    "label": "Open Spaces",
+    "openSpace": "Open a Space",
+    "closeTab": "Close Tab",
+    "closeBeforeDeleting": "This Space is open. Close its Tab before deleting it."
+  },
   "sigil": {
     "chooseResource": "Choose a resource",
     "bindingHint": "Click a canvas object or choose a resource from the list",
@@ -24,11 +30,6 @@
     "partialSelection": "A partially selected # reference is not included.",
     "tooMany": "Select at most 32 # references per request.",
     "finishBinding": "Choose a resource or close the # picker before sending."
-  },
-  "desktopTabs": {
-    "label": "Open Spaces",
-    "openSpace": "Open a Space",
-    "closeTab": "Close Tab"
   },
   "app": {
     "loadingWorkspace": "Loading your Home folder…",
