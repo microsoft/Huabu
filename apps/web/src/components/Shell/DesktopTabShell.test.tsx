@@ -85,6 +85,38 @@ describe('DesktopTabShell minimal Tab presentation', () => {
     await act(async () => root.render(<DesktopTabShell />));
   }
 
+  it('keeps the title and close control inside one shared active Tab surface', async () => {
+    await render();
+    const tab = container.querySelector<HTMLElement>(
+      '[role="tab"][aria-label="Space A"]',
+    );
+    const close = button('desktopTabs.closeTab');
+    expect(tab?.parentElement).toBe(close.parentElement);
+    expect(tab?.parentElement?.classList.contains('bg-bg-default')).toBe(true);
+    expect(container.firstElementChild?.classList.contains('bg-surface')).toBe(
+      true,
+    );
+    expect(tab?.parentElement?.classList.contains('border-r')).toBe(true);
+    expect(tab?.parentElement?.classList.contains('rounded-md')).toBe(false);
+    expect(tab?.classList.contains('enabled:hover:bg-transparent')).toBe(true);
+    expect(tab?.classList.contains('text-[13px]')).toBe(true);
+    expect(tab?.classList.contains('leading-5')).toBe(true);
+    expect(tab?.classList.contains('font-normal')).toBe(true);
+    expect(close.closest('button button')).toBeNull();
+    expect(tab?.parentElement?.classList.contains('group/tab')).toBe(true);
+    expect(close.classList.contains('opacity-0')).toBe(true);
+    expect(close.classList.contains('group-hover/tab:opacity-100')).toBe(true);
+    expect(
+      close.classList.contains('group-has-[:focus-visible]/tab:opacity-100'),
+    ).toBe(true);
+    expect(close.classList.contains('[@media(hover:none)]:opacity-100')).toBe(
+      true,
+    );
+    await act(async () => close.click());
+    expect(mocks.close).toHaveBeenCalledWith('space-a');
+    expect(mocks.activate).not.toHaveBeenCalled();
+  });
+
   function button(label: string): HTMLButtonElement {
     const element = container.querySelector<HTMLButtonElement>(
       `button[aria-label="${label}"]`,
@@ -108,6 +140,14 @@ describe('DesktopTabShell minimal Tab presentation', () => {
     expect(
       container.querySelectorAll('[aria-label="desktopTabs.closeTab"]'),
     ).toHaveLength(1);
+  });
+
+  it('does not expose an opaque Space ID while its title is still unknown', async () => {
+    snapshot.tabs[1].title = '';
+    await render();
+    const tab = button('canvasList.untitled');
+    expect(tab.textContent).toBe('canvasList.untitled');
+    expect(container.textContent).not.toContain('space-a');
   });
 
   it('keeps activation and close operations intact', async () => {
@@ -153,6 +193,27 @@ describe('DesktopTabShell minimal Tab presentation', () => {
     expect(home.getAttribute('aria-expanded')).toBeNull();
   });
 
+  it('highlights selected Home like other Tabs without adding close-control padding', async () => {
+    await render();
+    const home = button('navigation.home');
+    for (const activeId of ['space-a', 'home', 'space-a']) {
+      await act(async () =>
+        mocks.onState.mock.calls[0][0]({ ...snapshot, activeId }),
+      );
+      expect(home.parentElement?.classList.contains('bg-bg-default')).toBe(
+        activeId === 'home',
+      );
+      expect(
+        button('Space A').parentElement?.classList.contains('bg-bg-default'),
+      ).toBe(activeId === 'space-a');
+      expect(home.parentElement?.classList.contains('pr-1')).toBe(false);
+      expect(home.classList.contains('w-10')).toBe(true);
+      expect(home.getAttribute('aria-selected')).toBe(
+        String(activeId === 'home'),
+      );
+    }
+  });
+
   it('keeps Workspace immediately right of Settings in both Home and Space', async () => {
     await render();
     const workspace = button('workspace.switcher');
@@ -195,12 +256,33 @@ describe('DesktopTabShell minimal Tab presentation', () => {
     expect(workspace.disabled).toBe(false);
   });
 
-  it('keeps the open-Space action in the navigation strip', async () => {
+  it('opens a new Tab instead of navigating Home', async () => {
     await render();
-    await act(async () => button('desktopTabs.openSpace').click());
-    expect(mocks.open).toHaveBeenCalledWith({ canvasId: null });
+    await act(async () => button('desktopTabs.newTab').click());
+    expect(mocks.command).toHaveBeenCalledWith('new-tab');
+    expect(mocks.open).not.toHaveBeenCalled();
   });
 
+  it('renders the blank Tab as a closable named Tab, not another Home icon', async () => {
+    snapshot.tabs.push({
+      ...snapshot.tabs[0],
+      id: 'new-tab',
+      title: 'New tab',
+    });
+    snapshot.activeId = 'new-tab';
+    await render();
+    const blank = container.querySelector<HTMLButtonElement>(
+      '[role="tab"][aria-label="desktopTabs.newTab"]',
+    );
+    expect(blank?.textContent).toBe('desktopTabs.newTab');
+    expect(blank?.querySelector('svg')).toBeNull();
+    const close = blank?.parentElement?.querySelector<HTMLButtonElement>(
+      '[aria-label="desktopTabs.closeTab"]',
+    );
+    expect(close).toBeTruthy();
+    await act(async () => close?.click());
+    expect(mocks.close).toHaveBeenCalledWith('new-tab');
+  });
   it('places Settings before Workspace and opens it in the active content page', async () => {
     await render();
     const settings = button('settings.open');
@@ -219,7 +301,7 @@ describe('DesktopTabShell minimal Tab presentation', () => {
     for (const label of [
       'navigation.home',
       'desktopTabs.closeTab',
-      'desktopTabs.openSpace',
+      'desktopTabs.newTab',
       'settings.open',
       'workspace.switcher',
     ]) {

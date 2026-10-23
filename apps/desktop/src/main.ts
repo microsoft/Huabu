@@ -964,7 +964,7 @@ function registerDiagnosticsIpc(): void {
       const target = desktopTabs?.owns(event.sender)
         ? (desktopTabs.activeContents ?? event.sender)
         : win.webContents;
-      target.openDevTools();
+      target.openDevTools({ mode: 'detach' });
       return { ok: true };
     },
   );
@@ -1166,15 +1166,17 @@ function createWindow(url: string): void {
   //   - Windows: `titleBarOverlay` keeps the native buttons in the
   //     top-right corner, just transparent over our HTML chrome. We
   //     hand it the same height so the buttons line up with our row.
-  //   - macOS: `hiddenInset` keeps the traffic-light buttons; the
-  //     renderer leaves a left-side gutter so they don't sit on top of
-  //     our home button.
+  //   - macOS: position the native buttons inside the HTML strip and
+  //     reserve their left-side gutter in the Shell.
   //   - Linux: no overlay support yet, so we go fully frameless. v1
   //     ships without custom HTML buttons — users use the OS-level
   //     window manager shortcuts. We can wire IPC buttons later.
   const platformChrome:
     | { titleBarStyle: 'hidden'; titleBarOverlay: object }
-    | { titleBarStyle: 'hiddenInset' }
+    | {
+        titleBarStyle: 'hidden';
+        trafficLightPosition: { x: number; y: number };
+      }
     | { frame: false } =
     process.platform === 'win32'
       ? {
@@ -1186,7 +1188,10 @@ function createWindow(url: string): void {
           },
         }
       : process.platform === 'darwin'
-        ? { titleBarStyle: 'hiddenInset' as const }
+        ? {
+            titleBarStyle: 'hidden' as const,
+            trafficLightPosition: { x: 12, y: 10 },
+          }
         : { frame: false as const };
 
   // Prefer the .ico on Windows for crisp multi-resolution rendering in the
@@ -1237,7 +1242,10 @@ function createWindow(url: string): void {
     if (revealed) return;
     revealed = true;
     clearTimeout(revealTimer);
-    if (!win.isDestroyed()) win.show();
+    if (!win.isDestroyed()) {
+      if (process.platform === 'darwin') win.setWindowButtonVisibility(true);
+      win.show();
+    }
     closeSplashWindow();
   }
   win.once('ready-to-show', reveal);
@@ -1280,7 +1288,7 @@ function createWindow(url: string): void {
     IS_DEV &&
     (process.env.WEB_DEV_SERVER_URL || process.env.HUABU_DEVTOOLS === '1')
   ) {
-    mainWindow.webContents.openDevTools();
+    mainWindow.webContents.openDevTools({ mode: 'detach' });
   }
 
   const sendFullScreen = (fullScreen: boolean): void => {

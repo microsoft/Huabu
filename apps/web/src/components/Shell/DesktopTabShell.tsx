@@ -17,6 +17,8 @@ import type {
 } from '@huabu/shared/desktop-tabs';
 import type { CSSProperties, KeyboardEvent } from 'react';
 
+const NEW_DESKTOP_TAB_ID = 'new-tab';
+
 export default function DesktopTabShell() {
   const bridge = getElectronBridge();
   const tabs = bridge?.tabs;
@@ -138,7 +140,7 @@ export default function DesktopTabShell() {
 
   return (
     <div
-      className="bg-surface border-edge-default text-fg-default flex items-center gap-1 border-b px-2"
+      className="bg-surface border-edge-default text-fg-default flex items-center border-b pr-2"
       style={
         {
           height: bridge.titleBarHeight,
@@ -152,34 +154,45 @@ export default function DesktopTabShell() {
         ref={tabList}
         role="tablist"
         aria-label={t('desktopTabs.label')}
-        className="flex min-w-0 items-center gap-1 overflow-x-auto"
+        className="flex h-full min-w-0 items-stretch overflow-x-auto"
         style={{ WebkitAppRegion: 'no-drag' } as CSSProperties}
       >
         {snapshot?.tabs.map((tab, index) => (
           <div
             key={tab.id}
             className={cn(
-              'flex shrink-0 items-center rounded-md',
-              tab.id === snapshot.activeId && 'bg-hover',
+              'group/tab border-edge-default flex shrink-0 items-center border-r',
+              tab.id !== 'home' && 'pr-1',
+              tab.id === snapshot.activeId
+                ? 'bg-bg-default'
+                : !snapshot.busy && 'hover:bg-hover',
             )}
           >
             <Button
               role="tab"
               aria-selected={tab.id === snapshot.activeId}
-              aria-label={tab.canvasId ? tab.title : t('navigation.home')}
+              aria-label={
+                tab.id === NEW_DESKTOP_TAB_ID
+                  ? t('desktopTabs.newTab')
+                  : tab.canvasId
+                    ? tab.title || t('canvasList.untitled')
+                    : t('navigation.home')
+              }
               tabIndex={tab.id === snapshot.activeId ? 0 : -1}
               variant="ghost"
-              size={tab.canvasId ? 'sm' : 'md'}
-              iconOnly={!tab.canvasId}
+              size={tab.id === 'home' ? 'md' : 'sm'}
+              iconOnly={tab.id === 'home'}
               disabled={snapshot.busy}
               className={cn(
-                'h-7',
-                tab.canvasId ? 'max-w-48 gap-1.5 px-2' : 'w-7',
+                'h-full rounded-none enabled:hover:bg-transparent',
+                tab.id === 'home'
+                  ? 'w-10'
+                  : 'max-w-48 gap-1.5 px-3 text-[13px] leading-5 font-normal',
               )}
               onClick={() => run(tabs.activate(tab.id))}
               onKeyDown={(event) => onTabKeyDown(event, index)}
             >
-              {tab.canvasId ? (
+              {tab.id !== 'home' ? (
                 <span
                   className={cn(
                     'truncate',
@@ -188,17 +201,20 @@ export default function DesktopTabShell() {
                       : 'text-fg-muted',
                   )}
                 >
-                  {tab.title}
+                  {tab.id === NEW_DESKTOP_TAB_ID
+                    ? t('desktopTabs.newTab')
+                    : tab.title || t('canvasList.untitled')}
                 </span>
               ) : (
                 <House aria-hidden />
               )}
             </Button>
-            {tab.canvasId ? (
+            {tab.id !== 'home' ? (
               <Button
                 variant="ghost"
                 size="md"
                 iconOnly
+                className="h-7 w-7 shrink-0 opacity-0 group-hover/tab:opacity-100 group-has-[:focus-visible]/tab:opacity-100 [@media(hover:none)]:opacity-100"
                 aria-label={t('desktopTabs.closeTab')}
                 disabled={snapshot.busy}
                 onClick={() => run(tabs.close(tab.id))}
@@ -218,9 +234,9 @@ export default function DesktopTabShell() {
           variant="ghost"
           size="md"
           iconOnly
-          aria-label={t('desktopTabs.openSpace')}
+          aria-label={t('desktopTabs.newTab')}
           disabled={snapshot?.busy}
-          onClick={() => run(tabs.open({ canvasId: null }))}
+          onClick={() => run(tabs.command('new-tab'))}
         >
           <Plus />
         </Button>

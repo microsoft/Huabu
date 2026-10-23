@@ -98,15 +98,15 @@ import {
 import { getElectronBridge } from '@/hooks/useElectron';
 import { getCanvasVisibleArea } from '@/utils/canvasViewport';
 import {
-  changedSpaceEntries,
-  isVisibleWorldNode,
-  REQUEST_DELETE_SPACE,
-} from '@/utils/spaceHierarchy';
-import {
   desktopStorageKey,
   readApplicationPreference,
   writeApplicationPreference,
 } from '@/utils/desktopStorage';
+import {
+  changedSpaceEntries,
+  isVisibleWorldNode,
+  REQUEST_DELETE_SPACE,
+} from '@/utils/spaceHierarchy';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
 import { useWorkspaceStore } from './workspaceStore';

@@ -44,11 +44,17 @@ export interface DesktopHomeMenuPosition {
 }
 
 export type DesktopTabCommand =
+  | 'new-tab'
   | 'open-settings'
   | 'close-home-menu'
   | 'dismiss-home-menu'
   | 'end-space-deletion'
-  | { type: 'begin-space-deletion'; canvasId: string }
+  | {
+      type: 'sync-space-titles';
+      workspaceId: string;
+      titles: Record<string, string>;
+    }
+  | { type: 'begin-space-deletion'; canvasId: string; canvasIds?: string[] }
   | ({ type: 'open-home-menu' } & DesktopHomeMenuPosition);
 
 export interface DesktopTabReport {

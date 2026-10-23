@@ -30,6 +30,9 @@ interface TestContents {
   close: ReturnType<typeof vi.fn>;
   reload: ReturnType<typeof vi.fn>;
   focus: ReturnType<typeof vi.fn>;
+  isDevToolsOpened: ReturnType<typeof vi.fn>;
+  closeDevTools: ReturnType<typeof vi.fn>;
+  openDevTools: ReturnType<typeof vi.fn>;
   isDestroyed: () => boolean;
   callbacks: Map<string, (...args: never[]) => void>;
 }
@@ -71,7 +74,9 @@ vi.mock('electron', () => ({
       close: vi.fn(),
       reload: vi.fn(),
       focus: vi.fn(),
-      toggleDevTools: vi.fn(),
+      isDevToolsOpened: vi.fn().mockReturnValue(false),
+      closeDevTools: vi.fn(),
+      openDevTools: vi.fn(),
       isDestroyed: () => false,
       callbacks: new Map<string, (...args: never[]) => void>(),
       on: (event: string, callback: (...args: never[]) => void) =>
@@ -115,6 +120,9 @@ describe('desktop Space Tab lifecycle', () => {
         close: vi.fn(),
         reload: vi.fn(),
         focus: vi.fn(),
+        isDevToolsOpened: vi.fn().mockReturnValue(false),
+        closeDevTools: vi.fn(),
+        openDevTools: vi.fn(),
         isDestroyed: () => false,
         callbacks: new Map(),
       },
@@ -145,12 +153,191 @@ describe('desktop Space Tab lifecycle', () => {
     );
   }
 
+  it('opens active content DevTools detached and closes them on the next shortcut', () => {
+    const view = open('devtools-space');
+    const event = { preventDefault: vi.fn() };
+    const input = { type: 'keyDown', key: 'F12' };
+    tabs.handleInput(event as Electron.Event, input as Electron.Input);
+    expect(view.webContents.openDevTools).toHaveBeenCalledWith({
+      mode: 'detach',
+    });
+    view.webContents.isDevToolsOpened.mockReturnValue(true);
+    tabs.handleInput(event as Electron.Event, input as Electron.Input);
+    expect(view.webContents.closeDevTools).toHaveBeenCalledOnce();
+    expect(event.preventDefault).toHaveBeenCalledTimes(2);
+  });
+
   function open(canvasId: string): TestView {
     tabs.open({ canvasId });
     const view = mocks.views.at(-1)!;
     tabs.ready(view.webContents as never);
     return view;
   }
+
+  const newTab = () => tabs.command('new-tab', shell.webContents as never);
+
+  it('blocks deleting a Space tree if a descendant has an open Tab', () => {
+    open('child');
+    expect(() =>
+      tabs.command(
+        {
+          type: 'begin-space-deletion',
+          canvasId: 'parent',
+          canvasIds: ['parent', 'child'],
+        },
+        mocks.views[0].webContents as never,
+      ),
+    ).toThrow('This Space is open');
+    expect(tabs.snapshot.busy).toBe(false);
+  });
+
+  it('coordinates saves once per renderer and routes blank Tab Settings and reload to Home', async () => {
+    const space = open('a');
+    const home = mocks.views[0];
+    newTab();
+    tabs.command('open-settings');
+    expect(home.webContents.send).toHaveBeenCalledWith(
+      'menu:command',
+      'open-settings',
+    );
+    const saving = tabs.prepareCloseAll();
+    expect(() => newTab()).toThrow('Another Tab operation');
+    expect(
+      home.webContents.send.mock.calls.filter(
+        ([channel]) => channel === 'tabs:prepare-close',
+      ),
+    ).toHaveLength(1);
+    finish(home);
+    finish(space);
+    await saving;
+    tabs.resume();
+    const reload = tabs.reload('new-tab');
+    finish(home);
+    await reload;
+    expect(home.webContents.reload).toHaveBeenCalledOnce();
+    expect(space.webContents.reload).not.toHaveBeenCalled();
+  });
+
+  it('returns to the Space list when activating a retained blank Tab after visiting Workspace setup', () => {
+    newTab();
+    tabs.open({ canvasId: null, homePath: '/setup' });
+    tabs.activate('new-tab');
+    expect(mocks.views[0].webContents.send).toHaveBeenCalledWith(
+      'tabs:navigate',
+      {
+        canvasId: null,
+        homePath: '/spaces',
+      },
+    );
+  });
+
+  it('keeps one blank Tab using the retained Home view and returns to the previous Space on close', async () => {
+    const space = open('a');
+    const previousId = tabs.snapshot.activeId;
+    newTab();
+    newTab();
+    expect(
+      tabs.snapshot.tabs.map((tab) => tab.id).filter((id) => id === 'new-tab'),
+    ).toHaveLength(1);
+    expect(tabs.snapshot.activeId).toBe('new-tab');
+    expect(mocks.views).toHaveLength(2);
+    expect(mocks.views[0].setVisible).toHaveBeenLastCalledWith(true);
+    expect(space.setVisible).toHaveBeenLastCalledWith(false);
+    expect(tabs.activeContents).toBe(mocks.views[0].webContents);
+    await tabs.close('new-tab');
+    expect(tabs.snapshot.activeId).toBe(previousId);
+    expect(mocks.views[0].webContents.close).not.toHaveBeenCalled();
+    expect(space.webContents.send).not.toHaveBeenCalledWith(
+      'tabs:prepare-close',
+      expect.anything(),
+    );
+  });
+
+  it('replaces the blank Tab in place when opening a Space, including an already open Space', () => {
+    open('a');
+    const a = tabs.snapshot.activeId;
+    newTab();
+    tabs.activate(a);
+    open('b');
+    tabs.activate('new-tab');
+    open('c');
+    expect(tabs.snapshot.tabs.map((tab) => tab.canvasId)).toEqual([
+      null,
+      'a',
+      'c',
+      'b',
+    ]);
+    newTab();
+    tabs.open({ canvasId: 'a' });
+    expect(tabs.snapshot.activeId).toBe(a);
+    expect(tabs.snapshot.tabs.map((tab) => tab.canvasId)).toEqual([
+      null,
+      'a',
+      'c',
+      'b',
+    ]);
+  });
+
+  it('does not restore the blank Tab or save it as a Space', () => {
+    open('a');
+    newTab();
+    const saved = JSON.parse(
+      readFileSync(join(directory, 'desktop-tabs.json'), 'utf8'),
+    );
+    expect(saved[JSON.stringify(['local', 'workspace'])]).toEqual({
+      canvasIds: ['a'],
+      activeCanvasId: null,
+      titles: {},
+    });
+    const restored = makeTabs();
+    const home = mocks.views.at(-1);
+    if (!home) throw new Error('Missing restored Home view');
+    restored.ready(home.webContents as never);
+    restored.workspaceReady(home.webContents as never, 'workspace');
+    expect(restored.snapshot.tabs.map((tab) => tab.canvasId)).toEqual([
+      null,
+      'a',
+    ]);
+    expect(restored.snapshot.activeId).toBe('home');
+    restored.dispose();
+  });
+
+  it('uses the new Tab shortcut and rejects unsupported callers', () => {
+    const event = { preventDefault: vi.fn() };
+    tabs.handleInput(
+      event as Electron.Event,
+      {
+        type: 'keyDown',
+        key: 't',
+        meta: true,
+        control: true,
+      } as Electron.Input,
+    );
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+    expect(tabs.snapshot.activeId).toBe('new-tab');
+    expect(() =>
+      tabs.command('new-tab', mocks.views[0].webContents as never),
+    ).toThrow('Only the desktop shell');
+  });
+
+  it('keeps the blank Tab when opening a Space cannot persist, and closes it to Home if its previous Space is gone', async () => {
+    const space = open('a');
+    const id = tabs.snapshot.activeId;
+    newTab();
+    const task = tabs.close(id);
+    finish(space);
+    await task;
+    await tabs.close('new-tab');
+    expect(tabs.snapshot.activeId).toBe('home');
+    newTab();
+    mkdirSync(join(directory, 'desktop-tabs.json.tmp'));
+    expect(() => tabs.open({ canvasId: 'b' })).toThrow();
+    expect(tabs.snapshot.activeId).toBe('new-tab');
+    expect(tabs.snapshot.tabs.map((tab) => tab.id)).toEqual([
+      'home',
+      'new-tab',
+    ]);
+  });
 
   function finish(view: TestView, ok = true): void {
     const message = view.webContents.send.mock.calls.findLast(
@@ -787,8 +974,10 @@ describe('desktop Space Tab lifecycle', () => {
   });
 
   it('restores order and active Space lazily even when the local port changes', () => {
-    open('a');
-    open('b');
+    const a = open('a');
+    tabs.report(a.webContents as never, report({ title: 'Alpha' }));
+    const b = open('b');
+    tabs.report(b.webContents as never, report({ title: 'Beta' }));
     tabs.activate(tabs.snapshot.tabs[1].id);
     tabs.dispose();
     const before = mocks.views.length;
@@ -805,6 +994,77 @@ describe('desktop Space Tab lifecycle', () => {
         ?.canvasId,
     ).toBe('a');
     expect(mocks.views.length - before).toBe(2);
+    expect(tabs.snapshot.tabs.slice(1).map((tab) => tab.title)).toEqual([
+      'Alpha',
+      'Beta',
+    ]);
+  });
+
+  it('hydrates legacy lazy Tab names from Home without loading them or overwriting a live rename', () => {
+    tabs.dispose();
+    writeFileSync(
+      join(directory, 'desktop-tabs.json'),
+      JSON.stringify({
+        '["local","workspace"]': { canvasIds: ['a', 'b'], activeCanvasId: 'a' },
+      }),
+    );
+    const before = mocks.views.length;
+    tabs = makeTabs();
+    const home = mocks.views[before];
+    tabs.ready(home.webContents as never);
+    tabs.workspaceReady(home.webContents as never, 'workspace');
+    const a = mocks.views[before + 1];
+    tabs.ready(a.webContents as never);
+    tabs.report(a.webContents as never, report({ title: 'Renamed Alpha' }));
+    const catalog = {
+      type: 'sync-space-titles',
+      workspaceId: 'workspace',
+      titles: { a: 'Old Alpha', b: 'Beta' },
+    };
+    tabs.command(catalog, home.webContents as never);
+    expect(tabs.snapshot.tabs.slice(1).map((tab) => tab.title)).toEqual([
+      'Renamed Alpha',
+      'Beta',
+    ]);
+    expect(mocks.views.length - before).toBe(2);
+    expect(() =>
+      tabs.command(
+        { ...catalog, workspaceId: 'previous' },
+        home.webContents as never,
+      ),
+    ).toThrow('active Workspace');
+    expect(() => tabs.command(catalog, a.webContents as never)).toThrow(
+      'Only Home',
+    );
+    expect(() =>
+      tabs.command(
+        { ...catalog, titles: { b: 42 } },
+        home.webContents as never,
+      ),
+    ).toThrow('Invalid Tab title');
+  });
+
+  it('does not treat inherited catalogue properties as Space names', () => {
+    tabs.dispose();
+    writeFileSync(
+      join(directory, 'desktop-tabs.json'),
+      JSON.stringify({
+        '["local","workspace"]': {
+          canvasIds: ['constructor'],
+          activeCanvasId: null,
+        },
+      }),
+    );
+    const before = mocks.views.length;
+    tabs = makeTabs();
+    const home = mocks.views[before];
+    tabs.ready(home.webContents as never);
+    tabs.workspaceReady(home.webContents as never, 'workspace');
+    tabs.command(
+      { type: 'sync-space-titles', workspaceId: 'workspace', titles: {} },
+      home.webContents as never,
+    );
+    expect(tabs.snapshot.tabs[1].title).toBe('');
   });
 
   it('keeps remote Server sessions separate', () => {

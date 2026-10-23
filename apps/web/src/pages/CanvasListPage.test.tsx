@@ -8,12 +8,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import CanvasListPage from './CanvasListPage';
 import { ApiError } from '../api/_client';
-import { deleteCanvasById, exportCanvas, listCanvases } from '../api/canvas';
+import { exportCanvas, listCanvases } from '../api/canvas';
+import {
+  deleteSpaceTree,
+  getSpaceDeletionPreview,
+} from '../api/spaceHierarchy';
 import { toast } from '../components/Common/Toast';
 import { DesktopHomeMenu } from '../components/Shell/DesktopHomeMenu';
 import { APP_NAME } from '../config/app';
 
 import type {
+  DesktopTabCommand,
   DesktopTabResult,
   DesktopTabsSnapshot,
 } from '@huabu/shared/desktop-tabs';
@@ -22,8 +27,12 @@ import type { ReactNode } from 'react';
 const setCanvasCount = vi.fn();
 const setSpaceTitle = vi.fn();
 vi.mock('../i18n', () => ({ i18n: { t: (key: string) => key } }));
-vi.mock('../components/Space/SpaceDeletionDialog', () => ({
-  SpaceDeletionDialog: () => null,
+vi.mock('../api/spaceHierarchy', () => ({
+  deleteSpaceTree: vi.fn(),
+  getSpaceDeletionPreview: vi.fn(),
+}));
+vi.mock('../store/canvasStore', () => ({
+  drainPendingSaves: vi.fn(async () => undefined),
 }));
 const environment = vi.hoisted(() => ({
   electron: false,
@@ -40,6 +49,9 @@ const environment = vi.hoisted(() => ({
   onHomeMenu:
     vi.fn<(listener: (position: { x: number } | null) => void) => () => void>(),
   command: vi.fn(),
+  refreshTitles: vi.fn(async () => undefined),
+  translate: (key: string) => key,
+  syncTitles: vi.fn(),
   getState: vi.fn<() => Promise<DesktopTabsSnapshot>>(),
   onState:
     vi.fn<(listener: (state: DesktopTabsSnapshot) => void) => () => void>(),
@@ -48,7 +60,7 @@ const environment = vi.hoisted(() => ({
 vi.mock('react-i18next', () => ({
   Trans: ({ i18nKey }: { i18nKey: string }) => i18nKey,
   useTranslation: () => ({
-    t: (key: string) => key,
+    t: environment.translate,
     i18n: { language: 'en' },
   }),
 }));
@@ -107,7 +119,10 @@ vi.mock('../hooks/useElectron', () => {
     tabs: {
       context: { role: 'home' },
       onHomeMenu: environment.onHomeMenu,
-      command: environment.command,
+      command: (command: DesktopTabCommand) =>
+        typeof command === 'object' && command.type === 'sync-space-titles'
+          ? environment.syncTitles(command)
+          : environment.command(command),
       onState: environment.onState,
       getState: environment.getState,
     },
@@ -132,6 +147,7 @@ vi.mock('../store/workspaceStore', () => {
     capabilities: { canChangeWorkspace: environment.canChangeWorkspace },
     setCanvasCount,
     setSpaceTitle,
+    refreshSpaceTitles: environment.refreshTitles,
     workspacePath: '/tmp/test-workspace',
     workspaceId: environment.workspaceId,
     isSyncing: environment.syncing,
@@ -186,6 +202,14 @@ beforeEach(() => {
   environment.pickFolder.mockResolvedValue({ ok: false, reason: 'cancelled' });
   environment.onHomeMenu.mockReturnValue(vi.fn());
   environment.command.mockResolvedValue({ ok: true });
+  environment.syncTitles.mockResolvedValue({ ok: true });
+  vi.mocked(getSpaceDeletionPreview).mockResolvedValue({
+    token: 'token',
+    spaces: [{ canvasId: 'space-1', title: 'Space One' }],
+  });
+  vi.mocked(deleteSpaceTree).mockResolvedValue({
+    deletedCanvasIds: ['space-1'],
+  });
   environment.onState.mockReturnValue(vi.fn());
   environment.getState.mockResolvedValue({
     tabs: [],
@@ -267,84 +291,210 @@ describe('CanvasListPage navigation', () => {
     expect(tabs[1].getAttribute('aria-selected')).toBe('true');
     expect(localStorage.getItem('huabu.spaces.showAll')).toBe('true');
   });
-  it('searches nested Space names without matching ancestor names or paths', async () => {
-    vi.mocked(listCanvases).mockResolvedValueOnce({
-      canvases: [
-        {
-          canvasId: 'space-1',
-          title: 'Parent',
-          nodeCount: 0,
-          createdAt: 0,
-          updatedAt: 0,
-        },
-        {
-          canvasId: 'child',
-          title: 'Nested',
-          parentSpaceId: 'space-1',
-          nodeCount: 0,
-          createdAt: 0,
-          updatedAt: 0,
-        },
-      ],
-    });
-    await renderPage();
-    const input = container.querySelector<HTMLInputElement>(
-      'input[type="search"]',
-    );
-    if (!input) throw new Error('Search input missing');
-    const search = async (value: string) => {
-      await act(async () => {
-        Object.getOwnPropertyDescriptor(
-          HTMLInputElement.prototype,
-          'value',
-        )?.set?.call(input, value);
-        input.dispatchEvent(new Event('input', { bubbles: true }));
+  it.each(['browser', 'home', 'new-tab'])(
+    'searches nested Space names without matching ancestor names or paths in %s',
+    async (activeId) => {
+      environment.desktopHome = activeId !== 'browser';
+      environment.getState.mockResolvedValue({
+        tabs: [],
+        activeId,
+        workspaceId: 'workspace-1',
+        busy: false,
       });
-    };
-    await search('Parent');
-    expect(container.querySelector('a[href="/canvas/space-1"]')).not.toBeNull();
-    expect(container.querySelector('a[href="/canvas/child"]')).toBeNull();
-    await search('  NESTED ');
-    expect(container.querySelector('a[href="/canvas/space-1"]')).toBeNull();
-    expect(container.querySelector('a[href="/canvas/child"]')).not.toBeNull();
-    await search('Parent / Nested');
-    expect(container.querySelector('a[href="/canvas/child"]')).toBeNull();
-    await search('');
-    expect(container.querySelector('a[href="/canvas/space-1"]')).not.toBeNull();
-    expect(container.querySelector('a[href="/canvas/child"]')).toBeNull();
-  });
-  it('defaults to roots, remembers All, and exposes the canonical path for nested Spaces', async () => {
-    vi.mocked(listCanvases).mockResolvedValueOnce({
-      canvases: [
-        {
-          canvasId: 'space-1',
-          title: 'Space One',
-          nodeCount: 0,
-          createdAt: 0,
-          updatedAt: 0,
-        },
-        {
-          canvasId: 'child',
-          title: 'Nested',
-          parentSpaceId: 'space-1',
-          parentEntryNodeId: 'node-entry',
-          nodeCount: 0,
-          createdAt: 0,
-          updatedAt: 0,
-        },
-      ],
+      vi.mocked(listCanvases).mockResolvedValueOnce({
+        canvases: [
+          {
+            canvasId: 'space-1',
+            title: 'Parent',
+            nodeCount: 0,
+            createdAt: 0,
+            updatedAt: 0,
+          },
+          {
+            canvasId: 'child',
+            title: 'Nested',
+            parentSpaceId: 'space-1',
+            nodeCount: 0,
+            createdAt: 0,
+            updatedAt: 0,
+          },
+        ],
+      });
+      await renderPage();
+      const input = container.querySelector<HTMLInputElement>(
+        'input[type="search"]',
+      );
+      if (!input) throw new Error('Search input missing');
+      const search = async (value: string) => {
+        await act(async () => {
+          Object.getOwnPropertyDescriptor(
+            HTMLInputElement.prototype,
+            'value',
+          )?.set?.call(input, value);
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+      };
+      await search('Parent');
+      expect(
+        container.querySelector('a[href="/canvas/space-1"]'),
+      ).not.toBeNull();
+      expect(container.querySelector('a[href="/canvas/child"]')).toBeNull();
+      await search('  NESTED ');
+      expect(container.querySelector('a[href="/canvas/space-1"]')).toBeNull();
+      expect(container.querySelector('a[href="/canvas/child"]')).not.toBeNull();
+      await search('Parent / Nested');
+      expect(container.querySelector('a[href="/canvas/child"]')).toBeNull();
+      await search('');
+      expect(
+        container.querySelector('a[href="/canvas/space-1"]'),
+      ).not.toBeNull();
+      expect(container.querySelector('a[href="/canvas/child"]')).toBeNull();
+    },
+  );
+  it.each(['browser', 'home', 'new-tab'])(
+    'defaults to roots, remembers All, and exposes the canonical path for nested Spaces in %s',
+    async (activeId) => {
+      environment.desktopHome = activeId !== 'browser';
+      environment.getState.mockResolvedValue({
+        tabs: [],
+        activeId,
+        workspaceId: 'workspace-1',
+        busy: false,
+      });
+      vi.mocked(listCanvases).mockResolvedValueOnce({
+        canvases: [
+          {
+            canvasId: 'space-1',
+            title: 'Space One',
+            nodeCount: 0,
+            createdAt: 0,
+            updatedAt: 0,
+          },
+          {
+            canvasId: 'child',
+            title: 'Nested',
+            parentSpaceId: 'space-1',
+            parentEntryNodeId: 'node-entry',
+            nodeCount: 0,
+            createdAt: 0,
+            updatedAt: 0,
+          },
+        ],
+      });
+      await renderPage();
+      expect(container.querySelector('a[href="/canvas/child"]')).toBeNull();
+      const all = [...container.querySelectorAll('button')].find(
+        (button) => button.textContent === 'spaceHierarchy.all',
+      );
+      await act(async () => all?.click());
+      expect(
+        container.querySelector('a[href="/canvas/child"]')?.textContent,
+      ).toContain('Space One /');
+      expect(localStorage.getItem('huabu.spaces.showAll')).toBe('true');
+    },
+  );
+  it('synchronizes catalogue titles only after main confirms the matching Workspace', async () => {
+    environment.desktopHome = true;
+    environment.getState.mockResolvedValue({
+      tabs: [],
+      activeId: 'home',
+      workspaceId: null,
+      busy: false,
     });
     await renderPage();
-    expect(container.querySelector('a[href="/canvas/child"]')).toBeNull();
-    const all = [...container.querySelectorAll('button')].find(
-      (button) => button.textContent === 'spaceHierarchy.all',
+    expect(environment.syncTitles).not.toHaveBeenCalled();
+    await act(async () =>
+      environment.onState.mock.calls.at(-1)?.[0]({
+        tabs: [],
+        activeId: 'space-1',
+        workspaceId: 'workspace-1',
+        busy: false,
+      }),
     );
-    await act(async () => all?.click());
-    expect(
-      container.querySelector('a[href="/canvas/child"]')?.textContent,
-    ).toContain('Space One /');
-    expect(localStorage.getItem('huabu.spaces.showAll')).toBe('true');
+    expect(environment.syncTitles).toHaveBeenCalledExactlyOnceWith({
+      type: 'sync-space-titles',
+      workspaceId: 'workspace-1',
+      titles: { 'space-1': 'Space One' },
+    });
+    await act(async () =>
+      environment.onState.mock.calls.at(-1)?.[0]({
+        tabs: [],
+        activeId: 'space-1',
+        workspaceId: 'another-workspace',
+        busy: false,
+      }),
+    );
+    expect(environment.syncTitles).toHaveBeenCalledTimes(1);
   });
+
+  it('shares the full Home list and remembered scope with the new Tab, resetting search on activation', async () => {
+    environment.desktopHome = true;
+    const snapshot: DesktopTabsSnapshot = {
+      tabs: [],
+      activeId: 'new-tab',
+      workspaceId: 'workspace-1',
+      busy: false,
+    };
+    environment.getState.mockResolvedValue(snapshot);
+    const { link, router } = await renderPage();
+    const search = container.querySelector<HTMLInputElement>(
+      'input[aria-label="spaceHierarchy.search"]',
+    );
+    if (!search) throw new Error('Missing Space search input');
+    expect(
+      container.querySelector('[aria-label="canvasList.deleteCanvas"]'),
+    ).not.toBeNull();
+    expect(
+      container.querySelector('[aria-label="canvasList.exportCanvas"]'),
+    ).not.toBeNull();
+    expect(container.textContent).toContain('actions.importCanvas');
+    expect(container.textContent).toContain('actions.newCanvas');
+    expect(container.textContent).toContain('canvasList.nodeCount');
+    expect(container.querySelectorAll('[role="tab"]')).toHaveLength(2);
+    await act(async () => {
+      container.querySelectorAll<HTMLButtonElement>('[role="tab"]')[1].click();
+    });
+    const newTabContent = container.querySelector('main')?.innerHTML;
+    expect(newTabContent).toBeTruthy();
+    const setValue = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      'value',
+    )?.set;
+    if (!setValue) throw new Error('Missing native input setter');
+    await act(async () => {
+      setValue.call(search, 'missing');
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(container.querySelector('a[href="/canvas/space-1"]')).toBeNull();
+    expect(container.textContent).toContain('desktopTabs.noMatchingSpaces');
+    await act(async () => {
+      environment.onState.mock.calls.at(-1)?.[0]({
+        ...snapshot,
+        activeId: 'home',
+      });
+    });
+    expect(container.querySelector('main')?.innerHTML).toBe(newTabContent);
+    expect(
+      container
+        .querySelectorAll('[role="tab"]')[1]
+        .getAttribute('aria-selected'),
+    ).toBe('true');
+    await act(async () => {
+      environment.onState.mock.calls.at(-1)?.[0](snapshot);
+    });
+    expect(
+      container.querySelector<HTMLInputElement>('input[type="search"]')?.value,
+    ).toBe('');
+    expect(container.querySelector('main')?.innerHTML).toBe(newTabContent);
+    const restoredLink = container.querySelector<HTMLAnchorElement>(
+      'a[href="/canvas/space-1"]',
+    );
+    expect(restoredLink?.href).toBe(link.href);
+    await act(async () => restoredLink?.click());
+    expect(router.state.location.pathname).toBe('/canvas/space-1');
+    expect(setSpaceTitle).toHaveBeenCalledWith('space-1', 'Space One');
+  });
+
   async function requestDeletion() {
     const remove = container.querySelector<HTMLButtonElement>(
       'button[aria-label="canvasList.deleteCanvas"], button[title="canvasList.deleteCanvas"]',
@@ -356,7 +506,7 @@ describe('CanvasListPage navigation', () => {
   async function confirmDeletion() {
     const confirm = Array.from(
       container.querySelectorAll<HTMLButtonElement>('[role="dialog"] button'),
-    ).find((button) => button.textContent === 'actions.delete');
+    ).find((button) => button.textContent === 'spaceHierarchy.deleteCount');
     if (!confirm) throw new Error('Missing delete confirmation');
     await act(async () => confirm.click());
   }
@@ -391,7 +541,7 @@ describe('CanvasListPage navigation', () => {
         tone: 'warning',
       });
       expect(container.querySelector('[role="dialog"]')).toBeNull();
-      expect(deleteCanvasById).not.toHaveBeenCalled();
+      expect(deleteSpaceTree).not.toHaveBeenCalled();
       expect(environment.command).not.toHaveBeenCalled();
     },
   );
@@ -409,9 +559,15 @@ describe('CanvasListPage navigation', () => {
     });
     await requestDeletion();
     await confirmDeletion();
-    expect(deleteCanvasById).toHaveBeenCalledExactlyOnceWith('space-1');
+    expect(deleteSpaceTree).toHaveBeenCalledExactlyOnceWith('space-1', 'token');
     expect(environment.command.mock.calls).toEqual([
-      [{ type: 'begin-space-deletion', canvasId: 'space-1' }],
+      [
+        {
+          type: 'begin-space-deletion',
+          canvasId: 'space-1',
+          canvasIds: ['space-1'],
+        },
+      ],
       ['end-space-deletion'],
     ]);
   });
@@ -422,9 +578,44 @@ describe('CanvasListPage navigation', () => {
     await requestDeletion();
     markSpaceOpen();
     await confirmDeletion();
-    expect(deleteCanvasById).not.toHaveBeenCalled();
+    expect(deleteSpaceTree).not.toHaveBeenCalled();
     expect(environment.command).not.toHaveBeenCalled();
-    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(toast).toHaveBeenCalledWith('desktopTabs.closeBeforeDeleting', {
+      tone: 'warning',
+    });
+  });
+
+  it('blocks deleting an unopened parent when a descendant is open', async () => {
+    environment.desktopHome = true;
+    vi.mocked(getSpaceDeletionPreview).mockResolvedValueOnce({
+      token: 'tree-token',
+      spaces: [
+        { canvasId: 'space-1', title: 'Parent' },
+        { canvasId: 'child', title: 'Child' },
+      ],
+    });
+    environment.getState.mockResolvedValue({
+      activeId: 'home',
+      workspaceId: 'workspace-1',
+      busy: false,
+      tabs: [
+        {
+          id: 'child-tab',
+          canvasId: 'child',
+          title: 'Child',
+          loading: true,
+          running: false,
+          unread: false,
+          error: null,
+        },
+      ],
+    });
+    await renderPage();
+    await requestDeletion();
+    await confirmDeletion();
+    expect(deleteSpaceTree).not.toHaveBeenCalled();
+    expect(environment.command).not.toHaveBeenCalled();
     expect(toast).toHaveBeenCalledWith('desktopTabs.closeBeforeDeleting', {
       tone: 'warning',
     });
@@ -439,7 +630,7 @@ describe('CanvasListPage navigation', () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       await requestDeletion();
-      expect(deleteCanvasById).not.toHaveBeenCalled();
+      expect(deleteSpaceTree).not.toHaveBeenCalled();
       expect(container.querySelector('[role="dialog"]')).toBeNull();
       expect(toast).toHaveBeenCalledWith('Tab state unavailable', {
         tone: 'danger',
@@ -453,7 +644,7 @@ describe('CanvasListPage navigation', () => {
     environment.desktopHome = true;
     await renderPage();
     await requestDeletion();
-    vi.mocked(deleteCanvasById).mockRejectedValueOnce(
+    vi.mocked(deleteSpaceTree).mockRejectedValueOnce(
       new Error('Delete failed'),
     );
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -482,7 +673,7 @@ describe('CanvasListPage navigation', () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       await confirmDeletion();
-      expect(deleteCanvasById).not.toHaveBeenCalled();
+      expect(deleteSpaceTree).not.toHaveBeenCalled();
       expect(environment.command).toHaveBeenCalledTimes(1);
       expect(toast).toHaveBeenCalledWith(
         'Another Tab operation is in progress',
@@ -522,10 +713,10 @@ describe('CanvasListPage navigation', () => {
     await act(async () => remove.click());
     const confirm = Array.from(
       container.querySelectorAll<HTMLButtonElement>('[role="dialog"] button'),
-    ).find((button) => button.textContent === 'actions.delete');
+    ).find((button) => button.textContent === 'spaceHierarchy.deleteCount');
     if (!confirm) throw new Error('Missing delete confirmation');
     await act(async () => confirm.click());
-    expect(deleteCanvasById).toHaveBeenCalledWith('space-1');
+    expect(deleteSpaceTree).toHaveBeenCalledWith('space-1', 'token');
     expect(container.querySelector('a[href="/canvas/space-1"]')).toBeNull();
     await act(async () =>
       resolveOld({

@@ -12,7 +12,17 @@ describe('desktop Tab session contract', () => {
         canvasIds: ['a', 'b', 'a'],
         activeCanvasId: 'deleted',
       }),
-    ).toEqual({ canvasIds: ['a', 'b'], activeCanvasId: null });
+    ).toEqual({ canvasIds: ['a', 'b'], activeCanvasId: null, titles: {} });
+  });
+
+  it('restores optional title snapshots without requiring them in older sessions', () => {
+    expect(
+      parseTabSession({
+        canvasIds: ['a', 'b'],
+        activeCanvasId: 'a',
+        titles: { a: 'Alpha', b: 'Beta' },
+      }).titles,
+    ).toEqual({ a: 'Alpha', b: 'Beta' });
   });
 
   it.each([
@@ -20,6 +30,11 @@ describe('desktop Tab session contract', () => {
     {},
     { canvasIds: ['../bad'], activeCanvasId: null },
     { canvasIds: [17], activeCanvasId: null },
+    { canvasIds: ['a'], activeCanvasId: null, titles: null },
+    { canvasIds: ['a'], activeCanvasId: null, titles: [] },
+    { canvasIds: ['a'], activeCanvasId: null, titles: { a: 17 } },
+    { canvasIds: ['a'], activeCanvasId: null, titles: { a: 'x'.repeat(513) } },
+    { canvasIds: ['a'], activeCanvasId: null, titles: { '../bad': 'Bad' } },
   ])('rejects malformed stored session %j', (raw) =>
     expect(() => parseTabSession(raw)).toThrow(),
   );

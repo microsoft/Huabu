@@ -1,7 +1,8 @@
 {
   "desktopTabs": {
     "label": "Open Spaces",
-    "openSpace": "Open a Space",
+    "newTab": "New tab",
+    "noMatchingSpaces": "No matching Spaces.",
     "closeTab": "Close Tab",
     "closeBeforeDeleting": "This Space is open. Close its Tab before deleting it."
   },

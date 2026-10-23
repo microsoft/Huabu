@@ -8,6 +8,19 @@ import type { DesktopTabNavigation } from '@huabu/shared/desktop-tabs' with {
 export interface TabSession {
   canvasIds: string[];
   activeCanvasId: string | null;
+  titles: Record<string, string>;
+}
+
+export function parseTabTitles(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw))
+    throw new Error('Invalid Tab titles');
+  const titles = new Map<string, string>();
+  for (const [id, title] of Object.entries(raw)) {
+    if (!isCanvasId(id) || typeof title !== 'string' || title.length > 512)
+      throw new Error('Invalid Tab title');
+    titles.set(id, title);
+  }
+  return Object.fromEntries(titles);
 }
 
 export function parseTabSession(raw: unknown): TabSession {
@@ -23,6 +36,7 @@ export function parseTabSession(raw: unknown): TabSession {
   const canvasIds = [...new Set(value.canvasIds as string[])];
   return {
     canvasIds,
+    titles: parseTabTitles(value.titles === undefined ? {} : value.titles),
     activeCanvasId:
       typeof value.activeCanvasId === 'string' &&
       canvasIds.includes(value.activeCanvasId)

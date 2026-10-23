@@ -312,6 +312,8 @@ try {
     return {
       switcher: i18n.t('workspace.switcher'),
       home: i18n.t('navigation.home'),
+      newTab: i18n.t('desktopTabs.newTab'),
+      searchSpaces: i18n.t('spaceHierarchy.search'),
     };
   });
   const workspaceTrigger = shell.getByRole('button', {
@@ -340,7 +342,29 @@ try {
           ];
         },
       );
-      return { height: strip.getBoundingClientRect().height, controls };
+      const home = document.querySelector('[role="tab"]');
+      const icon = home?.querySelector('svg');
+      if (!home || !icon) throw new Error('Home icon is missing');
+      const segment = home.parentElement.getBoundingClientRect();
+      const glyph = icon.getBoundingClientRect();
+      return {
+        height: strip.getBoundingClientRect().height,
+        controls,
+        titles: Array.from(strip.querySelectorAll('[role="tab"]'))
+          .filter((tab) => !tab.querySelector('svg'))
+          .map((tab) => ({
+            size: getComputedStyle(tab).fontSize,
+            weight: getComputedStyle(tab).fontWeight,
+            lineHeight: getComputedStyle(tab).lineHeight,
+          })),
+        home: {
+          selected: home.getAttribute('aria-selected') === 'true',
+          offsetX: glyph.x + glyph.width / 2 - segment.x - segment.width / 2,
+          offsetY: glyph.y + glyph.height / 2 - segment.y - segment.height / 2,
+          background: getComputedStyle(home.parentElement).backgroundColor,
+          stripBackground: getComputedStyle(strip).backgroundColor,
+        },
+      };
     });
     assert.equal(
       chrome.height,
@@ -351,6 +375,32 @@ try {
       chrome.controls.length >= 4,
       'The persistent chrome icons must be present',
     );
+    assert.ok(
+      Math.abs(chrome.home.offsetX) <= 0.5,
+      'Home must be horizontally centered within its segment',
+    );
+    assert.ok(
+      Math.abs(chrome.home.offsetY) <= 0.5,
+      'Home must be vertically centered within its segment',
+    );
+    if (chrome.home.selected) {
+      assert.notEqual(
+        chrome.home.background,
+        'rgba(0, 0, 0, 0)',
+        'Selected Home must have a visible active surface',
+      );
+      assert.notEqual(
+        chrome.home.background,
+        chrome.home.stripBackground,
+        'Selected Home must be distinguishable from the strip',
+      );
+    } else {
+      assert.ok(
+        chrome.home.background === 'rgba(0, 0, 0, 0)' ||
+          chrome.home.background === chrome.home.stripBackground,
+        'Inactive Home must retain the window-control gutter background',
+      );
+    }
     for (const control of chrome.controls) {
       assert.equal(control.width, 16, `${control.label} must use a 16px icon`);
       assert.equal(control.height, 16, `${control.label} must use a 16px icon`);
@@ -359,8 +409,24 @@ try {
         `${control.label} must have at least a 28px click target`,
       );
     }
+    for (const title of chrome.titles) {
+      assert.deepEqual(
+        title,
+        { size: '13px', weight: '400', lineHeight: '20px' },
+        'Tab titles must use 13px regular text without changing the strip or icon sizing',
+      );
+    }
   }
   await assertTabIconSizes();
+  if (process.env.HUABU_TABS_SCREENSHOT) {
+    await shell.screenshot({
+      path: process.env.HUABU_TABS_SCREENSHOT.replace(
+        /\.png$/,
+        '-home-strip.png',
+      ),
+      clip: { x: 0, y: 0, width: 800, height: 36 },
+    });
+  }
   await workspaceTrigger.hover();
   await home.waitForTimeout(350);
   assert.equal(
@@ -485,6 +551,67 @@ try {
     await page.getByRole('dialog').waitFor({ state: 'hidden' });
   }
   await openSettingsFromShell(home);
+  const newTabButton = shell.getByRole('button', {
+    name: workspaceLabels.newTab,
+    exact: true,
+  });
+  await newTabButton.click();
+  await home
+    .getByRole('searchbox', { name: workspaceLabels.searchSpaces })
+    .waitFor();
+  const sharedListContent = await home.locator('main').innerHTML();
+  await shell
+    .getByRole('tab', { name: workspaceLabels.home, exact: true })
+    .click();
+  await shell
+    .getByRole('tab', {
+      name: workspaceLabels.home,
+      exact: true,
+      selected: true,
+    })
+    .waitFor();
+  await assertTabIconSizes();
+  assert.equal(
+    await home.locator('main').innerHTML(),
+    sharedListContent,
+    'Home and the blank Tab must render the same Space list and actions',
+  );
+  await newTabButton.click();
+  await newTabButton.click();
+  assert.equal(
+    await shell
+      .getByRole('tab', { name: workspaceLabels.newTab, exact: true })
+      .count(),
+    1,
+    'Repeated plus clicks must retain a single blank Tab',
+  );
+  assert.equal(
+    await electron.evaluate(
+      ({ webContents }) =>
+        webContents.getAllWebContents().filter((entry) => {
+          const path = new URL(entry.getURL() || 'about:blank').pathname;
+          return path === '/spaces';
+        }).length,
+    ),
+    1,
+    'The blank picker must reuse Home rather than launch another renderer',
+  );
+  if (process.platform === 'darwin') {
+    assert.deepEqual(
+      await electron.evaluate(({ BrowserWindow }) =>
+        BrowserWindow.getAllWindows()
+          .find((win) => win.webContents.getURL().includes('/_desktop'))
+          .getWindowButtonPosition(),
+      ),
+      { x: 12, y: 10 },
+      'Native window controls must fit inside the 36px strip, above content views',
+    );
+  }
+  if (process.env.HUABU_TABS_SCREENSHOT) {
+    await home.screenshot({
+      path: process.env.HUABU_TABS_SCREENSHOT.replace(/\.png$/, '-new-tab.png'),
+    });
+  }
   const createLabel = await home.evaluate(async () => {
     const { i18n } = await import('/src/i18n/index.ts');
     return i18n.t('actions.newCanvas');
@@ -502,6 +629,13 @@ try {
     );
   }, 'opening a Space created from retained Home');
   await content(createdTab.canvasId);
+  assert.equal(
+    (
+      await shell.evaluate(() => window.electronBridge.tabs.getState())
+    ).tabs.some((tab) => tab.id === 'new-tab'),
+    false,
+    'Creating a Space must replace the blank Tab',
+  );
   await shell.evaluate(() =>
     window.electronBridge.tabs.open({ canvasId: null }),
   );
@@ -512,7 +646,7 @@ try {
     const { i18n } = await import('/src/i18n/index.ts');
     return {
       remove: i18n.t('canvasList.deleteCanvas'),
-      confirm: i18n.t('actions.delete'),
+      confirm: i18n.t('spaceHierarchy.deleteCount', { count: 1 }),
       blocked: i18n.t('desktopTabs.closeBeforeDeleting'),
     };
   });
@@ -578,7 +712,119 @@ try {
   await home.locator(`a[href="/canvas/${spaces[0].canvasId}"]`).click();
   const a = await content(spaces[0].canvasId);
   await assertTabIconSizes();
+  const activeSegment = shell
+    .getByRole('tab', { name: 'Tabs smoke A', exact: true })
+    .locator('..');
+  const closeControl = activeSegment.locator('button').last();
+  await shell.evaluate(() => document.activeElement?.blur());
+  await shell.mouse.move(790, 35);
+  await waitFor(
+    () =>
+      closeControl.evaluate(
+        (button) => getComputedStyle(button).opacity === '0',
+      ),
+    'hiding Tab close controls outside hover and keyboard focus',
+  );
+  const restingWidth = await activeSegment.evaluate(
+    (segment) => segment.getBoundingClientRect().width,
+  );
+  await activeSegment.hover();
+  assert.equal(
+    await closeControl.evaluate((button) => getComputedStyle(button).opacity),
+    '1',
+  );
+  assert.equal(
+    await activeSegment.evaluate(
+      (segment) => segment.getBoundingClientRect().width,
+    ),
+    restingWidth,
+    'Revealing the close control must not move the Tab title',
+  );
+  if (process.env.HUABU_TABS_SCREENSHOT) {
+    await shell.screenshot({
+      path: process.env.HUABU_TABS_SCREENSHOT.replace(
+        /\.png$/,
+        '-close-hover.png',
+      ),
+      clip: { x: 0, y: 0, width: 800, height: 36 },
+    });
+  }
+  await shell.mouse.move(790, 35);
+  await shell.getByRole('tab', { name: 'Tabs smoke A', exact: true }).focus();
+  await shell.keyboard.press('Tab');
+  assert.equal(
+    await closeControl.evaluate(
+      (button) =>
+        document.activeElement === button &&
+        getComputedStyle(button).opacity === '1',
+    ),
+    true,
+    'Keyboard focus must reveal the close control',
+  );
+  await shell.evaluate(() => document.activeElement?.blur());
   await openSettingsFromShell(a);
+  const beforeBlank = await shell.evaluate(() =>
+    window.electronBridge.tabs.getState(),
+  );
+  const blankSpaceCount = beforeBlank.tabs.length;
+  await newTabButton.click();
+  const searchSpaces = home.getByRole('searchbox', {
+    name: workspaceLabels.searchSpaces,
+  });
+  await searchSpaces.fill('Tabs smoke B');
+  await home.locator(`a[href="/canvas/${spaces[1].canvasId}"]`).waitFor();
+  assert.equal(
+    await home.locator(`a[href="/canvas/${spaces[0].canvasId}"]`).count(),
+    0,
+  );
+  await searchSpaces.fill('');
+  await openSettingsFromShell(home);
+  await home.locator(`a[href="/canvas/${spaces[0].canvasId}"]`).click();
+  await waitFor(async () => {
+    const snapshot = await shell.evaluate(() =>
+      window.electronBridge.tabs.getState(),
+    );
+    return (
+      snapshot.activeId === beforeBlank.activeId &&
+      snapshot.tabs.length === blankSpaceCount &&
+      !snapshot.tabs.some((tab) => tab.id === 'new-tab')
+    );
+  }, 'activating an existing Space and removing its blank picker');
+  async function nativeTabShortcut(page, keyCode) {
+    await electron.evaluate(
+      ({ webContents }, { url, keyCode, modifier }) => {
+        const contents = webContents
+          .getAllWebContents()
+          .find((entry) => entry.getURL() === url);
+        if (!contents) throw new Error('Shortcut target is unavailable');
+        contents.focus();
+        contents.sendInputEvent({
+          type: 'keyDown',
+          keyCode,
+          modifiers: [modifier],
+        });
+        contents.sendInputEvent({
+          type: 'keyUp',
+          keyCode,
+          modifiers: [modifier],
+        });
+      },
+      {
+        url: page.url(),
+        keyCode,
+        modifier: process.platform === 'darwin' ? 'meta' : 'control',
+      },
+    );
+  }
+  await nativeTabShortcut(a, 'T');
+  await searchSpaces.waitFor({ state: 'visible' });
+  await nativeTabShortcut(home, 'W');
+  await waitFor(
+    async () =>
+      (await shell.evaluate(() => window.electronBridge.tabs.getState()))
+        .activeId === beforeBlank.activeId,
+    'closing the blank Tab back to the previous Space',
+  );
   assert.equal(
     await workspaceTrigger.count(),
     1,
@@ -874,6 +1120,18 @@ try {
   }
   await shell.getByRole('tab', { name: 'Tabs smoke A', exact: true }).click();
   if (process.platform === 'darwin' && nativeFocusAvailable) {
+    await electron.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()
+        .find((win) => win.webContents.getURL().includes('/_desktop'))
+        .webContents.focus();
+    });
+    await waitFor(
+      () =>
+        electron.evaluate(({ webContents }) =>
+          webContents.getFocusedWebContents()?.getURL().includes('/_desktop'),
+        ),
+      'focusing Shell before invoking the native Settings menu',
+    );
     const beforeMenu = await electron.evaluate(
       ({ BrowserWindow, webContents, Menu }) => {
         const win = BrowserWindow.getAllWindows().find((window) =>
@@ -1749,6 +2007,11 @@ try {
     window.electronBridge.tabs.getState(),
   );
   assert.deepEqual(
+    restored.tabs.filter((tab) => tab.canvasId).map((tab) => tab.title),
+    state.tabs.filter((tab) => tab.canvasId).map((tab) => tab.title),
+    'All restored Tabs must retain their names before lazy pages are opened',
+  );
+  assert.deepEqual(
     restored.tabs.map((tab) => tab.canvasId),
     state.tabs.map((tab) => tab.canvasId),
   );
@@ -1786,6 +2049,42 @@ try {
         .filter((entry) => entry.getURL().includes('/canvas/')).length,
   );
   assert.equal(loaded, 1, 'Restoration must load only the active Space');
+  await closeElectron();
+  const legacySessionPath = join(userData, 'desktop-tabs.json');
+  const legacySessions = JSON.parse(readFileSync(legacySessionPath, 'utf8'));
+  for (const session of Object.values(legacySessions)) {
+    if (
+      session &&
+      typeof session === 'object' &&
+      Array.isArray(session.canvasIds)
+    )
+      delete session.titles;
+  }
+  writeFileSync(legacySessionPath, JSON.stringify(legacySessions));
+  shell = await launch();
+  await waitFor(async () => {
+    const snapshot = await shell.evaluate(() =>
+      window.electronBridge.tabs.getState(),
+    );
+    return (
+      JSON.stringify(
+        snapshot.tabs.filter((tab) => tab.canvasId).map((tab) => tab.title),
+      ) ===
+      JSON.stringify(
+        state.tabs.filter((tab) => tab.canvasId).map((tab) => tab.title),
+      )
+    );
+  }, 'recovering all legacy Tab names from Home without opening lazy Spaces');
+  assert.equal(
+    await electron.evaluate(
+      ({ webContents }) =>
+        webContents
+          .getAllWebContents()
+          .filter((entry) => entry.getURL().includes('/canvas/')).length,
+    ),
+    1,
+    'Legacy title recovery must retain lazy Space loading',
+  );
   await shell.evaluate(() =>
     window.electronBridge.tabs.open({ canvasId: null }),
   );

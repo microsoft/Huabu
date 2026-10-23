@@ -1,7 +1,8 @@
 {
   "desktopTabs": {
     "label": "已打开的 Space",
-    "openSpace": "打开 Space",
+    "newTab": "新标签页",
+    "noMatchingSpaces": "没有匹配的 Space。",
     "closeTab": "关闭标签页",
     "closeBeforeDeleting": "此 Space 正在打开，请关闭标签页后再删除。"
   },
