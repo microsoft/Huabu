@@ -18,7 +18,7 @@ export class Logger {
   private level: LogLevel
   private writeFile?: (line: string) => void
 
-  constructor(level: LogLevel, writeFile?: (line: string) => void) {
+  constructor(level: LogLevel, writeFile?: (line: string) => void, private readonly onEntry?: (entry: LogEntry) => void) {
     this.level = level
     this.writeFile = writeFile
   }
@@ -40,14 +40,14 @@ export class Logger {
   }
 
   private log(level: LogLevel, event: string, data?: Record<string, unknown>): void {
-    if (LEVEL_ORDER[level] < LEVEL_ORDER[this.level]) return
-
     const entry: LogEntry = {
       ts: new Date().toISOString(),
       level,
       event,
       ...data,
     }
+    this.onEntry?.(entry)
+    if (LEVEL_ORDER[level] < LEVEL_ORDER[this.level]) return
 
     const line = JSON.stringify(entry)
 

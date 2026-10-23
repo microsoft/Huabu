@@ -28,7 +28,6 @@ import { rm } from 'node:fs/promises';
 import { stripLegacyPortalTopology } from '@huabu/shared';
 
 import {
-  acquireWorkspaceOperationLease,
   commitWorkspaceIdentity,
   getWorkspaceHandle,
   getWorkspaceKey,
@@ -55,6 +54,10 @@ import {
 import { SqliteStructuredStore } from './backends/sqlite/structured-store.js';
 import { SqliteWorkspaceRepository } from './backends/sqlite/workspace-repository.js';
 import { hasStorageCapability } from './capabilities.js';
+import {
+  assertSpaceHierarchyLocked,
+  withSpaceHierarchyLock,
+} from '../canvas/write-coordinator.js';
 import { spaceBlobAreas } from './ports/blob.js';
 import {
   parseStorageProfile,
@@ -799,20 +802,22 @@ export function createSpace(
   canvasId: string,
   title?: string | null,
 ): Promise<SpaceCreateResult> {
+  return withSpaceHierarchyLock(() => createSpaceUnlocked(canvasId, title));
+}
+
+function createSpaceUnlocked(
+  canvasId: string,
+  title?: string | null,
+): Promise<SpaceCreateResult> {
   const structured = ensure().structured;
-  const workspaceLease = acquireWorkspaceOperationLease();
   return serializeSpaceCreate(async () => {
-    try {
-      // One repository instance spans the read and the create, so a Workspace
-      // switch between them is rejected by the handle rather than silently
-      // creating the Space in the newly activated Workspace.
-      const spaces = structured.spaces();
-      const effectiveTitle =
-        title === undefined ? defaultSpaceTitle(await spaces.list()) : title;
-      return await spaces.create({ canvasId, title: effectiveTitle });
-    } finally {
-      workspaceLease.release();
-    }
+    // One repository instance spans the read and the create, so a Workspace
+    // switch between them is rejected by the handle rather than silently
+    // creating the Space in the newly activated Workspace.
+    const spaces = structured.spaces();
+    const effectiveTitle =
+      title === undefined ? defaultSpaceTitle(await spaces.list()) : title;
+    return await spaces.create({ canvasId, title: effectiveTitle });
   });
 }
 
@@ -828,47 +833,62 @@ export function createSpace(
 export async function deleteSpace(
   canvasId: string,
 ): Promise<SpaceDeleteOutcome> {
-  const workspaceLease = acquireWorkspaceOperationLease();
-  try {
-    const storage = ensure();
-    const started = await storage.structured.spaces().beginDelete({ canvasId });
-    if (!started.ok) return started;
-    try {
-      // Preserve the old retryable cleanup behavior: sweep even when the
-      // structured record is already absent, so orphan blobs can be removed.
-      // Every area, not just artifacts: a Space's bytes are spread across one
-      // scope per user-visible area, and on a backend where dropping the
-      // structured record does not remove the area they sit in, an unswept
-      // kind is an orphan.
-      await Promise.all(
-        spaceBlobAreas(storage.blobs.space(canvasId)).map((area) =>
-          area.deleteAll(),
-        ),
-      );
-      // Where the record is a row, nothing else will ever remove the
-      // directory those areas sat in. Sweeping the areas is the port's
-      // contract; removing what composition placed them under is this
-      // module's, and it is what stops a deleted Space leaving a husk behind.
-      if (storage.profile.structured.kind !== 'disk') {
-        // Not narrowed to local blobs. With remote bytes this root was never
-        // created and `force` makes the call a no-op, so the only deployment
-        // the two forms differ on is one that wrote Spaces with local bytes
-        // and later moved `HUABU_BLOB_BACKEND` to azure: there the
-        // pre-migration artifacts, uploads, memory and guide are still on
-        // disk, and skipping this would leave them behind the Space forever.
-        // One stat syscall per deletion is the whole cost of not doing that.
-        await rm(detachedSpaceRoot(canvasId), {
-          recursive: true,
-          force: true,
-        });
-      }
-      return await started.session.finish();
-    } catch (error) {
-      await started.session.abort();
-      throw error;
+  return withSpaceHierarchyLock(async () => {
+    if (
+      (await getStructuredStore().spaces().list()).some(
+        (space) => space.parentSpaceId === canvasId,
+      )
+    ) {
+      throw new Error('Space has children; use confirmed subtree deletion');
     }
-  } finally {
-    workspaceLease.release();
+    return deleteSpaceFromValidatedTreeAlreadyLocked(canvasId);
+  });
+}
+
+/**
+ * Internal lifecycle path for a validated descendant-first deletion plan.
+ * The caller must stop on failure and hold the hierarchy lock throughout.
+ */
+export async function deleteSpaceFromValidatedTreeAlreadyLocked(
+  canvasId: string,
+): Promise<SpaceDeleteOutcome> {
+  assertSpaceHierarchyLocked();
+  const storage = ensure();
+  const started = await storage.structured.spaces().beginDelete({ canvasId });
+  if (!started.ok) return started;
+  try {
+    // Preserve the old retryable cleanup behavior: sweep even when the
+    // structured record is already absent, so orphan blobs can be removed.
+    // Every area, not just artifacts: a Space's bytes are spread across one
+    // scope per user-visible area, and on a backend where dropping the
+    // structured record does not remove the area they sit in, an unswept
+    // kind is an orphan.
+    await Promise.all(
+      spaceBlobAreas(storage.blobs.space(canvasId)).map((area) =>
+        area.deleteAll(),
+      ),
+    );
+    // Where the record is a row, nothing else will ever remove the
+    // directory those areas sat in. Sweeping the areas is the port's
+    // contract; removing what composition placed them under is this
+    // module's, and it is what stops a deleted Space leaving a husk behind.
+    if (storage.profile.structured.kind !== 'disk') {
+      // Not narrowed to local blobs. With remote bytes this root was never
+      // created and `force` makes the call a no-op, so the only deployment
+      // the two forms differ on is one that wrote Spaces with local bytes
+      // and later moved `HUABU_BLOB_BACKEND` to azure: there the
+      // pre-migration artifacts, uploads, memory and guide are still on
+      // disk, and skipping this would leave them behind the Space forever.
+      // One stat syscall per deletion is the whole cost of not doing that.
+      await rm(detachedSpaceRoot(canvasId), {
+        recursive: true,
+        force: true,
+      });
+    }
+    return await started.session.finish();
+  } catch (error) {
+    await started.session.abort();
+    throw error;
   }
 }
 

@@ -9,7 +9,10 @@ import {
 } from '@/components/Panels/Canvas/canvasInputPolicy';
 import { createInkSigilRecognizer } from '@/handler/canvasPointerRecognizers/inkSigil';
 import { createNodeDragRecognizer } from '@/handler/canvasPointerRecognizers/nodeDrag';
-import { createNoteContentRecognizer } from '@/handler/canvasPointerRecognizers/noteContent';
+import {
+  canReadNoteWithPointer,
+  createNoteContentRecognizer,
+} from '@/handler/canvasPointerRecognizers/noteContent';
 import { createViewportNavigationRecognizer } from '@/handler/canvasPointerRecognizers/viewportNavigation';
 import { PointerRouterCore } from '@/handler/pointerRouter';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
@@ -24,6 +27,7 @@ import type { ReactFlowInstance } from '@xyflow/react';
 interface CanvasPointerRouterOptions {
   inputMode: EffectiveInputMode;
   explicitToolActive: boolean;
+  inkToolActive?: boolean;
   onTouchTakeover: () => void;
   onEmptyCanvasTap: () => void;
   onNodeTap: (nodeId: string) => void;
@@ -53,11 +57,12 @@ export function useCanvasPointerRouter(
 ): void {
   const optionsRef = useRef(options);
   optionsRef.current = options;
+  const fingerReadingAllowed = canReadNoteWithPointer('touch', options);
   useEffect(() => {
-    if (options.explicitToolActive || options.inputMode === 'mouse') {
+    if (!fingerReadingAllowed) {
       useGesturePreviewStore.setState({ noteReadingNodeId: null });
     }
-  }, [options.explicitToolActive, options.inputMode]);
+  }, [fingerReadingAllowed]);
 
   useEffect(() => {
     const el = wrapperRef.current;
@@ -90,6 +95,7 @@ export function useCanvasPointerRouter(
         instance,
         inputMode: readEffectiveInputMode(),
         explicitToolActive: o.explicitToolActive,
+        inkToolActive: o.inkToolActive,
         onTouchTakeover: o.onTouchTakeover,
         onEmptyCanvasTap: o.onEmptyCanvasTap,
         onNodeTap: o.onNodeTap,
@@ -117,7 +123,10 @@ export function useCanvasPointerRouter(
       core.handleDown(event);
       const owner = core.ownerOf(event.pointerId)?.id;
       suppressOwnedClick = owner === 'note-content' || owner === 'ink-sigil';
-      if (suppressOwnedClick && event.pointerType === 'touch')
+      if (
+        (suppressOwnedClick || owner === 'node-drag') &&
+        event.pointerType === 'touch'
+      )
         suppressOwnedTouch = true;
     };
     const onMove = (event: PointerEvent) => {
@@ -152,7 +161,10 @@ export function useCanvasPointerRouter(
       const touchNoteDoubleClick =
         event.type === 'dblclick' &&
         (lastPointerType === 'touch' || lastPointerType === 'pen') &&
-        !optionsRef.current.explicitToolActive &&
+        canReadNoteWithPointer(lastPointerType, {
+          ...optionsRef.current,
+          inputMode: readEffectiveInputMode(),
+        }) &&
         viewport?.dataset.noteScrollEnabled === 'true' &&
         viewport.scrollHeight > viewport.clientHeight + 1;
       if ((!suppressOwnedClick && !touchNoteDoubleClick) || event.detail === 0)

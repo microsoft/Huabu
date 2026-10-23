@@ -11,7 +11,6 @@ import {
   ChevronDown,
   Undo2,
   Redo2,
-  PanelsTopLeft,
   Sparkles,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
@@ -24,7 +23,7 @@ import {
   uploadPdf,
   uploadVideo,
 } from '@/api/artifact';
-import { listCanvases } from '@/api/canvas';
+import { SpaceShortcutPicker } from '@/components/Space/SpaceShortcutPicker';
 import { matchesShortcut } from '@/config/shortcuts';
 import { isEditableTarget } from '@/hooks/shortcuts';
 import { isOutsideCanvasInteraction } from '@/hooks/shortcuts/isEditableTarget';
@@ -61,7 +60,6 @@ import { SketchModeSwitcher } from '../../Nodes/sketch/SketchModeSwitcher.tsx';
 import { SketchSettingsPanel } from '../../Nodes/sketch/SketchSettingsPanel.tsx';
 
 import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
-import type { CanvasSummary } from '@huabu/shared';
 
 interface NodeToolbarProps {
   activeTool: 'select' | 'pan' | 'lasso';
@@ -101,9 +99,6 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
   const resourceMenuRef = useRef<HTMLDivElement>(null);
   const resourceJustDismissedRef = useRef(false);
   const [linkText, setLinkText] = useState('');
-  const [previewTargets, setPreviewTargets] = useState<CanvasSummary[]>([]);
-  const [previewTargetsLoading, setPreviewTargetsLoading] = useState(false);
-  const [previewTargetsError, setPreviewTargetsError] = useState(false);
 
   // Mouse tools share a SplitSelect with shortcut hints. Touch and pen use a
   // dedicated Lasso button while Select remains an internal direct-manipulation
@@ -189,12 +184,14 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
         setPendingNodeType(pendingNodeType === 'sketch' ? null : 'sketch');
         return;
       }
-      // Temporarily disabled because the audio node feature is not ready yet.
-      // if (matchesShortcut(e, 'mode.audio')) {
-      //   e.preventDefault();
-      //   setPendingNodeType(pendingNodeType === 'audio' ? null : 'audio');
-      //   return;
-      // }
+      if (matchesShortcut(e, 'mode.childSpace') && canvasId !== worldCanvasId) {
+        e.preventDefault();
+        onToolChange('select');
+        setPendingNodeType(
+          pendingNodeType === 'childSpace' ? null : 'childSpace',
+        );
+        return;
+      }
       if (matchesShortcut(e, 'mode.question')) {
         e.preventDefault();
         onToolChange('select');
@@ -206,6 +203,8 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [
     activeModal,
+    canvasId,
+    worldCanvasId,
     isNotMouse,
     onToolChange,
     pendingNodeType,
@@ -236,7 +235,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             {
               value: 'spacePreview' as const,
               label: t('spacePreview.add'),
-              icon: <PanelsTopLeft />,
+              icon: <NODE_ICON.spacePreview />,
             },
           ]
         : []),
@@ -246,19 +245,6 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
 
   const openSpacePreviewModal = () => {
     setActiveModal('spacePreview');
-    setPreviewTargetsLoading(true);
-    setPreviewTargetsError(false);
-    void listCanvases()
-      .then(({ canvases }) =>
-        setPreviewTargets(
-          canvases.filter((canvas) => canvas.canvasId !== canvasId),
-        ),
-      )
-      .catch(() => {
-        setPreviewTargets([]);
-        setPreviewTargetsError(true);
-      })
-      .finally(() => setPreviewTargetsLoading(false));
   };
 
   const getResourceMenuPosition = () => {
@@ -447,6 +433,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
                 activeTool === 'lasso' ? 'L' : activeTool === 'pan' ? 'P' : 'S'
               }
               primaryShortcutBadgeActive={!pendingNodeType}
+              primaryPressed={!pendingNodeType}
               primaryButtonClassName={clsx(
                 MAIN_TOOL_BUTTON_CLASS,
                 !pendingNodeType &&
@@ -467,6 +454,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             title={toolTitle(t('toolbar.nodes.note'), '1')}
             shortcutBadge={isNotMouse ? undefined : '1'}
             shortcutBadgeActive={pendingNodeType === 'note'}
+            aria-pressed={pendingNodeType === 'note'}
             className={clsx(
               MAIN_TOOL_BUTTON_CLASS,
               pendingNodeType === 'note' &&
@@ -485,6 +473,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             title={toolTitle(t('toolbar.nodes.text'), '2')}
             shortcutBadge={isNotMouse ? undefined : '2'}
             shortcutBadgeActive={pendingNodeType === 'text'}
+            aria-pressed={pendingNodeType === 'text'}
             className={clsx(
               MAIN_TOOL_BUTTON_CLASS,
               pendingNodeType === 'text' &&
@@ -503,6 +492,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             title={toolTitle(t('toolbar.nodes.frame'), '3')}
             shortcutBadge={isNotMouse ? undefined : '3'}
             shortcutBadgeActive={pendingNodeType === 'frame'}
+            aria-pressed={pendingNodeType === 'frame'}
             className={clsx(
               MAIN_TOOL_BUTTON_CLASS,
               pendingNodeType === 'frame' &&
@@ -538,6 +528,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
                 title={`${t('toolbar.nodes.sketch')} (4)`}
                 shortcutBadge="4"
                 shortcutBadgeActive={pendingNodeType === 'sketch'}
+                aria-pressed={pendingNodeType === 'sketch'}
                 className={clsx(
                   MAIN_TOOL_BUTTON_CLASS,
                   pendingNodeType === 'sketch' &&
@@ -557,22 +548,29 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
               </Button>
             )}
           </div>
-          {/* Temporarily disabled because the audio node feature is not ready yet.
-          <Button
-            variant="ghost"
-            iconOnly
-            title={`${t('toolbar.nodes.audio')} (5)`}
-            shortcutBadge="5"
-            shortcutBadgeActive={pendingNodeType === 'audio'}
-            className={clsx(
-              pendingNodeType === 'audio' && 'text-info bg-bg-default',
-            )}
-            onClick={() =>
-              setPendingNodeType(pendingNodeType === 'audio' ? null : 'audio')
-            }
-          >
-            <NODE_ICON.audio />
-          </Button> */}
+          {canvasId !== worldCanvasId && (
+            <Button
+              variant="ghost"
+              iconOnly
+              title={toolTitle(t('spaceHierarchy.createChild'), '5')}
+              shortcutBadge={isNotMouse ? undefined : '5'}
+              shortcutBadgeActive={pendingNodeType === 'childSpace'}
+              aria-pressed={pendingNodeType === 'childSpace'}
+              className={clsx(
+                MAIN_TOOL_BUTTON_CLASS,
+                pendingNodeType === 'childSpace' &&
+                  'text-info bg-info-bg enabled:hover:bg-info-bg',
+              )}
+              onClick={() => {
+                onToolChange('select');
+                setPendingNodeType(
+                  pendingNodeType === 'childSpace' ? null : 'childSpace',
+                );
+              }}
+            >
+              <NODE_ICON.spacePreview />
+            </Button>
+          )}
         </div>
 
         <div ref={resourceMenuRef} className="flex items-center gap-1.5">
@@ -727,54 +725,12 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
         </div>
       </Modal>
 
-      <Modal
-        title={t('spacePreview.chooseTarget')}
-        description={t('spacePreview.chooseTargetDescription')}
-        isOpen={activeModal === 'spacePreview'}
-        onClose={() => setActiveModal(null)}
-      >
-        <div className="flex max-h-80 flex-col overflow-y-auto">
-          {previewTargetsLoading ? (
-            <div className="text-fg-muted p-4 text-center text-sm">
-              {t('spacePreview.loadingTargets')}
-            </div>
-          ) : previewTargetsError ? (
-            <div className="text-danger p-4 text-center text-sm">
-              {t('spacePreview.targetsUnavailable')}
-            </div>
-          ) : previewTargets.length === 0 ? (
-            <div className="text-fg-muted p-4 text-center text-sm">
-              {t('spacePreview.noTargets')}
-            </div>
-          ) : (
-            previewTargets.map((target) => (
-              <Button
-                key={target.canvasId}
-                variant="ghost"
-                size="md"
-                className="w-full justify-start rounded-none"
-                onClick={() => {
-                  addNodes([
-                    {
-                      nodeType: 'spacePreview',
-                      data: {
-                        targetCanvasId: target.canvasId,
-                        origin: { type: 'user-created' },
-                      },
-                    },
-                  ]);
-                  setActiveModal(null);
-                }}
-              >
-                <PanelsTopLeft />
-                <span className="min-w-0 truncate">
-                  {target.title || t('spacePreview.untitledSpace')}
-                </span>
-              </Button>
-            ))
-          )}
-        </div>
-      </Modal>
+      {activeModal === 'spacePreview' && (
+        <SpaceShortcutPicker
+          reference={resourceMenuRef.current?.querySelector('button') ?? null}
+          onClose={() => setActiveModal(null)}
+        />
+      )}
 
       {/* 2. Link Input Modal */}
       <Modal

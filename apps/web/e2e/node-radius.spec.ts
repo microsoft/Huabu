@@ -21,7 +21,7 @@ for (const [size, radius] of [
   [600, 18],
   [900, 24],
 ]) {
-  test(`media shells share the ${radius}px radius at ${size}px without changing border insets`, async ({
+  test(`card shells use size-tier radii at ${size}px without changing border insets`, async ({
     page,
   }) => {
     await openNewCanvas(page);
@@ -56,26 +56,43 @@ for (const [size, radius] of [
     const noteBorderColor = await noteShell.evaluate(
       (element) => getComputedStyle(element).borderTopColor,
     );
-    expect(noteBorderColor).toMatch(/(?:0\.3|30%)[ )]/);
+    expect(noteBorderColor).toMatch(/(?:0\.75|75%)[ )]/);
     for (const type of cardTypes) {
       const shell = page.locator(
         `.react-flow__node-${type} .semantic-lod-node`,
       );
-      await expect(shell).toHaveCSS('border-top-left-radius', `${radius}px`);
-      await expect(shell).toHaveCSS('border-top-color', noteBorderColor);
-      const inset = type === 'image' || type === 'video' ? 0 : 3;
+      // Space shortcuts retain their compact content height, not the requested square.
+      const shellRadius = type === 'spacePreview' ? 12 : radius;
+      await expect(shell).toHaveCSS(
+        'border-top-left-radius',
+        `${shellRadius}px`,
+      );
+      const reading = (type === 'pdf' || type === 'web') && size >= 600;
+      if (type === 'pdf' || type === 'web')
+        await expect(shell).toHaveAttribute(
+          'data-presentation',
+          reading ? 'reading' : 'overview',
+        );
+      await expect(shell).toHaveCSS(
+        'border-top-color',
+        reading ? 'rgba(0, 0, 0, 0)' : noteBorderColor,
+      );
+      const inset = type === 'image' || type === 'video' ? 0 : 2;
       const content = shell.locator(':scope > .semantic-lod-content');
       await expect(content).toHaveCSS(
         'border-top-left-radius',
-        `${radius - inset}px`,
+        `${shellRadius - inset}px`,
       );
       await expect(content).toHaveCSS('overflow', 'hidden');
-      await expect(shell).toHaveCSS('border-left-width', `${inset}px`);
+      await expect(shell).toHaveCSS(
+        'border-left-width',
+        `${reading ? 0 : inset}px`,
+      );
       if (type === 'image' || type === 'video') {
         const border = shell.locator('[data-node-media-border]');
         await expect(border).toHaveCSS('border-top-color', noteBorderColor);
         await expect(border).toHaveCSS('border-top-left-radius', `${radius}px`);
-        await expect(border).toHaveCSS('border-left-width', '3px');
+        await expect(border).toHaveCSS('border-left-width', '2px');
         const geometry = await shell.evaluate((element) => {
           const content = element.querySelector('.semantic-lod-content');
           if (!content) throw new Error('Missing content clip');

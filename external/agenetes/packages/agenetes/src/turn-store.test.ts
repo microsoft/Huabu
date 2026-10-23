@@ -30,19 +30,35 @@ import {
 import type { AgentTurn, Namespace } from '@agenetes/protocol';
 
 let tmp: string;
+const fileStores: FileTurnStore[] = [];
+const namespaces: Namespace[] = [];
 
 beforeEach(() => {
+  fileStores.length = 0;
+  namespaces.length = 0;
   tmp = mkdtempSync(path.join(tmpdir(), 'agenetes-turnstore-'));
 });
 
 afterEach(() => {
+  for (const store of fileStores) {
+    for (const namespace of namespaces) store.close(namespace);
+  }
   rmSync(tmp, { recursive: true, force: true });
 });
 
-const ns = (name: string): Namespace => ({
-  name,
-  storage: { root: path.join(tmp, name) },
-});
+const ns = (name: string): Namespace => {
+  const namespace = { name, storage: { root: path.join(tmp, name) } };
+  namespaces.push(namespace);
+  return namespace;
+};
+
+const fileStore = (
+  ...args: ConstructorParameters<typeof FileTurnStore>
+): FileTurnStore => {
+  const store = new FileTurnStore(...args);
+  fileStores.push(store);
+  return store;
+};
 
 const turn = (text: string): AgentTurn => ({
   request: { type: 'user_text', content: `q:${text}` },
@@ -64,7 +80,7 @@ const turnDatabasePath = (namespace: Namespace): string =>
 // stays a faithful twin of the in-memory default.
 describe.each<[string, () => TurnStore]>([
   ['InMemoryTurnStore', () => new InMemoryTurnStore()],
-  ['FileTurnStore', () => new FileTurnStore()],
+  ['FileTurnStore', () => fileStore()],
 ])('%s — TurnStore contract', (_name, make) => {
   it('appends and lists folded turns in fold order', () => {
     const store = make();
@@ -236,13 +252,13 @@ describe.each<[string, () => TurnStore]>([
 describe('FileTurnStore — on-disk specifics', () => {
   it('persists to the Space-owned turns.sqlite and survives a restart', () => {
     const n = ns('canvas-1');
-    const first = new FileTurnStore();
+    const first = fileStore();
     first.append(n, 'thread-1', persisted('a', 1, 3));
     first.append(n, 'thread-1', persisted('b', 4, 7));
     expect(existsSync(turnDatabasePath(n))).toBe(true);
 
     // A fresh store reads the same on-disk log (restart-surviving).
-    const restarted = new FileTurnStore();
+    const restarted = fileStore();
     expect(restarted.list(n, 'thread-1').map((p) => p.seqEnd)).toEqual([3, 7]);
     expect(restarted.count(n, 'thread-1')).toBe(2);
     expect(restarted.fence(n, 'thread-1')).toBe(7);
@@ -250,7 +266,7 @@ describe('FileTurnStore — on-disk specifics', () => {
 
   it('closes the Space-owned database before its directory moves', () => {
     const n = ns('canvas-1');
-    const store = new FileTurnStore();
+    const store = fileStore();
     store.append(n, 'thread-1', persisted('a', 1, 3));
 
     store.close(n);
@@ -266,7 +282,7 @@ describe('FileTurnStore — on-disk specifics', () => {
 
   it('tolerates a corrupt tail line without bricking the read', () => {
     const n = ns('canvas-1');
-    const store = new FileTurnStore();
+    const store = fileStore();
     store.append(n, 'thread-1', persisted('a', 1, 3));
     // Append a malformed line directly, as a torn write would leave behind.
     appendFileSync(turnFilePath(n, 'thread-1'), '{ not json\n');
@@ -280,7 +296,7 @@ describe('FileTurnStore — on-disk specifics', () => {
   it('replace() writes the target database and a fresh store instance reads it back', () => {
     const source = ns('canvas-1');
     const target = ns('canvas-2');
-    const writer = new FileTurnStore();
+    const writer = fileStore();
     writer.append(source, 'thread-1', persisted('a', 1, 3));
     writer.append(source, 'thread-1', persisted('b', 4, 7));
     const snapshot = writer.list(source, 'thread-1');
@@ -288,21 +304,21 @@ describe('FileTurnStore — on-disk specifics', () => {
     writer.replace(target, 'thread-1', snapshot);
     expect(existsSync(turnDatabasePath(target))).toBe(true);
 
-    const restarted = new FileTurnStore();
+    const restarted = fileStore();
     expect(restarted.list(target, 'thread-1')).toEqual(snapshot);
     expect(restarted.fence(target, 'thread-1')).toBe(7);
   });
 
   it('delete() removes the thread rows so a fresh store observes an empty log', () => {
     const n = ns('canvas-1');
-    const writer = new FileTurnStore();
+    const writer = fileStore();
     writer.append(n, 'thread-1', persisted('a', 1, 3));
     expect(existsSync(turnDatabasePath(n))).toBe(true);
 
     writer.delete(n, 'thread-1');
     expect(existsSync(turnDatabasePath(n))).toBe(true);
 
-    const restarted = new FileTurnStore();
+    const restarted = fileStore();
     expect(restarted.list(n, 'thread-1')).toEqual([]);
     expect(restarted.count(n, 'thread-1')).toBe(0);
   });
@@ -319,7 +335,7 @@ describe('FileTurnStore — on-disk specifics', () => {
       { flag: 'w' },
     );
 
-    const store = new FileTurnStore();
+    const store = fileStore();
     expect(store.list(n, 'thread-1').map((record) => record.seqEnd)).toEqual([
       3, 7,
     ]);
@@ -333,7 +349,7 @@ describe('FileTurnStore — on-disk specifics', () => {
     mkdirSync(path.dirname(source), { recursive: true });
     writeFileSync(source, `${JSON.stringify(persisted('a', 1, 3))}\n`);
     let fail = true;
-    const store = new FileTurnStore({
+    const store = fileStore({
       rename: (from, to) => {
         if (fail) {
           fail = false;

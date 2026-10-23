@@ -12,6 +12,9 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { useWorkspaceStore } from '@/store/workspaceStore';
+import { isVisibleWorldNode } from '@/utils/spaceHierarchy';
+
 import { CanvasLayerTree } from './CanvasLayerTree';
 import { CanvasSearchInput } from './CanvasSearchInput';
 import { CanvasSearchResults } from './CanvasSearchResults';
@@ -168,7 +171,16 @@ export const CanvasLayerPanel = ({
     // (no extra render scheduled).
     frozenNodesRef.current = { canvasId: activeCanvasId, nodes: rawNodes };
   }
-  const nodes = isLeftCollapsed ? frozenNodesRef.current.nodes : rawNodes;
+  const worldId = useWorkspaceStore((state) => state.worldCanvasId);
+  const summaries = useWorkspaceStore((state) => state.spaceSummaries);
+  const sourceNodes = isLeftCollapsed ? frozenNodesRef.current.nodes : rawNodes;
+  const nodes = useMemo(
+    () =>
+      sourceNodes.filter((node) =>
+        isVisibleWorldNode(node, activeCanvasId, worldId, summaries),
+      ),
+    [sourceNodes, activeCanvasId, worldId, summaries],
+  );
   const listHostRef = useRef<HTMLDivElement>(null);
   const listSessionRef = useRef({
     canvasId: activeCanvasId,

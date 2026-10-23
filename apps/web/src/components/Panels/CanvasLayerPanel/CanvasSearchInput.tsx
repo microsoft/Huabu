@@ -127,7 +127,7 @@ export const CanvasSearchInput = ({
   return (
     <div
       className={cn(
-        'bg-surface flex h-8 items-center gap-2 rounded-lg border px-2 transition-colors',
+        'bg-bg-default focus-within:bg-surface flex h-8 items-center gap-2 rounded-md border px-2 transition-colors',
         error
           ? 'border-danger'
           : 'border-edge-default focus-within:border-info',
@@ -144,7 +144,7 @@ export const CanvasSearchInput = ({
         onKeyDown={handleKeyDown}
         placeholder={t('layers.searchPlaceholder')}
         spellCheck={false}
-        className="min-w-0 flex-1 rounded-none border-0 bg-transparent px-0 py-1 text-sm font-normal placeholder:text-xs placeholder:font-normal focus:ring-0"
+        className="placeholder:text-fg-muted min-w-0 flex-1 rounded-none border-0 bg-transparent px-0 py-1 text-sm font-normal placeholder:text-xs focus:ring-0"
         data-canvas-search-input="true"
         data-search-scope="canvas"
         aria-label={t('layers.searchAria')}

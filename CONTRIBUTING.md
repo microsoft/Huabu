@@ -10,6 +10,31 @@ Before opening an issue, search existing issues, use the latest available releas
 
 Security vulnerabilities must not be reported through public GitHub issues. Follow [SECURITY.md](SECURITY.md) to report them privately.
 
+## Local development
+
+Install the prerequisites and dependencies described in [Building from source](README.md#building-from-source), then start the desktop development environment:
+
+```bash
+pnpm run dev:desktop
+```
+
+This starts the server and web client in watch mode and opens the desktop application with hot reload.
+
+### Optional Git hooks
+
+Enable local checks once per clone:
+
+```bash
+pnpm run hooks:install
+```
+
+This installs untracked hooks in `.git/hooks`:
+
+- **pre-commit** runs `lint-staged` with ESLint fixes and Prettier on staged files.
+- **pre-push** runs `pnpm run typecheck`.
+
+Use Git's `--no-verify` option to skip a hook for an individual operation, or run `pnpm run hooks:uninstall` to remove the hooks. These checks are a local convenience; CI remains authoritative and runs lint, format, and typecheck regardless of local hook configuration.
+
 ## Contributor License Agreement
 
 Most contributions require agreement to a Contributor License Agreement (CLA) declaring that you have the right to, and actually do, grant us the rights to use the contribution. For details, visit [Contributor License Agreements](https://cla.opensource.microsoft.com). When a pull request is submitted, a CLA bot will determine whether the agreement is required and provide instructions.

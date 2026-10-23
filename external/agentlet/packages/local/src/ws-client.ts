@@ -13,6 +13,7 @@ import {
   type JsonRpcMessage,
 } from '@agentlet/protocol'
 import type { SessionProfile as BootstrapProfile } from './session-bootstrap.js'
+import { monitorConnection } from './connection-health.js'
 
 export interface WsClientOptions {
   serverUrl: string
@@ -47,7 +48,7 @@ export interface WsClientEvents {
 
 export class WsClient extends EventEmitter<WsClientEvents> {
   private ws: WebSocket | null = null
-  private pingTimer: ReturnType<typeof setInterval> | null = null
+  private health: ReturnType<typeof monitorConnection> | null = null
   private readonly options: WsClientOptions
   private handshakeReceived = false
 
@@ -80,12 +81,12 @@ export class WsClient extends EventEmitter<WsClientEvents> {
     url.searchParams.set('id', this.options.role === 'agentlet'
       ? this.options.agentletId
       : this.options.sessionId)
-    this.ws = new WebSocket(url.toString())
+    this.ws = new WebSocket(url.toString(), { handshakeTimeout: 10_000 })
+    this.health = monitorConnection(this.ws, this.options.heartbeatInterval ?? 30)
 
     this.ws.on('open', () => {
       this.emit('open')
       this.sendHello()
-      this.startHeartbeat()
     })
 
     this.ws.on('message', (data, isBinary) => {
@@ -104,7 +105,7 @@ export class WsClient extends EventEmitter<WsClientEvents> {
     })
 
     this.ws.on('close', (code, reason) => {
-      this.stopHeartbeat()
+      this.health?.stop()
       this.ws = null
       this.emit('close', code, reason.toString())
     })
@@ -123,7 +124,7 @@ export class WsClient extends EventEmitter<WsClientEvents> {
   }
 
   close(code = 1000, reason = ''): void {
-    this.stopHeartbeat()
+    this.health?.stop()
     this.ws?.close(code, reason)
   }
 
@@ -196,6 +197,7 @@ export class WsClient extends EventEmitter<WsClientEvents> {
   private handleMessage(msg: JsonRpcMessage): void {
     if (!this.handshakeReceived && 'id' in msg && msg.id === 1) {
       this.handshakeReceived = true
+      this.health?.handshakeComplete()
       if ('error' in msg && msg.error) {
         this.emit('handshake_error', msg.error)
       } else if ('result' in msg) {
@@ -207,19 +209,4 @@ export class WsClient extends EventEmitter<WsClientEvents> {
     this.emit('message', msg)
   }
 
-  private startHeartbeat(): void {
-    const interval = this.options.heartbeatInterval ?? 30
-    if (interval <= 0) return
-
-    this.pingTimer = setInterval(() => {
-      this.ws?.ping()
-    }, interval * 1000)
-  }
-
-  private stopHeartbeat(): void {
-    if (this.pingTimer) {
-      clearInterval(this.pingTimer)
-      this.pingTimer = null
-    }
-  }
 }

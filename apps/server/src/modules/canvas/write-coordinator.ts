@@ -2,7 +2,7 @@
 // Licensed under the MIT license.
 
 /**
- * Canvas-domain serialization for standalone node writes.
+ * Canvas-domain serialization for node writes and Space hierarchy mutations.
  *
  * The mutex is application policy, not a storage-backend guarantee. It keeps
  * this process's content PUT and preprocessing writers ordered with executor
@@ -10,7 +10,11 @@
  * persistence operations.
  */
 
+import { AsyncLocalStorage } from 'node:async_hooks';
+
 import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
+
+import { acquireWorkspaceOperationLease } from '../workspace.js';
 
 import type {
   NodeContent,
@@ -19,6 +23,35 @@ import type {
 } from '../storage/index.js';
 
 const canvasMutexChains = new Map<string, Promise<unknown>>();
+const hierarchyOwner = new AsyncLocalStorage<{ active: boolean }>();
+let hierarchyTail: Promise<void> = Promise.resolve();
+
+export function assertSpaceHierarchyLocked(): void {
+  if (!hierarchyOwner.getStore()?.active)
+    throw new Error('Space hierarchy lock is required');
+}
+
+/** Acquire before Canvas mutexes; nested create/delete compensation may reenter. */
+export async function withSpaceHierarchyLock<T>(
+  operation: () => Promise<T>,
+): Promise<T> {
+  if (hierarchyOwner.getStore()?.active) return operation();
+  const lease = acquireWorkspaceOperationLease();
+  const previous = hierarchyTail;
+  let release!: () => void;
+  hierarchyTail = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await previous;
+  const scope = { active: true };
+  try {
+    return await hierarchyOwner.run(scope, operation);
+  } finally {
+    scope.active = false;
+    release();
+    lease.release();
+  }
+}
 
 export async function withCanvasMutex<T>(
   canvasId: string,

@@ -87,7 +87,7 @@ export const AiSummaryButton = ({
               </Button>
             </div>
             {hasSummary && (
-              <p className="text-fg-default text-sm leading-relaxed">
+              <p className="text-fg-default text-sm leading-relaxed wrap-anywhere">
                 {summary}
               </p>
             )}
@@ -96,7 +96,7 @@ export const AiSummaryButton = ({
                 {visibleKeywords.map((kw) => (
                   <span
                     key={kw}
-                    className="bg-hover text-fg-muted rounded-full px-2 py-0.5 text-xs"
+                    className="bg-hover text-fg-muted min-w-0 rounded-full px-2 py-0.5 text-xs wrap-anywhere"
                   >
                     {kw}
                   </span>

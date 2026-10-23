@@ -17,8 +17,16 @@
 import { useMemo, useState } from 'react';
 
 import { MessageList } from '@/components/Messages/MessageList';
+import { ChatSessionProvider } from '@/hooks/useChatSession';
 
 import type { ChatMessage } from '@/store/chatTypes';
+
+const SESSION = {
+  threadId: 'tool-call-playground-thread',
+  canvasId: 'tool-call-playground-canvas',
+  ownerCanvasId: 'tool-call-playground-canvas',
+  conversationView: null,
+} as const;
 
 // ─── Sample input ──────────────────────────────────────────────────────
 //
@@ -394,7 +402,13 @@ export default function ToolCallPlaygroundPage() {
         {/* Right: rendered chat */}
         <div className="flex w-1/2 min-w-0 flex-col">
           <div className="mx-auto flex min-h-0 w-full max-w-2xl flex-1 flex-col px-4 py-4">
-            <MessageList messages={messages} isLoading={false} hideAIActions />
+            <ChatSessionProvider value={SESSION}>
+              <MessageList
+                messages={messages}
+                isLoading={false}
+                hideAIActions
+              />
+            </ChatSessionProvider>
           </div>
         </div>
       </div>

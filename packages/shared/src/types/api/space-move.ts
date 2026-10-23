@@ -22,6 +22,7 @@ export const moveSelectionBodySchema = z
         .object({
           kind: z.literal('new'),
           title: z.string().trim().min(1),
+          asChild: z.boolean().optional(),
         })
         .strict(),
     ]),
@@ -37,6 +38,7 @@ export const moveSelectionErrorCodeSchema = z.enum([
   'MOVE_NODE_NOT_MOVABLE',
   'MOVE_DESTINATION_MISSING',
   'MOVE_DESTINATION_SAME_AS_SOURCE',
+  'MOVE_HIERARCHY_CYCLE',
   'MOVE_DESTINATION_CREATE_FAILED',
   'MOVE_DESTINATION_CLEANUP_FAILED',
   'MOVE_WORLD_NOT_ALLOWED',

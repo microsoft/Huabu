@@ -9,6 +9,8 @@ import { Button } from '@/components/Common/Button';
 import { Popover } from '@/components/Common/Popover';
 import { Select } from '@/components/Common/Select';
 
+import { SettingLabel } from './SettingLabel';
+import { SettingRow } from './SettingRow';
 import { SettingSection } from './SettingSection';
 
 vi.mock('react-i18next', () => ({
@@ -52,6 +54,27 @@ afterEach(() => {
 });
 
 describe('SettingSection', () => {
+  it('keeps descriptions and optional markers readable without enlarging them', () => {
+    act(() =>
+      root.render(
+        <SettingSection>
+          <SettingRow
+            title={<SettingLabel optional>Profile</SettingLabel>}
+            description="Used for auxiliary tasks."
+          >
+            <Button>Configure</Button>
+          </SettingRow>
+        </SettingSection>,
+      ),
+    );
+    const description = container.querySelector('.setting-row p.text-xs');
+    expect(description?.classList.contains('text-fg-muted')).toBe(true);
+    expect(description?.classList.contains('text-sm')).toBe(false);
+    const optional = container.querySelector('.setting-row span.font-normal');
+    expect(optional?.classList.contains('text-fg-muted')).toBe(true);
+    expect(optional?.textContent).toContain('settings.optional');
+  });
+
   it('dismisses its portaled Select without a pointer press, preserving drafts and unrelated popovers', async () => {
     const onMount = vi.fn();
     const onUnmount = vi.fn();
@@ -189,7 +212,7 @@ describe('SettingSection', () => {
     { collapsible: false, withAction: true },
     { collapsible: true, withAction: true },
   ])(
-    'uses a 2px heading gap and 16px section spacing while preserving card layout: %o',
+    'uses a 6px heading gap and 16px section spacing while preserving card layout: %o',
     ({ collapsible, withAction }) => {
       act(() => {
         root.render(
@@ -210,7 +233,7 @@ describe('SettingSection', () => {
       const spacingElement =
         collapsible || withAction ? heading?.parentElement : heading;
       const card = container.querySelector('.divide-y');
-      expect(spacingElement?.classList.contains('mb-0.5')).toBe(true);
+      expect(spacingElement?.classList.contains('mb-1.5')).toBe(true);
       expect(
         container.querySelector('section')?.classList.contains('mb-4'),
       ).toBe(true);
@@ -271,7 +294,7 @@ describe('SettingSection', () => {
     if (!toggle) throw new Error('Missing section heading');
     const section = toggle.closest('section');
     expect(section?.classList.contains('mb-2')).toBe(true);
-    expect(toggle.parentElement?.classList.contains('mb-0.5')).toBe(false);
+    expect(toggle.parentElement?.classList.contains('mb-1.5')).toBe(false);
     expect(toggle.classList.contains('flex-1')).toBe(true);
     expect(toggle.classList.contains('min-h-8')).toBe(true);
     expect(toggle.classList.contains('enabled:hover:bg-hover')).toBe(true);
@@ -283,7 +306,7 @@ describe('SettingSection', () => {
     );
     act(() => toggle.click());
     expect(section?.classList.contains('mb-4')).toBe(true);
-    expect(toggle.parentElement?.classList.contains('mb-0.5')).toBe(true);
+    expect(toggle.parentElement?.classList.contains('mb-1.5')).toBe(true);
     expect(toggle.firstElementChild?.classList.contains('-rotate-90')).toBe(
       false,
     );

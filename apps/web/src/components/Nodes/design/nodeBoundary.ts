@@ -1,9 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { getAccentTokens } from './accentTokens';
+import { NODE_SHELL_INSET } from '@huabu/shared/canvas-engine';
 
-export const NODE_BORDER_WIDTH = 3;
+import { getAccentTokens, isWhiteAccent } from './accentTokens';
+
+export const NODE_BORDER_WIDTH = NODE_SHELL_INSET / 2;
 
 /** Card layout inset, not painted stroke width; Frame surfaces stay separate. */
 export function nodeLayoutBorderInset(type: string | undefined): number {
@@ -13,10 +15,12 @@ export function nodeLayoutBorderInset(type: string | undefined): number {
 }
 
 export function nodeBoundaryForAccent(accent: string | null) {
-  return {
-    borderColor: accent
+  const color =
+    accent && !isWhiteAccent(accent)
       ? getAccentTokens(accent).divider
-      : 'var(--edge-default)',
+      : 'var(--edge-default)';
+  return {
+    borderColor: `color-mix(in srgb, ${color} 75%, transparent)`,
     borderWidth: NODE_BORDER_WIDTH,
   };
 }

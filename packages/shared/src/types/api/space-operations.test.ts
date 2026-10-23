@@ -17,6 +17,47 @@ import {
   CANVAS_NODE_TYPES,
 } from '../canvas/index.js';
 
+it('shares Canvas source addresses with strict Space SEARCH responses', () => {
+  const match = {
+    nodeId: 'note',
+    nodeType: 'note',
+    label: 'Note',
+    field: 'content',
+    snippet: 'needle',
+    matchStart: 0,
+    matchLength: 6,
+    occurrenceIndex: 0,
+    source: { hash: 'a'.repeat(64), offset: 10, length: 6 },
+  };
+  const response = (value: object) => ({
+    type: 'SEARCH',
+    result: {
+      count: 1,
+      truncated: false,
+      matches: [{ tier: 'content', match: value }],
+    },
+  });
+  expect(spaceQueryResponseSchema.parse(response(match))).toEqual(
+    response(match),
+  );
+  expect(
+    spaceQueryResponseSchema.safeParse(
+      response({
+        ...match,
+        source: { ...match.source, offset: -1 },
+      }),
+    ).success,
+  ).toBe(false);
+  expect(
+    spaceQueryResponseSchema.safeParse(
+      response({
+        ...match,
+        unexpected: true,
+      }),
+    ).success,
+  ).toBe(false);
+});
+
 describe('agentCanvasCommandSchema', () => {
   it('rejects the retired Pin command at both agent boundaries', () => {
     const command = {

@@ -967,17 +967,18 @@ export const ChatPanel = ({
     />
   );
 
+  const hidePanelHeader =
+    hideDuplicateTitle &&
+    (!acpConnectionStatus || connectionInTab) &&
+    !!activeConversationView &&
+    !onToggle;
+
   return (
     <ChatSessionProvider value={session}>
       {hideDuplicateTitle && isEditingQuestionTitle && titleControl}
       <SidebarPanel
         title={panelTitle}
-        hideHeader={
-          hideDuplicateTitle &&
-          (!acpConnectionStatus || connectionInTab) &&
-          !!activeConversationView &&
-          !onToggle
-        }
+        hideHeader={hidePanelHeader}
         tabs={
           <span className="flex max-w-full min-w-0 flex-1 items-center gap-1">
             {!hideDuplicateTitle && titleControl}
@@ -1015,7 +1016,9 @@ export const ChatPanel = ({
           )
         }
       >
-        <div className="flex h-full flex-col gap-2 overflow-visible pt-3">
+        <div
+          className={`flex h-full flex-col gap-2 overflow-visible ${hidePanelHeader ? 'pt-3' : 'pt-1'}`}
+        >
           {historyError && (
             <div
               role="alert"

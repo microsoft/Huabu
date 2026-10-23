@@ -163,7 +163,7 @@
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 8px;
 }
 .sp-design-summary {
   min-width: 0;
@@ -231,10 +231,6 @@
 .sp-design-rules dd,
 .sp-design-rules p {
   color: var(--fg-muted);
-}
-.sp-design-type-marker {
-  display: inline-flex;
-  flex-shrink: 0;
 }
 .sp-design-unavailable {
   margin: 12px 0 0;

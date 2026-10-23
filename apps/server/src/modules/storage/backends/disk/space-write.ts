@@ -160,7 +160,11 @@ export function createDiskSpaceWrite(store: CanvasStore): SpaceHandle['write'] {
 
       // Preserve the legacy structural PUT's implicit-create path. Executor
       // batches may never manufacture a Space as a side effect.
-      store.write(input.nextRecord);
+      store.write({
+        ...input.nextRecord,
+        parentSpaceId: null,
+        parentEntryNodeId: null,
+      });
       return { ok: true };
     }
 
@@ -182,7 +186,11 @@ export function createDiskSpaceWrite(store: CanvasStore): SpaceHandle['write'] {
           'use SpaceRepository.rename first',
       );
     }
-    const nextRecord = input.nextRecord;
+    const nextRecord = {
+      ...input.nextRecord,
+      parentSpaceId: current.parentSpaceId,
+      parentEntryNodeId: current.parentEntryNodeId,
+    };
 
     const needsBatchRollback =
       input.nodeMutations.length > 0 || input.delta !== undefined;

@@ -1,10 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { CANVAS_NODE_TYPES } from '@huabu/shared';
+import { CANVAS_NODE_TYPES, spaceHierarchyParamsSchema } from '@huabu/shared';
 import { COMMAND_META, getDescendantIds } from '@huabu/shared/canvas-engine';
 
-import { getStructuredStore, isWorldCanvasId } from '../storage/index.js';
+import {
+  getStructuredStore,
+  isWorldCanvasId,
+  space,
+} from '../storage/index.js';
 
 import type { CanvasCommand } from '@huabu/shared';
 import type { NestableNode } from '@huabu/shared/canvas-engine';
@@ -32,6 +36,34 @@ export class WorldPreviewMutationError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'WorldPreviewMutationError';
+  }
+}
+
+/** Formal entries are removed only by explicit Space lifecycle operations. */
+export async function assertChildSpaceEntriesAllowed(
+  canvasId: string,
+  previousNodes: readonly unknown[],
+  nodes: readonly unknown[],
+): Promise<void> {
+  const byId = new Map(storedNodes(nodes).map((node) => [node.id, node]));
+  for (const previous of storedNodes(previousNodes)) {
+    const target = previewTarget(previous);
+    if (
+      !target ||
+      !spaceHierarchyParamsSchema.shape.canvasId.safeParse(target).success
+    )
+      continue;
+    const next = byId.get(previous.id);
+    if (next && previewTarget(next) === target) continue;
+    const child = await space(target).read();
+    if (
+      child?.parentSpaceId === canvasId &&
+      child.parentEntryNodeId === previous.id
+    ) {
+      throw new WorldPreviewMutationError(
+        'A child Space entry cannot be removed or retargeted. Use Delete Space (with confirmation) or Change parent.',
+      );
+    }
   }
 }
 

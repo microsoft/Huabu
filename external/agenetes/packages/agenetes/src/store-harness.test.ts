@@ -17,6 +17,7 @@
 // minus its tests (tsconfig `exclude`), and a test-only harness has no
 // business in the shipped `dist`.
 
+import { normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
@@ -217,7 +218,8 @@ const namespace = { name: 'harness', storage: undefined };
 // The harness is a module other suites import, so guard its own contract
 // tests: registering them again inside every importer would run the same
 // three cases five times and bury each suite's real subject.
-if (expect.getState().testPath === fileURLToPath(import.meta.url)) {
+const testPath = expect.getState().testPath;
+if (testPath && normalize(testPath) === fileURLToPath(import.meta.url)) {
   describe('asynchronous store harness', () => {
     it('answers every port method with a promise, never synchronously', async () => {
       const stores = createAsyncStores();

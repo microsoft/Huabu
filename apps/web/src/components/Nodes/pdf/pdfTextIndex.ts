@@ -1,6 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { literalTextMatches } from '@huabu/shared';
+import { markdownSearchTarget } from '@huabu/shared/canvas-engine';
+
 export type PdfTextItem = {
   str?: string;
   hasEOL?: boolean;
@@ -23,7 +26,7 @@ export function textFromPdfItems(items: readonly PdfTextItem[]): string {
   for (const item of items) {
     const value = item.str ?? '';
     if (!value) continue;
-    if (text && !text.endsWith(' ') && !text.endsWith('\n')) text += ' ';
+    if (text && !/\s$/.test(text) && !/^\s/.test(value)) text += ' ';
     text += value;
     if (item.hasEOL) text += '\n';
   }
@@ -40,21 +43,50 @@ export function findPdfTextMatches(
   const matches: PdfTextMatch[] = [];
   const sortedPages = [...pages].sort((a, b) => a.pageIndex - b.pageIndex);
   for (const page of sortedPages) {
-    const haystack = page.text.toLowerCase();
-    let from = 0;
     let pageOccurrenceIndex = 0;
-    while (from < haystack.length) {
-      const start = haystack.indexOf(needle, from);
-      if (start === -1) break;
+    for (const { start, end } of literalTextMatches(page.text, needle)) {
       matches.push({
         pageIndex: page.pageIndex,
         pageOccurrenceIndex,
         start,
-        end: start + needle.length,
+        end,
       });
       pageOccurrenceIndex += 1;
-      from = start + Math.max(1, needle.length);
     }
   }
   return matches;
+}
+
+export function findPdfSourceMatch(
+  pages: Iterable<PdfPageText>,
+  query: string,
+  markdown: string,
+  sourceOffset: number,
+  sourceLength = query.length,
+): number | null {
+  const target = markdownSearchTarget(markdown, sourceOffset, sourceLength);
+  if (!target) return null;
+  const compact = (text: string): string => text.replace(/\s/g, '');
+  const sorted = [...pages].sort((a, b) => a.pageIndex - b.pageIndex);
+  if (
+    compact(target.text) !== compact(sorted.map((page) => page.text).join(''))
+  )
+    return null;
+  const offset = compact(target.text.slice(0, target.start)).length;
+  const pageOffsets = new Map<number, number>();
+  let length = 0;
+  for (const page of sorted) {
+    pageOffsets.set(page.pageIndex, length);
+    length += compact(page.text).length;
+  }
+  const index = findPdfTextMatches(sorted, query).findIndex((match) => {
+    const page = sorted.find((entry) => entry.pageIndex === match.pageIndex);
+    return (
+      page &&
+      (pageOffsets.get(page.pageIndex) ?? 0) +
+        compact(page.text.slice(0, match.start)).length ===
+        offset
+    );
+  });
+  return index < 0 ? null : index;
 }

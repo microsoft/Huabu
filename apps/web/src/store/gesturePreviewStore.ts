@@ -5,11 +5,13 @@ import { create } from 'zustand';
 
 import { resetInkSigilSession } from './inkSigilStore';
 
+import type { TrackDropGap } from '@/handler/masonryDrop';
 import type { Guide } from '@/handler/snap/types';
 import type {
   FrameFitResult,
   NestableNode,
   StructuredDropContext,
+  StructuredDropTarget,
 } from '@huabu/shared/canvas-engine';
 
 /**
@@ -220,6 +222,7 @@ type GesturePreviewState = GesturePreviewData & {
  * by {@link describeStructuredDropZone} and offset to canvas space.
  */
 export type StructuredDropPreview = {
+  nodeId: string;
   frameId: string;
   kind: 'into-existing' | 'insert-new';
   x: number;
@@ -227,6 +230,10 @@ export type StructuredDropPreview = {
   width: number;
   height: number;
   context: StructuredDropContext;
+  masonry?: {
+    target: StructuredDropTarget;
+    gap: TrackDropGap | null;
+  };
 };
 
 /**
@@ -280,85 +287,142 @@ const INITIAL_PREVIEW_DATA: GesturePreviewData = {
  * direction one-way (canvasStore / snapSession → gesturePreviewStore)
  * and avoids a circular import.
  */
-export const useGesturePreviewStore = create<GesturePreviewState>()((set) => ({
-  ...INITIAL_PREVIEW_DATA,
-  setSketchErasePreview: (sketchErasePreview) => set({ sketchErasePreview }),
-  clearSketchErasePreview: () => set({ sketchErasePreview: {} }),
-  setSketchStrokeSelection: (sketchStrokeSelection) =>
-    set({ sketchStrokeSelection }),
-  clearSketchStrokeSelection: () =>
-    set({
-      sketchStrokeSelection: {},
-      sketchSelectionPolygon: null,
-      sketchSelectionSession: null,
-      sketchStrokeMovePreview: null,
-      sketchStrokeMoveCarriedNodeIds: [],
-    }),
-  setSketchStrokeHighlight: (sketchStrokeHighlight) =>
-    set({ sketchStrokeHighlight }),
-  clearSketchStrokeHighlight: () => set({ sketchStrokeHighlight: {} }),
-  setSketchSelectionPolygon: (sketchSelectionPolygon) =>
-    set({ sketchSelectionPolygon }),
-  commitSketchSelection: (sketchSelectionPolygon) =>
-    set({
-      sketchSelectionPolygon,
-      sketchSelectionSession: sketchSelectionPolygon ? {} : null,
-    }),
-  setSketchStrokeMovePreview: (sketchStrokeMovePreview) =>
-    set({ sketchStrokeMovePreview }),
-  setSketchStrokeMoveCarriedNodeIds: (sketchStrokeMoveCarriedNodeIds) =>
-    set({ sketchStrokeMoveCarriedNodeIds }),
-  setInkSubmissionPreparing: (inkSubmissionPreparing) =>
-    set({ inkSubmissionPreparing }),
-  setFrameFitPreviews: (previews) => set({ frameFitPreviews: previews }),
-  clearFrameFitPreview: () => set({ frameFitPreviews: [] }),
-  setSnapGuides: (guides) => set({ snapGuides: guides }),
-  clearSnapGuides: () => set({ snapGuides: [] }),
-  setStructuredDropPreview: (preview) =>
-    set({ structuredDropPreview: preview }),
-  clearStructuredDropPreview: () => set({ structuredDropPreview: null }),
-  setNodeGeometryPreviews: (nodes) =>
-    set((state) => {
-      const current = state.nodeGeometryPreviews;
-      if (nodes.length === 0) {
-        return current === null ? state : { nodeGeometryPreviews: null };
+const TRACK_INSERT_DWELL_MS = 300;
+let trackDwellTimer: ReturnType<typeof setTimeout> | undefined;
+function clearTrackDwell() {
+  clearTimeout(trackDwellTimer);
+  trackDwellTimer = undefined;
+}
+
+export const useGesturePreviewStore = create<GesturePreviewState>()(
+  (set, get) => ({
+    ...INITIAL_PREVIEW_DATA,
+    setSketchErasePreview: (sketchErasePreview) => set({ sketchErasePreview }),
+    clearSketchErasePreview: () => set({ sketchErasePreview: {} }),
+    setSketchStrokeSelection: (sketchStrokeSelection) =>
+      set({ sketchStrokeSelection }),
+    clearSketchStrokeSelection: () =>
+      set({
+        sketchStrokeSelection: {},
+        sketchSelectionPolygon: null,
+        sketchSelectionSession: null,
+        sketchStrokeMovePreview: null,
+        sketchStrokeMoveCarriedNodeIds: [],
+      }),
+    setSketchStrokeHighlight: (sketchStrokeHighlight) =>
+      set({ sketchStrokeHighlight }),
+    clearSketchStrokeHighlight: () => set({ sketchStrokeHighlight: {} }),
+    setSketchSelectionPolygon: (sketchSelectionPolygon) =>
+      set({ sketchSelectionPolygon }),
+    commitSketchSelection: (sketchSelectionPolygon) =>
+      set({
+        sketchSelectionPolygon,
+        sketchSelectionSession: sketchSelectionPolygon ? {} : null,
+      }),
+    setSketchStrokeMovePreview: (sketchStrokeMovePreview) =>
+      set({ sketchStrokeMovePreview }),
+    setSketchStrokeMoveCarriedNodeIds: (sketchStrokeMoveCarriedNodeIds) =>
+      set({ sketchStrokeMoveCarriedNodeIds }),
+    setInkSubmissionPreparing: (inkSubmissionPreparing) =>
+      set({ inkSubmissionPreparing }),
+    setFrameFitPreviews: (previews) => set({ frameFitPreviews: previews }),
+    clearFrameFitPreview: () => set({ frameFitPreviews: [] }),
+    setSnapGuides: (guides) => set({ snapGuides: guides }),
+    clearSnapGuides: () => set({ snapGuides: [] }),
+    setStructuredDropPreview: (preview) => {
+      const previous = get().structuredDropPreview;
+      const sameGap =
+        !!preview?.masonry?.gap &&
+        !!previous?.masonry?.gap &&
+        preview.nodeId === previous.nodeId &&
+        preview.frameId === previous.frameId &&
+        preview.context.axis === previous.context.axis &&
+        preview.masonry.gap.slot === previous.masonry.gap.slot;
+      if (!sameGap) clearTrackDwell();
+      if (
+        sameGap &&
+        preview?.masonry &&
+        previous?.masonry?.target.kind === 'insert-new'
+      ) {
+        preview = {
+          ...preview,
+          kind: 'insert-new',
+          masonry: {
+            ...preview.masonry,
+            target: previous.masonry.target,
+          },
+        };
       }
-      const unchanged =
-        current !== null &&
-        current.size === nodes.length &&
-        nodes.every((node) => {
-          const previous = current.get(node.id);
-          return (
-            previous?.position.x === node.position.x &&
-            previous.position.y === node.position.y &&
-            previous.style?.width === node.style?.width &&
-            previous.style?.height === node.style?.height &&
-            previous.measured?.width === node.measured?.width &&
-            previous.measured?.height === node.measured?.height
-          );
-        });
-      if (unchanged) return state;
-      return {
-        nodeGeometryPreviews: new Map(
-          nodes.map((node) => [
-            node.id,
-            {
-              position: node.position,
-              style: node.style,
-              measured: node.measured,
+      set({ structuredDropPreview: preview });
+      if (!sameGap && preview?.masonry?.gap) {
+        trackDwellTimer = setTimeout(() => {
+          trackDwellTimer = undefined;
+          const current = get().structuredDropPreview;
+          if (!current?.masonry?.gap) return;
+          set({
+            structuredDropPreview: {
+              ...current,
+              kind: 'insert-new',
+              masonry: {
+                ...current.masonry,
+                target: {
+                  kind: 'insert-new',
+                  slot: current.masonry.gap.slot,
+                },
+              },
             },
-          ]),
-        ),
-      };
-    }),
-  clearNodeGeometryPreviews: () =>
-    set((state) =>
-      state.nodeGeometryPreviews === null
-        ? state
-        : { nodeGeometryPreviews: null },
-    ),
-  resetCanvasScopedTransients: () => {
-    resetInkSigilSession();
-    set({ ...INITIAL_PREVIEW_DATA });
-  },
-}));
+          });
+        }, TRACK_INSERT_DWELL_MS);
+      }
+    },
+    clearStructuredDropPreview: () => {
+      clearTrackDwell();
+      set({ structuredDropPreview: null });
+    },
+    setNodeGeometryPreviews: (nodes) =>
+      set((state) => {
+        const current = state.nodeGeometryPreviews;
+        if (nodes.length === 0) {
+          return current === null ? state : { nodeGeometryPreviews: null };
+        }
+        const unchanged =
+          current !== null &&
+          current.size === nodes.length &&
+          nodes.every((node) => {
+            const previous = current.get(node.id);
+            return (
+              previous?.position.x === node.position.x &&
+              previous.position.y === node.position.y &&
+              previous.style?.width === node.style?.width &&
+              previous.style?.height === node.style?.height &&
+              previous.measured?.width === node.measured?.width &&
+              previous.measured?.height === node.measured?.height
+            );
+          });
+        if (unchanged) return state;
+        return {
+          nodeGeometryPreviews: new Map(
+            nodes.map((node) => [
+              node.id,
+              {
+                position: node.position,
+                style: node.style,
+                measured: node.measured,
+              },
+            ]),
+          ),
+        };
+      }),
+    clearNodeGeometryPreviews: () =>
+      set((state) =>
+        state.nodeGeometryPreviews === null
+          ? state
+          : { nodeGeometryPreviews: null },
+      ),
+    resetCanvasScopedTransients: () => {
+      clearTrackDwell();
+      resetInkSigilSession();
+      set({ ...INITIAL_PREVIEW_DATA });
+    },
+  }),
+);

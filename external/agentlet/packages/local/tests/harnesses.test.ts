@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { join } from 'node:path'
 import type { HarnessDiscoveryResult, JsonRpcMessage } from '@agentlet/protocol'
 import { ServerMethods } from '@agentlet/protocol'
@@ -27,6 +27,10 @@ import { prepareHarnessWorkspace } from '../src/harnesses/workspace.js'
 import { Agentlet } from '../src/agentlet.js'
 import { AgentProcess } from '../src/agent-process.js'
 import { Logger } from '../src/logger.js'
+
+afterEach(() => {
+  vi.unstubAllEnvs()
+})
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -98,7 +102,8 @@ describe('trusted harness discovery', () => {
     expect(harnesses[0]?.version).toBeUndefined()
   })
 
-  it('supports Windows native executables and probes through the platform shell', async () => {
+  it.each([undefined, 'C:\\Windows\\System32\\cmd.exe'])('supports Windows native executables with ComSpec=%s', async (shell) => {
+    vi.stubEnv('ComSpec', shell)
     mocks.platform.mockReturnValue('win32')
     mocks.probe.mockImplementation(async (file: string, args: string[]) => ({
       stdout: file === 'where.exe' ? `C:\\Tools\\${args[0]}.exe\r\nD:\\Other\\${args[0]}.exe\r\n` : '2.0\r\n',
@@ -106,7 +111,7 @@ describe('trusted harness discovery', () => {
     expect((await discoverHarnesses()).harnesses[0]).toMatchObject({
       status: 'ready', version: '2.0',
     })
-    expect(mocks.probe).toHaveBeenCalledWith('cmd.exe', ['/d', '/s', '/c', 'copilot --version'], expect.objectContaining({ shell: false }))
+    expect(mocks.probe).toHaveBeenCalledWith(shell ?? 'cmd.exe', ['/d', '/s', '/c', 'copilot --version'], expect.objectContaining({ shell: false }))
   })
 
   it.each(['cmd', 'CMD', 'bat', 'BAT'])(

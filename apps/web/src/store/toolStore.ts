@@ -17,11 +17,13 @@ import type { CanvasNodeType } from '@huabu/shared';
  * subset of the shared canvas-node union means adding a new canvas
  * node type will force a TS decision here, instead of silently
  * leaving the toolbar out of sync.
+ * `childSpace` is a creation action that places a canonical Space entry,
+ * not a separate persisted node type.
  */
-export type PendingNodeType = Exclude<
-  CanvasNodeType,
-  'image' | 'pdf' | 'video' | 'web'
-> | null;
+export type PendingNodeType =
+  | 'childSpace'
+  | Exclude<CanvasNodeType, 'image' | 'pdf' | 'video' | 'web'>
+  | null;
 
 /**
  * Active sketch tool settings — color, thickness, and tool mode used by

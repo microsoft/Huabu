@@ -86,7 +86,9 @@ Both hello methods are requests and require a matching JSON-RPC response before 
 | `server/sendResource` | Notification | Write a host-provided resource through the daemon environment registry. |
 | `server/replay` | Notification | Replay Gateway-to-daemon messages buffered during disconnection. |
 | `server/ping` | Notification | Application-level heartbeat request. |
-| `server/shutdown` | Notification | Ask the daemon to stop gracefully. |
+| `server/shutdown` | Notification | Stop gracefully, except reason `server_shutting_down`, which stops managed agents but keeps the daemon waiting to reconnect. |
+
+For `server/shutdown` with `{ "reason": "server_shutting_down" }`, the host is stopping its service. Agentlet closes the old control connection, stops existing agents and pending launches, and reconnects using its existing identity and credentials. Device reconnection does not resume old ACP sessions or tasks. Other reasons, including an omitted reason, retain the terminal graceful-shutdown behavior. User interruption remains terminal. Control reconnection uses exponential delays beginning at one second, capped by `--reconnect-max` (30 seconds by default), with no attempt limit and a reset after a successful handshake. Authentication rejection is terminal rather than a transient reconnect condition.
 
 `server/discoverHarnesses` accepts omitted params, `{}`, or `{ "prepareWorkspaces": boolean }`; every other option and invalid request shape is rejected with `-32602`. The advertised `AgentletProfile.capabilities.harnessDiscovery` is `{ version: 2 }`. Unsupported daemons must not be inferred to support discovery.
 
@@ -121,9 +123,11 @@ The host must include the required spawn parameters in every request. Agentlet h
 
 Historical Team manifest data is described in [`agent-team.md`](agent-team.md); it is not a runtime launch contract.
 
-The daemon enforces its startup `--max-agents` value against the authoritative managed-process map. A rejected spawn returns JSON-RPC error data `{ code: "capacity_exhausted", limit, active: { total, jobs, deployments, unknown, stopping } }`; these counts reveal no session IDs, commands, or host correlation IDs.
+The daemon enforces its startup `--max-agents` value against the authoritative managed-process map and tracked pending launches. Failed bootstrap and cancelled-launch cleanups remain tracked and reserve capacity until the owned tree exits; cleanup failures are logged and retried after one second while the daemon is active. New spawns during shutdown or planned-restart cleanup are rejected with `data: { code: "daemon_stopping" }` before any process starts, so launches cannot escape the cleanup snapshot. A capacity-rejected spawn returns JSON-RPC error data `{ code: "capacity_exhausted", limit, active: { total, jobs, deployments, unknown, stopping } }`; these counts reveal no session IDs, commands, or host correlation IDs.
 
-`server/stop` addresses one exact native `sessionId`. It is idempotent and returns `{ stopped: true, disposition: "stopped" | "already_absent" }`. For a present process, the daemon closes stdin, escalates through termination and kill with bounded exit waits, suppresses auto-restart, and removes the capacity slot only after exit is confirmed. Failure returns `data: { code: "agent_stop_failed", stillRunning: true }`.
+`server/stop` addresses one exact native `sessionId`. It is idempotent and returns `{ stopped: true, disposition: "stopped" | "already_absent" }`. For a present process, the daemon closes stdin, escalates through termination and kill with bounded exit waits, suppresses auto-restart, and removes the capacity slot only after the owned process tree exits. POSIX launches use a dedicated process group retained after the shell exits; Windows uses bounded, awaited `taskkill /PID <pid> /T /F`. Bootstrap failure, idle suspension, shutdown, and planned restart use the same cleanup path; reconnection waits for cleanup. Children that deliberately create another POSIX session are outside the owned group. Failure returns `data: { code: "agent_stop_failed", stillRunning: true }`.
+
+Idle cleanup rejection is handled and leaves the agent tracked as stopping so an explicit stop can retry. Shutdown attempts pending and managed cleanup concurrently, awaits every result even when another attempt fails, closes connections, and only then chooses its exit code. Any cleanup failure makes shutdown nonzero rather than skipping remaining agents.
 
 ## 5. ACP relay
 

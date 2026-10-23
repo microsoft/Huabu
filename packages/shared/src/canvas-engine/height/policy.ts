@@ -13,9 +13,8 @@
  *  - `REF_WIDTHS` in `apps/web/src/hooks/useNodeScale.ts`
  *  - a scatter of inline `typeof style.height === 'number'` checks
  *
- * The two type sets differ by exactly one entry (`note`), which is the
- * observation this table encodes: `note` is the only type whose owner
- * can change at runtime. See `docs/proposals/node-height-ownership-model.md`.
+ * Note is the only type whose owner can change at runtime. New Notes
+ * default to fixed height; stored and legacy ownership remain authoritative.
  */
 
 import type { HeightMode } from '../../types/canvas/node.js';
@@ -26,7 +25,7 @@ import type { Node } from '@xyflow/react';
  *
  * - `content` — always derived from rendered content. The user cannot pin
  *   it, so a top-level `style.height` is never authored geometry.
- * - `toggleable` — derived by default, but the user can pin it. The owner
+ * - `toggleable` — fixed by default, but the user can enable auto height. The owner
  *   is recorded per node in `data.heightMode`.
  * - `manual` — the height is authored (creation default or resize gesture)
  *   and content never drives it.
@@ -82,13 +81,13 @@ const MANUAL_POLICY: HeightPolicy = { kind: 'manual' };
  * Vertical and horizontal chrome (px) the node shell adds around a
  * node's body.
  *
- * `NodeWrapper` defaults to a 3px transparent border for non-sketch
+ * `NodeWrapper` defaults to a 2px transparent border for non-sketch
  * nodes (images paint it as an overlay instead), and border-box sizing eats into the
  * geometry the store assigned — on *both* axes. The body is `h-full
  * w-full` inside it.
  *
  * Vertically this is why a layout height computed from content alone
- * leaves the body 6px short, clipping the last line and lighting up the
+ * leaves the body 4px short, clipping the last line and lighting up the
  * truncation affordance on a node meant to fit exactly.
  *
  * Horizontally it is why the content's layout width is the node's width
@@ -98,7 +97,7 @@ const MANUAL_POLICY: HeightPolicy = { kind: 'manual' };
  * Applied outside the scaled container, so it is canvas-space px and is
  * never multiplied by the content scale.
  */
-export const NODE_SHELL_INSET = 6;
+export const NODE_SHELL_INSET = 4;
 
 /**
  * Height policy per node type. Types absent from this table are `manual`.
@@ -150,13 +149,12 @@ export function isAlwaysAutoHeightType(nodeType: string | undefined): boolean {
 
 /**
  * True when a node type is content-driven by default at creation time —
- * `content` and `toggleable` alike. Creation must not bake a nominal
- * layout height into `style.height` for these.
+ * only `content` types. Toggleable Notes start fixed unless explicitly auto.
  */
 export function isAutoHeightByDefaultType(
   nodeType: string | undefined,
 ): boolean {
-  return getHeightPolicy(nodeType).kind !== 'manual';
+  return getHeightPolicy(nodeType).kind === 'content';
 }
 
 /** Who currently owns a node's height. Re-exported for convenience. */

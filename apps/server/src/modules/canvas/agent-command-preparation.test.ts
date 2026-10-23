@@ -3,9 +3,65 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { createNodesCommandSchema, type CanvasNodeId } from '@huabu/shared';
+import {
+  autoHeightKey,
+  executeCanvasCommands,
+} from '@huabu/shared/canvas-engine';
+
 import { prepareAgentCanvasCommands } from './agent-command-preparation.js';
 
 describe('prepareAgentCanvasCommands', () => {
+  it.each([
+    { height: 'auto', mode: 'auto', expectedHeight: 56 },
+    { height: 180, mode: 'fixed', expectedHeight: 180 },
+    { height: undefined, mode: 'fixed', expectedHeight: 300 },
+  ] as const)(
+    'preserves wire creation height $height through execution',
+    ({ height, mode, expectedHeight }) => {
+      const wire = createNodesCommandSchema.parse({
+        type: 'CREATE_NODES',
+        nodes: [
+          {
+            nodeType: 'note',
+            position: { x: 10, y: 20 },
+            size: { width: 560, ...(height === undefined ? {} : { height }) },
+            data: { content: 'Auto height remains measurable.' },
+          },
+        ],
+      });
+      const commands = prepareAgentCanvasCommands([wire]);
+      const nodes = executeCanvasCommands(
+        { source: 'agent', commands },
+        { nodes: [], edges: [], canvasId: 'canvas' },
+      ).writeResult.nodes;
+      const note = nodes[0];
+      expect(note.data.heightMode).toBe(mode);
+      expect(note.style).toEqual({ width: 560, height: expectedHeight });
+      const measured = executeCanvasCommands(
+        {
+          source: 'system',
+          commands: [
+            {
+              type: 'APPLY_MEASURED_HEIGHT',
+              items: [
+                {
+                  nodeId: note.id as CanvasNodeId,
+                  intrinsicHeight: 420,
+                  measuredFor: autoHeightKey(note),
+                },
+              ],
+            },
+          ],
+        },
+        { nodes, edges: [], canvasId: 'canvas' },
+      ).writeResult.nodes[0];
+      expect(measured.style?.height).toBe(
+        mode === 'auto' ? 424 : expectedHeight,
+      );
+    },
+  );
+
   it('stamps server-owned authorship metadata', () => {
     const [create, connect] = prepareAgentCanvasCommands([
       {

@@ -14,15 +14,14 @@ import {
   deduplicateLabel,
   getAbsolutePosition,
   getNodeDefaultSize,
+  resolveHeightMode,
   type CanvasEdge,
   type CanvasNode,
   type NestableNode,
 } from '@huabu/shared/canvas-engine';
 
 const DESTINATION_GAP = 160;
-const MOVABLE_TYPES = new Set<CanvasNodeType>(
-  CANVAS_NODE_TYPES.filter((type) => type !== 'spacePreview'),
-);
+const MOVABLE_TYPES = new Set<CanvasNodeType>(CANVAS_NODE_TYPES);
 
 export class SpaceMovePlanError extends Error {
   constructor(
@@ -196,6 +195,7 @@ export function buildSpaceMovePlan(input: {
     if (!nodeId) continue;
     const nodeType = node.type as CanvasNodeType;
     const data = structuredClone(node.data ?? {});
+    if (nodeType === 'note') data.heightMode = resolveHeightMode(node);
     const originalLabel =
       typeof data.label === 'string' ? data.label.trim() : '';
     const label = deduplicateLabel(originalLabel || nodeType, labels);

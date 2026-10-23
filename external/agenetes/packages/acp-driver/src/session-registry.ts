@@ -246,6 +246,18 @@ class AcpSessionRegistry {
   get size(): number {
     return this.byPlacementAndThread.size;
   }
+
+  hasPendingPermissions(threadId: string, namespaceName: string): boolean {
+    for (const entry of this.byPlacementAndThread.values()) {
+      if (
+        entry.threadId === threadId &&
+        entry.namespace.name === namespaceName &&
+        entry.client.hasPendingPermissions(entry.sessionId)
+      )
+        return true;
+    }
+    return false;
+  }
 }
 
 function registryKey(agentletId: string, threadId: string): string {

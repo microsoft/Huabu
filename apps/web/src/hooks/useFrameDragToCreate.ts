@@ -10,7 +10,13 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 
-import { isPanelTarget } from '../components/Panels/Canvas/canvasInputPolicy';
+import { getDragActivationDistance } from '@/handler/canvasGestureSession';
+
+import {
+  isEmptyCanvasPlacementTarget,
+  isNodePlacementTap,
+  isPanelTarget,
+} from '../components/Panels/Canvas/canvasInputPolicy';
 
 import type { ReactFlowInstance } from '@xyflow/react';
 
@@ -39,6 +45,8 @@ interface FlowRect {
 interface DragRange {
   start: Point;
   end: Point;
+  pointerType: string;
+  clickAllowed: boolean;
 }
 
 /** Minimum frame size in flow-space pixels — guards against accidental taps. */
@@ -47,12 +55,16 @@ const MIN_FRAME_SIZE = 20;
 interface UseFrameDragToCreateOptions {
   /** True when the user has picked the frame tool. */
   active: boolean;
+  /** Changing the Space or creation tool cancels an in-flight rectangle. */
+  scopeKey?: string;
   /** Canvas wrapper used to translate global coords to local for the preview. */
   wrapperRef: MutableRefObject<HTMLDivElement | null>;
   /** React Flow instance used for screen↔flow coordinate conversion. */
   rfInstanceRef: MutableRefObject<ReactFlowInstance | null>;
   /** Called with the final flow-space rectangle when the gesture commits. */
   onCreate: (rect: FlowRect) => void;
+  /** Optional click action for tools that also support empty-space creation. */
+  onClick?: (point: Point) => void;
   /** Called whenever the gesture ends (commit, cancel, or escape). */
   onEnd: () => void;
 }
@@ -76,12 +88,17 @@ interface UseFrameDragToCreateResult {
 
 export function useFrameDragToCreate({
   active,
+  scopeKey,
   wrapperRef,
   rfInstanceRef,
   onCreate,
+  onClick,
   onEnd,
 }: UseFrameDragToCreateOptions): UseFrameDragToCreateResult {
   const [drag, setDrag] = useState<DragRange | null>(null);
+  useEffect(() => {
+    setDrag(null);
+  }, [active, scopeKey]);
 
   const cancel = useCallback(() => {
     setDrag(null);
@@ -114,7 +131,12 @@ export function useFrameDragToCreate({
       e.currentTarget.setPointerCapture(e.pointerId);
 
       const point = { x: e.clientX, y: e.clientY };
-      setDrag({ start: point, end: point });
+      setDrag({
+        start: point,
+        end: point,
+        pointerType: e.pointerType,
+        clickAllowed: isEmptyCanvasPlacementTarget(e.target as Element),
+      });
       return true;
     },
     [active],
@@ -122,7 +144,7 @@ export function useFrameDragToCreate({
 
   const onPointerMove = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
     setDrag((prev) =>
-      prev ? { start: prev.start, end: { x: e.clientX, y: e.clientY } } : prev,
+      prev ? { ...prev, end: { x: e.clientX, y: e.clientY } } : prev,
     );
   }, []);
 
@@ -136,7 +158,7 @@ export function useFrameDragToCreate({
       e.currentTarget.releasePointerCapture(e.pointerId);
 
       const instance = rfInstanceRef.current;
-      if (instance) {
+      if (active && instance) {
         const startFlow = instance.screenToFlowPosition(drag.start);
         const endFlow = instance.screenToFlowPosition({
           x: e.clientX,
@@ -147,13 +169,25 @@ export function useFrameDragToCreate({
         const width = Math.abs(endFlow.x - startFlow.x);
         const height = Math.abs(endFlow.y - startFlow.y);
 
-        if (width >= MIN_FRAME_SIZE && height >= MIN_FRAME_SIZE) {
+        if (
+          onClick &&
+          drag.clickAllowed &&
+          isNodePlacementTap(
+            drag.start.x,
+            drag.start.y,
+            e.clientX,
+            e.clientY,
+            getDragActivationDistance(drag.pointerType),
+          )
+        ) {
+          onClick(endFlow);
+        } else if (width >= MIN_FRAME_SIZE && height >= MIN_FRAME_SIZE) {
           onCreate({ x, y, width, height });
         }
       }
       cancel();
     },
-    [drag, rfInstanceRef, onCreate, cancel],
+    [active, drag, rfInstanceRef, onCreate, onClick, cancel],
   );
 
   const onPointerCancel = useCallback(

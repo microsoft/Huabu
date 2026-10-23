@@ -46,9 +46,17 @@ import {
 
 import { Button } from '@/components/Common/Button';
 import { cn } from '@/components/Common/cn';
+import {
+  DropdownMenu,
+  DropdownMenuItem,
+} from '@/components/Common/DropdownMenu';
 import { FLOATING_CHROME_PROPS } from '@/components/Common/floatingChrome';
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
 import { Input } from '@/components/Common/Input';
+import {
+  MENU_GROUP_CLASS,
+  MENU_SECTION_LABEL_CLASS,
+} from '@/components/Common/menuStyles';
 import { getAccentTokens } from '@/components/Nodes/design/accentTokens';
 import { useCloseOnEscape } from '@/hooks/useCloseOnEscape';
 import { useTrackAttention } from '@/hooks/useTrackAttention';
@@ -234,7 +242,7 @@ export function MilkdownFloatingToolbar({
   const mathSelectionRef = useRef<MilkdownTextRange | null>(null);
   const blockListOpen = openPopover === 'block-list';
   const mathOpen = openPopover === 'inline-math';
-  useCloseOnEscape(openPopover !== null, () => setOpenPopover(null));
+  useCloseOnEscape(mathOpen, () => setOpenPopover(null));
   const toolbarOpen = selectionRect !== null && engaged && !hiddenByGlobalModal;
   const virtualSelectionReference = useMemo(() => {
     if (!selectionRect) return null;
@@ -249,16 +257,6 @@ export function MilkdownFloatingToolbar({
   } = useFloating({
     open: toolbarOpen,
     placement: 'top',
-    middleware: [offset(8), flip({ padding: 8 }), shift({ padding: 8 })],
-    whileElementsMounted: autoUpdate,
-  });
-  const {
-    refs: blockListRefs,
-    floatingStyles: blockListStyles,
-    isPositioned: blockListPositioned,
-  } = useFloating({
-    open: blockListOpen,
-    placement: 'bottom-start',
     middleware: [offset(8), flip({ padding: 8 }), shift({ padding: 8 })],
     whileElementsMounted: autoUpdate,
   });
@@ -391,90 +389,57 @@ export function MilkdownFloatingToolbar({
       onMouseDown={(event) => event.preventDefault()}
     >
       <FloatingToolbar.Group>
-        <div ref={blockListRefs.setReference} className="flex items-center">
-          <Button
-            variant="ghost"
-            size="sm"
-            title={t('editor.blockType')}
-            disabled={disabled}
-            onClick={(event) => {
-              event.stopPropagation();
-              setOpenPopover((open) =>
-                open === 'block-list' ? null : 'block-list',
-              );
-            }}
-            className="text-fg-muted hover:bg-bg-default gap-1"
-          >
-            <ActiveBlockIcon className="size-3.5" />
-            <span className="text-xs">{blockLabels[activeBlock]}</span>
-            <ChevronDown className="size-3" />
-          </Button>
-        </div>
-      </FloatingToolbar.Group>
-
-      {blockListOpen
-        ? createPortal(
-            <>
-              <div
-                role="presentation"
-                className="fixed inset-0 z-40"
-                {...FLOATING_CHROME_PROPS}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setOpenPopover(null);
-                }}
-              />
-              {/* Handlers below only isolate the popover from the editor. */}
-              {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events */}
-              <div
-                ref={blockListRefs.setFloating}
-                {...FLOATING_CHROME_PROPS}
-                className="border-edge-default shadow-bottom bg-surface z-50 flex max-h-64 min-w-48 flex-col gap-1 overflow-y-auto rounded-md border p-1"
-                role="menu"
-                tabIndex={-1}
-                style={{
-                  ...blockListStyles,
-                  visibility: blockListPositioned ? 'visible' : 'hidden',
-                }}
-                onMouseDown={(event) => event.stopPropagation()}
-                onClick={(event) => event.stopPropagation()}
-              >
-                {BLOCK_GROUPS.map((group) => (
-                  <div key={group.labelKey} className="flex flex-col gap-1">
-                    <div className="text-fg-subtle px-2 pt-1 pb-0.5 text-[11px] leading-none font-semibold">
-                      {blockGroupLabels[group.labelKey]}
-                    </div>
-                    {group.types.map((type) => {
-                      const Icon = BLOCK_ICONS[type];
-                      return (
-                        <Button
-                          key={type}
-                          variant="ghost"
-                          size="sm"
-                          title={blockLabels[type]}
-                          onClick={() => {
-                            run(() => instance.setBlockType(type));
-                            setOpenPopover(null);
-                          }}
-                          className={cn(
-                            'h-7 w-full justify-start gap-2 px-2',
-                            type === activeBlock
-                              ? 'text-info bg-info-bg enabled:hover:bg-info-bg'
-                              : 'text-fg-muted hover:bg-bg-default',
-                          )}
-                        >
-                          <Icon className="size-3.5" />
-                          <span className="text-xs">{blockLabels[type]}</span>
-                        </Button>
-                      );
-                    })}
-                  </div>
-                ))}
+        <DropdownMenu
+          floating
+          placement="bottom-start"
+          open={blockListOpen}
+          onOpenChange={(open) => setOpenPopover(open ? 'block-list' : null)}
+          className="max-h-[min(16rem,calc(100dvh-24px))] min-w-48 overflow-y-auto overscroll-contain"
+          trigger={
+            <Button
+              variant="ghost"
+              size="sm"
+              title={t('editor.blockType')}
+              disabled={disabled}
+              onClick={(event) => event.stopPropagation()}
+              className="text-fg-muted hover:bg-bg-default gap-1"
+            >
+              <ActiveBlockIcon className="size-3.5" />
+              <span className="text-xs">{blockLabels[activeBlock]}</span>
+              <ChevronDown className="size-3" />
+            </Button>
+          }
+        >
+          {BLOCK_GROUPS.map((group) => (
+            <div key={group.labelKey} className={MENU_GROUP_CLASS}>
+              <div className={MENU_SECTION_LABEL_CLASS}>
+                {blockGroupLabels[group.labelKey]}
               </div>
-            </>,
-            document.body,
-          )
-        : null}
+              {group.types.map((type) => {
+                const Icon = BLOCK_ICONS[type];
+                return (
+                  <DropdownMenuItem
+                    key={type}
+                    icon={<Icon />}
+                    aria-current={type === activeBlock ? 'true' : undefined}
+                    onClick={() => {
+                      run(() => instance.setBlockType(type));
+                      setOpenPopover(null);
+                    }}
+                    className={cn(
+                      type === activeBlock
+                        ? 'text-info bg-info-bg enabled:hover:bg-info-bg'
+                        : undefined,
+                    )}
+                  >
+                    {blockLabels[type]}
+                  </DropdownMenuItem>
+                );
+              })}
+            </div>
+          ))}
+        </DropdownMenu>
+      </FloatingToolbar.Group>
 
       <FloatingToolbar.Divider />
 

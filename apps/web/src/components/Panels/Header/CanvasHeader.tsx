@@ -3,8 +3,13 @@
 
 import clsx from 'clsx';
 import { PanelLeft, PanelLeftClose } from 'lucide-react';
-import React from 'react';
+import React, { useRef } from 'react';
 import { useTranslation } from 'react-i18next';
+
+import {
+  SpaceNavigation,
+  SpaceReturnButton,
+} from '@/components/Space/SpaceNavigation';
 
 import { AppMenu } from './AppMenu.tsx';
 import { CanvasMenu } from './CanvasMenu.tsx';
@@ -51,14 +56,18 @@ export const CanvasHeader: React.FC<CanvasHeaderProps> = ({
   onOpenShortcuts,
 }) => {
   const { t } = useTranslation();
+  const headerRef = useRef<HTMLElement>(null);
+  const widthBoundaryRef = useRef<HTMLSpanElement>(null);
   // The desktop title bar (`WindowChrome`) shows a Home button for
   // back-to-list navigation; here the logo hosts the workspace-level
   // `AppMenu` (new / import canvas, switch workspace, settings, …), so
   // the two affordances no longer duplicate each other.
   return (
     <header
+      ref={headerRef}
+      data-canvas-header
       className={clsx(
-        'bg-surface flex items-center overflow-hidden',
+        'bg-surface relative flex items-center overflow-hidden',
         vertical
           ? 'border-edge-default h-full w-12 flex-col gap-1 border-r px-2 py-2'
           : compact
@@ -66,12 +75,21 @@ export const CanvasHeader: React.FC<CanvasHeaderProps> = ({
             : 'gap-1',
         !vertical &&
           (isCollapsed
-            ? 'shadow-bottom h-10 max-w-[18rem] rounded-lg border-0 px-2'
+            ? 'shadow-bottom h-10 max-w-[min(36rem,calc(100vw-7rem))] rounded-lg border-0 px-2'
             : compact
               ? 'border-edge-default h-11 border-r px-3'
               : 'border-edge-default h-12 border-r px-3 py-1'),
       )}
     >
+      {/* Keep the width budget independent of the currently visible crumbs. */}
+      {isCollapsed && !vertical && (
+        <span
+          ref={widthBoundaryRef}
+          aria-hidden
+          className="pointer-events-none invisible absolute h-0 w-screen"
+          style={{ maxWidth: 'inherit' }}
+        />
+      )}
       {!vertical && (
         <>
           <AppMenu
@@ -80,35 +98,46 @@ export const CanvasHeader: React.FC<CanvasHeaderProps> = ({
             triggerClassName={compact ? 'h-6 w-6 p-0' : undefined}
           />
 
-          <div className="min-w-0 flex-1">
-            {children ?? <CanvasMenu onOpenShortcuts={onOpenShortcuts} />}
+          <div className={clsx('min-w-0', isCollapsed ? 'shrink' : 'flex-1')}>
+            {children ?? (
+              <SpaceNavigation
+                widthBoundary={isCollapsed ? widthBoundaryRef : headerRef}
+              >
+                <CanvasMenu onOpenShortcuts={onOpenShortcuts} />
+              </SpaceNavigation>
+            )}
           </div>
         </>
       )}
 
-      {onToggle && (
-        <Button
-          variant="ghost"
-          iconOnly
-          size={vertical ? 'md' : 'sm'}
-          className="text-fg-subtle enabled:hover:text-fg-default"
-          tooltipWrapperClassName={clsx(
-            'inline-flex shrink-0',
-            !vertical && (compact ? 'ml-2.5' : 'ml-2'),
-          )}
-          onClick={onToggle}
-          title={isCollapsed ? t('layers.show') : t('layers.collapse')}
-          aria-label={
-            isCollapsed ? t('layers.showPanel') : t('layers.collapsePanel')
-          }
-        >
-          {isCollapsed ? (
-            <PanelLeft className="h-4! w-4!" />
-          ) : (
-            <PanelLeftClose className="h-4! w-4!" />
-          )}
-        </Button>
-      )}
+      <div
+        className={clsx(
+          'flex shrink-0 items-center gap-1 empty:hidden',
+          vertical ? 'flex-col' : 'ml-1',
+        )}
+      >
+        {!vertical && <SpaceReturnButton />}
+        {onToggle && (
+          <Button
+            variant="ghost"
+            iconOnly
+            size={vertical ? 'md' : 'sm'}
+            className="text-fg-subtle enabled:hover:text-fg-default"
+            tooltipWrapperClassName="inline-flex shrink-0"
+            onClick={onToggle}
+            title={isCollapsed ? t('layers.show') : t('layers.collapse')}
+            aria-label={
+              isCollapsed ? t('layers.showPanel') : t('layers.collapsePanel')
+            }
+          >
+            {isCollapsed ? (
+              <PanelLeft className="h-4! w-4!" />
+            ) : (
+              <PanelLeftClose className="h-4! w-4!" />
+            )}
+          </Button>
+        )}
+      </div>
     </header>
   );
 };

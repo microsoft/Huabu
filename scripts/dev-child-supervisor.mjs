@@ -7,7 +7,8 @@ import { fileURLToPath } from 'node:url';
 // Keep the service process tree alive independently while retaining an IPC
 // ownership link that survives abrupt task-runner termination.
 const SUPERVISOR_PATH = fileURLToPath(import.meta.url);
-const FORCE_KILL_DELAY_MS = 500;
+// Agentlet's parallel POSIX cleanup takes at most 5s + 2s + 2s.
+export const DEV_CHILD_SHUTDOWN_TIMEOUT_MS = 10_000;
 
 function killTree(child, signal) {
   if (!child?.pid) return;
@@ -44,6 +45,48 @@ function validateSpec(value) {
   return value;
 }
 
+function isGroupRunning(child) {
+  if (!child?.pid) return false;
+  try {
+    process.kill(-child.pid, 0);
+    return true;
+  } catch (error) {
+    if (error.code === 'ESRCH') return false;
+    if (error.code === 'EPERM') return true;
+    throw error;
+  }
+}
+
+export function waitForSupervisedDevChildren(children, code) {
+  const active = children.filter(
+    (child) => child.exitCode === null && child.signalCode === null,
+  );
+  if (active.length === 0) {
+    process.exit(code);
+    return;
+  }
+  const deadline = setTimeout(() => {
+    for (const child of active) {
+      if (child.exitCode === null && child.signalCode === null) {
+        killTree(child, 'SIGKILL');
+      }
+    }
+    process.exit(code);
+  }, DEV_CHILD_SHUTDOWN_TIMEOUT_MS + 1000);
+  for (const child of active) {
+    child.once('exit', () => {
+      if (
+        active.every(
+          (child) => child.exitCode !== null || child.signalCode !== null,
+        )
+      ) {
+        clearTimeout(deadline);
+        process.exit(code);
+      }
+    });
+  }
+}
+
 function supervise(serializedSpec) {
   const spec = validateSpec(JSON.parse(serializedSpec));
   let child;
@@ -57,10 +100,18 @@ function supervise(serializedSpec) {
       process.exit(code);
       return;
     }
-    setTimeout(() => {
+    const deadline = setTimeout(() => {
+      clearInterval(poll);
       killTree(child, 'SIGKILL');
       process.exit(code);
-    }, FORCE_KILL_DELAY_MS);
+    }, DEV_CHILD_SHUTDOWN_TIMEOUT_MS);
+    const poll = setInterval(() => {
+      if (!isGroupRunning(child)) {
+        clearTimeout(deadline);
+        clearInterval(poll);
+        process.exit(code);
+      }
+    }, 25);
   };
 
   process.on('SIGINT', () => shutdown(0));

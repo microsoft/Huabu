@@ -121,6 +121,9 @@ export default defineConfig([
       index: path.resolve(
         '../../external/agentlet/packages/local/src/index.ts',
       ),
+      'device-info': path.resolve(
+        '../../external/agentlet/packages/local/src/device-info.ts',
+      ),
     },
     format: ['esm'],
     outDir: 'dist-bundle/agentlet',

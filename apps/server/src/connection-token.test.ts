@@ -20,7 +20,7 @@ import {
 } from '../../../packages/client-runtime/src/daemon.js';
 
 const mocks = vi.hoisted(() => ({
-  persisted: 'historical-stored-token',
+  persisted: 'managed-stored-token',
   getPersistedSecret: vi.fn(),
   setSecret: vi.fn(),
   setDaemonToken: vi.fn(),
@@ -58,30 +58,45 @@ const request = {
 };
 
 describe('immutable connection token', () => {
-  it('ignores but does not delete historical persisted overrides', () => {
+  it('prefers environment overrides without persisting or deleting them', async () => {
     vi.stubEnv('HUABU_CONNECTION_TOKEN', 'environment-token');
-    initializeConnectionToken();
+    await initializeConnectionToken();
     expect(getConnectionToken()).toBe('environment-token');
     expect(mocks.setDaemonToken).toHaveBeenCalledWith('environment-token');
     expect(mocks.getPersistedSecret).not.toHaveBeenCalled();
     expect(mocks.setSecret).not.toHaveBeenCalled();
-    expect(mocks.persisted).toBe('historical-stored-token');
+    expect(mocks.persisted).toBe('managed-stored-token');
   });
-  it('generates one random token per boot and never switches after first use', () => {
+  it('persists a generated token before use and never switches during the process', async () => {
+    mocks.getPersistedSecret.mockReturnValue(null);
+    await initializeConnectionToken();
     const token = getConnectionToken();
     expect(token).toMatch(/^[0-9a-f]{64}$/);
+    expect(mocks.setSecret).toHaveBeenCalledWith(
+      'integration:agentlet:managed-token',
+      token,
+    );
     vi.stubEnv('HUABU_CONNECTION_TOKEN', 'later-change');
-    initializeConnectionToken();
-    initializeConnectionToken();
+    await initializeConnectionToken();
+    await initializeConnectionToken();
     expect(getConnectionToken()).toBe(token);
     expect(mocks.setDaemonToken).toHaveBeenLastCalledWith(token);
     expect(mocks.restart).not.toHaveBeenCalled();
     expect(mocks.disconnect).not.toHaveBeenCalled();
     _resetConnectionTokenForTests();
     vi.stubEnv('HUABU_CONNECTION_TOKEN', '  ');
-    expect(getConnectionToken()).not.toBe(token);
+    mocks.getPersistedSecret.mockReturnValue(token);
+    await initializeConnectionToken();
+    expect(getConnectionToken()).toBe(token);
   });
-  it('keeps a captured env token when env changes, and normalizes surrounding whitespace consistently with the source daemon', () => {
+  it('does not attach or return a token after persistence fails', async () => {
+    mocks.getPersistedSecret.mockReturnValue(null);
+    mocks.setSecret.mockRejectedValueOnce(new Error('write failed'));
+    await expect(initializeConnectionToken()).rejects.toThrow('write failed');
+    expect(mocks.setDaemonToken).not.toHaveBeenCalled();
+    expect(() => getConnectionToken()).toThrow('initialized and persisted');
+  });
+  it('keeps a captured env token when env changes, and normalizes surrounding whitespace consistently with the source daemon', async () => {
     vi.stubEnv('HUABU_CONNECTION_TOKEN', '  environment-token  ');
     expect(getConnectionToken()).toBe('environment-token');
     expect(
@@ -94,7 +109,7 @@ describe('immutable connection token', () => {
       }).token,
     ).toBe(getConnectionToken());
     vi.stubEnv('HUABU_CONNECTION_TOKEN', 'changed');
-    initializeConnectionToken();
+    await initializeConnectionToken();
     expect(getConnectionToken()).toBe('environment-token');
   });
 });
@@ -206,13 +221,13 @@ console.log(JSON.stringify({origin: process.env.HUABU_PUBLIC_ORIGIN, token: proc
       'pnpm start:daemon',
     );
   });
-  it('reports HTTP/loopback warnings and generated-token source', () => {
+  it('reports HTTP/loopback warnings and a stable managed-token source', () => {
     const result = buildAgentletConnectionCommand({
       ...request,
       origin: 'http://localhost:3001',
     });
     expect(result.warnings).toEqual(['loopback', 'insecure']);
-    expect(result.source).toBe('generated');
+    expect(result.source).toBe('managed');
     expect(result.content).toContain(
       "HUABU_PUBLIC_ORIGIN='http://localhost:3001'",
     );

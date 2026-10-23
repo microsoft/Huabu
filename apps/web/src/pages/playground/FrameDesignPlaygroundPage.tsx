@@ -9,11 +9,14 @@ import {
   type AccentToken,
   type SpaceInstructionFrameKind,
 } from '@huabu/shared';
+import {
+  FRAME_LAYOUT_CONFIG,
+  frameResponsiveTierForSize,
+} from '@huabu/shared/canvas-engine';
 
 import { ColorPicker } from '@/components/Common/ColorPicker';
 import { Select } from '@/components/Common/Select';
 import {
-  FRAME_DESIGN_CONFIG,
   frameVisualMetricsForSize as frameResponsiveMetricsForSize,
   type FrameVisualMetrics as FrameResponsiveMetrics,
 } from '@/components/Nodes/frame/frameDesign';
@@ -60,14 +63,6 @@ const TIER_LABELS: Record<FrameResponsiveTier, string> = {
   regular: 'Regular',
   large: 'Large',
 };
-
-function resolveTier(metrics: FrameResponsiveMetrics): FrameResponsiveTier {
-  return (
-    FRAME_DESIGN_CONFIG.tiers.find(
-      (tier) => tier.titleFontSize === metrics.titleFontSize,
-    )?.id ?? 'regular'
-  );
-}
 
 function PreviewNode({
   title,
@@ -118,7 +113,8 @@ function FrameContents({
   layout: PreviewLayout;
   metrics: FrameResponsiveMetrics;
 }) {
-  const gap = metrics.contentSpacing;
+  const gap = FRAME_LAYOUT_CONFIG.nodeGap;
+  const trackGap = FRAME_LAYOUT_CONFIG.trackGap;
 
   if (layout === 'free') {
     return (
@@ -144,7 +140,7 @@ function FrameContents({
 
   if (layout === 'column') {
     return (
-      <div className="grid h-full grid-cols-2" style={{ columnGap: gap }}>
+      <div className="grid h-full grid-cols-2" style={{ columnGap: trackGap }}>
         <div className="flex min-h-0 flex-col" style={{ gap }}>
           <PreviewNode title="Overview" metrics={metrics} className="flex-1" />
           <PreviewNode
@@ -171,7 +167,7 @@ function FrameContents({
 
   if (layout === 'row') {
     return (
-      <div className="grid h-full grid-rows-2" style={{ rowGap: gap }}>
+      <div className="grid h-full grid-rows-2" style={{ rowGap: trackGap }}>
         <div className="flex min-h-0" style={{ gap }}>
           <PreviewNode title="Overview" metrics={metrics} className="flex-1" />
           <PreviewNode
@@ -197,7 +193,10 @@ function FrameContents({
   }
 
   return (
-    <div className="grid h-full grid-cols-2 grid-rows-2" style={{ gap }}>
+    <div
+      className="grid h-full grid-cols-2 grid-rows-2"
+      style={{ columnGap: trackGap, rowGap: gap }}
+    >
       <PreviewNode title="Overview" metrics={metrics} />
       <PreviewNode title="Research" metrics={metrics} />
       <PreviewNode title="References" metrics={metrics} />
@@ -224,7 +223,7 @@ function FrameSpecimen({
   maxPreviewHeight?: number;
 }) {
   const metrics = frameResponsiveMetricsForSize(width, height);
-  const tier = resolveTier(metrics);
+  const tier = frameResponsiveTierForSize(width, height);
   const scale = Math.min(1, maxPreviewWidth / width, maxPreviewHeight / height);
   const resolvedAccent = resolveAccent(accent);
   const headerMetrics = getFrameHeaderMetrics(

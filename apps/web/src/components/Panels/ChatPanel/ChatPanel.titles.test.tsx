@@ -698,7 +698,9 @@ describe('rendered conversation titles', () => {
     expect(
       container.querySelector('[role="tab"] [data-acp-connection-status]'),
     ).not.toBeNull();
-    expect(container.querySelector('.h-9')).toBeNull();
+    expect(container.querySelector('.h-7.shrink-0')).toBeNull();
+    expect(container.querySelector('.overflow-visible.pt-3')).not.toBeNull();
+    expect(container.querySelector('.overflow-visible.pt-1')).toBeNull();
   });
 
   it('hides the duplicate title but retains connection and save controls, and waits for hydration before renaming', async () => {
@@ -725,6 +727,8 @@ describe('rendered conversation titles', () => {
       `button[aria-label="${i18n.t('chat.saveAsQuestion')}"]`,
     );
     expect(saveButton).not.toBeNull();
+    expect(saveButton?.closest('.h-7')).not.toBeNull();
+    expect(container.querySelector('.overflow-visible.pt-1')).not.toBeNull();
     expect(saveButton?.classList.contains('[&_svg]:h-3.25')).toBe(true);
     expect(saveButton?.classList.contains('min-h-6')).toBe(true);
     expect(saveButton?.classList.contains('text-fg-muted')).toBe(true);

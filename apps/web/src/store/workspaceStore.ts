@@ -22,7 +22,12 @@ import { i18n } from '../i18n';
 
 import type { CanvasSummary } from '@huabu/shared';
 
-type SpaceSummary = Pick<CanvasSummary, 'nodeCount' | 'updatedAt'>;
+type SpaceSummary = Partial<
+  Pick<
+    CanvasSummary,
+    'nodeCount' | 'updatedAt' | 'parentSpaceId' | 'parentEntryNodeId'
+  >
+>;
 
 const WORLD_ENABLED_KEY = 'huabu:world-enabled';
 
@@ -190,7 +195,13 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     if (changedCanvasIds.length > 0) {
       set((state) => {
         const spaceSummaries = { ...state.spaceSummaries };
-        for (const id of changedCanvasIds) delete spaceSummaries[id];
+        for (const id of changedCanvasIds) {
+          const summary = spaceSummaries[id];
+          if (summary) {
+            const { parentSpaceId, parentEntryNodeId } = summary;
+            spaceSummaries[id] = { parentSpaceId, parentEntryNodeId };
+          }
+        }
         return { spaceSummaries };
       });
     }
@@ -224,15 +235,32 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
             // An older list must not undo a confirmed local creation or rename.
             ...request.overrides,
           },
-          spaceSummaries: Object.fromEntries(
-            canvases
-              .filter((canvas) => !request.invalidated.has(canvas.canvasId))
-              .map(({ canvasId, nodeCount, updatedAt }) => [
-                canvasId,
-                { nodeCount, updatedAt },
-              ]),
-          ),
-          spaceTitlesStatus: 'ready',
+          spaceSummaries: {
+            ...Object.fromEntries(
+              [...request.invalidated].flatMap((id) =>
+                get().spaceSummaries[id]
+                  ? [[id, get().spaceSummaries[id]]]
+                  : [],
+              ),
+            ),
+            ...Object.fromEntries(
+              canvases
+                .filter((canvas) => !request.invalidated.has(canvas.canvasId))
+                .map(
+                  ({
+                    canvasId,
+                    nodeCount,
+                    updatedAt,
+                    parentSpaceId,
+                    parentEntryNodeId,
+                  }) => [
+                    canvasId,
+                    { nodeCount, updatedAt, parentSpaceId, parentEntryNodeId },
+                  ],
+                ),
+            ),
+          },
+          spaceTitlesStatus: request.invalidated.size ? 'loading' : 'ready',
           spaceTitlesError: null,
         });
       })

@@ -80,7 +80,7 @@ export const SidebarPanel = ({
           className={clsx(
             'flex max-w-full min-w-0 shrink-0 items-center justify-between',
             !compactHeader && 'border-edge-default border-b',
-            compactHeader ? 'h-9 px-2' : 'h-12 px-3',
+            compactHeader ? 'h-7 px-2' : 'h-12 px-3',
           )}
         >
           <div className="text-fg-muted flex max-w-full min-w-0 flex-1 items-center text-sm font-medium">

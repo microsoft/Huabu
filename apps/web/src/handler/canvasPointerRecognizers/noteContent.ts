@@ -12,19 +12,37 @@ import {
   endCanvasGesture,
   updateCanvasGesture,
 } from '@/handler/canvasGestureSession';
+import { canTouchClaimViewport } from '@/handler/canvasInteractionOwner';
+import { nodeIdAtScreenPoint } from '@/handler/canvasNodeAtPoint';
 import useCanvasStore from '@/store/canvasStore';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
+import { useInkSigilStore } from '@/store/inkSigilStore';
 
 import { createNodeDragRecognizer } from './nodeDrag';
 
 import type { CanvasPointerRouterContext } from '@/handler/canvasPointerRouterContext';
 import type { PointerRecognizer } from '@/handler/pointerRouter';
 
+export function canReadNoteWithPointer(
+  pointerType: string,
+  ctx: Pick<
+    CanvasPointerRouterContext,
+    'inputMode' | 'explicitToolActive' | 'inkToolActive'
+  >,
+): boolean {
+  return (
+    (pointerType === 'touch' || pointerType === 'pen') &&
+    canManipulateCanvasWithPointer(pointerType, ctx.inputMode) &&
+    (!ctx.explicitToolActive ||
+      (pointerType === 'touch' &&
+        ctx.inputMode === 'pen' &&
+        ctx.inkToolActive === true))
+  );
+}
+
 function targetViewport(event: PointerEvent, ctx: CanvasPointerRouterContext) {
   if (
-    ctx.explicitToolActive ||
-    !['touch', 'pen'].includes(event.pointerType) ||
-    !canManipulateCanvasWithPointer(event.pointerType, ctx.inputMode) ||
+    !canReadNoteWithPointer(event.pointerType, ctx) ||
     !event.isPrimary ||
     event.button !== 0 ||
     isPanelTarget(event.target as Element | null) ||
@@ -32,7 +50,34 @@ function targetViewport(event: PointerEvent, ctx: CanvasPointerRouterContext) {
   )
     return null;
   const target = event.target instanceof Element ? event.target : null;
-  const viewport = target?.closest<HTMLElement>('[data-note-content-viewport]');
+  let viewport = target?.closest<HTMLElement>('[data-note-content-viewport]');
+  if (
+    !viewport &&
+    event.pointerType === 'touch' &&
+    ctx.inputMode === 'pen' &&
+    target?.closest('[data-sketch-overlay]')
+  ) {
+    const nodes = useCanvasStore.getState().nodes;
+    const nodeId = nodeIdAtScreenPoint(event.clientX, event.clientY, {
+      excludeNodeIds: new Set(
+        nodes.filter((node) => node.type === 'sketch').map((node) => node.id),
+      ),
+    });
+    if (nodeId) {
+      viewport = ctx.wrapper.querySelector<HTMLElement>(
+        `.react-flow__node[data-id="${CSS.escape(nodeId)}"] [data-note-content-viewport]`,
+      );
+      const bounds = viewport?.getBoundingClientRect();
+      if (
+        !bounds ||
+        event.clientX < bounds.left ||
+        event.clientX > bounds.right ||
+        event.clientY < bounds.top ||
+        event.clientY > bounds.bottom
+      )
+        return null;
+    }
+  }
   const nodeId = closestNodeElement(viewport ?? null)?.dataset.id;
   if (
     !viewport ||
@@ -90,7 +135,11 @@ export function createNoteContentRecognizer(): PointerRecognizer<
     }
   };
   const isCurrent = (event: PointerEvent, ctx: CanvasPointerRouterContext) => {
-    if (!target?.viewport.isConnected || ctx.explicitToolActive) return false;
+    if (
+      !target?.viewport.isConnected ||
+      !canReadNoteWithPointer(event.pointerType, ctx)
+    )
+      return false;
     const selected = useCanvasStore
       .getState()
       .nodes.filter((node) => node.selected);
@@ -106,7 +155,10 @@ export function createNoteContentRecognizer(): PointerRecognizer<
   return {
     id: 'note-content',
     canClaim: (event, ctx) =>
-      pointerId === null && targetViewport(event, ctx) !== null,
+      pointerId === null &&
+      !useInkSigilStore.getState().pending &&
+      canTouchClaimViewport() &&
+      targetViewport(event, ctx) !== null,
     onDown: (event, ctx) => {
       target = targetViewport(event, ctx);
       if (!target) return 'pass';

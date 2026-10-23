@@ -14,6 +14,7 @@ import {
   parseServerMasterKey,
 } from './encrypted-file-secret-store.js';
 import { EnvironmentSecretStore } from './environment-secret-store.js';
+import { resolveStandaloneMasterKey } from './private-config.js';
 
 import type { SecretStore } from './secret-store-types.js';
 
@@ -22,7 +23,9 @@ let primaryStore: SecretStore | null = null;
 let initialized = false;
 
 /** Select and initialize the runtime backend before accepting requests. */
-export async function initializeSecretStore(): Promise<void> {
+export async function initializeSecretStore(
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<void> {
   if (initialized) return;
   await environmentStore.initialize();
 
@@ -33,37 +36,17 @@ export async function initializeSecretStore(): Promise<void> {
     return;
   }
 
-  const dataDir = getDataDir();
+  const dataDir = getDataDir(env);
   const encryptedPath = join(dataDir, 'encrypted-secrets.json');
-  const encodedKey = process.env.HUABU_SECRET_KEY?.trim();
-  if (encodedKey) {
-    // Consume the master key from the environment and scrub it. The parsed
-    // key now lives only inside the EncryptedFileSecretStore instance below,
-    // so it is never inherited by forked child processes (the agentlet
-    // daemon and the external agents it spawns). Defense in depth alongside
-    // the agentlet transport's `HUABU_` namespace strip; see
-    // docs/architecture/credential-storage.md and
-    // docs/architecture/agent-reachback.md.
-    delete process.env.HUABU_SECRET_KEY;
-    const store = new EncryptedFileSecretStore(
-      dataDir,
-      parseServerMasterKey(encodedKey),
-    );
-    await store.initialize();
-    primaryStore = store;
-    initialized = true;
-    return;
-  }
-
-  if (existsSync(encryptedPath)) {
-    throw new Error(
-      'HUABU_SECRET_KEY is required to decrypt the existing standalone credential store',
-    );
-  }
-
-  // Headless deployments may operate entirely from environment variables.
-  // This mode intentionally rejects settings writes instead of persisting plaintext.
-  primaryStore = null;
+  const encodedKey = env.HUABU_SECRET_KEY?.trim();
+  // Never let a deployment-owned master key reach forked external agents.
+  delete env.HUABU_SECRET_KEY;
+  const key = encodedKey
+    ? parseServerMasterKey(encodedKey)
+    : resolveStandaloneMasterKey(existsSync(encryptedPath), env);
+  const store = new EncryptedFileSecretStore(dataDir, key);
+  await store.initialize();
+  primaryStore = store;
   initialized = true;
 }
 
@@ -83,6 +66,22 @@ export function getSecret(id: string): string | null {
 export function getPersistedSecret(id: string): string | null {
   assertInitialized();
   return primaryStore?.get(id) ?? null;
+}
+
+/** Read saved credentials without creating storage for a new instance. */
+export async function readPersistedSecret(
+  id: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<string | null> {
+  if (
+    !initialized &&
+    !isDesktopSecretBridgeEnabled() &&
+    !existsSync(join(getDataDir(env), 'encrypted-secrets.json'))
+  ) {
+    return null;
+  }
+  await initializeSecretStore(env);
+  return getPersistedSecret(id);
 }
 
 /** Write only to the secure primary backend. */

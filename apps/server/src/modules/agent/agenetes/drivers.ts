@@ -17,6 +17,7 @@ import {
 } from './conversation-stores.js';
 import { type AgentHandle } from './handle.js';
 import { HISTORY_LOAD_SANITY_LIMIT } from './history-replay.js';
+import { withInkResponse } from './ink-response-driver.js';
 import { huabuPiDriverPorts } from './pi-driver.js';
 import { getExternalAgentRuntimeConfig } from '../acp/runtime-config.js';
 
@@ -43,8 +44,10 @@ const externalDriver = acpDriverFactory(acpRuntimePolicy);
 
 export const agenetes: Agenetes = mountAgenetes({
   drivers: {
-    [INTERNAL_DRIVER_KIND]: piDriverFactory({ ports: huabuPiDriverPorts }),
-    [EXTERNAL_DRIVER_KIND]: externalDriver,
+    [INTERNAL_DRIVER_KIND]: withInkResponse(
+      piDriverFactory({ ports: huabuPiDriverPorts }),
+    ),
+    [EXTERNAL_DRIVER_KIND]: withInkResponse(externalDriver),
   },
   // Dispatchers, not one backing: which store owns a conversation depends on
   // where its Space lives, and that is a runtime fact (`conversation-stores`).

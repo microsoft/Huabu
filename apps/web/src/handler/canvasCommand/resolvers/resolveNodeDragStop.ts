@@ -22,8 +22,12 @@ import {
   type StructuredDropTarget,
 } from '@huabu/shared/canvas-engine';
 
+import { resolveMasonryDrop } from '../../masonryDrop';
 import { extractNodeRef, canvasSizeFromStyle } from '../utils';
-import { buildStructuredFrameRelayoutCommands } from '../utils/frameLayout';
+import {
+  applyPendingMutations,
+  buildStructuredFrameRelayoutCommands,
+} from '../utils/frameLayout';
 
 import type {
   CanvasUiIntent,
@@ -190,8 +194,20 @@ export default function resolveNodeDragStop(
     if (prevParentId) affectedFrameIds.add(prevParentId);
     if (node?.parentId) affectedFrameIds.add(node.parentId);
   }
-  const projection = projectAffectedFrameGeometry(
+  const dropPlans = collectGridDropPlans(
+    intent.draggedNodeIds,
     result,
+    ui.nodes,
+    ui.edges,
+    intent.pointerFlowPosition,
+    intent.masonryDrop,
+    intent.zoom,
+  );
+  const dropOutcome = buildGridDropCommands(dropPlans, ui.nodes);
+
+  // Resolve destination cells before reflow can replace the live insertion coordinate.
+  const projection = projectAffectedFrameGeometry(
+    applyPendingMutations(result, dropOutcome),
     affectedFrameIds,
     ui.edges,
   );
@@ -218,15 +234,6 @@ export default function resolveNodeDragStop(
       ...(sizeChanged && size ? { size } : {}),
     });
   }
-
-  const dropPlans = collectGridDropPlans(
-    intent.draggedNodeIds,
-    result,
-    ui.nodes,
-    ui.edges,
-    intent.pointerFlowPosition,
-  );
-  const dropOutcome = buildGridDropCommands(dropPlans, ui.nodes);
 
   if (parentChanges.size === 0) {
     if (affectedFrameIds.size > 0) {
@@ -379,6 +386,12 @@ function collectGridDropPlans(
   preDragNodes: Node[],
   edges: UiResolverState['edges'],
   pointerFlowPosition?: { x: number; y: number },
+  cachedDrop?: {
+    nodeId: string;
+    frameId: string;
+    target: StructuredDropTarget;
+  },
+  zoom = 1,
 ): GridDropPlan[] {
   const plans: GridDropPlan[] = [];
   for (const id of draggedIds) {
@@ -398,10 +411,21 @@ function collectGridDropPlans(
         }
       : { x: post.position.x, y: post.position.y };
 
+    const previous =
+      cachedDrop?.nodeId === id && cachedDrop.frameId === frame.id
+        ? cachedDrop.target
+        : undefined;
     const target =
-      cfg.axis === 'row'
-        ? pickRowDropTarget(preDragNodes, frame.id, framePoint.y, edges)
-        : pickColumnDropTarget(preDragNodes, frame.id, framePoint.x, edges);
+      cfg.axis === 'grid'
+        ? pickColumnDropTarget(preDragNodes, frame.id, framePoint.x, edges)
+        : previous && (previous.kind === 'insert-new' || !pointerFlowPosition)
+          ? previous
+          : resolveMasonryDrop(preDragNodes, frame.id, cfg.axis, framePoint, {
+              edges,
+              zoom,
+              previous,
+              allowInsert: draggedIds.length === 1 && !!pointerFlowPosition,
+            }).target;
 
     plans.push({
       nodeId: id as CanvasNodeId,

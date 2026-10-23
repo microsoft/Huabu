@@ -109,7 +109,13 @@ export function stageDiskSpaceImport(canvasId: string): DiskSpaceImport {
       // any other spelling removed so two records cannot disagree.
       await writeFile(
         path.join(stagingDirectory, SPACE_JSON_FILENAME),
-        JSON.stringify({ ...record, canvasId, title }),
+        JSON.stringify({
+          ...record,
+          canvasId,
+          title,
+          parentSpaceId: null,
+          parentEntryNodeId: null,
+        }),
       );
       for (const name of bundleRecordFilenames()) {
         if (name === SPACE_JSON_FILENAME) continue;

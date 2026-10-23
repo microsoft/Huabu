@@ -105,6 +105,20 @@ export const chatEnvelopeSchema = z.object({
       imageAttachments: z.array(chatAttachmentSchema),
       snapshotAttachments: z.array(chatAttachmentSchema),
       inkRecognition: inkRecognitionSchema.optional(),
+      inkGeometry: z
+        .array(
+          z.object({
+            nodeId: z.string().min(1),
+            strokeIds: z.array(z.string().min(1)).min(1),
+            bounds: z.object({
+              x: z.number(),
+              y: z.number(),
+              width: z.number().nonnegative(),
+              height: z.number().nonnegative(),
+            }),
+          }),
+        )
+        .optional(),
       strokeSubsets: z
         .array(
           z.object({

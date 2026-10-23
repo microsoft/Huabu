@@ -11,7 +11,7 @@ import { UserMessage } from './UserMessage';
 
 import type { InkInterpretation } from '@huabu/shared';
 
-vi.mock('../Common/NodeRef', () => ({
+vi.mock('@/components/Nodes/NodeRef/NodeRef', () => ({
   NodeRef: ({
     nodeId,
     strokeCount,
@@ -37,6 +37,22 @@ afterEach(() => {
 });
 
 describe('UserMessage', () => {
+  it.each([true, false])(
+    'removes only the leading message top margins when isFirst=%s',
+    (isFirst) => {
+      container = document.createElement('div');
+      const root = createRoot(container);
+      act(() => root.render(<UserMessage content="Hello" isFirst={isFirst} />));
+      const message = container.querySelector('[data-chat-user-message]');
+      expect(message?.classList.contains('mt-0')).toBe(isFirst);
+      expect(message?.firstElementChild?.classList.contains('mt-2')).toBe(
+        !isFirst,
+      );
+      expect(message?.classList.contains('my-3')).toBe(true);
+      act(() => root.unmount());
+    },
+  );
+
   it.each(['', 'Overall instructions'])(
     'renders quoted comments as cards alongside user text %j',
     (content) => {
@@ -78,6 +94,10 @@ describe('UserMessage', () => {
       expect(container.querySelector('svg.lucide-quote')).toBeNull();
       expect(container.textContent).toContain('Explain this.');
       expect(container.textContent).toContain('Compare it.');
+      expect(
+        container.querySelector('[data-chat-prompt-content]')?.textContent ??
+          '',
+      ).toBe(content);
       if (content) expect(container.textContent).toContain(content);
       expect(container.textContent).not.toContain(
         'Quote from an earlier reply:',
@@ -157,6 +177,9 @@ describe('UserMessage', () => {
       container.querySelector('.text-fg-muted, .text-fg-subtle'),
     ).toBeNull();
     expect(container.textContent).toContain('My original words');
+    expect(
+      container.querySelector('[data-chat-prompt-content]')?.textContent,
+    ).toBe('My original words');
     expect(
       container.querySelector('[data-source="sketch-1"]')?.textContent,
     ).toBe('sketch-1 2');

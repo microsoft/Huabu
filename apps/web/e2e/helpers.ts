@@ -17,6 +17,29 @@ export interface Point {
   y: number;
 }
 
+export async function readScreenshotPixels(page: Page, points: Point[]) {
+  const screenshot = await page.screenshot();
+  return page.evaluate(
+    async ({ png, points }) => {
+      const image = new Image();
+      image.src = `data:image/png;base64,${png}`;
+      await image.decode();
+      const canvas = document.createElement('canvas');
+      canvas.width = image.width;
+      canvas.height = image.height;
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('Missing screenshot context');
+      context.drawImage(image, 0, 0);
+      return points.map(({ x, y }) =>
+        Array.from(
+          context.getImageData(Math.round(x), Math.round(y), 1, 1).data,
+        ),
+      );
+    },
+    { png: screenshot.toString('base64'), points },
+  );
+}
+
 /**
  * Open a brand-new canvas from the home page and wait until the React
  * Flow pane is interactive. Avoids depending on any pre-existing canvas

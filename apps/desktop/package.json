@@ -21,6 +21,7 @@
     "get-port": "^7.1.0"
   },
   "devDependencies": {
+    "@huabu/client-runtime": "workspace:*",
     "@types/node": "^24.13.3",
     "electron": "43.5.0",
     "electron-builder": "26.16.1",

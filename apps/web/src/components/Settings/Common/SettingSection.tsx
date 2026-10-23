@@ -67,7 +67,7 @@ export const SettingSection: React.FC<SettingSectionProps> = ({
         <div
           className={
             collapsible || action
-              ? `flex flex-wrap items-center gap-2 ${isCollapsed ? '' : 'mb-0.5'}`
+              ? `flex flex-wrap items-center gap-2 ${isCollapsed ? '' : 'mb-1.5'}`
               : undefined
           }
         >
@@ -99,7 +99,7 @@ export const SettingSection: React.FC<SettingSectionProps> = ({
               </Button>
             ) : (
               <h4
-                className={`text-fg-muted ${action ? '' : 'mb-0.5'} px-0.5 text-[13px] font-medium`}
+                className={`text-fg-muted ${action ? '' : 'mb-1.5'} px-0.5 text-[13px] font-medium`}
               >
                 <SettingLabel optional={optional}>{title}</SettingLabel>
               </h4>

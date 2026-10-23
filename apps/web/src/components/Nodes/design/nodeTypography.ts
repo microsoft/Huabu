@@ -3,15 +3,21 @@
 
 /** Fixed canvas-unit typography shared by Notes and PDF/Web cards. */
 export const NODE_TYPOGRAPHY = {
-  title: { size: 28, lineHeight: 1.3, weight: 600 },
-  h2: { size: 24, lineHeight: 1.3, weight: 500 },
+  title: { size: 24, lineHeight: 1.3, weight: 600 },
+  h2: { size: 22, lineHeight: 1.3, weight: 500 },
   h3: { size: 20, lineHeight: 1.35, weight: 500 },
-  h4: { size: 16, lineHeight: 1.4, weight: 500 },
-  h5: { size: 16, lineHeight: 1.4, weight: 500 },
-  h6: { size: 16, lineHeight: 1.4, weight: 500 },
-  cardTitle: { size: 28, lineHeight: 1.3, weight: 500 },
+  h4: { size: 18, lineHeight: 1.4, weight: 500 },
+  h5: { size: 18, lineHeight: 1.4, weight: 500 },
+  h6: { size: 18, lineHeight: 1.4, weight: 500 },
+  cardTitle: { size: 24, lineHeight: 1.3, weight: 500 },
+  noteBody: { size: 18, lineHeight: 1.4 },
   body: { size: 18, lineHeight: 1.4 },
   metadata: { size: 16, lineHeight: 1.4 },
+} as const;
+
+export const SPACE_CARD_TYPOGRAPHY = {
+  title: NODE_TYPOGRAPHY.cardTitle,
+  metadata: NODE_TYPOGRAPHY.body,
 } as const;
 
 /** Resizing cards changes text fit, never their font sizes or line heights. */
@@ -45,6 +51,6 @@ export const NODE_TYPOGRAPHY_STYLE = {
   '--node-h6-size': `${NODE_TYPOGRAPHY.h6.size}px`,
   '--node-h6-line': NODE_TYPOGRAPHY.h6.lineHeight,
   '--node-h6-weight': NODE_TYPOGRAPHY.h6.weight,
-  '--node-body-size': `${NODE_TYPOGRAPHY.body.size}px`,
-  '--node-body-line': NODE_TYPOGRAPHY.body.lineHeight,
+  '--node-body-size': `${NODE_TYPOGRAPHY.noteBody.size}px`,
+  '--node-body-line': NODE_TYPOGRAPHY.noteBody.lineHeight,
 } as const;

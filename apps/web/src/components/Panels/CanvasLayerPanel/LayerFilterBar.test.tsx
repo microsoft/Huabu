@@ -160,9 +160,9 @@ describe('single-line Layers filters', () => {
       expect(
         container.querySelectorAll('[data-layer-filter-key]'),
       ).toHaveLength(count);
-      expect(container.querySelectorAll('[role="menuitem"]')).toHaveLength(
-        FILTER_KEYS.length - count,
-      );
+      expect(
+        container.querySelectorAll('[role="menuitemcheckbox"]'),
+      ).toHaveLength(FILTER_KEYS.length - count);
       expect(
         container.querySelector('[data-layer-filter-chips]')?.className,
       ).not.toContain('flex-wrap');
@@ -178,7 +178,10 @@ describe('single-line Layers filters', () => {
       '[aria-label="layers.filterBy:layers.filterLabels.question"]',
     );
     if (!question) throw new Error('Missing hidden Question filter');
+    expect(question.getAttribute('role')).toBe('menuitemcheckbox');
+    expect(question.getAttribute('aria-checked')).toBe('false');
     act(() => question.click());
+    expect(question.getAttribute('aria-checked')).toBe('true');
     expect(moreButton().className).toContain('bg-info-bg');
     expect(moreButton().getAttribute('aria-label')).toBe(
       'layers.moreFiltersActive:1',

@@ -253,7 +253,7 @@ for (const theme of ['light', 'dark'] as const) {
             ).toBeLessThanOrEqual(8);
         }
         const border = shell.locator('[data-node-media-border]');
-        await expect(border).toHaveCSS('border-left-width', '3px');
+        await expect(border).toHaveCSS('border-left-width', '2px');
         await expect(border).toHaveCSS('pointer-events', 'none');
       };
       await expect(node).not.toHaveClass(/selected/);

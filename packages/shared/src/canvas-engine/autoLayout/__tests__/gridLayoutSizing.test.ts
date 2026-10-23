@@ -19,14 +19,18 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { applyStructuredFrameRelayout } from '../gridLayout.js';
+import { structuredFrameResizeScale } from '../../frame/resize.js';
+import {
+  applyStructuredFrameRelayout,
+  solveStructuredFrameLayout,
+} from '../gridLayout.js';
 
 import type { Node } from '@xyflow/react';
 
 function makeFrame(
   id: string,
   data: {
-    layoutMode: 'free' | 'column' | 'row';
+    layoutMode: 'free' | 'column' | 'row' | 'grid';
     gridCount?: number;
     sizing?: 'hug' | 'manual';
   },
@@ -74,6 +78,62 @@ function getFrameStyle(
 }
 
 describe('applyStructuredFrameRelayout — sizing branch', () => {
+  it.each(['column', 'row', 'grid'] as const)(
+    'keeps %s gaps and resize inversion stable at every Frame width',
+    (layoutMode) => {
+      for (const width of [600, 900, 1800, 2400]) {
+        const frame = makeFrame(
+          'f',
+          { layoutMode, gridCount: 2, sizing: 'manual' },
+          { width, height: 900 },
+        );
+        const children = Array.from({ length: 4 }, (_, index) => ({
+          ...makeChild(
+            `c${index}`,
+            'f',
+            { x: (index % 2) * 200, y: Math.floor(index / 2) * 100 },
+            { width: 100, height: 50 },
+          ),
+          data: { frameColumn: index % 2, frameRow: Math.floor(index / 2) },
+        }));
+        const nodes = [frame, ...children];
+        const layout = solveStructuredFrameLayout(nodes, 'f');
+        if (!layout) throw new Error('Expected structured Frame layout');
+        const positions = layout.childPositions;
+        expect(positions.get('c0')).toEqual({ x: 20, y: 64 });
+        expect(positions.get('c1')).toEqual({
+          x: layoutMode === 'row' ? 136 : 144,
+          y: 64,
+        });
+        expect(positions.get('c2')).toEqual({
+          x: 20,
+          y: layoutMode === 'row' ? 138 : 130,
+        });
+        expect(layout.frameSize).toEqual({
+          width: layoutMode === 'row' ? 256 : 264,
+          height: layoutMode === 'row' ? 208 : 200,
+        });
+        expect(
+          structuredFrameResizeScale(
+            nodes,
+            [],
+            'f',
+            layout.frameSize.width,
+            layout.frameSize.height,
+          ),
+        ).toEqual({ x: 1, y: 1 });
+        const doubled = structuredFrameResizeScale(
+          nodes,
+          [],
+          'f',
+          layout.frameSize.width + 200,
+          layout.frameSize.height + 100,
+        );
+        expect(doubled).toEqual({ x: 2, y: 2 });
+      }
+    },
+  );
+
   it('writes content-driven frame size for hug + column', () => {
     const frame = makeFrame(
       'f',

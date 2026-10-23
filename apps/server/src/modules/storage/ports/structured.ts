@@ -175,6 +175,12 @@ export type SpaceRenameResult =
  * complete before a later, independent record write fails.
  */
 export interface SpaceRepository {
+  /** Trusted hierarchy writer; the caller serializes membership, validates ancestry, and owns entry creation. Ordinary record writes preserve these fields. */
+  setParent(input: {
+    canvasId: string;
+    parentSpaceId: string | null;
+    parentEntryNodeId: string | null;
+  }): Promise<boolean>;
   list(): Promise<CanvasSummary[]>;
   /**
    * Return the stable id of the hidden World Space.

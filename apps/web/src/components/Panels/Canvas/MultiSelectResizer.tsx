@@ -348,7 +348,6 @@ export const MultiSelectResizer = () => {
       scaleY,
     });
     latestItemsRef.current = items;
-    previewResizeGeometry(items);
     const itemById = new Map(items.map((item) => [item.nodeId, item]));
     for (const node of snap.nodes) {
       if (!node.fontFit) continue;
@@ -366,6 +365,8 @@ export const MultiSelectResizer = () => {
         style: { ...(node.style ?? {}), fontSize },
       });
     }
+    // Space width limits must see the new content scale, not the previous tick.
+    previewResizeGeometry(items);
   };
 
   const endGesture = (e: React.PointerEvent) => {

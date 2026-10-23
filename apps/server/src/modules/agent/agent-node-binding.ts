@@ -160,7 +160,11 @@ export class AgentNodeBindingCoordinator {
     target: AgentNodeTarget,
     patch: Record<string, unknown>,
   ): Promise<() => void> {
+    const modeChanged =
+      Object.prototype.hasOwnProperty.call(patch, 'agentMode') &&
+      patch.agentMode !== target.agentMode;
     if (
+      !modeChanged &&
       !AGENT_NODE_PREPARATION_KEYS.some((key) =>
         Object.prototype.hasOwnProperty.call(patch, key),
       )
@@ -179,19 +183,20 @@ export class AgentNodeBindingCoordinator {
           'agent_binding_conflict',
           'Execution preparation cannot change after binding',
         );
-      return () => {};
+      if (!modeChanged) return () => {};
     }
     const release = this.dependencies.acquireTurn(target.threadId);
     if (!release) {
       // A layout save can echo unchanged preparation while an admitted turn
       // owns confirmation. It cannot replace that turn's configuration.
-      if (!changed) return () => {};
+      if (!changed && !modeChanged) return () => {};
       throw new AgentNodeBindingError(
         'agent_draft_busy',
         `Thread ${target.threadId} is preparing or running`,
       );
     }
     try {
+      if (target.bindingState === 'bound') return release;
       const canonical = await this.confirm(target, { alreadyLocked: true });
       if (canonical && changed) {
         throw new AgentNodeBindingError(

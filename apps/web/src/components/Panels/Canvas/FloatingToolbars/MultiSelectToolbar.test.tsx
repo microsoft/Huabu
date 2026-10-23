@@ -24,6 +24,7 @@ vi.mock('@/store/canvasStore', () => ({
 }));
 vi.mock('@/hooks/useInputMode', () => ({ useIsNotMouse: () => false }));
 vi.mock('react-i18next', () => ({
+  initReactI18next: { type: '3rdParty', init: vi.fn() },
   useTranslation: () => ({ t: (key: string) => key }),
 }));
 vi.mock('@/components/Common/CanvasFloatingPopover', () => ({
@@ -46,6 +47,11 @@ describe('MultiSelectToolbar font size', () => {
     const root = createRoot(container);
     try {
       await act(async () => root.render(<MultiSelectToolbar />));
+      expect(
+        container.querySelector(
+          'button[aria-label^="spaceHierarchy.collectAction"]',
+        ),
+      ).not.toBeNull();
       const move = container.querySelector<HTMLButtonElement>(
         '[aria-label="moveSelection.action"]',
       );
@@ -104,6 +110,19 @@ describe('MultiSelectToolbar font size', () => {
       }));
       await act(async () => root.render(<MultiSelectToolbar />));
       expect(container.querySelector('[name="font-size"]')).toBeNull();
+      state.nodes = state.nodes.map((node, index) => ({
+        ...node,
+        type: index === 0 ? 'spacePreview' : 'note',
+      }));
+      await act(async () => root.render(<MultiSelectToolbar />));
+      expect(
+        container.querySelector(
+          'button[aria-label^="spaceHierarchy.collectAction"]',
+        ),
+      ).not.toBeNull();
+      expect(
+        container.querySelector('button[aria-label="moveSelection.action"]'),
+      ).not.toBeNull();
     } finally {
       act(() => root.unmount());
       container.remove();

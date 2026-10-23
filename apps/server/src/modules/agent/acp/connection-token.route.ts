@@ -1,10 +1,15 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { agentletConnectionCommandRequestSchema } from '@huabu/shared';
+import {
+  agentletConnectionCommandRequestSchema,
+  agentletConnectionCredentialsRequestSchema,
+} from '@huabu/shared';
 
+import { getExternalAgentRuntimeConfig } from './runtime-config.js';
 import {
   buildAgentletConnectionCommand,
+  getConnectionToken,
   InvalidAgentletConnectionEnvFileError,
   InvalidAgentletConnectionOriginError,
 } from '../../../connection-token.js';
@@ -18,6 +23,27 @@ import type {
 import type { FastifyPluginAsync } from 'fastify';
 
 const connectionTokenRoutes: FastifyPluginAsync = async (app) => {
+  app.post('/connection-credentials', async (request, reply) => {
+    if (!isOwnerRequest(request)) {
+      return reply.status(403).send({
+        message: 'Forbidden: device connection requires owner authorization',
+      });
+    }
+    const parsed = agentletConnectionCredentialsRequestSchema.safeParse(
+      request.body,
+    );
+    if (!parsed.success) {
+      return reply.status(400).send({ message: 'Invalid connection request' });
+    }
+    return reply
+      .header('Cache-Control', 'no-store')
+      .header('Pragma', 'no-cache')
+      .send({
+        token: getConnectionToken(),
+        maxAgents: getExternalAgentRuntimeConfig().maxAgents,
+      });
+  });
+
   app.post<{
     Body: AgentletConnectionCommandRequest;
     Reply: ApiResult<AgentletConnectionCommandResponse>;

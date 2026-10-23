@@ -9,6 +9,7 @@ import {
   paneCenter,
   pinch,
   readViewportTransform,
+  readScreenshotPixels,
   scaleOf,
   touchTap,
 } from './helpers';
@@ -96,6 +97,118 @@ test('leaving the Canvas during a held Note scroll releases gesture ownership', 
     .poll(async () => scaleOf(await readViewportTransform(page)))
     .toBeLessThan(scaleOf(before));
 });
+
+for (const initialTool of ['Pen', 'Lasso'] as const) {
+  test(`finger Note reading survives Ink tool switches starting with ${initialTool}`, async ({
+    page,
+  }) => {
+    await openScrollableNote(page);
+    await page.evaluate(async () => {
+      const load = (path: string) => import(/* @vite-ignore */ path);
+      const { useToolStore } = await load('/src/store/toolStore.ts');
+      useToolStore.getState().setInputModePreference('pen');
+    });
+    const client = await page.context().newCDPSession(page);
+    const note = page.locator('.react-flow__node-note');
+    const viewport = note.locator('[data-note-content-viewport]');
+    const box = await viewport.boundingBox();
+    if (!box) throw new Error('Note viewport is not visible');
+    const point = { x: box.x + box.width / 2, y: box.y + box.height * 0.75 };
+    await page
+      .locator('.react-flow__pane')
+      .tap({ position: { x: 1100, y: 150 } });
+    await page.getByRole('button', { name: initialTool, exact: true }).tap();
+    if (initialTool === 'Pen') {
+      await expect(page.locator('[data-sketch-overlay]')).toBeVisible();
+    }
+    await touchTap(client, point);
+    await expect(note).toHaveClass(/selected/);
+    await touchTap(client, point);
+    await expect(viewport).toHaveAttribute('data-note-touch-reading', 'true');
+    const nodeBefore = await note.boundingBox();
+    const canvasBefore = await readViewportTransform(page);
+    for (const tool of ['Pen', 'Lasso', 'Pen', 'Eraser', 'Lasso']) {
+      const before = await viewport.evaluate((el) => el.scrollTop);
+      await page.getByRole('button', { name: tool, exact: true }).tap();
+      await expect(viewport).toHaveAttribute('data-note-touch-reading', 'true');
+      expect(await viewport.evaluate((el) => el.scrollTop)).toBe(before);
+      await oneFingerDrag(client, point, 0, -35);
+      await expect
+        .poll(() => viewport.evaluate((el) => el.scrollTop))
+        .toBeGreaterThan(before);
+      expect(await note.boundingBox()).toEqual(nodeBefore);
+      expect(await readViewportTransform(page)).toBe(canvasBefore);
+    }
+    await expect(page.locator('.react-flow__node-sketch')).toHaveCount(0);
+    await expect(page.locator('[data-canvas-panel="right"]')).toBeHidden();
+    await page.getByRole('button', { name: 'Pen', exact: true }).tap();
+    await touchTap(client, point);
+    await expect(note).not.toHaveClass(/selected/);
+    await expect(viewport).toHaveAttribute('data-note-touch-reading', 'false');
+    await touchTap(client, point);
+    await expect(note).toHaveClass(/selected/);
+    await touchTap(client, point);
+    await expect(viewport).toHaveAttribute('data-note-touch-reading', 'true');
+    const scrollBeforeInk = await viewport.evaluate((el) => el.scrollTop);
+    const ink = { x: point.x, y: point.y - 60 };
+    for (const [x1, y1, x2, y2] of [
+      [10, 0, 10, 40],
+      [30, 0, 30, 40],
+      [0, 10, 40, 10],
+      [0, 30, 40, 30],
+    ]) {
+      await client.send('Input.dispatchMouseEvent', {
+        type: 'mousePressed',
+        x: ink.x + x1,
+        y: ink.y + y1,
+        button: 'left',
+        buttons: 1,
+        pointerType: 'pen',
+        clickCount: 1,
+        force: 0.5,
+      });
+      for (let step = 1; step <= 10; step++) {
+        await client.send('Input.dispatchMouseEvent', {
+          type: 'mouseMoved',
+          x: ink.x + x1 + ((x2 - x1) * step) / 10,
+          y: ink.y + y1 + ((y2 - y1) * step) / 10,
+          button: 'left',
+          buttons: 1,
+          pointerType: 'pen',
+          force: 0.5,
+        });
+      }
+      await client.send('Input.dispatchMouseEvent', {
+        type: 'mouseReleased',
+        x: ink.x + x2,
+        y: ink.y + y2,
+        button: 'left',
+        buttons: 0,
+        pointerType: 'pen',
+        clickCount: 1,
+      });
+    }
+    await expect(page.locator('.react-flow__node-sketch')).toHaveCount(1);
+    await expect(viewport).toHaveAttribute('data-note-touch-reading', 'true');
+    expect(await viewport.evaluate((el) => el.scrollTop)).toBe(scrollBeforeInk);
+    await expect(page.getByRole('dialog')).toBeVisible();
+    const [strokePixel] = await readScreenshotPixels(page, [
+      { x: ink.x + 10, y: ink.y + 20 },
+    ]);
+    expect(Math.max(...strokePixel.slice(0, 3))).toBeLessThan(60);
+    await touchTap(client, { x: box.x + 25, y: box.y + 25 });
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.locator('[data-ink-sigil-label]')).toHaveText(
+      /touch reading/i,
+    );
+    await expect(note).toHaveClass(/selected/);
+    await expect(viewport).toHaveAttribute('data-note-touch-reading', 'true');
+    expect(await viewport.evaluate((el) => el.scrollTop)).toBe(scrollBeforeInk);
+    await pinch(client, point, 30, 100);
+    await expect.poll(() => readViewportTransform(page)).not.toBe(canvasBefore);
+    await expect(viewport).toHaveAttribute('data-note-touch-reading', 'true');
+  });
+}
 
 for (const { pointerType, preference } of [
   { pointerType: 'touch', preference: 'finger' },

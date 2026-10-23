@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { stripMarkdown } from './markdown.js';
+import { stripMarkdown, markdownSearchTarget } from './markdown.js';
 
 describe('stripMarkdown', () => {
   it.each([
@@ -45,5 +45,46 @@ describe('stripMarkdown', () => {
     [' \n\t ', ''],
   ])('projects %j without corrupting its content', (input, expected) => {
     expect(stripMarkdown(input)).toBe(expected);
+  });
+
+  describe('markdownSearchTarget', () => {
+    it('addresses visible text without counting hidden link destinations', () => {
+      const source =
+        '[needle](https://example.test/needle)\n\nParagraph needle';
+      expect(
+        markdownSearchTarget(source, source.indexOf('needle', 10), 6),
+      ).toBeNull();
+      expect(
+        markdownSearchTarget(source, source.lastIndexOf('needle'), 6),
+      ).toEqual({
+        text: 'needleParagraph needle',
+        start: 16,
+        end: 22,
+      });
+    });
+
+    it.each([
+      ['```needle\nneedle\n```', 3],
+      ['`needle`', 0],
+      ['![needle](image.png)', 2],
+      ['[label][ref]\n\n[ref]: https://needle.test', 27],
+      ['an &amp; entity', 4],
+    ])(
+      'does not treat hidden or transformed source syntax as visible: %s',
+      (source, offset) => {
+        expect(markdownSearchTarget(source, offset, 6)).toBeNull();
+      },
+    );
+
+    it('distinguishes a code fence language from its literal body', () => {
+      const source = '```needle\nneedle\n```';
+      expect(
+        markdownSearchTarget(source, source.lastIndexOf('needle'), 6),
+      ).toEqual({
+        text: 'needle',
+        start: 0,
+        end: 6,
+      });
+    });
   });
 });

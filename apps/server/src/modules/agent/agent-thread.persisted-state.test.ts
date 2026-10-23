@@ -195,6 +195,7 @@ describe('AgentThreadService persisted binding recovery', () => {
         target.threadId,
         externalRecord(target.canvasId, target.threadId),
       );
+      const readRecord = vi.spyOn(conversationThreadStore, 'get');
       const service = new AgentThreadService();
       expect(
         await service.resolveBinding({
@@ -206,6 +207,7 @@ describe('AgentThreadService persisted binding recovery', () => {
         alias: 'Fixed Agent',
         profileId: 'profile-fixed',
       });
+      expect(readRecord).toHaveBeenCalledWith(namespace, target.threadId);
 
       await mounted.reopen();
 

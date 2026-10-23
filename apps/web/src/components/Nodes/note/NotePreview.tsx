@@ -595,6 +595,7 @@ export const NotePreview = ({
 
       <div
         ref={containerRef}
+        data-search-renderer
         className={`relative h-full w-full overflow-auto py-3 ${
           editMode === 'raw' ? 'px-3' : 'pr-3'
         }`}
@@ -648,6 +649,7 @@ export const NotePreview = ({
               }
             >
               <RawMarkdownEditor
+                searchNodeId={id}
                 value={markdown}
                 readOnly={readOnly}
                 onChange={handleRawChange}

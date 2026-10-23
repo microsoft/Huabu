@@ -6,7 +6,7 @@
  *
  * TextNode and QuestionNode use proportional `data.style.fontSize` through
  * useTextNodeSurface: defaults are 16px and QUESTION_NODE_DEFAULT_FONT_SIZE.
- * Question insets and header geometry retain their 28px artwork basis; header text and status icons use the default font basis. Side grips
+ * Question content and chrome share the 24px default font basis. Side grips
  * preserve the font; corners and the Hug Frame/selection cascade ({@link ./fontFit})
  * scale it by the new/start outer-width ratio without fitting or rounding.
  * Existing fonts are respected without automatic persisted-data migration.
@@ -15,6 +15,7 @@
  * never re-declared.
  */
 
+import { CONVERSATION_CARD_SPACING } from '@/components/Nodes/design/nodeSpacing';
 import { NODE_TYPOGRAPHY } from '@/components/Nodes/design/nodeTypography';
 
 import type { FontOpts } from './textMeasure';
@@ -37,16 +38,22 @@ export const TEXT_NODE_PADDING_X = 8;
 /** Base vertical TextNode padding (px per side), scaled by fontSize / 16. */
 export const TEXT_NODE_PADDING_Y = 3;
 
-export const QUESTION_NODE_DEFAULT_FONT_SIZE = 24;
+export const QUESTION_NODE_DEFAULT_FONT_SIZE: number =
+  NODE_TYPOGRAPHY.cardTitle.size;
 
-/** Symmetric horizontal inset shared by measurement and the C card. */
-export const QUESTION_NODE_PADDING = 24;
-export const QUESTION_NODE_PADDING_Y = QUESTION_NODE_PADDING;
-/** Avatar/row geometry uses the artwork basis; status icon size uses the default font basis. */
-export const QUESTION_NODE_HEADER_HEIGHT = 32;
+/** Half the leading avatar column, included in symmetric text measurement. */
+export const QUESTION_NODE_AGENT_INSET =
+  (CONVERSATION_CARD_SPACING.iconSlotWidth + CONVERSATION_CARD_SPACING.rowGap) /
+  2;
+export const QUESTION_NODE_PADDING =
+  CONVERSATION_CARD_SPACING.padding + QUESTION_NODE_AGENT_INSET;
+export const QUESTION_NODE_PADDING_Y = CONVERSATION_CARD_SPACING.padding;
+export const QUESTION_NODE_HEADER_HEIGHT =
+  CONVERSATION_CARD_SPACING.footerHeight;
 export const QUESTION_NODE_STATUS_SIZE = NODE_TYPOGRAPHY.metadata.size;
-export const QUESTION_NODE_STATUS_PADDING_X = 6;
-export const QUESTION_NODE_HEADER_GAP = 12;
+export const QUESTION_NODE_STATUS_PADDING_X =
+  CONVERSATION_CARD_SPACING.statusPaddingX;
+export const QUESTION_NODE_HEADER_GAP = CONVERSATION_CARD_SPACING.rowGap;
 /** Half the base metadata-row-plus-gap height; scales with Question content. */
 export const QUESTION_NODE_HEADER_INSET =
   (QUESTION_NODE_HEADER_HEIGHT + QUESTION_NODE_HEADER_GAP) / 2;

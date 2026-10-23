@@ -443,7 +443,7 @@ export const ChatInput = ({
               placeholder={currentPlaceholder}
               disabled={disabled}
               rows={2}
-              className="text-fg-default placeholder:text-fg-subtle max-h-[10lh] min-h-[2lh] w-full resize-none overflow-y-auto overscroll-contain bg-transparent text-sm focus:outline-none disabled:cursor-not-allowed"
+              className="text-fg-default placeholder:text-fg-muted max-h-[10lh] min-h-[2lh] w-full resize-none overflow-y-auto overscroll-contain bg-transparent text-sm focus:outline-none disabled:cursor-not-allowed"
             />
             {!mention.open && slash.slashState && (
               <SlashCommandMenu
@@ -467,7 +467,7 @@ export const ChatInput = ({
                   variant="solid"
                   shape="pill"
                   iconOnly
-                  size="sm"
+                  size="md"
                   type="button"
                   title={t('chat.stopGenerating')}
                   onClick={(event) => {
@@ -475,6 +475,7 @@ export const ChatInput = ({
                     onStop();
                   }}
                   aria-label={t('chat.stop')}
+                  className="size-7 p-1"
                 >
                   <Square />
                 </Button>
@@ -483,11 +484,12 @@ export const ChatInput = ({
                   variant="solid"
                   shape="pill"
                   iconOnly
-                  size="sm"
+                  size="md"
                   type="submit"
                   title={t('chat.sendMessage')}
                   disabled={isSubmitDisabled}
                   aria-label={t('chat.send')}
+                  className="size-7 p-1"
                 >
                   <ArrowUp />
                 </Button>

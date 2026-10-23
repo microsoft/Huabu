@@ -16,6 +16,33 @@ import { space } from '../storage/index.js';
 
 import type { CanvasNode } from '@huabu/shared/canvas-engine';
 
+/** Project only durable activity boundaries, independently of viewing and geometry. */
+export async function projectAgentConversationActivity(
+  canvasId: string,
+  threadId: string,
+  lastActivityAt: number,
+): Promise<void> {
+  await withCanvasMutex(canvasId, async () => {
+    const canvas = await space(canvasId).read();
+    for (const node of (canvas?.state.nodes ?? []) as CanvasNode[]) {
+      if (
+        node.type !== 'question' ||
+        node.data.threadId !== threadId ||
+        (typeof node.data.lastActivityAt === 'number' &&
+          node.data.lastActivityAt >= lastActivityAt)
+      )
+        continue;
+      if (
+        !(await projectAgentNodeStateAlreadyLocked(canvasId, node.id, {
+          threadId,
+          lastActivityAt,
+        }))
+      )
+        throw new Error('Conversation activity projection was rejected');
+    }
+  });
+}
+
 export async function projectAgentNodeState(
   canvasId: string,
   nodeId: string,

@@ -6,7 +6,7 @@
 
 **§18 supersedes the original three-status intent report.** New reports are human-readable interpretation records for conversation history and transparency, not semantic classifications or execution gates.
 
-**§19 defines mode-independent Ink input; §20 requires Canvas-visible responses.** Ask, Operate, and external conversations can receive Ink while retaining their current mode and permissions. Every Ink turn must deliver a visible Canvas response: a substantive Canvas result or a host-created answer Note linked to the conversation. Ink used in discussion or planning never implicitly authorizes execution. See [Sketch Node's current Ink contract](../architecture/sketch-node.md#41-partial-stroke-selection-as-ai-context).
+**§22 supersedes §19's built-in Ask admission and §20's host-created answer Notes.** Ink replies are agent-authored Canvas results, spatially grounded in each submitted Ink query. Built-in Chat is excluded from Ink destinations; ordinary text Chat is unchanged. Existing external permissions remain authoritative, and discussion or planning never implicitly authorizes execution. See [Sketch Node's current Ink contract](../architecture/sketch-node.md#41-partial-stroke-selection-as-ai-context).
 
 Huabu should let a user lasso handwritten Sketch strokes together with optional Canvas nodes and explicitly submit that bounded selection as an Agent request. The selected Ink is a source that carries the user's intent. The chosen Agent interprets the partial-stroke image and responds within its current mode and permissions. A new conversation retains its explicit Agent/mode choice, with `operate` as the implicit built-in default; an existing Question thread retains its internal or external binding and effective mode.
 
@@ -934,7 +934,7 @@ Assert that both internal and external rendered directives include the direct-su
 
 ## 19. Mode-independent Ink input
 
-Status: **Approved; presentation preference superseded by §20** · Last updated: 2026-10-10
+Status: **Superseded by §22 for built-in Ask admission; permission preservation retained** · Last updated: 2026-10-19
 
 Ink is another way to supply user content, alongside typed text and selected Canvas sources. Input format, conversation mode, and answer presentation are separate concerns. Remove the proposed built-in Ask exclusion: write capability is not necessary to interpret Ink or retain a readable interpretation report.
 
@@ -948,7 +948,7 @@ Acceptance covers Ask in new, existing, cached-recent, and server-resolved desti
 
 ## 20. Canvas-visible Ink responses
 
-Status: **Implemented; process-crash recovery remains out of scope** · Last updated: 2026-10-10
+Status: **Superseded by §22; historical host-delivery design** · Last updated: 2026-10-19
 
 An Ink-initiated query is a Canvas interaction whose user is not expected to open ChatPanel. Every accepted Ink turn must visibly respond on Canvas, regardless of answer category or Agent mode. Discussion, research, planning, clarification, and inability to interpret are responses, not exceptions to Canvas delivery.
 
@@ -1141,3 +1141,41 @@ The initial scheduling target follows Inkitiate: after the 400 ms quiet window e
 - Source membership and fingerprints are validated before freezing. The shared request schema validates membership, count, and uniqueness; server canonical reads validate same-Space target identity/type and required materialization, not the authenticity of a past mutable binding. Existing mode/permission boundaries remain unchanged.
 - Geometry, quiet-window cancellation, binding persistence/failures, complete/partial membership, picker behavior, move previews, source history, wire validation, canonical preparation, and renderer regressions have automated coverage. An isolated browser fixture exercises real mouse drawing, picker opening, direct binding, reselection, and selected-label capture with mocked persistence; it is not an end-to-end Agent or disk-persistence test.
 - iPad/Pencil handwriting, real-device false-positive/false-negative rates, 10,000-stroke latency, and the P95 target remain unverified. The existing development server returned Workspace readiness errors during browser validation; no Workspace settings were changed to work around that failure.
+
+## 22. Agent-authored, spatially grounded Ink replies
+
+Status: **Implemented on `feat/ink-canvas-replies`; pending review and real-Agent acceptance** · Last updated: 2026-10-19
+
+### 22.1 Response contract
+
+Every successfully completed Ink query must produce a persisted, agent-authored visible Canvas change that answers that query. Remove the host-created answer Note and its automatic Agent-to-Note edge. A final chat answer, interpretation report, Agent Node projection, title update, read-only tool call, or unrelated metadata write is not delivery. Huabu wraps both mounted drivers to verify actual committed Canvas updates before Agenetes persists successful terminal events; a turn that finishes without a result emits a durable error, keeping the initial stream, reconnect, history, and Agent Node lifecycle consistent rather than manufacturing a reply.
+
+The Agent chooses the appropriate editable representation: a concise Note, multiple related objects, or modifications to existing objects. Notes are not prohibited; mechanically copying final chat text into a host-owned Note is. Discussion and clarification are also Canvas responses, not exemptions: write the analysis or focused clarification on Canvas without executing an uncertain or merely discussed task. Preserve source Ink and existing materials unless the request authorizes changing them. A failed, interrupted, or permission-blocked run remains incomplete and never fabricates success.
+
+### 22.2 Destination policy
+
+The Ink picker excludes built-in Chat (`internal` + `ask`) from new and continued conversations, including cached and server-recency defaults. The implicit built-in choice remains Operate. Do not silently change an existing conversation's mode. Revalidate the effective destination at submission and on the server, so stale clients or a mode change cannot submit Ink to built-in Ask. Ordinary text Chat retains both modes.
+
+External Agents remain selectable; their stored `ask` value is not the built-in read-only contract. External session permissions are never broadened to satisfy Ink delivery. If an external session cannot write, explicitly report the blocker and leave the turn unsuccessful rather than bypassing permissions or falling back to a host Note.
+
+### 22.3 Per-query spatial grounding
+
+Separate conversation ownership from response placement. The owning Agent Node supplies conversation continuity, not a default reply position. Every turn uses its own selected Ink, even when continuing a conversation whose Agent Node is elsewhere.
+
+Explicit spatial instructions in the submitted Ink take priority: arrows, indicated regions, trajectories, alignment, and referenced objects guide where and how results appear. Without such instructions, inspect the current Canvas geometry and place results near the submitted Ink and relevant materials, avoiding overlap and extending their existing visual relationships. Do not default to downward accumulation beneath the Agent Node.
+
+Provide the selected partial-Ink bounds in Canvas coordinates with the same prepared source snapshot used for the required image. The bounds must describe selected strokes rather than the entire merged Sketch region, handle nested frames and scaling, persist with the canonical turn, and be available to both built-in and external Agents. Grounding images remain evidence of the submitted layout; fresh geometry queries determine current obstacles before writing. Existing Space query, mutation, persistence, and sync surfaces remain canonical.
+
+### 22.4 Acceptance
+
+- New and continued built-in Ask destinations are absent; recent Ask defaults are ignored without changing their mode; external Agents and ordinary text Chat retain existing behavior.
+- Every successful Ink invocation has an actual visible, thread-attributed Agent write. No-result, metadata-only, wrong-thread, failed-write, and interrupted turns cannot gain a host-created Note or edge.
+- Internal and external prompts require agent-authored Canvas replies, explicit spatial-instruction priority, local placement without instructions, and verified writes without permission escalation.
+- Per-turn partial-Ink bounds survive submission and replay and remain independent of a distant conversation owner, unrelated strokes, and mutable later selection.
+- Focused unit/integration tests cover admission, result verification, geometry and prompt parity. Model compliance with semantic spatial instructions still requires real-agent acceptance testing; deterministic tests do not establish that quality.
+
+### 22.5 Implementation and verification boundary
+
+The implementation reuses the shared Agent menu with an Ink-only built-in mode filter, the existing conversation destination flow, shared stroke projection/bounds helpers, canonical envelope rendering, Space mutations, and the invocation lifecycle. The response controller now only verifies committed visible writes; it does not publish final chat text. A no-result turn fails explicitly, and a failed external stream cannot become successful merely by emitting a later `done`. This is not an automatic retry loop or a semantic answer grader.
+
+Focused regression coverage includes the picker and default selection, stale-mode rejection, HTTP admission errors, thread-scoped visible-write classification, absence of fallback Notes/edges, nested/scaled partial-stroke geometry, and canonical replay. An isolated Playwright fixture verifies built-in Chat exclusion, external continuation, and mouse/touch keyboard-focus behavior. Real-model spatial interpretation, response composition quality, and iPad/Pencil acceptance remain to be evaluated.

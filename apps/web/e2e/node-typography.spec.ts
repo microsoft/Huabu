@@ -33,7 +33,7 @@ test('Note uses fixed insets and cards retain width-scaled spacing across orient
         ...[400, 600].flatMap((width) => {
           const shell = {
             width,
-            border: '3px solid transparent',
+            border: '2px solid transparent',
             boxSizing: 'border-box',
           };
           return [
@@ -85,7 +85,7 @@ test('Note uses fixed insets and cards retain width-scaled spacing across orient
   const fixture = page.locator('#spacing-fixture');
   await expect(fixture.locator('.ProseMirror h1')).toHaveCount(2);
   for (const width of [400, 600]) {
-    const expectedPadding = (16 * (width - 6)) / 400;
+    const expectedPadding = (16 * (width - 4)) / 400;
     const noteInset = await fixture
       .locator(`[data-spacing="note-${width}"]`)
       .evaluate((el) => {
@@ -106,7 +106,7 @@ test('Note uses fixed insets and cards retain width-scaled spacing across orient
     for (const inset of noteInset) expect(inset).toBeCloseTo(16, 2);
     await expect(
       fixture.locator(`[data-spacing="note-${width}"] .ProseMirror h1`),
-    ).toHaveCSS('font-size', '28px');
+    ).toHaveCSS('font-size', '24px');
     await expect(
       fixture.locator(`[data-spacing="note-${width}"] .ProseMirror p`).first(),
     ).toHaveCSS('font-size', '18px');
@@ -118,7 +118,7 @@ test('Note uses fixed insets and cards retain width-scaled spacing across orient
         await expect(card).toHaveAttribute('data-orientation', orientation);
         await expect(card.locator('.preview-card__title')).toHaveCSS(
           'font-size',
-          '28px',
+          '24px',
         );
         await expect(card.locator('.preview-card__summary')).toHaveCSS(
           'font-size',
@@ -147,8 +147,8 @@ test('Note uses fixed insets and cards retain width-scaled spacing across orient
         for (const inset of metrics.insets)
           expect(inset).toBeCloseTo(expectedPadding, 2);
         if (orientation === 'horizontal')
-          expect(metrics.gap).toBeCloseTo((12 * (width - 6)) / 400, 2);
-        expect(metrics.summaryGap).toBeCloseTo((8 * (width - 6)) / 400, 2);
+          expect(metrics.gap).toBeCloseTo((12 * (width - 4)) / 400, 2);
+        expect(metrics.summaryGap).toBeCloseTo((8 * (width - 4)) / 400, 2);
       }
     }
   }
@@ -156,7 +156,7 @@ test('Note uses fixed insets and cards retain width-scaled spacing across orient
 
 test('canvas Notes and measurement share typography without affecting expanded preview or generic Milkdown', async ({
   page,
-}) => {
+}, testInfo) => {
   await page.goto('/playground/design');
   await page.evaluate(async () => {
     const reactPath = '/node_modules/.vite/deps/react.js';
@@ -176,7 +176,7 @@ test('canvas Notes and measurement share typography without affecting expanded p
     const container = document.createElement('div');
     container.id = 'note-heading-fixture';
     container.style.cssText =
-      'position:fixed;inset:0;z-index:99999;overflow:auto';
+      'position:fixed;inset:0;z-index:99999;overflow:auto;background:var(--bg-default)';
     document.body.append(container);
     createRoot(container).render(
       h(
@@ -217,7 +217,7 @@ test('canvas Notes and measurement share typography without affecting expanded p
       `[data-heading-surface="${surface}"] .ProseMirror`,
     );
     await expect(prose.locator('h6')).toBeAttached();
-    for (const [index, size] of [28, 24, 20, 16, 16, 16].entries()) {
+    for (const [index, size] of [24, 22, 20, 18, 18, 18].entries()) {
       await expect(prose.locator(`h${index + 1}`)).toHaveCSS(
         'font-size',
         `${size}px`,
@@ -229,11 +229,11 @@ test('canvas Notes and measurement share typography without affecting expanded p
     }
     await expect(prose.locator('p').first()).toHaveCSS(
       'font-size',
-      `${NODE_TYPOGRAPHY.body.size}px`,
+      `${NODE_TYPOGRAPHY.noteBody.size}px`,
     );
     await expect(prose.locator('li').first()).toHaveCSS(
       'font-size',
-      `${NODE_TYPOGRAPHY.body.size}px`,
+      `${NODE_TYPOGRAPHY.noteBody.size}px`,
     );
   }
   for (const surface of ['expanded', 'generic']) {
@@ -262,6 +262,9 @@ test('canvas Notes and measurement share typography without affecting expanded p
       );
     }
   }
+  await fixture
+    .locator('[data-heading-surface="canvas"]')
+    .screenshot({ path: testInfo.outputPath('note-type-scale.png') });
 });
 
 for (const nodeType of ['web', 'pdf']) {
@@ -367,7 +370,7 @@ for (const nodeType of ['web', 'pdf']) {
   });
 }
 
-test('same-width nodes use distinct heading roles and shared body sizes', async ({
+test('same-width nodes share title sizes and retain distinct Note body typography', async ({
   page,
 }) => {
   await page.goto('/playground/design#zoomed-overview');
@@ -397,15 +400,18 @@ test('same-width nodes use distinct heading roles and shared body sizes', async 
       }),
     );
   expect(metrics).toHaveLength(3);
-  expect(metrics[0].titleBase).toBe(28);
+  expect(metrics[0].titleBase).toBe(24);
   const h2 = scene.locator('.ProseMirror h2').first();
-  await expect(h2).toHaveCSS('font-size', '24px');
+  await expect(h2).toHaveCSS('font-size', '22px');
   for (const [index, metric] of metrics.entries()) {
     expect(metric.title).toBeCloseTo(
       index === 0 ? NODE_TYPOGRAPHY.title.size : NODE_TYPOGRAPHY.cardTitle.size,
       2,
     );
-    expect(metric.body).toBeCloseTo(NODE_TYPOGRAPHY.body.size, 2);
+    expect(metric.body).toBeCloseTo(
+      index === 0 ? NODE_TYPOGRAPHY.noteBody.size : NODE_TYPOGRAPHY.body.size,
+      2,
+    );
     expect(metric.weight).toBe(index === 0 ? '600' : '500');
   }
 });

@@ -10,6 +10,7 @@ import useCanvasStore from '@/store/canvasStore';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 
 import { NodeWrapper } from '../NodeWrapper';
+import { InkSigilHighlightHost } from './InkSigilHighlightHost';
 import { SketchControls } from './SketchControls';
 import { DEFAULT_STROKE_COLOR, DEFAULT_STROKE_SIZE } from './sketchPath';
 import { SketchStrokePath } from './SketchStrokePath';
@@ -125,14 +126,15 @@ export const SketchNode = memo(
         {isContentMissing ? (
           <MissingFileBanner nodeId={id} />
         ) : (
-          <svg
-            width={w}
-            height={h}
-            viewBox={`0 0 ${w} ${h}`}
-            className="h-full w-full"
-            overflow="visible"
-          >
-            {/*
+          <InkSigilHighlightHost nodeId={id}>
+            <svg
+              width={w}
+              height={h}
+              viewBox={`0 0 ${w} ${h}`}
+              className="relative h-full w-full"
+              overflow="visible"
+            >
+              {/*
             Hit-testing: the wrapper `.react-flow__node-sketch` is set to
             `pointer-events: none` in `index.css` so blank areas of the
             stroke's bounding box drill through to nodes beneath. Each
@@ -140,38 +142,39 @@ export const SketchNode = memo(
             which only registers hits on actual rendered fill \u2014 i.e. the
             painted stroke shape itself. No Tailwind override needed.
           */}
-            {strokes.map((s) => {
-              const isSelected = selectedStrokeIdSet.has(s.id);
-              const isHighlighted =
-                !isSelected && highlightStrokeIdSet.has(s.id);
-              return (
-                <g
-                  key={s.id}
-                  visibility={
-                    erasedStrokeIdSet.has(s.id) ? 'hidden' : undefined
-                  }
-                  transform={
-                    movePreview && isSelected && !isCarried
-                      ? `translate(${movePreview.dx} ${movePreview.dy})`
-                      : undefined
-                  }
-                >
-                  <SketchStrokePath
-                    stroke={s}
-                    scaleX={scaleX}
-                    scaleY={scaleY}
-                    emphasis={
-                      isSelected
-                        ? 'selected'
-                        : isHighlighted
-                          ? 'reference'
-                          : undefined
+              {strokes.map((s) => {
+                const isSelected = selectedStrokeIdSet.has(s.id);
+                const isHighlighted =
+                  !isSelected && highlightStrokeIdSet.has(s.id);
+                return (
+                  <g
+                    key={s.id}
+                    visibility={
+                      erasedStrokeIdSet.has(s.id) ? 'hidden' : undefined
                     }
-                  />
-                </g>
-              );
-            })}
-          </svg>
+                    transform={
+                      movePreview && isSelected && !isCarried
+                        ? `translate(${movePreview.dx} ${movePreview.dy})`
+                        : undefined
+                    }
+                  >
+                    <SketchStrokePath
+                      stroke={s}
+                      scaleX={scaleX}
+                      scaleY={scaleY}
+                      emphasis={
+                        isSelected
+                          ? 'selected'
+                          : isHighlighted
+                            ? 'reference'
+                            : undefined
+                      }
+                    />
+                  </g>
+                );
+              })}
+            </svg>
+          </InkSigilHighlightHost>
         )}
       </NodeWrapper>
     );

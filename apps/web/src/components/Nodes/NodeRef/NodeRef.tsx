@@ -3,10 +3,11 @@
 
 import { useTranslation } from 'react-i18next';
 
-import { Tooltip } from './Tooltip';
-import { NODE_ICON } from '../../config/nodeIcons';
-import useCanvasStore from '../../store/canvasStore';
-import { revealNodesOnCanvas } from '../Panels/CanvasLayerPanel/focusNodesOnCanvas';
+import { Tooltip } from '@/components/Common/Tooltip';
+import { useSpaceShortcutTarget } from '@/components/Nodes/spacePreview/useSpaceShortcutTarget';
+import { NODE_ICON } from '@/config/nodeIcons';
+import useCanvasStore from '@/store/canvasStore';
+import { revealNodesOnCanvas } from '@/utils/canvasViewport';
 
 import type { CanvasNodeType, ChatAttachment } from '@huabu/shared';
 
@@ -67,6 +68,14 @@ export function NodeRef({
     : undefined;
 
   const nodeData = node?.data as Record<string, unknown> | undefined;
+  const targetCanvasId =
+    !snapshotLabel &&
+    !attachment &&
+    (nodeData?.type ?? node?.type) === 'spacePreview' &&
+    typeof nodeData?.targetCanvasId === 'string'
+      ? nodeData.targetCanvasId
+      : undefined;
+  const spaceTarget = useSpaceShortcutTarget(targetCanvasId);
 
   // Disabled (struck-through "Node deleted" chip) whenever the referenced
   // node no longer exists on the canvas. `snapshotLabel` only freezes the
@@ -80,10 +89,12 @@ export function NodeRef({
     ? snapshotLabel
     : attachment
       ? (attachment.filename ?? attachment.label ?? 'file')
-      : ((nodeData?.label as string) ??
-        fallbackLabel ??
-        nodeId?.slice(0, 8) ??
-        '?');
+      : targetCanvasId
+        ? spaceTarget.title
+        : ((nodeData?.label as string) ??
+          fallbackLabel ??
+          nodeId?.slice(0, 8) ??
+          '?');
 
   // Determine icon
   const nodeType = attachment

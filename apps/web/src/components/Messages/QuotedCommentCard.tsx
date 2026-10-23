@@ -1,10 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/components/Common/Button';
 import { Tooltip } from '@/components/Common/Tooltip';
+import { useSearchSource } from '@/hooks/useSearchSource';
 
 import type { QuotedComment } from '@huabu/shared';
 import type { ReactNode } from 'react';
@@ -19,6 +21,10 @@ export function QuotedCommentCard({
   children?: ReactNode;
 }) {
   const { t } = useTranslation();
+  const quoteRef = useRef<HTMLButtonElement>(null);
+  const commentRef = useRef<HTMLParagraphElement>(null);
+  useSearchSource(quoteRef, comment.quote, 'text');
+  useSearchSource(commentRef, comment.comment, 'text');
   return (
     <div
       data-quoted-comment
@@ -33,6 +39,7 @@ export function QuotedCommentCard({
             contentClassName="max-h-[min(60dvh,24rem)] max-w-[min(90vw,24rem)] overflow-y-auto overscroll-contain wrap-anywhere whitespace-pre-wrap"
           >
             <Button
+              ref={quoteRef}
               variant="ghost"
               size="sm"
               aria-label={t('messages.fragmentQuotedPassage')}
@@ -73,7 +80,10 @@ export function QuotedCommentCard({
         </div>
       ) : null}
       {children ?? (
-        <p className="text-fg-default text-sm wrap-anywhere whitespace-pre-wrap">
+        <p
+          ref={commentRef}
+          className="text-fg-default text-sm wrap-anywhere whitespace-pre-wrap"
+        >
           {comment.comment}
         </p>
       )}

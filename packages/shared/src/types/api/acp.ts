@@ -537,7 +537,11 @@ export const acpAgentletStatusSchema = agentletStatusSchema;
 /** @deprecated Use {@link acpAgentletStatusSchema} instead. */
 export const acpDaemonStatusSchema = acpAgentletStatusSchema;
 
-export const connectionTokenSourceSchema = z.enum(['environment', 'generated']);
+export const connectionTokenSourceSchema = z.enum([
+  'environment',
+  'generated',
+  'managed',
+]);
 export type ConnectionTokenSource = z.infer<typeof connectionTokenSourceSchema>;
 
 export const connectionShellSchema = z.enum(['posix', 'powershell']);
@@ -570,6 +574,17 @@ export const agentletConnectionCommandResponseSchema = z.object({
 });
 export type AgentletConnectionCommandResponse = z.infer<
   typeof agentletConnectionCommandResponseSchema
+>;
+
+export const agentletConnectionCredentialsRequestSchema = z.object({}).strict();
+export const agentletConnectionCredentialsSchema = z
+  .object({
+    token: z.string().min(1),
+    maxAgents: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  })
+  .strict();
+export type AgentletConnectionCredentials = z.infer<
+  typeof agentletConnectionCredentialsSchema
 >;
 
 /** Schema mirror of {@link AcpProfilesListResponse}. */

@@ -23,6 +23,7 @@ import { useTranslation } from 'react-i18next';
 
 import { AgentIcon } from '@/components/Common/AgentIcon';
 import { Button } from '@/components/Common/Button';
+import { MENU_SURFACE_CLASS } from '@/components/Common/menuStyles';
 import { useSettingsUiStore } from '@/store/settingsUiStore';
 import { resolveQuestionAgentPresentation } from '@/utils/questionAgentPresentation';
 
@@ -217,7 +218,7 @@ export const AgentSelector = ({
           onDismiss={handleDismiss}
           anchor="bottom-left"
           offset={{ x: 0, y: -4 }}
-          className="flex max-w-[min(20rem,calc(100vw-1rem))] flex-col overflow-hidden py-1"
+          className={`${MENU_SURFACE_CLASS} flex max-h-[calc(100dvh-24px)] max-w-[min(20rem,calc(100vw-1rem))] flex-col overflow-y-auto overscroll-contain`}
         >
           <AgentMenuOptions
             heading={t('chat.agentHeading')}

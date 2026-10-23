@@ -14,6 +14,7 @@ import {
 import {
   deduplicateLabel,
   generateNextLabel,
+  resolveHeightMode,
 } from '@huabu/shared/canvas-engine';
 
 import { canvasSizeFromStyle, resolveFrameAtPoint } from '../utils';
@@ -104,6 +105,7 @@ export default function resolvePasteClipboard(
 
     // Clone data.
     const clonedData = JSON.parse(JSON.stringify(node.data ?? {}));
+    if (nodeType === 'note') clonedData.heightMode = resolveHeightMode(node);
     clonedData.label = label;
     clonedData.origin = { type: 'user-pasted' };
     // Stroke ids identify individual ink entries across selection, move,

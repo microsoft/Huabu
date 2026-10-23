@@ -297,7 +297,7 @@ test('dense Note titles require one complete 16px line without changing geometry
   for (const zoom of [0.1, 0.095, 0.09, 0.085, 0.08, 0.095]) {
     await zoomTo(page, zoom, 'note');
     const label = note.locator('[data-study-label]');
-    if ((180 - 6) * zoom < 16) {
+    if ((180 - 4) * zoom < 16) {
       await expect(label).toHaveAttribute('aria-hidden', 'true');
       await expect(label).toHaveCSS('opacity', '0');
       continue;
@@ -539,8 +539,8 @@ for (const [width, height] of [
           }),
         );
         const box = await card.boundingBox();
-        expect(box?.width).toBeCloseTo((width - 6) * zoom, 1);
-        expect(box?.height).toBeCloseTo((height - 6) * zoom, 1);
+        expect(box?.width).toBeCloseTo((width - 4) * zoom, 1);
+        expect(box?.height).toBeCloseTo((height - 4) * zoom, 1);
       }
       expect(Math.max(...widths) - Math.min(...widths)).toBeLessThan(0.02);
       await zoomTo(page, 0.3, type);
@@ -601,7 +601,7 @@ for (const cover of [true, false]) {
           await expect(image).toBeVisible();
           const imageBox = await image.boundingBox();
           expect(imageBox?.height).toBeGreaterThanOrEqual(
-            ((240 - 6) * zoom) / 4 - 1,
+            ((240 - 4) * zoom) / 4 - 1,
           );
         }
       }
@@ -981,8 +981,8 @@ async function labelGeometry(node: Locator) {
       probe: typography(probe),
       description: description ? typography(description) : null,
       label: { width: labelRect.width, height: labelRect.height },
-      availableHeight: Math.max(0, (shell.offsetHeight - 6) * scale - 12),
-      availableWidth: Math.max(0, (shell.offsetWidth - 6) * scale - 16),
+      availableHeight: Math.max(0, (shell.offsetHeight - 4) * scale - 12),
+      availableWidth: Math.max(0, (shell.offsetWidth - 4) * scale - 16),
       insets: {
         left: labelRect.left - shellRect.left,
         top: labelRect.top - shellRect.top,
@@ -1028,10 +1028,10 @@ async function expectLabelFit(
   // Screen-space layout rounds to Chromium's 1/64 CSS-pixel layout unit.
   expect(Math.abs(box.label.width - box.availableWidth)).toBeLessThan(0.02);
   expect(box.label.height).toBeLessThanOrEqual(box.availableHeight + 0.1);
-  expect(Math.abs(box.insets.left - (8 + 3 * zoom))).toBeLessThan(0.02);
-  expect(box.insets.top).toBeCloseTo(6 + 3 * zoom, 2);
-  expect(box.insets.right).toBeGreaterThanOrEqual(8 + 3 * zoom - 0.1);
-  expect(box.insets.bottom).toBeGreaterThanOrEqual(6 + 3 * zoom - 0.1);
+  expect(Math.abs(box.insets.left - (8 + 2 * zoom))).toBeLessThan(0.02);
+  expect(box.insets.top).toBeCloseTo(6 + 2 * zoom, 2);
+  expect(box.insets.right).toBeGreaterThanOrEqual(8 + 2 * zoom - 0.1);
+  expect(box.insets.bottom).toBeGreaterThanOrEqual(6 + 2 * zoom - 0.1);
   for (const word of box.words) {
     expect(word.width).toBeLessThanOrEqual(box.availableWidth + 0.1);
     expect(word.overflow).toBe('clip');
@@ -1204,7 +1204,7 @@ for (const type of TYPES) {
       width: 400,
       height: 320,
       radius: '12px',
-      border: '3px',
+      border: '2px',
       innerRadius: '9px',
     });
     expect(initial.screenWidth).toBeCloseTo(96, 3);
@@ -1332,7 +1332,7 @@ test('tiny labels hide but all four minimal shells retain their authored footpri
       const box = await geometry(node);
       expect(box.screenWidth).toBeCloseTo(400 * zoom, 3);
       expect(box.screenHeight).toBeCloseTo(320 * zoom, 3);
-      expect(box.border).toBe('3px');
+      expect(box.border).toBe('2px');
       expect(box.background).not.toBe('rgba(0, 0, 0, 0)');
       if (type === 'web' || type === 'pdf') continue;
       if (zoom < 0.25)
@@ -1541,18 +1541,18 @@ test('shallow far Notes sacrifice vertical whitespace before hiding their title'
     const node = shell(page, 'note');
     await expectLayers(node, minimal);
     if (minimal) {
-      const visible = 80 * zoom >= FAR.labelLine;
+      const visible = 82 * zoom >= FAR.labelLine;
       await expect(node.locator('[data-study-label]')).toHaveAttribute(
         'aria-hidden',
         String(!visible),
       );
       if (visible) {
         const box = await labelGeometry(node);
-        const inset = Math.min(6, (80 * zoom - FAR.labelLine) / 2);
-        expect(box.insets.top).toBeCloseTo(inset + 3 * zoom, 2);
+        const inset = Math.min(6, (82 * zoom - FAR.labelLine) / 2);
+        expect(box.insets.top).toBeCloseTo(inset + 2 * zoom, 2);
         expect(box.title.height).toBeCloseTo(FAR.labelLine, 2);
         expect(box.title.font).toBeCloseTo(FAR.labelFont, 2);
-        expect(box.insets.bottom).toBeGreaterThanOrEqual(3 * zoom - 0.1);
+        expect(box.insets.bottom).toBeGreaterThanOrEqual(2 * zoom - 0.1);
         expect(box.description).toBeNull();
       }
     }

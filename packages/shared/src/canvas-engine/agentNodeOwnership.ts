@@ -7,6 +7,7 @@ export const AGENT_NODE_OWNED_DATA_KEYS = [
   'status',
   'errorMessage',
   'invocationToken',
+  'lastActivityAt',
   'viewed',
   'threadId',
   'conversationTitleSource',

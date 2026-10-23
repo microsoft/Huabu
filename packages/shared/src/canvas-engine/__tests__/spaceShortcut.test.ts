@@ -22,6 +22,34 @@ const legacy: CanvasNode = {
 };
 
 describe('Space Shortcut geometry', () => {
+  it.each([0.1, 0.5, 1.5, 2])(
+    'preserves authored content scale %s on creation and reload',
+    (scale) => {
+      const result = executeCanvasCommands(
+        {
+          commands: [
+            {
+              type: 'CREATE_NODES',
+              nodes: [
+                {
+                  id,
+                  nodeType: 'spacePreview',
+                  position: legacy.position,
+                  data: { ...legacy.data, style: { fontSize: 24 * scale } },
+                  size: { width: 360 * scale, height: 800 },
+                },
+              ],
+            },
+          ],
+        },
+        { canvasId: 'host', nodes: [], edges: [] },
+      );
+      const node = normalizeSpaceShortcut(result.writeResult.nodes[0]);
+      expect(node.style?.width).toBe(360 * scale);
+      expect(node.style?.height).toBeUndefined();
+      expect(node.data.style).toEqual({ fontSize: 24 * scale });
+    },
+  );
   it.each([undefined, 1200])(
     'creates a shortcut with width %s without pinning a nominal height',
     (width) => {
@@ -53,7 +81,7 @@ describe('Space Shortcut geometry', () => {
         style: { width: width ?? SPACE_SHORTCUT_SIZE.defaultWidth },
         data: {
           targetCanvasId: 'target',
-          widthMode: width === undefined ? 'auto' : 'fixed',
+          widthMode: 'fixed',
         },
       });
       expect(result.writeResult.nodes[0].style?.height).toBeUndefined();
@@ -67,6 +95,17 @@ describe('Space Shortcut geometry', () => {
     expect(normalized.position).toBe(legacy.position);
     expect(normalizeSpaceShortcut(normalized)).toBe(normalized);
     expect(legacy.style?.height).toBe(800);
+  });
+
+  it('freezes legacy automatic widths without resetting saved geometry', () => {
+    const normalized = normalizeSpaceShortcut({
+      ...legacy,
+      data: { ...legacy.data, widthMode: 'auto' },
+      style: { width: 310 },
+    });
+    expect(normalized.style).toEqual({ width: 310 });
+    expect(normalized.data.widthMode).toBe('fixed');
+    expect(normalizeSpaceShortcut(normalized)).toBe(normalized);
   });
 
   it.each([100, 320, 1000])(

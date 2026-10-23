@@ -5,11 +5,10 @@
  * Preload script — runs in an isolated context with access to both
  * the DOM and a limited set of Node.js APIs.
  *
- * We keep this minimal: only version information and a handful of
- * runtime constants (`platform`, `titleBarHeight`) are exposed via
- * contextBridge. All application logic goes through the HTTP API
- * (the BrowserWindow loads http://127.0.0.1:<port>), so there is
- * no need to bridge Node.js or Electron APIs into the renderer.
+ * Expose only runtime constants and narrow native capabilities through
+ * contextBridge. Application data uses the selected Server's HTTP API;
+ * local-Agent IPC exposes lifecycle controls and state, never credentials
+ * or arbitrary process execution.
  *
  * Compatible with `webPreferences.sandbox: true` — only touches
  * `contextBridge`, `process.versions` and `process.platform`, all
@@ -39,6 +38,7 @@ import { contextBridge, ipcRenderer } from 'electron';
  */
 const TITLE_BAR_HEIGHT = 36;
 const isRemoteServer = process.argv.includes('--huabu-remote-server');
+import type { LocalAgentState } from './local-agent.js';
 
 contextBridge.exposeInMainWorld('electronBridge', {
   versions: {
@@ -50,6 +50,25 @@ contextBridge.exposeInMainWorld('electronBridge', {
   isElectron: true,
   /** Remote mode must not expose client-machine filesystem affordances. */
   isRemoteServer,
+  ...(isRemoteServer
+    ? {
+        localAgent: {
+          getState: (): Promise<LocalAgentState> =>
+            ipcRenderer.invoke('local-agent:get-state'),
+          setEnabled: (enabled: boolean): Promise<LocalAgentState> =>
+            ipcRenderer.invoke('local-agent:set-enabled', enabled),
+          onState: (
+            callback: (state: LocalAgentState) => void,
+          ): (() => void) => {
+            const listener = (_event: unknown, state: LocalAgentState): void =>
+              callback(state);
+            ipcRenderer.on('local-agent:state', listener);
+            return () =>
+              ipcRenderer.removeListener('local-agent:state', listener);
+          },
+        },
+      }
+    : {}),
   /**
    * `process.platform` value forwarded to the renderer. Used by the
    * custom title bar (`WindowChrome`) to leave a left-side gutter on

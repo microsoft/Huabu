@@ -43,7 +43,7 @@ The layout height is downstream of rendering, and rendering is gated on viewport
 
 `style.height` is deleted for auto notes by the same command, so nothing authoritative remains.
 
-`onlyRenderVisibleElements` is enabled in [`Canvas.tsx`](../../apps/web/src/components/Panels/Canvas/Canvas.tsx). Offscreen nodes are unmounted and cannot self-measure. This is why the symptom is not limited to zoom: panning a never-measured note into view produces the same jump, and why [`focusNodesOnCanvas.ts`](../../apps/web/src/components/Panels/CanvasLayerPanel/focusNodesOnCanvas.ts) already carries a fallback chain for "nodes React Flow left unmeasured".
+`onlyRenderVisibleElements` is enabled in [`Canvas.tsx`](../../apps/web/src/components/Panels/Canvas/Canvas.tsx). Offscreen nodes are unmounted and cannot self-measure. This is why the symptom is not limited to zoom: panning a never-measured note into view produces the same jump, and why [`canvasViewport.ts`](../../apps/web/src/utils/canvasViewport.ts) already carries a fallback chain for "nodes React Flow left unmeasured".
 
 ### The maintenance cost, separately from the bug
 

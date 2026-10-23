@@ -5,11 +5,44 @@ import { describe, expect, it } from 'vitest';
 
 import {
   compensateDetachedDragPosition,
+  getDragPointerPosition,
   mergeLiveDragGeometry,
 } from './liveDragGeometry';
 
 import type { NestableNode } from '@huabu/shared/canvas-engine';
 import type { Node } from '@xyflow/react';
+
+describe('getDragPointerPosition', () => {
+  it('reads mouse and pen client coordinates, including zero', () => {
+    expect(getDragPointerPosition({ clientX: 0, clientY: 20 })).toEqual({
+      x: 0,
+      y: 20,
+    });
+  });
+
+  it('reads the changed touch during movement and after all fingers lift', () => {
+    const changedTouches = [{ clientX: 40, clientY: 60 }];
+    for (const touches of [changedTouches, []]) {
+      expect(getDragPointerPosition({ touches, changedTouches })).toEqual({
+        x: 40,
+        y: 60,
+      });
+    }
+  });
+
+  it('falls back to an active touch when no changed touch is supplied', () => {
+    expect(
+      getDragPointerPosition({ touches: [{ clientX: 10, clientY: 30 }] }),
+    ).toEqual({ x: 10, y: 30 });
+  });
+
+  it('preserves the geometry fallback for events without coordinates', () => {
+    expect(getDragPointerPosition(undefined)).toBeUndefined();
+    expect(
+      getDragPointerPosition({ touches: [], changedTouches: [] }),
+    ).toBeUndefined();
+  });
+});
 
 describe('mergeLiveDragGeometry', () => {
   it('uses the drag event measurement for an auto-height Question node', () => {

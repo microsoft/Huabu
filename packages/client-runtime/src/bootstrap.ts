@@ -17,6 +17,13 @@ export interface RuntimeArtifacts {
   rfsEntry: string | null;
 }
 
+export function resolveServerDataDir(
+  repoRoot: string,
+  configuredPath?: string,
+): string {
+  return resolve(repoRoot, configuredPath || 'apps/server/data');
+}
+
 export function resolveRuntimeArtifacts(options: {
   repoRoot?: string;
   bundleDir?: string;

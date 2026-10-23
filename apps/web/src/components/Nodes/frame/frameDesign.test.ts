@@ -22,10 +22,10 @@ describe('Frame visual design', () => {
   });
   it.each([
     [600, 500, 64],
-    [1380, 876, 96],
-    [2400, 1800, 152],
+    [1380, 876, 64],
+    [2400, 1800, 64],
   ])(
-    'centers the title in the expanded inset for %s × %s',
+    'centers the title in the fixed inset for %s × %s',
     (width, height, inset) => {
       const metrics = frameVisualMetricsForSize(width, height);
       const header = getFrameHeaderMetrics(
@@ -67,10 +67,10 @@ describe('Frame visual design', () => {
 
   it.each([
     [600, 1800, 24, 16],
-    [1380, 876, 36, 24],
-    [2400, 1800, 52, 32],
-    [0, 0, 36, 24],
-    [5000, 600, 52, 32],
+    [1380, 876, 24, 24],
+    [2400, 1800, 24, 32],
+    [0, 0, 24, 24],
+    [5000, 600, 24, 32],
   ])(
     'adds appearance without changing layout for %s × %s',
     (width, height, titleFontSize, borderRadius) => {

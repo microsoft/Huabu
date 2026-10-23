@@ -35,16 +35,16 @@ export function usePdfTextIndex({
   enabled,
   onPageAspectRatio,
 }: UsePdfTextIndexOptions): PdfTextIndexSnapshot {
-  const [pages, setPages] = useState<ReadonlyMap<number, PdfPageText>>(
-    () => new Map(),
-  );
-  const [processedPageCount, setProcessedPageCount] = useState(0);
+  const [index, setIndex] = useState(() => ({
+    document,
+    pages: new Map<number, PdfPageText>(),
+    processedPageCount: 0,
+  }));
   const processedPageIndexesRef = useRef(new Set<number>());
 
   useEffect(() => {
     processedPageIndexesRef.current = new Set();
-    setPages(new Map());
-    setProcessedPageCount(0);
+    setIndex({ document, pages: new Map(), processedPageCount: 0 });
   }, [document]);
 
   useEffect(() => {
@@ -60,6 +60,7 @@ export function usePdfTextIndex({
         const pageIndex = pageNumber - 1;
         if (processedPageIndexesRef.current.has(pageIndex)) continue;
 
+        let pageText: PdfPageText | null = null;
         try {
           const page = await document.getPage(pageNumber);
           const [textContent, viewport] = await Promise.all([
@@ -71,20 +72,21 @@ export function usePdfTextIndex({
             textContent.items as Array<{ str?: string; hasEOL?: boolean }>,
           );
           onPageAspectRatio?.(pageIndex, viewport.width / viewport.height);
-          startTransition(() => {
-            setPages((current) => {
-              const next = new Map(current);
-              next.set(pageIndex, { pageIndex, text });
-              return next;
-            });
-          });
+          pageText = { pageIndex, text };
         } catch {
           // One malformed page must not prevent the remaining document from
           // becoming searchable.
         } finally {
           if (!cancelled) {
             processedPageIndexesRef.current.add(pageIndex);
-            setProcessedPageCount(processedPageIndexesRef.current.size);
+            const processedPageCount = processedPageIndexesRef.current.size;
+            startTransition(() =>
+              setIndex((current) => {
+                const pages = new Map(current.pages);
+                if (pageText) pages.set(pageIndex, pageText);
+                return { document, pages, processedPageCount };
+              }),
+            );
           }
         }
       }
@@ -100,9 +102,13 @@ export function usePdfTextIndex({
     };
   }, [document, enabled, onPageAspectRatio]);
 
+  const isCurrent = index.document === document;
   return {
-    pages,
-    isIndexing: !!document && enabled && processedPageCount < document.numPages,
-    indexedPageCount: processedPageCount,
+    pages: isCurrent ? index.pages : new Map(),
+    isIndexing:
+      !!document &&
+      enabled &&
+      (!isCurrent || index.processedPageCount < document.numPages),
+    indexedPageCount: isCurrent ? index.processedPageCount : 0,
   };
 }

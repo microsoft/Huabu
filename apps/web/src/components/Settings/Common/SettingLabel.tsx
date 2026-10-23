@@ -18,7 +18,7 @@ export function SettingLabel({
     <span>
       {children}
       {optional ? (
-        <span className="text-fg-subtle font-normal">
+        <span className="text-fg-muted font-normal">
           {' '}
           ({t('settings.optional')})
         </span>

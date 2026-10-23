@@ -3,6 +3,8 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { markdownSearchTarget } from '@huabu/shared/canvas-engine';
+
 import { createMilkdown, type MilkdownInstance } from '../createMilkdown';
 
 let instance: MilkdownInstance | undefined;
@@ -27,6 +29,24 @@ async function mount(markdown: string) {
 }
 
 describe('Milkdown text selection snapshots', () => {
+  it('resolves a search source after a code node without counting node-view chrome or moving selection', async () => {
+    const source = '```txt\nunrelated code\n```\n\nParagraph needle';
+    const editor = await mount(source);
+    const target = markdownSearchTarget(
+      source,
+      source.lastIndexOf('needle'),
+      6,
+    );
+    if (!target) throw new Error('Missing source projection');
+    const before = editor.getSelectionRange();
+    const range = editor.getSearchRange(target.text, target.start, target.end);
+    expect(range?.toString()).toBe('needle');
+    expect(range?.startContainer.parentElement?.closest('p')?.textContent).toBe(
+      'Paragraph needle',
+    );
+    expect(editor.getSelectionRange()).toEqual(before);
+    expect(editor.getSearchRange('changed needle', 8, 14)).toBeNull();
+  });
   it('captures inline formatted text with its actual range and neighboring context', async () => {
     const editor = await mount('Before **selected** after.');
     editor.__selectTextBetweenForTest?.('selected', 'selected');

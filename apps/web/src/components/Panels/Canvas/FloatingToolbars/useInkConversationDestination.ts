@@ -17,6 +17,7 @@ interface ConversationCandidate {
   nodeId: string;
   threadId?: string;
   available: boolean;
+  inkCompatible: boolean;
 }
 
 interface DestinationDraft {
@@ -35,11 +36,18 @@ function resolveDefaultDestination(
   conversation: RecentCanvasConversationResponse['conversation'],
   candidates: readonly ConversationCandidate[],
 ): InkDestination {
-  const available = candidates.filter(
+  const compatible = candidates.filter((candidate) => candidate.inkCompatible);
+  const available = compatible.filter(
     (candidate) => candidate.available && candidate.threadId,
   );
   const single = available.length === 1 ? available[0] : undefined;
-  return conversation
+  const excluded =
+    conversation &&
+    candidates.some(
+      (candidate) =>
+        candidate.nodeId === conversation.nodeId && !candidate.inkCompatible,
+    );
+  return conversation && !excluded
     ? { kind: 'continue', ...conversation }
     : single?.threadId
       ? {
@@ -47,7 +55,7 @@ function resolveDefaultDestination(
           nodeId: single.nodeId,
           threadId: single.threadId,
         }
-      : candidates.length === 0
+      : compatible.length === 0
         ? { kind: 'new' }
         : UNRESOLVED;
 }

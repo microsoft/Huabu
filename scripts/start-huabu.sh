@@ -186,8 +186,8 @@ NODE
     if node --input-type=module -e '
       const port = process.argv[1];
       const headers = {};
-      const user = process.env.HUABU_BASIC_AUTH_USER;
-      const pass = process.env.HUABU_BASIC_AUTH_PASS;
+      const user = process.env.HUABU_CANARY_BASIC_AUTH_USER ?? process.env.HUABU_BASIC_AUTH_USER;
+      const pass = process.env.HUABU_CANARY_BASIC_AUTH_PASS ?? process.env.HUABU_BASIC_AUTH_PASS;
       if (user && pass) {
         headers.Authorization = `Basic ${Buffer.from(`${user}:${pass}`).toString("base64")}`;
       }

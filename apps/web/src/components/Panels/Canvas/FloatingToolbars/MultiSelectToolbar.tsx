@@ -23,9 +23,11 @@ import {
   FLOATING_TOOLBAR_POPOVER_CLASS,
 } from '@/components/Common/FloatingToolbar';
 import { nodeUsesAccent } from '@/components/Nodes/design/nodeAccentPolicy';
+import { CollectIntoSpaceButton } from '@/components/Space/CollectIntoSpaceButton';
 import { useIsNotMouse } from '@/hooks/useInputMode';
 import { translateColorOptions } from '@/i18n/colors';
 import useCanvasStore from '@/store/canvasStore';
+import { useWorkspaceStore } from '@/store/workspaceStore';
 import { resolveGeometryEdit } from '@/utils/node/geometry';
 import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 
@@ -53,6 +55,8 @@ interface GeometryToolbarItem {
  * multi-selection bounding box when two or more nodes are selected.
  */
 export const MultiSelectToolbar = () => {
+  const canvasId = useCanvasStore((state) => state.canvasId);
+  const worldId = useWorkspaceStore((state) => state.worldCanvasId);
   const { t } = useTranslation();
   const nodes = useCanvasStore((s) => s.nodes);
   const edges = useCanvasStore((s) => s.edges);
@@ -71,9 +75,6 @@ export const MultiSelectToolbar = () => {
   const selectedNodes = useMemo(
     () => nodes.filter((n) => n.selected) as CanvasNode[],
     [nodes],
-  );
-  const hasNonMovableSelection = selectedNodes.some(
-    (node) => node.type === 'spacePreview',
   );
 
   // Edges whose endpoints are both in the node selection participate in
@@ -248,6 +249,7 @@ export const MultiSelectToolbar = () => {
       <DropdownMenu
         floating
         placement="bottom"
+        contentRole="dialog"
         className={`${FLOATING_TOOLBAR_POPOVER_CLASS} node-toolbar-size-panel flex-row items-center gap-2`}
         trigger={
           <Button variant="ghost" iconOnly title={t('toolbar.size.title')}>
@@ -348,9 +350,10 @@ export const MultiSelectToolbar = () => {
         />
       )}
 
-      {!hasNonMovableSelection && (
+      {selectedNodes.length > 1 && canvasId !== worldId && (
         <>
           <FloatingToolbar.Divider />
+          <CollectIntoSpaceButton />
           <FloatingToolbar.ActionButton
             title={t('moveSelection.action')}
             onClick={(event) =>

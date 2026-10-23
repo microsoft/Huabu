@@ -41,4 +41,21 @@ describe('deployment readiness', () => {
       /password|token|secretKey|allowedHosts":\[/i,
     );
   });
+
+  it('reports the explicit no-login owner policy and remote warning', () => {
+    const result = buildDeploymentReadiness({
+      allowedHostsConfigured: true,
+      basicAuthConfigured: false,
+      authenticationDisabled: true,
+      bindHost: '0.0.0.0',
+      bindScope: 'network',
+      ownerAllowed: true,
+      credentialStoreWritable: true,
+    });
+    expect(result.owner.policy).toBe('unauthenticated');
+    expect(result.issues).toContainEqual({
+      code: 'REMOTE_LOGIN_DISABLED',
+      severity: 'warning',
+    });
+  });
 });

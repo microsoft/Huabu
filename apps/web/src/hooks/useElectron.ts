@@ -177,6 +177,21 @@ interface ElectronUpdaterApi {
   onStatus: (cb: (status: UpdateStatus) => void) => () => void;
 }
 
+export interface ElectronLocalAgentState {
+  enabled: boolean;
+  agentletId?: string;
+  device?: { agentletId: string; displayName: string; version: string };
+  status:
+    | 'disabled'
+    | 'connecting'
+    | 'connected'
+    | 'reconnecting'
+    | 'stopping'
+    | 'authorization-required'
+    | 'error';
+  error: string | null;
+}
+
 interface ElectronBridge {
   versions: {
     node: string;
@@ -186,6 +201,11 @@ interface ElectronBridge {
   isElectron: true;
   /** Whether Electron is connected to a separately hosted Huabu Server. */
   isRemoteServer: boolean;
+  localAgent?: {
+    getState(): Promise<ElectronLocalAgentState>;
+    setEnabled(enabled: boolean): Promise<ElectronLocalAgentState>;
+    onState(callback: (state: ElectronLocalAgentState) => void): () => void;
+  };
   /** Forwarded `process.platform` value: 'win32' | 'darwin' | 'linux' | ... */
   platform: NodeJS.Platform;
   /**

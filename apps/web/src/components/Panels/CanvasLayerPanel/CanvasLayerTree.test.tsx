@@ -12,6 +12,7 @@ import { createEmptyWorkspace } from '../../../store/previewWorkspace/model';
 import { usePreviewWorkspaceStore } from '../../../store/previewWorkspace/store';
 
 import type { DataSourceTreeItem } from './types';
+import type * as CanvasFocus from '@/utils/canvasViewport';
 import type { DndContextProps, DragEndEvent } from '@dnd-kit/core';
 import type { Node } from '@xyflow/react';
 
@@ -61,7 +62,8 @@ vi.mock('@dnd-kit/sortable', () => ({
 vi.mock('../../../store/previewWorkspace/actions', () => ({
   openPreviewNode: mocks.openPreviewNode,
 }));
-vi.mock('./focusNodesOnCanvas', () => ({
+vi.mock('@/utils/canvasViewport', async (importOriginal) => ({
+  ...(await importOriginal<typeof CanvasFocus>()),
   revealNodesOnCanvas: mocks.revealNodesOnCanvas,
 }));
 vi.mock('../../Common/Toast', () => ({ toast: mocks.toast }));
@@ -162,7 +164,9 @@ async function renderTree(
     canvasId: CANVAS_ID,
     nodes,
     collapsedFrameIds: new Set(),
-    rfInstance: {} as never,
+    rfInstance: {
+      screenToFlowPosition: (position: { x: number; y: number }) => position,
+    } as never,
     canvasWrapper,
     selectNodes,
     reorderNodes: mocks.reorderNodes,

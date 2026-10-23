@@ -30,10 +30,12 @@
 
 import { diffArrays, diffWords } from 'diff';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { topLevelListItemMarkdown } from '@huabu/shared/canvas-engine';
 
 import { Button } from '@/components/Common/Button';
+import { Popover } from '@/components/Common/Popover';
 
 import type { MilkdownInstance } from '@/components/Milkdown';
 import type { BlockProvenance, DeletedBlockInfo } from '@huabu/shared';
@@ -121,24 +123,6 @@ export function computeDisplayDiffs(
   });
 }
 
-/** Pixel offset of the gutter bar from the block's right edge. */
-const GUTTER_OFFSET = 12;
-const GUTTER_HIT_LEFT = 3;
-const GUTTER_HIT_WIDTH = 12;
-
-export function isPointInEditedBlockGutter(
-  x: number,
-  y: number,
-  slot: Pick<BlockSlot, 'top' | 'right' | 'height'>,
-): boolean {
-  return (
-    y >= slot.top &&
-    y <= slot.top + slot.height &&
-    x >= slot.right + GUTTER_HIT_LEFT &&
-    x <= slot.right + GUTTER_HIT_LEFT + GUTTER_HIT_WIDTH
-  );
-}
-
 export function ProvenanceOverlay({
   blocks,
   tombstones,
@@ -150,6 +134,7 @@ export function ProvenanceOverlay({
   onRestoreTombstone,
   onDismissTombstone,
 }: ProvenanceOverlayProps): React.JSX.Element | null {
+  const { t } = useTranslation();
   const [slots, setSlots] = useState<Slot[]>([]);
   // Tomb groups are identified by their shared anchorKey (`__head__`
   // for the null-anchor doc-head group). Block hover keeps using the
@@ -159,6 +144,59 @@ export function ProvenanceOverlay({
     key: string;
   } | null>(null);
   const hideTimerRef = useRef<number>(0);
+  const markerRefs = useRef(new Map<string, HTMLButtonElement>());
+  const panelRef = useRef<HTMLDivElement>(null);
+  const keyboardOriginRef = useRef<HTMLButtonElement | null>(null);
+  const completedOriginRef = useRef<HTMLButtonElement | null>(null);
+
+  const focusReviewAction = useCallback(() => {
+    const action = panelRef.current?.querySelector('button');
+    action?.focus({ preventScroll: true });
+    action?.scrollIntoView({ block: 'nearest' });
+  }, []);
+
+  const completeReview = useCallback(() => {
+    window.clearTimeout(hideTimerRef.current);
+    completedOriginRef.current = panelRef.current?.contains(
+      document.activeElement,
+    )
+      ? keyboardOriginRef.current
+      : null;
+    keyboardOriginRef.current = null;
+    setHovered(null);
+  }, []);
+
+  const close = useCallback(() => {
+    window.clearTimeout(hideTimerRef.current);
+    const origin = keyboardOriginRef.current;
+    keyboardOriginRef.current = null;
+    setHovered(null);
+    origin?.focus({ preventScroll: true });
+  }, []);
+
+  useEffect(() => () => window.clearTimeout(hideTimerRef.current), []);
+
+  useEffect(() => {
+    const origin = keyboardOriginRef.current;
+    if (origin && !origin.isConnected) {
+      window.clearTimeout(hideTimerRef.current);
+      keyboardOriginRef.current = null;
+      setHovered(null);
+    }
+    const completed = completedOriginRef.current;
+    if (!completed || completed.isConnected) return;
+    completedOriginRef.current = null;
+    if (document.activeElement !== document.body) return;
+    const marker = [...markerRefs.current.values()].find(
+      (element) => element.isConnected,
+    );
+    if (marker) {
+      marker.focus({ preventScroll: true });
+      marker.scrollIntoView({ block: 'nearest' });
+    } else {
+      editor?.focus();
+    }
+  }, [slots, editor]);
 
   const sig = useMemo(() => {
     const b = blocks.map((x) => `${x.key}@${x.at}`).join(',');
@@ -312,54 +350,18 @@ export function ProvenanceOverlay({
 
   const scheduleHide = useCallback(() => {
     window.clearTimeout(hideTimerRef.current);
-    hideTimerRef.current = window.setTimeout(() => setHovered(null), 150);
+    hideTimerRef.current = window.setTimeout(() => {
+      if (
+        keyboardOriginRef.current ||
+        panelRef.current?.contains(document.activeElement)
+      )
+        return;
+      setHovered(null);
+    }, 150);
   }, []);
   const cancelHide = useCallback(() => {
     window.clearTimeout(hideTimerRef.current);
   }, []);
-
-  // Only the narrow gutter marker owns the block diff popover. Keeping the
-  // text body outside this hit area lets users read and select it without
-  // repeatedly opening provenance UI.
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container || !editor || blocks.length === 0) return;
-
-    const blockKeySet = new Set(blocks.map((b) => b.key));
-    const onMove = (e: MouseEvent) => {
-      // If we're inside the popover itself, keep it open.
-      const target = e.target as HTMLElement | null;
-      if (target?.closest('[data-prov-popover]')) {
-        cancelHide();
-        return;
-      }
-      // Walk current slot list and check if pointer lies near an edited
-      // block's gutter marker.
-      const cRect = container.getBoundingClientRect();
-      const xLocal = e.clientX - cRect.left + container.scrollLeft;
-      const yLocal = e.clientY - cRect.top + container.scrollTop;
-      for (const slot of slots) {
-        if (slot.kind !== 'block') continue;
-        if (!blockKeySet.has(slot.entry.key)) continue;
-        if (isPointInEditedBlockGutter(xLocal, yLocal, slot)) {
-          cancelHide();
-          if (hovered?.kind !== 'block' || hovered.key !== slot.entry.key) {
-            setHovered({ kind: 'block', key: slot.entry.key });
-          }
-          return;
-        }
-      }
-      if (hovered?.kind === 'block') scheduleHide();
-    };
-    const onLeave = () => scheduleHide();
-
-    container.addEventListener('mousemove', onMove);
-    container.addEventListener('mouseleave', onLeave);
-    return () => {
-      container.removeEventListener('mousemove', onMove);
-      container.removeEventListener('mouseleave', onLeave);
-    };
-  }, [containerRef, editor, blocks, slots, hovered, scheduleHide, cancelHide]);
 
   // Nothing to render if no slots have been measured yet. The bulk
   // summary pill lives in the outer (non-scrolling) panel and is
@@ -381,57 +383,65 @@ export function ProvenanceOverlay({
 
   return (
     <>
-      {/* Tombstone gutter markers (always visible). One marker per
-          anchor group — multiple consecutive deletes at the same
-          anchor share a single bar + popover. Shape mirrors the
-          modify/insert accent bar so the three provenance states read
-          as a unified family in the gutter. */}
       {slots.map((slot) => {
-        if (slot.kind !== 'tomb') return null;
-        const id = tombId(slot.anchorKey);
-        const active = hovered?.kind === 'tomb' && hovered.key === id;
-        const count = slot.entries.length;
-        // Mirror the `.huabu-ai-edited-block::after` accent bar
-        // (see `milkdown-overrides.css`): 6 px wide vertical bar with
-        // 1 px border-radius, sitting in the same gutter column as the
-        // modify/insert bars but using the `--danger` token. A wider
-        // invisible hit area (12 px) keeps the marker comfortably
-        // hoverable without making the visible bar feel chunky.
+        const id =
+          slot.kind === 'block' ? slot.entry.key : tombId(slot.anchorKey);
+        const markerId = `${slot.kind}:${id}`;
+        const active = hovered?.kind === slot.kind && hovered.key === id;
+        const label =
+          slot.kind === 'block'
+            ? t('chat.reviewAIBlockChanges')
+            : t('chat.reviewAIDeletions', { count: slot.entries.length });
         return (
-          <div
-            key={`tm:${id}`}
-            className="absolute z-10 flex cursor-pointer items-center"
+          <Button
+            key={markerId}
+            ref={(element) => {
+              if (element) markerRefs.current.set(markerId, element);
+              else markerRefs.current.delete(markerId);
+            }}
+            variant="ghost"
+            iconOnly
+            size="sm"
+            aria-label={label}
+            aria-haspopup="dialog"
+            aria-expanded={active}
+            className="focus-visible:outline-info absolute z-10 min-h-0 min-w-0 rounded-sm p-0 focus-visible:outline-2 focus-visible:outline-offset-2 enabled:hover:bg-transparent"
             style={{
-              top: slot.top - 2,
+              top: slot.kind === 'block' ? slot.top : slot.top - 2,
               left: slot.right + 3,
               width: 12,
-              height: 16,
+              height: slot.kind === 'block' ? slot.height : 16,
+            }}
+            onClick={(event) => {
+              cancelHide();
+              keyboardOriginRef.current = event.currentTarget;
+              setHovered({ kind: slot.kind, key: id });
+              if (active) focusReviewAction();
             }}
             onMouseEnter={() => {
+              if (keyboardOriginRef.current) return;
               cancelHide();
-              setHovered({ kind: 'tomb', key: id });
+              setHovered({ kind: slot.kind, key: id });
             }}
             onMouseLeave={scheduleHide}
-            title={
-              count > 1
-                ? `AI deleted ${count} blocks here — hover to review`
-                : 'AI deleted this block — hover to review'
-            }
           >
-            <div
-              style={{
-                width: 6,
-                height: 16,
-                marginLeft: 3,
-                borderRadius: 1,
-                backgroundColor: active
-                  ? 'var(--danger)'
-                  : 'var(--danger-light)',
-                transition: 'background-color 0.15s ease',
-                pointerEvents: 'none',
-              }}
-            />
-          </div>
+            {slot.kind === 'tomb' && (
+              <span
+                aria-hidden="true"
+                style={{
+                  width: 6,
+                  height: 16,
+                  marginLeft: 3,
+                  borderRadius: 1,
+                  backgroundColor: active
+                    ? 'var(--danger)'
+                    : 'var(--danger-light)',
+                  transition: 'background-color 0.15s ease',
+                  pointerEvents: 'none',
+                }}
+              />
+            )}
+          </Button>
         );
       })}
 
@@ -439,7 +449,22 @@ export function ProvenanceOverlay({
           currently hovered) */}
       {hoveredSlot ? (
         <DiffPopover
+          key={`${hoveredSlot.kind}:${hoveredSlot.kind === 'block' ? hoveredSlot.entry.key : tombId(hoveredSlot.anchorKey)}`}
           slot={hoveredSlot}
+          reference={markerRefs.current.get(
+            `${hoveredSlot.kind}:${hoveredSlot.kind === 'block' ? hoveredSlot.entry.key : tombId(hoveredSlot.anchorKey)}`,
+          )}
+          contentRef={panelRef}
+          label={
+            hoveredSlot.kind === 'block'
+              ? t('chat.reviewAIBlockChanges')
+              : t('chat.reviewAIDeletions', {
+                  count: hoveredSlot.entries.length,
+                })
+          }
+          onOpenAutoFocus={() => {
+            if (keyboardOriginRef.current) focusReviewAction();
+          }}
           onMouseEnter={cancelHide}
           onMouseLeave={scheduleHide}
           editor={editor}
@@ -448,7 +473,15 @@ export function ProvenanceOverlay({
           onInsertBelow={onInsertBelow}
           onRestoreTombstone={onRestoreTombstone}
           onDismissTombstone={onDismissTombstone}
-          onClose={() => setHovered(null)}
+          onClose={completeReview}
+          onDismiss={(reason) => {
+            if (reason === 'escape') close();
+            else {
+              keyboardOriginRef.current = null;
+              window.clearTimeout(hideTimerRef.current);
+              setHovered(null);
+            }
+          }}
         />
       ) : null}
     </>
@@ -457,6 +490,11 @@ export function ProvenanceOverlay({
 
 interface DiffPopoverProps {
   slot: Slot;
+  reference?: Element;
+  contentRef: React.RefObject<HTMLDivElement | null>;
+  label: string;
+  onOpenAutoFocus: () => void;
+  onDismiss: NonNullable<React.ComponentProps<typeof Popover>['onDismiss']>;
   editor: MilkdownInstance | null;
   onMouseEnter: () => void;
   onMouseLeave: () => void;
@@ -474,6 +512,11 @@ interface DiffPopoverProps {
 
 function DiffPopover({
   slot,
+  reference,
+  contentRef,
+  label,
+  onOpenAutoFocus,
+  onDismiss,
   editor,
   onMouseEnter,
   onMouseLeave,
@@ -503,134 +546,135 @@ function DiffPopover({
     return { kind: 'tomb', entries: slot.entries };
   }, [slot, editor]);
 
-  // Match the popover width to the anchor block (legacy behaviour);
-  // right edge aligns with the gutter bar.
-  const style: React.CSSProperties = {
-    top: slot.kind === 'block' ? slot.top : slot.top + 12,
-    left: slot.right + GUTTER_OFFSET,
-    width: slot.width,
-    transform: 'translateX(-100%)',
-  };
-
   return (
-    <div
-      data-prov-popover
-      className="border-edge-default bg-surface absolute z-20 max-h-100 overflow-y-auto rounded-md border p-3 shadow-lg"
-      style={style}
-      onMouseEnter={onMouseEnter}
-      onMouseLeave={onMouseLeave}
+    <Popover
+      reference={reference}
+      placement="bottom-end"
+      contentRef={contentRef}
+      onOpenAutoFocus={onOpenAutoFocus}
+      onDismiss={onDismiss}
+      style={{ width: slot.width }}
+      className="max-h-[min(25rem,var(--popover-available-height,calc(100dvh-24px)))] overflow-y-auto overscroll-contain p-3 wrap-anywhere"
     >
-      <div className="text-fg-muted mb-2 text-xs leading-relaxed">
-        {segments.kind === 'diff'
-          ? segments.rows.map((row, rowIndex) => (
-              <div
-                key={rowIndex}
-                className={rowIndex > 0 ? 'mt-1 border-t pt-1' : ''}
-              >
-                {row.map((seg, segmentIndex) => (
-                  <span
-                    key={segmentIndex}
-                    className={
-                      seg.type === 'removed'
-                        ? 'bg-diff-removed-bg text-diff-removed-text line-through'
-                        : seg.type === 'added'
-                          ? 'bg-diff-added-bg text-diff-added-text'
-                          : ''
-                    }
-                  >
-                    {seg.text}
-                  </span>
-                ))}
-              </div>
-            ))
-          : segments.entries.map((entry, i) => (
-              <div
-                key={entry.key}
-                className={`bg-diff-removed-bg text-diff-removed-text line-through ${
-                  i > 0 ? 'mt-1 pt-1' : ''
-                }`}
-              >
-                {entry.baselineMarkdown}
-              </div>
-            ))}
-      </div>
-      <div className="flex justify-end gap-1">
-        {slot.kind === 'block' ? (
-          <>
-            {onInsertBelow ? (
+      <div
+        role="dialog"
+        aria-label={label}
+        data-prov-popover=""
+        onMouseEnter={onMouseEnter}
+        onMouseLeave={onMouseLeave}
+      >
+        <div className="text-fg-muted mb-2 text-xs leading-relaxed">
+          {segments.kind === 'diff'
+            ? segments.rows.map((row, rowIndex) => (
+                <div
+                  key={rowIndex}
+                  className={rowIndex > 0 ? 'mt-1 border-t pt-1' : ''}
+                >
+                  {row.map((seg, segmentIndex) => (
+                    <span
+                      key={segmentIndex}
+                      className={
+                        seg.type === 'removed'
+                          ? 'bg-diff-removed-bg text-diff-removed-text line-through'
+                          : seg.type === 'added'
+                            ? 'bg-diff-added-bg text-diff-added-text'
+                            : ''
+                      }
+                    >
+                      {seg.text}
+                    </span>
+                  ))}
+                </div>
+              ))
+            : segments.entries.map((entry, i) => (
+                <div
+                  key={entry.key}
+                  className={`bg-diff-removed-bg text-diff-removed-text line-through ${
+                    i > 0 ? 'mt-1 pt-1' : ''
+                  }`}
+                >
+                  {entry.baselineMarkdown}
+                </div>
+              ))}
+        </div>
+        <div className="flex justify-end gap-1">
+          {slot.kind === 'block' ? (
+            <>
+              {onInsertBelow ? (
+                <Button
+                  variant="outline"
+                  tone="neutral"
+                  size="sm"
+                  onClick={() => {
+                    onInsertBelow(slot.entry.key, slot.entry.baselineMarkdown);
+                    onClose();
+                  }}
+                >
+                  Insert Below
+                </Button>
+              ) : null}
               <Button
                 variant="outline"
                 tone="neutral"
                 size="sm"
                 onClick={() => {
-                  onInsertBelow(slot.entry.key, slot.entry.baselineMarkdown);
+                  onRejectBlock(slot.entry.key);
                   onClose();
                 }}
               >
-                Insert Below
+                Reject
               </Button>
-            ) : null}
-            <Button
-              variant="outline"
-              tone="neutral"
-              size="sm"
-              onClick={() => {
-                onRejectBlock(slot.entry.key);
-                onClose();
-              }}
-            >
-              Reject
-            </Button>
-            <Button
-              variant="solid"
-              tone="info"
-              size="sm"
-              onClick={() => {
-                onAcceptBlock(slot.entry.key);
-                onClose();
-              }}
-            >
-              Accept
-            </Button>
-          </>
-        ) : (
-          <>
-            <Button
-              variant="outline"
-              tone="neutral"
-              size="sm"
-              onClick={() => {
-                // Reject = restore deleted blocks back into the doc
-                // (legacy semantics).
-                for (const entry of slot.entries) {
-                  onRestoreTombstone(
-                    entry.key,
-                    entry.baselineMarkdown,
-                    entry.anchorKey,
-                  );
-                }
-                onClose();
-              }}
-            >
-              Reject
-            </Button>
-            <Button
-              variant="solid"
-              tone="info"
-              size="sm"
-              onClick={() => {
-                // Accept = confirm the deletion (drop tombstone entries).
-                for (const entry of slot.entries) {
-                  onDismissTombstone(entry.key);
-                }
-                onClose();
-              }}
-            >
-              Accept
-            </Button>
-          </>
-        )}
+              <Button
+                variant="solid"
+                tone="info"
+                size="sm"
+                onClick={() => {
+                  onAcceptBlock(slot.entry.key);
+                  onClose();
+                }}
+              >
+                Accept
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button
+                variant="outline"
+                tone="neutral"
+                size="sm"
+                onClick={() => {
+                  // Reject = restore deleted blocks back into the doc
+                  // (legacy semantics).
+                  for (const entry of slot.entries) {
+                    onRestoreTombstone(
+                      entry.key,
+                      entry.baselineMarkdown,
+                      entry.anchorKey,
+                    );
+                  }
+                  onClose();
+                }}
+              >
+                Reject
+              </Button>
+              <Button
+                variant="solid"
+                tone="info"
+                size="sm"
+                onClick={() => {
+                  // Accept = confirm the deletion (drop tombstone entries).
+                  for (const entry of slot.entries) {
+                    onDismissTombstone(entry.key);
+                  }
+                  onClose();
+                }}
+              >
+                Accept
+              </Button>
+            </>
+          )}
+        </div>
       </div>
-    </div>
+    </Popover>
   );
 }

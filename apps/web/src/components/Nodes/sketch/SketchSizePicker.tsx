@@ -16,6 +16,7 @@ import { cn } from '@/components/Common/cn';
 import { FLOATING_TOOLBAR_POPOVER_CLASS } from '@/components/Common/FloatingToolbar';
 import { Popover } from '@/components/Common/Popover';
 import { RangeSlider } from '@/components/Common/RangeSlider';
+import { useCloseOnEscape } from '@/hooks/useCloseOnEscape';
 
 interface SketchSizePickerProps {
   floating?: boolean;
@@ -66,6 +67,24 @@ export function SketchSizePicker({
   });
   const previewHeight = Math.max(2, Math.min(10, value / 2));
 
+  useCloseOnEscape(isOpen && !floating, () => {
+    setIsOpen(false);
+    refs.domReference.current?.querySelector('button')?.focus();
+  });
+
+  const slider = (
+    <RangeSlider
+      value={value}
+      min={min}
+      max={max}
+      label={label}
+      size={touch ? 'md' : 'sm'}
+      onChange={onChange}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+    />
+  );
+
   return (
     <div ref={refs.setReference} className="flex items-center">
       <Button
@@ -102,16 +121,7 @@ export function SketchSizePicker({
           onDismiss={() => setIsOpen(false)}
           className={`${FLOATING_TOOLBAR_POPOVER_CLASS} flex items-center`}
         >
-          <RangeSlider
-            value={value}
-            min={min}
-            max={max}
-            label={label}
-            size={touch ? 'md' : 'sm'}
-            onChange={onChange}
-            onDragStart={onDragStart}
-            onDragEnd={onDragEnd}
-          />
+          {slider}
         </Popover>
       ) : isOpen ? (
         createPortal(
@@ -134,16 +144,7 @@ export function SketchSizePicker({
               onPointerDown={(event) => event.stopPropagation()}
               onClick={(event) => event.stopPropagation()}
             >
-              <RangeSlider
-                value={value}
-                min={min}
-                max={max}
-                label={label}
-                size={touch ? 'md' : 'sm'}
-                onChange={onChange}
-                onDragStart={onDragStart}
-                onDragEnd={onDragEnd}
-              />
+              {slider}
             </div>
           </>,
           document.body,

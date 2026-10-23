@@ -69,6 +69,7 @@ import { publishCanvasUpdate } from './canvas-sync.js';
 import { importForeignNodeSources } from './import-node-src.js';
 import {
   assertWorldPreviewMutationsAllowed,
+  assertChildSpaceEntriesAllowed,
   assertWorldPreviewResultAllowed,
   assertWorldPreviewTopologyAllowed,
   assertCurrentCanvasCommands,
@@ -681,6 +682,20 @@ export class CanvasNotFoundError extends Error {
   }
 }
 
+/** Publish a system lifecycle batch after its related metadata has settled. */
+export function publishCanvasExecution(output: ExecuteOnServerOutput): void {
+  if (output.toVersion === output.fromVersion) return;
+  publishCanvasUpdate(output.canvasId, {
+    type: 'update',
+    data: {
+      fromVersion: output.fromVersion,
+      toVersion: output.toVersion,
+      deltas: output.deltas,
+      pendingEffects: output.pendingEffects,
+    },
+  });
+}
+
 /**
  * Execute a batch of canvas commands against `canvasId`'s authoritative
  * state. Atomic per-canvas (mutex-guarded). On success the canvas
@@ -998,6 +1013,8 @@ async function executePreparedOnServerAlreadyLocked(
       ? assertWorldPreviewResultAllowed
       : assertWorldPreviewTopologyAllowed;
   assertResultAllowed(canvasId, prestateNodes, finalNodes, liveCanvasIds);
+  if (originator.source !== 'system')
+    await assertChildSpaceEntriesAllowed(canvasId, prestateNodes, finalNodes);
 
   const deltas = diffCanvasState(
     { nodes: prestateNodes, edges: prestateEdges },
@@ -1388,6 +1405,7 @@ export async function applyDeltasOnServerAlreadyLocked(input: {
                   current,
                   patch: {
                     ...node.data,
+                    agentMode: node.data.agentMode,
                     agentBinding: node.data.agentBinding ?? {
                       kind: 'internal',
                     },
@@ -1483,6 +1501,8 @@ export async function applyDeltasOnServerAlreadyLocked(input: {
         ? assertWorldPreviewResultAllowed
         : assertWorldPreviewTopologyAllowed;
     assertResultAllowed(canvasId, prestateNodes, finalNodes, liveCanvasIds);
+    if (originator.source !== 'system')
+      await assertChildSpaceEntriesAllowed(canvasId, prestateNodes, finalNodes);
 
     // Recompute the authoritative diff so the log row and broadcast
     // reflect exactly what landed (tolerates already-applied / missing

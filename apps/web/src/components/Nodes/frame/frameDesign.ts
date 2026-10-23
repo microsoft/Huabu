@@ -10,13 +10,14 @@ import {
 } from '@huabu/shared/canvas-engine';
 
 import { getAccentTokens } from '../design/accentTokens';
+import { NODE_TYPOGRAPHY } from '../design/nodeTypography';
 
 import type { CSSProperties } from 'react';
 
 const visualTiers = {
-  compact: { titleFontSize: 24, borderRadius: 16 },
-  regular: { titleFontSize: 36, borderRadius: 24 },
-  large: { titleFontSize: 52, borderRadius: 32 },
+  compact: { borderRadius: 16 },
+  regular: { borderRadius: 24 },
+  large: { borderRadius: 32 },
 } as const;
 
 /** Tune Frame appearance here; geometry stays owned by the shared engine. */
@@ -33,6 +34,8 @@ export const FRAME_DESIGN_CONFIG = {
   query: FRAME_LAYOUT_CONFIG.query,
   tiers: FRAME_LAYOUT_CONFIG.tiers.map((tier) => ({
     ...tier,
+    ...FRAME_LAYOUT_CONFIG.metrics,
+    titleFontSize: NODE_TYPOGRAPHY.cardTitle.size,
     ...visualTiers[tier.id],
   })),
   header: {
@@ -59,6 +62,7 @@ export const FRAME_DESIGN_CONFIG = {
 export function frameVisualMetricsForSize(width: number, height: number) {
   return {
     ...frameResponsiveMetricsForSize(width, height),
+    titleFontSize: NODE_TYPOGRAPHY.cardTitle.size,
     ...visualTiers[frameResponsiveTierForSize(width, height)],
   };
 }

@@ -1,7 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { frameResponsiveMetricsForSize } from './design.js';
+import {
+  FRAME_LAYOUT_CONFIG,
+  frameResponsiveMetricsForSize,
+} from './design.js';
 import { solveStructuredFrameLayout } from '../autoLayout/gridLayout.js';
 import { getNodeSize } from '../utils/nodeSizes.js';
 
@@ -52,7 +55,8 @@ export function structuredFrameResizeScale(
     return Math.min(
       ...[...tracks.values()].map((track) =>
         ratio(
-          available - Math.max(0, track.count - 1) * metrics.contentSpacing,
+          available -
+            Math.max(0, track.count - 1) * FRAME_LAYOUT_CONFIG.nodeGap,
           track.extent,
         ),
       ),

@@ -488,6 +488,11 @@ describe('ChatInput', () => {
       sources?.parentElement?.hasAttribute('data-chat-input-surface'),
     ).toBe(true);
     expect(sources?.nextElementSibling?.contains(textarea)).toBe(true);
+    expect(textarea?.classList.contains('placeholder:text-fg-muted')).toBe(
+      true,
+    );
+    const send = container.querySelector('[aria-label="chat.send"]');
+    expect(send?.classList.contains('size-7')).toBe(true);
     expect(
       container.querySelectorAll('[data-chat-context-sources]'),
     ).toHaveLength(1);

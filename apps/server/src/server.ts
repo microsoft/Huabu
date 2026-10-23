@@ -3,7 +3,6 @@
 
 import './load-env.js';
 import './setup-proxy.js';
-import { app } from './app.js';
 import { resolveBindHost } from './bind-host.js';
 import { initializeConnectionToken } from './connection-token.js';
 import { prewarmOAuthCredentials } from './modules/agent/oauth.js';
@@ -12,22 +11,50 @@ import {
   describeUnavailableCapabilities,
   initStorage,
 } from './modules/storage/index.js';
-import { initializeSecretStore } from './security/secret-store.js';
+import {
+  installDeploymentEnvironment,
+  readDeploymentSettings,
+  resolveDeploymentEnvironment,
+} from './security/deployment-settings.js';
+import { SECRET_IDS } from './security/secret-ids.js';
+import {
+  initializeSecretStore,
+  getPersistedSecret,
+} from './security/secret-store.js';
 import { resolveServerPort } from './server-port.js';
 import { getLogger } from './utils/logger.js';
 
+import type { app as serverApp } from './app.js';
+
 const log = getLogger('server');
 
-const HOST = resolveBindHost();
+let app: typeof serverApp | undefined;
 
 async function start(): Promise<void> {
   try {
     const port = resolveServerPort();
+    await initializeSecretStore();
+    const settings = readDeploymentSettings();
+    installDeploymentEnvironment(
+      resolveDeploymentEnvironment(
+        process.env,
+        settings,
+        settings?.remoteAccess.enabled
+          ? getPersistedSecret(SECRET_IDS.remoteAccessPassword)
+          : null,
+      ),
+    );
+    const HOST = resolveBindHost();
     const deployment = resolveDeploymentConfig();
     if (deployment.bindScope === 'network') {
       log.warn(
         'Remote access is enabled over operator-managed transport. Use HTTPS or a trusted private network.',
       );
+      if (deployment.authenticationDisabled) {
+        log.warn(
+          'Remote login is disabled. Anyone who can reach Huabu has full owner access. Restrict access with a trusted network or an authenticated proxy.',
+        );
+      }
     }
 
     // Before anything serves: an unknown or unimplemented backend must
@@ -47,8 +74,8 @@ async function start(): Promise<void> {
       log.info({ capability: line }, 'Storage capability unavailable');
     }
 
-    await initializeSecretStore();
-    initializeConnectionToken();
+    await initializeConnectionToken();
+    ({ app } = await import('./app.js'));
     await app.listen({ port, host: HOST });
     // When bound to a wildcard address, "localhost" is still the URL a
     // browser on this machine would use — but log both so operators on a
@@ -58,6 +85,13 @@ async function start(): Promise<void> {
         ? `localhost (bound on ${HOST})`
         : HOST;
     log.info(`Server running at http://${displayHost}:${port}`);
+    if (deployment.publicOrigin) {
+      log.info(`Configured access address: ${deployment.publicOrigin}`);
+    } else {
+      log.info(
+        'Local access only by default. Run pnpm run setup to configure access from other devices.',
+      );
+    }
 
     // Warm up OAuth tokens off the request path so the first chat/Settings
     // action doesn't pay pi-ai's one-time lazy OAuth load + token refresh.
@@ -104,6 +138,9 @@ function shutdown(reason: string): void {
   if (shuttingDown) return;
   shuttingDown = true;
   log.info(`Received ${reason}, shutting down…`);
+  if (!app) {
+    process.exit(0);
+  }
   const forceExit = setTimeout(() => {
     log.warn('Graceful shutdown timed out after 3s; forcing exit');
     process.exit(1);

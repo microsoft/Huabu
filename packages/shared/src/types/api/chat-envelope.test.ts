@@ -3,7 +3,30 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { inkRecognitionSchema } from './chat-envelope.js';
+import { chatEnvelopeSchema, inkRecognitionSchema } from './chat-envelope.js';
+
+describe('Ink query geometry', () => {
+  const schema =
+    chatEnvelopeSchema.shape.focus.shape.selection.shape.inkGeometry;
+  const geometry = [
+    {
+      nodeId: 'ink',
+      strokeIds: ['stroke'],
+      bounds: { x: -100, y: 20, width: 0, height: 50 },
+    },
+  ];
+  it('preserves partial-stroke coordinates and accepts legacy envelopes without geometry', () => {
+    expect(schema.parse(geometry)).toEqual(geometry);
+    expect(schema.parse(undefined)).toBeUndefined();
+  });
+  it.each([
+    { x: Infinity, y: 0, width: 10, height: 20 },
+    { x: 0, y: NaN, width: 10, height: 20 },
+    { x: 0, y: 0, width: -1, height: 20 },
+  ])('rejects invalid spatial evidence %j', (bounds) => {
+    expect(schema.safeParse([{ ...geometry[0], bounds }]).success).toBe(false);
+  });
+});
 
 function recognition(lines: Array<{ text: string; confidence?: number }>) {
   return {

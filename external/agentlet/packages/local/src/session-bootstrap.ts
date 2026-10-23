@@ -292,9 +292,16 @@ function sendRequest(
     function cleanup() {
       clearTimeout(timer)
       agent.removeListener('message', handler)
+      agent.removeListener('exit', onExit)
+    }
+
+    function onExit() {
+      cleanup()
+      reject(new Error(`Agent exited during '${method}'`))
     }
 
     agent.on('message', handler)
+    agent.once('exit', onExit)
 
     const request: JsonRpcMessage = {
       jsonrpc: '2.0',
@@ -396,9 +403,16 @@ function sendRequestCollectingNotifications(
         graceTimer = null
       }
       agent.removeListener('message', handler)
+      agent.removeListener('exit', onExit)
+    }
+
+    function onExit() {
+      cleanup()
+      reject(new Error(`Agent exited during '${method}'`))
     }
 
     agent.on('message', handler)
+    agent.once('exit', onExit)
 
     const request: JsonRpcMessage = {
       jsonrpc: '2.0',
@@ -460,9 +474,16 @@ function sendRequestWithNotificationDrain(
     function cleanup() {
       clearTimeout(timer)
       agent.removeListener('message', handler)
+      agent.removeListener('exit', onExit)
+    }
+
+    function onExit() {
+      cleanup()
+      reject(new Error(`Agent exited during '${method}'`))
     }
 
     agent.on('message', handler)
+    agent.once('exit', onExit)
 
     const request: JsonRpcMessage = {
       jsonrpc: '2.0',

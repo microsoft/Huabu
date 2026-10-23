@@ -72,7 +72,7 @@ describe('SidebarPanel', () => {
 
   it('uses a compact header when embedded', () => {
     render({ compactHeader: true });
-    const header = container?.querySelector('.h-9');
+    const header = container?.querySelector('.h-7');
     expect(header).not.toBeNull();
     expect(header?.classList.contains('border-b')).toBe(false);
   });

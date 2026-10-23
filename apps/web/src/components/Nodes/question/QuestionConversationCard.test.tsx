@@ -22,6 +22,7 @@ import { resolveQuestionHeaderFit } from './useQuestionHeaderFit';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
+    i18n: { language: 'zh-CN' },
     t: (key: string) =>
       key.startsWith('node.questionCard.')
         ? zh.node.questionCard[
@@ -32,11 +33,10 @@ vi.mock('react-i18next', () => ({
 }));
 
 describe('QuestionConversationCard', () => {
-  it('uses a Question-only 24px default without changing shared card titles', () => {
+  it('uses the same 24px default as shared card titles', () => {
     expect(QUESTION_NODE_DEFAULT_FONT_SIZE).toBe(24);
-    expect(NODE_TYPOGRAPHY.cardTitle.size).toBe(28);
-    const scale =
-      QUESTION_NODE_DEFAULT_FONT_SIZE / NODE_TYPOGRAPHY.cardTitle.size;
+    expect(NODE_TYPOGRAPHY.cardTitle.size).toBe(24);
+    const scale = 1;
     const host = document.createElement('div');
     host.innerHTML = renderToStaticMarkup(
       <QuestionConversationCard
@@ -61,7 +61,7 @@ describe('QuestionConversationCard', () => {
     ).toBe('24px');
     expect(
       parseFloat((host.firstElementChild as HTMLElement).style.paddingTop),
-    ).toBeCloseTo(24 * scale);
+    ).toBeCloseTo(16 * scale);
   });
   it.each([
     ['idle', false, 0, 'idle'],
@@ -95,7 +95,7 @@ describe('QuestionConversationCard', () => {
         placeholder="Ask"
         effectiveWidth={280}
         effectiveHeight={100}
-        effectiveFontSize={NODE_TYPOGRAPHY.cardTitle.size}
+        effectiveFontSize={QUESTION_NODE_DEFAULT_FONT_SIZE}
         paddingX={QUESTION_NODE_PADDING}
         paddingY={QUESTION_NODE_PADDING_Y + QUESTION_NODE_HEADER_INSET}
       />,
@@ -114,21 +114,31 @@ describe('QuestionConversationCard', () => {
     const card = host.firstElementChild as HTMLElement;
     expect(card.style.width).toBe('280px');
     expect(card.style.height).toBe('100px');
-    expect(card.style.padding).toBe('24px');
-    expect(card.style.getPropertyValue('--question-header-gap')).toBe('12px');
+    expect(card.style.padding).toBe('16px');
+    expect(card.style.getPropertyValue('--question-header-gap')).toBe('8px');
     expect(
-      host.querySelector('.question-conversation-agent')?.textContent,
+      host
+        .querySelector('.question-conversation-agent')
+        ?.getAttribute('aria-label'),
     ).toBe('Huabu');
+    expect(
+      host
+        .querySelector('.question-conversation-main')
+        ?.firstElementChild?.querySelector('.question-conversation-agent'),
+    ).not.toBeNull();
+    expect(host.querySelectorAll('.question-conversation-agent')).toHaveLength(
+      1,
+    );
     expect(host.querySelector('button')).toBeNull();
     expect(
       host.querySelector('.question-conversation-status svg'),
     ).not.toBeNull();
     expect(host.querySelector('.question-conversation-rail')).toBeNull();
-    expect(card.style.getPropertyValue('--question-status-size')).toBe('21px');
+    expect(card.style.getPropertyValue('--question-status-size')).toBe('18px');
     expect(card.style.getPropertyValue('--question-header-height')).toBe(
       '32px',
     );
-    expect(card.style.getPropertyValue('--question-meta-size')).toBe('21px');
+    expect(card.style.getPropertyValue('--question-meta-size')).toBe('18px');
     expect(card.style.getPropertyValue('--question-meta-line')).toBe('1.4');
     expect(
       Number(
@@ -136,13 +146,13 @@ describe('QuestionConversationCard', () => {
           .querySelector('.question-conversation-status svg')
           ?.getAttribute('width'),
       ),
-    ).toBeCloseTo((16 * 28) / 24);
+    ).toBe(16);
     expect(card.style.getPropertyValue('--question-title-line')).toBe('1.3');
     expect(card.style.getPropertyValue('--question-title-weight')).toBe('500');
     expect(
       (host.querySelector('.question-conversation-question') as HTMLElement)
         .style.fontSize,
-    ).toBe('28px');
+    ).toBe('24px');
     expect(getQuestionFontOpts()).toMatchObject({
       fontWeight: '500',
       lineHeight: 1.3,
@@ -152,7 +162,7 @@ describe('QuestionConversationCard', () => {
   it.each([24, 28, 35, 48])(
     'scales header text and status icons from the default font basis at %spx',
     (fontSize) => {
-      const scale = fontSize / NODE_TYPOGRAPHY.cardTitle.size;
+      const scale = fontSize / QUESTION_NODE_DEFAULT_FONT_SIZE;
       const host = document.createElement('div');
       host.innerHTML = renderToStaticMarkup(
         <QuestionConversationCard
@@ -175,11 +185,17 @@ describe('QuestionConversationCard', () => {
       const card = host.firstElementChild as HTMLElement;
       const headerScale = fontSize / QUESTION_NODE_DEFAULT_FONT_SIZE;
       expect(
-        parseFloat(card.style.getPropertyValue('--question-open-edge-width')),
-      ).toBeCloseTo(headerScale);
+        parseFloat(card.style.getPropertyValue('--question-edge-width')),
+      ).toBe(2);
       expect(
         parseFloat(card.style.getPropertyValue('--question-status-padding-x')),
       ).toBeCloseTo(6 * headerScale);
+      expect(
+        parseFloat(card.style.getPropertyValue('--question-icon-slot-width')),
+      ).toBeCloseTo(28 * scale);
+      expect(
+        parseFloat(card.style.getPropertyValue('--question-icon-gap')),
+      ).toBeCloseTo(8 * scale);
       for (const variable of [
         '--question-meta-size',
         '--question-status-size',
@@ -197,6 +213,15 @@ describe('QuestionConversationCard', () => {
       expect(
         parseFloat(card.style.getPropertyValue('--question-header-height')),
       ).toBeCloseTo(32 * scale);
+      expect(parseFloat(card.style.paddingLeft)).toBeCloseTo(16 * scale);
+      expect(parseFloat(card.style.paddingTop)).toBeCloseTo(16 * scale);
+      expect(
+        Number(
+          host
+            .querySelector('.question-conversation-agent svg')
+            ?.getAttribute('width'),
+        ),
+      ).toBeCloseTo(28 * scale);
       expect(
         (host.querySelector('.question-conversation-question') as HTMLElement)
           .style.fontSize,

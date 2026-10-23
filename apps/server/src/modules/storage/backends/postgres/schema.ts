@@ -85,4 +85,14 @@ const SCHEMA_V1 = `
   );
 `;
 
-export const POSTGRES_MIGRATIONS = [{ version: 1, sql: SCHEMA_V1 }] as const;
+export const POSTGRES_MIGRATIONS = [
+  { version: 1, sql: SCHEMA_V1 },
+  {
+    version: 2,
+    sql: `
+      ALTER TABLE spaces ADD COLUMN parent_space_id TEXT;
+      ALTER TABLE spaces ADD COLUMN parent_entry_node_id TEXT;
+      CREATE INDEX spaces_by_parent ON spaces(workspace_id, parent_space_id);
+    `,
+  },
+] as const;

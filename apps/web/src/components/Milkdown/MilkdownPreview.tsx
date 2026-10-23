@@ -26,6 +26,7 @@ import { useTranslation } from 'react-i18next';
 
 import { resolveArtifactUrl } from '@/api/artifact';
 import { useLinkFollowModifierHeld } from '@/hooks/useMultiSelectModifier';
+import { useSearchSource } from '@/hooks/useSearchSource';
 
 import { attachBlockDragListeners } from './blockDrag';
 import {
@@ -124,6 +125,7 @@ export function MilkdownPreview(
 
   const containerRef = useRef<HTMLDivElement>(null);
   const instanceRef = useRef<MilkdownInstance | null>(null);
+  useSearchSource(containerRef, markdown, 'markdown', instanceRef);
   const lastSyncedRef = useRef<string>(normalizeMarkdown(markdown));
   const pendingMarkdownRef = useRef<string | null>(null);
   const selectingWithMouseRef = useRef(false);
@@ -208,6 +210,7 @@ export function MilkdownPreview(
 
       instance.setAriaLabel(ariaLabelRef.current);
       instanceRef.current = instance;
+      mountRoot.setAttribute('data-search-source-ready', '');
 
       const pending = pendingMarkdownRef.current;
       pendingMarkdownRef.current = null;
@@ -223,6 +226,7 @@ export function MilkdownPreview(
       mountRoot.classList.remove('milkdown-preview-host');
       const instance = instanceRef.current;
       instanceRef.current = null;
+      mountRoot.removeAttribute('data-search-source-ready');
       if (instance) void instance.destroy();
     };
     // Re-mount when drag mode toggles (rare, expected).
@@ -450,6 +454,7 @@ export function MilkdownPreview(
   return (
     <div
       ref={containerRef}
+      data-search-renderer
       data-link-follow-held={
         linkActivation === 'modifier' ? String(followModifierHeld) : undefined
       }

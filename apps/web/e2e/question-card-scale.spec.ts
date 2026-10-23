@@ -45,6 +45,7 @@ async function authoredNode(page: Page, node: Locator) {
   // First structure save can materialize React Flow's derived measurement.
   // Preserve every authored field in the cross-node isolation comparison.
   delete stored.measured;
+  stored.parentId ??= null;
   return stored;
 }
 
@@ -193,7 +194,7 @@ async function metrics(node: Locator) {
       insetX: css(card, 'paddingLeft'),
       insetY: css(card, 'paddingTop'),
       header: css(header, 'height'),
-      headerGap: css(header, 'marginBottom'),
+      headerGap: css(header, 'marginTop'),
       avatar: css(avatar, 'width'),
       agentFont: css(agent, 'fontSize'),
       statusFont: css(status, 'fontSize'),
@@ -259,6 +260,7 @@ async function expectRestored(
   node: Locator,
   expected: CardMetrics,
   font: number,
+  width: number,
 ) {
   await expect(async () => {
     const current = await metrics(node);
@@ -266,9 +268,7 @@ async function expectRestored(
       expect(Math.abs(current[key] - expected[key]), key).toBeLessThan(0.1);
     expectUnclipped(current);
   }).toPass({ timeout: 5000 });
-  // Computed CSS widths have browser serialization/layout rounding; direct
-  // formula checks above retain full storage precision.
-  await expectSaved(page, node, expected.width, font, 0.02);
+  await expectSaved(page, node, width, font);
 }
 
 test.beforeEach(async ({ page }) => {
@@ -392,31 +392,36 @@ test('Question toolbar preserves fractional scale, scales the whole card, and re
   // Move focus out of toolbar controls so these are Canvas history shortcuts,
   // not native number-input undo. One key restores BOTH width and typography.
   await select(page, question);
-  for (const [expected, font, percent] of [
-    [reflowed, 36, '150'],
-    [scaled, 36, '150'],
-    [initial, INITIAL_FONT, String(Math.round((INITIAL_FONT / 24) * 100))],
+  for (const [expected, font, percent, savedWidth] of [
+    [reflowed, 36, '150', 480],
+    [scaled, 36, '150', scaledWidth],
+    [
+      initial,
+      INITIAL_FONT,
+      String(Math.round((INITIAL_FONT / 24) * 100)),
+      INITIAL_WIDTH,
+    ],
   ] as const) {
     await page.locator('[data-canvas-root]').focus();
     await page.keyboard.press('ControlOrMeta+z');
-    await expectRestored(page, question, expected, font);
+    await expectRestored(page, question, expected, font, savedWidth);
     if (!(await input.isVisible())) await select(page, question);
     await expect(input).toHaveValue(percent);
   }
-  for (const [expected, font, percent] of [
-    [scaled, 36, '150'],
-    [reflowed, 36, '150'],
-    [resetMetrics, 24, '100'],
+  for (const [expected, font, percent, savedWidth] of [
+    [scaled, 36, '150', scaledWidth],
+    [reflowed, 36, '150', 480],
+    [resetMetrics, 24, '100', 320],
   ] as const) {
     await page.locator('[data-canvas-root]').focus();
     await page.keyboard.press('ControlOrMeta+Shift+z');
-    await expectRestored(page, question, expected, font);
+    await expectRestored(page, question, expected, font, savedWidth);
     if (!(await input.isVisible())) await select(page, question);
     await expect(input).toHaveValue(percent);
   }
   expect(await authoredNode(page, text)).toEqual(textBefore);
   await page.reload();
-  await expectRestored(page, question, resetMetrics, 24);
+  await expectRestored(page, question, resetMetrics, 24, 320);
   await select(page, question);
   await expect(input).toHaveValue('100');
   await expect(reset).toHaveCount(0);
@@ -426,7 +431,7 @@ test('Question toolbar preserves fractional scale, scales the whole card, and re
   await input.press('Enter');
   await expectSaved(page, question, 480, 36);
   await page.reload();
-  await expectRestored(page, question, reflowed, 36);
+  await expectRestored(page, question, reflowed, 36, 480);
   await select(page, question);
   await expect(input).toHaveValue('150');
   expect(await authoredNode(page, text)).toEqual(textBefore);

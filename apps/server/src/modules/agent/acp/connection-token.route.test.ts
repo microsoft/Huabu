@@ -11,11 +11,16 @@ const mocks = vi.hoisted(() => ({
   InvalidEnvFileError: class InvalidEnvFileError extends Error {},
   buildCommand: vi.fn(),
   isOwner: vi.fn(),
+  getToken: vi.fn(),
 }));
 vi.mock('../../../connection-token.js', () => ({
   InvalidAgentletConnectionOriginError: mocks.InvalidOriginError,
   InvalidAgentletConnectionEnvFileError: mocks.InvalidEnvFileError,
   buildAgentletConnectionCommand: mocks.buildCommand,
+  getConnectionToken: mocks.getToken,
+}));
+vi.mock('./runtime-config.js', () => ({
+  getExternalAgentRuntimeConfig: () => ({ maxAgents: 7 }),
 }));
 vi.mock('../../security/owner.js', () => ({ isOwnerRequest: mocks.isOwner }));
 
@@ -37,6 +42,39 @@ const payload = {
 };
 
 describe('explicit owner-only connection copy', () => {
+  it('returns no-store structured credentials only to an owner', async () => {
+    const server = await setup();
+    mocks.isOwner.mockReturnValue(false);
+    let response = await server.inject({
+      method: 'POST',
+      url: '/api/acp/connection-credentials',
+      payload: {},
+    });
+    expect(response.statusCode).toBe(403);
+    expect(mocks.getToken).not.toHaveBeenCalled();
+    mocks.isOwner.mockReturnValue(true);
+    mocks.getToken.mockReturnValue('private-token');
+    response = await server.inject({
+      method: 'POST',
+      url: '/api/acp/connection-credentials',
+      payload: {},
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ token: 'private-token', maxAgents: 7 });
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.headers.pragma).toBe('no-cache');
+  });
+  it('rejects credential overrides in a desktop connection request', async () => {
+    mocks.isOwner.mockReturnValue(true);
+    const server = await setup();
+    const response = await server.inject({
+      method: 'POST',
+      url: '/api/acp/connection-credentials',
+      payload: { token: 'replacement', origin: 'https://other.test' },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(mocks.getToken).not.toHaveBeenCalled();
+  });
   it('removes both token configuration endpoints', async () => {
     mocks.isOwner.mockReturnValue(true);
     const server = await setup();
@@ -70,7 +108,7 @@ describe('explicit owner-only connection copy', () => {
       mocks.isOwner.mockReturnValue(true);
       mocks.buildCommand.mockReturnValue({
         content: 'explicit secret-bearing copy text',
-        source: 'generated',
+        source: 'managed',
         warnings: ['loopback'],
       });
       const server = await setup();
@@ -82,6 +120,7 @@ describe('explicit owner-only connection copy', () => {
       expect(response.statusCode).toBe(200);
       expect(response.headers['cache-control']).toBe('no-store');
       expect(response.headers.pragma).toBe('no-cache');
+      expect(response.json().source).toBe('managed');
       expect(mocks.buildCommand).toHaveBeenCalledWith({ ...payload, format });
     },
   );

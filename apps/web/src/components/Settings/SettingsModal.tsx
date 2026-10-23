@@ -49,17 +49,15 @@ interface SettingsModalProps {
 }
 
 /**
- * Tabbed settings dialog. A centered modal (same overlay pattern as
- * `ShortcutsModal`) with a left-hand tab rail and a scrollable content
- * pane, so the panel height stays fixed as more settings are added.
+ * Tabbed settings dialog with a desktop rail, compact top navigation in
+ * narrow windows, and an independently scrollable content pane.
  *
  * Each tab renders its owned Settings surface:
  *  - **Agent** — Utility Agent, Built-In Pi setup, external Profiles, and behavior
  *  - **Services** — manifest-driven image, search, transcript, and OCR providers
  *  - **General** — application, canvas, input, and update preferences
  *
- * The app version sits at the bottom of the left tab rail (a product-wide
- * fact, decoupled from any single tab).
+ * The app version stays in navigation, independent of the active page.
  */
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   isOpen,
@@ -162,7 +160,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         : t(activeLabelKey);
 
   return (
-    <div className="fixed inset-0 top-[var(--window-chrome-height,0px)] z-50 flex items-center justify-center">
+    <div className="fixed inset-0 top-[var(--window-chrome-height,0px)] z-50 flex items-center justify-center p-3 sm:p-6">
       {/* Backdrop */}
       {/* Backdrop: a soft, token-based frosted scrim (theme-aware) rather
           than a flat dark wash, so it harmonises with the bright title
@@ -180,16 +178,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="animate-in fade-in zoom-in-95 border-edge-default bg-surface shadow-bottom relative flex h-[80vh] max-h-160 w-full max-w-3xl overflow-hidden rounded-xl border duration-200 focus:outline-none"
+        className="animate-in fade-in zoom-in-95 border-edge-default bg-surface shadow-bottom relative flex h-[80dvh] max-h-160 w-full max-w-3xl flex-col overflow-hidden rounded-xl border duration-200 focus:outline-none sm:flex-row"
       >
         {/* Left tab rail */}
         <nav
           aria-labelledby={titleId}
-          className="border-edge-default bg-sidebar flex w-48 shrink-0 flex-col gap-0.5 border-r px-3 py-3"
+          className="border-edge-default bg-sidebar grid w-full shrink-0 grid-cols-3 gap-0.5 border-b px-3 py-3 sm:flex sm:w-48 sm:flex-col sm:border-r sm:border-b-0"
         >
           <h2
             id={titleId}
-            className="text-fg-default mb-2 flex h-7 shrink-0 items-center px-2 text-sm font-semibold"
+            className="text-fg-default col-span-2 row-start-1 mb-2 flex h-7 shrink-0 items-center px-2 text-sm font-semibold"
           >
             {t('settings.title')}
           </h2>
@@ -204,7 +202,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 size="md"
                 onClick={() => setActiveTab(id)}
                 aria-current={active ? 'page' : undefined}
-                className={`focus-visible:outline-info min-h-[30px] w-full justify-start gap-2 rounded-lg px-2 py-0 text-left text-sm focus-visible:outline-2 focus-visible:outline-offset-2 ${
+                className={`focus-visible:outline-info min-h-8 w-full justify-center gap-2 rounded-md px-2 py-0 text-center text-[13px] focus-visible:outline-2 focus-visible:outline-offset-2 sm:justify-start sm:text-left ${
                   active
                     ? 'bg-sidebar-selected text-fg-default enabled:hover:bg-sidebar-selected font-medium'
                     : 'text-fg-muted enabled:hover:text-fg-default font-normal'
@@ -216,20 +214,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           })}
 
           {/*
-           * App version pinned to the bottom of the rail: a product-wide
+           * App version in the desktop rail footer or mobile title row: a product-wide
            * fact, not a General-tab setting, so it lives here (decoupled
            * from any tab) as a muted signature rather than mixed in with
            * editable preferences. `__APP_VERSION__` is inlined at build
            * time from `apps/desktop/package.json` (see vite.config.ts).
            */}
-          <span className="text-fg-subtle mt-auto px-2 pt-4 font-mono text-[11px] select-text">
+          <span className="text-fg-muted col-start-3 row-start-1 mb-2 self-center justify-self-end px-2 font-mono text-[11px] select-text sm:mt-auto sm:mb-0 sm:self-auto sm:pt-4">
             v{__APP_VERSION__}
           </span>
         </nav>
 
         {/* Right content pane */}
-        <div className="flex min-w-0 flex-1 flex-col">
-          <header className="flex h-[52px] shrink-0 items-center justify-between px-5 py-3">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <header className="flex h-[52px] shrink-0 items-center justify-between px-4 py-3 sm:px-5">
             <div className="flex min-w-0 items-center gap-1.5">
               {(activeTab === 'builtIn' ||
                 (activeTab === 'agent' && externalAgentsNavigation)) && (
@@ -269,7 +267,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </Button>
           </header>
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-5 pt-0 pb-4">
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 pt-0 pb-4 sm:px-5">
             <DeploymentReadinessNotice />
             {activeTab === 'general' && (
               <SettingSection>

@@ -15,6 +15,14 @@ import { useTranslation } from 'react-i18next';
 
 import { AgentIcon } from '@/components/Common/AgentIcon';
 import { BuiltInAgentAvatar } from '@/components/Common/BuiltInAgentAvatar';
+import {
+  MENU_HINT_CLASS,
+  MENU_ITEM_CLASS,
+  MENU_LABEL_CLASS,
+  MENU_SECTION_LABEL_CLASS,
+  MENU_GROUP_CLASS,
+  MENU_SEPARATOR_CLASS,
+} from '@/components/Common/menuStyles';
 import { useSettingsUiStore } from '@/store/settingsUiStore';
 import { readAgentIcon } from '@/utils/agentIcon';
 
@@ -71,30 +79,25 @@ export function AgentMenuRow({
       disabled={disabled}
       onClick={onClick}
       title={title}
-      className={cn(
-        'w-full justify-start gap-2 rounded-none px-3 py-1.5 text-left',
-        current ? 'text-info' : 'text-fg-default',
-      )}
+      tooltipWrapperClassName="block w-full"
+      className={cn(MENU_ITEM_CLASS, current && 'text-info')}
     >
       <span className="shrink-0">{icon}</span>
-      <span className="shrink-0">{label}</span>
-      {hint && (
-        <span className="text-fg-muted ml-auto block min-w-0 truncate pl-2 text-xs">
-          {hint}
-        </span>
-      )}
+      <span className={MENU_LABEL_CLASS}>{label}</span>
+      {hint && <span className={MENU_HINT_CLASS}>{hint}</span>}
     </Button>
   );
 }
 
 interface AgentMenuOptionsProps {
-  /** Small uppercase heading shown above the rows. */
+  /** Subordinate section label shown above the rows. */
   heading: string;
-  /** Use a subordinate label when these options are nested under a menu section. */
-  externalHeadingStyle?: 'divider' | 'subheading';
   currentBinding: AgentBinding;
   currentMode: AgentMode;
   profiles: AgentProfileView[];
+  builtInModes?: readonly AgentMode[];
+  /** External choices can be peers of the heading or nested within it. */
+  externalGroup?: 'peer' | 'nested';
   /** Grey out every row (e.g. mid-stream) without closing the menu. */
   busy?: boolean;
   /** Tooltip applied to whichever row matches the current binding. */
@@ -111,10 +114,11 @@ interface AgentMenuOptionsProps {
  */
 export function AgentMenuOptions({
   heading,
-  externalHeadingStyle = 'divider',
   currentBinding,
   currentMode,
   profiles,
+  builtInModes,
+  externalGroup = 'peer',
   busy,
   currentRowTitle,
   onSelect,
@@ -136,99 +140,76 @@ export function AgentMenuOptions({
 
   return (
     <>
-      <div
-        role="presentation"
-        className="text-fg-muted px-3 pt-1.5 pb-1 text-[10px] tracking-wider uppercase select-none"
-      >
+      <div role="presentation" className={MENU_SECTION_LABEL_CLASS}>
         {heading}
       </div>
-      {modeItems.map((m) => {
-        const isCurrent =
-          currentBinding.kind === 'internal' && currentMode === m.mode;
-        return (
-          <AgentMenuRow
-            key={`mode:${m.mode}`}
-            icon={m.icon}
-            label={m.label}
-            hint={t('settings.builtInPi')}
-            current={isCurrent}
-            disabled={busy}
-            title={isCurrent ? currentRowTitle : undefined}
-            onClick={() =>
-              onSelect({ mode: m.mode, binding: INTERNAL_BINDING })
-            }
-          />
-        );
-      })}
-      {(() => {
-        if (profiles.length === 0) return null;
-        return (
-          <>
-            <div
-              role="presentation"
-              className={cn(
-                'mt-1 flex items-center gap-2 pt-1 pb-0.5 text-[10px] select-none',
-                externalHeadingStyle === 'subheading'
-                  ? 'text-fg-subtle px-3'
-                  : 'text-fg-muted px-3 tracking-wider uppercase',
-              )}
-            >
-              {externalHeadingStyle === 'divider' && (
-                <span className="bg-edge-default h-px flex-1" />
-              )}
-              <span>{t('chat.externalAgents')}</span>
-              {externalHeadingStyle === 'divider' && (
-                <span className="bg-edge-default h-px flex-1" />
-              )}
-            </div>
-            {profiles.map((profile) => {
-              const binding: AgentBinding = {
-                kind: 'external',
-                alias: profile.alias,
-                profileId: profile.id,
-              };
-              const isCurrent = bindingsEqual(currentBinding, binding);
-              const icon = readAgentIcon(profile);
-              return (
-                <AgentMenuRow
-                  key={`profile:${profile.id}`}
-                  icon={
-                    <AgentIcon
-                      shape={icon.shape}
-                      color={icon.color}
-                      size={16}
-                      withFace
-                    />
-                  }
-                  label={profile.alias}
-                  current={isCurrent}
-                  disabled={busy}
-                  title={isCurrent ? currentRowTitle : undefined}
-                  onClick={() => onSelect({ mode: currentMode, binding })}
-                />
-              );
-            })}
-          </>
-        );
-      })()}
+      {modeItems
+        .filter((m) => !builtInModes || builtInModes.includes(m.mode))
+        .map((m) => {
+          const isCurrent =
+            currentBinding.kind === 'internal' && currentMode === m.mode;
+          return (
+            <AgentMenuRow
+              key={`mode:${m.mode}`}
+              icon={m.icon}
+              label={m.label}
+              hint={t('settings.builtInPi')}
+              current={isCurrent}
+              disabled={busy}
+              title={isCurrent ? currentRowTitle : undefined}
+              onClick={() =>
+                onSelect({ mode: m.mode, binding: INTERNAL_BINDING })
+              }
+            />
+          );
+        })}
+      {profiles.length > 0 && (
+        <div className={externalGroup === 'nested' ? 'mt-2' : MENU_GROUP_CLASS}>
+          <div role="presentation" className={MENU_SECTION_LABEL_CLASS}>
+            {t('chat.externalAgents')}
+          </div>
+          {profiles.map((profile) => {
+            const binding: AgentBinding = {
+              kind: 'external',
+              alias: profile.alias,
+              profileId: profile.id,
+            };
+            const isCurrent = bindingsEqual(currentBinding, binding);
+            const icon = readAgentIcon(profile);
+            return (
+              <AgentMenuRow
+                key={`profile:${profile.id}`}
+                icon={
+                  <AgentIcon
+                    shape={icon.shape}
+                    color={icon.color}
+                    size={16}
+                    withFace
+                  />
+                }
+                label={profile.alias}
+                current={isCurrent}
+                disabled={busy}
+                title={isCurrent ? currentRowTitle : undefined}
+                onClick={() => onSelect({ mode: currentMode, binding })}
+              />
+            );
+          })}
+        </div>
+      )}
       {onAddAgent && (
         <>
-          <div
-            role="presentation"
-            className="bg-edge-default mt-1 h-px w-full"
-          />
-          <div className="px-1 py-1">
-            <Button
-              variant="ghost"
-              tone="neutral"
-              size="sm"
-              onClick={onAddAgent}
-              className="w-full justify-start gap-1.5 rounded px-2 py-1.5 text-left"
-            >
-              <Plus size={14} />
-              <span className="text-xs">{t('chat.addAgent')}</span>
-            </Button>
-          </div>
+          <div role="separator" className={MENU_SEPARATOR_CLASS} />
+          <Button
+            variant="ghost"
+            tone="neutral"
+            size="sm"
+            onClick={onAddAgent}
+            className={MENU_ITEM_CLASS}
+          >
+            <Plus size={14} />
+            <span className={MENU_LABEL_CLASS}>{t('chat.addAgent')}</span>
+          </Button>
         </>
       )}
     </>

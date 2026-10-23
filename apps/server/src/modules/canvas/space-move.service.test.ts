@@ -80,6 +80,63 @@ async function seedSource() {
 }
 
 describe('moveCanvasSelection', () => {
+  it.each([
+    { mode: 'auto', height: undefined, expectedHeight: 424 },
+    { mode: 'fixed', height: 172, expectedHeight: 172 },
+  ])(
+    'preserves a legacy $mode Note through persisted migration',
+    async ({ mode, height, expectedHeight }) => {
+      const source = createCanvas('source', 'Source');
+      if (!source) throw new Error('Missing source Space');
+      createCanvas('destination', 'Destination');
+      const store = getCanvasStore('source');
+      const autoHeight = { intrinsicHeight: 420, measuredFor: 'old' };
+      store.write({
+        ...source,
+        state: {
+          nodes: [
+            {
+              id: 'node-legacy',
+              type: 'note',
+              position: { x: 30, y: 40 },
+              data: { label: 'Legacy', autoHeight },
+              style: {
+                width: 320,
+                ...(height === undefined ? {} : { height }),
+              },
+            },
+          ],
+          edges: [],
+        },
+      });
+      store.writeNode('node-legacy', {
+        nodeId: 'node-legacy',
+        type: 'note',
+        label: 'Legacy',
+        content: 'Keep this note.',
+      });
+      const result = await moveCanvasSelection('source', {
+        selectedNodeIds: ['node-legacy'],
+        destination: { kind: 'existing', canvasId: 'destination' },
+        createSourcePreview: false,
+        expectedSourceVersion: source.version,
+      });
+      const destinationId = result.roots[0]?.destinationNodeId;
+      if (!destinationId) throw new Error('Missing moved Note');
+      expect((await space('destination').read())?.state.nodes).toEqual([
+        expect.objectContaining({
+          id: destinationId,
+          data: expect.objectContaining({ heightMode: mode, autoHeight }),
+          style: { width: 320, height: expectedHeight },
+        }),
+      ]);
+      expect((await space('source').read())?.state.nodes).toEqual([]);
+      expect(
+        getCanvasStore('destination').readNode(destinationId)?.content,
+      ).toBe('Keep this note.');
+    },
+  );
+
   it('moves an unbound draft without manufacturing an execution record', async () => {
     createCanvas('source', 'Source');
     createCanvas('destination', 'Destination');
@@ -268,7 +325,7 @@ describe('moveCanvasSelection', () => {
         type: 'spacePreview',
         position: originalFrame?.position,
         data: expect.objectContaining({ targetCanvasId: 'destination' }),
-        style: { width: 360 },
+        style: { width: 400 },
       }),
     );
     expect(destination?.state.nodes).toHaveLength(2);
@@ -379,7 +436,7 @@ describe('moveCanvasSelection', () => {
         id: result.sourcePreviewNodeId,
         type: 'spacePreview',
         position: { x: 100, y: 200 },
-        style: { width: 360 },
+        style: { width: 400 },
       }),
     );
   });

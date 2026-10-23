@@ -3,14 +3,7 @@
 
 import clsx from 'clsx';
 import { ArrowLeft, ArrowRight, TableOfContents, X } from 'lucide-react';
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type KeyboardEvent as ReactKeyboardEvent,
-} from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { getNodeIcon } from '@/config/nodeIcons.ts';
@@ -37,6 +30,10 @@ import {
 } from '../../../store/previewWorkspace/store.ts';
 import { DropdownMenu, DropdownMenuItem } from '../../Common/DropdownMenu.tsx';
 import { InlineEditableTitle } from '../../Common/InlineEditableTitle';
+import {
+  MENU_GROUP_CLASS,
+  MENU_SECTION_LABEL_CLASS,
+} from '../../Common/menuStyles';
 import { NodePreviewContent } from '../../Nodes/NodePreviewContent.tsx';
 import { PreviewHeaderButton } from '../../Nodes/PreviewHeaderButton';
 import { PreviewHeaderSlotContext } from '../../Nodes/PreviewHeaderSlot.tsx';
@@ -102,66 +99,28 @@ const ConnectedNodeMenu = ({
   onOpenChange,
   onSelect,
 }: ConnectedNodeMenuProps) => {
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const wasOpenRef = useRef(open);
-  const restoreTriggerFocusRef = useRef(true);
-
-  useEffect(() => {
-    const wasOpen = wasOpenRef.current;
-    wasOpenRef.current = open;
-    if (wasOpen && !open) {
-      if (restoreTriggerFocusRef.current) {
-        triggerRef.current?.focus({ preventScroll: true });
-      }
-      restoreTriggerFocusRef.current = true;
-    }
-  }, [open]);
-
-  const handleMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (
-      event.key !== 'ArrowDown' &&
-      event.key !== 'ArrowUp' &&
-      event.key !== 'Home' &&
-      event.key !== 'End'
-    ) {
-      return;
-    }
-
-    const items = Array.from(
-      event.currentTarget.querySelectorAll<HTMLButtonElement>(
-        '[role="menuitem"]',
-      ),
-    );
-    if (items.length === 0) return;
-
-    event.preventDefault();
-    event.stopPropagation();
-    const currentIndex = items.indexOf(
-      document.activeElement as HTMLButtonElement,
-    );
-    if (event.key === 'Home') {
-      items[0].focus();
-    } else if (event.key === 'End') {
-      items.at(-1)?.focus();
-    } else {
-      const delta = event.key === 'ArrowDown' ? 1 : -1;
-      const nextIndex =
-        currentIndex === -1
-          ? 0
-          : (currentIndex + delta + items.length) % items.length;
-      items[nextIndex].focus();
-    }
-  };
+  const contentRef = useRef<HTMLDivElement>(null);
 
   return (
     <DropdownMenu
+      aria-label={menuLabel}
       open={open}
       onOpenChange={onOpenChange}
+      onOpenAutoFocus={
+        focusDirection
+          ? () => {
+              const item = contentRef.current?.querySelector<HTMLElement>(
+                '[data-menu-initial-focus]',
+              );
+              item?.focus({ preventScroll: true });
+              item?.scrollIntoView({ block: 'nearest' });
+            }
+          : undefined
+      }
       align="bottom-left"
       className="min-w-56"
       trigger={
         <PreviewHeaderButton
-          ref={triggerRef}
           title={title}
           aria-label={title}
           aria-haspopup="menu"
@@ -172,39 +131,34 @@ const ConnectedNodeMenu = ({
         </PreviewHeaderButton>
       }
     >
-      <div
-        role="menu"
-        tabIndex={-1}
-        aria-label={menuLabel}
-        onKeyDown={handleMenuKeyDown}
-      >
-        {groups.map((group, groupIndex) => {
+      <div ref={contentRef}>
+        {groups.map((group) => {
           return (
-            <div
-              key={group.direction}
-              className={clsx(
-                groupIndex > 0 && 'border-edge-default mt-1 border-t pt-1',
-              )}
-            >
-              <div className="text-fg-subtle flex items-center justify-between gap-4 px-3 py-1 text-xs font-medium uppercase">
+            <div key={group.direction} className={MENU_GROUP_CLASS}>
+              <div
+                className={clsx(
+                  MENU_SECTION_LABEL_CLASS,
+                  'flex items-center justify-between gap-4',
+                )}
+              >
                 <span>{group.label}</span>
                 {group.shortcut &&
                   (group.direction === 'incoming' ? (
                     <ArrowLeft
                       size={14}
                       style={{ strokeWidth: 2 }}
-                      className="text-fg-subtle shrink-0"
+                      className="text-fg-muted shrink-0"
                       aria-label={group.shortcut}
                     />
                   ) : group.direction === 'outgoing' ? (
                     <ArrowRight
                       size={14}
                       style={{ strokeWidth: 2 }}
-                      className="text-fg-subtle shrink-0"
+                      className="text-fg-muted shrink-0"
                       aria-label={group.shortcut}
                     />
                   ) : (
-                    <span className="text-fg-subtle text-xs normal-case">
+                    <span className="text-fg-muted text-xs">
                       {group.shortcut}
                     </span>
                   ))}
@@ -219,11 +173,12 @@ const ConnectedNodeMenu = ({
                   <DropdownMenuItem
                     key={neighbor.id}
                     icon={<NodeTypeIcon size={13} />}
-                    autoFocus={
+                    data-menu-initial-focus={
                       group.direction === focusDirection && index === 0
+                        ? ''
+                        : undefined
                     }
                     onClick={() => {
-                      restoreTriggerFocusRef.current = false;
                       onSelect(neighbor.id);
                     }}
                   >
@@ -681,12 +636,16 @@ export const ExpandedNodePanel = ({
           preview document underneath fully visible instead of
           pushing it down with an inline find row. */}
       <div ref={setPreviewBodyEl} className="relative flex-1 overflow-hidden">
-        <PreviewSearchAdapterProvider>
+        <PreviewSearchAdapterProvider key={expandedNodeId}>
           {/* In-preview find bar — renders nothing unless search scope
               is `'node'`. Wires the highlight walk to the body element
               (via state-as-ref) so only the visible preview gets
               `::highlight()` ranges. */}
-          <InPreviewSearchBar scopeEl={previewBodyEl} nodeId={expandedNodeId} />
+          <InPreviewSearchBar
+            scopeEl={previewBodyEl}
+            nodeId={expandedNodeId}
+            requiresAdapter={activeItem.type === 'pdf'}
+          />
           <PreviewHeaderSlotContext.Provider value={headerSlotValue}>
             <NodePreviewContent
               key={expandedNodeId}

@@ -5,6 +5,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 import * as inkSigil from '@/store/inkSigilStore';
 import { useToolStore } from '@/store/toolStore';
 
@@ -42,13 +43,22 @@ const recognizers: PointerRecognizer<
 // Simulate the trusted window capture listener; DOM-created pen events are untrusted.
 const observePen = () => observeInputPointer('pen');
 
-function Harness({ inputMode }: { inputMode: EffectiveInputMode }) {
+function Harness({
+  inputMode,
+  explicitToolActive = false,
+  inkToolActive = false,
+}: {
+  inputMode: EffectiveInputMode;
+  explicitToolActive?: boolean;
+  inkToolActive?: boolean;
+}) {
   useCanvasPointerRouter(
     { current: wrapper },
     { current: {} as ReactFlowInstance },
     {
       inputMode,
-      explicitToolActive: false,
+      explicitToolActive,
+      inkToolActive,
       onTouchTakeover: vi.fn(),
       onEmptyCanvasTap: vi.fn(),
       onNodeTap: vi.fn(),
@@ -62,6 +72,7 @@ beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   onDown.mockClear();
   inkSigil.resetInkSigilSession();
+  useGesturePreviewStore.getState().resetCanvasScopedTransients();
   useToolStore.setState({ inputModePreference: 'auto', penObserved: false });
   useInputModeStore.setState({ mode: 'touch' });
   container = document.createElement('div');
@@ -92,6 +103,42 @@ afterEach(() => {
 });
 
 describe('useCanvasPointerRouter live input policy', () => {
+  it('preserves reading across Select and Ink tools in Pen mode but clears it for other placement tools', () => {
+    useToolStore.setState({ inputModePreference: 'pen' });
+    act(() => root.render(<Harness inputMode="pen" />));
+    useGesturePreviewStore.setState({ noteReadingNodeId: 'note' });
+    act(() =>
+      root.render(<Harness inputMode="pen" explicitToolActive inkToolActive />),
+    );
+    expect(useGesturePreviewStore.getState().noteReadingNodeId).toBe('note');
+    act(() => root.render(<Harness inputMode="pen" />));
+    expect(useGesturePreviewStore.getState().noteReadingNodeId).toBe('note');
+    act(() =>
+      root.render(<Harness inputMode="pen" explicitToolActive inkToolActive />),
+    );
+    act(() => root.render(<Harness inputMode="pen" explicitToolActive />));
+    expect(useGesturePreviewStore.getState().noteReadingNodeId).toBeNull();
+  });
+
+  it.each(['finger', 'mouse'] as const)(
+    'clears Ink-tool reading when the input preference changes to %s',
+    (inputMode) => {
+      useToolStore.setState({ inputModePreference: 'pen' });
+      act(() =>
+        root.render(
+          <Harness inputMode="pen" explicitToolActive inkToolActive />,
+        ),
+      );
+      useGesturePreviewStore.setState({ noteReadingNodeId: 'note' });
+      useToolStore.setState({ inputModePreference: inputMode });
+      act(() =>
+        root.render(
+          <Harness inputMode={inputMode} explicitToolActive inkToolActive />,
+        ),
+      );
+      expect(useGesturePreviewStore.getState().noteReadingNodeId).toBeNull();
+    },
+  );
   function openPending() {
     inkSigil.useInkSigilStore.setState({
       pending: {

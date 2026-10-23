@@ -147,20 +147,23 @@ export const useSearchStore = create<SearchState>((set, get) => ({
   },
 
   setQuery: (query) => {
-    set({ query });
-    const trimmed = query.trim();
-    cancelInFlight();
-    if (!trimmed) {
-      set({
-        results: [],
-        isStreaming: false,
-        truncated: false,
-        contentPhase: false,
-        error: null,
-        collapsedNodeIds: new Set<string>(),
-      });
+    const changed = query.trim() !== get().query.trim();
+    if (!changed) {
+      set({ query });
       return;
     }
+    const trimmed = query.trim();
+    cancelInFlight();
+    set({
+      query,
+      results: [],
+      isStreaming: false,
+      truncated: false,
+      contentPhase: false,
+      error: null,
+      collapsedNodeIds: new Set<string>(),
+    });
+    if (!trimmed) return;
     debounceHandle = setTimeout(() => {
       void runSearch(trimmed, set, get);
     }, DEBOUNCE_MS);
@@ -175,7 +178,7 @@ export const useSearchStore = create<SearchState>((set, get) => ({
     const sameLength = prev.length === nodeTypes.length;
     const sameMembers = sameLength && prev.every((t, i) => t === nodeTypes[i]);
     if (sameMembers) return;
-    set({ nodeTypes });
+    set({ nodeTypes, results: [], isStreaming: false, truncated: false });
     const trimmed = get().query.trim();
     cancelInFlight();
     if (!trimmed) return;

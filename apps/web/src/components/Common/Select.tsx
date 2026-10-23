@@ -9,6 +9,7 @@ import { Button, type ButtonProps } from './Button';
 import { cn } from './cn';
 import {
   MENU_CHECK_CLASS,
+  MENU_GROUP_CLASS,
   MENU_ICON_CLASS,
   MENU_ITEM_CLASS,
   MENU_LABEL_CLASS,
@@ -271,7 +272,13 @@ export function Select<T extends string = string>({
                   <div role="separator" className={MENU_SEPARATOR_CLASS} />
                 )}
                 {option.sectionLabel && (
-                  <div role="presentation" className={MENU_SECTION_LABEL_CLASS}>
+                  <div
+                    role="presentation"
+                    className={cn(
+                      MENU_SECTION_LABEL_CLASS,
+                      !option.separatorBefore && MENU_GROUP_CLASS,
+                    )}
+                  >
                     {option.sectionLabel}
                   </div>
                 )}

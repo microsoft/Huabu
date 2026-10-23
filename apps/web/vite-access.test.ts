@@ -35,4 +35,23 @@ describe('Vite access gate', () => {
       }),
     ).toBe('allow');
   });
+
+  it('allows remote access without credentials only after an explicit opt-out', () => {
+    expect(
+      decideViteAccess({
+        peer: '192.0.2.10',
+        expectedAuthorization: null,
+        receivedAuthorization: undefined,
+        authenticationDisabled: true,
+      }),
+    ).toBe('allow');
+    expect(
+      decideViteAccess({
+        peer: '192.0.2.10',
+        expectedAuthorization: 'Basic owner',
+        receivedAuthorization: undefined,
+        authenticationDisabled: true,
+      }),
+    ).toBe('authentication-required');
+  });
 });

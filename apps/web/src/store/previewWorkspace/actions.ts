@@ -16,7 +16,7 @@ import {
 
 export function openPreviewNode(
   nodeId: string,
-  options?: { transient?: boolean },
+  options?: { transient?: boolean; focusEditor?: boolean },
 ): string {
   const canvas = useCanvasStore.getState();
   const previousNodeId = selectActiveNodeId(
@@ -37,8 +37,14 @@ export function openPreviewNode(
       { transient: options?.transient ?? true },
     );
   const openedNode = canvas.nodes.find((node) => node.id === nodeId);
-  if (tabId && openedNode?.type === 'note') {
+  if (tabId && openedNode?.type === 'note' && options?.focusEditor !== false) {
     usePreviewWorkspaceStore.getState().requestNodeFocus(tabId);
+  } else if (tabId && options?.focusEditor === false) {
+    const preview = usePreviewWorkspaceStore.getState();
+    const request = preview.nodeFocusRequest;
+    if (request?.tabId === tabId) {
+      preview.consumeNodeFocusRequest(tabId, request.nonce);
+    }
   }
   return tabId;
 }

@@ -53,78 +53,51 @@ Requirements: Node.js 24.16.0+ and pnpm 10+. Use the version pinned in `.nvmrc` 
 
 ```bash
 pnpm install
-```
-
-The source development server needs a stable encryption key before credentials can be saved through the Settings UI. Copy `.env.example` to `.env`, generate a key with the following command, and paste its output into `HUABU_SECRET_KEY=`:
-
-```bash
-node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"
-```
-
-Keep that key unchanged: existing encrypted credentials cannot be opened with a different key. The `.env` file is git-ignored. Packaged Electron releases use the operating system's secure storage and do not require `HUABU_SECRET_KEY`.
-
-Then launch the desktop development environment:
-
-```bash
-pnpm run dev:desktop
-```
-
-This launches the desktop app (recommended), starting the server, the web client, and the shared package in watch mode, then opening Huabu in its own desktop window.
-
-To smoke-test the production bundles with Electron and its default local Server, run:
-
-```bash
 pnpm start:desktop
 ```
 
-To connect that Electron client to an existing remote Huabu Server instead, pass its HTTP or HTTPS origin:
+This builds and launches the desktop application. Choose your Home folder, then follow the [Quick Start](#quick-start) to connect your agents and create a Space.
 
-```bash
-pnpm start:desktop --server https://huabu.example.com:8443
-```
-
-The remote address must be an origin without credentials, a query, fragment, or path prefix. Remote mode does not start a local Server; when the remote deployment uses HTTP Basic Auth, Electron prompts for the username and password for the current session.
+For development with hot reload and local quality checks, see [Contributing](CONTRIBUTING.md#local-development).
 
 ### Standalone web access
 
-`pnpm start:web` serves the compiled web application and API from one Fastify process. It remains loopback-only by default. To make the single-owner application reachable on a network, configure the bind address, every hostname or IP used in the browser, and complete Basic Auth:
-
-```dotenv
-HUABU_BIND_HOST=0.0.0.0
-HUABU_PUBLIC_ORIGIN=https://huabu.example.com
-HUABU_BASIC_AUTH_USER=owner
-HUABU_BASIC_AUTH_PASS=<strong-password>
-```
-
-Then run `pnpm start:web`. `HUABU_PUBLIC_ORIGIN` is the root HTTP(S) origin that remote Agentlets use to reach this deployment; Huabu derives both the Canvas RFS URL and Agentlet WebSocket endpoint from it and automatically trusts its hostname in the Host, CORS, and Origin guards. Set optional `HUABU_ALLOWED_HOSTS` only for additional browser aliases. Huabu rejects paths, credentials, queries, fragments, unsupported schemes, and a missing or loopback public origin for non-loopback binds. It also rejects a non-loopback bind when either Basic Auth value is missing. The authenticated owner can use all features, including Settings, OAuth, and External Agents. `pnpm dev` applies the same requirement to non-loopback browser clients while preserving zero-configuration local development.
-
-`pnpm start:web` binds the fixed `SERVER_PORT` (default `3001`) and fails if that port is invalid or unavailable; it never advances to another port. Development launchers may advance from their preferred ports so intentional parallel instances remain possible.
-
-Huabu currently serves HTTP. Use a trusted private network or terminate HTTPS with deployment infrastructure such as Caddy, Nginx, Tailscale Serve, or a cloud load balancer. Do not put a Basic Auth deployment on an untrusted network without transport encryption.
-
-For a personal Alpha Canary started from a repository checkout, set `HUABU_CANARY_REDEPLOY_ENABLED=1` before `pnpm start:web`. The authenticated owner can configure an exact branch from fixed remote `origin` in Settings, compare it with the running commit, and invoke the checked-in `scripts/start-huabu.sh <branch> --non-interactive` redeployment instead of connecting through SSH. An empty configuration uses `alpha`. This helper updates the checkout in place and does not provide rollback or service recovery; see [Alpha Canary deployment](docs/architecture/canary-deployment.md).
-
-### Local quality checks (optional)
-
-The repository ships opt-in git hooks that give you fast feedback before
-you commit or push. Enable them once per clone:
+To use Huabu in a browser, start the web application:
 
 ```bash
-pnpm run hooks:install
+pnpm start:web
 ```
 
-This generates the hooks into your local `.git/hooks` directory (they are
-not tracked in the repository), wiring up:
+Open the server address printed in the terminal, choose your Home folder, and configure your agents or models in Settings. The web application and API share one server, accessible only from the same machine by default.
 
-- **pre-commit** — `lint-staged` (ESLint `--fix` + Prettier on staged files)
-- **pre-push** — `pnpm run typecheck`
+### Remote access
 
-Skip a single run with `--no-verify`, or disable the hooks again with
-`pnpm run hooks:uninstall`. These hooks are purely a local convenience —
-the authoritative gate is CI (`.github/workflows/ci.yml`), which runs lint,
-format, and typecheck on every pull request regardless of local setup.
+To use Huabu from another device, first stop any Huabu server and Vite development server using this instance's credential storage. Then run setup on the hosting machine, either directly or over SSH, and start the server:
 
-Connecting your agents and configuring optional capabilities work the same way as in a packaged build, so they are covered in the handbook: [External agents](https://microsoft.github.io/Huabu/docs/ai/external-agents) and [Models and capabilities](https://microsoft.github.io/Huabu/docs/ai/models-and-capabilities). A source build reads its encryption key from `HUABU_SECRET_KEY`, whereas packaged releases use operating-system-protected storage.
+```bash
+pnpm run setup
+pnpm start:web
+```
+
+Setup configures the standalone server (`pnpm start:web`). The desktop's built-in server uses separate instance storage and remains local-only.
+
+Open the configured address on another device. Use HTTPS outside trusted networks; disabling login grants full access to anyone who can reach Huabu.
+
+Or connect the desktop client:
+
+```bash
+pnpm start:desktop --server https://huabu.example.com
+```
+
+Use the server's root URL. The desktop connects without starting a local server.
+
+Before rerunning setup, stop the instance's Huabu and Vite servers; restart them afterward. To reset the connection token, use `pnpm run setup --reset-connection-token`.
+
+### Advanced deployment
+
+Environment variables and `.env` override setup choices and are never rewritten by setup. See [`.env.example`](.env.example) and [Deployment security](docs/architecture/deployment-security.md).
+
+Back up and persist both server data and private credential configuration. See [Credential storage](docs/architecture/credential-storage.md).
 
 ## Data, Credentials, and Connected Services
 

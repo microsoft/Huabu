@@ -11,6 +11,16 @@ export type InkQuestionTarget = {
   binding?: AgentBinding;
 };
 
+export function canReceiveInk({
+  binding,
+  mode,
+}: {
+  binding: AgentBinding;
+  mode: AgentMode;
+}): boolean {
+  return binding.kind === 'external' || mode === 'operate';
+}
+
 export type InkSubmissionCandidate =
   | {
       kind: 'ready';

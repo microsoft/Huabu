@@ -174,6 +174,7 @@ export async function guardAgentNodeDraftEditsAlreadyLocked(
       if (current.type !== 'question') continue;
       validateAgentNodeEditableData(patch);
       if (
+        !Object.prototype.hasOwnProperty.call(patch, 'agentMode') &&
         !AGENT_NODE_PREPARATION_KEYS.some((key) =>
           Object.prototype.hasOwnProperty.call(patch, key),
         )

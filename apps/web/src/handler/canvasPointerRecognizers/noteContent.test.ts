@@ -5,10 +5,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   canTouchTakeOverCanvasGesture,
+  beginCanvasGesture,
+  updateCanvasGesture,
   getCanvasGesture,
   resetCanvasGestureForTests,
 } from '@/handler/canvasGestureSession';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
+import { resetInkSigilSession, useInkSigilStore } from '@/store/inkSigilStore';
 
 import { createNoteContentRecognizer } from './noteContent';
 
@@ -19,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   getState: vi.fn(),
   nodeIdAtScreenPoint: vi.fn(),
   onNodeDragStart: vi.fn(),
+  onNodeDrag: vi.fn(),
   onNodesChange: vi.fn(),
   onNodeDragStop: vi.fn(),
   cancelActiveNodeDrag: vi.fn(),
@@ -47,7 +51,10 @@ function pointer(type: string, x = 50, y = 100, pointerType = 'touch') {
     bubbles: true,
     cancelable: true,
   });
-  Object.defineProperty(event, 'target', { value: viewport });
+  Object.defineProperty(event, 'target', {
+    value: viewport,
+    configurable: true,
+  });
   return event;
 }
 
@@ -101,11 +108,93 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  resetInkSigilSession();
   wrapper.remove();
   resetCanvasGestureForTests();
 });
 
 describe('Note content pointer ownership', () => {
+  it('yields an active reader tap to a pending resource binding under Sketch', () => {
+    ctx.explicitToolActive = true;
+    ctx.inkToolActive = true;
+    useGesturePreviewStore.setState({ noteReadingNodeId: 'note' });
+    const recognizer = createNoteContentRecognizer();
+    expect(recognizer.canClaim(pointer('pointerdown', 50, 75), ctx)).toBe(true);
+    useInkSigilStore.setState({
+      pending: {
+        canvasId: 'space',
+        fingerprint: 'hash',
+        strokeIds: ['a', 'b', 'c', 'd'],
+      },
+    });
+    expect(recognizer.canClaim(pointer('pointerdown', 50, 75), ctx)).toBe(
+      false,
+    );
+    expect(useGesturePreviewStore.getState().noteReadingNodeId).toBe('note');
+    expect(mocks.selectNodes).not.toHaveBeenCalled();
+  });
+  it.each(['lasso', 'sketch'])(
+    'lets a finger enter and scroll reading under the %s tool in Pen mode',
+    (tool) => {
+      ctx.explicitToolActive = true;
+      ctx.inkToolActive = true;
+      const overlay = document.createElement('div');
+      overlay.dataset.sketchOverlay = '';
+      wrapper.append(overlay);
+      const event = (type: string, y = 75, pointerType = 'touch') => {
+        const e = pointer(type, 50, y, pointerType);
+        if (tool === 'sketch')
+          Object.defineProperty(e, 'target', { value: overlay });
+        return e;
+      };
+      const recognizer = createNoteContentRecognizer();
+      expect(recognizer.canClaim(event('pointerdown', 75, 'pen'), ctx)).toBe(
+        false,
+      );
+      expect(recognizer.canClaim(event('pointerdown'), ctx)).toBe(true);
+      recognizer.onDown(event('pointerdown'), ctx);
+      recognizer.onUp?.(event('pointerup'), ctx);
+      expect(useGesturePreviewStore.getState().noteReadingNodeId).toBe('note');
+      recognizer.onDown(event('pointerdown'), ctx);
+      recognizer.onMove?.(event('pointermove', 25), ctx);
+      expect(viewport.scrollTop).toBe(100);
+      expect(mocks.onNodesChange).not.toHaveBeenCalled();
+      recognizer.onUp?.(event('pointerup', 25), ctx);
+      expect(useGesturePreviewStore.getState().noteReadingNodeId).toBe('note');
+    },
+  );
+
+  it('only resolves overlay touches inside the topmost eligible document body', () => {
+    ctx.explicitToolActive = true;
+    ctx.inkToolActive = true;
+    const overlay = document.createElement('div');
+    overlay.dataset.sketchOverlay = '';
+    wrapper.append(overlay);
+    const event = pointer('pointerdown', 50, 75);
+    Object.defineProperty(event, 'target', { value: overlay });
+    const recognizer = createNoteContentRecognizer();
+    expect(recognizer.canClaim(event, ctx)).toBe(true);
+    mocks.nodeIdAtScreenPoint.mockReturnValue('covering-node');
+    expect(recognizer.canClaim(event, ctx)).toBe(false);
+    mocks.nodeIdAtScreenPoint.mockReturnValue('note');
+    vi.mocked(viewport.getBoundingClientRect).mockReturnValue(
+      new DOMRect(0, 0, 200, 50),
+    );
+    expect(recognizer.canClaim(event, ctx)).toBe(false);
+  });
+
+  it('keeps finger drawing and active pen gestures out of Note reading', () => {
+    ctx.explicitToolActive = true;
+    ctx.inkToolActive = true;
+    ctx.inputMode = 'finger';
+    const recognizer = createNoteContentRecognizer();
+    expect(recognizer.canClaim(pointer('pointerdown'), ctx)).toBe(false);
+    ctx.inputMode = 'pen';
+    beginCanvasGesture('sketch-draw', 2, 'pen', { x: 0, y: 0 });
+    updateCanvasGesture(2, { x: 100, y: 100 });
+    expect(recognizer.canClaim(pointer('pointerdown'), ctx)).toBe(false);
+  });
+
   it.each(['touch', 'pen'])(
     'enters reading with a selected %s tap and deselects on the next tap',
     (type) => {

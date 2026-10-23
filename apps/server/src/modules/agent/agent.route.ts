@@ -36,6 +36,7 @@ import {
 } from './agent-node-binding.js';
 import { agentThreadResolver } from './agent-thread-resolver.js';
 import conversationTitleRoutes from './conversation-title.route.js';
+import { InkAgentModeError } from './ink-response.js';
 import { ExternalAgentRealizationError } from '../agent/acp/external-agent-realization.js';
 import { agenetes, INTERNAL_DRIVER_KIND } from '../agent/agenetes/drivers.js';
 import { InkModelCapabilityError } from '../agent/agent-submission.js';
@@ -826,7 +827,8 @@ const agentRoutes: FastifyPluginAsync = async (
       }
       if (
         error instanceof InkVisualPreparationError ||
-        error instanceof InkModelCapabilityError
+        error instanceof InkModelCapabilityError ||
+        error instanceof InkAgentModeError
       ) {
         return reply.code(409).send({
           message: error.message,

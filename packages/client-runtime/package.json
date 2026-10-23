@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./desktop": {
+      "types": "./dist/desktop.d.ts",
+      "import": "./dist/desktop.js"
+    },
     ".": {
       "types": "./src/bootstrap.ts",
       "import": "./dist/bootstrap.js"

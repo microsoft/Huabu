@@ -8,12 +8,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import CanvasListPage from './CanvasListPage';
 import { ApiError } from '../api/_client';
-import { exportCanvas } from '../api/canvas';
+import { exportCanvas, listCanvases } from '../api/canvas';
 import { toast } from '../components/Common/Toast';
 
 import type { ReactNode } from 'react';
 
 const setCanvasCount = vi.fn();
+const setSpaceTitle = vi.fn();
+vi.mock('../i18n', () => ({ i18n: { t: (key: string) => key } }));
+vi.mock('../components/Space/SpaceDeletionDialog', () => ({
+  SpaceDeletionDialog: () => null,
+}));
 
 vi.mock('react-i18next', () => ({
   Trans: ({ i18nKey }: { i18nKey: string }) => i18nKey,
@@ -81,12 +86,14 @@ vi.mock('../store/workspaceStore', () => ({
     selector: (state: {
       capabilities: { canChangeWorkspace: boolean };
       setCanvasCount: typeof setCanvasCount;
+      setSpaceTitle: typeof setSpaceTitle;
       workspacePath: string;
     }) => unknown,
   ) =>
     selector({
       capabilities: { canChangeWorkspace: false },
       setCanvasCount,
+      setSpaceTitle,
       workspacePath: '/tmp/test-workspace',
     }),
 }));
@@ -99,6 +106,7 @@ let container: HTMLDivElement;
 let root: Root;
 
 beforeEach(() => {
+  localStorage.clear();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -134,6 +142,105 @@ async function renderPage() {
 }
 
 describe('CanvasListPage navigation', () => {
+  it('uses a compact search field and keyboard-accessible segmented scope control', async () => {
+    await renderPage();
+    const search = container.querySelector('input[type="search"]');
+    expect(search?.getAttribute('placeholder')).toBe(
+      'spaceHierarchy.searchPlaceholder',
+    );
+    expect(search?.getAttribute('aria-label')).toBe('spaceHierarchy.search');
+    const tabs = container.querySelectorAll('[role="tab"]');
+    expect(tabs).toHaveLength(2);
+    expect(tabs[0].getAttribute('aria-selected')).toBe('true');
+    expect(container.querySelector('[role="tablist"]')?.contains(search)).toBe(
+      false,
+    );
+    await act(async () => {
+      tabs[0].dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }),
+      );
+    });
+    expect(tabs[1].getAttribute('aria-selected')).toBe('true');
+    expect(localStorage.getItem('huabu.spaces.showAll')).toBe('true');
+  });
+  it('searches nested Space names without matching ancestor names or paths', async () => {
+    vi.mocked(listCanvases).mockResolvedValueOnce({
+      canvases: [
+        {
+          canvasId: 'space-1',
+          title: 'Parent',
+          nodeCount: 0,
+          createdAt: 0,
+          updatedAt: 0,
+        },
+        {
+          canvasId: 'child',
+          title: 'Nested',
+          parentSpaceId: 'space-1',
+          nodeCount: 0,
+          createdAt: 0,
+          updatedAt: 0,
+        },
+      ],
+    });
+    await renderPage();
+    const input = container.querySelector<HTMLInputElement>(
+      'input[type="search"]',
+    );
+    if (!input) throw new Error('Search input missing');
+    const search = async (value: string) => {
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(
+          HTMLInputElement.prototype,
+          'value',
+        )?.set?.call(input, value);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+    };
+    await search('Parent');
+    expect(container.querySelector('a[href="/canvas/space-1"]')).not.toBeNull();
+    expect(container.querySelector('a[href="/canvas/child"]')).toBeNull();
+    await search('  NESTED ');
+    expect(container.querySelector('a[href="/canvas/space-1"]')).toBeNull();
+    expect(container.querySelector('a[href="/canvas/child"]')).not.toBeNull();
+    await search('Parent / Nested');
+    expect(container.querySelector('a[href="/canvas/child"]')).toBeNull();
+    await search('');
+    expect(container.querySelector('a[href="/canvas/space-1"]')).not.toBeNull();
+    expect(container.querySelector('a[href="/canvas/child"]')).toBeNull();
+  });
+  it('defaults to roots, remembers All, and exposes the canonical path for nested Spaces', async () => {
+    vi.mocked(listCanvases).mockResolvedValueOnce({
+      canvases: [
+        {
+          canvasId: 'space-1',
+          title: 'Space One',
+          nodeCount: 0,
+          createdAt: 0,
+          updatedAt: 0,
+        },
+        {
+          canvasId: 'child',
+          title: 'Nested',
+          parentSpaceId: 'space-1',
+          parentEntryNodeId: 'node-entry',
+          nodeCount: 0,
+          createdAt: 0,
+          updatedAt: 0,
+        },
+      ],
+    });
+    await renderPage();
+    expect(container.querySelector('a[href="/canvas/child"]')).toBeNull();
+    const all = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'spaceHierarchy.all',
+    );
+    await act(async () => all?.click());
+    expect(
+      container.querySelector('a[href="/canvas/child"]')?.textContent,
+    ).toContain('Space One /');
+    expect(localStorage.getItem('huabu.spaces.showAll')).toBe('true');
+  });
   it('shows the export refusal without leaving the Spaces list or reporting success', async () => {
     vi.mocked(exportCanvas).mockRejectedValueOnce(
       new ApiError(
@@ -174,6 +281,10 @@ describe('CanvasListPage navigation', () => {
 
     expect(event.defaultPrevented).toBe(true);
     expect(router.state.location.pathname).toBe('/canvas/space-1');
+    expect(setSpaceTitle).toHaveBeenCalledExactlyOnceWith(
+      'space-1',
+      'Space One',
+    );
   });
 
   it.each([

@@ -36,6 +36,54 @@ function createConnection(): {
 }
 
 describe('AcpAgentClient lifecycle cleanup', () => {
+  it.each(['answer', 'disconnect'] as const)(
+    'reports pending approval only for its session and clears it on %s',
+    async (finish) => {
+      const { connection, emitLifecycle } = createConnection();
+      const client = new AcpAgentClient(connection, { scopeName: 'test' });
+      const notify = vi.fn();
+      const prompt = client.prompt(
+        'session-1',
+        [{ type: 'text', text: 'work' }],
+        vi.fn(),
+        undefined,
+        notify,
+      );
+      const rejected = expect(prompt).rejects.toBeDefined();
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalled());
+      expect(client.hasPendingPermissions('session-1')).toBe(false);
+      const receive = vi.mocked(connection.onMessage).mock.calls[0][0];
+      receive({
+        jsonrpc: '2.0',
+        id: 'approval-1',
+        method: 'session/request_permission',
+        params: {
+          sessionId: 'session-1',
+          toolCall: {
+            toolCallId: 'tool-1',
+            title: 'Write file',
+            kind: 'edit',
+            status: 'pending',
+          },
+          options: [{ optionId: 'allow', name: 'Allow', kind: 'allow_once' }],
+        },
+      });
+      await vi.waitFor(() => expect(notify).toHaveBeenCalled());
+      expect(client.hasPendingPermissions('session-1')).toBe(true);
+      expect(client.hasPendingPermissions('other-session')).toBe(false);
+      if (finish === 'answer') {
+        expect(
+          client.resolvePermission(notify.mock.calls[0][0].requestId, {
+            optionId: 'allow',
+          }),
+        ).toBe(true);
+        expect(client.hasPendingPermissions('session-1')).toBe(false);
+      }
+      emitLifecycle({ type: 'agent/disconnected', reason: 'websocket_closed' });
+      await rejected;
+      expect(client.hasPendingPermissions('session-1')).toBe(false);
+    },
+  );
   it.each([undefined, {}, { image: false }, { image: 'true' }])(
     'rejects images before sending when image capability is not explicitly true: %j',
     async (promptCapabilities) => {

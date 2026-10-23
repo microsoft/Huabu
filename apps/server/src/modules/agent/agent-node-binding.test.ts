@@ -253,13 +253,45 @@ describe('AgentNodeBindingCoordinator', () => {
     expect(h.promote).not.toHaveBeenCalled();
   });
 
-  it('keeps ask/operate and display metadata outside execution identity', async () => {
+  it('allows idle Bound mode edits without changing execution identity', async () => {
     const h = harness(record());
-    await h.coordinator.guardDraftEdit(
+    const release = await h.coordinator.guardDraftEdit(
       { ...target(), bindingState: 'bound' },
       { agentMode: 'operate', label: 'Updated' },
     );
-    expect(h.acquireTurn).not.toHaveBeenCalled();
+    expect(h.acquireTurn).toHaveBeenCalledWith('thread-a');
     expect(h.readRecord).not.toHaveBeenCalled();
+    expect(h.release).not.toHaveBeenCalled();
+    release();
+    expect(h.release).toHaveBeenCalledOnce();
   });
+
+  it.each(['editing', 'bound'] as const)(
+    'rejects mode changes on %s nodes while a turn holds admission',
+    async (bindingState) => {
+      const h = harness();
+      h.acquireTurn.mockReturnValue(null);
+      await expect(
+        h.coordinator.guardDraftEdit(
+          { ...target(), bindingState, agentMode: 'operate' },
+          { agentMode: 'ask' },
+        ),
+      ).rejects.toMatchObject({ code: 'agent_draft_busy' });
+      expect(h.readRecord).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['editing', 'bound'] as const)(
+    'allows unchanged modes and labels on busy %s nodes',
+    async (bindingState) => {
+      const h = harness();
+      h.acquireTurn.mockReturnValue(null);
+      await h.coordinator.guardDraftEdit(
+        { ...target(), bindingState, agentMode: 'operate' },
+        { agentMode: 'operate', label: 'Renamed' },
+      );
+      expect(h.acquireTurn).not.toHaveBeenCalled();
+      expect(h.readRecord).not.toHaveBeenCalled();
+    },
+  );
 });

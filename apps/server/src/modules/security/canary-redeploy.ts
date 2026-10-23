@@ -20,6 +20,7 @@ import {
 } from '@huabu/shared';
 
 import { getDataDir } from '../../data-dir.js';
+import { getDeploymentEnvironment } from '../../security/deployment-settings.js';
 import { atomicWriteJson, readJsonStrict } from '../../utils/fs.js';
 import { getLogger } from '../../utils/logger.js';
 
@@ -473,6 +474,7 @@ export async function requestCanaryRedeploy(
       startedAt,
     });
 
+    const deploymentEnvironment = getDeploymentEnvironment();
     const child = spawn(
       process.execPath,
       [
@@ -487,7 +489,13 @@ export async function requestCanaryRedeploy(
         cwd: capability.repoRoot,
         detached: true,
         stdio: 'ignore',
-        env: process.env,
+        env: {
+          ...process.env,
+          HUABU_CANARY_BASIC_AUTH_USER:
+            deploymentEnvironment.HUABU_BASIC_AUTH_USER,
+          HUABU_CANARY_BASIC_AUTH_PASS:
+            deploymentEnvironment.HUABU_BASIC_AUTH_PASS,
+        },
       },
     );
     child.once('error', (error) => {

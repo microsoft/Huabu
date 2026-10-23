@@ -45,6 +45,7 @@ import {
   type CanvasShortcutRefs,
 } from './useCanvasShortcuts';
 import { OPEN_SPACE_SHORTCUT_EVENT } from '../../components/Nodes/spacePreview/spaceShortcutEvents';
+import { REQUEST_CREATE_CHILD_SPACE } from '../../components/Space/createChildSpaceAction';
 import { getCombo } from '../../config/shortcuts';
 
 // react-dom's `act` needs this flag set in a test environment.
@@ -99,6 +100,72 @@ describe('useCanvasShortcuts catalog key lock', () => {
     vi.clearAllMocks();
   });
 
+  it('collects the selected nodes with Mod+Alt+S, including macOS Option key text', () => {
+    canvasActions.nodes = [{ id: 'selected', selected: true }, { id: 'other' }];
+    const collect = vi.fn();
+    window.addEventListener(REQUEST_CREATE_CHILD_SPACE, collect);
+    try {
+      dispatchCombo('layer.collectSpace');
+      expect(collect).toHaveBeenCalledOnce();
+      expect(collect.mock.calls[0]?.[0].detail.nodeIds).toEqual(['selected']);
+      act(() =>
+        window.dispatchEvent(
+          new KeyboardEvent('keydown', {
+            key: 'ß',
+            code: 'KeyS',
+            metaKey: true,
+            altKey: true,
+            bubbles: true,
+          }),
+        ),
+      );
+      expect(collect).toHaveBeenCalledTimes(2);
+      expect(canvasActions.frameSelectedNodes).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener(REQUEST_CREATE_CHILD_SPACE, collect);
+    }
+  });
+
+  it('does not collect empty selections, typing, composition, or repeated keydowns', () => {
+    const collect = vi.fn();
+    window.addEventListener(REQUEST_CREATE_CHILD_SPACE, collect);
+    const input = document.createElement('input');
+    container.appendChild(input);
+    try {
+      dispatchCombo('layer.collectSpace');
+      canvasActions.nodes = [{ id: 'selected', selected: true }];
+      act(() => {
+        input.dispatchEvent(
+          new KeyboardEvent('keydown', {
+            key: 's',
+            metaKey: true,
+            altKey: true,
+            bubbles: true,
+          }),
+        );
+        window.dispatchEvent(
+          new KeyboardEvent('keydown', {
+            key: 's',
+            metaKey: true,
+            altKey: true,
+            isComposing: true,
+          }),
+        );
+        window.dispatchEvent(
+          new KeyboardEvent('keydown', {
+            key: 's',
+            metaKey: true,
+            altKey: true,
+            repeat: true,
+          }),
+        );
+      });
+      expect(collect).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener(REQUEST_CREATE_CHILD_SPACE, collect);
+    }
+  });
+
   it('fires the matching store action for each catalog combo it owns', () => {
     dispatchCombo('edit.undo');
     expect(canvasActions.undo).toHaveBeenCalledTimes(1);
@@ -140,12 +207,23 @@ describe('useCanvasShortcuts catalog key lock', () => {
       enter();
       expect(open).toHaveBeenCalledTimes(1);
       expect(open.mock.calls[0][0].detail).toEqual({ nodeId: 'shortcut' });
+      const button = document.createElement('button');
+      container.appendChild(button);
+      const event = new KeyboardEvent('keydown', {
+        key: 'Enter',
+        bubbles: true,
+        cancelable: true,
+      });
+      act(() => button.dispatchEvent(event));
+      expect(event.defaultPrevented).toBe(false);
+      expect(open).toHaveBeenCalledTimes(1);
+      button.remove();
       act(() =>
         window.dispatchEvent(
           new KeyboardEvent('keydown', { key: 'Delete', cancelable: true }),
         ),
       );
-      expect(canvasActions.deleteNodes).toHaveBeenCalledWith(['shortcut']);
+      expect(canvasActions.deleteNodes).toHaveBeenCalledWith(['shortcut'], []);
       expect(open).toHaveBeenCalledTimes(1);
       canvasActions.nodes = [shortcut, { ...shortcut, id: 'second' }];
       enter();
@@ -157,6 +235,43 @@ describe('useCanvasShortcuts catalog key lock', () => {
     } finally {
       window.removeEventListener(OPEN_SPACE_SHORTCUT_EVENT, open);
     }
+  });
+
+  it.each(['Delete', 'Backspace'])(
+    'routes mixed selections through one guarded deletion on %s',
+    (key) => {
+      canvasActions.nodes = [
+        { id: 'selected', selected: true },
+        { id: 'other' },
+      ];
+      canvasActions.edges = [
+        { id: 'edge-selected', selected: true },
+        { id: 'edge-other' },
+      ];
+      act(() =>
+        window.dispatchEvent(
+          new KeyboardEvent('keydown', { key, cancelable: true }),
+        ),
+      );
+      expect(canvasActions.deleteNodes).toHaveBeenCalledExactlyOnceWith(
+        ['selected'],
+        ['edge-selected'],
+      );
+      expect(canvasActions.disconnectEdges).not.toHaveBeenCalled();
+    },
+  );
+
+  it('retains edge-only deletion', () => {
+    canvasActions.edges = [{ id: 'edge-selected', selected: true }];
+    act(() =>
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Delete', cancelable: true }),
+      ),
+    );
+    expect(canvasActions.deleteNodes).not.toHaveBeenCalled();
+    expect(canvasActions.disconnectEdges).toHaveBeenCalledExactlyOnceWith([
+      'edge-selected',
+    ]);
   });
 
   it.each(['panel', 'menu', 'dialog', 'listbox'])(

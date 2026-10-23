@@ -30,6 +30,7 @@ import {
   putNodeContentBodySchema,
   stripLegacyPortalTopology,
   recentCanvasConversationParamsSchema,
+  deleteNodeParamsSchema,
 } from '@huabu/shared';
 import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 import {
@@ -55,6 +56,13 @@ import {
 } from './canvas-executor.js';
 import { searchCanvas } from './canvas-search.js';
 import { publishCanvasUpdate } from './canvas-sync.js';
+import { registerSpaceCardRoutes } from './space-card.route.js';
+import {
+  deletionPreview,
+  deleteSpaceTree,
+  SpaceHierarchyError,
+} from './space-hierarchy.js';
+import { registerSpaceHierarchyRoutes } from './space-hierarchy.route.js';
 import { moveCanvasSelection, SpaceMoveError } from './space-move.service.js';
 import {
   getSpacePreviewScene,
@@ -62,12 +70,16 @@ import {
 } from './space-preview-scene.js';
 import {
   assertCurrentCanvasCommands,
+  assertChildSpaceEntriesAllowed,
   assertWorldPreviewTopologyAllowed,
   readLiveSpaceIds,
   WorldPreviewMutationError,
 } from './world-preview-policy.js';
 import { reconcileWorldPreviews } from './world-previews.js';
-import { withCanvasMutex } from './write-coordinator.js';
+import {
+  withCanvasMutex,
+  withSpaceHierarchyLock,
+} from './write-coordinator.js';
 import { MAX_UPLOAD_BYTES } from '../../upload-limits.js';
 import { conversationEventLogStore } from '../agent/agenetes/conversation-stores.js';
 import { AgentNodeBindingError } from '../agent/agent-node-binding.js';
@@ -79,7 +91,6 @@ import { stripOfficeparserPreamble } from '../preprocessing/loaders/office-strip
 import {
   space,
   createSpace,
-  deleteSpace,
   isWorldCanvasId,
   stageSpaceImport,
   storageServes,
@@ -91,6 +102,7 @@ import {
   type UpdateNodeOutcome,
   updateNode,
 } from '../storage/index.js';
+import { acquireWorkspaceOperationLease } from '../workspace.js';
 
 import type { CanvasNodeType } from '@huabu/shared';
 import type {
@@ -99,6 +111,7 @@ import type {
   CanvasConflictResponse,
   CanvasSearchEvent,
   CreateCanvasRequest,
+  DeleteNodeParams,
   CreateCanvasResponse,
   DeleteCanvasResponse,
   DeleteNodeResponse,
@@ -583,6 +596,8 @@ async function hydrateNodeContent(
 }
 
 const canvasRoutes: FastifyPluginAsync = async (fastify) => {
+  registerSpaceHierarchyRoutes(fastify);
+  registerSpaceCardRoutes(fastify);
   fastify.get<{
     Params: RecentCanvasConversationParams;
     Reply: ApiResult<RecentCanvasConversationResponse>;
@@ -662,18 +677,35 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     Reply: ApiResult<DeleteCanvasResponse>;
   }>('/:canvasId', async function (request, reply) {
     const { canvasId } = request.params;
-    const deleted = await deleteSpace(canvasId);
+    return withSpaceHierarchyLock(async () => {
+      if (isWorldCanvasId(canvasId)) {
+        return reply
+          .code(403)
+          .send({ message: 'World canvas cannot be deleted' });
+      }
+      try {
+        const preview = deletionPreview(
+          await getStructuredStore().spaces().list(),
+          canvasId,
+        );
+        if (preview.spaces.length > 1)
+          return reply.code(409).send({
+            code: 'SPACE_TREE_CONFIRMATION_REQUIRED',
+            message: 'Confirm the complete subtree before deleting this Space',
+          });
+        await deleteSpaceTree(canvasId, preview.token);
+      } catch (error) {
+        if (error instanceof SpaceHierarchyError)
+          return reply.code(error.status).send({
+            code: error.code,
+            message: error.message,
+            details: error.details,
+          });
+        throw error;
+      }
 
-    if (!deleted.ok && deleted.reason === 'not-found') {
-      return reply.code(404).send({ message: 'Canvas not found' });
-    }
-    if (!deleted.ok && deleted.reason === 'world-forbidden') {
-      return reply
-        .code(403)
-        .send({ message: 'World canvas cannot be deleted' });
-    }
-
-    return reply.send({ success: true });
+      return reply.send({ success: true });
+    });
   });
 
   // Delete a node — removes its markdown sidecar.
@@ -689,42 +721,68 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
   // `<canvasId>/nodes/<nodeId>.md`, since that file is invisible to
   // the client's `state` payload.
   fastify.delete<{
-    Params: { canvasId: string; nodeId: string };
+    Params: DeleteNodeParams;
     Reply: ApiResult<DeleteNodeResponse>;
   }>('/:canvasId/nodes/:nodeId', async function (request, reply) {
-    const { canvasId, nodeId } = request.params;
-    const handle = getStructuredStore().space(canvasId);
-    const canvas = await handle.read();
-    if (!canvas) {
-      return reply.code(404).send({
-        code: 'CANVAS_NOT_FOUND',
-        message: 'Canvas not found',
-      });
-    }
-
+    const params = deleteNodeParamsSchema.safeParse(request.params);
+    if (!params.success)
+      return reply.code(400).send({ message: 'Invalid Canvas or node ID' });
+    const { canvasId, nodeId } = params.data;
+    const lease = acquireWorkspaceOperationLease();
     try {
-      await handle.nodes.delete(nodeId);
-    } catch (error) {
-      // CanvasStoreIOError (unlink rejected by the OS, e.g. EPERM /
-      // EACCES). Surface the failure so the client can revert its
-      // optimistic delete (or at least toast). Silently returning
-      // success here would leave structural state with no reference to
-      // the node but its `.md` orphaned on disk forever.
-      //
-      // `code` is the stable contract — the client maps it to a
-      // localised toast. `message` is the English fallback used for
-      // server logs and unknown-code situations.
-      request.log.error(
-        { canvasId, nodeId, err: toMessage(error) },
-        'Failed to delete node sidecar',
-      );
-      return reply.code(500).send({
-        code: 'NODE_FILE_DELETE_FAILED',
-        message: `Failed to delete node file for "${nodeId}"`,
-      });
-    }
+      const handle = getStructuredStore().space(canvasId);
+      return await withCanvasMutex(canvasId, async () => {
+        const canvas = await handle.read();
+        if (!canvas) {
+          return reply.code(404).send({
+            code: 'CANVAS_NOT_FOUND',
+            message: 'Canvas not found',
+          });
+        }
 
-    return reply.send({ success: true });
+        try {
+          const nodes = canvas.state.nodes as NodeLike[];
+          await assertChildSpaceEntriesAllowed(
+            canvasId,
+            nodes,
+            nodes.filter((node) => node.id !== nodeId),
+          );
+        } catch (error) {
+          if (error instanceof WorldPreviewMutationError)
+            return reply.code(409).send({
+              code: 'SPACE_ENTRY_PROTECTED',
+              message: error.message,
+            });
+          throw error;
+        }
+
+        try {
+          await handle.nodes.delete(nodeId);
+        } catch (error) {
+          // CanvasStoreIOError (unlink rejected by the OS, e.g. EPERM /
+          // EACCES). Surface the failure so the client can revert its
+          // optimistic delete (or at least toast). Silently returning
+          // success here would leave structural state with no reference to
+          // the node but its `.md` orphaned on disk forever.
+          //
+          // `code` is the stable contract — the client maps it to a
+          // localised toast. `message` is the English fallback used for
+          // server logs and unknown-code situations.
+          request.log.error(
+            { canvasId, nodeId, err: toMessage(error) },
+            'Failed to delete node sidecar',
+          );
+          return reply.code(500).send({
+            code: 'NODE_FILE_DELETE_FAILED',
+            message: `Failed to delete node file for "${nodeId}"`,
+          });
+        }
+
+        return reply.send({ success: true });
+      });
+    } finally {
+      lease.release();
+    }
   });
 
   // --- Per-node content endpoints --------------------------------------
@@ -1324,11 +1382,24 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         }
       }
 
+      const identityNodes = (incomingState.nodes ?? []).map((node) => {
+        const current = currentById.get(node.id);
+        return {
+          ...current,
+          ...node,
+          data: { ...current?.data, ...node.data },
+        };
+      });
       try {
+        await assertChildSpaceEntriesAllowed(
+          canvasId,
+          existing?.state.nodes ?? [],
+          identityNodes,
+        );
         assertWorldPreviewTopologyAllowed(
           canvasId,
           (existing?.state.nodes ?? []) as NodeLike[],
-          incomingState.nodes ?? [],
+          identityNodes,
           isWorldCanvasId(canvasId)
             ? await readLiveSpaceIds()
             : new Set<string>(),
@@ -1406,7 +1477,9 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
             const current = currentById.get(node.id);
             const patch = node.data ?? {};
             return current &&
-              changesAgentNodePreparation(current.data ?? {}, patch)
+              (changesAgentNodePreparation(current.data ?? {}, patch) ||
+                (Object.prototype.hasOwnProperty.call(patch, 'agentMode') &&
+                  patch.agentMode !== current.data?.agentMode))
               ? [{ current, patch }]
               : [];
           }),

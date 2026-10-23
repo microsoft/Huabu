@@ -15,6 +15,14 @@ import {
 } from '../note/noteDesign';
 
 describe('shared node boundary', () => {
+  it.each(['white', '#fff', '#ffffff'])(
+    'keeps a visible neutral boundary for white accent %s',
+    (accent) => {
+      expect(nodeBoundaryForAccent(accent).borderColor).toBe(
+        'color-mix(in srgb, var(--edge-default) 75%, transparent)',
+      );
+    },
+  );
   it.each(['image', 'video', 'sketch'])(
     'reserves no layout border for %s',
     (type) => {
@@ -32,22 +40,22 @@ describe('shared node boundary', () => {
     'office',
     'spacePreview',
     undefined,
-  ])('preserves the ordinary 3px layout border for %s', (type) => {
-    expect(nodeLayoutBorderInset(type)).toBe(3);
+  ])('uses the shared 2px layout border for %s', (type) => {
+    expect(nodeLayoutBorderInset(type)).toBe(2);
   });
 
-  it('shares boundaries without changing Note document geometry', () => {
-    expect(NODE_BORDER_WIDTH).toBe(3);
+  it('shares boundaries and retains Note document padding', () => {
+    expect(NODE_BORDER_WIDTH).toBe(2);
     expect(nodeBoundaryForAccent(null)).toEqual({
-      borderColor: 'var(--edge-default)',
-      borderWidth: 3,
+      borderColor: 'color-mix(in srgb, var(--edge-default) 75%, transparent)',
+      borderWidth: 2,
     });
     expect(nodeBoundaryForAccent('#008080')).toEqual({
-      borderColor: getAccentTokens('#008080').divider,
-      borderWidth: 3,
+      borderColor: `color-mix(in srgb, ${getAccentTokens('#008080').divider} 75%, transparent)`,
+      borderWidth: 2,
     });
     expect(NOTE_SURFACE_DESIGN_CONFIG).toMatchObject({
-      borderWidth: 3,
+      borderWidth: 2,
       contentPaddingBlock: 16,
       contentPaddingInline: 16,
     });

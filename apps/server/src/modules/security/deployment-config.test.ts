@@ -53,6 +53,39 @@ describe('resolveDeploymentConfig', () => {
     });
   });
 
+  it('allows explicitly disabled login but still requires a reachable public origin', () => {
+    expect(() =>
+      resolveDeploymentConfig({
+        HUABU_BIND_HOST: '0.0.0.0',
+        HUABU_AUTH_MODE: 'none',
+      }),
+    ).toThrow('HUABU_PUBLIC_ORIGIN');
+    expect(
+      resolveDeploymentConfig({
+        HUABU_BIND_HOST: '0.0.0.0',
+        HUABU_PUBLIC_ORIGIN: 'https://huabu.example',
+        HUABU_AUTH_MODE: 'none',
+      }),
+    ).toMatchObject({
+      bindScope: 'network',
+      authenticationDisabled: true,
+      basicAuthConfigured: false,
+    });
+  });
+
+  it('rejects invalid or conflicting authentication modes', () => {
+    expect(() => resolveDeploymentConfig({ HUABU_AUTH_MODE: 'false' })).toThrow(
+      'basic or none',
+    );
+    expect(() =>
+      resolveDeploymentConfig({
+        HUABU_AUTH_MODE: 'none',
+        HUABU_BASIC_AUTH_USER: 'user',
+        HUABU_BASIC_AUTH_PASS: 'password',
+      }),
+    ).toThrow('conflicts');
+  });
+
   it.each([
     'http://127.0.0.1:3001',
     'http://[::1]:3001',

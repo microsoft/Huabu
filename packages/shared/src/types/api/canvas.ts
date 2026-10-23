@@ -59,9 +59,13 @@ export interface PutCanvasResponse {
   version: number;
 }
 
-export interface DeleteNodeResponse {
-  success: boolean;
-}
+export const deleteNodeParamsSchema =
+  recentCanvasConversationParamsSchema.extend({
+    nodeId: z.string().regex(/^[a-zA-Z0-9_-]+$/, 'Invalid node ID'),
+  });
+export type DeleteNodeParams = z.infer<typeof deleteNodeParamsSchema>;
+export const deleteNodeResponseSchema = z.object({ success: z.boolean() });
+export type DeleteNodeResponse = z.infer<typeof deleteNodeResponseSchema>;
 
 // ─── Per-node content endpoints ───────────────────────────────────────────
 
@@ -300,18 +304,22 @@ export interface ImportCanvasResponse {
 // ─── Canvas List / Create ─────────────────────────────────────────────────────
 
 /** Summary of a single canvas returned by the list endpoint. */
-export interface CanvasSummary {
-  canvasId: string;
-  title: string | null;
-  nodeCount: number;
-  createdAt: number;
-  updatedAt: number;
-}
+export const canvasSummarySchema = z.object({
+  canvasId: z.string(),
+  parentSpaceId: z.string().nullable().optional(),
+  parentEntryNodeId: z.string().nullable().optional(),
+  title: z.string().nullable(),
+  nodeCount: z.number(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+});
+export type CanvasSummary = z.infer<typeof canvasSummarySchema>;
 
 /** Response for GET /api/canvas (list all canvases). */
-export interface ListCanvasesResponse {
-  canvases: CanvasSummary[];
-}
+export const listCanvasesResponseSchema = z.object({
+  canvases: z.array(canvasSummarySchema),
+});
+export type ListCanvasesResponse = z.infer<typeof listCanvasesResponseSchema>;
 
 /** Request body for POST /api/canvas (create a new canvas). */
 export const createCanvasBodySchema = z.object({

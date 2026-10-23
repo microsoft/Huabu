@@ -132,6 +132,8 @@ export const MessageList = memo(function MessageList({
   const positionedActivationRef = useRef(activationId);
   const observedCompletionRef = useRef(completedTurnId);
   const explicitReadingRef = useRef(false);
+  const [revealingSearch, setRevealingSearch] = useState(false);
+  const requestedSearchPageRef = useRef<string | undefined>(undefined);
   const handledOpenRequestRef = useRef<number | undefined>(undefined);
   const prependAnchorRef = useRef<{
     messageId: string;
@@ -497,6 +499,35 @@ export const MessageList = memo(function MessageList({
   }, [completedTurnId, canScroll, isLoadingOlderHistory, displayWindow]);
 
   useLayoutEffect(() => {
+    setRevealingSearch(false);
+    requestedSearchPageRef.current = undefined;
+  }, [viewKey, activationId, isActive]);
+
+  useEffect(() => {
+    if (
+      !revealingSearch ||
+      !canScroll() ||
+      !hasOlderHistory ||
+      isLoadingOlderHistory ||
+      olderHistoryError ||
+      !onLoadOlderHistory
+    )
+      return;
+    const page = cachedMessages[0]?.id ?? '';
+    if (requestedSearchPageRef.current === page) return;
+    requestedSearchPageRef.current = page;
+    onLoadOlderHistory();
+  }, [
+    revealingSearch,
+    canScroll,
+    hasOlderHistory,
+    isLoadingOlderHistory,
+    olderHistoryError,
+    onLoadOlderHistory,
+    cachedMessages,
+  ]);
+
+  useLayoutEffect(() => {
     const container = containerRef.current;
     if (!container || !canScroll()) return;
     const revealForSearch = (event: Event) => {
@@ -504,11 +535,17 @@ export const MessageList = memo(function MessageList({
       explicitReadingRef.current = true;
       isAtBottomRef.current = false;
       finishPrependAnchoring();
+      requestedSearchPageRef.current = undefined;
+      setRevealingSearch(true);
       displayWindow.showAll();
     };
+    const finishSearch = () => setRevealingSearch(false);
     container.addEventListener('chat-reveal-search', revealForSearch);
-    return () =>
+    container.addEventListener('chat-search-finished', finishSearch);
+    return () => {
       container.removeEventListener('chat-reveal-search', revealForSearch);
+      container.removeEventListener('chat-search-finished', finishSearch);
+    };
   }, [canScroll, finishPrependAnchoring, displayWindow]);
 
   useEffect(() => finishPrependAnchoring, [finishPrependAnchoring]);
@@ -572,6 +609,10 @@ export const MessageList = memo(function MessageList({
         data-chat-thread-root
         data-chat-thread-id={threadId}
         data-chat-cached-earlier={displayWindow.hasCachedEarlier || undefined}
+        data-chat-has-older={hasOlderHistory || undefined}
+        data-chat-history-loading={
+          isHistoryLoading || isLoadingOlderHistory || undefined
+        }
         tabIndex={-1}
         className="flex-1 overflow-x-visible overflow-y-auto px-3"
       >
@@ -653,6 +694,7 @@ export const MessageList = memo(function MessageList({
                   <div key={msg.id} data-chat-message-id={msg.id}>
                     <UserMessage
                       content={msg.content}
+                      isFirst={i === 0}
                       quotedComments={msg.quotedComments}
                       inputKind={msg.inputKind}
                       inkInterpretation={msg.inkInterpretation}

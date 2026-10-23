@@ -42,7 +42,7 @@ export function parseCli(argv: string[]): CliResult {
     .description('Run the agentlet daemon, bridging local ACP agents to a remote server over WebSocket')
     .requiredOption('--server <url>', 'Remote server bridge endpoint (WSS URL)')
     .option('--token <token>', 'Authentication token (or set AGENTLET_TOKEN env var)')
-    .option('--reconnect-max <seconds>', 'Maximum reconnection backoff in seconds', '300')
+    .option('--reconnect-max <seconds>', 'Maximum reconnection backoff in seconds', '30')
     .option('--buffer-limit <count>', 'Max messages buffered during disconnection', '1000')
     .option('--max-agents <count>', 'Maximum concurrent agents', '10')
     .option(
@@ -71,7 +71,7 @@ export function parseCli(argv: string[]): CliResult {
         options: {
           server: opts.server,
           token,
-          reconnectMax: parseInt(opts.reconnectMax, 10),
+          reconnectMax: positiveSafeInteger(opts.reconnectMax, '--reconnect-max'),
           bufferLimit: parseInt(opts.bufferLimit, 10),
           heartbeat: parseInt(opts.heartbeat, 10),
           allowInsecure: opts.allowInsecure,

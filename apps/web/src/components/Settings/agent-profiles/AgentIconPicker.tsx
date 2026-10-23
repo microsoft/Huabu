@@ -21,6 +21,7 @@ import {
 import { Button } from '@/components/Common/Button';
 import { cn } from '@/components/Common/cn';
 import { DropdownMenu } from '@/components/Common/DropdownMenu';
+import { MENU_SECTION_LABEL_CLASS } from '@/components/Common/menuStyles';
 
 type AgentIconPickerProps = {
   /** Current icon. */
@@ -44,6 +45,7 @@ export function AgentIconPicker({
   return (
     <DropdownMenu
       align="bottom-left"
+      contentRole="dialog"
       className="w-auto p-2"
       trigger={
         <Button
@@ -112,12 +114,13 @@ function IconOptionRow<T extends string>({
 }: IconOptionRowProps<T>) {
   return (
     <div>
-      <p className="text-fg-subtle mb-1 px-0.5 text-[10px] tracking-wider uppercase">
-        {label}
-      </p>
+      <p className={cn(MENU_SECTION_LABEL_CLASS, 'mb-1 px-0.5')}>{label}</p>
       <div className="flex gap-1">
         {options.map((option) => (
-          <button
+          <Button
+            variant="ghost"
+            iconOnly
+            size="sm"
             key={option}
             type="button"
             aria-pressed={isSelected(option)}
@@ -125,14 +128,14 @@ function IconOptionRow<T extends string>({
             title={optionLabel(option)}
             onClick={() => onSelect(option)}
             className={cn(
-              'flex h-8 w-8 items-center justify-center rounded-md border transition-colors',
+              'focus-visible:outline-info size-8 rounded-md border border-solid p-0 focus-visible:outline-2 focus-visible:outline-offset-2 [&_svg]:size-5',
               isSelected(option)
                 ? 'border-info bg-hover'
-                : 'hover:bg-hover border-transparent',
+                : 'border-transparent',
             )}
           >
             {renderIcon(option)}
-          </button>
+          </Button>
         ))}
       </div>
     </div>

@@ -339,6 +339,105 @@ describe('buildChatEnvelope selection records', () => {
     expect(envelope.focus.selection.snapshotAttachments).toEqual([
       expect.objectContaining({ originNodeIds: ['ink-1', 'ink-2'] }),
     ]);
+    expect(envelope.focus.selection.inkGeometry).toEqual(
+      ['ink-1', 'ink-2'].map((nodeId) => ({
+        nodeId,
+        strokeIds: ['stroke-1'],
+        bounds: { x: 1, y: 2, width: 2, height: 2 },
+      })),
+    );
+  });
+
+  it('freezes scaled partial-stroke bounds through nested frames with the raster snapshot', async () => {
+    const ink = {
+      id: 'ink-1',
+      type: 'sketch',
+      parentId: 'inner',
+      position: { x: 10, y: 20 },
+      style: { width: 200, height: 300 },
+      data: {
+        initialSize: { width: 100, height: 100 },
+        strokes: [
+          {
+            id: 'stroke-1',
+            points: [
+              [1, 2],
+              [3, 4],
+            ],
+          },
+          {
+            id: 'unselected',
+            points: [
+              [90, 90],
+              [100, 100],
+            ],
+          },
+        ],
+      },
+    };
+    readCanvas.mockResolvedValue({
+      state: {
+        nodes: [
+          {
+            id: 'outer',
+            type: 'frame',
+            position: { x: 100, y: 200 },
+            data: {},
+          },
+          {
+            id: 'inner',
+            type: 'frame',
+            parentId: 'outer',
+            position: { x: 30, y: 40 },
+            data: {},
+          },
+          ink,
+          {
+            id: 'owner',
+            type: 'question',
+            position: { x: 9000, y: 9000 },
+            data: {},
+          },
+        ],
+      },
+    });
+    rasterize.mockImplementationOnce(async () => {
+      ink.position.x = 4000;
+      ink.data.strokes[0].points = [[500, 500]];
+      return [{ src: 'ink.png', originNodeIds: ['ink-1'] }];
+    });
+    const envelope = await buildChatEnvelope({
+      content: '',
+      inputKind: 'ink-intent',
+      canvasId: 'canvas-1',
+      selectedNodes: [{ id: 'ink-1', type: 'sketch', strokeIds: ['stroke-1'] }],
+      logger,
+    });
+    expect(envelope.focus.selection.inkGeometry).toEqual([
+      {
+        nodeId: 'ink-1',
+        strokeIds: ['stroke-1'],
+        bounds: { x: 142, y: 266, width: 4, height: 6 },
+      },
+    ]);
+    expect(
+      chatEnvelopeSchema.parse(JSON.parse(JSON.stringify(envelope))).focus
+        .selection.inkGeometry,
+    ).toEqual(envelope.focus.selection.inkGeometry);
+  });
+
+  it('rejects a partially stale Ink selection rather than shrinking its spatial evidence', async () => {
+    await expect(
+      buildChatEnvelope({
+        content: '',
+        inputKind: 'ink-intent',
+        canvasId: 'canvas-1',
+        selectedNodes: [
+          { id: 'ink-1', type: 'sketch', strokeIds: ['stroke-1', 'missing'] },
+        ],
+        logger,
+      }),
+    ).rejects.toBeInstanceOf(InkVisualPreparationError);
   });
 
   it('attaches OCR derived from the same captured nodes as the required visual', async () => {

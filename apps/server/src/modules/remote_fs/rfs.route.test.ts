@@ -244,7 +244,7 @@ describe('GET /api/rfs/:canvasId/skill', () => {
         `${getNodeDefaultSize('web').width} × ${getNodeDefaultSize('web').height}px`,
       );
       expect(res.body).toContain(
-        `${getNodeDefaultSize('note').height}px nominal layout height`,
+        `${getNodeDefaultSize('note').width} × ${getNodeDefaultSize('note').height}px; fixed height by default`,
       );
     } finally {
       await app.close();
@@ -1081,7 +1081,19 @@ describe('POST /api/rfs/:canvasId/query', () => {
         result: {
           count: 1,
           truncated: false,
-          matches: [{ tier: 'content', match: { nodeId: 'node-1' } }],
+          matches: [
+            {
+              tier: 'content',
+              match: {
+                nodeId: 'node-1',
+                source: {
+                  hash: expect.stringMatching(/^[a-f0-9]{64}$/),
+                  offset: 6,
+                  length: 10,
+                },
+              },
+            },
+          ],
         },
       });
     } finally {

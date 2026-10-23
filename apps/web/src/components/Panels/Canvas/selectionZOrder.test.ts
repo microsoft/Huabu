@@ -10,7 +10,11 @@ import {
 } from '@huabu/shared/canvas-engine';
 
 import { applyNodeGeometryPreviews } from './applyNodeGeometryPreview';
-import { selectionZOrder, withoutNodeStyleZIndex } from './selectionZOrder';
+import {
+  canvasNodeZOrder,
+  selectionZOrder,
+  withoutNodeStyleZIndex,
+} from './selectionZOrder';
 
 import type { CanvasNode } from '@/components/Nodes/types';
 import type { NestableNode } from '@huabu/shared/canvas-engine';
@@ -41,6 +45,21 @@ function select(nodes: NestableNode[], ...ids: string[]) {
 }
 
 describe('selectionZOrder', () => {
+  it('keeps committed Ink above a selected document while Sketch or Lasso is armed', () => {
+    const nodes = [
+      node('reader', { selected: true }),
+      node('ink', { type: 'sketch' }),
+    ];
+    for (const z of [
+      canvasNodeZOrder(nodes, 'select', 'sketch'),
+      canvasNodeZOrder(nodes, 'lasso', null),
+    ]) {
+      expect(z.get('ink')).toBeGreaterThan(z.get('reader')!);
+    }
+    expect(
+      canvasNodeZOrder(nodes, 'select', null).get('reader'),
+    ).toBeGreaterThan(canvasNodeZOrder(nodes, 'select', null).get('ink')!);
+  });
   it('returns the base map by identity for empty, unselected and multi-selected scenes', () => {
     for (const nodes of [
       [],

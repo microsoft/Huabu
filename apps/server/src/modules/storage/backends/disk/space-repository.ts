@@ -72,6 +72,22 @@ export class DiskSpaceRepository implements SpaceRepository {
     this.#now = now;
   }
 
+  async setParent(input: {
+    canvasId: string;
+    parentSpaceId: string | null;
+    parentEntryNodeId: string | null;
+  }): Promise<boolean> {
+    this.#assertActiveWorkspace();
+    assertSpaceMutationAllowed(this.#workspacePath, input.canvasId);
+    if (this.#isWorld(input.canvasId))
+      throw new Error('World cannot have a parent');
+    const store = getCanvasStore(input.canvasId);
+    const current = readDiskSpaceRecord(store);
+    if (!current) return false;
+    store.write({ ...current, ...input });
+    return true;
+  }
+
   async list(): Promise<CanvasSummary[]> {
     this.#assertActiveWorkspace();
     refreshCanvasDirIndex();
@@ -79,6 +95,12 @@ export class DiskSpaceRepository implements SpaceRepository {
     return listCanvasDirEntries().map((entry) => {
       return {
         canvasId: entry.id,
+        ...(entry.parentSpaceId
+          ? {
+              parentSpaceId: entry.parentSpaceId,
+              parentEntryNodeId: entry.parentEntryNodeId ?? null,
+            }
+          : {}),
         title: titleVisibleAtDirectory(entry.title, entry.id, entry.filename),
         nodeCount: entry.nodeCount ?? 0,
         createdAt: entry.createdAt ?? 0,

@@ -4,7 +4,7 @@
 import { BookOpen, House } from 'lucide-react';
 import { useEffect, useLayoutEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useMatch } from 'react-router-dom';
 
 import { SettingsPopover } from '@/components/Settings/SettingsPopover';
 
@@ -54,7 +54,17 @@ export function WindowChrome() {
   const { t } = useTranslation();
   const bridge = getElectronBridge();
   const location = useLocation();
+  const canvasMatch = useMatch('/canvas/:canvasId');
+  const routeCanvasId = canvasMatch?.params.canvasId;
   const canvasTitle = useCanvasStore((s) => s.canvasTitle);
+  const storeCanvasId = useCanvasStore((s) => s.canvasId);
+  const isCanvasLoading = useCanvasStore((s) => s.isLoading);
+  const canvasNotFound = useCanvasStore((s) => s.canvasNotFound);
+  const routeCanvasTitle = useWorkspaceStore((s) =>
+    routeCanvasId && Object.hasOwn(s.spaceTitles, routeCanvasId)
+      ? s.spaceTitles[routeCanvasId]
+      : undefined,
+  );
   const workspaceLabel = useWorkspaceLabel();
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
   const canChangeWorkspace = useWorkspaceStore(
@@ -133,10 +143,14 @@ export function WindowChrome() {
   if (isFullScreen && onCanvasRoute) return null;
 
   const showWorkspaceSwitcher = onCanvasListRoute && !!workspaceLabel;
+  const currentCanvasTitle =
+    routeCanvasId === storeCanvasId && !isCanvasLoading && !canvasNotFound
+      ? canvasTitle || routeCanvasTitle
+      : routeCanvasTitle;
   const centerLabel = showWorkspaceSwitcher
     ? workspaceLabel
-    : onCanvasRoute && canvasTitle
-      ? canvasTitle
+    : onCanvasRoute && currentCanvasTitle
+      ? currentCanvasTitle
       : APP_NAME;
 
   return (

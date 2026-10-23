@@ -60,7 +60,7 @@ export interface PendingFrameMutations {
  * reference — this is intentionally lighter than `executor.execute`
  * because we only need enough fidelity for the grid layout pass.
  */
-function applyPendingMutations(
+export function applyPendingMutations(
   nodes: Node[],
   pending: PendingFrameMutations,
 ): Node[] {

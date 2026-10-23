@@ -32,6 +32,7 @@ import {
   resolveArtifactUrl,
   uploadImage as uploadImageApi,
 } from '@/api/artifact';
+import { useSearchSource } from '@/hooks/useSearchSource';
 
 import { attachBlockDragListeners } from './blockDrag';
 import { createMilkdown, type MilkdownInstance } from './createMilkdown';
@@ -122,6 +123,7 @@ export function MilkdownEditor(props: MilkdownEditorProps): React.JSX.Element {
 
   const rootRef = useRef<HTMLDivElement>(null);
   const instanceRef = useRef<MilkdownInstance | null>(null);
+  useSearchSource(rootRef, markdown, 'markdown', instanceRef);
   const [popoverInstance, setPopoverInstance] =
     useState<MilkdownInstance | null>(null);
   /** Most recent value either set on or emitted from the editor. */
@@ -207,6 +209,7 @@ export function MilkdownEditor(props: MilkdownEditorProps): React.JSX.Element {
       });
 
       instanceRef.current = instance;
+      root.setAttribute('data-search-source-ready', '');
       setPopoverInstance(instance);
       onReadyRef.current?.(instance);
 
@@ -224,6 +227,7 @@ export function MilkdownEditor(props: MilkdownEditorProps): React.JSX.Element {
       detachDrag();
       const instance = instanceRef.current;
       instanceRef.current = null;
+      root.removeAttribute('data-search-source-ready');
       setPopoverInstance(null);
       onReadyRef.current?.(null);
       if (instance) void instance.destroy();
@@ -301,7 +305,7 @@ export function MilkdownEditor(props: MilkdownEditorProps): React.JSX.Element {
 
   return (
     <>
-      <div ref={rootRef} className={className} />
+      <div ref={rootRef} className={className} data-search-renderer />
       {editable && popoverInstance ? (
         <MilkdownLinkPopover instance={popoverInstance} rootRef={rootRef} />
       ) : null}

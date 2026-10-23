@@ -144,12 +144,20 @@ export function SketchOverlay({
   const selectNodes = useCanvasStore((s) => s.selectNodes);
   const sketchDraft = useToolStore((s) => s.sketchDraft);
 
-  // Drop any prior canvas selection the moment the sketch tool
-  // activates so a stale selection isn't sent as context on the next
-  // chat turn or surfaced in selection-aware toolbars. The sketch tool
-  // only draws/erases: node selection lives in the Select tool (finger)
-  // and the pen/finger split (pen mode), never in this overlay.
+  // Keep an active finger reader when arming Ink; otherwise discard stale
+  // selection so it cannot leak into the next Chat turn.
   useEffect(() => {
+    const readingId = useGesturePreviewStore.getState().noteReadingNodeId;
+    const selected = useCanvasStore
+      .getState()
+      .nodes.filter((node) => node.selected);
+    if (
+      readEffectiveInputMode() === 'pen' &&
+      selected.length === 1 &&
+      selected[0].type === 'note' &&
+      selected[0].id === readingId
+    )
+      return;
     selectNodes([], false);
   }, [selectNodes]);
   const strokeColor = sketchDraft.strokeColor || DEFAULT_STROKE_COLOR;
@@ -941,6 +949,7 @@ export function SketchOverlay({
     return (
       <div
         ref={setOverlayEl}
+        data-sketch-overlay
         className="absolute inset-0 z-4"
         style={{ cursor: 'none', ...getStylusRawTouchOverlayStyle() }}
         onPointerDown={handleEraserPointerDown}
@@ -969,6 +978,7 @@ export function SketchOverlay({
   return (
     <div
       ref={setOverlayEl}
+      data-sketch-overlay
       className="absolute inset-0 z-4"
       style={{ cursor: dotCursor, ...getStylusRawTouchOverlayStyle() }}
       onPointerDown={handlePointerDown}

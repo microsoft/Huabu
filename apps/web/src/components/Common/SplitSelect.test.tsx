@@ -18,6 +18,34 @@ afterEach(() => {
 });
 
 describe('SplitSelect', () => {
+  it.each([undefined, false, true])(
+    'exposes primary pressed state %s without turning its menu trigger into a toggle',
+    (primaryPressed) => {
+      const onPrimaryAction = vi.fn();
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      act(() =>
+        root?.render(
+          <SplitSelect
+            options={[{ value: 'select', label: 'Select' }]}
+            value="select"
+            onChange={vi.fn()}
+            onPrimaryAction={onPrimaryAction}
+            primaryPressed={primaryPressed}
+          />,
+        ),
+      );
+      const buttons = container.querySelectorAll('button');
+      expect(buttons[0].getAttribute('aria-pressed')).toBe(
+        primaryPressed === undefined ? null : String(primaryPressed),
+      );
+      expect(buttons[1].hasAttribute('aria-pressed')).toBe(false);
+      act(() => buttons[0].click());
+      expect(onPrimaryAction).toHaveBeenCalledExactlyOnceWith('select');
+    },
+  );
+
   it('hides the menu button without disabling the primary action', () => {
     const onPrimaryAction = vi.fn();
     container = document.createElement('div');

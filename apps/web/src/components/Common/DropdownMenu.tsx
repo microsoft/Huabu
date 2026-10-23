@@ -6,12 +6,15 @@ import {
   cloneElement,
   useCallback,
   useEffect,
+  useId,
   useRef,
   useState,
   type ReactElement,
   type ReactNode,
 } from 'react';
 import { Link } from 'react-router-dom';
+
+import { isEditableTarget } from '@/hooks/shortcuts/isEditableTarget';
 
 import { Button } from './Button';
 import { cn } from './cn';
@@ -28,8 +31,28 @@ import {
   type PopoverProps,
 } from './Popover';
 
-import type { ButtonHTMLAttributes } from 'react';
+import type { AriaAttributes, ButtonHTMLAttributes } from 'react';
 import type { LinkProps } from 'react-router-dom';
+
+function getMenuItems(menu: HTMLElement | null) {
+  return Array.from(
+    menu?.querySelectorAll<HTMLElement>(
+      '[role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"]',
+    ) ?? [],
+  ).filter(
+    (item) =>
+      item.closest('[role="menu"]') === menu &&
+      !item.matches(':disabled, [aria-disabled="true"]') &&
+      !item.closest('[hidden], [inert]'),
+  );
+}
+
+function focusMenuEdge(menu: HTMLElement | null, edge: 'first' | 'last') {
+  const items = getMenuItems(menu);
+  const item = edge === 'last' ? items.at(-1) : items[0];
+  (item ?? menu)?.focus({ preventScroll: true });
+  item?.scrollIntoView({ block: 'nearest' });
+}
 
 // ─── DropdownMenuItem ─────────────────────────────────────────────────────────
 
@@ -41,6 +64,7 @@ type DropdownMenuItemProps = {
   /** Optional trailing affordance such as a submenu chevron. */
   trailing?: ReactNode;
   className?: string;
+  role?: 'menuitem' | 'menuitemcheckbox' | 'menuitemradio';
 } & Omit<
   ButtonHTMLAttributes<HTMLButtonElement>,
   'children' | 'className' | 'role'
@@ -74,12 +98,14 @@ export const DropdownMenuItem: React.FC<DropdownMenuItemProps> = ({
   shortcut,
   trailing,
   className,
+  role = 'menuitem',
   ...props
 }) => (
   <Button
     variant="ghost"
     tone="neutral"
-    role="menuitem"
+    role={role}
+    tabIndex={-1}
     className={cn(MENU_ITEM_CLASS, className)}
     {...props}
   >
@@ -112,6 +138,7 @@ export const DropdownMenuLink: React.FC<DropdownMenuLinkProps> = ({
 }) => (
   <Link
     role="menuitem"
+    tabIndex={-1}
     className={cn(
       MENU_ITEM_CLASS,
       'hover:bg-hover cursor-pointer border-none bg-transparent',
@@ -132,13 +159,20 @@ export const DropdownMenuLink: React.FC<DropdownMenuLinkProps> = ({
 // ─── DropdownMenu (container) ─────────────────────────────────────────────────
 
 type DropdownMenuProps = {
+  'aria-label'?: string;
   'aria-describedby'?: string;
   floating?: boolean;
   placement?: PopoverProps['placement'];
   onOpenAutoFocus?: PopoverProps['onOpenAutoFocus'];
+  /** Use dialog for form panels, or presentation when children own menu semantics and navigation. */
+  contentRole?: 'menu' | 'dialog' | 'presentation';
   /** The trigger element (typically a `<Button>`). Receives onClick and aria-expanded. */
   trigger: ReactElement<{
     onClick?: (e: React.MouseEvent) => void;
+    onKeyDown?: (e: React.KeyboardEvent<HTMLElement>) => void;
+    id?: string;
+    'aria-haspopup'?: AriaAttributes['aria-haspopup'];
+    'aria-controls'?: string;
     'aria-expanded'?: boolean;
     'aria-describedby'?: string;
   }>;
@@ -186,10 +220,12 @@ type DropdownMenuProps = {
  * ```
  */
 export const DropdownMenu: React.FC<DropdownMenuProps> = ({
+  'aria-label': label,
   'aria-describedby': describedBy,
   floating = false,
   placement,
   onOpenAutoFocus,
+  contentRole = 'menu',
   trigger,
   children,
   className,
@@ -214,24 +250,43 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
     [isControlled, isOpen, onOpenChange],
   );
   const triggerRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const id = useId();
+  const triggerId = trigger.props.id ?? `${id}-trigger`;
+  const menuId = `${id}-menu`;
+  const initialFocusRef = useRef<'first' | 'last'>('first');
   const justDismissedRef = useRef(false);
+  const wasOpenRef = useRef(isOpen);
+  const restoreFocusRef = useRef(true);
+
+  useEffect(() => {
+    const wasOpen = wasOpenRef.current;
+    wasOpenRef.current = isOpen;
+    if (isOpen) {
+      restoreFocusRef.current = true;
+    } else if (wasOpen && restoreFocusRef.current) {
+      const frame = requestAnimationFrame(() => {
+        if (document.activeElement === document.body) {
+          document.getElementById(triggerId)?.focus({ preventScroll: true });
+        }
+      });
+      return () => cancelAnimationFrame(frame);
+    }
+  }, [isOpen, triggerId]);
 
   const handleToggle = useCallback(() => {
     if (justDismissedRef.current) return;
+    initialFocusRef.current = 'first';
     setIsOpen((prev) => !prev);
   }, [setIsOpen]);
 
   const handleDismiss = useCallback(
     (reason: PopoverDismissReason) => {
       justDismissedRef.current = true;
+      restoreFocusRef.current = reason === 'escape';
       setIsOpen(false);
       requestAnimationFrame(() => {
         justDismissedRef.current = false;
-        if (reason === 'escape' && document.activeElement === document.body) {
-          triggerRef.current
-            ?.querySelector<HTMLElement>('[role="tab"], button')
-            ?.focus({ preventScroll: true });
-        }
       });
     },
     [setIsOpen],
@@ -264,6 +319,12 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
   }, [align, isRight, isTop, opensSideways]);
 
   const clonedTrigger = cloneElement(trigger, {
+    id: triggerId,
+    'aria-haspopup':
+      trigger.props['aria-haspopup'] ??
+      (contentRole === 'presentation' ? undefined : contentRole),
+    'aria-controls':
+      trigger.props['aria-controls'] ?? (isOpen ? menuId : undefined),
     ...(describedBy
       ? {
           'aria-describedby': [trigger.props['aria-describedby'], describedBy]
@@ -279,6 +340,24 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
         handleToggle();
       }
     },
+    onKeyDown: (event) => {
+      trigger.props.onKeyDown?.(event);
+      if (
+        event.defaultPrevented ||
+        event.target !== event.currentTarget ||
+        contentRole !== 'menu' ||
+        (opensSideways
+          ? event.key !== 'ArrowRight'
+          : event.key !== 'ArrowDown' && event.key !== 'ArrowUp')
+      )
+        return;
+      event.preventDefault();
+      event.stopPropagation();
+      const edge = event.key === 'ArrowUp' ? 'last' : 'first';
+      initialFocusRef.current = edge;
+      if (isOpen) focusMenuEdge(menuRef.current, edge);
+      else setIsOpen(true);
+    },
     'aria-expanded': isOpen,
   });
 
@@ -289,7 +368,80 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
       </div>
       {isOpen && (
         <Popover
-          onOpenAutoFocus={onOpenAutoFocus}
+          id={menuId}
+          role={contentRole}
+          aria-label={label}
+          aria-labelledby={
+            contentRole === 'presentation' || label ? undefined : triggerId
+          }
+          contentRef={menuRef}
+          onOpenAutoFocus={() => {
+            if (onOpenAutoFocus) onOpenAutoFocus();
+            else if (contentRole === 'menu')
+              focusMenuEdge(menuRef.current, initialFocusRef.current);
+            else if (contentRole === 'dialog')
+              menuRef.current
+                ?.querySelector<HTMLElement>(
+                  'input:not(:disabled), button:not(:disabled), select:not(:disabled), textarea:not(:disabled)',
+                )
+                ?.focus({ preventScroll: true });
+          }}
+          onKeyDown={(event) => {
+            if (
+              contentRole !== 'menu' ||
+              event.defaultPrevented ||
+              !(event.target instanceof Element) ||
+              isEditableTarget(event.target)
+            )
+              return;
+            if (event.key === 'Tab') {
+              setIsOpen(false);
+              document
+                .getElementById(triggerId)
+                ?.focus({ preventScroll: true });
+              return;
+            }
+            if (event.target.closest('[role="menu"]') !== event.currentTarget)
+              return;
+            if (event.key === 'ArrowLeft' && opensSideways) {
+              event.preventDefault();
+              event.stopPropagation();
+              handleDismiss('escape');
+              return;
+            }
+            if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+              event.stopPropagation();
+              return;
+            }
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.stopPropagation();
+              return;
+            }
+            if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key))
+              return;
+            event.preventDefault();
+            event.stopPropagation();
+            const items = getMenuItems(menuRef.current);
+            if (!items.length) return;
+            const index = items.findIndex(
+              (item) => item === document.activeElement,
+            );
+            const next =
+              event.key === 'Home'
+                ? 0
+                : event.key === 'End'
+                  ? items.length - 1
+                  : index < 0
+                    ? event.key === 'ArrowUp'
+                      ? items.length - 1
+                      : 0
+                    : (index +
+                        (event.key === 'ArrowDown' ? 1 : -1) +
+                        items.length) %
+                      items.length;
+            items[next]?.focus({ preventScroll: true });
+            items[next]?.scrollIntoView({ block: 'nearest' });
+          }}
           reference={floating ? triggerRef.current : undefined}
           placement={placement ?? (isRight ? 'bottom-end' : 'bottom-start')}
           position={computePosition()}
@@ -305,7 +457,14 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
             className,
           )}
         >
-          {children}
+          {contentRole === 'menu' ? (
+            // Keep nested portals outside the scrolling list.
+            <div className="max-h-[max(0px,calc(var(--popover-available-height,calc(100dvh-24px))-10px))] overflow-y-auto overscroll-contain">
+              {children}
+            </div>
+          ) : (
+            children
+          )}
         </Popover>
       )}
     </>
@@ -329,6 +488,8 @@ export const DropdownMenuSubmenu: React.FC<DropdownMenuSubmenuProps> = ({
   className,
 }) => {
   const [open, setOpen] = useState(false);
+  const keyboardOpenRef = useRef(false);
+  const contentRef = useRef<HTMLDivElement>(null);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const cancelClose = useCallback(() => {
@@ -338,7 +499,9 @@ export const DropdownMenuSubmenu: React.FC<DropdownMenuSubmenuProps> = ({
 
   const scheduleClose = useCallback(() => {
     cancelClose();
-    closeTimerRef.current = setTimeout(() => setOpen(false), 120);
+    closeTimerRef.current = setTimeout(() => {
+      if (!contentRef.current?.contains(document.activeElement)) setOpen(false);
+    }, 120);
   }, [cancelClose]);
 
   const openSubmenu = useCallback(() => {
@@ -349,13 +512,20 @@ export const DropdownMenuSubmenu: React.FC<DropdownMenuSubmenuProps> = ({
   useEffect(() => cancelClose, [cancelClose]);
 
   return (
-    <div onPointerEnter={openSubmenu} onPointerLeave={scheduleClose}>
+    <div
+      onPointerEnter={() => {
+        keyboardOpenRef.current = false;
+        openSubmenu();
+      }}
+      onPointerLeave={scheduleClose}
+    >
       <DropdownMenu
         floating
         placement="right-start"
         open={open}
         onOpenChange={setOpen}
         align="right-top"
+        onOpenAutoFocus={keyboardOpenRef.current ? undefined : () => undefined}
         className={className}
         trigger={
           <DropdownMenuItem
@@ -368,9 +538,19 @@ export const DropdownMenuSubmenu: React.FC<DropdownMenuSubmenuProps> = ({
               />
             }
             onKeyDown={(event) => {
-              if (event.key === 'ArrowRight') {
-                event.preventDefault();
-                openSubmenu();
+              if (['ArrowRight', 'Enter', ' '].includes(event.key))
+                keyboardOpenRef.current = true;
+            }}
+            onClick={(event) => {
+              event.preventDefault();
+              keyboardOpenRef.current = true;
+              openSubmenu();
+              if (open) {
+                focusMenuEdge(
+                  contentRef.current?.closest<HTMLElement>('[role="menu"]') ??
+                    null,
+                  'first',
+                );
               }
             }}
           >
@@ -378,7 +558,11 @@ export const DropdownMenuSubmenu: React.FC<DropdownMenuSubmenuProps> = ({
           </DropdownMenuItem>
         }
       >
-        <div onPointerEnter={cancelClose} onPointerLeave={scheduleClose}>
+        <div
+          ref={contentRef}
+          onPointerEnter={cancelClose}
+          onPointerLeave={scheduleClose}
+        >
           {children}
         </div>
       </DropdownMenu>

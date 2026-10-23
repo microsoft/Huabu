@@ -6,6 +6,7 @@ export * from './types/api/index.js';
 export * from './types/agent/index.js';
 export * from './utils/id.js';
 export * from './utils/chat-input.js';
+export * from './utils/text-search.js';
 export * from './utils/agent-icon.js';
 export * from './utils/spatial/index.js';
 export * from './utils/artifact-url.js';

@@ -11,7 +11,10 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { WindowChrome } from './WindowChrome';
+import { APP_NAME } from '../../config/app';
 import { getElectronBridge } from '../../hooks/useElectron';
+import useCanvasStore from '../../store/canvasStore';
+import { useWorkspaceStore } from '../../store/workspaceStore';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
@@ -19,25 +22,29 @@ vi.mock('react-i18next', () => ({
 vi.mock('../../hooks/useElectron', () => ({
   getElectronBridge: vi.fn(),
 }));
-vi.mock('../../store/canvasStore', () => ({
-  default: (select: (state: { canvasTitle: string }) => unknown) =>
-    select({ canvasTitle: 'Test Canvas' }),
-}));
-vi.mock('../../store/workspaceStore', () => ({
-  useWorkspaceLabel: () => 'Test Workspace',
-  useWorkspaceStore: (
-    select: (state: {
-      workspacePath: string;
-      capabilities: { canChangeWorkspace: boolean };
-      canvasCount: number;
-    }) => unknown,
-  ) =>
-    select({
+vi.mock('../../store/canvasStore', async () => {
+  const { create } = await import('zustand');
+  return {
+    default: create(() => ({
+      canvasId: 'c1',
+      canvasTitle: 'Test Canvas',
+      isLoading: false,
+      canvasNotFound: false,
+    })),
+  };
+});
+vi.mock('../../store/workspaceStore', async () => {
+  const { create } = await import('zustand');
+  return {
+    useWorkspaceLabel: () => 'Test Workspace',
+    useWorkspaceStore: create(() => ({
       workspacePath: '/workspace',
       capabilities: { canChangeWorkspace: true },
       canvasCount: 1,
-    }),
-}));
+      spaceTitles: {},
+    })),
+  };
+});
 vi.mock('../../config/handbook', () => ({ openUserHandbook: vi.fn() }));
 vi.mock('../Common/Tooltip', () => ({
   Tooltip: ({ children }: { children: ReactNode }) => children,
@@ -82,6 +89,13 @@ async function renderChrome(route = '/canvas/c1') {
 }
 
 beforeEach(() => {
+  useCanvasStore.setState({
+    canvasId: 'c1',
+    canvasTitle: 'Test Canvas',
+    isLoading: false,
+    canvasNotFound: false,
+  });
+  useWorkspaceStore.setState({ spaceTitles: { c2: 'Next Space' } });
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -107,6 +121,50 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+});
+
+describe('WindowChrome Space titles', () => {
+  it('shows the destination title from the list before canvas loading starts', async () => {
+    await renderChrome('/spaces');
+    await act(async () => navigate('/canvas/c2'));
+
+    expect(container.textContent).toContain('Next Space');
+    expect(container.textContent).not.toContain('Test Canvas');
+
+    act(() => useCanvasStore.setState({ canvasId: 'c2', isLoading: true }));
+    expect(container.textContent).toContain('Next Space');
+    expect(container.textContent).not.toContain('Test Canvas');
+
+    act(() =>
+      useCanvasStore.setState({
+        canvasTitle: 'Loaded Space',
+        isLoading: false,
+      }),
+    );
+    expect(container.textContent).toContain('Loaded Space');
+
+    act(() => useCanvasStore.setState({ canvasTitle: 'Renamed Space' }));
+    expect(container.textContent).toContain('Renamed Space');
+  });
+
+  it('uses the app name for an unknown destination instead of the previous title', async () => {
+    await renderChrome('/canvas/unknown');
+    expect(container.textContent).toContain(APP_NAME);
+    expect(container.textContent).not.toContain('Test Canvas');
+
+    act(() =>
+      useCanvasStore.setState({ canvasId: 'unknown', isLoading: true }),
+    );
+    expect(container.textContent).toContain(APP_NAME);
+    expect(container.textContent).not.toContain('Test Canvas');
+  });
+
+  it('does not show the previous title when the destination is missing', async () => {
+    useCanvasStore.setState({ canvasId: 'missing', canvasNotFound: true });
+    await renderChrome('/canvas/missing');
+    expect(container.textContent).toContain(APP_NAME);
+    expect(container.textContent).not.toContain('Test Canvas');
+  });
 });
 
 describe('WindowChrome fullscreen visibility', () => {

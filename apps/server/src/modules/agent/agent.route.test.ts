@@ -71,6 +71,7 @@ vi.mock('../workspace/paths.js', () => ({
 }));
 
 import agentRoutes from './agent.route.js';
+import { InkAgentModeError } from './ink-response.js';
 
 import type { AgentStreamEvent, ChatEnvelope } from '@huabu/shared';
 
@@ -164,7 +165,7 @@ describe('POST /agent', () => {
       await app.close();
     }
   });
-  it('admits Ink in Ask mode and streams acceptance without upgrading the request', async () => {
+  it('admits Ink in Operate mode and streams acceptance', async () => {
     mocks.beginPreparation.mockReturnValue({
       signal: new AbortController().signal,
       finish: vi.fn(),
@@ -197,7 +198,7 @@ describe('POST /agent', () => {
           content: '',
           threadId: 'thread-a',
           canvasId: 'canvas-a',
-          mode: 'ask',
+          mode: 'operate',
           canvasContext: {
             selectedNodes: [
               {
@@ -211,7 +212,7 @@ describe('POST /agent', () => {
       });
       expect(response.statusCode, response.body).toBe(200);
       expect(mocks.invoke).toHaveBeenCalledWith(
-        expect.objectContaining({ mode: 'ask' }),
+        expect.objectContaining({ mode: 'operate' }),
       );
       expect(mocks.buildChatEnvelope).toHaveBeenCalledWith(
         expect.objectContaining({ inputKind: 'ink-intent', content: '' }),
@@ -219,6 +220,44 @@ describe('POST /agent', () => {
       expect(response.headers['content-type']).toContain('text/event-stream');
       expect(response.body).toContain('event: accepted');
       expect(response.body).toContain('event: done');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('returns an explicit conflict when Ink admission rejects built-in Chat', async () => {
+    mocks.beginPreparation.mockReturnValue({
+      signal: new AbortController().signal,
+      finish: vi.fn(),
+    });
+    mocks.resolveFixedTarget.mockResolvedValue(null);
+    mocks.resolveTarget.mockResolvedValue(null);
+    mocks.invoke.mockRejectedValueOnce(new InkAgentModeError());
+    const app = Fastify();
+    await app.register(agentRoutes, { prefix: '/agent' });
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/agent',
+        payload: {
+          content: '',
+          inputKind: 'ink-intent',
+          threadId: 'thread-a',
+          canvasId: 'canvas-a',
+          mode: 'ask',
+          canvasContext: {
+            selectedNodes: [
+              { id: 'sketch-a', type: 'sketch', strokeIds: ['stroke-a'] },
+            ],
+          },
+        },
+      });
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toEqual({
+        code: 'ink_agent_read_only',
+        message: expect.stringContaining('Choose Agent instead of Chat'),
+      });
+      expect(response.body).not.toContain('event: accepted');
     } finally {
       await app.close();
     }

@@ -54,7 +54,10 @@ import { fileURLToPath } from 'node:url';
 
 import dotenv from 'dotenv';
 
-import { spawnSupervisedDevChild } from './dev-child-supervisor.mjs';
+import {
+  spawnSupervisedDevChild,
+  waitForSupervisedDevChildren,
+} from './dev-child-supervisor.mjs';
 import { findAvailablePort } from './dev-ports.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -211,12 +214,7 @@ function shutdown(code = 0) {
     process.exit(code);
     return;
   }
-  setTimeout(() => {
-    for (const child of children) {
-      killTree(child, 'SIGKILL');
-    }
-    process.exit(code);
-  }, 1000);
+  waitForSupervisedDevChildren(children, code);
 }
 
 process.on('SIGINT', () => shutdown(0));

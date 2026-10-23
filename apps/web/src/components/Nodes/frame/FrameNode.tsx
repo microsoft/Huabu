@@ -92,7 +92,8 @@ export const FrameNode = memo(
             node.type === 'image' ||
             node.type === 'video' ||
             node.type === 'text' ||
-            node.type === 'question';
+            node.type === 'question' ||
+            node.type === 'spacePreview';
           contentInsetX = Math.min(contentInsetX, node.position.x);
         }
 
@@ -169,7 +170,7 @@ export const FrameNode = memo(
       FRAME_DESIGN_CONFIG.header.minWidth;
     const responsiveMetrics = frameVisualMetricsForSize(nodeWidth, nodeHeight);
     const headerMetrics = getFrameHeaderMetrics(
-      contentInsetX,
+      isStructuredLayout ? responsiveMetrics.contentSpacing : contentInsetX,
       nodeWidth,
       responsiveMetrics.titleFontSize,
       responsiveMetrics.headerInset,
@@ -239,6 +240,7 @@ export const FrameNode = memo(
       <DropdownMenu
         floating
         placement="bottom"
+        contentRole="dialog"
         className="node-toolbar-layout"
         trigger={
           <Button variant="ghost" iconOnly title={t('node.frameLayout')}>

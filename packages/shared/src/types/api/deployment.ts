@@ -4,7 +4,11 @@
 import { z } from 'zod';
 
 export const deploymentReadinessIssueSchema = z.object({
-  code: z.enum(['CREDENTIAL_STORE_READ_ONLY', 'REMOTE_HTTP_UNVERIFIED']),
+  code: z.enum([
+    'CREDENTIAL_STORE_READ_ONLY',
+    'REMOTE_HTTP_UNVERIFIED',
+    'REMOTE_LOGIN_DISABLED',
+  ]),
   severity: z.enum(['warning', 'error']),
 });
 export type DeploymentReadinessIssue = z.infer<
@@ -21,7 +25,7 @@ export const deploymentReadinessResponseSchema = z.object({
     basicAuthConfigured: z.boolean(),
   }),
   owner: z.object({
-    policy: z.literal('loopback-or-basic-auth'),
+    policy: z.enum(['loopback-or-basic-auth', 'unauthenticated']),
     allowedForRequest: z.boolean(),
   }),
   credentials: z.object({

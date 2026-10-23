@@ -5,6 +5,9 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { getElectronBridge } from '@/hooks/useElectron';
+import { useDeploymentReadinessStore } from '@/store/deploymentReadinessStore';
+
 const {
   createConnectionCommand,
   getRuntimeConfig,
@@ -26,6 +29,7 @@ vi.mock('@/api/acp', () => ({
   updateExternalAgentRuntimeConfig: updateRuntimeConfig,
 }));
 vi.mock('@/components/Common/Toast', () => ({ toast }));
+vi.mock('@/hooks/useElectron', () => ({ getElectronBridge: vi.fn() }));
 
 import {
   AgentConnectionSettings,
@@ -34,6 +38,7 @@ import {
 
 import type {
   AgentletConnectionCommandResponse,
+  DeploymentReadinessResponse,
   ExternalAgentRuntimeConfig,
 } from '@huabu/shared';
 
@@ -46,7 +51,17 @@ const originalExecCommand = Object.getOwnPropertyDescriptor(
 );
 const content =
   "HUABU_PUBLIC_ORIGIN='https://huabu.example' HUABU_CONNECTION_TOKEN='secret' pnpm start:daemon --max-agents 10";
+const loopbackReadiness: DeploymentReadinessResponse = {
+  bind: { host: '127.0.0.1', scope: 'loopback' },
+  access: { allowedHostsConfigured: false, basicAuthConfigured: false },
+  owner: { policy: 'loopback-or-basic-auth', allowedForRequest: true },
+  credentials: { writable: true, reason: 'available' },
+  transport: { status: 'operator-unverified' },
+  issues: [],
+};
 beforeEach(() => {
+  vi.mocked(getElectronBridge).mockReturnValue(null);
+  useDeploymentReadinessStore.setState({ readiness: null, error: null });
   getRuntimeConfig.mockResolvedValue({ idleTimeoutSecs: 600, maxAgents: 10 });
   updateRuntimeConfig.mockImplementation(
     async (config: ExternalAgentRuntimeConfig) => config,
@@ -67,6 +82,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  useDeploymentReadinessStore.setState({ readiness: null, error: null });
   vi.clearAllMocks();
   if (originalExecCommand)
     Object.defineProperty(document, 'execCommand', originalExecCommand);
@@ -152,6 +168,74 @@ async function blurMaxAgents() {
 }
 
 describe('ExternalAgentRuntimeSettings', () => {
+  it('shows setup guidance before copying when loopback readiness arrives', async () => {
+    await render();
+    expect(container.textContent).not.toContain(
+      'settings.agentletLocalAccessSetup',
+    );
+    await act(async () =>
+      useDeploymentReadinessStore.setState({ readiness: loopbackReadiness }),
+    );
+    const notice = container.querySelector('[role="status"]');
+    expect(notice?.textContent).toBe('settings.agentletLocalAccessSetup');
+    expect(
+      notice?.compareDocumentPosition(button('settings.agentletCommandCopy')),
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(button('settings.agentletCommandCopy').disabled).toBe(false);
+    expect(createConnectionCommand).not.toHaveBeenCalled();
+    expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])(
+    'uses the appropriate desktop guidance for an external server: %s',
+    async (isRemoteServer) => {
+      vi.mocked(getElectronBridge).mockReturnValue({
+        isElectron: true,
+        isRemoteServer,
+        versions: { node: '24', chrome: '130', electron: '43' },
+        platform: 'darwin',
+        titleBarHeight: 32,
+      });
+      useDeploymentReadinessStore.setState({ readiness: loopbackReadiness });
+      await render();
+      expect(container.querySelector('[role="status"]')?.textContent).toBe(
+        isRemoteServer
+          ? 'settings.agentletLocalAccessSetup'
+          : 'settings.agentletDesktopLocalAccess',
+      );
+      expect(container.textContent).not.toContain(
+        isRemoteServer
+          ? 'settings.agentletDesktopLocalAccess'
+          : 'settings.agentletLocalAccessSetup',
+      );
+      expect(createConnectionCommand).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['network', 'unknown', 'error'])(
+    'does not show local-only guidance when readiness is %s',
+    async (mode) => {
+      useDeploymentReadinessStore.setState({
+        readiness:
+          mode === 'network'
+            ? {
+                ...loopbackReadiness,
+                bind: { host: '0.0.0.0', scope: 'network' },
+              }
+            : null,
+        error: mode === 'error' ? 'Readiness unavailable' : null,
+      });
+      await render();
+      expect(container.textContent).not.toContain(
+        'settings.agentletLocalAccessSetup',
+      );
+      expect(container.textContent).not.toContain(
+        'settings.agentletDesktopLocalAccess',
+      );
+      expect(button('settings.agentletCommandCopy').disabled).toBe(false);
+    },
+  );
+
   it('saves custom idle minutes on blur without a permanent Save button', async () => {
     await render();
     await chooseIdleTimeout('settings.custom');
@@ -520,14 +604,11 @@ describe('ExternalAgentRuntimeSettings', () => {
       [...container.querySelectorAll(`[id="${detailsId}"] > p`)].map(
         (paragraph) => paragraph.textContent,
       ),
-    ).toEqual([
-      'settings.agentletEnvFileInstructions',
-      'settings.agentletStableConnection',
-    ]);
+    ).toEqual(['settings.agentletEnvFileInstructions']);
     expect(container.textContent).toContain(
       'pnpm start:daemon --env-file ./connection.env',
     );
-    expect(container.textContent).toContain(
+    expect(container.textContent).not.toContain(
       'settings.agentletStableConnection',
     );
     expect(createConnectionCommand).not.toHaveBeenCalled();
@@ -626,6 +707,21 @@ describe('ExternalAgentRuntimeSettings', () => {
       expect(toast).toHaveBeenCalledWith(key, { tone: 'warning' });
     },
   );
+
+  it('copies a managed token without temporary-key warnings or rendering credentials', async () => {
+    createConnectionCommand.mockResolvedValue({
+      content,
+      source: 'managed',
+      warnings: [],
+    });
+    await render();
+    await act(async () => button('settings.agentletCommandCopy').click());
+    expect(toast).toHaveBeenCalledWith('settings.agentletCommandCopied', {
+      tone: 'success',
+    });
+    expect(container.querySelector('[role="status"]')).toBeNull();
+    expect(container.textContent).not.toContain('secret');
+  });
 
   it('shows every applicable connection warning inline without exposing copied content', async () => {
     createConnectionCommand.mockResolvedValue({

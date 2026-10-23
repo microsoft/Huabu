@@ -18,13 +18,25 @@ export interface AgentProcessEvents {
 
 export class AgentProcess extends EventEmitter<AgentProcessEvents> {
   private process: ChildProcess | null = null
+  private processGroupId: number | null = null
   private readonly options: AgentProcessOptions
 
   get pid(): number | undefined {
-    return this.process?.pid
+    return this.process?.pid ?? this.processGroupId ?? undefined
   }
 
   get running(): boolean {
+    if (this.processGroupId !== null) {
+      try {
+        process.kill(-this.processGroupId, 0)
+        return true
+      } catch (error) {
+        // Permission denial proves neither exit nor safe release of the owned group.
+        if (error instanceof Error && 'code' in error && error.code === 'EPERM') return true
+        if (!(error instanceof Error && 'code' in error && error.code === 'ESRCH')) throw error
+        this.processGroupId = null
+      }
+    }
     return this.process !== null && this.process.exitCode === null
   }
 
@@ -35,7 +47,7 @@ export class AgentProcess extends EventEmitter<AgentProcessEvents> {
 
   /** Spawn the agent subprocess */
   start(): void {
-    if (this.process) {
+    if (this.process || this.running) {
       throw new Error('Agent process already running')
     }
 
@@ -48,7 +60,10 @@ export class AgentProcess extends EventEmitter<AgentProcessEvents> {
         ? this.options.env
         : { ...process.env, ...this.options.env },
       stdio: ['pipe', 'pipe', 'pipe'],
+      detached: process.platform !== 'win32',
+      windowsHide: true,
     })
+    this.processGroupId = process.platform === 'win32' ? null : (this.process.pid ?? null)
 
     const { stdout, stderr } = this.process
 
@@ -100,13 +115,47 @@ export class AgentProcess extends EventEmitter<AgentProcessEvents> {
     this.process?.stdin?.end()
   }
 
-  /** Send SIGTERM to the agent */
-  terminate(): void {
-    this.process?.kill('SIGTERM')
+  /** Terminate the owned process tree, including shell wrappers. */
+  async terminate(): Promise<void> {
+    await this.signalTree('SIGTERM')
   }
 
-  /** Send SIGKILL to the agent */
-  kill(): void {
-    this.process?.kill('SIGKILL')
+  /** Forcefully terminate the owned process tree. */
+  async kill(): Promise<void> {
+    await this.signalTree('SIGKILL')
+  }
+
+  private async signalTree(signal: NodeJS.Signals): Promise<void> {
+    if (process.platform !== 'win32') {
+      if (this.processGroupId === null) return
+      try {
+        process.kill(-this.processGroupId, signal)
+      } catch (error) {
+        if (!(error instanceof Error && 'code' in error && error.code === 'ESRCH')) throw error
+        this.processGroupId = null
+      }
+      return
+    }
+    const pid = this.process?.pid
+    if (pid === undefined) return
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn('taskkill', ['/PID', String(pid), '/T', '/F'], {
+        windowsHide: true,
+        stdio: 'ignore',
+      })
+      const timer = setTimeout(() => {
+        child.kill('SIGKILL')
+        reject(new Error(`Timed out terminating agent process tree: ${pid}`))
+      }, 5000)
+      child.once('error', (error) => {
+        clearTimeout(timer)
+        reject(error)
+      })
+      child.once('exit', (code) => {
+        clearTimeout(timer)
+        if (code === 0) resolve()
+        else reject(new Error(`Unable to terminate agent process tree ${pid}: taskkill exited ${code}`))
+      })
+    })
   }
 }

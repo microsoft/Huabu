@@ -15,6 +15,8 @@ import { fileURLToPath } from 'node:url';
 
 import dotenv from 'dotenv';
 
+import { resolveServerDataDir } from '../packages/client-runtime/dist/bootstrap.js';
+
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..');
 
@@ -36,9 +38,9 @@ process.env.WEB_DIST_PATH = path.resolve(
 
 // Match `pnpm dev:server`, whose working directory is apps/server, so switching
 // launch modes keeps using the same credential store, logs, and saved settings.
-process.env.HUABU_DATA_DIR = path.resolve(
+process.env.HUABU_DATA_DIR = resolveServerDataDir(
   repoRoot,
-  process.env.HUABU_DATA_DIR ?? 'apps/server/data',
+  process.env.HUABU_DATA_DIR,
 );
 
 await import('../apps/server/dist-bundle/server.js');

@@ -139,6 +139,7 @@ export const fitNodesOnCanvas = (
   rfInstance: ReactFlowInstance,
   nodeIds: string[],
   padding = 0.15,
+  maxZoom = MAX_ZOOM,
 ): Promise<boolean> => {
   const bounds = getReliableNodeBounds(rfInstance, nodeIds);
   if (!bounds) return Promise.resolve(false);
@@ -152,7 +153,7 @@ export const fitNodesOnCanvas = (
       area.width,
       area.height,
       MIN_ZOOM,
-      MAX_ZOOM,
+      maxZoom,
       padding,
     );
     return rfInstance.setViewport({

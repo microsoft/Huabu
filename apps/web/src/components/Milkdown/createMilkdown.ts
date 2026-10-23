@@ -312,6 +312,8 @@ export interface MilkdownInlineMathState {
 export interface MilkdownInstance {
   /** Read the current document as markdown. */
   getMarkdown(): string;
+  /** Resolve a verified visible-text projection through the editor model. */
+  getSearchRange(text: string, start: number, end: number): Range | null;
   /**
    * Replace the entire document. Uses Milkdown's `replaceAll` macro so
    * undo history is preserved.
@@ -1963,6 +1965,7 @@ export async function createMilkdown(
             : inheritedAttributes),
           ...(ariaLabel ? { 'aria-label': ariaLabel } : {}),
           'data-link-activation': linkActivation,
+          'data-preview-search-content': '',
         }),
       };
     });
@@ -2572,6 +2575,31 @@ export async function createMilkdown(
 
   const instance: MilkdownInstance = {
     getMarkdown: () => crepe.getMarkdown(),
+    getSearchRange: (text, start, end) =>
+      crepe.editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        if (view.state.doc.textContent !== text) return null;
+        let offset = 0;
+        let from: number | undefined;
+        let to: number | undefined;
+        view.state.doc.descendants((node, position) => {
+          if (!node.isText) return;
+          const next = offset + node.nodeSize;
+          if (from === undefined && start >= offset && start < next)
+            from = position + start - offset;
+          if (end > offset && end <= next) to = position + end - offset;
+          offset = next;
+        });
+        if (from === undefined || to === undefined) return null;
+        const first = view.domAtPos(from, 1);
+        const last = view.domAtPos(to, -1);
+        const range = document.createRange();
+        range.setStart(first.node, first.offset);
+        range.setEnd(last.node, last.offset);
+        return !range.collapsed && range.toString() === text.slice(start, end)
+          ? range
+          : null;
+      }),
     setMarkdown: (markdown: string) => {
       crepe.editor.action(replaceAll(normalizeMathDelimiters(markdown)));
     },

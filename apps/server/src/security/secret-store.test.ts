@@ -51,6 +51,51 @@ const MODULE_RELOAD_TIMEOUT_MS = 30_000;
 
 describe('initializeSecretStore — master key isolation', () => {
   it(
+    'reads existing saved secrets without creating new storage or rewriting ciphertext',
+    async () => {
+      const directory = createDataDir();
+      const env = {
+        HUABU_DATA_DIR: join(directory, 'data'),
+        HUABU_CONFIG_DIR: join(directory, 'config'),
+      };
+      vi.stubEnv('HUABU_SECRET_BRIDGE', '');
+      const { SECRET_IDS } = await import('./secret-ids.js');
+      const store = await import('./secret-store.js');
+      expect(
+        await store.readPersistedSecret(SECRET_IDS.remoteAccessPassword, env),
+      ).toBeNull();
+      expect(existsSync(env.HUABU_DATA_DIR)).toBe(false);
+      expect(existsSync(env.HUABU_CONFIG_DIR)).toBe(false);
+      await store.initializeSecretStore(env);
+      await store.setSecret(
+        SECRET_IDS.remoteAccessPassword,
+        'saved-private-password',
+      );
+      const path = join(env.HUABU_DATA_DIR, 'encrypted-secrets.json');
+      const ciphertext = readFileSync(path, 'utf8');
+      vi.resetModules();
+      const restored = await import('./secret-store.js');
+      expect(
+        await restored.readPersistedSecret(
+          SECRET_IDS.remoteAccessPassword,
+          env,
+        ),
+      ).toBe('saved-private-password');
+      expect(readFileSync(path, 'utf8')).toBe(ciphertext);
+      vi.resetModules();
+      const wrongKey = await import('./secret-store.js');
+      await expect(
+        wrongKey.readPersistedSecret(SECRET_IDS.remoteAccessPassword, {
+          ...env,
+          HUABU_SECRET_KEY: Buffer.alloc(32, 4).toString('base64'),
+        }),
+      ).rejects.toThrow(/key/i);
+      expect(readFileSync(path, 'utf8')).toBe(ciphertext);
+    },
+    MODULE_RELOAD_TIMEOUT_MS,
+  );
+
+  it(
     'persists one encrypted OCR record and restores explicit nulls without reviving legacy values',
     async () => {
       const dataDir = createDataDir();
@@ -242,13 +287,26 @@ describe('initializeSecretStore — master key isolation', () => {
   );
 
   it(
-    'leaves the environment untouched when no master key is set',
+    'automatically initializes writable storage and restores credentials without an env key',
     async () => {
       process.env.HUABU_DATA_DIR = createDataDir();
 
       const mod = await import('./secret-store.js');
       await mod.initializeSecretStore();
-
+      expect(mod.isSecretStoreWritable()).toBe(true);
+      await mod.setSecret('integration:test:key', 'private-test-value');
+      expect(
+        readFileSync(
+          join(process.env.HUABU_DATA_DIR, 'encrypted-secrets.json'),
+          'utf8',
+        ),
+      ).not.toContain('private-test-value');
+      vi.resetModules();
+      const restored = await import('./secret-store.js');
+      await restored.initializeSecretStore();
+      expect(restored.getPersistedSecret('integration:test:key')).toBe(
+        'private-test-value',
+      );
       expect(process.env.HUABU_SECRET_KEY).toBeUndefined();
     },
     MODULE_RELOAD_TIMEOUT_MS,

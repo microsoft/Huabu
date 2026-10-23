@@ -14,6 +14,7 @@ const {
   cancelActiveNodeDrag,
   getState,
   nodeIdAtScreenPoint,
+  onNodeDrag,
   onNodeDragStart,
   onNodeDragStop,
   onNodesChange,
@@ -21,6 +22,7 @@ const {
   cancelActiveNodeDrag: vi.fn(),
   getState: vi.fn(),
   nodeIdAtScreenPoint: vi.fn(),
+  onNodeDrag: vi.fn(),
   onNodeDragStart: vi.fn(),
   onNodeDragStop: vi.fn(),
   onNodesChange: vi.fn(),
@@ -78,6 +80,7 @@ beforeEach(() => {
   getState.mockImplementation(() => ({
     nodes: [selectedNode],
     cancelActiveNodeDrag,
+    onNodeDrag,
     onNodeDragStart,
     onNodeDragStop,
     onNodesChange,
@@ -85,6 +88,28 @@ beforeEach(() => {
 });
 
 describe('createNodeDragRecognizer', () => {
+  it('publishes live preview geometry and pointer coordinates after activation', () => {
+    const recognizer = createNodeDragRecognizer();
+    recognizer.onDown(pointer(1, 100, 100), context);
+    recognizer.onMove?.(pointer(1, 105, 100), context);
+    expect(onNodeDrag).not.toHaveBeenCalled();
+    recognizer.onMove?.(pointer(1, 120, 130), context);
+    expect(onNodeDrag).toHaveBeenLastCalledWith(
+      expect.objectContaining({ clientX: 120, clientY: 130 }),
+      expect.objectContaining({ id: 'selected', position: { x: 30, y: 50 } }),
+      [expect.objectContaining({ id: 'selected', position: { x: 30, y: 50 } })],
+    );
+    recognizer.onMove?.(pointer(1, 140, 150), context);
+    expect(onNodeDrag).toHaveBeenLastCalledWith(
+      expect.objectContaining({ clientX: 140, clientY: 150 }),
+      expect.objectContaining({ id: 'selected', position: { x: 50, y: 70 } }),
+      [expect.objectContaining({ id: 'selected', position: { x: 50, y: 70 } })],
+    );
+    expect(onNodesChange.mock.invocationCallOrder[0]).toBeLessThan(
+      onNodeDrag.mock.invocationCallOrder[0],
+    );
+  });
+
   it('yields selected-node finger taps to a pending resource binding', () => {
     useInkSigilStore.setState({
       pending: {
@@ -181,6 +206,7 @@ describe('createNodeDragRecognizer', () => {
     getState.mockImplementation(() => ({
       nodes: [selectedNode, selectedSketch],
       cancelActiveNodeDrag,
+      onNodeDrag,
       onNodeDragStart,
       onNodeDragStop,
       onNodesChange,

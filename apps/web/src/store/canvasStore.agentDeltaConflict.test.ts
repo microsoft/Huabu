@@ -69,6 +69,44 @@ afterEach(() => {
 });
 
 describe('agent delta conflict protection', () => {
+  it.each([
+    { lastActivityAt: 1720000000000 },
+    { label: 'Prepared title', conversationTitleSource: 'fallback' },
+  ])(
+    'preserves local card scale and geometry during projection %j',
+    (patch) => {
+      const before = {
+        ...question('Prompt', 'idle'),
+        style: { width: 320 },
+        data: { ...question('Prompt', 'idle').data, style: { fontSize: 24 } },
+      };
+      const local = {
+        ...before,
+        position: { x: 60, y: 80 },
+        style: { width: 480 },
+        data: { ...before.data, style: { fontSize: 36, accent: 'teal' } },
+      };
+      useCanvasStore.getState()._setStateNoAutosave({ nodes: [local] });
+      useCanvasStore.getState().applyDeltasFromAgent(
+        [
+          {
+            type: 'REPLACE_NODE',
+            prev: before,
+            next: { ...before, data: { ...before.data, ...patch } },
+          },
+        ],
+        2,
+        pendingEffects,
+        true,
+      );
+      expect(useCanvasStore.getState().nodes[0]).toMatchObject({
+        ...local,
+        data: { ...local.data, ...patch },
+      });
+      expect(canvasHistoryManager.canUndo).toBe(false);
+    },
+  );
+
   it('keeps first submitted intent out of undo and rebases earlier geometry snapshots', () => {
     const before = question('', 'idle');
     canvasHistoryManager.takeSnapshot([before], []);

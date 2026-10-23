@@ -29,15 +29,15 @@ const STATUS_CONFIG: Record<
     icon: BadgeInfo,
     labelKey: 'messages.generationInterrupted',
     bg: 'bg-info-bg',
-    iconColor: 'text-info-light',
-    textColor: 'text-info',
+    iconColor: 'text-info',
+    textColor: 'text-fg-default',
     retryHoverBg: 'enabled:hover:bg-info-bg-hover',
   },
   error: {
     icon: XCircle,
     labelKey: 'messages.somethingWentWrong',
     bg: 'bg-danger-bg',
-    iconColor: 'text-danger-light',
+    iconColor: 'text-danger',
     textColor: 'text-danger',
     retryHoverBg: 'enabled:hover:bg-danger-bg-hover',
   },
@@ -55,10 +55,10 @@ export const StatusMessage = ({
   return (
     <div className="flex justify-start">
       <div
-        className={`my-2 flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-xs ${config.bg}`}
+        className={`my-2 flex w-full items-start gap-2 rounded-md px-3 py-1.5 text-xs leading-5 ${config.bg}`}
       >
-        <Icon size={12} className={config.iconColor} />
-        <span className={`min-w-0 flex-1 break-words ${config.textColor}`}>
+        <Icon size={16} className={`mt-0.5 shrink-0 ${config.iconColor}`} />
+        <span className={`min-w-0 flex-1 wrap-anywhere ${config.textColor}`}>
           {detail || t(config.labelKey)}
         </span>
         {onRetry && (
@@ -67,7 +67,7 @@ export const StatusMessage = ({
             iconOnly
             size="sm"
             onClick={onRetry}
-            className={`${config.textColor} ${config.retryHoverBg}`}
+            className={`shrink-0 ${config.textColor} ${config.retryHoverBg}`}
             title={t('messages.retry')}
           >
             <RefreshCw />

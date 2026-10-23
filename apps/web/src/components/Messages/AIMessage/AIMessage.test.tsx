@@ -366,6 +366,46 @@ describe('assistant activity presentation', () => {
   });
 
   describe('shared disclosure compatibility', () => {
+    it.each(['generic', 'merged'] as const)(
+      'keeps compact %s targets and visible chevrons without enlarging text',
+      (variant) => {
+        render(
+          variant === 'generic'
+            ? [tool('a')]
+            : ['a', 'b'].map((id) => ({
+                kind: 'tool',
+                variant: 'agent_tool',
+                toolName: 'read',
+                toolCallId: id,
+                title: 'Read',
+                status: 'completed',
+                data: {
+                  tool: 'read',
+                  status: 'success',
+                  data: { path: `${id}.md`, content: id },
+                },
+              })),
+          { isStreaming: false },
+        );
+        const trigger = button(
+          variant === 'generic' ? 'Read a' : 'messages.readFiles:2',
+        );
+        expect(trigger.classList.contains('min-h-6')).toBe(false);
+        expect(trigger.classList.contains('pointer-coarse:min-h-6')).toBe(true);
+        expect(trigger.classList.contains('enabled:hover:bg-transparent')).toBe(
+          true,
+        );
+        expect(trigger.parentElement?.classList.contains('pl-5')).toBe(true);
+        expect(trigger.classList.contains('text-xs')).toBe(true);
+        expect(trigger.classList.contains('focus-visible:outline-2')).toBe(
+          true,
+        );
+        const chevron = trigger.querySelector('svg');
+        expect(chevron?.classList.contains('text-fg-muted')).toBe(true);
+        expect(chevron?.classList.contains('text-fg-muted/50')).toBe(false);
+      },
+    );
+
     it('retains the existing uncontrolled collapseSignal behavior', () => {
       const renderDisclosure = (closed: boolean) =>
         act(() =>

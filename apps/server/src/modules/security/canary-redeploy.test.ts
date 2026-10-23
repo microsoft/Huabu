@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFile, execFileSync, spawnSync } from 'node:child_process';
 import {
   chmodSync,
   mkdtempSync,
@@ -10,8 +10,10 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -24,19 +26,87 @@ import {
   setCanaryRedeployConfig,
   writeCanaryRedeployResult,
 } from './canary-redeploy.js';
+import {
+  getDeploymentEnvironment,
+  installDeploymentEnvironment,
+  resolveDeploymentEnvironment,
+} from '../../security/deployment-settings.js';
+
+describe('Canary readiness probe', () => {
+  it.each(['saved', 'environment'])(
+    'authenticates the tracked script probe with %s credentials',
+    async (source) => {
+      const script = readFileSync(
+        new URL('../../../../../scripts/start-huabu.sh', import.meta.url),
+        'utf8',
+      );
+      const probe = script.match(
+        /if node --input-type=module -e '([\s\S]*?)' "\$server_port"/u,
+      )?.[1];
+      if (!probe) throw new Error('Tracked Canary readiness probe not found');
+      const expected = Buffer.from(
+        source === 'saved'
+          ? 'saved-owner:saved-password'
+          : 'environment-owner:environment-password',
+      ).toString('base64');
+      const server = createServer((request, response) => {
+        response.writeHead(
+          request.url === '/api/deployment/readiness' &&
+            request.headers.authorization === `Basic ${expected}`
+            ? 200
+            : 401,
+        );
+        response.end();
+      });
+      await new Promise<void>((resolve) =>
+        server.listen(0, '127.0.0.1', resolve),
+      );
+      try {
+        const address = server.address();
+        if (!address || typeof address === 'string') {
+          throw new Error('Readiness fixture did not bind a TCP port');
+        }
+        await promisify(execFile)(
+          process.execPath,
+          ['--input-type=module', '-e', probe, String(address.port)],
+          {
+            timeout: 10_000,
+            env: {
+              ...process.env,
+              HUABU_BASIC_AUTH_USER: 'environment-owner',
+              HUABU_BASIC_AUTH_PASS: 'environment-password',
+              HUABU_CANARY_BASIC_AUTH_USER:
+                source === 'saved' ? 'saved-owner' : undefined,
+              HUABU_CANARY_BASIC_AUTH_PASS:
+                source === 'saved' ? 'saved-password' : undefined,
+            },
+          },
+        );
+      } finally {
+        await new Promise<void>((resolve, reject) =>
+          server.close((error) => (error ? reject(error) : resolve())),
+        );
+      }
+    },
+  );
+});
 
 describe('Canary redeployment service', () => {
   let root: string;
   let remote: string;
   let dataDir: string;
+  let deploymentEnvironment: NodeJS.ProcessEnv;
   const originalEnv = {
     enabled: process.env.HUABU_CANARY_REDEPLOY_ENABLED,
     repoRoot: process.env.HUABU_REPO_ROOT,
     deployedSha: process.env.HUABU_DEPLOYED_SHA,
     dataDir: process.env.HUABU_DATA_DIR,
+    username: process.env.HUABU_BASIC_AUTH_USER,
+    password: process.env.HUABU_BASIC_AUTH_PASS,
   };
 
   beforeEach(() => {
+    deploymentEnvironment = getDeploymentEnvironment();
     root = mkdtempSync(join(tmpdir(), 'huabu-canary-repo-'));
     remote = mkdtempSync(join(tmpdir(), 'huabu-canary-remote-'));
     dataDir = mkdtempSync(join(tmpdir(), 'huabu-canary-data-'));
@@ -81,6 +151,9 @@ describe('Canary redeployment service', () => {
     restore('HUABU_REPO_ROOT', originalEnv.repoRoot);
     restore('HUABU_DEPLOYED_SHA', originalEnv.deployedSha);
     restore('HUABU_DATA_DIR', originalEnv.dataDir);
+    restore('HUABU_BASIC_AUTH_USER', originalEnv.username);
+    restore('HUABU_BASIC_AUTH_PASS', originalEnv.password);
+    installDeploymentEnvironment(deploymentEnvironment);
     resetCanaryRedeployStateForTest();
     rmSync(root, { recursive: true, force: true });
     rmSync(remote, { recursive: true, force: true });
@@ -203,6 +276,59 @@ describe('Canary redeployment service', () => {
       },
     });
   });
+
+  it.each(['basic', 'none'] as const)(
+    'passes effective %s authentication only through probe-specific runner variables',
+    async (authentication) => {
+      delete process.env.HUABU_BASIC_AUTH_USER;
+      delete process.env.HUABU_BASIC_AUTH_PASS;
+      installDeploymentEnvironment(
+        resolveDeploymentEnvironment(
+          {},
+          {
+            version: 1,
+            remoteAccess: {
+              enabled: true,
+              authentication,
+              publicOrigin: 'https://canary.example',
+              workspacePath: join(root, 'home'),
+            },
+          },
+          authentication === 'basic' ? 'saved-test-password' : null,
+        ),
+      );
+      const resultPath = join(dataDir, 'runner-environment.json');
+      writeFileSync(
+        join(root, 'scripts/canary-redeploy-runner.mjs'),
+        `import { writeFileSync } from 'node:fs';
+           writeFileSync(${JSON.stringify(resultPath)}, JSON.stringify({
+             usernameMatches: process.env.HUABU_CANARY_BASIC_AUTH_USER === 'owner',
+             passwordMatches: process.env.HUABU_CANARY_BASIC_AUTH_PASS === 'saved-test-password',
+             standardCredentialsPresent: process.env.HUABU_BASIC_AUTH_USER !== undefined || process.env.HUABU_BASIC_AUTH_PASS !== undefined,
+             passwordInArguments: process.argv.some(value => value.includes('saved-test-password')),
+           }));`,
+      );
+      await expect(requestCanaryRedeploy('alpha')).resolves.toMatchObject({
+        redeploy: { state: 'requested' },
+      });
+      await expect
+        .poll(() => JSON.parse(readFileSync(resultPath, 'utf8')), {
+          timeout: 5000,
+        })
+        .toEqual({
+          usernameMatches: authentication === 'basic',
+          passwordMatches: authentication === 'basic',
+          standardCredentialsPresent: false,
+          passwordInArguments: false,
+        });
+      expect(process.env.HUABU_BASIC_AUTH_USER).toBeUndefined();
+      expect(process.env.HUABU_BASIC_AUTH_PASS).toBeUndefined();
+      expect(process.env.HUABU_CANARY_BASIC_AUTH_PASS).toBeUndefined();
+      expect(
+        readFileSync(join(dataDir, 'canary-redeploy-status.json'), 'utf8'),
+      ).not.toContain('saved-test-password');
+    },
+  );
 
   it('records a detached runner failure without exposing command output', () => {
     const hook = join(root, 'failing-hook.sh');

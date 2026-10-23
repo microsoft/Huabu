@@ -5,39 +5,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 
-import { ApiError } from '@/api/_client';
-import { listCanvases, moveCanvasSelection } from '@/api/canvas';
-import { toast } from '@/components/Common/Toast';
-import useCanvasStore, { drainPendingSaves } from '@/store/canvasStore';
+import { getDescendantIds } from '@huabu/shared/canvas-engine';
+
+import { listCanvases } from '@/api/canvas';
+import { moveNodesToSpace } from '@/components/Space/moveNodesToSpace';
+import useCanvasStore from '@/store/canvasStore';
 import { useWorkspaceStore } from '@/store/workspaceStore';
+import { spaceAncestorIds } from '@/utils/spaceHierarchy';
 
-import { MoveSelectionPanel } from './MoveSelectionPanel';
-
-import type { SelectOption } from '@/components/Common/Select';
-import type { MoveSelectionBody, MoveSelectionErrorCode } from '@huabu/shared';
-
-const MOVE_ERROR_MESSAGES = {
-  MOVE_SOURCE_STALE: 'moveSelection.errors.sourceStale',
-  MOVE_SOURCE_NODE_MISSING: 'moveSelection.errors.sourceNodeMissing',
-  MOVE_NODE_NOT_MOVABLE: 'moveSelection.errors.nodeNotMovable',
-  MOVE_DESTINATION_MISSING: 'moveSelection.errors.destinationMissing',
-  MOVE_DESTINATION_SAME_AS_SOURCE: 'moveSelection.errors.sameDestination',
-  MOVE_DESTINATION_CREATE_FAILED:
-    'moveSelection.errors.destinationCreateFailed',
-  MOVE_DESTINATION_CLEANUP_FAILED: 'moveSelection.errors.reconcile',
-  MOVE_WORLD_NOT_ALLOWED: 'moveSelection.errors.worldNotAllowed',
-  MOVE_AGENT_RUNNING: 'moveSelection.errors.agentRunning',
-  MOVE_AGENT_TASK_OWNED: 'moveSelection.errors.agentTaskOwned',
-  MOVE_AGENT_PENDING_CHANGES: 'moveSelection.errors.agentPendingChanges',
-  MOVE_AGENT_HISTORY_INVALID: 'moveSelection.errors.agentHistoryInvalid',
-  MOVE_AGENT_CLOSE_FAILED: 'moveSelection.errors.agentCloseFailed',
-  MOVE_AGENT_REHOME_FAILED: 'moveSelection.errors.agentRehomeFailed',
-  MOVE_ARTIFACT_MISSING: 'moveSelection.errors.artifactMissing',
-  MOVE_DESTINATION_CONFLICT: 'moveSelection.errors.destinationConflict',
-  MOVE_COMPENSATION_FAILED: 'moveSelection.errors.reconcile',
-  MOVE_OUTCOME_UNKNOWN: 'moveSelection.errors.reconcile',
-  MOVE_FAILED: 'moveSelection.failed',
-} as const satisfies Record<MoveSelectionErrorCode, string>;
+import {
+  MoveSelectionPanel,
+  type MoveDestinationOption,
+} from './MoveSelectionPanel';
 
 export function MoveSelectionPopover() {
   const isOpen = useCanvasStore((state) => state.moveSelectionDialogOpen);
@@ -58,6 +37,27 @@ function MoveSelectionContent() {
     useCanvasStore.getState().nodes.filter((node) => node.selected),
   );
   const selectedNodeIds = selection.map((node) => node.id);
+  const [movedIds] = useState(() => {
+    const ids = new Set(selection.map((node) => node.id));
+    for (const node of selection) {
+      if (node.type === 'frame') {
+        for (const id of getDescendantIds(
+          useCanvasStore.getState().nodes,
+          node.id,
+        ))
+          ids.add(id);
+      }
+    }
+    return ids;
+  });
+  const [boundaryEdgeCount] = useState(
+    () =>
+      useCanvasStore
+        .getState()
+        .edges.filter(
+          (edge) => movedIds.has(edge.source) !== movedIds.has(edge.target),
+        ).length,
+  );
   const selectionIds = useMemo(
     () => new Set(selection.map((node) => node.id)),
     [selection],
@@ -69,11 +69,12 @@ function MoveSelectionContent() {
       selected.every((node) => selectionIds.has(node.id))
     );
   });
-  const [options, setOptions] = useState<SelectOption<string>[]>([]);
+  const [options, setOptions] = useState<MoveDestinationOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const mounted = useRef(true);
+  const inFlight = useRef(false);
 
   useEffect(() => {
     mounted.current = true;
@@ -98,12 +99,46 @@ function MoveSelectionContent() {
     void listCanvases()
       .then(({ canvases }) => {
         if (!active) return;
+        const titles = Object.fromEntries(
+          canvases.map((canvas) => [canvas.canvasId, canvas]),
+        );
+        const movedChildren = new Set(
+          canvases
+            .filter(
+              (canvas) =>
+                canvas.parentSpaceId === canvasId &&
+                canvas.parentEntryNodeId &&
+                movedIds.has(canvas.parentEntryNodeId),
+            )
+            .map((canvas) => canvas.canvasId),
+        );
         const next = canvases
-          .filter((canvas) => canvas.canvasId !== canvasId)
-          .map((canvas) => ({
-            value: canvas.canvasId,
-            label: canvas.title || t('moveSelection.untitledSpace'),
-          }));
+          .filter(
+            (canvas) =>
+              canvas.canvasId !== useWorkspaceStore.getState().worldCanvasId,
+          )
+          .map((canvas) => {
+            const ancestors = spaceAncestorIds(canvas.canvasId, titles);
+            const disabledReason =
+              canvas.canvasId === canvasId
+                ? t('moveSelection.currentSpace')
+                : ancestors.some((id) => movedChildren.has(id))
+                  ? t('moveSelection.errors.hierarchyCycle')
+                  : undefined;
+            return {
+              value: canvas.canvasId,
+              parentValue: canvas.parentSpaceId,
+              label: canvas.title || t('moveSelection.untitledSpace'),
+              disabled: !!disabledReason,
+              disabledReason,
+              description: ancestors
+                .slice(0, -1)
+                .map(
+                  (id) => titles[id]?.title || t('moveSelection.untitledSpace'),
+                )
+                .join(' / '),
+            };
+          });
         setOptions(next);
       })
       .catch(() => {
@@ -115,70 +150,29 @@ function MoveSelectionContent() {
     return () => {
       active = false;
     };
-  }, [canvasId, t]);
+  }, [canvasId, movedIds, t]);
 
   const close = useCallback(() => {
     if (!submitting) setOpen(false);
   }, [setOpen, submitting]);
 
-  const submit = async (
-    destination: MoveSelectionBody['destination'],
-    createSourcePreview: boolean,
-  ) => {
+  const submit = async (destinationId: string) => {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setSubmitting(true);
-    let moveRequested = false;
     try {
-      await drainPendingSaves();
-      if (
-        useCanvasStore.getState().canvasId !== canvasId ||
-        useWorkspaceStore.getState().workspaceId !== workspaceId
-      ) {
-        toast(t('moveSelection.errors.sourceStale'), {
-          tone: 'danger',
-          duration: 0,
-        });
-        return;
-      }
-      const expectedSourceVersion = useCanvasStore.getState().version;
-      moveRequested = true;
-      const result = await moveCanvasSelection(canvasId, {
+      const moved = await moveNodesToSpace(
+        canvasId,
         selectedNodeIds,
-        destination,
-        createSourcePreview,
-        expectedSourceVersion,
-      });
-      if (useWorkspaceStore.getState().workspaceId === workspaceId) {
-        useWorkspaceStore
-          .getState()
-          .setSpaceTitle(result.destination.canvasId, result.destination.title);
-        void useWorkspaceStore
-          .getState()
-          .refreshSpaceTitles([canvasId, result.destination.canvasId]);
-      }
-      if (mounted.current) setOpen(false);
-      toast(
-        t('moveSelection.success', {
-          count: result.movedNodeCount,
-          conversations: result.movedConversationCount,
-        }),
         {
-          tone: 'success',
-          action: {
-            label: t('moveSelection.openDestination'),
-            onClick: () => navigate(`/canvas/${result.destination.canvasId}`),
-          },
+          kind: 'existing',
+          canvasId: destinationId,
         },
+        navigate,
       );
-    } catch (error) {
-      const code =
-        moveRequested && error instanceof ApiError ? error.code : undefined;
-      const messageKey =
-        typeof code === 'string' &&
-        Object.prototype.hasOwnProperty.call(MOVE_ERROR_MESSAGES, code)
-          ? MOVE_ERROR_MESSAGES[code as MoveSelectionErrorCode]
-          : 'moveSelection.failed';
-      toast(t(messageKey), { tone: 'danger', duration: 0 });
+      if (moved && mounted.current) setOpen(false);
     } finally {
+      inFlight.current = false;
       if (mounted.current) setSubmitting(false);
     }
   };
@@ -188,13 +182,15 @@ function MoveSelectionContent() {
       reference={reference}
       boundary={boundary}
       count={selectedNodeIds.length}
+      currentSpaceId={canvasId}
+      boundaryEdgeCount={boundaryEdgeCount}
       includesFrames={selection.some((node) => node.type === 'frame')}
       options={options}
       loading={loading}
       loadError={loadError}
       submitting={submitting}
       onClose={close}
-      onSubmit={(destination, preview) => void submit(destination, preview)}
+      onSubmit={(destinationId) => void submit(destinationId)}
     />
   );
 }

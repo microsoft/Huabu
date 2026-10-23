@@ -4,16 +4,21 @@
 import { isIP } from 'node:net';
 
 import { resolveConfiguredPublicOrigin } from './public-origin.js';
+import {
+  getDeploymentEnvironment,
+  resolveAuthenticationMode,
+} from '../../security/deployment-settings.js';
 
 export interface DeploymentConfig {
   allowedHostsConfigured: boolean;
   basicAuthConfigured: boolean;
+  authenticationDisabled?: boolean;
   bindHost: string;
   bindScope: 'loopback' | 'network';
   publicOrigin?: string;
 }
 
-function isLoopbackHost(host: string): boolean {
+export function isLoopbackHost(host: string): boolean {
   const lower = host.toLowerCase();
   const withoutTrailingDot = lower.endsWith('.') ? lower.slice(0, -1) : lower;
   const normalized =
@@ -29,9 +34,10 @@ function isLoopbackHost(host: string): boolean {
 }
 
 export function resolveDeploymentConfig(
-  env: NodeJS.ProcessEnv = process.env,
+  env: NodeJS.ProcessEnv = getDeploymentEnvironment(),
 ): DeploymentConfig {
   const bindHost = env.HUABU_BIND_HOST ?? '127.0.0.1';
+  const authenticationDisabled = resolveAuthenticationMode(env) === 'none';
   const userConfigured = Boolean(env.HUABU_BASIC_AUTH_USER);
   const passConfigured = Boolean(env.HUABU_BASIC_AUTH_PASS);
   if (userConfigured !== passConfigured) {
@@ -45,7 +51,7 @@ export function resolveDeploymentConfig(
     publicOrigin || env.HUABU_ALLOWED_HOSTS?.trim(),
   );
   const bindScope = isLoopbackHost(bindHost) ? 'loopback' : 'network';
-  if (bindScope === 'network' && !userConfigured) {
+  if (bindScope === 'network' && !userConfigured && !authenticationDisabled) {
     throw new Error(
       'HUABU_BASIC_AUTH_USER and HUABU_BASIC_AUTH_PASS are required when HUABU_BIND_HOST is not loopback',
     );
@@ -67,6 +73,7 @@ export function resolveDeploymentConfig(
   return {
     allowedHostsConfigured,
     basicAuthConfigured: userConfigured,
+    ...(authenticationDisabled ? { authenticationDisabled: true } : {}),
     bindHost,
     bindScope,
     ...(publicOrigin ? { publicOrigin } : {}),

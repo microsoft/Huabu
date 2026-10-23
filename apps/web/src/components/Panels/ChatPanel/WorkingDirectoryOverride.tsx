@@ -338,7 +338,7 @@ export function WorkingDirectoryOverride({
                 className="text-fg-subtle mt-0.5 h-3.5 w-3.5 shrink-0"
                 aria-hidden
               />
-              <span className="text-fg-subtle shrink-0">
+              <span className="text-fg-muted shrink-0">
                 {t('chat.workingDirectoryDevice')}
               </span>
               <span className="text-fg-muted min-w-0 wrap-anywhere">

@@ -28,6 +28,7 @@
  */
 
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
@@ -39,6 +40,7 @@ import {
 import nodeNet from 'node:net';
 import { release as getOsRelease } from 'node:os';
 import { isAbsolute, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 import {
   app,
@@ -52,6 +54,7 @@ import {
 } from 'electron';
 import { utilityProcess, type UtilityProcess } from 'electron';
 
+import { LocalAgentManager, type LocalAgentCredential } from './local-agent.js';
 import { applyApplicationMenu, registerMenuIpc } from './mac-menu.js';
 import {
   promptForRemoteBasicAuth,
@@ -69,6 +72,10 @@ import {
 } from './server-target.js';
 import { TITLE_BAR_HEIGHT } from './title-bar.js';
 import { registerUpdaterIpc, startAutoUpdateChecks } from './updater.js';
+
+import type * as DesktopAgentRuntime from '@huabu/client-runtime/desktop' with {
+  'resolution-mode': 'import',
+};
 
 // ── Constants ────────────────────────────────────────────────────────
 
@@ -309,6 +316,200 @@ let serverProcess: UtilityProcess | null = null;
 let serverPort = 0;
 let applicationUrl: string | null = null;
 let remoteServerOrigin: string | null = null;
+let localAgentManager: LocalAgentManager | null = null;
+
+function registerLocalAgent(origin: string): void {
+  let secrets: DesktopSecureSecretStore | undefined;
+  const getSecrets = (): DesktopSecureSecretStore =>
+    (secrets ??= new DesktopSecureSecretStore(
+      join(app.getPath('userData'), 'remote-agent'),
+      safeStorage,
+    ));
+  const key = createHash('sha256').update(origin).digest('hex');
+  const bundleDir = IS_DEV
+    ? join(__dirname, '../../server/dist-bundle')
+    : join(process.resourcesPath, 'server');
+  const runtimePath = IS_DEV
+    ? join(__dirname, '../../../packages/client-runtime/dist/desktop.js')
+    : join(bundleDir, 'client-runtime/desktop.js');
+  const loadRuntime = (): Promise<typeof DesktopAgentRuntime> =>
+    import(pathToFileURL(runtimePath).href);
+  const requireEncryption = (): void => {
+    if (
+      !safeStorage.isEncryptionAvailable() ||
+      (process.platform === 'linux' &&
+        safeStorage.getSelectedStorageBackend() === 'basic_text')
+    ) {
+      throw new Error(
+        'Operating-system credential encryption is required to connect local Agents.',
+      );
+    }
+  };
+  const manager = new LocalAgentManager({
+    forceTerminate: (child) => {
+      const pid = child.pid;
+      if (pid === undefined)
+        throw new Error(
+          'The local Agent worker PID is unavailable for forced termination.',
+        );
+      process.kill(pid, 'SIGKILL');
+    },
+    readDevice: async () => {
+      const runtime = await loadRuntime();
+      const artifacts = runtime.resolveRuntimeArtifacts({
+        repoRoot: IS_DEV ? join(__dirname, '../../..') : undefined,
+        bundleDir,
+      });
+      if (!artifacts.daemonEntry) {
+        throw new Error(
+          'The bundled Agent runtime is missing. Rebuild or reinstall Huabu.',
+        );
+      }
+      return runtime.readDesktopDeviceInfo(artifacts.daemonEntry);
+    },
+    readCredential: () => {
+      const stored = getSecrets().get(key);
+      if (!stored) return null;
+      const value: unknown = JSON.parse(stored);
+      if (
+        !value ||
+        typeof value !== 'object' ||
+        !('token' in value) ||
+        typeof value.token !== 'string' ||
+        !value.token ||
+        !('maxAgents' in value) ||
+        typeof value.maxAgents !== 'number' ||
+        !Number.isSafeInteger(value.maxAgents) ||
+        value.maxAgents < 1
+      ) {
+        throw new Error(
+          'The saved local Agent authorization is invalid. Reconnect to authorize again.',
+        );
+      }
+      requireEncryption();
+      return { token: value.token, maxAgents: value.maxAgents };
+    },
+    saveCredential: (credential) => {
+      if (credential) requireEncryption();
+      getSecrets().set(key, credential ? JSON.stringify(credential) : null);
+    },
+    requestCredential: async () => {
+      requireEncryption();
+      const runtime = await loadRuntime();
+      const [token, maxAgents] = await runtime.fetchDesktopAgentCredential(
+        origin,
+        (input, init) =>
+          session.defaultSession.fetch(
+            input instanceof Request ? input.url : input.toString(),
+            init,
+          ),
+      );
+      return { token, maxAgents };
+    },
+    start: async (credential: LocalAgentCredential) => {
+      await ensureShellPath();
+      const runtime = await loadRuntime();
+      const artifacts = runtime.resolveRuntimeArtifacts({
+        repoRoot: IS_DEV ? join(__dirname, '../../..') : undefined,
+        bundleDir,
+      });
+      if (
+        !artifacts.daemonEntry ||
+        !artifacts.serviceSdkEntry ||
+        !artifacts.rfsEntry
+      ) {
+        throw new Error(
+          'The bundled Agent runtime is missing. Rebuild or reinstall Huabu.',
+        );
+      }
+      const url = new URL('/api/acp/agent', origin);
+      const insecure = url.protocol === 'http:';
+      url.protocol = insecure ? 'ws:' : 'wss:';
+      const child = utilityProcess.fork(
+        artifacts.daemonEntry,
+        [
+          'daemon',
+          '--server',
+          url.href,
+          '--max-agents',
+          String(credential.maxAgents),
+          ...(insecure ? ['--allow-insecure'] : []),
+          ...Object.entries(runtime.buildHuabuBootstrapEnv(artifacts)).flatMap(
+            ([name, value]) => ['--env-inject', `${name}=${value}`],
+          ),
+        ],
+        {
+          env: runtime.buildDaemonChildEnv(process.env, credential.token),
+          stdio: 'pipe',
+          serviceName: 'Huabu Local Agents',
+        },
+      );
+      child.stdout?.resume();
+      child.stderr?.resume();
+      return child;
+    },
+    onState: (state) => {
+      if (state.error) console.error('[desktop] local Agent:', state.error);
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('local-agent:state', state);
+      }
+    },
+  });
+  localAgentManager = manager;
+  const assertSender = (event: Electron.IpcMainInvokeEvent): void => {
+    if (
+      event.sender !== mainWindow?.webContents ||
+      event.senderFrame !== mainWindow.webContents.mainFrame ||
+      !isSameOrigin(event.senderFrame.url, origin)
+    )
+      throw new Error(
+        'Local Agent access requires the configured server main window.',
+      );
+  };
+  ipcMain.handle('local-agent:get-state', (event) => {
+    assertSender(event);
+    return manager.getState();
+  });
+  let actionPending = false;
+  ipcMain.handle('local-agent:set-enabled', async (event, enabled: unknown) => {
+    assertSender(event);
+    if (typeof enabled !== 'boolean')
+      throw new Error('Invalid local Agent action.');
+    if (actionPending)
+      throw new Error('A local Agent authorization is already in progress.');
+    actionPending = true;
+    try {
+      const current = manager.getState();
+      if (enabled || current.enabled) {
+        const parent = mainWindow;
+        if (!parent) throw new Error('The main window is unavailable.');
+        const response = await dialog.showMessageBox(parent, {
+          type: 'warning',
+          title: enabled ? 'Connect device' : 'Disconnect device',
+          message: enabled
+            ? `Allow ${origin} to run commands and access files on this device?`
+            : 'Disconnect this device?',
+          detail: enabled
+            ? 'Uses your account permissions. Reconnects when Huabu starts; quitting stops local tasks.' +
+              (origin.startsWith('http:')
+                ? '\nUnencrypted HTTP. Continue only on a trusted network.'
+                : '')
+            : 'Stops running tasks and disables automatic reconnection.',
+          buttons: ['Cancel', enabled ? 'Connect' : 'Disconnect'],
+          defaultId: 0,
+          cancelId: 0,
+          noLink: true,
+        });
+        if (response.response !== 1) return manager.getState();
+        assertSender(event);
+      }
+      return await manager.setEnabled(enabled);
+    } finally {
+      actionPending = false;
+    }
+  });
+  void manager.restore();
+}
 let secureSecretStore: DesktopSecureSecretStore | null = null;
 /**
  * Ring buffer of the server child's most recent stderr output. Reset on
@@ -1346,6 +1547,9 @@ app.whenReady().then(async () => {
       );
     }
     createWindow(applicationUrl);
+    if (requestedRemoteOrigin) {
+      registerLocalAgent(requestedRemoteOrigin);
+    }
     // Begin background update checks now that a window exists to receive
     // status events. No-op unless the app is packaged.
     startAutoUpdateChecks();
@@ -1410,6 +1614,20 @@ app.on('window-all-closed', () => {
 let quitInFlight = false;
 app.on('before-quit', (event) => {
   if (quitInFlight) return;
+  if (localAgentManager) {
+    event.preventDefault();
+    quitInFlight = true;
+    const manager = localAgentManager;
+    localAgentManager = null;
+    void manager.shutdown().then(
+      () => app.exit(0),
+      (error: unknown) => {
+        console.error('[desktop] local Agent shutdown failed:', error);
+        app.exit(1);
+      },
+    );
+    return;
+  }
   const proc = serverProcess;
   if (!proc) return;
   quitInFlight = true;

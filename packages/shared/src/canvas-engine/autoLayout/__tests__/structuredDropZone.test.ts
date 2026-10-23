@@ -1,9 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { FRAME_GRID_MAX_COUNT } from '../../../types/canvas/node.js';
+import * as frameDesign from '../../frame/design.js';
 import {
   applyGridLayout,
   describeStructuredDropZone,
@@ -98,6 +99,50 @@ function simulateGridDrop(
 }
 
 describe('describeStructuredDropZone context', () => {
+  it.each(['column', 'row', 'grid'] as const)(
+    'avoids a redundant pre-drop solve for a supplied %s target',
+    (axis) => {
+      const nodes = [
+        makeFrame(axis),
+        axis === 'row'
+          ? makeRowChild('first', 0, { x: 20, y: 64 })
+          : makeChild('first', 0, { x: 20, y: 64 }),
+        axis === 'row'
+          ? makeRowChild('second', 1, { x: 124, y: 128 })
+          : makeChild('second', 1, { x: 124, y: 128 }),
+      ];
+      const layout = solveStructuredFrameLayout(nodes, 'frame');
+      const first = layout?.childPositions.get('first');
+      if (!first) throw new Error('Missing first child');
+      const point = { x: first.x + 40, y: first.y + 20 };
+      const expected = describeStructuredDropZone(
+        nodes,
+        'frame',
+        point,
+        axis,
+        2,
+        dragged,
+      );
+      const solve = vi.spyOn(frameDesign, 'resolveFrameResponsiveLayout');
+      try {
+        const actual = describeStructuredDropZone(
+          nodes,
+          'frame',
+          point,
+          axis,
+          2,
+          dragged,
+          { target: { kind: 'into-existing', slot: 0 } },
+        );
+        expect(actual).not.toBeNull();
+        expect(actual).toEqual(expected);
+        expect(solve).toHaveBeenCalledTimes(axis === 'grid' ? 2 : 1);
+      } finally {
+        solve.mockRestore();
+      }
+    },
+  );
+
   it('reports column tracks and the frame size the drop resolves to', () => {
     const nodes = [
       makeFrame('column'),

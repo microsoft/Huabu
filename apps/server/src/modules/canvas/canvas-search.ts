@@ -34,12 +34,16 @@
  *   scan testable without spinning up Fastify.
  */
 
+import { createHash } from 'node:crypto';
+
 import {
   META_SEARCH_FIELDS,
   chatInputText,
+  literalTextMatches,
   type CanvasSearchEvent,
   type CanvasSearchMatch,
   type CanvasSearchRequest,
+  type CanvasSearchSource,
   type SearchField,
 } from '@huabu/shared';
 
@@ -205,6 +209,7 @@ function scanNodeContent(
       nodeType: node.type,
       label: content?.label ?? null,
       tryEmit,
+      sourceAt: sourceLocator(body),
     });
   }
 }
@@ -221,16 +226,77 @@ function scanNodeContent(
  * user message and an unrelated reply, while `buildSnippet`'s
  * whitespace collapse still renders them on one row.
  */
+function sourceLocator(
+  text: string,
+): (offset: number, length?: number) => CanvasSearchSource {
+  const hash = createHash('sha256').update(text).digest('hex');
+  return (offset, length) => ({ hash, offset, length });
+}
+
 function buildThreadHaystack(
   turns: readonly AgentTurn[],
   recoverInternalToolNames: boolean,
-): string {
+): { text: string; sourceAt: FieldEmitContext['sourceAt'] } {
   const segments: string[] = [];
+  const sources: {
+    start: number;
+    end: number;
+    locate: (offset: number, length?: number) => CanvasSearchSource;
+  }[] = [];
+  let length = 0;
+  const append = (text: string, searchable = true): number => {
+    const start = length + (segments.length ? 2 : 0);
+    segments.push(text);
+    length = start + text.length;
+    if (searchable)
+      sources.push({ start, end: length, locate: sourceLocator(text) });
+    return start;
+  };
   for (const turn of turns) {
     const user = chatEnvelopeFromSubmission(turn.request)?.user;
     const userText = user ? chatInputText(user) : undefined;
     if (typeof userText === 'string' && userText.length > 0) {
-      segments.push(userText);
+      const start = append(userText, false);
+      // Keep the existing searchable serialization while addressing only
+      // literal pieces the UI actually renders (not quote-prefix syntax).
+      let cursor = 0;
+      for (const comment of user?.quotedComments ?? []) {
+        const locate = sourceLocator(comment.quote);
+        let quoteOffset = 0;
+        for (const line of comment.quote.split(/\r?\n/)) {
+          const lineStart = userText.indexOf(`> ${line}`, cursor);
+          if (lineStart < 0) break;
+          const offset = quoteOffset;
+          sources.push({
+            start: start + lineStart + 2,
+            end: start + lineStart + 2 + line.length,
+            locate: (position, matchLength) =>
+              locate(offset + position, matchLength),
+          });
+          cursor = lineStart + line.length + 2;
+          quoteOffset +=
+            line.length +
+            (comment.quote.slice(quoteOffset + line.length).startsWith('\r\n')
+              ? 2
+              : 1);
+        }
+        const commentStart = userText.indexOf(comment.comment, cursor);
+        if (comment.comment && commentStart >= 0) {
+          sources.push({
+            start: start + commentStart,
+            end: start + commentStart + comment.comment.length,
+            locate: sourceLocator(comment.comment),
+          });
+          cursor = commentStart + comment.comment.length;
+        }
+      }
+      if (user?.text && userText.endsWith(user.text)) {
+        sources.push({
+          start: start + userText.length - user.text.length,
+          end: start + userText.length,
+          locate: sourceLocator(user.text),
+        });
+      }
     }
     let interpretationIndexed = false;
     for (const msg of turn.transcript) {
@@ -245,19 +311,26 @@ function buildThreadHaystack(
         )
           interpretationIndexed = true;
         if (interpretation?.state === 'reported') {
-          segments.push(interpretation.text);
-          if (interpretation.explanation)
-            segments.push(interpretation.explanation);
+          append(interpretation.text);
+          if (interpretation.explanation) append(interpretation.explanation);
         }
       }
       // Only assistant prose contributes model speech; `tool_call`,
       // `thinking`, `plan`, and `error` fragments are excluded.
       if (msg.type !== 'text') continue;
       const text = msg.data.content;
-      if (typeof text === 'string' && text.length > 0) segments.push(text);
+      if (typeof text === 'string' && text.length > 0) append(text);
     }
   }
-  return segments.join('\n\n');
+  return {
+    text: segments.join('\n\n'),
+    sourceAt: (offset, matchLength) => {
+      const source = sources.find(
+        (entry) => offset >= entry.start && offset + matchLength <= entry.end,
+      );
+      return source?.locate(offset - source.start, matchLength);
+    },
+  };
 }
 
 /**
@@ -283,12 +356,13 @@ async function scanNodeConversation(
     (await agenetes.record(namespace, node.threadId))?.spec.kind ===
     INTERNAL_DRIVER_KIND;
   const haystack = buildThreadHaystack(turns, recoverInternalToolNames);
-  if (haystack.length === 0) return;
-  emitFieldHits('conversation', haystack, needleLower, needleLen, {
+  if (haystack.text.length === 0) return;
+  emitFieldHits('conversation', haystack.text, needleLower, needleLen, {
     nodeId: node.id,
     nodeType: node.type,
     label,
     tryEmit,
+    sourceAt: haystack.sourceAt,
   });
 }
 
@@ -308,15 +382,15 @@ async function scanNodeConversation(
 function scanOccurrences(
   haystack: string,
   needleLower: string,
-  needleLen: number,
+  _needleLen: number,
   tryEmit: (match: CanvasSearchMatch) => boolean,
   buildMatch: (
     snippet: { text: string; matchStart: number; matchLength: number },
     occurrenceIndex: number,
+    sourceOffset: number,
+    sourceLength: number,
   ) => CanvasSearchMatch,
 ): void {
-  const lower = haystack.toLowerCase();
-  let from = 0;
   // 0-based ordinal of the hit *within this scan*. The wire contract
   // documents `occurrenceIndex` as monotonically increasing per
   // (entity, field), and every caller invokes `scanOccurrences` once
@@ -325,14 +399,10 @@ function scanOccurrences(
   // already shipped are 0..k-1 and map cleanly to the n-th DOM
   // occurrence on the client.
   let occurrenceIndex = 0;
-  while (true) {
-    const idx = lower.indexOf(needleLower, from);
-    if (idx === -1) return;
-    const snippet = buildSnippet(haystack, idx, needleLen);
-    if (!tryEmit(buildMatch(snippet, occurrenceIndex))) return;
-    // `max(1, needleLen)` guards against a zero-width needle locking
-    // the loop — schema-bounded to >= 1 char today, but cheap insurance.
-    from = idx + Math.max(1, needleLen);
+  for (const { start, end } of literalTextMatches(haystack, needleLower)) {
+    const snippet = buildSnippet(haystack, start, end - start);
+    if (!tryEmit(buildMatch(snippet, occurrenceIndex, start, end - start)))
+      return;
     occurrenceIndex += 1;
   }
 }
@@ -380,6 +450,7 @@ interface FieldEmitContext {
   label: string | null;
   /** Returns false when the global limit is exhausted. */
   tryEmit: (match: CanvasSearchMatch) => boolean;
+  sourceAt?: (offset: number, length: number) => CanvasSearchSource | undefined;
 }
 
 /**
@@ -406,7 +477,7 @@ function emitFieldHits(
     needleLower,
     needleLen,
     ctx.tryEmit,
-    (snippet, occurrenceIndex) => ({
+    (snippet, occurrenceIndex, sourceOffset, sourceLength) => ({
       nodeId: ctx.nodeId,
       nodeType: ctx.nodeType,
       label: ctx.label,
@@ -419,6 +490,7 @@ function emitFieldHits(
       // whitespace runs (e.g. needle `"a  b"`, snippet `"a b"`).
       matchLength: snippet.matchLength,
       occurrenceIndex,
+      source: ctx.sourceAt?.(sourceOffset, sourceLength),
     }),
   );
 }

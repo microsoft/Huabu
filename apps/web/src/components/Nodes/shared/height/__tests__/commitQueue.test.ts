@@ -354,7 +354,7 @@ describe('height commit queue — gesture suspension', () => {
     // gesture, so by the time the queue drains there is nothing to do.
     storeNodes = [
       note({
-        style: { width: 400, height: 408 },
+        style: { width: 400, height: 404 },
         data: {
           type: 'note',
           heightMode: 'auto',

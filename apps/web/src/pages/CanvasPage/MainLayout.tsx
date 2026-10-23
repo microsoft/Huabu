@@ -252,17 +252,17 @@ export const MainLayout = ({
     Math.min(Math.max(value, min), max);
 
   const resizeHandleClassName =
-    'absolute inset-y-0 z-10 w-1 touch-none bg-transparent outline-none';
+    'hover:bg-info/30 active:bg-info/50 absolute inset-y-0 z-10 w-1 touch-none bg-transparent outline-none';
 
   const leftHandleDisabled = isLeftCollapsed;
   const rightHandleDisabled =
     isRightCollapsed || displayedPreviewFullscreen || isRestoringCanvas;
 
-  const leftHandleClassName = `${resizeHandleClassName} right-0 ${
+  const leftHandleClassName = `${resizeHandleClassName} border-edge-default right-0 border-r ${
     leftHandleDisabled ? 'hidden' : 'cursor-col-resize'
   }`;
 
-  const rightHandleClassName = `${resizeHandleClassName} left-0 ${
+  const rightHandleClassName = `${resizeHandleClassName} border-edge-default left-0 border-l ${
     rightHandleDisabled ? 'hidden' : 'cursor-col-resize'
   }`;
 

@@ -51,6 +51,7 @@ import { useNodeCollapseStore } from '@/store/nodeCollapseStore.ts';
 import { getAccentTokens } from './design/accentTokens';
 import { resolveNodeAccent } from './design/nodeAccentPolicy';
 import {
+  NODE_BORDER_WIDTH,
   nodeBoundaryForAccent,
   nodeLayoutBorderInset,
 } from './design/nodeBoundary';
@@ -705,6 +706,9 @@ export const NodeWrapper = memo(
         }
       : undefined;
 
+    const hasStructuredDrop = useGesturePreviewStore(
+      (state) => state.structuredDropPreview?.nodeId === id,
+    );
     const [toolbarGestureActive, setToolbarGestureActive] = useState(false);
     const toolbarDragEnabled = !data.locked;
 
@@ -806,7 +810,12 @@ export const NodeWrapper = memo(
             paintsCardChrome &&
               type !== 'spacePreview' &&
               isDragging &&
+              !hasStructuredDrop &&
               'shadow-md',
+            isDragging &&
+              hasStructuredDrop &&
+              (paintsCardChrome || type === 'frame') &&
+              'shadow-sm',
             type !== 'frame' &&
               type !== 'note' &&
               !accentTokens &&
@@ -827,12 +836,13 @@ export const NodeWrapper = memo(
               !hasMediaBorderOverlay &&
               type !== 'frame' &&
               !hasCardSurface &&
-              'border-3',
+              'border-solid',
             // Question nodes need visible overflow for status badges and progress bar
             type === 'question' && 'overflow-visible',
             className,
           )}
           style={{
+            ...(type !== 'frame' && { borderWidth: borderInset }),
             // Fill priority: explicit override (`fillColor`, used by
             // QuestionNode) > subdued Note/Text surface > accent tint > transparent.
             ...(type !== 'frame' &&
@@ -984,7 +994,8 @@ export const NodeWrapper = memo(
           {hasMediaBorderOverlay && (
             <div
               aria-hidden
-              className="pointer-events-none absolute inset-0 z-1 rounded-[inherit] border-3 border-[inherit]"
+              className="pointer-events-none absolute inset-0 z-1 rounded-[inherit] border-solid border-[inherit]"
+              style={{ borderWidth: NODE_BORDER_WIDTH }}
               data-node-media-border
               data-node-image-border={type === 'image' || undefined}
             />

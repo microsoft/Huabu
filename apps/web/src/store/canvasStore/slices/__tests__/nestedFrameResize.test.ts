@@ -109,7 +109,57 @@ function absolute(nodes: Node[], id: string) {
 }
 
 describe('three nested Frames through the real geometry executor', () => {
-  it.each(['text', 'question'])(
+  it.each(['free', 'column', 'row', 'grid'] as const)(
+    'uses the new Space scale for width clamping in a single %s resize tick',
+    (layoutMode) => {
+      const initial = fixture([layoutMode, layoutMode, layoutMode]).map((n) =>
+        n.id === 'leaf'
+          ? {
+              ...n,
+              type: 'spacePreview',
+              style: { width: 360 },
+              data: {
+                targetCanvasId: 'child-space',
+                style: { fontSize: 24, accent: 'teal' },
+              },
+            }
+          : n,
+      );
+      const h = harness(initial);
+      for (const factor of [0.5, 1.5, 0.5]) {
+        const before = node(h.nodes(), 'leaf');
+        const beforeWidth = getNodeSize(before).width;
+        const beforeFont = (before.data.style as { fontSize: number }).fontSize;
+        const frame = node(h.nodes(), 'inner');
+        const frameSize = getNodeSize(frame);
+        h.controller.captureFrameResizeSnapshot('inner');
+        h.controller.applyFrameResizeScale(
+          frameSize.width * factor,
+          frameSize.height * factor,
+          frame.position.x,
+          frame.position.y,
+        );
+        h.controller.flushFrameResizeScale();
+        h.controller.clearFrameResizeSnapshot();
+        const preview = node(h.nodes(), 'leaf');
+        expect(getNodeSize(preview).width).toBeCloseTo(beforeWidth * factor, 6);
+        expect(preview.data.style).toEqual({
+          fontSize: beforeFont * factor,
+          accent: 'teal',
+        });
+        expect(preview.style?.height).toBeUndefined();
+        h.dispatch({
+          type: 'RESIZE_NODE',
+          items: [
+            { nodeId: 'inner', size: getNodeSize(node(h.nodes(), 'inner')) },
+          ],
+        });
+        expect(node(h.nodes(), 'leaf')).toEqual(preview);
+      }
+    },
+  );
+
+  it.each(['text', 'question', 'spacePreview'])(
     'scales deeply nested %s fonts from the immutable width baseline',
     (type) => {
       const initial = fixture(['free', 'free', 'free']).map((n) =>

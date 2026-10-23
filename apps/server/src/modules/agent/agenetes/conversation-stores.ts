@@ -39,6 +39,7 @@ import {
   SqliteThreadStore,
   SqliteTurnStore,
 } from './sqlite-stores.js';
+import { logger } from '../../../utils/logger.js';
 import {
   getStructuredStore,
   registerSpaceDirHandleOwner,
@@ -165,15 +166,45 @@ export const conversationThreadStore: ThreadStore = {
     ),
 };
 
+async function publishActivity(
+  namespace: Namespace,
+  threadId: string,
+  ts: number,
+) {
+  if (!namespace.name) return;
+  try {
+    // The Canvas executor imports drivers; load it only after the stores are mounted.
+    const { projectAgentConversationActivity } =
+      await import('../../canvas/agent-node-projection.js');
+    await projectAgentConversationActivity(namespace.name, threadId, ts);
+  } catch (error) {
+    // The authoritative log is already committed; a display projection cannot reject the turn.
+    logger.error(
+      { err: error, canvasId: namespace.name, threadId },
+      'Conversation activity projection failed',
+    );
+  }
+}
+
 export const conversationEventLogStore: EventLogStore = {
   appendTurnStart: (namespace, threadId, request: AgentSubmission | null) =>
-    inNamespace(namespace, (current, backing) =>
-      appendRecentConversationTurn(current, threadId, request, backing.events),
-    ),
+    inNamespace(namespace, async (current, backing) => {
+      const entry = await appendRecentConversationTurn(
+        current,
+        threadId,
+        request,
+        backing.events,
+      );
+      await publishActivity(current, threadId, entry.ts);
+      return entry;
+    }),
   append: (namespace, threadId, event) =>
-    inNamespace(namespace, (current, backing) =>
-      backing.events.append(current, threadId, event),
-    ),
+    inNamespace(namespace, async (current, backing) => {
+      const entry = await backing.events.append(current, threadId, event);
+      if (event.type === 'done' || event.type === 'error')
+        await publishActivity(current, threadId, entry.ts);
+      return entry;
+    }),
   read: (namespace, threadId, sinceSeq) =>
     inNamespace(namespace, (current, backing) =>
       backing.events.read(current, threadId, sinceSeq),

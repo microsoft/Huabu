@@ -18,6 +18,7 @@ import { createId } from '@huabu/shared';
 
 import { executeOnServer } from './canvas-executor.js';
 import { agenetes } from '../agent/agenetes/drivers.js';
+import { acquireAgentTurn } from '../agent/turn-lease.js';
 import { createSpace, space, withCanvasMutex } from '../storage/index.js';
 import {
   mountTestWorkspace,
@@ -106,6 +107,42 @@ async function attachedNode(canvasId: string): Promise<CanvasNode> {
 }
 
 describe('Agent Node creation against an awaited record', () => {
+  it('guards mode writes through Canvas commands until the turn lease is released', async () => {
+    const canvasId = await open();
+    let release: (() => void) | null = null;
+    try {
+      vi.spyOn(agenetes, 'record').mockImplementation(async () =>
+        internalRecord(canvasId, 'thread-attached'),
+      );
+      await attach(canvasId, 'thread-attached');
+      const setMode = (agentMode: 'ask' | 'operate') =>
+        executeOnServer({
+          canvasId,
+          originator: { source: 'ui' },
+          commands: [
+            {
+              type: 'MERGE_NODE_DATA',
+              patches: [{ nodeId: 'node-attached', patch: { agentMode } }],
+            },
+          ],
+        });
+      await setMode('operate');
+      release = acquireAgentTurn('thread-attached');
+      expect(release).not.toBeNull();
+      await expect(setMode('ask')).rejects.toMatchObject({
+        code: 'agent_draft_busy',
+      });
+      expect((await attachedNode(canvasId)).data.agentMode).toBe('operate');
+      release?.();
+      release = null;
+      await setMode('ask');
+      expect((await attachedNode(canvasId)).data.agentMode).toBe('ask');
+    } finally {
+      release?.();
+      await close();
+    }
+  });
+
   it('keeps the Space to itself while the record read is outstanding', async () => {
     const canvasId = await open();
     try {

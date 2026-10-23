@@ -34,7 +34,7 @@ const SHELL_BORDER = NODE_SHELL_INSET / 2;
 /**
  * Geometry actually written to the body container.
  *
- * `NodeWrapper` wraps every node in a 3px border (transparent unless an
+ * `NodeWrapper` wraps every node in a 2px border (transparent unless an
  * accent is set) with `box-sizing: border-box`, so a child may only
  * occupy the node box minus {@link NODE_SHELL_INSET}.
  *

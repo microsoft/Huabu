@@ -56,11 +56,19 @@ The `dist:*` scripts pass `--publish never`: electron-builder generates the upda
 
 The `.dmg` / `.exe` are the human-facing first installs; the `.zip` (Squirrel.Mac) and `latest*.yml` feeds are what the running app consumes. When a build is relocated from the build-source repo to the public distribution repo, these metadata files must move with it.
 
+## TypeScript build toolchain
+
+All workspaces that declare TypeScript, including the Agentlet and Agenetes subtrees and the documentation site, use the same `^6.0.3` dependency range and resolve to TypeScript `6.0.3` through the root `pnpm-lock.yaml`. Release builds use the workspace compiler selected by pnpm; no global compiler override is required.
+
+The Agenetes instance, Agent Profile registry, and documentation site's mixed browser/SSR project explicitly load Node.js types with `types: ["node"]`, because TypeScript 6 no longer automatically includes visible `@types` packages. The documentation site resolves its `@/*` alias through `./src/*` without the deprecated `baseUrl` option.
+
 ## macOS signing dependency
 
 Desktop packaging pins `electron-builder` to `26.16.1` in `apps/desktop/package.json` and resolves it through the shared `pnpm-lock.yaml`. This is the first stable v26 release containing the upstream [keychain password fix](https://github.com/electron-userland/electron-builder/pull/10172): `security import -P` needs the certificate password, but `security set-key-partition-list -k` needs the temporary keychain's own unlock password. Version `26.15.3` incorrectly reused the certificate password for the latter command, causing `SecKeychainUnlock` failures before signing or notarization.
 
 Local builds, GitHub Actions, and Azure Pipelines use the same packaging dependency. Both CI paths install with `--frozen-lockfile`; no workflow-specific password substitution or signing bypass is required. Developer ID signing and Apple notarization remain enabled.
+
+The workspace overrides the `node-gyp > undici` packaging dependency to the published `6.29.0` release, within node-gyp's declared `^6.25.0` range. The previous `6.29.1` lockfile resolution is unavailable from the configured package feed and prevents a frozen dependency restore. This scoped override does not change the application's runtime Undici dependency.
 
 ## Azure Pipelines packaging
 

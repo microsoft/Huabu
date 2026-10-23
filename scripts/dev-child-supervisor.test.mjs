@@ -6,11 +6,12 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 
 import { spawnSupervisedDevChild } from './dev-child-supervisor.mjs';
 
 const POLL_INTERVAL_MS = 25;
-const TIMEOUT_MS = 5_000;
+const TIMEOUT_MS = 15_000;
 
 async function waitFor(readiness) {
   const deadline = Date.now() + TIMEOUT_MS;
@@ -101,6 +102,7 @@ test('reaps descendants left behind when the direct child exits', async () => {
     const grandchild = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
       stdio: 'ignore',
     });
+
     grandchild.unref();
     writeFileSync(process.argv[1], String(grandchild.pid));
   `;
@@ -133,3 +135,90 @@ test('reaps descendants left behind when the direct child exits', async () => {
     await rm(pidFile, { force: true });
   }
 });
+
+test(
+  'waits across both supervisor layers for detached agent cleanup after the service exits',
+  {
+    skip: process.platform === 'win32',
+    timeout: 20_000,
+  },
+  async () => {
+    const pidFile = path.join(
+      tmpdir(),
+      `huabu-dev-agent-cleanup-${process.pid}.json`,
+    );
+    const workerScript = `
+    const { spawn } = require('node:child_process');
+    const { writeFileSync } = require('node:fs');
+    const agent = spawn(process.execPath, ['-e', "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000); process.send('ready');"], {
+      detached: true, stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+    });
+    agent.on('message', () => writeFileSync(process.argv[1], JSON.stringify({
+      worker: process.pid, agent: agent.pid,
+      service: Number(process.argv[2]), supervisor: Number(process.argv[3]),
+    })));
+    let stopping = false;
+    process.on('SIGTERM', () => {
+      if (stopping) return;
+      stopping = true;
+      setTimeout(() => {
+        agent.once('exit', () => process.exit(0));
+        agent.kill('SIGKILL');
+      }, 9000);
+    });
+  `;
+    const serviceScript = `
+    const { spawn } = require('node:child_process');
+    spawn(process.execPath, ['-e', process.argv[2], process.argv[1], String(process.pid), String(process.ppid)], { stdio: 'ignore' });
+    process.on('SIGTERM', () => process.exit(0));
+    setInterval(() => {}, 1000);
+  `;
+    const launcherScript = `
+    const { spawnSupervisedDevChild, waitForSupervisedDevChildren } = await import(process.argv[2]);
+    const supervisor = spawnSupervisedDevChild({
+      command: process.execPath, args: ['-e', process.argv[3], process.argv[1], process.argv[4]],
+      cwd: process.cwd(), shell: false,
+    });
+    process.on('SIGTERM', () => {
+      supervisor.kill('SIGTERM');
+      waitForSupervisedDevChildren([supervisor], 0);
+    });
+  `;
+    let launcher;
+    let pids;
+    try {
+      await writeFile(pidFile, '');
+      launcher = spawn(
+        process.execPath,
+        [
+          '--input-type=module',
+          '-e',
+          launcherScript,
+          pidFile,
+          new URL('./dev-child-supervisor.mjs', import.meta.url).href,
+          serviceScript,
+          workerScript,
+        ],
+        { stdio: 'ignore' },
+      );
+      await waitFor(async () => {
+        const source = await readFile(pidFile, 'utf8');
+        if (!source) return false;
+        pids = JSON.parse(source);
+        return Object.values(pids).every(isRunning);
+      });
+      const started = Date.now();
+      launcher.kill('SIGTERM');
+      assert.equal(await waitForExit(launcher), 0);
+      assert.ok(Date.now() - started >= 9000);
+      await waitFor(() => Object.values(pids).every((pid) => !isRunning(pid)));
+    } finally {
+      if (launcher?.exitCode === null && launcher?.signalCode === null)
+        launcher.kill('SIGKILL');
+      for (const pid of Object.values(pids ?? {})) {
+        if (isRunning(pid)) process.kill(pid, 'SIGKILL');
+      }
+      await rm(pidFile, { force: true });
+    }
+  },
+);

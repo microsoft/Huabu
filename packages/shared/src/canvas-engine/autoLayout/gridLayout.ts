@@ -38,6 +38,7 @@ import {
   FRAME_GRID_MIN_COUNT,
 } from '../../types/canvas/node.js';
 import {
+  FRAME_LAYOUT_CONFIG,
   frameResponsiveMetricsForSize,
   resolveFrameResponsiveLayout,
   type FrameResponsiveMetrics,
@@ -580,7 +581,7 @@ export interface StructuredGutterPlan {
 
 export interface StructuredLayoutOptions {
   edges?: readonly Edge[];
-  /** Target geometry owns the tier during an explicit Frame resize. */
+  /** Insets shared by the resize inverse and its forward layout. */
   responsiveMetrics?: FrameResponsiveMetrics;
   frozenGutters?: {
     x?: readonly number[];
@@ -709,8 +710,8 @@ function resolveStructuredMetrics(
  *
  * Everything is **content-driven** — there is no pinned container size. Each
  * column's width is the widest child in that column (empty columns are width 0
- * and collapse). Item gaps and side/bottom padding use the same spacing token
- * selected from the Frame's own responsive tier.
+ * and collapse). Item gaps, track gaps and outer padding use separate fixed
+ * Frame-owned tokens.
  *
  * Resizing the frame is handled upstream by scaling every child's
  * stored size per-axis (sx, sy); this solver then re-packs them so the
@@ -773,15 +774,15 @@ export function applyColumnLayout(
     items.length === 0 ? 0 : Math.max(...items.map((i) => i.width)),
   );
 
-  // One Frame-owned spacing token controls all non-header whitespace.
+  // Separate item rhythm from track separation and outer padding.
   const frameSize = getNodeSize(frame);
   const responsiveMetrics =
     responsiveMetricsOverride ??
     frameResponsiveMetricsForSize(frameSize.width, frameSize.height);
   const padX = responsiveMetrics.contentSpacing;
   const padY = responsiveMetrics.contentSpacing;
-  const interGapX = responsiveMetrics.contentSpacing;
-  const intraGapY = responsiveMetrics.contentSpacing;
+  const interGapX = FRAME_LAYOUT_CONFIG.trackGap;
+  const intraGapY = FRAME_LAYOUT_CONFIG.nodeGap;
   const gutters = planAxisGutters(
     'x',
     effectiveCols,
@@ -903,15 +904,15 @@ export function applyRowLayout(
     items.length === 0 ? 0 : Math.max(...items.map((i) => i.height)),
   );
 
-  // One Frame-owned spacing token controls all non-header whitespace.
+  // Row masonry mirrors the column layout's spacing.
   const frameSize = getNodeSize(frame);
   const responsiveMetrics =
     responsiveMetricsOverride ??
     frameResponsiveMetricsForSize(frameSize.width, frameSize.height);
   const padX = responsiveMetrics.contentSpacing;
   const padY = responsiveMetrics.contentSpacing;
-  const interGapY = responsiveMetrics.contentSpacing;
-  const intraGapX = responsiveMetrics.contentSpacing;
+  const interGapY = FRAME_LAYOUT_CONFIG.trackGap;
+  const intraGapX = FRAME_LAYOUT_CONFIG.nodeGap;
   const gutters = planAxisGutters(
     'y',
     effectiveRows,
@@ -1071,8 +1072,7 @@ function assignGridRows(
  * has none seeds it from the children's vertical bands, so entering
  * the mode preserves what the user already lined up.
  *
- * Frame sizing stays content-driven while non-header whitespace comes from the
- * Frame's own responsive tier.
+ * Frame sizing stays content-driven with fixed column and row gaps.
  */
 export function applyGridLayout(
   nodes: Node[],
@@ -1121,7 +1121,6 @@ export function applyGridLayout(
     if (child.width > colWidth[c]) colWidth[c] = child.width;
   }
 
-  // One Frame-owned spacing token controls all non-header whitespace.
   const heightMedian = median(children.map((c) => c.height));
   const frameSize = getNodeSize(frame);
   const responsiveMetrics =
@@ -1129,8 +1128,8 @@ export function applyGridLayout(
     frameResponsiveMetricsForSize(frameSize.width, frameSize.height);
   const padX = responsiveMetrics.contentSpacing;
   const padY = responsiveMetrics.contentSpacing;
-  const interGapX = responsiveMetrics.contentSpacing;
-  const interGapY = responsiveMetrics.contentSpacing;
+  const interGapX = FRAME_LAYOUT_CONFIG.trackGap;
+  const interGapY = FRAME_LAYOUT_CONFIG.nodeGap;
   const xGutters = planAxisGutters(
     'x',
     effectiveCols,
@@ -1957,23 +1956,22 @@ export function describeStructuredDropZone(
   axis: FrameGridAxis,
   count: number,
   dragged?: DraggedNodeRect,
-  options: StructuredLayoutOptions = {},
+  options: StructuredLayoutOptions & { target?: StructuredDropTarget } = {},
 ): StructuredDropZone | null {
   const frame = nodes.find((n) => n.id === frameId);
   if (!frame || !dragged) return null;
 
-  // One pre-drop solve feeds every axis the mode consults, so a `grid`
-  // still costs the same two solves per tick it always did.
-  const preDrop = solveStructuredFrameLayout(
-    nodes,
-    frameId,
-    'compact',
-    options,
-  );
+  // A supplied masonry target needs only the simulated solve; Grid still picks a row.
+  const preDrop =
+    !options.target || axis === 'grid'
+      ? solveStructuredFrameLayout(nodes, frameId, 'compact', options)
+      : null;
   const isCol = axis !== 'row';
-  const target = isCol
-    ? pickAxisDropTarget(preDrop, 'x', framePoint.x)
-    : pickAxisDropTarget(preDrop, 'y', framePoint.y);
+  const target =
+    options.target ??
+    (isCol
+      ? pickAxisDropTarget(preDrop, 'x', framePoint.x)
+      : pickAxisDropTarget(preDrop, 'y', framePoint.y));
 
   if (axis === 'grid') {
     return describeGridDropZone(

@@ -2,6 +2,10 @@
 // Licensed under the MIT license.
 
 import { isLoopbackRequest } from './peer.js';
+import {
+  getDeploymentEnvironment,
+  resolveAuthenticationMode,
+} from '../../security/deployment-settings.js';
 
 import type { FastifyRequest } from 'fastify';
 
@@ -12,5 +16,9 @@ export function markBasicAuthenticated(request: FastifyRequest): void {
 }
 
 export function isOwnerRequest(request: FastifyRequest): boolean {
-  return basicAuthenticatedRequests.has(request) || isLoopbackRequest(request);
+  return (
+    basicAuthenticatedRequests.has(request) ||
+    isLoopbackRequest(request) ||
+    resolveAuthenticationMode(getDeploymentEnvironment()) === 'none'
+  );
 }

@@ -16,6 +16,7 @@ import type { FastifyPluginAsync } from 'fastify';
 export function buildDeploymentReadiness(input: {
   allowedHostsConfigured: boolean;
   basicAuthConfigured: boolean;
+  authenticationDisabled?: boolean;
   bindHost: string;
   bindScope: 'loopback' | 'network';
   ownerAllowed: boolean;
@@ -33,6 +34,12 @@ export function buildDeploymentReadiness(input: {
       code: 'REMOTE_HTTP_UNVERIFIED',
       severity: 'warning',
     });
+    if (input.authenticationDisabled) {
+      issues.push({
+        code: 'REMOTE_LOGIN_DISABLED',
+        severity: 'warning',
+      });
+    }
   }
 
   return deploymentReadinessResponseSchema.parse({
@@ -45,7 +52,9 @@ export function buildDeploymentReadiness(input: {
       basicAuthConfigured: input.basicAuthConfigured,
     },
     owner: {
-      policy: 'loopback-or-basic-auth',
+      policy: input.authenticationDisabled
+        ? 'unauthenticated'
+        : 'loopback-or-basic-auth',
       allowedForRequest: input.ownerAllowed,
     },
     credentials: {

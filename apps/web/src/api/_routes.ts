@@ -50,8 +50,16 @@ export const routes = {
 
   // ── Canvas ────────────────────────────────────────────────────────
   canvasList: '/canvas',
+  spaceCardQuery: '/canvas/cards/query',
+  spaceTitle: (canvasId: string) => `/canvas/${enc(canvasId)}/title`,
   canvasImport: '/canvas/import',
   canvas: (canvasId: string) => `/canvas/${enc(canvasId)}`,
+  canvasChildren: (canvasId: string) => `/canvas/${enc(canvasId)}/children`,
+  canvasParent: (canvasId: string) => `/canvas/${enc(canvasId)}/parent`,
+  canvasDeletionPreview: (canvasId: string) =>
+    `/canvas/${enc(canvasId)}/deletion-preview`,
+  canvasDeleteTree: (canvasId: string) =>
+    `/canvas/${enc(canvasId)}/delete-tree`,
   recentCanvasConversation: (canvasId: string) =>
     `/canvas/${enc(canvasId)}/recent-conversation`,
   canvasExecute: (canvasId: string) => `/canvas/${enc(canvasId)}/execute`,

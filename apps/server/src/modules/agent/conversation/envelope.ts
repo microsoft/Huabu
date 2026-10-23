@@ -20,6 +20,11 @@
  *     (+ derived snapshots) and the anchor node (+ its neighbourhood).
  */
 
+import {
+  getInkSigilStrokes,
+  inkSigilBounds,
+} from '@huabu/shared/canvas-engine';
+
 import { isInkOcrConfigured, recognizeInk } from './ink-ocr.js';
 import { InkVisualPreparationError } from './prompt/required-ink-visuals.js';
 import { getSkill } from '../../../prompt/index.js';
@@ -467,6 +472,7 @@ export async function buildChatEnvelope(
   let snapshotAttachments: ChatAttachment[] = [];
   let consumedImageIds = new Set<string>();
   let inkRecognition: ChatEnvelope['focus']['selection']['inkRecognition'];
+  let inkGeometry: ChatEnvelope['focus']['selection']['inkGeometry'];
   if (selectedNodes && canvasId) {
     const derived = await deriveSnapshotAttachments(
       selectedNodes,
@@ -477,6 +483,27 @@ export async function buildChatEnvelope(
     );
     snapshotAttachments = derived.snapshotAttachments;
     consumedImageIds = derived.consumedImageIds;
+    if (requireInkVisuals && derived.preparedNodes) {
+      const selectedIds = new Set(
+        strokeSubsets.flatMap((subset) => subset.strokeIds),
+      );
+      const strokes = getInkSigilStrokes(derived.preparedNodes, selectedIds);
+      inkGeometry = strokeSubsets.map(({ nodeId, strokeIds }) => {
+        const wanted = new Set(strokeIds);
+        const selected = strokes.filter(
+          (stroke) => stroke.nodeId === nodeId && wanted.has(stroke.stroke.id),
+        );
+        if (
+          selected.length !== wanted.size ||
+          selected.some((stroke) => !stroke.points.length)
+        )
+          throw new InkVisualPreparationError([nodeId]);
+        const bounds = inkSigilBounds(selected);
+        if (!Object.values(bounds).every(Number.isFinite))
+          throw new InkVisualPreparationError([nodeId]);
+        return { nodeId, strokeIds: [...strokeIds], bounds };
+      });
+    }
     if (
       requireInkVisuals &&
       derived.preparedNodes &&
@@ -526,6 +553,7 @@ export async function buildChatEnvelope(
         imageAttachments: dedupedImageAttachments,
         snapshotAttachments,
         ...(inkRecognition ? { inkRecognition } : {}),
+        ...(inkGeometry ? { inkGeometry } : {}),
         strokeSubsets,
       },
       ...(anchor ? { anchor } : {}),

@@ -56,6 +56,11 @@ afterEach(() => {
 });
 
 describe('useSpaceShortcutTarget', () => {
+  it('does not fetch metadata without a target', async () => {
+    await act(async () => root.render(<Target id="" />));
+    expect(listCanvases).not.toHaveBeenCalled();
+  });
+
   it('keeps confirmed targets ready during refresh and disables a confirmed deletion afterwards', async () => {
     useWorkspaceStore.setState({
       spaceTitles: { target: 'Known target' },

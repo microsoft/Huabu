@@ -106,7 +106,17 @@ export type CanvasSearchRequest = z.infer<typeof canvasSearchRequestSchema>;
  * untruncated value should read it from a dedicated field instead
  * (e.g. the per-match `label` for node titles).
  */
-export interface CanvasSearchMatch {
+export const canvasSearchSourceSchema = z.object({
+  /** SHA-256 of the exact source segment, not its rendered text. */
+  hash: z.string().regex(/^[a-f0-9]{64}$/),
+  /** UTF-16 offset within that source segment. */
+  offset: z.number().int().nonnegative(),
+  /** Original-source length when Unicode case folding changes UTF-16 length. */
+  length: z.number().int().positive().optional(),
+});
+export type CanvasSearchSource = z.infer<typeof canvasSearchSourceSchema>;
+
+export const canvasSearchMatchSchema = z.object({
   /**
    * What kind of canvas entity this match belongs to.
    *
@@ -121,21 +131,21 @@ export interface CanvasSearchMatch {
    *   live in `sourceNodeId` / `targetNodeId` so the client can
    *   `fitView` on both ends of the edge.
    */
-  kind?: 'node' | 'edge';
-  nodeId: string;
-  nodeType: string;
+  kind: z.enum(['node', 'edge']).optional(),
+  nodeId: z.string(),
+  nodeType: z.string(),
   /** The node's display label at scan time (handy for result rows). */
-  label: string | null;
-  field: SearchField;
-  snippet: string;
+  label: z.string().nullable(),
+  field: searchFieldSchema,
+  snippet: z.string(),
   /** Match start offset within `snippet` (not within the original field). */
-  matchStart: number;
-  matchLength: number;
+  matchStart: z.number().int().nonnegative(),
+  matchLength: z.number().int().positive(),
   /**
    * 0-based ordinal of this hit among all hits in the same
    * `(nodeId, field)`. Server-stamped at emission time so the client
-   * can address the n-th occurrence inside a preview without having
-   * to count `matchStart` values itself — which goes wrong as soon
+   * can order results without counting snippet-relative `matchStart`
+   * values itself — which goes wrong as soon
    * as results truncate (global `limit` hits before this node's
    * earlier hits ship) or stream out of order (a later-stream-arriving
    * hit with a smaller `matchStart` would otherwise retroactively
@@ -145,12 +155,14 @@ export interface CanvasSearchMatch {
    * for this `(nodeId, field)` pair — i.e. it survives truncation and
    * is monotonically increasing per (nodeId, field).
    */
-  occurrenceIndex: number;
+  occurrenceIndex: z.number().int().nonnegative(),
+  source: canvasSearchSourceSchema.optional(),
   /** Edge-only — source endpoint node id. Set iff `kind === 'edge'`. */
-  sourceNodeId?: string;
+  sourceNodeId: z.string().optional(),
   /** Edge-only — target endpoint node id. Set iff `kind === 'edge'`. */
-  targetNodeId?: string;
-}
+  targetNodeId: z.string().optional(),
+});
+export type CanvasSearchMatch = z.infer<typeof canvasSearchMatchSchema>;
 
 /** NDJSON frame types emitted by the server. */
 export type CanvasSearchEvent =

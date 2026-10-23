@@ -30,6 +30,13 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { Button } from '@/components/Common/Button';
+import {
+  MENU_ITEM_CLASS,
+  MENU_SURFACE_CLASS,
+} from '@/components/Common/menuStyles';
+import { POPOVER_SURFACE_CLASS } from '@/components/Common/Popover';
+
 import type { AvailableCommand } from '@huabu/shared';
 
 export interface SlashCommandMenuRef {
@@ -140,7 +147,7 @@ export const SlashCommandMenu = forwardRef<
           role="listbox"
           aria-label={t('chat.slashCommands')}
           aria-busy="true"
-          className="border-edge-default bg-surface absolute right-0 bottom-full left-0 z-50 mb-2 rounded-lg border shadow-lg"
+          className={`${POPOVER_SURFACE_CLASS} ${MENU_SURFACE_CLASS} absolute right-0 bottom-full left-0 z-50 mb-2`}
         >
           <div className="text-fg-muted flex items-center gap-2 px-3 py-2.5 text-xs">
             <span
@@ -160,12 +167,13 @@ export const SlashCommandMenu = forwardRef<
       ref={listRef}
       role="listbox"
       aria-label={t('chat.slashCommands')}
-      className="border-edge-default bg-surface absolute right-0 bottom-full left-0 z-50 mb-2 max-h-64 overflow-y-auto rounded-lg border shadow-lg"
+      className={`${POPOVER_SURFACE_CLASS} ${MENU_SURFACE_CLASS} absolute right-0 bottom-full left-0 z-50 mb-2 max-h-64 overflow-y-auto`}
     >
       {filtered.map((cmd, idx) => {
         const isActive = idx === clampedHighlight;
         return (
-          <button
+          <Button
+            variant="ghost"
             key={cmd.name}
             type="button"
             role="option"
@@ -179,16 +187,18 @@ export const SlashCommandMenu = forwardRef<
               shouldScrollRef.current = false;
               setHighlight(idx);
             }}
-            className={`flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left transition-colors ${
+            className={`${MENU_ITEM_CLASS} flex-col items-start gap-0.5 ${
               isActive
                 ? 'bg-hover text-fg-default'
                 : 'text-fg-default hover:bg-hover'
             }`}
           >
             <div className="flex w-full items-baseline gap-2">
-              <span className="font-mono text-xs font-medium">/{cmd.name}</span>
+              <span className="min-w-0 truncate font-mono text-xs font-medium">
+                /{cmd.name}
+              </span>
               {cmd.input?.hint && (
-                <span className="text-fg-subtle truncate text-xs">
+                <span className="text-fg-muted min-w-0 truncate text-xs">
                   {cmd.input.hint}
                 </span>
               )}
@@ -198,7 +208,7 @@ export const SlashCommandMenu = forwardRef<
                 {cmd.description}
               </span>
             )}
-          </button>
+          </Button>
         );
       })}
     </div>

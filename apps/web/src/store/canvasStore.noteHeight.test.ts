@@ -48,7 +48,7 @@ describe('store Note height toggle', () => {
     useCanvasStore.getState().setNoteHeightMode(['n1'], 'auto');
     await vi.advanceTimersByTimeAsync(0);
     const node = useCanvasStore.getState().nodes[0];
-    expect(node.style).toMatchObject({ width: 400, height: 128 });
+    expect(node.style).toMatchObject({ width: 400, height: 124 });
     expect(node.data.heightMode).toBe('auto');
     expect(node.data.autoHeight).toEqual({
       intrinsicHeight: 120,

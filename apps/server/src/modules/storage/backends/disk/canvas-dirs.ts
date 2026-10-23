@@ -22,6 +22,7 @@ import {
   normalizeForCompare,
   toSafeFilename,
 } from '../../../../utils/naming.js';
+import { spaceHierarchyShapeError } from '../../../canvas/persistence-validation.js';
 import { getWorkspacePath } from '../../../workspace.js';
 
 export interface CanvasDirEntry {
@@ -37,6 +38,8 @@ export interface CanvasDirEntry {
   nodeCount?: number;
   createdAt?: number;
   updatedAt?: number;
+  parentSpaceId?: string | null;
+  parentEntryNodeId?: string | null;
 }
 
 const index = new NameIndex<CanvasDirEntry>();
@@ -62,7 +65,14 @@ function readCanvasDirEntry(
     state?: { nodes?: unknown[]; edges?: unknown[] };
     createdAt?: unknown;
     updatedAt?: unknown;
+    parentSpaceId?: string | null;
+    parentEntryNodeId?: string | null;
   };
+  const hierarchyError = spaceHierarchyShapeError(json);
+  if (hierarchyError)
+    throw new SyntaxError(
+      `Invalid Space record in ${recordPath}: ${hierarchyError}`,
+    );
   if (typeof json.canvasId !== 'string' || json.canvasId.length === 0) {
     throw new SyntaxError(
       `Invalid Space record in ${recordPath}: canvasId must be a non-empty string`,
@@ -77,6 +87,12 @@ function readCanvasDirEntry(
   if (requireTopology) sanitizeId(json.canvasId, 'world canvasId');
   return {
     id: json.canvasId,
+    ...(json.parentSpaceId
+      ? {
+          parentSpaceId: json.parentSpaceId,
+          parentEntryNodeId: json.parentEntryNodeId,
+        }
+      : {}),
     filename,
     title:
       typeof json.title === 'string' || json.title === null ? json.title : null,

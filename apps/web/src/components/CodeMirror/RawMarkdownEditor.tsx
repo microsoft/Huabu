@@ -35,9 +35,18 @@ import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { Compartment, EditorState, Prec } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { basicSetup } from 'codemirror';
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
+
+import { literalTextMatches } from '@huabu/shared';
+
+import { scheduleScrollToMatch } from '@/hooks/searchDom';
+import { hashSearchSource, useSearchSource } from '@/hooks/useSearchSource';
+import { usePreviewSearchStore } from '@/store/previewSearchStore';
 
 import { huabuLightTheme } from './huabuLightTheme';
+import { useRegisterPreviewSearchAdapter } from '../Panels/ExpandedNodePanel/PreviewSearchAdapterContext';
+
+import type { PreviewSearchAdapter } from '../Panels/ExpandedNodePanel/PreviewSearchAdapterContext';
 
 /**
  * How many spaces the Tab key inserts. Tweak here to switch between
@@ -73,6 +82,7 @@ export interface RawMarkdownEditorProps {
   className?: string;
   /** Accessible label forwarded to CM's content DOM. */
   ariaLabel?: string;
+  searchNodeId?: string;
 }
 
 export default function RawMarkdownEditor({
@@ -81,6 +91,7 @@ export default function RawMarkdownEditor({
   readOnly,
   className,
   ariaLabel,
+  searchNodeId,
 }: RawMarkdownEditorProps): React.JSX.Element {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -90,6 +101,75 @@ export default function RawMarkdownEditor({
   onChangeRef.current = onChange;
   /** Compartment that lets us hot-swap the read-only facet at runtime. */
   const readOnlyCompartmentRef = useRef<Compartment>(new Compartment());
+  const query = usePreviewSearchStore((state) =>
+    state.isOpen && state.nodeId === searchNodeId ? state.query : '',
+  );
+  const matches = useMemo(
+    () => Array.from(literalTextMatches(value, query)),
+    [value, query],
+  );
+  const getSearchRange = useCallback(
+    (text: string, start: number, end: number): Range | null => {
+      const view = viewRef.current;
+      if (
+        !view ||
+        view.state.doc.toString() !== text ||
+        !view.visibleRanges.some(({ from, to }) => start >= from && end <= to)
+      )
+        return null;
+      const from = view.domAtPos(start);
+      const to = view.domAtPos(end);
+      const range = document.createRange();
+      range.setStart(from.node, from.offset);
+      range.setEnd(to.node, to.offset);
+      return !range.collapsed && range.toString() === text.slice(start, end)
+        ? range
+        : null;
+    },
+    [],
+  );
+  const sourceResolver = useRef({ getSearchRange });
+  useSearchSource(hostRef, value, 'text', sourceResolver);
+  const adapter = useMemo<PreviewSearchAdapter | null>(() => {
+    if (!query) return null;
+    const getMatchRange = (index: number): Range | null => {
+      const match = matches[index];
+      return match ? getSearchRange(value, match.start, match.end) : null;
+    };
+    return {
+      query,
+      matchCount: matches.length,
+      isSearching: false,
+      canNavigate: true,
+      getMatchRange,
+      resolveSourceMatch: async (source) => {
+        if (source.hash !== (await hashSearchSource(value))) return null;
+        const index = matches.findIndex(
+          (match) =>
+            match.start === source.offset &&
+            match.end === source.offset + (source.length ?? query.length),
+        );
+        return index < 0 ? null : index;
+      },
+      navigateToMatch: (index, onResult) => {
+        const match = matches[index];
+        const view = viewRef.current;
+        if (!match || !view) {
+          onResult(false);
+          return;
+        }
+        view.dispatch({
+          effects: EditorView.scrollIntoView(match.start, { y: 'center' }),
+        });
+        return scheduleScrollToMatch(() => hostRef.current, query, index, {
+          getMatchRange: () => getMatchRange(index),
+          onMatch: (range) => onResult(true, range),
+          onTimeout: () => onResult(false),
+          fallbackToFirst: false,
+        });
+      },
+    };
+  }, [query, matches, value, getSearchRange]);
 
   // Mount the editor once. `readOnly` and `value` are reconciled by
   // dedicated effects below so we never tear the view down on prop
@@ -120,6 +200,8 @@ export default function RawMarkdownEditor({
 
     const view = new EditorView({ state, parent: host });
     viewRef.current = view;
+    view.contentDOM.setAttribute('data-preview-search-content', '');
+    host.setAttribute('data-search-source-ready', '');
 
     if (ariaLabel) {
       view.contentDOM.setAttribute('aria-label', ariaLabel);
@@ -128,6 +210,7 @@ export default function RawMarkdownEditor({
     return () => {
       view.destroy();
       viewRef.current = null;
+      host.removeAttribute('data-search-source-ready');
     };
     // Intentionally mount-only — see dedicated reconciliation effects.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -157,5 +240,7 @@ export default function RawMarkdownEditor({
     });
   }, [readOnly]);
 
-  return <div ref={hostRef} className={className} />;
+  useRegisterPreviewSearchAdapter(adapter);
+
+  return <div ref={hostRef} className={className} data-search-renderer />;
 }

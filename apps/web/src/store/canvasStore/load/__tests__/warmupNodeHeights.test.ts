@@ -101,8 +101,8 @@ describe('warmupNodeHeights', () => {
     });
     expect(
       measureNoteHeight.mock.calls.map(([request]) => request.contentWidth),
-    ).toEqual([394, 794]);
-    expect(result.nodes.map((node) => node.style?.height)).toEqual([128, 128]);
+    ).toEqual([396, 796]);
+    expect(result.nodes.map((node) => node.style?.height)).toEqual([124, 124]);
     expect(
       result.nodes.map(
         (node) => (node.data.autoHeight as { measuredFor: string }).measuredFor,
@@ -174,8 +174,8 @@ describe('warmupNodeHeights', () => {
 
     const warmedChild = result.nodes.find((node) => node.id === 'n1');
     const fittedFrame = result.nodes.find((node) => node.id === 'f1');
-    expect(warmedChild?.style?.height).toBe(268);
-    expect(fittedFrame?.style?.height).toBeGreaterThan(268);
+    expect(warmedChild?.style?.height).toBe(264);
+    expect(fittedFrame?.style?.height).toBeGreaterThan(264);
     expect(fittedFrame?.style?.height).not.toBe(120);
   });
 });

@@ -4,6 +4,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  CONVERSATION_CARD_SPACING,
   NODE_CONTENT_SPACING,
   nodeContentSpacingForWidth,
 } from './nodeSpacing';
@@ -19,11 +20,14 @@ describe('shared content spacing', () => {
     });
     expect(NOTE_SURFACE_DESIGN_CONFIG.contentPaddingBlock).toBe(16);
     expect(NOTE_SURFACE_DESIGN_CONFIG.contentPaddingInline).toBe(16);
+    expect(CONVERSATION_CARD_SPACING.padding).toBe(
+      NODE_CONTENT_SPACING.padding,
+    );
   });
   it.each([200, 400, 406, 600, 1000])(
     'preserves PDF/Web width scaling at %s, independently of height',
     (width) => {
-      const scale = (width - 6) / 400;
+      const scale = (width - 4) / 400;
       const spacing = nodeContentSpacingForWidth(width);
       expect(spacing.padding).toBeCloseTo(16 * scale);
       expect(spacing.imageTextGap).toBeCloseTo(12 * scale);

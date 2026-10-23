@@ -57,8 +57,8 @@ describe('question authored takeover policy', () => {
   it('uses authored font scale, never card width or screen-size floors', () => {
     expect(QUESTION_TAKEOVER_SIZE).toBe(128);
     expect(QUESTION_TAKEOVER_SIZE * QUESTION_TAKEOVER_AVATAR_RATIO).toBe(84.48);
-    for (const font of [2.8, 14, 28, 56, 280])
-      expect(questionTakeoverContentScale(font)).toBeCloseTo(font / 28);
+    for (const font of [2.4, 12, 24, 48, 240])
+      expect(questionTakeoverContentScale(font)).toBeCloseTo(font / 24);
     for (const invalid of [undefined, null, 0, -1, NaN, Infinity, '56'])
       expect(questionTakeoverContentScale(invalid)).toBe(1);
   });

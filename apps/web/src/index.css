@@ -15,7 +15,7 @@
 
   /* Text hierarchy */
   --fg-default: #191919;
-  --fg-muted: #515151;
+  --fg-muted: #55514a;
   --fg-subtle: #767676;
   --fg-inverse: #ffffff;
 
@@ -334,6 +334,15 @@ body,
   -webkit-touch-callout: none;
 }
 
+/* Chrome can be a sibling of Canvas or portalled into document.body. */
+[data-canvas-header],
+[data-canvas-toolbar-layer],
+[data-floating-chrome] {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 /* Touch/pen only: stop canvas gestures (draw, pan, lasso, node drag) from
    selecting node/panel text and popping the iOS copy callout. Left as the
    default for the mouse so desktop users can still select node text to
@@ -343,7 +352,12 @@ body,
   user-select: none;
 }
 
-[data-canvas-root]
+:is(
+    [data-canvas-root],
+    [data-canvas-header],
+    [data-canvas-toolbar-layer],
+    [data-floating-chrome]
+  )
   :is(input, textarea, select, [contenteditable='true'], a[href]) {
   -webkit-touch-callout: default;
   -webkit-user-select: text;

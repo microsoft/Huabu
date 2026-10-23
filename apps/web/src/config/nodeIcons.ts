@@ -23,7 +23,7 @@ import {
   Pencil,
   Mic,
   MessageCircleQuestionMark,
-  PanelsTopLeft,
+  Layers2,
 } from 'lucide-react';
 
 import type { CanvasNodeType, OfficeFormat } from '@huabu/shared';
@@ -56,7 +56,7 @@ export const NODE_ICON: Record<CanvasNodeType, LucideIcon> = {
   audio: Mic,
   web: Globe,
   frame: Frame,
-  spacePreview: PanelsTopLeft,
+  spacePreview: Layers2,
   sketch: Pencil,
   question: MessageCircleQuestionMark,
 };

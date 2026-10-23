@@ -5,16 +5,16 @@
  * Centralised workspace path management.
  *
  * Two operating modes, decided at process startup by the presence of the
- * `HUABU_WORKSPACE` environment variable:
+ * `HUABU_WORKSPACE` deployment override or the Home saved by remote setup:
  *
  *   ── Free mode (default for local dev) ──
- *     `HUABU_WORKSPACE` is *unset*.
+ *     Neither an override nor a saved remote Home is configured.
  *     The user picks any absolute directory at runtime via the client
  *     (folder picker / path input). `setWorkspacePath(absPath)` is the
  *     entry point. The active path can change during the process lifetime.
  *
  *   ── Managed mode (recommended for remote / single-tenant deployments) ──
- *     `HUABU_WORKSPACE=/abs/path` is set at process start.
+ *     `HUABU_WORKSPACE=/abs/path` or a setup Home is resolved at process start.
  *     The path is locked at boot via {@link initWorkspaceFromEnv} and
  *     CANNOT be changed at runtime. The client gets a read-only label
  *     (the basename of the path) and no folder-picker UI. To run a
@@ -39,6 +39,7 @@
 
 import path from 'node:path';
 
+import { getDeploymentEnvironment } from '../security/deployment-settings.js';
 import { resetExternalNoteSessions } from './canvas/external-watcher.js';
 import { refreshCanvasDirIndex } from './storage/canvas-dirs.js';
 import {
@@ -123,7 +124,7 @@ export function isWorkspaceConfigured(): boolean {
  * is surfaced loudly.
  */
 export function initWorkspaceFromEnv(): void {
-  const fromEnv = process.env[ENV_KEY];
+  const fromEnv = getDeploymentEnvironment()[ENV_KEY];
   if (!fromEnv) {
     _managed = false;
     return;

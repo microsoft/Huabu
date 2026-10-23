@@ -2,6 +2,7 @@
   "name": "huabu",
   "private": true,
   "scripts": {
+    "setup": "node scripts/setup.mjs",
     "predev": "pnpm run build:agentlet && pnpm run build:agenetes && pnpm run build:client-runtime",
     "dev": "node scripts/dev.mjs",
     "dev:server": "pnpm --filter @huabu/server dev",

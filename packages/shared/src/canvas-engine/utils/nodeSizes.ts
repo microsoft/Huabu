@@ -17,6 +17,7 @@
 
 import {
   clampSpaceShortcutWidth,
+  spaceShortcutScale,
   SPACE_SHORTCUT_SIZE,
 } from './spaceShortcut.js';
 import {
@@ -31,26 +32,22 @@ import type { Node } from '@xyflow/react';
 // Default dimensions per node type
 // ---------------------------------------------------------------------------
 const DEFAULT_SIZES: Record<string, NodeSize> = {
-  text: { width: 200 },
-  // Note nodes auto-size by content height but have a minimum intrinsic
-  // height of ~50px (the note policy's `minIntrinsicHeight`) plus borders/padding when empty.
-  // Use 56px as a nominal default for layout calculations (matches the
-  // minimum rendered height of an empty note at default zoom).
-  note: { width: 400, height: 56 },
+  text: { width: 400 },
+  note: { width: 400, height: 300 },
   web: { width: 400, height: 400 },
   pdf: { width: 400, height: 400 },
   office: { width: 400, height: 400 },
   video: { width: 400, height: 300 },
   image: { width: 400, height: 300 },
   // Compact recorder: fits the recording controls on one row.
-  audio: { width: 200, height: 56 },
+  audio: { width: 400, height: 56 },
   frame: { width: 400, height: 300 },
   spacePreview: {
     width: SPACE_SHORTCUT_SIZE.defaultWidth,
     height: SPACE_SHORTCUT_SIZE.defaultHeight,
   },
   // Question nodes auto-size to content (height-driven by text), matching
-  // the behaviour of text/note nodes. The width sets the wrap width when
+  // the behaviour of text nodes. The width sets the wrap width when
   // a question is created with content. Use 80px as a nominal default for
   // layout calculations (fits one line of text + padding at default zoom).
   question: { width: 400, height: 80 },
@@ -70,13 +67,12 @@ export function isAlwaysAutoHeightNodeType(nodeType: string): boolean {
  * These are used as layout fallbacks when creating nodes or calculating
  * initial positions before the node has been rendered and measured.
  *
- * Most nodes return both width and height. Text and note nodes *return*
- * both, but their *actual* rendered height is content-driven; the default
- * height here serves only for layout positioning (e.g. when connecting
- * new nodes). Once rendered, the measured height takes precedence.
+ * Most nodes return both width and height. For content-driven types,
+ * nominal heights serve only for layout positioning until measured.
+ * Notes start fixed-height unless creation explicitly requests auto.
  */
 export function getNodeDefaultSize(nodeType: string): NodeSize {
-  return DEFAULT_SIZES[nodeType] || { width: 300, height: 200 };
+  return DEFAULT_SIZES[nodeType] || { width: 400, height: 200 };
 }
 
 /**
@@ -85,7 +81,7 @@ export function getNodeDefaultSize(nodeType: string): NodeSize {
  * `getNodeDefaultSize` may include nominal heights for content-driven nodes so
  * placement algorithms can centre and avoid-overlap before the node is mounted.
  * Those nominal heights must not become fixed `style.height` on creation,
- * because text/note/question nodes grow from their rendered content. An explicit
+ * because text/question/spacePreview nodes grow from their rendered content. An explicit
  * caller-provided height is still preserved for note fixed-height restores and
  * inherently fixed-size node types. Text/question resize gestures store their
  * intended scale as `data.style.fontSize`, so their top-level height remains
@@ -94,10 +90,24 @@ export function getNodeDefaultSize(nodeType: string): NodeSize {
 export function getNodeCreationStyle(
   nodeType: string,
   size: NodeSize,
-  opts: { heightIsExplicit?: boolean } = {},
+  opts: { heightIsExplicit?: boolean; data?: Record<string, unknown> } = {},
 ): NodeSize {
+  if (nodeType === 'note') {
+    if (opts.data?.heightMode === 'auto') {
+      return opts.heightIsExplicit ? { ...size } : { width: size.width };
+    }
+    return {
+      width: size.width,
+      height: size.height ?? DEFAULT_SIZES.note.height,
+    };
+  }
   if (nodeType === 'spacePreview')
-    return { width: clampSpaceShortcutWidth(size.width) };
+    return {
+      width: clampSpaceShortcutWidth(
+        size.width,
+        spaceShortcutScale(opts.data ?? {}),
+      ),
+    };
   const shouldWriteHeight =
     typeof size.height === 'number' &&
     (opts.heightIsExplicit

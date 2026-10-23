@@ -36,16 +36,16 @@ function fixture(mode: string, sizing = 'hug'): Node[] {
 
 describe('responsive Frame geometry', () => {
   it.each(['column', 'row', 'grid'])(
-    'keeps Manual %s spacing on the actual outer tier',
+    'keeps Manual %s geometry with fixed density',
     (mode) => {
       const initial = fixture(mode, 'manual');
       const result = applyStructuredFrameRelayout(initial, ['f']).nodes;
       expect(result[0].style).toEqual(initial[0].style);
       expect(Math.min(...result.slice(1).map((node) => node.position.y))).toBe(
-        152,
+        64,
       );
       expect(Math.min(...result.slice(1).map((node) => node.position.x))).toBe(
-        40,
+        20,
       );
       expect(result.slice(1).map((node) => node.style)).toEqual(
         initial.slice(1).map((node) => node.style),
@@ -78,7 +78,7 @@ describe('responsive Frame geometry', () => {
   );
 
   it.each(['column', 'row', 'grid'])(
-    'resizes %s through the real executor across tiers and release',
+    'resizes %s through the real executor across widths and release',
     (mode) => {
       const edges: Edge[] = [
         {

@@ -2,7 +2,7 @@
 // Licensed under the MIT license.
 
 import { Check, ChevronDown, Minus, Plus } from 'lucide-react';
-import { useId, useRef, useState } from 'react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/components/Common/Button';
@@ -26,24 +26,13 @@ export function PDFZoomControls({
   disabled: boolean;
 }) {
   const { t } = useTranslation();
-  const id = useId();
   const [open, setOpen] = useState(false);
   if (disabled && open) setOpen(false);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const keyboardEdgeRef = useRef<'first' | 'last'>('first');
   const percentage = Math.round(zoom.scale * 100);
 
   const run = (action: () => void) => {
     action();
     setOpen(false);
-    triggerRef.current?.focus({ preventScroll: true });
-  };
-  const focusMenu = (edge: 'first' | 'last') => {
-    const items =
-      menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]');
-    const item = edge === 'last' ? items?.[items.length - 1] : items?.[0];
-    item?.focus({ preventScroll: true });
   };
 
   return (
@@ -67,10 +56,8 @@ export function PDFZoomControls({
         triggerWrapperClassName="flex"
         open={open && !disabled}
         onOpenChange={setOpen}
-        onOpenAutoFocus={() => focusMenu(keyboardEdgeRef.current)}
         trigger={
           <Button
-            ref={triggerRef}
             variant="ghost"
             size="sm"
             disabled={disabled}
@@ -79,21 +66,7 @@ export function PDFZoomControls({
             tooltipWrapperClassName="flex"
             aria-label={t('node.pdfZoomMenu', { percentage })}
             aria-haspopup="menu"
-            aria-controls={open ? id : undefined}
             className={`${FOCUS_CLASS} h-6 w-14 gap-0.5 px-1 py-0 text-[11px] tabular-nums`}
-            onPointerDown={() => {
-              keyboardEdgeRef.current = 'first';
-            }}
-            onKeyDown={(event) => {
-              if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-                event.preventDefault();
-                event.stopPropagation();
-                const edge = event.key === 'ArrowUp' ? 'last' : 'first';
-                keyboardEdgeRef.current = edge;
-                if (open) focusMenu(edge);
-                else setOpen(true);
-              }
-            }}
           >
             <span>
               {disabled || zoom.scale <= 0 ? '\u2014' : `${percentage}%`}
@@ -102,45 +75,7 @@ export function PDFZoomControls({
           </Button>
         }
       >
-        <div
-          ref={menuRef}
-          id={id}
-          role="menu"
-          tabIndex={-1}
-          aria-label={t('node.pdfZoom')}
-          className="min-w-40"
-          onKeyDown={(event) => {
-            // Let the shared Popover consume Escape before workspace shortcuts.
-            if (event.key === 'Escape') return;
-            event.stopPropagation();
-            if (event.key === 'Tab') {
-              setOpen(false);
-              triggerRef.current?.focus({ preventScroll: true });
-              return;
-            }
-            if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key))
-              return;
-            event.preventDefault();
-            const items = Array.from(
-              event.currentTarget.querySelectorAll<HTMLButtonElement>(
-                '[role="menuitem"]',
-              ),
-            );
-            const index = items.findIndex(
-              (item) => item === document.activeElement,
-            );
-            const next =
-              event.key === 'Home'
-                ? 0
-                : event.key === 'End'
-                  ? items.length - 1
-                  : (index +
-                      (event.key === 'ArrowDown' ? 1 : -1) +
-                      items.length) %
-                    items.length;
-            items[next]?.focus({ preventScroll: true });
-          }}
-        >
+        <div className="min-w-40">
           <DropdownMenuItem
             aria-current={zoom.mode === 'width' ? 'true' : undefined}
             trailing={

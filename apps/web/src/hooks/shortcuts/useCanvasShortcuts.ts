@@ -11,12 +11,14 @@ import {
 
 import {
   OPEN_SPACE_SHORTCUT_EVENT,
+  RENAME_SPACE_SHORTCUT_EVENT,
   type OpenSpaceShortcutDetail,
 } from '@/components/Nodes/spacePreview/spaceShortcutEvents';
 import { isVideoControlTarget } from '@/components/Nodes/video/videoInteraction';
 import { EDIT_EDGE_LABEL_EVENT } from '@/components/Panels/Canvas/edges/LabelledEdge';
-import { fitCanvasContent } from '@/components/Panels/CanvasLayerPanel/focusNodesOnCanvas';
+import { requestCreateChildSpace } from '@/components/Space/createChildSpaceAction';
 import { matchesShortcut } from '@/config/shortcuts';
+import { fitCanvasContent } from '@/utils/canvasViewport';
 
 import {
   isEditableTarget,
@@ -319,6 +321,15 @@ export function useCanvasShortcuts(
       if (e.target instanceof Element && isVideoControlTarget(e.target)) return;
       const mod = e.metaKey || e.ctrlKey;
       const editable = isEditableTarget(e.target);
+      if (
+        !editable &&
+        !e.isComposing &&
+        matchesShortcut(e, 'layer.collectSpace')
+      ) {
+        e.preventDefault();
+        if (!e.repeat) requestCreateChildSpace();
+        return;
+      }
 
       if (!editable && !e.isComposing && rfInstanceRef.current) {
         if (matchesShortcut(e, 'view.resetZoom')) {
@@ -367,10 +378,28 @@ export function useCanvasShortcuts(
           .filter((edge) => edge.selected)
           .map((edge) => edge.id);
         if (selectedNodeIds.length > 0) {
-          deleteNodes(selectedNodeIds);
-        }
-        if (selectedEdgeIds.length > 0) {
+          deleteNodes(selectedNodeIds, selectedEdgeIds);
+        } else if (selectedEdgeIds.length > 0) {
           disconnectEdges(selectedEdgeIds);
+        }
+        return;
+      }
+
+      if (!editable && !e.isComposing && matchesShortcut(e, 'space.rename')) {
+        const { nodes, edges } = useCanvasStore.getState();
+        const selected = nodes.filter((node) => node.selected);
+        if (
+          selected.length === 1 &&
+          selected[0].type === 'spacePreview' &&
+          !selected[0].data.locked &&
+          !edges.some((edge) => edge.selected)
+        ) {
+          e.preventDefault();
+          window.dispatchEvent(
+            new CustomEvent(RENAME_SPACE_SHORTCUT_EVENT, {
+              detail: { nodeId: selected[0].id },
+            }),
+          );
         }
         return;
       }
@@ -380,7 +409,14 @@ export function useCanvasShortcuts(
       // Enter is the way to descend into it (same pattern as tldraw/FigJam).
       // Requires exactly one edge and no nodes selected, so the target is
       // unambiguous.
-      if (key === 'Enter' && !mod && !e.altKey && !e.shiftKey && !editable) {
+      if (
+        key === 'Enter' &&
+        !mod &&
+        !e.altKey &&
+        !e.shiftKey &&
+        !e.isComposing &&
+        !isKeyboardInteractiveTarget(e.target)
+      ) {
         const { nodes: cur, edges: curEdges } = useCanvasStore.getState();
         const selectedNodes = cur.filter((node) => node.selected);
         if (

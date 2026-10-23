@@ -7,8 +7,8 @@ import { useTranslation } from 'react-i18next';
 
 import { resolveArtifactUrl } from '@/api/artifact';
 import { Button } from '@/components/Common/Button';
-import { NodeRef } from '@/components/Common/NodeRef';
 import { Tooltip } from '@/components/Common/Tooltip';
+import { NodeRef } from '@/components/Nodes/NodeRef/NodeRef';
 import { useChatSession } from '@/hooks/useChatSession';
 import useCanvasStore from '@/store/canvasStore';
 import {

@@ -5,19 +5,30 @@ import {
   createContext,
   useContext,
   useEffect,
+  useCallback,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
 
+import type { CanvasSearchSource } from '@huabu/shared';
+
 export type PreviewSearchAdapter = {
+  query: string;
   matchCount: number;
   isSearching: boolean;
   canNavigate: boolean;
-  navigateToMatch: (matchIndex: number) => void;
+  failed?: boolean;
+  resolveSourceMatch?: (source: CanvasSearchSource) => Promise<number | null>;
+  getMatchRange?: (matchIndex: number) => Range | null;
+  navigateToMatch: (
+    matchIndex: number,
+    onResult: (visible: boolean, range?: Range) => void,
+  ) => (() => void) | void;
 };
 
 type PreviewSearchAdapterContextValue = {
-  adapter: PreviewSearchAdapter | null;
+  adapter: (PreviewSearchAdapter & { isCurrent: () => boolean }) | null;
   register: (adapter: PreviewSearchAdapter | null) => void;
 };
 
@@ -29,7 +40,18 @@ export function PreviewSearchAdapterProvider({
 }: {
   children: ReactNode;
 }): React.JSX.Element {
-  const [adapter, register] = useState<PreviewSearchAdapter | null>(null);
+  const [adapter, setAdapter] =
+    useState<PreviewSearchAdapterContextValue['adapter']>(null);
+  const current = useRef<symbol | null>(null);
+  const register = useCallback((next: PreviewSearchAdapter | null) => {
+    const registration = next ? Symbol('preview-search-adapter') : null;
+    current.current = registration;
+    setAdapter(
+      next
+        ? { ...next, isCurrent: () => current.current === registration }
+        : null,
+    );
+  }, []);
   return (
     <PreviewSearchAdapterContext.Provider value={{ adapter, register }}>
       {children}
@@ -37,7 +59,7 @@ export function PreviewSearchAdapterProvider({
   );
 }
 
-export function usePreviewSearchAdapter(): PreviewSearchAdapter | null {
+export function usePreviewSearchAdapter(): PreviewSearchAdapterContextValue['adapter'] {
   return useContext(PreviewSearchAdapterContext)?.adapter ?? null;
 }
 

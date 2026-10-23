@@ -1,8 +1,7 @@
 {
   "compilerOptions": {
-    "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["./src/*"]
     },
     "target": "ES2020",
     "useDefineForClassFields": true,
@@ -16,6 +15,7 @@
     "noEmit": true,
     "jsx": "react-jsx",
     "strict": true,
+    "types": ["node"],
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true

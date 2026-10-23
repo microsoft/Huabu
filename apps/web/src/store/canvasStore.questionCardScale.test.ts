@@ -48,7 +48,7 @@ function current(): Node {
 
 function intent(percent: number) {
   return {
-    type: 'SET_QUESTION_CARD_SCALE' as const,
+    type: 'SET_CARD_SCALE' as const,
     nodeId: questionId,
     percent,
   };

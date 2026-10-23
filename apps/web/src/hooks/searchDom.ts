@@ -1,6 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { literalTextMatches } from '@huabu/shared';
+
+import { resolveSourceRange } from './useSearchSource';
+
+import type { CanvasSearchSource } from '@huabu/shared';
+
 /**
  * Shared DOM-walk helpers for the search subsystem.
  *
@@ -19,9 +25,8 @@
  * inside `root`'s text nodes and return it as a `Range`, or `null`
  * if there aren't that many matches.
  *
- * Walks in document order. When the preview declares one or more
- * `[data-preview-search-content]` roots, only those document surfaces are
- * searched; otherwise the whole root is used as a compatibility fallback.
+ * Walks in document order. Each `[data-search-renderer]` scopes its own
+ * searchable document without excluding sibling content in a larger root.
  * Hidden content and explicitly excluded chrome are always skipped.
  */
 export function findNthRange(
@@ -29,10 +34,18 @@ export function findNthRange(
   query: string,
   nth: number,
 ): Range | null {
-  const needle = query.toLowerCase();
-  if (!needle) return null;
-  const ranges = findRanges(root, query, nth + 1);
-  return ranges[nth] ?? null;
+  let index = 0;
+  for (const { node, offset, endNode, endOffset } of walkTextMatches(
+    root,
+    query,
+  )) {
+    if (index++ !== nth) continue;
+    const range = document.createRange();
+    range.setStart(node, offset);
+    range.setEnd(endNode, endOffset);
+    return range;
+  }
+  return null;
 }
 
 /**
@@ -45,50 +58,145 @@ export function findRanges(
   query: string,
   maxRanges = Number.POSITIVE_INFINITY,
 ): Range[] {
-  const needle = query.toLowerCase();
-  if (!needle || maxRanges <= 0) return [];
-
   const ranges: Range[] = [];
-  for (const searchRoot of getSearchRoots(root)) {
-    const walker = document.createTreeWalker(searchRoot, NodeFilter.SHOW_TEXT, {
-      acceptNode: (node) =>
-        isSearchableTextNode(node, searchRoot)
-          ? NodeFilter.FILTER_ACCEPT
-          : NodeFilter.FILTER_REJECT,
-    });
-    let current = walker.nextNode();
-    while (current && ranges.length < maxRanges) {
-      const text = (current.textContent ?? '').toLowerCase();
-      let from = 0;
-      while (ranges.length < maxRanges) {
-        const idx = text.indexOf(needle, from);
-        if (idx === -1) break;
-        const range = document.createRange();
-        range.setStart(current, idx);
-        range.setEnd(current, idx + needle.length);
-        ranges.push(range);
-        from = idx + Math.max(1, needle.length);
-      }
-      current = walker.nextNode();
-    }
+  if (maxRanges <= 0) return ranges;
+  for (const { node, offset, endNode, endOffset } of walkTextMatches(
+    root,
+    query,
+  )) {
+    const range = document.createRange();
+    range.setStart(node, offset);
+    range.setEnd(endNode, endOffset);
+    ranges.push(range);
     if (ranges.length >= maxRanges) break;
   }
   return ranges;
 }
 
-function getSearchRoots(root: HTMLElement): HTMLElement[] {
-  if (root.matches('[data-preview-search-content]')) return [root];
-  const candidates = Array.from(
-    root.querySelectorAll<HTMLElement>('[data-preview-search-content]'),
-  );
-  const topLevelCandidates = candidates.filter(
-    (candidate) =>
-      !candidate.parentElement?.closest('[data-preview-search-content]'),
-  );
-  return topLevelCandidates.length > 0 ? topLevelCandidates : [root];
+/** Count all searchable occurrences without allocating DOM Range objects. */
+export function countMatches(root: HTMLElement, query: string): number {
+  let count = 0;
+  const matches = walkTextMatches(root, query);
+  while (!matches.next().done) count += 1;
+  return count;
+}
+
+export function getRangeMatchIndex(
+  root: HTMLElement,
+  query: string,
+  range: Range,
+): number | null {
+  let index = 0;
+  for (const match of walkTextMatches(root, query)) {
+    if (
+      match.node === range.startContainer &&
+      match.offset === range.startOffset &&
+      match.endNode === range.endContainer &&
+      match.endOffset === range.endOffset
+    )
+      return index;
+    index++;
+  }
+  return null;
+}
+
+function searchableTextNodes(root: HTMLElement): Node[] {
+  const nodes: Node[] = [];
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_ALL);
+  let current = walker.nextNode();
+  while (current) {
+    if (
+      current.nodeType === Node.TEXT_NODE &&
+      isSearchableTextNode(current, root)
+    )
+      nodes.push(current);
+    current = walker.nextNode();
+  }
+  return nodes;
+}
+
+export function findProjectedRange(
+  root: HTMLElement,
+  source: string,
+  start: number,
+  end: number,
+): Range | null {
+  const nodes = searchableTextNodes(root);
+  const compact = (text: string): string => text.replace(/\s/g, '');
+  if (
+    compact(nodes.map((node) => node.textContent ?? '').join('')) !==
+    compact(source)
+  )
+    return null;
+  const from = compact(source.slice(0, start)).length;
+  const to = compact(source.slice(0, end)).length;
+  if (from === to) return null;
+  const range = document.createRange();
+  let index = 0;
+  let started = false;
+  for (const node of nodes) {
+    const text = node.textContent ?? '';
+    for (let offset = 0; offset < text.length; offset++) {
+      if (/\s/.test(text[offset] ?? '')) continue;
+      if (index === from) {
+        range.setStart(node, offset);
+        started = true;
+      }
+      index++;
+      if (started && index === to) {
+        range.setEnd(node, offset + 1);
+        return range;
+      }
+    }
+  }
+  return null;
+}
+
+function* walkTextMatches(
+  root: HTMLElement,
+  query: string,
+): Generator<{ node: Node; offset: number; endNode: Node; endOffset: number }> {
+  const needle = query.toLowerCase();
+  if (!needle) return;
+  const nodes = searchableTextNodes(root);
+  let text = '';
+  let previousBlock: Element | null | undefined;
+  const spans = nodes.map((node) => {
+    const block = node.parentElement?.closest(
+      'p,div,li,pre,td,th,h1,h2,h3,h4,h5,h6',
+    );
+    if (previousBlock !== undefined && block !== previousBlock) text += '\0';
+    previousBlock = block;
+    const start = text.length;
+    text += node.textContent ?? '';
+    return { node, start, end: text.length };
+  });
+  let spanIndex = 0;
+  for (const { start: index, end: matchEnd } of literalTextMatches(
+    text,
+    needle,
+  )) {
+    while (spanIndex < spans.length && (spans[spanIndex]?.end ?? 0) <= index)
+      spanIndex++;
+    const start = spans[spanIndex];
+    let endIndex = spanIndex;
+    while (endIndex < spans.length && (spans[endIndex]?.end ?? 0) < matchEnd)
+      endIndex++;
+    const end = spans[endIndex];
+    if (start && end)
+      yield {
+        node: start.node,
+        offset: index - start.start,
+        endNode: end.node,
+        endOffset: matchEnd - end.start,
+      };
+  }
 }
 
 function isSearchableTextNode(node: Node, boundary: HTMLElement): boolean {
+  const renderer = node.parentElement?.closest('[data-search-renderer]');
+  const content = node.parentElement?.closest('[data-preview-search-content]');
+  if (renderer && (!content || !renderer.contains(content))) return false;
   let element = node.parentElement;
   while (element) {
     const tag = element.tagName;
@@ -96,6 +204,7 @@ function isSearchableTextNode(node: Node, boundary: HTMLElement): boolean {
     if (
       element.hidden ||
       element.getAttribute('aria-hidden') === 'true' ||
+      element.getAttribute('data-preview-active') === 'false' ||
       element.hasAttribute('data-search-exclude')
     ) {
       return false;
@@ -119,24 +228,90 @@ function isSearchableTextNode(node: Node, boundary: HTMLElement): boolean {
  * already sits comfortably inside it. Uses instant (non-smooth)
  * scrolling so search navigation feels snappy.
  *
- * Note: `scrollIntoView` walks up through every scrollable ancestor,
- * so this works for nested scrollers (e.g. a preview body inside a
- * panel inside the page).
+ * Scroll each ancestor by the Range geometry, never by the dimensions
+ * of its potentially much taller parent paragraph.
  */
-export function scrollRangeIntoView(range: Range): void {
-  const rect = range.getBoundingClientRect();
-  const target = rect.top + rect.height / 2;
-  const viewport = window.innerHeight;
-  // `rect.width === 0` happens for ranges inside not-yet-laid-out
-  // text (e.g. pdf.js text-layer spans before their first paint);
-  // treat that as "needs scroll" so the parent element comes into
-  // view and the next observer pass can refine the position.
-  if (rect.width === 0 || target < 80 || target > viewport - 80) {
-    range.startContainer.parentElement?.scrollIntoView({
-      block: 'center',
-      behavior: 'auto',
-    });
+export function scrollRangeIntoView(range: Range): boolean {
+  let rect = range.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) return false;
+  for (
+    let parent = range.startContainer.parentElement;
+    parent;
+    parent = parent.parentElement
+  ) {
+    const style = getComputedStyle(parent);
+    const bounds = parent.getBoundingClientRect();
+    if (!bounds.height || !bounds.width) continue;
+    const inset = Math.min(80, bounds.height / 4);
+    if (
+      /(auto|scroll|hidden|clip)/.test(style.overflowY) &&
+      (rect.top < bounds.top + inset || rect.bottom > bounds.bottom - inset)
+    ) {
+      parent.scrollTop +=
+        rect.top + rect.height / 2 - bounds.top - bounds.height / 2;
+      rect = range.getBoundingClientRect();
+    }
+    if (
+      /(auto|scroll|hidden|clip)/.test(style.overflowX) &&
+      (rect.left < bounds.left || rect.right > bounds.right)
+    ) {
+      parent.scrollLeft +=
+        rect.left + rect.width / 2 - bounds.left - bounds.width / 2;
+      rect = range.getBoundingClientRect();
+    }
   }
+  if (
+    rect.top < 0 ||
+    rect.bottom > window.innerHeight ||
+    rect.left < 0 ||
+    rect.right > window.innerWidth
+  ) {
+    window.scrollBy({
+      top: rect.top + rect.height / 2 - window.innerHeight / 2,
+      left:
+        rect.left < 0 || rect.right > window.innerWidth
+          ? rect.left + rect.width / 2 - window.innerWidth / 2
+          : 0,
+      behavior: 'instant',
+    });
+    rect = range.getBoundingClientRect();
+  }
+  let visibleTop = 0;
+  let visibleBottom = window.innerHeight;
+  let visibleLeft = 0;
+  let visibleRight = window.innerWidth;
+  for (
+    let parent = range.startContainer.parentElement;
+    parent;
+    parent = parent.parentElement
+  ) {
+    const style = getComputedStyle(parent);
+    const bounds = parent.getBoundingClientRect();
+    if (bounds.height === 0) continue;
+    if (/(auto|scroll|hidden|clip)/.test(style.overflowY)) {
+      visibleTop = Math.max(visibleTop, bounds.top);
+      visibleBottom = Math.min(visibleBottom, bounds.bottom);
+    }
+    if (/(auto|scroll|hidden|clip)/.test(style.overflowX)) {
+      visibleLeft = Math.max(visibleLeft, bounds.left);
+      visibleRight = Math.min(visibleRight, bounds.right);
+    }
+  }
+  const visible = (
+    start: number,
+    end: number,
+    clipStart: number,
+    clipEnd: number,
+  ): boolean =>
+    end - start <= clipEnd - clipStart
+      ? start >= clipStart - 0.5 && end <= clipEnd + 0.5
+      : (start + end) / 2 >= clipStart && (start + end) / 2 <= clipEnd;
+  return (
+    visibleBottom > visibleTop &&
+    visibleRight > visibleLeft &&
+    visible(rect.top, rect.bottom, visibleTop, visibleBottom) &&
+    visible(rect.left, rect.right, visibleLeft, visibleRight)
+  );
 }
 
 /**
@@ -172,7 +347,16 @@ export function scheduleScrollToMatch(
   getRoot: () => HTMLElement | null,
   query: string,
   nth: number,
-  options?: { timeoutMs?: number; onTimeout?: () => void },
+  options?: {
+    timeoutMs?: number;
+    onTimeout?: () => void;
+    onMatch?: (range: Range) => void;
+    fallbackToFirst?: boolean;
+    getMatchRoot?: (root: HTMLElement) => HTMLElement | null;
+    source?: CanvasSearchSource;
+    requireSource?: boolean;
+    getMatchRange?: (root: HTMLElement) => Range | null;
+  },
 ): () => void {
   if (!query) return () => {};
   const timeoutMs = options?.timeoutMs ?? 8000;
@@ -184,9 +368,13 @@ export function scheduleScrollToMatch(
   let timer: ReturnType<typeof setTimeout> | null = null;
   let rafId = 0;
   let resolved = false;
+  let waitingForLayout = false;
   const preparedChatRoots = new WeakSet<HTMLElement>();
+  let preparedChatRoot: HTMLElement | null = null;
 
   const cleanup = (): void => {
+    preparedChatRoot?.dispatchEvent(new Event('chat-search-finished'));
+    preparedChatRoot = null;
     observer?.disconnect();
     observer = null;
     observedTarget = null;
@@ -201,6 +389,7 @@ export function scheduleScrollToMatch(
   };
 
   const tryScroll = (): boolean => {
+    waitingForLayout = false;
     if (cancelled) return true;
     const root = getRoot();
     if (!root) return false;
@@ -211,21 +400,54 @@ export function scheduleScrollToMatch(
         root.dispatchEvent(request);
         if (!request.defaultPrevented) return false;
         preparedChatRoots.add(root);
+        preparedChatRoot = root;
       }
-      if (root.hasAttribute('data-chat-cached-earlier')) return false;
+      if (
+        root.hasAttribute('data-chat-cached-earlier') ||
+        root.hasAttribute('data-chat-has-older') ||
+        root.hasAttribute('data-chat-history-loading')
+      )
+        return false;
     }
-    // Prefer the requested ordinal; fall back to the first match if
-    // the DOM has fewer occurrences than the indexed content (e.g.
-    // markdown source has matches in syntax tokens that the rendered
-    // view strips, or pdf.js hasn't paginated all hits yet).
-    const range =
-      findNthRange(root, query, nth) ?? findNthRange(root, query, 0);
+    const matchRoot = options?.getMatchRoot ? options.getMatchRoot(root) : root;
+    if (!matchRoot) return false;
+    if (options?.requireSource && !options.source) {
+      onTimeout?.();
+      return true;
+    }
+    const sourceMatch = options?.source
+      ? resolveSourceRange(
+          matchRoot,
+          query,
+          options.source,
+          searchableTextNodes,
+        )
+      : null;
+    if (sourceMatch?.unavailable) {
+      onTimeout?.();
+      return true;
+    }
+    // Document source ordinals can differ from rendered Markdown. Conversation
+    // ordinals must never fall back to an unrelated, more recent occurrence.
+    const range = options?.getMatchRange
+      ? options.getMatchRange(matchRoot)
+      : sourceMatch
+        ? sourceMatch.range
+        : (findNthRange(matchRoot, query, nth) ??
+          (root.matches('[data-chat-thread-root]') ||
+          options?.fallbackToFirst === false
+            ? null
+            : findNthRange(matchRoot, query, 0)));
     if (!range) return false;
-    scrollRangeIntoView(range);
+    if (!scrollRangeIntoView(range)) {
+      waitingForLayout = true;
+      return false;
+    }
+    options?.onMatch?.(range);
     return true;
   };
 
-  const onMutation: MutationCallback = () => {
+  const onMutation = (): void => {
     if (cancelled || rafId) return;
     rafId = requestAnimationFrame(() => {
       rafId = 0;
@@ -237,7 +459,7 @@ export function scheduleScrollToMatch(
       if (tryScroll()) {
         resolved = true;
         cleanup();
-      }
+      } else if (waitingForLayout) onMutation();
     });
   };
 
@@ -252,18 +474,27 @@ export function scheduleScrollToMatch(
       subtree: true,
       characterData: true,
       attributes: true,
-      attributeFilter: ['data-chat-cached-earlier', 'data-preview-active'],
+      attributeFilter: [
+        'data-chat-cached-earlier',
+        'data-chat-has-older',
+        'data-chat-history-loading',
+        'data-preview-active',
+        'data-search-source',
+        'data-search-source-ready',
+      ],
     });
     observedTarget = desired;
   };
 
   if (tryScroll()) {
+    cleanup();
     return () => {
       cancelled = true;
     };
   }
 
   ensureNarrowedObserver();
+  if (waitingForLayout) onMutation();
 
   timer = setTimeout(() => {
     cleanup();

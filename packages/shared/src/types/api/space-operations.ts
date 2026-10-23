@@ -11,7 +11,10 @@
 
 import { z } from 'zod';
 
-import { canvasSearchRequestSchema } from './canvas-search.js';
+import {
+  canvasSearchMatchSchema,
+  canvasSearchRequestSchema,
+} from './canvas-search.js';
 import {
   ACCENT_PALETTE,
   AGENT_CANVAS_COMMAND_TYPES,
@@ -852,21 +855,7 @@ const inspectEdgesResultSchema = z
   })
   .strict();
 
-const searchMatchSchema = z
-  .object({
-    kind: z.enum(['node', 'edge']).optional(),
-    nodeId: z.string(),
-    nodeType: z.string(),
-    label: z.string().nullable(),
-    field: z.enum(['label', 'summary', 'keywords', 'content', 'conversation']),
-    snippet: z.string(),
-    matchStart: z.number().int().nonnegative(),
-    matchLength: z.number().int().nonnegative(),
-    occurrenceIndex: z.number().int().nonnegative(),
-    sourceNodeId: z.string().optional(),
-    targetNodeId: z.string().optional(),
-  })
-  .strict();
+const searchMatchSchema = canvasSearchMatchSchema.strict();
 
 const searchResultSchema = z
   .object({

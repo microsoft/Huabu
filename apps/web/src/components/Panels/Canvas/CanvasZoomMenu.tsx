@@ -15,8 +15,7 @@ import { MENU_SEPARATOR_CLASS } from '@/components/Common/menuStyles';
 import { TextInput } from '@/components/Common/TextInput';
 import { MAX_ZOOM, MIN_ZOOM } from '@/config/canvas';
 import { formatShortcutById } from '@/config/shortcuts';
-
-import { fitCanvasContent } from '../CanvasLayerPanel/focusNodesOnCanvas';
+import { fitCanvasContent } from '@/utils/canvasViewport';
 
 export function CanvasZoomMenu() {
   const { t } = useTranslation();
@@ -68,10 +67,11 @@ export function CanvasZoomMenu() {
   return (
     <Panel
       position="bottom-left"
-      className="react-flow__controls bg-surface mx-4! my-6!"
+      className="react-flow__controls bg-surface mx-4! mt-6! mb-[14px]!"
     >
       <DropdownMenu
         floating
+        contentRole="presentation"
         placement="top-start"
         align="top-left"
         open={open}
@@ -141,7 +141,7 @@ export function CanvasZoomMenu() {
             >
               <label
                 htmlFor={`${id}-input`}
-                className="text-fg-subtle mb-1.5 block text-xs"
+                className="text-fg-muted mb-1.5 block text-xs"
               >
                 {t('canvasControls.zoomLevel')}
               </label>
@@ -164,7 +164,7 @@ export function CanvasZoomMenu() {
                 />
                 <span
                   aria-hidden="true"
-                  className="text-fg-subtle pointer-events-none absolute inset-y-0 right-2 flex items-center text-xs"
+                  className="text-fg-muted pointer-events-none absolute inset-y-0 right-2 flex items-center text-xs"
                 >
                   %
                 </span>
@@ -185,6 +185,7 @@ export function CanvasZoomMenu() {
             <div role="menu" aria-label={t('canvasControls.zoomMenu')}>
               <div role="separator" className={MENU_SEPARATOR_CLASS} />
               <DropdownMenuItem
+                tabIndex={0}
                 shortcut={formatShortcutById('view.zoomIn')}
                 disabled={zoom >= MAX_ZOOM}
                 onClick={() => run(() => void instance.zoomIn())}
@@ -192,6 +193,7 @@ export function CanvasZoomMenu() {
                 {t('canvasControls.zoomIn')}
               </DropdownMenuItem>
               <DropdownMenuItem
+                tabIndex={0}
                 shortcut={formatShortcutById('view.zoomOut')}
                 disabled={zoom <= MIN_ZOOM}
                 onClick={() => run(() => void instance.zoomOut())}
@@ -199,6 +201,7 @@ export function CanvasZoomMenu() {
                 {t('canvasControls.zoomOut')}
               </DropdownMenuItem>
               <DropdownMenuItem
+                tabIndex={0}
                 shortcut={formatShortcutById('view.resetZoom')}
                 onClick={() => run(() => void instance.zoomTo(1))}
               >
@@ -206,6 +209,7 @@ export function CanvasZoomMenu() {
               </DropdownMenuItem>
               <div role="separator" className={MENU_SEPARATOR_CLASS} />
               <DropdownMenuItem
+                tabIndex={0}
                 shortcut={formatShortcutById('view.fitAll')}
                 disabled={!hasNodes}
                 onClick={() =>
@@ -215,6 +219,7 @@ export function CanvasZoomMenu() {
                 {t('canvasControls.fitAll')}
               </DropdownMenuItem>
               <DropdownMenuItem
+                tabIndex={0}
                 shortcut={formatShortcutById('view.fitSelection')}
                 disabled={!hasSelection}
                 onClick={() =>

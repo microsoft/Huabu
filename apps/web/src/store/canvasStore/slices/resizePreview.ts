@@ -424,18 +424,10 @@ export function createResizePreviewController(opts: {
       }
     };
     scaleChildren(snap, width, height);
-    // Route through the canonical dispatch path so the gesture
-    // snapshot flag stays re-armed. For structured (column/row)
-    // frames the grid solver re-packs the scaled children at the
-    // end of the batch; for free frames the scaled positions stick.
-    // Use the same target-tier edge gutters as the inverse layout and final
-    // commit, avoiding a different gap policy when the pointer is released.
-    previewResizeGeometry(items);
-
     // Scale from each immutable starting font and outer width, never from
     // the previous tick and never by fitting text to the requested height.
     // The silent style patch remains in the gesture's single undo entry;
-    // Text/Question height remains renderer-owned.
+    // apply it first so Space width limits use the new content scale.
     const patchNodeSilent = opts.getState().patchNodeSilent;
     for (const { child, width: childWidth, height: childHeight } of fonts) {
       if (!child.fontFit) continue;
@@ -447,6 +439,8 @@ export function createResizePreviewController(opts: {
         style: { ...(child.style ?? {}), fontSize: next },
       });
     }
+    // Keep geometry on the canonical gesture path and repack structured Frames.
+    previewResizeGeometry(items);
   };
 
   return {

@@ -34,6 +34,8 @@ import archiver from 'archiver';
 import fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { autoHeightKey } from '@huabu/shared/canvas-engine';
+
 import canvasRoutes from './canvas.route.js';
 import { refreshCanvasDirIndex } from '../storage/backends/disk/canvas-dirs.js';
 import {
@@ -45,6 +47,8 @@ import {
 import { setWorkspacePath } from '../workspace.js';
 
 import type { CanvasFile, NodeContent } from '../storage/index.js';
+import type { GetCanvasResponse } from '@huabu/shared';
+import type { CanvasNode } from '@huabu/shared/canvas-engine';
 import type { FastifyInstance } from 'fastify';
 
 // ─── Fixtures ───────────────────────────────────────────────────────────────
@@ -977,6 +981,99 @@ describe('per-node content routes', () => {
 // ─── 9. Executor batches ────────────────────────────────────────────────────
 
 describe('POST /canvas/:canvasId/execute', () => {
+  it.each(['agent', 'ui'] as const)(
+    'preserves explicit auto height and subsequent measurements for %s creation',
+    async (source) => {
+      await seedSpace('canvas-height', 'Height', []);
+      const response = await app.inject({
+        method: 'POST',
+        url: '/canvas/canvas-height/execute',
+        payload: {
+          originator: { source },
+          commands: [
+            {
+              type: 'CREATE_NODES',
+              nodes: [
+                {
+                  id: 'node-auto',
+                  nodeType: 'note',
+                  position: { x: 0, y: 0 },
+                  size: { width: 560, height: 'auto' },
+                  data: { content: 'Content-driven note' },
+                },
+                {
+                  id: 'node-fixed',
+                  nodeType: 'note',
+                  position: { x: 600, y: 0 },
+                  size: { width: 560, height: 180 },
+                },
+                {
+                  id: 'node-default',
+                  nodeType: 'note',
+                  position: { x: 1200, y: 0 },
+                  size: { width: 560 },
+                },
+              ],
+            },
+          ],
+        },
+      });
+      expect(response.statusCode, response.body).toBe(200);
+      const read = await app.inject({
+        method: 'GET',
+        url: '/canvas/canvas-height',
+      });
+      expect(read.statusCode).toBe(200);
+      const nodes = read.json<
+        GetCanvasResponse & { state: { nodes: CanvasNode[] } }
+      >().state.nodes;
+      const auto = nodes.find((node) => node.id === 'node-auto');
+      if (!auto) throw new Error('Missing created auto Note');
+      expect(auto.data.heightMode).toBe('auto');
+      expect(auto.style).toMatchObject({ width: 560, height: 56 });
+      expect(nodes.find((node) => node.id === 'node-fixed')).toMatchObject({
+        data: { heightMode: 'fixed' },
+        style: { height: 180 },
+      });
+      expect(nodes.find((node) => node.id === 'node-default')).toMatchObject({
+        data: { heightMode: 'fixed' },
+        style: { height: 300 },
+      });
+      const measured = await app.inject({
+        method: 'POST',
+        url: '/canvas/canvas-height/execute',
+        payload: {
+          originator: { source: 'ui' },
+          commands: [
+            {
+              type: 'APPLY_MEASURED_HEIGHT',
+              items: [
+                {
+                  nodeId: auto.id,
+                  intrinsicHeight: 420,
+                  measuredFor: autoHeightKey(auto),
+                },
+              ],
+            },
+          ],
+        },
+      });
+      expect(measured.statusCode, measured.body).toBe(200);
+      const updated = await app.inject({
+        method: 'GET',
+        url: '/canvas/canvas-height',
+      });
+      expect(
+        updated
+          .json<GetCanvasResponse & { state: { nodes: CanvasNode[] } }>()
+          .state.nodes.find((node) => node.id === auto.id),
+      ).toMatchObject({
+        data: { heightMode: 'auto' },
+        style: { width: 560, height: 424 },
+      });
+    },
+  );
+
   it('hydrates prestate through the ports and lands nodes plus sidecars', async () => {
     await seedSpace('canvas-exec', 'Exec', [
       { id: 'node-existing', type: 'note', label: 'Existing', content: 'kept' },

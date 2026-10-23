@@ -72,6 +72,24 @@ export class PostgresSpaceRepository implements SpaceRepository {
     );
   }
 
+  async setParent(input: {
+    canvasId: string;
+    parentSpaceId: string | null;
+    parentEntryNodeId: string | null;
+  }): Promise<boolean> {
+    const workspaceId = this.#workspace();
+    this.#context.assertMutationAllowed(input.canvasId);
+    const result = await this.#context.database().run(
+      `UPDATE spaces SET parent_space_id = ?, parent_entry_node_id = ?
+       WHERE workspace_id = ? AND canvas_id = ? AND is_world = 0`,
+      input.parentSpaceId,
+      input.parentEntryNodeId,
+      workspaceId,
+      input.canvasId,
+    );
+    return result.changes === 1;
+  }
+
   async list(): Promise<CanvasSummary[]> {
     const workspaceId = this.#workspace();
     const database = this.#context.database();
@@ -86,6 +104,12 @@ export class PostgresSpaceRepository implements SpaceRepository {
       const { record } = decodeSpaceRow(row);
       return {
         canvasId: record.canvasId,
+        ...(record.parentSpaceId
+          ? {
+              parentSpaceId: record.parentSpaceId,
+              parentEntryNodeId: record.parentEntryNodeId ?? null,
+            }
+          : {}),
         title: record.title,
         nodeCount: record.state.nodes.length,
         createdAt: record.createdAt,

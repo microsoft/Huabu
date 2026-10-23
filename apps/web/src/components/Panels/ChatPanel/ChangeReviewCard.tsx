@@ -18,6 +18,7 @@ import { useTranslation } from 'react-i18next';
 
 import { applyDeltas } from '@huabu/shared/canvas-engine';
 
+import { NodeRef } from '@/components/Nodes/NodeRef/NodeRef';
 import {
   useAcpThreadChangesStore,
   isChangeStale,
@@ -25,7 +26,6 @@ import {
 import useCanvasStore from '@/store/canvasStore';
 
 import { Button } from '../../Common/Button';
-import { NodeRef } from '../../Common/NodeRef';
 import { Tooltip } from '../../Common/Tooltip';
 
 import type { CanvasChangeRecord, Delta } from '@huabu/shared/canvas-engine';

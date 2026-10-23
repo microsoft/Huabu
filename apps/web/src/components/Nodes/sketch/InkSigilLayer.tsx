@@ -5,7 +5,7 @@ import '@fontsource/caveat/latin-400.css';
 import 'lxgw-wenkai-lite-webfont/lxgwwenkailite-regular.css';
 import '@/components/Common/scrollbar.css';
 
-import { useViewport } from '@xyflow/react';
+import { useViewport, ViewportPortal } from '@xyflow/react';
 import { X } from 'lucide-react';
 import {
   useEffect,
@@ -21,6 +21,7 @@ import { useTranslation } from 'react-i18next';
 
 import { resolveAccent } from '@huabu/shared';
 import {
+  getAbsolutePosition,
   getInkSigilStrokes,
   INK_SIGIL_LABEL_MAX_WIDTH,
   INK_SIGIL_LABEL_LINE_HEIGHT,
@@ -38,6 +39,7 @@ import { cn } from '@/components/Common/cn';
 import { TabGroup } from '@/components/Common/TabGroup';
 import { toast } from '@/components/Common/Toast';
 import { applyNodeGeometryPreviews } from '@/components/Panels/Canvas/applyNodeGeometryPreview';
+import { canvasNodeZOrder } from '@/components/Panels/Canvas/selectionZOrder';
 import { getNodeIcon } from '@/config/nodeIcons';
 import useCanvasStore from '@/store/canvasStore';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
@@ -52,6 +54,7 @@ import {
 import { useToolStore } from '@/store/toolStore';
 import { INK_HANDWRITING_FONT_FAMILY } from '@/utils/node/nodeFontConfig';
 
+import { useInkSigilHighlightHost } from './InkSigilHighlightHost';
 import { useInkSigilDrag } from './useInkSigilDrag';
 import { useFrameSuppressed } from '../frame/FrameZoomContext';
 
@@ -61,7 +64,7 @@ import type {
   InkSigilProjection,
   InkSigilStroke,
 } from '@huabu/shared/canvas-engine';
-import type { Node } from '@xyflow/react';
+import type { Node, XYPosition } from '@xyflow/react';
 
 const RESOURCE_CATEGORIES = ['pdf', 'web', 'image', 'text'] as const;
 type ResourceCategory = (typeof RESOURCE_CATEGORIES)[number];
@@ -102,7 +105,7 @@ function ResourceList({
   }, [index, scrollRef]);
   if (!nodes.length)
     return (
-      <p className="text-fg-subtle px-2 py-3 text-xs" role="status">
+      <p className="text-fg-muted px-2 py-3 text-xs" role="status">
         {t('sigil.noResources')}
       </p>
     );
@@ -189,9 +192,6 @@ export function InkSigilLayer({ tool = 'select' }: { tool?: CanvasTool }) {
   const geometries = useGesturePreviewStore(
     (state) => state.nodeGeometryPreviews,
   );
-  const [highlightLayer, setHighlightLayer] = useState<HTMLDivElement | null>(
-    null,
-  );
   const canvasId = useCanvasStore((state) => state.canvasId);
   const pending = useInkSigilStore((state) => state.pending);
   const pendingNodeType = useToolStore((state) => state.pendingNodeType);
@@ -201,6 +201,10 @@ export function InkSigilLayer({ tool = 'select' }: { tool?: CanvasTool }) {
     tool === 'select' && (pendingNodeType === null || drawing);
   const drag = useInkSigilDrag(nodes, canvasId, interactive);
   const projections = useMemo(() => projectInkResourceBindings(nodes), [nodes]);
+  const zIndices = useMemo(
+    () => canvasNodeZOrder(nodes, tool, pendingNodeType),
+    [nodes, tool, pendingNodeType],
+  );
   const displayNodes = useMemo(
     () => applyNodeGeometryPreviews(nodes as CanvasNode[], geometries),
     [nodes, geometries],
@@ -247,15 +251,6 @@ export function InkSigilLayer({ tool = 'select' }: { tool?: CanvasTool }) {
 
   return (
     <>
-      <div className="pointer-events-none absolute inset-0 z-3 overflow-hidden">
-        <div
-          ref={setHighlightLayer}
-          style={{
-            transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})`,
-            transformOrigin: '0 0',
-          }}
-        />
-      </div>
       <div className="pointer-events-none absolute inset-0 z-5 overflow-hidden">
         <div
           style={{
@@ -305,6 +300,22 @@ export function InkSigilLayer({ tool = 'select' }: { tool?: CanvasTool }) {
                 ),
               ),
             };
+            const highlightNodeId = projection.sources.reduce(
+              (lowest, source) =>
+                (zIndices.get(source.nodeId) ?? Infinity) <
+                (zIndices.get(lowest.nodeId) ?? Infinity)
+                  ? source
+                  : lowest,
+            ).nodeId;
+            const highlightOrigin = getAbsolutePosition(
+              displayNodes,
+              highlightNodeId,
+            );
+            if (!highlightOrigin) {
+              throw new Error(
+                `[ink-sigil] Missing highlight owner: ${highlightNodeId}`,
+              );
+            }
             return (
               <InkSigilAnnotation
                 key={projection.binding.id}
@@ -313,7 +324,9 @@ export function InkSigilLayer({ tool = 'select' }: { tool?: CanvasTool }) {
                 drag={drag}
                 selected={selectedCount === 4}
                 zoom={viewport.zoom}
-                highlightLayer={highlightLayer}
+                highlightNodeId={highlightNodeId}
+                highlightOrigin={highlightOrigin}
+                highlightZ={zIndices.get(highlightNodeId) ?? 0}
                 picker={
                   pending?.canvasId === canvasId &&
                   pending.bindingId === projection.binding.id
@@ -346,7 +359,9 @@ function InkSigilAnnotation({
   interactive,
   drag,
   zoom,
-  highlightLayer,
+  highlightNodeId,
+  highlightOrigin,
+  highlightZ,
   picker,
 }: {
   projection: InkSigilProjection;
@@ -354,10 +369,13 @@ function InkSigilAnnotation({
   interactive: boolean;
   drag: ReturnType<typeof useInkSigilDrag>;
   zoom: number;
-  highlightLayer: HTMLDivElement | null;
+  highlightNodeId: string;
+  highlightOrigin: XYPosition;
+  highlightZ: number;
   picker?: { nodes: Node[] };
 }) {
   const { t } = useTranslation();
+  const highlightLayer = useInkSigilHighlightHost(highlightNodeId);
   const frameSuppressed = useFrameSuppressed(
     projection.sources.map((source) => source.nodeId),
   );
@@ -414,6 +432,30 @@ function InkSigilAnnotation({
     };
   }, [zoom, projection.label, layout.fontSize, broken, frameSuppressed, t]);
   if (frameSuppressed) return null;
+  const highlight = (
+    <div
+      inert
+      data-ink-sigil-highlight
+      data-canvas-grounding-exclude={
+        projection.target && selected ? undefined : ''
+      }
+      className={
+        broken
+          ? 'bg-warning-bg-hover/70 pointer-events-none absolute rounded'
+          : 'bg-ink-reference-highlight/70 pointer-events-none absolute rounded'
+      }
+      style={{
+        left:
+          layout.semanticBounds.x - (highlightLayer ? highlightOrigin.x : 0),
+        top: layout.semanticBounds.y - (highlightLayer ? highlightOrigin.y : 0),
+        width: layout.semanticBounds.width,
+        height: layout.semanticBounds.height,
+        // ViewportPortal follows the node renderer in DOM order, so a tie
+        // paints above the preceding node and below the absent source.
+        zIndex: highlightLayer ? undefined : highlightZ - 1,
+      }}
+    />
+  );
   return (
     <div
       data-ink-sigil={projection.binding.id}
@@ -423,28 +465,11 @@ function InkSigilAnnotation({
         projection.target && selected ? undefined : ''
       }
     >
-      {highlightLayer
-        ? createPortal(
-            <div
-              data-ink-sigil-highlight
-              data-canvas-grounding-exclude={
-                projection.target && selected ? undefined : ''
-              }
-              className={
-                broken
-                  ? 'bg-warning-bg-hover/70 absolute rounded'
-                  : 'bg-ink-reference-highlight/70 absolute rounded'
-              }
-              style={{
-                left: layout.semanticBounds.x,
-                top: layout.semanticBounds.y,
-                width: layout.semanticBounds.width,
-                height: layout.semanticBounds.height,
-              }}
-            />,
-            highlightLayer,
-          )
-        : null}
+      {highlightLayer ? (
+        createPortal(highlight, highlightLayer)
+      ) : (
+        <ViewportPortal>{highlight}</ViewportPortal>
+      )}
       <Button
         variant="ghost"
         data-ink-sigil-hit-target
@@ -610,7 +635,7 @@ function InkResourcePicker({
         onPointerDown={(event) => event.stopPropagation()}
       >
         <div className="mb-1.5 flex shrink-0 items-center justify-between gap-2 pl-1">
-          <span className="text-fg-subtle text-[10px]">
+          <span className="text-fg-muted text-xs">
             {t('sigil.bindingHint')}
           </span>
           <Button

@@ -30,8 +30,7 @@ function normalizeAgentAuthoredContent(
 }
 
 /**
- * Add server-owned authorship metadata and optional built-in-agent read-set
- * revisions before canonical execution.
+ * Add server-owned authorship metadata and optional built-in-agent read-set revisions before canonical execution.
  */
 export function prepareAgentCanvasCommands(
   commands: readonly AgentOperationCommand[],

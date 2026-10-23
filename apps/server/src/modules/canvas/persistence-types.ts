@@ -20,6 +20,8 @@ import type { CanvasEventRecord, ExecuteOriginator } from '@huabu/shared';
 /** On-disk shape of `<canvasDir>/space.json`. */
 export interface CanvasFile {
   canvasId: string;
+  parentSpaceId?: string | null;
+  parentEntryNodeId?: string | null;
   title: string | null;
   version: number;
   state: {

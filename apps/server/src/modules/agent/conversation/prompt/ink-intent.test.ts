@@ -92,6 +92,43 @@ afterEach(() => {
 
 describe('Ink-intent rendering', () => {
   it.each([INTERNAL_PROFILE, ACP_PROFILE])(
+    'renders per-query stroke geometry independently of the conversation owner for $toolset',
+    async (profile) => {
+      const envelope = inkEnvelope();
+      envelope.focus.anchor = { nodeId: 'distant-owner' };
+      envelope.focus.selection.inkGeometry = [
+        {
+          nodeId: 'ink-1',
+          strokeIds: ['stroke-1'],
+          bounds: { x: 120, y: -50, width: 80, height: 30 },
+        },
+      ];
+      const parts = await renderTurn(envelope, profile, OPTIONS);
+      const geometry = parts.find(
+        (part) =>
+          part.type === 'text' && part.text.startsWith('<ink_query_geometry>'),
+      );
+      expect(geometry).toEqual({
+        type: 'text',
+        text: expect.stringContaining(
+          '"bounds":{"x":120,"y":-50,"width":80,"height":30}',
+        ),
+      });
+      if (geometry?.type !== 'text') throw new Error('Missing query geometry');
+      expect(geometry.text).not.toContain('distant-owner');
+      const next = inkEnvelope();
+      next.focus.selection.inkGeometry = [
+        {
+          nodeId: 'ink-2',
+          strokeIds: ['stroke-1'],
+          bounds: { x: 9000, y: 5000, width: 20, height: 40 },
+        },
+      ];
+      const nextParts = await renderTurn(next, profile, OPTIONS);
+      expect(nextParts).not.toContainEqual(geometry);
+    },
+  );
+  it.each([INTERNAL_PROFILE, ACP_PROFILE])(
     'renders frozen resource references safely for $toolset',
     async (profile) => {
       const envelope = withGrounding(inkEnvelope());
@@ -154,7 +191,7 @@ describe('Ink-intent rendering', () => {
     ).rejects.toBeInstanceOf(InkVisualPreparationError);
   });
 
-  it('keeps Operate discussion chat-only while the host publishes Ink answers', () => {
+  it('keeps ordinary Operate discussion chat-only while Ink requires agent-authored replies', () => {
     const prompt = readFileSync(
       new URL('../../../../prompt/agents/operate/AGENT.md', import.meta.url),
       'utf8',
@@ -163,16 +200,16 @@ describe('Ink-intent rendering', () => {
       .split('2. **Discussion-only path**')[1]
       ?.split('3. **Space-change path**')[0];
     expect(discussion).toContain('provide a complete final answer in chat');
+    expect(discussion).toContain('Do not execute the discussed work');
     expect(discussion).toContain(
-      'Do not call `space_commands` or other mutation tools',
+      'For Ink, use the per-turn Canvas-delivery contract',
     );
-    expect(discussion).toContain('leave answer publication to Huabu');
     expect(discussion).not.toContain('prefer a useful Canvas presentation');
     expect(prompt).toContain(
-      'after a successful requested Space change, a brief summary is enough',
+      'after a successful Space change or Ink Canvas reply, a brief summary is enough',
     );
     expect(prompt).toContain(
-      'For discussion or planning, provide the complete answer',
+      'For ordinary text discussion or planning, provide the complete answer',
     );
     expect(prompt).not.toContain('a line or two is enough');
   });
@@ -227,36 +264,38 @@ describe('Ink-intent rendering', () => {
   );
 
   it.each([INTERNAL_PROFILE, ACP_PROFILE])(
-    'requires Canvas delivery with host fallback without granting agent write permissions for %j',
+    'requires agent-authored Canvas delivery and spatial placement without permission escalation for %j',
     async (profile) => {
       const parts = await renderTurn(inkEnvelope(), profile, OPTIONS);
       const directive = parts[0]?.type === 'text' ? parts[0].text : '';
       expect(directive).toContain(
-        'Canvas delivery is required for every Ink turn',
+        'Every Ink turn must be answered through your own persisted, visible Canvas changes',
       );
-      expect(directive).toContain('Ask/read-only stays read-only');
+      expect(directive).toContain('explicitly report the permission blocker');
       expect(directive).toContain(
-        'a request for discussion or planning does not authorize execution',
-      );
-      expect(directive).toContain(
-        'When the user requests a Canvas change and your current mode allows it',
+        'does not authorize executing the discussed work',
       );
       expect(directive).toContain(
-        'Huabu will publish that answer as a Note linked to this conversation',
+        'Huabu does not turn final chat text into a Canvas answer',
       );
       expect(directive).toContain(
-        'including discussion, research findings, plans, or clarification questions',
+        'Discussion, research, planning, and clarification also require a Canvas reply',
       );
       expect(directive).toContain(
-        'does not authorize you to execute discussed work',
+        'Follow explicit spatial instructions in the Ink first',
       );
       expect(directive).toContain(
-        'Do not omit the answer or leave it only in reasoning or tool output',
+        "near this turn's selected Ink and relevant materials",
+      );
+      expect(directive).toContain(
+        'Do not default to stacking replies below the Agent Node',
       );
       expect(directive).toContain('ask one focused clarification question');
       expect(directive).toContain('do not execute the uncertain task');
       expect(directive).toContain('do not create a duplicate reply Note');
-      expect(directive).toContain('renaming the Agent Node is not an answer');
+      expect(directive).toContain(
+        'renaming the Agent Node, metadata-only changes',
+      );
       expect(directive).toContain(
         'Verify every attempted Canvas write succeeded',
       );
@@ -369,7 +408,9 @@ describe('Ink-intent rendering', () => {
         })),
       );
       expect(INK_INTENT_DIRECTIVE).toContain('For this turn only');
-      expect(INK_INTENT_DIRECTIVE).toContain('use space_commands if available');
+      expect(INK_INTENT_DIRECTIVE).toContain(
+        'Use space_commands to deliver the reply',
+      );
       expect(INK_INTENT_DIRECTIVE).toContain(
         'ask one focused clarification question and wait for the user',
       );
@@ -561,6 +602,13 @@ describe('Ink-intent rendering', () => {
       originNodeIds: ['ink-1', 'ink-2'],
       lines: [{ text: '持久化的识别结果', confidence: 0.9 }],
     };
+    envelope.focus.selection.inkGeometry = [
+      {
+        nodeId: 'ink-1',
+        strokeIds: ['stroke-1'],
+        bounds: { x: 350, y: -100, width: 80, height: 30 },
+      },
+    ];
     const rendered = await renderInternalAgentInputs(envelope, OPTIONS);
     const request = JSON.parse(
       JSON.stringify(createChatSubmission(envelope, rendered)),
@@ -596,6 +644,10 @@ describe('Ink-intent rendering', () => {
       text: expect.stringContaining('持久化的识别结果'),
     });
     expect(messages[0].content).toStrictEqual(rendered[0].parts);
+    expect(JSON.stringify(messages[0].content)).toContain('ink_query_geometry');
+    expect(request.content.focus.selection.inkGeometry).toEqual(
+      envelope.focus.selection.inkGeometry,
+    );
     expect(messages[1].content).toBe('Thanks');
     expect(resolver).not.toHaveBeenCalled();
     expect(rasterize).not.toHaveBeenCalled();

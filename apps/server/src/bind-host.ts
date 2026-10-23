@@ -15,6 +15,10 @@
  * switches the default to `0.0.0.0` the test in `bind-host.test.ts`
  * will fail loudly.
  */
-export function resolveBindHost(env: NodeJS.ProcessEnv = process.env): string {
+import { getDeploymentEnvironment } from './security/deployment-settings.js';
+
+export function resolveBindHost(
+  env: NodeJS.ProcessEnv = getDeploymentEnvironment(),
+): string {
   return env.HUABU_BIND_HOST ?? '127.0.0.1';
 }

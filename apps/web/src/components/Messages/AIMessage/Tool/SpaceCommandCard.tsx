@@ -12,13 +12,14 @@ import { Check, ChevronRight, Command } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { NodeRef } from '@/components/Nodes/NodeRef/NodeRef';
+
 import {
   partIsExecuting,
   reconstructChangesFromCommands,
   type ToolPart,
 } from './helpers';
 import { Loading } from '../../../Common/Loading';
-import { NodeRef } from '../../../Common/NodeRef';
 
 import type { SpaceCommandsToolPart } from '@huabu/shared';
 

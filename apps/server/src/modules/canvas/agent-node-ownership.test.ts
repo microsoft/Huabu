@@ -9,17 +9,21 @@ import { createId } from '@huabu/shared';
 import {
   projectAgentNodeState,
   acknowledgeAgentNodeResult,
+  projectAgentConversationActivity,
 } from './agent-node-projection.js';
 import { applyDeltasOnServer, executeOnServer } from './canvas-executor.js';
 import { subscribeCanvasUpdates } from './canvas-sync.js';
 import canvasRoutes from './canvas.route.js';
+import { conversationEventLogStore } from '../agent/agenetes/conversation-stores.js';
 import { agenetes } from '../agent/agenetes/drivers.js';
+import { acquireAgentTurn } from '../agent/turn-lease.js';
 import { createSpace, space } from '../storage/index.js';
 import {
   forEachProductProfile,
   mountTestWorkspace,
   type MountedTestStorage,
 } from '../storage/testing.js';
+import { canvasAcpNamespace } from '../workspace/paths.js';
 
 import type { CanvasNode } from '@huabu/shared/canvas-engine';
 
@@ -87,6 +91,88 @@ forEachProductProfile((profile, label) => {
       return (await currentCanvas()).state.nodes[0] as CanvasNode;
     }
 
+    it.each(['done', 'error'] as const)(
+      'persists real log %s activity, without token, geometry, or viewing updates',
+      async (terminal) => {
+        const ns = canvasAcpNamespace(canvasId);
+        const now = Date.now();
+        const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+        const started = await conversationEventLogStore.appendTurnStart(
+          ns,
+          'thread-agent',
+          null,
+        );
+        expect((await current()).data.lastActivityAt).toBe(started.ts);
+        clock.mockReturnValue(now + 1000);
+        await conversationEventLogStore.append(ns, 'thread-agent', {
+          type: 'text_delta',
+          data: { content: 'answer' },
+        });
+        expect((await current()).data.lastActivityAt).toBe(started.ts);
+        const ended = await conversationEventLogStore.append(
+          ns,
+          'thread-agent',
+          terminal === 'done'
+            ? { type: 'done', data: { message: 'Done' } }
+            : { type: 'error', data: { error: 'Failed' } },
+        );
+        expect((await current()).data.lastActivityAt).toBe(ended.ts);
+        await projectAgentConversationActivity(
+          canvasId,
+          'thread-agent',
+          started.ts,
+        );
+        expect((await current()).data.lastActivityAt).toBe(ended.ts);
+        await projectAgentNodeState(canvasId, node.id, {
+          threadId: 'thread-agent',
+          viewed: true,
+        });
+        expect((await current()).data.lastActivityAt).toBe(ended.ts);
+        const stored = await current();
+        const saved = await app.inject({
+          method: 'PUT',
+          url: `/canvas/${canvasId}`,
+          payload: {
+            version: (await currentCanvas()).version,
+            state: {
+              nodes: [
+                {
+                  ...stored,
+                  position: { x: 100, y: 100 },
+                  data: { ...stored.data, lastActivityAt: 1 },
+                },
+              ],
+              edges: [],
+            },
+          },
+        });
+        expect(saved.statusCode).toBe(400);
+        expect((await current()).data.lastActivityAt).toBe(ended.ts);
+        const moved = await app.inject({
+          method: 'PUT',
+          url: `/canvas/${canvasId}`,
+          payload: {
+            version: (await currentCanvas()).version,
+            state: {
+              nodes: [
+                {
+                  ...stored,
+                  position: { x: 100, y: 100 },
+                  data: { agentBinding: { kind: 'internal' } },
+                },
+              ],
+              edges: [],
+            },
+          },
+        });
+        expect(moved.statusCode).toBe(200);
+        expect(await current()).toMatchObject({
+          position: { x: 100, y: 100 },
+          data: { lastActivityAt: ended.ts },
+        });
+      },
+    );
+
     it('saves layout with unchanged preparation despite missing execution records, but rejects preparation changes', async () => {
       const readRecord = vi
         .spyOn(agenetes, 'record')
@@ -150,6 +236,75 @@ forEachProductProfile((profile, label) => {
       expect(rejected.json().code).toBe('execution_record_missing');
       expect((await current()).position).toEqual({ x: 40, y: 60 });
       expect((await currentCanvas()).version).toBe(response.json().version);
+    });
+
+    it('rejects mode changes through PUT and undo while admission is held', async () => {
+      await executeOnServer({
+        canvasId,
+        originator: { source: 'ui' },
+        commands: [
+          {
+            type: 'MERGE_NODE_DATA',
+            patches: [
+              { nodeId: 'node-agent', patch: { agentMode: 'operate' } },
+            ],
+          },
+        ],
+      });
+      const before = await current();
+      const version = (await currentCanvas()).version;
+      const release = acquireAgentTurn('thread-agent');
+      expect(release).not.toBeNull();
+      try {
+        const response = await app.inject({
+          method: 'PUT',
+          url: `/canvas/${canvasId}`,
+          payload: {
+            version,
+            state: {
+              nodes: [
+                { id: node.id, type: 'question', data: { agentMode: 'ask' } },
+              ],
+              edges: [],
+            },
+          },
+        });
+        expect(response.statusCode).toBe(409);
+        expect(response.json().code).toBe('agent_draft_busy');
+        const { agentMode: _mode, ...withoutMode } = before.data;
+        await expect(
+          applyDeltasOnServer({
+            canvasId,
+            originator: { source: 'ui' },
+            deltas: [
+              {
+                type: 'REPLACE_NODE',
+                prev: before,
+                next: { ...before, data: withoutMode },
+              },
+            ],
+          }),
+        ).rejects.toMatchObject({ code: 'agent_draft_busy' });
+        expect((await current()).data.agentMode).toBe('operate');
+        expect((await currentCanvas()).version).toBe(version);
+      } finally {
+        release?.();
+      }
+      const response = await app.inject({
+        method: 'PUT',
+        url: `/canvas/${canvasId}`,
+        payload: {
+          version,
+          state: {
+            nodes: [
+              { id: node.id, type: 'question', data: { agentMode: 'ask' } },
+            ],
+            edges: [],
+          },
+        },
+      });
+      expect(response.statusCode).toBe(200);
+      expect((await current()).data.agentMode).toBe('ask');
     });
 
     it('initializes a legacy Question once without creating an execution record', async () => {

@@ -3,6 +3,12 @@
 
 import { describe, expect, it } from 'vitest';
 
+import {
+  executeCanvasCommands,
+  materializeAutoHeight,
+  resolveHeightMode,
+} from '@huabu/shared/canvas-engine';
+
 import { buildSpaceMovePlan, SpaceMovePlanError } from './space-move-plan.js';
 
 import type { CanvasEdge, CanvasNode } from '@huabu/shared/canvas-engine';
@@ -25,6 +31,55 @@ function node(
 }
 
 describe('buildSpaceMovePlan', () => {
+  it.each([
+    { name: 'legacy auto', data: {}, height: undefined },
+    {
+      name: 'legacy auto with a stale measurement',
+      data: { autoHeight: { intrinsicHeight: 420, measuredFor: 'old' } },
+      height: undefined,
+    },
+    { name: 'legacy fixed', data: {}, height: 172 },
+    {
+      name: 'explicit auto with a numeric footprint',
+      data: { heightMode: 'auto' },
+      height: 388,
+    },
+    { name: 'explicit fixed', data: { heightMode: 'fixed' }, height: 224 },
+  ])(
+    'preserves $name Note height ownership and geometry after execution',
+    ({ data, height }) => {
+      const source = node('note', 'note', 50, 60);
+      source.style = {
+        width: 320,
+        ...(height === undefined ? {} : { height }),
+      };
+      source.data = { ...source.data, ...data, content: 'Preserve my height.' };
+      const before = structuredClone(source);
+      const expectedMode = resolveHeightMode(source);
+      const expectedSize = materializeAutoHeight(source).style;
+      const plan = buildSpaceMovePlan({
+        sourceNodes: [source],
+        sourceEdges: [],
+        destinationNodes: [],
+        selectedNodeIds: [source.id],
+        destinationCanvasId: 'destination',
+        createSourcePreview: false,
+      });
+      expect(plan.commands[0]).toMatchObject({
+        type: 'CREATE_NODES',
+        nodes: [{ data: { heightMode: expectedMode } }],
+      });
+      const moved = executeCanvasCommands(
+        { source: 'system', commands: plan.commands },
+        { nodes: [], edges: [], canvasId: 'destination' },
+      ).writeResult.nodes[0];
+      expect(resolveHeightMode(moved)).toBe(expectedMode);
+      expect(moved.style).toEqual(expectedSize);
+      expect(moved.data.autoHeight).toEqual(source.data.autoHeight);
+      expect(source).toEqual(before);
+    },
+  );
+
   it('does not carry same-Space Sigil bindings into another Space', () => {
     const ink = node('ink', 'sketch', 0, 0);
     ink.data.strokes = [
@@ -108,7 +163,7 @@ describe('buildSpaceMovePlan', () => {
           nodeType: 'spacePreview',
           data: { targetCanvasId: 'destination' },
           position: { x: 50, y: 60 },
-          size: { width: 360, height: 102 },
+          size: { width: 400, height: 120 },
         },
       ],
     });
@@ -212,7 +267,7 @@ describe('buildSpaceMovePlan', () => {
       nodes: [
         {
           position: { x: -100, y: -200 },
-          size: { width: 360, height: 102 },
+          size: { width: 400, height: 120 },
         },
       ],
     });

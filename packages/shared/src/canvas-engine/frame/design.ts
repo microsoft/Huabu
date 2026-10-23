@@ -12,12 +12,13 @@ interface FrameLayoutConfig {
   query: {
     fallbackWidth: number;
   };
-  tiers: ReadonlyArray<
-    FrameResponsiveMetrics & {
-      id: FrameResponsiveTier;
-      maxWidth: number;
-    }
-  >;
+  metrics: FrameResponsiveMetrics;
+  nodeGap: number;
+  trackGap: number;
+  tiers: ReadonlyArray<{
+    id: FrameResponsiveTier;
+    maxWidth: number;
+  }>;
 }
 
 /**
@@ -27,24 +28,21 @@ export const FRAME_LAYOUT_CONFIG = {
   query: {
     fallbackWidth: 1200,
   },
+  metrics: { headerInset: 64, contentSpacing: 20 },
+  nodeGap: 16,
+  trackGap: 24,
   tiers: [
     {
       id: 'compact',
       maxWidth: 900,
-      headerInset: 64,
-      contentSpacing: 20,
     },
     {
       id: 'regular',
       maxWidth: 1800,
-      headerInset: 96,
-      contentSpacing: 28,
     },
     {
       id: 'large',
       maxWidth: Number.POSITIVE_INFINITY,
-      headerInset: 152,
-      contentSpacing: 40,
     },
   ],
 } as const satisfies FrameLayoutConfig;
@@ -77,63 +75,25 @@ export function frameResponsiveTierForSize(
 }
 
 export function frameResponsiveMetricsForSize(
-  width: number,
+  _width: number,
   _height: number,
 ): FrameResponsiveMetrics {
-  const tier = frameLayoutTierForSize(width);
-  return {
-    headerInset: tier.headerInset,
-    contentSpacing: tier.contentSpacing,
-  };
+  return { ...FRAME_LAYOUT_CONFIG.metrics };
 }
 
-/**
- * Resolve the same container-query tier while a Hug Frame's final box is
- * still being computed from its content bounds.
- */
+/** Hug and Manual Frames use the same fixed content insets. */
 export function frameResponsiveMetricsForContentSize(
-  contentWidth: number,
-  contentHeight: number,
-  minFrameWidth = 0,
-  minFrameHeight = 0,
+  _contentWidth: number,
+  _contentHeight: number,
+  _minFrameWidth = 0,
+  _minFrameHeight = 0,
 ): FrameResponsiveMetrics {
-  return resolveFrameResponsiveLayout((metrics) => ({
-    metrics,
-    frameSize: {
-      width: Math.max(minFrameWidth, contentWidth + metrics.contentSpacing * 2),
-      height: Math.max(
-        minFrameHeight,
-        contentHeight + metrics.headerInset + metrics.contentSpacing,
-      ),
-    },
-  })).metrics;
+  return { ...FRAME_LAYOUT_CONFIG.metrics };
 }
 
-/**
- * Find the smallest self-consistent tier for a content-derived box. Insets
- * increase monotonically, so checking each tier is bounded and independent
- * of previous geometry. The callback's dimensions must not decrease as the
- * insets grow.
- */
+/** Resolve content-derived geometry without width-dependent density changes. */
 export function resolveFrameResponsiveLayout<
   T extends { frameSize: { width: number; height: number } },
 >(layout: (metrics: FrameResponsiveMetrics) => T): T {
-  let result: T | undefined;
-  for (const metrics of FRAME_LAYOUT_CONFIG.tiers) {
-    result = layout({
-      headerInset: metrics.headerInset,
-      contentSpacing: metrics.contentSpacing,
-    });
-    const actual = frameResponsiveMetricsForSize(
-      result.frameSize.width,
-      result.frameSize.height,
-    );
-    if (
-      actual.headerInset === metrics.headerInset &&
-      actual.contentSpacing === metrics.contentSpacing
-    )
-      return result;
-  }
-  if (!result) throw new Error('Frame design must define at least one tier');
-  return result;
+  return layout({ ...FRAME_LAYOUT_CONFIG.metrics });
 }

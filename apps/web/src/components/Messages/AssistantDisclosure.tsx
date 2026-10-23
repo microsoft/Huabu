@@ -29,7 +29,10 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { Button } from '../Common/Button';
 
 export const ASSISTANT_ROW_CLASS_NAME =
-  'text-fg-muted relative ml-1 px-4 py-0.5 text-xs';
+  'text-fg-muted relative py-0.5 pr-4 pl-5 text-xs';
+
+export const ASSISTANT_DISCLOSURE_BUTTON_CLASS_NAME =
+  'focus-visible:outline-info min-w-0 flex-1 justify-start rounded-sm p-0 text-left font-normal enabled:hover:bg-transparent focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-6';
 
 interface AssistantDisclosureProps {
   /**
@@ -107,7 +110,7 @@ export function AssistantDisclosure({
   const expandable = children !== undefined && children !== null;
 
   const iconSlot = icon ? (
-    <span className="absolute top-1/2 left-0 flex size-3 -translate-y-1/2 items-center justify-center">
+    <span className="absolute top-1/2 left-1 flex size-3 -translate-y-1/2 items-center justify-center">
       {icon}
     </span>
   ) : null;
@@ -119,7 +122,7 @@ export function AssistantDisclosure({
   const chevron = expandable ? (
     <ChevronRight
       size={10}
-      className={`text-fg-muted/50 shrink-0 transition-transform ${
+      className={`text-fg-muted shrink-0 transition-transform ${
         !isCollapsed ? 'rotate-90' : ''
       }`}
     />
@@ -144,7 +147,7 @@ export function AssistantDisclosure({
                   }
                   onCollapsedChange?.(!isCollapsed);
                 }}
-                className="focus-visible:outline-info min-w-0 flex-1 justify-start rounded-none p-0 text-left font-normal focus-visible:outline-1"
+                className={ASSISTANT_DISCLOSURE_BUTTON_CLASS_NAME}
               >
                 {iconSlot}
                 {titleText}

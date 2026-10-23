@@ -10,7 +10,7 @@ import {
   getReliableNodeBounds,
   revealBoundsInViewport,
   revealNodesOnCanvas,
-} from './focusNodesOnCanvas';
+} from './canvasViewport';
 
 import type { ReactFlowInstance } from '@xyflow/react';
 

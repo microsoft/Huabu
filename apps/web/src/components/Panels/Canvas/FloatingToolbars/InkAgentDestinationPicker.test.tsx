@@ -180,25 +180,19 @@ async function key(target: Element | null, value: string) {
 }
 
 describe('InkAgentDestinationPicker', () => {
-  it('offers built-in Ask and Operate alongside external Agents', async () => {
+  it('offers Operate and external Agents, but not built-in Chat', async () => {
     await render({ conversations: [] });
     await openMenu();
     const items = [...required(menu()).querySelectorAll('[role="menuitem"]')];
     expect(
       items.some((item) => item.textContent?.startsWith(en.chat.modeChat)),
-    ).toBe(true);
+    ).toBe(false);
     expect(newConversationRow(en.chat.modeAgent).disabled).toBe(false);
     expect(newConversationRow('Reviewer').disabled).toBe(false);
     await act(async () => newConversationRow(en.chat.modeAgent).click());
     expect(props.onNewConversation).toHaveBeenCalledWith({
       binding: { kind: 'internal' },
       mode: 'operate',
-    });
-    await openMenu();
-    await act(async () => newConversationRow(en.chat.modeChat).click());
-    expect(props.onNewConversation).toHaveBeenLastCalledWith({
-      binding: { kind: 'internal' },
-      mode: 'ask',
     });
   });
 
@@ -211,14 +205,33 @@ describe('InkAgentDestinationPicker', () => {
     const externalHeading = [...newGroup.querySelectorAll('div')].find(
       (element) => element.textContent === en.chat.externalAgents,
     );
-    expect(externalHeading?.classList.contains('text-fg-subtle')).toBe(true);
-    expect(externalHeading?.classList.contains('px-3')).toBe(true);
+    expect(externalHeading?.classList.contains('text-fg-muted')).toBe(true);
+    expect(externalHeading?.classList.contains('px-2')).toBe(true);
     expect(externalHeading?.classList.contains('uppercase')).toBe(false);
     expect(externalHeading?.querySelector('.bg-edge-default')).toBeNull();
     const continueHeading = required(groups[0]).firstElementChild;
     const newHeading = newGroup.firstElementChild;
-    expect(continueHeading?.classList.contains('uppercase')).toBe(true);
-    expect(newHeading?.classList.contains('uppercase')).toBe(true);
+    expect(continueHeading?.classList.contains('uppercase')).toBe(false);
+    expect(newHeading?.classList.contains('uppercase')).toBe(false);
+    for (const heading of [continueHeading, newHeading]) {
+      expect(heading?.classList.contains('font-normal')).toBe(true);
+      expect(heading?.classList.contains('text-xs')).toBe(true);
+    }
+    expect(externalHeading?.classList.contains('font-normal')).toBe(true);
+    expect(externalHeading?.parentElement?.classList.contains('mt-2')).toBe(
+      true,
+    );
+    expect(externalHeading?.parentElement?.classList.contains('ml-4')).toBe(
+      false,
+    );
+    expect(externalHeading?.classList.contains('text-xs')).toBe(true);
+    expect(newGroup.previousElementSibling?.getAttribute('role')).toBe(
+      'separator',
+    );
+    expect(newGroup.previousElementSibling?.classList.contains('my-2')).toBe(
+      true,
+    );
+    expect(newGroup.classList.contains('border-t')).toBe(false);
   });
 
   it('shows unresolved conversation choice without implying a new conversation', async () => {
@@ -475,6 +488,9 @@ describe('InkAgentDestinationPicker', () => {
         'first',
       );
       expect(menu()).toBeNull();
+      await act(async () => {
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+      });
       expect(document.activeElement).toBe(trigger());
     },
   );
@@ -500,8 +516,8 @@ describe('InkAgentDestinationPicker', () => {
     await openMenu();
     expect(ancestorClick).not.toHaveBeenCalled();
     expect(menu()?.closest('[data-floating-chrome]')).not.toBeNull();
-    expect(menu()?.className).toContain('overflow-y-auto');
-    expect(menu()?.parentElement?.className).toContain('max-w-');
+    expect(menu()?.firstElementChild?.className).toContain('overflow-y-auto');
+    expect(menu()?.className).toContain('max-w-');
     await act(async () => {
       document.body.dispatchEvent(
         new PointerEvent('pointerdown', { bubbles: true }),
@@ -524,7 +540,7 @@ describe('InkAgentDestinationPicker', () => {
     );
     await render({ binding: null }, true);
     await openMenu();
-    const panel = required(menu()?.parentElement);
+    const panel = required(menu());
     expect(panel.closest('.picker-test-parent')).not.toBeNull();
     const x = Number.parseFloat(panel.style.left);
     const y = Number.parseFloat(panel.style.top);
@@ -532,9 +548,11 @@ describe('InkAgentDestinationPicker', () => {
     expect(x + 296).toBeLessThanOrEqual(308);
     expect(y).toBeGreaterThanOrEqual(12);
     expect(y + 180).toBeLessThanOrEqual(228);
-    expect(menu()?.className).toContain('100dvh-40px');
-    expect(menu()?.className).toContain('overflow-y-auto');
-    expect(menu()?.className).toContain('overscroll-contain');
+    expect(panel.style.getPropertyValue('--popover-available-height')).toBe(
+      '216px',
+    );
+    expect(panel.firstElementChild?.className).toContain('overflow-y-auto');
+    expect(panel.firstElementChild?.className).toContain('overscroll-contain');
     expect(menu()?.querySelector('[aria-current]')).toBeNull();
     expect(menu()?.querySelector('[role="menuitem"].text-info')).toBeNull();
     await act(async () => row('Second review').click());
@@ -551,9 +569,10 @@ describe('InkAgentDestinationPicker', () => {
     expect(trigger().textContent).toBe('选择 Agent');
     await openMenu();
     expect(menu()?.textContent).toContain('新建会话');
-    expect(menu()?.textContent).not.toContain('继续会话 · 当前画布');
+    expect(menu()?.textContent).not.toContain('继续会话');
     expect(menu()?.textContent).not.toContain('当前画布暂无可继续的会话');
     await render({ conversations });
-    expect(menu()?.textContent).toContain('继续会话 · 当前画布');
+    expect(menu()?.textContent).toContain('继续会话');
+    expect(menu()?.textContent).not.toContain('当前画布');
   });
 });

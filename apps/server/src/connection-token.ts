@@ -11,6 +11,8 @@ import {
   normalizePublicOrigin,
   resolveConfiguredPublicOrigin,
 } from './modules/security/public-origin.js';
+import { SECRET_IDS } from './security/secret-ids.js';
+import { getPersistedSecret, setSecret } from './security/secret-store.js';
 
 import type {
   AgentletConnectionCommandResponse,
@@ -28,8 +30,8 @@ import type {
  * the server process, so agent reachback credentials survive an
  * agentlet daemon restart.
  *
- * The environment/generated choice is captured at first use during module
- * composition. Persisted overrides are deliberately ignored and retained.
+ * Environment overrides win over the automatically managed credential.
+ * Historical Settings overrides remain ignored and retained.
  */
 let generatedToken: string | null = null;
 let activeToken: string | null = null;
@@ -44,25 +46,37 @@ function getEnvironmentToken(): string | null {
   return process.env.HUABU_CONNECTION_TOKEN?.trim() || null;
 }
 
-function resolveFallback(): {
-  token: string;
-  source: ConnectionTokenSource;
-} {
-  const environment = getEnvironmentToken();
-  return environment
-    ? { token: environment, source: 'environment' }
-    : { token: getGeneratedToken(), source: 'generated' };
-}
-
 export function getConnectionToken(): string {
   if (activeToken) return activeToken;
-  const fallback = resolveFallback();
-  activeToken = fallback.token;
-  activeSource = fallback.source;
+  const environment = getEnvironmentToken();
+  const stored = environment
+    ? null
+    : getPersistedSecret(SECRET_IDS.managedConnectionToken);
+  if (!environment && !stored) {
+    throw new Error(
+      'Connection token must be initialized and persisted before use',
+    );
+  }
+  activeToken = environment ?? stored;
+  activeSource = environment ? 'environment' : 'managed';
+  if (!activeToken) throw new Error('Connection token is unavailable');
   return activeToken;
 }
 
-export function initializeConnectionToken(): void {
+export async function initializeConnectionToken(): Promise<void> {
+  if (!activeToken) {
+    const environment = getEnvironmentToken();
+    if (environment) {
+      activeToken = environment;
+      activeSource = 'environment';
+    } else {
+      const stored = getPersistedSecret(SECRET_IDS.managedConnectionToken);
+      const token = stored ?? getGeneratedToken();
+      if (!stored) await setSecret(SECRET_IDS.managedConnectionToken, token);
+      activeToken = token;
+      activeSource = 'managed';
+    }
+  }
   getDaemonAuth().setDaemonToken(getConnectionToken());
 }
 

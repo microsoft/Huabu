@@ -1,11 +1,16 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
-import { updateNode } from './write-coordinator.js';
+import {
+  assertSpaceHierarchyLocked,
+  updateNode,
+  withSpaceHierarchyLock,
+} from './write-coordinator.js';
+import { acquireWorkspaceOperationLease } from '../workspace.js';
 
 import type {
   NodeContent,
@@ -14,6 +19,114 @@ import type {
   SpaceNodes,
   NodeSnapshot,
 } from '../storage/index.js';
+
+const { releaseLease } = vi.hoisted(() => ({ releaseLease: vi.fn() }));
+vi.mock('../workspace.js', () => ({
+  acquireWorkspaceOperationLease: vi.fn(() => ({
+    workspaceKey: 'test-workspace',
+    release: releaseLease,
+  })),
+}));
+
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+describe('withSpaceHierarchyLock', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('serializes callers and leases the Workspace before waiting', async () => {
+    const gate = deferred();
+    const events: string[] = [];
+    const first = withSpaceHierarchyLock(async () => {
+      events.push('first');
+      await gate.promise;
+    });
+    const second = withSpaceHierarchyLock(async () => {
+      events.push('second');
+    });
+    const third = withSpaceHierarchyLock(async () => {
+      events.push('third');
+    });
+    await Promise.resolve();
+    expect(events).toEqual(['first']);
+    expect(acquireWorkspaceOperationLease).toHaveBeenCalledTimes(3);
+    expect(releaseLease).not.toHaveBeenCalled();
+    gate.resolve();
+    await Promise.all([first, second, third]);
+    expect(events).toEqual(['first', 'second', 'third']);
+    expect(releaseLease).toHaveBeenCalledTimes(3);
+  });
+
+  it('allows nested operations without another lease or deadlock', async () => {
+    const result = await withSpaceHierarchyLock(() =>
+      withSpaceHierarchyLock(async () => 'nested'),
+    );
+    expect(result).toBe('nested');
+    expect(acquireWorkspaceOperationLease).toHaveBeenCalledTimes(1);
+    expect(releaseLease).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases the queue and lease after a rejected operation', async () => {
+    const error = new Error('mutation failed');
+    const failed = withSpaceHierarchyLock(async () => {
+      throw error;
+    });
+    const next = withSpaceHierarchyLock(async () => 'next');
+    await expect(failed).rejects.toBe(error);
+    await expect(next).resolves.toBe('next');
+    expect(releaseLease).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects expired inherited lock ownership', async () => {
+    const gate = deferred();
+    let inherited!: Promise<void>;
+    await withSpaceHierarchyLock(async () => {
+      expect(assertSpaceHierarchyLocked).not.toThrow();
+      inherited = (async () => {
+        await gate.promise;
+        assertSpaceHierarchyLocked();
+      })();
+    });
+    const rejected = expect(inherited).rejects.toThrow('hierarchy lock');
+    gate.resolve();
+    await rejected;
+    expect(assertSpaceHierarchyLocked).toThrow('hierarchy lock');
+  });
+
+  it('does not let expired inherited contexts bypass the queue', async () => {
+    const inheritedStart = deferred();
+    const gate = deferred();
+    const events: string[] = [];
+    let inherited!: Promise<void>;
+    await withSpaceHierarchyLock(async () => {
+      inherited = (async () => {
+        await inheritedStart.promise;
+        await withSpaceHierarchyLock(async () => {
+          events.push('inherited');
+        });
+      })();
+    });
+    const current = withSpaceHierarchyLock(async () => {
+      events.push('current');
+      await gate.promise;
+    });
+    inheritedStart.resolve();
+    await Promise.resolve();
+    expect(events).toEqual(['current']);
+    expect(acquireWorkspaceOperationLease).toHaveBeenCalledTimes(3);
+    gate.resolve();
+    await Promise.all([current, inherited]);
+    expect(events).toEqual(['current', 'inherited']);
+    expect(releaseLease).toHaveBeenCalledTimes(3);
+  });
+});
 
 function storageRevisionOf(record: NodeContent | null): string | null {
   return record === null ? null : JSON.stringify(record);

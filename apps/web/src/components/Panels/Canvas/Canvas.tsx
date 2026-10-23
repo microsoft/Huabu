@@ -23,9 +23,11 @@ import React, {
 } from 'react';
 import { createPortal } from 'react-dom';
 import '@xyflow/react/dist/style.css';
+import './CanvasEntrance.css';
 
+import { createId } from '@huabu/shared';
 import {
-  assignNodeZIndices,
+  frameNodesInRect as collectFrameRect,
   edgeZIndex,
   indexById,
 } from '@huabu/shared/canvas-engine';
@@ -58,6 +60,7 @@ import {
   stopHeightPrewarm,
 } from '@/components/Nodes/shared/height/measure/prewarmQueue';
 import { TextNode } from '@/components/Nodes/text/TextNode';
+import { requestCreateChildSpace } from '@/components/Space/createChildSpaceAction';
 import {
   uploadFileToNodeInput,
   urlToNodeInput,
@@ -84,8 +87,11 @@ import {
 import { useSketchHoverRouting } from '@/hooks/useSketchHoverRouting';
 import { useSketchStrokeMove } from '@/hooks/useSketchStrokeMove';
 import { openPreviewNode } from '@/store/previewWorkspace/actions';
+import { useWorkspaceStore } from '@/store/workspaceStore';
+import { anchorViewportCentre } from '@/utils/canvasViewport';
 import { isMac } from '@/utils/platform';
 import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
+import { isVisibleWorldNode } from '@/utils/spaceHierarchy';
 
 import { applyNodeGeometryPreviews } from './applyNodeGeometryPreview';
 import { CanvasGrid } from './CanvasGrid';
@@ -111,11 +117,12 @@ import { StrokeSelectionToolbar } from './FloatingToolbars/StrokeSelectionToolba
 import { MoveSelectionPopover } from './MoveSelectionPopover.tsx';
 import { MultiSelectResizer } from './MultiSelectResizer.tsx';
 import { SelectionOutlines } from './SelectionOutlines.tsx';
-import { selectionZOrder, withoutNodeStyleZIndex } from './selectionZOrder';
+import { canvasNodeZOrder, withoutNodeStyleZIndex } from './selectionZOrder';
 import { SnapGuidesOverlay } from './SnapGuidesOverlay.tsx';
 import { StrokeSelectionRegion } from './StrokeSelectionRegion.tsx';
 import { StructuredDropOverlay } from './StructuredDropOverlay.tsx';
 import { useInitialCanvasViewport } from './useInitialCanvasViewport.ts';
+import { useRevealCreatedNodes } from './useRevealCreatedNodes';
 import { MAX_ZOOM, MIN_ZOOM } from '../../../config/canvas.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
 import { useConnectPortStore } from '../../../store/connectPortStore.ts';
@@ -140,7 +147,6 @@ import {
 import { SpacePreviewNode } from '../../Nodes/spacePreview/SpacePreviewNode.tsx';
 import { VideoNode } from '../../Nodes/video/VideoNode.tsx';
 import { WebNode } from '../../Nodes/web/WebNode.tsx';
-import { anchorViewportCentre } from '../CanvasLayerPanel/focusNodesOnCanvas.ts';
 
 import type { CanvasNode } from '@/components/Nodes/types';
 import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
@@ -275,6 +281,7 @@ const CanvasGestures: React.FC<{
   rfInstanceRef: React.MutableRefObject<ReactFlowInstance | null>;
   inputMode: 'mouse' | 'pen' | 'finger';
   explicitToolActive: boolean;
+  inkToolActive: boolean;
   mouseMarqueeEnabled: boolean;
   canvasId: string | null;
   onMarqueeActiveChange: (active: boolean) => void;
@@ -290,6 +297,7 @@ const CanvasGestures: React.FC<{
   rfInstanceRef,
   inputMode,
   explicitToolActive,
+  inkToolActive,
   mouseMarqueeEnabled,
   canvasId,
   onMarqueeActiveChange,
@@ -316,6 +324,7 @@ const CanvasGestures: React.FC<{
     {
       inputMode,
       explicitToolActive,
+      inkToolActive,
       onTouchTakeover: () => {
         marquee.cancel();
         onTouchTakeover();
@@ -374,6 +383,25 @@ const CanvasContent: React.FC<CanvasProps> = ({
   const nodes = useCanvasStore((state) => state.nodes);
   const edges = useCanvasStore((state) => state.edges);
   const canvasId = useCanvasStore((state) => state.canvasId);
+  const worldId = useWorkspaceStore((state) => state.worldCanvasId);
+  const spaceSummaries = useWorkspaceStore((state) => state.spaceSummaries);
+  const spaceTitlesStatus = useWorkspaceStore(
+    (state) => state.spaceTitlesStatus,
+  );
+  const worldHiddenIds = useMemo(
+    () =>
+      new Set(
+        canvasId === worldId
+          ? nodes
+              .filter(
+                (node) =>
+                  !isVisibleWorldNode(node, canvasId, worldId, spaceSummaries),
+              )
+              .map((node) => node.id)
+          : [],
+      ),
+    [canvasId, worldId, nodes, spaceSummaries],
+  );
   const minimapEnabled = useCanvasStore((state) => state.minimapEnabled);
   const pendingNodeType = useToolStore((state) => state.pendingNodeType);
   // Whether a stroke-level sketch selection is active — suppresses node
@@ -395,9 +423,10 @@ const CanvasContent: React.FC<CanvasProps> = ({
   // Enables the peer slide-aside transition while a node hovers a
   // structured frame. Toggles once per hover (not per drag tick), and the
   // CSS rule excludes `.dragging` so the dragged node stays on the cursor.
-  const isStructuredReflowing = useGesturePreviewStore(
-    (state) => state.structuredDropPreview !== null,
+  const structuredTargetFrameId = useGesturePreviewStore(
+    (state) => state.structuredDropPreview?.frameId ?? null,
   );
+  const isStructuredReflowing = structuredTargetFrameId !== null;
   const nodeGeometryPreviews = useGesturePreviewStore(
     (state) => state.nodeGeometryPreviews,
   );
@@ -461,7 +490,14 @@ const CanvasContent: React.FC<CanvasProps> = ({
     defaultViewport,
     fitInitialViewport,
     isPending: isInitialViewportPending,
-  } = useInitialCanvasViewport();
+  } = useInitialCanvasViewport(
+    canvasId !== worldId || spaceTitlesStatus === 'ready'
+      ? 'ready'
+      : spaceTitlesStatus === 'error'
+        ? 'error'
+        : 'pending',
+  );
+  useRevealCreatedNodes(isInitialViewportPending);
 
   const isNotMouse = useIsNotMouse();
   const inputMode = useEffectiveInputMode();
@@ -638,10 +674,30 @@ const CanvasContent: React.FC<CanvasProps> = ({
   );
   const { pointerHandlers: framePointerHandlers, previewRect: frameDragRect } =
     useFrameDragToCreate({
-      active: pendingNodeType === 'frame',
+      active: pendingNodeType === 'frame' || pendingNodeType === 'childSpace',
+      scopeKey: `${canvasId}:${pendingNodeType}`,
       wrapperRef,
       rfInstanceRef,
-      onCreate: frameNodesInRect,
+      onCreate: (rect) => {
+        if (pendingNodeType === 'frame') {
+          frameNodesInRect(rect);
+          return;
+        }
+        const frameId = createId('node');
+        const grouped = collectFrameRect(
+          useCanvasStore.getState().nodes,
+          rect,
+          frameId,
+        );
+        const nodeIds = grouped.nodes
+          .filter((node) => node.parentId === frameId)
+          .map((node) => node.id);
+        requestCreateChildSpace({ x: rect.x, y: rect.y }, nodeIds);
+      },
+      onClick:
+        pendingNodeType === 'childSpace'
+          ? (position) => requestCreateChildSpace(position, [])
+          : undefined,
       onEnd: exitPendingNodeType,
     });
 
@@ -680,18 +736,11 @@ const CanvasContent: React.FC<CanvasProps> = ({
     cancelLasso();
     window.dispatchEvent(new Event(CANCEL_SKETCH_GESTURE_EVENT));
   }, [cancelLasso]);
-  // Forest order remains authoritative at rest and throughout Lasso, where
-  // partial Ink is not a selected node. Select-tool sole selection temporarily
-  // raises a node/subtree without changing store order or persisted z.
+  // Ink tools retain forest order so selected readers cannot cover new strokes.
   const nodesById = useMemo(() => indexById(nodes as NestableNode[]), [nodes]);
   const zByNode = useMemo(
-    () =>
-      selectionZOrder(
-        nodes as NestableNode[],
-        assignNodeZIndices(nodes as NestableNode[]),
-        { elevateSelectedNode: tool !== 'lasso' },
-      ),
-    [nodes, tool],
+    () => canvasNodeZOrder(nodes as NestableNode[], tool, pendingNodeType),
+    [nodes, tool, pendingNodeType],
   );
 
   // Cache of the wrapped node objects emitted last render, keyed by their
@@ -869,6 +918,7 @@ const CanvasContent: React.FC<CanvasProps> = ({
       if (
         !pendingNodeType ||
         pendingNodeType === 'frame' ||
+        pendingNodeType === 'childSpace' ||
         pendingNodeType === 'sketch'
       ) {
         return false;
@@ -955,7 +1005,8 @@ const CanvasContent: React.FC<CanvasProps> = ({
             frameHandlersRef.current.onPointerCancel(toReact(e)),
         }),
         (event, ctx) =>
-          useToolStore.getState().pendingNodeType === 'frame' &&
+          (useToolStore.getState().pendingNodeType === 'frame' ||
+            useToolStore.getState().pendingNodeType === 'childSpace') &&
           event.button === 0 &&
           event.isPrimary &&
           !isPanelTarget(event.target as Element | null) &&
@@ -1122,7 +1173,8 @@ const CanvasContent: React.FC<CanvasProps> = ({
         pendingNodeType === 'note' && 'canvas-pending-note',
         pendingNodeType === 'text' && 'canvas-pending-text',
         pendingNodeType === 'frame' && 'canvas-pending-frame',
-        pendingNodeType === 'sketch' && 'cursor-crosshair',
+        (pendingNodeType === 'sketch' || pendingNodeType === 'childSpace') &&
+          'cursor-crosshair',
         pendingNodeType === 'audio' && 'canvas-pending-audio',
         pendingNodeType === 'question' && 'canvas-pending-question',
         tool === 'lasso' && !isStrokeMoving && 'canvas-lasso cursor-crosshair',
@@ -1316,13 +1368,25 @@ const CanvasContent: React.FC<CanvasProps> = ({
       <FrameZoomProvider>
         <ReactFlow
           className={cn(
-            isInitialViewportPending && 'invisible',
+            isInitialViewportPending ? 'invisible' : 'space-canvas-enter',
             isStructuredReflowing && 'structured-reflow',
           )}
           defaultViewport={defaultViewport}
           deleteKeyCode={null}
-          nodes={displayNodes}
-          edges={displayEdges}
+          nodes={
+            worldHiddenIds.size
+              ? displayNodes.filter((node) => !worldHiddenIds.has(node.id))
+              : displayNodes
+          }
+          edges={
+            worldHiddenIds.size
+              ? displayEdges.filter(
+                  (edge) =>
+                    !worldHiddenIds.has(edge.source) &&
+                    !worldHiddenIds.has(edge.target),
+                )
+              : displayEdges
+          }
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
@@ -1438,11 +1502,16 @@ const CanvasContent: React.FC<CanvasProps> = ({
           elevateNodesOnSelect={false}
         >
           <FrameZoomController scopeKey={canvasId} />
+          <StructuredDropOverlay />
           <CanvasGestures
             wrapperRef={wrapperRef}
             rfInstanceRef={rfInstanceRef}
             inputMode={inputMode}
             explicitToolActive={tool === 'lasso' || Boolean(pendingNodeType)}
+            inkToolActive={
+              pendingNodeType === 'sketch' ||
+              (!pendingNodeType && tool === 'lasso')
+            }
             mouseMarqueeEnabled={mouseMarqueeEnabled}
             canvasId={canvasId}
             onMarqueeActiveChange={setIsMouseMarqueeSelecting}
@@ -1471,7 +1540,7 @@ const CanvasContent: React.FC<CanvasProps> = ({
             createPortal(
               <div
                 data-canvas-main-toolbar
-                className="react-flow__panel nodrag nopan pointer-events-auto absolute !bottom-6 !m-0 max-w-[calc(100%-24px)] -translate-x-1/2"
+                className="react-flow__panel nodrag nopan pointer-events-auto absolute !bottom-[14px] !m-0 max-w-[calc(100%-24px)] -translate-x-1/2"
                 style={mainToolbarPosition}
                 onPointerDown={(event) => event.stopPropagation()}
                 onDoubleClick={(event) => event.stopPropagation()}
@@ -1487,7 +1556,7 @@ const CanvasContent: React.FC<CanvasProps> = ({
           ) : (
             <Panel
               position="bottom-center"
-              className="mb-6"
+              className="mb-[14px]!"
               style={mainToolbarPosition}
             >
               <NodeToolbar activeTool={tool} onToolChange={setTool} />
@@ -1573,20 +1642,16 @@ const CanvasContent: React.FC<CanvasProps> = ({
       )}
 
       {/* Frame auto-fit preview overlays — shown while dragging nodes near frames */}
-      {frameFitPreviews.map((preview) => (
-        <FrameFitPreviewOverlay
-          key={preview.frameId}
-          preview={preview}
-          rfInstance={rfInstanceRef.current}
-          wrapperRef={wrapperRef}
-        />
-      ))}
-
-      {/* Structured-frame drop indicator — column/row track highlight or insert bar */}
-      <StructuredDropOverlay
-        rfInstance={rfInstanceRef.current}
-        wrapperRef={wrapperRef}
-      />
+      {frameFitPreviews
+        .filter((preview) => preview.frameId !== structuredTargetFrameId)
+        .map((preview) => (
+          <FrameFitPreviewOverlay
+            key={preview.frameId}
+            preview={preview}
+            rfInstance={rfInstanceRef.current}
+            wrapperRef={wrapperRef}
+          />
+        ))}
 
       {/* Smart-snap alignment guides — shown while dragging nodes */}
       <SnapGuidesOverlay

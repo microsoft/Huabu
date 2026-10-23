@@ -30,6 +30,7 @@ import { useExternalImportsStore } from '@/store/externalImportsStore';
 import { usePanelStore } from '@/store/panelStore';
 import { openPreviewNode } from '@/store/previewWorkspace/actions';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
+import { revealNodesOnCanvas } from '@/utils/canvasViewport';
 
 import {
   computeCollision as computeCollisionPure,
@@ -37,7 +38,6 @@ import {
   type DropIntent,
   type ResolvedDrop,
 } from './dropResolver';
-import { revealNodesOnCanvas } from './focusNodesOnCanvas';
 import { TreeRowItem } from './TreeRowItem';
 import { EmptyState } from '../../Common/EmptyState';
 import { toast } from '../../Common/Toast';

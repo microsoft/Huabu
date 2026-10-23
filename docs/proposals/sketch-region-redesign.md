@@ -90,7 +90,7 @@ Last updated: 2026-07-21
 
 - **持久化（零迁移）**：strokeIds 本就随 `request.selectedNodes[].strokeIds` 持久化（turn 记录存整份请求），无需新存储。surface 方式：消息加 `selectedStrokeIds?: SelectedStrokeSubset[]`（运行时 [chatTypes.ts](../../apps/web/src/store/chatTypes.ts) + wire [chat.ts](../../packages/shared/src/types/agent/chat.ts)）；envelope 的 `focus.selection` 加**可选** `strokeSubsets`（旧记录天然缺 → 优雅降级），[history.ts](../../apps/server/src/modules/agent/conversation/transcript/history.ts) 回读时 emit，[useChatHistory.ts](../../apps/web/src/hooks/useChatHistory.ts) 透传，[useAgentStream.ts](../../apps/web/src/hooks/useAgentStream.ts) 实时写入。**只影响新消息，存量零改动。**
 - **高亮通道**：瞬态 `gesturePreviewStore.sketchStrokeHighlight`（与活动选择 `sketchStrokeSelection` **分开**，避免打架）；[SketchNode.tsx](../../apps/web/src/components/Nodes/sketch/SketchNode.tsx) 渲染 `selection ∪ highlight`。**高亮用与选择相同的 `--color-info`**（app 统一的选择/高亮色，不另造视觉）；[UserMessage.tsx](../../apps/web/src/components/Messages/UserMessage.tsx) 的 chip `onMouseEnter/Leave` 写/清。
-- **删除兜底**（核心原则：**持久化的是历史事实，高亮是对当前画布的尽力而为**）：SketchNode **只高亮自己 `data.strokes` 里仍存在的 id** → 笔画被擦/节点被删天然被过滤，无需额外清理；节点被删时 chip 复用 [NodeRef](../../apps/web/src/components/Common/NodeRef.tsx) 现成的删除线降级、悬浮 no-op；计数标签取**发送当时**的记录数（持久 strokeIds 长度），不按当前重算。
+- **删除兜底**（核心原则：**持久化的是历史事实，高亮是对当前画布的尽力而为**）：SketchNode **只高亮自己 `data.strokes` 里仍存在的 id** → 笔画被擦/节点被删天然被过滤，无需额外清理；节点被删时 chip 复用 [NodeRef](../../apps/web/src/components/Nodes/NodeRef/NodeRef.tsx) 现成的删除线降级、悬浮 no-op；计数标签取**发送当时**的记录数（持久 strokeIds 长度），不按当前重算。
 - **标签**：显示「N 笔」（`chat.partialStrokeCount`，en/zh）；「N/M」需额外持久化发送时总笔数 M，未做。
 - **提交**：① `feat(chat): persist and re-surface partial stroke selection`（持久化 + 「N 笔」标签）；② `feat(canvas): highlight referenced strokes on hovering a chat stroke chip`（高亮通道 + chip 悬浮 + 删除兜底）。
 

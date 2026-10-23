@@ -281,12 +281,12 @@ for (const [language, strings] of [
 
     await open();
     await expect(input).toHaveCount(0);
-    await panel.getByRole('checkbox').uncheck();
+    await panel.getByRole('checkbox').check();
     await page
       .getByRole('heading', { name: 'Node toolbars', exact: true })
       .click();
     await expect(panel).toHaveCount(0);
     await open();
-    await expect(panel.getByRole('checkbox')).toBeChecked();
+    await expect(panel.getByRole('checkbox')).not.toBeChecked();
   });
 }

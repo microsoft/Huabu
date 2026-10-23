@@ -65,6 +65,7 @@ import {
 import workspaceRoutes from './modules/workspace.route.js';
 import workspacesRoutes from './modules/workspaces.route.js';
 import { preloadSkills } from './prompt/index.js';
+import { getDeploymentEnvironment } from './security/deployment-settings.js';
 import { MAX_UPLOAD_BYTES } from './upload-limits.js';
 import { logger } from './utils/logger.js';
 
@@ -148,8 +149,9 @@ app.register(multipart, {
 //
 // CORS preflight (OPTIONS) always passes through unauthenticated.
 
-const basicAuthUser = process.env.HUABU_BASIC_AUTH_USER;
-const basicAuthPass = process.env.HUABU_BASIC_AUTH_PASS;
+const deploymentEnvironment = getDeploymentEnvironment();
+const basicAuthUser = deploymentEnvironment.HUABU_BASIC_AUTH_USER;
+const basicAuthPass = deploymentEnvironment.HUABU_BASIC_AUTH_PASS;
 if (basicAuthUser && basicAuthPass) {
   const expectedBasic =
     'Basic ' +

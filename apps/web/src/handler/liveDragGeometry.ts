@@ -10,6 +10,22 @@ import {
 
 import type { Node } from '@xyflow/react';
 
+type ClientPoint = { clientX: number; clientY: number };
+
+export function getDragPointerPosition(
+  event:
+    | (Partial<ClientPoint> & {
+        touches?: ArrayLike<ClientPoint>;
+        changedTouches?: ArrayLike<ClientPoint>;
+      })
+    | undefined,
+): { x: number; y: number } | undefined {
+  const point = event?.changedTouches?.[0] ?? event?.touches?.[0] ?? event;
+  return typeof point?.clientX === 'number' && typeof point.clientY === 'number'
+    ? { x: point.clientX, y: point.clientY }
+    : undefined;
+}
+
 export function mergeLiveDragGeometry(
   stored: NestableNode,
   live: Node,

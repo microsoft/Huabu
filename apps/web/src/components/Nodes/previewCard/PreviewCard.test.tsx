@@ -516,7 +516,7 @@ describe('PreviewCard', () => {
     [1600, 500, 'M', 'horizontal'],
     [2500, 800, 'L', 'horizontal'],
     [400, 214, 'S', 'horizontal'],
-    [1000, 500, 'M', 'horizontal'],
+    [1000, 500, 'M', 'vertical'],
   ])(
     'uses outer geometry %s × %s for tier %s and %s layout',
     (width, height, tier, orientation) => {

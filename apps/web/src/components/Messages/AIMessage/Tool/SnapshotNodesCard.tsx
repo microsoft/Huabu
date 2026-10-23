@@ -15,11 +15,12 @@
 import { Camera, X as XIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
+import { NodeRef } from '@/components/Nodes/NodeRef/NodeRef';
+
 import { partIsExecuting } from './helpers';
 import { resolveArtifactUrl } from '../../../../api/artifact';
 import useCanvasStore from '../../../../store/canvasStore';
 import { Loading } from '../../../Common/Loading';
-import { NodeRef } from '../../../Common/NodeRef';
 import { AssistantDisclosure } from '../../AssistantDisclosure';
 
 import type { SnapshotEntry, SnapshotNodesToolPart } from '@huabu/shared';

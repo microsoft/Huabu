@@ -11,7 +11,10 @@ interface MarkdownNode {
   alt?: string | null;
   checked?: boolean | null;
   children?: MarkdownNode[];
-  position?: { start: { line: number }; end: { line: number } };
+  position?: {
+    start: { line: number; offset?: number };
+    end: { line: number; offset?: number };
+  };
 }
 
 const BLOCK_CONTAINERS = new Set(['root', 'blockquote', 'list', 'listItem']);
@@ -70,4 +73,56 @@ export function stripMarkdown(input: string): string {
       mdastExtensions: [gfmFromMarkdown()],
     }),
   ).trim();
+}
+
+/**
+ * Resolve a literal source match into the parser's visible text projection.
+ * Hidden syntax and transformations without an exact source mapping fail closed.
+ */
+export function markdownSearchTarget(
+  source: string,
+  offset: number,
+  length: number,
+): { text: string; start: number; end: number } | null {
+  const tree: MarkdownNode = fromMarkdown(source, {
+    extensions: [gfm()],
+    mdastExtensions: [gfmFromMarkdown()],
+  });
+  let text = '';
+  let start: number | undefined;
+  const visit = (node: MarkdownNode): void => {
+    if (['definition', 'html', 'image', 'imageReference'].includes(node.type))
+      return;
+    if (node.value !== undefined) {
+      const from = node.position?.start.offset;
+      const to = node.position?.end.offset;
+      if (from !== undefined && to !== undefined && node.value) {
+        const raw = source.slice(from, to);
+        let contentOffset = raw === node.value ? 0 : -1;
+        if (node.type === 'inlineCode') {
+          const delimiter = raw.match(/^`+/)?.[0].length ?? 0;
+          if (raw.slice(delimiter, -delimiter) === node.value)
+            contentOffset = delimiter;
+        } else if (node.type === 'code' && /^(?:`{3,}|~{3,})/.test(raw)) {
+          const bodyStart = raw.indexOf('\n') + 1;
+          if (
+            raw.slice(bodyStart, bodyStart + node.value.length) === node.value
+          )
+            contentOffset = bodyStart;
+        }
+        const relative = offset - from - contentOffset;
+        if (
+          contentOffset >= 0 &&
+          relative >= 0 &&
+          relative + length <= node.value.length
+        )
+          start = text.length + relative;
+      }
+      text += node.value;
+      return;
+    }
+    for (const child of node.children ?? []) visit(child);
+  };
+  visit(tree);
+  return start === undefined ? null : { text, start, end: start + length };
 }

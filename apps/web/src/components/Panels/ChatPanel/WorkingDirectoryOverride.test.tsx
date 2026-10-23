@@ -269,6 +269,37 @@ describe('WorkingDirectoryOverride', () => {
     expect(onSave).not.toHaveBeenCalled();
   });
 
+  it.each([false, true])(
+    'dismisses on a blank canvas press without saving (editing: %s)',
+    async (editing) => {
+      const onSave = vi.fn();
+      await render({ ...defaultProps, onSave });
+      await openPopover();
+      if (editing) {
+        await clickAction('Change');
+        await changePath('/unsaved');
+      }
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      container.addEventListener(
+        'pointerdown',
+        (event) => event.stopImmediatePropagation(),
+        { capture: true, once: true },
+      );
+      act(() =>
+        container.dispatchEvent(
+          new PointerEvent('pointerdown', { bubbles: true }),
+        ),
+      );
+      expect(document.body.querySelector('textarea')).toBeNull();
+      expect(onSave).not.toHaveBeenCalled();
+      await openPopover();
+      expect(nodeOverrideInput().value).toBe('/profiles/default');
+      expect(nodeOverrideInput().readOnly).toBe(true);
+    },
+  );
+
   it('commits on Enter but never during IME composition', async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     await render({ ...defaultProps, onSave });

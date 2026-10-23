@@ -2,21 +2,24 @@
 // Licensed under the MIT license.
 
 import { ArrowLeft } from 'lucide-react';
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 
+import { dismissMoveSuccessToasts } from '@/components/Space/moveNodesToSpace';
+import { SpaceActions } from '@/components/Space/SpaceActions';
 import { CenterArea } from '@/pages/CanvasPage/CenterArea.tsx';
 import { MainLayout } from '@/pages/CanvasPage/MainLayout.tsx';
 import { usePanelStore } from '@/store/panelStore';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
+import { fitNodesOnCanvas, revealNodesOnCanvas } from '@/utils/canvasViewport';
 import { readNodeDeepLinkIntent } from '@/utils/nodeDeepLink';
+import { isVisibleWorldNode } from '@/utils/spaceHierarchy';
 
 import { Loading } from '../../components/Common/Loading';
 import { toast } from '../../components/Common/Toast';
 import { hasNodePreview } from '../../components/Nodes/previews';
 import { CanvasLayerPanel } from '../../components/Panels/CanvasLayerPanel';
-import { revealNodesOnCanvas } from '../../components/Panels/CanvasLayerPanel/focusNodesOnCanvas';
 import { CanvasHeader } from '../../components/Panels/Header/CanvasHeader.tsx';
 import { PreviewWorkspacePanel } from '../../components/Panels/PreviewWorkspace/PreviewWorkspacePanel';
 import { useGlobalSearchHotkey } from '../../hooks/useGlobalSearchHotkey';
@@ -85,6 +88,10 @@ export default function CanvasPage() {
   const isLoading = useStore((s) => s.isLoading);
   const canvasNotFound = useStore((s) => s.canvasNotFound);
   const refreshSpaceTitles = useWorkspaceStore((s) => s.refreshSpaceTitles);
+  const workspaceId = useWorkspaceStore((s) => s.workspaceId);
+  useLayoutEffect(() => dismissMoveSuccessToasts, [canvasId, workspaceId]);
+  const worldId = useWorkspaceStore((s) => s.worldCanvasId);
+  const spaceSummaries = useWorkspaceStore((s) => s.spaceSummaries);
   const nodeCount = useStore((s) => s.nodes.length);
   // Subscribed so the very first render can detect a mismatch between the
   // URL canvas and whatever (stale or empty) canvas is currently in the
@@ -92,6 +99,40 @@ export default function CanvasPage() {
   // for one synchronous frame before the mount effect below kicks
   // `loadCanvas` and flips `isLoading` on.
   const storeCanvasId = useStore((s) => s.canvasId);
+  useEffect(() => {
+    if (isLoading || storeCanvasId !== worldId) return;
+    const canvas = useStore.getState();
+    if (canvas.canvasId !== storeCanvasId) return;
+    const hidden = new Set(
+      canvas.nodes
+        .filter(
+          (node) =>
+            !isVisibleWorldNode(node, storeCanvasId, worldId, spaceSummaries),
+        )
+        .map((node) => node.id),
+    );
+    if (
+      !canvas.nodes.some((node) => node.selected && hidden.has(node.id)) &&
+      !canvas.edges.some(
+        (edge) =>
+          edge.selected && (hidden.has(edge.source) || hidden.has(edge.target)),
+      )
+    )
+      return;
+    // Visibility changes must not leave invisible selection in Preview or clipboard actions.
+    canvas._setStateNoAutosave({
+      nodes: canvas.nodes.map((node) =>
+        node.selected && hidden.has(node.id)
+          ? { ...node, selected: false }
+          : node,
+      ),
+      edges: canvas.edges.map((edge) =>
+        edge.selected && (hidden.has(edge.source) || hidden.has(edge.target))
+          ? { ...edge, selected: false }
+          : edge,
+      ),
+    });
+  }, [isLoading, spaceSummaries, storeCanvasId, worldId]);
   const rfInstance = useStore((s) => s.rfInstance);
   const previewCanvasId = usePreviewWorkspaceStore((s) => s.canvasId);
   const isPreviewFullscreen = usePanelStore((s) => s.isPreviewFullscreen);
@@ -140,11 +181,68 @@ export default function CanvasPage() {
 
     if (placement) newCanvasPlacementRef.current = placement;
     if (previewNodeId) previewNodeIntentRef.current = previewNodeId;
+    const remainingState = { ...location.state };
+    delete remainingState.newCanvasPlacement;
+    delete remainingState.previewNode;
     navigate(`${location.pathname}${location.search}${location.hash}`, {
       replace: true,
-      state: null,
+      state: Object.keys(remainingState).length ? remainingState : null,
     });
   }, [canvasId, location, navigate]);
+
+  useEffect(() => {
+    const state: unknown = location.state;
+    if (!state || typeof state !== 'object' || !('focusNodeIds' in state))
+      return;
+    const ids = state.focusNodeIds;
+    if (
+      !Array.isArray(ids) ||
+      !ids.every((id): id is string => typeof id === 'string') ||
+      !('workspaceId' in state) ||
+      state.workspaceId !== workspaceId ||
+      storeCanvasId !== canvasId ||
+      isLoading
+    )
+      return;
+    const consumeIntent = () => {
+      const remainingState = { ...state };
+      delete remainingState.focusNodeIds;
+      navigate(`${location.pathname}${location.search}${location.hash}`, {
+        replace: true,
+        state: remainingState,
+      });
+    };
+    if (isPreviewFullscreen) {
+      consumeIntent();
+      return;
+    }
+    if (!rfInstance) return;
+    const frame = requestAnimationFrame(() => {
+      const canvas = useStore.getState();
+      if (canvas.canvasId !== canvasId) return;
+      const available = new Set(canvas.nodes.map((node) => node.id));
+      const targets = ids.filter((id) => available.has(id));
+      if (targets.length > 0) {
+        canvas.selectNodes(targets, false);
+        canvas.canvasWrapper?.focus({ preventScroll: true });
+        void fitNodesOnCanvas(rfInstance, targets, 0.15, 1);
+      } else {
+        toast(t('canvasPage.nodeTargetUnavailable'), { tone: 'warning' });
+      }
+      consumeIntent();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [
+    canvasId,
+    isLoading,
+    isPreviewFullscreen,
+    location,
+    navigate,
+    rfInstance,
+    storeCanvasId,
+    t,
+    workspaceId,
+  ]);
 
   useEffect(() => {
     const nodeId = previewNodeIntentRef.current;
@@ -342,12 +440,15 @@ export default function CanvasPage() {
   }
 
   return (
-    <MainLayout
-      header={<CanvasHeader onOpenShortcuts={openShortcuts} />}
-      leftPanel={<CanvasLayerPanel />}
-      rightPanel={<PreviewWorkspacePanel />}
-    >
-      <CenterArea canvasShortcutsDisabled={isShortcutsOpen} />
-    </MainLayout>
+    <>
+      <SpaceActions />
+      <MainLayout
+        header={<CanvasHeader onOpenShortcuts={openShortcuts} />}
+        leftPanel={<CanvasLayerPanel />}
+        rightPanel={<PreviewWorkspacePanel />}
+      >
+        <CenterArea canvasShortcutsDisabled={isShortcutsOpen} />
+      </MainLayout>
+    </>
   );
 }

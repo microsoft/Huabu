@@ -9,13 +9,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createId } from '@huabu/shared';
 
-import { createInkResponse } from './ink-response.js';
+import { createInkResponse, isInkCanvasResult } from './ink-response.js';
 import { executeOnServer } from '../canvas/canvas-executor.js';
-import { subscribeCanvasUpdates } from '../canvas/canvas-sync.js';
+import { publishCanvasUpdate } from '../canvas/canvas-sync.js';
 import { getCanvasStore } from '../storage/index.js';
 import { setWorkspacePath } from '../workspace.js';
 
-import type { CanvasNode } from '@huabu/shared/canvas-engine';
+import type { CanvasNode, Delta } from '@huabu/shared/canvas-engine';
 
 const canvasId = 'ink-response-test';
 const threadId = 'ink-thread';
@@ -39,7 +39,7 @@ beforeEach(() => {
           type: 'question',
           position: { x: 100, y: 100 },
           style: { width: 200 },
-          data: { threadId, agentMode: 'ask' },
+          data: { threadId, agentMode: 'operate' },
         },
       ],
       edges: [],
@@ -61,81 +61,22 @@ afterEach(() => {
   rmSync(tmp, { recursive: true, force: true });
 });
 
-function nodes(): CanvasNode[] {
-  return (getCanvasStore(canvasId).read()?.state.nodes ?? []) as CanvasNode[];
-}
-
-function notes() {
-  return nodes().filter((node) => node.type === 'note');
-}
-
-describe('host Ink response delivery', () => {
-  it('persists the full answer and conversation edge, broadcasts, and does not duplicate concurrent delivery', async () => {
+describe('agent-authored Ink response verification', () => {
+  it('rejects an empty or chat-only turn without creating a Note or edge', async () => {
     const response = createInkResponse(canvasId, threadId);
-    let broadcasts = 0;
-    const unsubscribe = subscribeCanvasUpdates(canvasId, () => {
-      broadcasts++;
-    });
-    try {
-      const outcome = {
-        text: '## Findings\n\nA researched answer with [sources](https://example.com).',
-        interrupted: false,
-      };
-      await Promise.all([response.deliver(outcome), response.deliver(outcome)]);
-      await response.deliver(outcome);
-      const note = notes()[0];
-      expect(notes()).toHaveLength(1);
-      expect(getCanvasStore(canvasId).readNode(note.id)?.content).toBe(
-        outcome.text,
-      );
-      expect(note.data.origin).toEqual({ type: 'user-from-chat', threadId });
-      expect(note.position.y).toBe(260);
-      expect(getCanvasStore(canvasId).read()?.state.edges).toEqual([
-        expect.objectContaining({ source: ownerId, target: note.id }),
-      ]);
-      expect(broadcasts).toBe(1);
-      expect(nodes().find((node) => node.id === ownerId)?.data.agentMode).toBe(
-        'ask',
-      );
-    } finally {
-      response.stop();
-      unsubscribe();
-    }
+    const before = getCanvasStore(canvasId).read();
+    await expect(response.deliver({ interrupted: false })).rejects.toThrow(
+      'without a visible Canvas result',
+    );
+    expect(getCanvasStore(canvasId).read()).toEqual(before);
   });
 
-  it.each([
-    { style: undefined, expected: { x: 100, y: 260 } },
-    { style: { width: 0, height: 0 }, expected: { x: 100, y: 260 } },
-    { style: { width: 200, height: 180 }, expected: { x: 0, y: 360 } },
-  ])(
-    'preserves the 80px placement gap for anchor geometry %j',
-    async ({ style, expected }) => {
-      const store = getCanvasStore(canvasId);
-      const canvas = store.read();
-      if (!canvas) throw new Error('Missing test Canvas');
-      store.write({
-        ...canvas,
-        state: {
-          ...canvas.state,
-          nodes: nodes().map((node) => ({ ...node, style })),
-        },
-      });
-      const response = createInkResponse(canvasId, threadId);
-      try {
-        await response.deliver({ text: 'Answer', interrupted: false });
-        expect(notes()[0].position).toEqual(expected);
-      } finally {
-        response.stop();
-      }
-    },
-  );
-
   it.each(['title', 'different-thread', 'actual-result'] as const)(
-    'distinguishes %s writes from an answer delivered by this turn',
+    'distinguishes %s writes from a Canvas reply',
     async (kind) => {
       const response = createInkResponse(canvasId, threadId);
       try {
-        await executeOnServer({
+        const result = await executeOnServer({
           canvasId,
           originator: {
             source: 'agent',
@@ -167,12 +108,20 @@ describe('host Ink response delivery', () => {
                   },
                 ],
         });
-        await response.deliver({ text: 'Final answer', interrupted: false });
-        const bodies = notes().map(
-          (node) => getCanvasStore(canvasId).readNode(node.id)?.content,
-        );
-        if (kind === 'actual-result') expect(bodies).toEqual(['Direct result']);
-        else expect(bodies).toContain('Final answer');
+        expect(result.results.every((item) => item.applied)).toBe(true);
+        const beforeVerification = getCanvasStore(canvasId).read();
+        if (kind === 'actual-result') {
+          await Promise.all([
+            response.deliver({ interrupted: false }),
+            response.deliver({ interrupted: false }),
+          ]);
+        } else {
+          await expect(
+            response.deliver({ interrupted: false }),
+          ).rejects.toThrow('without a visible Canvas result');
+        }
+        expect(getCanvasStore(canvasId).read()).toEqual(beforeVerification);
+        expect(beforeVerification?.state.edges).toEqual([]);
       } finally {
         response.stop();
       }
@@ -180,37 +129,168 @@ describe('host Ink response delivery', () => {
   );
 
   it.each([
-    { text: '', interrupted: false, expected: 'without providing an answer' },
-    { text: 'Partial findings', interrupted: true, expected: 'interrupted' },
-    {
-      text: '',
-      error: 'Search failed',
-      interrupted: false,
-      expected: 'Search failed',
-    },
+    { interrupted: true },
+    { interrupted: false, error: 'Write permission denied' },
   ])(
-    'delivers an honest outcome for incomplete or failed input: %j',
-    async ({ expected, ...outcome }) => {
+    'preserves an incomplete outcome without manufacturing a reply: %j',
+    async (outcome) => {
       const response = createInkResponse(canvasId, threadId);
-      try {
-        await response.deliver(outcome);
-        expect(
-          getCanvasStore(canvasId).readNode(notes()[0].id)?.content,
-        ).toContain(expected);
-      } finally {
-        response.stop();
-      }
+      const before = getCanvasStore(canvasId).read();
+      await response.deliver(outcome);
+      expect(getCanvasStore(canvasId).read()).toEqual(before);
     },
   );
 
-  it('reports a missing Canvas instead of claiming delivery', async () => {
-    const response = createInkResponse('missing-canvas', threadId);
-    try {
-      await expect(
-        response.deliver({ text: 'Answer', interrupted: false }),
-      ).rejects.toThrow('Canvas no longer exists');
-    } finally {
-      response.stop();
-    }
+  it('ignores Agent Node projections even when they contain a visible delta', async () => {
+    const response = createInkResponse(canvasId, threadId);
+    publishCanvasUpdate(canvasId, {
+      type: 'update',
+      data: {
+        threadId,
+        agentNodeProjection: true,
+        fromVersion: 1,
+        toVersion: 2,
+        deltas: [
+          {
+            type: 'INSERT_NODE',
+            node: {
+              id: 'note',
+              type: 'note',
+              position: { x: 0, y: 0 },
+              data: { content: 'Projection' },
+            },
+          },
+        ],
+        pendingEffects: {
+          mutatedNodes: [],
+          deletedNodeIds: [],
+          contentEditedNodeIds: [],
+          deferredFitFrameIds: [],
+        },
+      },
+    });
+    await expect(response.deliver({ interrupted: false })).rejects.toThrow(
+      'without a visible Canvas result',
+    );
   });
+
+  it('does not count failed writes or results from before this invocation', async () => {
+    await executeOnServer({
+      canvasId,
+      originator: { source: 'agent', threadId },
+      commands: [
+        {
+          type: 'CREATE_NODES',
+          nodes: [
+            {
+              nodeType: 'note',
+              data: { content: 'Earlier answer' },
+              position: { x: 900, y: 0 },
+            },
+          ],
+        },
+      ],
+    });
+    const response = createInkResponse(canvasId, threadId);
+    await executeOnServer({
+      canvasId,
+      originator: { source: 'agent', threadId },
+      commands: [
+        {
+          type: 'MERGE_NODE_DATA',
+          patches: [
+            { nodeId: createId('node'), patch: { content: 'Missing target' } },
+          ],
+        },
+      ],
+    });
+    await expect(response.deliver({ interrupted: false })).rejects.toThrow(
+      'without a visible Canvas result',
+    );
+  });
+});
+
+describe('visible Canvas result classification', () => {
+  const node: CanvasNode = {
+    id: 'note',
+    type: 'note',
+    position: { x: 0, y: 0 },
+    data: { content: 'Answer' },
+  };
+  it.each([
+    { delta: { type: 'INSERT_NODE', node }, visible: true },
+    {
+      delta: { type: 'INSERT_NODE', node: { ...node, hidden: true } },
+      visible: false,
+    },
+    {
+      delta: { type: 'INSERT_NODE', node: { ...node, type: 'question' } },
+      visible: false,
+    },
+    {
+      delta: {
+        type: 'REPLACE_NODE',
+        prev: node,
+        next: { ...node, data: { ...node.data, summary: 'Metadata' } },
+      },
+      visible: false,
+    },
+    {
+      delta: {
+        type: 'REPLACE_NODE',
+        prev: node,
+        next: { ...node, data: { content: 'Edited answer' } },
+      },
+      visible: true,
+    },
+    {
+      delta: {
+        type: 'REPLACE_NODE',
+        prev: node,
+        next: { ...node, position: { x: 20, y: 40 } },
+      },
+      visible: true,
+    },
+    {
+      delta: {
+        type: 'REPLACE_NODE',
+        prev: node,
+        next: { ...node, data: { ...node.data, style: { accent: 'purple' } } },
+      },
+      visible: true,
+    },
+    { delta: { type: 'DELETE_NODE', node }, visible: true },
+    {
+      delta: {
+        type: 'INSERT_EDGE',
+        edge: { id: 'edge', source: 'a', target: 'b' },
+      },
+      visible: true,
+    },
+    {
+      delta: {
+        type: 'INSERT_EDGE',
+        edge: { id: 'edge', source: 'a', target: 'b', hidden: true },
+      },
+      visible: false,
+    },
+    {
+      delta: {
+        type: 'REPLACE_EDGE',
+        prev: { id: 'edge', source: 'a', target: 'b' },
+        next: {
+          id: 'edge',
+          source: 'a',
+          target: 'b',
+          data: { labelSource: 'agent' },
+        },
+      },
+      visible: false,
+    },
+  ] satisfies Array<{ delta: Delta; visible: boolean }>)(
+    'classifies $delta.type as $visible',
+    ({ delta, visible }) => {
+      expect(isInkCanvasResult(delta)).toBe(visible);
+    },
+  );
 });

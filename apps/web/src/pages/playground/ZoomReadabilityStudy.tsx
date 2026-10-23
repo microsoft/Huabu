@@ -4,7 +4,10 @@
 import { useState } from 'react';
 
 import { resolveAccent } from '@huabu/shared';
-import { resolveFrameResponsiveLayout } from '@huabu/shared/canvas-engine';
+import {
+  FRAME_LAYOUT_CONFIG,
+  resolveFrameResponsiveLayout,
+} from '@huabu/shared/canvas-engine';
 
 import { Button } from '@/components/Common/Button';
 import { RangeSlider } from '@/components/Common/RangeSlider';
@@ -58,17 +61,21 @@ const MEDIA = [
   },
 ] as const;
 
-/** Size the fixture grid with the same self-consistent tiers as Hug Frames. */
+/** Size the fixture grid with the same fixed density as Hug Frames. */
 function studyFrameLayout(dense: boolean) {
   const node = dense ? DENSE_NODE : NODE;
   const rows = dense ? 2 : 1;
   return resolveFrameResponsiveLayout((metrics) => ({
     metrics,
     frameSize: {
-      width: node.width * 3 + metrics.contentSpacing * 4,
+      width:
+        node.width * 3 +
+        FRAME_LAYOUT_CONFIG.trackGap * 2 +
+        metrics.contentSpacing * 2,
       height:
         node.height * rows +
-        metrics.contentSpacing * rows +
+        FRAME_LAYOUT_CONFIG.nodeGap * (rows - 1) +
+        metrics.contentSpacing +
         metrics.headerInset,
     },
   }));
@@ -220,6 +227,7 @@ function StudyNodes({
   left = 60,
   top = 220,
   gap = dense ? 24 : 40,
+  rowGap = gap,
 }: {
   zoom: number;
   variant: Variant;
@@ -229,6 +237,7 @@ function StudyNodes({
   left?: number;
   top?: number;
   gap?: number;
+  rowGap?: number;
 }) {
   const types = dense
     ? (['note', 'web', 'pdf', 'pdf', 'note', 'web'] as const)
@@ -238,7 +247,7 @@ function StudyNodes({
     <div
       data-study-children=""
       className="absolute grid grid-cols-3"
-      style={{ left, top, gap }}
+      style={{ left, top, columnGap: gap, rowGap }}
     >
       {types.map((type, index) => (
         <StudyNode
@@ -345,7 +354,8 @@ function StudyFrame({
         dense={dense}
         left={layout.contentSpacing}
         top={layout.headerInset}
-        gap={layout.contentSpacing}
+        gap={FRAME_LAYOUT_CONFIG.trackGap}
+        rowGap={FRAME_LAYOUT_CONFIG.nodeGap}
         frameOverview={regionVisible}
       />
       {proposed && (

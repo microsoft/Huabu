@@ -7,6 +7,8 @@ export const SECRET_IDS = {
   rapidApiKey: 'integration:rapidapi:api-key',
   // Retained for historical encrypted records, never used for connection auth.
   agentletConnectionToken: 'integration:agentlet:connection-token',
+  managedConnectionToken: 'integration:agentlet:managed-token',
+  remoteAccessPassword: 'integration:server:access-password',
   inkOcrApiKey: 'integration:azure-vision:api-key',
   inkOcrConfig: 'integration:azure-vision:config',
   copilotOAuth: 'oauth:github-copilot:credentials',

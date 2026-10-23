@@ -9,17 +9,27 @@ import react from '@vitejs/plugin-react';
 import { defineConfig, loadEnv, type Plugin } from 'vite';
 
 import { decideViteAccess } from './vite-access';
+import {
+  readDeploymentSettings,
+  resolveAuthenticationMode,
+  resolveDeploymentEnvironment,
+} from '../server/src/security/deployment-settings';
+import { SECRET_IDS } from '../server/src/security/secret-ids';
 
 /**
  * Single-owner access gate for the dev server. Loopback keeps its
  * zero-configuration workflow; remote HTTP requests must pass Basic Auth
- * before receiving assets or reaching the API proxy. The gate does NOT cover
+ * unless login was explicitly disabled. The gate does NOT cover
  * the HMR WebSocket upgrade (which carries hot reload payloads, no app data).
  *
  * Note: this is plaintext over HTTP. Combine with a firewall / VPN for
  * anything beyond a quick team share on a trusted network.
  */
-function accessGatePlugin(user?: string, pass?: string): Plugin {
+function accessGatePlugin(
+  user?: string,
+  pass?: string,
+  authenticationDisabled = false,
+): Plugin {
   const expected =
     user && pass
       ? 'Basic ' + Buffer.from(`${user}:${pass}`, 'utf8').toString('base64')
@@ -31,6 +41,7 @@ function accessGatePlugin(user?: string, pass?: string): Plugin {
         peer: req.socket.remoteAddress,
         expectedAuthorization: expected,
         receivedAuthorization: req.headers.authorization,
+        authenticationDisabled,
       });
       if (decision === 'allow') return next();
       if (decision === 'remote-auth-configuration-required') {
@@ -54,7 +65,7 @@ function accessGatePlugin(user?: string, pass?: string): Plugin {
   };
 }
 
-export default defineConfig(({ mode }) => {
+export default defineConfig(async ({ mode, command }) => {
   // Resolve env with the same precedence as the server:
   //   shell `process.env`  >  apps/web/.env  >  <repo-root>/.env
   // `loadEnv` only reads .env files, so we explicitly merge `process.env` on
@@ -77,8 +88,26 @@ export default defineConfig(({ mode }) => {
   const devPort =
     Number.isFinite(parsedDevPort) && parsedDevPort > 0 ? parsedDevPort : 5173;
 
-  const authUser = env.HUABU_BASIC_AUTH_USER;
-  const authPass = env.HUABU_BASIC_AUTH_PASS;
+  let deploymentEnv = env;
+  if (command === 'serve') {
+    const settings = readDeploymentSettings(env);
+    let password: string | null = null;
+    if (
+      settings?.remoteAccess.enabled &&
+      (env.HUABU_AUTH_MODE ?? settings.remoteAccess.authentication) !==
+        'none' &&
+      env.HUABU_BASIC_AUTH_USER === undefined &&
+      env.HUABU_BASIC_AUTH_PASS === undefined
+    ) {
+      const { initializeSecretStore, getPersistedSecret } =
+        await import('../server/src/security/secret-store');
+      await initializeSecretStore(env);
+      password = getPersistedSecret(SECRET_IDS.remoteAccessPassword);
+    }
+    deploymentEnv = resolveDeploymentEnvironment(env, settings, password);
+  }
+  const authUser = deploymentEnv.HUABU_BASIC_AUTH_USER;
+  const authPass = deploymentEnv.HUABU_BASIC_AUTH_PASS;
   if (Boolean(authUser) !== Boolean(authPass)) {
     throw new Error(
       'HUABU_BASIC_AUTH_USER and HUABU_BASIC_AUTH_PASS must be configured together',
@@ -87,6 +116,13 @@ export default defineConfig(({ mode }) => {
   const authEnabled = Boolean(authUser && authPass);
   if (authEnabled) {
     console.log('[huabu] Vite dev server: Basic Auth enabled');
+  }
+  const authenticationDisabled =
+    resolveAuthenticationMode(deploymentEnv) === 'none';
+  if (authenticationDisabled) {
+    console.warn(
+      '[huabu] Vite login disabled: anyone who can reach this server has owner access.',
+    );
   }
 
   // The desktop app's `package.json` is the single source of truth for
@@ -99,7 +135,10 @@ export default defineConfig(({ mode }) => {
   const appVersion = desktopPkg.version ?? '0.0.0';
 
   return {
-    plugins: [react(), accessGatePlugin(authUser, authPass)],
+    plugins: [
+      react(),
+      accessGatePlugin(authUser, authPass, authenticationDisabled),
+    ],
     define: {
       __APP_VERSION__: JSON.stringify(appVersion),
       // Milkdown/Crepe mounts Vue components internally. Declare Vue's

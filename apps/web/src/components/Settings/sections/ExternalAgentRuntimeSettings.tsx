@@ -16,6 +16,8 @@ import { Select } from '@/components/Common/Select';
 import { textInputClassName } from '@/components/Common/TextInput';
 import { toast } from '@/components/Common/Toast';
 import { SettingRow } from '@/components/Settings/Common/SettingRow';
+import { getElectronBridge } from '@/hooks/useElectron';
+import { useDeploymentReadinessStore } from '@/store/deploymentReadinessStore';
 import { copyToClipboard } from '@/utils/io/clipboard';
 
 import type {
@@ -355,6 +357,14 @@ export function ExternalAgentRuntimeSettings() {
 
 export function AgentConnectionSettings() {
   const { t } = useTranslation();
+  const localAccessOnly = useDeploymentReadinessStore(
+    (state) => state.readiness?.bind.scope === 'loopback',
+  );
+  const bridge = getElectronBridge();
+  const localAccessHint =
+    bridge && !bridge.isRemoteServer
+      ? 'settings.agentletDesktopLocalAccess'
+      : 'settings.agentletLocalAccessSetup';
   const detailsId = useId();
   const [detailsExpanded, setDetailsExpanded] = useState(false);
   const [connectionShell, setConnectionShell] =
@@ -429,6 +439,11 @@ export function AgentConnectionSettings() {
           <p className="text-fg-muted mt-1">
             {t('settings.agentletRunConnectionDescription')}
           </p>
+          {localAccessOnly ? (
+            <p role="status" className="text-warning mt-2">
+              {t(localAccessHint)}
+            </p>
+          ) : null}
           <div className="mt-2 flex w-full flex-wrap items-center gap-2">
             <Select<ConnectionShell>
               appearance="field"
@@ -518,7 +533,6 @@ export function AgentConnectionSettings() {
                 {'pnpm start:daemon --env-file ./connection.env'}
               </code>
             </pre>
-            <p>{t('settings.agentletStableConnection')}</p>
           </div>
         )}
       </div>

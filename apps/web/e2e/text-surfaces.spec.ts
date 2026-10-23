@@ -68,7 +68,7 @@ test('Text shares the Note tint without a painted border and keeps unaccented te
     await expect(clear).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
     for (const shell of [text, clear]) {
       await expect(shell).toHaveCSS('border-top-color', 'rgba(0, 0, 0, 0)');
-      await expect(shell).toHaveCSS('border-top-width', '3px');
+      await expect(shell).toHaveCSS('border-top-width', '2px');
       await expect(shell).toHaveClass(/hover:ring/);
     }
     await expect(note).not.toHaveCSS('border-top-color', 'rgba(0, 0, 0, 0)');

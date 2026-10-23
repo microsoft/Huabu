@@ -42,7 +42,13 @@ const FIXTURES: Record<string, string> = {
  * Create a note by pasting markdown onto the canvas — the same path a
  * user takes. Multi-line text becomes a note node.
  */
-async function pasteNote(page: Page, markdown: string): Promise<void> {
+async function pasteNote(
+  page: Page,
+  markdown: string,
+  auto = true,
+): Promise<void> {
+  const notes = page.locator('.react-flow__node-note');
+  const count = await notes.count();
   await page.evaluate((text) => {
     const data = new DataTransfer();
     data.setData('text/plain', text);
@@ -54,6 +60,21 @@ async function pasteNote(page: Page, markdown: string): Promise<void> {
       }),
     );
   }, markdown);
+  await expect(notes).toHaveCount(count + 1);
+  if (auto) {
+    await enableNoteAutoHeight(page);
+  }
+}
+
+async function enableNoteAutoHeight(page: Page): Promise<void> {
+  await page.getByRole('button', { name: 'Size', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Fit height to content', exact: true })
+    .click();
+  await expect(
+    page.getByRole('button', { name: 'Switch to fixed height', exact: true }),
+  ).toBeVisible();
+  await page.keyboard.press('Escape');
 }
 
 /**
@@ -90,7 +111,10 @@ async function createAgentNote(
       nodes: [
         {
           nodeType: 'note',
-          data: { label: 'Agent long note', content: markdown },
+          data: {
+            label: 'Agent long note',
+            content: markdown,
+          },
           position: { x: 100, y: 100 },
           size: { width: 560, height: 'auto' },
           ...(parentId ? { parentId } : {}),
@@ -164,6 +188,38 @@ async function pasteAllFixtures(page: Page): Promise<string[]> {
 }
 
 test.describe('note auto height', () => {
+  test('new Notes default to a fixed box and can switch to auto', async ({
+    page,
+  }, testInfo) => {
+    await openNewCanvas(page);
+    const centre = await paneCenter(page);
+    await page.mouse.move(centre.x, centre.y);
+    await pasteNote(
+      page,
+      '# Fixed note\n\n' +
+        'A long paragraph that should scroll rather than grow. '.repeat(120),
+      false,
+    );
+    const note = page.locator('.react-flow__node-note');
+    await expect(note.locator('.ProseMirror')).toHaveCount(1);
+    await expect(note).toHaveCSS('width', '400px');
+    await expect(note).toHaveCSS('height', '300px');
+    await note.screenshot({ path: testInfo.outputPath('fixed-note.png') });
+    await enableNoteAutoHeight(page);
+    await expect
+      .poll(() =>
+        note.evaluate((el) => parseFloat((el as HTMLElement).style.height)),
+      )
+      .toBeGreaterThan(300);
+    await page.reload();
+    await expect(note).toHaveCount(1);
+    await expect
+      .poll(() =>
+        note.evaluate((el) => parseFloat((el as HTMLElement).style.height)),
+      )
+      .toBeGreaterThan(300);
+  });
+
   test('an agent-created long note replaces its initial height hint', async ({
     page,
   }) => {
@@ -262,6 +318,7 @@ test.describe('note auto height', () => {
       parseFloat((element as HTMLElement).style.height),
     );
 
+    await page.getByRole('button', { name: 'Expand', exact: true }).click();
     const editor = page.locator(
       '[data-search-scope="node"] .ProseMirror[contenteditable="true"]',
     );
@@ -273,7 +330,10 @@ test.describe('note auto height', () => {
         `Section ${index + 1}. This manually edited paragraph is long enough to wrap and must expand the mounted note.`,
     ).join('\n\n');
     await editor.fill(longContent);
-    await page.getByRole('button', { name: 'Close', exact: true }).click();
+    await page
+      .getByRole('tab', { selected: true })
+      .getByRole('button', { name: /^Close / })
+      .click();
 
     await expect
       .poll(() =>
@@ -350,6 +410,7 @@ test.describe('note auto height', () => {
     // anyway. Editing only the width must leave the note auto, which is
     // the second thing this asserts: the toolbar has to read ownership
     // rather than infer it from the presence of a number.
+    await page.getByRole('button', { name: 'Size', exact: true }).click();
     const widthInput = page.getByLabel('Width', { exact: true });
     await widthInput.fill('155');
     await widthInput.press('Enter');

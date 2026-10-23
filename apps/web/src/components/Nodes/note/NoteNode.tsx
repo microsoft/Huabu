@@ -29,7 +29,6 @@ import { useNodePresentation } from '@/hooks/useNodePresentation';
 import useCanvasStore from '@/store/canvasStore';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 import { openPreviewNode } from '@/store/previewWorkspace/actions';
-import { useToolStore } from '@/store/toolStore';
 import {
   canMoveHuabuPayload,
   canReadHuabuPayload,
@@ -127,9 +126,7 @@ export const NoteNode = memo(
     const readingRequested = useGesturePreviewStore(
       (s) => s.noteReadingNodeId === id,
     );
-    const pendingNodeType = useToolStore((s) => s.pendingNodeType);
-    const touchReading =
-      readingRequested && scrollingEnabled && isNotMouse && !pendingNodeType;
+    const touchReading = readingRequested && scrollingEnabled && isNotMouse;
     const preserveReadingOffset = useRef(false);
 
     useLayoutEffect(() => {

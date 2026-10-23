@@ -14,9 +14,11 @@ import { useTranslation } from 'react-i18next';
 import { NODE_SHELL_INSET } from '@huabu/shared/canvas-engine';
 
 import { AgentAvatarMark } from '@/components/Common/AgentAvatarMark';
+import { Tooltip } from '@/components/Common/Tooltip';
 import {
   QUESTION_FONT_FAMILY,
   QUESTION_NODE_DEFAULT_FONT_SIZE,
+  QUESTION_NODE_AGENT_INSET,
   QUESTION_NODE_HEADER_HEIGHT,
   QUESTION_NODE_HEADER_GAP,
   QUESTION_NODE_HEADER_INSET,
@@ -26,8 +28,15 @@ import {
 } from '@/utils/node/nodeFontConfig';
 
 import { resolveQuestionTakeoverTone } from './QuestionTakeoverMark';
-import { useQuestionHeaderFit } from './useQuestionHeaderFit';
+import { resolveNodeAccent } from '../design/nodeAccentPolicy';
+import {
+  NODE_BORDER_WIDTH,
+  nodeBoundaryForAccent,
+} from '../design/nodeBoundary';
+import { CONVERSATION_CARD_SPACING } from '../design/nodeSpacing';
 import { NODE_TYPOGRAPHY } from '../design/nodeTypography';
+import { noteSurfaceStyle } from '../note/noteDesign';
+import { NodeActivityTime } from '../shared/NodeActivityTime';
 import { resolveTextBodyBox } from '../shared/TextNodeBody';
 
 import type { QuestionAgentBadgeStatus } from './questionBadgeChrome';
@@ -56,6 +65,8 @@ export function QuestionConversationCard({
   unread,
   conflictCount,
   errorMessage,
+  lastActivityAt,
+  accent,
   text,
   placeholder,
   effectiveWidth,
@@ -77,14 +88,15 @@ export function QuestionConversationCard({
   unread: boolean;
   conflictCount: number;
   errorMessage?: string;
+  lastActivityAt?: number;
+  accent?: string | null;
   text: string;
   placeholder: string;
 }) {
   const { t } = useTranslation();
-  const scale = effectiveFontSize / NODE_TYPOGRAPHY.cardTitle.size;
-  const headerScale = effectiveFontSize / QUESTION_NODE_DEFAULT_FONT_SIZE;
-  const statusIconSize = QUESTION_NODE_STATUS_SIZE * headerScale;
-  const statusPaddingX = QUESTION_NODE_STATUS_PADDING_X * headerScale;
+  const scale = effectiveFontSize / QUESTION_NODE_DEFAULT_FONT_SIZE;
+  const statusIconSize = QUESTION_NODE_STATUS_SIZE * scale;
+  const statusPaddingX = QUESTION_NODE_STATUS_PADDING_X * scale;
   const state = resolveQuestionCardState(status, unread, conflictCount, isOpen);
   const tone = resolveQuestionTakeoverTone(status, unread, conflictCount);
   const box = resolveTextBodyBox({
@@ -106,14 +118,7 @@ export function QuestionConversationCard({
             : state === 'idle'
               ? Pencil
               : MessageCircle;
-  const { fit, headerRef, aliasRef, labelRef } = useQuestionHeaderFit(
-    QUESTION_NODE_HEADER_HEIGHT * scale,
-    8 * scale,
-    statusIconSize,
-    agent.alias,
-    label,
-    statusPaddingX,
-  );
+  const resolvedAccent = resolveNodeAccent('question', accent);
   const description =
     state === 'unread'
       ? t('node.questionCard.unreadDescription')
@@ -128,7 +133,6 @@ export function QuestionConversationCard({
       data-state={state}
       data-tone={tone}
       data-open={isOpen}
-      data-compact={!fit.alias || undefined}
       style={
         {
           // Bleed over the shared transparent shell inset without changing its
@@ -136,13 +140,18 @@ export function QuestionConversationCard({
           width: box.width + NODE_SHELL_INSET,
           height: box.height,
           margin: -NODE_SHELL_INSET / 2,
-          padding: `${box.paddingY - QUESTION_NODE_HEADER_INSET * scale}px ${paddingX}px`,
+          padding: `${box.paddingY - QUESTION_NODE_HEADER_INSET * scale}px ${Math.max(0, paddingX - QUESTION_NODE_AGENT_INSET * scale)}px`,
+          ...noteSurfaceStyle(resolvedAccent),
           fontFamily: QUESTION_FONT_FAMILY,
           '--question-scale': scale,
-          '--question-open-edge-width': `${headerScale}px`,
-          '--question-meta-size': `${NODE_TYPOGRAPHY.body.size * headerScale}px`,
-          '--question-status-size': `${NODE_TYPOGRAPHY.body.size * headerScale}px`,
+          '--question-card-edge':
+            nodeBoundaryForAccent(resolvedAccent).borderColor,
+          '--question-edge-width': `${NODE_BORDER_WIDTH}px`,
+          '--question-meta-size': `${NODE_TYPOGRAPHY.body.size * scale}px`,
+          '--question-status-size': `${NODE_TYPOGRAPHY.body.size * scale}px`,
           '--question-status-padding-x': `${statusPaddingX}px`,
+          '--question-icon-slot-width': `${CONVERSATION_CARD_SPACING.iconSlotWidth * scale}px`,
+          '--question-icon-gap': `${CONVERSATION_CARD_SPACING.rowGap * scale}px`,
           '--question-meta-line': NODE_TYPOGRAPHY.body.lineHeight,
           '--question-title-line': NODE_TYPOGRAPHY.cardTitle.lineHeight,
           '--question-title-weight': QUESTION_NODE_TITLE_WEIGHT,
@@ -151,20 +160,32 @@ export function QuestionConversationCard({
         } as CSSProperties
       }
     >
-      <div className="question-conversation-header" ref={headerRef}>
-        <span className="question-conversation-agent" title={agent.alias}>
-          <AgentAvatarMark
-            agent={agent}
-            size={QUESTION_NODE_HEADER_HEIGHT * scale}
-            detail="full"
-          />
-          <span>{agent.alias}</span>
-        </span>
+      <div className="question-conversation-main">
+        <Tooltip content={agent.alias} wrapperClassName="inline-flex shrink-0">
+          <span
+            className="question-conversation-agent"
+            aria-label={agent.alias}
+          >
+            <AgentAvatarMark
+              agent={agent}
+              size={CONVERSATION_CARD_SPACING.agentSize * scale}
+              detail="full"
+            />
+          </span>
+        </Tooltip>
+        <div
+          className="question-conversation-question"
+          data-placeholder={!text || undefined}
+          style={{ fontSize: effectiveFontSize }}
+        >
+          {text || placeholder}
+        </div>
+      </div>
+      <div className="question-conversation-header">
         <span
           className="question-conversation-status"
           title={description}
           aria-label={description}
-          style={{ display: fit.status ? undefined : 'none' }}
         >
           <Icon
             size={statusIconSize}
@@ -173,31 +194,13 @@ export function QuestionConversationCard({
               state === 'running' ? 'question-conversation-loading' : undefined
             }
           />
-          <span style={{ display: fit.statusText ? undefined : 'none' }}>
-            {label}
-          </span>
+          <span>{label}</span>
         </span>
-      </div>
-      <span
-        className="question-conversation-fit-probe"
-        ref={aliasRef}
-        aria-hidden
-      >
-        {agent.alias}
-      </span>
-      <span
-        className="question-conversation-fit-probe"
-        ref={labelRef}
-        aria-hidden
-      >
-        {label}
-      </span>
-      <div
-        className="question-conversation-question"
-        data-placeholder={!text || undefined}
-        style={{ fontSize: effectiveFontSize }}
-      >
-        {text || placeholder}
+        <NodeActivityTime
+          updatedAt={lastActivityAt}
+          kind="conversation"
+          scale={scale}
+        />
       </div>
     </div>
   );

@@ -32,6 +32,7 @@ import {
   autoHeightContentWidth,
   preserveAgentNodeOwnedData,
   projectAgentNodeEditableData,
+  replayAgentNodeEditableData,
   stripTransientNodeFields,
   applyDeltas,
   applySharedPostEffects,
@@ -71,8 +72,10 @@ import {
 } from '@/handler/canvasCommand/uiIntent';
 import {
   compensateDetachedDragPosition,
+  getDragPointerPosition,
   mergeLiveDragGeometry,
 } from '@/handler/liveDragGeometry';
+import { isPointInTrackGap, resolveMasonryDrop } from '@/handler/masonryDrop';
 import { projectStructuredTargetGeometry } from '@/handler/projectStructuredTargetGeometry';
 import {
   applySnap,
@@ -92,8 +95,15 @@ import {
   setSnapStructuredSuppressed,
   writeDragDecision,
 } from '@/handler/snap/snapSession';
+import { getCanvasVisibleArea } from '@/utils/canvasViewport';
+import {
+  changedSpaceEntries,
+  isVisibleWorldNode,
+  REQUEST_DELETE_SPACE,
+} from '@/utils/spaceHierarchy';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
+import { useWorkspaceStore } from './workspaceStore';
 import {
   getCanvas,
   postCanvasExecute,
@@ -481,6 +491,9 @@ type RFState = {
   pendingInlineEditNodeId: string | null;
   consumeInlineEditRequest: (nodeId: string) => void;
 
+  pendingRevealNodeIds: string[];
+  consumeRevealRequest: (nodeIds: string[]) => void;
+
   collapsedFrameIds: Set<string>;
   toggleFrameCollapse: (frameId: string) => void;
   isFrameCollapsed: (frameId: string) => boolean;
@@ -573,7 +586,7 @@ type RFState = {
     targetNodeId: string | null;
     dropPoint: { x: number; y: number };
   }) => void;
-  deleteNodes: (nodeIds: string[]) => void;
+  deleteNodes: (nodeIds: string[], edgeIds?: string[]) => void;
   disconnectEdges: (edgeIds: string[]) => void;
   setNodeGeometry: (
     items: Array<{
@@ -911,6 +924,35 @@ type RFState = {
    */
   flushCanvasEvents: () => Promise<void>;
 };
+
+function canChangeSpaceEntries(
+  canvasId: string,
+  previous: Node[],
+  next: Node[],
+): boolean {
+  const workspace = useWorkspaceStore.getState();
+  for (const node of changedSpaceEntries(previous, next)) {
+    const target = node.data.targetCanvasId;
+    if (typeof target !== 'string') continue;
+    const summary = workspace.spaceSummaries[target];
+    if (
+      workspace.spaceTitlesStatus !== 'ready' ||
+      (!summary && Object.hasOwn(workspace.spaceTitles, target))
+    ) {
+      toast(t('spaceHierarchy.ownershipUnavailable'), { tone: 'warning' });
+      void workspace.refreshSpaceTitles();
+      return false;
+    }
+    if (
+      summary?.parentSpaceId === canvasId &&
+      summary.parentEntryNodeId === node.id
+    ) {
+      toast(t('spaceHierarchy.entryProtected'), { tone: 'warning' });
+      return false;
+    }
+  }
+  return true;
+}
 
 /**
  * Module-scoped structure-save scheduler. Owns the debounce timer
@@ -1497,6 +1539,12 @@ const useCanvasStore = create<RFState>()(
       set({ pendingInlineEditNodeId: null });
     },
 
+    pendingRevealNodeIds: [],
+    consumeRevealRequest: (nodeIds) => {
+      if (get().pendingRevealNodeIds !== nodeIds) return;
+      set({ pendingRevealNodeIds: [] });
+    },
+
     collapsedFrameIds: new Set<string>(),
     toggleFrameCollapse: (frameId) => {
       const { collapsedFrameIds } = get();
@@ -1567,6 +1615,10 @@ const useCanvasStore = create<RFState>()(
 
       // Only commit if at least one command was applied.
       if (!commandResults.some((r) => r.applied)) return;
+      if (
+        !canChangeSpaceEntries(state.canvasId, state.nodes, writeResult.nodes)
+      )
+        return;
 
       const createdQuestions = writeResult.nodes.filter(
         (node) =>
@@ -1780,6 +1832,35 @@ const useCanvasStore = create<RFState>()(
       const localNodesById = new Map(
         get().nodes.map((node) => [node.id, node]),
       );
+      if (agentNodeProjection) {
+        deltas = deltas.map((delta) => {
+          if (
+            delta.type !== 'REPLACE_NODE' ||
+            delta.prev.type !== 'question' ||
+            delta.next.type !== 'question'
+          )
+            return delta;
+          const live = localNodesById.get(delta.next.id);
+          if (live?.type !== 'question') return delta;
+          // Lifecycle/title projections carry stale geometry in coarse deltas.
+          // Apply their data effects without replacing local resize/undo state.
+          return {
+            ...delta,
+            prev: live,
+            next: {
+              ...live,
+              data: preserveAgentNodeOwnedData(
+                replayAgentNodeEditableData(
+                  live.data,
+                  delta.prev.data,
+                  delta.next.data,
+                ),
+                delta.next.data,
+              ),
+            },
+          };
+        });
+      }
       const safeDeltas =
         dirty.size === 0
           ? deltas
@@ -1890,6 +1971,17 @@ const useCanvasStore = create<RFState>()(
       const prevNodes = get().nodes;
       const prevEdges = get().edges;
       const canvasId = get().canvasId;
+      const insertedSpaceTargets = safeDeltas.flatMap((delta) =>
+        delta.type === 'INSERT_NODE' &&
+        delta.node.type === 'spacePreview' &&
+        typeof delta.node.data.targetCanvasId === 'string'
+          ? [delta.node.data.targetCanvasId]
+          : [],
+      );
+      if (insertedSpaceTargets.length)
+        void useWorkspaceStore
+          .getState()
+          .refreshSpaceTitles(insertedSpaceTargets);
       if (agentNodeProjection) {
         canvasHistoryManager.rebaseAgentInitialContent(safeDeltas);
       } else if (
@@ -2008,19 +2100,61 @@ const useCanvasStore = create<RFState>()(
 
     /** Resolve a web-only UiIntent and execute the resulting commands. */
     dispatchUiIntent: (intent) => {
-      const { rfInstance, canvasWrapper } = get();
-      // Compute the viewport centre in flow coordinates so resolvers can
-      // anchor "no placement point" additions to the visible area. The
-      // shared engine no longer ships a layout fallback, so resolvers
-      // default to `(0, 0)` when neither a placement point nor a viewport
-      // centre is available (initial boot before React Flow registers).
-      let viewportCenter: Point | undefined;
+      if (intent.type === 'DELETE_NODES') {
+        const state = get();
+        const summaries = useWorkspaceStore.getState().spaceSummaries;
+        const affected = new Set(intent.nodeIds);
+        let changed = true;
+        while (changed) {
+          changed = false;
+          for (const node of state.nodes) {
+            if (
+              node.parentId &&
+              affected.has(node.parentId) &&
+              !affected.has(node.id)
+            ) {
+              affected.add(node.id);
+              changed = true;
+            }
+          }
+        }
+        const owned = Object.entries(summaries).filter(
+          ([, summary]) =>
+            summary?.parentSpaceId === state.canvasId &&
+            summary.parentEntryNodeId &&
+            affected.has(summary.parentEntryNodeId),
+        );
+        if (owned.length) {
+          const [childId, child] = owned[0]!;
+          if (
+            owned.length === 1 &&
+            intent.nodeIds.length === 1 &&
+            intent.nodeIds[0] === child?.parentEntryNodeId
+          ) {
+            window.dispatchEvent(
+              new CustomEvent(REQUEST_DELETE_SPACE, { detail: childId }),
+            );
+          } else {
+            toast(t('spaceHierarchy.deleteEntrySeparately'), {
+              tone: 'warning',
+            });
+          }
+          return;
+        }
+      }
+      const { rfInstance, canvasWrapper, viewport } = get();
+      // Fullscreen Preview unmounts Canvas; retain a nearby placement until
+      // the queued reveal can run against the restored, unobscured viewport.
+      let viewportCenter: Point | undefined = viewport
+        ? viewportCentreOf(viewport)
+        : undefined;
       if (rfInstance && canvasWrapper) {
         const rect = canvasWrapper.getBoundingClientRect();
-        if (rect.width > 0 && rect.height > 0) {
+        const area = getCanvasVisibleArea(canvasWrapper);
+        if (area.width > 0 && area.height > 0) {
           viewportCenter = rfInstance.screenToFlowPosition({
-            x: rect.left + rect.width / 2,
-            y: rect.top + rect.height / 2,
+            x: rect.left + area.x + area.width / 2,
+            y: rect.top + area.y + area.height / 2,
           });
         }
       }
@@ -2048,6 +2182,16 @@ const useCanvasStore = create<RFState>()(
               }
             : undefined,
         );
+      }
+      if (execution.revealNodeIds?.length) {
+        const existingIds = new Set(uiState.nodes.map((node) => node.id));
+        const liveIds = new Set(get().nodes.map((node) => node.id));
+        const createdIds = execution.revealNodeIds.filter(
+          (id) => !existingIds.has(id) && liveIds.has(id),
+        );
+        if (createdIds.length > 0) {
+          set({ pendingRevealNodeIds: createdIds });
+        }
       }
       if (editNodeId !== undefined && !editTargetAlreadyExists) {
         const node = get().nodes.find(({ id }) => id === editNodeId);
@@ -2166,6 +2310,7 @@ const useCanvasStore = create<RFState>()(
         await drainPendingSaves();
       set({
         isLoading: true,
+        pendingRevealNodeIds: [],
         canvasNotFound: false,
         versionConflict: false,
         versionConflictServerVersion: null,
@@ -2183,8 +2328,11 @@ const useCanvasStore = create<RFState>()(
           .getState()
           .loadForCanvas(targetId, { chatThreadId });
         canvasHistoryManager.activate(targetId, options?.resetHistory);
-        if (canvasId) {
-          set({ canvasId: targetId });
+        if (canvasId && targetId !== get().canvasId) {
+          get()._setStateNoAutosave({
+            canvasId: targetId,
+            canvasTitle: '',
+          });
         }
         const response = await getCanvas(targetId);
         if (!response) {
@@ -2376,6 +2524,7 @@ const useCanvasStore = create<RFState>()(
       // or, for older canvases without one, runs a one-shot fitView.
       set({
         pendingInlineEditNodeId: null,
+        pendingRevealNodeIds: [],
         collapsedFrameIds: new Set(),
         canvasNotFound: false,
         viewport: null,
@@ -2721,6 +2870,7 @@ const useCanvasStore = create<RFState>()(
     },
 
     onNodeDragStart: (event, _draggedNode, draggedNodes) => {
+      useGesturePreviewStore.getState().clearStructuredDropPreview();
       // Snapshot the true pre-drag positions before any intermediate
       // position updates are applied by ReactFlow.
       get().beginGesture('SET_NODE_GEOMETRY');
@@ -2760,17 +2910,20 @@ const useCanvasStore = create<RFState>()(
     onNodeDrag: (_event, draggedNode, draggedNodes) => {
       // Capture the cursor's screen position now (before the rAF) so the
       // structured-frame drop indicator can be placed at the actual
-      // pointer, not where the dragged node settled. Guarded against
-      // touch / programmatic emits that lack client coords.
-      const ptrEvent = _event as
-        | { clientX?: number; clientY?: number }
-        | undefined;
-      const pointerScreen =
-        ptrEvent &&
-        typeof ptrEvent.clientX === 'number' &&
-        typeof ptrEvent.clientY === 'number'
-          ? { x: ptrEvent.clientX, y: ptrEvent.clientY }
-          : null;
+      // pointer, not where the dragged node settled.
+      const pointerScreen = getDragPointerPosition(_event);
+      const pendingDrop =
+        useGesturePreviewStore.getState().structuredDropPreview;
+      const pointer = pointerScreen
+        ? get().rfInstance?.screenToFlowPosition(pointerScreen)
+        : undefined;
+      if (
+        pendingDrop?.masonry?.gap &&
+        pointer &&
+        !isPointInTrackGap(pendingDrop.masonry.gap, pointer)
+      ) {
+        useGesturePreviewStore.getState().clearStructuredDropPreview();
+      }
 
       // Throttle the heavy preview computation to once per animation frame.
       // Mouse events can fire at 120 Hz+ on high-refresh displays; capping at
@@ -3161,6 +3314,26 @@ const useCanvasStore = create<RFState>()(
                 }
               : undefined;
 
+          const previousDrop =
+            useGesturePreviewStore.getState().structuredDropPreview;
+          const masonry =
+            framePoint && gridCfg.axis !== 'grid'
+              ? resolveMasonryDrop(
+                  projectedGestureNodes,
+                  targetFrameId,
+                  gridCfg.axis,
+                  framePoint,
+                  {
+                    edges,
+                    zoom: get().rfInstance?.getZoom() ?? 1,
+                    allowInsert: draggedNodes.length === 1 && !!pointerFlow,
+                    previous:
+                      previousDrop?.frameId === targetFrameId
+                        ? previousDrop.masonry?.target
+                        : undefined,
+                  },
+                )
+              : undefined;
           const zone = framePoint
             ? describeStructuredDropZone(
                 projectedGestureNodes,
@@ -3169,7 +3342,7 @@ const useCanvasStore = create<RFState>()(
                 gridCfg.axis,
                 resolveFrameTrackCount(projectedGestureNodes, targetFrameId),
                 draggedRect,
-                { edges },
+                { edges, target: masonry?.target },
               )
             : null;
 
@@ -3182,19 +3355,28 @@ const useCanvasStore = create<RFState>()(
               y: frameAbs.y + rect.y,
             });
             useGesturePreviewStore.getState().setStructuredDropPreview({
+              nodeId: draggedNode.id,
               frameId: targetFrameId,
               kind: zone.kind,
               x: frameAbs.x + zone.x,
               y: frameAbs.y + zone.y,
               width: zone.width,
               height: zone.height,
+              ...(masonry
+                ? {
+                    masonry: {
+                      target: masonry.target,
+                      gap: masonry.gap ? toAbsoluteRect(masonry.gap) : null,
+                    },
+                  }
+                : {}),
               context: {
                 ...zone.context,
                 tracks: zone.context.tracks.map(toAbsoluteRect),
                 rows: zone.context.rows.map(toAbsoluteRect),
               },
             });
-            if (getFrameSizing(targetFrame) === 'hug') {
+            if (!masonry?.gap && getFrameSizing(targetFrame) === 'hug') {
               const structuredFramePreview: FrameFitPreview = {
                 frameId: targetFrameId,
                 position: frameAbs,
@@ -3211,12 +3393,14 @@ const useCanvasStore = create<RFState>()(
                 previews.push(structuredFramePreview);
               }
             }
-            projectedGestureNodes = projectStructuredTargetGeometry({
-              nodes: projectedGestureNodes,
-              targetFrameId,
-              zone,
-              edges,
-            });
+            if (!masonry?.gap) {
+              projectedGestureNodes = projectStructuredTargetGeometry({
+                nodes: projectedGestureNodes,
+                targetFrameId,
+                zone,
+                edges,
+              });
+            }
             publishGeometryProjection(projectedGestureNodes);
             publishFrameIntentPreviews(projectedGestureNodes);
             // Solver owns the slot here → suppress free-alignment guides.
@@ -3243,6 +3427,7 @@ const useCanvasStore = create<RFState>()(
         cancelAnimationFrame(_dragPreviewRafId);
         _dragPreviewRafId = null;
       }
+      const lastDrop = useGesturePreviewStore.getState().structuredDropPreview;
       useGesturePreviewStore.getState().clearFrameFitPreview();
       useGesturePreviewStore.getState().clearStructuredDropPreview();
       // Withdraw the peer slide-aside. Purely visual — the nodes never
@@ -3290,28 +3475,29 @@ const useCanvasStore = create<RFState>()(
       // Convert the cursor's screen position to flow space so the
       // resolver can assign grid-frame columns based on where the
       // mouse actually was (not where the dragged node settled).
-      // Guarded against unusual event shapes (touch, programmatic
-      // emits) — the resolver gracefully falls back to node X.
-      let pointerFlowPosition: { x: number; y: number } | undefined;
-      const mouseEvent = _event as
-        | { clientX?: number; clientY?: number }
-        | undefined;
-      if (
-        mouseEvent &&
-        typeof mouseEvent.clientX === 'number' &&
-        typeof mouseEvent.clientY === 'number'
-      ) {
-        const flow = get().rfInstance?.screenToFlowPosition({
-          x: mouseEvent.clientX,
-          y: mouseEvent.clientY,
-        });
-        if (flow) pointerFlowPosition = flow;
-      }
+      // Touch end uses changedTouches because touches is empty at release.
+      const pointerScreen = getDragPointerPosition(_event);
+      const pointerFlowPosition = pointerScreen
+        ? get().rfInstance?.screenToFlowPosition(pointerScreen)
+        : undefined;
 
       get().dispatchUiIntent({
         type: 'NODE_DRAG_STOP',
         draggedNodeIds: draggedNodes.map((n) => n.id),
         pointerFlowPosition,
+        zoom: get().rfInstance?.getZoom() ?? 1,
+        masonryDrop:
+          lastDrop?.masonry &&
+          (lastDrop.masonry.target.kind !== 'insert-new' ||
+            (pointerFlowPosition &&
+              lastDrop.masonry.gap &&
+              isPointInTrackGap(lastDrop.masonry.gap, pointerFlowPosition)))
+            ? {
+                nodeId: lastDrop.nodeId,
+                frameId: lastDrop.frameId,
+                target: lastDrop.masonry.target,
+              }
+            : undefined,
         bypassReparent,
         allowNestedFrameEntry,
         cachedDecisions,
@@ -3764,8 +3950,8 @@ const useCanvasStore = create<RFState>()(
       }
     },
 
-    deleteNodes: (nodeIds) => {
-      get().dispatchUiIntent({ type: 'DELETE_NODES', nodeIds });
+    deleteNodes: (nodeIds, edgeIds) => {
+      get().dispatchUiIntent({ type: 'DELETE_NODES', nodeIds, edgeIds });
     },
 
     disconnectEdges: (edgeIds) => {
@@ -3919,6 +4105,23 @@ const useCanvasStore = create<RFState>()(
     },
 
     selectNodes: (ids, multiSelect = false) => {
+      const state = get();
+      const workspace = useWorkspaceStore.getState();
+      if (state.canvasId === workspace.worldCanvasId) {
+        const visible = new Set(
+          state.nodes
+            .filter((node) =>
+              isVisibleWorldNode(
+                node,
+                state.canvasId,
+                workspace.worldCanvasId,
+                workspace.spaceSummaries,
+              ),
+            )
+            .map((node) => node.id),
+        );
+        ids = ids.filter((id) => visible.has(id));
+      }
       get().dispatchUiIntent({
         type: 'SELECT_NODES',
         nodeIds: ids,
@@ -4365,7 +4568,9 @@ const useCanvasStore = create<RFState>()(
 
     undo: async () => {
       const { nodes, edges, canvasId } = get();
-      const snapshot = canvasHistoryManager.undo(nodes, edges);
+      const snapshot = canvasHistoryManager.undo(nodes, edges, (candidate) =>
+        canChangeSpaceEntries(canvasId, nodes, candidate.nodes),
+      );
       if (!snapshot) return;
       // Undo swaps in authoritative geometry, so any retained stroke
       // selection / polygon may no longer describe it (e.g. the classic
@@ -4402,7 +4607,9 @@ const useCanvasStore = create<RFState>()(
 
     redo: async () => {
       const { nodes, edges, canvasId } = get();
-      const snapshot = canvasHistoryManager.redo(nodes, edges);
+      const snapshot = canvasHistoryManager.redo(nodes, edges, (candidate) =>
+        canChangeSpaceEntries(canvasId, nodes, candidate.nodes),
+      );
       if (!snapshot) return;
       // See `undo`: a redo is the same authoritative geometry swap, so
       // discard the floating stroke selection for the same reason.

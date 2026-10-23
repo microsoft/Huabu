@@ -10,6 +10,16 @@ export const NODE_CONTENT_SPACING = {
   descriptionGap: 8,
 } as const;
 
+export const CONVERSATION_CARD_SPACING = {
+  padding: NODE_CONTENT_SPACING.padding,
+  rowGap: 8,
+  footerHeight: 32,
+  iconSlotWidth: 28,
+  statusPaddingX: 6,
+  agentSize: 28,
+  spaceIconSize: 22,
+} as const;
+
 /** PDF/Web card spacing scales with width; Notes use the constants directly. */
 export function nodeContentSpacingForWidth(width: number) {
   const scale = nodeCardContentScale(width);

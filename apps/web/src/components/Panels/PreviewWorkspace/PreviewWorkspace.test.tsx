@@ -204,6 +204,26 @@ afterEach(() => {
   });
 });
 
+describe('search-result preview opening', () => {
+  it('suppresses stale editor focus for search without changing normal Note opening', () => {
+    useCanvasStore.setState({
+      canvasId: CANVAS_ID,
+      nodes: [canvasNode('a', 'Alpha')],
+    });
+    const tabId = openPreviewNode('a');
+    const originalRequest = store().nodeFocusRequest;
+    expect(originalRequest?.tabId).toBe(tabId);
+    expect(openPreviewNode('a', { transient: true, focusEditor: false })).toBe(
+      tabId,
+    );
+    expect(store().nodeFocusRequest).toBeNull();
+    openPreviewNode('a');
+    expect(store().nodeFocusRequest?.nonce).toBeGreaterThan(
+      originalRequest?.nonce ?? 0,
+    );
+  });
+});
+
 describe('tab-owned titles', () => {
   const titleInput = () =>
     container?.querySelector<HTMLInputElement>(
@@ -643,7 +663,7 @@ describe('tab strip', () => {
           .closest('.preview-tab-slot')
           ?.classList.contains('preview-tab-slot'),
       ).toBe(true);
-      expect(tab.classList.contains('rounded-lg')).toBe(true);
+      expect(tab.classList.contains('rounded-md')).toBe(true);
       const title = tab.querySelector('[data-testid="preview-tab-title"]');
       expect(title?.classList.contains('truncate')).toBe(true);
       expect(title?.classList.contains('min-w-0')).toBe(true);
@@ -662,6 +682,8 @@ describe('tab strip', () => {
     expect(activeTab.classList.contains('border-r')).toBe(false);
     expect(activeTab.classList.contains('after:bg-info-light')).toBe(false);
     expect(activeTab.classList.contains('bg-bg-default')).toBe(true);
+    expect(activeTab.classList.contains('font-medium')).toBe(true);
+    expect(inactiveTab.classList.contains('font-medium')).toBe(false);
     const strip = activeTab.closest('[role="tablist"]');
     expect(strip?.classList.contains('overflow-x-auto')).toBe(true);
     expect(strip?.classList.contains('overflow-y-hidden')).toBe(true);

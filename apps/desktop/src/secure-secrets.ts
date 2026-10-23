@@ -152,6 +152,10 @@ export class DesktopSecureSecretStore {
     return result;
   }
 
+  get(key: string): string | null {
+    return this.decrypt(key);
+  }
+
   set(key: string, value: string | null): void {
     this.assertLoaded();
     const entries = { ...this.encrypted.entries };

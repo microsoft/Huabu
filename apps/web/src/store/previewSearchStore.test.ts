@@ -44,4 +44,28 @@ describe('previewSearchStore', () => {
       isOpen: false,
     });
   });
+
+  it('addresses a result without changing canvas search and fences stale navigation completion', () => {
+    const state = usePreviewSearchStore.getState;
+    useSearchStore.setState({ query: 'canvas query' });
+    state().reveal('note-1', 'needle', 2);
+    const first = state().navigationRequest;
+    expect(state()).toMatchObject({
+      nodeId: 'note-1',
+      query: 'needle',
+      isOpen: true,
+      focusInput: false,
+      navigationRequest: { occurrenceIndex: 2 },
+    });
+    state().reveal('note-2', 'needle', 3);
+    const second = state().navigationRequest;
+    expect(second?.nonce).toBeGreaterThan(first?.nonce ?? 0);
+    state().consumeNavigation(first?.nonce ?? 0);
+    expect(state().navigationRequest).toBe(second);
+    state().consumeNavigation(second?.nonce ?? 0);
+    expect(state().navigationRequest).toBeNull();
+    expect(useSearchStore.getState().query).toBe('canvas query');
+    state().open('note-2');
+    expect(state().focusInput).toBe(true);
+  });
 });

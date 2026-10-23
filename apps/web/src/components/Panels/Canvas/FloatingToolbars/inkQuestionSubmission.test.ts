@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   deriveInkSubmissionCandidate,
+  canReceiveInk,
   inkLassoIdentity,
   inkSelectionIdentity,
   inkStrokeSelectionIdentity,
@@ -23,6 +24,20 @@ function node(
 }
 
 describe('Ink Question submission candidate', () => {
+  it('excludes only built-in read-only Chat, not external ask-valued sessions', () => {
+    expect(canReceiveInk({ binding: { kind: 'internal' }, mode: 'ask' })).toBe(
+      false,
+    );
+    expect(
+      canReceiveInk({ binding: { kind: 'internal' }, mode: 'operate' }),
+    ).toBe(true);
+    expect(
+      canReceiveInk({
+        binding: { kind: 'external', profileId: 'profile', alias: 'External' },
+        mode: 'ask',
+      }),
+    ).toBe(true);
+  });
   it('counts a partial Sketch and whole-node sources without duplication', () => {
     const candidate = deriveInkSubmissionCandidate(
       [node('sketch-1', 'sketch'), node('note-1', 'note')],

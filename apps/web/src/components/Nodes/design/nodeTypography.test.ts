@@ -16,13 +16,21 @@ describe('shared node typography', () => {
     expect(NODE_TYPOGRAPHY.title.weight).toBe(600);
     expect(FAR_ZOOM_DESIGN.labelWeight).toBe(500);
     expect(NODE_TYPOGRAPHY.cardTitle.weight).toBe(500);
-    expect(NODE_TYPOGRAPHY.title.size).toBe(28);
+    expect(NODE_TYPOGRAPHY.title.size).toBe(24);
+    expect(NODE_TYPOGRAPHY.cardTitle.size).toBe(24);
     expect(NODE_TYPOGRAPHY.cardTitle.size).toBeGreaterThan(
       NODE_TYPOGRAPHY.body.size,
     );
     expect(NODE_TYPOGRAPHY.body.size).toBeGreaterThan(
       NODE_TYPOGRAPHY.metadata.size,
     );
+  });
+
+  it('keeps readable Note body typography independent of other card descriptions', () => {
+    expect(NODE_TYPOGRAPHY.noteBody).toEqual({ size: 18, lineHeight: 1.4 });
+    expect(NODE_TYPOGRAPHY_STYLE['--node-body-size']).toBe('18px');
+    expect(NODE_TYPOGRAPHY_STYLE['--node-body-line']).toBe(1.4);
+    expect(NODE_TYPOGRAPHY.body).toEqual({ size: 18, lineHeight: 1.4 });
   });
 
   it('pins the adopted far-label screen-pixel metrics', () => {
@@ -40,11 +48,11 @@ describe('shared node typography', () => {
   });
 
   it.each([
-    ['h2', 24],
+    ['h2', 22],
     ['h3', 20],
-    ['h4', 16],
-    ['h5', 16],
-    ['h6', 16],
+    ['h4', 18],
+    ['h5', 18],
+    ['h6', 18],
   ] as const)(
     'publishes explicit %s typography for canvas Notes and their measurer',
     (level, size) => {

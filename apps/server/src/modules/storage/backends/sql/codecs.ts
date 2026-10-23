@@ -144,6 +144,16 @@ export function decodeSpaceRow(value: unknown): PersistedSpace {
   const context = `Space ${JSON.stringify(canvasId)}`;
   const record: CanvasFile = {
     canvasId,
+    ...(row['parent_space_id'] !== null && row['parent_space_id'] !== undefined
+      ? {
+          parentSpaceId: stringColumn(row, 'parent_space_id', context),
+          parentEntryNodeId: nullableStringColumn(
+            row,
+            'parent_entry_node_id',
+            context,
+          ),
+        }
+      : {}),
     title: nullableStringColumn(row, 'title', context),
     version: numberColumn(row, 'version', context),
     state: parseJson(
@@ -169,7 +179,7 @@ export function decodeSpaceRow(value: unknown): PersistedSpace {
 
 export const SPACE_COLUMNS =
   'canvas_id, workspace_id, title, collision_key, version, state_json, ' +
-  'created_at, updated_at, is_world';
+  'created_at, updated_at, is_world, parent_space_id, parent_entry_node_id';
 
 export function validateCanvasFile(record: CanvasFile, canvasId: string): void {
   const shapeError = canvasFileShapeError(record, canvasId);

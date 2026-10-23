@@ -39,10 +39,11 @@ import {
 import { toast } from '@/components/Common/Toast';
 import { Tooltip } from '@/components/Common/Tooltip';
 import { useHeightMode } from '@/components/Nodes/shared/height/useHeightMode';
-import { SpaceShortcutWidthSettings } from '@/components/Nodes/spacePreview/SpaceShortcutWidthSettings';
+import { requestCreateChildSpace } from '@/components/Space/createChildSpaceAction';
 import { NODE_ICON } from '@/config/nodeIcons';
 import { nodeToolbarOffset } from '@/config/nodeInteractionChrome';
-import { QUESTION_CARD_SCALE_RANGE } from '@/handler/canvasCommand/resolvers/resolveSetQuestionCardScale';
+import { formatShortcutById } from '@/config/shortcuts';
+import { CARD_SCALE_RANGE } from '@/handler/canvasCommand/resolvers/resolveSetCardScale';
 import { resolveUiIntent } from '@/handler/canvasCommand/uiIntent';
 import { handleCanvasNavigationKey } from '@/hooks/shortcuts/handleCanvasNavigationKey';
 import { handleCanvasFocusEscape } from '@/hooks/useCanvasFocusEscape';
@@ -59,6 +60,7 @@ import {
   selectIsNodeOpen,
   usePreviewWorkspaceStore,
 } from '@/store/previewWorkspace/store';
+import { useWorkspaceStore } from '@/store/workspaceStore';
 import { copyToClipboard } from '@/utils/io/clipboard';
 import { resolveGeometryEdit } from '@/utils/node/geometry';
 import { QUESTION_NODE_DEFAULT_FONT_SIZE } from '@/utils/node/nodeFontConfig';
@@ -228,6 +230,7 @@ export const NodeFloatingToolbar = memo(
     const mark = useNodeCollapseStore((s) => s.marks[id]);
     const updateNodeData = useCanvasStore((s) => s.updateNodeData);
     const canvasId = useCanvasStore((s) => s.canvasId);
+    const worldId = useWorkspaceStore((s) => s.worldCanvasId);
     const convertNodeType = useCanvasStore((s) => s.convertNodeType);
     const deleteNodes = useCanvasStore((s) => s.deleteNodes);
     const setMoveSelectionDialogOpen = useCanvasStore(
@@ -349,18 +352,17 @@ export const NodeFloatingToolbar = memo(
     // controls.
     const dispatchUiIntent = useCanvasStore((s) => s.dispatchUiIntent);
     const authoredFont = data.style?.fontSize;
-    const questionFont =
+    const cardFont =
       typeof authoredFont === 'number' &&
       Number.isFinite(authoredFont) &&
       authoredFont > 0
         ? authoredFont
         : QUESTION_NODE_DEFAULT_FONT_SIZE;
-    const questionScale =
-      (questionFont / QUESTION_NODE_DEFAULT_FONT_SIZE) * 100;
-    const applyQuestionScale = (percent: number) => {
+    const cardScale = (cardFont / QUESTION_NODE_DEFAULT_FONT_SIZE) * 100;
+    const applyCardScale = (percent: number) => {
       const state = useCanvasStore.getState();
       const intent = {
-        type: 'SET_QUESTION_CARD_SCALE' as const,
+        type: 'SET_CARD_SCALE' as const,
         nodeId: id,
         percent,
       };
@@ -419,7 +421,7 @@ export const NodeFloatingToolbar = memo(
         <div className="bg-edge-default mx-0.5 h-4 w-px" />
 
         {/* ── Group 2: Style — color + size ── */}
-        {type !== 'question' && type !== 'sketch' && (
+        {type !== 'sketch' && (
           <FloatingToolbar.ColorPicker
             floating
             triggerClassName="node-toolbar-color"
@@ -454,112 +456,90 @@ export const NodeFloatingToolbar = memo(
         <DropdownMenu
           floating
           placement="bottom"
-          className={`${FLOATING_TOOLBAR_POPOVER_CLASS} node-toolbar-size-panel ${type === 'spacePreview' ? '' : 'flex-row items-center gap-2'}`}
+          contentRole="dialog"
+          className={`${FLOATING_TOOLBAR_POPOVER_CLASS} node-toolbar-size-panel flex-row items-center gap-2`}
           trigger={
-            <Button
-              variant="ghost"
-              iconOnly
-              title={t(
-                type === 'spacePreview'
-                  ? 'spacePreview.widthSettings'
-                  : 'toolbar.size.title',
-              )}
-            >
+            <Button variant="ghost" iconOnly title={t('toolbar.size.title')}>
               <Settings2 />
             </Button>
           }
         >
-          {type === 'spacePreview' ? (
-            <SpaceShortcutWidthSettings
-              key={`${data.type === 'spacePreview' ? data.widthMode : ''}-${currentWidth}`}
-              width={currentWidth ?? SPACE_SHORTCUT_SIZE.defaultWidth}
-              automatic={
-                data.type === 'spacePreview' && data.widthMode === 'auto'
-              }
-              onChange={(width) => {
-                if (width === null) {
-                  updateNodeData(id, { widthMode: 'auto' });
-                } else {
-                  beginGesture('SET_NODE_GEOMETRY');
-                  setNodeGeometry([
-                    { nodeId: id, size: { width, height: 'auto' } },
-                  ]);
-                }
-              }}
-            />
-          ) : (
-            <FloatingToolbar.SizePicker
-              width={currentWidth}
-              height={isTextFlowNode ? null : currentHeight}
-              showHeight={!isTextFlowNode}
-              onApply={({ width, height }) => {
-                if (!internalNode) return;
-                const resolved = resolveGeometryEdit(internalNode, {
-                  width,
-                  height,
+          <FloatingToolbar.SizePicker
+            width={currentWidth}
+            height={isTextFlowNode ? null : currentHeight}
+            showHeight={!isTextFlowNode}
+            minSize={
+              type === 'spacePreview'
+                ? (SPACE_SHORTCUT_SIZE.minWidth * cardScale) / 100
+                : undefined
+            }
+            onApply={({ width, height }) => {
+              if (!internalNode) return;
+              const resolved = resolveGeometryEdit(internalNode, {
+                width,
+                height,
+              });
+              if (!resolved) return;
+              beginGesture('SET_NODE_GEOMETRY');
+              // Frame in hug mode: typing an explicit W or H is a
+              // direct-manipulation signal to switch the frame's sizing
+              // policy to manual. Dispatch the policy change first
+              // (inside the same gesture) so both intents fold into one
+              // undo entry and the geometry write isn't reverted by the
+              // engine's end-of-batch refit pass.
+              if (isFrameHug) {
+                dispatchUiIntent({
+                  type: 'SET_FRAME_LAYOUT_MODE',
+                  frameId: id,
+                  mode: frameLayoutMode,
+                  sizing: 'manual',
                 });
-                if (!resolved) return;
-                beginGesture('SET_NODE_GEOMETRY');
-                // Frame in hug mode: typing an explicit W or H is a
-                // direct-manipulation signal to switch the frame's sizing
-                // policy to manual. Dispatch the policy change first
-                // (inside the same gesture) so both intents fold into one
-                // undo entry and the geometry write isn't reverted by the
-                // engine's end-of-batch refit pass.
-                if (isFrameHug) {
-                  dispatchUiIntent({
-                    type: 'SET_FRAME_LAYOUT_MODE',
-                    frameId: id,
-                    mode: frameLayoutMode,
-                    sizing: 'manual',
-                  });
-                }
-                setNodeGeometry([
-                  {
-                    nodeId: id,
-                    size: {
-                      width: resolved.width,
-                      height: resolved.height,
-                    },
+              }
+              setNodeGeometry([
+                {
+                  nodeId: id,
+                  size: {
+                    width: resolved.width,
+                    height: resolved.height,
                   },
-                ]);
-              }}
-              autoSize={
-                isFrame
-                  ? {
-                      dimensions: 'both',
-                      appearance: 'separate',
-                      active: isFrameHug,
-                      onToggle: toggleFrameSizing,
-                    }
-                  : undefined
-              }
-              heightAuto={
-                type === 'note'
-                  ? {
-                      active: isNoteAutoHeight,
-                      onToggle: toggleNoteAutoHeight,
-                    }
-                  : undefined
-              }
-            />
-          )}
-          {type === 'question' && (
+                },
+              ]);
+            }}
+            autoSize={
+              isFrame
+                ? {
+                    dimensions: 'both',
+                    appearance: 'separate',
+                    active: isFrameHug,
+                    onToggle: toggleFrameSizing,
+                  }
+                : undefined
+            }
+            heightAuto={
+              type === 'note'
+                ? {
+                    active: isNoteAutoHeight,
+                    onToggle: toggleNoteAutoHeight,
+                  }
+                : undefined
+            }
+          />
+          {(type === 'question' || type === 'spacePreview') && (
             <FloatingToolbar.NumberInput
               label={t('toolbar.cardScale')}
               ariaLabel={t('toolbar.cardScale')}
               title={t('toolbar.cardScale')}
-              name="question-card-scale"
-              value={questionScale}
-              min={QUESTION_CARD_SCALE_RANGE.min}
-              max={QUESTION_CARD_SCALE_RANGE.max}
+              name="node-card-scale"
+              value={cardScale}
+              min={CARD_SCALE_RANGE.min}
+              max={CARD_SCALE_RANGE.max}
               inputClassName="w-9"
               endAdornment={
                 <span aria-hidden="true" className="text-fg-subtle text-xs">
                   %
                 </span>
               }
-              onApply={applyQuestionScale}
+              onApply={applyCardScale}
             />
           )}
         </DropdownMenu>
@@ -590,7 +570,6 @@ export const NodeFloatingToolbar = memo(
         >
           <div
             role="presentation"
-            onKeyDown={handleCanvasNavigationKey}
             onClick={(event) => {
               event.stopPropagation();
               const item = (event.target as Element).closest(
@@ -620,7 +599,16 @@ export const NodeFloatingToolbar = memo(
               </DropdownMenuItem>
             )}
             {overflow}
-            {type !== 'spacePreview' && (
+            {canvasId !== worldId && (
+              <DropdownMenuItem
+                icon={<NODE_ICON.spacePreview />}
+                shortcut={formatShortcutById('layer.collectSpace')}
+                onClick={() => requestCreateChildSpace()}
+              >
+                {t('spaceHierarchy.collectAction')}
+              </DropdownMenuItem>
+            )}
+            {canvasId !== worldId && (
               <DropdownMenuItem
                 icon={<SquareArrowRightEnter />}
                 onClick={() =>

@@ -37,6 +37,9 @@ async function nearMetrics(node: Locator) {
     const avatar = required('.question-conversation-agent > :first-child');
     const status = required('.question-conversation-status');
     const icon = required('.question-conversation-status svg');
+    const statusText = required(
+      '.question-conversation-status > span:last-child',
+    );
     const shell = required('.question-compact');
     const css = (el: Element, property: keyof CSSStyleDeclaration) =>
       Number.parseFloat(String(getComputedStyle(el)[property]));
@@ -66,6 +69,9 @@ async function nearMetrics(node: Locator) {
         avatar: rect(avatar),
         status: rect(status),
       },
+      alignment: {
+        statusText: rect(statusText),
+      },
       padding: [
         'paddingLeft',
         'paddingRight',
@@ -76,7 +82,7 @@ async function nearMetrics(node: Locator) {
         headerRect.left - cardRect.left,
         cardRect.right - headerRect.right,
       ],
-      gap: titleRect.top - headerRect.bottom,
+      gap: headerRect.top - titleRect.bottom,
       titleFont: css(title, 'fontSize'),
       titleLine: css(title, 'lineHeight'),
       statusFont: css(status, 'fontSize'),
@@ -87,10 +93,9 @@ async function nearMetrics(node: Locator) {
       fill: getComputedStyle(shell).backgroundColor,
       edge: getComputedStyle(card, '::before').boxShadow,
       neutralFill: color('--bg-surface'),
-      neutralEdge: color('--edge-default'),
-      tone: color('--question-tone'),
+      neutralEdge: color('--question-card-edge'),
       toneFill: color('--question-bg'),
-      toneEdge: color('--question-light'),
+      toneEdge: color('--question-tone'),
     };
   });
 }
@@ -101,25 +106,32 @@ async function expectNearC(node: Locator, fontSize = 24) {
     1,
   );
   await expect(node.locator('.question-conversation-status svg')).toBeVisible();
-  const scale = fontSize / 28;
+  const scale = fontSize / 24;
   await expect(async () => {
     const metrics = await nearMetrics(node);
     for (const padding of metrics.padding)
-      expect(padding).toBeCloseTo(24 * scale, 1);
+      expect(padding).toBeCloseTo(16 * scale, 1);
     expect(metrics.layout.header.height).toBeCloseTo(32 * scale, 1);
-    expect(metrics.layout.avatar.width).toBeCloseTo(32 * scale, 1);
-    expect(metrics.layout.avatar.height).toBeCloseTo(32 * scale, 1);
+    expect(metrics.edge).toContain('0px 0px 0px 2px');
+    expect(metrics.layout.avatar.width).toBeCloseTo(28 * scale, 1);
+    expect(metrics.layout.avatar.height).toBeCloseTo(28 * scale, 1);
     expect(metrics.titleFont).toBe(fontSize);
     expect(metrics.statusFont).toBeCloseTo(18 * scale, 1);
+    expect(metrics.layout.status.x).toBeCloseTo(metrics.layout.header.x, 1);
+    expect(metrics.alignment.statusText.x).toBeCloseTo(
+      metrics.layout.status.x + 28 * scale,
+      1,
+    );
     for (const size of metrics.iconSize)
       expect(size).toBeCloseTo(16 * scale, 1);
   }).toPass({ timeout: 5000 });
   const m = await nearMetrics(node);
-  for (const inset of m.insets) expect(inset).toBeCloseTo(24 * scale, 1);
-  expect(m.gap).toBeCloseTo(12 * scale, 1);
-  expect(m.titleLine).toBeCloseTo(36.4 * scale, 1);
-  expect(m.statusColor).toBe(m.tone);
-  expect(m.chipFill).toBe(m.toneFill);
+  for (const inset of m.insets) expect(inset).toBeCloseTo(16 * scale, 1);
+  expect(m.gap).toBeCloseTo(8 * scale, 1);
+  expect(m.titleLine).toBeCloseTo(31.2 * scale, 1);
+  expect(m.layout.title.x).toBeGreaterThan(
+    m.layout.avatar.x + m.layout.avatar.width,
+  );
   expect(m.chipRadius).toBeGreaterThan(0);
   return m;
 }
@@ -258,6 +270,7 @@ test(
           ...data,
           content: data.label,
           agentMode: 'ask' as const,
+          ...(id === 'unread' ? { lastActivityAt: Date.now() - 120_000 } : {}),
           ...(id === 'unread' ? { style: { fontSize: 28 } } : {}),
         },
       }));
@@ -317,6 +330,12 @@ test(
       '400px',
     );
     await expect(unread).toHaveCSS('width', '280px');
+    await expect(
+      unread.locator('[data-conversation-activity-time]'),
+    ).toHaveText(/2m ago|2分钟前/);
+    await expect(
+      fixture.locator('[data-id="idle"] [data-conversation-activity-time]'),
+    ).toHaveCount(0);
     await expect(fixture.locator('[data-id="narrow"]')).toHaveCSS(
       'width',
       '160px',
@@ -367,14 +386,15 @@ test(
       );
       await expect(node.locator('.question-conversation-card')).toHaveAttribute(
         'data-state',
-        id,
+        id === 'idle' ? 'open' : id,
       );
       await expect(node.locator('.question-conversation-status')).toHaveText(
-        label ?? '',
+        id === 'idle' ? /Conversation open|对话已打开/ : (label ?? ''),
       );
       const opened = await expectNearC(node, id === 'unread' ? 28 : 24);
-      expect(opened.layout).toEqual(closed.layout);
-      expect(opened.fill).toBe(opened.toneFill);
+      expect(opened.layout.title).toEqual(closed.layout.title);
+      expect(opened.layout.avatar).toEqual(closed.layout.avatar);
+      expect(opened.fill).toBe(closed.fill);
       expect(opened.edge).toContain(opened.toneEdge);
       await expect(node.locator('.question-conversation-tail')).toHaveCount(0);
       await page.evaluate(async (id) => {
@@ -414,11 +434,11 @@ test(
     );
     await expect(unread.locator('.question-conversation-agent')).toHaveCSS(
       'font-size',
-      '18px',
+      '21px',
     );
     await expect(unread.locator('.question-conversation-status')).toHaveCSS(
       'font-size',
-      '18px',
+      '21px',
     );
     for (const node of await fixture
       .locator('.react-flow__node-question')
@@ -442,6 +462,7 @@ test(
           cardBottom: card.getBoundingClientRect().bottom,
           titleTop: title.getBoundingClientRect().top,
           headerBottom: header.getBoundingClientRect().bottom,
+          headerTop: header.getBoundingClientRect().top,
           titleHeight: title.clientHeight,
           titleScrollHeight: title.scrollHeight,
         };
@@ -450,8 +471,8 @@ test(
       expect(geometry.titleBottom).toBeLessThanOrEqual(geometry.cardBottom);
       const fontSize =
         (await node.getAttribute('data-id')) === 'unread' ? 28 : 24;
-      expect(geometry.titleTop - geometry.headerBottom).toBeCloseTo(
-        (12 * fontSize) / 28,
+      expect(geometry.headerTop - geometry.titleBottom).toBeCloseTo(
+        (8 * fontSize) / 24,
         1,
       );
       expect(geometry.titleScrollHeight).toBeLessThanOrEqual(
@@ -654,6 +675,107 @@ test(
   },
 );
 
+test('layout Frame Questions stay readable when zoomed out and react to layout changes', async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await openNewCanvas(page);
+  const canvasId = new URL(page.url()).pathname.split('/canvas/')[1];
+  const created = await page.request.post(`/api/canvas/${canvasId}/execute`, {
+    data: {
+      commands: [
+        {
+          type: 'CREATE_NODES',
+          nodes: [
+            {
+              id: 'layout-frame',
+              nodeType: 'frame',
+              data: { label: 'Board', layoutMode: 'column', sizing: 'hug' },
+              position: { x: 60, y: 60 },
+            },
+            {
+              id: 'layout-question',
+              nodeType: 'question',
+              data: { label: 'Keep the card', content: 'Keep the card' },
+              position: { x: 100, y: 180 },
+            },
+          ],
+        },
+        {
+          type: 'SET_NODE_PARENT',
+          nodeIds: ['layout-question'],
+          parentId: 'layout-frame',
+        },
+      ],
+      originator: { source: 'agent', threadId: 'layout-card-test' },
+    },
+  });
+  expect(created.ok(), await created.text()).toBe(true);
+  await page.addInitScript((id) => {
+    localStorage.setItem(
+      `huabu.viewport.${id}`,
+      JSON.stringify({ x: 140, y: 120, zoom: 0.2 }),
+    );
+  }, canvasId);
+  await page.reload();
+  const shell = page.locator('[data-id="layout-question"] .question-compact');
+  const portal = page.locator('[data-takeover-node="layout-question"]');
+  await expect(shell).toBeVisible();
+  for (const layoutMode of ['column', 'free', 'row', 'grid', 'column']) {
+    const changed = await page.request.post(`/api/canvas/${canvasId}/execute`, {
+      data: {
+        commands: [
+          {
+            type: 'MERGE_NODE_DATA',
+            patches: [{ nodeId: 'layout-frame', patch: { layoutMode } }],
+          },
+        ],
+        originator: { source: 'agent', threadId: 'layout-card-test' },
+      },
+    });
+    expect(changed.ok(), await changed.text()).toBe(true);
+    await expect
+      .poll(async () => {
+        const transform = await readViewportTransform(page);
+        return transform ? scaleOf(transform) : null;
+      })
+      .toBe(0.2);
+    if (layoutMode === 'free' || layoutMode === 'grid') {
+      await expect(shell).toHaveCSS('opacity', '0');
+      await expect(portal).toHaveCSS('opacity', '1');
+    } else {
+      await expect(shell).toHaveCSS('opacity', '1');
+      await expect(shell).not.toHaveAttribute('data-lod-body');
+      await expect(portal).toHaveCount(0);
+    }
+  }
+  for (const parentId of [null, 'layout-frame', null, 'layout-frame']) {
+    const changed = await page.request.post(`/api/canvas/${canvasId}/execute`, {
+      data: {
+        commands: [
+          {
+            type: 'SET_NODE_PARENT',
+            nodeIds: ['layout-question'],
+            parentId,
+          },
+        ],
+        originator: { source: 'agent', threadId: 'layout-card-test' },
+      },
+    });
+    expect(changed.ok(), await changed.text()).toBe(true);
+    await expect(shell).toHaveCSS('opacity', parentId ? '1' : '0');
+    if (parentId) {
+      await expect(shell).not.toHaveAttribute('data-lod-body');
+      await expect(portal).toHaveCount(0);
+    } else {
+      await expect(portal).toHaveCSS('opacity', '1');
+    }
+  }
+  await page.screenshot({
+    path: testInfo.outputPath('layout-frame-question.png'),
+  });
+});
+
 test('real Canvas Question reload keeps the card and takeover mutually exclusive', async ({
   page,
 }, testInfo) => {
@@ -812,16 +934,17 @@ test('real Canvas C questions preserve authored width and open without moving co
   expect(closed.edge).toContain(closed.neutralEdge);
   await authored.locator('.question-conversation-question').dblclick();
   await expect(card).toHaveAttribute('data-open', 'true');
-  await expect(card).toHaveAttribute('data-state', 'idle');
+  await expect(card).toHaveAttribute('data-state', 'open');
   // Sample settled paint rather than an intermediate background transition.
   await expect(authored.locator('.question-compact')).toHaveCSS(
     'background-color',
-    closed.toneFill,
+    closed.fill,
   );
   const opened = await expectNearC(authored);
   for (const key of Object.keys(
     closed.layout,
   ) as (keyof typeof closed.layout)[]) {
+    if (key === 'status') continue;
     for (const metric of ['x', 'y', 'width', 'height'] as const) {
       // Fractional camera translation can introduce subpixel subtraction noise.
       expect(opened.layout[key][metric]).toBeCloseTo(
@@ -830,7 +953,7 @@ test('real Canvas C questions preserve authored width and open without moving co
       );
     }
   }
-  expect(opened.fill).toBe(opened.toneFill);
+  expect(opened.fill).toBe(closed.fill);
   expect(opened.edge).toContain(opened.toneEdge);
   expect(opened.edge).not.toBe(closed.edge);
   const tail = authored.locator('.question-conversation-tail');

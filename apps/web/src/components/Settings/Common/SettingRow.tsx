@@ -71,7 +71,7 @@ export const SettingRow: React.FC<SettingRowProps> = ({
               </p>
             ))}
           {description && (
-            <p className="text-fg-subtle mt-0.5 text-xs leading-[1.5]">
+            <p className="text-fg-muted mt-0.5 text-xs leading-[1.5]">
               {description}
             </p>
           )}

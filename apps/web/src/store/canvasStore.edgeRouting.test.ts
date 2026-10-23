@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   executeCanvasCommands,
   rerouteAllEdges,
+  solveStructuredFrameLayout,
 } from '@huabu/shared/canvas-engine';
 
 const api = vi.hoisted(() => ({
@@ -26,10 +27,11 @@ import { resolveUiIntent } from '@/handler/canvasCommand/uiIntent';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
 import useCanvasStore from './canvasStore';
+import { useGesturePreviewStore } from './gesturePreviewStore';
 
 import type * as apiModule from '../api';
 import type * as canvasApiModule from '../api/canvas';
-import type { Edge, Node, XYPosition } from '@xyflow/react';
+import type { Edge, Node, ReactFlowInstance, XYPosition } from '@xyflow/react';
 
 const state = () => useCanvasStore.getState();
 const right = { sourceHandle: 'right-source', targetHandle: 'left-target' };
@@ -125,6 +127,83 @@ afterEach(() => {
 });
 
 describe('edge routing after real node drags', () => {
+  it.each(['column', 'row'] as const)(
+    'uses the release track when the next %s preview frame has not run',
+    (axis) => {
+      const field = axis === 'column' ? 'frameColumn' : 'frameRow';
+      const nodes = [
+        note('frame', 0, 0, {
+          type: 'frame',
+          data: { sizing: 'manual', layoutMode: axis, gridCount: 2 },
+          style: { width: 800, height: 800 },
+        }),
+        ...Array.from({ length: 4 }, (_, index) =>
+          note(`child-${index}`, 20 + index * 120, 64 + index * 120, {
+            parentId: 'frame',
+            data: { heightMode: 'fixed', [field]: Math.floor(index / 2) },
+          }),
+        ),
+      ];
+      const layout = solveStructuredFrameLayout(nodes, 'frame');
+      if (!layout) throw new Error('Missing structured layout');
+      seed(
+        nodes.map((entry) => ({
+          ...entry,
+          position: layout.childPositions.get(entry.id) ?? entry.position,
+        })),
+        [],
+      );
+      const instance: Pick<
+        ReactFlowInstance,
+        'screenToFlowPosition' | 'getZoom'
+      > = {
+        screenToFlowPosition: (point) => point,
+        getZoom: () => 1,
+      };
+      state()._setStateNoAutosave({
+        rfInstance: instance as ReactFlowInstance,
+      });
+      const first = node('child-0').position;
+      const second = node('child-2').position;
+      const event = (type: string, position: XYPosition) =>
+        new MouseEvent(type, {
+          clientX: position.x + 40,
+          clientY: position.y + 30,
+          altKey: true,
+        });
+      start(['child-1']);
+      move('child-1', first, true);
+      state().onNodeDrag(event('mousemove', first), node('child-1'), [
+        node('child-1'),
+      ]);
+      vi.advanceTimersToNextFrame();
+      expect(
+        useGesturePreviewStore.getState().structuredDropPreview?.masonry
+          ?.target,
+      ).toEqual({ kind: 'into-existing', slot: 0 });
+      move('child-1', second, true);
+      state().onNodeDrag(event('mousemove', second), node('child-1'), [
+        node('child-1'),
+      ]);
+      expect(
+        useGesturePreviewStore.getState().structuredDropPreview?.masonry
+          ?.target,
+      ).toEqual({ kind: 'into-existing', slot: 0 });
+      move('child-1', second, false);
+      state().onNodeDragStop(event('mouseup', second), node('child-1'), [
+        node('child-1'),
+      ]);
+      expect(node('child-1').data[field]).toBe(1);
+      expect(
+        useGesturePreviewStore.getState().structuredDropPreview,
+      ).toBeNull();
+      vi.advanceTimersToNextFrame();
+      expect(
+        useGesturePreviewStore.getState().structuredDropPreview,
+      ).toBeNull();
+    },
+  );
+
   it('reselects ports on release even when a free move applies no commands', async () => {
     seed([note('s', 0, 0), note('t', 300, 0)], [edge('s', 't')]);
     const before = state().edges;

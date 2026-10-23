@@ -684,6 +684,13 @@ export class AcpAgentClient {
     return true;
   }
 
+  /** Inspect live approval state without starting or contacting a session. */
+  hasPendingPermissions(sessionId: string): boolean {
+    return [...this.pendingPermissions.values()].some(
+      (pending) => pending.sessionId === sessionId,
+    );
+  }
+
   /** Cancel every pending permission for one session (turn end / abort). */
   private cancelPendingPermissionsForSession(
     sessionId: string,

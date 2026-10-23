@@ -69,6 +69,41 @@ export function describeSpaceRepositoryContract(
       await expect(repository.list()).resolves.toEqual([]);
     });
 
+    it('persists hierarchy independently of ordinary structural writes', async () => {
+      const { repository, read, attemptMutation } = await open();
+      await repository.create({ canvasId: 'parent', title: 'Parent' });
+      await repository.create({ canvasId: 'child', title: 'Child' });
+      await expect(
+        repository.setParent({
+          canvasId: 'child',
+          parentSpaceId: 'parent',
+          parentEntryNodeId: 'node-entry',
+        }),
+      ).resolves.toBe(true);
+      expect(await read('child')).toMatchObject({
+        parentSpaceId: 'parent',
+        parentEntryNodeId: 'node-entry',
+      });
+      await attemptMutation('child');
+      expect(await read('child')).toMatchObject({
+        parentSpaceId: 'parent',
+        parentEntryNodeId: 'node-entry',
+      });
+      expect(await repository.list()).toContainEqual(
+        expect.objectContaining({
+          canvasId: 'child',
+          parentSpaceId: 'parent',
+          parentEntryNodeId: 'node-entry',
+        }),
+      );
+      await repository.setParent({
+        canvasId: 'child',
+        parentSpaceId: null,
+        parentEntryNodeId: null,
+      });
+      expect((await read('child'))?.parentSpaceId ?? null).toBeNull();
+    });
+
     it('lists created ordinary Spaces without promising order', async () => {
       const { repository } = await open();
       const first = await repository.create({

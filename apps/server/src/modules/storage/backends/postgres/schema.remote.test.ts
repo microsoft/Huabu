@@ -134,7 +134,7 @@ it('enforces foreign keys, JSON, nonempty revisions, and unique labels in the da
   ).rejects.toMatchObject({ code: '23505' });
   await expect(
     db.query(
-      "INSERT INTO spaces SELECT 'second-world', workspace_id, title, 'different', version, state_json, created_at, updated_at, 1 FROM spaces WHERE is_world = 1",
+      "INSERT INTO spaces (canvas_id, workspace_id, title, collision_key, version, state_json, created_at, updated_at, is_world) SELECT 'second-world', workspace_id, title, 'different', version, state_json, created_at, updated_at, 1 FROM spaces WHERE is_world = 1",
     ),
   ).rejects.toMatchObject({ code: '23505' });
   expect((await db.query('SELECT node_id FROM nodes')).rows).toEqual([

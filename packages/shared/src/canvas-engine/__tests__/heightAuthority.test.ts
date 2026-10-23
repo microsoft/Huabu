@@ -40,6 +40,36 @@ function dataOf(nodes: CanvasNode[], id: string) {
   return nodes.find((n) => n.id === id)?.data as Record<string, unknown>;
 }
 
+describe("CREATE_NODES height: 'auto'", () => {
+  it.each([undefined, 'fixed', 'auto'] as const)(
+    'honors explicit auto size with supplied ownership %s',
+    (heightMode) => {
+      const { writeResult } = run(
+        [
+          {
+            type: 'CREATE_NODES',
+            nodes: [
+              {
+                nodeType: 'note',
+                position: { x: 0, y: 0 },
+                size: { width: 400, height: 'auto' },
+                data: {
+                  content: CONTENT,
+                  ...(heightMode ? { heightMode } : {}),
+                  autoHeight: { intrinsicHeight: 260, measuredFor: KEY },
+                },
+              },
+            ],
+          },
+        ],
+        [],
+      );
+      expect(writeResult.nodes[0].data.heightMode).toBe('auto');
+      expect(writeResult.nodes[0].style).toEqual({ width: 400, height: 264 });
+    },
+  );
+});
+
 describe("SET_NODE_GEOMETRY height: 'auto'", () => {
   it('materializes a numeric height instead of clearing it', () => {
     const { writeResult } = run(
@@ -66,12 +96,12 @@ describe("SET_NODE_GEOMETRY height: 'auto'", () => {
 
     expect(styleOf(writeResult.nodes, 'n1')).toEqual({
       width: 400,
-      height: 268,
+      height: 264,
     });
     expect(dataOf(writeResult.nodes, 'n1').heightMode).toBe('auto');
     // `getNodeSize` reads `measured` first, so the mirror must agree.
     expect(writeResult.nodes.find((n) => n.id === 'n1')?.measured?.height).toBe(
-      268,
+      264,
     );
   });
 
@@ -139,7 +169,7 @@ describe("SET_NODE_GEOMETRY height: 'auto'", () => {
       ],
       writeResult.nodes,
     ).writeResult;
-    expect(styleOf(settled.nodes, 'n1')?.height).toBe(128);
+    expect(styleOf(settled.nodes, 'n1')?.height).toBe(124);
     expect(readAutoHeightHint(settled.nodes[0]).freshness).toBe('current');
   });
 
@@ -197,9 +227,9 @@ describe('APPLY_MEASURED_HEIGHT', () => {
       ],
     );
 
-    expect(styleOf(writeResult.nodes, 'n1')?.height).toBe(268);
+    expect(styleOf(writeResult.nodes, 'n1')?.height).toBe(264);
     expect(writeResult.nodes.find((n) => n.id === 'n1')?.measured?.height).toBe(
-      268,
+      264,
     );
     expect(dataOf(writeResult.nodes, 'n1').autoHeight).toEqual({
       intrinsicHeight: 260,
@@ -291,7 +321,7 @@ describe('APPLY_MEASURED_HEIGHT', () => {
     );
 
     expect(dataOf(writeResult.nodes, 'n1').heightMode).toBe('auto');
-    expect(styleOf(writeResult.nodes, 'n1')?.height).toBe(268);
+    expect(styleOf(writeResult.nodes, 'n1')?.height).toBe(264);
   });
 
   it('reuses node references for an unchanged re-measurement', () => {

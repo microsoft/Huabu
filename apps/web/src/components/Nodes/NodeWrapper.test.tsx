@@ -177,7 +177,7 @@ describe('NodeWrapper radius contract', () => {
       const { shell, content } = render({ type });
       const inner =
         radius -
-        (type === 'image' || type === 'video' || type === 'sketch' ? 0 : 3);
+        (type === 'image' || type === 'video' || type === 'sketch' ? 0 : 2);
       expect(shell.style.borderRadius).toBe(`${radius}px`);
       expect(shell.style.getPropertyValue('--node-shell-radius')).toBe(
         `${radius}px`,
@@ -301,7 +301,7 @@ describe('NodeWrapper radius contract', () => {
         const { shell, content } = render({ type, borderRadius: radius });
         expect(shell.style.borderRadius).toBe(`${radius}px`);
         expect(content.style.borderRadius).toBe(
-          `${Math.max(0, radius - (type === 'image' || type === 'video' ? 0 : 3))}px`,
+          `${Math.max(0, radius - (type === 'image' || type === 'video' ? 0 : 2))}px`,
         );
       }
     },
@@ -329,12 +329,13 @@ describe('NodeWrapper radius contract', () => {
           'absolute',
           'inset-0',
           'pointer-events-none',
-          'border-3',
+          'border-solid',
           'border-[inherit]',
           'rounded-[inherit]',
           'z-1',
         ])
           expect(border?.classList.contains(name)).toBe(true);
+        expect(border?.style.borderWidth).toBe('2px');
         expect(border?.hasAttribute('data-node-image-border')).toBe(
           type === 'image',
         );
@@ -391,7 +392,7 @@ describe('NodeWrapper radius contract', () => {
                 ? '0px'
                 : type === 'image' || type === 'video'
                   ? '0px'
-                  : '3px',
+                  : '2px',
             );
           }
         }
@@ -426,7 +427,7 @@ describe('NodeWrapper radius contract', () => {
       expect(
         overview.style.getPropertyValue('--note-surface-background'),
       ).toContain('color-mix(');
-      expect(overview.style.borderWidth).toBe('3px');
+      expect(overview.style.borderWidth).toBe('2px');
       expect(overview.classList.contains('hover:shadow-sm')).toBe(false);
     },
   );
@@ -437,7 +438,7 @@ describe('NodeWrapper radius contract', () => {
       'transparent',
     );
     const { shell } = render({ type: 'sketch', data });
-    expect(shell.style.borderWidth).toBe('');
+    expect(shell.style.borderWidth).toBe('0px');
     expect(shell.classList.contains('border-3')).toBe(false);
   });
 
@@ -470,7 +471,7 @@ describe('NodeWrapper radius contract', () => {
     );
     expect(shell.style.borderColor).toBe('');
     expect(shell.classList.contains('border-transparent')).toBe(true);
-    expect(shell.classList.contains('border-3')).toBe(true);
+    expect(shell.style.borderWidth).toBe('2px');
     expect(shell.classList.contains('hover:ring')).toBe(false);
     expect(shell.classList.contains('hover:shadow-sm')).toBe(false);
   });

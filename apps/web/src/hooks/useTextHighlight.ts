@@ -27,10 +27,11 @@
 
 import { useEffect, useState } from 'react';
 
-import { findRanges } from './searchDom';
+import { countMatches, findNthRange, findRanges } from './searchDom';
 
 /** Global registered highlight name. CSS selector: `::highlight(huabu-search)`. */
 const HIGHLIGHT_NAME = 'huabu-search';
+const surfaceRanges = new Map<symbol, Range[]>();
 
 interface UseTextHighlightOptions {
   /**
@@ -39,25 +40,27 @@ interface UseTextHighlightOptions {
    * `::highlight()` registration — used when the canvas-wide search
    * needs to paint matches on both the canvas root and the expanded
    * preview panel at the same time. `null` (or an array of only
-   * `null`s) clears the highlight set.
+   * `null`s) removes this surface's ranges without clearing other surfaces.
    */
   container: HTMLElement | (HTMLElement | null)[] | null;
   /** Needle. Empty string clears the highlight set. */
   query: string;
   /** Soft cap on Range objects we'll register (across all containers). */
   maxRanges?: number;
+  /** Keep the navigated occurrence painted even when it lies beyond the cap. */
+  activeMatchIndex?: number;
+  activeRange?: Range | null;
+  getActiveRange?: () => Range | null;
 }
 
 export interface UseTextHighlightResult {
   /**
-   * Current number of registered match ranges. Updates whenever the
+   * Total searchable occurrences, independent of the highlight cap. Updates whenever the
    * MutationObserver re-walks the container, so consumers showing a
    * `1/N` counter stay in sync with text that mounts asynchronously
    * (pdf.js text layer, Milkdown lazy editor, virtualised lists).
    *
-   * Capped by `maxRanges` — when the underlying document has more
-   * matches than the cap, this number reflects what was registered,
-   * not the true total.
+   * `maxRanges` bounds painted Range objects, not the navigation count.
    */
   matchCount: number;
 }
@@ -87,6 +90,9 @@ export function useTextHighlight({
   container,
   query,
   maxRanges = 500,
+  activeMatchIndex,
+  activeRange: selectedRange,
+  getActiveRange,
 }: UseTextHighlightOptions): UseTextHighlightResult {
   const [matchCount, setMatchCount] = useState(0);
 
@@ -110,6 +116,10 @@ export function useTextHighlight({
   // Cheaper than a `useMemo` + array-equality check, and avoids the
   // pitfall of `[a, b]` deps being a fresh array each render.
   const depKey = liveContainers.map(elementId).join('|');
+  const outlyingMatchIndex =
+    activeMatchIndex !== undefined && activeMatchIndex >= maxRanges
+      ? activeMatchIndex
+      : null;
 
   useEffect(() => {
     const HighlightCtor: typeof Highlight | undefined = (
@@ -122,47 +132,69 @@ export function useTextHighlight({
     // No-container / no-query / no-API → make sure count is zeroed
     // even when the API isn't available (jsdom in tests).
     if (liveContainers.length === 0 || !query) {
-      highlights?.delete(HIGHLIGHT_NAME);
       setMatchCount(0);
       return;
     }
-    if (!HighlightCtor || !highlights) {
-      // API unavailable — still surface a count so the find bar can
-      // advance, since the fallback `findNthRange` walk uses the same
-      // DOM independently of the registered highlight.
-      let initial = 0;
-      for (const c of liveContainers) {
-        initial += findRanges(c, query, maxRanges - initial).length;
-        if (initial >= maxRanges) break;
-      }
-      setMatchCount(initial);
-      return;
-    }
+    const surface = Symbol('search-surface');
+    const publish = (): void => {
+      if (!HighlightCtor || !highlights) return;
+      const ranges = Array.from(surfaceRanges.values()).flat();
+      if (ranges.length === 0) highlights.delete(HIGHLIGHT_NAME);
+      else highlights.set(HIGHLIGHT_NAME, new HighlightCtor(...ranges));
+    };
 
     const apply = (): void => {
       const ranges: Range[] = [];
+      let count = 0;
+      const candidate = getActiveRange?.() ?? selectedRange;
+      let activeRange =
+        candidate &&
+        !candidate.collapsed &&
+        liveContainers.some(
+          (container) =>
+            container.contains(candidate.startContainer) &&
+            container.contains(candidate.endContainer),
+        )
+          ? candidate
+          : null;
       for (const c of liveContainers) {
+        const containerCount = countMatches(c, query);
+        if (
+          HighlightCtor &&
+          highlights &&
+          !activeRange &&
+          outlyingMatchIndex !== null &&
+          outlyingMatchIndex >= count &&
+          outlyingMatchIndex < count + containerCount
+        ) {
+          activeRange = findNthRange(c, query, outlyingMatchIndex - count);
+        }
+        count += containerCount;
         const remaining = maxRanges - ranges.length;
-        if (remaining <= 0) break;
+        if (remaining <= 0 || !HighlightCtor || !highlights) continue;
         // `findRanges` checks `document.contains` implicitly via
         // `createTreeWalker`; a container that detached between
         // renders just yields zero ranges.
         ranges.push(...findRanges(c, query, remaining));
       }
+      if (
+        activeRange &&
+        !ranges.some(
+          (range) =>
+            range.startContainer === activeRange.startContainer &&
+            range.startOffset === activeRange.startOffset &&
+            range.endContainer === activeRange.endContainer &&
+            range.endOffset === activeRange.endOffset,
+        )
+      ) {
+        if (ranges.length < maxRanges) ranges.push(activeRange);
+        else if (ranges.length) ranges[ranges.length - 1] = activeRange;
+      }
       // Only update state when the count actually changes — avoids
       // a render storm during pdf.js's per-page text-layer mounts.
-      setMatchCount((prev) => (prev === ranges.length ? prev : ranges.length));
-      if (ranges.length === 0) {
-        highlights.delete(HIGHLIGHT_NAME);
-        return;
-      }
-      // Highlight constructor accepts an iterable of Range.
-      highlights.set(
-        HIGHLIGHT_NAME,
-        new HighlightCtor(
-          ...(ranges as unknown as ConstructorParameters<typeof Highlight>),
-        ),
-      );
+      setMatchCount((prev) => (prev === count ? prev : count));
+      if (HighlightCtor && highlights) surfaceRanges.set(surface, ranges);
+      publish();
     };
 
     apply();
@@ -198,13 +230,21 @@ export function useTextHighlight({
     return () => {
       if (scheduled) cancelAnimationFrame(scheduled);
       for (const o of observers) o.disconnect();
-      highlights.delete(HIGHLIGHT_NAME);
+      surfaceRanges.delete(surface);
+      publish();
     };
     // `liveContainers` is rebuilt every render but `depKey` collapses
     // it into a primitive identity string, so the effect only re-runs
     // when an actual element comes/goes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [depKey, query, maxRanges]);
+  }, [
+    depKey,
+    query,
+    maxRanges,
+    outlyingMatchIndex,
+    selectedRange,
+    getActiveRange,
+  ]);
 
   return { matchCount };
 }

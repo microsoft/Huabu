@@ -33,6 +33,35 @@ function keydown(init: {
 }
 
 describe('matches', () => {
+  it('uses Mod+Alt+S for Space collection without claiming save, select, or the former Drive-conflicting combo', () => {
+    const combo = getCombo('layer.collectSpace');
+    expect(combo).toEqual({ mod: true, alt: true, key: 's', code: 'KeyS' });
+    if (!combo) throw new Error('Missing collection shortcut');
+    expect(
+      matches(keydown({ key: 's', ctrlKey: true, altKey: true }), combo),
+    ).toBe(true);
+    expect(
+      matches(
+        keydown({ key: 'ß', code: 'KeyS', metaKey: true, altKey: true }),
+        combo,
+      ),
+    ).toBe(true);
+    expect(matches(keydown({ key: 's', metaKey: true }), combo)).toBe(false);
+    expect(matches(keydown({ key: 's' }), combo)).toBe(false);
+    expect(
+      matches(
+        keydown({ key: 'g', code: 'KeyG', metaKey: true, altKey: true }),
+        combo,
+      ),
+    ).toBe(false);
+  });
+  it('assigns 5 to child Space creation rather than the disabled audio tool', () => {
+    expect(getCombo('mode.childSpace')).toEqual({ key: '5' });
+    expect(
+      SHORTCUTS.find((item) => item.id === 'mode.childSpace')?.descriptionKey,
+    ).toBe('spaceHierarchy.createChild');
+    expect(SHORTCUTS.some((item) => item.id === 'mode.audio')).toBe(false);
+  });
   it('matches a mod+key combo, case-insensitively and via Cmd or Ctrl', () => {
     const combo: KeyCombo = { mod: true, key: 'z' };
     expect(matches(keydown({ key: 'z', metaKey: true }), combo)).toBe(true);

@@ -37,14 +37,15 @@ export interface NodeSize {
 }
 
 /**
- * Size accepted by `SET_NODE_GEOMETRY`.
+ * Size accepted by `CREATE_NODES` and `SET_NODE_GEOMETRY`.
  *
  * Widens {@link NodeSize} with `'auto'`, the explicit spelling of "hand
  * the height back to the renderer". It is not "unset": the engine records
  * `data.heightMode = 'auto'` and immediately materializes a concrete
  * number from the node's stored measurement hint, so `style.height` stays
- * usable for a node that has never rendered. Omitting `height` means the
- * same thing and is kept as a synonym for existing callers.
+ * usable for a node that has never rendered. For creation, omitting
+ * `height` retains the type's default unless auto ownership is supplied.
+ * Geometry edits retain their existing omitted-height semantics.
  *
  * Deliberately separate from {@link NodeSize}, which also describes stored
  * and default geometry where a non-numeric height would be meaningless.
@@ -86,7 +87,7 @@ type CanvasNodeCreateInputByType<T extends CanvasNodeType> = {
    * `space_commands` schema.
    */
   position: Point;
-  size?: NodeSize;
+  size?: NodeGeometrySize;
   parentId?: CanvasNodeId | null;
   /**
    * UI-only creation hint controlling create-time selection (honoured

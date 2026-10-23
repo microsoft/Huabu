@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-/** Proportional Text/Question content scaling for Frame and selection resize. */
+/** Proportional Text/Question/Space content scaling for Frame and selection resize. */
 
 import { getNodeSize } from '@huabu/shared/canvas-engine';
 
@@ -21,11 +21,16 @@ export interface NodeFontFit {
 }
 
 /**
- * Capture Text/Question content scale. Question's font controls its full card,
- * not only the title. Other types, including Note, retain their own policies.
+ * Capture Text/Question/Space content scale. Card fonts control their full
+ * content, not only the title. Other types, including Note, retain their own policies.
  */
 export function getNodeFontFit(node: Node): NodeFontFit | null {
-  if (node.type !== 'text' && node.type !== 'question') return null;
+  if (
+    node.type !== 'text' &&
+    node.type !== 'question' &&
+    node.type !== 'spacePreview'
+  )
+    return null;
   const data = (node.data ?? {}) as {
     style?: { fontSize?: unknown };
   };
@@ -34,7 +39,7 @@ export function getNodeFontFit(node: Node): NodeFontFit | null {
     fontSize:
       typeof fontSize === 'number' && Number.isFinite(fontSize) && fontSize > 0
         ? fontSize
-        : node.type === 'question'
+        : node.type !== 'text'
           ? QUESTION_NODE_DEFAULT_FONT_SIZE
           : 16,
     width: getNodeSize(node).width,

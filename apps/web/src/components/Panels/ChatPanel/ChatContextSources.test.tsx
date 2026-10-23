@@ -24,7 +24,7 @@ import type { ChatSession } from '@/hooks/useChatSession';
 import type { ChatAttachment } from '@huabu/shared';
 import type { Node } from '@xyflow/react';
 
-vi.mock('@/components/Common/NodeRef', () => ({
+vi.mock('@/components/Nodes/NodeRef/NodeRef', () => ({
   NodeRef: ({ nodeId }: { nodeId: string }) => <span>{nodeId}</span>,
 }));
 

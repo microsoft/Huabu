@@ -31,7 +31,7 @@ function child(): Node {
 }
 
 describe('normalizeFrameHeaderInsets', () => {
-  it('converges after expanding across a responsive boundary', () => {
+  it('converges after reserving the fixed header in a wide Frame', () => {
     const nodes = [
       {
         ...frame(),
@@ -41,9 +41,9 @@ describe('normalizeFrameHeaderInsets', () => {
       { ...child(), position: { x: 20, y: 20 } },
     ];
     const result = normalizeFrameHeaderInsets(nodes);
-    expect(result[0].style?.height).toBe(876);
-    expect(result[0].position.y).toBe(24);
-    expect(result[1].position.y).toBe(96);
+    expect(result[0].style?.height).toBe(844);
+    expect(result[0].position.y).toBe(56);
+    expect(result[1].position.y).toBe(64);
     expect(normalizeFrameHeaderInsets(result)).toBe(result);
   });
 

@@ -121,6 +121,14 @@ export interface SqliteMigration {
 
 export const SQLITE_MIGRATIONS: readonly SqliteMigration[] = Object.freeze([
   Object.freeze({ version: 1, sql: SCHEMA_V1 }),
+  Object.freeze({
+    version: 2,
+    sql: `
+      ALTER TABLE spaces ADD COLUMN parent_space_id TEXT;
+      ALTER TABLE spaces ADD COLUMN parent_entry_node_id TEXT;
+      CREATE INDEX spaces_by_parent ON spaces(workspace_id, parent_space_id);
+    `,
+  }),
 ]);
 
 export const SQLITE_SCHEMA_VERSION =

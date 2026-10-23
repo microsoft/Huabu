@@ -12,7 +12,7 @@ import {
 } from '../design.js';
 
 describe('Frame design config', () => {
-  it('keeps the public scale explicit and configurable', () => {
+  it('keeps width tiers for appearance, separate from fixed density', () => {
     expect(FRAME_LAYOUT_CONFIG.tiers).toMatchObject([
       { id: 'compact', maxWidth: 900 },
       { id: 'regular', maxWidth: 1800 },
@@ -40,36 +40,36 @@ describe('Frame design config', () => {
       1380,
       876,
       {
-        headerInset: 96,
-        contentSpacing: 28,
+        headerInset: 64,
+        contentSpacing: 20,
       },
     ],
     [
       2400,
       1800,
       {
-        headerInset: 152,
-        contentSpacing: 40,
+        headerInset: 64,
+        contentSpacing: 20,
       },
     ],
   ])(
-    'selects responsive tokens for a %spx by %spx Frame',
+    'uses fixed density for a %spx by %spx Frame',
     (width, height, expected) => {
       expect(frameResponsiveMetricsForSize(width, height)).toEqual(expected);
     },
   );
 
-  it('uses the regular configuration when dimensions are unavailable', () => {
+  it('uses fixed density when dimensions are unavailable', () => {
     expect(frameResponsiveMetricsForSize(0, 0)).toEqual({
-      headerInset: 96,
-      contentSpacing: 28,
+      headerInset: 64,
+      contentSpacing: 20,
     });
   });
 
-  it('resolves a Hug Frame tier from its final content-driven box', () => {
+  it('uses the same density for a content-driven Hug Frame', () => {
     expect(frameResponsiveMetricsForContentSize(1000, 650)).toEqual({
-      headerInset: 96,
-      contentSpacing: 28,
+      headerInset: 64,
+      contentSpacing: 20,
     });
   });
 
@@ -86,13 +86,16 @@ describe('Frame design config', () => {
 
   it.each([
     [899, 64, 20],
-    [900, 96, 28],
-    [1799, 96, 28],
-    [1800, 152, 40],
-  ])('uses width boundaries at %s', (width, headerInset, contentSpacing) => {
-    expect(frameResponsiveMetricsForSize(width, 600)).toEqual({
-      headerInset,
-      contentSpacing,
-    });
-  });
+    [900, 64, 20],
+    [1799, 64, 20],
+    [1800, 64, 20],
+  ])(
+    'keeps density stable across width %s',
+    (width, headerInset, contentSpacing) => {
+      expect(frameResponsiveMetricsForSize(width, 600)).toEqual({
+        headerInset,
+        contentSpacing,
+      });
+    },
+  );
 });

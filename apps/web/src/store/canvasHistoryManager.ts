@@ -323,9 +323,15 @@ class CanvasHistoryManager {
    * The current state is pushed to the redo stack.
    * Returns `null` if there is nothing to undo.
    */
-  undo(currentNodes: Node[], currentEdges: Edge[]): CanvasSnapshot | null {
-    const snapshot = this.undoStack.pop();
+  undo(
+    currentNodes: Node[],
+    currentEdges: Edge[],
+    canRestore?: (snapshot: CanvasSnapshot) => boolean,
+  ): CanvasSnapshot | null {
+    const snapshot = this.undoStack.at(-1);
     if (!snapshot) return null;
+    if (canRestore && !canRestore(snapshot)) return null;
+    this.undoStack.pop();
 
     this.redoStack.push(createSnapshot(currentNodes, currentEdges));
     const topology = stripLegacyPortalTopology(snapshot.nodes, snapshot.edges);
@@ -343,9 +349,15 @@ class CanvasHistoryManager {
    * The current state is pushed to the undo stack.
    * Returns `null` if there is nothing to redo.
    */
-  redo(currentNodes: Node[], currentEdges: Edge[]): CanvasSnapshot | null {
-    const snapshot = this.redoStack.pop();
+  redo(
+    currentNodes: Node[],
+    currentEdges: Edge[],
+    canRestore?: (snapshot: CanvasSnapshot) => boolean,
+  ): CanvasSnapshot | null {
+    const snapshot = this.redoStack.at(-1);
     if (!snapshot) return null;
+    if (canRestore && !canRestore(snapshot)) return null;
+    this.redoStack.pop();
 
     this.undoStack.push(createSnapshot(currentNodes, currentEdges));
     const topology = stripLegacyPortalTopology(snapshot.nodes, snapshot.edges);
@@ -505,12 +517,20 @@ export class CanvasHistoryRegistry {
     this.managers.get(canvasId)?.discardNodes(nodeIds);
   }
 
-  undo(nodes: Node[], edges: Edge[]): CanvasSnapshot | null {
-    return this.active.undo(nodes, edges);
+  undo(
+    nodes: Node[],
+    edges: Edge[],
+    canRestore?: (snapshot: CanvasSnapshot) => boolean,
+  ): CanvasSnapshot | null {
+    return this.active.undo(nodes, edges, canRestore);
   }
 
-  redo(nodes: Node[], edges: Edge[]): CanvasSnapshot | null {
-    return this.active.redo(nodes, edges);
+  redo(
+    nodes: Node[],
+    edges: Edge[],
+    canRestore?: (snapshot: CanvasSnapshot) => boolean,
+  ): CanvasSnapshot | null {
+    return this.active.redo(nodes, edges, canRestore);
   }
 
   clear(): void {

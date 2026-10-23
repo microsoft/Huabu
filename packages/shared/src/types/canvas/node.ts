@@ -671,7 +671,7 @@ export interface FrameNodeData extends BaseNodeData {
 export interface SpacePreviewNodeData extends BaseNodeData {
   type: 'spacePreview';
   targetCanvasId: string;
-  /** Missing on legacy previews, which retain a bounded fixed width. */
+  /** Legacy compatibility field; all widths are fixed, including old 'auto' values. */
   widthMode?: 'auto' | 'fixed';
 }
 
@@ -753,6 +753,8 @@ export interface QuestionNodeData extends BaseNodeData {
   bindingState?: AgentNodeBindingState;
   /** Server-owned identity of the current or most recent admitted prompt. */
   invocationToken?: string;
+  /** Latest durable turn-start or terminal event timestamp, projected by the server. */
+  lastActivityAt?: number;
   /**
    * The user's prompt. Persisted into the markdown sidecar body just
    * like text/note/web bodies (see `TEXT_BEARING_NODE_TYPES`) so a

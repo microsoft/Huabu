@@ -262,6 +262,12 @@ export async function renderTurn(
   if (inkRecognitionSection) {
     parts.push({ type: 'text', text: inkRecognitionSection });
   }
+  if (isInkIntent && env.focus.selection.inkGeometry?.length) {
+    parts.push({
+      type: 'text',
+      text: `<ink_query_geometry>\nSelected stroke bounds in absolute Canvas coordinates, captured with this turn's Ink image. These locate this query, not the conversation's Agent Node or all strokes in a Sketch. Inspect current geometry and nearby obstacles before placing the response.\n${escapeXmlText(JSON.stringify(env.focus.selection.inkGeometry))}\n</ink_query_geometry>`,
+    });
+  }
   if (resources?.bindings.length) {
     parts.push({
       type: 'text',

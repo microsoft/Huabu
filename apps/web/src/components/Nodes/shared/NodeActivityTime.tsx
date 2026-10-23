@@ -5,7 +5,7 @@ import { useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { Tooltip } from '@/components/Common/Tooltip';
-import { NODE_TYPOGRAPHY } from '@/components/Nodes/design/nodeTypography';
+import { SPACE_CARD_TYPOGRAPHY } from '@/components/Nodes/design/nodeTypography';
 
 let now = Date.now();
 let timer: ReturnType<typeof setInterval> | undefined;
@@ -29,20 +29,21 @@ function subscribe(listener: () => void) {
   };
 }
 
-export function SpaceShortcutSummary({
-  nodeCount,
+export function NodeActivityTime({
   updatedAt,
+  kind = 'space',
+  scale = 1,
 }: {
-  nodeCount?: number;
   updatedAt?: number;
+  kind?: 'space' | 'conversation';
+  scale?: number;
 }) {
   const { t, i18n } = useTranslation();
   const currentTime = useSyncExternalStore(subscribe, getNow, getNow);
-  const count =
-    nodeCount === undefined
-      ? ''
-      : t('spacePreview.nodeCount', { count: nodeCount });
-  const date = updatedAt && updatedAt > 0 ? new Date(updatedAt) : null;
+  const date =
+    updatedAt && updatedAt > 0 && Number.isFinite(new Date(updatedAt).getTime())
+      ? new Date(updatedAt)
+      : null;
   const elapsed = date ? Math.max(0, currentTime - date.getTime()) : 0;
   const unit =
     elapsed < 3_600_000 ? 'minute' : elapsed < 86_400_000 ? 'hour' : 'day';
@@ -50,35 +51,43 @@ export function SpaceShortcutSummary({
     unit === 'minute' ? 60_000 : unit === 'hour' ? 3_600_000 : 86_400_000;
   const relative = date
     ? elapsed < 60_000
-      ? t('spacePreview.updatedNow')
-      : t('spacePreview.updatedRelative', {
-          time: new Intl.RelativeTimeFormat(i18n.language, {
-            numeric: 'always',
-          }).format(-Math.floor(elapsed / divisor), unit),
-        })
+      ? t('spacePreview.timeNow')
+      : new Intl.RelativeTimeFormat(i18n.language, {
+          numeric: 'always',
+          style: 'narrow',
+        }).format(-Math.floor(elapsed / divisor), unit)
     : '';
-  const text = [count, relative].filter(Boolean).join(' · ');
+  const text = relative;
   const detail = [
-    count,
     date
-      ? t('spacePreview.updatedRelative', {
-          time: date.toLocaleString(i18n.language),
-        })
+      ? t(
+          kind === 'space'
+            ? 'spacePreview.updatedRelative'
+            : 'node.questionCard.lastActivity',
+          {
+            time: date.toLocaleString(i18n.language),
+          },
+        )
       : '',
   ]
     .filter(Boolean)
     .join(' · ');
   if (!text) return null;
   return (
-    <Tooltip content={detail} wrapperClassName="block min-w-0">
+    <Tooltip
+      content={detail}
+      wrapperClassName="ml-auto block min-w-0 max-w-[50%] shrink-0 self-center"
+    >
       <span
-        className="text-fg-muted block truncate"
-        data-space-shortcut-summary
+        className="text-fg-muted block truncate text-right font-normal"
+        data-space-shortcut-summary={kind === 'space' ? '' : undefined}
+        data-conversation-activity-time={
+          kind === 'conversation' ? '' : undefined
+        }
         aria-label={detail}
         style={{
-          fontSize: NODE_TYPOGRAPHY.metadata.size,
-          lineHeight: NODE_TYPOGRAPHY.metadata.lineHeight,
-          fontWeight: 400,
+          fontSize: SPACE_CARD_TYPOGRAPHY.metadata.size * scale,
+          lineHeight: SPACE_CARD_TYPOGRAPHY.metadata.lineHeight,
         }}
       >
         {text}

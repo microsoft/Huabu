@@ -49,6 +49,7 @@ type SplitSelectProps<T extends string = string> = {
   align?: 'bottom-left' | 'bottom-right' | 'top-left' | 'top-right';
   iconOnly?: boolean;
   primaryTitle?: string;
+  primaryPressed?: boolean;
   menuTitle?: string;
   /**
    * Optional single-character keyboard hint rendered as a tiny subscript
@@ -104,6 +105,7 @@ export function SplitSelect<T extends string = string>({
   align = 'bottom-left',
   iconOnly = false,
   primaryTitle,
+  primaryPressed,
   menuTitle,
   primaryShortcutBadge,
   primaryShortcutBadgeActive,
@@ -182,6 +184,7 @@ export function SplitSelect<T extends string = string>({
           disabled={disabled}
           onClick={handlePrimaryAction}
           title={primaryTitle}
+          aria-pressed={primaryPressed}
           aria-label={
             iconOnly
               ? (primaryTitle ??

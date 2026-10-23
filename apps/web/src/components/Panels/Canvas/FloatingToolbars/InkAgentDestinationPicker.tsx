@@ -2,7 +2,7 @@
 // Licensed under the MIT license.
 
 import { AlertCircle, ChevronDown, UserRound } from 'lucide-react';
-import { useId, useRef, useState } from 'react';
+import { useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { AgentAvatarMark } from '@/components/Common/AgentAvatarMark';
@@ -13,6 +13,11 @@ import {
   DropdownMenuItem,
 } from '@/components/Common/DropdownMenu';
 import { FLOATING_CHROME_PROPS } from '@/components/Common/floatingChrome';
+import {
+  MENU_GROUP_CLASS,
+  MENU_SECTION_LABEL_CLASS,
+  MENU_SEPARATOR_CLASS,
+} from '@/components/Common/menuStyles';
 import {
   AgentMenuOptions,
   type AgentChoice,
@@ -79,9 +84,6 @@ export function InkAgentDestinationPicker({
   const { t } = useTranslation();
   const id = useId();
   const [open, setOpen] = useState(false);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const keyboardOpen = useRef<'first' | 'last' | null>(null);
   const continuing = selectedNodeId !== undefined;
   const selected = conversations.find(
     (conversation) => conversation.nodeId === selectedNodeId,
@@ -129,23 +131,10 @@ export function InkAgentDestinationPicker({
         ? t('toolbar.inkAgentPicker.newDestinationLabel', { agent: agentName })
         : t('toolbar.inkAgentPicker.chooseAgent');
 
-  function focusMenu(edge: 'first' | 'last') {
-    const items = menuRef.current?.querySelectorAll<HTMLButtonElement>(
-      '[role="menuitem"]:not(:disabled)',
-    );
-    const item = edge === 'last' ? items?.[items.length - 1] : items?.[0];
-    (item ?? menuRef.current)?.focus({ preventScroll: true });
-  }
-
   function handleOpenChange(next: boolean) {
     if (next && disabled) return;
     setOpen(next);
     if (next && !open) void onRefreshProfiles();
-  }
-
-  function closeAfterChoice() {
-    setOpen(false);
-    triggerRef.current?.focus({ preventScroll: true });
   }
 
   return (
@@ -163,44 +152,26 @@ export function InkAgentDestinationPicker({
     >
       {/* Coordinate positioning clamps vertically even when neither side fits. */}
       <DropdownMenu
+        aria-label={t('toolbar.inkAgentPicker.menuLabel')}
         align="bottom-right"
         // Clear the trigger's 7px toolbar inset, then leave an 8px surface gap.
         offset={{ x: 0, y: 15 }}
         open={open}
         onOpenChange={handleOpenChange}
-        onOpenAutoFocus={() => {
-          focusMenu(keyboardOpen.current ?? 'first');
-        }}
         className="w-80 max-w-[calc(100vw-24px)]"
         trigger={
           <Button
-            ref={triggerRef}
             variant="ghost"
             size="sm"
             disabled={disabled}
             aria-haspopup="menu"
-            aria-controls={open ? `${id}-menu` : undefined}
             aria-label={accessibleLabel}
             aria-describedby={reason ? `${id}-reason` : undefined}
             data-popover-dismiss-ignore=""
             title={t('toolbar.inkAgentPicker.chooseSession')}
             className="ink-agent-destination-trigger max-w-[min(15rem,45vw)] min-w-0"
             onPointerDown={(event) => {
-              keyboardOpen.current = null;
               event.stopPropagation();
-            }}
-            onKeyDown={(event) => {
-              if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-                event.preventDefault();
-                event.stopPropagation();
-                keyboardOpen.current =
-                  event.key === 'ArrowUp' ? 'last' : 'first';
-                if (open) focusMenu(keyboardOpen.current);
-                else handleOpenChange(true);
-              } else if (event.key === 'Enter' || event.key === ' ') {
-                event.stopPropagation();
-                keyboardOpen.current = 'first';
-              }
             }}
           >
             <span className="shrink-0" aria-hidden>
@@ -212,7 +183,7 @@ export function InkAgentDestinationPicker({
             </span>
             <span className="min-w-0 truncate">{label}</span>
             {(agent || continuing) && (
-              <span className="text-fg-subtle shrink-0 text-[10px]">
+              <span className="text-fg-muted shrink-0 text-xs">
                 {t(
                   continuing
                     ? 'toolbar.inkAgentPicker.continue'
@@ -227,49 +198,7 @@ export function InkAgentDestinationPicker({
           </Button>
         }
       >
-        <div
-          ref={menuRef}
-          id={`${id}-menu`}
-          role="menu"
-          tabIndex={-1}
-          aria-label={t('toolbar.inkAgentPicker.menuLabel')}
-          className="max-h-[min(24rem,calc(100dvh-40px))] overflow-y-auto overscroll-contain"
-          onKeyDown={(event) => {
-            event.stopPropagation();
-            if (event.key === 'Tab') {
-              setOpen(false);
-              triggerRef.current?.focus({ preventScroll: true });
-              return;
-            }
-            if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key))
-              return;
-            event.preventDefault();
-            const items = [
-              ...event.currentTarget.querySelectorAll<HTMLButtonElement>(
-                '[role="menuitem"]:not(:disabled)',
-              ),
-            ];
-            if (!items.length) return;
-            const index = items.findIndex(
-              (item) => item === document.activeElement,
-            );
-            const next =
-              event.key === 'Home'
-                ? 0
-                : event.key === 'End'
-                  ? items.length - 1
-                  : index < 0
-                    ? event.key === 'ArrowUp'
-                      ? items.length - 1
-                      : 0
-                    : (index +
-                        (event.key === 'ArrowDown' ? 1 : -1) +
-                        items.length) %
-                      items.length;
-            items[next]?.focus({ preventScroll: true });
-            items[next]?.scrollIntoView({ block: 'nearest' });
-          }}
-        >
+        <div>
           {reason && (
             <p
               role="status"
@@ -282,11 +211,12 @@ export function InkAgentDestinationPicker({
             </p>
           )}
           {conversations.length > 0 && (
-            <div role="group" aria-labelledby={`${id}-continue`}>
-              <div
-                id={`${id}-continue`}
-                className="text-fg-muted px-3 pt-1.5 pb-1 text-[10px] tracking-wider uppercase"
-              >
+            <div
+              role="group"
+              aria-labelledby={`${id}-continue`}
+              className={MENU_GROUP_CLASS}
+            >
+              <div id={`${id}-continue`} className={MENU_SECTION_LABEL_CLASS}>
                 {t('toolbar.inkAgentPicker.continueCanvas')}
               </div>
               {conversations.map((conversation) => {
@@ -325,7 +255,7 @@ export function InkAgentDestinationPicker({
                     onClick={() => {
                       if (disabled || conversation.disabledReason) return;
                       onContinueConversation(conversation.nodeId);
-                      closeAfterChoice();
+                      setOpen(false);
                     }}
                   >
                     <span className="block truncate">{conversation.title}</span>
@@ -342,17 +272,19 @@ export function InkAgentDestinationPicker({
               })}
             </div>
           )}
+          {conversations.length > 0 && (
+            <div
+              role="separator"
+              className={cn(MENU_SEPARATOR_CLASS, 'my-2')}
+            />
+          )}
           <div
             role="group"
             aria-label={t('toolbar.inkAgentPicker.newConversation')}
-            className={cn(
-              '[&_[role=menuitem]>span:nth-child(2)]:min-w-0 [&_[role=menuitem]>span:nth-child(2)]:shrink [&_[role=menuitem]>span:nth-child(2)]:truncate',
-              conversations.length > 0 && 'border-edge-default mt-1 border-t',
-            )}
+            className="[&_[role=menuitem]>span:nth-child(2)]:min-w-0 [&_[role=menuitem]>span:nth-child(2)]:shrink [&_[role=menuitem]>span:nth-child(2)]:truncate"
           >
             <AgentMenuOptions
               heading={t('toolbar.inkAgentPicker.newConversation')}
-              externalHeadingStyle="subheading"
               currentBinding={
                 continuing
                   ? NO_CURRENT_BINDING
@@ -360,11 +292,13 @@ export function InkAgentDestinationPicker({
               }
               currentMode={mode}
               profiles={profiles}
+              builtInModes={['operate']}
+              externalGroup="nested"
               busy={disabled}
               onSelect={(choice) => {
                 if (disabled) return;
                 onNewConversation(choice);
-                closeAfterChoice();
+                setOpen(false);
               }}
             />
           </div>

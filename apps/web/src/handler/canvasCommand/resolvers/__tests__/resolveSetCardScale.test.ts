@@ -12,7 +12,7 @@ import { getNodeFontFit } from '@/utils/node/fontFit';
 import { QUESTION_NODE_DEFAULT_FONT_SIZE } from '@/utils/node/nodeFontConfig';
 
 import { resolveUiIntent } from '../../uiIntent';
-import { QUESTION_CARD_SCALE_RANGE } from '../resolveSetQuestionCardScale';
+import { CARD_SCALE_RANGE } from '../resolveSetCardScale';
 
 import type { Node } from '@xyflow/react';
 
@@ -32,7 +32,7 @@ function question(extra: Partial<Node> = {}): Node {
 
 function resolve(node: Node | undefined, percent: number) {
   return resolveUiIntent(
-    { type: 'SET_QUESTION_CARD_SCALE', nodeId: 'node-question', percent },
+    { type: 'SET_CARD_SCALE', nodeId: 'node-question', percent },
     { nodes: node ? [node] : [], edges: [] },
   );
 }
@@ -56,14 +56,35 @@ function expectScale(node: Node, percent: number) {
   expect(result.trace).toEqual([
     {
       action: 'node_edited',
-      node: { id: node.id, type: 'question', label: 'Question' },
+      node: { id: node.id, type: node.type, label: 'Question' },
     },
   ]);
   expect(node).toEqual(before);
   return result;
 }
 
-describe('SET_QUESTION_CARD_SCALE resolver', () => {
+describe('SET_CARD_SCALE resolver', () => {
+  it.each([10, 50, 125, 200])(
+    'scales Space geometry and content together at %s percent',
+    (percent) => {
+      const node = question({
+        type: 'spacePreview',
+        style: { width: 360 },
+        data: { label: 'Question', targetCanvasId: 'target' },
+      });
+      const resolution = expectScale(node, percent);
+      const result = executeCanvasCommands(
+        { commands: resolution.commands },
+        { canvasId: 'space-scale-test', nodes: [node], edges: [] },
+      );
+      const scaled = result.writeResult.nodes[0];
+      expect(scaled.style?.width).toBe((360 * percent) / 100);
+      expect(scaled.style?.height).toBeUndefined();
+      expect(scaled.data.style).toMatchObject({
+        fontSize: (24 * percent) / 100,
+      });
+    },
+  );
   it('uses the default title font when no override exists', () => {
     expectScale(question(), 200);
   });
@@ -127,7 +148,7 @@ describe('SET_QUESTION_CARD_SCALE resolver', () => {
   );
 
   it('exports the same inclusive limits used by the resolver', () => {
-    expect(QUESTION_CARD_SCALE_RANGE).toEqual({ min: 10, max: 1000 });
+    expect(CARD_SCALE_RANGE).toEqual({ min: 10, max: 1000 });
   });
 
   it.each(['text', 'note', 'frame', undefined])(

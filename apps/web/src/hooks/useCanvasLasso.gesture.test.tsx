@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { resetCanvasGestureForTests } from '@/handler/canvasGestureSession';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
+import { useWorkspaceStore } from '@/store/workspaceStore';
 
 import { createAreaSelectionSession } from './areaSelectionSession';
 import { useCanvasLasso } from './useCanvasLasso';
@@ -177,6 +178,7 @@ beforeEach(() => {
   resetCanvasGestureForTests();
   vi.clearAllMocks();
   mocks.canvasId = 'canvas';
+  useWorkspaceStore.setState({ worldCanvasId: null, spaceSummaries: {} });
   mocks.flowState = { userSelectionActive: false, nodesSelectionActive: true };
   mocks.nodes = [
     {
@@ -427,6 +429,38 @@ describe('lasso shared selection lifecycle', () => {
     expect(selected()).toEqual(['old']);
     expect(mocks.select).not.toHaveBeenCalled();
   });
+
+  it.each([false, true])(
+    'filters cancelled selections using current hierarchy (strokeLevel=%s)',
+    (strokeLevel) => {
+      useWorkspaceStore.setState({
+        worldCanvasId: 'canvas',
+        spaceSummaries: { target: { parentSpaceId: null } },
+      });
+      mocks.nodes.push({
+        id: 'entry',
+        type: 'spacePreview',
+        position: { x: 600, y: 600 },
+        data: { targetCanvasId: 'target' },
+        selected: true,
+      });
+      mocks.edges.push(
+        { id: 'from-entry', source: 'entry', target: 'old', selected: true },
+        { id: 'to-entry', source: 'old', target: 'entry', selected: true },
+      );
+      const session = createAreaSelectionSession(strokeLevel);
+      session.preview(null);
+      useWorkspaceStore.setState({
+        spaceSummaries: { target: { parentSpaceId: 'parent' } },
+      });
+      session.cancel();
+      expect(selected()).toEqual(['old']);
+      expect(
+        mocks.edges.filter((edge) => edge.selected).map((edge) => edge.id),
+      ).toEqual(['old-edge']);
+      expect(mocks.select).not.toHaveBeenCalled();
+    },
+  );
 
   it('selects nodes and strokes live, never a partially captured Frame or whole Sketch, and commits once', () => {
     const previousSession =

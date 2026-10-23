@@ -21,16 +21,22 @@ describe('nodeAccentPickerOptions', () => {
     },
   );
 
-  it.each(['audio', 'frame', 'note', 'office', 'pdf', 'spacePreview', 'web'])(
-    'omits the transparent sentinel and defaults %s to white',
-    (type) => {
-      expect(nodeAccentPickerOptions([type])).not.toContainEqual(
-        expect.objectContaining({ token: ACCENT_NONE_TOKEN }),
-      );
-      expect(nodeAccentPickerValue(type, null)).toBe('white');
-      expect(nodeAccentPickerValue(type, undefined)).toBe('white');
-    },
-  );
+  it.each([
+    'audio',
+    'frame',
+    'note',
+    'office',
+    'pdf',
+    'question',
+    'spacePreview',
+    'web',
+  ])('omits the transparent sentinel and defaults %s to white', (type) => {
+    expect(nodeAccentPickerOptions([type])).not.toContainEqual(
+      expect.objectContaining({ token: ACCENT_NONE_TOKEN }),
+    );
+    expect(nodeAccentPickerValue(type, null)).toBe('white');
+    expect(nodeAccentPickerValue(type, undefined)).toBe('white');
+  });
 
   it('omits the transparent sentinel from mixed surface selections', () => {
     expect(nodeAccentPickerOptions(['image', 'note'])).not.toContainEqual(

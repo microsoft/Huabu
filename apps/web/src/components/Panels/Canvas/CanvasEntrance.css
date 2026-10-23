@@ -1,0 +1,23 @@
+/*
+ * Copyright (c) Microsoft Corporation.
+ * Licensed under the MIT license.
+ */
+
+.space-canvas-enter {
+  animation: space-canvas-enter 240ms ease-out;
+}
+
+@keyframes space-canvas-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .space-canvas-enter {
+    animation: none;
+  }
+}

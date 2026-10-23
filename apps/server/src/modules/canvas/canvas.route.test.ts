@@ -43,6 +43,7 @@ vi.mock(
 );
 
 import canvasRoutes from './canvas.route.js';
+import { withCanvasMutex } from './write-coordinator.js';
 import { withSpaceDirHandlesReleased } from '../storage/backends/disk/space-dir-handles.js';
 import { createCanvas, deleteCanvas } from '../storage/compatibility/canvas.js';
 import {
@@ -56,7 +57,10 @@ import {
   unavailableCapabilityMessage,
 } from '../storage/index.js';
 import { changesPath } from '../storage/paths.js';
-import { setWorkspacePath } from '../workspace.js';
+import {
+  setWorkspacePath,
+  WorkspaceOperationInProgressError,
+} from '../workspace.js';
 
 import type * as SpaceDirHandlesModule from '../storage/backends/disk/space-dir-handles.js';
 import type * as StorageModule from '../storage/index.js';
@@ -148,6 +152,88 @@ afterEach(() => {
 });
 
 describe('POST /api/canvas lifecycle', () => {
+  it('queries only requested Space cards and validates bounded input', async () => {
+    const app = await buildApp();
+    try {
+      await createCanvas('card-target', 'Target');
+      const response = await app.inject({
+        method: 'POST',
+        url: '/canvas/cards/query',
+        payload: { canvasIds: ['card-target', 'missing'] },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json().spaces).toMatchObject({
+        'card-target': {
+          status: 'ready',
+          title: 'Target',
+          activity: [],
+        },
+        missing: { status: 'missing' },
+      });
+      for (const canvasIds of [
+        ['../escape'],
+        Array(51).fill('card-target'),
+        [],
+      ]) {
+        expect(
+          (
+            await app.inject({
+              method: 'POST',
+              url: '/canvas/cards/query',
+              payload: { canvasIds },
+            })
+          ).statusCode,
+        ).toBe(400);
+      }
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('renames an inactive Space without replacing topology and rejects stale or duplicate names', async () => {
+    const app = await buildApp();
+    try {
+      await createCanvas('card-target', 'Before');
+      await createCanvas('other-target', 'Taken');
+      const before = await space('card-target').read();
+      const renamed = await app.inject({
+        method: 'PATCH',
+        url: '/canvas/card-target/title',
+        payload: { title: ' After ', expectedTitle: 'Before' },
+      });
+      expect(renamed.statusCode).toBe(200);
+      expect(renamed.json().title).toBe('After');
+      const after = await space('card-target').read();
+      expect(after?.version).toBe((before?.version ?? 0) + 1);
+      expect(after?.state).toEqual(before?.state);
+      const stale = await app.inject({
+        method: 'PATCH',
+        url: '/canvas/card-target/title',
+        payload: { title: 'Stale', expectedTitle: 'Before' },
+      });
+      expect(stale.statusCode).toBe(409);
+      expect(stale.json().code).toBe('SPACE_TITLE_CHANGED');
+      const duplicate = await app.inject({
+        method: 'PATCH',
+        url: '/canvas/card-target/title',
+        payload: { title: 'Taken', expectedTitle: 'After' },
+      });
+      expect(duplicate.statusCode).toBe(409);
+      expect((await space('card-target').read())?.title).toBe('After');
+      expect(
+        (
+          await app.inject({
+            method: 'PATCH',
+            url: '/canvas/card-target/title',
+            payload: { title: ' ', expectedTitle: 'After' },
+          })
+        ).statusCode,
+      ).toBe(400);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('allocates concurrent default titles without skipping a suffix', async () => {
     const app = await buildApp();
     try {
@@ -165,6 +251,88 @@ describe('POST /api/canvas lifecycle', () => {
     } finally {
       await app.close();
     }
+  });
+
+  describe('node deletion Workspace lease', () => {
+    it.each([false, true])(
+      'blocks activation while queued and deleting, then releases on completion (failure=%s)',
+      async (fail) => {
+        await createCanvas('c1', 'Canvas');
+        getCanvasStore('c1').writeNode('n1', {
+          nodeId: 'n1',
+          type: 'note',
+          label: 'Note',
+          content: 'Keep until deletion',
+        });
+        const repository = getStructuredStore();
+        const handle = repository.space('c1');
+        const originalDelete = handle.nodes.delete.bind(handle.nodes);
+        const queued = deferred();
+        const enteredDelete = deferred();
+        const releaseMutex = deferred();
+        const releaseDelete = deferred();
+        const held = withCanvasMutex('c1', () => releaseMutex.promise);
+        const deleteSpy = vi
+          .spyOn(handle.nodes, 'delete')
+          .mockImplementation(async (id) => {
+            enteredDelete.resolve();
+            await releaseDelete.promise;
+            if (fail) throw new Error('Deletion unavailable');
+            return originalDelete(id);
+          });
+        const handleSpy = vi
+          .spyOn(repository, 'space')
+          .mockImplementationOnce(() => {
+            queued.resolve();
+            return handle;
+          });
+        const app = await buildApp();
+        const request = app
+          .inject({ method: 'DELETE', url: '/canvas/c1/nodes/n1' })
+          .then((response) => response);
+        try {
+          await queued.promise;
+          expect(() => setWorkspacePath(join(tmp, 'other'))).toThrow(
+            WorkspaceOperationInProgressError,
+          );
+          releaseMutex.resolve();
+          await enteredDelete.promise;
+          expect(() => setWorkspacePath(join(tmp, 'other'))).toThrow(
+            WorkspaceOperationInProgressError,
+          );
+          releaseDelete.resolve();
+          const response = await request;
+          expect(response.statusCode, response.body).toBe(fail ? 500 : 200);
+          expect(await handle.nodes.read('n1')).toEqual(
+            fail ? expect.anything() : null,
+          );
+          expect(() => setWorkspacePath(join(tmp, 'other'))).not.toThrow();
+        } finally {
+          releaseMutex.resolve();
+          releaseDelete.resolve();
+          await held;
+          await request;
+          deleteSpy.mockRestore();
+          handleSpy.mockRestore();
+          await app.close();
+        }
+      },
+    );
+
+    it('rejects malformed node identifiers before storage access', async () => {
+      const app = await buildApp();
+      vi.mocked(getStructuredStore).mockClear();
+      try {
+        const response = await app.inject({
+          method: 'DELETE',
+          url: '/canvas/c1/nodes/invalid%2Fnode',
+        });
+        expect(response.statusCode).toBe(400);
+        expect(getStructuredStore).not.toHaveBeenCalled();
+      } finally {
+        await app.close();
+      }
+    });
   });
 });
 

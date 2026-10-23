@@ -7,6 +7,23 @@ function finiteNumber(value: unknown): boolean {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
+export function spaceHierarchyShapeError(
+  record: Record<string, unknown>,
+): string | null {
+  const parent = record['parentSpaceId'];
+  const entry = record['parentEntryNodeId'];
+  if (
+    (parent === null || parent === undefined) &&
+    (entry === null || entry === undefined)
+  )
+    return null;
+  if (typeof parent !== 'string' || !/^[a-zA-Z0-9_-]+$/.test(parent))
+    return 'parentSpaceId must be a Space ID';
+  if (typeof entry !== 'string' || !/^node-[a-zA-Z0-9_-]+$/.test(entry))
+    return 'parentEntryNodeId must identify the formal entry';
+  return null;
+}
+
 /** Return the first minimal CanvasFile shape violation, if any. */
 export function canvasFileShapeError(
   value: unknown,
@@ -17,6 +34,8 @@ export function canvasFileShapeError(
   }
 
   const record = value as Record<string, unknown>;
+  const hierarchyError = spaceHierarchyShapeError(record);
+  if (hierarchyError) return hierarchyError;
   if (record['canvasId'] !== expectedCanvasId) {
     return `canvasId must equal ${JSON.stringify(expectedCanvasId)}`;
   }

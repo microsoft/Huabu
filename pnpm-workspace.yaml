@@ -22,3 +22,5 @@ onlyBuiltDependencies:
 # Keep this installer-only dependency from hoisting Node 10 types into workspaces.
 overrides:
   'http-response-object>@types/node': '^22.19.21'
+  # The configured feed does not publish the previously locked 6.29.1.
+  'node-gyp>undici': '6.29.0'

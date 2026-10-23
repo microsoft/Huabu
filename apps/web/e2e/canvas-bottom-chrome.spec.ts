@@ -47,7 +47,7 @@ test('collapsed controls create fresh Chats while expanding Preview preserves ex
   await expect(activeTab).not.toHaveAttribute('id', firstTabId);
 });
 
-test('shorter zoom control aligns with the roomier main toolbar bottom', async ({
+test('zoom control and main toolbar align 14px above the work area bottom', async ({
   page,
 }) => {
   await openNewCanvas(page);
@@ -68,7 +68,7 @@ test('shorter zoom control aligns with the roomier main toolbar bottom', async (
     if (!toolbarBox || !zoomBox || !layoutBox) {
       throw new Error('Expected visible bottom controls and work area');
     }
-    const bottom = layoutBox.y + layoutBox.height - 24;
+    const bottom = layoutBox.y + layoutBox.height - 14;
     expect(toolbarBox.y + toolbarBox.height).toBeCloseTo(bottom, 1);
     expect(zoomBox.y + zoomBox.height).toBeCloseTo(bottom, 1);
     expect(zoomBox.y).toBeGreaterThan(toolbarBox.y);

@@ -14,28 +14,29 @@ import type {
 import type { CanvasNodeId } from '@huabu/shared';
 
 /** Shared UI limits: reject rather than clamp, including fractional inputs. */
-export const QUESTION_CARD_SCALE_RANGE = { min: 10, max: 1000 } as const;
+export const CARD_SCALE_RANGE = { min: 10, max: 1000 } as const;
 
 /**
  * Resolve an absolute card scale without rounding or mutating live state.
  * Callers must preflight no-ops before beginGesture('SET_NODE_GEOMETRY'); the
  * existing mixed-command snapshot policy then records exactly one undo step.
  */
-export function resolveSetQuestionCardScale(
-  intent: Extract<CanvasUiIntent, { type: 'SET_QUESTION_CARD_SCALE' }>,
+export function resolveSetCardScale(
+  intent: Extract<CanvasUiIntent, { type: 'SET_CARD_SCALE' }>,
   ui: UiResolverState,
 ): UiIntentResolution {
   const { nodeId, percent } = intent;
   if (
     !Number.isFinite(percent) ||
-    percent < QUESTION_CARD_SCALE_RANGE.min ||
-    percent > QUESTION_CARD_SCALE_RANGE.max
+    percent < CARD_SCALE_RANGE.min ||
+    percent > CARD_SCALE_RANGE.max
   ) {
     return { commands: [], trace: [] };
   }
 
   const node = ui.nodes.find((candidate) => candidate.id === nodeId);
-  if (node?.type !== 'question') return { commands: [], trace: [] };
+  if (node?.type !== 'question' && node?.type !== 'spacePreview')
+    return { commands: [], trace: [] };
 
   // getNodeFontFit reads the outer width through canonical getNodeSize.
   const current = getNodeFontFit(node);

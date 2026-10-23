@@ -26,7 +26,7 @@ import {
   resolvePasteClipboard,
   resolveSelectNodes,
 } from './resolvers';
-import { resolveSetQuestionCardScale } from './resolvers/resolveSetQuestionCardScale';
+import { resolveSetCardScale } from './resolvers/resolveSetCardScale';
 import {
   computeNodeEditDiff,
   extractNodeRef,
@@ -48,7 +48,10 @@ import type {
   RecentAction,
   EdgeStyle,
 } from '@huabu/shared';
-import type { StructuredGutterSizes } from '@huabu/shared/canvas-engine';
+import type {
+  StructuredDropTarget,
+  StructuredGutterSizes,
+} from '@huabu/shared/canvas-engine';
 import type { Edge, Node } from '@xyflow/react';
 
 // ---------------------------------------------------------------------------
@@ -78,9 +81,10 @@ export interface AddNodeInput {
    * Providing `placementPoint` is a contract that the caller has chosen
    * the node's position (drag-drop, paste, toolbar click, sketch overlay,
    * group-into-frame, etc.). When omitted the resolver falls back to the
-   * viewport centre (or `(0, 0)` when the canvas is not yet mounted), so
+   * unobscured viewport centre (or the stored viewport while unmounted), so
    * a final explicit position is always emitted in the `CREATE_NODES`
-   * command — the shared engine no longer ships a layout fallback.
+   * command. Without either viewport it uses `(0, 0)` and reveals the node
+   * once Canvas is ready — the shared engine has no layout fallback.
    */
   placementPoint?: Point;
   /**
@@ -116,6 +120,13 @@ export type CanvasUiIntent =
       type: 'NODE_DRAG_STOP';
       draggedNodeIds: string[];
       pointerFlowPosition?: Point;
+      zoom?: number;
+      /** Release-validated insertion intent, or an ordinary track hint for gutters. */
+      masonryDrop?: {
+        nodeId: string;
+        frameId: string;
+        target: StructuredDropTarget;
+      };
       /**
        * When true, the user was holding Space at drag-stop (the "opt
        * out of auto-reparent" gesture). The resolver should leave
@@ -197,11 +208,11 @@ export type CanvasUiIntent =
       targetNodeId: string;
       targetContentAfterInsert: string;
     }
-  | { type: 'DELETE_NODES'; nodeIds: string[] }
+  | { type: 'DELETE_NODES'; nodeIds: string[]; edgeIds?: string[] }
   | { type: 'UPDATE_NODE_DATA'; nodeId: string; patch: Record<string, unknown> }
   | {
       /** Absolute percentage of QUESTION_NODE_DEFAULT_FONT_SIZE, in [10, 1000]. */
-      type: 'SET_QUESTION_CARD_SCALE';
+      type: 'SET_CARD_SCALE';
       nodeId: string;
       percent: number;
     }
@@ -318,6 +329,8 @@ export interface UiIntentResolution {
    * The store maps this to the node type's editing surface.
    */
   editNodeId?: string;
+  /** Reveal newly created, automatically placed nodes after the canvas is ready. */
+  revealNodeIds?: string[];
   /**
    * UI-only presentation request that bypasses the command pipeline.
    *
@@ -339,10 +352,9 @@ export interface UiResolverState {
    * `dispatchUiIntent` from the live React Flow instance + canvas wrapper
    * rect. Resolvers use it as the anchor when a new node has no explicit
    * `placementPoint` (e.g. "Add as note" from a chat panel), so the node
-   * lands in the visible area. Undefined when the canvas DOM is not yet
-   * mounted (initial boot) or when the React Flow instance has not
-   * registered yet — resolvers then default the position to `(0, 0)`
-   * because the shared engine no longer ships a layout fallback.
+   * lands in the unobscured visible area. When Canvas is unmounted, the
+   * stored viewport supplies a fallback centre. Without either viewport,
+   * resolvers default to `(0, 0)` and reveal automatic additions on mount.
    */
   viewportCenter?: Point;
 }
@@ -408,8 +420,8 @@ export function resolveUiIntent(
       return resolveDeleteNodes(intent, ui);
     case 'UPDATE_NODE_DATA':
       return resolveUpdateNodeData(intent, ui);
-    case 'SET_QUESTION_CARD_SCALE':
-      return resolveSetQuestionCardScale(intent, ui);
+    case 'SET_CARD_SCALE':
+      return resolveSetCardScale(intent, ui);
     case 'CONNECT_EDGE':
       return resolveConnectEdge(intent, ui);
     case 'DISCONNECT_EDGE':
@@ -484,25 +496,34 @@ function resolveDeleteNodes(
   ui: UiResolverState,
 ): UiIntentResolution {
   const toDelete = ui.nodes.filter((n) => intent.nodeIds.includes(n.id));
+  const disconnected = intent.edgeIds?.length
+    ? resolveDisconnectEdge(
+        { type: 'DISCONNECT_EDGE', edgeIds: intent.edgeIds },
+        ui,
+      )
+    : { commands: [], trace: [] };
   return {
     commands: [
       {
         type: 'DELETE_NODES',
         nodeIds: intent.nodeIds as CanvasNodeId[],
       },
+      ...disconnected.commands,
     ],
-    trace:
-      toDelete.length > 0
+    trace: [
+      ...(toDelete.length > 0
         ? [
             {
-              action: 'nodes_deleted',
+              action: 'nodes_deleted' as const,
               nodes: toDelete.map((n) => ({
                 ...extractNodeRef(n),
                 snippet: extractSnippet(n),
               })),
             },
           ]
-        : [],
+        : []),
+      ...disconnected.trace,
+    ],
   };
 }
 

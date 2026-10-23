@@ -14,7 +14,11 @@ export function decideViteAccess(input: {
   peer: string | undefined;
   expectedAuthorization: string | null;
   receivedAuthorization: string | undefined;
+  authenticationDisabled?: boolean;
 }): ViteAccessDecision {
+  if (input.authenticationDisabled && !input.expectedAuthorization) {
+    return 'allow';
+  }
   if (
     input.expectedAuthorization &&
     input.receivedAuthorization === input.expectedAuthorization

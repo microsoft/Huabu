@@ -103,7 +103,6 @@ function createHarness(options?: {
   skipTurnStarted?: boolean;
   internalGate?: Promise<void>;
   internalEvents?: StreamEvent[];
-  inkDeliveryError?: Error;
 }) {
   const release = vi.fn();
   const startLifecycle = options?.startError
@@ -113,14 +112,6 @@ function createHarness(options?: {
     ? vi.fn().mockRejectedValue(options.finishError)
     : vi.fn().mockResolvedValue(undefined);
   const failLifecycle = vi.fn().mockResolvedValue(undefined);
-  const deliverInkResponse = options?.inkDeliveryError
-    ? vi.fn().mockRejectedValue(options.inkDeliveryError)
-    : vi.fn().mockResolvedValue(undefined);
-  const stopInkResponse = vi.fn();
-  const createInkResponse = vi.fn(() => ({
-    deliver: deliverInkResponse,
-    stop: stopInkResponse,
-  }));
   const runExternal = vi.fn(
     (runOptions: {
       onTurnStarted?: (acceptance?: AgentTurnAccepted) => void;
@@ -207,7 +198,6 @@ function createHarness(options?: {
     startLifecycle,
     finishLifecycle,
     failLifecycle,
-    createInkResponse,
     runExternal,
     runInternal,
     closeHandle: vi.fn(),
@@ -225,9 +215,6 @@ function createHarness(options?: {
     runInternal,
     collectSpacePrompt,
     realizeExternal,
-    createInkResponse,
-    deliverInkResponse,
-    stopInkResponse,
   };
 }
 
@@ -250,7 +237,7 @@ function invocationOptions() {
 }
 
 describe('AgentThreadService', () => {
-  it('publishes the post-tool answer rather than preambles or tool output', async () => {
+  it('forwards verified external Ink events without publishing chat text', async () => {
     const h = createHarness({
       externalEvents: [
         { type: 'text_delta', data: { content: 'Let me investigate.' } },
@@ -274,22 +261,18 @@ describe('AgentThreadService', () => {
         { type: 'text', text: 'Input' },
       ]),
     });
-    for await (const _event of invocation.events) {
-      /* Drain the server-owned invocation. */
-    }
-    expect(h.deliverInkResponse).toHaveBeenCalledWith({
-      text: 'Here are the findings.',
-      error: undefined,
-      interrupted: false,
-    });
+    const received: AgentStreamEvent[] = [];
+    for await (const event of invocation.events) received.push(event);
+    expect(received.at(-1)?.type).toBe('done');
+    expect(h.finishLifecycle).toHaveBeenCalledOnce();
   });
 
-  it('does not create a response for an Ink turn rejected before acceptance', async () => {
+  it('does not report durable acceptance for an Ink turn that never starts', async () => {
     const h = createHarness({
       target: {
         ...TARGET,
         agentBinding: { kind: 'internal' },
-        agentMode: 'ask',
+        agentMode: 'operate',
       },
       skipTurnStarted: true,
     });
@@ -308,11 +291,10 @@ describe('AgentThreadService', () => {
     for await (const _event of invocation.events) {
       /* Drain the server-owned invocation. */
     }
-    expect(h.deliverInkResponse).not.toHaveBeenCalled();
-    expect(h.stopInkResponse).toHaveBeenCalledOnce();
+    expect(await invocation.acceptance).toBeNull();
   });
 
-  it.each(['ask', 'operate'] as const)(
+  it.each(['operate'] as const)(
     'delivers built-in %s Ink without altering its scope',
     async (mode) => {
       const h = createHarness({
@@ -342,22 +324,17 @@ describe('AgentThreadService', () => {
           { type: 'text', text: 'Input' },
         ]),
       });
-      for await (const event of invocation.events) {
-        if (event.type === 'done')
-          expect(h.deliverInkResponse).toHaveBeenCalledOnce();
+      for await (const _event of invocation.events) {
+        /* Drain the server-owned invocation. */
       }
       expect(h.runInternal).toHaveBeenCalledWith(
         expect.objectContaining({ scope: mode }),
       );
-      expect(h.deliverInkResponse).toHaveBeenCalledWith({
-        text: 'A complete discussion answer.',
-        error: undefined,
-        interrupted: false,
-      });
+      expect(h.finishLifecycle).toHaveBeenCalledOnce();
     },
   );
 
-  it('delivers external Ink on Canvas before forwarding done, but does not mirror ordinary Chat', async () => {
+  it('forwards successful driver completion for Ink and ordinary Chat', async () => {
     for (const inputKind of ['ink-intent', undefined] as const) {
       const h = createHarness();
       const envelope: ChatEnvelope = {
@@ -371,22 +348,18 @@ describe('AgentThreadService', () => {
           { type: 'text', text: 'Input' },
         ]),
       });
-      for await (const event of invocation.events) {
-        if (event.type === 'done' && inputKind)
-          expect(h.deliverInkResponse).toHaveBeenCalledWith({
-            text: 'Result',
-            error: undefined,
-            interrupted: false,
-          });
-      }
-      expect(h.createInkResponse).toHaveBeenCalledTimes(inputKind ? 1 : 0);
-      expect(h.stopInkResponse).toHaveBeenCalledTimes(inputKind ? 1 : 0);
+      const received: AgentStreamEvent[] = [];
+      for await (const event of invocation.events) received.push(event);
+      expect(received.at(-1)?.type).toBe('done');
+      expect(h.finishLifecycle).toHaveBeenCalledOnce();
     }
   });
 
   it('projects a Canvas delivery failure as an error and never forwards successful done', async () => {
     const h = createHarness({
-      inkDeliveryError: new Error('Storage unavailable'),
+      externalEvents: [
+        { type: 'error', data: { error: 'No visible Canvas result' } },
+      ],
     });
     const envelope: ChatEnvelope = {
       ...ENVELOPE,
@@ -400,20 +373,44 @@ describe('AgentThreadService', () => {
       ]),
     });
     const received: AgentStreamEvent[] = [];
-    await expect(
-      (async () => {
-        for await (const event of invocation.events) received.push(event);
-      })(),
-    ).rejects.toThrow('Storage unavailable');
+    for await (const event of invocation.events) received.push(event);
     expect(received.some((event) => event.type === 'done')).toBe(false);
     expect(h.failLifecycle).toHaveBeenCalledWith(
       TARGET,
-      'Ink response delivery failed: Storage unavailable',
+      'No visible Canvas result',
       expect.any(String),
       { consumePendingInkIntentLabel: true },
     );
     expect(h.release).toHaveBeenCalledOnce();
-    expect(h.stopInkResponse).toHaveBeenCalledOnce();
+  });
+
+  it('preserves an external Ink permission failure', async () => {
+    const h = createHarness({
+      externalEvents: [
+        { type: 'error', data: { error: 'Write permission denied' } },
+      ],
+    });
+    const envelope: ChatEnvelope = {
+      ...ENVELOPE,
+      user: { ...ENVELOPE.user, inputKind: 'ink-intent' },
+    };
+    const invocation = await h.service.invoke({
+      ...invocationOptions(),
+      envelope,
+      submission: createChatSubmission(envelope, [
+        { type: 'text', text: 'Input' },
+      ]),
+    });
+    const received: AgentStreamEvent[] = [];
+    for await (const event of invocation.events) received.push(event);
+    expect(received.some((event) => event.type === 'done')).toBe(false);
+    expect(h.finishLifecycle).not.toHaveBeenCalled();
+    expect(h.failLifecycle).toHaveBeenCalledWith(
+      TARGET,
+      'Write permission denied',
+      expect.any(String),
+      { consumePendingInkIntentLabel: true },
+    );
   });
 
   it.each([
@@ -426,8 +423,8 @@ describe('AgentThreadService', () => {
       expectedMode: 'operate',
     },
   ] as const)(
-    'admits Ink with normal mode resolution for an internal Ask target: %j',
-    async ({ mode, invocationToken, expectedMode }) => {
+    'rejects Ink for an internal Ask target without upgrading it: %j',
+    async ({ mode, invocationToken }) => {
       const target: FixedAgentNodeTarget = {
         ...TARGET,
         agentBinding: { kind: 'internal' },
@@ -439,51 +436,88 @@ describe('AgentThreadService', () => {
         ...ENVELOPE,
         user: { ...ENVELOPE.user, inputKind: 'ink-intent' },
       };
-      const invocation = await h.service.invoke({
-        ...invocationOptions(),
-        mode,
-        requestBinding: { kind: 'internal' },
-        envelope,
-        submission: createChatSubmission(envelope, [
-          { type: 'text', text: 'Prepared Ink request' },
-        ]),
-      });
-      for await (const _event of invocation.events) {
-        // Drain the canonical invocation stream.
-      }
-      expect(h.runInternal).toHaveBeenCalledWith(
-        expect.objectContaining({ scope: expectedMode, envelope }),
-      );
-      expect(invocation.binding).toEqual({ kind: 'internal' });
+      await expect(
+        h.service.invoke({
+          ...invocationOptions(),
+          mode,
+          requestBinding: { kind: 'internal' },
+          envelope,
+          submission: createChatSubmission(envelope, [
+            { type: 'text', text: 'Prepared Ink request' },
+          ]),
+        }),
+      ).rejects.toThrow('Choose Agent instead of Chat');
+      expect(h.runInternal).not.toHaveBeenCalled();
       expect(h.realizeExternal).not.toHaveBeenCalled();
       expect(h.release).toHaveBeenCalledOnce();
       expect(h.service.isActive('thread-a', 'canvas-a')).toBe(false);
-      expect(h.failLifecycle).not.toHaveBeenCalled();
+      expect(h.failLifecycle).toHaveBeenCalledOnce();
       expect(target.agentMode).toBe('ask');
     },
   );
 
-  it('admits Ink to an unanchored Ask conversation without upgrading its mode', async () => {
+  it('rejects a live Ask mode acquired while the deferred Ink envelope was pending', async () => {
+    const target: FixedAgentNodeTarget = {
+      ...TARGET,
+      agentBinding: { kind: 'internal' },
+      agentMode: 'operate',
+    };
+    const options = { target, agentTarget: target };
+    const h = createHarness(options);
+    let startPreparation!: () => void;
+    const preparing = new Promise<void>((resolve) => {
+      startPreparation = resolve;
+    });
+    let finishPreparation!: (envelope: ChatEnvelope) => void;
+    const pending = new Promise<ChatEnvelope>((resolve) => {
+      finishPreparation = resolve;
+    });
+    const envelope: ChatEnvelope = {
+      ...ENVELOPE,
+      user: { ...ENVELOPE.user, inputKind: 'ink-intent' },
+    };
+    const invocation = h.service.invoke({
+      ...invocationOptions(),
+      mode: 'operate',
+      requestBinding: { kind: 'internal' },
+      envelope: () => {
+        startPreparation();
+        return pending;
+      },
+      submission: createChatSubmission(envelope),
+    });
+    const rejected = expect(invocation).rejects.toThrow(
+      'Choose Agent instead of Chat',
+    );
+    await preparing;
+    options.agentTarget = { ...target, agentMode: 'ask' };
+    finishPreparation(envelope);
+    await rejected;
+    expect(target.agentMode).toBe('operate');
+    expect(h.runInternal).not.toHaveBeenCalled();
+    expect(h.release).toHaveBeenCalledOnce();
+    expect(h.failLifecycle).toHaveBeenCalledOnce();
+    expect(h.service.isActive('thread-a', 'canvas-a')).toBe(false);
+  });
+
+  it('rejects Ink to an unanchored Ask conversation without upgrading its mode', async () => {
     const h = createHarness({ target: null });
     const envelope: ChatEnvelope = {
       ...ENVELOPE,
       user: { ...ENVELOPE.user, inputKind: 'ink-intent' },
     };
-    const invocation = await h.service.invoke({
-      ...invocationOptions(),
-      fixedTarget: null,
-      requestBinding: { kind: 'internal' },
-      envelope,
-      submission: createChatSubmission(envelope, [
-        { type: 'text', text: 'Prepared Ink request' },
-      ]),
-    });
-    for await (const _event of invocation.events) {
-      // Drain the canonical invocation stream.
-    }
-    expect(h.runInternal).toHaveBeenCalledWith(
-      expect.objectContaining({ scope: 'ask', envelope }),
-    );
+    await expect(
+      h.service.invoke({
+        ...invocationOptions(),
+        fixedTarget: null,
+        requestBinding: { kind: 'internal' },
+        envelope,
+        submission: createChatSubmission(envelope, [
+          { type: 'text', text: 'Prepared Ink request' },
+        ]),
+      }),
+    ).rejects.toThrow('Choose Agent instead of Chat');
+    expect(h.runInternal).not.toHaveBeenCalled();
     expect(h.realizeExternal).not.toHaveBeenCalled();
   });
 

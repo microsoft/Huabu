@@ -65,8 +65,10 @@ describe('MultiSelectResizer content scale gesture', () => {
   it.each([
     ['text', false],
     ['question', false],
+    ['spacePreview', false],
     ['text', true],
     ['question', true],
+    ['spacePreview', true],
   ] as const)(
     'uniformly scales %s with nested=%s and commits the last preview',
     (type, nested) => {
@@ -172,6 +174,13 @@ describe('MultiSelectResizer content scale gesture', () => {
             fontSize: (base * (200 * scale)) / 200,
           },
         });
+        expect(
+          harness.patchNodeSilent.mock.invocationCallOrder.at(-1),
+        ).toBeLessThan(
+          harness.previewResizeGeometry.mock.invocationCallOrder[
+            harness.previewResizeGeometry.mock.calls.length - 1
+          ],
+        );
       }
       pointer(handle, 'pointerup', { pointerId: 1 });
       expect(harness.onNodeResizeStart).toHaveBeenCalledTimes(1);

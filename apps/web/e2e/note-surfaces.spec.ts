@@ -169,7 +169,7 @@ test('Full and Minimal Notes share a weaker accent surface inside and outside Fr
         expect(result.minimalColor).toBe(result.expectedColor);
         expect(result.hostBackground).toBe('rgba(0, 0, 0, 0)');
         expect(result.fade).toContain(result.surface);
-        expect(result.borderWidth).toBe('3px');
+        expect(result.borderWidth).toBe('2px');
         expect(result.width).toBe(360);
         expect(result.height).toBe(220);
       }

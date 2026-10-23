@@ -51,6 +51,7 @@ export function createPlacementRecognizer(
       return (
         pendingNodeType !== null &&
         pendingNodeType !== 'frame' &&
+        pendingNodeType !== 'childSpace' &&
         pendingNodeType !== 'sketch' &&
         event.button === 0 &&
         event.isPrimary &&

@@ -10,12 +10,13 @@ const DEFAULT_WHITE_ACCENT_TYPES = new Set([
   'note',
   'office',
   'pdf',
+  'question',
   'spacePreview',
   'web',
 ]);
 
 export function nodeUsesAccent(type: string | undefined): boolean {
-  return type !== 'question' && type !== 'sketch';
+  return type !== 'sketch';
 }
 
 export function nodeSupportsNoAccent(type: string | undefined): boolean {

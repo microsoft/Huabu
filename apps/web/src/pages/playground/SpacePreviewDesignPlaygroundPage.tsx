@@ -26,13 +26,16 @@ import { Modal } from '@/components/Common/Modal';
 import { Popover } from '@/components/Common/Popover';
 import { TextInput } from '@/components/Common/TextInput';
 import { Tooltip } from '@/components/Common/Tooltip';
-import { nodeBoundaryForAccent } from '@/components/Nodes/design/nodeBoundary';
+import {
+  NODE_BORDER_WIDTH,
+  nodeBoundaryForAccent,
+} from '@/components/Nodes/design/nodeBoundary';
 import { nodeMetricsForSize } from '@/components/Nodes/design/nodeDesign';
-import { NODE_CONTENT_SPACING } from '@/components/Nodes/design/nodeSpacing';
-import { NODE_TYPOGRAPHY } from '@/components/Nodes/design/nodeTypography';
+import { CONVERSATION_CARD_SPACING } from '@/components/Nodes/design/nodeSpacing';
+import { SPACE_CARD_TYPOGRAPHY } from '@/components/Nodes/design/nodeTypography';
 import { noteSurfaceStyle } from '@/components/Nodes/note/noteDesign';
-import { SpaceShortcutSummary } from '@/components/Nodes/spacePreview/SpaceShortcutSummary';
-import { SpaceShortcutWidthSettings } from '@/components/Nodes/spacePreview/SpaceShortcutWidthSettings';
+import { NodeActivityTime } from '@/components/Nodes/shared/NodeActivityTime';
+import { SpaceAgentActivity } from '@/components/Nodes/spacePreview/SpaceAgentActivity';
 import { getNodeIcon } from '@/config/nodeIcons';
 import { translateColorOptions } from '@/i18n/colors';
 
@@ -42,15 +45,13 @@ import './SpacePreviewDesignPlaygroundPage.css';
 
 const SpaceIcon = getNodeIcon('spacePreview');
 const MIN_WIDTH = SPACE_SHORTCUT_SIZE.minWidth;
-const AUTO_MAX_WIDTH = SPACE_SHORTCUT_SIZE.autoMaxWidth;
-const titleTypography = NODE_TYPOGRAPHY.cardTitle;
-const DEMO_NODE_COUNT = 24;
+const titleTypography = SPACE_CARD_TYPOGRAPHY.title;
 const DEMO_UPDATED_AT = Date.now() - 2 * 86_400_000;
 const specimens = [
   {
     id: 'primary',
     label: '未选中示例',
-    detail: '默认不选中 · 图标与名称始终可见',
+    detail: '默认不选中 · 名称与摘要始终可见',
   },
   {
     id: 'reference',
@@ -80,7 +81,9 @@ function SpaceShortcutSpecimen({
   const { t } = useTranslation();
   const [color, setColor] = useState('none');
   const [position, setPosition] = useState({ x: 0, y: 0 });
-  const [manualWidth, setManualWidth] = useState<number | null>(null);
+  const [manualWidth, setManualWidth] = useState<number>(
+    SPACE_SHORTCUT_SIZE.defaultWidth,
+  );
   const [widthOpen, setWidthOpen] = useState(false);
   const [measured, setMeasured] = useState<{ width: number; height: number }>({
     width: MIN_WIDTH,
@@ -92,7 +95,7 @@ function SpaceShortcutSpecimen({
     pointerId: number;
     startX: number;
     width: number;
-    manualWidth: number | null;
+    manualWidth: number;
     position: { x: number; y: number };
     max: number;
   } | null>(null);
@@ -119,12 +122,12 @@ function SpaceShortcutSpecimen({
   const accent = color === 'none' ? null : resolveAccent(color);
   const boundary = nodeBoundaryForAccent(accent);
   const height =
-    2 * (NODE_CONTENT_SPACING.padding + boundary.borderWidth) +
+    2 * (CONVERSATION_CARD_SPACING.padding + boundary.borderWidth) +
     titleTypography.size * titleTypography.lineHeight +
     (unavailable
       ? 0
-      : 4 +
-        NODE_TYPOGRAPHY.metadata.size * NODE_TYPOGRAPHY.metadata.lineHeight);
+      : CONVERSATION_CARD_SPACING.rowGap +
+        CONVERSATION_CARD_SPACING.footerHeight);
   const openSpace = () => {
     if (!unavailable) onOpen();
   };
@@ -155,13 +158,11 @@ function SpaceShortcutSpecimen({
       <div className="sp-design-stage">
         <div
           className="sp-design-movable"
-          data-width-mode={manualWidth === null ? 'auto' : 'manual'}
-          data-authored-width={manualWidth ?? undefined}
+          data-authored-width={manualWidth}
           style={{
-            width: manualWidth ?? 'max-content',
+            width: manualWidth,
             minWidth: `min(${MIN_WIDTH}px, 100%)`,
-            maxWidth:
-              manualWidth === null ? `min(${AUTO_MAX_WIDTH}px, 100%)` : '100%',
+            maxWidth: '100%',
             transform: `translate(${position.x}px, ${position.y}px)`,
           }}
         >
@@ -183,8 +184,9 @@ function SpaceShortcutSpecimen({
               style={{
                 ...noteSurfaceStyle(accent),
                 ...boundary,
-                padding: NODE_CONTENT_SPACING.padding,
-                gap: NODE_CONTENT_SPACING.imageTextGap,
+                padding: CONVERSATION_CARD_SPACING.padding,
+                paddingInline:
+                  CONVERSATION_CARD_SPACING.padding - boundary.borderWidth,
                 fontSize: titleTypography.size,
                 fontWeight: titleTypography.weight,
                 lineHeight: titleTypography.lineHeight,
@@ -210,34 +212,62 @@ function SpaceShortcutSpecimen({
                 }
               }}
             >
-              <Tooltip
-                content="空间快捷入口"
-                wrapperClassName="sp-design-type-marker"
-              >
-                <SpaceIcon
-                  style={{
-                    width: titleTypography.size,
-                    height: titleTypography.size,
-                    marginTop:
-                      (titleTypography.size * titleTypography.lineHeight -
-                        titleTypography.size) /
-                      2,
-                  }}
-                  strokeWidth={1.5}
-                  className="text-fg-muted"
-                  aria-hidden
-                />
-              </Tooltip>
               <span className="sp-design-copy">
-                <span className="sp-design-title" title={title}>
-                  {title}
+                <span className="flex items-start gap-2">
+                  <span
+                    className="text-fg-muted inline-flex h-[1lh] shrink-0 items-center justify-center"
+                    style={{ width: CONVERSATION_CARD_SPACING.iconSlotWidth }}
+                    data-space-type-icon
+                    aria-hidden
+                  >
+                    <SpaceIcon
+                      size={CONVERSATION_CARD_SPACING.spaceIconSize}
+                      style={{
+                        width: CONVERSATION_CARD_SPACING.spaceIconSize,
+                        height: CONVERSATION_CARD_SPACING.spaceIconSize,
+                      }}
+                    />
+                  </span>
+                  <span className="flex min-w-0 flex-1 items-start gap-1">
+                    <span className="sp-design-title" title={title}>
+                      {title}
+                    </span>
+                    <Tooltip
+                      content={t('spacePreview.shortcutLabel')}
+                      wrapperClassName="inline-flex h-[1lh] shrink-0 items-center"
+                    >
+                      <ArrowUpRight
+                        size="1em"
+                        style={{ width: '1em', height: '1em' }}
+                        aria-label={t('spacePreview.shortcutLabel')}
+                      />
+                    </Tooltip>
+                  </span>
                 </span>
                 {!unavailable ? (
-                  <span className="sp-design-summary">
-                    <SpaceShortcutSummary
-                      nodeCount={DEMO_NODE_COUNT}
-                      updatedAt={DEMO_UPDATED_AT}
+                  <span
+                    className="flex items-center gap-2"
+                    style={{ height: CONVERSATION_CARD_SPACING.footerHeight }}
+                  >
+                    <SpaceAgentActivity
+                      activity={[
+                        {
+                          nodeId: 'node-demo-1',
+                          threadId: 'demo-1',
+                          title: 'Research',
+                          status: 'running',
+                          agentBinding: { kind: 'internal' },
+                        },
+                        {
+                          nodeId: 'node-demo-2',
+                          threadId: 'demo-2',
+                          title: 'Review',
+                          status: 'approval',
+                          agentBinding: { kind: 'internal' },
+                        },
+                      ]}
                     />
+                    <NodeActivityTime updatedAt={DEMO_UPDATED_AT} />
                   </span>
                 ) : null}
               </span>
@@ -399,11 +429,14 @@ function SpaceShortcutSpecimen({
                   onDismiss={() => setWidthOpen(false)}
                   className={FLOATING_TOOLBAR_POPOVER_CLASS}
                 >
-                  <SpaceShortcutWidthSettings
-                    key={`${manualWidth}-${Math.round(measured.width)}`}
+                  <FloatingToolbar.SizePicker
                     width={measured.width}
-                    automatic={manualWidth === null}
-                    onChange={setManualWidth}
+                    height={null}
+                    showHeight={false}
+                    minSize={MIN_WIDTH}
+                    onApply={({ width }) => {
+                      if (width !== undefined) setManualWidth(width);
+                    }}
                   />
                 </Popover>
               ) : null}
@@ -411,7 +444,7 @@ function SpaceShortcutSpecimen({
           ) : null}
         </div>
         <p className="sp-design-size-readout">
-          {manualWidth === null ? '自动宽度' : `自定义 ${manualWidth}`}
+          {`宽度 ${manualWidth}`}
           {' · '}当前 {Math.round(measured.width)} ×{' '}
           {Math.round(measured.height)}
           {' · '}高度随文字变化
@@ -549,14 +582,16 @@ export default function SpacePreviewDesignPlaygroundPage() {
         <div>
           <span>01 / 使用同一套节点规范</span>
           <p>
-            3px 标准边界、共享圆角、28px / 500 卡片标题，以及 Note / Web / PDF
+            {NODE_BORDER_WIDTH}px 边界、{CONVERSATION_CARD_SPACING.padding}px
+            内边距、共享圆角、24px / 500 卡片标题，以及 Note / Web / PDF
             的表面与强调色。不增加阴影或新的边框颜色。
           </p>
         </div>
         <div>
           <span>02 / 入口，不是缩略画布</span>
           <p>
-            保留空间图标、目标名称，以及节点数量和相对更新时间摘要。没有封面、快照加载、内部缩放或大面积空白，也不显示
+            仅保留目标名称、Agent
+            活动和相对更新时间。没有图标、封面、快照加载、内部缩放或大面积空白，也不显示
             URL 和常驻跳转箭头。
           </p>
         </div>
@@ -575,32 +610,32 @@ export default function SpacePreviewDesignPlaygroundPage() {
             指向并进入已有 Space
             的快捷入口，不展示其内部内容，不复制节点，也不由此建立父子关系。
           </dd>
-          <dt>自动宽度</dt>
+          <dt>默认宽度</dt>
           <dd>
-            按图标、名称、间距和边框的实际布局适配。当前试验范围为 {MIN_WIDTH}–
-            {AUTO_MAX_WIDTH}{' '}
-            画布单位，不是所有节点的统一宽度标准。摘要不参与自动宽度计算。
+            新建入口统一为 {SPACE_SHORTCUT_SIZE.defaultWidth}
+            画布单位。名称和摘要变化不会改变宽度。
           </dd>
           <dt>文字与高度</dt>
           <dd>
             短标题一行，长标题最多两行，超出省略；悬停标题查看全名。字号固定为
-            28，不随宽度缩放；高度跟随标题行数和摘要，不提供高度输入或上下拉伸。
+            24，不随宽度缩放；摘要固定一行，高度只随标题行数变化，不提供高度输入或上下拉伸。
           </dd>
           <dt>空间摘要</dt>
           <dd>
-            标题下方间隔 4px，以 16px / 400
-            弱化文字展示节点数量和相对更新时间；单行显示，过长省略，悬停可查看精确时间。样例固定为
-            24 个节点、两天前更新；目标失效时隐藏摘要，不请求真实空间数据。
+            标题下方间隔 4px，以 18px / 400 展示 Agent
+            活动和相对更新时间，始终共用一行，放不下的对话收进「+N」。悬停时间可查看精确时间。样例固定为
+            1 个运行中、1
+            个待审批、两天前更新；目标失效时隐藏摘要，不请求真实空间数据。
           </dd>
           <dt>手动宽度</dt>
           <dd>
-            工具栏「宽度设置」可切换自动 / 自定义，输入不小于 {MIN_WIDTH}
-            的有限整数后应用，自定义宽度不设上限。拖动左右手柄会切换到自定义；键盘左右键每次调整
+            工具栏「宽度设置」使用共享 SizePicker，输入不小于 {MIN_WIDTH}
+            的有限整数后应用，宽度不设上限。也可拖动左右手柄；键盘左右键每次调整
             16。
           </dd>
           <dt>改名与恢复</dt>
           <dd>
-            自动模式随目标名称重新适配；自定义模式保留指定宽度，只重新换行。选择「自动」恢复内容适配。两个引用共享名称，各自保留宽度、颜色和位置。
+            改名保留指定宽度，只重新换行。两个引用共享名称，各自保留宽度、颜色和位置。
           </dd>
           <dt>小屏与单位</dt>
           <dd>
@@ -616,16 +651,15 @@ export default function SpacePreviewDesignPlaygroundPage() {
           <dt>正式接入边界</dt>
           <dd>
             此页只演示样式和交互，刷新后重置；不写入真实
-            Space。正式节点已接入目标名称、导航、宽度模式持久化、画布缩放和连线。删除普通快捷入口不会删除目标；World
+            Space。正式节点已接入目标名称、导航、宽度持久化、画布缩放和连线。删除普通快捷入口不会删除目标；World
             自动管理入口的保护规则保持不变。此页的键盘调宽和小屏约束仅用于演示。
           </dd>
         </dl>
         <h2 className="mt-6">建议按这个顺序体验</h2>
         <p>
-          ① 测试短 / 长标题，观察自动宽度和一 / 两行高度 → ②
+          ① 测试短 / 长标题，确认宽度不变、高度随一 / 两行变化 → ②
           在「选中与交互示例」的宽度设置中应用 320，再改名，确认宽度不变 → ③
-          拖左右手柄或用方向键，确认字号不变 → ④ 恢复自动 → ⑤
-          切换空间失效，检查进入被禁用。
+          拖左右手柄或用方向键，确认字号不变 → ④ 切换空间失效，检查进入被禁用。
         </p>
       </section>
       <p className="sp-design-state-hint">

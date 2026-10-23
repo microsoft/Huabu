@@ -8,6 +8,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -113,7 +114,9 @@ describe('server bundle runtime', () => {
   });
 
   it('loads real Agentlet and client-runtime artifacts outside the workspace without node_modules', async () => {
-    const directory = mkdtempSync(path.join(tmpdir(), 'huabu-real-runtime-'));
+    const directory = realpathSync(
+      mkdtempSync(path.join(tmpdir(), 'huabu-real-runtime-')),
+    );
     try {
       writeFileSync(path.join(directory, 'package.json'), '{"type":"module"}');
       await build({
@@ -122,6 +125,9 @@ describe('server bundle runtime', () => {
         entry: {
           index: path.resolve(
             '../../external/agentlet/packages/local/src/index.ts',
+          ),
+          'device-info': path.resolve(
+            '../../external/agentlet/packages/local/src/device-info.ts',
           ),
         },
         outDir: path.join(directory, 'agentlet'),
@@ -137,12 +143,14 @@ describe('server bundle runtime', () => {
       await build({
         ...runtimeOptions,
         config: false,
+        dts: false,
         entry: {
           'service-sdk': path.resolve(
             '../../packages/client-runtime/src/service-sdk.ts',
           ),
           daemon: path.resolve('../../packages/client-runtime/src/daemon.ts'),
           rfs: path.resolve('../../packages/client-runtime/src/rfs.ts'),
+          desktop: path.resolve('../../packages/client-runtime/src/desktop.ts'),
         },
         outDir: path.join(directory, 'client-runtime'),
         silent: true,
@@ -153,6 +161,29 @@ describe('server bundle runtime', () => {
         { encoding: 'utf8' },
       );
       expect(daemonHelp).toContain('--env-inject');
+      const deviceInfo = JSON.parse(
+        execFileSync(
+          process.execPath,
+          [
+            '--input-type=module',
+            '-e',
+            'const m = await import(process.argv[1]); console.log(JSON.stringify(await m.readDesktopDeviceInfo(process.argv[2])));',
+            pathToFileURL(path.join(directory, 'client-runtime/desktop.js'))
+              .href,
+            path.join(directory, 'agentlet/index.js'),
+          ],
+          {
+            cwd: directory,
+            encoding: 'utf8',
+            env: { ...process.env, HOME: directory, USERPROFILE: directory },
+          },
+        ),
+      );
+      expect(deviceInfo).toMatchObject({
+        agentletId: expect.any(String),
+        displayName: expect.any(String),
+        version: expect.any(String),
+      });
       const hostHelp = execFileSync(
         process.execPath,
         [path.join(directory, 'client-runtime/daemon.js'), '--help'],

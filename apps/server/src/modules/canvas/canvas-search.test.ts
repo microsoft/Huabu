@@ -140,6 +140,49 @@ async function collect(
 }
 
 describe('searchCanvas — tiered emission', () => {
+  it.each([
+    ['needle', 2, 6],
+    ['i\u0307', 0, 1],
+  ] as const)(
+    'preserves original UTF-16 source addresses after case folding: %s',
+    async (query, offset, length) => {
+      const events = await collect(
+        [mkNode('n1', 'note')],
+        [mkContent('n1', 'note', { content: '\u0130 needle' })],
+        { query, fields: ['content'] },
+      );
+      expect(events.find((event) => event.type === 'match')).toMatchObject({
+        match: { source: { offset, length } },
+      });
+    },
+  );
+  it('numbers raw Markdown occurrences including a link URL before the next visible paragraph', async () => {
+    const source = '[needle](https://example.test/needle)\n\nParagraph needle';
+    const events = await collect(
+      [mkNode('n1', 'note')],
+      [
+        mkContent('n1', 'note', {
+          content: source,
+        }),
+      ],
+      { query: 'needle', fields: ['content'] },
+    );
+    const ordinals = events.flatMap((event) =>
+      event.type === 'match' ? [event.match.occurrenceIndex] : [],
+    );
+    expect(ordinals).toEqual([0, 1, 2]);
+    const addresses = events.flatMap((event) =>
+      event.type === 'match' ? [event.match.source] : [],
+    );
+    expect(addresses.map((address) => address?.offset)).toEqual([
+      source.indexOf('needle'),
+      source.indexOf('needle', 10),
+      source.lastIndexOf('needle'),
+    ]);
+    expect(new Set(addresses.map((address) => address?.hash)).size).toBe(1);
+    expect(addresses[0]?.hash).toMatch(/^[a-f0-9]{64}$/);
+  });
+
   it('emits metadata-tier matches before content-tier matches', async () => {
     const nodes = [mkNode('n1', 'note'), mkNode('n2', 'text')];
     const contents = [
@@ -648,6 +691,11 @@ describe('searchCanvas — conversation tier', () => {
         { query, fields: ['conversation'] },
       );
       expect(events.filter((event) => event.type === 'match')).toHaveLength(1);
+      expect(events.find((event) => event.type === 'match')).toMatchObject({
+        match: {
+          source: { hash: expect.stringMatching(/^[a-f0-9]{64}$/), offset: 0 },
+        },
+      });
       const contextEvents = await collect(
         [mkNode('quoted-question', 'question', 'quoted-thread')],
         [mkContent('quoted-question', 'question', { label: 'Q' })],

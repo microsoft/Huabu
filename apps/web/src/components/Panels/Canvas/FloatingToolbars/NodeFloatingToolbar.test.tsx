@@ -9,7 +9,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSubmenu,
 } from '@/components/Common/DropdownMenu';
-import { resolveSetQuestionCardScale } from '@/handler/canvasCommand/resolvers/resolveSetQuestionCardScale';
+import { resolveSetCardScale } from '@/handler/canvasCommand/resolvers/resolveSetCardScale';
 import { QUESTION_NODE_DEFAULT_FONT_SIZE } from '@/utils/node/nodeFontConfig';
 
 import { NodeFloatingToolbar } from './NodeFloatingToolbar';
@@ -53,6 +53,7 @@ vi.mock('@xyflow/react', () => ({
   }),
 }));
 vi.mock('react-i18next', () => ({
+  initReactI18next: { type: '3rdParty', init: vi.fn() },
   useTranslation: () => ({
     t: (key: string) => (key === 'node.dragToMove' ? 'Drag to move' : key),
   }),
@@ -172,6 +173,38 @@ describe('NodeFloatingToolbar type-icon drag surface', () => {
     act(() => trigger.click());
   }
 
+  it('lets the shared menu move focus through production overflow actions', async () => {
+    render();
+    await act(async () => openPanel('toolbar.more'));
+    const items = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+    );
+    expect(items).toHaveLength(4);
+    expect(items[0].textContent).toContain('spaceHierarchy.collectAction');
+    expect(document.activeElement).toBe(items[0]);
+    act(() =>
+      items[0].dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'ArrowDown',
+          bubbles: true,
+          cancelable: true,
+        }),
+      ),
+    );
+    expect(document.activeElement).toBe(items[1]);
+    act(() =>
+      items[1].dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'End',
+          bubbles: true,
+          cancelable: true,
+        }),
+      ),
+    );
+    expect(document.activeElement).toBe(items[3]);
+    expect(items[3].textContent).toContain('actions.delete');
+  });
+
   it('anchors Move to the persistent overflow trigger rather than its disappearing menu item', () => {
     render();
     const trigger = container.querySelector<HTMLButtonElement>(
@@ -190,6 +223,36 @@ describe('NodeFloatingToolbar type-icon drag surface', () => {
     expect(trigger?.isConnected).toBe(true);
     expect(document.querySelector('.node-toolbar-overflow')).toBeNull();
   });
+
+  it.each(['video', 'spacePreview'] as const)(
+    'keeps single %s collection and movement in More',
+    (type) => {
+      render({
+        type,
+        data:
+          type === 'spacePreview'
+            ? { type, targetCanvasId: 'target' }
+            : { type, src: 'video.webm' },
+      });
+      expect(
+        container.querySelector('[aria-label^="spaceHierarchy.collectAction"]'),
+      ).toBeNull();
+      expect(document.body.textContent).not.toContain(
+        'spaceHierarchy.collectAction',
+      );
+      openPanel('toolbar.more');
+      const item = Array.from(
+        document.querySelectorAll('[role="menuitem"]'),
+      ).find((element) =>
+        element.textContent?.includes('spaceHierarchy.collectAction'),
+      );
+      expect(item).toBeDefined();
+      expect(item?.querySelector('.lucide-layers-2')).not.toBeNull();
+      expect(
+        document.querySelector('.node-toolbar-overflow')?.textContent,
+      ).toContain('moveSelection.action');
+    },
+  );
 
   it.each([
     { nested: false, detail: 1 },
@@ -248,20 +311,20 @@ describe('NodeFloatingToolbar type-icon drag surface', () => {
       data: { type: 'question', content: 'Question' },
     });
     expect(container.querySelector('[aria-label="Font size"]')).toBeNull();
-    expect(container.querySelector('[name="question-card-scale"]')).toBeNull();
+    expect(container.querySelector('[name="node-card-scale"]')).toBeNull();
     openPanel('toolbar.size.title');
     const scaleInput = document.querySelector<HTMLInputElement>(
-      '[name="question-card-scale"]',
+      '[name="node-card-scale"]',
     );
     expect(scaleInput?.min).toBe('10');
     expect(scaleInput?.max).toBe('1000');
     expect(scaleInput?.step).toBe('1');
     expect(
-      document.querySelector<HTMLInputElement>('[name="question-card-scale"]')
+      document.querySelector<HTMLInputElement>('[name="node-card-scale"]')
         ?.value,
     ).toBe('100');
     const scaleLabel = document
-      .querySelector('[name="question-card-scale"]')
+      .querySelector('[name="node-card-scale"]')
       ?.closest('label');
     expect(scaleLabel?.textContent).toContain('toolbar.cardScale');
     expect(scaleLabel?.textContent).toContain('%');
@@ -270,7 +333,7 @@ describe('NodeFloatingToolbar type-icon drag surface', () => {
     ).toBeNull();
     expect(container.querySelector('.lucide-rotate-ccw')).toBeNull();
     render({ type: 'text', data: { type: 'text', content: 'Text' } });
-    expect(container.querySelector('[name="question-card-scale"]')).toBeNull();
+    expect(container.querySelector('[name="node-card-scale"]')).toBeNull();
     expect(container.querySelector('[name="font-size"]')).not.toBeNull();
   });
 
@@ -291,7 +354,7 @@ describe('NodeFloatingToolbar type-icon drag surface', () => {
     });
     openPanel('toolbar.size.title');
     const input = document.querySelector<HTMLInputElement>(
-      '[name="question-card-scale"]',
+      '[name="node-card-scale"]',
     );
     if (!input) throw new Error('Missing card scale input');
     expect(input.value).toBe('123');
@@ -322,8 +385,8 @@ describe('NodeFloatingToolbar type-icon drag surface', () => {
           style: { fontSize: QUESTION_NODE_DEFAULT_FONT_SIZE * 1.5 },
         },
       };
-      const resolution = resolveSetQuestionCardScale(
-        { type: 'SET_QUESTION_CARD_SCALE', nodeId: node.id, percent },
+      const resolution = resolveSetCardScale(
+        { type: 'SET_CARD_SCALE', nodeId: node.id, percent },
         { nodes: [node], edges: [] },
       );
       const command = resolution.commands[0];
@@ -335,7 +398,7 @@ describe('NodeFloatingToolbar type-icon drag surface', () => {
       });
       openPanel('toolbar.size.title');
       expect(
-        document.querySelector<HTMLInputElement>('[name="question-card-scale"]')
+        document.querySelector<HTMLInputElement>('[name="node-card-scale"]')
           ?.value,
       ).toBe(String(percent));
     },
@@ -365,7 +428,7 @@ describe('NodeFloatingToolbar type-icon drag surface', () => {
     ['audio', 'mic'],
     ['office', 'file-type-corner'],
     ['frame', 'frame'],
-    ['spacePreview', 'panels-top-left'],
+    ['spacePreview', 'layers-2'],
     ['question', 'message-circle-question-mark'],
     ['sketch', 'pencil'],
   ] as const)(

@@ -1,10 +1,25 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { getDescendantIds } from '@huabu/shared/canvas-engine';
+import {
+  assignNodeZIndices,
+  getDescendantIds,
+} from '@huabu/shared/canvas-engine';
 
+import type { CanvasTool } from './canvasInputPolicy';
+import type { PendingNodeType } from '@/store/toolStore';
 import type { NestableNode } from '@huabu/shared/canvas-engine';
 import type { CSSProperties } from 'react';
+
+export function canvasNodeZOrder(
+  nodes: NestableNode[],
+  tool: CanvasTool,
+  pendingNodeType: PendingNodeType,
+): ReadonlyMap<string, number> {
+  return selectionZOrder(nodes, assignNodeZIndices(nodes), {
+    elevateSelectedNode: tool !== 'lasso' && pendingNodeType !== 'sketch',
+  });
+}
 
 /** Presentation-only elevation over assignNodeZIndices; never reorder source nodes. */
 export function selectionZOrder(

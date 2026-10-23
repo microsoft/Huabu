@@ -20,6 +20,7 @@ import {
   InvalidPublicOriginError,
   resolveConfiguredPublicOrigin,
 } from './public-origin.js';
+import { getDeploymentEnvironment } from '../../security/deployment-settings.js';
 
 import type { FastifyPluginAsync } from 'fastify';
 
@@ -50,7 +51,7 @@ function extractHostname(host: string | undefined): string | null {
  * Exported so the CORS layer can reuse the same set of hostnames.
  */
 export function resolveAllowedHostnames(
-  env: NodeJS.ProcessEnv = process.env,
+  env: NodeJS.ProcessEnv = getDeploymentEnvironment(),
 ): Set<string> {
   const extra = (env.HUABU_ALLOWED_HOSTS ?? '')
     .split(',')

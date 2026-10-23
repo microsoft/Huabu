@@ -17,7 +17,7 @@ export interface SpaceShortcutTarget {
 }
 
 export function useSpaceShortcutTarget(
-  targetCanvasId: string,
+  targetCanvasId = '',
 ): SpaceShortcutTarget {
   const { t } = useTranslation();
   const title = useWorkspaceStore((state) =>
@@ -41,8 +41,10 @@ export function useSpaceShortcutTarget(
   const refresh = useWorkspaceStore((state) => state.refreshSpaceTitles);
 
   useEffect(() => {
-    if (available && metadataStatus === 'idle') void refresh();
-  }, [available, metadataStatus, refresh]);
+    if (targetCanvasId && available && metadataStatus === 'idle') {
+      void refresh();
+    }
+  }, [targetCanvasId, available, metadataStatus, refresh]);
 
   const retry = useCallback(() => {
     void refresh();

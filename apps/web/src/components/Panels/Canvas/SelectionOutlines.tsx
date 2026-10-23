@@ -110,6 +110,9 @@ function SelectionOutlineForNode({
   const hasGeometryPreview = useGesturePreviewStore((state) =>
     state.nodeGeometryPreviews?.has(node.id),
   );
+  const hasStructuredDrop = useGesturePreviewStore(
+    (state) => state.structuredDropPreview?.nodeId === node.id,
+  );
   const mark = useNodeCollapseStore((state) => state.marks[node.id]);
   const abs = hasGeometryPreview
     ? (getAbsolutePosition(previewNodes as NestableNode[], node.id) ??
@@ -136,7 +139,13 @@ function SelectionOutlineForNode({
       data-canvas-grounding-exclude
       data-node-selection-outline={hoveredOnly ? undefined : node.id}
       data-node-hover-outline={hoveredOnly ? node.id : undefined}
-      className={`pointer-events-none absolute z-998 ${hoveredOnly ? 'opacity-50' : ''}`}
+      className={`pointer-events-none absolute z-998 ${
+        node.dragging && hasStructuredDrop && !mark
+          ? 'opacity-35'
+          : hoveredOnly
+            ? 'opacity-50'
+            : ''
+      }`}
       rect={{
         x: renderedRect.x,
         y: renderedRect.y,
@@ -166,7 +175,7 @@ function SelectionOutlineForNode({
  * for the bounding-box outline.
  *
  * Visual contract:
- *  - Opaque 1.5px solid `--color-info`, without a glow or type-specific fading.
+ *  - Solid `--color-info`; structured card drags soften it while the footprint marks the destination.
  *  - `border-radius` uses the node shell's responsive size policy and scales
  *    with `zoom`, so the outline tracks the rendered corners at any view scale.
  *  - `pointer-events: none` — purely cosmetic; pointer hit-testing still

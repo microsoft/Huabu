@@ -233,7 +233,7 @@ describe('workspace Space metadata', () => {
     const pending = useWorkspaceStore.getState().refreshSpaceTitles();
     const changed = useWorkspaceStore.getState().refreshSpaceTitles(['target']);
     expect(changed).toBe(pending);
-    expect(useWorkspaceStore.getState().spaceSummaries.target).toBeUndefined();
+    expect(useWorkspaceStore.getState().spaceSummaries.target).toEqual({});
     expect(useWorkspaceStore.getState().spaceTitles.target).toBe('Before');
     old.resolve(spaces('Before'));
     await changed;
@@ -253,10 +253,40 @@ describe('workspace Space metadata', () => {
     await useWorkspaceStore.getState().refreshSpaceTitles(['target']);
     expect(useWorkspaceStore.getState()).toMatchObject({
       spaceTitles: { target: 'Known' },
-      spaceSummaries: {},
+      spaceSummaries: { target: {} },
       spaceTitlesError: 'Offline',
     });
   });
+
+  it.each([null, 'parent'])(
+    'keeps confirmed hierarchy after a failed post-rename refresh (parent=%s)',
+    async (parentSpaceId) => {
+      const hierarchy = {
+        parentSpaceId,
+        parentEntryNodeId: parentSpaceId ? 'entry' : null,
+      };
+      useWorkspaceStore.setState({
+        spaceTitles: { target: 'Before' },
+        spaceSummaries: {
+          target: { ...hierarchy, nodeCount: 2, updatedAt: 1 },
+        },
+      });
+      const old = deferred<ListCanvasesResponse>();
+      vi.mocked(listCanvases)
+        .mockReturnValueOnce(old.promise)
+        .mockRejectedValueOnce(new Error('Offline'));
+      const pending = useWorkspaceStore.getState().refreshSpaceTitles();
+      useWorkspaceStore.getState().setSpaceTitle('target', 'Renamed');
+      void useWorkspaceStore.getState().refreshSpaceTitles(['target']);
+      old.resolve(spaces('Stale'));
+      await pending;
+      expect(useWorkspaceStore.getState().spaceTitles.target).toBe('Renamed');
+      expect(useWorkspaceStore.getState().spaceSummaries.target).toEqual(
+        hierarchy,
+      );
+      expect(useWorkspaceStore.getState().spaceTitlesError).toBe('Offline');
+    },
+  );
 
   it.each(['resolve', 'reject'] as const)(
     'ignores an old workspace request that completes with %s after switching away and back',

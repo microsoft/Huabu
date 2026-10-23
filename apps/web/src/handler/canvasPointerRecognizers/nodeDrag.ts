@@ -28,7 +28,7 @@ import type { Node, NodeChange } from '@xyflow/react';
  * nodes.
  *
  * The move is driven through the store's existing drag lifecycle
- * (`onNodeDragStart` → `onNodesChange` position ticks → `onNodeDragStop`)
+ * (`onNodeDragStart` → `onNodesChange` / `onNodeDrag` ticks → `onNodeDragStop`)
  * rather than React Flow's own pointer drag. That indirection is
  * deliberate: while the Sketch tool is armed React Flow node dragging is
  * disabled (`nodesDraggable={false}`) and the full-screen overlay covers
@@ -188,7 +188,22 @@ export function createNodeDragRecognizer(options?: {
       }
       if (!movementAllowed) return;
       const { dx, dy } = flowDelta(ctx, event.clientX, event.clientY);
-      useCanvasStore.getState().onNodesChange(positionChanges(dx, dy, true));
+      const store = useCanvasStore.getState();
+      store.onNodesChange(positionChanges(dx, dy, true));
+      const liveDragged = draggedNodes.map((node) => ({
+        ...node,
+        position: { x: node.position.x + dx, y: node.position.y + dy },
+      }));
+      const livePrimary = liveDragged.find(
+        (node) => node.id === primaryNode?.id,
+      );
+      if (livePrimary) {
+        store.onNodeDrag(
+          dragEvent({ clientX: event.clientX, clientY: event.clientY }),
+          livePrimary,
+          liveDragged,
+        );
+      }
     },
     onUp: (event, ctx) => {
       if (event.pointerId !== pointerId) return;

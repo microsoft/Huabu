@@ -10,6 +10,7 @@ import {
   MENU_SECTION_LABEL_CLASS,
   MENU_SURFACE_CLASS,
 } from '@/components/Common/menuStyles';
+import { POPOVER_SURFACE_CLASS } from '@/components/Common/Popover';
 import { getNodeIcon } from '@/config/nodeIcons';
 
 import type { useNodeMentionTypeahead } from './useNodeMentionTypeahead';
@@ -59,7 +60,7 @@ export function NodeMentionMenu({
   return (
     <div
       data-node-mention-menu
-      className={`${MENU_SURFACE_CLASS} border-edge-default bg-surface absolute bottom-full left-0 z-50 mb-2 w-full max-w-sm border shadow-lg`}
+      className={`${POPOVER_SURFACE_CLASS} ${MENU_SURFACE_CLASS} absolute bottom-full left-0 z-50 mb-2 w-full max-w-sm`}
     >
       <div className={`${MENU_SECTION_LABEL_CLASS} truncate`}>
         {mention.query
@@ -110,7 +111,7 @@ export function NodeMentionMenu({
               >
                 <Icon aria-hidden />
                 <span className="min-w-0 flex-1 truncate">{label}</span>
-                <span className="text-fg-subtle shrink-0 text-xs">
+                <span className="text-fg-muted shrink-0 text-xs">
                   {t(`layers.filterLabels.${typeKey}`, {
                     defaultValue: node.type ?? '',
                   })}

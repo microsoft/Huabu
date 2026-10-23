@@ -16,6 +16,7 @@ export interface CanvasPointerRouterContext {
   instance: ReactFlowInstance;
   inputMode: EffectiveInputMode;
   explicitToolActive: boolean;
+  inkToolActive?: boolean;
   onTouchTakeover: () => void;
   onEmptyCanvasTap: () => void;
   /**

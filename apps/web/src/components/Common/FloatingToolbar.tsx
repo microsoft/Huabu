@@ -20,6 +20,7 @@ import {
   ChevronDown,
   Shrink,
   UnfoldVertical,
+  UnfoldHorizontal,
   Ungroup,
 } from 'lucide-react';
 import { Fragment, useEffect, useRef, useState } from 'react';
@@ -33,7 +34,7 @@ import { cn } from './cn';
 import { ColorPicker, type ColorPreset } from './ColorPicker';
 import { DropdownMenu, DropdownMenuItem } from './DropdownMenu';
 import { FLOATING_CHROME_PROPS } from './floatingChrome';
-import { Popover } from './Popover';
+import { Popover, POPOVER_SURFACE_CLASS } from './Popover';
 import {
   Select as BaseSelect,
   type SelectOption as BaseSelectOption,
@@ -64,8 +65,7 @@ export const FLOATING_TOOLBAR_CLASS =
   'text-fg-muted shadow-bottom bg-surface flex items-center gap-1 rounded-lg p-1.5';
 
 /** Shared surface chrome for compact popovers opened from a toolbar. */
-export const FLOATING_TOOLBAR_POPOVER_CLASS =
-  'border-edge-default shadow-bottom bg-surface z-50 rounded-lg border p-2';
+export const FLOATING_TOOLBAR_POPOVER_CLASS = `${POPOVER_SURFACE_CLASS} z-50 p-2`;
 
 // ─── Root ─────────────────────────────────────────────────────────────────────
 
@@ -371,6 +371,17 @@ function ToolbarColorPicker({
     />
   );
 
+  const picker = (
+    <ColorPicker
+      colors={colors}
+      activeToken={value}
+      onSelect={(token) => {
+        onSelect(token);
+        setIsOpen(false);
+      }}
+    />
+  );
+
   return (
     <div
       ref={(node) => {
@@ -403,14 +414,7 @@ function ToolbarColorPicker({
           onDismiss={() => setIsOpen(false)}
           className={FLOATING_TOOLBAR_POPOVER_CLASS}
         >
-          <ColorPicker
-            colors={colors}
-            activeToken={value}
-            onSelect={(token) => {
-              onSelect(token);
-              setIsOpen(false);
-            }}
-          />
+          {picker}
         </Popover>
       ) : isOpen ? (
         createPortal(
@@ -436,14 +440,7 @@ function ToolbarColorPicker({
               onMouseDown={(e) => e.preventDefault()}
               onClick={(e) => e.stopPropagation()}
             >
-              <ColorPicker
-                colors={colors}
-                activeToken={value}
-                onSelect={(t) => {
-                  onSelect(t);
-                  setIsOpen(false);
-                }}
-              />
+              {picker}
             </div>
           </>,
           document.body,
@@ -496,11 +493,10 @@ interface ToolbarSizePickerProps {
   };
   /**
    * Generalised auto-size toggle. Like `heightAuto` but also covers
-   * the W input when `dimensions: 'both'` (e.g. frame hug-mode where
-   * both axes track the content).
+   * the W input when `dimensions: 'width'` and both inputs for `'both'`.
    *
    * When `active` is `true`:
-   * - The affected inputs (`H` only for `'height'`; `W` AND `H` for
+   * - The affected inputs (`W` for `'width'`; `H` for `'height'`; both for
    *   `'both'`) render with a subtle italic hint style.
    * - Typing into an affected input always dispatches via `onApply`,
    *   even when the typed value matches the current measured size,
@@ -518,7 +514,7 @@ interface ToolbarSizePickerProps {
    */
   autoSize?: {
     /** Which axes are auto-sized when `active`. Defaults to `'height'`. */
-    dimensions?: 'height' | 'both';
+    dimensions?: 'width' | 'height' | 'both';
     togglePosition?: 'start' | 'end';
     appearance?: 'grouped' | 'separate';
     active: boolean;
@@ -742,10 +738,11 @@ function ToolbarSizePicker({
     autoSize ??
     (heightAuto ? { dimensions: 'height' as const, ...heightAuto } : undefined);
   const autoActive = auto?.active === true;
-  const heightIsAuto = autoActive;
+  const isWidthOnly = auto?.dimensions === 'width';
+  const heightIsAuto = autoActive && !isWidthOnly;
   const isBothAxes = auto?.dimensions === 'both';
   const separateInputs = isBothAxes && auto?.appearance === 'separate';
-  const widthIsAuto = autoActive && isBothAxes;
+  const widthIsAuto = autoActive && (isBothAxes || isWidthOnly);
 
   // Auto/fixed toggle rendered as a single icon whose position matches
   // its scope: for single-axis note height it embeds in the H input;
@@ -760,10 +757,14 @@ function ToolbarSizePicker({
     const description = autoActive
       ? isBothAxes
         ? t('toolbar.size.switchManual')
-        : t('toolbar.size.switchFixedHeight')
+        : isWidthOnly
+          ? t('toolbar.size.switchFixedWidth')
+          : t('toolbar.size.switchFixedHeight')
       : isBothAxes
         ? t('toolbar.size.fitSize')
-        : t('toolbar.size.fitHeight');
+        : isWidthOnly
+          ? t('toolbar.size.fitWidth')
+          : t('toolbar.size.fitHeight');
     return (
       <Tooltip content={description}>
         <button
@@ -798,6 +799,9 @@ function ToolbarSizePicker({
       unstyled={isBothAxes && !separateInputs}
       autoText={widthIsAuto ? autoLabel : undefined}
       inputClassName={widthIsAuto ? 'text-fg-muted italic' : undefined}
+      endAdornment={
+        isWidthOnly ? modeToggle(<UnfoldHorizontal size={12} />) : undefined
+      }
       onApply={(next) => {
         if (
           widthIsAuto ||
@@ -821,7 +825,9 @@ function ToolbarSizePicker({
       autoText={heightIsAuto ? autoLabel : undefined}
       inputClassName={heightIsAuto ? 'text-fg-muted italic' : undefined}
       endAdornment={
-        isBothAxes ? undefined : modeToggle(<UnfoldVertical size={12} />)
+        isBothAxes || isWidthOnly
+          ? undefined
+          : modeToggle(<UnfoldVertical size={12} />)
       }
       onApply={(next) => {
         if (
@@ -984,6 +990,7 @@ function ToolbarAlignPicker({
         floating
         placement="bottom"
         open={isOpen}
+        contentRole="dialog"
         onOpenChange={setIsOpen}
         className={cn(FLOATING_TOOLBAR_POPOVER_CLASS, panelClassName)}
         trigger={

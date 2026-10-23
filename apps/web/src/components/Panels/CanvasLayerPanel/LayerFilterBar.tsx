@@ -196,6 +196,8 @@ export const LayerFilterBar = ({
               return (
                 <DropdownMenuItem
                   key={key}
+                  role="menuitemcheckbox"
+                  aria-checked={isSelected}
                   icon={
                     <Icon
                       size={14}

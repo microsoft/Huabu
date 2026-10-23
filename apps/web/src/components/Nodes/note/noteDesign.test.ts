@@ -26,13 +26,13 @@ describe('Note surface design', () => {
     }
   });
 
-  it('uses the Note accent with the Frame divider strategy', () => {
+  it('softens the accent divider for the shared content-card boundary', () => {
     expect(noteBoundaryForAccent(null)).toEqual({
-      borderColor: 'var(--edge-default)',
+      borderColor: 'color-mix(in srgb, var(--edge-default) 75%, transparent)',
       borderWidth: NOTE_SURFACE_DESIGN_CONFIG.borderWidth,
     });
     expect(noteBoundaryForAccent('#008080')).toEqual({
-      borderColor: getAccentTokens('#008080').divider,
+      borderColor: `color-mix(in srgb, ${getAccentTokens('#008080').divider} 75%, transparent)`,
       borderWidth: NOTE_SURFACE_DESIGN_CONFIG.borderWidth,
     });
   });

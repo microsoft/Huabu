@@ -6,6 +6,11 @@ import { ChevronDown } from 'lucide-react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import {
+  REQUEST_DELETE_SPACE,
+  REQUEST_REPARENT_SPACE,
+} from '@/utils/spaceHierarchy';
+
 import { ApiError } from '../../../api/_client';
 import { exportCanvas } from '../../../api/canvas.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
@@ -127,6 +132,7 @@ export const CanvasMenu: React.FC<CanvasMenuProps> = ({ onOpenShortcuts }) => {
         <Input
           ref={inputRef}
           name="space-title"
+          title={draftTitle}
           autoComplete="off"
           className="text-fg-default focus:shadow-bottom m-0 h-7 max-w-full min-w-8 overflow-hidden bg-transparent py-0.5 pr-0.5 pl-1.5 text-[15px] leading-6 font-medium text-ellipsis outline-none"
           value={draftTitle}
@@ -189,6 +195,28 @@ export const CanvasMenu: React.FC<CanvasMenuProps> = ({ onOpenShortcuts }) => {
           <DropdownMenuItem onClick={() => void handleExport()}>
             {t('canvasHeader.exportCanvas')}
           </DropdownMenuItem>
+          {!isWorld && (
+            <>
+              <DropdownMenuItem
+                onClick={() => {
+                  setIsOpen(false);
+                  window.dispatchEvent(new Event(REQUEST_REPARENT_SPACE));
+                }}
+              >
+                {t('spaceHierarchy.move')}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => {
+                  setIsOpen(false);
+                  window.dispatchEvent(
+                    new CustomEvent(REQUEST_DELETE_SPACE, { detail: canvasId }),
+                  );
+                }}
+              >
+                {t('canvasList.deleteCanvas')}
+              </DropdownMenuItem>
+            </>
+          )}
           {onOpenShortcuts && (
             <DropdownMenuItem
               shortcut="?"

@@ -86,6 +86,7 @@ export {
   createSpace,
   createStorage,
   deleteSpace,
+  deleteSpaceFromValidatedTreeAlreadyLocked,
   getBlobStore,
   getStorage,
   getStructuredStore,

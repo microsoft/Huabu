@@ -5,13 +5,42 @@ import { findSketchStrokesInPolygon } from '@/components/Nodes/sketch/sketchHitT
 import { nodesInSelection } from '@/components/Panels/Canvas/areaSelection';
 import useCanvasStore from '@/store/canvasStore';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
+import { useWorkspaceStore } from '@/store/workspaceStore';
+import { isVisibleWorldNode } from '@/utils/spaceHierarchy';
 
 import type { SelectionArea } from '@/utils/selectionGeometry';
 
 function applySelection(nodeIds: string[], edgeIds: string[]) {
   const state = useCanvasStore.getState();
-  const nodes = new Set(nodeIds);
-  const edges = new Set(edgeIds);
+  const workspace = useWorkspaceStore.getState();
+  const visible = new Set(
+    state.nodes
+      .filter(
+        (node) =>
+          !node.hidden &&
+          isVisibleWorldNode(
+            node,
+            state.canvasId,
+            workspace.worldCanvasId,
+            workspace.spaceSummaries,
+          ),
+      )
+      .map((node) => node.id),
+  );
+  const nodes = new Set(nodeIds.filter((id) => visible.has(id)));
+  const requestedEdges = new Set(edgeIds);
+  const edges = new Set(
+    state.edges
+      .filter(
+        (edge) =>
+          requestedEdges.has(edge.id) &&
+          !edge.hidden &&
+          edge.selectable !== false &&
+          visible.has(edge.source) &&
+          visible.has(edge.target),
+      )
+      .map((edge) => edge.id),
+  );
   state.onNodesChange(
     state.nodes.flatMap((node) =>
       Boolean(node.selected) === nodes.has(node.id)
@@ -58,9 +87,18 @@ export function createAreaSelectionSession(strokeLevel = false) {
       if (!sameCanvas()) return;
       changed = true;
       const state = useCanvasStore.getState();
+      const workspace = useWorkspaceStore.getState();
+      const visibleNodes = state.nodes.filter((node) =>
+        isVisibleWorldNode(
+          node,
+          state.canvasId,
+          workspace.worldCanvasId,
+          workspace.spaceSummaries,
+        ),
+      );
       const candidates = strokeLevel
-        ? state.nodes.filter((node) => node.type !== 'sketch')
-        : state.nodes;
+        ? visibleNodes.filter((node) => node.type !== 'sketch')
+        : visibleNodes;
       // Keep ancestors in the geometry resolver, even when their Sketch ink is selected separately.
       const hits = area ? nodesInSelection(state.nodes, area) : [];
       const eligible = new Set(candidates.map((node) => node.id));

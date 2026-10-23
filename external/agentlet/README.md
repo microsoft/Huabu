@@ -62,7 +62,7 @@ Important options:
 | `--agentlet-id <id>` | Exact execution-node identity override; the default is the persistent UUID in `~/.agentlet/device.json`. |
 | `--max-agents <count>` | Maximum number of concurrently managed agent processes. |
 | `--buffer-limit <count>` | Buffer capacity advertised in daemon and session profiles. |
-| `--reconnect-max <seconds>` | Maximum exponential reconnect delay. |
+| `--reconnect-max <seconds>` | Maximum exponential reconnect delay in positive whole seconds; defaults to 30. |
 | `--heartbeat <seconds>` | WebSocket ping interval; `0` disables heartbeats. |
 | `--log-level <level>` | `debug`, `info`, `warn`, or `error`. |
 | `--log-file <path>` | Optional JSON-lines log destination. |
@@ -71,6 +71,12 @@ Important options:
 Set `AGENTLET_TOKEN` in the daemon's environment before running these examples. The generic `--token` option remains available, but environment credentials avoid putting the token in process arguments. A rejected control handshake exits nonzero; an ordinary shutdown exits zero.
 
 The control and session connections use the same `agentletId`. Each spawned ACP session has its own `sessionId` and WebSocket, so control-channel and session-channel failures remain independent. The machine control channel reconnects automatically; a closed session channel stops that session's relay and is not automatically reconnected.
+
+A `server/shutdown` notification with reason `server_shutting_down` means the host is stopping, not that the user wants the daemon to exit. The daemon stops old managed agents and pending launches, stays alive, and reconnects with the same device identity and credentials after delays of 1, 2, 4, 8, 16, then 30 seconds by default. Attempts continue while the daemon runs; a successful handshake resets the delay. This restores device availability, not running tasks or session relays. Other shutdown reasons and user signals still stop the daemon. A rejected control handshake or HTTP 401/403 upgrade exits nonzero with actionable connection guidance rather than retrying rejected credentials indefinitely.
+
+Stopping waits for owned process-tree cleanup before releasing capacity or reconnecting, not merely for the shell to exit. POSIX signals the dedicated process group; Windows awaits tree-wide `taskkill`. Descendants that deliberately create a separate POSIX session are outside that group.
+
+Failed bootstrap cleanup retains its capacity reservation and is retried after one second. Idle cleanup failure keeps the agent tracked for an explicit stop retry. Shutdown attempts all pending and managed cleanups concurrently and waits for every result before exiting, reporting failure if any tree could not be stopped.
 
 ## Harness discovery
 

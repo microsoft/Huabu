@@ -14,11 +14,19 @@ import { afterAll } from 'vitest';
  * with parallel suites.
  */
 const previousDataDir = process.env.HUABU_DATA_DIR;
+const previousConfigDir = process.env.HUABU_CONFIG_DIR;
 const testDataDir = mkdtempSync(path.join(tmpdir(), 'huabu-server-test-data-'));
+const testConfigDir = mkdtempSync(
+  path.join(tmpdir(), 'huabu-server-test-config-'),
+);
 process.env.HUABU_DATA_DIR = testDataDir;
+process.env.HUABU_CONFIG_DIR = testConfigDir;
 
 afterAll(() => {
   if (previousDataDir === undefined) delete process.env.HUABU_DATA_DIR;
   else process.env.HUABU_DATA_DIR = previousDataDir;
+  if (previousConfigDir === undefined) delete process.env.HUABU_CONFIG_DIR;
+  else process.env.HUABU_CONFIG_DIR = previousConfigDir;
   rmSync(testDataDir, { recursive: true, force: true });
+  rmSync(testConfigDir, { recursive: true, force: true });
 });

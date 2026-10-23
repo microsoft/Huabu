@@ -30,7 +30,7 @@ export function ThinkingCard({
       {inActivity ? (
         <span
           aria-hidden
-          className="absolute top-1 left-0 flex size-3 items-center justify-center"
+          className="absolute top-1 left-1 flex size-3 items-center justify-center"
         >
           <span className="bg-fg-muted/50 h-1 w-1 rounded-full" />
         </span>

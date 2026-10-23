@@ -156,6 +156,22 @@ function findButton(label: string): HTMLButtonElement {
 }
 
 describe('Settings information architecture', () => {
+  it('keeps navigation and version above the scrollable form on narrow screens', async () => {
+    await renderModal();
+    const dialog = container.querySelector('[role="dialog"]');
+    const navigation = dialog?.querySelector('nav');
+    expect(dialog?.classList.contains('flex-col')).toBe(true);
+    expect(dialog?.classList.contains('sm:flex-row')).toBe(true);
+    expect(navigation?.classList.contains('grid-cols-3')).toBe(true);
+    expect(navigation?.classList.contains('sm:w-48')).toBe(true);
+    expect(navigation?.querySelector('span.select-text')).not.toBeNull();
+    expect(
+      container
+        .querySelector('header')
+        ?.parentElement?.classList.contains('min-h-0'),
+    ).toBe(true);
+  });
+
   it('vertically centers both titles on matching header centerlines', async () => {
     await renderModal();
     const title = container.querySelector('nav h2');
@@ -169,7 +185,7 @@ describe('Settings information architecture', () => {
     expect(header?.classList.contains('items-center')).toBe(true);
   });
 
-  it('starts content directly below the header without changing side or bottom padding', async () => {
+  it('starts content below the header with responsive side padding', async () => {
     await renderModal();
     for (const label of [
       'settings.agent',
@@ -181,7 +197,8 @@ describe('Settings information architecture', () => {
       expect(content?.classList.contains('overflow-y-auto')).toBe(true);
       expect(content?.classList.contains('pt-0')).toBe(true);
       expect(content?.classList.contains('pb-4')).toBe(true);
-      expect(content?.classList.contains('px-5')).toBe(true);
+      expect(content?.classList.contains('px-4')).toBe(true);
+      expect(content?.classList.contains('sm:px-5')).toBe(true);
       expect(content?.classList.contains('py-4')).toBe(false);
     }
   });
@@ -227,8 +244,9 @@ describe('Settings information architecture', () => {
     ]);
     for (const tab of tabs) {
       expect(tab.querySelector('svg')).toBeNull();
-      expect(tab.classList.contains('rounded-lg')).toBe(true);
-      expect(tab.classList.contains('min-h-[30px]')).toBe(true);
+      expect(tab.classList.contains('rounded-md')).toBe(true);
+      expect(tab.classList.contains('min-h-8')).toBe(true);
+      expect(tab.classList.contains('text-[13px]')).toBe(true);
       expect(tab.classList.contains('px-2')).toBe(true);
       expect(tab.classList.contains('py-0')).toBe(true);
       expect(tab.classList.contains('border-l-2')).toBe(false);

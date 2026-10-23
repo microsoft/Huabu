@@ -41,6 +41,8 @@ test('shared menus keep default metrics, states and behaviors without toolbar ov
   await expect(label).toHaveCSS('line-height', '18px');
   await expect(label).toHaveCSS('text-align', 'left');
   await expect(label).toHaveCSS('text-transform', 'none');
+  await expect(label).toHaveCSS('font-weight', '400');
+  await expect(label).toHaveCSS('margin-top', '16px');
   await selected
     .locator('xpath=ancestor::*[@data-floating-chrome][1]')
     .screenshot({
@@ -80,7 +82,11 @@ test('shared menus keep default metrics, states and behaviors without toolbar ov
     page.getByRole('menuitem', { name: 'Link', exact: true }),
   ).toHaveAttribute('href', '/#destination');
   await page.keyboard.press('Tab');
-  await action.focus();
+  await expect(action).toHaveCount(0);
+  const menuTrigger = page.getByRole('button', { name: 'Menu sample' });
+  await menuTrigger.focus();
+  await menuTrigger.press('ArrowDown');
+  await expect(action).toBeFocused();
   expect(
     await action.evaluate((el) => getComputedStyle(el).boxShadow),
   ).not.toBe('none');

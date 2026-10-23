@@ -245,6 +245,101 @@ test.afterEach(async ({ page }, testInfo) => {
   });
 });
 
+test('Frame density and card typography stay consistent across layout modes and reload', async ({
+  page,
+}, testInfo) => {
+  await openNewCanvas(page);
+  const frameId = 'density-frame' as CanvasNodeId;
+  const childIds = [0, 1, 2, 3].map(
+    (index) => `density-${index}` as CanvasNodeId,
+  );
+  await execute(page, [
+    {
+      type: 'CREATE_NODES',
+      nodes: [
+        {
+          id: frameId,
+          nodeType: 'frame',
+          data: {
+            label: 'Task board',
+            layoutMode: 'column',
+            gridCount: 2,
+            sizing: 'hug',
+          },
+          position: { x: 100, y: 100 },
+          size: { width: 2400, height: 1800 },
+        },
+        ...childIds.map(
+          (id, index): CanvasNodeCreateInput => ({
+            id,
+            nodeType: 'note',
+            data: {
+              label: `Task ${index + 1}`,
+              content: `# Task ${index + 1}\n\nReview the supporting material.`,
+              heightMode: 'fixed',
+            },
+            position: {
+              x: 140 + (index % 2) * 400,
+              y: 200 + Math.floor(index / 2) * 220,
+            },
+            size: { width: 320, height: 180 },
+          }),
+        ),
+      ],
+    },
+    { type: 'SET_NODE_PARENT', nodeIds: childIds, parentId: frameId },
+  ]);
+  await page.addInitScript((id) => {
+    localStorage.setItem(
+      `huabu.viewport.${id}`,
+      JSON.stringify({ x: 100, y: 100, zoom: 1 }),
+    );
+  }, canvasId(page));
+
+  for (const mode of ['column', 'row', 'grid'] as const) {
+    await execute(page, [
+      { type: 'SET_FRAME_LAYOUT', frameId, mode, gridCount: 2 },
+    ]);
+    await page.reload();
+    await expect.poll(() => readViewportTransform(page)).toContain('scale(1)');
+    const frame = node(page, frameId);
+    await expect(frame.locator('input')).toHaveCSS('font-size', '24px');
+    await expect(node(page, childIds[0]).locator('h1')).toHaveCSS(
+      'font-size',
+      '24px',
+    );
+    await expect(async () => {
+      const outer = await frame.boundingBox();
+      const boxes = await Promise.all(
+        childIds.map((id) => node(page, id).boundingBox()),
+      );
+      const [first, right, below] = boxes;
+      if (!outer || !first || !right || !below)
+        throw new Error('Missing Frame fixture geometry');
+      expect(first.x - outer.x).toBeCloseTo(20, 0);
+      expect(first.y - outer.y).toBeCloseTo(64, 0);
+      expect(right.x - first.x - first.width).toBeCloseTo(
+        mode === 'row' ? 16 : 24,
+        0,
+      );
+      expect(below.y - first.y - first.height).toBeCloseTo(
+        mode === 'row' ? 24 : 16,
+        0,
+      );
+    }).toPass();
+    await page.screenshot({ path: testInfo.outputPath(`density-${mode}.png`) });
+  }
+
+  await page.goto('/playground/design');
+  const titles = page.locator(
+    '.preview-card:not([data-far-zoom]) .preview-card__title',
+  );
+  await expect(titles.first()).toBeVisible();
+  await expect(titles.first()).toHaveCSS('font-size', '24px');
+  await titles.first().scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath('card-typography.png') });
+});
+
 for (const modes of [
   ['free', 'free', 'free'],
   ['free', 'column', 'grid'],

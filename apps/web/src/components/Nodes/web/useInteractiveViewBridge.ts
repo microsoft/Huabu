@@ -9,9 +9,9 @@ import {
   replaceInteractiveViewState,
   submitInteractiveViewAction,
 } from '@/api/interactiveView';
-import { revealNodesOnCanvas } from '@/components/Panels/CanvasLayerPanel/focusNodesOnCanvas';
 import useCanvasStore from '@/store/canvasStore';
 import { openPreviewNode } from '@/store/previewWorkspace/actions';
+import { revealNodesOnCanvas } from '@/utils/canvasViewport';
 
 import type {
   InteractiveViewBootstrapV1,

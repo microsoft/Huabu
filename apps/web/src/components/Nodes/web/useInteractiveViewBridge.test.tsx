@@ -17,7 +17,7 @@ vi.mock('@/api/interactiveView', () => ({
   submitInteractiveViewAction: mocks.submitAction,
 }));
 
-vi.mock('@/components/Panels/CanvasLayerPanel/focusNodesOnCanvas', () => ({
+vi.mock('@/utils/canvasViewport', () => ({
   revealNodesOnCanvas: vi.fn(),
 }));
 
