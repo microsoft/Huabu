@@ -1162,6 +1162,10 @@ export function settleNodePreprocess(nodeId: string): void {
   if (node) preprocessQueue.schedule(node);
 }
 
+export function drainNodePreprocessing(): Promise<void> {
+  return preprocessQueue.flushAll();
+}
+
 /**
  * Module-scoped resize-preview controller. Owns the rAF handle and
  * the free-frame child snapshot used during resize gestures; the

@@ -9,6 +9,7 @@ import { getQuestionNodeStatus } from '@huabu/shared';
 import { toast } from '@/components/Common/Toast';
 import { i18n } from '@/i18n';
 import useCanvasStore, {
+  drainNodePreprocessing,
   flushCanvasViewState,
   saveCanvasForSubmission,
 } from '@/store/canvasStore';
@@ -136,7 +137,11 @@ export function useDesktopContent(): {
         : undefined;
       void (async () => {
         try {
-          if (canvasId) await saveCanvasForSubmission(canvasId);
+          if (canvasId) {
+            await saveCanvasForSubmission(canvasId);
+            await drainNodePreprocessing();
+            await saveCanvasForSubmission(canvasId);
+          }
           await drainConversationTitleWrites();
           flushCanvasViewState();
           tabs.finishPrepareClose(requestId, { ok: true });

@@ -39,6 +39,7 @@ const mocks = vi.hoisted(() => ({
     nodes: [],
   },
   save: vi.fn(),
+  preprocess: vi.fn(),
   flush: vi.fn(),
   prepare: vi.fn<(listener: (requestId: string) => void) => () => void>(),
   resume: vi.fn<(listener: () => void) => () => void>(),
@@ -83,6 +84,7 @@ vi.mock('@/store/canvasStore', () => ({
     subscribe: () => () => {},
   },
   saveCanvasForSubmission: mocks.save,
+  drainNodePreprocessing: mocks.preprocess,
   flushCanvasViewState: mocks.flush,
 }));
 vi.mock('@/store/chatStore', () => ({
@@ -143,6 +145,7 @@ describe('desktop save presentation', () => {
     mocks.canvas.canvasId = 'space-a';
     mocks.canvas.isLoading = false;
     mocks.save.mockResolvedValue(undefined);
+    mocks.preprocess.mockResolvedValue(undefined);
     mocks.prepare.mockReturnValue(vi.fn());
     mocks.resume.mockReturnValue(vi.fn());
     removeInputGuard = installDesktopInputGuard();
@@ -357,11 +360,59 @@ describe('desktop save presentation', () => {
     expect(isDesktopInputFrozen()).toBe(true);
     expect(document.body.inert).toBe(true);
     expect(mocks.save).not.toHaveBeenCalled();
+    expect(mocks.preprocess).not.toHaveBeenCalled();
     expect(mocks.finish).toHaveBeenCalledWith('save-request', { ok: true });
     await resume();
     expectPresentation(false, false);
     expect(isDesktopInputFrozen()).toBe(false);
     expect(document.body.inert).toBe(false);
+  });
+
+  it('waits for preprocessing queued by editor blur before acknowledging close', async () => {
+    let complete!: () => void;
+    const editor = document.createElement('textarea');
+    document.body.appendChild(editor);
+    editor.focus();
+    editor.addEventListener('blur', () => {
+      mocks.preprocess.mockReturnValueOnce(
+        new Promise<void>((resolve) => {
+          complete = resolve;
+        }),
+      );
+    });
+    try {
+      await render();
+      await prepare();
+      expect(mocks.save).toHaveBeenCalledWith('space-a');
+      expect(mocks.preprocess).toHaveBeenCalledOnce();
+      expect(mocks.finish).not.toHaveBeenCalled();
+      await act(async () => complete());
+      expect(mocks.save).toHaveBeenCalledTimes(2);
+      expect(mocks.finish).toHaveBeenCalledWith('save-request', { ok: true });
+    } finally {
+      editor.remove();
+    }
+  });
+
+  it('rejects close and reports a preprocessing drain failure', async () => {
+    mocks.preprocess.mockRejectedValueOnce(
+      new Error('Restored content is pending'),
+    );
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await render();
+      await prepare();
+      expect(mocks.finish).toHaveBeenCalledWith('save-request', {
+        ok: false,
+        error: 'Restored content is pending',
+      });
+      expect(mocks.toast).toHaveBeenCalledWith('Restored content is pending', {
+        tone: 'danger',
+      });
+      expect(mocks.save).toHaveBeenCalledOnce();
+    } finally {
+      log.mockRestore();
+    }
   });
 
   it('hides the message after saving but keeps input frozen until resumed', async () => {

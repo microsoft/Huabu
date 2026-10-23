@@ -100,16 +100,17 @@ async function request(path, method = 'GET', body) {
   return response.json();
 }
 
-async function launch() {
+async function launch(remote = false) {
   electron = await _electron.launch({
     executablePath: desktopRequire('electron'),
     args: [
       join(repo, 'apps/desktop'),
       `--user-data-dir=${join(temporary, 'chromium')}`,
+      ...(remote ? ['--server', webOrigin] : []),
     ],
     env: {
       ...environment,
-      EXTERNAL_SERVER_URL: serverOrigin,
+      EXTERNAL_SERVER_URL: remote ? '' : serverOrigin,
       WEB_DEV_SERVER_URL: webOrigin,
       HUABU_INSTANCE: instance,
       HUABU_DEVTOOLS: '0',
@@ -628,7 +629,7 @@ try {
         !spaces.some((space) => space.canvasId === tab.canvasId),
     );
   }, 'opening a Space created from retained Home');
-  await content(createdTab.canvasId);
+  const createdPage = await content(createdTab.canvasId);
   assert.equal(
     (
       await shell.evaluate(() => window.electronBridge.tabs.getState())
@@ -672,16 +673,78 @@ try {
     'Refusing deletion must keep the open Space Tab',
   );
   await request(`/canvas/${createdTab.canvasId}`);
+  await shell.evaluate(
+    (id) => window.electronBridge.tabs.activate(id),
+    createdTab.id,
+  );
+  await createdPage.evaluate(async () => {
+    const {
+      default: store,
+      saveCanvasForSubmission,
+      drainNodePreprocessing,
+    } = await import('/src/store/canvasStore.ts');
+    store.getState().addNode({
+      id: 'tabs-smoke-close-text',
+      nodeType: 'text',
+      data: { content: 'Initial text' },
+      placementPoint: { x: 100, y: 100 },
+    });
+    await saveCanvasForSubmission(store.getState().canvasId);
+    await drainNodePreprocessing();
+    store.setState({ pendingInlineEditNodeId: 'tabs-smoke-close-text' });
+  });
+  const textEditor = createdPage.locator(
+    '.react-flow__node[data-id="tabs-smoke-close-text"] textarea',
+  );
+  await textEditor.fill('Settled text before immediate close');
+  let releasePreprocess;
+  const preprocessingGate = new Promise((resolve) => {
+    releasePreprocess = resolve;
+  });
+  let observePreprocess;
+  const preprocessingStarted = new Promise((resolve) => {
+    observePreprocess = resolve;
+  });
+  await createdPage.route(
+    '**/nodes/tabs-smoke-close-text/preprocess',
+    async (route) => {
+      observePreprocess();
+      await preprocessingGate;
+      await route.continue();
+    },
+  );
+  const closeTextTab = shell.evaluate(
+    (id) => window.electronBridge.tabs.close(id),
+    createdTab.id,
+  );
+  try {
+    await Promise.race([
+      preprocessingStarted,
+      new Promise((_, reject) =>
+        setTimeout(
+          () => reject(new Error('Close did not drain Text preprocessing')),
+          10_000,
+        ),
+      ),
+    ]);
+    assert.equal(
+      createdPage.isClosed(),
+      false,
+      'Text preprocessing must finish before renderer destruction',
+    );
+  } finally {
+    releasePreprocess();
+  }
   assert.equal(
-    (
-      await shell.evaluate(
-        (id) => window.electronBridge.tabs.close(id),
-        createdTab.id,
-      )
-    ).ok,
+    (await closeTextTab).ok,
     true,
     'The Space created from Home must save and close normally',
   );
+  const settledText = await request(
+    `/canvas/${createdTab.canvasId}/nodes/tabs-smoke-close-text/content`,
+  );
+  assert.equal(settledText.content, 'Settled text before immediate close');
+  assert.equal(settledText.label, 'Settled text before immediate close');
   await createdCard.hover();
   await createdCard
     .getByRole('button', { name: deletionLabels.remove, exact: true })
@@ -2320,6 +2383,57 @@ try {
   await closeElectron();
   console.log(
     'Unavailable Home shutdown was cancelled safely, then explicitly confirmed',
+  );
+  shell = await launch(true);
+  const remoteHome = await waitFor(
+    () =>
+      electron
+        .context()
+        .pages()
+        .find((page) => page.url().endsWith('/spaces')),
+    'loading remote desktop Home',
+  );
+  await remoteHome.waitForFunction(() =>
+    Boolean(window.electronBridge?.localAgent),
+  );
+  await waitFor(
+    () =>
+      remoteHome.evaluate(async () => {
+        const state = await window.electronBridge.localAgent.getState();
+        if (state.error) throw new Error(state.error);
+        return Boolean(state.device);
+      }),
+    'reading local device identity from retained Home',
+  );
+  const remoteSpace = await open(shell, shutdownSpace.canvasId);
+  assert.equal(
+    await remoteSpace.evaluate(
+      async () => (await window.electronBridge.localAgent.getState()).enabled,
+    ),
+    false,
+    'Space Settings must have access to local Agent state',
+  );
+  await remoteHome.evaluate(() => {
+    globalThis.tabsSmokeDeviceStates = [];
+    window.electronBridge.localAgent.onState((state) =>
+      globalThis.tabsSmokeDeviceStates.push(state.status),
+    );
+  });
+  await remoteSpace.evaluate(async () => {
+    globalThis.tabsSmokeDeviceStates = [];
+    window.electronBridge.localAgent.onState((state) =>
+      globalThis.tabsSmokeDeviceStates.push(state.status),
+    );
+    await window.electronBridge.localAgent.setEnabled(false);
+  });
+  for (const page of [remoteHome, remoteSpace]) {
+    await page.waitForFunction(() =>
+      globalThis.tabsSmokeDeviceStates.includes('disabled'),
+    );
+  }
+  await closeElectron();
+  console.log(
+    'Remote local-Agent controls and state broadcast work from Home and Space',
   );
   console.log(
     JSON.stringify(

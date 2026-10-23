@@ -456,15 +456,17 @@ function registerLocalAgent(origin: string): void {
     onState: (state) => {
       if (state.error) console.error('[desktop] local Agent:', state.error);
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('local-agent:state', state);
+        desktopTabs?.broadcast('local-agent:state', state);
       }
     },
   });
   localAgentManager = manager;
   const assertSender = (event: Electron.IpcMainInvokeEvent): void => {
     if (
-      event.sender !== mainWindow?.webContents ||
-      event.senderFrame !== mainWindow.webContents.mainFrame ||
+      !mainWindow ||
+      mainWindow.isDestroyed() ||
+      !desktopTabs?.owns(event.sender) ||
+      event.senderFrame !== event.sender.mainFrame ||
       !isSameOrigin(event.senderFrame.url, origin)
     )
       throw new Error(

@@ -33,7 +33,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 import type { LocalAgentState } from './local-agent.js';
-
 import type {
   DesktopTabNavigation,
   DesktopTabReport,
