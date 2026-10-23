@@ -31,11 +31,16 @@ vi.mock('./agent.service.js', async (actual) => ({
   runAgent: mocks.runAgent,
 }));
 
-import { conversationThreadStore } from './agenetes/conversation-stores.js';
+import {
+  conversationEventLogStore,
+  conversationThreadStore,
+  conversationTurnStore,
+} from './agenetes/conversation-stores.js';
 import { agenetes } from './agenetes/drivers.js';
+import { createChatSubmission } from './agenetes/handle.js';
 import { buildHuabuPiWorkloadSpec } from './agenetes/pi-driver.js';
 import { AgentThreadService } from './agent-thread.service.js';
-import { createSpace, space } from '../storage/index.js';
+import { createSpace, getStructuredStore, space } from '../storage/index.js';
 import {
   mountTestWorkspace,
   type MountedTestStorage,
@@ -186,6 +191,118 @@ async function invokeOnce(target: AgentNodeTarget): Promise<void> {
 }
 
 describe('AgentThreadService persisted binding recovery', () => {
+  it.each(
+    (['tail', 'folded'] as const).flatMap((kind) =>
+      [false, true].map((unscoped) => ({ kind, unscoped })),
+    ),
+  )(
+    'reconciles a disconnected request from its durable $kind after restart (wildcard=$unscoped)',
+    async ({ kind, unscoped }) => {
+      const target = await open();
+      try {
+        const namespace = canvasAcpNamespace(target.canvasId);
+        const submission = createChatSubmission({
+          ...ENVELOPE,
+          requestId: 'request-persisted',
+        });
+        await conversationEventLogStore.appendTurnStart(
+          namespace,
+          target.threadId,
+          submission,
+        );
+        if (kind === 'folded') {
+          await conversationTurnStore.append(namespace, target.threadId, {
+            turn: { request: submission, transcript: [] },
+            seqStart: 1,
+            seqEnd: 1,
+          });
+        }
+        await mounted.reopen();
+        const service = new AgentThreadService();
+        await expect(
+          service.stopAndWait(
+            target.threadId,
+            unscoped ? undefined : target.canvasId,
+            'request-persisted',
+          ),
+        ).resolves.toEqual({
+          stopped: false,
+          acceptance: null,
+          request: { id: 'request-persisted', accepted: true },
+        });
+        await expect(
+          service.stopAndWait(
+            target.threadId,
+            unscoped ? undefined : target.canvasId,
+            'request-not-sent',
+          ),
+        ).resolves.toEqual({
+          stopped: false,
+          acceptance: null,
+          request: { id: 'request-not-sent', accepted: false },
+        });
+      } finally {
+        await close();
+      }
+    },
+  );
+
+  it.each(['world', 'unnamed'] as const)(
+    'includes the %s namespace in wildcard acceptance reconciliation',
+    async (kind) => {
+      const target = await open();
+      try {
+        const canvasId =
+          kind === 'world' ? await getStructuredStore().spaces().worldId() : '';
+        await conversationEventLogStore.appendTurnStart(
+          canvasAcpNamespace(canvasId),
+          target.threadId,
+          createChatSubmission({ ...ENVELOPE, requestId: 'request-accepted' }),
+        );
+        const service = new AgentThreadService();
+        await expect(
+          service.stopAndWait(
+            target.threadId,
+            target.canvasId,
+            'request-accepted',
+          ),
+        ).resolves.toMatchObject({ request: { accepted: false } });
+        await expect(
+          service.stopAndWait(target.threadId, undefined, 'request-accepted'),
+        ).resolves.toMatchObject({ request: { accepted: true } });
+      } finally {
+        await close();
+      }
+    },
+  );
+
+  it('rejects wildcard reconciliation when scoped history cannot be read', async () => {
+    const target = await open();
+    try {
+      const history = agenetes.history.bind(agenetes);
+      vi.spyOn(agenetes, 'history').mockImplementation(
+        async (...args: Parameters<typeof agenetes.history>) => {
+          if (args[0].name === target.canvasId)
+            throw new Error('History unavailable');
+          return history(...args);
+        },
+      );
+      const service = new AgentThreadService();
+      await expect(
+        service.stopAndWait(target.threadId, undefined, 'request-unknown'),
+      ).rejects.toThrow('History unavailable');
+      const delayed = service.beginPreparation(
+        target.threadId,
+        target.canvasId,
+        'request-unknown',
+      );
+      expect(delayed.signal.aborted).toBe(true);
+      delayed.finish();
+    } finally {
+      await close();
+    }
+  });
+
   it('recovers an external binding from the durable record across a restart', async () => {
     const target = await open();
     try {

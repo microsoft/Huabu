@@ -13,7 +13,6 @@ import { ApiError } from '@/api/_client';
 import { renameSpace } from '@/api/spaceCard';
 import { Button } from '@/components/Common/Button';
 import { DropdownMenuItem } from '@/components/Common/DropdownMenu';
-import { TextInput } from '@/components/Common/TextInput';
 import { Tooltip } from '@/components/Common/Tooltip';
 import { nodeLayoutBorderInset } from '@/components/Nodes/design/nodeBoundary';
 import { CONVERSATION_CARD_SPACING } from '@/components/Nodes/design/nodeSpacing';
@@ -40,6 +39,7 @@ import {
   refreshSpaceCardActivity,
 } from './useSpaceCardActivity';
 import { useSpaceShortcutTarget } from './useSpaceShortcutTarget';
+import { CardTitle } from '../shared/CardTitle';
 import { NodeActivityTime } from '../shared/NodeActivityTime';
 
 import type { SpacePreviewNodeData } from '@/components/Nodes/types';
@@ -64,10 +64,8 @@ export const SpacePreviewNode = memo(
     const [draft, setDraft] = useState('');
     const [renameError, setRenameError] = useState<string | null>(null);
     const [saving, setSaving] = useState(false);
-    const inputRef = useRef<HTMLInputElement>(null);
     const savingRef = useRef(false);
     const cancelled = useRef(false);
-    const selectedOnPointerDown = useRef(false);
     const expectedTitle = useRef<string | null>(null);
     const canvasId = useCanvasStore((state) => state.canvasId);
     const workspaceId = useWorkspaceStore((state) => state.workspaceId);
@@ -110,12 +108,6 @@ export const SpacePreviewNode = memo(
       setRenameError(null);
       setEditing(true);
     }, [canRename, data.targetCanvasId]);
-    useEffect(() => {
-      if (editing) {
-        inputRef.current?.focus();
-        inputRef.current?.select();
-      }
-    }, [editing]);
     const commitRename = async () => {
       if (cancelled.current || savingRef.current) return;
       const title = draft.trim();
@@ -323,71 +315,35 @@ export const SpacePreviewNode = memo(
               </span>
               <div
                 className="flex min-w-0 flex-1 items-start gap-1"
-                onPointerDownCapture={() => {
-                  selectedOnPointerDown.current = !!selected;
-                }}
                 onDoubleClick={(event) => event.stopPropagation()}
               >
-                {editing ? (
-                  <TextInput
-                    ref={inputRef}
-                    value={draft}
-                    readOnly={saving}
-                    aria-label={t('spacePreview.rename')}
-                    aria-invalid={!!renameError}
-                    className="nodrag nopan w-full min-w-0 p-0"
-                    style={{ font: 'inherit', lineHeight: 'inherit' }}
-                    onChange={(event) => {
-                      setDraft(event.target.value);
-                      setRenameError(null);
-                    }}
-                    onBlur={() => void commitRename()}
-                    onKeyDown={(event) => {
-                      event.stopPropagation();
-                      if (
-                        event.nativeEvent.isComposing ||
-                        event.nativeEvent.keyCode === 229
-                      )
-                        return;
-                      if (event.key === 'Enter') {
-                        event.preventDefault();
-                        void commitRename();
-                      }
-                      if (event.key === 'Escape' && !savingRef.current) {
-                        event.preventDefault();
-                        cancelled.current = true;
-                        setEditing(false);
-                        setRenameError(null);
-                      }
-                    }}
-                  />
-                ) : selected && canRename ? (
-                  <Button
-                    variant="ghost"
-                    className="nodrag nopan text-fg-default h-auto min-w-0 justify-start p-0 text-left"
-                    tooltipWrapperClassName="min-w-0 max-w-full"
-                    style={{ font: 'inherit', lineHeight: 'inherit' }}
-                    title={t('spacePreview.rename')}
-                    onClick={(event) => {
-                      if (selectedOnPointerDown.current || event.detail === 0)
-                        startRename();
-                    }}
-                  >
-                    <span
-                      className="line-clamp-2 min-w-0 wrap-anywhere"
-                      title={target.title}
-                    >
-                      {target.title}
-                    </span>
-                  </Button>
-                ) : (
-                  <span
-                    className="line-clamp-2 min-w-0 wrap-anywhere"
-                    title={target.title}
-                  >
-                    {target.title}
-                  </span>
-                )}
+                <CardTitle
+                  title={target.title}
+                  selected={selected}
+                  renameLabel={t('spacePreview.rename')}
+                  clamp
+                  editor={
+                    canRename || editing
+                      ? {
+                          active: editing,
+                          draft,
+                          saving,
+                          error: renameError,
+                          onStart: startRename,
+                          onChange: (value) => {
+                            setDraft(value);
+                            setRenameError(null);
+                          },
+                          onCommit: () => void commitRename(),
+                          onCancel: () => {
+                            cancelled.current = true;
+                            setEditing(false);
+                            setRenameError(null);
+                          },
+                        }
+                      : undefined
+                  }
+                />
                 {!isChildEntry &&
                 canvasId !== worldId &&
                 targetStatus === 'ready' ? (

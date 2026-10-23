@@ -131,6 +131,8 @@ Activating a `conversation` result row ([CanvasSearchResults.tsx](../../apps/web
 
 ### 5.1 Trigger
 
+Agent and Space cards share `CardTitle` for inline renaming: the first pointer click selects the card; clicking its title after selection starts editing and selects the current text. Keyboard activation also starts editing. Enter or blur saves, Escape cancels, and IME confirmation is ignored. Title double-clicks do not open the conversation; double-clicking the rest of an Agent card retains the existing compose/replay behavior outside editing. Locked nodes, missing-content nodes, and pending conversation forks do not expose the editor. Empty titles show validation feedback; failed saves retain the draft for correction or retry. Agent titles reuse `canvasStore.tryRename('node', ...)`, just like the chat header, preserving canonical label ownership and user naming protection without changing the first prompt, transcript, or lifecycle. Card width and content scale remain unchanged.
+
 Double-click the node → `openInCompose()` ([QuestionNode.tsx](../../apps/web/src/components/Nodes/question/QuestionNode.tsx)). Creating a question through the toolbar placement flow or the connected-node picker also mints the thread and opens compose immediately. [`questionCompose.ts`](../../apps/web/src/components/Nodes/question/questionCompose.ts) opens the Question's Preview Workspace node tab and directs the input-focus request to that thread.
 
 - confirms server-acknowledged creation (or initializes a legacy node's missing thread association), opens the chat panel in **compose mode**, and defaults the built-in Huabu Agent to `operate`

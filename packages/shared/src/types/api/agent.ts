@@ -326,6 +326,7 @@ export const agentRequestSchema = z
     content: z.string(),
     quotedComments: z.array(quotedCommentSchema).optional(),
     threadId: z.string().min(1).optional(),
+    requestId: z.string().min(1).max(128).optional(),
     mode: z.enum(['ask', 'operate']).optional(),
     canvasContext: agentChatContextSchema.optional(),
     canvasId: z.string().min(1).optional(),
@@ -529,11 +530,23 @@ export interface ForkThreadResponse {
 export const agentTurnAcceptedSchema = z.object({
   threadId: z.string().min(1),
   turnStartSeq: z.number().int().positive(),
+  requestId: z.string().min(1).max(128).optional(),
 });
 export type AgentTurnAccepted = z.infer<typeof agentTurnAcceptedSchema>;
+
+export const stopThreadBodySchema = z.object({
+  requestId: z.string().min(1).max(128).optional(),
+});
+export type StopThreadBody = z.infer<typeof stopThreadBodySchema>;
 
 export const stopThreadResponseSchema = z.object({
   stopped: z.boolean(),
   acceptance: agentTurnAcceptedSchema.nullable(),
+  request: z
+    .object({
+      id: z.string().min(1).max(128),
+      accepted: z.boolean(),
+    })
+    .optional(),
 });
 export type StopThreadResponse = z.infer<typeof stopThreadResponseSchema>;

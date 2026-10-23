@@ -5,7 +5,10 @@
 
 import { getNodeSize } from '@huabu/shared/canvas-engine';
 
-import { QUESTION_NODE_DEFAULT_FONT_SIZE } from './nodeFontConfig';
+import {
+  QUESTION_NODE_DEFAULT_FONT_SIZE,
+  TEXT_NODE_DEFAULT_FONT_SIZE,
+} from './nodeFontConfig';
 
 import type { Node } from '@xyflow/react';
 
@@ -41,7 +44,7 @@ export function getNodeFontFit(node: Node): NodeFontFit | null {
         ? fontSize
         : node.type !== 'text'
           ? QUESTION_NODE_DEFAULT_FONT_SIZE
-          : 16,
+          : TEXT_NODE_DEFAULT_FONT_SIZE,
     width: getNodeSize(node).width,
   };
 }

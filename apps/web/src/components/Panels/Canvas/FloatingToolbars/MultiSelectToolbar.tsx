@@ -29,6 +29,7 @@ import { translateColorOptions } from '@/i18n/colors';
 import useCanvasStore from '@/store/canvasStore';
 import { useWorkspaceStore } from '@/store/workspaceStore';
 import { resolveGeometryEdit } from '@/utils/node/geometry';
+import { TEXT_NODE_DEFAULT_FONT_SIZE } from '@/utils/node/nodeFontConfig';
 import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 
 import './NodeToolbar.css';
@@ -111,9 +112,12 @@ export const MultiSelectToolbar = () => {
     if (!selectedNodes.every((n) => n.type === 'text')) {
       return null;
     }
-    const first = selectedNodes[0].data?.style?.fontSize ?? 16;
+    const first =
+      selectedNodes[0].data?.style?.fontSize ?? TEXT_NODE_DEFAULT_FONT_SIZE;
     const allSame = selectedNodes.every(
-      (n) => Math.round(n.data?.style?.fontSize ?? 16) === Math.round(first),
+      (n) =>
+        Math.round(n.data?.style?.fontSize ?? TEXT_NODE_DEFAULT_FONT_SIZE) ===
+        Math.round(first),
     );
     return { fontSize: allSame ? first : null };
   }, [selectedNodes]);

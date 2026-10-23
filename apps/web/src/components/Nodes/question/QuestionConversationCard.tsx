@@ -36,6 +36,7 @@ import {
 import { CONVERSATION_CARD_SPACING } from '../design/nodeSpacing';
 import { NODE_TYPOGRAPHY } from '../design/nodeTypography';
 import { noteSurfaceStyle } from '../note/noteDesign';
+import { CardTitle, type CardTitleEditor } from '../shared/CardTitle';
 import { NodeActivityTime } from '../shared/NodeActivityTime';
 import { resolveTextBodyBox } from '../shared/TextNodeBody';
 
@@ -74,6 +75,8 @@ export function QuestionConversationCard({
   effectiveFontSize,
   paddingX,
   paddingY,
+  selected,
+  titleEditor,
 }: Pick<
   TextNodeBodyProps,
   | 'effectiveWidth'
@@ -92,6 +95,8 @@ export function QuestionConversationCard({
   accent?: string | null;
   text: string;
   placeholder: string;
+  selected?: boolean;
+  titleEditor?: CardTitleEditor;
 }) {
   const { t } = useTranslation();
   const scale = effectiveFontSize / QUESTION_NODE_DEFAULT_FONT_SIZE;
@@ -138,7 +143,8 @@ export function QuestionConversationCard({
           // Bleed over the shared transparent shell inset without changing its
           // interaction geometry. The full authored card scales down to 10%.
           width: box.width + NODE_SHELL_INSET,
-          height: box.height,
+          height: titleEditor?.error ? 'auto' : box.height,
+          minHeight: box.height,
           margin: -NODE_SHELL_INSET / 2,
           padding: `${box.paddingY - QUESTION_NODE_HEADER_INSET * scale}px ${Math.max(0, paddingX - QUESTION_NODE_AGENT_INSET * scale)}px`,
           ...noteSurfaceStyle(resolvedAccent),
@@ -178,9 +184,23 @@ export function QuestionConversationCard({
           data-placeholder={!text || undefined}
           style={{ fontSize: effectiveFontSize }}
         >
-          {text || placeholder}
+          <CardTitle
+            title={text || placeholder}
+            selected={selected}
+            renameLabel={t('node.rename')}
+            editor={titleEditor}
+          />
         </div>
       </div>
+      {titleEditor?.error ? (
+        <div
+          role="alert"
+          className="text-danger"
+          style={{ fontSize: NODE_TYPOGRAPHY.body.size * scale }}
+        >
+          {titleEditor.error}
+        </div>
+      ) : null}
       <div className="question-conversation-header">
         <span
           className="question-conversation-status"

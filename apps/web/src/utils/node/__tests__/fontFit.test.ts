@@ -28,7 +28,7 @@ function textNode(accent: string | null): Node {
 describe('getNodeFontFit', () => {
   it('captures the effective default font and canonical outer width', () => {
     expect(getNodeFontFit(textNode(null))).toEqual({
-      fontSize: 16,
+      fontSize: 24,
       width: 200,
     });
     expect(getNodeFontFit({ ...textNode(null), type: 'question' })).toEqual({
@@ -61,7 +61,7 @@ describe('getNodeFontFit', () => {
     'falls back for invalid stored font %s',
     (fontSize) => {
       const node = { ...textNode(null), data: { style: { fontSize } } };
-      expect(getNodeFontFit(node)?.fontSize).toBe(16);
+      expect(getNodeFontFit(node)?.fontSize).toBe(24);
       expect(getNodeFontFit({ ...node, type: 'question' })?.fontSize).toBe(
         QUESTION_NODE_DEFAULT_FONT_SIZE,
       );
@@ -112,7 +112,7 @@ describe('refitFont proportional scaling', () => {
   it('preserves an unmeasured node font and avoids overflow', () => {
     const fit = fontFit({ ...textNode(null), style: {} });
     expect(fit.width).toBe(0);
-    expect(refitFont(fit, 400, 100)).toBe(16);
+    expect(refitFont(fit, 400, 100)).toBe(24);
     expect(refitFont({ fontSize: 16, width: 1 }, Number.MAX_VALUE, 100)).toBe(
       16,
     );

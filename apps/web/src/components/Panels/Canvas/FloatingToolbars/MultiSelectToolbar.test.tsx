@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MultiSelectToolbar } from './MultiSelectToolbar';
 
 const state = vi.hoisted(() => ({
-  nodes: [16, 24].map((fontSize, index) => ({
+  nodes: [16, 24].map((fontSize: number | undefined, index) => ({
     id: `text-${index}`,
     type: 'text',
     selected: true,
@@ -104,6 +104,14 @@ describe('MultiSelectToolbar font size', () => {
       }));
       await act(async () => root.render(<MultiSelectToolbar />));
       expect(input?.value).toBe('16');
+      state.nodes = state.nodes.map((node, index) => ({
+        ...node,
+        data: {
+          style: { ...node.data.style, fontSize: index === 0 ? undefined : 24 },
+        },
+      }));
+      await act(async () => root.render(<MultiSelectToolbar />));
+      expect(input?.value).toBe('24');
       state.nodes = state.nodes.map((node, index) => ({
         ...node,
         type: index === 0 ? 'text' : 'note',

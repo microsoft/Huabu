@@ -370,8 +370,8 @@ describe('resize-preview controller — proportional child fonts', () => {
 
   it('scales the default font of a child that had no fontSize yet', () => {
     // Most text nodes never get individually resized, so they carry no
-    // `style.fontSize` and render at base 16. `setNodeGeometry` pins their
-    // width during a frame cascade, so without scaling they would stay 16
+    // `style.fontSize` and render at base 24. `setNodeGeometry` pins their
+    // width during a frame cascade, so without scaling they would stay 24
     // in the enlarged box. The cascade must establish a locked fontSize.
     const node = {
       id: 'auto',
@@ -392,7 +392,7 @@ describe('resize-preview controller — proportional child fonts', () => {
 
     const scaled = findNode(store.getNodes(), 'auto');
     const box = boxOf(scaled);
-    const expected = (16 * box.width) / 40;
+    const expected = (24 * box.width) / 40;
     const style = (scaled.data as { style: Record<string, unknown> }).style;
     expect(style.fontSize).toBe(expected);
     expect(style.fontFamily).toBe('default');
@@ -445,7 +445,7 @@ describe('resize-preview controller — proportional child fonts', () => {
 
     const scaled = findNode(store.getNodes(), 'empty');
     const box = boxOf(scaled);
-    const expected = (16 * box.width) / 40;
+    const expected = (24 * box.width) / 40;
     const fontSize = (scaled.data as { style: { fontSize: number } }).style
       .fontSize;
     expect(fontSize).toBe(expected);

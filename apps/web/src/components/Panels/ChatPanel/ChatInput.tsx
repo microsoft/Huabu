@@ -35,6 +35,8 @@ export interface ChatInputProps {
   onCommit?: () => void;
   onStop: () => void;
   isStreaming?: boolean;
+  /** Submit a snapshot to the thread queue instead of starting a turn. */
+  queueSubmission?: boolean;
   /** Current built-in mode. Affects placeholder + the value submitted to `onSubmit`. */
   mode: AgentMode;
   /**
@@ -106,6 +108,7 @@ export const ChatInput = ({
   onCommit,
   onStop,
   isStreaming = false,
+  queueSubmission = false,
   mode,
   slashCommands = [],
   slashLoading = false,
@@ -353,9 +356,7 @@ export const ChatInput = ({
 
     if (e.key !== 'Enter') return;
     if (e.shiftKey) return;
-    // While a turn is streaming the input stays editable, but Enter must not
-    // send: the visible action is Stop, and the draft is held for next round.
-    if (isStreaming) return;
+    if (isStreaming && !queueSubmission) return;
     if (isSubmitDisabled) return;
 
     e.preventDefault();
@@ -366,7 +367,7 @@ export const ChatInput = ({
   // Handle form submission
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isStreaming && !isSubmitDisabled) {
+    if ((!isStreaming || queueSubmission) && !isSubmitDisabled) {
       onSubmit(e, mode);
     }
   };
@@ -479,21 +480,28 @@ export const ChatInput = ({
                 >
                   <Square />
                 </Button>
-              ) : (
+              ) : null}
+              {!isStreaming || queueSubmission ? (
                 <Button
                   variant="solid"
                   shape="pill"
                   iconOnly
                   size="md"
                   type="submit"
-                  title={t('chat.sendMessage')}
+                  title={t(
+                    queueSubmission
+                      ? 'chat.addToQueueHint'
+                      : 'chat.sendMessage',
+                  )}
                   disabled={isSubmitDisabled}
-                  aria-label={t('chat.send')}
+                  aria-label={t(
+                    queueSubmission ? 'chat.addToQueue' : 'chat.send',
+                  )}
                   className="size-7 p-1"
                 >
                   <ArrowUp />
                 </Button>
-              )}
+              ) : null}
             </div>
           </div>
         </div>

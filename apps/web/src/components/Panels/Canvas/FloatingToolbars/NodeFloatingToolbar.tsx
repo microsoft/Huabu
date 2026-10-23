@@ -63,7 +63,10 @@ import {
 import { useWorkspaceStore } from '@/store/workspaceStore';
 import { copyToClipboard } from '@/utils/io/clipboard';
 import { resolveGeometryEdit } from '@/utils/node/geometry';
-import { QUESTION_NODE_DEFAULT_FONT_SIZE } from '@/utils/node/nodeFontConfig';
+import {
+  QUESTION_NODE_DEFAULT_FONT_SIZE,
+  TEXT_NODE_DEFAULT_FONT_SIZE,
+} from '@/utils/node/nodeFontConfig';
 import { buildNodeDeepLink } from '@/utils/nodeDeepLink';
 
 import {
@@ -443,7 +446,7 @@ export const NodeFloatingToolbar = memo(
         {type === 'text' && (
           <>
             <TextFontSizePicker
-              value={data.style?.fontSize ?? 16}
+              value={data.style?.fontSize ?? TEXT_NODE_DEFAULT_FONT_SIZE}
               onApply={(fontSize) =>
                 updateNodeData(id, { style: { ...data.style, fontSize } })
               }

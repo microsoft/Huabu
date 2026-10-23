@@ -97,6 +97,7 @@ describe('Question ownership at the real message adapters', () => {
         const startLifecycle = vi.fn().mockResolvedValue(undefined);
         const finishLifecycle = vi.fn().mockResolvedValue(undefined);
         const service = new AgentThreadService({
+          hasAcceptedRequest: vi.fn(async () => false),
           resolveAgentNode: resolver.resolveAgentNode.bind(resolver),
           resolveFixedAgentNode: resolver.resolveFixedAgentNode.bind(resolver),
           resolvePersistedExternalBinding: () => null,

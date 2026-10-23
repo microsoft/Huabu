@@ -21,7 +21,11 @@ import {
   useConversationTitleStore,
 } from '@/store/conversationTitleStore';
 
-import { claimAgentStream } from './agentStreamCoordinator';
+import {
+  claimAgentStream,
+  hasAgentStreamClaim,
+} from './agentStreamCoordinator';
+import * as turnController from './agentTurnController';
 import { useChatHistory } from './useChatHistory';
 
 import type { ChatSession } from './useChatSession';
@@ -141,6 +145,8 @@ function seedStore(isStreaming: boolean) {
         binding: { kind: 'internal' },
         settings: { modelId: null, reasoningEffort: null },
         pendingAttachments: [],
+        queuedTurns: [],
+        queuePaused: false,
       },
     },
   });
@@ -197,6 +203,107 @@ afterEach(() => {
 });
 
 describe('useChatHistory paging', () => {
+  it.each(['completed', 'inactive'] as const)(
+    'awaits request reconciliation before history refresh and queue settlement after %s attach',
+    async (status) => {
+      seedStore(false);
+      let release!: () => void;
+      const pending = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const reconcile = vi
+        .spyOn(turnController, 'reconcileAgentTurnAfterReconnect')
+        .mockReturnValueOnce(pending);
+      const settle = vi
+        .spyOn(turnController, 'settleAgentTurnQueue')
+        .mockImplementation(() => {
+          expect(hasAgentStreamClaim(CANVAS_ID, THREAD_ID)).toBe(false);
+        });
+      apiMocks.reconnectStream.mockImplementationOnce(
+        async (_thread, _canvas, callbacks) => {
+          if (status === 'completed') {
+            callbacks.onEvent({ type: 'done', data: { message: 'Answer' } });
+            callbacks.onComplete();
+          }
+          return { status };
+        },
+      );
+      try {
+        await renderHarness();
+        expect(reconcile).toHaveBeenCalledExactlyOnceWith(CANVAS_ID, THREAD_ID);
+        expect(hasAgentStreamClaim(CANVAS_ID, THREAD_ID)).toBe(true);
+        expect(settle).not.toHaveBeenCalled();
+        expect(apiMocks.fetchHistoryPage).toHaveBeenCalledOnce();
+        await act(async () => {
+          release();
+          await pending;
+        });
+        expect(apiMocks.fetchHistoryPage).toHaveBeenCalledTimes(2);
+        expect(settle).toHaveBeenCalledOnce();
+      } finally {
+        release();
+        reconcile.mockRestore();
+        settle.mockRestore();
+      }
+    },
+  );
+
+  it('does not reconcile a cancelled attach', async () => {
+    seedStore(false);
+    const reconcile = vi.spyOn(
+      turnController,
+      'reconcileAgentTurnAfterReconnect',
+    );
+    apiMocks.reconnectStream.mockResolvedValueOnce({ status: 'aborted' });
+    try {
+      await renderHarness();
+      expect(reconcile).not.toHaveBeenCalled();
+    } finally {
+      reconcile.mockRestore();
+    }
+  });
+
+  it.each(['done', 'cancelled', 'error', 'close', 'aborted'])(
+    'settles the queue only after releasing the reconnect claim: %s',
+    async (terminal) => {
+      seedStore(false);
+      const settle = vi
+        .spyOn(turnController, 'settleAgentTurnQueue')
+        .mockImplementation((session, completed) => {
+          expect(
+            hasAgentStreamClaim(session.ownerCanvasId, session.threadId),
+          ).toBe(false);
+          expect(completed).toBe(terminal === 'done');
+        });
+      apiMocks.reconnectStream.mockImplementationOnce(
+        async (_thread, _canvas, callbacks) => {
+          if (terminal === 'error')
+            callbacks.onError(new Error('Disconnected'));
+          else {
+            if (terminal !== 'close')
+              callbacks.onEvent({
+                type: 'done',
+                data: {
+                  message: '',
+                  meta: {
+                    stopReason: terminal === 'cancelled' ? 'cancelled' : 'stop',
+                  },
+                },
+              });
+            callbacks.onComplete();
+          }
+          return { status: terminal === 'aborted' ? 'aborted' : 'completed' };
+        },
+      );
+      try {
+        await renderHarness();
+        expect(settle).toHaveBeenCalledOnce();
+      } finally {
+        settle.mockRestore();
+      }
+    },
+  );
+
   it.each([false, true])(
     'does not request history for a newly created thread with node=%s',
     async (node) => {
@@ -254,6 +361,40 @@ describe('useChatHistory paging', () => {
       historyError: null,
     });
   });
+
+  it('retains the draft after invalidated history fails and retries without remounting', async () => {
+    seedStore(false);
+    const chat = useChatStore.getState();
+    chat.setMessages(THREAD_ID, []);
+    chat.setDraft(THREAD_ID, 'Unsent draft');
+    await renderHarness();
+    expect(apiMocks.fetchHistoryPage).not.toHaveBeenCalled();
+
+    apiMocks.fetchHistoryPage.mockRejectedValueOnce(
+      new Error('History unavailable'),
+    );
+    await act(async () => chat.setHistoryLoaded(THREAD_ID, false));
+    expect(useChatStore.getState().threadsById[THREAD_ID]).toMatchObject({
+      historyLoaded: false,
+      historyError: 'History unavailable',
+      draft: 'Unsent draft',
+    });
+    expect(apiMocks.fetchHistoryPage).toHaveBeenCalledOnce();
+    apiMocks.fetchHistoryPage.mockResolvedValueOnce({
+      threadId: THREAD_ID,
+      turns: [],
+      hasMore: false,
+    });
+    await act(async () => latestRetryHistory?.());
+    expect(apiMocks.fetchHistoryPage).toHaveBeenCalledTimes(2);
+    expect(useChatStore.getState().threadsById[THREAD_ID]).toMatchObject({
+      historyLoaded: true,
+      historyError: null,
+      draft: 'Unsent draft',
+    });
+    expect(apiMocks.reconnectStream).not.toHaveBeenCalled();
+  });
+
   it('rehydrates quote-only user messages without regenerating template text', async () => {
     useChatStore.setState({ threadsById: {} });
     const quotedComments = [

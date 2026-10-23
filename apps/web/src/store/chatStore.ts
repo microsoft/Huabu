@@ -9,6 +9,7 @@ import { createId } from '@huabu/shared';
 import { getDefaultAgentBinding } from './acpProfilesStore';
 
 import type { ChatMessage } from './chatTypes';
+import type { PreparedAgentTurn } from '@/hooks/agentTurnController';
 import type {
   AgentBinding,
   AgentMode,
@@ -39,6 +40,12 @@ function defaultActionForBinding(binding: AgentBinding): AgentMode {
 /** Stable inline-edit row identity, omitted from agent requests and history. */
 export type DraftQuotedComment = QuotedComment & { draftId: string };
 
+export interface QueuedAgentTurn {
+  id: string;
+  prepared: PreparedAgentTurn;
+  status: 'pending' | 'sending' | 'uncertain';
+}
+
 export interface ChatThreadState {
   messages: ChatMessage[];
   /** Free-form composer text; quoted comments are staged separately. */
@@ -59,6 +66,8 @@ export interface ChatThreadState {
   olderHistoryError: string | null;
   /** Whether an agent run is streaming into this thread right now. */
   isStreaming: boolean;
+  /** Local send preparation before transport dispatch; absent means idle. */
+  isPreparing?: boolean;
   /** Last genuine stream done event, not a transport close or permission wait. */
   completedTurnId?: string;
   /** Last compose mode selected for this thread. */
@@ -81,6 +90,8 @@ export interface ChatThreadState {
    * cannot ride along on a different Chat's send.
    */
   pendingAttachments: ChatAttachment[];
+  queuedTurns: QueuedAgentTurn[];
+  queuePaused: boolean;
 }
 
 export interface ChatState {
@@ -123,7 +134,7 @@ export interface ChatState {
    * The one text-selection excerpt, shared by every visible Chat. This is
    * presentation context, not thread state: there is a single browser
    * selection, so several Chats may offer the same hint. Whichever one sends
-   * spends it, and the hint retires everywhere.
+   * or queues it spends it, and the hint retires everywhere.
    */
   selectionAttachment: ChatAttachment | null;
 
@@ -250,11 +261,20 @@ export interface ChatState {
 
   /** Mark / unmark a thread as having an active streaming run. */
   setThreadLoading: (threadId: string, loading: boolean) => void;
+  setThreadPreparing: (threadId: string, preparing: boolean) => void;
+  enqueueTurn: (threadId: string, turn: QueuedAgentTurn) => void;
+  removeQueuedTurn: (threadId: string, id: string) => void;
+  setQueuedTurnStatus: (
+    threadId: string,
+    id: string,
+    status: QueuedAgentTurn['status'],
+  ) => void;
+  setQueuePaused: (threadId: string, paused: boolean) => void;
 
   /**
    * Drop cached state for threads that aren't currently pinned.
    * A thread is "pinned" if it is:
-   *   - streaming, or
+   *   - streaming or holding queued turns, or
    *   - mapped to a Canvas.
    *
    * Triggered when a thread is cleared. Writes stay hot; evicted threads are
@@ -291,6 +311,8 @@ const EMPTY_THREAD: ChatThreadState = {
   binding: DEFAULT_BINDING,
   settings: { modelId: null, reasoningEffort: null },
   pendingAttachments: [],
+  queuedTurns: [],
+  queuePaused: false,
 };
 
 function threadOf(state: ChatState, threadId: string): ChatThreadState {
@@ -738,6 +760,45 @@ export const useChatStore = create<ChatState>()(
           return patchThread(state, threadId, { isStreaming: loading });
         }),
 
+      setThreadPreparing: (threadId, preparing) =>
+        set((state) =>
+          !!threadOf(state, threadId).isPreparing === preparing
+            ? state
+            : patchThread(state, threadId, { isPreparing: preparing }),
+        ),
+
+      enqueueTurn: (threadId, turn) =>
+        set((state) =>
+          patchThread(state, threadId, {
+            queuedTurns: [...threadOf(state, threadId).queuedTurns, turn],
+          }),
+        ),
+
+      removeQueuedTurn: (threadId, id) =>
+        set((state) =>
+          patchThread(state, threadId, {
+            queuedTurns: threadOf(state, threadId).queuedTurns.filter(
+              (turn) => turn.id !== id,
+            ),
+          }),
+        ),
+
+      setQueuedTurnStatus: (threadId, id, status) =>
+        set((state) =>
+          patchThread(state, threadId, {
+            queuedTurns: threadOf(state, threadId).queuedTurns.map((turn) =>
+              turn.id === id ? { ...turn, status } : turn,
+            ),
+          }),
+        ),
+
+      setQueuePaused: (threadId, paused) =>
+        set((state) =>
+          threadOf(state, threadId).queuePaused === paused
+            ? state
+            : patchThread(state, threadId, { queuePaused: paused }),
+        ),
+
       evictInactiveThreads: (maxKeep = MAX_CACHED_THREADS) =>
         set((state) => {
           const cached = Object.keys(state.threadsById);
@@ -745,7 +806,12 @@ export const useChatStore = create<ChatState>()(
 
           const pinned = new Set<string>(Object.values(state.threadMap));
           for (const [tid, entry] of Object.entries(state.threadsById)) {
-            if (entry.isStreaming) pinned.add(tid);
+            if (
+              entry.isStreaming ||
+              entry.isPreparing ||
+              entry.queuedTurns.length
+            )
+              pinned.add(tid);
           }
           const evictable = cached.filter((tid) => !pinned.has(tid));
           if (evictable.length === 0) return {};
@@ -823,6 +889,9 @@ export const selectThreadMessages = (
 /** A thread's composer draft ('' when none). */
 export const selectThreadDraft = (state: ChatState, threadId: string): string =>
   threadOf(state, threadId).draft;
+
+export const selectThreadQueuedTurns = (state: ChatState, threadId: string) =>
+  threadOf(state, threadId).queuedTurns;
 
 export const selectThreadExcludeCanvasSelection = (
   state: ChatState,

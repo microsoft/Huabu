@@ -10,6 +10,7 @@ import { AGENT_SSE_EVENTS, agentBindingSchema } from '@huabu/shared';
 import { externalAgentRealization } from './acp/external-agent-realization.js';
 import { runAcpAgent } from './acp/service.js';
 import { agenetes, EXTERNAL_DRIVER_KIND } from './agenetes/drivers.js';
+import { chatEnvelopeFromSubmission } from './agenetes/handle.js';
 import { agentNodeBinding } from './agent-node-binding.js';
 import { agentNodeLifecycle } from './agent-node-lifecycle.js';
 import { prepareAgentSubmission } from './agent-submission.js';
@@ -27,7 +28,9 @@ import { planSkillDispatch } from './skill-model-routing.js';
 import { resolveSpacePrompt } from './space-instruction-frames.js';
 import { acquireAgentTurn, waitForAgentTurnRelease } from './turn-lease.js';
 import { loadAgent } from '../../prompt/index.js';
+import { getStructuredStore } from '../storage/index.js';
 import { canvasAcpNamespace } from '../workspace/paths.js';
+import { acquireWorkspaceOperationLease } from '../workspace.js';
 
 import type {
   RealizedExternalAgentThread,
@@ -42,6 +45,7 @@ import type {
   AgentStreamEvent,
   AgentTurnAccepted,
   ReasoningEffort,
+  StopThreadResponse,
 } from '@huabu/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
@@ -53,6 +57,11 @@ interface PersistedSpacePrompt {
 }
 
 interface AgentThreadServiceDependencies {
+  hasAcceptedRequest: (
+    threadId: string,
+    canvasId: string | undefined,
+    requestId: string,
+  ) => Promise<boolean>;
   resolveAgentNode: (
     canvasId: string,
     threadId: string,
@@ -115,6 +124,31 @@ export function spacePromptFromWorkloadSpec(spec: unknown): string | undefined {
 }
 
 const DEFAULT_DEPENDENCIES: AgentThreadServiceDependencies = {
+  hasAcceptedRequest: async (threadId, canvasId, requestId) => {
+    const hasAcceptedInCanvas = async (id: string): Promise<boolean> => {
+      const history = await agenetes.history(canvasAcpNamespace(id), threadId, {
+        withTail: true,
+      });
+      return history.turns.some(
+        (turn) =>
+          chatEnvelopeFromSubmission(turn.request)?.requestId === requestId,
+      );
+    };
+    if (canvasId !== undefined) return hasAcceptedInCanvas(canvasId);
+
+    const lease = acquireWorkspaceOperationLease();
+    try {
+      if (await hasAcceptedInCanvas('')) return true;
+      const spaces = getStructuredStore().spaces();
+      if (await hasAcceptedInCanvas(await spaces.worldId())) return true;
+      for (const space of await spaces.list()) {
+        if (await hasAcceptedInCanvas(space.canvasId)) return true;
+      }
+      return false;
+    } finally {
+      lease.release();
+    }
+  },
   resolveAgentNode: (canvasId, threadId) =>
     agentThreadResolver.resolveAgentNode(canvasId, threadId),
   resolveFixedAgentNode: (canvasId, threadId) =>
@@ -166,7 +200,15 @@ export class AgentThreadBusyError extends Error {
   }
 }
 
+export class AgentRequestStoppedError extends Error {
+  constructor() {
+    super('The Agent request was stopped before execution.');
+    this.name = 'AgentRequestStoppedError';
+  }
+}
+
 export interface AgentThreadInvocationOptions {
+  requestId?: string;
   threadId: string;
   canvasId?: string;
   content: string;
@@ -218,6 +260,7 @@ export interface ExternalAgentThreadTarget {
 }
 
 interface ActiveAgentInvocation {
+  requestId?: string;
   canvasId?: string;
   abortController: AbortController;
   turnStartState: TurnStartState | null;
@@ -229,6 +272,7 @@ interface ActiveAgentInvocation {
 }
 
 interface PendingAgentPreparation {
+  requestId?: string;
   canvasId?: string;
   abortController: AbortController;
 }
@@ -258,6 +302,8 @@ function errorMessage(error: unknown): string {
 }
 
 export class AgentThreadService {
+  // Fence delayed POSTs for the lifetime of their server process.
+  private readonly stoppedRequests = new Set<string>();
   private readonly activeInvocations = new Map<string, ActiveAgentInvocation>();
   private readonly pendingPreparations = new Map<
     string,
@@ -268,17 +314,34 @@ export class AgentThreadService {
     private readonly dependencies: AgentThreadServiceDependencies = DEFAULT_DEPENDENCIES,
   ) {}
 
+  private isRequestStopped(
+    threadId: string,
+    canvasId: string | undefined,
+    requestId: string,
+  ): boolean {
+    return (
+      this.stoppedRequests.has(
+        JSON.stringify([canvasId, threadId, requestId]),
+      ) ||
+      this.stoppedRequests.has(JSON.stringify([undefined, threadId, requestId]))
+    );
+  }
+
   beginPreparation(
     threadId: string,
     canvasId?: string,
+    requestId?: string,
   ): {
     signal: AbortSignal;
     finish: () => void;
   } {
     const preparation: PendingAgentPreparation = {
+      requestId,
       canvasId,
       abortController: new AbortController(),
     };
+    if (requestId && this.isRequestStopped(threadId, canvasId, requestId))
+      preparation.abortController.abort();
     const pending = this.pendingPreparations.get(threadId) ?? new Set();
     pending.add(preparation);
     this.pendingPreparations.set(threadId, pending);
@@ -364,6 +427,15 @@ export class AgentThreadService {
     options.signal?.throwIfAborted();
     await this.dependencies.waitForTurnRelease(options.threadId);
     options.signal?.throwIfAborted();
+    if (
+      options.requestId &&
+      this.isRequestStopped(
+        options.threadId,
+        options.canvasId,
+        options.requestId,
+      )
+    )
+      throw new AgentRequestStoppedError();
     const releaseTurn = this.dependencies.acquireTurn(options.threadId);
     if (!releaseTurn) throw new AgentThreadBusyError(options.threadId);
 
@@ -376,6 +448,7 @@ export class AgentThreadService {
       resolveTurnStarted = resolve;
     });
     const active: ActiveAgentInvocation = {
+      requestId: options.requestId,
       canvasId: options.canvasId,
       abortController,
       turnStartState: null,
@@ -658,7 +731,13 @@ export class AgentThreadService {
         fixedTarget,
         (acceptance) => {
           if (!signal.aborted) active.phase = 'executing';
-          recordTurnStart({ started: true, acceptance });
+          recordTurnStart({
+            started: true,
+            acceptance:
+              acceptance && options.requestId
+                ? { ...acceptance, requestId: options.requestId }
+                : acceptance,
+          });
         },
         settle,
         active,
@@ -684,13 +763,15 @@ export class AgentThreadService {
   async stopAndWait(
     threadId: string,
     canvasId?: string,
-  ): Promise<{
-    stopped: boolean;
-    acceptance: AgentTurnAccepted | null;
-  }> {
+    requestId?: string,
+  ): Promise<StopThreadResponse> {
+    if (requestId) {
+      this.stoppedRequests.add(JSON.stringify([canvasId, threadId, requestId]));
+    }
     const pending = [...(this.pendingPreparations.get(threadId) ?? [])].filter(
       (preparation) =>
         !preparation.abortController.signal.aborted &&
+        (requestId === undefined || preparation.requestId === requestId) &&
         (canvasId === undefined || preparation.canvasId === canvasId),
     );
     for (const preparation of pending) preparation.abortController.abort();
@@ -698,9 +779,12 @@ export class AgentThreadService {
     const active = this.activeInvocations.get(threadId);
     if (
       active &&
-      !active.abortController.signal.aborted &&
+      (!active.abortController.signal.aborted || requestId !== undefined) &&
+      (requestId === undefined || active.requestId === requestId) &&
       (canvasId === undefined || active.canvasId === canvasId)
     ) {
+      const stopped =
+        !active.abortController.signal.aborted || pending.length > 0;
       const phaseAtStop = active.phase;
       active.abortController.abort();
       if (phaseAtStop === 'preparing') {
@@ -710,15 +794,41 @@ export class AgentThreadService {
       }
       const state = active.turnStartState ?? (await active.turnStarted);
       return {
-        stopped: true,
+        stopped,
         acceptance: state.started && state.acceptance ? state.acceptance : null,
+        ...(requestId
+          ? {
+              request: {
+                id: requestId,
+                accepted:
+                  (state.started && !!state.acceptance) ||
+                  (await this.dependencies.hasAcceptedRequest(
+                    threadId,
+                    canvasId,
+                    requestId,
+                  )),
+              },
+            }
+          : {}),
       };
     }
 
-    if (pending.length === 0) {
-      return { stopped: false, acceptance: null };
-    }
-    return { stopped: true, acceptance: null };
+    return {
+      stopped: pending.length > 0,
+      acceptance: null,
+      ...(requestId
+        ? {
+            request: {
+              id: requestId,
+              accepted: await this.dependencies.hasAcceptedRequest(
+                threadId,
+                canvasId,
+                requestId,
+              ),
+            },
+          }
+        : {}),
+    };
   }
 
   isActive(threadId: string, canvasId?: string): boolean {

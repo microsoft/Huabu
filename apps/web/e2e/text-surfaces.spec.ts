@@ -5,6 +5,50 @@ import { expect, test } from '@playwright/test';
 
 import { openNewCanvas } from './helpers';
 
+test('Text defaults to 24px while preserving authored fonts', async ({
+  page,
+}) => {
+  await openNewCanvas(page);
+  await page.keyboard.press('Escape');
+  const canvasId = page.url().split('/canvas/')[1]?.split(/[?#]/)[0];
+  const response = await page.request.post(`/api/canvas/${canvasId}/execute`, {
+    data: {
+      commands: [
+        {
+          type: 'CREATE_NODES',
+          nodes: [undefined, 16].map((fontSize, index) => ({
+            id: `node-font-${index}`,
+            nodeType: 'text',
+            data: { content: 'Text label', style: { fontSize } },
+            position: { x: 100 + index * 400, y: 100 },
+            size: { width: 300 },
+          })),
+        },
+      ],
+      originator: { source: 'agent', threadId: 'e2e-text-fonts' },
+    },
+  });
+  expect(response.ok(), await response.text()).toBe(true);
+  for (const [index, fontSize] of [24, 16].entries()) {
+    const text = page.locator(
+      `[data-id="node-font-${index}"] .semantic-lod-node`,
+    );
+    const editor = text.locator('textarea');
+    await expect(editor).toHaveCSS('font-size', `${fontSize}px`);
+    await expect(editor.locator('..')).toHaveCSS(
+      'padding-top',
+      `${(fontSize * 3) / 16}px`,
+    );
+    await text.dblclick();
+    await expect(editor).toBeFocused();
+    await expect(editor).toHaveCSS('font-size', `${fontSize}px`);
+    await editor.fill('Edited text label');
+    await page.keyboard.press('Tab');
+    await expect(text).toContainText('Edited text label');
+    await expect(editor).toHaveCSS('font-size', `${fontSize}px`);
+  }
+});
+
 test('Text shares the Note tint without a painted border and keeps unaccented text transparent', async ({
   page,
 }) => {

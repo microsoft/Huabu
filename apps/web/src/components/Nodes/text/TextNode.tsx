@@ -24,6 +24,7 @@ import useCanvasStore, { settleNodePreprocess } from '@/store/canvasStore.ts';
 import {
   FONT_FAMILY_CSS,
   getTextNodeFontOpts,
+  TEXT_NODE_DEFAULT_FONT_SIZE,
   TEXT_NODE_PADDING_X as NODE_PADDING_X,
   TEXT_NODE_PADDING_Y as NODE_PADDING_Y,
   TEXT_NODE_PLACEHOLDER,
@@ -101,10 +102,11 @@ export const TextNode = memo(
       width,
       isEditing,
       content,
-      baseFontSize: 16,
+      baseFontSize: TEXT_NODE_DEFAULT_FONT_SIZE,
       fontSizing: 'proportional',
-      paddingX: NODE_PADDING_X,
-      paddingY: NODE_PADDING_Y,
+      // Preserve the existing padding-to-font ratio for authored font sizes.
+      paddingX: (NODE_PADDING_X * TEXT_NODE_DEFAULT_FONT_SIZE) / 16,
+      paddingY: (NODE_PADDING_Y * TEXT_NODE_DEFAULT_FONT_SIZE) / 16,
       fontOpts,
       placeholder: TEXT_NODE_PLACEHOLDER,
     });

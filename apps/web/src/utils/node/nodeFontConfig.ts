@@ -5,7 +5,7 @@
  * Single source of truth for text-bearing node font configuration.
  *
  * TextNode and QuestionNode use proportional `data.style.fontSize` through
- * useTextNodeSurface: defaults are 16px and QUESTION_NODE_DEFAULT_FONT_SIZE.
+ * useTextNodeSurface: defaults are TEXT_NODE_DEFAULT_FONT_SIZE and QUESTION_NODE_DEFAULT_FONT_SIZE.
  * Question content and chrome share the 24px default font basis. Side grips
  * preserve the font; corners and the Hug Frame/selection cascade ({@link ./fontFit})
  * scale it by the new/start outer-width ratio without fitting or rounding.
@@ -32,6 +32,8 @@ export const FONT_FAMILY_CSS: Record<NodeFontFamily, string> = {
 /** Bundled mixed-language handwriting for resource Sigil annotations. */
 export const INK_HANDWRITING_FONT_FAMILY =
   '"Caveat", "LXGW WenKai Lite", "Kaiti SC", STKaiti, KaiTi, sans-serif';
+
+export const TEXT_NODE_DEFAULT_FONT_SIZE = 24;
 
 /** Base horizontal TextNode padding (px per side), scaled by fontSize / 16. */
 export const TEXT_NODE_PADDING_X = 8;

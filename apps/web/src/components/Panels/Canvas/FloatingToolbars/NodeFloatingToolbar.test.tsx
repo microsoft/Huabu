@@ -334,7 +334,9 @@ describe('NodeFloatingToolbar type-icon drag surface', () => {
     expect(container.querySelector('.lucide-rotate-ccw')).toBeNull();
     render({ type: 'text', data: { type: 'text', content: 'Text' } });
     expect(container.querySelector('[name="node-card-scale"]')).toBeNull();
-    expect(container.querySelector('[name="font-size"]')).not.toBeNull();
+    expect(
+      container.querySelector<HTMLInputElement>('[name="font-size"]')?.value,
+    ).toBe('24');
   });
 
   it('does not round stored fractional scales on focus/blur or Enter', () => {
