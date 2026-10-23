@@ -51,6 +51,8 @@ Common contains reusable UI primitives; canvas node references live in `componen
 
 ## 3. Where the canvas engine lives
 
+Desktop launches render a dedicated `DesktopTabShell` in the BrowserWindow and the existing App independently inside Home and Space content views. The router root diverts cross-Space navigation through the preload Tab API instead of replacing a content page's singleton Stores. Browser routing remains unchanged. Space-local persisted Stores use Workspace/Space-scoped keys, while application preferences synchronize between pages; see [Desktop Space Tabs](./desktop-tabs.md).
+
 The canvas-command **executor, command handlers, post-effects, and delta logic
 are NOT in the web app** — they were extracted to the shared package
 [`packages/shared/src/canvas-engine/`](../../packages/shared/src/canvas-engine) so the

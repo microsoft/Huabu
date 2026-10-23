@@ -20,7 +20,11 @@ import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { getElectronBridge, type UpdateStatus } from './useElectron';
-import { dismissToast, toast } from '../components/Common/Toast';
+import {
+  dismissToast,
+  toast,
+  type ToastTone,
+} from '../components/Common/Toast';
 
 interface UseAppUpdate {
   status: UpdateStatus;
@@ -37,9 +41,18 @@ export function canCheckForUpdates(status: UpdateStatus): boolean {
   );
 }
 
-export function useAppUpdate(): UseAppUpdate {
+export type UpdateFeedback = (message: string, tone: ToastTone) => void;
+
+export function useAppUpdate(onFeedback?: UpdateFeedback): UseAppUpdate {
   const { t } = useTranslation();
   const [status, setStatus] = useState<UpdateStatus>({ state: 'idle' });
+  const notify = useCallback(
+    (message: string, tone: ToastTone) => {
+      if (onFeedback) onFeedback(message, tone);
+      else toast(message, { tone });
+    },
+    [onFeedback],
+  );
 
   useEffect(() => {
     const updater = getElectronBridge()?.updater;
@@ -88,62 +101,88 @@ export function useAppUpdate(): UseAppUpdate {
     const updater = getElectronBridge()?.updater;
     if (!updater) return;
 
-    const checkingToastId = toast(t('update.checking'), {
-      tone: 'info',
-      duration: 0,
-      dismissible: false,
-    });
+    const checkingToastId = onFeedback
+      ? null
+      : toast(t('update.checking'), {
+          tone: 'info',
+          duration: 0,
+          dismissible: false,
+        });
+    onFeedback?.(t('update.checking'), 'info');
 
     void updater
       .check()
       .then((result) => {
-        dismissToast(checkingToastId);
+        if (checkingToastId) dismissToast(checkingToastId);
         if (!result.ok) {
-          toast(t('update.checkFailed', { message: result.error }), {
-            tone: 'danger',
-          });
+          notify(t('update.checkFailed', { message: result.error }), 'danger');
           return;
         }
 
         switch (result.status.state) {
           case 'available':
-            toast(
+            notify(
               t('update.foundVersion', { version: result.status.version }),
-              { tone: 'info' },
+              'info',
             );
             break;
           case 'not-available':
-            toast(
+            notify(
               t('update.currentVersion', { version: result.status.version }),
-              { tone: 'success' },
+              'success',
             );
             break;
           case 'error':
-            toast(t('update.checkFailed', { message: result.status.message }), {
-              tone: 'danger',
-            });
+            notify(
+              t('update.checkFailed', { message: result.status.message }),
+              'danger',
+            );
             break;
           default:
-            toast(t('update.checkComplete'), { tone: 'success' });
+            notify(t('update.checkComplete'), 'success');
             break;
         }
       })
       .catch((error: unknown) => {
-        dismissToast(checkingToastId);
-        toast(
+        if (checkingToastId) dismissToast(checkingToastId);
+        notify(
           t('update.checkFailed', {
             message: error instanceof Error ? error.message : String(error),
           }),
-          { tone: 'danger' },
+          'danger',
         );
       });
-  }, [t]);
+  }, [t, notify, onFeedback]);
   const download = useCallback(() => {
-    void getElectronBridge()?.updater?.download();
-  }, []);
+    const updater = getElectronBridge()?.updater;
+    if (!updater) return;
+    void updater
+      .download()
+      .then((result) => {
+        if (!result.ok) notify(result.error, 'danger');
+      })
+      .catch((error: unknown) =>
+        notify(
+          error instanceof Error ? error.message : String(error),
+          'danger',
+        ),
+      );
+  }, [notify]);
   const install = useCallback(() => {
-    void getElectronBridge()?.updater?.install();
-  }, []);
+    const updater = getElectronBridge()?.updater;
+    if (!updater) return;
+    void updater
+      .install()
+      .then((result) => {
+        if (!result.ok) notify(result.error, 'danger');
+      })
+      .catch((error: unknown) =>
+        notify(
+          error instanceof Error ? error.message : String(error),
+          'danger',
+        ),
+      );
+  }, [notify]);
 
   return { status, check, download, install };
 }

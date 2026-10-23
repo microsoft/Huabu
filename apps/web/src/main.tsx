@@ -1,14 +1,20 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import React from 'react';
+import React, { lazy, Suspense } from 'react';
 import ReactDOM from 'react-dom/client';
 
 import './index.css';
 import './i18n';
 
-import App from './App';
 import { APP_NAME } from './config/app';
+import { getElectronBridge } from './hooks/useElectron';
+import { installDesktopInputGuard } from './utils/desktopInput';
+
+const DesktopTabShell = lazy(
+  () => import('./components/Shell/DesktopTabShell'),
+);
+const App = lazy(() => import('./App'));
 
 document.title = APP_NAME;
 
@@ -32,10 +38,25 @@ for (const el of [document.documentElement, document.body, rootElement]) {
   );
 }
 
+const tabs = getElectronBridge()?.tabs;
+if (tabs && tabs.context.role !== 'shell') {
+  // Install before React mounts any window-level shortcut listeners.
+  const removeInputGuard = installDesktopInputGuard();
+  import.meta.hot?.dispose(removeInputGuard);
+}
+
 const root = ReactDOM.createRoot(rootElement);
 
 root.render(
   <React.StrictMode>
-    <App />
+    {getElectronBridge()?.tabs?.context.role === 'shell' ? (
+      <Suspense fallback={null}>
+        <DesktopTabShell />
+      </Suspense>
+    ) : (
+      <Suspense fallback={null}>
+        <App />
+      </Suspense>
+    )}
   </React.StrictMode>,
 );

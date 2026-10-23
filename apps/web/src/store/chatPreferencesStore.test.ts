@@ -36,4 +36,14 @@ describe('chatPreferencesStore', () => {
       MAX_RECENT_CHAT_TURNS,
     );
   });
+
+  it('resets a deleted preference without persisting the default back', async () => {
+    useChatPreferencesStore.getState().setRecentTurnCount(7);
+    localStorage.removeItem('huabu-chat-preferences');
+    await useChatPreferencesStore.persist.rehydrate();
+    expect(useChatPreferencesStore.getState().recentTurnCount).toBe(
+      DEFAULT_RECENT_CHAT_TURNS,
+    );
+    expect(localStorage.getItem('huabu-chat-preferences')).toBeNull();
+  });
 });

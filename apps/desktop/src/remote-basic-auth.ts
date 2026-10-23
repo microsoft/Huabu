@@ -156,8 +156,9 @@ export function registerRemoteBasicAuth(
   let promptCount = initialCredentials ? 1 : 0;
   let cancellationHandled = false;
   let navigationCredentials = initialCredentials;
+  const attemptedContents = new Set<number | undefined>();
 
-  app.on('login', (event, _webContents, requestDetails, authInfo, callback) => {
+  app.on('login', (event, webContents, requestDetails, authInfo, callback) => {
     if (
       !isRemoteBasicAuthChallenge(requestDetails.url, authInfo, serverOrigin)
     ) {
@@ -165,9 +166,9 @@ export function registerRemoteBasicAuth(
     }
 
     event.preventDefault();
-    if (navigationCredentials) {
+    if (navigationCredentials && !attemptedContents.has(webContents?.id)) {
       const credentials = navigationCredentials;
-      navigationCredentials = undefined;
+      attemptedContents.add(webContents?.id);
       callback(credentials.username, credentials.password);
       return;
     }
@@ -184,6 +185,8 @@ export function registerRemoteBasicAuth(
     }
     void pendingPrompt.then((credentials) => {
       if (credentials) {
+        navigationCredentials = credentials;
+        attemptedContents.add(webContents?.id);
         callback(credentials.username, credentials.password);
       } else {
         callback();

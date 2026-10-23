@@ -93,7 +93,13 @@ import {
   setSnapStructuredSuppressed,
   writeDragDecision,
 } from '@/handler/snap/snapSession';
+import { getElectronBridge } from '@/hooks/useElectron';
 import { getCanvasVisibleArea } from '@/utils/canvasViewport';
+import {
+  desktopStorageKey,
+  readApplicationPreference,
+  writeApplicationPreference,
+} from '@/utils/desktopStorage';
 import {
   changedSpaceEntries,
   isVisibleWorldNode,
@@ -224,7 +230,9 @@ function readViewportFromStorage(canvasId: string): CanvasViewport | null {
   const key = viewportStorageKey(canvasId);
 
   try {
-    return parseStoredViewport(localStorage.getItem(key));
+    return parseStoredViewport(
+      localStorage.getItem(desktopStorageKey(key)) ?? localStorage.getItem(key),
+    );
   } catch {
     // Private mode / disabled storage falls back to fitView.
     return null;
@@ -264,17 +272,23 @@ function flushViewportWrite(): void {
     clearTimeout(viewportWriteTimer);
     viewportWriteTimer = null;
   }
+
   const pending = pendingViewportWrite;
   pendingViewportWrite = null;
   if (!pending) return;
   try {
     localStorage.setItem(
-      viewportStorageKey(pending.canvasId),
+      desktopStorageKey(viewportStorageKey(pending.canvasId)),
       JSON.stringify(pending.viewport),
     );
   } catch {
     // Viewport persistence must never block interaction.
   }
+}
+
+export function flushCanvasViewState(): void {
+  flushViewportWrite();
+  usePreviewWorkspaceStore.getState().flush();
 }
 
 function writeViewportToStorage(
@@ -293,10 +307,10 @@ function writeViewportToStorage(
   );
 }
 
-// ─── MiniMap-visibility localStorage ──────────────────────────────────────
+// ─── MiniMap-visibility preference ────────────────────────────────────────
 //
 // Whether the canvas MiniMap overlay is shown is a global UI preference
-// (not per-canvas), so it uses a single localStorage key. Defaults to off so
+// (not per-canvas), persisted by the application preference adapter. Defaults to off so
 // first-time users get the cleaner canvas; once toggled in Settings the choice
 // survives refreshes / restarts.
 
@@ -304,7 +318,7 @@ const MINIMAP_STORAGE_KEY = 'huabu.minimapEnabled';
 
 function readMinimapEnabledFromStorage(): boolean {
   try {
-    return localStorage.getItem(MINIMAP_STORAGE_KEY) === 'true';
+    return readApplicationPreference(MINIMAP_STORAGE_KEY) === 'true';
   } catch {
     // Private mode / disabled storage — treat as off.
     return false;
@@ -313,9 +327,13 @@ function readMinimapEnabledFromStorage(): boolean {
 
 function writeMinimapEnabledToStorage(value: boolean): void {
   try {
-    localStorage.setItem(MINIMAP_STORAGE_KEY, String(value));
-  } catch {
-    // Ignore quota / private-mode errors; in-memory state still toggles.
+    writeApplicationPreference(MINIMAP_STORAGE_KEY, String(value));
+  } catch (error) {
+    console.error('Could not save MiniMap visibility:', error);
+    toast(error instanceof Error ? error.message : String(error), {
+      tone: 'danger',
+    });
+    if (getElectronBridge()?.tabs) throw error;
   }
 }
 
@@ -1140,6 +1158,10 @@ export function clearNodeDuplicateGuard(nodeId: string): void {
 export function settleNodePreprocess(nodeId: string): void {
   const node = useCanvasStore.getState().nodes.find((n) => n.id === nodeId);
   if (node) preprocessQueue.schedule(node);
+}
+
+export function drainNodePreprocessing(): Promise<void> {
+  return preprocessQueue.flushAll();
 }
 
 /**

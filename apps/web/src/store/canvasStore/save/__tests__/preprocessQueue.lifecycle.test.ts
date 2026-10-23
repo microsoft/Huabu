@@ -65,6 +65,59 @@ afterEach(() => {
 });
 
 describe('preprocessing task lifecycle', () => {
+  it('promotes settled Text edits immediately and waits for their label projection', async () => {
+    const text = { ...node, type: 'text', data: { content: 'Old heading' } };
+    const { state, queue } = setup([text]);
+    const result = deferred<{ success: boolean; suggestedLabel: string }>();
+    preprocessNode.mockReturnValueOnce(result.promise);
+    queue.schedule(text);
+    state.nodes = [{ ...text, data: { content: 'Final heading' } }];
+    let finished = false;
+    const drain = queue.flushAll().then(() => {
+      finished = true;
+    });
+    expect(preprocessNode).toHaveBeenCalledWith(
+      'canvas-a',
+      text.id,
+      expect.objectContaining({
+        snapshot: expect.objectContaining({ content: 'Final heading' }),
+      }),
+    );
+    expect(finished).toBe(false);
+    result.resolve({ success: true, suggestedLabel: 'Final heading' });
+    await drain;
+    expect(state.nodes[0].data.label).toBe('Final heading');
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(preprocessNode).toHaveBeenCalledOnce();
+  });
+
+  it('drains running requests and additional work queued during their completion', async () => {
+    const { state, queue } = setup();
+    const result = deferred<{ success: boolean }>();
+    preprocessNode.mockReturnValueOnce(result.promise);
+    queue.schedule(node);
+    await vi.advanceTimersByTimeAsync(100);
+    const next = { ...node, id: 'web-b' };
+    const drain = queue.flushAll();
+    state.nodes = [node, next];
+    queue.schedule(next);
+    result.resolve({ success: true });
+    await drain;
+    expect(preprocessNode).toHaveBeenCalledTimes(2);
+  });
+
+  it('refuses to bypass restored content and drains it after persistence resumes', async () => {
+    const { blocked, queue } = setup();
+    blocked.add(node.id);
+    queue.schedule(node);
+    await expect(queue.flushAll()).rejects.toThrow('restored content');
+    expect(preprocessNode).not.toHaveBeenCalled();
+    blocked.delete(node.id);
+    queue.resumeRestored('canvas-a', node.id);
+    await queue.flushAll();
+    expect(preprocessNode).toHaveBeenCalledOnce();
+  });
+
   it('preserves a protected rename while accepting otherwise current extraction', async () => {
     const { state, queue, ingestion } = setup();
     const result = deferred<{

@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   resolveFolderPickerSupported,
@@ -10,6 +10,7 @@ import {
 import { listCanvases } from '../api/canvas';
 
 import type { WorkspaceDescriptor, WorkspaceInfo } from '../api/workspace';
+import type * as ElectronModule from '../hooks/useElectron';
 import type { ListCanvasesResponse } from '@huabu/shared';
 
 const FIRST_ID = '00000000-0000-4000-8000-000000000001';
@@ -18,6 +19,22 @@ const SECOND_ID = '00000000-0000-4000-8000-000000000002';
 const apiState = vi.hoisted(() => ({
   info: null as WorkspaceInfo | null,
   workspaces: [] as WorkspaceDescriptor[],
+}));
+
+const desktop = vi.hoisted(() => ({
+  enabled: false,
+  tabs: {
+    beginWorkspaceChange: vi.fn(async () => ({ ok: true as const })),
+    endWorkspaceChange: vi.fn(async () => ({ ok: true as const })),
+    workspaceReady: vi.fn(async (_workspaceId: string) => ({
+      ok: true as const,
+    })),
+  },
+}));
+
+vi.mock('../hooks/useElectron', async (importOriginal) => ({
+  ...(await importOriginal<typeof ElectronModule>()),
+  getElectronBridge: () => (desktop.enabled ? { tabs: desktop.tabs } : null),
 }));
 
 const apiMocks = vi.hoisted(() => ({
@@ -71,6 +88,11 @@ function unconfiguredInfo(): WorkspaceInfo {
     worldCanvasId: null,
     capabilities: { canChangeWorkspace: true, nativePicker: false },
   };
+}
+
+function currentInfo(): WorkspaceInfo {
+  if (!apiState.info) throw new Error('Workspace test info is not initialized');
+  return apiState.info;
 }
 
 function descriptors(): WorkspaceDescriptor[] {
@@ -369,6 +391,170 @@ describe('workspaceStore registry persistence', () => {
       spaceTitles: {},
       spaceTitlesStatus: 'idle',
       spaceTitlesError: null,
+    });
+  });
+
+  describe('desktop Workspace activation recovery', () => {
+    beforeEach(() => {
+      desktop.enabled = true;
+      vi.clearAllMocks();
+      apiState.workspaces = descriptors();
+      apiState.info = {
+        ...unconfiguredInfo(),
+        configured: true,
+        workspaceId: FIRST_ID,
+        path: '/tmp/first',
+        name: 'First',
+      };
+      apiMocks.getWorkspaceInfo
+        .mockReset()
+        .mockImplementation(async () => currentInfo());
+      apiMocks.listWorkspaces
+        .mockReset()
+        .mockImplementation(async () => apiState.workspaces);
+      apiMocks.putWorkspacePath.mockReset().mockImplementation(async () => {
+        await apiMocks.activateWorkspace(SECOND_ID);
+        return apiState.info;
+      });
+      useWorkspaceStore.setState({
+        mode: 'free',
+        workspaceId: FIRST_ID,
+        workspacePath: '/tmp/first',
+        workspaceName: 'First',
+        recentWorkspaces: descriptors(),
+        isReady: true,
+        isSyncing: false,
+        error: null,
+      });
+    });
+
+    afterEach(() => {
+      desktop.enabled = false;
+      vi.restoreAllMocks();
+    });
+
+    const activate = (method: 'path' | 'recent') =>
+      method === 'path'
+        ? useWorkspaceStore.getState().selectWorkspace('/tmp/second')
+        : useWorkspaceStore.getState().activateRecentWorkspace(SECOND_ID);
+
+    it.each(['path', 'recent'] as const)(
+      'exposes save-barrier failures without changing the current Workspace (%s)',
+      async (method) => {
+        desktop.tabs.beginWorkspaceChange.mockRejectedValueOnce(
+          new Error('Background Space could not save'),
+        );
+        await expect(activate(method)).rejects.toThrow(
+          'Background Space could not save',
+        );
+        expect(useWorkspaceStore.getState()).toMatchObject({
+          workspaceId: FIRST_ID,
+          workspacePath: '/tmp/first',
+          workspaceName: 'First',
+          isReady: true,
+          isSyncing: false,
+          error: 'Background Space could not save',
+        });
+        expect(apiMocks.activateWorkspace).not.toHaveBeenCalled();
+        expect(apiMocks.putWorkspacePath).not.toHaveBeenCalled();
+        expect(desktop.tabs.endWorkspaceChange).not.toHaveBeenCalled();
+        expect(desktop.tabs.workspaceReady).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(['path', 'recent'] as const)(
+      'keeps the confirmed new identity when the registry refresh fails (%s)',
+      async (method) => {
+        apiMocks.listWorkspaces.mockRejectedValueOnce(
+          new Error('Registry offline'),
+        );
+        await expect(activate(method)).rejects.toThrow('Registry offline');
+        expect(useWorkspaceStore.getState()).toMatchObject({
+          workspaceId: SECOND_ID,
+          workspacePath: '/tmp/second',
+          isReady: true,
+          isSyncing: false,
+          error: 'Registry offline',
+        });
+        expect(desktop.tabs.endWorkspaceChange).toHaveBeenCalledOnce();
+        expect(desktop.tabs.workspaceReady).toHaveBeenCalledExactlyOnceWith(
+          SECOND_ID,
+        );
+      },
+    );
+
+    it('reconciles an info-query failure against the Server instead of the old Store', async () => {
+      apiMocks.getWorkspaceInfo.mockRejectedValueOnce(
+        new Error('Info offline'),
+      );
+      await expect(activate('recent')).rejects.toThrow('Info offline');
+      expect(apiMocks.getWorkspaceInfo).toHaveBeenCalledTimes(2);
+      expect(useWorkspaceStore.getState().workspaceId).toBe(SECOND_ID);
+      expect(desktop.tabs.workspaceReady).toHaveBeenCalledExactlyOnceWith(
+        SECOND_ID,
+      );
+    });
+
+    it.each(['path', 'recent'] as const)(
+      'confirms the Server after a rejected activation response (%s)',
+      async (method) => {
+        const rejectAfterActivation = async () => {
+          apiState.info = {
+            ...currentInfo(),
+            workspaceId: SECOND_ID,
+            path: '/tmp/second',
+            name: 'Second',
+          };
+          throw new Error('Response lost');
+        };
+        if (method === 'path')
+          apiMocks.putWorkspacePath.mockImplementationOnce(
+            rejectAfterActivation,
+          );
+        else
+          apiMocks.activateWorkspace.mockImplementationOnce(
+            rejectAfterActivation,
+          );
+        await expect(activate(method)).rejects.toThrow('Response lost');
+        expect(useWorkspaceStore.getState().workspaceId).toBe(SECOND_ID);
+        expect(desktop.tabs.workspaceReady).toHaveBeenCalledExactlyOnceWith(
+          SECOND_ID,
+        );
+      },
+    );
+
+    it('does not restore any Space session when the active identity cannot be confirmed', async () => {
+      const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+      apiMocks.getWorkspaceInfo.mockRejectedValue(
+        new Error('Server unreachable'),
+      );
+      await expect(activate('recent')).rejects.toThrow('Server unreachable');
+      expect(apiState.info?.workspaceId).toBe(SECOND_ID);
+      expect(useWorkspaceStore.getState()).toMatchObject({
+        workspaceId: null,
+        workspacePath: null,
+        isReady: false,
+        isSyncing: false,
+        error: 'Server unreachable',
+      });
+      expect(desktop.tabs.endWorkspaceChange).toHaveBeenCalledOnce();
+      expect(desktop.tabs.workspaceReady).not.toHaveBeenCalled();
+      expect(log).toHaveBeenCalledWith(
+        'Could not confirm the active Workspace:',
+        expect.any(Error),
+      );
+    });
+
+    it('restores the old session only after the Server confirms it is still active', async () => {
+      apiMocks.activateWorkspace.mockRejectedValueOnce(
+        new Error('Activation refused'),
+      );
+      await expect(activate('recent')).rejects.toThrow('Activation refused');
+      expect(apiMocks.getWorkspaceInfo).toHaveBeenCalledOnce();
+      expect(useWorkspaceStore.getState().workspaceId).toBe(FIRST_ID);
+      expect(desktop.tabs.workspaceReady).toHaveBeenCalledExactlyOnceWith(
+        FIRST_ID,
+      );
     });
   });
 

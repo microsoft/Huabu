@@ -1,4 +1,11 @@
 {
+  "desktopTabs": {
+    "label": "Open Spaces",
+    "newTab": "New tab",
+    "noMatchingSpaces": "No matching Spaces.",
+    "closeTab": "Close Tab",
+    "closeBeforeDeleting": "This Space is open. Close its Tab before deleting it."
+  },
   "sigil": {
     "chooseResource": "Choose a resource",
     "bindingHint": "Click a canvas object or choose a resource from the list",
@@ -615,6 +622,9 @@
     }
   },
   "workspace": {
+    "switcher": "Switch Workspace",
+    "open": "Open Workspace…",
+    "switchFailed": "Could not open the Workspace. Please try again.",
     "welcome": "Welcome to {{appName}}",
     "intro": "Choose a Home folder to store your Spaces, notes, and artifacts.",
     "folder": "Home folder",
@@ -1036,6 +1046,7 @@
     "currentAgentThread": "Current agent for this conversation",
     "newConversation": "New conversation",
     "titleSaveFailed": "Could not sync conversation title",
+    "retryTitleSave": "Retry title save",
     "renameTitle": "Rename conversation",
     "newChatWith": "New chat with {{name}}",
     "saveAsQuestion": "Save chat as Agent Node",

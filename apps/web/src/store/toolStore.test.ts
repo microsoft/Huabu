@@ -40,6 +40,16 @@ describe('toolStore input preference', () => {
     expect(stored.state?.penObserved).toBe(true);
     expect(stored.state?.inputModePreference).toBe('finger');
   });
+
+  it('resets deleted preferences without clearing transient tool state or echoing a write', async () => {
+    useToolStore.getState().setPendingNodeType('note');
+    useToolStore.getState().setInputModePreference('finger');
+    localStorage.removeItem('huabu-sketch-tools');
+    await useToolStore.persist.rehydrate();
+    expect(useToolStore.getState().inputModePreference).toBe('auto');
+    expect(useToolStore.getState().pendingNodeType).toBe('note');
+    expect(localStorage.getItem('huabu-sketch-tools')).toBeNull();
+  });
 });
 
 describe('toolStore sketch size presets', () => {

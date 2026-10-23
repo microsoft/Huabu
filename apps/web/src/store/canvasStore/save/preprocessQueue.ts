@@ -68,6 +68,8 @@ export type PreprocessQueueState = {
  */
 export type PreprocessQueue = {
   waitForIdle(): Promise<void>;
+  /** Promote queued work and await issued requests before renderer destruction. */
+  flushAll(): Promise<void>;
   /** Retain unfinished work for a possible history resurrection. */
   forgetNode(nodeId: string): void;
   /** Reconcile only tasks whose request inputs changed in history. */
@@ -247,6 +249,21 @@ export function createPreprocessQueue(opts: {
   }
 
   const queue: PreprocessQueue = {
+    async flushAll() {
+      do {
+        for (const nodeId of debouncer.cancelAll()) {
+          const task = tasks.get(nodeId);
+          if (task) start(nodeId, task);
+        }
+        await queue.waitForIdle();
+      } while (debouncer.pendingKeys().length > 0 || inflight.size > 0);
+      if ([...tasks.values()].some((task) => task.phase === 'blocked')) {
+        throw new Error(
+          'Node preprocessing is waiting for restored content to be saved.',
+        );
+      }
+    },
+
     async waitForIdle() {
       await Promise.all(inflight);
     },
