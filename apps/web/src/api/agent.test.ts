@@ -25,10 +25,12 @@ function callbacks(): AgentStreamCallbacks {
 function respond(events: AgentHostStreamEvent[]) {
   const fetchMock = vi
     .fn()
-    .mockResolvedValue(
-      new Response(
-        events.map((event) => frame(event.type, event.data)).join(''),
-        { headers: { 'Content-Type': 'text/event-stream' } },
+    .mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          events.map((event) => frame(event.type, event.data)).join(''),
+          { headers: { 'Content-Type': 'text/event-stream' } },
+        ),
       ),
     );
   vi.stubGlobal('fetch', fetchMock);
@@ -312,5 +314,52 @@ describe('agent API host acceptance', () => {
     ).resolves.toEqual({ status: 'completed' });
     expect(handlers.onAccepted).toHaveBeenCalledExactlyOnceWith(accepted);
     expect(handlers.onEvent).not.toHaveBeenCalled();
+  });
+
+  it('rejects with stream error if stream reaches EOF without a terminal event', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    respond([{ type: 'text_delta', data: { content: 'Partial response' } }]);
+    const handlers = callbacks();
+
+    await agentApi.streamMessage('Hello', 'thread-a', 'ask', handlers);
+
+    expect(handlers.onEvent).toHaveBeenCalledExactlyOnceWith({
+      type: 'text_delta',
+      data: { content: 'Partial response' },
+    });
+    expect(handlers.onComplete).not.toHaveBeenCalled();
+    expect(handlers.onError).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        message: 'Agent stream ended before a terminal event',
+      }),
+    );
+  });
+
+  it('calls onComplete when stream terminates after a done event', async () => {
+    respond([
+      { type: 'text_delta', data: { content: 'Full response' } },
+      { type: 'done', data: { message: 'Turn complete' } },
+    ]);
+    const handlers = callbacks();
+
+    await agentApi.streamMessage('Hello', 'thread-a', 'ask', handlers);
+
+    expect(handlers.onEvent).toHaveBeenCalledTimes(2);
+    expect(handlers.onError).not.toHaveBeenCalled();
+    expect(handlers.onComplete).toHaveBeenCalledOnce();
+  });
+
+  it('treats aborted stream without terminal event as intentional stop', async () => {
+    respond([{ type: 'text_delta', data: { content: 'Interrupted' } }]);
+    const handlers = callbacks();
+    const controller = new AbortController();
+    controller.abort();
+
+    await agentApi.streamMessage('Hello', 'thread-a', 'ask', handlers, {
+      signal: controller.signal,
+    });
+
+    expect(handlers.onError).not.toHaveBeenCalled();
+    expect(handlers.onComplete).toHaveBeenCalledOnce();
   });
 });

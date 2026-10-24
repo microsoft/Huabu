@@ -337,7 +337,10 @@ export const agentApi = {
         callbacks,
         options?.signal,
       );
-      if (!terminal) callbacks.onComplete();
+      if (!terminal) {
+        throw new Error('Agent stream ended before a terminal event');
+      }
+      if (terminal === 'done') callbacks.onComplete();
     } catch (error) {
       // Treat any error while the signal is aborted as an intentional stop
       if (options?.signal?.aborted) {
