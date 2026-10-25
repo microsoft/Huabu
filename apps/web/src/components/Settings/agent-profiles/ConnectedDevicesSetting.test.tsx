@@ -203,7 +203,9 @@ describe('connected device settings', () => {
     expect(rows[0].querySelector('button')?.textContent).toBe(
       'settings.localAgentDisconnect',
     );
-    expect(rows[1].querySelector('button')).toBeNull();
+    expect(rows[1].querySelector('button')?.getAttribute('aria-label')).toBe(
+      'settings.detectInstalledAgentsOnDevice',
+    );
     await act(async () => rows[0].querySelector('button')?.click());
     expect(api.setEnabled).toHaveBeenCalledExactlyOnceWith(false);
   });
@@ -241,7 +243,10 @@ describe('connected device settings', () => {
     await act(async () => root.render(<ConnectedDevicesSetting />));
     expect(container.querySelectorAll('.setting-row')).toHaveLength(1);
     expect(container.textContent).toContain('Server: linux x64');
-    expect(container.querySelector('button')).toBeNull();
+    expect(container.querySelector('button')?.getAttribute('aria-label')).toBe(
+      'settings.detectInstalledAgentsOnDevice',
+    );
+    expect(api.setEnabled).not.toHaveBeenCalled();
   });
 
   it('keeps the connect-this-device entry first before and after connecting', async () => {
@@ -258,7 +263,9 @@ describe('connected device settings', () => {
     const rows = container.querySelectorAll('.setting-row');
     expect(rows).toHaveLength(2);
     expect(rows[1].textContent).toContain('Server: linux x64');
-    expect(rows[1].querySelector('button')).toBeNull();
+    expect(rows[1].querySelector('button')?.getAttribute('aria-label')).toBe(
+      'settings.detectInstalledAgentsOnDevice',
+    );
     expect(rows[0].textContent).toContain('settings.localAgentTitle');
     expect(rows[0].querySelector('button')?.textContent).toBe(
       'settings.localAgentConnect',

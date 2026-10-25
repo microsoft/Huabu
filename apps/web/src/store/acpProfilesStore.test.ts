@@ -70,6 +70,66 @@ beforeEach(() => {
 });
 
 describe('browser-local recent conversation Agent', () => {
+  it('starts a post-mutation snapshot after an older polling GET finishes', async () => {
+    let finishOld!: (value: typeof snapshot) => void;
+    listProfiles.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishOld = resolve;
+        }),
+    );
+    const polling = useAcpProfilesStore
+      .getState()
+      .refresh({ background: true });
+    await vi.waitFor(() => expect(listProfiles).toHaveBeenCalledOnce());
+    const fresh = useAcpProfilesStore
+      .getState()
+      .refresh({ afterMutation: true });
+    const added = { ...profile, id: 'added' };
+    listProfiles.mockResolvedValueOnce({
+      ...snapshot,
+      profiles: [profile, added],
+      selectableProfileIds: [profile.id, added.id],
+    });
+    finishOld(snapshot);
+    await Promise.all([polling, fresh]);
+    expect(listProfiles).toHaveBeenCalledTimes(2);
+    expect(useAcpProfilesStore.getState().profiles).toEqual([profile, added]);
+  });
+
+  it('reports post-mutation refresh failure without discarding the last snapshot', async () => {
+    const error = new Error('Refresh failed');
+    listProfiles.mockRejectedValueOnce(error);
+    await expect(
+      useAcpProfilesStore.getState().refresh({ afterMutation: true }),
+    ).rejects.toBe(error);
+    expect(useAcpProfilesStore.getState().profiles).toEqual([profile]);
+    expect(useAcpProfilesStore.getState().error).toBe(error);
+    await useAcpProfilesStore.getState().refresh();
+    expect(useAcpProfilesStore.getState().error).toBeNull();
+  });
+
+  it('still makes a fresh request after a preceding polling failure', async () => {
+    let failOld!: (reason: Error) => void;
+    listProfiles.mockImplementationOnce(
+      () =>
+        new Promise((_, reject) => {
+          failOld = reject;
+        }),
+    );
+    const polling = useAcpProfilesStore
+      .getState()
+      .refresh({ background: true });
+    await vi.waitFor(() => expect(listProfiles).toHaveBeenCalledOnce());
+    const fresh = useAcpProfilesStore
+      .getState()
+      .refresh({ afterMutation: true });
+    failOld(new Error('Old poll failed'));
+    await Promise.all([polling, fresh]);
+    expect(listProfiles).toHaveBeenCalledTimes(2);
+    expect(useAcpProfilesStore.getState().error).toBeNull();
+  });
+
   it('keeps picker identity explicit and clears it for older server responses', async () => {
     listProfiles.mockResolvedValueOnce({
       ...snapshot,

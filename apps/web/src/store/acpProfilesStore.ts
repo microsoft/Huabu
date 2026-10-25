@@ -58,7 +58,7 @@ import type {
   AgentDefaultsResponse,
 } from '@huabu/shared';
 
-let inFlightRefresh: Promise<void> | null = null;
+let inFlightRefresh: Promise<Error | null> | null = null;
 let inFlightDefaults: Promise<AgentDefaultsResponse> | null = null;
 let defaultsSaveQueue = Promise.resolve();
 let defaultsRevision = 0;
@@ -118,8 +118,11 @@ interface AcpProfilesState {
   initStarted: boolean;
   /** Idempotent first-load helper called by the hook on mount. */
   init: () => Promise<void>;
-  /** Force a fresh GET. Safe to call concurrently. */
-  refresh: (options?: { background?: boolean }) => Promise<void>;
+  /** Refresh the shared snapshot; afterMutation waits for older reads and reports errors. */
+  refresh: (options?: {
+    background?: boolean;
+    afterMutation?: boolean;
+  }) => Promise<void>;
   loadDefaults: () => Promise<AgentDefaultsResponse>;
   saveDefaults: (config: AgentDefaults) => Promise<AgentDefaultsResponse>;
   rememberConversationAgent: (profileId: string) => void;
@@ -229,7 +232,16 @@ export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
   },
   refresh: async (options) => {
     await defaultsSaveQueue;
-    if (inFlightRefresh) return inFlightRefresh;
+    // A mutation must not join a snapshot captured before its commit.
+    if (options?.afterMutation && inFlightRefresh) await inFlightRefresh;
+    if (inFlightRefresh) {
+      const error = await inFlightRefresh;
+      if (options?.afterMutation && error) {
+        set({ error });
+        throw error;
+      }
+      return;
+    }
     const background = options?.background === true;
     const revision = defaultsRevision;
     const request = (async () => {
@@ -249,24 +261,32 @@ export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
           error: null,
           loading: false,
         });
+        return null;
       } catch (err) {
+        const error = err instanceof Error ? err : new Error(String(err));
         // Leave the previous snapshot in place so transient errors
         // don't make the picker flicker between "available" and empty.
         set(
           background
             ? { loading: false }
             : {
-                error: err instanceof Error ? err : new Error(String(err)),
+                error,
                 loading: false,
               },
         );
+        return error;
       }
     })();
     inFlightRefresh = request;
-    void request.finally(() => {
+    const clear = () => {
       if (inFlightRefresh === request) inFlightRefresh = null;
-    });
-    return request;
+    };
+    void request.then(clear, clear);
+    const error = await request;
+    if (options?.afterMutation && error) {
+      set({ error });
+      throw error;
+    }
   },
 }));
 

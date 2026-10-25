@@ -8,7 +8,10 @@ import { join } from 'node:path';
 import { createAgentProfileRegistry } from '@agenetes/agent-profile';
 import { describe, expect, it, vi } from 'vitest';
 
-import { registerHarnessProfileDiscovery } from './harness-profile-discovery.js';
+import {
+  HarnessProfileDiscoveryError,
+  registerHarnessProfileDiscovery,
+} from './harness-profile-discovery.js';
 import { AgentDefaultsService } from '../agent-defaults.js';
 
 import type {
@@ -37,6 +40,7 @@ type Event = { agentletId: string; status: 'connected' | 'disconnected' };
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 function setup(initialMachines = ['machine-a']) {
+  const connected = new Set(initialMachines);
   let listener: (event: Event) => void = () => {};
   let nextId = 0;
   const profiles: AgentProfile[] = [];
@@ -65,7 +69,7 @@ function setup(initialMachines = ['machine-a']) {
   };
   const gateway = {
     getAgentlets: () =>
-      initialMachines.map((agentletId) => ({
+      [...connected].map((agentletId) => ({
         agentletId,
         agentletProfile: {
           machine: {
@@ -84,23 +88,282 @@ function setup(initialMachines = ['machine-a']) {
     ),
   };
   const log = { info: vi.fn(), warn: vi.fn() };
-  const start = () =>
-    registerHarnessProfileDiscovery({
+  let discovery: ReturnType<typeof registerHarnessProfileDiscovery>;
+  const start = () => {
+    discovery = registerHarnessProfileDiscovery({
       gateway,
       getRegistry: () => registry,
       log,
     });
+    return discovery.dispose;
+  };
   return {
     start,
     profiles,
     registry,
     gateway,
     log,
-    emit: (event: Event) => listener(event),
+    discover: (agentletId = 'machine-a') => discovery.discover(agentletId),
+    emit: (event: Event) => {
+      if (event.status === 'connected') connected.add(event.agentletId);
+      else connected.delete(event.agentletId);
+      listener(event);
+    },
   };
 }
 
 describe('automatic ordinary Profile provisioning', () => {
+  it('shares automatic/manual overlap, then performs fresh idempotent discovery', async () => {
+    const context = setup();
+    let finish!: (result: HarnessDiscoveryResult) => void;
+    context.gateway.discoverHarnesses.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const dispose = context.start();
+    const first = context.discover();
+    expect(context.discover()).toBe(first);
+    expect(context.gateway.discoverHarnesses).toHaveBeenCalledOnce();
+    finish(observation);
+    expect((await first).harnesses[0]).toMatchObject({
+      profileStatus: 'created',
+      profileId: 'profile-1',
+    });
+    const original = structuredClone(context.profiles);
+    const second = await context.discover();
+    expect(second.harnesses[0]).toMatchObject({
+      profileStatus: 'existing',
+      profileId: 'profile-1',
+    });
+    expect(context.gateway.discoverHarnesses).toHaveBeenCalledTimes(2);
+    expect(context.profiles).toEqual(original);
+    dispose();
+  });
+
+  it('lets different devices discover independently', async () => {
+    const context = setup(['machine-a', 'machine-b']);
+    let finishA!: (result: HarnessDiscoveryResult) => void;
+    context.gateway.discoverHarnesses.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishA = resolve;
+        }),
+    );
+    const dispose = context.start();
+    const second = await context.discover('machine-b');
+    expect(second.agentletId).toBe('machine-b');
+    expect(context.profiles.map((profile) => profile.agentletId)).toEqual([
+      'machine-b',
+    ]);
+    finishA(observation);
+    await context.discover();
+    expect(context.profiles).toHaveLength(2);
+    dispose();
+  });
+
+  it.each(['disconnect', 'reconnect', 'dispose'] as const)(
+    'explicitly rejects a manual completion after %s',
+    async (action) => {
+      const context = setup();
+      let finish!: (result: HarnessDiscoveryResult) => void;
+      context.gateway.discoverHarnesses.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      );
+      const dispose = context.start();
+      const pending = context.discover();
+      const rejected = expect(pending).rejects.toMatchObject({
+        code: 'harness_discovery_stale',
+        status: 409,
+      });
+      if (action === 'dispose') dispose();
+      else
+        context.emit({
+          agentletId: 'machine-a',
+          status: action === 'disconnect' ? 'disconnected' : 'connected',
+        });
+      finish(observation);
+      await rejected;
+      dispose();
+    },
+  );
+
+  it('does not let an old finalizer clear the replacement connection request', async () => {
+    const context = setup();
+    const connection = {
+      ...context.gateway.getAgentlets()[0],
+      connectedAt: new Date('2026-01-01T00:00:00Z'),
+    };
+    context.gateway.getAgentlets = () => [connection];
+    let finishOld!: (result: HarnessDiscoveryResult) => void;
+    let finishNew!: (result: HarnessDiscoveryResult) => void;
+    context.gateway.discoverHarnesses
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishOld = resolve;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishNew = resolve;
+          }),
+      );
+    const dispose = context.start();
+    const old = context.discover();
+    const rejected = expect(old).rejects.toBeInstanceOf(
+      HarnessProfileDiscoveryError,
+    );
+    context.emit({ agentletId: 'machine-a', status: 'disconnected' });
+    context.emit({ agentletId: 'machine-a', status: 'connected' });
+    expect(context.gateway.getAgentlets()[0]).toBe(connection);
+    expect(connection.connectedAt.toISOString()).toBe(
+      '2026-01-01T00:00:00.000Z',
+    );
+    const replacement = context.discover();
+    finishOld(observation);
+    await rejected;
+    expect(context.discover()).toBe(replacement);
+    expect(context.gateway.discoverHarnesses).toHaveBeenCalledTimes(2);
+    finishNew(observation);
+    await replacement;
+    expect(context.registry.createProfile).toHaveBeenCalledOnce();
+    dispose();
+  });
+
+  it('reports partial persistence and retries without duplicating saved additions', async () => {
+    const context = setup();
+    const create = context.registry.createProfile.getMockImplementation();
+    if (!create) throw new Error('Expected the test registry implementation');
+    context.registry.createProfile
+      .mockImplementationOnce(create)
+      .mockImplementationOnce(() => {
+        throw new Error('Disk full');
+      });
+    context.gateway.discoverHarnesses.mockResolvedValue({
+      harnesses: [
+        observation.harnesses[0],
+        { ...observation.harnesses[0], id: 'codex' },
+      ],
+    });
+    const dispose = context.start();
+    await expect(context.discover()).rejects.toMatchObject({
+      code: 'harness_reconciliation_failed',
+      status: 500,
+      details: { createdProfileIds: ['profile-1'] },
+    });
+    expect(context.profiles).toHaveLength(1);
+    const result = await context.discover();
+    expect(result.harnesses.map((harness) => harness.profileStatus)).toEqual([
+      'existing',
+      'created',
+    ]);
+    expect(context.profiles).toHaveLength(2);
+    dispose();
+  });
+
+  it('keeps readiness and workspace diagnostics distinct and excludes Custom', async () => {
+    const context = setup();
+    context.gateway.discoverHarnesses.mockResolvedValue({
+      harnesses: [
+        { ...observation.harnesses[0], id: 'custom' },
+        {
+          ...observation.harnesses[0],
+          id: 'claude',
+          status: 'adapter-missing',
+        },
+        { ...observation.harnesses[0], id: 'codex', status: 'not-found' },
+        {
+          ...observation.harnesses[0],
+          workingDirPath: undefined,
+          diagnostics: [
+            { code: 'workspace_failed', message: 'Permission denied' },
+          ],
+        },
+      ],
+    });
+    const dispose = context.start();
+    const result = await context.discover();
+    expect(
+      result.harnesses.map(({ id, status, profileStatus }) => ({
+        id,
+        status,
+        profileStatus,
+      })),
+    ).toEqual([
+      { id: 'claude', status: 'adapter-missing', profileStatus: 'skipped' },
+      { id: 'codex', status: 'not-found', profileStatus: 'skipped' },
+      { id: 'copilot', status: 'ready', profileStatus: 'skipped' },
+    ]);
+    expect(result.harnesses[2].diagnostics?.[0].code).toBe('workspace_failed');
+    expect(context.registry.createProfile).not.toHaveBeenCalled();
+    dispose();
+  });
+
+  it('rejects inactive targets and distinguishes unsupported discovery', async () => {
+    const context = setup();
+    const dispose = context.start();
+    await context.discover();
+    await expect(context.discover('offline')).rejects.toMatchObject({
+      code: 'agentlet_unavailable',
+    });
+    context.gateway.discoverHarnesses.mockRejectedValueOnce(
+      Object.assign(new Error('old daemon'), {
+        code: 'harness_discovery_unsupported',
+      }),
+    );
+    await expect(context.discover()).rejects.toMatchObject({
+      code: 'harness_discovery_unsupported',
+      status: 503,
+    });
+    expect(context.profiles).toHaveLength(1);
+    dispose();
+  });
+
+  it('does not reconcile a resolved reply when disconnect wins before its continuation', async () => {
+    const context = setup();
+    let finish!: (result: HarnessDiscoveryResult) => void;
+    context.gateway.discoverHarnesses.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const dispose = context.start();
+    const rejected = expect(context.discover()).rejects.toMatchObject({
+      code: 'harness_discovery_stale',
+    });
+    finish(observation);
+    context.emit({ agentletId: 'machine-a', status: 'disconnected' });
+    await rejected;
+    expect(context.registry.createProfile).not.toHaveBeenCalled();
+    dispose();
+  });
+
+  it('reports registry unavailability without creating any Profiles', async () => {
+    const context = setup();
+    const discovery = registerHarnessProfileDiscovery({
+      gateway: context.gateway,
+      getRegistry: () => null,
+      log: context.log,
+    });
+    await expect(discovery.discover('machine-a')).rejects.toMatchObject({
+      code: 'profile_registry_unavailable',
+      status: 503,
+    });
+    expect(context.registry.createProfile).not.toHaveBeenCalled();
+    discovery.dispose();
+    await expect(discovery.discover('machine-a')).rejects.toMatchObject({
+      code: 'harness_discovery_stale',
+    });
+    expect(context.gateway.discoverHarnesses).toHaveBeenCalledOnce();
+  });
+
   it('never automatically provisions the manual Custom wrapper', async () => {
     const context = setup();
     context.gateway.discoverHarnesses.mockResolvedValue({
@@ -302,7 +565,7 @@ describe('automatic ordinary Profile provisioning', () => {
           log: context.log,
           onProfilesDiscovered: (profiles) =>
             defaults.initializeAgentDefaults(profiles),
-        });
+        }).dispose;
       dispose = start(registry);
       await flush();
       expect(context.log.warn).not.toHaveBeenCalled();
@@ -394,7 +657,7 @@ describe('automatic ordinary Profile provisioning', () => {
         gateway: context.gateway,
         getRegistry: () => registry,
         log: context.log,
-      });
+      }).dispose;
       await flush();
       const original = registry.listProfiles()[0]!;
       registry.patchProfile(original.id, { alias: 'Kept after restart' });
@@ -405,7 +668,7 @@ describe('automatic ordinary Profile provisioning', () => {
         gateway: context.gateway,
         getRegistry: () => restored,
         log: context.log,
-      });
+      }).dispose;
       await flush();
       expect(restored.listProfiles()).toHaveLength(1);
       expect(restored.listProfiles()[0]).toMatchObject({
@@ -437,7 +700,7 @@ describe('automatic ordinary Profile provisioning', () => {
         gateway: context.gateway,
         getRegistry: () => registry,
         log: context.log,
-      });
+      }).dispose;
       await flush();
       const profile = registry.listProfiles()[0];
       if (!profile)
@@ -465,7 +728,7 @@ describe('automatic ordinary Profile provisioning', () => {
         gateway: context.gateway,
         getRegistry: () => restored,
         log: context.log,
-      });
+      }).dispose;
       await flush();
       expect(restored.listProfiles()).toEqual([edited]);
       expect(restored.getProfile(profile.id)?.launch).toMatchObject({
@@ -487,7 +750,10 @@ describe('automatic ordinary Profile provisioning', () => {
     expect(context.profiles).toEqual([]);
     expect(context.log.warn).toHaveBeenCalledWith(
       expect.objectContaining({
-        err: expect.objectContaining({ message: 'Disk write failed' }),
+        err: expect.objectContaining({
+          code: 'harness_reconciliation_failed',
+          cause: expect.objectContaining({ message: 'Disk write failed' }),
+        }),
       }),
       '[acp] harness discovery failed',
     );
