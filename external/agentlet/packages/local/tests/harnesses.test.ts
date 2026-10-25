@@ -43,6 +43,32 @@ beforeEach(() => {
 })
 
 describe('trusted harness discovery', () => {
+  it.each([
+    ['claude', 'claude-agent-acp'],
+    ['codex', 'codex-acp'],
+  ])('reports native-only %s as adapter-missing and detects a newly installed adapter', async (native, adapter) => {
+    let adapterInstalled = false
+    mocks.probe.mockImplementation(async (file: string, args: string[]) => {
+      if (file === 'which' && args[0] === adapter && !adapterInstalled) {
+        throw Object.assign(new Error('not found'), { code: 1 })
+      }
+      return { stdout: file === 'which' ? `/usr/local/bin/${args[0]}\n` : '1.2.3\n' }
+    })
+    const first = (await discoverHarnesses({ prepareWorkspaces: true })).harnesses.find((entry) => entry.id === native)
+    expect(first).toMatchObject({
+      status: 'adapter-missing',
+      diagnostics: [{ code: 'adapter_missing', message: expect.any(String) }],
+    })
+    expect(first?.workingDirPath).toBeUndefined()
+    adapterInstalled = true
+    const second = (await discoverHarnesses({ prepareWorkspaces: true })).harnesses.find((entry) => entry.id === native)
+    expect(second).toMatchObject({
+      status: 'ready',
+      workingDirPath: join('/home/agentlet-test', '.agentlet', 'workspace', native),
+    })
+    expect(mocks.probe).not.toHaveBeenCalledWith(adapter, ['--version'], expect.anything())
+  })
+
   it('returns the complete stable catalogue without creating workspaces by default', async () => {
     const { harnesses } = await discoverHarnesses()
     expect(harnesses.map((entry) => entry.id)).toEqual(HARNESS_DEFINITIONS.map((entry) => entry.id))
