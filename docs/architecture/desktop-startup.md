@@ -1,7 +1,7 @@
 # Desktop Cold Start
 
 > What the user sees between double-clicking Huabu and the canvas list appearing, and which parts of the system own each phase.
-> Last updated: 2026-07-31
+> Last updated: 2026-10-25
 
 ---
 
@@ -11,7 +11,7 @@
 app.whenReady()
   ├─ splash window opens                 ← first thing on screen
   ├─ local: shell-PATH probe, port allocation, server fork + TCP readiness
-  ├─ remote: validate --server + probe /api/deployment/readiness
+  ├─ remote: resolve HUABU_PUBLIC_ORIGIN + probe /api/deployment/readiness
   ├─ main window created (show: false), loadURL(selected server origin)
   ├─ renderer parses the entry graph     ← nothing paints during this
   ├─ 'ready-to-show'  → main window shown, splash closed
@@ -19,9 +19,15 @@ app.whenReady()
                                            ← WorkspaceLoadingScreen covers this
 ```
 
-`pnpm start:desktop --server <URL>` selects a remote Huabu Server for the unpackaged production-bundle smoke test; packaged executables accept the same Electron process argument. The launcher forwards both `--server <URL>` and `--server=<URL>` to the main process, which accepts one credential-free HTTP or HTTPS origin and canonicalizes hostname case, default ports, and the trailing root slash. Query strings, fragments, repeated options, and path prefixes are rejected because the shipped SPA, `/api` routes, assets, SSE streams, and deep-link fallback share one root origin.
+`HUABU_PUBLIC_ORIGIN=https://huabu.example.com pnpm start:desktop` selects a remote Huabu Server for the unpackaged production-bundle smoke test. Source Desktop uses the same strict connection-environment loader as `huabu-daemon`: it reads the repository-root `.env`, then overlays the inherited process environment. A missing default file is optional; malformed files, duplicate keys, unreadable files, and a present blank or invalid origin fail explicitly without falling back locally. `--env-file <path>` and `--env-file=<path>` select an exclusive connection file, ignoring inherited connection settings and the default file. Repeated or missing file arguments fail. Relative file paths use the invocation directory (preserved through pnpm's `INIT_CWD` for source launches), not the package directory. There is no upward search or `.env.local` discovery.
 
-When `--server` is omitted, startup retains the local utility-process Server, Electron `safeStorage` secret bridge, port retries, native local-folder picker, and graceful shutdown lifecycle. Remote mode starts or exposes none of those local-Server resources: the remote deployment owns its data, workspace paths, and credentials, while Electron loads its SPA so existing same-origin-relative API, streaming, and artifact URLs require no renderer configuration bridge. The preload marks this mode explicitly so the renderer never falls back to a Server-side native picker and instead accepts paths meaningful on the remote host. Startup probes `/api/deployment/readiness`; `401` with a Basic challenge means the Server is reachable and the subsequent navigation may request credentials, while network, TLS, Host-guard, incompatible authentication/response, and other HTTP failures stop startup without falling back locally.
+Packaged executables apply the same override and explicit-file rules but have no default dotenv file: they use the OS-inherited process environment unless given `--env-file`. Configuration is not embedded at build time, loaded from shell dotfiles, or taken from an arbitrary working-directory `.env`. Finder launches do not automatically inherit terminal exports; the login-shell probe harvests PATH only. A second launch focuses the existing instance and does not change its connection. `--server` has been removed and produces a migration error directing callers to `HUABU_PUBLIC_ORIGIN` or `--env-file`. Desktop consumes only the public origin, never the daemon's `HUABU_CONNECTION_TOKEN`.
+
+`packages/client-runtime/src/desktop.ts::resolveDesktopServerOrigin()` reuses the canonical `normalizePublicOrigin()` validator: it accepts credential-free HTTP(S) root origins, including loopback client targets, and canonicalizes hostname case, default ports and the trailing root slash. Parsed query strings, fragments and non-root paths are rejected because the SPA and APIs share one origin; WHATWG URL normalization remains the same as the Server and daemon. Desktop main loads the existing self-contained ESM `desktop.js` through a native dynamic import from either the source runtime dist or packaged `server/client-runtime` resources; it does not statically require the workspace ESM package. This runtime is also required for configuration resolution in local mode, and missing artifacts surface as startup errors.
+
+With no origin in the selected source, startup retains the local utility-process Server, Electron `safeStorage` secret bridge, port retries, native local-folder picker, and graceful shutdown lifecycle. Remote mode starts or exposes none of those local-Server resources: the remote deployment owns its data, workspace paths, and credentials, while Electron loads its SPA so existing same-origin-relative API, streaming, and artifact URLs require no renderer configuration bridge. The preload marks this mode explicitly so the renderer never falls back to a Server-side native picker and instead accepts paths meaningful on the remote host. Startup probes `/api/deployment/readiness`; `401` with a Basic challenge means the Server is reachable and the subsequent navigation may request credentials, while network, TLS, Host-guard, incompatible authentication/response, and other HTTP failures stop startup without falling back locally.
+
+The full-stack HMR workflow (`pnpm dev:desktop`) retains its internal `EXTERNAL_SERVER_URL` / `WEB_DEV_SERVER_URL` contract. It resolves connection configuration before compiling or starting services and rejects a configured remote origin, even if it matches the internal Server. Remove the origin from the selected connection source, use an explicit file without an origin, or use `start:desktop` for remote mode. Main independently enforces the same exclusion before initializing local resources.
 
 Electron handles remote Basic Auth in the main process. After the unauthenticated readiness probe returns a Basic challenge, a sandboxed credential window collects the username and password and the main process repeats the readiness request with those credentials; only a valid Huabu response may proceed to SPA navigation. The validated credentials satisfy Chromium's first exact-origin challenge and remain only in the current network session. URL-embedded credentials are rejected, the renderer never receives the username or password, and later challenges must be non-proxy Basic challenges from the same parsed origin. The response-header exemption and top-level navigation guard use the same exact-origin comparison rather than a string prefix.
 
@@ -71,7 +77,9 @@ Verify after touching any of this by building and reading the emitted `dist/inde
 | File/dir                                                                                                 | Responsibility                                                                         |
 | -------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
 | [apps/desktop/src/main.ts](../../apps/desktop/src/main.ts)                                               | `createSplashWindow` / `closeSplashWindow`, the `show: false` + `ready-to-show` reveal |
-| [apps/desktop/src/server-target.ts](../../apps/desktop/src/server-target.ts)                             | Parse and normalize `--server`, probe remote readiness, and compare exact origins.     |
+| [apps/desktop/src/server-target.ts](../../apps/desktop/src/server-target.ts)                             | Probe remote readiness and compare exact origins.                                      |
+| [packages/client-runtime/src/desktop.ts](../../packages/client-runtime/src/desktop.ts)                   | Resolve Desktop connection arguments and public origin using the shared validator.     |
+| [packages/client-runtime/src/connection-env.ts](../../packages/client-runtime/src/connection-env.ts)     | Strict file parsing and environment-source selection shared with daemon.               |
 | [apps/desktop/src/local-agent.ts](../../apps/desktop/src/local-agent.ts)                                 | Optional remote-mode local Agentlet lifecycle and connection state.                    |
 | [apps/desktop/src/remote-basic-auth.ts](../../apps/desktop/src/remote-basic-auth.ts)                     | Scope Basic Auth challenges and own the sandboxed credential prompt.                   |
 | [apps/desktop/src/auth-preload.ts](../../apps/desktop/src/auth-preload.ts)                               | Narrow submit/cancel bridge for the credential prompt.                                 |

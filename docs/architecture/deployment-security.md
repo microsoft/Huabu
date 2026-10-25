@@ -1,6 +1,6 @@
 # Deployment Security
 
-> Network exposure, owner authentication, deployment readiness, transport guidance, and request-volume controls. Last updated: 2026-10-19
+> Network exposure, owner authentication, deployment readiness, transport guidance, and request-volume controls. Last updated: 2026-10-25
 
 ## Security model
 
@@ -64,7 +64,9 @@ Explicit deployment environment values override setup choices, including values 
 
 `pnpm start:web` serves the compiled SPA and API from Fastify. On a non-loopback bind, startup validation requires Basic Auth unless the operator explicitly disables login.
 
-`pnpm start:desktop --server <URL>` is a native client for the same remote deployment boundary. It accepts a root HTTP or HTTPS origin but does not weaken the Server's Host, Origin, CORS, or Basic Auth policy and does not inject allowed hosts. A `401` challenge from the selected exact origin opens a sandboxed Electron credential prompt; credentials remain in Chromium's current network session and are not placed in the command line, exposed to the renderer, or persisted by Huabu Desktop.
+Desktop selects remote mode through `HUABU_PUBLIC_ORIGIN`, using the same canonical root HTTP(S) validator and strict environment-file loader as `huabu-daemon`. Source launches read repository-root `.env` with process-environment overrides; an explicit `--env-file <path>` is the sole connection source. Packaged apps have no default dotenv discovery and read only inherited process configuration or an explicit file. A present blank or invalid origin fails, while no origin preserves local mode. `--server` is removed with an explicit migration error. Desktop reads only the origin, never `HUABU_CONNECTION_TOKEN`; optional local-Agent authorization still comes from the owner-authenticated credential endpoint or its separate consent vault. A configured remote origin conflicts with the HMR internal Server and fails before services start. See [Desktop startup](./desktop-startup.md) for launch-environment and relative-path details.
+
+The native remote client does not weaken the Server's Host, Origin, CORS, or Basic Auth policy and does not inject allowed hosts. A `401` challenge from the selected exact origin opens a sandboxed Electron credential prompt; credentials remain in Chromium's current network session and are not placed in the command line, exposed to the renderer, or persisted by Huabu Desktop.
 
 ## Deployment readiness
 

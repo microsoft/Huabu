@@ -184,6 +184,17 @@ describe('server bundle runtime', () => {
         displayName: expect.any(String),
         version: expect.any(String),
       });
+      const desktopOrigin = execFileSync(
+        process.execPath,
+        [
+          '--input-type=module',
+          '-e',
+          'const m = await import(process.argv[1]); console.log(m.resolveDesktopServerOrigin([], { inherited: { HUABU_PUBLIC_ORIGIN: "https://EXAMPLE.test:443/" } }));',
+          pathToFileURL(path.join(directory, 'client-runtime/desktop.js')).href,
+        ],
+        { cwd: directory, encoding: 'utf8' },
+      );
+      expect(desktopOrigin.trim()).toBe('https://example.test');
       const hostHelp = execFileSync(
         process.execPath,
         [path.join(directory, 'client-runtime/daemon.js'), '--help'],

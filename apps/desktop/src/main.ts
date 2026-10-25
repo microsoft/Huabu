@@ -66,7 +66,6 @@ import {
 } from './secure-secrets.js';
 import {
   isSameOrigin,
-  parseServerOption,
   probeRemoteServer,
   type BasicAuthCredentials,
 } from './server-target.js';
@@ -318,6 +317,13 @@ let applicationUrl: string | null = null;
 let remoteServerOrigin: string | null = null;
 let localAgentManager: LocalAgentManager | null = null;
 
+function loadDesktopRuntime(): Promise<typeof DesktopAgentRuntime> {
+  const runtimePath = IS_DEV
+    ? join(__dirname, '../../../packages/client-runtime/dist/desktop.js')
+    : join(process.resourcesPath, 'server/client-runtime/desktop.js');
+  return import(pathToFileURL(runtimePath).href);
+}
+
 function registerLocalAgent(origin: string): void {
   let secrets: DesktopSecureSecretStore | undefined;
   const getSecrets = (): DesktopSecureSecretStore =>
@@ -329,11 +335,6 @@ function registerLocalAgent(origin: string): void {
   const bundleDir = IS_DEV
     ? join(__dirname, '../../server/dist-bundle')
     : join(process.resourcesPath, 'server');
-  const runtimePath = IS_DEV
-    ? join(__dirname, '../../../packages/client-runtime/dist/desktop.js')
-    : join(bundleDir, 'client-runtime/desktop.js');
-  const loadRuntime = (): Promise<typeof DesktopAgentRuntime> =>
-    import(pathToFileURL(runtimePath).href);
   const requireEncryption = (): void => {
     if (
       !safeStorage.isEncryptionAvailable() ||
@@ -355,7 +356,7 @@ function registerLocalAgent(origin: string): void {
       process.kill(pid, 'SIGKILL');
     },
     readDevice: async () => {
-      const runtime = await loadRuntime();
+      const runtime = await loadDesktopRuntime();
       const artifacts = runtime.resolveRuntimeArtifacts({
         repoRoot: IS_DEV ? join(__dirname, '../../..') : undefined,
         bundleDir,
@@ -395,7 +396,7 @@ function registerLocalAgent(origin: string): void {
     },
     requestCredential: async () => {
       requireEncryption();
-      const runtime = await loadRuntime();
+      const runtime = await loadDesktopRuntime();
       const [token, maxAgents] = await runtime.fetchDesktopAgentCredential(
         origin,
         (input, init) =>
@@ -408,7 +409,7 @@ function registerLocalAgent(origin: string): void {
     },
     start: async (credential: LocalAgentCredential) => {
       await ensureShellPath();
-      const runtime = await loadRuntime();
+      const runtime = await loadDesktopRuntime();
       const artifacts = runtime.resolveRuntimeArtifacts({
         repoRoot: IS_DEV ? join(__dirname, '../../..') : undefined,
         bundleDir,
@@ -1337,7 +1338,12 @@ app.whenReady().then(async () => {
 
   let requestedRemoteOrigin: string | undefined;
   try {
-    requestedRemoteOrigin = parseServerOption(process.argv);
+    const runtime = await loadDesktopRuntime();
+    requestedRemoteOrigin = runtime.resolveDesktopServerOrigin(process.argv, {
+      repoRoot: IS_DEV ? join(__dirname, '../../..') : undefined,
+      cwd: IS_DEV ? process.env.INIT_CWD : undefined,
+      externalServerUrl: IS_DEV ? process.env.EXTERNAL_SERVER_URL : undefined,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     dialog.showErrorBox('Invalid Huabu Server address', message);
@@ -1390,11 +1396,6 @@ app.whenReady().then(async () => {
   try {
     const external = getExternalServerUrl();
     let remoteCredentials: BasicAuthCredentials | undefined;
-    if (requestedRemoteOrigin && external) {
-      throw new Error(
-        'The --server option cannot be combined with the internal EXTERNAL_SERVER_URL development configuration.',
-      );
-    }
     if (!external && !requestedRemoteOrigin) {
       if (!safeStorage.isEncryptionAvailable()) {
         throw new Error(

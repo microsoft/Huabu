@@ -48,11 +48,14 @@
  *   process.env  >  apps/web/.env  >  <repo-root>/.env  >  defaults
  */
 import { spawn, spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import dotenv from 'dotenv';
+
+import { resolveDesktopServerOrigin } from '../packages/client-runtime/dist/desktop.js';
 
 import {
   spawnSupervisedDevChild,
@@ -290,6 +293,11 @@ function spawnLongRunning(filter, label, extraEnv = {}) {
 /* ─── main ────────────────────────────────────────────────────────── */
 
 async function main() {
+  resolveDesktopServerOrigin(process.argv.slice(2), {
+    repoRoot,
+    cwd: process.env.INIT_CWD,
+    externalServerUrl: `http://${HOST}:${SERVER_PORT}`,
+  });
   const serverDataDir = path.join(repoRoot, 'apps/server/data');
 
   // 1. Prime Electron's main/preload output. tsc is fast on incremental
@@ -388,9 +396,9 @@ async function main() {
 
   console.log('[dev-desktop] Launching Electron …');
   const electron = spawnSupervisedDevChild({
-    command: 'pnpm',
-    args: ['exec', 'electron', '.'],
-    shell: true,
+    command: createRequire(import.meta.url)('electron'),
+    args: ['.', ...process.argv.slice(2)],
+    shell: false,
     cwd: path.join(repoRoot, 'apps/desktop'),
     env: electronEnv,
   });

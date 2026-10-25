@@ -20,6 +20,8 @@ pnpm run dev:desktop
 
 This starts the server and web client in watch mode and opens the desktop application with hot reload.
 
+HMR requires no `HUABU_PUBLIC_ORIGIN` in its selected connection source. Source Desktop reads repository-root `.env` with inherited process overrides, or only an explicit `--env-file`. Remove remote configuration, or pass a file without an origin to `pnpm dev:desktop --env-file /absolute/path/local.env`. To connect to a remote deployment instead of starting HMR services, use `HUABU_PUBLIC_ORIGIN=https://huabu.example.com pnpm start:desktop`. The old `--server` option is no longer supported.
+
 ### Optional Git hooks
 
 Enable local checks once per clone:

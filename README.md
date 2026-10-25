@@ -86,10 +86,12 @@ Open the configured address on another device. Use HTTPS outside trusted network
 Or connect the desktop client:
 
 ```bash
-pnpm start:desktop --server https://huabu.example.com
+HUABU_PUBLIC_ORIGIN=https://huabu.example.com pnpm start:desktop
 ```
 
-Use the server's root URL. The desktop connects without starting a local server.
+Use the server's root URL. The desktop connects without starting a local server. In PowerShell, set `$env:HUABU_PUBLIC_ORIGIN` before launching. Source launches also read repository-root `.env`, with process environment taking precedence. Alternatively, use `pnpm start:desktop --env-file /absolute/path/desktop.env` containing `HUABU_PUBLIC_ORIGIN`; an explicit file is the only connection source. Desktop does not use `HUABU_CONNECTION_TOKEN`, and the old `--server` option is no longer supported.
+
+Installed Desktop apps use their inherited launch environment or an explicit `--env-file`, not a default `.env` file. Clear remote configuration to return to local mode; an explicitly empty or invalid origin is an error. Existing running instances must be quit before changing their connection. See [Desktop startup](docs/architecture/desktop-startup.md) for details.
 
 Before rerunning setup, stop the instance's Huabu and Vite servers; restart them afterward. To reset the connection token, use `pnpm run setup --reset-connection-token`.
 

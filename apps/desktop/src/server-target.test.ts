@@ -6,8 +6,6 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   isSameOrigin,
   hasBasicAuthChallenge,
-  normalizeServerOrigin,
-  parseServerOption,
   probeRemoteServer,
 } from './server-target';
 
@@ -19,52 +17,6 @@ const readiness = {
   transport: { status: 'operator-unverified' },
   issues: [],
 };
-
-describe('parseServerOption', () => {
-  it('supports both CLI forms and canonicalizes origins', () => {
-    expect(
-      parseServerOption([
-        'electron',
-        '.',
-        '--server',
-        'HTTP://Example.COM:80/',
-      ]),
-    ).toBe('http://example.com');
-    expect(
-      parseServerOption(['Huabu', '--server=https://Example.COM:443']),
-    ).toBe('https://example.com');
-    expect(parseServerOption(['Huabu', '--server', 'http://[::1]:3001/'])).toBe(
-      'http://[::1]:3001',
-    );
-  });
-
-  it('preserves omitted local-server behavior', () => {
-    expect(parseServerOption(['electron', '.'])).toBeUndefined();
-  });
-
-  it('rejects missing, repeated, or unsafe values', () => {
-    expect(() => parseServerOption(['Huabu', '--server'])).toThrow(/requires/);
-    expect(() =>
-      parseServerOption([
-        'Huabu',
-        '--server=http://one.example',
-        '--server=http://two.example',
-      ]),
-    ).toThrow(/only once/);
-    expect(() =>
-      normalizeServerOrigin('https://user:pass@example.com'),
-    ).toThrow(/credentials/);
-    expect(() => normalizeServerOrigin('file:///tmp/huabu')).toThrow(
-      /HTTP or HTTPS/,
-    );
-    expect(() => normalizeServerOrigin('https://example.com/huabu')).toThrow(
-      /path prefix/,
-    );
-    expect(() =>
-      normalizeServerOrigin('https://example.com/?mode=desktop'),
-    ).toThrow(/query or fragment/);
-  });
-});
 
 describe('isSameOrigin', () => {
   it('uses URL origins instead of vulnerable string prefixes', () => {
