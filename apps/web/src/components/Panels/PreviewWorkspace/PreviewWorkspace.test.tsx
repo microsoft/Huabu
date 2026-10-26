@@ -28,6 +28,7 @@ import {
   restoreMessageListScrollPosition,
 } from '@/components/Messages/messageListScroll';
 import useCanvasStore from '@/store/canvasStore';
+import * as canvasModule from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 import {
   openPreviewNode,
@@ -36,6 +37,7 @@ import {
 import { createEmptyWorkspace } from '@/store/previewWorkspace/model';
 import { messageListViewKey } from '@/store/previewWorkspace/scrollMemory';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
+import { pageLifecycle } from '@/utils/pageLifecycle';
 
 import { PreviewTabDragOverlay } from './PreviewTab';
 import {
@@ -881,6 +883,33 @@ describe('tab drag feedback', () => {
 });
 
 describe('activation', () => {
+  it('registers every active split editor for outer-page preparation without closing inner tabs', () => {
+    const registration = vi.spyOn(pageLifecycle, 'register');
+    const settle = vi
+      .spyOn(canvasModule, 'settleNodePreprocess')
+      .mockImplementation(() => {});
+    try {
+      openNode('a');
+      store().splitGroup();
+      openNode('b');
+      render([canvasNode('a', 'Alpha'), canvasNode('b', 'Beta', 'text')]);
+      const before = store().workspace;
+      settle.mockClear();
+      const participant = registration.mock.calls.find(
+        ([key]) => key === 'preview-editors',
+      )?.[1];
+      if (!participant?.settle)
+        throw new Error('Missing preview editor participant');
+      participant.settle();
+      expect(settle.mock.calls.map(([id]) => id)).toEqual(['a', 'b']);
+      expect(store().workspace).toBe(before);
+      expect(Object.keys(store().workspace.tabs)).toHaveLength(2);
+    } finally {
+      settle.mockRestore();
+      registration.mockRestore();
+    }
+  });
+
   it('settles an active authored node before its renderer is left', () => {
     const first = openNode('a');
     openNode('b');

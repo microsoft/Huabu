@@ -213,7 +213,7 @@ describe('useCanvasShortcuts catalog key lock', () => {
     setDesktopInputFrozen(false);
     act(deleteSelected);
     dispatchCombo('edit.undo');
-    expect(canvasActions.deleteNodes).toHaveBeenCalledWith(['selected']);
+    expect(canvasActions.deleteNodes).toHaveBeenCalledWith(['selected'], []);
     expect(canvasActions.undo).toHaveBeenCalledOnce();
   });
 

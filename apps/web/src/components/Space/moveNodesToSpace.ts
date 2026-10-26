@@ -7,6 +7,7 @@ import { dismissToast, toast } from '@/components/Common/Toast';
 import { i18n } from '@/i18n';
 import useCanvasStore, { drainPendingSaves } from '@/store/canvasStore';
 import { useWorkspaceStore } from '@/store/workspaceStore';
+import { pageLifecycle } from '@/utils/pageLifecycle';
 
 import type { MoveSelectionBody, MoveSelectionErrorCode } from '@huabu/shared';
 import type { NavigateFunction } from 'react-router-dom';
@@ -58,74 +59,76 @@ export async function moveNodesToSpace(
   const generation = feedbackGeneration;
   let moveRequested = false;
   try {
-    await drainPendingSaves();
-    if (
-      generation !== feedbackGeneration ||
-      useCanvasStore.getState().canvasId !== canvasId ||
-      useWorkspaceStore.getState().workspaceId !== workspaceId
-    ) {
-      toast(i18n.t('moveSelection.errors.sourceStale'), {
-        tone: 'danger',
-        duration: 0,
+    return await pageLifecycle.run('updating', async () => {
+      await drainPendingSaves();
+      if (
+        generation !== feedbackGeneration ||
+        useCanvasStore.getState().canvasId !== canvasId ||
+        useWorkspaceStore.getState().workspaceId !== workspaceId
+      ) {
+        toast(i18n.t('moveSelection.errors.sourceStale'), {
+          tone: 'danger',
+          duration: 0,
+        });
+        return false;
+      }
+      moveRequested = true;
+      const result = await moveCanvasSelection(canvasId, {
+        selectedNodeIds,
+        destination,
+        createSourcePreview:
+          destination.kind === 'new' && destination.asChild === true,
+        expectedSourceVersion: useCanvasStore.getState().version,
       });
-      return false;
-    }
-    moveRequested = true;
-    const result = await moveCanvasSelection(canvasId, {
-      selectedNodeIds,
-      destination,
-      createSourcePreview:
-        destination.kind === 'new' && destination.asChild === true,
-      expectedSourceVersion: useCanvasStore.getState().version,
-    });
-    if (useWorkspaceStore.getState().workspaceId !== workspaceId) return true;
-    useWorkspaceStore
-      .getState()
-      .setSpaceTitle(result.destination.canvasId, result.destination.title);
-    void useWorkspaceStore
-      .getState()
-      .refreshSpaceTitles([canvasId, result.destination.canvasId]);
-    if (
-      generation !== feedbackGeneration ||
-      useCanvasStore.getState().canvasId !== canvasId
-    )
-      return true;
-    const toastId = toast(
-      i18n.t('moveSelection.success', {
-        count: result.movedNodeCount,
-        conversations: result.movedConversationCount,
-      }),
-      {
-        tone: 'success',
-        duration: 8000,
-        action: {
-          label: i18n.t('moveSelection.openDestination'),
-          onClick: () => {
-            if (generation !== feedbackGeneration) return;
-            if (useWorkspaceStore.getState().workspaceId !== workspaceId) {
-              toast(i18n.t('spaceHierarchy.workspaceChanged'), {
-                tone: 'warning',
-              });
-              return;
-            }
-            navigate(
-              `/canvas/${encodeURIComponent(result.destination.canvasId)}`,
-              {
-                state: {
-                  returnToSpace: canvasId,
-                  workspaceId,
-                  focusNodeIds: result.roots.map(
-                    (root) => root.destinationNodeId,
-                  ),
+      if (useWorkspaceStore.getState().workspaceId !== workspaceId) return true;
+      useWorkspaceStore
+        .getState()
+        .setSpaceTitle(result.destination.canvasId, result.destination.title);
+      void useWorkspaceStore
+        .getState()
+        .refreshSpaceTitles([canvasId, result.destination.canvasId]);
+      if (
+        generation !== feedbackGeneration ||
+        useCanvasStore.getState().canvasId !== canvasId
+      )
+        return true;
+      const toastId = toast(
+        i18n.t('moveSelection.success', {
+          count: result.movedNodeCount,
+          conversations: result.movedConversationCount,
+        }),
+        {
+          tone: 'success',
+          duration: 8000,
+          action: {
+            label: i18n.t('moveSelection.openDestination'),
+            onClick: () => {
+              if (generation !== feedbackGeneration) return;
+              if (useWorkspaceStore.getState().workspaceId !== workspaceId) {
+                toast(i18n.t('spaceHierarchy.workspaceChanged'), {
+                  tone: 'warning',
+                });
+                return;
+              }
+              navigate(
+                `/canvas/${encodeURIComponent(result.destination.canvasId)}`,
+                {
+                  state: {
+                    returnToSpace: canvasId,
+                    workspaceId,
+                    focusNodeIds: result.roots.map(
+                      (root) => root.destinationNodeId,
+                    ),
+                  },
                 },
-              },
-            );
+              );
+            },
           },
         },
-      },
-    );
-    successToastIds.add(toastId);
-    return true;
+      );
+      successToastIds.add(toastId);
+      return true;
+    });
   } catch (error) {
     const code =
       moveRequested && error instanceof ApiError ? error.code : undefined;

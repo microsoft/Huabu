@@ -2,6 +2,7 @@
 // Licensed under the MIT license.
 
 import { toast } from '@/components/Common/Toast';
+import { pageLifecycle } from '@/utils/pageLifecycle';
 
 import { loadDefaultAgentBinding } from '../acpProfilesStore';
 import useCanvasStore, { settleNodePreprocess } from '../canvasStore';
@@ -78,28 +79,30 @@ export async function openNewChat(
   const canvasId = initial.canvasId || useCanvasStore.getState().canvasId;
   if (!canvasId) return '';
   try {
-    const binding = await loadDefaultAgentBinding();
-    const preview = usePreviewWorkspaceStore.getState();
-    if (
-      useCanvasStore.getState().canvasId !== canvasId ||
-      preview.canvasId !== initial.canvasId ||
-      preview.workspace !== initial.workspace
-    ) {
-      return '';
-    }
-    const group = preview.workspace.groups.find(
-      (entry) => entry.id === (groupId ?? preview.workspace.activeGroupId),
-    );
-    if (!group) return '';
-    const threadId = createConversation({ canvasId, binding });
-    if (group.activeTabId) settleTab?.(group.activeTabId);
-    usePanelStore.getState().requestOpenRightPanel();
-    const tabId = preview.openPreviewTarget(
-      { kind: 'chat', canvasId, threadId },
-      { groupId: group.id },
-    );
-    usePanelStore.getState().requestFocusChatInput(threadId);
-    return tabId;
+    return await pageLifecycle.run('updating', async () => {
+      const binding = await loadDefaultAgentBinding();
+      const preview = usePreviewWorkspaceStore.getState();
+      if (
+        useCanvasStore.getState().canvasId !== canvasId ||
+        preview.canvasId !== initial.canvasId ||
+        preview.workspace !== initial.workspace
+      ) {
+        return '';
+      }
+      const group = preview.workspace.groups.find(
+        (entry) => entry.id === (groupId ?? preview.workspace.activeGroupId),
+      );
+      if (!group) return '';
+      const threadId = createConversation({ canvasId, binding });
+      if (group.activeTabId) settleTab?.(group.activeTabId);
+      usePanelStore.getState().requestOpenRightPanel();
+      const tabId = preview.openPreviewTarget(
+        { kind: 'chat', canvasId, threadId },
+        { groupId: group.id },
+      );
+      usePanelStore.getState().requestFocusChatInput(threadId);
+      return tabId;
+    });
   } catch (error) {
     toast(error instanceof Error ? error.message : String(error), {
       tone: 'danger',

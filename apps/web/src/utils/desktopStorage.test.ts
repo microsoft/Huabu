@@ -55,6 +55,8 @@ function setContext(context: DesktopTabContext) {
     onNavigate: vi.fn(),
     onPrepareClose: vi.fn(),
     finishPrepareClose: vi.fn(),
+    keepPrepareCloseAlive: vi.fn(),
+    onClosePrepared: vi.fn(),
     onResume: vi.fn(),
   };
   window.electronBridge = {

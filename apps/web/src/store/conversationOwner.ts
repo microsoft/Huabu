@@ -7,6 +7,7 @@ import { projectAgentNodeEditableData } from '@huabu/shared/canvas-engine';
 import { acknowledgeAgentNodeResult, postCanvasExecute } from '@/api/canvas';
 import { rememberConversationAgentBinding } from '@/store/acpProfilesStore';
 import useCanvasStore, { awaitQuestionCreation } from '@/store/canvasStore';
+import { pageLifecycle } from '@/utils/pageLifecycle';
 
 import type {
   AgentBinding,
@@ -174,6 +175,17 @@ async function applyConversationOwnerPatch(
 
 const draftSaves = new Map<string, Promise<void>>();
 
+pageLifecycle.register('conversation-drafts', {
+  flush: async () => {
+    const { canvasId, nodes } = useCanvasStore.getState();
+    await Promise.all(
+      nodes
+        .filter((node) => node.type === 'question')
+        .map((node) => draftSaves.get(`${canvasId}\0${node.id}`)),
+    );
+  },
+});
+
 function draftKey(view: AgentConversationView): string {
   return `${view.conversationOwner.canvasId}\0${view.conversationOwner.nodeId}`;
 }
@@ -276,9 +288,11 @@ export function patchConversationOwnerNode(
   const owner = view.conversationOwner;
   const key = `${owner.canvasId}\0${owner.nodeId}`;
   const previous = ownerPatchChains.get(key) ?? Promise.resolve();
-  const current = previous
-    .catch(() => undefined)
-    .then(() => applyConversationOwnerPatch(view, patch));
+  const current = pageLifecycle.run('updating', () =>
+    previous
+      .catch(() => undefined)
+      .then(() => applyConversationOwnerPatch(view, patch)),
+  );
   ownerPatchChains.set(key, current);
   return current.finally(() => {
     if (ownerPatchChains.get(key) === current) ownerPatchChains.delete(key);

@@ -37,7 +37,9 @@ export interface DesktopTabsSnapshot {
   busy: boolean;
 }
 
-export type DesktopTabResult = { ok: true } | { ok: false; error: string };
+export type DesktopTabResult =
+  | { ok: true }
+  | { ok: false; error: string; cancelled?: true };
 
 export interface DesktopHomeMenuPosition {
   x: number;
@@ -114,6 +116,8 @@ export interface DesktopTabsApi {
   endWorkspaceChange: () => Promise<DesktopTabResult>;
   onNavigate: (callback: (target: DesktopTabNavigation) => void) => () => void;
   onPrepareClose: (callback: (requestId: string) => void) => () => void;
+  keepPrepareCloseAlive: (requestId: string) => void;
+  onClosePrepared: (callback: () => void) => () => void;
   finishPrepareClose: (requestId: string, result: DesktopTabResult) => void;
   onResume: (callback: () => void) => () => void;
 }

@@ -121,6 +121,10 @@ const tabs: DesktopTabsApi | undefined =
         onNavigate: (callback: (target: DesktopTabNavigation) => void) =>
           subscribe('tabs:navigate', callback),
         onPrepareClose: (callback) => subscribe('tabs:prepare-close', callback),
+        keepPrepareCloseAlive: (id) =>
+          ipcRenderer.send('tabs:preparing-close', id),
+        onClosePrepared: (callback) =>
+          subscribe('tabs:close-prepared', callback),
         finishPrepareClose: (id, result) =>
           ipcRenderer.send('tabs:finish-close', id, result),
         onResume: (callback) => subscribe('tabs:resume', callback),

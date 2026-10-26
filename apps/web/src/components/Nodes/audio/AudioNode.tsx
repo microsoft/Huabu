@@ -8,6 +8,8 @@ import { useTranslation } from 'react-i18next';
 import { resolveArtifactUrl, uploadAudio } from '@/api/artifact';
 import { cn } from '@/components/Common/cn';
 import useCanvasStore from '@/store/canvasStore.ts';
+import { isDesktopInputFrozen } from '@/utils/desktopInput';
+import { pageLifecycle } from '@/utils/pageLifecycle';
 
 import { getMissingFileKind, MissingFileBanner } from '../MissingFileBanner';
 import { NodeWrapper } from '../NodeWrapper';
@@ -117,6 +119,16 @@ export const AudioNode = memo(
     }, []);
 
     useEffect(() => cleanupStream, [cleanupStream]);
+    useEffect(
+      () =>
+        pageLifecycle.register(`audio:${id}`, {
+          settle: () => {
+            const recorder = recorderRef.current;
+            if (recorder && recorder.state !== 'inactive') recorder.stop();
+          },
+        }),
+      [id],
+    );
 
     const startRecording = useCallback(async () => {
       if (!canvasId) {
@@ -126,55 +138,72 @@ export const AudioNode = memo(
       }
       setErrMsg(null);
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: true,
+        await pageLifecycle.run('importing', async () => {
+          const stream = await navigator.mediaDevices.getUserMedia({
+            audio: true,
+          });
+          const mime = pickRecorderMime();
+          const recorder = mime
+            ? new MediaRecorder(stream, { mimeType: mime })
+            : new MediaRecorder(stream);
+
+          chunksRef.current = [];
+          recorder.ondataavailable = (e) => {
+            if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
+          };
+          let finishRecording!: () => void;
+          let failRecording!: (error: Error) => void;
+          const recordingFinished = new Promise<void>((resolve, reject) => {
+            finishRecording = resolve;
+            failRecording = reject;
+          });
+          recorder.onerror = () =>
+            failRecording(new Error('Audio recording failed'));
+          recorder.onstop = async () => {
+            const usedMime = recorder.mimeType || mime || 'audio/webm';
+            const blob = new Blob(chunksRef.current, { type: usedMime });
+            cleanupStream();
+            if (blob.size === 0) {
+              setRecState('idle');
+              setElapsedMs(0);
+              finishRecording();
+              return;
+            }
+            setRecState('uploading');
+            try {
+              await pageLifecycle.run('importing', async () => {
+                const ext = mimeToExt(usedMime);
+                const file = new File([blob], `recording${ext}`, {
+                  type: usedMime,
+                });
+                const uri = await uploadAudio(file, canvasId);
+                updateNodeData(id, { src: uri });
+                setRecState('idle');
+                setElapsedMs(0);
+              });
+            } catch (err) {
+              console.error('Audio upload failed:', err);
+              setErrMsg(
+                err instanceof Error ? err.message : t('node.uploadFailed'),
+              );
+              setRecState('error');
+            } finally {
+              finishRecording();
+            }
+          };
+
+          streamRef.current = stream;
+          recorderRef.current = recorder;
+          startedAtRef.current = Date.now();
+          recorder.start();
+          setElapsedMs(0);
+          timerRef.current = window.setInterval(() => {
+            setElapsedMs(Date.now() - startedAtRef.current);
+          }, 200);
+          setRecState('recording');
+          if (isDesktopInputFrozen()) recorder.stop();
+          await recordingFinished;
         });
-        const mime = pickRecorderMime();
-        const recorder = mime
-          ? new MediaRecorder(stream, { mimeType: mime })
-          : new MediaRecorder(stream);
-
-        chunksRef.current = [];
-        recorder.ondataavailable = (e) => {
-          if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
-        };
-        recorder.onstop = async () => {
-          const usedMime = recorder.mimeType || mime || 'audio/webm';
-          const blob = new Blob(chunksRef.current, { type: usedMime });
-          cleanupStream();
-          if (blob.size === 0) {
-            setRecState('idle');
-            setElapsedMs(0);
-            return;
-          }
-          setRecState('uploading');
-          try {
-            const ext = mimeToExt(usedMime);
-            const file = new File([blob], `recording${ext}`, {
-              type: usedMime,
-            });
-            const uri = await uploadAudio(file, canvasId);
-            updateNodeData(id, { src: uri });
-            setRecState('idle');
-            setElapsedMs(0);
-          } catch (err) {
-            console.error('Audio upload failed:', err);
-            setErrMsg(
-              err instanceof Error ? err.message : t('node.uploadFailed'),
-            );
-            setRecState('error');
-          }
-        };
-
-        streamRef.current = stream;
-        recorderRef.current = recorder;
-        startedAtRef.current = Date.now();
-        recorder.start();
-        setElapsedMs(0);
-        timerRef.current = window.setInterval(() => {
-          setElapsedMs(Date.now() - startedAtRef.current);
-        }, 200);
-        setRecState('recording');
       } catch (err) {
         console.error('getUserMedia failed:', err);
         setErrMsg(

@@ -1,24 +1,17 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { getQuestionNodeStatus } from '@huabu/shared';
 
 import { toast } from '@/components/Common/Toast';
 import { i18n } from '@/i18n';
-import useCanvasStore, {
-  drainNodePreprocessing,
-  flushCanvasViewState,
-  saveCanvasForSubmission,
-} from '@/store/canvasStore';
+import useCanvasStore from '@/store/canvasStore';
 import { useChatPreferencesStore } from '@/store/chatPreferencesStore';
 import { useChatStore } from '@/store/chatStore';
-import {
-  ConversationTitleSaveError,
-  drainConversationTitleWrites,
-} from '@/store/conversationTitleStore';
+import { ConversationTitleSaveError } from '@/store/conversationTitleStore';
 import { useDesktopTabStore } from '@/store/desktopTabStore';
 import { useSettingsUiStore } from '@/store/settingsUiStore';
 import { useToolStore } from '@/store/toolStore';
@@ -32,6 +25,7 @@ import {
   readApplicationPreference,
   subscribeApplicationPreferences,
 } from '@/utils/desktopStorage';
+import { pageLifecycle } from '@/utils/pageLifecycle';
 
 import { getElectronBridge, requireDesktopTabSuccess } from './useElectron';
 
@@ -46,11 +40,29 @@ export { requireDesktopTabSuccess } from './useElectron';
 export function useDesktopContent(): {
   saving: boolean;
   preparingClose: boolean;
+  cancelClose: () => void;
 } {
   const tabs = getElectronBridge()?.tabs;
   const navigate = useNavigate();
   const [saving, setSaving] = useState(false);
   const [preparingClose, setPreparingClose] = useState(false);
+  const closeRequest = useRef<{
+    id: string;
+    controller: AbortController;
+    overlayTimer?: number;
+  } | null>(null);
+  const cancelClose = useCallback(() => {
+    const request = closeRequest.current;
+    if (!request) return;
+    window.clearTimeout(request.overlayTimer);
+    request.controller.abort();
+    closeRequest.current = null;
+    tabs?.finishPrepareClose(request.id, {
+      ok: false,
+      error: 'Closing was cancelled.',
+      cancelled: true,
+    });
+  }, [tabs]);
   const workspaceId = useWorkspaceStore((state) =>
     state.isReady ? state.workspaceId : null,
   );
@@ -96,7 +108,6 @@ export function useDesktopContent(): {
 
   useEffect(() => {
     if (!tabs || tabs.context.role === 'shell') return;
-    let activeRequestId: string | null = null;
     const reportSaveError = (error: unknown): string => {
       const message =
         error instanceof Error
@@ -124,49 +135,68 @@ export function useDesktopContent(): {
       navigate(desktopNavigationPath(target), { state: target.state });
     });
     const unsubscribePrepare = tabs.onPrepareClose((requestId) => {
-      activeRequestId = requestId;
+      closeRequest.current?.controller.abort();
+      const request: NonNullable<typeof closeRequest.current> = {
+        id: requestId,
+        controller: new AbortController(),
+      };
+      closeRequest.current = request;
       setDesktopInputFrozen(true);
       setPreparingClose(true);
       if (document.activeElement instanceof HTMLElement)
         document.activeElement.blur();
-      const canvasId = useCanvasStore.getState().canvasId;
-      const overlayTimer = canvasId
-        ? window.setTimeout(() => {
-            if (activeRequestId === requestId) setSaving(true);
-          }, 150)
-        : undefined;
+      request.overlayTimer = window.setTimeout(() => {
+        if (closeRequest.current === request) setSaving(true);
+      }, 150);
+      const heartbeat = window.setInterval(() => {
+        if (closeRequest.current === request)
+          tabs.keepPrepareCloseAlive(requestId);
+      }, 5_000);
       void (async () => {
         try {
-          if (canvasId) {
-            await saveCanvasForSubmission(canvasId);
-            await drainNodePreprocessing();
-            await saveCanvasForSubmission(canvasId);
+          await pageLifecycle.prepare(request.controller.signal);
+          if (closeRequest.current === request) {
+            tabs.finishPrepareClose(requestId, { ok: true });
           }
-          await drainConversationTitleWrites();
-          flushCanvasViewState();
-          tabs.finishPrepareClose(requestId, { ok: true });
         } catch (error) {
+          if (
+            closeRequest.current !== request ||
+            request.controller.signal.aborted
+          )
+            return;
           const message = reportSaveError(error);
+          window.clearTimeout(request.overlayTimer);
+          setSaving(false);
           tabs.finishPrepareClose(requestId, { ok: false, error: message });
         } finally {
-          window.clearTimeout(overlayTimer);
-          if (activeRequestId === requestId) setSaving(false);
+          window.clearInterval(heartbeat);
         }
       })();
     });
+    const unsubscribePrepared = tabs.onClosePrepared(() => {
+      window.clearTimeout(closeRequest.current?.overlayTimer);
+      closeRequest.current?.controller.abort();
+      closeRequest.current = null;
+      setSaving(false);
+    });
     const unsubscribeResume = tabs.onResume(() => {
-      activeRequestId = null;
+      window.clearTimeout(closeRequest.current?.overlayTimer);
+      closeRequest.current?.controller.abort();
+      closeRequest.current = null;
       setDesktopInputFrozen(false);
       setSaving(false);
       setPreparingClose(false);
     });
     tabs.ready();
     return () => {
-      activeRequestId = null;
+      window.clearTimeout(closeRequest.current?.overlayTimer);
+      closeRequest.current?.controller.abort();
+      closeRequest.current = null;
       setDesktopInputFrozen(false);
       unsubscribeNavigate();
       unsubscribePrepare();
       unsubscribeResume();
+      unsubscribePrepared();
     };
   }, [tabs, navigate]);
 
@@ -316,5 +346,5 @@ export function useDesktopContent(): {
     return unsubscribe;
   }, [tabs]);
 
-  return { saving, preparingClose };
+  return { saving, preparingClose, cancelClose };
 }

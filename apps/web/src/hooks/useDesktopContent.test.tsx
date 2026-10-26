@@ -20,6 +20,7 @@ import {
   installDesktopInputGuard,
   isDesktopInputFrozen,
 } from '@/utils/desktopInput';
+import { pageLifecycle } from '@/utils/pageLifecycle';
 
 import { useDesktopContent } from './useDesktopContent';
 import { getElectronBridge } from './useElectron';
@@ -44,6 +45,8 @@ const mocks = vi.hoisted(() => ({
   prepare: vi.fn<(listener: (requestId: string) => void) => () => void>(),
   resume: vi.fn<(listener: () => void) => () => void>(),
   finish: vi.fn(),
+  heartbeat: vi.fn(),
+  prepared: vi.fn<(listener: () => void) => () => void>(),
   navigate: vi.fn(),
   toast: vi.fn<typeof toast>(),
   setWorldEnabled: vi.fn(),
@@ -65,6 +68,8 @@ vi.mock('./useElectron', () => {
       onPrepareClose: mocks.prepare,
       onResume: mocks.resume,
       finishPrepareClose: mocks.finish,
+      keepPrepareCloseAlive: mocks.heartbeat,
+      onClosePrepared: mocks.prepared,
       ready: vi.fn(),
       report: vi.fn(),
       getState: mocks.state,
@@ -119,14 +124,19 @@ vi.mock('@/store/toolStore', () => ({
 ).IS_REACT_ACT_ENVIRONMENT = true;
 
 function Harness() {
-  const { saving, preparingClose } = useDesktopContent();
-  return <div data-saving={saving} data-frozen={preparingClose} />;
+  const { saving, preparingClose, cancelClose } = useDesktopContent();
+  return (
+    <div data-saving={saving} data-frozen={preparingClose}>
+      <button onClick={cancelClose}>Cancel close</button>
+    </div>
+  );
 }
 
 describe('desktop save presentation', () => {
   let root: Root;
   let container: HTMLDivElement;
   let removeInputGuard: () => void;
+  let removeCanvasPreparation: () => void;
 
   beforeEach(async () => {
     vi.useFakeTimers();
@@ -148,6 +158,18 @@ describe('desktop save presentation', () => {
     mocks.preprocess.mockResolvedValue(undefined);
     mocks.prepare.mockReturnValue(vi.fn());
     mocks.resume.mockReturnValue(vi.fn());
+    mocks.prepared.mockReturnValue(vi.fn());
+    removeCanvasPreparation = pageLifecycle.register('test-canvas', {
+      flush: async () => {
+        const canvasId = mocks.canvas.canvasId;
+        if (canvasId) {
+          await mocks.save(canvasId);
+          await mocks.preprocess();
+          await mocks.save(canvasId);
+        }
+        mocks.flush();
+      },
+    });
     removeInputGuard = installDesktopInputGuard();
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -158,6 +180,7 @@ describe('desktop save presentation', () => {
     act(() => root.unmount());
     container.remove();
     removeInputGuard();
+    removeCanvasPreparation();
     vi.useRealTimers();
   });
 
@@ -355,6 +378,7 @@ describe('desktop save presentation', () => {
     mocks.canvas.canvasId = null;
     await render();
     await prepare();
+    await act(async () => mocks.prepared.mock.calls[0][0]());
     await act(async () => vi.advanceTimersByTime(1000));
     expectPresentation(false, true);
     expect(isDesktopInputFrozen()).toBe(true);
@@ -415,7 +439,7 @@ describe('desktop save presentation', () => {
     }
   });
 
-  it('hides the message after saving but keeps input frozen until resumed', async () => {
+  it('keeps cancellation available after its own save until all pages are prepared', async () => {
     let completeSave: () => void;
     mocks.save.mockReturnValue(
       new Promise<void>((resolve) => {
@@ -431,7 +455,7 @@ describe('desktop save presentation', () => {
     expectPresentation(true, true);
     expect(mocks.finish).not.toHaveBeenCalled();
     await act(async () => completeSave());
-    expectPresentation(false, true);
+    expectPresentation(true, true);
     expect(mocks.flush).toHaveBeenCalled();
     expect(mocks.finish).toHaveBeenCalledWith('save-request', { ok: true });
     await resume();
@@ -441,10 +465,66 @@ describe('desktop save presentation', () => {
   it('does not flash the message for a fast save', async () => {
     await render();
     await prepare();
+    await act(async () => mocks.prepared.mock.calls[0][0]());
     await act(async () => vi.advanceTimersByTime(150));
     expectPresentation(false, true);
     expect(mocks.save).toHaveBeenCalledWith('space-a');
     expect(mocks.finish).toHaveBeenCalledWith('save-request', { ok: true });
+  });
+
+  it('waits for Home imports, keeps the handshake alive, and cancels without cancelling the import', async () => {
+    mocks.context.role = 'home';
+    mocks.canvas.canvasId = null;
+    let complete!: () => void;
+    const importing = pageLifecycle.run(
+      'importing',
+      () =>
+        new Promise<void>((resolve) => {
+          complete = resolve;
+        }),
+    );
+    await render();
+    await prepare();
+    await act(async () => vi.advanceTimersByTime(20_000));
+    expectPresentation(true, true);
+    expect(mocks.heartbeat).toHaveBeenCalledTimes(4);
+    expect(mocks.finish).not.toHaveBeenCalled();
+    // React's event handler remains testable while the real page is inert.
+    const button = container.querySelector('button');
+    if (!button?.parentElement) throw new Error('Missing cancel control');
+    const controls = document.createElement('dialog');
+    controls.setAttribute('data-desktop-close-controls', '');
+    controls.setAttribute('open', '');
+    button.parentElement.appendChild(controls);
+    controls.appendChild(button);
+    await act(async () => button.click());
+    expect(mocks.finish).toHaveBeenCalledExactlyOnceWith('save-request', {
+      ok: false,
+      error: 'Closing was cancelled.',
+      cancelled: true,
+    });
+    await resume();
+    await act(async () => {
+      complete();
+      await importing;
+    });
+    expect(mocks.finish).toHaveBeenCalledOnce();
+    expectPresentation(false, false);
+  });
+
+  it('never acknowledges an obsolete request after resume', async () => {
+    let complete!: () => void;
+    mocks.save.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        complete = resolve;
+      }),
+    );
+    await render();
+    await prepare();
+    await resume();
+    await act(async () => complete());
+    expect(mocks.finish).not.toHaveBeenCalled();
+    expectPresentation(false, false);
   });
 
   it('blocks window shortcuts and portal clicks after acknowledgement until resume', async () => {

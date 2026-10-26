@@ -244,9 +244,13 @@ describe('desktop Space Tab lifecycle', () => {
     expect(mocks.views[0].setVisible).toHaveBeenLastCalledWith(true);
     expect(space.setVisible).toHaveBeenLastCalledWith(false);
     expect(tabs.activeContents).toBe(mocks.views[0].webContents);
-    await tabs.close('new-tab');
+    const closingBlank = tabs.close('new-tab');
+    expect(tabs.snapshot.activeId).toBe('new-tab');
+    finish(mocks.views[0]);
+    await closingBlank;
     expect(tabs.snapshot.activeId).toBe(previousId);
     expect(mocks.views[0].webContents.close).not.toHaveBeenCalled();
+    expect(mocks.views[0].webContents.send).toHaveBeenCalledWith('tabs:resume');
     expect(space.webContents.send).not.toHaveBeenCalledWith(
       'tabs:prepare-close',
       expect.anything(),
@@ -327,7 +331,9 @@ describe('desktop Space Tab lifecycle', () => {
     const task = tabs.close(id);
     finish(space);
     await task;
-    await tabs.close('new-tab');
+    const closingBlank = tabs.close('new-tab');
+    finish(mocks.views[0]);
+    await closingBlank;
     expect(tabs.snapshot.activeId).toBe('home');
     newTab();
     mkdirSync(join(directory, 'desktop-tabs.json.tmp'));
@@ -903,6 +909,48 @@ describe('desktop Space Tab lifecycle', () => {
     await rejected;
     expect(a.webContents.close).not.toHaveBeenCalled();
     expect(tabs.snapshot.busy).toBe(false);
+  });
+
+  it('waits beyond the old timeout while the owning renderer remains responsive', async () => {
+    vi.useFakeTimers();
+    const a = open('a');
+    const close = tabs.close(tabs.snapshot.activeId);
+    const id = a.webContents.send.mock.calls.at(-1)![1];
+    for (let elapsed = 0; elapsed < 60_000; elapsed += 5_000) {
+      await vi.advanceTimersByTimeAsync(5_000);
+      tabs.keepDrainAlive(a.webContents as never, id);
+    }
+    expect(tabs.snapshot.busy).toBe(true);
+    expect(a.webContents.close).not.toHaveBeenCalled();
+    expect(() =>
+      tabs.keepDrainAlive(mocks.views[0].webContents as never, id),
+    ).toThrow('does not belong');
+    finish(a);
+    await close;
+    expect(a.webContents.close).toHaveBeenCalledOnce();
+    tabs.keepDrainAlive(a.webContents as never, id);
+  });
+
+  it('cancels a multi-page close immediately and retains every page', async () => {
+    const a = open('a');
+    const b = open('b');
+    const close = tabs.prepareCloseAll();
+    const id = a.webContents.send.mock.calls.at(-1)![1];
+    finish(a);
+    await Promise.resolve();
+    tabs.finishDrain(a.webContents as never, id, {
+      ok: false,
+      error: 'Closing was cancelled.',
+      cancelled: true,
+    });
+    await expect(close).rejects.toMatchObject({
+      name: 'DesktopCloseCancelledError',
+    });
+    expect(tabs.snapshot.busy).toBe(false);
+    for (const view of [mocks.views[0], a, b]) {
+      expect(view.webContents.close).not.toHaveBeenCalled();
+      expect(view.webContents.send).toHaveBeenCalledWith('tabs:resume');
+    }
   });
 
   it('awaits all save acknowledgements before resuming a failed window close', async () => {

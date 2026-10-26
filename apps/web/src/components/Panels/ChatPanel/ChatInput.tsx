@@ -14,6 +14,7 @@ import {
   useChatStore,
 } from '@/store/chatStore';
 import { usePanelStore } from '@/store/panelStore';
+import { pageLifecycle } from '@/utils/pageLifecycle';
 
 import { ChatContextSources } from './ChatContextSources';
 import { ContextUsageRing } from './ContextUsageRing';
@@ -206,41 +207,43 @@ export const ChatInput = ({
     async (file: File) => {
       if (!canvasId) return;
       try {
-        if (file.type.startsWith('image/')) {
-          const url = await uploadImage(file, canvasId);
-          addPendingAttachment(threadId, {
-            type: 'image',
-            source: 'upload',
-            url,
-            label: file.name || t('chat.attachmentFallbackImage'),
-          });
-        } else if (file.type === 'application/pdf') {
-          const url = await uploadPdf(file, canvasId);
-          addPendingAttachment(threadId, {
-            type: 'pdf',
-            source: 'upload',
-            url,
-            label: file.name || t('chat.attachmentFallbackPdf'),
-            filename: file.name,
-          });
-        } else {
-          // Read text content for text-based files
-          const isText =
-            file.type.startsWith('text/') ||
-            /\.(md|txt|csv|json|xml|yaml|yml|log)$/i.test(file.name);
-          const textContent = isText ? await file.text() : undefined;
+        await pageLifecycle.run('importing', async () => {
+          if (file.type.startsWith('image/')) {
+            const url = await uploadImage(file, canvasId);
+            addPendingAttachment(threadId, {
+              type: 'image',
+              source: 'upload',
+              url,
+              label: file.name || t('chat.attachmentFallbackImage'),
+            });
+          } else if (file.type === 'application/pdf') {
+            const url = await uploadPdf(file, canvasId);
+            addPendingAttachment(threadId, {
+              type: 'pdf',
+              source: 'upload',
+              url,
+              label: file.name || t('chat.attachmentFallbackPdf'),
+              filename: file.name,
+            });
+          } else {
+            // Read text content for text-based files
+            const isText =
+              file.type.startsWith('text/') ||
+              /\.(md|txt|csv|json|xml|yaml|yml|log)$/i.test(file.name);
+            const textContent = isText ? await file.text() : undefined;
 
-          const url = await uploadImage(file, canvasId);
-          addPendingAttachment(threadId, {
-            type: 'file',
-            source: 'upload',
-            url,
-            content: textContent,
-            label: file.name || t('chat.attachmentFallbackFile'),
-            filename: file.name,
-          });
-        }
-        onCommit?.();
+            const url = await uploadImage(file, canvasId);
+            addPendingAttachment(threadId, {
+              type: 'file',
+              source: 'upload',
+              url,
+              content: textContent,
+              label: file.name || t('chat.attachmentFallbackFile'),
+              filename: file.name,
+            });
+          }
+          onCommit?.();
+        });
       } catch (err) {
         console.error('Failed to upload file:', err);
       }

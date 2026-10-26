@@ -54,7 +54,7 @@ import {
   refreshConversationTitleAfterStream,
 } from '@/store/conversationTitleStore';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
-import { isPageUnloading } from '@/utils/pageLifecycle';
+import { isPageUnloading, pageLifecycle } from '@/utils/pageLifecycle';
 
 import {
   abortAgentStreamClaim,
@@ -1071,7 +1071,33 @@ export function createAgentTurnUserMessage(
   };
 }
 
-export async function dispatchAgentTurn(
+export function dispatchAgentTurn(
+  input: PreparedAgentTurn,
+  callbacks: AgentTurnCallbacks = {},
+): Promise<AgentTurnResult> {
+  let accepted!: () => void;
+  const acceptance = new Promise<null>((resolve) => {
+    accepted = () => resolve(null);
+  });
+  const result = dispatchPreparedAgentTurn(input, {
+    ...callbacks,
+    onAccepted: (turn) => {
+      accepted();
+      callbacks.onAccepted?.(turn);
+    },
+  });
+  void pageLifecycle
+    .run('updating', async () => {
+      const outcome = await Promise.race([acceptance, result]);
+      if (outcome?.error) throw outcome.error;
+    })
+    .catch((error: unknown) => {
+      console.error('[agent] Local turn preparation failed:', error);
+    });
+  return result;
+}
+
+async function dispatchPreparedAgentTurn(
   input: PreparedAgentTurn,
   callbacks: AgentTurnCallbacks = {},
 ): Promise<AgentTurnResult> {

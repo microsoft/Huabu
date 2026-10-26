@@ -51,6 +51,7 @@ import {
   usePreviewWorkspaceStore,
   type PreviewWorkspaceState,
 } from '@/store/previewWorkspace/store';
+import { pageLifecycle } from '@/utils/pageLifecycle';
 
 import { PreviewGroup } from './PreviewGroup';
 import { PreviewTabDragOverlay } from './PreviewTab';
@@ -205,6 +206,20 @@ export function PreviewWorkspace({
 } = {}) {
   const { t } = useTranslation();
   const workspace = usePreviewWorkspaceStore(selectWorkspace);
+  useEffect(
+    () =>
+      pageLifecycle.register('preview-editors', {
+        settle: () => {
+          const current = usePreviewWorkspaceStore.getState().workspace;
+          const { nodes } = useCanvasStore.getState();
+          for (const group of current.groups) {
+            if (group.activeTabId)
+              settleActivePreviewTab(current, nodes, group.activeTabId);
+          }
+        },
+      }),
+    [],
+  );
   useConversationTitles(workspace);
   const canvasId = usePreviewWorkspaceStore((s) => s.canvasId);
   const nodeFocusRequest = usePreviewWorkspaceStore((s) => s.nodeFocusRequest);

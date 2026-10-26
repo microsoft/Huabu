@@ -19,6 +19,7 @@ import { EDIT_EDGE_LABEL_EVENT } from '@/components/Panels/Canvas/edges/Labelled
 import { requestCreateChildSpace } from '@/components/Space/createChildSpaceAction';
 import { matchesShortcut } from '@/config/shortcuts';
 import { fitCanvasContent } from '@/utils/canvasViewport';
+import { pageLifecycle } from '@/utils/pageLifecycle';
 
 import {
   isEditableTarget,
@@ -26,7 +27,7 @@ import {
 } from './isEditableTarget';
 import { isKeyboardInteractiveTarget } from './isKeyboardInteractiveTarget';
 import {
-  uploadFileToNodeInput,
+  importFilesAsNodes,
   urlToNodeInput,
   textToNoteNodeInput,
   textToTextNodeInput,
@@ -42,7 +43,6 @@ import {
 import { looksLikeUrl } from '../../utils/io/media';
 
 import type { EditEdgeLabelDetail } from '@/components/Panels/Canvas/edges/LabelledEdge';
-import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
 import type { Edge, Node, ReactFlowInstance } from '@xyflow/react';
 
 /**
@@ -227,29 +227,13 @@ export function useCanvasShortcuts(
   const pasteFiles = useCallback(
     async (files: File[], basePos: { x: number; y: number }) => {
       if (!canvasId) return;
-      const inputs = (
-        await Promise.all(
-          files.map(async (file, index) => {
-            const offset = index * 30;
-            const pos = { x: basePos.x + offset, y: basePos.y + offset };
-            const input = await uploadFileToNodeInput(
-              file,
-              pos,
-              { type: 'user-pasted' },
-              canvasId,
-            );
-            // Strip auto-label for screenshot pastes (browser gives generic name)
-            if (input?.data && file.name === 'pasted-image') {
-              delete input.data.label;
-            }
-            return input;
-          }),
-        )
-      ).filter((input): input is AddNodeInput => input !== null);
-
-      if (inputs.length > 0) {
-        addNodes(inputs);
-      }
+      await importFilesAsNodes(
+        files,
+        basePos,
+        { type: 'user-pasted' },
+        canvasId,
+        addNodes,
+      );
     },
     [addNodes, canvasId],
   );
@@ -502,7 +486,8 @@ export function useCanvasShortcuts(
         // A setTimeout fallback covers the case where no native paste fires.
         pasteHandledRef.current = false;
 
-        setTimeout(async () => {
+        void pageLifecycle.run('importing', async () => {
+          await new Promise<void>((resolve) => setTimeout(resolve, 150));
           if (pasteHandledRef.current) return;
 
           // Native paste didn't fire — use Clipboard API as fallback
@@ -547,7 +532,7 @@ export function useCanvasShortcuts(
           } catch {
             // Clipboard API denied
           }
-        }, 150);
+        });
       }
     };
 

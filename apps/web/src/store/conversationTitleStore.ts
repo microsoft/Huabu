@@ -10,6 +10,7 @@ import {
   setConversationTitle,
 } from '@/api/conversationTitles';
 import { desktopSpaceStorage } from '@/utils/desktopStorage';
+import { pageLifecycle } from '@/utils/pageLifecycle';
 
 import type { ConversationTitle } from '@huabu/shared';
 
@@ -469,3 +470,7 @@ export function needsConversationTitleRefresh(
     (!!current.durable && !current.value.title)
   );
 }
+
+pageLifecycle.register('conversation-titles', {
+  flush: drainConversationTitleWrites,
+});

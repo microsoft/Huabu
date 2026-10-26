@@ -18,6 +18,7 @@ import {
 } from '@/store/chatStore';
 import { resolveConversationPreparation } from '@/store/conversationPreparation';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
+import { pageLifecycle } from '@/utils/pageLifecycle';
 
 import {
   claimAgentStream,
@@ -1174,6 +1175,42 @@ describe('queued composer turns', () => {
       },
     );
   });
+});
+
+it('tracks local submission only until durable acceptance, not the Agent stream', async () => {
+  const release = deferred();
+  let callbacks!: AgentStreamCallbacks;
+  mocks.stream.mockImplementationOnce(
+    async (_content, _thread, _mode, handlers: AgentStreamCallbacks) => {
+      callbacks = handlers;
+      await release.promise;
+      handlers.onComplete();
+    },
+  );
+  const tracker = vi.spyOn(pageLifecycle, 'run');
+  let streamingDone = false;
+  const turn = dispatchAgentTurn(request()).then(() => {
+    streamingDone = true;
+  });
+  try {
+    await vi.waitFor(() => expect(callbacks).toBeDefined());
+    const tracked = tracker.mock.results.at(-1)?.value as Promise<void>;
+    let localDone = false;
+    void tracked.then(() => {
+      localDone = true;
+    });
+    await Promise.resolve();
+    expect(localDone).toBe(false);
+    callbacks.onAccepted?.({ threadId: 'thread-1', turnStartSeq: 7 });
+    await tracked;
+    expect(localDone).toBe(true);
+    expect(streamingDone).toBe(false);
+    expect(mocks.stop).not.toHaveBeenCalled();
+  } finally {
+    release.resolve();
+    await turn;
+    tracker.mockRestore();
+  }
 });
 
 it('records genuine completion by owner thread, not tool updates or repeated done events', () => {

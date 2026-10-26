@@ -93,7 +93,7 @@ export default function DesktopTabShell() {
     setError(null);
     void action
       .then((result) => {
-        if (!result.ok) setError(result.error);
+        if (!result.ok && !result.cancelled) setError(result.error);
       })
       .catch((failure: unknown) => setError(String(failure)));
   };

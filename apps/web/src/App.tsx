@@ -24,6 +24,7 @@ import {
 import { RATE_LIMITED_EVENT, type RateLimitedEventDetail } from './api/_client';
 import { Loading } from './components/Common/Loading';
 import { dismissToast, toast, ToastContainer } from './components/Common/Toast';
+import { DesktopCloseOverlay } from './components/Shell/DesktopCloseOverlay';
 import { DesktopHomeMenu } from './components/Shell/DesktopHomeMenu';
 import { GlobalModals } from './components/Shell/GlobalModals';
 import { NativeMenuBridge } from './components/Shell/NativeMenuBridge';
@@ -161,7 +162,11 @@ const InitialisingContext = createContext(true);
  */
 function RootLayout() {
   const { t } = useTranslation();
-  const { saving: desktopSaving, preparingClose } = useDesktopContent();
+  const {
+    saving: desktopSaving,
+    preparingClose,
+    cancelClose,
+  } = useDesktopContent();
   const tabs = getElectronBridge()?.tabs;
   // Block any pathname change that's *leaving* a canvas route, so
   // pending debounced editor edits and the canvas-level structure
@@ -259,7 +264,9 @@ function RootLayout() {
           already provides the centered loading state. Rendered as a sibling
           of the page area so it stacks on top of whatever route is
           currently mounted. */}
-      {(isDraining || desktopSaving) && (
+      {desktopSaving ? (
+        <DesktopCloseOverlay onCancel={cancelClose} />
+      ) : isDraining ? (
         <div className="bg-surface absolute inset-0 z-[1000]">
           <Loading
             variant="spinner"
@@ -269,7 +276,7 @@ function RootLayout() {
             indicatorClassName="text-fg-subtle"
           />
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

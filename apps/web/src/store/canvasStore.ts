@@ -102,6 +102,7 @@ import {
   readApplicationPreference,
   writeApplicationPreference,
 } from '@/utils/desktopStorage';
+import { pageLifecycle } from '@/utils/pageLifecycle';
 import {
   changedSpaceEntries,
   isVisibleWorldNode,
@@ -1165,6 +1166,18 @@ export function settleNodePreprocess(nodeId: string): void {
 export function drainNodePreprocessing(): Promise<void> {
   return preprocessQueue.flushAll();
 }
+
+pageLifecycle.register('canvas', {
+  flush: async () => {
+    const { canvasId } = useCanvasStore.getState();
+    if (canvasId) {
+      await saveCanvasForSubmission(canvasId);
+      await drainNodePreprocessing();
+      await saveCanvasForSubmission(canvasId);
+    }
+    flushCanvasViewState();
+  },
+});
 
 /**
  * Module-scoped resize-preview controller. Owns the rAF handle and
@@ -4048,54 +4061,61 @@ const useCanvasStore = create<RFState>()(
       // so the node goes straight to its content height instead of
       // collapsing to the policy minimum and expanding a frame later.
       // Notes whose hint is already current skip the measurement.
-      void (async () => {
-        const measurements = await measureMissingAutoHeights(
-          mode === 'auto' ? items.map((item) => item.nodeId) : [],
-          get,
-        );
-
-        // Never replay captured geometry after an async measurement if a
-        // resize or navigation superseded the toggle. The measurement key
-        // also guards APPLY_MEASURED_HEIGHT, but cannot undo a stale resize.
-        const live = get();
-        if (live.canvasId !== canvasId) return;
-        const currentItems = items.filter((item) => {
-          const before = nodes.find((node) => node.id === item.nodeId);
-          const after = live.nodes.find((node) => node.id === item.nodeId);
-          return (
-            before &&
-            after?.type === 'note' &&
-            autoHeightContentWidth(before) === autoHeightContentWidth(after)
+      void pageLifecycle
+        .run('updating', async () => {
+          const measurements = await measureMissingAutoHeights(
+            mode === 'auto' ? items.map((item) => item.nodeId) : [],
+            get,
           );
-        });
-        if (currentItems.length === 0) return;
 
-        // SET_NODE_GEOMETRY uses snapshot:'caller'; open a gesture so the
-        // batch is captured as one undo entry without warnings. The
-        // measurement rides the same batch, so undo restores the pinned
-        // height in one step.
-        get().beginGesture('SET_NODE_GEOMETRY');
-        get().executeCommands(
-          [
-            {
-              type: 'SET_NODE_GEOMETRY',
-              items: currentItems.map((item) => ({
-                nodeId: item.nodeId as CanvasNodeId,
-                size: item.size,
-              })),
-            },
-            ...(measurements.length > 0
-              ? [
-                  {
-                    type: 'APPLY_MEASURED_HEIGHT' as const,
-                    items: measurements,
-                  },
-                ]
-              : []),
-          ],
-          'ui',
-        );
-      })();
+          // Never replay captured geometry after an async measurement if a
+          // resize or navigation superseded the toggle. The measurement key
+          // also guards APPLY_MEASURED_HEIGHT, but cannot undo a stale resize.
+          const live = get();
+          if (live.canvasId !== canvasId) return;
+          const currentItems = items.filter((item) => {
+            const before = nodes.find((node) => node.id === item.nodeId);
+            const after = live.nodes.find((node) => node.id === item.nodeId);
+            return (
+              before &&
+              after?.type === 'note' &&
+              autoHeightContentWidth(before) === autoHeightContentWidth(after)
+            );
+          });
+          if (currentItems.length === 0) return;
+
+          // SET_NODE_GEOMETRY uses snapshot:'caller'; open a gesture so the
+          // batch is captured as one undo entry without warnings. The
+          // measurement rides the same batch, so undo restores the pinned
+          // height in one step.
+          get().beginGesture('SET_NODE_GEOMETRY');
+          get().executeCommands(
+            [
+              {
+                type: 'SET_NODE_GEOMETRY',
+                items: currentItems.map((item) => ({
+                  nodeId: item.nodeId as CanvasNodeId,
+                  size: item.size,
+                })),
+              },
+              ...(measurements.length > 0
+                ? [
+                    {
+                      type: 'APPLY_MEASURED_HEIGHT' as const,
+                      items: measurements,
+                    },
+                  ]
+                : []),
+            ],
+            'ui',
+          );
+        })
+        .catch((error: unknown) => {
+          console.error('[canvas] Could not update Note sizing:', error);
+          toast(error instanceof Error ? error.message : String(error), {
+            tone: 'danger',
+          });
+        });
     },
 
     applyMeasuredHeights: (items) => {
@@ -4497,92 +4517,101 @@ const useCanvasStore = create<RFState>()(
         return;
       }
 
-      void (async () => {
-        // One clone per distinct source artifact, shared across every
-        // node and every reference in this paste (the same image may be
-        // embedded several times in one note, or reused across notes).
-        const clones = new Map<string, Promise<string | null>>();
-        const cloneRef = (ref: {
-          canvasId: string | null;
-          key: string;
-        }): Promise<string | null> => {
-          const from = ref.canvasId ?? srcCanvasId;
-          if (from === dstCanvasId) return Promise.resolve(null);
-          const cacheKey = `${from}/${ref.key}`;
-          let pending = clones.get(cacheKey);
-          if (!pending) {
-            // Best effort — a failed clone falls back to the original
-            // key. The new node then renders with the missing-file
-            // placeholder (artifactMissing flag from the server) so the
-            // user can still remove it.
-            pending = cloneArtifactToCanvas(from, ref.key, dstCanvasId).catch(
-              (err) => {
-                console.warn(
-                  '[paste] Failed to clone artifact for cross-canvas paste',
-                  err,
+      void pageLifecycle
+        .run('importing', async () => {
+          // One clone per distinct source artifact, shared across every
+          // node and every reference in this paste (the same image may be
+          // embedded several times in one note, or reused across notes).
+          const clones = new Map<string, Promise<string | null>>();
+          const cloneRef = (ref: {
+            canvasId: string | null;
+            key: string;
+          }): Promise<string | null> => {
+            const from = ref.canvasId ?? srcCanvasId;
+            if (from === dstCanvasId) return Promise.resolve(null);
+            const cacheKey = `${from}/${ref.key}`;
+            let pending = clones.get(cacheKey);
+            if (!pending) {
+              // Best effort — a failed clone falls back to the original
+              // key. The new node then renders with the missing-file
+              // placeholder (artifactMissing flag from the server) so the
+              // user can still remove it.
+              pending = cloneArtifactToCanvas(from, ref.key, dstCanvasId).catch(
+                (err) => {
+                  console.warn(
+                    '[paste] Failed to clone artifact for cross-canvas paste',
+                    err,
+                  );
+                  return null;
+                },
+              );
+              clones.set(cacheKey, pending);
+            }
+            return pending;
+          };
+
+          const remapped = await Promise.all(
+            clipboardNodes.map(async (node) => {
+              const data = {
+                ...((node.data ?? {}) as Record<string, unknown>),
+              };
+              let mutated = false;
+
+              for (const field of ARTIFACT_DATA_FIELDS) {
+                const value = data[field];
+                const ref = parseArtifactRef(value);
+                if (!ref) continue;
+                const newKey = await cloneRef(ref);
+                if (newKey && newKey !== value) {
+                  data[field] = newKey;
+                  mutated = true;
+                }
+              }
+
+              for (const field of markdownArtifactFields(data)) {
+                const markdown = data[field];
+                if (typeof markdown !== 'string' || markdown.length === 0)
+                  continue;
+                const refs = collectMarkdownArtifactRefs(markdown);
+                if (refs.length === 0) continue;
+                const rewrites = new Map<string, string>();
+                await Promise.all(
+                  refs.map(async (raw) => {
+                    const ref = parseArtifactRef(raw);
+                    if (!ref) return;
+                    const newKey = await cloneRef(ref);
+                    if (newKey && newKey !== raw) rewrites.set(raw, newKey);
+                  }),
                 );
-                return null;
-              },
-            );
-            clones.set(cacheKey, pending);
-          }
-          return pending;
-        };
-
-        const remapped = await Promise.all(
-          clipboardNodes.map(async (node) => {
-            const data = { ...((node.data ?? {}) as Record<string, unknown>) };
-            let mutated = false;
-
-            for (const field of ARTIFACT_DATA_FIELDS) {
-              const value = data[field];
-              const ref = parseArtifactRef(value);
-              if (!ref) continue;
-              const newKey = await cloneRef(ref);
-              if (newKey && newKey !== value) {
-                data[field] = newKey;
-                mutated = true;
+                if (rewrites.size === 0) continue;
+                const next = rewriteMarkdownArtifactRefs(markdown, (raw) =>
+                  rewrites.get(raw),
+                );
+                if (next !== markdown) {
+                  data[field] = next;
+                  mutated = true;
+                }
               }
-            }
 
-            for (const field of markdownArtifactFields(data)) {
-              const markdown = data[field];
-              if (typeof markdown !== 'string' || markdown.length === 0)
-                continue;
-              const refs = collectMarkdownArtifactRefs(markdown);
-              if (refs.length === 0) continue;
-              const rewrites = new Map<string, string>();
-              await Promise.all(
-                refs.map(async (raw) => {
-                  const ref = parseArtifactRef(raw);
-                  if (!ref) return;
-                  const newKey = await cloneRef(ref);
-                  if (newKey && newKey !== raw) rewrites.set(raw, newKey);
-                }),
-              );
-              if (rewrites.size === 0) continue;
-              const next = rewriteMarkdownArtifactRefs(markdown, (raw) =>
-                rewrites.get(raw),
-              );
-              if (next !== markdown) {
-                data[field] = next;
-                mutated = true;
-              }
-            }
-
-            return mutated ? { ...node, data } : node;
-          }),
-        );
-        // `dispatch` / `runForks` act on whatever canvas the store is
-        // showing *now*, but the work above was scoped to the canvas
-        // that was active when the paste started. Cloning takes one
-        // round-trip per embedded image, which is more than enough time
-        // for the user to switch Spaces — dropping the paste beats
-        // landing it on the wrong canvas.
-        if (get().canvasId !== dstCanvasId) return;
-        runForks();
-        dispatch(remapped);
-      })();
+              return mutated ? { ...node, data } : node;
+            }),
+          );
+          // `dispatch` / `runForks` act on whatever canvas the store is
+          // showing *now*, but the work above was scoped to the canvas
+          // that was active when the paste started. Cloning takes one
+          // round-trip per embedded image, which is more than enough time
+          // for the user to switch Spaces — dropping the paste beats
+          // landing it on the wrong canvas.
+          if (get().canvasId !== dstCanvasId) return;
+          runForks();
+          dispatch(remapped);
+        })
+        .catch((error: unknown) => {
+          console.error('[paste] Could not finish cross-Space paste:', error);
+          toast(error instanceof Error ? error.message : String(error), {
+            tone: 'danger',
+          });
+        });
     },
 
     canUndo: false,

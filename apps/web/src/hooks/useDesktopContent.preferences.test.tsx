@@ -102,6 +102,8 @@ beforeEach(async () => {
     onNavigate: vi.fn(() => vi.fn()),
     onPrepareClose: vi.fn(() => vi.fn()),
     finishPrepareClose: vi.fn(),
+    keepPrepareCloseAlive: vi.fn(),
+    onClosePrepared: vi.fn(() => vi.fn()),
     onResume: vi.fn(() => vi.fn()),
   };
   window.electronBridge = {

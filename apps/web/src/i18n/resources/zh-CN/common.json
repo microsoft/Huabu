@@ -34,7 +34,7 @@
   },
   "app": {
     "loadingWorkspace": "正在加载你的 Home 文件夹…",
-    "savingCanvas": "正在保存 Space…",
+    "savingCanvas": "正在保存…",
     "logoAlt": "Logo"
   },
   "actions": {

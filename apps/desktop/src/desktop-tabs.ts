@@ -45,6 +45,7 @@ interface DrainRequest {
   contentsId: number;
   resolve: () => void;
   reject: (error: Error) => void;
+  heartbeat: () => void;
 }
 
 const HOME_ID = 'home';
@@ -72,7 +73,7 @@ const isLegacyStorageKey = (key: string) =>
 
 export class DesktopCloseCancelledError extends Error {
   constructor() {
-    super('Closing was cancelled. Unavailable Tabs were kept open.');
+    super('Closing was cancelled. Tabs were kept open.');
     this.name = 'DesktopCloseCancelledError';
   }
 }
@@ -335,6 +336,7 @@ export class DesktopTabs {
 
   private runAction(action: () => Promise<void>): void {
     void action().catch((error: unknown) => {
+      if (error instanceof DesktopCloseCancelledError) return;
       console.error('[desktop-tabs] Tab action failed:', error);
       dialog.showErrorBox(
         'Tab action failed',
@@ -624,28 +626,45 @@ export class DesktopTabs {
       );
     const requestId = randomUUID();
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let settled = false;
     try {
       await new Promise<void>((resolve, reject) => {
+        const heartbeat = () => {
+          if (settled) return;
+          clearTimeout(timer);
+          timer = setTimeout(
+            () =>
+              reject(
+                new Error(
+                  `Saving "${tab.state.title}" timed out. The Tab was kept open.`,
+                ),
+              ),
+            CLOSE_TIMEOUT_MS,
+          );
+        };
         this.drains.set(requestId, {
           contentsId: view.webContents.id,
           resolve,
           reject,
+          heartbeat,
         });
-        timer = setTimeout(
-          () =>
-            reject(
-              new Error(
-                `Saving "${tab.state.title}" timed out. The Tab was kept open.`,
-              ),
-            ),
-          CLOSE_TIMEOUT_MS,
-        );
+        heartbeat();
         view.webContents.send('tabs:prepare-close', requestId);
       });
     } finally {
+      settled = true;
       clearTimeout(timer);
-      this.drains.delete(requestId);
     }
+  }
+
+  keepDrainAlive(contents: WebContents, requestId: unknown): void {
+    if (typeof requestId !== 'string') throw new Error('Invalid save request');
+    const request = this.drains.get(requestId);
+    // Heartbeats already in transit may arrive after the request settled.
+    if (!request) return;
+    if (request.contentsId !== contents.id)
+      throw new Error('Save request does not belong to this Tab');
+    request.heartbeat();
   }
 
   finishDrain(contents: WebContents, requestId: unknown, raw: unknown): void {
@@ -661,11 +680,15 @@ export class DesktopTabs {
       'error' in raw &&
       typeof raw.error === 'string'
     )
-      request.reject(new Error(raw.error));
+      if ('cancelled' in raw && raw.cancelled === true) {
+        for (const pending of this.drains.values())
+          pending.reject(new DesktopCloseCancelledError());
+      } else request.reject(new Error(raw.error));
     else throw new Error('Invalid save response');
   }
 
   resume(): void {
+    this.drains.clear();
     for (const tab of this.tabs) {
       if (tab.ready) tab.view?.webContents.send('tabs:resume');
     }
@@ -693,6 +716,7 @@ export class DesktopTabs {
       );
       if (blocking) throw blocking.error;
       if (failed.length > 0) {
+        this.closePrepared();
         const { response } = await dialog.showMessageBox(this.win, {
           type: 'warning',
           message: 'Close without saving unavailable pages?',
@@ -708,10 +732,18 @@ export class DesktopTabs {
           if (tab.ready) await this.drain(tab);
         }
       }
+      this.closePrepared();
       this.persist();
     } catch (error) {
       this.resume();
       throw error;
+    }
+  }
+
+  private closePrepared(): void {
+    this.drains.clear();
+    for (const tab of this.tabs) {
+      if (tab.ready) tab.view?.webContents.send('tabs:close-prepared');
     }
   }
 
@@ -759,11 +791,12 @@ export class DesktopTabs {
     if (this.busy) throw new Error('Another Tab operation is in progress');
     const tab = this.tabs.find((entry) => entry.state.id === id);
     if (!tab) throw new Error('Tab no longer exists');
+    const content = id === NEW_DESKTOP_TAB_ID ? this.tabs[0] : tab;
     this.setHomeMenu(null);
     this.busy = true;
     this.publish();
     try {
-      if (!tab.ready && tab.state.error) {
+      if (!content.ready && content.state.error) {
         const result = await dialog.showMessageBox(this.win, {
           type: 'warning',
           message: 'Close this failed Tab?',
@@ -779,7 +812,7 @@ export class DesktopTabs {
           return;
         }
       } else {
-        await this.drain(tab);
+        await this.drain(content);
       }
       const index = this.tabs.indexOf(tab);
       const remaining = this.tabs.filter((entry) => entry !== tab);
@@ -798,9 +831,8 @@ export class DesktopTabs {
       this.activeId = activeId;
       next.state.unread = false;
       this.destroyTab(tab);
-      this.busy = false;
       this.showActiveTab();
-      this.publish();
+      this.resume();
     } catch (error) {
       this.resume();
       this.activeId = id;
@@ -1113,6 +1145,8 @@ export function registerDesktopTabsIpc(
           await run(requireOwner(event), event, value);
           return { ok: true };
         } catch (error) {
+          if (error instanceof DesktopCloseCancelledError)
+            return { ok: false, error: error.message, cancelled: true };
           console.error(`[desktop-tabs] ${name}:`, error);
           return {
             ok: false,
@@ -1208,5 +1242,8 @@ export function registerDesktopTabsIpc(
   );
   listen('tabs:finish-close', (tabs, event, args) =>
     tabs.finishDrain(event.sender, args[0], args[1]),
+  );
+  listen('tabs:preparing-close', (tabs, event, args) =>
+    tabs.keepDrainAlive(event.sender, args[0]),
   );
 }

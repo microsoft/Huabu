@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-/* global window, document, getComputedStyle */
+/* global window, document, getComputedStyle, DataTransfer, ClipboardEvent */
 
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -677,6 +677,188 @@ try {
     (id) => window.electronBridge.tabs.activate(id),
     createdTab.id,
   );
+  let releaseUpload;
+  const uploadGate = new Promise((resolve) => {
+    releaseUpload = resolve;
+  });
+  let observeUpload;
+  const uploadStarted = new Promise((resolve) => {
+    observeUpload = resolve;
+  });
+  await createdPage.route('**/artifact/html', async (route) => {
+    observeUpload();
+    await uploadGate;
+    await route.continue();
+  });
+  await createdPage.evaluate(() => {
+    const files = new DataTransfer();
+    files.items.add(
+      new File(
+        [
+          '<!doctype html><html><head><title>Saved upload</title></head><body>Local upload before reload</body></html>',
+        ],
+        'tabs-close-upload.html',
+        { type: 'text/html' },
+      ),
+    );
+    document.querySelector('.react-flow').dispatchEvent(
+      new ClipboardEvent('paste', {
+        bubbles: true,
+        cancelable: true,
+        clipboardData: files,
+      }),
+    );
+  });
+  await uploadStarted;
+  const closeLabels = await createdPage.evaluate(async () => {
+    const { i18n } = await import('/src/i18n/index.ts');
+    return {
+      saving: i18n.t('app.savingCanvas'),
+      cancel: i18n.t('actions.cancel'),
+    };
+  });
+  const firstReload = shell.evaluate(
+    (id) => window.electronBridge.tabs.reload(id),
+    createdTab.id,
+  );
+  const closeDialog = createdPage.locator(
+    'dialog[data-desktop-close-controls]',
+  );
+  await closeDialog.waitFor({ state: 'visible' });
+  assert.deepEqual(
+    (await closeDialog.innerText())
+      .split(/\n+/)
+      .map((line) => line.trim())
+      .filter(Boolean),
+    [closeLabels.saving, closeLabels.cancel],
+    'Save progress must show only the saving message and cancel button',
+  );
+  await closeDialog
+    .getByRole('button', { name: closeLabels.cancel, exact: true })
+    .click();
+  assert.equal(
+    (await firstReload).cancelled,
+    true,
+    'Cancel must cancel reload, not the upload',
+  );
+  assert.equal(await createdPage.evaluate(() => document.body.inert), false);
+  await closeDialog.waitFor({ state: 'hidden' });
+  const previousDocument = await createdPage.evaluate(
+    () => performance.timeOrigin,
+  );
+  const secondReload = shell.evaluate(
+    (id) => window.electronBridge.tabs.reload(id),
+    createdTab.id,
+  );
+  try {
+    await closeDialog.waitFor({ state: 'visible' });
+    const wasDark = await createdPage.evaluate(() =>
+      document.documentElement.classList.contains('dark'),
+    );
+    try {
+      for (const dark of [false, true]) {
+        await createdPage.evaluate(
+          (value) => document.documentElement.classList.toggle('dark', value),
+          dark,
+        );
+        await closeDialog.evaluate((element) => {
+          for (const animation of element.getAnimations({ subtree: true })) {
+            if (animation.effect?.getComputedTiming().iterations !== Infinity)
+              animation.finish();
+          }
+        });
+        const minimumContrast = await closeDialog.evaluate((element) => {
+          const context = document.createElement('canvas').getContext('2d');
+          const surface = getComputedStyle(element).backgroundColor;
+          const luminance = (color) => {
+            context.clearRect(0, 0, 1, 1);
+            context.fillStyle = surface;
+            context.fillRect(0, 0, 1, 1);
+            context.fillStyle = color;
+            context.fillRect(0, 0, 1, 1);
+            const [r, g, b] = [...context.getImageData(0, 0, 1, 1).data].map(
+              (channel) => {
+                const value = channel / 255;
+                return value <= 0.04045
+                  ? value / 12.92
+                  : ((value + 0.055) / 1.055) ** 2.4;
+              },
+            );
+            return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+          };
+          return Math.min(
+            ...[
+              ...element.querySelectorAll('h2, p, div[role="status"], button'),
+            ].map((text) => {
+              const style = getComputedStyle(text);
+              const foreground = luminance(style.color);
+              const background = luminance(style.backgroundColor);
+              return (
+                (Math.max(foreground, background) + 0.05) /
+                (Math.min(foreground, background) + 0.05)
+              );
+            }),
+          );
+        });
+        assert.ok(
+          minimumContrast >= 4.5,
+          `Close progress text must meet 4.5:1 contrast (dark=${dark}, actual=${minimumContrast})`,
+        );
+        if (process.env.HUABU_TABS_SCREENSHOT) {
+          await createdPage.screenshot({
+            path: process.env.HUABU_TABS_SCREENSHOT.replace(
+              /\.png$/,
+              dark ? '-closing-dark.png' : '-closing.png',
+            ),
+            animations: 'disabled',
+          });
+        }
+      }
+    } finally {
+      await createdPage.evaluate(
+        (value) => document.documentElement.classList.toggle('dark', value),
+        wasDark,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 16_000));
+    assert.equal(createdPage.isClosed(), false);
+    assert.equal(
+      (await shell.evaluate(() => window.electronBridge.tabs.getState())).busy,
+      true,
+      'A responsive upload must remain pending beyond the old 15-second timeout',
+    );
+  } finally {
+    releaseUpload();
+  }
+  assert.equal((await secondReload).ok, true);
+  await waitFor(async () => {
+    const snapshot = await shell.evaluate(() =>
+      window.electronBridge.tabs.getState(),
+    );
+    return (
+      snapshot.tabs.find((tab) => tab.id === createdTab.id)?.loading === false
+    );
+  }, 'waiting for the reloaded renderer to become ready');
+  await content(createdTab.canvasId);
+  assert.notEqual(
+    await createdPage.evaluate(() => performance.timeOrigin),
+    previousDocument,
+    'Reload must create a new document, not merely retain the old in-memory node',
+  );
+  assert.equal(
+    await createdPage.evaluate(async () => {
+      const { default: store } = await import('/src/store/canvasStore.ts');
+      return store
+        .getState()
+        .nodes.some((node) => node.type === 'web' && node.data.src);
+    }),
+    true,
+    'Reload must retain the node inserted by the pending upload',
+  );
+  await createdPage.unroute('**/artifact/html');
+  console.log(
+    'Pending upload survived cancellation, waited beyond 15s, and persisted before reload',
+  );
   await createdPage.evaluate(async () => {
     const {
       default: store,
@@ -689,8 +871,34 @@ try {
       data: { content: 'Initial text' },
       placementPoint: { x: 100, y: 100 },
     });
+    for (const side of ['left', 'right']) {
+      store.getState().addNode({
+        id: `tabs-smoke-close-note-${side}`,
+        nodeType: 'note',
+        data: { content: `# Initial ${side}` },
+        placementPoint: { x: 300, y: side === 'left' ? 100 : 400 },
+      });
+    }
     await saveCanvasForSubmission(store.getState().canvasId);
     await drainNodePreprocessing();
+    const { openPreviewNode } =
+      await import('/src/store/previewWorkspace/actions.ts');
+    const { usePreviewWorkspaceStore } =
+      await import('/src/store/previewWorkspace/store.ts');
+    openPreviewNode('tabs-smoke-close-note-left', {
+      transient: false,
+      focusEditor: false,
+    });
+    usePreviewWorkspaceStore.getState().splitGroup();
+    openPreviewNode('tabs-smoke-close-note-right', {
+      transient: false,
+      focusEditor: false,
+    });
+    for (const side of ['left', 'right']) {
+      store.getState().updateNodeData(`tabs-smoke-close-note-${side}`, {
+        content: `# Settled ${side} on outer close`,
+      });
+    }
     store.setState({ pendingInlineEditNodeId: 'tabs-smoke-close-text' });
   });
   const textEditor = createdPage.locator(
@@ -745,6 +953,13 @@ try {
   );
   assert.equal(settledText.content, 'Settled text before immediate close');
   assert.equal(settledText.label, 'Settled text before immediate close');
+  for (const side of ['left', 'right']) {
+    const note = await request(
+      `/canvas/${createdTab.canvasId}/nodes/tabs-smoke-close-note-${side}/content`,
+    );
+    assert.equal(note.content, `# Settled ${side} on outer close`);
+    assert.equal(note.label, `Settled ${side} on outer close`);
+  }
   await createdCard.hover();
   await createdCard
     .getByRole('button', { name: deletionLabels.remove, exact: true })
@@ -1564,8 +1779,7 @@ try {
         return result;
       });
     await b
-      .locator('div.bg-surface.absolute.inset-0')
-      .filter({ hasText: 'Saving Space' })
+      .locator('dialog[data-desktop-close-controls]')
       .waitFor({ state: 'visible' });
     assert.equal(
       titleCloseSettled,
@@ -1957,9 +2171,7 @@ try {
   );
   let savingPresentation;
   try {
-    const overlay = a
-      .locator('div.bg-surface.absolute.inset-0')
-      .filter({ hasText: 'Saving Space' });
+    const overlay = a.locator('dialog[data-desktop-close-controls]');
     await overlay.waitFor({ state: 'visible' });
     await electron.evaluate(({ app, dialog }) => {
       globalThis.tabsSmokeShowErrorBox = dialog.showErrorBox;
@@ -2448,6 +2660,7 @@ try {
     ),
   );
 } catch (error) {
+  console.error('Desktop Tabs smoke failed:', error);
   console.error(logs);
   throw error;
 } finally {

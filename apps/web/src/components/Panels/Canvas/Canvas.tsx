@@ -35,6 +35,7 @@ import {
 import { resolveArtifactUrl } from '@/api/artifact';
 import { cn } from '@/components/Common/cn';
 import { Loading } from '@/components/Common/Loading';
+import { toast } from '@/components/Common/Toast';
 import { AudioNode } from '@/components/Nodes/audio/AudioNode';
 import {
   FrameZoomController,
@@ -62,7 +63,7 @@ import {
 import { TextNode } from '@/components/Nodes/text/TextNode';
 import { requestCreateChildSpace } from '@/components/Space/createChildSpaceAction';
 import {
-  uploadFileToNodeInput,
+  importFilesAsNodes,
   urlToNodeInput,
   textToNoteNodeInput,
 } from '@/handler/canvasCommand/nodeInputBuilders';
@@ -89,6 +90,7 @@ import { useSketchStrokeMove } from '@/hooks/useSketchStrokeMove';
 import { openPreviewNode } from '@/store/previewWorkspace/actions';
 import { useWorkspaceStore } from '@/store/workspaceStore';
 import { anchorViewportCentre } from '@/utils/canvasViewport';
+import { pageLifecycle } from '@/utils/pageLifecycle';
 import { isMac } from '@/utils/platform';
 import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 import { isVisibleWorldNode } from '@/utils/spaceHierarchy';
@@ -1305,10 +1307,35 @@ const CanvasContent: React.FC<CanvasProps> = ({
               });
             };
 
-            const img = new Image();
-            img.onload = () => doAdd(img.naturalWidth, img.naturalHeight);
-            img.onerror = () => doAdd(0, 0);
-            img.src = resolveArtifactUrl(src, canvasId ?? undefined);
+            void pageLifecycle
+              .run(
+                'importing',
+                () =>
+                  new Promise<void>((resolve, reject) => {
+                    const img = new Image();
+                    const finish = (width: number, height: number) => {
+                      try {
+                        doAdd(width, height);
+                        resolve();
+                      } catch (error) {
+                        reject(error);
+                      }
+                    };
+                    img.onload = () =>
+                      finish(img.naturalWidth, img.naturalHeight);
+                    img.onerror = () => finish(0, 0);
+                    img.src = resolveArtifactUrl(src, canvasId ?? undefined);
+                  }),
+              )
+              .catch((error: unknown) => {
+                console.error(
+                  '[canvas] Could not insert dropped image:',
+                  error,
+                );
+                toast(error instanceof Error ? error.message : String(error), {
+                  tone: 'danger',
+                });
+              });
             return;
           }
 
@@ -1320,26 +1347,13 @@ const CanvasContent: React.FC<CanvasProps> = ({
         const nativeFiles = Array.from(e.dataTransfer.files);
         if (nativeFiles.length > 0) {
           if (!canvasId) return;
-          void (async () => {
-            const inputs = (
-              await Promise.all(
-                nativeFiles.map(async (file, i) => {
-                  const offset = i * 30;
-                  const pos = {
-                    x: dropPos.x + offset,
-                    y: dropPos.y + offset,
-                  };
-                  return uploadFileToNodeInput(
-                    file,
-                    pos,
-                    { type: 'user-uploaded' },
-                    canvasId,
-                  );
-                }),
-              )
-            ).filter((input): input is AddNodeInput => input !== null);
-            if (inputs.length > 0) addNodes(inputs);
-          })();
+          void importFilesAsNodes(
+            nativeFiles,
+            dropPos,
+            { type: 'user-uploaded' },
+            canvasId,
+            addNodes,
+          );
           return;
         }
 
