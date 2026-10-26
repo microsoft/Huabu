@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 
 import { emptyAcpOverlay } from '@agenetes/acp-driver';
 
+import { isCanvasIntent } from '@huabu/shared';
 import { AGENT_SSE_EVENTS, agentBindingSchema } from '@huabu/shared';
 
 import { externalAgentRealization } from './acp/external-agent-realization.js';
@@ -422,7 +423,7 @@ export class AgentThreadService {
         if (projected && agentTarget) {
           const terminalOptions =
             active.turnStartState?.started === true &&
-            envelope?.user.inputKind === 'ink-intent'
+            isCanvasIntent(envelope?.user.inputKind)
               ? { consumePendingInkIntentLabel: true }
               : undefined;
           if (terminal === 'error') {
@@ -529,7 +530,7 @@ export class AgentThreadService {
       }
       if (
         !signal.aborted &&
-        envelope?.user.inputKind === 'ink-intent' &&
+        isCanvasIntent(envelope?.user.inputKind) &&
         binding.kind === 'internal'
       ) {
         const liveTarget = agentTarget

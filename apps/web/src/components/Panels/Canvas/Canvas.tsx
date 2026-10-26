@@ -406,8 +406,10 @@ const CanvasContent: React.FC<CanvasProps> = ({
   const pendingNodeType = useToolStore((state) => state.pendingNodeType);
   // Whether a stroke-level sketch selection is active — suppresses node
   // toolbars so a mixed lasso never shows them (boolean selector).
-  const hasStrokeSelection = useGesturePreviewStore(
-    (s) => Object.keys(s.sketchStrokeSelection).length > 0,
+  const hasLassoSelection = useGesturePreviewStore(
+    (s) =>
+      Object.keys(s.sketchStrokeSelection).length > 0 ||
+      s.sketchSelectionPolygon !== null,
   );
   // True while a stroke-move drag is in progress — drives the wrapper's
   // grabbing cursor (the pointer is captured by the router during the drag,
@@ -1564,7 +1566,7 @@ const CanvasContent: React.FC<CanvasProps> = ({
           )}
           <MultiSelectResizer />
           <SelectionOutlines />
-          {!isBoxSelecting && !hasStrokeSelection && <MultiSelectToolbar />}
+          {!isBoxSelecting && !hasLassoSelection && <MultiSelectToolbar />}
           {!isBoxSelecting && <StrokeSelectionRegion />}
           {!isBoxSelecting && <StrokeSelectionToolbar />}
           <InkSigilLayer tool={tool} />

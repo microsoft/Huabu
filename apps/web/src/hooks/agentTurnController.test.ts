@@ -86,7 +86,10 @@ function deferred() {
   return { promise, resolve };
 }
 
-function request(inputKind: 'text' | 'ink-intent' = 'text', owner = session) {
+function request(
+  inputKind: 'text' | 'ink-intent' | 'selection-intent' = 'text',
+  owner = session,
+) {
   return prepareAgentTurn({
     session: owner,
     inputKind,
@@ -770,29 +773,41 @@ describe('shared Agent turn input', () => {
     });
   });
 
-  it('sends Ink without consuming same-thread drafts, uploads, excerpts or skills', async () => {
-    const attachment = {
-      id: 'upload',
-      type: 'text',
-      content: 'private draft',
-    } as unknown as ChatAttachment;
-    useChatStore.getState().setDraft(session.threadId, 'Unsent draft');
-    useChatStore.getState().addPendingAttachment(session.threadId, attachment);
-    useChatStore.getState().setSelectionAttachment(attachment);
-    await dispatchAgentTurn(request('ink-intent'));
-    expect(mocks.stream.mock.calls[0][0]).toBe('');
-    expect(mocks.stream.mock.calls[0][4]).toMatchObject({
-      inputKind: 'ink-intent',
-      attachments: undefined,
-      invokedSkills: undefined,
-    });
-    const state = useChatStore.getState();
-    expect(state.threadsById[session.threadId].draft).toBe('Unsent draft');
-    expect(state.threadsById[session.threadId].pendingAttachments).toEqual([
-      attachment,
-    ]);
-    expect(state.selectionAttachment).toBe(attachment);
-  });
+  it.each(['ink-intent', 'selection-intent'] as const)(
+    'sends %s without consuming same-thread drafts, uploads, excerpts or skills',
+    async (inputKind) => {
+      if (inputKind === 'selection-intent') {
+        useGesturePreviewStore.setState({ sketchStrokeSelection: {} });
+      }
+      const attachment = {
+        id: 'upload',
+        type: 'text',
+        content: 'private draft',
+      } as unknown as ChatAttachment;
+      useChatStore.getState().setDraft(session.threadId, 'Unsent draft');
+      useChatStore
+        .getState()
+        .addPendingAttachment(session.threadId, attachment);
+      useChatStore.getState().setSelectionAttachment(attachment);
+      await dispatchAgentTurn(request(inputKind));
+      expect(mocks.stream.mock.calls[0][0]).toBe('');
+      expect(mocks.stream.mock.calls[0][4]).toMatchObject({
+        inputKind,
+        attachments: undefined,
+        invokedSkills: undefined,
+      });
+      const state = useChatStore.getState();
+      expect(state.threadsById[session.threadId].draft).toBe('Unsent draft');
+      expect(state.threadsById[session.threadId].pendingAttachments).toEqual([
+        attachment,
+      ]);
+      expect(state.selectionAttachment).toBe(attachment);
+      expect(selectThreadMessages(state, session.threadId)[0]).toMatchObject({
+        inputKind,
+        inkInterpretation: { state: 'missing' },
+      });
+    },
+  );
 
   it('preserves a selectable Question external binding for Ink', async () => {
     const binding = {

@@ -114,6 +114,30 @@ function buildInternal(turns: AgentTurn[]): ChatHistoryItem[] {
   return messages;
 }
 
+it('restores node-only selection interpretation without synthetic text or Ink sources', () => {
+  const envelope = makeEnvelope('');
+  envelope.user.inputKind = 'selection-intent';
+  envelope.focus.selection.selectedIds = ['text', 'note'];
+  envelope.focus.selection.textContents = [
+    { nodeId: 'text', content: 'Summarize the note' },
+  ];
+  const messages = buildInternal([
+    {
+      request: createChatSubmission(envelope),
+      transcript: [reportMessage({ text: 'Summarize the note' })],
+    },
+  ]);
+  expect(messages).toEqual([
+    {
+      role: 'user',
+      content: '',
+      inputKind: 'selection-intent',
+      selectedNodeIds: ['text', 'note'],
+      inkInterpretation: { state: 'reported', text: 'Summarize the note' },
+    },
+  ]);
+});
+
 function inkTurn(
   transcript: FoldedMessage[],
   meta?: AgentTurn['meta'],

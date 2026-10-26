@@ -1328,6 +1328,7 @@ export interface AgentSourceSelection {
   nodeIds: readonly string[];
   strokeSelection: Readonly<Record<string, readonly string[]>>;
   excludeNodeIds?: readonly string[];
+  lasso?: boolean;
 }
 
 function makeBuildSelectedDetail(
@@ -1346,6 +1347,9 @@ function makeBuildSelectedDetail(
       id: n.id,
       type: nodeType,
       label: data?.label as string | undefined,
+      ...(selection.lasso && n.type === 'text' && data?.contentMissing !== true
+        ? { content: typeof data?.content === 'string' ? data.content : '' }
+        : {}),
       ...(src !== undefined ? { src } : {}),
       ...(n.type === 'sketch' && selection.strokeSelection[n.id]?.length
         ? { strokeIds: [...selection.strokeSelection[n.id]] }
@@ -1353,6 +1357,25 @@ function makeBuildSelectedDetail(
     };
 
     if (n.type === 'frame') {
+      if (selection.lasso) {
+        detail.referenceOnly = true;
+        const children = allNodes
+          .filter(
+            (child) =>
+              child.parentId === n.id &&
+              !child.hidden &&
+              !selection.strokeSelection[child.id]?.length &&
+              !selection.excludeNodeIds?.includes(child.id),
+          )
+          .map((child) => ({
+            id: child.id,
+            type: (child.type ?? 'note') as CanvasNodeType,
+            label: child.data.label as string | undefined,
+            referenceOnly: true,
+          }));
+        if (children.length > 0) detail.children = children;
+        return detail;
+      }
       const children = allNodes
         .filter(
           (child) =>
@@ -2274,6 +2297,7 @@ const useCanvasStore = create<RFState>()(
       const selectedIds = new Set<string>();
       const collectSelectedIds = (values: WireSelectionNode[]): void => {
         for (const value of values) {
+          if (value.referenceOnly) continue;
           selectedIds.add(value.id);
           if (value.children?.length) collectSelectedIds(value.children);
         }

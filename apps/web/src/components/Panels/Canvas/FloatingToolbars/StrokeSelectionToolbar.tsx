@@ -97,6 +97,7 @@ import type { CanvasSketchNodeData } from '@/components/Nodes/types';
 import type { ChatSession } from '@/hooks/useChatSession';
 import type {
   AgentMode,
+  AgentInputKind,
   AgentBinding,
   AgentIcon,
   CanvasCommand,
@@ -108,6 +109,7 @@ import type {
 
 interface InkSubmissionAttempt {
   identity: string;
+  inputKind: AgentInputKind;
   session: ChatSession;
   mode: AgentMode;
   sources: CapturedAgentTurnSources;
@@ -179,7 +181,8 @@ function inkTargetAgent(target: InkQuestionTarget) {
  *   - pure stroke selection → color + size + overflow, then Agent submit;
  *   - mixed (strokes + nodes) → overflow, then Agent submit, while
  *     style controls and node toolbars stay suppressed;
- *   - pure node selection → the node toolbars own the surface.
+ *   - pure node lasso → overflow + Agent submit; ordinary node clicks retain
+ *     their node toolbars.
  */
 export const StrokeSelectionToolbar = () => {
   const { t } = useTranslation();
@@ -224,9 +227,11 @@ export const StrokeSelectionToolbar = () => {
     threadId: string;
   } | null>(null);
 
-  const hasSelection = Object.keys(selection).length > 0;
+  const hasStrokes = Object.keys(selection).length > 0;
   const hasNodeSelection = nodes.some((n) => n.selected);
-  const isMixed = hasSelection && hasNodeSelection;
+  const hasSelection =
+    hasStrokes || (selectionPolygon !== null && hasNodeSelection);
+  const isMixed = hasStrokes && hasNodeSelection;
   const pendingSigil = useInkSigilStore((state) => state.pending);
   const sigilSelection = useMemo(
     () =>
@@ -553,6 +558,7 @@ export const StrokeSelectionToolbar = () => {
             nodeIds: freshCandidate.selectedNodeIds,
             strokeSelection: freshCandidate.strokeSelection,
             excludeNodeIds: freshCandidate.excludedNodeIds,
+            lasso: true,
           }),
         };
         const groundingOperands = groundingOperandsFromContext(
@@ -616,12 +622,15 @@ export const StrokeSelectionToolbar = () => {
             );
           }
         }
-        if (!sourceBounds) return;
+        if (!sourceBounds) {
+          throw new Error(t('toolbar.invalidQuestionTarget'));
+        }
         let pendingGrounding: InkSubmissionAttempt['pendingGrounding'];
         try {
           if (
-            groundingNodeIds.length > 0 ||
-            selectedSigils.references.length > 0
+            freshCandidate.inputKind === 'ink-intent' &&
+            (groundingNodeIds.length > 0 ||
+              selectedSigils.references.length > 0)
           ) {
             const viewport = getViewport();
             pendingGrounding = {
@@ -648,6 +657,7 @@ export const StrokeSelectionToolbar = () => {
             const { nodeId, threadId } = freshCandidate.target;
             attempt = {
               identity,
+              inputKind: freshCandidate.inputKind,
               mode: inkTargetAgent(freshCandidate.target).mode,
               pendingGrounding,
               sources: capturedSources,
@@ -699,11 +709,15 @@ export const StrokeSelectionToolbar = () => {
               canvasId: canvas.canvasId,
               binding,
               mode,
-              label: 'New ink request',
+              label:
+                freshCandidate.inputKind === 'ink-intent'
+                  ? 'New ink request'
+                  : 'New selection request',
               pendingInkIntentLabel: true,
             });
             attempt = {
               identity,
+              inputKind: freshCandidate.inputKind,
               mode,
               pendingGrounding,
               sources: capturedSources,
@@ -758,7 +772,7 @@ export const StrokeSelectionToolbar = () => {
 
       const prepared = prepareAgentTurn({
         session: attempt.session,
-        inputKind: 'ink-intent',
+        inputKind: attempt.inputKind,
         content: '',
         mode: attempt.mode,
         groundingVisual: attempt.groundingVisual,
@@ -927,7 +941,7 @@ export const StrokeSelectionToolbar = () => {
   // the stroke selection via Delete / Backspace. Coexists with React Flow's
   // node delete (a mixed selection removes both on one press).
   useEffect(() => {
-    if (!hasSelection) return;
+    if (!hasStrokes) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || isOutsideCanvasInteraction(e.target)) return;
       if (e.key !== 'Delete' && e.key !== 'Backspace') return;
@@ -944,11 +958,13 @@ export const StrokeSelectionToolbar = () => {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [hasSelection, handleDelete]);
+  }, [hasStrokes, handleDelete]);
 
-  const showStyle = !isMixed; // style controls only for a pure stroke selection
+  const showStyle = hasStrokes && !isMixed;
   const selectionTypeLabel = t(
-    isMixed ? 'toolbar.multipleSelectedObjects' : 'toolbar.inkSelection',
+    isMixed || !hasStrokes
+      ? 'toolbar.multipleSelectedObjects'
+      : 'toolbar.inkSelection',
   );
   const InkIcon = NODE_ICON.sketch;
   const showSubmit = hasSelection;
@@ -960,13 +976,21 @@ export const StrokeSelectionToolbar = () => {
     isPreparing ||
     Boolean(unavailableReason);
   const submitTitle = isPreparing
-    ? t('toolbar.sendingInkRequest')
+    ? t(
+        hasStrokes
+          ? 'toolbar.sendingInkRequest'
+          : 'toolbar.sendingSelectionRequest',
+      )
     : confirmingDestination
       ? t('toolbar.inkAgentPicker.loadingConversation')
       : (sigilIssue ??
         unavailableReason?.message ??
         (candidate.kind === 'ready'
-          ? t('toolbar.sendInkRequest')
+          ? t(
+              hasStrokes
+                ? 'toolbar.sendInkRequest'
+                : 'toolbar.sendSelectionRequest',
+            )
           : t('toolbar.invalidQuestionTarget')));
 
   return (
@@ -986,7 +1010,11 @@ export const StrokeSelectionToolbar = () => {
             aria-label={selectionTypeLabel}
             className="text-fg-subtle flex shrink-0 items-center px-1"
           >
-            {isMixed ? <Shapes size={14} /> : <InkIcon size={14} />}
+            {isMixed || !hasStrokes ? (
+              <Shapes size={14} />
+            ) : (
+              <InkIcon size={14} />
+            )}
           </div>
         </Tooltip>
         <FloatingToolbar.Divider />

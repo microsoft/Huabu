@@ -6,6 +6,48 @@ import { describe, expect, it } from 'vitest';
 import { agentRequestSchema, stopThreadResponseSchema } from './agent.js';
 
 describe('agentRequestSchema input kinds', () => {
+  it('accepts node-only lasso requests and retains complete Text and lazy containers', () => {
+    const request = {
+      inputKind: 'selection-intent',
+      content: '',
+      canvasId: 'canvas-1',
+      canvasContext: {
+        selectedNodes: [
+          { id: 'text', type: 'text', content: 'Complete text\nSecond line' },
+          {
+            id: 'frame',
+            type: 'frame',
+            referenceOnly: true,
+            children: [{ id: 'note', type: 'note', referenceOnly: true }],
+          },
+        ],
+      },
+    };
+    expect(agentRequestSchema.parse(request)).toEqual(request);
+  });
+
+  it.each([
+    { canvasId: undefined, selectedNodes: [{ id: 'text', type: 'text' }] },
+    { canvasId: 'canvas', selectedNodes: [] },
+    { canvasId: 'canvas', selectedNodes: [{ id: 'q', type: 'question' }] },
+    {
+      canvasId: 'canvas',
+      selectedNodes: [{ id: 'ink', type: 'sketch', strokeIds: ['stroke'] }],
+    },
+  ])(
+    'rejects invalid node-only lasso sources: %j',
+    ({ canvasId, selectedNodes }) => {
+      expect(
+        agentRequestSchema.safeParse({
+          inputKind: 'selection-intent',
+          content: '',
+          canvasId,
+          canvasContext: { selectedNodes },
+        }).success,
+      ).toBe(false);
+    },
+  );
+
   const inkRequest = {
     inputKind: 'ink-intent',
     content: '',

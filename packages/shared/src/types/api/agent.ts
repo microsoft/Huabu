@@ -74,6 +74,10 @@ export type WireNodeRef = z.infer<typeof wireNodeRefSchema>;
  * before any prompt rendering. Never sent to the LLM directly.
  */
 export interface WireSelectionNode extends WireNodeRef {
+  /** Full Text content frozen at explicit lasso submission time. */
+  content?: string;
+  /** A lassoed container exposes a directory, not eagerly rendered children. */
+  referenceOnly?: boolean;
   /** Source URL — only present for `type === 'image'`. */
   src?: string;
   /**
@@ -95,6 +99,8 @@ export const wireSelectionNodeSchema: z.ZodType<WireSelectionNode> = z.lazy(
       id: z.string().min(1),
       type: z.enum(CANVAS_NODE_TYPES),
       label: z.string().optional(),
+      content: z.string().optional(),
+      referenceOnly: z.boolean().optional(),
       src: z.string().optional(),
       strokeIds: z.array(z.string()).optional(),
       children: z.array(wireSelectionNodeSchema).optional(),
@@ -183,8 +189,16 @@ export const agentBindingSchema = z.discriminatedUnion('kind', [
   }),
 ]) satisfies z.ZodType<AgentBinding>;
 
-export const agentInputKindSchema = z.enum(['text', 'ink-intent']);
+export const agentInputKindSchema = z.enum([
+  'text',
+  'ink-intent',
+  'selection-intent',
+]);
 export type AgentInputKind = z.infer<typeof agentInputKindSchema>;
+
+export function isCanvasIntent(inputKind: AgentInputKind | undefined): boolean {
+  return inputKind === 'ink-intent' || inputKind === 'selection-intent';
+}
 
 const inkInterpretationTextSchema = z
   .string()
@@ -386,6 +400,29 @@ export const agentRequestSchema = z
     reasoningEffort: z.enum(REASONING_EFFORT_VALUES).optional(),
   })
   .superRefine((request, context) => {
+    if (request.inputKind === 'selection-intent') {
+      const nodes = request.canvasContext?.selectedNodes ?? [];
+      if (
+        !request.canvasId ||
+        !nodes.some((node) => node.type !== 'question') ||
+        hasPartialSketchSelection(nodes)
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['canvasContext'],
+          message:
+            'Selection requests require a Canvas and selected nodes without partial Ink',
+        });
+      }
+      if (request.inkResources?.length || request.groundingVisual) {
+        context.addIssue({
+          code: 'custom',
+          path: ['inputKind'],
+          message: 'Ink resources and grounding require an Ink request',
+        });
+      }
+      return;
+    }
     if (request.inputKind !== 'ink-intent') {
       if (request.inkResources?.length) {
         context.addIssue({

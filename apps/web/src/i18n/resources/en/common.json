@@ -1178,6 +1178,15 @@
     "generationInterrupted": "Generation interrupted",
     "somethingWentWrong": "Something went wrong",
     "inkRequest": "Ink request",
+    "selectionRequest": "Selection request",
+    "selectionInterpretation": {
+      "agent": "Agent interpretation of the selection",
+      "pending": "Interpreting selection...",
+      "missing": "No interpretation was recorded",
+      "failed": "Selection request failed",
+      "interrupted": "Selection request interrupted",
+      "legacy": "Selection request"
+    },
     "inkInterpretation": {
       "agent": "Agent interpretation",
       "pending": "Waiting for the Agent’s interpretation…",
@@ -1402,6 +1411,8 @@
     "deleteSelected": "Delete selected",
     "sendInkRequest": "Send ink request",
     "sendingInkRequest": "Sending ink request",
+    "sendSelectionRequest": "Send selection request",
+    "sendingSelectionRequest": "Sending selection request",
     "multipleQuestionTargets": "Select only one Agent Node to continue",
     "invalidQuestionTarget": "This Agent Node cannot receive an ink request",
     "defaultInkAgentTarget": "Recent Agent",

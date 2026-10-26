@@ -1178,6 +1178,15 @@
     "generationInterrupted": "生成已中断",
     "somethingWentWrong": "出了点问题",
     "inkRequest": "笔迹请求",
+    "selectionRequest": "选区请求",
+    "selectionInterpretation": {
+      "agent": "Agent 对选区的理解",
+      "pending": "正在理解选区…",
+      "missing": "未记录对选区的理解",
+      "failed": "选区请求失败",
+      "interrupted": "选区请求已中断",
+      "legacy": "选区请求"
+    },
     "inkInterpretation": {
       "agent": "Agent 的理解",
       "pending": "正在等待 Agent 报告理解…",
@@ -1402,6 +1411,8 @@
     "deleteSelected": "删除所选项",
     "sendInkRequest": "发送笔迹请求",
     "sendingInkRequest": "正在发送笔迹请求",
+    "sendSelectionRequest": "发送选区请求",
+    "sendingSelectionRequest": "正在发送选区请求",
     "multipleQuestionTargets": "请只选择一个要继续的 Agent 节点",
     "invalidQuestionTarget": "此 Agent 节点无法接收笔迹请求",
     "defaultInkAgentTarget": "最近使用的 Agent",

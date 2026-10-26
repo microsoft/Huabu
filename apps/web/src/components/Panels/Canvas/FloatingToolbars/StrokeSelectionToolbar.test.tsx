@@ -361,6 +361,145 @@ afterEach(() => {
 });
 
 describe('StrokeSelectionToolbar Ink submission', () => {
+  it.each(['text', 'note', 'frame'])(
+    'offers explicit %s-only lasso submission without Ink style controls or a screenshot',
+    async (type) => {
+      const content =
+        'Full content\n' + 'Complete Text must not be truncated. '.repeat(20);
+      useCanvasStore.getState()._setStateNoAutosave({
+        nodes: [
+          {
+            id: 'source',
+            type,
+            selected: true,
+            position: { x: 0, y: 0 },
+            measured: { width: 200, height: 100 },
+            data: { content, label: 'Source' },
+          },
+        ],
+      });
+      useGesturePreviewStore.setState({ sketchStrokeSelection: {} });
+      mocks.dispatch.mockResolvedValue({ status: 'rejected' });
+      await mountToolbar();
+
+      expect(sendButton().getAttribute('aria-label')).toBe(
+        'Send selection request',
+      );
+      expect(document.querySelector('[data-sketch-controls]')).toBeNull();
+      expect(mocks.dispatch).not.toHaveBeenCalled();
+      await act(async () => sendButton().click());
+
+      const prepared = mocks.prepare.mock.calls[0][0];
+      expect(prepared.inputKind).toBe('selection-intent');
+      expect(prepared.content).toBe('');
+      expect(prepared.groundingVisual).toBeUndefined();
+      expect(mocks.prepareGrounding).not.toHaveBeenCalled();
+      expect(prepared.sources.canvasContext.selectedNodes).toEqual([
+        {
+          id: 'source',
+          type,
+          label: 'Source',
+          ...(type === 'text' ? { content } : {}),
+          ...(type === 'frame' ? { referenceOnly: true } : {}),
+        },
+      ]);
+      expect(
+        agentRequestSchema.safeParse({
+          inputKind: prepared.inputKind,
+          content: prepared.content,
+          canvasId: 'canvas-1',
+          canvasContext: prepared.sources.canvasContext,
+        }).success,
+      ).toBe(true);
+      expect(mocks.createQuestion).toHaveBeenCalledWith(
+        expect.objectContaining({
+          label: 'New selection request',
+          pendingInkIntentLabel: true,
+        }),
+      );
+    },
+  );
+
+  it('does not replace ordinary click-selection toolbars', async () => {
+    useCanvasStore.getState()._setStateNoAutosave({
+      nodes: [
+        {
+          id: 'text',
+          type: 'text',
+          selected: true,
+          position: { x: 0, y: 0 },
+          data: { content: 'Text' },
+        },
+      ],
+    });
+    useGesturePreviewStore.setState({
+      sketchStrokeSelection: {},
+      sketchSelectionPolygon: null,
+      sketchSelectionSession: null,
+    });
+    await mountToolbar();
+    expect(document.querySelector('.canvas-context-submit')).toBeNull();
+  });
+
+  it('captures a shallow Frame directory and full standalone Text, without Note bodies', () => {
+    useCanvasStore.getState()._setStateNoAutosave({
+      nodes: [
+        { id: 'frame', type: 'frame', position: { x: 0, y: 0 }, data: {} },
+        {
+          id: 'nested',
+          type: 'frame',
+          parentId: 'frame',
+          position: { x: 0, y: 0 },
+          data: {},
+        },
+        {
+          id: 'deep',
+          type: 'text',
+          parentId: 'nested',
+          position: { x: 0, y: 0 },
+          data: { content: 'Do not expand' },
+        },
+        {
+          id: 'child',
+          type: 'text',
+          parentId: 'frame',
+          position: { x: 0, y: 0 },
+          data: { content: 'Read on demand' },
+        },
+        {
+          id: 'text',
+          type: 'text',
+          position: { x: 0, y: 0 },
+          data: { content: 'Include all text' },
+        },
+        {
+          id: 'note',
+          type: 'note',
+          position: { x: 0, y: 0 },
+          data: { label: 'Note', content: 'Lazy body' },
+        },
+      ],
+    });
+    const context = useCanvasStore.getState().getAgentChatContext({
+      nodeIds: ['frame', 'text', 'note'],
+      strokeSelection: {},
+      lasso: true,
+    });
+    expect(context.selectedNodes).toEqual([
+      {
+        id: 'frame',
+        type: 'frame',
+        referenceOnly: true,
+        children: [
+          { id: 'nested', type: 'frame', referenceOnly: true },
+          { id: 'child', type: 'text', referenceOnly: true },
+        ],
+      },
+      { id: 'text', type: 'text', content: 'Include all text' },
+      { id: 'note', type: 'note', label: 'Note' },
+    ]);
+  });
+
   it('ignores a cached read-only recent conversation without changing its mode', async () => {
     mocks.dispatch.mockResolvedValueOnce({ status: 'completed' });
     addQuestion({ agentMode: 'ask' });
@@ -1211,8 +1350,9 @@ describe('StrokeSelectionToolbar Ink submission', () => {
       {
         id: 'frame',
         type: 'frame',
-        children: [{ id: 'sketch-1', type: 'sketch', strokeIds: ['stroke-1'] }],
+        referenceOnly: true,
       },
+      { id: 'sketch-1', type: 'sketch', strokeIds: ['stroke-1'] },
     ]);
     expect(prepared.groundingVisual.selectedNodeIds).toEqual(['frame']);
     expect(JSON.stringify(prepared.sources)).not.toContain('private reference');
@@ -1780,13 +1920,12 @@ describe('StrokeSelectionToolbar Ink submission', () => {
               {
                 id: 'frame-1',
                 type: 'frame',
-                children: [
-                  {
-                    id: 'sketch-1',
-                    type: 'sketch',
-                    strokeIds: ['stroke-1'],
-                  },
-                ],
+                referenceOnly: true,
+              },
+              {
+                id: 'sketch-1',
+                type: 'sketch',
+                strokeIds: ['stroke-1'],
               },
             ],
           },
