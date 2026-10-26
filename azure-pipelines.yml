@@ -185,7 +185,9 @@ jobs:
   - job: macOS
     displayName: Build macOS desktop
     condition: and(succeeded(), ${{ parameters.buildMacOS }})
-    timeoutInMinutes: '120'
+    timeoutInMinutes: '180'
+    variables:
+      MacEsrpRoot: '$(Agent.TempDirectory)/huabu-macos-esrp'
     pool:
       vmImage: macos-latest
     steps:
@@ -235,21 +237,112 @@ jobs:
       - pwsh: pnpm run build:agentlet
         displayName: Build agentlet workspace packages
 
+      - pwsh: node --test apps/desktop/scripts/esrp-macos.test.mjs
+        displayName: Test Apple release preparation and validation
+
       - pwsh: |
-          foreach ($name in @('CSC_LINK', 'CSC_KEY_PASSWORD', 'APPLE_ID', 'APPLE_APP_SPECIFIC_PASSWORD', 'APPLE_TEAM_ID')) {
+          foreach ($name in @('CodeSignAuthSignCertificateName', 'CodeSignAppRegistrationTenantId', 'CodeSignAppRegistrationClientId', 'CodeSignConnectedServiceName', 'CodeSignKeyVaultName')) {
             $value = [Environment]::GetEnvironmentVariable($name)
             if ([string]::IsNullOrWhiteSpace($value) -or $value.StartsWith('$(')) {
-              throw "Configure the Azure Pipelines secret variable: $name"
+              throw "Configure the Azure Pipelines variable: $name"
             }
           }
-          pnpm run build:desktop:mac
-        displayName: Build desktop installer (signed + notarized)
+        displayName: Validate Apple ESRP signing configuration
         env:
-          CSC_LINK: $(CSC_LINK)
-          CSC_KEY_PASSWORD: $(CSC_KEY_PASSWORD)
-          APPLE_ID: $(APPLE_ID)
-          APPLE_APP_SPECIFIC_PASSWORD: $(APPLE_APP_SPECIFIC_PASSWORD)
-          APPLE_TEAM_ID: $(APPLE_TEAM_ID)
+          CodeSignAuthSignCertificateName: $(CodeSignAuthSignCertificateName)
+          CodeSignAppRegistrationTenantId: $(CodeSignAppRegistrationTenantId)
+          CodeSignAppRegistrationClientId: $(CodeSignAppRegistrationClientId)
+          CodeSignConnectedServiceName: $(CodeSignConnectedServiceName)
+          CodeSignKeyVaultName: $(CodeSignKeyVaultName)
+
+      - bash: |
+          set -euo pipefail
+          pnpm run build:desktop:mac --dir --arm64 --x64 --config electron-builder.esrp.yml --config.directories.output="$MAC_ESRP_ROOT/prepared"
+          node apps/desktop/scripts/esrp-macos.mjs archive "$MAC_ESRP_ROOT"
+        displayName: Prepare arm64 and x64 application ZIPs for ESRP
+        env:
+          MAC_ESRP_ROOT: $(MacEsrpRoot)
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          CSC_LINK: ''
+          CSC_KEY_PASSWORD: ''
+          APPLE_ID: ''
+          APPLE_APP_SPECIFIC_PASSWORD: ''
+          APPLE_TEAM_ID: ''
+
+      - ${{ each arch in split('arm64,x64', ',') }}:
+          - task: EsrpAppleCodeSigning@1
+            displayName: ESRP Developer ID sign ${{ arch }} application
+            timeoutInMinutes: 30
+            inputs:
+              ConnectedServiceName: $(CodeSignConnectedServiceName)
+              AppRegistrationClientId: $(CodeSignAppRegistrationClientId)
+              AppRegistrationTenantId: $(CodeSignAppRegistrationTenantId)
+              AuthAKVName: $(CodeSignKeyVaultName)
+              AuthSignCertName: $(CodeSignAuthSignCertificateName)
+              FolderPath: '$(MacEsrpRoot)/sign-input/${{ arch }}'
+              Pattern: Huabu.zip
+              signConfigType: inlineSignParams
+              inlineOperation: |
+                [
+                  {
+                    "KeyCode": "CP-401337-Apple",
+                    "OperationCode": "MacAppDeveloperSign",
+                    "Parameters": { "Hardening": "Enable", "codesign-options": "enable" },
+                    "ToolName": "sign",
+                    "ToolVersion": "1.0"
+                  }
+                ]
+            env:
+              SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+              ESRP_GATEWAY_API: https://api.esrp.microsoft.com/api/v2
+
+      - bash: |
+          set -euo pipefail
+          node apps/desktop/scripts/esrp-macos.mjs verify-signed "$MAC_ESRP_ROOT"
+        displayName: Verify Developer ID signatures and prepare notarization
+        env:
+          MAC_ESRP_ROOT: $(MacEsrpRoot)
+
+      - ${{ each arch in split('arm64,x64', ',') }}:
+          - task: EsrpAppleCodeSigning@1
+            displayName: ESRP notarize ${{ arch }} signed application
+            timeoutInMinutes: 55
+            inputs:
+              ConnectedServiceName: $(CodeSignConnectedServiceName)
+              AppRegistrationClientId: $(CodeSignAppRegistrationClientId)
+              AppRegistrationTenantId: $(CodeSignAppRegistrationTenantId)
+              AuthAKVName: $(CodeSignKeyVaultName)
+              AuthSignCertName: $(CodeSignAuthSignCertificateName)
+              FolderPath: '$(MacEsrpRoot)/notarize-input/${{ arch }}'
+              Pattern: Huabu.zip
+              signConfigType: inlineSignParams
+              inlineOperation: |
+                [
+                  {
+                    "KeyCode": "CP-401337-Apple",
+                    "OperationCode": "MacAppDeveloperNotarize",
+                    "Parameters": {},
+                    "ToolName": "sign",
+                    "ToolVersion": "1.0"
+                  }
+                ]
+              NotarizationTimeout: '45'
+            env:
+              SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+              ESRP_GATEWAY_API: https://api.esrp.microsoft.com/api/v2
+
+      - bash: |
+          set -euo pipefail
+          node apps/desktop/scripts/esrp-macos.mjs package "$MAC_ESRP_ROOT" "$BUILD_SOURCESDIRECTORY/../huabu-electron-out"
+        displayName: Staple and verify applications, build and verify DMG and ZIP releases
+        env:
+          MAC_ESRP_ROOT: $(MacEsrpRoot)
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          CSC_LINK: ''
+          CSC_KEY_PASSWORD: ''
+          APPLE_ID: ''
+          APPLE_APP_SPECIFIC_PASSWORD: ''
+          APPLE_TEAM_ID: ''
 
       - pwsh: |
           $output = Join-Path $env:BUILD_SOURCESDIRECTORY '../huabu-electron-out'
