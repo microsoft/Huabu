@@ -18,7 +18,7 @@ import {
 } from '@/store/chatStore';
 import { resolveConversationPreparation } from '@/store/conversationPreparation';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
-import { pageLifecycle } from '@/utils/pageLifecycle';
+import { createPageLifecycle, pageLifecycle } from '@/utils/pageLifecycle';
 
 import {
   claimAgentStream,
@@ -1177,41 +1177,83 @@ describe('queued composer turns', () => {
   });
 });
 
-it('tracks local submission only until durable acceptance, not the Agent stream', async () => {
-  const release = deferred();
-  let callbacks!: AgentStreamCallbacks;
-  mocks.stream.mockImplementationOnce(
-    async (_content, _thread, _mode, handlers: AgentStreamCallbacks) => {
-      callbacks = handlers;
-      await release.promise;
-      handlers.onComplete();
-    },
-  );
-  const tracker = vi.spyOn(pageLifecycle, 'run');
-  let streamingDone = false;
-  const turn = dispatchAgentTurn(request()).then(() => {
-    streamingDone = true;
-  });
-  try {
-    await vi.waitFor(() => expect(callbacks).toBeDefined());
-    const tracked = tracker.mock.results.at(-1)?.value as Promise<void>;
-    let localDone = false;
-    void tracked.then(() => {
-      localDone = true;
-    });
-    await Promise.resolve();
-    expect(localDone).toBe(false);
-    callbacks.onAccepted?.({ threadId: 'thread-1', turnStartSeq: 7 });
-    await tracked;
-    expect(localDone).toBe(true);
-    expect(streamingDone).toBe(false);
-    expect(mocks.stop).not.toHaveBeenCalled();
-  } finally {
-    release.resolve();
-    await turn;
-    tracker.mockRestore();
-  }
-});
+it.each([
+  ['direct', 'accepted'],
+  ['queued', 'accepted'],
+  ['direct', 'rejected'],
+  ['queued', 'rejected'],
+] as const)(
+  'waits for a %s submission to be %s before settling page close',
+  async (source, outcome) => {
+    const lifecycle = createPageLifecycle();
+    vi.spyOn(pageLifecycle, 'run').mockImplementation(lifecycle.run);
+    const release = deferred();
+    const failure = new ApiError(400, {}, 'Submission rejected');
+    let callbacks!: AgentStreamCallbacks;
+    let streamingDone = false;
+    mocks.stream.mockImplementationOnce(
+      async (_content, _thread, _mode, handlers: AgentStreamCallbacks) => {
+        callbacks = handlers;
+        await release.promise;
+        if (outcome === 'rejected') handlers.onError(failure);
+        else handlers.onComplete();
+        streamingDone = true;
+      },
+    );
+    let turn: ReturnType<typeof dispatchAgentTurn> | undefined;
+    if (source === 'direct') {
+      turn = dispatchAgentTurn(request());
+    } else {
+      useChatStore.getState().enqueueTurn(session.threadId, {
+        id: 'sending',
+        prepared: request(),
+        status: 'pending',
+      });
+      resumeAgentTurnQueue(session);
+    }
+    const controller = new AbortController();
+    try {
+      await vi.waitFor(() => expect(callbacks).toBeDefined());
+      useChatStore.getState().enqueueTurn(session.threadId, {
+        id: 'later',
+        prepared: request(),
+        status: 'pending',
+      });
+      const closed = vi.fn();
+      const close = lifecycle
+        .prepare(controller.signal)
+        .then(closed, (error: unknown) => error);
+      await Promise.resolve();
+      expect(closed).not.toHaveBeenCalled();
+      if (outcome === 'accepted') {
+        callbacks.onAccepted?.({ threadId: session.threadId, turnStartSeq: 7 });
+        await close;
+        expect(closed).toHaveBeenCalledOnce();
+        expect(streamingDone).toBe(false);
+      } else {
+        release.resolve();
+        expect(await close).toBe(failure);
+        expect(closed).not.toHaveBeenCalled();
+      }
+      expect(mocks.stop).not.toHaveBeenCalled();
+      expect(mocks.stream).toHaveBeenCalledOnce();
+      expect(
+        useChatStore.getState().threadsById[session.threadId].queuedTurns,
+      ).toContainEqual(
+        expect.objectContaining({ id: 'later', status: 'pending' }),
+      );
+    } finally {
+      controller.abort();
+      release.resolve();
+      await turn;
+      await vi.waitFor(() =>
+        expect(
+          hasAgentStreamClaim(session.ownerCanvasId, session.threadId),
+        ).toBe(false),
+      );
+    }
+  },
+);
 
 it('records genuine completion by owner thread, not tool updates or repeated done events', () => {
   const ctx = { threadId: 'completed-owner', assistantId: 'assistant-1' };

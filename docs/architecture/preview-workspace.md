@@ -36,6 +36,8 @@ Queued-message removal uses the same overlay interaction as quoted-comment cards
 
 The dispatcher publishes thread-local, runtime-only preparation state as soon as it claims a direct or queued send, before waiting for drafts, validation or persistence. The composer shows Stop and Add to queue during this phase even without a sending queue item; Resume remains disabled. Preparation state clears on dispatch, cancellation or rejection, and preparing threads are protected from cache eviction.
 
+Direct and queued sends share the same page-close tracking boundary in `executeAgentTurn`: an already-started submission blocks desktop close until durable server acceptance or submission settlement; a failure during close preparation rejects the close. Acceptance releases the wait without waiting for the Agent response or invoking Stop. Close preparation does not start pending queue items or make the queue durable.
+
 Opening a cached conversation with a retained, no-longer-active request triggers reconnect and request reconciliation even when its last message is an error or a completed transcript and no owner is running. Live POSTs retain their exclusive stream claim; recovery refreshes history and reconciles before releasing the attach claim. Failed recovery retains the unresolved request and uses the existing bounded retry delay rather than permitting a duplicate send.
 
 Send and Add to queue use the same ArrowUp icon and button styling. The accessible label and tooltip distinguish immediate sending from queueing; the queue tooltip includes the existing Enter shortcut. The Stop action remains separate. Shift+Enter remains newline insertion; no additional queue shortcut is introduced.

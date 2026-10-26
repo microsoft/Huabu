@@ -1071,7 +1071,7 @@ export function createAgentTurnUserMessage(
   };
 }
 
-export function dispatchAgentTurn(
+function executeAgentTurn(
   input: PreparedAgentTurn,
   callbacks: AgentTurnCallbacks = {},
 ): Promise<AgentTurnResult> {
@@ -1079,7 +1079,7 @@ export function dispatchAgentTurn(
   const acceptance = new Promise<null>((resolve) => {
     accepted = () => resolve(null);
   });
-  const result = dispatchPreparedAgentTurn(input, {
+  const result = executePreparedAgentTurn(input, {
     ...callbacks,
     onAccepted: (turn) => {
       accepted();
@@ -1097,7 +1097,7 @@ export function dispatchAgentTurn(
   return result;
 }
 
-async function dispatchPreparedAgentTurn(
+export async function dispatchAgentTurn(
   input: PreparedAgentTurn,
   callbacks: AgentTurnCallbacks = {},
 ): Promise<AgentTurnResult> {
@@ -1139,7 +1139,7 @@ function waitForPreparation<T>(
   });
 }
 
-async function executeAgentTurn(
+async function executePreparedAgentTurn(
   input: PreparedAgentTurn,
   callbacks: AgentTurnCallbacks = {},
 ): Promise<AgentTurnResult> {
