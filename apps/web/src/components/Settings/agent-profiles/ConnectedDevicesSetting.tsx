@@ -12,6 +12,8 @@ import {
 } from '@/hooks/useElectron';
 import { useAcpProfilesStore } from '@/store/acpProfilesStore';
 
+import { ConnectedDeviceRow } from './ConnectedDeviceRow';
+
 const STATUS_KEYS = {
   disabled: 'settings.localAgentDisabled',
   connecting: 'settings.localAgentConnecting',
@@ -181,26 +183,12 @@ export function ConnectedDevicesSetting() {
         </SettingRow>
       ) : null}
       {orderedDevices.map((device) => (
-        <SettingRow
+        <ConnectedDeviceRow
           key={device.agentletId}
-          title={
-            <>
-              {device.displayName}
-              {device === localDevice ? (
-                <span className="text-fg-muted ml-1 font-normal">
-                  {t('settings.localAgentThisDevice')}
-                </span>
-              ) : null}
-            </>
-          }
-          description={[
-            t('settings.deviceProfileCount', { count: device.profileCount }),
-            `v${device.version}`,
-            device.agentletId,
-          ].join(' · ')}
-        >
-          {device === localDevice ? controls : null}
-        </SettingRow>
+          device={device}
+          isLocalDevice={device === localDevice}
+          connectionControls={device === localDevice ? controls : null}
+        />
       ))}
       {!api && connectedDevices.length === 0 ? (
         <SettingRow title={t('settings.noConnectedDevices')}>

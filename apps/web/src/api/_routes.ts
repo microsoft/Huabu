@@ -168,8 +168,10 @@ export const routes = {
       : `agentletId=${enc(target.agentletId ?? '')}`;
     return `/acp/agent-cli?${params}`;
   },
-  // Profiles (loopback-only) — user-managed spawn recipes.
+  // Owner-only Profiles and per-device harness discovery.
   acpProfiles: '/acp/profiles',
+  acpAgentletDiscovery: (agentletId: string) =>
+    `/acp/agentlets/${enc(agentletId)}/discover`,
   acpProfileItem: (id: string) => `/acp/profiles/${enc(id)}`,
   // Embedded agentlet daemon — health + manual restart.
   acpAgentlet: '/acp/agentlet',

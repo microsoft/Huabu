@@ -15,6 +15,7 @@ import { fastify, type FastifyBaseLogger } from 'fastify';
 import { getConnectionToken } from './connection-token.js';
 import { getDataDir } from './data-dir.js';
 import { setHostServerPort } from './host-port.js';
+import { createHarnessDiscoveryRoutes } from './modules/agent/acp/harness-discovery.route.js';
 import { registerHarnessProfileDiscovery } from './modules/agent/acp/harness-profile-discovery.js';
 import {
   acpAgentCliRoutes,
@@ -329,18 +330,20 @@ const agentletGateway = mountAgenetes(app, {
     legacyCommandProfiles: [],
   },
 });
-let unregisterHarnessDiscovery: (() => void) | undefined;
+let harnessDiscovery:
+  | ReturnType<typeof registerHarnessProfileDiscovery>
+  | undefined;
 app.addHook('onReady', async () => {
   const registry = getAgentProfileRegistry();
   if (registry) initializeAgentDefaults(registry.listProfiles());
-  unregisterHarnessDiscovery = registerHarnessProfileDiscovery({
+  harnessDiscovery = registerHarnessProfileDiscovery({
     gateway: agentletGateway,
     getRegistry: getAgentProfileRegistry,
     log: app.log,
     onProfilesDiscovered: initializeAgentDefaults,
   });
 });
-app.addHook('preClose', async () => unregisterHarnessDiscovery?.());
+app.addHook('preClose', async () => harnessDiscovery?.dispose());
 // Release every active external-note session on shutdown. Their `fs.watch`
 // handles are otherwise only closed on a workspace switch, so a
 // force-terminated process leaves them open — and on virtual/network
@@ -367,6 +370,12 @@ app.register(acpProfilesRoutes, { prefix: '/api/acp' });
 app.register(agentDefaultsRoutes, { prefix: '/api/agent/defaults' });
 app.register(acpAgentletRoutes, { prefix: '/api/acp' });
 app.register(acpAgentCliRoutes, { prefix: '/api/acp' });
+app.register(
+  createHarnessDiscoveryRoutes(() => harnessDiscovery),
+  {
+    prefix: '/api/acp',
+  },
+);
 app.register(acpThreadsRoutes, { prefix: '/api/acp' });
 app.register(externalAgentRuntimeConfigRoutes, { prefix: '/api/acp' });
 app.register(connectionTokenRoutes, { prefix: '/api/acp' });

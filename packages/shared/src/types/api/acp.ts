@@ -170,6 +170,39 @@ export type AcpAgentCliListResponse = z.infer<
   typeof acpAgentCliListResponseSchema
 >;
 
+export const acpAgentletDiscoveryParamsSchema = z
+  .object({
+    agentletId: z
+      .string()
+      .min(1)
+      .refine((value) => value.trim().length > 0),
+  })
+  .strict();
+export const acpAgentletDiscoveryBodySchema = z.object({}).strict();
+export type AcpAgentletDiscoveryParams = z.infer<
+  typeof acpAgentletDiscoveryParamsSchema
+>;
+export type AcpAgentletDiscoveryBody = z.infer<
+  typeof acpAgentletDiscoveryBodySchema
+>;
+export const acpAgentletDiscoveryEntrySchema = acpAgentCliInfoSchema.extend({
+  profileStatus: z.enum(['created', 'existing', 'skipped']),
+  profileId: z.string().min(1).optional(),
+});
+export const acpAgentletDiscoveryResponseSchema = z.object({
+  agentletId: z.string().min(1),
+  harnesses: z.array(acpAgentletDiscoveryEntrySchema),
+});
+export const acpAgentletDiscoveryErrorDetailsSchema = z.object({
+  createdProfileIds: z.array(z.string().min(1)),
+});
+export type AcpAgentletDiscoveryResponse = z.infer<
+  typeof acpAgentletDiscoveryResponseSchema
+>;
+export type AcpAgentletDiscoveryErrorDetails = z.infer<
+  typeof acpAgentletDiscoveryErrorDetailsSchema
+>;
+
 // ─── Thread → agent binding ────────────────────────────────────────────
 //
 // Each chat thread is permanently bound to a single agent for its entire

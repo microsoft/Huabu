@@ -8,12 +8,14 @@
  * server's `DaemonSupervisor`. The user never sees the daemon directly
  * — instead they author command Profiles which
  * describe how to spawn one external agent CLI on demand. This module
- * wraps the loopback-only profile/daemon endpoints plus the existing
+ * wraps the owner-only profile/device endpoints plus the existing
  * thread-scoped cached capability and control routes.
  *
  * Endpoint surface:
  *  - `GET /api/acp/agent-cli` — read the daemon's detected agent catalogue
  *     and populate the profile editor's picker with installation state.
+ *  - `POST /api/acp/agentlets/:agentletId/discover` — re-detect and provision
+ *     missing automatic Profiles on one connected device.
  *  - `GET/POST/PATCH/DELETE /api/acp/profiles` — CRUD for spawn
  *     recipes with revision-checked launch and working-directory edits.
  *  - `GET/POST /api/acp/daemon` — daemon liveness + manual restart.
@@ -48,6 +50,7 @@ import type {
   ConnectionCopyFormat,
   AgentletConnectionCommandResponse,
   AcpProfileCapabilitiesResponse,
+  AcpAgentletDiscoveryResponse,
 } from '@huabu/shared';
 
 export type {
@@ -94,6 +97,19 @@ export async function listAcpAgentClis(
   return apiFetch<AcpAgentCliListResponse>(routes.acpAgentCli(target), {
     fallbackMessage: 'Failed to detect installed agent CLIs',
   });
+}
+
+export async function discoverAcpAgentlet(
+  agentletId: string,
+): Promise<AcpAgentletDiscoveryResponse> {
+  return apiFetch<AcpAgentletDiscoveryResponse>(
+    routes.acpAgentletDiscovery(agentletId),
+    {
+      method: 'POST',
+      json: {},
+      fallbackMessage: 'Failed to detect installed Agents',
+    },
+  );
 }
 
 // ── Profile CRUD ─────────────────────────────────────────────────────
