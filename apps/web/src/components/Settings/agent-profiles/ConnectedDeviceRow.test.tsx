@@ -11,12 +11,19 @@ import { ConnectedDeviceRow } from './ConnectedDeviceRow';
 
 import type { AcpAgentletDiscoveryResponse } from '@huabu/shared';
 
-const api = vi.hoisted(() => ({ discover: vi.fn(), refresh: vi.fn() }));
+const api = vi.hoisted(() => ({
+  discover: vi.fn(),
+  refresh: vi.fn(),
+  rename: vi.fn(),
+}));
 vi.mock('@/api/acp', () => ({ discoverAcpAgentlet: api.discover }));
 vi.mock('@/store/acpProfilesStore', () => ({
   useAcpProfilesStore: (
-    selector: (state: { refresh: typeof api.refresh }) => unknown,
-  ) => selector({ refresh: api.refresh }),
+    selector: (state: {
+      refresh: typeof api.refresh;
+      renameDevice: typeof api.rename;
+    }) => unknown,
+  ) => selector({ refresh: api.refresh, renameDevice: api.rename }),
 }));
 vi.mock('react-i18next', async () => {
   const { createInstance } = await import('i18next');
@@ -81,6 +88,7 @@ let root: Root;
 beforeEach(() => {
   api.discover.mockReset().mockResolvedValue(result);
   api.refresh.mockReset().mockResolvedValue(undefined);
+  api.rename.mockReset().mockResolvedValue(undefined);
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -117,6 +125,65 @@ function detailsButton() {
 }
 
 describe('per-device installed Agent detection', () => {
+  it('keeps detection feedback while renaming the same device', async () => {
+    let finishDetection!: (value: AcpAgentletDiscoveryResponse) => void;
+    api.discover.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishDetection = resolve;
+        }),
+    );
+    await render(true);
+    await act(async () => detectionButton().click());
+    const rename = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Rename device"]',
+    );
+    if (!rename) throw new Error('Expected the rename action');
+    await act(async () => rename.click());
+    const input = container.querySelector('input');
+    if (!input) throw new Error('Expected the name input');
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        'value',
+      )?.set;
+      if (!setter) throw new Error('Missing native input setter');
+      setter.call(input, 'Office Mac');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () =>
+      input.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Enter',
+          bubbles: true,
+        }),
+      ),
+    );
+    expect(api.rename).toHaveBeenCalledExactlyOnceWith(
+      device.agentletId,
+      'Office Mac',
+    );
+    expect(detectionButton().disabled).toBe(true);
+    expect(container.textContent).toContain('Disconnect');
+    await act(async () =>
+      root.render(
+        <ConnectedDeviceRow
+          device={{ ...device, displayName: 'Office Mac' }}
+          isLocalDevice
+          connectionControls={<span>Disconnect</span>}
+        />,
+      ),
+    );
+    await act(async () => finishDetection(result));
+    expect(detectionButton().getAttribute('aria-label')).toContain(
+      'Office Mac',
+    );
+    expect(container.textContent).toContain('Agent types ready: 3');
+    expect(api.refresh).toHaveBeenCalledExactlyOnceWith({
+      afterMutation: true,
+    });
+  });
+
   it('blocks same-tick duplicate clicks and keeps pending feedback through snapshot publication', async () => {
     let finishDetection!: (value: AcpAgentletDiscoveryResponse) => void;
     let finishRefresh!: () => void;

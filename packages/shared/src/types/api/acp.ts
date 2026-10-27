@@ -620,6 +620,17 @@ export type AgentletConnectionCredentials = z.infer<
   typeof agentletConnectionCredentialsSchema
 >;
 
+export const agentletDeviceNameSchema = z.string().trim().min(1).max(120);
+export const agentletDeviceParamsSchema = z.object({
+  agentletId: z.string().min(1).max(256),
+});
+export const renameAgentletDeviceBodySchema = z
+  .object({ displayName: agentletDeviceNameSchema })
+  .strict();
+export type RenameAgentletDeviceBody = z.infer<
+  typeof renameAgentletDeviceBodySchema
+>;
+
 /** Schema mirror of {@link AcpProfilesListResponse}. */
 export const connectedAgentletDeviceSchema = z.object({
   agentletId: z.string().min(1),

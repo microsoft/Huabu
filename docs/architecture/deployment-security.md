@@ -72,7 +72,7 @@ Explicit deployment environment values override setup choices, including values 
 
 The response is deliberately redacted: it never contains usernames, passwords, connection tokens, secret keys, credential values, or the configured allowed-host entries. No-login mode reports owner policy `unauthenticated` and, on network binds, a `REMOTE_LOGIN_DISABLED` warning rendered in Settings.
 
-Settings loads readiness when it opens. A read-only credential store disables API-key and OAuth mutations while leaving non-secret model configuration available. Standalone deployments automatically initialize encrypted credential writes or use the explicit `HUABU_SECRET_KEY` override; see [`credential-storage.md`](./credential-storage.md).
+Settings loads readiness when it opens. It does not render a permanent notice solely for operator-unverified transport; readiness errors, read-only credential storage, and disabled-login warnings remain visible. Device-connection pages and copy-result toasts omit insecure-transport notices; native desktop connection confirmation retains the exact Server and permission consequences without an additional HTTP warning. Transport status and copy-response warning codes, startup/setup guidance, TLS validation, and authentication checks are unchanged. Removing presentation does not encrypt HTTP or WebSocket traffic. A read-only credential store disables API-key and OAuth mutations while leaving non-secret model configuration available. Standalone deployments automatically initialize encrypted credential writes or use the explicit `HUABU_SECRET_KEY` override; see [`credential-storage.md`](./credential-storage.md).
 
 ## Application-wide rate limiting
 

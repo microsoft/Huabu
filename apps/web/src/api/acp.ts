@@ -51,6 +51,7 @@ import type {
   AgentletConnectionCommandResponse,
   AcpProfileCapabilitiesResponse,
   AcpAgentletDiscoveryResponse,
+  RenameAgentletDeviceBody,
 } from '@huabu/shared';
 
 export type {
@@ -118,6 +119,17 @@ export async function discoverAcpAgentlet(
 export async function listAcpProfiles(): Promise<AcpProfilesListResponse> {
   return apiFetch<AcpProfilesListResponse>(routes.acpProfiles, {
     fallbackMessage: 'Failed to list agent profiles',
+  });
+}
+
+export async function renameAgentletDevice(
+  agentletId: string,
+  body: RenameAgentletDeviceBody,
+): Promise<RenameAgentletDeviceBody> {
+  return apiFetch<RenameAgentletDeviceBody>(routes.acpDevice(agentletId), {
+    method: 'PATCH',
+    json: body,
+    fallbackMessage: 'Failed to rename device',
   });
 }
 

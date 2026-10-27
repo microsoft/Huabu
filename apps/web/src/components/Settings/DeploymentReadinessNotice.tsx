@@ -15,16 +15,7 @@ export function DeploymentReadinessNotice() {
   const remoteLoginDisabled = readiness?.issues.some(
     (issue) => issue.code === 'REMOTE_LOGIN_DISABLED',
   );
-  const remoteTransportUnverified =
-    readiness?.bind.scope === 'network' &&
-    readiness.transport.status === 'operator-unverified';
-
-  if (
-    !error &&
-    !credentialStoreReadOnly &&
-    !remoteTransportUnverified &&
-    !remoteLoginDisabled
-  ) {
+  if (!error && !credentialStoreReadOnly && !remoteLoginDisabled) {
     return null;
   }
 
@@ -36,9 +27,6 @@ export function DeploymentReadinessNotice() {
           {error ? <p>{t('settings.readinessUnavailable')}</p> : null}
           {credentialStoreReadOnly ? (
             <p>{t('settings.credentialStoreReadOnly')}</p>
-          ) : null}
-          {remoteTransportUnverified ? (
-            <p>{t('settings.remoteTransportUnverified')}</p>
           ) : null}
           {remoteLoginDisabled ? (
             <p>{t('settings.remoteLoginDisabled')}</p>

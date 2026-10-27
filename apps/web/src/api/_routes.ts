@@ -172,6 +172,7 @@ export const routes = {
   acpProfiles: '/acp/profiles',
   acpAgentletDiscovery: (agentletId: string) =>
     `/acp/agentlets/${enc(agentletId)}/discover`,
+  acpDevice: (agentletId: string) => `/acp/devices/${enc(agentletId)}`,
   acpProfileItem: (id: string) => `/acp/profiles/${enc(id)}`,
   // Embedded agentlet daemon — health + manual restart.
   acpAgentlet: '/acp/agentlet',

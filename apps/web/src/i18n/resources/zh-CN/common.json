@@ -434,7 +434,6 @@
     "agentletCommandCopying": "正在复制…",
     "agentletCommandCopied": "连接命令已复制，请在运行 Agent 的设备上执行。",
     "agentletCommandCopiedLoopback": "命令已复制。当前地址仅适用于 Huabu 服务器本机；连接其他设备时，请使用可访问的服务器地址或配置端口转发。",
-    "agentletCommandCopiedInsecure": "命令已复制。连接未加密，请仅在可信网络中使用。",
     "agentletCommandCopyFailed": "无法复制连接信息，请重试。",
     "autoAcceptAgentChanges": "自动接受 Agent 对 Space 的更改",
     "autoAcceptAgentChangesDescription": "自动保留修改；刷新后无法从更改记录还原。",
@@ -455,7 +454,10 @@
     "imageApiVersionPlaceholder": "使用 2025-04-01-preview 或更新版本",
     "readinessUnavailable": "无法加载部署就绪状态，凭据操作可能失败。",
     "credentialStoreReadOnly": "凭据存储为只读。请检查服务器的私有凭据存储并重启 Huabu，以保存凭据或使用 OAuth。",
-    "remoteTransportUnverified": "此远程连接使用运维方管理的传输。请使用 HTTPS 或可信私有网络。",
+    "renameDevice": "重命名设备",
+    "deviceName": "设备名称",
+    "deviceNameInvalid": "请输入 1 至 120 个字符的设备名称。",
+    "deviceRenameFailed": "无法重命名设备，请重试。",
     "remoteLoginDisabled": "登录验证已关闭。任何能连接此服务的人都拥有完整的所有者权限。请通过可信网络或带认证的反向代理限制访问。",
     "canaryRedeploy": "Alpha Canary 重新部署",
     "canaryDescription": "运行版本 {{running}} · origin/{{branch}} {{remote}} · {{redeployBranch}} 最近结果：{{outcome}}",
@@ -564,7 +566,6 @@
     "agentletEnvFileInstructions": "将连接文件保存为源码目录下的 connection.env，然后运行：",
     "agentletGeneratedTokenWarning": "当前使用临时密钥。Huabu 服务器重启后，请重新复制连接命令，在运行 Agent 的设备上执行。",
     "agentletLoopbackWarning": "当前地址仅适用于 Huabu 服务器本机。连接其他设备时，请使用可访问的服务器地址或配置端口转发。",
-    "agentletInsecureWarning": "连接未加密，请仅在可信网络中使用；通过公共网络连接时应使用 HTTPS。",
     "agentletCommandCopiedGenerated": "连接信息已复制。服务器重启后，请重新复制并运行连接命令。"
   },
   "status": {

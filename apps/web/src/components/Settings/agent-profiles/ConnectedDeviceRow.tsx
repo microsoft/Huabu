@@ -1,13 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { RefreshCw } from 'lucide-react';
+import { Pencil, RefreshCw } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { ApiError } from '@/api/_client';
 import { discoverAcpAgentlet } from '@/api/acp';
 import { Button } from '@/components/Common/Button';
+import { TextInput } from '@/components/Common/TextInput';
 import { SettingRow } from '@/components/Settings/Common/SettingRow';
 import { useAcpProfilesStore } from '@/store/acpProfilesStore';
 
@@ -52,6 +53,15 @@ export function ConnectedDeviceRow({
 }) {
   const { t } = useTranslation();
   const refresh = useAcpProfilesStore((state) => state.refresh);
+  const renameDevice = useAcpProfilesStore((state) => state.renameDevice);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(device.displayName);
+  const [saving, setSaving] = useState(false);
+  const [renameError, setRenameError] = useState<string | null>(null);
+  const savingRef = useRef(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const renameRef = useRef<HTMLButtonElement>(null);
+  const wasEditing = useRef(false);
   const requestRef = useRef<symbol | null>(null);
   const [pending, setPending] = useState(false);
   const [result, setResult] = useState<AcpAgentletDiscoveryResponse | null>(
@@ -60,6 +70,42 @@ export function ConnectedDeviceRow({
   const [error, setError] = useState<string | null>(null);
   const [refreshFailed, setRefreshFailed] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
+
+  useEffect(() => {
+    if (editing) {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    } else if (wasEditing.current) {
+      renameRef.current?.focus();
+    }
+    wasEditing.current = editing;
+  }, [editing]);
+
+  const saveName = async () => {
+    if (savingRef.current) return;
+    const name = draft.trim();
+    if (!name || name.length > 120) {
+      setRenameError(t('settings.deviceNameInvalid'));
+      return;
+    }
+    savingRef.current = true;
+    setSaving(true);
+    setRenameError(null);
+    try {
+      if (name !== device.displayName)
+        await renameDevice(device.agentletId, name);
+      setEditing(false);
+    } catch (reason) {
+      setRenameError(
+        reason instanceof Error
+          ? reason.message
+          : t('settings.deviceRenameFailed'),
+      );
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  };
 
   useEffect(
     () => () => {
@@ -139,14 +185,41 @@ export function ConnectedDeviceRow({
     <div>
       <SettingRow
         title={
-          <>
-            {device.displayName}
-            {isLocalDevice ? (
-              <span className="text-fg-muted ml-1 font-normal">
-                {t('settings.localAgentThisDevice')}
+          editing ? (
+            <TextInput
+              ref={inputRef}
+              aria-label={t('settings.deviceName')}
+              aria-invalid={!!renameError}
+              className="w-full"
+              value={draft}
+              maxLength={120}
+              disabled={saving}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                event.stopPropagation();
+                if (event.nativeEvent.isComposing || saving) return;
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  void saveName();
+                } else if (event.key === 'Escape') {
+                  event.preventDefault();
+                  setEditing(false);
+                  setRenameError(null);
+                }
+              }}
+            />
+          ) : (
+            <>
+              <span className="[overflow-wrap:anywhere]">
+                {device.displayName}
               </span>
-            ) : null}
-          </>
+              {isLocalDevice ? (
+                <span className="text-fg-muted ml-1 font-normal">
+                  {t('settings.localAgentThisDevice')}
+                </span>
+              ) : null}
+            </>
+          )
         }
         description={[
           t('settings.deviceProfileCount', { count: device.profileCount }),
@@ -172,7 +245,53 @@ export function ConnectedDeviceRow({
               className={pending ? 'motion-safe:animate-spin' : undefined}
             />
           </Button>
+          {editing ? (
+            <>
+              <Button
+                size="sm"
+                disabled={saving}
+                onClick={() => void saveName()}
+              >
+                {t('actions.save')}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={saving}
+                onClick={() => {
+                  setEditing(false);
+                  setRenameError(null);
+                }}
+              >
+                {t('actions.cancel')}
+              </Button>
+            </>
+          ) : (
+            <Button
+              ref={renameRef}
+              variant="ghost"
+              size="sm"
+              iconOnly
+              aria-label={t('settings.renameDevice')}
+              title={t('settings.renameDevice')}
+              onClick={() => {
+                setDraft(device.displayName);
+                setRenameError(null);
+                setEditing(true);
+              }}
+            >
+              <Pencil className="size-3.5" aria-hidden />
+            </Button>
+          )}
         </div>
+        {renameError ? (
+          <p
+            role="alert"
+            className="text-danger mt-2 max-w-sm text-xs [overflow-wrap:anywhere]"
+          >
+            {renameError}
+          </p>
+        ) : null}
       </SettingRow>
       {pending || result || error || refreshFailed ? (
         <div className="px-3.5 pb-3 text-xs [overflow-wrap:anywhere]">

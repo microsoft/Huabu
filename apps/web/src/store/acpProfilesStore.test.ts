@@ -4,12 +4,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const listProfiles = vi.hoisted(() => vi.fn());
+const renameDevice = vi.hoisted(() => vi.fn());
 const api = vi.hoisted(() => ({
   getDefaults: vi.fn(),
   updateDefaults: vi.fn(),
   toast: vi.fn(),
 }));
-vi.mock('@/api/acp', () => ({ listAcpProfiles: listProfiles }));
+vi.mock('@/api/acp', () => ({
+  listAcpProfiles: listProfiles,
+  renameAgentletDevice: renameDevice,
+}));
 vi.mock('@/api/agentDefaults', () => ({
   getAgentDefaults: api.getDefaults,
   updateAgentDefaults: api.updateDefaults,
@@ -44,6 +48,7 @@ const snapshot = {
 beforeEach(() => {
   localStorage.clear();
   listProfiles.mockReset().mockResolvedValue(snapshot);
+  renameDevice.mockReset().mockResolvedValue({ displayName: 'New name' });
   api.getDefaults.mockReset().mockResolvedValue({
     defaults: snapshot.agentDefaults,
     selectionState: 'available',
@@ -128,6 +133,87 @@ describe('browser-local recent conversation Agent', () => {
     await Promise.all([polling, fresh]);
     expect(listProfiles).toHaveBeenCalledTimes(2);
     expect(useAcpProfilesStore.getState().error).toBeNull();
+  });
+
+  it('keeps acknowledged device names when an older poll completes', async () => {
+    const device = {
+      agentletId: 'machine',
+      displayName: 'Old name',
+      version: '1',
+      connectedAt: '2026-01-01T00:00:00.000Z',
+      profileCount: 1,
+    };
+    useAcpProfilesStore.setState({ connectedDevices: [device] });
+    let finishPoll!: (value: unknown) => void;
+    listProfiles.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishPoll = resolve;
+        }),
+    );
+    const poll = useAcpProfilesStore.getState().refresh();
+    await Promise.resolve();
+    await useAcpProfilesStore.getState().renameDevice('machine', 'New name');
+    finishPoll({ ...snapshot, connectedDevices: [device] });
+    await poll;
+    expect(useAcpProfilesStore.getState().connectedDevices[0].displayName).toBe(
+      'New name',
+    );
+    expect(renameDevice).toHaveBeenCalledWith('machine', {
+      displayName: 'New name',
+    });
+    expect(useAcpProfilesStore.getState().profiles).toEqual([profile]);
+  });
+
+  it('leaves the snapshot unchanged and rejects failed renames', async () => {
+    renameDevice.mockRejectedValueOnce(new Error('Offline'));
+    await expect(
+      useAcpProfilesStore.getState().renameDevice('machine', 'New name'),
+    ).rejects.toThrow('Offline');
+    expect(useAcpProfilesStore.getState().connectedDevices).toEqual([]);
+  });
+
+  it('publishes detected Profiles and the saved name after a rename races an older poll', async () => {
+    const device = {
+      agentletId: 'machine',
+      displayName: 'Old name',
+      version: '1',
+      connectedAt: '2026-01-01T00:00:00.000Z',
+      profileCount: 1,
+    };
+    useAcpProfilesStore.setState({ connectedDevices: [device] });
+    let finishOld!: (value: unknown) => void;
+    listProfiles.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishOld = resolve;
+        }),
+    );
+    const polling = useAcpProfilesStore
+      .getState()
+      .refresh({ background: true });
+    await vi.waitFor(() => expect(listProfiles).toHaveBeenCalledOnce());
+    const fresh = useAcpProfilesStore
+      .getState()
+      .refresh({ afterMutation: true });
+    await useAcpProfilesStore.getState().renameDevice('machine', 'New name');
+    const added = { ...profile, id: 'added' };
+    const renamed = { ...device, displayName: 'New name', profileCount: 2 };
+    listProfiles.mockResolvedValueOnce({
+      ...snapshot,
+      profiles: [profile, added],
+      selectableProfileIds: [profile.id, added.id],
+      connectedDevices: [renamed],
+    });
+    finishOld({ ...snapshot, connectedDevices: [device] });
+    await Promise.all([polling, fresh]);
+    expect(listProfiles).toHaveBeenCalledTimes(2);
+    expect(useAcpProfilesStore.getState().connectedDevices).toEqual([renamed]);
+    expect(useAcpProfilesStore.getState().profiles).toEqual([profile, added]);
+    expect(useAcpProfilesStore.getState().selectableProfileIds).toEqual([
+      profile.id,
+      added.id,
+    ]);
   });
 
   it('keeps picker identity explicit and clears it for older server responses', async () => {

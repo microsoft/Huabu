@@ -697,14 +697,52 @@ describe('ExternalAgentRuntimeSettings', () => {
   it.each([
     ['generated', [], 'settings.agentletCommandCopiedGenerated'],
     ['environment', ['loopback'], 'settings.agentletCommandCopiedLoopback'],
-    ['environment', ['insecure'], 'settings.agentletCommandCopiedInsecure'],
+    [
+      'environment',
+      ['insecure', 'loopback'],
+      'settings.agentletCommandCopiedLoopback',
+    ],
+    ['generated', ['insecure'], 'settings.agentletCommandCopiedGenerated'],
   ])(
-    'surfaces generated token and transport warnings',
+    'preserves generated-token and loopback guidance regardless of transport',
     async (source, warnings, key) => {
       createConnectionCommand.mockResolvedValue({ content, source, warnings });
       await render();
       await act(async () => button('settings.agentletCommandCopy').click());
       expect(toast).toHaveBeenCalledWith(key, { tone: 'warning' });
+    },
+  );
+
+  it.each(['command', 'env-file'] as const)(
+    'copies %s over unencrypted transport without inline or toast warnings',
+    async (format) => {
+      createConnectionCommand.mockResolvedValue({
+        content,
+        source: 'environment',
+        warnings: ['insecure'],
+      });
+      await render();
+      if (format === 'env-file') {
+        await act(async () =>
+          button('settings.agentletOtherConnectionOptions').click(),
+        );
+      }
+      await act(async () =>
+        button(
+          format === 'command'
+            ? 'settings.agentletCommandCopy'
+            : 'settings.agentletEnvFileCopy',
+        ).click(),
+      );
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(content);
+      expect(toast).toHaveBeenCalledExactlyOnceWith(
+        format === 'command'
+          ? 'settings.agentletCommandCopied'
+          : 'settings.agentletEnvFileCopied',
+        { tone: 'success' },
+      );
+      expect(container.querySelector('[role="status"]')).toBeNull();
+      expect(container.textContent).not.toContain('secret');
     },
   );
 
@@ -723,7 +761,7 @@ describe('ExternalAgentRuntimeSettings', () => {
     expect(container.textContent).not.toContain('secret');
   });
 
-  it('shows every applicable connection warning inline without exposing copied content', async () => {
+  it('shows actionable connection guidance without transport warnings or copied content', async () => {
     createConnectionCommand.mockResolvedValue({
       content,
       source: 'generated',
@@ -736,7 +774,9 @@ describe('ExternalAgentRuntimeSettings', () => {
       'settings.agentletGeneratedTokenWarning',
     );
     expect(status?.textContent).toContain('settings.agentletLoopbackWarning');
-    expect(status?.textContent).toContain('settings.agentletInsecureWarning');
+    expect(status?.textContent).not.toContain(
+      'settings.agentletInsecureWarning',
+    );
     expect(container.textContent).not.toContain('secret');
     expect(container.textContent).not.toContain('https://huabu.example');
   });

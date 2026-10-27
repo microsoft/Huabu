@@ -57,9 +57,10 @@ describe('deployment readiness notice', () => {
       expect(
         container.textContent?.includes('settings.remoteLoginDisabled'),
       ).toBe(disabled);
-      expect(container.textContent).toContain(
+      expect(container.textContent).not.toContain(
         'settings.remoteTransportUnverified',
       );
+      if (!disabled) expect(container.innerHTML).toBe('');
     },
   );
 });

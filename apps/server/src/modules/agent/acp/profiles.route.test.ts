@@ -25,6 +25,13 @@ const mocks = vi.hoisted(() => ({
   discoverCapabilities: vi.fn(),
   connectedIds: new Set(['machine-a', 'remote-machine']),
   pickerDeviceId: vi.fn(),
+  deviceNames: vi.fn(() => ({})),
+  renameDevice: vi.fn(),
+}));
+
+vi.mock('./device-names.js', () => ({
+  getDeviceNames: mocks.deviceNames,
+  renameDevice: mocks.renameDevice,
 }));
 
 vi.mock('./picker-device.js', () => ({
@@ -99,6 +106,113 @@ afterEach(async () => {
 });
 
 describe('ordinary Profile catalog routes', () => {
+  it('renames an exact device without changing Profile identity or aliases', async () => {
+    const server = await setup();
+    const response = await server.inject({
+      method: 'PATCH',
+      url: '/api/acp/devices/machine-a',
+      payload: { displayName: '  My workstation  ' },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ displayName: 'My workstation' });
+    expect(mocks.renameDevice).toHaveBeenCalledExactlyOnceWith(
+      'machine-a',
+      'My workstation',
+    );
+    expect(mocks.registry.patchProfile).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['', 400],
+    [' '.repeat(5), 400],
+    ['x'.repeat(121), 400],
+    ['x'.repeat(120), 200],
+  ])('validates device name %j', async (displayName, status) => {
+    const server = await setup();
+    const response = await server.inject({
+      method: 'PATCH',
+      url: '/api/acp/devices/machine-a',
+      payload: { displayName },
+    });
+    expect(response.statusCode).toBe(status);
+    if (status !== 200) expect(mocks.renameDevice).not.toHaveBeenCalled();
+  });
+
+  it.each(['offline', 'machine-a-host'])(
+    'rejects missing and hostname-only device targets: %s',
+    async (agentletId) => {
+      const server = await setup();
+      const response = await server.inject({
+        method: 'PATCH',
+        url: `/api/acp/devices/${agentletId}`,
+        payload: { displayName: 'Name' },
+      });
+      expect(response.statusCode).toBe(404);
+      expect(mocks.renameDevice).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps device renaming owner-only', async () => {
+    const server = await setup();
+    const response = await server.inject({
+      method: 'PATCH',
+      url: '/api/acp/devices/machine-a',
+      remoteAddress: '203.0.113.5',
+      payload: { displayName: 'Name' },
+    });
+    expect(response.statusCode).toBe(403);
+    expect(mocks.renameDevice).not.toHaveBeenCalled();
+  });
+
+  it('surfaces device-name storage failures', async () => {
+    mocks.renameDevice.mockImplementationOnce(() => {
+      throw new Error('Disk full');
+    });
+    const server = await setup();
+    const response = await server.inject({
+      method: 'PATCH',
+      url: '/api/acp/devices/machine-a',
+      payload: { displayName: 'Name' },
+    });
+    expect(response.statusCode).toBe(500);
+    expect(response.json().code).toBe('device_name_save_failed');
+  });
+
+  it('projects saved names without changing routing, metadata or Profile aliases', async () => {
+    mocks.registry.listProfiles.mockReturnValue([commandProfile]);
+    mocks.deviceNames.mockReturnValueOnce({ 'machine-a': 'Office PC' });
+    const server = await setup();
+    const response = await server.inject('/api/acp/profiles');
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      profiles: [commandProfile],
+      selectableProfileIds: ['command-1'],
+      connectedDevices: [
+        {
+          agentletId: 'machine-a',
+          displayName: 'Office PC',
+          hostname: 'machine-a-host',
+          profileCount: 1,
+        },
+        {
+          agentletId: 'remote-machine',
+          displayName: 'remote-machine-host: linux x64',
+        },
+      ],
+    });
+  });
+
+  it('does not hide unreadable saved names behind default labels', async () => {
+    mocks.registry.listProfiles.mockReturnValue([]);
+    mocks.deviceNames.mockImplementationOnce(() => {
+      throw new Error('Invalid JSON');
+    });
+    const server = await setup();
+    const response = await server.inject('/api/acp/profiles');
+    expect(response.statusCode).toBe(500);
+    expect(response.json().code).toBe('device_names_unavailable');
+  });
+
   it.each([
     ['machine-a', 'machine-a'],
     ['remote-machine-host', null],
