@@ -135,6 +135,8 @@ Open to Side moves the existing semantic target into the other group instead of 
 
 Canvas node double-clicks, Question toolbar compose or replay actions, search results, and connected-node navigation open transiently. New Chat opens are permanent.
 
+After durable acceptance of a Lasso request, the destination Agent Node opens permanently in Preview Workspace and receives a tab-addressed `bottom` positioning request. This applies to continued and newly created conversations, with Ink or node-only selections. The previous tab stays in the background, including a transient inspection tab; an already-open destination is activated in its existing group and promoted instead of duplicated. No split or composer-focus request is created. Rejected, superseded, or cross-Canvas submissions do not reveal a tab, and a removed or rebound destination is not opened by a late acceptance.
+
 ## 4. Rendering and Chat sessions
 
 Each group mounts its active tab plus at most one warm inactive tab selected by the greatest `lastActiveSeq`. The warm slot is a bounded runtime optimization rather than persisted topology: React 19 `Activity` keeps that tab's DOM and component state with `mode="hidden"`, cleans up its Effects while hidden, and restarts those Effects when the tab becomes visible again. Activity cleanup and closing a tab do not mark the page as unloading or terminate a thread-owned stream; only the browser page lifecycle suppresses unload-time transport errors.

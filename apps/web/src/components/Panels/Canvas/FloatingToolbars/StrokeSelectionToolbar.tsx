@@ -69,6 +69,8 @@ import {
 } from '@/store/chatStore';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 import { useInkSigilStore } from '@/store/inkSigilStore';
+import { openPreviewNode } from '@/store/previewWorkspace/actions';
+import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 
 import './NodeToolbar.css';
 
@@ -825,6 +827,24 @@ export const StrokeSelectionToolbar = () => {
           attemptsRef.current.clear();
           clearSelection();
           useCanvasStore.getState().selectNodes([]);
+          const anchor = attempt.session.conversationView?.presentationAnchor;
+          const currentCanvas = useCanvasStore.getState();
+          if (
+            !anchor ||
+            currentCanvas.canvasId !== anchor.canvasId ||
+            resolveInkQuestionTarget(
+              currentCanvas.nodes.find((node) => node.id === anchor.nodeId),
+            )?.threadId !== attempt.session.threadId
+          )
+            return;
+          const tabId = openPreviewNode(anchor.nodeId, {
+            transient: false,
+            focusEditor: false,
+          });
+          if (tabId)
+            usePreviewWorkspaceStore
+              .getState()
+              .requestChatOpen(tabId, 'bottom');
         },
         onAcceptanceRejected: releasePreparation,
       });
