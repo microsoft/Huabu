@@ -237,6 +237,23 @@ function invocationOptions() {
 }
 
 describe('AgentThreadService', () => {
+  it('exposes only the matching live invocation state for Agent reinsertion', async () => {
+    const h = createHarness();
+    expect(h.service.getInvocationState('canvas-a', 'thread-a')).toBeNull();
+    const invocation = await h.service.invoke(invocationOptions());
+    expect(h.service.getInvocationState('canvas-a', 'thread-a')).toEqual({
+      invocationToken: h.startLifecycle.mock.calls[0][2],
+      status: 'running',
+      errorMessage: '',
+    });
+    expect(h.service.getInvocationState('canvas-b', 'thread-a')).toBeNull();
+    expect(h.service.getInvocationState('canvas-a', 'thread-b')).toBeNull();
+    for await (const event of invocation.events) {
+      expect(event.type).toBeDefined();
+    }
+    expect(h.service.getInvocationState('canvas-a', 'thread-a')).toBeNull();
+  });
+
   it('forwards verified external Ink events without publishing chat text', async () => {
     const h = createHarness({
       externalEvents: [

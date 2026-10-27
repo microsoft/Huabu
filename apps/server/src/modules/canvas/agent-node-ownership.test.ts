@@ -14,8 +14,13 @@ import {
 import { applyDeltasOnServer, executeOnServer } from './canvas-executor.js';
 import { subscribeCanvasUpdates } from './canvas-sync.js';
 import canvasRoutes from './canvas.route.js';
-import { conversationEventLogStore } from '../agent/agenetes/conversation-stores.js';
+import {
+  conversationEventLogStore,
+  conversationTurnStore,
+} from '../agent/agenetes/conversation-stores.js';
 import { agenetes } from '../agent/agenetes/drivers.js';
+import { agentNodeLifecycle } from '../agent/agent-node-lifecycle.js';
+import { agentThreadService } from '../agent/agent-thread.service.js';
 import { acquireAgentTurn } from '../agent/turn-lease.js';
 import { createSpace, space } from '../storage/index.js';
 import {
@@ -403,6 +408,125 @@ forEachProductProfile((profile, label) => {
       expect((await space(canvasId).nodes.read(node.id))?.record.content).toBe(
         'Preserved intent',
       );
+    });
+
+    it.each(['done', 'error', 'interrupted', 'empty'] as const)(
+      'restores the latest canonical %s result rather than resetting the Agent to idle',
+      async (status) => {
+        await executeOnServer({
+          canvasId,
+          originator: { source: 'ui' },
+          commands: [
+            { type: 'DELETE_NODES', nodeIds: [node.id as `node-${string}`] },
+          ],
+        });
+        const namespace = canvasAcpNamespace(canvasId);
+        vi.spyOn(agenetes, 'record').mockResolvedValue({
+          spec: {
+            threadId: 'thread-agent',
+            namespace: { name: canvasId },
+            kind: 'internal',
+            workloadType: 'Deployment',
+            spec: {},
+          },
+          state: { driverState: {} },
+          driverSchemaVersion: 1,
+        } as NonNullable<Awaited<ReturnType<typeof agenetes.record>>>);
+        if (status !== 'empty') {
+          const start = await conversationEventLogStore.appendTurnStart(
+            namespace,
+            'thread-agent',
+            null,
+          );
+          if (status !== 'interrupted') {
+            const end = await conversationEventLogStore.append(
+              namespace,
+              'thread-agent',
+              status === 'error'
+                ? { type: 'error', data: { error: 'Canonical failure' } }
+                : { type: 'done', data: { message: 'Done' } },
+            );
+            await conversationTurnStore.append(namespace, 'thread-agent', {
+              seqStart: start.seq,
+              seqEnd: end.seq,
+              turn: {
+                request: null,
+                transcript:
+                  status === 'error'
+                    ? [{ type: 'error', data: { error: 'Canonical failure' } }]
+                    : [{ type: 'text', data: { content: 'Canonical answer' } }],
+              },
+            });
+          }
+        }
+        const response = await app.inject({
+          method: 'POST',
+          url: `/canvas/${canvasId}/nodes/${node.id}/association`,
+          payload: {
+            kind: 'restore',
+            node: { ...node, data: { content: 'Preserved intent' } },
+            threadId: 'thread-agent',
+            requireBinding: true,
+          },
+        });
+        expect(response.statusCode).toBe(200);
+        const expectedStatus =
+          status === 'empty'
+            ? undefined
+            : status === 'interrupted'
+              ? 'error'
+              : status;
+        expect(response.json().node.data.status).toBe(expectedStatus);
+        expect((await current()).data).toMatchObject({
+          threadId: 'thread-agent',
+          bindingState: 'bound',
+          ...(expectedStatus ? { status: expectedStatus } : {}),
+          ...(status === 'error' ? { errorMessage: 'Canonical failure' } : {}),
+          ...(status === 'interrupted'
+            ? { errorMessage: 'Agent execution was interrupted' }
+            : {}),
+        });
+        expect((await current()).data).not.toHaveProperty('invocationToken');
+      },
+    );
+
+    it('restores the live invocation token so its terminal transition still applies', async () => {
+      await executeOnServer({
+        canvasId,
+        originator: { source: 'ui' },
+        commands: [
+          { type: 'DELETE_NODES', nodeIds: [node.id as `node-${string}`] },
+        ],
+      });
+      vi.spyOn(agentThreadService, 'getInvocationState').mockReturnValue({
+        status: 'running',
+        invocationToken: 'current-server-token',
+        errorMessage: '',
+      });
+      const response = await app.inject({
+        method: 'POST',
+        url: `/canvas/${canvasId}/nodes/${node.id}/association`,
+        payload: {
+          kind: 'restore',
+          node: { ...node, data: { content: 'Preserved intent' } },
+          threadId: 'thread-agent',
+          requireBinding: false,
+        },
+      });
+      expect(response.statusCode).toBe(200);
+      expect((await current()).data).toMatchObject({
+        status: 'running',
+        invocationToken: 'current-server-token',
+      });
+      await agentNodeLifecycle.done(
+        {
+          canvasId,
+          nodeId: node.id as `node-${string}`,
+          threadId: 'thread-agent',
+        },
+        'current-server-token',
+      );
+      expect((await current()).data.status).toBe('done');
     });
 
     it('rejects resurrection of a Bound node with a missing record', async () => {

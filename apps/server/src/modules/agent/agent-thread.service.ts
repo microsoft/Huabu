@@ -40,6 +40,7 @@ import type { RenderedSpacePrompt } from './space-instruction-frames.js';
 import type {
   AgentBinding,
   AgentMode,
+  AgentNodeProjection,
   AgentStreamEvent,
   AgentTurnAccepted,
   ReasoningEffort,
@@ -220,6 +221,7 @@ export interface ExternalAgentThreadTarget {
 
 interface ActiveAgentInvocation {
   canvasId?: string;
+  invocationToken: string;
   abortController: AbortController;
   turnStartState: TurnStartState | null;
   turnStarted: Promise<TurnStartState>;
@@ -268,6 +270,22 @@ export class AgentThreadService {
   constructor(
     private readonly dependencies: AgentThreadServiceDependencies = DEFAULT_DEPENDENCIES,
   ) {}
+
+  getInvocationState(
+    canvasId: string,
+    threadId: string,
+  ): Pick<
+    AgentNodeProjection,
+    'invocationToken' | 'status' | 'errorMessage'
+  > | null {
+    const active = this.activeInvocations.get(threadId);
+    if (!active || active.canvasId !== canvasId) return null;
+    return {
+      invocationToken: active.invocationToken,
+      status: active.outcome ?? 'running',
+      errorMessage: active.errorMessage ?? '',
+    };
+  }
 
   beginPreparation(
     threadId: string,
@@ -376,8 +394,10 @@ export class AgentThreadService {
     const turnStarted = new Promise<TurnStartState>((resolve) => {
       resolveTurnStarted = resolve;
     });
+    const invocationToken = randomUUID();
     const active: ActiveAgentInvocation = {
       canvasId: options.canvasId,
+      invocationToken,
       abortController,
       turnStartState: null,
       turnStarted,
@@ -397,7 +417,6 @@ export class AgentThreadService {
     };
     signal.addEventListener('abort', onAbort, { once: true });
     if (signal.aborted) onAbort();
-    const invocationToken = randomUUID();
     let agentTarget: AgentNodeTarget | null = null;
     let fixedTarget: FixedAgentNodeTarget | null = null;
     let binding: AgentBinding = options.requestBinding ?? { kind: 'internal' };

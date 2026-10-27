@@ -352,6 +352,68 @@ describe('Question creation settlement', () => {
 });
 
 describe('Question undo identity reinsertion', () => {
+  it.each(['undo', 'redo'] as const)(
+    'uses the association content revision after %s instead of treating the sidecar as absent',
+    async (action) => {
+      if (action === 'undo') {
+        canvasHistoryManager.takeSnapshot([question], []);
+      } else {
+        canvasHistoryManager.takeSnapshot([], []);
+        canvasHistoryManager.undo([question], []);
+      }
+      associateNode.mockResolvedValue({
+        node: question,
+        fromVersion: 1,
+        toVersion: 2,
+      });
+      putCanvas.mockResolvedValue({ canvasId: 'canvas-restore', version: 3 });
+
+      await useCanvasStore.getState()[action]();
+      await awaitQuestionCreation('canvas-restore', question.id);
+      await useCanvasStore.getState().saveCanvas();
+      await vi.waitFor(() => expect(putNodeContent).toHaveBeenCalled());
+
+      expect(putNodeContent.mock.calls[0][2]).toMatchObject({
+        content: 'Original intent',
+        expectRev: nodeRevisionOf({ content: 'Original intent' }),
+      });
+      expect(useCanvasStore.getState().nodes[0].data).toMatchObject({
+        status: 'done',
+        threadId: 'thread-restore',
+        bindingState: 'bound',
+      });
+    },
+  );
+
+  it('preserves an edit made during reinsertion while using the confirmed server revision', async () => {
+    canvasHistoryManager.takeSnapshot([question], []);
+    let confirm!: (response: unknown) => void;
+    associateNode.mockReturnValue(
+      new Promise((resolve) => {
+        confirm = resolve;
+      }),
+    );
+    putCanvas.mockResolvedValue({ canvasId: 'canvas-restore', version: 3 });
+    await useCanvasStore.getState().undo();
+    await vi.waitFor(() => expect(associateNode).toHaveBeenCalledOnce());
+    useCanvasStore.getState()._setStateNoAutosave({
+      nodes: [
+        {
+          ...question,
+          data: { ...question.data, content: 'Edited while restoring' },
+        },
+      ],
+    });
+    confirm({ node: question, fromVersion: 1, toVersion: 2 });
+    await awaitQuestionCreation('canvas-restore', question.id);
+    await useCanvasStore.getState().saveCanvas();
+    await vi.waitFor(() => expect(putNodeContent).toHaveBeenCalled());
+    expect(putNodeContent.mock.calls[0][2]).toMatchObject({
+      content: 'Edited while restoring',
+      expectRev: nodeRevisionOf({ content: 'Original intent' }),
+    });
+  });
+
   it('restores the UI immediately but waits for an issued topology PUT before association', async () => {
     let finishStructure!: (response: unknown) => void;
     putCanvas.mockReturnValueOnce(

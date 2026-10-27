@@ -11,7 +11,10 @@ import {
 } from './canvas-executor.js';
 import { publishCanvasUpdate } from './canvas-sync.js';
 import { withCanvasMutex } from './write-coordinator.js';
+import { agenetes } from '../agent/agenetes/drivers.js';
+import { agentThreadService } from '../agent/agent-thread.service.js';
 import { space } from '../storage/index.js';
+import { canvasAcpNamespace } from '../workspace/paths.js';
 
 import type {
   AssociateAgentNodeBody,
@@ -88,7 +91,7 @@ export async function associateAgentNode(
       previous ?? (body.kind === 'restore' ? body.node : undefined);
     if (!source)
       throw new AgentNodeAssociationError('Agent Node no longer exists');
-    const node = await initializeAgentNodeCreationAlreadyLocked(
+    let node = await initializeAgentNodeCreationAlreadyLocked(
       canvasId,
       {
         ...source,
@@ -100,6 +103,33 @@ export async function associateAgentNode(
       } as CanvasNode,
       body.kind === 'restore' && body.requireBinding,
     );
+    if (body.kind === 'restore') {
+      const active = agentThreadService.getInvocationState(canvasId, threadId);
+      if (active) {
+        node = { ...node, data: { ...node.data, ...active } };
+      } else if (node.data.bindingState === 'bound') {
+        const latest = (
+          await agenetes.history(canvasAcpNamespace(canvasId), threadId, {
+            withTail: true,
+          })
+        ).turns.at(-1);
+        if (latest) {
+          const error = [...latest.transcript]
+            .reverse()
+            .find((message) => message.type === 'error');
+          node = {
+            ...node,
+            data: {
+              ...node.data,
+              status: error || latest.isIncomplete ? 'error' : 'done',
+              errorMessage:
+                error?.data.error ??
+                (latest.isIncomplete ? 'Agent execution was interrupted' : ''),
+            },
+          };
+        }
+      }
+    }
     const output = await applyDeltasOnServerAlreadyLocked({
       canvasId,
       deltas: previous

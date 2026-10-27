@@ -938,9 +938,9 @@ export function createNodeContentQueue(opts: {
         const node = opts.getState().nodes.find((n) => n.id === id);
         if (!node) continue;
         restores.delete(id);
-        // The deletion has settled. Only this resurrection starts from an
-        // absent sidecar; ordinary edits retain their authoritative baseline.
-        baselineRev.delete(id);
+        // Agent association already recreated its sidecar and seeded its rev.
+        // Other resurrected nodes still start from an absent sidecar.
+        if (node.type !== 'question') baselineRev.delete(id);
         frozen.delete(id);
         if (
           node.data?.contentMissing === true ||

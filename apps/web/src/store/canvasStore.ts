@@ -1472,8 +1472,10 @@ function restoreQuestionAssociations(
       const pending = questionCreations.get(`${canvasId}\0${node.id}`);
       if (pending?.promise === creation) pending.toVersion = response.toVersion;
       const current = useCanvasStore.getState();
-      if (current.canvasId !== canvasId) return;
+      if (current.canvasId !== canvasId || pending?.promise !== creation)
+        return;
       const confirmed = response.node as Node;
+      nodeContentQueue.seedBaselines([confirmed]);
       current._setStateNoAutosave({
         nodes: current.nodes.map((live) =>
           live.id === node.id && current.version <= response.toVersion

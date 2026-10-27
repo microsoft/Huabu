@@ -408,3 +408,74 @@ test('explicit Mouse mode keeps Note Delete in More even on a touch device', asy
   await page.getByRole('menuitem', { name: 'Delete', exact: true }).click();
   await expect(page.locator(`[data-id="${note.id}"]`)).toHaveCount(0);
 });
+
+test('Agent deletion and Undo preserve its thread and content without a save conflict', async ({
+  page,
+}) => {
+  await page.addInitScript(() =>
+    localStorage.setItem(
+      'huabu-sketch-tools',
+      JSON.stringify({ state: { inputModePreference: 'finger' }, version: 0 }),
+    ),
+  );
+  const conflicts: string[] = [];
+  page.on('response', (response) => {
+    if (response.status() === 409 && response.url().includes('/api/canvas/')) {
+      conflicts.push(response.url());
+    }
+  });
+  await openNewCanvas(page);
+  await seed(page, [
+    {
+      type: 'CREATE_NODES',
+      nodes: [
+        {
+          id: 'node-delete-agent',
+          nodeType: 'question',
+          position: { x: 350, y: 300 },
+          data: {
+            content: 'Preserve this Agent prompt',
+            agentBinding: { kind: 'internal' },
+          },
+        },
+      ],
+    },
+  ]);
+  const node = page.locator('[data-id="node-delete-agent"]');
+  await expect(node).toBeVisible();
+  const readData = () =>
+    page.evaluate(async () => {
+      const path = '/src/store/canvasStore.ts';
+      const { default: store } = (await import(path)) as typeof CanvasModule;
+      return store
+        .getState()
+        .nodes.find((node) => node.id === 'node-delete-agent')?.data;
+    });
+  const original = await readData();
+  expect(original?.threadId).toEqual(expect.any(String));
+  for (let iteration = 0; iteration < 2; iteration++) {
+    await select(page, ['node-delete-agent']);
+    await page
+      .locator('.node-floating-toolbar')
+      .getByRole('button', { name: 'Delete', exact: true })
+      .tap();
+    await expect(node).toHaveCount(0);
+    await page.getByRole('button', { name: 'Undo', exact: true }).tap();
+    await expect(node).toBeVisible();
+    await flushSaves(page);
+    expect(await readData()).toMatchObject({
+      threadId: original?.threadId,
+      content: 'Preserve this Agent prompt',
+    });
+    expect(conflicts).toEqual([]);
+    await expect(
+      page.getByRole('button', { name: 'Load latest', exact: true }),
+    ).toHaveCount(0);
+    await page.reload();
+    await expect(node).toBeVisible();
+    expect(await readData()).toMatchObject({
+      threadId: original?.threadId,
+      content: 'Preserve this Agent prompt',
+    });
+  }
+});
