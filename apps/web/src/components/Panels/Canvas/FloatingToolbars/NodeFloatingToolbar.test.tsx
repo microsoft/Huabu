@@ -5,6 +5,8 @@ import { act, type ComponentProps, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { CANVAS_NODE_TYPES } from '@huabu/shared';
+
 import {
   DropdownMenuItem,
   DropdownMenuSubmenu,
@@ -18,6 +20,7 @@ import type { Node } from '@xyflow/react';
 
 const mocks = vi.hoisted(() => ({
   isNotMouse: false,
+  effectiveMode: 'mouse' as 'mouse' | 'finger' | 'pen',
   modifierHeld: false,
   previewOpen: false,
   connectable: true,
@@ -28,6 +31,7 @@ const mocks = vi.hoisted(() => ({
     canvasWrapper: null as HTMLDivElement | null,
     ingestionByNodeId: {} as Record<string, { status: string }>,
     convertNodeType: vi.fn(),
+    deleteNodes: vi.fn(),
     beginGesture: vi.fn(),
     dispatchUiIntent: vi.fn(),
     onNodeDragStart: vi.fn(),
@@ -66,6 +70,7 @@ vi.mock('@/store/canvasStore', () => ({
 }));
 vi.mock('@/hooks/useInputMode', () => ({
   useIsNotMouse: () => mocks.isNotMouse,
+  useEffectiveInputMode: () => mocks.effectiveMode,
   readEffectiveInputMode: () => 'pen',
 }));
 vi.mock('@/hooks/useMultiSelectModifier', () => ({
@@ -108,6 +113,7 @@ describe('NodeFloatingToolbar type-icon drag surface', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.isNotMouse = false;
+    mocks.effectiveMode = 'mouse';
     mocks.modifierHeld = false;
     mocks.canvas.moveSelectionDialogOpen = false;
     mocks.previewOpen = false;
@@ -172,6 +178,42 @@ describe('NodeFloatingToolbar type-icon drag surface', () => {
     if (!trigger) throw new Error(`Missing ${label} trigger`);
     act(() => trigger.click());
   }
+
+  it.each(
+    CANVAS_NODE_TYPES.flatMap((type) =>
+      (['finger', 'pen'] as const).map((mode) => ({ type, mode })),
+    ),
+  )(
+    'puts $type Delete before More without a new group in $mode mode',
+    async ({ type, mode }) => {
+      mocks.effectiveMode = mode;
+      render({ type, actions: <button data-primary-action>Open</button> });
+      const remove = container.querySelector<HTMLButtonElement>(
+        '[aria-label="actions.delete"]',
+      );
+      expect(remove).not.toBeNull();
+      expect(
+        remove?.parentElement?.previousElementSibling?.hasAttribute(
+          'data-primary-action',
+        ),
+      ).toBe(true);
+      expect(
+        remove?.parentElement?.nextElementSibling?.classList.contains(
+          'bg-edge-default',
+        ),
+      ).toBe(true);
+      act(() => remove?.click());
+      expect(mocks.canvas.deleteNodes).toHaveBeenCalledExactlyOnceWith([
+        'node',
+      ]);
+      await act(async () => openPanel('toolbar.more'));
+      expect(
+        Array.from(document.querySelectorAll('[role="menuitem"]')).some(
+          (item) => item.textContent === 'actions.delete',
+        ),
+      ).toBe(false);
+    },
+  );
 
   it('lets the shared menu move focus through production overflow actions', async () => {
     render();

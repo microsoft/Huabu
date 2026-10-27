@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MultiSelectToolbar } from './MultiSelectToolbar';
 
 const state = vi.hoisted(() => ({
+  effectiveMode: 'mouse' as 'mouse' | 'finger' | 'pen',
   nodes: [16, 24].map((fontSize, index) => ({
     id: `text-${index}`,
     type: 'text',
@@ -17,12 +18,15 @@ const state = vi.hoisted(() => ({
   })),
   edges: [],
   executeCommands: vi.fn(),
+  deleteNodes: vi.fn(),
   setMoveSelectionDialogOpen: vi.fn(),
 }));
 vi.mock('@/store/canvasStore', () => ({
   default: (select: (value: typeof state) => unknown) => select(state),
 }));
-vi.mock('@/hooks/useInputMode', () => ({ useIsNotMouse: () => false }));
+vi.mock('@/hooks/useInputMode', () => ({
+  useEffectiveInputMode: () => state.effectiveMode,
+}));
 vi.mock('react-i18next', () => ({
   initReactI18next: { type: '3rdParty', init: vi.fn() },
   useTranslation: () => ({ t: (key: string) => key }),
@@ -40,6 +44,44 @@ vi.mock('@/components/Common/CanvasFloatingPopover', () => ({
 afterEach(() => vi.unstubAllGlobals());
 
 describe('MultiSelectToolbar font size', () => {
+  it.each(['finger', 'pen'] as const)(
+    'keeps Delete in the existing action group in %s mode',
+    async (mode) => {
+      vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+      state.effectiveMode = mode;
+      state.deleteNodes.mockClear();
+      const container = document.createElement('div');
+      document.body.append(container);
+      const root = createRoot(container);
+      try {
+        await act(async () => root.render(<MultiSelectToolbar />));
+        const remove = container.querySelector<HTMLButtonElement>(
+          '[aria-label="toolbar.deleteSelected"]',
+        );
+        expect(remove).not.toBeNull();
+        expect(
+          remove?.parentElement?.previousElementSibling?.classList.contains(
+            'bg-edge-default',
+          ),
+        ).toBe(false);
+        act(() => remove?.click());
+        expect(state.deleteNodes).toHaveBeenCalledExactlyOnceWith(
+          state.nodes.map((node) => node.id),
+          [],
+        );
+        state.effectiveMode = 'mouse';
+        await act(async () => root.render(<MultiSelectToolbar />));
+        expect(
+          container.querySelector('[aria-label="toolbar.deleteSelected"]'),
+        ).toBeNull();
+      } finally {
+        state.effectiveMode = 'mouse';
+        act(() => root.unmount());
+        container.remove();
+      }
+    },
+  );
+
   it('edits mixed sizes inline in one batch and hides the control for mixed types', async () => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     const container = document.createElement('div');

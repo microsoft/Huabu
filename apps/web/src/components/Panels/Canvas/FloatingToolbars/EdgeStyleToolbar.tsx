@@ -16,9 +16,10 @@ import {
   FloatingToolbar,
   FLOATING_TOOLBAR_CLASS,
 } from '@/components/Common/FloatingToolbar';
-import { useIsNotMouse } from '@/hooks/useInputMode';
+import { useEffectiveInputMode } from '@/hooks/useInputMode';
 import { translateColorOptions } from '@/i18n/colors';
 import useCanvasStore from '@/store/canvasStore';
+import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 
 import './NodeToolbar.css';
 
@@ -141,45 +142,57 @@ function getEdgeStyle(edge: Edge): EdgeStyle {
  * rendered by React Flow.  Falls back to the centre of the source/target
  * bounding box when the DOM element is not (yet) available.
  */
-function useEdgeMidpoint(selectedEdge: Edge | null, nodes: Node[]) {
+function useEdgeMidpoint(selectedEdges: Edge[], nodes: Node[]) {
   return useMemo(() => {
-    if (!selectedEdge) return null;
+    const points = selectedEdges.flatMap((selectedEdge) => {
+      // Try reading the rendered SVG path first
+      const pathEl = document.querySelector<SVGPathElement>(
+        `.react-flow__edge[data-id="${CSS.escape(selectedEdge.id)}"] path`,
+      );
+      if (pathEl) {
+        const total = pathEl.getTotalLength();
+        const pt = pathEl.getPointAtLength(total / 2);
 
-    // Try reading the rendered SVG path first
-    const pathEl = document.querySelector<SVGPathElement>(
-      `.react-flow__edge[data-id="${CSS.escape(selectedEdge.id)}"] path`,
-    );
-    if (pathEl) {
-      const total = pathEl.getTotalLength();
-      const pt = pathEl.getPointAtLength(total / 2);
+        // The path is inside the React Flow viewport transform group, so the
+        // point coordinates are already in flow-space.
+        return [{ x: pt.x, y: pt.y }];
+      }
 
-      // The path is inside the React Flow viewport transform group, so the
-      // point coordinates are already in flow-space.
-      return { x: pt.x, y: pt.y };
-    }
+      // Fallback: compute from node centres
+      const src = nodes.find((n) => n.id === selectedEdge.source);
+      const tgt = nodes.find((n) => n.id === selectedEdge.target);
+      if (!src || !tgt) return [];
 
-    // Fallback: compute from node centres
-    const src = nodes.find((n) => n.id === selectedEdge.source);
-    const tgt = nodes.find((n) => n.id === selectedEdge.target);
-    if (!src || !tgt) return null;
+      const sw = src.measured?.width ?? 200;
+      const sh = src.measured?.height ?? 100;
+      const tw = tgt.measured?.width ?? 200;
+      const th = tgt.measured?.height ?? 100;
 
-    const sw = src.measured?.width ?? 200;
-    const sh = src.measured?.height ?? 100;
-    const tw = tgt.measured?.width ?? 200;
-    const th = tgt.measured?.height ?? 100;
+      const sx = src.position.x + sw / 2;
+      const sy = src.position.y + sh / 2;
+      const tx = tgt.position.x + tw / 2;
+      const ty = tgt.position.y + th / 2;
 
-    const sx = src.position.x + sw / 2;
-    const sy = src.position.y + sh / 2;
-    const tx = tgt.position.x + tw / 2;
-    const ty = tgt.position.y + th / 2;
-
-    return { x: (sx + tx) / 2, y: (sy + ty) / 2 };
-  }, [selectedEdge, nodes]);
+      return [{ x: (sx + tx) / 2, y: (sy + ty) / 2 }];
+    });
+    if (points.length === 0) return null;
+    return {
+      x:
+        (Math.min(...points.map((point) => point.x)) +
+          Math.max(...points.map((point) => point.x))) /
+        2,
+      y:
+        (Math.min(...points.map((point) => point.y)) +
+          Math.max(...points.map((point) => point.y))) /
+        2,
+    };
+  }, [selectedEdges, nodes]);
 }
 
 /**
- * Floating toolbar that appears when exactly one edge is selected.
+ * Floating toolbar for edge-only selections.
  * Provides controls for line type, dash style, color, and thickness.
+ * Multiple edges expose only the Touch/Pen delete action.
  *
  * Follows the same styling pattern as MultiSelectToolbar.
  */
@@ -189,12 +202,17 @@ export const EdgeStyleToolbar = () => {
   const edges = useCanvasStore((s) => s.edges);
   const executeCommands = useCanvasStore((s) => s.executeCommands);
   const disconnectEdges = useCanvasStore((s) => s.disconnectEdges);
-  const isNotMouse = useIsNotMouse();
+  const showPrimaryDelete = useEffectiveInputMode() !== 'mouse';
+  const hasLassoSelection = useGesturePreviewStore(
+    (state) =>
+      state.sketchSelectionPolygon !== null ||
+      Object.keys(state.sketchStrokeSelection).length > 0,
+  );
 
-  const selectedEdge = useMemo(() => {
-    const sel = edges.filter((e) => e.selected);
-    return sel.length === 1 ? sel[0] : null;
+  const selectedEdges = useMemo(() => {
+    return edges.filter((edge) => edge.selected);
   }, [edges]);
+  const selectedEdge = selectedEdges.length === 1 ? selectedEdges[0] : null;
 
   const style = useMemo(
     () => (selectedEdge ? getEdgeStyle(selectedEdge) : ({} as EdgeStyle)),
@@ -219,7 +237,7 @@ export const EdgeStyleToolbar = () => {
     [selectedEdge, executeCommands],
   );
 
-  const midpoint = useEdgeMidpoint(selectedEdge, nodes);
+  const midpoint = useEdgeMidpoint(selectedEdges, nodes);
 
   // Treat the midpoint as a 0×0 anchor rect so `CanvasFloatingPopover`
   // centres the toolbar on the point and clamps it inside the viewport.
@@ -310,7 +328,12 @@ export const EdgeStyleToolbar = () => {
   return (
     <CanvasFloatingPopover
       anchor={anchor}
-      open={!!selectedEdge && !!anchor}
+      open={
+        !!anchor &&
+        !hasLassoSelection &&
+        !nodes.some((node) => node.selected) &&
+        (selectedEdges.length === 1 || showPrimaryDelete)
+      }
       // The label pill renders centred on the edge midpoint (the same
       // anchor), so a small offset would overlap it. 36px clears the
       // pill height (~22px) plus visual breathing room.
@@ -318,65 +341,71 @@ export const EdgeStyleToolbar = () => {
       side="top"
       className={`${FLOATING_TOOLBAR_CLASS} canvas-context-toolbar edge-context-toolbar`}
     >
-      <FloatingToolbar.Select
-        floating
-        menuClassName="node-toolbar-overflow"
-        label={t('edgeToolbar.type')}
-        className="edge-toolbar-value"
-        options={lineTypeOptions}
-        value={currentLineType}
-        onChange={(v) => setStyle({ lineType: v })}
-      />
+      {selectedEdge && (
+        <>
+          <FloatingToolbar.Select
+            floating
+            menuClassName="node-toolbar-overflow"
+            label={t('edgeToolbar.type')}
+            className="edge-toolbar-value"
+            options={lineTypeOptions}
+            value={currentLineType}
+            onChange={(v) => setStyle({ lineType: v })}
+          />
 
-      <FloatingToolbar.Select
-        floating
-        menuClassName="node-toolbar-overflow"
-        label={t('edgeToolbar.style')}
-        className="edge-toolbar-value"
-        options={lineStyleOptions}
-        value={currentLineStyle}
-        onChange={(v) => setStyle({ lineStyle: v })}
-      />
+          <FloatingToolbar.Select
+            floating
+            menuClassName="node-toolbar-overflow"
+            label={t('edgeToolbar.style')}
+            className="edge-toolbar-value"
+            options={lineStyleOptions}
+            value={currentLineStyle}
+            onChange={(v) => setStyle({ lineStyle: v })}
+          />
 
-      <FloatingToolbar.Select
-        floating
-        menuClassName="node-toolbar-overflow"
-        label={t('edgeToolbar.arrow')}
-        className="edge-toolbar-value"
-        options={directionOptions}
-        value={currentDirection}
-        onChange={(v) => setStyle({ direction: v })}
-      />
+          <FloatingToolbar.Select
+            floating
+            menuClassName="node-toolbar-overflow"
+            label={t('edgeToolbar.arrow')}
+            className="edge-toolbar-value"
+            options={directionOptions}
+            value={currentDirection}
+            onChange={(v) => setStyle({ direction: v })}
+          />
 
-      <FloatingToolbar.Select
-        floating
-        menuClassName="node-toolbar-overflow"
-        label={t('edgeToolbar.width')}
-        className="edge-toolbar-value"
-        options={STROKE_WIDTH_OPTIONS}
-        value={`${currentWidth}`}
-        onChange={(v) =>
-          setStyle({ strokeWidth: Number(v) as EdgeStrokeWidth })
-        }
-      />
+          <FloatingToolbar.Select
+            floating
+            menuClassName="node-toolbar-overflow"
+            label={t('edgeToolbar.width')}
+            className="edge-toolbar-value"
+            options={STROKE_WIDTH_OPTIONS}
+            value={`${currentWidth}`}
+            onChange={(v) =>
+              setStyle({ strokeWidth: Number(v) as EdgeStrokeWidth })
+            }
+          />
 
-      {/* Color picker */}
-      <FloatingToolbar.ColorPicker
-        floating
-        triggerClassName="node-toolbar-color"
-        colors={accentColors}
-        value={currentStroke}
-        onSelect={(token) => setStyle({ stroke: token })}
-        title={t('edgeToolbar.edgeColor')}
-      />
-
-      {/* Non-mouse only: mouse users have keyboard Delete / Backspace. */}
-      {isNotMouse && (
+          {/* Color picker */}
+          <FloatingToolbar.ColorPicker
+            floating
+            triggerClassName="node-toolbar-color"
+            colors={accentColors}
+            value={currentStroke}
+            onSelect={(token) => setStyle({ stroke: token })}
+            title={t('edgeToolbar.edgeColor')}
+          />
+        </>
+      )}
+      {showPrimaryDelete && (
         <FloatingToolbar.ActionButton
-          title={t('edgeToolbar.deleteEdge')}
+          title={t(
+            selectedEdges.length > 1
+              ? 'toolbar.deleteSelected'
+              : 'edgeToolbar.deleteEdge',
+          )}
           tone="danger"
           onClick={() => {
-            if (selectedEdge) disconnectEdges([selectedEdge.id]);
+            disconnectEdges(selectedEdges.map((edge) => edge.id));
           }}
         >
           <Trash2 />

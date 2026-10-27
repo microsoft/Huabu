@@ -586,7 +586,8 @@ type RFState = {
     targetNodeId: string | null;
     dropPoint: { x: number; y: number };
   }) => void;
-  deleteNodes: (nodeIds: string[], edgeIds?: string[]) => void;
+  /** True once all requested nodes are removed locally, not a persistence acknowledgement. */
+  deleteNodes: (nodeIds: string[], edgeIds?: string[]) => boolean;
   disconnectEdges: (edgeIds: string[]) => void;
   setNodeGeometry: (
     items: Array<{
@@ -3976,6 +3977,7 @@ const useCanvasStore = create<RFState>()(
 
     deleteNodes: (nodeIds, edgeIds) => {
       get().dispatchUiIntent({ type: 'DELETE_NODES', nodeIds, edgeIds });
+      return !get().nodes.some((node) => nodeIds.includes(node.id));
     },
 
     disconnectEdges: (edgeIds) => {

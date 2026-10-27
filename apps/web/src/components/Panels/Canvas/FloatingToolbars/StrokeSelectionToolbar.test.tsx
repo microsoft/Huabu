@@ -33,6 +33,8 @@ import {
   selectActiveTab,
   usePreviewWorkspaceStore,
 } from '@/store/previewWorkspace/store';
+import { useWorkspaceStore } from '@/store/workspaceStore';
+import { REQUEST_DELETE_SPACE } from '@/utils/spaceHierarchy';
 
 import { StrokeSelectionToolbar } from './StrokeSelectionToolbar';
 
@@ -56,6 +58,7 @@ const mocks = vi.hoisted(() => ({
   listProfiles: vi.fn(),
   recentConversation: vi.fn(),
   selecting: false,
+  effectiveMode: 'mouse' as 'mouse' | 'finger' | 'pen',
   popoverAnchor: null as unknown,
 }));
 
@@ -164,7 +167,10 @@ vi.mock('@/components/Nodes/sketch/sketchHitTest', () => ({
       ? { x: 0, y: 0, width: 100, height: 50 }
       : null,
 }));
-vi.mock('@/hooks/useInputMode', () => ({ useIsNotMouse: () => false }));
+vi.mock('@/hooks/useInputMode', () => ({
+  useIsNotMouse: () => false,
+  useEffectiveInputMode: () => mocks.effectiveMode,
+}));
 vi.mock('@/hooks/agentTurnController', () => ({
   captureAgentTurnSources: mocks.capture,
   prepareAgentTurn: mocks.prepare,
@@ -261,6 +267,7 @@ function addQuestion(data: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
+  mocks.effectiveMode = 'mouse';
   vi.clearAllMocks();
   usePreviewWorkspaceStore.setState({
     canvasId: 'canvas-1',
@@ -1827,7 +1834,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
     });
   });
 
-  it('keeps Delete in an always-visible overflow menu', async () => {
+  it('keeps desktop Delete in the overflow menu', async () => {
     const state = useCanvasStore.getState();
     state._setStateNoAutosave({
       nodes: state.nodes.map((node) =>
@@ -1891,6 +1898,142 @@ describe('StrokeSelectionToolbar Ink submission', () => {
     await act(async () => deleteItem?.click());
     expect(useGesturePreviewStore.getState().sketchStrokeSelection).toEqual({});
   });
+
+  it.each(
+    (['finger', 'pen'] as const).flatMap((mode) =>
+      (['strokes', 'nodes', 'mixed'] as const).map((kind) => ({ mode, kind })),
+    ),
+  )(
+    'exposes $kind Delete without a static identity icon or divider in $mode mode',
+    async ({ mode, kind }) => {
+      mocks.effectiveMode = mode;
+      if (kind !== 'strokes') {
+        const state = useCanvasStore.getState();
+        state._setStateNoAutosave({
+          nodes: [
+            ...state.nodes,
+            {
+              id: 'selected-note',
+              type: 'note',
+              selected: true,
+              position: { x: 120, y: 0 },
+              data: {},
+            },
+          ],
+        });
+      }
+      if (kind === 'nodes') {
+        useGesturePreviewStore.setState({ sketchStrokeSelection: {} });
+      }
+      await mountToolbar();
+      const group = document.body.querySelector('.ink-edit-group');
+      const remove = group?.querySelector<HTMLButtonElement>(
+        '[aria-label="Delete"]',
+      );
+      expect(remove).not.toBeNull();
+      expect(group?.querySelector('.lucide-ellipsis')).toBeNull();
+      expect(group?.querySelector('[role="img"]')).toBeNull();
+      expect(group?.querySelector('.lucide-shapes')).toBeNull();
+      expect(group?.querySelector('.lucide-pencil')).toBeNull();
+      expect(group?.querySelectorAll('.bg-edge-default')).toHaveLength(0);
+      expect(Boolean(group?.querySelector('[data-sketch-controls]'))).toBe(
+        kind === 'strokes',
+      );
+      expect(group?.lastElementChild).toBe(remove?.parentElement);
+      expect(remove?.disabled).toBe(false);
+    },
+  );
+
+  it.each(['confirmation', 'batch', 'ownership-loading'] as const)(
+    'preserves selected ink and nodes when deletion needs %s',
+    async (kind) => {
+      mocks.effectiveMode = 'finger';
+      const previousWorkspace = useWorkspaceStore.getState();
+      const refresh = vi.fn(async () => undefined);
+      const confirm = vi.fn();
+      window.addEventListener(REQUEST_DELETE_SPACE, confirm);
+      try {
+        useWorkspaceStore.setState({
+          spaceTitlesStatus: kind === 'ownership-loading' ? 'loading' : 'ready',
+          spaceTitles: { child: 'Child Space' },
+          spaceSummaries:
+            kind === 'ownership-loading'
+              ? {}
+              : {
+                  child: {
+                    parentSpaceId: 'canvas-1',
+                    parentEntryNodeId: 'entry',
+                  },
+                },
+          refreshSpaceTitles: refresh,
+        });
+        const state = useCanvasStore.getState();
+        state._setStateNoAutosave({
+          nodes: [
+            {
+              id: 'sketch-1',
+              type: 'sketch',
+              position: { x: 0, y: 0 },
+              data: {
+                strokes: [
+                  {
+                    id: 'stroke-1',
+                    points: [[0, 0]],
+                    color: 'teal',
+                    size: 4,
+                    createdAt: 1,
+                  },
+                ],
+              },
+            },
+            {
+              id: 'entry',
+              type: 'spacePreview',
+              selected: true,
+              position: { x: 120, y: 0 },
+              data: { targetCanvasId: 'child' },
+            },
+            ...(kind === 'batch'
+              ? [
+                  {
+                    id: 'note',
+                    type: 'note',
+                    selected: true,
+                    position: { x: 240, y: 0 },
+                    data: {},
+                  },
+                ]
+              : []),
+          ],
+        });
+        const before = useCanvasStore.getState().nodes;
+        const beforeInk =
+          useGesturePreviewStore.getState().sketchStrokeSelection;
+        await mountToolbar();
+        await act(async () =>
+          document
+            .querySelector<HTMLButtonElement>(
+              '.ink-edit-group [aria-label="Delete"]',
+            )
+            ?.click(),
+        );
+        expect(useCanvasStore.getState().nodes).toBe(before);
+        expect(useGesturePreviewStore.getState().sketchStrokeSelection).toBe(
+          beforeInk,
+        );
+        expect(
+          document.querySelector('.ink-edit-group [aria-label="Delete"]'),
+        ).not.toBeNull();
+        if (kind === 'confirmation') expect(confirm).toHaveBeenCalledOnce();
+        else expect(toast).toHaveBeenCalled();
+        if (kind === 'ownership-loading')
+          expect(refresh).toHaveBeenCalledOnce();
+      } finally {
+        window.removeEventListener(REQUEST_DELETE_SPACE, confirm);
+        useWorkspaceStore.setState(previousWorkspace);
+      }
+    },
+  );
 
   it('keeps only the identity divider when a mixed selection has no style controls', async () => {
     useCanvasStore.getState()._setStateNoAutosave({

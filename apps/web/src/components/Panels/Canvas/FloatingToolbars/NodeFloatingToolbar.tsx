@@ -47,7 +47,7 @@ import { CARD_SCALE_RANGE } from '@/handler/canvasCommand/resolvers/resolveSetCa
 import { resolveUiIntent } from '@/handler/canvasCommand/uiIntent';
 import { handleCanvasNavigationKey } from '@/hooks/shortcuts/handleCanvasNavigationKey';
 import { handleCanvasFocusEscape } from '@/hooks/useCanvasFocusEscape';
-import { useIsNotMouse } from '@/hooks/useInputMode';
+import { useEffectiveInputMode, useIsNotMouse } from '@/hooks/useInputMode';
 import { useCanvasMultiSelectModifierHeld } from '@/hooks/useMultiSelectModifier';
 import { useTakeoverMarkDrag } from '@/hooks/useTakeoverMarkDrag';
 import { translateColorOptions } from '@/i18n/colors';
@@ -196,7 +196,7 @@ function ToolbarTypeButton({
  *
  * The current-type drag control precedes formatting, dimensions, and primary
  * actions. Overflow contains conversion, secondary node actions, move, link,
- * and delete commands for every input mode.
+ * and desktop delete commands. Touch/Pen keeps Delete with the primary actions.
  *
  * Positioning, portal-into-body, and viewport clamping are delegated to
  * `CanvasFloatingPopover`.
@@ -245,6 +245,7 @@ export const NodeFloatingToolbar = memo(
     );
     const ingestion = useCanvasStore((s) => s.ingestionByNodeId[id]);
     const isNotMouse = useIsNotMouse();
+    const showPrimaryDelete = useEffectiveInputMode() !== 'mouse';
     // While the user holds the multi-select modifier (Ctrl / Cmd) they are
     // reaching for *another* node to add to the selection — this toolbar,
     // pinned above the current node, would occlude that target. Stand it
@@ -549,6 +550,15 @@ export const NodeFloatingToolbar = memo(
 
         {/* ── Group 4: Actions ── */}
         {actions}
+        {showPrimaryDelete && (
+          <FloatingToolbar.ActionButton
+            title={t('actions.delete')}
+            tone="danger"
+            onClick={() => deleteNodes([id])}
+          >
+            <Trash2 />
+          </FloatingToolbar.ActionButton>
+        )}
 
         <FloatingToolbar.Divider />
         <DropdownMenu
@@ -639,13 +649,15 @@ export const NodeFloatingToolbar = memo(
               {t('node.copyLink')}
             </DropdownMenuItem>
 
-            <DropdownMenuItem
-              icon={<Trash2 />}
-              className="text-danger"
-              onClick={() => deleteNodes([id])}
-            >
-              {t('actions.delete')}
-            </DropdownMenuItem>
+            {!showPrimaryDelete && (
+              <DropdownMenuItem
+                icon={<Trash2 />}
+                className="text-danger"
+                onClick={() => deleteNodes([id])}
+              >
+                {t('actions.delete')}
+              </DropdownMenuItem>
+            )}
           </div>
         </DropdownMenu>
       </CanvasFloatingPopover>

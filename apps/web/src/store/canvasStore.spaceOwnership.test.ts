@@ -143,7 +143,9 @@ it('defers the complete mixed node/edge deletion while child confirmation is pen
   const confirm = vi.fn();
   window.addEventListener(REQUEST_DELETE_SPACE, confirm);
   try {
-    useCanvasStore.getState().deleteNodes([entry.id], [edge.id]);
+    expect(useCanvasStore.getState().deleteNodes([entry.id], [edge.id])).toBe(
+      false,
+    );
     expect(confirm).toHaveBeenCalledOnce();
     expect(useCanvasStore.getState().nodes).toEqual(nodes);
     expect(useCanvasStore.getState().edges).toEqual([edge]);
@@ -162,7 +164,9 @@ it('keeps selected edges when deleting a Frame with a known child entry is refus
     ...endpoints,
   ];
   useCanvasStore.getState()._setStateNoAutosave({ nodes, edges: [edge] });
-  useCanvasStore.getState().deleteNodes(['node-frame'], [edge.id]);
+  expect(useCanvasStore.getState().deleteNodes(['node-frame'], [edge.id])).toBe(
+    false,
+  );
   expect(useCanvasStore.getState().nodes).toEqual(nodes);
   expect(useCanvasStore.getState().edges).toEqual([edge]);
   expect(api.deleteNode).not.toHaveBeenCalled();
@@ -179,7 +183,9 @@ it('deletes ordinary nodes and selected edges in one undoable execution', async 
   };
   const nodes = [note, ...endpoints];
   useCanvasStore.getState()._setStateNoAutosave({ nodes, edges: [edge] });
-  useCanvasStore.getState().deleteNodes([note.id], [edge.id]);
+  expect(useCanvasStore.getState().deleteNodes([note.id], [edge.id])).toBe(
+    true,
+  );
   expect(useCanvasStore.getState().nodes).toEqual(endpoints);
   expect(useCanvasStore.getState().edges).toEqual([]);
   await canvasHistoryManager.waitForDeletes('parent');

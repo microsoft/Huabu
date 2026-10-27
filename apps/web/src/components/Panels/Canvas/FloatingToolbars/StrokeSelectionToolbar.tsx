@@ -53,7 +53,7 @@ import {
   type CapturedAgentTurnSources,
 } from '@/hooks/agentTurnController';
 import { isOutsideCanvasInteraction } from '@/hooks/shortcuts/isEditableTarget';
-import { useIsNotMouse } from '@/hooks/useInputMode';
+import { useEffectiveInputMode, useIsNotMouse } from '@/hooks/useInputMode';
 import {
   getDefaultAgentBinding,
   rememberConversationAgentBinding,
@@ -177,8 +177,8 @@ function inkTargetAgent(target: InkQuestionTarget) {
 /**
  * Floating toolbar for a Stage 2 stroke-level lasso selection. Aligns with
  * the sketch node's own controls: color + thickness edit the selected
- * strokes. Secondary actions live in the shared overflow menu, while desktop
- * also retains its keyboard Delete shortcut. Toolbar arbitration guarantees at
+ * strokes. Touch/Pen exposes Delete directly; desktop retains overflow and
+ * its keyboard Delete shortcut. Toolbar arbitration guarantees at
  * most one floating toolbar:
  *   - pure stroke selection → color + size + overflow, then Agent submit;
  *   - mixed (strokes + nodes) → overflow, then Agent submit, while
@@ -216,6 +216,7 @@ export const StrokeSelectionToolbar = () => {
     (s) => s.setInkSubmissionPreparing,
   );
   const isNotMouse = useIsNotMouse();
+  const showPrimaryDelete = useEffectiveInputMode() !== 'mouse';
   const attemptsRef = useRef(new Map<string, InkSubmissionAttempt>());
   const selectionSessionIdsRef = useRef({
     next: 1,
@@ -946,19 +947,21 @@ export const StrokeSelectionToolbar = () => {
       .getState()
       .nodes.filter((n) => n.selected)
       .map((n) => n.id);
-    clearSelection();
     if (selectedNodeIds.length > 0) {
       // Node delete takes its own snapshot + records the intent trace; fold
-      // the stroke erase into that SAME undo entry.
-      deleteNodes(selectedNodeIds);
+      // the stroke erase into that SAME undo entry, but only if deletion was
+      // applied locally (Space ownership may block it or require confirmation).
+      if (!deleteNodes(selectedNodeIds)) return;
+      clearSelection();
       commitStrokeCommands(strokeCommands, { foldIntoOpenGesture: true });
     } else {
+      clearSelection();
       commitStrokeCommands(strokeCommands);
     }
   }, [selection, clearSelection, deleteNodes]);
 
-  // Keyboard delete: the delete button is touch-only, so desktop deletes
-  // the stroke selection via Delete / Backspace. Coexists with React Flow's
+  // Desktop can also delete the stroke selection via Delete / Backspace.
+  // Coexists with React Flow's
   // node delete (a mixed selection removes both on one press).
   useEffect(() => {
     if (!hasStrokes) return;
@@ -1024,20 +1027,24 @@ export const StrokeSelectionToolbar = () => {
       <FloatingToolbar.Group
         className={`${FLOATING_TOOLBAR_CLASS} canvas-context-toolbar ink-toolbar-surface ink-edit-group`}
       >
-        <Tooltip content={selectionTypeLabel}>
-          <div
-            role="img"
-            aria-label={selectionTypeLabel}
-            className="text-fg-subtle flex shrink-0 items-center px-1"
-          >
-            {isMixed || !hasStrokes ? (
-              <Shapes size={14} />
-            ) : (
-              <InkIcon size={14} />
-            )}
-          </div>
-        </Tooltip>
-        <FloatingToolbar.Divider />
+        {!showPrimaryDelete && (
+          <>
+            <Tooltip content={selectionTypeLabel}>
+              <div
+                role="img"
+                aria-label={selectionTypeLabel}
+                className="text-fg-subtle flex shrink-0 items-center px-1"
+              >
+                {isMixed || !hasStrokes ? (
+                  <Shapes size={14} />
+                ) : (
+                  <InkIcon size={14} />
+                )}
+              </div>
+            </Tooltip>
+            <FloatingToolbar.Divider />
+          </>
+        )}
         {showStyle && (
           <SketchControls
             floating
@@ -1051,30 +1058,42 @@ export const StrokeSelectionToolbar = () => {
             onSizeDragEnd={endNodeDataGesture}
           />
         )}
-        {showStyle && <FloatingToolbar.Divider />}
-        <DropdownMenu
-          floating
-          align="bottom-left"
-          className="node-toolbar-overflow"
-          trigger={
-            <Button
-              variant="ghost"
-              iconOnly
-              size="sm"
-              title={t('toolbar.more')}
-            >
-              <Ellipsis />
-            </Button>
-          }
-        >
-          <DropdownMenuItem
-            icon={<Trash2 />}
-            className="text-danger"
+        {showPrimaryDelete ? (
+          <FloatingToolbar.ActionButton
+            title={t('actions.delete')}
+            tone="danger"
             onClick={handleDelete}
           >
-            {t('actions.delete')}
-          </DropdownMenuItem>
-        </DropdownMenu>
+            <Trash2 />
+          </FloatingToolbar.ActionButton>
+        ) : (
+          <>
+            {showStyle && <FloatingToolbar.Divider />}
+            <DropdownMenu
+              floating
+              align="bottom-left"
+              className="node-toolbar-overflow"
+              trigger={
+                <Button
+                  variant="ghost"
+                  iconOnly
+                  size="sm"
+                  title={t('toolbar.more')}
+                >
+                  <Ellipsis />
+                </Button>
+              }
+            >
+              <DropdownMenuItem
+                icon={<Trash2 />}
+                className="text-danger"
+                onClick={handleDelete}
+              >
+                {t('actions.delete')}
+              </DropdownMenuItem>
+            </DropdownMenu>
+          </>
+        )}
       </FloatingToolbar.Group>
       {showSubmit && (
         <FloatingToolbar.Group

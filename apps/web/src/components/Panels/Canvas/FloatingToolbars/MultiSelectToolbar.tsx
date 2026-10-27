@@ -24,7 +24,7 @@ import {
 } from '@/components/Common/FloatingToolbar';
 import { nodeUsesAccent } from '@/components/Nodes/design/nodeAccentPolicy';
 import { CollectIntoSpaceButton } from '@/components/Space/CollectIntoSpaceButton';
-import { useIsNotMouse } from '@/hooks/useInputMode';
+import { useEffectiveInputMode } from '@/hooks/useInputMode';
 import { translateColorOptions } from '@/i18n/colors';
 import useCanvasStore from '@/store/canvasStore';
 import { useWorkspaceStore } from '@/store/workspaceStore';
@@ -70,7 +70,7 @@ export const MultiSelectToolbar = () => {
   const setMoveSelectionDialogOpen = useCanvasStore(
     (s) => s.setMoveSelectionDialogOpen,
   );
-  const isNotMouse = useIsNotMouse();
+  const showPrimaryDelete = useEffectiveInputMode() !== 'mouse';
 
   const selectedNodes = useMemo(
     () => nodes.filter((n) => n.selected) as CanvasNode[],
@@ -365,21 +365,20 @@ export const MultiSelectToolbar = () => {
         </>
       )}
 
-      {/* Non-mouse only: mouse users have keyboard Delete / Backspace. */}
-      {isNotMouse && (
-        <>
-          <FloatingToolbar.Divider />
-          <FloatingToolbar.ActionButton
-            title={t('toolbar.deleteSelected')}
-            tone="danger"
-            onClick={() => {
-              if (selectedNodes.length === 0) return;
-              deleteNodes(selectedNodes.map((n) => n.id));
-            }}
-          >
-            <Trash2 />
-          </FloatingToolbar.ActionButton>
-        </>
+      {showPrimaryDelete && (
+        <FloatingToolbar.ActionButton
+          title={t('toolbar.deleteSelected')}
+          tone="danger"
+          onClick={() => {
+            if (selectedNodes.length === 0) return;
+            deleteNodes(
+              selectedNodes.map((n) => n.id),
+              edges.filter((edge) => edge.selected).map((edge) => edge.id),
+            );
+          }}
+        >
+          <Trash2 />
+        </FloatingToolbar.ActionButton>
       )}
     </CanvasFloatingPopover>
   );
