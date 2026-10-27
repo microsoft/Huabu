@@ -30,6 +30,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { fingerprintMarkdownKeys } from '@huabu/shared/canvas-engine';
 
+import {
+  configureLatexCodeFences,
+  latexCodeBlockSchema,
+} from '../latexCodeFence';
 import { normalizeMathDelimiters } from '../markdownUtils';
 
 import type { Node as PMNode } from '@milkdown/prose/model';
@@ -56,6 +60,7 @@ async function createHarness(): Promise<Harness> {
       [Crepe.Feature.TopBar]: false,
     },
   });
+  crepe.editor.config(configureLatexCodeFences).use(latexCodeBlockSchema);
   await crepe.create();
   return {
     roundTrip(markdown: string) {
@@ -95,6 +100,9 @@ const AGENT_MARKDOWN_CASES: Array<[string, string]> = [
   ['escaped-punctuation', String.raw`Literal \*stars\* and \[brackets\].`],
   ['latex-inline-math', String.raw`The result is \(x + y\).`],
   ['latex-display-math', String.raw`\[x^2 + y^2 = z^2\]`],
+  ['latex-source', '```latex\n\\keypoint{Keep spaces and prose.}\n```'],
+  ['mixed-case-latex-source', '```LaTeX\n\\frac{a}{b}\n```'],
+  ['nested-latex-source', '> ```LATEX\n> \\keypoint{Keep this source.}\n> ```'],
   ['html-block', '<div data-kind="callout">\nImportant content\n</div>'],
   ['details-block', '<details>\n<summary>Details</summary>\nBody\n</details>'],
   ['definition', 'Term\n: Definition emitted by an agent'],
