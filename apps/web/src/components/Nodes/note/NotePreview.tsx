@@ -22,7 +22,7 @@
  * during iteration).
  */
 
-import { Code2, FileText, Sparkles } from 'lucide-react';
+import { Check, Code2, FileText, Pencil, Sparkles } from 'lucide-react';
 import {
   lazy,
   Suspense,
@@ -40,6 +40,7 @@ import { MilkdownEditor } from '@/components/Milkdown';
 import { MilkdownFloatingToolbar } from '@/components/Milkdown/MilkdownFloatingToolbar';
 import { PreviewHeaderButton } from '@/components/Nodes/PreviewHeaderButton';
 import { usePreviewHeaderSlot } from '@/components/Nodes/PreviewHeaderSlot';
+import { useEffectiveInputMode } from '@/hooks/useInputMode';
 import { usePreviewScrollMemory } from '@/hooks/usePreviewScrollMemory';
 import useCanvasStore from '@/store/canvasStore';
 import {
@@ -51,6 +52,7 @@ import {
 } from '@/utils/blockProvenance';
 import {
   canReadHuabuPayload,
+  createDragId,
   getHuabuPayload,
   setDragPayload,
 } from '@/utils/io/dragDrop';
@@ -119,6 +121,9 @@ export const NotePreview = ({
   // `content` is the canonical Markdown string. Brand-new note records
   // may have it absent or non-string; normalise to empty.
   const markdown = typeof data.content === 'string' ? data.content : '';
+  const touchMode = useEffectiveInputMode() !== 'mouse';
+  const [touchEditing, setTouchEditing] = useState(() => !markdown.trim());
+  const editable = !readOnly && (!touchMode || touchEditing);
   const provenance: MarkdownProvenance = useMemo(
     () =>
       PROVENANCE_ENABLED
@@ -396,9 +401,16 @@ export const NotePreview = ({
     if (readOnly) return;
     if (editMode !== 'wysiwyg') return;
     if (focusRequestNonce === undefined) return;
-    editor.focus();
+    if (editable) editor.focus();
     onFocusRequestHandled?.(focusRequestNonce);
-  }, [editor, readOnly, editMode, focusRequestNonce, onFocusRequestHandled]);
+  }, [
+    editor,
+    readOnly,
+    editable,
+    editMode,
+    focusRequestNonce,
+    onFocusRequestHandled,
+  ]);
 
   const handleBlockDragStart = useCallback(
     (event: MilkdownBlockDragEvent) => {
@@ -470,7 +482,7 @@ export const NotePreview = ({
   // the textarea's native drop behaviour.
   const handlePreviewDragOverCapture = useCallback(
     (e: React.DragEvent) => {
-      if (readOnly || editMode !== 'wysiwyg') return;
+      if (!editable || editMode !== 'wysiwyg') return;
       if (!canReadHuabuPayload(e.dataTransfer)) return;
       // We can't tell self-vs-cross-source until drop (dataTransfer
       // JSON is gated). preventDefault here unconditionally so the
@@ -491,11 +503,11 @@ export const NotePreview = ({
       e.preventDefault();
       e.dataTransfer.dropEffect = 'copy';
     },
-    [readOnly, editMode],
+    [editable, editMode],
   );
   const handlePreviewDropCapture = useCallback(
     (e: React.DragEvent) => {
-      if (readOnly || editMode !== 'wysiwyg') return;
+      if (!editable || editMode !== 'wysiwyg') return;
       if (!canReadHuabuPayload(e.dataTransfer)) return;
       const payload = getHuabuPayload(e.dataTransfer);
       if (!payload) return;
@@ -544,7 +556,7 @@ export const NotePreview = ({
       // can be expanded at a time — the cross-note flow happens via
       // dropping on the SOURCE-OTHER note's tile in `NoteNode`.
     },
-    [readOnly, editMode, id, editor, canvasId],
+    [editable, editMode, id, editor, canvasId],
   );
 
   const totalPending =
@@ -563,7 +575,7 @@ export const NotePreview = ({
   // it so it sits next to the universal Split view / Close buttons
   // instead of floating over the editor content.
   const { el: headerSlotEl } = usePreviewHeaderSlot();
-  const toggleButton = !readOnly ? (
+  const toggleButton = editable ? (
     <PreviewHeaderButton
       className={
         editMode === 'raw'
@@ -586,12 +598,47 @@ export const NotePreview = ({
       {editMode === 'wysiwyg' ? <Code2 /> : <FileText />}
     </PreviewHeaderButton>
   ) : null;
+  const editButton =
+    touchMode && !readOnly ? (
+      <PreviewHeaderButton
+        title={t(touchEditing ? 'editor.finishNoteEditing' : 'editor.editNote')}
+        aria-label={t(
+          touchEditing ? 'editor.finishNoteEditing' : 'editor.editNote',
+        )}
+        aria-pressed={touchEditing}
+        onClick={() => {
+          if (touchEditing) {
+            setEditMode('wysiwyg');
+            editor?.setReadonly(true);
+            if (
+              document.activeElement instanceof HTMLElement &&
+              containerRef.current?.contains(document.activeElement)
+            )
+              document.activeElement.blur();
+          } else {
+            // Keep this inside the user gesture so Safari permits the keyboard.
+            editor?.setReadonly(false);
+            editor?.focus();
+          }
+          setTouchEditing(!touchEditing);
+        }}
+      >
+        {touchEditing ? <Check /> : <Pencil />}
+      </PreviewHeaderButton>
+    ) : null;
 
   return (
     <div className="bg-surface relative h-full w-full">
       {headerSlotEl && toggleButton
         ? createPortal(toggleButton, headerSlotEl)
         : null}
+      {editButton ? (
+        headerSlotEl ? (
+          createPortal(editButton, headerSlotEl)
+        ) : (
+          <div className="absolute top-1 right-1 z-20">{editButton}</div>
+        )
+      ) : null}
 
       <div
         ref={containerRef}
@@ -604,7 +651,7 @@ export const NotePreview = ({
       >
         {editMode === 'wysiwyg' ? (
           <>
-            {!readOnly ? (
+            {editable ? (
               <MilkdownFloatingToolbar
                 instance={editor}
                 surfaceRef={containerRef}
@@ -613,12 +660,24 @@ export const NotePreview = ({
             <div className="contents" data-preview-search-content>
               <MilkdownEditor
                 markdown={markdown}
-                editable={!readOnly}
+                editable={editable}
                 canvasId={canvasId ?? undefined}
                 onChange={handleEditorChange}
                 onExternalUpdate={handleExternalUpdate}
                 onReady={setEditor}
                 onBlockDragStart={readOnly ? undefined : handleBlockDragStart}
+                getTouchDragPayload={
+                  touchMode && !editable
+                    ? (content) => ({
+                        dragId: createDragId(),
+                        kind: 'note',
+                        origin: id
+                          ? { type: 'user-excerpt', excerptFromNodeId: id }
+                          : { type: 'user-excerpt' },
+                        data: { content: content.trim() },
+                      })
+                    : undefined
+                }
                 decorations={decorations}
                 className="milkdown-note-preview"
                 onLinkClick={handleLinkClick}
@@ -651,7 +710,7 @@ export const NotePreview = ({
               <RawMarkdownEditor
                 searchNodeId={id}
                 value={markdown}
-                readOnly={readOnly}
+                readOnly={!editable}
                 onChange={handleRawChange}
                 ariaLabel={t('node.rawMarkdownSource')}
                 className="huabu-raw-markdown"

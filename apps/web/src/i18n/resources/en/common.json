@@ -592,6 +592,11 @@
   },
   "editor": {
     "readOnlyContent": "Read-only content",
+    "dragParagraphToCanvas": "Drag paragraph to empty canvas",
+    "touchParagraphHint": "Tap a paragraph, then drag its grip to empty canvas to copy it.",
+    "releaseParagraph": "Release to copy paragraph",
+    "editNote": "Edit note",
+    "finishNoteEditing": "Done editing",
     "blockType": "Block type",
     "textColor": "Text color",
     "highlightColor": "Highlight color",

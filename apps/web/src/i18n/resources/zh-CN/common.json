@@ -592,6 +592,11 @@
   },
   "editor": {
     "readOnlyContent": "只读内容",
+    "dragParagraphToCanvas": "将段落拖到画布空白处",
+    "touchParagraphHint": "点选段落，再将抓手拖到画布空白处，即可摘录副本。",
+    "releaseParagraph": "松开以摘录段落",
+    "editNote": "编辑笔记",
+    "finishNoteEditing": "完成编辑",
     "blockType": "块类型",
     "textColor": "文字颜色",
     "highlightColor": "高亮颜色",

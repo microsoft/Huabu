@@ -128,10 +128,12 @@ import useCanvasStore from '../../../store/canvasStore.ts';
 import { useConnectPortStore } from '../../../store/connectPortStore.ts';
 import { useGesturePreviewStore } from '../../../store/gesturePreviewStore.ts';
 import { useToolStore } from '../../../store/toolStore.ts';
+import { registerCanvasDropTarget } from '../../../utils/io/canvasDropTargets.ts';
 import {
   canMoveHuabuPayload,
   canReadHuabuPayload,
   getHuabuPayload,
+  type DragPayload,
 } from '../../../utils/io/dragDrop.ts';
 import { looksLikeUrl } from '../../../utils/io/media.ts';
 import { FrameNode } from '../../Nodes/frame/FrameNode.tsx';
@@ -1161,6 +1163,64 @@ const CanvasContent: React.FC<CanvasProps> = ({
     return () => setCanvasWrapper(null);
   }, [setCanvasWrapper]);
 
+  const handleInternalDrop = useCallback(
+    (payload: DragPayload, point: { x: number; y: number }, copy: boolean) => {
+      const instance = rfInstanceRef.current;
+      if (!instance) return;
+      const dropPos = instance.screenToFlowPosition(point);
+      const dedupeKey = `drag:${payload.dragId}`;
+      const now = Date.now();
+      const lastDrop = lastDropRef.current;
+      if (lastDrop && lastDrop.key === dedupeKey && now - lastDrop.at < 4000)
+        return;
+      lastDropRef.current = { key: dedupeKey, at: now };
+
+      if (payload.kind === 'web') {
+        addNode({
+          nodeType: 'web',
+          placementPoint: dropPos,
+          data: { src: payload.data.src, origin: payload.origin },
+        });
+      } else if (payload.kind === 'note') {
+        const newNote: AddNodeInput = {
+          nodeType: 'note',
+          placementPoint: dropPos,
+          data: { content: payload.data.content, origin: payload.origin },
+        };
+        const { sourceNodeId, sourceContentAfterMove } = payload.data;
+        if (
+          !copy &&
+          sourceNodeId !== undefined &&
+          sourceContentAfterMove !== undefined
+        )
+          moveNoteExcerpt({ sourceNodeId, sourceContentAfterMove, newNote });
+        else addNode(newNote);
+      } else {
+        const { src, label } = payload.data;
+        const doAdd = (width: number, height: number) =>
+          addNode({
+            nodeType: 'image',
+            placementPoint: dropPos,
+            data: { src, label, origin: payload.origin },
+            naturalDimensions: { width, height },
+          });
+        const image = new Image();
+        image.onload = () => doAdd(image.naturalWidth, image.naturalHeight);
+        image.onerror = () => doAdd(0, 0);
+        image.src = resolveArtifactUrl(src, canvasId ?? undefined);
+      }
+    },
+    [addNode, moveNoteExcerpt, canvasId],
+  );
+
+  useEffect(() => {
+    const wrapper = wrapperRef.current;
+    if (!wrapper) return;
+    return registerCanvasDropTarget(wrapper, (payload, point) =>
+      handleInternalDrop(payload, point, true),
+    );
+  }, [handleInternalDrop]);
+
   return (
     <div
       ref={wrapperRef}
@@ -1233,88 +1293,11 @@ const CanvasContent: React.FC<CanvasProps> = ({
         if (canReadHuabuPayload(e.dataTransfer)) {
           const payload = getHuabuPayload(e.dataTransfer);
           if (!payload) return;
-
-          // Deduplicate repeated drop events
-          const dedupeKey = `drag:${payload.dragId}`;
-          const now =
-            typeof e.timeStamp === 'number' && e.timeStamp > 0
-              ? e.timeStamp
-              : Date.now();
-          const lastDrop = lastDropRef.current;
-          if (
-            lastDrop &&
-            lastDrop.key === dedupeKey &&
-            now - lastDrop.at < 4000
-          )
-            return;
-          lastDropRef.current = { key: dedupeKey, at: now };
-
-          let newNodeInput: AddNodeInput | null = null;
-
-          if (payload.kind === 'web') {
-            newNodeInput = {
-              nodeType: 'web',
-              placementPoint: dropPos,
-              data: { src: payload.data.src, origin: payload.origin },
-            };
-          }
-
-          if (payload.kind === 'note') {
-            const newNoteInput: AddNodeInput = {
-              nodeType: 'note',
-              placementPoint: dropPos,
-              data: {
-                content: payload.data.content,
-                origin: payload.origin,
-              },
-            };
-
-            // Default = MOVE (source loses the dragged range);
-            // Option (macOS) / Ctrl (others) downgrades to COPY.
-            // MOVE additionally requires a source node id and a
-            // pre-computed post-MOVE snapshot, both absent when
-            // dragging from non-editable surfaces (AI chat cards) —
-            // those always fall back to COPY regardless of modifier
-            // state.
-            const { sourceNodeId, sourceContentAfterMove } = payload.data;
-            const canMove =
-              sourceNodeId !== undefined &&
-              sourceContentAfterMove !== undefined;
-            const isCopyModifier = isMac ? e.altKey : e.ctrlKey;
-            const isMove = canMove && !isCopyModifier;
-
-            if (isMove) {
-              moveNoteExcerpt({
-                sourceNodeId,
-                sourceContentAfterMove,
-                newNote: newNoteInput,
-              });
-            } else {
-              addNode(newNoteInput);
-            }
-            return;
-          }
-
-          if (payload.kind === 'image') {
-            const { src, label } = payload.data;
-
-            const doAdd = (natW: number, natH: number) => {
-              addNode({
-                nodeType: 'image',
-                placementPoint: dropPos,
-                data: { src, label, origin: payload.origin },
-                naturalDimensions: { width: natW, height: natH },
-              });
-            };
-
-            const img = new Image();
-            img.onload = () => doAdd(img.naturalWidth, img.naturalHeight);
-            img.onerror = () => doAdd(0, 0);
-            img.src = resolveArtifactUrl(src, canvasId ?? undefined);
-            return;
-          }
-
-          if (newNodeInput) addNode(newNodeInput);
+          handleInternalDrop(
+            payload,
+            { x: e.clientX, y: e.clientY },
+            isMac ? e.altKey : e.ctrlKey,
+          );
           return;
         }
 

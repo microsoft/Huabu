@@ -21,6 +21,7 @@ vi.mock('../createMilkdown', () => ({
     root.appendChild(editor);
     return {
       setAriaLabel: vi.fn(),
+      setReadonly: vi.fn(),
       destroy: vi.fn(),
       getSelectionClientRect: mocks.getSelectionClientRect,
       getTextSelection: mocks.getTextSelection,
