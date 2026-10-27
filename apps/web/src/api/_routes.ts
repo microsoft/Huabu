@@ -170,6 +170,7 @@ export const routes = {
   },
   // Profiles (loopback-only) — user-managed spawn recipes.
   acpProfiles: '/acp/profiles',
+  acpDevice: (agentletId: string) => `/acp/devices/${enc(agentletId)}`,
   acpProfileItem: (id: string) => `/acp/profiles/${enc(id)}`,
   // Embedded agentlet daemon — health + manual restart.
   acpAgentlet: '/acp/agentlet',

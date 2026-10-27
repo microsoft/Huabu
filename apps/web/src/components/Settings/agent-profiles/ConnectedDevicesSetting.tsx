@@ -1,16 +1,170 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { useEffect, useState } from 'react';
+import { Pencil } from 'lucide-react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/components/Common/Button';
+import { TextInput } from '@/components/Common/TextInput';
 import { SettingRow } from '@/components/Settings/Common/SettingRow';
 import {
   getElectronBridge,
   type ElectronLocalAgentState,
 } from '@/hooks/useElectron';
 import { useAcpProfilesStore } from '@/store/acpProfilesStore';
+
+import type { ConnectedAgentletDevice } from '@/api/acp';
+
+function ConnectedDeviceRow({
+  device,
+  isLocal,
+  children,
+}: {
+  device: ConnectedAgentletDevice;
+  isLocal: boolean;
+  children: ReactNode;
+}) {
+  const { t } = useTranslation();
+  const renameDevice = useAcpProfilesStore((store) => store.renameDevice);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(device.displayName);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const inFlight = useRef(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const renameRef = useRef<HTMLButtonElement>(null);
+  const wasEditing = useRef(false);
+
+  useEffect(() => {
+    if (editing) {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    } else if (wasEditing.current) {
+      renameRef.current?.focus();
+    }
+    wasEditing.current = editing;
+  }, [editing]);
+
+  const save = async () => {
+    if (inFlight.current) return;
+    const name = draft.trim();
+    if (!name || name.length > 120) {
+      setError(t('settings.deviceNameInvalid'));
+      return;
+    }
+    inFlight.current = true;
+    setSaving(true);
+    setError(null);
+    try {
+      if (name !== device.displayName)
+        await renameDevice(device.agentletId, name);
+      setEditing(false);
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : t('settings.deviceRenameFailed'),
+      );
+    } finally {
+      inFlight.current = false;
+      setSaving(false);
+    }
+  };
+
+  return (
+    <SettingRow
+      title={
+        editing ? (
+          <TextInput
+            ref={inputRef}
+            aria-label={t('settings.deviceName')}
+            aria-invalid={!!error}
+            className="w-full"
+            value={draft}
+            maxLength={120}
+            disabled={saving}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              event.stopPropagation();
+              if (event.nativeEvent.isComposing || saving) return;
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                void save();
+              } else if (event.key === 'Escape') {
+                event.preventDefault();
+                setEditing(false);
+                setError(null);
+              }
+            }}
+          />
+        ) : (
+          <>
+            <span className="[overflow-wrap:anywhere]">
+              {device.displayName}
+            </span>
+            {isLocal ? (
+              <span className="text-fg-muted ml-1 font-normal">
+                {t('settings.localAgentThisDevice')}
+              </span>
+            ) : null}
+          </>
+        )
+      }
+      description={[
+        t('settings.deviceProfileCount', { count: device.profileCount }),
+        `v${device.version}`,
+        device.agentletId,
+      ].join(' · ')}
+    >
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        {children}
+        {editing ? (
+          <>
+            <Button size="sm" disabled={saving} onClick={() => void save()}>
+              {t('actions.save')}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={saving}
+              onClick={() => {
+                setEditing(false);
+                setError(null);
+              }}
+            >
+              {t('actions.cancel')}
+            </Button>
+          </>
+        ) : (
+          <Button
+            ref={renameRef}
+            variant="ghost"
+            size="sm"
+            iconOnly
+            aria-label={t('settings.renameDevice')}
+            title={t('settings.renameDevice')}
+            onClick={() => {
+              setDraft(device.displayName);
+              setError(null);
+              setEditing(true);
+            }}
+          >
+            <Pencil className="size-3.5" aria-hidden />
+          </Button>
+        )}
+      </div>
+      {error ? (
+        <p
+          role="alert"
+          className="text-danger-fg mt-2 max-w-sm text-xs [overflow-wrap:anywhere]"
+        >
+          {error}
+        </p>
+      ) : null}
+    </SettingRow>
+  );
+}
 
 const STATUS_KEYS = {
   disabled: 'settings.localAgentDisabled',
@@ -181,26 +335,13 @@ export function ConnectedDevicesSetting() {
         </SettingRow>
       ) : null}
       {orderedDevices.map((device) => (
-        <SettingRow
+        <ConnectedDeviceRow
           key={device.agentletId}
-          title={
-            <>
-              {device.displayName}
-              {device === localDevice ? (
-                <span className="text-fg-muted ml-1 font-normal">
-                  {t('settings.localAgentThisDevice')}
-                </span>
-              ) : null}
-            </>
-          }
-          description={[
-            t('settings.deviceProfileCount', { count: device.profileCount }),
-            `v${device.version}`,
-            device.agentletId,
-          ].join(' · ')}
+          device={device}
+          isLocal={device === localDevice}
         >
           {device === localDevice ? controls : null}
-        </SettingRow>
+        </ConnectedDeviceRow>
       ))}
       {!api && connectedDevices.length === 0 ? (
         <SettingRow title={t('settings.noConnectedDevices')}>

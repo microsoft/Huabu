@@ -384,19 +384,20 @@ export function AgentConnectionSettings() {
           format,
         );
         await copyToClipboard(result.content);
-        setConnectionInfo({ source: result.source, warnings: result.warnings });
-        const warningKey = result.warnings.includes('insecure')
-          ? 'settings.agentletCommandCopiedInsecure'
-          : result.warnings.includes('loopback')
-            ? 'settings.agentletCommandCopiedLoopback'
-            : result.source === 'generated'
-              ? 'settings.agentletCommandCopiedGenerated'
-              : format === 'env-file'
-                ? 'settings.agentletEnvFileCopied'
-                : 'settings.agentletCommandCopied';
+        const warnings = result.warnings.filter(
+          (warning) => warning !== 'insecure',
+        );
+        setConnectionInfo({ source: result.source, warnings });
+        const warningKey = warnings.includes('loopback')
+          ? 'settings.agentletCommandCopiedLoopback'
+          : result.source === 'generated'
+            ? 'settings.agentletCommandCopiedGenerated'
+            : format === 'env-file'
+              ? 'settings.agentletEnvFileCopied'
+              : 'settings.agentletCommandCopied';
         toast(t(warningKey), {
           tone:
-            result.warnings.length > 0 || result.source === 'generated'
+            warnings.length > 0 || result.source === 'generated'
               ? 'warning'
               : 'success',
         });
@@ -481,9 +482,6 @@ export function AgentConnectionSettings() {
                 )}
                 {connectionInfo.warnings.includes('loopback') && (
                   <p>{t('settings.agentletLoopbackWarning')}</p>
-                )}
-                {connectionInfo.warnings.includes('insecure') && (
-                  <p>{t('settings.agentletInsecureWarning')}</p>
                 )}
               </div>
             )}

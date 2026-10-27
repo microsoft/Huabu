@@ -19,14 +19,16 @@ vi.mock('react-i18next', () => ({
 }));
 vi.mock('@/hooks/useElectron', () => ({ getElectronBridge: vi.fn() }));
 const refresh = vi.hoisted(() => vi.fn(async () => undefined));
+const renameDevice = vi.hoisted(() => vi.fn(async () => undefined));
 let connectedDevices: ConnectedAgentletDevice[] = [];
 vi.mock('@/store/acpProfilesStore', () => ({
   useAcpProfilesStore: (
     selector: (state: {
       refresh: typeof refresh;
       connectedDevices: ConnectedAgentletDevice[];
+      renameDevice: typeof renameDevice;
     }) => unknown,
-  ) => selector({ refresh, connectedDevices }),
+  ) => selector({ refresh, connectedDevices, renameDevice }),
 }));
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -55,6 +57,7 @@ const api = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  renameDevice.mockReset().mockResolvedValue(undefined);
   connectedDevices = [];
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -74,6 +77,101 @@ afterEach(() => {
 });
 
 describe('connected device settings', () => {
+  async function editDeviceName() {
+    vi.mocked(getElectronBridge).mockReturnValue(null);
+    connectedDevices = [
+      {
+        agentletId: 'device-id',
+        displayName: 'Office PC',
+        version: '1.0.0',
+        connectedAt: '2026-01-01T00:00:00.000Z',
+        profileCount: 2,
+      },
+    ];
+    await act(async () => root.render(<ConnectedDevicesSetting />));
+    expect(document.activeElement).not.toBe(container.querySelector('button'));
+    await act(async () => container.querySelector('button')?.click());
+    const input = container.querySelector('input');
+    if (!input) throw new Error('Missing device name input');
+    expect(document.activeElement).toBe(input);
+    expect(input.value).toBe('Office PC');
+    return input;
+  }
+
+  function typeName(input: HTMLInputElement, value: string) {
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        'value',
+      )?.set;
+      if (!setter) throw new Error('Missing native input setter');
+      setter.call(input, value);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  }
+
+  it('renames by exact identity on Enter and restores focus', async () => {
+    const input = await editDeviceName();
+    typeName(input, '  Work PC  ');
+    await act(async () =>
+      input.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      ),
+    );
+    expect(renameDevice).toHaveBeenCalledExactlyOnceWith(
+      'device-id',
+      'Work PC',
+    );
+    expect(container.querySelector('input')).toBeNull();
+    expect(document.activeElement?.getAttribute('aria-label')).toBe(
+      'settings.renameDevice',
+    );
+  });
+
+  it('rejects blank names and cancels with Escape without saving', async () => {
+    const input = await editDeviceName();
+    typeName(input, ' ');
+    await act(async () =>
+      input.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      ),
+    );
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+      'settings.deviceNameInvalid',
+    );
+    expect(renameDevice).not.toHaveBeenCalled();
+    await act(async () =>
+      input.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+      ),
+    );
+    expect(container.querySelector('input')).toBeNull();
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(container.textContent).toContain('Office PC');
+  });
+
+  it('retains failed drafts and allows retry without duplicate in-flight saves', async () => {
+    const input = await editDeviceName();
+    typeName(input, 'Work PC');
+    renameDevice.mockRejectedValueOnce(new Error('Device disconnected'));
+    const saveButton = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'actions.save',
+    );
+    if (!saveButton) throw new Error('Missing Save button');
+    await act(async () => {
+      saveButton.click();
+      saveButton.click();
+    });
+    expect(renameDevice).toHaveBeenCalledTimes(1);
+    expect(input.value).toBe('Work PC');
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+      'Device disconnected',
+    );
+    await act(async () => saveButton.click());
+    expect(renameDevice).toHaveBeenCalledTimes(2);
+    expect(container.querySelector('input')).toBeNull();
+  });
+
   it('does not expose local actions in a browser', async () => {
     vi.mocked(getElectronBridge).mockReturnValue(null);
     await act(async () => root.render(<ConnectedDevicesSetting />));
@@ -203,7 +301,9 @@ describe('connected device settings', () => {
     expect(rows[0].querySelector('button')?.textContent).toBe(
       'settings.localAgentDisconnect',
     );
-    expect(rows[1].querySelector('button')).toBeNull();
+    expect(rows[1].querySelector('button')?.getAttribute('aria-label')).toBe(
+      'settings.renameDevice',
+    );
     await act(async () => rows[0].querySelector('button')?.click());
     expect(api.setEnabled).toHaveBeenCalledExactlyOnceWith(false);
   });
@@ -241,7 +341,9 @@ describe('connected device settings', () => {
     await act(async () => root.render(<ConnectedDevicesSetting />));
     expect(container.querySelectorAll('.setting-row')).toHaveLength(1);
     expect(container.textContent).toContain('Server: linux x64');
-    expect(container.querySelector('button')).toBeNull();
+    expect(container.querySelector('button')?.getAttribute('aria-label')).toBe(
+      'settings.renameDevice',
+    );
   });
 
   it('keeps the connect-this-device entry first before and after connecting', async () => {
@@ -258,7 +360,9 @@ describe('connected device settings', () => {
     const rows = container.querySelectorAll('.setting-row');
     expect(rows).toHaveLength(2);
     expect(rows[1].textContent).toContain('Server: linux x64');
-    expect(rows[1].querySelector('button')).toBeNull();
+    expect(rows[1].querySelector('button')?.getAttribute('aria-label')).toBe(
+      'settings.renameDevice',
+    );
     expect(rows[0].textContent).toContain('settings.localAgentTitle');
     expect(rows[0].querySelector('button')?.textContent).toBe(
       'settings.localAgentConnect',

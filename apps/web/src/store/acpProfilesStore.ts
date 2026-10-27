@@ -42,7 +42,7 @@ import { create } from 'zustand';
 
 import { HUABU_AGENT_PROFILE_ID } from '@huabu/shared';
 
-import { listAcpProfiles } from '@/api/acp';
+import { listAcpProfiles, renameAgentletDevice } from '@/api/acp';
 import { getAgentDefaults, updateAgentDefaults } from '@/api/agentDefaults';
 import { toast } from '@/components/Common/Toast';
 import { i18n } from '@/i18n';
@@ -67,6 +67,7 @@ let inFlightRefresh: Promise<void> | null = null;
 let inFlightDefaults: Promise<AgentDefaultsResponse> | null = null;
 let defaultsSaveQueue = Promise.resolve();
 let defaultsRevision = 0;
+let deviceNamesRevision = 0;
 
 export const RECENT_CONVERSATION_AGENT_STORAGE_KEY =
   'huabu.recentConversationAgentProfile.v1';
@@ -143,6 +144,7 @@ interface AcpProfilesState {
   init: () => Promise<void>;
   /** Force a fresh GET. Safe to call concurrently. */
   refresh: (options?: { background?: boolean }) => Promise<void>;
+  renameDevice: (agentletId: string, displayName: string) => Promise<void>;
   loadDefaults: () => Promise<AgentDefaultsResponse>;
   saveDefaults: (config: AgentDefaults) => Promise<AgentDefaultsResponse>;
   rememberConversationAgent: (profileId: string) => void;
@@ -250,11 +252,21 @@ export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
     writeRecentConversationProfileId(profileId);
     set({ recentConversationProfileId: profileId });
   },
+  renameDevice: async (agentletId, displayName) => {
+    const saved = await renameAgentletDevice(agentletId, { displayName });
+    deviceNamesRevision++;
+    set((state) => ({
+      connectedDevices: state.connectedDevices.map((device) =>
+        device.agentletId === agentletId ? { ...device, ...saved } : device,
+      ),
+    }));
+  },
   refresh: async (options) => {
     await defaultsSaveQueue;
     if (inFlightRefresh) return inFlightRefresh;
     const background = options?.background === true;
     const revision = defaultsRevision;
+    const namesRevision = deviceNamesRevision;
     const request = (async () => {
       if (!background) set({ loading: true });
       try {
@@ -262,7 +274,9 @@ export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
         set({
           profiles: res.profiles,
           selectableProfileIds: res.selectableProfileIds,
-          connectedDevices: res.connectedDevices,
+          ...(namesRevision === deviceNamesRevision
+            ? { connectedDevices: res.connectedDevices }
+            : {}),
           folderPickerAgentletId: res.folderPickerAgentletId ?? null,
           agentlet: res.agentlet,
           ...(revision === defaultsRevision

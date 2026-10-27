@@ -497,10 +497,7 @@ function registerLocalAgent(origin: string): void {
             ? `Allow ${origin} to run commands and access files on this device?`
             : 'Disconnect this device?',
           detail: enabled
-            ? 'Uses your account permissions. Reconnects when Huabu starts; quitting stops local tasks.' +
-              (origin.startsWith('http:')
-                ? '\nUnencrypted HTTP. Continue only on a trusted network.'
-                : '')
+            ? 'Uses your account permissions. Reconnects when Huabu starts; quitting stops local tasks.'
             : 'Stops running tasks and disables automatic reconnection.',
           buttons: ['Cancel', enabled ? 'Connect' : 'Disconnect'],
           defaultId: 0,

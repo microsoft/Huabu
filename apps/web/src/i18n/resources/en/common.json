@@ -415,7 +415,6 @@
     "agentletCommandCopying": "Copying…",
     "agentletCommandCopied": "Connection command copied. Run it on the device where your Agents run.",
     "agentletCommandCopiedLoopback": "Command copied. This address only works on the Huabu server's device. For another device, use a reachable server address or set up port forwarding.",
-    "agentletCommandCopiedInsecure": "Command copied. The connection is not encrypted; use it only on a trusted network.",
     "agentletCommandCopyFailed": "Could not copy the connection information. Try again.",
     "autoAcceptAgentChanges": "Automatically accept Agent Space changes",
     "autoAcceptAgentChangesDescription": "Keep changes automatically; they cannot be reverted from change history after refresh.",
@@ -436,7 +435,10 @@
     "imageApiVersionPlaceholder": "Use 2025-04-01-preview or later.",
     "readinessUnavailable": "Deployment readiness could not be loaded. Credential actions may fail.",
     "credentialStoreReadOnly": "Credential storage is read-only. Check the server's private credential storage and restart Huabu to save credentials or use OAuth.",
-    "remoteTransportUnverified": "This remote connection uses operator-managed transport. Use HTTPS or a trusted private network.",
+    "renameDevice": "Rename device",
+    "deviceName": "Device name",
+    "deviceNameInvalid": "Enter a device name of 1 to 120 characters.",
+    "deviceRenameFailed": "Could not rename the device. Try again.",
     "remoteLoginDisabled": "Login is disabled. Anyone who can reach this server has full owner access. Restrict access with a trusted network or an authenticated proxy.",
     "canaryRedeploy": "Alpha Canary redeployment",
     "canaryDescription": "Running {{running}} · origin/{{branch}} {{remote}} · Last result for {{redeployBranch}}: {{outcome}}",
@@ -545,7 +547,6 @@
     "agentletEnvFileInstructions": "Save the connection file as connection.env in the source folder, then run:",
     "agentletGeneratedTokenWarning": "This connection uses a temporary key. After the Huabu server restarts, copy a new connection command and run it on the device where your Agents run.",
     "agentletLoopbackWarning": "This address only works on the Huabu server's device. For another device, use a reachable server address or set up port forwarding.",
-    "agentletInsecureWarning": "The connection is not encrypted. Use it only on a trusted network, or use HTTPS when connecting over a public network.",
     "agentletCommandCopiedGenerated": "Connection information copied. After the server restarts, copy and run a new connection command."
   },
   "status": {
