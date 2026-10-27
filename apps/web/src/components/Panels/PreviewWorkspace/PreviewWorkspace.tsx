@@ -359,6 +359,7 @@ export function PreviewWorkspace({
 
   const containerRef = useRef<HTMLDivElement>(null);
   const separatorDragCleanupRef = useRef<(() => void) | null>(null);
+  const [isResizing, setIsResizing] = useState(false);
   const [activeDragTabId, setActiveDragTabId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const isSplit = workspace.groups.length > 1;
@@ -413,12 +414,14 @@ export function PreviewWorkspace({
 
   const onSeparatorPointerDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
+      if (e.button !== 0) return;
       e.preventDefault();
       e.stopPropagation();
       separatorDragCleanupRef.current?.();
       const target = e.currentTarget;
       const pointerId = e.pointerId;
       target.setPointerCapture(pointerId);
+      setIsResizing(true);
 
       const move = (ev: PointerEvent) => {
         if (ev.pointerId !== pointerId) return;
@@ -430,15 +433,18 @@ export function PreviewWorkspace({
         window.removeEventListener('pointermove', move);
         window.removeEventListener('pointerup', finish);
         window.removeEventListener('pointercancel', finish);
-        if (separatorDragCleanupRef.current === cleanup) {
-          separatorDragCleanupRef.current = null;
-        }
-      };
-      const finish = (ev: PointerEvent) => {
-        if (ev.pointerId !== pointerId) return;
+        window.removeEventListener('blur', cleanup);
+        target.removeEventListener('lostpointercapture', finish);
         if (target.hasPointerCapture(pointerId)) {
           target.releasePointerCapture(pointerId);
         }
+        if (separatorDragCleanupRef.current === cleanup) {
+          separatorDragCleanupRef.current = null;
+        }
+        setIsResizing(false);
+      };
+      const finish = (ev: PointerEvent) => {
+        if (ev.pointerId !== pointerId) return;
         cleanup();
       };
 
@@ -446,6 +452,8 @@ export function PreviewWorkspace({
       window.addEventListener('pointermove', move);
       window.addEventListener('pointerup', finish);
       window.addEventListener('pointercancel', finish);
+      window.addEventListener('blur', cleanup);
+      target.addEventListener('lostpointercapture', finish);
     },
     [setSplitRatio],
   );
@@ -454,7 +462,7 @@ export function PreviewWorkspace({
     () => () => {
       separatorDragCleanupRef.current?.();
     },
-    [],
+    [isSplit],
   );
 
   const onSeparatorKeyDown = (e: React.KeyboardEvent) => {
@@ -492,6 +500,7 @@ export function PreviewWorkspace({
               <div
                 role="separator"
                 aria-orientation="vertical"
+                data-resizing={isResizing ? true : undefined}
                 aria-label={t('preview.resizeGroups')}
                 aria-valuenow={Math.round(workspace.splitRatio * 100)}
                 aria-valuemin={20}
@@ -501,7 +510,7 @@ export function PreviewWorkspace({
                 onKeyDown={onSeparatorKeyDown}
                 className="group focus-visible:outline-info z-10 -mx-1 flex w-2 shrink-0 cursor-col-resize touch-none items-center justify-center focus-visible:outline-1"
               >
-                <div className="bg-edge-default group-hover:bg-info h-full w-px" />
+                <div className="bg-edge-default group-hover:bg-info/30 group-data-[resizing=true]:bg-info/50 h-full w-px group-hover:w-1 group-data-[resizing=true]:w-1" />
               </div>
             )}
             <div
