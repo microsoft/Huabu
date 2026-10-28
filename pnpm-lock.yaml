@@ -19,8 +19,8 @@ importers:
         specifier: ^17.2.3
         version: 17.4.2
       electron:
-        specifier: 43.5.0
-        version: 43.5.0
+        specifier: 43.8.1
+        version: 43.8.1
       eslint:
         specifier: ^9.39.2
         version: 9.39.4(jiti@2.7.0)
@@ -83,8 +83,8 @@ importers:
         specifier: ^24.13.3
         version: 24.13.3
       electron:
-        specifier: 43.5.0
-        version: 43.5.0
+        specifier: 43.8.1
+        version: 43.8.1
       electron-builder:
         specifier: 26.16.1
         version: 26.16.1(electron-builder-squirrel-windows@26.16.1)
@@ -1255,8 +1255,8 @@ packages:
     resolution: {integrity: sha512-Bg/YN6kA7Swja/NQxka8xFdecb4E/auIEGF2G5A25EaQXhRnPj300/7/KpgsDDMYUzHTDAv4RyUxaQPJKW81Rw==}
     engines: {node: '>=22.19.0'}
 
-  '@electron-internal/extract-zip@1.0.5':
-    resolution: {integrity: sha512-+bqFCP98pLI0Tt0XQo1TmlXtwjWchISndDOxCkEcIuUgXWpBnLyRI+2DU+mesvnMMX6L1XDqYNA0lXNDHd/yiA==}
+  '@electron-internal/extract-zip@1.0.6':
+    resolution: {integrity: sha512-/aQLgFDdCSnwChfUwqekSmE1q2dCTzhUy5saIHBb5vyYn5LzWaKPaIz1wM0lDMCZYBoIG4svJNvAJb6vkI8BuA==}
     engines: {node: '>=22.12.0'}
 
   '@electron/asar@3.4.1':
@@ -4038,8 +4038,8 @@ packages:
     resolution: {integrity: sha512-bO3y10YikuUwUuDUQRM4KfwNkKhnpVO7IPdbsrejwN9/AABJzzTQ4GeHwyzNSrVO+tEH3/Np255a3sVZpZDjvg==}
     engines: {node: '>=8.0.0'}
 
-  electron@43.5.0:
-    resolution: {integrity: sha512-nV2aWuKatmUrxrAWP2pNIynNX7dy83TCAz+6KnsbK7hDVLE+6fa2iouOtir41AboZTa+J5w2UgicWHAqUaaUJw==}
+  electron@43.8.1:
+    resolution: {integrity: sha512-Qa6/xXODEn60oIkyuV8jXmyX84z6nicuBh7BOkPHVZlTTCG1MeTYjAkmxX+1B/kEkErPjs3WCP+JdtwkRaKRcQ==}
     engines: {node: '>= 22.12.0'}
     hasBin: true
 
@@ -6886,7 +6886,7 @@ packages:
     resolution: {integrity: sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w==}
 
   undici@6.29.0:
-    resolution: {integrity: sha512-R+RODBqp6i2pPflGdq+xIOUkl+RNfGgHwoinecKu/JCuf2uO06cOKoDbI2P7Dn6KcswdKwrczbU6IYJ6K8X+wg==, tarball: https://ms-feed-25.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/undici/-/undici-6.29.0.tgz}
+    resolution: {integrity: sha512-R+RODBqp6i2pPflGdq+xIOUkl+RNfGgHwoinecKu/JCuf2uO06cOKoDbI2P7Dn6KcswdKwrczbU6IYJ6K8X+wg==}
     engines: {node: '>=18.17'}
 
   undici@7.30.1:
@@ -8163,7 +8163,7 @@ snapshots:
 
   '@earendil-works/pi-telemetry@0.85.1': {}
 
-  '@electron-internal/extract-zip@1.0.5': {}
+  '@electron-internal/extract-zip@1.0.6': {}
 
   '@electron/asar@3.4.1':
     dependencies:
@@ -11119,9 +11119,9 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  electron@43.5.0:
+  electron@43.8.1:
     dependencies:
-      '@electron-internal/extract-zip': 1.0.5
+      '@electron-internal/extract-zip': 1.0.6
       '@electron/get': 5.1.0
       '@types/node': 24.13.3
     transitivePeerDependencies:
