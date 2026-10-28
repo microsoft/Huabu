@@ -158,23 +158,41 @@ describe('Space access', () => {
     expect((await titles('', { canvasId: ['mine'] })).statusCode).toBe(400);
   });
 
-  it('keeps agents and conversations to owners, whatever Space a request names', async () => {
+  it('lets a member use the Built-In agent in their Spaces, and keeps external agents to administrators', async () => {
     const { app } = host();
     const as = (owner: 'yes' | 'no') => ({ 'x-owner': owner });
+    const member = async (request: {
+      method?: 'GET' | 'POST';
+      url: string;
+      payload?: object;
+    }) => (await app.inject({ ...request, headers: as('no') })).statusCode;
+    // Conversations, through a Space they may use.
+    expect(await member({ url: '/api/agent/history/t1?canvasId=mine' })).toBe(
+      200,
+    );
+    expect(
+      await member({
+        method: 'POST',
+        url: '/api/agent',
+        payload: { canvasId: 'mine' },
+      }),
+    ).toBe(200);
+    expect(await member({ url: '/api/canvas/mine/threads/t1/changes' })).toBe(
+      200,
+    );
+    // Not through one they may not, nor without naming one.
+    expect(await member({ url: '/api/agent/history/t1?canvasId=other' })).toBe(
+      404,
+    );
+    expect(await member({ url: '/api/agent/history/t1' })).toBe(400);
     for (const request of [
-      { url: '/api/agent/history/t1?canvasId=mine' },
-      { url: '/api/agent/history/t1' },
-      { method: 'POST', url: '/api/agent', payload: { canvasId: 'mine' } },
       { method: 'POST', url: '/api/acp/threads/t1/permission?canvasId=mine' },
-      { url: '/api/canvas/mine/threads/t1/changes' },
       // The machine credential's own surface: agent launches, Task Runs and
       // shared service credentials.
       { method: 'POST', url: '/api/rfs/mine/services/web-search/lease' },
       { method: 'POST', url: '/api/interactive-views/mine/n1/actions/a1' },
     ] as const) {
-      expect(
-        (await app.inject({ ...request, headers: as('no') })).statusCode,
-      ).toBe(403);
+      expect(await member(request)).toBe(403);
     }
     expect(
       (
