@@ -28,18 +28,16 @@ declare module 'fastify' {
 type Fields = Record<string, unknown> | undefined;
 
 /**
- * Agents act through the shared machine credential, which reaches every
- * Space, so a member may not run or steer one until credentials carry the
- * caller's own authority. RFS is that credential's own surface: it launches
- * agents and Task Runs and leases shared service credentials, and the web
- * app never calls it. Matched by route pattern, not URL spelling.
+ * External agents act through the shared machine credential, which reaches
+ * every Space, on the operator's machines and under the operator's logins, so
+ * a member may not run or steer one. RFS is that credential's own surface: it
+ * launches agents and Task Runs and leases shared service credentials, and
+ * the web app never calls it. The change-review routes configure the
+ * deployment. A member runs the Built-In agent instead, through `/api/agent`,
+ * in their own access and with their own model keys. Matched by route
+ * pattern, not URL spelling.
  */
-const AGENT_ROUTES = [
-  '/api/agent',
-  '/api/acp',
-  '/api/agent-change-review',
-  '/api/rfs',
-];
+const ADMIN_AGENT_ROUTES = ['/api/acp', '/api/agent-change-review', '/api/rfs'];
 
 /**
  * The one value a request gives for `field` across its route parameters,
@@ -103,17 +101,23 @@ export function registerSpaceAccess(app: FastifyInstance): void {
     const route = request.routeOptions.url ?? '';
     if (
       !identity.owner &&
-      (threadId ||
-        request.routeOptions.config?.invokesAgent ||
-        AGENT_ROUTES.some(
+      (request.routeOptions.config?.invokesAgent ||
+        ADMIN_AGENT_ROUTES.some(
           (prefix) => route === prefix || route.startsWith(`${prefix}/`),
         ))
     ) {
       return reply.code(403).send({
-        message: 'Agents and conversations require an owner',
+        message: 'External agents and their settings require an administrator',
         code: 'AGENT_ACCESS_REQUIRED',
       });
     }
+    // A conversation lives in a Space, and is reached only through one the
+    // caller may use.
+    if (!identity.owner && threadId && !canvasId)
+      return reply.code(400).send({
+        message: 'A conversation is addressed through its Space',
+        code: 'SPACE_ACCESS_AMBIGUOUS',
+      });
 
     const checks: Array<[AccessLevel, string]> = [];
     if (canvasId) checks.push([level, canvasId]);

@@ -18,7 +18,6 @@ import {
 
 import { identityPrincipalSchema } from '@huabu/shared';
 
-
 import { getWorkspaceHandle } from '../workspace.js';
 import { IdentityError } from './service.js';
 import {

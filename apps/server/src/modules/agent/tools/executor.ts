@@ -69,10 +69,23 @@ import {
 } from './handlers/task.js';
 import { handleWebSearch, type WebSearchArgs } from './handlers/web-search.js';
 import { resolveWorldReadCanvasId } from '../../canvas/world-target-access.js';
-import { acquireWorkspaceOperationLease } from '../../workspace.js';
+import {
+  callerAccess,
+  personalSettingsOwner,
+} from '../../identity/personal-settings.js';
+import {
+  acquireWorkspaceOperationLease,
+  getWorkspaceHandle,
+} from '../../workspace.js';
 
 import type { AgentToolResult } from '@earendil-works/pi-agent-core';
 import type { NodeOrigin } from '@huabu/shared';
+
+const TASK_TOOLS: ReadonlySet<string> = new Set([
+  'create_task',
+  'start_task_run',
+  'complete_task_run',
+]);
 
 /**
  * Per-request context every handler call receives.
@@ -134,10 +147,16 @@ export async function executeTool(
       throw new Error('targetCanvasId must be a string');
     }
     const { targetCanvasId: _targetCanvasId, ...toolArgs } = value;
-    return {
-      ...toolArgs,
-      canvasId: await resolveWorldReadCanvasId(ownerCanvasId, requested),
-    } as unknown as T;
+    const canvasId = await resolveWorldReadCanvasId(ownerCanvasId, requested);
+    // An agent run reaches no further than the person who started it.
+    const access = callerAccess();
+    if (
+      access &&
+      canvasId !== ownerCanvasId &&
+      !(await access.can('read', { type: 'space', id: canvasId }))
+    )
+      throw new Error(`Canvas ${canvasId} is not readable`);
+    return { ...toolArgs, canvasId } as unknown as T;
   };
   const withStableWorkspace = async <T>(
     operation: () => T | Promise<T>,
@@ -152,6 +171,17 @@ export async function executeTool(
       lease.release();
     }
   };
+
+  // Task Runs start agents through the shared machine credential, which
+  // reaches every Space; a member's run may not.
+  if (
+    TASK_TOOLS.has(name) &&
+    callerAccess() &&
+    personalSettingsOwner() !== null
+  )
+    throw new Error(
+      `${name} is not available to this agent: Task Runs are the administrators'`,
+    );
 
   switch (name) {
     case 'report_ink_intent':
@@ -233,6 +263,27 @@ export async function executeTool(
       );
 
     case 'fs_write':
+      {
+        // Workspace memory and Skills steer every agent in the Workspace, so
+        // changing them is the Workspace's managers'. A Space's own memory is
+        // checked like any other write to that Space.
+        const access = callerAccess();
+        const workspaceId = getWorkspaceHandle()?.workspaceId;
+        const target = (args as { path?: unknown }).path;
+        if (
+          access &&
+          typeof target === 'string' &&
+          target.replace(/^\.?\//, '') !== 'memory/space.md' &&
+          !(
+            workspaceId &&
+            (await access.can('manage', { type: 'workspace', id: workspaceId }))
+          )
+        )
+          throw new Error(
+            'Changing Workspace memory or Skills needs manage access to the Workspace',
+          );
+      }
+      // falls through
       // canvasId is conditionally needed (only for memory/canvas.md);
       // the handler enforces that. Pass it through when present so the
       // handler can resolve canvas-scoped paths, but do not require it
