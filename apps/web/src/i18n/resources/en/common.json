@@ -181,6 +181,7 @@
     "title": "Settings",
     "open": "Open settings",
     "general": "General",
+    "people": "People",
     "agent": "Agent",
     "capabilities": "Capabilities",
     "capabilitiesDescription": "These Huabu-managed services can be configured as needed. Availability to an external Agent depends on that Agent's own capabilities.",
@@ -1541,5 +1542,21 @@
     "conversationAgentUnconfigured": "Connect an external Agent before starting a new conversation.",
     "nodeSaveFailed": "Couldn't write \"{{name}}\" to disk — the file may be locked or not writable.",
     "rateLimited": "Too many requests. Try again in {{seconds}} seconds."
+  },
+  "people": {
+    "loading": "Loading people…",
+    "loadFailed": "Could not load people.",
+    "saveFailed": "Could not save the change.",
+    "intro": "Who may use this Huabu, and which Workspaces they can open. People appear here after they first sign in. Changes apply on their next request.",
+    "administrator": "Administrator",
+    "access": "Access",
+    "roleIn": "Role in {{workspace}}",
+    "removeRole": "Remove from this Workspace",
+    "addToWorkspace": "Add to a Workspace…",
+    "role": {
+      "owner": "Owner",
+      "editor": "Editor",
+      "viewer": "Viewer"
+    }
   }
 }
