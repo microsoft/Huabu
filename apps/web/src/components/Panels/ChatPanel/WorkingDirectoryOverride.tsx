@@ -13,6 +13,8 @@ import { TextArea } from '@/components/Common/TextArea';
 import { Tooltip } from '@/components/Common/Tooltip';
 import { useAgentletFolderPicker } from '@/hooks/useAgentletFolderPicker';
 import { useAutoSizeTextArea } from '@/hooks/useAutoSizeTextArea';
+import useCanvasStore from '@/store/canvasStore';
+import { usePanelStore } from '@/store/panelStore';
 
 interface WorkingDirectoryOverrideProps {
   agentletId?: string;
@@ -345,6 +347,22 @@ export function WorkingDirectoryOverride({
                 {deviceName ?? t('chat.workingDirectoryDeviceUnknown')}
               </span>
             </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="mt-2"
+              disabled={!agentletId || !effectivePath || busy || isEditing}
+              onClick={() => {
+                const canvasId = useCanvasStore.getState().canvasId;
+                if (!canvasId || !agentletId || !effectivePath) return;
+                usePanelStore
+                  .getState()
+                  .openFiles({ canvasId, agentletId, path: effectivePath });
+                dismiss();
+              }}
+            >
+              {t('files.browse')}
+            </Button>
           </form>
         </Popover>
       ) : null}

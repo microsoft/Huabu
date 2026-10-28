@@ -514,6 +514,84 @@ describe('executeOnServer — MERGE_NODE_DATA CAS', () => {
 });
 
 describe('executeOnServer — CREATE_NODES id echo', () => {
+  it('persists and duplicates inert file references with frontmatter-only labels', async () => {
+    const store = getCanvasStore('c1');
+    store.write({
+      canvasId: 'c1',
+      title: null,
+      version: 1,
+      state: { nodes: [], edges: [] },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    const reference = {
+      agentletId: 'offline-device',
+      path: '/private/file.tex',
+      deviceName: 'Remote',
+    };
+    const create = await executeOnServer({
+      canvasId: 'c1',
+      originator: { source: 'ui' },
+      commands: [
+        {
+          type: 'CREATE_NODES',
+          nodes: [
+            {
+              id: 'node-ref',
+              nodeType: 'fileReference',
+              position: { x: 0, y: 0 },
+              data: { label: 'file.tex', fileReference: reference },
+            },
+          ],
+        },
+      ],
+    });
+    expect(create.results[0]?.applied).toBe(true);
+    expect(store.read()?.state.nodes).toMatchObject([
+      { data: { fileReference: reference } },
+    ]);
+    expect(store.readNode('node-ref')).toMatchObject({
+      label: 'file.tex',
+      content: '',
+    });
+    await executeOnServer({
+      canvasId: 'c1',
+      originator: { source: 'ui' },
+      commands: [
+        {
+          type: 'CREATE_NODES',
+          nodes: [
+            {
+              id: 'node-ref-copy',
+              nodeType: 'fileReference',
+              position: { x: 40, y: 40 },
+              data: { label: 'file.tex', fileReference: reference },
+            },
+          ],
+        },
+      ],
+    });
+    const nodes = store.read()?.state.nodes ?? [];
+    expect(nodes).toHaveLength(2);
+    expect(nodes).toMatchObject([
+      { data: { fileReference: reference } },
+      { data: { fileReference: reference } },
+    ]);
+    const rejected = await executeOnServer({
+      canvasId: 'c1',
+      originator: { source: 'ui' },
+      commands: [
+        {
+          type: 'MERGE_NODE_DATA',
+          patches: [
+            { nodeId: 'node-ref', patch: { content: 'must not be imported' } },
+          ],
+        },
+      ],
+    });
+    expect(rejected.results[0]?.applied).toBe(false);
+    expect(store.readNode('node-ref')?.content).toBe('');
+  });
   it('echoes the server-assigned id and label of every created node', async () => {
     const store = getCanvasStore('c1');
     store.write({

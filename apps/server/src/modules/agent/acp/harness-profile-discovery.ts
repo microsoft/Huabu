@@ -254,6 +254,7 @@ export function registerHarnessProfileDiscovery({
           alias: profiles.some((profile) => profile.alias === defaultAlias)
             ? `${defaultAlias} [${harness.id}]`
             : defaultAlias,
+          ...(harness.id === 'proxy' ? { visible: false } : {}),
           workingDirPath: harness.workingDirPath,
           metadata: { cliId: harness.id },
           customData: {
@@ -287,7 +288,10 @@ export function registerHarnessProfileDiscovery({
         { cause: error },
       );
     }
-    return response;
+    return {
+      ...response,
+      harnesses: response.harnesses.filter((entry) => entry.id !== 'proxy'),
+    };
   };
 
   const discover = (agentletId: string) => {

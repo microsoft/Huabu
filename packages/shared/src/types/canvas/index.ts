@@ -42,6 +42,7 @@ export type {
   NodeFontStyle,
   NodeTextDecoration,
   BaseNodeData,
+  FileReferenceNodeData,
   AutoHeightHint,
   HeightMode,
   BlockProvenance,

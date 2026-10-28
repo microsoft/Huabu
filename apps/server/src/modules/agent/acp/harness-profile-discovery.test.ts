@@ -50,6 +50,7 @@ function setup(initialMachines = ['machine-a']) {
       const profile: AgentProfile = {
         id: `profile-${++nextId}`,
         alias: input.alias,
+        visible: input.visible,
         agentletId: input.agentletId,
         workingDirPath: input.workingDirPath,
         launch:
@@ -113,6 +114,30 @@ function setup(initialMachines = ['machine-a']) {
 }
 
 describe('automatic ordinary Profile provisioning', () => {
+  it('provisions an idempotent exact-device hidden proxy outside the manual picker result', async () => {
+    const context = setup([]);
+    context.gateway.discoverHarnesses.mockResolvedValue({
+      harnesses: [
+        {
+          ...observation.harnesses[0]!,
+          id: 'proxy',
+          displayName: 'Filesystem Proxy',
+        },
+      ],
+    });
+    const dispose = context.start();
+    context.emit({ agentletId: 'machine-a', status: 'connected' });
+    await flush();
+    await context.discover();
+    expect(context.profiles).toHaveLength(1);
+    expect(context.profiles[0]).toMatchObject({
+      agentletId: 'machine-a',
+      visible: false,
+      launch: { kind: 'acp-harness', harnessId: 'proxy' },
+    });
+    expect((await context.discover()).harnesses).toHaveLength(0);
+    dispose();
+  });
   it('shares automatic/manual overlap, then performs fresh idempotent discovery', async () => {
     const context = setup();
     let finish!: (result: HarnessDiscoveryResult) => void;

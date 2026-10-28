@@ -65,6 +65,7 @@ const tabIndentKeymap = Prec.highest(
     {
       key: 'Tab',
       run: (view) => {
+        if (view.state.readOnly) return false;
         view.dispatch(view.state.replaceSelection(TAB_INDENT_STRING), {
           scrollIntoView: true,
           userEvent: 'input.type',
@@ -83,6 +84,7 @@ export interface RawMarkdownEditorProps {
   /** Accessible label forwarded to CM's content DOM. */
   ariaLabel?: string;
   searchNodeId?: string;
+  plainText?: boolean;
 }
 
 export default function RawMarkdownEditor({
@@ -92,6 +94,7 @@ export default function RawMarkdownEditor({
   className,
   ariaLabel,
   searchNodeId,
+  plainText = false,
 }: RawMarkdownEditorProps): React.JSX.Element {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -183,7 +186,9 @@ export default function RawMarkdownEditor({
       doc: value,
       extensions: [
         basicSetup,
-        markdown({ base: markdownLanguage, codeLanguages: [] }),
+        ...(plainText
+          ? []
+          : [markdown({ base: markdownLanguage, codeLanguages: [] })]),
         EditorView.lineWrapping,
         huabuLightTheme,
         tabIndentKeymap,

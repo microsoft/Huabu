@@ -12,6 +12,12 @@ import type { NodePreprocessProfile } from './types.js';
 import type { CanvasNodeType } from '@huabu/shared';
 
 export const profiles: Record<CanvasNodeType, NodePreprocessProfile> = {
+  fileReference: {
+    nodeType: 'fileReference',
+    bodyOwnership: 'derived',
+    capabilities: ['build_patch'],
+    watchFields: ['label', 'labelSource'],
+  },
   note: {
     nodeType: 'note',
     contentKind: 'note',

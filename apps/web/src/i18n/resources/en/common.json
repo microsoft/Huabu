@@ -1,4 +1,29 @@
 {
+  "files": {
+    "title": "Files",
+    "file": "File",
+    "browse": "Browse files",
+    "path": "Absolute directory path",
+    "selectDevice": "Choose a device",
+    "open": "Open",
+    "up": "Parent directory",
+    "refresh": "Refresh",
+    "showHidden": "Hidden files",
+    "choosePath": "Choose a device and enter a directory, or use Browse files in Chat.",
+    "loading": "Loading files…",
+    "failed": "Filesystem request failed",
+    "empty": "This directory is empty.",
+    "more": "Load more entries",
+    "add": "Add {{name}} to Canvas",
+    "offline": "This device is offline. Reconnect it and refresh.",
+    "treeLimit": "Tree limit reached. Open a narrower directory or refresh.",
+    "invalidReference": "Invalid file reference",
+    "referenceOnly": "File reference · content is not saved in this Space",
+    "readOnlyText": "Read-only file source",
+    "readMore": "Read more",
+    "changed": "File changed. Refresh to read it again.",
+    "previewLimit": "Preview limit reached (256 KiB). Open the file on its device for more."
+  },
   "sigil": {
     "chooseResource": "Choose a resource",
     "bindingHint": "Click a canvas object or choose a resource from the list",
@@ -987,6 +1012,7 @@
     "multiDragSameParentOnly": "Select layers from the same parent to move them together.",
     "invalidFrameDrop": "These layers cannot be moved to this destination. Check that the frame is available, unlocked, and not inside a selected layer.",
     "filterLabels": {
+      "fileReference": "File Reference",
       "note": "Note",
       "text": "Text",
       "image": "Image",

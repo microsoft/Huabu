@@ -1,4 +1,29 @@
 {
+  "files": {
+    "title": "文件",
+    "file": "文件",
+    "browse": "浏览文件",
+    "path": "目录绝对路径",
+    "selectDevice": "选择设备",
+    "open": "打开",
+    "up": "上级目录",
+    "refresh": "刷新",
+    "showHidden": "隐藏文件",
+    "choosePath": "选择设备并输入目录，或从聊天中的“浏览文件”进入。",
+    "loading": "正在加载文件…",
+    "failed": "文件访问失败",
+    "empty": "此目录为空。",
+    "more": "加载更多条目",
+    "add": "将 {{name}} 添加到画布",
+    "offline": "设备已离线，请重新连接后刷新。",
+    "treeLimit": "已达到文件树上限，请打开更小的目录或刷新。",
+    "invalidReference": "文件引用无效",
+    "referenceOnly": "文件引用 · 正文不会保存在此空间",
+    "readOnlyText": "只读文件源码",
+    "readMore": "继续读取",
+    "changed": "文件已变化，请刷新后重新读取。",
+    "previewLimit": "已达到预览上限（256 KiB），请在所属设备上打开文件查看其余内容。"
+  },
   "sigil": {
     "chooseResource": "选择资源",
     "bindingHint": "点击画布对象，或从列表选择资源",
@@ -987,6 +1012,7 @@
     "multiDragSameParentOnly": "请选择同一父级的图层后一起移动。",
     "invalidFrameDrop": "无法将这些图层移到此目标。请确认框架仍存在、未被锁定，且不在选中的图层内部。",
     "filterLabels": {
+      "fileReference": "文件引用",
       "note": "笔记",
       "text": "文本",
       "image": "图片",
