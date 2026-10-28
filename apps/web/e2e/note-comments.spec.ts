@@ -90,6 +90,7 @@ for (const mode of ['mouse', 'touch'] as const) {
     );
     const editor = page.locator('.milkdown-note-preview .ProseMirror');
     await expect(editor).toBeVisible();
+    if (mode === 'touch') await editor.tap();
     await expect(editor).toHaveAttribute(
       'contenteditable',
       mode === 'mouse' ? 'true' : 'false',
@@ -121,21 +122,45 @@ for (const mode of ['mouse', 'touch'] as const) {
       )
         turns++;
     });
-    await editor.locator('p').first().click({ clickCount: 3 });
-    await page.getByRole('button', { name: 'Comment', exact: true }).click();
+    if (mode === 'touch') {
+      await editor.locator('p').first().tap();
+      await editor
+        .locator('p')
+        .first()
+        .evaluate((paragraph) => {
+          const range = document.createRange();
+          range.selectNodeContents(paragraph);
+          const selection = window.getSelection();
+          if (!selection) throw new Error('Missing document selection');
+          selection.removeAllRanges();
+          selection.addRange(range);
+          document.dispatchEvent(new Event('selectionchange'));
+        });
+      await page.getByRole('button', { name: 'Comment', exact: true }).tap();
+    } else {
+      await editor.locator('p').first().click({ clickCount: 3 });
+      await page.getByRole('button', { name: 'Comment', exact: true }).click();
+    }
     await page
       .getByRole('textbox', { name: 'Comment', exact: true })
       .fill('Explain the selected claim');
     await expect(
       page.getByRole('button', { name: 'Add to input', exact: true }),
     ).toBeEnabled();
-    await page
-      .getByRole('button', { name: 'Add to input', exact: true })
-      .click();
+    const addToInput = page.getByRole('button', {
+      name: 'Add to input',
+      exact: true,
+    });
+    if (mode === 'touch') await addToInput.tap();
+    else await addToInput.click();
     await expect(
       page.getByRole('button', { name: 'View input', exact: true }),
     ).toBeVisible();
     await expect(editor).toBeVisible();
+    await expect(editor).toHaveAttribute(
+      'contenteditable',
+      mode === 'mouse' ? 'true' : 'false',
+    );
     const after = await page.evaluate(async ({ threadId }) => {
       const previewPath = '/src/store/previewWorkspace/store.ts';
       const canvasPath = '/src/store/canvasStore.ts';
