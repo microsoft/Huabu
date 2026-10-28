@@ -665,7 +665,15 @@
     "clickToSwitch": "点击切换",
     "openPathFailed": "打开路径失败",
     "activationTimeout": "打开“{{path}}”已超过 {{seconds}} 秒。请检查云盘或网络磁盘是否可用，然后重试。",
-    "activationInProgress": "另一个主目录仍在打开，请等待其完成。"
+    "activationInProgress": "另一个主目录仍在打开，请等待其完成。",
+    "yourWorkspaces": "你的工作区",
+    "introNamed": "选择一个工作区来保存你的 Space、笔记和产物，或新建一个。",
+    "newWorkspace": "新建工作区",
+    "namePlaceholder": "输入名称，然后按 Enter",
+    "create": "创建",
+    "current": "当前",
+    "named": "工作区：{{workspace}}",
+    "namedPrefix": "工作区："
   },
   "spaceHierarchy": {
     "collectAction": "收纳为子 Space",
