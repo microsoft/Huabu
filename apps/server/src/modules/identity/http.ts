@@ -3,6 +3,7 @@
 
 import { timingSafeEqual } from 'node:crypto';
 
+import { openPersonalSettings, useCaller } from './personal-settings.js';
 import {
   getRequestAuthorizations,
   setRequestWorkspaceChooser,
@@ -80,10 +81,15 @@ export function registerIdentity(
   // In Bubble mode every request runs in its caller's own Workspace. The slot
   // must wrap the rest of the lifecycle, which only a callback hook can do;
   // admission fills it below once it knows who is calling.
-  if (service.provider === 'bubble')
+  if (service.provider === 'bubble') {
     app.addHook('onRequest', (_request, _reply, done) =>
       openWorkspaceScope(done),
     );
+    // Likewise each member's settings, model keys and credentials are their own.
+    app.addHook('onRequest', (_request, _reply, done) =>
+      openPersonalSettings(done),
+    );
+  }
   app.addHook('onRequest', async (request, reply) => {
     const path = request.url.split('?', 1)[0];
     const identityRoute = path === '/api/identity' || path === SESSION_PATH;
@@ -174,6 +180,7 @@ export function registerIdentity(
       }
       // A member's first request, `GET /api/identity` after sign-in included,
       // is also where their personal Workspace is created.
+      if (identity.member && service.selectWorkspace) useCaller(identity);
       if (identity.member && service.selectWorkspace) {
         const scope = await service.selectWorkspace(identity);
         if (scope) fillWorkspaceScope(scope);

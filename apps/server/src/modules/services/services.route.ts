@@ -3,7 +3,7 @@
 
 import { serviceConfigUpdateSchema, serviceParamsSchema } from '@huabu/shared';
 
-import { isOwnerRequest } from '../security/owner.js';
+import { canChangeOwnSettings } from '../security/owner.js';
 
 import { serviceProvisioner, ServiceProvisionError } from './index.js';
 
@@ -59,7 +59,7 @@ const serviceRoutes: FastifyPluginAsync = async (app) => {
     Body: ServiceConfigUpdate;
     Reply: ApiResult<ServiceConfig>;
   }>('/:serviceId', async (request, reply) => {
-    if (!isOwnerRequest(request)) {
+    if (!canChangeOwnSettings(request)) {
       return reply.code(403).send({
         message: 'Forbidden: Service settings require owner authorization',
       });
