@@ -34,7 +34,9 @@ function host() {
       owner: request.headers['x-owner'] === 'yes',
       access: {
         can: async (level, { id }) =>
-          id === 'mine' || (id === 'shared' && level === 'read'),
+          id === 'mine' ||
+          (id === 'shared' && level === 'read') ||
+          (id === 'edit' && level !== 'manage'),
         claim: async ({ id }) => {
           claimed.push(id);
         },
@@ -46,6 +48,11 @@ function host() {
   const ok = async () => ({ ok: true });
   app.get('/api/canvas/:canvasId', ok);
   app.put('/api/canvas/:canvasId', ok);
+  app.delete(
+    '/api/canvas/:canvasId',
+    { config: { spaceAccess: 'manage' } },
+    ok,
+  );
   app.post(
     '/api/canvas/:canvasId/search',
     { config: { spaceAccess: 'read' } },
@@ -80,6 +87,17 @@ function host() {
 }
 
 describe('Space access', () => {
+  it('needs manage, not only write, on a route that declares it', async () => {
+    const { app } = host();
+    const remove = async (id: string) =>
+      (await app.inject({ method: 'DELETE', url: `/api/canvas/${id}` }))
+        .statusCode;
+    expect(await remove('mine')).toBe(200);
+    expect(await remove('edit')).toBe(403);
+    expect(await remove('shared')).toBe(403);
+    expect(await remove('other')).toBe(404);
+  });
+
   it('reads and writes only the Spaces the identity provider allows', async () => {
     const { app } = host();
     const status = async (method: 'GET' | 'PUT', id: string) =>

@@ -713,38 +713,43 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.delete<{
     Params: { canvasId: string };
     Reply: ApiResult<DeleteCanvasResponse>;
-  }>('/:canvasId', async function (request, reply) {
-    const { canvasId } = request.params;
-    return withSpaceHierarchyLock(async () => {
-      if (isWorldCanvasId(canvasId)) {
-        return reply
-          .code(403)
-          .send({ message: 'World canvas cannot be deleted' });
-      }
-      try {
-        const preview = deletionPreview(
-          await getStructuredStore().spaces().list(),
-          canvasId,
-        );
-        if (preview.spaces.length > 1)
-          return reply.code(409).send({
-            code: 'SPACE_TREE_CONFIRMATION_REQUIRED',
-            message: 'Confirm the complete subtree before deleting this Space',
-          });
-        await deleteSpaceTree(canvasId, preview.token);
-      } catch (error) {
-        if (error instanceof SpaceHierarchyError)
-          return reply.code(error.status).send({
-            code: error.code,
-            message: error.message,
-            details: error.details,
-          });
-        throw error;
-      }
+  }>(
+    '/:canvasId',
+    { config: { spaceAccess: 'manage' } },
+    async function (request, reply) {
+      const { canvasId } = request.params;
+      return withSpaceHierarchyLock(async () => {
+        if (isWorldCanvasId(canvasId)) {
+          return reply
+            .code(403)
+            .send({ message: 'World canvas cannot be deleted' });
+        }
+        try {
+          const preview = deletionPreview(
+            await getStructuredStore().spaces().list(),
+            canvasId,
+          );
+          if (preview.spaces.length > 1)
+            return reply.code(409).send({
+              code: 'SPACE_TREE_CONFIRMATION_REQUIRED',
+              message:
+                'Confirm the complete subtree before deleting this Space',
+            });
+          await deleteSpaceTree(canvasId, preview.token);
+        } catch (error) {
+          if (error instanceof SpaceHierarchyError)
+            return reply.code(error.status).send({
+              code: error.code,
+              message: error.message,
+              details: error.details,
+            });
+          throw error;
+        }
 
-      return reply.send({ success: true });
-    });
-  });
+        return reply.send({ success: true });
+      });
+    },
+  );
 
   // Delete a node — removes its markdown sidecar.
   //

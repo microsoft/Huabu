@@ -9,12 +9,18 @@ import {
 } from '../identity/request.js';
 import { UNRESTRICTED_ACCESS } from '../identity/service.js';
 
+import type { AccessLevel } from '../identity/service.js';
+
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 
 declare module 'fastify' {
   interface FastifyContextConfig {
-    /** A non-GET route that only reads the Space it names. */
-    spaceAccess?: 'read';
+    /**
+     * What a route needs on the Space it names, when not the method's
+     * default: `read` for a non-GET route that only reads it, `manage` for
+     * renaming or deleting it.
+     */
+    spaceAccess?: 'read' | 'manage';
     /** Starts or steers an agent outside the agent route prefixes. */
     invokesAgent?: true;
   }
@@ -110,7 +116,7 @@ export function registerSpaceAccess(app: FastifyInstance): void {
       });
     }
 
-    const checks: Array<['read' | 'write', string]> = [];
+    const checks: Array<[AccessLevel, string]> = [];
     if (canvasId) checks.push([level, canvasId]);
     const destination = body?.destination as Fields;
     for (const [needed, value] of [
@@ -135,7 +141,7 @@ export function registerSpaceAccess(app: FastifyInstance): void {
         continue;
       }
       // Without read access the Space is indistinguishable from a missing one.
-      if (needed === 'write' && (await identity.access.can('read', space)))
+      if (needed !== 'read' && (await identity.access.can('read', space)))
         return reply.code(403).send({
           message: 'Space is read-only for this principal',
           code: 'SPACE_ACCESS_REQUIRED',
