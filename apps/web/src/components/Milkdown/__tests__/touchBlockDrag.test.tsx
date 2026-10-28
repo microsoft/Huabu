@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MilkdownMessageCard } from '@/components/Messages/AIMessage/MilkdownMessageCard';
 import { NotePreview } from '@/components/Nodes/note/NotePreview';
+import { useInputModeStore } from '@/hooks/useInputMode';
 import { i18n } from '@/i18n';
 import { useToolStore } from '@/store/toolStore';
 import { registerCanvasDropTarget } from '@/utils/io/canvasDropTargets';
@@ -25,7 +26,8 @@ let unregister: () => void;
 const drop = vi.fn();
 
 beforeEach(() => {
-  useToolStore.setState({ inputModePreference: 'finger' });
+  useToolStore.setState({ inputModePreference: 'finger', penObserved: false });
+  useInputModeStore.setState({ mode: 'touch' });
   host = document.createElement('div');
   canvas = document.createElement('div');
   canvas.setAttribute('data-canvas-root', '');
@@ -44,7 +46,8 @@ afterEach(() => {
   unregister();
   host.remove();
   canvas.remove();
-  useToolStore.setState({ inputModePreference: 'auto' });
+  useToolStore.setState({ inputModePreference: 'auto', penObserved: false });
+  useInputModeStore.setState({ mode: 'mouse' });
   vi.restoreAllMocks();
   Reflect.deleteProperty(document, 'elementsFromPoint');
 });
@@ -86,6 +89,52 @@ async function grip() {
 }
 
 describe('touch paragraph extraction', () => {
+  it.each(['auto', 'mouse', 'finger', 'pen'] as const)(
+    'keeps mouse Notes directly editable without a touch edit button in %s mode',
+    async (inputModePreference) => {
+      useToolStore.setState({ inputModePreference, penObserved: true });
+      useInputModeStore.setState({ mode: 'mouse' });
+      act(() =>
+        root.render(<NotePreview data={{ content: 'Desktop editing.' }} />),
+      );
+      expect(
+        host.querySelector(`[aria-label="${i18n.t('editor.editNote')}"]`),
+      ).toBeNull();
+      expect(
+        host.querySelector(
+          `[aria-label="${i18n.t('editor.finishNoteEditing')}"]`,
+        ),
+      ).toBeNull();
+      await act(async () =>
+        vi.waitFor(() =>
+          expect(
+            host.querySelector('.ProseMirror')?.getAttribute('contenteditable'),
+          ).toBe('true'),
+        ),
+      );
+      expect(host.querySelector('.milkdown-touch-block-grip')).toBeNull();
+    },
+  );
+
+  it('switches an open Note between mouse editing and touch/pen reading', async () => {
+    useToolStore.setState({ inputModePreference: 'pen' });
+    act(() =>
+      root.render(<NotePreview data={{ content: 'Hybrid device reading.' }} />),
+    );
+    await grip();
+    const editor = host.querySelector<HTMLElement>('.ProseMirror');
+    for (const mode of ['mouse', 'pen', 'mouse', 'touch'] as const) {
+      act(() => useInputModeStore.setState({ mode }));
+      expect(editor?.getAttribute('contenteditable')).toBe(
+        mode === 'mouse' ? 'true' : 'false',
+      );
+      expect(
+        host.querySelector(`[aria-label="${i18n.t('editor.editNote')}"]`) !==
+          null,
+      ).toBe(mode !== 'mouse');
+    }
+  });
+
   it('keeps list-item boundaries rather than copying the whole list', async () => {
     act(() =>
       root.render(

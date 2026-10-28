@@ -40,7 +40,7 @@ import { MilkdownEditor } from '@/components/Milkdown';
 import { MilkdownFloatingToolbar } from '@/components/Milkdown/MilkdownFloatingToolbar';
 import { PreviewHeaderButton } from '@/components/Nodes/PreviewHeaderButton';
 import { usePreviewHeaderSlot } from '@/components/Nodes/PreviewHeaderSlot';
-import { useEffectiveInputMode } from '@/hooks/useInputMode';
+import { useIsNotMouse } from '@/hooks/useInputMode';
 import { usePreviewScrollMemory } from '@/hooks/usePreviewScrollMemory';
 import useCanvasStore from '@/store/canvasStore';
 import {
@@ -121,7 +121,7 @@ export const NotePreview = ({
   // `content` is the canonical Markdown string. Brand-new note records
   // may have it absent or non-string; normalise to empty.
   const markdown = typeof data.content === 'string' ? data.content : '';
-  const touchMode = useEffectiveInputMode() !== 'mouse';
+  const touchMode = useIsNotMouse();
   const [touchEditing, setTouchEditing] = useState(() => !markdown.trim());
   const editable = !readOnly && (!touchMode || touchEditing);
   const provenance: MarkdownProvenance = useMemo(
