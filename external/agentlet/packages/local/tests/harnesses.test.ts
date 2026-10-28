@@ -72,8 +72,8 @@ describe('trusted harness discovery', () => {
   it('returns the complete stable catalogue without creating workspaces by default', async () => {
     const { harnesses } = await discoverHarnesses()
     expect(harnesses.map((entry) => entry.id)).toEqual(HARNESS_DEFINITIONS.map((entry) => entry.id))
-    expect(harnesses).toHaveLength(11)
-    expect(harnesses.every((entry) => entry.status === 'ready')).toBe(true)
+    expect(harnesses).toHaveLength(12)
+    expect(harnesses.filter((entry) => entry.id !== 'proxy').every((entry) => entry.status === 'ready')).toBe(true)
     expect(harnesses.at(-1)).toMatchObject({
       id: 'custom',
       capabilities: { customLaunchCommand: true, autoApprove: false },
@@ -149,7 +149,7 @@ describe('trusted harness discovery', () => {
           : '1.0\r\n',
       }))
       const { harnesses } = await discoverHarnesses()
-      expect(harnesses.filter((entry) => entry.id !== 'custom').every((entry) => entry.status === 'ready')).toBe(true)
+      expect(harnesses.filter((entry) => entry.id !== 'custom' && entry.id !== 'proxy').every((entry) => entry.status === 'ready')).toBe(true)
       expect(harnesses[0]).toMatchObject({
         status: 'ready',
         capabilities: { autoApprove: true, customLaunchCommand: false },
@@ -229,7 +229,7 @@ describe('daemon discovery RPC', () => {
         const response = await createDaemon().request(ServerMethods.DISCOVER_HARNESSES, params)
         expect(response).toHaveProperty('result')
         const result = ('result' in response ? response.result : undefined) as HarnessDiscoveryResult
-        expect(result.harnesses).toHaveLength(11)
+        expect(result.harnesses).toHaveLength(12)
         expect(mocks.mkdir).toHaveBeenCalledTimes(params && 'prepareWorkspaces' in params && params.prepareWorkspaces ? 10 : 0)
         expect(start).not.toHaveBeenCalled()
       } finally {
