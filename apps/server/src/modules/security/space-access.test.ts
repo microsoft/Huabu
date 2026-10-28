@@ -38,6 +38,7 @@ function host() {
         claim: async ({ id }) => {
           claimed.push(id);
         },
+        workspaces: async () => 'all',
       },
     });
   });

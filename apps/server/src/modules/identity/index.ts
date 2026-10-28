@@ -3,6 +3,7 @@
 
 import { resolveIdentityConfig } from './config.js';
 import { createLocalIdentityService } from './local.js';
+import { openPostgresWorkspacePreferences } from './preferences.js';
 import { storageResourceDirectory } from './resources.js';
 
 import type { IdentityService, ResourceDirectory } from './service.js';
@@ -39,6 +40,7 @@ export function createIdentity(
       authenticator: authenticators as BubbleAuthConfig,
       owner,
       store: await bubble.openBubblePostgresStore(postgresUrl),
+      preferences: await openPostgresWorkspacePreferences(postgresUrl),
       resources,
     });
   }
@@ -48,6 +50,13 @@ export function createIdentity(
       challenge: 'Bearer realm="Huabu"',
       authenticate: async (credentials) =>
         (await (opening ??= open())).service.authenticate(credentials),
+      selectWorkspace: async (identity) =>
+        (await (opening ??= open())).service.selectWorkspace!(identity),
+      chooseWorkspace: async (identity, workspaceId) =>
+        (await (opening ??= open())).service.chooseWorkspace!(
+          identity,
+          workspaceId,
+        ),
     },
     bubble: async (app, options) =>
       (await (opening ??= open())).plugin(app, options),
