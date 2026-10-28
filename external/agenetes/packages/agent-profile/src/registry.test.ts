@@ -23,6 +23,17 @@ const input: CreateAgentProfileInput = {
 };
 
 describe('AgentProfileRegistry', () => {
+  it('persists hidden Profiles without selecting them and preserves legacy visibility', () => {
+    const store = new InMemoryAgentProfileRegistryStore();
+    const registry = new AgentProfileRegistry(store);
+    registry.createProfile(input);
+    registry.createProfile({ ...input, id: 'hidden', visible: false });
+    const restored = new AgentProfileRegistry(store);
+    expect(restored.listProfiles()).toHaveLength(2);
+    expect(restored.getProfile('hidden')?.visible).toBe(false);
+    expect(restored.listSelectableProfileIds()).toEqual(['ordinary']);
+    expect(restored.snapshotProfile('hidden').profileId).toBe('hidden');
+  });
   it('persists structured launch separately from editable metadata and clones immutable snapshots', () => {
     const store = new InMemoryAgentProfileRegistryStore();
     const registry = new AgentProfileRegistry(store);
