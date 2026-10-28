@@ -26,7 +26,9 @@ import { AgentBehaviorSettings } from './sections/AgentBehaviorSettings';
 import { ExternalAgentRuntimeSettings } from './sections/ExternalAgentRuntimeSettings';
 import { GeneralSettings } from './sections/GeneralSettings';
 import { LLMSettings } from './sections/LLMSettings';
+import { PeopleSettings } from './sections/PeopleSettings';
 import { ServicesSettings } from './sections/ServicesSettings';
+import { useIdentityStore } from '../../store/identityStore';
 
 /** Identifiers for the settings tabs (left-nav order). */
 type SettingsTab = SettingsTabId;
@@ -38,7 +40,8 @@ interface TabDef {
     | 'settings.general'
     | 'settings.devicesAndAgents'
     | 'settings.agentSettings'
-    | 'settings.services';
+    | 'settings.services'
+    | 'settings.people';
 }
 
 const TABS: TabDef[] = [
@@ -47,6 +50,7 @@ const TABS: TabDef[] = [
   { id: 'services', labelKey: 'settings.services' },
   { id: 'general', labelKey: 'settings.general' },
 ];
+const PEOPLE_TAB: TabDef = { id: 'people', labelKey: 'settings.people' };
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -70,12 +74,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onClose,
 }) => {
   const { t } = useTranslation();
+  const identity = useIdentityStore((s) => s.identity);
+  // A Bubble member configures only their own models and credentials; the
+  // deployment, its external agents and its people are the administrators'.
+  const member = identity?.provider === 'bubble' && !identity.owner;
+  const tabs =
+    identity?.provider === 'bubble' && identity.owner
+      ? [...TABS, PEOPLE_TAB]
+      : member ? TABS.filter((tab) => tab.id !== 'agent') : TABS;
   const llmInit = useLLMStore((s) => s.init);
   const acpInit = useAcpProfilesStore((s) => s.init);
   const loadDeploymentReadiness = useDeploymentReadinessStore((s) => s.load);
   const requestedTab = useSettingsUiStore((s) => s.requestedTab);
   const clearRequestedTab = useSettingsUiStore((s) => s.clearRequestedTab);
-  const [activeTab, setActiveTab] = useState<SettingsTab>(TABS[0].id);
+  const [activeTab, setActiveTab] = useState<SettingsTab>(member ? 'agentSettings' : TABS[0].id);
   const isAgentTab = activeTab === 'agentSettings' || activeTab === 'builtIn';
   const [externalAgentsNavigation, setExternalAgentsNavigation] =
     useState<ExternalAgentsNavigation | null>(null);
@@ -97,29 +109,33 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   // the tab the user last viewed.
   useEffect(() => {
     if (isOpen && requestedTab) {
-      setActiveTab(requestedTab);
+      setActiveTab(member && (requestedTab === 'agent' || requestedTab === 'people') ? 'agentSettings' : requestedTab);
       clearRequestedTab();
     }
-  }, [isOpen, requestedTab, clearRequestedTab]);
+  }, [isOpen, requestedTab, member, clearRequestedTab]);
+
+  useEffect(() => {
+    if (member && (activeTab === 'agent' || activeTab === 'people')) setActiveTab('agentSettings');
+  }, [member, activeTab]);
 
   useEffect(() => {
     if (!isOpen && activeTab === 'builtIn') setActiveTab('agentSettings');
   }, [isOpen, activeTab]);
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || member) return;
     void loadDeploymentReadiness();
-  }, [isOpen, loadDeploymentReadiness]);
+  }, [isOpen, member, loadDeploymentReadiness]);
 
   // Load each registry only when its owning tab is visible.
   useEffect(() => {
     if (!isOpen) return;
     const targetTab = requestedTab ?? activeTab;
-    if (targetTab === 'agent' || targetTab === 'agentSettings') void acpInit();
-    if (targetTab === 'builtIn') {
+    if (!member && (targetTab === 'agent' || targetTab === 'agentSettings')) void acpInit();
+    if (targetTab === 'builtIn' || (targetTab === 'agentSettings' && member)) {
       void llmInit();
     }
-  }, [isOpen, requestedTab, activeTab, llmInit, acpInit]);
+  }, [isOpen, requestedTab, activeTab, member, llmInit, acpInit]);
 
   // Close on Escape.
   useEffect(() => {
@@ -157,7 +173,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   if (!isOpen) return null;
 
   const activeLabelKey =
-    TABS.find((tab) => tab.id === activeTab)?.labelKey ?? 'settings.general';
+    tabs.find((tab) => tab.id === activeTab)?.labelKey ?? 'settings.general';
   const contentTitle =
     activeTab === 'agent' && externalAgentsNavigation
       ? externalAgentsNavigation.title
@@ -197,7 +213,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           >
             {t('settings.title')}
           </h2>
-          {TABS.map(({ id, labelKey }) => {
+          {tabs.map(({ id, labelKey }) => {
             const active =
               id === activeTab ||
               (id === 'agentSettings' && activeTab === 'builtIn');
@@ -275,19 +291,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </header>
 
           <div className="min-h-0 flex-1 overflow-y-auto px-4 pt-0 pb-4 sm:px-5">
-            <DeploymentReadinessNotice />
+            {!member && <DeploymentReadinessNotice />}
             {activeTab === 'general' && (
               <SettingSection>
                 <GeneralSettings />
               </SettingSection>
             )}
-            {activeTab === 'agent' && (
+            {activeTab === 'agent' && !member && (
               <ExternalAgentsSettings
                 onNavigationChange={handleExternalAgentsNavigationChange}
               />
             )}
+            {activeTab === 'people' && identity?.owner && <PeopleSettings />}
             {isAgentTab &&
-              (activeTab === 'builtIn' ? (
+              (activeTab === 'builtIn' || member ? (
                 <LLMSettings />
               ) : (
                 <>
