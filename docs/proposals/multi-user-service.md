@@ -1,6 +1,6 @@
 # Multi-User Service
 
-Status: In-Progress — PR A implemented, PR B proposed
+Status: Implemented — PR A (#356) and PR B
 Last updated: 2026-10-28
 
 Follows PR #237 (Bubble identity and per-user Space access) toward issue #228. Two stacked pull requests take one Huabu Server from "several people sign in and each edits their own Spaces in one shared Workspace" to a service several people can use day to day: each person has their own Workspaces, uses agents in them, and an operator admits people without scripts.
@@ -11,14 +11,14 @@ Nothing changes in local mode (`HUABU_IDENTITY_PROVIDER=local`). Desktop and sin
 
 After both PRs, in Bubble mode:
 
-| Outcome                                                                                                                                   | PR  |
-| ----------------------------------------------------------------------------------------------------------------------------------------- | --- |
-| Each admitted person gets a personal Workspace on first sign-in and can create, rename, switch and delete Workspaces they own.            | A   |
-| Two people work in different Workspaces at the same time. One person switching never moves another person.                                | A   |
-| Members run agents and conversations. An agent reaches only what the person who started it may reach.                                     | B   |
-| Connected credentials and service leases are per person. One person's agent never uses another's GitHub token or service key.             | B   |
-| A system owner admits members, revokes them and grants Workspace ownership from Settings.                                                 | B   |
-| A session that expires mid-edit is renewed without leaving the page, so unsaved edits survive. Sign-out can end the provider session too. | B   |
+| Outcome                                                                                                                                                                          | PR  |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --- |
+| Each admitted person gets a personal Workspace on first sign-in and can create, rename, switch and delete Workspaces they own.                                                   | A   |
+| Two people work in different Workspaces at the same time. One person switching never moves another person.                                                                       | A   |
+| Members run the Built-In agent and conversations, with their own model keys. It reaches only what the person who started it may reach. External agents stay with administrators. | B   |
+| Connected credentials and service leases are per person. One person's agent never uses another's GitHub token or service key.                                                    | B   |
+| A system owner admits members, revokes them and grants Workspace ownership from Settings.                                                                                        | B   |
+| A session that expires mid-edit is renewed without leaving the page, so unsaved edits survive. Sign-out can end the provider session too.                                        | B   |
 
 Out of scope for both: sharing a Workspace or Space between people beyond operator grants, quotas and billing, and Desktop as a multi-user client.
 
@@ -98,29 +98,37 @@ The Postgres suite runs two principals in two Workspaces concurrently: creates, 
 
 ## PR B — Members use agents, and the service is administrable
 
-### Per-run agent credentials
+### Members run the Built-In agent
 
-Each agent run gets its own token, minted by the Server when the run starts. It names the requesting principal, the Workspace, the root Space and the thread, and expires with the run. The Agentlet passes it as the reachback credential instead of the machine token. RFS admits it as that principal, and Space access is checked as for that person's browser requests, so an agent can read or edit only what its starter can. The machine token keeps unrestricted reach only for the Agentlet's own control surface, never for Space content.
+The first design gave each external agent run its own RFS token. Agentlet hands every agent process the daemon's own machine token (`AGENTLET_TOKEN`) by design, and refuses a session that sets it. So a member's external agent would hold an unrestricted credential beside any run token, and a prompt-injected agent could use it. External agents also run on the operator's machines under the operator's own CLI logins, so they cannot honour per-person keys either. So:
 
-This reopens `/api/agent`, `/api/acp`, `/api/agent-change-review` and Interactive View actions to members. It also covers the memory worker: a member's edits drive memory updates again, running in that person's Workspace under their authority.
+- **Members run the Built-In agent.** It runs in-process, never calls RFS, and its tools execute in the request's Workspace and caller scope. `/api/agent` and conversations are open to members through a Space they may use.
+- **Its tools check the starter.** A World conversation reads another Space only if the starter may read it. Workspace memory and Skills change only with `huabu.manage` on the Workspace. The Task Run tools are refused, because Task Runs launch external agents through the machine credential.
+- **External agents stay with administrators.** That covers `/api/acp`, RFS, change-review configuration, Interactive View actions and an external binding on `/api/agent`. A member's agent listing shows Built-In alone.
 
-### Per-person credentials
+Per-run credentials for external agents remain the way to open them to members later, and need Agentlet to stop giving agent processes the daemon token.
 
-Model configuration and LLM keys, connected credentials, service-package leases and integration configuration move from data-directory scope to per principal in Bubble mode. Each person configures their own models and keys in Settings, and an agent run resolves models from its starter's configuration. A member with no model configured sees the Agent tool explain that, not a Server error. Operator-only settings (deployment, Canary, Workspaces on the Server's filesystem) stay system-owner-only. Settings shows a member only their own configuration.
+### Personal settings
+
+A Bubble member's calls run in a personal settings namespace (`modules/identity/personal-settings.ts`), which also carries their access to the agent tools.
+
+- **Secrets.** The secret store namespaces their model keys, OAuth credentials and connected-service keys, with no fallback to the deployment's environment.
+- **Settings files.** Model settings and agent defaults live under `<data>/people/<key>/`.
+- **Routes.** Members may change their own settings; the deployment's stay with administrators. Settings shows a member only Built-In setup and services.
 
 ### Grant administration
 
-A Settings → People panel for system owners lists principals, and admits (`member`), revokes, and grants or removes `huabu.workspace.owner`. Huabu proxies these to Bubble's grant API in-process. Revoking `huabu.use` closes that person's open streams at the next revalidation, as #237 already does for Space grants.
+`/api/people`, and a People tab for system owners, list principals, admit and revoke `member`, and give or remove Workspace roles. Revocation applies on the next request, and to open streams within 30 seconds.
 
 ### Session lifecycle
 
-- **Refresh.** The sign-in flow requests a refresh token (`offline_access`), the Server holds it beside the access token in the session, and it renews the access token before it expires.
-- **Re-sign-in in a popup.** When renewal is impossible, a lapsed session re-signs in through a popup, keeping the page and its unsaved edits.
-- **Provider logout.** Sign-out optionally ends the provider session (RP-initiated logout) when the provider advertises `end_session_endpoint`.
+- **Refresh.** Sign-in requests `offline_access`. The page holds the refresh token in memory only, and renews the session before expiry and on a 401.
+- **Re-sign-in in a popup.** When renewal is impossible, the sign-in screen opens over the running app and signs in through a popup, then resends the refused saves.
+- **Provider logout.** `HUABU_SIGN_OUT_PROVIDER=true` makes sign-out also end the provider session through `end_session_endpoint`.
 
 ### Proof
 
-A member runs an agent that tries to read another member's Space through RFS and is refused. Their agent edits their own Space. Two members' connected credentials stay separate. An owner admits and revokes a member from the UI, and the revoked member's open page loses access within 30 seconds. A session that expires mid-edit renews or re-signs in without losing the edit. All of it is checked against real Auth0 and Entra sign-ins, as in #237.
+A dev Server in Bubble mode, with Postgres content and Bubble records, runs two members whose model settings point at a local OpenAI-compatible mock that records each request's key. Each member's Built-In agent answers using only their own key. A member is refused in another member's Space, for an external binding and on `/api/acp`. The People tab admits people and gives Workspace roles. Renewal and the popup are unit-tested. They were not tried against real Auth0 or Entra.
 
 ## Settled decisions
 
@@ -129,7 +137,7 @@ Confirmed 2026-10-28:
 1. **Current Workspace per person, not per tab.** A Workspace in every URL was rejected as a much larger web and API change for a rare need.
 2. **Workspace-qualified Space grants,** with an in-place migration of #237's grants, rather than relying on unique Space ids. Space grants stay so that one Space can be shared later. #237's roles are replaced by the model above.
 3. **Automatic personal Workspace on first sign-in,** rather than no Workspace until an operator grants one.
-4. **Per-person model keys** in PR B, rather than every member's agents using the operator's keys.
+4. **Per-person model keys** in PR B, rather than every member's agents using the operator's keys. Members therefore run the Built-In agent; external agents, which use the operator's CLI logins, stay with administrators.
 
 ## Code entry points
 
