@@ -87,7 +87,25 @@ export async function endSession(): Promise<void> {
  * staying put, when the Server did not confirm: the cookie would otherwise
  * admit the same account again on arrival.
  */
-export async function signOut(): Promise<void> {
+export async function signOut(
+  options: { providerSignOut?: boolean } = {},
+): Promise<void> {
   await endSession();
+  const { forgetTokens, providerSignOutUrl, heldAuthenticator } =
+    await import('../utils/oidcLogin');
+  forgetTokens();
+  // The provider's own session would otherwise sign the next person straight
+  // back in as this one, which matters on a shared computer.
+  if (options.providerSignOut) {
+    const authenticators = (await listInteractiveAuthenticators()) ?? [];
+    const authenticator =
+      heldAuthenticator() ??
+      (authenticators.length === 1 ? authenticators[0] : null);
+    const url = authenticator ? await providerSignOutUrl(authenticator) : null;
+    if (url) {
+      window.location.assign(url);
+      return;
+    }
+  }
   window.location.assign('/');
 }
