@@ -2,7 +2,12 @@
 // Licensed under the MIT license.
 
 import type { WorkspaceScope } from '../workspace/context.js';
-import type { IdentityPrincipal, IdentityResponse } from '@huabu/shared';
+import type {
+  IdentityPrincipal,
+  IdentityResponse,
+  Person,
+  WorkspaceRole,
+} from '@huabu/shared';
 
 /** Supplied by a trusted transport, never copied from a request body. */
 export interface IdentityCredentials {
@@ -104,6 +109,8 @@ export interface IdentityService {
    * mode).
    */
   selectWorkspace?(identity: ResolvedIdentity): Promise<WorkspaceScope | null>;
+  /** Who may use Huabu and with which Workspace roles; Bubble mode only. */
+  readonly people?: PeopleDirectory;
   /** Make a Workspace the caller's current one; `null` when refused. */
   chooseWorkspace?(
     identity: ResolvedIdentity,
@@ -119,4 +126,22 @@ export class IdentityError extends Error {
   ) {
     super(message);
   }
+}
+
+/**
+ * Administering people: admitting them to Huabu and giving them Workspace
+ * roles. Only an administrator's routes use it; the provider decides nothing
+ * here beyond storing the grants its policy then answers from.
+ */
+export interface PeopleDirectory {
+  list(): Promise<Person[]>;
+  /** `false` when there is no such principal. */
+  setMember(principalId: string, member: boolean, by: string): Promise<boolean>;
+  /** `null` removes every Workspace role they hold there. */
+  setWorkspaceRole(
+    principalId: string,
+    workspaceId: string,
+    role: WorkspaceRole | null,
+    by: string,
+  ): Promise<boolean>;
 }

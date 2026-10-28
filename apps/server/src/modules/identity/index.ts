@@ -50,6 +50,17 @@ export function createIdentity(
       challenge: 'Bearer realm="Huabu"',
       authenticate: async (credentials) =>
         (await (opening ??= open())).service.authenticate(credentials),
+      // Present from the start so routes can tell Bubble mode by it; each call
+      // opens Bubble on demand like every other member here.
+      people: {
+        list: async () => (await (opening ??= open())).service.people!.list(),
+        setMember: async (...args) =>
+          (await (opening ??= open())).service.people!.setMember(...args),
+        setWorkspaceRole: async (...args) =>
+          (await (opening ??= open())).service.people!.setWorkspaceRole(
+            ...args,
+          ),
+      },
       selectWorkspace: async (identity) =>
         (await (opening ??= open())).service.selectWorkspace!(identity),
       chooseWorkspace: async (identity, workspaceId) =>

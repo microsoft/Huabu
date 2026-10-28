@@ -18,6 +18,7 @@ import {
 
 import { identityPrincipalSchema } from '@huabu/shared';
 
+
 import { getWorkspaceHandle } from '../workspace.js';
 import { IdentityError } from './service.js';
 import {
@@ -29,8 +30,10 @@ import type { WorkspacePreferences } from './preferences.js';
 import type {
   HuabuResource,
   IdentityService,
+  PeopleDirectory,
   ResourceDirectory,
 } from './service.js';
+import type { WorkspaceRole } from '@huabu/shared';
 import type {
   BubbleAuthzOptions,
   BubbleStore,
@@ -57,6 +60,92 @@ const CAPABILITY = {
 const { read: READ, write: WRITE, manage: MANAGE } = CAPABILITY;
 const TARGET = { workspace: 'huabu.workspace', space: 'huabu.space' } as const;
 const SPACE_OWNER = 'huabu.space.owner';
+const WORKSPACE_ROLE = {
+  owner: 'huabu.workspace.owner',
+  editor: 'huabu.workspace.editor',
+  viewer: 'huabu.workspace.viewer',
+} as const satisfies Record<WorkspaceRole, string>;
+
+/** People administration over Bubble's principal and grant tables. */
+function bubblePeople(store: BubbleStore): PeopleDirectory {
+  const SYSTEM = { type: 'system' } as const;
+  const roleOf = (role: string): WorkspaceRole | null =>
+    (Object.keys(WORKSPACE_ROLE) as WorkspaceRole[]).find(
+      (key) => WORKSPACE_ROLE[key] === role,
+    ) ?? null;
+  return {
+    async list() {
+      const [principals, grants] = await Promise.all([
+        store.principals.list(),
+        store.grants.list(),
+      ]);
+      return principals.map((principal) => {
+        const held = grants.filter(
+          (grant) => grant.principalId === principal.principalId,
+        );
+        const system = held.filter((grant) => grant.target.type === 'system');
+        const workspaces = new Map<string, WorkspaceRole>();
+        for (const grant of held) {
+          const role = roleOf(grant.role);
+          if (
+            grant.target.type === TARGET.workspace &&
+            'id' in grant.target &&
+            role
+          )
+            workspaces.set(grant.target.id, role);
+        }
+        return {
+          principal: identityPrincipalSchema.parse({
+            principalId: principal.principalId,
+            kind: principal.kind,
+            ...(principal.displayName
+              ? { displayName: principal.displayName }
+              : {}),
+            ...(principal.email ? { email: principal.email } : {}),
+            ...(principal.avatarUrl ? { avatarUrl: principal.avatarUrl } : {}),
+          }),
+          member: system.some((grant) => grant.role === 'member'),
+          admin: system.some((grant) => grant.role === 'owner'),
+          workspaces: [...workspaces].map(([workspaceId, role]) => ({
+            workspaceId,
+            role,
+          })),
+        };
+      });
+    },
+    async setMember(principalId, member, by) {
+      if (!(await store.principals.get(principalId))) return false;
+      const rows = await store.grants.list({ target: SYSTEM, principalId });
+      const current = rows.filter((row) => row.role === 'member');
+      if (member && current.length === 0)
+        await store.grants.add({
+          target: SYSTEM,
+          principalId,
+          role: 'member',
+          grantedByPrincipalId: by,
+        });
+      if (!member)
+        for (const row of current) await store.grants.remove(row.grantId);
+      return true;
+    },
+    async setWorkspaceRole(principalId, workspaceId, role, by) {
+      if (!(await store.principals.get(principalId))) return false;
+      const target = { type: TARGET.workspace, id: workspaceId };
+      const rows = await store.grants.list({ target, principalId });
+      for (const row of rows)
+        if (roleOf(row.role) && row.role !== (role && WORKSPACE_ROLE[role]))
+          await store.grants.remove(row.grantId);
+      if (role && !rows.some((row) => row.role === WORKSPACE_ROLE[role]))
+        await store.grants.add({
+          target,
+          principalId,
+          role: WORKSPACE_ROLE[role],
+          grantedByPrincipalId: by,
+        });
+      return true;
+    },
+  };
+}
 
 /**
  * A Space's Bubble target names its Workspace too, so a Space can later be
@@ -107,17 +196,17 @@ function huabuAuthz(resources: ResourceDirectory): BubbleAuthzOptions {
     // Granting a role on a Workspace or Space takes `huabu.manage` there, so
     // an owner can share what they own; nothing here grants system roles.
     roles: {
-      'huabu.workspace.owner': {
+      [WORKSPACE_ROLE.owner]: {
         grantableOn: [TARGET.workspace],
         capabilities: [READ, WRITE, MANAGE],
         managementCapability: MANAGE,
       },
-      'huabu.workspace.editor': {
+      [WORKSPACE_ROLE.editor]: {
         grantableOn: [TARGET.workspace],
         capabilities: [READ, WRITE],
         managementCapability: MANAGE,
       },
-      'huabu.workspace.viewer': {
+      [WORKSPACE_ROLE.viewer]: {
         grantableOn: [TARGET.workspace],
         capabilities: [READ],
         managementCapability: MANAGE,
@@ -234,6 +323,7 @@ export async function openBubbleIdentity(options: {
     service: {
       provider: 'bubble',
       challenge: 'Bearer realm="Huabu"',
+      people: bubblePeople(store),
       selectWorkspace: (identity) =>
         selectRequestWorkspace(identity, preferences, options.resources),
       chooseWorkspace: (identity, workspaceId) =>
@@ -301,7 +391,7 @@ export async function openBubbleIdentity(options: {
                   role:
                     resource.type === 'space'
                       ? SPACE_OWNER
-                      : 'huabu.workspace.owner',
+                      : WORKSPACE_ROLE.owner,
                   grantedByPrincipalId: principalId,
                 });
               },

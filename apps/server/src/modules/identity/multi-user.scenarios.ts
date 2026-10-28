@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { openBubbleIdentity } from './bubble.js';
 import { registerIdentity } from './http.js';
+import peopleRoutes from './people.route.js';
 import { createMemoryWorkspacePreferences } from './preferences.js';
 import { storageResourceDirectory } from './resources.js';
 import canvasRoutes from '../canvas/canvas.route.js';
@@ -68,11 +69,15 @@ async function host() {
   registerSpaceAccess(app);
   await app.register(canvasRoutes, { prefix: '/api/canvas' });
   await app.register(workspaceRoutes, { prefix: '/api/workspace' });
+  await app.register(peopleRoutes, {
+    prefix: '/api/people',
+    service: bubble.service,
+  });
   await app.register(workspacesRoutes, { prefix: '/api/workspaces' });
 
   const call = async (
     principalId: string,
-    method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+    method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE',
     url: string,
     payload?: object,
   ) => {
@@ -242,6 +247,65 @@ export function describeSeveralPeople(
           })
         ).status,
       ).toBe(404);
+    });
+
+    it('lets an administrator admit, revoke and give Workspace roles', async () => {
+      const { call, store, workspaceOf, spacesOf } = await host();
+      await store.principals.upsert({ principalId: 'erin', kind: 'user' });
+      // Signed in, not admitted.
+      expect((await call('erin', 'GET', '/api/canvas')).status).toBe(403);
+      expect((await call('carol', 'GET', '/api/people')).status).toBe(403);
+
+      const listed = (await call('admin', 'GET', '/api/people')).body as Array<{
+        principal: { principalId: string };
+        member: boolean;
+        admin: boolean;
+      }>;
+      expect(
+        Object.fromEntries(
+          listed.map((p) => [p.principal.principalId, [p.member, p.admin]]),
+        ),
+      ).toMatchObject({
+        admin: [false, true],
+        carol: [true, false],
+        erin: [false, false],
+      });
+
+      const admit = (principalId: string, member: boolean) =>
+        call('admin', 'PUT', `/api/people/${principalId}/member`, { member });
+      expect((await admit('erin', true)).status).toBe(204);
+      expect((await call('erin', 'GET', '/api/canvas')).status).toBe(200);
+      expect((await admit('nobody', true)).status).toBe(404);
+      expect((await admit('admin', false)).status).toBe(409);
+
+      // A Workspace role lets Erin enter Carol's Workspace and edit there,
+      // beside the personal Workspace her first admitted request made.
+      const carolWs = await workspaceOf('carol');
+      await call('carol', 'POST', '/api/canvas', { title: 'plan' });
+      expect(
+        (
+          await call('admin', 'PUT', `/api/people/erin/workspaces/${carolWs}`, {
+            role: 'editor',
+          })
+        ).status,
+      ).toBe(204);
+      await call('erin', 'POST', `/api/workspaces/${carolWs}/activate`);
+      expect(await spacesOf('erin')).toEqual(['plan']);
+      const people = (await call('admin', 'GET', '/api/people')).body as Array<{
+        principal: { principalId: string };
+        workspaces: Array<{ workspaceId: string; role: string }>;
+      }>;
+      expect(
+        people.find((p) => p.principal.principalId === 'erin')?.workspaces,
+      ).toContainEqual({ workspaceId: carolWs, role: 'editor' });
+
+      // Removing it, then admission, takes effect on the next request.
+      await call('admin', 'PUT', `/api/people/erin/workspaces/${carolWs}`, {
+        role: null,
+      });
+      expect(await spacesOf('erin')).not.toContain('plan');
+      await admit('erin', false);
+      expect((await call('erin', 'GET', '/api/canvas')).status).toBe(403);
     });
   });
 }
