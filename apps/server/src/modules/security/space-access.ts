@@ -10,7 +10,6 @@ import {
 import { UNRESTRICTED_ACCESS } from '../identity/service.js';
 
 import type { AccessLevel } from '../identity/service.js';
-
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 
 declare module 'fastify' {

@@ -15,6 +15,8 @@ import { resetStorageCache } from '../storage/index.js';
 import { createWorkspace } from '../workspace-activation.js';
 import { getWorkspaceHandle, setWorkspacePath } from '../workspace.js';
 
+import type { FastifyPluginAsync } from 'fastify';
+
 let tmp: string;
 let previousDataDir: string | undefined;
 beforeEach(() => {
@@ -36,7 +38,7 @@ describe('Workspace-scoped routes', () => {
   it('run each call in the Workspace their prefix names', async () => {
     const other = await createWorkspace('Other');
     const app = Fastify();
-    const routes = async (scoped: typeof app) => {
+    const routes: FastifyPluginAsync = async (scoped) => {
       scoped.get('/where', async () => ({
         workspaceId: getWorkspaceHandle()?.workspaceId,
       }));

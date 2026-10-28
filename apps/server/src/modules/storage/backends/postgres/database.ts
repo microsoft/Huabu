@@ -2,10 +2,10 @@
 // Licensed under the MIT license.
 
 import { Pool, type PoolClient, type PoolConfig } from 'pg';
-import { currentWorkspaceScope } from '../../../workspace/context.js';
 
 import { POSTGRES_MIGRATIONS } from './schema.js';
 import { createKeyedMutex } from '../../../../utils/keyed-mutex.js';
+import { currentWorkspaceScope } from '../../../workspace/context.js';
 import {
   assertSpaceMutationAllowed,
   beginSpaceDeleteAdmission,

@@ -23,7 +23,7 @@ import {
   toSafeFilename,
 } from '../../../../utils/naming.js';
 import { spaceHierarchyShapeError } from '../../../canvas/persistence-validation.js';
-import { getWorkspaceDirectory, getWorkspacePath } from '../../../workspace.js';
+import { getWorkspacePath } from '../../../workspace.js';
 
 export interface CanvasDirEntry {
   id: string;

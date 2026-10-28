@@ -20,10 +20,10 @@
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { currentWorkspaceScope } from '../../../workspace/context.js';
 
 import { SQLITE_MIGRATIONS, type SqliteMigration } from './schema.js';
 import { getDataDir } from '../../../../data-dir.js';
+import { currentWorkspaceScope } from '../../../workspace/context.js';
 import {
   assertSpaceMutationAllowed,
   beginSpaceDeleteAdmission,
