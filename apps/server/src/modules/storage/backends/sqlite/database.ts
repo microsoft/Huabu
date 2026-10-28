@@ -20,6 +20,7 @@
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { currentWorkspaceScope } from '../../../workspace/context.js';
 
 import { SQLITE_MIGRATIONS, type SqliteMigration } from './schema.js';
 import { getDataDir } from '../../../../data-dir.js';
@@ -236,21 +237,34 @@ export class SqliteStoreContext {
     this.#workspaceId = workspaceId;
   }
 
+  /**
+   * The Workspace this call runs in: its request's or background work's own
+   * scope where one is open, else the process-active one set by
+   * {@link useWorkspace}. Concurrent calls in different Workspaces therefore
+   * never read each other's rows through the one shared connection.
+   */
+  #currentWorkspaceId(): string | null {
+    const scope = currentWorkspaceScope();
+    if (scope !== undefined) return scope?.handle.workspaceId ?? null;
+    return this.#workspaceId;
+  }
+
   /** The active Workspace id, or `null` when none has been selected. */
   activeWorkspaceId(): string | null {
-    return this.#workspaceId;
+    return this.#currentWorkspaceId();
   }
 
   /** The active Workspace id, or a refusal when none has been selected. */
   workspaceId(): string {
     this.assertOpen();
-    if (this.#workspaceId === null) {
+    const workspaceId = this.#currentWorkspaceId();
+    if (workspaceId === null) {
       throw new SqliteWorkspaceScopeError(
         'No Workspace is active on the SQLite backend. Activate one before ' +
           'reading or writing Spaces.',
       );
     }
-    return this.#workspaceId;
+    return workspaceId;
   }
 
   /**

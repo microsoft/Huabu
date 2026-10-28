@@ -23,7 +23,7 @@ import {
   toSafeFilename,
 } from '../../../../utils/naming.js';
 import { spaceHierarchyShapeError } from '../../../canvas/persistence-validation.js';
-import { getWorkspacePath } from '../../../workspace.js';
+import { getWorkspaceDirectory, getWorkspacePath } from '../../../workspace.js';
 
 export interface CanvasDirEntry {
   id: string;
@@ -42,9 +42,29 @@ export interface CanvasDirEntry {
   parentEntryNodeId?: string | null;
 }
 
-const index = new NameIndex<CanvasDirEntry>();
-let worldEntry: CanvasDirEntry | null = null;
-let scanned = false;
+/** One Workspace folder's index. Several are live at once in Bubble mode. */
+interface DirIndexState {
+  readonly index: NameIndex<CanvasDirEntry>;
+  worldEntry: CanvasDirEntry | null;
+  scanned: boolean;
+}
+
+const states = new Map<string, DirIndexState>();
+
+/** The index of the Workspace this call runs in. */
+function dirState(): DirIndexState {
+  const workspacePath = getWorkspacePath();
+  let state = states.get(workspacePath);
+  if (!state) {
+    state = {
+      index: new NameIndex<CanvasDirEntry>(),
+      worldEntry: null,
+      scanned: false,
+    };
+    states.set(workspacePath, state);
+  }
+  return state;
+}
 
 function readCanvasDirEntry(
   fullPath: string,
@@ -103,11 +123,12 @@ function readCanvasDirEntry(
 }
 
 function scanWorkspace(): void {
-  index.reset([]);
-  worldEntry = null;
+  const state = dirState();
+  state.index.reset([]);
+  state.worldEntry = null;
   const ws = getWorkspacePath();
   if (!existsSync(ws)) {
-    scanned = true;
+    state.scanned = true;
     return;
   }
 
@@ -124,8 +145,12 @@ function scanWorkspace(): void {
         }`,
       );
     }
-    worldEntry = readCanvasDirEntry(worldRoot, WORLD_CANVAS_DIR_NAME, true);
-    if (!worldEntry) {
+    state.worldEntry = readCanvasDirEntry(
+      worldRoot,
+      WORLD_CANVAS_DIR_NAME,
+      true,
+    );
+    if (!state.worldEntry) {
       throw new Error(
         `World canvas is missing or malformed: ${path.join(
           worldRoot,
@@ -160,46 +185,50 @@ function scanWorkspace(): void {
       );
     }
     duplicateOf.set(canvasEntry.id, entry);
-    index.add(canvasEntry);
+    state.index.add(canvasEntry);
   }
-  if (worldEntry && index.has(worldEntry.id)) {
+  const worldEntry = state.worldEntry;
+  if (worldEntry && state.index.has(worldEntry.id)) {
     throw new Error(
       `World canvasId duplicates an ordinary Space: ${worldEntry.id}`,
     );
   }
-  scanned = true;
+  state.scanned = true;
 }
 
 function ensureScanned(): void {
-  if (!scanned) scanWorkspace();
+  if (!dirState().scanned) scanWorkspace();
 }
 
 /** Force a re-scan on next access (call after migrations / imports). */
 export function refreshCanvasDirIndex(): void {
-  scanned = false;
+  // Every folder rescans, not only this call's: a refresh is rare, and a
+  // stale index is worse than a second scan.
+  states.clear();
 }
 
 export function canvasDirName(canvasId: string): string {
   ensureScanned();
-  if (worldEntry?.id === canvasId) return WORLD_CANVAS_DIR_NAME;
-  return index.get(canvasId)?.filename ?? canvasId;
+  if (dirState().worldEntry?.id === canvasId) return WORLD_CANVAS_DIR_NAME;
+  return dirState().index.get(canvasId)?.filename ?? canvasId;
 }
 
 /** Ordinary user-visible Spaces only. */
 export function listCanvasDirEntries(): CanvasDirEntry[] {
   ensureScanned();
-  return index.list();
+  return dirState().index.list();
 }
 
 /** Every executable Canvas scope, including the hidden World. */
 export function listAllCanvasDirEntries(): CanvasDirEntry[] {
   ensureScanned();
+  const { index, worldEntry } = dirState();
   return worldEntry ? [...index.list(), worldEntry] : index.list();
 }
 
 export function getWorldCanvasId(): string | null {
   ensureScanned();
-  return worldEntry?.id ?? null;
+  return dirState().worldEntry?.id ?? null;
 }
 
 export function requireWorldCanvasId(): string {
@@ -212,7 +241,7 @@ export function requireWorldCanvasId(): string {
 
 export function isWorldCanvasId(canvasId: string): boolean {
   ensureScanned();
-  return worldEntry?.id === canvasId;
+  return dirState().worldEntry?.id === canvasId;
 }
 
 /**
@@ -226,7 +255,9 @@ export function suggestCanvasDir(
   ensureScanned();
   const base = toSafeFilename(title, fallback);
   return dedupeName(base, [
-    ...index.list().map((entry) => entry.filename),
+    ...dirState()
+      .index.list()
+      .map((entry) => entry.filename),
     WORLD_CANVAS_DIR_NAME,
   ]);
 }
@@ -237,7 +268,7 @@ export function registerCanvasDir(
   title: string | null,
 ): NameIndexResult<CanvasDirEntry> {
   ensureScanned();
-  return index.add({ id: canvasId, filename: dirName, title });
+  return dirState().index.add({ id: canvasId, filename: dirName, title });
 }
 
 export function patchCanvasDirTitle(
@@ -245,12 +276,12 @@ export function patchCanvasDirTitle(
   title: string | null,
 ): void {
   ensureScanned();
-  index.patch(canvasId, { title });
+  dirState().index.patch(canvasId, { title });
 }
 
 export function unregisterCanvasDir(canvasId: string): void {
   ensureScanned();
-  index.remove(canvasId);
+  dirState().index.remove(canvasId);
 }
 
 /** Result of a strict on-disk rename. */
@@ -299,6 +330,7 @@ export function renameCanvasDirOnDisk(
   newDirName: string,
 ): CanvasDirRenameResult {
   ensureScanned();
+  const { index, worldEntry } = dirState();
   const entry = index.get(canvasId);
   if (!entry) return { ok: false, reason: 'not-found' };
 
@@ -306,7 +338,11 @@ export function renameCanvasDirOnDisk(
     worldEntry &&
     normalizeForCompare(worldEntry.filename) === normalizeForCompare(newDirName)
   ) {
-    return { ok: false, reason: 'conflict', conflictWith: worldEntry.filename };
+    return {
+      ok: false,
+      reason: 'conflict',
+      conflictWith: worldEntry.filename,
+    };
   }
 
   if (normalizeForCompare(entry.filename) === normalizeForCompare(newDirName)) {

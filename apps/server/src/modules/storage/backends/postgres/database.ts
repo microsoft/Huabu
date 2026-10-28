@@ -2,6 +2,7 @@
 // Licensed under the MIT license.
 
 import { Pool, type PoolClient, type PoolConfig } from 'pg';
+import { currentWorkspaceScope } from '../../../workspace/context.js';
 
 import { POSTGRES_MIGRATIONS } from './schema.js';
 import { createKeyedMutex } from '../../../../utils/keyed-mutex.js';
@@ -180,14 +181,27 @@ export class PostgresStoreContext {
   useWorkspace(workspaceId: string | null): void {
     this.#workspaceId = workspaceId;
   }
-  activeWorkspaceId(): string | null {
+
+  /**
+   * The Workspace this call runs in: its request's or background work's own
+   * scope where one is open, else the process-active one set by
+   * {@link useWorkspace}. Concurrent calls in different Workspaces therefore
+   * never read each other's rows through the one shared connection.
+   */
+  #currentWorkspaceId(): string | null {
+    const scope = currentWorkspaceScope();
+    if (scope !== undefined) return scope?.handle.workspaceId ?? null;
     return this.#workspaceId;
+  }
+  activeWorkspaceId(): string | null {
+    return this.#currentWorkspaceId();
   }
   workspaceId(): string {
     this.assertOpen();
-    if (!this.#workspaceId)
+    const workspaceId = this.#currentWorkspaceId();
+    if (!workspaceId)
       throw new Error('No Workspace is active on the Postgres backend');
-    return this.#workspaceId;
+    return workspaceId;
   }
   assertBoundWorkspace(bound: string, what: string): string {
     if (this.workspaceId() !== bound)
@@ -220,10 +234,10 @@ export class PostgresStoreContext {
   /** Never hold a SQL transaction while composition performs blob I/O. */
   transaction<T>(operation: (database: PgExecutor) => Promise<T>): Promise<T> {
     this.assertOpen();
-    const bound = this.#workspaceId;
+    const bound = this.#currentWorkspaceId();
     const result = serializeTransactions(this.#admissionScope, async () => {
       this.assertOpen();
-      if (bound !== this.#workspaceId)
+      if (bound !== this.#currentWorkspaceId())
         throw new Error('Postgres operation belongs to an inactive Workspace');
       const client = await this.#pool.connect();
       // pg-pool drops its own idle listener while a client is checked out and
@@ -238,7 +252,7 @@ export class PostgresStoreContext {
         await client.query('BEGIN');
         await client.query("SET LOCAL lock_timeout = '5s'");
         await client.query('SELECT pg_advisory_xact_lock($1)', [WRITE_LOCK]);
-        if (bound !== this.#workspaceId)
+        if (bound !== this.#currentWorkspaceId())
           throw new Error(
             'Postgres operation belongs to an inactive Workspace',
           );
