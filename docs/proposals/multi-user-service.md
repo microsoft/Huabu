@@ -1,6 +1,6 @@
 # Multi-User Service
 
-Status: Proposed
+Status: In-Progress — PR A implemented, PR B proposed
 Last updated: 2026-10-28
 
 Follows PR #237 (Bubble identity and per-user Space access) toward issue #228. Two stacked pull requests take one Huabu Server from "several people sign in and each edits their own Spaces in one shared Workspace" to a service several people can use day to day: each person has their own Workspaces, uses agents in them, and an operator admits people without scripts.
@@ -31,7 +31,7 @@ Each request runs in exactly one Workspace, resolved once in admission and carri
 How the Workspace is chosen:
 
 - **Local mode:** the process-active Workspace, as today. Switching still changes it for every client, because local mode has one person.
-- **Bubble mode:** the principal's _current Workspace_, a per-principal preference stored in Huabu (`principal_preferences`, referencing Bubble's `principalId`, as #228 proposes). Switching changes only that preference. It must be a Workspace the principal can read (`huabu.workspace.read`, new), else admission falls back to their personal Workspace.
+- **Bubble mode:** the principal's _current Workspace_, a per-principal row stored in Huabu (`huabu_identity.current_workspaces`, referencing Bubble's `principalId`, as #228 proposes). Switching changes only that row. It must be a Workspace the principal may enter, else admission falls back to the first one they may enter, or a new personal Workspace.
 
 A per-principal preference rather than a Workspace header keeps images, frames, downloads and EventSource working without changes, since they cannot set headers. The cost is that one person's tabs share one current Workspace, which is also the behavior today. Per-tab Workspaces would need the Workspace in every URL and are not planned.
 
@@ -40,10 +40,11 @@ Work that outlives the request (agents, memory updates, Task Runs, preprocessing
 ### Storage
 
 - **SQL namespaces per call, not per connection.** `useWorkspace()` mutates the one Postgres/SQLite connection's namespace today, so concurrent Workspaces would read each other's Spaces. The structured store reads the Workspace id from the context per query, and transactions bind it when they open. The one database-wide write order (`pg_advisory_xact_lock(WRITE_LOCK)`) stays: it also covers name allocation and the Workspace registry. A per-Workspace lock is a later throughput change.
-- **Per-Workspace state.** The World id, canvas-dirs index, user-skill cache, external-note sessions and the Space-create and hierarchy chains move into a `WorkspaceRuntime` (`modules/workspace/runtime.ts`, new), created on first use per Workspace and evicted when idle. The process-wide reset hooks (`refreshCanvasDirIndex`, `invalidateUserSkill`, `resetExternalNoteSessions`) become methods on it.
+- **Per-Workspace state.** The SQL World id and the Disk directory index are kept per Workspace. The user-skill cache rebuilds whenever the calling Workspace differs, which is correct and costs only a rescan. The Space-create and hierarchy chains stay process-wide: they serialize, which costs throughput, not correctness. Queues that outlive a request (memory passes, World-preview reconciliation, preprocessing) run each item in its enqueuer's scope, because they chain promises from the enqueuing call.
 - **Leases.** `acquireWorkspaceOperationLease()` counts per Workspace. It still stops a local-mode switch or a Workspace delete from stranding in-flight work, and no longer refuses a second live Workspace.
-- **Blob prefixes use the Workspace id.** Azure blobs are prefixed by `getWorkspaceKey()`, which on Disk is the folder _path_, so moving a folder orphans them. This becomes the Workspace id, with a one-time copy-forward on first open.
-- **Maps keyed by Space id alone** (canvas mutex, SSE listeners, memory worker, dir handles, tombstones, Agenetes turn owners) stay as they are. Space ids are random UUIDs or `createId('canvas')` and imports mint new ids. Workspace creation refuses a Disk folder whose Space ids collide with a live Workspace's.
+- **Maps keyed by Space id alone** (canvas mutex, SSE listeners, memory worker, dir handles, tombstones, Agenetes turn owners) stay as they are. Space ids are random UUIDs or `createId('canvas')`, imports mint new ids, and personal Workspaces start empty. The one way to repeat an id is an administrator adopting a copy of a Disk folder as a second Workspace; that is a known limitation, not guarded.
+
+Not changed: Azure blobs are still prefixed by the Workspace key, which on Disk is the folder path. That predates this work and does not affect several people working at once.
 
 ### Roles and capabilities
 
