@@ -37,6 +37,11 @@ import { parserCtx, serializerCtx } from '@milkdown/core';
 import { Crepe } from '@milkdown/crepe';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import {
+  configureLatexCodeFences,
+  latexCodeBlockSchema,
+} from '../latexCodeFence';
+
 const here = dirname(fileURLToPath(import.meta.url));
 const loadFixture = (name: string): string =>
   readFileSync(resolve(here, 'fixtures', name), 'utf-8');
@@ -68,6 +73,7 @@ async function createHarness(): Promise<RoundTripHarness> {
     },
   });
 
+  crepe.editor.config(configureLatexCodeFences).use(latexCodeBlockSchema);
   await crepe.create();
 
   return {
