@@ -14,7 +14,7 @@ import {
 
 import { getProfileSchemaCache } from './acp/profile-schema-cache.js';
 import { getAgentDefaults, setAgentDefaults } from './agent-defaults.js';
-import { isOwnerRequest } from '../security/owner.js';
+import { canChangeOwnSettings } from '../security/owner.js';
 
 import type {
   AgentDefaults,
@@ -75,7 +75,7 @@ function projectDefaults(defaults: AgentDefaults): AgentDefaultsResponse {
 
 const agentDefaultsRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', async (request, reply) => {
-    if (!isOwnerRequest(request)) {
+    if (!canChangeOwnSettings(request)) {
       return reply.status(403).send({
         message:
           'Forbidden: Utility Agent settings require owner authorization',

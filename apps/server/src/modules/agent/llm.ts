@@ -51,6 +51,10 @@ import {
   setSecret,
 } from '../../security/secret-store.js';
 import { getLogger } from '../../utils/logger.js';
+import {
+  personalSettingsOwner,
+  settingsFilePath,
+} from '../identity/personal-settings.js';
 
 import type {
   Api,
@@ -198,7 +202,15 @@ function getDataFilePath(filename: string): string {
   return join(getDataDir(), filename);
 }
 
-const CONFIG_FILE = getDataFilePath('llm-config.json');
+/**
+ * The deployment's model settings, or a member's own in their personal
+ * settings namespace (`../identity/personal-settings.ts`).
+ */
+function configFile(): string {
+  return personalSettingsOwner()
+    ? settingsFilePath('llm-config.json')
+    : getDataFilePath('llm-config.json');
+}
 
 /**
  * Effective active configuration assembled from the persisted store —
@@ -304,8 +316,8 @@ interface UtilityConfigPersisted {
  */
 function loadPersistedStore(): PersistedStore {
   try {
-    if (!existsSync(CONFIG_FILE)) return { providers: {} };
-    const raw = readFileSync(CONFIG_FILE, 'utf-8');
+    if (!existsSync(configFile())) return { providers: {} };
+    const raw = readFileSync(configFile(), 'utf-8');
     const parsed = JSON.parse(raw) as Record<string, unknown>;
 
     // Legacy shape — single active provider, fields at top level.
@@ -413,13 +425,13 @@ function extractLegacyImageConfig(
 }
 
 function savePersistedStore(store: PersistedStore): void {
-  const dir = dirname(CONFIG_FILE);
+  const dir = dirname(configFile());
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
   }
-  writeFileSync(CONFIG_FILE, JSON.stringify(store, null, 2), 'utf-8');
+  writeFileSync(configFile(), JSON.stringify(store, null, 2), 'utf-8');
   try {
-    chmodSync(CONFIG_FILE, 0o600);
+    chmodSync(configFile(), 0o600);
   } catch {
     // Non-critical — best effort on platforms that support it
   }
@@ -449,16 +461,30 @@ function loadPersistedConfig(): PersistedConfig | null {
 
 // ==================== Runtime State ====================
 
-let cachedModel: Model<Api> | null = null;
-let activeConfig: PersistedConfig | null = null;
+interface RuntimeState {
+  cachedModel: Model<Api> | null;
+  activeConfig: PersistedConfig | null;
+  /**
+   * Cached utility-tier model. Built from `store.utilityConfig` and
+   * invalidated whenever {@link setUtilityConfig} writes. When utility is
+   * following the chat model (no utility config), the resolver returns the
+   * chat model directly and this stays null.
+   */
+  cachedUtilityModel: Model<Api> | null;
+}
 
-/**
- * Cached utility-tier model. Built from `store.utilityConfig` and
- * invalidated whenever {@link setUtilityConfig} writes. When utility is
- * following the chat model (no utility config), the resolver returns the
- * chat model directly and this stays null.
- */
-let cachedUtilityModel: Model<Api> | null = null;
+/** One runtime state per settings namespace: the deployment's, or a member's. */
+const runtimeStates = new Map<string, RuntimeState>();
+
+function runtime(): RuntimeState {
+  const key = personalSettingsOwner() ?? '';
+  let state = runtimeStates.get(key);
+  if (!state) {
+    state = { cachedModel: null, activeConfig: null, cachedUtilityModel: null };
+    runtimeStates.set(key, state);
+  }
+  return state;
+}
 
 /**
  * Resolve the API key for a provider.
@@ -565,14 +591,21 @@ function buildModel(cfg: PersistedConfig): Model<Api> {
 
 /** Initialize the active configuration from persisted config or env vars. */
 function ensureConfig(): PersistedConfig {
-  if (activeConfig) return activeConfig;
+  const state = runtime();
+  if (state.activeConfig) return state.activeConfig;
 
   // Try persisted config
   const persisted = loadPersistedConfig();
   if (persisted) {
-    activeConfig = persisted;
-    return activeConfig;
+    state.activeConfig = persisted;
+    return persisted;
   }
+
+  // The deployment's environment is the operator's, never a member's.
+  if (personalSettingsOwner())
+    throw new Error(
+      'No model configured. Choose a provider and add your key in Settings.',
+    );
 
   // Fall back to legacy Azure OpenAI env vars
   const azureKey = process.env.AZURE_OPENAI_API_KEY;
@@ -580,11 +613,12 @@ function ensureConfig(): PersistedConfig {
   const azureDeployment = process.env.AZURE_OPENAI_API_DEPLOYMENT_NAME;
 
   if (azureKey && azureEndpoint && azureDeployment) {
-    activeConfig = {
+    const azure: PersistedConfig = {
       provider: 'azure-openai',
       model: azureDeployment,
     };
-    return activeConfig;
+    state.activeConfig = azure;
+    return azure;
   }
 
   // Try other providers from env vars
@@ -592,8 +626,9 @@ function ensureConfig(): PersistedConfig {
     if (p.builtIn && getEnvApiKey(p.id as KnownProvider)) {
       const models = getModelsForProvider(p.id);
       if (models.length > 0) {
-        activeConfig = { provider: p.id, model: models[0].id };
-        return activeConfig;
+        const found: PersistedConfig = { provider: p.id, model: models[0].id };
+        state.activeConfig = found;
+        return found;
       }
     }
   }
@@ -996,8 +1031,8 @@ export async function setLLMConfig(
     provider: update.provider,
     model: resolvedModel,
   };
-  activeConfig = persisted;
-  cachedModel = null;
+  runtime().activeConfig = persisted;
+  runtime().cachedModel = null;
   if (
     persisted.provider === 'openai' &&
     (update.apiKey !== undefined || update.baseUrl !== undefined)
@@ -1250,7 +1285,7 @@ export async function setUtilityConfig(
   if (!update.provider) {
     delete store.utilityConfig;
     savePersistedStore(store);
-    cachedUtilityModel = null;
+    runtime().cachedUtilityModel = null;
     return getUtilityConfig();
   }
 
@@ -1292,7 +1327,7 @@ export async function setUtilityConfig(
   }
 
   savePersistedStore(store);
-  cachedUtilityModel = null;
+  runtime().cachedUtilityModel = null;
   return getUtilityConfig();
 }
 
@@ -1304,9 +1339,11 @@ export async function setUtilityConfig(
 function getUtilityModel(): Model<Api> {
   const cfg = loadUtilityPersistedConfig();
   if (!cfg) return getLLMModel();
-  if (cachedUtilityModel) return cachedUtilityModel;
-  cachedUtilityModel = buildModel(cfg);
-  return cachedUtilityModel;
+  const state = runtime();
+  if (state.cachedUtilityModel) return state.cachedUtilityModel;
+  const model = buildModel(cfg);
+  state.cachedUtilityModel = model;
+  return model;
 }
 
 /**
@@ -1580,7 +1617,8 @@ export async function ensureApiKeyForRole(
  * Get a configured pi-ai Model instance for the active provider/model.
  */
 export function getLLMModel(): Model<Api> {
-  if (cachedModel) return cachedModel;
+  const state = runtime();
+  if (state.cachedModel) return state.cachedModel;
 
   const cfg = ensureConfig();
   const apiKey = resolveApiKey(cfg.provider);
@@ -1597,8 +1635,9 @@ export function getLLMModel(): Model<Api> {
     }
   }
 
-  cachedModel = buildModel(cfg);
-  return cachedModel;
+  const model = buildModel(cfg);
+  state.cachedModel = model;
+  return model;
 }
 
 /**
