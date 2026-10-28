@@ -23,6 +23,8 @@ export type IdentityConfig =
       /** Principal provisioned as Bubble system owner at startup. */
       owner?: string;
       postgresUrl: string;
+      /** Signing out of Huabu also ends the identity provider's session. */
+      providerSignOut?: boolean;
     };
 
 export function resolveIdentityConfig(
@@ -67,6 +69,9 @@ export function resolveIdentityConfig(
     authenticators,
     ...(owner ? { owner } : {}),
     postgresUrl,
+    ...(env.HUABU_SIGN_OUT_PROVIDER === 'true'
+      ? { providerSignOut: true }
+      : {}),
   };
 }
 

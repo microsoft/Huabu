@@ -17,7 +17,13 @@ import { API_CONFIG } from '../../config/api';
 import { APP_NAME } from '../../config/app';
 import { WorkspaceLoadingScreen } from '../../pages/WorkspaceLoadingScreen';
 import { useIdentityStore } from '../../store/identityStore';
-import { beginLogin, completeLogin } from '../../utils/oidcLogin';
+import {
+  beginLogin,
+  completeLogin,
+  refreshTokens,
+  signInWithPopup,
+  type SignedInTokens,
+} from '../../utils/oidcLogin';
 import { Button } from '../Common/Button';
 
 import type { IdentityResponse } from '@huabu/shared';
@@ -73,6 +79,22 @@ export function SignInGate({ children }: { children: ReactNode }) {
   const callback = useRef<Promise<string | undefined>>(undefined);
   // Once the app has run, a lapsed session can strand its unsaved edits.
   const appStarted = useRef(false);
+  const renewalTimer = useRef<number | undefined>(undefined);
+
+  /**
+   * Hand fresh tokens to the Server, and renew them a minute before they
+   * expire while this page holds a refresh token.
+   */
+  const adopt = useCallback(async (tokens: SignedInTokens) => {
+    await startSession(tokens.accessToken);
+    window.clearTimeout(renewalTimer.current);
+    if (tokens.expiresIn && tokens.expiresIn > 90)
+      renewalTimer.current = window.setTimeout(
+        () => void refreshTokens().then((next) => next && adopt(next)),
+        (tokens.expiresIn - 60) * 1000,
+      );
+  }, []);
+  useEffect(() => () => window.clearTimeout(renewalTimer.current), []);
 
   const check = useCallback(
     async (loginError?: string) => {
@@ -136,32 +158,74 @@ export function SignInGate({ children }: { children: ReactNode }) {
   useEffect(() => {
     callback.current ??= (async () => {
       try {
-        const token = await completeLogin();
-        if (token) await startSession(token);
+        const tokens = await completeLogin();
+        if (tokens) await adopt(tokens);
         return undefined;
       } catch (error) {
         return error instanceof Error ? error.message : String(error);
       }
     })();
     void callback.current.then((loginError) => check(loginError));
-  }, [check]);
+  }, [check, adopt]);
 
   useEffect(() => {
-    const recheck = () => void check();
+    // A lapsed session renews in place when this page holds a refresh token;
+    // whatever it refused is then sent again.
+    const recheck = () =>
+      void (async () => {
+        const tokens = appStarted.current ? await refreshTokens() : null;
+        if (tokens) {
+          try {
+            await adopt(tokens);
+            await resend();
+          } catch {
+            // Fall through to the sign-in check below.
+          }
+        }
+        await check();
+      })();
     window.addEventListener(AUTH_REQUIRED_EVENT, recheck);
     return () => window.removeEventListener(AUTH_REQUIRED_EVENT, recheck);
-  }, [check]);
+  }, [check, adopt]);
+
+  /** Sign in again without leaving the page, then resend what was refused. */
+  const signInInPlace = useCallback(
+    async (authenticator: InteractiveAuthenticator) => {
+      await adopt(await signInWithPopup(authenticator));
+      await check();
+      await resend();
+    },
+    [adopt, check],
+  );
 
   if (state.kind === 'ready') return <>{children}</>;
   if (state.kind === 'checking') return <WorkspaceLoadingScreen />;
+  // The app keeps running under a lapsed session, so its edits survive.
+  if (state.kind === 'signIn' && appStarted.current)
+    return (
+      <>
+        {children}
+        <div className="bg-bg-default/95 fixed inset-0 z-[1000]">
+          <SignInScreen state={state} onSignIn={signInInPlace} />
+        </div>
+      </>
+    );
   return <SignInScreen state={state} />;
+}
+
+async function resend(): Promise<void> {
+  const { resendUnsavedCanvasEdits } = await import('../../store/canvasStore');
+  await resendUnsavedCanvasEdits();
 }
 
 /** The sign-in and no-access screens, in the Welcome page's frame. */
 export function SignInScreen({
   state,
+  onSignIn,
 }: {
   state: Exclude<GateState, { kind: 'checking' | 'ready' }>;
+  /** Sign in without leaving the page; the provider's redirect otherwise. */
+  onSignIn?: (authenticator: InteractiveAuthenticator) => Promise<void>;
 }) {
   const { t } = useTranslation();
   const [pending, setPending] = useState<string | null>(null);
@@ -215,7 +279,12 @@ export function SignInScreen({
                 disabled={pending !== null}
                 onClick={() => {
                   setPending(authenticator.issuer);
-                  void beginLogin(authenticator).catch(() => setPending(null));
+                  void (onSignIn ?? beginLogin)(authenticator).then(
+                    () => {
+                      if (onSignIn) setPending(null);
+                    },
+                    () => setPending(null),
+                  );
                 }}
               >
                 {pending === authenticator.issuer
@@ -253,7 +322,7 @@ export function SignInScreen({
           </p>
         )}
 
-        {state.kind === 'signIn' && state.unsavedEdits && (
+        {state.kind === 'signIn' && state.unsavedEdits && !onSignIn && (
           <p className="text-danger-fg mt-3 text-center text-xs" role="alert">
             {t('auth.signInUnsaved')}
           </p>

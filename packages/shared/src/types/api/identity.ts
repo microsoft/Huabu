@@ -18,8 +18,10 @@ export const identityResponseSchema = z.object({
   principal: identityPrincipalSchema,
   /** May use Huabu at all. */
   member: z.boolean(),
-  /** May also change settings, credentials and agent configuration. */
+  /** Administers the deployment: its settings, agents and people. */
   owner: z.boolean(),
+  /** Signing out should also end the identity provider's own session. */
+  providerSignOut: z.boolean().optional(),
 });
 export type IdentityResponse = z.infer<typeof identityResponseSchema>;
 

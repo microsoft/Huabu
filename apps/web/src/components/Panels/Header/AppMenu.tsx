@@ -102,7 +102,7 @@ export const AppMenu: React.FC<AppMenuProps> = ({
     try {
       if (!(await savedBeforeSignOut())) failure = 'auth.signOutUnsaved';
       else {
-        await signOut();
+        await signOut({ providerSignOut: identity?.providerSignOut });
         return;
       }
     } catch {

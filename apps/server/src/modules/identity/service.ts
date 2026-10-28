@@ -88,6 +88,8 @@ export interface ResourceDirectory {
 /** Resolve afresh for each request so revocation is not hidden by a host cache. */
 export interface IdentityService {
   readonly provider: IdentityResponse['provider'];
+  /** Signing out also ends the identity provider's own session. */
+  readonly providerSignOut?: boolean;
   readonly challenge: string;
   /**
    * Admits callers without any credential, as local mode does without Basic

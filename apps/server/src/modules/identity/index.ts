@@ -48,6 +48,7 @@ export function createIdentity(
     service: {
       provider: 'bubble',
       challenge: 'Bearer realm="Huabu"',
+      ...(config.providerSignOut ? { providerSignOut: true } : {}),
       authenticate: async (credentials) =>
         (await (opening ??= open())).service.authenticate(credentials),
       // Present from the start so routes can tell Bubble mode by it; each call

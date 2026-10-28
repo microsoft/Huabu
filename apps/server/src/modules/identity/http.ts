@@ -259,7 +259,13 @@ export function registerIdentity(
       if (!identity)
         throw new Error('Identity admission did not resolve a principal');
       const { principal, member, owner } = identity;
-      return { provider: service.provider, principal, member, owner };
+      return {
+        provider: service.provider,
+        principal,
+        member,
+        owner,
+        ...(service.providerSignOut ? { providerSignOut: true } : {}),
+      };
     },
   );
 
