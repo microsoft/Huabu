@@ -1,7 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-const PUBLIC_ROOT_SKILL_PATTERN = /^\/api\/rfs\/[^/?]+\/skill(?:\?.*)?$/;
+const PUBLIC_ROOT_SKILL_PATTERN =
+  /^\/api\/rfs\/(?:w\/[^/?]+\/)?[^/?]+\/skill(?:\?.*)?$/;
 
 /** Only a credential-free root skill request may bypass the RFS auth gate. */
 export function isPublicRfsSkillBootstrapRequest(input: {

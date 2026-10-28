@@ -27,6 +27,7 @@ vi.mock('./index.js', async (importOriginal) => {
 
 vi.mock('../security/owner.js', () => ({
   isOwnerRequest: mocks.isOwner,
+  canChangeOwnSettings: mocks.isOwner,
 }));
 
 const { default: serviceRoutes } = await import('./services.route.js');

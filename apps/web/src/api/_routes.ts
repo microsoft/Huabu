@@ -33,6 +33,12 @@ export const routes = {
   workspaceActivate: (workspaceId: string) =>
     `/workspaces/${enc(workspaceId)}/activate`,
 
+  // ── People (Bubble administration) ────────────────────────────────
+  people: '/people',
+  personMember: (principalId: string) => `/people/${enc(principalId)}/member`,
+  personWorkspace: (principalId: string, workspaceId: string) =>
+    `/people/${enc(principalId)}/workspaces/${enc(workspaceId)}`,
+
   // ── LLM ───────────────────────────────────────────────────────────
   llmConfig: '/llm/config',
   llmImageConfig: '/llm/image-config',

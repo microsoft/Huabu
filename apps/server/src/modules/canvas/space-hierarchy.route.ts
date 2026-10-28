@@ -105,18 +105,22 @@ export function registerSpaceHierarchyRoutes(fastify: FastifyInstance): void {
       ),
     );
   });
-  fastify.post('/:canvasId/delete-tree', async (request, reply) => {
-    const params = spaceHierarchyParamsSchema.safeParse(request.params);
-    const body = deleteSpaceTreeBodySchema.safeParse(request.body);
-    if (!params.success || !body.success)
-      return reply
-        .code(400)
-        .send({ message: 'Invalid subtree deletion request' });
-    return respond(reply, async () => ({
-      deletedCanvasIds: await deleteSpaceTree(
-        params.data.canvasId,
-        body.data.token,
-      ),
-    }));
-  });
+  fastify.post(
+    '/:canvasId/delete-tree',
+    { config: { spaceAccess: 'manage' } },
+    async (request, reply) => {
+      const params = spaceHierarchyParamsSchema.safeParse(request.params);
+      const body = deleteSpaceTreeBodySchema.safeParse(request.body);
+      if (!params.success || !body.success)
+        return reply
+          .code(400)
+          .send({ message: 'Invalid subtree deletion request' });
+      return respond(reply, async () => ({
+        deletedCanvasIds: await deleteSpaceTree(
+          params.data.canvasId,
+          body.data.token,
+        ),
+      }));
+    },
+  );
 }

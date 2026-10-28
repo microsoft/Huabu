@@ -181,6 +181,7 @@
     "title": "Settings",
     "open": "Open settings",
     "general": "General",
+    "people": "People",
     "agent": "Agent",
     "capabilities": "Capabilities",
     "capabilitiesDescription": "These Huabu-managed services can be configured as needed. Availability to an external Agent depends on that Agent's own capabilities.",
@@ -665,7 +666,15 @@
     "clickToSwitch": "Click to switch",
     "openPathFailed": "Failed to open path",
     "activationTimeout": "Opening Home folder “{{path}}” took longer than {{seconds}} seconds. Check that the cloud or network drive is available, then try again.",
-    "activationInProgress": "Another Home folder is still opening. Please wait for it to finish."
+    "activationInProgress": "Another Home folder is still opening. Please wait for it to finish.",
+    "yourWorkspaces": "Your Workspaces",
+    "introNamed": "Choose a Workspace for your Spaces, notes, and artifacts, or create one.",
+    "newWorkspace": "New Workspace",
+    "namePlaceholder": "Name, then press Enter",
+    "create": "Create",
+    "current": "Current",
+    "named": "Workspace: {{workspace}}",
+    "namedPrefix": "Workspace: "
   },
   "spaceHierarchy": {
     "collectAction": "Collect into child Space",
@@ -1533,5 +1542,21 @@
     "conversationAgentUnconfigured": "Connect an external Agent before starting a new conversation.",
     "nodeSaveFailed": "Couldn't write \"{{name}}\" to disk — the file may be locked or not writable.",
     "rateLimited": "Too many requests. Try again in {{seconds}} seconds."
+  },
+  "people": {
+    "loading": "Loading people…",
+    "loadFailed": "Could not load people.",
+    "saveFailed": "Could not save the change.",
+    "intro": "Who may use this Huabu, and which Workspaces they can open. People appear here after they first sign in. Changes apply on their next request.",
+    "administrator": "Administrator",
+    "access": "Access",
+    "roleIn": "Role in {{workspace}}",
+    "removeRole": "Remove from this Workspace",
+    "addToWorkspace": "Add to a Workspace…",
+    "role": {
+      "owner": "Owner",
+      "editor": "Editor",
+      "viewer": "Viewer"
+    }
   }
 }

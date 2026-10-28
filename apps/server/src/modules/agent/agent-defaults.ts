@@ -10,6 +10,10 @@ import { agentDefaultsSchema } from '@huabu/shared';
 
 import { getDataDir } from '../../data-dir.js';
 import { atomicWriteJson } from '../../utils/fs.js';
+import {
+  personalSettingsOwner,
+  settingsFilePath,
+} from '../identity/personal-settings.js';
 
 import type { AgentDefaults, AgentProfileView } from '@huabu/shared';
 
@@ -35,7 +39,9 @@ interface AgentDefaultsStorage {
 }
 
 function configPath(): string {
-  return join(getDataDir(), 'agent-defaults.json');
+  return personalSettingsOwner()
+    ? settingsFilePath('agent-defaults.json')
+    : join(getDataDir(), 'agent-defaults.json');
 }
 
 const diskStorage: AgentDefaultsStorage = {
@@ -125,9 +131,19 @@ export class AgentDefaultsService {
 }
 
 const service = new AgentDefaultsService();
-export const getAgentDefaults = (): AgentDefaults => service.getAgentDefaults();
+/**
+ * A member's own defaults always pick the Built-In agent: external agents run
+ * on the operator's machines under the operator's logins, so they stay the
+ * administrators'.
+ */
+export const getAgentDefaults = (): AgentDefaults => {
+  const defaults = service.getAgentDefaults();
+  return personalSettingsOwner()
+    ? { ...defaults, profileId: 'huabu' }
+    : defaults;
+};
 export const requireDefaultAgentProfileId = (): string =>
-  service.requireDefaultAgentProfileId();
+  personalSettingsOwner() ? 'huabu' : service.requireDefaultAgentProfileId();
 export const setAgentDefaults = (config: AgentDefaults): AgentDefaults =>
   service.setAgentDefaults(config);
 export const initializeAgentDefaults = (

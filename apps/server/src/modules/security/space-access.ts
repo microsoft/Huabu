@@ -9,12 +9,17 @@ import {
 } from '../identity/request.js';
 import { UNRESTRICTED_ACCESS } from '../identity/service.js';
 
+import type { AccessLevel } from '../identity/service.js';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 
 declare module 'fastify' {
   interface FastifyContextConfig {
-    /** A non-GET route that only reads the Space it names. */
-    spaceAccess?: 'read';
+    /**
+     * What a route needs on the Space it names, when not the method's
+     * default: `read` for a non-GET route that only reads it, `manage` for
+     * renaming or deleting it.
+     */
+    spaceAccess?: 'read' | 'manage';
     /** Starts or steers an agent outside the agent route prefixes. */
     invokesAgent?: true;
   }
@@ -23,18 +28,18 @@ declare module 'fastify' {
 type Fields = Record<string, unknown> | undefined;
 
 /**
- * Agents act through the shared machine credential, which reaches every
- * Space, so a member may not run or steer one until credentials carry the
- * caller's own authority. RFS is that credential's own surface: it launches
- * agents and Task Runs and leases shared service credentials, and the web
- * app never calls it. Matched by route pattern, not URL spelling.
+ * External agents act through the shared machine credential, which reaches
+ * every Space, on the operator's machines and under the operator's logins, so
+ * a member may not run or steer one. RFS is that credential's own surface: it
+ * launches agents and Task Runs and leases shared service credentials, and
+ * the web app never calls it. The change-review routes configure the
+ * deployment. A member runs the Built-In agent instead, through `/api/agent`,
+ * in their own access and with their own model keys. Matched by route
+ * pattern, not URL spelling.
  */
-const AGENT_ROUTES = [
-  '/api/agent',
-  '/api/acp',
-  '/api/agent-change-review',
-  '/api/rfs',
-];
+const ADMIN_AGENT_ROUTES = ['/api/acp', '/api/agent-change-review', '/api/rfs'];
+/** The one external-agent route a member reads: it lists only Built-In. */
+const MEMBER_AGENT_LISTING = '/api/acp/profiles';
 
 /**
  * The one value a request gives for `field` across its route parameters,
@@ -98,19 +103,26 @@ export function registerSpaceAccess(app: FastifyInstance): void {
     const route = request.routeOptions.url ?? '';
     if (
       !identity.owner &&
-      (threadId ||
-        request.routeOptions.config?.invokesAgent ||
-        AGENT_ROUTES.some(
+      !(request.method === 'GET' && route === MEMBER_AGENT_LISTING) &&
+      (request.routeOptions.config?.invokesAgent ||
+        ADMIN_AGENT_ROUTES.some(
           (prefix) => route === prefix || route.startsWith(`${prefix}/`),
         ))
     ) {
       return reply.code(403).send({
-        message: 'Agents and conversations require an owner',
+        message: 'External agents and their settings require an administrator',
         code: 'AGENT_ACCESS_REQUIRED',
       });
     }
+    // A conversation lives in a Space, and is reached only through one the
+    // caller may use.
+    if (!identity.owner && threadId && !canvasId)
+      return reply.code(400).send({
+        message: 'A conversation is addressed through its Space',
+        code: 'SPACE_ACCESS_AMBIGUOUS',
+      });
 
-    const checks: Array<['read' | 'write', string]> = [];
+    const checks: Array<[AccessLevel, string]> = [];
     if (canvasId) checks.push([level, canvasId]);
     const destination = body?.destination as Fields;
     for (const [needed, value] of [
@@ -135,7 +147,7 @@ export function registerSpaceAccess(app: FastifyInstance): void {
         continue;
       }
       // Without read access the Space is indistinguishable from a missing one.
-      if (needed === 'write' && (await identity.access.can('read', space)))
+      if (needed !== 'read' && (await identity.access.can('read', space)))
         return reply.code(403).send({
           message: 'Space is read-only for this principal',
           code: 'SPACE_ACCESS_REQUIRED',

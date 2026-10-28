@@ -42,6 +42,7 @@ import { resetExternalNoteSessions } from './modules/canvas/external-watcher.js'
 import externalNoteRoutes from './modules/canvas/external.route.js';
 import syncRoutes from './modules/canvas/sync.route.js';
 import { createIdentity, registerIdentity } from './modules/identity/index.js';
+import peopleRoutes from './modules/identity/people.route.js';
 import integrationsRoutes from './modules/integrations/integrations.route.js';
 import interactiveViewRoutes from './modules/interactive-view/interactive-view.route.js';
 import rfsRoutes from './modules/remote_fs/rfs.route.js';
@@ -59,6 +60,7 @@ import { registerSpaceAccess } from './modules/security/space-access.js';
 import serviceRoutes from './modules/services/services.route.js';
 import { closeStorage } from './modules/storage/index.js';
 import webRoutes from './modules/web/web.route.js';
+import { workspaceScopedRoutes } from './modules/workspace/scoped-routes.js';
 import { registerWorkspaceRequiredGuard } from './modules/workspace-required.js';
 import { initWorkspaceFromEnv } from './modules/workspace.js';
 import workspaceRoutes from './modules/workspace.route.js';
@@ -144,6 +146,10 @@ registerIdentity(app, {
 // An embedded Bubble serves its own API beside Huabu's, behind the same host,
 // origin and rate-limit guards; clients address it as `<origin>/bubble`.
 if (identity.bubble) app.register(identity.bubble, { prefix: '/bubble' });
+app.register(peopleRoutes, {
+  prefix: '/api/people',
+  service: identity.service,
+});
 
 // Register @fastify/static to enable `reply.sendFile()`.
 // Actual artifact serving uses a dynamic root resolved at request time
@@ -183,6 +189,10 @@ app.register(skillsRoutes, { prefix: '/api/skills' });
 app.register(workspaceRoutes, { prefix: '/api/workspace' });
 app.register(workspacesRoutes, { prefix: '/api/workspaces' });
 app.register(rfsRoutes, { prefix: '/api/rfs' });
+// An agent's reachback names the Workspace its run started in.
+app.register(workspaceScopedRoutes(rfsRoutes), {
+  prefix: '/api/rfs/w/:workspaceId',
+});
 
 // ── External agent (ACP) transport host ───────────────────────────────
 // Mount the Agenetes agentlet transport host (`@agenetes/agentlet-host`).

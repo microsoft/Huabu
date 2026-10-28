@@ -56,6 +56,7 @@ import {
 import { buildHistoryFromTurns } from '../agent/conversation/transcript/history.js';
 import { getLLMModel } from '../agent/llm.js';
 import { hydrateCanvasNodes } from '../canvas/canvas-executor.js';
+import { personalSettingsOwner } from '../identity/personal-settings.js';
 import { space } from '../storage/index.js';
 import { canvasAcpNamespace } from '../workspace/paths.js';
 
@@ -831,6 +832,14 @@ const agentRoutes: FastifyPluginAsync = async (
       agentTarget,
       fixedTarget,
     });
+    // External agents run on the operator's machines under the operator's
+    // logins and reach every Space through the shared machine credential, so
+    // a member runs the Built-In agent, with their own model keys.
+    if (effectiveBinding?.kind === 'external' && personalSettingsOwner())
+      return reply.code(403).send({
+        message: 'External agents are available to administrators only',
+        code: 'AGENT_ACCESS_REQUIRED',
+      });
     if (effectiveBinding?.kind === 'external') {
       request.log.info(
         {

@@ -1134,6 +1134,17 @@ export function hasUnsavedCanvasEdits(): boolean {
   );
 }
 
+/**
+ * Resend what a lapsed session refused, once it has been renewed. Best
+ * effort: a save that fails again is reported as any other save failure.
+ */
+export async function resendUnsavedCanvasEdits(): Promise<void> {
+  const { canvasId } = useCanvasStore.getState();
+  if (!canvasId) return;
+  if (structureSaveErrors.has(canvasId)) structureScheduler.schedule();
+  await drainPendingSaves();
+}
+
 export class CanvasSubmissionSaveError extends Error {
   readonly code = 'canvas_save_failed';
 

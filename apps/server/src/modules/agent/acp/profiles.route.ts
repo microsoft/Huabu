@@ -33,6 +33,7 @@ import {
 } from '@agenetes/agentlet-host';
 
 import {
+  HUABU_AGENT_PROFILE_ID,
   agentProfileParamsSchema,
   createAcpProfileBodySchema,
   patchAgentProfileBodySchema,
@@ -52,6 +53,7 @@ import {
   readProfileCapabilities,
 } from './profile-capabilities.js';
 import { invalidateProfileSchemaCache } from './profile-schema-cache.js';
+import { personalSettingsOwner } from '../../identity/personal-settings.js';
 import { isOwnerRequest } from '../../security/owner.js';
 import {
   getAgentDefaults,
@@ -220,6 +222,17 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
   app.get<{ Reply: ApiResult<AcpProfilesListResponse> }>(
     '/profiles',
     async (request, reply) => {
+      // A member runs the Built-In agent only: no external profile, device or
+      // daemon of the operator's is theirs to see.
+      if (personalSettingsOwner())
+        return {
+          profiles: [],
+          selectableProfileIds: [HUABU_AGENT_PROFILE_ID],
+          connectedDevices: [],
+          folderPickerAgentletId: null,
+          agentlet: getDaemonSupervisor().getStatus(),
+          agentDefaults: getAgentDefaults(),
+        };
       if (denyRemote(request, reply)) return;
       const registry = getAgentProfileRegistry();
       if (!registry) {

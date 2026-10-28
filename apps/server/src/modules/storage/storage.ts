@@ -67,7 +67,9 @@ import {
   type StorageProfile,
 } from './profile.js';
 import { withSpacePutAdmission } from './space-lifecycle-admission.js';
+import { runInWorkspace } from '../workspace/context.js';
 
+import type { WorkspaceScope } from '../workspace/context.js';
 import type { DiskSpaceImport } from './backends/disk/space-import.js';
 import type { DiskSpaceTree } from './backends/disk/space-tree.js';
 import type { SqliteSpaceSubstrate } from './backends/sqlite/space-extension.js';
@@ -370,7 +372,9 @@ let current: Storage | null = null;
 let workspaces: WorkspaceRepository | null = null;
 let sqlite: SqliteStoreContext | null = null;
 let postgres: PostgresStoreContext | null = null;
-let activeWorldCanvasId: string | null = null;
+// World ids per Workspace for backends without folders. Several Workspaces
+// are open at once in Bubble mode, each with its own World.
+const worldCanvasIds = new Map<string, string>();
 let spaceCreateTail: Promise<void> = Promise.resolve();
 
 /**
@@ -699,7 +703,7 @@ export async function activateWorkspace(
   commitWorkspaceIdentity(workspace);
   if (sqlite) sqlite.useWorkspace(workspace.workspaceId);
   if (postgres) postgres.useWorkspace(workspace.workspaceId);
-  activeWorldCanvasId = null;
+  worldCanvasIds.delete(workspace.workspaceId);
   if (
     workspaces instanceof SqliteWorkspaceRepository ||
     workspaces instanceof PostgresWorkspaceRepository
@@ -709,7 +713,35 @@ export async function activateWorkspace(
   // A Workspace with no World has no Portal target and no home view. On Disk
   // the World is written by workspace preparation; here the same step belongs
   // to activation, because activation is the whole of "open a Workspace".
-  activeWorldCanvasId = await ensure().structured.spaces().ensureWorld();
+  worldCanvasIds.set(
+    workspace.workspaceId,
+    await ensure().structured.spaces().ensureWorld(),
+  );
+}
+
+/**
+ * Open a Workspace for the calls that run in it, without making it the
+ * process-active one.
+ *
+ * The scoped counterpart to {@link activateWorkspace}, for Bubble mode, where
+ * each request runs in its caller's Workspace. On Disk the folder is adopted
+ * and indexed on first use; elsewhere the World is ensured once per Workspace.
+ * Idempotent and cheap after the first call.
+ */
+export async function openWorkspace(
+  workspace: WorkspaceHandle,
+): Promise<WorkspaceScope> {
+  const workspacePath = workspaceDirectory(workspace.workspaceId);
+  if (materializesWorkspaces() && !workspacePath)
+    throw new Error(`Workspace "${workspace.workspaceId}" has no folder`);
+  const scope: WorkspaceScope = { handle: workspace, path: workspacePath };
+  if (!workspacePath && !worldCanvasIds.has(workspace.workspaceId)) {
+    const world = await runInWorkspace(scope, () =>
+      ensure().structured.spaces().ensureWorld(),
+    );
+    worldCanvasIds.set(workspace.workspaceId, world);
+  }
+  return scope;
 }
 
 /**
@@ -722,7 +754,9 @@ export async function activateWorkspace(
  * it is synchronous in call sites that cannot await.
  */
 export function getWorldCanvasId(): string | null {
-  return materializesWorkspaces() ? diskWorldCanvasId() : activeWorldCanvasId;
+  if (materializesWorkspaces()) return diskWorldCanvasId();
+  const workspaceId = getWorkspaceHandle()?.workspaceId;
+  return workspaceId ? (worldCanvasIds.get(workspaceId) ?? null) : null;
 }
 
 export function requireWorldCanvasId(): string {
@@ -762,7 +796,7 @@ export async function closeStorage(): Promise<void> {
   workspaces = null;
   sqlite = null;
   postgres = null;
-  activeWorldCanvasId = null;
+  worldCanvasIds.clear();
   try {
     if (storage) {
       const results = await Promise.allSettled([

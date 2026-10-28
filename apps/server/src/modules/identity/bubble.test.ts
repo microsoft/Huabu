@@ -7,11 +7,13 @@ import { InMemoryBubbleStore } from '@octostaff/bubble';
 import Fastify from 'fastify';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { openBubbleIdentity } from './bubble.js';
+import { migrateSpaceGrants, openBubbleIdentity } from './bubble.js';
 import { registerIdentity } from './http.js';
+import { createMemoryWorkspacePreferences } from './preferences.js';
 import { getRequestIdentity } from './request.js';
 import { isOwnerRequest } from '../security/owner.js';
 import { registerSpaceAccess } from '../security/space-access.js';
+import { getWorkspaceHandle } from '../workspace.js';
 
 import type { HuabuResource, ResourceDirectory } from './service.js';
 import type { BubbleStore } from '@octostaff/bubble';
@@ -60,17 +62,43 @@ async function revokeAll(
     await store.grants.remove(row.grantId);
 }
 
-/** Workspace `w1` holds Spaces `a` and `b`, `a` holds `a1`; `w2` holds `c`. */
-const PARENTS: Record<string, HuabuResource> = {
-  a: { type: 'workspace', id: 'w1' },
-  a1: { type: 'space', id: 'a' },
-  b: { type: 'workspace', id: 'w1' },
-  c: { type: 'workspace', id: 'w2' },
+/**
+ * Workspace `w1` holds Spaces `a` and `b`, `a` holds `a1`; `w2` holds `c`.
+ * Workspaces made at runtime hold nothing.
+ */
+const PARENTS: Record<string, Record<string, HuabuResource>> = {
+  w1: {
+    a: { type: 'workspace', id: 'w1' },
+    a1: { type: 'space', id: 'a' },
+    b: { type: 'workspace', id: 'w1' },
+  },
+  w2: { c: { type: 'workspace', id: 'w2' } },
 };
-const RESOURCES: ResourceDirectory = {
-  workspaceExists: async (id) => id === 'w1' || id === 'w2',
-  spaceParent: async (id) => PARENTS[id] ?? null,
-};
+const scopeOf = (workspaceId: string) => ({
+  handle: { workspaceId, name: workspaceId },
+  path: null,
+});
+function directory(): ResourceDirectory & { created: string[] } {
+  const created: string[] = [];
+  const exists = (id: string) => id in PARENTS || created.includes(id);
+  return {
+    created,
+    workspaceExists: async (id) => exists(id),
+    spaceParent: async (workspaceId, id) => PARENTS[workspaceId]?.[id] ?? null,
+    workspaceOfSpace: async (id) =>
+      Object.keys(PARENTS).find((w) => id in PARENTS[w]) ?? null,
+    openWorkspace: async (id) => (exists(id) ? scopeOf(id) : null),
+    defaultWorkspace: async () => scopeOf('w1'),
+    createWorkspace: async (name) => {
+      created.push(`made-${created.length + 1}`);
+      return {
+        ...scopeOf(created.at(-1)!),
+        handle: { workspaceId: created.at(-1)!, name },
+      };
+    },
+  };
+}
+const RESOURCES = directory();
 
 const servers: FastifyInstance[] = [];
 afterEach(async () => {
@@ -84,19 +112,22 @@ async function host(
     owner?: string;
     revalidationIntervalMs?: number;
     secureOrigin?: boolean;
+    store?: BubbleStore;
   } = {},
 ) {
-  const store = new InMemoryBubbleStore();
+  const store = options.store ?? new InMemoryBubbleStore();
   const lookups: string[] = [];
+  const resources = directory();
   const bubble = await openBubbleIdentity({
     authenticator: options.authenticator ?? AUTHENTICATORS,
     owner: 'owner' in options ? options.owner : 'admin',
     store,
+    preferences: createMemoryWorkspacePreferences(),
     resources: {
-      ...RESOURCES,
-      spaceParent: async (id) => {
-        lookups.push(id);
-        return RESOURCES.spaceParent(id);
+      ...resources,
+      spaceParent: async (workspaceId, id) => {
+        lookups.push(`${workspaceId}:${id}`);
+        return resources.spaceParent(workspaceId, id);
       },
     },
   });
@@ -112,25 +143,43 @@ async function host(
   registerSpaceAccess(app);
   app.get('/', { config: { identity: 'shell' } }, async () => 'shell');
   app.get('/api/data', async () => ({ private: true }));
-  // Answers what the caller may do with each Space, and claims one on POST.
+  app.get('/api/workspace', async () => ({
+    workspaceId: getWorkspaceHandle()?.workspaceId ?? null,
+  }));
+  app.post<{ Params: { id: string } }>(
+    '/api/choose/:id',
+    async (request, reply) =>
+      (await bubble.service.chooseWorkspace!(
+        getRequestIdentity(request)!,
+        request.params.id,
+      ))
+        ? {}
+        : reply.code(403).send({}),
+  );
+  // Answers what the caller may do with each Space of the Workspace the
+  // request runs in, and with that Workspace; claims a Space on POST.
   app.get('/api/access', async (request) => {
     const { access } = getRequestIdentity(request)!;
-    const levels = async (id: string) =>
+    const levels = async (resource: HuabuResource) =>
       (
         await Promise.all(
-          (['read', 'write'] as const).map(async (level) =>
-            (await access.can(level, { type: 'space', id })) ? level : '',
+          (['read', 'write', 'manage'] as const).map(async (level) =>
+            (await access.can(level, resource)) ? level[0] : '',
           ),
         )
       ).join('');
-    return Object.fromEntries(
-      await Promise.all(
-        ['a', 'a1', 'b', 'c', 'missing'].map(async (id) => [
-          id,
-          await levels(id),
-        ]),
+    const workspaceId = getWorkspaceHandle()?.workspaceId ?? '';
+    return {
+      workspace: await levels({ type: 'workspace', id: workspaceId }),
+      ...Object.fromEntries(
+        await Promise.all(
+          ['a', 'a1', 'b', 'c', 'missing'].map(async (id) => [
+            id,
+            await levels({ type: 'space', id }),
+          ]),
+        ),
       ),
-    );
+    };
   });
   app.post<{ Params: { id: string } }>('/api/claim/:id', async (request) => {
     await getRequestIdentity(request)!.access.claim({
@@ -149,7 +198,7 @@ async function host(
   };
   app.get('/api/events', events);
   app.get('/api/canvas/:canvasId/events', events);
-  return { app, store, lookups };
+  return { app, store, lookups, resources };
 }
 
 /** Whether a WebSocket on `path` opens and, when asked, carries a clean reply. */
@@ -374,7 +423,7 @@ describe('Bubble identity', () => {
     const { app, store } = await host({ revalidationIntervalMs: 20 });
     const origin = await app.listen({ port: 0, host: '127.0.0.1' });
     await grant(store, 'carol', 'member');
-    const space = { type: 'huabu.space', id: 'b' } as const;
+    const space = { type: 'huabu.space', id: 'w1:b' } as const;
     await grant(store, 'carol', 'huabu.space.owner', space);
     const response = await fetch(`${origin}/api/canvas/b/events`, {
       headers: as('carol'),
@@ -394,8 +443,8 @@ describe('Bubble identity', () => {
   it('answers every check in a request from one policy scope', async () => {
     const { app, lookups } = await host();
     await app.inject({ url: '/api/access', headers: MASTER });
-    // Ten questions about five Spaces, each Space resolved once.
-    expect(lookups.filter((id) => id === 'a')).toHaveLength(1);
+    // Eighteen questions, each Space resolved once.
+    expect(lookups.filter((id) => id === 'w1:a')).toHaveLength(1);
   });
 
   it('serves the application shell to a browser that has not signed in', async () => {
@@ -405,75 +454,199 @@ describe('Bubble identity', () => {
     expect((await app.inject('/api/data')).statusCode).toBe(401);
   });
 
-  it('lets a member reach only the Spaces they own, and a Workspace owner every Space in it', async () => {
+  it('gives a new member one personal Workspace they own, however many first requests race', async () => {
+    const { app, store, resources } = await host();
+    await grant(store, 'carol', 'member');
+    const workspaces = await Promise.all(
+      Array.from({ length: 5 }, async () =>
+        (
+          await app.inject({ url: '/api/workspace', headers: as('carol') })
+        ).json(),
+      ),
+    );
+    expect(resources.created).toEqual(['made-1']);
+    expect(new Set(workspaces.map((w) => w.workspaceId))).toEqual(
+      new Set(['made-1']),
+    );
+    const access = await app.inject({
+      url: '/api/access',
+      headers: as('carol'),
+    });
+    expect(access.json()).toMatchObject({ workspace: 'rwm', a: '', c: '' });
+
+    // A login without `member` gets no Workspace at all.
+    await app.inject({ url: '/api/identity', headers: as('erin') });
+    expect(resources.created).toEqual(['made-1']);
+  });
+
+  it('gives each Workspace role its capabilities on every Space inside', async () => {
     const { app, store } = await host();
+    const w1 = { type: 'huabu.workspace', id: 'w1' } as const;
+    const roles = {
+      olive: 'huabu.workspace.owner',
+      eddie: 'huabu.workspace.editor',
+      vera: 'huabu.workspace.viewer',
+    } as const;
+    for (const [principalId, role] of Object.entries(roles)) {
+      await grant(store, principalId, 'member');
+      await grant(store, principalId, role, w1);
+    }
     const access = async (principalId: string) =>
       (
         await app.inject({ url: '/api/access', headers: as(principalId) })
       ).json();
-    for (const principalId of ['carol', 'dave'])
-      await grant(store, principalId, 'member');
-    const none = { a: '', a1: '', b: '', c: '', missing: '' };
-    expect(await access('carol')).toEqual(none);
+    const of = (level: string) => ({
+      workspace: level,
+      a: level,
+      a1: level,
+      b: level,
+      c: '',
+      missing: '',
+    });
+    expect(await access('olive')).toEqual(of('rwm'));
+    expect(await access('eddie')).toEqual(of('rw'));
+    expect(await access('vera')).toEqual(of('r'));
+    // The system owner reaches every Space that exists.
+    expect(await access('admin')).toEqual(of('rwm'));
+  });
 
-    // Creating a Space makes its creator the owner of it and the Spaces inside
-    // it, and nobody else.
-    const claimed = await app.inject({
+  it('scopes a Space grant to the Workspace it names', async () => {
+    const { app, store } = await host();
+    await grant(store, 'carol', 'member');
+    // Owning `a` in w1 enters w1, and reaches `a` and the Spaces inside it.
+    await grant(store, 'carol', 'huabu.space.owner', {
+      type: 'huabu.space',
+      id: 'w1:a',
+    });
+    const access = async () =>
+      (await app.inject({ url: '/api/access', headers: as('carol') })).json();
+    expect(await access()).toEqual({
+      workspace: '',
+      a: 'rwm',
+      a1: 'rwm',
+      b: '',
+      c: '',
+      missing: '',
+    });
+    // The same id in another Workspace is another Space.
+    await grant(store, 'dave', 'member');
+    await grant(store, 'dave', 'huabu.space.owner', {
+      type: 'huabu.space',
+      id: 'w2:a',
+    });
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/api/choose/w1',
+          headers: as('dave'),
+        })
+      ).statusCode,
+    ).toBe(403);
+
+    // Creating a Space claims it in the Workspace the request runs in.
+    await app.inject({
       method: 'POST',
-      url: '/api/claim/a',
+      url: '/api/claim/b',
       headers: as('carol'),
     });
-    expect(claimed.statusCode).toBe(200);
-    expect(await access('carol')).toEqual({
-      ...none,
-      a: 'readwrite',
-      a1: 'readwrite',
-    });
-    expect(await access('dave')).toEqual(none);
+    expect(
+      (await store.grants.list({ principalId: 'carol' })).map(
+        (row) => row.target,
+      ),
+    ).toContainEqual({ type: 'huabu.space', id: 'w1:b' });
+  });
 
-    // A Workspace owner reaches its Spaces, not another Workspace's.
-    await grant(store, 'dave', 'huabu.workspace.owner', {
+  it('switches only its caller, and only into a Workspace they may enter', async () => {
+    const { app, store } = await host();
+    await grant(store, 'carol', 'member');
+    await grant(store, 'dave', 'member');
+    await grant(store, 'carol', 'huabu.workspace.viewer', {
+      type: 'huabu.workspace',
+      id: 'w2',
+    });
+    const current = async (principalId: string) =>
+      (
+        await app.inject({ url: '/api/workspace', headers: as(principalId) })
+      ).json().workspaceId;
+    expect(await current('carol')).toBe('w2');
+    expect(await current('dave')).toBe('made-1');
+    const choose = (principalId: string, id: string) =>
+      app.inject({
+        method: 'POST',
+        url: `/api/choose/${id}`,
+        headers: as(principalId),
+      });
+    expect((await choose('carol', 'w1')).statusCode).toBe(403);
+    expect((await choose('carol', 'made-1')).statusCode).toBe(403);
+    expect((await choose('admin', 'w2')).statusCode).toBe(200);
+    expect([await current('admin'), await current('carol')]).toEqual([
+      'w2',
+      'w2',
+    ]);
+    expect((await choose('admin', 'w1')).statusCode).toBe(200);
+    expect([await current('admin'), await current('carol')]).toEqual([
+      'w1',
+      'w2',
+    ]);
+  });
+
+  it('lets whoever manages a Workspace or Space share it, and nobody else', async () => {
+    const { app, store } = await host();
+    for (const principalId of ['olive', 'eddie'])
+      await grant(store, principalId, 'member');
+    await grant(store, 'olive', 'huabu.workspace.owner', {
       type: 'huabu.workspace',
       id: 'w1',
     });
-    expect(await access('dave')).toEqual({
-      ...none,
-      a: 'readwrite',
-      a1: 'readwrite',
-      b: 'readwrite',
+    await grant(store, 'eddie', 'huabu.workspace.editor', {
+      type: 'huabu.workspace',
+      id: 'w1',
     });
-
-    // The system owner reaches every Space that exists.
-    expect(await access('admin')).toEqual({
-      a: 'readwrite',
-      a1: 'readwrite',
-      b: 'readwrite',
-      c: 'readwrite',
-      missing: '',
-    });
-  });
-
-  it('leaves granting Space ownership to system owners', async () => {
-    const { app, store } = await host();
-    await grant(store, 'carol', 'member');
-    await app.inject({
-      method: 'POST',
-      url: '/api/claim/a',
-      headers: as('carol'),
-    });
-    const share = (principalId: string) =>
+    const share = (principalId: string, target: AuthzTarget, role: string) =>
       app.inject({
         method: 'POST',
         url: '/bubble/v1/grants',
         headers: as(principalId),
-        payload: {
-          target: { type: 'huabu.space', id: 'a' },
-          principalId: 'dave',
-          role: 'huabu.space.owner',
-        },
+        payload: { target, principalId: 'frank', role },
       });
-    expect((await share('carol')).statusCode).toBe(403);
-    expect((await share('admin')).statusCode).toBeLessThan(300);
+    const space = { type: 'huabu.space', id: 'w1:a' } as const;
+    const workspace = { type: 'huabu.workspace', id: 'w1' } as const;
+    expect((await share('eddie', space, 'huabu.space.owner')).statusCode).toBe(
+      403,
+    );
+    expect(
+      (await share('eddie', workspace, 'huabu.workspace.viewer')).statusCode,
+    ).toBe(403);
+    expect(
+      (await share('olive', space, 'huabu.space.owner')).statusCode,
+    ).toBeLessThan(300);
+    expect(
+      (await share('olive', workspace, 'huabu.workspace.viewer')).statusCode,
+    ).toBeLessThan(300);
+    // System roles stay the administrator's.
+    expect(
+      (await share('olive', { type: 'system' }, 'member')).statusCode,
+    ).toBe(403);
+  });
+
+  it("rewrites #237's Space grants to name their Workspace, once", async () => {
+    const store = new InMemoryBubbleStore();
+    for (const id of ['a', 'c', 'gone'])
+      await grant(store, 'carol', 'huabu.space.owner', {
+        type: 'huabu.space',
+        id,
+      });
+    await migrateSpaceGrants(store, RESOURCES);
+    await migrateSpaceGrants(store, RESOURCES);
+    expect(
+      (await store.grants.list({ principalId: 'carol' })).map(
+        (row) => row.target,
+      ),
+    ).toEqual([
+      { type: 'huabu.space', id: 'w1:a' },
+      { type: 'huabu.space', id: 'w2:c' },
+    ]);
   });
 
   it('carries a validated Bearer credential in an HttpOnly session cookie', async () => {
@@ -557,6 +730,7 @@ describe('Bubble identity', () => {
       openBubbleIdentity({
         authenticator: [{ driver: 'no-such-driver' }] as never,
         store: new InMemoryBubbleStore(),
+        preferences: createMemoryWorkspacePreferences(),
         resources: RESOURCES,
       }),
     ).rejects.toThrow();

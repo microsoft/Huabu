@@ -3,6 +3,7 @@
 
 import { resolveIdentityConfig } from './config.js';
 import { createLocalIdentityService } from './local.js';
+import { openPostgresWorkspacePreferences } from './preferences.js';
 import { storageResourceDirectory } from './resources.js';
 
 import type { IdentityService, ResourceDirectory } from './service.js';
@@ -39,6 +40,7 @@ export function createIdentity(
       authenticator: authenticators as BubbleAuthConfig,
       owner,
       store: await bubble.openBubblePostgresStore(postgresUrl),
+      preferences: await openPostgresWorkspacePreferences(postgresUrl),
       resources,
     });
   }
@@ -46,8 +48,25 @@ export function createIdentity(
     service: {
       provider: 'bubble',
       challenge: 'Bearer realm="Huabu"',
+      ...(config.providerSignOut ? { providerSignOut: true } : {}),
       authenticate: async (credentials) =>
         (await (opening ??= open())).service.authenticate(credentials),
+      // Present from the start so routes can tell Bubble mode by it; each call
+      // opens Bubble on demand like every other member here.
+      people: {
+        list: async () => (await (opening ??= open())).service.people.list(),
+        setMember: async (...args) =>
+          (await (opening ??= open())).service.people.setMember(...args),
+        setWorkspaceRole: async (...args) =>
+          (await (opening ??= open())).service.people.setWorkspaceRole(...args),
+      },
+      selectWorkspace: async (identity) =>
+        (await (opening ??= open())).service.selectWorkspace(identity),
+      chooseWorkspace: async (identity, workspaceId) =>
+        (await (opening ??= open())).service.chooseWorkspace(
+          identity,
+          workspaceId,
+        ),
     },
     bubble: async (app, options) =>
       (await (opening ??= open())).plugin(app, options),

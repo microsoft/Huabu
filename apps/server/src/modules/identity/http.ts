@@ -3,14 +3,20 @@
 
 import { timingSafeEqual } from 'node:crypto';
 
+import { openPersonalSettings, useCaller } from './personal-settings.js';
 import {
   getRequestAuthorizations,
+  setRequestWorkspaceChooser,
   getRequestIdentity,
   setRequestIdentity,
 } from './request.js';
 import { IdentityError, UNRESTRICTED_ACCESS } from './service.js';
 import { isPublicRfsSkillBootstrapRequest } from '../remote_fs/public-skill.js';
 import { isLoopbackRequest } from '../security/peer.js';
+import {
+  fillWorkspaceScope,
+  openWorkspaceScope,
+} from '../workspace/context.js';
 
 import type { IdentityCredentials, IdentityService } from './service.js';
 import type { IdentityResponse } from '@huabu/shared';
@@ -72,6 +78,18 @@ export function registerIdentity(
   app.addHook('preClose', async () => {
     for (const close of activeResponses) close();
   });
+  // In Bubble mode every request runs in its caller's own Workspace. The slot
+  // must wrap the rest of the lifecycle, which only a callback hook can do;
+  // admission fills it below once it knows who is calling.
+  if (service.provider === 'bubble') {
+    app.addHook('onRequest', (_request, _reply, done) =>
+      openWorkspaceScope(done),
+    );
+    // Likewise each member's settings, model keys and credentials are their own.
+    app.addHook('onRequest', (_request, _reply, done) =>
+      openPersonalSettings(done),
+    );
+  }
   app.addHook('onRequest', async (request, reply) => {
     const path = request.url.split('?', 1)[0];
     const identityRoute = path === '/api/identity' || path === SESSION_PATH;
@@ -160,6 +178,20 @@ export function registerIdentity(
           code: 'ACCESS_REQUIRED',
         });
       }
+      // A member's first request, `GET /api/identity` after sign-in included,
+      // is also where their personal Workspace is created.
+      if (identity.member && service.selectWorkspace) useCaller(identity);
+      if (identity.member && service.selectWorkspace) {
+        const scope = await service.selectWorkspace(identity);
+        if (scope) fillWorkspaceScope(scope);
+        const { chooseWorkspace } = service;
+        if (chooseWorkspace)
+          setRequestWorkspaceChooser(
+            request,
+            async (workspaceId) =>
+              (await chooseWorkspace(identity, workspaceId)) !== null,
+          );
+      }
       if (
         service.provider === 'bubble' &&
         !reply.raw.destroyed &&
@@ -227,7 +259,13 @@ export function registerIdentity(
       if (!identity)
         throw new Error('Identity admission did not resolve a principal');
       const { principal, member, owner } = identity;
-      return { provider: service.provider, principal, member, owner };
+      return {
+        provider: service.provider,
+        principal,
+        member,
+        owner,
+        ...(service.providerSignOut ? { providerSignOut: true } : {}),
+      };
     },
   );
 

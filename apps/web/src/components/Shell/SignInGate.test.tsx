@@ -14,7 +14,11 @@ vi.mock('../../pages/WorkspaceLoadingScreen', () => ({
   WorkspaceLoadingScreen: () => null,
 }));
 const unsaved = vi.hoisted(() => vi.fn(() => false));
-vi.mock('../../store/canvasStore', () => ({ hasUnsavedCanvasEdits: unsaved }));
+const resend = vi.hoisted(() => vi.fn(async () => {}));
+vi.mock('../../store/canvasStore', () => ({
+  hasUnsavedCanvasEdits: unsaved,
+  resendUnsavedCanvasEdits: resend,
+}));
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string, values?: Record<string, string>) =>
@@ -136,7 +140,7 @@ describe('SignInGate', () => {
     expect(container.textContent).toContain('Carol');
   });
 
-  it('warns that signing in again loses edits a lapsed session could not save', async () => {
+  it('keeps the app, and its unsaved edits, under the sign-in screen when a session lapses', async () => {
     routes['GET /api/identity'] = () => json(MEMBER);
     await mount();
     expect(container.textContent).toBe('app');
@@ -144,18 +148,70 @@ describe('SignInGate', () => {
     routes['GET /api/identity'] = () => json({}, 401);
     routes['GET /bubble/v1/auth/authenticators'] = () =>
       json({ authenticators: [ENTRA] });
-    const lapse = async (hasUnsaved: boolean) => {
-      unsaved.mockReturnValue(hasUnsaved);
-      await act(async () => {
-        window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT));
-      });
-      for (let i = 0; i < 5; i++) await act(async () => {});
-    };
-    await lapse(true);
+    unsaved.mockReturnValue(true);
+    await act(async () => {
+      window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT));
+    });
+    for (let i = 0; i < 5; i++) await act(async () => {});
+    // Signing in happens in a popup, so nothing is lost and nothing warns.
+    expect(container.textContent).toContain('app');
     expect(container.textContent).toContain('auth.signInTitle');
-    expect(container.textContent).toContain('auth.signInUnsaved');
-    await lapse(false);
     expect(container.textContent).not.toContain('auth.signInUnsaved');
+  });
+
+  it('renews a lapsing session in place with the refresh token the login gave', async () => {
+    sessionStorage.setItem(
+      'huabu.oidc.pending',
+      JSON.stringify({
+        state: 'expected',
+        verifier: 'verifier',
+        authenticator: ENTRA,
+        returnTo: '/canvas/mine',
+      }),
+    );
+    window.history.replaceState(
+      null,
+      '',
+      '/auth/callback?code=the-code&state=expected',
+    );
+    routes[
+      'GET https://login.example/tenant/v2.0/.well-known/openid-configuration'
+    ] = () => json({ token_endpoint: 'https://login.example/token' });
+    let issued = 0;
+    routes['POST https://login.example/token'] = () =>
+      json({
+        access_token: `access-${++issued}`,
+        refresh_token: `refresh-${issued}`,
+      });
+    routes['POST /api/identity/session'] = () =>
+      new Response(null, { status: 204 });
+    routes['GET /api/identity'] = () => json(MEMBER);
+    await mount();
+    expect(container.textContent).toBe('app');
+
+    await act(async () => {
+      window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT));
+    });
+    for (let i = 0; i < 5; i++) await act(async () => {});
+    const grants = calls
+      .filter((call) => call.url === 'https://login.example/token')
+      .map((call) =>
+        Object.fromEntries(new URLSearchParams(String(call.init?.body))),
+      );
+    expect(grants[1]).toMatchObject({
+      grant_type: 'refresh_token',
+      refresh_token: 'refresh-1',
+      client_id: 'spa',
+    });
+    const sessions = calls.filter(
+      (call) => call.url === '/api/identity/session',
+    );
+    expect(
+      new Headers(sessions.at(-1)?.init?.headers).get('Authorization'),
+    ).toBe('Bearer access-2');
+    // The page never left, and what the lapse refused goes out again.
+    expect(container.textContent).toBe('app');
+    expect(resend).toHaveBeenCalled();
   });
 
   it('completes a provider redirect by handing the token to the Server', async () => {
