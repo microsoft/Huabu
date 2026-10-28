@@ -8,8 +8,8 @@ import { z } from 'zod';
 import { workspaceCreateSchema, workspaceRenameSchema } from '@huabu/shared';
 
 import {
-  getRequestIdentity,
   getRequestWorkspaceChooser,
+  requireRequestIdentity,
 } from './identity/request.js';
 import { migrateLegacyDesktopWorkspaceStore } from './legacy-desktop-workspace-store.js';
 import { resetPreprocessDispatcher } from './preprocessing/index.js';
@@ -223,7 +223,7 @@ async function enterable(
 ): Promise<readonly WorkspaceHandle[]> {
   // Managed mode keeps everyone in its one Workspace.
   if (isManagedMode()) return visibleWorkspaces();
-  const allowed = await getRequestIdentity(request)!.access.workspaces();
+  const allowed = await requireRequestIdentity(request).access.workspaces();
   return getWorkspaceRepository().list(allowed === 'all' ? undefined : allowed);
 }
 
@@ -231,7 +231,7 @@ async function canManage(
   request: FastifyRequest,
   workspaceId: string,
 ): Promise<boolean> {
-  return getRequestIdentity(request)!.access.can('manage', {
+  return requireRequestIdentity(request).access.can('manage', {
     type: 'workspace',
     id: workspaceId,
   });
@@ -290,7 +290,7 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
         return sendError(reply, 400, 'Workspace name is required');
       try {
         const workspace = await createWorkspace(parsed.data.name, (created) =>
-          getRequestIdentity(request)!.access.claim({
+          requireRequestIdentity(request).access.claim({
             type: 'workspace',
             id: created.workspaceId,
           }),

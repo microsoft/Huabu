@@ -302,7 +302,13 @@ export async function openBubbleIdentity(options: {
   store: BubbleStore;
   preferences: WorkspacePreferences;
   resources: ResourceDirectory;
-}): Promise<{ service: IdentityService; plugin: FastifyPluginAsync }> {
+}): Promise<{
+  service: IdentityService &
+    Required<
+      Pick<IdentityService, 'people' | 'selectWorkspace' | 'chooseWorkspace'>
+    >;
+  plugin: FastifyPluginAsync;
+}> {
   const { store, owner, preferences } = options;
   // Both are this identity's from here on: the plugin closes them, and so
   // does a failure to open.

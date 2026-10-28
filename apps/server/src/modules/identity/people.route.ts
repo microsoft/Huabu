@@ -6,7 +6,7 @@ import {
   setPersonWorkspaceRoleSchema,
 } from '@huabu/shared';
 
-import { getRequestIdentity } from './request.js';
+import { getRequestIdentity, requireRequestIdentity } from './request.js';
 import { getWorkspaceRepository } from '../storage/index.js';
 
 import type { IdentityService } from './service.js';
@@ -23,8 +23,13 @@ const peopleRoutes: FastifyPluginAsync<{ service: IdentityService }> = async (
   { service },
 ) => {
   const people = service.people;
+  if (!people) {
+    app.addHook('preHandler', async (_request, reply) =>
+      reply.code(404).send({ message: 'Not found' }),
+    );
+    return;
+  }
   app.addHook('preHandler', async (request, reply) => {
-    if (!people) return reply.code(404).send({ message: 'Not found' });
     if (!getRequestIdentity(request)?.owner)
       return reply.code(403).send({
         message: 'Administering people requires an administrator',
@@ -32,7 +37,7 @@ const peopleRoutes: FastifyPluginAsync<{ service: IdentityService }> = async (
       });
   });
 
-  app.get('/', async () => people!.list());
+  app.get('/', async () => people.list());
 
   app.put<{ Params: { principalId: string } }>(
     '/:principalId/member',
@@ -40,14 +45,14 @@ const peopleRoutes: FastifyPluginAsync<{ service: IdentityService }> = async (
       const body = setPersonMemberSchema.safeParse(request.body);
       if (!body.success)
         return reply.code(400).send({ message: 'Invalid request body' });
-      const by = getRequestIdentity(request)!.principal.principalId;
+      const by = requireRequestIdentity(request).principal.principalId;
       // An administrator cannot lock themselves out from here.
       if (!body.data.member && request.params.principalId === by)
         return reply
           .code(409)
           .send({ message: 'You cannot revoke your own access' });
       if (
-        !(await people!.setMember(
+        !(await people.setMember(
           request.params.principalId,
           body.data.member,
           by,
@@ -67,9 +72,9 @@ const peopleRoutes: FastifyPluginAsync<{ service: IdentityService }> = async (
       const { principalId, workspaceId } = request.params;
       if (body.data.role && !(await getWorkspaceRepository().get(workspaceId)))
         return reply.code(404).send({ message: 'Workspace not found' });
-      const by = getRequestIdentity(request)!.principal.principalId;
+      const by = requireRequestIdentity(request).principal.principalId;
       if (
-        !(await people!.setWorkspaceRole(
+        !(await people.setWorkspaceRole(
           principalId,
           workspaceId,
           body.data.role,
