@@ -26,6 +26,12 @@ export const workspaceCapabilitiesSchema = z.object({
   canChangeWorkspace: z.boolean(),
   /** Whether the server can show a native folder picker. */
   nativePicker: z.boolean(),
+  /**
+   * Whether Workspaces are switched and created by name rather than by
+   * folder: each signed-in person has their own (Bubble mode). Absent from
+   * older servers.
+   */
+  namedWorkspaces: z.boolean().optional(),
 });
 export type WorkspaceCapabilities = z.infer<typeof workspaceCapabilitiesSchema>;
 

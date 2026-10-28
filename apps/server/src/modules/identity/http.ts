@@ -5,6 +5,7 @@ import { timingSafeEqual } from 'node:crypto';
 
 import {
   getRequestAuthorizations,
+  setRequestWorkspaceChooser,
   getRequestIdentity,
   setRequestIdentity,
 } from './request.js';
@@ -176,6 +177,13 @@ export function registerIdentity(
       if (identity.member && service.selectWorkspace) {
         const scope = await service.selectWorkspace(identity);
         if (scope) fillWorkspaceScope(scope);
+        const { chooseWorkspace } = service;
+        if (chooseWorkspace)
+          setRequestWorkspaceChooser(
+            request,
+            async (workspaceId) =>
+              (await chooseWorkspace(identity, workspaceId)) !== null,
+          );
       }
       if (
         service.provider === 'bubble' &&

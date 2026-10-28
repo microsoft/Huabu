@@ -17,6 +17,7 @@ import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { prepareWorkspaceOnDisk } from './workspace-prepare.js';
 import {
   beginWorkspaceActivation,
   isManagedMode,
@@ -224,15 +225,17 @@ export async function activateWorkspacePath(
  * Create a Workspace by name, on any backend, without activating it.
  *
  * Where a Workspace is a row this is the repository's own create. On Disk it
- * is a new folder under the data directory, prepared in the isolated worker
- * like any other: the creator never chooses where it lives, which is what lets
- * someone without access to the Server's filesystem have one.
+ * is a new folder under the data directory: the creator never chooses where
+ * it lives, which is what lets someone without access to the Server's
+ * filesystem have one. An empty folder the Server just made is not the
+ * unresponsive cloud or network drive the preparation worker isolates, so it
+ * is prepared in-process.
  */
 export async function createWorkspace(name: string): Promise<WorkspaceHandle> {
   if (!materializesWorkspaces()) return createNamedWorkspace(name);
   const workspacePath = path.join(getDataDir(), 'workspaces', randomUUID());
   await mkdir(workspacePath, { recursive: true });
-  await runWorkspacePreparation(workspacePath);
+  prepareWorkspaceOnDisk(workspacePath);
   const adopted = adoptWorkspaceDirectory(workspacePath);
   return (
     (await getWorkspaceRepository().rename(adopted.workspaceId, name)) ??

@@ -160,7 +160,9 @@ function sendError(
 }
 
 /** Build the canonical success payload describing the current workspace. */
-async function buildWorkspaceState(): Promise<WorkspaceInfo> {
+async function buildWorkspaceState(
+  personal: { admin: boolean } | null = null,
+): Promise<WorkspaceInfo> {
   const managed = isManagedMode();
   const workspace = getWorkspaceHandle();
   const configured = workspace !== null;
@@ -171,26 +173,38 @@ async function buildWorkspaceState(): Promise<WorkspaceInfo> {
     // Free-mode active absolute path. Never exposed in managed mode.
     // Null in managed mode, and null wherever a Workspace has no folder at
     // all. The client already renders a Workspace with no path.
-    path: workspace && !managed ? getWorkspaceDirectory() : null,
+    path:
+      workspace && !managed && (!personal || personal.admin)
+        ? getWorkspaceDirectory()
+        : null,
     // Persisted display label. Safe to send in either mode.
     name: workspace?.name ?? null,
     worldCanvasId: configured
       ? await getStructuredStore().spaces().worldId()
       : null,
-    capabilities: {
-      // Switching Workspaces means picking a folder in this API. A backend
-      // that keeps Workspaces as rows has one already open and no folder to
-      // offer, so the client stops showing a picker it could not honour.
-      canChangeWorkspace: !managed && materializesWorkspaces(),
-      nativePicker:
-        !managed && materializesWorkspaces() && canShowNativePicker(),
-    },
+    capabilities: personal
+      ? // Each person switches among, and creates, Workspaces of their own
+        // by name; folders are not theirs to pick.
+        {
+          canChangeWorkspace: !managed,
+          nativePicker: false,
+          namedWorkspaces: true,
+        }
+      : {
+          // Switching Workspaces means picking a folder in this API. A backend
+          // that keeps Workspaces as rows has one already open and no folder to
+          // offer, so the client stops showing a picker it could not honour.
+          canChangeWorkspace: !managed && materializesWorkspaces(),
+          nativePicker:
+            !managed && materializesWorkspaces() && canShowNativePicker(),
+        },
   };
 }
 
 const workspaceRoutes: FastifyPluginAsync = async (app) => {
-  // The active Workspace is the whole Server's, so a principal with
-  // per-Space access (a Bubble member) may not change it.
+  // These routes pick folders on the Server and move the process-active
+  // Workspace, so in Bubble mode only an administrator reaches them; a person
+  // switches their own Workspace through `/api/workspaces`.
   app.addHook('preHandler', async (request, reply) => {
     if (
       request.method !== 'GET' &&
@@ -208,7 +222,9 @@ const workspaceRoutes: FastifyPluginAsync = async (app) => {
   // Always available (clients need to know the mode).
   // ────────────────────────────────────────────────────────────────
   app.get<{ Reply: ApiResult<WorkspaceInfo> }>('/', async (request) => {
-    const state = await buildWorkspaceState();
+    const state = await buildWorkspaceState(
+      isRestrictedRequest(request) ? { admin: isOwnerRequest(request) } : null,
+    );
     // World is an ordinary Space here, advertised only to who may read it.
     if (
       state.worldCanvasId &&

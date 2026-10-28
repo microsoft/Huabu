@@ -12,8 +12,8 @@ import { registerIdentity } from './http.js';
 import { createMemoryWorkspacePreferences } from './preferences.js';
 import { getRequestIdentity } from './request.js';
 import { isOwnerRequest } from '../security/owner.js';
-import { getWorkspaceHandle } from '../workspace.js';
 import { registerSpaceAccess } from '../security/space-access.js';
+import { getWorkspaceHandle } from '../workspace.js';
 
 import type { HuabuResource, ResourceDirectory } from './service.js';
 import type { BubbleStore } from '@octostaff/bubble';
