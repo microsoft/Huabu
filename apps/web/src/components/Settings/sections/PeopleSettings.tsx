@@ -152,22 +152,24 @@ export function PeopleSettings() {
                 </ul>
               )}
               {addable.length > 0 && (
-                <Select
-                  size="sm"
-                  variant="ghost"
-                  options={addable.map((w) => ({
-                    value: w.workspaceId,
-                    label: w.name,
-                  }))}
-                  value=""
-                  placeholder={t('people.addToWorkspace')}
-                  disabled={busy}
-                  onChange={(workspaceId) =>
-                    void change(() =>
-                      setPersonWorkspaceRole(id, workspaceId, 'viewer'),
-                    )
-                  }
-                />
+                <div className="flex">
+                  <Select
+                    size="sm"
+                    variant="ghost"
+                    options={addable.map((w) => ({
+                      value: w.workspaceId,
+                      label: w.name,
+                    }))}
+                    value=""
+                    placeholder={t('people.addToWorkspace')}
+                    disabled={busy}
+                    onChange={(workspaceId) =>
+                      void change(() =>
+                        setPersonWorkspaceRole(id, workspaceId, 'viewer'),
+                      )
+                    }
+                  />
+                </div>
               )}
             </li>
           );
