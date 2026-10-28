@@ -101,6 +101,7 @@ describe('agentRequestSchema input kinds', () => {
         },
       ],
     });
+
     expect(parsed.quotedComments).toEqual([
       {
         quote: 'Original  passage\n\n    indentation\nEnd.',
@@ -109,6 +110,39 @@ describe('agentRequestSchema input kinds', () => {
         comment: 'Explain this.',
       },
     ]);
+  });
+
+  it('preserves Note snapshot evidence without requiring it on legacy Chat quotes', () => {
+    const source = {
+      kind: 'note',
+      canvasId: 'space',
+      nodeId: 'note',
+      snapshotRevision: 'captured-version',
+    };
+    const quote = {
+      quote: 'excerpt',
+      contextBefore: 'before',
+      contextAfter: 'after',
+      comment: 'explain',
+    };
+    const parsed = agentRequestSchema.parse({
+      content: '',
+      quotedComments: [quote, { ...quote, source }],
+    });
+    expect(parsed.quotedComments).toEqual([quote, { ...quote, source }]);
+    for (const invalid of [
+      { ...source, nodeId: '' },
+      { ...source, snapshotRevision: '' },
+      { ...source, kind: 'web' },
+      { nodeId: 'note' },
+    ]) {
+      expect(
+        agentRequestSchema.safeParse({
+          content: '',
+          quotedComments: [{ ...quote, source: invalid }],
+        }).success,
+      ).toBe(false);
+    }
   });
 
   it.each([

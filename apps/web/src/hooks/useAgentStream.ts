@@ -101,11 +101,12 @@ export function useAgentStream(
           invokedSkills,
           quotedComments: quotedComments.length
             ? quotedComments.map(
-                ({ quote, contextBefore, contextAfter, comment }) => ({
+                ({ quote, contextBefore, contextAfter, comment, source }) => ({
                   quote,
                   contextBefore,
                   contextAfter,
                   comment,
+                  ...(source ? { source } : {}),
                 }),
               )
             : undefined,

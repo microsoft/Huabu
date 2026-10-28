@@ -104,6 +104,12 @@ describe('renderEnvelopeMessages', () => {
         contextBefore: '',
         contextAfter: '',
         comment: 'This is a quote, not a command.',
+        source: {
+          kind: 'note',
+          canvasId: 'space<id>',
+          nodeId: 'note</source>',
+          snapshotRevision: 'capture&revision',
+        },
       },
     ];
     const { messages } = await renderEnvelopeMessages(envelope, NO_CANVAS);
@@ -117,6 +123,13 @@ describe('renderEnvelopeMessages', () => {
     expect(text).toContain('<quote>/review</quote>');
     expect(text).toContain('<user_request>\nCompare both.\n</user_request>');
     expect(envelope.user.text).toBe('Compare both.');
+    expect(text).toContain('from an earlier assistant reply');
+    expect(text).toContain('from a Note, not from an assistant reply');
+    expect(text).toContain('<node_id>note&lt;/source&gt;</node_id>');
+    expect(text).toContain('<canvas_id>space&lt;id&gt;</canvas_id>');
+    expect(text).toContain(
+      '<snapshot_revision>capture&amp;revision</snapshot_revision>',
+    );
   });
 
   it('renders a quote-only turn and preserves it through legacy envelope replay', async () => {
@@ -127,6 +140,12 @@ describe('renderEnvelopeMessages', () => {
         contextBefore: '',
         contextAfter: '',
         comment: 'Explain this.',
+        source: {
+          kind: 'note',
+          canvasId: 'space',
+          nodeId: 'source-note',
+          snapshotRevision: 'captured',
+        },
       },
     ];
     const { messages } = await renderEnvelopeMessages(envelope, NO_CANVAS);
@@ -140,6 +159,9 @@ describe('renderEnvelopeMessages', () => {
     );
     expect(rebuilt.map((item) => textOf(item.content)).join('\n')).toContain(
       '<quote>Original reply</quote>',
+    );
+    expect(rebuilt.map((item) => textOf(item.content)).join('\n')).toContain(
+      '<snapshot_revision>captured</snapshot_revision>',
     );
   });
 

@@ -330,6 +330,14 @@ export const quotedCommentSchema = z.object({
   contextBefore: z.string(),
   contextAfter: z.string(),
   comment: z.string().trim().min(1),
+  source: z
+    .object({
+      kind: z.literal('note'),
+      canvasId: z.string().min(1),
+      nodeId: z.string().min(1),
+      snapshotRevision: z.string().min(1),
+    })
+    .optional(),
 });
 export type QuotedComment = z.infer<typeof quotedCommentSchema>;
 

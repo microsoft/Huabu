@@ -43,6 +43,12 @@ describe('chatStore composer drafts', () => {
       contextBefore: 'Before ',
       contextAfter: ' after',
       comment: ' Explain. ',
+      source: {
+        kind: 'note' as const,
+        canvasId: 'space',
+        nodeId: 'note',
+        snapshotRevision: 'version',
+      },
     };
     store.setDraft('a', 'General instructions');
     store.addQuotedComment('a', comment);
@@ -68,6 +74,48 @@ describe('chatStore composer drafts', () => {
     expect(selectThreadDraft(useChatStore.getState(), 'a')).toBe(
       'General instructions',
     );
+  });
+
+  it('pins hidden quote drafts during cache eviction and compares source evidence on consumption', () => {
+    const store = useChatStore.getState();
+    const source = {
+      kind: 'note' as const,
+      canvasId: 'space',
+      nodeId: 'note',
+      snapshotRevision: 'original',
+    };
+    store.addQuotedComment('hidden', {
+      quote: 'excerpt',
+      contextBefore: '',
+      contextAfter: '',
+      comment: 'explain',
+      source,
+    });
+    const captured = selectThreadQuotedComments(
+      useChatStore.getState(),
+      'hidden',
+    );
+    store.setDraft('evictable', 'ordinary draft');
+    store.evictInactiveThreads(0);
+    expect(useChatStore.getState().threadsById.hidden).toBeDefined();
+    expect(useChatStore.getState().threadsById.evictable).toBeUndefined();
+    store.setQuotedComments(
+      'hidden',
+      captured.map((item) => ({
+        ...item,
+        source: { ...source, snapshotRevision: 'changed' },
+      })),
+    );
+    store.consumeDraft('hidden', '', captured);
+    expect(
+      selectThreadQuotedComments(useChatStore.getState(), 'hidden'),
+    ).toHaveLength(1);
+    const next = selectThreadQuotedComments(useChatStore.getState(), 'hidden');
+    store.consumeDraft('hidden', '', next);
+    store.restoreDraftIfEmpty('hidden', '', next);
+    expect(
+      selectThreadQuotedComments(useChatStore.getState(), 'hidden'),
+    ).toEqual(next);
   });
 
   it('consumes only the submitted draft snapshot and retains additions and edits', () => {

@@ -179,6 +179,12 @@ describe('buildHistoryFromTurns', () => {
           contextBefore: 'Before ',
           contextAfter: ' after',
           comment: 'Explain this.',
+          source: {
+            kind: 'note',
+            canvasId: 'space',
+            nodeId: 'note',
+            snapshotRevision: 'captured',
+          },
         },
       ];
       const messages = build([
