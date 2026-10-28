@@ -279,7 +279,13 @@ export async function openBubbleIdentity(options: {
   store: BubbleStore;
   preferences: WorkspacePreferences;
   resources: ResourceDirectory;
-}): Promise<{ service: IdentityService; plugin: FastifyPluginAsync }> {
+}): Promise<{
+  service: IdentityService &
+    Required<
+      Pick<IdentityService, 'people' | 'selectWorkspace' | 'chooseWorkspace'>
+    >;
+  plugin: FastifyPluginAsync;
+}> {
   const { store, owner, preferences } = options;
   const runtime = await createBubbleRuntime({
     store,

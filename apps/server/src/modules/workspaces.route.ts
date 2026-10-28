@@ -8,8 +8,8 @@ import { z } from 'zod';
 import { workspaceCreateSchema, workspaceRenameSchema } from '@huabu/shared';
 
 import {
-  getRequestIdentity,
   getRequestWorkspaceChooser,
+  requireRequestIdentity,
 } from './identity/request.js';
 import { migrateLegacyDesktopWorkspaceStore } from './legacy-desktop-workspace-store.js';
 import { resetPreprocessDispatcher } from './preprocessing/index.js';
@@ -213,7 +213,7 @@ function personal(request: FastifyRequest): boolean {
 async function enterable(
   request: FastifyRequest,
 ): Promise<readonly WorkspaceHandle[]> {
-  const allowed = await getRequestIdentity(request)!.access.workspaces();
+  const allowed = await requireRequestIdentity(request).access.workspaces();
   const all = await getWorkspaceRepository().list();
   return allowed === 'all'
     ? all
@@ -224,7 +224,7 @@ async function canManage(
   request: FastifyRequest,
   workspaceId: string,
 ): Promise<boolean> {
-  return getRequestIdentity(request)!.access.can('manage', {
+  return requireRequestIdentity(request).access.can('manage', {
     type: 'workspace',
     id: workspaceId,
   });
@@ -283,7 +283,7 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
         return sendError(reply, 400, 'Workspace name is required');
       try {
         const workspace = await createWorkspace(parsed.data.name);
-        await getRequestIdentity(request)!.access.claim({
+        await requireRequestIdentity(request).access.claim({
           type: 'workspace',
           id: workspace.workspaceId,
         });

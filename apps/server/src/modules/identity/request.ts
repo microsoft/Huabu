@@ -21,6 +21,16 @@ export function setRequestIdentity(
   identities.set(request, identity);
 }
 
+/** The identity of a request admission has resolved; a server bug otherwise. */
+export function requireRequestIdentity(
+  request: FastifyRequest,
+): ResolvedIdentity {
+  const identity = identities.get(request);
+  if (!identity)
+    throw new Error('Identity admission did not resolve a principal');
+  return identity;
+}
+
 /** Transport-resolved identity, never a caller-supplied principal header/body. */
 export function getRequestIdentity(
   request: FastifyRequest,

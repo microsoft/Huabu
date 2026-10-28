@@ -54,18 +54,16 @@ export function createIdentity(
       // Present from the start so routes can tell Bubble mode by it; each call
       // opens Bubble on demand like every other member here.
       people: {
-        list: async () => (await (opening ??= open())).service.people!.list(),
+        list: async () => (await (opening ??= open())).service.people.list(),
         setMember: async (...args) =>
-          (await (opening ??= open())).service.people!.setMember(...args),
+          (await (opening ??= open())).service.people.setMember(...args),
         setWorkspaceRole: async (...args) =>
-          (await (opening ??= open())).service.people!.setWorkspaceRole(
-            ...args,
-          ),
+          (await (opening ??= open())).service.people.setWorkspaceRole(...args),
       },
       selectWorkspace: async (identity) =>
-        (await (opening ??= open())).service.selectWorkspace!(identity),
+        (await (opening ??= open())).service.selectWorkspace(identity),
       chooseWorkspace: async (identity, workspaceId) =>
-        (await (opening ??= open())).service.chooseWorkspace!(
+        (await (opening ??= open())).service.chooseWorkspace(
           identity,
           workspaceId,
         ),
