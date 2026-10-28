@@ -38,6 +38,8 @@ type Fields = Record<string, unknown> | undefined;
  * pattern, not URL spelling.
  */
 const ADMIN_AGENT_ROUTES = ['/api/acp', '/api/agent-change-review', '/api/rfs'];
+/** The one external-agent route a member reads: it lists only Built-In. */
+const MEMBER_AGENT_LISTING = '/api/acp/profiles';
 
 /**
  * The one value a request gives for `field` across its route parameters,
@@ -101,6 +103,7 @@ export function registerSpaceAccess(app: FastifyInstance): void {
     const route = request.routeOptions.url ?? '';
     if (
       !identity.owner &&
+      !(request.method === 'GET' && route === MEMBER_AGENT_LISTING) &&
       (request.routeOptions.config?.invokesAgent ||
         ADMIN_AGENT_ROUTES.some(
           (prefix) => route === prefix || route.startsWith(`${prefix}/`),

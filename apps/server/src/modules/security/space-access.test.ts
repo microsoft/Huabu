@@ -61,6 +61,8 @@ function host() {
   app.get('/api/agent/history/:threadId', ok);
   app.post('/api/agent', ok);
   app.post('/api/acp/threads/:threadId/permission', ok);
+  app.get('/api/acp/profiles', ok);
+  app.post('/api/acp/profiles', ok);
   app.get('/api/canvas/:canvasId/threads/:threadId/changes', ok);
   app.post('/api/canvas-titles', ok);
   app.post('/api/rfs/:canvasId/services/:serviceId/lease', ok);
@@ -185,7 +187,10 @@ describe('Space access', () => {
       404,
     );
     expect(await member({ url: '/api/agent/history/t1' })).toBe(400);
+    // Listing agents shows them Built-In; changing profiles does not.
+    expect(await member({ url: '/api/acp/profiles' })).toBe(200);
     for (const request of [
+      { method: 'POST', url: '/api/acp/profiles' },
       { method: 'POST', url: '/api/acp/threads/t1/permission?canvasId=mine' },
       // The machine credential's own surface: agent launches, Task Runs and
       // shared service credentials.
