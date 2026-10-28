@@ -66,5 +66,10 @@ export function parseFsRequest(operation: FsOperation, value: unknown): FsReques
   if (limit !== undefined && (typeof limit !== 'number' || !Number.isSafeInteger(limit) || limit < (operation === 'fs-list' ? 1 : 4) || limit > maximum)) {
     throw new Error('Invalid filesystem request limit')
   }
-  return record as unknown as FsRequest
+  return {
+    path: record.path,
+    ...(typeof record.cursor === 'string' ? { cursor: record.cursor } : {}),
+    ...(typeof record.showHidden === 'boolean' ? { showHidden: record.showHidden } : {}),
+    ...(typeof limit === 'number' ? operation === 'fs-list' ? { limit } : { limitBytes: limit } : {}),
+  }
 }

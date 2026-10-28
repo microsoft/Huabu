@@ -123,4 +123,8 @@ describe('stateless filesystem commands', () => {
     controller.abort()
     expect(await executeFsCommand('fs-list', { path: directory }, controller.signal)).toMatchObject({ ok: false, error: { code: 'cancelled' } })
   })
+
+  it.skipIf(process.platform !== 'linux')('rejects generated procfs files without stable size metadata rather than silently truncating', async () => {
+    expect(await executeFsCommand('fs-read', { path: '/proc/self/status' })).toMatchObject({ ok: false, error: { code: 'unsupported_file' } })
+  })
 })

@@ -114,6 +114,8 @@ async function read(request: FsRequest, signal: AbortSignal) {
     }
     signal.throwIfAborted()
     if (version(await handle.stat()) !== contentVersion) throw new FsFailure('stale_cursor', 'File changed during reading')
+    if (offset + bytesRead > before.size) throw new FsFailure('unsupported_file', 'File does not provide stable size metadata')
+    if (bytesRead < Math.min(buffer.length, before.size - offset)) throw new FsFailure('io_error', 'File ended before its reported size')
     let length = Math.min(bytesRead, limit)
     if (bytesRead > limit) {
       while (length > 0 && (buffer[length]! & 0xc0) === 0x80) length--
