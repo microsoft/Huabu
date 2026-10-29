@@ -32,6 +32,8 @@ export function ConnectedDeviceRow({
   connectionControls,
   connectionError,
   menuItems,
+  menuOpen,
+  onMenuOpenChange,
   online = true,
   children,
   onAdd,
@@ -43,6 +45,8 @@ export function ConnectedDeviceRow({
   connectionControls?: ReactNode;
   connectionError?: string | null;
   menuItems?: ReactNode;
+  menuOpen?: boolean;
+  onMenuOpenChange?: (open: boolean) => void;
   online?: boolean;
   children?: ReactNode;
   onAdd?: () => void;
@@ -209,6 +213,8 @@ export function ConnectedDeviceRow({
             </>
           ) : (
             <DropdownMenu
+              open={menuOpen}
+              onOpenChange={onMenuOpenChange}
               align="bottom-right"
               trigger={
                 <Button
@@ -228,6 +234,7 @@ export function ConnectedDeviceRow({
                 <DropdownMenuItem
                   icon={<Pencil />}
                   onClick={() => {
+                    onMenuOpenChange?.(false);
                     setDraft(device.displayName);
                     setRenameError(null);
                     setEditing(true);

@@ -311,10 +311,13 @@ test('local connection actions and offline device groups remain stable', async (
     },
   ];
   let enabled = true;
+  let cancelDisconnect = true;
   const changes: boolean[] = [];
   await page.route('**/__e2e/local-agent', async (route) => {
-    enabled = route.request().postDataJSON().enabled;
-    changes.push(enabled);
+    const requested = route.request().postDataJSON().enabled;
+    changes.push(requested);
+    if (!requested && cancelDisconnect) cancelDisconnect = false;
+    else enabled = requested;
     await route.fulfill({
       json: {
         enabled,
@@ -411,7 +414,9 @@ test('local connection actions and offline device groups remain stable', async (
       exact: true,
     }),
   ).toHaveCount(0);
-  await local.getByRole('button', { name: 'My Mac actions' }).click();
+  const localMenu = local.getByRole('button', { name: 'My Mac actions' });
+  await localMenu.focus();
+  await page.keyboard.press('Enter');
   const disconnect = page.getByRole('menuitem', {
     name: en.settings.localAgentDisconnect,
     exact: true,
@@ -420,8 +425,18 @@ test('local connection actions and offline device groups remain stable', async (
   await dialog.screenshot({
     path: testInfo.outputPath('local-connected-menu.png'),
   });
-  await disconnect.click();
+  await disconnect.focus();
+  await page.keyboard.press('Enter');
   await expect(page.getByRole('menu')).toHaveCount(0);
+  await expect(localMenu).toBeFocused();
+  await expect(
+    local.getByRole('button', { name: en.settings.addAgent, exact: true }),
+  ).toBeVisible();
+  await page.keyboard.press('Enter');
+  await disconnect.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('menu')).toHaveCount(0);
+  await expect(localMenu).toBeFocused();
   await expect(
     local.getByRole('button', {
       name: en.settings.localAgentConnect,
@@ -479,7 +494,7 @@ test('local connection actions and offline device groups remain stable', async (
   await expect(remote.getByRole('status')).toHaveText(
     en.settings.localAgentDisabled,
   );
-  expect(changes).toEqual([false, true]);
+  expect(changes).toEqual([false, false, true]);
 });
 
 for (const hasTouch of [false, true]) {

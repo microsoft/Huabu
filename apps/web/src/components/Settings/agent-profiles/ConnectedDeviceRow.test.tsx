@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { act } from 'react';
+import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -65,6 +65,39 @@ async function openMenu() {
 }
 
 describe('device menu', () => {
+  it('does not reopen a controlled menu after cancelling Rename', async () => {
+    function LocalDevice() {
+      const [open, setOpen] = useState(false);
+      return (
+        <ConnectedDeviceRow
+          device={device}
+          isLocalDevice
+          menuOpen={open}
+          onMenuOpenChange={setOpen}
+        />
+      );
+    }
+    await act(async () => root.render(<LocalDevice />));
+    await act(async () =>
+      container
+        .querySelector<HTMLButtonElement>('[aria-haspopup="menu"]')
+        ?.click(),
+    );
+    await act(async () =>
+      document.querySelector<HTMLButtonElement>('[role="menuitem"]')?.click(),
+    );
+    expect(container.querySelector('input')).toBe(document.activeElement);
+    await act(async () =>
+      [...container.querySelectorAll('button')]
+        .find((button) => button.textContent === 'Cancel')
+        ?.click(),
+    );
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    expect(document.activeElement).toBe(
+      container.querySelector('[aria-haspopup="menu"]'),
+    );
+  });
+
   it('keeps offline metadata readable without inventing a version or offering online-only actions', async () => {
     await act(async () =>
       root.render(

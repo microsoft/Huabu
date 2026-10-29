@@ -2,7 +2,7 @@
 // Licensed under the MIT license.
 
 import { MoreHorizontal, Unplug } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/components/Common/Button';
@@ -10,7 +10,6 @@ import {
   DropdownMenu,
   DropdownMenuItem,
 } from '@/components/Common/DropdownMenu';
-import { dismissPopoversWithin } from '@/components/Common/Popover';
 import { SettingRow } from '@/components/Settings/Common/SettingRow';
 import {
   getElectronBridge,
@@ -55,6 +54,9 @@ export function ConnectedDevicesSetting({
   const knownDevices = useAcpProfilesStore((state) => state.knownDevices);
   const [state, setState] = useState<ElectronLocalAgentState | null>(null);
   const [pending, setPending] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const connectRef = useRef<HTMLButtonElement>(null);
+  const restoreConnectFocus = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const folderPickerAgentletId = useAcpProfilesStore(
     (state) => state.folderPickerAgentletId,
@@ -86,6 +88,15 @@ export function ConnectedDevicesSetting({
   }, [api, refresh]);
 
   const busy = pending || state?.status === 'stopping';
+  useEffect(() => {
+    if (busy || !restoreConnectFocus.current) return;
+    const frame = requestAnimationFrame(() => {
+      restoreConnectFocus.current = false;
+      if (document.activeElement === document.body)
+        connectRef.current?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [busy, state?.enabled]);
   const needsRetry =
     state?.status === 'error' || state?.status === 'authorization-required';
   const changeConnection = async (enabled: boolean) => {
@@ -176,6 +187,7 @@ export function ConnectedDevicesSetting({
             ) : null}
             {!state?.enabled && (
               <Button
+                ref={connectRef}
                 variant="outline"
                 size="field"
                 disabled={busy || (!state && !error)}
@@ -218,9 +230,9 @@ export function ConnectedDevicesSetting({
       <DropdownMenuItem
         icon={<Unplug />}
         disabled={busy}
-        onClick={(event) => {
-          const menu = event.currentTarget.closest('[role="menu"]');
-          if (menu) dismissPopoversWithin(menu);
+        onClick={() => {
+          restoreConnectFocus.current = !localDevice;
+          setMenuOpen(false);
           void changeConnection(false);
         }}
       >
@@ -239,6 +251,8 @@ export function ConnectedDevicesSetting({
             {controls}
             {disconnect && (
               <DropdownMenu
+                open={menuOpen}
+                onOpenChange={setMenuOpen}
                 align="bottom-right"
                 trigger={
                   <Button
@@ -284,6 +298,8 @@ export function ConnectedDevicesSetting({
             connectionControls={isLocalDevice ? controls : null}
             connectionError={isLocalDevice ? message : null}
             menuItems={isLocalDevice ? disconnect : null}
+            menuOpen={isLocalDevice ? menuOpen : undefined}
+            onMenuOpenChange={isLocalDevice ? setMenuOpen : undefined}
             onAdd={onAdd ? () => onAdd(device.agentletId) : undefined}
             addRef={addRef?.(device.agentletId)}
             profileCount={deviceProfiles.length}

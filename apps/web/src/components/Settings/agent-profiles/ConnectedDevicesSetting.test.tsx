@@ -81,6 +81,67 @@ afterEach(() => {
 });
 
 describe('connected device settings', () => {
+  it.each([
+    [true, 'cancel'],
+    [true, 'disconnect'],
+    [true, 'error'],
+    [false, 'cancel'],
+    [false, 'disconnect'],
+    [false, 'error'],
+  ] as const)(
+    'restores focus after Disconnect (identity=%s, outcome=%s)',
+    async (withIdentity, outcome) => {
+      const current: ElectronLocalAgentState = {
+        enabled: true,
+        status: 'connected',
+        error: null,
+        ...(withIdentity ? { agentletId: 'this-device' } : {}),
+      };
+      await act(async () => root.render(<ConnectedDevicesSetting />));
+      await act(async () => onState?.(current));
+      let finish!: () => void;
+      api.setEnabled.mockImplementationOnce(
+        () =>
+          new Promise((resolve, reject) => {
+            finish = () =>
+              outcome === 'error'
+                ? reject(new Error('Disconnect failed'))
+                : resolve(
+                    outcome === 'cancel'
+                      ? current
+                      : { ...current, enabled: false, status: 'disabled' },
+                  );
+          }),
+      );
+      await openDeviceMenu();
+      const item =
+        document.querySelector<HTMLButtonElement>('[role="menuitem"]');
+      expect(item).toBeTruthy();
+      act(() => item?.focus());
+      await act(async () => item?.click());
+      expect(document.querySelector('[role="menu"]')).toBeNull();
+      await act(async () => finish());
+      await act(
+        async () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => resolve()),
+          ),
+      );
+      const target =
+        !withIdentity && outcome === 'disconnect'
+          ? [...container.querySelectorAll('button')].find(
+              (button) => button.textContent === 'settings.localAgentConnect',
+            )
+          : container.querySelector('[aria-label="settings.deviceActions"]');
+      expect(target).toBeTruthy();
+      expect(document.activeElement).toBe(target);
+      if (outcome === 'error')
+        expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+          'Disconnect failed',
+        );
+    },
+  );
+
   async function openDeviceMenu(element: ParentNode = container) {
     const trigger = element.querySelector<HTMLButtonElement>(
       '[aria-label="settings.deviceActions"]',
@@ -89,6 +150,36 @@ describe('connected device settings', () => {
       await act(async () => trigger?.click());
     return document.querySelector('[role="menu"]');
   }
+
+  it('does not steal focus while a legacy Disconnect finishes', async () => {
+    await act(async () => root.render(<ConnectedDevicesSetting />));
+    await act(async () =>
+      onState?.({ enabled: true, status: 'connected', error: null }),
+    );
+    let finish!: () => void;
+    api.setEnabled.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = () => resolve(initial);
+        }),
+    );
+    const outside = document.createElement('button');
+    document.body.appendChild(outside);
+    try {
+      await disconnectLocal();
+      act(() => outside.focus());
+      await act(async () => finish());
+      await act(
+        async () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => resolve()),
+          ),
+      );
+      expect(document.activeElement).toBe(outside);
+    } finally {
+      outside.remove();
+    }
+  });
 
   async function disconnectLocal(element: ParentNode = container) {
     const menu = await openDeviceMenu(element);
