@@ -3,7 +3,7 @@
 
 import { expect, test } from '@playwright/test';
 
-import { openNewCanvas } from './helpers';
+import { openNewCanvas, readScreenshotPixels } from './helpers';
 
 import type * as QuestionModule from '../src/components/Nodes/question/questionCompose';
 import type * as CanvasModule from '../src/store/canvasStore';
@@ -13,7 +13,7 @@ import type * as PreviewActions from '../src/store/previewWorkspace/actions';
 import type * as PreviewModule from '../src/store/previewWorkspace/store';
 import type * as ToolModule from '../src/store/toolStore';
 
-const sourceText = 'Before selected passage after.\n\nSecond line.';
+const sourceText = `Before selected passage after. ${'Wrapped source text. '.repeat(16)}\n\nSecond line.`;
 
 for (const mode of ['mouse', 'touch'] as const) {
   test(`file preview ${mode} stages a frozen partial-file Comment without a read, send or navigation`, async ({
@@ -119,6 +119,9 @@ for (const mode of ['mouse', 'touch'] as const) {
     );
     const editor = page.locator('.cm-content');
     await expect(editor).toBeVisible();
+    await page
+      .context()
+      .grantPermissions(['clipboard-read', 'clipboard-write']);
     const initialReads = reads;
     const before = await page.evaluate(async () => {
       const previewPath = '/src/store/previewWorkspace/store.ts';
@@ -142,25 +145,114 @@ for (const mode of ['mouse', 'touch'] as const) {
       )
         turns++;
     });
-    if (mode === 'mouse') {
-      await editor.locator('.cm-line').first().click({ clickCount: 3 });
-      await page.getByRole('button', { name: 'Comment', exact: true }).click();
-    } else {
-      await editor.locator('.cm-line').first().tap();
-      await editor
-        .locator('.cm-line')
-        .first()
-        .evaluate((line) => {
+    const selectPassage = async () => {
+      const line = editor.locator('.cm-line').first();
+      if (mode === 'touch') {
+        await line.tap();
+        await line.evaluate((element) => {
+          const text = element.firstChild;
+          if (!text) throw new Error('Missing source text');
           const range = document.createRange();
-          range.selectNodeContents(line);
+          range.setStart(text, 7);
+          range.setEnd(text, 23);
           const selection = window.getSelection();
           if (!selection) throw new Error('Missing document selection');
           selection.removeAllRanges();
           selection.addRange(range);
           document.dispatchEvent(new Event('selectionchange'));
         });
-      await page.getByRole('button', { name: 'Comment', exact: true }).tap();
-    }
+      } else {
+        const points = await line.evaluate((element) => {
+          const text = element.firstChild;
+          if (!text) throw new Error('Missing source text');
+          const point = (offset: number) => {
+            const range = document.createRange();
+            range.setStart(text, offset);
+            range.collapse(true);
+            const rect = range.getBoundingClientRect();
+            return { x: rect.x, y: rect.y + rect.height / 2 };
+          };
+          return { from: point(7), to: point(23) };
+        });
+        await page.mouse.move(points.from.x, points.from.y);
+        await page.mouse.down();
+        await page.mouse.move(points.to.x, points.to.y, { steps: 8 });
+        await page.mouse.up();
+      }
+      await expect(
+        page.getByRole('button', { name: 'Comment', exact: true }),
+      ).toBeVisible();
+    };
+    await selectPassage();
+    await expect(
+      page.getByRole('button', { name: 'Copy', exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: 'Add as note', exact: true }),
+    ).toBeVisible();
+    const paint = await editor.evaluate((content) => {
+      const line = content.querySelector('.cm-activeLine');
+      const shell = content.closest('.cm-editor');
+      const selection = shell?.querySelector('.cm-selectionBackground');
+      if (!line || !selection)
+        throw new Error('Missing active line or drawn selection');
+      const rect = selection.getBoundingClientRect();
+      const style = getComputedStyle(line);
+      return {
+        lineBackground: style.backgroundColor,
+        lineHeight: line.getBoundingClientRect().height,
+        textLineHeight: Number.parseFloat(style.lineHeight),
+        backgroundLayer: getComputedStyle(line, '::before').zIndex,
+        point: { x: rect.x + rect.width / 2, y: rect.bottom - 2 },
+      };
+    });
+    expect(paint.lineHeight).toBeGreaterThan(paint.textLineHeight * 2);
+    expect(paint.lineBackground).toBe('rgba(0, 0, 0, 0)');
+    expect(paint.backgroundLayer).toBe('-2');
+    const [pixel] = await readScreenshotPixels(page, [paint.point]);
+    expect(pixel[2] - pixel[0]).toBeGreaterThan(5);
+    await page.screenshot({
+      path: test.info().outputPath(`file-selection-${mode}.png`),
+    });
+    await editor.evaluate((content) => content.blur());
+    await expect(page.locator('.cm-editor')).not.toHaveClass(/cm-focused/);
+    const [unfocusedPixel] = await readScreenshotPixels(page, [paint.point]);
+    expect(unfocusedPixel[2] - unfocusedPixel[0]).toBeGreaterThan(5);
+    const copy = page.getByRole('button', { name: 'Copy', exact: true });
+    if (mode === 'touch') await copy.tap();
+    else await copy.click();
+    await expect
+      .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+      .toBe('selected passage');
+    await expect(copy).toBeHidden();
+    await selectPassage();
+    const save = page.getByRole('button', { name: 'Add as note', exact: true });
+    if (mode === 'touch') await save.tap();
+    else await save.click();
+    await expect
+      .poll(() =>
+        page.evaluate(async () => {
+          const canvasPath = '/src/store/canvasStore.ts';
+          const { default: canvas } = (await import(
+            canvasPath
+          )) as typeof CanvasModule;
+          return canvas
+            .getState()
+            .nodes.filter(
+              (node) =>
+                node.type === 'note' &&
+                node.data.content === 'selected passage',
+            )
+            .map((node) => node.data.origin);
+        }),
+      )
+      .toEqual([
+        { type: 'user-excerpt', excerptFromNodeId: 'node-file-source' },
+      ]);
+    await selectPassage();
+    const comment = page.getByRole('button', { name: 'Comment', exact: true });
+    if (mode === 'touch') await comment.tap();
+    else await comment.click();
     await expect(
       page.getByText('Captured file snapshot', { exact: false }),
     ).toContainText('/canonical/source.tex');
@@ -199,7 +291,7 @@ for (const mode of ['mouse', 'touch'] as const) {
     expect(after.thread.draft).toBe('Keep instructions');
     expect(after.thread.pendingQuotedComments).toMatchObject([
       {
-        quote: 'Before selected passage after.',
+        quote: 'selected passage',
         comment: 'Explain the file',
         source: {
           kind: 'file-reference',
