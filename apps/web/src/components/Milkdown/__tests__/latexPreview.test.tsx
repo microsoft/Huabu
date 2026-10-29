@@ -17,7 +17,7 @@ change improves efficiency without compromising task performance.`;
 const instances: MilkdownInstance[] = [];
 const roots: HTMLElement[] = [];
 
-async function mount(markdown: string, previewMode = true) {
+async function mount(markdown: string, previewMode = true, editable = true) {
   const root = document.createElement('div');
   document.body.append(root);
   roots.push(root);
@@ -25,6 +25,7 @@ async function mount(markdown: string, previewMode = true) {
     root,
     initialMarkdown: markdown,
     previewMode,
+    editable,
     toolbarMode: 'none',
   });
   instances.push(instance);
@@ -37,6 +38,29 @@ afterEach(async () => {
 });
 
 describe('LaTeX source fences versus explicit math', () => {
+  it.each([
+    { previewMode: true, editable: true },
+    { previewMode: true, editable: false },
+    { previewMode: false, editable: true },
+    { previewMode: false, editable: false },
+  ])(
+    'preserves long source lines and indentation with wrapping (preview=$previewMode, editable=$editable)',
+    async ({ previewMode, editable }) => {
+      const body = `  ${'unbroken_token'.repeat(40)}\n\tindented source`;
+      const instance = await mount('', previewMode, editable);
+      for (const language of ['text', 'latex', 'tex']) {
+        const source = `\`\`\`${language}\n${body}\n\`\`\``;
+        instance.setMarkdown(source);
+        const serialized = instance.getMarkdown();
+        expect(serialized).toContain(source);
+        instance.setMarkdown(serialized);
+        expect(instance.getMarkdown()).toBe(serialized);
+        instance.__selectCurrentBlockForTest?.();
+        expect(instance.getDragPayload()?.markdown).toContain(body);
+      }
+    },
+  );
+
   it.each(['latex', 'LaTeX', 'LATEX', 'tex'])(
     'retains %s document source and its fence language through serialization',
     async (language) => {

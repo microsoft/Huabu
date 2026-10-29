@@ -12,6 +12,7 @@
  *  - Hides the async lifecycle: callers always receive a ready instance.
  */
 
+import { EditorView as CodeMirrorView } from '@codemirror/view';
 import {
   editorViewCtx,
   editorViewOptionsCtx,
@@ -1948,6 +1949,9 @@ export async function createMilkdown(
         : {}),
     },
     featureConfigs: {
+      [Crepe.Feature.CodeMirror]: {
+        extensions: [CodeMirrorView.lineWrapping],
+      },
       ...(placeholder
         ? { [Crepe.Feature.Placeholder]: { text: placeholder } }
         : {}),

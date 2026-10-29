@@ -79,6 +79,8 @@ The factory's [`latexCodeFence`](../../apps/web/src/components/Milkdown/latexCod
 
 Readonly code blocks reuse Crepe's lazy NodeView, but a text change invalidates that block's view so ProseMirror recreates it from the updated source. Crepe 7.21.2 otherwise rejects its own programmatic CodeMirror text updates through a readonly change filter, leaving touch-mode streaming source stale. Editable blocks retain the upstream incremental update path; the adapter never temporarily enables editing or replaces the math renderer, preview sanitizer, Copy handler or visibility lifecycle.
 
+The shared factory adds CodeMirror's `EditorView.lineWrapping` through Crepe's CodeMirror feature configuration. Code-block source visually wraps to its container width and reflows when Chat or Note is resized, including long unbroken tokens. This applies to editable and readonly source views, including latex/tex fences and the source editor for explicit math, without adding line breaks to the document. Source Copy, fragment/drag export and Markdown serialization retain the original text; rendered math previews are unchanged.
+
 Everything from here on is what happens **inside** the document. Pointer routing up to that point — which gesture the canvas claims before the event ever reaches a note — belongs to [canvas-input-interactions.md](./canvas-input-interactions.md).
 
 | Surface                                                                         | Mount                                  | Notes                                                                                                                                                                                                                        |
