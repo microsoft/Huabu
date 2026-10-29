@@ -19,6 +19,7 @@ import { SettingRow } from '@/components/Settings/Common/SettingRow';
 import { SettingSection } from '@/components/Settings/Common/SettingSection';
 import { useAcpProfilesStore } from '@/store/acpProfilesStore';
 import { readAgentIcon, withAgentIcon } from '@/utils/agentIcon';
+import { resolveConnectedDevice } from '@/utils/agentletDevice';
 
 import { AgentletHealthBanner } from './AgentletHealthBanner';
 import { AgentProfileEditor } from './AgentProfileEditor';
@@ -201,21 +202,30 @@ export function ExternalAgentsSettings({
     [],
   );
 
-  const catalogueProfile = profiles.find(
-    (profile) =>
-      profile.launch.kind === 'acp-harness' &&
-      selectableProfileIds.includes(profile.id),
-  );
-  const { detectedClis, loaded: detectionLoaded } = useDetectedClis(
-    editor?.kind !== 'connect-device' &&
-      (editor !== null || catalogueProfile !== undefined),
+  const {
+    detectedClis,
+    loaded: detectionLoaded,
+    error: detectionError,
+    recheck,
+  } = useDetectedClis(
+    editor !== null && editor.kind !== 'connect-device',
     editor?.kind === 'edit-command'
       ? { profileId: editor.profile.id }
       : editor?.kind === 'create'
         ? { agentletId: editor.agentletId }
-        : catalogueProfile
-          ? { profileId: catalogueProfile.id }
-          : { agentletId: '' },
+        : { agentletId: '' },
+    (() => {
+      const target =
+        editor?.kind === 'create'
+          ? editor.agentletId
+          : editor?.kind === 'edit-command'
+            ? editor.profile.agentletId
+            : '';
+      const device = resolveConnectedDevice(target, connectedDevices);
+      return device
+        ? `${device.agentletId}:${device.connectedAt}`
+        : 'unavailable';
+    })(),
   );
 
   const saveIcon = useCallback(
@@ -241,23 +251,83 @@ export function ExternalAgentsSettings({
     [refresh, t],
   );
 
-  const describeProfile = (profile: AgentProfileView): string => {
-    const cliId =
+  const renderProfile = (profile: AgentProfileView) => {
+    const harness =
       profile.launch.kind === 'acp-harness'
         ? profile.launch.harnessId
-        : 'custom';
-    const description =
-      !cliId || cliId === 'custom'
-        ? [
-            t('settings.agentCustomBadge'),
-            profile.launch.kind === 'acp-command'
-              ? profile.launch.command
-              : profile.launch.harnessId,
-          ].join(' · ')
-        : (detectedClis.find((cli) => cli.id === cliId)?.displayName ?? cliId);
-    return selectableProfileIds.includes(profile.id)
-      ? description
-      : `${description} · ${t('settings.agentUnavailable')}`;
+        : t('settings.customCommand');
+    return (
+      <div key={profile.id} className="group/profile mr-2.5 ml-8">
+        <SettingRow
+          density="compact"
+          className="px-0 py-1 [&.setting-row]:flex-row [&.setting-row]:items-center [&.setting-row]:gap-2 [&>.setting-row-control]:w-auto"
+          leading={
+            <PersistedAgentIconPicker
+              value={readAgentIcon(profile)}
+              alias={profile.alias}
+              onSave={(icon) => saveIcon(profile, icon)}
+            />
+          }
+          title={
+            <span className="flex min-w-0 items-center gap-2 font-normal">
+              <span className="truncate" title={profile.alias}>
+                {profile.alias}
+              </span>
+              {profile.alias !== harness && (
+                <span
+                  className="text-fg-muted max-w-[35%] shrink-0 truncate text-xs"
+                  title={harness}
+                >
+                  {harness}
+                </span>
+              )}
+            </span>
+          }
+          description={
+            selectableProfileIds.includes(profile.id) ||
+            !resolveConnectedDevice(profile.agentletId, connectedDevices)
+              ? undefined
+              : t('settings.agentUnavailable')
+          }
+        >
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="field"
+              iconOnly
+              title={t('menu.edit')}
+              aria-label={t('settings.editAgentProfile', {
+                name: profile.alias,
+              })}
+              className="focus-visible:outline-info enabled:hover:text-fg-default focus-visible:text-fg-default focus-visible:outline-2"
+              ref={restoreTriggerFocus(`command:${profile.id}`)}
+              data-editor-trigger={`command:${profile.id}`}
+              onClick={() =>
+                openEditor(
+                  { kind: 'edit-command', profile },
+                  `command:${profile.id}`,
+                )
+              }
+            >
+              <Pencil aria-hidden />
+            </Button>
+            <Button
+              variant="ghost"
+              size="field"
+              iconOnly
+              title={t('actions.delete')}
+              aria-label={t('settings.deleteAgentProfile', {
+                name: profile.alias,
+              })}
+              className="focus-visible:outline-info enabled:hover:text-danger-fg focus-visible:text-danger-fg focus-visible:outline-2"
+              onClick={() => setPendingDelete(profile)}
+            >
+              <Trash2 aria-hidden />
+            </Button>
+          </div>
+        </SettingRow>
+      </div>
+    );
   };
 
   const handleRestart = useCallback(async () => {
@@ -312,33 +382,26 @@ export function ExternalAgentsSettings({
             ) : (
               <>
                 <ProfileFormFooterTarget target={footerTarget}>
-                  <SettingSection>
-                    <AgentProfileEditor
-                      {...(editor.kind === 'create'
-                        ? { mode: 'create' as const }
-                        : {
-                            mode: 'edit-command' as const,
-                            profile: editor.profile,
-                          })}
-                      detectedClis={detectedClis}
-                      detectionLoaded={detectionLoaded}
-                      connectedDevices={connectedDevices}
-                      agentletId={
-                        editor.kind === 'create'
-                          ? editor.agentletId
-                          : editor.profile.agentletId
-                      }
-                      onAgentletChange={(agentletId) =>
-                        setEditor((current) =>
-                          current?.kind === 'create'
-                            ? { ...current, agentletId }
-                            : current,
-                        )
-                      }
-                      onClose={closeEditor}
-                      onSaved={refresh}
-                    />
-                  </SettingSection>
+                  <AgentProfileEditor
+                    {...(editor.kind === 'create'
+                      ? { mode: 'create' as const }
+                      : {
+                          mode: 'edit-command' as const,
+                          profile: editor.profile,
+                        })}
+                    detectedClis={detectedClis}
+                    detectionLoaded={detectionLoaded}
+                    detectionError={detectionError}
+                    onRecheck={recheck}
+                    connectedDevices={connectedDevices}
+                    agentletId={
+                      editor.kind === 'create'
+                        ? editor.agentletId
+                        : editor.profile.agentletId
+                    }
+                    onClose={closeEditor}
+                    onSaved={() => refresh({ afterMutation: true })}
+                  />
                 </ProfileFormFooterTarget>
                 <div ref={setFooterTarget} className="mt-3" />
               </>
@@ -346,119 +409,39 @@ export function ExternalAgentsSettings({
           </div>
         ) : (
           <div key="list" ref={activeViewRef}>
-            <SettingSection
-              title={t('settings.connectedDevices')}
-              collapsible
-              keepMounted
-              action={
-                <Button
-                  variant="ghost"
-                  tone="neutral"
-                  size="sm"
-                  aria-label={t('settings.addDevice')}
-                  ref={restoreTriggerFocus('connect-device')}
-                  data-editor-trigger="connect-device"
-                  onClick={() =>
-                    openEditor({ kind: 'connect-device' }, 'connect-device')
+            {loading && !loaded ? (
+              <SettingRow title={t('settings.loadingAgents')}>
+                <Loading layout="inline" size="sm" />
+              </SettingRow>
+            ) : (
+              <>
+                <ConnectedDevicesSetting
+                  profiles={profiles}
+                  renderProfile={renderProfile}
+                  onAdd={(agentletId) =>
+                    openEditor(
+                      { kind: 'create', agentletId },
+                      `create:${agentletId}`,
+                    )
                   }
-                >
-                  <Plus size={12} />
-                  {t('settings.addDevice')}
-                </Button>
+                  addRef={(agentletId) =>
+                    restoreTriggerFocus(`create:${agentletId}`)
+                  }
+                />
+              </>
+            )}
+            <Button
+              variant="outline"
+              size="field"
+              ref={restoreTriggerFocus('connect-device')}
+              data-editor-trigger="connect-device"
+              onClick={() =>
+                openEditor({ kind: 'connect-device' }, 'connect-device')
               }
             >
-              <ConnectedDevicesSetting />
-            </SettingSection>
-            <SettingSection
-              title={t('settings.agentProfiles')}
-              collapsible
-              keepMounted
-              action={
-                <Button
-                  variant="ghost"
-                  tone="neutral"
-                  size="sm"
-                  ref={restoreTriggerFocus('create')}
-                  data-editor-trigger="create"
-                  onClick={() => {
-                    const agentletId = connectedDevices[0]?.agentletId;
-                    if (agentletId)
-                      openEditor({ kind: 'create', agentletId }, 'create');
-                  }}
-                  disabled={
-                    connectedDevices.length === 0 || (loading && !loaded)
-                  }
-                >
-                  <Plus size={12} />
-                  <span>{t('settings.addAgent')}</span>
-                </Button>
-              }
-            >
-              {loading && !loaded ? (
-                <SettingRow title={t('settings.loadingAgents')}>
-                  <Loading layout="inline" size="sm" />
-                </SettingRow>
-              ) : (
-                <>
-                  {profiles.map((profile) => (
-                    <SettingRow
-                      key={profile.id}
-                      leading={
-                        <PersistedAgentIconPicker
-                          value={readAgentIcon(profile)}
-                          alias={profile.alias}
-                          onSave={(icon) => saveIcon(profile, icon)}
-                        />
-                      }
-                      title={profile.alias}
-                      description={describeProfile(profile)}
-                    >
-                      <div className="flex shrink-0 items-center gap-1">
-                        <Button
-                          variant="ghost"
-                          tone="neutral"
-                          size="field"
-                          iconOnly
-                          title={t('settings.editProfile')}
-                          ref={restoreTriggerFocus(`command:${profile.id}`)}
-                          data-editor-trigger={`command:${profile.id}`}
-                          onClick={() =>
-                            openEditor(
-                              { kind: 'edit-command', profile },
-                              `command:${profile.id}`,
-                            )
-                          }
-                        >
-                          <Pencil size={12} />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          tone="danger"
-                          size="field"
-                          iconOnly
-                          title={t('settings.deleteProfile')}
-                          onClick={() => setPendingDelete(profile)}
-                        >
-                          <Trash2 size={12} />
-                        </Button>
-                      </div>
-                    </SettingRow>
-                  ))}
-                  {(profiles.length === 0 || connectedDevices.length === 0) && (
-                    <div className="text-fg-muted flex flex-col gap-1 px-3 py-2.5 text-xs">
-                      {profiles.length === 0 && (
-                        <span>{t('settings.noAgents')}</span>
-                      )}
-                      {connectedDevices.length === 0 && (
-                        <span>
-                          {t('settings.noConnectedDevicesDescription')}
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </>
-              )}
-            </SettingSection>
+              <Plus />
+              {t('settings.addDevice')}
+            </Button>
           </div>
         )}
       </div>
