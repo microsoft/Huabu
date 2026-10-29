@@ -5,6 +5,8 @@ import { AgentProfileError } from '@agenetes/agent-profile';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { acpProfilesListResponseSchema } from '@huabu/shared';
+
 import acpProfilesRoutes from './profiles.route.js';
 
 import type * as ProfileCapabilities from './profile-capabilities.js';
@@ -24,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   readCapabilities: vi.fn(),
   discoverCapabilities: vi.fn(),
   connectedIds: new Set(['machine-a', 'remote-machine']),
+  offlineIds: new Set<string>(),
   pickerDeviceId: vi.fn(),
   deviceNames: vi.fn(() => ({})),
   renameDevice: vi.fn(),
@@ -50,10 +53,15 @@ vi.mock('@agenetes/agentlet-host', () => ({
   }),
   getAgentletGateway: () => ({
     discoverHarnesses: mocks.discoverHarnesses,
-    getAgentlets: () =>
-      [...mocks.connectedIds].map((agentletId) => ({
+    getAgentlets: (filter?: { status: string }) =>
+      [
+        ...mocks.connectedIds,
+        ...(filter?.status === 'connected' ? [] : mocks.offlineIds),
+      ].map((agentletId) => ({
         agentletId,
-        status: 'connected',
+        status: mocks.connectedIds.has(agentletId)
+          ? 'connected'
+          : 'disconnected',
         connectedAt: new Date('2026-01-01T00:00:00.000Z'),
         agentletProfile: {
           bridge: { name: 'agentlet', version: '1.0.0' },
@@ -103,9 +111,46 @@ afterEach(async () => {
   await app?.close();
   app = undefined;
   vi.resetAllMocks();
+  mocks.offlineIds.clear();
 });
 
 describe('ordinary Profile catalog routes', () => {
+  it('projects offline metadata and persisted names without making their Profiles selectable', async () => {
+    mocks.offlineIds.add('offline');
+    mocks.registry.listProfiles.mockReturnValue([
+      commandProfile,
+      { ...commandProfile, id: 'offline-profile', agentletId: 'offline' },
+    ]);
+    mocks.deviceNames.mockReturnValueOnce({
+      offline: 'Windows workstation',
+      'past-device': 'Previously renamed device',
+    });
+    const server = await setup();
+    const response = await server.inject('/api/acp/profiles');
+    expect(response.statusCode).toBe(200);
+    const body = acpProfilesListResponseSchema.parse(response.json());
+    expect(body.selectableProfileIds).toEqual(['command-1']);
+    expect(
+      body.connectedDevices.map((device) => device.agentletId),
+    ).not.toContain('offline');
+    expect(body.knownDevices).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          agentletId: 'offline',
+          displayName: 'Windows workstation',
+          hostname: 'offline-host',
+          version: '1.0.0',
+        }),
+        { agentletId: 'past-device', displayName: 'Previously renamed device' },
+      ]),
+    );
+    const renamed = await server.inject({
+      method: 'PATCH',
+      url: '/api/acp/devices/offline',
+      payload: { displayName: 'New name' },
+    });
+    expect(renamed.statusCode).toBe(404);
+  });
   it('renames an exact device without changing Profile identity or aliases', async () => {
     const server = await setup();
     const response = await server.inject({

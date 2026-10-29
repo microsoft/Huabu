@@ -646,10 +646,17 @@ export type ConnectedAgentletDevice = z.infer<
   typeof connectedAgentletDeviceSchema
 >;
 
+export const agentletDeviceSchema = connectedAgentletDeviceSchema
+  .omit({ connectedAt: true, profileCount: true })
+  .extend({ version: z.string().min(1).optional() });
+export type AgentletDevice = z.infer<typeof agentletDeviceSchema>;
+
 export const acpProfilesListResponseSchema = z.object({
   profiles: z.array(agentProfileSchema),
   selectableProfileIds: z.array(z.string().min(1)),
   connectedDevices: z.array(connectedAgentletDeviceSchema),
+  /** Display metadata only; presence never implies a live connection. */
+  knownDevices: z.array(agentletDeviceSchema).optional(),
   /** Connected persisted device identity on the Server's filesystem; absent on older servers. */
   folderPickerAgentletId: z.string().min(1).nullable().optional(),
   agentlet: acpAgentletStatusSchema,

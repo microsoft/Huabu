@@ -65,6 +65,7 @@ import type {
   AcpProfilesListResponse,
   AcpProfileCapabilitiesResponse,
   AgentProfileView,
+  AgentletDevice,
   ApiResult,
   RenameAgentletDeviceBody,
 } from '@huabu/shared';
@@ -229,7 +230,10 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
         });
       }
       const profiles = registry.listProfiles();
-      const connected = getConnectedAgentlets();
+      const connections = getAgentletGateway()?.getAgentlets() ?? [];
+      const connected = connections.filter(
+        (connection) => connection.status === 'connected',
+      );
       let deviceNames: Record<string, string>;
       try {
         deviceNames = getDeviceNames();
@@ -257,7 +261,7 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
         if (!agentletId) continue;
         profileCounts.set(agentletId, (profileCounts.get(agentletId) ?? 0) + 1);
       }
-      const connectedDevices = connected
+      const devices = connections
         .map((connection) => ({
           agentletId: connection.agentletId,
           displayName: Object.hasOwn(deviceNames, connection.agentletId)
@@ -284,12 +288,32 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
               right.hostname ?? right.agentletId,
             ) || left.agentletId.localeCompare(right.agentletId),
         );
+      const connectedIds = new Set(
+        connected.map((device) => device.agentletId),
+      );
+      const connectedDevices = devices.filter((device) =>
+        connectedIds.has(device.agentletId),
+      );
+      const knownDevices = new Map<string, AgentletDevice>(
+        devices.map(
+          ({
+            connectedAt: _connectedAt,
+            profileCount: _profileCount,
+            ...device
+          }) => [device.agentletId, device],
+        ),
+      );
+      for (const [agentletId, displayName] of Object.entries(deviceNames)) {
+        if (!knownDevices.has(agentletId))
+          knownDevices.set(agentletId, { agentletId, displayName });
+      }
       return {
         profiles,
         selectableProfileIds: profiles
           .filter((profile) => resolveConnectedAgentletId(profile.agentletId))
           .map((profile) => profile.id),
         connectedDevices,
+        knownDevices: [...knownDevices.values()],
         folderPickerAgentletId,
         agentlet: getDaemonSupervisor().getStatus(),
         agentDefaults: getAgentDefaults(),

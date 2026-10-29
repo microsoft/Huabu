@@ -50,7 +50,6 @@ import type {
   ConnectionCopyFormat,
   AgentletConnectionCommandResponse,
   AcpProfileCapabilitiesResponse,
-  AcpAgentletDiscoveryResponse,
   RenameAgentletDeviceBody,
 } from '@huabu/shared';
 
@@ -98,19 +97,6 @@ export async function listAcpAgentClis(
   return apiFetch<AcpAgentCliListResponse>(routes.acpAgentCli(target), {
     fallbackMessage: 'Failed to detect installed agent CLIs',
   });
-}
-
-export async function discoverAcpAgentlet(
-  agentletId: string,
-): Promise<AcpAgentletDiscoveryResponse> {
-  return apiFetch<AcpAgentletDiscoveryResponse>(
-    routes.acpAgentletDiscovery(agentletId),
-    {
-      method: 'POST',
-      json: {},
-      fallbackMessage: 'Failed to detect installed Agents',
-    },
-  );
 }
 
 // ── Profile CRUD ─────────────────────────────────────────────────────

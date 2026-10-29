@@ -41,6 +41,7 @@ const snapshot = {
   profiles: [profile],
   selectableProfileIds: [profile.id],
   connectedDevices: [],
+  knownDevices: [],
   agentlet: null,
   agentDefaults: { profileId: 'huabu', functionalModel: 'utility-only' },
 };
@@ -75,6 +76,20 @@ beforeEach(() => {
 });
 
 describe('browser-local recent conversation Agent', () => {
+  it('loads offline metadata without promoting it into runtime availability', async () => {
+    const device = { agentletId: 'offline', displayName: 'Office PC' };
+    listProfiles.mockResolvedValueOnce({
+      ...snapshot,
+      selectableProfileIds: [],
+      knownDevices: [device],
+    });
+    await useAcpProfilesStore.getState().refresh();
+    expect(useAcpProfilesStore.getState().knownDevices).toEqual([device]);
+    expect(useAcpProfilesStore.getState().connectedDevices).toEqual([]);
+    expect(useAcpProfilesStore.getState().selectableProfileIds).toEqual([]);
+    await useAcpProfilesStore.getState().refresh();
+    expect(useAcpProfilesStore.getState().knownDevices).toEqual([]);
+  });
   it('starts a post-mutation snapshot after an older polling GET finishes', async () => {
     let finishOld!: (value: typeof snapshot) => void;
     listProfiles.mockImplementationOnce(
@@ -143,7 +158,10 @@ describe('browser-local recent conversation Agent', () => {
       connectedAt: '2026-01-01T00:00:00.000Z',
       profileCount: 1,
     };
-    useAcpProfilesStore.setState({ connectedDevices: [device] });
+    useAcpProfilesStore.setState({
+      connectedDevices: [device],
+      knownDevices: [device],
+    });
     let finishPoll!: (value: unknown) => void;
     listProfiles.mockImplementationOnce(
       () =>
@@ -157,6 +175,9 @@ describe('browser-local recent conversation Agent', () => {
     finishPoll({ ...snapshot, connectedDevices: [device] });
     await poll;
     expect(useAcpProfilesStore.getState().connectedDevices[0].displayName).toBe(
+      'New name',
+    );
+    expect(useAcpProfilesStore.getState().knownDevices[0].displayName).toBe(
       'New name',
     );
     expect(renameDevice).toHaveBeenCalledWith('machine', {

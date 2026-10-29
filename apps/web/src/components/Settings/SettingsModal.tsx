@@ -34,11 +34,16 @@ type SettingsTab = SettingsTabId;
 interface TabDef {
   id: SettingsTab;
   /** i18n key for the tab label. */
-  labelKey: 'settings.general' | 'settings.agent' | 'settings.services';
+  labelKey:
+    | 'settings.general'
+    | 'settings.devicesAndAgents'
+    | 'settings.agentSettings'
+    | 'settings.services';
 }
 
 const TABS: TabDef[] = [
-  { id: 'agent', labelKey: 'settings.agent' },
+  { id: 'agent', labelKey: 'settings.devicesAndAgents' },
+  { id: 'agentSettings', labelKey: 'settings.agentSettings' },
   { id: 'services', labelKey: 'settings.services' },
   { id: 'general', labelKey: 'settings.general' },
 ];
@@ -53,7 +58,8 @@ interface SettingsModalProps {
  * narrow windows, and an independently scrollable content pane.
  *
  * Each tab renders its owned Settings surface:
- *  - **Agent** — Utility Agent, Built-In Pi setup, external Profiles, and behavior
+ *  - **Devices and Agents** — device connections and grouped Profiles
+ *  - **Agent settings** — Utility Agent, Built-In Pi, and behavior
  *  - **Services** — manifest-driven image, search, transcript, and OCR providers
  *  - **General** — application, canvas, input, and update preferences
  *
@@ -70,7 +76,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const requestedTab = useSettingsUiStore((s) => s.requestedTab);
   const clearRequestedTab = useSettingsUiStore((s) => s.clearRequestedTab);
   const [activeTab, setActiveTab] = useState<SettingsTab>(TABS[0].id);
-  const isAgentTab = activeTab === 'agent' || activeTab === 'builtIn';
+  const isAgentTab = activeTab === 'agentSettings' || activeTab === 'builtIn';
   const [externalAgentsNavigation, setExternalAgentsNavigation] =
     useState<ExternalAgentsNavigation | null>(null);
   const titleId = useId();
@@ -97,7 +103,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   }, [isOpen, requestedTab, clearRequestedTab]);
 
   useEffect(() => {
-    if (!isOpen && activeTab === 'builtIn') setActiveTab('agent');
+    if (!isOpen && activeTab === 'builtIn') setActiveTab('agentSettings');
   }, [isOpen, activeTab]);
 
   useEffect(() => {
@@ -109,7 +115,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   useEffect(() => {
     if (!isOpen) return;
     const targetTab = requestedTab ?? activeTab;
-    if (targetTab === 'agent') void acpInit();
+    if (targetTab === 'agent' || targetTab === 'agentSettings') void acpInit();
     if (targetTab === 'builtIn') {
       void llmInit();
     }
@@ -178,22 +184,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="animate-in fade-in zoom-in-95 border-edge-default bg-surface shadow-bottom relative flex h-[80dvh] max-h-160 w-full max-w-3xl flex-col overflow-hidden rounded-xl border duration-200 focus:outline-none sm:flex-row"
+        className="animate-in fade-in zoom-in-95 border-edge-default bg-surface text-fg-default shadow-bottom relative flex h-[80dvh] max-h-160 w-full max-w-3xl flex-col overflow-hidden rounded-xl border duration-200 focus:outline-none sm:flex-row"
       >
         {/* Left tab rail */}
         <nav
           aria-labelledby={titleId}
-          className="border-edge-default bg-sidebar grid w-full shrink-0 grid-cols-3 gap-0.5 border-b px-3 py-3 sm:flex sm:w-48 sm:flex-col sm:border-r sm:border-b-0"
+          className="border-edge-default bg-sidebar grid w-full shrink-0 grid-cols-2 gap-0.5 border-b px-3 py-3 sm:flex sm:w-48 sm:flex-col sm:border-r sm:border-b-0"
         >
           <h2
             id={titleId}
-            className="text-fg-default col-span-2 row-start-1 mb-2 flex h-7 shrink-0 items-center px-2 text-sm font-semibold"
+            className="text-fg-default row-start-1 mb-2 flex h-7 shrink-0 items-center px-2 text-sm font-semibold"
           >
             {t('settings.title')}
           </h2>
           {TABS.map(({ id, labelKey }) => {
             const active =
-              id === activeTab || (id === 'agent' && activeTab === 'builtIn');
+              id === activeTab ||
+              (id === 'agentSettings' && activeTab === 'builtIn');
             return (
               <Button
                 key={id}
@@ -220,7 +227,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
            * editable preferences. `__APP_VERSION__` is inlined at build
            * time from `apps/desktop/package.json` (see vite.config.ts).
            */}
-          <span className="text-fg-muted col-start-3 row-start-1 mb-2 self-center justify-self-end px-2 font-mono text-[11px] select-text sm:mt-auto sm:mb-0 sm:self-auto sm:pt-4">
+          <span className="text-fg-muted col-start-2 row-start-1 mb-2 self-center justify-self-end px-2 font-mono text-[11px] select-text sm:mt-auto sm:mb-0 sm:self-auto sm:pt-4">
             v{__APP_VERSION__}
           </span>
         </nav>
@@ -239,7 +246,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   title={t('settings.backToAgents')}
                   onClick={
                     activeTab === 'builtIn'
-                      ? () => setActiveTab('agent')
+                      ? () => setActiveTab('agentSettings')
                       : externalAgentsNavigation?.onBack
                   }
                 >
@@ -274,57 +281,53 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <GeneralSettings />
               </SettingSection>
             )}
+            {activeTab === 'agent' && (
+              <ExternalAgentsSettings
+                onNavigationChange={handleExternalAgentsNavigationChange}
+              />
+            )}
             {isAgentTab &&
               (activeTab === 'builtIn' ? (
                 <LLMSettings />
               ) : (
                 <>
-                  <div className="mb-4">
-                    <ExternalAgentsSettings
-                      onNavigationChange={handleExternalAgentsNavigationChange}
-                    />
-                  </div>
-                  {externalAgentsNavigation ? null : <AgentDefaultsSettings />}
-                  {externalAgentsNavigation ? null : (
-                    <>
-                      <SettingSection
-                        title={t('settings.agentBehavior')}
-                        collapsible
-                        defaultCollapsed
-                        keepMounted
+                  <AgentDefaultsSettings />
+                  <SettingSection
+                    title={t('settings.agentBehavior')}
+                    collapsible
+                    defaultCollapsed
+                    keepMounted
+                  >
+                    <AgentBehaviorSettings />
+                  </SettingSection>
+                  <SettingSection
+                    title={t('settings.externalAgentRuntime')}
+                    collapsible
+                    defaultCollapsed
+                    keepMounted
+                  >
+                    <ExternalAgentRuntimeSettings />
+                  </SettingSection>
+                  <SettingSection
+                    title={t('settings.builtInPi')}
+                    collapsible
+                    defaultCollapsed
+                    keepMounted
+                  >
+                    <SettingRow
+                      title={t('settings.builtInPiConfiguration')}
+                      description={t('settings.builtInPiChatSetup')}
+                    >
+                      <Button
+                        variant="outline"
+                        size="field"
+                        aria-label={t('settings.builtInPiConfigure')}
+                        onClick={() => setActiveTab('builtIn')}
                       >
-                        <AgentBehaviorSettings />
-                      </SettingSection>
-                      <SettingSection
-                        title={t('settings.externalAgentRuntime')}
-                        collapsible
-                        defaultCollapsed
-                        keepMounted
-                      >
-                        <ExternalAgentRuntimeSettings />
-                      </SettingSection>
-                      <SettingSection
-                        title={t('settings.builtInPi')}
-                        collapsible
-                        defaultCollapsed
-                        keepMounted
-                      >
-                        <SettingRow
-                          title={t('settings.builtInPiConfiguration')}
-                          description={t('settings.builtInPiChatSetup')}
-                        >
-                          <Button
-                            variant="outline"
-                            size="field"
-                            aria-label={t('settings.builtInPiConfigure')}
-                            onClick={() => setActiveTab('builtIn')}
-                          >
-                            {t('settings.configure')}
-                          </Button>
-                        </SettingRow>
-                      </SettingSection>
-                    </>
-                  )}
+                        {t('settings.configure')}
+                      </Button>
+                    </SettingRow>
+                  </SettingSection>
                 </>
               ))}
             {activeTab === 'services' && (

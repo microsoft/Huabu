@@ -54,6 +54,7 @@ import type {
 } from '@/api/acp';
 import type {
   AgentBinding,
+  AgentletDevice,
   AgentDefaults,
   AgentDefaultsResponse,
 } from '@huabu/shared';
@@ -95,6 +96,8 @@ interface AcpProfilesState {
   selectableProfileIds: string[];
   /** Active Agentlet control connections, sorted by the server. */
   connectedDevices: ConnectedAgentletDevice[];
+  /** Display-only device history; never used for runtime availability. */
+  knownDevices: AgentletDevice[];
   folderPickerAgentletId: string | null;
   /** Latest agentlet snapshot. `null` until the first fetch resolves. */
   agentlet: AcpAgentletStatus | null;
@@ -134,6 +137,7 @@ export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
   profiles: [],
   selectableProfileIds: [],
   connectedDevices: [],
+  knownDevices: [],
   folderPickerAgentletId: null,
   agentlet: null,
   agentDefaults: null,
@@ -239,6 +243,9 @@ export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
       connectedDevices: state.connectedDevices.map((device) =>
         device.agentletId === agentletId ? { ...device, ...saved } : device,
       ),
+      knownDevices: state.knownDevices.map((device) =>
+        device.agentletId === agentletId ? { ...device, ...saved } : device,
+      ),
     }));
   },
   refresh: async (options) => {
@@ -264,7 +271,10 @@ export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
           profiles: res.profiles,
           selectableProfileIds: res.selectableProfileIds,
           ...(namesRevision === deviceNamesRevision
-            ? { connectedDevices: res.connectedDevices }
+            ? {
+                connectedDevices: res.connectedDevices,
+                knownDevices: res.knownDevices ?? res.connectedDevices,
+              }
             : {}),
           folderPickerAgentletId: res.folderPickerAgentletId ?? null,
           agentlet: res.agentlet,
