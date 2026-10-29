@@ -19,6 +19,32 @@ type NodeBounds = {
 type ViewportSize = { width: number; height: number };
 type VisibleArea = ViewportSize & { x: number; y: number };
 
+export function getCanvasViewportCenter({
+  rfInstance,
+  canvasWrapper,
+  viewport,
+}: {
+  rfInstance: ReactFlowInstance | null;
+  canvasWrapper: HTMLElement | null;
+  viewport: Viewport | null;
+}): { x: number; y: number } | undefined {
+  if (rfInstance && canvasWrapper) {
+    const rect = canvasWrapper.getBoundingClientRect();
+    const area = getCanvasVisibleArea(canvasWrapper);
+    if (area.width > 0 && area.height > 0)
+      return rfInstance.screenToFlowPosition({
+        x: rect.left + area.x + area.width / 2,
+        y: rect.top + area.y + area.height / 2,
+      });
+  }
+  if (viewport && viewport.zoom > 0)
+    return {
+      x: (window.innerWidth / 2 - viewport.x) / viewport.zoom,
+      y: (window.innerHeight / 2 - viewport.y) / viewport.zoom,
+    };
+  return undefined;
+}
+
 export function getCanvasVisibleArea(wrapper: HTMLElement): VisibleArea {
   const style = wrapper instanceof Element ? getComputedStyle(wrapper) : null;
   const left =

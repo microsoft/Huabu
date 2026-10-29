@@ -17,6 +17,198 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem('huabu.language', 'en'));
 });
 
+test('Add Content brings an existing Space into the visible destination and selects its entry', async ({
+  page,
+}, testInfo) => {
+  const oldParent = await create(page, 'Bring old parent');
+  const destination = await create(page, 'Bring destination');
+  const created = await page.request.post(`/api/canvas/${oldParent}/children`, {
+    data: { title: 'Bring source' },
+  });
+  expect(created.ok()).toBe(true);
+  const source = await created.json();
+  const grandchild = await page.request.post(
+    `/api/canvas/${source.canvasId}/children`,
+    {
+      data: { title: 'Bring retained child' },
+    },
+  );
+  expect(grandchild.ok()).toBe(true);
+  const original = await (
+    await page.request.get(`/api/canvas/${source.canvasId}`)
+  ).json();
+  const seeded = await page.request.post(`/api/canvas/${destination}/execute`, {
+    data: {
+      commands: [
+        {
+          type: 'CREATE_NODES',
+          nodes: [
+            {
+              id: 'node-far',
+              nodeType: 'text',
+              position: { x: 20000, y: 20000 },
+              data: { content: 'Far away' },
+            },
+            {
+              id: 'node-center',
+              nodeType: 'note',
+              position: { x: 440, y: 250 },
+              size: { width: 400, height: 300 },
+              data: { content: 'Keep clear' },
+            },
+          ],
+        },
+      ],
+      originator: { source: 'ui', tabId: 'e2e-bring-space' },
+    },
+  });
+  expect(seeded.ok()).toBe(true);
+  await page.goto(`/canvas/${destination}`);
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute(
+    'aria-busy',
+    'false',
+  );
+  await expect
+    .poll(() =>
+      page.evaluate(async () => {
+        const path = '/src/store/canvasStore.ts';
+        const { default: store } = (await import(path)) as typeof CanvasStore;
+        return !!store.getState().rfInstance;
+      }),
+    )
+    .toBe(true);
+  await page.evaluate(async () => {
+    const path = '/src/store/canvasStore.ts';
+    const { default: store } = (await import(path)) as typeof CanvasStore;
+    const viewport = { x: 0, y: 0, zoom: 1 };
+    const instance = store.getState().rfInstance;
+    if (!instance) throw new Error('Canvas viewport is missing');
+    await instance.setViewport(viewport);
+    store.getState().setViewport(viewport);
+  });
+  await page.getByRole('button', { name: 'Add Content', exact: true }).click();
+  await expect(
+    page.getByRole('menuitem', { name: 'Add Space Shortcut', exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole('menuitem', { name: 'Move existing Space here', exact: true })
+    .click();
+  const picker = page.getByRole('dialog', {
+    name: 'Move existing Space here',
+    exact: true,
+  });
+  await picker.getByRole('textbox').fill('Bring source');
+  await expect(
+    picker.getByRole('button', { name: 'Bring source', exact: true }),
+  ).toBeEnabled();
+  await page.screenshot({
+    path: testInfo.outputPath('bring-space-picker-desktop.png'),
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(picker.locator('..')).toHaveCSS('max-width', '358px');
+  await expect
+    .poll(async () => {
+      const box = await picker.boundingBox();
+      return box ? box.x + box.width : Infinity;
+    })
+    .toBeLessThanOrEqual(378);
+  const bounds = await picker.boundingBox();
+  if (!bounds) throw new Error('Source picker is missing');
+  expect(bounds.x).toBeGreaterThanOrEqual(12);
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(378);
+  await page.screenshot({
+    path: testInfo.outputPath('bring-space-picker-mobile.png'),
+  });
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.route(
+    `**/api/canvas/${source.canvasId}/parent`,
+    (route) =>
+      route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ message: 'Move test failure' }),
+      }),
+    { times: 1 },
+  );
+  const sourceChoice = picker.getByRole('button', {
+    name: 'Bring source',
+    exact: true,
+  });
+  await sourceChoice.click();
+  await expect(picker.getByRole('alert')).toHaveText('Move test failure');
+  await expect(
+    page.getByText('Move test failure', { exact: true }),
+  ).toHaveCount(1);
+  await expect(sourceChoice).toBeEnabled();
+  let releaseMove!: () => void;
+  const moveGate = new Promise<void>((resolve) => {
+    releaseMove = resolve;
+  });
+  await page.route(`**/api/canvas/${source.canvasId}/parent`, async (route) => {
+    await moveGate;
+    await route.continue();
+  });
+  const responsePromise = page.waitForResponse(
+    (response) =>
+      response.url().endsWith(`/api/canvas/${source.canvasId}/parent`) &&
+      response.request().method() === 'PATCH',
+  );
+  await picker
+    .getByRole('button', { name: 'Bring source', exact: true })
+    .click();
+  await expect(sourceChoice).toBeVisible();
+  await expect(sourceChoice).toBeDisabled();
+  await expect(picker.getByRole('status')).toHaveText('Moving Space…');
+  await expect(picker.getByRole('textbox')).toHaveValue('Bring source');
+  await page.screenshot({ path: testInfo.outputPath('bring-space-busy.png') });
+  releaseMove();
+  const response = await responsePromise;
+  expect(response.ok()).toBe(true);
+  expect(response.request().postDataJSON()).toMatchObject({
+    parentSpaceId: destination,
+    expectedParentSpaceId: oldParent,
+    position: { x: expect.any(Number), y: expect.any(Number) },
+  });
+  const moved = await response.json();
+  await expect(picker).toBeHidden();
+  const card = page.locator(
+    `.react-flow__node[data-id="${moved.parentEntryNodeId}"]`,
+  );
+  await expect(card).toHaveClass(/selected/);
+  await expect(card).toBeInViewport({ ratio: 1 });
+  await expect(page).toHaveURL(new RegExp(`/canvas/${destination}$`));
+  const cardBounds = await card.boundingBox();
+  const noteBounds = await page
+    .locator('.react-flow__node[data-id="node-center"]')
+    .boundingBox();
+  if (!cardBounds || !noteBounds) throw new Error('Placement bounds missing');
+  expect(
+    cardBounds.x + cardBounds.width <= noteBounds.x ||
+      cardBounds.x >= noteBounds.x + noteBounds.width ||
+      cardBounds.y + cardBounds.height <= noteBounds.y ||
+      cardBounds.y >= noteBounds.y + noteBounds.height,
+  ).toBe(true);
+  await page.screenshot({
+    path: testInfo.outputPath('bring-space-result.png'),
+  });
+  const after = await (
+    await page.request.get(`/api/canvas/${source.canvasId}`)
+  ).json();
+  const { canvases }: { canvases: CanvasSummary[] } = await (
+    await page.request.get('/api/canvas')
+  ).json();
+  expect(
+    canvases.find((space) => space.canvasId === source.canvasId)?.parentSpaceId,
+  ).toBe(destination);
+  expect(after.state).toEqual(original.state);
+  const previous = await (
+    await page.request.get(`/api/canvas/${oldParent}`)
+  ).json();
+  expect(previous.state.nodes).not.toContainEqual(
+    expect.objectContaining({ id: source.parentEntryNodeId }),
+  );
+});
+
 test('Home moves an existing Space subtree and the current Space menu promotes it without changing content', async ({
   page,
 }, testInfo) => {
@@ -250,7 +442,7 @@ test('Home moves an existing Space subtree and the current Space menu promotes i
 
 test('cancelling child-Space deletion preserves separately selected edges', async ({
   page,
-}) => {
+}, testInfo) => {
   const parent = await create(page, 'Guarded delete parent');
   const response = await page.request.post(`/api/canvas/${parent}/children`, {
     data: { title: 'Guarded delete child' },
@@ -311,10 +503,26 @@ test('cancelling child-Space deletion preserves separately selected edges', asyn
   }, child.parentEntryNodeId);
   await page.keyboard.press('Backspace');
   const dialog = page.getByRole('dialog', {
-    name: 'Delete Space?',
+    name: 'Delete “Guarded delete child”?',
     exact: true,
   });
   await expect(dialog).toBeVisible();
+  await expect(
+    dialog.getByText('Guarded delete child', { exact: true }),
+  ).toHaveCount(0);
+  await expect(dialog).not.toContainText('shortcuts');
+  await expect(dialog).toContainText(
+    'All contents will be permanently deleted.',
+  );
+  await page.screenshot({
+    path: testInfo.outputPath('delete-space-desktop.png'),
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(dialog).toHaveCSS('max-width', '342px');
+  await page.screenshot({
+    path: testInfo.outputPath('delete-space-mobile.png'),
+  });
+  await page.setViewportSize({ width: 1280, height: 800 });
   await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(dialog).not.toBeVisible();
   const retained = await page.evaluate(async () => {
@@ -416,7 +624,7 @@ test('leaves a deleted current Space and keeps the partial-cleanup error visible
     .getByRole('menuitem', { name: 'Delete Space', exact: true })
     .click();
   const dialog = page.getByRole('dialog', {
-    name: 'Delete Space?',
+    name: 'Delete “Partial cleanup”?',
     exact: true,
   });
   await dialog
@@ -428,7 +636,7 @@ test('leaves a deleted current Space and keeps the partial-cleanup error visible
   ).toBeVisible();
 });
 
-test('change-parent dialog initializes from metadata arriving after opening', async ({
+test('change-parent menu waits for metadata before opening', async ({
   page,
 }) => {
   const root = await create(page, 'Review root');
@@ -449,10 +657,14 @@ test('change-parent dialog initializes from metadata arriving after opening', as
   });
   await page.goto(`/canvas/${child}`);
   await page.getByRole('button', { name: 'Space menu', exact: true }).click();
-  await page
-    .getByRole('menuitem', { name: 'Move into another Space', exact: true })
-    .click();
+  const moveItem = page.getByRole('menuitem', {
+    name: 'Move into another Space',
+    exact: true,
+  });
+  await expect(moveItem).toBeDisabled();
   release();
+  await expect(moveItem).toBeEnabled();
+  await moveItem.click();
   const dialog = page.getByRole('dialog', {
     name: 'Move Review child',
     exact: true,

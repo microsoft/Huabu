@@ -4,22 +4,26 @@
 import { z } from 'zod';
 
 const spaceId = z.string().regex(/^[a-zA-Z0-9_-]+$/);
+const entryPositionSchema = z
+  .object({ x: z.number().finite(), y: z.number().finite() })
+  .strict();
 export const spaceHierarchyParamsSchema = z.object({ canvasId: spaceId });
 export const spaceParentBodySchema = z
   .object({
     parentSpaceId: spaceId.nullable(),
     expectedParentSpaceId: spaceId.nullable(),
+    position: entryPositionSchema.optional(),
   })
-  .strict();
+  .strict()
+  .refine((body) => !body.position || body.parentSpaceId !== null, {
+    message: 'A position requires a parent Space',
+  });
 export type SpaceParentBody = z.infer<typeof spaceParentBodySchema>;
 
 export const createChildSpaceBodySchema = z
   .object({
     title: z.string().trim().min(1).max(500),
-    position: z
-      .object({ x: z.number().finite(), y: z.number().finite() })
-      .strict()
-      .optional(),
+    position: entryPositionSchema.optional(),
   })
   .strict();
 export type CreateChildSpaceBody = z.infer<typeof createChildSpaceBodySchema>;

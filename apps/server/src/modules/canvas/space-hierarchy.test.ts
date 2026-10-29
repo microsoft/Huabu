@@ -619,6 +619,69 @@ describe('Space ownership', () => {
       await app.close();
     }
   });
+  it('moves an existing Space to explicit coordinates and removes its old entry', async () => {
+    const child = await createChildSpace('root', 'Child');
+    await storage.createSpace('destination', 'Destination');
+    const app = Fastify();
+    registerSpaceHierarchyRoutes(app);
+    try {
+      const position = { x: -123.5, y: 456.25 };
+      for (const invalid of [
+        { x: '1', y: 0 },
+        { x: null, y: 0 },
+        { x: 0, y: 0, z: 1 },
+      ]) {
+        const response = await app.inject({
+          method: 'PATCH',
+          url: `/${child.canvasId}/parent`,
+          payload: {
+            parentSpaceId: 'destination',
+            expectedParentSpaceId: 'root',
+            position: invalid,
+          },
+        });
+        expect(response.statusCode).toBe(400);
+      }
+      const invalidPromotion = await app.inject({
+        method: 'PATCH',
+        url: `/${child.canvasId}/parent`,
+        payload: {
+          parentSpaceId: null,
+          expectedParentSpaceId: 'root',
+          position,
+        },
+      });
+      expect(invalidPromotion.statusCode).toBe(400);
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/${child.canvasId}/parent`,
+        payload: {
+          parentSpaceId: 'destination',
+          expectedParentSpaceId: 'root',
+          position,
+        },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(
+        (await storage.space('destination').read())?.state.nodes,
+      ).toContainEqual(
+        expect.objectContaining({
+          id: response.json().parentEntryNodeId,
+          position,
+        }),
+      );
+      expect(
+        (await storage.space('root').read())?.state.nodes,
+      ).not.toContainEqual(
+        expect.objectContaining({ id: child.parentEntryNodeId }),
+      );
+      expect((await storage.space(child.canvasId).read())?.parentSpaceId).toBe(
+        'destination',
+      );
+    } finally {
+      await app.close();
+    }
+  });
   it('places the canonical child entry at the requested canvas coordinates', async () => {
     const app = Fastify();
     registerSpaceHierarchyRoutes(app);

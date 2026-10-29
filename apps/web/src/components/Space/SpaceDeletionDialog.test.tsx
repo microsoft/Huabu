@@ -29,7 +29,8 @@ vi.mock('react-i18next', () => ({
   initReactI18next: { type: '3rdParty', init: vi.fn() },
   useTranslation: () => ({ t: translate }),
 }));
-const translate = (key: string) => key;
+const translate = (key: string, values?: Record<string, unknown>) =>
+  values ? `${key} ${JSON.stringify(values)}` : key;
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 let host: HTMLDivElement;
 let root: Root;
@@ -76,6 +77,46 @@ async function remove() {
   if (!button) throw new Error('Missing delete action');
   await act(async () => button.click());
 }
+
+it('names the target only in the title and summarizes descendant deletion', () => {
+  const dialog = document.querySelector('[role="dialog"]');
+  expect(dialog?.querySelector('h3')?.textContent).toBe(
+    'spaceHierarchy.deleteNamedTitle {"name":"Parent"}',
+  );
+  expect(dialog?.textContent?.match(/Parent/g)).toHaveLength(1);
+  expect(dialog?.textContent).toContain(
+    'spaceHierarchy.deleteDescendants {"count":1}',
+  );
+  expect(dialog?.textContent).toContain(
+    'spaceHierarchy.deleteCount {"count":2}',
+  );
+  expect(dialog?.querySelector('ul')).toBeNull();
+  expect(dialog?.textContent).not.toContain('spaceHierarchy.linkedSpacesKept');
+});
+
+it('shows no descendant summary for an untitled Space without children', async () => {
+  vi.mocked(getSpaceDeletionPreview).mockResolvedValueOnce({
+    token: 'leaf-token',
+    spaces: [{ canvasId: 'leaf', title: null }],
+  });
+  await act(async () =>
+    root.render(
+      <SpaceDeletionDialog
+        canvasId="leaf"
+        onClose={vi.fn()}
+        onDeleted={onDeleted}
+      />,
+    ),
+  );
+  const dialog = document.querySelector('[role="dialog"]');
+  expect(dialog?.querySelector('h3')?.textContent).toBe(
+    'spaceHierarchy.deleteNamedTitle {"name":"canvasList.untitled"}',
+  );
+  expect(dialog?.textContent).not.toContain('spaceHierarchy.deleteDescendants');
+  expect(dialog?.textContent).toContain(
+    'spaceHierarchy.deleteCount {"count":1}',
+  );
+});
 
 it.each([['child'], ['child', 'parent']])(
   'reconciles confirmed deletions without claiming success: %j',

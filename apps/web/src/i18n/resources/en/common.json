@@ -689,6 +689,8 @@
     "activationInProgress": "Another Home folder is still opening. Please wait for it to finish."
   },
   "spaceHierarchy": {
+    "bring": "Move existing Space here",
+    "alreadyChild": "Already in this Space",
     "collectAction": "Collect into child Space",
     "breadcrumb": "Space path",
     "ancestors": "Parent Spaces",
@@ -710,12 +712,12 @@
     "deleteEntrySeparately": "Delete child Spaces individually with confirmation before deleting this selection.",
     "ownershipUnavailable": "Space ownership is not available yet. Refreshing; retry once it has loaded.",
     "entryProtected": "This change would remove or retarget a child Space entry. Use Delete Space or Move into another Space instead.",
-    "deleteWarning": "Contents will be permanently deleted. This cannot be undone.",
+    "deleteNamedTitle": "Delete “{{name}}”?",
+    "deleteWarning": "All contents will be permanently deleted. This cannot be undone.",
     "deleteCount_one": "Delete Space",
     "deleteCount_other": "Delete {{count}} Spaces",
     "deleteDescendants_one": "Also deletes {{count}} nested Space",
     "deleteDescendants_other": "Also deletes {{count}} nested Spaces",
-    "linkedSpacesKept": "Spaces linked only by shortcuts are kept.",
     "backTo": "Back to {{name}}",
     "failed": "Space operation failed",
     "workspaceChanged": "Workspace changed. Please retry in the current Workspace."

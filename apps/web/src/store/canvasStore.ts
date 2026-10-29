@@ -96,7 +96,7 @@ import {
   writeDragDecision,
 } from '@/handler/snap/snapSession';
 import { getElectronBridge } from '@/hooks/useElectron';
-import { getCanvasVisibleArea } from '@/utils/canvasViewport';
+import { getCanvasViewportCenter } from '@/utils/canvasViewport';
 import {
   desktopStorageKey,
   readApplicationPreference,
@@ -174,7 +174,6 @@ import type {
   CanvasNodeMeasuredHeightUpdate,
   CanvasNodeType,
   CanvasViewport,
-  Point,
   RecentAction,
   WireSelectionNode,
 } from '@huabu/shared';
@@ -2251,22 +2250,9 @@ const useCanvasStore = create<RFState>()(
           return;
         }
       }
-      const { rfInstance, canvasWrapper, viewport } = get();
       // Fullscreen Preview unmounts Canvas; retain a nearby placement until
       // the queued reveal can run against the restored, unobscured viewport.
-      let viewportCenter: Point | undefined = viewport
-        ? viewportCentreOf(viewport)
-        : undefined;
-      if (rfInstance && canvasWrapper) {
-        const rect = canvasWrapper.getBoundingClientRect();
-        const area = getCanvasVisibleArea(canvasWrapper);
-        if (area.width > 0 && area.height > 0) {
-          viewportCenter = rfInstance.screenToFlowPosition({
-            x: rect.left + area.x + area.width / 2,
-            y: rect.top + area.y + area.height / 2,
-          });
-        }
-      }
+      const viewportCenter = getCanvasViewportCenter(get());
       const uiState: UiResolverState = {
         nodes: get().nodes,
         edges: get().edges,

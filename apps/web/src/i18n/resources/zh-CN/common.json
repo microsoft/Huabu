@@ -689,6 +689,8 @@
     "activationInProgress": "另一个主目录仍在打开，请等待其完成。"
   },
   "spaceHierarchy": {
+    "bring": "移入已有空间",
+    "alreadyChild": "已在当前空间中",
     "collectAction": "收纳为子 Space",
     "breadcrumb": "Space 路径",
     "ancestors": "上级 Space",
@@ -710,12 +712,12 @@
     "deleteEntrySeparately": "请先逐个确认删除子 Space，再删除这组选中内容。",
     "ownershipUnavailable": "Space 归属信息尚不可用，正在刷新；请加载完成后重试。",
     "entryProtected": "此操作会移除或改变子 Space 入口。请使用“删除 Space”或“移入其他 Space”。",
-    "deleteWarning": "内容将被永久删除，无法撤销。",
+    "deleteNamedTitle": "删除「{{name}}」？",
+    "deleteWarning": "其中的所有内容将被永久删除，无法撤销。",
     "deleteCount_one": "删除 Space",
     "deleteCount_other": "删除 {{count}} 个 Space",
-    "deleteDescendants_one": "同时删除 {{count}} 个子 Space",
-    "deleteDescendants_other": "同时删除 {{count}} 个子 Space",
-    "linkedSpacesKept": "仅通过快捷方式关联的 Space 会保留。",
+    "deleteDescendants_one": "包含 {{count}} 个子空间，将一并删除。",
+    "deleteDescendants_other": "包含 {{count}} 个子空间，将一并删除。",
     "backTo": "返回 {{name}}",
     "failed": "Space 操作失败",
     "workspaceChanged": "工作区已切换，请在当前工作区重试。"

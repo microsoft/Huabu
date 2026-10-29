@@ -390,6 +390,11 @@ describe('NodeToolbar', () => {
 
     act(() => menuTrigger?.click());
 
+    expect(
+      [...document.querySelectorAll('[role="menuitem"]')].some((item) =>
+        item.textContent?.includes('spaceHierarchy.bring'),
+      ),
+    ).toBe(true);
     const previewAction = Array.from(
       document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
     ).find((button) => button.textContent?.includes('spacePreview.add'));
