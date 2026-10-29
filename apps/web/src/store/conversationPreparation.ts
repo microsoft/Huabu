@@ -115,6 +115,7 @@ export function resolveConversationPreparation(
   return {
     binding,
     realized: !!execution,
+    agentletId: execution?.agentletId,
     editable,
     ready:
       binding.kind === 'internal' || !!execution || state.locked[key] === false,

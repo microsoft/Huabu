@@ -3,6 +3,7 @@
 
 import { noop, type CommandDefinition } from './types.js';
 import { createId, type CanvasCommand } from '../../index.js';
+import { isFileReference } from '../../utils/file-reference.js';
 import { projectAgentNodeEditableData } from '../agentNodeOwnership.js';
 import { materializeAutoHeight } from '../height/materialize.js';
 import { getHeightPolicy } from '../height/policy.js';
@@ -42,6 +43,15 @@ const createNodes: CommandDefinition<Cmd> = {
 
   handler(cmd, state) {
     if (cmd.nodes.length === 0) return noop(state);
+    if (
+      cmd.nodes.some(
+        (node) =>
+          node.nodeType === 'fileReference' &&
+          (!isFileReference(node.data?.fileReference) ||
+            ['content', 'src'].some((key) => key in (node.data ?? {}))),
+      )
+    )
+      return noop(state, 'invalid-target');
     if (
       cmd.nodes.some(
         (node) =>

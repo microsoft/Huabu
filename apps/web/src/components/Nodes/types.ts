@@ -17,6 +17,7 @@ import type {
   SpacePreviewNodeData as SharedSpacePreviewNodeData,
   SketchNodeData as SharedSketchNodeData,
   QuestionNodeData as SharedQuestionNodeData,
+  FileReferenceNodeData,
 } from '@huabu/shared';
 import type { Node } from '@xyflow/react';
 
@@ -61,6 +62,7 @@ export type CanvasQuestionNodeData = SharedQuestionNodeData & {
 
 /** Union type for all canvas node data */
 export type CanvasNodeData =
+  | (FileReferenceNodeData & Record<string, unknown>)
   | CanvasNoteNodeData
   | CanvasTextNodeData
   | CanvasWebNodeData

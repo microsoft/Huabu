@@ -16,6 +16,8 @@ The recent-conversation GET includes its Space existence check inside that same 
 
 ## 2. Disk Layout
 
+`fileReference` nodes retain only device/path/display metadata in structural state and use a frontmatter-only `.md` sidecar for labels. External bytes are never stored as node content or artifacts; copy and bundle export preserve only the reference. Source/body mutations are rejected for this type. See [connected-device files](./device-files.md).
+
 Space ownership is logical metadata, not directory nesting. Ordinary Space records optionally store `parentSpaceId` and `parentEntryNodeId`; missing/null fields mean top-level. SQLite and PostgreSQL add `parent_space_id` / `parent_entry_node_id` and a Workspace/parent index in migration v2. The collection's trusted `setParent` primitive persists both fields, while the canvas hierarchy service owns existence, cycle, and canonical-entry checks under its Workspace-leased process lock. Ordinary structural writes preserve stored hierarchy instead of accepting it from clients. Disk summaries capture hierarchy in the existing directory-index scan without extra record reads or write-back. Imported single-Space bundles clear ownership and remain top-level; they do not recursively import children. See [Space ownership and lifecycle](./space-preview.md#space-ownership-and-lifecycle) for API, navigation, deletion, and concurrency guarantees.
 
 ```

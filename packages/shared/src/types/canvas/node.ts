@@ -14,6 +14,7 @@ import type {
   AgentNodeLaunchOverrides,
 } from '../api/agent-node.js';
 import type { AgentIcon } from '../api/agent-profile.js';
+import type { FileReference } from '../api/device-files.js';
 import type { InkResourceBinding } from '../api/ink-sigil.js';
 import type { InteractiveViewDefinitionV1 } from '../api/interactive-view.js';
 
@@ -37,6 +38,7 @@ export const CANVAS_NODE_TYPES = [
   'spacePreview',
   'sketch',
   'question',
+  'fileReference',
 ] as const;
 export type CanvasNodeType = (typeof CANVAS_NODE_TYPES)[number];
 
@@ -807,7 +809,13 @@ export interface QuestionNodeData extends BaseNodeData {
  * Discriminated union of all node data types.
  * Use the 'type' field to narrow down to specific node type.
  */
+export interface FileReferenceNodeData extends BaseNodeData {
+  type: 'fileReference';
+  fileReference: FileReference;
+}
+
 export type NodeData =
+  | FileReferenceNodeData
   | NoteNodeData
   | TextNodeData
   | WebNodeData

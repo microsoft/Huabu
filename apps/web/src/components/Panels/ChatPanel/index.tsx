@@ -808,11 +808,11 @@ export const ChatPanel = ({
     agentBinding.kind === 'external'
       ? acpProfiles.find((profile) => profile.id === agentBinding.profileId)
       : undefined;
-  const selectedExternalDevice = selectedExternalProfile
-    ? resolveConnectedDevice(
-        selectedExternalProfile.agentletId,
-        connectedDevices,
-      )
+  const directoryAgentletId = preparation.realized
+    ? preparation.agentletId
+    : selectedExternalProfile?.agentletId;
+  const selectedExternalDevice = directoryAgentletId
+    ? resolveConnectedDevice(directoryAgentletId, connectedDevices)
     : undefined;
   const workingDirectoryOverride = preparation.workingDirectoryOverride;
   const showWorkingDirectoryOverride =
@@ -1137,7 +1137,7 @@ export const ChatPanel = ({
                   />
                   {showWorkingDirectoryOverride ? (
                     <WorkingDirectoryOverride
-                      agentletId={selectedExternalProfile?.agentletId}
+                      agentletId={selectedExternalDevice?.agentletId}
                       deviceName={selectedExternalDevice?.displayName}
                       profileWorkingDirPath={
                         selectedExternalProfile?.workingDirPath ?? ''

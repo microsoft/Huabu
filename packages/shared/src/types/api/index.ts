@@ -42,3 +42,4 @@ export * from './interactive-view.js';
 export * from './deployment.js';
 export * from './agent-node.js';
 export * from './service-package.js';
+export * from './device-files.js';

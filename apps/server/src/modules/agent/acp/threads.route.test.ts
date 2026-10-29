@@ -158,6 +158,7 @@ describe('ACP cached capability route', () => {
           alias: 'Removed Profile',
         },
         workingDirPath: '/frozen/project',
+        agentletId: 'machine',
       },
     });
     expect(mocks.create).not.toHaveBeenCalled();

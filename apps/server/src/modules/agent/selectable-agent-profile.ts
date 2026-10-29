@@ -29,7 +29,11 @@ function getConnectedProfileRegistry(): AgentProfileRegistryPort | null {
     listSelectableProfileIds: () =>
       registry
         .listProfiles()
-        .filter((profile) => resolveConnectedAgentletId(profile.agentletId))
+        .filter(
+          (profile) =>
+            profile.visible !== false &&
+            resolveConnectedAgentletId(profile.agentletId),
+        )
         .map((profile) => profile.id),
   };
 }

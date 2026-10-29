@@ -36,6 +36,7 @@ import { resolveArtifactUrl } from '@/api/artifact';
 import { cn } from '@/components/Common/cn';
 import { Loading } from '@/components/Common/Loading';
 import { AudioNode } from '@/components/Nodes/audio/AudioNode';
+import { FileReferenceNode } from '@/components/Nodes/fileReference/FileReferenceNode';
 import {
   FrameZoomController,
   FrameZoomProvider,
@@ -161,6 +162,7 @@ const mainToolbarPosition: React.CSSProperties = {
 };
 
 const nodeTypes = {
+  fileReference: FileReferenceNode,
   image: ImageNode,
   text: TextNode,
   note: NoteNode,
@@ -240,6 +242,7 @@ const FrameFitPreviewOverlay: React.FC<{
 
 /** Node types that support expand-on-double-click. */
 const EXPANDABLE_TYPES = new Set([
+  'fileReference',
   'image',
   'video',
   'web',
@@ -1195,6 +1198,17 @@ const CanvasContent: React.FC<CanvasProps> = ({
         )
           moveNoteExcerpt({ sourceNodeId, sourceContentAfterMove, newNote });
         else addNode(newNote);
+      } else if (payload.kind === 'fileReference') {
+        addNode({
+          nodeType: 'fileReference',
+          placementPoint: dropPos,
+          data: {
+            fileReference: payload.data.fileReference,
+            label: payload.data.label,
+            origin: payload.origin,
+          },
+          size: { width: 400, height: 180 },
+        });
       } else {
         const { src, label } = payload.data;
         const doAdd = (width: number, height: number) =>

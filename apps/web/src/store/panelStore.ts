@@ -5,6 +5,14 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
 interface PanelState {
+  leftMode: 'layers' | 'files';
+  filesLocation: { canvasId: string; agentletId: string; path: string } | null;
+  openFiles: (location: {
+    canvasId: string;
+    agentletId: string;
+    path: string;
+  }) => void;
+  setLeftMode: (mode: 'layers' | 'files') => void;
   /**
    * Collapse state for the left (layer) side panel.
    *
@@ -61,6 +69,11 @@ interface PanelState {
 export const usePanelStore = create<PanelState>()(
   persist(
     (set) => ({
+      leftMode: 'layers',
+      filesLocation: null,
+      openFiles: (filesLocation) =>
+        set({ filesLocation, leftMode: 'files', isLeftCollapsed: false }),
+      setLeftMode: (leftMode) => set({ leftMode }),
       isLeftCollapsed: true,
       setLeftCollapsed: (collapsed) => set({ isLeftCollapsed: collapsed }),
       toggleLeftPanel: () =>
@@ -70,6 +83,7 @@ export const usePanelStore = create<PanelState>()(
       requestFocusCanvasSearch: () =>
         set((s) => ({
           isLeftCollapsed: false,
+          leftMode: 'layers',
           focusCanvasSearchRequest: (s.focusCanvasSearchRequest ?? 0) + 1,
         })),
 

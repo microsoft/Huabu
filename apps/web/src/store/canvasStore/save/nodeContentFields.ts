@@ -53,6 +53,7 @@ export const NODE_CONTENT_KEYS: ReadonlySet<string> = new Set([
  * inline in structural state.
  */
 export const MD_BACKED_NODE_TYPES: ReadonlySet<string> = new Set([
+  'fileReference',
   'note',
   'text',
   'web',

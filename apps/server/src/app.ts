@@ -15,6 +15,7 @@ import { fastify, type FastifyBaseLogger } from 'fastify';
 import { getConnectionToken } from './connection-token.js';
 import { getDataDir } from './data-dir.js';
 import { setHostServerPort } from './host-port.js';
+import deviceFilesRoutes from './modules/agent/acp/device-files.route.js';
 import { createHarnessDiscoveryRoutes } from './modules/agent/acp/harness-discovery.route.js';
 import { registerHarnessProfileDiscovery } from './modules/agent/acp/harness-profile-discovery.js';
 import {
@@ -367,6 +368,7 @@ app.addHook('onListen', async () => {
 // (M3). See modules/agent/acp/profile-cache-port.ts.
 installAcpProfileCachePort();
 app.register(acpProfilesRoutes, { prefix: '/api/acp' });
+app.register(deviceFilesRoutes, { prefix: '/api/acp' });
 app.register(agentDefaultsRoutes, { prefix: '/api/agent/defaults' });
 app.register(acpAgentletRoutes, { prefix: '/api/acp' });
 app.register(acpAgentCliRoutes, { prefix: '/api/acp' });
