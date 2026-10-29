@@ -27,7 +27,8 @@ vi.mock('react-router-dom', () => ({ useNavigate: () => mocks.navigate }));
 vi.mock('react-i18next', () => ({
   initReactI18next: { type: '3rdParty', init: vi.fn() },
   useTranslation: () => ({
-    t: (key: string, options?: { name?: string }) => options?.name ?? key,
+    t: (key: string, options?: { name?: string }) =>
+      options?.name ? `${key}: ${options.name}` : key,
   }),
 }));
 vi.mock('@/store/canvasStore', () => ({
@@ -71,7 +72,12 @@ let host: HTMLDivElement;
 beforeEach(() => {
   vi.clearAllMocks();
   useRemoteConversationOwnerStore.setState({ entries: {} });
-  useWorkspaceStore.setState({ workspaceId: 'workspace' });
+  useWorkspaceStore.setState({
+    workspaceId: 'workspace',
+    spaceTitles: {},
+    isReady: true,
+    isSyncing: false,
+  });
   mocks.getOwner.mockResolvedValue(owner);
   host = document.createElement('div');
   document.body.append(host);
@@ -89,6 +95,29 @@ async function render() {
     );
   });
 }
+
+it('centers loading feedback with an inline information icon and no Retry', async () => {
+  let resolveOwner!: (value: typeof owner) => void;
+  mocks.getOwner.mockReturnValueOnce(
+    new Promise<typeof owner>((resolve) => {
+      resolveOwner = resolve;
+    }),
+  );
+  await render();
+  const status = host.querySelector('[role="status"]');
+  expect(status?.classList.contains('grid-rows-[1fr_auto_2fr]')).toBe(true);
+  expect(status?.querySelector('p')?.textContent).toBe(
+    'remoteConversation.loading',
+  );
+  expect(
+    status
+      ?.querySelector('p')
+      ?.previousElementSibling?.querySelector('svg.lucide-info'),
+  ).not.toBeNull();
+  expect(status?.querySelector('button')).toBeNull();
+  await act(async () => resolveOwner(owner));
+  expect(host.querySelector('[data-chat-thread="thread"]')).not.toBeNull();
+});
 
 it('opens only after validating the owner and preserves the original session address', async () => {
   await render();
@@ -167,7 +196,7 @@ it('refuses a replacement owner rather than silently retargeting the tab', async
   expect(mocks.chat).not.toHaveBeenCalled();
 });
 
-it('revalidates a displayed conversation on focus and removes stale Chat after deletion', async () => {
+it('shows a neutral missing-owner status with the remembered Space name and no Retry', async () => {
   await render();
   expect(host.querySelector('[data-chat-thread="thread"]')).not.toBeNull();
   mocks.getOwner.mockRejectedValueOnce(
@@ -177,14 +206,59 @@ it('revalidates a displayed conversation on focus and removes stale Chat after d
     window.dispatchEvent(new Event('focus'));
   });
   expect(host.querySelector('[data-chat-thread]')).toBeNull();
-  expect(host.querySelector('[role="alert"]')?.textContent).toContain(
-    'remoteConversation.sourceNodeUnavailable',
+  expect(host.querySelector('[role="status"]')?.textContent).toBe(
+    'remoteConversation.sourceNodeMissing',
   );
+  expect(
+    host.querySelector('[role="status"] [aria-hidden] svg'),
+  ).not.toBeNull();
+  expect(host.querySelector('[role="alert"]')).toBeNull();
+  expect(host.textContent).not.toContain('remoteConversation.retry');
+  expect(host.querySelector('button')?.textContent).toBe('Child Space');
 });
 
 it.each([
-  ['conversation_owner_missing', 'sourceNodeUnavailable'],
-  ['missing_node_content', 'sourceNodeUnavailable'],
+  ['Saved Space', 'Saved Space'],
+  [null, 'spacePreview.untitledSpace'],
+  [undefined, 'child'],
+])(
+  'uses the cached Space title %s before an owner has been loaded',
+  async (title, expected) => {
+    if (title !== undefined)
+      useWorkspaceStore.getState().setSpaceTitle('child', title);
+    mocks.getOwner.mockRejectedValueOnce(
+      new ApiError(
+        404,
+        { code: 'conversation_owner_missing' },
+        'Owner missing',
+      ),
+    );
+    await render();
+    expect(host.querySelector('[role="status"] p')?.textContent).toBe(
+      'remoteConversation.sourceNodeMissing',
+    );
+    expect(host.querySelector('button')?.textContent).toBe(expected);
+    expect(host.textContent).not.toContain('remoteConversation.retry');
+    expect(mocks.chat).not.toHaveBeenCalled();
+  },
+);
+
+it('can recover a missing owner on the next poll without a Retry button', async () => {
+  vi.useFakeTimers();
+  await render();
+  mocks.getOwner.mockRejectedValueOnce(
+    new ApiError(404, { code: 'conversation_owner_missing' }, 'Owner missing'),
+  );
+  await act(async () => vi.advanceTimersByTimeAsync(5000));
+  expect(host.querySelector('[role="status"]')).not.toBeNull();
+  expect(host.querySelector('[data-chat-thread]')).toBeNull();
+  await act(async () => vi.advanceTimersByTimeAsync(5000));
+  expect(host.querySelector('[role="status"]')).toBeNull();
+  expect(host.querySelector('[data-chat-thread="thread"]')).not.toBeNull();
+});
+
+it.each([
+  ['missing_node_content', 'sourceNodeContentUnavailable'],
   ['canvas_not_found', 'sourceSpaceUnavailable'],
 ])(
   'explains %s on the next poll and recovers on Retry',
@@ -234,6 +308,21 @@ it('does not label an unrelated lookup failure as a deleted source', async () =>
   );
 });
 
+it('centers a blocking workspace error using the same empty state and keeps Retry', async () => {
+  const message =
+    'Workspace has not been configured yet. Please set a workspace path first.';
+  mocks.getOwner.mockRejectedValueOnce(new ApiError(503, {}, message));
+  await render();
+  const alert = host.querySelector('[role="alert"]');
+  expect(alert?.classList.contains('grid-rows-[1fr_auto_2fr]')).toBe(true);
+  expect(alert?.querySelector('svg.lucide-info')).not.toBeNull();
+  expect(alert?.querySelector('p')?.textContent).toBe(message);
+  expect(alert?.querySelector('button')?.textContent).toBe(
+    'remoteConversation.retry',
+  );
+  expect(mocks.chat).not.toHaveBeenCalled();
+});
+
 it.each([
   new TypeError('Failed to fetch'),
   new ApiError(503, {}, 'Temporarily unavailable'),
@@ -256,6 +345,9 @@ it.each([
         ?.getAttribute('data-unavailable'),
     ).toBe('true');
     expect(host.querySelector('[role="alert"]')).not.toBeNull();
+    expect(
+      host.querySelector('[role="alert"]')?.classList.contains('shrink-0'),
+    ).toBe(true);
     await act(async () => window.dispatchEvent(new Event('focus')));
     expect(host.querySelector('input')).toBe(input);
     expect(

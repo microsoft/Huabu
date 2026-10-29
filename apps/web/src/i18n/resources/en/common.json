@@ -1,6 +1,7 @@
 {
   "remoteConversation": {
-    "sourceNodeUnavailable": "The source Agent node has been deleted or is unavailable. You can no longer interact with this conversation.",
+    "sourceNodeMissing": "The Agent node is no longer in this Space.",
+    "sourceNodeContentUnavailable": "The Agent node's content could not be loaded. Try again.",
     "sourceSpaceUnavailable": "The source Space has been deleted or is unavailable. You can no longer interact with this conversation.",
     "openSpace": "Open Space",
     "loading": "Loading conversation…",

@@ -1,12 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { ArrowUpRight } from 'lucide-react';
+import { ArrowUpRight, Info } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 
 import { Button } from '@/components/Common/Button';
+import { EmptyState } from '@/components/Common/EmptyState';
 import { NODE_ICON } from '@/config/nodeIcons';
 import useCanvasStore from '@/store/canvasStore';
 import {
@@ -34,6 +35,9 @@ export function SpaceConversationPreview({
   const { t } = useTranslation();
   const navigate = useNavigate();
   const canvasId = useCanvasStore((state) => state.canvasId);
+  const cachedSpaceTitle = useWorkspaceStore(
+    (state) => state.spaceTitles[target.canvasId],
+  );
   const key = conversationOwnerKey(
     target.canvasId,
     target.nodeId,
@@ -42,12 +46,20 @@ export function SpaceConversationPreview({
   const entry = useRemoteConversationOwnerStore((state) => state.entries[key]);
   const [validatedKey, setValidatedKey] = useState<string | null>(null);
   const refresh = useCallback(async () => {
+    const workspaceId = useWorkspaceStore.getState().workspaceId;
     try {
-      await refreshConversationOwner(
+      const owner = await refreshConversationOwner(
         target.canvasId,
         target.nodeId,
         target.threadId,
       );
+      const workspace = useWorkspaceStore.getState();
+      if (
+        workspace.workspaceId === workspaceId &&
+        workspace.spaceTitles[target.canvasId] !== owner.spaceTitle
+      ) {
+        workspace.setSpaceTitle(target.canvasId, owner.spaceTitle);
+      }
       setValidatedKey(key);
     } catch (error) {
       // Transport failures retain the last validated view; invalid ownership does not.
@@ -92,11 +104,16 @@ export function SpaceConversationPreview({
 
   const owner = entry?.owner;
   const spaceTitle =
-    owner?.spaceTitle?.trim() || t('spacePreview.untitledSpace');
+    owner?.spaceTitle?.trim() ||
+    cachedSpaceTitle?.trim() ||
+    (cachedSpaceTitle === undefined && !owner
+      ? target.canvasId
+      : t('spacePreview.untitledSpace'));
+  const ownerMissing = entry?.errorCode === 'conversation_owner_missing';
+  const showChat = owner?.nodeId === target.nodeId && validatedKey === key;
   const errorMessage =
-    entry?.errorCode === 'conversation_owner_missing' ||
     entry?.errorCode === 'missing_node_content'
-      ? t('remoteConversation.sourceNodeUnavailable')
+      ? t('remoteConversation.sourceNodeContentUnavailable')
       : entry?.errorCode === 'canvas_not_found'
         ? t('remoteConversation.sourceSpaceUnavailable')
         : entry?.error;
@@ -131,18 +148,38 @@ export function SpaceConversationPreview({
           <ArrowUpRight aria-hidden />
         </Button>
       </div>
-      {entry?.error ? (
+      {!showChat || entry?.error ? (
         <div
-          role="alert"
-          className="text-danger flex flex-col items-start gap-2 p-3 text-sm"
+          role={entry?.error && !ownerMissing ? 'alert' : 'status'}
+          className={
+            showChat
+              ? 'shrink-0 px-6 py-4'
+              : 'grid min-h-0 flex-1 grid-rows-[1fr_auto_2fr] overflow-y-auto px-6 py-6'
+          }
         >
-          <p>{errorMessage}</p>
-          <Button variant="outline" size="sm" onClick={() => void refresh()}>
-            {t('remoteConversation.retry')}
-          </Button>
+          <EmptyState
+            icon={<Info className="text-fg-muted size-4" />}
+            message={
+              ownerMissing
+                ? t('remoteConversation.sourceNodeMissing')
+                : (errorMessage ?? t('remoteConversation.loading'))
+            }
+            action={
+              entry?.error && !ownerMissing ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void refresh()}
+                >
+                  {t('remoteConversation.retry')}
+                </Button>
+              ) : undefined
+            }
+            className="[&_p]:text-fg-muted row-start-2 min-w-0 py-0 [overflow-wrap:anywhere]"
+          />
         </div>
       ) : null}
-      {owner?.nodeId === target.nodeId && validatedKey === key ? (
+      {showChat ? (
         <div
           className="min-h-0 flex-1"
           onDragStartCapture={(event) => {
@@ -156,10 +193,6 @@ export function SpaceConversationPreview({
             session={session}
             ownerUnavailable={!!entry?.error}
           />
-        </div>
-      ) : !entry?.error ? (
-        <div role="status" className="text-fg-muted p-3 text-sm">
-          {t('remoteConversation.loading')}
         </div>
       ) : null}
     </div>

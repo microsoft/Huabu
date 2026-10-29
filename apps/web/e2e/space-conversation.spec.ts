@@ -87,7 +87,12 @@ test('opens and continues a child Agent in the parent without leaking canvas sel
       ),
     parent,
   );
+  let cardsFixture: Record<string, unknown> | undefined;
   await page.route('**/api/canvas/cards/query', async (route) => {
+    if (cardsFixture) {
+      await route.fulfill({ json: cardsFixture });
+      return;
+    }
     const response = await route.fetch();
     const body = await response.json();
     if (body.spaces[child]?.status === 'ready') {
@@ -101,6 +106,7 @@ test('opens and continues a child Agent in the parent without leaking canvas sel
         },
       ];
     }
+    cardsFixture = body;
     await route.fulfill({ response, json: body });
   });
   await page.route('https://example.test/review-result.svg', (route) =>
@@ -231,14 +237,27 @@ test('opens and continues a child Agent in the parent without leaking canvas sel
     path: testInfo.outputPath('parent-conversation.png'),
   });
   let ownerUnavailable = false;
+  let ownerErrorMessage = 'Temporarily unavailable';
+  let ownerMissing = false;
   let invocationToken = 'run-1';
   let viewed = false;
   const acknowledgements: string[] = [];
   await page.route(`**/api/agent/owner/${threadId}?**`, async (route) => {
+    if (ownerMissing) {
+      await route.fulfill({
+        status: 404,
+        json: {
+          code: 'conversation_owner_missing',
+          message:
+            'The Agent conversation no longer has an owner in this Space',
+        },
+      });
+      return;
+    }
     if (ownerUnavailable) {
       await route.fulfill({
         status: 503,
-        json: { message: 'Temporarily unavailable' },
+        json: { message: ownerErrorMessage },
       });
       return;
     }
@@ -353,5 +372,91 @@ test('opens and continues a child Agent in the parent without leaking canvas sel
   expect(acknowledgements).not.toContain('run-3');
   await input.click();
   await expect.poll(() => acknowledgements).toContain('run-3');
+  ownerMissing = true;
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  const missingStatus = page.getByRole('status').filter({
+    hasText: 'The Agent node is no longer in this Space.',
+  });
+  await expect(missingStatus).toBeVisible();
+  await expect(missingStatus.locator('svg.lucide-info')).toBeVisible();
+  await expect(missingStatus.locator('svg')).toHaveCSS('width', '16px');
+  await expect(missingStatus.locator('svg')).toHaveCSS('height', '16px');
+  await expect(missingStatus.locator('svg')).toHaveCSS(
+    'color',
+    await missingStatus
+      .locator('p')
+      .evaluate((element) => getComputedStyle(element).color),
+  );
+  await expect(missingStatus.locator('p')).toHaveCSS('text-align', 'left');
+  const statusBox = await missingStatus.boundingBox();
+  const messageBox = await missingStatus
+    .locator('p')
+    .locator('..')
+    .boundingBox();
+  const iconBox = await missingStatus.locator('svg').boundingBox();
+  const textBox = await missingStatus.locator('p').boundingBox();
+  if (!iconBox || !textBox) throw new Error('Missing inline icon');
+  expect(iconBox.x + iconBox.width).toBeLessThan(textBox.x);
+  expect(Math.abs(iconBox.y - textBox.y)).toBeLessThanOrEqual(3);
+  if (!statusBox || !messageBox) throw new Error('Missing empty-state layout');
+  expect(
+    Math.abs(
+      messageBox.x + messageBox.width / 2 - statusBox.x - statusBox.width / 2,
+    ),
+  ).toBeLessThan(2);
+  const messageCenter =
+    (messageBox.y + messageBox.height / 2 - statusBox.y) / statusBox.height;
+  expect(messageCenter).toBeGreaterThan(0.25);
+  expect(messageCenter).toBeLessThan(0.5);
+  await expect(
+    page.getByRole('button', { name: 'Retry', exact: true }),
+  ).toHaveCount(0);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(
+    page.getByRole('button', { name: 'Child task: Open Space', exact: true }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath('parent-conversation-owner-missing.png'),
+  });
+  await page.setViewportSize({ width: 900, height: 700 });
+  await expect(missingStatus).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath('parent-conversation-owner-missing-narrow.png'),
+  });
+  const workspaceError =
+    'Workspace has not been configured yet. Please set a workspace path first.';
+  ownerMissing = false;
+  ownerUnavailable = true;
+  ownerErrorMessage = workspaceError;
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  const blockingError = page.getByRole('alert');
+  await expect(blockingError).toContainText(workspaceError);
+  await expect(blockingError.locator('svg.lucide-info')).toHaveCSS(
+    'width',
+    '16px',
+  );
+  await expect(blockingError.locator('p')).toHaveCSS('text-align', 'left');
+  await expect(
+    blockingError.getByRole('button', { name: 'Retry' }),
+  ).toBeVisible();
+  const errorBox = await blockingError.boundingBox();
+  const errorTextBox = await blockingError
+    .locator('p')
+    .locator('..')
+    .boundingBox();
+  if (!errorBox || !errorTextBox)
+    throw new Error('Missing blocking-error layout');
+  expect(
+    Math.abs(
+      errorTextBox.x + errorTextBox.width / 2 - errorBox.x - errorBox.width / 2,
+    ),
+  ).toBeLessThan(2);
+  const errorCenter =
+    (errorTextBox.y + errorTextBox.height / 2 - errorBox.y) / errorBox.height;
+  expect(errorCenter).toBeGreaterThan(0.25);
+  expect(errorCenter).toBeLessThan(0.5);
+  await page.screenshot({
+    path: testInfo.outputPath('parent-conversation-workspace-error.png'),
+  });
   await page.unrouteAll({ behavior: 'wait' });
 });
