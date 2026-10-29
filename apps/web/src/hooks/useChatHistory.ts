@@ -278,11 +278,12 @@ export function useChatHistory(
     effectiveConversationView?.conversationOwner.nodeId ?? null;
   const ownerSource = useConversationOwnerSource(effectiveConversationView);
   const ownerStatus = ownerSource?.status;
+  const ownerInvocationToken = ownerSource?.invocationToken;
   const ownerHistoryKey = effectiveConversationView
     ? JSON.stringify([
         ownerCanvasId,
         threadId,
-        ownerSource?.invocationToken ?? null,
+        ownerInvocationToken ?? null,
         ownerStatus,
       ])
     : null;
@@ -670,14 +671,19 @@ export function useChatHistory(
       })
       .finally(() => {
         claim.release();
+        // A disposed observer must not settle a successor's queue.
+        if (cancelled) return;
         settleAgentTurnQueue(
           { threadId: ownerThreadId, ownerCanvasId },
-          !cancelled && queueCompletedNormally,
+          queueCompletedNormally,
         );
       });
 
     return () => {
       cancelled = true;
+      // Only this live attachment owns its loading state; a released claim may
+      // already have been replaced by a new send.
+      if (!claim.signal.aborted) setIsLoading(ownerThreadId, false);
       claim.release();
     };
   }, [
@@ -686,6 +692,7 @@ export function useChatHistory(
     ownerCanvasId,
     ownerNodeId,
     ownerStatus,
+    ownerInvocationToken,
     effectiveConversationView,
     previewTabId,
     addMessage,

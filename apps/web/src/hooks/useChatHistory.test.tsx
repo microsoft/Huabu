@@ -125,8 +125,14 @@ const SESSION: ChatSession = {
   conversationView: null,
 };
 
-function Harness({ session = SESSION }: { session?: ChatSession }) {
-  const history = useChatHistory(session, noopSetIsLoading);
+function Harness({
+  session = SESSION,
+  setIsLoading = noopSetIsLoading,
+}: {
+  session?: ChatSession;
+  setIsLoading?: (threadId: string, loading: boolean) => void;
+}) {
+  const history = useChatHistory(session, setIsLoading);
   latestLoadOlderHistory = history.loadOlderHistory;
   latestRetryHistory = history.retryHistory;
   latestOwnerHistoryReady = history.isCurrentOwnerHistory;
@@ -166,12 +172,15 @@ function seedStore(isStreaming: boolean) {
   });
 }
 
-async function renderHarness(session: ChatSession = SESSION): Promise<void> {
+async function renderHarness(
+  session: ChatSession = SESSION,
+  setIsLoading: (threadId: string, loading: boolean) => void = noopSetIsLoading,
+): Promise<void> {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
   await act(async () => {
-    root?.render(<Harness session={session} />);
+    root?.render(<Harness session={session} setIsLoading={setIsLoading} />);
     await Promise.resolve();
     await Promise.resolve();
   });
@@ -218,6 +227,329 @@ afterEach(() => {
 });
 
 describe('useChatHistory paging', () => {
+  it.each([
+    { status: 'done', pending: false },
+    { status: 'running', pending: false },
+    { status: 'running', pending: true },
+  ])(
+    'attaches a new remote invocation after $status with an old pending attachment: $pending',
+    async ({ status, pending }) => {
+      seedStore(false);
+      const session: ChatSession = {
+        ...SESSION,
+        ownerCanvasId: 'remote',
+        conversationView: {
+          presentationAnchor: { canvasId: 'remote', nodeId: 'remote-node' },
+          conversationOwner: {
+            canvasId: 'remote',
+            nodeId: 'remote-node',
+            threadId: THREAD_ID,
+          },
+        },
+      };
+      apiMocks.remoteSource = { status, invocationToken: 'old-run' };
+      apiMocks.fetchHistoryPage.mockResolvedValue({
+        threadId: THREAD_ID,
+        hasMore: false,
+        turns: [
+          {
+            id: 'old',
+            messages: [
+              {
+                role: 'assistant',
+                parts: [{ kind: 'text', text: 'Old answer' }],
+              },
+            ],
+          },
+        ],
+      });
+      let finishOld: ((result: AgentStreamAttachResult) => void) | undefined;
+      if (pending) {
+        apiMocks.reconnectStream.mockImplementationOnce(
+          async (_thread, _canvas, callbacks) => {
+            callbacks.onEvent({
+              type: 'text_delta',
+              data: { content: 'Old answer' },
+            });
+            return new Promise((resolve) => {
+              finishOld = resolve;
+            });
+          },
+        );
+      }
+      const setIsLoading = useChatStore.getState().setThreadLoading;
+      await renderHarness(session, setIsLoading);
+      apiMocks.reconnectStream.mockClear();
+      apiMocks.fetchHistoryPage.mockResolvedValue({
+        threadId: THREAD_ID,
+        hasMore: false,
+        turns: [
+          {
+            id: 'old',
+            messages: [
+              {
+                role: 'assistant',
+                parts: [{ kind: 'text', text: 'Old answer' }],
+              },
+            ],
+          },
+          {
+            id: 'new',
+            active: true,
+            messages: [
+              { role: 'user', content: 'New message from child Space' },
+            ],
+          },
+        ],
+      });
+      let finishNew: ((result: AgentStreamAttachResult) => void) | undefined;
+      apiMocks.reconnectStream.mockImplementationOnce(
+        async (_thread, _canvas, callbacks) => {
+          callbacks.onEvent({
+            type: 'text_delta',
+            data: { content: 'New reply' },
+          });
+          return new Promise((resolve) => {
+            finishNew = resolve;
+          });
+        },
+      );
+      apiMocks.remoteSource = { status: 'running', invocationToken: 'new-run' };
+      try {
+        await act(async () =>
+          root?.render(
+            <Harness session={session} setIsLoading={setIsLoading} />,
+          ),
+        );
+        expect(apiMocks.reconnectStream).toHaveBeenCalledTimes(1);
+        expect(useChatStore.getState().threadsById[THREAD_ID].messages).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              role: 'user',
+              content: 'New message from child Space',
+            }),
+          ]),
+        );
+        expect(useChatStore.getState().threadsById[THREAD_ID].isStreaming).toBe(
+          true,
+        );
+        await act(async () =>
+          useChatStore.getState().enqueueTurn(THREAD_ID, {
+            id: 'queued-next',
+            status: 'pending',
+            prepared: {
+              session,
+              inputKind: 'text',
+              content: 'Send after the current run',
+              mode: 'ask',
+              sources: {
+                canvasId: 'remote',
+                canvasContext: { selectedNodes: [] },
+              },
+              agentBinding: { kind: 'internal' },
+              settings: { modelId: null, reasoningEffort: null },
+            },
+          }),
+        );
+        // The old request can finish after the new attachment has claimed the thread.
+        await act(async () => finishOld?.({ status: 'aborted' }));
+        expect(useChatStore.getState().threadsById[THREAD_ID].queuePaused).toBe(
+          false,
+        );
+        expect(
+          useChatStore.getState().threadsById[THREAD_ID].queuedTurns,
+        ).toHaveLength(1);
+        expect(hasAgentStreamClaim('remote', THREAD_ID)).toBe(true);
+        expect(useChatStore.getState().threadsById[THREAD_ID].isStreaming).toBe(
+          true,
+        );
+        apiMocks.remoteSource = {
+          status: 'running',
+          invocationToken: 'new-run',
+        };
+        await act(async () =>
+          root?.render(
+            <Harness session={session} setIsLoading={setIsLoading} />,
+          ),
+        );
+        expect(apiMocks.reconnectStream).toHaveBeenCalledTimes(1);
+        // A failure of the current attachment still pauses its own queue.
+        await act(async () => finishNew?.({ status: 'aborted' }));
+        expect(useChatStore.getState().threadsById[THREAD_ID].queuePaused).toBe(
+          true,
+        );
+      } finally {
+        await act(async () => {
+          root?.unmount();
+          root = undefined;
+          finishOld?.({ status: 'aborted' });
+          finishNew?.({ status: 'aborted' });
+        });
+      }
+    },
+  );
+
+  it.each(['running', 'done'])(
+    'does not clear a newer send when a new %s invocation cleans up an already released attachment',
+    async (status) => {
+      seedStore(false);
+      const session: ChatSession = {
+        ...SESSION,
+        ownerCanvasId: 'remote',
+        conversationView: {
+          presentationAnchor: { canvasId: 'remote', nodeId: 'remote-node' },
+          conversationOwner: {
+            canvasId: 'remote',
+            nodeId: 'remote-node',
+            threadId: THREAD_ID,
+          },
+        },
+      };
+      apiMocks.remoteSource = { status: 'running', invocationToken: 'run' };
+      const setIsLoading = useChatStore.getState().setThreadLoading;
+      await renderHarness(session, setIsLoading);
+      expect(hasAgentStreamClaim('remote', THREAD_ID)).toBe(false);
+      const post = claimAgentStream('remote', THREAD_ID, 'post');
+      expect(post).not.toBeNull();
+      try {
+        await act(async () => setIsLoading(THREAD_ID, true));
+        apiMocks.remoteSource = { status, invocationToken: 'new-run' };
+        await act(async () =>
+          root?.render(
+            <Harness session={session} setIsLoading={setIsLoading} />,
+          ),
+        );
+        expect(useChatStore.getState().threadsById[THREAD_ID].isStreaming).toBe(
+          true,
+        );
+        expect(post?.signal.aborted).toBe(false);
+      } finally {
+        post?.release();
+      }
+    },
+  );
+
+  it.each(['done', 'error'])(
+    'clears an attached remote stream and restores missing messages when owner polling reaches %s before SSE completion',
+    async (status) => {
+      seedStore(false);
+      const session: ChatSession = {
+        ...SESSION,
+        ownerCanvasId: 'remote',
+        conversationView: {
+          presentationAnchor: { canvasId: 'remote', nodeId: 'remote-node' },
+          conversationOwner: {
+            canvasId: 'remote',
+            nodeId: 'remote-node',
+            threadId: THREAD_ID,
+          },
+        },
+      };
+      apiMocks.remoteSource = { status: 'running', invocationToken: 'run' };
+      let finishAttach!: (result: AgentStreamAttachResult) => void;
+      apiMocks.reconnectStream.mockImplementationOnce(
+        async (_thread, _canvas, callbacks) => {
+          callbacks.onEvent({
+            type: 'text_delta',
+            data: { content: 'Partial' },
+          });
+          // Model the live event projection, which no longer has historyTurnActive.
+          useChatStore.getState().addMessage(THREAD_ID, {
+            id: 'live-assistant',
+            role: 'assistant',
+            segments: [{ kind: 'text', text: 'Partial' }],
+          });
+          return new Promise((resolve) => {
+            finishAttach = resolve;
+          });
+        },
+      );
+      const setIsLoading = useChatStore.getState().setThreadLoading;
+      await renderHarness(session, setIsLoading);
+      expect(useChatStore.getState().threadsById[THREAD_ID].isStreaming).toBe(
+        true,
+      );
+      apiMocks.fetchHistoryPage.mockResolvedValue({
+        threadId: THREAD_ID,
+        hasMore: false,
+        turns: [
+          {
+            id: 'turn-1',
+            messages: [
+              { role: 'user', content: 'hi' },
+              {
+                role: 'assistant',
+                parts: [{ kind: 'text', text: 'Completed intermediate reply' }],
+              },
+              {
+                role: 'assistant',
+                parts: [{ kind: 'text', text: 'Final answer' }],
+              },
+            ],
+          },
+          {
+            id: 'turn-2',
+            messages: [
+              { role: 'user', content: 'Queued follow-up' },
+              {
+                role: 'assistant',
+                parts: [{ kind: 'text', text: 'Follow-up answer' }],
+              },
+            ],
+          },
+        ],
+      });
+      apiMocks.remoteSource = { status, invocationToken: 'run' };
+      try {
+        await act(async () =>
+          root?.render(
+            <Harness session={session} setIsLoading={setIsLoading} />,
+          ),
+        );
+        expect(useChatStore.getState().threadsById[THREAD_ID].isStreaming).toBe(
+          false,
+        );
+        expect(latestOwnerHistoryReady).toBe(true);
+        expect(apiMocks.fetchHistoryPage).toHaveBeenLastCalledWith(
+          THREAD_ID,
+          'remote',
+          expect.any(Number),
+        );
+        expect(
+          useChatStore
+            .getState()
+            .threadsById[THREAD_ID].messages.map((message) => ({
+              id: message.id,
+              role: message.role,
+              ...(message.role === 'user' ? { content: message.content } : {}),
+              ...(message.role === 'assistant'
+                ? { segments: message.segments }
+                : {}),
+            })),
+        ).toEqual([
+          { id: 'turn-1:0', role: 'user', content: 'hi' },
+          {
+            id: 'turn-1:1',
+            role: 'assistant',
+            segments: [{ kind: 'text', text: 'Completed intermediate reply' }],
+          },
+          {
+            id: 'turn-1:2',
+            role: 'assistant',
+            segments: [{ kind: 'text', text: 'Final answer' }],
+          },
+          { id: 'turn-2:0', role: 'user', content: 'Queued follow-up' },
+          {
+            id: 'turn-2:1',
+            role: 'assistant',
+            segments: [{ kind: 'text', text: 'Follow-up answer' }],
+          },
+        ]);
+      } finally {
+        await act(async () => finishAttach({ status: 'aborted' }));
+      }
+    },
+  );
   it('refreshes a new terminal invocation without observing running, preserving older pages', async () => {
     seedStore(false);
     useChatStore.getState().setMessages(THREAD_ID, [
