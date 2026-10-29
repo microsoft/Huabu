@@ -23,10 +23,14 @@ import useCanvasStore from '@/store/canvasStore';
 import { usePanelStore } from '@/store/panelStore';
 import { setDragPayload } from '@/utils/io/dragDrop';
 
+import { FilesPanelEntryMenu } from './FilesPanelEntryMenu';
+
 import type { FileListResult } from '@huabu/shared';
 
 type Entry = FileListResult['entries'][number];
-type Row = { entry: Entry; depth: number } | { more: string; depth: number };
+type Row =
+  | { entry: Entry; depth: number; relativePath: string }
+  | { more: string; depth: number };
 const MAX_TREE_ENTRIES = 2000;
 
 export function FilesPanel() {
@@ -158,18 +162,23 @@ export function FilesPanel() {
   const rows = useMemo(() => {
     const result: Row[] = [];
     const visited = new Set<string>();
-    const visit = (directory: string, depth: number) => {
+    const rootPath = sourcePath ? pages[sourcePath]?.path : undefined;
+    const separator = rootPath?.startsWith('/') ? '/' : '\\';
+    const visit = (directory: string, depth: number, parent: string) => {
       if (visited.has(directory) || depth > 32) return;
       visited.add(directory);
       const page = pages[directory];
       for (const entry of page?.entries ?? []) {
-        result.push({ entry, depth });
+        const relativePath = parent
+          ? `${parent}${separator}${entry.name}`
+          : entry.name;
+        result.push({ entry, depth, relativePath });
         if (entry.kind === 'directory' && expanded.has(entry.path))
-          visit(entry.path, depth + 1);
+          visit(entry.path, depth + 1, relativePath);
       }
       if (page?.nextCursor) result.push({ more: directory, depth });
     };
-    if (sourcePath) visit(sourcePath, 0);
+    if (sourcePath) visit(sourcePath, 0, '');
     return result;
   }, [pages, expanded, sourcePath]);
 
@@ -314,83 +323,92 @@ export function FilesPanel() {
                 {t('files.more')}
               </Button>
             );
-          const { entry, depth } = row;
+          const { entry, depth, relativePath } = row;
           const directory = entry.kind === 'directory';
           const Icon = directory ? Folder : FileText;
           return (
-            <div
-              className="hover:bg-hover flex h-8 items-center gap-1 pr-2"
-              style={{ paddingLeft: depth * 14 + 8 }}
+            <FilesPanelEntryMenu
+              name={entry.name}
+              path={entry.path}
+              relativePath={relativePath}
+              onCopyResult={(copied) =>
+                setError(copied ? null : t('files.copyFailed'))
+              }
             >
-              {directory ? (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="min-w-0 flex-1 justify-start truncate"
-                  disabled={pending}
-                  aria-expanded={expanded.has(entry.path)}
-                  onClick={() => {
-                    if (depth >= 32) {
-                      setError(t('files.treeLimit'));
-                      return;
-                    }
-                    if (!pages[entry.path]) void load(entry.path);
-                    else
-                      setExpanded((previous) => {
-                        const next = new Set(previous);
-                        if (!next.delete(entry.path)) next.add(entry.path);
-                        return next;
-                      });
-                  }}
-                >
-                  {expanded.has(entry.path) ? (
-                    <ChevronDown />
-                  ) : (
-                    <ChevronRight />
-                  )}
-                  <Icon />
-                  <span className="truncate">{entry.name}</span>
-                </Button>
-              ) : (
-                <>
-                  <span
-                    className="text-fg-default flex min-w-0 flex-1 items-center gap-1.5 pl-2 text-xs"
-                    draggable={entry.kind === 'file'}
-                    onDragStart={(event) => {
-                      if (!source || entry.kind !== 'file') return;
-                      setDragPayload(event, {
-                        kind: 'fileReference',
-                        origin: { type: 'user-created' },
-                        data: {
-                          label: entry.name,
-                          fileReference: {
-                            agentletId: source.agentletId,
-                            path: entry.path,
-                            deviceName: selectedDevice?.displayName,
-                          },
-                        },
-                      });
+              <div
+                className="hover:bg-hover flex h-8 items-center gap-1 pr-2"
+                style={{ paddingLeft: depth * 14 + 8 }}
+              >
+                {directory ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="min-w-0 flex-1 justify-start truncate"
+                    disabled={pending}
+                    aria-expanded={expanded.has(entry.path)}
+                    onClick={() => {
+                      if (depth >= 32) {
+                        setError(t('files.treeLimit'));
+                        return;
+                      }
+                      if (!pages[entry.path]) void load(entry.path);
+                      else
+                        setExpanded((previous) => {
+                          const next = new Set(previous);
+                          if (!next.delete(entry.path)) next.add(entry.path);
+                          return next;
+                        });
                     }}
                   >
-                    <Icon className="text-fg-muted h-3.5 w-3.5 shrink-0" />
-                    <span className="truncate" title={entry.path}>
-                      {entry.name}
-                    </span>
-                  </span>
-                  {entry.kind === 'file' ? (
-                    <Button
-                      size="sm"
-                      iconOnly
-                      variant="ghost"
-                      title={t('files.add', { name: entry.name })}
-                      onClick={() => add(entry)}
+                    {expanded.has(entry.path) ? (
+                      <ChevronDown />
+                    ) : (
+                      <ChevronRight />
+                    )}
+                    <Icon />
+                    <span className="truncate">{entry.name}</span>
+                  </Button>
+                ) : (
+                  <>
+                    <span
+                      className="text-fg-default flex min-w-0 flex-1 items-center gap-1.5 pl-2 text-xs"
+                      draggable={entry.kind === 'file'}
+                      onDragStart={(event) => {
+                        if (!source || entry.kind !== 'file') return;
+                        setDragPayload(event, {
+                          kind: 'fileReference',
+                          origin: { type: 'user-created' },
+                          data: {
+                            label: entry.name,
+                            fileReference: {
+                              agentletId: source.agentletId,
+                              path: entry.path,
+                              deviceName: selectedDevice?.displayName,
+                            },
+                          },
+                        });
+                      }}
                     >
-                      <Plus />
-                    </Button>
-                  ) : null}
-                </>
-              )}
-            </div>
+                      <Icon className="text-fg-muted h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate" title={entry.path}>
+                        {entry.name}
+                      </span>
+                    </span>
+                    {entry.kind === 'file' ? (
+                      <Button
+                        size="sm"
+                        iconOnly
+                        variant="ghost"
+                        title={t('files.add', { name: entry.name })}
+                        onClick={() => add(entry)}
+                      >
+                        <Plus />
+                      </Button>
+                    ) : null}
+                  </>
+                )}
+              </div>
+            </FilesPanelEntryMenu>
           );
         }}
       />
