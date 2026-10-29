@@ -337,6 +337,25 @@ describe('buildChatEnvelope selection records', () => {
           snapshotRevision: 'captured',
         },
       },
+      {
+        quote: 'file passage',
+        contextBefore: 'before ',
+        contextAfter: ' after',
+        comment: 'Explain this file.',
+        source: {
+          kind: 'file-reference' as const,
+          canvasId: 'space',
+          nodeId: 'file',
+          agentletId: 'device',
+          path: '/source.tex',
+          contentVersion: 'a'.repeat(64),
+          offsetUnit: 'utf-16' as const,
+          from: 7,
+          to: 19,
+          loadedLength: 40,
+          complete: false,
+        },
+      },
     ];
     const envelope = await buildChatEnvelope({
       content: '',

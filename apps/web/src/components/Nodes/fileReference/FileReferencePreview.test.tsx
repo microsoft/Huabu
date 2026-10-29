@@ -8,6 +8,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { FileReferencePreview } from './FileReferencePreview';
 
 import type { FileReadResult } from '@huabu/shared';
+import type * as ReactI18next from 'react-i18next';
 
 const mocks = vi.hoisted(() => ({
   read: vi.fn(),
@@ -15,7 +16,10 @@ const mocks = vi.hoisted(() => ({
   t: (key: string) => key,
 }));
 vi.mock('@/api/device-files', () => ({ readDeviceFile: mocks.read }));
-vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: mocks.t }) }));
+vi.mock('react-i18next', async (original) => ({
+  ...(await original<typeof ReactI18next>()),
+  useTranslation: () => ({ t: mocks.t }),
+}));
 vi.mock('@/components/CodeMirror/RawMarkdownEditor', () => ({
   default: (props: {
     value: string;

@@ -15,8 +15,13 @@ import { FragmentSelectionActions } from './FragmentSelectionActions';
 import type { MilkdownPreviewSelection } from '@/components/Milkdown/MilkdownPreview';
 import type { ReactNode } from 'react';
 
+export type FragmentCommentSelection = Pick<
+  MilkdownPreviewSelection,
+  'text' | 'contextBefore' | 'contextAfter' | 'position'
+>;
+
 interface FragmentCommentPopoverProps {
-  selection: MilkdownPreviewSelection;
+  selection: FragmentCommentSelection;
   onBegin: () => void;
   onAdd: (comment: string) => void;
   onCopy: () => Promise<void>;

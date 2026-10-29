@@ -1118,6 +1118,25 @@ describe('shared Agent turn input', () => {
           snapshotRevision: 'snapshot',
         },
       },
+      {
+        quote: 'File passage',
+        contextBefore: 'Before ',
+        contextAfter: ' after',
+        comment: 'Explain file.',
+        source: {
+          kind: 'file-reference' as const,
+          canvasId: 'canvas-1',
+          nodeId: 'file',
+          agentletId: 'source-device',
+          path: '/source.tex',
+          contentVersion: 'a'.repeat(64),
+          offsetUnit: 'utf-16' as const,
+          from: 7,
+          to: 19,
+          loadedLength: 40,
+          complete: false,
+        },
+      },
     ];
     const prepared = request();
     prepared.content = '';

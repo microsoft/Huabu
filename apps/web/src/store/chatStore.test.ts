@@ -36,6 +36,57 @@ describe('chatStore composer drafts', () => {
     });
   });
 
+  it('consumes only the exact file source and restores its frozen metadata on retry', () => {
+    const store = useChatStore.getState();
+    const quote = {
+      quote: 'excerpt',
+      contextBefore: 'pre ',
+      contextAfter: ' after',
+      comment: 'Explain.',
+      source: {
+        kind: 'file-reference' as const,
+        canvasId: 'space',
+        nodeId: 'file',
+        agentletId: 'device',
+        path: '/source.tex',
+        contentVersion: 'a'.repeat(64),
+        offsetUnit: 'utf-16' as const,
+        from: 4,
+        to: 11,
+        loadedLength: 30,
+        complete: false,
+      },
+    };
+    store.addQuotedComment('thread', quote);
+    const sent = selectThreadQuotedComments(useChatStore.getState(), 'thread');
+    const [entry] = sent;
+    for (const change of [
+      { agentletId: 'other' },
+      { path: '/other.tex' },
+      { contentVersion: 'b'.repeat(64) },
+      { from: 5 },
+      { loadedLength: 40 },
+      { complete: true },
+    ]) {
+      store.consumeDraft('thread', '', [
+        { ...entry, source: { ...quote.source, ...change } },
+      ]);
+      expect(
+        selectThreadQuotedComments(useChatStore.getState(), 'thread'),
+      ).toHaveLength(1);
+    }
+    store.consumeDraft('thread', '', [
+      { ...entry, source: { ...quote.source } },
+    ]);
+    expect(
+      selectThreadQuotedComments(useChatStore.getState(), 'thread'),
+    ).toEqual([]);
+    store.restoreDraftIfEmpty('thread', '', sent);
+    expect(
+      selectThreadQuotedComments(useChatStore.getState(), 'thread'),
+    ).toEqual(sent);
+  });
+
   it('keeps quoted comments thread-local and supports editing and removal', () => {
     const store = useChatStore.getState();
     const comment = {

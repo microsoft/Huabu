@@ -8,13 +8,18 @@ import { isFileReference } from '@huabu/shared';
 
 import { readDeviceFile } from '@/api/device-files';
 import { Button } from '@/components/Common/Button';
+import useCanvasStore from '@/store/canvasStore';
 
 import type { PreviewComponentProps } from '../previews';
+import type { EditorView } from '@codemirror/view';
 import type { FileReadResult } from '@huabu/shared';
 
 const SourceViewer = lazy(
   () => import('@/components/CodeMirror/RawMarkdownEditor'),
 );
+const CommentActions = lazy(async () => ({
+  default: (await import('./FileCommentActions')).FileCommentActions,
+}));
 const MAX_PREVIEW_BYTES = 262_144;
 
 export function FileReferencePreview({ id, data }: PreviewComponentProps) {
@@ -31,6 +36,9 @@ export function FileReferencePreview({ id, data }: PreviewComponentProps) {
   const generation = useRef(0);
   const controller = useRef<AbortController | null>(null);
   const loadedBytes = useRef(0);
+  const surfaceRef = useRef<HTMLDivElement>(null);
+  const canvasId = useCanvasStore((state) => state.canvasId);
+  const [view, setView] = useState<EditorView | null>(null);
   useEffect(() => {
     const current = ++generation.current;
     controller.current?.abort();
@@ -105,7 +113,21 @@ export function FileReferencePreview({ id, data }: PreviewComponentProps) {
       </div>
     );
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div ref={surfaceRef} className="flex h-full min-h-0 flex-col">
+      {id && canvasId && agentletId ? (
+        <Suspense fallback={null}>
+          <CommentActions
+            key={`${canvasId}\0${id}\0${agentletId}\0${path}`}
+            view={view}
+            surfaceRef={surfaceRef}
+            canvasId={canvasId}
+            nodeId={id}
+            agentletId={agentletId}
+            file={result}
+            disabled={pending || !!error}
+          />
+        </Suspense>
+      ) : null}
       <div className="border-edge-default flex shrink-0 flex-wrap items-center gap-2 border-b p-2 text-xs">
         <span className="text-fg-muted min-w-0 flex-1 break-all">
           {reference.deviceName ?? agentletId} · {path}
@@ -136,6 +158,7 @@ export function FileReferencePreview({ id, data }: PreviewComponentProps) {
             value={result.text}
             readOnly
             plainText
+            onReady={setView}
             searchNodeId={id}
             ariaLabel={t('files.readOnlyText')}
             className="min-h-0 flex-1 overflow-auto"
