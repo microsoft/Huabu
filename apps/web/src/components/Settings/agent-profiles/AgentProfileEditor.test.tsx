@@ -185,6 +185,48 @@ afterEach(() => {
 });
 
 describe('AgentProfileEditor', () => {
+  it('dismisses draft icon popovers on Change without discarding the draft', async () => {
+    renderEditor();
+    chooseAgent('GitHub Copilot');
+    input('settings.displayName', 'My reviewer');
+    const icon = container?.querySelector<HTMLButtonElement>(
+      '[aria-label="settings.agentIcon.change"]',
+    );
+    expect(icon).toBeTruthy();
+    await act(async () => icon?.click());
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    chooseAgent('settings.changeAgent');
+    await act(async () => vi.advanceTimersByTime(20));
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.activeElement?.getAttribute('aria-pressed')).toBe('true');
+    chooseAgent('GitHub Copilot');
+    expect(
+      container?.querySelector<HTMLInputElement>(
+        '[aria-label="settings.displayName"]',
+      )?.value,
+    ).toBe('My reviewer');
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(api.create).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])(
+    'focuses an available option when the selected harness is absent (loaded=%s)',
+    async (loaded) => {
+      renderEditor();
+      chooseAgent('GitHub Copilot');
+      renderEditor(undefined, [], loaded);
+      chooseAgent('settings.changeAgent');
+      await act(async () => vi.advanceTimersByTime(20));
+      expect(document.activeElement?.textContent).toBe(
+        'settings.customCommand',
+      );
+      expect(document.activeElement?.getAttribute('aria-pressed')).toBe(
+        'false',
+      );
+      expect(api.create).not.toHaveBeenCalled();
+    },
+  );
+
   it('preserves per-harness drafts, icon and approval while changing the selection', () => {
     renderEditor();
     chooseAgent('GitHub Copilot');

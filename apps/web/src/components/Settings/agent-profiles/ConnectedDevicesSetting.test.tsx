@@ -262,6 +262,41 @@ describe('connected device settings', () => {
     expect(api.setEnabled).not.toHaveBeenCalled();
   });
 
+  it.each([undefined, '1.2.3'])(
+    'fills missing local metadata without replacing the saved name or known version (%s)',
+    async (version) => {
+      knownDevices = [
+        { agentletId: 'this-device', displayName: 'Saved Mac name', version },
+      ];
+      await act(async () =>
+        root.render(<ConnectedDevicesSetting onAdd={vi.fn()} />),
+      );
+      await act(async () =>
+        onState?.({
+          enabled: false,
+          status: 'disabled',
+          error: null,
+          device: {
+            agentletId: 'this-device',
+            displayName: 'Runtime name',
+            version: '2.3.4',
+          },
+        }),
+      );
+      const card = container.querySelector('[data-device-id="this-device"]');
+      expect(card?.textContent).toContain('Saved Mac name');
+      expect(card?.textContent).not.toContain('Runtime name');
+      expect(card?.textContent).toContain('settings.localAgentConnect');
+      expect(card?.querySelector('[data-editor-trigger]')).toBeNull();
+      const menu = await openDeviceMenu();
+      expect(menu?.textContent).toContain(version ?? '2.3.4');
+      expect(menu?.textContent).not.toContain('settings.renameDevice');
+      expect(api.setEnabled).not.toHaveBeenCalled();
+      expect(renameDevice).not.toHaveBeenCalled();
+      expect(knownDevices[0].version).toBe(version);
+    },
+  );
+
   it('connects without a token input and updates independently from Settings actions', async () => {
     await act(async () => root.render(<ConnectedDevicesSetting />));
     expect(container.querySelector('input')).toBeNull();

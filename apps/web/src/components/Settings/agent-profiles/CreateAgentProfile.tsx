@@ -6,6 +6,7 @@ import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/components/Common/Button';
+import { dismissPopoversWithin } from '@/components/Common/Popover';
 import { SettingRow } from '@/components/Settings/Common/SettingRow';
 import { SettingSection } from '@/components/Settings/Common/SettingSection';
 
@@ -39,6 +40,7 @@ export function CreateAgentProfile({
   const [busy, setBusy] = useState(false);
   const changeRef = useRef<HTMLButtonElement>(null);
   const selectionRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const device = connectedDevices.find(
     (device) => device.agentletId === agentletId,
   );
@@ -70,7 +72,10 @@ export function CreateAgentProfile({
       <h4 className="text-fg-default mt-5 mb-2 text-[13px] font-medium">
         {t('settings.chooseAgent')}
       </h4>
-      <div className="border-edge-default overflow-hidden rounded-lg border">
+      <div
+        ref={contentRef}
+        className="border-edge-default overflow-hidden rounded-lg border"
+      >
         {choosing ? (
           <div ref={selectionRef} aria-label={t('settings.chooseAgent')}>
             {!detectionLoaded && (
@@ -163,11 +168,16 @@ export function CreateAgentProfile({
               className="ml-auto"
               disabled={busy}
               onClick={() => {
+                if (contentRef.current)
+                  dismissPopoversWithin(contentRef.current);
                 setChoosing(true);
                 requestAnimationFrame(() => {
                   const current =
                     selectionRef.current?.querySelector<HTMLButtonElement>(
                       '[aria-pressed="true"]',
+                    ) ??
+                    selectionRef.current?.querySelector<HTMLButtonElement>(
+                      'button[aria-pressed]:not(:disabled)',
                     );
                   current?.focus();
                   current?.scrollIntoView({ block: 'nearest' });

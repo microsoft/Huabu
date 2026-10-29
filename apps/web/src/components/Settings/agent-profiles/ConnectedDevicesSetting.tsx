@@ -113,11 +113,17 @@ export function ConnectedDevicesSetting({
       device,
     ]),
   );
-  if (localId && !devicesById.has(localId)) {
+  if (localId) {
+    const knownDevice = devicesById.get(localId);
     devicesById.set(localId, {
       ...state?.device,
+      ...knownDevice,
       agentletId: localId,
-      displayName: state?.device?.displayName ?? t('settings.localAgentTitle'),
+      displayName:
+        knownDevice?.displayName ??
+        state?.device?.displayName ??
+        t('settings.localAgentTitle'),
+      version: knownDevice?.version ?? state?.device?.version,
     });
   }
   const known = [...devicesById.values()];

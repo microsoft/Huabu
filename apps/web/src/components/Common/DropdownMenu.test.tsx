@@ -13,6 +13,7 @@ import {
   DropdownMenuLink,
   DropdownMenuSubmenu,
 } from './DropdownMenu';
+import { dismissPopoversWithin } from './Popover';
 import { TextInput } from './TextInput';
 
 (
@@ -66,6 +67,34 @@ afterEach(() => {
 });
 
 describe('DropdownMenu keyboard contract', () => {
+  it('dismisses a nonfloating dialog owned by hidden content without restoring focus', async () => {
+    await mount(
+      <>
+        <Button data-testid="outside">Collapse</Button>
+        <div data-testid="owner">
+          <DropdownMenu
+            contentRole="dialog"
+            trigger={<Button data-testid="trigger">Icon</Button>}
+          >
+            <Button>Shape</Button>
+          </DropdownMenu>
+        </div>
+      </>,
+    );
+    await click(getElement('[data-testid="trigger"]'));
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    const owner = getElement('[data-testid="owner"]');
+    expect(owner.querySelector('[role="dialog"]')).toBeNull();
+    await act(async () => {
+      getElement('[data-testid="outside"]').focus();
+      dismissPopoversWithin(owner);
+      owner.hidden = true;
+    });
+    await nextFrame();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.activeElement).toBe(getElement('[data-testid="outside"]'));
+  });
+
   it('restores focus after a controlled action closes the menu', async () => {
     function Menu() {
       const [open, setOpen] = useState(false);

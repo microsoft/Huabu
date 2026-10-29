@@ -16,6 +16,162 @@ const windowsId = 'c717d73c-7188-44ca-a6bd-67455f4cd3e8';
 const longAlias =
   'GitHub Copilot (ChristydeMacBook-Air.local: darwin arm64) - workspace code review';
 
+test('keyboard hiding closes icon popovers and Change retains focus during failed rechecks', async ({
+  page,
+}, testInfo) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.route('**/api/acp/profiles', (route) =>
+    route.fulfill({
+      json: {
+        profiles: [
+          {
+            id: 'reviewer',
+            alias: 'Reviewer',
+            agentletId: 'mac',
+            workingDirPath: '/work',
+            launch: { kind: 'acp-harness', harnessId: 'copilot' },
+          },
+        ],
+        selectableProfileIds: ['reviewer'],
+        connectedDevices: [
+          {
+            agentletId: 'mac',
+            displayName: 'My Mac',
+            connectedAt: '2026-01-01T00:00:00.000Z',
+            profileCount: 1,
+          },
+        ],
+        agentlet: null,
+      },
+    }),
+  );
+  let rechecking = false;
+  let releaseRecheck!: () => void;
+  const recheck = new Promise<void>((resolve) => {
+    releaseRecheck = resolve;
+  });
+  await page.route('**/api/acp/agent-cli?*', async (route) => {
+    if (rechecking) {
+      await recheck;
+      await route.fulfill({
+        status: 503,
+        json: { message: 'Catalogue unavailable' },
+      });
+    } else {
+      await route.fulfill({
+        json: {
+          agents: [
+            {
+              id: 'copilot',
+              displayName: 'Copilot',
+              status: 'ready',
+              installHint: '',
+              capabilities: { autoApprove: true, customLaunchCommand: false },
+            },
+          ],
+        },
+      });
+    }
+  });
+  try {
+    await page.goto('/playground/components');
+    await page.evaluate(async () => {
+      const load = (path: string) => import(/* @vite-ignore */ path);
+      const { openSettingsModalFixture } = await load(
+        '/e2e/fixtures/settings-components.tsx',
+      );
+      openSettingsModalFixture();
+    });
+    const dialog = page.getByRole('dialog', {
+      name: en.settings.title,
+      exact: true,
+    });
+    await dialog
+      .getByRole('button', { name: en.settings.devicesAndAgents, exact: true })
+      .click();
+    const device = dialog.locator('[data-device-id="mac"]');
+    const fold = device.getByRole('button', { name: /^My Mac(?: 1 agent)?$/ });
+    const avatar = device.getByRole('button', {
+      name: 'Change icon for Reviewer',
+      exact: true,
+    });
+    const iconDialog = page.getByRole('dialog', {
+      name: 'Change icon for Reviewer',
+      exact: true,
+    });
+    await avatar.focus();
+    await page.keyboard.press('Enter');
+    await expect(iconDialog).toBeVisible();
+    await fold.focus();
+    await page.keyboard.press('Enter');
+    await expect(fold).toHaveAttribute('aria-expanded', 'false');
+    await expect(iconDialog).toHaveCount(0);
+    await expect(fold).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(avatar).toBeVisible();
+    await expect(iconDialog).toHaveCount(0);
+
+    await device
+      .getByRole('button', { name: en.settings.addAgent, exact: true })
+      .click();
+    const copilot = dialog.getByRole('button', {
+      name: /Copilot.*Ready to configure/,
+    });
+    await copilot.click();
+    const name = dialog.getByRole('textbox', {
+      name: en.settings.displayName,
+      exact: true,
+    });
+    await name.fill('Reviewer draft');
+    await dialog
+      .getByRole('button', {
+        name: 'Change icon for Reviewer draft',
+        exact: true,
+      })
+      .focus();
+    await page.keyboard.press('Enter');
+    const draftIcon = page.getByRole('dialog', {
+      name: 'Change icon for Reviewer draft',
+      exact: true,
+    });
+    await expect(draftIcon).toBeVisible();
+    const change = dialog.getByRole('button', {
+      name: en.settings.changeAgent,
+      exact: true,
+    });
+    await change.focus();
+    await page.keyboard.press('Enter');
+    await expect(draftIcon).toHaveCount(0);
+    await expect(copilot).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(name).toHaveValue('Reviewer draft');
+    await expect(draftIcon).toHaveCount(0);
+
+    rechecking = true;
+    await page.evaluate(() =>
+      window.dispatchEvent(new Event('workspace-changed')),
+    );
+    await expect(dialog.getByRole('status')).toHaveText(
+      en.settings.detectingClis,
+    );
+    await change.focus();
+    await page.keyboard.press('Enter');
+    const custom = dialog.getByRole('button', {
+      name: en.settings.customCommand,
+      exact: true,
+    });
+    await expect(custom).toBeFocused();
+    releaseRecheck();
+    await expect(dialog.getByRole('alert')).toBeVisible();
+    await expect(custom).toBeFocused();
+    await dialog.screenshot({
+      path: testInfo.outputPath('keyboard-recheck.png'),
+    });
+  } finally {
+    releaseRecheck();
+  }
+});
+
 test('editing does not flash unsupported warnings before capabilities arrive', async ({
   page,
 }) => {
