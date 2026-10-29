@@ -1,17 +1,19 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { ArrowUp, Copy, MessageSquare } from 'lucide-react';
+import { ArrowUp } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/components/Common/Button';
 import { Popover } from '@/components/Common/Popover';
 import { TextArea } from '@/components/Common/TextArea';
-import { NODE_ICON } from '@/config/nodeIcons';
 import { useAutoSizeTextArea } from '@/hooks/useAutoSizeTextArea';
 
+import { FragmentSelectionActions } from './FragmentSelectionActions';
+
 import type { MilkdownPreviewSelection } from '@/components/Milkdown/MilkdownPreview';
+import type { ReactNode } from 'react';
 
 interface FragmentCommentPopoverProps {
   selection: MilkdownPreviewSelection;
@@ -20,6 +22,9 @@ interface FragmentCommentPopoverProps {
   onCopy: () => Promise<void>;
   onSaveAsNote: () => void;
   onDismiss: () => void;
+  initialMode?: 'actions' | 'comment';
+  children?: ReactNode;
+  addDisabled?: boolean;
 }
 
 export function FragmentCommentPopover({
@@ -29,15 +34,15 @@ export function FragmentCommentPopover({
   onCopy,
   onSaveAsNote,
   onDismiss,
+  initialMode = 'actions',
+  children,
+  addDisabled = false,
 }: FragmentCommentPopoverProps) {
   const { t } = useTranslation();
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(initialMode === 'comment');
   const [comment, setComment] = useState('');
-  const [copyError, setCopyError] = useState(false);
-  const [copying, setCopying] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   useAutoSizeTextArea(inputRef, comment, editing);
-  const NoteIcon = NODE_ICON.note;
 
   return (
     <Popover
@@ -56,7 +61,7 @@ export function FragmentCommentPopover({
           className="flex flex-col gap-2"
           onSubmit={(event) => {
             event.preventDefault();
-            if (comment.trim()) onAdd(comment);
+            if (comment.trim() && !addDisabled) onAdd(comment);
           }}
         >
           <figure className="bg-hover/60 min-w-0 rounded-md px-2 py-1.5">
@@ -67,6 +72,7 @@ export function FragmentCommentPopover({
               {selection.text.trim()}
             </blockquote>
           </figure>
+          {children}
           <div className="relative">
             <TextArea
               ref={inputRef}
@@ -98,66 +104,25 @@ export function FragmentCommentPopover({
               type="submit"
               title={t('messages.addCommentToInput')}
               tooltipWrapperClassName="absolute right-1 bottom-1"
-              disabled={!comment.trim()}
+              disabled={!comment.trim() || addDisabled}
             >
               <ArrowUp aria-hidden="true" />
             </Button>
           </div>
         </form>
       ) : (
-        <>
-          <div className="flex items-center gap-1">
-            <Button
-              variant="ghost"
-              iconOnly
-              size="sm"
-              title={t('messages.copy')}
-              disabled={copying}
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => {
-                onBegin();
-                setCopyError(false);
-                setCopying(true);
-                void onCopy()
-                  .then(onDismiss)
-                  .catch(() => setCopyError(true))
-                  .finally(() => setCopying(false));
-              }}
-            >
-              <Copy />
-            </Button>
-            <Button
-              variant="ghost"
-              iconOnly
-              size="sm"
-              title={t('messages.addAsNote')}
-              disabled={copying}
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={onSaveAsNote}
-            >
-              <NoteIcon />
-            </Button>
-            <Button
-              variant="ghost"
-              iconOnly
-              size="sm"
-              title={t('messages.fragmentComment')}
-              disabled={copying}
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => {
-                onBegin();
-                setEditing(true);
-              }}
-            >
-              <MessageSquare />
-            </Button>
-          </div>
-          {copyError ? (
-            <p role="alert" className="text-danger px-2 py-1 text-xs">
-              {t('messages.fragmentCopyFailed')}
-            </p>
-          ) : null}
-        </>
+        <FragmentSelectionActions
+          onCopy={() => {
+            onBegin();
+            return onCopy();
+          }}
+          onCopied={onDismiss}
+          onSaveAsNote={onSaveAsNote}
+          onComment={() => {
+            onBegin();
+            setEditing(true);
+          }}
+        />
       )}
     </Popover>
   );

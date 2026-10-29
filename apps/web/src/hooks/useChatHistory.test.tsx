@@ -262,6 +262,12 @@ describe('useChatHistory paging', () => {
         contextBefore: 'Before ',
         contextAfter: ' after',
         comment: 'Explain this.',
+        source: {
+          kind: 'note' as const,
+          canvasId: 'space',
+          nodeId: 'note',
+          snapshotRevision: 'captured',
+        },
       },
     ];
     apiMocks.fetchHistoryPage.mockResolvedValueOnce({

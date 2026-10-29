@@ -70,7 +70,7 @@ import type {
 } from './types';
 import type { ColorPreset } from '@/components/Common/ColorPicker';
 import type { LucideIcon } from 'lucide-react';
-import type { RefObject } from 'react';
+import type { ReactNode, RefObject } from 'react';
 
 type MilkdownToolbarPopover =
   | 'block-list'
@@ -203,6 +203,8 @@ export interface MilkdownFloatingToolbarProps {
   surfaceRef: RefObject<HTMLElement | null>;
   disabled?: boolean;
   className?: string;
+  mode?: 'edit' | 'selection';
+  children?: ReactNode;
 }
 
 export function MilkdownFloatingToolbar({
@@ -210,6 +212,8 @@ export function MilkdownFloatingToolbar({
   surfaceRef,
   disabled = false,
   className,
+  mode = 'edit',
+  children,
 }: MilkdownFloatingToolbarProps): React.JSX.Element | null {
   const { t } = useTranslation();
   const [formatting, setFormatting] = useState(() =>
@@ -243,7 +247,13 @@ export function MilkdownFloatingToolbar({
   const blockListOpen = openPopover === 'block-list';
   const mathOpen = openPopover === 'inline-math';
   useCloseOnEscape(mathOpen, () => setOpenPopover(null));
-  const toolbarOpen = selectionRect !== null && engaged && !hiddenByGlobalModal;
+  const hasTextSelection = !!instance?.getSelectionText()?.trim();
+  const toolbarOpen =
+    selectionRect !== null &&
+    engaged &&
+    !disabled &&
+    !hiddenByGlobalModal &&
+    (mode === 'edit' || hasTextSelection);
   const virtualSelectionReference = useMemo(() => {
     if (!selectionRect) return null;
     return {
@@ -388,157 +398,168 @@ export function MilkdownFloatingToolbar({
       className={cn('w-fit max-w-full flex-wrap', className)}
       onMouseDown={(event) => event.preventDefault()}
     >
-      <FloatingToolbar.Group>
-        <DropdownMenu
-          floating
-          placement="bottom-start"
-          open={blockListOpen}
-          onOpenChange={(open) => setOpenPopover(open ? 'block-list' : null)}
-          className="max-h-[min(16rem,calc(100dvh-24px))] min-w-48 overflow-y-auto overscroll-contain"
-          trigger={
-            <Button
-              variant="ghost"
-              size="sm"
-              title={t('editor.blockType')}
-              disabled={disabled}
-              onClick={(event) => event.stopPropagation()}
-              className="text-fg-muted hover:bg-bg-default gap-1"
+      {mode === 'edit' ? (
+        <>
+          <FloatingToolbar.Group>
+            <DropdownMenu
+              floating
+              placement="bottom-start"
+              open={blockListOpen}
+              onOpenChange={(open) =>
+                setOpenPopover(open ? 'block-list' : null)
+              }
+              className="max-h-[min(16rem,calc(100dvh-24px))] min-w-48 overflow-y-auto overscroll-contain"
+              trigger={
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  title={t('editor.blockType')}
+                  disabled={disabled}
+                  onClick={(event) => event.stopPropagation()}
+                  className="text-fg-muted hover:bg-bg-default gap-1"
+                >
+                  <ActiveBlockIcon className="size-3.5" />
+                  <span className="text-xs">{blockLabels[activeBlock]}</span>
+                  <ChevronDown className="size-3" />
+                </Button>
+              }
             >
-              <ActiveBlockIcon className="size-3.5" />
-              <span className="text-xs">{blockLabels[activeBlock]}</span>
-              <ChevronDown className="size-3" />
-            </Button>
-          }
-        >
-          {BLOCK_GROUPS.map((group) => (
-            <div key={group.labelKey} className={MENU_GROUP_CLASS}>
-              <div className={MENU_SECTION_LABEL_CLASS}>
-                {blockGroupLabels[group.labelKey]}
-              </div>
-              {group.types.map((type) => {
-                const Icon = BLOCK_ICONS[type];
-                return (
-                  <DropdownMenuItem
-                    key={type}
-                    icon={<Icon />}
-                    aria-current={type === activeBlock ? 'true' : undefined}
-                    onClick={() => {
-                      run(() => instance.setBlockType(type));
-                      setOpenPopover(null);
-                    }}
-                    className={cn(
-                      type === activeBlock
-                        ? 'text-info bg-info-bg enabled:hover:bg-info-bg'
-                        : undefined,
-                    )}
-                  >
-                    {blockLabels[type]}
-                  </DropdownMenuItem>
-                );
-              })}
+              {BLOCK_GROUPS.map((group) => (
+                <div key={group.labelKey} className={MENU_GROUP_CLASS}>
+                  <div className={MENU_SECTION_LABEL_CLASS}>
+                    {blockGroupLabels[group.labelKey]}
+                  </div>
+                  {group.types.map((type) => {
+                    const Icon = BLOCK_ICONS[type];
+                    return (
+                      <DropdownMenuItem
+                        key={type}
+                        icon={<Icon />}
+                        aria-current={type === activeBlock ? 'true' : undefined}
+                        onClick={() => {
+                          run(() => instance.setBlockType(type));
+                          setOpenPopover(null);
+                        }}
+                        className={cn(
+                          type === activeBlock
+                            ? 'text-info bg-info-bg enabled:hover:bg-info-bg'
+                            : undefined,
+                        )}
+                      >
+                        {blockLabels[type]}
+                      </DropdownMenuItem>
+                    );
+                  })}
+                </div>
+              ))}
+            </DropdownMenu>
+          </FloatingToolbar.Group>
+
+          <FloatingToolbar.Divider />
+
+          <FloatingToolbar.Group>
+            {TEXT_STYLE_MARKS.map((mark) => {
+              const Icon = INLINE_MARK_ICONS[mark];
+              return (
+                <FloatingToolbar.ToggleButton
+                  key={mark}
+                  active={formatting.activeMarks.has(mark)}
+                  title={inlineMarkTitles[mark]}
+                  disabled={disabled}
+                  onClick={() => run(() => instance.toggleMark(mark))}
+                >
+                  <Icon />
+                </FloatingToolbar.ToggleButton>
+              );
+            })}
+          </FloatingToolbar.Group>
+
+          <FloatingToolbar.Divider />
+
+          <FloatingToolbar.Group>
+            <FloatingToolbar.ColorPicker
+              colors={ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT}
+              value={formatting.textColor ?? ACCENT_NONE_TOKEN}
+              onSelect={(token) => selectColor(token, instance.setTextColor)}
+              title={t('editor.textColor')}
+              open={openPopover === 'text-color'}
+              onOpenChange={(open) =>
+                setOpenPopover(open ? 'text-color' : null)
+              }
+            >
+              <TextColorTrigger color={textColorCss} />
+            </FloatingToolbar.ColorPicker>
+            <FloatingToolbar.ColorPicker
+              colors={BACKGROUND_COLOR_PICKER_OPTIONS}
+              value={formatting.backgroundColor ?? ACCENT_NONE_TOKEN}
+              onSelect={(token) =>
+                selectColor(token, instance.setBackgroundColor)
+              }
+              title={t('editor.highlightColor')}
+              open={openPopover === 'background-color'}
+              onOpenChange={(open) =>
+                setOpenPopover(open ? 'background-color' : null)
+              }
+            >
+              <BackgroundColorTrigger color={backgroundColorCss} />
+            </FloatingToolbar.ColorPicker>
+          </FloatingToolbar.Group>
+
+          <FloatingToolbar.Divider />
+
+          <FloatingToolbar.Group>
+            <div className="flex items-center">
+              <FloatingToolbar.ActionButton
+                title={t('editor.link')}
+                disabled={disabled || !linkAvailable}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setOpenPopover(null);
+                  instance.requestLinkEdit();
+                }}
+              >
+                <Link />
+              </FloatingToolbar.ActionButton>
             </div>
-          ))}
-        </DropdownMenu>
-      </FloatingToolbar.Group>
-
-      <FloatingToolbar.Divider />
-
-      <FloatingToolbar.Group>
-        {TEXT_STYLE_MARKS.map((mark) => {
-          const Icon = INLINE_MARK_ICONS[mark];
-          return (
             <FloatingToolbar.ToggleButton
-              key={mark}
-              active={formatting.activeMarks.has(mark)}
-              title={inlineMarkTitles[mark]}
+              active={formatting.activeMarks.has('inlineCode')}
+              title={inlineMarkTitles.inlineCode}
               disabled={disabled}
-              onClick={() => run(() => instance.toggleMark(mark))}
+              onClick={() => run(() => instance.toggleMark('inlineCode'))}
             >
-              <Icon />
+              <Code />
             </FloatingToolbar.ToggleButton>
-          );
-        })}
-      </FloatingToolbar.Group>
-
-      <FloatingToolbar.Divider />
-
-      <FloatingToolbar.Group>
-        <FloatingToolbar.ColorPicker
-          colors={ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT}
-          value={formatting.textColor ?? ACCENT_NONE_TOKEN}
-          onSelect={(token) => selectColor(token, instance.setTextColor)}
-          title={t('editor.textColor')}
-          open={openPopover === 'text-color'}
-          onOpenChange={(open) => setOpenPopover(open ? 'text-color' : null)}
-        >
-          <TextColorTrigger color={textColorCss} />
-        </FloatingToolbar.ColorPicker>
-        <FloatingToolbar.ColorPicker
-          colors={BACKGROUND_COLOR_PICKER_OPTIONS}
-          value={formatting.backgroundColor ?? ACCENT_NONE_TOKEN}
-          onSelect={(token) => selectColor(token, instance.setBackgroundColor)}
-          title={t('editor.highlightColor')}
-          open={openPopover === 'background-color'}
-          onOpenChange={(open) =>
-            setOpenPopover(open ? 'background-color' : null)
-          }
-        >
-          <BackgroundColorTrigger color={backgroundColorCss} />
-        </FloatingToolbar.ColorPicker>
-      </FloatingToolbar.Group>
-
-      <FloatingToolbar.Divider />
-
-      <FloatingToolbar.Group>
-        <div className="flex items-center">
-          <FloatingToolbar.ActionButton
-            title={t('editor.link')}
-            disabled={disabled || !linkAvailable}
-            onClick={(event) => {
-              event.stopPropagation();
-              setOpenPopover(null);
-              instance.requestLinkEdit();
-            }}
-          >
-            <Link />
-          </FloatingToolbar.ActionButton>
-        </div>
-        <FloatingToolbar.ToggleButton
-          active={formatting.activeMarks.has('inlineCode')}
-          title={inlineMarkTitles.inlineCode}
-          disabled={disabled}
-          onClick={() => run(() => instance.toggleMark('inlineCode'))}
-        >
-          <Code />
-        </FloatingToolbar.ToggleButton>
-        <div ref={mathRefs.setReference} className="flex items-center">
-          <FloatingToolbar.ActionButton
-            title={t('editor.inlineMath')}
-            disabled={disabled}
-            onClick={(event) => {
-              event.stopPropagation();
-              setOpenPopover((open) => {
-                const nextOpen = open === 'inline-math' ? null : 'inline-math';
-                if (nextOpen) {
-                  const activeMath = instance.getActiveInlineMath();
-                  const selectionRange = instance.getSelectionRange(true);
-                  mathSelectionRef.current =
-                    activeMath?.range ?? selectionRange;
-                  setMathValue(
-                    activeMath?.value ?? instance.getSelectionText() ?? 'x',
-                  );
-                } else {
-                  mathSelectionRef.current = null;
-                }
-                return nextOpen;
-              });
-            }}
-          >
-            <Sigma />
-          </FloatingToolbar.ActionButton>
-        </div>
-      </FloatingToolbar.Group>
-
+            <div ref={mathRefs.setReference} className="flex items-center">
+              <FloatingToolbar.ActionButton
+                title={t('editor.inlineMath')}
+                disabled={disabled}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setOpenPopover((open) => {
+                    const nextOpen =
+                      open === 'inline-math' ? null : 'inline-math';
+                    if (nextOpen) {
+                      const activeMath = instance.getActiveInlineMath();
+                      const selectionRange = instance.getSelectionRange(true);
+                      mathSelectionRef.current =
+                        activeMath?.range ?? selectionRange;
+                      setMathValue(
+                        activeMath?.value ?? instance.getSelectionText() ?? 'x',
+                      );
+                    } else {
+                      mathSelectionRef.current = null;
+                    }
+                    return nextOpen;
+                  });
+                }}
+              >
+                <Sigma />
+              </FloatingToolbar.ActionButton>
+            </div>
+          </FloatingToolbar.Group>
+        </>
+      ) : null}
+      {hasTextSelection ? children : null}
       {mathOpen
         ? createPortal(
             <>

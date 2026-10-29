@@ -709,7 +709,12 @@ export const useChatStore = create<ChatState>()(
                     sent.quote === item.quote &&
                     sent.contextBefore === item.contextBefore &&
                     sent.contextAfter === item.contextAfter &&
-                    sent.comment === item.comment,
+                    sent.comment === item.comment &&
+                    sent.source?.kind === item.source?.kind &&
+                    sent.source?.canvasId === item.source?.canvasId &&
+                    sent.source?.nodeId === item.source?.nodeId &&
+                    sent.source?.snapshotRevision ===
+                      item.source?.snapshotRevision,
                 ),
             ),
           });
@@ -745,7 +750,8 @@ export const useChatStore = create<ChatState>()(
 
           const pinned = new Set<string>(Object.values(state.threadMap));
           for (const [tid, entry] of Object.entries(state.threadsById)) {
-            if (entry.isStreaming) pinned.add(tid);
+            if (entry.isStreaming || entry.pendingQuotedComments.length)
+              pinned.add(tid);
           }
           const evictable = cached.filter((tid) => !pinned.has(tid));
           if (evictable.length === 0) return {};

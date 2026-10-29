@@ -1111,6 +1111,12 @@ describe('shared Agent turn input', () => {
         contextBefore: 'Before ',
         contextAfter: ' after',
         comment: 'Explain this.',
+        source: {
+          kind: 'note' as const,
+          canvasId: 'canvas-1',
+          nodeId: 'source-note',
+          snapshotRevision: 'snapshot',
+        },
       },
     ];
     const prepared = request();
@@ -1145,6 +1151,12 @@ describe('shared Agent turn input', () => {
         contextBefore: '',
         contextAfter: '',
         comment: 'Explain this.',
+        source: {
+          kind: 'note',
+          canvasId: 'canvas-1',
+          nodeId: 'source-note',
+          snapshotRevision: 'snapshot',
+        },
       });
       mocks.stream.mockImplementationOnce(
         async (_content, _thread, _mode, callbacks: AgentStreamCallbacks) => {
@@ -1188,12 +1200,77 @@ describe('shared Agent turn input', () => {
           contextBefore: '',
           contextAfter: '',
           comment: 'Explain this.',
+          source: {
+            kind: 'note',
+            canvasId: 'canvas-1',
+            nodeId: 'source-note',
+            snapshotRevision: 'snapshot',
+          },
         },
       ]);
     },
   );
 
   describe('composer selection exclusion', () => {
+    it.each([true, false])(
+      'keeps Note quote evidence independent of selected parent Frame context, excluded=%s',
+      async (excluded) => {
+        useCanvasStore.getState()._setStateNoAutosave({
+          nodes: [
+            {
+              id: 'frame',
+              type: 'frame',
+              selected: true,
+              position: { x: 0, y: 0 },
+              data: {},
+            },
+            {
+              id: 'source-note',
+              type: 'note',
+              parentId: 'frame',
+              position: { x: 0, y: 0 },
+              data: { content: 'Changed Note content' },
+            },
+          ],
+        });
+        const quote = {
+          quote: 'Captured excerpt',
+          contextBefore: 'before',
+          contextAfter: 'after',
+          comment: 'Explain',
+          source: {
+            kind: 'note' as const,
+            canvasId: 'canvas-1',
+            nodeId: 'source-note',
+            snapshotRevision: 'captured',
+          },
+        };
+        useChatStore.getState().addQuotedComment(session.threadId, quote);
+        useChatStore
+          .getState()
+          .setExcludeCanvasSelection(session.threadId, excluded);
+        let hook!: UseAgentStreamReturn;
+        function Harness() {
+          hook = useAgentStream(session);
+          return null;
+        }
+        container = document.createElement('div');
+        root = createRoot(container);
+        await act(async () => root?.render(createElement(Harness)));
+        await act(async () => hook.startStream('', 'operate'));
+        const sent = mocks.stream.mock.calls[0][4];
+        expect(sent.quotedComments).toEqual([quote]);
+        if (excluded) {
+          expect(sent.canvasContext).toEqual({ selectedNodes: [] });
+        } else {
+          expect(sent.canvasContext?.selectedNodes).toMatchObject([
+            { id: 'frame', children: [{ id: 'source-note' }] },
+          ]);
+        }
+        expect(useCanvasStore.getState().nodes[0].selected).toBe(true);
+      },
+    );
+
     it.each([
       { external: false, anchored: false },
       { external: true, anchored: false },

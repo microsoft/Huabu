@@ -330,6 +330,12 @@ describe('buildChatEnvelope selection records', () => {
         contextBefore: 'Before ',
         contextAfter: ' after',
         comment: 'Explain this.',
+        source: {
+          kind: 'note' as const,
+          canvasId: 'space',
+          nodeId: 'note',
+          snapshotRevision: 'captured',
+        },
       },
     ];
     const envelope = await buildChatEnvelope({

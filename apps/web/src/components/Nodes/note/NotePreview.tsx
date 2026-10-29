@@ -59,6 +59,7 @@ import {
 import { dragPayloadToMarkdown } from '@/utils/io/payloadToMarkdown';
 import { openDocumentLink } from '@/utils/openDocumentLink';
 
+import { NoteCommentActions } from './NoteCommentActions';
 import { ProvenanceOverlay } from './ProvenanceOverlay';
 
 import type {
@@ -651,7 +652,16 @@ export const NotePreview = ({
       >
         {editMode === 'wysiwyg' ? (
           <>
-            {editable ? (
+            {id && canvasId ? (
+              <NoteCommentActions
+                key={`${canvasId}\0${id}`}
+                editor={editor}
+                surfaceRef={containerRef}
+                canvasId={canvasId}
+                nodeId={id}
+                mode={editable ? 'edit' : 'selection'}
+              />
+            ) : editable ? (
               <MilkdownFloatingToolbar
                 instance={editor}
                 surfaceRef={containerRef}
