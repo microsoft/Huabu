@@ -21,6 +21,7 @@ However, execution traces alone do not establish whether a proposed
 change improves efficiency without compromising task performance.`;
 
 async function mount(page: Page, theme: string, input: 'mouse' | 'finger') {
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
   await page.addInitScript(() => performance.setResourceTimingBufferSize(2000));
   await page.route(
     (url) => url.pathname.startsWith('/api/'),
@@ -175,6 +176,79 @@ for (const theme of ['light', 'dark']) {
           .toBeLessThanOrEqual(1);
         await host.screenshot({
           path: info.outputPath(`${theme}-${input}.png`),
+        });
+      });
+
+      test('code source soft-wraps on container resize without changing copied text', async ({
+        page,
+      }, info) => {
+        await mount(page, theme, input);
+        const host = page.locator('#latex-fixture');
+        const body = `  ${'unbroken_token'.repeat(28)}\n\tindented source`;
+        for (const language of ['text', 'latex', 'tex']) {
+          const markdown = `\`\`\`${language}\n${body}\n\`\`\``;
+          await page.evaluate(
+            (content) => window.latexFixture.render(content, true),
+            markdown,
+          );
+          const block = host.locator('.milkdown-code-block').first();
+          await expect(block.locator('.cm-line')).toHaveText(body.split('\n'));
+          const heights: number[] = [];
+          for (const width of [640, 320, 520]) {
+            await host.evaluate((element, width) => {
+              element.style.width = `${width}px`;
+            }, width);
+            await expect
+              .poll(() =>
+                block
+                  .locator('.cm-scroller')
+                  .evaluate(
+                    (element) => element.scrollWidth - element.clientWidth,
+                  ),
+              )
+              .toBeLessThanOrEqual(1);
+            const line = block.locator('.cm-line').first();
+            await expect
+              .poll(() =>
+                line.evaluate(
+                  (element) =>
+                    element.getBoundingClientRect().height /
+                    Number.parseFloat(getComputedStyle(element).lineHeight),
+                ),
+              )
+              .toBeGreaterThan(1.5);
+            heights.push(
+              await line.evaluate(
+                (element) => element.getBoundingClientRect().height,
+              ),
+            );
+            await expect(block.locator('.cm-content')).toHaveClass(
+              /cm-lineWrapping/,
+            );
+            await expect(block.locator('.cm-line')).toHaveText(
+              body.split('\n'),
+            );
+          }
+          expect(heights[1]).toBeGreaterThan(heights[0]);
+          expect(heights[2]).toBeLessThan(heights[1]);
+          await page.evaluate(
+            (content) => window.latexFixture.render(content, false),
+            markdown,
+          );
+          await block.hover();
+          await block.locator('.copy-button').click();
+          await expect
+            .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+            .toBe(body);
+          await host
+            .getByRole('button', { name: 'Copy message', exact: true })
+            .click();
+          await expect
+            .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+            .toBe(markdown);
+        }
+        await host.screenshot({
+          path: info.outputPath(`wrapped-${theme}-${input}.png`),
         });
       });
     });

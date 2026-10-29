@@ -3,19 +3,20 @@
 
 import { Compartment, StateEffect } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
-import { MessageSquare } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { Button } from '@/components/Common/Button';
 import { Popover } from '@/components/Common/Popover';
 import { toast } from '@/components/Common/Toast';
+import { FragmentSelectionActions } from '@/components/Messages/AIMessage/FragmentSelectionActions';
 import {
   PreviewCommentEditor,
   type PreviewCommentCapture,
 } from '@/components/Messages/PreviewCommentEditor';
 import { useTrackAttention } from '@/hooks/useTrackAttention';
+import useCanvasStore from '@/store/canvasStore';
 import { useAnyGlobalModalOpen } from '@/store/globalModalUi';
+import { copyToClipboard } from '@/utils/io/clipboard';
 
 import type { FileReadResult } from '@huabu/shared';
 import type { RefObject } from 'react';
@@ -80,6 +81,16 @@ export function FileCommentActions({
   const [engaged, setEngaged] = useState(true);
   const [dismissed, setDismissed] = useState(false);
   const modalOpen = useAnyGlobalModalOpen();
+  const readSelection = () =>
+    view && file && !disabled
+      ? captureFileComment(view, { canvasId, nodeId, agentletId }, file)
+      : null;
+  const clearSelection = () => {
+    if (view) {
+      view.dispatch({ selection: { anchor: view.state.selection.main.head } });
+    }
+    setSelection(null);
+  };
   useTrackAttention(
     (target) => surfaceRef.current?.contains(target) ?? false,
     setEngaged,
@@ -134,21 +145,34 @@ export function FileCommentActions({
           className="p-1"
           onDismiss={() => setDismissed(true)}
         >
-          <Button
-            variant="ghost"
-            size="sm"
-            iconOnly
-            title={t('messages.fragmentComment')}
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => {
-              const next =
-                view && file && !disabled
-                  ? captureFileComment(
-                      view,
-                      { canvasId, nodeId, agentletId },
-                      file,
-                    )
-                  : null;
+          <FragmentSelectionActions
+            onCopy={async () => {
+              const next = readSelection();
+              if (!next)
+                throw new Error(t('messages.commentSelectionUnavailable'));
+              await copyToClipboard(next.selection.text);
+            }}
+            onCopied={clearSelection}
+            onSaveAsNote={() => {
+              const next = readSelection();
+              if (!next) {
+                toast(t('messages.commentSelectionUnavailable'), {
+                  tone: 'warning',
+                });
+                setSelection(null);
+                return;
+              }
+              useCanvasStore.getState().addNode({
+                nodeType: 'note',
+                data: {
+                  content: next.selection.text,
+                  origin: { type: 'user-excerpt', excerptFromNodeId: nodeId },
+                },
+              });
+              clearSelection();
+            }}
+            onComment={() => {
+              const next = readSelection();
               if (!next) {
                 toast(t('messages.commentSelectionUnavailable'), {
                   tone: 'warning',
@@ -158,9 +182,7 @@ export function FileCommentActions({
               }
               setCapture(next);
             }}
-          >
-            <MessageSquare aria-hidden="true" />
-          </Button>
+          />
         </Popover>
       ) : null}
       {capture ? (
