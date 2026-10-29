@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { existsSync } from 'node:fs'
+import { existsSync, realpathSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { HarnessDefinition } from './types.js'
 
@@ -13,7 +13,14 @@ function quoteTrustedPath(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`
 }
 
-function proxyEntry(): string { return join(dirname(process.argv[1]!), 'fs-proxy.js') }
+export function resolveProxyEntry(
+  entry: string,
+  resolveRealPath: (path: string) => string = realpathSync,
+): string {
+  return join(dirname(resolveRealPath(entry)), 'fs-proxy.js')
+}
+
+function proxyEntry(): string { return resolveProxyEntry(process.argv[1]!) }
 
 export const proxyHarness: HarnessDefinition = {
   id: 'proxy', displayName: 'Filesystem Proxy', installHint: 'Included with Agentlet',

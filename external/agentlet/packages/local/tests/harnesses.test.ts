@@ -27,6 +27,7 @@ import { prepareHarnessWorkspace } from '../src/harnesses/workspace.js'
 import { Agentlet } from '../src/agentlet.js'
 import { AgentProcess } from '../src/agent-process.js'
 import { Logger } from '../src/logger.js'
+import { resolveProxyEntry } from '../src/harnesses/proxy.js'
 
 afterEach(() => {
   vi.unstubAllEnvs()
@@ -43,6 +44,14 @@ beforeEach(() => {
 })
 
 describe('trusted harness discovery', () => {
+  it('locates the bundled proxy relative to a symlinked CLI entry target', () => {
+    const resolveRealPath = vi.fn(() => '/opt/agentlet/dist/index.js')
+    expect(resolveProxyEntry('/usr/local/bin/agentlet', resolveRealPath)).toBe(
+      join('/opt/agentlet/dist', 'fs-proxy.js'),
+    )
+    expect(resolveRealPath).toHaveBeenCalledExactlyOnceWith('/usr/local/bin/agentlet')
+  })
+
   it.each([
     ['claude', 'claude-agent-acp'],
     ['codex', 'codex-acp'],
