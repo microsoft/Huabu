@@ -9,6 +9,8 @@ import { workspaceCreateSchema, workspaceRenameSchema } from '@huabu/shared';
 
 import { migrateLegacyDesktopWorkspaceStore } from './legacy-desktop-workspace-store.js';
 import { resetPreprocessDispatcher } from './preprocessing/index.js';
+import { isOwnerRequest } from './security/owner.js';
+import { isRestrictedRequest } from './security/space-access.js';
 import {
   activateWorkspace,
   adoptWorkspaceDirectory,
@@ -187,6 +189,16 @@ interface WorkspaceParams {
 }
 
 const workspacesRoutes: FastifyPluginAsync = async (app) => {
+  // Listing, creating and switching Workspaces act for the whole Server, so
+  // a principal with per-Space access (a Bubble member) may not.
+  app.addHook('preHandler', async (request, reply) => {
+    if (!isOwnerRequest(request) && isRestrictedRequest(request)) {
+      return reply.status(403).send({
+        message: 'Forbidden: managing Workspaces requires an owner',
+      });
+    }
+  });
+
   let legacyDesktopStoreImported = false;
 
   /**

@@ -1,15 +1,19 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const listProfiles = vi.hoisted(() => vi.fn());
+const renameDevice = vi.hoisted(() => vi.fn());
 const api = vi.hoisted(() => ({
   getDefaults: vi.fn(),
   updateDefaults: vi.fn(),
   toast: vi.fn(),
 }));
-vi.mock('@/api/acp', () => ({ listAcpProfiles: listProfiles }));
+vi.mock('@/api/acp', () => ({
+  listAcpProfiles: listProfiles,
+  renameAgentletDevice: renameDevice,
+}));
 vi.mock('@/api/agentDefaults', () => ({
   getAgentDefaults: api.getDefaults,
   updateAgentDefaults: api.updateDefaults,
@@ -37,6 +41,7 @@ const snapshot = {
   profiles: [profile],
   selectableProfileIds: [profile.id],
   connectedDevices: [],
+  knownDevices: [],
   agentlet: null,
   agentDefaults: { profileId: 'huabu', functionalModel: 'utility-only' },
 };
@@ -44,6 +49,7 @@ const snapshot = {
 beforeEach(() => {
   localStorage.clear();
   listProfiles.mockReset().mockResolvedValue(snapshot);
+  renameDevice.mockReset().mockResolvedValue({ displayName: 'New name' });
   api.getDefaults.mockReset().mockResolvedValue({
     defaults: snapshot.agentDefaults,
     selectionState: 'available',
@@ -69,7 +75,23 @@ beforeEach(() => {
   });
 });
 
+afterEach(() => vi.restoreAllMocks());
+
 describe('browser-local recent conversation Agent', () => {
+  it('loads offline metadata without promoting it into runtime availability', async () => {
+    const device = { agentletId: 'offline', displayName: 'Office PC' };
+    listProfiles.mockResolvedValueOnce({
+      ...snapshot,
+      selectableProfileIds: [],
+      knownDevices: [device],
+    });
+    await useAcpProfilesStore.getState().refresh();
+    expect(useAcpProfilesStore.getState().knownDevices).toEqual([device]);
+    expect(useAcpProfilesStore.getState().connectedDevices).toEqual([]);
+    expect(useAcpProfilesStore.getState().selectableProfileIds).toEqual([]);
+    await useAcpProfilesStore.getState().refresh();
+    expect(useAcpProfilesStore.getState().knownDevices).toEqual([]);
+  });
   it('starts a post-mutation snapshot after an older polling GET finishes', async () => {
     let finishOld!: (value: typeof snapshot) => void;
     listProfiles.mockImplementationOnce(
@@ -128,6 +150,50 @@ describe('browser-local recent conversation Agent', () => {
     await Promise.all([polling, fresh]);
     expect(listProfiles).toHaveBeenCalledTimes(2);
     expect(useAcpProfilesStore.getState().error).toBeNull();
+  });
+
+  it('keeps acknowledged device names when an older poll completes', async () => {
+    const device = {
+      agentletId: 'machine',
+      displayName: 'Old name',
+      version: '1',
+      connectedAt: '2026-01-01T00:00:00.000Z',
+      profileCount: 1,
+    };
+    useAcpProfilesStore.setState({
+      connectedDevices: [device],
+      knownDevices: [device],
+    });
+    let finishPoll!: (value: unknown) => void;
+    listProfiles.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishPoll = resolve;
+        }),
+    );
+    const poll = useAcpProfilesStore.getState().refresh();
+    await Promise.resolve();
+    await useAcpProfilesStore.getState().renameDevice('machine', 'New name');
+    finishPoll({ ...snapshot, connectedDevices: [device] });
+    await poll;
+    expect(useAcpProfilesStore.getState().connectedDevices[0].displayName).toBe(
+      'New name',
+    );
+    expect(useAcpProfilesStore.getState().knownDevices[0].displayName).toBe(
+      'New name',
+    );
+    expect(renameDevice).toHaveBeenCalledWith('machine', {
+      displayName: 'New name',
+    });
+    expect(useAcpProfilesStore.getState().profiles).toEqual([profile]);
+  });
+
+  it('leaves the snapshot unchanged and rejects failed renames', async () => {
+    renameDevice.mockRejectedValueOnce(new Error('Offline'));
+    await expect(
+      useAcpProfilesStore.getState().renameDevice('machine', 'New name'),
+    ).rejects.toThrow('Offline');
+    expect(useAcpProfilesStore.getState().connectedDevices).toEqual([]);
   });
 
   it('keeps picker identity explicit and clears it for older server responses', async () => {
@@ -212,6 +278,44 @@ describe('browser-local recent conversation Agent', () => {
     expect(localStorage.getItem(RECENT_CONVERSATION_AGENT_STORAGE_KEY)).toBe(
       'second',
     );
+  });
+
+  it('rereads incoming recency changes without echoing or trusting stale event values', () => {
+    localStorage.setItem(RECENT_CONVERSATION_AGENT_STORAGE_KEY, 'huabu');
+    const write = vi.spyOn(localStorage, 'setItem');
+    window.dispatchEvent(
+      new StorageEvent('storage', {
+        key: RECENT_CONVERSATION_AGENT_STORAGE_KEY,
+        newValue: 'stale-profile',
+      }),
+    );
+    expect(getDefaultAgentBinding()).toEqual({ kind: 'internal' });
+    expect(write).not.toHaveBeenCalled();
+    localStorage.removeItem(RECENT_CONVERSATION_AGENT_STORAGE_KEY);
+    window.dispatchEvent(
+      new StorageEvent('storage', {
+        key: RECENT_CONVERSATION_AGENT_STORAGE_KEY,
+        newValue: 'huabu',
+      }),
+    );
+    expect(
+      useAcpProfilesStore.getState().recentConversationProfileId,
+    ).toBeNull();
+    expect(getDefaultAgentBinding()).toMatchObject({ profileId: profile.id });
+    write.mockRestore();
+  });
+
+  it('keeps the browser selection session-local and reports unavailable storage', () => {
+    vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
+      throw new Error('Storage unavailable');
+    });
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    useAcpProfilesStore.getState().rememberConversationAgent('huabu');
+    expect(getDefaultAgentBinding()).toEqual({ kind: 'internal' });
+    expect(api.toast).toHaveBeenCalledWith('Storage unavailable', {
+      tone: 'danger',
+    });
+    expect(log).toHaveBeenCalled();
   });
 });
 

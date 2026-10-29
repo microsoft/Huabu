@@ -33,7 +33,7 @@ test('Note uses fixed insets and cards retain width-scaled spacing across orient
         ...[400, 600].flatMap((width) => {
           const shell = {
             width,
-            border: '2px solid transparent',
+            border: '1px solid transparent',
             boxSizing: 'border-box',
           };
           return [
@@ -85,7 +85,7 @@ test('Note uses fixed insets and cards retain width-scaled spacing across orient
   const fixture = page.locator('#spacing-fixture');
   await expect(fixture.locator('.ProseMirror h1')).toHaveCount(2);
   for (const width of [400, 600]) {
-    const expectedPadding = (16 * (width - 4)) / 400;
+    const expectedPadding = (16 * (width - 2)) / 400;
     const noteInset = await fixture
       .locator(`[data-spacing="note-${width}"]`)
       .evaluate((el) => {
@@ -147,8 +147,8 @@ test('Note uses fixed insets and cards retain width-scaled spacing across orient
         for (const inset of metrics.insets)
           expect(inset).toBeCloseTo(expectedPadding, 2);
         if (orientation === 'horizontal')
-          expect(metrics.gap).toBeCloseTo((12 * (width - 4)) / 400, 2);
-        expect(metrics.summaryGap).toBeCloseTo((8 * (width - 4)) / 400, 2);
+          expect(metrics.gap).toBeCloseTo((12 * (width - 2)) / 400, 2);
+        expect(metrics.summaryGap).toBeCloseTo((8 * (width - 2)) / 400, 2);
       }
     }
   }

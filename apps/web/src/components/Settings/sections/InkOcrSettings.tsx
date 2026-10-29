@@ -149,7 +149,7 @@ export function InkOcrSettings() {
             </span>
           ) : loadFailed || !config ? (
             <div className="flex items-center gap-2">
-              <span role="alert" className="text-danger text-xs">
+              <span role="alert" className="text-danger-fg text-xs">
                 {t('settings.inkOcr.loadFailed')}
               </span>
               <Button
@@ -166,7 +166,9 @@ export function InkOcrSettings() {
             <div className="flex items-center gap-2">
               <Key
                 size={14}
-                className={config.configured ? 'text-success' : 'text-warning'}
+                className={
+                  config.configured ? 'text-success-fg' : 'text-warning-fg'
+                }
                 aria-label={
                   config.configured
                     ? t('settings.inkOcr.configured')
@@ -278,7 +280,7 @@ export function InkOcrSettings() {
                   </Button>
                 ) : null}
                 {saveError ? (
-                  <p role="alert" className="text-danger text-xs">
+                  <p role="alert" className="text-danger-fg text-xs">
                     {saveError}
                   </p>
                 ) : null}

@@ -3,8 +3,6 @@
 
 import { useRef, useState } from 'react';
 
-import { resolveAccent } from '@huabu/shared';
-
 import { RangeSlider } from '@/components/Common/RangeSlider';
 import {
   FAR_ZOOM_DESIGN,
@@ -80,7 +78,7 @@ function Specimen({
     design,
   );
   previous.current = layout.labelRetained;
-  const accent = resolveAccent(sample.accent);
+  const accent = sample.accent;
   const radius = nodeMetricsForSize(sample.width, sample.height).radius;
   return (
     <div style={{ width: sample.width * zoom, height: sample.height * zoom }}>

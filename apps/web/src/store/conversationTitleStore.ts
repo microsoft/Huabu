@@ -2,13 +2,15 @@
 // Licensed under the MIT license.
 
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { createJSONStorage, persist } from 'zustand/middleware';
 
 import { ApiError } from '@/api/_client';
 import {
   queryConversationTitles,
   setConversationTitle,
 } from '@/api/conversationTitles';
+import { desktopSpaceStorage } from '@/utils/desktopStorage';
+import { pageLifecycle } from '@/utils/pageLifecycle';
 
 import type { ConversationTitle } from '@huabu/shared';
 
@@ -17,6 +19,7 @@ interface TitleEntry {
   durable?: boolean;
   renaming?: boolean;
   error?: string;
+  writeError?: string;
   failedTitle?: string;
   revision: number;
 }
@@ -32,10 +35,38 @@ export const conversationTitleKey = (canvasId: string, threadId: string) =>
   JSON.stringify([canvasId, threadId]);
 
 const EMPTY_TITLE: ConversationTitle = { title: null, source: null };
+let pendingPersistenceError: unknown;
 
 export const useConversationTitleStore = create<TitleState>()(
   persist(() => ({ entries: {}, pending: {}, refreshEpoch: 0 }), {
     name: 'huabu.conversationTitleDrafts',
+    storage: createJSONStorage(() => {
+      const storage = desktopSpaceStorage();
+      let persisted: string | null | undefined;
+      return {
+        ...storage,
+        getItem: (name) => {
+          const value = storage.getItem(name);
+          if (typeof value === 'string' || value === null) persisted = value;
+          return value;
+        },
+        setItem: (name, value) => {
+          if (value === persisted) {
+            pendingPersistenceError = undefined;
+            return;
+          }
+          try {
+            const result = storage.setItem(name, value);
+            persisted = value;
+            pendingPersistenceError = undefined;
+            return result;
+          } catch (error) {
+            pendingPersistenceError = error;
+            throw error;
+          }
+        },
+      };
+    }),
     version: 1,
     partialize: (state) => ({ pending: state.pending }),
     merge: (persisted, current) => {
@@ -81,13 +112,18 @@ function patch(key: string, change: Partial<TitleEntry>) {
 function queuePendingTitle(key: string, title: string) {
   useConversationTitleStore.setState((state) => ({
     pending: { ...state.pending, [key]: title },
+    entries: {
+      ...state.entries,
+      [key]: {
+        ...entry(key),
+        revision: entry(key).revision + 1,
+        renaming: false,
+        error: undefined,
+        writeError: undefined,
+        failedTitle: undefined,
+      },
+    },
   }));
-  patch(key, {
-    revision: entry(key).revision + 1,
-    renaming: false,
-    error: undefined,
-    failedTitle: undefined,
-  });
 }
 
 export function getConversationTitle(
@@ -105,8 +141,50 @@ export function getConversationTitle(
 const queries = new Map<string, Promise<void>>();
 const invalidated = new Set<string>();
 const saves = new Map<string, Promise<void>>();
+const writes = new Set<Promise<void>>();
 const errorMessage = (error: unknown) =>
   error instanceof Error ? error.message : 'Failed to save conversation title';
+
+function trackTitleWrite(request: Promise<void>): Promise<void> {
+  writes.add(request);
+  const clear = () => writes.delete(request);
+  void request.then(clear, clear);
+  return request;
+}
+
+function failedTitleWrites() {
+  const { entries } = useConversationTitleStore.getState();
+  return Object.entries(entries).filter(([, value]) => value.writeError);
+}
+
+export class ConversationTitleSaveError extends Error {
+  async retry(): Promise<void> {
+    if (pendingPersistenceError) {
+      try {
+        // Persist the latest pending snapshot, never the failed attempt's copy.
+        useConversationTitleStore.setState({});
+      } catch (error) {
+        throw new ConversationTitleSaveError(errorMessage(error));
+      }
+    }
+    await Promise.all(
+      failedTitleWrites().map(([key]) => {
+        const [canvasId, threadId]: [string, string] = JSON.parse(key);
+        return retryConversationTitle(canvasId, threadId);
+      }),
+    );
+    await drainConversationTitleWrites();
+  }
+}
+
+export async function drainConversationTitleWrites(): Promise<void> {
+  while (writes.size) await Promise.allSettled([...writes]);
+  if (pendingPersistenceError)
+    throw new ConversationTitleSaveError(errorMessage(pendingPersistenceError));
+  // Only failures of the latest intent block closing, not superseded requests.
+  const failed = failedTitleWrites()[0];
+  if (failed) throw new ConversationTitleSaveError(failed[1].writeError);
+}
 
 /** Refetch backend facts; events arriving during a read queue one fresh read. */
 export function invalidateConversationTitle(
@@ -165,7 +243,7 @@ export async function refreshConversationTitles(
               patch(key, {
                 value,
                 durable: current.durable || !!value.title,
-                error: current.failedTitle ? current.error : undefined,
+                error: current.writeError,
               });
             }
             // An empty title does not imply that the durable thread is absent.
@@ -183,7 +261,7 @@ export async function refreshConversationTitles(
             !entry(key).renaming &&
             entry(key).revision === revisions[index]
           )
-            patch(key, { error: errorMessage(error) });
+            patch(key, { error: entry(key).writeError ?? errorMessage(error) });
         });
       })
       .finally(() => {
@@ -202,7 +280,18 @@ export async function refreshConversationTitles(
   await Promise.all(waiting);
 }
 
-export async function renameConversationTitle(
+export function renameConversationTitle(
+  canvasId: string,
+  threadId: string,
+  raw: string,
+  isDraft: boolean,
+): Promise<void> {
+  return trackTitleWrite(
+    performConversationTitleRename(canvasId, threadId, raw, isDraft),
+  );
+}
+
+async function performConversationTitleRename(
   canvasId: string,
   threadId: string,
   raw: string,
@@ -225,6 +314,7 @@ export async function renameConversationTitle(
     revision,
     renaming: true,
     error: undefined,
+    writeError: undefined,
     failedTitle: undefined,
   });
   try {
@@ -256,6 +346,7 @@ export async function renameConversationTitle(
         renaming: false,
         revision: revision + 1,
         error: errorMessage(error),
+        writeError: errorMessage(error),
         failedTitle: title,
       });
     throw error;
@@ -272,35 +363,44 @@ export function flushPendingConversationTitle(
   if (active) return active;
   if (!useConversationTitleStore.getState().pending[key])
     return Promise.resolve();
-  const request = (async () => {
-    while (useConversationTitleStore.getState().pending[key]) {
-      const title = useConversationTitleStore.getState().pending[key];
-      try {
-        const value = await setConversationTitle(canvasId, threadId, { title });
-        if (useConversationTitleStore.getState().pending[key] !== title)
-          continue;
-        patch(key, {
-          value,
-          durable: true,
-          error: undefined,
-          revision: entry(key).revision + 1,
-        });
-        useConversationTitleStore.setState((state) => {
-          const pending = { ...state.pending };
-          delete pending[key];
-          return { pending };
-        });
-      } catch (error) {
-        patch(key, {
-          error:
+  const request = trackTitleWrite(
+    (async () => {
+      while (useConversationTitleStore.getState().pending[key]) {
+        const title = useConversationTitleStore.getState().pending[key];
+        try {
+          const value = await setConversationTitle(canvasId, threadId, {
+            title,
+          });
+          if (useConversationTitleStore.getState().pending[key] !== title)
+            continue;
+          patch(key, {
+            value,
+            durable: true,
+            error: undefined,
+            writeError: undefined,
+            revision: entry(key).revision + 1,
+          });
+          useConversationTitleStore.setState((state) => {
+            const pending = { ...state.pending };
+            delete pending[key];
+            return { pending };
+          });
+        } catch (error) {
+          if (useConversationTitleStore.getState().pending[key] !== title)
+            continue;
+          const failure =
             error instanceof ApiError && error.status === 404
               ? undefined
-              : errorMessage(error),
-        });
-        break;
+              : errorMessage(error);
+          patch(key, {
+            error: failure,
+            writeError: failure,
+          });
+          break;
+        }
       }
-    }
-  })().finally(() => saves.delete(key));
+    })().finally(() => saves.delete(key)),
+  );
   saves.set(key, request);
   return request;
 }
@@ -321,6 +421,17 @@ export async function retryConversationTitle(
   canvasId: string,
   threadId: string,
 ) {
+  if (pendingPersistenceError) {
+    try {
+      useConversationTitleStore.setState({});
+    } catch (error) {
+      console.error(
+        '[conversation-title] Could not persist pending titles:',
+        error,
+      );
+      return;
+    }
+  }
   const failed = entry(conversationTitleKey(canvasId, threadId)).failedTitle;
   if (failed) {
     // The error remains observable in the store if the explicit retry fails.
@@ -359,3 +470,7 @@ export function needsConversationTitleRefresh(
     (!!current.durable && !current.value.title)
   );
 }
+
+pageLifecycle.register('conversation-titles', {
+  flush: drainConversationTitleWrites,
+});

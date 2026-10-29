@@ -46,9 +46,11 @@ vi.mock('./storage/index.js', async (importOriginal) => {
   };
 });
 
+import { setRequestIdentity } from './identity/request.js';
 import { getStructuredStore } from './storage/index.js';
 import { activateWorkspacePath } from './workspace-activation.js';
 import workspaceRoutes from './workspace.route.js';
+import { registerLocalTestIdentity } from '../test-support/local-identity.js';
 
 import type * as StorageModule from './storage/index.js';
 import type * as WorkspaceActivationModule from './workspace-activation.js';
@@ -59,6 +61,7 @@ const spaces = vi.fn(() => ({ list: vi.fn(), worldId }));
 
 async function buildApp() {
   const app = fastify();
+  registerLocalTestIdentity(app);
   await app.register(workspaceRoutes, { prefix: '/workspace' });
   await app.ready();
   return app;
@@ -87,6 +90,36 @@ beforeEach(() => {
 });
 
 describe('workspace Space repository integration', () => {
+  it('advertises World only to a per-Space caller who may read it', async () => {
+    workspaceState.configured = true;
+    const app = fastify();
+    app.addHook('onRequest', async (request) => {
+      setRequestIdentity(request, {
+        principal: { principalId: 'carol', kind: 'user' },
+        member: true,
+        owner: false,
+        access: {
+          can: async () => request.headers['x-world'] === 'yes',
+          claim: async () => {},
+        },
+      });
+    });
+    await app.register(workspaceRoutes, { prefix: '/workspace' });
+    try {
+      const world = async (header: string) =>
+        (
+          await app.inject({
+            url: '/workspace',
+            headers: { 'x-world': header },
+          })
+        ).json().worldCanvasId;
+      expect(await world('no')).toBeNull();
+      expect(await world('yes')).toBe('world-id');
+    } finally {
+      await app.close();
+    }
+  });
+
   it('reads the configured World id from the Space repository', async () => {
     workspaceState.configured = true;
     const app = await buildApp();

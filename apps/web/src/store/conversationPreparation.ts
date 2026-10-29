@@ -2,12 +2,14 @@
 // Licensed under the MIT license.
 
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { createJSONStorage, persist } from 'zustand/middleware';
 
 import {
   isAgentWorkingDirectory,
   MAX_AGENT_WORKING_DIR_PATH_LENGTH,
 } from '@huabu/shared/agent-working-directory';
+
+import { desktopSpaceStorage } from '@/utils/desktopStorage';
 
 import { rememberConversationAgentBinding } from './acpProfilesStore';
 import useCanvasStore from './canvasStore';
@@ -23,6 +25,7 @@ import {
   resolveConversationOwnerSource,
   saveConversationWorkingDirectoryOverride,
   saveConversationDraft,
+  validateConversationView,
 } from './conversationOwner';
 
 import type { ChatSession } from '@/hooks/useChatSession';
@@ -62,6 +65,7 @@ export const useConversationPreparationStore = create<PreparationState>()(
     }),
     {
       name: 'huabu-conversation-preparation',
+      storage: createJSONStorage(desktopSpaceStorage),
       partialize: ({ directories }) => ({ directories }),
       merge: (persisted, current) => {
         const raw = (persisted as Partial<PreparationState> | undefined)
@@ -245,7 +249,7 @@ export async function saveConversationAgent(
     chat.setAgentBinding(
       session.threadId,
       choice.binding,
-      session.canvasId || undefined,
+      session.ownerCanvasId || undefined,
     );
     chat.setThreadLastAction(session.threadId, choice.mode);
   } finally {
@@ -297,6 +301,9 @@ export async function runConversationControl(
     try {
       if (session.conversationView) {
         await awaitConversationDraft(session.conversationView);
+        if (session.canvasId !== session.ownerCanvasId) {
+          await validateConversationView(session.conversationView);
+        }
       }
       const target = conversationControlTarget(session);
       attempted = true;

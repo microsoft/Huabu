@@ -107,6 +107,7 @@ describe('ChatInput', () => {
     value = '',
     isStreaming = false,
     submitDisabled = false,
+    queueSubmission = false,
   ) {
     const onSubmit = vi.fn();
     const onChange = vi.fn();
@@ -131,12 +132,62 @@ describe('ChatInput', () => {
             mode="ask"
             isStreaming={isStreaming}
             submitDisabled={submitDisabled}
+            queueSubmission={queueSubmission}
           />
         </ChatSessionProvider>,
       ),
     );
     return { onSubmit, onChange };
   }
+
+  it('queues via Enter and the submit button while retaining a separate Stop action', () => {
+    const { onSubmit } = renderQuotedInput('Next task', true, false, true);
+    expect(container?.querySelector('[aria-label="chat.stop"]')).not.toBeNull();
+    const queueButton = container?.querySelector<HTMLButtonElement>(
+      '[aria-label="chat.addToQueue"]',
+    );
+    expect(queueButton?.disabled).toBe(false);
+    act(() => queueButton?.click());
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    const textarea = container?.querySelector('textarea');
+    act(() =>
+      textarea?.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Enter',
+          bubbles: true,
+          cancelable: true,
+        }),
+      ),
+    );
+    expect(onSubmit).toHaveBeenCalledTimes(2);
+    act(() => {
+      textarea?.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Enter',
+          shiftKey: true,
+          bubbles: true,
+        }),
+      );
+      textarea?.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Enter',
+          isComposing: true,
+          bubbles: true,
+        }),
+      );
+    });
+    expect(onSubmit).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['', '   '])('does not queue an empty draft %j', (value) => {
+    const { onSubmit } = renderQuotedInput(value, true, false, true);
+    const queueButton = container?.querySelector<HTMLButtonElement>(
+      '[aria-label="chat.addToQueue"]',
+    );
+    expect(queueButton?.disabled).toBe(true);
+    act(() => queueButton?.click());
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
 
   it('keeps the draft editable while history blocks both button and keyboard submission', () => {
     const { onSubmit } = renderQuotedInput('Unsent draft', false, true);

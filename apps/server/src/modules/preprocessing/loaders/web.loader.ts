@@ -25,6 +25,8 @@ import { Readability } from '@mozilla/readability';
 import { parseHTML } from 'linkedom';
 import TurndownService from 'turndown';
 
+import { isPublicNetworkOnly, outboundFetch } from '../../security/outbound.js';
+
 import type { IDocumentLoader, LoadResult } from './loader.interface.js';
 
 // ===================================
@@ -444,7 +446,7 @@ async function fetchHtmlWithRetry(
     );
 
     try {
-      const response = await fetch(url, {
+      const response = await outboundFetch(url, {
         method: 'GET',
         headers: {
           'User-Agent':
@@ -554,7 +556,8 @@ function looksLikeBotChallenge(html: string, headers?: Headers): boolean {
 async function fetchViaElectron(url: string): Promise<string | null> {
   const endpoint = process.env.HUABU_ELECTRON_FETCH_URL;
   const token = process.env.HUABU_ELECTRON_FETCH_TOKEN;
-  if (!endpoint || !token) return null;
+  // The desktop shell fetches without the public-network check.
+  if (!endpoint || !token || isPublicNetworkOnly()) return null;
   try {
     const response = await fetch(endpoint, {
       method: 'POST',

@@ -14,7 +14,7 @@ import useCanvasStore from '@/store/canvasStore';
 import { openPreviewNode } from '@/store/previewWorkspace/actions';
 
 import { getAccentTokens } from '../design/accentTokens';
-import { resolveNodeAccent } from '../design/nodeAccentPolicy';
+import { nodeAccentToken } from '../design/nodeAccentPolicy';
 import { getMissingFileKind, MissingFileBanner } from '../MissingFileBanner';
 import { NodeWrapper } from '../NodeWrapper';
 import { noteSurfaceStyle } from '../note/noteDesign';
@@ -100,7 +100,7 @@ export const OfficeNode = memo(
 
     // Accent tokens — mirror PreviewCard so the office card sits
     // visually consistent next to the rest of the node types.
-    const resolvedAccent = resolveNodeAccent('office', data.style?.accent);
+    const resolvedAccent = nodeAccentToken('office', data.style?.accent);
     const accentTokens = resolvedAccent
       ? getAccentTokens(resolvedAccent)
       : null;

@@ -27,7 +27,7 @@ describe('shared content spacing', () => {
   it.each([200, 400, 406, 600, 1000])(
     'preserves PDF/Web width scaling at %s, independently of height',
     (width) => {
-      const scale = (width - 4) / 400;
+      const scale = (width - 2) / 400;
       const spacing = nodeContentSpacingForWidth(width);
       expect(spacing.padding).toBeCloseTo(16 * scale);
       expect(spacing.imageTextGap).toBeCloseTo(12 * scale);

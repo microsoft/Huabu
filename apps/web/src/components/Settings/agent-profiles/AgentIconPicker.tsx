@@ -57,6 +57,7 @@ export function AgentIconPicker({
           // Override the Button's default lucide-sized icon (~13px) and tighten
           // the icon-only padding so the avatar fills the trigger.
           className="rounded-full p-0.5 [&_svg]:h-5 [&_svg]:w-5"
+          tooltipWrapperClassName="flex"
           aria-label={t('settings.agentIcon.change', { alias })}
           title={t('settings.agentIcon.change', { alias })}
         >

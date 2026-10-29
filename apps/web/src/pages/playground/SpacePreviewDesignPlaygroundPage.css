@@ -234,7 +234,7 @@
 }
 .sp-design-unavailable {
   margin: 12px 0 0;
-  color: var(--warning);
+  color: var(--warning-fg);
   font-size: 12px;
 }
 .sp-design-notes {

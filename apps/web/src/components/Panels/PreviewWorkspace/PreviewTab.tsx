@@ -89,7 +89,8 @@ function usePreviewTabPresentation(
   );
   const isNode = target.kind === 'node';
   const chatTitle = useConversationTitleStore((state) => {
-    if (target.kind !== 'chat') return undefined;
+    if (target.kind !== 'chat' && target.kind !== 'conversation')
+      return undefined;
     return getConversationTitle(target.canvasId, target.threadId, state).title;
   });
   const label =
@@ -101,15 +102,20 @@ function usePreviewTabPresentation(
       : chatTitle || t('chat.newConversation');
   const Icon = isNode
     ? getNodeIcon(node?.type, node?.data)
-    : target.kind === 'url'
-      ? Globe
-      : MessageCircle;
+    : target.kind === 'conversation'
+      ? getNodeIcon('question')
+      : target.kind === 'url'
+        ? Globe
+        : MessageCircle;
   const accessibleName = isNode
     ? `${title} (${node?.type ?? 'node'})`
     : target.kind === 'url'
       ? target.url
       : title;
-  const nodeType = CANVAS_NODE_TYPES.find((type) => type === node?.type);
+  const nodeType =
+    target.kind === 'conversation'
+      ? 'question'
+      : CANVAS_NODE_TYPES.find((type) => type === node?.type);
   const officeFormat = OFFICE_FORMATS.find(
     (format) => format === node?.data.format,
   );
@@ -134,7 +140,8 @@ function usePreviewTabPresentation(
     tabDescription: target.kind === 'url' ? target.url : title,
     typeLabel,
     Icon,
-    canRename: target.kind === 'chat' || !!node,
+    canRename:
+      target.kind === 'chat' || target.kind === 'conversation' || !!node,
   };
 }
 

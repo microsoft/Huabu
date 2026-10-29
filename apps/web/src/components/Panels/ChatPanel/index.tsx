@@ -33,7 +33,6 @@ import { useInternalSlashCommands } from '@/hooks/useInternalSlashCommands';
 import { useAcpProfilesStore } from '@/store/acpProfilesStore';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import useCanvasStore from '@/store/canvasStore';
-import { useChatPreferencesStore } from '@/store/chatPreferencesStore';
 import {
   selectThreadBinding,
   selectThreadHistoryLoaded,
@@ -45,7 +44,7 @@ import {
 import { findPendingPermissionRequest } from '@/store/chatTypes';
 import {
   acknowledgeConversationResult,
-  resolveConversationOwnerSource,
+  useConversationOwnerSource,
 } from '@/store/conversationOwner';
 import {
   resolveConversationPreparation,
@@ -64,7 +63,10 @@ import {
   useConversationTitleStore,
 } from '@/store/conversationTitleStore';
 import { useLLMStore } from '@/store/llmStore';
-import { messageListViewKey } from '@/store/previewWorkspace/scrollMemory';
+import {
+  messageListViewKey,
+  previewTargetKey,
+} from '@/store/previewWorkspace/scrollMemory';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 import { snapshotAgentIcon } from '@/utils/agentIcon';
 import { resolveConnectedDevice } from '@/utils/agentletDevice';
@@ -89,9 +91,10 @@ import { useChatHistory } from '../../../hooks/useChatHistory';
 import { MessageList } from '../../Messages/MessageList';
 import { SidebarPanel } from '../SidebarPanel';
 
-import type { AgentIcon, AgentMode, CanvasNodeId } from '@huabu/shared';
+import type { AgentMode, CanvasNodeId } from '@huabu/shared';
 
 interface ChatPanelProps {
+  ownerUnavailable?: boolean;
   isActive?: boolean;
   activationId?: number;
   isCollapsed?: boolean;
@@ -120,6 +123,7 @@ interface ChatPanelProps {
 }
 
 export const ChatPanel = ({
+  ownerUnavailable = false,
   isActive = true,
   activationId,
   isCollapsed,
@@ -150,6 +154,7 @@ export const ChatPanel = ({
   // (their mode is ACP-managed), so they pin to ask. Falls back to ask
   // for legacy nodes that pre-date the `@` picker.
   const { threadId, ownerCanvasId } = session;
+  const remote = session.canvasId !== ownerCanvasId;
   const lastAction = useChatStore((state) =>
     selectThreadLastAction(state, threadId),
   );
@@ -157,15 +162,12 @@ export const ChatPanel = ({
 
   const viewingQuestionNodeId =
     activeConversationView?.conversationOwner.nodeId;
-  const conversationOwnerSource = useCanvasStore((state) =>
-    resolveConversationOwnerSource(
-      state.canvasId,
-      state.nodes,
-      activeConversationView,
-    ),
+  const conversationOwnerSource = useConversationOwnerSource(
+    activeConversationView,
   );
   const ownerScopeReady =
-    !activeConversationView || conversationOwnerSource !== undefined;
+    !ownerUnavailable &&
+    (!activeConversationView || conversationOwnerSource !== undefined);
   // "Composing" = the viewed question node has never been authored/run yet
   // (its status is still `idle`). Its binding remains mutable unless creation
   // explicitly fixed it; the mode follows this thread's inline pick rather
@@ -189,48 +191,30 @@ export const ChatPanel = ({
   const observedToken = conversationOwnerSource?.invocationToken;
   const observedStatus = conversationOwnerSource?.status;
   const observedViewed = conversationOwnerSource?.viewed;
-  useEffect(() => {
-    if (!activeConversationView || !activelyViewingOwner) return;
-    void acknowledgeConversationResult(activeConversationView, {
-      invocationToken: observedToken,
-      status: observedStatus,
-      viewed: observedViewed,
-    }).catch((error) =>
-      console.error('Failed to acknowledge Agent result', error),
-    );
-  }, [
-    activeConversationView,
-    activelyViewingOwner,
-    observedToken,
-    observedStatus,
-    observedViewed,
-  ]);
   // Bind-time avatar snapshot of the viewing question node, used as the
   // fallback icon in the agent chip when the bound external Profile no
   // longer exists — mirrors how the canvas node preserves its identity.
-  const viewingQuestionAgentIcon = useCanvasStore((s) => {
-    if (!viewingQuestionNodeId) return undefined;
-    const node = s.nodes.find((n) => n.id === viewingQuestionNodeId);
-    const d = node?.data as { agentIcon?: AgentIcon } | undefined;
-    return d?.agentIcon;
-  });
+  const viewingQuestionAgentIcon = conversationOwnerSource?.agentIcon;
 
   // The viewing question node's authored label, used as the panel title
   // when replaying so the header reflects *which* question is open rather
   // than a generic "Question Replay". Empty while composing a brand-new
   // node (no content authored yet) — the title falls back accordingly.
-  const viewingQuestionLabel =
-    typeof conversationOwnerSource?.label === 'string'
-      ? conversationOwnerSource.label.trim() || undefined
-      : undefined;
-  const isViewingUserNamedQuestion =
-    conversationOwnerSource?.labelSource === 'user';
   const tryRename = useCanvasStore((s) => s.tryRename);
   const canRenameQuestion = ownerScopeReady;
   const titleKey = conversationTitleKey(ownerCanvasId, threadId);
-  const cachedTitle = useConversationTitleStore(
-    (state) => getConversationTitle(ownerCanvasId, threadId, state).title,
+  const titleValue = useConversationTitleStore(
+    useShallow((state) => getConversationTitle(ownerCanvasId, threadId, state)),
   );
+  const cachedTitle = titleValue.title;
+  const viewingQuestionLabel = remote
+    ? (cachedTitle ?? undefined)
+    : typeof conversationOwnerSource?.label === 'string'
+      ? conversationOwnerSource.label.trim() || undefined
+      : undefined;
+  const isViewingUserNamedQuestion = remote
+    ? titleValue.source === 'user'
+    : conversationOwnerSource?.labelSource === 'user';
   const titleError = useConversationTitleStore(
     (state) => state.entries[titleKey]?.error,
   );
@@ -281,6 +265,57 @@ export const ChatPanel = ({
   // Chat history hook — loads history and handles reconnection
   const historyWindow = useChatHistory(session, setIsLoading, previewTabId);
   const loadOlderHistory = historyWindow?.loadOlderHistory;
+  const isCurrentOwnerHistory = historyWindow?.isCurrentOwnerHistory;
+  const [isLatestVisible, setIsLatestVisible] = useState(false);
+  const hasReadIntent = usePreviewWorkspaceStore((state) => {
+    const tab = state.workspace.tabs[previewTabId];
+    return (
+      !!tab &&
+      state.readIntentByTab[previewTabId] === previewTargetKey(tab.target)
+    );
+  });
+  useEffect(() => {
+    if (
+      !activeConversationView ||
+      !activelyViewingOwner ||
+      !isActive ||
+      !hasReadIntent ||
+      !isCurrentOwnerHistory ||
+      !ownerScopeReady ||
+      !isLatestVisible
+    )
+      return;
+    const acknowledge = () => {
+      if (document.visibilityState !== 'visible' || !document.hasFocus())
+        return;
+      void acknowledgeConversationResult(activeConversationView, {
+        invocationToken: observedToken,
+        status: observedStatus,
+        viewed: observedViewed,
+      }).catch((error) =>
+        console.error('Failed to acknowledge Agent result', error),
+      );
+    };
+    const frame = requestAnimationFrame(acknowledge);
+    window.addEventListener('focus', acknowledge);
+    document.addEventListener('visibilitychange', acknowledge);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener('focus', acknowledge);
+      document.removeEventListener('visibilitychange', acknowledge);
+    };
+  }, [
+    activeConversationView,
+    activelyViewingOwner,
+    isActive,
+    hasReadIntent,
+    isCurrentOwnerHistory,
+    ownerScopeReady,
+    observedToken,
+    observedStatus,
+    observedViewed,
+    isLatestVisible,
+  ]);
 
   // Persistent chat state. Messages are per-thread (see chatStore.ts);
   // every read names this session's thread, so a stream running in another
@@ -288,8 +323,8 @@ export const ChatPanel = ({
   const messages = useChatStore((state) =>
     selectThreadMessages(state, threadId),
   );
-  const completedTurnId = useChatStore(
-    (state) => state.threadsById[threadId]?.completedTurnId,
+  const historyPages = useChatStore(
+    (state) => state.threadsById[threadId]?.historyPages,
   );
   const pendingPermission = useMemo(
     () => findPendingPermissionRequest(messages),
@@ -303,9 +338,6 @@ export const ChatPanel = ({
   );
   const historyPage = useChatStore(
     useShallow((state) => selectThreadHistoryPageState(state, threadId)),
-  );
-  const recentTurnCount = useChatPreferencesStore(
-    (state) => state.recentTurnCount,
   );
   const addNode = useCanvasStore((state) => state.addNode);
   const llmConfig = useLLMStore((state) => state.config);
@@ -475,11 +507,28 @@ export const ChatPanel = ({
     canvasId: ownerCanvasId,
     provider: llmConfig?.provider,
     defaultModelId: llmConfig?.model,
-    enabled: ownerScopeReady && agentBinding.kind !== 'external',
+    enabled:
+      agentBinding.kind !== 'external' &&
+      (!activeConversationView || conversationOwnerSource !== undefined),
     threadHasMessages: activeConversationView
       ? conversationOwnerSource?.bindingState === 'bound'
       : messages.length > 0,
   });
+
+  const handleBuiltinSelection = async (select: () => Promise<void>) => {
+    try {
+      if (!ownerScopeReady) throw new Error(t('chat.settingsUnavailable'));
+      await select();
+      onCommit?.();
+    } catch (error) {
+      toast(
+        error instanceof Error
+          ? t('chat.failedUpdateOptionWithMessage', { message: error.message })
+          : t('chat.failedUpdateOption'),
+        { tone: 'danger' },
+      );
+    }
+  };
 
   // Legacy status names describe cache reads, not live transport health.
   // A failed refresh with a usable snapshot keeps the optimistic green state.
@@ -674,16 +723,17 @@ export const ChatPanel = ({
     }
     if (next.length > 120) return;
     setSavingTitleIdentity(titleIdentity);
-    const save = viewingQuestionNodeId
-      ? tryRename('node', viewingQuestionNodeId, next)
-      : renameConversationTitle(
-          ownerCanvasId,
-          threadId,
-          next,
-          isHistoryLoaded &&
-            !isLoading &&
-            !messages.some((message) => message.role === 'user'),
-        ).then(() => true);
+    const save =
+      viewingQuestionNodeId && !remote
+        ? tryRename('node', viewingQuestionNodeId, next)
+        : renameConversationTitle(
+            ownerCanvasId,
+            threadId,
+            next,
+            isHistoryLoaded &&
+              !isLoading &&
+              !messages.some((message) => message.role === 'user'),
+          ).then(() => true);
     void save
       .then((accepted) => {
         if (currentTitleIdentity.current !== titleIdentity) return;
@@ -716,6 +766,7 @@ export const ChatPanel = ({
     onCommit,
     tryRename,
     viewingQuestionNodeId,
+    remote,
   ]);
 
   const handledRenameNonce = useRef<number | undefined>(undefined);
@@ -747,6 +798,7 @@ export const ChatPanel = ({
   const handleSubmit = useCallback(
     async (e: React.FormEvent, agentMode: AgentMode, draft: string) => {
       e.preventDefault();
+      if (!ownerScopeReady || builtinThreadSettings.saving) return;
       if (!selectThreadHistoryLoaded(useChatStore.getState(), threadId)) return;
       // Strip leading `/<id>` tokens that match a known slash command
       // and forward them as `invokedSkills`. Skill invocation is gated
@@ -785,20 +837,36 @@ export const ChatPanel = ({
         invokedSkills.length > 0 ? invokedSkills : undefined,
       );
     },
-    [agentBinding.kind, knownSlashIds, onCommit, startStream, threadId],
+    [
+      agentBinding.kind,
+      knownSlashIds,
+      onCommit,
+      startStream,
+      threadId,
+      ownerScopeReady,
+      builtinThreadSettings.saving,
+    ],
   );
 
   const handleRetry = useCallback(() => {
+    if (!ownerScopeReady || builtinThreadSettings.saving) return;
     const lastUserMsg = [...messages]
       .reverse()
       .find((message) => message.role === 'user');
     if (lastUserMsg?.role === 'user') {
       void retryStream(lastUserMsg, mode);
     }
-  }, [messages, mode, retryStream]);
+  }, [
+    messages,
+    mode,
+    retryStream,
+    ownerScopeReady,
+    builtinThreadSettings.saving,
+  ]);
 
   // Both presentations share preparation admission and frozen execution identity.
   const preparationEditable =
+    ownerScopeReady &&
     preparation.editable &&
     isHistoryLoaded &&
     !savingAgentDraft &&
@@ -1017,12 +1085,12 @@ export const ChatPanel = ({
         }
       >
         <div
-          className={`flex h-full flex-col gap-2 overflow-visible ${hidePanelHeader ? 'pt-3' : 'pt-1'}`}
+          className={`flex h-full flex-col gap-2 overflow-visible ${remote ? 'pt-0' : hidePanelHeader ? 'pt-3' : 'pt-1'}`}
         >
           {historyError && (
             <div
               role="alert"
-              className="text-danger flex items-center gap-2 px-3 text-xs"
+              className="text-danger-fg flex items-center gap-2 px-3 text-xs"
             >
               <span>
                 {t('chat.historyLoadFailed')}: {historyError}
@@ -1039,7 +1107,7 @@ export const ChatPanel = ({
           {acpConnectionStatus === 'failed' && (
             <div
               role="alert"
-              className="text-danger flex items-start gap-2 px-3 text-xs"
+              className="text-danger-fg flex items-start gap-2 px-3 text-xs"
             >
               <span className="min-w-0 flex-1 wrap-anywhere whitespace-pre-line">
                 {[agentAlias, connectionDescription, connectionError]
@@ -1058,7 +1126,7 @@ export const ChatPanel = ({
           {!activeConversationView && titleError && (
             <div
               role="alert"
-              className="text-danger flex items-center gap-2 px-3 text-xs"
+              className="text-danger-fg flex items-center gap-2 px-3 text-xs"
             >
               <span>
                 {t('chat.titleSaveFailed')}: {titleError}
@@ -1075,15 +1143,19 @@ export const ChatPanel = ({
             </div>
           )}
           <MessageList
+            onLatestVisibleChange={setIsLatestVisible}
             messages={messages}
-            recentTurnCount={recentTurnCount}
+            historyPages={historyPages}
+            onLoadHistoryPage={historyWindow?.loadHistoryPage}
+            onVisibleMessagesChange={historyWindow?.updateHistoryViewport}
+            historyPageError={historyWindow?.historyPageError}
+            onRetryHistoryPage={historyWindow?.retryHistoryPage}
             activationId={activationId}
-            completedTurnId={completedTurnId}
             threadId={threadId}
             isLoading={isLoading}
             isHistoryLoading={!isHistoryLoaded && !historyError}
+            isHistoryReady={isHistoryLoaded}
             hasOlderHistory={historyPage.hasOlderHistory}
-            olderTurnBatchSize={recentTurnCount}
             isLoadingOlderHistory={historyPage.isLoadingOlderHistory}
             olderHistoryError={historyPage.olderHistoryError ?? undefined}
             onLoadOlderHistory={loadOlderHistory}
@@ -1101,16 +1173,13 @@ export const ChatPanel = ({
 
           <div className="px-3 pb-2">
             {pendingPermission ? (
-              <div className="mb-2">
+              <div className="mb-2" inert={ownerUnavailable}>
                 <PermissionTray
                   threadId={threadId}
                   messageId={pendingPermission.messageId}
                   part={pendingPermission.part}
                 />
               </div>
-            ) : null}
-            {ownerCanvasId && threadId ? (
-              <ChangeReviewCard canvasId={ownerCanvasId} threadId={threadId} />
             ) : null}
             <ThreadChatInput
               onSubmit={handleSubmit}
@@ -1119,12 +1188,15 @@ export const ChatPanel = ({
               adjacentNodeSourceId={adjacentNodeSourceId}
               isStreaming={isLoading}
               mode={mode}
-              connectedTop={hasThreadChanges}
+              connectedTop={!remote && hasThreadChanges}
               slashCommands={slashCommands}
               slashLoading={slashLoading}
               onSlashMenuIntent={refreshSlashCommands}
               agentSelectorSlot={
-                <div className="flex min-w-0 items-center">
+                <div
+                  className="flex min-w-0 items-center"
+                  inert={ownerUnavailable}
+                >
                   <AgentSelector
                     currentBinding={agentBinding}
                     currentMode={mode}
@@ -1159,35 +1231,40 @@ export const ChatPanel = ({
                 </div>
               }
               acpSelectorsSlot={
-                agentBinding.kind === 'external' ? (
-                  <AcpSessionSelectors
-                    meta={acpSessionMeta}
-                    source={acpSessionMetaSource}
-                    loading={acpSessionMetaLoading}
-                    error={acpSessionMetaError}
-                    onRetry={refreshAcpSessionMeta}
-                    onSelectMode={handleAcpSelectMode}
-                    onSelectModel={handleAcpSelectModel}
-                    onSelectConfigOption={handleAcpSelectConfigOption}
-                  />
-                ) : (
-                  <BuiltinSessionSelectors
-                    models={builtinThreadSettings.models}
-                    currentModelId={builtinThreadSettings.effectiveModelId}
-                    currentReasoningEffort={
-                      builtinThreadSettings.settings.reasoningEffort
-                    }
-                    loading={builtinThreadSettings.loading}
-                    onSelectModel={async (modelId) => {
-                      await builtinThreadSettings.selectModel(modelId);
-                      onCommit?.();
-                    }}
-                    onSelectReasoningEffort={async (effort) => {
-                      await builtinThreadSettings.selectReasoningEffort(effort);
-                      onCommit?.();
-                    }}
-                  />
-                )
+                <div className="contents" inert={ownerUnavailable}>
+                  {agentBinding.kind === 'external' ? (
+                    <AcpSessionSelectors
+                      meta={acpSessionMeta}
+                      source={acpSessionMetaSource}
+                      loading={acpSessionMetaLoading}
+                      error={acpSessionMetaError}
+                      onRetry={refreshAcpSessionMeta}
+                      onSelectMode={handleAcpSelectMode}
+                      onSelectModel={handleAcpSelectModel}
+                      onSelectConfigOption={handleAcpSelectConfigOption}
+                    />
+                  ) : (
+                    <BuiltinSessionSelectors
+                      models={builtinThreadSettings.models}
+                      currentModelId={builtinThreadSettings.effectiveModelId}
+                      currentReasoningEffort={
+                        builtinThreadSettings.settings.reasoningEffort
+                      }
+                      loading={builtinThreadSettings.loading}
+                      disabled={builtinThreadSettings.saving}
+                      onSelectModel={(modelId) =>
+                        handleBuiltinSelection(() =>
+                          builtinThreadSettings.selectModel(modelId),
+                        )
+                      }
+                      onSelectReasoningEffort={(effort) =>
+                        handleBuiltinSelection(() =>
+                          builtinThreadSettings.selectReasoningEffort(effort),
+                        )
+                      }
+                    />
+                  )}
+                </div>
               }
               // For external (ACP) bindings, defer to the agent's own
               // `session_usage_update`; the internal context-token fetch
@@ -1206,12 +1283,21 @@ export const ChatPanel = ({
               // connection badge above; we keep the input enabled so the
               // user can retry / trigger a re-ensure on the next send.
               submitDisabled={
+                !ownerScopeReady ||
+                builtinThreadSettings.saving ||
                 !isHistoryLoaded ||
                 preparation.pending ||
                 savingAgentDraft ||
                 savingWorkingDirectory
               }
-            />
+            >
+              {!remote && ownerCanvasId && threadId ? (
+                <ChangeReviewCard
+                  canvasId={ownerCanvasId}
+                  threadId={threadId}
+                />
+              ) : null}
+            </ThreadChatInput>
           </div>
         </div>
       </SidebarPanel>

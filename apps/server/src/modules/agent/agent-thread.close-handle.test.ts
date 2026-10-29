@@ -84,6 +84,7 @@ function harness() {
     })();
   });
   const service = new AgentThreadService({
+    hasAcceptedRequest: vi.fn(async () => false),
     resolveAgentNode: async () => null,
     resolveFixedAgentNode: async () => null,
     resolvePersistedExternalBinding: async () => null,

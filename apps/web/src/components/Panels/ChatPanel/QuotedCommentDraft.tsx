@@ -108,7 +108,7 @@ export function QuotedCommentDraft({
             }}
           />
           {invalid ? (
-            <p id={errorId} role="alert" className="text-danger text-xs">
+            <p id={errorId} role="alert" className="text-danger-fg text-xs">
               {t('messages.quotedCommentRequired')}
             </p>
           ) : null}

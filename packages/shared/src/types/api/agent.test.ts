@@ -3,7 +3,11 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { agentRequestSchema, stopThreadResponseSchema } from './agent.js';
+import {
+  agentRequestSchema,
+  stopThreadBodySchema,
+  stopThreadResponseSchema,
+} from './agent.js';
 
 describe('agentRequestSchema input kinds', () => {
   it('accepts node-only lasso requests and retains complete Text and lazy containers', () => {
@@ -378,6 +382,29 @@ describe('agentRequestSchema input kinds', () => {
 });
 
 describe('stopThreadResponseSchema', () => {
+  it('validates request identity and retains inactive acceptance reconciliation', () => {
+    expect(stopThreadBodySchema.safeParse({ requestId: '' }).success).toBe(
+      false,
+    );
+    expect(
+      stopThreadBodySchema.safeParse({ requestId: 'x'.repeat(129) }).success,
+    ).toBe(false);
+    expect(stopThreadBodySchema.parse({ requestId: 'request-a' })).toEqual({
+      requestId: 'request-a',
+    });
+    expect(
+      stopThreadResponseSchema.parse({
+        stopped: false,
+        acceptance: null,
+        request: { id: 'request-a', accepted: true },
+      }),
+    ).toEqual({
+      stopped: false,
+      acceptance: null,
+      request: { id: 'request-a', accepted: true },
+    });
+  });
+
   it('carries durable acceptance when the stopped turn already started', () => {
     expect(
       stopThreadResponseSchema.parse({

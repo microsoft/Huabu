@@ -12,17 +12,20 @@ import {
   selectThreadDraft,
   selectThreadMessages,
   selectThreadQuotedComments,
+  selectThreadQueuedTurns,
   selectThreadExcludeCanvasSelection,
   useChatStore,
 } from '@/store/chatStore';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 
+import { hasAgentStreamClaim } from './agentStreamCoordinator';
 import {
   captureAgentTurnSources,
   createAgentTurnUserMessage,
   dispatchAgentTurn,
   prepareAgentTurn,
   prepareAgentTurnRetry,
+  resumeAgentTurnQueue,
   stopAgentTurn,
 } from './agentTurnController';
 
@@ -64,6 +67,13 @@ export function useAgentStream(
     const target =
       usePreviewWorkspaceStore.getState().workspace.tabs[previewTabId]?.target;
     const view = session.conversationView;
+    if (target?.kind === 'conversation' && view) {
+      return (
+        target.canvasId === session.ownerCanvasId &&
+        target.nodeId === view.conversationOwner.nodeId &&
+        target.threadId === session.threadId
+      );
+    }
     return view
       ? target?.kind === 'node' &&
           target.canvasId === view.presentationAnchor.canvasId &&
@@ -76,18 +86,23 @@ export function useAgentStream(
     async (prompt: string, mode: AgentMode, invokedSkills?: string[]) => {
       const chat = useChatStore.getState();
       const quotedComments = selectThreadQuotedComments(chat, session.threadId);
-      if (
-        (!prompt.trim() && !quotedComments.length) ||
-        selectThreadIsLoading(chat, session.threadId)
-      )
-        return;
+      if (!prompt.trim() && !quotedComments.length) return;
+      if (quotedComments.some((item) => !item.comment.trim())) return;
+      const queuedTurns = selectThreadQueuedTurns(chat, session.threadId);
+      const shouldQueue =
+        selectThreadIsLoading(chat, session.threadId) ||
+        queuedTurns.length > 0 ||
+        hasAgentStreamClaim(session.ownerCanvasId, session.threadId);
       const draft = selectThreadDraft(chat, session.threadId);
       const excludeCanvasSelection = selectThreadExcludeCanvasSelection(
         chat,
         session.threadId,
       );
       const pending = selectThreadPendingAttachments(chat, session.threadId);
-      const excerpt = chat.selectionAttachment;
+      const excerpt =
+        session.canvasId === session.ownerCanvasId
+          ? chat.selectionAttachment
+          : null;
       const previousMessageId = selectThreadMessages(chat, session.threadId).at(
         -1,
       )?.id;
@@ -118,6 +133,19 @@ export function useAgentStream(
           ),
           attachments: [...pending, ...(excerpt ? [excerpt] : [])],
         });
+        if (shouldQueue) {
+          chat.enqueueTurn(session.threadId, {
+            id: createId('queued-turn'),
+            prepared,
+            status: 'pending',
+          });
+          chat.consumeDraft(session.threadId, draft, quotedComments);
+          chat.setExcludeCanvasSelection(session.threadId, false);
+          chat.clearPendingAttachments(session.threadId);
+          if (excerpt) chat.setSelectionAttachment(null);
+          return;
+        }
+        chat.setQueuePaused(session.threadId, false);
         let draftConsumed = true;
         let started = false;
         restoreDraft = () => {
@@ -131,6 +159,10 @@ export function useAgentStream(
           );
           if (restored && excludeCanvasSelection)
             current.setExcludeCanvasSelection(session.threadId, true);
+          if (restored) {
+            for (const attachment of prepared.attachments ?? [])
+              current.addPendingAttachment(session.threadId, attachment);
+          }
           if (!restored && !started) {
             const messages = selectThreadMessages(current, session.threadId);
             const lastMessage = messages.at(-1);
@@ -153,6 +185,8 @@ export function useAgentStream(
         };
         chat.consumeDraft(session.threadId, draft, quotedComments);
         chat.setExcludeCanvasSelection(session.threadId, false);
+        chat.clearPendingAttachments(session.threadId);
+        if (excerpt) chat.setSelectionAttachment(null);
         const result = await dispatchAgentTurn(prepared, {
           canDispatch,
           onStarted: () => {
@@ -160,14 +194,6 @@ export function useAgentStream(
           },
           onAccepted: () => {
             draftConsumed = false;
-            const current = useChatStore.getState();
-            if (
-              selectThreadPendingAttachments(current, session.threadId) ===
-              pending
-            )
-              current.clearPendingAttachments(session.threadId);
-            if (current.selectionAttachment === excerpt)
-              current.setSelectionAttachment(null);
           },
           onAcceptanceRejected: restoreDraft,
         });
@@ -193,6 +219,16 @@ export function useAgentStream(
       mode: AgentMode,
     ) => {
       try {
+        if (
+          message.queuedTurnId &&
+          selectThreadQueuedTurns(
+            useChatStore.getState(),
+            session.threadId,
+          ).some((turn) => turn.id === message.queuedTurnId)
+        ) {
+          resumeAgentTurnQueue(session);
+          return;
+        }
         await dispatchAgentTurn(prepareAgentTurnRetry(session, message, mode), {
           canDispatch,
         });

@@ -396,7 +396,10 @@ export function scheduleScrollToMatch(
     if (root.matches('[data-chat-thread-root]')) {
       if (root.closest('[data-preview-active="false"]')) return false;
       if (!preparedChatRoots.has(root)) {
-        const request = new Event('chat-reveal-search', { cancelable: true });
+        const request = new CustomEvent('chat-reveal-search', {
+          cancelable: true,
+          detail: { source: options?.source },
+        });
         root.dispatchEvent(request);
         if (!request.defaultPrevented) return false;
         preparedChatRoots.add(root);
@@ -404,7 +407,8 @@ export function scheduleScrollToMatch(
       }
       if (
         root.hasAttribute('data-chat-cached-earlier') ||
-        root.hasAttribute('data-chat-has-older') ||
+        (root.hasAttribute('data-chat-has-older') &&
+          !root.hasAttribute('data-chat-virtual-search')) ||
         root.hasAttribute('data-chat-history-loading')
       )
         return false;

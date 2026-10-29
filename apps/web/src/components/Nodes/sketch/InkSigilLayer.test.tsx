@@ -603,7 +603,7 @@ describe('Ink resource picker', () => {
     expect(
       container
         .querySelector('[data-ink-sigil-highlight]')
-        ?.classList.contains('bg-ink-reference-highlight/70'),
+        ?.classList.contains('bg-ink-reference-bg'),
     ).toBe(true);
     const originalLeft = parseFloat(
       container.querySelector<HTMLElement>('[data-ink-sigil-label]')?.style
@@ -958,7 +958,7 @@ describe('Ink resource picker', () => {
         container.querySelector('[role="dialog"]')?.textContent,
       ).not.toContain('Remove reference');
       expect(
-        container.querySelector('[role="dialog"] .text-danger'),
+        container.querySelector('[role="dialog"] .text-danger-fg'),
       ).toBeNull();
       await act(async () => tab('Web').click());
       const replacement = [

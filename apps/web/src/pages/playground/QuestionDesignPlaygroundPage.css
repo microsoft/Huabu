@@ -84,16 +84,16 @@
   border: 1px solid currentColor;
 }
 .qs-state-symbol[data-tone='warning'] {
-  color: var(--warning);
+  color: var(--warning-fg);
 }
 .qs-state-symbol[data-tone='danger'] {
-  color: var(--danger);
+  color: var(--danger-fg);
 }
 .qs-state-symbol[data-tone='info'] {
-  color: var(--info);
+  color: var(--info-fg);
 }
 .qs-state-symbol[data-tone='success'] {
-  color: var(--success);
+  color: var(--success-fg);
 }
 .qs-status-label {
   position: absolute;
@@ -385,19 +385,19 @@
   background: var(--bg-hover);
 }
 .qd-status[data-tone='info'] {
-  color: var(--info);
+  color: var(--info-fg);
   background: var(--info-bg);
 }
 .qd-status[data-tone='warning'] {
-  color: var(--warning);
+  color: var(--warning-fg);
   background: var(--warning-bg);
 }
 .qd-status[data-tone='success'] {
-  color: var(--success);
+  color: var(--success-fg);
   background: var(--success-bg);
 }
 .qd-status[data-tone='danger'] {
-  color: var(--danger);
+  color: var(--danger-fg);
   background: var(--danger-bg);
 }
 .qd-card h3 {
@@ -434,10 +434,10 @@
   align-self: flex-end;
 }
 .qd-card[data-direction='topic'][data-state='approval'] .qd-footer-detail {
-  color: var(--warning);
+  color: var(--warning-fg);
 }
 .qd-card[data-direction='topic'][data-state='error'] .qd-footer-detail {
-  color: var(--danger);
+  color: var(--danger-fg);
 }
 .qd-handoff {
   margin-top: 18px;
@@ -611,7 +611,7 @@
   margin: 14px 0;
 }
 .qd-request > svg {
-  color: var(--warning);
+  color: var(--warning-fg);
   flex-shrink: 0;
 }
 .qd-request p {

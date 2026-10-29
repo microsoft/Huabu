@@ -21,9 +21,11 @@ import { getAccentTokens } from '@/components/Nodes/design/accentTokens';
 import { FRAME_REGION_STYLE } from '@/components/Nodes/frame/frameRegionStyle';
 import { useFrameInternalEdge } from '@/components/Nodes/frame/FrameZoomContext';
 import useCanvasStore from '@/store/canvasStore';
+import { resolveAccentCss } from '@/utils/accentColor';
 import { TEXT_NODE_PADDING_X } from '@/utils/node/nodeFontConfig';
 import { measureTextContent } from '@/utils/node/textMeasure';
 
+import { getEdgeAccent } from './edgeAccent';
 import { getEdgeLabelRenderZ } from './edgeZ';
 
 import type { CanvasEdgeId, EdgeStyle } from '@huabu/shared';
@@ -122,9 +124,7 @@ export function LabelledEdge(props: EdgeProps) {
             labelY={labelY}
             value={edgeStyle.label ?? ''}
             selected={!!selected}
-            edgeStrokeColor={
-              typeof style?.stroke === 'string' ? style.stroke : undefined
-            }
+            edgeStrokeColor={getEdgeAccent(props)}
           />
         </div>
       </EdgeLabelRenderer>
@@ -199,9 +199,7 @@ function EdgeLabelEditor({
   value: string;
   selected: boolean;
   /**
-   * Already CSS-resolved (see `applyEdgeStyle`). Drives the label
-   * border colour when the edge is NOT selected, so the pill always
-   * visually "belongs" to its edge regardless of palette colour.
+   * Stored accent token or literal, retained for theme-aware label variants.
    */
   edgeStrokeColor: string | undefined;
   editing: boolean;
@@ -347,7 +345,7 @@ function EdgeLabelEditor({
   // instead of jumping to info-blue once focus is lost.
   const borderColor = useInfoColors
     ? 'var(--color-info)'
-    : (edgeStrokeColor ??
+    : (resolveAccentCss(edgeStrokeColor) ??
       'var(--xy-edge-stroke, var(--xy-edge-stroke-default))');
   // Border stays deliberately thin so an unselected pill reads as a quiet
   // annotation on its edge rather than a heavy chip — it no longer tracks the

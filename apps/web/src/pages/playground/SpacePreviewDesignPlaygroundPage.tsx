@@ -11,10 +11,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 
-import {
-  ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT,
-  resolveAccent,
-} from '@huabu/shared';
+import { ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT } from '@huabu/shared';
 import { SPACE_SHORTCUT_SIZE } from '@huabu/shared/canvas-engine';
 
 import { Button } from '@/components/Common/Button';
@@ -119,7 +116,7 @@ function SpaceShortcutSpecimen({
     ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT,
     t,
   );
-  const accent = color === 'none' ? null : resolveAccent(color);
+  const accent = color === 'none' ? null : color;
   const boundary = nodeBoundaryForAccent(accent);
   const height =
     2 * (CONVERSATION_CARD_SPACING.padding + boundary.borderWidth) +
@@ -272,7 +269,7 @@ function SpaceShortcutSpecimen({
                 ) : null}
               </span>
               {unavailable ? (
-                <AlertTriangle className="text-warning" aria-hidden />
+                <AlertTriangle className="text-warning-fg" aria-hidden />
               ) : null}
             </Button>
             {selected

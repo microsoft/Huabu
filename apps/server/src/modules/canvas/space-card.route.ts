@@ -13,6 +13,7 @@ import {
 import { publishCanvasUpdate } from './canvas-sync.js';
 import { withCanvasMutex } from './write-coordinator.js';
 import { agentThreadService } from '../agent/agent-thread.service.js';
+import { canReadSpace } from '../security/space-access.js';
 import { getStructuredStore, space } from '../storage/index.js';
 import { canvasAcpNamespace } from '../workspace/paths.js';
 import { acquireWorkspaceOperationLease } from '../workspace.js';
@@ -79,6 +80,10 @@ export function registerSpaceCardRoutes(app: FastifyInstance): void {
         [...new Set(parsed.data.canvasIds)].map(
           async (canvasId): Promise<[string, SpaceCardSnapshot]> => {
             try {
+              // A Space the caller may not read is indistinguishable from a
+              // missing one.
+              if (!(await canReadSpace(request, canvasId)))
+                return [canvasId, { status: 'missing' }];
               const handle = space(canvasId);
               const record = await handle.read();
               if (!record) return [canvasId, { status: 'missing' }];

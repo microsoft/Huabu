@@ -121,11 +121,13 @@ Chat fragment comments are distinct from all three Canvas pointing signals. The 
 
 ### 4.1 Anchored conversation ownership
 
-The web retains `AgentConversationView` for anchored Question conversations. Its `presentationAnchor` and `conversationOwner` identify the same Canvas and node, with the owner also carrying `threadId`. Validation requires that Canvas to be active and the live Question's thread to match. Legacy World `nodeRef` presentation and its source-reference resolver are removed; a Space Preview cannot open a source-owned conversation in the host Canvas.
+The web retains `AgentConversationView` for anchored Question conversations. Its `presentationAnchor` and `conversationOwner` identify the same Canvas and node, with the owner also carrying `threadId`. A Space-card Agent badge can present that existing conversation in the host Canvas without changing its owner. `ChatSession.canvasId` identifies the presentation Canvas; `ownerCanvasId` remains the execution Canvas. Local validation checks the live Question's thread; remote validation reads bounded metadata from `GET /api/agent/owner/:threadId?canvasId=...`, verifies the canonical node/thread association and does not realize the Agent. This reuses ChatPanel rather than restoring the removed World `nodeRef` projection.
 
 History, reconnect, `/api/agent`, tools, lifecycle writes, binding/mode, and change records use the conversation owner's Canvas. The Question is sent as `anchorNodeId`; Canvas selection is included only when it belongs to that same Canvas. Unbound Chat has no anchored conversation view and uses its session Canvas.
 
-First-turn composition requires `status: idle` and no non-empty authored `content` on the ordinary Question. No separately resolved World-reference content flag participates in this decision.
+First-turn composition requires `status: idle` and no non-empty authored `content` on the ordinary Question. The remote metadata projection carries only `hasAuthoredContent`, not the content body, to preserve the same decision without loading the source Canvas.
+
+Remote presentation excludes the host Canvas's live selection, partial Ink, global excerpt, adjacent-preview context and node-mention candidates. This isolation is applied at both composer presentation and submission capture; hiding chips alone is not sufficient. Uploaded attachments and generated-media URLs resolve against the owner Canvas. Existing conversation attachments and quoted comments remain thread-scoped. Canvas-specific actions require entering the source Space, and node-reference clicks navigate there explicitly. Cross-Space node references and optional source-Canvas addressing are deferred.
 
 For every anchored `/api/agent` request, the server resolves `(canvasId, threadId)` to the authoritative Question owner before constructing the envelope. A client anchor that differs from that node, or an anchor for a thread with no Question owner, is rejected; the resolved node also supplies the effective persisted mode and fixed binding policy.
 

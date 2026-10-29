@@ -689,6 +689,7 @@ export function applyEdgeStyle(edge: Edge, style?: EdgeStyle): Edge {
   if (!style) {
     return {
       ...edge,
+      data: { ...edge.data, edgeStyle: { stroke: DEFAULT_EDGE_STROKE_TOKEN } },
       style: {
         ...edge.style,
         stroke: resolveAccent(DEFAULT_EDGE_STROKE_TOKEN) ?? undefined,

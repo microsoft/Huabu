@@ -16,6 +16,7 @@ import type { Node } from '@xyflow/react';
 
 const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
+  openConversation: vi.fn(),
   rename: vi.fn(),
   setSpaceTitle: vi.fn(),
   refreshTitles: vi.fn(),
@@ -46,6 +47,9 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key, i18n: { language: 'en' } }),
 }));
 vi.mock('react-router-dom', () => ({ useNavigate: () => mocks.navigate }));
+vi.mock('@/store/previewWorkspace/actions', () => ({
+  openSpaceConversation: mocks.openConversation,
+}));
 vi.mock('./useSpaceShortcutTarget', () => ({
   useSpaceShortcutTarget: () => mocks.target,
 }));
@@ -209,9 +213,9 @@ function open() {
 }
 
 function editTitle(value: string) {
-  const input = host.querySelector('input');
+  const input = host.querySelector('textarea');
   const setter = Object.getOwnPropertyDescriptor(
-    HTMLInputElement.prototype,
+    HTMLTextAreaElement.prototype,
     'value',
   )?.set;
   if (!input || !setter) throw new Error('Title editor is unavailable');
@@ -258,7 +262,7 @@ describe('Space Shortcut production node', () => {
     act(() => retry?.click());
     expect(mocks.target.retry).toHaveBeenCalledOnce();
     act(() => rename?.click());
-    expect(host.querySelector('input')).not.toBeNull();
+    expect(host.querySelector('textarea')).not.toBeNull();
   });
 
   it('hides Retry from More when healthy and disables Rename for missing targets', () => {
@@ -309,7 +313,7 @@ describe('Space Shortcut production node', () => {
     },
   );
 
-  it('opens the chosen conversation through the existing node deep link, retaining return navigation', () => {
+  it('opens the chosen original conversation without navigating away from the parent', () => {
     mocks.activity.activity = [
       {
         nodeId: 'node-agent-1',
@@ -332,13 +336,13 @@ describe('Space Shortcut production node', () => {
     );
     expect(button).not.toBeNull();
     act(() => button?.click());
-    expect(mocks.navigate).toHaveBeenCalledExactlyOnceWith(
-      '/canvas/target?node=node-agent-2',
-      {
-        state: { returnToSpace: 'source', workspaceId: 'workspace' },
-      },
+    expect(mocks.openConversation).toHaveBeenCalledExactlyOnceWith(
+      'target',
+      'node-agent-2',
+      'thread-2',
     );
-    expect(host.querySelector('input')).toBeNull();
+    expect(mocks.navigate).not.toHaveBeenCalled();
+    expect(host.querySelector('textarea')).toBeNull();
   });
   it.each(['shortcut', 'child', 'world'])(
     'shows a small leading Space icon on %s cards without changing width',
@@ -362,7 +366,7 @@ describe('Space Shortcut production node', () => {
           }),
         ),
       );
-      expect(host.querySelector('input')).not.toBeNull();
+      expect(host.querySelector('textarea')).not.toBeNull();
       expect(host.querySelector('[data-space-type-icon]')).toBe(marker);
       expect(mocks.state.nodes[0].style?.width).toBe(360);
     },
@@ -394,7 +398,7 @@ describe('Space Shortcut production node', () => {
         }),
       ),
     );
-    expect(host.querySelector('input')?.value).toBe('Research');
+    expect(host.querySelector('textarea')?.value).toBe('Research');
     const input = editTitle('Renamed');
     act(() =>
       input.dispatchEvent(
@@ -416,7 +420,7 @@ describe('Space Shortcut production node', () => {
       expectedTitle: 'Research',
     });
     expect(mocks.setSpaceTitle).toHaveBeenCalledWith('target', 'Renamed');
-    expect(host.querySelector('input')).toBeNull();
+    expect(host.querySelector('textarea')).toBeNull();
     expect(mocks.navigate).not.toHaveBeenCalled();
   });
 
@@ -439,7 +443,7 @@ describe('Space Shortcut production node', () => {
       ),
     );
     expect(mocks.navigate).not.toHaveBeenCalled();
-    expect(host.querySelector('input')).toBeNull();
+    expect(host.querySelector('textarea')).toBeNull();
   });
 
   it('keeps the draft and displays save failures; Escape does not save', async () => {
@@ -458,7 +462,7 @@ describe('Space Shortcut production node', () => {
         new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
       ),
     );
-    expect(host.querySelector('input')?.value).toBe('New title');
+    expect(host.querySelector('textarea')?.value).toBe('New title');
     expect(host.querySelector('[role="alert"]')?.textContent).toBe(
       'spacePreview.renameFailed',
     );
@@ -468,7 +472,7 @@ describe('Space Shortcut production node', () => {
       ),
     );
     expect(mocks.rename).toHaveBeenCalledTimes(1);
-    expect(host.querySelector('input')).toBeNull();
+    expect(host.querySelector('textarea')).toBeNull();
   });
 
   it('marks ordinary shortcuts after the name, not in the summary or on owned entries', () => {

@@ -40,7 +40,6 @@ import {
   ACCENT_NONE_TOKEN,
   ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT,
   isAccentToken,
-  resolveAccent,
   type AccentToken,
 } from '@huabu/shared';
 
@@ -128,11 +127,9 @@ const INLINE_MARK_ICONS: Record<MilkdownInlineMark, LucideIcon> = {
 const BACKGROUND_COLOR_PICKER_OPTIONS: readonly ColorPreset[] =
   ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT.map((option) => {
     if (!isAccentToken(option.token)) return option;
-    const accent = resolveAccent(option.token);
-    if (!accent) return option;
     return {
       ...option,
-      value: getAccentTokens(accent).highlightBg,
+      value: getAccentTokens(option.token).highlightBg,
     };
   });
 
@@ -164,9 +161,7 @@ function colorCssForAccentToken(
   kind: 'text' | 'background',
 ): string | null {
   if (!token) return null;
-  const accent = resolveAccent(token);
-  if (!accent) return null;
-  const tokens = getAccentTokens(accent);
+  const tokens = getAccentTokens(token);
   return kind === 'text' ? tokens.fg : tokens.highlightBg;
 }
 

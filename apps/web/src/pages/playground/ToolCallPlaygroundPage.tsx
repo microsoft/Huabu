@@ -379,7 +379,7 @@ export default function ToolCallPlaygroundPage() {
           </p>
         </div>
         {error ? (
-          <span className="text-danger text-xs font-medium">{error}</span>
+          <span className="text-danger-fg text-xs font-medium">{error}</span>
         ) : (
           <span className="text-fg-subtle text-xs">
             {messages.length} message{messages.length === 1 ? '' : 's'}

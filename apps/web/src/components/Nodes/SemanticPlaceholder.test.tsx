@@ -44,7 +44,7 @@ describe('Text-only minimal layer', () => {
       expect(label.getAttribute('aria-hidden')).toBe('false');
       expect(left).toBeLessThan(6);
       expect(width).toBeGreaterThanOrEqual(12);
-      expect(left * 2 + width).toBeCloseTo((240 - 4) * zoom);
+      expect(left * 2 + width).toBeCloseTo((240 - 2) * zoom);
       expect(container.querySelector('[data-study-title]')?.textContent).toBe(
         title,
       );
@@ -70,11 +70,11 @@ describe('Text-only minimal layer', () => {
   });
 
   it.each([
-    [96, 3.5, true],
-    [88, 2.5, true],
-    [72, 0.5, true],
-    [68, 0, true],
-    [67, 0, false],
+    [96, 3.75, true],
+    [88, 2.75, true],
+    [72, 0.75, true],
+    [66, 0, true],
+    [65, 0, false],
   ])(
     'uses reduced screen-space vertical inset for a %spx high Note',
     (height, inset, visible) => {

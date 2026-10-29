@@ -12,8 +12,8 @@
  *
  * Semantic-token discipline (matches design-system §2.1):
  *   pending     → text-fg-muted   (no special color)
- *   in_progress → text-info       (active)
- *   completed   → text-success    (done)
+ *   in_progress → text-info-fg       (active)
+ *   completed   → text-success-fg    (done)
  *   priority badge uses tonal pills, no raw hex.
  */
 
@@ -100,9 +100,13 @@ export function PlanCard({ entries }: PlanCardProps) {
               >
                 <span className="mt-0.5 shrink-0">
                   {entry.status === 'completed' ? (
-                    <Check size={12} className="text-success" />
+                    <Check size={12} className="text-success-fg" />
                   ) : entry.status === 'in_progress' ? (
-                    <Loading layout="inline" size="xs" className="text-info" />
+                    <Loading
+                      layout="inline"
+                      size="xs"
+                      className="text-info-fg"
+                    />
                   ) : (
                     <Circle size={12} className="text-fg-muted" />
                   )}
@@ -122,7 +126,7 @@ export function PlanCard({ entries }: PlanCardProps) {
                   <span
                     className={`text-fg-subtle bg-bg-default ml-auto rounded-full px-1.5 py-0.5 text-[10px] ${
                       entry.priority === 'high'
-                        ? 'text-warning'
+                        ? 'text-warning-fg'
                         : 'text-fg-subtle'
                     }`}
                   >

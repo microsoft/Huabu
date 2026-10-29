@@ -8,27 +8,21 @@
 .qzc-study[data-palette='theme'] {
   --warning-light: #f7c85c;
   --warning-bg: #fef6e7;
-  --warning-bg-hover: #fbe7ad;
   --success: #16a34a;
   --success-light: #6faf4f;
   --success-bg: #f0fdf4;
-  --success-bg-hover: #dcfce7;
   --danger: #e43636;
   --danger-light: #cf8181;
-  --danger-bg-hover: #fee2e2;
 }
 /* Both comparison modes use the unchanged production dark palette. */
 .dark .qzc-study[data-palette='theme'] {
   --warning-light: inherit;
   --warning-bg: inherit;
-  --warning-bg-hover: inherit;
   --success: inherit;
   --success-light: inherit;
   --success-bg: inherit;
-  --success-bg-hover: inherit;
   --danger: inherit;
   --danger-light: inherit;
-  --danger-bg-hover: inherit;
 }
 .qzc-palette-preview {
   display: grid;

@@ -322,7 +322,7 @@ describe('resolvePasteClipboard', () => {
       name: 'legacy auto',
       height: undefined,
       heightMode: undefined,
-      expected: 56,
+      expected: 52,
       mode: 'auto',
     },
     {

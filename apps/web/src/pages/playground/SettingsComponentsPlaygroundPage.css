@@ -59,7 +59,7 @@
   padding: 3px 8px;
   border-radius: 6px;
   background: var(--success-bg);
-  color: var(--success);
+  color: var(--success-fg);
   font-size: 12px;
   white-space: nowrap;
 }

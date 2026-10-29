@@ -63,7 +63,10 @@ import {
 import { useWorkspaceStore } from '@/store/workspaceStore';
 import { copyToClipboard } from '@/utils/io/clipboard';
 import { resolveGeometryEdit } from '@/utils/node/geometry';
-import { QUESTION_NODE_DEFAULT_FONT_SIZE } from '@/utils/node/nodeFontConfig';
+import {
+  QUESTION_NODE_DEFAULT_FONT_SIZE,
+  TEXT_NODE_DEFAULT_FONT_SIZE,
+} from '@/utils/node/nodeFontConfig';
 import { buildNodeDeepLink } from '@/utils/nodeDeepLink';
 
 import {
@@ -172,7 +175,7 @@ function ToolbarTypeButton({
       }
       className={`nodrag nopan flex shrink-0 items-center justify-center rounded select-none ${
         active
-          ? 'text-info bg-info-bg enabled:hover:bg-info-bg'
+          ? 'text-info-fg bg-info-bg enabled:hover:bg-info-bg'
           : 'text-fg-muted hover:bg-hover hover:text-fg-default'
       } ${dragEnabled && !disabled ? 'cursor-grab active:cursor-grabbing' : ''}`}
       style={{
@@ -443,7 +446,7 @@ export const NodeFloatingToolbar = memo(
         {type === 'text' && (
           <>
             <TextFontSizePicker
-              value={data.style?.fontSize ?? 16}
+              value={data.style?.fontSize ?? TEXT_NODE_DEFAULT_FONT_SIZE}
               onApply={(fontSize) =>
                 updateNodeData(id, { style: { ...data.style, fontSize } })
               }
@@ -641,7 +644,7 @@ export const NodeFloatingToolbar = memo(
 
             <DropdownMenuItem
               icon={<Trash2 />}
-              className="text-danger"
+              className="text-danger-fg"
               onClick={() => deleteNodes([id])}
             >
               {t('actions.delete')}

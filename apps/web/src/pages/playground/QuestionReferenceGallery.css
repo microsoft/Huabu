@@ -107,15 +107,15 @@
 }
 .qi-card[data-appearance][data-tone='warning'] {
   --qg-fill: var(--warning-bg);
-  --qg-strong: var(--warning-bg-hover);
+  --qg-strong: var(--warning-bg);
 }
 .qi-card[data-appearance][data-tone='success'] {
   --qg-fill: var(--success-bg);
-  --qg-strong: var(--success-bg-hover);
+  --qg-strong: var(--success-bg);
 }
 .qi-card[data-appearance][data-tone='danger'] {
   --qg-fill: var(--danger-bg);
-  --qg-strong: var(--danger-bg-hover);
+  --qg-strong: var(--danger-bg);
 }
 .qi-card[data-appearance='compact'],
 .qi-card[data-appearance='tag'],

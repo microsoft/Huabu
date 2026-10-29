@@ -444,9 +444,9 @@ export function MergedAgentToolRow({
         }
       >
         {isExecuting ? (
-          <Loading layout="inline" size="xs" className="text-info" />
+          <Loading layout="inline" size="xs" className="text-info-fg" />
         ) : isError ? (
-          <XIcon size={12} className="text-danger" />
+          <XIcon size={12} className="text-danger-fg" />
         ) : (
           <Check size={12} className="text-fg-muted" />
         )}
@@ -503,7 +503,7 @@ export function MergedAgentToolRow({
                 />
               ) : (
                 <span
-                  className={entry.ok ? '' : 'text-danger/80'}
+                  className={entry.ok ? '' : 'text-danger-fg'}
                   title={entry.text}
                 >
                   {entry.text || '?'}
@@ -577,7 +577,7 @@ export function MergedAgentToolRow({
                   {entry.ok ? (
                     <Check size={11} className="text-fg-muted/60 shrink-0" />
                   ) : (
-                    <XIcon size={11} className="text-danger shrink-0" />
+                    <XIcon size={11} className="text-danger-fg shrink-0" />
                   )}
                   {entry.ok && entry.nodeId ? (
                     <NodeRef
@@ -586,7 +586,7 @@ export function MergedAgentToolRow({
                     />
                   ) : (
                     <span
-                      className={`truncate ${entry.ok ? '' : 'text-danger/80'}`}
+                      className={`truncate ${entry.ok ? '' : 'text-danger-fg'}`}
                       title={entry.text}
                     >
                       {entry.text || '?'}
@@ -602,8 +602,8 @@ export function MergedAgentToolRow({
                     key={`fail-${i}`}
                     className="text-fg-muted flex items-center gap-1.5 text-xs"
                   >
-                    <XIcon size={11} className="text-danger shrink-0" />
-                    <span className="text-danger/80 truncate" title={msg}>
+                    <XIcon size={11} className="text-danger-fg shrink-0" />
+                    <span className="text-danger-fg truncate" title={msg}>
                       {msg}
                     </span>
                   </div>
@@ -645,10 +645,10 @@ export function MergedAgentToolRow({
                   {entry.ok ? (
                     <Check size={11} className="text-fg-muted/60 shrink-0" />
                   ) : (
-                    <XIcon size={11} className="text-danger shrink-0" />
+                    <XIcon size={11} className="text-danger-fg shrink-0" />
                   )}
                   <span
-                    className={`truncate ${entry.ok ? '' : 'text-danger/80'}`}
+                    className={`truncate ${entry.ok ? '' : 'text-danger-fg'}`}
                     title={entry.text}
                   >
                     {entry.text || '?'}

@@ -2,40 +2,49 @@
 // Licensed under the MIT license.
 
 import { toast } from '@/components/Common/Toast';
+import { pageLifecycle } from '@/utils/pageLifecycle';
 
 import { loadDefaultAgentBinding } from '../acpProfilesStore';
-import useCanvasStore, { settleNodePreprocess } from '../canvasStore';
+import useCanvasStore from '../canvasStore';
 import { createConversation } from '../conversationPreparation';
 import { usePanelStore } from '../panelStore';
 import { findTabByTarget, groupOfTab, normalizePreviewTarget } from './model';
-import {
-  selectActiveNodeId,
-  selectActiveTab,
-  usePreviewWorkspaceStore,
-} from './store';
+import { selectActiveTab, usePreviewWorkspaceStore } from './store';
+
+export function openSpaceConversation(
+  canvasId: string,
+  nodeId: string,
+  threadId: string,
+): string {
+  const preview = usePreviewWorkspaceStore.getState();
+  usePanelStore.getState().requestOpenRightPanel();
+  const tabId = preview.openPreviewTarget({
+    kind: 'conversation',
+    canvasId,
+    nodeId,
+    threadId,
+  });
+  preview.requestChatOpen(tabId, 'bottom');
+  return tabId;
+}
 
 export function openPreviewNode(
   nodeId: string,
-  options?: { transient?: boolean; focusEditor?: boolean },
+  options?: {
+    transient?: boolean;
+    focusEditor?: boolean;
+    markReadIntent?: boolean;
+  },
 ): string {
   const canvas = useCanvasStore.getState();
-  const previousNodeId = selectActiveNodeId(
-    usePreviewWorkspaceStore.getState(),
-  );
-  if (previousNodeId && previousNodeId !== nodeId) {
-    const previous = canvas.nodes.find((node) => node.id === previousNodeId);
-    if (previous?.type === 'note' || previous?.type === 'text') {
-      settleNodePreprocess(previousNodeId);
-    }
-  }
-
   usePanelStore.getState().requestOpenRightPanel();
-  const tabId = usePreviewWorkspaceStore
-    .getState()
-    .openPreviewTarget(
-      { kind: 'node', canvasId: canvas.canvasId, nodeId },
-      { transient: options?.transient ?? true },
-    );
+  const tabId = usePreviewWorkspaceStore.getState().openPreviewTarget(
+    { kind: 'node', canvasId: canvas.canvasId, nodeId },
+    {
+      transient: options?.transient ?? true,
+      markReadIntent: options?.markReadIntent,
+    },
+  );
   const openedNode = canvas.nodes.find((node) => node.id === nodeId);
   if (tabId && openedNode?.type === 'note' && options?.focusEditor !== false) {
     usePreviewWorkspaceStore.getState().requestNodeFocus(tabId);
@@ -70,36 +79,34 @@ export async function openChat(): Promise<string> {
 }
 
 /** Creates a Chat only after defaults load, without stealing a changed UI. */
-export async function openNewChat(
-  groupId?: string,
-  settleTab?: (tabId: string) => void,
-): Promise<string> {
+export async function openNewChat(groupId?: string): Promise<string> {
   const initial = usePreviewWorkspaceStore.getState();
   const canvasId = initial.canvasId || useCanvasStore.getState().canvasId;
   if (!canvasId) return '';
   try {
-    const binding = await loadDefaultAgentBinding();
-    const preview = usePreviewWorkspaceStore.getState();
-    if (
-      useCanvasStore.getState().canvasId !== canvasId ||
-      preview.canvasId !== initial.canvasId ||
-      preview.workspace !== initial.workspace
-    ) {
-      return '';
-    }
-    const group = preview.workspace.groups.find(
-      (entry) => entry.id === (groupId ?? preview.workspace.activeGroupId),
-    );
-    if (!group) return '';
-    const threadId = createConversation({ canvasId, binding });
-    if (group.activeTabId) settleTab?.(group.activeTabId);
-    usePanelStore.getState().requestOpenRightPanel();
-    const tabId = preview.openPreviewTarget(
-      { kind: 'chat', canvasId, threadId },
-      { groupId: group.id },
-    );
-    usePanelStore.getState().requestFocusChatInput(threadId);
-    return tabId;
+    return await pageLifecycle.run('updating', async () => {
+      const binding = await loadDefaultAgentBinding();
+      const preview = usePreviewWorkspaceStore.getState();
+      if (
+        useCanvasStore.getState().canvasId !== canvasId ||
+        preview.canvasId !== initial.canvasId ||
+        preview.workspace !== initial.workspace
+      ) {
+        return '';
+      }
+      const group = preview.workspace.groups.find(
+        (entry) => entry.id === (groupId ?? preview.workspace.activeGroupId),
+      );
+      if (!group) return '';
+      const threadId = createConversation({ canvasId, binding });
+      usePanelStore.getState().requestOpenRightPanel();
+      const tabId = preview.openPreviewTarget(
+        { kind: 'chat', canvasId, threadId },
+        { groupId: group.id },
+      );
+      usePanelStore.getState().requestFocusChatInput(threadId);
+      return tabId;
+    });
   } catch (error) {
     toast(error instanceof Error ? error.message : String(error), {
       tone: 'danger',
@@ -126,19 +133,21 @@ export function openPreviewUrl(
         nodeId: sourceNodeId,
       })
     : sourceThreadId
-      ? findTabByTarget(preview.workspace, {
+      ? (findTabByTarget(preview.workspace, {
           kind: 'chat',
           canvasId,
           threadId: sourceThreadId,
-        })
+        }) ??
+        Object.values(preview.workspace.tabs).find(
+          (tab) =>
+            tab.target.kind === 'conversation' &&
+            tab.target.threadId === sourceThreadId,
+        ))
       : null;
   const groupId = source
     ? groupOfTab(preview.workspace, source.id)?.id
     : undefined;
   if (source) {
-    if (source.target.kind === 'node') {
-      settleNodePreprocess(source.target.nodeId);
-    }
     preview.promoteTab(source.id);
   }
   usePanelStore.getState().requestOpenRightPanel();
@@ -152,12 +161,5 @@ export function closeActivePreviewNode(): void {
   const target = activeTab?.target;
   if (target?.kind !== 'node') return;
 
-  const node = useCanvasStore
-    .getState()
-    .nodes.find((candidate) => candidate.id === target.nodeId);
-  preview.closeTab(activeTab.id, () => {
-    if (node?.type === 'note' || node?.type === 'text') {
-      settleNodePreprocess(node.id);
-    }
-  });
+  preview.closeTab(activeTab.id);
 }

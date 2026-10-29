@@ -14,6 +14,7 @@ import {
   useChatStore,
 } from '@/store/chatStore';
 import { usePanelStore } from '@/store/panelStore';
+import { pageLifecycle } from '@/utils/pageLifecycle';
 
 import { ChatContextSources } from './ChatContextSources';
 import { ContextUsageRing } from './ContextUsageRing';
@@ -35,6 +36,8 @@ export interface ChatInputProps {
   onCommit?: () => void;
   onStop: () => void;
   isStreaming?: boolean;
+  /** Submit a snapshot to the thread queue instead of starting a turn. */
+  queueSubmission?: boolean;
   /** Current built-in mode. Affects placeholder + the value submitted to `onSubmit`. */
   mode: AgentMode;
   /**
@@ -106,6 +109,7 @@ export const ChatInput = ({
   onCommit,
   onStop,
   isStreaming = false,
+  queueSubmission = false,
   mode,
   slashCommands = [],
   slashLoading = false,
@@ -132,7 +136,11 @@ export const ChatInput = ({
   useAutoSizeTextArea(textareaRef, value);
 
   // Pending attachments belong to the thread this composer is sending to.
-  const { threadId, canvasId } = useChatSession();
+  const {
+    threadId,
+    ownerCanvasId: canvasId,
+    canvasId: presentationCanvasId,
+  } = useChatSession();
   const quotedComments = useChatStore((state) =>
     selectThreadQuotedComments(state, threadId),
   );
@@ -203,41 +211,43 @@ export const ChatInput = ({
     async (file: File) => {
       if (!canvasId) return;
       try {
-        if (file.type.startsWith('image/')) {
-          const url = await uploadImage(file, canvasId);
-          addPendingAttachment(threadId, {
-            type: 'image',
-            source: 'upload',
-            url,
-            label: file.name || t('chat.attachmentFallbackImage'),
-          });
-        } else if (file.type === 'application/pdf') {
-          const url = await uploadPdf(file, canvasId);
-          addPendingAttachment(threadId, {
-            type: 'pdf',
-            source: 'upload',
-            url,
-            label: file.name || t('chat.attachmentFallbackPdf'),
-            filename: file.name,
-          });
-        } else {
-          // Read text content for text-based files
-          const isText =
-            file.type.startsWith('text/') ||
-            /\.(md|txt|csv|json|xml|yaml|yml|log)$/i.test(file.name);
-          const textContent = isText ? await file.text() : undefined;
+        await pageLifecycle.run('importing', async () => {
+          if (file.type.startsWith('image/')) {
+            const url = await uploadImage(file, canvasId);
+            addPendingAttachment(threadId, {
+              type: 'image',
+              source: 'upload',
+              url,
+              label: file.name || t('chat.attachmentFallbackImage'),
+            });
+          } else if (file.type === 'application/pdf') {
+            const url = await uploadPdf(file, canvasId);
+            addPendingAttachment(threadId, {
+              type: 'pdf',
+              source: 'upload',
+              url,
+              label: file.name || t('chat.attachmentFallbackPdf'),
+              filename: file.name,
+            });
+          } else {
+            // Read text content for text-based files
+            const isText =
+              file.type.startsWith('text/') ||
+              /\.(md|txt|csv|json|xml|yaml|yml|log)$/i.test(file.name);
+            const textContent = isText ? await file.text() : undefined;
 
-          const url = await uploadImage(file, canvasId);
-          addPendingAttachment(threadId, {
-            type: 'file',
-            source: 'upload',
-            url,
-            content: textContent,
-            label: file.name || t('chat.attachmentFallbackFile'),
-            filename: file.name,
-          });
-        }
-        onCommit?.();
+            const url = await uploadImage(file, canvasId);
+            addPendingAttachment(threadId, {
+              type: 'file',
+              source: 'upload',
+              url,
+              content: textContent,
+              label: file.name || t('chat.attachmentFallbackFile'),
+              filename: file.name,
+            });
+          }
+          onCommit?.();
+        });
       } catch (err) {
         console.error('Failed to upload file:', err);
       }
@@ -288,9 +298,11 @@ export const ChatInput = ({
 
   // Dynamic placeholder based on mode
   const currentPlaceholder =
-    mode === 'operate'
-      ? t('chat.operatePlaceholder')
-      : (placeholder ?? t('chat.inputPlaceholder'));
+    canvasId !== presentationCanvasId
+      ? t('remoteConversation.placeholder')
+      : mode === 'operate'
+        ? t('chat.operatePlaceholder')
+        : (placeholder ?? t('chat.inputPlaceholder'));
 
   // Handle Enter key for submission and ArrowUp/ArrowDown for prompt history
   const handleKeyDown: React.KeyboardEventHandler<HTMLTextAreaElement> = (
@@ -353,9 +365,7 @@ export const ChatInput = ({
 
     if (e.key !== 'Enter') return;
     if (e.shiftKey) return;
-    // While a turn is streaming the input stays editable, but Enter must not
-    // send: the visible action is Stop, and the draft is held for next round.
-    if (isStreaming) return;
+    if (isStreaming && !queueSubmission) return;
     if (isSubmitDisabled) return;
 
     e.preventDefault();
@@ -366,7 +376,7 @@ export const ChatInput = ({
   // Handle form submission
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isStreaming && !isSubmitDisabled) {
+    if ((!isStreaming || queueSubmission) && !isSubmitDisabled) {
       onSubmit(e, mode);
     }
   };
@@ -380,7 +390,7 @@ export const ChatInput = ({
       <form onSubmit={handleSubmit} className="w-full">
         <div
           data-chat-input-surface
-          className={`group/composer focus-within:border-info focus-within:ring-info/15 relative border px-3 pt-3 pb-2 transition-colors focus-within:ring-2 ${connectedTop ? 'rounded-t-none rounded-b-2xl' : 'rounded-2xl'} ${isDragOver ? 'border-edge-default bg-info-bg' : 'border-edge-default bg-surface'}`}
+          className={`group/composer focus-within:border-info focus-within:ring-info-bg relative border px-3 pt-3 pb-2 transition-colors focus-within:ring-2 ${connectedTop ? 'rounded-t-none rounded-b-2xl' : 'rounded-2xl'} ${isDragOver ? 'border-edge-default bg-info-bg' : 'border-edge-default bg-surface'}`}
         >
           {mention.open ? <NodeMentionMenu mention={mention} /> : null}
           <ChatContextSources
@@ -479,21 +489,28 @@ export const ChatInput = ({
                 >
                   <Square />
                 </Button>
-              ) : (
+              ) : null}
+              {!isStreaming || queueSubmission ? (
                 <Button
                   variant="solid"
                   shape="pill"
                   iconOnly
                   size="md"
                   type="submit"
-                  title={t('chat.sendMessage')}
+                  title={t(
+                    queueSubmission
+                      ? 'chat.addToQueueHint'
+                      : 'chat.sendMessage',
+                  )}
                   disabled={isSubmitDisabled}
-                  aria-label={t('chat.send')}
+                  aria-label={t(
+                    queueSubmission ? 'chat.addToQueue' : 'chat.send',
+                  )}
                   className="size-7 p-1"
                 >
                   <ArrowUp />
                 </Button>
-              )}
+              ) : null}
             </div>
           </div>
         </div>

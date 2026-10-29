@@ -25,7 +25,7 @@ export interface ChatSession {
   canvasId: string;
   /**
    * The Canvas that owns the conversation. Differs from `canvasId` when a
-   * World reference presents a conversation owned by its source Canvas.
+   * Space card presents a conversation owned by its target Canvas.
    */
   ownerCanvasId: string;
   /**
@@ -38,6 +38,9 @@ export interface ChatSession {
 const ChatSessionContext = createContext<ChatSession | null>(null);
 
 export const ChatSessionProvider = ChatSessionContext.Provider;
+
+/** Shared node renderers also appear outside Chat. */
+export const useOptionalChatSession = () => useContext(ChatSessionContext);
 
 /**
  * Read the session of the enclosing Chat renderer. Throws outside a provider

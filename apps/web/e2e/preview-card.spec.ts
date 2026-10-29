@@ -237,18 +237,18 @@ for (const accent of ['white', 'teal']) {
         bodyOverflow: getComputedStyle(card.parentElement).overflow,
       };
     });
-    expect(geometry.leftGap).toBeCloseTo(2, 3);
-    expect(geometry.rightGap).toBeCloseTo(2, 3);
-    expect(geometry.clipLeftGap).toBeCloseTo(2, 3);
-    expect(geometry.clipRightGap).toBeCloseTo(2, 3);
+    expect(geometry.leftGap).toBeCloseTo(1, 3);
+    expect(geometry.rightGap).toBeCloseTo(1, 3);
+    expect(geometry.clipLeftGap).toBeCloseTo(1, 3);
+    expect(geometry.clipRightGap).toBeCloseTo(1, 3);
     expect(geometry.dividerHeight).toBe('1px');
     expect(geometry.dividerPseudoContent).toBe('none');
-    expect(geometry.border).toBe('2px');
-    expect(geometry.titleInset).toBeCloseTo(2 + 16 * (396 / 400), 1);
+    expect(geometry.border).toBe('1px');
+    expect(geometry.titleInset).toBeCloseTo(1 + 16 * (398 / 400), 1);
     expect(geometry.badgeDelta).toBeCloseTo(0, 3);
     expect(geometry.cardOverflow).toBe('hidden');
     expect(geometry.bodyOverflow).toBe('visible');
-    expect(geometry.cardRadius).toBe(geometry.shellRadius - 2);
+    expect(geometry.cardRadius).toBe(geometry.shellRadius - 1);
     expect(geometry.bottomRadius).toBe(geometry.cardRadius);
     expect(geometry.coverRadius).toBe(geometry.cardRadius);
     expect(geometry.cornerHitsImage).toBe(false);
@@ -280,6 +280,7 @@ for (const nodeType of ['pdf', 'web']) {
                   nodeType,
                   data: {
                     label: 'Reading corners',
+                    style: { accent: 'blue' },
                     ...(nodeType === 'web'
                       ? { src: 'https://reading.example.test/' }
                       : {}),
@@ -319,10 +320,27 @@ for (const nodeType of ['pdf', 'web']) {
         padding: clip.padding,
       };
     });
-    for (const inset of geometry.insets) expect(inset).toBeCloseTo(3, 3);
-    expect(geometry.radiusDifference).toBe(3);
+    for (const inset of geometry.insets) expect(inset).toBeCloseTo(1, 3);
+    expect(geometry.radiusDifference).toBe(1);
     expect(geometry.overflow).toBe('hidden');
     expect(geometry.padding).toBe('0px');
+    for (const dark of [false, true]) {
+      await page.evaluate(
+        (dark) => document.documentElement.classList.toggle('dark', dark),
+        dark,
+      );
+      await expect(shell).toHaveCSS('border-top-width', '1px');
+      await expect(shell).toHaveCSS('border-top-style', 'solid');
+      await expect(shell).toHaveCSS(
+        'border-top-color',
+        dark ? 'rgb(141, 172, 209)' : 'rgb(104, 143, 184)',
+      );
+      await page.screenshot({
+        path: test
+          .info()
+          .outputPath(`${nodeType}-reading-${dark ? 'dark' : 'light'}.png`),
+      });
+    }
   });
 }
 

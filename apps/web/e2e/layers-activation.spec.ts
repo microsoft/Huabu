@@ -575,6 +575,7 @@ for (const theme of ['light', 'dark']) {
         surface: resolveColor('--bg-surface'),
         subtle: resolveColor('--fg-subtle'),
         info: resolveColor('--info'),
+        infoForeground: resolveColor('--info-fg'),
       };
       probe.remove();
       return colors;
@@ -605,7 +606,7 @@ for (const theme of ['light', 'dark']) {
     await editor.press('Enter');
     await expect(row.getByRole('textbox')).toHaveCount(0);
     await expect(label).toHaveText('Inline renamed layer');
-    await expect(icon).toHaveCSS('color', colors.info);
+    await expect(icon).toHaveCSS('color', colors.infoForeground);
     await label.dblclick();
     const renamedEditor = row.getByRole('textbox', {
       name: 'Inline renamed layer',
@@ -1477,7 +1478,7 @@ test('keeps type filters on one line and preserves overflow selections during re
   });
 
   const filterIcons = bar.locator('svg');
-  const themeColor = (token: '--fg-subtle' | '--info') =>
+  const themeColor = (token: '--fg-subtle' | '--info-fg') =>
     page.evaluate((token) => {
       const probe = document.createElement('span');
       probe.style.color = `var(${token})`;
@@ -1507,7 +1508,9 @@ test('keeps type filters on one line and preserves overflow selections during re
   }
 
   await more.click();
-  const filter = page.getByRole('menuitem', { name: /^Filter by / }).first();
+  const filter = page
+    .getByRole('menuitemcheckbox', { name: /^Filter by / })
+    .first();
   const overflowIcon = filter.locator('svg').first();
   await expect(overflowIcon).toHaveCSS('width', '14px');
   await expect(overflowIcon).toHaveCSS('height', '14px');
@@ -1521,7 +1524,7 @@ test('keeps type filters on one line and preserves overflow selections during re
   await filter.click();
   await expect(more).toHaveAccessibleName('More filters (1 active)');
   await expect(
-    page.getByRole('menuitem', {
+    page.getByRole('menuitemcheckbox', {
       name: `Stop filtering by ${filterName}`,
       exact: true,
     }),
@@ -1550,7 +1553,7 @@ test('keeps type filters on one line and preserves overflow selections during re
       exact: true,
     }),
   ).toHaveAttribute('aria-pressed', 'true');
-  const infoColor = await themeColor('--info');
+  const infoColor = await themeColor('--info-fg');
   await expect(
     bar
       .getByRole('button', {

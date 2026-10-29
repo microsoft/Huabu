@@ -41,6 +41,34 @@ afterEach(() => {
 });
 
 describe('agent API host acceptance', () => {
+  it('sends the same request identity to dispatch and Stop', async () => {
+    const fetchMock = respond([{ type: 'end', data: {} }]);
+    await agentApi.streamMessage('Hello', 'thread-a', 'operate', callbacks(), {
+      requestId: 'request-a',
+    });
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({
+      requestId: 'request-a',
+    });
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          stopped: false,
+          acceptance: null,
+          request: { id: 'request-a', accepted: false },
+        }),
+        { headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    await expect(
+      agentApi.stopThread('thread-a', 'canvas-a', 'request-a'),
+    ).resolves.toMatchObject({
+      request: { id: 'request-a', accepted: false },
+    });
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
+      requestId: 'request-a',
+    });
+  });
+
   it('sends quoted comments as structured input rather than interpolating the prompt', async () => {
     const fetchMock = respond([{ type: 'end', data: {} }]);
     const quotedComments = [

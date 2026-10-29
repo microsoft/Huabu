@@ -28,6 +28,7 @@ import {
   restoreMessageListScrollPosition,
 } from '@/components/Messages/messageListScroll';
 import useCanvasStore from '@/store/canvasStore';
+import * as canvasModule from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 import {
   openPreviewNode,
@@ -36,6 +37,7 @@ import {
 import { createEmptyWorkspace } from '@/store/previewWorkspace/model';
 import { messageListViewKey } from '@/store/previewWorkspace/scrollMemory';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
+import { pageLifecycle } from '@/utils/pageLifecycle';
 
 import { PreviewTabDragOverlay } from './PreviewTab';
 import {
@@ -446,45 +448,57 @@ describe('tab strip', () => {
     expect(store().workspace.tabs[sourceId].transient).toBe(true);
   });
 
-  it('promotes the source Chat and opens its URL in that group rather than the focused group', () => {
-    const sourceId = store().openPreviewTarget(
-      { kind: 'chat', canvasId: CANVAS_ID, threadId: 'source-thread' },
-      { transient: true },
-    );
-    const otherId = store().openPreviewTarget(
-      { kind: 'node', canvasId: CANVAS_ID, nodeId: 'other' },
-      { openToSide: true, transient: true },
-    );
-    const otherGroupId = store().workspace.activeGroupId;
-    expect(otherGroupId).not.toBe('g1');
+  it.each(['chat', 'conversation'] as const)(
+    'promotes the source %s and opens its URL in that group rather than the focused group',
+    (kind) => {
+      const sourceId = store().openPreviewTarget(
+        kind === 'chat'
+          ? { kind, canvasId: CANVAS_ID, threadId: 'source-thread' }
+          : {
+              kind,
+              canvasId: 'child',
+              nodeId: 'agent',
+              threadId: 'source-thread',
+            },
+        { transient: true },
+      );
+      const otherId = store().openPreviewTarget(
+        { kind: 'node', canvasId: CANVAS_ID, nodeId: 'other' },
+        { openToSide: true, transient: true },
+      );
+      const otherGroupId = store().workspace.activeGroupId;
+      expect(otherGroupId).not.toBe('g1');
 
-    const urlId = openPreviewUrl(
-      'https://example.com/path',
-      undefined,
-      'source-thread',
-    );
-    const workspace = store().workspace;
-    expect(workspace.tabs[sourceId]).toMatchObject({
-      transient: false,
-      target: { kind: 'chat', threadId: 'source-thread' },
-    });
-    expect(workspace.tabs[urlId].transient).toBe(false);
-    expect(workspace.groups.find((group) => group.id === 'g1')).toMatchObject({
-      tabIds: [sourceId, urlId],
-      activeTabId: urlId,
-    });
-    expect(
-      workspace.groups.find((group) => group.id === otherGroupId),
-    ).toMatchObject({
-      tabIds: [otherId],
-      activeTabId: otherId,
-    });
-    expect(workspace.tabs[otherId].transient).toBe(true);
-    expect(workspace.activeGroupId).toBe('g1');
-    openNode('next-inspection', true);
-    expect(store().workspace.tabs[sourceId]).toBeDefined();
-    expect(store().workspace.tabs[urlId]).toBeDefined();
-  });
+      const urlId = openPreviewUrl(
+        'https://example.com/path',
+        undefined,
+        'source-thread',
+      );
+      const workspace = store().workspace;
+      expect(workspace.tabs[sourceId]).toMatchObject({
+        transient: false,
+        target: { kind, threadId: 'source-thread' },
+      });
+      expect(workspace.tabs[urlId].transient).toBe(false);
+      expect(workspace.groups.find((group) => group.id === 'g1')).toMatchObject(
+        {
+          tabIds: [sourceId, urlId],
+          activeTabId: urlId,
+        },
+      );
+      expect(
+        workspace.groups.find((group) => group.id === otherGroupId),
+      ).toMatchObject({
+        tabIds: [otherId],
+        activeTabId: otherId,
+      });
+      expect(workspace.tabs[otherId].transient).toBe(true);
+      expect(workspace.activeGroupId).toBe('g1');
+      openNode('next-inspection', true);
+      expect(store().workspace.tabs[sourceId]).toBeDefined();
+      expect(store().workspace.tabs[urlId]).toBeDefined();
+    },
+  );
 
   it('promotes a source Chat while deduplicating a URL already in the other group', () => {
     const sourceId = store().openPreviewTarget(
@@ -601,6 +615,31 @@ describe('tab strip', () => {
       overlay?.querySelector('svg:last-child')?.classList.contains('shrink-0'),
     ).toBe(true);
   });
+
+  it.each(['chat', 'conversation'] as const)(
+    'uses the resource icon in the %s drag overlay',
+    (kind) => {
+      const tabId = store().openPreviewTarget(
+        kind === 'chat'
+          ? { kind, canvasId: CANVAS_ID, threadId: 'thread' }
+          : { kind, canvasId: 'child', nodeId: 'agent', threadId: 'thread' },
+      );
+      const tab = store().workspace.tabs[tabId];
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      act(() => root?.render(<PreviewTabDragOverlay tab={tab} />));
+      expect(
+        container
+          .querySelector('svg')
+          ?.classList.contains(
+            kind === 'conversation'
+              ? 'lucide-message-circle-question-mark'
+              : 'lucide-message-circle',
+          ),
+      ).toBe(true);
+    },
+  );
 
   it('hosts the drag overlay portal outside Preview layout transforms', () => {
     container = document.createElement('div');
@@ -881,6 +920,33 @@ describe('tab drag feedback', () => {
 });
 
 describe('activation', () => {
+  it('registers every active split editor for outer-page preparation without closing inner tabs', () => {
+    const registration = vi.spyOn(pageLifecycle, 'register');
+    const settle = vi
+      .spyOn(canvasModule, 'settleNodePreprocess')
+      .mockImplementation(() => {});
+    try {
+      openNode('a');
+      store().splitGroup();
+      openNode('b');
+      render([canvasNode('a', 'Alpha'), canvasNode('b', 'Beta', 'text')]);
+      const before = store().workspace;
+      settle.mockClear();
+      const participant = registration.mock.calls.find(
+        ([key]) => key === 'preview-editors',
+      )?.[1];
+      if (!participant?.settle)
+        throw new Error('Missing preview editor participant');
+      participant.settle();
+      expect(settle.mock.calls.map(([id]) => id)).toEqual(['a', 'b']);
+      expect(store().workspace).toBe(before);
+      expect(Object.keys(store().workspace.tabs)).toHaveLength(2);
+    } finally {
+      settle.mockRestore();
+      registration.mockRestore();
+    }
+  });
+
   it('settles an active authored node before its renderer is left', () => {
     const first = openNode('a');
     openNode('b');

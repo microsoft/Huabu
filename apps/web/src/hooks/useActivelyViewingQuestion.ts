@@ -2,9 +2,10 @@
 // Licensed under the MIT license.
 
 /**
- * "Actively viewing" a question's conversation means BOTH:
+ * "Actively viewing" a question's conversation requires:
  *   1. a Preview Workspace tab presents its node, and
- *   2. that panel is expanded (not collapsed).
+ *   2. that panel is expanded (not collapsed), and
+ *   3. its desktop Space Tab is active (when running in desktop Tabs).
  *
  * A collapsed panel means the user is not actually watching, so a completing
  * run must stay unread and the on-canvas badge must fall back to the node's
@@ -16,8 +17,11 @@
  */
 
 import useCanvasStore from '@/store/canvasStore';
+import { useDesktopTabStore } from '@/store/desktopTabStore';
 import { usePanelStore } from '@/store/panelStore';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
+
+import { getElectronBridge } from './useElectron';
 
 import type {
   CanvasPreviewWorkspace,
@@ -37,11 +41,18 @@ function activeTabs(workspace: CanvasPreviewWorkspace): PreviewTab[] {
 export function useActivelyViewingQuestionNode(nodeId: string): boolean {
   const anchored = usePreviewWorkspaceStore((state) =>
     activeTabs(state.workspace).some(
-      (tab) => tab.target.kind === 'node' && tab.target.nodeId === nodeId,
+      (tab) =>
+        (tab.target.kind === 'node' || tab.target.kind === 'conversation') &&
+        tab.target.nodeId === nodeId,
     ),
   );
   const panelExpanded = usePanelStore((s) => !s.isRightCollapsed);
-  return anchored && panelExpanded;
+  const desktopActive = useDesktopTabStore((state) => state.isActive);
+  return (
+    anchored &&
+    panelExpanded &&
+    (getElectronBridge()?.tabs?.context.role !== 'space' || desktopActive)
+  );
 }
 
 /**
@@ -53,9 +64,20 @@ export function isActivelyViewingQuestion(match: {
   nodeId?: string;
   threadId?: string;
 }): boolean {
+  if (
+    getElectronBridge()?.tabs?.context.role === 'space' &&
+    !useDesktopTabStore.getState().isActive
+  )
+    return false;
   const workspace = usePreviewWorkspaceStore.getState().workspace;
   const canvas = useCanvasStore.getState();
   const matches = activeTabs(workspace).some((tab) => {
+    if (tab.target.kind === 'conversation') {
+      return (
+        tab.target.nodeId === match.nodeId ||
+        tab.target.threadId === match.threadId
+      );
+    }
     if (tab.target.kind !== 'node') return false;
     const targetNodeId = tab.target.nodeId;
     if (match.nodeId === targetNodeId) return true;

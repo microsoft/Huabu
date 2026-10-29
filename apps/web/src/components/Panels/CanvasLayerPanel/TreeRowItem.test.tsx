@@ -140,11 +140,11 @@ describe('Layers row presentation', () => {
     expect(input.getAttribute('aria-label')).toBe('Note');
     expect(input.classList.contains('text-sm')).toBe(true);
     expect(input.classList.contains('text-fg-default')).toBe(true);
-    expect(input.classList.contains('text-info')).toBe(false);
+    expect(input.classList.contains('text-info-fg')).toBe(false);
     expect(input.classList.contains('bg-surface')).toBe(true);
     expect(input.classList.contains('border')).toBe(true);
     expect(input.classList.contains('focus:border-info')).toBe(true);
-    expect(input.classList.contains('focus:ring-info/20')).toBe(true);
+    expect(input.classList.contains('focus:ring-info-light')).toBe(true);
     expect(
       container
         .querySelector('span.pointer-events-none')
@@ -169,13 +169,15 @@ describe('Layers row presentation', () => {
       );
       const icon = container.querySelector('span.pointer-events-none');
       expect(
-        icon?.classList.contains(isSelected ? 'text-info' : 'text-fg-subtle'),
+        icon?.classList.contains(
+          isSelected ? 'text-info-fg' : 'text-fg-subtle',
+        ),
       ).toBe(true);
       expect(icon?.classList.contains('text-fg-muted')).toBe(false);
       expect(
         container
           .querySelector('span.truncate')
-          ?.classList.contains(isSelected ? 'text-info' : 'text-fg-default'),
+          ?.classList.contains(isSelected ? 'text-info-fg' : 'text-fg-default'),
       ).toBe(true);
     },
   );

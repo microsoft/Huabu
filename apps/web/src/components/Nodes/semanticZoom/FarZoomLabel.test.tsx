@@ -118,7 +118,7 @@ describe('shared far-zoom renderer lifecycle', () => {
             label={{ title: 'Title', description: 'Existing description' }}
             active
             width={500}
-            height={(availableHeight + 12) / 0.2 + 4}
+            height={(availableHeight + 12) / 0.2 + 2}
             zoom={0.2}
           />,
         ),

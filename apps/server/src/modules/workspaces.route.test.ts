@@ -199,11 +199,13 @@ vi.mock('./preprocessing/index.js', () => ({
 }));
 
 import workspacesRoutes from './workspaces.route.js';
+import { registerLocalTestIdentity } from '../test-support/local-identity.js';
 
 import type * as WorkspaceActivationModule from './workspace-activation.js';
 
 async function buildApp() {
   const app = fastify();
+  registerLocalTestIdentity(app);
   await app.register(workspacesRoutes, { prefix: '/workspaces' });
   await app.ready();
   return app;

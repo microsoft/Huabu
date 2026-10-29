@@ -5,6 +5,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { ChatSessionProvider } from '@/hooks/useChatSession';
 import useCanvasStore from '@/store/canvasStore';
 import { useWorkspaceStore } from '@/store/workspaceStore';
 
@@ -12,6 +13,8 @@ import { NodeRef } from './NodeRef';
 
 import type { ReactFlowInstance } from '@xyflow/react';
 
+const navigate = vi.hoisted(() => vi.fn());
+vi.mock('react-router-dom', () => ({ useNavigate: () => navigate }));
 vi.mock('react-i18next', () => ({
   initReactI18next: { type: '3rdParty', init: vi.fn() },
   useTranslation: () => ({ t: (key: string) => key }),
@@ -31,6 +34,7 @@ describe('NodeRef canvas navigation', () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
+    navigate.mockClear();
     useWorkspaceStore.setState({
       isReady: true,
       isSyncing: false,
@@ -81,6 +85,33 @@ describe('NodeRef canvas navigation', () => {
     expect(container.textContent).toBe('Renamed');
     act(() => container.querySelector<HTMLElement>('[role="button"]')?.click());
     expect(selectNodes).toHaveBeenCalledWith(['shortcut']);
+  });
+
+  it('opens a remote reference in its source Space instead of selecting a parent node', () => {
+    const selectNodes = vi.fn();
+    useCanvasStore.setState({ canvasId: 'parent', nodes: [], selectNodes });
+    useWorkspaceStore.setState({ workspaceId: 'workspace' });
+    act(() =>
+      root.render(
+        <ChatSessionProvider
+          value={{
+            canvasId: 'parent',
+            ownerCanvasId: 'child',
+            threadId: 'thread',
+            conversationView: null,
+          }}
+        >
+          <NodeRef nodeId="node-source" snapshotLabel="Source reference" />
+        </ChatSessionProvider>,
+      ),
+    );
+    const button = container.querySelector('button');
+    expect(button?.disabled).toBe(false);
+    act(() => button?.click());
+    expect(selectNodes).not.toHaveBeenCalled();
+    expect(navigate).toHaveBeenCalledWith('/canvas/child?node=node-source', {
+      state: { returnToSpace: 'parent', workspaceId: 'workspace' },
+    });
   });
 
   it.each([null, '  ', undefined])(
@@ -207,6 +238,9 @@ describe('NodeRef canvas navigation', () => {
         selectNodes,
       });
       act(() => root.render(<NodeRef nodeId="target" />));
+      expect(container.querySelector('[role="button"]')?.classList).toContain(
+        'text-fg-muted',
+      );
       act(() =>
         container.querySelector<HTMLElement>('[role="button"]')?.click(),
       );

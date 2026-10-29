@@ -3,9 +3,11 @@
 
 import { memo, useMemo } from 'react';
 
-import { resolveAccent, type SketchStroke } from '@huabu/shared';
+import { resolveAccentCss } from '@/utils/accentColor';
 
 import { pointsToPath } from './sketchPath';
+
+import type { SketchStroke } from '@huabu/shared';
 
 type StrokeEmphasis = 'selected' | 'reference';
 
@@ -34,7 +36,7 @@ export const SketchStrokePath = memo(function SketchStrokePath({
     () => pointsToPath(scaledPoints, 1, stroke.size),
     [scaledPoints, stroke.size],
   );
-  const resolvedColor = resolveAccent(stroke.color) ?? stroke.color;
+  const resolvedColor = resolveAccentCss(stroke.color) ?? stroke.color;
 
   return (
     <>
@@ -46,7 +48,7 @@ export const SketchStrokePath = memo(function SketchStrokePath({
           fill="none"
           stroke="var(--color-info)"
           strokeWidth={2}
-          strokeOpacity={emphasis === 'selected' ? 0.7 : 0.45}
+          strokeOpacity={`var(--sketch-${emphasis}-opacity)`}
           strokeLinejoin="round"
           strokeLinecap="round"
           vectorEffect="non-scaling-stroke"

@@ -3,15 +3,25 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { postCanvasExecute, acknowledgeAgentNodeResult } = vi.hoisted(() => ({
-  postCanvasExecute: vi.fn(),
-  acknowledgeAgentNodeResult: vi.fn(),
-}));
+const { postCanvasExecute, acknowledgeAgentNodeResult, getOwner } = vi.hoisted(
+  () => ({
+    postCanvasExecute: vi.fn(),
+    acknowledgeAgentNodeResult: vi.fn(),
+    getOwner: vi.fn(),
+  }),
+);
 
+vi.mock('@/api/agent', async (original) => ({
+  ...(await original<typeof AgentApi>()),
+  getAgentConversationOwner: getOwner,
+}));
 vi.mock('@/api/canvas', async (importOriginal) => ({
   ...(await importOriginal<typeof CanvasApi>()),
   postCanvasExecute,
   acknowledgeAgentNodeResult,
+}));
+vi.mock('@/store/conversationTitleStore', () => ({
+  invalidateConversationTitle: vi.fn(),
 }));
 
 import useCanvasStore from './canvasStore';
@@ -31,7 +41,12 @@ import {
   awaitConversationDraft,
   acknowledgeConversationResult,
 } from './conversationOwner';
+import {
+  refreshConversationOwner,
+  useRemoteConversationOwnerStore,
+} from './remoteConversationOwner';
 
+import type * as AgentApi from '@/api/agent';
 import type * as CanvasApi from '@/api/canvas';
 import type { AgentConversationView } from '@huabu/shared';
 
@@ -56,6 +71,14 @@ beforeEach(() => {
     },
   });
   postCanvasExecute.mockReset();
+  useRemoteConversationOwnerStore.setState({ entries: {} });
+  getOwner.mockReset().mockResolvedValue({
+    canvasId: 'canvas-source',
+    nodeId: 'node-source',
+    threadId: 'thread-source',
+    spaceTitle: 'Source',
+    source: { agentBinding: { kind: 'internal' }, status: 'done' },
+  });
   acknowledgeAgentNodeResult
     .mockReset()
     .mockResolvedValue({ acknowledged: true });
@@ -75,6 +98,7 @@ beforeEach(() => {
   });
   useCanvasStore.getState()._setStateNoAutosave({
     canvasId: 'canvas-source',
+    isLoading: false,
     version: 1,
     nodes: [
       {
@@ -97,6 +121,78 @@ beforeEach(() => {
 });
 
 describe('conversation owner routing', () => {
+  it.each([false, true])(
+    'verifies remote configuration using a read started after the write, with stale poll failure=%s',
+    async (pollFails) => {
+      useCanvasStore.getState()._setStateNoAutosave({
+        canvasId: 'parent',
+        nodes: [],
+      });
+      const oldOwner = {
+        ...ownerView.conversationOwner,
+        spaceTitle: 'Source',
+        source: {
+          agentBinding: { kind: 'internal' as const },
+          agentMode: 'operate' as const,
+        },
+      };
+      const binding = {
+        kind: 'external' as const,
+        profileId: 'new',
+        alias: 'New',
+      };
+      const newOwner = {
+        ...oldOwner,
+        source: { agentBinding: binding, agentMode: 'ask' as const },
+      };
+      let resolvePoll!: (owner: typeof oldOwner) => void;
+      let rejectPoll!: (error: Error) => void;
+      const stale = new Promise<typeof oldOwner>((resolve, reject) => {
+        resolvePoll = resolve;
+        rejectPoll = reject;
+      });
+      let resolveWrite!: (
+        response: Awaited<ReturnType<typeof CanvasApi.postCanvasExecute>>,
+      ) => void;
+      const write = new Promise<
+        Awaited<ReturnType<typeof CanvasApi.postCanvasExecute>>
+      >((resolve) => {
+        resolveWrite = resolve;
+      });
+      const response = await postCanvasExecute();
+      postCanvasExecute.mockClear();
+      postCanvasExecute.mockReturnValueOnce(write);
+      getOwner
+        .mockResolvedValueOnce(oldOwner)
+        .mockReturnValueOnce(stale)
+        .mockResolvedValue(newOwner);
+      const save = saveConversationDraft(ownerView, {
+        agentBinding: binding,
+        agentMode: 'ask',
+      });
+      await vi.waitFor(() =>
+        expect(postCanvasExecute).toHaveBeenCalledTimes(1),
+      );
+      const poll = refreshConversationOwner(
+        'canvas-source',
+        'node-source',
+        'thread-source',
+      );
+      const pollResult = Promise.allSettled([poll]);
+      resolveWrite(response);
+      await Promise.resolve();
+      if (pollFails) rejectPoll(new TypeError('Old poll failed'));
+      else resolvePoll(oldOwner);
+      await pollResult;
+      await expect(save).resolves.toBeUndefined();
+      await expect(awaitConversationDraft(ownerView)).resolves.toBeUndefined();
+      expect(getOwner).toHaveBeenCalledTimes(3);
+      expect(
+        resolveConversationOwnerSource('parent', [], ownerView)?.agentBinding,
+      ).toEqual(binding);
+    },
+  );
+
   it('acknowledges only the observed terminal invocation, never a viewed merge', async () => {
     const view = {
       ...ownerView,
@@ -146,6 +242,11 @@ describe('conversation owner routing', () => {
         threadId: 'draft-thread',
       },
     };
+    getOwner.mockResolvedValue({
+      ...view.conversationOwner,
+      spaceTitle: 'Draft',
+      source: { agentBinding: { kind: 'internal' } },
+    });
     postCanvasExecute.mockResolvedValueOnce({ results: [{ applied: false }] });
     await expect(
       saveConversationDraft(view, {
@@ -502,6 +603,12 @@ describe('conversation owner routing', () => {
     expect(
       shouldComposeConversationOwner({ status: 'idle', content: '' }),
     ).toBe(true);
+    expect(
+      shouldComposeConversationOwner({
+        status: 'idle',
+        hasAuthoredContent: true,
+      }),
+    ).toBe(false);
   });
 
   it('validates the current owner and rejects stale thread identity', async () => {
@@ -515,10 +622,31 @@ describe('conversation owner routing', () => {
     expect(postCanvasExecute).not.toHaveBeenCalled();
   });
 
-  it('rejects a deleted owner or a different active Canvas', async () => {
+  it('validates offscreen ownership remotely and defers live-node checks while loading', async () => {
     useCanvasStore.getState()._setStateNoAutosave({ canvasId: 'canvas-other' });
+    await expect(validateConversationView(ownerView)).resolves.toBeUndefined();
+    useCanvasStore.getState()._setStateNoAutosave({
+      canvasId: 'canvas-source',
+      isLoading: true,
+      nodes: [],
+    });
+    await expect(validateConversationView(ownerView)).resolves.toBeUndefined();
+  });
+
+  it('validates remote ownership without changing the active Canvas and rejects a deleted owner', async () => {
+    useCanvasStore.getState()._setStateNoAutosave({ canvasId: 'canvas-other' });
+    await expect(validateConversationView(ownerView)).resolves.toBeUndefined();
+    expect(getOwner).toHaveBeenCalledWith('canvas-source', 'thread-source');
+    expect(useCanvasStore.getState().canvasId).toBe('canvas-other');
+    getOwner.mockResolvedValueOnce({
+      canvasId: 'canvas-source',
+      nodeId: 'replacement',
+      threadId: 'thread-source',
+      spaceTitle: 'Source',
+      source: { agentBinding: { kind: 'internal' } },
+    });
     await expect(validateConversationView(ownerView)).rejects.toThrow(
-      ConversationIntegrityError,
+      'owner changed',
     );
     useCanvasStore
       .getState()
@@ -526,6 +654,18 @@ describe('conversation owner routing', () => {
     await expect(validateConversationView(ownerView)).rejects.toThrow(
       ConversationIntegrityError,
     );
+  });
+
+  it('rejects mismatched presentation anchors even when the owner is offscreen', async () => {
+    useCanvasStore.getState()._setStateNoAutosave({ canvasId: 'canvas-other' });
+    for (const presentationAnchor of [
+      { canvasId: 'canvas-other', nodeId: 'node-source' },
+      { canvasId: 'canvas-source', nodeId: 'node-other' },
+    ]) {
+      await expect(
+        validateConversationView({ ...ownerView, presentationAnchor }),
+      ).rejects.toThrow(ConversationIntegrityError);
+    }
   });
 
   it('reconciles a routed lifecycle response when its source becomes active', async () => {

@@ -51,7 +51,7 @@ function RuntimeSaveFeedback({
         </p>
       ) : error ? (
         <div className="flex flex-col items-end gap-2">
-          <p role="alert" className="text-danger [overflow-wrap:anywhere]">
+          <p role="alert" className="text-danger-fg [overflow-wrap:anywhere]">
             {error}
           </p>
           {onRetry && (
@@ -384,19 +384,20 @@ export function AgentConnectionSettings() {
           format,
         );
         await copyToClipboard(result.content);
-        setConnectionInfo({ source: result.source, warnings: result.warnings });
-        const warningKey = result.warnings.includes('insecure')
-          ? 'settings.agentletCommandCopiedInsecure'
-          : result.warnings.includes('loopback')
-            ? 'settings.agentletCommandCopiedLoopback'
-            : result.source === 'generated'
-              ? 'settings.agentletCommandCopiedGenerated'
-              : format === 'env-file'
-                ? 'settings.agentletEnvFileCopied'
-                : 'settings.agentletCommandCopied';
+        const warnings = result.warnings.filter(
+          (warning) => warning !== 'insecure',
+        );
+        setConnectionInfo({ source: result.source, warnings });
+        const warningKey = warnings.includes('loopback')
+          ? 'settings.agentletCommandCopiedLoopback'
+          : result.source === 'generated'
+            ? 'settings.agentletCommandCopiedGenerated'
+            : format === 'env-file'
+              ? 'settings.agentletEnvFileCopied'
+              : 'settings.agentletCommandCopied';
         toast(t(warningKey), {
           tone:
-            result.warnings.length > 0 || result.source === 'generated'
+            warnings.length > 0 || result.source === 'generated'
               ? 'warning'
               : 'success',
         });
@@ -440,7 +441,7 @@ export function AgentConnectionSettings() {
             {t('settings.agentletRunConnectionDescription')}
           </p>
           {localAccessOnly ? (
-            <p role="status" className="text-warning mt-2">
+            <p role="status" className="text-warning-fg mt-2">
               {t(localAccessHint)}
             </p>
           ) : null}
@@ -475,15 +476,12 @@ export function AgentConnectionSettings() {
           {connectionInfo &&
             (connectionInfo.source === 'generated' ||
               connectionInfo.warnings.length > 0) && (
-              <div role="status" className="text-warning mt-2 space-y-1">
+              <div role="status" className="text-warning-fg mt-2 space-y-1">
                 {connectionInfo.source === 'generated' && (
                   <p>{t('settings.agentletGeneratedTokenWarning')}</p>
                 )}
                 {connectionInfo.warnings.includes('loopback') && (
                   <p>{t('settings.agentletLoopbackWarning')}</p>
-                )}
-                {connectionInfo.warnings.includes('insecure') && (
-                  <p>{t('settings.agentletInsecureWarning')}</p>
                 )}
               </div>
             )}

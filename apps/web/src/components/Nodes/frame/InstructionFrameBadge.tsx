@@ -44,7 +44,7 @@ export function InstructionFrameBadge({
     <span
       className={clsx(
         'text-fg-inverse pointer-events-auto inline-flex shrink-0 items-center rounded-full leading-none font-semibold shadow-sm',
-        isPrompt ? 'bg-info' : 'bg-success',
+        isPrompt ? 'bg-info-fg' : 'bg-success-fg',
       )}
       style={{
         height,

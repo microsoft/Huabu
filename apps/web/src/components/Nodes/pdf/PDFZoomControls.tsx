@@ -16,7 +16,7 @@ import { PreviewHeaderButton } from '@/components/Nodes/PreviewHeaderButton';
 import type { usePdfZoom } from './usePdfZoom';
 
 const FOCUS_CLASS =
-  'touch-manipulation outline-none focus-visible:ring-2 focus-visible:ring-info-light focus-visible:ring-inset';
+  'touch-manipulation outline-none focus-visible:ring-2 focus-visible:ring-info focus-visible:ring-inset';
 
 export function PDFZoomControls({
   zoom,

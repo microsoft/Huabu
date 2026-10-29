@@ -5,7 +5,10 @@ import { AgentProfileError } from '@agenetes/agent-profile';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { acpProfilesListResponseSchema } from '@huabu/shared';
+
 import acpProfilesRoutes from './profiles.route.js';
+import { registerLocalTestIdentity } from '../../../test-support/local-identity.js';
 
 import type * as ProfileCapabilities from './profile-capabilities.js';
 
@@ -24,7 +27,15 @@ const mocks = vi.hoisted(() => ({
   readCapabilities: vi.fn(),
   discoverCapabilities: vi.fn(),
   connectedIds: new Set(['machine-a', 'remote-machine']),
+  offlineIds: new Set<string>(),
   pickerDeviceId: vi.fn(),
+  deviceNames: vi.fn(() => ({})),
+  renameDevice: vi.fn(),
+}));
+
+vi.mock('./device-names.js', () => ({
+  getDeviceNames: mocks.deviceNames,
+  renameDevice: mocks.renameDevice,
 }));
 
 vi.mock('./picker-device.js', () => ({
@@ -43,10 +54,15 @@ vi.mock('@agenetes/agentlet-host', () => ({
   }),
   getAgentletGateway: () => ({
     discoverHarnesses: mocks.discoverHarnesses,
-    getAgentlets: () =>
-      [...mocks.connectedIds].map((agentletId) => ({
+    getAgentlets: (filter?: { status: string }) =>
+      [
+        ...mocks.connectedIds,
+        ...(filter?.status === 'connected' ? [] : mocks.offlineIds),
+      ].map((agentletId) => ({
         agentletId,
-        status: 'connected',
+        status: mocks.connectedIds.has(agentletId)
+          ? 'connected'
+          : 'disconnected',
         connectedAt: new Date('2026-01-01T00:00:00.000Z'),
         agentletProfile: {
           bridge: { name: 'agentlet', version: '1.0.0' },
@@ -88,6 +104,7 @@ const source = { version: 1, agentletId: 'machine-a', harnessId: 'copilot' };
 let app: FastifyInstance | undefined;
 async function setup() {
   app = Fastify({ logger: false });
+  registerLocalTestIdentity(app);
   await app.register(acpProfilesRoutes, { prefix: '/api/acp' });
   return app;
 }
@@ -96,6 +113,7 @@ afterEach(async () => {
   await app?.close();
   app = undefined;
   vi.resetAllMocks();
+  mocks.offlineIds.clear();
 });
 
 describe('ordinary Profile catalog routes', () => {
@@ -130,6 +148,149 @@ describe('ordinary Profile catalog routes', () => {
     });
     expect(response.statusCode).toBe(400);
     expect(mocks.registry.createProfile).not.toHaveBeenCalled();
+  });
+
+  it('projects offline metadata and persisted names without making their Profiles selectable', async () => {
+    mocks.offlineIds.add('offline');
+    mocks.registry.listProfiles.mockReturnValue([
+      commandProfile,
+      { ...commandProfile, id: 'offline-profile', agentletId: 'offline' },
+    ]);
+    mocks.deviceNames.mockReturnValueOnce({
+      offline: 'Windows workstation',
+      'past-device': 'Previously renamed device',
+    });
+    const server = await setup();
+    const response = await server.inject('/api/acp/profiles');
+    expect(response.statusCode).toBe(200);
+    const body = acpProfilesListResponseSchema.parse(response.json());
+    expect(body.selectableProfileIds).toEqual(['command-1']);
+    expect(
+      body.connectedDevices.map((device) => device.agentletId),
+    ).not.toContain('offline');
+    expect(body.knownDevices).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          agentletId: 'offline',
+          displayName: 'Windows workstation',
+          hostname: 'offline-host',
+          version: '1.0.0',
+        }),
+        { agentletId: 'past-device', displayName: 'Previously renamed device' },
+      ]),
+    );
+    const renamed = await server.inject({
+      method: 'PATCH',
+      url: '/api/acp/devices/offline',
+      payload: { displayName: 'New name' },
+    });
+    expect(renamed.statusCode).toBe(404);
+  });
+  it('renames an exact device without changing Profile identity or aliases', async () => {
+    const server = await setup();
+    const response = await server.inject({
+      method: 'PATCH',
+      url: '/api/acp/devices/machine-a',
+      payload: { displayName: '  My workstation  ' },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ displayName: 'My workstation' });
+    expect(mocks.renameDevice).toHaveBeenCalledExactlyOnceWith(
+      'machine-a',
+      'My workstation',
+    );
+    expect(mocks.registry.patchProfile).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['', 400],
+    [' '.repeat(5), 400],
+    ['x'.repeat(121), 400],
+    ['x'.repeat(120), 200],
+  ])('validates device name %j', async (displayName, status) => {
+    const server = await setup();
+    const response = await server.inject({
+      method: 'PATCH',
+      url: '/api/acp/devices/machine-a',
+      payload: { displayName },
+    });
+    expect(response.statusCode).toBe(status);
+    if (status !== 200) expect(mocks.renameDevice).not.toHaveBeenCalled();
+  });
+
+  it.each(['offline', 'machine-a-host'])(
+    'rejects missing and hostname-only device targets: %s',
+    async (agentletId) => {
+      const server = await setup();
+      const response = await server.inject({
+        method: 'PATCH',
+        url: `/api/acp/devices/${agentletId}`,
+        payload: { displayName: 'Name' },
+      });
+      expect(response.statusCode).toBe(404);
+      expect(mocks.renameDevice).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps device renaming owner-only', async () => {
+    const server = await setup();
+    const response = await server.inject({
+      method: 'PATCH',
+      url: '/api/acp/devices/machine-a',
+      remoteAddress: '203.0.113.5',
+      payload: { displayName: 'Name' },
+    });
+    expect(response.statusCode).toBe(403);
+    expect(mocks.renameDevice).not.toHaveBeenCalled();
+  });
+
+  it('surfaces device-name storage failures', async () => {
+    mocks.renameDevice.mockImplementationOnce(() => {
+      throw new Error('Disk full');
+    });
+    const server = await setup();
+    const response = await server.inject({
+      method: 'PATCH',
+      url: '/api/acp/devices/machine-a',
+      payload: { displayName: 'Name' },
+    });
+    expect(response.statusCode).toBe(500);
+    expect(response.json().code).toBe('device_name_save_failed');
+  });
+
+  it('projects saved names without changing routing, metadata or Profile aliases', async () => {
+    mocks.registry.listProfiles.mockReturnValue([commandProfile]);
+    mocks.deviceNames.mockReturnValueOnce({ 'machine-a': 'Office PC' });
+    const server = await setup();
+    const response = await server.inject('/api/acp/profiles');
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      profiles: [commandProfile],
+      selectableProfileIds: ['command-1'],
+      connectedDevices: [
+        {
+          agentletId: 'machine-a',
+          displayName: 'Office PC',
+          hostname: 'machine-a-host',
+          profileCount: 1,
+        },
+        {
+          agentletId: 'remote-machine',
+          displayName: 'remote-machine-host: linux x64',
+        },
+      ],
+    });
+  });
+
+  it('does not hide unreadable saved names behind default labels', async () => {
+    mocks.registry.listProfiles.mockReturnValue([]);
+    mocks.deviceNames.mockImplementationOnce(() => {
+      throw new Error('Invalid JSON');
+    });
+    const server = await setup();
+    const response = await server.inject('/api/acp/profiles');
+    expect(response.statusCode).toBe(500);
+    expect(response.json().code).toBe('device_names_unavailable');
   });
   it.each([
     ['machine-a', 'machine-a'],

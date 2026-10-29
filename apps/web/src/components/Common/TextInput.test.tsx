@@ -36,6 +36,7 @@ describe('TextInput', () => {
     expect(input.className).toContain('rounded-md');
     expect(input.className).toContain('px-2');
     expect(input.className).toContain('text-xs');
+    expect(input.classList.contains('focus:ring-info')).toBe(true);
   });
 
   it('supports medium density and caller class overrides', () => {

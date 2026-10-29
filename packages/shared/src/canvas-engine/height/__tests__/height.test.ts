@@ -208,8 +208,8 @@ describe('intrinsicToLayoutHeight', () => {
   });
 
   it('keeps the Note minimum in canvas units at every width', () => {
-    expect(intrinsicToLayoutHeight(10, 'note', 400)).toBe(56);
-    expect(intrinsicToLayoutHeight(10, 'note', 200)).toBe(56);
+    expect(intrinsicToLayoutHeight(10, 'note', 400)).toBe(52);
+    expect(intrinsicToLayoutHeight(10, 'note', 200)).toBe(52);
   });
 
   it('does not scale types without a reference width', () => {
@@ -236,7 +236,7 @@ describe('intrinsicToLayoutHeight', () => {
       expect(scale).toBe(1);
       expect(
         autoHeightContentWidth(node({ type: 'note', style: { width } })),
-      ).toBe(width - 4);
+      ).toBe(width - 2);
     }
   });
 
@@ -249,14 +249,14 @@ describe('intrinsicToLayoutHeight', () => {
           measured: { width: 400 },
         }),
       ),
-    ).toBe(796.25);
+    ).toBe(798.25);
     expect(
       autoHeightContentWidth(node({ type: 'note', measured: { width: 600 } })),
-    ).toBe(596);
-    expect(autoHeightContentWidth(node({ type: 'note' }))).toBe(396);
+    ).toBe(598);
+    expect(autoHeightContentWidth(node({ type: 'note' }))).toBe(398);
     expect(
       autoHeightContentWidth(node({ type: 'note', style: { width: NaN } })),
-    ).toBe(396);
+    ).toBe(398);
     expect(
       autoHeightContentWidth(node({ type: 'note', style: { width: 0 } })),
     ).toBe(1);
@@ -433,7 +433,7 @@ describe('materializeAutoHeight', () => {
         },
       }),
     );
-    // 260 content plus 4px shell chrome, quantized.
+    // 260 content plus 2px shell chrome, quantized.
     expect((result.style as { height: number }).height).toBe(264);
   });
 

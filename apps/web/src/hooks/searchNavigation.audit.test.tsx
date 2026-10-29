@@ -279,12 +279,21 @@ describe('source-to-rendered addressing', () => {
     );
     const onMatch = vi.fn();
     const onTimeout = vi.fn();
+    const hash = await hashSearchSource('needle');
+    // Hash registration is asynchronous; establish ambiguity before navigating.
+    await vi.waitFor(() =>
+      expect(
+        Array.from(scope.children, (element) =>
+          element.getAttribute('data-search-source'),
+        ),
+      ).toEqual([hash, hash]),
+    );
     const cancel = scheduleScrollToMatch(() => scope, 'needle', 1, {
-      source: { hash: await hashSearchSource('needle'), offset: 0 },
+      source: { hash, offset: 0 },
       onMatch,
       onTimeout,
     });
-    await vi.waitFor(() => expect(onTimeout).toHaveBeenCalledTimes(1));
+    expect(onTimeout).toHaveBeenCalledTimes(1);
     expect(onMatch).not.toHaveBeenCalled();
     cancel();
     unregister.forEach((cleanup) => cleanup());

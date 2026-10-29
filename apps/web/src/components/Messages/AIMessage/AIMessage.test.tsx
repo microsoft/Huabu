@@ -249,7 +249,7 @@ describe('assistant activity presentation', () => {
   it('retains a failed tool marker without adding ordinary tool icons', () => {
     render([{ ...tool('a'), status: 'failed' }], { isStreaming: false });
     expect(button('Read a').querySelectorAll('svg')).toHaveLength(2);
-    expect(button('Read a').querySelector('.text-danger')).not.toBeNull();
+    expect(button('Read a').querySelector('.text-danger-fg')).not.toBeNull();
   });
 
   it('shows full thinking in a live block while individual tool outputs stay collapsed', () => {

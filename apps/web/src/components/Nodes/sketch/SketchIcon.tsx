@@ -3,7 +3,7 @@
 
 import { memo, useMemo } from 'react';
 
-import { resolveAccent } from '@huabu/shared';
+import { resolveAccentCss } from '@/utils/accentColor';
 
 import { DEFAULT_STROKE_COLOR } from './sketchPath';
 
@@ -40,7 +40,7 @@ export const SketchIcon = memo(function SketchIcon({
       strokes.map((s) => ({
         id: s.id,
         points: s.points.map((p) => `${p[0]},${p[1]}`).join(' '),
-        stroke: resolveAccent(s.color) ?? s.color ?? DEFAULT_STROKE_COLOR,
+        stroke: resolveAccentCss(s.color) ?? s.color ?? DEFAULT_STROKE_COLOR,
       })),
     [strokes],
   );

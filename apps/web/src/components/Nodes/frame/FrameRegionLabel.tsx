@@ -157,9 +157,7 @@ export function FrameRegionLabel({
         boxSizing: 'border-box',
         fontSize: 7,
         color: colors?.fg ?? 'var(--fg-muted)',
-        backgroundColor:
-          colors?.highlightBg ??
-          'color-mix(in srgb, var(--fg-default) 12%, var(--bg-hover))',
+        backgroundColor: colors?.highlightBg ?? 'var(--bg-hover)',
       }}
     >
       {childCount}

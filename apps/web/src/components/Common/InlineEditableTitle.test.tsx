@@ -118,7 +118,7 @@ describe('InlineEditableTitle', () => {
       expect(displayClasses.contains(token)).toBe(true);
       expect(input.classList.contains(token)).toBe(true);
     }
-    expect(input.classList.contains('focus:ring-info-light')).toBe(true);
+    expect(input.classList.contains('focus:ring-info')).toBe(true);
     expect(input.classList.contains('border-transparent')).toBe(false);
     expect(input.maxLength).toBe(120);
     expect(document.activeElement).toBe(input);

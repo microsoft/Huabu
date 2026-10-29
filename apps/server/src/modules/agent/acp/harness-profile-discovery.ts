@@ -13,12 +13,7 @@ import type {
   HarnessDiscoveryParams,
   HarnessDiscoveryResult,
 } from '@agentlet/protocol';
-import type {
-  AcpAgentletDiscoveryErrorDetails,
-  AcpAgentletDiscoveryResponse,
-  CustomData,
-  JsonValue,
-} from '@huabu/shared';
+import type { CustomData, JsonValue } from '@huabu/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
 const SOURCE_KEY = 'discoveredAgent';
@@ -117,193 +112,84 @@ interface DiscoveryOptions {
   onProfilesDiscovered?: (profiles: AgentProfile[]) => void;
 }
 
-export class HarnessProfileDiscoveryError extends Error {
-  constructor(
-    readonly code:
-      | 'agentlet_unavailable'
-      | 'harness_discovery_stale'
-      | 'profile_registry_unavailable'
-      | 'harness_discovery_unsupported'
-      | 'harness_discovery_unavailable'
-      | 'harness_reconciliation_failed',
-    readonly status: 409 | 500 | 503,
-    message: string,
-    readonly details?: AcpAgentletDiscoveryErrorDetails,
-    options?: ErrorOptions,
-  ) {
-    super(message, options);
-  }
-}
-
 export function registerHarnessProfileDiscovery({
   gateway,
   getRegistry,
   log,
   onProfilesDiscovered,
-}: DiscoveryOptions) {
+}: DiscoveryOptions): () => void {
   const generations = new Map<string, number>();
-  const inFlight = new Map<string, Promise<AcpAgentletDiscoveryResponse>>();
   let disposed = false;
 
-  const connectedDevice = (agentletId: string) =>
-    gateway
-      .getAgentlets({ status: 'connected' })
-      .find((candidate) => candidate.agentletId === agentletId);
-
-  const runDiscovery = async (
-    agentletId: string,
-    generation: number | undefined,
-  ): Promise<AcpAgentletDiscoveryResponse> => {
-    const assertCurrent = () => {
-      if (disposed || generations.get(agentletId) !== generation) {
-        throw new HarnessProfileDiscoveryError(
-          'harness_discovery_stale',
-          409,
-          'The device connection changed. Detect installed Agents again.',
-        );
-      }
-      if (!connectedDevice(agentletId)) {
-        throw new HarnessProfileDiscoveryError(
-          'agentlet_unavailable',
-          409,
-          'The selected device is not connected.',
-        );
-      }
-    };
-    assertCurrent();
-    let result: HarnessDiscoveryResult;
-    try {
-      result = await gateway.discoverHarnesses(agentletId, {
-        prepareWorkspaces: true,
-      });
-    } catch (error) {
-      assertCurrent();
-      const unsupported =
-        error instanceof Error &&
-        'code' in error &&
-        error.code === 'harness_discovery_unsupported';
-      throw new HarnessProfileDiscoveryError(
-        unsupported
-          ? 'harness_discovery_unsupported'
-          : 'harness_discovery_unavailable',
-        503,
-        unsupported
-          ? 'Update Agentlet on this device to detect installed Agents.'
-          : 'Agentlet harness detection is unavailable. Try again.',
-        undefined,
-        { cause: error },
-      );
-    }
-    assertCurrent();
+  const discover = async (agentletId: string, generation: number) => {
+    const result = await gateway.discoverHarnesses(agentletId, {
+      prepareWorkspaces: true,
+    });
+    if (disposed || generations.get(agentletId) !== generation) return;
     const registry = getRegistry();
-    if (!registry) {
-      throw new HarnessProfileDiscoveryError(
-        'profile_registry_unavailable',
-        503,
-        'Agent Profile registry is not ready.',
-      );
-    }
-    const response: AcpAgentletDiscoveryResponse = {
-      agentletId,
-      harnesses: result.harnesses
-        .filter((harness) => harness.id !== CUSTOM_COMMAND_WRAPPER_ID)
-        .map((harness) => ({ ...harness, profileStatus: 'skipped' })),
-    };
-    const createdProfileIds: string[] = [];
+    if (!registry) throw new Error('Agent Profile registry is not ready');
 
-    try {
-      for (const harness of response.harnesses) {
-        for (const diagnostic of harness.diagnostics ?? []) {
-          log.warn(
-            { agentletId, harnessId: harness.id, ...diagnostic },
-            '[acp] harness discovery diagnostic',
-          );
-        }
-        if (harness.status !== 'ready') continue;
-        if (!harness.workingDirPath) {
-          log.warn(
-            { agentletId, harnessId: harness.id },
-            '[acp] discovered harness has no usable default workspace',
-          );
-          continue;
-        }
-        // No await between the lookup and the synchronous registry commit.
-        const profiles = registry.listProfiles();
-        const existing = profiles.find((profile) => {
-          const source = parseSource(profile.customData?.[SOURCE_KEY]);
-          return (
-            profile.agentletId === agentletId &&
-            source?.agentletId === agentletId &&
-            source.harnessId === harness.id &&
-            profile.launch.kind === 'acp-harness' &&
-            profile.launch.harnessId === harness.id
-          );
-        });
-        if (existing) {
-          harness.profileStatus = 'existing';
-          harness.profileId = existing.id;
-          continue;
-        }
-        assertCurrent();
-        const connection = connectedDevice(agentletId);
-        const defaultAlias = `${harness.displayName} (${formatAgentletDeviceDisplayName(
-          connection?.agentletProfile?.machine,
-        )})`;
-        const common = {
-          agentletId,
-          alias: profiles.some((profile) => profile.alias === defaultAlias)
-            ? `${defaultAlias} [${harness.id}]`
-            : defaultAlias,
-          ...(harness.id === 'proxy' ? { visible: false } : {}),
-          workingDirPath: harness.workingDirPath,
-          metadata: { cliId: harness.id },
-          customData: {
-            [SOURCE_KEY]: { version: 1, agentletId, harnessId: harness.id },
-          },
-        };
-        const profile = registry.createProfile({
-          ...common,
-          launchKind: 'acp-harness',
-          harnessId: harness.id,
-          ...(harness.capabilities.autoApprove
-            ? { options: { autoApprove: true } }
-            : {}),
-        });
-        createdProfileIds.push(profile.id);
-        harness.profileStatus = 'created';
-        harness.profileId = profile.id;
-        log.info(
-          { agentletId, harnessId: harness.id, profileId: profile.id },
-          '[acp] automatically created Profile',
+    for (const harness of result.harnesses) {
+      if (harness.id === CUSTOM_COMMAND_WRAPPER_ID) continue;
+      for (const diagnostic of harness.diagnostics ?? []) {
+        log.warn(
+          { agentletId, harnessId: harness.id, ...diagnostic },
+          '[acp] harness discovery diagnostic',
         );
       }
-      onProfilesDiscovered?.(registry.listProfiles());
-    } catch (error) {
-      if (error instanceof HarnessProfileDiscoveryError) throw error;
-      throw new HarnessProfileDiscoveryError(
-        'harness_reconciliation_failed',
-        500,
-        'Could not finish creating automatic Profiles. Saved additions are retained; try again.',
-        { createdProfileIds },
-        { cause: error },
+      if (harness.status !== 'ready') continue;
+      if (!harness.workingDirPath) {
+        log.warn(
+          { agentletId, harnessId: harness.id },
+          '[acp] discovered harness has no usable default workspace',
+        );
+        continue;
+      }
+      // No await between the lookup and the synchronous registry commit.
+      const profiles = registry.listProfiles();
+      const existing = profiles.find((profile) => {
+        const source = parseSource(profile.customData?.[SOURCE_KEY]);
+        return (
+          profile.agentletId === agentletId &&
+          source?.agentletId === agentletId &&
+          source.harnessId === harness.id &&
+          profile.launch.kind === 'acp-harness' &&
+          profile.launch.harnessId === harness.id
+        );
+      });
+      if (existing) continue;
+      const connection = gateway
+        .getAgentlets({ status: 'connected' })
+        .find((candidate) => candidate.agentletId === agentletId);
+      const defaultAlias = `${harness.displayName} (${formatAgentletDeviceDisplayName(
+        connection?.agentletProfile?.machine,
+      )})`;
+      const common = {
+        agentletId,
+        alias: profiles.some((profile) => profile.alias === defaultAlias)
+          ? `${defaultAlias} [${harness.id}]`
+          : defaultAlias,
+        ...(harness.id === 'proxy' ? { visible: false } : {}),
+        workingDirPath: harness.workingDirPath,
+        metadata: { cliId: harness.id },
+        customData: {
+          [SOURCE_KEY]: { version: 1, agentletId, harnessId: harness.id },
+        },
+      };
+      const profile = registry.createProfile({
+        ...common,
+        launchKind: 'acp-harness',
+        harnessId: harness.id,
+        ...(harness.capabilities.autoApprove
+          ? { options: { autoApprove: true } }
+          : {}),
+      });
+      log.info(
+        { agentletId, harnessId: harness.id, profileId: profile.id },
+        '[acp] automatically created Profile',
       );
     }
-    return {
-      ...response,
-      harnesses: response.harnesses.filter((entry) => entry.id !== 'proxy'),
-    };
-  };
-
-  const discover = (agentletId: string) => {
-    const current = inFlight.get(agentletId);
-    if (current) return current;
-    const request = runDiscovery(agentletId, generations.get(agentletId));
-    inFlight.set(agentletId, request);
-    const clear = () => {
-      if (inFlight.get(agentletId) === request) inFlight.delete(agentletId);
-    };
-    void request.then(clear, clear);
-    return request;
+    onProfilesDiscovered?.(registry.listProfiles());
   };
 
   const onChanged: Parameters<DiscoveryGateway['onAgentletsChanged']>[0] = ({
@@ -313,9 +199,8 @@ export function registerHarnessProfileDiscovery({
     if (disposed) return;
     const generation = (generations.get(agentletId) ?? 0) + 1;
     generations.set(agentletId, generation);
-    inFlight.delete(agentletId);
     if (status === 'connected') {
-      void discover(agentletId).catch((error: unknown) => {
+      void discover(agentletId, generation).catch((error: unknown) => {
         if (disposed || generations.get(agentletId) !== generation) return;
         log.warn({ agentletId, err: error }, '[acp] harness discovery failed');
       });
@@ -326,11 +211,9 @@ export function registerHarnessProfileDiscovery({
   for (const { agentletId } of gateway.getAgentlets({ status: 'connected' })) {
     onChanged({ agentletId, status: 'connected' });
   }
-  const dispose = () => {
+  return () => {
     disposed = true;
     generations.clear();
-    inFlight.clear();
     unsubscribe();
   };
-  return { discover, dispose };
 }

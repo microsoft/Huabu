@@ -23,6 +23,7 @@ export default defineConfig({
   reporter: 'list',
   use: {
     ...devices['Desktop Chrome'],
+    launchOptions: { ignoreDefaultArgs: ['--hide-scrollbars'] },
     baseURL,
     locale: 'en-US',
     viewport: { width: 1280, height: 800 },

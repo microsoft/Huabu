@@ -46,7 +46,7 @@ export const StructuredDropOverlay = memo(function StructuredDropOverlay() {
             <>
               <div
                 data-track-insert-line
-                className="bg-info/35 absolute rounded-full"
+                className="bg-info absolute rounded-full"
                 style={{
                   left: column ? gap.width / 2 - 0.75 / zoom : 0,
                   top: column ? 0 : gap.height / 2 - 0.75 / zoom,
@@ -56,7 +56,7 @@ export const StructuredDropOverlay = memo(function StructuredDropOverlay() {
               />
               <div
                 data-track-insert-label
-                className="bg-surface text-info border-info/35 absolute flex items-center gap-1 rounded-lg border px-2 py-1 text-sm leading-[18px] font-medium whitespace-nowrap"
+                className="bg-surface text-info-fg border-info absolute flex items-center gap-1 rounded-lg border px-2 py-1 text-sm leading-[18px] font-medium whitespace-nowrap"
                 style={{
                   left: column ? gap.width / 2 : 8 / zoom,
                   top: column ? 0 : gap.height / 2,
@@ -83,8 +83,8 @@ export const StructuredDropOverlay = memo(function StructuredDropOverlay() {
           data-structured-drop={preview.kind}
           className={
             opensTrack
-              ? 'bg-info/10 border-info/50 pointer-events-none absolute flex items-center justify-center border border-dashed'
-              : 'bg-info/5 border-info/35 pointer-events-none absolute border border-dashed'
+              ? 'bg-canvas-overlay-drop border-info pointer-events-none absolute flex items-center justify-center border border-dashed'
+              : 'bg-canvas-overlay-subtle border-info pointer-events-none absolute border border-dashed'
           }
           style={{
             left: preview.x,
@@ -96,7 +96,7 @@ export const StructuredDropOverlay = memo(function StructuredDropOverlay() {
           }}
         >
           {opensTrack ? (
-            <Plus className="text-info" size={20} strokeWidth={2.5} />
+            <Plus className="text-info-fg" size={20} strokeWidth={2.5} />
           ) : null}
         </div>
       </div>

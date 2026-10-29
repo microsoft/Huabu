@@ -7,6 +7,7 @@ import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useCanvasActions } from './useCanvasActions';
+import { Button } from '../components/Common/Button';
 import { ToastContainer } from '../components/Common/Toast';
 
 vi.mock('react-i18next', () => ({
@@ -20,9 +21,10 @@ vi.mock('./useInputMode', () => ({ useEffectiveInputMode: () => 'mouse' }));
 let container: HTMLDivElement;
 let root: Root;
 function ImportControl() {
-  const { onFileChange, isImporting } = useCanvasActions();
+  const { create, onFileChange, isImporting } = useCanvasActions();
   return (
     <>
+      <Button onClick={() => void create()}>Create</Button>
       <input
         type="file"
         onChange={(e) => void onFileChange(e)}
@@ -123,9 +125,39 @@ describe('Space import feedback', () => {
         }),
       ),
     );
-    const router = await renderImport();
-    await selectArchive();
-    expect(router.state.location.pathname).toBe('/canvas/imported-space');
-    expect(document.querySelector('[role="status"]')).toBeNull();
+    const invalidate = vi.fn();
+    window.addEventListener('canvas-list-changed', invalidate);
+    try {
+      const router = await renderImport();
+      await selectArchive();
+      expect(router.state.location.pathname).toBe('/canvas/imported-space');
+      expect(document.querySelector('[role="status"]')).toBeNull();
+      expect(invalidate).toHaveBeenCalledOnce();
+    } finally {
+      window.removeEventListener('canvas-list-changed', invalidate);
+    }
+  });
+
+  it('invalidates the retained Home list after creation', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ canvasId: 'created-space' }), {
+          status: 200,
+        }),
+      ),
+    );
+    const invalidate = vi.fn();
+    window.addEventListener('canvas-list-changed', invalidate);
+    try {
+      const router = await renderImport();
+      const button = container.querySelector('button');
+      if (!button) throw new Error('Create button was not rendered');
+      await act(async () => button.click());
+      expect(router.state.location.pathname).toBe('/canvas/created-space');
+      expect(invalidate).toHaveBeenCalledOnce();
+    } finally {
+      window.removeEventListener('canvas-list-changed', invalidate);
+    }
   });
 });

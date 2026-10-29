@@ -12,8 +12,6 @@ import {
 import { memo, useCallback, useEffect, useState, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { resolveAccent } from '@huabu/shared';
-
 import {
   DropdownMenuItem,
   DropdownMenuSubmenu,
@@ -24,6 +22,7 @@ import useCanvasStore, { settleNodePreprocess } from '@/store/canvasStore.ts';
 import {
   FONT_FAMILY_CSS,
   getTextNodeFontOpts,
+  TEXT_NODE_DEFAULT_FONT_SIZE,
   TEXT_NODE_PADDING_X as NODE_PADDING_X,
   TEXT_NODE_PADDING_Y as NODE_PADDING_Y,
   TEXT_NODE_PLACEHOLDER,
@@ -87,9 +86,9 @@ export const TextNode = memo(
     // NodeWrapper shares Note's subdued accent fill without a painted border;
     // unaccented Text stays transparent. Locally we retain the foreground tint
     // for the editable body independently of hover and selection outlines.
-    const accent = resolveAccent(style.accent);
+    const accent = style.accent;
     const accentTokens = accent ? getAccentTokens(accent) : null;
-    const textColor = accentTokens?.fg ?? undefined;
+    const textColor = accentTokens?.textFg;
 
     const fontOpts = getTextNodeFontOpts(style);
 
@@ -101,10 +100,11 @@ export const TextNode = memo(
       width,
       isEditing,
       content,
-      baseFontSize: 16,
+      baseFontSize: TEXT_NODE_DEFAULT_FONT_SIZE,
       fontSizing: 'proportional',
-      paddingX: NODE_PADDING_X,
-      paddingY: NODE_PADDING_Y,
+      // Preserve the existing padding-to-font ratio for authored font sizes.
+      paddingX: (NODE_PADDING_X * TEXT_NODE_DEFAULT_FONT_SIZE) / 16,
+      paddingY: (NODE_PADDING_Y * TEXT_NODE_DEFAULT_FONT_SIZE) / 16,
       fontOpts,
       placeholder: TEXT_NODE_PLACEHOLDER,
     });
@@ -290,7 +290,7 @@ export const TextNode = memo(
             fontStyle={isItalic ? 'italic' : 'normal'}
             textDecoration={textDecoration}
             color={textColor}
-            textareaClassName="placeholder:text-fg-subtle/30"
+            textareaClassName="placeholder:text-fg-muted"
             containerClassName="overflow-hidden"
           />
         )}

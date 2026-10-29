@@ -8,6 +8,7 @@ import {
   getDeploymentEnvironment,
   resolveAuthenticationMode,
 } from '../../security/deployment-settings.js';
+import { resolveIdentityConfig } from '../identity/config.js';
 
 export interface DeploymentConfig {
   allowedHostsConfigured: boolean;
@@ -36,22 +37,23 @@ export function isLoopbackHost(host: string): boolean {
 export function resolveDeploymentConfig(
   env: NodeJS.ProcessEnv = getDeploymentEnvironment(),
 ): DeploymentConfig {
+  const identity = resolveIdentityConfig(env);
   const bindHost = env.HUABU_BIND_HOST ?? '127.0.0.1';
   const authenticationDisabled = resolveAuthenticationMode(env) === 'none';
   const userConfigured = Boolean(env.HUABU_BASIC_AUTH_USER);
-  const passConfigured = Boolean(env.HUABU_BASIC_AUTH_PASS);
-  if (userConfigured !== passConfigured) {
-    throw new Error(
-      'HUABU_BASIC_AUTH_USER and HUABU_BASIC_AUTH_PASS must be configured together',
-    );
-  }
 
   const publicOrigin = resolveConfiguredPublicOrigin(env);
   const allowedHostsConfigured = Boolean(
     publicOrigin || env.HUABU_ALLOWED_HOSTS?.trim(),
   );
   const bindScope = isLoopbackHost(bindHost) ? 'loopback' : 'network';
-  if (bindScope === 'network' && !userConfigured && !authenticationDisabled) {
+  // Bubble identity replaces Basic Auth as the network login.
+  if (
+    bindScope === 'network' &&
+    !userConfigured &&
+    !authenticationDisabled &&
+    identity.provider === 'local'
+  ) {
     throw new Error(
       'HUABU_BASIC_AUTH_USER and HUABU_BASIC_AUTH_PASS are required when HUABU_BIND_HOST is not loopback',
     );
@@ -70,6 +72,21 @@ export function resolveDeploymentConfig(
       'HUABU_PUBLIC_ORIGIN must be reachable beyond loopback when HUABU_BIND_HOST is not loopback',
     );
   }
+
+  // Bubble's `default` driver trusts the bearer text as the principal id. A
+  // loopback listener behind a proxy is still reachable from its public
+  // origin, so either one beyond loopback rules it out.
+  if (
+    (bindScope === 'network' ||
+      (publicOrigin && !isLoopbackHost(new URL(publicOrigin).hostname))) &&
+    identity.provider === 'bubble' &&
+    identity.authenticators.some((entry) => entry.driver === 'default')
+  ) {
+    throw new Error(
+      'The Bubble "default" authenticator verifies nothing and is not allowed when HUABU_BIND_HOST or HUABU_PUBLIC_ORIGIN is not loopback',
+    );
+  }
+
   return {
     allowedHostsConfigured,
     basicAuthConfigured: userConfigured,

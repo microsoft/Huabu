@@ -30,7 +30,7 @@ afterEach(() => {
 describe('StatusMessage', () => {
   it.each([
     ['interrupted', 'messages.generationInterrupted', 'text-fg-default'],
-    ['error', 'messages.somethingWentWrong', 'text-danger'],
+    ['error', 'messages.somethingWentWrong', 'text-danger-fg'],
   ] as const)(
     'preserves the %s fallback with readable text',
     (status, label, color) => {

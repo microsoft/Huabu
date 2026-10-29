@@ -49,7 +49,7 @@ import { useGesturePreviewStore } from '@/store/gesturePreviewStore.ts';
 import { useNodeCollapseStore } from '@/store/nodeCollapseStore.ts';
 
 import { getAccentTokens } from './design/accentTokens';
-import { resolveNodeAccent } from './design/nodeAccentPolicy';
+import { nodeAccentToken } from './design/nodeAccentPolicy';
 import {
   NODE_BORDER_WIDTH,
   nodeBoundaryForAccent,
@@ -674,8 +674,8 @@ export const NodeWrapper = memo(
 
     // Derive accent-tinted tokens once so border/shadow stay in sync with
     // the rest of the canvas (PreviewCard, SemanticPlaceholder, ...).
-    // Stored value is a palette token (or legacy hex); resolve to CSS color.
-    const accent = resolveNodeAccent(type, data.style?.accent);
+    // Keep preset identity so each role resolves to its calibrated theme color.
+    const accent = nodeAccentToken(type, data.style?.accent);
     const accentTokens =
       type !== 'frame' && accent ? getAccentTokens(accent) : null;
     const shellRadius =
@@ -696,7 +696,7 @@ export const NodeWrapper = memo(
     const paintsCardChrome = hasCardSurface && !isDocumentReading;
     // Every card shares one boundary policy; media paint it as an overlay
     // rather than reserving layout space inside the shell.
-    const cardBoundaryStyle = paintsCardChrome
+    const cardBoundaryStyle = hasCardSurface
       ? {
           ...nodeBoundaryForAccent(accent),
           ...((type === 'image' || type === 'video') &&
@@ -800,7 +800,7 @@ export const NodeWrapper = memo(
             // / shadow / transform / opacity — i.e. all the
             // selection-state visuals this class is here to smooth.
             'semantic-lod-node group relative flex h-full w-full flex-col transition duration-120',
-            paintsCardChrome && 'border-solid',
+            hasCardSurface && 'border-solid',
 
             paintsCardChrome &&
               type !== 'spacePreview' &&
@@ -863,7 +863,7 @@ export const NodeWrapper = memo(
               borderColor: 'transparent',
             }),
             ...cardBoundaryStyle,
-            // Preserve the shared tint, attenuating fill and border independently.
+            // Preserve the shared surface beneath the separate Frame-region veil.
             ...(frameSuppressed &&
               frameRegionSurfaceStyle(
                 accent,
@@ -875,8 +875,6 @@ export const NodeWrapper = memo(
               )),
             ...(isDocumentReading && {
               backgroundColor: 'transparent',
-              borderColor: 'transparent',
-              borderWidth: 0,
             }),
             ...(type !== 'frame' && {
               borderRadius: shellRadius,
@@ -926,7 +924,7 @@ export const NodeWrapper = memo(
               duplicate file in the folder, not the node. */}
           {data.contentDuplicate && !frameSuppressed && (
             <div className="border-warning-light bg-surface absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 overflow-hidden rounded-md border border-dashed p-3 text-center">
-              <FileWarning className="text-warning h-7 w-7 shrink-0" />
+              <FileWarning className="text-warning-fg h-7 w-7 shrink-0" />
               <div className="text-fg-default text-sm font-medium">
                 Duplicate files on disk
               </div>

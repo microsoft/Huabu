@@ -5,6 +5,9 @@ import { useCallback, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 
+import { isDesktopInputFrozen } from '@/utils/desktopInput';
+import { pageLifecycle } from '@/utils/pageLifecycle';
+
 import { useEffectiveInputMode } from './useInputMode';
 import { ApiError } from '../api/_client';
 import { createCanvas, importCanvas } from '../api/canvas';
@@ -41,14 +44,18 @@ export function useCanvasActions(): UseCanvasActionsResult {
   const create = useCallback(async () => {
     try {
       setIsCreating(true);
-      const response = await createCanvas();
-      navigate(`/canvas/${response.canvasId}`, {
-        state: {
-          newCanvasPlacement: {
-            canvasId: response.canvasId,
-            nodeType: inputMode === 'mouse' ? 'note' : 'sketch',
+      await pageLifecycle.run('updating', async () => {
+        const response = await createCanvas();
+        window.dispatchEvent(new Event('canvas-list-changed'));
+        if (isDesktopInputFrozen()) return;
+        navigate(`/canvas/${response.canvasId}`, {
+          state: {
+            newCanvasPlacement: {
+              canvasId: response.canvasId,
+              nodeType: inputMode === 'mouse' ? 'note' : 'sketch',
+            },
           },
-        },
+        });
       });
     } catch (error) {
       console.error('Failed to create canvas:', error);
@@ -71,8 +78,12 @@ export function useCanvasActions(): UseCanvasActionsResult {
 
       setIsImporting(true);
       try {
-        const result = await importCanvas(file);
-        navigate(`/canvas/${result.canvasId}`);
+        await pageLifecycle.run('importing', async () => {
+          const result = await importCanvas(file);
+          window.dispatchEvent(new Event('canvas-list-changed'));
+          if (isDesktopInputFrozen()) return;
+          navigate(`/canvas/${result.canvasId}`);
+        });
       } catch (err) {
         toast(
           err instanceof ApiError &&

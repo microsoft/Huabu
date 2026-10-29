@@ -7,14 +7,30 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AppMenu } from './AppMenu';
+import { useIdentityStore } from '../../../store/identityStore';
+import {
+  isDesktopInputFrozen,
+  setDesktopInputFrozen,
+} from '../../../utils/desktopInput';
 
 import type * as DropdownMenuExports from '../../Common/DropdownMenu';
+import type { IdentityResponse } from '@huabu/shared';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
 
 vi.mock('../../../config/handbook', () => ({ openUserHandbook: vi.fn() }));
+const signOutMocks = vi.hoisted(() => ({
+  saved: vi.fn<() => Promise<boolean>>(),
+  signOut: vi.fn<() => Promise<void>>(),
+  toast: vi.fn(),
+}));
+vi.mock('../../../store/canvasStore', () => ({
+  savedBeforeSignOut: signOutMocks.saved,
+}));
+vi.mock('../../../api/identity', () => ({ signOut: signOutMocks.signOut }));
+vi.mock('../../Common/Toast.tsx', () => ({ toast: signOutMocks.toast }));
 vi.mock('../../../config/shortcuts', () => ({
   getShortcutKeys: () => undefined,
 }));
@@ -159,5 +175,91 @@ describe('AppMenu', () => {
       candidate.textContent?.includes('canvasPage.backToList'),
     );
     expect(link?.getAttribute('href')).toBe('/spaces');
+  });
+
+  it('offers sign-out only to a Bubble-signed-in caller', () => {
+    const items = (identity: IdentityResponse | null) => {
+      useIdentityStore.setState({ identity });
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      act(() =>
+        root?.render(
+          <MemoryRouter initialEntries={['/spaces']}>
+            <AppMenu />
+          </MemoryRouter>,
+        ),
+      );
+      const labels = Array.from(
+        container.querySelectorAll('[role="menuitem"]'),
+      ).map((item) => item.textContent);
+      act(() => root?.unmount());
+      container.remove();
+      return labels;
+    };
+    const principal = { principalId: 'carol', kind: 'user' as const };
+    expect(items(null)).not.toContain('auth.signOutAs');
+    expect(
+      items({ provider: 'local', principal, member: true, owner: true }),
+    ).not.toContain('auth.signOutAs');
+    expect(
+      items({ provider: 'bubble', principal, member: true, owner: false }),
+    ).toContain('auth.signOutAs');
+  });
+
+  it('signs out only once Canvas edits are saved, and says so otherwise', async () => {
+    useIdentityStore.setState({
+      identity: {
+        provider: 'bubble',
+        principal: { principalId: 'carol', kind: 'user' },
+        member: true,
+        owner: false,
+      },
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() =>
+      root?.render(
+        <MemoryRouter initialEntries={['/canvas/c1']}>
+          <AppMenu />
+        </MemoryRouter>,
+      ),
+    );
+    const signOutItem = () =>
+      Array.from(
+        container!.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+      ).find((item) => item.textContent?.includes('auth.signOutAs'));
+    let settleSave!: (saved: boolean) => void;
+    signOutMocks.saved.mockReturnValueOnce(
+      new Promise((resolve) => (settleSave = resolve)),
+    );
+    await act(async () => signOutItem()?.click());
+    // No edit can start while the last saves run.
+    expect(isDesktopInputFrozen()).toBe(true);
+    expect(document.body.inert).toBe(true);
+    await act(async () => settleSave(false));
+    expect(isDesktopInputFrozen()).toBe(false);
+    expect(document.body.inert).toBe(false);
+    expect(signOutMocks.signOut).not.toHaveBeenCalled();
+    expect(signOutMocks.toast).toHaveBeenCalledWith('auth.signOutUnsaved', {
+      tone: 'danger',
+    });
+
+    signOutMocks.saved.mockResolvedValueOnce(true);
+    signOutMocks.signOut.mockRejectedValueOnce(new Error('503'));
+    await act(async () => signOutItem()?.click());
+    expect(signOutMocks.signOut).toHaveBeenCalledTimes(1);
+    expect(signOutMocks.toast).toHaveBeenLastCalledWith('auth.signOutFailed', {
+      tone: 'danger',
+    });
+    expect(isDesktopInputFrozen()).toBe(false);
+
+    // A successful sign-out navigates away, so input stays frozen.
+    signOutMocks.saved.mockResolvedValueOnce(true);
+    signOutMocks.signOut.mockResolvedValueOnce();
+    await act(async () => signOutItem()?.click());
+    expect(isDesktopInputFrozen()).toBe(true);
+    setDesktopInputFrozen(false);
   });
 });

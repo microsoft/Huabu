@@ -95,7 +95,14 @@ import {
   setSnapStructuredSuppressed,
   writeDragDecision,
 } from '@/handler/snap/snapSession';
+import { getElectronBridge } from '@/hooks/useElectron';
 import { getCanvasVisibleArea } from '@/utils/canvasViewport';
+import {
+  desktopStorageKey,
+  readApplicationPreference,
+  writeApplicationPreference,
+} from '@/utils/desktopStorage';
+import { pageLifecycle } from '@/utils/pageLifecycle';
 import {
   changedSpaceEntries,
   isVisibleWorldNode,
@@ -133,6 +140,7 @@ import { createUnloadFlush } from './canvasStore/save/unloadFlush';
 import { createResizePreviewController } from './canvasStore/slices/resizePreview';
 import { useChatStore } from './chatStore';
 import { useGesturePreviewStore } from './gesturePreviewStore';
+import { usePanelStore } from './panelStore';
 import {
   selectActiveNodeId,
   selectIsNodeOpen,
@@ -153,6 +161,7 @@ import type {
   FrameFitPreview,
   FrameFitPreviewRole,
 } from './gesturePreviewStore';
+import type { CanvasPreviewWorkspace } from './previewWorkspace/model';
 import type { NodeIngestionInfo } from '@/handler/canvasCommand/preprocess';
 import type {
   AgentChatContext,
@@ -226,7 +235,9 @@ function readViewportFromStorage(canvasId: string): CanvasViewport | null {
   const key = viewportStorageKey(canvasId);
 
   try {
-    return parseStoredViewport(localStorage.getItem(key));
+    return parseStoredViewport(
+      localStorage.getItem(desktopStorageKey(key)) ?? localStorage.getItem(key),
+    );
   } catch {
     // Private mode / disabled storage falls back to fitView.
     return null;
@@ -266,17 +277,23 @@ function flushViewportWrite(): void {
     clearTimeout(viewportWriteTimer);
     viewportWriteTimer = null;
   }
+
   const pending = pendingViewportWrite;
   pendingViewportWrite = null;
   if (!pending) return;
   try {
     localStorage.setItem(
-      viewportStorageKey(pending.canvasId),
+      desktopStorageKey(viewportStorageKey(pending.canvasId)),
       JSON.stringify(pending.viewport),
     );
   } catch {
     // Viewport persistence must never block interaction.
   }
+}
+
+export function flushCanvasViewState(): void {
+  flushViewportWrite();
+  usePreviewWorkspaceStore.getState().flush();
 }
 
 function writeViewportToStorage(
@@ -295,10 +312,10 @@ function writeViewportToStorage(
   );
 }
 
-// ─── MiniMap-visibility localStorage ──────────────────────────────────────
+// ─── MiniMap-visibility preference ────────────────────────────────────────
 //
 // Whether the canvas MiniMap overlay is shown is a global UI preference
-// (not per-canvas), so it uses a single localStorage key. Defaults to off so
+// (not per-canvas), persisted by the application preference adapter. Defaults to off so
 // first-time users get the cleaner canvas; once toggled in Settings the choice
 // survives refreshes / restarts.
 
@@ -306,7 +323,7 @@ const MINIMAP_STORAGE_KEY = 'huabu.minimapEnabled';
 
 function readMinimapEnabledFromStorage(): boolean {
   try {
-    return localStorage.getItem(MINIMAP_STORAGE_KEY) === 'true';
+    return readApplicationPreference(MINIMAP_STORAGE_KEY) === 'true';
   } catch {
     // Private mode / disabled storage — treat as off.
     return false;
@@ -315,9 +332,13 @@ function readMinimapEnabledFromStorage(): boolean {
 
 function writeMinimapEnabledToStorage(value: boolean): void {
   try {
-    localStorage.setItem(MINIMAP_STORAGE_KEY, String(value));
-  } catch {
-    // Ignore quota / private-mode errors; in-memory state still toggles.
+    writeApplicationPreference(MINIMAP_STORAGE_KEY, String(value));
+  } catch (error) {
+    console.error('Could not save MiniMap visibility:', error);
+    toast(error instanceof Error ? error.message : String(error), {
+      tone: 'danger',
+    });
+    if (getElectronBridge()?.tabs) throw error;
   }
 }
 
@@ -922,7 +943,7 @@ type RFState = {
    * the request context. Resolves once the in-flight POST settles
    * (success or fail); a failed flush is retried on the next trigger.
    */
-  flushCanvasEvents: () => Promise<void>;
+  flushCanvasEvents: (canvasId?: string) => Promise<void>;
 };
 
 function canChangeSpaceEntries(
@@ -1030,47 +1051,176 @@ async function waitForSidecarWrites(): Promise<void> {
   ]);
 }
 
-/**
- * Promote every pending canvas-level structure save AND every pending
- * debounced per-node content save into an immediate flush, then
- * resolve once both have settled.
- *
- * Called from `CanvasPage` via `useBlocker` so that navigating away
- * from a canvas (back to list, into settings, into docs, into another
- * canvas) holds the navigation until every queued PUT has been sent
- * and its response received. Without this, trailing edits would fire
- * later under a stale captured `canvasId` — by which time the user
- * has moved on and there's nothing left in the store to revert if the
- * PUT fails. Ordinary failures retain the existing non-blocking behavior.
- * A failed resurrection rejects: the current Canvas owns the only restored
- * body, so navigation must retain it until Retry or explicit deletion.
- *
- * Order mirrors {@link switchCanvas}: structure first (canvas-level
- * version PUT), then per-node content. Resurrection makes this ordering a
- * dependency: topology must admit the restored sidecar before its PUT.
- */
-export async function drainPendingSaves(): Promise<void> {
-  await structureScheduler.flushAsync();
+async function waitForStructureSave(canvasId: string): Promise<void> {
   while (
-    useCanvasStore.getState().isSaving ||
-    useCanvasStore.getState().pendingSave
+    useCanvasStore.getState().canvasId === canvasId &&
+    (useCanvasStore.getState().isSaving ||
+      useCanvasStore.getState().pendingSave)
   ) {
     await new Promise<void>((resolve) => {
       const unsubscribe = useCanvasStore.subscribe((state) => {
-        if (!state.isSaving && !state.pendingSave) {
+        if (
+          state.canvasId !== canvasId ||
+          (!state.isSaving && !state.pendingSave)
+        ) {
           unsubscribe();
           resolve();
         }
       });
     });
   }
-  await nodeContentQueue.flushAll();
-  await canvasHistoryManager.waitForDeletes(useCanvasStore.getState().canvasId);
-  if (nodeContentQueue.hasPendingRestoredContent()) {
-    throw new Error(
-      'Restored node content is waiting for a successful structure save. Retry before leaving this Canvas.',
-    );
+}
+
+/**
+ * Promote every pending canvas-level structure save AND every pending
+ * debounced per-node content save into an immediate flush, then
+ * resolve once both have settled.
+ *
+ * Called from the router-root `SpaceNavigationGuard` so navigating away
+ * from a canvas (back to list, into settings, into docs, into another
+ * canvas) holds the navigation until every queued PUT has been sent
+ * and its response received. Without this, trailing edits would fire
+ * later under a stale captured `canvasId` — by which time the user
+ * has moved on and there's nothing left in the store to revert if the
+ * PUT fails. Any unresolved structure or content failure rejects: navigation
+ * must retain local edits until saved or explicitly discarded.
+ *
+ * Order mirrors {@link switchCanvas}: structure first (canvas-level
+ * version PUT), then per-node content. Resurrection makes this ordering a
+ * dependency: topology must admit the restored sidecar before its PUT.
+ * Keep the captured scope if navigation finishes during an await; outgoing
+ * saves were drained by navigation, and the new Space belongs to another turn.
+ */
+export async function drainPendingSaves(
+  canvasId = useCanvasStore.getState().canvasId,
+): Promise<void> {
+  const isActive = () => useCanvasStore.getState().canvasId === canvasId;
+  const initial = useCanvasStore.getState();
+  if (isActive() && !initial.isLoading) {
+    const failure = structureSaveErrors.get(canvasId);
+    // Retry only failures retained before this drain, never loop on a new failure.
+    if (
+      failure &&
+      !(failure instanceof CanvasConflictError) &&
+      !initial.versionConflict &&
+      !initial.isSaving &&
+      !initial.pendingSave &&
+      !structureScheduler.hasPending()
+    ) {
+      structureScheduler.schedule();
+    }
+    nodeContentQueue.retryFailedSaves(canvasId);
   }
+  do {
+    if (isActive()) await structureScheduler.flushAsync();
+    await waitForStructureSave(canvasId);
+    if (isActive()) await nodeContentQueue.flushAll();
+    await canvasHistoryManager.waitForDeletes(canvasId);
+    if (isActive() && nodeContentQueue.hasPendingRestoredContent()) {
+      throw new Error(
+        'Restored node content is waiting for a successful structure save. Retry before leaving this Canvas.',
+      );
+    }
+    const state = useCanvasStore.getState();
+    if (
+      (state.canvasId === canvasId && state.versionConflict) ||
+      structureSaveErrors.has(canvasId)
+    ) {
+      throw (
+        structureSaveErrors.get(canvasId) ??
+        new Error('Canvas version conflict')
+      );
+    }
+    await nodeContentQueue.flushAllForSubmission(canvasId);
+  } while (isActive() && structureScheduler.hasPending());
+}
+
+/** Explicit navigation-only discard; already-issued writes cannot be undone. */
+export async function discardPendingSaves(canvasId: string): Promise<void> {
+  const state = useCanvasStore.getState();
+  if (state.canvasId !== canvasId)
+    throw new Error('Cannot discard edits from a different Space');
+  state._setStateNoAutosave({ isLoading: true, pendingSave: false });
+  structureScheduler.cancelPending();
+  preprocessQueue.cancelAll();
+  const resumeContentSaves = nodeContentQueue.suspendCanvas(canvasId);
+  try {
+    // Keep failure records until every admitted writer has settled.
+    await waitForStructureSave(canvasId);
+    await waitForSidecarWrites();
+    await canvasHistoryManager.waitForDeletes(canvasId);
+    if (useCanvasStore.getState().canvasId !== canvasId)
+      throw new Error('Space changed while discarding edits');
+    structureScheduler.cancelPending();
+    preprocessQueue.cancelAll();
+    nodeContentQueue.discardCanvas(canvasId);
+    structureSaveErrors.delete(canvasId);
+    canvasHistoryManager.clearCanvas(canvasId);
+    dismissVersionConflictToast();
+    useCanvasStore.getState()._setStateNoAutosave({
+      canvasId: '',
+      canvasTitle: '',
+      nodes: [],
+      edges: [],
+      version: 0,
+      viewport: null,
+      isLoading: false,
+      isSaving: false,
+      pendingSave: false,
+      versionConflict: false,
+      versionConflictServerVersion: null,
+      canUndo: false,
+      canRedo: false,
+      ingestionByNodeId: {},
+      pendingForkThreadIds: {},
+    });
+  } catch (error) {
+    if (useCanvasStore.getState().canvasId === canvasId)
+      useCanvasStore.getState()._setStateNoAutosave({ isLoading: false });
+    throw error;
+  } finally {
+    resumeContentSaves();
+  }
+}
+
+/**
+ * Drain every save queue for the current Canvas before the session ends,
+ * and report whether everything reached the Server. Signing out removes the
+ * credential the unload flush would need, so whatever is still queued or
+ * failed then would be lost.
+ */
+export async function savedBeforeSignOut(): Promise<boolean> {
+  try {
+    // The desktop close path: stop recordings, await imports and uploads,
+    // then save structure and every node's content strictly, failing on any
+    // retained structure or content failure.
+    await pageLifecycle.prepare(new AbortController().signal);
+    const { canvasId } = useCanvasStore.getState();
+    if (canvasId) await canvasEvents.flush(canvasId);
+    else await drainPendingSaves();
+    await preprocessQueue.flushAll();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether the open Canvas holds an edit the Server has not acknowledged:
+ * queued, in flight or failed. Leaving the page now would lose it.
+ */
+export function hasUnsavedCanvasEdits(): boolean {
+  const { canvasId, isSaving, pendingSave, versionConflict } =
+    useCanvasStore.getState();
+  if (!canvasId) return false;
+  return (
+    isSaving ||
+    pendingSave ||
+    versionConflict ||
+    structureScheduler.hasPending() ||
+    structureSaveErrors.has(canvasId) ||
+    nodeContentQueue.hasUnsavedContent(canvasId)
+  );
 }
 
 export class CanvasSubmissionSaveError extends Error {
@@ -1086,26 +1236,8 @@ export class CanvasSubmissionSaveError extends Error {
 }
 
 export async function saveCanvasForSubmission(canvasId: string): Promise<void> {
-  const assertCanvas = () => {
-    if (useCanvasStore.getState().canvasId !== canvasId) {
-      throw new Error(`Submission Canvas changed: ${canvasId}`);
-    }
-  };
   try {
-    assertCanvas();
-    do {
-      await drainPendingSaves();
-      assertCanvas();
-    } while (structureScheduler.hasPending());
-    const state = useCanvasStore.getState();
-    if (state.versionConflict || structureSaveErrors.has(canvasId)) {
-      throw (
-        structureSaveErrors.get(canvasId) ??
-        new Error('Canvas version conflict')
-      );
-    }
-    await nodeContentQueue.flushAllForSubmission(canvasId);
-    assertCanvas();
+    await drainPendingSaves(canvasId);
   } catch (error) {
     throw new CanvasSubmissionSaveError(canvasId, error);
   }
@@ -1127,7 +1259,7 @@ export function clearNodeDuplicateGuard(nodeId: string): void {
  * editing it (exit-edit "settle").
  *
  * Called for editor-authored nodes (`note` / `text`) from their exit-edit
- * boundaries — `closeExpanded` / `openExpanded` for `note` and `TextNode`'s
+ * boundaries — Preview Workspace departure for `note` and `TextNode`'s
  * blur handler for `text` — whose auto-derived label (the on-disk `.md`
  * filename) must be committed only when the heading is settled, never on
  * every keystroke pause, which churned the filename through every partial
@@ -1143,6 +1275,54 @@ export function settleNodePreprocess(nodeId: string): void {
   const node = useCanvasStore.getState().nodes.find((n) => n.id === nodeId);
   if (node) preprocessQueue.schedule(node);
 }
+
+function settleDepartingPreviewEditors(
+  previous: CanvasPreviewWorkspace,
+  next?: CanvasPreviewWorkspace,
+): void {
+  const { canvasId, nodes } = useCanvasStore.getState();
+  const retained = new Set(
+    next?.groups.flatMap((group) => {
+      const target = group.activeTabId
+        ? next.tabs[group.activeTabId]?.target
+        : undefined;
+      return target?.kind === 'node' && target.canvasId === canvasId
+        ? [target.nodeId]
+        : [];
+    }),
+  );
+  for (const group of previous.groups) {
+    const target = group.activeTabId
+      ? previous.tabs[group.activeTabId]?.target
+      : undefined;
+    if (
+      target?.kind !== 'node' ||
+      target.canvasId !== canvasId ||
+      retained.has(target.nodeId)
+    )
+      continue;
+    const node = nodes.find((candidate) => candidate.id === target.nodeId);
+    if (node?.type === 'note' || node?.type === 'text') {
+      settleNodePreprocess(node.id);
+    }
+  }
+}
+
+export function drainNodePreprocessing(): Promise<void> {
+  return preprocessQueue.flushAll();
+}
+
+pageLifecycle.register('canvas', {
+  flush: async () => {
+    const { canvasId } = useCanvasStore.getState();
+    if (canvasId) {
+      await saveCanvasForSubmission(canvasId);
+      await drainNodePreprocessing();
+      await saveCanvasForSubmission(canvasId);
+    }
+    flushCanvasViewState();
+  },
+});
 
 /**
  * Module-scoped resize-preview controller. Owns the rAF handle and
@@ -2520,25 +2700,9 @@ const useCanvasStore = create<RFState>()(
       const currentId = get().canvasId;
       if (canvasId === currentId) return;
 
-      // Flip into the loading state *before* awaiting anything so the
-      // shell shows the loading state on the very next render instead of
-      // briefly painting the previous canvas while the structure save
-      // flush resolves. `loadCanvas` below will set `isLoading: true`
-      // again (idempotent) once it starts the actual fetch.
-      set({
-        isLoading: true,
-        canvasNotFound: false,
-      });
-      // Retain the outgoing conflict gate until its drain succeeds.
-      // loadCanvas clears it when the new authoritative state is requested.
-
-      // Flush any pending save for the current canvas before switching
-      try {
-        await drainPendingSaves();
-      } catch (error) {
-        set({ isLoading: false });
-        throw error;
-      }
+      // Keep the outgoing Space authoritative and editable until saving succeeds.
+      await drainPendingSaves();
+      set({ isLoading: true, canvasNotFound: false });
 
       // Cancel all pending preprocessing timers
       preprocessQueue.cancelAll();
@@ -2889,8 +3053,8 @@ const useCanvasStore = create<RFState>()(
       }
     },
 
-    flushCanvasEvents: async () => {
-      await canvasEvents.flush(get().canvasId);
+    flushCanvasEvents: async (canvasId = get().canvasId) => {
+      await canvasEvents.flush(canvasId);
     },
 
     onNodeDragStart: (event, _draggedNode, draggedNodes) => {
@@ -4050,54 +4214,61 @@ const useCanvasStore = create<RFState>()(
       // so the node goes straight to its content height instead of
       // collapsing to the policy minimum and expanding a frame later.
       // Notes whose hint is already current skip the measurement.
-      void (async () => {
-        const measurements = await measureMissingAutoHeights(
-          mode === 'auto' ? items.map((item) => item.nodeId) : [],
-          get,
-        );
-
-        // Never replay captured geometry after an async measurement if a
-        // resize or navigation superseded the toggle. The measurement key
-        // also guards APPLY_MEASURED_HEIGHT, but cannot undo a stale resize.
-        const live = get();
-        if (live.canvasId !== canvasId) return;
-        const currentItems = items.filter((item) => {
-          const before = nodes.find((node) => node.id === item.nodeId);
-          const after = live.nodes.find((node) => node.id === item.nodeId);
-          return (
-            before &&
-            after?.type === 'note' &&
-            autoHeightContentWidth(before) === autoHeightContentWidth(after)
+      void pageLifecycle
+        .run('updating', async () => {
+          const measurements = await measureMissingAutoHeights(
+            mode === 'auto' ? items.map((item) => item.nodeId) : [],
+            get,
           );
-        });
-        if (currentItems.length === 0) return;
 
-        // SET_NODE_GEOMETRY uses snapshot:'caller'; open a gesture so the
-        // batch is captured as one undo entry without warnings. The
-        // measurement rides the same batch, so undo restores the pinned
-        // height in one step.
-        get().beginGesture('SET_NODE_GEOMETRY');
-        get().executeCommands(
-          [
-            {
-              type: 'SET_NODE_GEOMETRY',
-              items: currentItems.map((item) => ({
-                nodeId: item.nodeId as CanvasNodeId,
-                size: item.size,
-              })),
-            },
-            ...(measurements.length > 0
-              ? [
-                  {
-                    type: 'APPLY_MEASURED_HEIGHT' as const,
-                    items: measurements,
-                  },
-                ]
-              : []),
-          ],
-          'ui',
-        );
-      })();
+          // Never replay captured geometry after an async measurement if a
+          // resize or navigation superseded the toggle. The measurement key
+          // also guards APPLY_MEASURED_HEIGHT, but cannot undo a stale resize.
+          const live = get();
+          if (live.canvasId !== canvasId) return;
+          const currentItems = items.filter((item) => {
+            const before = nodes.find((node) => node.id === item.nodeId);
+            const after = live.nodes.find((node) => node.id === item.nodeId);
+            return (
+              before &&
+              after?.type === 'note' &&
+              autoHeightContentWidth(before) === autoHeightContentWidth(after)
+            );
+          });
+          if (currentItems.length === 0) return;
+
+          // SET_NODE_GEOMETRY uses snapshot:'caller'; open a gesture so the
+          // batch is captured as one undo entry without warnings. The
+          // measurement rides the same batch, so undo restores the pinned
+          // height in one step.
+          get().beginGesture('SET_NODE_GEOMETRY');
+          get().executeCommands(
+            [
+              {
+                type: 'SET_NODE_GEOMETRY',
+                items: currentItems.map((item) => ({
+                  nodeId: item.nodeId as CanvasNodeId,
+                  size: item.size,
+                })),
+              },
+              ...(measurements.length > 0
+                ? [
+                    {
+                      type: 'APPLY_MEASURED_HEIGHT' as const,
+                      items: measurements,
+                    },
+                  ]
+                : []),
+            ],
+            'ui',
+          );
+        })
+        .catch((error: unknown) => {
+          console.error('[canvas] Could not update Note sizing:', error);
+          toast(error instanceof Error ? error.message : String(error), {
+            tone: 'danger',
+          });
+        });
     },
 
     applyMeasuredHeights: (items) => {
@@ -4499,92 +4670,101 @@ const useCanvasStore = create<RFState>()(
         return;
       }
 
-      void (async () => {
-        // One clone per distinct source artifact, shared across every
-        // node and every reference in this paste (the same image may be
-        // embedded several times in one note, or reused across notes).
-        const clones = new Map<string, Promise<string | null>>();
-        const cloneRef = (ref: {
-          canvasId: string | null;
-          key: string;
-        }): Promise<string | null> => {
-          const from = ref.canvasId ?? srcCanvasId;
-          if (from === dstCanvasId) return Promise.resolve(null);
-          const cacheKey = `${from}/${ref.key}`;
-          let pending = clones.get(cacheKey);
-          if (!pending) {
-            // Best effort — a failed clone falls back to the original
-            // key. The new node then renders with the missing-file
-            // placeholder (artifactMissing flag from the server) so the
-            // user can still remove it.
-            pending = cloneArtifactToCanvas(from, ref.key, dstCanvasId).catch(
-              (err) => {
-                console.warn(
-                  '[paste] Failed to clone artifact for cross-canvas paste',
-                  err,
+      void pageLifecycle
+        .run('importing', async () => {
+          // One clone per distinct source artifact, shared across every
+          // node and every reference in this paste (the same image may be
+          // embedded several times in one note, or reused across notes).
+          const clones = new Map<string, Promise<string | null>>();
+          const cloneRef = (ref: {
+            canvasId: string | null;
+            key: string;
+          }): Promise<string | null> => {
+            const from = ref.canvasId ?? srcCanvasId;
+            if (from === dstCanvasId) return Promise.resolve(null);
+            const cacheKey = `${from}/${ref.key}`;
+            let pending = clones.get(cacheKey);
+            if (!pending) {
+              // Best effort — a failed clone falls back to the original
+              // key. The new node then renders with the missing-file
+              // placeholder (artifactMissing flag from the server) so the
+              // user can still remove it.
+              pending = cloneArtifactToCanvas(from, ref.key, dstCanvasId).catch(
+                (err) => {
+                  console.warn(
+                    '[paste] Failed to clone artifact for cross-canvas paste',
+                    err,
+                  );
+                  return null;
+                },
+              );
+              clones.set(cacheKey, pending);
+            }
+            return pending;
+          };
+
+          const remapped = await Promise.all(
+            clipboardNodes.map(async (node) => {
+              const data = {
+                ...((node.data ?? {}) as Record<string, unknown>),
+              };
+              let mutated = false;
+
+              for (const field of ARTIFACT_DATA_FIELDS) {
+                const value = data[field];
+                const ref = parseArtifactRef(value);
+                if (!ref) continue;
+                const newKey = await cloneRef(ref);
+                if (newKey && newKey !== value) {
+                  data[field] = newKey;
+                  mutated = true;
+                }
+              }
+
+              for (const field of markdownArtifactFields(data)) {
+                const markdown = data[field];
+                if (typeof markdown !== 'string' || markdown.length === 0)
+                  continue;
+                const refs = collectMarkdownArtifactRefs(markdown);
+                if (refs.length === 0) continue;
+                const rewrites = new Map<string, string>();
+                await Promise.all(
+                  refs.map(async (raw) => {
+                    const ref = parseArtifactRef(raw);
+                    if (!ref) return;
+                    const newKey = await cloneRef(ref);
+                    if (newKey && newKey !== raw) rewrites.set(raw, newKey);
+                  }),
                 );
-                return null;
-              },
-            );
-            clones.set(cacheKey, pending);
-          }
-          return pending;
-        };
-
-        const remapped = await Promise.all(
-          clipboardNodes.map(async (node) => {
-            const data = { ...((node.data ?? {}) as Record<string, unknown>) };
-            let mutated = false;
-
-            for (const field of ARTIFACT_DATA_FIELDS) {
-              const value = data[field];
-              const ref = parseArtifactRef(value);
-              if (!ref) continue;
-              const newKey = await cloneRef(ref);
-              if (newKey && newKey !== value) {
-                data[field] = newKey;
-                mutated = true;
+                if (rewrites.size === 0) continue;
+                const next = rewriteMarkdownArtifactRefs(markdown, (raw) =>
+                  rewrites.get(raw),
+                );
+                if (next !== markdown) {
+                  data[field] = next;
+                  mutated = true;
+                }
               }
-            }
 
-            for (const field of markdownArtifactFields(data)) {
-              const markdown = data[field];
-              if (typeof markdown !== 'string' || markdown.length === 0)
-                continue;
-              const refs = collectMarkdownArtifactRefs(markdown);
-              if (refs.length === 0) continue;
-              const rewrites = new Map<string, string>();
-              await Promise.all(
-                refs.map(async (raw) => {
-                  const ref = parseArtifactRef(raw);
-                  if (!ref) return;
-                  const newKey = await cloneRef(ref);
-                  if (newKey && newKey !== raw) rewrites.set(raw, newKey);
-                }),
-              );
-              if (rewrites.size === 0) continue;
-              const next = rewriteMarkdownArtifactRefs(markdown, (raw) =>
-                rewrites.get(raw),
-              );
-              if (next !== markdown) {
-                data[field] = next;
-                mutated = true;
-              }
-            }
-
-            return mutated ? { ...node, data } : node;
-          }),
-        );
-        // `dispatch` / `runForks` act on whatever canvas the store is
-        // showing *now*, but the work above was scoped to the canvas
-        // that was active when the paste started. Cloning takes one
-        // round-trip per embedded image, which is more than enough time
-        // for the user to switch Spaces — dropping the paste beats
-        // landing it on the wrong canvas.
-        if (get().canvasId !== dstCanvasId) return;
-        runForks();
-        dispatch(remapped);
-      })();
+              return mutated ? { ...node, data } : node;
+            }),
+          );
+          // `dispatch` / `runForks` act on whatever canvas the store is
+          // showing *now*, but the work above was scoped to the canvas
+          // that was active when the paste started. Cloning takes one
+          // round-trip per embedded image, which is more than enough time
+          // for the user to switch Spaces — dropping the paste beats
+          // landing it on the wrong canvas.
+          if (get().canvasId !== dstCanvasId) return;
+          runForks();
+          dispatch(remapped);
+        })
+        .catch((error: unknown) => {
+          console.error('[paste] Could not finish cross-Space paste:', error);
+          toast(error instanceof Error ? error.message : String(error), {
+            tone: 'danger',
+          });
+        });
     },
 
     canUndo: false,
@@ -4664,5 +4844,20 @@ const useCanvasStore = create<RFState>()(
     },
   })),
 );
+
+// Observe topology rather than individual entry points, including reused tabs
+// in another split group. Still-visible editors and ordinary focus changes stay open.
+usePreviewWorkspaceStore.subscribe((next, previous) => {
+  if (next.workspace !== previous.workspace) {
+    settleDepartingPreviewEditors(previous.workspace, next.workspace);
+  }
+});
+usePanelStore.subscribe((next, previous) => {
+  if (next.isRightCollapsed && !previous.isRightCollapsed) {
+    settleDepartingPreviewEditors(
+      usePreviewWorkspaceStore.getState().workspace,
+    );
+  }
+});
 
 export default useCanvasStore;

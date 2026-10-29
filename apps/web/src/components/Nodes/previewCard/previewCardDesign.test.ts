@@ -19,8 +19,8 @@ describe('preview card geometry', () => {
     expect(metrics.padding).toBe(padding);
     expect(metrics.imageWidth).toBeCloseTo(
       Math.min(
-        (width - 4 - 2 * padding) * 0.36,
-        ((height - 4 - 2 * padding) * 4) / 3,
+        (width - 2 * NODE_BORDER_WIDTH - 2 * padding) * 0.36,
+        ((height - 2 * NODE_BORDER_WIDTH - 2 * padding) * 4) / 3,
       ),
     );
   });
@@ -65,13 +65,13 @@ describe('preview card geometry', () => {
     },
   );
 
-  it('accounts for both 2px borders before calculating available image height', () => {
-    expect(NODE_BORDER_WIDTH).toBe(2);
+  it('accounts for both 1px borders before calculating available image height', () => {
+    expect(NODE_BORDER_WIDTH).toBe(1);
     expect(previewCardMetricsForSize(400, 400)).toMatchObject({
-      innerWidth: 364.32,
-      innerHeight: 364.32,
+      innerWidth: 366.16,
+      innerHeight: 366.16,
     });
-    expect(previewCardMetricsForSize(4, 4)).toMatchObject({
+    expect(previewCardMetricsForSize(2, 2)).toMatchObject({
       innerWidth: 0,
       innerHeight: 0,
       horizontal: false,

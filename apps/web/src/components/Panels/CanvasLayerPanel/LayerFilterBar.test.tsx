@@ -188,7 +188,7 @@ describe('single-line Layers filters', () => {
     );
     expect(
       container.querySelector(
-        '[aria-label^="layers.stopFilteringBy"] svg.text-info',
+        '[aria-label^="layers.stopFilteringBy"] svg.text-info-fg',
       ),
     ).not.toBeNull();
 

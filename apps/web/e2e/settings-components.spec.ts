@@ -14,6 +14,141 @@ import type {
 
 test.use({ hasTouch: false });
 
+test('device names can be edited without a permanent transport warning', async ({
+  page,
+}, testInfo) => {
+  let displayName = 'Windows workstation';
+  let rejectSave = true;
+  await page.route('**/api/acp/profiles', (route) =>
+    route.fulfill({
+      json: {
+        profiles: [],
+        selectableProfileIds: [],
+        connectedDevices: [
+          {
+            agentletId: 'windows-device',
+            displayName,
+            hostname: 'desktop',
+            platform: 'win32',
+            arch: 'x64',
+            version: '1.0.0',
+            connectedAt: '2026-01-01T00:00:00.000Z',
+            profileCount: 0,
+          },
+        ],
+        agentlet: { online: true, restartAttempt: 0 },
+      },
+    }),
+  );
+  await page.route('**/api/acp/devices/windows-device', async (route) => {
+    expect(route.request().method()).toBe('PATCH');
+    if (rejectSave) {
+      rejectSave = false;
+      await route.fulfill({
+        status: 503,
+        json: { message: 'Device unavailable. Try again.' },
+      });
+      return;
+    }
+    displayName = route.request().postDataJSON().displayName;
+    await route.fulfill({ json: { displayName } });
+  });
+  await page.route('**/api/deployment/readiness', (route) =>
+    route.fulfill({
+      json: {
+        bind: { host: '0.0.0.0', scope: 'network' },
+        access: { allowedHostsConfigured: true, basicAuthConfigured: true },
+        owner: { policy: 'loopback-or-basic-auth', allowedForRequest: true },
+        credentials: { writable: true, reason: 'available' },
+        transport: { status: 'operator-unverified' },
+        issues: [],
+      } satisfies DeploymentReadinessResponse,
+    }),
+  );
+  await page.goto('/playground/components');
+  await page.evaluate(async () => {
+    const load = (path: string) => import(/* @vite-ignore */ path);
+    const { openSettingsModalFixture } = await load(
+      '/e2e/fixtures/settings-components.tsx',
+    );
+    openSettingsModalFixture();
+  });
+  const dialog = page.getByRole('dialog');
+  await dialog
+    .getByRole('button', { name: en.settings.devicesAndAgents, exact: true })
+    .click();
+  await expect(
+    dialog.getByText('Windows workstation', { exact: true }),
+  ).toBeVisible();
+  await expect(dialog.getByText(/operator-managed transport/)).toHaveCount(0);
+  const actions = dialog.getByRole('button', { name: / actions$/ });
+  await actions.click();
+  const rename = page.getByRole('menuitem', { name: en.settings.renameDevice });
+  await rename.click();
+  const input = dialog.getByRole('textbox', { name: en.settings.deviceName });
+  await expect(input).toBeFocused();
+  await input.fill('Office PC');
+  await input.press('Enter');
+  await expect(dialog.getByRole('alert')).toHaveText(
+    'Device unavailable. Try again.',
+  );
+  await expect(input).toHaveValue('Office PC');
+  await dialog.screenshot({
+    path: testInfo.outputPath('device-rename-error.png'),
+  });
+  await dialog.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(dialog.getByText('Office PC', { exact: true })).toBeVisible();
+  await expect(actions).toBeFocused();
+  await actions.click();
+  await rename.click();
+  const longName = 'Workstation'.repeat(10);
+  await input.fill(longName);
+  await input.press('Enter');
+  const row = dialog.locator('.setting-row').filter({ hasText: longName });
+  for (const dark of [false, true]) {
+    await page.setViewportSize({ width: dark ? 900 : 1280, height: 800 });
+    await page.evaluate(
+      (value) => document.documentElement.classList.toggle('dark', value),
+      dark,
+    );
+    expect(
+      await row.evaluate(
+        (element) => element.scrollWidth <= element.clientWidth,
+      ),
+    ).toBe(true);
+    await dialog.screenshot({
+      path: testInfo.outputPath(
+        `device-settings-${dark ? 'dark' : 'light'}.png`,
+      ),
+    });
+  }
+  await page.context().grantPermissions(['clipboard-write', 'clipboard-read']);
+  await page.route('**/api/acp/connection-command', (route) =>
+    route.fulfill({
+      json: {
+        content: 'echo connection-test',
+        source: 'environment',
+        warnings: ['insecure'],
+      },
+    }),
+  );
+  await dialog
+    .getByRole('button', { name: en.settings.addDevice, exact: true })
+    .click();
+  await dialog
+    .getByRole('button', { name: en.settings.agentletCommandCopy, exact: true })
+    .click();
+  await expect(
+    page.getByText(en.settings.agentletCommandCopied, { exact: true }),
+  ).toBeVisible();
+  await expect(
+    dialog.getByText(/not encrypted|unencrypted|insecure/i),
+  ).toHaveCount(0);
+  await dialog.screenshot({
+    path: testInfo.outputPath('device-connection-copy.png'),
+  });
+});
+
 test('Services uses field saves and shared credential confirmation without a card footer', async ({
   page,
 }) => {
@@ -218,11 +353,11 @@ test('Agent sections keep their defaults and runtime fields preserve drafts acro
     openSettingsModalFixture();
   });
   const dialog = page.getByRole('dialog');
-  await dialog.getByRole('button', { name: 'Agent', exact: true }).click();
+  await dialog
+    .getByRole('button', { name: en.settings.agentSettings, exact: true })
+    .click();
   let readsAfterFirstExpansion = 0;
   for (const [name, expanded] of [
-    ['Connected devices', true],
-    ['External agents', true],
     ['Utility tasks', true],
     ['Conversation and changes', false],
     ['Advanced runtime settings', false],
@@ -259,15 +394,6 @@ test('Agent sections keep their defaults and runtime fields preserve drafts acro
     const card = dialog.locator(`[id="${id}"]`);
     if (expanded) {
       await expect(card).toBeHidden();
-      if (name === 'Connected devices') {
-        await expect(
-          dialog.getByRole('button', { name: 'Add device', exact: true }),
-        ).toBeVisible();
-      } else if (name === 'External agents') {
-        await expect(
-          dialog.getByRole('button', { name: 'Add agent', exact: true }),
-        ).toBeVisible();
-      }
       await heading.press('Tab');
       expect(
         await card.evaluate((el) => el.contains(document.activeElement)),
@@ -314,8 +440,6 @@ test('Agent sections keep their defaults and runtime fields preserve drafts acro
   expect(Math.abs(behaviorRect.width - runtimeRect.width)).toBeLessThan(1);
   await page.setViewportSize({ width: 480, height: 800 });
   for (const name of [
-    'Connected devices',
-    'External agents',
     'Utility tasks',
     'Conversation and changes',
     'Advanced runtime settings',

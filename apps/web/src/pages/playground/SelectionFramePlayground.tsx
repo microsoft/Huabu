@@ -252,7 +252,7 @@ export function SelectionFramePlayground() {
     >
       <div className="mb-5 flex flex-wrap items-center justify-between gap-4">
         <div>
-          <span className="text-info text-xs font-semibold">
+          <span className="text-info-fg text-xs font-semibold">
             INTERACTION PROPOSAL · PLAYGROUND ONLY
           </span>
           <p className="text-fg-muted mt-2 text-sm">
@@ -405,7 +405,7 @@ export function SelectionFramePlayground() {
             }}
           >
             <svg
-              className="text-info pointer-events-none absolute inset-0 h-full w-full overflow-visible"
+              className="text-info-fg pointer-events-none absolute inset-0 h-full w-full overflow-visible"
               aria-hidden="true"
             >
               <defs>

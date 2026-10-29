@@ -288,7 +288,7 @@ for (const axis of ['column', 'row'] as const) {
         await expect(label).toHaveCSS('box-shadow', 'none');
         const tokenColors = await label.evaluate((element) => {
           const probe = document.createElement('span');
-          probe.style.color = 'var(--info)';
+          probe.style.color = 'var(--info-fg)';
           probe.style.backgroundColor = 'var(--bg-surface)';
           element.append(probe);
           const style = getComputedStyle(probe);

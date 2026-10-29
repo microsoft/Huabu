@@ -43,7 +43,7 @@ it('forwards refs, actions, disabled and semantic state without changing header 
           onClick={onClick}
           disabled
           aria-pressed
-          className="bg-info-bg text-info"
+          className="bg-info-bg text-info-fg"
         >
           <Bookmark />
         </PreviewHeaderButton>,
@@ -51,7 +51,7 @@ it('forwards refs, actions, disabled and semantic state without changing header 
     );
     expect(ref.current?.disabled).toBe(true);
     expect(ref.current?.getAttribute('aria-pressed')).toBe('true');
-    expect(ref.current?.classList.contains('text-info')).toBe(true);
+    expect(ref.current?.classList.contains('text-info-fg')).toBe(true);
     expect(ref.current?.classList.contains('min-h-6')).toBe(true);
     expect(ref.current?.classList.contains('[&_svg]:h-3.25')).toBe(true);
     act(() => ref.current?.click());

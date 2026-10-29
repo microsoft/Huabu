@@ -238,7 +238,7 @@ export function AgentDefaultsSettings() {
                   </span>
                 )}
                 {capabilities.error ? (
-                  <div className="text-danger text-xs" role="alert">
+                  <div className="text-danger-fg text-xs" role="alert">
                     {capabilities.error.message}
                     <Button
                       size="field"
@@ -255,11 +255,11 @@ export function AgentDefaultsSettings() {
                 ) : unavailableModel &&
                   !capabilities.loading &&
                   supportsModel ? (
-                  <span role="status" className="text-warning text-xs">
+                  <span role="status" className="text-warning-fg text-xs">
                     {t('settings.agentDefaultsModelUnavailable')}
                   </span>
                 ) : !supportsModel && selectedProfile ? (
-                  <span role="status" className="text-warning text-xs">
+                  <span role="status" className="text-warning-fg text-xs">
                     {t('settings.agentDefaultsModelUnsupported')}
                   </span>
                 ) : null}
@@ -278,7 +278,7 @@ export function AgentDefaultsSettings() {
           {showStatus && (
             <div className="space-y-2 px-3 py-2 text-xs">
               {missing ? (
-                <p className="text-warning" role="status">
+                <p className="text-warning-fg" role="status">
                   {t('settings.agentDefaultsDeleted')}
                 </p>
               ) : draft.profileId === null ? (
@@ -287,21 +287,21 @@ export function AgentDefaultsSettings() {
                 </p>
               ) : snapshot?.defaults.profileId === draft.profileId &&
                 snapshot.selectionState === 'offline' ? (
-                <p className="text-warning">
+                <p className="text-warning-fg">
                   {t('settings.agentDefaultsOffline')}
                 </p>
               ) : null}
               {!isBuiltIn &&
                 draft.functionalModel.trim() &&
                 modelCapability !== 'supported' && (
-                  <p className="text-warning">
+                  <p className="text-warning-fg">
                     {modelCapability === 'unsupported'
                       ? t('settings.agentDefaultsModelUnsupported')
                       : t('settings.agentDefaultsModelUnknown')}
                   </p>
                 )}
               {(error || profilesError) && (
-                <p className="text-danger" role="alert">
+                <p className="text-danger-fg" role="alert">
                   {error ?? profilesError?.message}
                 </p>
               )}

@@ -459,6 +459,12 @@ test('Add Space Shortcut browses the shared tree and preserves target ownership'
   ).toBeDisabled();
   await expect(
     picker.getByRole('button', { name: 'Shortcut tree child', exact: true }),
+  ).toBeVisible();
+  await picker
+    .getByRole('button', { name: 'Collapse Shortcut tree parent', exact: true })
+    .click();
+  await expect(
+    picker.getByRole('button', { name: 'Shortcut tree child', exact: true }),
   ).toHaveCount(0);
   await picker
     .getByRole('button', { name: 'Expand Shortcut tree parent', exact: true })

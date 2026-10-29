@@ -1069,7 +1069,7 @@ export const StrokeSelectionToolbar = () => {
         >
           <DropdownMenuItem
             icon={<Trash2 />}
-            className="text-danger"
+            className="text-danger-fg"
             onClick={handleDelete}
           >
             {t('actions.delete')}

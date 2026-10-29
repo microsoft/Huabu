@@ -60,12 +60,12 @@
   --crepe-color-on-inverse: var(--fg-inverse);
   --crepe-color-inline-area: var(--bg-hover);
   --crepe-color-inline-code: var(--fg-default);
-  --crepe-color-error: var(--danger);
+  --crepe-color-error: var(--danger-fg);
 
   /* Accent palette — Crepe uses `primary` for focus / active states
      (e.g. selected table column header, code-mirror keywords) and
      `secondary` as a soft accent fill (latex editor background). */
-  --crepe-color-primary: var(--info);
+  --crepe-color-primary: var(--info-fg);
   --crepe-color-secondary: var(--info-bg);
   --crepe-color-on-secondary: var(--fg-default);
 
@@ -185,7 +185,7 @@
    translucent selection layer composes with the mark's own background,
    while unhighlighted text retains the browser's native selection style. */
 .milkdown .ProseMirror span[data-huabu-background-color]::selection {
-  background-color: color-mix(in srgb, var(--info) 35%, transparent);
+  background-color: var(--editor-selection-bg);
 }
 
 .milkdown .ProseMirror p {
@@ -575,7 +575,7 @@
 
 .milkdown .milkdown-slash-menu .tab-group ul li.selected {
   background: var(--info-bg);
-  color: var(--info);
+  color: var(--info-fg);
 }
 
 .milkdown .milkdown-slash-menu .menu-groups {
@@ -621,7 +621,7 @@
 
 .milkdown .milkdown-slash-menu .menu-groups .menu-group li.active {
   background: var(--info-bg);
-  color: var(--info);
+  color: var(--info-fg);
 }
 
 .milkdown .milkdown-slash-menu .menu-groups .menu-group li .milkdown-icon {
@@ -934,8 +934,8 @@
    falls back to `.cm-selectionBackground` (when unfocused). The stock
    light theme uses a dark slate (#d9d9d9 → much darker once layered),
    which reads as near-black against our white card. Replace it with
-   the same translucent-blue tint we use elsewhere for selection
-   (`--info-bg-hover`, #dbeafe) so it harmonises with the focus border
+   the same opaque-blue tint we use elsewhere for selection
+   (`--info-bg`) so it harmonises with the focus border
    and stays readable over `cm-content` (`--fg-default`). */
 .milkdown .milkdown-code-block .cm-editor .cm-selectionBackground,
 .milkdown
@@ -944,13 +944,13 @@
   > .cm-scroller
   > .cm-selectionLayer
   .cm-selectionBackground {
-  background: var(--info-bg-hover) !important;
+  background: var(--info-bg) !important;
 }
 
 /* Native text selection (used while the user is dragging mid-select,
    before CodeMirror's overlay catches up). Keep it consistent. */
 .milkdown .milkdown-code-block .cm-content ::selection {
-  background: var(--info-bg-hover);
+  background: var(--info-bg);
 }
 
 /* CodeMirror's `defaultHighlightStyle` paints LaTeX command tokens

@@ -80,7 +80,7 @@ export function AgentMenuRow({
       onClick={onClick}
       title={title}
       tooltipWrapperClassName="block w-full"
-      className={cn(MENU_ITEM_CLASS, current && 'text-info')}
+      className={cn(MENU_ITEM_CLASS, current && 'text-info-fg')}
     >
       <span className="shrink-0">{icon}</span>
       <span className={MENU_LABEL_CLASS}>{label}</span>

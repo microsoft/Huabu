@@ -31,9 +31,11 @@ vi.mock('./agent-submission.js', () => ({
 
 vi.mock('./agent-thread.service.js', () => {
   class AgentThreadBusyError extends Error {}
+  class AgentRequestStoppedError extends Error {}
 
   return {
     AgentThreadBusyError,
+    AgentRequestStoppedError,
     agentThreadService: {
       resolveFixedTarget: mocks.resolveFixedTarget,
       resolveTarget: mocks.resolveTarget,
@@ -120,6 +122,97 @@ afterEach(() => {
 });
 
 describe('POST /agent', () => {
+  it('carries the request identity through preparation, dispatch and the durable envelope', async () => {
+    mocks.beginPreparation.mockReturnValue({
+      signal: new AbortController().signal,
+      finish: vi.fn(),
+    });
+    mocks.resolveFixedTarget.mockResolvedValue(null);
+    mocks.resolveTarget.mockResolvedValue(null);
+    mocks.resolveBinding.mockResolvedValue({ kind: 'internal' });
+    mocks.buildChatEnvelope.mockResolvedValue(ENVELOPE);
+    mocks.invoke.mockImplementationOnce(async (options) => {
+      expect(await options.envelope()).toEqual({
+        ...ENVELOPE,
+        requestId: 'request-a',
+      });
+      return {
+        binding: { kind: 'internal' },
+        fixedTarget: null,
+        signal: new AbortController().signal,
+        acceptance: Promise.resolve({
+          threadId: 'thread-a',
+          turnStartSeq: 1,
+          requestId: 'request-a',
+        }),
+        events: events(),
+        dispose: vi.fn().mockResolvedValue(undefined),
+      };
+    });
+    const app = Fastify();
+    await app.register(agentRoutes, { prefix: '/agent' });
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/agent',
+        payload: {
+          content: 'Hello',
+          threadId: 'thread-a',
+          canvasId: 'canvas-a',
+          requestId: 'request-a',
+        },
+      });
+      expect(response.statusCode, response.body).toBe(200);
+      expect(mocks.beginPreparation).toHaveBeenCalledWith(
+        'thread-a',
+        'canvas-a',
+        'request-a',
+      );
+      expect(mocks.invoke).toHaveBeenCalledWith(
+        expect.objectContaining({ requestId: 'request-a' }),
+      );
+      expect(response.body).toContain('"requestId":"request-a"');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('validates and forwards request-scoped Stop reconciliation', async () => {
+    mocks.stopAndWait.mockResolvedValue({
+      stopped: false,
+      acceptance: null,
+      request: { id: 'request-a', accepted: true },
+    });
+    const app = Fastify();
+    await app.register(agentRoutes, { prefix: '/agent' });
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/agent/stop/thread-a?canvasId=canvas-a',
+        payload: { requestId: 'request-a' },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json().request).toEqual({
+        id: 'request-a',
+        accepted: true,
+      });
+      expect(mocks.stopAndWait).toHaveBeenCalledWith(
+        'thread-a',
+        'canvas-a',
+        'request-a',
+      );
+      const invalid = await app.inject({
+        method: 'POST',
+        url: '/agent/stop/thread-a?canvasId=canvas-a',
+        payload: { requestId: '' },
+      });
+      expect(invalid.statusCode).toBe(400);
+      expect(mocks.stopAndWait).toHaveBeenCalledOnce();
+    } finally {
+      await app.close();
+    }
+  });
+
   it('passes external Chat directory intent to the prompt realization path', async () => {
     const binding = {
       kind: 'external' as const,

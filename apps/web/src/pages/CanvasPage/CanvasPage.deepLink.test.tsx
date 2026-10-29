@@ -12,6 +12,7 @@ import { usePanelStore } from '../../store/panelStore';
 import { createEmptyWorkspace } from '../../store/previewWorkspace/model';
 import { usePreviewWorkspaceStore } from '../../store/previewWorkspace/store';
 
+import type * as PreviewActions from '../../store/previewWorkspace/actions';
 import type { CanvasSummary } from '@huabu/shared';
 import type { Node } from '@xyflow/react';
 
@@ -22,7 +23,7 @@ import type { Node } from '@xyflow/react';
 const mocks = vi.hoisted(() => ({
   revealNodesOnCanvas: vi.fn(),
   fitNodesOnCanvas: vi.fn(),
-  openPreviewNode: vi.fn(() => 'tab-1'),
+  openPreviewNode: vi.fn<typeof PreviewActions.openPreviewNode>(() => 'tab-1'),
   toast: vi.fn(),
   requestChatOpen: vi.fn(),
   connect: vi.fn(),
@@ -146,6 +147,7 @@ async function renderAt(
   usePreviewWorkspaceStore.setState({
     canvasId: CANVAS_ID,
     workspace: createEmptyWorkspace('group-1'),
+    readIntentByTab: {},
     requestChatOpen: mocks.requestChatOpen,
   });
 
@@ -174,7 +176,7 @@ beforeEach(() => {
   root = createRoot(container);
   mocks.revealNodesOnCanvas.mockClear();
   mocks.fitNodesOnCanvas.mockClear();
-  mocks.openPreviewNode.mockClear();
+  mocks.openPreviewNode.mockReset();
   mocks.toast.mockClear();
   mocks.requestChatOpen.mockClear();
   mocks.refreshSpaceTitles.mockClear();
@@ -199,6 +201,7 @@ afterEach(() => {
   usePreviewWorkspaceStore.setState({
     canvasId: '',
     workspace: createEmptyWorkspace(),
+    readIntentByTab: {},
   });
 });
 
@@ -365,6 +368,7 @@ describe('CanvasPage node deep-link navigation', () => {
     expect(selectNodes).toHaveBeenCalledWith(['node-1'], false);
     expect(mocks.openPreviewNode).toHaveBeenCalledWith('node-1', {
       transient: false,
+      markReadIntent: false,
     });
     expect(mocks.revealNodesOnCanvas).toHaveBeenCalledWith(
       useCanvasStore.getState().rfInstance,
@@ -413,9 +417,45 @@ describe('CanvasPage node deep-link navigation', () => {
 
     expect(mocks.openPreviewNode).toHaveBeenCalledWith('node-1', {
       transient: false,
+      markReadIntent: false,
     });
     expect(mocks.requestChatOpen).toHaveBeenCalledWith('tab-1', 'bottom');
     expect(usePanelStore.getState().focusChatInputRequest).toBeNull();
+  });
+
+  it('does not infer reading from deep-link entry, history navigation, or reload', async () => {
+    const actual = await vi.importActual<typeof PreviewActions>(
+      '../../store/previewWorkspace/actions',
+    );
+    mocks.openPreviewNode.mockImplementation(actual.openPreviewNode);
+    const url = `/canvas/${CANVAS_ID}?node=node-1`;
+    const question = node('question', {
+      threadId: 'thread-1',
+      status: 'done',
+      viewed: false,
+    });
+    const { router } = await renderAt(url, question);
+    const preview = usePreviewWorkspaceStore.getState();
+    const tabId = preview.workspace.groups[0].activeTabId;
+    expect(tabId).toBeTruthy();
+    expect(preview.readIntentByTab).toEqual({});
+    await act(async () => router.navigate(`/canvas/${CANVAS_ID}`));
+    await act(async () => router.navigate(-1));
+    expect(usePreviewWorkspaceStore.getState().readIntentByTab).toEqual({});
+    expect(
+      Object.keys(usePreviewWorkspaceStore.getState().workspace.tabs),
+    ).toEqual([tabId]);
+
+    await act(async () => root.render(null));
+    await renderAt(url, question);
+    const restored = usePreviewWorkspaceStore.getState();
+    expect(restored.readIntentByTab).toEqual({});
+    const restoredTabId = restored.workspace.groups[0].activeTabId;
+    if (!restoredTabId) throw new Error('Missing restored Question tab');
+    act(() => restored.activateTab(restoredTabId));
+    expect(
+      usePreviewWorkspaceStore.getState().readIntentByTab[restoredTabId],
+    ).toBeTruthy();
   });
 
   it('does not create or open a conversation for an idle Question', async () => {

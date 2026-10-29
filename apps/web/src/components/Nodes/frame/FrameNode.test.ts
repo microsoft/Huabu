@@ -73,7 +73,7 @@ describe('getFrameHeaderMetrics', () => {
       },
     );
 
-    it.each(['#388388', '#E9C46A', '#A8A29E', 'var(--info)', 'red'])(
+    it.each(['#388388', '#E9C46A', '#A8A29E', 'var(--info)', 'crimson'])(
       'preserves the original accent %s without foreground mixing',
       (accent) => {
         expect(getFrameAccentMarkerColor(accent)).toBe(accent);

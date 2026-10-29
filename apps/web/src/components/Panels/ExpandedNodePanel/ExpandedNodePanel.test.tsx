@@ -238,7 +238,7 @@ describe('ExpandedNodePanel edge navigation', () => {
     act(() => standaloneTitle.click());
     const input = host.querySelector('input');
     if (!input) throw new Error('Missing title input');
-    expect(input.className).toContain('focus:ring-info-light');
+    expect(input.className).toContain('focus:ring-info');
     expect(input.className).toContain('-ml-1.25');
     expect(document.activeElement).toBe(input);
     act(() =>

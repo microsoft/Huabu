@@ -19,7 +19,6 @@ import {
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
-import { resolveAccent } from '@huabu/shared';
 import {
   getAbsolutePosition,
   getInkSigilStrokes,
@@ -52,6 +51,7 @@ import {
   validatePendingInkSigil,
 } from '@/store/inkSigilStore';
 import { useToolStore } from '@/store/toolStore';
+import { resolveAccentCss } from '@/utils/accentColor';
 import { INK_HANDWRITING_FONT_FAMILY } from '@/utils/node/nodeFontConfig';
 
 import { useInkSigilHighlightHost } from './InkSigilHighlightHost';
@@ -441,8 +441,8 @@ function InkSigilAnnotation({
       }
       className={
         broken
-          ? 'bg-warning-bg-hover/70 pointer-events-none absolute rounded'
-          : 'bg-ink-reference-highlight/70 pointer-events-none absolute rounded'
+          ? 'bg-ink-broken-reference-bg pointer-events-none absolute rounded'
+          : 'bg-ink-reference-bg pointer-events-none absolute rounded'
       }
       style={{
         left:
@@ -497,7 +497,7 @@ function InkSigilAnnotation({
       <Button
         variant="ghost"
         data-ink-sigil-label
-        className={`absolute touch-none justify-start overflow-hidden rounded-none bg-transparent p-0 text-left font-normal select-none enabled:hover:bg-transparent ${broken ? 'text-warning' : 'text-fg-default'} ${interactive ? 'pointer-events-auto cursor-grab active:cursor-grabbing' : 'pointer-events-none'}`}
+        className={`absolute touch-none justify-start overflow-hidden rounded-none bg-transparent p-0 text-left font-normal select-none enabled:hover:bg-transparent ${broken ? 'text-warning-fg' : 'text-fg-default'} ${interactive ? 'pointer-events-auto cursor-grab active:cursor-grabbing' : 'pointer-events-none'}`}
         tabIndex={interactive ? 0 : -1}
         style={{
           left: layout.labelX,
@@ -506,7 +506,7 @@ function InkSigilAnnotation({
           fontFamily: INK_HANDWRITING_FONT_FAMILY,
           color: broken
             ? undefined
-            : (resolveAccent(projection.sources[0].stroke.color) ??
+            : (resolveAccentCss(projection.sources[0].stroke.color) ??
               projection.sources[0].stroke.color),
           lineHeight: INK_SIGIL_LABEL_LINE_HEIGHT,
         }}

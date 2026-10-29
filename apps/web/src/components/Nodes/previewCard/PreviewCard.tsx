@@ -14,7 +14,7 @@ import { handleCanvasNavigationKey } from '@/hooks/shortcuts/handleCanvasNavigat
 
 import { previewCardMetricsForSize } from './previewCardDesign';
 import { FAR_ZOOM_DESIGN } from '../design/farZoomDesign';
-import { resolveNodeAccent } from '../design/nodeAccentPolicy';
+import { nodeAccentToken } from '../design/nodeAccentPolicy';
 import { NODE_BORDER_WIDTH } from '../design/nodeBoundary';
 import { NODE_TYPOGRAPHY } from '../design/nodeTypography';
 import { noteSurfaceStyle } from '../note/noteDesign';
@@ -304,7 +304,7 @@ function PreviewCardContent({
     scale,
   ]);
 
-  const resolvedAccent = resolveNodeAccent(nodeType, accent);
+  const resolvedAccent = nodeAccentToken(nodeType, accent);
   const style = {
     ...(resolvedAccent ? noteSurfaceStyle(resolvedAccent) : {}),
     ...(far

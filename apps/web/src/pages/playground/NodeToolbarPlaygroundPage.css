@@ -166,11 +166,11 @@
   box-shadow: 0 0 0 1px var(--edge-default);
 }
 .nt-toolbar .nt-tool[aria-pressed='true'] {
-  color: var(--info);
+  color: var(--info-fg);
   background: var(--info-bg);
 }
 .nt-toolbar button.nt-text-format[aria-pressed='true'] {
-  color: var(--info);
+  color: var(--info-fg);
   background: transparent;
 }
 .nt-toolbar button.nt-text-format:hover {

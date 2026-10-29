@@ -13,6 +13,8 @@ interface FragmentSelectionActionsProps {
   onSaveAsNote: () => void;
   onComment: () => void;
   onCopied: () => void;
+  saveAsNoteDisabled?: boolean;
+  saveAsNoteTitle?: string;
 }
 
 export function FragmentSelectionActions({
@@ -20,6 +22,8 @@ export function FragmentSelectionActions({
   onSaveAsNote,
   onComment,
   onCopied,
+  saveAsNoteDisabled = false,
+  saveAsNoteTitle,
 }: FragmentSelectionActionsProps) {
   const { t } = useTranslation();
   const [copyError, setCopyError] = useState(false);
@@ -50,8 +54,8 @@ export function FragmentSelectionActions({
           variant="ghost"
           iconOnly
           size="sm"
-          title={t('messages.addAsNote')}
-          disabled={copying}
+          title={saveAsNoteTitle ?? t('messages.addAsNote')}
+          disabled={copying || saveAsNoteDisabled}
           onMouseDown={(event) => event.preventDefault()}
           onClick={onSaveAsNote}
         >

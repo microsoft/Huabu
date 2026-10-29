@@ -25,7 +25,7 @@ for (const toolbarClass of [
         :root {
           --bg-hover: rgb(242, 242, 242);
           --info-bg: rgb(242, 248, 255);
-          --info: rgb(46, 144, 255);
+          --info-fg: rgb(35, 109, 194);
         }
         @layer utilities {
           .bg-transparent { background-color: transparent; }
@@ -52,7 +52,7 @@ for (const toolbarClass of [
     );
     const pressed = page.locator('#pressed');
     await expect(pressed).toHaveCSS('background-color', 'rgb(242, 248, 255)');
-    await expect(pressed).toHaveCSS('color', 'rgb(46, 144, 255)');
+    await expect(pressed).toHaveCSS('color', 'rgb(35, 109, 194)');
     await expect(page.locator('.node-toolbar-color')).toHaveCSS(
       'background-color',
       'rgba(0, 0, 0, 0)',

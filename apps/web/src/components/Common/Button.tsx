@@ -53,35 +53,35 @@ const variantToneClasses: Record<ButtonVariant, Record<Tone, string>> = {
   solid: {
     neutral:
       'border border-transparent bg-inverse text-fg-inverse enabled:hover:bg-inverse/80',
-    info: 'border border-transparent bg-info text-fg-inverse enabled:hover:bg-info/80',
+    info: 'border border-transparent bg-info-fg text-fg-inverse enabled:hover:ring-1 enabled:hover:ring-inset enabled:hover:ring-fg-inverse',
     success:
-      'border border-transparent bg-success text-fg-inverse enabled:hover:bg-success/80',
+      'border border-transparent bg-success-fg text-fg-inverse enabled:hover:ring-1 enabled:hover:ring-inset enabled:hover:ring-fg-inverse',
     warning:
-      'border border-transparent bg-warning text-fg-inverse enabled:hover:bg-warning/80',
+      'border border-transparent bg-warning-fg text-fg-inverse enabled:hover:ring-1 enabled:hover:ring-inset enabled:hover:ring-fg-inverse',
     danger:
-      'border border-transparent bg-danger text-fg-inverse enabled:hover:bg-danger/80',
+      'border border-transparent bg-danger-fg text-fg-inverse enabled:hover:ring-1 enabled:hover:ring-inset enabled:hover:ring-fg-inverse',
   },
   outline: {
     neutral:
       'border border-edge-default bg-surface text-fg-muted enabled:hover:bg-hover',
-    info: 'border border-info bg-surface text-info enabled:hover:bg-info-bg',
+    info: 'border border-info bg-surface text-info-fg enabled:hover:bg-info-bg',
     success:
-      'border border-success bg-surface text-success enabled:hover:bg-success-bg',
+      'border border-success bg-surface text-success-fg enabled:hover:bg-success-bg',
     warning:
-      'border border-warning bg-surface text-warning enabled:hover:bg-warning-bg',
+      'border border-warning-fg bg-surface text-warning-fg enabled:hover:bg-warning-bg',
     danger:
-      'border border-danger bg-surface text-danger enabled:hover:bg-danger-bg',
+      'border border-danger bg-surface text-danger-fg enabled:hover:bg-danger-bg',
   },
   ghost: {
     neutral:
       'cursor-pointer border-none bg-transparent text-fg-muted enabled:hover:bg-hover',
-    info: 'cursor-pointer border-none bg-transparent text-info enabled:hover:bg-info-bg',
+    info: 'cursor-pointer border-none bg-transparent text-info-fg enabled:hover:bg-info-bg',
     success:
-      'cursor-pointer border-none bg-transparent text-success enabled:hover:bg-success-bg',
+      'cursor-pointer border-none bg-transparent text-success-fg enabled:hover:bg-hover',
     warning:
-      'cursor-pointer border-none bg-transparent text-warning enabled:hover:bg-warning-bg',
+      'cursor-pointer border-none bg-transparent text-warning-fg enabled:hover:bg-hover',
     danger:
-      'cursor-pointer border-none bg-transparent text-danger enabled:hover:bg-danger-bg',
+      'cursor-pointer border-none bg-transparent text-danger-fg enabled:hover:bg-hover',
   },
 };
 
@@ -174,7 +174,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
             className={cn(
               'pointer-events-none absolute right-1 bottom-0.5 select-none',
               'text-[9px] leading-none font-medium',
-              shortcutBadgeActive ? 'text-info' : 'text-fg-subtle',
+              shortcutBadgeActive ? 'text-info-fg' : 'text-fg-subtle',
             )}
           >
             {shortcutBadge}

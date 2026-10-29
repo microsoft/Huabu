@@ -1,1309 +1,614 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { Activity, act, useState } from 'react';
+import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MessageList } from './MessageList';
-import {
-  forgetMessageListScrollPosition,
-  rememberMessageListScrollAnchor,
-  rememberMessageListScrollPosition,
-} from './messageListScroll';
 
-import type { ChatMessage } from '../../store/chatTypes';
-import type { InkInterpretation } from '@huabu/shared';
+import type { ChatMessage } from '@/store/chatTypes';
+import type { ScrollSeekConfiguration } from 'react-virtuoso';
 
-const renderCounts = vi.hoisted(() => ({
-  assistant: new Map<string, number>(),
-  assistantEffects: [] as string[],
-  user: 0,
-  userInputKinds: [] as Array<string | undefined>,
-  userInterpretations: [] as Array<InkInterpretation | undefined>,
-  userGroundingValues: [] as unknown[],
+const virtual = vi.hoisted(() => ({
+  jump: vi.fn(),
+  props: {} as Record<string, unknown>,
 }));
-
-vi.mock('./AIMessage', async () => {
-  const { memo, useEffect } = await import('react');
+vi.mock('react-virtuoso', async () => {
+  const { useImperativeHandle } = await import('react');
   return {
-    AIMessage: memo(function MockAIMessage({
-      messageId,
-      endStatus,
-      enableComments,
-    }: {
-      messageId: string;
-      endStatus?: 'interrupted' | 'error';
-      enableComments?: boolean;
-    }) {
-      renderCounts.assistant.set(
-        messageId,
-        (renderCounts.assistant.get(messageId) ?? 0) + 1,
-      );
-      useEffect(() => {
-        renderCounts.assistantEffects.push(messageId);
-      }, [messageId]);
-      return (
-        <div
-          data-assistant-message={messageId}
-          data-end-status={endStatus}
-          data-comments={enableComments}
-        />
-      );
-    }),
+    Virtuoso: (props: {
+      ref: React.Ref<unknown>;
+      data: string[];
+      itemContent: (index: number, id: string) => React.ReactNode;
+      firstItemIndex: number;
+    }) => {
+      virtual.props = props;
+      useImperativeHandle(props.ref, () => ({ scrollToIndex: virtual.jump }));
+      return props.data.map((id, index) => (
+        <div key={id}>
+          {props.itemContent(props.firstItemIndex + index, id)}
+        </div>
+      ));
+    },
   };
 });
-
-vi.mock('./UserMessage', async () => {
-  const { memo } = await import('react');
-  return {
-    UserMessage: memo(function MockUserMessage({
-      isFirst,
-      inputKind,
-      inkInterpretation,
-      groundingVisual,
-    }: {
-      isFirst?: boolean;
-      inputKind?: string;
-      inkInterpretation?: InkInterpretation;
-      groundingVisual?: unknown;
-    }) {
-      renderCounts.user++;
-      renderCounts.userInputKinds.push(inputKind);
-      renderCounts.userInterpretations.push(inkInterpretation);
-      renderCounts.userGroundingValues.push(groundingVisual);
-      return <div data-user-message data-first={isFirst} />;
-    }),
-  };
-});
-
+vi.mock('./AIMessage', () => ({
+  AIMessage: ({
+    messageId,
+    isStreaming,
+    enableComments,
+    endStatus,
+  }: {
+    messageId: string;
+    isStreaming: boolean;
+    enableComments: boolean;
+    endStatus?: string;
+  }) => (
+    <div
+      data-assistant={messageId}
+      data-streaming={isStreaming}
+      data-comments={enableComments}
+      data-end-status={endStatus}
+    />
+  ),
+}));
+vi.mock('./UserMessage', () => ({
+  UserMessage: ({
+    content,
+    isFirst,
+    inputKind,
+  }: {
+    content: string;
+    isFirst: boolean;
+    inputKind?: string;
+  }) => (
+    <div data-user data-first={isFirst} data-input-kind={inputKind}>
+      {content}
+    </div>
+  ),
+}));
 vi.mock('./StatusMessage', () => ({
-  StatusMessage: () => <div data-status-message />,
+  StatusMessage: () => <div data-status />,
 }));
-
 vi.mock('../Common/Button', () => ({
   Button: ({
     children,
-    ...props
+    onClick,
+    'aria-label': label,
   }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
-    <button {...props}>{children}</button>
+    <button onClick={onClick} aria-label={label}>
+      {children}
+    </button>
   ),
 }));
-
 vi.mock('../Common/Loading', () => ({
-  Loading: () => <div data-loading />,
+  Loading: ({ variant }: { variant?: string }) => (
+    <div
+      data-loading
+      data-loading-spinner={variant === 'spinner' ? '' : undefined}
+    />
+  ),
 }));
-
 vi.mock('../Common/ThinkingIndicator', () => ({
   ThinkingIndicator: () => <div data-thinking />,
 }));
-
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    t: (key: string, values?: { count?: number }) => {
-      if (key === 'chat.showEarlierTurns') {
-        return `Show ${values?.count ?? 0} earlier turns`;
-      }
-      if (key === 'chat.loadingEarlierTurns') return 'Loading earlier turns…';
-      if (key === 'chat.backToBottom') return 'Back to bottom';
-      if (key === 'chat.newMessage') return 'New message';
-      return key;
-    },
-  }),
+  useTranslation: () => ({ t: (key: string) => key }),
 }));
 
-let root: Root | undefined;
-let container: HTMLDivElement | undefined;
-
-function mount(element: React.ReactNode): void {
-  container = document.createElement('div');
-  document.body.appendChild(container);
-  root = createRoot(container);
-  act(() => root?.render(element));
-}
-
+const messages: ChatMessage[] = [
+  { id: 'user', role: 'user', content: 'Hello', inputKind: 'ink-intent' },
+  {
+    id: 'assistant',
+    role: 'assistant',
+    segments: [{ kind: 'text', text: 'Answer' }],
+  },
+];
+let container: HTMLDivElement;
+let root: Root;
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
-  renderCounts.assistant.clear();
-  renderCounts.assistantEffects = [];
-  renderCounts.user = 0;
-  renderCounts.userInputKinds = [];
-  renderCounts.userInterpretations = [];
-  renderCounts.userGroundingValues = [];
-  vi.spyOn(HTMLElement.prototype, 'scrollTo').mockImplementation(() => {});
+  vi.useFakeTimers();
+  vi.stubGlobal('requestAnimationFrame', (fn: FrameRequestCallback) =>
+    setTimeout(() => fn(0), 16),
+  );
+  vi.stubGlobal('cancelAnimationFrame', clearTimeout);
+  vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(500);
+  container = document.createElement('div');
+  document.body.append(container);
+  root = createRoot(container);
+  virtual.jump.mockClear();
 });
-
 afterEach(() => {
-  act(() => root?.unmount());
-  container?.remove();
-  root = undefined;
-  container = undefined;
+  act(() => root.unmount());
+  container.remove();
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
-
-describe('MessageList leading user spacing', () => {
-  it.each([false, true])(
-    'marks only the leading rendered message as first when an assistant precedes it=%s',
-    (withAssistant) => {
-      const messages: ChatMessage[] = [
-        { id: 'user-1', role: 'user', content: 'First question' },
-        { id: 'user-2', role: 'user', content: 'Follow-up question' },
-      ];
-      if (withAssistant) {
-        messages.unshift({
-          id: 'assistant-1',
-          role: 'assistant',
-          segments: [{ kind: 'text', text: 'Earlier answer' }],
-        });
-      }
-      mount(<MessageList messages={messages} isLoading={false} />);
-      expect(
-        [...(container?.querySelectorAll('[data-user-message]') ?? [])].map(
-          (message) => message.getAttribute('data-first'),
-        ),
-      ).toEqual([String(!withAssistant), 'false']);
-    },
+function render(props: Partial<React.ComponentProps<typeof MessageList>> = {}) {
+  act(() =>
+    root.render(
+      <MessageList messages={messages} isLoading={false} {...props} />,
+    ),
   );
-});
+  act(() => vi.advanceTimersByTime(600));
+}
 
-describe('MessageList comment availability', () => {
-  it.each([
-    [true, false],
-    [true, true],
-    [false, false],
-    [false, true],
-  ])(
-    'follows panel visibility (%s) independently of history hydration (%s)',
-    (isActive, isHistoryLoading) => {
-      mount(
-        <MessageList
-          messages={[
-            {
-              id: 'visible-answer',
-              role: 'assistant',
-              segments: [{ kind: 'text', text: 'An already rendered answer' }],
-            },
-          ]}
-          isLoading={false}
-          isActive={isActive}
-          isHistoryLoading={isHistoryLoading}
-        />,
-      );
-      expect(
-        container
-          ?.querySelector('[data-assistant-message="visible-answer"]')
-          ?.getAttribute('data-comments'),
-      ).toBe(String(isActive));
-    },
-  );
-});
-
-describe('MessageList empty state', () => {
-  it('shows the disclaimer only while the conversation is empty', () => {
-    mount(<MessageList messages={[]} isLoading={false} />);
-
-    expect(
-      container?.querySelector('[data-chat-empty-disclaimer]')?.textContent,
-    ).toBe('chat.aiContentDisclaimer');
-
-    act(() =>
-      root?.render(
-        <MessageList
-          messages={[{ id: 'user-1', role: 'user', content: 'Hello' }]}
-          isLoading={false}
-        />,
-      ),
-    );
-
-    expect(container?.querySelector('[data-chat-empty-disclaimer]')).toBeNull();
-  });
-});
-
-describe('MessageList bottom navigation', () => {
-  const scrollTopDescriptor = Object.getOwnPropertyDescriptor(
-    HTMLElement.prototype,
-    'scrollTop',
-  );
-  let height: number;
-  let viewportHeight: number;
-  let top: number;
-  let resizes: Set<() => void>;
-  let observe: ReturnType<typeof vi.fn>;
-
-  beforeEach(() => {
-    height = 1_000;
-    viewportHeight = 200;
-    top = 0;
-    resizes = new Set();
-    observe = vi.fn();
-    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(
-      () => height,
-    );
-    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(
-      () => viewportHeight,
-    );
-    Object.defineProperty(HTMLElement.prototype, 'scrollTop', {
-      configurable: true,
-      get: () => top,
-      set: (value: number) => {
-        top = Math.max(0, Math.min(value, height - viewportHeight));
-      },
-    });
-    vi.mocked(HTMLElement.prototype.scrollTo).mockImplementation(function (
-      this: HTMLElement,
-      options?: ScrollToOptions | number,
-    ) {
-      if (typeof options === 'object') this.scrollTop = options.top ?? 0;
-    });
-    vi.stubGlobal(
-      'ResizeObserver',
-      class {
-        callback: () => void;
-        constructor(callback: () => void) {
-          this.callback = callback;
-          resizes.add(callback);
-        }
-        observe = observe;
-        disconnect() {
-          resizes.delete(this.callback);
-        }
-      },
-    );
-  });
-
-  afterEach(() => {
-    if (scrollTopDescriptor) {
-      Object.defineProperty(
-        HTMLElement.prototype,
-        'scrollTop',
-        scrollTopDescriptor,
-      );
-    } else {
-      Reflect.deleteProperty(HTMLElement.prototype, 'scrollTop');
-    }
-  });
-
-  function thread(): HTMLElement {
-    const element = container?.querySelector<HTMLElement>(
+describe('manual virtual chat', () => {
+  it('reports the latest end only after hydration and placement, and clears it when hidden', () => {
+    const onLatestVisibleChange = vi.fn();
+    render({ onLatestVisibleChange, isHistoryReady: false });
+    expect(onLatestVisibleChange).toHaveBeenLastCalledWith(false);
+    render({ onLatestVisibleChange });
+    expect(onLatestVisibleChange).toHaveBeenLastCalledWith(true);
+    const scroller = container.querySelector<HTMLElement>(
       '[data-chat-thread-root]',
     );
-    if (!element) throw new Error('Thread is not mounted');
-    return element;
-  }
-
-  function scrollTo(value: number): void {
+    if (!scroller) throw new Error('Missing scroller');
+    Object.defineProperty(scroller, 'scrollHeight', { value: 2000 });
     act(() => {
-      thread().scrollTop = value;
-      thread().dispatchEvent(new Event('scroll', { bubbles: true }));
+      scroller.scrollTop = 500;
+      scroller.dispatchEvent(new Event('scroll'));
     });
-  }
-
-  function resize(): void {
+    expect(onLatestVisibleChange).toHaveBeenLastCalledWith(false);
     act(() => {
-      for (const callback of resizes) callback();
+      scroller.scrollTop = 1500;
+      scroller.dispatchEvent(new Event('scroll'));
     });
-  }
-
-  function bottomButton(): HTMLButtonElement | undefined {
-    return Array.from(container?.querySelectorAll('button') ?? []).find(
-      (button) => /Back to bottom|New message/.test(button.textContent ?? ''),
-    );
-  }
-
-  it('shows back-to-bottom only beyond 50px even without new messages', () => {
-    mount(<MessageList messages={[]} isLoading={false} />);
-    expect(top).toBe(800);
-    scrollTo(750);
-    expect(bottomButton()).toBeUndefined();
-    scrollTo(749);
-    expect(bottomButton()?.textContent).toContain('Back to bottom');
-    scrollTo(750);
-    expect(bottomButton()).toBeUndefined();
+    expect(onLatestVisibleChange).toHaveBeenLastCalledWith(true);
+    render({ onLatestVisibleChange, isActive: false });
+    expect(onLatestVisibleChange).toHaveBeenLastCalledWith(false);
   });
 
-  it('jumps instantly and follows late content and viewport growth', () => {
-    mount(<MessageList messages={[]} isLoading={false} />);
-    scrollTo(100);
-    act(() => bottomButton()?.click());
-    expect(top).toBe(800);
-    expect(bottomButton()).toBeUndefined();
-    expect(HTMLElement.prototype.scrollTo).toHaveBeenLastCalledWith({
-      top: 1_000,
-      behavior: 'instant',
+  it('does not acknowledge the latest end while its body is a refill placeholder', () => {
+    const onLatestVisibleChange = vi.fn();
+    render({
+      onLatestVisibleChange,
+      messages: [],
+      historyPages: [{ limit: 3, messageIds: ['missing-tail'], loaded: false }],
     });
-    height = 1_500;
-    resize();
-    expect(top).toBe(1_300);
-    viewportHeight = 100;
-    resize();
-    expect(top).toBe(1_400);
-    expect(observe).toHaveBeenCalledWith(thread());
-    expect(observe).toHaveBeenCalledWith(thread().firstElementChild);
-    for (const args of vi.mocked(HTMLElement.prototype.scrollTo).mock.calls) {
-      expect(args).toEqual([expect.objectContaining({ behavior: 'instant' })]);
+    expect(onLatestVisibleChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it('keeps the return control stable between separate show and hide thresholds', () => {
+    render();
+    const scroller = container.querySelector<HTMLElement>(
+      '[data-chat-thread-root]',
+    );
+    if (!scroller) throw new Error('Missing scroller');
+    Object.defineProperty(scroller, 'scrollHeight', { value: 2000 });
+    const button = () =>
+      container.querySelector('[aria-label="chat.backToBottom"]');
+    const scrollToGap = (gap: number) =>
+      act(() => {
+        scroller.scrollTop = 1500 - gap;
+        scroller.dispatchEvent(new Event('scroll'));
+      });
+    for (const gap of [0, 51, 160]) {
+      scrollToGap(gap);
+      expect(button()).toBeNull();
+    }
+    scrollToGap(161);
+    const visible = button();
+    expect(visible).not.toBeNull();
+    expect(visible?.textContent).toBe('');
+    expect(visible?.querySelector('svg')).not.toBeNull();
+    for (const gap of [159, 100, 51, 160]) {
+      scrollToGap(gap);
+      expect(button()).toBe(visible);
+    }
+    scrollToGap(50);
+    expect(button()).toBeNull();
+    scrollToGap(100);
+    expect(button()).toBeNull();
+  });
+
+  it('keeps the measured outer height when a body is evicted repeatedly', () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(
+      new DOMRect(0, 0, 300, 480),
+    );
+    const page = { messageIds: ['assistant'], limit: 3, loaded: true };
+    render({ historyPages: [page] });
+    for (let count = 0; count < 2; count++) {
+      render({ messages: [], historyPages: [{ ...page, loaded: false }] });
+      const row = container.querySelector<HTMLElement>(
+        '[data-chat-message-id="assistant"]',
+      );
+      expect(row?.style.height).toBe('480px');
+      expect(row?.hasAttribute('data-chat-row-loading')).toBe(true);
+      render({ historyPages: [page] });
     }
   });
 
-  it('does not hide the button before the scroll actually reaches bottom', () => {
-    mount(<MessageList messages={[]} isLoading={false} />);
-    scrollTo(100);
-    vi.mocked(HTMLElement.prototype.scrollTo).mockImplementation(() => {});
-    act(() => bottomButton()?.click());
-    expect(top).toBe(100);
-    expect(bottomButton()).toBeDefined();
-  });
-
-  it('keeps following when growth emits a scroll event without movement', () => {
-    mount(<MessageList messages={[]} isLoading={false} />);
-    height = 1_500;
-    act(() => thread().dispatchEvent(new Event('scroll')));
-    resize();
-    expect(top).toBe(1_300);
-    expect(bottomButton()).toBeUndefined();
-  });
-
-  it('never pulls a paused reader down on delayed resize or streamed updates', () => {
-    const tail: ChatMessage = {
-      id: 'assistant-live',
-      role: 'assistant',
-      segments: [{ kind: 'text', text: 'First' }],
+  it('defers passing-page refills while seeking and keeps loading through target refill', () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(
+      new DOMRect(0, 0, 300, 480),
+    );
+    const page = {
+      messageIds: ['older'],
+      before: 'cursor',
+      limit: 3,
+      loaded: false,
     };
-    mount(<MessageList messages={[tail]} isLoading />);
-    scrollTo(100);
-    height = 1_500;
-    resize();
-    expect(top).toBe(100);
-    expect(bottomButton()?.textContent).toContain('Back to bottom');
+    const load = vi.fn();
+    render({ historyPages: [page], onLoadHistoryPage: load });
     act(() =>
-      root?.render(
-        <MessageList
-          messages={[
-            { ...tail, segments: [{ kind: 'text', text: 'More output' }] },
-          ]}
-          isLoading
-        />,
-      ),
+      container
+        .querySelector('[data-chat-thread-root]')
+        ?.dispatchEvent(new Event('pointerdown', { bubbles: true })),
     );
-    expect(top).toBe(100);
-    expect(bottomButton()?.textContent).toContain('New message');
-    scrollTo(1_300);
-    expect(bottomButton()).toBeUndefined();
-    height = 1_700;
-    resize();
-    expect(top).toBe(1_500);
-  });
-
-  it('honors an upward gesture before resize without preventing native scrolling', () => {
-    mount(<MessageList messages={[]} isLoading={false} />);
-    const wheel = new WheelEvent('wheel', {
-      deltaY: -100,
-      bubbles: true,
-      cancelable: true,
-    });
-    act(() => thread().dispatchEvent(wheel));
-    height = 1_500;
-    resize();
-    expect(wheel.defaultPrevented).toBe(false);
-    expect(top).toBe(800);
-    expect(bottomButton()).toBeDefined();
-  });
-
-  it('does not stop following for downward wheel input already at bottom', () => {
-    mount(<MessageList messages={[]} isLoading={false} />);
-    act(() =>
-      thread().dispatchEvent(
-        new WheelEvent('wheel', {
-          deltaY: 100,
-          bubbles: true,
-        }),
-      ),
-    );
-    height = 1_500;
-    resize();
-    expect(top).toBe(1_300);
-  });
-
-  it('does not undo native scrolling before its scroll event arrives', () => {
-    mount(<MessageList messages={[]} isLoading={false} />);
-    thread().scrollTop = 100;
-    height = 1_500;
-    resize();
-    expect(top).toBe(100);
-    expect(bottomButton()).toBeDefined();
-  });
-
-  it('keeps keyboard focus in the thread after activating the bottom action', () => {
-    mount(<MessageList messages={[]} isLoading={false} />);
-    scrollTo(100);
-    const button = bottomButton();
-    button?.focus();
-    act(() => button?.click());
-    expect(document.activeElement).toBe(thread());
-    expect(top).toBe(800);
-    act(() =>
-      thread().dispatchEvent(
-        new KeyboardEvent('keydown', {
-          key: 'End',
-          bubbles: true,
-        }),
-      ),
-    );
-    height = 1_500;
-    resize();
-    expect(top).toBe(1_300);
-    act(() =>
-      thread().dispatchEvent(
-        new KeyboardEvent('keydown', {
-          key: 'PageUp',
-          bubbles: true,
-        }),
-      ),
-    );
-    height = 1_700;
-    resize();
-    expect(top).toBe(1_300);
-  });
-
-  it('does not flag a prepend with the same tail as new output', () => {
-    const tail: ChatMessage = {
-      id: 'current',
-      role: 'user',
-      content: 'Current',
-    };
-    mount(<MessageList messages={[tail]} isLoading={false} />);
-    scrollTo(100);
-    act(() =>
-      root?.render(
-        <MessageList
-          messages={[{ id: 'older', role: 'user', content: 'Older' }, tail]}
-          isLoading={false}
-        />,
-      ),
-    );
-    expect(top).toBe(100);
-    expect(bottomButton()?.textContent).toContain('Back to bottom');
-  });
-
-  it('waits for hydration and disconnects observers on unmount', () => {
-    mount(<MessageList messages={[]} isLoading={false} isHistoryLoading />);
-    expect(top).toBe(0);
-    expect(bottomButton()).toBeUndefined();
-    act(() => root?.render(<MessageList messages={[]} isLoading={false} />));
-    expect(top).toBe(800);
-    expect(resizes.size).toBe(1);
-    act(() => root?.unmount());
-    root = undefined;
-    expect(resizes.size).toBe(0);
-  });
-
-  it('ignores hidden-tab scroll events and resize callbacks', () => {
-    mount(
-      <div data-preview-active="true">
-        <MessageList messages={[]} isLoading={false} />
-      </div>,
-    );
-    const wrapper = container?.querySelector<HTMLElement>(
-      '[data-preview-active]',
-    );
-    wrapper?.setAttribute('data-preview-active', 'false');
-    height = 1_500;
-    resize();
-    expect(top).toBe(800);
-    wrapper?.setAttribute('data-preview-active', 'true');
-    resize();
-    expect(top).toBe(1_300);
-  });
-
-  const history = (count: number): ChatMessage[] =>
-    Array.from({ length: count }, (_, index): ChatMessage[] => [
-      { id: `u${index}`, role: 'user', content: `Turn ${index}` },
-      {
-        id: `a${index}`,
-        role: 'assistant',
-        segments: [{ kind: 'text', text: `Reply ${index}` }],
-      },
-    ]).flat();
-  const messageIds = () =>
-    Array.from(
-      thread().querySelectorAll<HTMLElement>('[data-chat-message-id]'),
-      (element) => element.dataset.chatMessageId,
-    );
-  const earlier = () =>
-    Array.from(container?.querySelectorAll('button') ?? []).find((button) =>
-      button.textContent?.includes('earlier turns'),
-    );
-
-  it('mounts only recent cached turns and expands cache before fetching', () => {
-    const messages = history(10);
-    const fetchOlder = vi.fn();
-    mount(
-      <MessageList
-        messages={messages}
-        isLoading={false}
-        recentTurnCount={3}
-        hasOlderHistory
-        onLoadOlderHistory={fetchOlder}
-      />,
-    );
-    expect(messageIds()).toEqual(['u7', 'a7', 'u8', 'a8', 'u9', 'a9']);
-    expect([...renderCounts.assistant.keys()]).toEqual(['a7', 'a8', 'a9']);
-    act(() => earlier()?.click());
-    expect(messageIds()).toHaveLength(12);
-    expect(fetchOlder).not.toHaveBeenCalled();
-    act(() => earlier()?.click());
-    act(() => earlier()?.click());
-    expect(messageIds()).toHaveLength(20);
-    expect(fetchOlder).not.toHaveBeenCalled();
-    act(() => earlier()?.click());
-    expect(fetchOlder).toHaveBeenCalledTimes(1);
-    expect(messages).toHaveLength(20);
-  });
-
-  it('does not reset expanded history on ordinary rerenders, but does on activation', () => {
-    const messages = history(10);
-    const view = (activationId: number) => (
-      <MessageList
-        messages={messages}
-        recentTurnCount={3}
-        isLoading={false}
-        activationId={activationId}
-      />
-    );
-    mount(view(0));
-    act(() => earlier()?.click());
-    act(() => root?.render(view(0)));
-    expect(messageIds()).toHaveLength(12);
-    act(() => root?.render(view(1)));
-    expect(messageIds()).toHaveLength(6);
-    expect(top).toBe(800);
-  });
-
-  it('selects the recent window before a retained Activity reconnects', () => {
-    const messages = history(10);
-    const view = (active: boolean, activationId: number) => (
-      <Activity mode={active ? 'visible' : 'hidden'}>
-        <MessageList
-          messages={messages}
-          recentTurnCount={3}
-          isLoading={false}
-          activationId={activationId}
-          isActive={active}
-        />
-      </Activity>
-    );
-    mount(view(true, 0));
-    act(() => earlier()?.click());
-    act(() => root?.render(view(false, 0)));
-    renderCounts.assistant.clear();
-    renderCounts.assistantEffects = [];
-    act(() => root?.render(view(true, 1)));
-    expect(messageIds()).toHaveLength(6);
-    expect(
-      [...renderCounts.assistant.keys()].every((id) =>
-        ['a7', 'a8', 'a9'].includes(id),
-      ),
-    ).toBe(true);
-    expect(renderCounts.assistantEffects).toEqual(['a7', 'a8', 'a9']);
-  });
-
-  it('grows during a turn and compacts only on genuine completion', () => {
-    mount(
-      <MessageList
-        messages={history(3)}
-        recentTurnCount={3}
-        isLoading={false}
-      />,
-    );
-    const grown = history(4);
-    act(() =>
-      root?.render(
-        <MessageList messages={grown} recentTurnCount={3} isLoading />,
-      ),
-    );
-    expect(messageIds()).toHaveLength(8);
-    act(() =>
-      root?.render(
-        <MessageList messages={grown} recentTurnCount={3} isLoading={false} />,
-      ),
-    );
-    expect(messageIds()).toHaveLength(8);
-    act(() =>
-      root?.render(
-        <MessageList
-          messages={grown}
-          recentTurnCount={3}
-          isLoading={false}
-          completedTurnId="a3"
-        />,
-      ),
-    );
-    expect(messageIds()).toHaveLength(6);
-    expect(messageIds()[0]).toBe('u1');
-    expect(top).toBe(800);
-  });
-
-  it('does not compact an upward-reading gesture even before its scroll event', () => {
-    mount(
-      <MessageList
-        messages={history(3)}
-        recentTurnCount={3}
-        isLoading={false}
-      />,
-    );
-    act(() =>
-      thread().dispatchEvent(
-        new WheelEvent('wheel', { deltaY: -100, bubbles: true }),
-      ),
-    );
-    act(() =>
-      root?.render(
-        <MessageList
-          messages={history(4)}
-          recentTurnCount={3}
-          isLoading={false}
-          completedTurnId="a3"
-        />,
-      ),
-    );
-    expect(messageIds()).toHaveLength(8);
-  });
-
-  it('does not compact or override native scrolling before its event at completion', () => {
-    mount(
-      <MessageList
-        messages={history(3)}
-        recentTurnCount={3}
-        isLoading={false}
-      />,
-    );
-    thread().scrollTop = 100;
-    act(() =>
-      root?.render(
-        <MessageList
-          messages={history(4)}
-          recentTurnCount={3}
-          isLoading={false}
-          completedTurnId="a3"
-        />,
-      ),
-    );
-    expect(messageIds()).toHaveLength(8);
-    expect(top).toBe(100);
-  });
-
-  it('protects expanded history at completion and compacts on explicit return to latest', () => {
-    mount(
-      <MessageList
-        messages={history(6)}
-        recentTurnCount={3}
-        isLoading={false}
-      />,
-    );
-    act(() => earlier()?.click());
-    scrollTo(100);
-    act(() =>
-      root?.render(
-        <MessageList
-          messages={history(7)}
-          recentTurnCount={3}
-          isLoading={false}
-          completedTurnId="a6"
-        />,
-      ),
-    );
-    expect(messageIds()).toHaveLength(14);
-    expect(top).toBe(100);
-    act(() => bottomButton()?.click());
-    expect(messageIds()).toHaveLength(6);
-    expect(top).toBe(800);
-  });
-
-  it('does not compact or scroll a hidden conversation on completion', () => {
-    const view = (messages: ChatMessage[], active: boolean, done?: string) => (
-      <MessageList
-        messages={messages}
-        recentTurnCount={3}
-        isLoading={false}
-        isActive={active}
-        completedTurnId={done}
-      />
-    );
-    mount(view(history(3), true));
-    act(() => root?.render(view(history(4), false, 'a3')));
-    expect(messageIds()).toHaveLength(8);
-    expect(top).toBe(800);
-  });
-
-  it('materializes cached history for explicit search and protects the target', () => {
-    mount(
-      <MessageList
-        messages={history(10)}
-        recentTurnCount={3}
-        isLoading={false}
-      />,
-    );
-    const request = new Event('chat-reveal-search', { cancelable: true });
-    act(() => thread().dispatchEvent(request));
-    expect(request.defaultPrevented).toBe(true);
-    expect(messageIds()).toHaveLength(20);
-    act(() =>
-      root?.render(
-        <MessageList
-          messages={history(11)}
-          recentTurnCount={3}
-          isLoading={false}
-          completedTurnId="a10"
-        />,
-      ),
-    );
-    expect(messageIds()).toHaveLength(22);
-  });
-
-  it('hydrates a recent window without ever mounting the full fetched array', () => {
-    mount(
-      <MessageList
-        messages={[]}
-        recentTurnCount={3}
-        isLoading={false}
-        isHistoryLoading
-      />,
-    );
-    act(() =>
-      root?.render(
-        <MessageList
-          messages={history(10)}
-          recentTurnCount={3}
-          isLoading={false}
-        />,
-      ),
-    );
-    expect(messageIds()).toHaveLength(6);
-    expect(renderCounts.user).toBe(3);
-  });
-
-  it('opens at latest without overwriting a bookmark and reveals it from cache on request', () => {
-    const viewKey = 'reading-return-test';
-    const source = document.createElement('div');
-    const anchor = document.createElement('div');
-    anchor.dataset.chatMessageId = 'u2';
-    anchor.getBoundingClientRect = () => ({ top: 10, bottom: 100 }) as DOMRect;
-    source.appendChild(anchor);
-    rememberMessageListScrollAnchor(source, viewKey);
-    const fetchOlder = vi.fn();
-    mount(
-      <MessageList
-        messages={history(10)}
-        recentTurnCount={3}
-        isLoading={false}
-        viewKey={viewKey}
-        onLoadOlderHistory={fetchOlder}
-      />,
-    );
-    expect(messageIds()[0]).toBe('u7');
-    expect(top).toBe(800);
-    act(() => thread().dispatchEvent(new Event('scroll')));
-    const button = Array.from(container?.querySelectorAll('button') ?? []).find(
-      (entry) => entry.textContent === 'chat.returnToReadingPosition',
-    );
-    expect(button).toBeDefined();
-    button?.focus();
-    act(() => button?.click());
-    expect(messageIds()[0]).toBe('u2');
-    expect(document.activeElement).toBe(thread());
-    expect(fetchOlder).not.toHaveBeenCalled();
-    forgetMessageListScrollPosition(viewKey);
-  });
-
-  it('reports an unavailable reading target without fetching history', () => {
-    const viewKey = 'missing-return-test';
-    const source = document.createElement('div');
-    const anchor = document.createElement('div');
-    anchor.dataset.chatMessageId = 'no-longer-cached';
-    anchor.getBoundingClientRect = () => ({ top: 10, bottom: 100 }) as DOMRect;
-    source.appendChild(anchor);
-    rememberMessageListScrollAnchor(source, viewKey);
-    const fetchOlder = vi.fn();
-    mount(
-      <MessageList
-        messages={history(10)}
-        recentTurnCount={3}
-        isLoading={false}
-        viewKey={viewKey}
-        onLoadOlderHistory={fetchOlder}
-      />,
-    );
-    act(() =>
-      Array.from(container?.querySelectorAll('button') ?? [])
-        .find((entry) => entry.textContent === 'chat.returnToReadingPosition')
-        ?.click(),
-    );
-    expect(container?.querySelector('[role="status"]')?.textContent).toBe(
-      'chat.readingPositionUnavailable',
-    );
-    expect(messageIds()).toHaveLength(6);
-    expect(fetchOlder).not.toHaveBeenCalled();
-    forgetMessageListScrollPosition(viewKey);
-  });
-
-  it('keeps the reading window across live-to-history ID reconciliation', () => {
-    const messages = history(10);
-    mount(
-      <MessageList messages={messages} recentTurnCount={3} isLoading={false} />,
-    );
-    act(() => earlier()?.click());
-    scrollTo(100);
-    const hydrated = messages.map((message, index) => ({
-      ...message,
-      id: `server-${index}`,
-      historyTurnId: `turn-${Math.floor(index / 2)}`,
-    }));
-    act(() =>
-      root?.render(
-        <MessageList
-          messages={hydrated}
-          recentTurnCount={3}
-          isLoading={false}
-        />,
-      ),
-    );
-    expect(messageIds()).toHaveLength(12);
-    expect(messageIds()[0]).toBe('server-8');
-    expect(top).toBe(100);
-  });
-});
-
-describe('MessageList render isolation', () => {
-  it.each(['interrupted', 'error'] as const)(
-    'forwards %s only to the immediately preceding assistant message',
-    (status) => {
-      mount(
-        <MessageList
-          messages={[
-            { id: 'user-1', role: 'user', content: 'First request' },
-            { id: 'earlier', role: 'assistant', segments: [] },
-            { id: 'stopped', role: 'assistant', segments: [] },
-            { id: 'status-1', role: 'status', status },
-            { id: 'user-2', role: 'user', content: 'Next request' },
-            { id: 'next', role: 'assistant', segments: [] },
-          ]}
-          isLoading={false}
-        />,
-      );
-      expect(
-        container
-          ?.querySelector('[data-assistant-message="stopped"]')
-          ?.getAttribute('data-end-status'),
-      ).toBe(status);
-      expect(
-        container
-          ?.querySelector('[data-assistant-message="earlier"]')
-          ?.hasAttribute('data-end-status'),
-      ).toBe(false);
-      expect(
-        container
-          ?.querySelector('[data-assistant-message="next"]')
-          ?.hasAttribute('data-end-status'),
-      ).toBe(false);
-    },
-  );
-
-  it('forwards the persisted input kind to user-message rendering', () => {
-    mount(
-      <MessageList
-        messages={[
-          {
-            id: 'ink-user',
-            role: 'user',
-            content: '',
-            inputKind: 'ink-intent',
-            inkInterpretation: {
-              state: 'reported',
-              text: 'Expand the third step',
-              explanation: 'The arrow points at step three.',
-            },
-            groundingVisual: {
-              kind: 'visible-canvas',
-              dataUrl: 'data:image/png;base64,cG5n',
-              viewport: {
-                x: 0,
-                y: 0,
-                zoom: 1,
-                width: 100,
-                height: 100,
-                devicePixelRatio: 1,
-              },
-              crop: { x: 0, y: 0, width: 100, height: 100 },
-              selectedNodeIds: ['note-1'],
-              strokeSubsets: [{ nodeId: 'sketch-1', strokeIds: ['stroke-1'] }],
-            },
-          },
-        ]}
-        isLoading={false}
-      />,
-    );
-
-    expect(renderCounts.userInputKinds).toEqual(['ink-intent']);
-    expect(renderCounts.userInterpretations).toEqual([
-      {
-        state: 'reported',
-        text: 'Expand the third step',
-        explanation: 'The arrow points at step three.',
-      },
-    ]);
-    expect(renderCounts.userGroundingValues).toEqual([undefined]);
-  });
-
-  it('does not rerender historical messages when a sibling draft changes', () => {
-    const messages: ChatMessage[] = Array.from(
-      { length: 100 },
-      (_, index): ChatMessage[] => [
-        {
-          id: `user-${index}`,
-          role: 'user',
-          content: `Question ${index}`,
-        },
-        {
-          id: `assistant-${index}`,
-          role: 'assistant',
-          segments: [
-            {
-              kind: 'text',
-              text: `## Answer ${index}\n\nA representative Markdown response.`,
-            },
-          ],
-        },
-      ],
-    ).flat();
-
-    function Harness() {
-      const [draft, setDraft] = useState('');
-      return (
-        <>
-          <textarea
-            aria-label="Draft"
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-          />
-          <MessageList messages={messages} isLoading={false} />
-        </>
-      );
-    }
-
-    mount(<Harness />);
-    const textarea = container?.querySelector('textarea');
-    expect(textarea).not.toBeNull();
-
+    const config = virtual.props
+      .scrollSeekConfiguration as ScrollSeekConfiguration;
+    const range = { startIndex: 1_000_000, endIndex: 1_000_000 };
+    expect(config.enter(200, range)).toBe(false);
     act(() => {
-      const valueSetter = Object.getOwnPropertyDescriptor(
-        HTMLTextAreaElement.prototype,
-        'value',
-      )?.set;
-      valueSetter?.call(textarea, '你');
-      textarea?.dispatchEvent(new Event('input', { bubbles: true }));
+      expect(config.enter(1200, range)).toBe(true);
     });
-
-    expect(renderCounts.user).toBe(100);
-    expect(renderCounts.assistant.size).toBe(100);
-    expect(
-      [...renderCounts.assistant.values()].every((count) => count === 1),
-    ).toBe(true);
-  });
-
-  it('rerenders only the assistant message whose segments changed', () => {
-    const first = {
-      id: 'assistant-1',
-      role: 'assistant',
-      segments: [{ kind: 'text', text: 'Stable' }],
-    } satisfies ChatMessage;
-    const second = {
-      id: 'assistant-2',
-      role: 'assistant',
-      segments: [{ kind: 'text', text: 'Streaming' }],
-    } satisfies ChatMessage;
-
-    mount(<MessageList messages={[first, second]} isLoading />);
+    const scroller = container.querySelector<HTMLElement>(
+      '[data-chat-thread-root]',
+    );
     act(() => {
-      root?.render(
-        <MessageList
-          messages={[
-            first,
-            {
-              ...second,
-              segments: [{ kind: 'text', text: 'Streaming update' }],
-            },
-          ]}
-          isLoading
-        />,
-      );
+      if (!scroller) throw new Error('Missing scroller');
+      scroller.scrollTop = 1000;
+      scroller.dispatchEvent(new Event('scroll'));
     });
-
-    expect(renderCounts.assistant.get('assistant-1')).toBe(1);
-    expect(renderCounts.assistant.get('assistant-2')).toBe(2);
+    act(() =>
+      (virtual.props.rangeChanged as (next: typeof range) => void)(range),
+    );
+    expect(load).not.toHaveBeenCalled();
+    expect(
+      container.querySelector('[data-chat-scroll-loading]'),
+    ).not.toBeNull();
+    act(() => {
+      expect(config.exit(0, range)).toBe(true);
+    });
+    expect(load).toHaveBeenCalledWith(page);
+    act(() => vi.advanceTimersByTime(600));
+    expect(
+      container.querySelector('[data-chat-scroll-loading]'),
+    ).not.toBeNull();
+    render({
+      messages: [{ id: 'older', role: 'user', content: 'Loaded' }, ...messages],
+      historyPages: [{ ...page, loaded: true }],
+      onLoadHistoryPage: load,
+    });
+    expect(container.querySelector('[data-chat-scroll-loading]')).toBeNull();
   });
-});
 
-describe('MessageList opening position', () => {
-  it('restores a saved position and offers new messages without auto-scrolling', () => {
-    const viewKey = 'canvas-1:thread-1';
-    rememberMessageListScrollPosition(viewKey, 240);
-    const scrollHeight = vi
-      .spyOn(HTMLElement.prototype, 'scrollHeight', 'get')
-      .mockReturnValue(1_000);
-    const clientHeight = vi
-      .spyOn(HTMLElement.prototype, 'clientHeight', 'get')
-      .mockReturnValue(200);
+  it('uses row placeholders without whole-viewport loading for ordinary fast scrolling', () => {
+    render();
+    act(() =>
+      container
+        .querySelector('[data-chat-thread-root]')
+        ?.dispatchEvent(new Event('pointerdown', { bubbles: true })),
+    );
+    const config = virtual.props
+      .scrollSeekConfiguration as ScrollSeekConfiguration;
+    act(() => {
+      expect(
+        config.enter(1200, { startIndex: 1_000_000, endIndex: 1_000_001 }),
+      ).toBe(true);
+    });
+    expect(container.querySelector('[data-chat-scroll-loading]')).toBeNull();
+  });
 
-    try {
-      mount(
-        <MessageList
-          messages={[]}
-          isLoading={false}
-          viewKey={viewKey}
-          openPosition="last-user"
-          openPositionRequestNonce={1}
-        />,
-      );
-
-      const messageContainer = container?.querySelector<HTMLElement>(
+  it.each([-400, 600])(
+    'releases whole-viewport loading while only overscan at %spx remains missing',
+    (top) => {
+      vi.spyOn(
+        HTMLElement.prototype,
+        'getBoundingClientRect',
+      ).mockImplementation(function (this: HTMLElement) {
+        return this.dataset.chatMessageId === 'older'
+          ? new DOMRect(0, top, 300, 300)
+          : new DOMRect(0, 0, 300, 480);
+      });
+      const page = {
+        messageIds: ['older'],
+        before: 'cursor',
+        limit: 3,
+        loaded: false,
+      };
+      const load = vi.fn();
+      render({ historyPages: [page], onLoadHistoryPage: load });
+      const scroller = container.querySelector<HTMLElement>(
         '[data-chat-thread-root]',
       );
-      expect(messageContainer?.scrollTop).toBe(240);
-      expect(container?.textContent).toContain('New message');
-    } finally {
-      scrollHeight.mockRestore();
-      clientHeight.mockRestore();
-    }
+      act(() => {
+        if (!scroller) throw new Error('Missing scroller');
+        scroller.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+        scroller.scrollTop = 1000;
+        scroller.dispatchEvent(new Event('scroll'));
+        (
+          virtual.props.rangeChanged as (range: {
+            startIndex: number;
+            endIndex: number;
+          }) => void
+        )({ startIndex: 1_000_000, endIndex: 1_000_002 });
+      });
+      expect(
+        container.querySelector('[data-chat-scroll-loading]'),
+      ).not.toBeNull();
+      expect(load).toHaveBeenCalledWith(page);
+      act(() => vi.advanceTimersByTime(600));
+      expect(container.querySelector('[data-chat-scroll-loading]')).toBeNull();
+      expect(
+        container.querySelector(
+          '[data-chat-message-id="older"][aria-busy=true]',
+        ),
+      ).not.toBeNull();
+      expect(container.querySelectorAll('[data-loading-spinner]')).toHaveLength(
+        0,
+      );
+    },
+  );
+
+  it('opens at latest once without following unsolicited output', () => {
+    render();
+    expect(virtual.jump).toHaveBeenCalledWith(
+      expect.objectContaining({ index: 1, align: 'end' }),
+    );
+    expect(virtual.props.followOutput).toBe(false);
+    virtual.jump.mockClear();
+    render({
+      messages: [
+        ...messages,
+        {
+          id: 'next',
+          role: 'assistant',
+          segments: [{ kind: 'text', text: 'Next' }],
+        },
+      ],
+      isLoading: true,
+    });
+
+    render({ messages: [...messages] });
+    expect(virtual.jump).not.toHaveBeenCalled();
   });
 
-  it('restores the same visible message after a cold remount', () => {
-    const viewKey = 'canvas-1:thread-semantic-anchor';
-    const messages: ChatMessage[] = [
-      { id: 'user-1', role: 'user', content: 'Question 1' },
-      { id: 'user-2', role: 'user', content: 'Question 2' },
+  it('follows a new local send at bottom and stops immediately on upward input', () => {
+    render();
+    virtual.jump.mockClear();
+    const sent: ChatMessage[] = [
+      ...messages,
+      { id: 'send', role: 'user', content: 'Next' },
     ];
-    let remounted = false;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        const messageId = this.dataset.chatMessageId;
-        if (this.hasAttribute('data-chat-thread-root')) {
-          return {
-            x: 0,
-            y: 0,
-            width: 100,
-            height: 200,
-            top: 0,
-            right: 100,
-            bottom: 200,
-            left: 0,
-            toJSON: () => ({}),
-          };
-        }
-        const top = messageId === 'user-2' ? (remounted ? 300 : 40) : -100;
-        return {
-          x: 0,
-          y: top,
-          width: 100,
-          height: 20,
-          top,
-          right: 100,
-          bottom: top + 20,
-          left: 0,
-          toJSON: () => ({}),
-        };
-      },
-    );
-
-    mount(
-      <MessageList messages={messages} isLoading={false} viewKey={viewKey} />,
-    );
-    const firstContainer = container?.querySelector<HTMLElement>(
-      '[data-chat-thread-root]',
-    );
-    if (firstContainer) {
-      firstContainer.scrollTop = 200;
-      act(() => firstContainer.dispatchEvent(new Event('scroll')));
-    }
-    act(() => root?.unmount());
-    container?.remove();
-    root = undefined;
-    container = undefined;
-
-    remounted = true;
-    mount(
-      <MessageList messages={messages} isLoading={false} viewKey={viewKey} />,
-    );
-
-    const remountedThreadRoot = document.querySelector<HTMLElement>(
-      '[data-chat-thread-root]',
-    );
-    expect(remountedThreadRoot?.scrollTop).toBe(260);
-    forgetMessageListScrollPosition(viewKey);
-  });
-});
-
-describe('MessageList older history', () => {
-  it('reveals cached turns and pages older history only during an explicit search jump', () => {
-    const onLoadOlderHistory = vi.fn();
-    const recent: ChatMessage[] = [
-      { id: 'user-2', role: 'user', content: 'Recent needle' },
-      { id: 'user-3', role: 'user', content: 'Newest needle' },
-    ];
-    const renderList = (messages: ChatMessage[], loading = false) => (
-      <MessageList
-        messages={messages}
-        recentTurnCount={1}
-        isLoading={false}
-        hasOlderHistory
-        isLoadingOlderHistory={loading}
-        onLoadOlderHistory={onLoadOlderHistory}
-      />
-    );
-    mount(renderList(recent));
-    expect(
-      container?.querySelector('[data-chat-message-id="user-2"]'),
-    ).toBeNull();
-    expect(onLoadOlderHistory).not.toHaveBeenCalled();
-    const thread = container?.querySelector<HTMLElement>(
-      '[data-chat-thread-root]',
+    render({ messages: sent, isLoading: true });
+    expect(virtual.jump).toHaveBeenCalledWith(
+      expect.objectContaining({ index: 2, align: 'end' }),
     );
     act(() =>
-      thread?.dispatchEvent(
-        new Event('chat-reveal-search', { cancelable: true }),
-      ),
+      container
+        .querySelector('[data-chat-thread-root]')
+        ?.dispatchEvent(
+          new WheelEvent('wheel', { bubbles: true, deltaY: -100 }),
+        ),
     );
+    virtual.jump.mockClear();
+    render({
+      messages: [
+        ...sent,
+        {
+          id: 'response',
+          role: 'assistant',
+          segments: [{ kind: 'text', text: 'Answer' }],
+        },
+      ],
+      isLoading: true,
+    });
+    expect(virtual.jump).not.toHaveBeenCalled();
+  });
+
+  it('does not follow a new local send while reading history', () => {
+    render();
+    const scroller = container.querySelector<HTMLElement>(
+      '[data-chat-thread-root]',
+    );
+    if (!scroller) throw new Error('Missing scroller');
+    Object.defineProperty(scroller, 'scrollHeight', {
+      configurable: true,
+      value: 2000,
+    });
+    act(() => scroller.dispatchEvent(new Event('scroll')));
+    virtual.jump.mockClear();
+    render({
+      messages: [...messages, { id: 'send', role: 'user', content: 'Next' }],
+      isLoading: true,
+    });
+    expect(virtual.jump).not.toHaveBeenCalled();
+  });
+  it('follows the first send in an empty hydrated thread', () => {
+    render({ messages: [] });
+    virtual.jump.mockClear();
+    render({
+      messages: [{ id: 'first', role: 'user', content: 'First' }],
+      isLoading: true,
+    });
+    expect(virtual.jump).toHaveBeenCalledWith(
+      expect.objectContaining({ index: 0, align: 'end' }),
+    );
+  });
+
+  it('does not enable follow for an active turn arriving through hydration', () => {
+    render({ messages: [], isHistoryLoading: true, isHistoryReady: false });
+    const hydrated: ChatMessage[] = [
+      {
+        id: 'hydrated',
+        historyTurnId: 'turn',
+        historyTurnActive: true,
+        role: 'user',
+        content: 'Existing send',
+      },
+    ];
+    render({ messages: hydrated, isHistoryReady: true });
+    virtual.jump.mockClear();
+    render({
+      messages: [
+        ...hydrated,
+        {
+          id: 'response',
+          role: 'assistant',
+          segments: [{ kind: 'text', text: 'Output' }],
+        },
+      ],
+      isLoading: true,
+    });
+    expect(virtual.jump).not.toHaveBeenCalled();
+  });
+
+  it('does not position failed or pending hydration', () => {
+    render({ isHistoryLoading: true, isHistoryReady: false });
+    render({ isHistoryLoading: false, isHistoryReady: false });
+    expect(virtual.jump).not.toHaveBeenCalled();
+    render({ isHistoryReady: true });
+    expect(virtual.jump).toHaveBeenCalledTimes(1);
+  });
+
+  it('honors one explicit last-user request', () => {
+    render({ openPosition: 'last-user', openPositionRequestNonce: 1 });
+    expect(virtual.jump).toHaveBeenCalledWith(
+      expect.objectContaining({ index: 0, align: 'start' }),
+    );
+    virtual.jump.mockClear();
+    render({ openPosition: 'last-user', openPositionRequestNonce: 1 });
+    expect(virtual.jump).not.toHaveBeenCalled();
+  });
+
+  it('preserves rendering contracts and only marks the actual live assistant', () => {
+    render({ isLoading: true });
     expect(
-      container?.querySelector('[data-chat-message-id="user-2"]'),
+      container.querySelector('[data-user]')?.getAttribute('data-input-kind'),
+    ).toBe('ink-intent');
+    expect(
+      container
+        .querySelector('[data-assistant]')
+        ?.getAttribute('data-streaming'),
+    ).toBe('true');
+    expect(
+      container
+        .querySelector('[data-assistant]')
+        ?.getAttribute('data-comments'),
+    ).toBe('true');
+    render({
+      messages: [...messages, { id: 'next', role: 'user', content: 'Next' }],
+      isLoading: true,
+    });
+    expect(
+      container
+        .querySelector('[data-assistant]')
+        ?.getAttribute('data-streaming'),
+    ).toBe('false');
+    expect(container.querySelector('[data-thinking]')).not.toBeNull();
+  });
+
+  it('preserves end status and disables comments in inactive panels', () => {
+    render({
+      messages: [
+        ...messages,
+        { id: 'status', role: 'status', status: 'interrupted' },
+      ],
+      isActive: false,
+    });
+    expect(
+      container
+        .querySelector('[data-assistant]')
+        ?.getAttribute('data-end-status'),
+    ).toBe('interrupted');
+    expect(
+      container
+        .querySelector('[data-assistant]')
+        ?.getAttribute('data-comments'),
+    ).toBe('false');
+    expect(virtual.jump).not.toHaveBeenCalled();
+  });
+
+  it('uses metadata to keep evicted messages addressable and fetches visible pages', () => {
+    const page = {
+      before: 'cursor',
+      limit: 3,
+      messageIds: ['older'],
+      loaded: false,
+    };
+    const load = vi.fn();
+    render({ historyPages: [page], onLoadHistoryPage: load });
+    expect(virtual.props.data).toEqual(['older', 'user', 'assistant']);
+    act(() => {
+      const onRange = virtual.props.rangeChanged as (range: {
+        startIndex: number;
+        endIndex: number;
+      }) => void;
+      onRange({ startIndex: 1_000_000, endIndex: 1_000_001 });
+    });
+    expect(load).toHaveBeenCalledWith(page);
+    expect(container.querySelector('[aria-busy=true]')).not.toBeNull();
+  });
+
+  it('automatically requests older history without a show-earlier button', () => {
+    const load = vi.fn();
+    render({ hasOlderHistory: true, onLoadOlderHistory: load });
+    act(() =>
+      container
+        .querySelector('[data-chat-thread-root]')
+        ?.dispatchEvent(new Event('pointerdown', { bubbles: true })),
+    );
+    act(() => (virtual.props.startReached as () => void)());
+    expect(load).toHaveBeenCalledOnce();
+    expect(container.textContent).not.toContain('chat.showEarlierTurns');
+  });
+
+  it('stops automatic retries on page errors and offers an explicit retry', () => {
+    const load = vi.fn();
+    render({
+      hasOlderHistory: true,
+      olderHistoryError: 'Offline',
+      onLoadOlderHistory: load,
+    });
+    act(() => (virtual.props.startReached as () => void)());
+    expect(load).not.toHaveBeenCalled();
+    expect(container.querySelector('[role=alert]')?.textContent).toContain(
+      'Offline',
+    );
+    act(() => container.querySelector('button')?.click());
+    expect(load).toHaveBeenCalledOnce();
+  });
+
+  it('loads older turns on upward keyboard intent even when the list cannot scroll', () => {
+    const load = vi.fn();
+    render({ hasOlderHistory: true, onLoadOlderHistory: load });
+    expect(load).not.toHaveBeenCalled();
+    act(() =>
+      container
+        .querySelector('[data-chat-thread-root]')
+        ?.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }),
+        ),
+    );
+    expect(load).toHaveBeenCalledOnce();
+  });
+
+  it('loads older turns on an upward touch-scroll attempt without a scroll event', () => {
+    const load = vi.fn();
+    render({ hasOlderHistory: true, onLoadOlderHistory: load });
+    const scroller = container.querySelector('[data-chat-thread-root]');
+    for (const [type, clientY] of [
+      ['touchstart', 100],
+      ['touchmove', 150],
+    ] as const) {
+      const event = new Event(type, { bubbles: true });
+      Object.defineProperty(event, 'touches', { value: [{ clientY }] });
+      act(() => scroller?.dispatchEvent(event));
+    }
+    expect(load).toHaveBeenCalledOnce();
+  });
+  it('keeps the empty disclaimer separate from hydration and generation', () => {
+    render({ messages: [] });
+    expect(
+      container.querySelector('[data-chat-empty-disclaimer]'),
     ).not.toBeNull();
-    expect(onLoadOlderHistory).toHaveBeenCalledTimes(1);
-    act(() => root?.render(renderList(recent, true)));
-    expect(onLoadOlderHistory).toHaveBeenCalledTimes(1);
-    const older: ChatMessage[] = [
-      { id: 'user-1', role: 'user', content: 'Older needle' },
-      ...recent,
-    ];
-    act(() => root?.render(renderList(older)));
-    expect(onLoadOlderHistory).toHaveBeenCalledTimes(2);
-    act(() => root?.render(renderList(older)));
-    expect(onLoadOlderHistory).toHaveBeenCalledTimes(2);
-    act(() => thread?.dispatchEvent(new Event('chat-search-finished')));
-    act(() =>
-      root?.render(
-        renderList([
-          { id: 'user-0', role: 'user', content: 'Oldest needle' },
-          ...older,
-        ]),
-      ),
-    );
-    expect(onLoadOlderHistory).toHaveBeenCalledTimes(2);
-  });
-
-  it('does not automatically retry a failed older-history page during search', () => {
-    const onLoadOlderHistory = vi.fn();
-    mount(
-      <MessageList
-        messages={[]}
-        isLoading={false}
-        hasOlderHistory
-        olderHistoryError="History unavailable"
-        onLoadOlderHistory={onLoadOlderHistory}
-      />,
-    );
-    const thread = container?.querySelector<HTMLElement>(
-      '[data-chat-thread-root]',
-    );
-    act(() =>
-      thread?.dispatchEvent(
-        new Event('chat-reveal-search', { cancelable: true }),
-      ),
-    );
-    expect(onLoadOlderHistory).not.toHaveBeenCalled();
-    expect(container?.querySelector('[role="alert"]')?.textContent).toBe(
-      'History unavailable',
-    );
-  });
-
-  it('exposes an accessible explicit expansion control', () => {
-    const onLoadOlderHistory = vi.fn();
-    mount(
-      <MessageList
-        messages={[]}
-        isLoading={false}
-        hasOlderHistory
-        olderTurnBatchSize={3}
-        onLoadOlderHistory={onLoadOlderHistory}
-      />,
-    );
-
-    const button = Array.from(container?.querySelectorAll('button') ?? []).find(
-      (candidate) => candidate.textContent === 'Show 3 earlier turns',
-    );
-    expect(button).not.toBeUndefined();
-
-    act(() => button?.click());
-    expect(onLoadOlderHistory).toHaveBeenCalledTimes(1);
-  });
-
-  it('preserves the first visible message while prepending older history', () => {
-    const current: ChatMessage[] = [
-      { id: 'user-2', role: 'user', content: 'Question 2' },
-      {
-        id: 'assistant-2',
-        role: 'assistant',
-        segments: [{ kind: 'text', text: 'Answer 2' }],
-      },
-    ];
-    const prepended: ChatMessage[] = [
-      { id: 'user-1', role: 'user', content: 'Question 1' },
-      {
-        id: 'assistant-1',
-        role: 'assistant',
-        segments: [{ kind: 'text', text: 'Answer 1' }],
-      },
-      ...current,
-    ];
-    let didPrepend = false;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        const messageId = this.dataset.chatMessageId;
-        const top = messageId === 'user-2' ? (didPrepend ? 100 : 40) : -100;
-        return {
-          x: 0,
-          y: top,
-          width: 100,
-          height: 20,
-          top,
-          right: 100,
-          bottom: top + 20,
-          left: 0,
-          toJSON: () => ({}),
-        };
-      },
-    );
-
-    const renderList = (messages: ChatMessage[]) => (
-      <MessageList
-        messages={messages}
-        isLoading={false}
-        hasOlderHistory={!didPrepend}
-        olderTurnBatchSize={1}
-        onLoadOlderHistory={() => {
-          didPrepend = true;
-          root?.render(renderList(prepended));
-        }}
-      />
-    );
-    mount(renderList(current));
-    const messageContainer = container?.querySelector<HTMLElement>(
-      '[data-chat-thread-root]',
-    );
-    if (messageContainer) messageContainer.scrollTop = 200;
-    const button = Array.from(container?.querySelectorAll('button') ?? []).find(
-      (candidate) => candidate.textContent === 'Show 1 earlier turns',
-    );
-
-    act(() => button?.click());
-
-    expect(messageContainer?.scrollTop).toBe(260);
+    render({ messages: [], isHistoryLoading: true });
+    expect(container.querySelector('[data-chat-empty-disclaimer]')).toBeNull();
+    expect(container.querySelector('[data-loading]')).not.toBeNull();
   });
 });

@@ -78,7 +78,7 @@ export const ContextUsageRing = ({
   usageOverride,
 }: ContextUsageRingProps) => {
   const { t } = useTranslation();
-  const { threadId, canvasId } = useChatSession();
+  const { threadId, ownerCanvasId: canvasId } = useChatSession();
   const messages = useChatStore((state) =>
     selectThreadMessages(state, threadId),
   );

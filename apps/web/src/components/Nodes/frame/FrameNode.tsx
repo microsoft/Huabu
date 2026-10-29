@@ -13,7 +13,6 @@ import {
   FRAME_GRID_MIN_COUNT,
   classifySpaceInstructionFrame,
   directAgentNodeIdsForFrame,
-  resolveAccent,
   type FrameLayoutMode,
 } from '@huabu/shared';
 import { clampGridCount, frameAccentToken } from '@huabu/shared/canvas-engine';
@@ -403,7 +402,7 @@ export const FrameNode = memo(
       clearFrameResizeSnapshot();
     }, [flushFrameResizeScale, clearFrameResizeSnapshot]);
 
-    const frameAccent = resolveAccent(frameAccentToken(data.style?.accent));
+    const frameAccent = frameAccentToken(data.style?.accent);
     const frameHeader = (
       <FrameHeader
         metrics={headerMetrics}

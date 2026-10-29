@@ -238,7 +238,7 @@ describe('InkAgentDestinationPicker', () => {
     await render({ binding: null, unresolved: true });
     expect(trigger().textContent).toBe('Choose conversation');
     await openMenu();
-    expect(menu()?.querySelector('[role="menuitem"].text-info')).toBeNull();
+    expect(menu()?.querySelector('[role="menuitem"].text-info-fg')).toBeNull();
     expect(row('First review').disabled).toBe(false);
     await render({ loading: true });
     expect(trigger().textContent).toBe('Loading conversation…');
@@ -253,7 +253,7 @@ describe('InkAgentDestinationPicker', () => {
     expect(props.onRefreshProfiles).toHaveBeenCalledOnce();
     expect(menu()?.textContent).not.toContain('No conversations to continue');
     expect(menu()?.textContent).not.toContain('Continue conversation');
-    expect(menu()?.querySelector('[role="menuitem"].text-info')).toBeNull();
+    expect(menu()?.querySelector('[role="menuitem"].text-info-fg')).toBeNull();
     expect(menu()?.querySelectorAll('[role="group"]')).toHaveLength(1);
     await render({ profiles: [...profiles] });
     expect(props.onRefreshProfiles).toHaveBeenCalledOnce();
@@ -346,7 +346,7 @@ describe('InkAgentDestinationPicker', () => {
     await render({ selectedNodeId: 'busy' });
     expect(trigger().textContent).toContain('Busy reviewContinue');
     expect(trigger().disabled).toBe(false);
-    expect(trigger().querySelector('.text-warning')).toBeNull();
+    expect(trigger().querySelector('.text-warning-fg')).toBeNull();
     expect(
       document.getElementById(
         required(trigger().getAttribute('aria-describedby')),
@@ -382,7 +382,7 @@ describe('InkAgentDestinationPicker', () => {
       },
     });
     expect(trigger().textContent).toContain('Conversation unavailableContinue');
-    expect(trigger().querySelector('.text-warning')).not.toBeNull();
+    expect(trigger().querySelector('.text-warning-fg')).not.toBeNull();
     await openMenu();
     expect(menu()?.textContent).toContain('The destination was removed');
     expect(props.onNewConversation).not.toHaveBeenCalled();
@@ -554,7 +554,7 @@ describe('InkAgentDestinationPicker', () => {
     expect(panel.firstElementChild?.className).toContain('overflow-y-auto');
     expect(panel.firstElementChild?.className).toContain('overscroll-contain');
     expect(menu()?.querySelector('[aria-current]')).toBeNull();
-    expect(menu()?.querySelector('[role="menuitem"].text-info')).toBeNull();
+    expect(menu()?.querySelector('[role="menuitem"].text-info-fg')).toBeNull();
     await act(async () => row('Second review').click());
     expect(props.onContinueConversation).toHaveBeenCalledWith('second');
     expect(document.querySelector('.picker-test-parent')).not.toBeNull();

@@ -133,10 +133,10 @@ export const MainLayout = ({
   const LEFT_MAX_RATIO = 0.3;
 
   const LEFT_DEFAULT_WIDTH_PX = 260;
-  const RIGHT_DEFAULT_WIDTH_PX = 420;
-
   const [leftWidthPx, setLeftWidthPx] = useState(LEFT_DEFAULT_WIDTH_PX);
-  const [rightWidthPx, setRightWidthPx] = useState(RIGHT_DEFAULT_WIDTH_PX);
+  const [rightWidthPx, setRightWidthPx] = useState(
+    () => usePanelStore.getState().rightWidthPx,
+  );
   const [retainLeftContent, setRetainLeftContent] = useState(!isLeftCollapsed);
   const leftContentMounted = !isLeftCollapsed || retainLeftContent;
   useLayoutEffect(() => {
@@ -297,6 +297,7 @@ export const MainLayout = ({
       (isLeft ? visibleLeftWidth : visibleRightWidth);
     const pointerId = event.pointerId;
     const setWidth = isLeft ? setLeftWidthPx : setRightWidthPx;
+    let resizedWidth: number | null = null;
     target.setPointerCapture(pointerId);
     setResizingSide(side);
 
@@ -311,13 +312,12 @@ export const MainLayout = ({
               totalWidth * LEFT_MAX_RATIO,
             )
         : totalWidth - effectiveLeftWidthPx - CENTER_MIN_WIDTH_PX;
-      setWidth(
-        clamp(
-          startWidth + (move.clientX - startX) * (isLeft ? 1 : -1),
-          isLeft ? LEFT_MIN_WIDTH_PX : RIGHT_MIN_WIDTH_PX,
-          maxWidth,
-        ),
+      resizedWidth = clamp(
+        startWidth + (move.clientX - startX) * (isLeft ? 1 : -1),
+        isLeft ? LEFT_MIN_WIDTH_PX : RIGHT_MIN_WIDTH_PX,
+        maxWidth,
       );
+      setWidth(resizedWidth);
     };
 
     const cleanup = () => {
@@ -331,6 +331,10 @@ export const MainLayout = ({
       }
       resizeCleanupRef.current = null;
       setResizingSide(null);
+      // Persist once per gesture, not on every pointer move.
+      if (!isLeft && resizedWidth !== null) {
+        usePanelStore.getState().setRightWidthPx(resizedWidth);
+      }
     };
     const onEnd = (end: PointerEvent) => {
       if (end.pointerId === pointerId) cleanup();

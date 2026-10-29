@@ -14,8 +14,6 @@
  * Endpoint surface:
  *  - `GET /api/acp/agent-cli` — read the daemon's detected agent catalogue
  *     and populate the profile editor's picker with installation state.
- *  - `POST /api/acp/agentlets/:agentletId/discover` — re-detect and provision
- *     missing automatic Profiles on one connected device.
  *  - `GET/POST/PATCH/DELETE /api/acp/profiles` — CRUD for spawn
  *     recipes with revision-checked launch and working-directory edits.
  *  - `GET/POST /api/acp/daemon` — daemon liveness + manual restart.
@@ -50,7 +48,7 @@ import type {
   ConnectionCopyFormat,
   AgentletConnectionCommandResponse,
   AcpProfileCapabilitiesResponse,
-  AcpAgentletDiscoveryResponse,
+  RenameAgentletDeviceBody,
 } from '@huabu/shared';
 
 export type {
@@ -99,25 +97,23 @@ export async function listAcpAgentClis(
   });
 }
 
-export async function discoverAcpAgentlet(
-  agentletId: string,
-): Promise<AcpAgentletDiscoveryResponse> {
-  return apiFetch<AcpAgentletDiscoveryResponse>(
-    routes.acpAgentletDiscovery(agentletId),
-    {
-      method: 'POST',
-      json: {},
-      fallbackMessage: 'Failed to detect installed Agents',
-    },
-  );
-}
-
 // ── Profile CRUD ─────────────────────────────────────────────────────
 
 /** Snapshot every Profile, selectability, and the current agentlet status. */
 export async function listAcpProfiles(): Promise<AcpProfilesListResponse> {
   return apiFetch<AcpProfilesListResponse>(routes.acpProfiles, {
     fallbackMessage: 'Failed to list agent profiles',
+  });
+}
+
+export async function renameAgentletDevice(
+  agentletId: string,
+  body: RenameAgentletDeviceBody,
+): Promise<RenameAgentletDeviceBody> {
+  return apiFetch<RenameAgentletDeviceBody>(routes.acpDevice(agentletId), {
+    method: 'PATCH',
+    json: body,
+    fallbackMessage: 'Failed to rename device',
   });
 }
 

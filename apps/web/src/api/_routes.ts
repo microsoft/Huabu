@@ -22,6 +22,8 @@ export const routes = {
   canaryRedeployCheck: '/deployment/canary/check',
   canaryRedeploy: '/deployment/canary/redeploy',
   agentDefaults: '/agent/defaults',
+  agentConversationOwner: (canvasId: string, threadId: string) =>
+    `/agent/owner/${enc(threadId)}?canvasId=${enc(canvasId)}`,
 
   // ── Workspace ─────────────────────────────────────────────────────
   workspace: '/workspace',
@@ -169,10 +171,9 @@ export const routes = {
       : `agentletId=${enc(target.agentletId ?? '')}`;
     return `/acp/agent-cli?${params}`;
   },
-  // Owner-only Profiles and per-device harness discovery.
+  // Owner-only Profiles and device metadata.
   acpProfiles: '/acp/profiles',
-  acpAgentletDiscovery: (agentletId: string) =>
-    `/acp/agentlets/${enc(agentletId)}/discover`,
+  acpDevice: (agentletId: string) => `/acp/devices/${enc(agentletId)}`,
   acpProfileItem: (id: string) => `/acp/profiles/${enc(id)}`,
   // Embedded agentlet daemon — health + manual restart.
   acpAgentlet: '/acp/agentlet',

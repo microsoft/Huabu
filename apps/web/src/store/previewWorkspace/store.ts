@@ -45,6 +45,7 @@ import {
   seedWorkspaceFromLegacyChat,
   writeWorkspace,
 } from './persistence';
+import { previewTargetKey } from './scrollMemory';
 
 /** Pre-workspace Chat state used to seed a Canvas opened for the first time. */
 export type LegacyChatSeed = {
@@ -66,6 +67,13 @@ function commitWorkspace(
 
   return {
     workspace,
+    readIntentByTab: Object.fromEntries(
+      Object.entries(state.readIntentByTab).filter(
+        ([tabId, key]) =>
+          workspace.tabs[tabId] &&
+          previewTargetKey(workspace.tabs[tabId].target) === key,
+      ),
+    ),
     ...(state.nodeFocusRequest && !workspace.tabs[state.nodeFocusRequest.tabId]
       ? { nodeFocusRequest: null }
       : {}),
@@ -79,6 +87,9 @@ export type PreviewWorkspaceState = {
   /** Canvas whose layout is currently in memory; `''` before the first load. */
   canvasId: string;
   workspace: CanvasPreviewWorkspace;
+  /** Explicit interaction in this Canvas visit; never persisted with the layout. */
+  readIntentByTab: Record<string, string>;
+  markTabInteracted: (tabId: string) => void;
   /** One-shot request to focus the editable surface of a specific tab. */
   nodeFocusRequest: { tabId: string; nonce: number } | null;
   /** Runtime-only sequence that keeps focus request identities monotonic. */
@@ -103,7 +114,10 @@ export type PreviewWorkspaceState = {
 
   openPreviewTarget: (
     target: PreviewTarget,
-    options?: OpenPreviewTargetOptions,
+    options?: OpenPreviewTargetOptions & {
+      /** Passive navigation must not count as explicit reading. */
+      markReadIntent?: boolean;
+    },
     beforeTabRemoved?: BeforePreviewTabRemoved,
   ) => string;
   closeTab: (tabId: string, beforeTabRemoved?: BeforePreviewTabRemoved) => void;
@@ -137,6 +151,15 @@ export const usePreviewWorkspaceStore = create<PreviewWorkspaceState>(
   (set, get) => ({
     canvasId: '',
     workspace: createEmptyWorkspace(),
+    readIntentByTab: {},
+    markTabInteracted: (tabId) => {
+      const state = get();
+      const tab = state.workspace.tabs[tabId];
+      if (!tab) return;
+      const key = previewTargetKey(tab.target);
+      if (state.readIntentByTab[tabId] === key) return;
+      set({ readIntentByTab: { ...state.readIntentByTab, [tabId]: key } });
+    },
     nodeFocusRequest: null,
     nodeFocusRequestSeq: 0,
     chatOpenRequest: null,
@@ -155,6 +178,7 @@ export const usePreviewWorkspaceStore = create<PreviewWorkspaceState>(
       set({
         canvasId,
         workspace,
+        readIntentByTab: {},
         nodeFocusRequest: null,
         chatOpenRequest: null,
       });
@@ -170,6 +194,9 @@ export const usePreviewWorkspaceStore = create<PreviewWorkspaceState>(
       const opened = openTarget(state.workspace, target, options);
       if (!opened.tabId) return '';
       set(commitWorkspace(state, opened.workspace, beforeTabRemoved));
+      if (options?.markReadIntent !== false) {
+        get().markTabInteracted(opened.tabId);
+      }
       return opened.tabId;
     },
 
@@ -185,8 +212,10 @@ export const usePreviewWorkspaceStore = create<PreviewWorkspaceState>(
       set(commitWorkspace(state, workspace, beforeTabRemoved));
     },
 
-    activateTab: (tabId) =>
-      set({ workspace: activateTab(get().workspace, tabId) }),
+    activateTab: (tabId) => {
+      set({ workspace: activateTab(get().workspace, tabId) });
+      get().markTabInteracted(tabId);
+    },
 
     promoteTab: (tabId) =>
       set({ workspace: promoteTab(get().workspace, tabId) }),

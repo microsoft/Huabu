@@ -41,7 +41,11 @@ export function useNodeMentionTypeahead({
   disabled: boolean;
 }) {
   const { t } = useTranslation();
-  const { canvasId, threadId } = useChatSession();
+  const {
+    ownerCanvasId: canvasId,
+    canvasId: presentationCanvasId,
+    threadId,
+  } = useChatSession();
   const activeCanvasId = useCanvasStore((state) => state.canvasId);
   const [selection, setSelection] = useState({ start: 0, end: 0 });
   const [focused, setFocused] = useState(false);
@@ -62,6 +66,7 @@ export function useNodeMentionTypeahead({
     !composing &&
     !!canvasId &&
     activeCanvasId === canvasId &&
+    activeCanvasId === presentationCanvasId &&
     !!token &&
     dismissed !== queryKey;
   const query = token?.query ?? '';

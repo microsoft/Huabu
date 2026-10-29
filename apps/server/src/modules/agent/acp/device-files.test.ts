@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DeviceFilesService } from './device-files.js';
 import deviceFilesRoutes from './device-files.route.js';
+import { registerLocalTestIdentity } from '../../../test-support/local-identity.js';
 
 import type { AcpAgentClient } from '@agenetes/acp-driver';
 
@@ -104,6 +105,7 @@ afterEach(async () => {
 describe('private filesystem ACP service', () => {
   it('validates owner-only HTTP input and marks successful file responses no-store', async () => {
     const app = Fastify();
+    registerLocalTestIdentity(app);
     await app.register(deviceFilesRoutes, { prefix: '/api/acp' });
     try {
       expect(

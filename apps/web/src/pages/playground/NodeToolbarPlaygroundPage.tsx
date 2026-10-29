@@ -736,7 +736,7 @@ function Specimen({ type: initialType }: { type: CanvasNodeType }) {
                     复制链接
                   </DropdownMenuItem>
                   <DropdownMenuItem
-                    className="text-danger"
+                    className="text-danger-fg"
                     icon={<Trash2 size={15} />}
                     onClick={() => {
                       setDeleted(true);
@@ -932,7 +932,7 @@ function NodeSample({
         <div className="nt-agent-meta">
           <MessageSquare size={18} />
           <span>Copilot</span>
-          <span className={playing ? 'text-info' : 'text-fg-subtle'}>
+          <span className={playing ? 'text-info-fg' : 'text-fg-subtle'}>
             {playing ? '运行中' : '草稿'}
           </span>
         </div>

@@ -178,7 +178,7 @@ describe('height prewarm recovery', () => {
     await vi.advanceTimersByTimeAsync(650);
     expect(
       mocks.measure.mock.calls.map(([request]) => request.contentWidth),
-    ).toEqual([396, 796, 396]);
+    ).toEqual([398, 798, 398]);
     expect(mocks.propose).toHaveBeenCalledOnce();
     expect(mocks.propose).toHaveBeenCalledWith({
       nodeId: 'n1',
@@ -201,7 +201,7 @@ describe('height prewarm recovery', () => {
     await vi.advanceTimersByTimeAsync(600);
     expect(
       mocks.measure.mock.calls.map(([request]) => request.contentWidth),
-    ).toEqual([396, 796]);
+    ).toEqual([398, 798]);
     expect(mocks.propose).toHaveBeenCalledOnce();
     expect(mocks.propose).toHaveBeenCalledWith({
       nodeId: 'n1',

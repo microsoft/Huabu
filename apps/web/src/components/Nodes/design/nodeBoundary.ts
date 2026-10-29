@@ -17,10 +17,10 @@ export function nodeLayoutBorderInset(type: string | undefined): number {
 export function nodeBoundaryForAccent(accent: string | null) {
   const color =
     accent && !isWhiteAccent(accent)
-      ? getAccentTokens(accent).divider
+      ? getAccentTokens(accent).border
       : 'var(--edge-default)';
   return {
-    borderColor: `color-mix(in srgb, ${color} 75%, transparent)`,
+    borderColor: color,
     borderWidth: NODE_BORDER_WIDTH,
   };
 }

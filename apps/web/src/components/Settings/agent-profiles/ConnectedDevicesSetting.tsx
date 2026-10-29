@@ -1,18 +1,27 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { useEffect, useState } from 'react';
+import { MoreHorizontal, Unplug } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/components/Common/Button';
+import {
+  DropdownMenu,
+  DropdownMenuItem,
+} from '@/components/Common/DropdownMenu';
 import { SettingRow } from '@/components/Settings/Common/SettingRow';
 import {
   getElectronBridge,
   type ElectronLocalAgentState,
 } from '@/hooks/useElectron';
 import { useAcpProfilesStore } from '@/store/acpProfilesStore';
+import { resolveConnectedDevice } from '@/utils/agentletDevice';
 
 import { ConnectedDeviceRow } from './ConnectedDeviceRow';
+
+import type { AgentProfileView, AgentletDevice } from '@huabu/shared';
+import type { ReactNode, Ref } from 'react';
 
 const STATUS_KEYS = {
   disabled: 'settings.localAgentDisabled',
@@ -24,7 +33,17 @@ const STATUS_KEYS = {
   error: 'settings.localAgentError',
 } as const;
 
-export function ConnectedDevicesSetting() {
+export function ConnectedDevicesSetting({
+  profiles = [],
+  renderProfile,
+  onAdd,
+  addRef,
+}: {
+  profiles?: AgentProfileView[];
+  renderProfile?: (profile: AgentProfileView) => ReactNode;
+  onAdd?: (agentletId: string) => void;
+  addRef?: (agentletId: string) => Ref<HTMLButtonElement>;
+}) {
   const { t } = useTranslation();
   const bridge = getElectronBridge();
   const api = bridge?.isRemoteServer ? bridge.localAgent : undefined;
@@ -32,9 +51,16 @@ export function ConnectedDevicesSetting() {
   const connectedDevices = useAcpProfilesStore(
     (state) => state.connectedDevices,
   );
+  const knownDevices = useAcpProfilesStore((state) => state.knownDevices);
   const [state, setState] = useState<ElectronLocalAgentState | null>(null);
   const [pending, setPending] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const connectRef = useRef<HTMLButtonElement>(null);
+  const restoreConnectFocus = useRef(false);
   const [error, setError] = useState<string | null>(null);
+  const folderPickerAgentletId = useAcpProfilesStore(
+    (state) => state.folderPickerAgentletId,
+  );
 
   useEffect(() => {
     if (!api) return;
@@ -62,6 +88,15 @@ export function ConnectedDevicesSetting() {
   }, [api, refresh]);
 
   const busy = pending || state?.status === 'stopping';
+  useEffect(() => {
+    if (busy || !restoreConnectFocus.current) return;
+    const frame = requestAnimationFrame(() => {
+      restoreConnectFocus.current = false;
+      if (document.activeElement === document.body)
+        connectRef.current?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [busy, state?.enabled]);
   const needsRetry =
     state?.status === 'error' || state?.status === 'authorization-required';
   const changeConnection = async (enabled: boolean) => {
@@ -78,119 +113,202 @@ export function ConnectedDevicesSetting() {
     }
   };
   const message = error ?? state?.error;
-  const localDevice = connectedDevices.find(
-    (device) => device.agentletId === state?.agentletId,
+  const localId = api
+    ? (state?.agentletId ?? state?.device?.agentletId)
+    : bridge?.isElectron && !bridge.isRemoteServer
+      ? folderPickerAgentletId
+      : undefined;
+  const devicesById = new Map<string, AgentletDevice>(
+    [...knownDevices, ...connectedDevices].map((device) => [
+      device.agentletId,
+      device,
+    ]),
   );
-  const orderedDevices = localDevice
-    ? [
-        localDevice,
-        ...connectedDevices.filter((device) => device !== localDevice),
-      ]
-    : connectedDevices;
+  if (localId) {
+    const knownDevice = devicesById.get(localId);
+    devicesById.set(localId, {
+      ...state?.device,
+      ...knownDevice,
+      agentletId: localId,
+      displayName:
+        knownDevice?.displayName ??
+        state?.device?.displayName ??
+        t('settings.localAgentTitle'),
+      version: knownDevice?.version ?? state?.device?.version,
+    });
+  }
+  const known = [...devicesById.values()];
+  const profilesByDevice = new Map<string, AgentProfileView[]>();
+  for (const profile of profiles) {
+    const device =
+      resolveConnectedDevice(profile.agentletId, connectedDevices) ??
+      resolveConnectedDevice(profile.agentletId, known);
+    const target = device?.agentletId ?? profile.agentletId;
+    if (!devicesById.has(target))
+      devicesById.set(target, { agentletId: target, displayName: target });
+    const group = profilesByDevice.get(target) ?? [];
+    group.push(profile);
+    profilesByDevice.set(target, group);
+  }
+  const localDevice = localId ? devicesById.get(localId) : undefined;
+  const orderedDevices = [
+    ...(localDevice ? [localDevice] : []),
+    ...connectedDevices.filter((device) => device.agentletId !== localId),
+    ...[...devicesById.values()].filter(
+      (device) =>
+        device.agentletId !== localId &&
+        !connectedDevices.some(
+          (online) => online.agentletId === device.agentletId,
+        ),
+    ),
+  ];
   const showStatus =
     !state || (state.status !== 'disabled' && state.status !== 'connected');
 
-  const controls = api ? (
-    <>
-      <div className="flex flex-wrap items-center justify-end gap-3">
-        {showStatus ? (
-          <span role="status" className="text-fg-muted text-xs">
-            {t(state ? STATUS_KEYS[state.status] : 'settings.loadingAgents')}
-          </span>
-        ) : null}
-        <div className="flex flex-wrap gap-2">
-          {state?.enabled && needsRetry ? (
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={busy}
-              onClick={() => void changeConnection(true)}
-            >
-              {t('settings.localAgentReconnect')}
-            </Button>
+  const controls =
+    api && (showStatus || !state?.enabled || needsRetry) ? (
+      <>
+        <div className="flex flex-wrap items-center justify-end gap-3">
+          {showStatus ? (
+            <span role="status" className="text-fg-muted text-xs">
+              {t(state ? STATUS_KEYS[state.status] : 'settings.loadingAgents')}
+            </span>
           ) : null}
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={busy || (!state && !error)}
-            onClick={() => {
-              if (state) {
-                void changeConnection(!state.enabled);
-              } else {
-                setPending(true);
-                void api
-                  .getState()
-                  .then(
-                    (next) => {
-                      setState(next);
-                      setError(null);
-                    },
-                    (reason: unknown) =>
-                      setError(
-                        reason instanceof Error
-                          ? reason.message
-                          : String(reason),
-                      ),
-                  )
-                  .finally(() => setPending(false));
-              }
-            }}
-          >
-            {t(
-              !state && error
-                ? 'settings.retrySave'
-                : state?.enabled
-                  ? 'settings.localAgentDisconnect'
-                  : 'settings.localAgentConnect',
+          <div className="flex flex-wrap gap-2">
+            {state?.enabled && needsRetry ? (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={busy}
+                onClick={() => void changeConnection(true)}
+              >
+                {t('settings.localAgentReconnect')}
+              </Button>
+            ) : null}
+            {!state?.enabled && (
+              <Button
+                ref={connectRef}
+                variant="outline"
+                size="field"
+                disabled={busy || (!state && !error)}
+                onClick={() => {
+                  if (state) {
+                    void changeConnection(true);
+                  } else {
+                    setPending(true);
+                    void api
+                      .getState()
+                      .then(
+                        (next) => {
+                          setState(next);
+                          setError(null);
+                        },
+                        (reason: unknown) =>
+                          setError(
+                            reason instanceof Error
+                              ? reason.message
+                              : String(reason),
+                          ),
+                      )
+                      .finally(() => setPending(false));
+                  }
+                }}
+              >
+                {t(
+                  !state && error
+                    ? 'settings.retrySave'
+                    : 'settings.localAgentConnect',
+                )}
+              </Button>
             )}
-          </Button>
+          </div>
         </div>
-      </div>
-      {message ? (
-        <p
-          role="alert"
-          className="text-danger mt-2 max-w-sm text-xs [overflow-wrap:anywhere]"
-        >
-          {message}
-        </p>
-      ) : null}
-    </>
-  ) : null;
+      </>
+    ) : null;
+  const disconnect =
+    api && state?.enabled ? (
+      <DropdownMenuItem
+        icon={<Unplug />}
+        disabled={busy}
+        onClick={() => {
+          restoreConnectFocus.current = !localDevice;
+          setMenuOpen(false);
+          void changeConnection(false);
+        }}
+      >
+        {t('settings.localAgentDisconnect')}
+      </DropdownMenuItem>
+    ) : null;
 
   return (
     <>
       {api && !localDevice ? (
         <SettingRow
-          title={
-            state?.device ? (
-              <>
-                {state.device.displayName}
-                <span className="text-fg-muted ml-1 font-normal">
-                  {t('settings.localAgentThisDevice')}
-                </span>
-              </>
-            ) : (
-              t('settings.localAgentTitle')
-            )
-          }
-          description={
-            state?.device
-              ? `v${state.device.version} · ${state.device.agentletId}`
-              : undefined
-          }
+          title={t('settings.localAgentTitle')}
+          className="border-edge-default mb-3 rounded-lg border"
         >
-          {controls}
+          <div className="flex items-center gap-2">
+            {controls}
+            {disconnect && (
+              <DropdownMenu
+                open={menuOpen}
+                onOpenChange={setMenuOpen}
+                align="bottom-right"
+                trigger={
+                  <Button
+                    variant="ghost"
+                    size="field"
+                    iconOnly
+                    aria-label={t('settings.deviceActions', {
+                      device: t('settings.localAgentTitle'),
+                    })}
+                  >
+                    <MoreHorizontal />
+                  </Button>
+                }
+              >
+                {disconnect}
+              </DropdownMenu>
+            )}
+          </div>
+          {message && (
+            <p
+              role="alert"
+              className="text-danger-fg mt-2 text-xs [overflow-wrap:anywhere]"
+            >
+              {message}
+            </p>
+          )}
         </SettingRow>
       ) : null}
-      {orderedDevices.map((device) => (
-        <ConnectedDeviceRow
-          key={device.agentletId}
-          device={device}
-          isLocalDevice={device === localDevice}
-          connectionControls={device === localDevice ? controls : null}
-        />
-      ))}
-      {!api && connectedDevices.length === 0 ? (
+      {orderedDevices.map((device) => {
+        const deviceProfiles = profilesByDevice.get(device.agentletId) ?? [];
+        const isLocalDevice = device.agentletId === localId;
+        const online =
+          connectedDevices.some(
+            (entry) => entry.agentletId === device.agentletId,
+          ) &&
+          (!isLocalDevice || !api || state?.status === 'connected');
+        return (
+          <ConnectedDeviceRow
+            key={device.agentletId}
+            device={device}
+            isLocalDevice={isLocalDevice}
+            online={online}
+            connectionControls={isLocalDevice ? controls : null}
+            connectionError={isLocalDevice ? message : null}
+            menuItems={isLocalDevice ? disconnect : null}
+            menuOpen={isLocalDevice ? menuOpen : undefined}
+            onMenuOpenChange={isLocalDevice ? setMenuOpen : undefined}
+            onAdd={onAdd ? () => onAdd(device.agentletId) : undefined}
+            addRef={addRef?.(device.agentletId)}
+            profileCount={deviceProfiles.length}
+          >
+            {deviceProfiles.map((profile) => renderProfile?.(profile))}
+          </ConnectedDeviceRow>
+        );
+      })}
+      {!api && orderedDevices.length === 0 ? (
         <SettingRow title={t('settings.noConnectedDevices')}>
           <span />
         </SettingRow>

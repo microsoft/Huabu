@@ -51,6 +51,7 @@ import {
   usePreviewWorkspaceStore,
   type PreviewWorkspaceState,
 } from '@/store/previewWorkspace/store';
+import { pageLifecycle } from '@/utils/pageLifecycle';
 
 import { PreviewGroup } from './PreviewGroup';
 import { PreviewTabDragOverlay } from './PreviewTab';
@@ -205,6 +206,20 @@ export function PreviewWorkspace({
 } = {}) {
   const { t } = useTranslation();
   const workspace = usePreviewWorkspaceStore(selectWorkspace);
+  useEffect(
+    () =>
+      pageLifecycle.register('preview-editors', {
+        settle: () => {
+          const current = usePreviewWorkspaceStore.getState().workspace;
+          const { nodes } = useCanvasStore.getState();
+          for (const group of current.groups) {
+            if (group.activeTabId)
+              settleActivePreviewTab(current, nodes, group.activeTabId);
+          }
+        },
+      }),
+    [],
+  );
   useConversationTitles(workspace);
   const canvasId = usePreviewWorkspaceStore((s) => s.canvasId);
   const nodeFocusRequest = usePreviewWorkspaceStore((s) => s.nodeFocusRequest);
@@ -256,7 +271,7 @@ export function PreviewWorkspace({
   const scrollViewKeys = useCanvasStore(
     useShallow((state) =>
       scrollTargets.map((target) => {
-        if (target.kind === 'chat') {
+        if (target.kind === 'chat' || target.kind === 'conversation') {
           return messageListViewKey(target.canvasId, target.threadId);
         }
         // Cross-origin frame scroll state is neither accessible nor retained.
@@ -292,27 +307,7 @@ export function PreviewWorkspace({
     reconcilePreviewScrollTargets(canvasId, scrollRegistrations);
   }, [canvasId, scrollRegistrations]);
 
-  const settleTab = useCallback((tabId: string) => {
-    settleActivePreviewTab(
-      usePreviewWorkspaceStore.getState().workspace,
-      useCanvasStore.getState().nodes,
-      tabId,
-    );
-  }, []);
-
-  const activateWorkspaceTab = useCallback(
-    (tabId: string) => {
-      const current = usePreviewWorkspaceStore.getState().workspace;
-      const group = current.groups.find((candidate) =>
-        candidate.tabIds.includes(tabId),
-      );
-      if (group?.activeTabId && group.activeTabId !== tabId) {
-        settleTab(group.activeTabId);
-      }
-      activateTab(tabId);
-    },
-    [activateTab, settleTab],
-  );
+  const activateWorkspaceTab = activateTab;
 
   const collapseAfterClose = () => {
     if (!onCollapse) return;
@@ -330,13 +325,13 @@ export function PreviewWorkspace({
     closingFocusRef.current = document.activeElement;
     const currentWorkspace = usePreviewWorkspaceStore.getState().workspace;
     const isFinalTab = Object.keys(currentWorkspace.tabs).length === 1;
-    closeTab(tabId, settleTab);
+    closeTab(tabId);
     if (isFinalTab) collapseAfterClose();
   };
   const closeWorkspaceTabs = (tabId: string, scope: ClosePreviewTabsScope) => {
     closingFocusRef.current = document.activeElement;
     const before = usePreviewWorkspaceStore.getState().workspace;
-    closeTabs(tabId, scope, settleTab);
+    closeTabs(tabId, scope);
     const after = usePreviewWorkspaceStore.getState().workspace;
     if (
       Object.keys(before.tabs).length > 0 &&
@@ -352,9 +347,9 @@ export function PreviewWorkspace({
   const openNewChat = useCallback(
     (groupId: string) => {
       if (!canvasId) return;
-      void createWorkspaceChat(groupId, settleTab);
+      void createWorkspaceChat(groupId);
     },
-    [canvasId, settleTab],
+    [canvasId],
   );
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -396,11 +391,10 @@ export function PreviewWorkspace({
         String(over.id),
       );
       if (!destination) return;
-      settleTab(tabId);
-      moveTab(tabId, destination, settleTab);
+      moveTab(tabId, destination);
       activateTab(tabId);
     },
-    [activateTab, clearTabDrag, moveTab, settleTab],
+    [activateTab, clearTabDrag, moveTab],
   );
 
   const activeDragTab = activeDragTabId

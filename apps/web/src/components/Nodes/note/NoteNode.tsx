@@ -526,14 +526,11 @@ export const NoteNode = memo(
         farLabel={farLabel}
         actions={isContentMissing ? undefined : NoteActions}
         keepAspectRatio={false}
-        // Active drop-target highlight: thick `--info-light` ring on
-        // the wrapper's true outer edge plus a translucent
-        // `--info-light` wash over the whole node — same hue family
-        // as NotePreview's insertion bar but softer so it reads as a
-        // "zone" rather than a precise insertion point.
+        fillColor={isDropTarget ? 'var(--info-bg)' : undefined}
         className={clsx(
           'huabu-note-surface',
-          isDropTarget && 'ring-info-light bg-info-light/60 ring-4',
+          isDropTarget &&
+            'ring-info ring-4 [--note-surface-background:var(--info-bg)]',
         )}
       >
         {isContentMissing ? (

@@ -9,6 +9,7 @@ import { isCanvasIntent } from '@huabu/shared';
 
 import { cn } from '@/components/Common/cn';
 import { NodeRef } from '@/components/Nodes/NodeRef/NodeRef';
+import { useOptionalChatSession } from '@/hooks/useChatSession';
 import { useSearchSource } from '@/hooks/useSearchSource';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 
@@ -58,6 +59,8 @@ export const UserMessage = memo(function UserMessage({
   invokedSkills,
 }: UserMessageProps) {
   const { t } = useTranslation();
+  const session = useOptionalChatSession();
+  const remote = session && session.ownerCanvasId !== session.canvasId;
   const contentRef = useRef<HTMLSpanElement>(null);
   const interpretationRef = useRef<HTMLSpanElement>(null);
   useSearchSource(contentRef, content, 'text');
@@ -177,8 +180,12 @@ export const UserMessage = memo(function UserMessage({
               return (
                 <span
                   key={id}
-                  onMouseEnter={() => setStrokeHighlight({ [id]: strokeIds })}
-                  onMouseLeave={() => clearStrokeHighlight()}
+                  onMouseEnter={() => {
+                    if (!remote) setStrokeHighlight({ [id]: strokeIds });
+                  }}
+                  onMouseLeave={() => {
+                    if (!remote) clearStrokeHighlight();
+                  }}
                 >
                   <NodeRef nodeId={id} strokeCount={strokeIds.length} />
                 </span>

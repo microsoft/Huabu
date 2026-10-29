@@ -11,7 +11,66 @@
   Naming: fg-* (text), bg-* (surfaces), edge-* (borders).
   =================================================================== */
 :root {
+  color-scheme: light;
   --icon-stroke-width: 2;
+
+  /* Calibrated canvas variants. Raw light/dark colors live in ACCENT_PALETTE. */
+  --accent-white-fg: #191919;
+  --accent-white-bg: #ffffff;
+  --accent-white-soft-bg: #ffffff;
+  --accent-white-divider: #e6e6e6;
+  --accent-white-highlight-bg: #ececec;
+  --accent-grey-fg: #625d56;
+  --accent-grey-bg: #f1efec;
+  --accent-grey-soft-bg: #f8f7f5;
+  --accent-grey-divider: #d3cec7;
+  --accent-grey-highlight-bg: #e7e3dd;
+  --accent-teal-fg: #2f6862;
+  --accent-teal-bg: #eaf3f1;
+  --accent-teal-soft-bg: #f4f8f7;
+  --accent-teal-divider: #bed5d0;
+  --accent-teal-highlight-bg: #d9eae5;
+  --accent-blue-fg: #365d85;
+  --accent-blue-bg: #ebf1f8;
+  --accent-blue-soft-bg: #f5f8fc;
+  --accent-blue-divider: #c2d2e4;
+  --accent-blue-highlight-bg: #dce7f3;
+  --accent-green-fg: #4c6b3d;
+  --accent-green-bg: #eff4ea;
+  --accent-green-soft-bg: #f7f9f3;
+  --accent-green-divider: #cedbbf;
+  --accent-green-highlight-bg: #e1ebd5;
+  --accent-amber-fg: #705414;
+  --accent-amber-bg: #fbf6e8;
+  --accent-amber-soft-bg: #fdfaf2;
+  --accent-amber-divider: #ead58f;
+  --accent-amber-highlight-bg: #f5e8bd;
+  --accent-orange-fg: #824619;
+  --accent-orange-bg: #fff0df;
+  --accent-orange-soft-bg: #fffaf4;
+  --accent-orange-divider: #f0d0aa;
+  --accent-orange-highlight-bg: #ffe0ba;
+  --accent-red-fg: #8f3e4d;
+  --accent-red-bg: #fdedef;
+  --accent-red-soft-bg: #fff7f7;
+  --accent-red-divider: #edc7cc;
+  --accent-red-highlight-bg: #f8dce1;
+  --accent-purple-fg: #685086;
+  --accent-purple-bg: #f2edf7;
+  --accent-purple-soft-bg: #f9f6fc;
+  --accent-purple-divider: #d7cbe3;
+  --accent-purple-highlight-bg: #e8dff0;
+
+  /* Text nodes use brighter foregrounds on their shallow surfaces. */
+  --accent-white-text-fg: var(--accent-white-fg);
+  --accent-grey-text-fg: #747069;
+  --accent-teal-text-fg: #1c7c71;
+  --accent-blue-text-fg: #3174b0;
+  --accent-green-text-fg: #597a2f;
+  --accent-amber-text-fg: #aa8100;
+  --accent-orange-text-fg: #ae5e1c;
+  --accent-red-text-fg: #b94b63;
+  --accent-purple-text-fg: #855dab;
 
   /* Text hierarchy */
   --fg-default: #191919;
@@ -34,39 +93,33 @@
 
   /* Status: info */
   --info: #2e90ff;
+  --info-fg: #236dc2;
   --info-light: #8ac2ff;
   --info-bg: #f2f8ff;
-  --info-bg-hover: #dbeafe;
+  --info-bg-hover: var(--bg-hover);
 
   /* Status: success */
-  --success: #1e7a3f;
-  --success-light: #a4c9a4;
-  --success-bg: #e3f2e8;
-  --success-bg-hover: #deeedd;
-  --ink-reference-highlight: #dcfce7;
+  --success: #42a863;
+  --success-fg: #087f3d;
+  --success-light: #98cda4;
+  --success-bg: #f1faf2;
 
   /* Status: warning */
-  --warning: #eb7f31;
-  --warning-light: #e2b38d;
-  --warning-bg: #fdf6f1;
-  --warning-bg-hover: #f7e5d6;
+  --warning: #df7d2d;
+  --warning-fg: #b0540e;
+  --warning-light: #e9b082;
+  --warning-bg: #fef5ee;
 
   /* Status: danger */
-  --danger: #c0392b;
-  --danger-light: #e3b2a9;
-  --danger-bg: #fbe5e2;
-  --danger-bg-hover: #fbe2e1;
+  --danger: #ea5b4c;
+  --danger-fg: #bd4236;
+  --danger-light: #f2a89c;
+  --danger-bg: #fff5f3;
 
   /* AI colors */
   --ai: #bda6ce;
   --ai-light: rgba(189, 166, 206, 0.3);
   --ai-bg: rgba(189, 166, 206, 0.1);
-
-  /* Diff */
-  --diff-added-bg: var(--success-bg);
-  --diff-added-text: var(--success);
-  --diff-removed-bg: var(--danger-bg);
-  --diff-removed-text: var(--danger);
 
   /* Question node */
   --question-fg: #d97a2b;
@@ -77,7 +130,6 @@
   --canvas-grid: #cccccc;
   --pdf-selection-border: var(--info);
   --pdf-selection-bg: color-mix(in srgb, var(--info) 12%, transparent);
-  --pdf-highlight-bg: color-mix(in srgb, var(--warning-light) 45%, transparent);
   --shimmer-1: #d1d5db;
   --shimmer-2: #6b7280;
   --shimmer-3: #4b5563;
@@ -88,6 +140,61 @@
 /* Dark theme overrides.
    TODO: migrate system tokens to fg/bg/edge naming in a follow-up pass. */
 .dark {
+  color-scheme: dark;
+  --accent-white-fg: #fafafa;
+  --accent-white-bg: #242424;
+  --accent-white-soft-bg: #202020;
+  --accent-white-divider: #454545;
+  --accent-white-highlight-bg: #383838;
+  --accent-grey-fg: #d8d2c9;
+  --accent-grey-bg: #2c2925;
+  --accent-grey-soft-bg: #24221f;
+  --accent-grey-divider: #4d463d;
+  --accent-grey-highlight-bg: #3d3831;
+  --accent-teal-fg: #a8d6ca;
+  --accent-teal-bg: #20332f;
+  --accent-teal-soft-bg: #1d2926;
+  --accent-teal-divider: #38574e;
+  --accent-teal-highlight-bg: #2d4740;
+  --accent-blue-fg: #b5cde9;
+  --accent-blue-bg: #233044;
+  --accent-blue-soft-bg: #1e2734;
+  --accent-blue-divider: #3b506b;
+  --accent-blue-highlight-bg: #30425a;
+  --accent-green-fg: #c2d4ae;
+  --accent-green-bg: #2c3324;
+  --accent-green-soft-bg: #242a20;
+  --accent-green-divider: #4c583e;
+  --accent-green-highlight-bg: #3d4931;
+  --accent-amber-fg: #ffe4a0;
+  --accent-amber-bg: #3b3218;
+  --accent-amber-soft-bg: #2e291a;
+  --accent-amber-divider: #6b5928;
+  --accent-amber-highlight-bg: #55451c;
+  --accent-orange-fg: #ffd0a6;
+  --accent-orange-bg: #3d2d1d;
+  --accent-orange-soft-bg: #30251c;
+  --accent-orange-divider: #705031;
+  --accent-orange-highlight-bg: #583d23;
+  --accent-red-fg: #f7c3cb;
+  --accent-red-bg: #3c282d;
+  --accent-red-soft-bg: #2e2125;
+  --accent-red-divider: #6b454f;
+  --accent-red-highlight-bg: #51333d;
+  --accent-purple-fg: #d1bee4;
+  --accent-purple-bg: #31283c;
+  --accent-purple-soft-bg: #272130;
+  --accent-purple-divider: #564465;
+  --accent-purple-highlight-bg: #433451;
+  --accent-white-text-fg: var(--accent-white-fg);
+  --accent-grey-text-fg: var(--accent-grey-fg);
+  --accent-teal-text-fg: var(--accent-teal-fg);
+  --accent-blue-text-fg: var(--accent-blue-fg);
+  --accent-green-text-fg: var(--accent-green-fg);
+  --accent-amber-text-fg: var(--accent-amber-fg);
+  --accent-orange-text-fg: var(--accent-orange-fg);
+  --accent-red-text-fg: var(--accent-red-fg);
+  --accent-purple-text-fg: var(--accent-purple-fg);
   /* --- App design-system tokens --- */
   --fg-default: oklch(0.985 0 0);
   --fg-muted: oklch(0.78 0 0);
@@ -107,39 +214,33 @@
   --edge-default: oklch(1 0 0 / 10%);
 
   /* Status: success */
-  --success: #4ade80;
-  --success-light: #22c55e;
-  --success-bg: oklch(0.22 0.04 150);
-  --success-bg-hover: oklch(0.28 0.05 150);
-  --ink-reference-highlight: var(--success-bg-hover);
+  --success: #64bf7d;
+  --success-fg: #acdeb7;
+  --success-light: #50825c;
+  --success-bg: #223426;
 
   /* Status: warning */
-  --warning: #fbbf24;
-  --warning-light: #f59e0b;
-  --warning-bg: oklch(0.22 0.05 80);
-  --warning-bg-hover: oklch(0.28 0.06 80);
+  --warning: #d9a440;
+  --warning-fg: #efcd97;
+  --warning-light: #957335;
+  --warning-bg: #3a2e1b;
 
   /* Status: info */
-  --info: #60a5fa;
-  --info-light: #93c5fd;
-  --info-bg: oklch(0.22 0.04 260);
-  --info-bg-hover: oklch(0.28 0.05 260);
+  --info: #6aaaf4;
+  --info-fg: #b2d3fa;
+  --info-light: #4776ad;
+  --info-bg: #1b304b;
+  --info-bg-hover: var(--bg-hover);
 
   /* Status: danger */
-  --danger: oklch(0.704 0.191 22.216);
-  --danger-light: #f87171;
-  --danger-bg: oklch(0.28 0.06 25);
-  --danger-bg-hover: oklch(0.28 0.06 25);
+  --danger: #f08476;
+  --danger-fg: #f8c0b7;
+  --danger-light: #a75c52;
+  --danger-bg: #412724;
 
   --ai: #bda6ce;
   --ai-light: rgba(189, 166, 206, 0.3);
   --ai-bg: rgba(189, 166, 206, 0.1);
-
-  /* Diff */
-  --diff-added-bg: oklch(0.25 0.06 150);
-  --diff-added-text: #86efac;
-  --diff-removed-bg: oklch(0.25 0.06 25);
-  --diff-removed-text: #fca5a5;
 
   /* Special purpose */
   --question-fg: #d97a2b;
@@ -152,6 +253,33 @@
   --skeleton-1: oklch(0.2 0 0);
   --skeleton-2: oklch(0.28 0 0);
   --skeleton-3: oklch(0.32 0 0);
+}
+
+/* Resolve semantic aliases and translucent paint against the current theme. */
+:root,
+.dark {
+  --diff-added-bg: var(--success-bg);
+  --diff-added-text: var(--success-fg);
+  --diff-removed-bg: var(--danger-bg);
+  --diff-removed-text: var(--danger-fg);
+  --ink-reference-bg: color-mix(in srgb, var(--success-bg) 70%, transparent);
+  --ink-broken-reference-bg: color-mix(
+    in srgb,
+    var(--warning-bg) 70%,
+    transparent
+  );
+  --canvas-overlay-subtle: color-mix(in srgb, var(--info) 6%, transparent);
+  --canvas-overlay-drop: color-mix(in srgb, var(--info) 10%, transparent);
+  --canvas-overlay-selection: color-mix(in srgb, var(--info) 14%, transparent);
+  --editor-selection-bg: color-mix(in srgb, var(--info) 35%, transparent);
+  --pdf-highlight-bg: color-mix(in srgb, var(--warning-light) 45%, transparent);
+  --pdf-text-selection-bg: color-mix(
+    in srgb,
+    var(--warning-light) 20.25%,
+    transparent
+  );
+  --sketch-selected-opacity: 0.7;
+  --sketch-reference-opacity: 0.45;
 }
 
 /* Extending Tailwind theme with utility classes.*/
@@ -177,28 +305,32 @@
 
   /* Status: danger */
   --color-danger: var(--danger);
+  --color-danger-fg: var(--danger-fg);
   --color-danger-light: var(--danger-light);
   --color-danger-bg: var(--danger-bg);
-  --color-danger-bg-hover: var(--danger-bg-hover);
 
   /* Status: success */
   --color-success: var(--success);
+  --color-success-fg: var(--success-fg);
   --color-success-light: var(--success-light);
   --color-success-bg: var(--success-bg);
-  --color-success-bg-hover: var(--success-bg-hover);
-  --color-ink-reference-highlight: var(--ink-reference-highlight);
+  --color-ink-reference-bg: var(--ink-reference-bg);
+  --color-ink-broken-reference-bg: var(--ink-broken-reference-bg);
 
   /* Status: warning */
   --color-warning: var(--warning);
+  --color-warning-fg: var(--warning-fg);
   --color-warning-light: var(--warning-light);
   --color-warning-bg: var(--warning-bg);
-  --color-warning-bg-hover: var(--warning-bg-hover);
 
   /* Status: info */
   --color-info: var(--info);
+  --color-info-fg: var(--info-fg);
   --color-info-light: var(--info-light);
   --color-info-bg: var(--info-bg);
   --color-info-bg-hover: var(--info-bg-hover);
+  --color-canvas-overlay-subtle: var(--canvas-overlay-subtle);
+  --color-canvas-overlay-drop: var(--canvas-overlay-drop);
 
   /* Diff */
   --color-diff-added-bg: var(--diff-added-bg);
@@ -685,7 +817,7 @@ body.node-resize-active * {
   still shows the user which region is selected. */
 .textLayer span::selection {
   color: transparent;
-  background: color-mix(in srgb, var(--pdf-highlight-bg) 45%, transparent);
+  background: var(--pdf-text-selection-bg);
 }
 
 /* Thinking indicator shimmer — gradient slides across text */
@@ -802,7 +934,7 @@ body.node-resize-active * {
   Canvas search — CSS Custom Highlight API paint rule.
   The `useTextHighlight` hook registers ranges under the name
   `huabu-search`; without this selector the browser has nowhere
-  to draw them. Uses the warning-bg token so it reads as a "found"
+  to draw them. Uses the PDF highlight token so it reads as a "found"
   marker without competing with selection (which uses --info).
 
   We intentionally do NOT set `color` here. pdf.js's text layer
@@ -832,9 +964,5 @@ body.node-resize-active * {
   Highlight pseudo-elements can be scoped by ancestor selectors per
   the CSS Highlight API spec. */
 .textLayer ::highlight(huabu-search) {
-  background-color: color-mix(
-    in srgb,
-    var(--pdf-highlight-bg) 45%,
-    transparent
-  );
+  background-color: var(--pdf-text-selection-bg);
 }

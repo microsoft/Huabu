@@ -3,6 +3,7 @@
 
 import { z } from 'zod';
 
+import { agentIconSchema } from './agent-profile.js';
 import { agentBindingSchema } from './agent.js';
 import { fileReferenceSchema } from './device-files.js';
 import { sketchResourceBindingDataSchema } from './ink-sigil.js';
@@ -18,6 +19,33 @@ export const agentNodeLaunchOverridesSchema = z
   .strict();
 export type AgentNodeLaunchOverrides = z.infer<
   typeof agentNodeLaunchOverridesSchema
+>;
+
+export const agentConversationOwnerQuerySchema = z.object({
+  canvasId: z.string().min(1),
+});
+export const agentConversationOwnerResponseSchema = z.object({
+  canvasId: z.string().min(1),
+  nodeId: z.string().min(1),
+  threadId: z.string().min(1),
+  spaceTitle: z.string().nullable(),
+  source: z.object({
+    hasAuthoredContent: z.boolean(),
+    label: z.string().optional(),
+    labelSource: z.enum(['user', 'auto', 'agent']).optional(),
+    status: z.enum(['idle', 'running', 'done', 'error']).optional(),
+    viewed: z.boolean().optional(),
+    agentMode: z.enum(['ask', 'operate']).optional(),
+    agentBinding: agentBindingSchema,
+    agentBindingPolicy: z.enum(['selectable', 'fixed']).optional(),
+    bindingState: agentNodeBindingStateSchema.optional(),
+    agentLaunchOverrides: agentNodeLaunchOverridesSchema.optional(),
+    agentIcon: agentIconSchema.optional(),
+    invocationToken: z.string().optional(),
+  }),
+});
+export type AgentConversationOwnerResponse = z.infer<
+  typeof agentConversationOwnerResponseSchema
 >;
 
 /** Bounded ownership contract; unrelated node data retains its existing shape. */

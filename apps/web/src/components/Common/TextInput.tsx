@@ -37,7 +37,7 @@ export function textInputClassName({
   size = 'sm',
 }: Pick<TextInputProps, 'className' | 'mono' | 'size'>): string {
   return cn(
-    'border-edge-default bg-surface text-fg-default placeholder:text-fg-subtle focus:ring-info-light rounded-md border focus:ring-1 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-danger',
+    'border-edge-default bg-surface text-fg-default placeholder:text-fg-subtle focus:ring-info rounded-md border focus:ring-1 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-danger',
     SIZE_CLASSES[size],
     mono && 'font-mono',
     className,

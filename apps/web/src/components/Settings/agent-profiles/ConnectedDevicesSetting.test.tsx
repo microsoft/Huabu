@@ -13,20 +13,25 @@ import {
 import { ConnectedDevicesSetting } from './ConnectedDevicesSetting';
 
 import type { ConnectedAgentletDevice } from '@/api/acp';
+import type { AgentletDevice, AgentProfileView } from '@huabu/shared';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
 vi.mock('@/hooks/useElectron', () => ({ getElectronBridge: vi.fn() }));
 const refresh = vi.hoisted(() => vi.fn(async () => undefined));
+const renameDevice = vi.hoisted(() => vi.fn(async () => undefined));
 let connectedDevices: ConnectedAgentletDevice[] = [];
+let knownDevices: AgentletDevice[] = [];
 vi.mock('@/store/acpProfilesStore', () => ({
   useAcpProfilesStore: (
     selector: (state: {
       refresh: typeof refresh;
       connectedDevices: ConnectedAgentletDevice[];
+      knownDevices: AgentletDevice[];
+      renameDevice: typeof renameDevice;
     }) => unknown,
-  ) => selector({ refresh, connectedDevices }),
+  ) => selector({ refresh, connectedDevices, knownDevices, renameDevice }),
 }));
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -55,7 +60,9 @@ const api = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  renameDevice.mockReset().mockResolvedValue(undefined);
   connectedDevices = [];
+  knownDevices = [];
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -74,6 +81,220 @@ afterEach(() => {
 });
 
 describe('connected device settings', () => {
+  it.each([
+    [true, 'cancel'],
+    [true, 'disconnect'],
+    [true, 'error'],
+    [false, 'cancel'],
+    [false, 'disconnect'],
+    [false, 'error'],
+  ] as const)(
+    'restores focus after Disconnect (identity=%s, outcome=%s)',
+    async (withIdentity, outcome) => {
+      const current: ElectronLocalAgentState = {
+        enabled: true,
+        status: 'connected',
+        error: null,
+        ...(withIdentity ? { agentletId: 'this-device' } : {}),
+      };
+      await act(async () => root.render(<ConnectedDevicesSetting />));
+      await act(async () => onState?.(current));
+      let finish!: () => void;
+      api.setEnabled.mockImplementationOnce(
+        () =>
+          new Promise((resolve, reject) => {
+            finish = () =>
+              outcome === 'error'
+                ? reject(new Error('Disconnect failed'))
+                : resolve(
+                    outcome === 'cancel'
+                      ? current
+                      : { ...current, enabled: false, status: 'disabled' },
+                  );
+          }),
+      );
+      await openDeviceMenu();
+      const item =
+        document.querySelector<HTMLButtonElement>('[role="menuitem"]');
+      expect(item).toBeTruthy();
+      act(() => item?.focus());
+      await act(async () => item?.click());
+      expect(document.querySelector('[role="menu"]')).toBeNull();
+      await act(async () => finish());
+      await act(
+        async () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => resolve()),
+          ),
+      );
+      const target =
+        !withIdentity && outcome === 'disconnect'
+          ? [...container.querySelectorAll('button')].find(
+              (button) => button.textContent === 'settings.localAgentConnect',
+            )
+          : container.querySelector('[aria-label="settings.deviceActions"]');
+      expect(target).toBeTruthy();
+      expect(document.activeElement).toBe(target);
+      if (outcome === 'error')
+        expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+          'Disconnect failed',
+        );
+    },
+  );
+
+  async function openDeviceMenu(element: ParentNode = container) {
+    const trigger = element.querySelector<HTMLButtonElement>(
+      '[aria-label="settings.deviceActions"]',
+    );
+    if (trigger?.getAttribute('aria-expanded') !== 'true')
+      await act(async () => trigger?.click());
+    return document.querySelector('[role="menu"]');
+  }
+
+  it('does not steal focus while a legacy Disconnect finishes', async () => {
+    await act(async () => root.render(<ConnectedDevicesSetting />));
+    await act(async () =>
+      onState?.({ enabled: true, status: 'connected', error: null }),
+    );
+    let finish!: () => void;
+    api.setEnabled.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = () => resolve(initial);
+        }),
+    );
+    const outside = document.createElement('button');
+    document.body.appendChild(outside);
+    try {
+      await disconnectLocal();
+      act(() => outside.focus());
+      await act(async () => finish());
+      await act(
+        async () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => resolve()),
+          ),
+      );
+      expect(document.activeElement).toBe(outside);
+    } finally {
+      outside.remove();
+    }
+  });
+
+  async function disconnectLocal(element: ParentNode = container) {
+    const menu = await openDeviceMenu(element);
+    const button = [
+      ...(menu?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? []),
+    ].find((item) => item.textContent === 'settings.localAgentDisconnect');
+    expect(button).toBeTruthy();
+    await act(async () => button?.click());
+  }
+  async function editDeviceName() {
+    vi.mocked(getElectronBridge).mockReturnValue(null);
+    connectedDevices = [
+      {
+        agentletId: 'device-id',
+        displayName: 'Office PC',
+        version: '1.0.0',
+        connectedAt: '2026-01-01T00:00:00.000Z',
+        profileCount: 2,
+      },
+    ];
+    await act(async () => root.render(<ConnectedDevicesSetting />));
+    expect(document.activeElement).not.toBe(container.querySelector('button'));
+    await act(async () =>
+      container
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label="settings.deviceActions"]',
+        )
+        ?.click(),
+    );
+    await act(async () =>
+      [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+        .find((button) => button.textContent === 'settings.renameDevice')
+        ?.click(),
+    );
+    const input = container.querySelector('input');
+    if (!input) throw new Error('Missing device name input');
+    expect(document.activeElement).toBe(input);
+    expect(input.value).toBe('Office PC');
+    return input;
+  }
+
+  function typeName(input: HTMLInputElement, value: string) {
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        'value',
+      )?.set;
+      if (!setter) throw new Error('Missing native input setter');
+      setter.call(input, value);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  }
+
+  it('renames by exact identity on Enter and restores focus', async () => {
+    const input = await editDeviceName();
+    typeName(input, '  Work PC  ');
+    await act(async () =>
+      input.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      ),
+    );
+    expect(renameDevice).toHaveBeenCalledExactlyOnceWith(
+      'device-id',
+      'Work PC',
+    );
+    expect(container.querySelector('input')).toBeNull();
+    expect(document.activeElement?.getAttribute('aria-label')).toBe(
+      'settings.deviceActions',
+    );
+  });
+
+  it('rejects blank names and cancels with Escape without saving', async () => {
+    const input = await editDeviceName();
+    typeName(input, ' ');
+    await act(async () =>
+      input.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      ),
+    );
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+      'settings.deviceNameInvalid',
+    );
+    expect(renameDevice).not.toHaveBeenCalled();
+    await act(async () =>
+      input.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+      ),
+    );
+    expect(container.querySelector('input')).toBeNull();
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(container.textContent).toContain('Office PC');
+  });
+
+  it('retains failed drafts and allows retry without duplicate in-flight saves', async () => {
+    const input = await editDeviceName();
+    typeName(input, 'Work PC');
+    renameDevice.mockRejectedValueOnce(new Error('Device disconnected'));
+    const saveButton = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'actions.save',
+    );
+    if (!saveButton) throw new Error('Missing Save button');
+    await act(async () => {
+      saveButton.click();
+      saveButton.click();
+    });
+    expect(renameDevice).toHaveBeenCalledTimes(1);
+    expect(input.value).toBe('Work PC');
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+      'Device disconnected',
+    );
+    await act(async () => saveButton.click());
+    expect(renameDevice).toHaveBeenCalledTimes(2);
+    expect(container.querySelector('input')).toBeNull();
+  });
+
   it('does not expose local actions in a browser', async () => {
     vi.mocked(getElectronBridge).mockReturnValue(null);
     await act(async () => root.render(<ConnectedDevicesSetting />));
@@ -97,7 +318,7 @@ describe('connected device settings', () => {
     );
   });
 
-  it('shows the actual device name, version and ID before connecting', async () => {
+  it('shows the actual device name with ID and version directly in its menu before connecting', async () => {
     await act(async () => root.render(<ConnectedDevicesSetting />));
     await act(async () =>
       onState?.({
@@ -114,15 +335,58 @@ describe('connected device settings', () => {
     const row = container.querySelector('.setting-row');
     expect(row?.textContent).toContain('My computer: darwin arm64');
     expect(row?.textContent).toContain('settings.localAgentThisDevice');
-    expect(row?.textContent).toContain('this-device');
-    expect(row?.querySelector('p + p')?.textContent).toBe(
-      'v2.3.4 · this-device',
+    expect(row?.textContent).not.toContain('this-device');
+    await act(async () =>
+      container
+        .querySelector<HTMLButtonElement>(
+          '[aria-label="settings.deviceActions"]',
+        )
+        ?.click(),
     );
-    expect(row?.querySelector('button')?.textContent).toBe(
-      'settings.localAgentConnect',
+    expect(document.querySelector('[role="menu"]')?.textContent).toContain(
+      'this-device',
     );
+    expect(document.querySelector('[role="menu"]')?.textContent).toContain(
+      '2.3.4',
+    );
+    expect(row?.textContent).toContain('settings.localAgentConnect');
     expect(api.setEnabled).not.toHaveBeenCalled();
   });
+
+  it.each([undefined, '1.2.3'])(
+    'fills missing local metadata without replacing the saved name or known version (%s)',
+    async (version) => {
+      knownDevices = [
+        { agentletId: 'this-device', displayName: 'Saved Mac name', version },
+      ];
+      await act(async () =>
+        root.render(<ConnectedDevicesSetting onAdd={vi.fn()} />),
+      );
+      await act(async () =>
+        onState?.({
+          enabled: false,
+          status: 'disabled',
+          error: null,
+          device: {
+            agentletId: 'this-device',
+            displayName: 'Runtime name',
+            version: '2.3.4',
+          },
+        }),
+      );
+      const card = container.querySelector('[data-device-id="this-device"]');
+      expect(card?.textContent).toContain('Saved Mac name');
+      expect(card?.textContent).not.toContain('Runtime name');
+      expect(card?.textContent).toContain('settings.localAgentConnect');
+      expect(card?.querySelector('[data-editor-trigger]')).toBeNull();
+      const menu = await openDeviceMenu();
+      expect(menu?.textContent).toContain(version ?? '2.3.4');
+      expect(menu?.textContent).not.toContain('settings.renameDevice');
+      expect(api.setEnabled).not.toHaveBeenCalled();
+      expect(renameDevice).not.toHaveBeenCalled();
+      expect(knownDevices[0].version).toBe(version);
+    },
+  );
 
   it('connects without a token input and updates independently from Settings actions', async () => {
     await act(async () => root.render(<ConnectedDevicesSetting />));
@@ -134,8 +398,10 @@ describe('connected device settings', () => {
       onState?.({ enabled: true, status: 'connected', error: null }),
     );
     expect(container.querySelector('[role="status"]')).toBeNull();
-    expect(container.textContent).toContain('settings.localAgentDisconnect');
-    await act(async () => container.querySelector('button')?.click());
+    expect(container.textContent).not.toContain(
+      'settings.localAgentDisconnect',
+    );
+    await disconnectLocal();
     expect(api.setEnabled).toHaveBeenLastCalledWith(false);
   });
 
@@ -152,7 +418,9 @@ describe('connected device settings', () => {
       'Authorization rejected',
     );
     expect(container.textContent).toContain('settings.localAgentReconnect');
-    expect(container.textContent).toContain('settings.localAgentDisconnect');
+    expect((await openDeviceMenu())?.textContent).toContain(
+      'settings.localAgentDisconnect',
+    );
   });
 
   it('surfaces IPC failures and leaves the action available for retry', async () => {
@@ -163,6 +431,27 @@ describe('connected device settings', () => {
       'Connection unavailable',
     );
     expect(container.querySelector('button')?.disabled).toBe(false);
+  });
+
+  it('shows stopping status and disables disconnect while local tasks are stopping', async () => {
+    await act(async () => root.render(<ConnectedDevicesSetting />));
+    await act(async () =>
+      onState?.({
+        enabled: true,
+        status: 'stopping',
+        error: null,
+        agentletId: 'local',
+      }),
+    );
+    expect(container.querySelector('[role="status"]')?.textContent).toBe(
+      'settings.localAgentStopping',
+    );
+    const menu = await openDeviceMenu();
+    const disconnect = [
+      ...(menu?.querySelectorAll<HTMLButtonElement>('button') ?? []),
+    ].find((button) => button.textContent === 'settings.localAgentDisconnect');
+    expect(disconnect?.disabled).toBe(true);
+    expect(api.setEnabled).not.toHaveBeenCalled();
   });
 
   it('merges desktop controls into the exact device row, not a matching hostname', async () => {
@@ -189,24 +478,22 @@ describe('connected device settings', () => {
     const rows = container.querySelectorAll('.setting-row');
     expect(rows).toHaveLength(2);
     expect(container.textContent).not.toContain('settings.localAgentTitle');
-    expect(rows[0].textContent).toContain('this-device');
+    expect(
+      rows[0].closest('[data-device-id]')?.getAttribute('data-device-id'),
+    ).toBe('this-device');
     expect(rows[0].textContent).toContain('settings.localAgentThisDevice');
     expect(rows[1].textContent).not.toContain('settings.localAgentThisDevice');
     expect(connectedDevices[0].agentletId).toBe('another-device');
-    expect(rows[0].querySelector('p + p')?.textContent).toBe(
-      'settings.deviceProfileCount · v1.0.0 · this-device',
-    );
+    expect(rows[0].querySelector('p + p')).toBeNull();
     expect(
       rows[0].querySelector('.setting-row-control')?.textContent,
     ).not.toContain('1.0.0');
     expect(rows[0].querySelector('[role="status"]')).toBeNull();
-    expect(rows[0].querySelector('button')?.textContent).toBe(
+    expect(container.textContent).not.toContain(
       'settings.localAgentDisconnect',
     );
-    expect(rows[1].querySelector('button')?.getAttribute('aria-label')).toBe(
-      'settings.detectInstalledAgentsOnDevice',
-    );
-    await act(async () => rows[0].querySelector('button')?.click());
+    expect(rows[1].querySelector('button[aria-expanded]')).not.toBeNull();
+    await disconnectLocal(rows[0]);
     expect(api.setEnabled).toHaveBeenCalledExactlyOnceWith(false);
   });
 
@@ -224,7 +511,7 @@ describe('connected device settings', () => {
     expect(container.querySelector('[role="status"]')?.textContent).toBe(
       'settings.localAgentReconnecting',
     );
-    expect(container.querySelector('button')?.textContent).toBe(
+    expect((await openDeviceMenu())?.textContent).toContain(
       'settings.localAgentDisconnect',
     );
   });
@@ -243,10 +530,171 @@ describe('connected device settings', () => {
     await act(async () => root.render(<ConnectedDevicesSetting />));
     expect(container.querySelectorAll('.setting-row')).toHaveLength(1);
     expect(container.textContent).toContain('Server: linux x64');
-    expect(container.querySelector('button')?.getAttribute('aria-label')).toBe(
-      'settings.detectInstalledAgentsOnDevice',
-    );
+    expect(
+      container.querySelector('button')?.getAttribute('aria-expanded'),
+    ).toBe('true');
     expect(api.setEnabled).not.toHaveBeenCalled();
+  });
+
+  it('keeps local Profiles and collapse state in the same card across disconnect and reconnect', async () => {
+    const device = {
+      agentletId: 'this-device',
+      displayName: 'Saved Mac name',
+      version: '1.0',
+      connectedAt: '2026-01-01T00:00:00.000Z',
+      profileCount: 1,
+    };
+    const profiles: AgentProfileView[] = [
+      {
+        id: 'local-profile',
+        alias: 'Local reviewer',
+        agentletId: device.agentletId,
+        workingDirPath: '/work',
+        launch: { kind: 'acp-command', command: 'review' },
+      },
+    ];
+    connectedDevices = [device];
+    knownDevices = [device];
+    await act(async () =>
+      root.render(
+        <ConnectedDevicesSetting
+          profiles={profiles}
+          renderProfile={(profile) => (
+            <span key={profile.id}>{profile.alias}</span>
+          )}
+          onAdd={vi.fn()}
+        />,
+      ),
+    );
+    await act(async () =>
+      onState?.({
+        enabled: true,
+        status: 'connected',
+        error: null,
+        agentletId: device.agentletId,
+      }),
+    );
+    const card = container.querySelector('[data-device-id="this-device"]');
+    const fold = card?.querySelector<HTMLButtonElement>(
+      'button[aria-expanded]',
+    );
+    await act(async () => fold?.click());
+    connectedDevices = [];
+    await act(async () =>
+      onState?.({
+        enabled: false,
+        status: 'disabled',
+        error: null,
+        device: { ...device, displayName: 'Runtime name' },
+      }),
+    );
+    expect(container.querySelector('[data-device-id="this-device"]')).toBe(
+      card,
+    );
+    expect(card?.textContent).toContain('Saved Mac name');
+    expect(card?.textContent).toContain('Local reviewer');
+    expect(card?.querySelector('[role="status"]')).toBeNull();
+    expect(fold?.getAttribute('aria-expanded')).toBe('false');
+    expect(card?.querySelector('[data-editor-trigger]')).toBeNull();
+    const connect = [...(card?.querySelectorAll('button') ?? [])].find(
+      (button) => button.textContent === 'settings.localAgentConnect',
+    );
+    expect(connect).toBeTruthy();
+    await act(async () => connect?.click());
+    expect(api.setEnabled).toHaveBeenLastCalledWith(true);
+    connectedDevices = [device];
+    await act(async () =>
+      onState?.({
+        enabled: true,
+        status: 'connected',
+        error: null,
+        agentletId: device.agentletId,
+      }),
+    );
+    expect(fold?.getAttribute('aria-expanded')).toBe('false');
+    expect(
+      card?.querySelector('[data-editor-trigger="create:this-device"]'),
+    ).not.toBeNull();
+    expect(card?.textContent).not.toContain('settings.localAgentConnect');
+  });
+
+  it('shows known offline devices and unresolved targets without remote connection actions', async () => {
+    vi.mocked(getElectronBridge).mockReturnValue(null);
+    knownDevices = [
+      {
+        agentletId: 'office',
+        hostname: 'desktop',
+        displayName: 'Office PC',
+        version: '2.0',
+      },
+      { agentletId: 'empty', displayName: 'Empty device' },
+    ];
+    const profiles: AgentProfileView[] = [
+      {
+        id: 'a',
+        alias: 'Reviewer',
+        agentletId: 'desktop',
+        workingDirPath: '/work',
+        launch: { kind: 'acp-command', command: 'review' },
+      },
+      {
+        id: 'b',
+        alias: 'Unknown',
+        agentletId: 'lost',
+        workingDirPath: '/work',
+        launch: { kind: 'acp-command', command: 'review' },
+      },
+    ];
+    await act(async () =>
+      root.render(
+        <ConnectedDevicesSetting
+          profiles={profiles}
+          renderProfile={(profile) => (
+            <span key={profile.id}>{profile.alias}</span>
+          )}
+          onAdd={vi.fn()}
+        />,
+      ),
+    );
+    const office = container.querySelector('[data-device-id="office"]');
+    expect(office?.textContent).toContain('Reviewer');
+    expect(office?.querySelector('[role="status"]')?.textContent).toBe(
+      'settings.localAgentDisabled',
+    );
+    expect(
+      container.querySelector('[data-device-id="lost"]')?.textContent,
+    ).toContain('Unknown');
+    expect(container.querySelector('[data-device-id="empty"]')).not.toBeNull();
+    expect(container.querySelector('[data-editor-trigger]')).toBeNull();
+    expect(container.textContent).not.toContain('settings.localAgentConnect');
+    const menu = await openDeviceMenu();
+    expect(menu?.textContent).not.toContain('settings.renameDevice');
+    expect(menu?.textContent).not.toContain('settings.localAgentDisconnect');
+    expect(menu?.textContent).toContain('office');
+    expect(api.getState).not.toHaveBeenCalled();
+  });
+
+  it('retains the connected state when native disconnect confirmation is cancelled', async () => {
+    api.setEnabled.mockResolvedValueOnce({
+      enabled: true,
+      status: 'connected',
+      error: null,
+      agentletId: 'this-device',
+    });
+    await act(async () => root.render(<ConnectedDevicesSetting />));
+    await act(async () =>
+      onState?.({
+        enabled: true,
+        status: 'connected',
+        error: null,
+        agentletId: 'this-device',
+      }),
+    );
+    await disconnectLocal();
+    expect(container.textContent).not.toContain('settings.localAgentConnect');
+    expect((await openDeviceMenu())?.textContent).toContain(
+      'settings.localAgentDisconnect',
+    );
   });
 
   it('keeps the connect-this-device entry first before and after connecting', async () => {
@@ -263,8 +711,8 @@ describe('connected device settings', () => {
     const rows = container.querySelectorAll('.setting-row');
     expect(rows).toHaveLength(2);
     expect(rows[1].textContent).toContain('Server: linux x64');
-    expect(rows[1].querySelector('button')?.getAttribute('aria-label')).toBe(
-      'settings.detectInstalledAgentsOnDevice',
+    expect(rows[1].querySelector('button')?.getAttribute('aria-expanded')).toBe(
+      'true',
     );
     expect(rows[0].textContent).toContain('settings.localAgentTitle');
     expect(rows[0].querySelector('button')?.textContent).toBe(
@@ -295,7 +743,7 @@ describe('connected device settings', () => {
     expect(connectedRows[0].textContent).toContain(
       'settings.localAgentThisDevice',
     );
-    expect(connectedRows[0].querySelector('button')?.textContent).toBe(
+    expect((await openDeviceMenu(connectedRows[0]))?.textContent).toContain(
       'settings.localAgentDisconnect',
     );
     expect(connectedRows[1].textContent).toContain('Server: linux x64');

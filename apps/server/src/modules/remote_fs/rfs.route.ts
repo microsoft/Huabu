@@ -735,6 +735,7 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
   // ── POST /:canvasId/query ──
   app.post<{ Params: { canvasId: string } }>(
     '/:canvasId/query',
+    { config: { spaceAccess: 'read' } },
     async (request, reply) => {
       const body = request.body;
       const buffer = Buffer.isBuffer(body) ? body : Buffer.alloc(0);

@@ -109,35 +109,42 @@ const interactiveViewRoutes: FastifyPluginAsync = async (app) => {
     Params: { canvasId: string; nodeId: string; actionId: string };
     Body: InteractiveViewActionRequest;
     Reply: ApiResult<InteractiveViewActionResponse>;
-  }>('/:canvasId/:nodeId/actions/:actionId', async (request, reply) => {
-    const params = interactiveViewActionParamsSchema.safeParse(request.params);
-    const body = interactiveViewActionRequestSchema.safeParse(
-      request.body ?? {},
-    );
-    if (!params.success || !body.success) {
-      return reply.code(400).send({
-        message: 'Invalid Interactive View action request',
-        code: 'validation_failed',
-      });
-    }
-    try {
-      await interactiveViewService.submitAgentEvent(
-        params.data.canvasId,
-        params.data.nodeId,
-        params.data.actionId,
-        body.data.input,
-        request.log,
+  }>(
+    '/:canvasId/:nodeId/actions/:actionId',
+    // The action is delivered to the view's agent as a new turn.
+    { config: { invokesAgent: true } },
+    async (request, reply) => {
+      const params = interactiveViewActionParamsSchema.safeParse(
+        request.params,
       );
-      return reply.send({ accepted: true });
-    } catch (error) {
-      if (error instanceof InteractiveViewServiceError) {
-        return reply
-          .code(statusFor(error))
-          .send({ message: error.message, code: error.code });
+      const body = interactiveViewActionRequestSchema.safeParse(
+        request.body ?? {},
+      );
+      if (!params.success || !body.success) {
+        return reply.code(400).send({
+          message: 'Invalid Interactive View action request',
+          code: 'validation_failed',
+        });
       }
-      throw error;
-    }
-  });
+      try {
+        await interactiveViewService.submitAgentEvent(
+          params.data.canvasId,
+          params.data.nodeId,
+          params.data.actionId,
+          body.data.input,
+          request.log,
+        );
+        return reply.send({ accepted: true });
+      } catch (error) {
+        if (error instanceof InteractiveViewServiceError) {
+          return reply
+            .code(statusFor(error))
+            .send({ message: error.message, code: error.code });
+        }
+        throw error;
+      }
+    },
+  );
 
   app.get<{
     Params: { canvasId: string; nodeId: string };

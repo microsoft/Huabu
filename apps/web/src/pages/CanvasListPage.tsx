@@ -1,14 +1,28 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { Download, Plus, Search, Trash2, Upload } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import {
+  Download,
+  FolderInput,
+  FolderUp,
+  MoreHorizontal,
+  Plus,
+  Search,
+  Trash2,
+  Upload,
+} from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 
+import { WorkspaceLoadingScreen } from './WorkspaceLoadingScreen';
 import { ApiError } from '../api/_client';
 import { listCanvases, exportCanvas } from '../api/canvas';
 import { Button } from '../components/Common/Button';
+import {
+  DropdownMenu,
+  DropdownMenuItem,
+} from '../components/Common/DropdownMenu';
 import { EmptyState } from '../components/Common/EmptyState';
 import { Loading } from '../components/Common/Loading';
 import { TabGroup } from '../components/Common/TabGroup';
@@ -17,14 +31,21 @@ import { toast } from '../components/Common/Toast';
 import { Tooltip } from '../components/Common/Tooltip';
 import { Header } from '../components/Panels/Header/Header';
 import { SpaceDeletionDialog } from '../components/Space/SpaceDeletionDialog';
+import { SpaceOrganizationPopover } from '../components/Space/SpaceOrganizationPopover';
+import { useSpaceParentMove } from '../components/Space/useSpaceParentMove';
 import { APP_NAME } from '../config/app';
 import { useCanvasActions } from '../hooks/useCanvasActions';
-import { isElectron } from '../hooks/useElectron';
+import {
+  getElectronBridge,
+  isElectron,
+  requireDesktopTabSuccess,
+} from '../hooks/useElectron';
 import { i18n as translations } from '../i18n';
 import { useWorkspaceLabel, useWorkspaceStore } from '../store/workspaceStore';
 import { spaceAncestorIds } from '../utils/spaceHierarchy';
 
 import type { CanvasSummary } from '@huabu/shared';
+import type { DesktopTabsSnapshot } from '@huabu/shared/desktop-tabs';
 
 /**
  * Home page that shows all canvases in the workspace.
@@ -32,8 +53,22 @@ import type { CanvasSummary } from '@huabu/shared';
  */
 export default function CanvasListPage() {
   const { t, i18n } = useTranslation();
+  const { move, busy: moving, canMove } = useSpaceParentMove();
   const [canvases, setCanvases] = useState<CanvasSummary[]>([]);
+  const [listedWorkspaceId, setListedWorkspaceId] = useState<string | null>(
+    null,
+  );
+  const [desktopWorkspaceId, setDesktopWorkspaceId] = useState<string | null>(
+    null,
+  );
   const [isLoading, setIsLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [menuSpaceId, setMenuSpaceId] = useState<string | null>(null);
+  const menuRef = useRef<HTMLButtonElement>(null);
+  const [movingSpace, setMovingSpace] = useState<{
+    canvasId: string;
+    reference: HTMLElement | null;
+  } | null>(null);
   const [pendingDelete, setPendingDelete] = useState<{
     canvasId: string;
     title: string | null;
@@ -41,7 +76,6 @@ export default function CanvasListPage() {
   const [showAll, setShowAll] = useState(
     () => localStorage.getItem('huabu.spaces.showAll') === 'true',
   );
-  const [search, setSearch] = useState('');
   const byId = Object.fromEntries(
     canvases.map((canvas) => [canvas.canvasId, canvas]),
   );
@@ -51,6 +85,7 @@ export default function CanvasListPage() {
       .map((id) => byId[id]?.title || t('canvasList.untitled'))
       .join(' / ');
   const [exportingId, setExportingId] = useState<string | null>(null);
+  const listRequestRef = useRef({ version: 0 });
   const {
     create: handleCreate,
     isCreating,
@@ -66,37 +101,147 @@ export default function CanvasListPage() {
   );
   const setCanvasCount = useWorkspaceStore((s) => s.setCanvasCount);
   const setSpaceTitle = useWorkspaceStore((s) => s.setSpaceTitle);
-  const isElectronApp = isElectron();
+  const workspaceSyncing = useWorkspaceStore((s) => s.isSyncing);
+  const workspaceId = useWorkspaceStore((s) => s.workspaceId);
+  useEffect(() => {
+    setMenuSpaceId(null);
+    setMovingSpace(null);
+  }, [workspaceId]);
+  const isElectronApp = isElectron() && !getElectronBridge()?.tabs;
+  const isDesktopHome = getElectronBridge()?.tabs?.context.role === 'home';
 
-  const fetchCanvases = useCallback(async () => {
-    try {
-      setIsLoading(true);
-      const response = await listCanvases();
-      setCanvases(response.canvases);
-      setCanvasCount(response.canvases.length);
-    } catch (error) {
-      console.error('Failed to list canvases:', error);
-      toast(
-        error instanceof Error
-          ? error.message
-          : translations.t('spaceHierarchy.failed'),
-        { tone: 'danger' },
-      );
-    } finally {
-      setIsLoading(false);
-    }
-  }, [setCanvasCount]);
+  const fetchCanvases = useCallback(
+    async (showLoading = true) => {
+      const workspace = useWorkspaceStore.getState();
+      if (workspace.isSyncing) return;
+      const requestId = ++listRequestRef.current.version;
+      const isCurrent = () => {
+        const current = useWorkspaceStore.getState();
+        return (
+          requestId === listRequestRef.current.version &&
+          !current.isSyncing &&
+          current.workspaceId === workspace.workspaceId &&
+          current.workspacePath === workspace.workspacePath
+        );
+      };
+      try {
+        if (showLoading) setIsLoading(true);
+        const response = await listCanvases();
+        if (!isCurrent()) return;
+        setCanvases(response.canvases);
+        setListedWorkspaceId(workspace.workspaceId);
+        setCanvasCount(response.canvases.length);
+      } catch (error) {
+        if (isCurrent()) {
+          console.error('Failed to list canvases:', error);
+          toast(
+            error instanceof Error
+              ? error.message
+              : translations.t('spaceHierarchy.failed'),
+            { tone: 'danger' },
+          );
+        }
+      } finally {
+        if (isCurrent()) setIsLoading(false);
+      }
+    },
+    [setCanvasCount],
+  );
 
   useEffect(() => {
+    const requests = listRequestRef.current;
     void fetchCanvases();
+    return () => {
+      requests.version++;
+    };
   }, [fetchCanvases]);
 
   // Re-fetch when workspace changes
   useEffect(() => {
     const handler = () => void fetchCanvases();
+    const refresh = () => void fetchCanvases(false);
     window.addEventListener('workspace-changed', handler);
-    return () => window.removeEventListener('workspace-changed', handler);
+    window.addEventListener('canvas-list-changed', refresh);
+    return () => {
+      window.removeEventListener('workspace-changed', handler);
+      window.removeEventListener('canvas-list-changed', refresh);
+    };
   }, [fetchCanvases]);
+
+  useEffect(() => {
+    const tabs = getElectronBridge()?.tabs;
+    if (!tabs || tabs.context.role !== 'home') return;
+    let active = true;
+    let live = true;
+    let received = false;
+    let previousId: string | undefined;
+    const update = (state: DesktopTabsSnapshot) => {
+      setDesktopWorkspaceId(state.busy ? null : state.workspaceId);
+      if (state.activeId !== previousId) setSearch('');
+      previousId = state.activeId;
+      const nextActive =
+        (state.activeId === 'home' || state.activeId === 'new-tab') &&
+        !state.busy;
+      if (nextActive && !active) void fetchCanvases(false);
+      active = nextActive;
+    };
+    const unsubscribe = tabs.onState((state) => {
+      received = true;
+      update(state);
+    });
+    void tabs
+      .getState()
+      .then((state) => {
+        if (live && !received) update(state);
+      })
+      .catch((error: unknown) => {
+        if (!live) return;
+        console.error('[desktop-tabs] Could not read Home state:', error);
+        toast(error instanceof Error ? error.message : String(error), {
+          tone: 'danger',
+        });
+      });
+    return () => {
+      live = false;
+      unsubscribe();
+    };
+  }, [fetchCanvases]);
+
+  useEffect(() => {
+    const tabs = getElectronBridge()?.tabs;
+    if (
+      !tabs ||
+      tabs.context.role !== 'home' ||
+      workspaceSyncing ||
+      !listedWorkspaceId ||
+      listedWorkspaceId !== desktopWorkspaceId ||
+      listedWorkspaceId !== useWorkspaceStore.getState().workspaceId
+    )
+      return;
+    let live = true;
+    void tabs
+      .command({
+        type: 'sync-space-titles',
+        workspaceId: listedWorkspaceId,
+        titles: Object.fromEntries(
+          canvases.map((canvas) => [canvas.canvasId, canvas.title ?? '']),
+        ),
+      })
+      .then(requireDesktopTabSuccess)
+      .catch((error: unknown) => {
+        if (!live) return;
+        console.error(
+          '[desktop-tabs] Could not synchronize Space titles:',
+          error,
+        );
+        toast(error instanceof Error ? error.message : String(error), {
+          tone: 'danger',
+        });
+      });
+    return () => {
+      live = false;
+    };
+  }, [canvases, listedWorkspaceId, desktopWorkspaceId, workspaceSyncing]);
 
   const handleExport = async (canvasId: string) => {
     setExportingId(canvasId);
@@ -120,8 +265,28 @@ export default function CanvasListPage() {
     }
   };
 
-  const requestDelete = (canvasId: string, title: string | null) => {
-    setPendingDelete({ canvasId, title });
+  const reportDeleteError = (error: unknown) => {
+    console.error('Failed to delete canvas:', error);
+    toast(error instanceof Error ? error.message : String(error), {
+      tone: 'danger',
+    });
+  };
+
+  const canDeleteSpace = async (canvasId: string): Promise<boolean> => {
+    const tabs = getElectronBridge()?.tabs;
+    if (!tabs) return true;
+    const state = await tabs.getState();
+    if (!state.tabs.some((tab) => tab.canvasId === canvasId)) return true;
+    toast(t('desktopTabs.closeBeforeDeleting'), { tone: 'warning' });
+    return false;
+  };
+
+  const requestDelete = async (canvasId: string, title: string | null) => {
+    try {
+      if (await canDeleteSpace(canvasId)) setPendingDelete({ canvasId, title });
+    } catch (error) {
+      reportDeleteError(error);
+    }
   };
 
   const formatDate = (timestamp: number) => {
@@ -133,9 +298,70 @@ export default function CanvasListPage() {
       minute: '2-digit',
     });
   };
+  const visibleCanvases = canvases.filter((canvas) =>
+    query
+      ? (canvas.title || t('canvasList.untitled'))
+          .toLocaleLowerCase()
+          .includes(query)
+      : showAll || !canvas.parentSpaceId,
+  );
+
+  const workspaceName = (
+    <>
+      <span>
+        {workspacePath
+          ? t('workspace.pathPrefix')
+          : t('workspace.workspacePrefix')}
+        {workspaceLabel}
+      </span>
+    </>
+  );
+  const workspaceSwitcher =
+    !isDesktopHome && workspaceLabel ? (
+      <Tooltip
+        content={
+          <div className="text-center">
+            <div>
+              {workspacePath
+                ? t('workspace.path', { path: workspacePath })
+                : t('workspace.workspace', { workspace: workspaceLabel })}
+            </div>
+            <div>{t('canvasList.canvasCount', { count: canvases.length })}</div>
+            {canChangeWorkspace && (
+              <div className="text-fg-subtle mt-1">
+                {t('workspace.clickToSwitch')}
+              </div>
+            )}
+          </div>
+        }
+      >
+        {canChangeWorkspace ? (
+          <Link
+            to="/setup"
+            className="text-fg-subtle hover:text-fg-default mt-0.5 ml-1 truncate text-xs transition-colors"
+          >
+            {workspaceName}
+          </Link>
+        ) : (
+          <span className="text-fg-subtle mt-0.5 ml-1 cursor-default truncate text-xs">
+            {workspaceName}
+          </span>
+        )}
+      </Tooltip>
+    ) : null;
+
+  if (isDesktopHome && workspaceSyncing) return <WorkspaceLoadingScreen />;
 
   return (
     <div className="bg-bg-default flex h-full flex-col">
+      {movingSpace && (
+        <SpaceOrganizationPopover
+          key={`${workspaceId}:${movingSpace.canvasId}`}
+          canvasId={movingSpace.canvasId}
+          reference={movingSpace.reference}
+          onClose={() => setMovingSpace(null)}
+        />
+      )}
       {pendingDelete && (
         <SpaceDeletionDialog
           canvasId={pendingDelete.canvasId}
@@ -143,9 +369,17 @@ export default function CanvasListPage() {
             setPendingDelete(null);
             void fetchCanvases();
           }}
-          onDeleted={(_ids, failure) => {
+          onDeleted={(ids, failure) => {
+            listRequestRef.current.version++;
+            setCanvases((current) => {
+              const remaining = current.filter(
+                (canvas) => !ids.includes(canvas.canvasId),
+              );
+              setCanvasCount(remaining.length);
+              return remaining;
+            });
             if (!failure) setPendingDelete(null);
-            void fetchCanvases();
+            void fetchCanvases(false);
           }}
         />
       )}
@@ -159,53 +393,12 @@ export default function CanvasListPage() {
         onChange={(e) => void handleFileChange(e)}
       />
 
-      {/* Header — hidden in Electron, where WindowChrome already shows the
-          workspace folder name + switcher tooltip in the title bar. */}
-      {!isElectronApp && (
+      {!isElectronApp && !isDesktopHome && (
         <Header>
           <h1 className="text-fg-default -ml-1 text-lg font-semibold">
             {APP_NAME}
           </h1>
-          {workspaceLabel && (
-            <Tooltip
-              content={
-                <div className="text-center">
-                  <div>
-                    {workspacePath
-                      ? t('workspace.path', { path: workspacePath })
-                      : t('workspace.workspace', { workspace: workspaceLabel })}
-                  </div>
-                  <div>
-                    {t('canvasList.canvasCount', { count: canvases.length })}
-                  </div>
-                  {canChangeWorkspace && (
-                    <div className="text-fg-subtle mt-1">
-                      {t('workspace.clickToSwitch')}
-                    </div>
-                  )}
-                </div>
-              }
-            >
-              {canChangeWorkspace ? (
-                <Link
-                  to="/setup"
-                  className="text-fg-subtle hover:text-fg-default mt-0.5 ml-1 truncate text-xs transition-colors"
-                >
-                  {workspacePath
-                    ? t('workspace.pathPrefix')
-                    : t('workspace.workspacePrefix')}
-                  {workspaceLabel}
-                </Link>
-              ) : (
-                <span className="text-fg-subtle mt-0.5 ml-1 cursor-default truncate text-xs">
-                  {workspacePath
-                    ? t('workspace.pathPrefix')
-                    : t('workspace.workspacePrefix')}
-                  {workspaceLabel}
-                </span>
-              )}
-            </Tooltip>
-          )}
+          {workspaceSwitcher}
         </Header>
       )}
 
@@ -214,9 +407,15 @@ export default function CanvasListPage() {
         <main className="mx-auto w-full max-w-7xl px-6 py-8 sm:px-8">
           <div className="mb-8 flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <h2 className="text-fg-default text-3xl font-semibold tracking-tight">
-                {t('canvasList.title')}
-              </h2>
+              {isDesktopHome ? (
+                <h1 className="text-fg-default text-3xl font-semibold tracking-tight">
+                  {t('canvasList.title')}
+                </h1>
+              ) : (
+                <h2 className="text-fg-default text-3xl font-semibold tracking-tight">
+                  {t('canvasList.title')}
+                </h2>
+              )}
               <p className="text-fg-muted mt-1 text-sm">
                 {t('canvasList.subtitle')}
               </p>
@@ -292,6 +491,7 @@ export default function CanvasListPage() {
               }}
             />
           </div>
+
           {isLoading ? (
             <Loading
               variant="spinner"
@@ -317,94 +517,126 @@ export default function CanvasListPage() {
                 </Button>
               }
             />
+          ) : visibleCanvases.length === 0 ? (
+            <EmptyState message={t('desktopTabs.noMatchingSpaces')} />
           ) : (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {canvases
-                .filter((canvas) =>
-                  query
-                    ? (canvas.title || t('canvasList.untitled'))
-                        .toLocaleLowerCase()
-                        .includes(query)
-                    : showAll || !canvas.parentSpaceId,
-                )
-                .map((canvas) => (
-                  <div
-                    key={canvas.canvasId}
-                    className="group border-edge-default bg-surface hover:border-edge-default relative flex flex-col rounded-xl border p-5 text-left transition-all hover:shadow-md"
+              {visibleCanvases.map((canvas) => (
+                <div
+                  key={canvas.canvasId}
+                  className="group border-edge-default bg-surface hover:border-edge-default relative flex flex-col rounded-xl border p-5 text-left transition-all hover:shadow-md"
+                >
+                  <Link
+                    to={`/canvas/${canvas.canvasId}`}
+                    onClick={() =>
+                      setSpaceTitle(
+                        canvas.canvasId,
+                        canvas.title || t('canvasList.untitled'),
+                      )
+                    }
+                    className="flex flex-1 flex-col text-left"
                   >
-                    <Link
-                      to={`/canvas/${canvas.canvasId}`}
-                      onClick={() =>
-                        setSpaceTitle(
-                          canvas.canvasId,
-                          canvas.title || t('canvasList.untitled'),
-                        )
-                      }
-                      className="flex flex-1 flex-col text-left"
-                    >
-                      <h3 className="text-fg-default group-hover:text-fg-default truncate text-sm font-semibold">
-                        {canvas.title || t('canvasList.untitled')}
-                      </h3>
-                      {canvas.parentSpaceId && (
-                        <p
-                          title={pathLabel(canvas.canvasId)}
-                          className="text-fg-subtle truncate text-xs"
-                        >
-                          {pathLabel(canvas.parentSpaceId)} /
-                        </p>
-                      )}
-                      <p className="text-fg-subtle mt-1 text-xs">
-                        {t('canvasList.nodeCount', {
-                          count: canvas.nodeCount,
-                        })}
+                    <h3 className="text-fg-default group-hover:text-fg-default truncate pr-7 text-sm font-semibold">
+                      {canvas.title || t('canvasList.untitled')}
+                    </h3>
+                    {canvas.parentSpaceId && (
+                      <p
+                        title={pathLabel(canvas.canvasId)}
+                        className="text-fg-subtle truncate text-xs"
+                      >
+                        {pathLabel(canvas.parentSpaceId)} /
                       </p>
-                      <div className="text-fg-subtle mt-auto pt-4 text-xs">
-                        {t('canvasList.updated', {
-                          date: formatDate(canvas.updatedAt),
+                    )}
+                    <p className="text-fg-subtle mt-1 text-xs">
+                      {t('canvasList.nodeCount', {
+                        count: canvas.nodeCount,
+                      })}
+                    </p>
+                    <div className="text-fg-subtle mt-auto pt-4 text-xs">
+                      {t('canvasList.updated', {
+                        date: formatDate(canvas.updatedAt),
+                      })}
+                    </div>
+                  </Link>
+                  <DropdownMenu
+                    open={menuSpaceId === canvas.canvasId}
+                    onOpenChange={(open) => {
+                      setMenuSpaceId(open ? canvas.canvasId : null);
+                      if (open && !canMove(canvas.canvasId))
+                        void useWorkspaceStore.getState().refreshSpaceTitles();
+                    }}
+                    triggerWrapperClassName="absolute top-3 right-3"
+                    align="bottom-right"
+                    trigger={
+                      <Button
+                        ref={
+                          menuSpaceId === canvas.canvasId ? menuRef : undefined
+                        }
+                        variant="ghost"
+                        iconOnly
+                        aria-label={t('canvasList.spaceActions', {
+                          name: canvas.title || t('canvasList.untitled'),
                         })}
-                      </div>
-                    </Link>
-                    {/* Export button */}
-                    <Button
-                      variant="ghost"
-                      iconOnly
-                      onClick={(e) => {
-                        e.stopPropagation();
+                      >
+                        <MoreHorizontal className="text-fg-subtle" />
+                      </Button>
+                    }
+                  >
+                    <DropdownMenuItem
+                      icon={<FolderInput />}
+                      disabled={moving || !canMove(canvas.canvasId)}
+                      onClick={() => {
+                        setMenuSpaceId(null);
+                        setMovingSpace({
+                          canvasId: canvas.canvasId,
+                          reference: menuRef.current,
+                        });
+                      }}
+                    >
+                      {t('spaceHierarchy.move')}
+                    </DropdownMenuItem>
+                    {canvas.parentSpaceId && (
+                      <DropdownMenuItem
+                        icon={<FolderUp />}
+                        disabled={moving || !canMove(canvas.canvasId)}
+                        onClick={() => {
+                          setMenuSpaceId(null);
+                          void move(
+                            canvas.canvasId,
+                            null,
+                            canvas.parentSpaceId ?? null,
+                          );
+                        }}
+                      >
+                        {t('spaceHierarchy.moveToTopLevel')}
+                      </DropdownMenuItem>
+                    )}
+                    <DropdownMenuItem
+                      icon={<Download />}
+                      disabled={exportingId === canvas.canvasId}
+                      onClick={() => {
+                        setMenuSpaceId(null);
                         void handleExport(canvas.canvasId);
                       }}
-                      tooltipWrapperClassName="absolute top-3 right-10 inline-flex opacity-0 transition-opacity group-hover:opacity-100"
-                      title={
+                    >
+                      {t(
                         exportingId === canvas.canvasId
-                          ? t('canvasList.exporting')
-                          : t('canvasList.exportCanvas')
-                      }
-                      disabled={exportingId === canvas.canvasId}
-                    >
-                      {exportingId === canvas.canvasId ? (
-                        <Loading
-                          layout="inline"
-                          size="sm"
-                          className="text-fg-subtle"
-                        />
-                      ) : (
-                        <Download className="text-fg-subtle" />
+                          ? 'canvasList.exporting'
+                          : 'canvasList.exportCanvas',
                       )}
-                    </Button>
-                    {/* Delete button */}
-                    <Button
-                      variant="ghost"
-                      iconOnly
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        requestDelete(canvas.canvasId, canvas.title);
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      icon={<Trash2 />}
+                      onClick={() => {
+                        setMenuSpaceId(null);
+                        void requestDelete(canvas.canvasId, canvas.title);
                       }}
-                      tooltipWrapperClassName="absolute top-3 right-3 inline-flex opacity-0 transition-opacity group-hover:opacity-100"
-                      title={t('canvasList.deleteCanvas')}
                     >
-                      <Trash2 className="text-fg-subtle" />
-                    </Button>
-                  </div>
-                ))}
+                      {t('canvasList.deleteCanvas')}
+                    </DropdownMenuItem>
+                  </DropdownMenu>
+                </div>
+              ))}
             </div>
           )}
         </main>

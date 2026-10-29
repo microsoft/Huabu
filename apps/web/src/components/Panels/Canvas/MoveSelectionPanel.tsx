@@ -47,7 +47,7 @@ export function MoveSelectionPanel({
           {t('moveSelection.description', { count })}
           {includesFrames && ` · ${t('moveSelection.frameNotice')}`}
           {boundaryEdgeCount > 0 && (
-            <p className="text-warning mt-1">
+            <p className="text-warning-fg mt-1">
               {t('moveSelection.boundaryNotice')}
             </p>
           )}

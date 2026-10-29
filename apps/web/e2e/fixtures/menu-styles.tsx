@@ -76,7 +76,7 @@ function MenuStylesFixture() {
         <DropdownMenuItem disabled>Disabled action</DropdownMenuItem>
         <DropdownMenuItem
           icon={<Trash2 />}
-          className="text-danger"
+          className="text-danger-fg"
           onClick={() => setResult('delete')}
         >
           Delete

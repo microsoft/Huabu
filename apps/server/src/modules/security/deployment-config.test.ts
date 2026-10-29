@@ -113,4 +113,42 @@ describe('resolveDeploymentConfig', () => {
       }),
     ).toMatchObject({ allowedHostsConfigured: true });
   });
+
+  it('accepts a network deployment protected by Bubble instead of Basic Auth', () => {
+    const bubble = {
+      HUABU_BIND_HOST: '0.0.0.0',
+      HUABU_IDENTITY_PROVIDER: 'bubble',
+      HUABU_STRUCTURED_BACKEND: 'postgres',
+      HUABU_POSTGRES_URL: 'postgres://huabu@db.example/huabu',
+    };
+    const allowed = { ...bubble, HUABU_PUBLIC_ORIGIN: 'https://huabu.example' };
+    expect(resolveDeploymentConfig(allowed)).toMatchObject({
+      basicAuthConfigured: false,
+      bindScope: 'network',
+    });
+    expect(() => resolveDeploymentConfig(bubble)).toThrow(
+      /HUABU_PUBLIC_ORIGIN/,
+    );
+    // Bubble's `default` driver trusts the bearer text as the principal id.
+    const unverified = { HUABU_BUBBLE_AUTH: '[{"driver":"default"}]' };
+    expect(() =>
+      resolveDeploymentConfig({ ...allowed, ...unverified }),
+    ).toThrow(/default/);
+    expect(
+      resolveDeploymentConfig({
+        ...bubble,
+        ...unverified,
+        HUABU_BIND_HOST: '127.0.0.1',
+      }),
+    ).toMatchObject({ bindScope: 'loopback' });
+    // Behind a TLS-terminating proxy a loopback listener is still public.
+    expect(() =>
+      resolveDeploymentConfig({
+        ...bubble,
+        ...unverified,
+        HUABU_BIND_HOST: '127.0.0.1',
+        HUABU_PUBLIC_ORIGIN: 'https://huabu.example.com',
+      }),
+    ).toThrow(/default/);
+  });
 });

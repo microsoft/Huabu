@@ -1,22 +1,21 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { act } from 'react';
+import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ApiError } from '@/api/_client';
-
 import { ConnectedDeviceRow } from './ConnectedDeviceRow';
 
-import type { AcpAgentletDiscoveryResponse } from '@huabu/shared';
-
-const api = vi.hoisted(() => ({ discover: vi.fn(), refresh: vi.fn() }));
-vi.mock('@/api/acp', () => ({ discoverAcpAgentlet: api.discover }));
+const api = vi.hoisted(() => ({
+  rename: vi.fn(),
+  toast: vi.fn(),
+}));
+vi.mock('@/components/Common/Toast', () => ({ toast: api.toast }));
 vi.mock('@/store/acpProfilesStore', () => ({
   useAcpProfilesStore: (
-    selector: (state: { refresh: typeof api.refresh }) => unknown,
-  ) => selector({ refresh: api.refresh }),
+    selector: (state: { renameDevice: typeof api.rename }) => unknown,
+  ) => selector({ renameDevice: api.rename }),
 }));
 vi.mock('react-i18next', async () => {
   const { createInstance } = await import('i18next');
@@ -27,60 +26,17 @@ vi.mock('react-i18next', async () => {
 });
 
 const device = {
-  agentletId: 'device-a',
+  agentletId: 'c717d73c-7188-44ca-a6bd-67455f4cd3e8',
   displayName: 'Machine: linux x64',
   version: '1.0',
   profileCount: 1,
   connectedAt: '2026-01-01T00:00:00.000Z',
 };
-const entry = {
-  id: 'copilot',
-  displayName: 'GitHub Copilot',
-  status: 'ready' as const,
-  capabilities: { autoApprove: true, customLaunchCommand: false },
-  installHint: 'Install Copilot',
-};
-const result: AcpAgentletDiscoveryResponse = {
-  agentletId: device.agentletId,
-  harnesses: [
-    { ...entry, profileStatus: 'existing', profileId: 'old' },
-    {
-      ...entry,
-      id: 'gemini',
-      displayName: 'Gemini',
-      profileStatus: 'created',
-      profileId: 'new',
-    },
-    {
-      ...entry,
-      id: 'claude',
-      displayName: 'Claude',
-      status: 'adapter-missing',
-      profileStatus: 'skipped',
-      installHint: 'npm install -g @agentclientprotocol/claude-agent-acp',
-    },
-    {
-      ...entry,
-      id: 'codex',
-      displayName: 'Codex',
-      status: 'not-found',
-      profileStatus: 'skipped',
-    },
-    {
-      ...entry,
-      id: 'qwen',
-      displayName: 'Qwen',
-      profileStatus: 'skipped',
-      diagnostics: [{ code: 'workspace_failed', message: 'Permission denied' }],
-    },
-  ],
-};
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 let container: HTMLDivElement;
 let root: Root;
 beforeEach(() => {
-  api.discover.mockReset().mockResolvedValue(result);
-  api.refresh.mockReset().mockResolvedValue(undefined);
+  vi.clearAllMocks();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -88,215 +44,126 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  vi.unstubAllGlobals();
 });
 
-async function render(local = false) {
+async function openMenu() {
   await act(async () =>
     root.render(
       <ConnectedDeviceRow
         device={device}
-        isLocalDevice={local}
-        connectionControls={local ? <span>Disconnect</span> : null}
+        isLocalDevice
+        connectionControls={<span>Disconnect</span>}
       />,
     ),
   );
-}
-function detectionButton() {
-  const button = container.querySelector<HTMLButtonElement>(
-    'button[aria-label^="Detect installed Agents on"]',
+  await act(async () =>
+    container
+      .querySelector<HTMLButtonElement>('button[aria-label$=" actions"]')
+      ?.click(),
   );
-  if (!button) throw new Error('Expected the device detection button');
-  return button;
-}
-function detailsButton() {
-  const button = [...container.querySelectorAll('button')].find(
-    (element) => element.textContent === 'Detection details',
-  );
-  if (!button) throw new Error('Expected the detection details button');
-  return button;
 }
 
-describe('per-device installed Agent detection', () => {
-  it('blocks same-tick duplicate clicks and keeps pending feedback through snapshot publication', async () => {
-    let finishDetection!: (value: AcpAgentletDiscoveryResponse) => void;
-    let finishRefresh!: () => void;
-    api.discover.mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          finishDetection = resolve;
-        }),
+describe('device menu', () => {
+  it('does not reopen a controlled menu after cancelling Rename', async () => {
+    function LocalDevice() {
+      const [open, setOpen] = useState(false);
+      return (
+        <ConnectedDeviceRow
+          device={device}
+          isLocalDevice
+          menuOpen={open}
+          onMenuOpenChange={setOpen}
+        />
+      );
+    }
+    await act(async () => root.render(<LocalDevice />));
+    await act(async () =>
+      container
+        .querySelector<HTMLButtonElement>('[aria-haspopup="menu"]')
+        ?.click(),
     );
-    api.refresh.mockImplementationOnce(
-      () =>
-        new Promise<void>((resolve) => {
-          finishRefresh = resolve;
-        }),
+    await act(async () =>
+      document.querySelector<HTMLButtonElement>('[role="menuitem"]')?.click(),
     );
-    await render();
-    await act(async () => {
-      detectionButton().click();
-      detectionButton().click();
-    });
-    expect(api.discover).toHaveBeenCalledExactlyOnceWith(device.agentletId);
-    expect(detectionButton().disabled).toBe(true);
-    expect(container.textContent).toContain('Detecting installed Agents');
-    await act(async () => finishDetection(result));
-    expect(api.refresh).toHaveBeenCalledExactlyOnceWith({
-      afterMutation: true,
-    });
-    expect(detectionButton().disabled).toBe(true);
-    await act(async () => finishRefresh());
-    expect(detectionButton().disabled).toBe(false);
-  });
-
-  it('shows exact summary counts, workspace warning and actionable adapter guidance', async () => {
-    await render();
-    await act(async () => detectionButton().click());
-    expect(container.textContent).toContain(
-      'Agent types ready: 3. Automatic Profiles: 1 existing, 1 new. Missing ACP adapters: 1; not found: 1.',
+    expect(container.querySelector('input')).toBe(document.activeElement);
+    await act(async () =>
+      [...container.querySelectorAll('button')]
+        .find((button) => button.textContent === 'Cancel')
+        ?.click(),
     );
-    expect(container.textContent).toContain(
-      '1 ready Agent could not get a default working folder',
-    );
-    const details = detailsButton();
-    expect(details.getAttribute('aria-expanded')).toBe('false');
-    await act(async () => details.click());
-    expect(container.textContent).toContain(
-      'Native CLI found; ACP adapter missing',
-    );
-    expect(container.querySelector('code')?.textContent).toBe(
-      'npm install -g @agentclientprotocol/claude-agent-acp',
-    );
-    expect(container.textContent).toContain(
-      'To use this Agent, install on this device, then detect again',
-    );
-    expect(details.getAttribute('aria-expanded')).toBe('true');
-  });
-
-  it('does not hide adapter diagnostics when no Profile was added', async () => {
-    api.discover.mockResolvedValueOnce({
-      ...result,
-      harnesses: [result.harnesses[2]],
-    });
-    await render();
-    await act(async () => detectionButton().click());
-    expect(container.textContent).toContain('0 new. Missing ACP adapters: 1');
-  });
-
-  it('preserves lookup/version warnings and safely handles unknown diagnostic codes', async () => {
-    api.discover.mockResolvedValueOnce({
-      ...result,
-      harnesses: [
-        {
-          ...entry,
-          status: 'not-found',
-          profileStatus: 'skipped',
-          diagnostics: [
-            { code: 'lookup_failed', message: 'lookup failed' },
-            { code: 'version_probe_failed', message: 'unknown version' },
-            { code: 'toString', message: 'unknown diagnostic' },
-          ],
-        },
-      ],
-    });
-    await render();
-    await act(async () => detectionButton().click());
-    const details = detailsButton();
-    await act(async () => details.click());
-    expect(container.textContent).toContain(
-      'PATH lookup failed; installation could not be confirmed',
-    );
-    expect(container.textContent).toContain(
-      'Version unavailable; command readiness is unchanged',
-    );
-    expect(container.textContent).toContain(
-      'Agentlet reported an additional detection diagnostic',
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    expect(document.activeElement).toBe(
+      container.querySelector('[aria-haspopup="menu"]'),
     );
   });
 
-  it('keeps local connection controls and identity alongside the detection action', async () => {
-    await render(true);
-    expect(container.textContent).toContain('(This device)');
+  it('keeps offline metadata readable without inventing a version or offering online-only actions', async () => {
+    await act(async () =>
+      root.render(
+        <ConnectedDeviceRow
+          device={{ agentletId: 'offline', displayName: 'Offline PC' }}
+          isLocalDevice={false}
+          online={false}
+          onAdd={vi.fn()}
+        />,
+      ),
+    );
+    expect(container.querySelector('[role="status"]')?.textContent).toBe(
+      'Not connected',
+    );
+    expect(container.querySelector('[data-editor-trigger]')).toBeNull();
+    await act(async () =>
+      container
+        .querySelector<HTMLButtonElement>('[aria-label="Offline PC actions"]')
+        ?.click(),
+    );
+    const menu = document.querySelector('[role="menu"]');
+    expect(menu?.textContent).toContain('offline');
+    expect(menu?.textContent).not.toContain('Version');
+    expect(menu?.textContent).not.toContain('Rename');
+  });
+
+  it('shows identity directly below Rename without a bulk discovery action', async () => {
+    await openMenu();
+    const menu = document.querySelector('[role="menu"]');
+    expect(menu?.textContent).toContain('c717d73c…d3e8');
+    expect(menu?.textContent).not.toContain(device.agentletId);
+    expect(menu?.textContent).toContain('Version');
+    expect(menu?.textContent).toContain(device.version);
+    const items = [...(menu?.querySelectorAll('button') ?? [])];
+    expect(
+      items.map((item) => item.getAttribute('aria-label') ?? item.textContent),
+    ).toEqual(['Rename', 'Copy device ID']);
+    expect(container.textContent).toContain('This device');
+    expect(container.textContent).not.toContain('(This device)');
     expect(container.textContent).toContain('Disconnect');
-    expect(detectionButton().getAttribute('aria-label')).toContain(
-      device.displayName,
-    );
-    expect(api.discover).not.toHaveBeenCalled();
+    await act(async () => items[0].click());
+    expect(container.querySelector('input')).toBe(document.activeElement);
   });
 
-  it.each([
-    ['harness_discovery_stale', 409, 'device connection changed'],
-    ['harness_discovery_unsupported', 503, 'Update Agentlet'],
-    ['harness_discovery_unavailable', 503, 'detection is unavailable'],
-    ['agentlet_unavailable', 409, 'no longer connected'],
-    ['forbidden', 403, 'Owner authorization'],
-  ])('reports %s and allows explicit retry', async (code, status, text) => {
-    api.discover.mockRejectedValueOnce(
-      new ApiError(
-        Number(status),
-        { code: String(code), message: 'private upstream message' },
-        'fallback',
-      ),
-    );
-    await render();
-    await act(async () => detectionButton().click());
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
-      String(text),
-    );
-    expect(container.textContent).not.toContain('private upstream message');
-    expect(detectionButton().disabled).toBe(false);
-    await act(async () => detectionButton().click());
-    expect(api.discover).toHaveBeenCalledTimes(2);
-    expect(container.querySelector('[role="alert"]')).toBeNull();
-  });
-
-  it('reports partial creation and refreshes shared state after reconciliation failure', async () => {
-    api.discover.mockRejectedValueOnce(
-      new ApiError(
-        500,
-        {
-          code: 'harness_reconciliation_failed',
-          details: { createdProfileIds: ['saved-1', 'saved-2'] },
-        },
-        'failed',
-      ),
-    );
-    await render();
-    await act(async () => detectionButton().click());
-    expect(container.textContent).toContain(
-      '2 new Profiles were saved before the failure',
-    );
-    expect(api.refresh).toHaveBeenCalledExactlyOnceWith({
-      afterMutation: true,
-    });
-  });
-
-  it('distinguishes a failed list refresh from a successful detection', async () => {
-    api.refresh.mockRejectedValueOnce(new Error('network'));
-    await render();
-    await act(async () => detectionButton().click());
-    expect(container.textContent).toContain('Agent types ready: 3');
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
-      'Could not refresh the shared Profile list',
-    );
-    expect(detectionButton().disabled).toBe(false);
-  });
-
-  it('does not publish an old row result into a remounted device row', async () => {
-    let finish!: (value: AcpAgentletDiscoveryResponse) => void;
-    api.discover.mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          finish = resolve;
-        }),
-    );
-    await render();
-    await act(async () => detectionButton().click());
-    await act(async () => root.render(null));
-    await render();
-    await act(async () => finish(result));
-    expect(container.textContent).not.toContain('Agent types ready');
-    expect(detectionButton().disabled).toBe(false);
-    expect(api.refresh).toHaveBeenCalledOnce();
-  });
+  it.each([false, true])(
+    'copies the exact device ID and reports clipboard failure: %s',
+    async (fails) => {
+      const writeText = fails
+        ? vi.fn().mockRejectedValue(new Error('Clipboard unavailable'))
+        : vi.fn().mockResolvedValue(undefined);
+      vi.stubGlobal('navigator', {
+        clipboard: { writeText },
+        platform: navigator.platform,
+        userAgent: navigator.userAgent,
+      });
+      await openMenu();
+      await act(async () =>
+        document
+          .querySelector<HTMLButtonElement>('[aria-label="Copy device ID"]')
+          ?.click(),
+      );
+      expect(writeText).toHaveBeenCalledExactlyOnceWith(device.agentletId);
+      expect(api.toast).toHaveBeenCalledWith(
+        fails ? 'Clipboard unavailable' : 'Device ID copied',
+        { tone: fails ? 'danger' : 'success' },
+      );
+    },
+  );
 });

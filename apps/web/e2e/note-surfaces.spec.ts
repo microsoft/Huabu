@@ -73,19 +73,12 @@ test('Full and Minimal Notes share a weaker accent surface inside and outside Fr
 
   for (const lod of ['full', 'minimal']) {
     if (lod === 'minimal') {
-      for (let step = 0; step < 7; step++) {
-        const width = await notes
-          .first()
-          .evaluate((node) => node.getBoundingClientRect().width);
-        await page.keyboard.press('ControlOrMeta+-');
-        await expect
-          .poll(() =>
-            notes
-              .first()
-              .evaluate((node) => node.getBoundingClientRect().width),
-          )
-          .toBeLessThan(width * 0.85);
-      }
+      await page
+        .getByRole('button', { name: /Canvas zoom .*Open zoom menu/ })
+        .click();
+      const zoom = page.locator('input[name="canvasZoom"]');
+      await zoom.fill('20');
+      await zoom.press('Enter');
     }
     await expect(notes.locator('.semantic-lod-node').first()).toHaveAttribute(
       'data-lod',
@@ -169,7 +162,7 @@ test('Full and Minimal Notes share a weaker accent surface inside and outside Fr
         expect(result.minimalColor).toBe(result.expectedColor);
         expect(result.hostBackground).toBe('rgba(0, 0, 0, 0)');
         expect(result.fade).toContain(result.surface);
-        expect(result.borderWidth).toBe('2px');
+        expect(result.borderWidth).toBe('1px');
         expect(result.width).toBe(360);
         expect(result.height).toBe(220);
       }

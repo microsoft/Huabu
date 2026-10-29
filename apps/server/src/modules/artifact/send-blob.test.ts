@@ -7,7 +7,10 @@ import Fastify from 'fastify';
 import { describe, expect, it, vi } from 'vitest';
 
 import { resolveRange, sendBlob } from './send-blob.js';
+import { setRequestIdentity } from '../identity/request.js';
+import { UNRESTRICTED_ACCESS } from '../identity/service.js';
 
+import type { ResourceAccess } from '../identity/service.js';
 import type { BlobInfo, BlobScope } from '../storage/index.js';
 
 /**
@@ -256,5 +259,89 @@ describe('sendBlob', () => {
 
     const res = await serveScope(scope, 'a.png');
     expect(res.statusCode).toBe(500);
+  });
+});
+
+describe('sendBlob under per-Space access', () => {
+  it('keeps a restricted caller’s blobs out of shared caches, conditional replies included', async () => {
+    const scope = fakeScope({ 'a.png': Buffer.from('png') });
+    const cache = async (access: ResourceAccess) => {
+      const app = Fastify();
+      app.addHook('onRequest', async (request) => {
+        setRequestIdentity(request, {
+          principal: { principalId: 'p', kind: 'user' },
+          member: true,
+          owner: false,
+          access,
+        });
+      });
+      app.get('/blob', async (request, reply) => {
+        await sendBlob(request, reply, scope, 'a.png');
+        return reply;
+      });
+      const first = await app.inject('/blob');
+      const revalidated = await app.inject({
+        url: '/blob',
+        headers: { 'if-none-match': String(first.headers.etag) },
+      });
+      await app.close();
+      return [
+        first.headers['cache-control'],
+        revalidated.statusCode,
+        revalidated.headers['cache-control'],
+      ];
+    };
+    expect(await cache(UNRESTRICTED_ACCESS)).toEqual([
+      'public, max-age=0',
+      304,
+      'public, max-age=0',
+    ]);
+    expect(
+      await cache({ can: async () => true, claim: async () => {} }),
+    ).toEqual(['private, no-cache', 304, 'private, no-cache']);
+  });
+
+  it('renders a stored document in an opaque origin only for restricted callers', async () => {
+    const scope = fakeScope({ 'page.html': Buffer.from('<script></script>') });
+    const csp = async (access: ResourceAccess) => {
+      const app = Fastify();
+      app.addHook('onRequest', async (request) => {
+        setRequestIdentity(request, {
+          principal: { principalId: 'p', kind: 'user' },
+          member: true,
+          owner: true,
+          access,
+        });
+      });
+      app.get('/blob', async (request, reply) => {
+        await sendBlob(request, reply, scope, 'page.html');
+        return reply;
+      });
+      app.get('/renderer', async (request, reply) => {
+        reply.header('Content-Security-Policy', "connect-src 'none'");
+        await sendBlob(request, reply, scope, 'page.html');
+        return reply;
+      });
+      const [blob, renderer] = await Promise.all([
+        app.inject('/blob'),
+        app.inject('/renderer'),
+      ]);
+      await app.close();
+      return [
+        blob.headers['content-security-policy'],
+        renderer.headers['content-security-policy'],
+      ];
+    };
+    // Local mode: unchanged.
+    expect(await csp(UNRESTRICTED_ACCESS)).toEqual([
+      undefined,
+      "connect-src 'none'",
+    ]);
+    // Bubble mode, even for a system owner; a route's own policy stays
+    // enforced beside the sandbox.
+    const sandbox = 'sandbox allow-scripts allow-forms allow-popups';
+    expect(await csp({ can: async () => true, claim: async () => {} })).toEqual(
+      [sandbox, ["connect-src 'none'", sandbox]],
+    );
   });
 });

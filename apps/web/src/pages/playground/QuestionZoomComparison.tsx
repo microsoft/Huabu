@@ -530,9 +530,7 @@ export function QuestionZoomComparison({
         </div>
       </div>
       <p>
-        配色按钮显示当前版本，点击切换。新版浅色模式保留四组主色，以蓝色为参照调整描边、背景和
-        bg-hover
-        的明暗层级；使用独立色值，不使用渐变。深色配色暂未统一，全局主题不变。
+        配色按钮显示当前版本，点击切换。当前状态色区分主色、前景、辅助强调和背景，悬停复用中性背景；旧版对照仅保留历史主色与背景。
       </p>
       <div
         className="qzc-palette-preview"
@@ -554,7 +552,7 @@ export function QuestionZoomComparison({
               {
                 '--qzc-preview-light': `var(--${tone}-light)`,
                 '--qzc-preview-bg': `var(--${tone}-bg)`,
-                '--qzc-preview-bg-hover': `var(--${tone}-bg-hover)`,
+                '--qzc-preview-bg-hover': 'var(--bg-hover)',
               } as CSSProperties
             }
           >
@@ -563,9 +561,9 @@ export function QuestionZoomComparison({
               {(
                 [
                   ['', '主色'],
+                  ['-fg', '前景'],
                   ['-light', '描边'],
                   ['-bg', '背景'],
-                  ['-bg-hover', '悬停'],
                 ] as const
               ).map(([suffix, name]) => (
                 <span key={name}>

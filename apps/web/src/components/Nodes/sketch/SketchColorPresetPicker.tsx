@@ -5,6 +5,7 @@ import { useState } from 'react';
 
 import { cn } from '@/components/Common/cn';
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
+import { resolveAccentCss, resolveColorPresetCss } from '@/utils/accentColor';
 
 import type { ColorPreset } from '@/components/Common/ColorPicker';
 import type { SketchColorPresets } from '@/store/toolStore';
@@ -32,8 +33,10 @@ export function SketchColorPresetPicker({
     <div className="flex items-center">
       {presets.map((color, index) => {
         const isActive = index === activeIndex;
-        const swatchColor =
-          colors.find((preset) => preset.token === color)?.value ?? color;
+        const preset = colors.find((entry) => entry.token === color);
+        const swatchColor = preset
+          ? resolveColorPresetCss(preset)
+          : (resolveAccentCss(color) ?? color);
         return (
           <FloatingToolbar.ColorPicker
             key={index}

@@ -39,7 +39,7 @@ export const AiSummaryButton = ({
       title={t('node.aiSummary')}
       aria-haspopup="dialog"
       aria-expanded={open}
-      className={open ? 'bg-bg-default text-info' : undefined}
+      className={open ? 'bg-bg-default text-info-fg' : undefined}
       onClick={() => setOpen(!open)}
     >
       <Sparkles />

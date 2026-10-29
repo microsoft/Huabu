@@ -343,7 +343,7 @@ describe('NodeConnectionHandles contract', () => {
       for (const side of ['top', 'right', 'bottom', 'left'] as const) {
         const anchor = handle(side);
         const inset = ['note', 'pdf', 'web', 'text'].includes(type)
-          ? '-2px'
+          ? '-1px'
           : '0px';
         expect(anchor.style[side]).toBe(inset);
         expect(
@@ -372,6 +372,7 @@ describe('NodeConnectionHandles contract', () => {
         expect(dot.classList.contains('z-999')).toBe(true);
         expect(dot.classList.contains('pointer-events-none')).toBe(true);
         expect(dot.style.backgroundColor).toBe('var(--color-info-light)');
+        expect(dot.style.borderWidth).toBe('0px');
         expect(
           target.closest('.react-flow__node')?.getAttribute('data-id'),
         ).toBe('node');
@@ -614,7 +615,7 @@ describe('NodeConnectionHandles contract', () => {
         x: borderX * zoom + 10 + 16,
         y: borderY * zoom + 20,
       });
-      expect(parseFloat(handle('right').style.left) + 2).toBe(borderX - 100);
+      expect(parseFloat(handle('right').style.left) + 1).toBe(borderX - 100);
       act(() => hit('right').focus());
       const overlay = hud.querySelector('svg')?.parentElement;
       if (!overlay) throw new Error('Missing hot port overlay');

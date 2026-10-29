@@ -149,7 +149,7 @@ export const ApiKeyRow: React.FC<ApiKeyRowProps> = ({
               <p
                 id={feedbackId}
                 role="alert"
-                className="text-danger mt-2 text-xs [overflow-wrap:anywhere]"
+                className="text-danger-fg mt-2 text-xs [overflow-wrap:anywhere]"
               >
                 {feedback}
               </p>
@@ -200,13 +200,13 @@ export const ApiKeyRow: React.FC<ApiKeyRowProps> = ({
             {saved ? (
               <Check
                 size={14}
-                className="text-success"
+                className="text-success-fg"
                 aria-label={t('settings.keyConfigured')}
               />
             ) : (
               <Key
                 size={14}
-                className="text-warning"
+                className="text-warning-fg"
                 aria-label={t('settings.keyNotConfigured')}
               />
             )}

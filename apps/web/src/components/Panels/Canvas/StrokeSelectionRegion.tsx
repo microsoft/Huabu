@@ -58,8 +58,7 @@ export const StrokeSelectionRegion = memo(() => {
     >
       <polygon
         points={points}
-        fill="var(--color-info)"
-        fillOpacity={0.06}
+        fill="var(--canvas-overlay-subtle)"
         stroke="var(--color-info)"
         strokeWidth={1}
         strokeDasharray="4 3"

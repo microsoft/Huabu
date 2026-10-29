@@ -21,10 +21,8 @@ export const SKETCH_OPTIONS = {
  * Default stroke color when `data.strokeColor` is unset (legacy data).
  *
  * Stored as a picker token (e.g. `'black'`, `'grey'`); resolved to a CSS
- * color at render time via `resolveAccent`. `'black'` and `'white'` are
- * sketch-only picker entries that are not part of `ACCENT_PALETTE`, so
- * they fall through `resolveAccent`'s passthrough branch and render as
- * the literal CSS color keyword.
+ * color at render time via `resolveAccentCss`. Black is a sketch-only
+ * entry and stays a literal CSS color; palette tokens follow the theme.
  */
 export const DEFAULT_STROKE_COLOR = 'black';
 
@@ -41,8 +39,7 @@ export const SKETCH_SIZE_MAX = 32;
  * Diverges from node `style.accent` only by prepending `black` — sketch
  * ink legitimately needs a true black for high-contrast strokes, which
  * is not part of `ACCENT_PALETTE`. `white` lives in `ACCENT_PALETTE`
- * itself so it's picked up via the spread; resolved to its hex value at
- * render time via `resolveAccent`.
+ * itself so it's picked up via the spread and follows the active theme.
  */
 export const SKETCH_COLOR_OPTIONS: readonly ColorPickerOption[] = [
   { token: 'black', name: 'Black', value: '#000000' },

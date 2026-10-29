@@ -3,7 +3,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
-import { ACCENT_PALETTE, resolveAccent, type AccentToken } from '@huabu/shared';
+import { ACCENT_PALETTE, type AccentToken } from '@huabu/shared';
 
 import { ColorPicker } from '@/components/Common/ColorPicker';
 import { MilkdownPreview } from '@/components/Milkdown/MilkdownPreview';
@@ -140,7 +140,7 @@ export function NoteSpecimen({
 }) {
   const { showFade, ...viewport } = useNoteSpecimenViewport();
   const presentationScale = zoom ?? Math.min(1, 300 / width, 260 / height);
-  const resolvedAccent = resolveAccent(accent);
+  const resolvedAccent = accent;
   const metrics = nodeMetricsForSize(width, height);
 
   return (

@@ -68,7 +68,7 @@ export function AcpConnectionDot({
       data-acp-connection-status={status}
       className={cn(
         'size-1.5 shrink-0 rounded-full',
-        status === 'connected' && 'bg-success/50',
+        status === 'connected' && 'bg-success-light',
         status === 'connecting' &&
           'bg-info animate-pulse motion-reduce:animate-none',
         status === 'failed' && 'bg-danger',
@@ -92,7 +92,7 @@ export const AcpConnectionBadge: FC<AcpConnectionInfo> = (connection) => {
         className={cn(
           'inline-flex shrink-0 items-center gap-1 px-0.5 py-0.5',
           connection.status === 'failed' &&
-            'text-danger text-[10px] font-medium',
+            'text-danger-fg text-[10px] font-medium',
         )}
         aria-label={tooltipText ?? undefined}
       >

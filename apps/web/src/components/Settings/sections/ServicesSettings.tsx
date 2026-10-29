@@ -357,7 +357,7 @@ function ServiceForm({
                       <div className="flex flex-col items-end gap-2">
                         <p
                           role="alert"
-                          className="text-danger [overflow-wrap:anywhere]"
+                          className="text-danger-fg [overflow-wrap:anywhere]"
                         >
                           {errors[field.id]}
                         </p>
@@ -431,7 +431,7 @@ export function ServicesSettings() {
 
   if (error) {
     return (
-      <p role="alert" className="text-danger px-1 text-xs">
+      <p role="alert" className="text-danger-fg px-1 text-xs">
         {error}
       </p>
     );

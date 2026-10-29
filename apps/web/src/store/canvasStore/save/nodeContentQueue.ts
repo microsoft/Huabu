@@ -31,7 +31,7 @@ import {
   NodeDuplicateFilesError,
   putNodeContent,
 } from '@/api/canvas';
-import { toast } from '@/components/Common/Toast';
+import { dismissToast, toast } from '@/components/Common/Toast';
 import { i18n } from '@/i18n';
 import { copyToClipboard } from '@/utils/io/clipboard';
 
@@ -74,6 +74,7 @@ function revOfNode(node: Node): string {
  */
 export type NodeContentQueueState = {
   canvasId: string;
+  isLoading: boolean;
   nodes: readonly Node[];
   _setStateNoAutosave: (partial: { nodes: Node[] }) => void;
   patchNodeSilent: (nodeId: string, patch: Record<string, unknown>) => void;
@@ -148,6 +149,12 @@ export type NodeContentQueue = {
    */
   flushAll(): Promise<void>;
   flushAllForSubmission(canvasId: string): Promise<void>;
+  /** Requeue retained transient or label-collision failures once per save attempt. */
+  retryFailedSaves(canvasId: string): void;
+  /** Stop new writes and restore releases until discard settles; returns resume. */
+  suspendCanvas(canvasId: string): () => void;
+  /** Forget explicitly discarded edits after issued writes have settled. */
+  discardCanvas(canvasId: string): void;
 
   /**
    * `beforeunload` best-effort flush of pending content saves via
@@ -187,6 +194,8 @@ export type NodeContentQueue = {
    */
   pendingNodeIds(): string[];
   pendingFields(nodeId: string): ReadonlySet<string>;
+  /** Whether a content edit has not reached the Server: queued, in flight or failed. */
+  hasUnsavedContent(canvasId: string): boolean;
 
   /**
    * Seed (or refresh) the optimistic-concurrency baseline revision for
@@ -217,11 +226,18 @@ export function createNodeContentQueue(opts: {
   onRestoredContentPersisted?: (canvasId: string, nodeId: string) => void;
 }): NodeContentQueue {
   const debouncer = createPerKeyDebouncer<string>(opts.delayMs);
+  const suspendedCanvases = new Set<string>();
   const inflight = new Map<string, Promise<void>>();
   const restores = new Map<string, { canvasId: string; token: object }>();
   const restoredContent = new Map<string, string>();
   const generations = new Map<string, object>();
   const failures = new Map<string, { canvasId: string; error: unknown }>();
+  const failureToasts = new Map<string, string>();
+  function dismissFailureToast(nodeId: string): void {
+    const id = failureToasts.get(nodeId);
+    if (id) dismissToast(id);
+    failureToasts.delete(nodeId);
+  }
   const pendingFields = new Map<string, Map<string, object>>();
   const suppressNextNewNodeSave = new Set<string>();
   /**
@@ -392,7 +408,11 @@ export function createNodeContentQueue(opts: {
     nodeId: string,
     kOpts?: { keepalive?: boolean },
   ): Promise<void> {
-    if (opts.getState().canvasId !== canvasId) return;
+    if (
+      opts.getState().canvasId !== canvasId ||
+      suspendedCanvases.has(canvasId)
+    )
+      return;
     const generation = generations.get(nodeId);
     await opts.waitForCreation?.(canvasId, nodeId);
     if (
@@ -401,6 +421,7 @@ export function createNodeContentQueue(opts: {
     )
       return;
     while (true) {
+      if (suspendedCanvases.has(canvasId)) return;
       const requested = new Map(pendingFields.get(nodeId));
       const body = buildRequest(nodeId, new Set(requested.keys()));
       if (!body) return;
@@ -440,6 +461,7 @@ export function createNodeContentQueue(opts: {
       if (livePending?.size === 0) pendingFields.delete(nodeId);
       const completedRestore = restoredContent.delete(nodeId);
       failures.delete(nodeId);
+      dismissFailureToast(nodeId);
       contentConflictToasted.delete(nodeId);
       saveErrorToasted.delete(nodeId);
       // A write that succeeded means any prior duplicate has been
@@ -485,7 +507,8 @@ export function createNodeContentQueue(opts: {
         });
       }
       if (pendingFields.get(nodeId)?.size) schedule(canvasId, nodeId);
-      if (completedRestore) opts.onRestoredContentPersisted?.(canvasId, nodeId);
+      if (completedRestore && !suspendedCanvases.has(canvasId))
+        opts.onRestoredContentPersisted?.(canvasId, nodeId);
       return;
     }
   }
@@ -523,22 +546,27 @@ export function createNodeContentQueue(opts: {
       node && typeof node.data?.['label'] === 'string'
         ? (node.data['label'] as string)
         : i18n.t('node.untitled');
-    toast(i18n.t('node.contentConflict', { label }), {
+    const generation = generations.get(nodeId);
+    dismissFailureToast(nodeId);
+    const toastId = toast(i18n.t('node.contentConflict', { label }), {
       tone: 'danger',
       duration: 0,
       secondaryAction: {
         label: i18n.t('node.contentConflictKeepMine'),
         onClick: () => {
+          if (generations.get(nodeId) !== generation) return;
           void resolveKeepMine(nodeId);
         },
       },
       action: {
         label: i18n.t('node.contentConflictLoadLatest'),
         onClick: () => {
+          if (generations.get(nodeId) !== generation) return;
           void resolveLoadLatest(nodeId);
         },
       },
     });
+    failureToasts.set(nodeId, toastId);
     console.warn('[node-content] write refused (stale content):', nodeId);
   }
 
@@ -716,7 +744,11 @@ export function createNodeContentQueue(opts: {
     });
     if (duplicateToasted.has(nodeId)) return;
     duplicateToasted.add(nodeId);
-    toast(err.message, { tone: 'danger', duration: 0, dismissible: true });
+    dismissFailureToast(nodeId);
+    failureToasts.set(
+      nodeId,
+      toast(err.message, { tone: 'danger', duration: 0, dismissible: true }),
+    );
     console.error('Node write refused — duplicate files on disk:', nodeId, err);
   }
 
@@ -825,13 +857,16 @@ export function createNodeContentQueue(opts: {
   ): void {
     if (source === 'auto' && saveErrorToasted.has(nodeId)) return;
     saveErrorToasted.add(nodeId);
-    toast(message, {
+    const generation = generations.get(nodeId);
+    dismissFailureToast(nodeId);
+    const toastId = toast(message, {
       tone: 'danger',
       duration: 0,
       dismissible: true,
       action: {
         label: i18n.t('messages.retry'),
         onClick: () => {
+          if (generations.get(nodeId) !== generation) return;
           // Allow a later failure to re-alert, then re-attempt the write.
           saveErrorToasted.delete(nodeId);
           if (restores.get(nodeId)?.canvasId === canvasId) {
@@ -844,6 +879,7 @@ export function createNodeContentQueue(opts: {
         },
       },
     });
+    failureToasts.set(nodeId, toastId);
   }
 
   /**
@@ -890,7 +926,7 @@ export function createNodeContentQueue(opts: {
    * if the user has since navigated away.
    */
   function schedule(canvasId: string, nodeId: string): void {
-    if (!canvasId || !nodeId) return;
+    if (!canvasId || !nodeId || suspendedCanvases.has(canvasId)) return;
     debouncer.schedule(nodeId, () => {
       // Conflicts are surfaced via `tryRename`'s own await path; other
       // failures are handled (toast + optional label-revert) by
@@ -931,7 +967,11 @@ export function createNodeContentQueue(opts: {
     },
 
     acknowledgeRestores(canvasId, tokens) {
-      if (opts.getState().canvasId !== canvasId) return;
+      if (
+        opts.getState().canvasId !== canvasId ||
+        suspendedCanvases.has(canvasId)
+      )
+        return;
       for (const [id, token] of tokens) {
         const entry = restores.get(id);
         if (entry?.canvasId !== canvasId || entry.token !== token) continue;
@@ -1026,6 +1066,26 @@ export function createNodeContentQueue(opts: {
       return serializedFlush(canvasId, nodeId, source);
     },
 
+    retryFailedSaves(canvasId) {
+      const state = opts.getState();
+      if (state.canvasId !== canvasId || state.isLoading) return;
+      const nodeIds = new Set(state.nodes.map((node) => node.id));
+      const pendingIds = new Set(debouncer.pendingKeys());
+      for (const [nodeId, failure] of failures) {
+        if (
+          failure.canvasId === canvasId &&
+          nodeIds.has(nodeId) &&
+          (!(failure.error instanceof CanvasConflictError) ||
+            failure.error.code === 'NODE_LABEL_CONFLICT') &&
+          !(failure.error instanceof NodeDuplicateFilesError) &&
+          !inflight.has(nodeId) &&
+          !pendingIds.has(nodeId)
+        ) {
+          schedule(canvasId, nodeId);
+        }
+      }
+    },
+
     async flushAll() {
       const canvasId = opts.getState().canvasId;
       const pendingIds = debouncer.cancelAll();
@@ -1038,21 +1098,20 @@ export function createNodeContentQueue(opts: {
     },
 
     async flushAllForSubmission(canvasId) {
-      const assertCanvas = () => {
-        if (opts.getState().canvasId !== canvasId) {
-          throw new Error(`Content save Canvas changed: ${canvasId}`);
-        }
-      };
-      assertCanvas();
-      do {
+      // Navigation drains the outgoing Space; never flush the new Space for it.
+      while (opts.getState().canvasId === canvasId) {
         await this.flushAll();
-        assertCanvas();
-      } while (debouncer.pendingKeys().length > 0 || inflight.size > 0);
-      const nodeIds = new Set(opts.getState().nodes.map((node) => node.id));
+        if (debouncer.pendingKeys().length === 0 && inflight.size === 0) break;
+      }
+      const state = opts.getState();
+      const nodeIds =
+        state.canvasId === canvasId && !state.isLoading
+          ? new Set(state.nodes.map((node) => node.id))
+          : undefined;
       const errors = Array.from(failures.entries())
         .filter(
           ([nodeId, failure]) =>
-            failure.canvasId === canvasId && nodeIds.has(nodeId),
+            failure.canvasId === canvasId && (!nodeIds || nodeIds.has(nodeId)),
         )
         .map(
           ([nodeId, failure]) =>
@@ -1066,6 +1125,28 @@ export function createNodeContentQueue(opts: {
           `Content saves failed for Canvas ${canvasId}`,
         );
       }
+    },
+
+    discardCanvas(canvasId) {
+      const state = opts.getState();
+      const ids = new Set(
+        state.canvasId === canvasId ? state.nodes.map((node) => node.id) : [],
+      );
+      for (const [id, failure] of failures) {
+        if (failure.canvasId === canvasId) ids.add(id);
+      }
+      for (const [id, owner] of restoredContent) {
+        if (owner === canvasId) ids.add(id);
+      }
+      for (const id of ids) this.forgetNode(id);
+    },
+
+    suspendCanvas(canvasId) {
+      suspendedCanvases.add(canvasId);
+      if (opts.getState().canvasId === canvasId) debouncer.cancelAll();
+      return () => {
+        suspendedCanvases.delete(canvasId);
+      };
     },
 
     flushAllKeepalive() {
@@ -1085,6 +1166,7 @@ export function createNodeContentQueue(opts: {
     },
 
     forgetNode(nodeId) {
+      dismissFailureToast(nodeId);
       generations.delete(nodeId);
       restores.delete(nodeId);
       restoredContent.delete(nodeId);
@@ -1108,6 +1190,9 @@ export function createNodeContentQueue(opts: {
         baselineRev.set(node.id, revOfNode(node));
         baselineGeneration.set(node.id, {});
         failures.delete(node.id);
+        dismissFailureToast(node.id);
+        saveErrorToasted.delete(node.id);
+        duplicateToasted.delete(node.id);
         // A fresh authoritative baseline means any prior conflict for this
         // node is resolved — drop the toast guard and unfreeze it so a
         // later divergence alerts again and writes resume.
@@ -1134,6 +1219,13 @@ export function createNodeContentQueue(opts: {
     pendingFields(nodeId) {
       if (restoredContent.has(nodeId)) return new Set(NODE_CONTENT_KEYS);
       return new Set(pendingFields.get(nodeId)?.keys());
+    },
+
+    hasUnsavedContent(canvasId) {
+      return (
+        this.pendingNodeIds().length > 0 ||
+        [...failures.values()].some((failure) => failure.canvasId === canvasId)
+      );
     },
   };
 }

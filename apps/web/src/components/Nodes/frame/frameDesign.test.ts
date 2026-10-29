@@ -3,7 +3,6 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { resolveAccent } from '@huabu/shared';
 import { frameResponsiveMetricsForSize } from '@huabu/shared/canvas-engine';
 
 import {
@@ -59,7 +58,7 @@ describe('Frame visual design', () => {
 
   it('preserves the default accent for missing and empty legacy colors', () => {
     const expected = frameSurfaceStyle(
-      resolveAccent(FRAME_DESIGN_CONFIG.appearance.defaultAccent),
+      FRAME_DESIGN_CONFIG.appearance.defaultAccent,
     );
     expect(frameSurfaceStyle(null)).toEqual(expected);
     expect(frameSurfaceStyle('')).toEqual(expected);

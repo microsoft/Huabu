@@ -25,6 +25,8 @@ import { NODE_ICON } from '@/config/nodeIcons.ts';
 import { nodeToolbarOffset } from '@/config/nodeInteractionChrome';
 import { useIsNotMouse } from '@/hooks/useInputMode';
 
+import { renderEdgeAccent } from './edges/edgeAccent';
+
 import './FloatingToolbars/NodeToolbar.css';
 
 /** Where a pending connection starts and ends, in flow coordinates. */
@@ -66,9 +68,11 @@ function PendingConnectionEdge({ nodeId, side, to }: PendingConnectionTether) {
   const node = useInternalNode(nodeId);
 
   const { stroke, strokeWidth, hasArrow } = useMemo(() => {
-    const edge = applyEdgeStyle(
-      { id: PENDING_ARROW_ID, source: '', target: '' },
-      CONNECTED_NODE_EDGE_STYLE,
+    const edge = renderEdgeAccent(
+      applyEdgeStyle(
+        { id: PENDING_ARROW_ID, source: '', target: '' },
+        CONNECTED_NODE_EDGE_STYLE,
+      ),
     );
     return {
       stroke:

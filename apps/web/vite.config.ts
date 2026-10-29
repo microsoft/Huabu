@@ -191,6 +191,12 @@ export default defineConfig(async ({ mode, command }) => {
           changeOrigin: true,
           ws: true,
         },
+        // Bubble identity serves its login discovery beside the API.
+        '/bubble': {
+          target: apiTarget,
+          changeOrigin: true,
+          ws: true,
+        },
       },
     },
     // `vite preview` serves the production build but does NOT inherit
@@ -202,6 +208,12 @@ export default defineConfig(async ({ mode, command }) => {
       strictPort: true,
       proxy: {
         '/api': {
+          target: apiTarget,
+          changeOrigin: true,
+          ws: true,
+        },
+        // Bubble identity serves its login discovery beside the API.
+        '/bubble': {
           target: apiTarget,
           changeOrigin: true,
           ws: true,

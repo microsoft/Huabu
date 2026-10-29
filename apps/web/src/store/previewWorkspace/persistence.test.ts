@@ -62,6 +62,24 @@ beforeEach(() => {
 });
 
 describe('workspace round trip', () => {
+  it('preserves a remote conversation identity in its parent layout without copying nodes', () => {
+    const target = {
+      kind: 'conversation',
+      canvasId: 'child',
+      nodeId: 'agent',
+      threadId: 'thread',
+    } as const;
+    const opened = openTarget(createEmptyWorkspace('g1'), target);
+    writeWorkspace(CANVAS, opened.workspace);
+    const restored = readWorkspace(CANVAS);
+    expect(restored).toEqual(opened.workspace);
+    if (!restored) throw new Error('Missing restored workspace');
+    expect(validateWorkspace(restored, CANVAS, new Set())).toEqual(restored);
+    const reopened = openTarget(restored, target);
+    expect(reopened.tabId).toBe(opened.tabId);
+    expect(Object.keys(reopened.workspace.tabs)).toHaveLength(1);
+  });
+
   it.each([true, false])(
     'restores an empty right group (empty workspace: %s)',
     (empty) => {

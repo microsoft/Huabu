@@ -141,7 +141,7 @@ export const ImageProviderSettings: React.FC = () => {
       {!collapsed && (
         <>
           {imageError && (
-            <p className="text-danger px-3 py-2 text-xs" role="alert">
+            <p className="text-danger-fg px-3 py-2 text-xs" role="alert">
               {imageError}
             </p>
           )}

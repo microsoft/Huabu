@@ -142,7 +142,6 @@ export default function CanvasPage() {
   const consumedDeepLinkActivationRef = useRef<string | null>(null);
   const setPendingNodeType = useToolStore((s) => s.setPendingNodeType);
   const isShortcutsOpen = useShortcutsUiStore((s) => s.isOpen);
-  const openShortcuts = useShortcutsUiStore((s) => s.open);
   // Cmd+F / Ctrl+F → focus the canvas-wide search input in the
   // left layer panel (or, when focus is inside the expanded
   // preview, the in-preview find bar).
@@ -297,7 +296,10 @@ export default function CanvasPage() {
     canvas.selectNodes([node.id], false);
     if (node.type === 'question') {
       if (typeof node.data.threadId === 'string' && node.data.threadId) {
-        const tabId = openPreviewNode(node.id, { transient: false });
+        const tabId = openPreviewNode(node.id, {
+          transient: false,
+          markReadIntent: false,
+        });
         if (tabId) {
           usePreviewWorkspaceStore.getState().requestChatOpen(tabId, 'bottom');
         }
@@ -305,7 +307,7 @@ export default function CanvasPage() {
         toast(t('canvasPage.nodeFocusedNoPreview'), { tone: 'info' });
       }
     } else if (hasNodePreview(node.type ?? '')) {
-      openPreviewNode(node.id, { transient: false });
+      openPreviewNode(node.id, { transient: false, markReadIntent: false });
     } else {
       toast(t('canvasPage.nodeFocusedNoPreview'), { tone: 'info' });
     }
@@ -443,7 +445,7 @@ export default function CanvasPage() {
     <>
       <SpaceActions />
       <MainLayout
-        header={<CanvasHeader onOpenShortcuts={openShortcuts} />}
+        header={<CanvasHeader />}
         leftPanel={<CanvasSidebar />}
         rightPanel={<PreviewWorkspacePanel />}
       >

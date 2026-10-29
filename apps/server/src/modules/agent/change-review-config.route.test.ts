@@ -9,6 +9,7 @@ import Fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import agentChangeReviewConfigRoutes from './change-review-config.route.js';
+import { registerLocalTestIdentity } from '../../test-support/local-identity.js';
 
 import type { FastifyInstance } from 'fastify';
 
@@ -21,6 +22,7 @@ describe('Agent change-review config routes', () => {
     dataDir = mkdtempSync(join(tmpdir(), 'huabu-change-review-route-'));
     process.env.HUABU_DATA_DIR = dataDir;
     app = Fastify({ logger: false });
+    registerLocalTestIdentity(app);
     await app.register(agentChangeReviewConfigRoutes, {
       prefix: '/api/agent-change-review',
     });

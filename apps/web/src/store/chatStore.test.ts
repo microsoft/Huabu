@@ -146,7 +146,7 @@ describe('chatStore composer drafts', () => {
       useChatStore.getState(),
       'hidden',
     );
-    store.setDraft('evictable', 'ordinary draft');
+    store.setDraft('evictable', '');
     store.evictInactiveThreads(0);
     expect(useChatStore.getState().threadsById.hidden).toBeDefined();
     expect(useChatStore.getState().threadsById.evictable).toBeUndefined();
@@ -167,6 +167,25 @@ describe('chatStore composer drafts', () => {
     expect(
       selectThreadQuotedComments(useChatStore.getState(), 'hidden'),
     ).toEqual(next);
+  });
+
+  it('keeps preparing threads reactive, runtime-only and pinned until released', () => {
+    const chat = useChatStore.getState();
+    chat.setThreadPreparing('preparing', true);
+    chat.setDraft('idle', '');
+    const state = useChatStore.getState();
+    expect(state.threadsById.preparing.isPreparing).toBe(true);
+    chat.setThreadPreparing('preparing', true);
+    expect(useChatStore.getState()).toBe(state);
+    expect(
+      useChatStore.persist.getOptions().partialize?.(state),
+    ).not.toHaveProperty('threadsById');
+    chat.evictInactiveThreads(0);
+    expect(useChatStore.getState().threadsById.preparing).toBeDefined();
+    expect(useChatStore.getState().threadsById.idle).toBeUndefined();
+    chat.setThreadPreparing('preparing', false);
+    chat.evictInactiveThreads(0);
+    expect(useChatStore.getState().threadsById.preparing).toBeUndefined();
   });
 
   it('consumes only the submitted draft snapshot and retains additions and edits', () => {

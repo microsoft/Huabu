@@ -40,6 +40,7 @@ import {
 } from '@/store/previewWorkspace/model';
 import { readPdfPreviewView } from '@/store/previewWorkspace/scrollMemory';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
+import { pageLifecycle } from '@/utils/pageLifecycle';
 
 import { FloatingDragHandle } from '../FloatingDragHandle';
 import {
@@ -533,30 +534,36 @@ export const PDFPreview = ({
 
         // Run text extraction and image upload in parallel
         try {
-          const [blob, extractedText] = await Promise.all([
-            getBlob(),
-            getText(),
-          ]);
+          await pageLifecycle.run('importing', async () => {
+            const [blob, extractedText] = await Promise.all([
+              getBlob(),
+              getText(),
+            ]);
 
-          if (!blob) throw new Error('Canvas capture returned null');
+            if (!blob) throw new Error('Canvas capture returned null');
 
-          const file = new File([blob], 'pdf-capture.png', {
-            type: 'image/png',
+            const file = new File([blob], 'pdf-capture.png', {
+              type: 'image/png',
+            });
+            const canvasId = useCanvasStore.getState().canvasId;
+            if (!canvasId) throw new Error('No active canvas');
+            const url = await uploadImage(file, canvasId);
+
+            setPendingCapture((prev) => {
+              if (!prev) return prev;
+              return {
+                ...prev,
+                text: extractedText,
+                imageUrl: url,
+                capturing: false,
+              };
+            });
           });
-          const canvasId = useCanvasStore.getState().canvasId;
-          if (!canvasId) throw new Error('No active canvas');
-          const url = await uploadImage(file, canvasId);
-
-          setPendingCapture((prev) => {
-            if (!prev) return prev;
-            return {
-              ...prev,
-              text: extractedText,
-              imageUrl: url,
-              capturing: false,
-            };
+        } catch (error) {
+          console.error('[pdf] Could not capture area:', error);
+          toast(error instanceof Error ? error.message : String(error), {
+            tone: 'danger',
           });
-        } catch {
           setPendingCapture((prev) => {
             if (!prev) return prev;
             return { ...prev, capturing: false };
@@ -606,26 +613,29 @@ export const PDFPreview = ({
       }
 
       try {
-        let fallbackThreadId = chat.threadMap[canvasId];
-        if (!fallbackThreadId) {
-          const binding = await loadDefaultAgentBinding();
-          if (
-            useCanvasStore.getState().canvasId !== canvasId ||
-            usePreviewWorkspaceStore.getState().workspace !== preview.workspace
-          )
-            return;
-          fallbackThreadId = chat.ensureCanvasThread(canvasId, binding);
-        }
-        const pdfTab = findTabByTarget(preview.workspace, pdfTarget);
-        const pdfGroup = pdfTab
-          ? groupOfTab(preview.workspace, pdfTab.id)
-          : null;
-        chat.addPendingAttachment(fallbackThreadId, attachment);
-        preview.openPreviewTarget(
-          { kind: 'chat', canvasId, threadId: fallbackThreadId },
-          { groupId: pdfGroup?.id, openToSide: true },
-        );
-        usePanelStore.getState().requestFocusChatInput(fallbackThreadId);
+        await pageLifecycle.run('updating', async () => {
+          let fallbackThreadId = chat.threadMap[canvasId];
+          if (!fallbackThreadId) {
+            const binding = await loadDefaultAgentBinding();
+            if (
+              useCanvasStore.getState().canvasId !== canvasId ||
+              usePreviewWorkspaceStore.getState().workspace !==
+                preview.workspace
+            )
+              return;
+            fallbackThreadId = chat.ensureCanvasThread(canvasId, binding);
+          }
+          const pdfTab = findTabByTarget(preview.workspace, pdfTarget);
+          const pdfGroup = pdfTab
+            ? groupOfTab(preview.workspace, pdfTab.id)
+            : null;
+          chat.addPendingAttachment(fallbackThreadId, attachment);
+          preview.openPreviewTarget(
+            { kind: 'chat', canvasId, threadId: fallbackThreadId },
+            { groupId: pdfGroup?.id, openToSide: true },
+          );
+          usePanelStore.getState().requestFocusChatInput(fallbackThreadId);
+        });
       } catch (error) {
         toast(error instanceof Error ? error.message : String(error), {
           tone: 'danger',
@@ -664,7 +674,7 @@ export const PDFPreview = ({
         title={t('node.selectArea')}
         aria-label={t('node.selectAreaToCapture')}
         aria-pressed={captureMode}
-        className={clsx(captureMode && 'text-info bg-bg-default')}
+        className={clsx(captureMode && 'text-info-fg bg-bg-default')}
         onClick={() => {
           const next = !captureMode;
           setCaptureMode(next);
@@ -678,7 +688,7 @@ export const PDFPreview = ({
         title={t('node.highlightText')}
         aria-label={t('node.highlightText')}
         aria-pressed={highlightMode}
-        className={clsx(highlightMode && 'bg-bg-default text-warning-light')}
+        className={clsx(highlightMode && 'bg-bg-default text-warning-fg')}
         onClick={() => {
           const next = !highlightMode;
           setHighlightMode(next);
@@ -750,7 +760,7 @@ export const PDFPreview = ({
               onSourceError={() => setFailedSource(src)}
               loading=""
               error={
-                <div className="text-danger p-4 text-xs">
+                <div className="text-danger-fg p-4 text-xs">
                   {t('node.errorLoadingPdf')}
                   <Button
                     variant="ghost"

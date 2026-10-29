@@ -13,6 +13,7 @@ import {
 } from 'vitest';
 
 import { registerOpCounterHook } from './op-counter-hook.js';
+import { setRequestIdentity } from '../../identity/request.js';
 
 const mocks = vi.hoisted(() => ({
   defaults: vi.fn(),
@@ -26,6 +27,16 @@ vi.mock('./index.js', () => ({
 }));
 
 const app = Fastify();
+// `x-member` marks a per-Space member, as Bubble identity resolves one.
+app.addHook('onRequest', async (request) => {
+  if (request.headers['x-member'])
+    setRequestIdentity(request, {
+      principal: { principalId: 'carol', kind: 'user' },
+      member: true,
+      owner: false,
+      access: { can: async () => true, claim: async () => {} },
+    });
+});
 registerOpCounterHook(app);
 app.post('/api/canvas/:id/events', async () => ({ ok: true }));
 app.post('/api/agent', async () => ({ ok: true }));
@@ -72,6 +83,24 @@ describe('legacy curator eligibility', () => {
       ['space-a', 1],
     ]);
     expect(mocks.enqueue).toHaveBeenCalledTimes(2);
+  });
+
+  it('never counts a per-Space member towards a memory run', async () => {
+    const headers = { 'x-member': '1' };
+    await app.inject({
+      method: 'POST',
+      url: '/api/canvas/space-a/events',
+      headers,
+      payload: { events: [{}, {}] },
+    });
+    await app.inject({
+      method: 'POST',
+      url: '/api/agent',
+      headers,
+      payload: { canvasId: 'space-a' },
+    });
+    expect(mocks.bump).not.toHaveBeenCalled();
+    expect(mocks.enqueue).not.toHaveBeenCalled();
   });
 
   it('does not break requests or start Pi when defaults cannot be read', async () => {

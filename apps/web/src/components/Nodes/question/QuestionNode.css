@@ -5,6 +5,7 @@
 
 .question-compact {
   --question-tone: var(--fg-muted);
+  --question-fg: var(--fg-muted);
   --question-light: var(--fg-subtle);
   --question-bg: var(--bg-hover);
   --question-fill: var(--bg-surface);
@@ -12,21 +13,25 @@
 }
 .question-tone-info {
   --question-tone: var(--info);
+  --question-fg: var(--info-fg);
   --question-light: var(--info-light);
   --question-bg: var(--info-bg);
 }
 .question-tone-warning {
   --question-tone: var(--warning);
+  --question-fg: var(--warning-fg);
   --question-light: var(--warning-light);
   --question-bg: var(--warning-bg);
 }
 .question-tone-success {
   --question-tone: var(--success);
+  --question-fg: var(--success-fg);
   --question-light: var(--success-light);
   --question-bg: var(--success-bg);
 }
 .question-tone-danger {
   --question-tone: var(--danger);
+  --question-fg: var(--danger-fg);
   --question-light: var(--danger-light);
   --question-bg: var(--danger-bg);
 }
@@ -100,7 +105,7 @@
   min-width: 0;
   flex: 0 1 auto;
   overflow: hidden;
-  color: color-mix(in srgb, var(--question-tone) 65%, var(--fg-default));
+  color: var(--question-fg);
   border-radius: calc(6px * var(--question-scale));
   background: var(--question-bg);
   padding: calc(3px * var(--question-scale))

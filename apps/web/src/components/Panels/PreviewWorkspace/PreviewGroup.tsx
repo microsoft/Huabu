@@ -14,6 +14,7 @@ import { useShallow } from 'zustand/react/shallow';
 
 import useCanvasStore from '@/store/canvasStore';
 import { previewTargetKey } from '@/store/previewWorkspace/scrollMemory';
+import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 
 import { PreviewRenderer } from './PreviewRenderer';
 import {
@@ -153,7 +154,8 @@ export function PreviewGroup({
       group.tabIds.flatMap((tabId) => {
         const tab = workspace.tabs[tabId];
         if (!tab) return [];
-        if (tab.target.kind === 'chat') return [tabId];
+        if (tab.target.kind === 'chat' || tab.target.kind === 'conversation')
+          return [tabId];
         if (tab.target.kind === 'url') return [];
         const nodeId = tab.target.nodeId;
         const node = state.nodes.find((candidate) => candidate.id === nodeId);
@@ -207,6 +209,18 @@ export function PreviewGroup({
       />
       <div
         role="tabpanel"
+        onPointerDownCapture={() =>
+          activeTab &&
+          usePreviewWorkspaceStore.getState().markTabInteracted(activeTab.id)
+        }
+        onKeyDownCapture={() =>
+          activeTab &&
+          usePreviewWorkspaceStore.getState().markTabInteracted(activeTab.id)
+        }
+        onWheelCapture={() =>
+          activeTab &&
+          usePreviewWorkspaceStore.getState().markTabInteracted(activeTab.id)
+        }
         id={panelElementId(group.id)}
         aria-labelledby={
           activeTab ? tabElementId(group.id, activeTab.id) : undefined

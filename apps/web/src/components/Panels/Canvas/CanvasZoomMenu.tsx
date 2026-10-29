@@ -86,7 +86,7 @@ export function CanvasZoomMenu() {
             ref={triggerRef}
             variant="ghost"
             size="sm"
-            className="focus-visible:ring-info-light h-8 w-17.5 touch-manipulation justify-center gap-1 px-2 tabular-nums focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset"
+            className="focus-visible:ring-info h-8 w-17.5 touch-manipulation justify-center gap-1 px-2 tabular-nums focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset"
             aria-label={t('canvasControls.zoomAria', { percentage })}
             aria-haspopup="dialog"
             aria-controls={open ? id : undefined}
@@ -173,7 +173,7 @@ export function CanvasZoomMenu() {
                 <p
                   id={`${id}-error`}
                   role="alert"
-                  className="text-danger mt-1 text-xs"
+                  className="text-danger-fg mt-1 text-xs"
                 >
                   {t('canvasControls.invalidZoom', {
                     min: MIN_ZOOM * 100,

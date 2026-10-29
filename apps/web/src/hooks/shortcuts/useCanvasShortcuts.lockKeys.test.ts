@@ -47,6 +47,10 @@ import {
 import { OPEN_SPACE_SHORTCUT_EVENT } from '../../components/Nodes/spacePreview/spaceShortcutEvents';
 import { REQUEST_CREATE_CHILD_SPACE } from '../../components/Space/createChildSpaceAction';
 import { getCombo } from '../../config/shortcuts';
+import {
+  installDesktopInputGuard,
+  setDesktopInputFrozen,
+} from '../../utils/desktopInput';
 
 // react-dom's `act` needs this flag set in a test environment.
 (
@@ -74,8 +78,10 @@ function dispatchCombo(id: string): void {
 describe('useCanvasShortcuts catalog key lock', () => {
   let container: HTMLDivElement;
   let root: Root;
+  let removeInputGuard: () => void;
 
   beforeEach(() => {
+    removeInputGuard = installDesktopInputGuard();
     canvasActions.nodes = [];
     canvasActions.edges = [];
     container = document.createElement('div');
@@ -97,6 +103,7 @@ describe('useCanvasShortcuts catalog key lock', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    removeInputGuard();
     vi.clearAllMocks();
   });
 
@@ -186,6 +193,56 @@ describe('useCanvasShortcuts catalog key lock', () => {
 
     dispatchCombo('layer.bringFront');
     expect(canvasActions.sendSelectedToOrder).toHaveBeenLastCalledWith('top');
+  });
+
+  it('blocks Delete and Undo from a saving dialog before bubbling handlers run', () => {
+    canvasActions.nodes = [{ id: 'selected', selected: true, data: {} }];
+    const dialog = document.createElement('dialog');
+    dialog.setAttribute('role', 'dialog');
+    dialog.open = true;
+    container.append(dialog);
+    dialog.addEventListener('keydown', (event) => event.stopPropagation());
+    act(() => {
+      dialog.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Delete',
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      dialog.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'z',
+          metaKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    expect(canvasActions.deleteNodes).not.toHaveBeenCalled();
+    expect(canvasActions.undo).not.toHaveBeenCalled();
+  });
+
+  it('blocks body-targeted Delete and Undo during a desktop save, then resumes', () => {
+    canvasActions.nodes = [{ id: 'selected', selected: true, data: {} }];
+    const deleteSelected = () =>
+      document.body.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Delete',
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    setDesktopInputFrozen(true);
+    act(deleteSelected);
+    dispatchCombo('edit.undo');
+    expect(canvasActions.deleteNodes).not.toHaveBeenCalled();
+    expect(canvasActions.undo).not.toHaveBeenCalled();
+    setDesktopInputFrozen(false);
+    act(deleteSelected);
+    dispatchCombo('edit.undo');
+    expect(canvasActions.deleteNodes).toHaveBeenCalledWith(['selected'], []);
+    expect(canvasActions.undo).toHaveBeenCalledOnce();
   });
 
   it('opens only a sole selected shortcut on Enter', () => {

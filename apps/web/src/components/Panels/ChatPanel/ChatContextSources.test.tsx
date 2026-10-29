@@ -120,6 +120,28 @@ afterEach(() => {
 });
 
 describe('ChatContextSources', () => {
+  it('does not offer parent selection, adjacent previews or global excerpts to a child conversation', () => {
+    setNodes([node('parent-note', { selected: true }), node('adjacent')]);
+    useChatStore.setState({ selectionAttachment: excerpt });
+    render({
+      owner: {
+        ...session,
+        ownerCanvasId: 'child',
+        conversationView: {
+          presentationAnchor: { canvasId: 'child', nodeId: 'agent' },
+          conversationOwner: {
+            canvasId: 'child',
+            nodeId: 'agent',
+            threadId: session.threadId,
+          },
+        },
+      },
+      adjacentNodeSourceId: 'adjacent',
+    });
+    expect(container.querySelector('[data-chat-context-sources]')).toBeNull();
+    expect(useChatStore.getState().selectionAttachment).toBe(excerpt);
+  });
+
   it('makes pinned and uploaded preview text focusable separately from removal', () => {
     useChatStore.getState().addPendingAttachment(session.threadId, excerpt);
     useChatStore.getState().addPendingAttachment(session.threadId, {

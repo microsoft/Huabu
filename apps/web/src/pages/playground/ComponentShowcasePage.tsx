@@ -215,7 +215,7 @@ function SplitSelectDemo() {
             iconOnly
             primaryTitle="Activate current tool"
             menuTitle="Switch tool"
-            primaryButtonClassName="text-info bg-bg-default enabled:hover:bg-bg-default"
+            primaryButtonClassName="text-info-fg bg-bg-default enabled:hover:bg-bg-default"
             menuButtonClassName="enabled:hover:bg-bg-default"
           />
         </div>
@@ -332,7 +332,7 @@ export default function ComponentShowcasePage() {
           </h1>
           <Link
             to="/playground/settings-components"
-            className="text-info text-xs underline"
+            className="text-info-fg text-xs underline"
           >
             Settings component specimens
           </Link>
@@ -584,9 +584,9 @@ export default function ComponentShowcasePage() {
           {/* ────────────────────── Toast ─────────────────────── */}
           <Section
             title="Toast"
-            description="Imperative toast via toast() function. Five tones (neutral, info, success, warning, danger) shared with Button. Auto-dismisses after 3 seconds."
+            description="Production toast() component: compact neutral surfaces, unfilled status icons, and text actions. Most tones dismiss after 3 seconds; danger and the action examples stay until dismissed."
           >
-            <SubSection label="Tones (auto-dismiss)">
+            <SubSection label="Tones (danger stays visible)">
               <Button
                 variant="solid"
                 tone="neutral"
@@ -652,7 +652,7 @@ export default function ComponentShowcasePage() {
                 tone="info"
                 size="sm"
                 onClick={() =>
-                  toast('Saved as draft — undo within 10 seconds.', {
+                  toast('Saved as draft.', {
                     tone: 'info',
                     duration: 0,
                     action: {
@@ -705,6 +705,77 @@ export default function ComponentShowcasePage() {
                 }
               >
                 Danger + Reload
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  toast(
+                    'This note was edited in another window. Keep your changes or load the latest version before continuing.',
+                    {
+                      tone: 'warning',
+                      duration: 0,
+                      secondaryAction: {
+                        label: 'Keep mine',
+                        onClick: () =>
+                          toast('Kept your changes (demo)', {
+                            tone: 'neutral',
+                          }),
+                      },
+                      action: {
+                        label: 'Load latest',
+                        onClick: () =>
+                          toast('Loaded latest version (demo)', {
+                            tone: 'success',
+                          }),
+                      },
+                    },
+                  )
+                }
+              >
+                Long message + two actions
+              </Button>
+            </SubSection>
+            <SubSection label="Boundary cases">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  toast('Hover or focus to pause the three-second timer.', {
+                    secondaryAction: {
+                      label: 'Continue',
+                      onClick: () => toast('Continued (demo)'),
+                    },
+                  })
+                }
+              >
+                Timed secondary action
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  toast('Unable to save this note. '.repeat(150), {
+                    tone: 'danger',
+                    action: {
+                      label: 'Retry',
+                      onClick: () => toast('Retry requested (demo)'),
+                    },
+                  })
+                }
+              >
+                Long error details
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  for (let index = 1; index <= 12; index++) {
+                    toast(`Persistent error ${index}`, { tone: 'danger' });
+                  }
+                }}
+              >
+                Stack 12 errors
               </Button>
             </SubSection>
             <SubSection label="Dismissible only (no action)">

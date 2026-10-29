@@ -169,7 +169,7 @@ describe('mounted Note actual-width measurement', () => {
       const host = required(
         container.querySelector<HTMLElement>('[data-note-content-host]'),
       );
-      Object.defineProperty(host, 'clientWidth', { value: 396 });
+      Object.defineProperty(host, 'clientWidth', { value: 398 });
       Object.defineProperty(
         host.querySelector('.ProseMirror'),
         'scrollHeight',
@@ -204,7 +204,7 @@ describe('mounted Note actual-width measurement', () => {
     const host = required(
       container.querySelector<HTMLElement>('[data-note-content-host]'),
     );
-    Object.defineProperty(host, 'clientWidth', { value: 396 });
+    Object.defineProperty(host, 'clientWidth', { value: 398 });
     Object.defineProperty(host.querySelector('.ProseMirror'), 'scrollHeight', {
       value: 500,
     });
@@ -223,7 +223,7 @@ describe('mounted Note actual-width measurement', () => {
     );
     const prose = required(host.querySelector<HTMLElement>('.ProseMirror'));
     Object.defineProperty(host, 'clientWidth', {
-      value: 396,
+      value: 398,
       configurable: true,
     });
     Object.defineProperty(prose, 'scrollHeight', {
@@ -240,7 +240,7 @@ describe('mounted Note actual-width measurement', () => {
     act(oldCallback);
     render();
     expect(mocks.propose).not.toHaveBeenCalled();
-    Object.defineProperty(host, 'clientWidth', { value: 796 });
+    Object.defineProperty(host, 'clientWidth', { value: 798 });
     Object.defineProperty(prose, 'scrollHeight', { value: 100 });
     act(oldCallback);
     expect(mocks.propose).not.toHaveBeenCalled();
@@ -266,7 +266,7 @@ describe('mounted Note actual-width measurement', () => {
     const host = required(
       container.querySelector<HTMLElement>('[data-note-content-host]'),
     );
-    Object.defineProperty(host, 'clientWidth', { value: 396 });
+    Object.defineProperty(host, 'clientWidth', { value: 398 });
     Object.defineProperty(host.querySelector('.ProseMirror'), 'scrollHeight', {
       value: 500,
     });

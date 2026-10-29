@@ -90,6 +90,7 @@ beforeEach(() => {
     isLeftCollapsed: true,
     isRightCollapsed: true,
     isPreviewFullscreen: false,
+    rightWidthPx: 420,
   });
 
   container = document.createElement('div');
@@ -474,6 +475,34 @@ describe('MainLayout Chat motion', () => {
     expect(slot?.style.width).toBe('840px');
   });
 
+  it('restores the saved width on remount and clamps only its presentation', () => {
+    usePanelStore.setState({ isRightCollapsed: false, rightWidthPx: 1000 });
+    const renderLayout = () =>
+      root?.render(
+        <MainLayout
+          header={<LayoutChild />}
+          leftPanel={<LayoutChild />}
+          rightPanel={<LayoutChild />}
+        >
+          <LayoutChild />
+        </MainLayout>,
+      );
+    const width = () =>
+      container?.querySelector<HTMLElement>('[data-right-panel-slot]')?.style
+        .width;
+
+    act(renderLayout);
+    expect(width()).toBe('1000px');
+    act(() => usePanelStore.getState().setLeftCollapsed(false));
+    expect(width()).toBe('840px');
+    expect(usePanelStore.getState().rightWidthPx).toBe(1000);
+    act(() => root?.render(null));
+    act(renderLayout);
+    expect(width()).toBe('840px');
+    act(() => usePanelStore.getState().setLeftCollapsed(true));
+    expect(width()).toBe('1000px');
+  });
+
   it.each([
     ['left', 'pointerup'],
     ['left', 'pointercancel'],
@@ -483,6 +512,7 @@ describe('MainLayout Chat motion', () => {
     ['right', 'pointercancel'],
     ['right', 'blur'],
     ['right', 'lostpointercapture'],
+    ['right', 'unmount'],
   ])(
     'resizes %s only with the owning pointer and stops on %s',
     (side, endType) => {
@@ -569,14 +599,20 @@ describe('MainLayout Chat motion', () => {
       );
       const minimum = side === 'left' ? '200px' : '264px';
       expect(panel.style.width).toBe(minimum);
-      act(() =>
+      expect(usePanelStore.getState().rightWidthPx).toBe(420);
+      act(() => {
+        if (endType === 'unmount') {
+          root?.render(null);
+          return;
+        }
         (endType === 'lostpointercapture' ? handle : window).dispatchEvent(
           endType === 'blur'
             ? new Event('blur')
             : new PointerEvent(endType, { pointerId: 1 }),
-        ),
-      );
-      expect(handle.dataset.resizing).toBeUndefined();
+        );
+      });
+      if (endType !== 'unmount')
+        expect(handle.dataset.resizing).toBeUndefined();
       expect(handle.releasePointerCapture).toHaveBeenCalledExactlyOnceWith(1);
       act(() =>
         window.dispatchEvent(
@@ -587,6 +623,9 @@ describe('MainLayout Chat motion', () => {
         ),
       );
       expect(panel.style.width).toBe(minimum);
+      expect(usePanelStore.getState().rightWidthPx).toBe(
+        side === 'right' ? 264 : 420,
+      );
     },
   );
 

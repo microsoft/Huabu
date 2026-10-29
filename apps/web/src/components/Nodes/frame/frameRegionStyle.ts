@@ -11,7 +11,7 @@ export const FRAME_REGION_STYLE = {
   edgeOpacity: 0.4,
 } as const;
 
-/** Attenuate paint channels independently, never the entire shell. */
+/** Keep child surfaces and outlines intact beneath the separate region veil. */
 export function frameRegionSurfaceStyle(
   accent: string | null,
   borderColor: string,
@@ -22,6 +22,6 @@ export function frameRegionSurfaceStyle(
   return {
     ...base,
     backgroundColor: `color-mix(in srgb, ${background} ${FRAME_REGION_STYLE.backgroundOpacity * 100}%, transparent)`,
-    borderColor: `color-mix(in srgb, ${isFrame ? base.borderColor : borderColor} ${FRAME_REGION_STYLE.edgeOpacity * 100}%, transparent)`,
+    borderColor: isFrame ? base.borderColor : borderColor,
   };
 }

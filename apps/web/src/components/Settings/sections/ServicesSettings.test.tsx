@@ -241,7 +241,7 @@ describe('ServicesSettings', () => {
       id === 'web-search' ? configured : config(id),
     );
     await render();
-    expect(container.querySelector('.text-success')).toBeNull();
+    expect(container.querySelector('.text-success-fg')).toBeNull();
     expect(container.textContent).not.toContain('已配置');
     expect(container.textContent).not.toContain('未验证');
     await click('配置网页搜索（Tavily）');

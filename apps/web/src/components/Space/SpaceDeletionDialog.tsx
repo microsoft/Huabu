@@ -11,6 +11,10 @@ import { Loading } from '@/components/Common/Loading';
 import { Modal } from '@/components/Common/Modal';
 import { toast } from '@/components/Common/Toast';
 import { NODE_ICON } from '@/config/nodeIcons';
+import {
+  getElectronBridge,
+  requireDesktopTabSuccess,
+} from '@/hooks/useElectron';
 import { drainPendingSaves } from '@/store/canvasStore';
 import { deleteWorkspace } from '@/store/previewWorkspace/persistence';
 import { useWorkspaceStore } from '@/store/workspaceStore';
@@ -80,10 +84,34 @@ export function SpaceDeletionDialog({
   const remove = async () => {
     if (!preview) return;
     setBusy(true);
+    const tabs = getElectronBridge()?.tabs;
+    let deletionPrepared = false;
     try {
       await drainPendingSaves();
       if (useWorkspaceStore.getState().workspaceId !== workspaceId)
         throw new Error(t('spaceHierarchy.workspaceChanged'));
+      if (tabs) {
+        const canvasIds = preview.spaces.map((space) => space.canvasId);
+        const state = await tabs.getState();
+        if (
+          state.tabs.some(
+            (tab) => tab.canvasId && canvasIds.includes(tab.canvasId),
+          )
+        ) {
+          const message = t('desktopTabs.closeBeforeDeleting');
+          setError(message);
+          toast(message, { tone: 'warning' });
+          return;
+        }
+        requireDesktopTabSuccess(
+          await tabs.command({
+            type: 'begin-space-deletion',
+            canvasId,
+            canvasIds,
+          }),
+        );
+        deletionPrepared = true;
+      }
       const result = await deleteSpaceTree(canvasId, preview.token);
       if (useWorkspaceStore.getState().workspaceId !== workspaceId) return;
       for (const id of result.deletedCanvasIds) deleteWorkspace(id);
@@ -97,6 +125,7 @@ export function SpaceDeletionDialog({
       const message =
         cause instanceof Error ? cause.message : t('spaceHierarchy.failed');
       setError(message);
+      if (tabs) toast(message, { tone: 'danger' });
       setPreview(null);
       const confirmed = new Set(preview.spaces.map((item) => item.canvasId));
       if (
@@ -116,6 +145,19 @@ export function SpaceDeletionDialog({
       }
       await useWorkspaceStore.getState().refreshSpaceTitles();
     } finally {
+      if (tabs && deletionPrepared) {
+        try {
+          requireDesktopTabSuccess(await tabs.command('end-space-deletion'));
+        } catch (cause) {
+          console.error(
+            '[desktop-tabs] Could not release Space deletion:',
+            cause,
+          );
+          toast(cause instanceof Error ? cause.message : String(cause), {
+            tone: 'danger',
+          });
+        }
+      }
       setBusy(false);
     }
   };
@@ -212,7 +254,7 @@ export function SpaceDeletionDialog({
         />
       ) : null}
       {error && (
-        <div role="alert" className="text-danger mt-3 space-y-2 text-sm">
+        <div role="alert" className="text-danger-fg mt-3 space-y-2 text-sm">
           <p>{error}</p>
           {!rootDeleted && (
             <Button

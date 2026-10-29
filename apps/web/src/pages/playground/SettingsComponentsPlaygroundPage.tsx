@@ -48,7 +48,7 @@ function Specimen({
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-fg-default text-sm font-semibold">{title}</h2>
           <span
-            className={cn('text-xs', draft ? 'text-info' : 'text-fg-subtle')}
+            className={cn('text-xs', draft ? 'text-info-fg' : 'text-fg-subtle')}
           >
             {draft ? '拟议组合 · 尚未抽取' : '复用现有组件'}
           </span>
@@ -74,8 +74,8 @@ function Feedback({ state }: { state: FeedbackState }) {
       role={state === 'error' ? 'alert' : 'status'}
       className={cn(
         'flex min-w-0 items-start gap-1.5 text-xs',
-        state === 'error' ? 'text-danger' : 'text-fg-muted',
-        state === 'saved' && 'text-success',
+        state === 'error' ? 'text-danger-fg' : 'text-fg-muted',
+        state === 'saved' && 'text-success-fg',
       )}
     >
       {state === 'saving' ? (
@@ -328,7 +328,7 @@ function ControlSpecimens() {
             </div>
             <div id="specimen-count-feedback">
               {invalidCount && (
-                <p role="alert" className="text-danger mt-1 text-xs">
+                <p role="alert" className="text-danger-fg mt-1 text-xs">
                   请输入 1–20 之间的整数。
                 </p>
               )}
@@ -571,14 +571,14 @@ function EntitySpecimens() {
               </span>
             }
           >
-            <span className="text-success text-xs">已连接</span>
+            <span className="text-success-fg text-xs">已连接</span>
           </SettingRow>
           <SettingRow
             className="settings-demo-row"
             title="示例 Agent B"
             description="远程机器 · 不代表已登录"
           >
-            <span className="text-warning text-xs">离线</span>
+            <span className="text-warning-fg text-xs">离线</span>
           </SettingRow>
         </SettingSection>
       )}
@@ -600,7 +600,7 @@ function GlobalSpecimens() {
         role="status"
       >
         <p className="text-fg-default flex items-center gap-2 text-xs font-medium">
-          <AlertTriangle size={14} className="text-warning" aria-hidden />
+          <AlertTriangle size={14} className="text-warning-fg" aria-hidden />
           当前配置只读
         </p>
         <p className="text-fg-muted mt-1 text-xs">
@@ -608,8 +608,8 @@ function GlobalSpecimens() {
         </p>
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-3">
-        <span className="text-success text-xs">已配置</span>
-        <span className="text-warning text-xs">离线</span>
+        <span className="text-success-fg text-xs">已配置</span>
+        <span className="text-warning-fg text-xs">离线</span>
         <span className="text-fg-muted text-xs">不支持</span>
       </div>
       <p className="text-fg-subtle mt-2 text-xs">
@@ -666,7 +666,7 @@ export default function SettingsComponentsPlaygroundPage() {
               </Button>
               <Link
                 to="/playground/components"
-                className="text-info self-center px-2 text-xs underline"
+                className="text-info-fg self-center px-2 text-xs underline"
               >
                 Common 展厅
               </Link>

@@ -168,7 +168,7 @@ export function SpaceNavigation({
             variant="ghost"
             size="sm"
             iconOnly
-            className="text-warning"
+            className="text-warning-fg"
             title={`${error} — ${t('spacePreview.retry')}`}
             onClick={() => void refresh()}
           >

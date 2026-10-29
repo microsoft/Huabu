@@ -81,13 +81,13 @@ const MANUAL_POLICY: HeightPolicy = { kind: 'manual' };
  * Vertical and horizontal chrome (px) the node shell adds around a
  * node's body.
  *
- * `NodeWrapper` defaults to a 2px transparent border for non-sketch
+ * `NodeWrapper` defaults to a 1px transparent border for non-sketch
  * nodes (images paint it as an overlay instead), and border-box sizing eats into the
  * geometry the store assigned — on *both* axes. The body is `h-full
  * w-full` inside it.
  *
  * Vertically this is why a layout height computed from content alone
- * leaves the body 4px short, clipping the last line and lighting up the
+ * leaves the body 2px short, clipping the last line and lighting up the
  * truncation affordance on a node meant to fit exactly.
  *
  * Horizontally it is why the content's layout width is the node's width
@@ -97,7 +97,7 @@ const MANUAL_POLICY: HeightPolicy = { kind: 'manual' };
  * Applied outside the scaled container, so it is canvas-space px and is
  * never multiplied by the content scale.
  */
-export const NODE_SHELL_INSET = 4;
+export const NODE_SHELL_INSET = 2;
 
 /**
  * Height policy per node type. Types absent from this table are `manual`.

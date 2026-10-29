@@ -2,7 +2,9 @@
 // Licensed under the MIT license.
 
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { createJSONStorage, persist } from 'zustand/middleware';
+
+import { desktopSpaceStorage } from '@/utils/desktopStorage';
 
 interface PanelState {
   leftMode: 'layers' | 'files';
@@ -39,6 +41,9 @@ interface PanelState {
    * first-time users.
    */
   isRightCollapsed: boolean;
+  /** Last manually resized Preview width, shared across Spaces on this device. */
+  rightWidthPx: number;
+  setRightWidthPx: (width: number) => void;
   /** Transient presentation mode; fullscreen never survives a reload. */
   isPreviewFullscreen: boolean;
   setPreviewFullscreen: (fullscreen: boolean) => void;
@@ -88,6 +93,8 @@ export const usePanelStore = create<PanelState>()(
         })),
 
       isRightCollapsed: true,
+      rightWidthPx: 420,
+      setRightWidthPx: (width) => set({ rightWidthPx: width }),
       isPreviewFullscreen: false,
       setPreviewFullscreen: (fullscreen) =>
         set({
@@ -125,11 +132,13 @@ export const usePanelStore = create<PanelState>()(
     }),
     {
       name: 'huabu-panel',
-      // Only the chat panel's open state is persisted. `isLeftCollapsed`
+      storage: createJSONStorage(desktopSpaceStorage),
+      // Preview's open state and preferred width persist. `isLeftCollapsed`
       // stays per-session (always collapsed on fresh load — matches the
       // pre-persist default), and focus requests stay transient.
       partialize: (state) => ({
         isRightCollapsed: state.isRightCollapsed,
+        rightWidthPx: state.rightWidthPx,
       }),
     },
   ),

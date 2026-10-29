@@ -203,13 +203,13 @@ export const LayerFilterBar = ({
                       size={14}
                       className={clsx(
                         'h-3.5! w-3.5!',
-                        isSelected ? 'text-info' : 'text-fg-subtle',
+                        isSelected ? 'text-info-fg' : 'text-fg-subtle',
                       )}
                     />
                   }
                   trailing={
                     isSelected ? (
-                      <Check size={14} className="text-info" aria-hidden />
+                      <Check size={14} className="text-info-fg" aria-hidden />
                     ) : undefined
                   }
                   aria-label={

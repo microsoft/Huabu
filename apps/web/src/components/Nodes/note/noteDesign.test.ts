@@ -12,27 +12,26 @@ import {
 import { getAccentTokens } from '../design/accentTokens';
 
 describe('Note surface design', () => {
-  it('halves the shared Frame tint while keeping the no-accent theme surface', () => {
-    expect(NOTE_SURFACE_DESIGN_CONFIG.accentSurfaceMix).toBe(50);
+  it('uses the calibrated shallow surface without further mixing', () => {
     expect(noteSurfaceStyle(null)).toEqual({
       '--note-surface-background': 'var(--bg-note-surface)',
       backgroundColor: NOTE_SURFACE_BACKGROUND,
     });
-    for (const accent of ['var(--accent-teal)', '#008080', 'white']) {
+    for (const accent of ['teal', 'var(--accent-teal)', '#008080', 'white']) {
       expect(noteSurfaceStyle(accent)).toEqual({
-        '--note-surface-background': `color-mix(in srgb, ${getAccentTokens(accent).bg} 50%, var(--bg-note-surface))`,
+        '--note-surface-background': getAccentTokens(accent).softBg,
         backgroundColor: NOTE_SURFACE_BACKGROUND,
       });
     }
   });
 
-  it('softens the accent divider for the shared content-card boundary', () => {
+  it('uses the raw accent for the shared content-card boundary', () => {
     expect(noteBoundaryForAccent(null)).toEqual({
-      borderColor: 'color-mix(in srgb, var(--edge-default) 75%, transparent)',
+      borderColor: 'var(--edge-default)',
       borderWidth: NOTE_SURFACE_DESIGN_CONFIG.borderWidth,
     });
     expect(noteBoundaryForAccent('#008080')).toEqual({
-      borderColor: `color-mix(in srgb, ${getAccentTokens('#008080').divider} 75%, transparent)`,
+      borderColor: '#008080',
       borderWidth: NOTE_SURFACE_DESIGN_CONFIG.borderWidth,
     });
   });

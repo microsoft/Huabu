@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/components/Common/Button';
 import { Select } from '@/components/Common/Select';
+import { toast } from '@/components/Common/Toast';
 import { Toggle } from '@/components/Common/Toggle';
 import { CanaryRedeploySettings } from '@/components/Settings/CanaryRedeploySettings';
 import { SettingRow } from '@/components/Settings/Common/SettingRow';
@@ -16,6 +17,7 @@ import { supportedLngs, type SupportedLanguage } from '@/i18n';
 import useCanvasStore from '@/store/canvasStore';
 import { useToolStore, type InputModePreference } from '@/store/toolStore';
 import { useWorkspaceStore } from '@/store/workspaceStore';
+import { writeApplicationPreference } from '@/utils/desktopStorage';
 
 /** Native language names, shown regardless of the active UI language. */
 const LANGUAGE_LABELS: Record<SupportedLanguage, string> = {
@@ -29,9 +31,9 @@ const LANGUAGE_OPTIONS = supportedLngs.map((lng) => ({
 }));
 
 /**
- * General application settings. Language changes persist to `localStorage`
- * (`huabu.language`) via i18next's language detector cache, while the
- * canvas store persists the minimap preference independently.
+ * General application settings. Desktop language changes persist before
+ * updating i18next; browsers retain i18next's best-effort caching. Incoming
+ * hydration never writes back to main. Minimap persists independently.
  *
  * Renders bare {@link SettingRow} entries; the parent supplies the card
  * wrapper so the General tab shows one flat list rather than redundant
@@ -56,8 +58,17 @@ export const GeneralSettings: React.FC = () => {
   const current = (i18n.resolvedLanguage ?? i18n.language) as SupportedLanguage;
 
   const handleChange = useCallback(
-    (value: SupportedLanguage) => {
-      void i18n.changeLanguage(value);
+    async (value: SupportedLanguage) => {
+      try {
+        if (getElectronBridge()?.tabs)
+          writeApplicationPreference('huabu.language', value);
+        await i18n.changeLanguage(value);
+      } catch (error) {
+        console.error('[settings] Could not change language:', error);
+        toast(error instanceof Error ? error.message : String(error), {
+          tone: 'danger',
+        });
+      }
     },
     [i18n],
   );

@@ -38,37 +38,42 @@ afterEach(() => {
 });
 
 describe('SketchStrokePath', () => {
-  it('paints a screen-stable semantic outline behind selected Ink', () => {
-    act(() =>
-      root?.render(
-        <svg>
-          <SketchStrokePath
-            stroke={stroke}
-            scaleX={1}
-            scaleY={1}
-            emphasis="selected"
-          />
-        </svg>,
-      ),
-    );
+  it.each(['selected', 'reference'] as const)(
+    'paints a screen-stable semantic outline behind %s Ink',
+    (emphasis) => {
+      act(() =>
+        root?.render(
+          <svg>
+            <SketchStrokePath
+              stroke={stroke}
+              scaleX={1}
+              scaleY={1}
+              emphasis={emphasis}
+            />
+          </svg>,
+        ),
+      );
 
-    const paths = host?.querySelectorAll('path');
-    expect(paths).toHaveLength(2);
-    expect(paths?.[0]?.getAttribute('data-sketch-stroke-emphasis')).toBe(
-      'selected',
-    );
-    expect(paths?.[0]?.hasAttribute('data-canvas-grounding-exclude')).toBe(
-      true,
-    );
-    expect(paths?.[0]?.getAttribute('stroke')).toBe('var(--color-info)');
-    expect(paths?.[0]?.getAttribute('stroke-width')).toBe('2');
-    expect(paths?.[0]?.getAttribute('stroke-opacity')).toBe('0.7');
-    expect(paths?.[0]?.style.filter).toBe(
-      'drop-shadow(0 0 2px var(--color-info-light))',
-    );
-    expect(paths?.[0]?.getAttribute('vector-effect')).toBe(
-      'non-scaling-stroke',
-    );
-    expect(paths?.[1]?.getAttribute('fill')).toBe('black');
-  });
+      const paths = host?.querySelectorAll('path');
+      expect(paths).toHaveLength(2);
+      expect(paths?.[0]?.getAttribute('data-sketch-stroke-emphasis')).toBe(
+        emphasis,
+      );
+      expect(paths?.[0]?.hasAttribute('data-canvas-grounding-exclude')).toBe(
+        true,
+      );
+      expect(paths?.[0]?.getAttribute('stroke')).toBe('var(--color-info)');
+      expect(paths?.[0]?.getAttribute('stroke-width')).toBe('2');
+      expect(paths?.[0]?.getAttribute('stroke-opacity')).toBe(
+        `var(--sketch-${emphasis}-opacity)`,
+      );
+      expect(paths?.[0]?.style.filter).toBe(
+        'drop-shadow(0 0 2px var(--color-info-light))',
+      );
+      expect(paths?.[0]?.getAttribute('vector-effect')).toBe(
+        'non-scaling-stroke',
+      );
+      expect(paths?.[1]?.getAttribute('fill')).toBe('black');
+    },
+  );
 });

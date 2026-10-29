@@ -5,7 +5,7 @@
 export const MENU_SURFACE_CLASS = 'rounded-lg p-1';
 
 export const MENU_ITEM_CLASS =
-  'text-fg-default flex min-h-7 w-full items-center justify-start gap-2 rounded-md px-2 py-1 text-left text-[13px] leading-5 font-normal transition-colors enabled:hover:bg-hover focus-visible:bg-hover focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-info-light disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:size-3.5 [&_svg]:shrink-0';
+  'text-fg-default flex min-h-7 w-full items-center justify-start gap-2 rounded-md px-2 py-1 text-left text-[13px] leading-5 font-normal transition-colors enabled:hover:bg-hover focus-visible:bg-hover focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-info disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:size-3.5 [&_svg]:shrink-0';
 
 export const MENU_LABEL_CLASS =
   'min-w-0 flex-1 text-left [overflow-wrap:anywhere] whitespace-normal';
@@ -16,7 +16,7 @@ export const MENU_HINT_CLASS =
   'text-fg-muted ml-2 shrink-0 text-xs font-normal';
 
 export const MENU_CHECK_CLASS =
-  'text-info ml-auto flex w-3.5 shrink-0 justify-center';
+  'text-info-fg ml-auto flex w-3.5 shrink-0 justify-center';
 
 export const MENU_SECTION_LABEL_CLASS =
   'text-fg-muted px-2 py-1 text-left text-xs leading-[18px] font-normal select-none';

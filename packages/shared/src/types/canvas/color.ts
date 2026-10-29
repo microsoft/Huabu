@@ -38,23 +38,23 @@
  * Entry shape:
  * - `token`: stable code/data identifier — NEVER change once shipped.
  * - `name`:  default English display label (also used as i18n fallback key).
- * - `value`: current hex; safe to swap when re-skinning.
+ * - `value` / `darkValue`: theme-specific raw colors, not derived tints.
  *
  * The first entry is treated as the visually-neutral default in the toolbar,
  * but "no accent" itself is `null`, not a palette entry.
  */
 export const ACCENT_PALETTE = [
-  { token: 'white', name: 'White', value: '#ffffff' },
-  { token: 'grey', name: 'Grey', value: '#A8A29E' },
-  { token: 'teal', name: 'Teal', value: '#388388' },
-  { token: 'blue', name: 'Blue', value: '#4ABFBD' },
-  { token: 'green', name: 'Green', value: '#8AB77D' },
+  { token: 'white', name: 'White', value: '#FFFFFF', darkValue: '#D4D4D4' },
+  { token: 'grey', name: 'Grey', value: '#9B9690', darkValue: '#B5AEA4' },
+  { token: 'teal', name: 'Teal', value: '#5A9590', darkValue: '#7BB8AC' },
+  { token: 'blue', name: 'Blue', value: '#688FB8', darkValue: '#8DACD1' },
+  { token: 'green', name: 'Green', value: '#86A477', darkValue: '#A1B78A' },
   // Keep the stable `amber` token for persisted canvases; the current
   // palette presents this hue to users as Yellow.
-  { token: 'amber', name: 'Yellow', value: '#E9C46A' },
-  { token: 'orange', name: 'Orange', value: '#F4A261' },
-  { token: 'red', name: 'Red', value: '#E76F51' },
-  { token: 'purple', name: 'Purple', value: '#9B8AC4' },
+  { token: 'amber', name: 'Yellow', value: '#F2C84B', darkValue: '#F0CC68' },
+  { token: 'orange', name: 'Orange', value: '#F1AA70', darkValue: '#F3B47E' },
+  { token: 'red', name: 'Red', value: '#E58A91', darkValue: '#EBA0A8' },
+  { token: 'purple', name: 'Purple', value: '#9A85B5', darkValue: '#B39ACA' },
 ] as const;
 
 export type AccentEntry = (typeof ACCENT_PALETTE)[number];
@@ -113,7 +113,10 @@ const HEX_RE = /^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
 // ---- Type guards ----
 
 export function isAccentToken(x: unknown): x is AccentToken {
-  return typeof x === 'string' && x in ACCENT_BY_TOKEN;
+  return (
+    typeof x === 'string' &&
+    Object.prototype.hasOwnProperty.call(ACCENT_BY_TOKEN, x)
+  );
 }
 
 export function isHexColor(x: unknown): x is string {
@@ -130,9 +133,15 @@ export function isHexColor(x: unknown): x is string {
  *   (e.g. sketch `strokeColor: 'black'`, QuestionNode's sticky fill).
  * - `null` / `undefined` / empty → `null`.
  */
-export function resolveAccent(input: string | null | undefined): string | null {
+export function resolveAccent(
+  input: string | null | undefined,
+  theme: 'light' | 'dark' = 'light',
+): string | null {
   if (!input) return null;
-  if (isAccentToken(input)) return ACCENT_BY_TOKEN[input].value;
+  if (isAccentToken(input)) {
+    const entry = ACCENT_BY_TOKEN[input];
+    return theme === 'dark' ? entry.darkValue : entry.value;
+  }
   return input;
 }
 

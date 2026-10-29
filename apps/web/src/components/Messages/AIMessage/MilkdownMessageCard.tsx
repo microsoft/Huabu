@@ -35,6 +35,8 @@ interface MilkdownMessageCardProps {
   messageId?: string;
   segmentIndex?: number;
   enableComments?: boolean;
+  sourceCanvasId?: string;
+  canvasActionsDisabled?: boolean;
 }
 
 /**
@@ -103,8 +105,11 @@ export const MilkdownMessageCard = memo(function MilkdownMessageCard({
   threadId,
   messageId,
   enableComments = false,
+  sourceCanvasId,
+  canvasActionsDisabled = false,
 }: MilkdownMessageCardProps) {
-  const canvasId = useCanvasStore((s) => s.canvasId);
+  const activeCanvasId = useCanvasStore((s) => s.canvasId);
+  const canvasId = sourceCanvasId ?? activeCanvasId;
   const [selection, setSelection] = useState<MilkdownPreviewSelection | null>(
     null,
   );
@@ -137,7 +142,7 @@ export const MilkdownMessageCard = memo(function MilkdownMessageCard({
         onTextSelection={
           enableComments && messageId ? handleTextSelection : undefined
         }
-        enableBlockDrag
+        enableBlockDrag={!canvasActionsDisabled}
         getTouchDragPayload={(markdown) => {
           const built =
             buildImageDragPayload(markdown, threadId, canvasId) ??
@@ -159,6 +164,7 @@ export const MilkdownMessageCard = memo(function MilkdownMessageCard({
       {enableComments && messageId && selection ? (
         <FragmentCommentPopover
           selection={selection}
+          canvasActionsDisabled={canvasActionsDisabled}
           onCopy={() => copyToClipboard(selection.text)}
           onSaveAsNote={() => {
             useCanvasStore.getState().addNode({

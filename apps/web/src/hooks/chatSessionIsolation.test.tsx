@@ -21,6 +21,7 @@
 
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { VirtuosoMockContext } from 'react-virtuoso';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ChatPanel } from '@/components/Panels/ChatPanel';
@@ -317,21 +318,34 @@ describe('two mounted ChatPanels', () => {
       s.addMessage(THREAD_A, userMessage('m1', 'alpha conversation'));
       s.addMessage(THREAD_B, userMessage('m2', 'beta conversation'));
       s.addMessage('thread-unrelated', userMessage('m3', 'not on screen'));
+      s.setHistoryLoaded(THREAD_A, true);
+      s.setHistoryLoaded(THREAD_B, true);
     });
 
     await commit(() => {
       root?.render(
-        <>
-          <ChatPanel session={SESSION_A} previewTabId="tab-a" />
-          <ChatPanel session={SESSION_B} previewTabId="tab-b" />
-        </>,
+        <VirtuosoMockContext.Provider
+          value={{ viewportHeight: 500, itemHeight: 120 }}
+        >
+          <div data-panel="a">
+            <ChatPanel session={SESSION_A} previewTabId="tab-a" />
+          </div>
+          <div data-panel="b">
+            <ChatPanel session={SESSION_B} previewTabId="tab-b" />
+          </div>
+        </VirtuosoMockContext.Provider>,
       );
     });
 
-    const text = container?.textContent ?? '';
-    expect(text).toContain('alpha conversation');
-    expect(text).toContain('beta conversation');
-    expect(text).not.toContain('not on screen');
+    await vi.waitFor(() => {
+      const panelA = container?.querySelector('[data-panel="a"]')?.textContent;
+      const panelB = container?.querySelector('[data-panel="b"]')?.textContent;
+      expect(panelA).toContain('alpha conversation');
+      expect(panelA).not.toContain('beta conversation');
+      expect(panelB).toContain('beta conversation');
+      expect(panelB).not.toContain('alpha conversation');
+      expect(container?.textContent).not.toContain('not on screen');
+    });
   });
 
   it('renders each thread with its own compose mode', async () => {

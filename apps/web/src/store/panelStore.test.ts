@@ -5,6 +5,42 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import { usePanelStore } from './panelStore';
 
+describe('panel store width persistence', () => {
+  beforeEach(() => {
+    usePanelStore.setState(usePanelStore.getInitialState());
+    localStorage.removeItem('huabu-panel');
+  });
+
+  it('restores the preferred width from localStorage', async () => {
+    usePanelStore.getState().setRightWidthPx(720);
+    const saved = localStorage.getItem('huabu-panel');
+    if (saved === null) throw new Error('Expected saved panel preferences');
+    expect(JSON.parse(saved).state).toEqual({
+      isRightCollapsed: true,
+      rightWidthPx: 720,
+    });
+
+    usePanelStore.setState(usePanelStore.getInitialState());
+    localStorage.setItem('huabu-panel', saved);
+    await usePanelStore.persist.rehydrate();
+
+    expect(usePanelStore.getState().rightWidthPx).toBe(720);
+  });
+
+  it('keeps the default width for older saved preferences', async () => {
+    localStorage.setItem(
+      'huabu-panel',
+      JSON.stringify({ state: { isRightCollapsed: false }, version: 0 }),
+    );
+    await usePanelStore.persist.rehydrate();
+
+    expect(usePanelStore.getState()).toMatchObject({
+      isRightCollapsed: false,
+      rightWidthPx: 420,
+    });
+  });
+});
+
 describe('panel store opening', () => {
   beforeEach(() => {
     usePanelStore.setState({

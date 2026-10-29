@@ -7,11 +7,19 @@ import { projectAgentNodeEditableData } from '@huabu/shared/canvas-engine';
 import { acknowledgeAgentNodeResult, postCanvasExecute } from '@/api/canvas';
 import { rememberConversationAgentBinding } from '@/store/acpProfilesStore';
 import useCanvasStore, { awaitQuestionCreation } from '@/store/canvasStore';
+import { pageLifecycle } from '@/utils/pageLifecycle';
+
+import {
+  conversationOwnerKey,
+  refreshConversationOwner,
+  useRemoteConversationOwnerStore,
+} from './remoteConversationOwner';
 
 import type {
   AgentBinding,
   AgentConversationView,
   AgentLaunchOverrides,
+  AgentIcon,
 } from '@huabu/shared';
 import type { Delta } from '@huabu/shared/canvas-engine';
 import type { Node } from '@xyflow/react';
@@ -30,6 +38,8 @@ export type ConversationOwnerSource = {
   invocationToken?: string;
   pendingInkIntentLabel?: boolean;
   content?: unknown;
+  hasAuthoredContent?: boolean;
+  agentIcon?: AgentIcon;
 };
 
 const ownerPatchChains = new Map<string, Promise<void>>();
@@ -78,7 +88,8 @@ export function shouldComposeConversationOwner(
   source: ConversationOwnerSource | undefined,
 ): boolean {
   const hasAuthoredContent =
-    typeof source?.content === 'string' && source.content.trim().length > 0;
+    source?.hasAuthoredContent === true ||
+    (typeof source?.content === 'string' && source.content.trim().length > 0);
   return getQuestionNodeStatus(source) === 'idle' && !hasAuthoredContent;
 }
 
@@ -104,13 +115,29 @@ export async function validateConversationView(
 ): Promise<void> {
   const active = useCanvasStore.getState();
   const owner = view.conversationOwner;
-  const node = active.nodes.find((candidate) => candidate.id === owner.nodeId);
   if (
-    active.canvasId !== owner.canvasId ||
     view.presentationAnchor.canvasId !== owner.canvasId ||
-    view.presentationAnchor.nodeId !== owner.nodeId ||
-    node?.type !== 'question' ||
-    node.data.threadId !== owner.threadId
+    view.presentationAnchor.nodeId !== owner.nodeId
+  ) {
+    throw new ConversationIntegrityError(
+      'Conversation owner no longer matches the presentation anchor',
+    );
+  }
+  if (active.canvasId !== owner.canvasId) {
+    await refreshConversationOwner(
+      owner.canvasId,
+      owner.nodeId,
+      owner.threadId,
+    );
+    return;
+  }
+  const node = active.nodes.find((candidate) => candidate.id === owner.nodeId);
+  // The server validates the owner again at admission, including offscreen Spaces.
+  const hasLiveOwnerCanvas =
+    active.canvasId === owner.canvasId && !active.isLoading;
+  if (
+    hasLiveOwnerCanvas &&
+    (node?.type !== 'question' || node.data.threadId !== owner.threadId)
   ) {
     throw new ConversationIntegrityError(
       'Conversation owner no longer matches the active Agent node',
@@ -123,12 +150,42 @@ export function resolveConversationOwnerSource(
   nodes: readonly Node[],
   view: AgentConversationView | null,
 ): ConversationOwnerSource | undefined {
-  if (!view || view.conversationOwner.canvasId !== activeCanvasId)
-    return undefined;
+  if (!view) return undefined;
+  if (view.conversationOwner.canvasId !== activeCanvasId) {
+    const owner = view.conversationOwner;
+    const entry =
+      useRemoteConversationOwnerStore.getState().entries[
+        conversationOwnerKey(owner.canvasId, owner.nodeId, owner.threadId)
+      ];
+    return entry?.owner?.nodeId === owner.nodeId
+      ? entry.owner.source
+      : undefined;
+  }
   return nodes.find(
     (node) =>
       node.id === view.conversationOwner.nodeId && node.type === 'question',
   )?.data as ConversationOwnerSource | undefined;
+}
+
+export function useConversationOwnerSource(view: AgentConversationView | null) {
+  const local = useCanvasStore((state) =>
+    view?.conversationOwner.canvasId === state.canvasId
+      ? resolveConversationOwnerSource(state.canvasId, state.nodes, view)
+      : undefined,
+  );
+  const remote = useRemoteConversationOwnerStore((state) => {
+    if (!view) return undefined;
+    const owner = view.conversationOwner;
+    const entry =
+      state.entries[
+        conversationOwnerKey(owner.canvasId, owner.nodeId, owner.threadId)
+      ];
+    return entry?.owner?.nodeId === owner.nodeId
+      ? entry.owner.source
+      : undefined;
+  });
+  const activeCanvasId = useCanvasStore((state) => state.canvasId);
+  return view?.conversationOwner.canvasId === activeCanvasId ? local : remote;
 }
 
 async function applyConversationOwnerPatch(
@@ -140,6 +197,9 @@ async function applyConversationOwnerPatch(
   const editable = filterClientOwnedQuestionPatch(undefined, patch);
   if (!editable || Object.keys(editable).length !== Object.keys(patch).length) {
     throw new Error('Agent Node lifecycle and association are server-owned');
+  }
+  if (useCanvasStore.getState().canvasId !== owner.canvasId) {
+    await validateConversationView(view);
   }
   const wirePatch = Object.fromEntries(
     Object.entries(editable).filter(([, value]) => value !== undefined),
@@ -170,9 +230,28 @@ async function applyConversationOwnerPatch(
       >[2],
     );
   }
+  if (current.canvasId !== owner.canvasId) {
+    await refreshConversationOwner(
+      owner.canvasId,
+      owner.nodeId,
+      owner.threadId,
+      { fresh: true },
+    );
+  }
 }
 
 const draftSaves = new Map<string, Promise<void>>();
+
+pageLifecycle.register('conversation-drafts', {
+  flush: async () => {
+    const { canvasId, nodes } = useCanvasStore.getState();
+    await Promise.all(
+      nodes
+        .filter((node) => node.type === 'question')
+        .map((node) => draftSaves.get(`${canvasId}\0${node.id}`)),
+    );
+  },
+});
 
 function draftKey(view: AgentConversationView): string {
   return `${view.conversationOwner.canvasId}\0${view.conversationOwner.nodeId}`;
@@ -276,9 +355,11 @@ export function patchConversationOwnerNode(
   const owner = view.conversationOwner;
   const key = `${owner.canvasId}\0${owner.nodeId}`;
   const previous = ownerPatchChains.get(key) ?? Promise.resolve();
-  const current = previous
-    .catch(() => undefined)
-    .then(() => applyConversationOwnerPatch(view, patch));
+  const current = pageLifecycle.run('updating', () =>
+    previous
+      .catch(() => undefined)
+      .then(() => applyConversationOwnerPatch(view, patch)),
+  );
   ownerPatchChains.set(key, current);
   return current.finally(() => {
     if (ownerPatchChains.get(key) === current) ownerPatchChains.delete(key);

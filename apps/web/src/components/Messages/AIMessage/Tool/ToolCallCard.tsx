@@ -69,7 +69,7 @@ function renderContentBlock(
           href={block.uri}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-info text-xs underline"
+          className="text-info-fg text-xs underline"
         >
           {block.name || block.uri}
         </a>
@@ -149,7 +149,7 @@ export function ToolCallCard({ part, showIcon = false }: ToolCallCardProps) {
 
   const icon =
     part.status === 'failed' ? (
-      <XIcon size={12} className="text-danger" />
+      <XIcon size={12} className="text-danger-fg" />
     ) : showIcon ? (
       <ToolKindIcon part={part} className="text-fg-muted/60" />
     ) : null;

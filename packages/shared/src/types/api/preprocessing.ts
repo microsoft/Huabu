@@ -109,6 +109,12 @@ export interface PreprocessNodeRequest extends Omit<
   canvasId: string;
   nodeId: string;
   trigger: TriggerReason;
+  /**
+   * Set by the Server, never the wire body: every fetch the run makes must
+   * reach a public address, for a caller whose URLs must not reach the
+   * Server's own network.
+   */
+  publicNetworkOnly?: boolean;
 }
 
 // ---------------------------------------------------------------------------

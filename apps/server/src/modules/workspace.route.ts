@@ -9,6 +9,8 @@ import path from 'node:path';
 import { validatePathSchema, workspacePathSchema } from '@huabu/shared';
 
 import { resetPreprocessDispatcher } from './preprocessing/index.js';
+import { isOwnerRequest } from './security/owner.js';
+import { canReadSpace, isRestrictedRequest } from './security/space-access.js';
 import {
   getStructuredStore,
   materializesWorkspaces,
@@ -187,13 +189,35 @@ async function buildWorkspaceState(): Promise<WorkspaceInfo> {
 }
 
 const workspaceRoutes: FastifyPluginAsync = async (app) => {
+  // The active Workspace is the whole Server's, so a principal with
+  // per-Space access (a Bubble member) may not change it.
+  app.addHook('preHandler', async (request, reply) => {
+    if (
+      request.method !== 'GET' &&
+      !isOwnerRequest(request) &&
+      isRestrictedRequest(request)
+    ) {
+      return reply.status(403).send({
+        message: 'Forbidden: changing the Workspace requires an owner',
+      });
+    }
+  });
+
   // ────────────────────────────────────────────────────────────────
   // GET /api/workspace — read-only state + capabilities
   // Always available (clients need to know the mode).
   // ────────────────────────────────────────────────────────────────
-  app.get<{ Reply: ApiResult<WorkspaceInfo> }>('/', async () =>
-    buildWorkspaceState(),
-  );
+  app.get<{ Reply: ApiResult<WorkspaceInfo> }>('/', async (request) => {
+    const state = await buildWorkspaceState();
+    // World is an ordinary Space here, advertised only to who may read it.
+    if (
+      state.worldCanvasId &&
+      isRestrictedRequest(request) &&
+      !(await canReadSpace(request, state.worldCanvasId))
+    )
+      return { ...state, worldCanvasId: null };
+    return state;
+  });
 
   // ────────────────────────────────────────────────────────────
   // The endpoints below mutate the active workspace and only exist

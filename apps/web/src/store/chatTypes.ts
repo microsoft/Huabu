@@ -57,6 +57,8 @@ export type ChatMessage =
       /** Whether this message belongs to the currently active server turn. */
       historyTurnActive?: boolean;
       role: 'user';
+      /** Runtime identity for routing an unaccepted queue item's retry. */
+      queuedTurnId?: string;
       content: string;
       quotedComments?: QuotedComment[];
       inputKind?: AgentRequest['inputKind'];

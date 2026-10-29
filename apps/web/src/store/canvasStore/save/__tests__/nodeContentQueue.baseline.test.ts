@@ -64,6 +64,7 @@ function makeQueue(
 ) {
   const state = {
     canvasId: 'c1',
+    isLoading: false,
     nodes: [node] as Node[],
     _setStateNoAutosave: vi.fn(),
     patchNodeSilent: vi.fn(),

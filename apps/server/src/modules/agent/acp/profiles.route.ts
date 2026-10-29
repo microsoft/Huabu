@@ -36,8 +36,11 @@ import {
   agentProfileParamsSchema,
   createAcpProfileBodySchema,
   patchAgentProfileBodySchema,
+  agentletDeviceParamsSchema,
+  renameAgentletDeviceBodySchema,
 } from '@huabu/shared';
 
+import { getDeviceNames, renameDevice } from './device-names.js';
 import {
   hasDiscoverySource,
   mergeProfileCustomData,
@@ -62,7 +65,9 @@ import type {
   AcpProfilesListResponse,
   AcpProfileCapabilitiesResponse,
   AgentProfileView,
+  AgentletDevice,
   ApiResult,
+  RenameAgentletDeviceBody,
 } from '@huabu/shared';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 
@@ -135,6 +140,36 @@ async function validateHarnessLaunch(
 }
 
 const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
+  app.patch<{ Reply: ApiResult<RenameAgentletDeviceBody> }>(
+    '/devices/:agentletId',
+    async (request, reply) => {
+      if (denyRemote(request, reply)) return;
+      const params = agentletDeviceParamsSchema.safeParse(request.params);
+      const body = renameAgentletDeviceBodySchema.safeParse(request.body);
+      if (!params.success || !body.success) {
+        return reply.status(400).send({
+          code: 'validation_failed',
+          message: 'Device names must contain 1 to 120 characters.',
+        });
+      }
+      if (!isAgentletConnected(params.data.agentletId)) {
+        return reply.status(404).send({
+          code: 'device_not_connected',
+          message: 'The selected device is no longer connected.',
+        });
+      }
+      try {
+        renameDevice(params.data.agentletId, body.data.displayName);
+        return body.data;
+      } catch (error) {
+        request.log.error({ err: error }, 'Failed to save device name');
+        return reply.status(500).send({
+          code: 'device_name_save_failed',
+          message: 'Failed to save device name.',
+        });
+      }
+    },
+  );
   for (const method of ['GET', 'POST'] as const) {
     app.route<{
       Params: { id: string };
@@ -195,7 +230,20 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
         });
       }
       const profiles = registry.listProfiles();
-      const connected = getConnectedAgentlets();
+      const connections = getAgentletGateway()?.getAgentlets() ?? [];
+      const connected = connections.filter(
+        (connection) => connection.status === 'connected',
+      );
+      let deviceNames: Record<string, string>;
+      try {
+        deviceNames = getDeviceNames();
+      } catch (error) {
+        request.log.error({ err: error }, 'Failed to read device names');
+        return reply.status(500).send({
+          code: 'device_names_unavailable',
+          message: 'Failed to read device names.',
+        });
+      }
       let folderPickerAgentletId: string | null = null;
       try {
         const localId = await readPickerDeviceId();
@@ -214,12 +262,14 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
         if (!agentletId) continue;
         profileCounts.set(agentletId, (profileCounts.get(agentletId) ?? 0) + 1);
       }
-      const connectedDevices = connected
+      const devices = connections
         .map((connection) => ({
           agentletId: connection.agentletId,
-          displayName: formatAgentletDeviceDisplayName(
-            connection.agentletProfile?.machine,
-          ),
+          displayName: Object.hasOwn(deviceNames, connection.agentletId)
+            ? deviceNames[connection.agentletId]
+            : formatAgentletDeviceDisplayName(
+                connection.agentletProfile?.machine,
+              ),
           ...(connection.agentletProfile?.machine?.hostname
             ? { hostname: connection.agentletProfile.machine.hostname }
             : {}),
@@ -239,6 +289,25 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
               right.hostname ?? right.agentletId,
             ) || left.agentletId.localeCompare(right.agentletId),
         );
+      const connectedIds = new Set(
+        connected.map((device) => device.agentletId),
+      );
+      const connectedDevices = devices.filter((device) =>
+        connectedIds.has(device.agentletId),
+      );
+      const knownDevices = new Map<string, AgentletDevice>(
+        devices.map(
+          ({
+            connectedAt: _connectedAt,
+            profileCount: _profileCount,
+            ...device
+          }) => [device.agentletId, device],
+        ),
+      );
+      for (const [agentletId, displayName] of Object.entries(deviceNames)) {
+        if (!knownDevices.has(agentletId))
+          knownDevices.set(agentletId, { agentletId, displayName });
+      }
       return {
         profiles: profiles.filter((profile) => profile.visible !== false),
         selectableProfileIds: profiles
@@ -249,6 +318,7 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
           )
           .map((profile) => profile.id),
         connectedDevices,
+        knownDevices: [...knownDevices.values()],
         folderPickerAgentletId,
         agentlet: getDaemonSupervisor().getStatus(),
         agentDefaults: getAgentDefaults(),

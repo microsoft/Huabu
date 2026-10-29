@@ -116,7 +116,7 @@ describe('CREATE_NODES selection', () => {
         [],
       );
       expect(nodes[0].data.heightMode).toBe('auto');
-      expect(nodes[0].style).toEqual({ width: 500, height: height ?? 56 });
+      expect(nodes[0].style).toEqual({ width: 500, height: height ?? 52 });
     },
   );
 

@@ -3,13 +3,22 @@
 
 import equal from 'fast-deep-equal';
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { createJSONStorage, persist } from 'zustand/middleware';
 
 import { createId } from '@huabu/shared';
 
-import { getDefaultAgentBinding } from './acpProfilesStore';
+import { desktopSpaceStorage } from '@/utils/desktopStorage';
 
+import { getDefaultAgentBinding } from './acpProfilesStore';
+import {
+  historyMessageIds,
+  isProtectedHistoryMessage,
+  trimHistoryPages,
+} from './chatHistoryCache';
+
+import type { ChatHistoryPage } from './chatHistoryCache';
 import type { ChatMessage } from './chatTypes';
+import type { PreparedAgentTurn } from '@/hooks/agentTurnController';
 import type {
   AgentBinding,
   AgentMode,
@@ -40,8 +49,18 @@ function defaultActionForBinding(binding: AgentBinding): AgentMode {
 /** Stable inline-edit row identity, omitted from agent requests and history. */
 export type DraftQuotedComment = QuotedComment & { draftId: string };
 
+export interface QueuedAgentTurn {
+  id: string;
+  prepared: PreparedAgentTurn;
+  status: 'pending' | 'sending' | 'uncertain';
+}
+
 export interface ChatThreadState {
   messages: ChatMessage[];
+  historyPages?: ChatHistoryPage[];
+  historyVisibleIds?: string[];
+  historyRevision?: number;
+  historyViewports?: Record<string, readonly string[]>;
   /** Free-form composer text; quoted comments are staged separately. */
   draft: string;
   pendingQuotedComments: DraftQuotedComment[];
@@ -60,6 +79,8 @@ export interface ChatThreadState {
   olderHistoryError: string | null;
   /** Whether an agent run is streaming into this thread right now. */
   isStreaming: boolean;
+  /** Local send preparation before transport dispatch; absent means idle. */
+  isPreparing?: boolean;
   /** Last genuine stream done event, not a transport close or permission wait. */
   completedTurnId?: string;
   /** Last compose mode selected for this thread. */
@@ -82,6 +103,8 @@ export interface ChatThreadState {
    * cannot ride along on a different Chat's send.
    */
   pendingAttachments: ChatAttachment[];
+  queuedTurns: QueuedAgentTurn[];
+  queuePaused: boolean;
 }
 
 export interface ChatState {
@@ -124,7 +147,7 @@ export interface ChatState {
    * The one text-selection excerpt, shared by every visible Chat. This is
    * presentation context, not thread state: there is a single browser
    * selection, so several Chats may offer the same hint. Whichever one sends
-   * spends it, and the hint retires everywhere.
+   * or queues it spends it, and the hint retires everywhere.
    */
   selectionAttachment: ChatAttachment | null;
 
@@ -159,6 +182,18 @@ export interface ChatState {
   ) => void;
   /** Replace the entire message list for a thread. */
   setMessages: (threadId: string, messages: ChatMessage[]) => void;
+  setHistoryPages: (threadId: string, pages: ChatHistoryPage[]) => void;
+  refillHistoryPage: (
+    threadId: string,
+    page: ChatHistoryPage,
+    messages: ChatMessage[],
+  ) => void;
+  trimHistoryCache: (
+    threadId: string,
+    visibleIds: readonly string[],
+    viewId?: string,
+  ) => void;
+  retainHistoryView: (threadId: string, viewId?: string) => () => void;
   markTurnCompleted: (threadId: string, assistantId: string) => void;
   /** Prepend a page while deduplicating stable server message IDs. */
   prependHistoryMessages: (threadId: string, messages: ChatMessage[]) => void;
@@ -251,15 +286,20 @@ export interface ChatState {
 
   /** Mark / unmark a thread as having an active streaming run. */
   setThreadLoading: (threadId: string, loading: boolean) => void;
+  setThreadPreparing: (threadId: string, preparing: boolean) => void;
+  enqueueTurn: (threadId: string, turn: QueuedAgentTurn) => void;
+  removeQueuedTurn: (threadId: string, id: string) => void;
+  setQueuedTurnStatus: (
+    threadId: string,
+    id: string,
+    status: QueuedAgentTurn['status'],
+  ) => void;
+  setQueuePaused: (threadId: string, paused: boolean) => void;
 
   /**
-   * Drop cached state for threads that aren't currently pinned.
-   * A thread is "pinned" if it is:
-   *   - streaming, or
-   *   - mapped to a Canvas.
-   *
-   * Triggered when a thread is cleared. Writes stay hot; evicted threads are
-   * refetched by `useChatHistory` the next time a tab renders them.
+   * Evict inactive bodies while retaining cursor directories. Active views,
+   * Canvas mappings, unfinished input and unreconciled turns remain pinned.
+   * Releasing a history view triggers eviction; reopening refetches its bodies.
    */
   evictInactiveThreads: (maxKeep?: number) => void;
 }
@@ -268,8 +308,7 @@ export interface ChatState {
  * Soft upper bound on cached threads. Picked to comfortably cover the
  * realistic working set (1 canvas chat + a handful of recently opened
  * question threads) without holding on to dead history forever. Crossing the
- * threshold drops *all* non-pinned entries at once — simple and predictable;
- * refetch on re-visit is cheap.
+ * threshold drops non-pinned bodies while retaining their cursor directories.
  */
 const MAX_CACHED_THREADS = 10;
 
@@ -292,6 +331,8 @@ const EMPTY_THREAD: ChatThreadState = {
   binding: DEFAULT_BINDING,
   settings: { modelId: null, reasoningEffort: null },
   pendingAttachments: [],
+  queuedTurns: [],
+  queuePaused: false,
 };
 
 function threadOf(state: ChatState, threadId: string): ChatThreadState {
@@ -411,7 +452,102 @@ export const useChatStore = create<ChatState>()(
         }),
 
       setMessages: (threadId, messages) =>
-        set((state) => patchThread(state, threadId, { messages })),
+        set((state) => {
+          const ids = new Set(messages.map((message) => message.id));
+          return patchThread(state, threadId, {
+            messages,
+            historyPages: threadOf(state, threadId).historyPages?.map((page) =>
+              page.loaded
+                ? {
+                    ...page,
+                    messageIds: page.messageIds.filter((id) => ids.has(id)),
+                  }
+                : page,
+            ),
+          });
+        }),
+
+      setHistoryPages: (threadId, historyPages) =>
+        set((state) => patchThread(state, threadId, { historyPages })),
+
+      refillHistoryPage: (threadId, page, messages) =>
+        set((state) => {
+          const thread = threadOf(state, threadId);
+          const pages = thread.historyPages ?? [];
+          if (!pages.includes(page)) return {};
+          const historyPages = pages.map((entry) =>
+            entry === page ? { ...entry, loaded: true } : entry,
+          );
+          const byId = new Map(
+            [...messages, ...thread.messages].map((message) => [
+              message.id,
+              message,
+            ]),
+          );
+          return patchThread(state, threadId, {
+            historyPages,
+            messages: historyMessageIds(historyPages, thread.messages).flatMap(
+              (id) => {
+                const message = byId.get(id);
+                return message ? [message] : [];
+              },
+            ),
+          });
+        }),
+
+      trimHistoryCache: (threadId, visibleIds, viewId) =>
+        set((state) => {
+          const thread = threadOf(state, threadId);
+          if (!thread.historyPages) return {};
+          if (viewId && !Object.hasOwn(thread.historyViewports ?? {}, viewId))
+            return {};
+          const historyViewports = viewId
+            ? { ...thread.historyViewports, [viewId]: visibleIds }
+            : thread.historyViewports;
+          const patch = trimHistoryPages(thread.historyPages, thread.messages, [
+            ...visibleIds,
+            ...Object.values(historyViewports ?? {}).flat(),
+          ]);
+          const previousViewport = viewId
+            ? thread.historyViewports?.[viewId]
+            : thread.historyVisibleIds;
+          const sameViewport =
+            visibleIds.length === previousViewport?.length &&
+            visibleIds.every((id, index) => id === previousViewport?.[index]);
+          return patch.messages.length === thread.messages.length &&
+            sameViewport
+            ? {}
+            : patchThread(state, threadId, {
+                ...patch,
+                historyVisibleIds: [...visibleIds],
+                historyViewports,
+              });
+        }),
+
+      retainHistoryView: (threadId, viewId = createId('history-view')) => {
+        set((state) =>
+          patchThread(state, threadId, {
+            historyViewports: {
+              ...threadOf(state, threadId).historyViewports,
+              [viewId]:
+                threadOf(state, threadId).historyViewports?.[viewId] ?? [],
+            },
+          }),
+        );
+        let released = false;
+        return () => {
+          if (released) return;
+          released = true;
+          set((state) => {
+            const thread = state.threadsById[threadId];
+            if (!thread) return {};
+            const historyViewports = { ...thread.historyViewports };
+            delete historyViewports[viewId];
+            return patchThread(state, threadId, { historyViewports });
+          });
+          get().evictInactiveThreads();
+        };
+      },
 
       markTurnCompleted: (threadId, assistantId) =>
         set((state) =>
@@ -475,7 +611,15 @@ export const useChatStore = create<ChatState>()(
       setHistoryLoaded: (threadId, loaded) =>
         set((state) => {
           if (threadOf(state, threadId).historyLoaded === loaded) return {};
-          return patchThread(state, threadId, { historyLoaded: loaded });
+          return patchThread(state, threadId, {
+            historyLoaded: loaded,
+            ...(!loaded
+              ? {
+                  historyRevision:
+                    (threadOf(state, threadId).historyRevision ?? 0) + 1,
+                }
+              : {}),
+          });
         }),
 
       setHistoryError: (threadId, historyError) =>
@@ -740,26 +884,94 @@ export const useChatStore = create<ChatState>()(
           return patchThread(state, threadId, { isStreaming: loading });
         }),
 
+      setThreadPreparing: (threadId, preparing) =>
+        set((state) =>
+          !!threadOf(state, threadId).isPreparing === preparing
+            ? state
+            : patchThread(state, threadId, { isPreparing: preparing }),
+        ),
+
+      enqueueTurn: (threadId, turn) =>
+        set((state) =>
+          patchThread(state, threadId, {
+            queuedTurns: [...threadOf(state, threadId).queuedTurns, turn],
+          }),
+        ),
+
+      removeQueuedTurn: (threadId, id) =>
+        set((state) =>
+          patchThread(state, threadId, {
+            queuedTurns: threadOf(state, threadId).queuedTurns.filter(
+              (turn) => turn.id !== id,
+            ),
+          }),
+        ),
+
+      setQueuedTurnStatus: (threadId, id, status) =>
+        set((state) =>
+          patchThread(state, threadId, {
+            queuedTurns: threadOf(state, threadId).queuedTurns.map((turn) =>
+              turn.id === id ? { ...turn, status } : turn,
+            ),
+          }),
+        ),
+
+      setQueuePaused: (threadId, paused) =>
+        set((state) =>
+          threadOf(state, threadId).queuePaused === paused
+            ? state
+            : patchThread(state, threadId, { queuePaused: paused }),
+        ),
+
       evictInactiveThreads: (maxKeep = MAX_CACHED_THREADS) =>
         set((state) => {
-          const cached = Object.keys(state.threadsById);
+          const cached = Object.keys(state.threadsById).filter((tid) => {
+            const thread = state.threadsById[tid];
+            return thread?.messages.length || !thread?.historyPages?.length;
+          });
           if (cached.length <= maxKeep) return {};
 
           const pinned = new Set<string>(Object.values(state.threadMap));
           for (const [tid, entry] of Object.entries(state.threadsById)) {
-            if (entry.isStreaming || entry.pendingQuotedComments.length)
+            if (
+              entry.isStreaming ||
+              Object.keys(entry.historyViewports ?? {}).length ||
+              entry.isPreparing ||
+              entry.queuedTurns.length ||
+              entry.draft ||
+              entry.pendingAttachments.length ||
+              entry.pendingQuotedComments.length ||
+              entry.messages.some(isProtectedHistoryMessage)
+            )
               pinned.add(tid);
           }
           const evictable = cached.filter((tid) => !pinned.has(tid));
           if (evictable.length === 0) return {};
 
           const threadsById = { ...state.threadsById };
-          for (const tid of evictable) delete threadsById[tid];
+          for (const tid of evictable) {
+            const thread = threadsById[tid];
+            if (thread?.historyPages?.length) {
+              threadsById[tid] = {
+                ...thread,
+                messages: [],
+                historyLoaded: false,
+                historyRevision: (thread.historyRevision ?? 0) + 1,
+                historyPages: thread.historyPages.map((page) => ({
+                  ...page,
+                  loaded: false,
+                })),
+              };
+            } else {
+              delete threadsById[tid];
+            }
+          }
           return { threadsById };
         }),
     }),
     {
       name: 'huabu-chat',
+      storage: createJSONStorage(desktopSpaceStorage),
       version: 5,
       migrate: (persisted) => {
         const state = persisted as Partial<ChatState> & {
@@ -826,6 +1038,9 @@ export const selectThreadMessages = (
 /** A thread's composer draft ('' when none). */
 export const selectThreadDraft = (state: ChatState, threadId: string): string =>
   threadOf(state, threadId).draft;
+
+export const selectThreadQueuedTurns = (state: ChatState, threadId: string) =>
+  threadOf(state, threadId).queuedTurns;
 
 export const selectThreadExcludeCanvasSelection = (
   state: ChatState,

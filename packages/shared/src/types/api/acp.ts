@@ -170,39 +170,6 @@ export type AcpAgentCliListResponse = z.infer<
   typeof acpAgentCliListResponseSchema
 >;
 
-export const acpAgentletDiscoveryParamsSchema = z
-  .object({
-    agentletId: z
-      .string()
-      .min(1)
-      .refine((value) => value.trim().length > 0),
-  })
-  .strict();
-export const acpAgentletDiscoveryBodySchema = z.object({}).strict();
-export type AcpAgentletDiscoveryParams = z.infer<
-  typeof acpAgentletDiscoveryParamsSchema
->;
-export type AcpAgentletDiscoveryBody = z.infer<
-  typeof acpAgentletDiscoveryBodySchema
->;
-export const acpAgentletDiscoveryEntrySchema = acpAgentCliInfoSchema.extend({
-  profileStatus: z.enum(['created', 'existing', 'skipped']),
-  profileId: z.string().min(1).optional(),
-});
-export const acpAgentletDiscoveryResponseSchema = z.object({
-  agentletId: z.string().min(1),
-  harnesses: z.array(acpAgentletDiscoveryEntrySchema),
-});
-export const acpAgentletDiscoveryErrorDetailsSchema = z.object({
-  createdProfileIds: z.array(z.string().min(1)),
-});
-export type AcpAgentletDiscoveryResponse = z.infer<
-  typeof acpAgentletDiscoveryResponseSchema
->;
-export type AcpAgentletDiscoveryErrorDetails = z.infer<
-  typeof acpAgentletDiscoveryErrorDetailsSchema
->;
-
 // ─── Thread → agent binding ────────────────────────────────────────────
 //
 // Each chat thread is permanently bound to a single agent for its entire
@@ -621,6 +588,17 @@ export type AgentletConnectionCredentials = z.infer<
   typeof agentletConnectionCredentialsSchema
 >;
 
+export const agentletDeviceNameSchema = z.string().trim().min(1).max(120);
+export const agentletDeviceParamsSchema = z.object({
+  agentletId: z.string().min(1).max(256),
+});
+export const renameAgentletDeviceBodySchema = z
+  .object({ displayName: agentletDeviceNameSchema })
+  .strict();
+export type RenameAgentletDeviceBody = z.infer<
+  typeof renameAgentletDeviceBodySchema
+>;
+
 /** Schema mirror of {@link AcpProfilesListResponse}. */
 export const connectedAgentletDeviceSchema = z.object({
   agentletId: z.string().min(1),
@@ -636,10 +614,17 @@ export type ConnectedAgentletDevice = z.infer<
   typeof connectedAgentletDeviceSchema
 >;
 
+export const agentletDeviceSchema = connectedAgentletDeviceSchema
+  .omit({ connectedAt: true, profileCount: true })
+  .extend({ version: z.string().min(1).optional() });
+export type AgentletDevice = z.infer<typeof agentletDeviceSchema>;
+
 export const acpProfilesListResponseSchema = z.object({
   profiles: z.array(agentProfileSchema),
   selectableProfileIds: z.array(z.string().min(1)),
   connectedDevices: z.array(connectedAgentletDeviceSchema),
+  /** Display metadata only; presence never implies a live connection. */
+  knownDevices: z.array(agentletDeviceSchema).optional(),
   /** Connected persisted device identity on the Server's filesystem; absent on older servers. */
   folderPickerAgentletId: z.string().min(1).nullable().optional(),
   agentlet: acpAgentletStatusSchema,

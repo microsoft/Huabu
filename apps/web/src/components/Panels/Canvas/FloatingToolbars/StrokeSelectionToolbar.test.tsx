@@ -1887,7 +1887,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
     const deleteItem = [
       ...document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
     ].find((item) => item.textContent === 'Delete');
-    expect(deleteItem?.className).toContain('text-danger');
+    expect(deleteItem?.className).toContain('text-danger-fg');
     await act(async () => deleteItem?.click());
     expect(useGesturePreviewStore.getState().sketchStrokeSelection).toEqual({});
   });

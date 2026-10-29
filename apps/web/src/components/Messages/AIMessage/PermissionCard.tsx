@@ -150,7 +150,7 @@ export function PermissionCard({ part }: PermissionCardProps) {
       icon={
         <ShieldQuestion
           size={12}
-          className={part.resolution ? 'text-fg-subtle' : 'text-warning'}
+          className={part.resolution ? 'text-fg-subtle' : 'text-warning-fg'}
         />
       }
       title={
@@ -241,7 +241,7 @@ export function PermissionTray({
     >
       <div className="px-3 py-2.5">
         <div className="flex items-center gap-2">
-          <span className="bg-warning-bg text-warning flex size-6 shrink-0 items-center justify-center rounded-full">
+          <span className="bg-warning-bg text-warning-fg flex size-6 shrink-0 items-center justify-center rounded-full">
             <ShieldQuestion size={14} />
           </span>
           <span className="text-fg-default text-sm font-medium">{title}</span>
@@ -249,7 +249,7 @@ export function PermissionTray({
         {preview && (
           <CommandBlock
             text={preview}
-            className="bg-warning-bg/45 [&_pre>span]:text-warning mt-2 border-transparent"
+            className="bg-warning-bg [&_pre>span]:text-warning-fg mt-2 border-transparent"
           />
         )}
         {locations.length > 0 && (

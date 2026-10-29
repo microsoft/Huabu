@@ -14,6 +14,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import {
   getChatThreadSettings,
@@ -56,6 +57,7 @@ export function useBuiltinThreadSettings({
   enabled,
   threadHasMessages,
 }: UseBuiltinThreadSettingsArgs) {
+  const { t } = useTranslation();
   const [models, setModels] = useState<LLMModelInfo[]>([]);
   const [settingsState, setSettingsState] = useState<{
     threadId: string | null;
@@ -85,6 +87,8 @@ export function useBuiltinThreadSettings({
         ? cachedSettings
         : EMPTY_SETTINGS;
   const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   // Bumped on every local user mutation. A settings fetch that started
   // before a mutation must not clobber the newer local value (P1-2).
   const mutationGenRef = useRef(0);
@@ -186,89 +190,90 @@ export function useBuiltinThreadSettings({
     );
   }, [enabled, threadId, settings, setThreadSettings]);
 
-  const updateLocalSettings = useCallback(
-    (
+  const selectSettings = useCallback(
+    async (
       update: (current: ChatThreadSettings) => ChatThreadSettings,
-    ): ChatThreadSettings | null => {
-      if (!threadId) return null;
+      persist: (threadId: string) => Promise<ChatThreadSettings | void>,
+    ): Promise<void> => {
+      if (!enabled || !threadId) throw new Error(t('chat.settingsUnavailable'));
+      if (savingRef.current) throw new Error(t('chat.settingsUpdatePending'));
       const current = settingsStateRef.current;
       const previous =
         current.threadId === threadId
           ? current.settings
           : selectThreadSettings(useChatStore.getState(), threadId);
+      mutationGenRef.current += 1;
       const nextSettings = update(previous);
       replaceSettingsState({ threadId, settings: nextSettings });
       setThreadSettings(threadId, nextSettings);
-      return nextSettings;
+      if (!threadHasMessages) return;
+
+      savingRef.current = true;
+      setSaving(true);
+      const applyResult = (settings: ChatThreadSettings) => {
+        if (settingsStateRef.current.threadId === threadId) {
+          replaceSettingsState({ threadId, settings });
+        }
+        setThreadSettings(threadId, settings);
+      };
+      try {
+        const corrected = await persist(threadId);
+        if (corrected) applyResult(corrected);
+      } catch (error) {
+        // A timeout can still have committed remotely; the next GET reconciles it.
+        applyResult(previous);
+        throw error;
+      } finally {
+        savingRef.current = false;
+        setSaving(false);
+      }
     },
-    [threadId, replaceSettingsState, setThreadSettings],
+    [
+      enabled,
+      threadId,
+      threadHasMessages,
+      replaceSettingsState,
+      setThreadSettings,
+      t,
+    ],
   );
 
   const selectModel = useCallback(
-    async (modelId: string) => {
-      if (!threadId) return;
-      mutationGenRef.current += 1; // local choice beats any in-flight GET
-      const gen = mutationGenRef.current;
+    (modelId: string) => {
       // Optimistic: adopt the model and drop an effort the new model can't
       // honour (off/absent stay), so the UI never shows a stale effort.
       const nextEfforts =
         models.find((m) => m.id === modelId)?.reasoningEfforts ?? [];
-      updateLocalSettings((current) => ({
-        ...current,
-        modelId,
-        reasoningEffort:
-          current.reasoningEffort &&
-          current.reasoningEffort !== 'off' &&
-          !nextEfforts.includes(current.reasoningEffort)
-            ? null
-            : current.reasoningEffort,
-      }));
-      // No persisted record yet → hold locally; the first message carries
-      // it (skip the POST so nothing 404s).
-      if (!threadHasMessages) return;
-      try {
-        const corrected = await setChatThreadModel(
-          threadId,
+      return selectSettings(
+        (current) => ({
+          ...current,
           modelId,
-          canvasId ?? undefined,
-        );
-        // Adopt the server's canonical (clamped) values, unless the user
-        // changed something while the request was in flight.
-        if (mutationGenRef.current === gen) {
-          replaceSettingsState({ threadId, settings: corrected });
-        }
-      } catch {
-        // Keep the optimistic value; a genuinely bad value is corrected by
-        // the next settings fetch.
-      }
+          reasoningEffort:
+            current.reasoningEffort &&
+            current.reasoningEffort !== 'off' &&
+            !nextEfforts.includes(current.reasoningEffort)
+              ? null
+              : current.reasoningEffort,
+        }),
+        (id) => setChatThreadModel(id, modelId, canvasId ?? undefined),
+      );
     },
-    [
-      threadId,
-      canvasId,
-      threadHasMessages,
-      models,
-      updateLocalSettings,
-      replaceSettingsState,
-    ],
+    [canvasId, models, selectSettings],
   );
 
   const selectReasoningEffort = useCallback(
-    async (reasoningEffort: string) => {
-      if (!threadId) return;
-      mutationGenRef.current += 1;
-      updateLocalSettings((current) => ({ ...current, reasoningEffort }));
-      if (!threadHasMessages) return;
-      try {
-        await setChatThreadReasoningEffort(
-          threadId,
-          reasoningEffort,
-          canvasId ?? undefined,
-        );
-      } catch {
-        // Keep the optimistic value; carried on the next send.
-      }
-    },
-    [threadId, canvasId, threadHasMessages, updateLocalSettings],
+    (reasoningEffort: string) =>
+      selectSettings(
+        (current) => ({ ...current, reasoningEffort }),
+        async (id) => {
+          await setChatThreadReasoningEffort(
+            id,
+            reasoningEffort,
+            canvasId ?? undefined,
+          );
+        },
+      ),
+    [canvasId, selectSettings],
   );
 
   // The effective model id: the per-thread override, else the global default.
@@ -279,6 +284,7 @@ export function useBuiltinThreadSettings({
     settings,
     effectiveModelId,
     loading,
+    saving,
     selectModel,
     selectReasoningEffort,
   };

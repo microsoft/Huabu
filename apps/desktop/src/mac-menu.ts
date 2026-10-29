@@ -22,7 +22,13 @@
  * every exported entry point degrades to clearing the application menu.
  */
 
-import { app, BrowserWindow, ipcMain, Menu } from 'electron';
+import {
+  app,
+  ipcMain,
+  Menu,
+  type BrowserWindow,
+  type WebContents,
+} from 'electron';
 
 /**
  * Resolver for the current main window, injected by `main.ts`. Menu
@@ -30,6 +36,9 @@ import { app, BrowserWindow, ipcMain, Menu } from 'electron';
  * so multi-window setups still route commands to a live renderer.
  */
 let getMainWindow: () => BrowserWindow | null = () => null;
+let getActiveContents: () => WebContents | null = () =>
+  getMainWindow()?.webContents ?? null;
+let closeActiveTab: (() => void) | undefined;
 
 /**
  * Labels for the macOS menu bar, sourced from the renderer's i18n so
@@ -143,9 +152,10 @@ const DEFAULT_MENU_CONFIG: MenuConfig = {
  * focused window so multi-window setups route to the right renderer.
  */
 function sendMenuCommand(command: string): void {
-  const win = BrowserWindow.getFocusedWindow() ?? getMainWindow();
-  if (win && !win.webContents.isDestroyed()) {
-    win.webContents.send('menu:command', command);
+  const contents = getActiveContents();
+  if (contents && !contents.isDestroyed()) {
+    if (command === 'open-settings') contents.focus();
+    contents.send('menu:command', command);
   }
 }
 
@@ -277,7 +287,16 @@ function buildMacMenu(config: MenuConfig): Menu {
             ]
           : []),
         { type: 'separator' },
-        { role: 'close', label: labels.close },
+        {
+          label: labels.close,
+          accelerator: 'CmdOrCtrl+W',
+          click: (_item, focusedWindow) => {
+            if (!focusedWindow) return;
+            if (focusedWindow === getMainWindow() && closeActiveTab)
+              closeActiveTab();
+            else focusedWindow.close();
+          },
+        },
       ],
     },
     {
@@ -350,8 +369,12 @@ function buildMacMenu(config: MenuConfig): Menu {
  */
 export function applyApplicationMenu(
   resolveMainWindow: () => BrowserWindow | null,
+  resolveActiveContents?: () => WebContents | null,
+  closeTab?: () => void,
 ): void {
   getMainWindow = resolveMainWindow;
+  if (resolveActiveContents) getActiveContents = resolveActiveContents;
+  closeActiveTab = closeTab;
   if (process.platform === 'darwin') {
     Menu.setApplicationMenu(buildMacMenu(DEFAULT_MENU_CONFIG));
   } else {

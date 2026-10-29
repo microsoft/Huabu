@@ -762,7 +762,7 @@ test('normally ended activity completes despite failed, stale or missing tool st
   await expect(
     activity(page)
       .getByRole('button', { name: 'Reading file 2' })
-      .locator('.text-danger'),
+      .locator('.text-danger-fg'),
   ).toBeVisible();
 });
 

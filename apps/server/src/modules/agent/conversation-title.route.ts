@@ -27,6 +27,7 @@ export function createConversationTitleRoutes(
   return async (fastify) => {
     fastify.post<{ Reply: ApiResult<QueryConversationTitlesResponse> }>(
       '/threads/titles/query',
+      { config: { spaceAccess: 'read' } },
       async (request, reply) => {
         const body = queryConversationTitlesBodySchema.safeParse(request.body);
         if (!body.success)

@@ -2,9 +2,19 @@
 // Licensed under the MIT license.
 
 import type { PreviewTarget } from './model';
+import type { ChatMessage } from '../chatTypes';
+
+export interface ChatViewportSnapshot {
+  scrollTop: number;
+  messageAnchor?: PreviewScrollPosition['messageAnchor'];
+  firstMessageId?: string;
+  tail?: ChatMessage;
+  atBottom: boolean;
+}
 
 export interface PreviewScrollPosition {
   scrollTop: number;
+  chatViewport?: ChatViewportSnapshot;
   pdfView?: {
     source: string;
     mode: 'width' | 'page' | 'custom';
@@ -53,13 +63,50 @@ export function readMessageListScrollBookmark(
     : undefined;
 }
 
+export function remapMessageListScrollAnchor(
+  viewKey: string,
+  aliases: ReadonlyMap<string, string>,
+): void {
+  const position = scrollPositionByViewKey.get(viewKey);
+  const previous = position?.messageAnchor;
+  const messageId = previous && aliases.get(previous.messageId);
+  if (!position || !previous || !messageId) return;
+  scrollPositionByViewKey.set(viewKey, {
+    ...position,
+    messageAnchor: { ...previous, messageId },
+  });
+}
+
+export function readChatViewport(
+  viewKey: string | undefined,
+): ChatViewportSnapshot | undefined {
+  return viewKey
+    ? scrollPositionByViewKey.get(viewKey)?.chatViewport
+    : undefined;
+}
+
+export function rememberChatViewport(
+  viewKey: string | undefined,
+  snapshot: ChatViewportSnapshot,
+): void {
+  if (!viewKey) return;
+  const previous = scrollPositionByViewKey.get(viewKey);
+  scrollPositionByViewKey.set(viewKey, {
+    ...previous,
+    scrollTop: previous?.scrollTop ?? snapshot.scrollTop,
+    chatViewport: snapshot,
+  });
+}
+
 export function previewTargetKey(target: PreviewTarget): string {
   return JSON.stringify(
-    target.kind === 'chat'
-      ? [target.kind, target.canvasId, target.threadId]
-      : target.kind === 'node'
-        ? [target.kind, target.canvasId, target.nodeId]
-        : [target.kind, target.canvasId, target.url],
+    target.kind === 'conversation'
+      ? [target.kind, target.canvasId, target.nodeId, target.threadId]
+      : target.kind === 'chat'
+        ? [target.kind, target.canvasId, target.threadId]
+        : target.kind === 'node'
+          ? [target.kind, target.canvasId, target.nodeId]
+          : [target.kind, target.canvasId, target.url],
   );
 }
 
@@ -109,35 +156,40 @@ export function rememberPreviewScrollPosition(
   });
 }
 
-export function rememberMessageListScrollAnchor(
+export function captureMessageListScrollAnchor(
   container: HTMLElement,
-  viewKey: string | undefined,
-): void {
-  if (!viewKey) return;
+): PreviewScrollPosition['messageAnchor'] {
   const containerTop = container.getBoundingClientRect().top;
   const anchor = Array.from(
     container.querySelectorAll<HTMLElement>('[data-chat-message-id]'),
   ).find((element) => element.getBoundingClientRect().bottom > containerTop);
   const messageId = anchor?.dataset.chatMessageId;
+  return anchor && messageId
+    ? {
+        messageId,
+        offsetTop: anchor.getBoundingClientRect().top - containerTop,
+      }
+    : undefined;
+}
+
+export function rememberMessageListScrollAnchor(
+  container: HTMLElement,
+  viewKey: string | undefined,
+): void {
+  if (!viewKey) return;
   scrollPositionByViewKey.set(viewKey, {
+    ...scrollPositionByViewKey.get(viewKey),
     scrollTop: Math.max(0, container.scrollTop),
-    ...(anchor && messageId
-      ? {
-          messageAnchor: {
-            messageId,
-            offsetTop: anchor.getBoundingClientRect().top - containerTop,
-          },
-        }
-      : {}),
+    messageAnchor: captureMessageListScrollAnchor(container),
   });
 }
 
 export function restorePreviewScrollPosition(
   container: HTMLElement,
   viewKey: string | undefined,
+  position = viewKey ? scrollPositionByViewKey.get(viewKey) : undefined,
 ): boolean {
   if (!viewKey) return false;
-  const position = scrollPositionByViewKey.get(viewKey);
   if (!position) return false;
   if (position.messageAnchor) {
     const anchor = Array.from(

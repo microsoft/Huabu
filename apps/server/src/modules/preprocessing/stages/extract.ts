@@ -8,6 +8,7 @@
  * No LLM, no persistence.
  */
 
+import { outboundFetch } from '../../security/outbound.js';
 import { DocumentLoaderFactory } from '../loaders/index.js';
 
 import type { ResolvedInput, ExtractResult } from '../types.js';
@@ -75,7 +76,7 @@ export async function extract(resolved: ResolvedInput): Promise<ExtractResult> {
 
     // Handle remote PDF URLs (e.g. arXiv: https://arxiv.org/pdf/<id>)
     if (artifactUri && REMOTE_URL_RE.test(artifactUri)) {
-      const response = await fetch(artifactUri);
+      const response = await outboundFetch(artifactUri);
       if (!response.ok) {
         throw new Error(
           `Failed to fetch remote PDF: ${response.status} ${response.statusText}`,

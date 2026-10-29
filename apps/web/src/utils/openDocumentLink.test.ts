@@ -4,7 +4,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { isElectron } from '@/hooks/useElectron';
-import { settleNodePreprocess } from '@/store/canvasStore';
 import { usePanelStore } from '@/store/panelStore';
 import { createEmptyWorkspace } from '@/store/previewWorkspace/model';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
@@ -14,7 +13,6 @@ import { openDocumentLink } from './openDocumentLink';
 vi.mock('@/hooks/useElectron', () => ({ isElectron: vi.fn() }));
 vi.mock('@/store/canvasStore', () => ({
   default: { getState: vi.fn() },
-  settleNodePreprocess: vi.fn(),
 }));
 vi.mock('@/store/chatStore', () => ({ useChatStore: { getState: vi.fn() } }));
 vi.mock('@/store/panelStore', () => {
@@ -67,11 +65,6 @@ describe.each([true, false])('document links in Electron=%s', (inElectron) => {
         expect(
           usePanelStore.getState().requestOpenRightPanel,
         ).toHaveBeenCalledOnce();
-        if (kind === 'node') {
-          expect(settleNodePreprocess).toHaveBeenCalledExactlyOnceWith('note');
-        } else {
-          expect(settleNodePreprocess).not.toHaveBeenCalled();
-        }
       } else {
         expect(window.open).toHaveBeenCalledExactlyOnceWith(
           'https://EXAMPLE.com:443/path?q=1#section',
@@ -79,7 +72,6 @@ describe.each([true, false])('document links in Electron=%s', (inElectron) => {
           'noopener,noreferrer',
         );
         expect(store().workspace).toBe(before);
-        expect(settleNodePreprocess).not.toHaveBeenCalled();
         expect(
           usePanelStore.getState().requestOpenRightPanel,
         ).not.toHaveBeenCalled();
@@ -110,7 +102,6 @@ describe.each([true, false])('document links in Electron=%s', (inElectron) => {
 
       expect(store().workspace).toBe(before);
       expect(window.open).not.toHaveBeenCalled();
-      expect(settleNodePreprocess).not.toHaveBeenCalled();
       expect(
         usePanelStore.getState().requestOpenRightPanel,
       ).not.toHaveBeenCalled();
@@ -133,6 +124,5 @@ describe.each([true, false])('document links in Electron=%s', (inElectron) => {
       );
       expect(Object.keys(store().workspace.tabs)).toHaveLength(0);
     }
-    expect(settleNodePreprocess).not.toHaveBeenCalled();
   });
 });

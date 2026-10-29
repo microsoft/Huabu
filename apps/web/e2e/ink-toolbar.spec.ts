@@ -30,7 +30,7 @@ test('Ink submission spinner stays centered throughout rotation and respects red
   await expect(send).toHaveAttribute('aria-busy', 'true');
   await expect(send).toBeDisabled();
   await expect(picker).toBeDisabled();
-  await expect(picker.locator('.text-warning')).toHaveCount(0);
+  await expect(picker.locator('.text-warning-fg')).toHaveCount(0);
   const spinner = send.locator('[data-loading-spinner]');
   await expect(spinner).toBeVisible();
   await expect(send.locator('.lucide-square')).toHaveCount(0);

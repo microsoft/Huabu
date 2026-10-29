@@ -176,7 +176,7 @@ for (const theme of ['light', 'dark'] as const) {
         .poll(() => poster.evaluate((el) => el.naturalWidth))
         .toBe(320);
       // Use the real Canvas HUD, not a simulated selected CSS class.
-      const outline = page.locator('.react-flow > div[style*="outline:"]');
+      const outline = page.locator('[data-node-selection-outline]');
       await page
         .locator('.react-flow__pane')
         .click({ position: { x: 40, y: 150 } });
@@ -253,7 +253,7 @@ for (const theme of ['light', 'dark'] as const) {
             ).toBeLessThanOrEqual(8);
         }
         const border = shell.locator('[data-node-media-border]');
-        await expect(border).toHaveCSS('border-left-width', '2px');
+        await expect(border).toHaveCSS('border-left-width', '1px');
         await expect(border).toHaveCSS('pointer-events', 'none');
       };
       await expect(node).not.toHaveClass(/selected/);
@@ -262,7 +262,7 @@ for (const theme of ['light', 'dark'] as const) {
       await node.click({ position: { x: 15, y: 15 } });
       await expect(node).toHaveClass(/selected/);
       await expect(outline).toHaveCount(1);
-      await expect(outline).toHaveCSS('outline-width', '1px');
+      await expect(outline).toHaveCSS('box-shadow', /0px 0px 0px 1\.5px$/);
       await assertBoundary('selected');
       if (zoom >= 0.3) {
         await node

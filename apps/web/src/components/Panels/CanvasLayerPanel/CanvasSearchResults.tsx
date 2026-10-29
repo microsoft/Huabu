@@ -567,17 +567,17 @@ export const CanvasSearchResults = (): React.JSX.Element => {
           user spots the warning before scrolling and knows the list
           is incomplete. */}
       {!error && truncated && (
-        <div className="border-edge-default bg-warning-bg/40 flex items-start gap-2 border-b px-3 py-2 text-xs">
+        <div className="border-edge-default bg-warning-bg flex items-start gap-2 border-b px-3 py-2 text-xs">
           <TriangleAlert
             size={14}
-            className="text-warning mt-0.5 shrink-0"
+            className="text-warning-fg mt-0.5 shrink-0"
             aria-hidden
           />
           <span className="text-fg-muted">{t('search.resultsTruncated')}</span>
         </div>
       )}
 
-      {error && <div className="text-danger px-3 py-3 text-xs">{error}</div>}
+      {error && <div className="text-danger-fg px-3 py-3 text-xs">{error}</div>}
 
       {!error && nodeGroups.length > 0 && (
         <Virtuoso

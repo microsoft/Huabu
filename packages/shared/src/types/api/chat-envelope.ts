@@ -80,6 +80,7 @@ export const inkRecognitionSchema = z
 export type InkRecognition = z.infer<typeof inkRecognitionSchema>;
 
 export const chatEnvelopeSchema = z.object({
+  requestId: z.string().min(1).max(128).optional(),
   user: z.object({
     text: z.string(),
     quotedComments: z.array(quotedCommentSchema).optional(),

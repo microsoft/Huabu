@@ -396,6 +396,111 @@ describe('moveCanvasSelection', () => {
     );
   });
 
+  it('refuses to copy an artifact cited from a Space the caller may not read', async () => {
+    createCanvas('source', 'Source');
+    createCanvas('destination', 'Destination');
+    createCanvas('private', 'Private');
+    await space('private').artifacts.put(
+      'artifact-secret.png',
+      Buffer.from('x'),
+    );
+    const seeded = await executeOnServer({
+      canvasId: 'source',
+      originator: { source: 'ui' },
+      commands: [
+        {
+          type: 'CREATE_NODES',
+          nodes: [
+            {
+              id: 'node-cited',
+              nodeType: 'image',
+              data: {
+                label: 'Cited',
+                src: '/api/canvas/private/artifact/artifact-secret.png',
+              },
+              position: { x: 0, y: 0 },
+              size: { width: 100, height: 100 },
+            },
+          ],
+        },
+      ],
+    });
+    const move = (canRead: boolean) =>
+      moveCanvasSelection(
+        'source',
+        {
+          selectedNodeIds: ['node-cited'],
+          destination: { kind: 'existing', canvasId: 'destination' },
+          createSourcePreview: false,
+          expectedSourceVersion: seeded.toVersion,
+        },
+        { canRead: async () => canRead, claim: async () => {} },
+      );
+
+    await expect(move(false)).rejects.toMatchObject({
+      code: 'MOVE_ARTIFACT_MISSING',
+    });
+    expect((await space('destination').nodes.list()).size).toBe(0);
+    expect((await space('source').read())?.state.nodes).toHaveLength(1);
+    await move(true);
+    expect((await space('destination').nodes.list()).size).toBe(1);
+  });
+
+  it('claims a new destination before moving content, and keeps the source when that fails', async () => {
+    createCanvas('source', 'Source');
+    const seeded = await executeOnServer({
+      canvasId: 'source',
+      originator: { source: 'ui' },
+      commands: [
+        {
+          type: 'CREATE_NODES',
+          nodes: [
+            {
+              id: 'node-claimed',
+              nodeType: 'note',
+              data: { label: 'Claimed', content: 'body' },
+              position: { x: 0, y: 0 },
+              size: { width: 200, height: 100 },
+            },
+          ],
+        },
+      ],
+    });
+    const move = (claim: (canvasId: string) => Promise<void>) =>
+      moveCanvasSelection(
+        'source',
+        {
+          selectedNodeIds: ['node-claimed'],
+          destination: { kind: 'new', title: 'Claimed destination' },
+          createSourcePreview: false,
+          expectedSourceVersion: seeded.toVersion,
+        },
+        { canRead: async () => true, claim },
+      );
+
+    await expect(
+      move(async () => {
+        throw new Error('grant store unavailable');
+      }),
+    ).rejects.toBeInstanceOf(Error);
+    expect((await space('source').read())?.state.nodes).toHaveLength(1);
+    expect(
+      (await getStructuredStore().spaces().list()).some(
+        (candidate) => candidate.title === 'Claimed destination',
+      ),
+    ).toBe(false);
+
+    const claimed: Array<[string, number]> = [];
+    const result = await move(async (canvasId) => {
+      claimed.push([
+        canvasId,
+        (await space('source').read())!.state.nodes.length,
+      ]);
+    });
+    // Claimed while the selection was still in the source.
+    expect(claimed).toEqual([[result.destination.canvasId, 1]]);
+  });
+
   it('creates a named destination Space and leaves its preview at the source', async () => {
     createCanvas('source', 'Source');
     const seeded = await executeOnServer({

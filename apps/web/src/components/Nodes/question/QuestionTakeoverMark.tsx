@@ -110,7 +110,6 @@ export function QuestionTakeoverMark({
 }: QuestionTakeoverMarkProps) {
   const chip = resolveQuestionBadgeChrome({
     status,
-    agent,
     unread,
     conflictCount,
   });
@@ -246,7 +245,7 @@ export function QuestionTakeoverMark({
             {chip.isApproval && (
               <span
                 title={conflictTooltip}
-                className="bg-warning text-fg-inverse absolute z-20 flex items-center justify-center rounded-full"
+                className="bg-warning-fg text-fg-inverse absolute z-20 flex items-center justify-center rounded-full"
                 style={{
                   width: satellite,
                   height: satellite,

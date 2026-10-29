@@ -3,6 +3,8 @@
 
 import { clsx } from 'clsx';
 
+import { resolveColorPresetCss } from '@/utils/accentColor';
+
 import { Button } from './Button';
 
 /**
@@ -27,7 +29,8 @@ export interface ColorPickerProps {
 
 /**
  * Reusable color picker palette — a row of circular swatches.
- * Identity is by `token`; the swatch background uses `value` for display only.
+ * Identity is by `token`; raw palette swatches follow the theme, while custom
+ * `value` overrides (such as highlight backgrounds) are used directly.
  *
  * Swatches whose `value` is `transparent` are rendered with a checkerboard
  * pattern so the "no fill / clear" option is visually distinct from a solid
@@ -42,6 +45,7 @@ export const ColorPicker = ({
     <div className="flex gap-0">
       {colors.map((c) => {
         const isTransparent = c.value === 'transparent' || !c.value;
+        const value = resolveColorPresetCss(c);
         return (
           <Button
             key={c.token}
@@ -72,7 +76,7 @@ export const ColorPicker = ({
                       backgroundSize: '6px 6px',
                       backgroundPosition: '0 0, 3px 3px',
                     }
-                  : { backgroundColor: c.value }
+                  : { backgroundColor: value ?? undefined }
               }
             />
           </Button>

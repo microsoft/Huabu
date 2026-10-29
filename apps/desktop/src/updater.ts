@@ -36,6 +36,14 @@ import { app, ipcMain, type BrowserWindow } from 'electron';
 // compiles to `require('electron-updater').autoUpdater`, which is correct.
 import { autoUpdater } from 'electron-updater';
 
+interface UpdaterDesktopHooks {
+  broadcast: (status: UpdateStatus) => void;
+  prepareInstall: () => Promise<void>;
+  cancelInstall: () => void;
+}
+
+let desktopHooks: UpdaterDesktopHooks | undefined;
+
 /**
  * Discriminated snapshot of the updater lifecycle mirrored to the
  * renderer. Keep this in lockstep with the `UpdateStatus` type declared
@@ -148,6 +156,10 @@ function normalizeReleaseNotes(
 }
 
 function publishStatus(getWindow: () => BrowserWindow | null): void {
+  if (desktopHooks) {
+    desktopHooks.broadcast(lastStatus);
+    return;
+  }
   const win = getWindow();
   if (win && !win.webContents.isDestroyed()) {
     win.webContents.send('update:status', lastStatus);
@@ -170,10 +182,12 @@ function setStatus(
  */
 export function registerUpdaterIpc(
   getWindow: () => BrowserWindow | null,
+  hooks?: UpdaterDesktopHooks,
 ): void {
   if (wired) return;
   wired = true;
   resolveWindow = getWindow;
+  desktopHooks = hooks;
 
   ipcMain.handle('update:get-state', (): UpdateStatus => lastStatus);
 
@@ -226,26 +240,40 @@ export function registerUpdaterIpc(
     }
   });
 
-  ipcMain.handle('update:install', (): UpdateActionResult => {
-    if (!isPackaged()) {
-      return {
-        ok: false,
-        error: 'Updates are only available in the installed app.',
+  ipcMain.handle(
+    'update:install',
+    (): UpdateActionResult | Promise<UpdateActionResult> => {
+      if (!isPackaged()) {
+        return {
+          ok: false,
+          error: 'Updates are only available in the installed app.',
+        };
+      }
+      // `quitAndInstall` triggers `before-quit`, so the main process's
+      // cooperative server-shutdown path still runs before the installer
+      // relaunches the app. On success the app quits; on failure (installer
+      // missing / cannot launch) electron-updater emits the shared `error`
+      // event — possibly asynchronously, since the installer is spawned
+      // detached — and with an error no operation promise claims. The shared
+      // listener therefore recognises it as the install failure (see
+      // `operationErrors`); `installOpActive` only gates raising the
+      // persistent "Update failed" badge for such an unclaimed error.
+      const install = (): UpdateActionResult => {
+        installOpActive = true;
+        setImmediate(() => autoUpdater.quitAndInstall());
+        return { ok: true };
       };
-    }
-    // `quitAndInstall` triggers `before-quit`, so the main process's
-    // cooperative server-shutdown path still runs before the installer
-    // relaunches the app. On success the app quits; on failure (installer
-    // missing / cannot launch) electron-updater emits the shared `error`
-    // event — possibly asynchronously, since the installer is spawned
-    // detached — and with an error no operation promise claims. The shared
-    // listener therefore recognises it as the install failure (see
-    // `operationErrors`); `installOpActive` only gates raising the
-    // persistent "Update failed" badge for such an unclaimed error.
-    installOpActive = true;
-    setImmediate(() => autoUpdater.quitAndInstall());
-    return { ok: true };
-  });
+      return desktopHooks
+        ? desktopHooks.prepareInstall().then(install, (error: unknown) => {
+            desktopHooks?.cancelInstall();
+            return {
+              ok: false,
+              error: error instanceof Error ? error.message : String(error),
+            };
+          })
+        : install();
+    },
+  );
 
   if (!isPackaged()) return;
 
@@ -301,6 +329,7 @@ export function registerUpdaterIpc(
         return;
       }
       if (installOpActive) {
+        desktopHooks?.cancelInstall();
         // After an install request, the one unclaimed error source is the
         // installer itself — surface it as the persistent "Update failed"
         // badge, even when it arrives async and even when a background

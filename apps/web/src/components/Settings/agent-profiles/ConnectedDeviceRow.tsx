@@ -1,272 +1,284 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { RefreshCw } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import {
+  ChevronDown,
+  ChevronRight,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+} from 'lucide-react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { ApiError } from '@/api/_client';
-import { discoverAcpAgentlet } from '@/api/acp';
 import { Button } from '@/components/Common/Button';
+import {
+  DropdownMenu,
+  DropdownMenuItem,
+} from '@/components/Common/DropdownMenu';
+import { dismissPopoversWithin } from '@/components/Common/Popover';
+import { TextInput } from '@/components/Common/TextInput';
 import { SettingRow } from '@/components/Settings/Common/SettingRow';
 import { useAcpProfilesStore } from '@/store/acpProfilesStore';
 
-import type {
-  AcpAgentletDiscoveryResponse,
-  ConnectedAgentletDevice,
-} from '@huabu/shared';
-import type { ParseKeys } from 'i18next';
-import type { ReactNode } from 'react';
+import { DeviceInformation } from './DeviceInformation';
 
-const ERROR_KEYS = new Map<string, ParseKeys>([
-  ['agentlet_unavailable', 'settings.deviceDetectionDisconnected'],
-  ['harness_discovery_stale', 'settings.deviceDetectionStale'],
-  ['harness_discovery_unsupported', 'settings.deviceDetectionUnsupported'],
-  ['harness_discovery_unavailable', 'settings.deviceDetectionUnavailable'],
-  [
-    'profile_registry_unavailable',
-    'settings.deviceDetectionRegistryUnavailable',
-  ],
-  [
-    'harness_reconciliation_failed',
-    'settings.deviceDetectionReconciliationFailed',
-  ],
-]);
-const DIAGNOSTIC_KEYS = new Map<string, ParseKeys>([
-  ['binary_missing', 'settings.deviceDetectionNotFound'],
-  ['adapter_missing', 'settings.deviceDetectionAdapterMissing'],
-  ['lookup_failed', 'settings.deviceDetectionLookupFailed'],
-  ['workspace_failed', 'settings.deviceDetectionWorkspaceFailed'],
-  ['version_unknown', 'settings.deviceDetectionVersionUnknown'],
-  ['version_probe_failed', 'settings.deviceDetectionVersionUnknown'],
-]);
+import type { AgentletDevice } from '@huabu/shared';
+import type { ReactNode, Ref } from 'react';
 
 export function ConnectedDeviceRow({
   device,
   isLocalDevice,
   connectionControls,
+  connectionError,
+  menuItems,
+  menuOpen,
+  onMenuOpenChange,
+  online = true,
+  children,
+  onAdd,
+  addRef,
+  profileCount = 0,
 }: {
-  device: ConnectedAgentletDevice;
+  device: AgentletDevice;
   isLocalDevice: boolean;
   connectionControls?: ReactNode;
+  connectionError?: string | null;
+  menuItems?: ReactNode;
+  menuOpen?: boolean;
+  onMenuOpenChange?: (open: boolean) => void;
+  online?: boolean;
+  children?: ReactNode;
+  onAdd?: () => void;
+  addRef?: Ref<HTMLButtonElement>;
+  profileCount?: number;
 }) {
   const { t } = useTranslation();
-  const refresh = useAcpProfilesStore((state) => state.refresh);
-  const requestRef = useRef<symbol | null>(null);
-  const [pending, setPending] = useState(false);
-  const [result, setResult] = useState<AcpAgentletDiscoveryResponse | null>(
-    null,
-  );
-  const [error, setError] = useState<string | null>(null);
-  const [refreshFailed, setRefreshFailed] = useState(false);
-  const [showDetails, setShowDetails] = useState(false);
+  const renameDevice = useAcpProfilesStore((state) => state.renameDevice);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(device.displayName);
+  const [saving, setSaving] = useState(false);
+  const [renameError, setRenameError] = useState<string | null>(null);
+  const savingRef = useRef(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const renameRef = useRef<HTMLButtonElement>(null);
+  const wasEditing = useRef(false);
+  const [expanded, setExpanded] = useState(true);
+  const profilesId = useId();
+  const profilesRef = useRef<HTMLDivElement>(null);
 
-  useEffect(
-    () => () => {
-      requestRef.current = null;
-    },
-    [],
-  );
-
-  const detect = async () => {
-    if (requestRef.current) return;
-    const request = Symbol();
-    requestRef.current = request;
-    setPending(true);
-    setResult(null);
-    setError(null);
-    setRefreshFailed(false);
-    setShowDetails(false);
-    try {
-      const response = await discoverAcpAgentlet(device.agentletId);
-      if (requestRef.current === request) setResult(response);
-    } catch (reason) {
-      if (requestRef.current === request) {
-        const key =
-          reason instanceof ApiError
-            ? ERROR_KEYS.get(reason.code ?? '')
-            : undefined;
-        let message = t(
-          reason instanceof ApiError && reason.status === 403
-            ? 'settings.deviceDetectionOwnerRequired'
-            : (key ?? 'settings.deviceDetectionUnavailable'),
-        );
-        const details = reason instanceof ApiError ? reason.details : undefined;
-        if (
-          details &&
-          typeof details === 'object' &&
-          'createdProfileIds' in details &&
-          Array.isArray(details.createdProfileIds) &&
-          details.createdProfileIds.every((id) => typeof id === 'string')
-        ) {
-          message += ` ${t('settings.deviceDetectionPartialCount', { count: details.createdProfileIds.length })}`;
-        }
-        setError(message);
-      }
+  useEffect(() => {
+    if (editing) {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    } else if (wasEditing.current) {
+      renameRef.current?.focus();
     }
-    // Even an interrupted reconciliation may have persisted some additions.
+    wasEditing.current = editing;
+  }, [editing]);
+
+  const saveName = async () => {
+    if (savingRef.current) return;
+    const name = draft.trim();
+    if (!name || name.length > 120) {
+      setRenameError(t('settings.deviceNameInvalid'));
+      return;
+    }
+    savingRef.current = true;
+    setSaving(true);
+    setRenameError(null);
     try {
-      await refresh({ afterMutation: true });
-    } catch {
-      if (requestRef.current === request) setRefreshFailed(true);
+      if (name !== device.displayName)
+        await renameDevice(device.agentletId, name);
+      setEditing(false);
+    } catch (reason) {
+      setRenameError(
+        reason instanceof Error
+          ? reason.message
+          : t('settings.deviceRenameFailed'),
+      );
     } finally {
-      if (requestRef.current === request) {
-        requestRef.current = null;
-        setPending(false);
-      }
+      savingRef.current = false;
+      setSaving(false);
     }
   };
 
-  const entries = result?.harnesses ?? [];
-  const ready = entries.filter((entry) => entry.status === 'ready').length;
-  const existing = entries.filter(
-    (entry) => entry.profileStatus === 'existing',
-  ).length;
-  const created = entries.filter(
-    (entry) => entry.profileStatus === 'created',
-  ).length;
-  const adapterMissing = entries.filter(
-    (entry) => entry.status === 'adapter-missing',
-  ).length;
-  const notFound = entries.filter(
-    (entry) => entry.status === 'not-found',
-  ).length;
-  const workspaceFailed = entries.filter(
-    (entry) => entry.status === 'ready' && entry.profileStatus === 'skipped',
-  ).length;
-
   return (
-    <div>
+    <div
+      className="border-edge-default mb-3 rounded-lg border"
+      data-device-id={device.agentletId}
+    >
       <SettingRow
         title={
-          <>
-            {device.displayName}
-            {isLocalDevice ? (
-              <span className="text-fg-muted ml-1 font-normal">
-                {t('settings.localAgentThisDevice')}
-              </span>
-            ) : null}
-          </>
-        }
-        description={[
-          t('settings.deviceProfileCount', { count: device.profileCount }),
-          `v${device.version}`,
-          device.agentletId,
-        ].join(' · ')}
-      >
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          {connectionControls}
-          <Button
-            variant="ghost"
-            size="sm"
-            iconOnly
-            title={t('settings.detectInstalledAgents')}
-            aria-label={t('settings.detectInstalledAgentsOnDevice', {
-              device: device.displayName,
-            })}
-            aria-busy={pending}
-            disabled={pending}
-            onClick={() => void detect()}
-          >
-            <RefreshCw
-              className={pending ? 'motion-safe:animate-spin' : undefined}
+          editing ? (
+            <TextInput
+              ref={inputRef}
+              aria-label={t('settings.deviceName')}
+              aria-invalid={!!renameError}
+              className="w-full"
+              value={draft}
+              maxLength={120}
+              disabled={saving}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                event.stopPropagation();
+                if (event.nativeEvent.isComposing || saving) return;
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  void saveName();
+                } else if (event.key === 'Escape') {
+                  event.preventDefault();
+                  setEditing(false);
+                  setRenameError(null);
+                }
+              }}
             />
-          </Button>
-        </div>
-      </SettingRow>
-      {pending || result || error || refreshFailed ? (
-        <div className="px-3.5 pb-3 text-xs [overflow-wrap:anywhere]">
-          {pending ? (
-            <p role="status" className="text-fg-muted">
-              {t('settings.deviceDetectionPending')}
-            </p>
-          ) : null}
-          {result ? (
-            <div role="status" className="text-fg-muted space-y-1">
-              <p>
-                {t('settings.deviceDetectionSummary', {
-                  ready,
-                  existing,
-                  created,
-                  adapterMissing,
-                  notFound,
-                })}
-              </p>
-              {workspaceFailed ? (
-                <p className="text-warning">
-                  {t('settings.deviceDetectionWorkspaceCount', {
-                    count: workspaceFailed,
-                  })}
-                </p>
-              ) : null}
-            </div>
-          ) : null}
-          {error ? (
-            <p role="alert" className="text-danger">
-              {error}
-            </p>
-          ) : null}
-          {refreshFailed ? (
-            <p role="alert" className="text-danger">
-              {t('settings.deviceDetectionRefreshFailed')}
-            </p>
-          ) : null}
-          {result && entries.length > 0 ? (
+          ) : (
+            <Button
+              variant="ghost"
+              size="field"
+              className="text-fg-default focus-visible:outline-info min-h-8 w-full min-w-0 justify-start gap-2 px-1 text-left focus-visible:outline-2 enabled:hover:bg-transparent"
+              aria-expanded={expanded}
+              aria-controls={profilesId}
+              onClick={() => {
+                if (expanded && profilesRef.current)
+                  dismissPopoversWithin(profilesRef.current);
+                setExpanded((value) => !value);
+              }}
+            >
+              {expanded ? (
+                <ChevronDown className="shrink-0" />
+              ) : (
+                <ChevronRight className="shrink-0" />
+              )}
+              <span className="flex min-w-0 items-baseline gap-1.5">
+                <span className="truncate" title={device.displayName}>
+                  {device.displayName}
+                </span>
+                {isLocalDevice ? (
+                  <span className="text-fg-muted shrink-0 text-xs font-normal">
+                    {t('settings.localAgentThisDevice')}
+                  </span>
+                ) : null}
+              </span>
+              {!expanded && (
+                <span className="text-fg-muted shrink-0 text-xs font-normal">
+                  {t('settings.deviceProfileCount', { count: profileCount })}
+                </span>
+              )}
+            </Button>
+          )
+        }
+        className="gap-2 px-2.5 py-1.5"
+      >
+        <div className="flex flex-wrap items-center justify-end gap-1">
+          {!editing && connectionControls}
+          {!online && !isLocalDevice && (
+            <span role="status" className="text-fg-muted px-2 text-xs">
+              {t('settings.localAgentDisabled')}
+            </span>
+          )}
+          {online && onAdd && !editing && (
+            <Button
+              variant="ghost"
+              size="field"
+              ref={addRef}
+              data-editor-trigger={`create:${device.agentletId}`}
+              onClick={onAdd}
+            >
+              <Plus />
+              {t('settings.addAgent')}
+            </Button>
+          )}
+          {editing ? (
             <>
+              <Button
+                size="sm"
+                disabled={saving}
+                onClick={() => void saveName()}
+              >
+                {t('actions.save')}
+              </Button>
               <Button
                 variant="ghost"
                 size="sm"
-                aria-expanded={showDetails}
-                onClick={() => setShowDetails((shown) => !shown)}
-                className="mt-1"
+                disabled={saving}
+                onClick={() => {
+                  setEditing(false);
+                  setRenameError(null);
+                }}
               >
-                {t('settings.deviceDetectionDetails')}
+                {t('actions.cancel')}
               </Button>
-              {showDetails ? (
-                <ul className="text-fg-muted mt-2 space-y-2">
-                  {entries.map((entry) => (
-                    <li key={entry.id}>
-                      <p className="text-fg-default font-medium">
-                        {entry.displayName}:{' '}
-                        {t(
-                          entry.status === 'adapter-missing'
-                            ? 'settings.deviceDetectionAdapterMissing'
-                            : entry.status === 'not-found'
-                              ? entry.diagnostics?.some(
-                                  (diagnostic) =>
-                                    diagnostic.code === 'lookup_failed',
-                                )
-                                ? 'settings.deviceDetectionLookupFailed'
-                                : 'settings.deviceDetectionNotFound'
-                              : entry.profileStatus === 'created'
-                                ? 'settings.deviceDetectionCreated'
-                                : entry.profileStatus === 'existing'
-                                  ? 'settings.deviceDetectionExisting'
-                                  : 'settings.deviceDetectionWorkspaceFailed',
-                        )}
-                      </p>
-                      {entry.status !== 'ready' && entry.installHint ? (
-                        <p>
-                          {t('settings.deviceDetectionInstallHint')}{' '}
-                          <code>{entry.installHint}</code>
-                        </p>
-                      ) : null}
-                      {entry.diagnostics?.map((diagnostic, index) => (
-                        <p key={`${diagnostic.code}-${index}`}>
-                          {t(
-                            DIAGNOSTIC_KEYS.get(diagnostic.code) ??
-                              'settings.deviceDetectionDiagnostic',
-                          )}
-                        </p>
-                      ))}
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
             </>
-          ) : null}
+          ) : (
+            <DropdownMenu
+              open={menuOpen}
+              onOpenChange={onMenuOpenChange}
+              align="bottom-right"
+              trigger={
+                <Button
+                  ref={renameRef}
+                  variant="ghost"
+                  size="field"
+                  iconOnly
+                  aria-label={t('settings.deviceActions', {
+                    device: device.displayName,
+                  })}
+                >
+                  <MoreHorizontal />
+                </Button>
+              }
+            >
+              {online && (
+                <DropdownMenuItem
+                  icon={<Pencil />}
+                  onClick={() => {
+                    onMenuOpenChange?.(false);
+                    setDraft(device.displayName);
+                    setRenameError(null);
+                    setEditing(true);
+                  }}
+                >
+                  {t('settings.renameDevice')}
+                </DropdownMenuItem>
+              )}
+              {menuItems}
+              <DeviceInformation device={device} />
+            </DropdownMenu>
+          )}
         </div>
-      ) : null}
+        {renameError ? (
+          <p
+            role="alert"
+            className="text-danger-fg mt-2 max-w-sm text-xs [overflow-wrap:anywhere]"
+          >
+            {renameError}
+          </p>
+        ) : null}
+      </SettingRow>
+      {connectionError && (
+        <p
+          role="alert"
+          className="text-danger-fg px-3.5 pb-2 text-xs [overflow-wrap:anywhere]"
+        >
+          {connectionError}
+        </p>
+      )}
+      <div
+        id={profilesId}
+        ref={profilesRef}
+        hidden={!expanded}
+        className="border-edge-default border-t py-1.5"
+      >
+        {profileCount ? (
+          children
+        ) : (
+          <p className="text-fg-muted px-8 py-2 text-xs">
+            {t('settings.noAgentConfigurations')}
+          </p>
+        )}
+      </div>
     </div>
   );
 }

@@ -16,6 +16,7 @@ import { readTypedSSEStream } from './_sse';
 
 import type {
   AgentBinding,
+  AgentConversationOwnerResponse,
   AgentHostStreamEvent,
   AgentInputKind,
   AgentMode,
@@ -31,6 +32,16 @@ import type {
   ForkThreadResponse,
   StopThreadResponse,
 } from '@huabu/shared';
+
+export function getAgentConversationOwner(canvasId: string, threadId: string) {
+  return apiFetch<AgentConversationOwnerResponse>(
+    routes.agentConversationOwner(canvasId, threadId),
+    {
+      cache: 'no-store',
+      fallbackMessage: 'Unable to load the Agent conversation owner',
+    },
+  );
+}
 
 // ==================== Stream Callbacks ====================
 
@@ -179,10 +190,11 @@ export const agentApi = {
   stopThread: async (
     threadId: string,
     canvasId?: string,
+    requestId?: string,
   ): Promise<StopThreadResponse> => {
     return await apiFetch<StopThreadResponse>(
       routes.agentStop(threadId, canvasId),
-      { method: 'POST' },
+      { method: 'POST', ...(requestId ? { json: { requestId } } : {}) },
     );
   },
 
@@ -240,6 +252,7 @@ export const agentApi = {
     mode: AgentMode,
     callbacks: AgentStreamCallbacks,
     options?: {
+      requestId?: AgentRequest['requestId'];
       inputKind?: AgentInputKind;
       canvasContext?: AgentChatContext;
       canvasId?: string;
@@ -287,6 +300,7 @@ export const agentApi = {
       content,
       inputKind: options?.inputKind,
       threadId,
+      requestId: options?.requestId,
       mode,
       canvasContext: options?.canvasContext,
       canvasId: options?.canvasId,

@@ -368,22 +368,25 @@ describe('MoveSelectionPopover', () => {
     );
   }
 
-  it('browses compact expandable rows and searches collapsed descendants', async () => {
+  it('expands one level by default, keeps deeper branches collapsed and respects manual collapse during search', async () => {
     await openPanel([
       { canvasId: 'destination', title: 'Destination' },
       { canvasId: 'child', title: 'Child', parentSpaceId: 'destination' },
+      { canvasId: 'grandchild', title: 'Grandchild', parentSpaceId: 'child' },
     ]);
-    expect(document.querySelector('button[aria-label="Child"]')).toBeNull();
+    expect(
+      document.querySelector('button[aria-label="Grandchild"]'),
+    ).toBeNull();
     const expand = document.querySelector<HTMLButtonElement>(
-      'button[aria-label="moveSelection.expand"]',
+      'button[aria-label="moveSelection.collapse"]',
     );
-    expect(expand?.getAttribute('aria-expanded')).toBe('false');
-    act(() => expand?.click());
+    expect(expand?.getAttribute('aria-expanded')).toBe('true');
     const child = document.querySelector('button[aria-label="Child"]');
     expect(child).not.toBeNull();
     expect(child?.textContent).toBe('Child');
     expect(moveCanvasSelection).not.toHaveBeenCalled();
     act(() => expand?.click());
+    expect(document.querySelector('button[aria-label="Child"]')).toBeNull();
     act(() => {
       Object.getOwnPropertyDescriptor(
         HTMLInputElement.prototype,
@@ -396,6 +399,24 @@ describe('MoveSelectionPopover', () => {
     expect(
       document.querySelector('button[aria-label="Child"]')?.textContent,
     ).toContain('Destination');
+    act(() => {
+      Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        'value',
+      )?.set?.call(destinationSelector(), '');
+      destinationSelector().dispatchEvent(
+        new Event('input', { bubbles: true }),
+      );
+    });
+    expect(document.querySelector('button[aria-label="Child"]')).toBeNull();
+    act(() =>
+      document
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label="moveSelection.expand"]',
+        )
+        ?.click(),
+    );
+    expect(document.querySelector('button[aria-label="Child"]')).not.toBeNull();
   });
 
   it('disables self and descendants of owned entries inside selected Frames, not ordinary shortcuts', async () => {

@@ -346,7 +346,7 @@ export function MilkdownLinkPopover({
           }}
         />
         {error ? (
-          <p id={`${id}-error`} role="alert" className="text-danger text-xs">
+          <p id={`${id}-error`} role="alert" className="text-danger-fg text-xs">
             {error}
           </p>
         ) : null}

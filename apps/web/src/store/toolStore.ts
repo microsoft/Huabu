@@ -2,9 +2,9 @@
 // Licensed under the MIT license.
 
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
 
 import { SKETCH_ERASER_RADIUS_SCREEN_PX } from '@/config/canvas';
+import { persistApplicationPreferences } from '@/utils/applicationPreferenceStore';
 
 import type { CanvasNodeType } from '@huabu/shared';
 
@@ -111,6 +111,18 @@ const DEFAULT_ERASER_SIZE_PRESETS: SketchSizePresets = [
 ];
 const DEFAULT_COLOR_PRESETS: SketchColorPresets = ['black', 'red', 'blue'];
 
+const DEFAULT_TOOL_PREFERENCES = {
+  sketchDraft: DEFAULT_SKETCH_DRAFT,
+  colorPresets: DEFAULT_COLOR_PRESETS,
+  strokeSizePresets: DEFAULT_STROKE_SIZE_PRESETS,
+  eraserSizePresets: DEFAULT_ERASER_SIZE_PRESETS,
+  activeColorPreset: 0,
+  activeStrokeSizePreset: 1,
+  activeEraserSizePreset: 0,
+  inputModePreference: 'auto',
+  penObserved: false,
+} satisfies Partial<ToolState>;
+
 /**
  * Toolbar / tool-settings store.
  *
@@ -126,25 +138,18 @@ const DEFAULT_COLOR_PRESETS: SketchColorPresets = ['black', 'red', 'blue'];
  * on persisted nodes/edges.
  */
 export const useToolStore = create<ToolState>()(
-  persist(
-    (set) => ({
+  persistApplicationPreferences(
+    (set, get) => ({
       pendingNodeType: null,
-      sketchDraft: DEFAULT_SKETCH_DRAFT,
-      colorPresets: DEFAULT_COLOR_PRESETS,
-      strokeSizePresets: DEFAULT_STROKE_SIZE_PRESETS,
-      eraserSizePresets: DEFAULT_ERASER_SIZE_PRESETS,
-      activeColorPreset: 0,
-      activeStrokeSizePreset: 1,
-      activeEraserSizePreset: 0,
-      inputModePreference: 'auto',
-      penObserved: false,
+      ...DEFAULT_TOOL_PREFERENCES,
       setPendingNodeType: (type) => set({ pendingNodeType: type }),
       setSketchDraft: (patch) =>
         set((state) => ({ sketchDraft: { ...state.sketchDraft, ...patch } })),
       setInputModePreference: (inputModePreference) =>
         set({ inputModePreference }),
-      observePen: () =>
-        set((state) => (state.penObserved ? state : { penObserved: true })),
+      observePen: () => {
+        if (!get().penObserved) set({ penObserved: true });
+      },
       selectSketchColorPreset: (index) =>
         set((state) => {
           const color = state.colorPresets[index];
@@ -207,6 +212,11 @@ export const useToolStore = create<ToolState>()(
     {
       name: 'huabu-sketch-tools',
       version: 3,
+      merge: (persisted, current) => ({
+        ...current,
+        ...DEFAULT_TOOL_PREFERENCES,
+        ...(persisted as Partial<ToolState> | undefined),
+      }),
       migrate: (persistedState, version) => {
         if (!persistedState) return persistedState as ToolState;
         const state = persistedState as Partial<ToolState>;

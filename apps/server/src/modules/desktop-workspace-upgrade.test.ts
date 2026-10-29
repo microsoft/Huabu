@@ -44,6 +44,7 @@ import { resetStorageCache } from './storage/index.js';
 import { setWorkspacePath } from './workspace.js';
 import workspaceRoutes from './workspace.route.js';
 import workspacesRoutes from './workspaces.route.js';
+import { registerLocalTestIdentity } from '../test-support/local-identity.js';
 
 import type { WorkspaceDescriptor, WorkspaceInfo } from '@huabu/shared';
 import type { FastifyInstance } from 'fastify';
@@ -65,6 +66,7 @@ describe('desktop upgrade to the plural Workspace registry', () => {
   /** Mount the Workspace plugins at the prefixes `app.ts` uses. */
   async function buildApp(): Promise<FastifyInstance> {
     const app = fastify();
+    registerLocalTestIdentity(app);
     await app.register(workspaceRoutes, { prefix: '/api/workspace' });
     await app.register(workspacesRoutes, { prefix: '/api/workspaces' });
     await app.ready();

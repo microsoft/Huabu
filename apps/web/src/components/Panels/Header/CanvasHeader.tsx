@@ -34,12 +34,6 @@ interface CanvasHeaderProps {
    */
   compact?: boolean;
   vertical?: boolean;
-  /**
-   * Opens the Keyboard Shortcuts modal. Forwarded to the default
-   * `<CanvasMenu />` so the dropdown can host the entry alongside
-   * Undo / Redo / Export.
-   */
-  onOpenShortcuts?: () => void;
 }
 
 /**
@@ -53,7 +47,6 @@ export const CanvasHeader: React.FC<CanvasHeaderProps> = ({
   onToggle,
   compact = false,
   vertical = false,
-  onOpenShortcuts,
 }) => {
   const { t } = useTranslation();
   const headerRef = useRef<HTMLElement>(null);
@@ -103,7 +96,7 @@ export const CanvasHeader: React.FC<CanvasHeaderProps> = ({
               <SpaceNavigation
                 widthBoundary={isCollapsed ? widthBoundaryRef : headerRef}
               >
-                <CanvasMenu onOpenShortcuts={onOpenShortcuts} />
+                <CanvasMenu />
               </SpaceNavigation>
             )}
           </div>

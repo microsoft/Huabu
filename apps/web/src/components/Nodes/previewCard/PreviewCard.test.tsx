@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PreviewCard, type PreviewCardProps } from './PreviewCard';
 import { previewCardMetricsForSize } from './previewCardDesign';
 import { FAR_ZOOM_DESIGN } from '../design/farZoomDesign';
-import { resolveNodeAccent } from '../design/nodeAccentPolicy';
+import { nodeAccentToken } from '../design/nodeAccentPolicy';
 import { nodeContentSpacingForWidth } from '../design/nodeSpacing';
 import { NODE_CARD_TYPOGRAPHY } from '../design/nodeTypography';
 import { noteSurfaceStyle } from '../note/noteDesign';
@@ -149,7 +149,7 @@ describe('PreviewCard', () => {
           });
           const card = cardElement();
           const expected = noteSurfaceStyle(
-            resolveNodeAccent(nodeType, 'teal'),
+            nodeAccentToken(nodeType, 'teal'),
           ) as Record<string, string>;
           expect(card.style.getPropertyValue('--note-surface-background')).toBe(
             expected['--note-surface-background'],
@@ -178,7 +178,7 @@ describe('PreviewCard', () => {
           .querySelector<HTMLElement>('.preview-card')
           ?.style.getPropertyValue('--note-surface-background'),
       );
-      expect(legacy).toContain('color-mix(');
+      expect(legacy).toBe('var(--accent-white-soft-bg)');
     },
   );
   it('hides only the Web source row in far mode and restores it without replacing the cover', () => {

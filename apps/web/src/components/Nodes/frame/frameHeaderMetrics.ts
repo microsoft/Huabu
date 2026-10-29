@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { resolveAccentCss } from '@/utils/accentColor';
+
 import { FRAME_DESIGN_CONFIG } from './frameDesign';
 import { isWhiteAccent } from '../design/accentTokens';
 
@@ -13,7 +15,9 @@ export interface FrameHeaderMetrics {
 }
 
 export function getFrameAccentMarkerColor(accent: string | null): string {
-  return !accent || isWhiteAccent(accent) ? 'var(--fg-muted)' : accent;
+  return !accent || isWhiteAccent(accent)
+    ? 'var(--fg-muted)'
+    : (resolveAccentCss(accent) ?? accent);
 }
 
 /**

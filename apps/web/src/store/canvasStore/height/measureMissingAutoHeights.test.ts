@@ -46,7 +46,7 @@ describe('auto toggle measurement', () => {
     ]);
     expect(measure).toHaveBeenCalledWith({
       markdown: '# hello',
-      contentWidth: 796,
+      contentWidth: 798,
       canvasId: 'c1',
     });
   });

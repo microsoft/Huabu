@@ -13,7 +13,7 @@ import { prepareAgentCanvasCommands } from './agent-command-preparation.js';
 
 describe('prepareAgentCanvasCommands', () => {
   it.each([
-    { height: 'auto', mode: 'auto', expectedHeight: 56 },
+    { height: 'auto', mode: 'auto', expectedHeight: 52 },
     { height: 180, mode: 'fixed', expectedHeight: 180 },
     { height: undefined, mode: 'fixed', expectedHeight: 300 },
   ] as const)(

@@ -5,6 +5,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 import type * as CanvasStore from '../src/store/canvasStore';
 import type * as WorkspaceStore from '../src/store/workspaceStore';
+import type { CanvasSummary } from '@huabu/shared';
 
 async function create(page: Page, title: string) {
   const response = await page.request.post('/api/canvas', { data: { title } });
@@ -14,6 +15,237 @@ async function create(page: Page, title: string) {
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem('huabu.language', 'en'));
+});
+
+test('Home moves an existing Space subtree and the current Space menu promotes it without changing content', async ({
+  page,
+}, testInfo) => {
+  const source = await create(page, 'Organize existing Space');
+  const destination = await create(page, 'Organize destination');
+  const childResponse = await page.request.post(
+    `/api/canvas/${source}/children`,
+    {
+      data: { title: 'Organize retained child' },
+    },
+  );
+  expect(childResponse.ok()).toBe(true);
+  const child = (await childResponse.json()).canvasId;
+  const seeded = await page.request.post(`/api/canvas/${source}/execute`, {
+    data: {
+      commands: [
+        {
+          type: 'CREATE_NODES',
+          nodes: [
+            {
+              id: 'node-retained-text',
+              nodeType: 'text',
+              data: { content: 'Keep this content and its position' },
+              position: { x: 120, y: 240 },
+            },
+          ],
+        },
+      ],
+      originator: { source: 'ui', tabId: 'e2e-organize' },
+    },
+  });
+  expect(seeded.ok()).toBe(true);
+  const original = await (
+    await page.request.get(`/api/canvas/${source}`)
+  ).json();
+
+  await page.goto('/spaces');
+  const homeTrigger = page.getByRole('button', {
+    name: 'Actions for Organize existing Space',
+    exact: true,
+  });
+  await homeTrigger.focus();
+  await homeTrigger.press('ArrowDown');
+  await page
+    .getByRole('menuitem', { name: 'Move into another Space', exact: true })
+    .click();
+  const dialog = page.getByRole('dialog', {
+    name: 'Move Organize existing Space',
+    exact: true,
+  });
+  await expect(dialog.getByRole('textbox')).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(homeTrigger).toBeFocused();
+  await homeTrigger.press('ArrowDown');
+  await page
+    .getByRole('menuitem', { name: 'Move into another Space', exact: true })
+    .click();
+  await expect(dialog).not.toHaveAttribute('aria-modal', 'true');
+  await dialog
+    .getByRole('textbox', { name: 'Search destination Spaces' })
+    .fill('Organize');
+  await expect(
+    dialog.getByRole('button', {
+      name: 'Organize existing Space',
+      exact: true,
+    }),
+  ).toHaveCount(0);
+  await expect(
+    dialog.getByRole('button', {
+      name: 'Organize retained child',
+      exact: true,
+    }),
+  ).toHaveCount(0);
+  await expect(
+    dialog.getByRole('button', { name: 'Top level', exact: true }),
+  ).toHaveCount(0);
+  await expect(dialog).not.toContainText('Current location:');
+  await expect(dialog).not.toContainText('will become a child Space');
+  const anchor = page.getByRole('button', {
+    name: 'Actions for Organize existing Space',
+    exact: true,
+  });
+  const anchorBounds = await anchor.boundingBox();
+  const desktopBounds = await dialog.boundingBox();
+  if (!anchorBounds || !desktopBounds)
+    throw new Error('Move popover anchor is not visible');
+  expect(desktopBounds.y).toBeGreaterThanOrEqual(
+    anchorBounds.y + anchorBounds.height,
+  );
+  expect(desktopBounds.y - anchorBounds.y - anchorBounds.height).toBeLessThan(
+    24,
+  );
+  await page.screenshot({
+    path: testInfo.outputPath('move-space-desktop.png'),
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(dialog.locator('..')).toHaveCSS('max-width', '358px');
+  const bounds = await dialog.boundingBox();
+  if (!bounds) throw new Error('Move dialog is not visible');
+  expect(bounds.x).toBeGreaterThanOrEqual(12);
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(378);
+  await page.screenshot({ path: testInfo.outputPath('move-space-mobile.png') });
+  await dialog
+    .getByRole('button', { name: 'Organize destination', exact: true })
+    .click();
+  await expect(dialog).toBeHidden();
+  await expect(page).toHaveURL(/\/spaces$/);
+  await expect(page.locator(`a[href="/canvas/${source}"]`)).toHaveCount(0);
+
+  const list = async (): Promise<CanvasSummary[]> =>
+    (await (await page.request.get('/api/canvas')).json()).canvases;
+  const nested = (await list()).find((space) => space.canvasId === source);
+  if (!nested) throw new Error('Moved Space is missing');
+  expect(nested.parentSpaceId).toBe(destination);
+  expect(
+    (await list()).find((space) => space.canvasId === child)?.parentSpaceId,
+  ).toBe(source);
+  const moved = await (await page.request.get(`/api/canvas/${source}`)).json();
+  expect(moved.state.nodes).toEqual(original.state.nodes);
+  expect(moved.state.edges).toEqual(original.state.edges);
+
+  await page.getByRole('tab', { name: 'All', exact: true }).click();
+  await page.locator(`a[href="/canvas/${source}"]`).click();
+  await expect(
+    page.getByRole('link', { name: 'Organize destination', exact: true }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Space menu', exact: true }).click();
+  await page
+    .getByRole('menuitem', { name: 'Move into another Space', exact: true })
+    .click();
+  await expect(dialog).not.toContainText('will remain as a shortcut');
+  await expect(
+    dialog.getByRole('button', { name: 'Move to top level', exact: true }),
+  ).toHaveCount(0);
+  const titleAnchor = await page
+    .getByRole('button', { name: 'Space menu', exact: true })
+    .boundingBox();
+  const titlePopover = await dialog.boundingBox();
+  if (!titleAnchor || !titlePopover)
+    throw new Error('Title popover anchor is not visible');
+  expect(titlePopover.y).toBeGreaterThanOrEqual(
+    titleAnchor.y + titleAnchor.height,
+  );
+  expect(titlePopover.y - titleAnchor.y - titleAnchor.height).toBeLessThan(24);
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Space menu', exact: true }).click();
+  await page
+    .getByRole('menu')
+    .screenshot({ path: testInfo.outputPath('promote-space-menu.png') });
+  await page
+    .getByRole('menuitem', { name: 'Move to top level', exact: true })
+    .click();
+  await expect(dialog).toBeHidden();
+  await expect(page).toHaveURL(new RegExp(`/canvas/${source}$`));
+  await expect
+    .poll(
+      async () =>
+        (await list()).find((space) => space.canvasId === source)
+          ?.parentSpaceId ?? null,
+    )
+    .toBeNull();
+  const promoted = (await list()).find((space) => space.canvasId === source);
+  expect(promoted).toBeDefined();
+  expect(promoted?.parentSpaceId ?? null).toBeNull();
+  expect(
+    (await list()).find((space) => space.canvasId === child)?.parentSpaceId,
+  ).toBe(source);
+  const parentRecord = await (
+    await page.request.get(`/api/canvas/${destination}`)
+  ).json();
+  expect(parentRecord.state.nodes).not.toContainEqual(
+    expect.objectContaining({
+      id: nested.parentEntryNodeId,
+      data: expect.objectContaining({ targetCanvasId: source }),
+    }),
+  );
+  await page.reload();
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute(
+    'aria-busy',
+    'false',
+  );
+  await expect(
+    page.getByRole('link', { name: 'Organize destination', exact: true }),
+  ).toHaveCount(0);
+
+  const reattach = await page.request.patch(`/api/canvas/${source}/parent`, {
+    data: { parentSpaceId: destination, expectedParentSpaceId: null },
+  });
+  expect(reattach.ok()).toBe(true);
+  const reattached = await reattach.json();
+  await page.goto('/spaces');
+  await page.getByRole('tab', { name: 'All', exact: true }).click();
+  await page
+    .getByRole('button', {
+      name: 'Actions for Organize existing Space',
+      exact: true,
+    })
+    .click();
+  await page
+    .getByRole('menuitem', { name: 'Move to top level', exact: true })
+    .click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect
+    .poll(
+      async () =>
+        (await list()).find((space) => space.canvasId === source)
+          ?.parentSpaceId ?? null,
+    )
+    .toBeNull();
+  await expect
+    .poll(async () => {
+      const record = await (
+        await page.request.get(`/api/canvas/${destination}`)
+      ).json();
+      return record.state.nodes.some(
+        (node: { id: string }) => node.id === reattached.parentEntryNodeId,
+      );
+    })
+    .toBe(false);
+  await page
+    .getByRole('button', {
+      name: 'Actions for Organize existing Space',
+      exact: true,
+    })
+    .click();
+  await expect(
+    page.getByRole('menuitem', { name: 'Move to top level', exact: true }),
+  ).toHaveCount(0);
 });
 
 test('cancelling child-Space deletion preserves separately selected edges', async ({
@@ -218,32 +450,26 @@ test('change-parent dialog initializes from metadata arriving after opening', as
   await page.goto(`/canvas/${child}`);
   await page.getByRole('button', { name: 'Space menu', exact: true }).click();
   await page
-    .getByRole('menuitem', { name: 'Change parent', exact: true })
+    .getByRole('menuitem', { name: 'Move into another Space', exact: true })
     .click();
   release();
   const dialog = page.getByRole('dialog', {
-    name: 'Change parent',
+    name: 'Move Review child',
     exact: true,
   });
   await expect(
-    dialog.getByRole('button', { name: 'Parent Space', exact: true }),
-  ).toBeEnabled();
+    dialog.getByRole('button', { name: 'Review root', exact: true }),
+  ).toBeDisabled();
   await expect(
-    dialog.getByRole('button', { name: 'Parent Space', exact: true }),
-  ).toHaveText('Review root');
-  await dialog
-    .getByRole('button', { name: 'Parent Space', exact: true })
-    .click();
-  await page
-    .getByRole('option', { name: 'Review destination', exact: true })
-    .click();
+    dialog.getByRole('button', { name: 'Review root', exact: true }),
+  ).toHaveAttribute('aria-pressed', 'true');
   const request = page.waitForResponse(
     (response) =>
       response.url().endsWith(`/api/canvas/${child}/parent`) &&
       response.request().method() === 'PATCH',
   );
   await dialog
-    .getByRole('button', { name: 'Change parent', exact: true })
+    .getByRole('button', { name: 'Review destination', exact: true })
     .click();
   const response = await request;
   expect(response.ok()).toBe(true);
@@ -441,41 +667,33 @@ test('change-parent conflict reloads the baseline and allows a fresh choice', as
   ).toBeVisible();
   await page.getByRole('button', { name: 'Space menu', exact: true }).click();
   await page
-    .getByRole('menuitem', { name: 'Change parent', exact: true })
+    .getByRole('menuitem', { name: 'Move into another Space', exact: true })
     .click();
   const dialog = page.getByRole('dialog', {
-    name: 'Change parent',
+    name: 'Move Conflict child',
     exact: true,
   });
-  const parent = dialog.getByRole('button', {
-    name: 'Parent Space',
-    exact: true,
-  });
-  await expect(parent).toBeEnabled();
-  await parent.click();
-  await page
-    .getByRole('option', { name: 'Chosen parent', exact: true })
-    .click();
+  await expect(
+    dialog.getByRole('button', { name: 'Chosen parent', exact: true }),
+  ).toBeVisible();
   const changed = await page.request.patch(`/api/canvas/${child}/parent`, {
     data: { parentSpaceId: concurrent, expectedParentSpaceId: original },
   });
   expect(changed.ok()).toBe(true);
   await dialog
-    .getByRole('button', { name: 'Change parent', exact: true })
+    .getByRole('button', { name: 'Chosen parent', exact: true })
     .click();
   await expect(dialog.getByRole('alert')).toContainText('Space parent changed');
-  await expect(parent).toHaveText('Concurrent parent');
-  await parent.click();
-  await page
-    .getByRole('option', { name: 'Chosen parent', exact: true })
-    .click();
+  await expect(
+    dialog.getByRole('button', { name: 'Concurrent parent', exact: true }),
+  ).toHaveAttribute('aria-pressed', 'true');
   const completion = page.waitForResponse(
     (response) =>
       response.url().endsWith(`/api/canvas/${child}/parent`) &&
       response.request().method() === 'PATCH',
   );
   await dialog
-    .getByRole('button', { name: 'Change parent', exact: true })
+    .getByRole('button', { name: 'Chosen parent', exact: true })
     .click();
   const completed = await completion;
   expect(completed.ok()).toBe(true);

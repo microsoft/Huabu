@@ -1,33 +1,17 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-/**
- * Shared accent-color derivation for canvas nodes.
- *
- * Both `SemanticPlaceholder` (minimal LOD) and `PreviewCard` (full LOD) render
- * the same node at different zoom levels. To avoid a visible color "jump" when
- * the LOD changes, both must derive their tinted tokens from the same formulas.
- * This module is the single source of truth for those formulas.
- */
+import { isAccentToken } from '@huabu/shared';
+
+import { resolveAccentCss } from '@/utils/accentColor';
 
 /** % of accent mixed into the default foreground for text/icon color. */
 const ACCENT_FG_MIX = 60;
 /** % of accent mixed over the surface for tinted backgrounds. */
 const ACCENT_BG_MIX = 15;
-/** % of accent over transparent for very subtle section tints. */
-const ACCENT_SOFT_MIX = 8;
-/**
- * % of accent over transparent for a solid node border.
- *
- * Edges use the raw accent at 100%. Node borders are thicker and cover a much
- * larger perimeter, so keeping them slightly quieter preserves hierarchy while
- * 75% remains close enough for a node and its same-accent edge to read as one
- * visual family.
- */
-const ACCENT_BORDER_MIX = 75;
-/** % of accent over transparent for a thin accent divider. */
+/** % of custom accent over the page background for section dividers. */
 const ACCENT_DIVIDER_MIX = 30;
-/** % of accent over transparent for inline text highlights. */
+/** % of custom accent over the surface for inline text highlights. */
 const ACCENT_HIGHLIGHT_BG_MIX = 25;
 
 /**
@@ -47,6 +31,8 @@ export function isWhiteAccent(accent: string): boolean {
 export interface AccentTokens {
   /** Foreground color for text and icons on accent-tinted surfaces. */
   fg: string;
+  /** Text-node foreground, calibrated against softBg rather than highlightBg. */
+  textFg: string;
   /** Background color for an accent-tinted surface. */
   bg: string;
   /** Solid accent border (e.g. card outline). */
@@ -59,7 +45,19 @@ export interface AccentTokens {
   highlightBg: string;
 }
 
+/** Preserve preset identity; only legacy/custom colors use runtime mixing. */
 export function getAccentTokens(accent: string): AccentTokens {
+  if (isAccentToken(accent)) {
+    return {
+      fg: `var(--accent-${accent}-fg)`,
+      textFg: `var(--accent-${accent}-text-fg)`,
+      bg: `var(--accent-${accent}-bg)`,
+      border: resolveAccentCss(accent),
+      divider: `var(--accent-${accent}-divider)`,
+      softBg: `var(--accent-${accent}-soft-bg)`,
+      highlightBg: `var(--accent-${accent}-highlight-bg)`,
+    };
+  }
   // White accent: keep text at the regular foreground color so it reads as
   // black (light theme) / white (dark theme) instead of mid-gray.
   const fg = isWhiteAccent(accent)
@@ -68,15 +66,11 @@ export function getAccentTokens(accent: string): AccentTokens {
 
   return {
     fg,
+    textFg: fg,
     bg: `color-mix(in srgb, ${accent} ${ACCENT_BG_MIX}%, var(--bg-surface))`,
-    // Use color-mix for alpha so any valid CSS color works (hex, keywords
-    // like `white`, `var(...)`, etc.). The previous hex-suffix approach
-    // produced invalid strings like `white80` for non-hex inputs, which the
-    // browser silently rejects -> the previous border color stayed in the
-    // inline style and the swatch appeared to "stick".
-    border: `color-mix(in srgb, ${accent} ${ACCENT_BORDER_MIX}%, var(--edge-default))`,
+    border: accent,
     divider: `color-mix(in srgb, ${accent} ${ACCENT_DIVIDER_MIX}%, var(--bg-default))`,
-    softBg: `color-mix(in srgb, ${accent} ${ACCENT_SOFT_MIX}%, var(--fg-default))`,
+    softBg: `color-mix(in srgb, color-mix(in srgb, ${accent} ${ACCENT_BG_MIX}%, var(--bg-surface)) 50%, var(--bg-note-surface))`,
     highlightBg: `color-mix(in srgb, ${accent} ${ACCENT_HIGHLIGHT_BG_MIX}%, var(--bg-surface))`,
   };
 }

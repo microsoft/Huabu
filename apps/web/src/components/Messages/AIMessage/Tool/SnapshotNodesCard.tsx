@@ -16,10 +16,10 @@ import { Camera, X as XIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { NodeRef } from '@/components/Nodes/NodeRef/NodeRef';
+import { useChatSession } from '@/hooks/useChatSession';
 
 import { partIsExecuting } from './helpers';
 import { resolveArtifactUrl } from '../../../../api/artifact';
-import useCanvasStore from '../../../../store/canvasStore';
 import { Loading } from '../../../Common/Loading';
 import { AssistantDisclosure } from '../../AssistantDisclosure';
 
@@ -55,7 +55,7 @@ function pickDataFields(part: SnapshotNodesToolPart): {
 
 export function SnapshotNodesCard({ part }: SnapshotNodesCardProps) {
   const { t } = useTranslation();
-  const canvasId = useCanvasStore((s) => s.canvasId);
+  const { ownerCanvasId: canvasId } = useChatSession();
   const { nodeIds, snapshots, error: rawError } = pickDataFields(part);
   const executing = partIsExecuting(part);
   const failed = part.status === 'failed' || rawError !== undefined;
@@ -89,9 +89,9 @@ export function SnapshotNodesCard({ part }: SnapshotNodesCardProps) {
 
   // ── Icon ───────────────────────────────────────────────────────────
   const icon = executing ? (
-    <Loading layout="inline" size="xs" className="text-info" />
+    <Loading layout="inline" size="xs" className="text-info-fg" />
   ) : failed ? (
-    <XIcon size={12} className="text-danger" />
+    <XIcon size={12} className="text-danger-fg" />
   ) : (
     <Camera size={12} className="text-fg-muted/60" />
   );
@@ -101,7 +101,7 @@ export function SnapshotNodesCard({ part }: SnapshotNodesCardProps) {
     snapshots.length > 0 || error ? (
       <div className="border-edge-default/40 ml-4 flex flex-col gap-2 border-l py-2 pl-3">
         {error ? (
-          <div className="text-danger bg-bg-default rounded-sm px-2 py-1 text-xs whitespace-pre-wrap">
+          <div className="text-danger-fg bg-bg-default rounded-sm px-2 py-1 text-xs whitespace-pre-wrap">
             {error}
           </div>
         ) : null}

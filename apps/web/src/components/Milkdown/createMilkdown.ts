@@ -48,7 +48,7 @@ import { canJoin } from '@milkdown/prose/transform';
 import { Decoration, DecorationSet } from '@milkdown/prose/view';
 import { $markSchema, $prose, $remark, replaceAll } from '@milkdown/utils';
 
-import { isAccentToken, resolveAccent, type AccentToken } from '@huabu/shared';
+import { isAccentToken, type AccentToken } from '@huabu/shared';
 import { fingerprintMarkdownKeys } from '@huabu/shared/canvas-engine';
 
 import { toast } from '@/components/Common/Toast';
@@ -606,8 +606,7 @@ function colorCssForAccent(
   token: AccentToken,
   kind: 'text' | 'background',
 ): string {
-  const accent = resolveAccent(token) ?? token;
-  const tokens = getAccentTokens(accent);
+  const tokens = getAccentTokens(token);
   return kind === 'text' ? tokens.fg : tokens.highlightBg;
 }
 

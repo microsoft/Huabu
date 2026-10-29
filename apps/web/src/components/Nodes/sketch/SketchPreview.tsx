@@ -3,7 +3,7 @@
 
 import { memo, useMemo } from 'react';
 
-import { resolveAccent } from '@huabu/shared';
+import { resolveAccentCss } from '@/utils/accentColor';
 
 import {
   pointsToPath,
@@ -32,7 +32,7 @@ export const SketchPreview = memo(({ data }: PreviewComponentProps) => {
     return strokes.map((s) => ({
       id: s.id,
       d: pointsToPath(s.points, 1, s.size ?? DEFAULT_STROKE_SIZE),
-      fill: resolveAccent(s.color) ?? s.color ?? DEFAULT_STROKE_COLOR,
+      fill: resolveAccentCss(s.color) ?? s.color ?? DEFAULT_STROKE_COLOR,
     }));
   }, [sketchData.strokes]);
 

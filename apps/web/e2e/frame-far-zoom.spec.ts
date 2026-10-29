@@ -333,6 +333,51 @@ async function zoomTo(page: Page, zoom: number) {
   }, zoom);
 }
 
+test('neutral Frame count uses the existing opaque hover surface in both themes', async ({
+  page,
+}) => {
+  const audit = await mountFrames(page, {
+    accent: 'white',
+    regionTitle: 'Project notes',
+  });
+  await zoomTo(page, 0.09);
+  const count = region(page, 'outer').locator('[data-frame-region-count]');
+  await expect(count).toBeVisible();
+  for (const dark of [false, true]) {
+    await page.evaluate(
+      (dark) => document.documentElement.classList.toggle('dark', dark),
+      dark,
+    );
+    const colors = await count.evaluate((el) => {
+      const probe = document.createElement('span');
+      probe.style.cssText = 'background:var(--bg-hover);color:var(--fg-muted)';
+      el.after(probe);
+      const expected = getComputedStyle(probe);
+      const actual = getComputedStyle(el);
+      const result = {
+        background: actual.backgroundColor,
+        color: actual.color,
+        expectedBackground: expected.backgroundColor,
+        expectedColor: expected.color,
+      };
+      probe.remove();
+      return result;
+    });
+    expect(colors.background).toBe(colors.expectedBackground);
+    expect(colors.color).toBe(colors.expectedColor);
+    await expect(count).toHaveCSS('opacity', '1');
+    await page.screenshot({
+      path: test.info().outputPath(`frame-${dark ? 'dark' : 'light'}.png`),
+      clip: { x: 40, y: 40, width: 220, height: 110 },
+    });
+  }
+  expect(await page.evaluate(() => window.frameZoomFixture.snapshot())).toEqual(
+    audit.snapshot,
+  );
+  expect(audit.writes).toEqual([]);
+  expect(audit.errors).toEqual([]);
+});
+
 for (const contentSize of [
   { width: 100, height: 80 },
   { width: 1000, height: 600 },

@@ -27,6 +27,8 @@ import { API_CONFIG } from '../config/api';
 import type { ApiErrorBody } from '@huabu/shared';
 
 export const RATE_LIMITED_EVENT = 'huabu:rate-limited';
+/** A request was refused for want of a login, as when a session expires. */
+export const AUTH_REQUIRED_EVENT = 'huabu:auth-required';
 
 export interface RateLimitedEventDetail {
   retryAfterSeconds: number;
@@ -128,6 +130,12 @@ export async function apiErrorFromResponse(
     body.details = { retryAfterSeconds: seconds };
     notifyRateLimited({ retryAfterSeconds: seconds });
   }
+  if (
+    response.status === 401 &&
+    body.code === 'IDENTITY_REQUIRED' &&
+    typeof window !== 'undefined'
+  )
+    window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT));
   return new ApiError(response.status, body, fallback);
 }
 

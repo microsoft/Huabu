@@ -92,7 +92,7 @@ export const AcpSessionSelectors = ({
     error && !loading ? (
       <span
         role="alert"
-        className="text-danger inline-flex items-center gap-1 text-xs"
+        className="text-danger-fg inline-flex items-center gap-1 text-xs"
       >
         <span>{error.message}</span>
         {onRetry && (
@@ -251,7 +251,7 @@ export const AcpSessionSelectors = ({
             <div className="flex items-start gap-2.5">
               <TriangleAlert
                 aria-hidden="true"
-                className="text-warning mt-0.5 h-4 w-4 shrink-0"
+                className="text-warning-fg mt-0.5 h-4 w-4 shrink-0"
               />
               <div className="min-w-0">
                 <h3

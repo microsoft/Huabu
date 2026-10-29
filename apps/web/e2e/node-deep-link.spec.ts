@@ -5,6 +5,104 @@ import { expect, test } from '@playwright/test';
 
 import { openNewCanvas, paneCenter, readViewportTransform } from './helpers';
 
+test('keeps a deep-linked Question unread after reload until conversation interaction', async ({
+  page,
+}) => {
+  await page.addInitScript(() => localStorage.setItem('huabu.language', 'en'));
+  const created = await page.request.post('/api/canvas', {
+    data: { title: 'Deep-link read intent' },
+  });
+  expect(created.ok()).toBe(true);
+  const { canvasId } = await created.json();
+  const nodeId = 'node-deep-link-agent';
+  const added = await page.request.post(`/api/canvas/${canvasId}/execute`, {
+    data: {
+      commands: [
+        {
+          type: 'CREATE_NODES',
+          nodes: [
+            {
+              id: nodeId,
+              nodeType: 'question',
+              position: { x: 100, y: 100 },
+              data: {
+                label: 'Unread result',
+                content: 'Review this',
+                agentBinding: { kind: 'internal' },
+              },
+            },
+          ],
+        },
+      ],
+      originator: { source: 'ui', tabId: 'deep-link-read-test' },
+    },
+  });
+  expect(added.ok(), await added.text()).toBe(true);
+  const associated = await page.request.post(
+    `/api/canvas/${canvasId}/nodes/${nodeId}/association`,
+    { data: { kind: 'initialize' } },
+  );
+  expect(associated.ok(), await associated.text()).toBe(true);
+  const { node: agent } = await associated.json();
+  const threadId = agent.data.threadId;
+  await page.route(`**/api/canvas/${canvasId}`, async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    const question = body.state.nodes.find(
+      (entry: { id: string }) => entry.id === nodeId,
+    );
+    Object.assign(question.data, {
+      status: 'done',
+      invocationToken: 'deep-link-run',
+      viewed: false,
+    });
+    await route.fulfill({ response, json: body });
+  });
+  await page.route(`**/api/agent/history/${threadId}/page?**`, (route) =>
+    route.fulfill({
+      json: {
+        threadId,
+        hasMore: false,
+        turns: [
+          {
+            id: 'turn-1',
+            messages: [
+              { role: 'user', content: 'Review this' },
+              {
+                role: 'assistant',
+                parts: [{ kind: 'text', text: 'A result waiting to be read.' }],
+              },
+            ],
+          },
+        ],
+      },
+    }),
+  );
+  const acknowledgements: string[] = [];
+  await page.route(
+    `**/api/canvas/${canvasId}/nodes/${nodeId}/viewed`,
+    async (route) => {
+      acknowledgements.push(route.request().postDataJSON().invocationToken);
+      await route.fulfill({ json: { acknowledged: true } });
+    },
+  );
+
+  await page.goto(`/canvas/${canvasId}?node=${nodeId}`);
+  for (const reload of [false, true]) {
+    if (reload) await page.reload();
+    await expect(page.getByText('A result waiting to be read.')).toBeVisible();
+    await page.evaluate(async () => {
+      window.dispatchEvent(new Event('focus'));
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      );
+    });
+    expect(acknowledgements).toEqual([]);
+  }
+  await page.locator('textarea').last().click();
+  await expect.poll(() => acknowledgements).toContain('deep-link-run');
+});
+
 test('copies and restores a Note deep link without repeated viewport takeover', async ({
   context,
   page,

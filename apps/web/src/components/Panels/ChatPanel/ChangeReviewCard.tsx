@@ -212,7 +212,7 @@ function ChangeRow({
         {conflicted && (
           <AlertTriangle
             size={12}
-            className="text-warning shrink-0"
+            className="text-warning-fg shrink-0"
             aria-label={t('chat.skippedConflictAria')}
           />
         )}
@@ -251,7 +251,7 @@ function ChangeRow({
         )}
         {conflicted && (
           <Tooltip content={t('chat.skippedConflictTooltip')}>
-            <span className="text-warning shrink-0 cursor-help whitespace-nowrap">
+            <span className="text-warning-fg shrink-0 cursor-help whitespace-nowrap">
               · {t('chat.skipped')}
             </span>
           </Tooltip>

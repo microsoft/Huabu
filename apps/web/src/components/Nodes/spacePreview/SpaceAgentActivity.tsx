@@ -26,12 +26,10 @@ import type {
 
 const BADGE_LAYOUT = 'gap-1.5 rounded-md py-[3px]';
 const BADGE_STATUS_CLASSES: Record<SpaceCardAgent['status'], string> = {
-  running:
-    'bg-info-bg text-[color:color-mix(in_srgb,var(--info)_65%,var(--fg-default))] enabled:hover:bg-info-bg-hover',
-  approval:
-    'bg-warning-bg text-[color:color-mix(in_srgb,var(--warning)_65%,var(--fg-default))] enabled:hover:bg-warning-bg-hover',
-  error: 'bg-danger-bg text-danger enabled:hover:bg-danger-bg-hover',
-  unread: 'bg-success-bg text-success enabled:hover:bg-success-bg-hover',
+  running: 'bg-info-bg text-info-fg enabled:hover:bg-info-bg-hover',
+  approval: 'bg-warning-bg text-warning-fg enabled:hover:bg-hover',
+  error: 'bg-danger-bg text-danger-fg enabled:hover:bg-hover',
+  unread: 'bg-success-bg text-success-fg enabled:hover:bg-hover',
   unknown: 'bg-hover text-fg-muted enabled:hover:bg-edge-default',
   idle: 'bg-hover text-fg-muted enabled:hover:bg-edge-default',
 };
@@ -175,7 +173,7 @@ export function SpaceAgentActivity({
           <span
             role="status"
             aria-label={unavailableDescription}
-            className="text-warning block truncate"
+            className="text-warning-fg block truncate"
           >
             {unavailableLabel}
           </span>

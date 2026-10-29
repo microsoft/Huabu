@@ -21,6 +21,8 @@ import {
   AGENT_HOST_SSE_EVENTS,
   AGENT_SSE_EVENTS,
   agentCanvasIdQuerySchema,
+  agentConversationOwnerQuerySchema,
+  agentConversationOwnerResponseSchema,
   agentHistoryPageParamsSchema,
   agentHistoryPageQuerySchema,
   agentRequestSchema,
@@ -28,6 +30,7 @@ import {
   forkThreadBodySchema,
   setChatThreadModelRequestSchema,
   setChatThreadReasoningEffortRequestSchema,
+  stopThreadBodySchema,
 } from '@huabu/shared';
 
 import {
@@ -43,6 +46,7 @@ import { InkModelCapabilityError } from '../agent/agent-submission.js';
 import { AgentThreadResolutionError } from '../agent/agent-thread-resolver.js';
 import {
   AgentThreadBusyError,
+  AgentRequestStoppedError,
   agentThreadService,
 } from '../agent/agent-thread.service.js';
 import {
@@ -51,6 +55,8 @@ import {
 } from '../agent/conversation/envelope.js';
 import { buildHistoryFromTurns } from '../agent/conversation/transcript/history.js';
 import { getLLMModel } from '../agent/llm.js';
+import { hydrateCanvasNodes } from '../canvas/canvas-executor.js';
+import { space } from '../storage/index.js';
 import { canvasAcpNamespace } from '../workspace/paths.js';
 
 import type { ControlMsg, Namespace } from '@agenetes/protocol';
@@ -71,7 +77,9 @@ import type {
   ForkThreadResponse,
   SetChatThreadSettingResponse,
   StopThreadResponse,
+  StopThreadBody,
 } from '@huabu/shared';
+import type { CanvasNode } from '@huabu/shared/canvas-engine';
 import type { FastifyPluginAsync } from 'fastify';
 
 // ==================== Helpers ====================
@@ -178,6 +186,77 @@ const agentRoutes: FastifyPluginAsync = async (
   _opts,
 ): Promise<void> => {
   await fastify.register(conversationTitleRoutes);
+
+  fastify.get('/owner/:threadId', async (request, reply) => {
+    const params = agentHistoryPageParamsSchema.safeParse(request.params);
+    const query = agentConversationOwnerQuerySchema.safeParse(request.query);
+    if (!params.success || !query.success) {
+      return reply.code(400).send({ message: 'Invalid conversation address' });
+    }
+    const { canvasId } = query.data;
+    const { threadId } = params.data;
+    try {
+      const owner = await agentThreadResolver.resolveAgentNode(
+        canvasId,
+        threadId,
+      );
+      if (!owner) {
+        return reply.code(404).send({
+          message:
+            'The Agent conversation no longer has an owner in this Space',
+          code: 'conversation_owner_missing',
+        });
+      }
+      const canvas = await space(canvasId).read();
+      const node = (canvas?.state.nodes as CanvasNode[] | undefined)?.find(
+        (candidate) => candidate.id === owner.nodeId,
+      );
+      if (
+        !node ||
+        node.type !== 'question' ||
+        node.data?.threadId !== threadId
+      ) {
+        return reply.code(409).send({
+          message: 'The Agent conversation owner changed',
+          code: 'conversation_owner_mismatch',
+        });
+      }
+      const record = await space(canvasId).nodes.read(owner.nodeId);
+      if (!record) {
+        return reply.code(404).send({
+          message: 'The Agent node content is unavailable',
+          code: 'missing_node_content',
+        });
+      }
+      const hydrated = hydrateCanvasNodes(new Map([[node.id, record]]), [
+        node,
+      ])[0];
+      return reply.header('Cache-Control', 'no-store').send(
+        agentConversationOwnerResponseSchema.parse({
+          canvasId,
+          nodeId: owner.nodeId,
+          threadId,
+          spaceTitle: canvas?.title ?? null,
+          source: {
+            ...hydrated.data,
+            hasAuthoredContent:
+              typeof hydrated.data.content === 'string' &&
+              hydrated.data.content.trim().length > 0,
+            agentBinding: owner.agentBinding,
+            agentLaunchOverrides: owner.launchOverrides,
+          },
+        }),
+      );
+    } catch (error) {
+      if (error instanceof AgentThreadResolutionError) {
+        return reply.code(error.code === 'canvas_not_found' ? 404 : 409).send({
+          message: error.message,
+          code: error.code,
+        });
+      }
+      throw error;
+    }
+  });
 
   fastify.get<{
     Params: AgentHistoryPageParams;
@@ -369,15 +448,28 @@ const agentRoutes: FastifyPluginAsync = async (
   fastify.post<{
     Params: { threadId: string };
     Querystring: AgentCanvasIdQuery;
+    Body: StopThreadBody;
     Reply: ApiResult<StopThreadResponse>;
   }>('/stop/:threadId', async function (request, reply) {
-    const { threadId } = request.params;
+    const parsedParams = agentHistoryPageParamsSchema.safeParse(request.params);
+    if (!parsedParams.success) {
+      return reply.code(400).send({ message: 'Invalid parameters' });
+    }
+    const { threadId } = parsedParams.data;
+    const parsedBody = stopThreadBodySchema.safeParse(request.body ?? {});
+    if (!parsedBody.success) {
+      return reply.code(400).send({ message: 'Invalid body' });
+    }
     const parsedQuery = agentCanvasIdQuerySchema.safeParse(request.query);
     if (!parsedQuery.success) {
       return reply.code(400).send({ message: 'Invalid query parameters' });
     }
     return reply.send(
-      await agentThreadService.stopAndWait(threadId, parsedQuery.data.canvasId),
+      await agentThreadService.stopAndWait(
+        threadId,
+        parsedQuery.data.canvasId,
+        parsedBody.data.requestId,
+      ),
     );
   });
 
@@ -673,6 +765,7 @@ const agentRoutes: FastifyPluginAsync = async (
       inputKind,
       content,
       threadId,
+      requestId,
       mode = 'ask',
       canvasContext,
       canvasId,
@@ -692,6 +785,7 @@ const agentRoutes: FastifyPluginAsync = async (
     const preparation = agentThreadService.beginPreparation(
       resolvedThreadId,
       canvasId,
+      requestId,
     );
     let preparationFinished = false;
     const finishPreparation = () => {
@@ -764,8 +858,8 @@ const agentRoutes: FastifyPluginAsync = async (
     // message INSIDE the dispatch layer (runAgent / runAcpAgent), so both
     // backends share one render timing and it never enters the persisted
     // transcript (it is re-derived from the envelope on reload).
-    const envelope = () =>
-      buildChatEnvelope({
+    const envelope = async () => ({
+      ...(await buildChatEnvelope({
         inputKind,
         content,
         attachments,
@@ -778,7 +872,9 @@ const agentRoutes: FastifyPluginAsync = async (
         canvasId: canvasId ?? null,
         logger: request.log,
         signal: preparation.signal,
-      });
+      })),
+      ...(requestId ? { requestId } : {}),
+    });
     // Debug-prompt metadata forwarded to the dispatch layer (it assembles
     // the final prompt). No-op unless HUABU_DEBUG_PROMPT is set.
     const debugPrompt = {
@@ -795,6 +891,7 @@ const agentRoutes: FastifyPluginAsync = async (
     try {
       invocation = await agentThreadService.invoke({
         threadId: resolvedThreadId,
+        requestId,
         canvasId,
         content,
         mode: effectiveMode,
@@ -835,7 +932,10 @@ const agentRoutes: FastifyPluginAsync = async (
           code: error.code,
         });
       }
-      if (preparation.signal.aborted) {
+      if (
+        preparation.signal.aborted ||
+        error instanceof AgentRequestStoppedError
+      ) {
         return reply.code(409).send({
           message: 'The Agent request was stopped before execution.',
           code: 'request_stopped',

@@ -101,7 +101,7 @@ describe('warmupNodeHeights', () => {
     });
     expect(
       measureNoteHeight.mock.calls.map(([request]) => request.contentWidth),
-    ).toEqual([396, 796]);
+    ).toEqual([398, 798]);
     expect(result.nodes.map((node) => node.style?.height)).toEqual([124, 124]);
     expect(
       result.nodes.map(

@@ -9,10 +9,7 @@
  * `@codemirror/lang-markdown` for syntax highlighting and nested
  * code-fence parsing.
  *
- * Intentionally **uses CodeMirror's default light theme** for the
- * first iteration — we want to evaluate the out-of-the-box look
- * before investing in a Huabu-flavoured theme that maps onto our
- * design tokens.
+ * Uses Huabu's semantic-token theme for both light and dark surfaces.
  *
  * API mirrors the textarea it replaces in `NotePreview`:
  *   - `value`     — current markdown (source of truth)

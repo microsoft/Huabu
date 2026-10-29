@@ -2,7 +2,7 @@
 // Licensed under the MIT license.
 
 import { DndContext } from '@dnd-kit/core';
-import { act, useState, type ComponentProps } from 'react';
+import { act, useEffect, useState, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import {
   afterEach,
@@ -25,12 +25,17 @@ import {
 } from '@/api/conversationTitles';
 import { Button } from '@/components/Common/Button';
 import { toast } from '@/components/Common/Toast';
+import { resetAgentTurnAcceptanceObserversForTests } from '@/hooks/agentTurnController';
+import { useBuiltinThreadSettings } from '@/hooks/useBuiltinThreadSettings';
 import { useConversationTitles } from '@/hooks/useConversationTitles';
 import { i18n } from '@/i18n';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
-import { conversationViewForNode } from '@/store/conversationOwner';
+import {
+  acknowledgeConversationResult,
+  conversationViewForNode,
+} from '@/store/conversationOwner';
 import {
   observeConversationExecution,
   saveConversationWorkingDirectory,
@@ -43,12 +48,18 @@ import {
   useConversationTitleStore,
 } from '@/store/conversationTitleStore';
 import { useLLMStore } from '@/store/llmStore';
+import { usePanelStore } from '@/store/panelStore';
 import {
   createEmptyWorkspace,
   openTarget,
 } from '@/store/previewWorkspace/model';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
+import {
+  conversationOwnerKey,
+  useRemoteConversationOwnerStore,
+} from '@/store/remoteConversationOwner';
 
+import { BuiltinSessionSelectors } from './BuiltinSessionSelectors';
 import {
   PreviewTab,
   PreviewTabDragOverlay,
@@ -61,6 +72,7 @@ import type { AcpSessionSelectors } from './AcpSessionSelectors';
 import type * as AcpApi from '@/api/acp';
 import type { ChatSession } from '@/hooks/useChatSession';
 import type * as CanvasStore from '@/store/canvasStore';
+import type * as ConversationOwner from '@/store/conversationOwner';
 import type {
   CanvasPreviewWorkspace,
   PreviewTab as TabModel,
@@ -81,13 +93,23 @@ const sessionMetaState = vi.hoisted(() => ({
   refresh: vi.fn(),
   applyOptimistic: vi.fn(),
 }));
+const historyState = vi.hoisted(() => ({
+  current: false,
+  latestVisible: true,
+}));
+vi.mock('@/store/conversationOwner', async (original) => ({
+  ...(await original<typeof ConversationOwner>()),
+  acknowledgeConversationResult: vi.fn(),
+}));
 
 // Keep real panel, editor, tab, stores, and stream hook; replace unrelated UI
 // and network boundaries with complete, stable fixtures.
 vi.mock('react-router-dom', () => ({ useNavigate: () => () => {} }));
 vi.mock('@/components/Common/Loading', () => ({ Loading: () => null }));
 vi.mock('@/components/Common/Toast', () => ({ toast: vi.fn() }));
-vi.mock('@/hooks/useChatHistory', () => ({ useChatHistory: () => {} }));
+vi.mock('@/hooks/useChatHistory', () => ({
+  useChatHistory: () => ({ isCurrentOwnerHistory: historyState.current }),
+}));
 vi.mock('@/hooks/useAcpProfiles', () => ({
   useAcpProfiles: () => ({ profiles: [], loaded: true, refresh: vi.fn() }),
 }));
@@ -120,20 +142,41 @@ vi.mock('@/hooks/useInternalSlashCommands', () => ({
   }),
 }));
 vi.mock('@/hooks/useBuiltinThreadSettings', () => ({
-  useBuiltinThreadSettings: () => ({
+  useBuiltinThreadSettings: vi.fn(() => ({
     models: [],
     settings: { reasoningEffort: null },
     effectiveModelId: null,
     loading: false,
-  }),
+    saving: false,
+    selectModel: vi.fn(),
+    selectReasoningEffort: vi.fn(),
+  })),
 }));
 vi.mock('@/components/Messages/MessageList', () => ({
-  MessageList: () => null,
+  MessageList: ({
+    isHistoryReady,
+    isHistoryLoading,
+    onLatestVisibleChange,
+  }: {
+    isHistoryReady?: boolean;
+    isHistoryLoading?: boolean;
+    onLatestVisibleChange?: (visible: boolean) => void;
+  }) => {
+    useEffect(() => onLatestVisibleChange?.(historyState.latestVisible));
+    return (
+      <div
+        data-history-ready={isHistoryReady}
+        data-history-loading={isHistoryLoading}
+      />
+    );
+  },
 }));
 vi.mock('./ChangeReviewCard', () => ({ ChangeReviewCard: () => null }));
 vi.mock('./AgentSelector', () => ({ AgentSelector: () => null }));
 vi.mock('./BuiltinSessionSelectors', () => ({
-  BuiltinSessionSelectors: () => null,
+  BuiltinSessionSelectors: vi.fn(
+    (_props: ComponentProps<typeof BuiltinSessionSelectors>) => null,
+  ),
 }));
 vi.mock('./AcpSessionSelectors', () => ({
   AcpSessionSelectors: ({
@@ -301,8 +344,11 @@ async function renderPanel(
 ) {
   usePreviewWorkspaceStore.setState({
     canvasId: session.canvasId,
+    readIntentByTab: {},
     workspace: {
       ...createEmptyWorkspace(),
+      groups: [{ id: 'group', tabIds: [tab.id], activeTabId: tab.id }],
+      activeGroupId: 'group',
       tabs: { [tab.id]: tab },
     },
   });
@@ -357,6 +403,13 @@ async function enter(input: HTMLInputElement) {
 
 beforeEach(async () => {
   vi.resetAllMocks();
+  historyState.current = false;
+  historyState.latestVisible = true;
+  usePanelStore.setState({ isRightCollapsed: false });
+  vi.mocked(acknowledgeConversationResult).mockResolvedValue(undefined);
+  useRemoteConversationOwnerStore.setState({ entries: {} });
+  saveCanvasForSubmission.mockResolvedValue(undefined);
+  resetAgentTurnAcceptanceObserversForTests();
   sessionMetaState.loading = false;
   sessionMetaState.error = null;
   sessionMetaState.updatedAt = 0;
@@ -427,6 +480,216 @@ afterEach(async () => {
 });
 
 describe('rendered conversation titles', () => {
+  const remoteSession: ChatSession = {
+    ...baseSession,
+    ownerCanvasId: 'child',
+    conversationView: {
+      presentationAnchor: { canvasId: 'child', nodeId: 'agent' },
+      conversationOwner: {
+        canvasId: 'child',
+        nodeId: 'agent',
+        threadId: 'thread',
+      },
+    },
+  };
+  const remoteTab: TabModel = {
+    ...baseTab,
+    target: {
+      kind: 'conversation',
+      canvasId: 'child',
+      nodeId: 'agent',
+      threadId: 'thread',
+    },
+  };
+  function seedRemoteOwner() {
+    useRemoteConversationOwnerStore.setState({
+      entries: {
+        [conversationOwnerKey('child', 'agent', 'thread')]: {
+          owner: {
+            canvasId: 'child',
+            nodeId: 'agent',
+            threadId: 'thread',
+            spaceTitle: 'Child',
+            source: {
+              label: 'Original name',
+              status: 'done',
+              viewed: false,
+              invocationToken: 'new-run',
+              hasAuthoredContent: true,
+              agentBinding: { kind: 'internal' },
+            },
+          },
+        },
+      },
+    });
+    useChatStore
+      .getState()
+      .setMessages('thread', [{ id: 'u', role: 'user', content: 'Task' }]);
+  }
+
+  it('uses the shared remote title for immediate repeated edits before owner polling', async () => {
+    seedRemoteOwner();
+    serverTitles.set(conversationTitleKey('child', 'thread'), {
+      title: 'Original name',
+      source: 'user',
+    });
+    await refreshConversationTitles('child', ['thread']);
+    await renderPanel(remoteSession, remoteTab);
+    await enter(await edit('New name'));
+    expect(title()).toBe('New name');
+    expect(
+      useRemoteConversationOwnerStore.getState().entries[
+        conversationOwnerKey('child', 'agent', 'thread')
+      ]?.owner?.source.label,
+    ).toBe('Original name');
+    await act(async () => header().click());
+    expect(
+      container.querySelector<HTMLInputElement>(
+        'input[aria-label="Rename node"]',
+      )?.value,
+    ).toBe('New name');
+  });
+
+  it('requires explicit read intent and current rendered history before acknowledging a restored preview', async () => {
+    seedRemoteOwner();
+    vi.useFakeTimers();
+    const focus = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    const visibility = vi
+      .spyOn(document, 'visibilityState', 'get')
+      .mockReturnValue('visible');
+    try {
+      historyState.current = true;
+      await renderPanel(remoteSession, remoteTab);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(20);
+        window.dispatchEvent(new Event('focus'));
+      });
+      expect(acknowledgeConversationResult).not.toHaveBeenCalled();
+      historyState.current = false;
+      await act(async () =>
+        usePreviewWorkspaceStore.getState().markTabInteracted('tab'),
+      );
+      await act(async () => vi.advanceTimersByTimeAsync(20));
+      expect(acknowledgeConversationResult).not.toHaveBeenCalled();
+      historyState.current = true;
+      historyState.latestVisible = false;
+      await act(async () =>
+        root.render(
+          <PanelFixture
+            session={remoteSession}
+            tab={remoteTab}
+            onCommit={vi.fn()}
+            props={{}}
+          />,
+        ),
+      );
+      await act(async () => vi.advanceTimersByTimeAsync(20));
+      expect(acknowledgeConversationResult).not.toHaveBeenCalled();
+      historyState.latestVisible = true;
+      await act(async () =>
+        root.render(
+          <PanelFixture
+            session={remoteSession}
+            tab={remoteTab}
+            onCommit={vi.fn()}
+            props={{}}
+          />,
+        ),
+      );
+      await act(async () => vi.advanceTimersByTimeAsync(20));
+      expect(acknowledgeConversationResult).toHaveBeenCalledWith(
+        remoteSession.conversationView,
+        { invocationToken: 'new-run', status: 'done', viewed: false },
+      );
+    } finally {
+      focus.mockRestore();
+      visibility.mockRestore();
+    }
+  });
+
+  it('blocks unavailable-owner submission without clearing pre-first-send settings', async () => {
+    const actual = await vi.importActual<{
+      useBuiltinThreadSettings: typeof useBuiltinThreadSettings;
+    }>('@/hooks/useBuiltinThreadSettings');
+    vi.mocked(useBuiltinThreadSettings).mockImplementation(
+      actual.useBuiltinThreadSettings,
+    );
+    const llmApi = await import('@/api/llm');
+    vi.spyOn(llmApi, 'getLLMModels').mockResolvedValue([]);
+    seedRemoteOwner();
+    const selection = { modelId: 'chosen-model', reasoningEffort: 'high' };
+    useChatStore.getState().setMessages('thread', []);
+    useChatStore.getState().setThreadSettings('thread', selection);
+    await renderPanel(remoteSession, remoteTab);
+    expect(useChatStore.getState().settingsByThread.thread).toEqual(selection);
+    await renderPanel(remoteSession, remoteTab, vi.fn(), {
+      ownerUnavailable: true,
+    });
+    const selectors = vi.mocked(BuiltinSessionSelectors).mock.lastCall?.[0];
+    assert(selectors);
+    await act(async () => {
+      await selectors.onSelectModel('unavailable-model');
+      await selectors.onSelectReasoningEffort('low');
+    });
+    expect(toast).toHaveBeenCalledTimes(2);
+    expect(useChatStore.getState().settingsByThread.thread).toEqual(selection);
+    const form = container.querySelector('form');
+    assert(form);
+    expect(form.dataset.submitDisabled).toBe('true');
+    await act(async () =>
+      form.dispatchEvent(
+        new Event('submit', { bubbles: true, cancelable: true }),
+      ),
+    );
+    expect(agentApi.streamMessage).not.toHaveBeenCalled();
+    expect(useChatStore.getState().settingsByThread.thread).toEqual(selection);
+    expect(useBuiltinThreadSettings).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        enabled: true,
+        threadId: 'thread',
+        canvasId: 'child',
+      }),
+    );
+    await renderPanel(remoteSession, remoteTab);
+    expect(container.querySelector('form')?.dataset.submitDisabled).toBe(
+      'false',
+    );
+    expect(useChatStore.getState().settingsByThread.thread).toEqual(selection);
+  });
+
+  it('reports failed built-in selections without committing the tab', async () => {
+    const failure = new Error('Rejected by server');
+    const selectModel = vi.fn().mockRejectedValue(failure);
+    const selectReasoningEffort = vi.fn().mockRejectedValue(failure);
+    vi.mocked(useBuiltinThreadSettings).mockReturnValue({
+      models: [],
+      settings: { modelId: 'model-1', reasoningEffort: 'high' },
+      effectiveModelId: 'model-1',
+      loading: false,
+      saving: true,
+      selectModel,
+      selectReasoningEffort,
+    });
+    const onCommit = vi.fn();
+    await renderPanel(baseSession, baseTab, onCommit);
+    const selectors = vi.mocked(BuiltinSessionSelectors).mock.lastCall?.[0];
+    assert(selectors);
+    expect(selectors.disabled).toBe(true);
+    expect(container.querySelector('form')?.dataset.submitDisabled).toBe(
+      'true',
+    );
+    await act(async () => {
+      await selectors.onSelectModel('model-2');
+      await selectors.onSelectReasoningEffort('low');
+    });
+    expect(toast).toHaveBeenCalledWith(
+      expect.stringContaining('Rejected by server'),
+      { tone: 'danger' },
+    );
+    expect(toast).toHaveBeenCalledTimes(2);
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
   it.each([false, true])(
     'preserves consecutive selector choices and releases submission gating with firstFailure=%s',
     async (firstFailure) => {
@@ -578,7 +841,12 @@ describe('rendered conversation titles', () => {
     observeConversationExecution('canvas', 'thread', undefined);
     await saveConversationWorkingDirectory(baseSession, '/chat/project');
     vi.mocked(agentApi.streamMessage).mockImplementation(
-      async (_prompt, _thread, _mode, callbacks) => {
+      async (_prompt, threadId, _mode, callbacks, options) => {
+        callbacks.onAccepted?.({
+          threadId,
+          turnStartSeq: 1,
+          requestId: options?.requestId,
+        });
         callbacks.onComplete();
       },
     );
@@ -618,6 +886,25 @@ describe('rendered conversation titles', () => {
         );
     });
     expect(agentApi.streamMessage).not.toHaveBeenCalled();
+  });
+
+  it('keeps scroll readiness false after history fails until retry succeeds', async () => {
+    useChatStore.getState().setHistoryLoaded('thread', false);
+    await renderPanel();
+    const list = () => container.querySelector('[data-history-ready]');
+    expect(list()?.getAttribute('data-history-loading')).toBe('true');
+    expect(list()?.getAttribute('data-history-ready')).toBe('false');
+    await act(async () =>
+      useChatStore.getState().setHistoryError('thread', 'offline'),
+    );
+    expect(list()?.getAttribute('data-history-loading')).toBe('false');
+    expect(list()?.getAttribute('data-history-ready')).toBe('false');
+    await act(async () => {
+      useChatStore.getState().setHistoryError('thread', null);
+      useChatStore.getState().setHistoryLoaded('thread', true);
+    });
+    expect(list()?.getAttribute('data-history-ready')).toBe('true');
+    expect(list()?.getAttribute('data-history-loading')).toBe('false');
   });
   it.each(['connected', 'connecting', 'failed'] as const)(
     'moves the %s capability status to the tab without losing failure recovery',
@@ -999,7 +1286,12 @@ describe('rendered conversation titles', () => {
     let complete!: () => void;
     let release!: () => void;
     vi.mocked(agentApi.streamMessage).mockImplementation(
-      async (_prompt, _thread, _mode, callbacks) => {
+      async (_prompt, threadId, _mode, callbacks, options) => {
+        callbacks.onAccepted?.({
+          threadId,
+          turnStartSeq: 1,
+          requestId: options?.requestId,
+        });
         event = callbacks.onEvent;
         complete = callbacks.onComplete!;
         await new Promise<void>((resolve) => {
@@ -1083,7 +1375,12 @@ describe('rendered conversation titles', () => {
     let complete!: () => void;
     let release!: () => void;
     vi.mocked(agentApi.streamMessage).mockImplementation(
-      async (_prompt, _thread, _mode, callbacks) => {
+      async (_prompt, threadId, _mode, callbacks, options) => {
+        callbacks.onAccepted?.({
+          threadId,
+          turnStartSeq: 1,
+          requestId: options?.requestId,
+        });
         event = callbacks.onEvent;
         assert(callbacks.onComplete);
         complete = callbacks.onComplete;

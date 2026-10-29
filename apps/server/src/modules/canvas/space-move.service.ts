@@ -207,10 +207,26 @@ function movedWorkloadSpec(
   };
 }
 
+/**
+ * What the caller may do, for a host that authorizes per Space. The route has
+ * already authorized the source and destination; these cover what the move
+ * reaches beyond them.
+ */
+export interface SpaceMoveAccess {
+  /** Whether the caller may read a Space whose artifact a moved node cites. */
+  canRead(canvasId: string): Promise<boolean>;
+  /**
+   * Make the caller owner of the new destination, before any content moves,
+   * so a failure here is compensated like any other.
+   */
+  claim(canvasId: string): Promise<void>;
+}
+
 async function cloneArtifacts(
   sourceCanvasId: string,
   destinationCanvasId: string,
   nodes: readonly CanvasNode[],
+  access: SpaceMoveAccess | undefined,
 ): Promise<CanvasNode[]> {
   const destination = space(destinationCanvasId).artifacts;
   const cloned = new Map<string, string>();
@@ -223,6 +239,10 @@ async function cloneArtifacts(
     const cacheKey = `${owner}/${ref.key}`;
     const existing = cloned.get(cacheKey);
     if (existing) return existing;
+    // A cited Space the caller may not read is as absent as a missing one.
+    if (owner !== sourceCanvasId && access && !(await access.canRead(owner))) {
+      throw new SpaceMoveError('MOVE_ARTIFACT_MISSING');
+    }
     const body = await space(owner).artifacts.read(ref.key);
     if (!body) {
       throw new SpaceMoveError('MOVE_ARTIFACT_MISSING');
@@ -264,21 +284,27 @@ async function cloneArtifacts(
 export async function moveCanvasSelection(
   sourceCanvasId: string,
   input: MoveSelectionBody,
+  access?: SpaceMoveAccess,
 ): Promise<MoveSelectionResponse> {
   return withSpaceHierarchyLock(() =>
-    moveCanvasSelectionUnlocked(sourceCanvasId, {
-      ...input,
-      createSourcePreview:
-        input.createSourcePreview ||
-        (input.destination.kind === 'new' &&
-          input.destination.asChild === true),
-    }),
+    moveCanvasSelectionUnlocked(
+      sourceCanvasId,
+      {
+        ...input,
+        createSourcePreview:
+          input.createSourcePreview ||
+          (input.destination.kind === 'new' &&
+            input.destination.asChild === true),
+      },
+      access,
+    ),
   );
 }
 
 async function moveCanvasSelectionUnlocked(
   sourceCanvasId: string,
   input: MoveSelectionBody,
+  access: SpaceMoveAccess | undefined,
 ): Promise<MoveSelectionResponse> {
   const destinationCanvasId =
     input.destination.kind === 'existing'
@@ -305,6 +331,8 @@ async function moveCanvasSelectionUnlocked(
         throw new SpaceMoveError('MOVE_DESTINATION_CREATE_FAILED');
       }
       createdDestination = true;
+      phase = 'destination-claim';
+      await access?.claim(destinationCanvasId);
     }
     const repository = getStructuredStore().spaces();
     const members = await repository.list();
@@ -466,6 +494,7 @@ async function moveCanvasSelectionUnlocked(
             sourceCanvasId,
             destinationCanvasId,
             movedNodes,
+            access,
           );
           const rewrittenById = new Map(
             rewrittenNodes.map((node) => [node.id, node]),

@@ -580,7 +580,7 @@ export const NotePreview = ({
     <PreviewHeaderButton
       className={
         editMode === 'raw'
-          ? 'text-info bg-info-bg enabled:hover:bg-info-bg-hover'
+          ? 'text-info-fg bg-info-bg enabled:hover:bg-info-bg-hover'
           : ''
       }
       title={

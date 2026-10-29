@@ -6,7 +6,7 @@
  * lucide `MessageSquare` / `Sprout`.
  *
  * They use `currentColor` (stroke and dot fill) so they inherit the surrounding
- * text color — ink normally, and the active/`text-info` blue when their row or
+ * text color — ink normally, and the active/`text-info-fg` blue when their row or
  * chip is the current selection — matching every other menu row exactly. The
  * mode is conveyed by shape, not a fixed color:
  *

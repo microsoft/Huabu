@@ -63,7 +63,7 @@ import {
 import { TextNode } from '@/components/Nodes/text/TextNode';
 import { requestCreateChildSpace } from '@/components/Space/createChildSpaceAction';
 import {
-  uploadFileToNodeInput,
+  importFilesAsNodes,
   urlToNodeInput,
   textToNoteNodeInput,
 } from '@/handler/canvasCommand/nodeInputBuilders';
@@ -107,6 +107,7 @@ import {
 import { NodeToolbar } from './CanvasToolbar.tsx';
 import { CanvasZoomMenu } from './CanvasZoomMenu';
 import { ConnectedNodePicker } from './ConnectedNodePicker.tsx';
+import { renderEdgeAccent } from './edges/edgeAccent';
 import {
   EDIT_EDGE_LABEL_EVENT,
   LabelledEdge,
@@ -229,7 +230,7 @@ const FrameFitPreviewOverlay: React.FC<{
   return (
     <div
       data-canvas-grounding-exclude
-      className="bg-info-bg/40 shadow-bottom pointer-events-none absolute z-40 transition-all duration-150"
+      className="bg-canvas-overlay-subtle shadow-bottom pointer-events-none absolute z-40 transition-all duration-150"
       style={{
         left: screenRect.left,
         top: screenRect.top,
@@ -880,7 +881,7 @@ const CanvasContent: React.FC<CanvasProps> = ({
     };
 
     const result = edges.map((e) => {
-      const styled = styleEdge(e);
+      const styled = styleEdge(renderEdgeAccent(e));
       const z = edgeZIndex(zByNode, nodesById, e.source, e.target);
 
       // Reuse the wrapped edge emitted last render when the
@@ -1319,26 +1320,13 @@ const CanvasContent: React.FC<CanvasProps> = ({
         const nativeFiles = Array.from(e.dataTransfer.files);
         if (nativeFiles.length > 0) {
           if (!canvasId) return;
-          void (async () => {
-            const inputs = (
-              await Promise.all(
-                nativeFiles.map(async (file, i) => {
-                  const offset = i * 30;
-                  const pos = {
-                    x: dropPos.x + offset,
-                    y: dropPos.y + offset,
-                  };
-                  return uploadFileToNodeInput(
-                    file,
-                    pos,
-                    { type: 'user-uploaded' },
-                    canvasId,
-                  );
-                }),
-              )
-            ).filter((input): input is AddNodeInput => input !== null);
-            if (inputs.length > 0) addNodes(inputs);
-          })();
+          void importFilesAsNodes(
+            nativeFiles,
+            dropPos,
+            { type: 'user-uploaded' },
+            canvasId,
+            addNodes,
+          );
           return;
         }
 
@@ -1618,7 +1606,7 @@ const CanvasContent: React.FC<CanvasProps> = ({
         >
           <path
             d={lassoPreviewPath}
-            fill="color-mix(in srgb, var(--color-info) 14%, transparent)"
+            fill="var(--canvas-overlay-selection)"
             stroke="var(--color-info)"
             strokeWidth={1.5}
             strokeLinejoin="round"
@@ -1630,7 +1618,7 @@ const CanvasContent: React.FC<CanvasProps> = ({
       {/* Frame drag preview overlay */}
       {frameDragRect && frameDragRect.width > 2 && (
         <div
-          className="border-info bg-info-bg/40 pointer-events-none absolute z-50 rounded border border-dashed"
+          className="border-info bg-canvas-overlay-subtle pointer-events-none absolute z-50 rounded border border-dashed"
           style={{
             left: frameDragRect.left,
             top: frameDragRect.top,

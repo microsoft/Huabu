@@ -8,10 +8,14 @@ import {
   queryConversationTitles,
   setConversationTitle,
 } from '@/api/conversationTitles';
+import { createEmptyWorkspace } from '@/store/previewWorkspace/model';
+import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 
 import {
   clearPendingConversationTitle,
+  ConversationTitleSaveError,
   conversationTitleKey,
+  drainConversationTitleWrites,
   flushPendingConversationTitle,
   getConversationTitle,
   invalidateConversationTitle,
@@ -90,6 +94,305 @@ beforeEach(() => {
 });
 
 describe('conversation titles', () => {
+  it('does not block closing a persisted draft after a read-only title query fails', async () => {
+    await renameConversationTitle('canvas', 'thread', 'Safe draft', true);
+    const persisted = localStorage.getItem('huabu.conversationTitleDrafts');
+    query.mockRejectedValueOnce(new Error('Query offline'));
+    await refreshConversationTitles('canvas', ['thread']);
+    expect(save).not.toHaveBeenCalled();
+    expect(useConversationTitleStore.getState().entries[key].error).toBe(
+      'Query offline',
+    );
+    expect(
+      useConversationTitleStore.getState().entries[key].writeError,
+    ).toBeUndefined();
+    expect(localStorage.getItem('huabu.conversationTitleDrafts')).toBe(
+      persisted,
+    );
+    await expect(drainConversationTitleWrites()).resolves.toBeUndefined();
+  });
+
+  it('does not let a query failure replace or clear a pending PUT failure', async () => {
+    await renameConversationTitle('canvas', 'thread', 'Pending', true);
+    save.mockRejectedValueOnce(new Error('PUT offline'));
+    await flushPendingConversationTitle('canvas', 'thread');
+    query.mockRejectedValueOnce(new Error('GET offline'));
+    await refreshConversationTitles('canvas', ['thread']);
+    await expect(drainConversationTitleWrites()).rejects.toThrow('PUT offline');
+    expect(useConversationTitleStore.getState().entries[key].error).toBe(
+      'PUT offline',
+    );
+  });
+
+  it.each(['draft', 'creation-race'] as const)(
+    'blocks close on %s local persistence failure and retries the latest pending snapshot',
+    async (kind) => {
+      const original = localStorage.getItem('huabu.conversationTitleDrafts');
+      const storage = vi
+        .spyOn(localStorage, 'setItem')
+        .mockImplementation(() => {
+          throw new DOMException('Quota exceeded', 'QuotaExceededError');
+        });
+      try {
+        if (kind === 'creation-race')
+          save.mockRejectedValueOnce(
+            new ApiError(404, { code: 'thread_not_found' }, 'Missing thread'),
+          );
+        await expect(
+          renameConversationTitle(
+            'canvas',
+            'thread',
+            'First',
+            kind === 'draft',
+          ),
+        ).rejects.toThrow('Quota exceeded');
+        expect(localStorage.getItem('huabu.conversationTitleDrafts')).toBe(
+          original,
+        );
+        const failure: unknown = await drainConversationTitleWrites().catch(
+          (error: unknown) => error,
+        );
+        if (!(failure instanceof ConversationTitleSaveError))
+          throw new Error('Missing persistence recovery');
+        await expect(failure.retry()).rejects.toThrow('Quota exceeded');
+        await expect(
+          renameConversationTitle('canvas', 'thread', 'Latest', true),
+        ).rejects.toThrow('Quota exceeded');
+        storage.mockRestore();
+        await failure.retry();
+        await expect(drainConversationTitleWrites()).resolves.toBeUndefined();
+        const record = JSON.parse(
+          localStorage.getItem('huabu.conversationTitleDrafts') ?? '{}',
+        );
+        expect(record.state.pending[key]).toBe('Latest');
+        expect(current().title).toBe('Latest');
+      } finally {
+        storage.mockRestore();
+      }
+    },
+  );
+
+  it('does not rewrite safe pending state on read-only cache updates when storage is full', async () => {
+    await renameConversationTitle('canvas', 'thread', 'Safe draft', true);
+    const storage = vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
+      throw new DOMException('Quota exceeded', 'QuotaExceededError');
+    });
+    try {
+      query.mockRejectedValueOnce(new Error('Query offline'));
+      await refreshConversationTitles('canvas', ['thread']);
+      expect(storage).not.toHaveBeenCalled();
+      await expect(drainConversationTitleWrites()).resolves.toBeUndefined();
+    } finally {
+      storage.mockRestore();
+    }
+  });
+
+  it('a successful later draft write clears an earlier persistence failure without replaying stale intent', async () => {
+    const storage = vi
+      .spyOn(localStorage, 'setItem')
+      .mockImplementationOnce(() => {
+        throw new Error('Storage offline');
+      });
+    try {
+      await expect(
+        renameConversationTitle('canvas', 'thread', 'Old', true),
+      ).rejects.toThrow('Storage offline');
+      await renameConversationTitle('canvas', 'thread', 'New', true);
+      await expect(drainConversationTitleWrites()).resolves.toBeUndefined();
+      expect(
+        JSON.parse(
+          localStorage.getItem('huabu.conversationTitleDrafts') ?? '{}',
+        ).state.pending[key],
+      ).toBe('New');
+    } finally {
+      storage.mockRestore();
+    }
+  });
+
+  it.each(['pending', 'failed'])(
+    'retains retry access after an unbound Chat closes while its title write is %s',
+    async (phase) => {
+      usePreviewWorkspaceStore.setState({
+        canvasId: 'canvas',
+        workspace: createEmptyWorkspace(),
+      });
+      const preview = () => usePreviewWorkspaceStore.getState();
+      const tabId = preview().openPreviewTarget({
+        kind: 'chat',
+        canvasId: 'canvas',
+        threadId: 'thread',
+      });
+      const request = deferred<ConversationTitle>();
+      save.mockReturnValueOnce(request.promise);
+      const rename = renameConversationTitle(
+        'canvas',
+        'thread',
+        'Unsaved title',
+        false,
+      ).catch((error: unknown) => error);
+      if (phase === 'pending') preview().closeTab(tabId);
+      request.reject(new Error('Offline'));
+      await rename;
+      if (phase === 'failed') preview().closeTab(tabId);
+      expect(preview().workspace.tabs).toEqual({});
+      await refreshConversationTitles('canvas', ['thread']);
+      const error: unknown = await drainConversationTitleWrites().catch(
+        (failure: unknown) => failure,
+      );
+      expect(error).toBeInstanceOf(ConversationTitleSaveError);
+      if (!(error instanceof ConversationTitleSaveError))
+        throw new Error('Missing title recovery');
+      save.mockRejectedValueOnce(new Error('Still offline'));
+      await expect(error.retry()).rejects.toThrow('Still offline');
+      expect(
+        useConversationTitleStore.getState().entries[key].failedTitle,
+      ).toBe('Unsaved title');
+      await error.retry();
+      await expect(drainConversationTitleWrites()).resolves.toBeUndefined();
+      expect(current().title).toBe('Unsaved title');
+      expect(preview().workspace.tabs).toEqual({});
+    },
+  );
+
+  it('retries all current failures, including pending flushes, without replacing newer intent', async () => {
+    save.mockRejectedValueOnce(new Error('First offline'));
+    await renameConversationTitle('canvas', 'first', 'Old intent', false).catch(
+      () => {},
+    );
+    await renameConversationTitle('canvas', 'pending', 'Pending intent', true);
+    save.mockRejectedValueOnce(new Error('Flush offline'));
+    await flushPendingConversationTitle('canvas', 'pending');
+    const error: unknown = await drainConversationTitleWrites().catch(
+      (failure: unknown) => failure,
+    );
+    if (!(error instanceof ConversationTitleSaveError))
+      throw new Error('Missing title recovery');
+    await renameConversationTitle('canvas', 'first', 'Newer intent', false);
+    save.mockClear();
+    await error.retry();
+    expect(getConversationTitle('canvas', 'first').title).toBe('Newer intent');
+    expect(save).toHaveBeenCalledExactlyOnceWith('canvas', 'pending', {
+      title: 'Pending intent',
+    });
+    await expect(drainConversationTitleWrites()).resolves.toBeUndefined();
+  });
+
+  it('drains durable title writes, including writes started while draining', async () => {
+    const first = deferred<ConversationTitle>();
+    const second = deferred<ConversationTitle>();
+    save.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    const renameFirst = renameConversationTitle(
+      'canvas',
+      'first',
+      'First',
+      false,
+    );
+    let finished = false;
+    const drain = drainConversationTitleWrites().then(() => {
+      finished = true;
+    });
+    const renameSecond = renameConversationTitle(
+      'canvas',
+      'second',
+      'Second',
+      false,
+    );
+    first.resolve({ title: 'First', source: 'user' });
+    await renameFirst;
+    expect(finished).toBe(false);
+    second.resolve({ title: 'Second', source: 'user' });
+    await Promise.all([renameSecond, drain]);
+    expect(finished).toBe(true);
+  });
+
+  it('blocks draining after a failed durable rename until explicit retry succeeds', async () => {
+    save.mockRejectedValueOnce(new Error('Title write offline'));
+    await expect(
+      renameConversationTitle('canvas', 'thread', 'Keep this rename', false),
+    ).rejects.toThrow('Title write offline');
+    await expect(drainConversationTitleWrites()).rejects.toThrow(
+      'Title write offline',
+    );
+    await retryConversationTitle('canvas', 'thread');
+    await expect(drainConversationTitleWrites()).resolves.toBeUndefined();
+    expect(current().title).toBe('Keep this rename');
+  });
+
+  it('waits for every write before rejecting a failed drain', async () => {
+    const first = deferred<ConversationTitle>();
+    const second = deferred<ConversationTitle>();
+    save.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    const renameFirst = renameConversationTitle(
+      'canvas',
+      'first',
+      'First',
+      false,
+    ).catch((error: unknown) => error);
+    const renameSecond = renameConversationTitle(
+      'canvas',
+      'second',
+      'Second',
+      false,
+    );
+    let finished = false;
+    const drain = drainConversationTitleWrites().catch((error: unknown) => {
+      finished = true;
+      return error;
+    });
+    first.reject(new Error('First write failed'));
+    await renameFirst;
+    expect(finished).toBe(false);
+    second.resolve({ title: 'Second', source: 'user' });
+    await renameSecond;
+    expect(await drain).toEqual(new Error('First write failed'));
+  });
+
+  it('does not let a superseded rename failure block a newer successful title', async () => {
+    const old = deferred<ConversationTitle>();
+    save.mockReturnValueOnce(old.promise);
+    const previous = renameConversationTitle(
+      'canvas',
+      'thread',
+      'Old',
+      false,
+    ).catch((error: unknown) => error);
+    await renameConversationTitle('canvas', 'thread', 'Latest', false);
+    const drain = drainConversationTitleWrites();
+    old.reject(new Error('Superseded failure'));
+    await previous;
+    await expect(drain).resolves.toBeUndefined();
+    expect(current().title).toBe('Latest');
+  });
+
+  it('drains pending flushes and retains their non-404 errors until retry', async () => {
+    await renameConversationTitle('canvas', 'thread', 'Pending', true);
+    const request = deferred<ConversationTitle>();
+    save.mockReturnValueOnce(request.promise);
+    const flush = flushPendingConversationTitle('canvas', 'thread');
+    const drain = expect(drainConversationTitleWrites()).rejects.toThrow(
+      'Flush offline',
+    );
+    request.reject(new Error('Flush offline'));
+    await Promise.all([flush, drain]);
+    expect(useConversationTitleStore.getState().pending[key]).toBe('Pending');
+    await flushPendingConversationTitle('canvas', 'thread');
+    await expect(drainConversationTitleWrites()).resolves.toBeUndefined();
+    expect(useConversationTitleStore.getState().pending[key]).toBeUndefined();
+  });
+
+  it('allows locally persisted pre-send intent and recognized creation races to close', async () => {
+    await renameConversationTitle('canvas', 'draft', 'Before first send', true);
+    save.mockRejectedValueOnce(
+      new ApiError(404, { code: 'thread_not_found' }, 'Not durable yet'),
+    );
+    await renameConversationTitle('canvas', 'thread', 'Creation race', false);
+    await expect(drainConversationTitleWrites()).resolves.toBeUndefined();
+    expect(useConversationTitleStore.getState().pending).toEqual({
+      [conversationTitleKey('canvas', 'draft')]: 'Before first send',
+      [key]: 'Creation race',
+    });
+  });
+
   it('remains untitled until the backend supplies a title', async () => {
     expect(current()).toEqual({ title: null, source: null });
     await loadTitle('Backend fallback');

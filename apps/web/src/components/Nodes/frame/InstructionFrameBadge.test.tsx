@@ -27,9 +27,9 @@ describe('InstructionFrameBadge', () => {
   });
 
   it.each([
-    ['prompt', 0, 'node.promptFrameBadgeGlobal', 'bg-info'],
-    ['prompt', 2, 'node.promptFrameBadgeConnected:2', 'bg-info'],
-    ['skill', 0, 'node.skillFrameBadge', 'bg-success'],
+    ['prompt', 0, 'node.promptFrameBadgeGlobal', 'bg-info-fg'],
+    ['prompt', 2, 'node.promptFrameBadgeConnected:2', 'bg-info-fg'],
+    ['skill', 0, 'node.skillFrameBadge', 'bg-success-fg'],
   ] as const)(
     'renders the %s semantic pill with %s direct Agents',
     (kind, directAgentCount, label, tone) => {

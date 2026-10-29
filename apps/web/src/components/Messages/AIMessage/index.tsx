@@ -194,7 +194,8 @@ export const AIMessage = memo(function AIMessage({
 }: AIMessageProps) {
   const { t } = useTranslation();
   const addNode = useCanvasStore((state) => state.addNode);
-  const { threadId } = useChatSession();
+  const { threadId, ownerCanvasId, canvasId } = useChatSession();
+  const remote = ownerCanvasId !== canvasId;
 
   // Plain-text copy / "add as note" only includes visible text — thinking
   // is internal reasoning and shouldn't bleed into derived artifacts.
@@ -317,6 +318,8 @@ export const AIMessage = memo(function AIMessage({
                   messageId={messageId}
                   segmentIndex={idx}
                   enableComments={enableComments}
+                  sourceCanvasId={ownerCanvasId}
+                  canvasActionsDisabled={remote}
                 />
               </div>
             </div>
@@ -337,7 +340,12 @@ export const AIMessage = memo(function AIMessage({
               size="sm"
               className="text-fg-subtle"
               aria-label={t('messages.addAsNote')}
-              title={t('messages.addAsNote')}
+              title={t(
+                remote
+                  ? 'remoteConversation.canvasAction'
+                  : 'messages.addAsNote',
+              )}
+              disabled={remote}
               onClick={() => {
                 addNode({
                   nodeType: 'note',

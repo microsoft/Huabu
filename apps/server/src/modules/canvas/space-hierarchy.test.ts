@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { invertDelta } from '@huabu/shared/canvas-engine';
 
 import { applyDeltasOnServer, executeOnServer } from './canvas-executor.js';
+import * as canvasExecutor from './canvas-executor.js';
 import * as canvasSync from './canvas-sync.js';
 import canvasRoutes from './canvas.route.js';
 import {
@@ -23,6 +24,7 @@ import { registerSpaceHierarchyRoutes } from './space-hierarchy.route.js';
 import { moveCanvasSelection } from './space-move.service.js';
 import { assertChildSpaceEntriesAllowed } from './world-preview-policy.js';
 import { acquireAgentTurn } from '../agent/turn-lease.js';
+import { setRequestIdentity } from '../identity/request.js';
 import * as storage from '../storage/index.js';
 import { setWorkspacePath } from '../workspace.js';
 
@@ -294,6 +296,51 @@ describe('Mixed selection Space migration', () => {
 });
 
 describe('Space ownership', () => {
+  it('retains the old formal entry when parent persistence fails', async () => {
+    const child = await createChildSpace('root', 'Child');
+    await storage.createSpace('destination', 'Destination');
+    const repository = storage.getStructuredStore().spaces();
+    vi.spyOn(
+      Object.getPrototypeOf(repository) as typeof repository,
+      'setParent',
+    ).mockRejectedValueOnce(new Error('Disk full'));
+    await expect(
+      setSpaceParent(child.canvasId, {
+        parentSpaceId: 'destination',
+        expectedParentSpaceId: 'root',
+      }),
+    ).rejects.toThrow('Disk full');
+    expect((await storage.space('root').read())?.state.nodes).toContainEqual(
+      expect.objectContaining({ id: child.parentEntryNodeId }),
+    );
+    expect((await storage.space(child.canvasId).read())?.parentSpaceId).toBe(
+      'root',
+    );
+  });
+
+  it('reports cleanup failure explicitly after promotion without deleting any contents', async () => {
+    const child = await createChildSpace('root', 'Child');
+    vi.spyOn(
+      canvasExecutor,
+      'executeOnServerAlreadyLocked',
+    ).mockRejectedValueOnce(new Error('Disk full'));
+    await expect(
+      setSpaceParent(child.canvasId, {
+        parentSpaceId: null,
+        expectedParentSpaceId: 'root',
+      }),
+    ).rejects.toMatchObject({
+      code: 'SPACE_ENTRY_REMOVE_FAILED',
+      status: 500,
+    });
+    expect(
+      (await storage.space(child.canvasId).read())?.parentSpaceId,
+    ).toBeNull();
+    expect((await storage.space('root').read())?.state.nodes).toContainEqual(
+      expect.objectContaining({ id: child.parentEntryNodeId }),
+    );
+  });
+
   it.each(['success', 'refused', 'failed', 'failed-after-commit'])(
     'publishes the retained entry only after parent persistence settles (%s)',
     async (outcome) => {
@@ -604,7 +651,7 @@ describe('Space ownership', () => {
       await app.close();
     }
   });
-  it('creates arbitrary nesting, retains old links on reparent and rejects cycles', async () => {
+  it('creates arbitrary nesting, removes the old entry on promotion and rejects cycles', async () => {
     const child = await createChildSpace('root', 'Child');
     const grandchild = await createChildSpace(child.canvasId, 'Grandchild');
     expect(await list()).toContainEqual(expect.objectContaining(child));
@@ -618,12 +665,67 @@ describe('Space ownership', () => {
       parentSpaceId: null,
       expectedParentSpaceId: 'root',
     });
-    expect((await storage.space('root').read())?.state.nodes).toContainEqual(
+    expect(
+      (await storage.space('root').read())?.state.nodes,
+    ).not.toContainEqual(
       expect.objectContaining({ id: child.parentEntryNodeId }),
     );
     expect(
       (await storage.space(child.canvasId).read())?.parentSpaceId,
     ).toBeNull();
+    expect(
+      (await storage.space(grandchild.canvasId).read())?.parentSpaceId,
+    ).toBe(child.canvasId);
+  });
+
+  it('reparents by removing only the previous formal entry, keeping manual shortcuts and contents', async () => {
+    const child = await createChildSpace('root', 'Child');
+    await storage.createSpace('destination', 'Destination');
+    await executeOnServer({
+      canvasId: 'root',
+      commands: [
+        {
+          type: 'CREATE_NODES',
+          nodes: [
+            {
+              id: 'node-manual-shortcut',
+              nodeType: 'spacePreview',
+              data: { targetCanvasId: child.canvasId },
+              position: { x: 400, y: 0 },
+            },
+          ],
+        },
+      ],
+      originator: { source: 'system' },
+    });
+    const before = await storage.space(child.canvasId).read();
+    const moved = await setSpaceParent(child.canvasId, {
+      parentSpaceId: 'destination',
+      expectedParentSpaceId: 'root',
+    });
+    const oldNodes = (await storage.space('root').read())?.state.nodes;
+    expect(oldNodes).not.toContainEqual(
+      expect.objectContaining({ id: child.parentEntryNodeId }),
+    );
+    expect(oldNodes).toContainEqual(
+      expect.objectContaining({ id: 'node-manual-shortcut' }),
+    );
+    expect(
+      (await storage.space('destination').read())?.state.nodes,
+    ).toContainEqual(expect.objectContaining({ id: moved.parentEntryNodeId }));
+    expect((await storage.space(child.canvasId).read())?.state).toEqual(
+      before?.state,
+    );
+    await setSpaceParent(child.canvasId, {
+      parentSpaceId: null,
+      expectedParentSpaceId: 'destination',
+    });
+    expect(
+      (await storage.space('destination').read())?.state.nodes,
+    ).toHaveLength(0);
+    expect((await storage.space('root').read())?.state.nodes).toContainEqual(
+      expect.objectContaining({ id: 'node-manual-shortcut' }),
+    );
   });
 
   it('serializes opposing reparent requests and rejects missing or World parents', async () => {
@@ -856,6 +958,61 @@ describe('Space ownership', () => {
       parentEntryNodeId: result.sourcePreviewNodeId,
     });
     expect(result.sourcePreviewNodeId).toBeTruthy();
+  });
+
+  it('claims a detached Space before detaching it, so a failed claim keeps it under its parent', async () => {
+    const child = await createChildSpace('root', 'Inherited only');
+    const parents: Array<string | null | undefined> = [];
+    let failClaim = true;
+    const app = Fastify();
+    app.addHook('onRequest', async (request) => {
+      setRequestIdentity(request, {
+        principal: { principalId: 'carol', kind: 'user' },
+        member: true,
+        owner: false,
+        access: {
+          can: async () => true,
+          claim: async ({ id }) => {
+            parents.push(
+              (await list()).find((item) => item.canvasId === id)
+                ?.parentSpaceId,
+            );
+            if (failClaim) throw new Error('grant store unavailable');
+          },
+        },
+      });
+    });
+    registerSpaceHierarchyRoutes(app);
+    const detach = () =>
+      app.inject({
+        method: 'PATCH',
+        url: `/${child.canvasId}/parent`,
+        payload: { parentSpaceId: null, expectedParentSpaceId: 'root' },
+      });
+    try {
+      expect((await detach()).statusCode).toBe(500);
+      expect(
+        (await list()).find((item) => item.canvasId === child.canvasId)
+          ?.parentSpaceId,
+      ).toBe('root');
+      failClaim = false;
+      expect((await detach()).statusCode).toBe(200);
+      // Both claims ran while the Space was still under its parent.
+      expect(parents).toEqual(['root', 'root']);
+
+      // A stale request, and one detaching an already-root Space, claim
+      // nothing.
+      expect((await detach()).statusCode).toBe(409);
+      const noOp = await app.inject({
+        method: 'PATCH',
+        url: `/${child.canvasId}/parent`,
+        payload: { parentSpaceId: null, expectedParentSpaceId: null },
+      });
+      expect(noOp.statusCode).toBe(200);
+      expect(parents).toHaveLength(2);
+    } finally {
+      await app.close();
+    }
   });
 
   it('validates hierarchy HTTP inputs and returns explicit confirmation conflicts', async () => {

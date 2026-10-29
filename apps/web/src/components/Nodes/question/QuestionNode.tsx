@@ -3,7 +3,7 @@
 
 import { useStore } from '@xyflow/react';
 import { Maximize2 } from 'lucide-react';
-import { memo, useCallback, useMemo } from 'react';
+import { memo, useCallback, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { getQuestionNodeStatus } from '@huabu/shared';
@@ -25,10 +25,7 @@ import {
   useChatStore,
 } from '@/store/chatStore.ts';
 import { findPendingPermissionRequestId } from '@/store/chatTypes.ts';
-import {
-  acknowledgeConversationResult,
-  resolveConversationAgentBinding,
-} from '@/store/conversationOwner';
+import { resolveConversationAgentBinding } from '@/store/conversationOwner';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 import {
   getQuestionFontOpts,
@@ -64,7 +61,7 @@ export type QuestionNodeType = Node<CanvasQuestionNodeData, 'question'>;
 /**
  * Question node — a canvas anchor for a chat thread.
  *
- * It no longer hosts an inline editor or an auto-run countdown. Instead:
+ * It hosts inline title editing, but never edits the prompt or auto-runs:
  *   - Double-clicking a not-yet-run node opens the chat panel into
  *     *compose* mode for this node's thread (focus the input, pick the
  *     agent inline, type, send). The first send authors `data.content`
@@ -72,7 +69,7 @@ export type QuestionNodeType = Node<CanvasQuestionNodeData, 'question'>;
  *   - Double-clicking a running / finished node opens its conversation
  *     (live or replay) in the chat panel.
  *
- * The node body just renders the authored question read-only.
+ * Renaming uses the canonical node label without changing authored content.
  */
 export const QuestionNode = memo(
   ({ id, data, selected, width }: NodeProps<QuestionNodeType>) => {
@@ -96,11 +93,48 @@ export const QuestionNode = memo(
     // shorter) label is at most a small, `transition-all`-animated size
     // change rather than a large jump from a very long first message.
     const displayText = getQuestionDisplayText(data);
+    const tryRename = useCanvasStore((state) => state.tryRename);
+    const [editingTitle, setEditingTitle] = useState(false);
+    const [titleDraft, setTitleDraft] = useState('');
+    const [titleError, setTitleError] = useState<string | null>(null);
+    const [savingTitle, setSavingTitle] = useState(false);
+    const titleEditActive = useRef(false);
+    const titleSavePending = useRef(false);
+    const originalTitle = useRef('');
+    const commitTitle = async () => {
+      if (!titleEditActive.current || titleSavePending.current) return;
+      const next = titleDraft.trim();
+      if (!next) {
+        setTitleError(t('node.nameRequired'));
+        return;
+      }
+      if (next === originalTitle.current) {
+        titleEditActive.current = false;
+        setEditingTitle(false);
+        return;
+      }
+      titleSavePending.current = true;
+      setSavingTitle(true);
+      setTitleError(null);
+      try {
+        if (await tryRename('node', id, next)) {
+          titleEditActive.current = false;
+          setEditingTitle(false);
+        } else {
+          setTitleError(t('chat.titleSaveFailed'));
+        }
+      } catch (error) {
+        console.error('Failed to rename Agent node:', error);
+        setTitleError(t('chat.titleSaveFailed'));
+      } finally {
+        titleSavePending.current = false;
+        setSavingTitle(false);
+      }
+    };
 
     // ------------------------------------------------------------------
     // Shared surface (auto-size + read-only body prop bundles).
-    // `isEditing` is always false: the body is display-only and the
-    // double-click overlay routes to `handleActivate`.
+    // The title field owns its draft; sizing follows the persisted display text.
     // ------------------------------------------------------------------
     const fontOpts = useMemo(() => getQuestionFontOpts(), []);
     const surface = useTextNodeSurface({
@@ -212,37 +246,8 @@ export const QuestionNode = memo(
           'bottom',
           { transient },
         );
-        // Mark as viewed only once the run has finished.
-        if (hasRun && !data.viewed) {
-          void acknowledgeConversationResult(
-            {
-              presentationAnchor: { canvasId, nodeId: id },
-              conversationOwner: {
-                canvasId,
-                nodeId: id,
-                threadId: data.threadId,
-              },
-            },
-            {
-              status: data.status,
-              viewed: data.viewed,
-              invocationToken: data.invocationToken,
-            },
-          ).catch((error) =>
-            console.error('Failed to acknowledge Agent result', error),
-          );
-        }
       },
-      [
-        id,
-        data.threadId,
-        data.agentBinding,
-        data.viewed,
-        hasRun,
-        canvasId,
-        data.invocationToken,
-        data.status,
-      ],
+      [id, data.threadId, data.agentBinding, canvasId],
     );
 
     // ------------------------------------------------------------------
@@ -367,7 +372,9 @@ export const QuestionNode = memo(
           isChatAnchorActive ? 'question-open' : '',
         ].join(' ')}
         onDoubleClick={
-          isContentMissing || isForkPending ? undefined : handleActivate
+          isContentMissing || isForkPending || editingTitle
+            ? undefined
+            : handleActivate
         }
         takeover={
           isContentMissing || inLayoutFrame
@@ -434,6 +441,36 @@ export const QuestionNode = memo(
             accent={data.style?.accent}
             text={surface.draft}
             placeholder={QUESTION_NODE_PLACEHOLDER}
+            selected={selected}
+            titleEditor={
+              !data.locked && !isForkPending
+                ? {
+                    active: editingTitle,
+                    draft: titleDraft,
+                    saving: savingTitle,
+                    error: titleError,
+                    maxLength: 120,
+                    onStart: () => {
+                      if (titleSavePending.current) return;
+                      originalTitle.current = displayText.trim();
+                      setTitleDraft(displayText);
+                      setTitleError(null);
+                      titleEditActive.current = true;
+                      setEditingTitle(true);
+                    },
+                    onChange: (value) => {
+                      setTitleDraft(value);
+                      setTitleError(null);
+                    },
+                    onCommit: () => void commitTitle(),
+                    onCancel: () => {
+                      titleEditActive.current = false;
+                      setEditingTitle(false);
+                      setTitleError(null);
+                    },
+                  }
+                : undefined
+            }
           />
         )}
       </NodeWrapper>

@@ -56,7 +56,7 @@ for (const [size, radius] of [
     const noteBorderColor = await noteShell.evaluate(
       (element) => getComputedStyle(element).borderTopColor,
     );
-    expect(noteBorderColor).toMatch(/(?:0\.75|75%)[ )]/);
+    expect(noteBorderColor).toBe('rgb(90, 149, 144)');
     for (const type of cardTypes) {
       const shell = page.locator(
         `.react-flow__node-${type} .semantic-lod-node`,
@@ -73,26 +73,20 @@ for (const [size, radius] of [
           'data-presentation',
           reading ? 'reading' : 'overview',
         );
-      await expect(shell).toHaveCSS(
-        'border-top-color',
-        reading ? 'rgba(0, 0, 0, 0)' : noteBorderColor,
-      );
-      const inset = type === 'image' || type === 'video' ? 0 : 2;
+      await expect(shell).toHaveCSS('border-top-color', noteBorderColor);
+      const inset = type === 'image' || type === 'video' ? 0 : 1;
       const content = shell.locator(':scope > .semantic-lod-content');
       await expect(content).toHaveCSS(
         'border-top-left-radius',
         `${shellRadius - inset}px`,
       );
       await expect(content).toHaveCSS('overflow', 'hidden');
-      await expect(shell).toHaveCSS(
-        'border-left-width',
-        `${reading ? 0 : inset}px`,
-      );
+      await expect(shell).toHaveCSS('border-left-width', `${inset}px`);
       if (type === 'image' || type === 'video') {
         const border = shell.locator('[data-node-media-border]');
         await expect(border).toHaveCSS('border-top-color', noteBorderColor);
         await expect(border).toHaveCSS('border-top-left-radius', `${radius}px`);
-        await expect(border).toHaveCSS('border-left-width', '2px');
+        await expect(border).toHaveCSS('border-left-width', '1px');
         const geometry = await shell.evaluate((element) => {
           const content = element.querySelector('.semantic-lod-content');
           if (!content) throw new Error('Missing content clip');

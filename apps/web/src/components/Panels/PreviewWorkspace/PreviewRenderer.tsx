@@ -21,6 +21,7 @@ import { conversationViewForNode } from '@/store/conversationOwner';
 import { previewTargetKey } from '@/store/previewWorkspace/scrollMemory';
 
 import { ChatPanel } from '../ChatPanel';
+import { SpaceConversationPreview } from './SpaceConversationPreview';
 import { UrlPreview } from './UrlPreview';
 import { ExpandedNodePanel } from '../ExpandedNodePanel/ExpandedNodePanel';
 
@@ -133,6 +134,28 @@ export function PreviewRenderer({
   }, [target, node]);
 
   if (target.kind === 'url') return <UrlPreview url={target.url} />;
+
+  if (target.kind === 'conversation') {
+    return (
+      <SpaceConversationPreview
+        target={target}
+        previewTabId={tabId}
+        isActive={isActive}
+        activationId={activationId}
+        onCommit={onCommit}
+        hideDuplicateTitle
+        titleEditorHost={titleEditorHost}
+        onConnectionChange={
+          onChatConnectionChange ? handleConnectionChange : undefined
+        }
+        renameRequestNonce={renameRequestNonce}
+        onRenameRequestHandled={onRenameRequestHandled}
+        onRenameKeyboardEnd={onRenameKeyboardEnd}
+        openPositionRequest={chatOpenRequest}
+        onOpenPositionHandled={onChatOpenRequestHandled}
+      />
+    );
+  }
 
   if (session) {
     return (

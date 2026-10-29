@@ -54,6 +54,7 @@ import multipart from '@fastify/multipart';
 import fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { registerLocalTestIdentity } from '../../test-support/local-identity.js';
 import agentRoutes from '../agent/agent.route.js';
 import artifactRoute from '../artifact/artifact.route.js';
 import canvasRoutes from '../canvas/canvas.route.js';
@@ -90,6 +91,7 @@ let tmp: string;
 /** Mount the same plugins at the same prefixes as `app.ts`. */
 async function buildApp(): Promise<FastifyInstance> {
   const app = fastify();
+  registerLocalTestIdentity(app);
   await app.register(multipart);
   await app.register(canvasRoutes, { prefix: '/api/canvas' });
   await app.register(artifactRoute, { prefix: '/api/canvas' });

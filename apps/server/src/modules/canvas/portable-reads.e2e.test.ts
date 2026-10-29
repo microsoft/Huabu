@@ -37,6 +37,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { autoHeightKey } from '@huabu/shared/canvas-engine';
 
 import canvasRoutes from './canvas.route.js';
+import { registerLocalTestIdentity } from '../../test-support/local-identity.js';
 import { refreshCanvasDirIndex } from '../storage/backends/disk/canvas-dirs.js';
 import {
   createSpace,
@@ -84,6 +85,7 @@ function freshWorkspace(): string {
 
 async function buildApp(): Promise<FastifyInstance> {
   const instance = fastify();
+  registerLocalTestIdentity(instance);
   await instance.register(multipart);
   await instance.register(canvasRoutes, { prefix: '/canvas' });
   await instance.ready();
@@ -694,7 +696,28 @@ describe('Space bundle round trip', () => {
     const record = await space(newCanvasId).read();
     expect(record?.canvasId).toBe(newCanvasId);
     const nodes = await space(newCanvasId).nodes.list();
-    expect(nodes.get('node-a')?.record.content).toContain('exported body');
+    expect(nodes.has('node-a')).toBe(false);
+    expect([...nodes.values()][0]?.record.content).toContain('exported body');
+    expect(record?.state.nodes[0]).toMatchObject({
+      id: [...nodes.keys()][0],
+    });
+    const repeated = await app.inject({
+      method: 'POST',
+      url: '/canvas/import',
+      payload: body.payload,
+      headers: body.headers,
+    });
+    expect(repeated.statusCode).toBe(200);
+    const repeatedNodes = await space(repeated.json().canvasId).nodes.list();
+    expect([...repeatedNodes.keys()].some((id) => nodes.has(id))).toBe(false);
+    expect([...repeatedNodes.values()][0]?.record.content).toContain(
+      'exported body',
+    );
+    const originalNodes = await space('canvas-export').nodes.list();
+    expect([...originalNodes.keys()]).toEqual(['node-a']);
+    expect(originalNodes.get('node-a')?.record.content).toContain(
+      'exported body',
+    );
   });
 
   it('accepts a bundle that still carries the frozen canvas.json record name', async () => {
@@ -735,7 +758,11 @@ describe('Space bundle round trip', () => {
     const record = await space(canvasId).read();
     expect(record?.title).toBe('Legacy bundle');
     const nodes = await space(canvasId).nodes.list();
-    expect(nodes.get('node-legacy')?.record.content).toContain('legacy body');
+    expect(nodes.has('node-legacy')).toBe(false);
+    expect([...nodes.values()][0]?.record.content).toContain('legacy body');
+    expect(record?.state.nodes[0]).toMatchObject({
+      id: [...nodes.keys()][0],
+    });
   });
 
   it('de-duplicates the title when the imported name is already taken', async () => {
@@ -1030,7 +1057,7 @@ describe('POST /canvas/:canvasId/execute', () => {
       const auto = nodes.find((node) => node.id === 'node-auto');
       if (!auto) throw new Error('Missing created auto Note');
       expect(auto.data.heightMode).toBe('auto');
-      expect(auto.style).toMatchObject({ width: 560, height: 56 });
+      expect(auto.style).toMatchObject({ width: 560, height: 52 });
       expect(nodes.find((node) => node.id === 'node-fixed')).toMatchObject({
         data: { heightMode: 'fixed' },
         style: { height: 180 },

@@ -250,7 +250,7 @@ function BuiltinModelSettings({ section }: { section: 'chat' | 'utility' }) {
       <SettingRow title={t('settings.agentDefaultsModel')}>
         {llmError ? (
           <div
-            className="text-danger flex items-center gap-2 text-xs"
+            className="text-danger-fg flex items-center gap-2 text-xs"
             role="alert"
           >
             {llmError}
@@ -551,7 +551,7 @@ function BuiltinModelSettings({ section }: { section: 'chat' | 'utility' }) {
                     title={t('settings.authentication')}
                     description={t('settings.utilityUsesLogin')}
                   >
-                    <Check size={14} className="text-success" />
+                    <Check size={14} className="text-success-fg" />
                   </SettingRow>
                 ) : (
                   <SettingRow

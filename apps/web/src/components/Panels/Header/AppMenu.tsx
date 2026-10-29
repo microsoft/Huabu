@@ -5,6 +5,7 @@ import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
 
+import { signOut } from '../../../api/identity';
 import { openUserHandbook } from '../../../config/handbook';
 import { getShortcutKeys } from '../../../config/shortcuts';
 import { canCheckForUpdates, useAppUpdate } from '../../../hooks/useAppUpdate';
@@ -18,9 +19,12 @@ import {
   openServerLog,
 } from '../../../hooks/useElectron';
 import { useRunDiagnostic } from '../../../hooks/useRunDiagnostic';
+import { savedBeforeSignOut } from '../../../store/canvasStore';
+import { useIdentityStore } from '../../../store/identityStore';
 import { useSettingsUiStore } from '../../../store/settingsUiStore';
 import { useShortcutsUiStore } from '../../../store/shortcutsUiStore';
 import { useWorkspaceStore } from '../../../store/workspaceStore';
+import { setDesktopInputFrozen } from '../../../utils/desktopInput';
 import { formatShortcut } from '../../../utils/platform';
 import { Button } from '../../Common/Button';
 import { cn } from '../../Common/cn';
@@ -31,6 +35,7 @@ import {
   DropdownMenuSubmenu,
 } from '../../Common/DropdownMenu';
 import { MENU_SEPARATOR_CLASS } from '../../Common/menuStyles';
+import { toast } from '../../Common/Toast.tsx';
 
 interface AppMenuProps {
   /**
@@ -71,6 +76,7 @@ export const AppMenu: React.FC<AppMenuProps> = ({
   const canChangeWorkspace = useWorkspaceStore(
     (s) => s.capabilities?.canChangeWorkspace ?? true,
   );
+  const identity = useIdentityStore((s) => s.identity);
   const worldCanvasId = useWorkspaceStore((s) => s.worldCanvasId);
   const worldEnabled = useWorkspaceStore((s) => s.worldEnabled);
   const onWorld =
@@ -84,6 +90,27 @@ export const AppMenu: React.FC<AppMenuProps> = ({
   const { status: updateStatus, check: checkForUpdates } = useAppUpdate();
   const updaterAvailable = !!getElectronBridge()?.updater;
 
+  // Ending the session first would leave queued Canvas saves without a
+  // credential, so sign-out waits for them and stays if any did not land.
+  // Input stays frozen throughout, as for a desktop close, so no edit can
+  // start after the last save.
+  const signOutKeepingEdits = async () => {
+    setDesktopInputFrozen(true);
+    if (document.activeElement instanceof HTMLElement)
+      document.activeElement.blur();
+    let failure: 'auth.signOutUnsaved' | 'auth.signOutFailed';
+    try {
+      if (!(await savedBeforeSignOut())) failure = 'auth.signOutUnsaved';
+      else {
+        await signOut();
+        return;
+      }
+    } catch {
+      failure = 'auth.signOutFailed';
+    }
+    setDesktopInputFrozen(false);
+    toast(t(failure), { tone: 'danger' });
+  };
   const runAndClose = (fn: () => void) => () => {
     setIsOpen(false);
     fn();
@@ -222,6 +249,22 @@ export const AppMenu: React.FC<AppMenuProps> = ({
               {t('troubleshooting.copySystemInfo')}
             </DropdownMenuItem>
           </DropdownMenuSubmenu>
+        )}
+
+        {identity?.provider === 'bubble' && (
+          <>
+            <div role="separator" className={MENU_SEPARATOR_CLASS} />
+            <DropdownMenuItem
+              onClick={runAndClose(() => void signOutKeepingEdits())}
+            >
+              {t('auth.signOutAs', {
+                name:
+                  identity.principal.displayName ??
+                  identity.principal.email ??
+                  identity.principal.principalId,
+              })}
+            </DropdownMenuItem>
+          </>
         )}
       </DropdownMenu>
     </>

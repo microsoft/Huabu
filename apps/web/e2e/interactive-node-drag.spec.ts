@@ -350,7 +350,7 @@ for (const type of ['web', 'pdf', 'question'] as const) {
       await expect(boundary).toBeVisible();
       if (type !== 'question') {
         await expect(boundary).toHaveAttribute('data-presentation', 'reading');
-        await expect(boundary).toHaveCSS('border-top-width', '0px');
+        await expect(boundary).toHaveCSS('border-top-width', '1px');
       } else {
         await expect(page.locator(`[data-takeover-node="${id}"]`)).toHaveCSS(
           'opacity',

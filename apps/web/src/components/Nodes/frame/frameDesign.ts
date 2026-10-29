@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { resolveAccent } from '@huabu/shared';
 import {
   FRAME_DEFAULT_ACCENT,
   FRAME_LAYOUT_CONFIG,
@@ -71,7 +70,7 @@ export type FrameVisualMetrics = ReturnType<typeof frameVisualMetricsForSize>;
 
 export function frameSurfaceStyle(accent: string | null): CSSProperties {
   const appearance = FRAME_DESIGN_CONFIG.appearance;
-  const resolvedAccent = accent || resolveAccent(appearance.defaultAccent);
+  const resolvedAccent = accent || appearance.defaultAccent;
   return {
     borderWidth: appearance.borderWidth,
     borderStyle: appearance.borderStyle,

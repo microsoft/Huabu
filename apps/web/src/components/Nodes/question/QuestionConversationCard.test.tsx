@@ -186,7 +186,7 @@ describe('QuestionConversationCard', () => {
       const headerScale = fontSize / QUESTION_NODE_DEFAULT_FONT_SIZE;
       expect(
         parseFloat(card.style.getPropertyValue('--question-edge-width')),
-      ).toBe(2);
+      ).toBe(1);
       expect(
         parseFloat(card.style.getPropertyValue('--question-status-padding-x')),
       ).toBeCloseTo(6 * headerScale);

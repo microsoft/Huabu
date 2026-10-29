@@ -16,15 +16,9 @@ import {
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import {
-  uploadHtml,
-  uploadImage,
-  uploadOffice,
-  uploadPdf,
-  uploadVideo,
-} from '@/api/artifact';
 import { SpaceShortcutPicker } from '@/components/Space/SpaceShortcutPicker';
 import { matchesShortcut } from '@/config/shortcuts';
+import { importFilesAsNodes } from '@/handler/canvasCommand/nodeInputBuilders';
 import { isEditableTarget } from '@/hooks/shortcuts';
 import { isOutsideCanvasInteraction } from '@/hooks/shortcuts/isEditableTarget';
 import { useIsNotMouse } from '@/hooks/useInputMode';
@@ -37,12 +31,7 @@ import {
 } from './canvasInputPolicy.ts';
 import { NODE_ICON } from '../../../config/nodeIcons.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
-import {
-  detectNodeType,
-  detectOfficeFormat,
-  getImageDimensionsFromBlob,
-  getVideoDimensionsFromBlob,
-} from '../../../utils/io/media.ts';
+import { detectNodeType } from '../../../utils/io/media.ts';
 import { Button } from '../../Common/Button.tsx';
 import {
   MENU_ICON_CLASS,
@@ -259,86 +248,13 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
     if (!canvasId) return;
     setActiveModal(null);
 
-    const inputs = (
-      await Promise.all(
-        Array.from(files).map(async (file): Promise<AddNodeInput | null> => {
-          const type = detectNodeType(file.name);
-
-          try {
-            let url = '';
-            let naturalDimensions:
-              | { width: number; height: number }
-              | undefined;
-
-            if (type === 'image') {
-              const [uploadedUrl, dims] = await Promise.all([
-                uploadImage(file, canvasId),
-                getImageDimensionsFromBlob(file).catch(() => undefined),
-              ]);
-              url = uploadedUrl;
-              naturalDimensions = dims;
-            } else if (type === 'video') {
-              const [uploadedUrl, dims] = await Promise.all([
-                uploadVideo(file, canvasId),
-                // A codec the browser cannot decode still deserves a node — it
-                // just falls back to the default size.
-                getVideoDimensionsFromBlob(file).catch(() => undefined),
-              ]);
-              url = uploadedUrl;
-              naturalDimensions = dims;
-            } else if (type === 'pdf') {
-              url = await uploadPdf(file, canvasId);
-            } else if (type === 'office') {
-              url = await uploadOffice(file, canvasId);
-              const format = detectOfficeFormat(file.name) ?? 'docx';
-              return {
-                nodeType: 'office',
-                data: {
-                  type: 'office',
-                  src: url,
-                  format,
-                  label: file.name,
-                  origin: { type: 'user-uploaded' },
-                },
-              };
-            } else if (type === 'note') {
-              const content = await file.text();
-              return {
-                nodeType: 'note',
-                data: {
-                  content,
-                  label: file.name,
-                  origin: { type: 'user-uploaded' },
-                },
-              };
-            } else if (type === 'web') {
-              // Local .html / .htm file — store the bytes as an
-              // artifact (same path as drag/drop) so the preprocess
-              // pipeline can render it as a Web node.
-              url = await uploadHtml(file, canvasId);
-            }
-
-            return {
-              nodeType: type,
-              data: {
-                type,
-                src: url,
-                label: file.name,
-                origin: { type: 'user-uploaded' },
-              },
-              ...(naturalDimensions ? { naturalDimensions } : {}),
-            };
-          } catch (error) {
-            console.error(`Failed to upload ${file.name}:`, error);
-            return null;
-          }
-        }),
-      )
-    ).filter((input): input is AddNodeInput => input !== null);
-
-    if (inputs.length > 0) {
-      addNodes(inputs);
-    }
+    await importFilesAsNodes(
+      Array.from(files),
+      undefined,
+      { type: 'user-uploaded' },
+      canvasId,
+      addNodes,
+    );
 
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
@@ -380,7 +296,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
 
   return (
     <>
-      <div className="text-fg-muted shadow-bottom bg-surface border-edge-default pointer-events-auto relative flex w-max items-center gap-1.5 rounded-xl border px-2 py-1.5">
+      <div className="text-fg-muted shadow-bottom bg-surface border-edge-default [&_button[aria-pressed=true]_svg]:text-info pointer-events-auto relative flex w-max items-center gap-1.5 rounded-xl border px-2 py-1.5">
         {/* Group 1: Tools */}
         <div className="flex items-center gap-1.5">
           {isNotMouse ? (
@@ -395,7 +311,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
                 MAIN_TOOL_BUTTON_CLASS,
                 !pendingNodeType &&
                   activeTool === 'lasso' &&
-                  'text-info bg-info-bg enabled:hover:bg-info-bg',
+                  'text-info-fg bg-info-bg enabled:hover:bg-info-bg',
               )}
               onClick={() => {
                 if (pendingNodeType) setPendingNodeType(null);
@@ -437,7 +353,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
               primaryButtonClassName={clsx(
                 MAIN_TOOL_BUTTON_CLASS,
                 !pendingNodeType &&
-                  'text-info bg-info-bg enabled:hover:bg-info-bg',
+                  'text-info-fg bg-info-bg enabled:hover:bg-info-bg',
               )}
               menuButtonClassName="enabled:hover:bg-bg-default"
             />
@@ -458,7 +374,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             className={clsx(
               MAIN_TOOL_BUTTON_CLASS,
               pendingNodeType === 'note' &&
-                'text-info bg-info-bg enabled:hover:bg-info-bg',
+                'text-info-fg bg-info-bg enabled:hover:bg-info-bg',
             )}
             onClick={() => {
               onToolChange('select');
@@ -477,7 +393,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             className={clsx(
               MAIN_TOOL_BUTTON_CLASS,
               pendingNodeType === 'text' &&
-                'text-info bg-info-bg enabled:hover:bg-info-bg',
+                'text-info-fg bg-info-bg enabled:hover:bg-info-bg',
             )}
             onClick={() => {
               onToolChange('select');
@@ -496,7 +412,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             className={clsx(
               MAIN_TOOL_BUTTON_CLASS,
               pendingNodeType === 'frame' &&
-                'text-info bg-info-bg enabled:hover:bg-info-bg',
+                'text-info-fg bg-info-bg enabled:hover:bg-info-bg',
             )}
             onClick={() => {
               onToolChange('select');
@@ -532,7 +448,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
                 className={clsx(
                   MAIN_TOOL_BUTTON_CLASS,
                   pendingNodeType === 'sketch' &&
-                    'text-info bg-info-bg enabled:hover:bg-info-bg',
+                    'text-info-fg bg-info-bg enabled:hover:bg-info-bg',
                 )}
                 onClick={() => {
                   // Clicking the Sketch button always resets the tool to draw
@@ -559,7 +475,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
               className={clsx(
                 MAIN_TOOL_BUTTON_CLASS,
                 pendingNodeType === 'childSpace' &&
-                  'text-info bg-info-bg enabled:hover:bg-info-bg',
+                  'text-info-fg bg-info-bg enabled:hover:bg-info-bg',
               )}
               onClick={() => {
                 onToolChange('select');
@@ -649,7 +565,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
               'h-9 shrink-0 gap-1.5 px-2 py-0 font-normal whitespace-nowrap [&>span]:right-1 [&>span]:bottom-1',
               !isNotMouse && 'pr-4',
               pendingNodeType === 'question' &&
-                'text-info bg-info-bg enabled:hover:bg-info-bg',
+                'text-info-fg bg-info-bg enabled:hover:bg-info-bg',
             )}
             onClick={() =>
               setPendingNodeType(

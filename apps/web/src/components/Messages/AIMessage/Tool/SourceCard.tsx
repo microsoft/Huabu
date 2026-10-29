@@ -27,7 +27,7 @@ export const SourceCard = ({ source }: { source: Source }) => {
   const title = (source.title ?? '').trim() || source.url;
   const hostname = getHostname(source.url);
   const cardRef = useRef<HTMLAnchorElement | null>(null);
-  const { threadId } = useChatSession();
+  const { threadId, canvasId, ownerCanvasId } = useChatSession();
 
   return (
     <div
@@ -35,30 +35,32 @@ export const SourceCard = ({ source }: { source: Source }) => {
       data-source-url={source.url}
       data-source-title={title}
     >
-      <DragToCanvasHandleButton
-        className={clsx(
-          'absolute top-1 left-0',
-          'opacity-0 transition-opacity',
-          'group-hover:opacity-100 hover:opacity-100 focus-visible:opacity-100',
-        )}
-        onDragStart={(e) => {
-          e.stopPropagation();
+      {canvasId === ownerCanvasId ? (
+        <DragToCanvasHandleButton
+          className={clsx(
+            'absolute top-1 left-0',
+            'opacity-0 transition-opacity',
+            'group-hover:opacity-100 hover:opacity-100 focus-visible:opacity-100',
+          )}
+          onDragStart={(e) => {
+            e.stopPropagation();
 
-          setDragPayload(
-            e,
-            {
-              kind: 'web',
-              origin: { type: 'user-from-chat', threadId },
-              data: {
-                src: source.url,
+            setDragPayload(
+              e,
+              {
+                kind: 'web',
+                origin: { type: 'user-from-chat', threadId },
+                data: {
+                  src: source.url,
+                },
               },
-            },
-            {
-              dragImageElement: cardRef.current,
-            },
-          );
-        }}
-      />
+              {
+                dragImageElement: cardRef.current,
+              },
+            );
+          }}
+        />
+      ) : null}
       <a
         ref={cardRef}
         href={source.url}

@@ -16,7 +16,9 @@ export function useConversationTitles(workspace: CanvasPreviewWorkspace) {
   const targets = JSON.stringify(
     Object.values(workspace.tabs)
       .flatMap(({ target }) =>
-        target.kind === 'chat' ? [[target.canvasId, target.threadId]] : [],
+        target.kind === 'chat' || target.kind === 'conversation'
+          ? [[target.canvasId, target.threadId]]
+          : [],
       )
       .sort(),
   );

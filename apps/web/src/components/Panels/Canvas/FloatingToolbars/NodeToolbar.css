@@ -39,11 +39,11 @@
 }
 :is(.node-floating-toolbar, .canvas-context-toolbar)
   button[aria-pressed='true'] {
-  color: var(--info);
+  color: var(--info-fg);
   background: var(--info-bg);
 }
 .node-floating-toolbar button.node-toolbar-text-format[aria-pressed='true'] {
-  color: var(--info);
+  color: var(--info-fg);
   background: transparent;
 }
 .node-floating-toolbar button.node-toolbar-text-format:hover {

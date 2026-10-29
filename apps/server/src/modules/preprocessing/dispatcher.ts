@@ -14,6 +14,7 @@ import { isLabelProtected } from './label-policy.js';
 import { runPipeline, type PipelineDeps } from './pipeline.js';
 import { getProfile } from './profiles.js';
 import { ProviderManager } from './provider-manager.js';
+import { withPublicNetworkOnly } from '../security/outbound.js';
 import { space, getStructuredStore } from '../storage/index.js';
 
 import type {
@@ -116,6 +117,7 @@ function dedupeKey(request: PreprocessNodeRequest): string {
     o?.allowLLM === false ? 'nl' : 'll',
     o?.allowPersistence === false ? 'np' : 'pp',
     o?.mode ?? '',
+    request.publicNetworkOnly ? 'pub' : 'any',
   ].join('\u0000');
 }
 
@@ -170,12 +172,14 @@ export class PreprocessDispatcher {
       provider: this.provider,
     };
 
-    return runPipeline(
-      request,
-      plan,
-      profile.contentKind,
-      profile.bodyOwnership,
-      deps,
-    );
+    const run = () =>
+      runPipeline(
+        request,
+        plan,
+        profile.contentKind,
+        profile.bodyOwnership,
+        deps,
+      );
+    return request.publicNetworkOnly ? withPublicNetworkOnly(run) : run();
   }
 }

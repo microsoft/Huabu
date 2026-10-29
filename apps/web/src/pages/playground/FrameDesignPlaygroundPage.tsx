@@ -5,7 +5,6 @@ import { useState } from 'react';
 
 import {
   ACCENT_PALETTE,
-  resolveAccent,
   type AccentToken,
   type SpaceInstructionFrameKind,
 } from '@huabu/shared';
@@ -225,7 +224,7 @@ function FrameSpecimen({
   const metrics = frameResponsiveMetricsForSize(width, height);
   const tier = frameResponsiveTierForSize(width, height);
   const scale = Math.min(1, maxPreviewWidth / width, maxPreviewHeight / height);
-  const resolvedAccent = resolveAccent(accent);
+  const resolvedAccent = accent;
   const headerMetrics = getFrameHeaderMetrics(
     metrics.contentSpacing,
     width,

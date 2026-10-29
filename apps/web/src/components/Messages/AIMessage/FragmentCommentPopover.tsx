@@ -30,6 +30,7 @@ interface FragmentCommentPopoverProps {
   initialMode?: 'actions' | 'comment';
   children?: ReactNode;
   addDisabled?: boolean;
+  canvasActionsDisabled?: boolean;
 }
 
 export function FragmentCommentPopover({
@@ -42,6 +43,7 @@ export function FragmentCommentPopover({
   initialMode = 'actions',
   children,
   addDisabled = false,
+  canvasActionsDisabled = false,
 }: FragmentCommentPopoverProps) {
   const { t } = useTranslation();
   const [editing, setEditing] = useState(initialMode === 'comment');
@@ -123,6 +125,12 @@ export function FragmentCommentPopover({
           }}
           onCopied={onDismiss}
           onSaveAsNote={onSaveAsNote}
+          saveAsNoteDisabled={canvasActionsDisabled}
+          saveAsNoteTitle={
+            canvasActionsDisabled
+              ? t('remoteConversation.canvasAction')
+              : undefined
+          }
           onComment={() => {
             onBegin();
             setEditing(true);

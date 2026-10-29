@@ -8,7 +8,7 @@
  * Why a store and not per-component state? Several surfaces need the
  * profile list in lockstep: the Settings editor lets the user CRUD
  * profiles, the chat picker uses the same list to label "external"
- * binding options, and new conversations resolve browser-local recency
+ * binding options, and new conversations resolve client-local recency
  * against the current selectable catalogue.
  * Centralising
  * the list in a store means any caller can `await
@@ -42,10 +42,15 @@ import { create } from 'zustand';
 
 import { HUABU_AGENT_PROFILE_ID } from '@huabu/shared';
 
-import { listAcpProfiles } from '@/api/acp';
+import { listAcpProfiles, renameAgentletDevice } from '@/api/acp';
 import { getAgentDefaults, updateAgentDefaults } from '@/api/agentDefaults';
 import { toast } from '@/components/Common/Toast';
 import { i18n } from '@/i18n';
+import {
+  readApplicationPreference,
+  subscribeApplicationPreferences,
+  writeApplicationPreference,
+} from '@/utils/desktopStorage';
 
 import type {
   AcpAgentletStatus,
@@ -54,6 +59,7 @@ import type {
 } from '@/api/acp';
 import type {
   AgentBinding,
+  AgentletDevice,
   AgentDefaults,
   AgentDefaultsResponse,
 } from '@huabu/shared';
@@ -62,18 +68,26 @@ let inFlightRefresh: Promise<Error | null> | null = null;
 let inFlightDefaults: Promise<AgentDefaultsResponse> | null = null;
 let defaultsSaveQueue = Promise.resolve();
 let defaultsRevision = 0;
+let deviceNamesRevision = 0;
 
 export const RECENT_CONVERSATION_AGENT_STORAGE_KEY =
   'huabu.recentConversationAgentProfile.v1';
 
 function readRecentConversationProfileId(): string | null {
-  if (typeof localStorage === 'undefined') return null;
   try {
-    const profileId = localStorage.getItem(
+    const profileId = readApplicationPreference(
       RECENT_CONVERSATION_AGENT_STORAGE_KEY,
     );
     return profileId?.trim() || null;
-  } catch {
+  } catch (error) {
+    console.error(
+      '[preferences] Could not read recent conversation Agent:',
+      error,
+    );
+    toast(error instanceof Error ? error.message : String(error), {
+      tone: 'danger',
+    });
+    if (window.electronBridge?.tabs) throw error;
     return null;
   }
 }
@@ -81,8 +95,19 @@ function readRecentConversationProfileId(): string | null {
 function writeRecentConversationProfileId(profileId: string): void {
   if (typeof localStorage === 'undefined') return;
   try {
-    localStorage.setItem(RECENT_CONVERSATION_AGENT_STORAGE_KEY, profileId);
-  } catch {
+    writeApplicationPreference(
+      RECENT_CONVERSATION_AGENT_STORAGE_KEY,
+      profileId,
+    );
+  } catch (error) {
+    console.error(
+      '[preferences] Could not save recent conversation Agent:',
+      error,
+    );
+    toast(error instanceof Error ? error.message : String(error), {
+      tone: 'danger',
+    });
+    if (window.electronBridge?.tabs) throw error;
     // Unavailable browser storage keeps the preference session-local.
   }
 }
@@ -94,13 +119,15 @@ interface AcpProfilesState {
   selectableProfileIds: string[];
   /** Active Agentlet control connections, sorted by the server. */
   connectedDevices: ConnectedAgentletDevice[];
+  /** Display-only device history; never used for runtime availability. */
+  knownDevices: AgentletDevice[];
   folderPickerAgentletId: string | null;
   /** Latest agentlet snapshot. `null` until the first fetch resolves. */
   agentlet: AcpAgentletStatus | null;
   /** Absent on older servers; never infer a default from list ordering. */
   agentDefaults: AgentDefaults | null;
   defaultsError: Error | null;
-  /** Browser-local convenience preference; never persisted by the Server. */
+  /** Client-local convenience preference; never persisted by the Server. */
   recentConversationProfileId: string | null;
   /**
    * `true` once a fetch has *succeeded* at least once. A failed initial
@@ -123,6 +150,7 @@ interface AcpProfilesState {
     background?: boolean;
     afterMutation?: boolean;
   }) => Promise<void>;
+  renameDevice: (agentletId: string, displayName: string) => Promise<void>;
   loadDefaults: () => Promise<AgentDefaultsResponse>;
   saveDefaults: (config: AgentDefaults) => Promise<AgentDefaultsResponse>;
   rememberConversationAgent: (profileId: string) => void;
@@ -132,6 +160,7 @@ export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
   profiles: [],
   selectableProfileIds: [],
   connectedDevices: [],
+  knownDevices: [],
   folderPickerAgentletId: null,
   agentlet: null,
   agentDefaults: null,
@@ -230,6 +259,18 @@ export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
     writeRecentConversationProfileId(profileId);
     set({ recentConversationProfileId: profileId });
   },
+  renameDevice: async (agentletId, displayName) => {
+    const saved = await renameAgentletDevice(agentletId, { displayName });
+    deviceNamesRevision++;
+    set((state) => ({
+      connectedDevices: state.connectedDevices.map((device) =>
+        device.agentletId === agentletId ? { ...device, ...saved } : device,
+      ),
+      knownDevices: state.knownDevices.map((device) =>
+        device.agentletId === agentletId ? { ...device, ...saved } : device,
+      ),
+    }));
+  },
   refresh: async (options) => {
     await defaultsSaveQueue;
     // A mutation must not join a snapshot captured before its commit.
@@ -244,6 +285,7 @@ export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
     }
     const background = options?.background === true;
     const revision = defaultsRevision;
+    const namesRevision = deviceNamesRevision;
     const request = (async () => {
       if (!background) set({ loading: true });
       try {
@@ -251,7 +293,12 @@ export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
         set({
           profiles: res.profiles,
           selectableProfileIds: res.selectableProfileIds,
-          connectedDevices: res.connectedDevices,
+          ...(namesRevision === deviceNamesRevision
+            ? {
+                connectedDevices: res.connectedDevices,
+                knownDevices: res.knownDevices ?? res.connectedDevices,
+              }
+            : {}),
           folderPickerAgentletId: res.folderPickerAgentletId ?? null,
           agentlet: res.agentlet,
           ...(revision === defaultsRevision
@@ -289,6 +336,14 @@ export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
     }
   },
 }));
+
+const unsubscribePreferences = subscribeApplicationPreferences((key) => {
+  if (key !== RECENT_CONVERSATION_AGENT_STORAGE_KEY) return;
+  useAcpProfilesStore.setState({
+    recentConversationProfileId: readRecentConversationProfileId(),
+  });
+});
+import.meta.hot?.dispose(unsubscribePreferences);
 
 export function selectDefaultConversationProfileId(
   state: Pick<

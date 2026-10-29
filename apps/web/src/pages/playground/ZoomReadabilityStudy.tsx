@@ -3,7 +3,6 @@
 
 import { useState } from 'react';
 
-import { resolveAccent } from '@huabu/shared';
 import {
   FRAME_LAYOUT_CONFIG,
   resolveFrameResponsiveLayout,
@@ -42,7 +41,7 @@ const SCENE = { width: 1400, height: 550 };
 const PRESETS = [100, 50, 35, 25, 15, 14, 10, 8, 5] as const;
 type Variant = 'baseline' | 'proposal';
 type Context = 'independent' | 'grouped' | 'dense' | 'tall';
-const ACCENT = resolveAccent('teal');
+const ACCENT = 'teal';
 const MEDIA = [
   {
     type: 'web',

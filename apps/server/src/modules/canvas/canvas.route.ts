@@ -89,9 +89,18 @@ import { ARTIFACT_URL_REGEX } from '../artifact/utils.js';
 import { getPreprocessDispatcher, getProfile } from '../preprocessing/index.js';
 import { isLabelProtected } from '../preprocessing/label-policy.js';
 import { stripOfficeparserPreamble } from '../preprocessing/loaders/office-strip.js';
+import { isOwnerRequest } from '../security/owner.js';
+import {
+  canReadCitedSpaces,
+  canReadSpace,
+  claimSpace,
+  isRestrictedRequest,
+  readableSpaces,
+} from '../security/space-access.js';
 import {
   space,
   createSpace,
+  deleteSpace,
   isWorldCanvasId,
   stageSpaceImport,
   storageServes,
@@ -104,6 +113,7 @@ import {
   updateNode,
 } from '../storage/index.js';
 import { acquireWorkspaceOperationLease } from '../workspace.js';
+import { remapImportedSpace } from './import-space-identity.js';
 
 import type { CanvasNodeType } from '@huabu/shared';
 import type {
@@ -143,7 +153,7 @@ import type {
   RecentCanvasConversationParams,
   RecentCanvasConversationResponse,
 } from '@huabu/shared';
-import type { FastifyPluginAsync } from 'fastify';
+import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 
 /**
  * Loose node type for processing unknown/untyped node structures.
@@ -597,6 +607,22 @@ async function hydrateNodeContent(
   });
 }
 
+/**
+ * Make the caller owner of a Space it has just created, or remove the Space:
+ * one nobody can reach must not be left behind, nor duplicated by a retry.
+ */
+async function claimOrDiscard(
+  request: FastifyRequest,
+  canvasId: string,
+): Promise<void> {
+  try {
+    await claimSpace(request, canvasId);
+  } catch (error) {
+    await deleteSpace(canvasId).catch(() => {});
+    throw error;
+  }
+}
+
 const canvasRoutes: FastifyPluginAsync = async (fastify) => {
   registerSpaceHierarchyRoutes(fastify);
   registerSpaceCardRoutes(fastify);
@@ -637,10 +663,21 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
 
   fastify.get<{ Reply: ApiResult<ListCanvasesResponse> }>(
     '/',
-    async function (_request, reply) {
-      const summaries = [...(await getStructuredStore().spaces().list())].sort(
-        (a, b) => b.updatedAt - a.updatedAt,
+    async function (request, reply) {
+      const readable = await readableSpaces(
+        request,
+        await getStructuredStore().spaces().list(),
       );
+      // A readable Space under a parent the caller cannot see is listed as
+      // a root of its own; the stored hierarchy is unchanged.
+      const listed = new Set(readable.map((item) => item.canvasId));
+      const summaries = readable
+        .map((item) =>
+          item.parentSpaceId && !listed.has(item.parentSpaceId)
+            ? { ...item, parentSpaceId: null }
+            : item,
+        )
+        .sort((a, b) => b.updatedAt - a.updatedAt);
 
       return reply.send({ canvases: summaries });
     },
@@ -667,6 +704,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     const canvas = created.record;
+    await claimOrDiscard(request, canvas.canvasId);
     return reply
       .code(201)
       .send({ canvasId: canvas.canvasId, title: canvas.title });
@@ -1162,6 +1200,20 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
 
     const { nodeType, trigger, snapshot, previousSnapshot, options } =
       parsed.data;
+    // A snapshot may point at another Space's artifact, whose bytes the
+    // pipeline would read; that Space is as absent as a missing one.
+    if (
+      !(await canReadCitedSpaces(request, canvasId, [
+        snapshot,
+        previousSnapshot,
+      ]))
+    ) {
+      return reply.code(404).send({ message: 'Canvas not found' });
+    }
+    // Enrichment runs the Utility Agent through the shared machine
+    // credential, which a member may not use; extraction still runs, but
+    // only against public addresses.
+    const member = isRestrictedRequest(request) && !isOwnerRequest(request);
     const dispatcher = getPreprocessDispatcher();
     if (
       MD_BACKED_NODE_TYPES.has(nodeType) &&
@@ -1183,11 +1235,12 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         snapshot,
         previousSnapshot,
         options: {
-          allowLLM: options?.allowLLM ?? true,
+          allowLLM: !member && (options?.allowLLM ?? true),
           allowPersistence: options?.allowPersistence ?? true,
           force: options?.force ?? false,
           mode: options?.mode,
         },
+        ...(member ? { publicNetworkOnly: true } : {}),
       };
 
       const result = await dispatcher.preprocess(ppRequest);
@@ -1662,7 +1715,10 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     }
     try {
       return reply.send(
-        await moveCanvasSelection(params.data.canvasId, parsed.data),
+        await moveCanvasSelection(params.data.canvasId, parsed.data, {
+          canRead: (canvasId) => canReadSpace(request, canvasId),
+          claim: (canvasId) => claimSpace(request, canvasId),
+        }),
       );
     } catch (error) {
       if (error instanceof SpaceMoveError) {
@@ -1698,6 +1754,18 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     if (parsed.data.originator.source === 'system') {
       return reply.code(403).send({
         message: 'System command origin is reserved for internal callers',
+      });
+    }
+    // An agent batch fetches the sources its nodes name, as only an agent
+    // may; a member runs no agents, so cannot speak for one.
+    if (
+      parsed.data.originator.source === 'agent' &&
+      isRestrictedRequest(request) &&
+      !isOwnerRequest(request)
+    ) {
+      return reply.code(403).send({
+        message: 'Agents and conversations require an owner',
+        code: 'AGENT_ACCESS_REQUIRED',
       });
     }
     const { commands, originator, runId } = parsed.data;
@@ -2194,34 +2262,35 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
             message: 'Invalid bundle: missing Space record',
           });
         }
-        const sourceCanvasId = parsed.canvasId;
+        const remapped = await remapImportedSpace(
+          stagingDir,
+          parsed,
+          targetCanvasId,
+        );
         const importedManifest = manifest as ImportManifest | null;
         const targetTitle =
           importedManifest?.title ?? parsed.title ?? 'Imported canvas';
         const topology = stripLegacyPortalTopology(
-          (parsed.state.nodes ?? []) as Parameters<
+          (remapped.state.nodes ?? []) as Parameters<
             typeof stripLegacyPortalTopology
           >[0],
-          (parsed.state.edges ?? []) as Parameters<
+          (remapped.state.edges ?? []) as Parameters<
             typeof stripLegacyPortalTopology
           >[1],
         );
 
-        // Artifact URLs are the bundle's own vocabulary, so they are rewritten
-        // here; where the result is filed is not, so `publish` decides that —
+        // Identities and artifact URLs belong to the public bundle format.
+        // Where the result is filed does not, so `publish` decides that —
         // including the de-duplication suffix it may have to add to the title.
         await staged.publish({
-          ...parsed,
+          ...remapped,
           canvasId: targetCanvasId,
           title: targetTitle,
-          state: rewriteCanvasArtifactUrls(
-            { ...parsed.state, ...topology },
-            sourceCanvasId,
-            targetCanvasId,
-          ),
+          state: { ...remapped.state, ...topology },
         });
         stagingCleanedUp = true;
 
+        await claimOrDiscard(request, targetCanvasId);
         const response: ImportCanvasResponse = {
           canvasId: targetCanvasId,
         };
@@ -2251,6 +2320,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
   // an `AbortController` so it short-circuits between nodes.
   fastify.post<{ Params: { canvasId: string } }>(
     '/:canvasId/search',
+    { config: { spaceAccess: 'read' } },
     async function (request, reply) {
       const { canvasId } = request.params;
       const parsed = canvasSearchRequestSchema.safeParse(request.body);
@@ -2319,21 +2389,6 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     },
   );
 };
-
-/**
- * Rewrite `/api/canvas/<old>/artifact/<file>` URLs inside canvas state to
- * point at the freshly-allocated canvas id. Mutates and returns the input.
- */
-function rewriteCanvasArtifactUrls<T>(
-  state: T,
-  fromCanvasId: string,
-  toCanvasId: string,
-): T {
-  const fromPrefix = `/api/canvas/${fromCanvasId}/artifact/`;
-  const toPrefix = `/api/canvas/${toCanvasId}/artifact/`;
-  const json = JSON.stringify(state).split(fromPrefix).join(toPrefix);
-  return JSON.parse(json) as T;
-}
 
 /**
  * Iterate over zip entries via `yauzl`, calling `onEntry(path, read)` for
