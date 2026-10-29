@@ -19,6 +19,7 @@
 import { z } from 'zod';
 
 import { agentWorkingDirectorySchema } from './agent-profile.js';
+import { fileReferenceSchema } from './device-files.js';
 import { inkResourceReferencesSchema } from './ink-sigil.js';
 import { REASONING_EFFORT_VALUES } from './llm.js';
 import {
@@ -331,12 +332,33 @@ export const quotedCommentSchema = z.object({
   contextAfter: z.string(),
   comment: z.string().trim().min(1),
   source: z
-    .object({
-      kind: z.literal('note'),
-      canvasId: z.string().min(1),
-      nodeId: z.string().min(1),
-      snapshotRevision: z.string().min(1),
-    })
+    .discriminatedUnion('kind', [
+      z.object({
+        kind: z.literal('note'),
+        canvasId: z.string().min(1),
+        nodeId: z.string().min(1),
+        snapshotRevision: z.string().min(1),
+      }),
+      z
+        .object({
+          kind: z.literal('file-reference'),
+          canvasId: z.string().min(1),
+          nodeId: z.string().min(1),
+          agentletId: fileReferenceSchema.shape.agentletId,
+          path: fileReferenceSchema.shape.path,
+          contentVersion: z.string().regex(/^[a-f0-9]{64}$/),
+          offsetUnit: z.literal('utf-16'),
+          from: z.number().int().nonnegative(),
+          to: z.number().int().positive(),
+          loadedLength: z.number().int().nonnegative(),
+          complete: z.boolean(),
+        })
+        .refine(
+          (source) =>
+            source.from < source.to && source.to <= source.loadedLength,
+          'Selection must be inside the loaded document',
+        ),
+    ])
     .optional(),
 });
 export type QuotedComment = z.infer<typeof quotedCommentSchema>;

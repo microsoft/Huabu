@@ -1233,6 +1233,7 @@
     "fragmentComment": "Comment",
     "commentChooseDestination": "Choose an existing conversation",
     "commentSelectionUnavailable": "The text selection is no longer available. Select the passage again.",
+    "commentCapturedFile": "Captured file snapshot",
     "commentDestinationLoading": "Loading conversation…",
     "commentDestinationUnavailable": "This conversation is unavailable. Choose another destination.",
     "commentNoDestinations": "Create a conversation separately before adding a comment.",

@@ -26,6 +26,53 @@ describe('agentRequestSchema input kinds', () => {
     expect(agentRequestSchema.parse(request)).toEqual(request);
   });
 
+  it('preserves file snapshot evidence and rejects invalid ranges and identities', () => {
+    const source = {
+      kind: 'file-reference',
+      canvasId: 'space',
+      nodeId: 'file',
+      agentletId: 'source-device',
+      path: '/source.tex',
+      contentVersion: 'a'.repeat(64),
+      offsetUnit: 'utf-16',
+      from: 4,
+      to: 11,
+      loadedLength: 30,
+      complete: false,
+    };
+    const quote = {
+      quote: 'excerpt',
+      contextBefore: 'pre ',
+      contextAfter: ' after',
+      comment: 'explain',
+    };
+    expect(
+      agentRequestSchema.parse({
+        content: '',
+        quotedComments: [{ ...quote, source }],
+      }).quotedComments?.[0]?.source,
+    ).toEqual(source);
+    for (const invalid of [
+      { ...source, path: 'relative.tex' },
+      { ...source, agentletId: '' },
+      { ...source, contentVersion: '' },
+      { ...source, offsetUnit: 'bytes' },
+      { ...source, from: -1 },
+      { ...source, from: 11 },
+      { ...source, to: 31 },
+      { ...source, from: 4.5 },
+      { ...source, loadedLength: 0 },
+      { ...source, complete: undefined },
+    ]) {
+      expect(
+        agentRequestSchema.safeParse({
+          content: '',
+          quotedComments: [{ ...quote, source: invalid }],
+        }).success,
+      ).toBe(false);
+    }
+  });
+
   it.each([
     { canvasId: undefined, selectedNodes: [{ id: 'text', type: 'text' }] },
     { canvasId: 'canvas', selectedNodes: [] },

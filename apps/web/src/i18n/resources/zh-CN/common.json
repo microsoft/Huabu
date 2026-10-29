@@ -1233,6 +1233,7 @@
     "fragmentComment": "评论",
     "commentChooseDestination": "选择已有对话",
     "commentSelectionUnavailable": "文字选区已失效，请重新选择引用内容。",
+    "commentCapturedFile": "已捕获的文件快照",
     "commentDestinationLoading": "正在加载对话…",
     "commentDestinationUnavailable": "此对话不可用，请选择其他目标。",
     "commentNoDestinations": "请先单独创建对话，再添加评论。",

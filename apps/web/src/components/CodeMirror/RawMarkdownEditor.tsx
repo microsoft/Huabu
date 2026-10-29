@@ -85,6 +85,8 @@ export interface RawMarkdownEditorProps {
   ariaLabel?: string;
   searchNodeId?: string;
   plainText?: boolean;
+  /** Reports the mounted view and null on teardown for opt-in integrations. */
+  onReady?: (view: EditorView | null) => void;
 }
 
 export default function RawMarkdownEditor({
@@ -95,6 +97,7 @@ export default function RawMarkdownEditor({
   ariaLabel,
   searchNodeId,
   plainText = false,
+  onReady,
 }: RawMarkdownEditorProps): React.JSX.Element {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -102,6 +105,8 @@ export default function RawMarkdownEditor({
   /** Latest `onChange` accessed by the update listener without remount. */
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const onReadyRef = useRef(onReady);
+  onReadyRef.current = onReady;
   /** Compartment that lets us hot-swap the read-only facet at runtime. */
   const readOnlyCompartmentRef = useRef<Compartment>(new Compartment());
   const query = usePreviewSearchStore((state) =>
@@ -211,10 +216,12 @@ export default function RawMarkdownEditor({
     if (ariaLabel) {
       view.contentDOM.setAttribute('aria-label', ariaLabel);
     }
+    onReadyRef.current?.(view);
 
     return () => {
       view.destroy();
       viewRef.current = null;
+      onReadyRef.current?.(null);
       host.removeAttribute('data-search-source-ready');
     };
     // Intentionally mount-only — see dedicated reconciliation effects.

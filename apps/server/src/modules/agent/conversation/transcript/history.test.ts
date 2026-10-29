@@ -186,6 +186,25 @@ describe('buildHistoryFromTurns', () => {
             snapshotRevision: 'captured',
           },
         },
+        {
+          quote: 'file excerpt',
+          contextBefore: 'before ',
+          contextAfter: ' after',
+          comment: 'Explain this file.',
+          source: {
+            kind: 'file-reference',
+            canvasId: 'space',
+            nodeId: 'file',
+            agentletId: 'device',
+            path: '/source.tex',
+            contentVersion: 'a'.repeat(64),
+            offsetUnit: 'utf-16',
+            from: 7,
+            to: 19,
+            loadedLength: 40,
+            complete: true,
+          },
+        },
       ];
       const messages = build([
         { request: createChatSubmission(envelope), transcript: [] },

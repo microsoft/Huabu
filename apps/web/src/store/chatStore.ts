@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import equal from 'fast-deep-equal';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
@@ -710,11 +711,7 @@ export const useChatStore = create<ChatState>()(
                     sent.contextBefore === item.contextBefore &&
                     sent.contextAfter === item.contextAfter &&
                     sent.comment === item.comment &&
-                    sent.source?.kind === item.source?.kind &&
-                    sent.source?.canvasId === item.source?.canvasId &&
-                    sent.source?.nodeId === item.source?.nodeId &&
-                    sent.source?.snapshotRevision ===
-                      item.source?.snapshotRevision,
+                    equal(sent.source, item.source),
                 ),
             ),
           });
