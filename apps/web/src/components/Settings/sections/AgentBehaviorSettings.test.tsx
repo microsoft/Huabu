@@ -23,15 +23,6 @@ vi.mock('@/api/agentChangeReview', () => ({
 }));
 
 vi.mock('@/components/Common/Toast', () => ({ toast }));
-vi.mock('@/store/chatPreferencesStore', () => ({
-  MAX_RECENT_CHAT_TURNS: 20,
-  MIN_RECENT_CHAT_TURNS: 1,
-  useChatPreferencesStore: (selector: (state: object) => unknown) =>
-    selector({
-      recentTurnCount: 3,
-      setRecentTurnCount: vi.fn(),
-    }),
-}));
 import { AgentBehaviorSettings } from './AgentBehaviorSettings';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -69,6 +60,12 @@ async function renderSettings(): Promise<HTMLButtonElement> {
 }
 
 describe('AgentBehaviorSettings', () => {
+  it('does not expose a history page-size preference', async () => {
+    await renderSettings();
+    expect(container.textContent).not.toContain('settings.recentChatTurns');
+    expect(container.querySelector('[role="combobox"]')).toBeNull();
+  });
+
   it('loads the server value and persists a toggle', async () => {
     const toggle = await renderSettings();
     expect(toggle.getAttribute('aria-checked')).toBe('false');

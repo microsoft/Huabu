@@ -417,8 +417,6 @@
     "inputMode_pen": "手写笔",
     "inputMode_finger": "手指",
     "automaticResolved": "自动（{{mode}}）",
-    "recentChatTurns": "聊天历史分页大小",
-    "recentChatTurnsDescription": "每页获取的完整对话轮次数。向上滚动时自动加载更早的记录。",
     "externalAgentIdleTimeout": "Agent 空闲暂停时间",
     "externalAgentIdleTimeoutDescription": "Agent 空闲超过此时间后暂停，下次使用时恢复。",
     "externalAgentIdleTimeoutSaved": "已更新外部 Agent 空闲超时",

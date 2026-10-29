@@ -488,7 +488,12 @@ const historyAnswer = (turn: number) =>
 
 async function mockHistory(
   page: Page,
-  failure?: { nextOlder?: boolean; delayMs?: number },
+  failure?: {
+    nextOlder?: boolean;
+    delayMs?: number;
+    short?: boolean;
+    total?: number;
+  },
 ) {
   const requests: string[] = [];
   await page.route('**/api/agent/history/*/page?*', async (route) => {
@@ -508,7 +513,7 @@ async function mockHistory(
       });
       return;
     }
-    const end = before ? Number(before) : 60;
+    const end = before ? Number(before) : (failure?.total ?? 60);
     const start = Math.max(0, end - Number(url.searchParams.get('limit')));
     await route.fulfill({
       json: {
@@ -521,7 +526,14 @@ async function mockHistory(
               { role: 'user', content: `Question ${turn}` },
               {
                 role: 'assistant',
-                parts: [{ kind: 'text', text: historyAnswer(turn) }],
+                parts: [
+                  {
+                    kind: 'text',
+                    text: failure?.short
+                      ? `Answer ${turn}`
+                      : historyAnswer(turn),
+                  },
+                ],
               },
             ],
           };
@@ -533,6 +545,150 @@ async function mockHistory(
   });
   return requests;
 }
+
+for (const width of [1280, 390]) {
+  test(`fills short history without a scroll gesture at ${width}px`, async ({
+    page,
+  }, info) => {
+    await page.setViewportSize({ width, height: 1000 });
+    const requests = await mockHistory(page, { short: true, delayMs: 200 });
+    await page.goto('/playground/chat-performance?mode=history');
+    await expect.poll(() => requests.length).toBeGreaterThan(1);
+    await expect
+      .poll(() =>
+        scroll(page).evaluate(
+          (element) => element.scrollHeight - element.clientHeight,
+        ),
+      )
+      .toBeGreaterThan(1);
+    await settle(page);
+    await expect
+      .poll(() =>
+        scroll(page).evaluate(
+          (element) =>
+            element.scrollHeight - element.clientHeight - element.scrollTop,
+        ),
+      )
+      .toBeLessThanOrEqual(2);
+    const count = requests.length;
+    await page.waitForTimeout(600);
+    expect(requests).toHaveLength(count);
+    expect(new Set(requests).size).toBe(count);
+    await page.screenshot({
+      path: info.outputPath('short-history-filled.png'),
+    });
+  });
+}
+
+test('resumes short-history filling after releasing a held pointer', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  const requests = await mockHistory(page, { short: true });
+  await page.goto('/playground/chat-performance?mode=history');
+  await scroll(page).locator('[data-chat-message-id]').first().waitFor();
+  const bounds = await scroll(page).boundingBox();
+  if (!bounds) throw new Error('Missing history viewport');
+  await page.mouse.move(bounds.x + 5, bounds.y + bounds.height - 20);
+  await page.mouse.down();
+  await page.waitForTimeout(1000);
+  await page.mouse.up();
+  await expect
+    .poll(() =>
+      scroll(page).evaluate(
+        (element) => element.scrollHeight - element.clientHeight,
+      ),
+    )
+    .toBeGreaterThan(1);
+  await settle(page);
+  expect(new Set(requests).size).toBe(requests.length);
+});
+
+test('resumes filling when a larger viewport no longer overflows', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 600 });
+  const requests = await mockHistory(page, { short: true });
+  await page.goto('/playground/chat-performance?mode=history');
+  await expect
+    .poll(() =>
+      scroll(page).evaluate(
+        (element) => element.scrollHeight - element.clientHeight,
+      ),
+    )
+    .toBeGreaterThan(1);
+  await settle(page);
+  const count = requests.length;
+  await page.setViewportSize({ width: 1280, height: 1800 });
+  await expect.poll(() => requests.length).toBeGreaterThan(count);
+  await expect
+    .poll(() =>
+      scroll(page).evaluate(
+        (element) => element.scrollHeight - element.clientHeight,
+      ),
+    )
+    .toBeGreaterThan(1);
+  await settle(page);
+  expect(new Set(requests).size).toBe(requests.length);
+});
+
+test('user input during automatic fill keeps the original reading row visible', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  await mockHistory(page, { short: true, delayMs: 500 });
+  await page.goto('/playground/chat-performance?mode=history');
+  await expect(page.getByRole('status')).toContainText('Loading earlier');
+  const saved = await anchor(page);
+  await scroll(page).dispatchEvent('wheel', { deltaY: -10 });
+  await expect
+    .poll(() =>
+      scroll(page).evaluate(
+        (element) => element.scrollHeight - element.clientHeight,
+      ),
+    )
+    .toBeGreaterThan(1);
+  await expect(page.getByRole('status')).toHaveCount(0);
+  await settle(page);
+  // An underfilled transcript cannot retain a top offset beyond its maximum scroll.
+  await expect(
+    scroll(page).locator(`[data-chat-message-id="${saved.id}"]`),
+  ).toBeInViewport();
+});
+
+test('stops filling when history is exhausted, including after viewport growth', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 1400 });
+  const requests = await mockHistory(page, { short: true, total: 4 });
+  await page.goto('/playground/chat-performance?mode=history');
+  await expect.poll(() => requests.length).toBe(2);
+  await expect(scroll(page)).not.toHaveAttribute('data-chat-has-older', 'true');
+  await page.setViewportSize({ width: 1280, height: 1600 });
+  await settle(page);
+  expect(requests).toHaveLength(2);
+});
+
+test('pauses automatic fill on failure and resumes only after retry', async ({
+  page,
+}, info) => {
+  await page.setViewportSize({ width: 1280, height: 1400 });
+  const requests = await mockHistory(page, {
+    short: true,
+    nextOlder: true,
+    total: 4,
+  });
+  await page.goto('/playground/chat-performance?mode=history');
+  const error = page.getByRole('alert');
+  await expect(error).toContainText('History temporarily unavailable');
+  await page.waitForTimeout(600);
+  expect(requests).toHaveLength(2);
+  await page.screenshot({ path: info.outputPath('short-history-retry.png') });
+  await error.getByRole('button', { name: 'Retry' }).click();
+  await expect(error).toHaveCount(0);
+  await expect(scroll(page)).not.toHaveAttribute('data-chat-has-older', 'true');
+  expect(requests).toHaveLength(3);
+});
 
 test('automatically pages, evicts bodies and refetches using retained cursors', async ({
   page,

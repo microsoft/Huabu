@@ -417,8 +417,6 @@
     "inputMode_pen": "Pen",
     "inputMode_finger": "Finger",
     "automaticResolved": "Auto ({{mode}})",
-    "recentChatTurns": "Chat history page size",
-    "recentChatTurnsDescription": "Number of complete turns fetched per page. Older history loads automatically as you scroll.",
     "externalAgentIdleTimeout": "Agent idle pause time",
     "externalAgentIdleTimeoutDescription": "Pause the Agent after this idle time; resume when used again.",
     "externalAgentIdleTimeoutSaved": "External agent idle timeout updated",

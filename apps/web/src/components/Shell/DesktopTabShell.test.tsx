@@ -43,6 +43,7 @@ describe('DesktopTabShell minimal Tab presentation', () => {
       workspaceId: 'workspace',
       activeId: 'space-a',
       busy: false,
+      canChangeWorkspace: true,
       tabs: [
         {
           id: 'home',
@@ -76,9 +77,14 @@ describe('DesktopTabShell minimal Tab presentation', () => {
     root = createRoot(container);
   });
 
-  afterEach(() => {
-    act(() => root.unmount());
+  afterEach(async () => {
+    await act(async () => {
+      document.dispatchEvent(new Event('pointercancel'));
+      root.unmount();
+      await new Promise((resolve) => setTimeout(resolve, 60));
+    });
     container.remove();
+    vi.restoreAllMocks();
   });
 
   async function render() {
@@ -261,6 +267,309 @@ describe('DesktopTabShell minimal Tab presentation', () => {
     await act(async () => button('desktopTabs.newTab').click());
     expect(mocks.command).toHaveBeenCalledWith('new-tab');
     expect(mocks.open).not.toHaveBeenCalled();
+    expect(
+      button('desktopTabs.newTab').parentElement?.classList.contains('ml-1'),
+    ).toBe(true);
+  });
+
+  it('hides the Workspace button until switching is supported', async () => {
+    snapshot.canChangeWorkspace = false;
+    await render();
+    expect(
+      container.querySelector('[aria-label="workspace.switcher"]'),
+    ).toBeNull();
+    expect(button('settings.open')).toBeTruthy();
+    await act(async () =>
+      mocks.onState.mock.calls[0][0]({ ...snapshot, canChangeWorkspace: true }),
+    );
+    expect(button('workspace.switcher')).toBeTruthy();
+  });
+
+  it('insets only the new-Tab hover background without shrinking the shared icon button', async () => {
+    await render();
+    const add = button('desktopTabs.newTab');
+    expect(add.classList.contains('before:inset-0.5')).toBe(true);
+    expect(add.classList.contains('enabled:hover:bg-transparent')).toBe(true);
+    expect(add.classList.contains('enabled:hover:before:bg-hover')).toBe(true);
+    expect(add.classList.contains('p-1.5')).toBe(true);
+    expect(add.className).toContain('[&_svg]:h-4');
+    expect(add.querySelector('svg')?.classList.contains('relative')).toBe(true);
+  });
+
+  it('supports keyboard reordering without activating another Tab or moving Home', async () => {
+    snapshot.tabs.push({
+      ...snapshot.tabs[1],
+      id: 'space-b',
+      canvasId: 'b',
+      title: 'Space B',
+    });
+    await render();
+    await act(async () =>
+      button('Space A').dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'ArrowRight',
+          altKey: true,
+          shiftKey: true,
+          bubbles: true,
+        }),
+      ),
+    );
+    expect(mocks.command).toHaveBeenCalledWith({
+      type: 'move-tab',
+      id: 'space-a',
+      index: 2,
+    });
+    expect(mocks.activate).not.toHaveBeenCalled();
+    mocks.command.mockClear();
+    await act(async () =>
+      button('Space A').dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'ArrowLeft',
+          altKey: true,
+          shiftKey: true,
+          bubbles: true,
+        }),
+      ),
+    );
+    expect(mocks.command).not.toHaveBeenCalled();
+    expect(button('navigation.home').getAttribute('aria-disabled')).not.toBe(
+      'true',
+    );
+    expect(button('Space A').getAttribute('draggable')).toBeNull();
+    expect(button('Space A').getAttribute('aria-roledescription')).toBe(
+      'sortable',
+    );
+  });
+
+  it.each([true, false])(
+    'keeps keyboard focus and blocks pending actions when move success is %s',
+    async (ok) => {
+      let finish!: (
+        result: { ok: true } | { ok: false; error: string },
+      ) => void;
+      mocks.command.mockReturnValueOnce(
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+      );
+      await prepareDrag();
+      const space = button('Space A');
+      space.focus();
+      const key = async (reorder: boolean) =>
+        act(async () =>
+          space.dispatchEvent(
+            new KeyboardEvent('keydown', {
+              key: 'ArrowRight',
+              altKey: reorder,
+              shiftKey: reorder,
+              bubbles: true,
+            }),
+          ),
+        );
+      await key(true);
+      expect(space.disabled).toBe(false);
+      expect(space.getAttribute('aria-disabled')).toBe('true');
+      expect(button('navigation.home').getAttribute('aria-disabled')).toBe(
+        'true',
+      );
+      expect(document.activeElement).toBe(space);
+      await key(true);
+      await key(false);
+      await act(async () => {
+        space.click();
+        button('navigation.home').click();
+        button('desktopTabs.closeTab').click();
+      });
+      expect(mocks.command).toHaveBeenCalledTimes(1);
+      expect(mocks.activate).not.toHaveBeenCalled();
+      expect(mocks.close).not.toHaveBeenCalled();
+      await act(async () => {
+        if (ok) {
+          snapshot = {
+            ...snapshot,
+            tabs: [snapshot.tabs[0], snapshot.tabs[2], snapshot.tabs[1]],
+          };
+          mocks.onState.mock.calls[0][0](snapshot);
+        }
+        finish(ok ? { ok: true } : { ok: false, error: 'Move failed' });
+      });
+      expect(document.activeElement).toBe(space);
+      expect(space.getAttribute('aria-disabled')).toBe('false');
+      await key(false);
+      expect(mocks.activate).toHaveBeenCalledWith({
+        id: ok ? 'home' : 'space-b',
+        focus: 'shell',
+      });
+    },
+  );
+
+  async function prepareDrag() {
+    snapshot.tabs.push({
+      ...snapshot.tabs[1],
+      id: 'space-b',
+      canvasId: 'b',
+      title: 'Space B',
+    });
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        const id =
+          this.getAttribute('data-desktop-tab-id') ??
+          this.closest('[data-desktop-tab-id]')?.getAttribute(
+            'data-desktop-tab-id',
+          );
+        if (id === 'space-a') return new DOMRect(40, 0, 100, 35);
+        if (id === 'space-b') return new DOMRect(140, 0, 100, 35);
+        if (this.querySelector('[data-testid="desktop-tab-drag-overlay"]'))
+          return new DOMRect(40, 0, 100, 35);
+        return new DOMRect(0, 0, 40, 35);
+      },
+    );
+    await render();
+  }
+
+  async function pointer(target: EventTarget, type: string, clientX: number) {
+    await act(async () => {
+      target.dispatchEvent(
+        new PointerEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          pointerId: 1,
+          pointerType: 'mouse',
+          isPrimary: true,
+          button: 0,
+          clientX,
+          clientY: 17,
+        }),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+  }
+
+  async function startDrag() {
+    await pointer(button('Space A'), 'pointerdown', 70);
+    await pointer(document, 'pointermove', 80);
+    await pointer(document, 'pointermove', 180);
+  }
+
+  it('keeps a faded source and a labelled overlay during pointer dragging without activating the Tab', async () => {
+    await prepareDrag();
+    await startDrag();
+    expect(
+      document.querySelector('[data-testid="desktop-tab-drag-overlay"]')
+        ?.textContent,
+    ).toBe('Space A');
+    expect(
+      button('Space A').parentElement?.classList.contains('opacity-30'),
+    ).toBe(true);
+    expect(mocks.command).not.toHaveBeenCalled();
+    await pointer(document, 'pointermove', 70);
+    await pointer(document, 'pointerup', 70);
+    expect(mocks.command).not.toHaveBeenCalled();
+    expect(
+      document.querySelector('[data-testid="desktop-tab-drag-overlay"]'),
+    ).toBeNull();
+    expect(mocks.activate).not.toHaveBeenCalled();
+  });
+
+  it.each(['escape', 'blur', 'busy', 'removed'] as const)(
+    'cancels a drag on %s without committing a move',
+    async (reason) => {
+      await prepareDrag();
+      await startDrag();
+      expect(
+        document.querySelector('[data-testid="desktop-tab-drag-overlay"]'),
+      ).not.toBeNull();
+      await act(async () => {
+        if (reason === 'escape')
+          document.dispatchEvent(
+            new KeyboardEvent('keydown', {
+              code: 'Escape',
+              key: 'Escape',
+              bubbles: true,
+            }),
+          );
+        else if (reason === 'blur') window.dispatchEvent(new Event('blur'));
+        else
+          mocks.onState.mock.calls[0][0]({
+            ...snapshot,
+            busy: reason === 'busy',
+            tabs:
+              reason === 'removed'
+                ? snapshot.tabs.filter((tab) => tab.id !== 'space-a')
+                : snapshot.tabs,
+          });
+      });
+      await pointer(document, 'pointerup', 180);
+      expect(
+        document.querySelector('[data-testid="desktop-tab-drag-overlay"]'),
+      ).toBeNull();
+      expect(mocks.command).not.toHaveBeenCalled();
+    },
+  );
+
+  it('projects a reorder while main acknowledges it, and rolls back a rejected move', async () => {
+    let finish!: (result: { ok: false; error: string }) => void;
+    mocks.command.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    await prepareDrag();
+    await act(async () =>
+      button('Space A').dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'ArrowRight',
+          altKey: true,
+          shiftKey: true,
+          bubbles: true,
+        }),
+      ),
+    );
+    const titles = () =>
+      Array.from(container.querySelectorAll('[role="tab"]')).map((tab) =>
+        tab.getAttribute('aria-label'),
+      );
+    expect(titles()).toEqual(['navigation.home', 'Space B', 'Space A']);
+    await act(async () => mocks.onState.mock.calls[0][0](snapshot));
+    expect(titles()).toEqual(['navigation.home', 'Space B', 'Space A']);
+    await act(async () =>
+      finish({ ok: false, error: 'Could not save Tab order' }),
+    );
+    expect(titles()).toEqual(['navigation.home', 'Space A', 'Space B']);
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+      'Could not save Tab order',
+    );
+  });
+
+  it('does not start dragging from Home, a close control, or a busy Tab', async () => {
+    await prepareDrag();
+    for (const target of [
+      button('navigation.home'),
+      button('desktopTabs.closeTab'),
+    ]) {
+      await pointer(target, 'pointerdown', 70);
+      await pointer(document, 'pointermove', 180);
+      await pointer(document, 'pointerup', 180);
+      expect(
+        document.querySelector('[data-testid="desktop-tab-drag-overlay"]'),
+      ).toBeNull();
+    }
+    await act(async () =>
+      mocks.onState.mock.calls[0][0]({ ...snapshot, busy: true }),
+    );
+    await act(async () => {
+      button('Space A').click();
+      button('navigation.home').click();
+      button('Space A').dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }),
+      );
+    });
+    await startDrag();
+    expect(
+      document.querySelector('[data-testid="desktop-tab-drag-overlay"]'),
+    ).toBeNull();
+    expect(mocks.command).not.toHaveBeenCalled();
+    expect(mocks.activate).not.toHaveBeenCalled();
   });
 
   it('renders the blank Tab as a closable named Tab, not another Home icon', async () => {

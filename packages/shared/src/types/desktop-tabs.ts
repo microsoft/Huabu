@@ -35,6 +35,7 @@ export interface DesktopTabsSnapshot {
   activeId: string;
   workspaceId: string | null;
   busy: boolean;
+  canChangeWorkspace: boolean;
 }
 
 export type DesktopTabResult =
@@ -51,6 +52,8 @@ export type DesktopTabCommand =
   | 'close-home-menu'
   | 'dismiss-home-menu'
   | 'end-space-deletion'
+  | { type: 'move-tab'; id: string; index: number }
+  | { type: 'sync-workspace-capabilities'; canChangeWorkspace: boolean }
   | {
       type: 'sync-space-titles';
       workspaceId: string;

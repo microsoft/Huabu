@@ -12,6 +12,7 @@ export interface ChatHistoryPage {
 }
 
 export const MAX_HISTORY_PAGES = 5;
+export const HISTORY_PAGE_TURNS = 3;
 
 export function isProtectedHistoryMessage(message: ChatMessage): boolean {
   return (

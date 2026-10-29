@@ -136,6 +136,131 @@ function render(props: Partial<React.ComponentProps<typeof MessageList>> = {}) {
   act(() => vi.advanceTimersByTime(600));
 }
 
+describe('automatic viewport fill', () => {
+  beforeEach(() => {
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(private callback: ResizeObserverCallback) {}
+        observe(target: Element) {
+          this.callback(
+            [
+              {
+                target,
+                contentRect: target.getBoundingClientRect(),
+                borderBoxSize: [],
+                contentBoxSize: [],
+                devicePixelContentBoxSize: [],
+              },
+            ],
+            this,
+          );
+        }
+        disconnect() {}
+        unobserve() {}
+      },
+    );
+  });
+
+  function measure() {
+    act(() => {
+      (virtual.props.totalListHeightChanged as (height: number) => void)(240);
+    });
+    act(() => vi.advanceTimersByTime(600));
+  }
+
+  it('fills a measured short viewport without enabling output following', () => {
+    const load = vi.fn();
+    render({ hasOlderHistory: true, onLoadOlderHistory: load });
+    measure();
+    expect(load).toHaveBeenCalledOnce();
+    expect(virtual.props.followOutput).toBe(false);
+  });
+
+  it.each(['pointerup', 'pointercancel', 'blur'])(
+    'resumes a fill deferred by a held pointer after %s',
+    (event) => {
+      const load = vi.fn();
+      render({ hasOlderHistory: true, onLoadOlderHistory: load });
+      const scroller = container.querySelector('[data-chat-thread-root]');
+      if (!scroller) throw new Error('Missing scroller');
+      act(() => {
+        scroller.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+      });
+      measure();
+      expect(load).not.toHaveBeenCalled();
+      virtual.jump.mockClear();
+      act(() => window.dispatchEvent(new Event(event)));
+      act(() => vi.advanceTimersByTime(600));
+      expect(load).toHaveBeenCalledOnce();
+      expect(virtual.jump).not.toHaveBeenCalled();
+      act(() => window.dispatchEvent(new Event(event)));
+      act(() => vi.advanceTimersByTime(600));
+      expect(load).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each<Partial<React.ComponentProps<typeof MessageList>>>([
+    { isActive: false },
+    { isHistoryReady: false },
+    { isHistoryLoading: true },
+    { isLoading: true },
+    { isLoadingOlderHistory: true },
+    { olderHistoryError: 'Offline' },
+    { historyPageError: 'Refill failed' },
+    { hasOlderHistory: false },
+    { historyPages: [{ limit: 3, messageIds: ['missing'], loaded: false }] },
+  ])('does not fill an unavailable or unsettled view: %j', (props) => {
+    const load = vi.fn();
+    render({ hasOlderHistory: true, onLoadOlderHistory: load, ...props });
+    measure();
+    expect(load).not.toHaveBeenCalled();
+  });
+
+  it('does not fill an already scrollable viewport', () => {
+    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(
+      1000,
+    );
+    const load = vi.fn();
+    render({ hasOlderHistory: true, onLoadOlderHistory: load });
+    measure();
+    expect(load).not.toHaveBeenCalled();
+  });
+
+  it('cancels the fill-to-latest request when the reader takes control', () => {
+    const load = vi.fn();
+    render({ hasOlderHistory: true, onLoadOlderHistory: load });
+    measure();
+    render({
+      hasOlderHistory: true,
+      onLoadOlderHistory: load,
+      isLoadingOlderHistory: true,
+    });
+    act(() =>
+      container
+        .querySelector('[data-chat-thread-root]')
+        ?.dispatchEvent(
+          new WheelEvent('wheel', { bubbles: true, deltaY: -10 }),
+        ),
+    );
+    virtual.jump.mockClear();
+    render({
+      hasOlderHistory: false,
+      onLoadOlderHistory: load,
+      messages: [
+        {
+          id: 'older',
+          role: 'user',
+          content: 'Earlier question',
+          historyTurnId: 'earlier',
+        },
+        ...messages,
+      ],
+    });
+    expect(virtual.jump).not.toHaveBeenCalled();
+  });
+});
+
 describe('manual virtual chat', () => {
   it('reports the latest end only after hydration and placement, and clears it when hidden', () => {
     const onLatestVisibleChange = vi.fn();
@@ -500,7 +625,12 @@ describe('manual virtual chat', () => {
         .querySelector('[data-assistant]')
         ?.getAttribute('data-streaming'),
     ).toBe('false');
-    expect(container.querySelector('[data-thinking]')).not.toBeNull();
+    const thinking = container.querySelector('[data-thinking]');
+    expect(thinking).not.toBeNull();
+    expect(thinking?.parentElement?.className).toBe('ml-1 px-4 py-2');
+    expect(thinking?.parentElement?.parentElement?.className).toBe('px-3');
+    render({ isLoading: true });
+    expect(container.querySelector('[data-thinking]')).toBeNull();
   });
 
   it('preserves end status and disables comments in inactive panels', () => {

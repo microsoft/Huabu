@@ -14,7 +14,6 @@ import {
   DndContext,
   DragOverlay,
   KeyboardSensor,
-  PointerSensor,
   pointerWithin,
   useSensor,
   useSensors,
@@ -22,7 +21,6 @@ import {
   type DragEndEvent,
   type DragOverEvent,
   type DragStartEvent,
-  type PointerSensorProps,
 } from '@dnd-kit/core';
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
 import {
@@ -38,6 +36,7 @@ import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { useShallow } from 'zustand/react/shallow';
 
+import { TabPointerSensor } from '@/components/Common/TabPointerSensor';
 import { useConversationTitles } from '@/hooks/useConversationTitles';
 import useCanvasStore, { settleNodePreprocess } from '@/store/canvasStore';
 import { conversationViewForNode } from '@/store/conversationOwner';
@@ -73,58 +72,6 @@ import type { Node } from '@xyflow/react';
 const RATIO_STEP = 0.05;
 
 const selectWorkspace = (s: PreviewWorkspaceState) => s.workspace;
-
-export function subscribeToTabDragInterruption(
-  cancel: () => void,
-  ownerDocument: Document = document,
-  ownerWindow: Window = window,
-): () => void {
-  const cancelOnHidden = () => {
-    if (ownerDocument.visibilityState === 'hidden') cancel();
-  };
-  ownerWindow.addEventListener('blur', cancel);
-  ownerDocument.addEventListener('visibilitychange', cancelOnHidden);
-  return () => {
-    ownerWindow.removeEventListener('blur', cancel);
-    ownerDocument.removeEventListener('visibilitychange', cancelOnHidden);
-  };
-}
-
-class PreviewTabPointerSensor extends PointerSensor {
-  constructor(props: PointerSensorProps) {
-    let unsubscribe = () => {};
-    const onCancel = () => {
-      unsubscribe();
-      props.onCancel();
-    };
-    const onEnd = () => {
-      unsubscribe();
-      props.onEnd();
-    };
-    const onAbort = (id: Parameters<PointerSensorProps['onAbort']>[0]) => {
-      unsubscribe();
-      props.onAbort(id);
-    };
-
-    super({ ...props, onAbort, onCancel, onEnd });
-
-    const ownerDocument =
-      (
-        props.event.target as
-          | (EventTarget & { ownerDocument?: Document })
-          | null
-      )?.ownerDocument ?? document;
-    unsubscribe = subscribeToTabDragInterruption(
-      () => {
-        // Use the sensor's pointercancel handler to detach listeners before
-        // notifying DndContext, including when activation is still pending.
-        ownerDocument.dispatchEvent(new Event('pointercancel'));
-      },
-      ownerDocument,
-      ownerDocument.defaultView ?? window,
-    );
-  }
-}
 
 export function PreviewTabDragOverlayPortal({
   tab,
@@ -358,7 +305,7 @@ export function PreviewWorkspace({
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const isSplit = workspace.groups.length > 1;
   const sensors = useSensors(
-    useSensor(PreviewTabPointerSensor, {
+    useSensor(TabPointerSensor, {
       activationConstraint: { distance: 5 },
     }),
     useSensor(KeyboardSensor, {

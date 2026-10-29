@@ -138,6 +138,10 @@ function VirtualMessageList({
   const { t } = useTranslation();
   const list = useRef<VirtuosoHandle>(null);
   const [scroller, setScroller] = useState<HTMLElement | null>(null);
+  const [listHeight, setListHeight] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(0);
+  const [layoutVersion, setLayoutVersion] = useState(0);
+  const fillingLatest = useRef(false);
   const byId = useMemo(
     () => new Map(messages.map((message) => [message.id, message])),
     [messages],
@@ -356,6 +360,7 @@ function VirtualMessageList({
             50;
         saveAnchor();
         reportLatestVisible();
+        setLayoutVersion((version) => version + 1);
       };
       if (placementRequest.current) {
         // Let the requested tail finish its initial Markdown measurement, not
@@ -374,6 +379,7 @@ function VirtualMessageList({
   }, [correctAnchor, saveAnchor, scroller, reportLatestVisible]);
 
   const takeControl = useCallback(() => {
+    fillingLatest.current = false;
     following.current = false;
     lastScrollTop.current = scroller?.scrollTop ?? 0;
     anchorCorrectionUntil.current = 0;
@@ -392,6 +398,7 @@ function VirtualMessageList({
       if (!scrollbarDragging.current) return;
       scrollbarDragging.current = false;
       saveAnchor();
+      setLayoutVersion((version) => version + 1);
     };
     window.addEventListener('pointerup', release);
     window.addEventListener('pointercancel', release);
@@ -490,6 +497,12 @@ function VirtualMessageList({
   ]);
 
   const hasMessages = ids.length > 0;
+  useLayoutEffect(() => {
+    if (!fillingLatest.current || isLoadingOlderHistory) return;
+    fillingLatest.current = false;
+    if (isActive && !olderHistoryError && !allowHistoryLoad.current) jump();
+  }, [isLoadingOlderHistory, isActive, olderHistoryError, jump]);
+
   // Activity detaches layout effects. Save the anchor before hidden dimensions
   // can overwrite it, then restore by message identity rather than pixel totals.
   useLayoutEffect(() => {
@@ -588,6 +601,7 @@ function VirtualMessageList({
             changed = true;
           if (height > 0) heights.current.set(id, height);
         } else if (target === scroller) {
+          setViewportHeight(scroller.clientHeight);
           const size = `${scroller.clientWidth}:${scroller.clientHeight}`;
           if (
             viewportSize.current !== undefined &&
@@ -779,6 +793,60 @@ function VirtualMessageList({
     onLoadOlderHistory,
     search,
     scroller,
+  ]);
+
+  useEffect(() => {
+    if (
+      !scroller ||
+      !isActive ||
+      !isHistoryReady ||
+      isHistoryLoading ||
+      isLoading ||
+      !hasOlderHistory ||
+      isLoadingOlderHistory ||
+      olderHistoryError ||
+      historyPageError ||
+      search ||
+      localFind ||
+      isSeeking ||
+      viewportHeight <= 0 ||
+      (ids.length > 0 && listHeight <= 0)
+    )
+      return;
+    const timer = setTimeout(() => {
+      if (
+        (ids.length > 0 && !ready.current) ||
+        positioning.current ||
+        seeking.current ||
+        scrollbarDragging.current ||
+        scroller.clientHeight <= 0 ||
+        scroller.scrollHeight > scroller.clientHeight + 1 ||
+        ids.some((id) => !currentMessages.current.has(id))
+      )
+        return;
+      fillingLatest.current = !allowHistoryLoad.current;
+      onLoadOlderHistory?.();
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [
+    scroller,
+    isActive,
+    isHistoryReady,
+    isHistoryLoading,
+    isLoading,
+    hasOlderHistory,
+    isLoadingOlderHistory,
+    olderHistoryError,
+    historyPageError,
+    search,
+    localFind,
+    isSeeking,
+    viewportHeight,
+    listHeight,
+    layoutVersion,
+    ids,
+    historyPages,
+    onLoadOlderHistory,
   ]);
 
   useEffect(() => {
@@ -1099,6 +1167,7 @@ function VirtualMessageList({
             firstItemIndex={first}
             computeItemKey={(_index, id) => id}
             defaultItemHeight={120}
+            totalListHeightChanged={setListHeight}
             increaseViewportBy={{ top: 400, bottom: 400 }}
             followOutput={false}
             rangeChanged={setRange}
@@ -1107,8 +1176,10 @@ function VirtualMessageList({
           />
         ) : null}
         {isLoading && !streamingAssistantId ? (
-          <div className="px-3 py-2">
-            <ThinkingIndicator />
+          <div className="px-3">
+            <div className="ml-1 px-4 py-2">
+              <ThinkingIndicator />
+            </div>
           </div>
         ) : null}
         {isHistoryLoading && !ids.length ? (

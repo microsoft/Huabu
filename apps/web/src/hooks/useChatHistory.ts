@@ -16,8 +16,10 @@ import { settleInkInterpretation } from '@huabu/shared/ink-interpretation';
 import { ApiError } from '@/api/_client';
 import { agentApi } from '@/api/agent';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
-import { MAX_HISTORY_PAGES } from '@/store/chatHistoryCache';
-import { useChatPreferencesStore } from '@/store/chatPreferencesStore';
+import {
+  HISTORY_PAGE_TURNS,
+  MAX_HISTORY_PAGES,
+} from '@/store/chatHistoryCache';
 import {
   selectThreadHistoryLoaded,
   selectThreadHistoryPageState,
@@ -188,7 +190,7 @@ function applyInitialHistoryPage(response: AgentHistoryPageResponse): void {
   state.setMessages(response.threadId, messages);
   state.setHistoryPages(response.threadId, [
     {
-      limit: useChatPreferencesStore.getState().recentTurnCount,
+      limit: HISTORY_PAGE_TURNS,
       messageIds: messages.map((message) => message.id),
       loaded: true,
     },
@@ -445,9 +447,6 @@ export function useChatHistory(
   const historyError = useChatStore(
     (state) => state.threadsById[threadId]?.historyError ?? null,
   );
-  const recentTurnCount = useChatPreferencesStore(
-    (state) => state.recentTurnCount,
-  );
   const effectiveConversationView = session.conversationView;
   const ownerCanvasId =
     effectiveConversationView?.conversationOwner.canvasId || canvasId;
@@ -532,7 +531,7 @@ export function useChatHistory(
         const response = await agentApi.fetchHistoryPage(
           tid,
           ownerCanvasId,
-          recentTurnCount,
+          HISTORY_PAGE_TURNS,
         );
         return {
           response,
@@ -540,7 +539,7 @@ export function useChatHistory(
           overlapsCache: false,
           pages: [
             {
-              limit: recentTurnCount,
+              limit: HISTORY_PAGE_TURNS,
               messageIds: historyTurnsToMessages(response.turns).map(
                 (message) => message.id,
               ),
@@ -549,7 +548,7 @@ export function useChatHistory(
           ],
         };
       }
-      return fetchLatestHistoryWindow(tid, ownerCanvasId, recentTurnCount);
+      return fetchLatestHistoryWindow(tid, ownerCanvasId, HISTORY_PAGE_TURNS);
     };
 
     fetchValidatedHistory()
@@ -603,7 +602,6 @@ export function useChatHistory(
     effectiveConversationView,
     previewTabId,
     canvasId,
-    recentTurnCount,
     historyError,
     isHistoryLoaded,
     isStreaming,
@@ -641,7 +639,7 @@ export function useChatHistory(
       .fetchHistoryPage(
         threadId,
         ownerCanvasId,
-        recentTurnCount,
+        HISTORY_PAGE_TURNS,
         requestedBefore,
       )
       .then((response) => {
@@ -660,7 +658,7 @@ export function useChatHistory(
         state.setHistoryPages(threadId, [
           {
             before: requestedBefore,
-            limit: recentTurnCount,
+            limit: HISTORY_PAGE_TURNS,
             messageIds: messages.map((message) => message.id),
             loaded: true,
           },
@@ -698,7 +696,7 @@ export function useChatHistory(
               : 'Failed to load earlier turns',
         });
       });
-  }, [ownerCanvasId, recentTurnCount, threadId, reloadHistory]);
+  }, [ownerCanvasId, threadId, reloadHistory]);
 
   const loadHistoryPage = useCallback(
     (page: ChatHistoryPage) => {
@@ -764,7 +762,7 @@ export function useChatHistory(
     let cancelled = false;
     const original = selectThreadMessages(useChatStore.getState(), threadId);
     setRefreshError(undefined);
-    void fetchLatestHistoryWindow(threadId, ownerCanvasId, recentTurnCount)
+    void fetchLatestHistoryWindow(threadId, ownerCanvasId, HISTORY_PAGE_TURNS)
       .then((window) => {
         const current = useChatStore.getState().threadsById[threadId];
         if (
@@ -820,7 +818,6 @@ export function useChatHistory(
     streaming,
     ownerCanvasId,
     threadId,
-    recentTurnCount,
     isHistoryLoaded,
     refreshNonce,
     setRefreshError,
@@ -873,7 +870,7 @@ export function useChatHistory(
       const refreshed = await fetchLatestHistoryWindow(
         ownerThreadId,
         ownerCanvasId,
-        recentTurnCount,
+        HISTORY_PAGE_TURNS,
       );
       if (cancelled) return;
       applyLatestHistoryWindow(refreshed, ownerCanvasId);
@@ -993,7 +990,7 @@ export function useChatHistory(
         const finalHistory = await fetchLatestHistoryWindow(
           ownerThreadId,
           ownerCanvasId,
-          recentTurnCount,
+          HISTORY_PAGE_TURNS,
         );
         if (!cancelled) {
           applyLatestHistoryWindow(finalHistory, ownerCanvasId);
@@ -1052,7 +1049,6 @@ export function useChatHistory(
     previewTabId,
     addMessage,
     setIsLoading,
-    recentTurnCount,
   ]);
 
   const retryHistory = useCallback(() => {

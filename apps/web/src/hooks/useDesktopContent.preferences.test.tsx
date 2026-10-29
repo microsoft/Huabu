@@ -92,7 +92,7 @@ beforeEach(async () => {
     activate: vi.fn(),
     close: vi.fn(),
     reload: vi.fn(),
-    command: vi.fn(),
+    command: vi.fn().mockResolvedValue({ ok: true }),
     onHomeMenu: vi.fn(),
     ready: vi.fn(),
     report: vi.fn(),
@@ -192,8 +192,30 @@ it('reconciles preferences deleted before mount without restoring stale local re
     world: false,
     minimap: false,
   });
+
   expect(useToolStore.getState().pendingNodeType).toBe('note');
   expect(tabs.setPreference).not.toHaveBeenCalled();
+});
+
+it('publishes live Workspace switching capabilities from Home only', async () => {
+  tabs.context.role = 'home';
+  useWorkspaceStore.setState({
+    capabilities: { canChangeWorkspace: false, nativePicker: false },
+  });
+  await render();
+  expect(tabs.command).toHaveBeenLastCalledWith({
+    type: 'sync-workspace-capabilities',
+    canChangeWorkspace: false,
+  });
+  await act(async () => {
+    useWorkspaceStore.setState({
+      capabilities: { canChangeWorkspace: true, nativePicker: true },
+    });
+  });
+  expect(tabs.command).toHaveBeenLastCalledWith({
+    type: 'sync-workspace-capabilities',
+    canChangeWorkspace: true,
+  });
 });
 
 it('reports an initial read failure while retaining the subscription for recovery', async () => {

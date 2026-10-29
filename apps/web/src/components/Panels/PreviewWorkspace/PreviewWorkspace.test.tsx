@@ -23,6 +23,7 @@ import {
   vi,
 } from 'vitest';
 
+import { subscribeToTabDragInterruption } from '@/components/Common/TabPointerSensor';
 import {
   rememberMessageListScrollPosition,
   restoreMessageListScrollPosition,
@@ -44,7 +45,6 @@ import {
   PreviewTabDragOverlayPortal,
   PreviewWorkspace,
   settleActivePreviewTab,
-  subscribeToTabDragInterruption,
 } from './PreviewWorkspace';
 import { PreviewWorkspacePanel } from './PreviewWorkspacePanel';
 import {

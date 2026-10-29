@@ -67,6 +67,25 @@ export function useDesktopContent(): {
     state.isReady ? state.workspaceId : null,
   );
   const workspaceSyncing = useWorkspaceStore((state) => state.isSyncing);
+  const canChangeWorkspace = useWorkspaceStore(
+    (state) => state.capabilities?.canChangeWorkspace ?? false,
+  );
+
+  useEffect(() => {
+    if (!tabs || tabs.context.role !== 'home') return;
+    void tabs
+      .command({ type: 'sync-workspace-capabilities', canChangeWorkspace })
+      .then(requireDesktopTabSuccess)
+      .catch((error: unknown) => {
+        console.error(
+          '[desktop-tabs] Workspace capability sync failed:',
+          error,
+        );
+        toast(error instanceof Error ? error.message : String(error), {
+          tone: 'danger',
+        });
+      });
+  }, [tabs, canChangeWorkspace]);
 
   useEffect(() => {
     if (!tabs || tabs.context.role !== 'space') return;

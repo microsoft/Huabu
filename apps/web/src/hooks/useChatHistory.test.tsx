@@ -15,6 +15,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApiError } from '@/api/_client';
+import { useChatPreferencesStore } from '@/store/chatPreferencesStore';
 import { selectThreadHistoryLoaded, useChatStore } from '@/store/chatStore';
 import {
   conversationTitleKey,
@@ -1005,7 +1006,7 @@ describe('useChatHistory paging', () => {
     },
   );
 
-  it('hydrates only the configured newest page with stable message IDs', async () => {
+  it('uses the internal newest-page size regardless of legacy preferences', async () => {
     useChatStore.setState({
       threadMap: { [CANVAS_ID]: THREAD_ID },
       threadsById: {},
@@ -1025,13 +1026,18 @@ describe('useChatHistory paging', () => {
       hasMore: true,
     });
 
-    await renderHarness();
-
-    expect(apiMocks.fetchHistoryPage).toHaveBeenCalledWith(
-      THREAD_ID,
-      CANVAS_ID,
-      3,
-    );
+    const previous = useChatPreferencesStore.getState().recentTurnCount;
+    useChatPreferencesStore.getState().setRecentTurnCount(20);
+    try {
+      await renderHarness();
+      expect(apiMocks.fetchHistoryPage).toHaveBeenCalledWith(
+        THREAD_ID,
+        CANVAS_ID,
+        3,
+      );
+    } finally {
+      useChatPreferencesStore.getState().setRecentTurnCount(previous);
+    }
     const thread = useChatStore.getState().threadsById[THREAD_ID];
     expect(thread?.messages.map((message) => message.id)).toEqual([
       'turn-latest:0',
