@@ -510,6 +510,22 @@ describe('Bubble identity', () => {
     expect(await access('admin')).toEqual(of('rwm'));
   });
 
+  it('does not reuse a saved Workspace after its last grant is revoked', async () => {
+    const { app, store } = await host();
+    await grant(store, 'carol', 'member');
+    const target = { type: 'huabu.workspace', id: 'w1' } as const;
+    await grant(store, 'carol', 'huabu.workspace.viewer', target);
+    expect(
+      (await app.inject({ url: '/api/workspace', headers: as('carol') })).json()
+        .workspaceId,
+    ).toBe('w1');
+    await revokeAll(store, 'carol', target);
+    expect(
+      (await app.inject({ url: '/api/workspace', headers: as('carol') })).json()
+        .workspaceId,
+    ).toBe('made-1');
+  });
+
   it('scopes a Space grant to the Workspace it names', async () => {
     const { app, store } = await host();
     await grant(store, 'carol', 'member');
@@ -644,6 +660,7 @@ describe('Bubble identity', () => {
         (row) => row.target,
       ),
     ).toEqual([
+      { type: 'huabu.space', id: 'gone' },
       { type: 'huabu.space', id: 'w1:a' },
       { type: 'huabu.space', id: 'w2:c' },
     ]);

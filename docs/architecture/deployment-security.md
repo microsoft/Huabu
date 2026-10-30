@@ -95,11 +95,11 @@ Long-lived Bubble-authenticated HTTP responses, including existing SSE streams, 
 
 Huabu declares its own permission model to Bubble as host targets and roles, so grants live in Bubble's table and Bubble's policy answers every check. There are two target kinds: `huabu.workspace`, named by Workspace id, and `huabu.space`, named `<workspaceId>:<canvasId>` so that a grant never reaches a Space of the same id in another Workspace. A Space's parent is its parent Space or, for a root Space, its own Workspace. Three capabilities apply on both kinds and flow down that chain, never up or sideways:
 
-| Capability     | Allows                                                                        |
-| -------------- | ----------------------------------------------------------------------------- |
-| `huabu.read`   | Seeing and opening the Workspace or Space, every `GET`, search, live streams. |
-| `huabu.write`  | Editing Spaces and creating them.                                             |
-| `huabu.manage` | Renaming and deleting it, and granting roles on it.                           |
+| Capability     | Allows                                                                         |
+| -------------- | ------------------------------------------------------------------------------ |
+| `huabu.read`   | Seeing and opening the Workspace or Space, every `GET`, search, live streams.  |
+| `huabu.write`  | Editing Spaces and creating them.                                              |
+| `huabu.manage` | Renaming and deleting it, changing a Space's parent, and granting roles on it. |
 
 | Role                     | Granted on  | Gives                                              |
 | ------------------------ | ----------- | -------------------------------------------------- |
@@ -108,7 +108,7 @@ Huabu declares its own permission model to Bubble as host targets and roles, so 
 | `huabu.workspace.viewer` | a Workspace | read                                               |
 | `huabu.space.owner`      | a Space     | read, write, manage on it and the Spaces inside it |
 
-A system `owner` holds every Huabu capability everywhere, which is Bubble's root rule. Every role on a Workspace or Space is granted with `huabu.manage` there, so whoever owns a Workspace or Space may share it, for example `{"target":{"type":"huabu.workspace","id":"<workspaceId>"},"principalId":"dave","role":"huabu.workspace.viewer"}` posted to `/bubble/v1/grants`; system roles stay with system owners. A Workspace or Space grant alone does not admit anyone: admission still needs `huabu.use`. On startup, Space grants that name a Space by id alone, as the first Bubble release wrote them, are rewritten to name the Workspace holding that Space, and dropped when no Workspace does.
+A system `owner` holds every Huabu capability everywhere, which is Bubble's root rule. Every role on a Workspace or Space is granted with `huabu.manage` there, so whoever owns a Workspace or Space may share it, for example `{"target":{"type":"huabu.workspace","id":"<workspaceId>"},"principalId":"dave","role":"huabu.workspace.viewer"}` posted to `/bubble/v1/grants`; system roles stay with system owners. A Workspace or Space grant alone does not admit anyone: admission still needs `huabu.use`. On startup, Space grants that name a Space by id alone, as the first Bubble release wrote them, are rewritten to name the Workspace holding that Space, while unresolved grants are retained for retry on a later startup because a registered Disk Workspace may be temporarily offline. Unqualified targets grant no access under the new policy.
 
 Creating a Space makes its creator its `huabu.space.owner`. A selection move into a new Space claims it right after creating it, before any content leaves the source, so a failed claim is compensated like any other move failure. A move also requires read access to every Space whose artifact a moved node cites before copying it into the destination. That covers `POST /api/canvas`, bundle import, moving a selection into a new Space, adding a child Space, and detaching a Space to the root, where it no longer inherits from a parent. A Space created by an agent through the machine credential is claimed by nobody and is reachable through its Workspace or system ownership.
 

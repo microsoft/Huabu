@@ -88,11 +88,14 @@ function provisionPersonalWorkspace(
   const running = pending.get(principalId);
   if (running) return running;
   const creating = (async () => {
-    // A request that read this principal's grants before a racing first
-    // request claimed its Workspace still finds that Workspace here: the
-    // preference is only ever set to one the principal may enter.
+    // Recheck grants: the preference can be stale after revocation, or a
+    // racing first request may just have claimed its personal Workspace.
     const already = await preferences.current(principalId);
-    const existing = already ? await resources.openWorkspace(already) : null;
+    const allowed = await identity.access.workspaces();
+    const existing =
+      already && (allowed === 'all' || allowed.includes(already))
+        ? await resources.openWorkspace(already)
+        : null;
     if (existing) return existing;
     const scope = await resources.createWorkspace(
       `${displayName?.trim() || principalId}'s Workspace`,

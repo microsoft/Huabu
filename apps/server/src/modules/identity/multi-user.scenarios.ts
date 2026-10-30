@@ -72,7 +72,7 @@ async function host() {
 
   const call = async (
     principalId: string,
-    method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
     url: string,
     payload?: object,
   ) => {
@@ -232,6 +232,18 @@ export function describeSeveralPeople(
       await call('dave', 'POST', `/api/workspaces/${carolWs}/activate`);
       const id = space.body.canvasId as string;
       expect((await call('dave', 'GET', `/api/canvas/${id}`)).status).toBe(200);
+      for (const url of ['/api/canvas', '/api/canvas/import']) {
+        expect(
+          (await call('dave', 'POST', url, { title: 'forbidden' })).status,
+        ).toBe(403);
+      }
+      expect(
+        (
+          await call('dave', 'POST', `/api/canvas/${id}/children`, {
+            title: 'forbidden',
+          })
+        ).status,
+      ).toBe(403);
       expect((await call('dave', 'DELETE', `/api/canvas/${id}`)).status).toBe(
         403,
       );
@@ -242,6 +254,109 @@ export function describeSeveralPeople(
           })
         ).status,
       ).toBe(404);
+    });
+
+    it('lets editors save content but requires manage for renames and ownership-granting detachment', async () => {
+      const { call, store, workspaceOf } = await host();
+      const workspaceId = await workspaceOf('carol');
+      const root = await call('carol', 'POST', '/api/canvas', {
+        title: 'Root',
+      });
+      const id = root.body.canvasId as string;
+      const child = await call('carol', 'POST', `/api/canvas/${id}/children`, {
+        title: 'Child',
+      });
+      expect(child.status).toBe(200);
+      const childId = child.body.canvasId as string;
+      await store.grants.add({
+        target: { type: 'huabu.workspace', id: workspaceId },
+        principalId: 'dave',
+        role: 'huabu.workspace.editor',
+        grantedByPrincipalId: 'carol',
+      });
+      await call('dave', 'POST', `/api/workspaces/${workspaceId}/activate`);
+
+      const before = (await call('dave', 'GET', `/api/canvas/${id}`)).body;
+      const renamed = await call('dave', 'PUT', `/api/canvas/${id}`, {
+        version: before.version,
+        state: before.state,
+        title: 'Stolen title',
+      });
+      expect(renamed.status).toBe(403);
+      expect(
+        (await call('carol', 'GET', `/api/canvas/${id}`)).body,
+      ).toMatchObject({ title: 'Root', version: before.version });
+      const saved = await call('dave', 'PUT', `/api/canvas/${id}`, {
+        version: before.version,
+        state: before.state,
+        title: 'Root',
+      });
+      expect(saved.status).toBe(200);
+      expect(
+        (
+          await call('dave', 'PATCH', `/api/canvas/${childId}/parent`, {
+            parentSpaceId: null,
+            expectedParentSpaceId: id,
+          })
+        ).status,
+      ).toBe(403);
+      expect(
+        (await call('carol', 'GET', '/api/canvas')).body.canvases.find(
+          (space: { canvasId: string }) => space.canvasId === childId,
+        ).parentSpaceId,
+      ).toBe(id);
+      expect(
+        await store.grants.list({
+          principalId: 'dave',
+          target: { type: 'huabu.space', id: `${workspaceId}:${childId}` },
+        }),
+      ).toEqual([]);
+
+      // Creating new Spaces, including children, still belongs to write access.
+      expect(
+        (await call('dave', 'POST', '/api/canvas', { title: 'Editor root' }))
+          .status,
+      ).toBe(201);
+      const ownedRoot = (
+        await call('dave', 'GET', '/api/canvas')
+      ).body.canvases.find(
+        (space: { title: string }) => space.title === 'Editor root',
+      );
+      // Reparenting beneath an owned Space must not turn inherited write
+      // access on somebody else's child into inherited manage access.
+      expect(
+        (
+          await call('dave', 'PATCH', `/api/canvas/${childId}/parent`, {
+            parentSpaceId: ownedRoot.canvasId,
+            expectedParentSpaceId: id,
+          })
+        ).status,
+      ).toBe(403);
+      expect(
+        (
+          await call('dave', 'POST', `/api/canvas/${id}/children`, {
+            title: 'Editor child',
+          })
+        ).status,
+      ).toBe(200);
+      expect(
+        (
+          await call('carol', 'PATCH', `/api/canvas/${childId}/parent`, {
+            parentSpaceId: null,
+            expectedParentSpaceId: id,
+          })
+        ).status,
+      ).toBe(200);
+      const current = (await call('carol', 'GET', `/api/canvas/${id}`)).body;
+      expect(
+        (
+          await call('carol', 'PUT', `/api/canvas/${id}`, {
+            version: current.version,
+            state: current.state,
+            title: 'Renamed',
+          })
+        ).status,
+      ).toBe(200);
     });
   });
 }

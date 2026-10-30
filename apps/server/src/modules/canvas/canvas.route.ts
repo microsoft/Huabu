@@ -93,6 +93,8 @@ import {
   canReadCitedSpaces,
   canReadSpace,
   claimSpace,
+  canManageSpace,
+  requireWorkspaceWrite,
   isRestrictedRequest,
   readableSpaces,
 } from '../security/space-access.js';
@@ -686,27 +688,34 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.post<{
     Body: CreateCanvasRequest;
     Reply: ApiResult<CreateCanvasResponse>;
-  }>('/', async function (request, reply) {
-    const parsed = createCanvasBodySchema.safeParse(request.body);
-    if (!parsed.success) {
-      return reply.code(400).send({ message: 'Invalid request body' });
-    }
+  }>(
+    '/',
+    { preHandler: requireWorkspaceWrite },
+    async function (request, reply) {
+      const parsed = createCanvasBodySchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ message: 'Invalid request body' });
+      }
 
-    const canvasId = createId('canvas');
-    const created = await createSpace(canvasId, parsed.data.title ?? undefined);
+      const canvasId = createId('canvas');
+      const created = await createSpace(
+        canvasId,
+        parsed.data.title ?? undefined,
+      );
 
-    if (!created.ok) {
+      if (!created.ok) {
+        return reply
+          .code(409)
+          .send({ message: 'Canvas with this ID already exists' });
+      }
+
+      const canvas = created.record;
+      await claimOrDiscard(request, canvas.canvasId);
       return reply
-        .code(409)
-        .send({ message: 'Canvas with this ID already exists' });
-    }
-
-    const canvas = created.record;
-    await claimOrDiscard(request, canvas.canvasId);
-    return reply
-      .code(201)
-      .send({ canvasId: canvas.canvasId, title: canvas.title });
-  });
+        .code(201)
+        .send({ canvasId: canvas.canvasId, title: canvas.title });
+    },
+  );
 
   // --- Delete a canvas ---
 
@@ -1483,6 +1492,11 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           : undefined;
 
       if (existing !== null && titleChange !== undefined) {
+        if (!(await canManageSpace(request, canvasId)))
+          return reply.code(403).send({
+            message: 'Managing this Space is required to rename it',
+            code: 'SPACE_ACCESS_REQUIRED',
+          });
         let renamed;
         try {
           renamed = await spaces.rename({ canvasId, ...titleChange });
@@ -2138,6 +2152,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
 
   fastify.post<{ Reply: ApiResult<ImportCanvasResponse> }>(
     '/import',
+    { preHandler: requireWorkspaceWrite },
     async function (request, reply) {
       const targetCanvasId = createId('canvas');
       // Where an imported Space lands is the backend's business — the

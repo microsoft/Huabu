@@ -25,17 +25,16 @@ export interface ResolvedIdentity {
   access: ResourceAccess;
 }
 
-/** A Huabu resource whose access the identity provider decides; `id` is Huabu's. */
+/**
+ * A Huabu resource whose access the identity provider decides; `id` is Huabu's.
+ * A Space id always names the Space in the call's Workspace scope.
+ */
 export interface HuabuResource {
   type: 'workspace' | 'space';
   id: string;
 }
 
-/**
- * A Space is named by its id alone: it is always the Space of that id in the
- * Workspace the call runs in (`../workspace/context.ts`).
- */
-/** `manage`: rename, delete, grant on it; for a Workspace, its memory and Skills. */
+/** `manage`: rename, delete, change a Space's parent, or grant roles on it. */
 export type AccessLevel = 'read' | 'write' | 'manage';
 
 export interface ResourceAccess {
@@ -70,7 +69,10 @@ export interface ResourceDirectory {
     workspaceId: string,
     canvasId: string,
   ): Promise<HuabuResource | null>;
-  /** The Workspace holding a Space, for migrating grants that named none. */
+  /**
+   * The Workspace holding a Space, for migrating grants that named none.
+   * Null means unresolved (a registration may be offline); read errors reject.
+   */
   workspaceOfSpace(canvasId: string): Promise<string | null>;
   /** A registered Workspace, opened for calls to run in; `null` if none. */
   openWorkspace(workspaceId: string): Promise<WorkspaceScope | null>;

@@ -12,10 +12,12 @@ import {
 import { IdentityError, UNRESTRICTED_ACCESS } from './service.js';
 import { isPublicRfsSkillBootstrapRequest } from '../remote_fs/public-skill.js';
 import { isLoopbackRequest } from '../security/peer.js';
+import { openWorkspace } from '../storage/index.js';
 import {
   fillWorkspaceScope,
   openWorkspaceScope,
 } from '../workspace/context.js';
+import { getProcessWorkspaceHandle } from '../workspace.js';
 
 import type { IdentityCredentials, IdentityService } from './service.js';
 import type { IdentityResponse } from '@huabu/shared';
@@ -127,6 +129,10 @@ export function registerIdentity(
       supplied.length === expected.length &&
       timingSafeEqual(supplied, expected)
     ) {
+      if (service.provider === 'bubble') {
+        const workspace = getProcessWorkspaceHandle();
+        if (workspace) fillWorkspaceScope(await openWorkspace(workspace));
+      }
       setRequestIdentity(request, {
         principal: { principalId: 'huabu-agentlet', kind: 'bot' },
         member: true,

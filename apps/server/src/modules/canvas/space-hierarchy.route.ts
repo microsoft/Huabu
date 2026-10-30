@@ -77,21 +77,26 @@ export function registerSpaceHierarchyRoutes(fastify: FastifyInstance): void {
       }
     });
   });
-  fastify.patch('/:canvasId/parent', async (request, reply) => {
-    const params = spaceHierarchyParamsSchema.safeParse(request.params);
-    const body = spaceParentBodySchema.safeParse(request.body);
-    if (!params.success || !body.success)
-      return reply.code(400).send({ message: 'Invalid Space parent request' });
-    return respond(reply, async () => {
-      // A root Space inherits from no parent, so whoever detaches it keeps
-      // it. The claim is made only for a valid, real detachment and before
-      // it commits: until it holds, the Space stays under the parent the
-      // caller reaches it through.
-      return setSpaceParent(params.data.canvasId, body.data, undefined, () =>
-        claimSpace(request, params.data.canvasId),
-      );
-    });
-  });
+  // Moving a Space changes its inherited authority, whether attaching or
+  // detaching it. Write access alone must never become manage access.
+  fastify.patch(
+    '/:canvasId/parent',
+    { config: { spaceAccess: 'manage' } },
+    async (request, reply) => {
+      const params = spaceHierarchyParamsSchema.safeParse(request.params);
+      const body = spaceParentBodySchema.safeParse(request.body);
+      if (!params.success || !body.success)
+        return reply
+          .code(400)
+          .send({ message: 'Invalid Space parent request' });
+      return respond(reply, async () => {
+        // Claim only a valid detachment, before removing inherited authority.
+        return setSpaceParent(params.data.canvasId, body.data, undefined, () =>
+          claimSpace(request, params.data.canvasId),
+        );
+      });
+    },
+  );
   fastify.get('/:canvasId/deletion-preview', async (request, reply) => {
     const params = spaceHierarchyParamsSchema.safeParse(request.params);
     if (!params.success)

@@ -34,13 +34,9 @@ export const storageResourceDirectory: ResourceDirectory = {
   },
   async workspaceOfSpace(canvasId) {
     for (const workspace of await getWorkspaceRepository().list()) {
-      try {
-        const scope = await openWorkspace(workspace);
-        if (await runInWorkspace(scope, () => space(canvasId).read()))
-          return workspace.workspaceId;
-      } catch {
-        // A Workspace whose folder is gone holds nothing to find.
-      }
+      const scope = await openWorkspace(workspace);
+      if (await runInWorkspace(scope, () => space(canvasId).read()))
+        return workspace.workspaceId;
     }
     return null;
   },

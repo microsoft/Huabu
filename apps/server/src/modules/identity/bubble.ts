@@ -137,7 +137,9 @@ function huabuAuthz(resources: ResourceDirectory): BubbleAuthzOptions {
 
 /**
  * Rewrite #237's Space grants, which named a Space by id alone, to name the
- * Workspace holding it. A grant on a Space no Workspace holds is dropped.
+ * Workspace holding it. Unresolved grants remain for a later startup: the
+ * registry may omit a temporarily unavailable Workspace. Unqualified targets
+ * cannot authorize access under the new policy.
  * Idempotent: qualified grants are left alone.
  */
 export async function migrateSpaceGrants(
@@ -149,16 +151,16 @@ export async function migrateSpaceGrants(
     if (target.type !== TARGET.space || !('id' in target)) continue;
     if (parseSpaceTargetId(target.id)) continue;
     const workspaceId = await resources.workspaceOfSpace(target.id);
-    if (workspaceId)
-      await store.grants.add({
-        target: {
-          type: TARGET.space,
-          id: spaceTargetId(workspaceId, target.id),
-        },
-        principalId: grant.principalId,
-        role: grant.role,
-        grantedByPrincipalId: grant.grantedByPrincipalId ?? null,
-      });
+    if (!workspaceId) continue;
+    await store.grants.add({
+      target: {
+        type: TARGET.space,
+        id: spaceTargetId(workspaceId, target.id),
+      },
+      principalId: grant.principalId,
+      role: grant.role,
+      grantedByPrincipalId: grant.grantedByPrincipalId ?? null,
+    });
     await store.grants.remove(grant.grantId);
   }
 }

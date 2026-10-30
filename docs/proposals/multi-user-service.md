@@ -50,12 +50,12 @@ Not changed: Azure blobs are still prefixed by the Workspace key, which on Disk 
 
 This replaces #237's model. Huabu checks four capabilities, and the same names apply on a Workspace and on a Space:
 
-| Capability     | Allows                                                                                                                  |
-| -------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `huabu.read`   | Seeing and opening the Workspace or Space, every `GET`, search, live streams.                                           |
-| `huabu.write`  | Editing Spaces and creating them. From PR B, also running agents and conversations in them.                             |
-| `huabu.manage` | Renaming and deleting it, granting roles on it. On a Workspace, also its memory, Skills and Workspace settings.         |
-| `huabu.admin`  | System target only: deployment, Canary, folder Workspaces on the Server's filesystem, and People administration (PR B). |
+| Capability     | Allows                                                                                                                                     |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `huabu.read`   | Seeing and opening the Workspace or Space, every `GET`, search, live streams.                                                              |
+| `huabu.write`  | Editing Spaces and creating them. From PR B, also running agents and conversations in them.                                                |
+| `huabu.manage` | Renaming and deleting it, changing a Space's parent, granting roles on it. On a Workspace, also its memory, Skills and Workspace settings. |
+| `huabu.admin`  | System target only: deployment, Canary, folder Workspaces on the Server's filesystem, and People administration (PR B).                    |
 
 Roles:
 
@@ -73,7 +73,7 @@ Roles:
 - **Admission.** Still system `member` or `owner`. A Workspace or Space grant alone does not admit anyone.
 - **Space ownership on creation.** Creating a Space in a Workspace you can write claims `huabu.space.owner` on it, as in #237. This keeps a shared Space reachable by its creator if the Workspace grant is later narrowed.
 - **Workspace-qualified Space targets.** `huabu.space` targets are `<workspaceId>:<canvasId>`, and the parent of a root Space is its own Workspace, not "the active one". So a Space can be shared later without sharing its Workspace.
-- **Migration from #237.** On first start, `huabu.space.owner` grants are rewritten to qualified targets in the Workspace that holds each Space. `huabu.workspace.owner` grants keep their meaning. A #237 grant that names no existing Space is dropped.
+- **Migration from #237.** On first start, `huabu.space.owner` grants are rewritten to qualified targets in the Workspace that holds each Space. `huabu.workspace.owner` grants keep their meaning. An unresolved #237 grant is retained for retry on a later startup: an offline registered Disk Workspace cannot establish that its Space is gone. Unqualified targets grant no access under the new policy. Read failures abort migration without removing the affected grant.
 - **Later goal, not in these PRs.** Every request names its Workspace explicitly. Until then a request runs in its caller's current Workspace, and a Space shared from another Workspace is reached by switching to that Workspace.
 
 ### Workspaces for members

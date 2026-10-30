@@ -11,8 +11,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { runInWorkspace } from './context.js';
 import { workspaceScopedRoutes } from './scoped-routes.js';
 import { buildReachbackEnv } from '../agent/acp/reachback-env.js';
+import { registerIdentity } from '../identity/http.js';
 import { resetStorageCache } from '../storage/index.js';
 import { createWorkspace } from '../workspace-activation.js';
+import { registerWorkspaceRequiredGuard } from '../workspace-required.js';
 import { getWorkspaceHandle, setWorkspacePath } from '../workspace.js';
 
 import type { FastifyPluginAsync } from 'fastify';
@@ -35,6 +37,43 @@ afterEach(() => {
 });
 
 describe('Workspace-scoped routes', () => {
+  it('binds Bubble machine requests to the process Workspace unless the URL names another', async () => {
+    const other = await createWorkspace('Other');
+    const app = Fastify();
+    registerIdentity(app, {
+      service: {
+        provider: 'bubble',
+        challenge: 'Bearer',
+        authenticate: async () => null,
+      },
+      getConnectionToken: () => 'machine-secret',
+    });
+    registerWorkspaceRequiredGuard(app);
+    const routes: FastifyPluginAsync = async (scoped) => {
+      scoped.get('/:canvasId/where', async () => ({
+        workspaceId: getWorkspaceHandle()?.workspaceId,
+      }));
+    };
+    await app.register(routes, { prefix: '/api/rfs' });
+    await app.register(workspaceScopedRoutes(routes), {
+      prefix: '/api/rfs/w/:workspaceId',
+    });
+    try {
+      for (const [url, workspaceId] of [
+        ['/api/rfs/a/where', getWorkspaceHandle()?.workspaceId],
+        [`/api/rfs/w/${other.workspaceId}/a/where`, other.workspaceId],
+      ]) {
+        const response = await app.inject({
+          url,
+          headers: { authorization: 'Bearer machine-secret' },
+        });
+        expect(response.statusCode).toBe(200);
+        expect(response.json()).toEqual({ workspaceId });
+      }
+    } finally {
+      await app.close();
+    }
+  });
   it('run each call in the Workspace their prefix names', async () => {
     const other = await createWorkspace('Other');
     const app = Fastify();
