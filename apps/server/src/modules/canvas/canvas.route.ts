@@ -1703,10 +1703,18 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         message: 'Invalid move request',
       });
     }
+    if (
+      parsed.data.destination.kind === 'new' &&
+      !parsed.data.destination.asChild
+    ) {
+      await requireWorkspaceWrite(request, reply);
+      if (reply.sent) return;
+    }
     try {
       return reply.send(
         await moveCanvasSelection(params.data.canvasId, parsed.data, {
           canRead: (canvasId) => canReadSpace(request, canvasId),
+          canManage: (canvasId) => canManageSpace(request, canvasId),
           claim: (canvasId) => claimSpace(request, canvasId),
         }),
       );

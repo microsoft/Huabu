@@ -434,7 +434,11 @@ describe('moveCanvasSelection', () => {
           createSourcePreview: false,
           expectedSourceVersion: seeded.toVersion,
         },
-        { canRead: async () => canRead, claim: async () => {} },
+        {
+          canRead: async () => canRead,
+          canManage: async () => true,
+          claim: async () => {},
+        },
       );
 
     await expect(move(false)).rejects.toMatchObject({
@@ -475,7 +479,7 @@ describe('moveCanvasSelection', () => {
           createSourcePreview: false,
           expectedSourceVersion: seeded.toVersion,
         },
-        { canRead: async () => true, claim },
+        { canRead: async () => true, canManage: async () => true, claim },
       );
 
     await expect(

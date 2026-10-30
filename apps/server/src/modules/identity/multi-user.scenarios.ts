@@ -358,5 +358,138 @@ export function describeSeveralPeople(
         ).status,
       ).toBe(200);
     });
+
+    it('requires Workspace write to move into a new root, while a Space owner may create a child destination', async () => {
+      const { call, store, workspaceOf, spacesOf } = await host();
+      const workspaceId = await workspaceOf('carol');
+      const source = await call('carol', 'POST', '/api/canvas', {
+        title: 'Source',
+      });
+      const id = source.body.canvasId as string;
+      await call('carol', 'POST', `/api/canvas/${id}/children`, {
+        title: 'Selected child',
+      });
+      for (const [type, targetId, role] of [
+        ['huabu.workspace', workspaceId, 'huabu.workspace.viewer'],
+        ['huabu.space', `${workspaceId}:${id}`, 'huabu.space.owner'],
+      ] as const)
+        await store.grants.add({
+          target: { type, id: targetId },
+          principalId: 'dave',
+          role,
+          grantedByPrincipalId: 'carol',
+        });
+      await call('dave', 'POST', `/api/workspaces/${workspaceId}/activate`);
+      const before = (await call('dave', 'GET', `/api/canvas/${id}`)).body;
+      const move = {
+        selectedNodeIds: [before.state.nodes[0].id],
+        createSourcePreview: false,
+        expectedSourceVersion: before.version,
+      };
+      for (const asChild of [false, undefined]) {
+        expect(
+          (
+            await call('dave', 'POST', `/api/canvas/${id}/move-selection`, {
+              ...move,
+              destination: { kind: 'new', title: 'Forbidden', asChild },
+            })
+          ).status,
+        ).toBe(403);
+      }
+      expect(await spacesOf('dave')).toEqual(['Selected child', 'Source']);
+      expect((await call('dave', 'GET', `/api/canvas/${id}`)).body).toEqual(
+        before,
+      );
+      const allowed = await call(
+        'dave',
+        'POST',
+        `/api/canvas/${id}/move-selection`,
+        {
+          ...move,
+          destination: { kind: 'new', title: 'Allowed child', asChild: true },
+        },
+      );
+      expect(allowed.status).toBe(200);
+      expect(
+        (await call('dave', 'GET', '/api/canvas')).body.canvases.find(
+          (item: { title: string }) => item.title === 'Allowed child',
+        ).parentSpaceId,
+      ).toBe(id);
+    });
+
+    it('requires management of every child reparented by a selection move before any mutations', async () => {
+      const { call, store, workspaceOf } = await host();
+      const workspaceId = await workspaceOf('carol');
+      const source = await call('carol', 'POST', '/api/canvas', {
+        title: 'Source',
+      });
+      const id = source.body.canvasId as string;
+      const child = await call('carol', 'POST', `/api/canvas/${id}/children`, {
+        title: 'Someone else owns this',
+      });
+      await store.grants.add({
+        target: { type: 'huabu.workspace', id: workspaceId },
+        principalId: 'dave',
+        role: 'huabu.workspace.editor',
+        grantedByPrincipalId: 'carol',
+      });
+      await call('dave', 'POST', `/api/workspaces/${workspaceId}/activate`);
+      await call('dave', 'POST', `/api/canvas/${id}/children`, {
+        title: 'Editors own the child they create',
+      });
+      const destination = await call('dave', 'POST', '/api/canvas', {
+        title: 'Owned destination',
+      });
+      const destinationId = destination.body.canvasId as string;
+      const before = (await call('dave', 'GET', `/api/canvas/${id}`)).body;
+      const beforeDestination = (
+        await call('dave', 'GET', `/api/canvas/${destinationId}`)
+      ).body;
+      const beforeSpaces = (await call('dave', 'GET', '/api/canvas')).body;
+      const beforeGrants = await store.grants.list({ principalId: 'dave' });
+      const move = {
+        selectedNodeIds: before.state.nodes.map(
+          (node: { id: string }) => node.id,
+        ),
+        createSourcePreview: false,
+        expectedSourceVersion: before.version,
+      };
+      for (const target of [
+        { kind: 'existing', canvasId: destinationId },
+        { kind: 'new', title: 'Must not be created', asChild: true },
+      ])
+        expect(
+          (
+            await call('dave', 'POST', `/api/canvas/${id}/move-selection`, {
+              ...move,
+              destination: target,
+            })
+          ).status,
+        ).toBe(403);
+      expect((await call('dave', 'GET', `/api/canvas/${id}`)).body).toEqual(
+        before,
+      );
+      expect(
+        (await call('dave', 'GET', `/api/canvas/${destinationId}`)).body,
+      ).toEqual(beforeDestination);
+      expect((await call('dave', 'GET', '/api/canvas')).body).toEqual(
+        beforeSpaces,
+      );
+      expect(await store.grants.list({ principalId: 'dave' })).toEqual(
+        beforeGrants,
+      );
+      const allowed = await call(
+        'carol',
+        'POST',
+        `/api/canvas/${id}/move-selection`,
+        { ...move, destination: { kind: 'existing', canvasId: destinationId } },
+      );
+      expect(allowed.status).toBe(200);
+      expect(
+        (await call('carol', 'GET', '/api/canvas')).body.canvases.find(
+          (item: { canvasId: string }) => item.canvasId === child.body.canvasId,
+        ).parentSpaceId,
+      ).toBe(destinationId);
+    });
   });
 }
