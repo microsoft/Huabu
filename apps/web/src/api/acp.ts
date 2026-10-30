@@ -8,7 +8,7 @@
  * server's `DaemonSupervisor`. The user never sees the daemon directly
  * — instead they author command Profiles which
  * describe how to spawn one external agent CLI on demand. This module
- * wraps the loopback-only profile/daemon endpoints plus the existing
+ * wraps the owner-only profile/device endpoints plus the existing
  * thread-scoped cached capability and control routes.
  *
  * Endpoint surface:

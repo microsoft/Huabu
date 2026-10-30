@@ -124,6 +124,9 @@ export default defineConfig([
       'device-info': path.resolve(
         '../../external/agentlet/packages/local/src/device-info.ts',
       ),
+      'fs-proxy': path.resolve(
+        '../../external/agentlet/packages/local/src/fs-proxy.ts',
+      ),
     },
     format: ['esm'],
     outDir: 'dist-bundle/agentlet',

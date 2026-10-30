@@ -25,6 +25,7 @@
  * default behavior.
  */
 
+import clsx from 'clsx';
 import { useEffect, useRef, useState } from 'react';
 
 import {
@@ -38,6 +39,10 @@ import { attachBlockDragListeners } from './blockDrag';
 import { createMilkdown, type MilkdownInstance } from './createMilkdown';
 import { markdownEquals, normalizeMarkdown } from './markdownUtils';
 import { MilkdownLinkPopover } from './MilkdownLinkPopover';
+import {
+  TouchBlockDragHandle,
+  type GetTouchDragPayload,
+} from './TouchBlockDragHandle';
 
 import type {
   MilkdownBlockDragEvent,
@@ -103,6 +108,7 @@ export interface MilkdownEditorProps {
    * (the helper already manages the drag image).
    */
   onBlockDragStart?: (event: MilkdownBlockDragEvent) => void;
+  getTouchDragPayload?: GetTouchDragPayload;
 }
 
 export function MilkdownEditor(props: MilkdownEditorProps): React.JSX.Element {
@@ -119,6 +125,7 @@ export function MilkdownEditor(props: MilkdownEditorProps): React.JSX.Element {
     onLinkClick,
     linkActivation = 'modifier',
     onBlockDragStart,
+    getTouchDragPayload,
   } = props;
 
   const rootRef = useRef<HTMLDivElement>(null);
@@ -147,6 +154,8 @@ export function MilkdownEditor(props: MilkdownEditorProps): React.JSX.Element {
   /** Track latest canvasId so the mount-only editor reads a fresh value. */
   const canvasIdRef = useRef(canvasId);
   canvasIdRef.current = canvasId;
+  const editableRef = useRef(editable);
+  editableRef.current = editable;
 
   // Mount the editor once. The async lifecycle is guarded with a
   // `cancelled` flag so React 18 StrictMode's double-effect cleans up
@@ -209,6 +218,7 @@ export function MilkdownEditor(props: MilkdownEditorProps): React.JSX.Element {
       });
 
       instanceRef.current = instance;
+      instance.setReadonly(!editableRef.current);
       root.setAttribute('data-search-source-ready', '');
       setPopoverInstance(instance);
       onReadyRef.current?.(instance);
@@ -305,7 +315,20 @@ export function MilkdownEditor(props: MilkdownEditorProps): React.JSX.Element {
 
   return (
     <>
-      <div ref={rootRef} className={className} data-search-renderer />
+      <div
+        ref={rootRef}
+        className={clsx(className, {
+          'milkdown-touch-blocks': !!getTouchDragPayload,
+        })}
+        data-search-renderer
+      />
+      {getTouchDragPayload && popoverInstance && rootRef.current ? (
+        <TouchBlockDragHandle
+          root={rootRef.current}
+          instance={popoverInstance}
+          getPayload={getTouchDragPayload}
+        />
+      ) : null}
       {editable && popoverInstance ? (
         <MilkdownLinkPopover instance={popoverInstance} rootRef={rootRef} />
       ) : null}

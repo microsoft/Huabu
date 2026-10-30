@@ -10,6 +10,7 @@ import {
   useState,
 } from 'react';
 
+import { isCanvasIntent } from '@huabu/shared';
 import { createId } from '@huabu/shared';
 import { settleInkInterpretation } from '@huabu/shared/ink-interpretation';
 
@@ -144,7 +145,7 @@ function historyItemsToMessages(
           ? { quotedComments: message.quotedComments }
           : {}),
         ...(message.inputKind ? { inputKind: message.inputKind } : {}),
-        ...(message.inputKind === 'ink-intent'
+        ...(isCanvasIntent(message.inputKind)
           ? {
               inkInterpretation: historyTurnActive
                 ? (message.inkInterpretation ?? { state: 'pending' as const })

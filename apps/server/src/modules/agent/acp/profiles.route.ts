@@ -257,6 +257,7 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
       }
       const profileCounts = new Map<string, number>();
       for (const profile of profiles) {
+        if (profile.visible === false) continue;
         const agentletId = resolveConnectedAgentletId(profile.agentletId);
         if (!agentletId) continue;
         profileCounts.set(agentletId, (profileCounts.get(agentletId) ?? 0) + 1);
@@ -308,9 +309,13 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
           knownDevices.set(agentletId, { agentletId, displayName });
       }
       return {
-        profiles,
+        profiles: profiles.filter((profile) => profile.visible !== false),
         selectableProfileIds: profiles
-          .filter((profile) => resolveConnectedAgentletId(profile.agentletId))
+          .filter(
+            (profile) =>
+              profile.visible !== false &&
+              resolveConnectedAgentletId(profile.agentletId),
+          )
           .map((profile) => profile.id),
         connectedDevices,
         knownDevices: [...knownDevices.values()],
@@ -354,6 +359,12 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
         });
       }
       const launch = parsed.data.launch;
+      if (launch.kind === 'acp-harness' && launch.harnessId === 'proxy') {
+        return reply.status(400).send({
+          code: 'reserved_profile',
+          message: 'The filesystem proxy is automatically managed',
+        });
+      }
       if (!(await validateHarnessLaunch(launch, agentletId, request, reply)))
         return;
       const common = {

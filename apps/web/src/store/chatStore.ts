@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import equal from 'fast-deep-equal';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
@@ -853,7 +854,8 @@ export const useChatStore = create<ChatState>()(
                     sent.quote === item.quote &&
                     sent.contextBefore === item.contextBefore &&
                     sent.contextAfter === item.contextAfter &&
-                    sent.comment === item.comment,
+                    sent.comment === item.comment &&
+                    equal(sent.source, item.source),
                 ),
             ),
           });

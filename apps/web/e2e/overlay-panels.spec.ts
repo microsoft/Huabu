@@ -5,6 +5,8 @@ import { expect, test, type Page } from '@playwright/test';
 
 import { openNewCanvas, readViewportTransform, oneFingerDrag } from './helpers';
 
+import type * as ToolModule from '../src/store/toolStore';
+
 async function createChatPreview(page: Page) {
   await page
     .getByRole('button', { name: 'New conversation', exact: true })
@@ -43,6 +45,20 @@ async function geometry(page: Page) {
       height: canvas.height,
       transform: viewport.style.transform,
     };
+  });
+}
+
+async function resizeFeedbackColors(page: Page) {
+  return page.evaluate(() => {
+    const probe = document.createElement('div');
+    document.body.append(probe);
+    const readColor = (opacity: number) => {
+      probe.style.backgroundColor = `color-mix(in oklab, var(--color-info) ${opacity}%, transparent)`;
+      return getComputedStyle(probe).backgroundColor;
+    };
+    const colors = { hover: readColor(30), drag: readColor(50) };
+    probe.remove();
+    return colors;
   });
 }
 
@@ -115,6 +131,175 @@ test('overlays never resize or pan Canvas and isolate mouse, wheel, touch and ke
   await expect
     .poll(() => readViewportTransform(page))
     .not.toBe(before.transform);
+});
+
+for (const pointerType of ['touch', 'pen', 'mouse'] as const) {
+  test(`preview resize targets are 8px with persistent ${pointerType} drag feedback`, async ({
+    page,
+  }) => {
+    await openNewCanvas(page);
+    await page.keyboard.press('Escape');
+    await page.evaluate(async (pointerType) => {
+      const path = '/src/store/toolStore.ts';
+      const { useToolStore } = (await import(path)) as typeof ToolModule;
+      useToolStore
+        .getState()
+        .setInputModePreference(
+          pointerType === 'touch' ? 'finger' : pointerType,
+        );
+    }, pointerType);
+    await createChatPreview(page);
+    await page
+      .getByRole('button', {
+        name: 'Split: create an empty group on the right',
+        exact: true,
+      })
+      .click();
+    await settlePanels(page);
+    await page.mouse.move(10, 10);
+    const before = await geometry(page);
+    const panel = page.locator('[data-canvas-panel="right"]');
+    const outer = panel.locator(':scope > [role="separator"]');
+    const inner = panel.getByRole('separator', {
+      name: 'Resize preview groups',
+    });
+    const { drag: blue } = await resizeFeedbackColors(page);
+    const client = await page.context().newCDPSession(page);
+    const pointer = async (
+      phase: 'start' | 'move' | 'end',
+      x: number,
+      y: number,
+    ) => {
+      if (pointerType === 'touch') {
+        await client.send('Input.dispatchTouchEvent', {
+          type:
+            phase === 'start'
+              ? 'touchStart'
+              : phase === 'move'
+                ? 'touchMove'
+                : 'touchEnd',
+          touchPoints: phase === 'end' ? [] : [{ x, y }],
+        });
+      } else {
+        await client.send('Input.dispatchMouseEvent', {
+          type:
+            phase === 'start'
+              ? 'mousePressed'
+              : phase === 'move'
+                ? 'mouseMoved'
+                : 'mouseReleased',
+          pointerType,
+          button: 'left',
+          buttons: phase === 'end' ? 0 : 1,
+          clickCount: 1,
+          x,
+          y,
+        });
+      }
+    };
+
+    for (const handle of [outer, inner]) {
+      const rule = handle.locator(':scope > div');
+      await expect(handle).toHaveCSS('width', '8px');
+      await expect(rule).toHaveCSS('width', '1px');
+      expect(
+        await handle.evaluate((element) => {
+          const box = element.getBoundingClientRect();
+          return [-5, -3, 3, 5].map((offset) => {
+            const hit = document.elementFromPoint(
+              box.x + box.width / 2 + offset,
+              box.y + box.height / 2,
+            );
+            return hit !== null && element.contains(hit);
+          });
+        }),
+      ).toEqual([false, true, true, false]);
+
+      for (const offset of [-3, 3]) {
+        const box = await handle.boundingBox();
+        const panelBox = await panel.boundingBox();
+        if (!box || !panelBox)
+          throw new Error('Resize controls must be visible');
+        if (handle === outer) expect(box.x).toBeCloseTo(panelBox.x - 4, 1);
+        const previousRatio = await inner.getAttribute('aria-valuenow');
+        if (previousRatio === null) throw new Error('Split ratio is missing');
+        const x = box.x + box.width / 2 + offset;
+        const y = box.y + box.height / 2;
+        await pointer('start', x, y);
+        await expect(handle).toHaveAttribute('data-resizing', 'true');
+        await expect(rule).toHaveCSS('width', '4px');
+        await expect(rule).toHaveCSS('background-color', blue);
+        const dx = handle === outer ? -50 : 30;
+        await pointer('move', x + dx, y);
+        if (handle === outer) {
+          await expect
+            .poll(async () => (await panel.boundingBox())?.width)
+            .toBeCloseTo(panelBox.width + 50, 1);
+        } else {
+          await expect(inner).not.toHaveAttribute(
+            'aria-valuenow',
+            previousRatio,
+          );
+        }
+        await expect(rule).toHaveCSS('background-color', blue);
+        // At the width/ratio limit, capture keeps feedback alive off the handle.
+        await pointer('move', 10, y);
+        await expect(handle).toHaveAttribute('data-resizing', 'true');
+        await expect(rule).toHaveCSS('background-color', blue);
+        await pointer('move', x + dx, y);
+        await pointer('end', x + dx, y);
+        await expect(handle).not.toHaveAttribute('data-resizing');
+        await page.mouse.move(10, 10);
+        await expect(rule).toHaveCSS('width', '1px');
+        await expect(rule).not.toHaveCSS('background-color', blue);
+        expect(await geometry(page)).toEqual(before);
+      }
+    }
+    await client.detach();
+  });
+}
+
+test.describe('desktop resize feedback', () => {
+  test.use({ hasTouch: false });
+
+  test('both rules use 4px translucent hover and active feedback', async ({
+    page,
+  }) => {
+    await openNewCanvas(page);
+    await page.keyboard.press('Escape');
+    await createChatPreview(page);
+    await page
+      .getByRole('button', {
+        name: 'Split: create an empty group on the right',
+        exact: true,
+      })
+      .click();
+    await settlePanels(page);
+    const panel = page.locator('[data-canvas-panel="right"]');
+    const colors = await resizeFeedbackColors(page);
+    for (const handle of [
+      panel.locator(':scope > [role="separator"]'),
+      panel.getByRole('separator', { name: 'Resize preview groups' }),
+    ]) {
+      const rule = handle.locator(':scope > div');
+      await page.mouse.move(10, 10);
+      await expect(rule).toHaveCSS('width', '1px');
+      await handle.hover({ position: { x: 4, y: 300 } });
+      await expect(handle).toHaveCSS('width', '8px');
+      await expect(rule).toHaveCSS('width', '4px');
+      await expect(rule).toHaveCSS('background-color', colors.hover);
+      await page.mouse.down();
+      await expect(handle).toHaveAttribute('data-resizing', 'true');
+      await expect(rule).toHaveCSS('background-color', colors.drag);
+      await page.mouse.move(10, 300);
+      await expect(rule).toHaveCSS('width', '4px');
+      await expect(rule).toHaveCSS('background-color', colors.drag);
+      await page.mouse.up();
+      await page.mouse.move(10, 10);
+      await expect(handle).not.toHaveAttribute('data-resizing');
+      await expect(rule).toHaveCSS('width', '1px');
+    }
+  });
 });
 
 test('panel descendants chain vertical wheel to their outer scroller', async ({

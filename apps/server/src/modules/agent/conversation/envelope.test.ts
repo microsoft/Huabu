@@ -253,6 +253,76 @@ describe('buildChatEnvelope selection records', () => {
     expect(envelope.focus.selection.selectedIds).toEqual(['frame-1']);
   });
 
+  it('persists full Text but only previews and references for Note and Frame directories', async () => {
+    const content = 'Complete Text\n' + 'Full body. '.repeat(100);
+    const envelope = await buildChatEnvelope({
+      inputKind: 'selection-intent',
+      content: '',
+      canvasId: 'canvas-1',
+      logger,
+      selectedNodes: [
+        { id: 'text', type: 'text', content },
+        { id: 'child-1', type: 'note' },
+        {
+          id: 'frame-1',
+          type: 'frame',
+          referenceOnly: true,
+          children: [
+            { id: 'ink-1', type: 'sketch', referenceOnly: true },
+            {
+              id: 'image',
+              type: 'image',
+              referenceOnly: true,
+              src: 'hidden.png',
+            },
+            { id: 'child-1', type: 'note', referenceOnly: true },
+          ],
+        },
+      ],
+    });
+    expect(envelope.focus.selection.textContents).toEqual([
+      { nodeId: 'text', content },
+    ]);
+    expect(envelope.focus.selection.refs.map((ref) => ref.id)).toEqual([
+      'text',
+      'child-1',
+      'frame-1',
+      'ink-1',
+      'image',
+    ]);
+    expect(
+      envelope.focus.selection.refs.find((ref) => ref.id === 'child-1'),
+    ).toMatchObject({
+      preview: 'Child body',
+    });
+    expect(envelope.focus.selection.snapshotAttachments).toEqual([]);
+    expect(envelope.focus.selection.imageAttachments).toEqual([]);
+    expect(rasterize).not.toHaveBeenCalled();
+    expect(recognizeInk).not.toHaveBeenCalled();
+    expect(
+      chatEnvelopeSchema.parse(JSON.parse(JSON.stringify(envelope))),
+    ).toEqual(envelope);
+  });
+
+  it('reads non-hydrated Text in full and fails explicitly when it is unavailable', async () => {
+    const input = {
+      inputKind: 'selection-intent' as const,
+      content: '',
+      canvasId: 'canvas-1',
+      logger,
+      selectedNodes: [{ id: 'child-1', type: 'text' as const }],
+    };
+    expect(
+      (await buildChatEnvelope(input)).focus.selection.textContents,
+    ).toEqual([{ nodeId: 'child-1', content: 'Child body' }]);
+    await expect(
+      buildChatEnvelope({
+        ...input,
+        selectedNodes: [{ id: 'missing', type: 'text' }],
+      }),
+    ).rejects.toThrow('Selected Text content is unavailable');
+  });
+
   it('persists quoted comments through the validated envelope without changing ordinary text', async () => {
     const quotedComments = [
       {
@@ -260,6 +330,31 @@ describe('buildChatEnvelope selection records', () => {
         contextBefore: 'Before ',
         contextAfter: ' after',
         comment: 'Explain this.',
+        source: {
+          kind: 'note' as const,
+          canvasId: 'space',
+          nodeId: 'note',
+          snapshotRevision: 'captured',
+        },
+      },
+      {
+        quote: 'file passage',
+        contextBefore: 'before ',
+        contextAfter: ' after',
+        comment: 'Explain this file.',
+        source: {
+          kind: 'file-reference' as const,
+          canvasId: 'space',
+          nodeId: 'file',
+          agentletId: 'device',
+          path: '/source.tex',
+          contentVersion: 'a'.repeat(64),
+          offsetUnit: 'utf-16' as const,
+          from: 7,
+          to: 19,
+          loadedLength: 40,
+          complete: false,
+        },
       },
     ];
     const envelope = await buildChatEnvelope({

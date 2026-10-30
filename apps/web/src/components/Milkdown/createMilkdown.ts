@@ -12,6 +12,7 @@
  *  - Hides the async lifecycle: callers always receive a ready instance.
  */
 
+import { EditorView as CodeMirrorView } from '@codemirror/view';
 import {
   editorViewCtx,
   editorViewOptionsCtx,
@@ -64,6 +65,11 @@ import {
 import { isMac } from '@/utils/platform';
 import { normalizeSafeLinkHref } from '@/utils/safeLink';
 
+import {
+  configureLatexCodeFences,
+  latexCodeBlockSchema,
+  readonlyCodeBlockView,
+} from './latexCodeFence';
 import { normalizeMathDelimiters } from './markdownUtils';
 
 import type {
@@ -1242,7 +1248,7 @@ function markdownForBlockType(key: MilkdownBlockType, text: string): string {
   if (key === 'ordered-list') return `1. ${text}\n`;
   if (key === 'task-list') return `- [ ] ${text}\n`;
   if (key === 'code-block') return `\`\`\`\n${text}\n\`\`\`\n`;
-  if (key === 'math') return `\`\`\`LaTeX\n${text}\n\`\`\`\n`;
+  if (key === 'math') return `$$\n${text}\n$$\n`;
   if (key === 'divider') return '---\n';
   return `${text}\n`;
 }
@@ -1942,11 +1948,19 @@ export async function createMilkdown(
         : {}),
     },
     featureConfigs: {
+      [Crepe.Feature.CodeMirror]: {
+        extensions: [CodeMirrorView.lineWrapping],
+      },
       ...(placeholder
         ? { [Crepe.Feature.Placeholder]: { text: placeholder } }
         : {}),
     },
   });
+
+  crepe.editor
+    .config(configureLatexCodeFences)
+    .use(latexCodeBlockSchema)
+    .use(readonlyCodeBlockView);
 
   // ProseMirror owns the textbox DOM and can replace it during Crepe's async
   // setup (notably across React StrictMode's setup/cleanup replay). Put the

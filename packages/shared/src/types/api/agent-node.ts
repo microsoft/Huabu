@@ -5,6 +5,7 @@ import { z } from 'zod';
 
 import { agentIconSchema } from './agent-profile.js';
 import { agentBindingSchema } from './agent.js';
+import { fileReferenceSchema } from './device-files.js';
 import { sketchResourceBindingDataSchema } from './ink-sigil.js';
 
 export const agentNodeBindingStateSchema = z.enum(['editing', 'bound']);
@@ -77,6 +78,21 @@ const canvasNodeEditBaseSchema = z
   .catchall(z.unknown());
 export const canvasEditableNodeSchema = canvasNodeEditBaseSchema.superRefine(
   (node, ctx) => {
+    if (node.type === 'fileReference') {
+      if (
+        (node.data &&
+          'fileReference' in node.data &&
+          !fileReferenceSchema.safeParse(node.data.fileReference).success) ||
+        ['content', 'src'].some((key) => key in (node.data ?? {}))
+      ) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Invalid metadata-only file reference',
+          path: ['data'],
+        });
+      }
+      return;
+    }
     if (!node.data || (node.type !== 'question' && node.type !== 'sketch'))
       return;
     const parsed = (

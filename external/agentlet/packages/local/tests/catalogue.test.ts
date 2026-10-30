@@ -15,6 +15,7 @@ describe('harness definitions', () => {
       { id: 'cursor', displayName: 'Cursor' },
       { id: 'codebuddy', displayName: 'CodeBuddy' },
       { id: 'hermes', displayName: 'Hermes Agent' },
+      { id: 'proxy', displayName: 'Filesystem Proxy' },
       { id: 'custom', displayName: 'Custom command' },
     ])
   })

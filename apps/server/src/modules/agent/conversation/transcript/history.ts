@@ -15,7 +15,11 @@
  * is unit-testable in isolation.
  */
 
-import { commandFromRawInput, variantForInternalTool } from '@huabu/shared';
+import {
+  commandFromRawInput,
+  isCanvasIntent,
+  variantForInternalTool,
+} from '@huabu/shared';
 import { inkResourceAttachments } from '@huabu/shared/canvas-engine';
 import {
   readInkInterpretation,
@@ -319,7 +323,7 @@ export function buildHistoryFromTurns(
       const selectedStrokeIds = envelope.focus.selection.strokeSubsets ?? [];
       const invokedSkills = envelope.skills.invokedIds;
       if (
-        envelope.user.inputKind === 'ink-intent' ||
+        isCanvasIntent(envelope.user.inputKind) ||
         envelope.user.text.trim() ||
         envelope.user.quotedComments?.length ||
         attachments.length > 0 ||
@@ -334,7 +338,7 @@ export function buildHistoryFromTurns(
           ...(envelope.user.inputKind && {
             inputKind: envelope.user.inputKind,
           }),
-          ...(envelope.user.inputKind === 'ink-intent' && {
+          ...(isCanvasIntent(envelope.user.inputKind) && {
             inkInterpretation: { state: 'pending' as const },
           }),
           ...(envelope.focus.groundingVisual && {
@@ -351,7 +355,7 @@ export function buildHistoryFromTurns(
           ...(invokedSkills.length > 0 && { invokedSkills }),
         };
         messages.push(userItem);
-        if (envelope.user.inputKind === 'ink-intent') inkUserItem = userItem;
+        if (isCanvasIntent(envelope.user.inputKind)) inkUserItem = userItem;
       }
     } else if (viewEvent) {
       messages.push({

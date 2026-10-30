@@ -151,6 +151,9 @@ export const MainLayout = ({
   const restoreCanvasFrameRef = useRef<number | null>(null);
   const [layoutWidth, setLayoutWidth] = useState<number | null>(null);
   const resizeCleanupRef = useRef<(() => void) | null>(null);
+  const [resizingSide, setResizingSide] = useState<'left' | 'right' | null>(
+    null,
+  );
   useEffect(() => () => resizeCleanupRef.current?.(), []);
 
   useLayoutEffect(() => {
@@ -252,19 +255,28 @@ export const MainLayout = ({
     Math.min(Math.max(value, min), max);
 
   const resizeHandleClassName =
-    'hover:bg-info-light active:bg-info-light absolute inset-y-0 z-10 w-1 touch-none bg-transparent outline-none';
+    'absolute inset-y-0 z-10 touch-none bg-transparent outline-none';
 
   const leftHandleDisabled = isLeftCollapsed;
   const rightHandleDisabled =
     isRightCollapsed || displayedPreviewFullscreen || isRestoringCanvas;
 
-  const leftHandleClassName = `${resizeHandleClassName} border-edge-default right-0 border-r ${
+  const leftHandleClassName = `${resizeHandleClassName} hover:bg-info/30 active:bg-info/50 data-[resizing=true]:bg-info/50 border-edge-default right-0 w-1 border-r ${
     leftHandleDisabled ? 'hidden' : 'cursor-col-resize'
   }`;
 
-  const rightHandleClassName = `${resizeHandleClassName} border-edge-default left-0 border-l ${
+  const rightHandleClassName = `${resizeHandleClassName} group -left-1 w-2 ${
     rightHandleDisabled ? 'hidden' : 'cursor-col-resize'
   }`;
+
+  useEffect(() => {
+    if (
+      (resizingSide === 'left' && leftHandleDisabled) ||
+      (resizingSide === 'right' && rightHandleDisabled)
+    ) {
+      resizeCleanupRef.current?.();
+    }
+  }, [resizingSide, leftHandleDisabled, rightHandleDisabled]);
 
   const onResizePointerDown = (
     side: 'left' | 'right',
@@ -274,8 +286,11 @@ export const MainLayout = ({
     const disabled = isLeft ? leftHandleDisabled : rightHandleDisabled;
     const layout = contentRef.current;
     if (disabled || event.button !== 0 || !layout) return;
+    event.preventDefault();
+    event.stopPropagation();
     resizeCleanupRef.current?.();
 
+    const target = event.currentTarget;
     const startX = event.clientX;
     const startWidth =
       event.currentTarget.parentElement?.getBoundingClientRect().width ??
@@ -283,7 +298,8 @@ export const MainLayout = ({
     const pointerId = event.pointerId;
     const setWidth = isLeft ? setLeftWidthPx : setRightWidthPx;
     let resizedWidth: number | null = null;
-    event.currentTarget.setPointerCapture(pointerId);
+    target.setPointerCapture(pointerId);
+    setResizingSide(side);
 
     const onMove = (move: PointerEvent) => {
       if (move.pointerId !== pointerId) return;
@@ -309,7 +325,12 @@ export const MainLayout = ({
       window.removeEventListener('pointerup', onEnd);
       window.removeEventListener('pointercancel', onEnd);
       window.removeEventListener('blur', cleanup);
+      target.removeEventListener('lostpointercapture', onEnd);
+      if (target.hasPointerCapture(pointerId)) {
+        target.releasePointerCapture(pointerId);
+      }
       resizeCleanupRef.current = null;
+      setResizingSide(null);
       // Persist once per gesture, not on every pointer move.
       if (!isLeft && resizedWidth !== null) {
         usePanelStore.getState().setRightWidthPx(resizedWidth);
@@ -323,6 +344,7 @@ export const MainLayout = ({
     window.addEventListener('pointerup', onEnd);
     window.addEventListener('pointercancel', onEnd);
     window.addEventListener('blur', cleanup);
+    target.addEventListener('lostpointercapture', onEnd);
     resizeCleanupRef.current = cleanup;
   };
 
@@ -393,6 +415,7 @@ export const MainLayout = ({
         <div
           role="separator"
           aria-orientation="vertical"
+          data-resizing={resizingSide === 'left' ? true : undefined}
           className={leftHandleClassName}
           onPointerDown={(event) => onResizePointerDown('left', event)}
         />
@@ -458,7 +481,7 @@ export const MainLayout = ({
         )}
 
       <div
-        className="bg-surface absolute inset-y-0 right-0 z-40 overflow-hidden outline-none"
+        className="bg-surface absolute inset-y-0 right-0 z-40 outline-none"
         data-right-panel-slot
         data-canvas-panel="right"
         data-collapsed={
@@ -472,8 +495,9 @@ export const MainLayout = ({
             : `${visibleRightWidth}px`,
         }}
       >
+        {/* Clip content without clipping the resize target across the boundary. */}
         <div
-          className="absolute top-0 h-full"
+          className="absolute top-0 h-full overflow-hidden overscroll-contain"
           data-right-panel-content
           inert={isRightCollapsed && !displayedPreviewFullscreen}
           style={{
@@ -496,9 +520,12 @@ export const MainLayout = ({
         <div
           role="separator"
           aria-orientation="vertical"
+          data-resizing={resizingSide === 'right' ? true : undefined}
           className={rightHandleClassName}
           onPointerDown={(event) => onResizePointerDown('right', event)}
-        />
+        >
+          <div className="bg-edge-default group-hover:bg-info/30 group-data-[resizing=true]:bg-info/50 pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 group-hover:w-1 group-data-[resizing=true]:w-1" />
+        </div>
       </div>
       {!displayedPreviewFullscreen && (
         <div

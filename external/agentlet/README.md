@@ -18,6 +18,8 @@ It contains no AI or host-application logic. The daemon accepts authenticated co
 
 Agentlet does not provide a standalone relay server, REST API, browser UI, token administration service, or durable session/event store. Those control-plane responsibilities belong to the embedding host and its Gateway.
 
+The bundled `proxy` harness is a deterministic ACP agent, not an AI provider. It advertises only `fs-list` and `fs-read` through available commands and accepts `/COMMAND ` followed by a strict JSON object with an absolute `path` and optional stateless continuation cursor. Native read-only operations use the daemon account's filesystem permissions, follow ordinary symlinks, and never execute input as shell commands. Each response is one versioned JSON result or explicit error; listing, UTF-8 reads and serialized output are bounded. The executable is built beside the daemon and needs no downloaded runtime. Hosts decide whether and how to expose this capability to their owner.
+
 ## Packages
 
 | Package | Responsibility |

@@ -124,6 +124,7 @@ function envelope(): ChatEnvelope {
         strokeSubsets: [{ nodeId: 'node-ink', strokeIds: ['stroke-a'] }],
         imageAttachments: [],
         snapshotAttachments: [],
+        textContents: [{ nodeId: 'node-note', content: 'Text' }],
       },
     },
   });
@@ -191,6 +192,10 @@ it.each(['jsonl', 'sqlite'])(
     if (user.role !== 'user') throw new Error('Expected user message');
     expect(user.attachments).toHaveLength(1);
     expect(user.attachments?.[0].originNodeId).toBe(nodes[0].id);
+    expect(
+      chatEnvelopeSchema.parse(turn.request?.content).focus.selection
+        .textContents,
+    ).toEqual([{ nodeId: nodes[0].id, content: 'Text' }]);
   },
 );
 

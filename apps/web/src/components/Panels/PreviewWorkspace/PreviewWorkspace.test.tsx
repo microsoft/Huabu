@@ -1695,25 +1695,29 @@ describe('split', () => {
     expect(store().workspace.splitRatio).toBeCloseTo(0.2, 5);
   });
 
-  it('widens the left group when the separator is dragged right', () => {
-    openNode('a');
-    openNode('b');
-    render([canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')]);
-    act(() => {
-      store().openPreviewTarget(
-        { kind: 'node', canvasId: CANVAS_ID, nodeId: 'b' },
-        { openToSide: true },
-      );
-    });
+  it.each(['pointerup', 'pointercancel', 'lostpointercapture', 'blur'])(
+    'keeps split resize feedback until %s ends the captured gesture',
+    (endType) => {
+      openNode('a');
+      openNode('b');
+      render([canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')]);
+      act(() => {
+        store().openPreviewTarget(
+          { kind: 'node', canvasId: CANVAS_ID, nodeId: 'b' },
+          { openToSide: true },
+        );
+      });
 
-    const separator = container?.querySelector<HTMLElement>(
-      '[role="separator"][aria-valuenow]',
-    );
-    const workspace = separator?.parentElement;
-    expect(separator).toBeDefined();
-    expect(workspace).toBeDefined();
-    vi.spyOn(workspace as HTMLElement, 'getBoundingClientRect').mockReturnValue(
-      {
+      const separator = container?.querySelector<HTMLElement>(
+        '[role="separator"][aria-valuenow]',
+      );
+      const workspace = separator?.parentElement;
+      expect(separator).toBeDefined();
+      expect(workspace).toBeDefined();
+      vi.spyOn(
+        workspace as HTMLElement,
+        'getBoundingClientRect',
+      ).mockReturnValue({
         x: 100,
         y: 0,
         left: 100,
@@ -1723,13 +1727,14 @@ describe('split', () => {
         width: 400,
         height: 600,
         toJSON: () => ({}),
-      },
-    );
-    (separator as HTMLElement).setPointerCapture = vi.fn();
-    (separator as HTMLElement).releasePointerCapture = vi.fn();
-    (separator as HTMLElement).hasPointerCapture = vi.fn(() => true);
-    vi.spyOn(separator as HTMLElement, 'getBoundingClientRect').mockReturnValue(
-      {
+      });
+      (separator as HTMLElement).setPointerCapture = vi.fn();
+      (separator as HTMLElement).releasePointerCapture = vi.fn();
+      (separator as HTMLElement).hasPointerCapture = vi.fn(() => true);
+      vi.spyOn(
+        separator as HTMLElement,
+        'getBoundingClientRect',
+      ).mockReturnValue({
         x: 296,
         y: 0,
         left: 296,
@@ -1739,30 +1744,57 @@ describe('split', () => {
         width: 8,
         height: 600,
         toJSON: () => ({}),
-      },
-    );
+      });
 
-    act(() => {
-      separator?.dispatchEvent(
-        new PointerEvent('pointerdown', {
-          bubbles: true,
-          clientX: 300,
-          pointerId: 1,
-        }),
-      );
-      window.dispatchEvent(
-        new PointerEvent('pointermove', { clientX: 140, pointerId: 2 }),
-      );
-      window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 2 }));
-      expect(store().workspace.splitRatio).toBe(0.5);
-      window.dispatchEvent(
-        new PointerEvent('pointermove', { clientX: 340, pointerId: 1 }),
-      );
-      window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1 }));
-    });
+      act(() => {
+        separator?.dispatchEvent(
+          new PointerEvent('pointerdown', {
+            bubbles: true,
+            clientX: 300,
+            pointerId: 1,
+            pointerType: 'touch',
+          }),
+        );
+      });
+      expect(separator?.dataset.resizing).toBe('true');
+      expect(
+        separator?.firstElementChild?.classList.contains(
+          'group-data-[resizing=true]:bg-info/50',
+        ),
+      ).toBe(true);
+      act(() => {
+        window.dispatchEvent(
+          new PointerEvent('pointermove', { clientX: 140, pointerId: 2 }),
+        );
+        window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 2 }));
+        expect(store().workspace.splitRatio).toBe(0.5);
+        window.dispatchEvent(
+          new PointerEvent('pointermove', { clientX: 340, pointerId: 1 }),
+        );
+      });
 
-    expect(store().workspace.splitRatio).toBeCloseTo(0.6, 5);
-  });
+      expect(store().workspace.splitRatio).toBeCloseTo(0.6, 5);
+      expect(separator?.dataset.resizing).toBe('true');
+      act(() => {
+        const target = endType === 'lostpointercapture' ? separator : window;
+        target?.dispatchEvent(
+          endType === 'blur'
+            ? new Event('blur')
+            : new PointerEvent(endType, { pointerId: 1 }),
+        );
+      });
+      expect(separator?.dataset.resizing).toBeUndefined();
+      expect(separator?.releasePointerCapture).toHaveBeenCalledExactlyOnceWith(
+        1,
+      );
+      act(() => {
+        window.dispatchEvent(
+          new PointerEvent('pointermove', { clientX: 400, pointerId: 1 }),
+        );
+      });
+      expect(store().workspace.splitRatio).toBeCloseTo(0.6, 5);
+    },
+  );
 
   it('collapses back to one group when the side group empties', () => {
     openNode('a');

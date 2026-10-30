@@ -35,8 +35,8 @@ import {
 import { resolveArtifactUrl } from '@/api/artifact';
 import { cn } from '@/components/Common/cn';
 import { Loading } from '@/components/Common/Loading';
-import { toast } from '@/components/Common/Toast';
 import { AudioNode } from '@/components/Nodes/audio/AudioNode';
+import { FileReferenceNode } from '@/components/Nodes/fileReference/FileReferenceNode';
 import {
   FrameZoomController,
   FrameZoomProvider,
@@ -90,7 +90,6 @@ import { useSketchStrokeMove } from '@/hooks/useSketchStrokeMove';
 import { openPreviewNode } from '@/store/previewWorkspace/actions';
 import { useWorkspaceStore } from '@/store/workspaceStore';
 import { anchorViewportCentre } from '@/utils/canvasViewport';
-import { pageLifecycle } from '@/utils/pageLifecycle';
 import { isMac } from '@/utils/platform';
 import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 import { isVisibleWorldNode } from '@/utils/spaceHierarchy';
@@ -131,10 +130,12 @@ import useCanvasStore from '../../../store/canvasStore.ts';
 import { useConnectPortStore } from '../../../store/connectPortStore.ts';
 import { useGesturePreviewStore } from '../../../store/gesturePreviewStore.ts';
 import { useToolStore } from '../../../store/toolStore.ts';
+import { registerCanvasDropTarget } from '../../../utils/io/canvasDropTargets.ts';
 import {
   canMoveHuabuPayload,
   canReadHuabuPayload,
   getHuabuPayload,
+  type DragPayload,
 } from '../../../utils/io/dragDrop.ts';
 import { looksLikeUrl } from '../../../utils/io/media.ts';
 import { FrameNode } from '../../Nodes/frame/FrameNode.tsx';
@@ -162,6 +163,7 @@ const mainToolbarPosition: React.CSSProperties = {
 };
 
 const nodeTypes = {
+  fileReference: FileReferenceNode,
   image: ImageNode,
   text: TextNode,
   note: NoteNode,
@@ -241,6 +243,7 @@ const FrameFitPreviewOverlay: React.FC<{
 
 /** Node types that support expand-on-double-click. */
 const EXPANDABLE_TYPES = new Set([
+  'fileReference',
   'image',
   'video',
   'web',
@@ -409,8 +412,10 @@ const CanvasContent: React.FC<CanvasProps> = ({
   const pendingNodeType = useToolStore((state) => state.pendingNodeType);
   // Whether a stroke-level sketch selection is active — suppresses node
   // toolbars so a mixed lasso never shows them (boolean selector).
-  const hasStrokeSelection = useGesturePreviewStore(
-    (s) => Object.keys(s.sketchStrokeSelection).length > 0,
+  const hasLassoSelection = useGesturePreviewStore(
+    (s) =>
+      Object.keys(s.sketchStrokeSelection).length > 0 ||
+      s.sketchSelectionPolygon !== null,
   );
   // True while a stroke-move drag is in progress — drives the wrapper's
   // grabbing cursor (the pointer is captured by the router during the drag,
@@ -1162,6 +1167,75 @@ const CanvasContent: React.FC<CanvasProps> = ({
     return () => setCanvasWrapper(null);
   }, [setCanvasWrapper]);
 
+  const handleInternalDrop = useCallback(
+    (payload: DragPayload, point: { x: number; y: number }, copy: boolean) => {
+      const instance = rfInstanceRef.current;
+      if (!instance) return;
+      const dropPos = instance.screenToFlowPosition(point);
+      const dedupeKey = `drag:${payload.dragId}`;
+      const now = Date.now();
+      const lastDrop = lastDropRef.current;
+      if (lastDrop && lastDrop.key === dedupeKey && now - lastDrop.at < 4000)
+        return;
+      lastDropRef.current = { key: dedupeKey, at: now };
+
+      if (payload.kind === 'web') {
+        addNode({
+          nodeType: 'web',
+          placementPoint: dropPos,
+          data: { src: payload.data.src, origin: payload.origin },
+        });
+      } else if (payload.kind === 'note') {
+        const newNote: AddNodeInput = {
+          nodeType: 'note',
+          placementPoint: dropPos,
+          data: { content: payload.data.content, origin: payload.origin },
+        };
+        const { sourceNodeId, sourceContentAfterMove } = payload.data;
+        if (
+          !copy &&
+          sourceNodeId !== undefined &&
+          sourceContentAfterMove !== undefined
+        )
+          moveNoteExcerpt({ sourceNodeId, sourceContentAfterMove, newNote });
+        else addNode(newNote);
+      } else if (payload.kind === 'fileReference') {
+        addNode({
+          nodeType: 'fileReference',
+          placementPoint: dropPos,
+          data: {
+            fileReference: payload.data.fileReference,
+            label: payload.data.label,
+            origin: payload.origin,
+          },
+          size: { width: 400, height: 180 },
+        });
+      } else {
+        const { src, label } = payload.data;
+        const doAdd = (width: number, height: number) =>
+          addNode({
+            nodeType: 'image',
+            placementPoint: dropPos,
+            data: { src, label, origin: payload.origin },
+            naturalDimensions: { width, height },
+          });
+        const image = new Image();
+        image.onload = () => doAdd(image.naturalWidth, image.naturalHeight);
+        image.onerror = () => doAdd(0, 0);
+        image.src = resolveArtifactUrl(src, canvasId ?? undefined);
+      }
+    },
+    [addNode, moveNoteExcerpt, canvasId],
+  );
+
+  useEffect(() => {
+    const wrapper = wrapperRef.current;
+    if (!wrapper) return;
+    return registerCanvasDropTarget(wrapper, (payload, point) =>
+      handleInternalDrop(payload, point, true),
+    );
+  }, [handleInternalDrop]);
+
   return (
     <div
       ref={wrapperRef}
@@ -1234,113 +1308,11 @@ const CanvasContent: React.FC<CanvasProps> = ({
         if (canReadHuabuPayload(e.dataTransfer)) {
           const payload = getHuabuPayload(e.dataTransfer);
           if (!payload) return;
-
-          // Deduplicate repeated drop events
-          const dedupeKey = `drag:${payload.dragId}`;
-          const now =
-            typeof e.timeStamp === 'number' && e.timeStamp > 0
-              ? e.timeStamp
-              : Date.now();
-          const lastDrop = lastDropRef.current;
-          if (
-            lastDrop &&
-            lastDrop.key === dedupeKey &&
-            now - lastDrop.at < 4000
-          )
-            return;
-          lastDropRef.current = { key: dedupeKey, at: now };
-
-          let newNodeInput: AddNodeInput | null = null;
-
-          if (payload.kind === 'web') {
-            newNodeInput = {
-              nodeType: 'web',
-              placementPoint: dropPos,
-              data: { src: payload.data.src, origin: payload.origin },
-            };
-          }
-
-          if (payload.kind === 'note') {
-            const newNoteInput: AddNodeInput = {
-              nodeType: 'note',
-              placementPoint: dropPos,
-              data: {
-                content: payload.data.content,
-                origin: payload.origin,
-              },
-            };
-
-            // Default = MOVE (source loses the dragged range);
-            // Option (macOS) / Ctrl (others) downgrades to COPY.
-            // MOVE additionally requires a source node id and a
-            // pre-computed post-MOVE snapshot, both absent when
-            // dragging from non-editable surfaces (AI chat cards) —
-            // those always fall back to COPY regardless of modifier
-            // state.
-            const { sourceNodeId, sourceContentAfterMove } = payload.data;
-            const canMove =
-              sourceNodeId !== undefined &&
-              sourceContentAfterMove !== undefined;
-            const isCopyModifier = isMac ? e.altKey : e.ctrlKey;
-            const isMove = canMove && !isCopyModifier;
-
-            if (isMove) {
-              moveNoteExcerpt({
-                sourceNodeId,
-                sourceContentAfterMove,
-                newNote: newNoteInput,
-              });
-            } else {
-              addNode(newNoteInput);
-            }
-            return;
-          }
-
-          if (payload.kind === 'image') {
-            const { src, label } = payload.data;
-
-            const doAdd = (natW: number, natH: number) => {
-              addNode({
-                nodeType: 'image',
-                placementPoint: dropPos,
-                data: { src, label, origin: payload.origin },
-                naturalDimensions: { width: natW, height: natH },
-              });
-            };
-
-            void pageLifecycle
-              .run(
-                'importing',
-                () =>
-                  new Promise<void>((resolve, reject) => {
-                    const img = new Image();
-                    const finish = (width: number, height: number) => {
-                      try {
-                        doAdd(width, height);
-                        resolve();
-                      } catch (error) {
-                        reject(error);
-                      }
-                    };
-                    img.onload = () =>
-                      finish(img.naturalWidth, img.naturalHeight);
-                    img.onerror = () => finish(0, 0);
-                    img.src = resolveArtifactUrl(src, canvasId ?? undefined);
-                  }),
-              )
-              .catch((error: unknown) => {
-                console.error(
-                  '[canvas] Could not insert dropped image:',
-                  error,
-                );
-                toast(error instanceof Error ? error.message : String(error), {
-                  tone: 'danger',
-                });
-              });
-            return;
-          }
-
-          if (newNodeInput) addNode(newNodeInput);
+          handleInternalDrop(
+            payload,
+            { x: e.clientX, y: e.clientY },
+            isMac ? e.altKey : e.ctrlKey,
+          );
           return;
         }
 
@@ -1579,7 +1551,7 @@ const CanvasContent: React.FC<CanvasProps> = ({
           )}
           <MultiSelectResizer />
           <SelectionOutlines />
-          {!isBoxSelecting && !hasStrokeSelection && <MultiSelectToolbar />}
+          {!isBoxSelecting && !hasLassoSelection && <MultiSelectToolbar />}
           {!isBoxSelecting && <StrokeSelectionRegion />}
           {!isBoxSelecting && <StrokeSelectionToolbar />}
           <InkSigilLayer tool={tool} />

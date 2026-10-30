@@ -18,7 +18,7 @@
  *    themselves and pull the relevant `tool_result` payload.
  */
 
-import { chatInputText } from '@huabu/shared';
+import { chatInputText, isCanvasIntent } from '@huabu/shared';
 
 import {
   agenetes,
@@ -446,22 +446,21 @@ export async function* runAgent(
   }
   if (signal?.aborted) return [];
   const finishInkIntentTurn =
-    envelope?.user?.inputKind === 'ink-intent' && canvasId && deploymentThreadId
+    isCanvasIntent(envelope?.user?.inputKind) && canvasId && deploymentThreadId
       ? beginActiveInkIntentTurn(
           canvasId,
           deploymentThreadId,
           inkIntentOwnerNodeId,
         )
       : () => undefined;
-  const turnTools =
-    envelope?.user?.inputKind === 'ink-intent'
-      ? buildAgentToolsByNames(['report_ink_intent'], {
-          canvasId,
-          origin,
-          threadId: deploymentThreadId,
-          readSet: getSessionReadSet(deploymentThreadId),
-        })
-      : undefined;
+  const turnTools = isCanvasIntent(envelope?.user?.inputKind)
+    ? buildAgentToolsByNames(['report_ink_intent'], {
+        canvasId,
+        origin,
+        threadId: deploymentThreadId,
+        readSet: getSessionReadSet(deploymentThreadId),
+      })
+    : undefined;
   const iterator = handle.run(submission, {
     maxIterations: maxIterations ?? agentCfg.runtime.maxIterations,
     signal,

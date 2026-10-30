@@ -112,6 +112,7 @@ function insertedNodeIds(deltas: readonly Delta[]): Set<string> {
 // surfaces the discrepancy. See `docs/node-content-api-split.md`.
 
 const MD_BACKED_NODE_TYPES = new Set([
+  'fileReference',
   'note',
   'text',
   'web',

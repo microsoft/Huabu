@@ -56,6 +56,20 @@ describe('installation Agent defaults', () => {
     }
   });
 
+  it('excludes hidden Profiles from absent-only Utility initialization', () => {
+    const hidden = { ...profile('proxy'), visible: false };
+    const empty = setup();
+    expect(
+      empty.service.initializeAgentDefaults([hidden]).profileId,
+    ).toBeNull();
+    expect(empty.storage.write).not.toHaveBeenCalled();
+    const ready = setup();
+    expect(
+      ready.service.initializeAgentDefaults([hidden, profile('ordinary')])
+        .profileId,
+    ).toBe('ordinary');
+  });
+
   it('offers a uniquely resolved hostname-era candidate to initialization', () => {
     const initialize = vi
       .spyOn(AgentDefaultsService.prototype, 'initializeAgentDefaults')

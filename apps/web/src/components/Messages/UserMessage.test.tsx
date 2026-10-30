@@ -129,6 +129,34 @@ describe('UserMessage', () => {
     act(() => root.unmount());
   });
 
+  it('identifies node-only requests without claiming they contain handwriting', () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    act(() => {
+      root.render(
+        <UserMessage
+          content=""
+          inputKind="selection-intent"
+          inkInterpretation={{
+            state: 'reported',
+            text: 'Summarize the selected material',
+          }}
+        />,
+      );
+    });
+    expect(
+      container.querySelector('svg[aria-label="Selection request"]'),
+    ).not.toBeNull();
+    expect(container.textContent).toBe('Summarize the selected material');
+    expect(
+      container
+        .querySelector('[data-ink-interpretation]')
+        ?.getAttribute('aria-description'),
+    ).toBe('Agent interpretation of the selection');
+    act(() => root.unmount());
+  });
+
   it('renders only the inline summary beside the pen, preserving sources and content', () => {
     container = document.createElement('div');
     document.body.appendChild(container);

@@ -102,6 +102,7 @@ export interface ChatEnvelopeParams {
 function collectImageAttachments(nodes: WireSelectionNode[]): ChatAttachment[] {
   const attachments: ChatAttachment[] = [];
   for (const node of nodes) {
+    if (node.referenceOnly) continue;
     if (node.type === 'image' && node.src) {
       attachments.push({
         type: 'image',
@@ -126,6 +127,7 @@ function collectSketchNodeIds(nodes: WireSelectionNode[]): string[] {
   const ids: string[] = [];
   const walk = (list: WireSelectionNode[]) => {
     for (const n of list) {
+      if (n.referenceOnly) continue;
       if (n.type === 'sketch') ids.push(n.id);
       if (n.children) walk(n.children);
     }
@@ -147,6 +149,7 @@ function collectSketchStrokeSubsets(
   const out: { nodeId: string; strokeIds: string[] }[] = [];
   const walk = (list: WireSelectionNode[]) => {
     for (const n of list) {
+      if (n.referenceOnly) continue;
       if (n.type === 'sketch' && n.strokeIds && n.strokeIds.length > 0) {
         out.push({ nodeId: n.id, strokeIds: n.strokeIds });
       }
@@ -186,8 +189,11 @@ async function collectSelectedNodeRefs(
     }
   }
   const refs: AgentNodePreview[] = [];
+  const seen = new Set<string>();
   const walk = (list: WireSelectionNode[]) => {
     for (const n of list) {
+      if (seen.has(n.id)) continue;
+      seen.add(n.id);
       // Route through the shared assembler: the node carries whatever the
       // client wire already knows (label / src); anything missing (note
       // body / summary) is filled from the sidecar. One place owns
@@ -428,6 +434,24 @@ export async function buildChatEnvelope(
   } = params;
 
   const requireInkVisuals = inputKind === 'ink-intent';
+  const textNodes =
+    inputKind === 'ink-intent' || inputKind === 'selection-intent'
+      ? (selectedNodes ?? []).filter((node) => node.type === 'text')
+      : [];
+  const missingTextIds = textNodes
+    .filter((node) => node.content === undefined)
+    .map((node) => node.id);
+  const textRecords =
+    canvasId && missingTextIds.length
+      ? await space(canvasId).nodes.readMany(missingTextIds)
+      : new Map<string, NodeSnapshot>();
+  const textContents = textNodes.map((node) => {
+    const content = node.content ?? textRecords.get(node.id)?.record.content;
+    if (typeof content !== 'string') {
+      throw new Error(`Selected Text content is unavailable: ${node.id}`);
+    }
+    return { nodeId: node.id, content };
+  });
   const resources = inkResources?.length
     ? await prepareInkResources(inkResources, canvasId, selectedNodes ?? [])
     : undefined;
@@ -549,6 +573,7 @@ export async function buildChatEnvelope(
       ...(groundingVisual ? { groundingVisual } : {}),
       selection: {
         refs: selectionRefs,
+        ...(textContents.length ? { textContents } : {}),
         selectedIds: selectedNodes ? collectSelectedNodeIds(selectedNodes) : [],
         imageAttachments: dedupedImageAttachments,
         snapshotAttachments,

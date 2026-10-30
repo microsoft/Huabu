@@ -131,6 +131,7 @@ describe('ACP cached-meta across awaited persistence', () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
       source: 'thread',
+      execution: { agentletId: 'agentlet-from-record' },
       availableCommands: [{ name: 'review' }],
       commandsUpdatedAt: 31,
       sessionMeta: {
@@ -161,6 +162,7 @@ describe('ACP cached-meta across awaited persistence', () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
       source: 'thread',
+      execution: { agentletId: 'device-uuid' },
       availableCommands: [{ name: 'review' }],
     });
   });
@@ -215,6 +217,7 @@ describe('ACP cached-meta across awaited persistence', () => {
       source: 'thread',
       execution: {
         binding: { kind: 'external', alias: 'A', profileId: 'profile-1' },
+        agentletId: 'agentlet-from-record',
       },
       availableCommands: [{ name: 'compact', description: 'Compact context' }],
       commandsUpdatedAt: 11,

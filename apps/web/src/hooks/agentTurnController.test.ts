@@ -140,7 +140,10 @@ function deferred() {
   return { promise, resolve };
 }
 
-function request(inputKind: 'text' | 'ink-intent' = 'text', owner = session) {
+function request(
+  inputKind: 'text' | 'ink-intent' | 'selection-intent' = 'text',
+  owner = session,
+) {
   return prepareAgentTurn({
     session: owner,
     inputKind,
@@ -1806,6 +1809,61 @@ describe('Ink interpretation lifecycle', () => {
     });
   });
 
+  it('preserves lasso reference-only capture when retrying from history', () => {
+    useCanvasStore.getState()._setStateNoAutosave({
+      canvasId: session.canvasId,
+      nodes: [
+        {
+          id: 'outer-frame',
+          type: 'frame',
+          position: { x: 0, y: 0 },
+          data: { label: 'Outer' },
+        },
+        {
+          id: 'inner-frame',
+          type: 'frame',
+          parentId: 'outer-frame',
+          position: { x: 0, y: 0 },
+          data: { label: 'Inner' },
+        },
+        {
+          id: 'image',
+          type: 'image',
+          parentId: 'inner-frame',
+          position: { x: 0, y: 0 },
+          data: { src: 'artifact.png' },
+        },
+      ],
+    });
+    const retry = prepareAgentTurnRetry(
+      session,
+      {
+        id: 'historical-lasso',
+        role: 'user',
+        content: '',
+        inputKind: 'ink-intent',
+        selectedNodeIds: ['outer-frame'],
+      },
+      'operate',
+    );
+    expect(retry.sources.canvasContext.selectedNodes).toEqual([
+      {
+        id: 'outer-frame',
+        type: 'frame',
+        label: 'Outer',
+        referenceOnly: true,
+        children: [
+          {
+            id: 'inner-frame',
+            type: 'frame',
+            label: 'Inner',
+            referenceOnly: true,
+          },
+        ],
+      },
+    ]);
+  });
+
   it('retains report output without confirming it before terminal status', () => {
     startReport('report-1', { text: '  Explain this arrow  ' });
     updateReport('report-1', {
@@ -2338,29 +2396,41 @@ describe('shared Agent turn input', () => {
     });
   });
 
-  it('sends Ink without consuming same-thread drafts, uploads, excerpts or skills', async () => {
-    const attachment = {
-      id: 'upload',
-      type: 'text',
-      content: 'private draft',
-    } as unknown as ChatAttachment;
-    useChatStore.getState().setDraft(session.threadId, 'Unsent draft');
-    useChatStore.getState().addPendingAttachment(session.threadId, attachment);
-    useChatStore.getState().setSelectionAttachment(attachment);
-    await dispatchAgentTurn(request('ink-intent'));
-    expect(mocks.stream.mock.calls[0][0]).toBe('');
-    expect(mocks.stream.mock.calls[0][4]).toMatchObject({
-      inputKind: 'ink-intent',
-      attachments: undefined,
-      invokedSkills: undefined,
-    });
-    const state = useChatStore.getState();
-    expect(state.threadsById[session.threadId].draft).toBe('Unsent draft');
-    expect(state.threadsById[session.threadId].pendingAttachments).toEqual([
-      attachment,
-    ]);
-    expect(state.selectionAttachment).toBe(attachment);
-  });
+  it.each(['ink-intent', 'selection-intent'] as const)(
+    'sends %s without consuming same-thread drafts, uploads, excerpts or skills',
+    async (inputKind) => {
+      if (inputKind === 'selection-intent') {
+        useGesturePreviewStore.setState({ sketchStrokeSelection: {} });
+      }
+      const attachment = {
+        id: 'upload',
+        type: 'text',
+        content: 'private draft',
+      } as unknown as ChatAttachment;
+      useChatStore.getState().setDraft(session.threadId, 'Unsent draft');
+      useChatStore
+        .getState()
+        .addPendingAttachment(session.threadId, attachment);
+      useChatStore.getState().setSelectionAttachment(attachment);
+      await dispatchAgentTurn(request(inputKind));
+      expect(mocks.stream.mock.calls[0][0]).toBe('');
+      expect(mocks.stream.mock.calls[0][4]).toMatchObject({
+        inputKind,
+        attachments: undefined,
+        invokedSkills: undefined,
+      });
+      const state = useChatStore.getState();
+      expect(state.threadsById[session.threadId].draft).toBe('Unsent draft');
+      expect(state.threadsById[session.threadId].pendingAttachments).toEqual([
+        attachment,
+      ]);
+      expect(state.selectionAttachment).toBe(attachment);
+      expect(selectThreadMessages(state, session.threadId)[0]).toMatchObject({
+        inputKind,
+        inkInterpretation: { state: 'missing' },
+      });
+    },
+  );
 
   it('preserves a selectable Question external binding for Ink', async () => {
     const binding = {
@@ -2729,6 +2799,31 @@ describe('shared Agent turn input', () => {
         contextBefore: 'Before ',
         contextAfter: ' after',
         comment: 'Explain this.',
+        source: {
+          kind: 'note' as const,
+          canvasId: 'canvas-1',
+          nodeId: 'source-note',
+          snapshotRevision: 'snapshot',
+        },
+      },
+      {
+        quote: 'File passage',
+        contextBefore: 'Before ',
+        contextAfter: ' after',
+        comment: 'Explain file.',
+        source: {
+          kind: 'file-reference' as const,
+          canvasId: 'canvas-1',
+          nodeId: 'file',
+          agentletId: 'source-device',
+          path: '/source.tex',
+          contentVersion: 'a'.repeat(64),
+          offsetUnit: 'utf-16' as const,
+          from: 7,
+          to: 19,
+          loadedLength: 40,
+          complete: false,
+        },
       },
     ];
     const prepared = request();
@@ -2763,6 +2858,12 @@ describe('shared Agent turn input', () => {
         contextBefore: '',
         contextAfter: '',
         comment: 'Explain this.',
+        source: {
+          kind: 'note',
+          canvasId: 'canvas-1',
+          nodeId: 'source-note',
+          snapshotRevision: 'snapshot',
+        },
       });
       mocks.stream.mockImplementationOnce(
         async (_content, _thread, _mode, callbacks: AgentStreamCallbacks) => {
@@ -2806,12 +2907,77 @@ describe('shared Agent turn input', () => {
           contextBefore: '',
           contextAfter: '',
           comment: 'Explain this.',
+          source: {
+            kind: 'note',
+            canvasId: 'canvas-1',
+            nodeId: 'source-note',
+            snapshotRevision: 'snapshot',
+          },
         },
       ]);
     },
   );
 
   describe('composer selection exclusion', () => {
+    it.each([true, false])(
+      'keeps Note quote evidence independent of selected parent Frame context, excluded=%s',
+      async (excluded) => {
+        useCanvasStore.getState()._setStateNoAutosave({
+          nodes: [
+            {
+              id: 'frame',
+              type: 'frame',
+              selected: true,
+              position: { x: 0, y: 0 },
+              data: {},
+            },
+            {
+              id: 'source-note',
+              type: 'note',
+              parentId: 'frame',
+              position: { x: 0, y: 0 },
+              data: { content: 'Changed Note content' },
+            },
+          ],
+        });
+        const quote = {
+          quote: 'Captured excerpt',
+          contextBefore: 'before',
+          contextAfter: 'after',
+          comment: 'Explain',
+          source: {
+            kind: 'note' as const,
+            canvasId: 'canvas-1',
+            nodeId: 'source-note',
+            snapshotRevision: 'captured',
+          },
+        };
+        useChatStore.getState().addQuotedComment(session.threadId, quote);
+        useChatStore
+          .getState()
+          .setExcludeCanvasSelection(session.threadId, excluded);
+        let hook!: UseAgentStreamReturn;
+        function Harness() {
+          hook = useAgentStream(session);
+          return null;
+        }
+        container = document.createElement('div');
+        root = createRoot(container);
+        await act(async () => root?.render(createElement(Harness)));
+        await act(async () => hook.startStream('', 'operate'));
+        const sent = mocks.stream.mock.calls[0][4];
+        expect(sent.quotedComments).toEqual([quote]);
+        if (excluded) {
+          expect(sent.canvasContext).toEqual({ selectedNodes: [] });
+        } else {
+          expect(sent.canvasContext?.selectedNodes).toMatchObject([
+            { id: 'frame', children: [{ id: 'source-note' }] },
+          ]);
+        }
+        expect(useCanvasStore.getState().nodes[0].selected).toBe(true);
+      },
+    );
+
     it.each([
       { external: false, anchored: false },
       { external: true, anchored: false },

@@ -16,6 +16,8 @@
 
 A node is processed by asking "which capabilities are dirty for this change", not "is this an ingest or a label request".
 
+The `fileReference` type is metadata-only, with no extraction, enrichment, content fetch or watched fields. Its label is persisted through normal Canvas sidecar writes; opening its read-only Preview uses the separate [device-files](./device-files.md) service and never triggers preprocessing.
+
 ---
 
 ## 2. Pipeline (6 stages)

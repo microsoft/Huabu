@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { isCanvasIntent } from '@huabu/shared';
 import {
   createId,
   variantForInternalTool,
@@ -237,7 +238,7 @@ export function settleTurnInkInterpretation(
   outcome: 'done' | 'error' | 'interrupted',
 ): void {
   const owner = owningUserMessage(ctx);
-  if (owner?.role !== 'user' || owner.inputKind !== 'ink-intent') return;
+  if (owner?.role !== 'user' || !isCanvasIntent(owner.inputKind)) return;
   useChatStore.getState().updateMessage(ctx.threadId, owner.id, (message) => {
     if (message.role !== 'user') return message;
     const inkInterpretation = settleInkInterpretation(
@@ -708,7 +709,7 @@ export function handleStreamEvent(
       const owner = owningUserMessage(ctx);
       hiddenInkIntentToolCalls.set(hiddenToolKey(ctx, data.toolCallId), {
         rawInput: data.rawInput,
-        ...(owner?.role === 'user' && owner.inputKind === 'ink-intent'
+        ...(owner?.role === 'user' && isCanvasIntent(owner.inputKind)
           ? { messageId: owner.id }
           : {}),
       });
@@ -968,6 +969,7 @@ export function prepareAgentTurnRetry(
         subset.strokeIds,
       ]),
     ),
+    lasso: message.inputKind === 'ink-intent',
   });
   const present = new Set(
     sourceMessageMetadata(sources.canvasContext).selectedNodeIds,
@@ -1053,7 +1055,7 @@ export function createAgentTurnUserMessage(
       ? { quotedComments: prepared.quotedComments }
       : {}),
     inputKind: prepared.inputKind,
-    ...(prepared.inputKind === 'ink-intent'
+    ...(isCanvasIntent(prepared.inputKind)
       ? { inkInterpretation: { state: 'pending' as const } }
       : {}),
     groundingVisual: prepared.groundingVisual,
@@ -1240,6 +1242,14 @@ async function executePreparedAgentTurn(
       }
       if (inputKind === 'ink-intent' && sentSelectedStrokeIds.length === 0) {
         throw new Error('Ink requests require selected Sketch strokes');
+      }
+      if (
+        inputKind === 'selection-intent' &&
+        !prepared.sources.canvasContext.selectedNodes.some(
+          (node) => node.type !== 'question',
+        )
+      ) {
+        throw new Error('Selection requests require selected Canvas nodes');
       }
       if (conversationView) {
         await waitForPreparation(
@@ -1536,7 +1546,7 @@ async function executePreparedAgentTurn(
   }
   if (
     preparation.binding.kind === 'external' &&
-    (prompt.trim() || quotedComments?.length || inputKind === 'ink-intent')
+    (prompt.trim() || quotedComments?.length || isCanvasIntent(inputKind))
   ) {
     requestedCwd = conversationControlTarget(session).cwd;
     try {

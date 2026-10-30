@@ -47,6 +47,7 @@ function setup(initialMachines = ['machine-a']) {
         id: `profile-${++nextId}`,
         alias: input.alias,
         agentletId: input.agentletId,
+        visible: input.visible,
         workingDirPath: input.workingDirPath,
         launch:
           input.launchKind === 'acp-command'
@@ -101,6 +102,24 @@ function setup(initialMachines = ['machine-a']) {
 }
 
 describe('automatic ordinary Profile provisioning', () => {
+  it('creates the filesystem proxy as a hidden Profile', async () => {
+    const context = setup();
+    context.gateway.discoverHarnesses.mockResolvedValue({
+      harnesses: observation.harnesses.map((harness) => ({
+        ...harness,
+        id: 'proxy',
+        displayName: 'Filesystem Proxy',
+      })),
+    });
+    const dispose = context.start();
+    await flush();
+    expect(context.profiles[0]).toMatchObject({
+      visible: false,
+      launch: { kind: 'acp-harness', harnessId: 'proxy' },
+    });
+    dispose();
+  });
+
   it('never automatically provisions the manual Custom wrapper', async () => {
     const context = setup();
     context.gateway.discoverHarnesses.mockResolvedValue({
