@@ -128,73 +128,81 @@ export function registerSpaceCardRoutes(app: FastifyInstance): void {
     }
   });
 
-  app.patch('/:canvasId/title', async (request, reply) => {
-    const params = recentCanvasConversationParamsSchema.safeParse(
-      request.params,
-    );
-    const body = renameSpaceBodySchema.safeParse(request.body);
-    if (!params.success || !body.success)
-      return reply.code(400).send({ message: 'Invalid Space rename' });
-    const { canvasId } = params.data;
-    const lease = acquireWorkspaceOperationLease();
-    try {
-      return await withCanvasMutex(canvasId, async () => {
-        const handle = space(canvasId);
-        const current = await handle.read();
-        if (!current)
-          return reply.code(404).send({ message: 'Space not found' });
-        if (current.title !== body.data.expectedTitle)
-          return reply.code(409).send({
-            code: 'SPACE_TITLE_CHANGED',
-            message: 'The Space name changed. Refresh and try again.',
-          });
-        const renamed = await getStructuredStore()
-          .spaces()
-          .rename({ canvasId, title: body.data.title });
-        if (!renamed.ok)
-          return reply
-            .code(
-              renamed.reason === 'not-found'
-                ? 404
-                : renamed.reason === 'world-forbidden'
-                  ? 403
-                  : 409,
-            )
-            .send({
-              code:
-                renamed.reason === 'title-conflict'
-                  ? 'CANVAS_TITLE_CONFLICT'
-                  : 'SPACE_RENAME_REJECTED',
-              message: 'Unable to rename this Space',
+  app.patch(
+    '/:canvasId/title',
+    { config: { spaceAccess: 'manage' } },
+    async (request, reply) => {
+      const params = recentCanvasConversationParamsSchema.safeParse(
+        request.params,
+      );
+      const body = renameSpaceBodySchema.safeParse(request.body);
+      if (!params.success || !body.success)
+        return reply.code(400).send({ message: 'Invalid Space rename' });
+      const { canvasId } = params.data;
+      const lease = acquireWorkspaceOperationLease();
+      try {
+        return await withCanvasMutex(canvasId, async () => {
+          const handle = space(canvasId);
+          const current = await handle.read();
+          if (!current)
+            return reply.code(404).send({ message: 'Space not found' });
+          if (current.title !== body.data.expectedTitle)
+            return reply.code(409).send({
+              code: 'SPACE_TITLE_CHANGED',
+              message: 'The Space name changed. Refresh and try again.',
             });
-        const record = {
-          ...renamed.record,
-          version: current.version + 1,
-          updatedAt: Date.now(),
-        };
-        const written = await handle.write({
-          expectedVersion: current.version,
-          nextRecord: record,
-          nodeMutations: [],
+          const renamed = await getStructuredStore()
+            .spaces()
+            .rename({ canvasId, title: body.data.title });
+          if (!renamed.ok)
+            return reply
+              .code(
+                renamed.reason === 'not-found'
+                  ? 404
+                  : renamed.reason === 'world-forbidden'
+                    ? 403
+                    : 409,
+              )
+              .send({
+                code:
+                  renamed.reason === 'title-conflict'
+                    ? 'CANVAS_TITLE_CONFLICT'
+                    : 'SPACE_RENAME_REJECTED',
+                message: 'Unable to rename this Space',
+              });
+          const record = {
+            ...renamed.record,
+            version: current.version + 1,
+            updatedAt: Date.now(),
+          };
+          const written = await handle.write({
+            expectedVersion: current.version,
+            nextRecord: record,
+            nodeMutations: [],
+          });
+          if (!written.ok)
+            throw new Error(
+              `Space rename metadata write failed: ${written.reason}`,
+            );
+          publishCanvasUpdate(canvasId, {
+            type: 'snapshot',
+            data: { version: record.version },
+          });
+          return reply.send({
+            title: record.title,
+            updatedAt: record.updatedAt,
+          });
         });
-        if (!written.ok)
-          throw new Error(
-            `Space rename metadata write failed: ${written.reason}`,
-          );
-        publishCanvasUpdate(canvasId, {
-          type: 'snapshot',
-          data: { version: record.version },
+      } catch (error) {
+        request.log.error({ err: error, canvasId }, 'Space rename failed');
+        return reply.code(500).send({
+          code: 'SPACE_RENAME_FAILED',
+          message:
+            'Unable to confirm the Space rename. Refresh before retrying.',
         });
-        return reply.send({ title: record.title, updatedAt: record.updatedAt });
-      });
-    } catch (error) {
-      request.log.error({ err: error, canvasId }, 'Space rename failed');
-      return reply.code(500).send({
-        code: 'SPACE_RENAME_FAILED',
-        message: 'Unable to confirm the Space rename. Refresh before retrying.',
-      });
-    } finally {
-      lease.release();
-    }
-  });
+      } finally {
+        lease.release();
+      }
+    },
+  );
 }

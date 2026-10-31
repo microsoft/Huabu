@@ -724,7 +724,15 @@
     "clickToSwitch": "Click to switch",
     "openPathFailed": "Failed to open path",
     "activationTimeout": "Opening Home folder “{{path}}” took longer than {{seconds}} seconds. Check that the cloud or network drive is available, then try again.",
-    "activationInProgress": "Another Home folder is still opening. Please wait for it to finish."
+    "activationInProgress": "Another Home folder is still opening. Please wait for it to finish.",
+    "yourWorkspaces": "Your Workspaces",
+    "introNamed": "Choose a Workspace for your Spaces, notes, and artifacts, or create one.",
+    "newWorkspace": "New Workspace",
+    "namePlaceholder": "Name, then press Enter",
+    "create": "Create",
+    "current": "Current",
+    "named": "Workspace: {{workspace}}",
+    "namedPrefix": "Workspace: "
   },
   "spaceHierarchy": {
     "collectAction": "Collect into child Space",

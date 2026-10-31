@@ -979,6 +979,7 @@ describe('Space ownership', () => {
             );
             if (failClaim) throw new Error('grant store unavailable');
           },
+          workspaces: async () => 'all',
         },
       });
     });

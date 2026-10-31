@@ -215,6 +215,8 @@ function movedWorkloadSpec(
 export interface SpaceMoveAccess {
   /** Whether the caller may read a Space whose artifact a moved node cites. */
   canRead(canvasId: string): Promise<boolean>;
+  /** Moving a canonical child entry changes that child's inherited authority. */
+  canManage(canvasId: string): Promise<boolean>;
   /**
    * Make the caller owner of the new destination, before any content moves,
    * so a failure here is compensated like any other.
@@ -322,20 +324,8 @@ async function moveCanvasSelectionUnlocked(
   let phase = 'destination-create';
   let compensation = 'not-needed';
   try {
-    if (input.destination.kind === 'new') {
-      const created = await createSpace(
-        destinationCanvasId,
-        input.destination.title,
-      );
-      if (!created.ok) {
-        throw new SpaceMoveError('MOVE_DESTINATION_CREATE_FAILED');
-      }
-      createdDestination = true;
-      phase = 'destination-claim';
-      await access?.claim(destinationCanvasId);
-    }
     const repository = getStructuredStore().spaces();
-    const members = await repository.list();
+    let members = await repository.list();
     const sourceChildren = members.filter(
       (item) => item.parentSpaceId === sourceCanvasId,
     );
@@ -350,17 +340,22 @@ async function moveCanvasSelectionUnlocked(
         phase = 'validation';
         const sourceHandle = space(sourceCanvasId);
         const destinationHandle = space(destinationCanvasId);
-        const [source, destination, sourceRecords, destinationRecords] =
+        const [source, storedDestination, sourceRecords, destinationRecords] =
           await Promise.all([
             sourceHandle.read(),
-            destinationHandle.read(),
+            input.destination.kind === 'existing'
+              ? destinationHandle.read()
+              : null,
             sourceHandle.nodes.list(),
-            destinationHandle.nodes.list(),
+            input.destination.kind === 'existing'
+              ? destinationHandle.nodes.list()
+              : new Map(),
           ]);
+        let destination = storedDestination;
         if (!source) {
           throw new SpaceMoveError('MOVE_SOURCE_NODE_MISSING', 404);
         }
-        if (!destination) {
+        if (!destination && input.destination.kind === 'existing') {
           throw new SpaceMoveError('MOVE_DESTINATION_MISSING', 404);
         }
         if (source.version !== input.expectedSourceVersion) {
@@ -371,10 +366,12 @@ async function moveCanvasSelectionUnlocked(
           sourceRecords,
           source.state.nodes as CanvasNode[],
         );
-        const hydratedDestination = hydrateCanvasNodes(
-          destinationRecords,
-          destination.state.nodes as CanvasNode[],
-        );
+        const hydratedDestination = destination
+          ? hydrateCanvasNodes(
+              destinationRecords,
+              destination.state.nodes as CanvasNode[],
+            )
+          : [];
         let plan: SpaceMovePlan;
         try {
           plan = buildSpaceMovePlan({
@@ -403,11 +400,21 @@ async function moveCanvasSelectionUnlocked(
         );
         if (ownedChildren.length > 0) {
           const destinationAncestors = new Set(
-            hierarchyAncestors(members, destinationCanvasId).map(
-              (item) => item.canvasId,
-            ),
+            input.destination.kind === 'existing'
+              ? hierarchyAncestors(members, destinationCanvasId).map(
+                  (item) => item.canvasId,
+                )
+              : input.destination.asChild
+                ? hierarchyAncestors(members, sourceCanvasId).map(
+                    (item) => item.canvasId,
+                  )
+                : [],
           );
           for (const child of ownedChildren) {
+            // Do this under the hierarchy lock, before creating a destination,
+            // claiming it, or writing any moved content.
+            if (access && !(await access.canManage(child.canvasId)))
+              throw new SpaceMoveError('MOVE_NODE_NOT_MOVABLE', 403);
             const entry = hydratedSource.find(
               (node) => node.id === child.parentEntryNodeId,
             );
@@ -422,6 +429,24 @@ async function moveCanvasSelectionUnlocked(
             }
           }
         }
+
+        if (input.destination.kind === 'new') {
+          phase = 'destination-create';
+          const created = await createSpace(
+            destinationCanvasId,
+            input.destination.title,
+          );
+          if (!created.ok)
+            throw new SpaceMoveError('MOVE_DESTINATION_CREATE_FAILED');
+          destination = created.record;
+          createdDestination = true;
+          phase = 'destination-claim';
+          await access?.claim(destinationCanvasId);
+          // Parent changes and their compensation also need the new member.
+          members = await repository.list();
+        }
+        if (!destination)
+          throw new SpaceMoveError('MOVE_DESTINATION_MISSING', 404);
 
         const taskSnapshot = await sourceHandle.tasks.read();
         if (

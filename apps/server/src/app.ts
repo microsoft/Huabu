@@ -60,6 +60,7 @@ import { registerSpaceAccess } from './modules/security/space-access.js';
 import serviceRoutes from './modules/services/services.route.js';
 import { closeStorage } from './modules/storage/index.js';
 import webRoutes from './modules/web/web.route.js';
+import { workspaceScopedRoutes } from './modules/workspace/scoped-routes.js';
 import { registerWorkspaceRequiredGuard } from './modules/workspace-required.js';
 import { initWorkspaceFromEnv } from './modules/workspace.js';
 import workspaceRoutes from './modules/workspace.route.js';
@@ -184,6 +185,10 @@ app.register(skillsRoutes, { prefix: '/api/skills' });
 app.register(workspaceRoutes, { prefix: '/api/workspace' });
 app.register(workspacesRoutes, { prefix: '/api/workspaces' });
 app.register(rfsRoutes, { prefix: '/api/rfs' });
+// An agent's reachback names the Workspace its run started in.
+app.register(workspaceScopedRoutes(rfsRoutes), {
+  prefix: '/api/rfs/w/:workspaceId',
+});
 
 // ── External agent (ACP) transport host ───────────────────────────────
 // Mount the Agenetes agentlet transport host (`@agenetes/agentlet-host`).

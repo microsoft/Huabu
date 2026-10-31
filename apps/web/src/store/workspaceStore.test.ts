@@ -39,6 +39,16 @@ vi.mock('../hooks/useElectron', async (importOriginal) => ({
 }));
 
 const apiMocks = vi.hoisted(() => ({
+  createNamedWorkspace: vi.fn(async (name: string) => {
+    const created = {
+      workspaceId: '33333333-3333-4333-8333-333333333333',
+      name,
+      path: null,
+      active: false,
+    };
+    apiState.workspaces = [created, ...apiState.workspaces];
+    return created;
+  }),
   getWorkspaceInfo: vi.fn(async () => apiState.info as WorkspaceInfo),
   listWorkspaces: vi.fn(async () => apiState.workspaces),
   activateWorkspace: vi.fn(async (workspaceId: string) => {
@@ -75,6 +85,7 @@ vi.mock('../api/workspace', () => ({
   getWorkspaceInfo: apiMocks.getWorkspaceInfo,
   listWorkspaces: apiMocks.listWorkspaces,
   activateWorkspace: apiMocks.activateWorkspace,
+  createNamedWorkspace: apiMocks.createNamedWorkspace,
   putWorkspacePath: apiMocks.putWorkspacePath,
   removeWorkspace: apiMocks.removeWorkspace,
 }));
@@ -557,6 +568,34 @@ describe('workspaceStore registry persistence', () => {
         FIRST_ID,
       );
     });
+  });
+
+  it('keeps the Workspace the Server chose for this person', async () => {
+    apiState.info = {
+      ...unconfiguredInfo(),
+      configured: true,
+      workspaceId: FIRST_ID,
+      name: 'First',
+      capabilities: {
+        canChangeWorkspace: true,
+        nativePicker: false,
+        namedWorkspaces: true,
+      },
+    };
+    await expect(useWorkspaceStore.getState().init()).resolves.toBe(true);
+    // Their current Workspace has no path, and is already theirs.
+    expect(apiMocks.activateWorkspace).not.toHaveBeenCalled();
+    expect(useWorkspaceStore.getState()).toMatchObject({
+      workspaceId: FIRST_ID,
+      workspaceName: 'First',
+      isReady: true,
+    });
+
+    await useWorkspaceStore.getState().createWorkspace('Side project');
+    expect(apiMocks.createNamedWorkspace).toHaveBeenCalledWith('Side project');
+    expect(apiMocks.activateWorkspace).toHaveBeenCalledWith(
+      '33333333-3333-4333-8333-333333333333',
+    );
   });
 
   it('restores the first Workspace from server-owned MRU order', async () => {

@@ -99,6 +99,9 @@ export default function CanvasListPage() {
   const canChangeWorkspace = useWorkspaceStore(
     (s) => s.capabilities?.canChangeWorkspace ?? true,
   );
+  const namedWorkspaces = useWorkspaceStore(
+    (s) => s.capabilities?.namedWorkspaces === true,
+  );
   const setCanvasCount = useWorkspaceStore((s) => s.setCanvasCount);
   const setSpaceTitle = useWorkspaceStore((s) => s.setSpaceTitle);
   const workspaceSyncing = useWorkspaceStore((s) => s.isSyncing);
@@ -311,7 +314,9 @@ export default function CanvasListPage() {
       <span>
         {workspacePath
           ? t('workspace.pathPrefix')
-          : t('workspace.workspacePrefix')}
+          : namedWorkspaces
+            ? t('workspace.namedPrefix')
+            : t('workspace.workspacePrefix')}
         {workspaceLabel}
       </span>
     </>
@@ -324,7 +329,9 @@ export default function CanvasListPage() {
             <div>
               {workspacePath
                 ? t('workspace.path', { path: workspacePath })
-                : t('workspace.workspace', { workspace: workspaceLabel })}
+                : namedWorkspaces
+                  ? t('workspace.named', { workspace: workspaceLabel })
+                  : t('workspace.workspace', { workspace: workspaceLabel })}
             </div>
             <div>{t('canvasList.canvasCount', { count: canvases.length })}</div>
             {canChangeWorkspace && (

@@ -297,7 +297,11 @@ describe('sendBlob under per-Space access', () => {
       'public, max-age=0',
     ]);
     expect(
-      await cache({ can: async () => true, claim: async () => {} }),
+      await cache({
+        can: async () => true,
+        claim: async () => {},
+        workspaces: async () => 'all' as const,
+      }),
     ).toEqual(['private, no-cache', 304, 'private, no-cache']);
   });
 
@@ -340,8 +344,12 @@ describe('sendBlob under per-Space access', () => {
     // Bubble mode, even for a system owner; a route's own policy stays
     // enforced beside the sandbox.
     const sandbox = 'sandbox allow-scripts allow-forms allow-popups';
-    expect(await csp({ can: async () => true, claim: async () => {} })).toEqual(
-      [sandbox, ["connect-src 'none'", sandbox]],
-    );
+    expect(
+      await csp({
+        can: async () => true,
+        claim: async () => {},
+        workspaces: async () => 'all' as const,
+      }),
+    ).toEqual([sandbox, ["connect-src 'none'", sandbox]]);
   });
 });

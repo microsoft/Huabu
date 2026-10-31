@@ -52,6 +52,7 @@ describe('a member’s Spaces', () => {
     const app = await host({
       can: async (_level, { id }) => id === child.canvasId,
       claim: async () => {},
+      workspaces: async () => 'all' as const,
     });
     const listed = (await app.inject('/canvas')).json().canvases;
     await app.close();
@@ -77,7 +78,11 @@ describe('a member’s Spaces', () => {
           principal: { principalId: 'carol', kind: 'user' },
           member: true,
           owner,
-          access: { can: async () => true, claim: async () => {} },
+          access: {
+            can: async () => true,
+            claim: async () => {},
+            workspaces: async () => 'all' as const,
+          },
         });
       });
       await app.register(canvasRoutes, { prefix: '/canvas' });
@@ -115,6 +120,7 @@ describe('a member’s Spaces', () => {
       claim: async () => {
         throw new Error('grant store unavailable');
       },
+      workspaces: async () => 'all',
     });
     const response = await app.inject({
       method: 'POST',

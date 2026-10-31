@@ -18,9 +18,19 @@ import {
 
 import { identityPrincipalSchema } from '@huabu/shared';
 
+import { getWorkspaceHandle } from '../workspace.js';
 import { IdentityError } from './service.js';
+import {
+  chooseRequestWorkspace,
+  selectRequestWorkspace,
+} from './workspace-selection.js';
 
-import type { IdentityService, ResourceDirectory } from './service.js';
+import type { WorkspacePreferences } from './preferences.js';
+import type {
+  HuabuResource,
+  IdentityService,
+  ResourceDirectory,
+} from './service.js';
 import type {
   BubbleAuthzOptions,
   BubbleStore,
@@ -30,26 +40,44 @@ import type { FastifyPluginAsync } from 'fastify';
 
 /**
  * Huabu's permission model, kept in Bubble's grant table and answered by
- * Bubble's policy. On Bubble's system target, a `member` may use Huabu and an
- * `owner` may also manage it; a system owner also holds every Huabu capability
- * on every Workspace and Space. A Workspace owner may read and write every
- * Space in that Workspace; a Space owner, that Space and the Spaces inside it.
- * Only a system owner grants the ownership roles, so there is no sharing
- * between members.
+ * Bubble's policy (`docs/proposals/multi-user-service.md`, "Roles and
+ * capabilities"). On the system target a `member` may use Huabu and an `owner`
+ * may also administer the deployment; Bubble's system-owner rule gives the
+ * latter every capability on every Workspace and Space too. On a Workspace or
+ * a Space the same three capability names apply, and they flow down from a
+ * Workspace to its root Spaces and from a Space to the Spaces inside it.
  */
 const USE = 'huabu.use';
-const MANAGE = 'huabu.manage';
-const READ = 'huabu.space.read';
-const WRITE = 'huabu.space.write';
-const TARGET = { workspace: 'huabu.workspace', space: 'huabu.space' } as const;
-const OWNER_ROLE = {
-  workspace: 'huabu.workspace.owner',
-  space: 'huabu.space.owner',
+const ADMIN = 'huabu.admin';
+const CAPABILITY = {
+  read: 'huabu.read',
+  write: 'huabu.write',
+  manage: 'huabu.manage',
 } as const;
+const { read: READ, write: WRITE, manage: MANAGE } = CAPABILITY;
+const TARGET = { workspace: 'huabu.workspace', space: 'huabu.space' } as const;
+const SPACE_OWNER = 'huabu.space.owner';
+
+/**
+ * A Space's Bubble target names its Workspace too, so a Space can later be
+ * shared on its own and two Workspaces can never share a grant by id.
+ */
+export function spaceTargetId(workspaceId: string, canvasId: string): string {
+  return `${workspaceId}:${canvasId}`;
+}
+
+function parseSpaceTargetId(
+  id: string,
+): { workspaceId: string; canvasId: string } | null {
+  const at = id.indexOf(':');
+  if (at <= 0 || at === id.length - 1) return null;
+  return { workspaceId: id.slice(0, at), canvasId: id.slice(at + 1) };
+}
 
 function huabuAuthz(resources: ResourceDirectory): BubbleAuthzOptions {
+  const flowing = [READ, WRITE, MANAGE];
   return {
-    coreRoleCapabilities: { member: [USE], owner: [USE, MANAGE] },
+    coreRoleCapabilities: { member: [USE], owner: [USE, ADMIN] },
     targets: {
       [TARGET.workspace]: {
         resolve: async (id) =>
@@ -57,30 +85,84 @@ function huabuAuthz(resources: ResourceDirectory): BubbleAuthzOptions {
       },
       [TARGET.space]: {
         resolve: async (id) => {
-          const parent = await resources.spaceParent(id);
-          return parent
-            ? { parent: { type: TARGET[parent.type], id: parent.id } }
-            : null;
+          const target = parseSpaceTargetId(id);
+          if (!target) return null;
+          const parent = await resources.spaceParent(
+            target.workspaceId,
+            target.canvasId,
+          );
+          if (!parent) return null;
+          return {
+            parent:
+              parent.type === 'space'
+                ? {
+                    type: TARGET.space,
+                    id: spaceTargetId(target.workspaceId, parent.id),
+                  }
+                : { type: TARGET.workspace, id: parent.id },
+          };
         },
       },
     },
+    // Granting a role on a Workspace or Space takes `huabu.manage` there, so
+    // an owner can share what they own; nothing here grants system roles.
     roles: {
-      [OWNER_ROLE.workspace]: {
+      'huabu.workspace.owner': {
+        grantableOn: [TARGET.workspace],
+        capabilities: [READ, WRITE, MANAGE],
+        managementCapability: MANAGE,
+      },
+      'huabu.workspace.editor': {
         grantableOn: [TARGET.workspace],
         capabilities: [READ, WRITE],
         managementCapability: MANAGE,
       },
-      [OWNER_ROLE.space]: {
+      'huabu.workspace.viewer': {
+        grantableOn: [TARGET.workspace],
+        capabilities: [READ],
+        managementCapability: MANAGE,
+      },
+      [SPACE_OWNER]: {
         grantableOn: [TARGET.space],
-        capabilities: [READ, WRITE],
+        capabilities: [READ, WRITE, MANAGE],
         managementCapability: MANAGE,
       },
     },
     inheritance: [
-      { from: TARGET.workspace, to: TARGET.space, capabilities: [READ, WRITE] },
-      { from: TARGET.space, to: TARGET.space, capabilities: [READ, WRITE] },
+      { from: TARGET.workspace, to: TARGET.space, capabilities: flowing },
+      { from: TARGET.space, to: TARGET.space, capabilities: flowing },
     ],
   };
+}
+
+/**
+ * Rewrite #237's Space grants, which named a Space by id alone, to name the
+ * Workspace holding it. Unresolved grants remain for a later startup: the
+ * registry may omit a temporarily unavailable Workspace. Unqualified targets
+ * cannot authorize access under the new policy.
+ * Idempotent: qualified grants are left alone.
+ */
+export async function migrateSpaceGrants(
+  store: BubbleStore,
+  resources: ResourceDirectory,
+): Promise<void> {
+  for (const grant of await store.grants.list()) {
+    const { target } = grant;
+    if (target.type !== TARGET.space || !('id' in target)) continue;
+    if (parseSpaceTargetId(target.id)) continue;
+    const workspaceId = await resources.workspaceOfSpace(target.id);
+    if (!workspaceId) continue;
+    await store.grants.add({
+      target: {
+        type: TARGET.space,
+        id: spaceTargetId(workspaceId, target.id),
+      },
+      principalId: grant.principalId,
+      role: grant.role,
+      grantedByPrincipalId: grant.grantedByPrincipalId ?? null,
+    });
+    await store.grants.remove(grant.grantId);
+  }
 }
 
 /** Bubble's records live beside Huabu's, in a schema of their own. */
@@ -109,9 +191,10 @@ export async function openBubbleIdentity(options: {
   /** Principal provisioned as Bubble system owner. */
   owner?: string;
   store: BubbleStore;
+  preferences: WorkspacePreferences;
   resources: ResourceDirectory;
 }): Promise<{ service: IdentityService; plugin: FastifyPluginAsync }> {
-  const { store, owner } = options;
+  const { store, owner, preferences } = options;
   const runtime = await createBubbleRuntime({
     store,
     authenticator: options.authenticator,
@@ -122,6 +205,12 @@ export async function openBubbleIdentity(options: {
     await store.close?.();
     throw error;
   });
+  await migrateSpaceGrants(store, options.resources).catch(
+    async (error: unknown) => {
+      await store.close?.();
+      throw error;
+    },
+  );
   if (owner) {
     // Created without an external identity, which suits master-key callers; a
     // federated user is granted ownership through Bubble after first login.
@@ -147,6 +236,15 @@ export async function openBubbleIdentity(options: {
     service: {
       provider: 'bubble',
       challenge: 'Bearer realm="Huabu"',
+      selectWorkspace: (identity) =>
+        selectRequestWorkspace(identity, preferences, options.resources),
+      chooseWorkspace: (identity, workspaceId) =>
+        chooseRequestWorkspace(
+          identity,
+          preferences,
+          options.resources,
+          workspaceId,
+        ),
       async authenticate({ authorization, header }) {
         if (!authorization || !/^Bearer\s+\S+$/i.test(authorization))
           return null;
@@ -169,23 +267,61 @@ export async function openBubbleIdentity(options: {
           // One grant load and ancestry walk per request; a later request or
           // stream revalidation authenticates again and gets a fresh scope.
           const policy = runtime.policy.scoped();
+          const admin = await policy.can(ADMIN, principalId, {
+            type: 'system',
+          });
+          // A Space is the one of that id in the Workspace this call runs in.
+          const target = (resource: HuabuResource) => {
+            if (resource.type === 'workspace')
+              return { type: TARGET.workspace, id: resource.id };
+            const workspaceId = getWorkspaceHandle()?.workspaceId;
+            return workspaceId
+              ? {
+                  type: TARGET.space,
+                  id: spaceTargetId(workspaceId, resource.id),
+                }
+              : null;
+          };
           return {
             principal: identityPrincipalSchema.parse(whoami.principal),
             member: await policy.can(USE, principalId, { type: 'system' }),
-            owner: await policy.can(MANAGE, principalId, { type: 'system' }),
+            owner: admin,
             access: {
-              can: (level, resource) =>
-                policy.can(level === 'read' ? READ : WRITE, principalId, {
-                  type: TARGET[resource.type],
-                  id: resource.id,
-                }),
+              can: async (level, resource) => {
+                const resolved = target(resource);
+                return resolved
+                  ? policy.can(CAPABILITY[level], principalId, resolved)
+                  : false;
+              },
               claim: async (resource) => {
+                const resolved = target(resource);
+                if (!resolved)
+                  throw new Error('A Space is claimed inside a Workspace');
                 await store.grants.add({
-                  target: { type: TARGET[resource.type], id: resource.id },
+                  target: resolved,
                   principalId,
-                  role: OWNER_ROLE[resource.type],
+                  role:
+                    resource.type === 'space'
+                      ? SPACE_OWNER
+                      : 'huabu.workspace.owner',
                   grantedByPrincipalId: principalId,
                 });
+              },
+              // A Space shared on its own makes its Workspace enterable; what
+              // the caller sees there is still decided Space by Space.
+              workspaces: async () => {
+                if (admin) return 'all';
+                const ids = new Set<string>();
+                for (const grant of await store.grants.list({ principalId })) {
+                  const granted = grant.target;
+                  if (!('id' in granted)) continue;
+                  if (granted.type === TARGET.workspace) ids.add(granted.id);
+                  if (granted.type === TARGET.space) {
+                    const space = parseSpaceTargetId(granted.id);
+                    if (space) ids.add(space.workspaceId);
+                  }
+                }
+                return [...ids];
               },
             },
           };
@@ -237,6 +373,7 @@ export async function openBubbleIdentity(options: {
         app.server.off('upgrade', forward);
         await runtime.stop();
         await store.close?.();
+        await preferences.close();
       });
     },
   };

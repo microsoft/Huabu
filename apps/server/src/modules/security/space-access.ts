@@ -8,13 +8,19 @@ import {
   recordRequestAuthorization,
 } from '../identity/request.js';
 import { UNRESTRICTED_ACCESS } from '../identity/service.js';
+import { getWorkspaceHandle } from '../workspace.js';
 
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { AccessLevel } from '../identity/service.js';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
 declare module 'fastify' {
   interface FastifyContextConfig {
-    /** A non-GET route that only reads the Space it names. */
-    spaceAccess?: 'read';
+    /**
+     * What a route needs on the Space it names, when not the method's
+     * default: `read` for a non-GET route that only reads it, `manage` for
+     * renaming, deleting, or changing its parent.
+     */
+    spaceAccess?: 'read' | 'manage';
     /** Starts or steers an agent outside the agent route prefixes. */
     invokesAgent?: true;
   }
@@ -110,7 +116,7 @@ export function registerSpaceAccess(app: FastifyInstance): void {
       });
     }
 
-    const checks: Array<['read' | 'write', string]> = [];
+    const checks: Array<[AccessLevel, string]> = [];
     if (canvasId) checks.push([level, canvasId]);
     const destination = body?.destination as Fields;
     for (const [needed, value] of [
@@ -135,7 +141,7 @@ export function registerSpaceAccess(app: FastifyInstance): void {
         continue;
       }
       // Without read access the Space is indistinguishable from a missing one.
-      if (needed === 'write' && (await identity.access.can('read', space)))
+      if (needed !== 'read' && (await identity.access.can('read', space)))
         return reply.code(403).send({
           message: 'Space is read-only for this principal',
           code: 'SPACE_ACCESS_REQUIRED',
@@ -149,6 +155,43 @@ export function registerSpaceAccess(app: FastifyInstance): void {
 export function isRestrictedRequest(request: FastifyRequest): boolean {
   const access = getRequestIdentity(request)?.access;
   return access !== undefined && access !== UNRESTRICTED_ACCESS;
+}
+
+/** Root creation has no existing Space to authorize; it writes the Workspace. */
+export async function requireWorkspaceWrite(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  if (!isRestrictedRequest(request)) return;
+  const workspaceId = getWorkspaceHandle()?.workspaceId;
+  const resource = workspaceId
+    ? ({ type: 'workspace', id: workspaceId } as const)
+    : null;
+  if (
+    resource &&
+    (await getRequestIdentity(request)?.access.can('write', resource))
+  ) {
+    recordRequestAuthorization(request, 'write', resource);
+    return;
+  }
+  reply.code(403).send({
+    message: 'Workspace write access required',
+    code: 'SPACE_ACCESS_REQUIRED',
+  });
+}
+
+/** Conditional manage checks for mutations carried by otherwise writable routes. */
+export async function canManageSpace(
+  request: FastifyRequest,
+  canvasId: string,
+): Promise<boolean> {
+  return (
+    !isRestrictedRequest(request) ||
+    (await getRequestIdentity(request)?.access.can('manage', {
+      type: 'space',
+      id: canvasId,
+    })) === true
+  );
 }
 
 /** Record the caller as owner of the Space it has just created. */
