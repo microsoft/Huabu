@@ -8,6 +8,7 @@ import { useTranslation } from 'react-i18next';
 
 import { resolveArtifactUrl } from '@/api/artifact';
 import { getWebPage, getWebReader } from '@/api/web';
+import { Button } from '@/components/Common/Button';
 import { usePreviewScrollMemory } from '@/hooks/usePreviewScrollMemory';
 
 import { useInteractiveViewBridge } from './useInteractiveViewBridge';
@@ -76,20 +77,22 @@ export const WebPreview = ({
   const [readerError, setReaderError] = useState<string | null>(null);
   const [iframeReady, setIframeReady] = useState(false);
   const [iframeBumpKey, setIframeBumpKey] = useState(0);
+  const [bridgeFailed, setBridgeFailed] = useState(false);
+  const onBootstrapError = useCallback(() => setBridgeFailed(true), []);
   const liveIframeRef = useRef<HTMLIFrameElement>(null);
   const readerScrollRef = useRef<HTMLDivElement>(null);
   usePreviewScrollMemory(readerScrollRef, scrollViewKey);
-  const connectedInteractiveLoadRef = useRef<string | null>(null);
   const isInteractiveView =
     data.interactiveView !== null &&
     typeof data.interactiveView === 'object' &&
     pageKind === 'html' &&
     !pageSnapshot;
   const interactiveBridge = useInteractiveViewBridge({
-    enabled: mode === 'live' && isInteractiveView,
+    enabled: mode === 'live' && isInteractiveView && !bridgeFailed,
     canvasId,
     nodeId: id ?? '',
     iframeRef: liveIframeRef,
+    onBootstrapError,
   });
 
   // Electron is detected once at mount — it does not change at runtime.
@@ -145,6 +148,7 @@ export const WebPreview = ({
 
     let cancelled = false;
     setLoadingPage(true);
+    setBridgeFailed(false);
     setPageError(null);
 
     void (async () => {
@@ -268,6 +272,7 @@ export const WebPreview = ({
 
   const handleReload = useCallback(() => {
     setIframeReady(false);
+    setBridgeFailed(false);
     // If we previously fell back to reader, this also re-arms a live
     // attempt — the user explicitly asked for a refresh, treat it as a
     // chance to retry the live site.
@@ -414,6 +419,20 @@ export const WebPreview = ({
               <div>{t('node.failedLoadPage')}</div>
               <p className="text-xs">{pageError}</p>
             </div>
+          ) : bridgeFailed ? (
+            <div className="text-fg-subtle flex h-full w-full flex-col items-center justify-center gap-2 text-sm">
+              <span role="status">
+                {t('node.failedInitializeInteractiveView')}
+              </span>
+              <Button
+                variant="ghost"
+                tone="neutral"
+                size="sm"
+                onClick={handleReload}
+              >
+                {t('messages.retry')}
+              </Button>
+            </div>
           ) : pageSrc ? (
             <>
               {/* Iframe is ALWAYS mounted and visible — never hidden under an
@@ -437,14 +456,7 @@ export const WebPreview = ({
                 style={pageSnapshot ? { colorScheme: 'light' } : undefined}
                 onLoad={() => {
                   setIframeReady(true);
-                  if (!isInteractiveView) return;
-                  const loadKey = `${pageSrc}-${iframeBumpKey}`;
-                  if (connectedInteractiveLoadRef.current === loadKey) {
-                    interactiveBridge.closePort();
-                    return;
-                  }
-                  connectedInteractiveLoadRef.current = loadKey;
-                  void interactiveBridge.connect();
+                  interactiveBridge.onLoad();
                 }}
               />
               {!iframeReady ? (

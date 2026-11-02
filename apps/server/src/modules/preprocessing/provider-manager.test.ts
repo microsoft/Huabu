@@ -78,6 +78,25 @@ describe('external text enrichment', () => {
     expect(complete).not.toHaveBeenCalled();
   });
 
+  it('locally bounds long summary sources and still dispatches just one model call', async () => {
+    runText.mockResolvedValue(
+      '{"label":"Title","summary":"Summary","keywords":["Keyword"]}',
+    );
+    await provider.generateContentMeta(
+      'START ' + 'x'.repeat(200_001) + ' END',
+      {},
+      context,
+    );
+    expect(runText).toHaveBeenCalledOnce();
+    const prompt: string = runText.mock.calls[0][0];
+    const source = prompt
+      .split('Content:\n')[1]
+      .split('\n\nAnalyze the above content')[0];
+    expect(source.length).toBeLessThanOrEqual(6000);
+    expect(source).toContain('START');
+    expect(source).toContain('END');
+  });
+
   it('generates a Frame title with the Space context', async () => {
     runText.mockResolvedValue('Topic');
     await expect(

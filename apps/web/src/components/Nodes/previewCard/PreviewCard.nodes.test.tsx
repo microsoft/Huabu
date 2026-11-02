@@ -140,6 +140,34 @@ async function renderPdf(data: Record<string, unknown> = {}) {
 }
 
 describe('PDF and Web PreviewCard integration', () => {
+  it('keeps structured summaries readable on Office cards too', async () => {
+    const props: NodeProps<OfficeNodeType> = {
+      id: 'office-1',
+      type: 'office',
+      selected: false,
+      selectable: true,
+      draggable: true,
+      deletable: true,
+      dragging: false,
+      isConnectable: true,
+      zIndex: 0,
+      positionAbsoluteX: 0,
+      positionAbsoluteY: 0,
+      data: {
+        type: 'office',
+        src: 'document.docx',
+        format: 'docx',
+        summary: 'Plan confirmed.\n\n- Arrive Friday\n- Return Sunday',
+      },
+    };
+    await act(async () => root.render(<OfficeNode {...props} />));
+    expect(
+      container.querySelector('[data-office-content] p')?.textContent,
+    ).toBe('Plan confirmed.');
+    expect(container.querySelectorAll('[data-office-content] li')).toHaveLength(
+      2,
+    );
+  });
   it.each([undefined, 'teal', 'white'])(
     'shares PDF surface colors with Office for accent %s',
     async (accent) => {

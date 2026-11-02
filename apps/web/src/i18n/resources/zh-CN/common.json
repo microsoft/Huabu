@@ -963,6 +963,7 @@
     "openExternally": "在外部打开",
     "openPageExternal": "在外部浏览器打开页面",
     "failedLoadPage": "页面加载失败",
+    "failedInitializeInteractiveView": "页面交互初始化失败，请重试。",
     "livePage": "实时页面",
     "noSource": "无来源",
     "failedLoadReader": "阅读视图加载失败",

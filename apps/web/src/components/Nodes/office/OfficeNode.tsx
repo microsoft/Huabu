@@ -6,9 +6,12 @@ import { Download, Maximize2 } from 'lucide-react';
 import { memo, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { stripMarkdown } from '@huabu/shared/canvas-engine';
+
 import { resolveArtifactUrl } from '@/api/artifact';
 import { DropdownMenuItem } from '@/components/Common/DropdownMenu';
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
+import { SummaryContent } from '@/components/Common/SummaryContent';
 import { OFFICE_FORMAT_ICON } from '@/config/nodeIcons';
 import useCanvasStore from '@/store/canvasStore';
 import { openPreviewNode } from '@/store/previewWorkspace/actions';
@@ -94,7 +97,10 @@ export const OfficeNode = memo(
       (data.label as string) ||
       t('node.untitledTypedDocument', { label: meta.label });
     const farLabel = useMemo(
-      () => ({ title, description: summary }),
+      () => ({
+        title,
+        description: stripMarkdown(summary).replace(/\s+/g, ' '),
+      }),
       [title, summary],
     );
 
@@ -210,9 +216,9 @@ export const OfficeNode = memo(
                       </span>
                     </div>
                     {summary ? (
-                      <p className="text-fg-muted mt-1 line-clamp-5 text-base leading-relaxed">
-                        {summary}
-                      </p>
+                      <div className="text-fg-muted mt-1 line-clamp-5 text-base leading-relaxed">
+                        <SummaryContent summary={summary} />
+                      </div>
                     ) : null}
                   </div>
                 </div>

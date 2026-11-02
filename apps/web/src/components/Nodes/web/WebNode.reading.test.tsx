@@ -22,6 +22,8 @@ const mocks = vi.hoisted(() => ({
   getWebPreview: vi.fn(),
   getWebPage: vi.fn(),
   openPreviewNode: vi.fn(),
+  bridge: vi.fn(),
+  bridgeLoad: vi.fn(),
   resolveArtifactUrl: vi.fn(
     (src: string, canvasId: string) =>
       `/api/canvas/${canvasId}/artifact/${src}`,
@@ -41,6 +43,12 @@ vi.mock('@/api/web', () => ({
 }));
 vi.mock('@/api/artifact', () => ({
   resolveArtifactUrl: mocks.resolveArtifactUrl,
+}));
+vi.mock('./useInteractiveViewBridge', () => ({
+  useInteractiveViewBridge: (input: unknown) => {
+    mocks.bridge(input);
+    return { onLoad: mocks.bridgeLoad };
+  },
 }));
 vi.mock('@/store/canvasStore', () => ({
   default: (
@@ -337,15 +345,67 @@ describe('WebNode reading presentation', () => {
     expect(mocks.getWebPage).toHaveBeenCalledTimes(1);
   });
 
-  it('leaves authored interactive views in the existing overview/expanded flow', async () => {
+  it('renders interactive views through the existing renderer and shared bridge', async () => {
     mocks.presentation.mode = 'reading';
+    mocks.getWebPage.mockResolvedValue({
+      kind: 'html',
+      src: '/api/interactive-views/canvas-1/web-1/renderer',
+    });
     await render({
       src: 'art_interactive.html',
       interactiveView: {} as CanvasWebNodeData['interactiveView'],
     });
-    expect(container.querySelector('[data-preview-card]')).not.toBeNull();
+    expect(container.querySelector('[data-preview-card]')).toBeNull();
+    expect(mocks.resolveArtifactUrl).toHaveBeenCalledWith(
+      '/api/interactive-views/canvas-1/web-1/renderer',
+      'canvas-1',
+    );
+    expect(element('iframe').getAttribute('sandbox')).toBe(
+      'allow-scripts allow-forms',
+    );
+    expect(element('iframe').hasAttribute('inert')).toBe(true);
+    expect(mocks.bridge).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        enabled: true,
+        canvasId: 'canvas-1',
+        nodeId: 'web-1',
+      }),
+    );
+    act(() => element('iframe').dispatchEvent(new Event('load')));
+    expect(mocks.bridgeLoad).toHaveBeenCalledOnce();
+    const iframe = element('iframe');
+    mocks.presentation.isSoleSelected = true;
+    await render({
+      src: 'art_interactive.html',
+      interactiveView: {} as CanvasWebNodeData['interactiveView'],
+    });
+    expect(element('iframe')).toBe(iframe);
+    expect(iframe.hasAttribute('inert')).toBe(false);
+    mocks.presentation.isVisible = false;
+    await render({
+      src: 'art_interactive.html',
+      interactiveView: {} as CanvasWebNodeData['interactiveView'],
+    });
     expect(container.querySelector('iframe')).toBeNull();
-    expect(mocks.getWebPage).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      'https://example.com/original',
+      { kind: 'url', src: 'https://example.com/original' },
+    ],
+    ['snapshot.mhtml', { kind: 'html', src: 'snapshot.mhtml', snapshot: true }],
+    ['art_page.html', { kind: 'url', src: 'https://example.com/redirect' }],
+  ])('does not attach a capability bridge to %s', async (src, page) => {
+    mocks.presentation.mode = 'reading';
+    mocks.getWebPage.mockResolvedValue(page);
+    await render({
+      src,
+      interactiveView: {} as CanvasWebNodeData['interactiveView'],
+    });
+    expect(mocks.bridge).toHaveBeenLastCalledWith(
+      expect.objectContaining({ enabled: false }),
+    );
   });
 
   it('preserves missing-file UI without mounting or resolving a page', async () => {

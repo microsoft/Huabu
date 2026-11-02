@@ -963,6 +963,7 @@
     "openExternally": "Open externally",
     "openPageExternal": "Open page in external browser",
     "failedLoadPage": "Failed to load page",
+    "failedInitializeInteractiveView": "Could not initialize page interactions. Try again.",
     "livePage": "Live page",
     "noSource": "No source",
     "failedLoadReader": "Failed to load reader view",

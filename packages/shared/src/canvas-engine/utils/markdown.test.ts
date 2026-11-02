@@ -3,7 +3,48 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { stripMarkdown, markdownSearchTarget } from './markdown.js';
+import {
+  stripMarkdown,
+  markdownSearchTarget,
+  markdownSummaryBlocks,
+} from './markdown.js';
+
+describe('markdownSummaryBlocks', () => {
+  it('preserves paragraphs and flat lists without interactive markup', () => {
+    expect(
+      markdownSummaryBlocks(
+        'Arrive **Friday**.\n\n- Climb [the mountain](https://example.com)\n- Return Sunday\n\n3. Check trains\n4. Check opening hours',
+      ),
+    ).toEqual([
+      { type: 'paragraph', text: 'Arrive Friday.' },
+      {
+        type: 'list',
+        ordered: false,
+        start: 1,
+        items: ['Climb the mountain', 'Return Sunday'],
+      },
+      {
+        type: 'list',
+        ordered: true,
+        start: 3,
+        items: ['Check trains', 'Check opening hours'],
+      },
+    ]);
+  });
+
+  it('keeps legacy plain summaries and flattens unsupported content to text', () => {
+    expect(markdownSummaryBlocks('A short summary.')).toEqual([
+      { type: 'paragraph', text: 'A short summary.' },
+    ]);
+    expect(
+      markdownSummaryBlocks('![Route](image.png)\n\n<script>alert(1)</script>'),
+    ).toEqual([
+      { type: 'paragraph', text: 'Route' },
+      { type: 'paragraph', text: 'alert(1)' },
+    ]);
+    expect(markdownSummaryBlocks(' \n\n ')).toEqual([]);
+  });
+});
 
 describe('stripMarkdown', () => {
   it.each([

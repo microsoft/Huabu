@@ -9,6 +9,7 @@ import { getNodeDefaultSize } from '@huabu/shared/canvas-engine';
 
 import { Button } from '@/components/Common/Button';
 import { Loading } from '@/components/Common/Loading';
+import { SummaryContent } from '@/components/Common/SummaryContent';
 import { getNodeIcon } from '@/config/nodeIcons';
 import { handleCanvasNavigationKey } from '@/hooks/shortcuts/handleCanvasNavigationKey';
 
@@ -419,7 +420,7 @@ function PreviewCardContent({
           </>
         )}
         {summary?.trim() ? (
-          <p
+          <div
             className="preview-card__summary text-fg-muted"
             style={
               !titleFits || summaryLines < minSummaryLines
@@ -427,8 +428,8 @@ function PreviewCardContent({
                 : undefined
             }
           >
-            {summary}
-          </p>
+            <SummaryContent summary={summary} compact={far} />
+          </div>
         ) : null}
         {failed ? (
           <div

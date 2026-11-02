@@ -75,10 +75,7 @@ export const WebNode = memo(
     const isInteractiveView =
       data.interactiveView !== null && typeof data.interactiveView === 'object';
     const showReading =
-      !!src &&
-      presentation.mode === 'reading' &&
-      presentation.isVisible &&
-      !isInteractiveView;
+      !!src && presentation.mode === 'reading' && presentation.isVisible;
 
     // URL surfaced as the "open externally" link in the floating toolbar.
     // Only remote http(s) URLs have a meaningful destination — uploaded
@@ -203,11 +200,12 @@ export const WebNode = memo(
           <MissingFileBanner nodeId={id} />
         ) : showReading ? (
           <WebReadingView
-            key={`${canvasId}:${id}:${src}`}
+            key={`${canvasId}:${id}:${src}:${isInteractiveView}`}
             nodeId={id}
             canvasId={canvasId}
             src={src}
             interactive={presentation.isSoleSelected}
+            isInteractiveView={isInteractiveView}
             zoom={presentation.zoom}
           />
         ) : (
