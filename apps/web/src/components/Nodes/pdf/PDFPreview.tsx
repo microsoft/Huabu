@@ -303,71 +303,72 @@ export const PDFPreview = ({
   // If the selection is fully covered by existing highlights → remove those
   // highlights (toggle-off).
   // ---------------------------------------------------------------------------
+  const applyTextHighlight = useCallback(() => {
+    const el = scrollContainerRef.current;
+    const sel = window.getSelection();
+    if (!el || !sel || sel.rangeCount === 0 || !el.contains(sel.anchorNode))
+      return;
+    const text = sel.toString().trim();
+    if (!text) return;
+
+    const range = sel.getRangeAt(0);
+    const clientRects = range.getClientRects();
+    if (clientRects.length === 0) return;
+
+    // Group client rects by page container (normalized 0–1 coordinates).
+    const pageContainers = el.querySelectorAll<HTMLElement>(
+      '[data-pdf-page-index]',
+    );
+    const grouped = new Map<
+      number,
+      { x: number; y: number; width: number; height: number }[]
+    >();
+
+    for (const cr of clientRects) {
+      for (const pc of pageContainers) {
+        const pageRect = pc.getBoundingClientRect();
+        if (
+          cr.top >= pageRect.top - 2 &&
+          cr.bottom <= pageRect.bottom + 2 &&
+          cr.left >= pageRect.left - 2 &&
+          cr.right <= pageRect.right + 2
+        ) {
+          const pageIdx = Number(pc.dataset.pdfPageIndex);
+          const normalized = {
+            x: (cr.left - pageRect.left) / pageRect.width,
+            y: (cr.top - pageRect.top) / pageRect.height,
+            width: cr.width / pageRect.width,
+            height: cr.height / pageRect.height,
+          };
+          if (!grouped.has(pageIdx)) grouped.set(pageIdx, []);
+          const arr = grouped.get(pageIdx);
+          if (arr) arr.push(normalized);
+          break;
+        }
+      }
+    }
+
+    if (grouped.size === 0) return;
+
+    // Deduplicate & merge overlapping rects per page.
+    for (const [pageIdx, rects] of grouped) {
+      grouped.set(pageIdx, mergeLineRects(rects));
+    }
+
+    const updated = computeHighlightUpdate(highlightsRef.current, grouped);
+    onDataChange?.({ highlights: updated });
+    sel.removeAllRanges();
+  }, [onDataChange]);
+
   useEffect(() => {
     if (!highlightMode) return;
     const el = scrollContainerRef.current;
     if (!el) return;
 
-    const handleMouseUp = () => {
-      requestAnimationFrame(() => {
-        const sel = window.getSelection();
-        if (!sel || sel.rangeCount === 0) return;
-        const text = sel.toString().trim();
-        if (!text) return;
-
-        const range = sel.getRangeAt(0);
-        const clientRects = range.getClientRects();
-        if (clientRects.length === 0) return;
-
-        // Group client rects by page container (normalized 0–1 coordinates).
-        const pageContainers = el.querySelectorAll<HTMLElement>(
-          '[data-pdf-page-index]',
-        );
-        const grouped = new Map<
-          number,
-          { x: number; y: number; width: number; height: number }[]
-        >();
-
-        for (const cr of clientRects) {
-          for (const pc of pageContainers) {
-            const pageRect = pc.getBoundingClientRect();
-            if (
-              cr.top >= pageRect.top - 2 &&
-              cr.bottom <= pageRect.bottom + 2 &&
-              cr.left >= pageRect.left - 2 &&
-              cr.right <= pageRect.right + 2
-            ) {
-              const pageIdx = Number(pc.dataset.pdfPageIndex);
-              const normalized = {
-                x: (cr.left - pageRect.left) / pageRect.width,
-                y: (cr.top - pageRect.top) / pageRect.height,
-                width: cr.width / pageRect.width,
-                height: cr.height / pageRect.height,
-              };
-              if (!grouped.has(pageIdx)) grouped.set(pageIdx, []);
-              const arr = grouped.get(pageIdx);
-              if (arr) arr.push(normalized);
-              break;
-            }
-          }
-        }
-
-        if (grouped.size === 0) return;
-
-        // Deduplicate & merge overlapping rects per page.
-        for (const [pageIdx, rects] of grouped) {
-          grouped.set(pageIdx, mergeLineRects(rects));
-        }
-
-        const updated = computeHighlightUpdate(highlightsRef.current, grouped);
-        onDataChange?.({ highlights: updated });
-        sel.removeAllRanges();
-      });
-    };
-
+    const handleMouseUp = () => requestAnimationFrame(applyTextHighlight);
     el.addEventListener('mouseup', handleMouseUp);
     return () => el.removeEventListener('mouseup', handleMouseUp);
-  }, [highlightMode, onDataChange]);
+  }, [highlightMode, applyTextHighlight]);
 
   const handlePageAspectRatioResolved = useCallback(
     (pageIndex: number, aspectRatio: number, naturalWidth?: number) => {
@@ -693,6 +694,7 @@ export const PDFPreview = ({
           const next = !highlightMode;
           setHighlightMode(next);
           if (next) {
+            applyTextHighlight();
             setCaptureMode(false);
             setPendingCapture(null);
           }
