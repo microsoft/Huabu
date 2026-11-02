@@ -19,7 +19,7 @@ import { isVisibleWorldNode } from '@/utils/spaceHierarchy';
 import { Loading } from '../../components/Common/Loading';
 import { toast } from '../../components/Common/Toast';
 import { hasNodePreview } from '../../components/Nodes/previews';
-import { CanvasLayerPanel } from '../../components/Panels/CanvasLayerPanel';
+import { CanvasSidebar } from '../../components/Panels/CanvasSidebar';
 import { CanvasHeader } from '../../components/Panels/Header/CanvasHeader.tsx';
 import { PreviewWorkspacePanel } from '../../components/Panels/PreviewWorkspace/PreviewWorkspacePanel';
 import { useGlobalSearchHotkey } from '../../hooks/useGlobalSearchHotkey';
@@ -142,7 +142,6 @@ export default function CanvasPage() {
   const consumedDeepLinkActivationRef = useRef<string | null>(null);
   const setPendingNodeType = useToolStore((s) => s.setPendingNodeType);
   const isShortcutsOpen = useShortcutsUiStore((s) => s.isOpen);
-  const openShortcuts = useShortcutsUiStore((s) => s.open);
   // Cmd+F / Ctrl+F → focus the canvas-wide search input in the
   // left layer panel (or, when focus is inside the expanded
   // preview, the in-preview find bar).
@@ -446,8 +445,8 @@ export default function CanvasPage() {
     <>
       <SpaceActions />
       <MainLayout
-        header={<CanvasHeader onOpenShortcuts={openShortcuts} />}
-        leftPanel={<CanvasLayerPanel />}
+        header={<CanvasHeader />}
+        leftPanel={<CanvasSidebar />}
         rightPanel={<PreviewWorkspacePanel />}
       >
         <CenterArea canvasShortcutsDisabled={isShortcutsOpen} />

@@ -103,7 +103,9 @@ export class AgentDefaultsService {
     const stored = this.storage.read();
     const current = this.parseDefaults(stored);
     if (stored !== undefined) return current;
-    const candidates = profiles.filter((profile) => profile.id !== 'huabu');
+    const candidates = profiles.filter(
+      (profile) => profile.id !== 'huabu' && profile.visible !== false,
+    );
     const key = (profile: AgentProfileView): string[] => [
       profile.agentletId,
       'harnessId' in profile.launch

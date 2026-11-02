@@ -31,6 +31,7 @@ import {
   stripLegacyPortalTopology,
   recentCanvasConversationParamsSchema,
   deleteNodeParamsSchema,
+  fileReferenceSchema,
 } from '@huabu/shared';
 import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 import {
@@ -234,6 +235,7 @@ function openInFileManager(targetPath: string): void {
  * frontmatter.
  */
 const MD_BACKED_NODE_TYPES = new Set([
+  'fileReference',
   'note',
   'text',
   'web',
@@ -830,6 +832,10 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           });
         }
 
+        publishCanvasUpdate(canvasId, {
+          type: 'invalidate',
+          data: { nodeIds: [nodeId] },
+        });
         return reply.send({ success: true });
       });
     } finally {
@@ -877,6 +883,20 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       provenance,
       expectRev,
     } = parsed.data;
+    const storedNode = (canvas.state.nodes as NodeLike[] | undefined)?.find(
+      (node) => node.id === nodeId,
+    );
+    if (
+      (storedNode?.type === 'fileReference' || nodeType === 'fileReference') &&
+      (nodeType !== 'fileReference' ||
+        (incomingContent !== undefined && incomingContent !== '') ||
+        incomingSrc !== undefined)
+    ) {
+      return reply.code(400).send({
+        message: 'File references store metadata only',
+        code: 'invalid_file_reference',
+      });
+    }
 
     if (!MD_BACKED_NODE_TYPES.has(nodeType)) {
       return reply.code(400).send({
@@ -1041,6 +1061,10 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.code(500).send({ message: 'Failed to write node content' });
     }
 
+    publishCanvasUpdate(canvasId, {
+      type: 'invalidate',
+      data: { nodeIds: [nodeId] },
+    });
     const response: PutNodeContentResponse = {
       nodeId,
       label: outcome.label,
@@ -1457,6 +1481,19 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           data: { ...current?.data, ...node.data },
         };
       });
+      if (
+        identityNodes.some(
+          (node) =>
+            node.type === 'fileReference' &&
+            (!fileReferenceSchema.safeParse(node.data?.fileReference).success ||
+              ['content', 'src'].some((key) => key in (node.data ?? {}))),
+        )
+      ) {
+        return reply.code(400).send({
+          message: 'Invalid file reference',
+          code: 'invalid_file_reference',
+        });
+      }
       try {
         await assertChildSpaceEntriesAllowed(
           canvasId,
@@ -1663,10 +1700,8 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           }
         }
 
-        return reply.send({
-          canvasId,
-          version: nextVersion,
-        });
+        publishCanvasUpdate(canvasId, { type: 'invalidate', data: {} });
+        return reply.send({ canvasId, version: nextVersion });
       } catch (error) {
         if (error instanceof AgentNodeEditError) {
           return reply

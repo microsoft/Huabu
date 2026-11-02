@@ -686,26 +686,46 @@ describe('structured write authority', () => {
     expect(violations).toEqual([]);
   });
 
-  it('keeps legacy CanvasStore mutations inside the Disk adapter and compatibility layer', () => {
+  const callsLegacyMutation = (source: string): boolean => {
     const unambiguousMutation =
-      /\.\s*(?:writeNode|deleteNode|renameSelf|destroy|appendDeltaLogEntry|appendEvents|appendChanges|removeChange|upsertIntent)\s*\(/;
-    const callsLegacyMutation = (source: string): boolean => {
-      if (unambiguousMutation.test(source)) return true;
-      if (/getCanvasStore\s*\([^)]*\)\s*\.\s*write\s*\(/.test(source)) {
+      /\.\s*(?:writeNode|deleteNode|renameSelf|appendDeltaLogEntry|appendEvents|appendChanges|removeChange|upsertIntent)\s*\(/;
+    if (unambiguousMutation.test(source)) return true;
+    // Generic stream methods are mutations only on a legacy store receiver.
+    if (
+      /getCanvasStore\s*\([^)]*\)\s*\.\s*(?:write|destroy)\s*\(/.test(source)
+    ) {
+      return true;
+    }
+    for (const match of source.matchAll(
+      /\b([A-Za-z_$][\w$]*)\s*=\s*getCanvasStore\s*\(/g,
+    )) {
+      const identifier = match[1].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      if (
+        new RegExp(`\\b${identifier}\\s*\\.\\s*(?:write|destroy)\\s*\\(`).test(
+          source,
+        )
+      ) {
         return true;
       }
-      for (const match of source.matchAll(
-        /\b([A-Za-z_$][\w$]*)\s*=\s*getCanvasStore\s*\(/g,
-      )) {
-        const identifier = match[1].replace(/[$]/g, '\\$&');
-        if (
-          new RegExp(`\\b${identifier}\\s*\\.\\s*write\\s*\\(`).test(source)
-        ) {
-          return true;
-        }
-      }
-      return false;
-    };
+    }
+    return false;
+  };
+
+  it.each([
+    ["getCanvasStore('space').destroy()", true],
+    ["const store = getCanvasStore('space'); store.destroy()", true],
+    ["getCanvasStore('space').write(canvas)", true],
+    ["const store = getCanvasStore('space'); store.write(canvas)", true],
+    ["const $store = getCanvasStore('space'); $store.destroy()", true],
+    ["store.writeNode('node', content)", true],
+    ['reply.raw.destroy()', false],
+    ["reply.raw.write(': ping\\n\\n')", false],
+    ["const store = getCanvasStore('space'); reply.raw.destroy()", false],
+  ])('classifies legacy mutations in %s', (source, expected) => {
+    expect(callsLegacyMutation(source)).toBe(expected);
+  });
+
+  it('keeps legacy CanvasStore mutations inside the Disk adapter and compatibility layer', () => {
     const violations = sourceFiles
       .filter((file) => !file.endsWith('.test.ts'))
       .filter((file) => !inLayer(file, 'backends'))

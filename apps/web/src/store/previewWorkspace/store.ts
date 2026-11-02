@@ -17,6 +17,7 @@
 
 import { create } from 'zustand';
 
+import { findObservedConversation } from '../remoteConversationOwner';
 import {
   activateTab,
   closeTab,
@@ -282,8 +283,19 @@ export const usePreviewWorkspaceStore = create<PreviewWorkspaceState>(
 
     validate: (liveNodeIds) => {
       const state = get();
-      const { canvasId, workspace } = state;
+      const { canvasId } = state;
+      let { workspace } = state;
       if (!canvasId) return;
+      for (const tab of Object.values(workspace.tabs)) {
+        if (tab.target.kind !== 'node' || liveNodeIds.has(tab.target.nodeId))
+          continue;
+        const owner = findObservedConversation(canvasId, tab.target.nodeId);
+        if (owner)
+          workspace = replaceTabTarget(workspace, tab.id, {
+            kind: 'conversation',
+            ...owner,
+          });
+      }
       const validated = validateWorkspace(workspace, canvasId, liveNodeIds);
       set(commitWorkspace(state, validated));
     },

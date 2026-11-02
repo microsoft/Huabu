@@ -24,6 +24,7 @@ interface ChatPreferencesState {
   setRecentTurnCount: (count: number) => void;
 }
 
+// Retained for desktop preference compatibility; history paging ignores this legacy value.
 export const useChatPreferencesStore = create<ChatPreferencesState>()(
   persistApplicationPreferences(
     (set) => ({

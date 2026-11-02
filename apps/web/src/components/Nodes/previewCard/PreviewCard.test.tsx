@@ -68,6 +68,34 @@ function cardElement(): HTMLElement {
 }
 
 describe('PreviewCard', () => {
+  it('renders summary paragraphs and lists without live links, images, or HTML', () => {
+    render({
+      nodeType: 'web',
+      summary:
+        'Arrive **Friday**.\n\n- Climb [the mountain](https://example.com)\n- Return Sunday\n\n3. Check trains\n4. Check hours\n\n<img src=x onerror=alert(1)>',
+    });
+    const summary = container.querySelector('.preview-card__summary');
+    expect(summary?.querySelector('p')?.textContent).toBe('Arrive Friday.');
+    expect(summary?.querySelectorAll('ul li')).toHaveLength(2);
+    expect(summary?.querySelector('ol')?.start).toBe(3);
+    expect(summary?.querySelectorAll('ol li')).toHaveLength(2);
+    expect(summary?.querySelector('a, img, script, input')).toBeNull();
+    expect(summary?.textContent).not.toContain('**');
+  });
+
+  it('flattens structured summaries in far zoom and restores lists on return', () => {
+    const summary = '- Friday arrival\n- Sunday return';
+    render({ summary, farZoom: 0.19 });
+    expect(container.querySelector('.preview-card__summary')?.textContent).toBe(
+      'Friday arrival Sunday return',
+    );
+    expect(container.querySelector('.preview-card__summary ul')).toBeNull();
+    render({ summary });
+    expect(
+      container.querySelectorAll('.preview-card__summary li'),
+    ).toHaveLength(2);
+  });
+
   it('retains a single summary line and original typography outside far zoom', () => {
     vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(60);
     vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(16);

@@ -49,6 +49,7 @@ const popoverRoots = new Map<
   {
     panel: HTMLDivElement;
     reference: Element | null | undefined;
+    owner: Element | null | undefined;
     dismiss: () => void;
   }
 >();
@@ -58,7 +59,7 @@ export function dismissPopoversWithin(element: Element): void {
   for (const root of popoverRoots.values()) {
     if (
       element.contains(root.panel) ||
-      (root.reference && element.contains(root.reference))
+      (root.owner && element.contains(root.owner))
     ) {
       root.dismiss();
     }
@@ -135,6 +136,8 @@ export type PopoverProps = Pick<
   'id' | 'role' | 'aria-label' | 'aria-labelledby' | 'onKeyDown'
 > & {
   reference?: Element | null;
+  /** Logical owner for ancestor-hide dismissal, independent of positioning. */
+  owner?: Element | null;
   placement?: Placement;
   /**
    * Screen-space position (e.g. clientX/Y from the triggering event).
@@ -227,6 +230,7 @@ export const Popover: FC<PopoverProps> = ({
   'aria-labelledby': labelledBy,
   onKeyDown,
   reference,
+  owner,
   placement = 'bottom',
   position: positionProp,
   onDismiss,
@@ -263,12 +267,13 @@ export const Popover: FC<PopoverProps> = ({
     popoverRoots.set(escapeLayer, {
       panel: contentElement,
       reference,
+      owner: owner ?? reference,
       dismiss: () => onDismissRef.current?.('ancestor-hidden'),
     });
     return () => {
       popoverRoots.delete(escapeLayer);
     };
-  }, [contentElement, escapeLayer, reference]);
+  }, [contentElement, escapeLayer, reference, owner]);
   const floating = useFloating({
     open: Boolean(reference),
     elements: { reference },

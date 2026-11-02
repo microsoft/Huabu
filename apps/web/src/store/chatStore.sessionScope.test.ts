@@ -411,7 +411,10 @@ describe('chatStore persistence and eviction', () => {
   it('pins current, mapped and streaming threads', () => {
     const store = useChatStore.getState();
     for (const threadId of ['t1', 't2', 't3', 't4']) {
-      store.addMessage(threadId, userMessage(`m-${threadId}`, threadId));
+      store.addMessage(threadId, {
+        ...userMessage(`m-${threadId}`, threadId),
+        historyTurnId: `persisted-${threadId}`,
+      });
     }
     useChatStore.setState({
       threadMap: { 'canvas-1': 't1', 'canvas-2': 't3' },

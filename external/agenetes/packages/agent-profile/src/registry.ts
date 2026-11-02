@@ -24,6 +24,7 @@ export function commandProfile(
   return parseProfile({
     id: input.id ?? generateId(),
     alias: input.alias,
+    ...(input.visible === undefined ? {} : { visible: input.visible }),
     agentletId: input.agentletId,
     workingDirPath: input.workingDirPath,
     launch: { kind: 'acp-command', command: input.command },
@@ -39,6 +40,7 @@ export function harnessProfile(
   return parseProfile({
     id: input.id ?? generateId(),
     alias: input.alias,
+    ...(input.visible === undefined ? {} : { visible: input.visible }),
     agentletId: input.agentletId,
     workingDirPath: input.workingDirPath,
     launch: {
@@ -82,7 +84,9 @@ export class AgentProfileRegistry {
     return structuredClone(this.state.profiles);
   }
   listSelectableProfileIds(): string[] {
-    return this.state.profiles.map(({ id }) => id);
+    return this.state.profiles
+      .filter((profile) => profile.visible !== false)
+      .map(({ id }) => id);
   }
   snapshotProfile(id: string): AgentProfileSnapshot {
     const { agentletId, workingDirPath, launch, executionRevision } =

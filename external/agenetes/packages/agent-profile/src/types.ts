@@ -9,6 +9,7 @@ export type JsonValue =
 export interface AgentProfile {
   id: string;
   alias: string;
+  visible?: boolean;
   agentletId: string;
   workingDirPath: string;
   launch: AgentProfileLaunch;
@@ -35,6 +36,7 @@ export interface AgentProfileSnapshot {
 export interface CreateAcpCommandProfileInput {
   id?: string;
   alias: string;
+  visible?: boolean;
   agentletId: string;
   command: string;
   workingDirPath: string;

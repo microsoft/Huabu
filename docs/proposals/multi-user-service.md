@@ -1,7 +1,7 @@
 # Multi-User Service
 
 Status: In-Progress — PR A implemented, PR B proposed
-Last updated: 2026-10-28
+Last updated: 2026-11-02
 
 Follows PR #237 (Bubble identity and per-user Space access) toward issue #228. Two stacked pull requests take one Huabu Server from "several people sign in and each edits their own Spaces in one shared Workspace" to a service several people can use day to day: each person has their own Workspaces, uses agents in them, and an operator admits people without scripts.
 
@@ -91,6 +91,12 @@ Agents stay owner-only for members, as in #237. Each run now carries its Workspa
 - Boot no longer activates `registered[0]` in Bubble mode: the Server has already chosen the caller's current Workspace.
 - The switcher lists the caller's Workspaces and is enabled for members. Switching posts to `/api/workspaces/:id/activate`, which in Bubble mode sets only the caller's preference.
 - The Home folder name and `GET /api/workspace` path are withheld from members, closing a #237 limitation.
+
+### Integration with main (2026-11-02)
+
+- **Moving existing Spaces.** The new hierarchy picker and bring-existing-Space flow reuse `PATCH /api/canvas/:canvasId/parent`. The route retains PR A's `manage` requirement on the moved Space and `write` on its destination. Placement now travels in the request body's optional `position`; the detachment ownership callback remains under the hierarchy lock.
+- **Authoritative conversation snapshots.** A stream captures its admitted Workspace and restores it for reads triggered by Canvas publisher callbacks, which can arrive outside the observing request or in another request's scope. Local mode retains the existing process-Workspace change check.
+- **Connected devices, profile grouping and file browsing.** These remain deployment-wide, owner-only features in PR A. The stateless filesystem proxy has no Workspace namespace and is selected by device id. Before PR B opens these routes to members, device/profile discovery and arbitrary filesystem access need explicit principal authorization; a Workspace or Space grant alone does not authorize a connected device's files. The per-person Workspace design itself is unchanged.
 
 ### Proof
 

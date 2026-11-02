@@ -25,6 +25,7 @@ import { randomUUID } from 'node:crypto';
 import { AcpServiceError } from '@agenetes/acp-driver';
 import { getAgentProfileRegistry } from '@agenetes/agentlet-host';
 
+import { isCanvasIntent } from '@huabu/shared';
 import { chatInputText } from '@huabu/shared';
 
 import { renderExternalAgentInputs } from './preprocessor.js';
@@ -275,8 +276,9 @@ export async function* runAcpAgent(
       opts.threadId,
       chatInputText(opts.envelope.user),
     );
-  const inkToken =
-    opts.envelope.user.inputKind === 'ink-intent' ? randomUUID() : undefined;
+  const inkToken = isCanvasIntent(opts.envelope.user.inputKind)
+    ? randomUUID()
+    : undefined;
   if (inkToken) {
     if (!canvasId) throw new Error('Ink intent requires a Space');
     if (!submission.rendered) throw new Error('Ink input was not rendered');

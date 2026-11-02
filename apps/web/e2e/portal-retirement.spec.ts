@@ -344,11 +344,13 @@ test('World membership, Open Space, shortcut metadata refresh, and test-Space de
   await waitForWrites(page);
   await page.goto('/');
   const card = page.locator(`a[href="/canvas/${sourceId}"]`).locator('..');
-  await card.hover();
-  await card.getByRole('button', { name: 'Delete Space', exact: true }).click();
+  await card.getByRole('button', { name: /^Actions for / }).click();
+  await page
+    .getByRole('menuitem', { name: 'Delete Space', exact: true })
+    .click();
   await page
     .getByRole('dialog')
-    .getByRole('button', { name: 'Delete', exact: true })
+    .getByRole('button', { name: 'Delete Space', exact: true })
     .click();
   await expect(page.locator(`a[href="/canvas/${sourceId}"]`)).toHaveCount(0);
   await goToWorld(page);

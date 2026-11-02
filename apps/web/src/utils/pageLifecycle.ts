@@ -41,7 +41,7 @@ export function createPageLifecycle() {
     { stage: PageCloseStage; settled: Promise<void> }
   >();
   let generation = 0;
-  let closing: { errors: unknown[] } | undefined;
+  let closing: { errors: unknown[]; signal: AbortSignal } | undefined;
 
   return {
     register(key: string, preparation: Preparation): () => void {
@@ -80,9 +80,9 @@ export function createPageLifecycle() {
       signal: AbortSignal,
       onStage?: (stage: PageCloseStage) => void,
     ): Promise<void> {
-      if (closing)
+      if (closing && !closing.signal.aborted)
         throw new Error('Page close preparation is already in progress.');
-      const request = { errors: [] as unknown[] };
+      const request = { errors: [] as unknown[], signal };
       closing = request;
       try {
         signal.throwIfAborted();

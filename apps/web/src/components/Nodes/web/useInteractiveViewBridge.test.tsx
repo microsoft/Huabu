@@ -129,6 +129,7 @@ describe('useInteractiveViewBridge', () => {
     unmounted = false;
     vi.useFakeTimers();
     FakeMessageChannel.latest = null;
+    iframeRef.current = { contentWindow } as unknown as HTMLIFrameElement;
     vi.stubGlobal('MessageChannel', FakeMessageChannel);
     mocks.getRuntime.mockResolvedValue(runtime);
     mocks.submitAction.mockResolvedValue({ accepted: true });
@@ -242,4 +243,139 @@ describe('useInteractiveViewBridge', () => {
     unmounted = true;
     expect(channel?.port1.close).toHaveBeenCalledOnce();
   });
+
+  it('connects once per iframe, closes on navigation, and reconnects only for a new element', async () => {
+    let bridge: ReturnType<typeof useInteractiveViewBridge>;
+    function Harness({ enabled = true }) {
+      bridge = useInteractiveViewBridge({
+        enabled,
+        canvasId: 'canvas-a',
+        nodeId: 'node-view',
+        iframeRef,
+      });
+      return null;
+    }
+    await act(async () => root.render(createElement(Harness)));
+    await act(async () => bridge.onLoad());
+    const first = FakeMessageChannel.latest;
+    expect(mocks.getRuntime).toHaveBeenCalledOnce();
+    act(() => bridge.onLoad());
+    expect(first?.port1.close).toHaveBeenCalledOnce();
+    expect(mocks.getRuntime).toHaveBeenCalledOnce();
+    await act(async () => {
+      vi.advanceTimersByTime(10_000);
+      window.dispatchEvent(new Event('focus'));
+    });
+    expect(mocks.getRuntime).toHaveBeenCalledOnce();
+
+    iframeRef.current = { contentWindow } as unknown as HTMLIFrameElement;
+    await act(async () => bridge.onLoad());
+    expect(mocks.getRuntime).toHaveBeenCalledTimes(2);
+    const second = FakeMessageChannel.latest;
+    expect(second).not.toBe(first);
+    await act(async () =>
+      root.render(createElement(Harness, { enabled: false })),
+    );
+    expect(second?.port1.close).toHaveBeenCalledOnce();
+    act(() => bridge.onLoad());
+    expect(mocks.getRuntime).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not send an in-flight bootstrap to a replacement iframe', async () => {
+    let resolveRuntime!: (value: typeof runtime) => void;
+    mocks.getRuntime.mockReturnValue(
+      new Promise<typeof runtime>((resolve) => {
+        resolveRuntime = resolve;
+      }),
+    );
+    let bridge: ReturnType<typeof useInteractiveViewBridge>;
+    function Harness() {
+      bridge = useInteractiveViewBridge({
+        enabled: true,
+        canvasId: 'canvas-a',
+        nodeId: 'node-view',
+        iframeRef,
+      });
+      return null;
+    }
+    act(() => root.render(createElement(Harness)));
+    act(() => bridge.onLoad());
+    iframeRef.current = { contentWindow } as unknown as HTMLIFrameElement;
+    await act(async () => resolveRuntime(runtime));
+    expect(FakeMessageChannel.latest).toBeNull();
+    expect(contentWindow.postMessage).not.toHaveBeenCalled();
+  });
+
+  it('reports bootstrap failure and recovers only after a fresh iframe load', async () => {
+    const error = new Error('Runtime unavailable');
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const onBootstrapError = vi.fn();
+    mocks.getRuntime.mockRejectedValueOnce(error);
+    let bridge: ReturnType<typeof useInteractiveViewBridge>;
+    function Harness() {
+      bridge = useInteractiveViewBridge({
+        enabled: true,
+        canvasId: 'canvas-a',
+        nodeId: 'node-view',
+        iframeRef,
+        onBootstrapError,
+      });
+      return null;
+    }
+    await act(async () => root.render(createElement(Harness)));
+    await act(async () => bridge.onLoad());
+    expect(onBootstrapError).toHaveBeenCalledOnce();
+    expect(log).toHaveBeenCalledWith(
+      '[interactive-view] bootstrap failed',
+      error,
+    );
+    expect(FakeMessageChannel.latest).toBeNull();
+    await act(async () => bridge.onLoad());
+    expect(mocks.getRuntime).toHaveBeenCalledOnce();
+    iframeRef.current = { contentWindow } as unknown as HTMLIFrameElement;
+    await act(async () => bridge.onLoad());
+    expect(FakeMessageChannel.latest?.port1.sent[0]).toMatchObject({
+      type: 'huabu.view.bootstrap',
+    });
+    expect(onBootstrapError).toHaveBeenCalledOnce();
+    log.mockRestore();
+  });
+
+  it.each(['replacement', 'disabled', 'unmounted'])(
+    'ignores a stale bootstrap rejection after %s',
+    async (change) => {
+      let rejectRuntime!: (error: Error) => void;
+      mocks.getRuntime.mockReturnValue(
+        new Promise((_, reject) => {
+          rejectRuntime = reject;
+        }),
+      );
+      const onBootstrapError = vi.fn();
+      let bridge: ReturnType<typeof useInteractiveViewBridge>;
+      function Harness({ enabled = true }) {
+        bridge = useInteractiveViewBridge({
+          enabled,
+          canvasId: 'canvas-a',
+          nodeId: 'node-view',
+          iframeRef,
+          onBootstrapError,
+        });
+        return null;
+      }
+      await act(async () => root.render(createElement(Harness)));
+      act(() => bridge.onLoad());
+      if (change === 'replacement') {
+        iframeRef.current = { contentWindow } as unknown as HTMLIFrameElement;
+      } else if (change === 'disabled') {
+        await act(async () =>
+          root.render(createElement(Harness, { enabled: false })),
+        );
+      } else {
+        act(() => root.unmount());
+        unmounted = true;
+      }
+      await act(async () => rejectRuntime(new Error('Stale failure')));
+      expect(onBootstrapError).not.toHaveBeenCalled();
+    },
+  );
 });

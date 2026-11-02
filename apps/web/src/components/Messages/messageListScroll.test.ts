@@ -8,8 +8,10 @@ import {
   forgetMessageListScrollTarget,
   messageListViewKey,
   nodePreviewViewKey,
+  readChatViewport,
   reconcileMessageListScrollTargets,
   registerMessageListScrollTarget,
+  rememberChatViewport,
   replaceMessageListScrollTarget,
 } from '@/store/previewWorkspace/scrollMemory';
 
@@ -151,13 +153,17 @@ describe('per-view scroll positions', () => {
     registerMessageListScrollTarget(first, viewKey);
     registerMessageListScrollTarget(second, viewKey);
     rememberMessageListScrollPosition(viewKey, 220);
+    const viewport = { scrollTop: 220, atBottom: false, firstMessageId: 'u1' };
+    rememberChatViewport(viewKey, viewport);
 
     forgetMessageListScrollTarget(first);
+    expect(readChatViewport(viewKey)).toEqual(viewport);
     expect(
       restoreMessageListScrollPosition(document.createElement('div'), viewKey),
     ).toBe(true);
 
     forgetMessageListScrollTarget(second);
+    expect(readChatViewport(viewKey)).toBeUndefined();
     expect(
       restoreMessageListScrollPosition(document.createElement('div'), viewKey),
     ).toBe(false);

@@ -4,7 +4,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const host = vi.hoisted(() => ({
-  profiles: [] as Array<{ id: string; alias: string; agentletId: string }>,
+  profiles: [] as Array<{
+    id: string;
+    alias: string;
+    agentletId: string;
+    visible?: boolean;
+  }>,
   connectedIds: [] as string[],
 }));
 
@@ -34,6 +39,18 @@ afterEach(() => {
 });
 
 describe('listAvailableAgentProfiles', () => {
+  it('does not offer or invoke a hidden connected Profile as an ordinary Agent', () => {
+    host.profiles = [
+      { id: 'proxy', alias: 'Proxy', agentletId: 'device', visible: false },
+    ];
+    host.connectedIds = ['device'];
+    expect(listAvailableAgentProfiles()).toEqual([
+      { id: 'huabu', alias: 'Built-In Pi' },
+    ]);
+    expect(() => requireAvailableAgentProfile('proxy')).toThrow(
+      expect.objectContaining({ code: 'profile_not_selectable' }),
+    );
+  });
   it('prepends Huabu and projects available Profile identities', () => {
     const profiles = new Map([
       [

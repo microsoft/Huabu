@@ -120,4 +120,26 @@ describe('page lifecycle', () => {
     await lifecycle.prepare(new AbortController().signal, vi.fn());
     expect(flush).toHaveBeenCalledOnce();
   });
+
+  it('accepts a retry immediately after abort without the old cleanup releasing its lock', async () => {
+    const lifecycle = createPageLifecycle();
+    const save = deferred();
+    const flush = vi.fn(() => save.promise);
+    lifecycle.register('canvas', { flush });
+    const controller = new AbortController();
+    const first = lifecycle.prepare(controller.signal);
+    const cancelled = expect(first).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+    controller.abort();
+    const retry = lifecycle.prepare(new AbortController().signal);
+    await cancelled;
+    expect(flush).toHaveBeenCalledTimes(2);
+    await expect(
+      lifecycle.prepare(new AbortController().signal),
+    ).rejects.toThrow('already in progress');
+    save.resolve();
+    await retry;
+    await lifecycle.prepare(new AbortController().signal);
+  });
 });

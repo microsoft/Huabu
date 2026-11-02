@@ -88,6 +88,17 @@ export const InPreviewSearchBar = ({
   );
 
   useEffect(() => {
+    if (!isActive || !scopeEl) return;
+    const chat = scopeEl.matches('[data-chat-thread-root]')
+      ? scopeEl
+      : scopeEl.querySelector('[data-chat-thread-root]');
+    chat?.dispatchEvent(new Event('chat-find-open'));
+    return () => {
+      chat?.dispatchEvent(new Event('chat-find-close'));
+    };
+  }, [isActive, scopeEl]);
+
+  useEffect(() => {
     if (isActive && focusInput) {
       inputRef.current?.focus();
       inputRef.current?.select();

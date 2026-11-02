@@ -132,6 +132,7 @@
 
 .preview-card__summary {
   -webkit-line-clamp: var(--card-summary-lines, 2);
+  max-height: calc(var(--card-summary-lines, 2) * var(--card-description-line));
   margin-top: var(--card-description-gap);
   font-size: var(--card-description);
   line-height: var(--card-description-line);

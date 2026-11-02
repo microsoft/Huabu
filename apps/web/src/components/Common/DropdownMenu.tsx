@@ -443,6 +443,7 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
             items[next]?.scrollIntoView({ block: 'nearest' });
           }}
           reference={floating ? triggerRef.current : undefined}
+          owner={triggerRef.current}
           placement={placement ?? (isRight ? 'bottom-end' : 'bottom-start')}
           position={computePosition()}
           onDismiss={handleDismiss}

@@ -105,6 +105,9 @@ export const chatEnvelopeSchema = z.object({
       selectedIds: z.array(z.string()),
       imageAttachments: z.array(chatAttachmentSchema),
       snapshotAttachments: z.array(chatAttachmentSchema),
+      textContents: z
+        .array(z.object({ nodeId: z.string(), content: z.string() }))
+        .optional(),
       inkRecognition: inkRecognitionSchema.optional(),
       inkGeometry: z
         .array(

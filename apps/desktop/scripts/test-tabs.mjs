@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-/* global window, document, getComputedStyle, DataTransfer, ClipboardEvent */
+/* global window, document, getComputedStyle, DataTransfer, ClipboardEvent, DOMMatrixReadOnly */
 
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -419,11 +419,71 @@ try {
     }
   }
   await assertTabIconSizes();
+  assert.equal(
+    await shell.evaluate(() => {
+      const strip = document.querySelector('[role="tablist"]');
+      return (
+        strip.nextElementSibling.getBoundingClientRect().left -
+        strip.getBoundingClientRect().right
+      );
+    }),
+    4,
+    'New-Tab controls must have a 4px gap from the Tab border',
+  );
   if (process.env.HUABU_TABS_SCREENSHOT) {
     await shell.screenshot({
       path: process.env.HUABU_TABS_SCREENSHOT.replace(
         /\.png$/,
         '-home-strip.png',
+      ),
+      clip: { x: 0, y: 0, width: 800, height: 36 },
+    });
+  }
+  const addControl = shell.getByRole('button', {
+    name: workspaceLabels.newTab,
+    exact: true,
+  });
+  await addControl.hover();
+  await shell.waitForTimeout(200);
+  const addGeometry = await addControl.evaluate((button) => {
+    const target = button.getBoundingClientRect();
+    const glyph = button.querySelector('svg').getBoundingClientRect();
+    const background = getComputedStyle(button, '::before');
+    const strip = button.parentElement.parentElement.getBoundingClientRect();
+    return {
+      targetWidth: target.width,
+      targetHeight: target.height,
+      glyphWidth: glyph.width,
+      glyphHeight: glyph.height,
+      backgroundWidth: parseFloat(background.width),
+      backgroundHeight: parseFloat(background.height),
+      topGap: target.top + parseFloat(background.top) - strip.top,
+      bottomGap: strip.bottom - target.bottom + parseFloat(background.bottom),
+      leftGap:
+        target.left +
+        parseFloat(background.left) -
+        document.querySelector('[role="tablist"]').getBoundingClientRect()
+          .right,
+      backgroundColor: background.backgroundColor,
+      buttonBackground: getComputedStyle(button).backgroundColor,
+    };
+  });
+  assert.equal(addGeometry.targetWidth, 28);
+  assert.equal(addGeometry.targetHeight, 28);
+  assert.equal(addGeometry.glyphWidth, 16);
+  assert.equal(addGeometry.glyphHeight, 16);
+  assert.equal(addGeometry.backgroundWidth, 24);
+  assert.equal(addGeometry.backgroundHeight, 24);
+  assert.equal(addGeometry.leftGap, 6);
+  assert.ok(Math.abs(addGeometry.topGap - 6) <= 0.5);
+  assert.ok(Math.abs(addGeometry.bottomGap - 6) <= 0.5);
+  assert.notEqual(addGeometry.backgroundColor, 'rgba(0, 0, 0, 0)');
+  assert.equal(addGeometry.buttonBackground, 'rgba(0, 0, 0, 0)');
+  if (process.env.HUABU_TABS_SCREENSHOT) {
+    await shell.screenshot({
+      path: process.env.HUABU_TABS_SCREENSHOT.replace(
+        /\.png$/,
+        '-plus-hover.png',
       ),
       clip: { x: 0, y: 0, width: 800, height: 36 },
     });
@@ -654,9 +714,9 @@ try {
   const createdCard = home
     .locator(`a[href="/canvas/${createdTab.canvasId}"]`)
     .locator('..');
-  await createdCard.hover();
-  await createdCard
-    .getByRole('button', { name: deletionLabels.remove, exact: true })
+  await createdCard.locator('button[aria-haspopup="menu"]').click();
+  await home
+    .getByRole('menuitem', { name: deletionLabels.remove, exact: true })
     .click();
   await home
     .getByText(deletionLabels.blocked, { exact: true })
@@ -960,9 +1020,9 @@ try {
     assert.equal(note.content, `# Settled ${side} on outer close`);
     assert.equal(note.label, `Settled ${side} on outer close`);
   }
-  await createdCard.hover();
-  await createdCard
-    .getByRole('button', { name: deletionLabels.remove, exact: true })
+  await createdCard.locator('button[aria-haspopup="menu"]').click();
+  await home
+    .getByRole('menuitem', { name: deletionLabels.remove, exact: true })
     .click();
   const deleteDialog = home.getByRole('dialog');
   await deleteDialog.waitFor({ state: 'visible' });
@@ -987,6 +1047,185 @@ try {
       path: process.env.HUABU_TABS_SCREENSHOT.replace(/\.png$/, '-home.png'),
     });
   }
+  const navigationParent = await request('/canvas', 'POST', {
+    title: 'Navigation parent',
+  });
+  const navigationChild = await request('/canvas', 'POST', {
+    title: 'Navigation child',
+  });
+  const parentPage = await open(shell, navigationParent.canvasId);
+  const parentSnapshot = await shell.evaluate(() =>
+    window.electronBridge.tabs.getState(),
+  );
+  await parentPage.evaluate((canvasId) => {
+    window.location.href = `/canvas/${canvasId}?node=missing#anchor`;
+  }, navigationChild.canvasId);
+  const childPage = await content(navigationChild.canvasId);
+  const replacedSnapshot = await shell.evaluate(() =>
+    window.electronBridge.tabs.getState(),
+  );
+  assert.equal(
+    replacedSnapshot.activeId,
+    parentSnapshot.activeId,
+    'Subspace navigation must keep the same Tab',
+  );
+  assert.equal(replacedSnapshot.tabs.length, parentSnapshot.tabs.length);
+  assert.ok(childPage.url().endsWith('?node=missing#anchor'));
+  await waitFor(
+    () => parentPage.isClosed(),
+    'disposing the saved source renderer',
+  );
+  const reopenedParent = await open(shell, navigationParent.canvasId);
+  const withParent = await shell.evaluate(() =>
+    window.electronBridge.tabs.getState(),
+  );
+  const existingResult = await reopenedParent.evaluate(
+    (canvasId) => window.electronBridge.tabs.open({ canvasId }),
+    navigationChild.canvasId,
+  );
+  assert.equal(existingResult.ok, true);
+  assert.equal(
+    reopenedParent.isClosed(),
+    false,
+    'An already-open destination must retain the source',
+  );
+  const selectedChild = await shell.evaluate(() =>
+    window.electronBridge.tabs.getState(),
+  );
+  assert.equal(selectedChild.activeId, replacedSnapshot.activeId);
+  assert.equal(selectedChild.tabs.length, withParent.tabs.length);
+  const childTab = shell.getByRole('tab', {
+    name: 'Navigation child',
+    exact: true,
+  });
+  const parentTab = shell.getByRole('tab', {
+    name: 'Navigation parent',
+    exact: true,
+  });
+  const childBounds = await childTab.boundingBox();
+  const parentBounds = await parentTab.boundingBox();
+  assert.ok(childBounds && parentBounds);
+  const dragStartX = childBounds.x + childBounds.width / 2;
+  const dragY = childBounds.y + childBounds.height / 2;
+  const dragEndX = parentBounds.x + parentBounds.width / 2;
+  await shell.mouse.move(dragStartX, dragY);
+  await shell.mouse.down();
+  await shell.mouse.move(dragStartX + 6, dragY);
+  const dragOverlay = shell.getByTestId('desktop-tab-drag-overlay');
+  await dragOverlay.waitFor({ state: 'visible' });
+  await shell.mouse.move(dragEndX, dragY, { steps: 12 });
+  await waitFor(
+    async () =>
+      parentTab.evaluate((button) => {
+        const style = getComputedStyle(button.parentElement);
+        return (
+          style.transform !== 'none' &&
+          new DOMMatrixReadOnly(style.transform).m41 < -10 &&
+          style.transitionProperty.includes('transform')
+        );
+      }),
+    'animating the neighbouring desktop Tab during pointer movement',
+  );
+  const sourceSegment = await childTab.locator('..').boundingBox();
+  const overlayBounds = await dragOverlay.boundingBox();
+  assert.ok(sourceSegment && overlayBounds);
+  assert.ok(
+    Math.abs(overlayBounds.y - childBounds.y) <= 1,
+    'Drag overlay must stay in the title strip',
+  );
+  assert.ok(
+    Math.abs(overlayBounds.width - sourceSegment.width) <= 1,
+    'Drag overlay must retain the full Tab width',
+  );
+  assert.equal(
+    await childTab
+      .locator('..')
+      .evaluate((segment) => getComputedStyle(segment).opacity),
+    '0.3',
+  );
+  assert.equal(
+    (await shell.evaluate(() => window.electronBridge.tabs.getState()))
+      .activeId,
+    selectedChild.activeId,
+  );
+  if (process.env.HUABU_TABS_SCREENSHOT) {
+    await shell.screenshot({
+      path: process.env.HUABU_TABS_SCREENSHOT.replace(
+        /\.png$/,
+        '-tab-drag.png',
+      ),
+      clip: { x: 0, y: 0, width: 800, height: 36 },
+    });
+  }
+  await shell.emulateMedia({ reducedMotion: 'reduce' });
+  assert.equal(
+    await parentTab.evaluate(
+      (button) => getComputedStyle(button.parentElement).transitionProperty,
+    ),
+    'none',
+    'Reduced motion must disable neighbour animation',
+  );
+  await shell.emulateMedia({ reducedMotion: 'no-preference' });
+  await shell.mouse.up();
+  await dragOverlay.waitFor({ state: 'detached' });
+  await waitFor(async () => {
+    const snapshot = await shell.evaluate(() =>
+      window.electronBridge.tabs.getState(),
+    );
+    return snapshot.tabs.at(-1).canvasId === navigationChild.canvasId;
+  }, 'persisting dragged Tab order');
+  const reordered = await shell.evaluate(() =>
+    window.electronBridge.tabs.getState(),
+  );
+  const cancelBounds = await childTab.boundingBox();
+  assert.ok(cancelBounds);
+  await shell.mouse.move(cancelBounds.x + 30, dragY);
+  await shell.mouse.down();
+  await shell.mouse.move(cancelBounds.x + 10, dragY);
+  await dragOverlay.waitFor({ state: 'visible' });
+  await shell.keyboard.press('Escape');
+  await shell.mouse.up();
+  await dragOverlay.waitFor({ state: 'detached' });
+  assert.deepEqual(
+    (
+      await shell.evaluate(() => window.electronBridge.tabs.getState())
+    ).tabs.map((tab) => tab.id),
+    reordered.tabs.map((tab) => tab.id),
+    'Escape must cancel desktop Tab reordering',
+  );
+  await shell
+    .getByRole('tab', { name: 'Navigation child', exact: true })
+    .press('Alt+Shift+ArrowLeft');
+  await waitFor(async () => {
+    const snapshot = await shell.evaluate(() =>
+      window.electronBridge.tabs.getState(),
+    );
+    return snapshot.tabs.at(-1).canvasId === navigationParent.canvasId;
+  }, 'reordering Tabs with the keyboard');
+  assert.equal(
+    (
+      await shell.evaluate(
+        (id) => window.electronBridge.tabs.close(id),
+        selectedChild.activeId,
+      )
+    ).ok,
+    true,
+  );
+  assert.equal(
+    (await shell.evaluate(() => window.electronBridge.tabs.getState()))
+      .activeId,
+    withParent.activeId,
+    'Closing a Tab must select its right neighbour',
+  );
+  assert.equal(
+    (
+      await shell.evaluate(
+        (id) => window.electronBridge.tabs.close(id),
+        withParent.activeId,
+      )
+    ).ok,
+    true,
+  );
   await home.locator(`a[href="/canvas/${spaces[0].canvasId}"]`).click();
   const a = await content(spaces[0].canvasId);
   await assertTabIconSizes();
@@ -1743,6 +1982,17 @@ try {
       });
     }
   });
+  await electron.evaluate(({ dialog }) => {
+    const original = dialog.showMessageBox;
+    globalThis.tabsSmokeRestoreDiscardDialog = () => {
+      dialog.showMessageBox = original;
+    };
+    globalThis.tabsSmokeDiscardPrompts = [];
+    dialog.showMessageBox = async (_win, options) => {
+      globalThis.tabsSmokeDiscardPrompts.push(options);
+      return { response: 0, checkboxChecked: false };
+    };
+  });
   let titleClose;
   try {
     await b.evaluate(async () => {
@@ -1796,12 +2046,36 @@ try {
       false,
       'A title failure must keep its renderer available for explicit retry',
     );
-    assert.equal(await b.evaluate(() => document.body.inert), false);
+    await b.waitForFunction(() => !document.body.inert);
     assert.equal(
       (await shell.evaluate((id) => window.electronBridge.tabs.reload(id), bId))
         .ok,
       false,
       'Reload must also reject the unresolved title failure',
+    );
+    assert.deepEqual(
+      await electron.evaluate(() =>
+        globalThis.tabsSmokeDiscardPrompts.map(
+          ({ buttons, defaultId, cancelId }) => ({
+            buttons,
+            defaultId,
+            cancelId,
+          }),
+        ),
+      ),
+      [
+        {
+          buttons: ['Cancel', 'Close without saving'],
+          defaultId: 0,
+          cancelId: 0,
+        },
+        {
+          buttons: ['Cancel', 'Reload without saving'],
+          defaultId: 0,
+          cancelId: 0,
+        },
+      ],
+      'Close and reload must offer explicit discard with Cancel as the default',
     );
     await shell.getByRole('tab', { name: 'Tabs smoke B', exact: true }).click();
     const retryTitleLabel = await b.evaluate(async () => {
@@ -1951,6 +2225,13 @@ try {
     assert.equal(refused.ok, false);
     assert.match(refused.error, /Draft quota exceeded/);
     assert.equal(b.isClosed(), false);
+    assert.match(
+      await electron.evaluate(
+        () => globalThis.tabsSmokeDiscardPrompts.at(-1).detail,
+      ),
+      /Draft quota exceeded/,
+      'The discard warning must explain the local persistence failure',
+    );
     await b.evaluate(() => globalThis.tabsSmokeRestoreTitleStorage());
     const retryLabel = await b.evaluate(async () => {
       const { i18n } = await import('/src/i18n/index.ts');
@@ -2011,6 +2292,11 @@ try {
     'An unresolved save conflict must keep the Tab open',
   );
   assert.equal(a.isClosed(), false);
+  await electron.evaluate(() => {
+    globalThis.tabsSmokeRestoreDiscardDialog();
+    delete globalThis.tabsSmokeRestoreDiscardDialog;
+    delete globalThis.tabsSmokeDiscardPrompts;
+  });
   await b.evaluate(async () => {
     const { default: canvas, saveCanvasForSubmission } =
       await import('/src/store/canvasStore.ts');

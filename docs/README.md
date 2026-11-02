@@ -43,6 +43,8 @@ docs/
 
 ## Architecture — current system reference
 
+Connected-device browsing and the bundled ACP proxy are documented in [device-files.md](./architecture/device-files.md).
+
 | Doc                                                                             | What it covers                                                                                           |
 | ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | --- | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | --- | ----------------------------------------------- | -------------------------------------------------------------------------------------------- |
 | [agent-architecture.md](./architecture/agent-architecture.md)                   | Server-side agent runtime, tools, skills, SSE protocol.                                                  |

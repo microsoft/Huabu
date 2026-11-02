@@ -8,6 +8,7 @@ import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/components/Common/Button';
 import { Popover } from '@/components/Common/Popover';
+import { SummaryContent } from '@/components/Common/SummaryContent';
 
 import { PreviewHeaderButton } from './PreviewHeaderButton';
 import { usePreviewHeaderSlot } from './PreviewHeaderSlot';
@@ -87,9 +88,9 @@ export const AiSummaryButton = ({
               </Button>
             </div>
             {hasSummary && (
-              <p className="text-fg-default text-sm leading-relaxed wrap-anywhere">
-                {summary}
-              </p>
+              <div className="text-fg-default text-sm leading-relaxed wrap-anywhere">
+                <SummaryContent summary={summary} />
+              </div>
             )}
             {hasKeywords && (
               <div className="flex flex-wrap gap-1.5">

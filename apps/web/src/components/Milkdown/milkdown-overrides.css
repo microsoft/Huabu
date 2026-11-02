@@ -710,6 +710,67 @@
   cursor: grabbing;
 }
 
+.milkdown-touch-blocks {
+  position: relative;
+}
+
+.milkdown-touch-blocks .milkdown-block-handle {
+  display: none !important;
+}
+
+.milkdown-touch-block-grip {
+  position: absolute;
+  z-index: 5;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  width: 44px;
+  height: 44px;
+  padding: 2px 0 0;
+  border: 0;
+  color: var(--fg-subtle);
+  background: transparent;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.milkdown-touch-block-grip-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 20px;
+  border-radius: 0.25rem;
+}
+
+.milkdown-touch-block-grip:hover .milkdown-touch-block-grip-icon,
+.milkdown-touch-block-grip:active .milkdown-touch-block-grip-icon {
+  color: var(--fg-default);
+  background: var(--bg-hover);
+}
+
+.milkdown-touch-drag-preview {
+  position: fixed;
+  z-index: 10000;
+  width: 244px;
+  max-height: 100px;
+  overflow: hidden;
+  padding: 8px;
+  border: 2px solid var(--edge-default);
+  border-radius: 0.5rem;
+  background: var(--bg-surface);
+  color: var(--fg-default);
+  font-size: 12px;
+  pointer-events: none;
+  user-select: none;
+}
+
+.milkdown-touch-drag-preview[data-drop-accepted='true'] {
+  border-color: var(--info);
+}
+
 /* ── Drag preview host ──────────────────────────────────────────────
    `MilkdownPreview.buildBlockDragImage` mounts a fresh
    `<div class="milkdown-drag-preview-host">` in `document.body` for

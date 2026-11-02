@@ -79,6 +79,8 @@ export function dragPayloadToMarkdown(
   options: PayloadToMarkdownOptions = {},
 ): string | null {
   switch (payload.kind) {
+    case 'fileReference':
+      return null;
     case 'note': {
       const content = payload.data.content.trim();
       return content === '' ? null : content;

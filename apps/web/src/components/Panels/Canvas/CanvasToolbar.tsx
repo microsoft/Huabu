@@ -16,6 +16,7 @@ import {
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { SpaceOrganizationPopover } from '@/components/Space/SpaceOrganizationPopover';
 import { SpaceShortcutPicker } from '@/components/Space/SpaceShortcutPicker';
 import { matchesShortcut } from '@/config/shortcuts';
 import { importFilesAsNodes } from '@/handler/canvasCommand/nodeInputBuilders';
@@ -82,7 +83,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
 
   // State
   const [activeModal, setActiveModal] = useState<
-    'upload' | 'link' | 'spacePreview' | null
+    'upload' | 'link' | 'spacePreview' | 'bringSpace' | null
   >(null);
   const [resourceMenuOpen, setResourceMenuOpen] = useState(false);
   const resourceMenuRef = useRef<HTMLDivElement>(null);
@@ -203,7 +204,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
 
   const resourceOptions = useMemo<
     {
-      value: 'upload' | 'link' | 'spacePreview';
+      value: 'upload' | 'link' | 'spacePreview' | 'bringSpace';
       label: string;
       icon: React.ReactNode;
     }[]
@@ -224,6 +225,11 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             {
               value: 'spacePreview' as const,
               label: t('spacePreview.add'),
+              icon: <NODE_ICON.spacePreview />,
+            },
+            {
+              value: 'bringSpace' as const,
+              label: t('spaceHierarchy.bring'),
               icon: <NODE_ICON.spacePreview />,
             },
           ]
@@ -643,6 +649,14 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
 
       {activeModal === 'spacePreview' && (
         <SpaceShortcutPicker
+          reference={resourceMenuRef.current?.querySelector('button') ?? null}
+          onClose={() => setActiveModal(null)}
+        />
+      )}
+      {activeModal === 'bringSpace' && (
+        <SpaceOrganizationPopover
+          canvasId={canvasId}
+          mode="source"
           reference={resourceMenuRef.current?.querySelector('button') ?? null}
           onClose={() => setActiveModal(null)}
         />

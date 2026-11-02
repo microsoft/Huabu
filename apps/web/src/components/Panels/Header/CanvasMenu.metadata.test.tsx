@@ -3,13 +3,22 @@
 
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { listCanvases } from '@/api/canvas';
 import useCanvasStore from '@/store/canvasStore';
 import { useWorkspaceStore } from '@/store/workspaceStore';
 
-import { CanvasMenu } from './CanvasMenu';
+import { CanvasMenu as CanvasMenuComponent } from './CanvasMenu';
+
+function CanvasMenu() {
+  return (
+    <MemoryRouter>
+      <CanvasMenuComponent />
+    </MemoryRouter>
+  );
+}
 
 vi.mock('@/api/canvas', async (importOriginal) => ({
   ...(await importOriginal()),
@@ -69,6 +78,59 @@ afterEach(() => {
 });
 
 describe('CanvasMenu Space metadata', () => {
+  it('disables both movement actions until names and hierarchy have loaded', async () => {
+    let finish!: (value: Awaited<ReturnType<typeof listCanvases>>) => void;
+    vi.mocked(listCanvases).mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    useWorkspaceStore.setState({
+      spaceTitlesStatus: 'idle',
+      spaceTitles: {},
+      spaceSummaries: { target: { parentSpaceId: 'parent' } },
+    });
+    await act(async () => root.render(<CanvasMenu />));
+    await act(async () =>
+      container
+        .querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')
+        ?.click(),
+    );
+    const actions = () =>
+      [
+        ...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+      ].filter((button) =>
+        ['spaceHierarchy.move', 'spaceHierarchy.moveToTopLevel'].includes(
+          button.textContent ?? '',
+        ),
+      );
+    expect(actions()).toHaveLength(2);
+    expect(actions().every((button) => button.disabled)).toBe(true);
+    await act(async () =>
+      finish({
+        canvases: [
+          {
+            canvasId: 'target',
+            title: 'Loaded title',
+            parentSpaceId: 'parent',
+            nodeCount: 2,
+            createdAt: 1,
+            updatedAt: 1,
+          },
+          {
+            canvasId: 'parent',
+            title: 'Parent',
+            nodeCount: 1,
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        ],
+      }),
+    );
+    expect(actions()).toHaveLength(2);
+    expect(actions().every((button) => !button.disabled)).toBe(true);
+  });
+
   it('publishes the current title after an accepted header rename', async () => {
     tryRename.mockImplementationOnce(async () => {
       useCanvasStore.setState({ canvasTitle: 'Renamed' });

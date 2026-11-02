@@ -115,7 +115,9 @@ async function renderSettings() {
 }
 
 async function click(label: string) {
-  const button = [...(container?.querySelectorAll('button') ?? [])].find(
+  if (label === 'menu.edit') label = 'settings.editAgentProfile';
+  if (label === 'actions.delete') label = 'settings.deleteAgentProfile';
+  const button = [...document.querySelectorAll('button')].find(
     (element) =>
       element.getAttribute('aria-label') === label ||
       element.textContent === label,
@@ -188,76 +190,97 @@ afterEach(() => {
 });
 
 describe('ExternalAgentsSettings', () => {
-  it('starts both list sections expanded and keeps Add actions available when collapsed', async () => {
+  it('retains offline and ambiguous legacy Profiles without routing them to an arbitrary device', async () => {
     await renderSettings();
-    const device = container?.querySelector<HTMLButtonElement>(
-      '[data-editor-trigger="connect-device"]',
+    const device = useAcpProfilesStore.getState().connectedDevices[0];
+    await act(async () =>
+      useAcpProfilesStore.setState({
+        connectedDevices: [
+          { ...device, hostname: 'same' },
+          { ...device, agentletId: 'other', hostname: 'same' },
+        ],
+        profiles: [
+          profile,
+          { ...profile, id: 'legacy', alias: 'Legacy', agentletId: 'same' },
+          { ...profile, id: 'offline', alias: 'Offline', agentletId: 'gone' },
+          { ...profile, id: 'duplicate', alias: 'Reviewer' },
+        ],
+      }),
     );
-    const agent = container?.querySelector<HTMLButtonElement>(
-      '[data-editor-trigger="create"]',
-    );
-    for (const [trigger, label] of [
-      [device, 'settings.connectedDevices'],
-      [agent, 'settings.agentProfiles'],
-    ] as const) {
-      const section = trigger?.closest('section');
-      const heading = section?.querySelector<HTMLButtonElement>(
-        'button[aria-expanded]',
-      );
-      const card = section?.querySelector<HTMLElement>('.divide-y');
-      expect(heading?.getAttribute('aria-expanded')).toBe('true');
-      await click(label);
-      expect(heading?.getAttribute('aria-expanded')).toBe('false');
-      expect(card?.hidden).toBe(true);
-      expect(trigger?.closest('[hidden]')).toBeNull();
-      expect(trigger?.disabled).toBe(false);
-      await click(label);
-      expect(card?.hidden).toBe(false);
-      expect(section?.querySelector('.divide-y')).toBe(card);
+    const local = container?.querySelector('[data-device-id="local"]');
+    expect(
+      local?.querySelectorAll('[data-editor-trigger^="command:"]'),
+    ).toHaveLength(2);
+    expect(local?.textContent).not.toContain('Legacy');
+    expect(container?.textContent).toContain('Legacy');
+    expect(container?.textContent).toContain('Offline');
+    expect(
+      container?.querySelector('[data-device-id="same"]')?.textContent,
+    ).toContain('Legacy');
+    expect(
+      container?.querySelector('[data-device-id="gone"]')?.textContent,
+    ).toContain('Offline');
+    for (const id of ['same', 'gone']) {
+      expect(
+        container?.querySelector(`[data-device-id="${id}"]`)?.textContent,
+      ).not.toContain('settings.agentUnavailable');
     }
-    await click('settings.connectedDevices');
+    expect(
+      apiMocks.detection.mock.calls.every((call) => call[0] === false),
+    ).toBe(true);
+  });
+  it('groups Profiles under one device fold and keeps Add actions outside the fold', async () => {
+    await renderSettings();
+    const agent = container?.querySelector<HTMLButtonElement>(
+      '[data-editor-trigger="create:local"]',
+    );
+    const section = agent?.closest('[data-device-id]');
+    expect(section?.textContent).toContain('Reviewer');
+    const heading = section?.querySelector<HTMLButtonElement>(
+      'button[aria-controls]',
+    );
+    expect(heading?.getAttribute('aria-expanded')).toBe('true');
+    await act(async () => heading?.click());
+    const card = document.getElementById(
+      heading?.getAttribute('aria-controls') ?? '',
+    );
+    expect(card?.hidden).toBe(true);
+    expect(agent?.closest('[hidden]')).toBeNull();
+    expect(agent?.disabled).toBe(false);
+    await act(async () =>
+      useAcpProfilesStore.setState({
+        connectedDevices: [...useAcpProfilesStore.getState().connectedDevices],
+      }),
+    );
+    expect(heading?.getAttribute('aria-expanded')).toBe('false');
     await click('settings.addDevice');
     expect(container?.textContent).toContain('git clone');
-    expect(container?.textContent).not.toContain('settings.connectedDevices');
   });
 
   it.each([false, true])(
-    'puts both Add actions beside headings outside the list with empty lists: %s',
+    'keeps Connect available below the list and scopes Add to online devices: %s',
     async (empty) => {
       await renderSettings();
       if (empty) {
         await act(async () =>
-          useAcpProfilesStore.setState({ profiles: [], connectedDevices: [] }),
+          useAcpProfilesStore.setState({
+            profiles: [],
+            connectedDevices: [],
+            knownDevices: [],
+          }),
         );
       }
       const device = container?.querySelector<HTMLButtonElement>(
         '[data-editor-trigger="connect-device"]',
       );
       const agent = container?.querySelector<HTMLButtonElement>(
-        '[data-editor-trigger="create"]',
+        '[data-editor-trigger="create:local"]',
       );
-      for (const button of [device, agent]) {
-        expect(button?.parentElement?.classList.contains('ml-auto')).toBe(true);
-        expect(
-          button?.parentElement?.parentElement?.querySelector(
-            '[aria-expanded]',
-          ),
-        ).not.toBeNull();
-        const card = button?.closest('section')?.querySelector('.divide-y');
-        expect(card?.contains(button ?? null)).toBe(false);
-        expect(button?.classList.contains('bg-transparent')).toBe(true);
-        expect(button?.classList.contains('text-fg-muted')).toBe(true);
-        expect(button?.classList.contains('text-xs')).toBe(true);
-      }
+      expect(device?.closest('[data-device-id]')).toBeNull();
       if (empty) {
-        expect(agent?.closest('section')?.textContent).toContain(
-          'settings.noAgents',
-        );
-        expect(agent?.closest('section')?.textContent).toContain(
-          'settings.noConnectedDevicesDescription',
-        );
-      }
-      expect(agent?.disabled).toBe(empty);
+        expect(agent).toBeNull();
+        expect(container?.textContent).toContain('settings.noConnectedDevices');
+      } else expect(agent?.closest('[data-device-id]')).not.toBeNull();
       expect(device?.disabled).toBe(false);
     },
   );
@@ -275,21 +298,15 @@ describe('ExternalAgentsSettings', () => {
   it('opens device connection as a focused view and restores the Add device trigger on Back', async () => {
     await renderSettings();
     const trigger = container?.querySelector<HTMLButtonElement>(
-      '[aria-label="settings.addDevice"]',
+      '[data-editor-trigger="connect-device"]',
     );
-    const section = trigger?.closest('section');
-    expect(section?.querySelector('[aria-expanded]')?.textContent).toBe(
-      'settings.connectedDevices',
-    );
-    expect(section?.textContent).toContain('Local machine: linux x64');
     expect(trigger?.hasAttribute('aria-expanded')).toBe(false);
-    expect(section?.textContent).not.toContain('git clone');
+    expect(container?.textContent).not.toContain('git clone');
 
     await click('settings.addDevice');
     expect(container?.contains(trigger ?? null)).toBe(false);
     expect(container?.textContent).toContain('git clone');
-    expect(container?.textContent).not.toContain('settings.connectedDevices');
-    expect(container?.textContent).not.toContain('settings.agentProfiles');
+    expect(container?.querySelector('[data-device-id]')).toBeNull();
     expect(container?.textContent).not.toContain(
       'settings.externalAgentIdleTimeout',
     );
@@ -304,7 +321,7 @@ describe('ExternalAgentsSettings', () => {
     );
     expect(document.activeElement).toBe(restoredTrigger);
     expect(container?.textContent).not.toContain('git clone');
-    expect(container?.textContent).toContain('settings.connectedDevices');
+    expect(container?.textContent).toContain('Local machine: linux x64');
     expect(onNavigationChange.mock.lastCall?.[0]).toBeNull();
   });
 
@@ -313,7 +330,7 @@ describe('ExternalAgentsSettings', () => {
     await act(async () =>
       useAcpProfilesStore.setState({ connectedDevices: [] }),
     );
-    expect(container?.textContent).toContain('settings.noConnectedDevices');
+    expect(container?.textContent).toContain('settings.localAgentDisabled');
     await click('settings.addDevice');
     expect(container?.textContent).toContain('git clone');
   });
@@ -331,9 +348,9 @@ describe('ExternalAgentsSettings', () => {
       );
       expect(
         container?.querySelector<HTMLButtonElement>(
-          '[data-editor-trigger="create"]',
-        )?.disabled,
-      ).toBe(!loaded);
+          '[data-editor-trigger="create:local"]',
+        ) !== null,
+      ).toBe(loaded);
       expect(
         container?.querySelector<HTMLButtonElement>(
           '[data-editor-trigger="connect-device"]',
@@ -400,6 +417,7 @@ describe('ExternalAgentsSettings', () => {
     });
     await renderSettings();
     await click('settings.addAgent');
+    await click('settings.customCommand');
     input('input[aria-label="settings.launchCommand"]', 'agent --acp');
     input('[aria-label="path"]', '/work/project');
     await click('settings.createProfile');
@@ -421,7 +439,7 @@ describe('ExternalAgentsSettings', () => {
       return profiles[0];
     });
     await renderSettings();
-    await click('settings.editProfile');
+    await click('menu.edit');
     expect(apiMocks.detection).toHaveBeenLastCalledWith(true, {
       profileId: profile.id,
     });
@@ -455,7 +473,7 @@ describe('ExternalAgentsSettings', () => {
       return { deleted: true };
     });
     await renderSettings();
-    await click('settings.deleteProfile');
+    await click('actions.delete');
     const confirm = container
       ?.querySelector('[role="dialog"]')
       ?.querySelectorAll('button')[1];

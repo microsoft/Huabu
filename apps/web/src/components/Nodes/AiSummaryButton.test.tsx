@@ -97,4 +97,12 @@ describe('<AiSummaryButton>', () => {
       'Keyword',
     );
   });
+
+  it('uses the same structured summary in the preview popover as on the canvas', () => {
+    render('A weekend away.\n\n- Friday arrival\n- Sunday return');
+    act(() => container?.querySelector<HTMLButtonElement>('button')?.click());
+    const dialog = document.querySelector('[role="dialog"]');
+    expect(dialog?.querySelector('p')?.textContent).toBe('A weekend away.');
+    expect(dialog?.querySelectorAll('li')).toHaveLength(2);
+  });
 });

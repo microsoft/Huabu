@@ -43,3 +43,4 @@ export * from './deployment.js';
 export * from './identity.js';
 export * from './agent-node.js';
 export * from './service-package.js';
+export * from './device-files.js';

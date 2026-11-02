@@ -24,6 +24,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
+import { subscribeCanvasUpdates } from './canvas-sync.js';
 import canvasRoutes from './canvas.route.js';
 import {
   getCanvasStore,
@@ -87,6 +88,138 @@ afterEach(() => {
 });
 
 describe('PUT /nodes/:nodeId/content — content CAS', () => {
+  it('notifies the affected node after content save and sidecar deletion, not a rejected CAS', async () => {
+    const app = await buildApp();
+    const received = vi.fn();
+    const unsubscribe = subscribeCanvasUpdates('c1', received);
+    try {
+      seedCanvas('c1', 'n1', 'Note');
+      expect(
+        (
+          await putContent(app, 'c1', 'n1', {
+            nodeType: 'note',
+            content: 'first',
+            expectRev: REV_EMPTY,
+          })
+        ).statusCode,
+      ).toBe(200);
+      expect(received).toHaveBeenCalledExactlyOnceWith({
+        type: 'invalidate',
+        data: { nodeIds: ['n1'] },
+      });
+      received.mockClear();
+      expect(
+        (
+          await putContent(app, 'c1', 'n1', {
+            nodeType: 'note',
+            content: 'stale',
+            expectRev: REV_EMPTY,
+          })
+        ).statusCode,
+      ).toBe(409);
+      expect(received).not.toHaveBeenCalled();
+      expect(
+        (await app.inject({ method: 'DELETE', url: '/canvas/c1/nodes/n1' }))
+          .statusCode,
+      ).toBe(200);
+      expect(received).toHaveBeenCalledExactlyOnceWith({
+        type: 'invalidate',
+        data: { nodeIds: ['n1'] },
+      });
+    } finally {
+      unsubscribe();
+      await app.close();
+    }
+  });
+
+  it('rejects source/body writes and type spoofing on metadata-only file references', async () => {
+    seedCanvas('c1', 'ref', 'Source');
+    const store = getCanvasStore('c1');
+    const canvas = store.read()!;
+    canvas.state.nodes = [
+      {
+        id: 'ref',
+        type: 'fileReference',
+        position: { x: 0, y: 0 },
+        data: {
+          label: 'Source',
+          fileReference: {
+            agentletId: 'offline-device',
+            path: '/private/source.txt',
+          },
+        },
+      },
+    ];
+    store.write(canvas);
+    const app = await buildApp();
+    try {
+      for (const body of [
+        { nodeType: 'fileReference', content: 'secret bytes' },
+        { nodeType: 'fileReference', src: 'file:///private/source.txt' },
+        { nodeType: 'note', content: 'type spoof' },
+      ])
+        expect((await putContent(app, 'c1', 'ref', body)).statusCode).toBe(400);
+      expect(
+        (
+          await putContent(app, 'c1', 'ref', {
+            nodeType: 'fileReference',
+            label: 'Renamed',
+          })
+        ).statusCode,
+      ).toBe(200);
+      expect(store.readNode('ref')).toMatchObject({
+        content: '',
+        label: 'Renamed',
+      });
+      const read = await app.inject({ method: 'GET', url: '/canvas/c1' });
+      expect(read.statusCode).toBe(200);
+      const node = read.json().state.nodes[0];
+      expect(node.data.fileReference).toEqual({
+        agentletId: 'offline-device',
+        path: '/private/source.txt',
+      });
+      expect(node.data).not.toHaveProperty('content');
+      expect(node.data).not.toHaveProperty('src');
+      const move = await app.inject({
+        method: 'PUT',
+        url: '/canvas/c1',
+        payload: {
+          version: store.read()?.version,
+          state: {
+            nodes: [
+              { id: 'ref', type: 'fileReference', position: { x: 5, y: 5 } },
+            ],
+            edges: [],
+          },
+        },
+      });
+      expect(move.statusCode).toBe(200);
+      expect(store.read()?.state.nodes).toMatchObject([
+        {
+          data: {
+            fileReference: {
+              agentletId: 'offline-device',
+              path: '/private/source.txt',
+            },
+          },
+        },
+      ]);
+      const invalid = await app.inject({
+        method: 'PUT',
+        url: '/canvas/c1',
+        payload: {
+          version: store.read()?.version,
+          state: {
+            nodes: [{ id: 'ref', data: { content: 'type-omitted bypass' } }],
+            edges: [],
+          },
+        },
+      });
+      expect(invalid.statusCode).toBe(400);
+    } finally {
+      await app.close();
+    }
+  });
   it.each(['user', 'agent'])(
     'preserves a current %s Question label against a late preprocessing save',
     async (labelSource) => {

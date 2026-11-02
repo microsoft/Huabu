@@ -42,6 +42,7 @@ vi.mock(
   },
 );
 
+import { subscribeCanvasUpdates } from './canvas-sync.js';
 import canvasRoutes from './canvas.route.js';
 import { withCanvasMutex } from './write-coordinator.js';
 import { registerLocalTestIdentity } from '../../test-support/local-identity.js';
@@ -340,6 +341,35 @@ describe('POST /api/canvas lifecycle', () => {
 });
 
 describe('PUT /api/canvas/:canvasId lifecycle', () => {
+  it('notifies observers after topology saves without publishing editable deltas', async () => {
+    createCanvas('c1', 'Original');
+    const app = await buildApp();
+    const received = vi.fn();
+    const unsubscribe = subscribeCanvasUpdates('c1', received);
+    try {
+      const response = await app.inject({
+        method: 'PUT',
+        url: '/canvas/c1',
+        payload: { version: 0, state: { nodes: [], edges: [] } },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(received).toHaveBeenCalledExactlyOnceWith({
+        type: 'invalidate',
+        data: {},
+      });
+      received.mockClear();
+      const conflict = await app.inject({
+        method: 'PUT',
+        url: '/canvas/c1',
+        payload: { version: 0, state: { nodes: [], edges: [] } },
+      });
+      expect(conflict.statusCode).toBe(409);
+      expect(received).not.toHaveBeenCalled();
+    } finally {
+      unsubscribe();
+      await app.close();
+    }
+  });
   it.each(['sketch', undefined])(
     'rejects malformed persisted Sigil metadata before saving or renaming with type %s',
     async (type) => {

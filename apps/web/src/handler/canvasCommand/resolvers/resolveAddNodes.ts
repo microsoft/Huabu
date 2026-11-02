@@ -73,7 +73,7 @@ const VIEWPORT_FALLBACK_HEIGHT =
  * height. In that case we use a shared viewport fallback height so
  * centring still feels balanced until measured dimensions are available.
  */
-function viewportCenterAnchor(
+export function viewportCenterAnchor(
   nodeType: CanvasNodeType,
   size: NodeSize | undefined,
   center: Point,

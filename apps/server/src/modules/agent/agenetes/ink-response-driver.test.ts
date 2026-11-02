@@ -137,6 +137,25 @@ function publishResult(attributedThreadId = threadId) {
 
 describe('Ink verification before Agenetes persistence', () => {
   it.each(['internal', 'external'])(
+    'also requires visible delivery for %s node-only lasso requests',
+    async (kind) => {
+      const h = await mount(kind);
+      const selected = createChatSubmission({
+        ...envelope,
+        user: { ...envelope.user, inputKind: 'selection-intent' },
+      });
+      const events = await collect(h.handle.run(selected, {}));
+      expect(events.at(-1)).toEqual({
+        type: 'error',
+        data: {
+          error: expect.stringContaining('without a visible Canvas result'),
+        },
+      });
+      expect(events).not.toContainEqual(done);
+    },
+  );
+
+  it.each(['internal', 'external'])(
     'gives the %s initial stream, reconnect, and history the same delivery failure',
     async (kind) => {
       const h = await mount(kind);

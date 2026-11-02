@@ -96,7 +96,17 @@ const chrome = EditorView.theme(
 
     // Active line: very subtle to avoid competing with selection.
     '.cm-activeLine': {
+      backgroundColor: 'transparent',
+      position: 'relative',
+    },
+    // CodeMirror draws selections behind content at z-index -1.
+    '.cm-activeLine::before': {
+      content: '""',
+      position: 'absolute',
+      inset: '0',
       backgroundColor: BG_HOVER,
+      zIndex: '-2',
+      pointerEvents: 'none',
     },
     '.cm-activeLineGutter': {
       backgroundColor: BG_HOVER,

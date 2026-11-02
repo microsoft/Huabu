@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { normalizeOrigin } from '@huabu/shared';
+import { isFileReference, normalizeOrigin } from '@huabu/shared';
 
-import type { NodeOrigin } from '@huabu/shared';
+import type { FileReference, NodeOrigin } from '@huabu/shared';
 
 export const HUABU_DND_MIME = 'application/x-huabu-dnd';
 
@@ -50,7 +50,15 @@ export type DragPayload = {
   dragId: string;
   // Where the drag originated from, e.g. 'user-from-chat', 'user-from-library', 'user-excerpt'.
   origin: NodeOrigin;
-} & (WebDragPayload | NoteDragPayload | ImageDragPayload);
+} & (
+  | WebDragPayload
+  | NoteDragPayload
+  | ImageDragPayload
+  | {
+      kind: 'fileReference';
+      data: { fileReference: FileReference; label: string };
+    }
+);
 
 export const createDragId = () => {
   const uuid = globalThis.crypto?.randomUUID?.();
@@ -268,6 +276,23 @@ export const getHuabuPayload = (dt: DataTransfer): DragPayload | null => {
           src: src.trim(),
           label: typeof label === 'string' ? label : undefined,
         },
+        dragId: normalizedDragId,
+        origin: normalizedOrigin,
+      };
+    }
+
+    if (
+      kind === 'fileReference' &&
+      data &&
+      typeof data === 'object' &&
+      'fileReference' in data &&
+      isFileReference(data.fileReference) &&
+      'label' in data &&
+      typeof data.label === 'string'
+    ) {
+      return {
+        kind,
+        data: { fileReference: data.fileReference, label: data.label },
         dragId: normalizedDragId,
         origin: normalizedOrigin,
       };

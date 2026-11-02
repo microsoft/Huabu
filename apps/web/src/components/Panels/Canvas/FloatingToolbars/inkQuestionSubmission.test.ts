@@ -24,6 +24,48 @@ function node(
 }
 
 describe('Ink Question submission candidate', () => {
+  it.each(['text', 'note', 'frame', 'image'])(
+    'accepts a %s selection without requiring Ink',
+    (type) => {
+      expect(
+        deriveInkSubmissionCandidate([node('source', type)], {}),
+      ).toMatchObject({
+        kind: 'ready',
+        inputKind: 'selection-intent',
+        selectedNodeIds: ['source'],
+        sourceCount: 1,
+        strokeSelection: {},
+      });
+    },
+  );
+
+  it('uses a selected Frame as the reference instead of expanding nested selections', () => {
+    expect(
+      deriveInkSubmissionCandidate(
+        [
+          node('frame', 'frame'),
+          { ...node('nested', 'frame'), parentId: 'frame' },
+          { ...node('text', 'text'), parentId: 'nested' },
+          node('outside', 'text'),
+        ],
+        {},
+      ),
+    ).toMatchObject({
+      kind: 'ready',
+      selectedNodeIds: ['frame', 'outside'],
+      sourceCount: 2,
+    });
+  });
+
+  it('rejects empty and Question-only selections', () => {
+    for (const nodes of [[], [node('question', 'question')]]) {
+      expect(deriveInkSubmissionCandidate(nodes, {})).toMatchObject({
+        kind: 'blocked',
+        reason: 'no-sources',
+      });
+    }
+  });
+
   it('excludes only built-in read-only Chat, not external ask-valued sessions', () => {
     expect(canReceiveInk({ binding: { kind: 'internal' }, mode: 'ask' })).toBe(
       false,

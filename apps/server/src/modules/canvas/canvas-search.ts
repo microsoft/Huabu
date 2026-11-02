@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { createHash } from 'node:crypto';
+
 /**
  * Per-canvas full-text search.
  *
@@ -34,11 +36,10 @@
  *   scan testable without spinning up Fastify.
  */
 
-import { createHash } from 'node:crypto';
-
 import {
   META_SEARCH_FIELDS,
   chatInputText,
+  isCanvasIntent,
   literalTextMatches,
   type CanvasSearchEvent,
   type CanvasSearchMatch,
@@ -300,7 +301,7 @@ function buildThreadHaystack(
     }
     let interpretationIndexed = false;
     for (const msg of turn.transcript) {
-      if (user?.inputKind === 'ink-intent' && !interpretationIndexed) {
+      if (isCanvasIntent(user?.inputKind) && !interpretationIndexed) {
         const interpretation = inkInterpretationFromFoldedToolCall(
           msg,
           recoverInternalToolNames,

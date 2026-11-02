@@ -36,17 +36,21 @@ vi.mock('@/api/acp', () => ({
 function Harness({
   enabled,
   profileId,
+  connectionKey,
 }: {
   enabled: boolean;
   profileId?: string;
+  connectionKey?: string;
 }) {
-  const { detectedClis, loaded } = useDetectedClis(
+  const { detectedClis, loaded, error, recheck } = useDetectedClis(
     enabled,
     profileId ? { profileId } : { agentletId: 'local-device' },
+    connectionKey,
   );
   return (
-    <span>
+    <span data-error={error}>
       {loaded ? 'loaded' : 'idle'}:{detectedClis.length}
+      <button aria-label="Recheck" onClick={recheck} />
     </span>
   );
 }
@@ -122,6 +126,9 @@ describe('useDetectedClis', () => {
     expect(apiMocks.toast).toHaveBeenCalledWith('Daemon unavailable', {
       tone: 'danger',
     });
+    expect(container.querySelector('span')?.dataset.error).toBe(
+      'Daemon unavailable',
+    );
   });
 
   it('ignores responses from the previous workspace', async () => {
@@ -142,6 +149,62 @@ describe('useDetectedClis', () => {
     await act(async () => resolveOld?.({ agents: [] }));
 
     expect(container.textContent).toBe('loaded:1');
+  });
+
+  it('rechecks explicitly and ignores the superseded request', async () => {
+    let resolveOld:
+      | ((value: { agents: AcpAgentCliInfo[] }) => void)
+      | undefined;
+    apiMocks.listAgentClis
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveOld = resolve;
+          }),
+      )
+      .mockResolvedValueOnce({ agents: [detectedAgent] });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => root?.render(<Harness enabled />));
+    await act(async () => container?.querySelector('button')?.click());
+    await act(async () => resolveOld?.({ agents: [] }));
+    expect(apiMocks.listAgentClis).toHaveBeenCalledTimes(2);
+    expect(apiMocks.listAgentClis).toHaveBeenLastCalledWith({
+      agentletId: 'local-device',
+    });
+    expect(container.textContent).toBe('loaded:1');
+  });
+
+  it('invalidates results across an observed disconnect and reconnect to the same device', async () => {
+    let resolveOld:
+      | ((value: { agents: AcpAgentCliInfo[] }) => void)
+      | undefined;
+    apiMocks.listAgentClis
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveOld = resolve;
+          }),
+      )
+      .mockRejectedValueOnce(new Error('Device offline'))
+      .mockResolvedValueOnce({ agents: [] });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () =>
+      root?.render(<Harness enabled connectionKey="connected" />),
+    );
+    await act(async () =>
+      root?.render(<Harness enabled connectionKey="unavailable" />),
+    );
+    await act(async () =>
+      root?.render(<Harness enabled connectionKey="connected" />),
+    );
+    await act(async () => resolveOld?.({ agents: [detectedAgent] }));
+    expect(apiMocks.listAgentClis).toHaveBeenCalledTimes(3);
+    expect(container.textContent).toBe('loaded:0');
+    expect(container.querySelector('span')?.dataset.error).toBeUndefined();
   });
 
   it('reloads for the edited Profile target and fences responses from the previous machine', async () => {

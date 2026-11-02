@@ -132,7 +132,9 @@ describe('ThreadChatInput', () => {
             onStop={vi.fn()}
             onCommit={onCommit}
             mode="operate"
-          />
+          >
+            <div data-change-review>Changes</div>
+          </ThreadChatInput>
         </ChatSessionProvider>,
       ),
     );
@@ -152,6 +154,11 @@ describe('ThreadChatInput', () => {
         ?.getAttribute('data-stroke-count'),
     ).toBe('2');
     expect(container.textContent).not.toContain('chat.queueMemoryOnly');
+    const queue = container.querySelector('section');
+    const changes = container.querySelector('[data-change-review]');
+    const input = container.querySelector('form');
+    expect(queue?.nextElementSibling).toBe(changes);
+    expect(changes?.nextElementSibling).toBe(input);
     expect(
       useChatStore.getState().threadsById[session.threadId].messages,
     ).toEqual([]);
@@ -164,6 +171,9 @@ describe('ThreadChatInput', () => {
     );
     expect(onCommit).toHaveBeenCalledOnce();
     expect(container.querySelector('[data-chat-user-message]')).toBeNull();
+    expect(container.querySelector('section')).toBeNull();
+    expect(container.firstElementChild).toBe(changes);
+    expect(changes?.nextElementSibling).toBe(input);
   });
 
   it('updates its thread draft without rerendering its parent', () => {

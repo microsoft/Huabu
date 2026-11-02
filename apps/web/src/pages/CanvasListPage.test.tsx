@@ -12,7 +12,9 @@ import { exportCanvas, listCanvases } from '../api/canvas';
 import {
   deleteSpaceTree,
   getSpaceDeletionPreview,
+  setSpaceParent,
 } from '../api/spaceHierarchy';
+import { Button } from '../components/Common/Button';
 import { toast } from '../components/Common/Toast';
 import { DesktopHomeMenu } from '../components/Shell/DesktopHomeMenu';
 import { APP_NAME } from '../config/app';
@@ -30,6 +32,7 @@ vi.mock('../i18n', () => ({ i18n: { t: (key: string) => key } }));
 vi.mock('../api/spaceHierarchy', () => ({
   deleteSpaceTree: vi.fn(),
   getSpaceDeletionPreview: vi.fn(),
+  setSpaceParent: vi.fn(),
 }));
 vi.mock('../store/canvasStore', () => ({
   drainPendingSaves: vi.fn(async () => undefined),
@@ -40,6 +43,11 @@ const environment = vi.hoisted(() => ({
   canChangeWorkspace: false,
   pickerSupported: false,
   syncing: false,
+  metadataStatus: 'ready' as 'idle' | 'loading' | 'ready' | 'error',
+  titles: { 'space-1': 'Space One', parent: 'Parent' } as Record<
+    string,
+    string | null
+  >,
   workspaceId: 'workspace-1',
   error: null as string | null,
   otherPath: '/tmp/other-workspace',
@@ -81,6 +89,26 @@ vi.mock('../api/canvas', () => ({
 }));
 
 vi.mock('../components/Common/Toast', () => ({ toast: vi.fn() }));
+
+vi.mock('../components/Space/SpaceOrganizationPopover', () => ({
+  SpaceOrganizationPopover: ({
+    canvasId,
+    reference,
+    onClose,
+  }: {
+    canvasId: string;
+    reference: HTMLElement | null;
+    onClose: () => void;
+  }) => (
+    <div
+      role="dialog"
+      data-moving-space={canvasId}
+      data-move-anchor={reference?.getAttribute('aria-label')}
+    >
+      <Button onClick={onClose}>Cancel move</Button>
+    </div>
+  ),
+}));
 
 vi.mock('../components/Common/Modal', () => ({
   Modal: ({ isOpen, footer }: { isOpen: boolean; footer: ReactNode }) =>
@@ -151,6 +179,11 @@ vi.mock('../store/workspaceStore', () => {
     workspacePath: '/tmp/test-workspace',
     workspaceId: environment.workspaceId,
     isSyncing: environment.syncing,
+    isReady: true,
+    worldCanvasId: null,
+    spaceTitlesStatus: environment.metadataStatus,
+    spaceTitles: environment.titles,
+    spaceSummaries: { 'space-1': {}, parent: {} },
     error: environment.error,
     recentWorkspaces: [
       {
@@ -194,6 +227,8 @@ beforeEach(() => {
   environment.canChangeWorkspace = false;
   environment.pickerSupported = false;
   environment.syncing = false;
+  environment.metadataStatus = 'ready';
+  environment.titles = { 'space-1': 'Space One', parent: 'Parent' };
   environment.workspaceId = 'workspace-1';
   environment.error = null;
   environment.otherPath = '/tmp/other-workspace';
@@ -216,6 +251,7 @@ beforeEach(() => {
     activeId: 'home',
     workspaceId: 'workspace-1',
     busy: false,
+    canChangeWorkspace: true,
   });
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -269,7 +305,133 @@ async function openWorkspaceMenu() {
   return menu;
 }
 
+async function openSpaceMenu() {
+  const trigger = container.querySelector<HTMLButtonElement>(
+    '[aria-label="canvasList.spaceActions"]',
+  );
+  if (!trigger) throw new Error('Missing Space actions');
+  await act(async () => trigger.click());
+  const menu = document.querySelector<HTMLElement>('[role="menu"]');
+  if (!menu) throw new Error('Missing Space actions menu');
+  return menu;
+}
+
+async function spaceAction(label: string) {
+  const menu = await openSpaceMenu();
+  const button = [...menu.querySelectorAll<HTMLButtonElement>('button')].find(
+    (item) => item.textContent === label,
+  );
+  if (!button) throw new Error(`Missing action: ${label}`);
+  await act(async () => button.click());
+  return button;
+}
+
+function mainMarkup() {
+  const main = container.querySelector('main')?.cloneNode(true);
+  if (!(main instanceof HTMLElement)) throw new Error('Missing Home content');
+  for (const element of main.querySelectorAll('[id]'))
+    element.removeAttribute('id');
+  return main.innerHTML;
+}
+
 describe('CanvasListPage navigation', () => {
+  it.each(['idle', 'loading', 'error', 'missing-title'] as const)(
+    'disables both movement actions with %s metadata even when the Home card is named',
+    async (status) => {
+      localStorage.setItem('huabu.spaces.showAll', 'true');
+      environment.metadataStatus =
+        status === 'missing-title' ? 'ready' : status;
+      if (status === 'missing-title') environment.titles = {};
+      vi.mocked(listCanvases).mockResolvedValueOnce({
+        canvases: [
+          {
+            canvasId: 'space-1',
+            title: 'Space One',
+            nodeCount: 2,
+            updatedAt: 0,
+            createdAt: 0,
+            parentSpaceId: 'parent',
+          },
+        ],
+      });
+      await renderPage();
+      const menu = await openSpaceMenu();
+      for (const label of [
+        'spaceHierarchy.move',
+        'spaceHierarchy.moveToTopLevel',
+      ]) {
+        const action = [
+          ...menu.querySelectorAll<HTMLButtonElement>('button'),
+        ].find((button) => button.textContent === label);
+        expect(action?.disabled).toBe(true);
+        await act(async () => action?.click());
+      }
+      expect(environment.refreshTitles).toHaveBeenCalled();
+      expect(setSpaceParent).not.toHaveBeenCalled();
+      expect(container.querySelector('[data-moving-space]')).toBeNull();
+    },
+  );
+
+  it('promotes a child directly from its Home menu without opening the picker', async () => {
+    localStorage.setItem('huabu.spaces.showAll', 'true');
+    vi.mocked(listCanvases).mockResolvedValueOnce({
+      canvases: [
+        {
+          canvasId: 'space-1',
+          title: 'Space One',
+          nodeCount: 2,
+          updatedAt: 0,
+          createdAt: 0,
+          parentSpaceId: 'parent',
+        },
+      ],
+    });
+    vi.mocked(setSpaceParent).mockResolvedValueOnce({
+      canvasId: 'space-1',
+      parentSpaceId: null,
+      parentEntryNodeId: null,
+    });
+    const { router } = await renderPage();
+    await spaceAction('spaceHierarchy.moveToTopLevel');
+    expect(setSpaceParent).toHaveBeenCalledExactlyOnceWith('space-1', {
+      parentSpaceId: null,
+      expectedParentSpaceId: 'parent',
+    });
+    expect(container.querySelector('[data-moving-space]')).toBeNull();
+    expect(router.state.location.pathname).toBe('/spaces');
+    expect(environment.refreshTitles).toHaveBeenCalledWith([
+      'space-1',
+      'parent',
+    ]);
+  });
+
+  it('does not offer promotion for a top-level Space', async () => {
+    await renderPage();
+    const menu = await openSpaceMenu();
+    expect(menu.textContent).not.toContain('spaceHierarchy.moveToTopLevel');
+  });
+  it('moves the chosen Home Space without opening its canvas', async () => {
+    const { router } = await renderPage();
+    await spaceAction('spaceHierarchy.move');
+    expect(
+      container
+        .querySelector('[data-moving-space]')
+        ?.getAttribute('data-moving-space'),
+    ).toBe('space-1');
+    expect(
+      container
+        .querySelector('[data-moving-space]')
+        ?.getAttribute('data-move-anchor'),
+    ).toBe('canvasList.spaceActions');
+    expect(router.state.location.pathname).toBe('/spaces');
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('[data-moving-space] button')
+        ?.click();
+    });
+    expect(container.querySelector('[data-moving-space]')).toBeNull();
+  });
+
   it('uses a compact search field and keyboard-accessible segmented scope control', async () => {
     await renderPage();
     const search = container.querySelector('input[type="search"]');
@@ -300,6 +462,7 @@ describe('CanvasListPage navigation', () => {
         activeId,
         workspaceId: 'workspace-1',
         busy: false,
+        canChangeWorkspace: true,
       });
       vi.mocked(listCanvases).mockResolvedValueOnce({
         canvases: [
@@ -360,6 +523,7 @@ describe('CanvasListPage navigation', () => {
         activeId,
         workspaceId: 'workspace-1',
         busy: false,
+        canChangeWorkspace: true,
       });
       vi.mocked(listCanvases).mockResolvedValueOnce({
         canvases: [
@@ -400,6 +564,7 @@ describe('CanvasListPage navigation', () => {
       activeId: 'home',
       workspaceId: null,
       busy: false,
+      canChangeWorkspace: true,
     });
     await renderPage();
     expect(environment.syncTitles).not.toHaveBeenCalled();
@@ -409,6 +574,7 @@ describe('CanvasListPage navigation', () => {
         activeId: 'space-1',
         workspaceId: 'workspace-1',
         busy: false,
+        canChangeWorkspace: true,
       }),
     );
     expect(environment.syncTitles).toHaveBeenCalledExactlyOnceWith({
@@ -422,6 +588,7 @@ describe('CanvasListPage navigation', () => {
         activeId: 'space-1',
         workspaceId: 'another-workspace',
         busy: false,
+        canChangeWorkspace: true,
       }),
     );
     expect(environment.syncTitles).toHaveBeenCalledTimes(1);
@@ -434,6 +601,7 @@ describe('CanvasListPage navigation', () => {
       activeId: 'new-tab',
       workspaceId: 'workspace-1',
       busy: false,
+      canChangeWorkspace: true,
     };
     environment.getState.mockResolvedValue(snapshot);
     const { link, router } = await renderPage();
@@ -441,12 +609,14 @@ describe('CanvasListPage navigation', () => {
       'input[aria-label="spaceHierarchy.search"]',
     );
     if (!search) throw new Error('Missing Space search input');
-    expect(
-      container.querySelector('[aria-label="canvasList.deleteCanvas"]'),
-    ).not.toBeNull();
-    expect(
-      container.querySelector('[aria-label="canvasList.exportCanvas"]'),
-    ).not.toBeNull();
+    const menu = await openSpaceMenu();
+    expect(menu.textContent).toContain('canvasList.deleteCanvas');
+    expect(menu.textContent).toContain('canvasList.exportCanvas');
+    await act(async () => {
+      menu.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+      );
+    });
     expect(container.textContent).toContain('actions.importCanvas');
     expect(container.textContent).toContain('actions.newCanvas');
     expect(container.textContent).toContain('canvasList.nodeCount');
@@ -454,7 +624,7 @@ describe('CanvasListPage navigation', () => {
     await act(async () => {
       container.querySelectorAll<HTMLButtonElement>('[role="tab"]')[1].click();
     });
-    const newTabContent = container.querySelector('main')?.innerHTML;
+    const newTabContent = mainMarkup();
     expect(newTabContent).toBeTruthy();
     const setValue = Object.getOwnPropertyDescriptor(
       HTMLInputElement.prototype,
@@ -473,7 +643,7 @@ describe('CanvasListPage navigation', () => {
         activeId: 'home',
       });
     });
-    expect(container.querySelector('main')?.innerHTML).toBe(newTabContent);
+    expect(mainMarkup()).toBe(newTabContent);
     expect(
       container
         .querySelectorAll('[role="tab"]')[1]
@@ -485,7 +655,7 @@ describe('CanvasListPage navigation', () => {
     expect(
       container.querySelector<HTMLInputElement>('input[type="search"]')?.value,
     ).toBe('');
-    expect(container.querySelector('main')?.innerHTML).toBe(newTabContent);
+    expect(mainMarkup()).toBe(newTabContent);
     const restoredLink = container.querySelector<HTMLAnchorElement>(
       'a[href="/canvas/space-1"]',
     );
@@ -496,11 +666,7 @@ describe('CanvasListPage navigation', () => {
   });
 
   async function requestDeletion() {
-    const remove = container.querySelector<HTMLButtonElement>(
-      'button[aria-label="canvasList.deleteCanvas"], button[title="canvasList.deleteCanvas"]',
-    );
-    if (!remove) throw new Error('Missing Space delete button');
-    await act(async () => remove.click());
+    await spaceAction('canvasList.deleteCanvas');
   }
 
   async function confirmDeletion() {
@@ -516,6 +682,7 @@ describe('CanvasListPage navigation', () => {
       activeId: 'home',
       workspaceId: 'workspace-1',
       busy: false,
+      canChangeWorkspace: true,
       tabs: [
         {
           id: 'space-tab',
@@ -556,6 +723,7 @@ describe('CanvasListPage navigation', () => {
       activeId: 'home',
       workspaceId: 'workspace-1',
       busy: false,
+      canChangeWorkspace: true,
     });
     await requestDeletion();
     await confirmDeletion();
@@ -599,6 +767,7 @@ describe('CanvasListPage navigation', () => {
       activeId: 'home',
       workspaceId: 'workspace-1',
       busy: false,
+      canChangeWorkspace: true,
       tabs: [
         {
           id: 'child-tab',
@@ -702,15 +871,7 @@ describe('CanvasListPage navigation', () => {
         }),
       );
     act(() => window.dispatchEvent(new Event('canvas-list-changed')));
-    const remove =
-      container.querySelector<HTMLButtonElement>(
-        'button[title="canvasList.deleteCanvas"]',
-      ) ??
-      container.querySelector<HTMLButtonElement>(
-        'button[aria-label="canvasList.deleteCanvas"]',
-      );
-    if (!remove) throw new Error('Missing Space delete button');
-    await act(async () => remove.click());
+    await requestDeletion();
     const confirm = Array.from(
       container.querySelectorAll<HTMLButtonElement>('[role="dialog"] button'),
     ).find((button) => button.textContent === 'spaceHierarchy.deleteCount');
@@ -770,6 +931,7 @@ describe('CanvasListPage navigation', () => {
       activeId,
       workspaceId: 'workspace-1',
       busy: false,
+      canChangeWorkspace: true,
       tabs: [],
     });
     await act(async () => update(snapshot('space-1')));
@@ -1048,11 +1210,7 @@ describe('CanvasListPage navigation', () => {
       ),
     );
     const { router } = await renderPage();
-    const button = container.querySelector<HTMLButtonElement>(
-      'button[aria-label="canvasList.exportCanvas"]',
-    );
-    if (!button) throw new Error('Export control was not rendered');
-    await act(async () => button.click());
+    const button = await spaceAction('canvasList.exportCanvas');
     expect(router.state.location.pathname).toBe('/spaces');
     expect(toast).toHaveBeenCalledExactlyOnceWith(
       'canvasList.exportUnavailable',

@@ -103,7 +103,11 @@ export function createAcpAgentCliRoutes(
               message: 'Agent Profile is unavailable',
             });
           }
-          return { agents: await detect(parsed.data) };
+          return {
+            agents: (await detect(parsed.data)).filter(
+              (entry) => entry.id !== 'proxy',
+            ),
+          };
         } catch (error) {
           request.log.warn(
             { err: error },

@@ -1,7 +1,16 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { Download, Plus, Search, Trash2, Upload } from 'lucide-react';
+import {
+  Download,
+  FolderInput,
+  FolderUp,
+  MoreHorizontal,
+  Plus,
+  Search,
+  Trash2,
+  Upload,
+} from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
@@ -10,6 +19,10 @@ import { WorkspaceLoadingScreen } from './WorkspaceLoadingScreen';
 import { ApiError } from '../api/_client';
 import { listCanvases, exportCanvas } from '../api/canvas';
 import { Button } from '../components/Common/Button';
+import {
+  DropdownMenu,
+  DropdownMenuItem,
+} from '../components/Common/DropdownMenu';
 import { EmptyState } from '../components/Common/EmptyState';
 import { Loading } from '../components/Common/Loading';
 import { TabGroup } from '../components/Common/TabGroup';
@@ -18,6 +31,8 @@ import { toast } from '../components/Common/Toast';
 import { Tooltip } from '../components/Common/Tooltip';
 import { Header } from '../components/Panels/Header/Header';
 import { SpaceDeletionDialog } from '../components/Space/SpaceDeletionDialog';
+import { SpaceOrganizationPopover } from '../components/Space/SpaceOrganizationPopover';
+import { useSpaceParentMove } from '../components/Space/useSpaceParentMove';
 import { APP_NAME } from '../config/app';
 import { useCanvasActions } from '../hooks/useCanvasActions';
 import {
@@ -38,6 +53,7 @@ import type { DesktopTabsSnapshot } from '@huabu/shared/desktop-tabs';
  */
 export default function CanvasListPage() {
   const { t, i18n } = useTranslation();
+  const { move, busy: moving, canMove } = useSpaceParentMove();
   const [canvases, setCanvases] = useState<CanvasSummary[]>([]);
   const [listedWorkspaceId, setListedWorkspaceId] = useState<string | null>(
     null,
@@ -47,6 +63,12 @@ export default function CanvasListPage() {
   );
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [menuSpaceId, setMenuSpaceId] = useState<string | null>(null);
+  const menuRef = useRef<HTMLButtonElement>(null);
+  const [movingSpace, setMovingSpace] = useState<{
+    canvasId: string;
+    reference: HTMLElement | null;
+  } | null>(null);
   const [pendingDelete, setPendingDelete] = useState<{
     canvasId: string;
     title: string | null;
@@ -83,6 +105,11 @@ export default function CanvasListPage() {
   const setCanvasCount = useWorkspaceStore((s) => s.setCanvasCount);
   const setSpaceTitle = useWorkspaceStore((s) => s.setSpaceTitle);
   const workspaceSyncing = useWorkspaceStore((s) => s.isSyncing);
+  const workspaceId = useWorkspaceStore((s) => s.workspaceId);
+  useEffect(() => {
+    setMenuSpaceId(null);
+    setMovingSpace(null);
+  }, [workspaceId]);
   const isElectronApp = isElectron() && !getElectronBridge()?.tabs;
   const isDesktopHome = getElectronBridge()?.tabs?.context.role === 'home';
 
@@ -334,6 +361,14 @@ export default function CanvasListPage() {
 
   return (
     <div className="bg-bg-default flex h-full flex-col">
+      {movingSpace && (
+        <SpaceOrganizationPopover
+          key={`${workspaceId}:${movingSpace.canvasId}`}
+          canvasId={movingSpace.canvasId}
+          reference={movingSpace.reference}
+          onClose={() => setMovingSpace(null)}
+        />
+      )}
       {pendingDelete && (
         <SpaceDeletionDialog
           canvasId={pendingDelete.canvasId}
@@ -508,7 +543,7 @@ export default function CanvasListPage() {
                     }
                     className="flex flex-1 flex-col text-left"
                   >
-                    <h3 className="text-fg-default group-hover:text-fg-default truncate text-sm font-semibold">
+                    <h3 className="text-fg-default group-hover:text-fg-default truncate pr-7 text-sm font-semibold">
                       {canvas.title || t('canvasList.untitled')}
                     </h3>
                     {canvas.parentSpaceId && (
@@ -530,45 +565,83 @@ export default function CanvasListPage() {
                       })}
                     </div>
                   </Link>
-                  {/* Export button */}
-                  <Button
-                    variant="ghost"
-                    iconOnly
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void handleExport(canvas.canvasId);
+                  <DropdownMenu
+                    open={menuSpaceId === canvas.canvasId}
+                    onOpenChange={(open) => {
+                      setMenuSpaceId(open ? canvas.canvasId : null);
+                      if (open && !canMove(canvas.canvasId))
+                        void useWorkspaceStore.getState().refreshSpaceTitles();
                     }}
-                    tooltipWrapperClassName="absolute top-3 right-10 inline-flex opacity-0 transition-opacity group-hover:opacity-100"
-                    title={
-                      exportingId === canvas.canvasId
-                        ? t('canvasList.exporting')
-                        : t('canvasList.exportCanvas')
+                    triggerWrapperClassName="absolute top-3 right-3"
+                    align="bottom-right"
+                    trigger={
+                      <Button
+                        ref={
+                          menuSpaceId === canvas.canvasId ? menuRef : undefined
+                        }
+                        variant="ghost"
+                        iconOnly
+                        aria-label={t('canvasList.spaceActions', {
+                          name: canvas.title || t('canvasList.untitled'),
+                        })}
+                      >
+                        <MoreHorizontal className="text-fg-subtle" />
+                      </Button>
                     }
-                    disabled={exportingId === canvas.canvasId}
                   >
-                    {exportingId === canvas.canvasId ? (
-                      <Loading
-                        layout="inline"
-                        size="sm"
-                        className="text-fg-subtle"
-                      />
-                    ) : (
-                      <Download className="text-fg-subtle" />
+                    <DropdownMenuItem
+                      icon={<FolderInput />}
+                      disabled={moving || !canMove(canvas.canvasId)}
+                      onClick={() => {
+                        setMenuSpaceId(null);
+                        setMovingSpace({
+                          canvasId: canvas.canvasId,
+                          reference: menuRef.current,
+                        });
+                      }}
+                    >
+                      {t('spaceHierarchy.move')}
+                    </DropdownMenuItem>
+                    {canvas.parentSpaceId && (
+                      <DropdownMenuItem
+                        icon={<FolderUp />}
+                        disabled={moving || !canMove(canvas.canvasId)}
+                        onClick={() => {
+                          setMenuSpaceId(null);
+                          void move(
+                            canvas.canvasId,
+                            null,
+                            canvas.parentSpaceId ?? null,
+                          );
+                        }}
+                      >
+                        {t('spaceHierarchy.moveToTopLevel')}
+                      </DropdownMenuItem>
                     )}
-                  </Button>
-                  {/* Delete button */}
-                  <Button
-                    variant="ghost"
-                    iconOnly
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void requestDelete(canvas.canvasId, canvas.title);
-                    }}
-                    tooltipWrapperClassName="absolute top-3 right-3 inline-flex opacity-0 transition-opacity group-hover:opacity-100"
-                    title={t('canvasList.deleteCanvas')}
-                  >
-                    <Trash2 className="text-fg-subtle" />
-                  </Button>
+                    <DropdownMenuItem
+                      icon={<Download />}
+                      disabled={exportingId === canvas.canvasId}
+                      onClick={() => {
+                        setMenuSpaceId(null);
+                        void handleExport(canvas.canvasId);
+                      }}
+                    >
+                      {t(
+                        exportingId === canvas.canvasId
+                          ? 'canvasList.exporting'
+                          : 'canvasList.exportCanvas',
+                      )}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      icon={<Trash2 />}
+                      onClick={() => {
+                        setMenuSpaceId(null);
+                        void requestDelete(canvas.canvasId, canvas.title);
+                      }}
+                    >
+                      {t('canvasList.deleteCanvas')}
+                    </DropdownMenuItem>
+                  </DropdownMenu>
                 </div>
               ))}
             </div>

@@ -50,7 +50,14 @@ const selectionFields = {
   inkRecognition: 'inkRecognition',
   imageAttachments: 'attachments',
   snapshotAttachments: 'attachments',
+  textContents: 'text-contents',
 } satisfies Shape<ChatEnvelope['focus']['selection']>;
+const textContentFields = {
+  nodeId: 'nodeId',
+  content: null,
+} satisfies Shape<
+  NonNullable<ChatEnvelope['focus']['selection']['textContents']>[number]
+>;
 const resourceFields = {
   bindings: 'resource-reference',
   refs: 'refs',
@@ -204,6 +211,8 @@ export function rewriteImportContract(
       return fields(value, focusFields, rewrite);
     case 'chat-selection':
       return fields(value, selectionFields, rewrite);
+    case 'text-contents':
+      return fields(value, textContentFields, rewrite);
     case 'chat-resources':
       return fields(value, resourceFields, rewrite);
     case 'resource-reference':

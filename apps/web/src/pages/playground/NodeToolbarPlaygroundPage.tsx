@@ -70,6 +70,7 @@ import './NodeToolbarPlaygroundPage.css';
 import type { CanvasNodeType } from '@huabu/shared';
 
 export const TOOLBAR_SPECIMENS = {
+  fileReference: { title: 'README.md', category: 'Files' },
   note: { title: 'Ideas worth keeping', category: '内容' },
   text: { title: 'Make room for a new perspective.', category: '内容' },
   image: { title: 'A little room for big ideas', category: '媒体' },

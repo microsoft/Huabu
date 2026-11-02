@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { listAcpAgentClis } from '@/api/acp';
@@ -13,42 +13,51 @@ import type { AcpAgentCliInfo, AcpAgentCliQuery } from '@huabu/shared';
 export function useDetectedClis(
   enabled = true,
   target: AcpAgentCliQuery,
+  connectionKey = '',
 ): {
   detectedClis: AcpAgentCliInfo[];
   loaded: boolean;
+  error: string | null;
+  recheck: () => void;
 } {
   const { t } = useTranslation();
   const [snapshot, setSnapshot] = useState<{
     key: string;
     detectedClis: AcpAgentCliInfo[];
     loaded: boolean;
-  }>({ key: JSON.stringify(target), detectedClis: [], loaded: false });
-  const key = JSON.stringify(target);
+    error: string | null;
+  }>({ key: '', detectedClis: [], loaded: false, error: null });
+  const [revision, setRevision] = useState(0);
+  const recheck = useCallback(() => setRevision((value) => value + 1), []);
+  const { agentletId, profileId } = target;
+  const key = JSON.stringify([agentletId, profileId, connectionKey, revision]);
 
   useEffect(() => {
     if (!enabled) return;
     let generation = 0;
     const load = async () => {
       const current = ++generation;
-      setSnapshot({ key, loaded: false, detectedClis: [] });
+      setSnapshot({ key, loaded: false, detectedClis: [], error: null });
       try {
-        const response = await listAcpAgentClis(target);
+        const response = await listAcpAgentClis(
+          profileId === undefined ? { agentletId } : { profileId },
+        );
         if (current === generation) {
           setSnapshot({
             key,
             loaded: true,
             detectedClis: response.agents,
+            error: null,
           });
         }
       } catch (error) {
         if (current === generation) {
-          setSnapshot({ key, loaded: true, detectedClis: [] });
-          toast(
+          const message =
             error instanceof Error
               ? error.message
-              : t('settings.agentDetectionFailed'),
-            { tone: 'danger' },
-          );
+              : t('settings.agentDetectionFailed');
+          setSnapshot({ key, loaded: true, detectedClis: [], error: message });
+          toast(message, { tone: 'danger' });
         }
       }
     };
@@ -59,9 +68,14 @@ export function useDetectedClis(
       generation++;
       window.removeEventListener('workspace-changed', handler);
     };
-  }, [enabled, key, t]);
+  }, [enabled, key, agentletId, profileId, t]);
 
   return snapshot.key === key
-    ? { detectedClis: snapshot.detectedClis, loaded: snapshot.loaded }
-    : { detectedClis: [], loaded: false };
+    ? {
+        detectedClis: snapshot.detectedClis,
+        loaded: snapshot.loaded,
+        error: snapshot.error,
+        recheck,
+      }
+    : { detectedClis: [], loaded: false, error: null, recheck };
 }

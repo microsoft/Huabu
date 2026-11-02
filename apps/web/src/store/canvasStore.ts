@@ -96,7 +96,7 @@ import {
   writeDragDecision,
 } from '@/handler/snap/snapSession';
 import { getElectronBridge } from '@/hooks/useElectron';
-import { getCanvasVisibleArea } from '@/utils/canvasViewport';
+import { getCanvasViewportCenter } from '@/utils/canvasViewport';
 import {
   desktopStorageKey,
   readApplicationPreference,
@@ -174,7 +174,6 @@ import type {
   CanvasNodeMeasuredHeightUpdate,
   CanvasNodeType,
   CanvasViewport,
-  Point,
   RecentAction,
   WireSelectionNode,
 } from '@huabu/shared';
@@ -943,7 +942,7 @@ type RFState = {
    * the request context. Resolves once the in-flight POST settles
    * (success or fail); a failed flush is retried on the next trigger.
    */
-  flushCanvasEvents: () => Promise<void>;
+  flushCanvasEvents: (canvasId?: string) => Promise<void>;
 };
 
 function canChangeSpaceEntries(
@@ -1051,46 +1050,135 @@ async function waitForSidecarWrites(): Promise<void> {
   ]);
 }
 
-/**
- * Promote every pending canvas-level structure save AND every pending
- * debounced per-node content save into an immediate flush, then
- * resolve once both have settled.
- *
- * Called from `CanvasPage` via `useBlocker` so that navigating away
- * from a canvas (back to list, into settings, into docs, into another
- * canvas) holds the navigation until every queued PUT has been sent
- * and its response received. Without this, trailing edits would fire
- * later under a stale captured `canvasId` — by which time the user
- * has moved on and there's nothing left in the store to revert if the
- * PUT fails. Ordinary failures retain the existing non-blocking behavior.
- * A failed resurrection rejects: the current Canvas owns the only restored
- * body, so navigation must retain it until Retry or explicit deletion.
- *
- * Order mirrors {@link switchCanvas}: structure first (canvas-level
- * version PUT), then per-node content. Resurrection makes this ordering a
- * dependency: topology must admit the restored sidecar before its PUT.
- */
-export async function drainPendingSaves(): Promise<void> {
-  await structureScheduler.flushAsync();
+async function waitForStructureSave(canvasId: string): Promise<void> {
   while (
-    useCanvasStore.getState().isSaving ||
-    useCanvasStore.getState().pendingSave
+    useCanvasStore.getState().canvasId === canvasId &&
+    (useCanvasStore.getState().isSaving ||
+      useCanvasStore.getState().pendingSave)
   ) {
     await new Promise<void>((resolve) => {
       const unsubscribe = useCanvasStore.subscribe((state) => {
-        if (!state.isSaving && !state.pendingSave) {
+        if (
+          state.canvasId !== canvasId ||
+          (!state.isSaving && !state.pendingSave)
+        ) {
           unsubscribe();
           resolve();
         }
       });
     });
   }
-  await nodeContentQueue.flushAll();
-  await canvasHistoryManager.waitForDeletes(useCanvasStore.getState().canvasId);
-  if (nodeContentQueue.hasPendingRestoredContent()) {
-    throw new Error(
-      'Restored node content is waiting for a successful structure save. Retry before leaving this Canvas.',
-    );
+}
+
+/**
+ * Promote every pending canvas-level structure save AND every pending
+ * debounced per-node content save into an immediate flush, then
+ * resolve once both have settled.
+ *
+ * Called from the router-root `SpaceNavigationGuard` so navigating away
+ * from a canvas (back to list, into settings, into docs, into another
+ * canvas) holds the navigation until every queued PUT has been sent
+ * and its response received. Without this, trailing edits would fire
+ * later under a stale captured `canvasId` — by which time the user
+ * has moved on and there's nothing left in the store to revert if the
+ * PUT fails. Any unresolved structure or content failure rejects: navigation
+ * must retain local edits until saved or explicitly discarded.
+ *
+ * Order mirrors {@link switchCanvas}: structure first (canvas-level
+ * version PUT), then per-node content. Resurrection makes this ordering a
+ * dependency: topology must admit the restored sidecar before its PUT.
+ * Keep the captured scope if navigation finishes during an await; outgoing
+ * saves were drained by navigation, and the new Space belongs to another turn.
+ */
+export async function drainPendingSaves(
+  canvasId = useCanvasStore.getState().canvasId,
+): Promise<void> {
+  const isActive = () => useCanvasStore.getState().canvasId === canvasId;
+  const initial = useCanvasStore.getState();
+  if (isActive() && !initial.isLoading) {
+    const failure = structureSaveErrors.get(canvasId);
+    // Retry only failures retained before this drain, never loop on a new failure.
+    if (
+      failure &&
+      !(failure instanceof CanvasConflictError) &&
+      !initial.versionConflict &&
+      !initial.isSaving &&
+      !initial.pendingSave &&
+      !structureScheduler.hasPending()
+    ) {
+      structureScheduler.schedule();
+    }
+    nodeContentQueue.retryFailedSaves(canvasId);
+  }
+  do {
+    if (isActive()) await structureScheduler.flushAsync();
+    await waitForStructureSave(canvasId);
+    if (isActive()) await nodeContentQueue.flushAll();
+    await canvasHistoryManager.waitForDeletes(canvasId);
+    if (isActive() && nodeContentQueue.hasPendingRestoredContent()) {
+      throw new Error(
+        'Restored node content is waiting for a successful structure save. Retry before leaving this Canvas.',
+      );
+    }
+    const state = useCanvasStore.getState();
+    if (
+      (state.canvasId === canvasId && state.versionConflict) ||
+      structureSaveErrors.has(canvasId)
+    ) {
+      throw (
+        structureSaveErrors.get(canvasId) ??
+        new Error('Canvas version conflict')
+      );
+    }
+    await nodeContentQueue.flushAllForSubmission(canvasId);
+  } while (isActive() && structureScheduler.hasPending());
+}
+
+/** Explicit navigation-only discard; already-issued writes cannot be undone. */
+export async function discardPendingSaves(canvasId: string): Promise<void> {
+  const state = useCanvasStore.getState();
+  if (state.canvasId !== canvasId)
+    throw new Error('Cannot discard edits from a different Space');
+  state._setStateNoAutosave({ isLoading: true, pendingSave: false });
+  structureScheduler.cancelPending();
+  preprocessQueue.cancelAll();
+  const resumeContentSaves = nodeContentQueue.suspendCanvas(canvasId);
+  try {
+    // Keep failure records until every admitted writer has settled.
+    await waitForStructureSave(canvasId);
+    await waitForSidecarWrites();
+    await canvasHistoryManager.waitForDeletes(canvasId);
+    if (useCanvasStore.getState().canvasId !== canvasId)
+      throw new Error('Space changed while discarding edits');
+    structureScheduler.cancelPending();
+    preprocessQueue.cancelAll();
+    nodeContentQueue.discardCanvas(canvasId);
+    structureSaveErrors.delete(canvasId);
+    canvasHistoryManager.clearCanvas(canvasId);
+    dismissVersionConflictToast();
+    useCanvasStore.getState()._setStateNoAutosave({
+      canvasId: '',
+      canvasTitle: '',
+      nodes: [],
+      edges: [],
+      version: 0,
+      viewport: null,
+      isLoading: false,
+      isSaving: false,
+      pendingSave: false,
+      versionConflict: false,
+      versionConflictServerVersion: null,
+      canUndo: false,
+      canRedo: false,
+      ingestionByNodeId: {},
+      pendingForkThreadIds: {},
+    });
+  } catch (error) {
+    if (useCanvasStore.getState().canvasId === canvasId)
+      useCanvasStore.getState()._setStateNoAutosave({ isLoading: false });
+    throw error;
+  } finally {
+    resumeContentSaves();
   }
 }
 
@@ -1147,26 +1235,8 @@ export class CanvasSubmissionSaveError extends Error {
 }
 
 export async function saveCanvasForSubmission(canvasId: string): Promise<void> {
-  const assertCanvas = () => {
-    if (useCanvasStore.getState().canvasId !== canvasId) {
-      throw new Error(`Submission Canvas changed: ${canvasId}`);
-    }
-  };
   try {
-    assertCanvas();
-    do {
-      await drainPendingSaves();
-      assertCanvas();
-    } while (structureScheduler.hasPending());
-    const state = useCanvasStore.getState();
-    if (state.versionConflict || structureSaveErrors.has(canvasId)) {
-      throw (
-        structureSaveErrors.get(canvasId) ??
-        new Error('Canvas version conflict')
-      );
-    }
-    await nodeContentQueue.flushAllForSubmission(canvasId);
-    assertCanvas();
+    await drainPendingSaves(canvasId);
   } catch (error) {
     throw new CanvasSubmissionSaveError(canvasId, error);
   }
@@ -1437,6 +1507,7 @@ export interface AgentSourceSelection {
   nodeIds: readonly string[];
   strokeSelection: Readonly<Record<string, readonly string[]>>;
   excludeNodeIds?: readonly string[];
+  lasso?: boolean;
 }
 
 function makeBuildSelectedDetail(
@@ -1455,6 +1526,9 @@ function makeBuildSelectedDetail(
       id: n.id,
       type: nodeType,
       label: data?.label as string | undefined,
+      ...(selection.lasso && n.type === 'text' && data?.contentMissing !== true
+        ? { content: typeof data?.content === 'string' ? data.content : '' }
+        : {}),
       ...(src !== undefined ? { src } : {}),
       ...(n.type === 'sketch' && selection.strokeSelection[n.id]?.length
         ? { strokeIds: [...selection.strokeSelection[n.id]] }
@@ -1462,6 +1536,25 @@ function makeBuildSelectedDetail(
     };
 
     if (n.type === 'frame') {
+      if (selection.lasso) {
+        detail.referenceOnly = true;
+        const children = allNodes
+          .filter(
+            (child) =>
+              child.parentId === n.id &&
+              !child.hidden &&
+              !selection.strokeSelection[child.id]?.length &&
+              !selection.excludeNodeIds?.includes(child.id),
+          )
+          .map((child) => ({
+            id: child.id,
+            type: (child.type ?? 'note') as CanvasNodeType,
+            label: child.data.label as string | undefined,
+            referenceOnly: true,
+          }));
+        if (children.length > 0) detail.children = children;
+        return detail;
+      }
       const children = allNodes
         .filter(
           (child) =>
@@ -2251,22 +2344,9 @@ const useCanvasStore = create<RFState>()(
           return;
         }
       }
-      const { rfInstance, canvasWrapper, viewport } = get();
       // Fullscreen Preview unmounts Canvas; retain a nearby placement until
       // the queued reveal can run against the restored, unobscured viewport.
-      let viewportCenter: Point | undefined = viewport
-        ? viewportCentreOf(viewport)
-        : undefined;
-      if (rfInstance && canvasWrapper) {
-        const rect = canvasWrapper.getBoundingClientRect();
-        const area = getCanvasVisibleArea(canvasWrapper);
-        if (area.width > 0 && area.height > 0) {
-          viewportCenter = rfInstance.screenToFlowPosition({
-            x: rect.left + area.x + area.width / 2,
-            y: rect.top + area.y + area.height / 2,
-          });
-        }
-      }
+      const viewportCenter = getCanvasViewportCenter(get());
       const uiState: UiResolverState = {
         nodes: get().nodes,
         edges: get().edges,
@@ -2383,6 +2463,7 @@ const useCanvasStore = create<RFState>()(
       const selectedIds = new Set<string>();
       const collectSelectedIds = (values: WireSelectionNode[]): void => {
         for (const value of values) {
+          if (value.referenceOnly) continue;
           selectedIds.add(value.id);
           if (value.children?.length) collectSelectedIds(value.children);
         }
@@ -2605,25 +2686,9 @@ const useCanvasStore = create<RFState>()(
       const currentId = get().canvasId;
       if (canvasId === currentId) return;
 
-      // Flip into the loading state *before* awaiting anything so the
-      // shell shows the loading state on the very next render instead of
-      // briefly painting the previous canvas while the structure save
-      // flush resolves. `loadCanvas` below will set `isLoading: true`
-      // again (idempotent) once it starts the actual fetch.
-      set({
-        isLoading: true,
-        canvasNotFound: false,
-      });
-      // Retain the outgoing conflict gate until its drain succeeds.
-      // loadCanvas clears it when the new authoritative state is requested.
-
-      // Flush any pending save for the current canvas before switching
-      try {
-        await drainPendingSaves();
-      } catch (error) {
-        set({ isLoading: false });
-        throw error;
-      }
+      // Keep the outgoing Space authoritative and editable until saving succeeds.
+      await drainPendingSaves();
+      set({ isLoading: true, canvasNotFound: false });
 
       // Cancel all pending preprocessing timers
       preprocessQueue.cancelAll();
@@ -2974,8 +3039,8 @@ const useCanvasStore = create<RFState>()(
       }
     },
 
-    flushCanvasEvents: async () => {
-      await canvasEvents.flush(get().canvasId);
+    flushCanvasEvents: async (canvasId = get().canvasId) => {
+      await canvasEvents.flush(canvasId);
     },
 
     onNodeDragStart: (event, _draggedNode, draggedNodes) => {

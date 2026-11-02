@@ -4,6 +4,7 @@
 import { expect, test } from '@playwright/test';
 
 import { FAR_ZOOM_DESIGN as FAR } from '../src/components/Nodes/design/farZoomDesign';
+import { NODE_BORDER_WIDTH } from '../src/components/Nodes/design/nodeBoundary';
 import { NODE_TYPOGRAPHY } from '../src/components/Nodes/design/nodeTypography';
 
 import type * as HistoryModule from '../src/store/canvasHistoryManager';
@@ -297,7 +298,7 @@ test('dense Note titles require one complete 16px line without changing geometry
   for (const zoom of [0.1, 0.095, 0.09, 0.085, 0.08, 0.095]) {
     await zoomTo(page, zoom, 'note');
     const label = note.locator('[data-study-label]');
-    if ((180 - 4) * zoom < 16) {
+    if ((180 - 2 * NODE_BORDER_WIDTH) * zoom < FAR.labelLine) {
       await expect(label).toHaveAttribute('aria-hidden', 'true');
       await expect(label).toHaveCSS('opacity', '0');
       continue;
@@ -338,7 +339,7 @@ test('Note far-zoom labels use 12px titles and fitting 10px descriptions in eith
     await page.evaluate((theme) => {
       document.documentElement.classList.toggle('dark', theme === 'dark');
     }, theme);
-    for (const zoom of [0.19, 0.158, 0.157, 0.12, 0.1, 0.19, 0.23]) {
+    for (const zoom of [0.19, 0.156, 0.155, 0.12, 0.1, 0.19, 0.23]) {
       await zoomTo(page, zoom, 'note');
       await expect(divider).toHaveCount(0);
       const title = node.locator('[data-study-title]');
@@ -347,7 +348,12 @@ test('Note far-zoom labels use 12px titles and fitting 10px descriptions in eith
       await expect(title).toHaveCSS('font-size', '12px');
       await expect(title).toHaveCSS('line-height', '16px');
       await expect(title).toHaveCSS('font-weight', '500');
-      if (zoom >= 0.158) {
+      const descriptionFits =
+        (400 - 2 * NODE_BORDER_WIDTH) * zoom - 2 * FAR.labelInset >=
+        FAR.labelLine +
+          FAR.descriptionGap +
+          FAR.descriptionMinLines * FAR.descriptionLine;
+      if (descriptionFits) {
         await expect(description).toBeVisible();
         await expect(description).toHaveText('Source details remain readable.');
         await expect(description).toHaveCSS('font-size', '10px');
@@ -946,61 +952,82 @@ async function geometry(node: Locator) {
 }
 
 async function labelGeometry(node: Locator) {
-  return node.evaluate((element) => {
-    const shell = element as HTMLElement;
-    const label = shell.querySelector<HTMLElement>('[data-study-label]');
-    const title = label?.querySelector<HTMLElement>('[data-study-title]');
-    const probe = label?.querySelector<HTMLElement>('[data-title-probe]');
-    if (!label || !title || !probe) throw new Error('Missing production label');
-    const description = label.querySelector<HTMLElement>(
-      '[data-study-description]',
-    );
-    const shellRect = shell.getBoundingClientRect();
-    const scale = shellRect.width / shell.offsetWidth;
-    const titleRect = title.getBoundingClientRect();
-    const probeRect = probe.getBoundingClientRect();
-    const labelRect = label.getBoundingClientRect();
-    const labelScale = new DOMMatrixReadOnly(getComputedStyle(label).transform)
-      .a;
-    const typography = (el: HTMLElement) => {
-      const css = getComputedStyle(el);
-      const rect = el.getBoundingClientRect();
-      return {
-        font: parseFloat(css.fontSize) * scale * labelScale,
-        line: parseFloat(css.lineHeight) * scale * labelScale,
-        height: rect.height,
-        width: rect.width,
-        clamp: Number(css.webkitLineClamp),
-        top: rect.top,
-        bottom: rect.bottom,
+  return node.evaluate(
+    (element, { design, borderWidth }) => {
+      const shell = element as HTMLElement;
+      const label = shell.querySelector<HTMLElement>('[data-study-label]');
+      const title = label?.querySelector<HTMLElement>('[data-study-title]');
+      const probe = label?.querySelector<HTMLElement>('[data-title-probe]');
+      if (!label || !title || !probe)
+        throw new Error('Missing production label');
+      const description = label.querySelector<HTMLElement>(
+        '[data-study-description]',
+      );
+      const shellRect = shell.getBoundingClientRect();
+      const scale = shellRect.width / shell.offsetWidth;
+      const innerWidth = (shell.offsetWidth - 2 * borderWidth) * scale;
+      const innerHeight = (shell.offsetHeight - 2 * borderWidth) * scale;
+      const horizontalInset = Math.min(
+        design.labelInsetInline,
+        Math.max(0, (innerWidth - design.labelFont) / 2),
+      );
+      const verticalInset = Math.min(
+        design.labelInset,
+        Math.max(0, (innerHeight - design.labelLine) / 2),
+      );
+      const titleRect = title.getBoundingClientRect();
+      const probeRect = probe.getBoundingClientRect();
+      const labelRect = label.getBoundingClientRect();
+      const labelScale = new DOMMatrixReadOnly(
+        getComputedStyle(label).transform,
+      ).a;
+      const typography = (el: HTMLElement) => {
+        const css = getComputedStyle(el);
+        const rect = el.getBoundingClientRect();
+        return {
+          font: parseFloat(css.fontSize) * scale * labelScale,
+          line: parseFloat(css.lineHeight) * scale * labelScale,
+          height: rect.height,
+          width: rect.width,
+          clamp: Number(css.webkitLineClamp),
+          top: rect.top,
+          bottom: rect.bottom,
+        };
       };
-    };
-    return {
-      scale,
-      title: typography(title),
-      probe: typography(probe),
-      description: description ? typography(description) : null,
-      label: { width: labelRect.width, height: labelRect.height },
-      availableHeight: Math.max(0, (shell.offsetHeight - 2) * scale - 12),
-      availableWidth: Math.max(0, (shell.offsetWidth - 2) * scale - 16),
-      insets: {
-        left: labelRect.left - shellRect.left,
-        top: labelRect.top - shellRect.top,
-        right: shellRect.right - labelRect.right,
-        bottom: shellRect.bottom - labelRect.bottom,
-      },
-      probeWidthDelta: probeRect.width - titleRect.width,
-      words: Array.from(
-        title.querySelectorAll<HTMLElement>('[data-study-word]'),
-        (word) => ({
-          width: word.getBoundingClientRect().width,
-          height: word.getBoundingClientRect().height,
-          overflow: getComputedStyle(word).textOverflow,
-          whiteSpace: getComputedStyle(word).whiteSpace,
-        }),
-      ),
-    };
-  });
+      return {
+        scale,
+        title: typography(title),
+        probe: typography(probe),
+        description: description ? typography(description) : null,
+        label: { width: labelRect.width, height: labelRect.height },
+        availableHeight: Math.max(0, innerHeight - 2 * verticalInset),
+        availableWidth: Math.max(0, innerWidth - 2 * horizontalInset),
+        expectedInset: {
+          inline: horizontalInset + borderWidth * scale,
+          block: verticalInset + borderWidth * scale,
+        },
+        insets: {
+          left: labelRect.left - shellRect.left,
+          top: labelRect.top - shellRect.top,
+          right: shellRect.right - labelRect.right,
+          bottom: shellRect.bottom - labelRect.bottom,
+        },
+        probeWidthDelta: probeRect.width - titleRect.width,
+        // Clamped spans can include hidden fragments in their bounding boxes.
+        words: Array.from(
+          probe.querySelectorAll<HTMLElement>('[data-study-word]'),
+          (word) => ({
+            text: word.textContent,
+            width: word.getBoundingClientRect().width,
+            height: word.getBoundingClientRect().height,
+            overflow: getComputedStyle(word).textOverflow,
+            whiteSpace: getComputedStyle(word).whiteSpace,
+          }),
+        ),
+      };
+    },
+    { design: FAR, borderWidth: NODE_BORDER_WIDTH },
+  );
 }
 
 async function expectLabelFit(
@@ -1010,6 +1037,10 @@ async function expectLabelFit(
 ) {
   const design = FAR;
   await expect(node.locator('[data-study-label]')).toHaveCSS('opacity', '1');
+  await expect(node.locator('[data-study-title]')).toHaveCSS(
+    'overflow',
+    'hidden',
+  );
   const box = await labelGeometry(node);
   expect(box.scale).toBeCloseTo(zoom, 4);
   expect(box.title.font).toBeCloseTo(design.labelFont, 3);
@@ -1025,15 +1056,26 @@ async function expectLabelFit(
     Math.min(box.probe.height, box.title.clamp * design.labelLine),
     1,
   );
+  expect(box.title.clamp).toBe(
+    Math.floor(box.availableHeight / design.labelLine),
+  );
   // Screen-space layout rounds to Chromium's 1/64 CSS-pixel layout unit.
   expect(Math.abs(box.label.width - box.availableWidth)).toBeLessThan(0.02);
   expect(box.label.height).toBeLessThanOrEqual(box.availableHeight + 0.1);
-  expect(Math.abs(box.insets.left - (8 + zoom))).toBeLessThan(0.02);
-  expect(box.insets.top).toBeCloseTo(6 + zoom, 2);
-  expect(box.insets.right).toBeGreaterThanOrEqual(8 + zoom - 0.1);
-  expect(box.insets.bottom).toBeGreaterThanOrEqual(6 + zoom - 0.1);
+  expect(Math.abs(box.insets.left - box.expectedInset.inline)).toBeLessThan(
+    0.02,
+  );
+  expect(box.insets.top).toBeCloseTo(box.expectedInset.block, 2);
+  expect(box.insets.right).toBeGreaterThanOrEqual(
+    box.expectedInset.inline - 0.1,
+  );
+  expect(box.insets.bottom).toBeGreaterThanOrEqual(
+    box.expectedInset.block - 0.1,
+  );
   for (const word of box.words) {
-    expect(word.width).toBeLessThanOrEqual(box.availableWidth + 0.1);
+    expect(word.width, word.text ?? '').toBeLessThanOrEqual(
+      box.availableWidth + 0.1,
+    );
     expect(word.overflow).toBe('clip');
     expect(word.whiteSpace).toBe('normal');
   }
@@ -1111,7 +1153,7 @@ test('words move intact to the next line and only overwide words break internall
   const title = 'Go Jupyter: Supercalifragilisticexpialidocious - Research';
   const audit = await mountNodes(page, {
     title,
-    // Keep this a wrap-boundary fixture with the current 10px title font.
+    // Keep this a wrap-boundary fixture with the current 12px title font.
     width: 320,
     height: 700,
     zoom: 0.2,
@@ -1144,10 +1186,6 @@ test('words move intact to the next line and only overwide words break internall
     expect(await group.evaluate((el) => el.getClientRects().length)).toBe(1);
   }
   await expect(node.locator('[data-study-title]')).toHaveText(title);
-  await expect(node.locator('[data-study-title]')).toHaveCSS(
-    '-webkit-line-clamp',
-    '6',
-  );
   for (const word of await node
     .locator('[data-study-title] [data-study-word]')
     .all()) {
@@ -1284,20 +1322,16 @@ for (const [language, title, description] of [
       title,
       description,
     });
-    for (const zoom of [0.25, 0.27, 0.29, 0.25]) {
+    for (const zoom of [0.24, 0.25, 0.27, 0.279, 0.25]) {
       await zoomTo(page, zoom);
       for (const type of ['note', 'office'] as const) {
         const node = shell(page, type);
         await expectLayers(node, true);
         const box = await expectLabelFit(node, zoom);
-        const design = FAR;
-        expect(box.title.clamp).toBe(
-          Math.floor(box.availableHeight / design.labelLine),
-        );
-        expect(box.title.height).toBeGreaterThan(3 * design.labelLine);
+        expect(box.title.height).toBeGreaterThan(3 * FAR.labelLine);
       }
       if (zoom === 0.27)
-        await testInfo.attach(`${language}-35-percent`, {
+        await testInfo.attach(`${language}-27-percent`, {
           body: await page.locator('#far-zoom-fixture').screenshot(),
           contentType: 'image/png',
         });
@@ -1313,19 +1347,20 @@ test('tiny labels hide but all four minimal shells retain their authored footpri
 }) => {
   const audit = await mountNodes(page);
   const before = await page.evaluate(() => window.farZoomFixture.readState());
-  for (const zoom of [0.08, 0.05, 0.25]) {
+  for (const zoom of [0.08, 0.051, 0.05, 0.051, 0.25]) {
     await zoomTo(page, zoom);
     for (const type of TYPES) {
       const node = shell(page, type);
       await expectLayers(node, true);
+      const labelFits = (320 - 2 * NODE_BORDER_WIDTH) * zoom >= FAR.labelLine;
       if (type === 'note' || type === 'office') {
         await expect(node.locator('[data-study-label]')).toHaveAttribute(
           'aria-hidden',
-          String(zoom < 0.25),
+          String(!labelFits),
         );
         await expect(node.locator('[data-study-label]')).toHaveCSS(
           'opacity',
-          zoom < 0.25 ? '0' : '1',
+          labelFits ? '1' : '0',
         );
       }
       await expect(node).toHaveCSS('opacity', '1');
@@ -1335,7 +1370,7 @@ test('tiny labels hide but all four minimal shells retain their authored footpri
       expect(box.border).toBe('1px');
       expect(box.background).not.toBe('rgba(0, 0, 0, 0)');
       if (type === 'web' || type === 'pdf') continue;
-      if (zoom < 0.25)
+      if (!labelFits)
         await expect(node.locator('[data-study-description]')).toHaveCount(0);
       else await expectLabelFit(node, zoom);
     }
@@ -1478,36 +1513,37 @@ for (const [width, height] of [
   [1000, 200],
   [2000, 1600],
 ]) {
-  test(`Note uses 25/28 percent while cards retain 20/24 percent at ${width}x${height}`, async ({
+  test(`Note, Web, PDF and Office share 25/28 percent at ${width}x${height}`, async ({
     page,
-  }) => {
+  }, testInfo) => {
     const audit = await mountNodes(page, {
       width,
       height,
       zoom: 0.25,
     });
     const before = await page.evaluate(() => window.farZoomFixture.readState());
-    for (const [zoom, noteMinimal, cardMinimal] of [
-      [0.25, false, false],
-      [0.249, true, false],
-      [0.25, true, false],
-      [0.279, true, false],
-      [0.28, false, false],
-      [0.26, false, false],
-      [0.25, false, false],
-      [0.249, true, false],
-      [0.2, true, false],
-      [0.199, true, true],
-      [0.239, true, true],
-      [0.24, true, false],
-      [0.28, false, false],
+    for (const [zoom, minimal] of [
+      [0.25, false],
+      [0.249, true],
+      [0.25, true],
+      [0.279, true],
+      [0.28, false],
+      [0.26, false],
+      [0.25, false],
+      [0.249, true],
+      [0.2, true],
+      [0.199, true],
+      [0.239, true],
+      [0.24, true],
+      [0.28, false],
     ] as const) {
       await zoomTo(page, zoom);
-      for (const type of TYPES)
-        await expectLayers(
-          shell(page, type),
-          type === 'note' ? noteMinimal : cardMinimal,
-        );
+      for (const type of TYPES) await expectLayers(shell(page, type), minimal);
+      if (zoom === 0.24)
+        await testInfo.attach('unified-far-zoom', {
+          body: await page.locator('#far-zoom-fixture').screenshot(),
+          contentType: 'image/png',
+        });
     }
     expect(
       await page.evaluate(() => window.farZoomFixture.readState()),

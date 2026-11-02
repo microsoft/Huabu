@@ -59,11 +59,12 @@ import type {
 } from '@/api/acp';
 import type {
   AgentBinding,
+  AgentletDevice,
   AgentDefaults,
   AgentDefaultsResponse,
 } from '@huabu/shared';
 
-let inFlightRefresh: Promise<void> | null = null;
+let inFlightRefresh: Promise<Error | null> | null = null;
 let inFlightDefaults: Promise<AgentDefaultsResponse> | null = null;
 let defaultsSaveQueue = Promise.resolve();
 let defaultsRevision = 0;
@@ -118,6 +119,8 @@ interface AcpProfilesState {
   selectableProfileIds: string[];
   /** Active Agentlet control connections, sorted by the server. */
   connectedDevices: ConnectedAgentletDevice[];
+  /** Display-only device history; never used for runtime availability. */
+  knownDevices: AgentletDevice[];
   folderPickerAgentletId: string | null;
   /** Latest agentlet snapshot. `null` until the first fetch resolves. */
   agentlet: AcpAgentletStatus | null;
@@ -142,8 +145,11 @@ interface AcpProfilesState {
   initStarted: boolean;
   /** Idempotent first-load helper called by the hook on mount. */
   init: () => Promise<void>;
-  /** Force a fresh GET. Safe to call concurrently. */
-  refresh: (options?: { background?: boolean }) => Promise<void>;
+  /** Refresh the shared snapshot; afterMutation waits for older reads and reports errors. */
+  refresh: (options?: {
+    background?: boolean;
+    afterMutation?: boolean;
+  }) => Promise<void>;
   renameDevice: (agentletId: string, displayName: string) => Promise<void>;
   loadDefaults: () => Promise<AgentDefaultsResponse>;
   saveDefaults: (config: AgentDefaults) => Promise<AgentDefaultsResponse>;
@@ -154,6 +160,7 @@ export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
   profiles: [],
   selectableProfileIds: [],
   connectedDevices: [],
+  knownDevices: [],
   folderPickerAgentletId: null,
   agentlet: null,
   agentDefaults: null,
@@ -259,11 +266,23 @@ export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
       connectedDevices: state.connectedDevices.map((device) =>
         device.agentletId === agentletId ? { ...device, ...saved } : device,
       ),
+      knownDevices: state.knownDevices.map((device) =>
+        device.agentletId === agentletId ? { ...device, ...saved } : device,
+      ),
     }));
   },
   refresh: async (options) => {
     await defaultsSaveQueue;
-    if (inFlightRefresh) return inFlightRefresh;
+    // A mutation must not join a snapshot captured before its commit.
+    if (options?.afterMutation && inFlightRefresh) await inFlightRefresh;
+    if (inFlightRefresh) {
+      const error = await inFlightRefresh;
+      if (options?.afterMutation && error) {
+        set({ error });
+        throw error;
+      }
+      return;
+    }
     const background = options?.background === true;
     const revision = defaultsRevision;
     const namesRevision = deviceNamesRevision;
@@ -275,7 +294,10 @@ export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
           profiles: res.profiles,
           selectableProfileIds: res.selectableProfileIds,
           ...(namesRevision === deviceNamesRevision
-            ? { connectedDevices: res.connectedDevices }
+            ? {
+                connectedDevices: res.connectedDevices,
+                knownDevices: res.knownDevices ?? res.connectedDevices,
+              }
             : {}),
           folderPickerAgentletId: res.folderPickerAgentletId ?? null,
           agentlet: res.agentlet,
@@ -286,24 +308,32 @@ export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
           error: null,
           loading: false,
         });
+        return null;
       } catch (err) {
+        const error = err instanceof Error ? err : new Error(String(err));
         // Leave the previous snapshot in place so transient errors
         // don't make the picker flicker between "available" and empty.
         set(
           background
             ? { loading: false }
             : {
-                error: err instanceof Error ? err : new Error(String(err)),
+                error,
                 loading: false,
               },
         );
+        return error;
       }
     })();
     inFlightRefresh = request;
-    void request.finally(() => {
+    const clear = () => {
       if (inFlightRefresh === request) inFlightRefresh = null;
-    });
-    return request;
+    };
+    void request.then(clear, clear);
+    const error = await request;
+    if (options?.afterMutation && error) {
+      set({ error });
+      throw error;
+    }
   },
 }));
 

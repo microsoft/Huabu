@@ -2,7 +2,7 @@
 // Licensed under the MIT license.
 
 import { X } from 'lucide-react';
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/components/Common/Button';
@@ -26,10 +26,15 @@ interface ThreadChatInputProps extends Omit<
   ChatInputProps,
   'value' | 'onChange' | 'onSubmit'
 > {
+  children?: ReactNode;
   onSubmit: (event: React.FormEvent, mode: AgentMode, draft: string) => void;
 }
 
-export function ThreadChatInput({ onSubmit, ...props }: ThreadChatInputProps) {
+export function ThreadChatInput({
+  children,
+  onSubmit,
+  ...props
+}: ThreadChatInputProps) {
   const session = useChatSession();
   const { threadId } = session;
   const { t } = useTranslation();
@@ -134,6 +139,7 @@ export function ThreadChatInput({ onSubmit, ...props }: ThreadChatInputProps) {
           </ol>
         </section>
       ) : null}
+      {children}
       <ChatInput
         {...props}
         isStreaming={

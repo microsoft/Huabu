@@ -657,12 +657,11 @@ export const NodeWrapper = memo(
       !isBoxSelecting &&
       !multiSelectModifierHeld;
 
-    // While a stroke-level (sketch) selection exists, its own toolbar (or,
-    // on desktop, none) owns the surface — suppress this node's floating
-    // toolbar so a mixed lasso never shows the node toolbar. Boolean
-    // selector so this only re-renders when the flag flips.
-    const hasStrokeSelection = useGesturePreviewStore(
-      (s) => Object.keys(s.sketchStrokeSelection).length > 0,
+    // A retained lasso owns one toolbar, including selections without ink.
+    const hasLassoSelection = useGesturePreviewStore(
+      (s) =>
+        Object.keys(s.sketchStrokeSelection).length > 0 ||
+        s.sketchSelectionPolygon !== null,
     );
 
     // While a create-connected gesture is pending, the picker asks "what
@@ -733,7 +732,7 @@ export const NodeWrapper = memo(
           !isBoxSelecting &&
           (!isDragging || toolbarGestureActive) &&
           !resizing &&
-          !hasStrokeSelection &&
+          !hasLassoSelection &&
           !hasPendingConnect && (
             <NodeFloatingToolbar
               id={id}

@@ -26,6 +26,13 @@ async function workspace(page: Page) {
 
 test.beforeEach(async ({ page }) => {
   await page.goto('/setup');
+  await page.waitForFunction(() =>
+    performance
+      .getEntriesByType('resource')
+      .some((entry) =>
+        new URL(entry.name).pathname.endsWith('/deps/react-router-dom.js'),
+      ),
+  );
   await page.evaluate(async () => {
     const dependencyUrl = (file: string) => {
       const resource = performance

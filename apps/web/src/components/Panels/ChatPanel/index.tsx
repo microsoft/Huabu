@@ -33,7 +33,6 @@ import { useInternalSlashCommands } from '@/hooks/useInternalSlashCommands';
 import { useAcpProfilesStore } from '@/store/acpProfilesStore';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import useCanvasStore from '@/store/canvasStore';
-import { useChatPreferencesStore } from '@/store/chatPreferencesStore';
 import {
   selectThreadBinding,
   selectThreadHistoryLoaded,
@@ -96,6 +95,7 @@ import type { AgentMode, CanvasNodeId } from '@huabu/shared';
 
 interface ChatPanelProps {
   ownerUnavailable?: boolean;
+  ownerStreamUnavailable?: boolean;
   isActive?: boolean;
   activationId?: number;
   isCollapsed?: boolean;
@@ -125,6 +125,7 @@ interface ChatPanelProps {
 
 export const ChatPanel = ({
   ownerUnavailable = false,
+  ownerStreamUnavailable = ownerUnavailable,
   isActive = true,
   activationId,
   isCollapsed,
@@ -264,7 +265,12 @@ export const ChatPanel = ({
     useAgentStream(session, previewTabId);
 
   // Chat history hook — loads history and handles reconnection
-  const historyWindow = useChatHistory(session, setIsLoading, previewTabId);
+  const historyWindow = useChatHistory(
+    session,
+    setIsLoading,
+    previewTabId,
+    ownerStreamUnavailable,
+  );
   const loadOlderHistory = historyWindow?.loadOlderHistory;
   const isCurrentOwnerHistory = historyWindow?.isCurrentOwnerHistory;
   const [isLatestVisible, setIsLatestVisible] = useState(false);
@@ -324,8 +330,8 @@ export const ChatPanel = ({
   const messages = useChatStore((state) =>
     selectThreadMessages(state, threadId),
   );
-  const completedTurnId = useChatStore(
-    (state) => state.threadsById[threadId]?.completedTurnId,
+  const historyPages = useChatStore(
+    (state) => state.threadsById[threadId]?.historyPages,
   );
   const pendingPermission = useMemo(
     () => findPendingPermissionRequest(messages),
@@ -339,9 +345,6 @@ export const ChatPanel = ({
   );
   const historyPage = useChatStore(
     useShallow((state) => selectThreadHistoryPageState(state, threadId)),
-  );
-  const recentTurnCount = useChatPreferencesStore(
-    (state) => state.recentTurnCount,
   );
   const addNode = useCanvasStore((state) => state.addNode);
   const llmConfig = useLLMStore((state) => state.config);
@@ -880,11 +883,11 @@ export const ChatPanel = ({
     agentBinding.kind === 'external'
       ? acpProfiles.find((profile) => profile.id === agentBinding.profileId)
       : undefined;
-  const selectedExternalDevice = selectedExternalProfile
-    ? resolveConnectedDevice(
-        selectedExternalProfile.agentletId,
-        connectedDevices,
-      )
+  const directoryAgentletId = preparation.realized
+    ? preparation.agentletId
+    : selectedExternalProfile?.agentletId;
+  const selectedExternalDevice = directoryAgentletId
+    ? resolveConnectedDevice(directoryAgentletId, connectedDevices)
     : undefined;
   const workingDirectoryOverride = preparation.workingDirectoryOverride;
   const showWorkingDirectoryOverride =
@@ -1091,7 +1094,7 @@ export const ChatPanel = ({
         <div
           className={`flex h-full flex-col gap-2 overflow-visible ${remote ? 'pt-0' : hidePanelHeader ? 'pt-3' : 'pt-1'}`}
         >
-          {historyError && (
+          {historyError && !ownerUnavailable && (
             <div
               role="alert"
               className="text-danger-fg flex items-center gap-2 px-3 text-xs"
@@ -1149,14 +1152,19 @@ export const ChatPanel = ({
           <MessageList
             onLatestVisibleChange={setIsLatestVisible}
             messages={messages}
-            recentTurnCount={recentTurnCount}
+            historyPages={historyPages}
+            onLoadHistoryPage={historyWindow?.loadHistoryPage}
+            onVisibleMessagesChange={historyWindow?.updateHistoryViewport}
+            historyPageError={historyWindow?.historyPageError}
+            onRetryHistoryPage={historyWindow?.retryHistoryPage}
             activationId={activationId}
-            completedTurnId={completedTurnId}
             threadId={threadId}
             isLoading={isLoading}
-            isHistoryLoading={!isHistoryLoaded && !historyError}
+            isHistoryLoading={
+              !ownerUnavailable && !isHistoryLoaded && !historyError
+            }
+            isHistoryReady={isHistoryLoaded}
             hasOlderHistory={historyPage.hasOlderHistory}
-            olderTurnBatchSize={recentTurnCount}
             isLoadingOlderHistory={historyPage.isLoadingOlderHistory}
             olderHistoryError={historyPage.olderHistoryError ?? undefined}
             onLoadOlderHistory={loadOlderHistory}
@@ -1181,9 +1189,6 @@ export const ChatPanel = ({
                   part={pendingPermission.part}
                 />
               </div>
-            ) : null}
-            {!remote && ownerCanvasId && threadId ? (
-              <ChangeReviewCard canvasId={ownerCanvasId} threadId={threadId} />
             ) : null}
             <ThreadChatInput
               onSubmit={handleSubmit}
@@ -1213,7 +1218,7 @@ export const ChatPanel = ({
                   />
                   {showWorkingDirectoryOverride ? (
                     <WorkingDirectoryOverride
-                      agentletId={selectedExternalProfile?.agentletId}
+                      agentletId={selectedExternalDevice?.agentletId}
                       deviceName={selectedExternalDevice?.displayName}
                       profileWorkingDirPath={
                         selectedExternalProfile?.workingDirPath ?? ''
@@ -1294,7 +1299,14 @@ export const ChatPanel = ({
                 savingAgentDraft ||
                 savingWorkingDirectory
               }
-            />
+            >
+              {!remote && ownerCanvasId && threadId ? (
+                <ChangeReviewCard
+                  canvasId={ownerCanvasId}
+                  threadId={threadId}
+                />
+              ) : null}
+            </ThreadChatInput>
           </div>
         </div>
       </SidebarPanel>

@@ -1172,7 +1172,7 @@ describe('Milkdown block commands', () => {
     ['ordered list', '1. hello'],
     ['task list', '- [ ] hello'],
     ['code block', '```\nhello\n```'],
-    ['math block', '```LaTeX\nhello\n```'],
+    ['math block', '$$\nhello\n$$'],
   ] as const)('converts a %s to a table', async (_label, markdown) => {
     const instance = await mount(markdown);
 

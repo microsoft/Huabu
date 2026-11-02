@@ -11,6 +11,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createEmptyWorkspace, openTarget, type PreviewTarget } from './model';
+import { useRemoteConversationOwnerStore } from '../remoteConversationOwner';
 import { readWorkspace, writeWorkspace } from './persistence';
 import {
   selectActiveNodeId,
@@ -53,6 +54,7 @@ const store = () => usePreviewWorkspaceStore.getState();
 
 beforeEach(() => {
   testStorage.storage.clear();
+  useRemoteConversationOwnerStore.setState({ entries: {} });
   usePreviewWorkspaceStore.setState({
     canvasId: '',
     workspace: createEmptyWorkspace(),
@@ -65,6 +67,33 @@ beforeEach(() => {
 });
 
 describe('loading a Canvas', () => {
+  it('retains the address of a deleted observed Question instead of closing its conversation', () => {
+    store().loadForCanvas(CANVAS);
+    const tabId = store().openPreviewTarget(node('question'));
+    useRemoteConversationOwnerStore.setState({
+      entries: {
+        known: {
+          lastKnownOwner: {
+            canvasId: CANVAS,
+            nodeId: 'question',
+            threadId: 'saved-thread',
+            spaceTitle: 'Space',
+            source: {
+              agentBinding: { kind: 'internal' },
+              hasAuthoredContent: true,
+            },
+          },
+        },
+      },
+    });
+    store().validate(new Set());
+    expect(store().workspace.tabs[tabId]?.target).toEqual({
+      kind: 'conversation',
+      canvasId: CANVAS,
+      nodeId: 'question',
+      threadId: 'saved-thread',
+    });
+  });
   it('opens passive targets without read intent and preserves later explicit reading', () => {
     store().loadForCanvas(CANVAS);
     const tabId = store().openPreviewTarget(node('question'), {

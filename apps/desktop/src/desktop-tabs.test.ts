@@ -131,6 +131,10 @@ describe('desktop Space Tab lifecycle', () => {
     tabs = makeTabs();
     tabs.ready(mocks.views[0].webContents as never);
     tabs.workspaceReady(mocks.views[0].webContents as never, 'workspace');
+    tabs.command(
+      { type: 'sync-workspace-capabilities', canChangeWorkspace: true },
+      mocks.views[0].webContents as never,
+    );
   });
 
   afterEach(() => {
@@ -175,6 +179,249 @@ describe('desktop Space Tab lifecycle', () => {
   }
 
   const newTab = () => tabs.command('new-tab', shell.webContents as never);
+
+  it('saves before replacing a Space in the same Tab and retains navigation intent', async () => {
+    const parent = open('parent');
+    const id = tabs.snapshot.activeId;
+    open('other');
+    tabs.activate(id);
+    const target = {
+      canvasId: 'child',
+      search: '?node=n1',
+      hash: '#focus',
+      state: { selected: 'n1' },
+    };
+    const navigation = tabs.open(target, parent.webContents as never);
+    expect(tabs.snapshot.busy).toBe(true);
+    expect(parent.webContents.close).not.toHaveBeenCalled();
+    expect(tabs.snapshot.tabs.map((tab) => tab.canvasId)).toEqual([
+      null,
+      'parent',
+      'other',
+    ]);
+    finish(parent);
+    await navigation;
+    expect(tabs.snapshot.activeId).toBe(id);
+    expect(tabs.snapshot.tabs.map((tab) => tab.canvasId)).toEqual([
+      null,
+      'child',
+      'other',
+    ]);
+    expect(parent.webContents.close).toHaveBeenCalledOnce();
+    const child = mocks.views.at(-1);
+    if (!child) throw new Error('Missing replacement view');
+    expect(child.webContents.loadURL).toHaveBeenCalledWith(
+      'http://localhost:3001/canvas/child?node=n1#focus',
+    );
+    tabs.ready(child.webContents as never);
+    expect(child.webContents.send).toHaveBeenCalledWith(
+      'tabs:navigate',
+      target,
+    );
+    expect(tabs.snapshot.busy).toBe(false);
+    expect(mocks.options.at(-1)?.webPreferences?.additionalArguments).toContain(
+      '--huabu-canvas-id=child',
+    );
+  });
+
+  it('activates an already open destination without replacing or saving the source', async () => {
+    const parent = open('parent');
+    const parentId = tabs.snapshot.activeId;
+    const child = open('child');
+    const childId = tabs.snapshot.activeId;
+    tabs.activate(parentId);
+    await tabs.open({ canvasId: 'child' }, parent.webContents as never);
+    expect(tabs.snapshot.activeId).toBe(childId);
+    expect(tabs.snapshot.tabs).toHaveLength(3);
+    expect(parent.webContents.close).not.toHaveBeenCalled();
+    expect(parent.webContents.send).not.toHaveBeenCalledWith(
+      'tabs:prepare-close',
+      expect.anything(),
+    );
+    expect(child.webContents.focus).toHaveBeenCalled();
+  });
+
+  it('does not consume an unrelated blank Tab when a background Space opens an existing destination', async () => {
+    const parent = open('parent');
+    open('child');
+    const childId = tabs.snapshot.activeId;
+    newTab();
+    await tabs.open({ canvasId: 'child' }, parent.webContents as never);
+    expect(tabs.snapshot.activeId).toBe(childId);
+    expect(tabs.snapshot.tabs.some((tab) => tab.id === 'new-tab')).toBe(true);
+  });
+
+  it.each(['save', 'persist', 'cancel'] as const)(
+    'keeps the original Space when same-Tab navigation fails: %s',
+    async (failure) => {
+      const parent = open('parent');
+      const id = tabs.snapshot.activeId;
+      if (failure === 'persist')
+        mkdirSync(join(directory, 'desktop-tabs.json.tmp'));
+      const navigation = tabs.open(
+        { canvasId: 'child' },
+        parent.webContents as never,
+      );
+      const rejected = expect(navigation).rejects.toThrow();
+      if (failure === 'cancel') {
+        const request = parent.webContents.send.mock.calls.findLast(
+          ([channel]) => channel === 'tabs:prepare-close',
+        );
+        if (!request) throw new Error('Missing save request');
+        tabs.finishDrain(parent.webContents as never, request[1], {
+          ok: false,
+          error: 'Cancelled',
+          cancelled: true,
+        });
+      } else finish(parent, failure !== 'save');
+      await rejected;
+      expect(tabs.snapshot.activeId).toBe(id);
+      expect(tabs.snapshot.tabs.map((tab) => tab.canvasId)).toEqual([
+        null,
+        'parent',
+      ]);
+      expect(tabs.snapshot.busy).toBe(false);
+      expect(parent.webContents.close).not.toHaveBeenCalled();
+      expect(parent.webContents.send).toHaveBeenCalledWith('tabs:resume');
+    },
+  );
+
+  it('selects the right neighbour, then the left, and only then Home on close', async () => {
+    const a = open('a');
+    const aId = tabs.snapshot.activeId;
+    const b = open('b');
+    const bId = tabs.snapshot.activeId;
+    tabs.activate(aId);
+    const closingA = tabs.close(aId);
+    finish(a);
+    await closingA;
+    expect(tabs.snapshot.activeId).toBe(bId);
+    newTab();
+    const closingBlank = tabs.close('new-tab');
+    finish(mocks.views[0]);
+    await closingBlank;
+    expect(tabs.snapshot.activeId).toBe(bId);
+    const closingB = tabs.close(bId);
+    finish(b);
+    await closingB;
+    expect(tabs.snapshot.activeId).toBe('home');
+  });
+
+  it('persists reordered Tabs without changing activation or reloading content', () => {
+    const a = open('a');
+    const aId = tabs.snapshot.activeId;
+    open('b');
+    const activeId = tabs.snapshot.activeId;
+    newTab();
+    tabs.activate(activeId);
+    tabs.command(
+      { type: 'move-tab', id: aId, index: 3 },
+      shell.webContents as never,
+    );
+    expect(tabs.snapshot.tabs.map((tab) => tab.canvasId)).toEqual([
+      null,
+      'b',
+      null,
+      'a',
+    ]);
+    expect(tabs.snapshot.activeId).toBe(activeId);
+    expect(a.webContents.close).not.toHaveBeenCalled();
+    const saved = JSON.parse(
+      readFileSync(join(directory, 'desktop-tabs.json'), 'utf8'),
+    );
+    expect(saved[JSON.stringify(['local', 'workspace'])].canvasIds).toEqual([
+      'b',
+      'a',
+    ]);
+    tabs.command(
+      { type: 'move-tab', id: 'new-tab', index: 1 },
+      shell.webContents as never,
+    );
+    expect(tabs.snapshot.tabs[1].id).toBe('new-tab');
+  });
+
+  it('validates reorder ownership, fixed Home, bounds, and persistence failures', () => {
+    const a = open('a');
+    const id = tabs.snapshot.activeId;
+    open('b');
+    const before = tabs.snapshot;
+    expect(() =>
+      tabs.command({ type: 'move-tab', id, index: 2 }, a.webContents as never),
+    ).toThrow('Only the desktop shell');
+    for (const index of [0, -1, 3, 1.5, NaN]) {
+      expect(() =>
+        tabs.command(
+          { type: 'move-tab', id, index },
+          shell.webContents as never,
+        ),
+      ).toThrow('Invalid Tab position');
+    }
+    expect(() =>
+      tabs.command(
+        { type: 'move-tab', id: 'home', index: 1 },
+        shell.webContents as never,
+      ),
+    ).toThrow('Invalid Tab position');
+    expect(() =>
+      tabs.command(
+        { type: 'move-tab', id: 'missing', index: 1 },
+        shell.webContents as never,
+      ),
+    ).toThrow('Tab no longer exists');
+    mkdirSync(join(directory, 'desktop-tabs.json.tmp'));
+    expect(() =>
+      tabs.command(
+        { type: 'move-tab', id, index: 2 },
+        shell.webContents as never,
+      ),
+    ).toThrow();
+    expect(tabs.snapshot).toEqual(before);
+  });
+
+  it('hides and rejects Workspace switching when Home reports a fixed server Workspace', () => {
+    const a = open('a');
+    const command = {
+      type: 'sync-workspace-capabilities',
+      canChangeWorkspace: false,
+    };
+    expect(() => tabs.command(command, a.webContents as never)).toThrow(
+      'Only Home',
+    );
+    tabs.command({ type: 'open-home-menu', x: 76 }, shell.webContents as never);
+    tabs.command(command, mocks.views[0].webContents as never);
+    expect(tabs.snapshot.canChangeWorkspace).toBe(false);
+    expect(shell.webContents.send).toHaveBeenCalledWith('tabs:home-menu', null);
+    expect(() =>
+      tabs.command(
+        { type: 'open-home-menu', x: 76 },
+        shell.webContents as never,
+      ),
+    ).toThrow('Workspace switching is unavailable');
+    expect(() =>
+      tabs.command(
+        { ...command, canChangeWorkspace: 'false' },
+        mocks.views[0].webContents as never,
+      ),
+    ).toThrow('Invalid Workspace capabilities');
+  });
+
+  it('rejects reordering and competing navigation while a replacement is saving', async () => {
+    const parent = open('parent');
+    const id = tabs.snapshot.activeId;
+    const replacing = tabs.open(
+      { canvasId: 'child' },
+      parent.webContents as never,
+    );
+    expect(() =>
+      tabs.command(
+        { type: 'move-tab', id, index: 1 },
+        shell.webContents as never,
+      ),
+    ).toThrow('Another Tab operation');
+    expect(() => tabs.open({ canvasId: 'other' })).toThrow('Tabs are saving');
+    finish(parent);
+    await replacing;
+  });
 
   it('blocks deleting a Space tree if a descendant has an open Tab', () => {
     open('child');
@@ -694,8 +941,9 @@ describe('desktop Space Tab lifecycle', () => {
     expect(mocks.options[0].webPreferences?.partition).toBeUndefined();
   });
 
-  it('diverts native cross-Space navigation without changing the source page identity', () => {
+  it('replaces native cross-Space navigation only after saving the source page', async () => {
     const a = open('a');
+    const id = tabs.snapshot.activeId;
     const navigate = a.webContents.callbacks.get('will-navigate');
     if (!navigate) throw new Error('Missing navigation guard');
     const event = { preventDefault: vi.fn() };
@@ -704,11 +952,12 @@ describe('desktop Space Tab lifecycle', () => {
       'http://localhost:3001/canvas/b?node=n#anchor' as never,
     );
     expect(event.preventDefault).toHaveBeenCalled();
-    expect(tabs.snapshot.tabs.map((tab) => tab.canvasId)).toEqual([
-      null,
-      'a',
-      'b',
-    ]);
+    expect(a.webContents.close).not.toHaveBeenCalled();
+    finish(a);
+    await vi.waitFor(() => expect(tabs.snapshot.busy).toBe(false));
+    expect(tabs.snapshot.tabs.map((tab) => tab.canvasId)).toEqual([null, 'b']);
+    expect(tabs.snapshot.activeId).toBe(id);
+    expect(a.webContents.close).toHaveBeenCalledOnce();
     expect(a.webContents.loadURL).toHaveBeenCalledTimes(1);
     expect(mocks.views[2].webContents.loadURL).toHaveBeenCalledWith(
       'http://localhost:3001/canvas/b?node=n#anchor',
@@ -890,6 +1139,7 @@ describe('desktop Space Tab lifecycle', () => {
   });
 
   it('keeps the Tab and resumes input if saving fails', async () => {
+    mocks.showMessageBox.mockResolvedValueOnce({ response: 0 });
     const a = open('a');
     const close = tabs.close(tabs.snapshot.activeId);
     finish(a, false);
@@ -898,9 +1148,18 @@ describe('desktop Space Tab lifecycle', () => {
     expect(tabs.snapshot.busy).toBe(false);
     expect(a.webContents.send).toHaveBeenCalledWith('tabs:resume');
     expect(tabs.snapshot.tabs).toHaveLength(2);
+    expect(mocks.showMessageBox).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        buttons: ['Cancel', 'Close without saving'],
+        defaultId: 0,
+        cancelId: 0,
+      }),
+    );
   });
 
   it('times out without pretending a save succeeded', async () => {
+    mocks.showMessageBox.mockResolvedValueOnce({ response: 0 });
     vi.useFakeTimers();
     const a = open('a');
     const close = tabs.close(tabs.snapshot.activeId);
@@ -909,6 +1168,91 @@ describe('desktop Space Tab lifecycle', () => {
     await rejected;
     expect(a.webContents.close).not.toHaveBeenCalled();
     expect(tabs.snapshot.busy).toBe(false);
+  });
+
+  it.each(['close', 'reload'] as const)(
+    'requires explicit discard approval to %s after an offline save failure',
+    async (action) => {
+      let confirm!: (value: { response: number }) => void;
+      mocks.showMessageBox.mockReturnValueOnce(
+        new Promise((resolve) => {
+          confirm = resolve;
+        }),
+      );
+      const a = open('a');
+      const task = tabs[action](tabs.snapshot.activeId);
+      const id = a.webContents.send.mock.calls.at(-1)?.[1];
+      tabs.finishDrain(a.webContents as never, id, {
+        ok: false,
+        error: 'Network offline',
+      });
+      await vi.waitFor(() =>
+        expect(mocks.showMessageBox).toHaveBeenCalledOnce(),
+      );
+      expect(a.webContents.close).not.toHaveBeenCalled();
+      expect(a.webContents.reload).not.toHaveBeenCalled();
+      expect(tabs.snapshot.busy).toBe(true);
+      expect(a.webContents.send).toHaveBeenCalledWith('tabs:close-prepared');
+      expect(mocks.showMessageBox).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          detail: expect.stringContaining('Unsaved changes may be lost'),
+          buttons: [
+            'Cancel',
+            action === 'close'
+              ? 'Close without saving'
+              : 'Reload without saving',
+          ],
+          defaultId: 0,
+          cancelId: 0,
+        }),
+      );
+      confirm({ response: 1 });
+      await task;
+      expect(a.webContents[action]).toHaveBeenCalledOnce();
+      expect(tabs.snapshot.busy).toBe(false);
+    },
+  );
+
+  it('keeps failed reloads cancellable and retries saving after recovery', async () => {
+    mocks.showMessageBox.mockResolvedValueOnce({ response: 0 });
+    const a = open('a');
+    const id = tabs.snapshot.activeId;
+    const reload = tabs.reload(id);
+    finish(a, false);
+    await expect(reload).rejects.toThrow('Disk full');
+    expect(a.webContents.reload).not.toHaveBeenCalled();
+    expect(tabs.snapshot.busy).toBe(false);
+    expect(a.webContents.send).toHaveBeenCalledWith('tabs:resume');
+    const retry = tabs.reload(id);
+    finish(a);
+    await retry;
+    expect(a.webContents.reload).toHaveBeenCalledOnce();
+  });
+
+  it('ignores a late response from a cancelled request without settling its retry', async () => {
+    const a = open('a');
+    const id = tabs.snapshot.activeId;
+    const closing = tabs.close(id);
+    const requestId = a.webContents.send.mock.calls.at(-1)?.[1];
+    tabs.finishDrain(a.webContents as never, requestId, {
+      ok: false,
+      error: 'Closing was cancelled.',
+      cancelled: true,
+    });
+    await expect(closing).rejects.toMatchObject({
+      name: 'DesktopCloseCancelledError',
+    });
+    expect(mocks.showMessageBox).not.toHaveBeenCalled();
+    const retry = tabs.reload(id);
+    expect(() =>
+      tabs.finishDrain(a.webContents as never, requestId, { ok: true }),
+    ).not.toThrow();
+    expect(tabs.snapshot.busy).toBe(true);
+    expect(a.webContents.reload).not.toHaveBeenCalled();
+    finish(a);
+    await retry;
+    expect(a.webContents.reload).toHaveBeenCalledOnce();
   });
 
   it('waits beyond the old timeout while the owning renderer remains responsive', async () => {
@@ -1314,6 +1658,81 @@ describe('desktop Space Tab lifecycle', () => {
     finish(a);
     await reload;
     expect(a.webContents.reload).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes an initializing Tab without requesting a save or discard confirmation', async () => {
+    tabs.open({ canvasId: 'loading' });
+    const view = mocks.views.at(-1);
+    if (!view) throw new Error('Missing loading view');
+    expect(tabs.snapshot.tabs.at(-1)).toMatchObject({
+      title: '',
+      loading: true,
+    });
+
+    await tabs.close(tabs.snapshot.activeId);
+
+    expect(view.webContents.close).toHaveBeenCalledOnce();
+    expect(view.webContents.send).not.toHaveBeenCalledWith(
+      'tabs:prepare-close',
+      expect.anything(),
+    );
+    expect(mocks.showMessageBox).not.toHaveBeenCalled();
+    expect(mocks.showErrorBox).not.toHaveBeenCalled();
+    expect(tabs.snapshot).toMatchObject({ activeId: 'home', busy: false });
+    expect(tabs.snapshot.tabs).toHaveLength(1);
+    const stored = JSON.parse(
+      readFileSync(join(directory, 'desktop-tabs.json'), 'utf8'),
+    );
+    expect(stored[JSON.stringify(['local', 'workspace'])].canvasIds).toEqual(
+      [],
+    );
+  });
+
+  it('closes a saved Tab during reload without requesting another save', async () => {
+    const view = open('reloading');
+    const id = tabs.snapshot.activeId;
+    const reload = tabs.reload(id);
+    finish(view);
+    await reload;
+    view.webContents.send.mockClear();
+
+    await tabs.close(id);
+
+    expect(view.webContents.close).toHaveBeenCalledOnce();
+    expect(view.webContents.send).not.toHaveBeenCalledWith(
+      'tabs:prepare-close',
+      expect.anything(),
+    );
+    expect(mocks.showMessageBox).not.toHaveBeenCalled();
+  });
+
+  it('ignores load failures caused by destroying an initializing Tab', async () => {
+    tabs.open({ canvasId: 'loading' });
+    const view = mocks.views.at(-1);
+    if (!view) throw new Error('Missing loading view');
+    const failLoad = view.webContents.callbacks.get('did-fail-load');
+    if (!failLoad) throw new Error('Missing load failure handler');
+    view.webContents.close.mockImplementationOnce(() =>
+      failLoad(
+        {} as never,
+        -2 as never,
+        'Load cancelled by closing' as never,
+        '' as never,
+        true as never,
+      ),
+    );
+
+    await tabs.close(tabs.snapshot.activeId);
+    failLoad(
+      {} as never,
+      -2 as never,
+      'Late load failure' as never,
+      '' as never,
+      true as never,
+    );
+
+    expect(mocks.showErrorBox).not.toHaveBeenCalled();
+    expect(mocks.showMessageBox).not.toHaveBeenCalled();
   });
 
   it('asks before closing an unavailable renderer', async () => {

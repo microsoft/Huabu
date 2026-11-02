@@ -74,8 +74,6 @@ vi.mock('./agent-profiles/ExternalAgentsSettings', () => ({
     const trigger = useRef<HTMLButtonElement>(null);
     return (
       <div data-testid="profile-management">
-        <h4>settings.connectedDevices</h4>
-        <h4>settings.agentProfiles</h4>
         <button
           ref={trigger}
           onClick={() =>
@@ -162,7 +160,7 @@ describe('Settings information architecture', () => {
     const navigation = dialog?.querySelector('nav');
     expect(dialog?.classList.contains('flex-col')).toBe(true);
     expect(dialog?.classList.contains('sm:flex-row')).toBe(true);
-    expect(navigation?.classList.contains('grid-cols-3')).toBe(true);
+    expect(navigation?.classList.contains('grid-cols-2')).toBe(true);
     expect(navigation?.classList.contains('sm:w-48')).toBe(true);
     expect(navigation?.querySelector('span.select-text')).not.toBeNull();
     expect(
@@ -188,7 +186,8 @@ describe('Settings information architecture', () => {
   it('starts content below the header with responsive side padding', async () => {
     await renderModal();
     for (const label of [
-      'settings.agent',
+      'settings.devicesAndAgents',
+      'settings.agentSettings',
       'settings.services',
       'settings.general',
     ]) {
@@ -223,7 +222,8 @@ describe('Settings information architecture', () => {
   it('keeps the content header free of a bottom divider across settings pages', async () => {
     await renderModal();
     for (const label of [
-      'settings.agent',
+      'settings.devicesAndAgents',
+      'settings.agentSettings',
       'settings.services',
       'settings.general',
     ]) {
@@ -238,7 +238,8 @@ describe('Settings information architecture', () => {
     await renderModal();
     const tabs = [...container.querySelectorAll('nav button')];
     expect(tabs.map((tab) => tab.textContent)).toEqual([
-      'settings.agent',
+      'settings.devicesAndAgents',
+      'settings.agentSettings',
       'settings.services',
       'settings.general',
     ]);
@@ -252,10 +253,12 @@ describe('Settings information architecture', () => {
       expect(tab.classList.contains('border-l-2')).toBe(false);
     }
     expect(
-      findTab('settings.agent').classList.contains('bg-sidebar-selected'),
+      findTab('settings.devicesAndAgents').classList.contains(
+        'bg-sidebar-selected',
+      ),
     ).toBe(true);
     expect(
-      findTab('settings.agent').classList.contains(
+      findTab('settings.devicesAndAgents').classList.contains(
         'enabled:hover:bg-sidebar-selected',
       ),
     ).toBe(true);
@@ -273,7 +276,9 @@ describe('Settings information architecture', () => {
       findTab('settings.general').classList.contains('bg-sidebar-selected'),
     ).toBe(true);
     expect(
-      findTab('settings.agent').classList.contains('bg-sidebar-selected'),
+      findTab('settings.devicesAndAgents').classList.contains(
+        'bg-sidebar-selected',
+      ),
     ).toBe(false);
     expect(container.querySelector('nav')?.textContent).toContain('v');
   });
@@ -288,14 +293,21 @@ describe('Settings information architecture', () => {
     ).toBe(true);
   });
 
-  it('puts external Agents first and keeps behavior, runtime, and Built-In sections collapsed', async () => {
+  it('separates device management from Agent preferences and keeps advanced groups collapsed', async () => {
     await renderModal();
 
     expect(
       container.querySelector('[data-testid="agent-defaults"]'),
-    ).not.toBeNull();
+    ).toBeNull();
     expect(
       container.querySelector('[data-testid="profile-management"]'),
+    ).not.toBeNull();
+    await act(async () => findTab('settings.agentSettings').click());
+    expect(
+      container.querySelector('[data-testid="profile-management"]'),
+    ).toBeNull();
+    expect(
+      container.querySelector('[data-testid="agent-defaults"]'),
     ).not.toBeNull();
     expect(
       container.querySelector('[data-testid="agent-behavior"]'),
@@ -306,8 +318,6 @@ describe('Settings information architecture', () => {
         (heading) => heading.textContent,
       ),
     ).toEqual([
-      'settings.connectedDevices',
-      'settings.agentProfiles',
       'settings.agentDefaultsTitle',
       'settings.agentBehavior',
       'settings.externalAgentRuntime',
@@ -316,18 +326,8 @@ describe('Settings information architecture', () => {
     expect(
       container.querySelector('[data-testid="built-in-settings"]'),
     ).toBeNull();
-    const profiles = container.querySelector(
-      '[data-testid="profile-management"]',
-    );
     const defaults = container.querySelector('[data-testid="agent-defaults"]');
-    if (!profiles || !defaults) {
-      throw new Error('Expected Agent Profiles and Utility Agent sections');
-    }
-    expect(
-      profiles.compareDocumentPosition(defaults) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    expect(profiles.parentElement?.classList.contains('mb-4')).toBe(true);
+    if (!defaults) throw new Error('Expected Utility Agent settings');
     expect(mocks.init).toHaveBeenCalled();
     expect(mocks.llmInit).not.toHaveBeenCalled();
     expect(findButton('settings.builtInPi').getAttribute('aria-expanded')).toBe(
@@ -424,9 +424,9 @@ describe('Settings information architecture', () => {
     expect(document.activeElement).toBe(trigger);
     expect(
       container.querySelector('[data-testid="agent-defaults"]'),
-    ).not.toBeNull();
+    ).toBeNull();
     expect(container.querySelector('header h3')?.textContent).toBe(
-      'settings.agent',
+      'settings.devicesAndAgents',
     );
   });
 
@@ -452,6 +452,7 @@ describe('Built-In Pi placement', () => {
   it('opens Built-In configuration only on demand even when it is the Utility Agent', async () => {
     mocks.profileId = 'huabu';
     await renderModal();
+    await act(async () => findTab('settings.agentSettings').click());
 
     expect(
       container.querySelector('[data-testid="built-in-settings"]'),
@@ -461,7 +462,7 @@ describe('Built-In Pi placement', () => {
     ).not.toBeNull();
     expect(
       container.querySelector('[data-testid="profile-management"]'),
-    ).not.toBeNull();
+    ).toBeNull();
     expect(mocks.llmInit).not.toHaveBeenCalled();
     await act(async () => findButton('settings.builtInPi').click());
     await act(async () => {
@@ -516,6 +517,6 @@ describe('Built-In Pi placement', () => {
     ).not.toBeNull();
     expect(
       container.querySelector('[data-testid="profile-management"]'),
-    ).not.toBeNull();
+    ).toBeNull();
   });
 });

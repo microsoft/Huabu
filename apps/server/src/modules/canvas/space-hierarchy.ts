@@ -14,6 +14,7 @@ import {
   publishCanvasExecution,
   type ExecuteOnServerOutput,
 } from './canvas-executor.js';
+import { publishCanvasUpdate } from './canvas-sync.js';
 import {
   withCanvasMutexes,
   withSpaceHierarchyLock,
@@ -132,7 +133,6 @@ export function deletionPreview(
 export async function setSpaceParent(
   canvasId: string,
   input: SpaceParentBody,
-  entryPosition?: CreateChildSpaceBody['position'],
   /**
    * Runs under the hierarchy lock once a detachment to the root is valid and
    * real, before it is committed; a failure leaves the Space where it was.
@@ -170,8 +170,28 @@ export async function setSpaceParent(
     if (input.parentSpaceId === null) await beforeDetach?.();
 
     return withCanvasMutexes(
-      [canvasId, ...(input.parentSpaceId ? [input.parentSpaceId] : [])],
+      [
+        canvasId,
+        ...(input.parentSpaceId ? [input.parentSpaceId] : []),
+        ...(current.parentSpaceId ? [current.parentSpaceId] : []),
+      ],
       async () => {
+        const oldParent = current.parentSpaceId
+          ? await space(current.parentSpaceId).read()
+          : null;
+        const oldEntry = (
+          oldParent?.state.nodes as CanvasNode[] | undefined
+        )?.find((node) => node.id === current.parentEntryNodeId);
+        if (
+          oldEntry &&
+          (!isEntryId(oldEntry.id) ||
+            oldEntry.type !== 'spacePreview' ||
+            oldEntry.data.targetCanvasId !== canvasId)
+        )
+          throw new SpaceHierarchyError(
+            'SPACE_ENTRY_INVALID',
+            'The previous parent entry is invalid; refresh before retrying',
+          );
         let entryId: CanvasNodeId | null = null;
         let entryWrite: ExecuteOnServerOutput | undefined;
         if (input.parentSpaceId) {
@@ -195,7 +215,7 @@ export async function setSpaceParent(
                     id: entryId,
                     nodeType: 'spacePreview',
                     data: { targetCanvasId: canvasId },
-                    position: entryPosition ?? {
+                    position: input.position ?? {
                       x: bounds ? bounds.maxX + 80 : 80,
                       y: bounds?.minY ?? 80,
                     },
@@ -225,6 +245,28 @@ export async function setSpaceParent(
               'SPACE_PARENT_FAILED',
               'Could not save Space parent',
             );
+          if (current.parentSpaceId && oldEntry && isEntryId(oldEntry.id)) {
+            try {
+              const removed = await executeOnServerAlreadyLocked({
+                canvasId: current.parentSpaceId,
+                commands: [{ type: 'DELETE_NODES', nodeIds: [oldEntry.id] }],
+                originator: { source: 'system' },
+              });
+              if (removed.results.some((result) => !result.applied))
+                throw new Error(
+                  'The previous parent entry could not be removed',
+                );
+            } catch (cause) {
+              throw new SpaceHierarchyError(
+                'SPACE_ENTRY_REMOVE_FAILED',
+                'Space ownership changed, but removing the previous entry failed. Refresh and remove the remaining shortcut.',
+                500,
+                {
+                  cause: cause instanceof Error ? cause.message : String(cause),
+                },
+              );
+            }
+          }
         } finally {
           // A failed attachment retains the card; publish only after ownership settles.
           if (entryWrite) publishCanvasExecution(entryWrite);
@@ -258,14 +300,11 @@ export async function createChildSpace(
       );
     // Retain the created Space if attachment fails; refresh resolves uncertain writes.
     try {
-      return await setSpaceParent(
-        canvasId,
-        {
-          parentSpaceId,
-          expectedParentSpaceId: null,
-        },
+      return await setSpaceParent(canvasId, {
+        parentSpaceId,
+        expectedParentSpaceId: null,
         position,
-      );
+      });
     } catch (error) {
       throw new SpaceHierarchyError(
         'SPACE_CHILD_INCOMPLETE',
@@ -331,6 +370,7 @@ export async function deleteSpaceTree(
                 `Could not delete Space ${id}: ${outcome.reason}`,
               );
             deleted.push(id);
+            publishCanvasUpdate(id, { type: 'invalidate', data: {} });
           }
           if (
             root?.parentSpaceId &&

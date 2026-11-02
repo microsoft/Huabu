@@ -169,6 +169,7 @@ export function registerHarnessProfileDiscovery({
         alias: profiles.some((profile) => profile.alias === defaultAlias)
           ? `${defaultAlias} [${harness.id}]`
           : defaultAlias,
+        ...(harness.id === 'proxy' ? { visible: false } : {}),
         workingDirPath: harness.workingDirPath,
         metadata: { cliId: harness.id },
         customData: {

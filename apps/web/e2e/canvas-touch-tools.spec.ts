@@ -134,6 +134,11 @@ test.describe('canvas touch tools', () => {
       .first();
     await expect(floatingToolbar).toBeVisible();
     await expect(floatingToolbar).toHaveCSS('z-index', '1000');
+    await expect(
+      page.getByRole('button', { name: 'Send selection request', exact: true }),
+    ).toBeVisible();
+    await expect(page.locator('.ink-context-toolbar')).toHaveCount(1);
+    await expect(page.locator('.node-toolbar-color')).toHaveCount(0);
 
     await touchTap(client, { x: center.x + 300, y: center.y + 200 });
 

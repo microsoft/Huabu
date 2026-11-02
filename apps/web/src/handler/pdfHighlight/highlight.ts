@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { createUuid } from '@huabu/shared';
+
 import type { PdfHighlight } from '@huabu/shared';
 
 /** Normalized rectangle: all values 0–1, relative to the page. */
@@ -170,7 +172,7 @@ export function computeHighlightUpdate(
 
     if (fragments.length > 0) {
       newHighlights.push({
-        id: crypto.randomUUID(),
+        id: createUuid(),
         pageIndex,
         rects: fragments,
       });

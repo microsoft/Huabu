@@ -14,6 +14,7 @@
 const enc = encodeURIComponent;
 
 export const routes = {
+  deviceFiles: '/acp/files',
   // ── Deployment ────────────────────────────────────────────────────
   deploymentReadiness: '/deployment/readiness',
   canaryRedeployStatus: '/deployment/canary',
@@ -23,6 +24,8 @@ export const routes = {
   agentDefaults: '/agent/defaults',
   agentConversationOwner: (canvasId: string, threadId: string) =>
     `/agent/owner/${enc(threadId)}?canvasId=${enc(canvasId)}`,
+  agentConversationOwnerStream: (canvasId: string, threadId: string) =>
+    `/agent/owner/${enc(threadId)}/stream?canvasId=${enc(canvasId)}`,
 
   // ── Workspace ─────────────────────────────────────────────────────
   workspace: '/workspace',
@@ -170,7 +173,7 @@ export const routes = {
       : `agentletId=${enc(target.agentletId ?? '')}`;
     return `/acp/agent-cli?${params}`;
   },
-  // Profiles (loopback-only) — user-managed spawn recipes.
+  // Owner-only Profiles and device metadata.
   acpProfiles: '/acp/profiles',
   acpDevice: (agentletId: string) => `/acp/devices/${enc(agentletId)}`,
   acpProfileItem: (id: string) => `/acp/profiles/${enc(id)}`,

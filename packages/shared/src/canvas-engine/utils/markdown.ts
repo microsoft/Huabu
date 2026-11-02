@@ -75,6 +75,37 @@ export function stripMarkdown(input: string): string {
   ).trim();
 }
 
+export type MarkdownSummaryBlock =
+  | { type: 'paragraph'; text: string }
+  | { type: 'list'; ordered: boolean; start: number; items: string[] };
+
+/** Lightweight previews retain paragraphs/lists, never HTML, media, or links. */
+export function markdownSummaryBlocks(input: string): MarkdownSummaryBlock[] {
+  const tree = fromMarkdown(input, {
+    extensions: [gfm()],
+    mdastExtensions: [gfmFromMarkdown()],
+  });
+  return tree.children.flatMap((node): MarkdownSummaryBlock[] => {
+    if (node.type === 'list') {
+      const items = node.children
+        .map((item) => plainText(item).trim())
+        .filter(Boolean);
+      return items.length
+        ? [
+            {
+              type: 'list',
+              ordered: !!node.ordered,
+              start: node.start ?? 1,
+              items,
+            },
+          ]
+        : [];
+    }
+    const text = plainText(node).trim();
+    return text ? [{ type: 'paragraph', text }] : [];
+  });
+}
+
 /**
  * Resolve a literal source match into the parser's visible text projection.
  * Hidden syntax and transformations without an exact source mapping fail closed.

@@ -27,6 +27,7 @@ import { Button } from '@/components/Common/Button';
 import { toast } from '@/components/Common/Toast';
 import { resetAgentTurnAcceptanceObserversForTests } from '@/hooks/agentTurnController';
 import { useBuiltinThreadSettings } from '@/hooks/useBuiltinThreadSettings';
+import { useChatHistory } from '@/hooks/useChatHistory';
 import { useConversationTitles } from '@/hooks/useConversationTitles';
 import { i18n } from '@/i18n';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
@@ -108,7 +109,9 @@ vi.mock('react-router-dom', () => ({ useNavigate: () => () => {} }));
 vi.mock('@/components/Common/Loading', () => ({ Loading: () => null }));
 vi.mock('@/components/Common/Toast', () => ({ toast: vi.fn() }));
 vi.mock('@/hooks/useChatHistory', () => ({
-  useChatHistory: () => ({ isCurrentOwnerHistory: historyState.current }),
+  useChatHistory: vi.fn(() => ({
+    isCurrentOwnerHistory: historyState.current,
+  })),
 }));
 vi.mock('@/hooks/useAcpProfiles', () => ({
   useAcpProfiles: () => ({ profiles: [], loaded: true, refresh: vi.fn() }),
@@ -154,12 +157,21 @@ vi.mock('@/hooks/useBuiltinThreadSettings', () => ({
 }));
 vi.mock('@/components/Messages/MessageList', () => ({
   MessageList: ({
+    isHistoryReady,
+    isHistoryLoading,
     onLatestVisibleChange,
   }: {
+    isHistoryReady?: boolean;
+    isHistoryLoading?: boolean;
     onLatestVisibleChange?: (visible: boolean) => void;
   }) => {
     useEffect(() => onLatestVisibleChange?.(historyState.latestVisible));
-    return null;
+    return (
+      <div
+        data-history-ready={isHistoryReady}
+        data-history-loading={isHistoryLoading}
+      />
+    );
   },
 }));
 vi.mock('./ChangeReviewCard', () => ({ ChangeReviewCard: () => null }));
@@ -216,6 +228,7 @@ vi.mock('@/api/conversationTitles', () => ({
   setConversationTitle: vi.fn(),
 }));
 vi.mock('@/api/agent', () => ({
+  streamAgentConversationOwner: vi.fn(() => Promise.resolve()),
   agentApi: { streamMessage: vi.fn(), stopThread: vi.fn() },
 }));
 vi.mock('@/api/acp', async (original) => ({
@@ -616,6 +629,7 @@ describe('rendered conversation titles', () => {
     await renderPanel(remoteSession, remoteTab, vi.fn(), {
       ownerUnavailable: true,
     });
+
     const selectors = vi.mocked(BuiltinSessionSelectors).mock.lastCall?.[0];
     assert(selectors);
     await act(async () => {
@@ -646,6 +660,22 @@ describe('rendered conversation titles', () => {
       'false',
     );
     expect(useChatStore.getState().settingsByThread.thread).toEqual(selection);
+  });
+
+  it('disables writes without tearing down reply history on a retryable observation failure', async () => {
+    seedRemoteOwner();
+    await renderPanel(remoteSession, remoteTab, vi.fn(), {
+      ownerUnavailable: true,
+      ownerStreamUnavailable: false,
+    });
+    expect(container.querySelector('form')?.dataset.submitDisabled).toBe(
+      'true',
+    );
+    expect(vi.mocked(useChatHistory).mock.lastCall?.[3]).toBe(false);
+    await renderPanel(remoteSession, remoteTab, vi.fn(), {
+      ownerUnavailable: true,
+    });
+    expect(vi.mocked(useChatHistory).mock.lastCall?.[3]).toBe(true);
   });
 
   it('reports failed built-in selections without committing the tab', async () => {
@@ -877,6 +907,25 @@ describe('rendered conversation titles', () => {
         );
     });
     expect(agentApi.streamMessage).not.toHaveBeenCalled();
+  });
+
+  it('keeps scroll readiness false after history fails until retry succeeds', async () => {
+    useChatStore.getState().setHistoryLoaded('thread', false);
+    await renderPanel();
+    const list = () => container.querySelector('[data-history-ready]');
+    expect(list()?.getAttribute('data-history-loading')).toBe('true');
+    expect(list()?.getAttribute('data-history-ready')).toBe('false');
+    await act(async () =>
+      useChatStore.getState().setHistoryError('thread', 'offline'),
+    );
+    expect(list()?.getAttribute('data-history-loading')).toBe('false');
+    expect(list()?.getAttribute('data-history-ready')).toBe('false');
+    await act(async () => {
+      useChatStore.getState().setHistoryError('thread', null);
+      useChatStore.getState().setHistoryLoaded('thread', true);
+    });
+    expect(list()?.getAttribute('data-history-ready')).toBe('true');
+    expect(list()?.getAttribute('data-history-loading')).toBe('false');
   });
   it.each(['connected', 'connecting', 'failed'] as const)(
     'moves the %s capability status to the tab without losing failure recovery',

@@ -19,7 +19,12 @@ import { create } from 'zustand';
  * open and then cleared so a later plain `open()` reopens on the last
  * tab the user was viewing rather than snapping back.
  */
-export type SettingsTabId = 'general' | 'agent' | 'services' | 'builtIn';
+export type SettingsTabId =
+  | 'general'
+  | 'agent'
+  | 'agentSettings'
+  | 'services'
+  | 'builtIn';
 
 interface SettingsUiState {
   isOpen: boolean;

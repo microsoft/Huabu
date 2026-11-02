@@ -14,3 +14,4 @@ export * from './utils/acp-session-selectors.js';
 export { stripLegacyPortalTopology } from './utils/strip-legacy-portal-topology.js';
 export * from './llm/image-capabilities.js';
 export * from './llm/model-roles.js';
+export { isFileReference } from './utils/file-reference.js';

@@ -4,6 +4,8 @@
 
 ## 1. Summary
 
+**Node-only Lasso extension:** the current [selection contract](../architecture/sketch-node.md#41-partial-stroke-selection-as-ai-context) supersedes the V1 requirement for at least one selected stroke. Node-only selections use `selection-intent`; Text is included in full, while Note and Frame remain on-demand references. Ink-containing requests retain `ink-intent` and its required visual safeguards.
+
 **§18 supersedes the original three-status intent report.** New reports are human-readable interpretation records for conversation history and transparency, not semantic classifications or execution gates.
 
 **§22 supersedes §19's built-in Ask admission and §20's host-created answer Notes.** Ink replies are agent-authored Canvas results, spatially grounded in each submitted Ink query. Built-in Chat is excluded from Ink destinations; ordinary text Chat is unchanged. Existing external permissions remain authoritative, and discussion or planning never implicitly authorizes execution. See [Sketch Node's current Ink contract](../architecture/sketch-node.md#41-partial-stroke-selection-as-ai-context).

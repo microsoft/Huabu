@@ -14,7 +14,6 @@ import {
   DndContext,
   DragOverlay,
   KeyboardSensor,
-  PointerSensor,
   pointerWithin,
   useSensor,
   useSensors,
@@ -22,7 +21,6 @@ import {
   type DragEndEvent,
   type DragOverEvent,
   type DragStartEvent,
-  type PointerSensorProps,
 } from '@dnd-kit/core';
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
 import {
@@ -38,6 +36,7 @@ import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { useShallow } from 'zustand/react/shallow';
 
+import { TabPointerSensor } from '@/components/Common/TabPointerSensor';
 import { useConversationTitles } from '@/hooks/useConversationTitles';
 import useCanvasStore, { settleNodePreprocess } from '@/store/canvasStore';
 import { conversationViewForNode } from '@/store/conversationOwner';
@@ -73,58 +72,6 @@ import type { Node } from '@xyflow/react';
 const RATIO_STEP = 0.05;
 
 const selectWorkspace = (s: PreviewWorkspaceState) => s.workspace;
-
-export function subscribeToTabDragInterruption(
-  cancel: () => void,
-  ownerDocument: Document = document,
-  ownerWindow: Window = window,
-): () => void {
-  const cancelOnHidden = () => {
-    if (ownerDocument.visibilityState === 'hidden') cancel();
-  };
-  ownerWindow.addEventListener('blur', cancel);
-  ownerDocument.addEventListener('visibilitychange', cancelOnHidden);
-  return () => {
-    ownerWindow.removeEventListener('blur', cancel);
-    ownerDocument.removeEventListener('visibilitychange', cancelOnHidden);
-  };
-}
-
-class PreviewTabPointerSensor extends PointerSensor {
-  constructor(props: PointerSensorProps) {
-    let unsubscribe = () => {};
-    const onCancel = () => {
-      unsubscribe();
-      props.onCancel();
-    };
-    const onEnd = () => {
-      unsubscribe();
-      props.onEnd();
-    };
-    const onAbort = (id: Parameters<PointerSensorProps['onAbort']>[0]) => {
-      unsubscribe();
-      props.onAbort(id);
-    };
-
-    super({ ...props, onAbort, onCancel, onEnd });
-
-    const ownerDocument =
-      (
-        props.event.target as
-          | (EventTarget & { ownerDocument?: Document })
-          | null
-      )?.ownerDocument ?? document;
-    unsubscribe = subscribeToTabDragInterruption(
-      () => {
-        // Use the sensor's pointercancel handler to detach listeners before
-        // notifying DndContext, including when activation is still pending.
-        ownerDocument.dispatchEvent(new Event('pointercancel'));
-      },
-      ownerDocument,
-      ownerDocument.defaultView ?? window,
-    );
-  }
-}
 
 export function PreviewTabDragOverlayPortal({
   tab,
@@ -354,11 +301,12 @@ export function PreviewWorkspace({
 
   const containerRef = useRef<HTMLDivElement>(null);
   const separatorDragCleanupRef = useRef<(() => void) | null>(null);
+  const [isResizing, setIsResizing] = useState(false);
   const [activeDragTabId, setActiveDragTabId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const isSplit = workspace.groups.length > 1;
   const sensors = useSensors(
-    useSensor(PreviewTabPointerSensor, {
+    useSensor(TabPointerSensor, {
       activationConstraint: { distance: 5 },
     }),
     useSensor(KeyboardSensor, {
@@ -407,12 +355,14 @@ export function PreviewWorkspace({
 
   const onSeparatorPointerDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
+      if (e.button !== 0) return;
       e.preventDefault();
       e.stopPropagation();
       separatorDragCleanupRef.current?.();
       const target = e.currentTarget;
       const pointerId = e.pointerId;
       target.setPointerCapture(pointerId);
+      setIsResizing(true);
 
       const move = (ev: PointerEvent) => {
         if (ev.pointerId !== pointerId) return;
@@ -424,15 +374,18 @@ export function PreviewWorkspace({
         window.removeEventListener('pointermove', move);
         window.removeEventListener('pointerup', finish);
         window.removeEventListener('pointercancel', finish);
-        if (separatorDragCleanupRef.current === cleanup) {
-          separatorDragCleanupRef.current = null;
-        }
-      };
-      const finish = (ev: PointerEvent) => {
-        if (ev.pointerId !== pointerId) return;
+        window.removeEventListener('blur', cleanup);
+        target.removeEventListener('lostpointercapture', finish);
         if (target.hasPointerCapture(pointerId)) {
           target.releasePointerCapture(pointerId);
         }
+        if (separatorDragCleanupRef.current === cleanup) {
+          separatorDragCleanupRef.current = null;
+        }
+        setIsResizing(false);
+      };
+      const finish = (ev: PointerEvent) => {
+        if (ev.pointerId !== pointerId) return;
         cleanup();
       };
 
@@ -440,6 +393,8 @@ export function PreviewWorkspace({
       window.addEventListener('pointermove', move);
       window.addEventListener('pointerup', finish);
       window.addEventListener('pointercancel', finish);
+      window.addEventListener('blur', cleanup);
+      target.addEventListener('lostpointercapture', finish);
     },
     [setSplitRatio],
   );
@@ -448,7 +403,7 @@ export function PreviewWorkspace({
     () => () => {
       separatorDragCleanupRef.current?.();
     },
-    [],
+    [isSplit],
   );
 
   const onSeparatorKeyDown = (e: React.KeyboardEvent) => {
@@ -486,6 +441,7 @@ export function PreviewWorkspace({
               <div
                 role="separator"
                 aria-orientation="vertical"
+                data-resizing={isResizing ? true : undefined}
                 aria-label={t('preview.resizeGroups')}
                 aria-valuenow={Math.round(workspace.splitRatio * 100)}
                 aria-valuemin={20}
@@ -495,7 +451,7 @@ export function PreviewWorkspace({
                 onKeyDown={onSeparatorKeyDown}
                 className="group focus-visible:outline-info z-10 -mx-1 flex w-2 shrink-0 cursor-col-resize touch-none items-center justify-center focus-visible:outline-1"
               >
-                <div className="bg-edge-default group-hover:bg-info h-full w-px" />
+                <div className="bg-edge-default group-hover:bg-info/30 group-data-[resizing=true]:bg-info/50 h-full w-px group-hover:w-1 group-data-[resizing=true]:w-1" />
               </div>
             )}
             <div

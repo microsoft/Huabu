@@ -41,6 +41,7 @@ const snapshot = {
   profiles: [profile],
   selectableProfileIds: [profile.id],
   connectedDevices: [],
+  knownDevices: [],
   agentlet: null,
   agentDefaults: { profileId: 'huabu', functionalModel: 'utility-only' },
 };
@@ -77,6 +78,80 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe('browser-local recent conversation Agent', () => {
+  it('loads offline metadata without promoting it into runtime availability', async () => {
+    const device = { agentletId: 'offline', displayName: 'Office PC' };
+    listProfiles.mockResolvedValueOnce({
+      ...snapshot,
+      selectableProfileIds: [],
+      knownDevices: [device],
+    });
+    await useAcpProfilesStore.getState().refresh();
+    expect(useAcpProfilesStore.getState().knownDevices).toEqual([device]);
+    expect(useAcpProfilesStore.getState().connectedDevices).toEqual([]);
+    expect(useAcpProfilesStore.getState().selectableProfileIds).toEqual([]);
+    await useAcpProfilesStore.getState().refresh();
+    expect(useAcpProfilesStore.getState().knownDevices).toEqual([]);
+  });
+  it('starts a post-mutation snapshot after an older polling GET finishes', async () => {
+    let finishOld!: (value: typeof snapshot) => void;
+    listProfiles.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishOld = resolve;
+        }),
+    );
+    const polling = useAcpProfilesStore
+      .getState()
+      .refresh({ background: true });
+    await vi.waitFor(() => expect(listProfiles).toHaveBeenCalledOnce());
+    const fresh = useAcpProfilesStore
+      .getState()
+      .refresh({ afterMutation: true });
+    const added = { ...profile, id: 'added' };
+    listProfiles.mockResolvedValueOnce({
+      ...snapshot,
+      profiles: [profile, added],
+      selectableProfileIds: [profile.id, added.id],
+    });
+    finishOld(snapshot);
+    await Promise.all([polling, fresh]);
+    expect(listProfiles).toHaveBeenCalledTimes(2);
+    expect(useAcpProfilesStore.getState().profiles).toEqual([profile, added]);
+  });
+
+  it('reports post-mutation refresh failure without discarding the last snapshot', async () => {
+    const error = new Error('Refresh failed');
+    listProfiles.mockRejectedValueOnce(error);
+    await expect(
+      useAcpProfilesStore.getState().refresh({ afterMutation: true }),
+    ).rejects.toBe(error);
+    expect(useAcpProfilesStore.getState().profiles).toEqual([profile]);
+    expect(useAcpProfilesStore.getState().error).toBe(error);
+    await useAcpProfilesStore.getState().refresh();
+    expect(useAcpProfilesStore.getState().error).toBeNull();
+  });
+
+  it('still makes a fresh request after a preceding polling failure', async () => {
+    let failOld!: (reason: Error) => void;
+    listProfiles.mockImplementationOnce(
+      () =>
+        new Promise((_, reject) => {
+          failOld = reject;
+        }),
+    );
+    const polling = useAcpProfilesStore
+      .getState()
+      .refresh({ background: true });
+    await vi.waitFor(() => expect(listProfiles).toHaveBeenCalledOnce());
+    const fresh = useAcpProfilesStore
+      .getState()
+      .refresh({ afterMutation: true });
+    failOld(new Error('Old poll failed'));
+    await Promise.all([polling, fresh]);
+    expect(listProfiles).toHaveBeenCalledTimes(2);
+    expect(useAcpProfilesStore.getState().error).toBeNull();
+  });
+
   it('keeps acknowledged device names when an older poll completes', async () => {
     const device = {
       agentletId: 'machine',
@@ -85,7 +160,10 @@ describe('browser-local recent conversation Agent', () => {
       connectedAt: '2026-01-01T00:00:00.000Z',
       profileCount: 1,
     };
-    useAcpProfilesStore.setState({ connectedDevices: [device] });
+    useAcpProfilesStore.setState({
+      connectedDevices: [device],
+      knownDevices: [device],
+    });
     let finishPoll!: (value: unknown) => void;
     listProfiles.mockImplementationOnce(
       () =>
@@ -99,6 +177,9 @@ describe('browser-local recent conversation Agent', () => {
     finishPoll({ ...snapshot, connectedDevices: [device] });
     await poll;
     expect(useAcpProfilesStore.getState().connectedDevices[0].displayName).toBe(
+      'New name',
+    );
+    expect(useAcpProfilesStore.getState().knownDevices[0].displayName).toBe(
       'New name',
     );
     expect(renameDevice).toHaveBeenCalledWith('machine', {

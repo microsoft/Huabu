@@ -1,7 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import type { AgentBinding, AgentChatContext, AgentMode } from '@huabu/shared';
+import type {
+  AgentBinding,
+  AgentChatContext,
+  AgentInputKind,
+  AgentMode,
+} from '@huabu/shared';
 import type { Node } from '@xyflow/react';
 
 export type InkQuestionTarget = {
@@ -24,6 +29,7 @@ export function canReceiveInk({
 export type InkSubmissionCandidate =
   | {
       kind: 'ready';
+      inputKind: AgentInputKind;
       sourceCount: number;
       selectedNodeIds: string[];
       strokeSelection: Record<string, string[]>;
@@ -32,7 +38,7 @@ export type InkSubmissionCandidate =
     }
   | {
       kind: 'blocked';
-      reason: 'no-ink' | 'invalid-question-target';
+      reason: 'no-sources' | 'invalid-question-target';
       sourceCount: number;
     };
 
@@ -90,20 +96,39 @@ export function deriveInkSubmissionCandidate(
   const excludedNodeIds = nodes
     .filter((node) => node.type === 'question')
     .map((node) => node.id);
+  const nodesById = new Map(nodes.map((node) => [node.id, node]));
+  const selectedFrames = new Set(
+    selectedNodes
+      .filter((node) => node.type === 'frame')
+      .map((node) => node.id),
+  );
   const selectedNodeIds = selectedNodes
-    .filter((node) => node.type !== 'question')
+    .filter((node) => {
+      if (node.type === 'question') return false;
+      const visited = new Set<string>();
+      let parentId = node.parentId;
+      while (parentId && !visited.has(parentId)) {
+        if (selectedFrames.has(parentId)) return false;
+        visited.add(parentId);
+        parentId = nodesById.get(parentId)?.parentId;
+      }
+      return true;
+    })
     .map((node) => node.id);
   const sourceCount = new Set([
     ...selectedNodeIds,
     ...Object.keys(strokeSelection),
   ]).size;
 
-  if (Object.keys(strokeSelection).length === 0) {
-    return { kind: 'blocked', reason: 'no-ink', sourceCount };
+  if (sourceCount === 0) {
+    return { kind: 'blocked', reason: 'no-sources', sourceCount };
   }
+  const inputKind =
+    Object.keys(strokeSelection).length > 0 ? 'ink-intent' : 'selection-intent';
   if (!targetNodeId) {
     return {
       kind: 'ready',
+      inputKind,
       sourceCount,
       selectedNodeIds,
       strokeSelection,
@@ -124,6 +149,7 @@ export function deriveInkSubmissionCandidate(
   }
   return {
     kind: 'ready',
+    inputKind,
     sourceCount,
     selectedNodeIds,
     strokeSelection,

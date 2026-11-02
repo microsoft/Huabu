@@ -21,26 +21,22 @@ import { DropdownMenu, DropdownMenuItem } from '../../Common/DropdownMenu.tsx';
 import { Input } from '../../Common/Input';
 import { MENU_SEPARATOR_CLASS } from '../../Common/menuStyles';
 import { toast } from '../../Common/Toast.tsx';
-
-interface CanvasMenuProps {
-  /**
-   * Opens the Keyboard Shortcuts modal. Wired from `CanvasPage`, which owns
-   * the modal state. When omitted (e.g. on standalone-page headers that do
-   * not host the modal), the menu item is hidden.
-   */
-  onOpenShortcuts?: () => void;
-}
+import { useSpaceParentMove } from '../../Space/useSpaceParentMove';
 
 /**
  * canvas title + dropdown menu.
  * Sits in the header and exposes Export / Import canvas actions.
  */
-export const CanvasMenu: React.FC<CanvasMenuProps> = ({ onOpenShortcuts }) => {
+export const CanvasMenu: React.FC = () => {
   const { t } = useTranslation();
   const canvasTitle = useCanvasStore((s) => s.canvasTitle);
   const tryRename = useCanvasStore((s) => s.tryRename);
   const canvasId = useCanvasStore((s) => s.canvasId);
   const isWorld = useWorkspaceStore((s) => s.worldCanvasId === canvasId);
+  const parentSpaceId = useWorkspaceStore(
+    (s) => s.spaceSummaries[canvasId]?.parentSpaceId,
+  );
+  const { move, busy, canMove } = useSpaceParentMove();
   const undo = useCanvasStore((s) => s.undo);
   const redo = useCanvasStore((s) => s.redo);
   const canUndo = useCanvasStore((s) => s.canUndo);
@@ -53,6 +49,7 @@ export const CanvasMenu: React.FC<CanvasMenuProps> = ({ onOpenShortcuts }) => {
   const [draftTitle, setDraftTitle] = useState(canvasTitle);
 
   const inputRef = useRef<HTMLInputElement>(null);
+  const menuRef = useRef<HTMLButtonElement>(null);
   const sizerRef = useRef<HTMLSpanElement>(null);
 
   // Sync the local draft whenever the store title changes (e.g. on canvas
@@ -153,9 +150,14 @@ export const CanvasMenu: React.FC<CanvasMenuProps> = ({ onOpenShortcuts }) => {
       <div className="group-hover:border-edge-default h-7 shrink-0 border-l border-transparent transition-colors">
         <DropdownMenu
           open={isOpen}
-          onOpenChange={setIsOpen}
+          onOpenChange={(open) => {
+            setIsOpen(open);
+            if (open && !isWorld && !canMove(canvasId))
+              void useWorkspaceStore.getState().refreshSpaceTitles();
+          }}
           trigger={
             <Button
+              ref={menuRef}
               variant="ghost"
               size="sm"
               iconOnly
@@ -198,13 +200,29 @@ export const CanvasMenu: React.FC<CanvasMenuProps> = ({ onOpenShortcuts }) => {
           {!isWorld && (
             <>
               <DropdownMenuItem
+                disabled={busy || !canMove(canvasId)}
                 onClick={() => {
                   setIsOpen(false);
-                  window.dispatchEvent(new Event(REQUEST_REPARENT_SPACE));
+                  window.dispatchEvent(
+                    new CustomEvent(REQUEST_REPARENT_SPACE, {
+                      detail: menuRef.current,
+                    }),
+                  );
                 }}
               >
                 {t('spaceHierarchy.move')}
               </DropdownMenuItem>
+              {parentSpaceId && (
+                <DropdownMenuItem
+                  disabled={busy || !canMove(canvasId)}
+                  onClick={() => {
+                    setIsOpen(false);
+                    void move(canvasId, null, parentSpaceId);
+                  }}
+                >
+                  {t('spaceHierarchy.moveToTopLevel')}
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem
                 onClick={() => {
                   setIsOpen(false);
@@ -216,17 +234,6 @@ export const CanvasMenu: React.FC<CanvasMenuProps> = ({ onOpenShortcuts }) => {
                 {t('canvasList.deleteCanvas')}
               </DropdownMenuItem>
             </>
-          )}
-          {onOpenShortcuts && (
-            <DropdownMenuItem
-              shortcut="?"
-              onClick={() => {
-                setIsOpen(false);
-                onOpenShortcuts();
-              }}
-            >
-              {t('shortcuts.title')}
-            </DropdownMenuItem>
           )}
         </DropdownMenu>
       </div>

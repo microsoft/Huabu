@@ -91,7 +91,7 @@ export function registerSpaceHierarchyRoutes(fastify: FastifyInstance): void {
           .send({ message: 'Invalid Space parent request' });
       return respond(reply, async () => {
         // Claim only a valid detachment, before removing inherited authority.
-        return setSpaceParent(params.data.canvasId, body.data, undefined, () =>
+        return setSpaceParent(params.data.canvasId, body.data, () =>
           claimSpace(request, params.data.canvasId),
         );
       });

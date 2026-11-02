@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { isCanvasIntent } from '@huabu/shared';
+
 import { chatEnvelopeFromSubmission } from './handle.js';
 import { createInkResponse } from '../ink-response.js';
 
@@ -26,7 +28,7 @@ export function withInkResponse(
             ctx: unknown,
           ): ReturnType<AgentHandle['run']> {
             const envelope = chatEnvelopeFromSubmission(submission);
-            if (envelope?.user.inputKind !== 'ink-intent')
+            if (!isCanvasIntent(envelope?.user.inputKind))
               return yield* target.run(submission, ctx);
 
             const canvasId = workload.namespace.name;

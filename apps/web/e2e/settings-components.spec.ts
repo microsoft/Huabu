@@ -74,12 +74,16 @@ test('device names can be edited without a permanent transport warning', async (
     openSettingsModalFixture();
   });
   const dialog = page.getByRole('dialog');
-  await dialog.getByRole('button', { name: 'Agent', exact: true }).click();
+  await dialog
+    .getByRole('button', { name: en.settings.devicesAndAgents, exact: true })
+    .click();
   await expect(
     dialog.getByText('Windows workstation', { exact: true }),
   ).toBeVisible();
   await expect(dialog.getByText(/operator-managed transport/)).toHaveCount(0);
-  const rename = dialog.getByRole('button', { name: en.settings.renameDevice });
+  const actions = dialog.getByRole('button', { name: / actions$/ });
+  await actions.click();
+  const rename = page.getByRole('menuitem', { name: en.settings.renameDevice });
   await rename.click();
   const input = dialog.getByRole('textbox', { name: en.settings.deviceName });
   await expect(input).toBeFocused();
@@ -94,7 +98,8 @@ test('device names can be edited without a permanent transport warning', async (
   });
   await dialog.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(dialog.getByText('Office PC', { exact: true })).toBeVisible();
-  await expect(rename).toBeFocused();
+  await expect(actions).toBeFocused();
+  await actions.click();
   await rename.click();
   const longName = 'Workstation'.repeat(10);
   await input.fill(longName);
@@ -127,7 +132,9 @@ test('device names can be edited without a permanent transport warning', async (
       },
     }),
   );
-  await dialog.getByRole('button', { name: 'Add device', exact: true }).click();
+  await dialog
+    .getByRole('button', { name: en.settings.addDevice, exact: true })
+    .click();
   await dialog
     .getByRole('button', { name: en.settings.agentletCommandCopy, exact: true })
     .click();
@@ -346,11 +353,11 @@ test('Agent sections keep their defaults and runtime fields preserve drafts acro
     openSettingsModalFixture();
   });
   const dialog = page.getByRole('dialog');
-  await dialog.getByRole('button', { name: 'Agent', exact: true }).click();
+  await dialog
+    .getByRole('button', { name: en.settings.agentSettings, exact: true })
+    .click();
   let readsAfterFirstExpansion = 0;
   for (const [name, expanded] of [
-    ['Connected devices', true],
-    ['External agents', true],
     ['Utility tasks', true],
     ['Conversation and changes', false],
     ['Advanced runtime settings', false],
@@ -387,15 +394,6 @@ test('Agent sections keep their defaults and runtime fields preserve drafts acro
     const card = dialog.locator(`[id="${id}"]`);
     if (expanded) {
       await expect(card).toBeHidden();
-      if (name === 'Connected devices') {
-        await expect(
-          dialog.getByRole('button', { name: 'Add device', exact: true }),
-        ).toBeVisible();
-      } else if (name === 'External agents') {
-        await expect(
-          dialog.getByRole('button', { name: 'Add agent', exact: true }),
-        ).toBeVisible();
-      }
       await heading.press('Tab');
       expect(
         await card.evaluate((el) => el.contains(document.activeElement)),
@@ -442,8 +440,6 @@ test('Agent sections keep their defaults and runtime fields preserve drafts acro
   expect(Math.abs(behaviorRect.width - runtimeRect.width)).toBeLessThan(1);
   await page.setViewportSize({ width: 480, height: 800 });
   for (const name of [
-    'Connected devices',
-    'External agents',
     'Utility tasks',
     'Conversation and changes',
     'Advanced runtime settings',
