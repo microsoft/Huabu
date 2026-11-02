@@ -240,7 +240,7 @@ beforeEach(() => {
   environment.syncTitles.mockResolvedValue({ ok: true });
   vi.mocked(getSpaceDeletionPreview).mockResolvedValue({
     token: 'token',
-    spaces: [{ canvasId: 'space-1', title: 'Space One' }],
+    spaces: [{ canvasId: 'space-1', title: 'Space One', parentSpaceId: null }],
   });
   vi.mocked(deleteSpaceTree).mockResolvedValue({
     deletedCanvasIds: ['space-1'],
@@ -698,18 +698,20 @@ describe('CanvasListPage navigation', () => {
   }
 
   it.each([false, true])(
-    'blocks deleting an open desktop Space, including lazy restored Tabs (loading=%s)',
+    'allows confirming deletion of open and lazy desktop Tabs (loading=%s)',
     async (loading) => {
       environment.desktopHome = true;
       markSpaceOpen(loading);
       await renderPage();
       await requestDeletion();
-      expect(toast).toHaveBeenCalledWith('desktopTabs.closeBeforeDeleting', {
-        tone: 'warning',
-      });
-      expect(container.querySelector('[role="dialog"]')).toBeNull();
+      expect(container.querySelector('[role="dialog"]')).not.toBeNull();
       expect(deleteSpaceTree).not.toHaveBeenCalled();
       expect(environment.command).not.toHaveBeenCalled();
+      await confirmDeletion();
+      expect(deleteSpaceTree).toHaveBeenCalledExactlyOnceWith(
+        'space-1',
+        'token',
+      );
     },
   );
 
@@ -736,31 +738,37 @@ describe('CanvasListPage navigation', () => {
           canvasIds: ['space-1'],
         },
       ],
-      ['end-space-deletion'],
+      [
+        {
+          type: 'end-space-deletion',
+          deletedCanvasIds: ['space-1'],
+          returnTo: { 'space-1': null },
+        },
+      ],
     ]);
   });
 
-  it('rechecks the current desktop Tabs when deletion is confirmed', async () => {
+  it('delegates Tabs opened during confirmation to main-process preparation', async () => {
     environment.desktopHome = true;
     await renderPage();
     await requestDeletion();
     markSpaceOpen();
     await confirmDeletion();
-    expect(deleteSpaceTree).not.toHaveBeenCalled();
-    expect(environment.command).not.toHaveBeenCalled();
-    expect(container.querySelector('[role="dialog"]')).not.toBeNull();
-    expect(toast).toHaveBeenCalledWith('desktopTabs.closeBeforeDeleting', {
-      tone: 'warning',
+    expect(deleteSpaceTree).toHaveBeenCalledExactlyOnceWith('space-1', 'token');
+    expect(environment.command).toHaveBeenCalledWith({
+      type: 'begin-space-deletion',
+      canvasId: 'space-1',
+      canvasIds: ['space-1'],
     });
   });
 
-  it('blocks deleting an unopened parent when a descendant is open', async () => {
+  it('includes open descendants in deletion preparation', async () => {
     environment.desktopHome = true;
     vi.mocked(getSpaceDeletionPreview).mockResolvedValueOnce({
       token: 'tree-token',
       spaces: [
-        { canvasId: 'space-1', title: 'Parent' },
-        { canvasId: 'child', title: 'Child' },
+        { canvasId: 'space-1', title: 'Parent', parentSpaceId: null },
+        { canvasId: 'child', title: 'Child', parentSpaceId: 'space-1' },
       ],
     });
     environment.getState.mockResolvedValue({
@@ -783,27 +791,31 @@ describe('CanvasListPage navigation', () => {
     await renderPage();
     await requestDeletion();
     await confirmDeletion();
-    expect(deleteSpaceTree).not.toHaveBeenCalled();
-    expect(environment.command).not.toHaveBeenCalled();
-    expect(toast).toHaveBeenCalledWith('desktopTabs.closeBeforeDeleting', {
-      tone: 'warning',
+    expect(deleteSpaceTree).toHaveBeenCalledExactlyOnceWith(
+      'space-1',
+      'tree-token',
+    );
+    expect(environment.command).toHaveBeenCalledWith({
+      type: 'begin-space-deletion',
+      canvasId: 'space-1',
+      canvasIds: ['space-1', 'child'],
     });
   });
 
-  it('does not delete if current Tab state cannot be read', async () => {
+  it('does not delete if main cannot prepare Tabs', async () => {
     environment.desktopHome = true;
     await renderPage();
-    environment.getState.mockRejectedValueOnce(
-      new Error('Tab state unavailable'),
-    );
+    environment.command.mockResolvedValueOnce({
+      ok: false,
+      error: 'Tab state unavailable',
+    });
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       await requestDeletion();
+      await confirmDeletion();
       expect(deleteSpaceTree).not.toHaveBeenCalled();
-      expect(container.querySelector('[role="dialog"]')).toBeNull();
-      expect(toast).toHaveBeenCalledWith('Tab state unavailable', {
-        tone: 'danger',
-      });
+      expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+      expect(toast).not.toHaveBeenCalled();
     } finally {
       log.mockRestore();
     }
@@ -819,13 +831,17 @@ describe('CanvasListPage navigation', () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       await confirmDeletion();
-      expect(environment.command).toHaveBeenLastCalledWith(
-        'end-space-deletion',
-      );
+      expect(environment.command).toHaveBeenLastCalledWith({
+        type: 'end-space-deletion',
+        deletedCanvasIds: [],
+        returnTo: {},
+        failure: 'spaceHierarchy.deletionErrors.request',
+      });
       expect(
         container.querySelector('a[href="/canvas/space-1"]'),
       ).not.toBeNull();
-      expect(toast).toHaveBeenCalledWith('Delete failed', { tone: 'danger' });
+      expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+      expect(toast).not.toHaveBeenCalled();
     } finally {
       log.mockRestore();
     }
@@ -839,18 +855,43 @@ describe('CanvasListPage navigation', () => {
       ok: false,
       error: 'Another Tab operation is in progress',
     });
+
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       await confirmDeletion();
       expect(deleteSpaceTree).not.toHaveBeenCalled();
       expect(environment.command).toHaveBeenCalledTimes(1);
-      expect(toast).toHaveBeenCalledWith(
-        'Another Tab operation is in progress',
-        { tone: 'danger' },
-      );
+      expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+      expect(toast).not.toHaveBeenCalled();
     } finally {
       log.mockRestore();
     }
+  });
+
+  it('keeps partial deletion feedback in the dialog without a competing list-refresh toast', async () => {
+    environment.desktopHome = true;
+    await renderPage();
+    await requestDeletion();
+    const listCalls = vi.mocked(listCanvases).mock.calls.length;
+    vi.mocked(deleteSpaceTree).mockRejectedValueOnce(
+      new ApiError(
+        500,
+        {
+          code: 'SPACE_TREE_DELETE_FAILED',
+          message: 'Cleanup incomplete',
+          details: {
+            deletedCanvasIds: ['space-1'],
+            remainingCanvasIds: [],
+            cause: 'Cleanup failed',
+          },
+        },
+        'Cleanup incomplete',
+      ),
+    );
+    await confirmDeletion();
+    expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(listCanvases).toHaveBeenCalledTimes(listCalls);
+    expect(toast).not.toHaveBeenCalled();
   });
 
   it('does not resurrect a deleted Space from an older background refresh', async () => {

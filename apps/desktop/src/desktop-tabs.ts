@@ -39,6 +39,7 @@ interface ContentTab {
   completion: string | null;
   failureNotified: boolean;
   navigation?: DesktopTabNavigation;
+  deletionError?: string;
 }
 
 interface DrainRequest {
@@ -91,7 +92,8 @@ export class DesktopTabs {
   private origin: string;
   private sessionPath: string;
   private workspaceChanging = false;
-  private spaceDeleting = false;
+  private spaceDeleting: { owner: ContentTab; canvasIds: string[] } | null =
+    null;
   private legacyStorage: Record<string, string> = {};
   private preferences: Record<string, string> = {};
 
@@ -357,11 +359,11 @@ export class DesktopTabs {
     tab.state.error = message;
     tab.state.loading = false;
     if (
-      tab.state.id === HOME_ID &&
-      (this.workspaceChanging || this.spaceDeleting)
+      (tab.state.id === HOME_ID && this.workspaceChanging) ||
+      this.spaceDeleting?.owner === tab
     ) {
       this.workspaceChanging = false;
-      this.spaceDeleting = false;
+      this.spaceDeleting = null;
       this.resume();
     } else this.publish();
     if (notify)
@@ -570,6 +572,10 @@ export class DesktopTabs {
       contents.send('tabs:navigate', tab.navigation);
       delete tab.navigation;
     }
+    if (tab.deletionError) {
+      contents.send('tabs:deletion-error', tab.deletionError);
+      delete tab.deletionError;
+    }
     this.publish();
   }
 
@@ -653,7 +659,10 @@ export class DesktopTabs {
     this.publish();
   }
 
-  private async drain(tab: ContentTab): Promise<void> {
+  private async drain(
+    tab: ContentTab,
+    reason?: 'space-deletion',
+  ): Promise<void> {
     const view = tab.view;
     if (!view) return;
     if (!tab.ready)
@@ -685,7 +694,10 @@ export class DesktopTabs {
           heartbeat,
         });
         heartbeat();
-        view.webContents.send('tabs:prepare-close', requestId);
+        view.webContents.send(
+          'tabs:prepare-close',
+          reason ? { requestId, reason } : requestId,
+        );
       });
     } finally {
       settled = true;
@@ -1035,7 +1047,39 @@ export class DesktopTabs {
       ?.view?.webContents.send('tabs:home-menu', position);
   }
 
-  command(raw: unknown, sender?: WebContents): void {
+  private async beginSpaceDeletion(
+    owner: ContentTab,
+    canvasIds: string[],
+  ): Promise<void> {
+    if (this.busy) throw new Error('Another Tab operation is in progress');
+    this.busy = true;
+    this.setHomeMenu(null);
+    this.publish();
+    try {
+      const results = await Promise.allSettled(
+        this.tabs
+          .filter(
+            (tab) =>
+              tab.state.canvasId && canvasIds.includes(tab.state.canvasId),
+          )
+          .map((tab) => this.drain(tab, 'space-deletion')),
+      );
+      const failure = results.find((result) => result.status === 'rejected');
+      if (failure?.status === 'rejected') throw failure.reason;
+      if (!owner.ready)
+        throw new Error(
+          'The requesting Tab became unavailable during deletion',
+        );
+      // Keep prepared renderers alive until the requester finishes the HTTP operation.
+      this.spaceDeleting = { owner, canvasIds };
+      this.closePrepared();
+    } catch (error) {
+      this.resume();
+      throw error;
+    }
+  }
+
+  command(raw: unknown, sender?: WebContents): void | Promise<void> {
     if (
       raw &&
       typeof raw === 'object' &&
@@ -1123,19 +1167,105 @@ export class DesktopTabs {
       return;
     }
     if (
-      raw === 'end-space-deletion' ||
-      (raw &&
-        typeof raw === 'object' &&
-        'type' in raw &&
-        raw.type === 'begin-space-deletion')
+      raw &&
+      typeof raw === 'object' &&
+      'type' in raw &&
+      (raw.type === 'begin-space-deletion' || raw.type === 'end-space-deletion')
     ) {
-      if (!sender || this.contentTab(sender).state.id !== HOME_ID)
-        throw new Error('Only Home can delete a Space');
-      if (raw === 'end-space-deletion') {
-        if (!this.spaceDeleting)
-          throw new Error('No Space deletion is in progress');
-        this.spaceDeleting = false;
-        this.resume();
+      if (!sender) throw new Error('Space deletion requires a content Tab');
+      const owner = this.contentTab(sender);
+      if (raw.type === 'end-space-deletion') {
+        const deletion = this.spaceDeleting;
+        if (!deletion || deletion.owner !== owner)
+          throw new Error('No Space deletion belongs to this Tab');
+        const reportedFailure = 'failure' in raw ? raw.failure : undefined;
+        if (
+          reportedFailure !== undefined &&
+          typeof reportedFailure !== 'string'
+        )
+          throw new Error('Invalid Space deletion error');
+        let failure: string | undefined = reportedFailure;
+        const deletedIds =
+          'deletedCanvasIds' in raw ? raw.deletedCanvasIds : undefined;
+        if (
+          !Array.isArray(deletedIds) ||
+          deletedIds.some(
+            (id: unknown) =>
+              typeof id !== 'string' || !deletion.canvasIds.includes(id),
+          )
+        )
+          throw new Error('Invalid Space deletion result');
+        const returnTo = 'returnTo' in raw ? raw.returnTo : undefined;
+        if (
+          returnTo !== undefined &&
+          (!returnTo ||
+            typeof returnTo !== 'object' ||
+            Array.isArray(returnTo) ||
+            Object.entries(returnTo).some(
+              ([id, target]) =>
+                !deletedIds.includes(id) ||
+                (target !== null &&
+                  (typeof target !== 'string' ||
+                    !parseTabNavigation({ canvasId: target }).canvasId ||
+                    deletedIds.includes(target))),
+            ))
+        )
+          throw new Error('Invalid Space deletion return destination');
+        const removed = this.tabs.filter((tab) =>
+          deletedIds.includes(tab.state.canvasId),
+        );
+        const remaining = this.tabs.filter((tab) => !removed.includes(tab));
+        let activeId = remaining.some((tab) => tab.state.id === this.activeId)
+          ? this.activeId
+          : HOME_ID;
+        const active = removed.find((tab) => tab.state.id === this.activeId);
+        const target =
+          active?.state.canvasId && returnTo
+            ? Object.entries(returnTo).find(
+                ([id]) => id === active.state.canvasId,
+              )?.[1]
+            : null;
+        if (active && typeof target === 'string') {
+          let parent = remaining.find((tab) => tab.state.canvasId === target);
+          if (!parent) {
+            parent = this.newTab(target);
+            remaining.splice(
+              Math.min(this.tabs.indexOf(active), remaining.length),
+              0,
+              parent,
+            );
+          }
+          this.ensureView(parent);
+          parent.state.unread = false;
+          activeId = parent.state.id;
+        }
+        try {
+          this.persist(remaining, activeId);
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          failure = failure ? `${failure}\n${message}` : message;
+          throw error;
+        } finally {
+          // Deleted pages must not resume writes, even if session persistence fails.
+          this.tabs = remaining;
+          this.activeId = activeId;
+          for (const tab of removed) this.destroyTab(tab);
+          this.spaceDeleting = null;
+          this.showActiveTab();
+          this.resume();
+          if (failure && removed.includes(owner)) {
+            const destination = this.tabs.find(
+              (tab) => tab.state.id === this.activeId,
+            );
+            if (destination?.ready)
+              destination.view?.webContents.send(
+                'tabs:deletion-error',
+                failure,
+              );
+            else if (destination) destination.deletionError = failure;
+          }
+        }
         return;
       }
       if (this.busy) throw new Error('Another Tab operation is in progress');
@@ -1155,13 +1285,7 @@ export class DesktopTabs {
         )
       )
         throw new Error('Invalid Space deletion identities');
-      if (this.tabs.some((tab) => canvasIds.includes(tab.state.canvasId)))
-        throw new Error('This Space is open. Close its Tab before deleting.');
-      this.spaceDeleting = true;
-      this.busy = true;
-      this.setHomeMenu(null);
-      this.publish();
-      return;
+      return this.beginSpaceDeletion(owner, canvasIds);
     }
     if (raw === 'close-home-menu' || raw === 'dismiss-home-menu') {
       if (

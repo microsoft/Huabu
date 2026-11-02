@@ -69,6 +69,7 @@ test.beforeEach(async ({ page }) => {
         onHomeMenu: () => () => {},
         onNavigate: () => () => {},
         onPrepareClose: () => () => {},
+        onDeletionError: () => () => {},
         onClosePrepared: () => () => {},
         onResume: () => () => {},
         ready: () => {},

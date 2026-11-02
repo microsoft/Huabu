@@ -5,6 +5,8 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 
+import { toast } from '@/components/Common/Toast';
+import { getElectronBridge } from '@/hooks/useElectron';
 import useCanvasStore from '@/store/canvasStore';
 import { useWorkspaceStore } from '@/store/workspaceStore';
 import {
@@ -98,10 +100,19 @@ export function SpaceActions() {
           key={deleting}
           canvasId={deleting}
           onClose={() => setDeleting(null)}
-          onDeleted={(ids, failure) => {
+          onDeleted={(ids, failure, returnTo) => {
             if (!failure) setDeleting(null);
-            if (ids.includes(useCanvasStore.getState().canvasId))
-              navigate('/spaces');
+            const currentId = useCanvasStore.getState().canvasId;
+            if (!getElectronBridge()?.tabs && ids.includes(currentId)) {
+              setDeleting(null);
+              navigate(
+                returnTo?.[currentId]
+                  ? `/canvas/${returnTo[currentId]}`
+                  : '/spaces',
+                { replace: true },
+              );
+              if (failure) toast(failure, { tone: 'danger' });
+            }
           }}
         />
       )}

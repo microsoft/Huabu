@@ -47,6 +47,8 @@ config → (leaf — imports nothing internal)
 
 Common contains reusable UI primitives; canvas node references live in `components/Nodes/NodeRef/` because they resolve node state and navigate the canvas. Shared viewport geometry and fit/reveal operations live in `utils/canvasViewport.ts`, not in a panel directory, so components, hooks, pages, and the canvas store can reuse them without depending on panel implementation.
 
+Common Modal uses the existing Floating UI focus manager to contain keyboard and assistive-technology focus, honor `initialFocusRef`, and restore focus on close. It locks background scrolling and bounds the scrollable panel to the visible viewport below desktop window chrome, so long error details remain reachable.
+
 ---
 
 ## 3. Where the canvas engine lives

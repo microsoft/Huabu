@@ -708,7 +708,8 @@ try {
     return {
       remove: i18n.t('canvasList.deleteCanvas'),
       confirm: i18n.t('spaceHierarchy.deleteCount', { count: 1 }),
-      blocked: i18n.t('desktopTabs.closeBeforeDeleting'),
+      cancel: i18n.t('actions.cancel'),
+      failure: i18n.t('spaceHierarchy.deletionErrors.agentRunning'),
     };
   });
   const createdCard = home
@@ -718,19 +719,43 @@ try {
   await home
     .getByRole('menuitem', { name: deletionLabels.remove, exact: true })
     .click();
+  await home.getByRole('dialog').waitFor({ state: 'visible' });
+  const deletionFailure = 'Deletion failed in smoke test';
+  const deleteRoute = `**/api/canvas/${createdTab.canvasId}/delete-tree`;
+  await home.route(deleteRoute, (route) =>
+    route.fulfill({
+      status: 409,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        message: deletionFailure,
+        code: 'SPACE_AGENT_RUNNING',
+      }),
+    }),
+  );
   await home
-    .getByText(deletionLabels.blocked, { exact: true })
+    .getByRole('dialog')
+    .getByRole('button', { name: deletionLabels.confirm, exact: true })
+    .click();
+  await home
+    .getByRole('dialog')
+    .getByRole('alert')
+    .getByText(deletionLabels.failure, { exact: true })
     .waitFor({ state: 'visible' });
   assert.equal(
-    await home.getByRole('dialog').count(),
-    0,
-    'An open Space must not enter delete confirmation',
+    await home.getByText(deletionLabels.failure, { exact: true }).count(),
+    1,
+    'Deletion errors must appear only in the dialog, not a duplicate toast',
   );
+  await home.unroute(deleteRoute);
+  await home
+    .getByRole('dialog')
+    .getByRole('button', { name: deletionLabels.cancel, exact: true })
+    .click();
   assert.ok(
     (
       await shell.evaluate(() => window.electronBridge.tabs.getState())
     ).tabs.some((tab) => tab.id === createdTab.id),
-    'Refusing deletion must keep the open Space Tab',
+    'Cancelling deletion must keep the open Space Tab',
   );
   await request(`/canvas/${createdTab.canvasId}`);
   await shell.evaluate(
@@ -1020,28 +1045,82 @@ try {
     assert.equal(note.content, `# Settled ${side} on outer close`);
     assert.equal(note.label, `Settled ${side} on outer close`);
   }
-  await createdCard.locator('button[aria-haspopup="menu"]').click();
-  await home
-    .getByRole('menuitem', { name: deletionLabels.remove, exact: true })
-    .click();
-  const deleteDialog = home.getByRole('dialog');
+  const deletionParent = await request('/canvas', 'POST', {
+    title: 'Deletion parent',
+  });
+  await request(`/canvas/${createdTab.canvasId}/parent`, 'PATCH', {
+    parentSpaceId: deletionParent.canvasId,
+    expectedParentSpaceId: null,
+  });
+  await home.evaluate(
+    (canvasId) => window.electronBridge.tabs.open({ canvasId }),
+    createdTab.canvasId,
+  );
+  const deletingPage = await content(createdTab.canvasId);
+  await deletingPage.evaluate(async (canvasId) => {
+    const { REQUEST_DELETE_SPACE } =
+      await import('/src/utils/spaceHierarchy.ts');
+    window.dispatchEvent(
+      new CustomEvent(REQUEST_DELETE_SPACE, { detail: canvasId }),
+    );
+  }, createdTab.canvasId);
+  const deleteDialog = deletingPage.getByRole('dialog');
   await deleteDialog.waitFor({ state: 'visible' });
   await deleteDialog
     .getByRole('button', { name: deletionLabels.confirm, exact: true })
     .click();
-  await home
-    .locator(`a[href="/canvas/${createdTab.canvasId}"]`)
-    .waitFor({ state: 'detached' });
-  await waitFor(
-    async () =>
-      !(await shell.evaluate(() => window.electronBridge.tabs.getState())).busy,
-    'releasing the closed-Space deletion guard',
+  await waitFor(async () => {
+    const state = await shell.evaluate(() =>
+      window.electronBridge.tabs.getState(),
+    );
+    return (
+      !state.busy &&
+      state.tabs.some(
+        (tab) =>
+          tab.id === state.activeId && tab.canvasId === deletionParent.canvasId,
+      )
+    );
+  }, 'returning from self-deletion to the surviving parent');
+  assert.equal(
+    deletingPage.isClosed(),
+    true,
+    'Deleting the current Space must close its Tab automatically',
   );
   assert.equal(
     (await fetch(`${serverOrigin}/api/canvas/${createdTab.canvasId}`)).status,
     404,
-    'Closing the Tab must allow deleting the Space from Home',
+    'An open Space must be deletable without returning to Home',
   );
+  await content(deletionParent.canvasId);
+  const deletionState = await shell.evaluate(() =>
+    window.electronBridge.tabs.getState(),
+  );
+  assert.equal(
+    deletionState.tabs.filter((tab) => tab.canvasId === deletionParent.canvasId)
+      .length,
+    1,
+  );
+  assert.equal(
+    (
+      await shell.evaluate(
+        (id) => window.electronBridge.tabs.close(id),
+        deletionState.activeId,
+      )
+    ).ok,
+    true,
+  );
+  await shell.evaluate(() =>
+    window.electronBridge.tabs.open({ canvasId: null }),
+  );
+  await home
+    .locator(`a[href="/canvas/${createdTab.canvasId}"]`)
+    .waitFor({ state: 'detached' });
+  const parentDeletionPreview = await request(
+    `/canvas/${deletionParent.canvasId}/deletion-preview`,
+  );
+  await request(`/canvas/${deletionParent.canvasId}/delete-tree`, 'POST', {
+    token: parentDeletionPreview.token,
+  });
   if (process.env.HUABU_TABS_SCREENSHOT) {
     await home.screenshot({
       path: process.env.HUABU_TABS_SCREENSHOT.replace(/\.png$/, '-home.png'),

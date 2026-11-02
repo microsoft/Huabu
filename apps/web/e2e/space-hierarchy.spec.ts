@@ -632,8 +632,178 @@ test('leaves a deleted current Space and keeps the partial-cleanup error visible
     .click();
   await expect(page).toHaveURL(/\/spaces$/);
   await expect(
-    page.getByText('Parent cleanup failed', { exact: true }),
+    page.getByText(
+      'Deletion did not finish cleanly. Check the current Space list before continuing.',
+      { exact: true },
+    ),
   ).toBeVisible();
+});
+
+test('deletion recovery stays localized, traps focus and requires a fresh confirmation', async ({
+  page,
+}, testInfo) => {
+  const id = await create(page, '项目资料');
+  const childResponse = await page.request.post(`/api/canvas/${id}/children`, {
+    data: { title: '调研' },
+  });
+  expect(childResponse.ok()).toBe(true);
+  const child = (await childResponse.json()).canvasId as string;
+  await page.goto(`/canvas/${id}`);
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute(
+    'aria-busy',
+    'false',
+  );
+  await page.evaluate(async () => {
+    const path = '/src/i18n/index.ts';
+    const { i18n } = await import(path);
+    await i18n.changeLanguage('zh-CN');
+  });
+  let requests = 0;
+  let releaseDeletion!: () => void;
+  const deletionGate = new Promise<void>((resolve) => {
+    releaseDeletion = resolve;
+  });
+  await page.route(`**/api/canvas/${id}/delete-tree`, async (route) => {
+    requests++;
+    if (requests === 1) await deletionGate;
+    return route.fulfill({
+      status: requests === 1 ? 409 : 500,
+      contentType: 'application/json',
+      body: JSON.stringify(
+        requests === 1
+          ? {
+              code: 'SPACE_AGENT_RUNNING',
+              message: 'Stop running Agents before deleting this subtree',
+            }
+          : {
+              code: 'SPACE_TREE_DELETE_FAILED',
+              message: 'Subtree deletion did not complete',
+              details: {
+                deletedCanvasIds: [child],
+                remainingCanvasIds: [id],
+                cause: 'Storage failure',
+              },
+            },
+      ),
+    });
+  });
+  await page.getByRole('button', { name: 'Space 菜单', exact: true }).click();
+  await page.getByRole('menuitem', { name: '删除 Space', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  const capture = async (name: string) => {
+    const box = await dialog.boundingBox();
+    if (!box) throw new Error('Deletion dialog is missing');
+    await page.screenshot({
+      path: testInfo.outputPath(name),
+      animations: 'disabled',
+      clip: {
+        x: box.x - 32,
+        y: box.y - 32,
+        width: box.width + 64,
+        height: box.height + 64,
+      },
+    });
+  };
+  const cancel = dialog.getByRole('button', { name: '取消', exact: true });
+  const remove = dialog.getByRole('button', {
+    name: '删除 2 个 Space',
+    exact: true,
+  });
+  await expect(remove).toBeEnabled();
+  await expect(cancel).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(remove).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(cancel).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(remove).toBeFocused();
+  await cancel.focus();
+  await capture('deletion-confirm.png');
+  await remove.click();
+  await expect(dialog).toHaveAccessibleName('正在删除「项目资料」');
+  await expect(dialog.getByRole('status')).toHaveText(
+    '请稍候，正在保存更改并处理删除。',
+  );
+  await expect(cancel).toBeDisabled();
+  await expect(
+    dialog.getByRole('button', { name: '正在删除…', exact: true }),
+  ).toBeDisabled();
+  await page.keyboard.press('Escape');
+  await page.mouse.click(8, 8);
+  await expect(dialog).toBeVisible();
+  await capture('deletion-busy.png');
+  expect(requests).toBe(1);
+  releaseDeletion();
+  const reason =
+    '此 Space 或子 Space 中仍有 Agent 正在处理任务。请先停止任务或等待完成，再重新检查。';
+  await expect(dialog).toHaveAccessibleName('未能完成删除「项目资料」');
+  await expect(dialog.getByRole('alert')).toHaveText(reason);
+  await expect(dialog.getByRole('status')).toHaveCount(0);
+  await expect(page.getByText(reason, { exact: true })).toHaveCount(1);
+  await expect(dialog.getByRole('button')).toHaveCount(2);
+  const recheck = dialog.getByRole('button', {
+    name: '重新检查',
+    exact: true,
+  });
+  await recheck.focus();
+  await page.keyboard.press('Tab');
+  await expect(cancel).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(recheck).toBeFocused();
+  await cancel.focus();
+  await capture('deletion-error-light.png');
+  const lightSurface = await dialog.evaluate(
+    (element) => getComputedStyle(element).backgroundColor,
+  );
+  await page.evaluate(() => document.documentElement.classList.add('dark'));
+  await expect
+    .poll(() =>
+      dialog.evaluate((element) => getComputedStyle(element).backgroundColor),
+    )
+    .not.toBe(lightSurface);
+  await capture('deletion-error-dark.png');
+  await page.setViewportSize({ width: 390, height: 700 });
+  await expect(dialog).toHaveCSS('max-width', '342px');
+  await page.screenshot({
+    path: testInfo.outputPath('deletion-error-narrow.png'),
+    animations: 'disabled',
+  });
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.evaluate(() => document.documentElement.classList.remove('dark'));
+  await recheck.click();
+  await expect(remove).toBeEnabled();
+  await expect(cancel).toBeFocused();
+  expect(requests).toBe(1);
+  await remove.click();
+  await expect(dialog.getByRole('alert')).toContainText(
+    '已删除 1 个 Space，已删除的内容无法恢复。',
+  );
+  await expect(dialog.getByRole('button')).toHaveCount(2);
+  await expect(recheck).toBeEnabled();
+  await capture('deletion-partial.png');
+  await page.route(`**/api/canvas/${id}/deletion-preview`, (route) =>
+    route.fulfill({
+      status: 500,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        message: 'Network diagnostic detail. '.repeat(60),
+      }),
+    }),
+  );
+  await recheck.click();
+  await expect(dialog.getByRole('alert')).toContainText(
+    '暂时无法获取删除范围，请检查连接后重新检查。',
+  );
+  await expect(dialog.locator('details')).not.toHaveAttribute('open');
+  await dialog.locator('summary').click();
+  await page.setViewportSize({ width: 390, height: 360 });
+  await expect(dialog).toHaveCSS('max-height', '312px');
+  const bounds = await dialog.boundingBox();
+  if (!bounds) throw new Error('Deletion dialog is missing');
+  expect(bounds.y).toBeGreaterThanOrEqual(24);
+  expect(bounds.y + bounds.height).toBeLessThanOrEqual(336);
+  await cancel.click();
+  await expect(dialog).toBeHidden();
 });
 
 test('change-parent menu waits for metadata before opening', async ({

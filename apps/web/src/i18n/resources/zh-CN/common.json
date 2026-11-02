@@ -43,8 +43,7 @@
     "label": "已打开的 Space",
     "newTab": "新标签页",
     "noMatchingSpaces": "没有匹配的 Space。",
-    "closeTab": "关闭标签页",
-    "closeBeforeDeleting": "此 Space 正在打开，请关闭标签页后再删除。"
+    "closeTab": "关闭标签页"
   },
   "sigil": {
     "chooseResource": "选择资源",
@@ -753,6 +752,27 @@
     "entryProtected": "此操作会移除或改变子 Space 入口。请使用“删除 Space”或“移入其他 Space”。",
     "deleteNamedTitle": "删除「{{name}}」？",
     "deleteWarning": "其中的所有内容将被永久删除，无法撤销。",
+    "deletingNamedTitle": "正在删除「{{name}}」",
+    "deleting": "正在删除…",
+    "deletionInProgress": "请稍候，正在保存更改并处理删除。",
+    "deleteFailedTitle": "未能完成删除",
+    "deleteFailedNamedTitle": "未能完成删除「{{name}}」",
+    "deletedNamedTitle": "「{{name}}」已删除",
+    "recheckDeletion": "重新检查",
+    "deletionDetails": "技术详情",
+    "deletionProgress_one": "已删除 {{count}} 个 Space，已删除的内容无法恢复。",
+    "deletionProgress_other": "已删除 {{count}} 个 Space，已删除的内容无法恢复。",
+    "deletionErrors": {
+      "agentRunning": "此 Space 或子 Space 中仍有 Agent 正在处理任务。请先停止任务或等待完成，再重新检查。",
+      "treeChanged": "Space 的层级已发生变化，请重新检查当前删除范围，再次确认。",
+      "interrupted": "删除流程未能全部完成，请检查当前 Space 的状态。",
+      "notFound": "此 Space 已不可用，请关闭弹窗并刷新 Space 列表。",
+      "preview": "暂时无法获取删除范围，请检查连接后重新检查。",
+      "prepare": "未能保存更改或完成删除准备，尚未发送删除请求。请处理问题后重新检查。",
+      "request": "暂时无法确认删除结果，请检查连接，并重新检查当前 Space 后再试。",
+      "refresh": "未能刷新 Space 列表，请关闭弹窗并刷新列表，确认当前状态。",
+      "release": "未能完成标签页清理，请关闭弹窗并检查仍打开的 Space。"
+    },
     "deleteCount_one": "删除 Space",
     "deleteCount_other": "删除 {{count}} 个 Space",
     "deleteDescendants_one": "包含 {{count}} 个子空间，将一并删除。",

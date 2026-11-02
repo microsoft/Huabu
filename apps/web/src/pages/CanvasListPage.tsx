@@ -265,28 +265,8 @@ export default function CanvasListPage() {
     }
   };
 
-  const reportDeleteError = (error: unknown) => {
-    console.error('Failed to delete canvas:', error);
-    toast(error instanceof Error ? error.message : String(error), {
-      tone: 'danger',
-    });
-  };
-
-  const canDeleteSpace = async (canvasId: string): Promise<boolean> => {
-    const tabs = getElectronBridge()?.tabs;
-    if (!tabs) return true;
-    const state = await tabs.getState();
-    if (!state.tabs.some((tab) => tab.canvasId === canvasId)) return true;
-    toast(t('desktopTabs.closeBeforeDeleting'), { tone: 'warning' });
-    return false;
-  };
-
-  const requestDelete = async (canvasId: string, title: string | null) => {
-    try {
-      if (await canDeleteSpace(canvasId)) setPendingDelete({ canvasId, title });
-    } catch (error) {
-      reportDeleteError(error);
-    }
+  const requestDelete = (canvasId: string, title: string | null) => {
+    setPendingDelete({ canvasId, title });
   };
 
   const formatDate = (timestamp: number) => {
@@ -378,8 +358,10 @@ export default function CanvasListPage() {
               setCanvasCount(remaining.length);
               return remaining;
             });
-            if (!failure) setPendingDelete(null);
-            void fetchCanvases(false);
+            if (!failure) {
+              setPendingDelete(null);
+              void fetchCanvases(false);
+            }
           }}
         />
       )}

@@ -11,6 +11,7 @@ import {
 } from '@/api/conversationTitles';
 import useCanvasStore from '@/store/canvasStore';
 import {
+  ConversationTitleSaveError,
   renameConversationTitle,
   refreshConversationTitles,
   useConversationTitleStore,
@@ -26,7 +27,10 @@ import { useDesktopContent } from './useDesktopContent';
 import { getElectronBridge } from './useElectron';
 
 import type { toast } from '@/components/Common/Toast';
-import type { DesktopTabsSnapshot } from '@huabu/shared/desktop-tabs';
+import type {
+  DesktopTabsApi,
+  DesktopTabsSnapshot,
+} from '@huabu/shared/desktop-tabs';
 
 const mocks = vi.hoisted(() => ({
   context: { role: 'space', canvasId: 'space-a', workspaceId: 'workspace' },
@@ -42,7 +46,8 @@ const mocks = vi.hoisted(() => ({
   save: vi.fn(),
   preprocess: vi.fn(),
   flush: vi.fn(),
-  prepare: vi.fn<(listener: (requestId: string) => void) => () => void>(),
+  prepare: vi.fn<DesktopTabsApi['onPrepareClose']>(),
+  deletionError: vi.fn<DesktopTabsApi['onDeletionError']>(),
   resume: vi.fn<(listener: () => void) => () => void>(),
   finish: vi.fn(),
   heartbeat: vi.fn(),
@@ -66,6 +71,7 @@ vi.mock('./useElectron', () => {
       context: mocks.context,
       onNavigate: () => () => {},
       onPrepareClose: mocks.prepare,
+      onDeletionError: mocks.deletionError,
       onResume: mocks.resume,
       finishPrepareClose: mocks.finish,
       keepPrepareCloseAlive: mocks.heartbeat,
@@ -159,6 +165,7 @@ describe('desktop save presentation', () => {
     mocks.save.mockResolvedValue(undefined);
     mocks.preprocess.mockResolvedValue(undefined);
     mocks.prepare.mockReturnValue(vi.fn());
+    mocks.deletionError.mockReturnValue(vi.fn());
     mocks.resume.mockReturnValue(vi.fn());
     mocks.prepared.mockReturnValue(vi.fn());
     removeCanvasPreparation = pageLifecycle.register('test-canvas', {
@@ -316,6 +323,67 @@ describe('desktop save presentation', () => {
       }
     },
   );
+
+  it('returns deletion preparation failures to the dialog without a toast', async () => {
+    mocks.save.mockRejectedValue(new Error('Disk full'));
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await render();
+      await act(async () =>
+        mocks.prepare.mock.calls[0][0]({
+          requestId: 'delete-request',
+          reason: 'space-deletion',
+        }),
+      );
+      expect(mocks.finish).toHaveBeenCalledWith('delete-request', {
+        ok: false,
+        error: 'Disk full',
+      });
+      expect(mocks.toast).not.toHaveBeenCalled();
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it('shows the deletion error handed off to the destination once', async () => {
+    await render();
+    await act(async () =>
+      mocks.deletionError.mock.calls[0][0]('Partial deletion'),
+    );
+    expect(mocks.toast).toHaveBeenCalledExactlyOnceWith('Partial deletion', {
+      tone: 'danger',
+    });
+  });
+
+  it('retries title-save failures on the next deletion attempt without needing a toast action', async () => {
+    const error = new ConversationTitleSaveError('Title save failed');
+    const retry = vi.spyOn(error, 'retry').mockResolvedValue();
+    mocks.save.mockRejectedValueOnce(error);
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await render();
+      await act(async () =>
+        mocks.prepare.mock.calls[0][0]({
+          requestId: 'delete-first',
+          reason: 'space-deletion',
+        }),
+      );
+      await resume();
+      await act(async () =>
+        mocks.prepare.mock.calls[0][0]({
+          requestId: 'delete-retry',
+          reason: 'space-deletion',
+        }),
+      );
+      expect(retry).toHaveBeenCalledOnce();
+      expect(mocks.finish).toHaveBeenLastCalledWith('delete-retry', {
+        ok: true,
+      });
+      expect(mocks.toast).not.toHaveBeenCalled();
+    } finally {
+      log.mockRestore();
+    }
+  });
 
   it('hydrates queued World preference notifications without echoing writes to main', async () => {
     await render();
