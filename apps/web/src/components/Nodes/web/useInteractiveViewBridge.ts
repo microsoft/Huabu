@@ -129,13 +129,15 @@ export function useInteractiveViewBridge(input: {
   canvasId: string | null;
   nodeId: string;
   iframeRef: RefObject<HTMLIFrameElement | null>;
+  onBootstrapError?: () => void;
 }) {
-  const { enabled, canvasId, nodeId, iframeRef } = input;
+  const { enabled, canvasId, nodeId, iframeRef, onBootstrapError } = input;
   const resourceRef = useRef<InteractiveViewResource | null>(null);
   const dataRef = useRef<Record<string, InteractiveViewDataSnapshotV1>>({});
   const portRef = useRef<MessagePort | null>(null);
   const runtimeCleanupRef = useRef<(() => void) | null>(null);
   const generationRef = useRef(0);
+  const loadedFrameRef = useRef<HTMLIFrameElement | null>(null);
 
   const closePort = useCallback(() => {
     generationRef.current += 1;
@@ -152,19 +154,25 @@ export function useInteractiveViewBridge(input: {
 
   const connect = useCallback(async () => {
     closePort();
-    if (!enabled || !canvasId || !iframeRef.current?.contentWindow) return;
+    const frame = iframeRef.current;
+    if (!enabled || !canvasId || !frame?.contentWindow) return;
 
     const generation = generationRef.current;
     let runtime;
     try {
       runtime = await getInteractiveViewRuntime(canvasId, nodeId);
     } catch (error) {
+      if (generationRef.current !== generation || iframeRef.current !== frame) {
+        return;
+      }
       console.error('[interactive-view] bootstrap failed', error);
+      onBootstrapError?.();
       return;
     }
     if (
       generationRef.current !== generation ||
-      !iframeRef.current?.contentWindow
+      iframeRef.current !== frame ||
+      !frame.contentWindow
     ) {
       return;
     }
@@ -460,7 +468,7 @@ export function useInteractiveViewBridge(input: {
     };
     port.start();
 
-    iframeRef.current.contentWindow.postMessage(
+    frame.contentWindow.postMessage(
       {
         type: 'huabu.view.connect',
         protocolVersion: 1,
@@ -501,7 +509,18 @@ export function useInteractiveViewBridge(input: {
       window.removeEventListener('focus', onFocus);
       if (timer !== null) window.clearInterval(timer);
     };
-  }, [canvasId, closePort, enabled, iframeRef, nodeId]);
+  }, [canvasId, closePort, enabled, iframeRef, nodeId, onBootstrapError]);
 
-  return { connect, closePort };
+  const onLoad = useCallback(() => {
+    if (!enabled || !iframeRef.current) return;
+    // A second load on the same element is navigation, not a new trusted renderer.
+    if (loadedFrameRef.current === iframeRef.current) {
+      closePort();
+      return;
+    }
+    loadedFrameRef.current = iframeRef.current;
+    void connect();
+  }, [closePort, connect, enabled, iframeRef]);
+
+  return { connect, closePort, onLoad };
 }
