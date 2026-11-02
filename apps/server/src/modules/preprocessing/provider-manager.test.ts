@@ -94,7 +94,8 @@ describe('external text enrichment', () => {
       .split('\n\nAnalyze the above content')[0];
     expect(source.length).toBeLessThanOrEqual(6000);
     expect(source).toContain('START');
-    expect(source).toContain('END');
+    expect(source).not.toContain('END');
+    expect(prompt).toContain('opening excerpt, not the full document');
   });
 
   it('generates a Frame title with the Space context', async () => {
