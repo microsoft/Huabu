@@ -699,7 +699,7 @@ describe('structured write authority', () => {
     for (const match of source.matchAll(
       /\b([A-Za-z_$][\w$]*)\s*=\s*getCanvasStore\s*\(/g,
     )) {
-      const identifier = match[1].replace(/[$]/g, '\\$&');
+      const identifier = match[1].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       if (
         new RegExp(`\\b${identifier}\\s*\\.\\s*(?:write|destroy)\\s*\\(`).test(
           source,

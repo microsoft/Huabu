@@ -3,17 +3,18 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { postCanvasExecute, acknowledgeAgentNodeResult, getOwner } = vi.hoisted(
-  () => ({
+const { postCanvasExecute, acknowledgeAgentNodeResult, getOwner, streamOwner } =
+  vi.hoisted(() => ({
     postCanvasExecute: vi.fn(),
     acknowledgeAgentNodeResult: vi.fn(),
     getOwner: vi.fn(),
-  }),
-);
+    streamOwner: vi.fn(),
+  }));
 
 vi.mock('@/api/agent', async (original) => ({
   ...(await original<typeof AgentApi>()),
   getAgentConversationOwner: getOwner,
+  streamAgentConversationOwner: streamOwner,
 }));
 vi.mock('@/api/canvas', async (importOriginal) => ({
   ...(await importOriginal<typeof CanvasApi>()),
@@ -43,12 +44,16 @@ import {
 } from './conversationOwner';
 import {
   refreshConversationOwner,
+  subscribeConversationOwner,
   useRemoteConversationOwnerStore,
 } from './remoteConversationOwner';
 
 import type * as AgentApi from '@/api/agent';
 import type * as CanvasApi from '@/api/canvas';
-import type { AgentConversationView } from '@huabu/shared';
+import type {
+  AgentConversationView,
+  AgentConversationOwnerResponse,
+} from '@huabu/shared';
 
 const ownerView: AgentConversationView = {
   presentationAnchor: {
@@ -121,6 +126,72 @@ beforeEach(() => {
 });
 
 describe('conversation owner routing', () => {
+  it('acknowledges a saved draft despite an older SSE snapshot arriving during post-write validation', async () => {
+    useCanvasStore
+      .getState()
+      ._setStateNoAutosave({ canvasId: 'parent', nodes: [] });
+    const oldOwner: AgentConversationOwnerResponse = {
+      ...ownerView.conversationOwner,
+      observation: { epoch: 'server', revision: 1 },
+      spaceTitle: 'Source',
+      source: {
+        agentBinding: { kind: 'internal' },
+        agentMode: 'ask',
+        hasAuthoredContent: false,
+      },
+    };
+    const saved: AgentConversationOwnerResponse = {
+      ...oldOwner,
+      observation: { epoch: 'server', revision: 3 },
+      source: { ...oldOwner.source, agentMode: 'operate' },
+    };
+    let receive!: Parameters<typeof AgentApi.streamAgentConversationOwner>[2];
+    streamOwner.mockImplementation((_canvas, _thread, callback) => {
+      receive = callback;
+      return Promise.resolve();
+    });
+    const stop = subscribeConversationOwner(
+      'canvas-source',
+      'node-source',
+      'thread-source',
+    );
+    let finish!: (value: AgentConversationOwnerResponse) => void;
+    getOwner.mockResolvedValueOnce(oldOwner).mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    try {
+      const save = saveConversationDraft(ownerView, {
+        agentBinding: { kind: 'internal' },
+        agentMode: 'operate',
+      });
+      await vi.waitFor(() => expect(getOwner).toHaveBeenCalledTimes(2));
+      receive({
+        type: 'snapshot',
+        data: {
+          streamId: 'connection',
+          revision: 1,
+          value: {
+            state: 'ready',
+            owner: {
+              ...oldOwner,
+              observation: { epoch: 'server', revision: 2 },
+            },
+          },
+        },
+      });
+      finish(saved);
+      await expect(save).resolves.toBeUndefined();
+      await expect(awaitConversationDraft(ownerView)).resolves.toBeUndefined();
+      expect(
+        resolveConversationOwnerSource('parent', [], ownerView)?.agentMode,
+      ).toBe('operate');
+    } finally {
+      stop();
+    }
+  });
+
   it.each([false, true])(
     'verifies remote configuration using a read started after the write, with stale poll failure=%s',
     async (pollFails) => {

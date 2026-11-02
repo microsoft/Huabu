@@ -7,7 +7,10 @@ import { afterEach, assert, beforeEach, expect, it, vi } from 'vitest';
 
 import { ApiError } from '@/api/_client';
 import { useChatStore } from '@/store/chatStore';
-import { useRemoteConversationOwnerStore } from '@/store/remoteConversationOwner';
+import {
+  conversationOwnerKey,
+  useRemoteConversationOwnerStore,
+} from '@/store/remoteConversationOwner';
 import { useWorkspaceStore } from '@/store/workspaceStore';
 
 import { SpaceConversationPreview } from './SpaceConversationPreview';
@@ -112,9 +115,11 @@ vi.mock('../ChatPanel', () => ({
   ChatPanel: ({
     session,
     ownerUnavailable,
+    ownerStreamUnavailable,
   }: {
     session: ChatSession;
     ownerUnavailable?: boolean;
+    ownerStreamUnavailable?: boolean;
   }) => {
     mocks.chat(session);
     useEffect(() => {
@@ -124,6 +129,7 @@ vi.mock('../ChatPanel', () => ({
       <div
         data-chat-thread={session.threadId}
         data-unavailable={ownerUnavailable}
+        data-stream-unavailable={ownerStreamUnavailable}
       >
         Original conversation
         <input aria-label="Draft" />
@@ -323,6 +329,68 @@ it('shows a neutral missing-owner status with the remembered Space name and no R
   expect(host.querySelector('button')?.textContent).toBe('Child Space');
 });
 
+it.each(['Renamed Space', null, ''])(
+  'prefers the refreshed Space title %s over a retained missing owner',
+  async (title) => {
+    await render();
+    mocks.getOwner.mockRejectedValueOnce(
+      new ApiError(404, { code: 'conversation_owner_missing' }, 'Missing'),
+    );
+    await act(async () => mocks.sync?.({ type: 'invalidate', data: {} }));
+    act(() => useWorkspaceStore.getState().setSpaceTitle('child', title));
+    expect(host.querySelector('button')?.textContent).toBe(
+      title || 'spacePreview.untitledSpace',
+    );
+  },
+);
+
+it('retains cached history read-only until the reopened tab receives a baseline', async () => {
+  useChatStore
+    .getState()
+    .setMessages('thread', [
+      { id: 'history', role: 'user', content: 'Preserved' },
+    ]);
+  useRemoteConversationOwnerStore.setState({
+    entries: {
+      [conversationOwnerKey('child', 'agent', 'thread')]: {
+        owner: {
+          ...owner,
+          source: {
+            ...owner.source,
+            status: 'done',
+            agentBinding: { kind: 'internal' },
+            hasAuthoredContent: true,
+          },
+        },
+      },
+    },
+  });
+  let finish!: (value: typeof owner) => void;
+  mocks.getOwner.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  await render();
+  expect(
+    host.querySelector('[data-chat-thread]')?.getAttribute('data-unavailable'),
+  ).toBe('true');
+  expect(
+    host
+      .querySelector('[data-chat-thread]')
+      ?.getAttribute('data-stream-unavailable'),
+  ).toBe('true');
+  await act(async () => finish(owner));
+  expect(
+    host.querySelector('[data-chat-thread]')?.getAttribute('data-unavailable'),
+  ).toBe('false');
+  expect(
+    host
+      .querySelector('[data-chat-thread]')
+      ?.getAttribute('data-stream-unavailable'),
+  ).toBe('false');
+});
+
 it.each([
   ['Saved Space', 'Saved Space'],
   [null, 'spacePreview.untitledSpace'],
@@ -446,6 +514,11 @@ it.each([
     expect(host.querySelector('input')).toBe(input);
     expect(document.activeElement).toBe(input);
     expect(input.value).toBe('Unsent draft');
+    expect(
+      host
+        .querySelector('[data-chat-thread]')
+        ?.getAttribute('data-stream-unavailable'),
+    ).toBe('false');
     expect(
       host
         .querySelector('[data-chat-thread]')

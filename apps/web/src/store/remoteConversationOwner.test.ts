@@ -244,6 +244,111 @@ it('a late successful query cannot resurrect a deleted owner', async () => {
   ).toBeUndefined();
 });
 
+it('keeps a fresh saved configuration when an older buffered snapshot arrives during its GET', async () => {
+  observe();
+  const before = { ...owner, observation: { epoch: 'server', revision: 1 } };
+  receive(snapshot(1, before));
+  let resolve!: (value: AgentConversationOwnerResponse) => void;
+  mocks.getOwner.mockReturnValueOnce(
+    new Promise((done) => {
+      resolve = done;
+    }),
+  );
+  const read = refreshConversationOwner('child', 'node-agent', 'thread', {
+    fresh: true,
+  });
+  receive(
+    snapshot(2, { ...before, observation: { epoch: 'server', revision: 2 } }),
+  );
+  const saved: AgentConversationOwnerResponse = {
+    ...owner,
+    source: { ...owner.source, agentMode: 'operate' },
+    observation: { epoch: 'server', revision: 3 },
+  };
+  resolve(saved);
+  await expect(read).resolves.toEqual(saved);
+  receive(
+    snapshot(3, { ...before, observation: { epoch: 'server', revision: 2 } }),
+  );
+  expect(
+    useRemoteConversationOwnerStore.getState().entries[key]?.owner,
+  ).toEqual(saved);
+});
+
+it('rejects a versioned GET overtaken by a newer missing snapshot', async () => {
+  observe();
+  let resolve!: (value: AgentConversationOwnerResponse) => void;
+  mocks.getOwner.mockReturnValueOnce(
+    new Promise((done) => {
+      resolve = done;
+    }),
+  );
+  const read = refreshConversationOwner('child', 'node-agent', 'thread', {
+    fresh: true,
+  });
+  receive({
+    type: 'snapshot',
+    data: {
+      revision: 1,
+      streamId: 'connection',
+      value: {
+        state: 'unavailable',
+        status: 404,
+        error: {
+          message: 'Missing',
+          code: 'conversation_owner_missing',
+          details: { observation: { epoch: 'server', revision: 3 } },
+        },
+      },
+    },
+  });
+  resolve({ ...owner, observation: { epoch: 'server', revision: 2 } });
+  await expect(read).rejects.toMatchObject({ status: 404 });
+  expect(
+    useRemoteConversationOwnerStore.getState().entries[key]?.owner,
+  ).toBeUndefined();
+});
+
+it('does not replace a newer HTTP confirmation with an older missing snapshot', async () => {
+  observe();
+  const saved = { ...owner, observation: { epoch: 'server', revision: 3 } };
+  mocks.getOwner.mockResolvedValueOnce(saved);
+  await refreshConversationOwner('child', 'node-agent', 'thread', {
+    fresh: true,
+  });
+  receive({
+    type: 'snapshot',
+    data: {
+      revision: 1,
+      streamId: 'connection',
+      value: {
+        state: 'unavailable',
+        status: 404,
+        error: {
+          message: 'Missing',
+          details: { observation: { epoch: 'server', revision: 2 } },
+        },
+      },
+    },
+  });
+  expect(
+    useRemoteConversationOwnerStore.getState().entries[key]?.owner,
+  ).toEqual(saved);
+});
+
+it('does not validate another subscriber from cached ownership before the new baseline', () => {
+  useRemoteConversationOwnerStore.setState({ entries: { [key]: { owner } } });
+  const first = vi.fn();
+  const second = vi.fn();
+  observe(first);
+  observe(second);
+  expect(first).not.toHaveBeenCalled();
+  expect(second).not.toHaveBeenCalled();
+  receive(snapshot());
+  expect(first).toHaveBeenCalledOnce();
+  expect(second).toHaveBeenCalledOnce();
+});
+
 it('respects Retry-After despite focus and visibility events, then receives a full baseline', async () => {
   observe();
   fail(

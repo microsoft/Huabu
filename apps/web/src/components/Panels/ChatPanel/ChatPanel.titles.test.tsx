@@ -27,6 +27,7 @@ import { Button } from '@/components/Common/Button';
 import { toast } from '@/components/Common/Toast';
 import { resetAgentTurnAcceptanceObserversForTests } from '@/hooks/agentTurnController';
 import { useBuiltinThreadSettings } from '@/hooks/useBuiltinThreadSettings';
+import { useChatHistory } from '@/hooks/useChatHistory';
 import { useConversationTitles } from '@/hooks/useConversationTitles';
 import { i18n } from '@/i18n';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
@@ -108,7 +109,9 @@ vi.mock('react-router-dom', () => ({ useNavigate: () => () => {} }));
 vi.mock('@/components/Common/Loading', () => ({ Loading: () => null }));
 vi.mock('@/components/Common/Toast', () => ({ toast: vi.fn() }));
 vi.mock('@/hooks/useChatHistory', () => ({
-  useChatHistory: () => ({ isCurrentOwnerHistory: historyState.current }),
+  useChatHistory: vi.fn(() => ({
+    isCurrentOwnerHistory: historyState.current,
+  })),
 }));
 vi.mock('@/hooks/useAcpProfiles', () => ({
   useAcpProfiles: () => ({ profiles: [], loaded: true, refresh: vi.fn() }),
@@ -626,6 +629,7 @@ describe('rendered conversation titles', () => {
     await renderPanel(remoteSession, remoteTab, vi.fn(), {
       ownerUnavailable: true,
     });
+
     const selectors = vi.mocked(BuiltinSessionSelectors).mock.lastCall?.[0];
     assert(selectors);
     await act(async () => {
@@ -656,6 +660,22 @@ describe('rendered conversation titles', () => {
       'false',
     );
     expect(useChatStore.getState().settingsByThread.thread).toEqual(selection);
+  });
+
+  it('disables writes without tearing down reply history on a retryable observation failure', async () => {
+    seedRemoteOwner();
+    await renderPanel(remoteSession, remoteTab, vi.fn(), {
+      ownerUnavailable: true,
+      ownerStreamUnavailable: false,
+    });
+    expect(container.querySelector('form')?.dataset.submitDisabled).toBe(
+      'true',
+    );
+    expect(vi.mocked(useChatHistory).mock.lastCall?.[3]).toBe(false);
+    await renderPanel(remoteSession, remoteTab, vi.fn(), {
+      ownerUnavailable: true,
+    });
+    expect(vi.mocked(useChatHistory).mock.lastCall?.[3]).toBe(true);
   });
 
   it('reports failed built-in selections without committing the tab', async () => {

@@ -127,9 +127,13 @@ export function OwnedConversationPreview({
     [key, target.canvasId, target.nodeId, target.threadId],
   );
   const owner = entry?.owner ?? entry?.lastKnownOwner;
+  const title = entry?.owner
+    ? entry.owner.spaceTitle
+    : cachedSpaceTitle !== undefined
+      ? cachedSpaceTitle
+      : owner?.spaceTitle;
   const spaceTitle =
-    owner?.spaceTitle?.trim() ||
-    cachedSpaceTitle?.trim() ||
+    title?.trim() ||
     (cachedSpaceTitle === undefined && !owner
       ? target.canvasId
       : t('spacePreview.untitledSpace'));
@@ -226,7 +230,8 @@ export function OwnedConversationPreview({
           <ChatPanel
             {...props}
             session={session}
-            ownerUnavailable={unavailable}
+            ownerUnavailable={unavailable || !validated}
+            ownerStreamUnavailable={localMissing || !entry?.owner || !validated}
           />
         </div>
       ) : null}

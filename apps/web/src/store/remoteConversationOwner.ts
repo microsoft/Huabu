@@ -14,7 +14,10 @@ import { useChatStore } from './chatStore';
 import { invalidateConversationTitle } from './conversationTitleStore';
 import { useWorkspaceStore } from './workspaceStore';
 
-import type { AgentConversationOwnerResponse } from '@huabu/shared';
+import type {
+  AgentConversationOwnerObservation,
+  AgentConversationOwnerResponse,
+} from '@huabu/shared';
 
 export const conversationOwnerKey = (
   canvasId: string,
@@ -28,6 +31,7 @@ interface OwnerEntry {
   error?: string;
   errorCode?: string;
   errorStatus?: number;
+  observation?: AgentConversationOwnerObservation;
 }
 
 export const useRemoteConversationOwnerStore = create<{
@@ -42,6 +46,39 @@ type OwnerRequest = {
 const requests = new Map<string, OwnerRequest>();
 const snapshotSerials = new Map<string, number>();
 
+function failureObservation(
+  error: unknown,
+): AgentConversationOwnerObservation | undefined {
+  const details = error instanceof ApiError ? error.details : undefined;
+  if (!details || typeof details !== 'object' || !('observation' in details))
+    return undefined;
+  const value = details.observation;
+  if (
+    value &&
+    typeof value === 'object' &&
+    'epoch' in value &&
+    typeof value.epoch === 'string' &&
+    'revision' in value &&
+    typeof value.revision === 'number' &&
+    Number.isSafeInteger(value.revision) &&
+    value.revision > 0
+  )
+    return { epoch: value.epoch, revision: value.revision };
+  return undefined;
+}
+
+function isSuperseded(
+  key: string,
+  observation?: AgentConversationOwnerObservation,
+  snapshotSerial?: number,
+) {
+  const current =
+    useRemoteConversationOwnerStore.getState().entries[key]?.observation;
+  if (current && observation && current.epoch === observation.epoch)
+    return observation.revision < current.revision;
+  return snapshotSerials.get(key) !== snapshotSerial;
+}
+
 function publishOwner(
   key: string,
   owner: AgentConversationOwnerResponse,
@@ -50,7 +87,10 @@ function publishOwner(
   const previous =
     useRemoteConversationOwnerStore.getState().entries[key]?.owner;
   useRemoteConversationOwnerStore.setState((state) => ({
-    entries: { ...state.entries, [key]: { owner, lastKnownOwner: owner } },
+    entries: {
+      ...state.entries,
+      [key]: { owner, lastKnownOwner: owner, observation: owner.observation },
+    },
   }));
   if (previous?.source.label !== owner.source.label)
     invalidateConversationTitle(owner.canvasId, owner.threadId);
@@ -68,6 +108,8 @@ function publishFailure(key: string, error: unknown) {
       ...state.entries,
       [key]: {
         lastKnownOwner: state.entries[key]?.lastKnownOwner,
+        observation:
+          failureObservation(error) ?? state.entries[key]?.observation,
         ...(error instanceof TypeError ||
         (error instanceof ApiError &&
           (error.status === 408 || error.status === 429 || error.status >= 500))
@@ -87,7 +129,7 @@ function currentOwner(key: string): AgentConversationOwnerResponse {
   if (entry?.owner && !entry.error) return entry.owner;
   throw new ApiError(
     entry?.errorStatus ?? 409,
-    { code: entry?.errorCode },
+    { code: entry?.errorCode, details: { observation: entry?.observation } },
     entry?.error ?? 'The conversation state changed during validation',
   );
 }
@@ -154,14 +196,16 @@ export function refreshConversationOwner(
   )
     .then((owner) => {
       controller.signal.throwIfAborted();
-      if (snapshotSerials.get(key) !== snapshotSerial) return currentOwner(key);
+      if (isSuperseded(key, owner.observation, snapshotSerial))
+        return currentOwner(key);
       validateOwner(owner, nodeId);
       publishOwner(key, owner, workspaceId);
       return owner;
     })
     .catch((error: unknown) => {
       if (controller.signal.aborted) throw error;
-      if (snapshotSerials.get(key) !== snapshotSerial) return currentOwner(key);
+      if (isSuperseded(key, failureObservation(error), snapshotSerial))
+        return currentOwner(key);
       publishFailure(key, error);
       throw error;
     })
@@ -187,6 +231,7 @@ const observers = new Map<
     address: { canvasId: string; nodeId: string; threadId: string };
     refresh: () => void;
     dispose: () => void;
+    validated: boolean;
   }
 >();
 
@@ -216,6 +261,8 @@ export function subscribeConversationOwner(
       }
       controller?.abort();
       controller = new AbortController();
+      const currentObserver = observers.get(key);
+      if (currentObserver) currentObserver.validated = false;
       const { signal } = controller;
       let streamId: string | undefined;
       let revision = 0;
@@ -233,6 +280,23 @@ export function subscribeConversationOwner(
             !!useRemoteConversationOwnerStore.getState().entries[key]?.error;
           streamId = snapshot.streamId;
           revision = snapshot.revision;
+          const observation =
+            snapshot.value.state === 'ready'
+              ? snapshot.value.owner.observation
+              : snapshot.value.error.details?.observation;
+          const currentEntry =
+            useRemoteConversationOwnerStore.getState().entries[key];
+          if (
+            observation &&
+            currentEntry?.observation?.epoch === observation.epoch &&
+            observation.revision < currentEntry.observation.revision
+          ) {
+            if (currentEntry.owner && !currentEntry.error) {
+              if (currentObserver) currentObserver.validated = true;
+              for (const listener of listeners) listener();
+            }
+            return;
+          }
           snapshotSerials.set(key, (snapshotSerials.get(key) ?? 0) + 1);
           retryDelay = 500;
           retryNotBefore = 0;
@@ -255,6 +319,7 @@ export function subscribeConversationOwner(
             return;
           }
           publishOwner(key, snapshot.value.owner, workspaceId);
+          if (currentObserver) currentObserver.validated = true;
           if (calibrate && !hasAgentStreamClaim(canvasId, threadId)) {
             useChatStore.getState().setHistoryError(threadId, null);
             useChatStore.getState().setHistoryLoaded(threadId, false);
@@ -299,6 +364,7 @@ export function subscribeConversationOwner(
     document.addEventListener('visibilitychange', onVisible);
     observer = {
       listeners,
+      validated: false,
       address: { canvasId, nodeId, threadId },
       refresh,
       dispose: () => {
@@ -316,7 +382,10 @@ export function subscribeConversationOwner(
   const listener = () => onRefresh?.();
   current.listeners.add(listener);
   if (current.listeners.size === 1) current.refresh();
-  else if (useRemoteConversationOwnerStore.getState().entries[key]?.owner)
+  else if (
+    current.validated &&
+    !useRemoteConversationOwnerStore.getState().entries[key]?.error
+  )
     listener();
   return () => {
     if (!current.listeners.delete(listener)) return;

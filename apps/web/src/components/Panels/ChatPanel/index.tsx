@@ -95,6 +95,7 @@ import type { AgentMode, CanvasNodeId } from '@huabu/shared';
 
 interface ChatPanelProps {
   ownerUnavailable?: boolean;
+  ownerStreamUnavailable?: boolean;
   isActive?: boolean;
   activationId?: number;
   isCollapsed?: boolean;
@@ -124,6 +125,7 @@ interface ChatPanelProps {
 
 export const ChatPanel = ({
   ownerUnavailable = false,
+  ownerStreamUnavailable = ownerUnavailable,
   isActive = true,
   activationId,
   isCollapsed,
@@ -267,7 +269,7 @@ export const ChatPanel = ({
     session,
     setIsLoading,
     previewTabId,
-    ownerUnavailable,
+    ownerStreamUnavailable,
   );
   const loadOlderHistory = historyWindow?.loadOlderHistory;
   const isCurrentOwnerHistory = historyWindow?.isCurrentOwnerHistory;

@@ -18,7 +18,7 @@ Two channels cooperate:
 
 Space Shortcut does not open a target Canvas sync stream or fetch preview scenes. It shares workspace Space metadata for titles, target availability, node counts, and update timestamps, refreshed on entry and focus; local moves and renames also invalidate/refetch affected summaries. Inactive target content mutations appear on the next metadata refresh, not through live target subscriptions; see [space-preview.md](./space-preview.md).
 
-World preview reconciliation is a system-originated command batch against World and publishes through World's existing delta stream when topology changes. Portal Pin routing, batched source-reference refreshes, and World `nodeRef` conversation presentation are retired. Opening an Agent conversation from a Space card subscribes to its source's existing Canvas SSE transport without loading or applying that source Canvas document; passive Space cards still do not subscribe.
+World preview reconciliation is a system-originated command batch against World and publishes through World's existing delta stream when topology changes. Portal Pin routing, batched source-reference refreshes, and World `nodeRef` conversation presentation are retired. Opening an Agent conversation from a Space card subscribes to its dedicated owner-state SSE transport without loading or applying the source Canvas document; the server derives these snapshots from the existing Canvas publisher, and passive Space cards still do not subscribe.
 
 `version` (monotonic per canvas) is the concurrency primitive; a **dirty-node**
 filter guarantees an incoming agent write never clobbers a node the user is

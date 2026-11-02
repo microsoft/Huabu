@@ -96,6 +96,7 @@ for (const direction of ['parent-to-child', 'child-to-parent']) {
     const ownerKey = `owner:${threadId}`;
     let ownerMissing = false;
     let ownerReads = 0;
+    let ownerObservationFailed = false;
     let ownerRevision = 1;
     const ownerSnapshot = (): AgentConversationOwnerEvent => ({
       type: 'snapshot',
@@ -197,7 +198,20 @@ for (const direction of ['parent-to-child', 'child-to-parent']) {
     await context.route(`**/api/agent/owner/${threadId}/stream?**`, (route) =>
       route.fulfill({
         headers: { 'x-test-stream': 'true' },
-        json: { key: ownerKey, events: [ownerSnapshot()] },
+        json: {
+          key: ownerKey,
+          events: [
+            ownerObservationFailed
+              ? {
+                  type: 'error',
+                  data: {
+                    status: 503,
+                    error: { message: 'Status temporarily unavailable' },
+                  },
+                }
+              : ownerSnapshot(),
+          ],
+        },
       }),
     );
     await context.route(`**/api/agent/owner/${threadId}?**`, (route) => {
@@ -314,6 +328,46 @@ for (const direction of ['parent-to-child', 'child-to-parent']) {
     await expect(observer.locator('textarea').last()).toHaveValue(
       'Keep observer draft',
     );
+
+    ownerObservationFailed = true;
+    await publish(
+      observer,
+      ownerKey,
+      {
+        type: 'error',
+        data: {
+          status: 503,
+          error: { message: 'Status temporarily unavailable' },
+        },
+      },
+      true,
+    );
+    await expect(observer.getByRole('alert')).toContainText(
+      'Status temporarily unavailable',
+    );
+    await expect(
+      observer.getByRole('button', { name: 'Stop', exact: true }),
+    ).toBeVisible();
+    await expect(
+      observer.getByRole('button', { name: 'Add to queue', exact: true }),
+    ).toBeDisabled();
+    await publish(observer, streamKey, {
+      type: 'text_delta',
+      data: { content: ' Still streaming through the outage.' },
+    });
+    await expect(
+      observer.getByText(
+        'Live cross-Space reply continues. Still streaming through the outage.',
+        { exact: true },
+      ),
+    ).toBeVisible();
+    expect(observerAttachments).toBe(1);
+    ownerObservationFailed = false;
+    await expect(observer.getByRole('alert')).toHaveCount(0);
+    await expect(
+      observer.getByRole('button', { name: 'Stop', exact: true }),
+    ).toBeVisible();
+    expect(observerAttachments).toBe(1);
 
     // Completion can reach the metadata channel before the stream's last frame.
     status = 'done';

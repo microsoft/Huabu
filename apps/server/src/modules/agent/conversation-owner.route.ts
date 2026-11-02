@@ -10,7 +10,7 @@ import {
 } from '@huabu/shared';
 
 import {
-  agentThreadResolver,
+  AgentThreadResolver,
   AgentThreadResolutionError,
 } from './agent-thread-resolver.js';
 import { hydrateCanvasNodes } from '../canvas/canvas-executor.js';
@@ -29,86 +29,165 @@ import type {
 import type { CanvasNode } from '@huabu/shared/canvas-engine';
 import type { FastifyPluginAsync } from 'fastify';
 
+const observationEpoch = randomUUID();
+let observationRevision = 0;
+const pendingStorageReads = new Map<string, Promise<unknown>>();
+
+function abortable<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    signal.addEventListener('abort', abort, { once: true });
+    void operation.then(
+      (value) => {
+        signal.removeEventListener('abort', abort);
+        if (signal.aborted) reject(signal.reason);
+        else resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener('abort', abort);
+        reject(error);
+      },
+    );
+    if (signal.aborted) abort();
+  });
+}
+
+function readStorage<T>(
+  key: string,
+  read: () => Promise<T>,
+  signal: AbortSignal,
+): Promise<T> {
+  signal.throwIfAborted();
+  // Drivers may not cancel I/O. Never queue another read behind abandoned I/O.
+  if (pendingStorageReads.has(key))
+    throw new Error('A previous conversation storage read is still pending');
+  const operation = read();
+  pendingStorageReads.set(key, operation);
+  void operation.then(
+    () => pendingStorageReads.delete(key),
+    () => pendingStorageReads.delete(key),
+  );
+  return abortable(operation, signal);
+}
+
 async function readOwner(
   canvasId: string,
   threadId: string,
-  workspaceKey?: string,
+  workspaceKey: string,
+  signal: AbortSignal,
 ): Promise<AgentConversationOwnerState> {
-  const lease = acquireWorkspaceOperationLease();
-  try {
-    if (workspaceKey !== undefined && lease.workspaceKey !== workspaceKey)
-      throw new Error('The observed Workspace changed');
-    return await withCanvasMutex(canvasId, async () => {
-      const owner = await agentThreadResolver.resolveAgentNode(
-        canvasId,
-        threadId,
-      );
-      if (!owner)
-        return {
-          state: 'unavailable',
-          status: 404,
-          error: {
-            message:
-              'The Agent conversation no longer has an owner in this Space',
-            code: 'conversation_owner_missing',
-          },
+  return abortable(
+    withCanvasMutex(canvasId, async () => {
+      signal.throwIfAborted();
+      const lease = acquireWorkspaceOperationLease();
+      try {
+        if (lease.workspaceKey !== workspaceKey)
+          throw new Error('The observed Workspace changed');
+        // Capture the handle once: abandoned reads cannot follow a Workspace switch.
+        const handle = space(canvasId);
+        const readKey = JSON.stringify([workspaceKey, canvasId]);
+        const canvas = await readStorage(readKey, () => handle.read(), signal);
+        const resolver = new AgentThreadResolver({
+          readCanvasNodes: async () =>
+            canvas ? (canvas.state.nodes as CanvasNode[]) : null,
+          readNodeContent: async (id, nodeId) =>
+            (
+              await readStorage(
+                JSON.stringify([workspaceKey, id, nodeId]),
+                () => handle.nodes.read(nodeId),
+                signal,
+              )
+            )?.record.content ?? null,
+        });
+        const readState = async (): Promise<AgentConversationOwnerState> => {
+          const owner = await resolver.resolveAgentNode(canvasId, threadId);
+          signal.throwIfAborted();
+          if (!owner)
+            return {
+              state: 'unavailable',
+              status: 404,
+              error: {
+                message:
+                  'The Agent conversation no longer has an owner in this Space',
+                code: 'conversation_owner_missing',
+              },
+            };
+          const node = (canvas?.state.nodes as CanvasNode[] | undefined)?.find(
+            (candidate) => candidate.id === owner.nodeId,
+          );
+          if (
+            !node ||
+            node.type !== 'question' ||
+            node.data?.threadId !== threadId
+          )
+            return {
+              state: 'unavailable',
+              status: 409,
+              error: {
+                message: 'The Agent conversation owner changed',
+                code: 'conversation_owner_mismatch',
+              },
+            };
+          const record = await readStorage(
+            JSON.stringify([workspaceKey, canvasId, owner.nodeId]),
+            () => handle.nodes.read(owner.nodeId),
+            signal,
+          );
+          if (!record)
+            return {
+              state: 'unavailable',
+              status: 404,
+              error: {
+                message: 'The Agent node content is unavailable',
+                code: 'missing_node_content',
+              },
+            };
+          const hydrated = hydrateCanvasNodes(new Map([[node.id, record]]), [
+            node,
+          ])[0];
+          return {
+            state: 'ready',
+            owner: agentConversationOwnerResponseSchema.parse({
+              canvasId,
+              nodeId: owner.nodeId,
+              threadId,
+              spaceTitle: canvas?.title ?? null,
+              source: {
+                ...hydrated.data,
+                hasAuthoredContent:
+                  typeof hydrated.data.content === 'string' &&
+                  hydrated.data.content.trim().length > 0,
+                agentBinding: owner.agentBinding,
+                agentLaunchOverrides: owner.launchOverrides,
+              },
+            }),
+          };
         };
-      const handle = space(canvasId);
-      const canvas = await handle.read();
-      const node = (canvas?.state.nodes as CanvasNode[] | undefined)?.find(
-        (candidate) => candidate.id === owner.nodeId,
-      );
-      if (!node || node.type !== 'question' || node.data?.threadId !== threadId)
-        return {
-          state: 'unavailable',
-          status: 409,
-          error: {
-            message: 'The Agent conversation owner changed',
-            code: 'conversation_owner_mismatch',
-          },
+        let value: AgentConversationOwnerState;
+        try {
+          value = await readState();
+        } catch (error) {
+          if (!(error instanceof AgentThreadResolutionError)) throw error;
+          value = {
+            state: 'unavailable',
+            status: error.code === 'canvas_not_found' ? 404 : 409,
+            error: { message: error.message, code: error.code },
+          };
+        }
+        signal.throwIfAborted();
+        const observation = {
+          epoch: observationEpoch,
+          revision: ++observationRevision,
         };
-      const record = await handle.nodes.read(owner.nodeId);
-      if (!record)
-        return {
-          state: 'unavailable',
-          status: 404,
-          error: {
-            message: 'The Agent node content is unavailable',
-            code: 'missing_node_content',
-          },
-        };
-      const hydrated = hydrateCanvasNodes(new Map([[node.id, record]]), [
-        node,
-      ])[0];
-      return {
-        state: 'ready',
-        owner: agentConversationOwnerResponseSchema.parse({
-          canvasId,
-          nodeId: owner.nodeId,
-          threadId,
-          spaceTitle: canvas?.title ?? null,
-          source: {
-            ...hydrated.data,
-            hasAuthoredContent:
-              typeof hydrated.data.content === 'string' &&
-              hydrated.data.content.trim().length > 0,
-            agentBinding: owner.agentBinding,
-            agentLaunchOverrides: owner.launchOverrides,
-          },
-        }),
-      };
-    });
-  } catch (error) {
-    if (error instanceof AgentThreadResolutionError)
-      return {
-        state: 'unavailable',
-        status: error.code === 'canvas_not_found' ? 404 : 409,
-        error: { message: error.message, code: error.code },
-      };
-    throw error;
-  } finally {
-    lease.release();
-  }
+        return value.state === 'ready'
+          ? { ...value, owner: { ...value.owner, observation } }
+          : { ...value, error: { ...value.error, details: { observation } } };
+      } finally {
+        lease.release();
+      }
+    }),
+    signal,
+  );
 }
 
 const conversationOwnerRoutes: FastifyPluginAsync = async (fastify) => {
@@ -117,11 +196,39 @@ const conversationOwnerRoutes: FastifyPluginAsync = async (fastify) => {
     const query = agentConversationOwnerQuerySchema.safeParse(request.query);
     if (!params.success || !query.success)
       return reply.code(400).send({ message: 'Invalid conversation address' });
-    const result = await readOwner(query.data.canvasId, params.data.threadId);
-    reply.header('Cache-Control', 'no-store');
-    return result.state === 'ready'
-      ? reply.send(result.owner)
-      : reply.code(result.status).send(result.error);
+    const controller = new AbortController();
+    const close = () => controller.abort();
+    const timer = setTimeout(
+      () =>
+        controller.abort(
+          new DOMException('Owner query timed out', 'TimeoutError'),
+        ),
+      10_000,
+    );
+    reply.raw.once('close', close);
+    try {
+      const result = await readOwner(
+        query.data.canvasId,
+        params.data.threadId,
+        getWorkspaceKey(),
+        controller.signal,
+      );
+      reply.header('Cache-Control', 'no-store');
+      return result.state === 'ready'
+        ? reply.send(result.owner)
+        : reply.code(result.status).send(result.error);
+    } catch (error) {
+      if (controller.signal.aborted && reply.raw.destroyed) return reply;
+      request.log.error({ err: error }, 'Conversation owner read failed');
+      return reply.code(controller.signal.aborted ? 408 : 503).send({
+        message: controller.signal.aborted
+          ? 'The conversation status query timed out'
+          : 'Unable to read the conversation state',
+      });
+    } finally {
+      clearTimeout(timer);
+      reply.raw.off('close', close);
+    }
   });
 
   fastify.get('/owner/:threadId/stream', async (request, reply) => {
@@ -148,6 +255,7 @@ const conversationOwnerRoutes: FastifyPluginAsync = async (fastify) => {
     let dirty = false;
     let nodeId: string | undefined;
     let previous: string | undefined;
+    const controller = new AbortController();
     let readTimer: ReturnType<typeof setTimeout> | undefined;
     const write = (event: AgentConversationOwnerEvent) => {
       if (!closed)
@@ -161,6 +269,7 @@ const conversationOwnerRoutes: FastifyPluginAsync = async (fastify) => {
     const cleanup = () => {
       if (closed) return;
       closed = true;
+      controller.abort();
       clearInterval(heartbeat);
       clearTimeout(readTimer);
       unsubscribe();
@@ -198,13 +307,22 @@ const conversationOwnerRoutes: FastifyPluginAsync = async (fastify) => {
               () => fail(new Error('Owner query timed out'), 408),
               10_000,
             );
-            const value = await readOwner(canvasId, threadId, workspaceKey);
+            const value = await readOwner(
+              canvasId,
+              threadId,
+              workspaceKey,
+              controller.signal,
+            );
             clearTimeout(readTimer);
             if (closed) return;
             nodeId = value.state === 'ready' ? value.owner.nodeId : undefined;
             // A write during the read invalidates it before publication.
             if (dirty) continue;
-            const encoded = JSON.stringify(value);
+            const encoded = JSON.stringify(
+              value.state === 'ready'
+                ? { ...value.owner, observation: undefined }
+                : { ...value.error, details: undefined, status: value.status },
+            );
             if (encoded === previous) continue;
             previous = encoded;
             write({
