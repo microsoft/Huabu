@@ -82,6 +82,7 @@ vi.mock('@/components/Panels/ChatPanel/useSlashCommandTypeahead', () => ({
 }));
 
 vi.mock('@/api/agent', () => ({
+  streamAgentConversationOwner: vi.fn(() => Promise.resolve()),
   getAgentConversationOwner: vi.fn(
     async (canvasId: string, threadId: string) => ({
       canvasId,

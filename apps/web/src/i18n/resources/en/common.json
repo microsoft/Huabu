@@ -30,7 +30,8 @@
     "previewLimit": "Preview limit reached (256 KiB). Open the file on its device for more."
   },
   "remoteConversation": {
-    "sourceNodeUnavailable": "The source Agent node has been deleted or is unavailable. You can no longer interact with this conversation.",
+    "sourceNodeMissing": "The Agent node is no longer in this Space.",
+    "sourceNodeContentUnavailable": "The Agent node's content could not be loaded. Try again.",
     "sourceSpaceUnavailable": "The source Space has been deleted or is unavailable. You can no longer interact with this conversation.",
     "openSpace": "Open Space",
     "loading": "Loading conversation…",
@@ -727,6 +728,8 @@
     "activationInProgress": "Another Home folder is still opening. Please wait for it to finish."
   },
   "spaceHierarchy": {
+    "bring": "Move existing Space here",
+    "alreadyChild": "Already in this Space",
     "collectAction": "Collect into child Space",
     "breadcrumb": "Space path",
     "ancestors": "Parent Spaces",
@@ -748,12 +751,12 @@
     "deleteEntrySeparately": "Delete child Spaces individually with confirmation before deleting this selection.",
     "ownershipUnavailable": "Space ownership is not available yet. Refreshing; retry once it has loaded.",
     "entryProtected": "This change would remove or retarget a child Space entry. Use Delete Space or Move into another Space instead.",
-    "deleteWarning": "Contents will be permanently deleted. This cannot be undone.",
+    "deleteNamedTitle": "Delete “{{name}}”?",
+    "deleteWarning": "All contents will be permanently deleted. This cannot be undone.",
     "deleteCount_one": "Delete Space",
     "deleteCount_other": "Delete {{count}} Spaces",
     "deleteDescendants_one": "Also deletes {{count}} nested Space",
     "deleteDescendants_other": "Also deletes {{count}} nested Spaces",
-    "linkedSpacesKept": "Spaces linked only by shortcuts are kept.",
     "backTo": "Back to {{name}}",
     "failed": "Space operation failed",
     "workspaceChanged": "Workspace changed. Please retry in the current Workspace."

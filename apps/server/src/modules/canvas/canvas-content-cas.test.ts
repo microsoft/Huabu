@@ -24,6 +24,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
+import { subscribeCanvasUpdates } from './canvas-sync.js';
 import canvasRoutes from './canvas.route.js';
 import {
   getCanvasStore,
@@ -87,6 +88,50 @@ afterEach(() => {
 });
 
 describe('PUT /nodes/:nodeId/content — content CAS', () => {
+  it('notifies the affected node after content save and sidecar deletion, not a rejected CAS', async () => {
+    const app = await buildApp();
+    const received = vi.fn();
+    const unsubscribe = subscribeCanvasUpdates('c1', received);
+    try {
+      seedCanvas('c1', 'n1', 'Note');
+      expect(
+        (
+          await putContent(app, 'c1', 'n1', {
+            nodeType: 'note',
+            content: 'first',
+            expectRev: REV_EMPTY,
+          })
+        ).statusCode,
+      ).toBe(200);
+      expect(received).toHaveBeenCalledExactlyOnceWith({
+        type: 'invalidate',
+        data: { nodeIds: ['n1'] },
+      });
+      received.mockClear();
+      expect(
+        (
+          await putContent(app, 'c1', 'n1', {
+            nodeType: 'note',
+            content: 'stale',
+            expectRev: REV_EMPTY,
+          })
+        ).statusCode,
+      ).toBe(409);
+      expect(received).not.toHaveBeenCalled();
+      expect(
+        (await app.inject({ method: 'DELETE', url: '/canvas/c1/nodes/n1' }))
+          .statusCode,
+      ).toBe(200);
+      expect(received).toHaveBeenCalledExactlyOnceWith({
+        type: 'invalidate',
+        data: { nodeIds: ['n1'] },
+      });
+    } finally {
+      unsubscribe();
+      await app.close();
+    }
+  });
+
   it('rejects source/body writes and type spoofing on metadata-only file references', async () => {
     seedCanvas('c1', 'ref', 'Source');
     const store = getCanvasStore('c1');

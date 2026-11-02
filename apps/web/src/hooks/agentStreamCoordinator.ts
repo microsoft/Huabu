@@ -18,9 +18,29 @@ interface ActiveClaim {
 }
 
 const claims = new Map<string, ActiveClaim>();
+const releaseListeners = new Map<string, Set<() => void>>();
 
 function claimKey(canvasId: string, threadId: string): string {
   return `${canvasId}\0${threadId}`;
+}
+
+export function subscribeAgentStreamRelease(
+  canvasId: string,
+  threadId: string,
+  listener: () => void,
+): () => void {
+  const key = claimKey(canvasId, threadId);
+  const listeners = releaseListeners.get(key) ?? new Set<() => void>();
+  listeners.add(listener);
+  releaseListeners.set(key, listeners);
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0) releaseListeners.delete(key);
+  };
+}
+
+function notifyReleased(key: string): void {
+  for (const listener of releaseListeners.get(key) ?? []) listener();
 }
 
 export function claimAgentStream(
@@ -48,6 +68,7 @@ export function claimAgentStream(
       if (claims.get(key) !== active) return;
       claims.delete(key);
       active.controller.abort();
+      notifyReleased(key);
     },
   };
 }
@@ -67,4 +88,5 @@ export function abortAgentStreamClaim(
   if (!active) return;
   if (!active.holdUntilRelease) claims.delete(claimKey(canvasId, threadId));
   active.controller.abort();
+  if (!active.holdUntilRelease) notifyReleased(claimKey(canvasId, threadId));
 }

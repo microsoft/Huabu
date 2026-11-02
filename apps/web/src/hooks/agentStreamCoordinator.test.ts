@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { selectThreadMessages, useChatStore } from '@/store/chatStore';
 
@@ -9,10 +9,46 @@ import {
   abortAgentStreamClaim,
   claimAgentStream,
   hasAgentStreamClaim,
+  subscribeAgentStreamRelease,
 } from './agentStreamCoordinator';
 import { handleStreamEvent } from './useAgentStream';
 
 describe('agentStreamCoordinator', () => {
+  it('notifies only the matching waiters after actual release, not abort of a held POST', () => {
+    const listener = vi.fn(() => {
+      expect(hasAgentStreamClaim('leased', 'thread')).toBe(false);
+    });
+    const unrelated = vi.fn();
+    const unsubscribe = subscribeAgentStreamRelease(
+      'leased',
+      'thread',
+      listener,
+    );
+    const unsubscribeOther = subscribeAgentStreamRelease(
+      'other',
+      'thread',
+      unrelated,
+    );
+    const post = claimAgentStream('leased', 'thread', 'post', {
+      holdUntilRelease: true,
+    });
+    try {
+      abortAgentStreamClaim('leased', 'thread');
+      expect(listener).not.toHaveBeenCalled();
+      post?.release();
+      post?.release();
+      expect(listener).toHaveBeenCalledOnce();
+      expect(unrelated).not.toHaveBeenCalled();
+      unsubscribe();
+      claimAgentStream('leased', 'thread', 'attach')?.release();
+      expect(listener).toHaveBeenCalledOnce();
+    } finally {
+      post?.release();
+      unsubscribe();
+      unsubscribeOther();
+    }
+  });
+
   it('holds a cancelled controller claim until lifecycle cleanup finishes', () => {
     const claim = claimAgentStream('held-canvas', 'held-thread', 'post', {
       holdUntilRelease: true,

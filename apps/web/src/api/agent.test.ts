@@ -3,7 +3,11 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { agentApi } from './agent';
+import {
+  agentApi,
+  getAgentConversationOwner,
+  streamAgentConversationOwner,
+} from './agent';
 
 import type { ApiError } from './_client';
 import type { AgentStreamCallbacks } from './agent';
@@ -38,6 +42,86 @@ function respond(events: AgentHostStreamEvent[]) {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  vi.useRealTimers();
+});
+
+it('times out only the short owner query after ten seconds and permits a later read', async () => {
+  vi.useFakeTimers();
+  const fetchMock = vi.fn(
+    (_url, options: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        options.signal?.addEventListener(
+          'abort',
+          () => reject(options.signal?.reason),
+          { once: true },
+        );
+      }),
+  );
+  vi.stubGlobal('fetch', fetchMock);
+  const request = getAgentConversationOwner('canvas', 'thread');
+  const failure = expect(request).rejects.toMatchObject({ status: 408 });
+  await vi.advanceTimersByTimeAsync(9999);
+  expect(fetchMock.mock.calls[0][1].signal?.aborted).toBe(false);
+  await vi.advanceTimersByTimeAsync(1);
+  await failure;
+  fetchMock.mockResolvedValueOnce(
+    new Response(JSON.stringify({ threadId: 'thread' })),
+  );
+  await expect(getAgentConversationOwner('canvas', 'thread')).resolves.toEqual({
+    threadId: 'thread',
+  });
+});
+
+it('times out a state stream without a first snapshot, but not a slow Agent after a snapshot', async () => {
+  vi.useFakeTimers();
+  let write!: ReadableStreamDefaultController<Uint8Array>;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(
+      async (_url, options: RequestInit) =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              write = controller;
+              options.signal?.addEventListener(
+                'abort',
+                () => controller.error(options.signal?.reason),
+                { once: true },
+              );
+            },
+          }),
+        ),
+    ),
+  );
+  const controller = new AbortController();
+  const receive = vi.fn();
+  const first = streamAgentConversationOwner(
+    'canvas',
+    'thread',
+    receive,
+    controller.signal,
+  );
+  const failure = expect(first).rejects.toMatchObject({ status: 408 });
+  await vi.advanceTimersByTimeAsync(10_000);
+  await failure;
+  const second = streamAgentConversationOwner(
+    'canvas',
+    'thread',
+    receive,
+    controller.signal,
+  );
+  const stopped = expect(second).rejects.toMatchObject({ name: 'AbortError' });
+  await vi.advanceTimersByTimeAsync(0);
+  write.enqueue(
+    new TextEncoder().encode(
+      'event: snapshot\ndata: {"streamId":"s","revision":1,"value":{"state":"ready","owner":{}}}\n\n',
+    ),
+  );
+  await vi.advanceTimersByTimeAsync(20_000);
+  expect(receive).toHaveBeenCalledOnce();
+  expect(controller.signal.aborted).toBe(false);
+  controller.abort();
+  await stopped;
 });
 
 describe('agent API host acceptance', () => {

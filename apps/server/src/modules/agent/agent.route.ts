@@ -21,8 +21,6 @@ import {
   AGENT_HOST_SSE_EVENTS,
   AGENT_SSE_EVENTS,
   agentCanvasIdQuerySchema,
-  agentConversationOwnerQuerySchema,
-  agentConversationOwnerResponseSchema,
   agentHistoryPageParamsSchema,
   agentHistoryPageQuerySchema,
   agentRequestSchema,
@@ -38,6 +36,7 @@ import {
   agentNodeBinding,
 } from './agent-node-binding.js';
 import { agentThreadResolver } from './agent-thread-resolver.js';
+import conversationOwnerRoutes from './conversation-owner.route.js';
 import conversationTitleRoutes from './conversation-title.route.js';
 import { InkAgentModeError } from './ink-response.js';
 import { ExternalAgentRealizationError } from '../agent/acp/external-agent-realization.js';
@@ -55,8 +54,6 @@ import {
 } from '../agent/conversation/envelope.js';
 import { buildHistoryFromTurns } from '../agent/conversation/transcript/history.js';
 import { getLLMModel } from '../agent/llm.js';
-import { hydrateCanvasNodes } from '../canvas/canvas-executor.js';
-import { space } from '../storage/index.js';
 import { canvasAcpNamespace } from '../workspace/paths.js';
 
 import type { ControlMsg, Namespace } from '@agenetes/protocol';
@@ -79,7 +76,6 @@ import type {
   StopThreadResponse,
   StopThreadBody,
 } from '@huabu/shared';
-import type { CanvasNode } from '@huabu/shared/canvas-engine';
 import type { FastifyPluginAsync } from 'fastify';
 
 // ==================== Helpers ====================
@@ -186,77 +182,7 @@ const agentRoutes: FastifyPluginAsync = async (
   _opts,
 ): Promise<void> => {
   await fastify.register(conversationTitleRoutes);
-
-  fastify.get('/owner/:threadId', async (request, reply) => {
-    const params = agentHistoryPageParamsSchema.safeParse(request.params);
-    const query = agentConversationOwnerQuerySchema.safeParse(request.query);
-    if (!params.success || !query.success) {
-      return reply.code(400).send({ message: 'Invalid conversation address' });
-    }
-    const { canvasId } = query.data;
-    const { threadId } = params.data;
-    try {
-      const owner = await agentThreadResolver.resolveAgentNode(
-        canvasId,
-        threadId,
-      );
-      if (!owner) {
-        return reply.code(404).send({
-          message:
-            'The Agent conversation no longer has an owner in this Space',
-          code: 'conversation_owner_missing',
-        });
-      }
-      const canvas = await space(canvasId).read();
-      const node = (canvas?.state.nodes as CanvasNode[] | undefined)?.find(
-        (candidate) => candidate.id === owner.nodeId,
-      );
-      if (
-        !node ||
-        node.type !== 'question' ||
-        node.data?.threadId !== threadId
-      ) {
-        return reply.code(409).send({
-          message: 'The Agent conversation owner changed',
-          code: 'conversation_owner_mismatch',
-        });
-      }
-      const record = await space(canvasId).nodes.read(owner.nodeId);
-      if (!record) {
-        return reply.code(404).send({
-          message: 'The Agent node content is unavailable',
-          code: 'missing_node_content',
-        });
-      }
-      const hydrated = hydrateCanvasNodes(new Map([[node.id, record]]), [
-        node,
-      ])[0];
-      return reply.header('Cache-Control', 'no-store').send(
-        agentConversationOwnerResponseSchema.parse({
-          canvasId,
-          nodeId: owner.nodeId,
-          threadId,
-          spaceTitle: canvas?.title ?? null,
-          source: {
-            ...hydrated.data,
-            hasAuthoredContent:
-              typeof hydrated.data.content === 'string' &&
-              hydrated.data.content.trim().length > 0,
-            agentBinding: owner.agentBinding,
-            agentLaunchOverrides: owner.launchOverrides,
-          },
-        }),
-      );
-    } catch (error) {
-      if (error instanceof AgentThreadResolutionError) {
-        return reply.code(error.code === 'canvas_not_found' ? 404 : 409).send({
-          message: error.message,
-          code: error.code,
-        });
-      }
-      throw error;
-    }
-  });
+  await fastify.register(conversationOwnerRoutes);
 
   fastify.get<{
     Params: AgentHistoryPageParams;

@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '@/api/_client';
 import { setSpaceParent } from '@/api/spaceHierarchy';
 import { toast } from '@/components/Common/Toast';
-import { drainPendingSaves } from '@/store/canvasStore';
+import useCanvasStore, { drainPendingSaves } from '@/store/canvasStore';
 import { useWorkspaceStore } from '@/store/workspaceStore';
 import { pageLifecycle } from '@/utils/pageLifecycle';
 
@@ -20,6 +20,8 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const mocks = vi.hoisted(() => ({
   refresh: vi.fn(async (): Promise<void> => undefined),
   close: vi.fn(),
+  select: vi.fn(),
+  placement: vi.fn(() => ({ x: -120, y: 240 })),
   translate: (key: string, values?: Record<string, unknown>) =>
     values ? `${key} ${JSON.stringify(values)}` : key,
 }));
@@ -29,9 +31,20 @@ vi.mock('react-i18next', () => ({
 }));
 vi.mock('@/api/spaceHierarchy', () => ({ setSpaceParent: vi.fn() }));
 vi.mock('@/components/Common/Toast', () => ({ toast: vi.fn() }));
-vi.mock('@/store/canvasStore', () => ({
-  drainPendingSaves: vi.fn(async () => undefined),
+vi.mock('./spaceEntryPlacement', () => ({
+  getSpaceEntryPosition: mocks.placement,
 }));
+vi.mock('@/store/canvasStore', async () => {
+  const { create } = await import('zustand');
+  return {
+    default: create(() => ({
+      canvasId: 'source',
+      nodes: [],
+      selectNodes: mocks.select,
+    })),
+    drainPendingSaves: vi.fn(async () => undefined),
+  };
+});
 vi.mock('@/store/workspaceStore', async () => {
   const { create } = await import('zustand');
   return {
@@ -55,6 +68,7 @@ let reference: HTMLButtonElement;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  useCanvasStore.setState({ canvasId: 'source', nodes: [] });
   mocks.refresh.mockReset().mockResolvedValue(undefined);
   vi.mocked(drainPendingSaves).mockReset().mockResolvedValue(undefined);
   vi.mocked(setSpaceParent).mockReset().mockResolvedValue({
@@ -150,6 +164,132 @@ function deferParentRequest() {
 }
 
 describe('SpaceOrganizationPopover', () => {
+  async function renderSourcePicker() {
+    await act(async () =>
+      root.render(
+        <SpaceOrganizationPopover
+          canvasId="source"
+          mode="source"
+          reference={reference}
+          onClose={mocks.close}
+        />,
+      ),
+    );
+  }
+
+  it('excludes self, ancestors and World and disables existing direct children', async () => {
+    useWorkspaceStore.setState({
+      spaceSummaries: {
+        ...useWorkspaceStore.getState().spaceSummaries,
+        source: { parentSpaceId: 'old' },
+      },
+    });
+    await renderSourcePicker();
+    for (const name of ['Source', 'Old parent', 'World'])
+      expect(document.querySelector(`button[aria-label="${name}"]`)).toBeNull();
+    expect(button('Descendant').disabled).toBe(true);
+    expect(button('Target').disabled).toBe(false);
+    expect(setSpaceParent).not.toHaveBeenCalled();
+  });
+
+  it('moves immediately at the local position and selects the entry after delayed sync', async () => {
+    await renderSourcePicker();
+    await chooseTarget();
+    expect(setSpaceParent).toHaveBeenCalledExactlyOnceWith('target', {
+      parentSpaceId: 'source',
+      expectedParentSpaceId: 'root',
+      position: { x: -120, y: 240 },
+    });
+    expect(mocks.select).not.toHaveBeenCalled();
+    expect(mocks.close).not.toHaveBeenCalled();
+    await act(async () =>
+      useCanvasStore.setState({
+        nodes: [{ id: 'node-entry', position: { x: -120, y: 240 }, data: {} }],
+      }),
+    );
+    expect(mocks.select).toHaveBeenCalledExactlyOnceWith(['node-entry']);
+    expect(mocks.close).toHaveBeenCalledOnce();
+    expect(document.activeElement).toBe(reference);
+    expect(toast).not.toHaveBeenCalled();
+  });
+
+  it('selects an entry that arrived before the request completed', async () => {
+    useCanvasStore.setState({
+      nodes: [{ id: 'node-entry', position: { x: 0, y: 0 }, data: {} }],
+    });
+    mocks.select.mockImplementationOnce(() => {
+      useCanvasStore.setState({ nodes: [...useCanvasStore.getState().nodes] });
+    });
+    await renderSourcePicker();
+    await chooseTarget();
+    expect(mocks.select).toHaveBeenCalledOnce();
+    expect(mocks.close).toHaveBeenCalledOnce();
+  });
+
+  it('cancels without submitting when dismissed', async () => {
+    await renderSourcePicker();
+    await act(async () =>
+      document.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+      ),
+    );
+    expect(mocks.close).toHaveBeenCalled();
+    expect(setSpaceParent).not.toHaveBeenCalled();
+  });
+
+  it('does not move into a destination left during save draining', async () => {
+    const drain = deferred();
+    vi.mocked(drainPendingSaves).mockReturnValueOnce(drain.promise);
+    await renderSourcePicker();
+    await chooseTarget();
+    await act(async () => {
+      useCanvasStore.setState({ canvasId: 'target' });
+      drain.resolve();
+    });
+    expect(setSpaceParent).not.toHaveBeenCalled();
+    expect(mocks.placement).not.toHaveBeenCalled();
+  });
+
+  it('does not select a late entry in another workspace', async () => {
+    await renderSourcePicker();
+    await chooseTarget();
+    await act(async () => {
+      useWorkspaceStore.setState({ workspaceId: 'another-workspace' });
+      useCanvasStore.setState({
+        nodes: [{ id: 'node-entry', position: { x: 0, y: 0 }, data: {} }],
+      });
+    });
+    expect(mocks.select).not.toHaveBeenCalled();
+  });
+
+  it('reports placement failures without changing ownership', async () => {
+    mocks.placement.mockImplementationOnce(() => {
+      throw new Error('Viewport unavailable');
+    });
+    await renderSourcePicker();
+    await chooseTarget();
+    expect(setSpaceParent).not.toHaveBeenCalled();
+    expect(document.querySelector('[role="alert"]')?.textContent).toBe(
+      'Viewport unavailable',
+    );
+    expect(toast).not.toHaveBeenCalled();
+    expect(mocks.close).not.toHaveBeenCalled();
+  });
+
+  it('keeps failure feedback when moving a Space into the visible destination', async () => {
+    vi.mocked(setSpaceParent).mockRejectedValueOnce(
+      new Error('Attachment failed'),
+    );
+    await renderSourcePicker();
+    await chooseTarget();
+    expect(document.querySelector('[role="alert"]')?.textContent).toBe(
+      'Attachment failed',
+    );
+    expect(toast).not.toHaveBeenCalled();
+    expect(mocks.select).not.toHaveBeenCalled();
+    expect(mocks.close).not.toHaveBeenCalled();
+  });
+
   it('does not present a destination with missing title or ancestry metadata', async () => {
     useWorkspaceStore.setState({
       spaceTitles: { source: 'Source', target: 'Target' },
@@ -259,9 +399,10 @@ describe('SpaceOrganizationPopover', () => {
       saves.resolve();
     });
     expect(setSpaceParent).not.toHaveBeenCalled();
-    expect(toast).toHaveBeenCalledWith('spacePreview.targetsUnavailable', {
-      tone: 'danger',
-    });
+    expect(document.querySelector('[role="alert"]')?.textContent).toBe(
+      'spacePreview.targetsUnavailable',
+    );
+    expect(toast).not.toHaveBeenCalled();
   });
 
   it('moves the explicit source on destination selection without a confirmation dialog', async () => {
@@ -310,7 +451,7 @@ describe('SpaceOrganizationPopover', () => {
     useWorkspaceStore.setState({ spaceTitlesStatus: 'loading' });
     await renderDialog();
     expect(document.querySelector('[role="status"]')).not.toBeNull();
-    expect(document.querySelector('button[aria-label="Target"]')).toBeNull();
+    expect(button('Target').disabled).toBe(true);
     await act(async () =>
       useWorkspaceStore.setState({ spaceTitlesStatus: 'ready' }),
     );
@@ -329,6 +470,38 @@ describe('SpaceOrganizationPopover', () => {
     });
     expect(button('Target').textContent).toContain('Root');
     expect(button('Target').disabled).toBe(false);
+    const target = button('Target');
+    await act(async () =>
+      useWorkspaceStore.setState({ spaceTitlesStatus: 'loading' }),
+    );
+    expect(button('Target')).toBe(target);
+    expect(target.disabled).toBe(true);
+    expect(input.value).toBe('Target');
+    expect(
+      document.querySelector('[role="status"] .sr-only')?.textContent,
+    ).toBe('spacePreview.loadingTargets');
+    await act(async () => target.click());
+    expect(setSpaceParent).not.toHaveBeenCalled();
+    await act(async () =>
+      useWorkspaceStore.setState({ spaceTitlesStatus: 'ready' }),
+    );
+    expect(button('Target')).toBe(target);
+    expect(target.disabled).toBe(false);
+  });
+
+  it('uses the loading placeholder only before any options are available', async () => {
+    useWorkspaceStore.setState({
+      spaceTitlesStatus: 'loading',
+      spaceTitles: {},
+      spaceSummaries: {},
+    });
+    await renderDialog();
+    expect(document.querySelector('[role="status"]')?.textContent).toBe(
+      'spacePreview.loadingTargets',
+    );
+    expect(document.querySelector('[role="status"] .sr-only')).toBeNull();
+    expect(document.querySelector('ul')).toBeNull();
+    expect(setSpaceParent).not.toHaveBeenCalled();
   });
 
   it('refreshes and resets selection after a parent conflict', async () => {
@@ -371,9 +544,26 @@ describe('SpaceOrganizationPopover', () => {
       'Attachment failed',
     );
     expect(mocks.close).not.toHaveBeenCalled();
-    expect(toast).toHaveBeenCalledExactlyOnceWith('Attachment failed', {
-      tone: 'danger',
+    expect(toast).not.toHaveBeenCalled();
+  });
+
+  it('shows only one inline error when both moving and metadata refresh fail', async () => {
+    await renderDialog();
+    vi.mocked(setSpaceParent).mockRejectedValueOnce(
+      new Error('Attachment failed'),
+    );
+    mocks.refresh.mockImplementationOnce(async () => {
+      useWorkspaceStore.setState({
+        spaceTitlesStatus: 'error',
+        spaceTitlesError: 'Metadata unavailable',
+      });
     });
+    await chooseTarget();
+    const alerts = document.querySelectorAll('[role="alert"]');
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0].textContent).toBe('Attachment failed');
+    expect(button('spacePreview.retry')).toBeDefined();
+    expect(toast).not.toHaveBeenCalled();
   });
 
   it('retries metadata errors and cancels without changing ownership', async () => {
@@ -411,7 +601,13 @@ describe('SpaceOrganizationPopover', () => {
       confirm.click();
     });
     expect(drainPendingSaves).toHaveBeenCalledOnce();
-    expect(document.querySelector('button[aria-label="Target"]')).toBeNull();
+    expect(button('Target')).toBe(confirm);
+    expect(confirm.disabled).toBe(true);
+    expect(
+      document.querySelector('[role="status"] .sr-only')?.textContent,
+    ).toBe('spaceHierarchy.moving');
+    await act(async () => confirm.click());
+    expect(drainPendingSaves).toHaveBeenCalledOnce();
     await act(async () => {
       document.dispatchEvent(
         new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
@@ -479,7 +675,10 @@ describe('SpaceOrganizationPopover', () => {
         pending.reject(new Error('Move failed'));
         await rejected;
       });
-      expect(toast).toHaveBeenCalledWith('Move failed', { tone: 'danger' });
+      expect(document.querySelector('[role="alert"]')?.textContent).toBe(
+        'Move failed',
+      );
+      expect(toast).not.toHaveBeenCalled();
       expect(mocks.close).not.toHaveBeenCalled();
     },
   );

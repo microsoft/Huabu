@@ -109,6 +109,8 @@ function SpacePickerContent({
   const listRef = useRef<HTMLUListElement>(null);
   const [query, setQuery] = useState('');
   const [expansion, setExpansion] = useState<Record<string, boolean>>({});
+  const busy = loading || submitting;
+  const hasOptions = options.length > 0;
   const search = query.trim().toLocaleLowerCase();
   const { children, defaults, rows } = useMemo(() => {
     const byId = new Map(options.map((option) => [option.value, option]));
@@ -200,7 +202,7 @@ function SpacePickerContent({
         <TextInput
           ref={searchRef}
           size="field"
-          className="h-9 w-full pl-9"
+          className={cn('h-9 w-full pl-9', busy && hasOptions && 'pr-9')}
           name="space-destination-search"
           aria-label={searchLabel}
           placeholder={searchLabel}
@@ -209,8 +211,17 @@ function SpacePickerContent({
           onKeyDown={(event) => navigateResults(event)}
           disabled={submitting}
         />
+        {busy && hasOptions && (
+          <div
+            role="status"
+            className="text-fg-muted pointer-events-none absolute top-1/2 right-3 -translate-y-1/2"
+          >
+            <Spinner size="sm" />
+            <span className="sr-only">{loadingLabel}</span>
+          </div>
+        )}
       </div>
-      {loading || submitting ? (
+      {busy && !hasOptions ? (
         <div
           role="status"
           className="text-fg-muted flex items-center gap-2 px-2 py-3 text-sm"
@@ -247,6 +258,7 @@ function SpacePickerContent({
                     iconOnly
                     className="shrink-0"
                     aria-expanded={expanded}
+                    disabled={submitting}
                     aria-label={t(
                       expanded
                         ? 'moveSelection.collapse'
@@ -287,7 +299,7 @@ function SpacePickerContent({
                       ? undefined
                       : selectedValue === option.value
                   }
-                  disabled={option.disabled}
+                  disabled={busy || loadError || option.disabled}
                   data-space-nav=""
                   onClick={() => onSubmit(option.value)}
                   onKeyDown={(event) => navigateResults(event, option)}

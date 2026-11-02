@@ -6,6 +6,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react';
@@ -41,7 +42,11 @@ import {
 } from '@/store/previewWorkspace/scrollMemory';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 
-import { claimAgentStream } from './agentStreamCoordinator';
+import {
+  claimAgentStream,
+  hasAgentStreamClaim,
+  subscribeAgentStreamRelease,
+} from './agentStreamCoordinator';
 import {
   clearInkInterpretationStream,
   hasUnreconciledAgentTurn,
@@ -412,6 +417,7 @@ export function useChatHistory(
   session: ChatSession,
   setIsLoading: (threadId: string, loading: boolean) => void,
   previewTabId?: string,
+  ownerUnavailable = false,
 ): ChatHistoryWindow {
   const { threadId, canvasId } = session;
   const [historyViewId] = useState(() => createId('history-view'));
@@ -448,7 +454,43 @@ export function useChatHistory(
   const historyError = useChatStore(
     (state) => state.threadsById[threadId]?.historyError ?? null,
   );
-  const effectiveConversationView = session.conversationView;
+  const presentationCanvasId =
+    session.conversationView?.presentationAnchor.canvasId;
+  const presentationNodeId =
+    session.conversationView?.presentationAnchor.nodeId;
+  const conversationCanvasId =
+    session.conversationView?.conversationOwner.canvasId;
+  const conversationNodeId = session.conversationView?.conversationOwner.nodeId;
+  const conversationThreadId =
+    session.conversationView?.conversationOwner.threadId;
+  // Node metadata updates recreate sessions, but do not change stream ownership.
+  const effectiveConversationView = useMemo(
+    () =>
+      presentationCanvasId &&
+      presentationNodeId &&
+      conversationCanvasId &&
+      conversationNodeId &&
+      conversationThreadId
+        ? {
+            presentationAnchor: {
+              canvasId: presentationCanvasId,
+              nodeId: presentationNodeId,
+            },
+            conversationOwner: {
+              canvasId: conversationCanvasId,
+              nodeId: conversationNodeId,
+              threadId: conversationThreadId,
+            },
+          }
+        : null,
+    [
+      presentationCanvasId,
+      presentationNodeId,
+      conversationCanvasId,
+      conversationNodeId,
+      conversationThreadId,
+    ],
+  );
   const ownerCanvasId =
     effectiveConversationView?.conversationOwner.canvasId || canvasId;
   const ownerNodeId =
@@ -479,15 +521,17 @@ export function useChatHistory(
   }, [threadId, ownerCanvasId, setRefreshError]);
   const ownerSource = useConversationOwnerSource(effectiveConversationView);
   const ownerStatus = ownerSource?.status;
+  const ownerInvocationToken = ownerSource?.invocationToken;
   const ownerHistoryKey = effectiveConversationView
     ? JSON.stringify([
         ownerCanvasId,
         threadId,
-        ownerSource?.invocationToken ?? null,
+        ownerInvocationToken ?? null,
         ownerStatus,
       ])
     : null;
   const [hydratedOwnerKey, setHydratedOwnerKey] = useState<string | null>(null);
+  const [attachAttempt, setAttachAttempt] = useState(0);
   const isStreaming = useChatStore((state) =>
     selectThreadIsLoading(state, threadId),
   );
@@ -505,6 +549,12 @@ export function useChatHistory(
     // thread (cache survives navigation) rather than the current one.
     const tid = threadId;
     const loaded = selectThreadHistoryLoaded(useChatStore.getState(), tid);
+    // History remains readable after node deletion; never replace a retained transcript.
+    if (
+      ownerUnavailable &&
+      (loaded || selectThreadMessages(useChatStore.getState(), tid).length > 0)
+    )
+      return;
     if (loaded && (!needsOwnerRefresh || isStreaming)) return;
     if (historyError) return;
 
@@ -514,9 +564,11 @@ export function useChatHistory(
     const action = selectThreadLastAction(currentState, tid);
 
     const fetchValidatedHistory = async () => {
-      if (effectiveConversationView) {
+      if (effectiveConversationView && !ownerUnavailable) {
         try {
-          await validateConversationView(effectiveConversationView);
+          await validateConversationView(effectiveConversationView, {
+            allowObserved: true,
+          });
         } catch (error) {
           if (error instanceof ConversationIntegrityError) {
             if (previewTabId && canvasId === ownerCanvasId) {
@@ -608,6 +660,7 @@ export function useChatHistory(
     isStreaming,
     needsOwnerRefresh,
     ownerHistoryKey,
+    ownerUnavailable,
   ]);
 
   const loadOlderHistory = useCallback(() => {
@@ -758,7 +811,13 @@ export function useChatHistory(
     (state) => state.threadsById[threadId]?.isStreaming,
   );
   useEffect(() => {
-    if (!completedTurnId || streaming || !ownerCanvasId || !isHistoryLoaded)
+    if (
+      ownerUnavailable ||
+      !completedTurnId ||
+      streaming ||
+      !ownerCanvasId ||
+      !isHistoryLoaded
+    )
       return;
     let cancelled = false;
     const original = selectThreadMessages(useChatStore.getState(), threadId);
@@ -822,13 +881,15 @@ export function useChatHistory(
     isHistoryLoaded,
     refreshNonce,
     setRefreshError,
+    ownerUnavailable,
   ]);
 
   // Try to reconnect to an active server-side run after history is loaded.
   // This handles the page-refresh case: events buffered during the refresh
   // are replayed, then live streaming resumes.
   useEffect(() => {
-    if (!isHistoryLoaded || !threadId || !ownerCanvasId) return;
+    if (!isHistoryLoaded || !threadId || !ownerCanvasId || ownerUnavailable)
+      return;
 
     const msgs = selectThreadMessages(useChatStore.getState(), threadId);
     const lastMessage = msgs[msgs.length - 1];
@@ -848,14 +909,20 @@ export function useChatHistory(
     let cancelled = false;
     const ownerThreadId = threadId;
     const ownerView = effectiveConversationView;
+    const retryController = new AbortController();
     const claim = claimAgentStream(ownerCanvasId, ownerThreadId, 'attach');
-    if (!claim) return;
+    if (!claim) {
+      return subscribeAgentStreamRelease(ownerCanvasId, ownerThreadId, () =>
+        setAttachAttempt((attempt) => attempt + 1),
+      );
+    }
     let queueCompletedNormally = false;
+    let retryInactive = false;
 
     const tryReconnect = async () => {
       if (ownerView) {
         try {
-          await validateConversationView(ownerView);
+          await validateConversationView(ownerView, { allowObserved: true });
         } catch (error) {
           if (error instanceof ConversationIntegrityError) {
             if (previewTabId) {
@@ -982,6 +1049,7 @@ export function useChatHistory(
 
       if (result.status !== 'completed') queueCompletedNormally = false;
       if (result.status === 'inactive' && !cancelled) {
+        retryInactive = ownerStatus === 'running';
         outcome = 'interrupted';
         settleTurnInkInterpretation(streamContext, 'interrupted');
       }
@@ -999,7 +1067,7 @@ export function useChatHistory(
           setIsLoading(ownerThreadId, false);
         }
       }
-      if (result.status !== 'aborted') {
+      if (result.status !== 'aborted' && !retryInactive) {
         attachRetryDelayByThread.delete(ownerThreadId);
       }
     };
@@ -1030,14 +1098,32 @@ export function useChatHistory(
       })
       .finally(() => {
         claim.release();
+        // A disposed observer must not settle a successor's queue.
+        if (cancelled) return;
         settleAgentTurnQueue(
           { threadId: ownerThreadId, ownerCanvasId },
-          !cancelled && queueCompletedNormally,
+          queueCompletedNormally,
         );
+        if (retryInactive) {
+          const delay =
+            attachRetryDelayByThread.get(ownerThreadId) ??
+            INITIAL_ATTACH_RETRY_MS;
+          attachRetryDelayByThread.set(
+            ownerThreadId,
+            Math.min(delay * 2, MAX_ATTACH_RETRY_MS),
+          );
+          void waitForRetry(delay, retryController.signal).then(() => {
+            if (!cancelled) setAttachAttempt((attempt) => attempt + 1);
+          });
+        }
       });
 
     return () => {
       cancelled = true;
+      retryController.abort();
+      // Only this live attachment owns its loading state; a released claim may
+      // already have been replaced by a new send.
+      if (!claim.signal.aborted) setIsLoading(ownerThreadId, false);
       claim.release();
     };
   }, [
@@ -1046,10 +1132,34 @@ export function useChatHistory(
     ownerCanvasId,
     ownerNodeId,
     ownerStatus,
+    ownerInvocationToken,
     effectiveConversationView,
     previewTabId,
     addMessage,
     setIsLoading,
+    attachAttempt,
+    ownerUnavailable,
+  ]);
+
+  useEffect(() => {
+    if (
+      ownerUnavailable ||
+      (ownerStatus !== 'done' && ownerStatus !== 'error') ||
+      hydratedOwnerKey !== ownerHistoryKey ||
+      hasAgentStreamClaim(ownerCanvasId, threadId) ||
+      !useChatStore.getState().threadsById[threadId]?.queuedTurns.length
+    )
+      return;
+    // A terminal owner snapshot is not proof of normal stream completion.
+    settleAgentTurnQueue({ threadId, ownerCanvasId }, false);
+  }, [
+    ownerStatus,
+    hydratedOwnerKey,
+    ownerHistoryKey,
+    ownerCanvasId,
+    threadId,
+    isStreaming,
+    ownerUnavailable,
   ]);
 
   const retryHistory = useCallback(() => {

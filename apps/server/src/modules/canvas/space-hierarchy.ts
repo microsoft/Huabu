@@ -14,6 +14,7 @@ import {
   publishCanvasExecution,
   type ExecuteOnServerOutput,
 } from './canvas-executor.js';
+import { publishCanvasUpdate } from './canvas-sync.js';
 import {
   withCanvasMutexes,
   withSpaceHierarchyLock,
@@ -132,7 +133,6 @@ export function deletionPreview(
 export async function setSpaceParent(
   canvasId: string,
   input: SpaceParentBody,
-  entryPosition?: CreateChildSpaceBody['position'],
   /**
    * Runs under the hierarchy lock once a detachment to the root is valid and
    * real, before it is committed; a failure leaves the Space where it was.
@@ -215,7 +215,7 @@ export async function setSpaceParent(
                     id: entryId,
                     nodeType: 'spacePreview',
                     data: { targetCanvasId: canvasId },
-                    position: entryPosition ?? {
+                    position: input.position ?? {
                       x: bounds ? bounds.maxX + 80 : 80,
                       y: bounds?.minY ?? 80,
                     },
@@ -300,14 +300,11 @@ export async function createChildSpace(
       );
     // Retain the created Space if attachment fails; refresh resolves uncertain writes.
     try {
-      return await setSpaceParent(
-        canvasId,
-        {
-          parentSpaceId,
-          expectedParentSpaceId: null,
-        },
+      return await setSpaceParent(canvasId, {
+        parentSpaceId,
+        expectedParentSpaceId: null,
         position,
-      );
+      });
     } catch (error) {
       throw new SpaceHierarchyError(
         'SPACE_CHILD_INCOMPLETE',
@@ -373,6 +370,7 @@ export async function deleteSpaceTree(
                 `Could not delete Space ${id}: ${outcome.reason}`,
               );
             deleted.push(id);
+            publishCanvasUpdate(id, { type: 'invalidate', data: {} });
           }
           if (
             root?.parentSpaceId &&

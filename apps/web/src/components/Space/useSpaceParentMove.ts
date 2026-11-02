@@ -6,10 +6,12 @@ import { useTranslation } from 'react-i18next';
 
 import { setSpaceParent } from '@/api/spaceHierarchy';
 import { toast } from '@/components/Common/Toast';
-import { drainPendingSaves } from '@/store/canvasStore';
+import useCanvasStore, { drainPendingSaves } from '@/store/canvasStore';
 import { useWorkspaceStore } from '@/store/workspaceStore';
 import { pageLifecycle } from '@/utils/pageLifecycle';
 import { spaceAncestorIds } from '@/utils/spaceHierarchy';
+
+import type { SpaceParentBody, SpaceHierarchyResponse } from '@huabu/shared';
 
 function hasMoveMetadata(
   state: Pick<
@@ -34,15 +36,17 @@ function isMetadataReady(state: ReturnType<typeof useWorkspaceStore.getState>) {
   );
 }
 
-export function useSpaceParentMove() {
+export function useSpaceParentMove(
+  errorFeedback: 'toast' | 'inline' = 'toast',
+) {
   const { t } = useTranslation();
   const ready = useWorkspaceStore(isMetadataReady);
   const spaceTitles = useWorkspaceStore((state) => state.spaceTitles);
   const spaceSummaries = useWorkspaceStore((state) => state.spaceSummaries);
   const worldCanvasId = useWorkspaceStore((state) => state.worldCanvasId);
-  const canMove = (canvasId: string) =>
-    ready &&
+  const hasMetadata = (canvasId: string) =>
     hasMoveMetadata({ spaceTitles, spaceSummaries, worldCanvasId }, canvasId);
+  const canMove = (canvasId: string) => ready && hasMetadata(canvasId);
   const active = useRef(false);
   const submitting = useRef(false);
   const [busy, setBusy] = useState(false);
@@ -58,7 +62,8 @@ export function useSpaceParentMove() {
     canvasId: string,
     parentSpaceId: string | null,
     expectedParentSpaceId: string | null,
-  ): Promise<boolean> => {
+    getPosition?: () => NonNullable<SpaceParentBody['position']>,
+  ): Promise<SpaceHierarchyResponse | false> => {
     if (submitting.current) return false;
     const state = useWorkspaceStore.getState();
     const {
@@ -69,7 +74,10 @@ export function useSpaceParentMove() {
     const isSameWorkspace = () =>
       useWorkspaceStore.getState().workspaceId === workspaceId &&
       !useWorkspaceStore.getState().isSyncing;
-    const isCurrent = () => active.current && isSameWorkspace();
+    const isCurrent = () =>
+      active.current &&
+      isSameWorkspace() &&
+      (!getPosition || useCanvasStore.getState().canvasId === parentSpaceId);
     const name = titles[canvasId] || t('canvasList.untitled');
     const destination = parentSpaceId
       ? spaceAncestorIds(parentSpaceId, summaries)
@@ -102,10 +110,12 @@ export function useSpaceParentMove() {
         await drainPendingSaves();
         if (!isCurrent()) return false;
         requireMetadata();
+        const position = getPosition?.();
         try {
-          await setSpaceParent(canvasId, {
+          return await setSpaceParent(canvasId, {
             parentSpaceId,
             expectedParentSpaceId,
+            ...(position && { position }),
           });
         } finally {
           // A failed attachment may still change ownership or leave an entry.
@@ -114,18 +124,19 @@ export function useSpaceParentMove() {
             await state.refreshSpaceTitles(refreshIds);
           }
         }
-        return true;
       });
       if (!moved || !isCurrent()) return false;
-      toast(t('spaceHierarchy.moved', { name, destination }), {
-        tone: 'success',
-      });
-      return true;
+      if (!getPosition)
+        toast(t('spaceHierarchy.moved', { name, destination }), {
+          tone: 'success',
+        });
+      return moved;
     } catch (cause) {
       const message =
         cause instanceof Error ? cause.message : t('spaceHierarchy.failed');
       if (isSameWorkspace()) {
-        toast(message, { tone: 'danger' });
+        if (errorFeedback === 'toast' || !isCurrent())
+          toast(message, { tone: 'danger' });
         if (active.current) setError(message);
       }
       return false;
@@ -134,5 +145,5 @@ export function useSpaceParentMove() {
       if (active.current) setBusy(false);
     }
   };
-  return { move, busy, error, canMove };
+  return { move, busy, error, canMove, hasMetadata };
 }

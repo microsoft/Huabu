@@ -87,7 +87,7 @@ export function registerSpaceHierarchyRoutes(fastify: FastifyInstance): void {
       // it. The claim is made only for a valid, real detachment and before
       // it commits: until it holds, the Space stays under the parent the
       // caller reaches it through.
-      return setSpaceParent(params.data.canvasId, body.data, undefined, () =>
+      return setSpaceParent(params.data.canvasId, body.data, () =>
         claimSpace(request, params.data.canvasId),
       );
     });
