@@ -1478,36 +1478,37 @@ for (const [width, height] of [
   [1000, 200],
   [2000, 1600],
 ]) {
-  test(`Note uses 25/28 percent while cards retain 20/24 percent at ${width}x${height}`, async ({
+  test(`Note, Web, PDF and Office share 25/28 percent at ${width}x${height}`, async ({
     page,
-  }) => {
+  }, testInfo) => {
     const audit = await mountNodes(page, {
       width,
       height,
       zoom: 0.25,
     });
     const before = await page.evaluate(() => window.farZoomFixture.readState());
-    for (const [zoom, noteMinimal, cardMinimal] of [
-      [0.25, false, false],
-      [0.249, true, false],
-      [0.25, true, false],
-      [0.279, true, false],
-      [0.28, false, false],
-      [0.26, false, false],
-      [0.25, false, false],
-      [0.249, true, false],
-      [0.2, true, false],
-      [0.199, true, true],
-      [0.239, true, true],
-      [0.24, true, false],
-      [0.28, false, false],
+    for (const [zoom, minimal] of [
+      [0.25, false],
+      [0.249, true],
+      [0.25, true],
+      [0.279, true],
+      [0.28, false],
+      [0.26, false],
+      [0.25, false],
+      [0.249, true],
+      [0.2, true],
+      [0.199, true],
+      [0.239, true],
+      [0.24, true],
+      [0.28, false],
     ] as const) {
       await zoomTo(page, zoom);
-      for (const type of TYPES)
-        await expectLayers(
-          shell(page, type),
-          type === 'note' ? noteMinimal : cardMinimal,
-        );
+      for (const type of TYPES) await expectLayers(shell(page, type), minimal);
+      if (zoom === 0.24)
+        await testInfo.attach('unified-far-zoom', {
+          body: await page.locator('#far-zoom-fixture').screenshot(),
+          contentType: 'image/png',
+        });
     }
     expect(
       await page.evaluate(() => window.farZoomFixture.readState()),
