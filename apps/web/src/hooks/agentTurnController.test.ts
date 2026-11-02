@@ -6,6 +6,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApiError } from '@/api/_client';
+import { getAgentConversationOwner } from '@/api/agent';
 import { ThreadChatInput } from '@/components/Panels/ChatPanel/ThreadChatInput';
 import { ChatSessionProvider } from '@/hooks/useChatSession';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
@@ -46,6 +47,8 @@ import { useChatHistory } from './useChatHistory';
 
 import type { ChatSession } from './useChatSession';
 import type { AgentStreamCallbacks } from '@/api/agent';
+import type * as CanvasStoreModule from '@/store/canvasStore';
+import type * as ConversationOwnerModule from '@/store/conversationOwner';
 import type { ChatAttachment } from '@huabu/shared';
 
 const mocks = vi.hoisted(() => ({
@@ -79,6 +82,15 @@ vi.mock('@/components/Panels/ChatPanel/useSlashCommandTypeahead', () => ({
 }));
 
 vi.mock('@/api/agent', () => ({
+  getAgentConversationOwner: vi.fn(
+    async (canvasId: string, threadId: string) => ({
+      canvasId,
+      threadId,
+      nodeId: 'question-1',
+      spaceTitle: 'Original Space',
+      source: { agentBinding: { kind: 'internal' } },
+    }),
+  ),
   agentApi: {
     streamMessage: mocks.stream,
     stopThread: mocks.stop,
@@ -128,7 +140,10 @@ function deferred() {
   return { promise, resolve };
 }
 
-function request(inputKind: 'text' | 'ink-intent' = 'text', owner = session) {
+function request(
+  inputKind: 'text' | 'ink-intent' | 'selection-intent' = 'text',
+  owner = session,
+) {
   return prepareAgentTurn({
     session: owner,
     inputKind,
@@ -1120,6 +1135,281 @@ describe('queued composer turns', () => {
     { external: false, anchored: true },
     { external: true, anchored: true },
   ])(
+    'drains queued turns in their original Space after navigation: %j',
+    async ({ external, anchored }) => {
+      const [canvasModule, ownerModule] = await Promise.all([
+        vi.importActual<typeof CanvasStoreModule>('@/store/canvasStore'),
+        vi.importActual<typeof ConversationOwnerModule>(
+          '@/store/conversationOwner',
+        ),
+      ]);
+      mocks.save.mockImplementation(canvasModule.saveCanvasForSubmission);
+      mocks.validate.mockImplementation(ownerModule.validateConversationView);
+      const owner = anchored ? questionSession : session;
+      const binding = external
+        ? { kind: 'external' as const, profileId: 'profile-1', alias: 'Agent' }
+        : { kind: 'internal' as const };
+      vi.mocked(getAgentConversationOwner).mockResolvedValue({
+        canvasId: owner.ownerCanvasId,
+        threadId: owner.threadId,
+        nodeId: 'question-1',
+        spaceTitle: 'Original Space',
+        source: { agentBinding: binding, hasAuthoredContent: true },
+      });
+      useChatStore.getState().setAgentBinding(owner.threadId, binding);
+      const prepared = request('text', owner);
+      for (const content of ['Second', 'Third']) {
+        useChatStore.getState().enqueueTurn(owner.threadId, {
+          id: content,
+          prepared: { ...prepared, content },
+          status: 'pending',
+        });
+      }
+      useCanvasStore.getState()._setStateNoAutosave({
+        canvasId: 'parent-space',
+        nodes: [
+          {
+            id: 'parent-note',
+            type: 'note',
+            selected: true,
+            position: { x: 0, y: 0 },
+            data: { content: 'Do not send this' },
+          },
+        ],
+      });
+      vi.spyOn(useAcpThreadChangesStore.getState(), 'load').mockResolvedValue();
+      mocks.stream.mockImplementation(
+        async (_content, threadId, _mode, callbacks: AgentStreamCallbacks) =>
+          finish(callbacks, threadId),
+      );
+      await act(async () => settleAgentTurnQueue(owner, true));
+      await waitForQueue();
+      expect(mocks.stream.mock.calls.map(([content]) => content)).toEqual([
+        'Second',
+        'Third',
+      ]);
+      for (const call of mocks.stream.mock.calls) {
+        expect(call[1]).toBe(owner.threadId);
+        expect(call[4]).toMatchObject({
+          canvasId: owner.ownerCanvasId,
+          canvasContext: prepared.sources.canvasContext,
+          agentBinding: binding,
+          anchorNodeId: anchored ? 'question-1' : undefined,
+        });
+      }
+      expect(mocks.save.mock.calls).toEqual([['canvas-1'], ['canvas-1']]);
+      expect(
+        vi.mocked(useCanvasStore.getState().flushCanvasEvents).mock.calls,
+      ).toEqual([['canvas-1'], ['canvas-1']]);
+      expect(useCanvasStore.getState().canvasId).toBe('parent-space');
+      expect(
+        useChatStore.getState().threadsById[owner.threadId].queuePaused,
+      ).toBe(false);
+    },
+  );
+
+  it.each(['draft', 'validate', 'save', 'flush'] as const)(
+    'continues queued preparation when navigation starts during %s',
+    async (stage) => {
+      const pending = deferred();
+      const operation =
+        stage === 'flush'
+          ? vi.mocked(useCanvasStore.getState().flushCanvasEvents)
+          : mocks[stage];
+      operation.mockReturnValueOnce(pending.promise);
+      useChatStore.getState().setAgentBinding(session.threadId, {
+        kind: 'external',
+        profileId: 'profile-1',
+        alias: 'Agent',
+      });
+      useChatStore.getState().enqueueTurn(session.threadId, {
+        id: 'queued-navigation',
+        status: 'pending',
+        prepared: request('text', questionSession),
+      });
+      vi.spyOn(useAcpThreadChangesStore.getState(), 'load').mockResolvedValue();
+      mocks.stream.mockImplementation(
+        async (_content, threadId, _mode, callbacks: AgentStreamCallbacks) =>
+          finish(callbacks, threadId),
+      );
+      try {
+        await act(async () => {
+          resumeAgentTurnQueue(questionSession);
+          await vi.waitFor(() => expect(operation).toHaveBeenCalledOnce());
+          useCanvasStore.getState()._setStateNoAutosave({ isLoading: true });
+          useCanvasStore.getState()._setStateNoAutosave({
+            canvasId: 'parent-space',
+            nodes: [],
+          });
+          expect(
+            hasAgentStreamClaim(session.ownerCanvasId, session.threadId),
+          ).toBe(true);
+        });
+      } finally {
+        pending.resolve();
+        await waitForQueue();
+      }
+      expect(mocks.stream).toHaveBeenCalledOnce();
+      expect(mocks.stream.mock.calls[0][4]).toMatchObject({
+        canvasId: session.ownerCanvasId,
+        anchorNodeId: 'question-1',
+      });
+      expect(mocks.stop).not.toHaveBeenCalled();
+      expect(
+        selectThreadMessages(useChatStore.getState(), session.threadId).filter(
+          (message) => message.role === 'status',
+        ),
+      ).toEqual([]);
+    },
+  );
+
+  it('retains and pauses an offscreen queued turn when the server rejects its owner', async () => {
+    useChatStore.getState().enqueueTurn(session.threadId, {
+      id: 'deleted-owner',
+      prepared: request('text', questionSession),
+      status: 'pending',
+    });
+    useCanvasStore.getState()._setStateNoAutosave({
+      canvasId: 'parent-space',
+      nodes: [],
+    });
+    vi.spyOn(useAcpThreadChangesStore.getState(), 'load').mockResolvedValue();
+    mocks.stream.mockImplementation(
+      async (_content, _threadId, _mode, callbacks: AgentStreamCallbacks) => {
+        callbacks.onError(
+          new ApiError(
+            409,
+            {
+              message: 'Question owner was deleted',
+              code: 'conversation_owner_mismatch',
+            },
+            'Submission failed',
+          ),
+        );
+      },
+    );
+    await act(async () => {
+      settleAgentTurnQueue(questionSession, true);
+      await vi.waitFor(() =>
+        expect(
+          useChatStore.getState().threadsById[session.threadId],
+        ).toMatchObject({
+          queuePaused: true,
+          queuedTurns: [{ id: 'deleted-owner', status: 'pending' }],
+        }),
+      );
+    });
+    expect(
+      selectThreadMessages(useChatStore.getState(), session.threadId),
+    ).toContainEqual(
+      expect.objectContaining({
+        role: 'status',
+        status: 'error',
+        detail: 'Question owner was deleted',
+      }),
+    );
+  });
+
+  it('pauses a queued turn while its Space is returning with an unresolved content save', async () => {
+    const canvasModule = await vi.importActual<typeof CanvasStoreModule>(
+      '@/store/canvasStore',
+    );
+    const canvasApi = await import('@/api/canvas');
+    vi.spyOn(canvasApi, 'putNodeContent').mockRejectedValue(
+      new Error('disk unavailable'),
+    );
+    mocks.save.mockImplementation(canvasModule.saveCanvasForSubmission);
+    const prepared = request();
+    useCanvasStore.setState({
+      nodes: useCanvasStore
+        .getState()
+        .nodes.map((node) =>
+          node.id === 'note-1'
+            ? { ...node, data: { ...node.data, content: 'Unsaved' } }
+            : node,
+        ),
+    });
+    await expect(canvasModule.drainPendingSaves()).rejects.toThrow(
+      'Content saves failed',
+    );
+    useCanvasStore.getState()._setStateNoAutosave({
+      canvasId: 'parent-space',
+      nodes: [],
+    });
+    useCanvasStore.getState()._setStateNoAutosave({
+      canvasId: session.ownerCanvasId,
+      isLoading: true,
+    });
+    useChatStore.getState().enqueueTurn(session.threadId, {
+      id: 'failed-return-load',
+      prepared,
+      status: 'pending',
+    });
+    try {
+      await act(async () => settleAgentTurnQueue(session, true));
+      await act(async () => {
+        await vi.waitFor(() =>
+          expect(
+            useChatStore.getState().threadsById[session.threadId].queuePaused,
+          ).toBe(true),
+        );
+      });
+      expect(mocks.stream).not.toHaveBeenCalled();
+      expect(
+        useChatStore.getState().threadsById[session.threadId],
+      ).toMatchObject({
+        queuePaused: true,
+        queuedTurns: [{ id: 'failed-return-load', status: 'pending' }],
+      });
+    } finally {
+      await canvasModule.discardPendingSaves(session.ownerCanvasId);
+    }
+  });
+
+  it('keeps a dispatched queued turn running while leaving its Space', async () => {
+    const pending = deferred();
+    let signal: AbortSignal | undefined;
+    mocks.stream.mockImplementation(
+      async (
+        _content,
+        threadId,
+        _mode,
+        callbacks: AgentStreamCallbacks,
+        options,
+      ) => {
+        signal = options.signal;
+        await pending.promise;
+        finish(callbacks, threadId);
+      },
+    );
+    useChatStore.getState().enqueueTurn(session.threadId, {
+      id: 'queued-navigation',
+      status: 'pending',
+      prepared: request(),
+    });
+    try {
+      await act(async () => {
+        resumeAgentTurnQueue(session);
+        await vi.waitFor(() => expect(mocks.stream).toHaveBeenCalledOnce());
+        useCanvasStore.getState()._setStateNoAutosave({
+          canvasId: 'parent-space',
+          isLoading: true,
+        });
+      });
+      expect(signal?.aborted).toBe(false);
+      expect(mocks.stop).not.toHaveBeenCalled();
+    } finally {
+      pending.resolve();
+      await waitForQueue();
+    }
+  });
+
+  it.each([
+    { external: false, anchored: false },
+    { external: true, anchored: false },
+    { external: false, anchored: true },
+    { external: true, anchored: true },
+  ])(
     'dispatches queued turns through the shared owner/binding pipeline: %j',
     async ({ external, anchored }) => {
       const owner = anchored ? questionSession : session;
@@ -1325,6 +1615,7 @@ beforeEach(() => {
   });
   useCanvasStore.getState()._setStateNoAutosave({
     canvasId: 'canvas-1',
+    isLoading: false,
     isSaving: false,
     pendingSave: false,
     versionConflict: false,
@@ -1516,6 +1807,61 @@ describe('Ink interpretation lifecycle', () => {
       selectedNodeIds: ['sketch-1'],
       selectedStrokeIds: [{ nodeId: 'sketch-1', strokeIds: ['stroke-1'] }],
     });
+  });
+
+  it('preserves lasso reference-only capture when retrying from history', () => {
+    useCanvasStore.getState()._setStateNoAutosave({
+      canvasId: session.canvasId,
+      nodes: [
+        {
+          id: 'outer-frame',
+          type: 'frame',
+          position: { x: 0, y: 0 },
+          data: { label: 'Outer' },
+        },
+        {
+          id: 'inner-frame',
+          type: 'frame',
+          parentId: 'outer-frame',
+          position: { x: 0, y: 0 },
+          data: { label: 'Inner' },
+        },
+        {
+          id: 'image',
+          type: 'image',
+          parentId: 'inner-frame',
+          position: { x: 0, y: 0 },
+          data: { src: 'artifact.png' },
+        },
+      ],
+    });
+    const retry = prepareAgentTurnRetry(
+      session,
+      {
+        id: 'historical-lasso',
+        role: 'user',
+        content: '',
+        inputKind: 'ink-intent',
+        selectedNodeIds: ['outer-frame'],
+      },
+      'operate',
+    );
+    expect(retry.sources.canvasContext.selectedNodes).toEqual([
+      {
+        id: 'outer-frame',
+        type: 'frame',
+        label: 'Outer',
+        referenceOnly: true,
+        children: [
+          {
+            id: 'inner-frame',
+            type: 'frame',
+            label: 'Inner',
+            referenceOnly: true,
+          },
+        ],
+      },
+    ]);
   });
 
   it('retains report output without confirming it before terminal status', () => {
@@ -2050,29 +2396,41 @@ describe('shared Agent turn input', () => {
     });
   });
 
-  it('sends Ink without consuming same-thread drafts, uploads, excerpts or skills', async () => {
-    const attachment = {
-      id: 'upload',
-      type: 'text',
-      content: 'private draft',
-    } as unknown as ChatAttachment;
-    useChatStore.getState().setDraft(session.threadId, 'Unsent draft');
-    useChatStore.getState().addPendingAttachment(session.threadId, attachment);
-    useChatStore.getState().setSelectionAttachment(attachment);
-    await dispatchAgentTurn(request('ink-intent'));
-    expect(mocks.stream.mock.calls[0][0]).toBe('');
-    expect(mocks.stream.mock.calls[0][4]).toMatchObject({
-      inputKind: 'ink-intent',
-      attachments: undefined,
-      invokedSkills: undefined,
-    });
-    const state = useChatStore.getState();
-    expect(state.threadsById[session.threadId].draft).toBe('Unsent draft');
-    expect(state.threadsById[session.threadId].pendingAttachments).toEqual([
-      attachment,
-    ]);
-    expect(state.selectionAttachment).toBe(attachment);
-  });
+  it.each(['ink-intent', 'selection-intent'] as const)(
+    'sends %s without consuming same-thread drafts, uploads, excerpts or skills',
+    async (inputKind) => {
+      if (inputKind === 'selection-intent') {
+        useGesturePreviewStore.setState({ sketchStrokeSelection: {} });
+      }
+      const attachment = {
+        id: 'upload',
+        type: 'text',
+        content: 'private draft',
+      } as unknown as ChatAttachment;
+      useChatStore.getState().setDraft(session.threadId, 'Unsent draft');
+      useChatStore
+        .getState()
+        .addPendingAttachment(session.threadId, attachment);
+      useChatStore.getState().setSelectionAttachment(attachment);
+      await dispatchAgentTurn(request(inputKind));
+      expect(mocks.stream.mock.calls[0][0]).toBe('');
+      expect(mocks.stream.mock.calls[0][4]).toMatchObject({
+        inputKind,
+        attachments: undefined,
+        invokedSkills: undefined,
+      });
+      const state = useChatStore.getState();
+      expect(state.threadsById[session.threadId].draft).toBe('Unsent draft');
+      expect(state.threadsById[session.threadId].pendingAttachments).toEqual([
+        attachment,
+      ]);
+      expect(state.selectionAttachment).toBe(attachment);
+      expect(selectThreadMessages(state, session.threadId)[0]).toMatchObject({
+        inputKind,
+        inkInterpretation: { state: 'missing' },
+      });
+    },
+  );
 
   it('preserves a selectable Question external binding for Ink', async () => {
     const binding = {
@@ -2441,6 +2799,31 @@ describe('shared Agent turn input', () => {
         contextBefore: 'Before ',
         contextAfter: ' after',
         comment: 'Explain this.',
+        source: {
+          kind: 'note' as const,
+          canvasId: 'canvas-1',
+          nodeId: 'source-note',
+          snapshotRevision: 'snapshot',
+        },
+      },
+      {
+        quote: 'File passage',
+        contextBefore: 'Before ',
+        contextAfter: ' after',
+        comment: 'Explain file.',
+        source: {
+          kind: 'file-reference' as const,
+          canvasId: 'canvas-1',
+          nodeId: 'file',
+          agentletId: 'source-device',
+          path: '/source.tex',
+          contentVersion: 'a'.repeat(64),
+          offsetUnit: 'utf-16' as const,
+          from: 7,
+          to: 19,
+          loadedLength: 40,
+          complete: false,
+        },
       },
     ];
     const prepared = request();
@@ -2475,6 +2858,12 @@ describe('shared Agent turn input', () => {
         contextBefore: '',
         contextAfter: '',
         comment: 'Explain this.',
+        source: {
+          kind: 'note',
+          canvasId: 'canvas-1',
+          nodeId: 'source-note',
+          snapshotRevision: 'snapshot',
+        },
       });
       mocks.stream.mockImplementationOnce(
         async (_content, _thread, _mode, callbacks: AgentStreamCallbacks) => {
@@ -2518,12 +2907,77 @@ describe('shared Agent turn input', () => {
           contextBefore: '',
           contextAfter: '',
           comment: 'Explain this.',
+          source: {
+            kind: 'note',
+            canvasId: 'canvas-1',
+            nodeId: 'source-note',
+            snapshotRevision: 'snapshot',
+          },
         },
       ]);
     },
   );
 
   describe('composer selection exclusion', () => {
+    it.each([true, false])(
+      'keeps Note quote evidence independent of selected parent Frame context, excluded=%s',
+      async (excluded) => {
+        useCanvasStore.getState()._setStateNoAutosave({
+          nodes: [
+            {
+              id: 'frame',
+              type: 'frame',
+              selected: true,
+              position: { x: 0, y: 0 },
+              data: {},
+            },
+            {
+              id: 'source-note',
+              type: 'note',
+              parentId: 'frame',
+              position: { x: 0, y: 0 },
+              data: { content: 'Changed Note content' },
+            },
+          ],
+        });
+        const quote = {
+          quote: 'Captured excerpt',
+          contextBefore: 'before',
+          contextAfter: 'after',
+          comment: 'Explain',
+          source: {
+            kind: 'note' as const,
+            canvasId: 'canvas-1',
+            nodeId: 'source-note',
+            snapshotRevision: 'captured',
+          },
+        };
+        useChatStore.getState().addQuotedComment(session.threadId, quote);
+        useChatStore
+          .getState()
+          .setExcludeCanvasSelection(session.threadId, excluded);
+        let hook!: UseAgentStreamReturn;
+        function Harness() {
+          hook = useAgentStream(session);
+          return null;
+        }
+        container = document.createElement('div');
+        root = createRoot(container);
+        await act(async () => root?.render(createElement(Harness)));
+        await act(async () => hook.startStream('', 'operate'));
+        const sent = mocks.stream.mock.calls[0][4];
+        expect(sent.quotedComments).toEqual([quote]);
+        if (excluded) {
+          expect(sent.canvasContext).toEqual({ selectedNodes: [] });
+        } else {
+          expect(sent.canvasContext?.selectedNodes).toMatchObject([
+            { id: 'frame', children: [{ id: 'source-note' }] },
+          ]);
+        }
+        expect(useCanvasStore.getState().nodes[0].selected).toBe(true);
+      },
+    );
+
     it.each([
       { external: false, anchored: false },
       { external: true, anchored: false },

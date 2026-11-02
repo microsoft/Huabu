@@ -27,6 +27,7 @@ import { prepareHarnessWorkspace } from '../src/harnesses/workspace.js'
 import { Agentlet } from '../src/agentlet.js'
 import { AgentProcess } from '../src/agent-process.js'
 import { Logger } from '../src/logger.js'
+import { resolveProxyEntry } from '../src/harnesses/proxy.js'
 
 afterEach(() => {
   vi.unstubAllEnvs()
@@ -43,11 +44,45 @@ beforeEach(() => {
 })
 
 describe('trusted harness discovery', () => {
+  it('locates the bundled proxy relative to a symlinked CLI entry target', () => {
+    const resolveRealPath = vi.fn(() => '/opt/agentlet/dist/index.js')
+    expect(resolveProxyEntry('/usr/local/bin/agentlet', resolveRealPath)).toBe(
+      join('/opt/agentlet/dist', 'fs-proxy.js'),
+    )
+    expect(resolveRealPath).toHaveBeenCalledExactlyOnceWith('/usr/local/bin/agentlet')
+  })
+
+  it.each([
+    ['claude', 'claude-agent-acp'],
+    ['codex', 'codex-acp'],
+  ])('reports native-only %s as adapter-missing and detects a newly installed adapter', async (native, adapter) => {
+    let adapterInstalled = false
+    mocks.probe.mockImplementation(async (file: string, args: string[]) => {
+      if (file === 'which' && args[0] === adapter && !adapterInstalled) {
+        throw Object.assign(new Error('not found'), { code: 1 })
+      }
+      return { stdout: file === 'which' ? `/usr/local/bin/${args[0]}\n` : '1.2.3\n' }
+    })
+    const first = (await discoverHarnesses({ prepareWorkspaces: true })).harnesses.find((entry) => entry.id === native)
+    expect(first).toMatchObject({
+      status: 'adapter-missing',
+      diagnostics: [{ code: 'adapter_missing', message: expect.any(String) }],
+    })
+    expect(first?.workingDirPath).toBeUndefined()
+    adapterInstalled = true
+    const second = (await discoverHarnesses({ prepareWorkspaces: true })).harnesses.find((entry) => entry.id === native)
+    expect(second).toMatchObject({
+      status: 'ready',
+      workingDirPath: join('/home/agentlet-test', '.agentlet', 'workspace', native),
+    })
+    expect(mocks.probe).not.toHaveBeenCalledWith(adapter, ['--version'], expect.anything())
+  })
+
   it('returns the complete stable catalogue without creating workspaces by default', async () => {
     const { harnesses } = await discoverHarnesses()
     expect(harnesses.map((entry) => entry.id)).toEqual(HARNESS_DEFINITIONS.map((entry) => entry.id))
-    expect(harnesses).toHaveLength(11)
-    expect(harnesses.every((entry) => entry.status === 'ready')).toBe(true)
+    expect(harnesses).toHaveLength(12)
+    expect(harnesses.filter((entry) => entry.id !== 'proxy').every((entry) => entry.status === 'ready')).toBe(true)
     expect(harnesses.at(-1)).toMatchObject({
       id: 'custom',
       capabilities: { customLaunchCommand: true, autoApprove: false },
@@ -123,7 +158,7 @@ describe('trusted harness discovery', () => {
           : '1.0\r\n',
       }))
       const { harnesses } = await discoverHarnesses()
-      expect(harnesses.filter((entry) => entry.id !== 'custom').every((entry) => entry.status === 'ready')).toBe(true)
+      expect(harnesses.filter((entry) => entry.id !== 'custom' && entry.id !== 'proxy').every((entry) => entry.status === 'ready')).toBe(true)
       expect(harnesses[0]).toMatchObject({
         status: 'ready',
         capabilities: { autoApprove: true, customLaunchCommand: false },
@@ -203,7 +238,7 @@ describe('daemon discovery RPC', () => {
         const response = await createDaemon().request(ServerMethods.DISCOVER_HARNESSES, params)
         expect(response).toHaveProperty('result')
         const result = ('result' in response ? response.result : undefined) as HarnessDiscoveryResult
-        expect(result.harnesses).toHaveLength(11)
+        expect(result.harnesses).toHaveLength(12)
         expect(mocks.mkdir).toHaveBeenCalledTimes(params && 'prepareWorkspaces' in params && params.prepareWorkspaces ? 10 : 0)
         expect(start).not.toHaveBeenCalled()
       } finally {

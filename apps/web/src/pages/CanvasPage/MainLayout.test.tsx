@@ -390,7 +390,21 @@ describe('MainLayout Chat motion', () => {
 
     expect(slot?.style.width).toBe('420px');
     expect(content?.hasAttribute('inert')).toBe(true);
-    expect(slot?.classList.contains('overflow-hidden')).toBe(true);
+    expect(slot?.classList.contains('overflow-hidden')).toBe(false);
+    expect(content?.classList.contains('overflow-hidden')).toBe(true);
+    expect(content?.classList.contains('overscroll-contain')).toBe(true);
+    const handle = slot?.querySelector('[role="separator"]');
+    expect(handle?.classList.contains('w-2')).toBe(true);
+    expect(handle?.classList.contains('-left-1')).toBe(true);
+    expect(handle?.firstElementChild?.classList.contains('w-px')).toBe(true);
+    expect(handle?.firstElementChild?.classList.contains('left-1/2')).toBe(
+      true,
+    );
+    expect(
+      handle?.firstElementChild?.classList.contains(
+        'group-data-[resizing=true]:w-1',
+      ),
+    ).toBe(true);
     expect(center?.classList.contains('inset-0')).toBe(true);
     expect(content?.style.width).toBe('100%');
 
@@ -434,6 +448,9 @@ describe('MainLayout Chat motion', () => {
     const rightHandle = handles?.[handles.length - 1];
     Object.defineProperty(rightHandle, 'setPointerCapture', {
       value: vi.fn(),
+    });
+    Object.defineProperty(rightHandle, 'hasPointerCapture', {
+      value: vi.fn(() => false),
     });
 
     act(() => {
@@ -490,9 +507,11 @@ describe('MainLayout Chat motion', () => {
     ['left', 'pointerup'],
     ['left', 'pointercancel'],
     ['left', 'blur'],
+    ['left', 'lostpointercapture'],
     ['right', 'pointerup'],
     ['right', 'pointercancel'],
     ['right', 'blur'],
+    ['right', 'lostpointercapture'],
     ['right', 'unmount'],
   ])(
     'resizes %s only with the owning pointer and stops on %s',
@@ -521,16 +540,25 @@ describe('MainLayout Chat motion', () => {
       const direction = side === 'left' ? 1 : -1;
       panel.getBoundingClientRect = () => ({ width: initialWidth }) as DOMRect;
       Object.defineProperty(handle, 'setPointerCapture', { value: vi.fn() });
+      Object.defineProperty(handle, 'hasPointerCapture', {
+        value: vi.fn(() => true),
+      });
+      Object.defineProperty(handle, 'releasePointerCapture', {
+        value: vi.fn(),
+      });
       act(() =>
         handle.dispatchEvent(
           new PointerEvent('pointerdown', {
             bubbles: true,
             button: 0,
             pointerId: 1,
+            pointerType: 'touch',
             clientX: 500,
           }),
         ),
       );
+      expect(handle.dataset.resizing).toBe('true');
+      expect(handle.setPointerCapture).toHaveBeenCalledWith(1);
       act(() => {
         window.dispatchEvent(
           new PointerEvent('pointermove', {
@@ -541,6 +569,7 @@ describe('MainLayout Chat motion', () => {
         window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 2 }));
       });
       expect(panel.style.width).toBe(`${initialWidth}px`);
+      expect(handle.dataset.resizing).toBe('true');
       act(() =>
         window.dispatchEvent(
           new PointerEvent('pointermove', {
@@ -550,6 +579,7 @@ describe('MainLayout Chat motion', () => {
         ),
       );
       expect(panel.style.width).toBe(`${initialWidth + 50}px`);
+      expect(handle.dataset.resizing).toBe('true');
       act(() =>
         window.dispatchEvent(
           new PointerEvent('pointermove', {
@@ -575,12 +605,15 @@ describe('MainLayout Chat motion', () => {
           root?.render(null);
           return;
         }
-        window.dispatchEvent(
+        (endType === 'lostpointercapture' ? handle : window).dispatchEvent(
           endType === 'blur'
             ? new Event('blur')
             : new PointerEvent(endType, { pointerId: 1 }),
         );
       });
+      if (endType !== 'unmount')
+        expect(handle.dataset.resizing).toBeUndefined();
+      expect(handle.releasePointerCapture).toHaveBeenCalledExactlyOnceWith(1);
       act(() =>
         window.dispatchEvent(
           new PointerEvent('pointermove', {
@@ -629,7 +662,8 @@ describe('MainLayout Chat motion', () => {
       container?.querySelector('[data-testid="mounted-canvas"]'),
     ).toBeNull();
     expect(slot?.style.width).toBe('calc(100% - 48px)');
-    expect(slot?.classList.contains('overflow-hidden')).toBe(true);
+    expect(slot?.classList.contains('overflow-hidden')).toBe(false);
+    expect(content?.classList.contains('overflow-hidden')).toBe(true);
     expect(content?.style.width).toBe('100%');
     const rail = container?.querySelector<HTMLElement>(
       '[data-fullscreen-header-rail]',

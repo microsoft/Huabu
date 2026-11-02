@@ -1,9 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { PenLine } from 'lucide-react';
+import { PenLine, Shapes } from 'lucide-react';
 import { memo, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
+
+import { isCanvasIntent } from '@huabu/shared';
 
 import { cn } from '@/components/Common/cn';
 import { NodeRef } from '@/components/Nodes/NodeRef/NodeRef';
@@ -82,6 +84,12 @@ export const UserMessage = memo(function UserMessage({
     (attachments && attachments.length > 0) ||
     (selectedNodeIds && selectedNodeIds.length > 0);
   const hasSkills = !!invokedSkills && invokedSkills.length > 0;
+  const canvasIntent = isCanvasIntent(inputKind);
+  const RequestIcon = inputKind === 'selection-intent' ? Shapes : PenLine;
+  const interpretationKey =
+    inputKind === 'selection-intent'
+      ? 'messages.selectionInterpretation'
+      : 'messages.inkInterpretation';
 
   return (
     <div
@@ -102,24 +110,25 @@ export const UserMessage = memo(function UserMessage({
             ))}
           </div>
         ) : null}
-        {content ||
-        inputKind === 'ink-intent' ||
-        hasSkills ||
-        !quotedComments?.length ? (
+        {content || canvasIntent || hasSkills || !quotedComments?.length ? (
           <div className="bg-bg-default text-fg-default overflow-hidden rounded-md border border-none px-4 py-2 text-sm">
             <div className="leading-relaxed wrap-anywhere whitespace-pre-wrap">
-              {inputKind === 'ink-intent' && (
-                <PenLine
+              {canvasIntent && (
+                <RequestIcon
                   className="mr-1.5 inline-block size-3.5 align-text-bottom"
                   role="img"
-                  aria-label={t('messages.inkRequest')}
+                  aria-label={t(
+                    inputKind === 'selection-intent'
+                      ? 'messages.selectionRequest'
+                      : 'messages.inkRequest',
+                  )}
                 />
               )}
-              {inputKind === 'ink-intent' && (
+              {canvasIntent && (
                 <span
                   ref={interpretationRef}
                   data-ink-interpretation
-                  aria-description={t('messages.inkInterpretation.agent')}
+                  aria-description={t(`${interpretationKey}.agent`)}
                   role={
                     inkInterpretation?.state === 'reported'
                       ? undefined
@@ -129,11 +138,11 @@ export const UserMessage = memo(function UserMessage({
                   {inkInterpretation?.state === 'reported'
                     ? inkInterpretation.text
                     : t(
-                        `messages.inkInterpretation.${inkInterpretation?.state ?? 'legacy'}`,
+                        `${interpretationKey}.${inkInterpretation?.state ?? 'legacy'}`,
                       )}
                 </span>
               )}
-              {inputKind === 'ink-intent' && hasSkills ? ' ' : null}
+              {canvasIntent && hasSkills ? ' ' : null}
               {hasSkills &&
                 invokedSkills.map((id) => (
                   <span
@@ -144,7 +153,7 @@ export const UserMessage = memo(function UserMessage({
                     /{id}
                   </span>
                 ))}
-              {inputKind === 'ink-intent' && content ? ' ' : null}
+              {canvasIntent && content ? ' ' : null}
               {content && (
                 <span ref={contentRef} data-chat-prompt-content>
                   {content}

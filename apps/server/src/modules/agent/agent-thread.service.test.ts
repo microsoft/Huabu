@@ -619,49 +619,52 @@ describe('AgentThreadService', () => {
     },
   );
 
-  it('rejects a live Ask mode acquired while the deferred Ink envelope was pending', async () => {
-    const target: FixedAgentNodeTarget = {
-      ...TARGET,
-      agentBinding: { kind: 'internal' },
-      agentMode: 'operate',
-    };
-    const options = { target, agentTarget: target };
-    const h = createHarness(options);
-    let startPreparation!: () => void;
-    const preparing = new Promise<void>((resolve) => {
-      startPreparation = resolve;
-    });
-    let finishPreparation!: (envelope: ChatEnvelope) => void;
-    const pending = new Promise<ChatEnvelope>((resolve) => {
-      finishPreparation = resolve;
-    });
-    const envelope: ChatEnvelope = {
-      ...ENVELOPE,
-      user: { ...ENVELOPE.user, inputKind: 'ink-intent' },
-    };
-    const invocation = h.service.invoke({
-      ...invocationOptions(),
-      mode: 'operate',
-      requestBinding: { kind: 'internal' },
-      envelope: () => {
-        startPreparation();
-        return pending;
-      },
-      submission: createChatSubmission(envelope),
-    });
-    const rejected = expect(invocation).rejects.toThrow(
-      'Choose Agent instead of Chat',
-    );
-    await preparing;
-    options.agentTarget = { ...target, agentMode: 'ask' };
-    finishPreparation(envelope);
-    await rejected;
-    expect(target.agentMode).toBe('operate');
-    expect(h.runInternal).not.toHaveBeenCalled();
-    expect(h.release).toHaveBeenCalledOnce();
-    expect(h.failLifecycle).toHaveBeenCalledOnce();
-    expect(h.service.isActive('thread-a', 'canvas-a')).toBe(false);
-  });
+  it.each(['ink-intent', 'selection-intent'] as const)(
+    'rejects a live Ask mode acquired while the deferred %s envelope was pending',
+    async (inputKind) => {
+      const target: FixedAgentNodeTarget = {
+        ...TARGET,
+        agentBinding: { kind: 'internal' },
+        agentMode: 'operate',
+      };
+      const options = { target, agentTarget: target };
+      const h = createHarness(options);
+      let startPreparation!: () => void;
+      const preparing = new Promise<void>((resolve) => {
+        startPreparation = resolve;
+      });
+      let finishPreparation!: (envelope: ChatEnvelope) => void;
+      const pending = new Promise<ChatEnvelope>((resolve) => {
+        finishPreparation = resolve;
+      });
+      const envelope: ChatEnvelope = {
+        ...ENVELOPE,
+        user: { ...ENVELOPE.user, inputKind },
+      };
+      const invocation = h.service.invoke({
+        ...invocationOptions(),
+        mode: 'operate',
+        requestBinding: { kind: 'internal' },
+        envelope: () => {
+          startPreparation();
+          return pending;
+        },
+        submission: createChatSubmission(envelope),
+      });
+      const rejected = expect(invocation).rejects.toThrow(
+        'Choose Agent instead of Chat',
+      );
+      await preparing;
+      options.agentTarget = { ...target, agentMode: 'ask' };
+      finishPreparation(envelope);
+      await rejected;
+      expect(target.agentMode).toBe('operate');
+      expect(h.runInternal).not.toHaveBeenCalled();
+      expect(h.release).toHaveBeenCalledOnce();
+      expect(h.failLifecycle).toHaveBeenCalledOnce();
+      expect(h.service.isActive('thread-a', 'canvas-a')).toBe(false);
+    },
+  );
 
   it('rejects Ink to an unanchored Ask conversation without upgrading its mode', async () => {
     const h = createHarness({ target: null });

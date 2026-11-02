@@ -63,7 +63,8 @@ async function settlePendingInkQuestion(
     const record = (await handle.nodes.read(node.id))?.record;
     const canRename =
       text !== undefined &&
-      record?.label === INK_PLACEHOLDER_LABEL &&
+      (record?.label === INK_PLACEHOLDER_LABEL ||
+        record?.label === 'New selection request') &&
       record.labelSource !== 'user';
     assertActive();
     const command: CanvasCommand = {

@@ -239,6 +239,9 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
             profileId: spec.binding.profileId,
           },
           ...(spec.cwd !== undefined ? { workingDirPath: spec.cwd } : {}),
+          ...(resolveThreadAgentletId(record)
+            ? { agentletId: resolveThreadAgentletId(record) }
+            : {}),
           ...(spec.workingDirectoryOverride !== undefined
             ? { workingDirectoryOverride: spec.workingDirectoryOverride }
             : {}),

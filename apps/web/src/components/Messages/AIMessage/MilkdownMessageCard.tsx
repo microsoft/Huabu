@@ -14,7 +14,7 @@ import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 import { usePanelStore } from '@/store/panelStore';
 import { copyToClipboard } from '@/utils/io/clipboard';
-import { setDragPayload } from '@/utils/io/dragDrop';
+import { createDragId, setDragPayload } from '@/utils/io/dragDrop';
 import { openDocumentLink } from '@/utils/openDocumentLink';
 
 import { FragmentCommentPopover } from './FragmentCommentPopover';
@@ -143,6 +143,12 @@ export const MilkdownMessageCard = memo(function MilkdownMessageCard({
           enableComments && messageId ? handleTextSelection : undefined
         }
         enableBlockDrag={!canvasActionsDisabled}
+        getTouchDragPayload={(markdown) => {
+          const built =
+            buildImageDragPayload(markdown, threadId, canvasId) ??
+            buildNoteDragPayload(markdown, threadId);
+          return built ? { ...built.payload, dragId: createDragId() } : null;
+        }}
         onBlockDragStart={({ markdown, nativeEvent }) => {
           const built =
             buildImageDragPayload(markdown, threadId, canvasId) ??

@@ -2,12 +2,12 @@
 
 Ordinary external agents use persisted Profiles and the existing ACP runtime. Agentlet owns the supported harness catalogue, detection, capability descriptions, and structured launch compilation; Agenetes owns the generic Profile registry; Huabu owns automatic Profile creation, the application default, and the Settings/API projection.
 
-Profiles describe Agent harness providers, not standalone service APIs. Optional OCR, web search, and image generation integrations retain their own configuration and server-held credentials independently of the Utility Agent or conversational recency preference. Submission-time Ink OCR supplies auxiliary evidence to the chosen Agent; it is not an internal-Agent fallback. A future model-provider or function-provider abstraction is separate from the Profile contract.
+Profiles describe ACP harness launch identities, not standalone service APIs. The bundled deterministic `proxy` harness is an automatic hidden Profile (`visible: false`) used by the [connected-device File Explorer](./device-files.md). Missing visibility remains visible for legacy Profiles. Hidden Profiles are excluded from normal catalogues, selectors and Utility-default initialization, and do not change conversational recency. Visibility is host-owned, not a user create/patch field; the proxy harness is reserved from manual creation. Optional OCR, web search, and image generation integrations retain their own configuration and server-held credentials independently of the Utility Agent or conversational recency preference. Submission-time Ink OCR supplies auxiliary evidence to the chosen Agent; it is not an internal-Agent fallback. A future model-provider or function-provider abstraction is separate from the Profile contract.
 
 ## Discovery and provisioning
 
 ```text
-agentlet control connection / reconnection
+agentlet connection / reconnection
   -> capability-gated server/discoverHarnesses through Gateway
   -> local PATH detection and default workspace preparation
   -> Huabu duplicate-safe creation in AgentProfileRegistry
@@ -22,6 +22,8 @@ The daemon advertises versioned harness discovery support. The Gateway routes re
 Automatic discovery requests workspace preparation. The daemon resolves its own home and creates or reuses `~/.agentlet/workspace/<harnessId>`, using only identities in its local catalogue. It reports an absolute `workingDirPath`. A workspace failure prevents automatic creation for that entry. Directories are shared by uses of that harness's default Profile, not isolated per Agent Node. Deleting a Profile never deletes its directory. Discovery does not start ACP sessions, install harnesses or skills, copy prompts, or provision credentials.
 
 Huabu subscribes to machine connection events, includes machines already connected at registration, and invalidates stale results on reconnect, disconnect, and shutdown. After each successful response it synchronously checks and creates automatic defaults through the registry. The check and commit contain no asynchronous gap.
+
+Connection-triggered provisioning uses one application-scoped discovery coordinator. Overlapping connection events share one prepared discovery per device and lifecycle generation, while different devices remain independent. Every disconnect/reconnect advances the generation, and shutdown disposes the coordinator. Replies must still belong to the current connected generation before reconciliation; stale replies and old request finalizers cannot affect a replacement request. Gateway's reused connection object and original `connectedAt` are not generation identities. Existing Gateway pending-RPC rejection, v2 capability gates, validation, and bounded timeout remain unchanged.
 
 The Agentlet CLI owns its default device identity. On first start it atomically creates `~/.agentlet/device.json` containing `{ "version": 1, "deviceId": "<uuid>" }`; later starts reuse that UUID, so identity survives daemon, Huabu, OS-session, binary, upgrade, and worktree restarts while the home directory remains. A malformed or unreadable identity file fails explicitly instead of rotating identity. `--agentlet-id` remains an advanced exact override and does not rewrite the persisted UUID. Hello metadata reports the real hostname, platform, and architecture separately for display; none of those fields participates in identity. Windows and WSL naturally receive distinct identities because they use separate home directories.
 
@@ -191,4 +193,5 @@ Other connection options keeps only the file-saving instruction, launch command,
 | [`profiles.route.ts`](../../apps/server/src/modules/agent/acp/profiles.route.ts)                                        | Ordinary Profile HTTP API                                          |
 | [`agent-cli.route.ts`](../../apps/server/src/modules/agent/acp/agent-cli.route.ts)                                      | Agentlet-backed manual-editor catalogue                            |
 | [`Settings/agent-profiles/`](../../apps/web/src/components/Settings/agent-profiles/)                                    | Ordinary Profile Settings and editor                               |
+| [`ConnectedDeviceRow.tsx`](../../apps/web/src/components/Settings/agent-profiles/ConnectedDeviceRow.tsx)                | Device grouping, renaming, identity and connection controls        |
 | [`acpProfilesStore.ts`](../../apps/web/src/store/acpProfilesStore.ts)                                                   | Shared Profile snapshot for Settings and selectors                 |

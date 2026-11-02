@@ -14,6 +14,7 @@ vi.mock('../api', async (importOriginal) => ({
 
 import useCanvasStore, {
   CanvasSubmissionSaveError,
+  drainPendingSaves,
   saveCanvasForSubmission,
 } from './canvasStore';
 import { CanvasConflictError } from '../api/canvas';
@@ -52,6 +53,40 @@ afterEach(() => {
 });
 
 describe('canvasStore structure-save reconciliation', () => {
+  it('retries a retained transient failure once per drain and succeeds after recovery', async () => {
+    useCanvasStore.getState()._setStateNoAutosave({ isLoading: false });
+    putCanvas.mockRejectedValue(new Error('offline'));
+    await useCanvasStore.getState().saveCanvas();
+    await expect(drainPendingSaves()).rejects.toThrow('offline');
+    expect(putCanvas).toHaveBeenCalledTimes(2);
+    putCanvas.mockResolvedValue({ canvasId: 'canvas-race', version: 11 });
+    await expect(drainPendingSaves()).resolves.toBeUndefined();
+    expect(putCanvas).toHaveBeenCalledTimes(3);
+    await drainPendingSaves();
+    expect(putCanvas).toHaveBeenCalledTimes(3);
+  });
+
+  it('does not retry retained failures against nodes from an incomplete return load', async () => {
+    putCanvas.mockRejectedValue(new Error('offline'));
+    await useCanvasStore.getState().saveCanvas();
+    await expect(drainPendingSaves()).rejects.toThrow('offline');
+    expect(putCanvas).toHaveBeenCalledOnce();
+  });
+
+  it('does not automatically retry a retained conflict', async () => {
+    useCanvasStore.getState()._setStateNoAutosave({ isLoading: false });
+    putCanvas.mockRejectedValue(
+      new CanvasConflictError({
+        code: 'CANVAS_VERSION_CONFLICT',
+        message: 'conflict',
+        serverVersion: 12,
+      }),
+    );
+    await useCanvasStore.getState().saveCanvas();
+    await expect(drainPendingSaves()).rejects.toThrow('conflict');
+    expect(putCanvas).toHaveBeenCalledOnce();
+  });
+
   it('does not let a delayed success lower an SSE-advanced version', async () => {
     let acknowledge:
       | ((value: { canvasId: string; version: number }) => void)
@@ -145,7 +180,7 @@ describe('canvasStore structure-save reconciliation', () => {
     ).resolves.toBeUndefined();
   });
 
-  it('rejects submission for a conflicted or different active Canvas', async () => {
+  it('rejects only the conflicted Canvas, not an offscreen submission', async () => {
     useCanvasStore.getState()._setStateNoAutosave({ versionConflict: true });
 
     await expect(saveCanvasForSubmission('canvas-race')).rejects.toBeInstanceOf(
@@ -153,6 +188,41 @@ describe('canvasStore structure-save reconciliation', () => {
     );
     await expect(
       saveCanvasForSubmission('other-canvas'),
-    ).rejects.toBeInstanceOf(CanvasSubmissionSaveError);
+    ).resolves.toBeUndefined();
+    expect(putCanvas).not.toHaveBeenCalled();
+  });
+
+  it('retains structure-save failures after navigating away', async () => {
+    putCanvas.mockRejectedValueOnce(new Error('disk unavailable'));
+    await useCanvasStore.getState().saveCanvas();
+    useCanvasStore.getState()._setStateNoAutosave({
+      canvasId: 'parent-canvas',
+      versionConflict: false,
+    });
+    await expect(saveCanvasForSubmission('canvas-race')).rejects.toMatchObject({
+      name: 'CanvasSubmissionSaveError',
+      cause: { message: 'disk unavailable' },
+    });
+    expect(putCanvas).toHaveBeenCalledOnce();
+  });
+
+  it('finishes submission persistence when navigation follows an in-flight save', async () => {
+    let acknowledge!: (value: { canvasId: string; version: number }) => void;
+    putCanvas.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          acknowledge = resolve;
+        }),
+    );
+    const saving = useCanvasStore.getState().saveCanvas();
+    const submission = saveCanvasForSubmission('canvas-race');
+    acknowledge({ canvasId: 'canvas-race', version: 11 });
+    await saving;
+    useCanvasStore.getState()._setStateNoAutosave({
+      canvasId: 'parent-canvas',
+      versionConflict: true,
+    });
+    await expect(submission).resolves.toBeUndefined();
+    expect(putCanvas).toHaveBeenCalledOnce();
   });
 });

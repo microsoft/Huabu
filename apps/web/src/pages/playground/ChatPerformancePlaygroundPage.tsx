@@ -7,6 +7,7 @@ import { Button } from '@/components/Common/Button';
 import { MessageList } from '@/components/Messages/MessageList';
 import { ThreadChatInput } from '@/components/Panels/ChatPanel/ThreadChatInput';
 import { selectRetainedPreviewTabs } from '@/components/Panels/PreviewWorkspace/retainedPreviewTabs';
+import { useChatHistory } from '@/hooks/useChatHistory';
 import { ChatSessionProvider } from '@/hooks/useChatSession';
 import { useChatStore } from '@/store/chatStore';
 import { activateTab } from '@/store/previewWorkspace/model';
@@ -44,11 +45,49 @@ function buildMessages(count: number): ChatMessage[] {
 }
 
 export default function ChatPerformancePlaygroundPage() {
+  if (new URLSearchParams(window.location.search).get('mode') === 'history')
+    return <HistoryFixture />;
   return new URLSearchParams(window.location.search).get('mode') ===
     'activation' ? (
     <ActivationFixture />
   ) : (
     <ComposerFixture />
+  );
+}
+
+function HistoryFixture() {
+  const history = useChatHistory(SESSION, NOOP);
+  const thread = useChatStore((state) => state.threadsById[SESSION.threadId]);
+  return (
+    <ChatSessionProvider value={SESSION}>
+      <main
+        data-chat-history-fixture
+        data-cached={thread?.messages.length ?? 0}
+        data-pages={thread?.historyPages?.length ?? 0}
+        data-loaded-pages={
+          thread?.historyPages?.filter((page) => page.loaded).length ?? 0
+        }
+        className="bg-bg-default mx-auto flex h-full w-full max-w-3xl flex-col p-4"
+      >
+        <MessageList
+          messages={thread?.messages ?? []}
+          threadId={SESSION.threadId}
+          viewKey={SESSION.threadId}
+          isLoading={false}
+          isHistoryLoading={!thread?.historyLoaded}
+          isHistoryReady={thread?.historyLoaded}
+          hasOlderHistory={thread?.hasOlderHistory}
+          isLoadingOlderHistory={thread?.isLoadingOlderHistory}
+          olderHistoryError={thread?.olderHistoryError ?? undefined}
+          onLoadOlderHistory={history.loadOlderHistory}
+          historyPages={thread?.historyPages}
+          onLoadHistoryPage={history.loadHistoryPage}
+          historyPageError={history.historyPageError}
+          onRetryHistoryPage={history.retryHistoryPage}
+          onVisibleMessagesChange={history.updateHistoryViewport}
+        />
+      </main>
+    </ChatSessionProvider>
   );
 }
 
@@ -165,13 +204,13 @@ function ActivationPanel({
   active,
   activationId,
   thread,
-  recentTurnCount,
+  onSend,
 }: {
   tabId: string;
   active: boolean;
   activationId: number;
   thread: FixtureThread;
-  recentTurnCount: number | undefined;
+  onSend: () => void;
 }) {
   const [mountId] = useState(() => crypto.randomUUID());
   const [submittedDraft, setSubmittedDraft] = useState('');
@@ -195,10 +234,7 @@ function ActivationPanel({
           isLoading={thread.isLoading}
           isActive={active}
           viewKey={session.threadId}
-          recentTurnCount={recentTurnCount}
-          olderTurnBatchSize={3}
           activationId={activationId}
-          completedTurnId={thread.completedTurnId}
         />
         <div className="pt-3">
           <ThreadChatInput
@@ -206,6 +242,7 @@ function ActivationPanel({
               event.preventDefault();
               setSubmittedDraft(draft);
               useChatStore.getState().setDraft(session.threadId, '');
+              onSend();
             }}
             onStop={NOOP}
             mode="ask"
@@ -217,11 +254,6 @@ function ActivationPanel({
 }
 
 function ActivationFixture() {
-  const presentation =
-    new URLSearchParams(window.location.search).get('presentation') ===
-    'full-list'
-      ? 'full-list'
-      : 'windowed';
   const [threads, setThreads] = useState<Record<string, FixtureThread>>(() => {
     const requested = Number.parseInt(
       new URLSearchParams(window.location.search).get('turns') ?? '100',
@@ -272,15 +304,15 @@ function ActivationFixture() {
     RETAINABLE_TABS,
   );
 
-  function updateTurn(complete: boolean) {
+  function updateTurn(complete: boolean, tabId = activeTabId) {
     setThreads((current) => {
-      const previous = requireThread(current, activeTabId);
+      const previous = requireThread(current, tabId);
       if (previous.isLoading !== complete) return current;
       const turnCount = previous.turnCount + (complete ? 0 : 1);
-      const turnId = `${activeTabId}-turn-${turnCount}`;
+      const turnId = `${tabId}-turn-${turnCount}`;
       return {
         ...current,
-        [activeTabId]: {
+        [tabId]: {
           turnCount,
           isLoading: !complete,
           completedTurnId: complete ? turnId : previous.completedTurnId,
@@ -292,7 +324,7 @@ function ActivationFixture() {
               )
             : [
                 ...previous.messages,
-                ...buildTurn(activeTabId, turnCount).map((message) => ({
+                ...buildTurn(tabId, turnCount).map((message) => ({
                   ...message,
                   historyTurnActive: true,
                 })),
@@ -307,10 +339,10 @@ function ActivationFixture() {
       data-chat-activation-fixture
       data-build-mode={import.meta.env.PROD ? 'production' : 'development'}
       data-active-tab={activeTabId}
-      data-presentation={presentation}
+      data-presentation="virtual"
       className="bg-bg-default mx-auto flex h-full w-full max-w-3xl flex-col p-4"
     >
-      <nav aria-label="Fixture tabs" className="flex gap-2 pb-2">
+      <nav aria-label="Fixture tabs" className="flex flex-wrap gap-2 pb-2">
         {TAB_IDS.map((id) => (
           <Button
             key={id}
@@ -341,7 +373,45 @@ function ActivationFixture() {
         >
           Complete turn
         </Button>
+        <Button
+          variant="outline"
+          onClick={() =>
+            setThreads((current) => {
+              const previous = requireThread(current, activeTabId);
+              const tail = previous.messages.at(-1);
+              return {
+                ...current,
+                [activeTabId]: {
+                  ...previous,
+                  messages: previous.messages.map((message) =>
+                    message === tail && message.role === 'assistant'
+                      ? {
+                          ...message,
+                          segments: [
+                            ...message.segments,
+                            {
+                              kind: 'text',
+                              text: 'Streaming paragraph with **additional output**.\n\n'.repeat(
+                                40,
+                              ),
+                            },
+                          ],
+                        }
+                      : message,
+                  ),
+                },
+              };
+            })
+          }
+        >
+          Append output
+        </Button>
       </nav>
+      {activeTabId !== 'a' && (
+        <Button variant="outline" onClick={() => updateTurn(false, 'a')}>
+          Add background turn to A
+        </Button>
+      )}
       {retainedTabs.map((tab) => (
         <Activity
           key={tab.id}
@@ -352,7 +422,7 @@ function ActivationFixture() {
             active={tab.id === activeTabId}
             activationId={tab.lastActiveSeq}
             thread={requireThread(threads, tab.id)}
-            recentTurnCount={presentation === 'full-list' ? undefined : 3}
+            onSend={() => updateTurn(false, tab.id)}
           />
         </Activity>
       ))}

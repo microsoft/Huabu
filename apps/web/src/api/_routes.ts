@@ -14,6 +14,7 @@
 const enc = encodeURIComponent;
 
 export const routes = {
+  deviceFiles: '/acp/files',
   // ── Deployment ────────────────────────────────────────────────────
   deploymentReadiness: '/deployment/readiness',
   canaryRedeployStatus: '/deployment/canary',

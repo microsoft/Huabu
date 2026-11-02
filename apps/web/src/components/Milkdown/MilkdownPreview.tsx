@@ -9,22 +9,24 @@
  * rules are scoped under `.milkdown` (see `milkdown-overrides.css`),
  * so no extra style isolation is required around the preview surface.
  *
- * When `enableBlockDrag` is set, the editor is mounted as editable so
+ * In mouse mode, `enableBlockDrag` mounts the editor as editable so
  * Crepe's block handle is available, but all input mutations are
  * suppressed via DOM capture handlers. The `previewMode` option
  * additionally disables the floating Toolbar / LinkTooltip / Table
  * chrome so the surface looks genuinely read-only without resorting
  * to CSS hacks.
+ * Touch/Pen mode uses non-editable DOM and an independent pointer grip.
  *
  * Multi-block drag is delegated to `attachBlockDragListeners` (shared
  * with `MilkdownEditor`); see `blockDrag.ts` for design notes.
  */
 
 import clsx from 'clsx';
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { resolveArtifactUrl } from '@/api/artifact';
+import { useEffectiveInputMode } from '@/hooks/useInputMode';
 import { useLinkFollowModifierHeld } from '@/hooks/useMultiSelectModifier';
 import { useSearchSource } from '@/hooks/useSearchSource';
 
@@ -35,6 +37,10 @@ import {
   type MilkdownTextSelection,
 } from './createMilkdown';
 import { markdownEquals, normalizeMarkdown } from './markdownUtils';
+import {
+  TouchBlockDragHandle,
+  type GetTouchDragPayload,
+} from './TouchBlockDragHandle';
 
 import type { MilkdownBlockDragEvent, MilkdownLinkActivation } from './types';
 export interface MilkdownPreviewProps {
@@ -57,6 +63,7 @@ export interface MilkdownPreviewProps {
   enableBlockDrag?: boolean;
   /** Fires alongside Crepe's native drag handler when a block drag begins. */
   onBlockDragStart?: (event: MilkdownBlockDragEvent) => void;
+  getTouchDragPayload?: GetTouchDragPayload;
   /** Reports only native text selections wholly inside this preview. */
   onTextSelection?: (selection: MilkdownPreviewSelection | null) => void;
 }
@@ -114,11 +121,19 @@ export function MilkdownPreview(
     canvasId,
     enableBlockDrag = false,
     onBlockDragStart,
+    getTouchDragPayload,
     linkActivation = 'plain',
     onLinkClick,
     onTextSelection,
   } = props;
   const resolvedAriaLabel = ariaLabel ?? t('editor.readOnlyContent');
+  const touchMode = useEffectiveInputMode() !== 'mouse';
+  const nativeDragEditable = enableBlockDrag && !touchMode;
+  const editableRef = useRef(nativeDragEditable);
+  editableRef.current = nativeDragEditable;
+  const [touchInstance, setTouchInstance] = useState<MilkdownInstance | null>(
+    null,
+  );
   const followModifierHeld = useLinkFollowModifierHeld(
     linkActivation === 'modifier',
   );
@@ -165,13 +180,6 @@ export function MilkdownPreview(
     // removed.
     const mountRoot: HTMLElement = container;
 
-    // Class hook used by `milkdown-overrides.css` to scope the compact
-    // block-handle (single 18px grip, no "+ add" button) to chat-card
-    // previews only — the standalone editor keeps the full Crepe handle.
-    if (enableBlockDrag) {
-      mountRoot.classList.add('milkdown-preview-host');
-    }
-
     const detachDrag = attachBlockDragListeners({
       mountRoot,
       instanceRef,
@@ -186,7 +194,7 @@ export function MilkdownPreview(
         // mode so Crepe shows the block handle and lets the user
         // initiate a native drag. Input mutations are still blocked by
         // the wrapper's capture handlers below.
-        editable: enableBlockDrag,
+        editable: editableRef.current,
         ariaLabel: ariaLabelRef.current,
         // Disable Crepe's edit-time chrome (Toolbar / LinkTooltip /
         // Table reorder handles) when the surface is drag-only. See
@@ -209,7 +217,9 @@ export function MilkdownPreview(
       }
 
       instance.setAriaLabel(ariaLabelRef.current);
+      instance.setReadonly(!editableRef.current);
       instanceRef.current = instance;
+      setTouchInstance(instance);
       mountRoot.setAttribute('data-search-source-ready', '');
 
       const pending = pendingMarkdownRef.current;
@@ -223,14 +233,18 @@ export function MilkdownPreview(
     return () => {
       cancelled = true;
       detachDrag();
-      mountRoot.classList.remove('milkdown-preview-host');
       const instance = instanceRef.current;
       instanceRef.current = null;
+      setTouchInstance(null);
       mountRoot.removeAttribute('data-search-source-ready');
       if (instance) void instance.destroy();
     };
     // Re-mount when drag mode toggles (rare, expected).
   }, [enableBlockDrag, linkActivation, hasLinkCallback]);
+
+  useEffect(() => {
+    instanceRef.current?.setReadonly(!nativeDragEditable);
+  }, [nativeDragEditable]);
 
   useEffect(() => {
     const mountRoot = containerRef.current;
@@ -452,27 +466,44 @@ export function MilkdownPreview(
   );
 
   return (
-    <div
-      ref={containerRef}
-      data-search-renderer
-      data-link-follow-held={
-        linkActivation === 'modifier' ? String(followModifierHeld) : undefined
-      }
-      className={clsx('[&_a]:pointer-events-auto', className)}
-      // Surface the read-only nature to assistive tech. In drag mode
-      // we still keep the inner ProseMirror `contenteditable=true` so
-      // the block-drag handle remains hit-testable, but we capture &
-      // swallow every input verb (typing, paste, cut, drop) above —
-      // so the visible behavior is read-only. `aria-readonly` lets
-      // screen readers convey that to the user. Pure-display mode
-      // (no block drag) keeps `aria-readonly` unset because
-      // `contenteditable=false` already communicates read-only.
-      aria-readonly={enableBlockDrag ? true : undefined}
-      onBeforeInputCapture={onBeforeInputCapture}
-      onKeyDownCapture={onKeyDownCapture}
-      onPasteCapture={onPasteCapture}
-      onCutCapture={onCutCapture}
-      onDropCapture={onDropCapture}
-    />
+    <>
+      <div
+        ref={containerRef}
+        data-search-renderer
+        data-link-follow-held={
+          linkActivation === 'modifier' ? String(followModifierHeld) : undefined
+        }
+        className={clsx('[&_a]:pointer-events-auto', className, {
+          'milkdown-preview-host': enableBlockDrag,
+          'milkdown-touch-blocks':
+            enableBlockDrag && touchMode && getTouchDragPayload,
+        })}
+        // Surface the read-only nature to assistive tech. In drag mode
+        // we still keep the inner ProseMirror `contenteditable=true` so
+        // the block-drag handle remains hit-testable, but we capture &
+        // swallow every input verb (typing, paste, cut, drop) above —
+        // so the visible behavior is read-only. `aria-readonly` lets
+        // screen readers convey that to the user. Pure-display mode
+        // (no block drag) keeps `aria-readonly` unset because
+        // `contenteditable=false` already communicates read-only.
+        aria-readonly={enableBlockDrag ? true : undefined}
+        onBeforeInputCapture={onBeforeInputCapture}
+        onKeyDownCapture={onKeyDownCapture}
+        onPasteCapture={onPasteCapture}
+        onCutCapture={onCutCapture}
+        onDropCapture={onDropCapture}
+      />
+      {enableBlockDrag &&
+      touchMode &&
+      getTouchDragPayload &&
+      touchInstance &&
+      containerRef.current ? (
+        <TouchBlockDragHandle
+          root={containerRef.current}
+          instance={touchInstance}
+          getPayload={getTouchDragPayload}
+        />
+      ) : null}
+    </>
   );
 }

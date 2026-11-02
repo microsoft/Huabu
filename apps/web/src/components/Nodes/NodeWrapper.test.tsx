@@ -60,8 +60,9 @@ vi.mock('@/store/gesturePreviewStore.ts', () => ({
   useGesturePreviewStore: (
     select: (state: {
       sketchStrokeSelection: Record<string, never>;
+      sketchSelectionPolygon: null;
     }) => unknown,
-  ) => select({ sketchStrokeSelection: {} }),
+  ) => select({ sketchStrokeSelection: {}, sketchSelectionPolygon: null }),
 }));
 vi.mock('@/store/connectPortStore.ts', () => ({
   useConnectPortStore: (select: (state: { pending: null }) => unknown) =>

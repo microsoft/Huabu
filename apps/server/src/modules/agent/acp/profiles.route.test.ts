@@ -117,6 +117,39 @@ afterEach(async () => {
 });
 
 describe('ordinary Profile catalog routes', () => {
+  it('hides the proxy from normal catalogues without hiding its connected device', async () => {
+    mocks.registry.listProfiles.mockReturnValue([
+      commandProfile,
+      { ...commandProfile, id: 'hidden', visible: false },
+    ]);
+    const server = await setup();
+    const response = await server.inject({
+      method: 'GET',
+      url: '/api/acp/profiles',
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().profiles).toEqual([commandProfile]);
+    expect(response.json().selectableProfileIds).not.toContain('hidden');
+    expect(response.json().connectedDevices).toContainEqual(
+      expect.objectContaining({ agentletId: 'machine-a', profileCount: 1 }),
+    );
+  });
+  it('reserves the bundled proxy harness for automatic hidden provisioning', async () => {
+    const server = await setup();
+    const response = await server.inject({
+      method: 'POST',
+      url: '/api/acp/profiles',
+      payload: {
+        alias: 'Proxy',
+        agentletId: 'machine-a',
+        workingDirPath: '/work',
+        launch: { kind: 'acp-harness', harnessId: 'proxy' },
+      },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(mocks.registry.createProfile).not.toHaveBeenCalled();
+  });
+
   it('projects offline metadata and persisted names without making their Profiles selectable', async () => {
     mocks.offlineIds.add('offline');
     mocks.registry.listProfiles.mockReturnValue([
@@ -259,7 +292,6 @@ describe('ordinary Profile catalog routes', () => {
     expect(response.statusCode).toBe(500);
     expect(response.json().code).toBe('device_names_unavailable');
   });
-
   it.each([
     ['machine-a', 'machine-a'],
     ['remote-machine-host', null],

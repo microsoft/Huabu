@@ -258,65 +258,81 @@ describe('POST /agent', () => {
       await app.close();
     }
   });
-  it('admits Ink in Operate mode and streams acceptance', async () => {
-    mocks.beginPreparation.mockReturnValue({
-      signal: new AbortController().signal,
-      finish: vi.fn(),
-    });
-    mocks.resolveFixedTarget.mockResolvedValue(null);
-    mocks.resolveTarget.mockResolvedValue(null);
-    mocks.buildChatEnvelope.mockResolvedValue(ENVELOPE);
-    mocks.invoke.mockImplementationOnce(async (options) => {
-      await options.envelope();
-      return {
-        binding: { kind: 'internal' },
-        fixedTarget: null,
+  it.each(['ink-intent', 'selection-intent'] as const)(
+    'admits %s in Operate mode and streams acceptance',
+    async (inputKind) => {
+      mocks.beginPreparation.mockReturnValue({
         signal: new AbortController().signal,
-        acceptance: Promise.resolve({
-          threadId: 'thread-a',
-          turnStartSeq: 1,
-        }),
-        events: events(),
-        dispose: vi.fn().mockResolvedValue(undefined),
-      };
-    });
-    const app = Fastify();
-    await app.register(agentRoutes, { prefix: '/agent' });
-    try {
-      const response = await app.inject({
-        method: 'POST',
-        url: '/agent',
-        payload: {
-          inputKind: 'ink-intent',
-          content: '',
-          threadId: 'thread-a',
-          canvasId: 'canvas-a',
-          mode: 'operate',
-          canvasContext: {
-            selectedNodes: [
-              {
-                id: 'sketch-a',
-                type: 'sketch',
-                strokeIds: ['stroke-a'],
-              },
-            ],
-          },
-        },
+        finish: vi.fn(),
       });
-      expect(response.statusCode, response.body).toBe(200);
-      expect(mocks.invoke).toHaveBeenCalledWith(
-        expect.objectContaining({ mode: 'operate' }),
-      );
-      expect(mocks.buildChatEnvelope).toHaveBeenCalledWith(
-        expect.objectContaining({ inputKind: 'ink-intent', content: '' }),
-      );
-      expect(response.headers['content-type']).toContain('text/event-stream');
-      expect(response.body).toContain('event: accepted');
-      expect(response.body).toContain('event: done');
-    } finally {
-      await app.close();
-    }
-  });
+      mocks.resolveFixedTarget.mockResolvedValue(null);
+      mocks.resolveTarget.mockResolvedValue(null);
+      mocks.buildChatEnvelope.mockResolvedValue({
+        ...ENVELOPE,
+        user: { ...ENVELOPE.user, inputKind },
+      });
+      mocks.invoke.mockImplementationOnce(async (options) => {
+        await options.envelope();
+        return {
+          binding: { kind: 'internal' },
+          fixedTarget: null,
+          signal: new AbortController().signal,
+          acceptance: Promise.resolve({
+            threadId: 'thread-a',
+            turnStartSeq: 1,
+          }),
+          events: events(),
+          dispose: vi.fn().mockResolvedValue(undefined),
+        };
+      });
+      const app = Fastify();
+      await app.register(agentRoutes, { prefix: '/agent' });
+      try {
+        const response = await app.inject({
+          method: 'POST',
+          url: '/agent',
+          payload: {
+            inputKind,
+            content: '',
+            threadId: 'thread-a',
+            canvasId: 'canvas-a',
+            mode: 'operate',
+            canvasContext: {
+              selectedNodes:
+                inputKind === 'selection-intent'
+                  ? [
+                      {
+                        id: 'text-a',
+                        type: 'text',
+                        content: 'Use the whole Text',
+                      },
+                      { id: 'note-a', type: 'note' },
+                    ]
+                  : [
+                      {
+                        id: 'sketch-a',
+                        type: 'sketch',
+                        strokeIds: ['stroke-a'],
+                      },
+                    ],
+            },
+          },
+        });
+        expect(response.statusCode, response.body).toBe(200);
+        expect(mocks.invoke).toHaveBeenCalledWith(
+          expect.objectContaining({ mode: 'operate' }),
+        );
+        expect(mocks.buildChatEnvelope).toHaveBeenCalledWith(
+          expect.objectContaining({ inputKind, content: '' }),
+        );
+        expect(response.headers['content-type']).toContain('text/event-stream');
+        expect(response.body).toContain('event: accepted');
+        expect(response.body).toContain('event: done');
+      } finally {
+        await app.close();
+      }
+    },
+  );
 
   it('returns an explicit conflict when Ink admission rejects built-in Chat', async () => {
     mocks.beginPreparation.mockReturnValue({

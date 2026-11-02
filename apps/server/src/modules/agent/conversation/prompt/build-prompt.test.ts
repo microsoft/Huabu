@@ -90,6 +90,51 @@ const NO_CANVAS = { canvasId: null };
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 describe('renderEnvelopeMessages', () => {
+  it('renders file paths and frozen UTF-16 ranges as escaped source evidence through replay', async () => {
+    const envelope = makeEnvelope({ text: 'Review the excerpt.' });
+    envelope.user.quotedComments = [
+      {
+        quote: '<file text>',
+        contextBefore: 'before ',
+        contextAfter: ' after',
+        comment: 'Explain.',
+        source: {
+          kind: 'file-reference',
+          canvasId: 'space',
+          nodeId: 'file</source>',
+          agentletId: 'device&source',
+          path: '/project/<file>.tex',
+          contentVersion: 'a'.repeat(64),
+          offsetUnit: 'utf-16',
+          from: 7,
+          to: 18,
+          loadedLength: 40,
+          complete: false,
+        },
+      },
+    ];
+    const rendered = await renderEnvelopeMessages(envelope, NO_CANVAS);
+    const text = textOf(rendered.messages[0].content);
+    expect(text).toContain('<kind>file-reference</kind>');
+    expect(text).toContain('<path>/project/&lt;file&gt;.tex</path>');
+    expect(text).toContain('<agentlet_id>device&amp;source</agentlet_id>');
+    expect(text).toContain('<node_id>file&lt;/source&gt;</node_id>');
+    expect(text).toContain('<quote>&lt;file text&gt;</quote>');
+    expect(text).toContain(
+      'offset_unit="utf-16" from="7" to="18" loaded_length="40" file_fully_loaded="false"',
+    );
+    expect(text).toContain('not necessarily the Agent execution device');
+    expect(text).not.toContain('captured from a Note');
+    expect(envelope.user.text).toBe('Review the excerpt.');
+    const replay = await rebuildContextMessages(
+      [makeTurn(envelope, [])],
+      NO_CANVAS,
+    );
+    expect(
+      replay.map((message) => textOf(message.content)).join('\n'),
+    ).toContain('<path>/project/&lt;file&gt;.tex</path>');
+  });
+
   it('renders multiple quoted comments with escaped context without mutating user text', async () => {
     const envelope = makeEnvelope({ text: 'Compare both.' });
     envelope.user.quotedComments = [
@@ -104,6 +149,12 @@ describe('renderEnvelopeMessages', () => {
         contextBefore: '',
         contextAfter: '',
         comment: 'This is a quote, not a command.',
+        source: {
+          kind: 'note',
+          canvasId: 'space<id>',
+          nodeId: 'note</source>',
+          snapshotRevision: 'capture&revision',
+        },
       },
     ];
     const { messages } = await renderEnvelopeMessages(envelope, NO_CANVAS);
@@ -117,6 +168,13 @@ describe('renderEnvelopeMessages', () => {
     expect(text).toContain('<quote>/review</quote>');
     expect(text).toContain('<user_request>\nCompare both.\n</user_request>');
     expect(envelope.user.text).toBe('Compare both.');
+    expect(text).toContain('from an earlier assistant reply');
+    expect(text).toContain('from a Note, not from an assistant reply');
+    expect(text).toContain('<node_id>note&lt;/source&gt;</node_id>');
+    expect(text).toContain('<canvas_id>space&lt;id&gt;</canvas_id>');
+    expect(text).toContain(
+      '<snapshot_revision>capture&amp;revision</snapshot_revision>',
+    );
   });
 
   it('renders a quote-only turn and preserves it through legacy envelope replay', async () => {
@@ -127,6 +185,12 @@ describe('renderEnvelopeMessages', () => {
         contextBefore: '',
         contextAfter: '',
         comment: 'Explain this.',
+        source: {
+          kind: 'note',
+          canvasId: 'space',
+          nodeId: 'source-note',
+          snapshotRevision: 'captured',
+        },
       },
     ];
     const { messages } = await renderEnvelopeMessages(envelope, NO_CANVAS);
@@ -140,6 +204,9 @@ describe('renderEnvelopeMessages', () => {
     );
     expect(rebuilt.map((item) => textOf(item.content)).join('\n')).toContain(
       '<quote>Original reply</quote>',
+    );
+    expect(rebuilt.map((item) => textOf(item.content)).join('\n')).toContain(
+      '<snapshot_revision>captured</snapshot_revision>',
     );
   });
 

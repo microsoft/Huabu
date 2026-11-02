@@ -19,7 +19,7 @@ import { isVisibleWorldNode } from '@/utils/spaceHierarchy';
 import { Loading } from '../../components/Common/Loading';
 import { toast } from '../../components/Common/Toast';
 import { hasNodePreview } from '../../components/Nodes/previews';
-import { CanvasLayerPanel } from '../../components/Panels/CanvasLayerPanel';
+import { CanvasSidebar } from '../../components/Panels/CanvasSidebar';
 import { CanvasHeader } from '../../components/Panels/Header/CanvasHeader.tsx';
 import { PreviewWorkspacePanel } from '../../components/Panels/PreviewWorkspace/PreviewWorkspacePanel';
 import { useGlobalSearchHotkey } from '../../hooks/useGlobalSearchHotkey';
@@ -446,7 +446,7 @@ export default function CanvasPage() {
       <SpaceActions />
       <MainLayout
         header={<CanvasHeader />}
-        leftPanel={<CanvasLayerPanel />}
+        leftPanel={<CanvasSidebar />}
         rightPanel={<PreviewWorkspacePanel />}
       >
         <CenterArea canvasShortcutsDisabled={isShortcutsOpen} />

@@ -23,6 +23,16 @@ import { useAcpProfilesStore } from '@/store/acpProfilesStore';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
+import { usePanelStore } from '@/store/panelStore';
+import {
+  createEmptyWorkspace,
+  findTabByTarget,
+  groupOfTab,
+} from '@/store/previewWorkspace/model';
+import {
+  selectActiveTab,
+  usePreviewWorkspaceStore,
+} from '@/store/previewWorkspace/store';
 
 import { StrokeSelectionToolbar } from './StrokeSelectionToolbar';
 
@@ -252,6 +262,16 @@ function addQuestion(data: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  usePreviewWorkspaceStore.setState({
+    canvasId: 'canvas-1',
+    workspace: createEmptyWorkspace('main'),
+    nodeFocusRequest: null,
+    chatOpenRequest: null,
+  });
+  usePanelStore.setState({
+    isRightCollapsed: true,
+    focusChatInputRequest: null,
+  });
   mocks.selecting = false;
   mocks.recentConversation
     .mockReset()
@@ -361,6 +381,343 @@ afterEach(() => {
 });
 
 describe('StrokeSelectionToolbar Ink submission', () => {
+  it.each(['continue', 'new', 'nodes'] as const)(
+    'reveals the accepted %s destination permanently while retaining the previous inspection tab',
+    async (kind) => {
+      if (kind === 'new') {
+        const created = mocks.createQuestion.getMockImplementation()?.();
+        mocks.createQuestion.mockImplementationOnce(() => {
+          addQuestion({ threadId: 'thread-1' });
+          return created;
+        });
+      } else {
+        addQuestion({ threadId: 'thread-1' });
+      }
+      if (kind === 'nodes') {
+        const canvas = useCanvasStore.getState();
+        canvas._setStateNoAutosave({
+          nodes: [
+            ...canvas.nodes.filter((node) => node.type !== 'sketch'),
+            {
+              id: 'text-1',
+              type: 'text',
+              selected: true,
+              position: { x: 0, y: 0 },
+              measured: { width: 200, height: 100 },
+              data: { content: 'Selected text' },
+            },
+          ],
+        });
+        useGesturePreviewStore.setState({ sketchStrokeSelection: {} });
+      }
+      const previousTabId = usePreviewWorkspaceStore
+        .getState()
+        .openPreviewTarget(
+          { kind: 'node', canvasId: 'canvas-1', nodeId: 'previous-note' },
+          { transient: true },
+        );
+      const before = usePreviewWorkspaceStore.getState().workspace;
+      const pending = deferredResult();
+      let callbacks: AgentTurnCallbacks | undefined;
+      mocks.dispatch.mockImplementationOnce(
+        (_input: unknown, received: AgentTurnCallbacks) => {
+          callbacks = received;
+          received.onStarted?.();
+          return pending.promise;
+        },
+      );
+      await mountToolbar();
+      if (kind !== 'new') await selectConversation();
+      await act(async () => sendButton().click());
+      expect(mocks.dispatch).toHaveBeenCalledOnce();
+      expect(usePreviewWorkspaceStore.getState().workspace).toBe(before);
+      expect(usePanelStore.getState().isRightCollapsed).toBe(true);
+
+      act(() =>
+        callbacks?.onAccepted?.({ threadId: 'thread-1', turnStartSeq: 1 }),
+      );
+      const preview = usePreviewWorkspaceStore.getState();
+      const active = selectActiveTab(preview);
+      expect(active?.target).toEqual({
+        kind: 'node',
+        canvasId: 'canvas-1',
+        nodeId: 'question-1',
+      });
+      expect(active?.transient).toBe(false);
+      expect(preview.workspace.tabs[previousTabId]).toEqual(
+        before.tabs[previousTabId],
+      );
+      expect(preview.workspace.groups).toHaveLength(1);
+      expect(preview.workspace.groups[0].tabIds).toEqual([
+        previousTabId,
+        active?.id,
+      ]);
+      expect(preview.chatOpenRequest).toMatchObject({
+        tabId: active?.id,
+        position: 'bottom',
+      });
+      expect(preview.nodeFocusRequest).toBeNull();
+      expect(usePanelStore.getState().isRightCollapsed).toBe(false);
+      expect(usePanelStore.getState().focusChatInputRequest).toBeNull();
+      expect(mocks.createQuestion).toHaveBeenCalledTimes(
+        kind === 'new' ? 1 : 0,
+      );
+      pending.resolve({
+        status: 'completed',
+        accepted: { threadId: 'thread-1', turnStartSeq: 1 },
+      });
+      await act(async () => pending.promise);
+    },
+  );
+
+  it('activates and promotes an existing Agent tab without duplicating or moving it', async () => {
+    addQuestion({ threadId: 'thread-1' });
+    const preview = usePreviewWorkspaceStore.getState();
+    const previousId = preview.openPreviewTarget(
+      { kind: 'node', canvasId: 'canvas-1', nodeId: 'previous-note' },
+      { transient: true },
+    );
+    const target = {
+      kind: 'node' as const,
+      canvasId: 'canvas-1',
+      nodeId: 'question-1',
+    };
+    const agentId = preview.openPreviewTarget(target, {
+      transient: true,
+      openToSide: true,
+    });
+    const groupId = groupOfTab(
+      usePreviewWorkspaceStore.getState().workspace,
+      agentId,
+    )?.id;
+    preview.activateTab(previousId);
+    const pending = deferredResult();
+    let callbacks: AgentTurnCallbacks | undefined;
+    mocks.dispatch.mockImplementationOnce(
+      (_input: unknown, received: AgentTurnCallbacks) => {
+        callbacks = received;
+        return pending.promise;
+      },
+    );
+    await renderToolbar();
+    await selectConversation();
+    await act(async () => sendButton().click());
+    act(() =>
+      callbacks?.onAccepted?.({ threadId: 'thread-1', turnStartSeq: 1 }),
+    );
+    const state = usePreviewWorkspaceStore.getState();
+    expect(selectActiveTab(state)?.id).toBe(agentId);
+    expect(findTabByTarget(state.workspace, target)?.transient).toBe(false);
+    expect(groupOfTab(state.workspace, agentId)?.id).toBe(groupId);
+    expect(state.workspace.activeGroupId).toBe(groupId);
+    expect(Object.keys(state.workspace.tabs)).toHaveLength(2);
+    expect(state.workspace.tabs[previousId]).toBeDefined();
+    act(() =>
+      callbacks?.onAccepted?.({ threadId: 'thread-1', turnStartSeq: 1 }),
+    );
+    expect(usePreviewWorkspaceStore.getState().workspace).toBe(state.workspace);
+    pending.resolve({
+      status: 'completed',
+      accepted: { threadId: 'thread-1', turnStartSeq: 1 },
+    });
+    await act(async () => pending.promise);
+  });
+
+  it.each([
+    'rejected',
+    'canvas-changed',
+    'selection-changed',
+    'removed',
+    'rebound',
+  ] as const)(
+    'does not reveal a destination for %s acceptance',
+    async (change) => {
+      addQuestion({ threadId: 'thread-1' });
+      const pending = deferredResult();
+      let callbacks: AgentTurnCallbacks | undefined;
+      mocks.dispatch.mockImplementationOnce(
+        (_input: unknown, received: AgentTurnCallbacks) => {
+          callbacks = received;
+          return pending.promise;
+        },
+      );
+      await renderToolbar();
+      await selectConversation();
+      await act(async () => sendButton().click());
+      act(() => {
+        const canvas = useCanvasStore.getState();
+        if (change === 'canvas-changed')
+          canvas._setStateNoAutosave({ canvasId: 'canvas-2' });
+        if (change === 'selection-changed')
+          useGesturePreviewStore.setState({
+            sketchStrokeSelection: { 'sketch-1': ['stroke-2'] },
+          });
+        if (change === 'removed')
+          canvas._setStateNoAutosave({
+            nodes: canvas.nodes.filter((node) => node.id !== 'question-1'),
+          });
+        if (change === 'rebound')
+          canvas._setStateNoAutosave({
+            nodes: canvas.nodes.map((node) =>
+              node.id === 'question-1'
+                ? { ...node, data: { ...node.data, threadId: 'other-thread' } }
+                : node,
+            ),
+          });
+      });
+      act(() => {
+        if (change === 'rejected') callbacks?.onAcceptanceRejected?.();
+        else callbacks?.onAccepted?.({ threadId: 'thread-1', turnStartSeq: 1 });
+      });
+      expect(
+        Object.keys(usePreviewWorkspaceStore.getState().workspace.tabs),
+      ).toHaveLength(0);
+      expect(usePanelStore.getState().isRightCollapsed).toBe(true);
+      expect(usePreviewWorkspaceStore.getState().chatOpenRequest).toBeNull();
+      pending.resolve({ status: 'rejected' });
+      await act(async () => pending.promise);
+    },
+  );
+
+  it.each(['text', 'note', 'frame'])(
+    'offers explicit %s-only lasso submission without Ink style controls or a screenshot',
+    async (type) => {
+      const content =
+        'Full content\n' + 'Complete Text must not be truncated. '.repeat(20);
+      useCanvasStore.getState()._setStateNoAutosave({
+        nodes: [
+          {
+            id: 'source',
+            type,
+            selected: true,
+            position: { x: 0, y: 0 },
+            measured: { width: 200, height: 100 },
+            data: { content, label: 'Source' },
+          },
+        ],
+      });
+      useGesturePreviewStore.setState({ sketchStrokeSelection: {} });
+      mocks.dispatch.mockResolvedValue({ status: 'rejected' });
+      await mountToolbar();
+
+      expect(sendButton().getAttribute('aria-label')).toBe(
+        'Send selection request',
+      );
+      expect(document.querySelector('[data-sketch-controls]')).toBeNull();
+      expect(mocks.dispatch).not.toHaveBeenCalled();
+      await act(async () => sendButton().click());
+
+      const prepared = mocks.prepare.mock.calls[0][0];
+      expect(prepared.inputKind).toBe('selection-intent');
+      expect(prepared.content).toBe('');
+      expect(prepared.groundingVisual).toBeUndefined();
+      expect(mocks.prepareGrounding).not.toHaveBeenCalled();
+      expect(prepared.sources.canvasContext.selectedNodes).toEqual([
+        {
+          id: 'source',
+          type,
+          label: 'Source',
+          ...(type === 'text' ? { content } : {}),
+          ...(type === 'frame' ? { referenceOnly: true } : {}),
+        },
+      ]);
+      expect(
+        agentRequestSchema.safeParse({
+          inputKind: prepared.inputKind,
+          content: prepared.content,
+          canvasId: 'canvas-1',
+          canvasContext: prepared.sources.canvasContext,
+        }).success,
+      ).toBe(true);
+      expect(mocks.createQuestion).toHaveBeenCalledWith(
+        expect.objectContaining({
+          label: 'New selection request',
+          pendingInkIntentLabel: true,
+        }),
+      );
+    },
+  );
+
+  it('does not replace ordinary click-selection toolbars', async () => {
+    useCanvasStore.getState()._setStateNoAutosave({
+      nodes: [
+        {
+          id: 'text',
+          type: 'text',
+          selected: true,
+          position: { x: 0, y: 0 },
+          data: { content: 'Text' },
+        },
+      ],
+    });
+    useGesturePreviewStore.setState({
+      sketchStrokeSelection: {},
+      sketchSelectionPolygon: null,
+      sketchSelectionSession: null,
+    });
+    await mountToolbar();
+    expect(document.querySelector('.canvas-context-submit')).toBeNull();
+  });
+
+  it('captures a shallow Frame directory and full standalone Text, without Note bodies', () => {
+    useCanvasStore.getState()._setStateNoAutosave({
+      nodes: [
+        { id: 'frame', type: 'frame', position: { x: 0, y: 0 }, data: {} },
+        {
+          id: 'nested',
+          type: 'frame',
+          parentId: 'frame',
+          position: { x: 0, y: 0 },
+          data: {},
+        },
+        {
+          id: 'deep',
+          type: 'text',
+          parentId: 'nested',
+          position: { x: 0, y: 0 },
+          data: { content: 'Do not expand' },
+        },
+        {
+          id: 'child',
+          type: 'text',
+          parentId: 'frame',
+          position: { x: 0, y: 0 },
+          data: { content: 'Read on demand' },
+        },
+        {
+          id: 'text',
+          type: 'text',
+          position: { x: 0, y: 0 },
+          data: { content: 'Include all text' },
+        },
+        {
+          id: 'note',
+          type: 'note',
+          position: { x: 0, y: 0 },
+          data: { label: 'Note', content: 'Lazy body' },
+        },
+      ],
+    });
+    const context = useCanvasStore.getState().getAgentChatContext({
+      nodeIds: ['frame', 'text', 'note'],
+      strokeSelection: {},
+      lasso: true,
+    });
+    expect(context.selectedNodes).toEqual([
+      {
+        id: 'frame',
+        type: 'frame',
+        referenceOnly: true,
+        children: [
+          { id: 'nested', type: 'frame', referenceOnly: true },
+          { id: 'child', type: 'text', referenceOnly: true },
+        ],
+      },
+      { id: 'text', type: 'text', content: 'Include all text' },
+      { id: 'note', type: 'note', label: 'Note' },
+    ]);
+  });
+
   it('ignores a cached read-only recent conversation without changing its mode', async () => {
     mocks.dispatch.mockResolvedValueOnce({ status: 'completed' });
     addQuestion({ agentMode: 'ask' });
@@ -1211,8 +1568,9 @@ describe('StrokeSelectionToolbar Ink submission', () => {
       {
         id: 'frame',
         type: 'frame',
-        children: [{ id: 'sketch-1', type: 'sketch', strokeIds: ['stroke-1'] }],
+        referenceOnly: true,
       },
+      { id: 'sketch-1', type: 'sketch', strokeIds: ['stroke-1'] },
     ]);
     expect(prepared.groundingVisual.selectedNodeIds).toEqual(['frame']);
     expect(JSON.stringify(prepared.sources)).not.toContain('private reference');
@@ -1780,13 +2138,12 @@ describe('StrokeSelectionToolbar Ink submission', () => {
               {
                 id: 'frame-1',
                 type: 'frame',
-                children: [
-                  {
-                    id: 'sketch-1',
-                    type: 'sketch',
-                    strokeIds: ['stroke-1'],
-                  },
-                ],
+                referenceOnly: true,
+              },
+              {
+                id: 'sketch-1',
+                type: 'sketch',
+                strokeIds: ['stroke-1'],
               },
             ],
           },

@@ -11,6 +11,9 @@ import {
   translateOf,
 } from './helpers';
 
+import type * as PanelModule from '../src/store/panelStore';
+import type * as PreviewModule from '../src/store/previewWorkspace/store';
+
 /**
  * Mouse-mode canvas behavior — the half of the touch/pen interaction work
  * that *can* be driven by automation (real-device tests cover finger/pen).
@@ -781,8 +784,14 @@ test.describe('canvas mouse mode', () => {
   test('lassoed Ink creates one Question and clears after acceptance', async ({
     page,
   }) => {
+    await page.evaluate(async () => {
+      const path = '/src/store/panelStore.ts';
+      const { usePanelStore } = (await import(path)) as typeof PanelModule;
+      usePanelStore.getState().setRightCollapsed(true);
+    });
+    await expect(page.locator('[data-canvas-panel="right"]')).toBeHidden();
     const center = await paneCenter(page);
-    const toolbar = page.locator('.react-flow__panel.bottom.center');
+    const toolbar = page.locator('[data-canvas-main-toolbar]');
     await toolbar.getByRole('button', { name: /^Sketch/ }).click();
 
     await page.mouse.move(center.x - 45, center.y);
@@ -899,7 +908,6 @@ test.describe('canvas mouse mode', () => {
     expect(pendingSendBox.width).toBe(sendBox.width);
     expect(pendingSendBox.height).toBe(sendBox.height);
     await expect(page.getByRole('tooltip')).toHaveCount(0);
-    await page.keyboard.press('s');
     await expect(page.locator('[data-stroke-selection-region]')).toBeVisible();
     await expect(selectedInk).toBeVisible();
     releaseAgentRequest();
@@ -908,6 +916,20 @@ test.describe('canvas mouse mode', () => {
     await expect(send).toHaveCount(0);
     await expect(page.locator('[data-stroke-selection-region]')).toHaveCount(0);
     await expect(selectedInk).toHaveCount(0);
+    await expect(page.locator('[data-canvas-panel="right"]')).toBeVisible();
+    await expect(page.getByRole('tab', { selected: true })).toBeVisible();
+    const nodeId = await page
+      .locator('.react-flow__node-question')
+      .getAttribute('data-id');
+    expect(
+      await page.evaluate(async () => {
+        const path = '/src/store/previewWorkspace/store.ts';
+        const { usePreviewWorkspaceStore, selectActiveTab } = (await import(
+          path
+        )) as typeof PreviewModule;
+        return selectActiveTab(usePreviewWorkspaceStore.getState())?.target;
+      }),
+    ).toMatchObject({ kind: 'node', nodeId });
   });
 
   test('mixed Ink submits hidden current-LOD Canvas grounding', async ({

@@ -15,6 +15,8 @@ import {
 
 import { i18n } from '@/i18n';
 import { useAcpProfilesStore } from '@/store/acpProfilesStore';
+import useCanvasStore from '@/store/canvasStore';
+import { usePanelStore } from '@/store/panelStore';
 import { useWorkspaceStore } from '@/store/workspaceStore';
 
 import { WorkingDirectoryOverride } from './WorkingDirectoryOverride';
@@ -99,6 +101,29 @@ describe('WorkingDirectoryOverride', () => {
     editable: true,
     saving: false,
   };
+  it('browses the exact effective device/path without changing the execution directory', async () => {
+    useCanvasStore.setState({ canvasId: 'canvas-files' });
+    const onSave = vi.fn();
+    await render({
+      ...defaultProps,
+      agentletId: 'frozen-device',
+      effectiveWorkingDirPath: '/frozen/path',
+      editable: false,
+      onSave,
+    });
+    await openPopover();
+    await clickAction('Browse files');
+    expect(usePanelStore.getState()).toMatchObject({
+      leftMode: 'files',
+      isLeftCollapsed: false,
+      filesLocation: {
+        canvasId: 'canvas-files',
+        agentletId: 'frozen-device',
+        path: '/frozen/path',
+      },
+    });
+    expect(onSave).not.toHaveBeenCalled();
+  });
 
   it('offers picking only while editing on the confirmed device and saves only on Done', async () => {
     useWorkspaceStore.setState({

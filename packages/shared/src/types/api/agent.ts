@@ -19,6 +19,7 @@
 import { z } from 'zod';
 
 import { agentWorkingDirectorySchema } from './agent-profile.js';
+import { fileReferenceSchema } from './device-files.js';
 import { inkResourceReferencesSchema } from './ink-sigil.js';
 import { REASONING_EFFORT_VALUES } from './llm.js';
 import {
@@ -74,6 +75,10 @@ export type WireNodeRef = z.infer<typeof wireNodeRefSchema>;
  * before any prompt rendering. Never sent to the LLM directly.
  */
 export interface WireSelectionNode extends WireNodeRef {
+  /** Full Text content frozen at explicit lasso submission time. */
+  content?: string;
+  /** A lassoed container exposes a directory, not eagerly rendered children. */
+  referenceOnly?: boolean;
   /** Source URL — only present for `type === 'image'`. */
   src?: string;
   /**
@@ -95,6 +100,8 @@ export const wireSelectionNodeSchema: z.ZodType<WireSelectionNode> = z.lazy(
       id: z.string().min(1),
       type: z.enum(CANVAS_NODE_TYPES),
       label: z.string().optional(),
+      content: z.string().optional(),
+      referenceOnly: z.boolean().optional(),
       src: z.string().optional(),
       strokeIds: z.array(z.string()).optional(),
       children: z.array(wireSelectionNodeSchema).optional(),
@@ -183,8 +190,16 @@ export const agentBindingSchema = z.discriminatedUnion('kind', [
   }),
 ]) satisfies z.ZodType<AgentBinding>;
 
-export const agentInputKindSchema = z.enum(['text', 'ink-intent']);
+export const agentInputKindSchema = z.enum([
+  'text',
+  'ink-intent',
+  'selection-intent',
+]);
 export type AgentInputKind = z.infer<typeof agentInputKindSchema>;
+
+export function isCanvasIntent(inputKind: AgentInputKind | undefined): boolean {
+  return inputKind === 'ink-intent' || inputKind === 'selection-intent';
+}
 
 const inkInterpretationTextSchema = z
   .string()
@@ -316,6 +331,35 @@ export const quotedCommentSchema = z.object({
   contextBefore: z.string(),
   contextAfter: z.string(),
   comment: z.string().trim().min(1),
+  source: z
+    .discriminatedUnion('kind', [
+      z.object({
+        kind: z.literal('note'),
+        canvasId: z.string().min(1),
+        nodeId: z.string().min(1),
+        snapshotRevision: z.string().min(1),
+      }),
+      z
+        .object({
+          kind: z.literal('file-reference'),
+          canvasId: z.string().min(1),
+          nodeId: z.string().min(1),
+          agentletId: fileReferenceSchema.shape.agentletId,
+          path: fileReferenceSchema.shape.path,
+          contentVersion: z.string().regex(/^[a-f0-9]{64}$/),
+          offsetUnit: z.literal('utf-16'),
+          from: z.number().int().nonnegative(),
+          to: z.number().int().positive(),
+          loadedLength: z.number().int().nonnegative(),
+          complete: z.boolean(),
+        })
+        .refine(
+          (source) =>
+            source.from < source.to && source.to <= source.loadedLength,
+          'Selection must be inside the loaded document',
+        ),
+    ])
+    .optional(),
 });
 export type QuotedComment = z.infer<typeof quotedCommentSchema>;
 
@@ -387,6 +431,29 @@ export const agentRequestSchema = z
     reasoningEffort: z.enum(REASONING_EFFORT_VALUES).optional(),
   })
   .superRefine((request, context) => {
+    if (request.inputKind === 'selection-intent') {
+      const nodes = request.canvasContext?.selectedNodes ?? [];
+      if (
+        !request.canvasId ||
+        !nodes.some((node) => node.type !== 'question') ||
+        hasPartialSketchSelection(nodes)
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['canvasContext'],
+          message:
+            'Selection requests require a Canvas and selected nodes without partial Ink',
+        });
+      }
+      if (request.inkResources?.length || request.groundingVisual) {
+        context.addIssue({
+          code: 'custom',
+          path: ['inputKind'],
+          message: 'Ink resources and grounding require an Ink request',
+        });
+      }
+      return;
+    }
     if (request.inputKind !== 'ink-intent') {
       if (request.inkResources?.length) {
         context.addIssue({

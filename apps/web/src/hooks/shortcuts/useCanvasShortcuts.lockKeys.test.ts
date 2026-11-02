@@ -195,6 +195,34 @@ describe('useCanvasShortcuts catalog key lock', () => {
     expect(canvasActions.sendSelectedToOrder).toHaveBeenLastCalledWith('top');
   });
 
+  it('blocks Delete and Undo from a saving dialog before bubbling handlers run', () => {
+    canvasActions.nodes = [{ id: 'selected', selected: true, data: {} }];
+    const dialog = document.createElement('dialog');
+    dialog.setAttribute('role', 'dialog');
+    dialog.open = true;
+    container.append(dialog);
+    dialog.addEventListener('keydown', (event) => event.stopPropagation());
+    act(() => {
+      dialog.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Delete',
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      dialog.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'z',
+          metaKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    expect(canvasActions.deleteNodes).not.toHaveBeenCalled();
+    expect(canvasActions.undo).not.toHaveBeenCalled();
+  });
+
   it('blocks body-targeted Delete and Undo during a desktop save, then resumes', () => {
     canvasActions.nodes = [{ id: 'selected', selected: true, data: {} }];
     const deleteSelected = () =>

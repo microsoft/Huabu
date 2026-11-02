@@ -114,6 +114,30 @@ function buildInternal(turns: AgentTurn[]): ChatHistoryItem[] {
   return messages;
 }
 
+it('restores node-only selection interpretation without synthetic text or Ink sources', () => {
+  const envelope = makeEnvelope('');
+  envelope.user.inputKind = 'selection-intent';
+  envelope.focus.selection.selectedIds = ['text', 'note'];
+  envelope.focus.selection.textContents = [
+    { nodeId: 'text', content: 'Summarize the note' },
+  ];
+  const messages = buildInternal([
+    {
+      request: createChatSubmission(envelope),
+      transcript: [reportMessage({ text: 'Summarize the note' })],
+    },
+  ]);
+  expect(messages).toEqual([
+    {
+      role: 'user',
+      content: '',
+      inputKind: 'selection-intent',
+      selectedNodeIds: ['text', 'note'],
+      inkInterpretation: { state: 'reported', text: 'Summarize the note' },
+    },
+  ]);
+});
+
 function inkTurn(
   transcript: FoldedMessage[],
   meta?: AgentTurn['meta'],
@@ -155,6 +179,31 @@ describe('buildHistoryFromTurns', () => {
           contextBefore: 'Before ',
           contextAfter: ' after',
           comment: 'Explain this.',
+          source: {
+            kind: 'note',
+            canvasId: 'space',
+            nodeId: 'note',
+            snapshotRevision: 'captured',
+          },
+        },
+        {
+          quote: 'file excerpt',
+          contextBefore: 'before ',
+          contextAfter: ' after',
+          comment: 'Explain this file.',
+          source: {
+            kind: 'file-reference',
+            canvasId: 'space',
+            nodeId: 'file',
+            agentletId: 'device',
+            path: '/source.tex',
+            contentVersion: 'a'.repeat(64),
+            offsetUnit: 'utf-16',
+            from: 7,
+            to: 19,
+            loadedLength: 40,
+            complete: true,
+          },
         },
       ];
       const messages = build([

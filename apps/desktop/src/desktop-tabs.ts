@@ -81,7 +81,7 @@ export class DesktopCloseCancelledError extends Error {
 export class DesktopTabs {
   private tabs: ContentTab[] = [];
   private activeId = HOME_ID;
-  private newTabReturnId = HOME_ID;
+  private canChangeWorkspace = false;
   private workspaceId: string | null = null;
   private busy = false;
   private homeMenuPosition: DesktopHomeMenuPosition | null = null;
@@ -146,6 +146,7 @@ export class DesktopTabs {
       activeId: this.activeId,
       workspaceId: this.workspaceId,
       busy: this.busy,
+      canChangeWorkspace: this.canChangeWorkspace,
     };
   }
 
@@ -282,7 +283,9 @@ export class DesktopTabs {
     contents.on('will-navigate', (event, url) => {
       if (isApplicationLink(url)) {
         event.preventDefault();
-        this.runAction(async () => this.open(tabNavigationFromUrl(url)));
+        this.runAction(async () =>
+          this.open(tabNavigationFromUrl(url), contents),
+        );
         return;
       }
       if (isSameOrigin(url, this.origin)) return;
@@ -346,6 +349,7 @@ export class DesktopTabs {
   }
 
   private fail(tab: ContentTab, message: string): void {
+    if (!tab.view) return;
     console.error('[desktop-tabs]', message);
     const notify = !tab.failureNotified;
     tab.failureNotified = true;
@@ -463,7 +467,6 @@ export class DesktopTabs {
       tab.state.id = NEW_DESKTOP_TAB_ID;
       tab.state.title = 'New tab';
       tab.state.loading = false;
-      this.newTabReturnId = this.activeId;
       this.tabs.push(tab);
     }
     try {
@@ -477,15 +480,19 @@ export class DesktopTabs {
     }
   }
 
-  open(raw: unknown): void {
+  open(raw: unknown, sender?: WebContents): void | Promise<void> {
     if (this.busy)
       throw new Error('Tabs are saving. Try again after saving finishes.');
     const target = parseTabNavigation(raw);
     if (target.canvasId && !this.workspaceId)
       throw new Error('Workspace is not ready');
+    const source =
+      sender && !this.isShell(sender) ? this.contentTab(sender) : undefined;
     const previousTabs = this.tabs.slice();
     const replacingNewTab =
-      target.canvasId !== null && this.activeId === NEW_DESKTOP_TAB_ID;
+      target.canvasId !== null &&
+      this.activeId === NEW_DESKTOP_TAB_ID &&
+      !source?.state.canvasId;
     const blankIndex = this.tabs.findIndex(
       (entry) => entry.state.id === NEW_DESKTOP_TAB_ID,
     );
@@ -494,6 +501,8 @@ export class DesktopTabs {
         ? entry.state.id === HOME_ID
         : entry.state.canvasId === target.canvasId,
     );
+    if (!tab && target.canvasId && source?.state.canvasId)
+      return this.replaceSpace(source, target);
     const created = !tab;
     if (!tab) {
       tab = this.newTab(target.canvasId);
@@ -523,6 +532,33 @@ export class DesktopTabs {
     if (tab.ready && tab.navigation) {
       tab.view?.webContents.send('tabs:navigate', tab.navigation);
       delete tab.navigation;
+    }
+  }
+
+  private async replaceSpace(
+    source: ContentTab,
+    target: DesktopTabNavigation,
+  ): Promise<void> {
+    const replacement = this.newTab(target.canvasId);
+    replacement.state.id = source.state.id;
+    replacement.navigation = target;
+    this.setHomeMenu(null);
+    this.busy = true;
+    this.publish();
+    try {
+      await this.drain(source);
+      this.ensureView(replacement);
+      const next = this.tabs.map((tab) => (tab === source ? replacement : tab));
+      this.persist(next, replacement.state.id);
+      this.tabs = next;
+      this.activeId = replacement.state.id;
+      this.destroyTab(source);
+      this.showActiveTab();
+    } catch (error) {
+      this.destroyTab(replacement);
+      throw error;
+    } finally {
+      this.resume();
     }
   }
 
@@ -840,17 +876,16 @@ export class DesktopTabs {
           this.resume();
           return;
         }
-      } else {
+      } else if (content.ready || !content.state.loading) {
         await this.drainBeforeDestruction(content, 'close');
       }
       const index = this.tabs.indexOf(tab);
       const remaining = this.tabs.filter((entry) => entry !== tab);
       const activeId =
         this.activeId === id
-          ? id === NEW_DESKTOP_TAB_ID
-            ? (remaining.find((entry) => entry.state.id === this.newTabReturnId)
-                ?.state.id ?? HOME_ID)
-            : remaining[Math.max(0, index - 1)].state.id
+          ? (remaining[index]?.state.id ??
+            remaining[index - 1]?.state.id ??
+            HOME_ID)
           : this.activeId;
       const next = remaining.find((entry) => entry.state.id === activeId);
       if (!next) throw new Error('No remaining Tab can be activated');
@@ -1005,6 +1040,54 @@ export class DesktopTabs {
       raw &&
       typeof raw === 'object' &&
       'type' in raw &&
+      raw.type === 'sync-workspace-capabilities'
+    ) {
+      if (!sender || this.contentTab(sender).state.id !== HOME_ID)
+        throw new Error('Only Home can synchronize Workspace capabilities');
+      if (
+        !('canChangeWorkspace' in raw) ||
+        typeof raw.canChangeWorkspace !== 'boolean'
+      )
+        throw new Error('Invalid Workspace capabilities');
+      this.canChangeWorkspace = raw.canChangeWorkspace;
+      if (!this.canChangeWorkspace) this.setHomeMenu(null);
+      this.publish();
+      return;
+    }
+    if (
+      raw &&
+      typeof raw === 'object' &&
+      'type' in raw &&
+      raw.type === 'move-tab'
+    ) {
+      if (!sender || !this.isShell(sender))
+        throw new Error('Only the desktop shell can reorder Tabs');
+      if (this.busy) throw new Error('Another Tab operation is in progress');
+      if (
+        !('id' in raw) ||
+        typeof raw.id !== 'string' ||
+        raw.id === HOME_ID ||
+        !('index' in raw) ||
+        typeof raw.index !== 'number' ||
+        !Number.isInteger(raw.index) ||
+        raw.index < 1 ||
+        raw.index >= this.tabs.length
+      )
+        throw new Error('Invalid Tab position');
+      const index = this.tabs.findIndex((tab) => tab.state.id === raw.id);
+      if (index < 0) throw new Error('Tab no longer exists');
+      const next = this.tabs.slice();
+      const [tab] = next.splice(index, 1);
+      next.splice(raw.index, 0, tab);
+      this.persist(next);
+      this.tabs = next;
+      this.publish();
+      return;
+    }
+    if (
+      raw &&
+      typeof raw === 'object' &&
+      'type' in raw &&
       raw.type === 'sync-space-titles'
     ) {
       if (!sender || this.contentTab(sender).state.id !== HOME_ID)
@@ -1099,6 +1182,8 @@ export class DesktopTabs {
     ) {
       if (!sender || !this.isShell(sender))
         throw new Error('Only the desktop shell can open the Home menu');
+      if (!this.canChangeWorkspace)
+        throw new Error('Workspace switching is unavailable');
       if (
         !('x' in raw) ||
         typeof raw.x !== 'number' ||
@@ -1129,10 +1214,11 @@ export class DesktopTabs {
   }
 
   private destroyTab(tab: ContentTab): void {
-    if (!tab.view) return;
-    this.win.contentView.removeChildView(tab.view);
-    tab.view.webContents.close({ waitForBeforeUnload: false });
+    const view = tab.view;
+    if (!view) return;
     tab.view = null;
+    this.win.contentView.removeChildView(view);
+    view.webContents.close({ waitForBeforeUnload: false });
   }
 
   dispose(): void {
@@ -1221,7 +1307,7 @@ export function registerDesktopTabsIpc(
       }
     });
   }
-  action('tabs:open', (tabs, _event, value) => tabs.open(value));
+  action('tabs:open', (tabs, event, value) => tabs.open(value, event.sender));
   for (const operation of ['activate', 'close', 'reload'] as const) {
     action(`tabs:${operation}`, (tabs, event, value) => {
       if (!tabs.isShell(event.sender)) {

@@ -38,6 +38,31 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
+it('does not indent a readonly plain-text source with Tab', async () => {
+  const onChange = vi.fn();
+  await act(async () =>
+    root.render(
+      <RawMarkdownEditor
+        value="source text"
+        readOnly
+        plainText
+        onChange={onChange}
+      />,
+    ),
+  );
+  const content = host.querySelector<HTMLElement>('.cm-content');
+  if (!content) throw new Error('Missing source viewer');
+  const view = EditorView.findFromDOM(content);
+  if (!view) throw new Error('Missing CodeMirror view');
+  await act(async () =>
+    content.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Tab', code: 'Tab', bubbles: true }),
+    ),
+  );
+  expect(view.state.doc.toString()).toBe('source text');
+  expect(onChange).not.toHaveBeenCalled();
+});
+
 it.each([false, true])(
   'reveals exact raw-source URL text without editing or focusing (%s)',
   async (readOnly) => {

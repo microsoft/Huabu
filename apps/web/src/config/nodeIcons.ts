@@ -40,6 +40,7 @@ import type { LucideIcon } from 'lucide-react';
  * ```
  */
 export const NODE_ICON: Record<CanvasNodeType, LucideIcon> = {
+  fileReference: FileText,
   note: Clipboard,
   text: Type,
   image: ImageIcon,
@@ -81,6 +82,7 @@ export const OFFICE_FORMAT_ICON: Record<OfficeFormat, LucideIcon> = {
  * Human-readable display name for each node type.
  */
 export const NODE_TYPE_LABEL: Record<CanvasNodeType, string> = {
+  fileReference: 'File Reference',
   note: 'Note',
   text: 'Text',
   image: 'Image',

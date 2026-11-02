@@ -424,6 +424,7 @@ export const acpThreadCachedMetaResponseSchema = z.object({
         profileId: z.string().min(1),
       }),
       workingDirPath: z.string().optional(),
+      agentletId: z.string().optional(),
       /** Null denotes inheritance; absent on legacy execution snapshots. */
       workingDirectoryOverride: z.string().nullable().optional(),
     })

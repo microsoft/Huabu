@@ -71,6 +71,7 @@ vi.mock('./useElectron', () => {
       keepPrepareCloseAlive: mocks.heartbeat,
       onClosePrepared: mocks.prepared,
       ready: vi.fn(),
+      command: vi.fn().mockResolvedValue({ ok: true }),
       report: vi.fn(),
       getState: mocks.state,
       onState: mocks.onState,
@@ -149,6 +150,7 @@ describe('desktop save presentation', () => {
       activeId: 'home',
       workspaceId: 'workspace',
       busy: false,
+      canChangeWorkspace: true,
     });
     mocks.onState.mockReturnValue(vi.fn());
     mocks.context.role = 'space';
@@ -270,6 +272,7 @@ describe('desktop save presentation', () => {
       activeId: 'a',
       workspaceId: 'workspace',
       busy: false,
+      canChangeWorkspace: true,
     };
     await act(async () => update(active));
     expect(useDesktopTabStore.getState().isActive).toBe(true);

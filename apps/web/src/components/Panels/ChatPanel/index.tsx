@@ -33,7 +33,6 @@ import { useInternalSlashCommands } from '@/hooks/useInternalSlashCommands';
 import { useAcpProfilesStore } from '@/store/acpProfilesStore';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import useCanvasStore from '@/store/canvasStore';
-import { useChatPreferencesStore } from '@/store/chatPreferencesStore';
 import {
   selectThreadBinding,
   selectThreadHistoryLoaded,
@@ -329,8 +328,8 @@ export const ChatPanel = ({
   const messages = useChatStore((state) =>
     selectThreadMessages(state, threadId),
   );
-  const completedTurnId = useChatStore(
-    (state) => state.threadsById[threadId]?.completedTurnId,
+  const historyPages = useChatStore(
+    (state) => state.threadsById[threadId]?.historyPages,
   );
   const pendingPermission = useMemo(
     () => findPendingPermissionRequest(messages),
@@ -344,9 +343,6 @@ export const ChatPanel = ({
   );
   const historyPage = useChatStore(
     useShallow((state) => selectThreadHistoryPageState(state, threadId)),
-  );
-  const recentTurnCount = useChatPreferencesStore(
-    (state) => state.recentTurnCount,
   );
   const addNode = useCanvasStore((state) => state.addNode);
   const llmConfig = useLLMStore((state) => state.config);
@@ -885,11 +881,11 @@ export const ChatPanel = ({
     agentBinding.kind === 'external'
       ? acpProfiles.find((profile) => profile.id === agentBinding.profileId)
       : undefined;
-  const selectedExternalDevice = selectedExternalProfile
-    ? resolveConnectedDevice(
-        selectedExternalProfile.agentletId,
-        connectedDevices,
-      )
+  const directoryAgentletId = preparation.realized
+    ? preparation.agentletId
+    : selectedExternalProfile?.agentletId;
+  const selectedExternalDevice = directoryAgentletId
+    ? resolveConnectedDevice(directoryAgentletId, connectedDevices)
     : undefined;
   const workingDirectoryOverride = preparation.workingDirectoryOverride;
   const showWorkingDirectoryOverride =
@@ -1154,16 +1150,19 @@ export const ChatPanel = ({
           <MessageList
             onLatestVisibleChange={setIsLatestVisible}
             messages={messages}
-            recentTurnCount={recentTurnCount}
+            historyPages={historyPages}
+            onLoadHistoryPage={historyWindow?.loadHistoryPage}
+            onVisibleMessagesChange={historyWindow?.updateHistoryViewport}
+            historyPageError={historyWindow?.historyPageError}
+            onRetryHistoryPage={historyWindow?.retryHistoryPage}
             activationId={activationId}
-            completedTurnId={completedTurnId}
             threadId={threadId}
             isLoading={isLoading}
             isHistoryLoading={
               !ownerUnavailable && !isHistoryLoaded && !historyError
             }
+            isHistoryReady={isHistoryLoaded}
             hasOlderHistory={historyPage.hasOlderHistory}
-            olderTurnBatchSize={recentTurnCount}
             isLoadingOlderHistory={historyPage.isLoadingOlderHistory}
             olderHistoryError={historyPage.olderHistoryError ?? undefined}
             onLoadOlderHistory={loadOlderHistory}
@@ -1188,9 +1187,6 @@ export const ChatPanel = ({
                   part={pendingPermission.part}
                 />
               </div>
-            ) : null}
-            {!remote && ownerCanvasId && threadId ? (
-              <ChangeReviewCard canvasId={ownerCanvasId} threadId={threadId} />
             ) : null}
             <ThreadChatInput
               onSubmit={handleSubmit}
@@ -1220,7 +1216,7 @@ export const ChatPanel = ({
                   />
                   {showWorkingDirectoryOverride ? (
                     <WorkingDirectoryOverride
-                      agentletId={selectedExternalProfile?.agentletId}
+                      agentletId={selectedExternalDevice?.agentletId}
                       deviceName={selectedExternalDevice?.displayName}
                       profileWorkingDirPath={
                         selectedExternalProfile?.workingDirPath ?? ''
@@ -1301,7 +1297,14 @@ export const ChatPanel = ({
                 savingAgentDraft ||
                 savingWorkingDirectory
               }
-            />
+            >
+              {!remote && ownerCanvasId && threadId ? (
+                <ChangeReviewCard
+                  canvasId={ownerCanvasId}
+                  threadId={threadId}
+                />
+              ) : null}
+            </ThreadChatInput>
           </div>
         </div>
       </SidebarPanel>

@@ -251,6 +251,7 @@ beforeEach(() => {
     activeId: 'home',
     workspaceId: 'workspace-1',
     busy: false,
+    canChangeWorkspace: true,
   });
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -461,6 +462,7 @@ describe('CanvasListPage navigation', () => {
         activeId,
         workspaceId: 'workspace-1',
         busy: false,
+        canChangeWorkspace: true,
       });
       vi.mocked(listCanvases).mockResolvedValueOnce({
         canvases: [
@@ -521,6 +523,7 @@ describe('CanvasListPage navigation', () => {
         activeId,
         workspaceId: 'workspace-1',
         busy: false,
+        canChangeWorkspace: true,
       });
       vi.mocked(listCanvases).mockResolvedValueOnce({
         canvases: [
@@ -561,6 +564,7 @@ describe('CanvasListPage navigation', () => {
       activeId: 'home',
       workspaceId: null,
       busy: false,
+      canChangeWorkspace: true,
     });
     await renderPage();
     expect(environment.syncTitles).not.toHaveBeenCalled();
@@ -570,6 +574,7 @@ describe('CanvasListPage navigation', () => {
         activeId: 'space-1',
         workspaceId: 'workspace-1',
         busy: false,
+        canChangeWorkspace: true,
       }),
     );
     expect(environment.syncTitles).toHaveBeenCalledExactlyOnceWith({
@@ -583,6 +588,7 @@ describe('CanvasListPage navigation', () => {
         activeId: 'space-1',
         workspaceId: 'another-workspace',
         busy: false,
+        canChangeWorkspace: true,
       }),
     );
     expect(environment.syncTitles).toHaveBeenCalledTimes(1);
@@ -595,6 +601,7 @@ describe('CanvasListPage navigation', () => {
       activeId: 'new-tab',
       workspaceId: 'workspace-1',
       busy: false,
+      canChangeWorkspace: true,
     };
     environment.getState.mockResolvedValue(snapshot);
     const { link, router } = await renderPage();
@@ -675,6 +682,7 @@ describe('CanvasListPage navigation', () => {
       activeId: 'home',
       workspaceId: 'workspace-1',
       busy: false,
+      canChangeWorkspace: true,
       tabs: [
         {
           id: 'space-tab',
@@ -715,6 +723,7 @@ describe('CanvasListPage navigation', () => {
       activeId: 'home',
       workspaceId: 'workspace-1',
       busy: false,
+      canChangeWorkspace: true,
     });
     await requestDeletion();
     await confirmDeletion();
@@ -758,6 +767,7 @@ describe('CanvasListPage navigation', () => {
       activeId: 'home',
       workspaceId: 'workspace-1',
       busy: false,
+      canChangeWorkspace: true,
       tabs: [
         {
           id: 'child-tab',
@@ -921,6 +931,7 @@ describe('CanvasListPage navigation', () => {
       activeId,
       workspaceId: 'workspace-1',
       busy: false,
+      canChangeWorkspace: true,
       tabs: [],
     });
     await act(async () => update(snapshot('space-1')));

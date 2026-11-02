@@ -98,6 +98,7 @@ beforeEach(() => {
   });
   useCanvasStore.getState()._setStateNoAutosave({
     canvasId: 'canvas-source',
+    isLoading: false,
     version: 1,
     nodes: [
       {
@@ -621,6 +622,17 @@ describe('conversation owner routing', () => {
     expect(postCanvasExecute).not.toHaveBeenCalled();
   });
 
+  it('validates offscreen ownership remotely and defers live-node checks while loading', async () => {
+    useCanvasStore.getState()._setStateNoAutosave({ canvasId: 'canvas-other' });
+    await expect(validateConversationView(ownerView)).resolves.toBeUndefined();
+    useCanvasStore.getState()._setStateNoAutosave({
+      canvasId: 'canvas-source',
+      isLoading: true,
+      nodes: [],
+    });
+    await expect(validateConversationView(ownerView)).resolves.toBeUndefined();
+  });
+
   it('validates remote ownership without changing the active Canvas and rejects a deleted owner', async () => {
     useCanvasStore.getState()._setStateNoAutosave({ canvasId: 'canvas-other' });
     await expect(validateConversationView(ownerView)).resolves.toBeUndefined();
@@ -646,6 +658,18 @@ describe('conversation owner routing', () => {
     await expect(validateConversationView(ownerView)).rejects.toThrow(
       ConversationIntegrityError,
     );
+  });
+
+  it('rejects mismatched presentation anchors even when the owner is offscreen', async () => {
+    useCanvasStore.getState()._setStateNoAutosave({ canvasId: 'canvas-other' });
+    for (const presentationAnchor of [
+      { canvasId: 'canvas-other', nodeId: 'node-source' },
+      { canvasId: 'canvas-source', nodeId: 'node-other' },
+    ]) {
+      await expect(
+        validateConversationView({ ...ownerView, presentationAnchor }),
+      ).rejects.toThrow(ConversationIntegrityError);
+    }
   });
 
   it('reconciles a routed lifecycle response when its source becomes active', async () => {

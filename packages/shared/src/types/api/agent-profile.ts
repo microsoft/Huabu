@@ -69,6 +69,7 @@ export const AGENT_ICON_CUSTOM_DATA_KEY = 'icon';
 const profileBaseSchema = z.object({
   id: trimmedString(255),
   alias: trimmedString(255),
+  visible: z.boolean().optional(),
   agentletId: trimmedString(255),
   workingDirPath: pathSchema,
   customData: customDataSchema.optional(),
@@ -114,6 +115,7 @@ export const agentProfileSchema = profileBaseSchema
 export type AgentProfileView = z.infer<typeof agentProfileSchema>;
 
 export const createAgentProfileBodySchema = agentProfileSchema.omit({
+  visible: true,
   id: true,
   revision: true,
   executionRevision: true,
@@ -123,7 +125,13 @@ export type CreateAgentProfileBody = z.infer<
 >;
 
 export const createAcpCommandProfileBodySchema = profileBaseSchema
-  .omit({ id: true, agentletId: true, revision: true, executionRevision: true })
+  .omit({
+    id: true,
+    visible: true,
+    agentletId: true,
+    revision: true,
+    executionRevision: true,
+  })
   .extend({
     launch: commandLaunchSchema,
     metadata: commandMetadataSchema.optional(),
@@ -134,6 +142,7 @@ export type CreateAcpCommandProfileBody = z.infer<
 >;
 
 export const createAcpProfileBodySchema = agentProfileSchema.omit({
+  visible: true,
   id: true,
   revision: true,
   executionRevision: true,

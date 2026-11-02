@@ -25,6 +25,7 @@ export const profileSchema = z
   .object({
     id: identity,
     alias: identity,
+    visible: z.boolean().optional(),
     agentletId: nonempty,
     workingDirPath: nonempty,
     launch: agentProfileLaunchSchema,

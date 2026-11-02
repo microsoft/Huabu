@@ -4,9 +4,11 @@
 import { expect, test } from '@playwright/test';
 
 import type * as AgentApiModule from '../src/api/agent';
+import type * as ReviewModule from '../src/components/Panels/ChatPanel/ChangeReviewCard';
 import type * as ComposerModule from '../src/components/Panels/ChatPanel/ThreadChatInput';
 import type * as StreamModule from '../src/hooks/useAgentStream';
 import type * as SessionModule from '../src/hooks/useChatSession';
+import type * as ChangesModule from '../src/store/acpThreadChangesStore';
 import type * as CanvasModule from '../src/store/canvasStore';
 import type * as ChatModule from '../src/store/chatStore';
 import type * as ReactModule from 'react';
@@ -29,6 +31,8 @@ test('queues, removes, pauses and resumes through the real composer', async ({
     const reactPath = '/node_modules/.vite/deps/react.js';
     const domPath = '/node_modules/.vite/deps/react-dom_client.js';
     const composerPath = '/src/components/Panels/ChatPanel/ThreadChatInput.tsx';
+    const reviewPath = '/src/components/Panels/ChatPanel/ChangeReviewCard.tsx';
+    const changesPath = '/src/store/acpThreadChangesStore.ts';
     const streamPath = '/src/hooks/useAgentStream.ts';
     const sessionPath = '/src/hooks/useChatSession.ts';
     const chatPath = '/src/store/chatStore.ts';
@@ -38,6 +42,8 @@ test('queues, removes, pauses and resumes through the real composer', async ({
       { default: React },
       { default: ReactDOM },
       { ThreadChatInput },
+      { ChangeReviewCard },
+      { useAcpThreadChangesStore },
       { useAgentStream },
       { ChatSessionProvider },
       { useChatStore },
@@ -47,6 +53,8 @@ test('queues, removes, pauses and resumes through the real composer', async ({
       import(reactPath) as Promise<{ default: typeof ReactModule }>,
       import(domPath) as Promise<{ default: typeof DomModule }>,
       import(composerPath) as Promise<typeof ComposerModule>,
+      import(reviewPath) as Promise<typeof ReviewModule>,
+      import(changesPath) as Promise<typeof ChangesModule>,
       import(streamPath) as Promise<typeof StreamModule>,
       import(sessionPath) as Promise<typeof SessionModule>,
       import(chatPath) as Promise<typeof ChatModule>,
@@ -65,6 +73,29 @@ test('queues, removes, pauses and resumes through the real composer', async ({
     useChatStore
       .getState()
       .setAgentBinding(session.threadId, { kind: 'internal' });
+    useAcpThreadChangesStore.setState({
+      byThread: {
+        [session.threadId]: [
+          {
+            id: 'queue-layout-change',
+            kind: 'create',
+            label: 'Created: Review note',
+            nodeId: 'review-note',
+            revertDeltas: [
+              {
+                type: 'DELETE_NODE',
+                node: {
+                  id: 'review-note',
+                  type: 'note',
+                  position: { x: 0, y: 0 },
+                  data: { label: 'Review note', content: 'Review changes' },
+                },
+              },
+            ],
+          },
+        ],
+      },
+    });
     const harness: QueueHarness = { sent: [], finish: () => undefined };
     (window as Window & { queueHarness?: QueueHarness }).queueHarness = harness;
     agentApi.streamMessage = async (content, threadId, _mode, callbacks) => {
@@ -86,15 +117,23 @@ test('queues, removes, pauses and resumes through the real composer', async ({
       return React.createElement(
         ChatSessionProvider,
         { value: session },
-        React.createElement(ThreadChatInput, {
-          mode: 'operate',
-          isStreaming: stream.isLoading,
-          onStop: stream.stopStream,
-          onSubmit: (event, mode, draft) => {
-            event.preventDefault();
-            void stream.startStream(draft, mode);
+        React.createElement(
+          ThreadChatInput,
+          {
+            mode: 'operate',
+            connectedTop: true,
+            isStreaming: stream.isLoading,
+            onStop: stream.stopStream,
+            onSubmit: (event, mode, draft) => {
+              event.preventDefault();
+              void stream.startStream(draft, mode);
+            },
           },
-        }),
+          React.createElement(ChangeReviewCard, {
+            canvasId: session.canvasId,
+            threadId: session.threadId,
+          }),
+        ),
       );
     }
     const fixture = document.querySelector('[data-chat-performance-fixture]');
@@ -155,6 +194,22 @@ test('queues, removes, pauses and resumes through the real composer', async ({
     await page.setViewportSize({ width, height: 800 });
     await expect(input).toBeInViewport();
     await expect(queue).toBeInViewport();
+    const layout = await queue.evaluate((element) => {
+      const review = element.nextElementSibling;
+      const composer =
+        review?.nextElementSibling?.querySelector('.group\\/composer');
+      if (!review || !composer) throw new Error('Missing connected composer');
+      return {
+        queueBottom: element.getBoundingClientRect().bottom,
+        reviewTop: review.getBoundingClientRect().top,
+        reviewBottom: review.getBoundingClientRect().bottom,
+        composerTop: composer.getBoundingClientRect().top,
+      };
+    });
+    expect(layout.queueBottom).toBeLessThanOrEqual(layout.reviewTop);
+    expect(
+      Math.abs(layout.reviewBottom - layout.composerTop),
+    ).toBeLessThanOrEqual(1);
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= window.innerWidth,

@@ -45,6 +45,7 @@ describe('preprocess restore projection generation', () => {
     };
     const state = {
       canvasId: 'canvas-1',
+      isLoading: false,
       nodes: [node],
       setNodeIngestion: vi.fn(),
       clearNodeIngestion: vi.fn(),
