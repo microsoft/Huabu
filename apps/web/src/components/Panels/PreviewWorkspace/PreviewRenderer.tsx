@@ -21,7 +21,10 @@ import { conversationViewForNode } from '@/store/conversationOwner';
 import { previewTargetKey } from '@/store/previewWorkspace/scrollMemory';
 
 import { ChatPanel } from '../ChatPanel';
-import { SpaceConversationPreview } from './SpaceConversationPreview';
+import {
+  OwnedConversationPreview,
+  SpaceConversationPreview,
+} from './SpaceConversationPreview';
 import { UrlPreview } from './UrlPreview';
 import { ExpandedNodePanel } from '../ExpandedNodePanel/ExpandedNodePanel';
 
@@ -158,8 +161,11 @@ export function PreviewRenderer({
   }
 
   if (session) {
+    const Conversation = session.conversationView
+      ? OwnedConversationPreview
+      : ChatPanel;
     return (
-      <ChatPanel
+      <Conversation
         session={session}
         previewTabId={tabId}
         isActive={isActive}

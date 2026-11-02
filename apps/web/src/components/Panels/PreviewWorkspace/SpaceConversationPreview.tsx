@@ -11,8 +11,14 @@ import { EmptyState } from '@/components/Common/EmptyState';
 import { NODE_ICON } from '@/config/nodeIcons';
 import useCanvasStore from '@/store/canvasStore';
 import {
+  selectThreadHistoryLoaded,
+  selectThreadMessages,
+  useChatStore,
+} from '@/store/chatStore';
+import {
   conversationOwnerKey,
-  refreshConversationOwner,
+  retryConversationOwnerObservation,
+  subscribeConversationOwner,
   useRemoteConversationOwnerStore,
 } from '@/store/remoteConversationOwner';
 import { useWorkspaceStore } from '@/store/workspaceStore';
@@ -32,56 +38,7 @@ export function SpaceConversationPreview({
 }: Omit<ComponentProps<typeof ChatPanel>, 'session'> & {
   target: Extract<PreviewTarget, { kind: 'conversation' }>;
 }) {
-  const { t } = useTranslation();
-  const navigate = useNavigate();
   const canvasId = useCanvasStore((state) => state.canvasId);
-  const cachedSpaceTitle = useWorkspaceStore(
-    (state) => state.spaceTitles[target.canvasId],
-  );
-  const key = conversationOwnerKey(
-    target.canvasId,
-    target.nodeId,
-    target.threadId,
-  );
-  const entry = useRemoteConversationOwnerStore((state) => state.entries[key]);
-  const [validatedKey, setValidatedKey] = useState<string | null>(null);
-  const refresh = useCallback(async () => {
-    const workspaceId = useWorkspaceStore.getState().workspaceId;
-    try {
-      const owner = await refreshConversationOwner(
-        target.canvasId,
-        target.nodeId,
-        target.threadId,
-      );
-      const workspace = useWorkspaceStore.getState();
-      if (
-        workspace.workspaceId === workspaceId &&
-        workspace.spaceTitles[target.canvasId] !== owner.spaceTitle
-      ) {
-        workspace.setSpaceTitle(target.canvasId, owner.spaceTitle);
-      }
-      setValidatedKey(key);
-    } catch (error) {
-      // Transport failures retain the last validated view; invalid ownership does not.
-      console.error('Unable to refresh the displayed Agent owner', error);
-    }
-  }, [key, target.canvasId, target.nodeId, target.threadId]);
-  useEffect(() => {
-    let disposed = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const poll = async () => {
-      if (document.visibilityState !== 'hidden') await refresh();
-      if (!disposed) timer = setTimeout(() => void poll(), 5000);
-    };
-    void poll();
-    const onFocus = () => void refresh();
-    window.addEventListener('focus', onFocus);
-    return () => {
-      disposed = true;
-      clearTimeout(timer);
-      window.removeEventListener('focus', onFocus);
-    };
-  }, [refresh]);
   const session = useMemo<ChatSession>(
     () => ({
       canvasId,
@@ -101,16 +58,90 @@ export function SpaceConversationPreview({
     }),
     [canvasId, target.canvasId, target.nodeId, target.threadId],
   );
+  return <OwnedConversationPreview {...props} session={session} />;
+}
 
-  const owner = entry?.owner;
+export function OwnedConversationPreview({
+  session,
+  ...props
+}: ComponentProps<typeof ChatPanel>) {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const target = session.conversationView?.conversationOwner;
+  if (!target)
+    throw new Error('Owned conversation preview requires an owner address');
+  const canvasId = session.canvasId;
+  const remote = target.canvasId !== canvasId;
+  const localMissing = useCanvasStore(
+    (state) =>
+      !remote &&
+      state.canvasId === canvasId &&
+      !state.isLoading &&
+      !state.nodes.some(
+        (node) =>
+          node.id === target.nodeId &&
+          node.type === 'question' &&
+          node.data.threadId === target.threadId,
+      ),
+  );
+  const cachedSpaceTitle = useWorkspaceStore(
+    (state) => state.spaceTitles[target.canvasId],
+  );
+  const key = conversationOwnerKey(
+    target.canvasId,
+    target.nodeId,
+    target.threadId,
+  );
+  const entry = useRemoteConversationOwnerStore((state) => state.entries[key]);
+  const hasHistory = useChatStore((state) =>
+    selectThreadMessages(state, target.threadId).some(
+      (message) => message.role === 'user' || message.role === 'assistant',
+    ),
+  );
+  const historyLoaded = useChatStore((state) =>
+    selectThreadHistoryLoaded(state, target.threadId),
+  );
+  const historyError = useChatStore(
+    (state) => state.threadsById[target.threadId]?.historyError,
+  );
+  const [validatedKey, setValidatedKey] = useState<string | null>(null);
+  const refresh = useCallback(() => {
+    try {
+      retryConversationOwnerObservation(
+        target.canvasId,
+        target.nodeId,
+        target.threadId,
+      );
+    } catch (error) {
+      console.error('Unable to refresh the displayed Agent owner', error);
+    }
+  }, [target.canvasId, target.nodeId, target.threadId]);
+  useEffect(
+    () =>
+      subscribeConversationOwner(
+        target.canvasId,
+        target.nodeId,
+        target.threadId,
+        () => setValidatedKey(key),
+      ),
+    [key, target.canvasId, target.nodeId, target.threadId],
+  );
+  const owner = entry?.owner ?? entry?.lastKnownOwner;
   const spaceTitle =
     owner?.spaceTitle?.trim() ||
     cachedSpaceTitle?.trim() ||
     (cachedSpaceTitle === undefined && !owner
       ? target.canvasId
       : t('spacePreview.untitledSpace'));
-  const ownerMissing = entry?.errorCode === 'conversation_owner_missing';
-  const showChat = owner?.nodeId === target.nodeId && validatedKey === key;
+  const ownerMissing =
+    localMissing || entry?.errorCode === 'conversation_owner_missing';
+  const unavailable = localMissing || !!entry?.error;
+  const validated = !remote || validatedKey === key;
+  const showChat = unavailable
+    ? hasHistory || (!localMissing && !!entry?.owner && validated)
+    : hasHistory || (validated && (!remote || owner?.nodeId === target.nodeId));
+  const loadMissingHistory =
+    ownerMissing && !hasHistory && !historyLoaded && !historyError;
   const errorMessage =
     entry?.errorCode === 'missing_node_content'
       ? t('remoteConversation.sourceNodeContentUnavailable')
@@ -119,36 +150,38 @@ export function SpaceConversationPreview({
         : entry?.error;
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex min-w-0 px-3 py-1">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="max-w-full justify-start"
-          tooltipWrapperClassName="min-w-0 max-w-full"
-          aria-label={`${spaceTitle}: ${t('remoteConversation.openSpace')}`}
-          title={t('remoteConversation.openSpace')}
-          onClick={() => {
-            const url = new URL(
-              buildNodeDeepLink(
-                window.location.origin,
-                target.canvasId,
-                target.nodeId,
-              ),
-            );
-            navigate(`${url.pathname}${url.search}`, {
-              state: {
-                returnToSpace: canvasId,
-                workspaceId: useWorkspaceStore.getState().workspaceId,
-              },
-            });
-          }}
-        >
-          <SpaceIcon aria-hidden />
-          <span className="truncate">{spaceTitle}</span>
-          <ArrowUpRight aria-hidden />
-        </Button>
-      </div>
-      {!showChat || entry?.error ? (
+      {remote ? (
+        <div className="flex min-w-0 px-3 py-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="max-w-full justify-start"
+            tooltipWrapperClassName="min-w-0 max-w-full"
+            aria-label={`${spaceTitle}: ${t('remoteConversation.openSpace')}`}
+            title={t('remoteConversation.openSpace')}
+            onClick={() => {
+              const url = new URL(
+                buildNodeDeepLink(
+                  window.location.origin,
+                  target.canvasId,
+                  target.nodeId,
+                ),
+              );
+              navigate(`${url.pathname}${url.search}`, {
+                state: {
+                  returnToSpace: canvasId,
+                  workspaceId: useWorkspaceStore.getState().workspaceId,
+                },
+              });
+            }}
+          >
+            <SpaceIcon aria-hidden />
+            <span className="truncate">{spaceTitle}</span>
+            <ArrowUpRight aria-hidden />
+          </Button>
+        </div>
+      ) : null}
+      {!showChat || unavailable ? (
         <div
           role={entry?.error && !ownerMissing ? 'alert' : 'status'}
           className={
@@ -179,10 +212,12 @@ export function SpaceConversationPreview({
           />
         </div>
       ) : null}
-      {showChat ? (
+      {showChat || loadMissingHistory ? (
         <div
+          hidden={!showChat}
           className="min-h-0 flex-1"
           onDragStartCapture={(event) => {
+            if (!remote && !unavailable) return;
             // Native image/link drags bypass individual Canvas action controls.
             event.preventDefault();
             event.stopPropagation();
@@ -191,7 +226,7 @@ export function SpaceConversationPreview({
           <ChatPanel
             {...props}
             session={session}
-            ownerUnavailable={!!entry?.error}
+            ownerUnavailable={unavailable}
           />
         </div>
       ) : null}

@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { useEffect, useMemo } from 'react';
+
 import { getQuestionNodeStatus } from '@huabu/shared';
 import { projectAgentNodeEditableData } from '@huabu/shared/canvas-engine';
 
@@ -12,6 +14,7 @@ import { pageLifecycle } from '@/utils/pageLifecycle';
 import {
   conversationOwnerKey,
   refreshConversationOwner,
+  subscribeConversationOwner,
   useRemoteConversationOwnerStore,
 } from './remoteConversationOwner';
 
@@ -112,15 +115,26 @@ export function filterClientOwnedQuestionPatch(
 
 export async function validateConversationView(
   view: AgentConversationView,
+  options?: { allowObserved?: boolean },
 ): Promise<void> {
   const active = useCanvasStore.getState();
   const owner = view.conversationOwner;
-  if (active.canvasId !== owner.canvasId) {
+  const observed =
+    useRemoteConversationOwnerStore.getState().entries[
+      conversationOwnerKey(owner.canvasId, owner.nodeId, owner.threadId)
+    ];
+  if (
+    observed?.error ||
+    (active.canvasId !== owner.canvasId &&
+      !(options?.allowObserved && observed?.owner))
+  ) {
     await refreshConversationOwner(
       owner.canvasId,
       owner.nodeId,
       owner.threadId,
     );
+  }
+  if (active.canvasId !== owner.canvasId) {
     return;
   }
   const node = active.nodes.find((candidate) => candidate.id === owner.nodeId);
@@ -160,6 +174,13 @@ export function resolveConversationOwnerSource(
 }
 
 export function useConversationOwnerSource(view: AgentConversationView | null) {
+  const canvasId = view?.conversationOwner.canvasId;
+  const nodeId = view?.conversationOwner.nodeId;
+  const threadId = view?.conversationOwner.threadId;
+  useEffect(() => {
+    if (!canvasId || !nodeId || !threadId) return;
+    return subscribeConversationOwner(canvasId, nodeId, threadId);
+  }, [canvasId, nodeId, threadId]);
   const local = useCanvasStore((state) =>
     view?.conversationOwner.canvasId === state.canvasId
       ? resolveConversationOwnerSource(state.canvasId, state.nodes, view)
@@ -172,12 +193,21 @@ export function useConversationOwnerSource(view: AgentConversationView | null) {
       state.entries[
         conversationOwnerKey(owner.canvasId, owner.nodeId, owner.threadId)
       ];
-    return entry?.owner?.nodeId === owner.nodeId
-      ? entry.owner.source
-      : undefined;
+    const known = entry?.owner ?? entry?.lastKnownOwner;
+    return known?.nodeId === owner.nodeId ? known.source : undefined;
   });
   const activeCanvasId = useCanvasStore((state) => state.canvasId);
-  return view?.conversationOwner.canvasId === activeCanvasId ? local : remote;
+  return useMemo(() => {
+    if (canvasId !== activeCanvasId || !local) return remote;
+    if (!local || !remote) return local;
+    // Keep local editable drafts; lifecycle comes from the same observation as remote views.
+    return {
+      ...local,
+      status: remote.status,
+      invocationToken: remote.invocationToken,
+      viewed: remote.viewed,
+    };
+  }, [canvasId, activeCanvasId, local, remote]);
 }
 
 async function applyConversationOwnerPatch(

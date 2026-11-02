@@ -13,6 +13,8 @@
  * Mirrors the SSE plumbing in `external.route.ts`.
  */
 
+import { recentCanvasConversationParamsSchema } from '@huabu/shared';
+
 import { subscribeCanvasUpdates } from './canvas-sync.js';
 import { space } from '../storage/index.js';
 
@@ -27,7 +29,14 @@ const syncRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   fastify.get<{ Params: { canvasId: string } }>(
     '/:canvasId/sync/stream',
     async (request, reply) => {
-      const { canvasId } = request.params;
+      const params = recentCanvasConversationParamsSchema.safeParse(
+        request.params,
+      );
+      if (!params.success)
+        return reply.code(400).send({
+          message: params.error.issues[0]?.message ?? 'Invalid canvas ID',
+        });
+      const { canvasId } = params.data;
       reply.hijack();
       reply.raw.writeHead(200, {
         'Content-Type': 'text/event-stream',
@@ -40,18 +49,42 @@ const syncRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
 
       const pending: CanvasSyncEvent[] = [];
       let snapshotSent = false;
+      let closed = false;
       const unsubscribe = subscribeCanvasUpdates(canvasId, (event) => {
+        if (closed) return;
         if (!snapshotSent) {
           pending.push(event);
           return;
         }
         writeSSE(reply.raw, event);
       });
+      const heartbeat = setInterval(() => {
+        reply.raw.write(': ping\n\n');
+      }, 15_000);
+      const cleanup = () => {
+        if (closed) return;
+        closed = true;
+        clearInterval(heartbeat);
+        unsubscribe();
+      };
+      reply.raw.once('close', cleanup);
 
       // Subscribe before reading the baseline. Updates committed while the
       // snapshot is read are buffered and delivered after it, closing the
       // handshake race without reordering updates ahead of the snapshot.
-      const canvas = await space(canvasId).read();
+      let canvas;
+      try {
+        canvas = await space(canvasId).read();
+      } catch (error) {
+        request.log.error(
+          { err: error, canvasId },
+          'Canvas sync baseline read failed',
+        );
+        cleanup();
+        reply.raw.destroy();
+        return;
+      }
+      if (closed) return;
       writeSSE(reply.raw, {
         type: 'snapshot',
         data: { version: canvas?.version ?? 0 },
@@ -59,20 +92,6 @@ const syncRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       snapshotSent = true;
       for (const event of pending) writeSSE(reply.raw, event);
       pending.length = 0;
-
-      const heartbeat = setInterval(() => {
-        reply.raw.write(': ping\n\n');
-      }, 15_000);
-
-      request.raw.on('close', () => {
-        clearInterval(heartbeat);
-        unsubscribe();
-        try {
-          reply.raw.end();
-        } catch {
-          /* already closed */
-        }
-      });
     },
   );
 };

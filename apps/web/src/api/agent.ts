@@ -17,6 +17,7 @@ import { readTypedSSEStream } from './_sse';
 import type {
   AgentBinding,
   AgentConversationOwnerResponse,
+  AgentConversationOwnerEvent,
   AgentHostStreamEvent,
   AgentInputKind,
   AgentMode,
@@ -33,17 +34,113 @@ import type {
   StopThreadResponse,
 } from '@huabu/shared';
 
-export function getAgentConversationOwner(canvasId: string, threadId: string) {
-  return apiFetch<AgentConversationOwnerResponse>(
-    routes.agentConversationOwner(canvasId, threadId),
-    {
-      cache: 'no-store',
-      fallbackMessage: 'Unable to load the Agent conversation owner',
-    },
+export async function getAgentConversationOwner(
+  canvasId: string,
+  threadId: string,
+  signal?: AbortSignal,
+) {
+  const timeout = new AbortController();
+  const timer = setTimeout(
+    () =>
+      timeout.abort(new DOMException('Owner query timed out', 'TimeoutError')),
+    10_000,
   );
+  const requestSignal = signal
+    ? AbortSignal.any([signal, timeout.signal])
+    : timeout.signal;
+  try {
+    const owner = await apiFetch<AgentConversationOwnerResponse>(
+      routes.agentConversationOwner(canvasId, threadId),
+      {
+        cache: 'no-store',
+        signal: requestSignal,
+        fallbackMessage: 'Unable to load the Agent conversation owner',
+      },
+    );
+    requestSignal.throwIfAborted();
+    return owner;
+  } catch (error) {
+    if (!signal?.aborted && timeout.signal.aborted) {
+      throw new ApiError(
+        408,
+        {},
+        'Unable to refresh the conversation: the status query timed out',
+      );
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // ==================== Stream Callbacks ====================
+
+export async function streamAgentConversationOwner(
+  canvasId: string,
+  threadId: string,
+  receive: (
+    event: Extract<AgentConversationOwnerEvent, { type: 'snapshot' }>,
+  ) => void,
+  signal: AbortSignal,
+): Promise<void> {
+  const controller = new AbortController();
+  const requestSignal = AbortSignal.any([signal, controller.signal]);
+  let timer: ReturnType<typeof setTimeout> | undefined = setTimeout(
+    () =>
+      controller.abort(
+        new DOMException('Owner snapshot timed out', 'TimeoutError'),
+      ),
+    10_000,
+  );
+  try {
+    const response = await fetch(
+      apiUrl(routes.agentConversationOwnerStream(canvasId, threadId)),
+      {
+        signal: requestSignal,
+        cache: 'no-store',
+      },
+    );
+    if (!response.ok)
+      throw await apiErrorFromResponse(
+        response,
+        'Unable to observe the conversation',
+      );
+    if (!response.body)
+      throw new Error('Conversation state response has no stream');
+    await readTypedSSEStream<AgentConversationOwnerEvent>(
+      response,
+      (event) => {
+        if (requestSignal.aborted) return;
+        if (event.type === 'error')
+          throw new ApiError(
+            event.data.status,
+            event.data.error,
+            event.data.error.message,
+          );
+        if (event.type !== 'snapshot') return;
+        clearTimeout(timer);
+        timer = undefined;
+        receive(event);
+      },
+      requestSignal,
+      { inactivityTimeoutMs: 45_000 },
+    );
+    requestSignal.throwIfAborted();
+    if (!signal.aborted)
+      throw new Error('Conversation state stream ended unexpectedly');
+  } catch (error) {
+    if (!signal.aborted && controller.signal.aborted)
+      throw new ApiError(
+        408,
+        {},
+        'Unable to refresh the conversation: the status query timed out',
+      );
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    controller.abort();
+  }
+}
 
 export interface AgentStreamCallbacks {
   onAccepted?: (acceptance: AgentTurnAccepted) => void;

@@ -23,6 +23,8 @@ export const routes = {
   agentDefaults: '/agent/defaults',
   agentConversationOwner: (canvasId: string, threadId: string) =>
     `/agent/owner/${enc(threadId)}?canvasId=${enc(canvasId)}`,
+  agentConversationOwnerStream: (canvasId: string, threadId: string) =>
+    `/agent/owner/${enc(threadId)}/stream?canvasId=${enc(canvasId)}`,
 
   // ── Workspace ─────────────────────────────────────────────────────
   workspace: '/workspace',

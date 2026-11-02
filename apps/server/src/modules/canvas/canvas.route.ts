@@ -816,6 +816,10 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           });
         }
 
+        publishCanvasUpdate(canvasId, {
+          type: 'invalidate',
+          data: { nodeIds: [nodeId] },
+        });
         return reply.send({ success: true });
       });
     } finally {
@@ -1027,6 +1031,10 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.code(500).send({ message: 'Failed to write node content' });
     }
 
+    publishCanvasUpdate(canvasId, {
+      type: 'invalidate',
+      data: { nodeIds: [nodeId] },
+    });
     const response: PutNodeContentResponse = {
       nodeId,
       label: outcome.label,
@@ -1644,10 +1652,8 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           }
         }
 
-        return reply.send({
-          canvasId,
-          version: nextVersion,
-        });
+        publishCanvasUpdate(canvasId, { type: 'invalidate', data: {} });
+        return reply.send({ canvasId, version: nextVersion });
       } catch (error) {
         if (error instanceof AgentNodeEditError) {
           return reply

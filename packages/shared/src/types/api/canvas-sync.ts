@@ -9,7 +9,9 @@
  * ACP agent writing through the reachback `/execute` route) without
  * polling or a manual reload.
  *
- * Two event kinds:
+ * Event kinds:
+ *  - `invalidate` — ordinary saves/deletes invalidate bounded read models
+ *    without replacing editable Canvas state.
  *  - `snapshot` — sent once on connect. Carries the canvas's current
  *    `version` so a client that connected *after* a mutation can detect
  *    the gap (snapshot.version !== local version) and `loadCanvas` to
@@ -38,6 +40,11 @@ export const canvasSyncPendingEffectsSchema = z.object({
 });
 
 export const canvasSyncEventSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('invalidate'),
+    /** Read-model notification, not an instruction to replace editable Canvas state. */
+    data: z.object({ nodeIds: z.array(z.string()).optional() }),
+  }),
   z.object({
     type: z.literal('snapshot'),
     data: z.object({ version: z.number() }),

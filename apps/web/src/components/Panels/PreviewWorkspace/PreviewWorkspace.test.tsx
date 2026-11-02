@@ -54,7 +54,14 @@ import {
 } from './tabDnd';
 
 import type * as AcpApi from '@/api/acp';
+import type * as RemoteOwner from '@/store/remoteConversationOwner';
 import type { Node } from '@xyflow/react';
+
+vi.mock('react-router-dom', () => ({ useNavigate: () => vi.fn() }));
+vi.mock('@/store/remoteConversationOwner', async (original) => ({
+  ...(await original<typeof RemoteOwner>()),
+  subscribeConversationOwner: () => () => {},
+}));
 
 (
   globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }

@@ -14,6 +14,7 @@ import {
   publishCanvasExecution,
   type ExecuteOnServerOutput,
 } from './canvas-executor.js';
+import { publishCanvasUpdate } from './canvas-sync.js';
 import {
   withCanvasMutexes,
   withSpaceHierarchyLock,
@@ -369,6 +370,7 @@ export async function deleteSpaceTree(
                 `Could not delete Space ${id}: ${outcome.reason}`,
               );
             deleted.push(id);
+            publishCanvasUpdate(id, { type: 'invalidate', data: {} });
           }
           if (
             root?.parentSpaceId &&

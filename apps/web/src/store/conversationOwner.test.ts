@@ -624,7 +624,11 @@ describe('conversation owner routing', () => {
   it('validates remote ownership without changing the active Canvas and rejects a deleted owner', async () => {
     useCanvasStore.getState()._setStateNoAutosave({ canvasId: 'canvas-other' });
     await expect(validateConversationView(ownerView)).resolves.toBeUndefined();
-    expect(getOwner).toHaveBeenCalledWith('canvas-source', 'thread-source');
+    expect(getOwner).toHaveBeenCalledWith(
+      'canvas-source',
+      'thread-source',
+      expect.any(AbortSignal),
+    );
     expect(useCanvasStore.getState().canvasId).toBe('canvas-other');
     getOwner.mockResolvedValueOnce({
       canvasId: 'canvas-source',

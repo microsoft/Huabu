@@ -128,11 +128,18 @@ const SESSION: ChatSession = {
 function Harness({
   session = SESSION,
   setIsLoading = noopSetIsLoading,
+  ownerUnavailable = false,
 }: {
   session?: ChatSession;
   setIsLoading?: (threadId: string, loading: boolean) => void;
+  ownerUnavailable?: boolean;
 }) {
-  const history = useChatHistory(session, setIsLoading);
+  const history = useChatHistory(
+    session,
+    setIsLoading,
+    undefined,
+    ownerUnavailable,
+  );
   latestLoadOlderHistory = history.loadOlderHistory;
   latestRetryHistory = history.retryHistory;
   latestOwnerHistoryReady = history.isCurrentOwnerHistory;
@@ -175,12 +182,19 @@ function seedStore(isStreaming: boolean) {
 async function renderHarness(
   session: ChatSession = SESSION,
   setIsLoading: (threadId: string, loading: boolean) => void = noopSetIsLoading,
+  ownerUnavailable = false,
 ): Promise<void> {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
   await act(async () => {
-    root?.render(<Harness session={session} setIsLoading={setIsLoading} />);
+    root?.render(
+      <Harness
+        session={session}
+        setIsLoading={setIsLoading}
+        ownerUnavailable={ownerUnavailable}
+      />,
+    );
     await Promise.resolve();
     await Promise.resolve();
   });
@@ -227,6 +241,145 @@ afterEach(() => {
 });
 
 describe('useChatHistory paging', () => {
+  it('keeps cached history and never attaches a stream while the owner is unavailable', async () => {
+    seedStore(false);
+    await renderHarness(SESSION, noopSetIsLoading, true);
+    expect(useChatStore.getState().threadsById[THREAD_ID].messages).toEqual([
+      { id: 'm1', role: 'user', content: 'hi' },
+    ]);
+    expect(apiMocks.fetchHistoryPage).not.toHaveBeenCalled();
+    expect(apiMocks.reconnectStream).not.toHaveBeenCalled();
+  });
+
+  it('can hydrate persisted history without reattaching when the owner is already missing', async () => {
+    seedStore(false);
+    useChatStore.getState().setMessages(THREAD_ID, []);
+    useChatStore.getState().setHistoryLoaded(THREAD_ID, false);
+    await renderHarness(SESSION, noopSetIsLoading, true);
+    expect(
+      useChatStore.getState().threadsById[THREAD_ID].messages,
+    ).toMatchObject([{ role: 'user', content: 'hi', historyTurnId: 'turn-1' }]);
+    expect(apiMocks.reconnectStream).not.toHaveBeenCalled();
+  });
+  it.each(['local', 'remote'])(
+    'keeps the %s attachment when node updates recreate the same conversation address',
+    async (location) => {
+      seedStore(false);
+      const ownerCanvasId = location === 'local' ? CANVAS_ID : 'remote';
+      const session: ChatSession = {
+        ...SESSION,
+        ownerCanvasId,
+        conversationView: {
+          presentationAnchor: { canvasId: ownerCanvasId, nodeId: 'owner' },
+          conversationOwner: {
+            canvasId: ownerCanvasId,
+            nodeId: 'owner',
+            threadId: THREAD_ID,
+          },
+        },
+      };
+      apiMocks.remoteSource = { status: 'running', invocationToken: 'run' };
+      canvasMock.state.nodes = [
+        {
+          id: 'owner',
+          type: 'question',
+          data: {
+            status: 'running',
+            invocationToken: 'run',
+            threadId: THREAD_ID,
+          },
+        },
+      ];
+      let finish!: (value: AgentStreamAttachResult) => void;
+      apiMocks.reconnectStream.mockImplementationOnce(
+        async () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      );
+      await renderHarness(session);
+      try {
+        await act(async () =>
+          root?.render(<Harness session={structuredClone(session)} />),
+        );
+        expect(apiMocks.reconnectStream).toHaveBeenCalledTimes(1);
+        expect(hasAgentStreamClaim(ownerCanvasId, THREAD_ID)).toBe(true);
+      } finally {
+        await act(async () => finish({ status: 'aborted' }));
+      }
+    },
+  );
+
+  it('retries an inactive attachment while the same owner invocation is still running', async () => {
+    vi.useFakeTimers();
+    seedStore(false);
+    const session: ChatSession = {
+      ...SESSION,
+      ownerCanvasId: 'remote',
+      conversationView: {
+        presentationAnchor: { canvasId: 'remote', nodeId: 'owner' },
+        conversationOwner: {
+          canvasId: 'remote',
+          nodeId: 'owner',
+          threadId: THREAD_ID,
+        },
+      },
+    };
+    apiMocks.remoteSource = { status: 'running', invocationToken: 'run' };
+    let finish!: (value: AgentStreamAttachResult) => void;
+    apiMocks.reconnectStream
+      .mockResolvedValueOnce({ status: 'inactive' })
+      .mockImplementationOnce(
+        async () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      );
+    try {
+      await renderHarness(session);
+      await act(async () => vi.advanceTimersByTimeAsync(500));
+      expect(apiMocks.reconnectStream).toHaveBeenCalledTimes(2);
+    } finally {
+      await act(async () => finish?.({ status: 'aborted' }));
+      vi.useRealTimers();
+    }
+  });
+
+  it('attaches a newly discovered invocation after the previous local POST releases its claim', async () => {
+    seedStore(true);
+    const session: ChatSession = {
+      ...SESSION,
+      ownerCanvasId: 'remote',
+      conversationView: {
+        presentationAnchor: { canvasId: 'remote', nodeId: 'owner' },
+        conversationOwner: {
+          canvasId: 'remote',
+          nodeId: 'owner',
+          threadId: THREAD_ID,
+        },
+      },
+    };
+    apiMocks.remoteSource = { status: 'running', invocationToken: 'next-run' };
+    const post = claimAgentStream('remote', THREAD_ID, 'post');
+    let finish!: (value: AgentStreamAttachResult) => void;
+    apiMocks.reconnectStream.mockImplementationOnce(
+      async () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    try {
+      await renderHarness(session);
+      expect(apiMocks.reconnectStream).not.toHaveBeenCalled();
+      await act(async () => post?.release());
+      expect(apiMocks.reconnectStream).toHaveBeenCalledTimes(1);
+      expect(hasAgentStreamClaim('remote', THREAD_ID)).toBe(true);
+    } finally {
+      post?.release();
+      await act(async () => finish?.({ status: 'aborted' }));
+    }
+  });
+
   it.each([
     { status: 'done', pending: false },
     { status: 'running', pending: false },
@@ -447,6 +600,19 @@ describe('useChatHistory paging', () => {
       };
       apiMocks.remoteSource = { status: 'running', invocationToken: 'run' };
       let finishAttach!: (result: AgentStreamAttachResult) => void;
+      useChatStore.getState().enqueueTurn(THREAD_ID, {
+        id: 'actually-pending',
+        status: 'pending',
+        prepared: {
+          session,
+          inputKind: 'text',
+          content: 'Waiting locally',
+          mode: 'ask',
+          sources: { canvasId: 'remote', canvasContext: { selectedNodes: [] } },
+          agentBinding: { kind: 'internal' },
+          settings: { modelId: null, reasoningEffort: null },
+        },
+      });
       apiMocks.reconnectStream.mockImplementationOnce(
         async (_thread, _canvas, callbacks) => {
           callbacks.onEvent({
@@ -510,6 +676,9 @@ describe('useChatHistory paging', () => {
           false,
         );
         expect(latestOwnerHistoryReady).toBe(true);
+        expect(useChatStore.getState().threadsById[THREAD_ID].queuePaused).toBe(
+          true,
+        );
         expect(apiMocks.fetchHistoryPage).toHaveBeenLastCalledWith(
           THREAD_ID,
           'remote',

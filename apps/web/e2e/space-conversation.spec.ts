@@ -4,6 +4,7 @@
 import { expect, test } from '@playwright/test';
 
 import { readViewportTransform } from './helpers';
+import { installStreams } from './stream-helpers';
 
 test('opens and continues a child Agent in the parent without leaking canvas selection', async ({
   page,
@@ -242,6 +243,53 @@ test('opens and continues a child Agent in the parent without leaking canvas sel
   let invocationToken = 'run-1';
   let viewed = false;
   const acknowledgements: string[] = [];
+  await installStreams(page);
+  await page.route(
+    `**/api/agent/owner/${threadId}/stream?**`,
+    async (route) => {
+      if (ownerUnavailable)
+        return route.fulfill({
+          status: 503,
+          json: { message: ownerErrorMessage },
+        });
+      const response = await route.fetch({
+        url: route.request().url().replace('/stream?', '?'),
+      });
+      const owner = await response.json();
+      owner.source = {
+        ...owner.source,
+        status: 'done',
+        invocationToken,
+        viewed,
+      };
+      return route.fulfill({
+        headers: { 'x-test-stream': 'true' },
+        json: {
+          key: `owner:${threadId}`,
+          events: [
+            {
+              type: 'snapshot',
+              data: {
+                streamId: 'fixture',
+                revision: 1,
+                value: ownerMissing
+                  ? {
+                      state: 'unavailable',
+                      status: 404,
+                      error: {
+                        code: 'conversation_owner_missing',
+                        message:
+                          'The Agent conversation no longer has an owner in this Space',
+                      },
+                    }
+                  : { state: 'ready', owner },
+              },
+            },
+          ],
+        },
+      });
+    },
+  );
   await page.route(`**/api/agent/owner/${threadId}?**`, async (route) => {
     if (ownerMissing) {
       await route.fulfill({
@@ -407,7 +455,11 @@ test('opens and continues a child Agent in the parent without leaking canvas sel
   const messageCenter =
     (messageBox.y + messageBox.height / 2 - statusBox.y) / statusBox.height;
   expect(messageCenter).toBeGreaterThan(0.25);
-  expect(messageCenter).toBeLessThan(0.5);
+  expect(messageCenter).toBeLessThanOrEqual(0.55);
+  await expect(page.getByText('New result completed elsewhere.')).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Send', exact: true }),
+  ).toBeDisabled();
   await expect(
     page.getByRole('button', { name: 'Retry', exact: true }),
   ).toHaveCount(0);

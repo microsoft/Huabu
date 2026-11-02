@@ -47,6 +47,40 @@ export type AgentConversationOwnerResponse = z.infer<
   typeof agentConversationOwnerResponseSchema
 >;
 
+export const agentConversationOwnerFailureSchema = z.object({
+  status: z.number().int().min(400).max(599),
+  error: z.object({ message: z.string(), code: z.string().optional() }),
+});
+export const agentConversationOwnerStateSchema = z.discriminatedUnion('state', [
+  z.object({
+    state: z.literal('ready'),
+    owner: agentConversationOwnerResponseSchema,
+  }),
+  agentConversationOwnerFailureSchema.extend({
+    state: z.literal('unavailable'),
+  }),
+]);
+export type AgentConversationOwnerState = z.infer<
+  typeof agentConversationOwnerStateSchema
+>;
+export const agentConversationOwnerEventSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('snapshot'),
+    data: z.object({
+      streamId: z.string().min(1),
+      revision: z.number().int().positive(),
+      value: agentConversationOwnerStateSchema,
+    }),
+  }),
+  z.object({
+    type: z.literal('error'),
+    data: agentConversationOwnerFailureSchema,
+  }),
+]);
+export type AgentConversationOwnerEvent = z.infer<
+  typeof agentConversationOwnerEventSchema
+>;
+
 /** Bounded ownership contract; unrelated node data retains its existing shape. */
 export const canvasEditableNodeDataSchema = z
   .object({

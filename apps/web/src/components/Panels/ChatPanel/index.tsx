@@ -264,7 +264,12 @@ export const ChatPanel = ({
     useAgentStream(session, previewTabId);
 
   // Chat history hook — loads history and handles reconnection
-  const historyWindow = useChatHistory(session, setIsLoading, previewTabId);
+  const historyWindow = useChatHistory(
+    session,
+    setIsLoading,
+    previewTabId,
+    ownerUnavailable,
+  );
   const loadOlderHistory = historyWindow?.loadOlderHistory;
   const isCurrentOwnerHistory = historyWindow?.isCurrentOwnerHistory;
   const [isLatestVisible, setIsLatestVisible] = useState(false);
@@ -1091,7 +1096,7 @@ export const ChatPanel = ({
         <div
           className={`flex h-full flex-col gap-2 overflow-visible ${remote ? 'pt-0' : hidePanelHeader ? 'pt-3' : 'pt-1'}`}
         >
-          {historyError && (
+          {historyError && !ownerUnavailable && (
             <div
               role="alert"
               className="text-danger-fg flex items-center gap-2 px-3 text-xs"
@@ -1154,7 +1159,9 @@ export const ChatPanel = ({
             completedTurnId={completedTurnId}
             threadId={threadId}
             isLoading={isLoading}
-            isHistoryLoading={!isHistoryLoaded && !historyError}
+            isHistoryLoading={
+              !ownerUnavailable && !isHistoryLoaded && !historyError
+            }
             hasOlderHistory={historyPage.hasOlderHistory}
             olderTurnBatchSize={recentTurnCount}
             isLoadingOlderHistory={historyPage.isLoadingOlderHistory}
