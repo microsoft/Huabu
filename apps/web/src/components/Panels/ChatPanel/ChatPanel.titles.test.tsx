@@ -225,6 +225,7 @@ vi.mock('@/api/conversationTitles', () => ({
   setConversationTitle: vi.fn(),
 }));
 vi.mock('@/api/agent', () => ({
+  streamAgentConversationOwner: vi.fn(() => Promise.resolve()),
   agentApi: { streamMessage: vi.fn(), stopThread: vi.fn() },
 }));
 vi.mock('@/api/acp', async (original) => ({
