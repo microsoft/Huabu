@@ -88,6 +88,62 @@ beforeEach(() => {
 });
 
 describe('createNodeDragRecognizer', () => {
+  it('moves a fully covered Frame while taps still target the pressed child', () => {
+    const frame: Node = {
+      id: 'frame',
+      type: 'frame',
+      position: { x: 100, y: 200 },
+      data: {},
+    };
+    const nodes = [
+      frame,
+      { ...selectedNode, parentId: frame.id },
+      { ...selectedNode, id: 'other', parentId: frame.id },
+    ];
+    getState.mockImplementation(() => ({
+      nodes,
+      cancelActiveNodeDrag,
+      onNodeDrag,
+      onNodeDragStart,
+      onNodeDragStop,
+      onNodesChange,
+    }));
+    const onTap = vi.fn();
+    const recognizer = createNodeDragRecognizer({
+      acceptsPointer: () => true,
+      onTap,
+    });
+    recognizer.onDown(pointer(1, 100, 100), context);
+    recognizer.onUp?.(pointer(1, 100, 100), context);
+    expect(onTap).toHaveBeenCalledWith(selectedNode.id, expect.anything());
+    recognizer.onDown(pointer(2, 100, 100), context);
+    recognizer.onMove?.(pointer(2, 120, 130), context);
+    expect(onNodeDragStart).toHaveBeenCalledWith(expect.anything(), frame, [
+      frame,
+    ]);
+    expect(onNodesChange).toHaveBeenLastCalledWith([
+      {
+        type: 'position',
+        id: 'frame',
+        position: { x: 120, y: 230 },
+        dragging: true,
+      },
+    ]);
+    recognizer.onUp?.(pointer(2, 140, 150), context);
+    expect(onNodesChange).toHaveBeenLastCalledWith([
+      {
+        type: 'position',
+        id: 'frame',
+        position: { x: 140, y: 250 },
+        dragging: false,
+      },
+    ]);
+    expect(nodes.filter((n) => n.selected).map((n) => n.id)).toEqual([
+      'selected',
+      'other',
+    ]);
+  });
+
   it('publishes live preview geometry and pointer coordinates after activation', () => {
     const recognizer = createNodeDragRecognizer();
     recognizer.onDown(pointer(1, 100, 100), context);
@@ -108,6 +164,89 @@ describe('createNodeDragRecognizer', () => {
     expect(onNodesChange.mock.invocationCallOrder[0]).toBeLessThan(
       onNodeDrag.mock.invocationCallOrder[0],
     );
+  });
+
+  it('keeps the original flow anchor across viewport pans and forwards modifiers', () => {
+    let pan = 0;
+    const ctx = {
+      ...context,
+      instance: {
+        ...context.instance,
+        screenToFlowPosition: ({ x, y }: { x: number; y: number }) => ({
+          x: x - pan,
+          y,
+        }),
+      },
+    } as CanvasPointerRouterContext;
+    const recognizer = createNodeDragRecognizer();
+    recognizer.onDown(pointer(1, 100, 100), ctx);
+    const event = { ...pointer(1, 120, 130), altKey: true, ctrlKey: true };
+    recognizer.onMove?.(event, ctx);
+    pan = -40;
+    recognizer.onMove?.(event, ctx);
+    expect(onNodesChange).toHaveBeenLastCalledWith([
+      {
+        type: 'position',
+        id: selectedNode.id,
+        position: { x: 70, y: 50 },
+        dragging: true,
+      },
+    ]);
+    expect(onNodeDragStart.mock.calls[0][0]).toBe(event);
+    expect(onNodeDrag.mock.lastCall?.[0]).toBe(event);
+    recognizer.onUp?.(event, ctx);
+    expect(onNodeDragStop.mock.lastCall?.[0]).toBe(event);
+  });
+
+  it.each(['mouse', 'pen', 'touch'])(
+    'uses the full nested selection before pruning for %s',
+    (pointerType) => {
+      const outer: Node = {
+        id: 'outer',
+        type: 'frame',
+        position: { x: 100, y: 200 },
+        data: {},
+      };
+      const inner: Node = {
+        ...selectedNode,
+        id: 'inner',
+        type: 'frame',
+        parentId: outer.id,
+      };
+      const child: Node = { ...selectedNode, parentId: inner.id };
+      const store = getState();
+      getState.mockReturnValue({ ...store, nodes: [outer, inner, child] });
+      const recognizer = createNodeDragRecognizer({
+        acceptsPointer: () => true,
+        onTap: vi.fn(),
+      });
+      recognizer.onDown({ ...pointer(1, 100, 100), pointerType }, context);
+      recognizer.onMove?.({ ...pointer(1, 120, 130), pointerType }, context);
+      expect(onNodeDragStart).toHaveBeenCalledWith(expect.anything(), outer, [
+        outer,
+      ]);
+      expect(onNodesChange).toHaveBeenLastCalledWith([
+        {
+          type: 'position',
+          id: outer.id,
+          position: { x: 120, y: 230 },
+          dragging: true,
+        },
+      ]);
+      expect(inner.selected).toBe(true);
+      expect(child.selected).toBe(true);
+      expect(outer.selected).toBeUndefined();
+    },
+  );
+
+  it('does not restore old geometry or undo state after changing canvas', () => {
+    const recognizer = createNodeDragRecognizer();
+    recognizer.onDown(pointer(1, 0, 0), context);
+    recognizer.onMove?.(pointer(1, 20, 0), context);
+    getState.mockReturnValue({ canvasId: 'new-space' });
+    recognizer.onCancel?.(pointer(1, 20, 0), context);
+    expect(cancelActiveNodeDrag).not.toHaveBeenCalled();
+    expect(onNodeDragStop).not.toHaveBeenCalled();
   });
 
   it('yields selected-node finger taps to a pending resource binding', () => {

@@ -127,6 +127,104 @@ afterEach(() => {
 });
 
 describe('edge routing after real node drags', () => {
+  it.each(['free', 'column', 'row', 'grid'])(
+    'moves a fully covered %s Frame, preserving child geometry, selection, persistence, and one-step history',
+    async (layoutMode) => {
+      seed(
+        [
+          note('frame', 100, 200, {
+            type: 'frame',
+            data: { sizing: 'manual', layoutMode },
+            style: { width: 400, height: 300 },
+          }),
+          note('a', 30, 80, { parentId: 'frame', selected: true }),
+          note('b', 200, 80, { parentId: 'frame', selected: true }),
+          note('outside', 800, 200),
+        ],
+        [edge('a', 'outside')],
+      );
+      const before = state().nodes;
+      start(['frame']);
+      const changes = (dragging: boolean) =>
+        ['frame'].map((id) => ({
+          type: 'position' as const,
+          id,
+          position: { x: 700, y: 300 },
+          dragging,
+        }));
+      state().onNodesChange(changes(true));
+      expect(node('frame').position).toEqual({ x: 700, y: 300 });
+      state().onNodeDrag(new MouseEvent('mousemove'), node('frame'), [
+        node('frame'),
+      ]);
+      vi.advanceTimersToNextFrame();
+      state().onNodesChange(changes(false));
+      stop(['frame']);
+      expect(node('frame').position).toEqual({ x: 700, y: 300 });
+      expect(node('frame').selected).toBeUndefined();
+      for (const id of ['a', 'b']) {
+        expect(node(id)).toMatchObject({
+          selected: true,
+          parentId: 'frame',
+          position: before.find((entry) => entry.id === id)?.position,
+        });
+      }
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(api.putCanvas).toHaveBeenCalledOnce();
+      expect(api.putCanvas).toHaveBeenCalledWith(
+        'routing-canvas',
+        expect.objectContaining({
+          state: expect.objectContaining({
+            nodes: expect.arrayContaining([
+              expect.objectContaining({
+                id: 'frame',
+                position: { x: 700, y: 300 },
+              }),
+              expect.objectContaining({
+                id: 'a',
+                parentId: 'frame',
+                position: { x: 30, y: 80 },
+              }),
+            ]),
+          }),
+        }),
+        expect.anything(),
+      );
+      state().undo();
+      expect(node('frame').position).toEqual({ x: 100, y: 200 });
+      expect(canvasHistoryManager.canUndo).toBe(false);
+      state().redo();
+      expect(node('frame').position).toEqual({ x: 700, y: 300 });
+    },
+  );
+
+  it('cancels inferred Frame movement and clears it before the next single-node drag', () => {
+    seed(
+      [
+        note('frame', 100, 200, {
+          type: 'frame',
+          data: { sizing: 'manual' },
+          style: { width: 400, height: 300 },
+        }),
+        note('a', 30, 80, { parentId: 'frame', selected: true }),
+        note('b', 200, 80, { parentId: 'frame', selected: true }),
+      ],
+      [],
+    );
+    start(['frame']);
+    move('frame', { x: 130, y: 220 }, true);
+    expect(node('frame').position).toEqual({ x: 130, y: 220 });
+    state().cancelActiveNodeDrag();
+    expect(node('frame').position).toEqual({ x: 100, y: 200 });
+    expect(state().nodes.some((entry) => entry.dragging)).toBe(false);
+    expect(canvasHistoryManager.canUndo).toBe(false);
+    start(['a']);
+    move('a', { x: 60, y: 100 }, true);
+    expect(node('frame').position).toEqual({ x: 100, y: 200 });
+    expect(node('a').position).toEqual({ x: 60, y: 100 });
+    state().cancelActiveNodeDrag();
+  });
+
   it.each(['column', 'row'] as const)(
     'uses the release track when the next %s preview frame has not run',
     (axis) => {

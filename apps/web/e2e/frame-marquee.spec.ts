@@ -76,7 +76,7 @@ function geometry(nodes: Node[]) {
   return nodes
     .map(({ id, parentId, position, width, height }) => ({
       id,
-      parentId,
+      parentId: parentId ?? null,
       position,
       width,
       height,
@@ -303,6 +303,181 @@ test.afterEach(async ({ page }, testInfo) => {
   }
 });
 
+test('inferred Frame advances on every equally spaced pointer tick', async ({
+  page,
+}) => {
+  const ids = await seed(page, 1);
+  const before = await rects(page, ids);
+  const saved = (await persisted(page)).nodes;
+  const savedFrame = saved.find((entry) => entry.id === ids.frame);
+  if (!savedFrame) throw new Error('Missing saved Frame');
+  await press(page, blank(before, 1));
+  await move(page, center(before.second));
+  await page.mouse.up();
+  await selection(page, [ids.first, ids.second]);
+  const start = center(before.first);
+  const settle = () =>
+    page.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        ),
+    );
+  await page.keyboard.down('Alt');
+  await press(page, start);
+  await page.mouse.move(start.x + 2, start.y);
+  await settle();
+  const origin = (await rects(page, ids)).frame.x;
+  for (let step = 1; step <= 8; step++) {
+    await page.mouse.move(start.x + 2 + step * 10, start.y);
+    await settle();
+    expect((await rects(page, ids)).frame.x - origin).toBeCloseTo(step * 10, 1);
+  }
+  const moving = await rects(page, ids);
+  await page.mouse.up();
+  await page.keyboard.up('Alt');
+  await sameRects(page, ids, moving);
+  await selection(page, [ids.first, ids.second]);
+  await expect
+    .poll(
+      async () =>
+        (await persisted(page)).nodes.find((entry) => entry.id === ids.frame)
+          ?.position.x,
+    )
+    .toBe(savedFrame.position.x + 82);
+  await undo(page, ids, before, saved);
+});
+
+test('captured Frame drag cancels without losing selection or moving children', async ({
+  page,
+}) => {
+  const ids = await seed(page, 1);
+  const before = await rects(page, ids);
+  await press(page, blank(before, 1));
+  await move(page, center(before.second));
+  await page.mouse.up();
+  for (const reason of ['escape', 'capture', 'blur', 'tool']) {
+    const start = center(before.first);
+    await press(page, start);
+    await move(page, { x: start.x + 80, y: start.y + 40 });
+    expect((await rects(page, ids)).frame.x).toBeGreaterThan(
+      before.frame.x + 50,
+    );
+    if (reason === 'escape') await page.keyboard.press('Escape');
+    else if (reason === 'tool') await page.keyboard.press('l');
+    else
+      await page.evaluate((reason) => {
+        if (reason === 'blur') window.dispatchEvent(new Event('blur'));
+        else {
+          const owner = Array.from(document.querySelectorAll('*')).find(
+            (element) => element.hasPointerCapture(1),
+          );
+          if (!owner) throw new Error('Expected captured Frame drag');
+          owner.releasePointerCapture(1);
+        }
+      }, reason);
+    await page.mouse.up();
+    if (reason === 'tool') await page.keyboard.press('s');
+    await sameRects(page, ids, before);
+    await selection(page, [ids.first, ids.second]);
+  }
+});
+
+test('inferred Frame remains under the pointer during edge auto-pan', async ({
+  page,
+}) => {
+  const ids = await seed(page, 1);
+  const before = await rects(page, ids);
+  await press(page, blank(before, 1));
+  await move(page, center(before.second));
+  await page.mouse.up();
+  await page.keyboard.down('Alt');
+  await press(page, center(before.first));
+  const cursor = { x: 1990, y: 500 };
+  await move(page, cursor);
+  const initialPan = translateOf(await readViewportTransform(page));
+  await expect
+    .poll(async () => translateOf(await readViewportTransform(page)).x)
+    .toBeLessThan(initialPan.x - 100);
+  const duringPan = await node(page, ids.first).boundingBox();
+  if (!duringPan) throw new Error('Missing dragged child');
+  expect(center(duringPan).x).toBeCloseTo(cursor.x, 0);
+  expect(center(duringPan).y).toBeCloseTo(cursor.y, 0);
+  // Bring both children back into the rendered viewport before checking selection.
+  await move(page, { x: 1000, y: 500 });
+  await page.mouse.up();
+  await page.keyboard.up('Alt');
+  await selection(page, [ids.first, ids.second]);
+  const released = await node(page, ids.first).boundingBox();
+  await stableViewport(page);
+  expect(await node(page, ids.first).boundingBox()).toEqual(released);
+});
+
+for (const tool of ['s', 'l']) {
+  test(`nested canonical selection carries the outer Frame with ${tool}`, async ({
+    page,
+  }) => {
+    const ids = await seed(page, 1);
+    await execute(page, [
+      {
+        type: 'CREATE_NODES',
+        nodes: [
+          {
+            nodeType: 'frame',
+            data: { label: 'outer', sizing: 'manual', layoutMode: 'free' },
+            position: { x: 200, y: 120 },
+            size: { width: 800, height: 600 },
+          },
+        ],
+      },
+    ]);
+    const outer = (await persisted(page)).nodes.find(
+      (entry) => entry.data.label === 'outer',
+    );
+    if (!outer) throw new Error('Missing outer Frame');
+    await execute(page, [
+      { type: 'SET_NODE_PARENT', nodeIds: [ids.frame], parentId: outer.id },
+    ]);
+    await page.reload();
+    await expect(page.locator('.react-flow__node')).toHaveCount(4);
+    await stableViewport(page);
+    const before = await rects(page, ids);
+    const outerBefore = await node(page, outer.id).boundingBox();
+    if (!outerBefore) throw new Error('Missing outer Frame geometry');
+    const from = { x: before.frame.x - 8, y: before.frame.y - 8 };
+    const to = {
+      x: before.frame.x + before.frame.width + 8,
+      y: before.frame.y + before.frame.height + 8,
+    };
+    await page.keyboard.press(tool);
+    await press(page, from);
+    if (tool === 'l') {
+      await move(page, { x: to.x, y: from.y });
+      await move(page, to);
+      await move(page, { x: from.x, y: to.y });
+      await move(page, from);
+    } else await move(page, to);
+    await page.mouse.up();
+    await selection(page, [ids.frame, ids.first, ids.second]);
+    const start = center(before.first);
+    await page.keyboard.down('Alt');
+    await press(page, start);
+    await move(page, { x: start.x + 80, y: start.y + 40 });
+    await page.mouse.up();
+    await page.keyboard.up('Alt');
+    const after = await rects(page, ids);
+    const outerAfter = await node(page, outer.id).boundingBox();
+    if (!outerAfter) throw new Error('Missing moved outer Frame');
+    expect(outerAfter.x - outerBefore.x).toBeCloseTo(80, 1);
+    expect(outerAfter.y - outerBefore.y).toBeCloseTo(40, 1);
+    for (const name of names) {
+      expect(after[name].x - before[name].x).toBeCloseTo(80, 1);
+      expect(after[name].y - before[name].y).toBeCloseTo(40, 1);
+    }
+    await selection(page, [ids.frame, ids.first, ids.second]);
+  });
+}
+
 for (const tool of ['s', 'l']) {
   test(`shared area policy and cancellation with ${tool === 's' ? 'rectangle' : 'lasso'}`, async ({
     page,
@@ -348,6 +523,80 @@ for (const tool of ['s', 'l']) {
 }
 
 for (const zoom of [0.5, 1, 2]) {
+  for (const tool of ['s', 'l']) {
+    test(`fully selected children carry their Frame with ${tool === 's' ? 'direct' : 'lasso'} drag at ${zoom}`, async ({
+      page,
+    }, testInfo) => {
+      const ids = await seed(page, zoom);
+      const before = await rects(page, ids);
+      const saved = (await persisted(page)).nodes;
+      await page.keyboard.press(tool);
+      const from = blank(before, zoom);
+      const to = center(before.second);
+      await press(page, from);
+      if (tool === 'l') {
+        await move(page, { x: to.x, y: from.y });
+        await move(page, to);
+        await move(page, { x: from.x, y: to.y });
+        await move(page, from);
+      } else {
+        await move(page, to);
+      }
+      await page.mouse.up();
+      await selection(page, [ids.first, ids.second]);
+      const start = {
+        x: before.first.x + before.first.width * 0.75,
+        y: before.first.y + before.first.height / 2,
+      };
+      await page.keyboard.down('Alt');
+      await press(page, start);
+      await move(page, { x: start.x + 120 * zoom, y: start.y + 75 * zoom });
+      await expect(page.locator('[data-multi-resize-control]')).toHaveCount(0);
+      const moving = await rects(page, ids);
+      const dx = (moving.frame.x - before.frame.x) / zoom;
+      const dy = (moving.frame.y - before.frame.y) / zoom;
+      expect(dx).toBeCloseTo(120, 1);
+      expect(dy).toBeCloseTo(75, 1);
+      for (const name of names) {
+        expect(moving[name].x - before[name].x).toBeCloseTo(dx * zoom, 1);
+        expect(moving[name].y - before[name].y).toBeCloseTo(dy * zoom, 1);
+        expect(moving[name].width).toBeCloseTo(before[name].width, 1);
+        expect(moving[name].height).toBeCloseTo(before[name].height, 1);
+      }
+      await capture(page, testInfo, 'inferred-frame-drag');
+      await page.mouse.up();
+      await page.keyboard.up('Alt');
+      await selection(page, [ids.first, ids.second]);
+      await expect(page.locator('[data-multi-resize-control]')).toHaveCount(4);
+      await sameRects(page, ids, moving);
+      await expect
+        .poll(async () => {
+          const nodes = (await persisted(page)).nodes;
+          return names.every((name) => {
+            const original = saved.find((n) => n.id === ids[name]);
+            const current = nodes.find((n) => n.id === ids[name]);
+            return (
+              original &&
+              current &&
+              (current.parentId ?? null) === (original.parentId ?? null) &&
+              Math.abs(
+                current.position.x -
+                  original.position.x -
+                  (name === 'frame' ? dx : 0),
+              ) < 0.1 &&
+              Math.abs(
+                current.position.y -
+                  original.position.y -
+                  (name === 'frame' ? dy : 0),
+              ) < 0.1
+            );
+          });
+        })
+        .toBe(true);
+      await undo(page, ids, before, saved);
+    });
+  }
+
   test(`Frame blank live partial selection at ${zoom}`, async ({
     page,
   }, testInfo) => {
@@ -413,7 +662,11 @@ for (const zoom of [0.5, 1, 2]) {
         return names.every((name) => {
           const original = saved.find((entry) => entry.id === ids[name]);
           const current = actual.find((entry) => entry.id === ids[name]);
-          if (!original || !current || original.parentId !== current.parentId)
+          if (
+            !original ||
+            !current ||
+            (original.parentId ?? null) !== (current.parentId ?? null)
+          )
             return false;
           return (
             Math.abs(
@@ -459,7 +712,11 @@ for (const zoom of [0.5, 1, 2]) {
         return names.every((name) => {
           const original = saved.find((entry) => entry.id === ids[name]);
           const current = actual.find((entry) => entry.id === ids[name]);
-          if (!original || !current || original.parentId !== current.parentId)
+          if (
+            !original ||
+            !current ||
+            (original.parentId ?? null) !== (current.parentId ?? null)
+          )
             return false;
           return (
             Math.abs(

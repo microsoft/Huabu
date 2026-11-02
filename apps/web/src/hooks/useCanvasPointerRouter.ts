@@ -124,7 +124,9 @@ export function useCanvasPointerRouter(
       const owner = core.ownerOf(event.pointerId)?.id;
       suppressOwnedClick = owner === 'note-content' || owner === 'ink-sigil';
       if (
-        (suppressOwnedClick || owner === 'node-drag') &&
+        (suppressOwnedClick ||
+          owner === 'node-drag' ||
+          owner === 'frame-selection-drag') &&
         event.pointerType === 'touch'
       )
         suppressOwnedTouch = true;
@@ -146,6 +148,7 @@ export function useCanvasPointerRouter(
       const owner = core.ownerOf(event.pointerId)?.id;
       if (
         owner === 'mouse-marquee' ||
+        owner === 'frame-selection-drag' ||
         owner === 'lasso' ||
         owner === 'note-content' ||
         owner === 'ink-sigil'
