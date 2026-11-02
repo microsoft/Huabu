@@ -101,7 +101,7 @@ describe('useNodePresentation', () => {
     render('frame');
     expect(result.mode).toBe('overview');
   });
-  it('keeps videos in ordinary mode at any size, with the shared far-zoom hysteresis', () => {
+  it('keeps videos in ordinary mode at any size, with separate playback hysteresis', () => {
     fixture.node.style = { width: 2400, height: 1600 };
     render('video');
     expect(result.mode).toBe('overview');
@@ -116,7 +116,7 @@ describe('useNodePresentation', () => {
       expect(result.mode).toBe(mode);
     }
   });
-  it('uses the Note-specific zoom band even for short Notes', () => {
+  it('uses the shared zoom band even for short Notes', () => {
     fixture.node.style = { width: 400, height: 80 };
     for (const [zoom, expected] of [
       [0.5, 'overview'],
@@ -135,15 +135,16 @@ describe('useNodePresentation', () => {
     expect(result.mode).toBe('overview');
   });
 
-  it.each(['pdf', 'web', 'office', 'video'])(
-    'keeps %s on the existing 20/24 percent band',
+  it.each(['note', 'pdf', 'web', 'office'])(
+    'uses the shared 25/28 percent band for %s',
     (type) => {
       for (const [zoom, expected] of [
-        [0.249, 'overview'],
-        [0.2, 'overview'],
-        [0.199, 'minimal'],
-        [0.239, 'minimal'],
-        [0.24, 'overview'],
+        [0.28, 'overview'],
+        [0.25, 'overview'],
+        [0.249, 'minimal'],
+        [0.25, 'minimal'],
+        [0.279, 'minimal'],
+        [0.28, 'overview'],
       ] as const) {
         fixture.viewport.zoom = zoom;
         render(type);

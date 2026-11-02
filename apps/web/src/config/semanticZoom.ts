@@ -74,8 +74,9 @@ export interface SemanticZoomConfig {
 }
 
 export const SEMANTIC_ZOOM_CONFIG: SemanticZoomConfig = {
-  minimalZoom: { enter: 0.2, exit: 0.24 },
-  minimalZoomByType: { note: { enter: 0.25, exit: 0.28 } },
+  minimalZoom: { enter: 0.25, exit: 0.28 },
+  // Video keeps its poster; this band gates playback, not text labels.
+  minimalZoomByType: { video: { enter: 0.2, exit: 0.24 } },
 
   nodeLOD: {
     // Only heavy node types — all others default to 'full' at every level.

@@ -16,43 +16,66 @@ describe('three-layer node presentation', () => {
   const belowEnter = enter - 0.0001;
   const belowExit = exit - 0.0001;
 
-  it.each([
-    [80, 80],
-    [400, 80],
-    [400, 320],
-    [2000, 1600],
-  ])('uses Note-only 25/28 percent hysteresis at %sx%s', (width, height) => {
-    expect(SEMANTIC_ZOOM_CONFIG.minimalZoomByType.note).toEqual({
-      enter: 0.25,
-      exit: 0.28,
+  describe.each(['note', 'pdf', 'web', 'office'])('%s labels', (nodeType) => {
+    it.each([
+      [80, 80],
+      [400, 80],
+      [400, 320],
+      [2000, 1600],
+    ])('uses shared 25/28 percent hysteresis at %sx%s', (width, height) => {
+      expect(SEMANTIC_ZOOM_CONFIG.minimalZoomByType[nodeType]).toBeUndefined();
+      expect(SEMANTIC_ZOOM_CONFIG.nodeLOD[nodeType]?.minimal).toBe('minimal');
+      let mode: NodePresentationMode = 'overview';
+      for (const [zoom, expected] of [
+        [0.28, 'overview'],
+        [0.26, 'overview'],
+        [0.25, 'overview'],
+        [0.2499, 'minimal'],
+        [0.25, 'minimal'],
+        [0.2799, 'minimal'],
+        [0.28, 'overview'],
+        [0.26, 'overview'],
+      ] as const) {
+        mode = resolveNodePresentation(
+          zoom,
+          width * zoom,
+          height * zoom,
+          mode,
+          false,
+          nodeType,
+        );
+        expect(mode).toBe(expected);
+      }
     });
+  });
+
+  it('preserves the Video playback 20/24 percent hysteresis', () => {
     let mode: NodePresentationMode = 'overview';
     for (const [zoom, expected] of [
-      [0.28, 'overview'],
-      [0.26, 'overview'],
-      [0.25, 'overview'],
-      [0.2499, 'minimal'],
-      [0.25, 'minimal'],
-      [0.2799, 'minimal'],
-      [0.28, 'overview'],
-      [0.26, 'overview'],
+      [0.24, 'overview'],
+      [0.2, 'overview'],
+      [0.1999, 'minimal'],
+      [0.2, 'minimal'],
+      [0.2399, 'minimal'],
+      [0.24, 'overview'],
+      [0.22, 'overview'],
     ] as const) {
       mode = resolveNodePresentation(
         zoom,
-        width * zoom,
-        height * zoom,
+        400 * zoom,
+        300 * zoom,
         mode,
         false,
-        'note',
+        'video',
       );
       expect(mode).toBe(expected);
     }
   });
 
-  it('uses the configured 20% entry and 24% exit band', () => {
+  it('uses the shared 25% entry and 28% exit band', () => {
     expect(SEMANTIC_ZOOM_CONFIG.minimalZoom).toEqual({
-      enter: 0.2,
-      exit: 0.24,
+      enter: 0.25,
+      exit: 0.28,
     });
   });
 
