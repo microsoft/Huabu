@@ -20,7 +20,10 @@ import {
   putNodeContent,
 } from '@/api/canvas';
 import { dismissToast, toast } from '@/components/Common/Toast';
-import { withSaveErrorsHandledByCaller } from '@/utils/saveErrorFeedback';
+import {
+  holdSaveErrorRecovery,
+  withSaveErrorsHandledByCaller,
+} from '@/utils/saveErrorFeedback';
 
 import { createNodeContentQueue } from '../nodeContentQueue';
 
@@ -70,6 +73,69 @@ beforeEach(() => {
 });
 
 describe('nodeContentQueue — save-failure surfacing', () => {
+  it.each(['conflict', 'duplicate'] as const)(
+    'cancels deferred %s recovery when its failure is retired',
+    async (kind) => {
+      const node = noteNode('unsaved');
+      const { queue } = makeQueue(node);
+      const release = holdSaveErrorRecovery();
+      try {
+        putMock.mockRejectedValue(
+          kind === 'conflict'
+            ? new CanvasConflictError({
+                code: 'NODE_CONTENT_CONFLICT',
+                message: 'conflict',
+                currentRev: 'server',
+              })
+            : new NodeDuplicateFilesError({ message: 'duplicate' }),
+        );
+        queue.scheduleChanges('c1', [], [node]);
+        await expect(queue.flushAllForSubmission('c1')).rejects.toThrow();
+        queue.seedBaselines([node]);
+        queue.scheduleChanges('c1', [], [node]);
+        await expect(queue.flushAllForSubmission('c1')).rejects.toThrow();
+        expect(toastMock).not.toHaveBeenCalled();
+      } finally {
+        release();
+      }
+      expect(toastMock).toHaveBeenCalledOnce();
+      queue.discardCanvas('c1');
+    },
+  );
+
+  it.each(['resolved', 'forgotten', 'discarded', 'refreshed'] as const)(
+    'does not replay a deferred duplicate notification after it is %s',
+    async (kind) => {
+      const node = noteNode('unsaved');
+      const { queue, state } = makeQueue(node);
+      const release = holdSaveErrorRecovery();
+      try {
+        putMock.mockRejectedValue(
+          new NodeDuplicateFilesError({ message: 'duplicate' }),
+        );
+        await expect(queue.flushNow('c1', node.id)).rejects.toThrow();
+        if (kind === 'resolved') {
+          putMock.mockResolvedValue({
+            nodeId: node.id,
+            label: 'Note',
+            rev: 'saved',
+          });
+          await queue.flushNow('c1', node.id);
+          expect(state.patchNodeSilent).toHaveBeenLastCalledWith(node.id, {
+            contentDuplicate: false,
+            duplicateFiles: [],
+          });
+        } else if (kind === 'forgotten') queue.forgetNode(node.id);
+        else if (kind === 'discarded') queue.discardCanvas('c1');
+        else queue.clearDuplicateGuard(node.id);
+      } finally {
+        release();
+      }
+      expect(toastMock).not.toHaveBeenCalled();
+      queue.discardCanvas('c1');
+    },
+  );
+
   it('returns preparation save failures to the caller without losing edits or suppressing future autosave errors', async () => {
     const node = noteNode('unsaved content');
     const { queue, state } = makeQueue(node);

@@ -6,7 +6,11 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import { ApiError } from '@/api/_client';
-import { putNodeContent } from '@/api/canvas';
+import {
+  CanvasConflictError,
+  NodeDuplicateFilesError,
+  putNodeContent,
+} from '@/api/canvas';
 import { deleteSpaceTree, getSpaceDeletionPreview } from '@/api/spaceHierarchy';
 import { toast } from '@/components/Common/Toast';
 import { drainPendingSaves } from '@/store/canvasStore';
@@ -375,6 +379,81 @@ it('owns Note save failures from the initial local drain before desktop preparat
   expect(queue.hasUnsavedContent('parent')).toBe(true);
   expect(toast).not.toHaveBeenCalled();
 });
+
+it.each([
+  new CanvasConflictError({
+    code: 'NODE_CONTENT_CONFLICT',
+    message: 'changed elsewhere',
+    currentRev: 'server-rev',
+  }),
+  new NodeDuplicateFilesError({
+    message: 'duplicate files',
+    duplicateFiles: ['a.md', 'b.md'],
+  }),
+])(
+  'defers Note recovery until the deletion dialog closes: %s',
+  async (error) => {
+    const node = {
+      id: 'note',
+      type: 'note',
+      position: { x: 0, y: 0 },
+      data: { content: 'Unsaved note' },
+    };
+    const patchNodeSilent = vi.fn();
+    const queue = createNodeContentQueue({
+      delayMs: 500,
+      getState: () => ({
+        canvasId: 'parent',
+        isLoading: false,
+        nodes: [node],
+        _setStateNoAutosave: vi.fn(),
+        patchNodeSilent,
+      }),
+    });
+    vi.mocked(putNodeContent).mockRejectedValue(error);
+    vi.mocked(drainPendingSaves).mockImplementationOnce(async () => {
+      queue.scheduleChanges('parent', [], [node]);
+      await queue.flushAllForSubmission('parent');
+    });
+    await remove();
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain(
+      'spaceHierarchy.deletionErrors.prepare',
+    );
+    expect(deleteSpaceTree).not.toHaveBeenCalled();
+    expect(queue.hasUnsavedContent('parent')).toBe(true);
+    expect(node.data.content).toBe('Unsaved note');
+    expect(toast).not.toHaveBeenCalled();
+    if (error instanceof NodeDuplicateFilesError) {
+      expect(patchNodeSilent).toHaveBeenCalledWith('note', {
+        contentDuplicate: true,
+        duplicateFiles: ['a.md', 'b.md'],
+      });
+    } else {
+      await queue.flushNow('parent', 'note');
+      expect(putNodeContent).toHaveBeenCalledOnce();
+    }
+    await act(async () => root.render(null));
+    expect(toast).toHaveBeenCalledOnce();
+    if (error instanceof CanvasConflictError) {
+      const options = vi.mocked(toast).mock.calls[0][1];
+      expect(options?.action?.onClick).toBeTypeOf('function');
+      vi.mocked(putNodeContent).mockResolvedValue({
+        nodeId: 'note',
+        label: null,
+        rev: 'saved',
+      });
+      options?.secondaryAction?.onClick();
+      await vi.waitFor(() => {
+        expect(queue.hasUnsavedContent('parent')).toBe(false);
+      });
+      expect(vi.mocked(putNodeContent).mock.calls[1][2]).toMatchObject({
+        content: 'Unsaved note',
+        expectRev: 'server-rev',
+      });
+    }
+    queue.discardCanvas('parent');
+  },
+);
 
 it.each(['parent', 'unrelated'])(
   'refuses deletion when the live preview is not a child of its container: %s',

@@ -17,7 +17,10 @@ import {
 import { drainPendingSaves } from '@/store/canvasStore';
 import { deleteWorkspace } from '@/store/previewWorkspace/persistence';
 import { useWorkspaceStore } from '@/store/workspaceStore';
-import { withSaveErrorsHandledByCaller } from '@/utils/saveErrorFeedback';
+import {
+  holdSaveErrorRecovery,
+  withSaveErrorsHandledByCaller,
+} from '@/utils/saveErrorFeedback';
 
 import type {
   DeleteSpaceTreeFailure,
@@ -70,6 +73,7 @@ export function SpaceDeletionDialog({
   onDeleted: (ids: string[], failure?: string, completed?: boolean) => void;
 }) {
   const { t } = useTranslation();
+  useEffect(holdSaveErrorRecovery, []);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const liveWorkspaceId = useWorkspaceStore((state) => state.workspaceId);
   const [workspaceId] = useState(liveWorkspaceId);
