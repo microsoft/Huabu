@@ -21,6 +21,7 @@ import {
   putNodeContent,
 } from '@/api/canvas';
 import { toast } from '@/components/Common/Toast';
+import { holdSaveErrorRecovery } from '@/utils/saveErrorFeedback';
 
 import { createNodeContentQueue } from '../nodeContentQueue';
 
@@ -311,42 +312,51 @@ describe('nodeContentQueue baseline lifecycle', () => {
     expect(toastMock).toHaveBeenCalledTimes(1);
   });
 
-  it('adopts contentMissing when Load latest finds a deleted sidecar', async () => {
-    const node = noteNode('mine');
-    const { queue, state } = makeQueue(node);
-    queue.seedBaselines([node]);
-    putMock.mockRejectedValueOnce(
-      new CanvasConflictError({
-        code: 'NODE_CONTENT_CONFLICT',
-        message: 'changed elsewhere',
+  it.each([false, true])(
+    'adopts contentMissing when Load latest finds a deleted sidecar (deferred: %s)',
+    async (deferred) => {
+      const node = noteNode('mine');
+      const { queue, state } = makeQueue(node);
+      queue.seedBaselines([node]);
+      putMock.mockRejectedValueOnce(
+        new CanvasConflictError({
+          code: 'NODE_CONTENT_CONFLICT',
+          message: 'changed elsewhere',
+          nodeId: 'n1',
+          currentRev: 'OTHER',
+        }),
+      );
+      getMock.mockResolvedValueOnce({
         nodeId: 'n1',
-        currentRev: 'OTHER',
-      }),
-    );
-    getMock.mockResolvedValueOnce({
-      nodeId: 'n1',
-      type: 'note',
-      label: null,
-      content: '',
-      rev: nodeRevisionOf({}),
-      contentMissing: true,
-    });
-
-    await queue.flushNow('c1', 'n1');
-    const toastOpts = toastMock.mock.calls[0][1] as {
-      action: { onClick: () => void };
-    };
-    toastOpts.action.onClick();
-    await vi.waitFor(() => {
-      expect(state._setStateNoAutosave).toHaveBeenCalledWith({
-        nodes: [
-          expect.objectContaining({
-            data: expect.objectContaining({ contentMissing: true }),
-          }),
-        ],
+        type: 'note',
+        label: null,
+        content: '',
+        rev: nodeRevisionOf({}),
+        contentMissing: true,
       });
-    });
-  });
+
+      const release = deferred ? holdSaveErrorRecovery() : undefined;
+      try {
+        await queue.flushNow('c1', 'n1');
+        if (deferred) expect(toastMock).not.toHaveBeenCalled();
+      } finally {
+        release?.();
+      }
+      const toastOpts = toastMock.mock.calls[0][1] as {
+        action: { onClick: () => void };
+      };
+      toastOpts.action.onClick();
+      await vi.waitFor(() => {
+        expect(state._setStateNoAutosave).toHaveBeenCalledWith({
+          nodes: [
+            expect.objectContaining({
+              data: expect.objectContaining({ contentMissing: true }),
+            }),
+          ],
+        });
+      });
+    },
+  );
 
   it('"Keep mine" re-baselines to the disk rev and force-writes over it', async () => {
     const node = noteNode('mine');

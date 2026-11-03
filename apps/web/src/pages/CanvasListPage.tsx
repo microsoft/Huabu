@@ -73,6 +73,7 @@ export default function CanvasListPage() {
     canvasId: string;
     title: string | null;
   } | null>(null);
+  const deletionOpen = useRef(false);
   const [showAll, setShowAll] = useState(
     () => localStorage.getItem('huabu.spaces.showAll') === 'true',
   );
@@ -111,7 +112,7 @@ export default function CanvasListPage() {
   const isDesktopHome = getElectronBridge()?.tabs?.context.role === 'home';
 
   const fetchCanvases = useCallback(
-    async (showLoading = true) => {
+    async (showLoading = true, failureMessage?: string) => {
       const workspace = useWorkspaceStore.getState();
       if (workspace.isSyncing) return;
       const requestId = ++listRequestRef.current.version;
@@ -134,12 +135,14 @@ export default function CanvasListPage() {
       } catch (error) {
         if (isCurrent()) {
           console.error('Failed to list canvases:', error);
-          toast(
-            error instanceof Error
-              ? error.message
-              : translations.t('spaceHierarchy.failed'),
-            { tone: 'danger' },
-          );
+          if (!deletionOpen.current)
+            toast(
+              failureMessage ??
+                (error instanceof Error
+                  ? error.message
+                  : translations.t('spaceHierarchy.failed')),
+              { tone: 'danger' },
+            );
         }
       } finally {
         if (isCurrent()) setIsLoading(false);
@@ -147,6 +150,32 @@ export default function CanvasListPage() {
     },
     [setCanvasCount],
   );
+
+  const reconcileDeletedSpaces = useCallback(
+    (ids: string[]) => {
+      listRequestRef.current.version++;
+      setCanvases((current) => {
+        const remaining = current.filter(
+          (canvas) => !ids.includes(canvas.canvasId),
+        );
+        setCanvasCount(remaining.length);
+        return remaining;
+      });
+      setIsLoading(false);
+    },
+    [setCanvasCount],
+  );
+
+  useEffect(() => {
+    const tabs = getElectronBridge()?.tabs;
+    if (!tabs || tabs.context.role !== 'home') return;
+    return tabs.onSpacesDeleted((result) => {
+      const workspace = useWorkspaceStore.getState();
+      if (workspace.isSyncing || workspace.workspaceId !== result.workspaceId)
+        return;
+      reconcileDeletedSpaces(result.deletedCanvasIds);
+    });
+  }, [reconcileDeletedSpaces]);
 
   useEffect(() => {
     const requests = listRequestRef.current;
@@ -265,28 +294,9 @@ export default function CanvasListPage() {
     }
   };
 
-  const reportDeleteError = (error: unknown) => {
-    console.error('Failed to delete canvas:', error);
-    toast(error instanceof Error ? error.message : String(error), {
-      tone: 'danger',
-    });
-  };
-
-  const canDeleteSpace = async (canvasId: string): Promise<boolean> => {
-    const tabs = getElectronBridge()?.tabs;
-    if (!tabs) return true;
-    const state = await tabs.getState();
-    if (!state.tabs.some((tab) => tab.canvasId === canvasId)) return true;
-    toast(t('desktopTabs.closeBeforeDeleting'), { tone: 'warning' });
-    return false;
-  };
-
-  const requestDelete = async (canvasId: string, title: string | null) => {
-    try {
-      if (await canDeleteSpace(canvasId)) setPendingDelete({ canvasId, title });
-    } catch (error) {
-      reportDeleteError(error);
-    }
+  const requestDelete = (canvasId: string, title: string | null) => {
+    deletionOpen.current = true;
+    setPendingDelete({ canvasId, title });
   };
 
   const formatDate = (timestamp: number) => {
@@ -366,20 +376,24 @@ export default function CanvasListPage() {
         <SpaceDeletionDialog
           canvasId={pendingDelete.canvasId}
           onClose={() => {
+            deletionOpen.current = false;
             setPendingDelete(null);
             void fetchCanvases();
           }}
-          onDeleted={(ids, failure) => {
-            listRequestRef.current.version++;
-            setCanvases((current) => {
-              const remaining = current.filter(
-                (canvas) => !ids.includes(canvas.canvasId),
-              );
-              setCanvasCount(remaining.length);
-              return remaining;
-            });
-            if (!failure) setPendingDelete(null);
-            void fetchCanvases(false);
+          onDeleted={(ids, failure, completed) => {
+            reconcileDeletedSpaces(ids);
+            if (!failure || completed) {
+              deletionOpen.current = false;
+              setPendingDelete(null);
+              if (failure) toast(failure, { tone: 'danger' });
+              else
+                void fetchCanvases(
+                  false,
+                  translations.t(
+                    'spaceHierarchy.deletionErrors.deletedRefresh',
+                  ),
+                );
+            }
           }}
         />
       )}

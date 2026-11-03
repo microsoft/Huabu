@@ -39,7 +39,11 @@ export type SpaceHierarchyResponse = z.infer<
 export const deleteSpaceTreePreviewSchema = z.object({
   token: z.string(),
   spaces: z.array(
-    z.object({ canvasId: spaceId, title: z.string().nullable() }),
+    z.object({
+      canvasId: spaceId,
+      title: z.string().nullable(),
+      parentSpaceId: spaceId.nullable(),
+    }),
   ),
 });
 export type DeleteSpaceTreePreview = z.infer<

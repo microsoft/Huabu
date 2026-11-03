@@ -34,6 +34,10 @@ import {
 import { dismissToast, toast } from '@/components/Common/Toast';
 import { i18n } from '@/i18n';
 import { copyToClipboard } from '@/utils/io/clipboard';
+import {
+  saveErrorsHandledByCaller,
+  showSaveErrorRecovery,
+} from '@/utils/saveErrorFeedback';
 
 import {
   MD_BACKED_NODE_TYPES,
@@ -233,10 +237,21 @@ export function createNodeContentQueue(opts: {
   const generations = new Map<string, object>();
   const failures = new Map<string, { canvasId: string; error: unknown }>();
   const failureToasts = new Map<string, string>();
+  const pendingFailureRecovery = new Map<string, () => void>();
   function dismissFailureToast(nodeId: string): void {
+    pendingFailureRecovery.get(nodeId)?.();
+    pendingFailureRecovery.delete(nodeId);
     const id = failureToasts.get(nodeId);
     if (id) dismissToast(id);
     failureToasts.delete(nodeId);
+  }
+  function showFailureRecovery(nodeId: string, show: () => void): void {
+    const canvasId = opts.getState().canvasId;
+    const cancel = showSaveErrorRecovery(() => {
+      pendingFailureRecovery.delete(nodeId);
+      if (opts.getState().canvasId === canvasId) show();
+    });
+    if (cancel) pendingFailureRecovery.set(nodeId, cancel);
   }
   const pendingFields = new Map<string, Map<string, object>>();
   const suppressNextNewNodeSave = new Set<string>();
@@ -269,7 +284,7 @@ export function createNodeContentQueue(opts: {
 
   /**
    * Node ids for which the persistent `NODE_CONTENT_CONFLICT` toast is
-   * already showing. Rate-limits the toast to once per node (autosave
+   * registered (visible or deferred). Rate-limits it to once per node (autosave
    * would otherwise re-pop it on every keystroke while the node stays
    * blocked). Cleared on a successful write or a baseline reseed.
    */
@@ -289,7 +304,7 @@ export function createNodeContentQueue(opts: {
   const frozen = new Map<string, string>();
 
   /**
-   * Node ids for which we have already shown the persistent
+   * Node ids for which we have registered the persistent
    * "duplicate files on disk" toast. Autosave retries while the
    * duplicate persists would otherwise pop a fresh toast on every
    * keystroke; we toast once and clear the flag on the next
@@ -548,25 +563,27 @@ export function createNodeContentQueue(opts: {
         : i18n.t('node.untitled');
     const generation = generations.get(nodeId);
     dismissFailureToast(nodeId);
-    const toastId = toast(i18n.t('node.contentConflict', { label }), {
-      tone: 'danger',
-      duration: 0,
-      secondaryAction: {
-        label: i18n.t('node.contentConflictKeepMine'),
-        onClick: () => {
-          if (generations.get(nodeId) !== generation) return;
-          void resolveKeepMine(nodeId);
+    showFailureRecovery(nodeId, () => {
+      const toastId = toast(i18n.t('node.contentConflict', { label }), {
+        tone: 'danger',
+        duration: 0,
+        secondaryAction: {
+          label: i18n.t('node.contentConflictKeepMine'),
+          onClick: () => {
+            if (generations.get(nodeId) !== generation) return;
+            void resolveKeepMine(nodeId);
+          },
         },
-      },
-      action: {
-        label: i18n.t('node.contentConflictLoadLatest'),
-        onClick: () => {
-          if (generations.get(nodeId) !== generation) return;
-          void resolveLoadLatest(nodeId);
+        action: {
+          label: i18n.t('node.contentConflictLoadLatest'),
+          onClick: () => {
+            if (generations.get(nodeId) !== generation) return;
+            void resolveLoadLatest(nodeId);
+          },
         },
-      },
+      });
+      failureToasts.set(nodeId, toastId);
     });
-    failureToasts.set(nodeId, toastId);
     console.warn('[node-content] write refused (stale content):', nodeId);
   }
 
@@ -745,10 +762,12 @@ export function createNodeContentQueue(opts: {
     if (duplicateToasted.has(nodeId)) return;
     duplicateToasted.add(nodeId);
     dismissFailureToast(nodeId);
-    failureToasts.set(
-      nodeId,
-      toast(err.message, { tone: 'danger', duration: 0, dismissible: true }),
-    );
+    showFailureRecovery(nodeId, () => {
+      failureToasts.set(
+        nodeId,
+        toast(err.message, { tone: 'danger', duration: 0, dismissible: true }),
+      );
+    });
     console.error('Node write refused — duplicate files on disk:', nodeId, err);
   }
 
@@ -855,6 +874,7 @@ export function createNodeContentQueue(opts: {
     message: string,
     source: 'user' | 'auto',
   ): void {
+    if (saveErrorsHandledByCaller()) return;
     if (source === 'auto' && saveErrorToasted.has(nodeId)) return;
     saveErrorToasted.add(nodeId);
     const generation = generations.get(nodeId);
@@ -1163,6 +1183,8 @@ export function createNodeContentQueue(opts: {
 
     clearDuplicateGuard(nodeId) {
       duplicateToasted.delete(nodeId);
+      if (failures.get(nodeId)?.error instanceof NodeDuplicateFilesError)
+        dismissFailureToast(nodeId);
     },
 
     forgetNode(nodeId) {
