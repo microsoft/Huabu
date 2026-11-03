@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SignInGate } from './SignInGate';
 import { AUTH_REQUIRED_EVENT } from '../../api/_client';
 import { useIdentityStore } from '../../store/identityStore';
+import { forgetTokens } from '../../utils/oidcLogin';
 
 // The brand animation draws on a canvas the test DOM does not provide.
 vi.mock('../../pages/WorkspaceLoadingScreen', () => ({
@@ -54,6 +55,7 @@ let container: HTMLDivElement;
 let root: Root;
 
 beforeEach(() => {
+  forgetTokens();
   calls = [];
   routes = {};
   vi.stubGlobal(
@@ -79,6 +81,25 @@ afterEach(() => {
   act(() => root.unmount());
   container.remove();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
+
+it('shows a blocked-popup error over the running app and permits retry', async () => {
+  routes['GET /api/identity'] = () => json(MEMBER);
+  await mount();
+  routes['GET /api/identity'] = () => json({}, 401);
+  routes['GET /bubble/v1/auth/authenticators'] = () =>
+    json({ authenticators: [ENTRA] });
+  await act(async () => window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT)));
+  for (let i = 0; i < 5; i++) await act(async () => {});
+  vi.spyOn(window, 'open').mockReturnValue(null);
+  await act(async () => container.querySelector('button')?.click());
+  for (let i = 0; i < 5; i++) await act(async () => {});
+  expect(container.textContent).toContain(
+    'The browser blocked the sign-in window',
+  );
+  expect(container.textContent).toContain('app');
+  expect(container.querySelector('button')?.disabled).toBe(false);
 });
 
 async function mount(strict = false) {

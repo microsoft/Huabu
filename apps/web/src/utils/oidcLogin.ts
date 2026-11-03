@@ -36,6 +36,9 @@ interface HeldRefresh {
 }
 
 let held: HeldRefresh | null = null;
+let tokenGeneration = 0;
+let refreshing: Promise<SignedInTokens | null> | null = null;
+let signedInAuthenticator: InteractiveAuthenticator | null = null;
 
 function base64Url(bytes: Uint8Array): string {
   return btoa(String.fromCharCode(...bytes))
@@ -105,6 +108,7 @@ async function requestTokens(
   authenticator: InteractiveAuthenticator,
   grant: Record<string, string>,
 ): Promise<SignedInTokens> {
+  const generation = tokenGeneration;
   const { token_endpoint: tokenEndpoint } =
     await providerMetadata(authenticator);
   if (!tokenEndpoint)
@@ -125,8 +129,12 @@ async function requestTokens(
       token.error_description ?? 'Sign-in could not be completed',
     );
   // Providers that rotate refresh tokens send a new one with each use.
-  if (token.refresh_token)
-    held = { authenticator, refreshToken: token.refresh_token };
+  if (generation === tokenGeneration) {
+    signedInAuthenticator = authenticator;
+    if (token.refresh_token)
+      held = { authenticator, refreshToken: token.refresh_token };
+    else if (grant.grant_type === 'authorization_code') held = null;
+  }
   return {
     accessToken: token.access_token,
     ...(typeof token.expires_in === 'number'
@@ -140,6 +148,7 @@ function exchangeCode(
   code: string,
   verifier: string,
 ): Promise<SignedInTokens> {
+  forgetTokens();
   return requestTokens(authenticator, {
     grant_type: 'authorization_code',
     code,
@@ -257,28 +266,40 @@ export async function signInWithPopup(
  * A fresh access token from the refresh token this page holds, or `null`
  * when it holds none or the provider refuses it.
  */
-export async function refreshTokens(): Promise<SignedInTokens | null> {
+export function refreshTokens(): Promise<SignedInTokens | null> {
+  if (refreshing) return refreshing;
   const current = held;
-  if (!current) return null;
-  try {
-    return await requestTokens(current.authenticator, {
-      grant_type: 'refresh_token',
-      refresh_token: current.refreshToken,
-    });
-  } catch {
-    if (held === current) held = null;
-    return null;
-  }
+  if (!current) return Promise.resolve(null);
+  const generation = tokenGeneration;
+  const attempt = (async () => {
+    try {
+      const tokens = await requestTokens(current.authenticator, {
+        grant_type: 'refresh_token',
+        refresh_token: current.refreshToken,
+      });
+      return generation === tokenGeneration ? tokens : null;
+    } catch {
+      if (held === current) held = null;
+      return null;
+    } finally {
+      if (generation === tokenGeneration) refreshing = null;
+    }
+  })();
+  refreshing = attempt;
+  return attempt;
 }
 
-/** The provider this page signed in with, while it holds a refresh token. */
+/** The provider this page signed in with, retained until sign-out. */
 export function heldAuthenticator(): InteractiveAuthenticator | null {
-  return held?.authenticator ?? null;
+  return signedInAuthenticator;
 }
 
 /** Forget the refresh token, as signing out must. */
 export function forgetTokens(): void {
+  tokenGeneration += 1;
   held = null;
+  signedInAuthenticator = null;
+  refreshing = null;
 }
 
 /**

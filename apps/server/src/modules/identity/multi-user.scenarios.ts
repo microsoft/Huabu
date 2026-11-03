@@ -697,6 +697,20 @@ export function describeSeveralPeople(
       // beside the personal Workspace her first admitted request made.
       const carolWs = await workspaceOf('carol');
       await call('carol', 'POST', '/api/canvas', { title: 'plan' });
+      // #356 retains system-owner access. People role choices use the
+      // existing Workspace list, including each member's Workspace.
+      expect(
+        (await call('admin', 'GET', '/api/workspaces')).body.map(
+          (w: { workspaceId: string }) => w.workspaceId,
+        ),
+      ).toContain(carolWs);
+      const adminWs = await workspaceOf('admin');
+      expect(
+        (await call('admin', 'POST', `/api/workspaces/${carolWs}/activate`))
+          .status,
+      ).toBe(200);
+      expect(await spacesOf('admin')).toEqual(['plan']);
+      await call('admin', 'POST', `/api/workspaces/${adminWs}/activate`);
       expect(
         (
           await call('admin', 'PUT', `/api/people/erin/workspaces/${carolWs}`, {

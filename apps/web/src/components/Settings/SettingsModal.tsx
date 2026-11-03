@@ -81,13 +81,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const tabs =
     identity?.provider === 'bubble' && identity.owner
       ? [...TABS, PEOPLE_TAB]
-      : member ? TABS.filter((tab) => tab.id !== 'agent') : TABS;
+      : member
+        ? TABS.filter((tab) => tab.id !== 'agent')
+        : TABS;
   const llmInit = useLLMStore((s) => s.init);
   const acpInit = useAcpProfilesStore((s) => s.init);
   const loadDeploymentReadiness = useDeploymentReadinessStore((s) => s.load);
   const requestedTab = useSettingsUiStore((s) => s.requestedTab);
   const clearRequestedTab = useSettingsUiStore((s) => s.clearRequestedTab);
-  const [activeTab, setActiveTab] = useState<SettingsTab>(member ? 'agentSettings' : TABS[0].id);
+  const [activeTab, setActiveTab] = useState<SettingsTab>(
+    member ? 'agentSettings' : TABS[0].id,
+  );
   const isAgentTab = activeTab === 'agentSettings' || activeTab === 'builtIn';
   const [externalAgentsNavigation, setExternalAgentsNavigation] =
     useState<ExternalAgentsNavigation | null>(null);
@@ -109,13 +113,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   // the tab the user last viewed.
   useEffect(() => {
     if (isOpen && requestedTab) {
-      setActiveTab(member && (requestedTab === 'agent' || requestedTab === 'people') ? 'agentSettings' : requestedTab);
+      setActiveTab(
+        member && (requestedTab === 'agent' || requestedTab === 'people')
+          ? 'agentSettings'
+          : requestedTab,
+      );
       clearRequestedTab();
     }
   }, [isOpen, requestedTab, member, clearRequestedTab]);
 
   useEffect(() => {
-    if (member && (activeTab === 'agent' || activeTab === 'people')) setActiveTab('agentSettings');
+    if (member && (activeTab === 'agent' || activeTab === 'people'))
+      setActiveTab('agentSettings');
   }, [member, activeTab]);
 
   useEffect(() => {
@@ -130,8 +139,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   // Load each registry only when its owning tab is visible.
   useEffect(() => {
     if (!isOpen) return;
-    const targetTab = requestedTab ?? activeTab;
-    if (!member && (targetTab === 'agent' || targetTab === 'agentSettings')) void acpInit();
+    const targetTab =
+      member && (requestedTab === 'agent' || requestedTab === 'people')
+        ? 'agentSettings'
+        : (requestedTab ?? activeTab);
+    if (!member && (targetTab === 'agent' || targetTab === 'agentSettings'))
+      void acpInit();
     if (targetTab === 'builtIn' || (targetTab === 'agentSettings' && member)) {
       void llmInit();
     }

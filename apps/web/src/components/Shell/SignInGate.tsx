@@ -191,9 +191,13 @@ export function SignInGate({ children }: { children: ReactNode }) {
   /** Sign in again without leaving the page, then resend what was refused. */
   const signInInPlace = useCallback(
     async (authenticator: InteractiveAuthenticator) => {
-      await adopt(await signInWithPopup(authenticator));
-      await check();
-      await resend();
+      try {
+        await adopt(await signInWithPopup(authenticator));
+        await check();
+        await resend();
+      } catch (error) {
+        await check(error instanceof Error ? error.message : String(error));
+      }
     },
     [adopt, check],
   );

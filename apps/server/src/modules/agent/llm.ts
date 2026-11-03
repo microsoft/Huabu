@@ -471,6 +471,10 @@ interface RuntimeState {
    * chat model directly and this stays null.
    */
   cachedUtilityModel: Model<Api> | null;
+  openAIModelIdsCache: { ids: string[]; expiresAt: number } | null;
+  openAIModelIdsRequest: Promise<string[] | null> | null;
+  /** Reject cache publication after this owner changes credentials. */
+  openAIModelIdsEpoch: number;
 }
 
 /** One runtime state per settings namespace: the deployment's, or a member's. */
@@ -480,7 +484,14 @@ function runtime(): RuntimeState {
   const key = personalSettingsOwner() ?? '';
   let state = runtimeStates.get(key);
   if (!state) {
-    state = { cachedModel: null, activeConfig: null, cachedUtilityModel: null };
+    state = {
+      cachedModel: null,
+      activeConfig: null,
+      cachedUtilityModel: null,
+      openAIModelIdsCache: null,
+      openAIModelIdsRequest: null,
+      openAIModelIdsEpoch: 0,
+    };
     runtimeStates.set(key, state);
   }
   return state;
@@ -719,17 +730,6 @@ const OPENAI_NON_CHAT_MODEL_MARKERS = [
 ] as const;
 
 const OPENAI_MODEL_IDS_CACHE_TTL_MS = 5 * 60_000;
-let openAIModelIdsCache: { ids: string[]; expiresAt: number } | null = null;
-let openAIModelIdsRequest: Promise<string[] | null> | null = null;
-/**
- * Bumped whenever the OpenAI key / baseUrl changes. An in-flight
- * `/v1/models` fetch started under the previous credential captures the
- * epoch at launch and, if it no longer matches on completion, neither
- * repopulates the cache (stale-key ids) nor clears a newer in-flight
- * request.
- */
-let openAIModelIdsEpoch = 0;
-
 /** Whether an OpenAI `/v1/models` id is a chat/completion model. */
 export function isOpenAIChatModelId(id: string): boolean {
   const lower = id.toLowerCase();
@@ -784,19 +784,23 @@ export function mergeOpenAIModels(
  * pi-ai catalogue instead of showing an empty list.
  */
 async function fetchOpenAIModelIds(): Promise<string[] | null> {
-  if (openAIModelIdsCache && openAIModelIdsCache.expiresAt > Date.now()) {
-    return [...openAIModelIdsCache.ids];
+  const state = runtime();
+  if (
+    state.openAIModelIdsCache &&
+    state.openAIModelIdsCache.expiresAt > Date.now()
+  ) {
+    return [...state.openAIModelIdsCache.ids];
   }
-  if (openAIModelIdsRequest) return openAIModelIdsRequest;
+  if (state.openAIModelIdsRequest) return state.openAIModelIdsRequest;
 
-  const epoch = openAIModelIdsEpoch;
-  openAIModelIdsRequest = fetchOpenAIModelIdsUncached();
+  const epoch = state.openAIModelIdsEpoch;
+  state.openAIModelIdsRequest = fetchOpenAIModelIdsUncached();
   try {
-    const ids = await openAIModelIdsRequest;
+    const ids = await state.openAIModelIdsRequest;
     // Drop the result if the credential changed mid-flight — a stale-key
     // model list must not seed the cache for the new key.
-    if (ids && epoch === openAIModelIdsEpoch) {
-      openAIModelIdsCache = {
+    if (ids && epoch === state.openAIModelIdsEpoch) {
+      state.openAIModelIdsCache = {
         ids: [...ids],
         expiresAt: Date.now() + OPENAI_MODEL_IDS_CACHE_TTL_MS,
       };
@@ -805,7 +809,7 @@ async function fetchOpenAIModelIds(): Promise<string[] | null> {
   } finally {
     // Only clear our own request slot; a config change may have already
     // installed a fresh request for the new credential.
-    if (epoch === openAIModelIdsEpoch) openAIModelIdsRequest = null;
+    if (epoch === state.openAIModelIdsEpoch) state.openAIModelIdsRequest = null;
   }
 }
 
@@ -1037,9 +1041,10 @@ export async function setLLMConfig(
     persisted.provider === 'openai' &&
     (update.apiKey !== undefined || update.baseUrl !== undefined)
   ) {
-    openAIModelIdsCache = null;
-    openAIModelIdsRequest = null;
-    openAIModelIdsEpoch += 1;
+    const state = runtime();
+    state.openAIModelIdsCache = null;
+    state.openAIModelIdsRequest = null;
+    state.openAIModelIdsEpoch += 1;
   }
 
   const providerInfo = getProviderCatalog().find(

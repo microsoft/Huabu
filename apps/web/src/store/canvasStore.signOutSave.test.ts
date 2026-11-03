@@ -22,6 +22,7 @@ vi.mock('@/components/Common/Toast', () => ({ toast: vi.fn() }));
 import useCanvasStore, {
   hasUnsavedCanvasEdits,
   savedBeforeSignOut,
+  resendUnsavedCanvasEdits,
 } from './canvasStore';
 import { pageLifecycle } from '../utils/pageLifecycle';
 
@@ -116,6 +117,22 @@ describe('savedBeforeSignOut', () => {
 });
 
 describe('hasUnsavedCanvasEdits', () => {
+  it('resends a settled 401 sidecar failure after renewal without requiring another edit', async () => {
+    api.putNodeContent.mockRejectedValue(new Error('401 IDENTITY_REQUIRED'));
+    state().updateNodeData(note.id, { content: 'Retained across renewal' });
+    expect(await savedBeforeSignOut()).toBe(false);
+    const attempts = api.putNodeContent.mock.calls.length;
+    api.putNodeContent.mockResolvedValue({ revision: 'r3' });
+    await resendUnsavedCanvasEdits();
+    expect(api.putNodeContent).toHaveBeenCalledTimes(attempts + 1);
+    expect(api.putNodeContent).toHaveBeenLastCalledWith(
+      'signout-canvas',
+      note.id,
+      expect.objectContaining({ content: 'Retained across renewal' }),
+      undefined,
+    );
+    expect(hasUnsavedCanvasEdits()).toBe(false);
+  });
   it('counts a queued, then a failed, content edit until one lands', async () => {
     expect(hasUnsavedCanvasEdits()).toBe(false);
     api.putNodeContent.mockRejectedValue(new Error('401 IDENTITY_REQUIRED'));

@@ -40,7 +40,11 @@ import conversationOwnerRoutes from './conversation-owner.route.js';
 import conversationTitleRoutes from './conversation-title.route.js';
 import { InkAgentModeError } from './ink-response.js';
 import { ExternalAgentRealizationError } from '../agent/acp/external-agent-realization.js';
-import { agenetes, INTERNAL_DRIVER_KIND } from '../agent/agenetes/drivers.js';
+import {
+  agenetes,
+  EXTERNAL_DRIVER_KIND,
+  INTERNAL_DRIVER_KIND,
+} from '../agent/agenetes/drivers.js';
 import { InkModelCapabilityError } from '../agent/agent-submission.js';
 import { AgentThreadResolutionError } from '../agent/agent-thread-resolver.js';
 import {
@@ -55,6 +59,7 @@ import {
 import { buildHistoryFromTurns } from '../agent/conversation/transcript/history.js';
 import { getLLMModel } from '../agent/llm.js';
 import { personalSettingsOwner } from '../identity/personal-settings.js';
+import { getRequestIdentity } from '../identity/request.js';
 import { canvasAcpNamespace } from '../workspace/paths.js';
 
 import type { ControlMsg, Namespace } from '@agenetes/protocol';
@@ -182,6 +187,49 @@ const agentRoutes: FastifyPluginAsync = async (
   fastify,
   _opts,
 ): Promise<void> => {
+  // A Space grant permits Built-In conversations, but never control of an
+  // external thread using the deployment's machine credential. Resolve both
+  // the Question binding and persisted driver before any mutation runs.
+  fastify.addHook('preHandler', async (request, reply) => {
+    const identity = getRequestIdentity(request);
+    if (
+      !identity ||
+      identity.owner ||
+      request.method === 'GET' ||
+      request.method === 'HEAD'
+    )
+      return;
+    const params = request.params as { threadId?: string };
+    const body = request.body as
+      | { threadId?: string; canvasId?: string }
+      | undefined;
+    const query = request.query as { canvasId?: string };
+    const threadId = params.threadId ?? body?.threadId;
+    const canvasId = body?.canvasId ?? query.canvasId;
+    if (!threadId || !canvasId) return;
+    try {
+      const record = await agenetes.record(
+        canvasAcpNamespace(canvasId),
+        threadId,
+      );
+      if (
+        record?.spec.kind === EXTERNAL_DRIVER_KIND ||
+        (await agentThreadService.resolveExternalTarget(canvasId, threadId))
+      ) {
+        return reply.code(403).send({
+          message: 'External agents are available to administrators only',
+          code: 'AGENT_ACCESS_REQUIRED',
+        });
+      }
+    } catch (error) {
+      if (error instanceof AgentThreadResolutionError) {
+        return reply
+          .code(error.code === 'canvas_not_found' ? 404 : 409)
+          .send({ message: error.message, code: error.code });
+      }
+      throw error;
+    }
+  });
   await fastify.register(conversationTitleRoutes);
   await fastify.register(conversationOwnerRoutes);
 

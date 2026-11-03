@@ -3,7 +3,7 @@
 Status: In-Progress — PR A (#356) merged, PR B (#357) implemented for review
 Last updated: 2026-11-03
 
-Follows PR #237 (Bubble identity and per-user Space access) toward issue #228. Two stacked pull requests take one Huabu Server from "several people sign in and each edits their own Spaces in one shared Workspace" to a service several people can use day to day: each person has their own Workspaces, uses agents in them, and an operator admits people without scripts.
+Follows PR #237 (Bubble identity and per-user Space access) toward issue #228. PR A (#356) is merged; PR B (#357) now targets `main`. Together these pull requests take one Huabu Server from "several people sign in and each edits their own Spaces in one shared Workspace" to a service several people can use day to day: each person has their own Workspaces, uses agents in them, and an operator admits people without scripts.
 
 Nothing changes in local mode (`HUABU_IDENTITY_PROVIDER=local`). Desktop and single-owner deployments keep one process-active Workspace, the same routes and the same UI.
 
@@ -97,7 +97,7 @@ Agents stay owner-only for members, as in #237. Each run now carries its Workspa
 
 - **Moving existing Spaces.** The new hierarchy picker and bring-existing-Space flow reuse `PATCH /api/canvas/:canvasId/parent`. The route retains PR A's `manage` requirement on the moved Space and `write` on its destination. Placement now travels in the request body's optional `position`; the detachment ownership callback remains under the hierarchy lock.
 - **Authoritative conversation snapshots.** A stream captures its admitted Workspace and restores it for reads triggered by Canvas publisher callbacks, which can arrive outside the observing request or in another request's scope. Local mode retains the existing process-Workspace change check.
-- **Connected devices, profile grouping and file browsing.** These remain deployment-wide, owner-only features in PR A. The stateless filesystem proxy has no Workspace namespace and is selected by device id. Before PR B opens these routes to members, device/profile discovery and arbitrary filesystem access need explicit principal authorization; a Workspace or Space grant alone does not authorize a connected device's files. The per-person Workspace design itself is unchanged.
+- **Connected devices, profile grouping and file browsing.** These remain deployment-wide, owner-only features in PR A. The stateless filesystem proxy has no Workspace namespace and is selected by device id. PR B keeps them administrator-only; member profile discovery returns Built-In alone and an empty device list. Opening device/profile discovery and arbitrary filesystem access later needs explicit principal authorization; a Workspace or Space grant alone does not authorize a connected device's files. The per-person Workspace design itself is unchanged.
 
 ### Proof
 
@@ -122,6 +122,13 @@ A Bubble member's calls run in a personal settings namespace (`modules/identity/
 - **Secrets.** The secret store namespaces their model keys, OAuth credentials and connected-service keys, with no fallback to the deployment's environment.
 - **Settings files.** Model settings and agent defaults live under `<data>/people/<key>/`.
 - **Routes.** Members may change their own settings; the deployment's stay with administrators. Settings shows a member only Built-In setup and services.
+
+### Integration after #356 merged (2026-11-03)
+
+- The member settings UI follows main's separate **Devices and Agents** and **Agent settings** tabs. Members see their Built-In configuration under Agent settings, Services and General; administrators also see People. Member deep links to the external-agent tab land in their own settings.
+- OCR never imports deployment legacy files or environment credentials for a member. Pending model OAuth flows, pi-ai runtime Models collections and live OpenAI discovery caches belong to the settings owner. Member pi-ai authentication also excludes ambient environment and file credentials.
+- Agent mutation routes check both the Question binding and persisted external driver before allowing a member to stop or steer a thread. External agents and connected devices stay with administrators.
+- Session refresh shares one in-flight token exchange, retains the selected provider for logout, and discards a refresh that finishes after sign-out. Popup failures reach the existing sign-in error alert. Recovery uses main's save drain to retry retained sidecar failures while keeping its conflict and restoration guards.
 
 ### Grant administration
 

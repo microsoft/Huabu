@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   resolveBinding: vi.fn(),
   invoke: vi.fn(),
   stopAndWait: vi.fn(),
+  resolveExternalTarget: vi.fn(),
+  record: vi.fn(),
 }));
 
 vi.mock('./conversation/envelope.js', () => ({
@@ -43,6 +45,7 @@ vi.mock('./agent-thread.service.js', () => {
       beginPreparation: mocks.beginPreparation,
       invoke: mocks.invoke,
       stopAndWait: mocks.stopAndWait,
+      resolveExternalTarget: mocks.resolveExternalTarget,
     },
   };
 });
@@ -55,8 +58,10 @@ vi.mock('./acp/external-agent-realization.js', () => ({
 
 vi.mock('./agenetes/drivers.js', () => ({
   INTERNAL_DRIVER_KIND: 'internal',
+  EXTERNAL_DRIVER_KIND: 'external',
   agenetes: {
     logMetadata: () => ({ turnCount: 0 }),
+    record: mocks.record,
   },
 }));
 
@@ -74,6 +79,7 @@ vi.mock('../workspace/paths.js', () => ({
 
 import agentRoutes from './agent.route.js';
 import { InkAgentModeError } from './ink-response.js';
+import { setRequestIdentity } from '../identity/request.js';
 
 import type { AgentStreamEvent, ChatEnvelope } from '@huabu/shared';
 
@@ -106,6 +112,7 @@ async function* failsBeforeFirstEvent(): AsyncGenerator<
 afterEach(() => {
   vi.clearAllMocks();
   mocks.resolveTarget.mockResolvedValue(null);
+  mocks.record.mockResolvedValue(null);
   mocks.resolveBinding.mockImplementation(
     ({ requestBinding }: { requestBinding?: unknown }) =>
       requestBinding ?? { kind: 'internal' },
@@ -122,6 +129,49 @@ afterEach(() => {
 });
 
 describe('POST /agent', () => {
+  it('refuses member control of an external thread in a writable Space before stopping it', async () => {
+    const app = Fastify();
+    app.addHook('onRequest', async (request) => {
+      setRequestIdentity(request, {
+        principal: { principalId: 'carol', kind: 'user' },
+        member: true,
+        owner: request.headers['x-owner'] === 'yes',
+        access: {
+          can: async () => true,
+          claim: async () => {},
+          workspaces: async () => 'all',
+        },
+      });
+    });
+    await app.register(agentRoutes, { prefix: '/api/agent' });
+    mocks.resolveExternalTarget.mockResolvedValue({
+      binding: { kind: 'external' },
+    });
+    mocks.stopAndWait.mockResolvedValue({ status: 'stopped' });
+    try {
+      const request = {
+        method: 'POST' as const,
+        url: '/api/agent/stop/thread-a?canvasId=mine',
+        payload: {},
+      };
+      expect((await app.inject(request)).statusCode).toBe(403);
+      expect(mocks.stopAndWait).not.toHaveBeenCalled();
+      expect(
+        (await app.inject({ ...request, headers: { 'x-owner': 'yes' } }))
+          .statusCode,
+      ).toBe(200);
+      expect(mocks.stopAndWait).toHaveBeenCalledOnce();
+      mocks.resolveExternalTarget.mockResolvedValue(null);
+      mocks.record.mockResolvedValue({ spec: { kind: 'external' } });
+      expect((await app.inject(request)).statusCode).toBe(403);
+      expect(mocks.stopAndWait).toHaveBeenCalledOnce();
+      mocks.record.mockResolvedValue(null);
+      expect((await app.inject(request)).statusCode).toBe(200);
+      expect(mocks.stopAndWait).toHaveBeenCalledTimes(2);
+    } finally {
+      await app.close();
+    }
+  });
   it('carries the request identity through preparation, dispatch and the durable envelope', async () => {
     mocks.beginPreparation.mockReturnValue({
       signal: new AbortController().signal,

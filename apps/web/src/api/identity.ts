@@ -93,13 +93,14 @@ export async function signOut(
   await endSession();
   const { forgetTokens, providerSignOutUrl, heldAuthenticator } =
     await import('../utils/oidcLogin');
+  const signedInAuthenticator = heldAuthenticator();
   forgetTokens();
   // The provider's own session would otherwise sign the next person straight
   // back in as this one, which matters on a shared computer.
   if (options.providerSignOut) {
     const authenticators = (await listInteractiveAuthenticators()) ?? [];
     const authenticator =
-      heldAuthenticator() ??
+      signedInAuthenticator ??
       (authenticators.length === 1 ? authenticators[0] : null);
     const url = authenticator ? await providerSignOutUrl(authenticator) : null;
     if (url) {

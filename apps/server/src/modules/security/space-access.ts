@@ -69,7 +69,7 @@ function single(
  * The Space is the `canvasId` route parameter, query field or body field,
  * which must agree wherever more than one is given; a route that moves
  * content between Spaces also names the other one in its body. Conversations
- * and agents are an owner's alone, as {@link AGENT_ROUTES} explains. The
+ * use the caller's Space access; external agents require an administrator. The
  * identity provider decides each check, and each granted check is recorded so
  * a long-lived response is closed once it no longer holds. Unrestricted
  * callers, the local owner and the machine credential, skip the guard

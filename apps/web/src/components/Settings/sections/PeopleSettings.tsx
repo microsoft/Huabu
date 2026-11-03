@@ -104,7 +104,7 @@ export function PeopleSettings() {
                   </div>
                 </div>
                 <Toggle
-                  label={t('people.access')}
+                  label={`${t('people.access')}: ${personName(person)}`}
                   checked={person.member || person.admin}
                   disabled={busy || person.admin || id === self}
                   onChange={(member) =>

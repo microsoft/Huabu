@@ -6,11 +6,12 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SettingsModal } from './SettingsModal';
+import { useIdentityStore } from '../../store/identityStore';
 
 import type { ExternalAgentsNavigation } from './agent-profiles/ExternalAgentsSettings';
 import type { Root } from 'react-dom/client';
 
-type RequestedTab = 'builtIn' | 'services' | null;
+type RequestedTab = 'builtIn' | 'services' | 'agent' | null;
 
 const mocks = vi.hoisted(() => ({
   init: vi.fn(),
@@ -116,6 +117,7 @@ let root: Root;
 let container: HTMLDivElement;
 
 beforeEach(() => {
+  useIdentityStore.setState({ identity: null });
   vi.clearAllMocks();
   mocks.profileId = 'external';
   mocks.requestedTab = null;
@@ -123,6 +125,35 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
 });
+
+it.each([null, 'agent'] as const)(
+  'shows members their Built-In settings without loading external agent registries (requested: %s)',
+  async (requestedTab) => {
+    useIdentityStore.setState({
+      identity: {
+        provider: 'bubble',
+        principal: { principalId: 'carol', kind: 'user' },
+        member: true,
+        owner: false,
+      },
+    });
+    mocks.requestedTab = requestedTab;
+    await act(async () =>
+      root.render(<SettingsModal isOpen onClose={() => {}} />),
+    );
+    expect(
+      container.querySelector('[data-testid="built-in-settings"]'),
+    ).not.toBeNull();
+    expect(
+      container.querySelector('[data-testid="profile-management"]'),
+    ).toBeNull();
+    expect(container.textContent).not.toContain('settings.devicesAndAgents');
+    expect(container.textContent).not.toContain('settings.people');
+    expect(mocks.init).not.toHaveBeenCalled();
+    expect(mocks.load).not.toHaveBeenCalled();
+    expect(mocks.llmInit).toHaveBeenCalled();
+  },
+);
 
 afterEach(() => {
   act(() => root.unmount());

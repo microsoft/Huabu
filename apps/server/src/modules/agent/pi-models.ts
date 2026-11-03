@@ -25,6 +25,10 @@ import {
 } from '../../security/secret-ids.js';
 import { getSecret, setSecret } from '../../security/secret-store.js';
 import { getLogger } from '../../utils/logger.js';
+import {
+  personalSettingsOwner,
+  personalSecretId,
+} from '../identity/personal-settings.js';
 
 import type {
   Credential,
@@ -109,13 +113,14 @@ async function withProviderLock<T>(
   providerId: string,
   fn: () => Promise<T>,
 ): Promise<T> {
-  const previous = providerLocks.get(providerId) ?? Promise.resolve();
+  const key = personalSecretId(secretIdFor(providerId));
+  const previous = providerLocks.get(key) ?? Promise.resolve();
   let release!: () => void;
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
   providerLocks.set(
-    providerId,
+    key,
     previous.then(() => gate),
   );
   await previous.catch(() => undefined);
@@ -171,20 +176,34 @@ export const credentialStore: CredentialStore = {
   },
 };
 
-let cachedModels: MutableModels | undefined;
+const cachedModels = new Map<string | null, MutableModels>();
 
 /**
  * The shared pi-ai `Models` collection, with every built-in provider
  * registered and auth backed by the SecretStore CredentialStore adapter.
  */
 export function getPiModels(): MutableModels {
-  if (!cachedModels) {
+  const owner = personalSettingsOwner();
+  let models = cachedModels.get(owner);
+  if (!models) {
     const startedAt = Date.now();
-    cachedModels = builtinModels({ credentials: credentialStore });
+    models = builtinModels({
+      credentials: credentialStore,
+      // Ambient credentials and files belong to the deployment operator.
+      ...(owner
+        ? {
+            authContext: {
+              env: async () => undefined,
+              fileExists: async () => false,
+            },
+          }
+        : {}),
+    });
+    cachedModels.set(owner, models);
     log.debug(
       { elapsedMs: Date.now() - startedAt },
       'Initialized pi-ai Models collection',
     );
   }
-  return cachedModels;
+  return models;
 }

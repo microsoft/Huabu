@@ -3,7 +3,14 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { refreshTokens, signInWithPopup } from './oidcLogin';
+import {
+  completeLogin,
+  forgetTokens,
+  heldAuthenticator,
+  refreshTokens,
+  signInWithPopup,
+} from './oidcLogin';
+import { signOut } from '../api/identity';
 
 const ENTRA = {
   driver: 'entra',
@@ -15,8 +22,127 @@ const ENTRA = {
 };
 
 afterEach(() => {
+  forgetTokens();
+  sessionStorage.clear();
+  window.history.replaceState(null, '', '/');
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+});
+
+async function holdRefreshToken() {
+  sessionStorage.setItem(
+    'huabu.oidc.pending',
+    JSON.stringify({
+      state: 'expected',
+      verifier: 'v',
+      authenticator: ENTRA,
+      returnTo: '/',
+    }),
+  );
+  window.history.replaceState(null, '', '/auth/callback?code=c&state=expected');
+  await completeLogin();
+}
+
+describe('session renewal', () => {
+  it('shares one rotating refresh across concurrent callers and permits the next rotation', async () => {
+    let release!: (response: Response) => void;
+    const pending = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    let refreshCalls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).endsWith('openid-configuration'))
+          return Response.json({
+            token_endpoint: 'https://login.example/token',
+          });
+        const grant = new URLSearchParams(String(init?.body));
+        if (grant.get('grant_type') === 'authorization_code')
+          return Response.json({
+            access_token: 'initial',
+            refresh_token: 'r1',
+          });
+        refreshCalls++;
+        if (refreshCalls === 1) return pending;
+        expect(grant.get('refresh_token')).toBe('r2');
+        return Response.json({ access_token: 'third', refresh_token: 'r3' });
+      }),
+    );
+    await holdRefreshToken();
+    const first = refreshTokens();
+    const second = refreshTokens();
+    await vi.waitFor(() => expect(refreshCalls).toBeGreaterThan(0));
+    expect(refreshCalls).toBe(1);
+    release(Response.json({ access_token: 'renewed', refresh_token: 'r2' }));
+    expect(await Promise.all([first, second])).toEqual([
+      { accessToken: 'renewed' },
+      { accessToken: 'renewed' },
+    ]);
+    expect(await refreshTokens()).toEqual({ accessToken: 'third' });
+  });
+
+  it('does not restore a refresh token when an in-flight renewal finishes after sign-out', async () => {
+    let release!: (response: Response) => void;
+    const pending = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).endsWith('openid-configuration'))
+          return Response.json({
+            token_endpoint: 'https://login.example/token',
+          });
+        return new URLSearchParams(String(init?.body)).get('grant_type') ===
+          'authorization_code'
+          ? Response.json({ access_token: 'initial', refresh_token: 'r1' })
+          : pending;
+      }),
+    );
+    await holdRefreshToken();
+    const renewal = refreshTokens();
+    await vi.waitFor(() => expect(vi.mocked(fetch)).toHaveBeenCalledTimes(4));
+    forgetTokens();
+    release(
+      Response.json({ access_token: 'late', refresh_token: 'late-refresh' }),
+    );
+    expect(await renewal).toBeNull();
+    expect(await refreshTokens()).toBeNull();
+    expect(heldAuthenticator()).toBeNull();
+  });
+
+  it('logs out the selected provider when multiple providers are configured', async () => {
+    const assign = vi
+      .spyOn(window.location, 'assign')
+      .mockImplementation(() => {});
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === 'DELETE')
+          return new Response(null, { status: 204 });
+        if (String(input).includes('/bubble/'))
+          return Response.json({
+            authenticators: [
+              ENTRA,
+              { ...ENTRA, driver: 'auth0', issuer: 'https://auth0.example' },
+            ],
+          });
+        if (String(input).endsWith('openid-configuration'))
+          return Response.json({
+            token_endpoint: 'https://login.example/token',
+            end_session_endpoint: 'https://login.example/logout',
+          });
+        return Response.json({ access_token: 'initial', refresh_token: 'r1' });
+      }),
+    );
+    await holdRefreshToken();
+    await signOut({ providerSignOut: true });
+    expect(assign).toHaveBeenCalledWith(
+      expect.stringContaining('https://login.example/logout?'),
+    );
+    expect(heldAuthenticator()).toBeNull();
+  });
 });
 
 describe('signing in again in a popup', () => {

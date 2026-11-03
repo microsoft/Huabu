@@ -1229,8 +1229,7 @@ export function hasUnsavedCanvasEdits(): boolean {
 export async function resendUnsavedCanvasEdits(): Promise<void> {
   const { canvasId } = useCanvasStore.getState();
   if (!canvasId) return;
-  if (structureSaveErrors.has(canvasId)) structureScheduler.schedule();
-  await drainPendingSaves();
+  await drainPendingSaves(canvasId);
 }
 
 export class CanvasSubmissionSaveError extends Error {
