@@ -51,6 +51,8 @@ DevTools open in a detached window for startup development tools, diagnostic req
 
 ## 3. Saving and lifetime
 
+Deletion preparation in the requesting page and in affected desktop children shares `prepareSpaceDeletion(signal)`, built on the existing `pageLifecycle`. Registered editor settlement, pending mutations/imports, retained title-save retry, and all registered persistence owners run under that preparation's abort signal. Retry is inside the lifecycle lock and abortable wait, never a separate prelude in the desktop hook. Timeout, resume, replacement, or requester unmount releases caller-owned save feedback without waiting for a stalled underlying request. Late completion cannot advance the retired preparation, clear a newer retry failure, or acknowledge a replacement request. Actual writes are not cancelled or rolled back. Ordinary close and sign-out still use `pageLifecycle.prepare` without deletion-specific automatic retry or feedback suppression.
+
 The native macOS Close menu action closes the active closable Tab only when the main window is focused. A focused auxiliary window, including the remote sign-in prompt, closes normally without touching the main window's Tabs; without a focused window the action does nothing.
 
 A Tab whose renderer is still initializing, before registering its save handler and without a load/crash failure, closes without a save request or discard warning. This also applies during a reload that has already passed the save/discard boundary. Once ready, the normal save acknowledgement remains mandatory; failed renderers retain explicit discard confirmation. Load failures arriving during or after intentional renderer destruction do not produce error dialogs.

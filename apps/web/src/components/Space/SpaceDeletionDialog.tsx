@@ -14,13 +14,10 @@ import {
   getElectronBridge,
   requireDesktopTabSuccess,
 } from '@/hooks/useElectron';
-import { drainPendingSaves } from '@/store/canvasStore';
 import { deleteWorkspace } from '@/store/previewWorkspace/persistence';
 import { useWorkspaceStore } from '@/store/workspaceStore';
-import {
-  holdSaveErrorRecovery,
-  withSaveErrorsHandledByCaller,
-} from '@/utils/saveErrorFeedback';
+import { prepareSpaceDeletion } from '@/utils/prepareSpaceDeletion';
+import { holdSaveErrorRecovery } from '@/utils/saveErrorFeedback';
 
 import type {
   DeleteSpaceTreeFailure,
@@ -75,6 +72,8 @@ export function SpaceDeletionDialog({
   const { t } = useTranslation();
   useEffect(holdSaveErrorRecovery, []);
   const cancelRef = useRef<HTMLButtonElement>(null);
+  const preparationRef = useRef<AbortController | null>(null);
+  useEffect(() => () => preparationRef.current?.abort(), []);
   const liveWorkspaceId = useWorkspaceStore((state) => state.workspaceId);
   const [workspaceId] = useState(liveWorkspaceId);
   useEffect(() => {
@@ -163,27 +162,23 @@ export function SpaceDeletionDialog({
           preview.spaces.some((space) => space.canvasId === containerSpaceId))
       )
         throw new Error(t('spaceHierarchy.deleteFromContainer'));
-      await withSaveErrorsHandledByCaller(async () => {
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        try {
-          await Promise.race([
-            drainPendingSaves(),
-            new Promise<never>((_resolve, reject) => {
-              timer = setTimeout(
-                () =>
-                  reject(
-                    new Error(
-                      t('spaceHierarchy.deletionErrors.prepareTimeout'),
-                    ),
-                  ),
-                15_000,
-              );
-            }),
-          ]);
-        } finally {
-          clearTimeout(timer);
-        }
-      });
+      const controller = new AbortController();
+      preparationRef.current = controller;
+      const timer = setTimeout(
+        () =>
+          controller.abort(
+            new Error(t('spaceHierarchy.deletionErrors.prepareTimeout')),
+          ),
+        15_000,
+      );
+      try {
+        await prepareSpaceDeletion(controller.signal);
+        controller.signal.throwIfAborted();
+      } finally {
+        clearTimeout(timer);
+        if (preparationRef.current === controller)
+          preparationRef.current = null;
+      }
       if (useWorkspaceStore.getState().workspaceId !== workspaceId)
         throw new Error(t('spaceHierarchy.workspaceChanged'));
       if (tabs) {

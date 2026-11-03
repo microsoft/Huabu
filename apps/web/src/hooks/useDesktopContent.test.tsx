@@ -24,6 +24,10 @@ import {
   isDesktopInputFrozen,
 } from '@/utils/desktopInput';
 import { pageLifecycle } from '@/utils/pageLifecycle';
+import {
+  saveErrorsHandledByCaller,
+  showSaveErrorRecovery,
+} from '@/utils/saveErrorFeedback';
 
 import { useDesktopContent } from './useDesktopContent';
 import { getElectronBridge } from './useElectron';
@@ -420,6 +424,64 @@ describe('desktop save presentation', () => {
       expect(mocks.toast).not.toHaveBeenCalled();
     } finally {
       log.mockRestore();
+    }
+  });
+
+  it('releases feedback on resume during title retry and fences late completion from a replacement', async () => {
+    const error = new ConversationTitleSaveError('Title save failed');
+    let completeOld!: () => void;
+    let completeNew!: () => void;
+    const retry = vi
+      .spyOn(error, 'retry')
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            completeOld = resolve;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            completeNew = resolve;
+          }),
+      );
+    mocks.save.mockRejectedValueOnce(error);
+    try {
+      await render();
+      const start = (requestId: string) =>
+        act(async () =>
+          mocks.prepare.mock.calls[0][0]({
+            requestId,
+            reason: 'space-deletion',
+          }),
+        );
+      await start('first-failure');
+      await resume();
+      mocks.save.mockClear();
+      mocks.finish.mockClear();
+      await start('stalled-retry');
+      expect(saveErrorsHandledByCaller()).toBe(true);
+      const recovery = vi.fn();
+      showSaveErrorRecovery(recovery);
+      expect(recovery).not.toHaveBeenCalled();
+      await resume();
+      expect(isDesktopInputFrozen()).toBe(false);
+      expect(saveErrorsHandledByCaller()).toBe(false);
+      expect(recovery).toHaveBeenCalledOnce();
+      await start('replacement');
+      await act(async () => completeOld());
+      expect(mocks.save).not.toHaveBeenCalled();
+      expect(mocks.finish).not.toHaveBeenCalled();
+      expect(saveErrorsHandledByCaller()).toBe(true);
+      expect(isDesktopInputFrozen()).toBe(true);
+      await act(async () => completeNew());
+      expect(retry).toHaveBeenCalledTimes(2);
+      expect(mocks.finish).toHaveBeenCalledExactlyOnceWith('replacement', {
+        ok: true,
+      });
+      expect(saveErrorsHandledByCaller()).toBe(false);
+    } finally {
+      retry.mockRestore();
     }
   });
 

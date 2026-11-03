@@ -18,6 +18,55 @@ function deferred() {
 }
 
 describe('page lifecycle', () => {
+  it.each(['retry', 'import', 'save'] as const)(
+    'retires a stalled %s without allowing late completion to advance preparation',
+    async (stage) => {
+      const lifecycle = createPageLifecycle();
+      const stalled = deferred();
+      const controller = new AbortController();
+      const next = vi.fn(async () => {});
+      const operation =
+        stage === 'import'
+          ? lifecycle.run('importing', () => stalled.promise)
+          : undefined;
+      lifecycle.register('first', {
+        flush: stage === 'save' ? () => stalled.promise : async () => {},
+      });
+      lifecycle.register('next', { flush: next });
+      const first = lifecycle.prepare(
+        controller.signal,
+        undefined,
+        stage === 'retry' ? () => stalled.promise : undefined,
+      );
+      const rejected = expect(first).rejects.toMatchObject({
+        name: 'AbortError',
+      });
+      controller.abort();
+      await rejected;
+      expect(next).not.toHaveBeenCalled();
+      stalled.resolve();
+      await operation;
+      await Promise.resolve();
+      expect(next).not.toHaveBeenCalled();
+      await lifecycle.prepare(new AbortController().signal);
+      expect(next).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('does not start another participant after a settler aborts preparation', async () => {
+    const lifecycle = createPageLifecycle();
+    const controller = new AbortController();
+    const later = vi.fn();
+    const retry = vi.fn(async () => {});
+    lifecycle.register('first', { settle: () => controller.abort() });
+    lifecycle.register('later', { settle: later, flush: later });
+    await expect(
+      lifecycle.prepare(controller.signal, undefined, retry),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(later).not.toHaveBeenCalled();
+    expect(retry).not.toHaveBeenCalled();
+  });
+
   it('preserves synchronous action setup while tracking its asynchronous lifetime', async () => {
     const lifecycle = createPageLifecycle();
     const started = vi.fn();

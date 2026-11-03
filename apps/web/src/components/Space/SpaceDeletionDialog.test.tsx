@@ -15,8 +15,10 @@ import { deleteSpaceTree, getSpaceDeletionPreview } from '@/api/spaceHierarchy';
 import { toast } from '@/components/Common/Toast';
 import { drainPendingSaves } from '@/store/canvasStore';
 import { createNodeContentQueue } from '@/store/canvasStore/save/nodeContentQueue';
+import { ConversationTitleSaveError } from '@/store/conversationTitleStore';
 import { deleteWorkspace } from '@/store/previewWorkspace/persistence';
 import { useWorkspaceStore } from '@/store/workspaceStore';
+import { pageLifecycle } from '@/utils/pageLifecycle';
 import { saveErrorsHandledByCaller } from '@/utils/saveErrorFeedback';
 
 import { SpaceDeletionDialog } from './SpaceDeletionDialog';
@@ -58,12 +60,16 @@ const translate = (key: string, values?: Record<string, unknown>) =>
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 let host: HTMLDivElement;
 let root: Root;
+let unregisterSave: () => void;
 const onDeleted = vi.fn();
 const refresh = vi.fn(async (): Promise<void> => undefined);
 const originalRefresh = useWorkspaceStore.getState().refreshSpaceTitles;
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  unregisterSave = pageLifecycle.register('test-deletion-save', {
+    flush: () => drainPendingSaves(),
+  });
   vi.spyOn(console, 'error').mockImplementation(() => {});
   desktop.enabled = false;
   desktop.command.mockReset().mockResolvedValue({ ok: true });
@@ -93,6 +99,7 @@ beforeEach(async () => {
 });
 afterEach(() => {
   act(() => root.unmount());
+  unregisterSave();
   host.remove();
   useWorkspaceStore.setState({ refreshSpaceTitles: originalRefresh });
   vi.restoreAllMocks();
@@ -414,6 +421,71 @@ it('ends a stalled local drain after 15 seconds without waiting for refresh or d
   await act(async () => finishSave());
   expect(deleteSpaceTree).not.toHaveBeenCalled();
   expect(desktop.command).not.toHaveBeenCalled();
+  expect(toast).not.toHaveBeenCalled();
+});
+
+it('uses the shared preparation to settle editors and await imports before saving', async () => {
+  const settle = vi.fn();
+  const unregisterEditor = pageLifecycle.register('test-editor', { settle });
+  let completeImport!: () => void;
+  const importing = pageLifecycle.run(
+    'importing',
+    () =>
+      new Promise<void>((resolve) => {
+        completeImport = resolve;
+      }),
+  );
+  vi.mocked(deleteSpaceTree).mockResolvedValue({
+    deletedCanvasIds: ['parent', 'child'],
+  });
+  try {
+    await remove();
+    expect(settle).toHaveBeenCalledOnce();
+    expect(drainPendingSaves).not.toHaveBeenCalled();
+    expect(deleteSpaceTree).not.toHaveBeenCalled();
+    await act(async () => completeImport());
+    await importing;
+    expect(drainPendingSaves).toHaveBeenCalledOnce();
+    expect(deleteSpaceTree).toHaveBeenCalledOnce();
+  } finally {
+    unregisterEditor();
+  }
+});
+
+it('unmounting during preparation releases feedback and does not delete after saving finishes', async () => {
+  let completeSave!: () => void;
+  vi.mocked(drainPendingSaves).mockImplementationOnce(
+    () =>
+      new Promise<void>((resolve) => {
+        completeSave = resolve;
+      }),
+  );
+  await remove();
+  expect(saveErrorsHandledByCaller()).toBe(true);
+  await act(async () => root.render(null));
+  expect(saveErrorsHandledByCaller()).toBe(false);
+  await act(async () => completeSave());
+  expect(deleteSpaceTree).not.toHaveBeenCalled();
+  expect(desktop.command).not.toHaveBeenCalled();
+});
+
+it('retries a retained title failure through the same local preparation', async () => {
+  const error = new ConversationTitleSaveError('Title failed');
+  const retry = vi.spyOn(error, 'retry').mockResolvedValue();
+  vi.mocked(drainPendingSaves).mockRejectedValueOnce(error);
+  vi.mocked(deleteSpaceTree).mockResolvedValue({
+    deletedCanvasIds: ['parent', 'child'],
+  });
+  await remove();
+  expect(deleteSpaceTree).not.toHaveBeenCalled();
+  const recheck = [...document.querySelectorAll('button')].find((button) =>
+    button.textContent?.includes('spaceHierarchy.recheckDeletion'),
+  );
+  if (!recheck) throw new Error('Missing recheck action');
+  await act(async () => recheck.click());
+  await remove();
+  expect(retry).toHaveBeenCalledOnce();
+  expect(deleteSpaceTree).toHaveBeenCalledOnce();
   expect(toast).not.toHaveBeenCalled();
 });
 
