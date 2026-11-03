@@ -84,7 +84,10 @@ export interface ResourceDirectory {
   workspaceOfSpace(canvasId: string): Promise<string | null>;
   /** A registered Workspace, opened for calls to run in; `null` if none. */
   openWorkspace(workspaceId: string): Promise<WorkspaceScope | null>;
-  /** Where a caller who may enter any Workspace lands first. */
+  /**
+   * Where a caller who may enter any Workspace lands first: the Server's own
+   * Workspace, or `null` while it has none open.
+   */
   defaultWorkspace(): Promise<WorkspaceScope | null>;
   /**
    * The one Workspace every request runs in when the deployment locks it

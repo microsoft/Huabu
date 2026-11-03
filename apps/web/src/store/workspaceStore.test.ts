@@ -598,6 +598,23 @@ describe('workspaceStore registry persistence', () => {
     );
   });
 
+  it("leaves the choice to a person the Server put in no Workspace, rather than opening someone else's", async () => {
+    apiState.info = {
+      ...unconfiguredInfo(),
+      capabilities: {
+        canChangeWorkspace: true,
+        nativePicker: false,
+        namedWorkspaces: true,
+      },
+    };
+    await expect(useWorkspaceStore.getState().init()).resolves.toBe(false);
+    expect(apiMocks.activateWorkspace).not.toHaveBeenCalled();
+    // The registry is still offered to choose from.
+    expect(useWorkspaceStore.getState().recentWorkspaces).toEqual(
+      apiState.workspaces,
+    );
+  });
+
   it('restores the first Workspace from server-owned MRU order', async () => {
     await expect(useWorkspaceStore.getState().init()).resolves.toBe(true);
 

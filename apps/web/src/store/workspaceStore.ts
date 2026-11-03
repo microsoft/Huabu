@@ -436,7 +436,11 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
 
       // Restore the most recently used registered Workspace. The registry is
       // authoritative and activation promotes the selected entry to its front.
-      const saved = registered[0];
+      // Where each person has their own Workspaces the Server has already
+      // picked theirs; having none, they choose. An administrator's registry
+      // holds everybody's, and its first entry may be someone else's.
+      const saved =
+        info.capabilities.namedWorkspaces === true ? undefined : registered[0];
       if (saved) {
         try {
           await activateWorkspace(saved.workspaceId);
@@ -538,6 +542,15 @@ export function useWorkspaceLabel(): string | null {
     if (path) return path.split(/[\\/]/).filter(Boolean).pop() ?? null;
     return null;
   }, [name, path]);
+}
+
+/**
+ * Whether the caller may create or import Spaces at the top of the current
+ * Workspace. A person given only some of its Spaces may not; servers that do
+ * not say so allow it.
+ */
+export function useCanCreateSpaces(): boolean {
+  return useWorkspaceStore((s) => s.capabilities?.canCreateSpaces ?? true);
 }
 
 /**

@@ -41,7 +41,11 @@ import {
   requireDesktopTabSuccess,
 } from '../hooks/useElectron';
 import { i18n as translations } from '../i18n';
-import { useWorkspaceLabel, useWorkspaceStore } from '../store/workspaceStore';
+import {
+  useCanCreateSpaces,
+  useWorkspaceLabel,
+  useWorkspaceStore,
+} from '../store/workspaceStore';
 import { spaceAncestorIds } from '../utils/spaceHierarchy';
 
 import type { CanvasSummary } from '@huabu/shared';
@@ -102,6 +106,7 @@ export default function CanvasListPage() {
   const namedWorkspaces = useWorkspaceStore(
     (s) => s.capabilities?.namedWorkspaces === true,
   );
+  const canCreateSpaces = useCanCreateSpaces();
   const setCanvasCount = useWorkspaceStore((s) => s.setCanvasCount);
   const setSpaceTitle = useWorkspaceStore((s) => s.setSpaceTitle);
   const workspaceSyncing = useWorkspaceStore((s) => s.isSyncing);
@@ -443,41 +448,45 @@ export default function CanvasListPage() {
                   onChange={(event) => setSearch(event.target.value)}
                 />
               </div>
-              <Button
-                variant="outline"
-                tone="neutral"
-                className="h-9 shrink-0"
-                onClick={handleImportClick}
-                disabled={isImporting}
-              >
-                {isImporting ? (
-                  <Loading
-                    layout="inline"
-                    size="sm"
-                    className="text-fg-subtle"
-                  />
-                ) : (
-                  <Upload />
-                )}
-                {t('actions.importCanvas')}
-              </Button>
-              <Button
-                variant="solid"
-                className="h-9 shrink-0"
-                onClick={handleCreate}
-                disabled={isCreating}
-              >
-                {isCreating ? (
-                  <Loading
-                    layout="inline"
-                    size="sm"
-                    className="text-fg-inverse"
-                  />
-                ) : (
-                  <Plus />
-                )}
-                {t('actions.newCanvas')}
-              </Button>
+              {canCreateSpaces && (
+                <>
+                  <Button
+                    variant="outline"
+                    tone="neutral"
+                    className="h-9 shrink-0"
+                    onClick={handleImportClick}
+                    disabled={isImporting}
+                  >
+                    {isImporting ? (
+                      <Loading
+                        layout="inline"
+                        size="sm"
+                        className="text-fg-subtle"
+                      />
+                    ) : (
+                      <Upload />
+                    )}
+                    {t('actions.importCanvas')}
+                  </Button>
+                  <Button
+                    variant="solid"
+                    className="h-9 shrink-0"
+                    onClick={handleCreate}
+                    disabled={isCreating}
+                  >
+                    {isCreating ? (
+                      <Loading
+                        layout="inline"
+                        size="sm"
+                        className="text-fg-inverse"
+                      />
+                    ) : (
+                      <Plus />
+                    )}
+                    {t('actions.newCanvas')}
+                  </Button>
+                </>
+              )}
             </div>
           </div>
 
@@ -513,15 +522,17 @@ export default function CanvasListPage() {
               message={t('canvasList.empty')}
               className="border-edge-default rounded-xl border-2 border-dashed"
               action={
-                <Button
-                  variant="ghost"
-                  tone="neutral"
-                  onClick={handleCreate}
-                  disabled={isCreating}
-                  className="text-fg-default hover:text-fg-muted text-sm font-medium underline"
-                >
-                  {t('canvasList.createFirst')}
-                </Button>
+                canCreateSpaces && (
+                  <Button
+                    variant="ghost"
+                    tone="neutral"
+                    onClick={handleCreate}
+                    disabled={isCreating}
+                    className="text-fg-default hover:text-fg-muted text-sm font-medium underline"
+                  >
+                    {t('canvasList.createFirst')}
+                  </Button>
+                )
               }
             />
           ) : visibleCanvases.length === 0 ? (

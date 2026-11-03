@@ -12,6 +12,10 @@ import type { FastifyInstance } from 'fastify';
  */
 export function registerWorkspaceRequiredGuard(app: FastifyInstance): void {
   app.addHook('preHandler', async (request, reply) => {
+    // Nothing here reads a Workspace: a path no route serves is answered as
+    // not found, and the application shell is static files.
+    if (request.is404 || request.routeOptions.config?.identity === 'shell')
+      return;
     const url = request.url;
     const publicSkillBootstrap = isPublicRfsSkillBootstrapRequest({
       method: request.method,

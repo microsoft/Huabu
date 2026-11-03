@@ -157,20 +157,33 @@ export function isRestrictedRequest(request: FastifyRequest): boolean {
   return access !== undefined && access !== UNRESTRICTED_ACCESS;
 }
 
+/** The current Workspace, as a resource, if the caller may write it. */
+async function writableWorkspace(request: FastifyRequest) {
+  const workspaceId = getWorkspaceHandle()?.workspaceId;
+  if (!workspaceId) return null;
+  const resource = { type: 'workspace', id: workspaceId } as const;
+  return (await getRequestIdentity(request)?.access.can('write', resource))
+    ? resource
+    : null;
+}
+
+/** Whether the caller may create root Spaces in their current Workspace. */
+export async function canWriteWorkspace(
+  request: FastifyRequest,
+): Promise<boolean> {
+  return (
+    !isRestrictedRequest(request) || (await writableWorkspace(request)) !== null
+  );
+}
+
 /** Root creation has no existing Space to authorize; it writes the Workspace. */
 export async function requireWorkspaceWrite(
   request: FastifyRequest,
   reply: FastifyReply,
 ): Promise<void> {
   if (!isRestrictedRequest(request)) return;
-  const workspaceId = getWorkspaceHandle()?.workspaceId;
-  const resource = workspaceId
-    ? ({ type: 'workspace', id: workspaceId } as const)
-    : null;
-  if (
-    resource &&
-    (await getRequestIdentity(request)?.access.can('write', resource))
-  ) {
+  const resource = await writableWorkspace(request);
+  if (resource) {
     recordRequestAuthorization(request, 'write', resource);
     return;
   }

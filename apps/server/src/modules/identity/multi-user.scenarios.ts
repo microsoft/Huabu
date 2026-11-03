@@ -282,6 +282,57 @@ export function describeSeveralPeople(
       ).toBe(404);
     });
 
+    it('advertises top-level Space creation only where the caller may write the Workspace', async () => {
+      const { call, store, workspaceOf } = await host();
+      const canCreate = async (principalId: string) =>
+        (await call(principalId, 'GET', '/api/workspace')).body.capabilities
+          .canCreateSpaces;
+      const carolWs = await workspaceOf('carol');
+      const daveWs = await workspaceOf('dave');
+      expect(await canCreate('carol')).toBe(true);
+      expect(await canCreate('admin')).toBe(true);
+
+      // Given one of carol's Spaces, dave may enter her Workspace but not
+      // add to its top level.
+      const shared = await call('carol', 'POST', '/api/canvas', {
+        title: 'shared',
+      });
+      await store.grants.add({
+        target: {
+          type: 'huabu.space',
+          id: `${carolWs}:${shared.body.canvasId as string}`,
+        },
+        principalId: 'dave',
+        role: 'huabu.space.owner',
+        grantedByPrincipalId: 'carol',
+      });
+      await call('dave', 'POST', `/api/workspaces/${carolWs}/activate`);
+      expect(await workspaceOf('dave')).toBe(carolWs);
+      expect(await canCreate('dave')).toBe(false);
+      expect(
+        (await call('dave', 'POST', '/api/canvas', { title: 'x' })).status,
+      ).toBe(403);
+
+      // A viewer of the whole Workspace may not either; an editor may.
+      for (const [role, expected] of [
+        ['huabu.workspace.viewer', false],
+        ['huabu.workspace.editor', true],
+      ] as const) {
+        const grant = await store.grants.add({
+          target: { type: 'huabu.workspace', id: carolWs },
+          principalId: 'dave',
+          role,
+          grantedByPrincipalId: 'carol',
+        });
+        expect(await canCreate('dave')).toBe(expected);
+        await store.grants.remove(grant.grant.grantId);
+      }
+
+      // Back home, dave creates as before.
+      await call('dave', 'POST', `/api/workspaces/${daveWs}/activate`);
+      expect(await canCreate('dave')).toBe(true);
+    });
+
     it('lets editors save content but requires manage for renames and ownership-granting detachment', async () => {
       const { call, store, workspaceOf } = await host();
       const workspaceId = await workspaceOf('carol');

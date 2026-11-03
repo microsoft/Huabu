@@ -34,6 +34,19 @@ import {
 } from '../workspace.js';
 
 import type * as WorkspaceActivationModule from '../workspace-activation.js';
+import type * as WorkspaceModule from '../workspace.js';
+
+// Lets a test take away the Server's own Workspace, as on a fresh Disk
+// install whose administrator has yet to pick a folder.
+const processWorkspace = vi.hoisted(() => ({ hidden: false }));
+vi.mock('../workspace.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof WorkspaceModule>();
+  return {
+    ...actual,
+    getProcessWorkspaceHandle: () =>
+      processWorkspace.hidden ? null : actual.getProcessWorkspaceHandle(),
+  };
+});
 
 // Folder preparation runs in-process here instead of in its worker.
 vi.mock('../workspace-activation.js', async (importOriginal) => {
@@ -75,6 +88,7 @@ beforeEach(() => {
   setWorkspacePath(join(tmp, 'server'));
 });
 afterEach(async () => {
+  processWorkspace.hidden = false;
   await closeStorage();
   if (previousDataDir === undefined) delete process.env.HUABU_DATA_DIR;
   else process.env.HUABU_DATA_DIR = previousDataDir;
@@ -102,6 +116,26 @@ it('lists only allowed Workspace manifests even when an unrelated manifest is co
   expect(
     (await call('admin', 'GET', '/api/workspaces')).status,
   ).toBeGreaterThanOrEqual(500);
+});
+
+it("never lands an administrator in a member's Workspace while the Server has none of its own", async () => {
+  processWorkspace.hidden = true;
+  const { call, workspaceOf, spacesOf } = await host();
+  const carolWs = await workspaceOf('carol');
+  await call('carol', 'POST', '/api/canvas', { title: 'carol notes' });
+
+  // The administrator is asked to choose instead of being put in carol's.
+  const state = (await call('admin', 'GET', '/api/workspace')).body;
+  expect(state).toMatchObject({ configured: false, workspaceId: null });
+  expect(
+    (await call('admin', 'POST', '/api/canvas', { title: 'admin secret' }))
+      .status,
+  ).toBeGreaterThanOrEqual(400);
+  expect(await spacesOf('carol')).toEqual(['carol notes']);
+
+  // Choosing a Workspace explicitly still works.
+  await call('admin', 'POST', `/api/workspaces/${carolWs}/activate`);
+  expect(await workspaceOf('admin')).toBe(carolWs);
 });
 
 it('preserves legacy ownership while a registered Disk Workspace is offline, then migrates it on recovery', async () => {

@@ -56,8 +56,10 @@ export const storageResourceDirectory: ResourceDirectory = {
     return workspace ? openWorkspace(workspace) : null;
   },
   async defaultWorkspace() {
-    const workspace =
-      getProcessWorkspaceHandle() ?? (await getWorkspaceRepository().list())[0];
+    // Only the Server's own Workspace. Any other registered one may be a
+    // member's personal Workspace, where whatever an administrator made would
+    // be that member's to see; with none open, they choose for themselves.
+    const workspace = getProcessWorkspaceHandle();
     return workspace ? openWorkspace(workspace) : null;
   },
   async lockedWorkspace() {

@@ -32,6 +32,11 @@ export const workspaceCapabilitiesSchema = z.object({
    * older servers.
    */
   namedWorkspaces: z.boolean().optional(),
+  /**
+   * Whether the caller may create and import Spaces at the top of the current
+   * Workspace. Absent means yes: a local caller, or an older server.
+   */
+  canCreateSpaces: z.boolean().optional(),
 });
 export type WorkspaceCapabilities = z.infer<typeof workspaceCapabilitiesSchema>;
 

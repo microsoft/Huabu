@@ -11,7 +11,11 @@ import { validatePathSchema, workspacePathSchema } from '@huabu/shared';
 import { getRequestWorkspaceChooser } from './identity/request.js';
 import { resetPreprocessDispatcher } from './preprocessing/index.js';
 import { isOwnerRequest } from './security/owner.js';
-import { canReadSpace, isRestrictedRequest } from './security/space-access.js';
+import {
+  canReadSpace,
+  canWriteWorkspace,
+  isRestrictedRequest,
+} from './security/space-access.js';
 import {
   getStructuredStore,
   materializesWorkspaces,
@@ -40,7 +44,7 @@ import type {
   WorkspaceInfo,
   WorkspacePathRequest,
 } from '@huabu/shared';
-import type { FastifyPluginAsync, FastifyReply } from 'fastify';
+import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 
 /**
  * Run a command and return its stdout, or null on failure.
@@ -161,9 +165,22 @@ function sendError(
   return reply.status(status).send(body);
 }
 
+/**
+ * How a caller whose access is decided per Workspace sees the one this call
+ * runs in; `null` for a caller with unrestricted access.
+ */
+async function personalCaller(request: FastifyRequest) {
+  return isRestrictedRequest(request)
+    ? {
+        admin: isOwnerRequest(request),
+        canCreateSpaces: await canWriteWorkspace(request),
+      }
+    : null;
+}
+
 /** Build the canonical success payload describing the current workspace. */
 async function buildWorkspaceState(
-  personal: { admin: boolean } | null = null,
+  personal: { admin: boolean; canCreateSpaces: boolean } | null = null,
 ): Promise<WorkspaceInfo> {
   const managed = isManagedMode();
   const workspace = getWorkspaceHandle();
@@ -191,6 +208,7 @@ async function buildWorkspaceState(
           canChangeWorkspace: !managed,
           nativePicker: false,
           namedWorkspaces: true,
+          canCreateSpaces: configured && personal.canCreateSpaces,
         }
       : {
           // Switching Workspaces means picking a folder in this API. A backend
@@ -224,9 +242,7 @@ const workspaceRoutes: FastifyPluginAsync = async (app) => {
   // Always available (clients need to know the mode).
   // ────────────────────────────────────────────────────────────────
   app.get<{ Reply: ApiResult<WorkspaceInfo> }>('/', async (request) => {
-    const state = await buildWorkspaceState(
-      isRestrictedRequest(request) ? { admin: isOwnerRequest(request) } : null,
-    );
+    const state = await buildWorkspaceState(await personalCaller(request));
     // World is an ordinary Space here, advertised only to who may read it.
     if (
       state.worldCanvasId &&
@@ -339,11 +355,7 @@ const workspaceRoutes: FastifyPluginAsync = async (app) => {
         // Reset singletons that cache filesystem handles for the old workspace.
         resetStorageCache();
         resetPreprocessDispatcher();
-        return buildWorkspaceState(
-          isRestrictedRequest(request)
-            ? { admin: isOwnerRequest(request) }
-            : null,
-        );
+        return buildWorkspaceState(await personalCaller(request));
       });
       // In Bubble mode the administrator who picked the folder works there
       // too; everybody else stays where they are.
