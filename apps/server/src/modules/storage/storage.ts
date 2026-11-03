@@ -68,6 +68,8 @@ import {
 } from './profile.js';
 import { withSpacePutAdmission } from './space-lifecycle-admission.js';
 import { runInWorkspace } from '../workspace/context.js';
+import { runWorkspacePreparation } from '../workspace-activation.js';
+import { refreshCanvasDirIndex } from './canvas-dirs.js';
 
 import type { WorkspaceScope } from '../workspace/context.js';
 import type { DiskSpaceImport } from './backends/disk/space-import.js';
@@ -375,6 +377,9 @@ let postgres: PostgresStoreContext | null = null;
 // World ids per Workspace for backends without folders. Several Workspaces
 // are open at once in Bubble mode, each with its own World.
 const worldCanvasIds = new Map<string, string>();
+// Keep successful preparation and coalesce first opens of the same Disk
+// folder. A failure is removed so repaired/offline folders can be retried.
+const diskWorkspacePreparations = new Map<string, Promise<void>>();
 let spaceCreateTail: Promise<void> = Promise.resolve();
 
 /**
@@ -724,8 +729,9 @@ export async function activateWorkspace(
  * process-active one.
  *
  * The scoped counterpart to {@link activateWorkspace}, for Bubble mode, where
- * each request runs in its caller's Workspace. On Disk the folder is adopted
- * and indexed on first use; elsewhere the World is ensured once per Workspace.
+ * each request runs in its caller's Workspace. On Disk the folder is prepared
+ * in the isolated worker on first use; elsewhere the World is ensured once
+ * per Workspace.
  * Idempotent and cheap after the first call.
  */
 export async function openWorkspace(
@@ -735,6 +741,21 @@ export async function openWorkspace(
   if (materializesWorkspaces() && !workspacePath)
     throw new Error(`Workspace "${workspace.workspaceId}" has no folder`);
   const scope: WorkspaceScope = { handle: workspace, path: workspacePath };
+  if (workspacePath) {
+    let preparation = diskWorkspacePreparations.get(workspacePath);
+    if (!preparation) {
+      preparation = runWorkspacePreparation(workspacePath)
+        .then(() => {
+          refreshCanvasDirIndex(workspacePath);
+        })
+        .catch((error: unknown) => {
+          diskWorkspacePreparations.delete(workspacePath);
+          throw error;
+        });
+      diskWorkspacePreparations.set(workspacePath, preparation);
+    }
+    await preparation;
+  }
   if (!workspacePath && !worldCanvasIds.has(workspace.workspaceId)) {
     const world = await runInWorkspace(scope, () =>
       ensure().structured.spaces().ensureWorld(),
@@ -797,6 +818,7 @@ export async function closeStorage(): Promise<void> {
   sqlite = null;
   postgres = null;
   worldCanvasIds.clear();
+  diskWorkspacePreparations.clear();
   try {
     if (storage) {
       const results = await Promise.allSettled([

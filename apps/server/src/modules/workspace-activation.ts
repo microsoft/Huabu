@@ -115,6 +115,17 @@ export function runWorkspacePreparation(
       // try/catch runs) is captured for diagnosis instead of vanishing.
       child = fork(workerPath, [workspacePath], {
         stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+        // Source-mode callers (tests included) may run without tsx themselves.
+        // The worker still needs its loader to resolve .js imports to .ts.
+        ...(workerPath.endsWith('.ts')
+          ? {
+              execArgv: [
+                ...process.execArgv,
+                '--import',
+                import.meta.resolve('tsx'),
+              ],
+            }
+          : {}),
       });
     } catch (error) {
       reject(error);

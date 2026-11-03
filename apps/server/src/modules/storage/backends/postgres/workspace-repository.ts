@@ -90,14 +90,21 @@ export class PostgresWorkspaceRepository implements WorkspaceRepository {
     return await readWorkspaceRow(this.#context.database(), workspaceId);
   }
 
-  async list(): Promise<readonly WorkspaceHandle[]> {
+  async list(
+    workspaceIds?: readonly string[],
+  ): Promise<readonly WorkspaceHandle[]> {
+    if (workspaceIds?.length === 0) return [];
     // Most recently opened first, matching the Disk registry's ordering, so a
     // client rendering the picker gets the same list on either backend.
     return (
-      await this.#context.database().all(`SELECT ${WORKSPACE_COLUMNS}
+      await this.#context.database().all(
+        `SELECT ${WORKSPACE_COLUMNS}
          FROM workspaces
          WHERE forgotten_at IS NULL
-         ORDER BY last_opened_at DESC, created_at DESC`)
+         ${workspaceIds ? `AND workspace_id IN (${workspaceIds.map(() => '?').join(', ')})` : ''}
+         ORDER BY last_opened_at DESC, created_at DESC, workspace_id ASC`,
+        ...(workspaceIds ?? []),
+      )
     ).map(decodeWorkspaceRow);
   }
 

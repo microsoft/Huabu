@@ -297,12 +297,17 @@ export async function openBubbleIdentity(options: {
             bubbleAuthContextToPrincipal(registered),
           );
           const { principalId } = registered;
-          // One grant load and ancestry walk per request; a later request or
-          // stream revalidation authenticates again and gets a fresh scope.
-          const policy = runtime.policy.scoped();
-          const admin = await policy.can(ADMIN, principalId, {
+          const admission = runtime.policy.scoped();
+          const admin = await admission.can(ADMIN, principalId, {
             type: 'system',
           });
+          const member = await admission.can(USE, principalId, {
+            type: 'system',
+          });
+          // Resource checks start after Workspace selection, which can grant
+          // ownership during provisioning (including a racing first request).
+          // Cache that fresh policy until this request claims another resource.
+          let policy: ReturnType<typeof runtime.policy.scoped> | undefined;
           // A Space is the one of that id in the Workspace this call runs in.
           const target = (resource: HuabuResource) => {
             if (resource.type === 'workspace')
@@ -317,13 +322,17 @@ export async function openBubbleIdentity(options: {
           };
           return {
             principal: identityPrincipalSchema.parse(whoami.principal),
-            member: await policy.can(USE, principalId, { type: 'system' }),
+            member,
             owner: admin,
             access: {
               can: async (level, resource) => {
                 const resolved = target(resource);
                 return resolved
-                  ? policy.can(CAPABILITY[level], principalId, resolved)
+                  ? (policy ??= runtime.policy.scoped()).can(
+                      CAPABILITY[level],
+                      principalId,
+                      resolved,
+                    )
                   : false;
               },
               claim: async (resource) => {
@@ -339,6 +348,7 @@ export async function openBubbleIdentity(options: {
                       : 'huabu.workspace.owner',
                   grantedByPrincipalId: principalId,
                 });
+                policy = undefined;
               },
               // A Space shared on its own makes its Workspace enterable; what
               // the caller sees there is still decided Space by Space.

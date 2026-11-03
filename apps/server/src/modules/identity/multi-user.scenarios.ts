@@ -124,6 +124,17 @@ export function describeSeveralPeople(
   scratch: () => string,
 ): void {
   describe(`several people on one Server (${backend})`, () => {
+    it('allows concurrent first-request writes after personal Workspace provisioning', async () => {
+      const { call, spacesOf } = await host();
+      const created = await Promise.all(
+        ['First', 'Second'].map((title) =>
+          call('carol', 'POST', '/api/canvas', { title }),
+        ),
+      );
+      expect(created.map((response) => response.status)).toEqual([201, 201]);
+      expect(await spacesOf('carol')).toEqual(['First', 'Second']);
+    });
+
     it('gives each member a Workspace of their own and keeps their Spaces apart', async () => {
       const { call, workspaceOf, spacesOf } = await host();
       const [carolWs, daveWs, adminWs] = await Promise.all([

@@ -1,7 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { mkdirSync, mkdtempSync, renameSync, rmSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -36,6 +42,9 @@ vi.mock('../workspace-activation.js', async (importOriginal) => {
   const workspace = await import('../workspace.js');
   return {
     ...actual,
+    runWorkspacePreparation: async (workspacePath: string) => {
+      prepareWorkspaceOnDisk(workspacePath);
+    },
     prepareWorkspacePath: async (newPath: string) => {
       const resolved = workspace.resolveWorkspacePath(newPath);
       prepareWorkspaceOnDisk(resolved);
@@ -74,6 +83,26 @@ afterEach(async () => {
 });
 
 describeSeveralPeople('Disk', () => tmp);
+
+it('lists only allowed Workspace manifests even when an unrelated manifest is corrupt', async () => {
+  const { call, workspaceOf } = await host();
+  const carolWs = await workspaceOf('carol');
+  const side = (
+    await call('carol', 'POST', '/api/workspaces', { name: 'Side' })
+  ).body.workspaceId as string;
+  const expected = (await getWorkspaceRepository().list())
+    .filter((w) => [carolWs, side].includes(w.workspaceId))
+    .map((w) => w.workspaceId);
+  writeFileSync(join(tmp, 'server', '.workspace.json'), '{broken');
+  const response = await call('carol', 'GET', '/api/workspaces');
+  expect(response.status).toBe(200);
+  expect(
+    response.body.map((w: { workspaceId: string }) => w.workspaceId),
+  ).toEqual(expected);
+  expect(
+    (await call('admin', 'GET', '/api/workspaces')).status,
+  ).toBeGreaterThanOrEqual(500);
+});
 
 it('preserves legacy ownership while a registered Disk Workspace is offline, then migrates it on recovery', async () => {
   const store = new InMemoryBubbleStore();

@@ -387,7 +387,7 @@ function commitResolvedWorkspacePath(resolvedPath: string): void {
   // — here `invalidateUserSkill` is only ever called from within
   // function bodies, after both modules have finished evaluating.
   invalidateUserSkill();
-  resetExternalNoteSessions();
+  resetExternalNoteSessions({ processOnly: true });
 }
 
 /**
@@ -406,7 +406,7 @@ export function commitWorkspaceIdentity(workspace: WorkspaceHandle): void {
   _workspacePath = null;
   refreshCanvasDirIndex();
   invalidateUserSkill();
-  resetExternalNoteSessions();
+  resetExternalNoteSessions({ processOnly: true });
 }
 
 /** Refresh metadata for the active Workspace without switching namespaces. */

@@ -11,7 +11,6 @@ import {
   getRequestIdentity,
   getRequestWorkspaceChooser,
 } from './identity/request.js';
-import { mayEnterWorkspace } from './identity/service.js';
 import { migrateLegacyDesktopWorkspaceStore } from './legacy-desktop-workspace-store.js';
 import { resetPreprocessDispatcher } from './preprocessing/index.js';
 import { isOwnerRequest } from './security/owner.js';
@@ -225,9 +224,7 @@ async function enterable(
   // Managed mode keeps everyone in its one Workspace.
   if (isManagedMode()) return visibleWorkspaces();
   const allowed = await getRequestIdentity(request)!.access.workspaces();
-  return (await getWorkspaceRepository().list()).filter((workspace) =>
-    mayEnterWorkspace(allowed, workspace.workspaceId),
-  );
+  return getWorkspaceRepository().list(allowed === 'all' ? undefined : allowed);
 }
 
 async function canManage(
