@@ -494,12 +494,12 @@ export default function CanvasListPage() {
 
           {isLoading ? (
             <Loading
-              variant="spinner"
+              defer
+              variant="brand"
               layout="block"
               size="md"
-              message={t('canvasList.loading')}
+              message={t('status.loadingProgress')}
               className="py-20"
-              indicatorClassName="text-fg-subtle"
             />
           ) : canvases.length === 0 ? (
             <EmptyState

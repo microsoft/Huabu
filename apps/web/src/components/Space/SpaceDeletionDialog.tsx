@@ -215,7 +215,7 @@ export function SpaceDeletionDialog({
         <Loading
           layout="block"
           size="sm"
-          message={t('canvasList.loading')}
+          message={t('status.loadingProgress')}
           className="py-6"
         />
       ) : null}

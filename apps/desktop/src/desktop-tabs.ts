@@ -501,7 +501,12 @@ export class DesktopTabs {
         ? entry.state.id === HOME_ID
         : entry.state.canvasId === target.canvasId,
     );
-    if (!tab && target.canvasId && source?.state.canvasId)
+    if (
+      !tab &&
+      target.canvasId &&
+      source?.state.canvasId &&
+      target.openIn === 'current-tab'
+    )
       return this.replaceSpace(source, target);
     const created = !tab;
     if (!tab) {

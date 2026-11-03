@@ -180,6 +180,46 @@ describe('desktop Space Tab lifecycle', () => {
 
   const newTab = () => tabs.command('new-tab', shell.webContents as never);
 
+  it.each([undefined, 'new-tab'] as const)(
+    'opens a destination in another Tab without preparing or destroying the source: %s',
+    async (openIn) => {
+      const parent = open('parent');
+      const parentId = tabs.snapshot.activeId;
+      const target = {
+        canvasId: 'child',
+        openIn,
+        search: '?node=n1',
+        hash: '#focus',
+        state: { selected: 'n1' },
+      };
+      await tabs.open(target, parent.webContents as never);
+      expect(tabs.snapshot.tabs.map((tab) => tab.canvasId)).toEqual([
+        null,
+        'parent',
+        'child',
+      ]);
+      expect(tabs.snapshot.activeId).not.toBe(parentId);
+      expect(tabs.snapshot.busy).toBe(false);
+      expect(parent.webContents.close).not.toHaveBeenCalled();
+      expect(parent.webContents.send).not.toHaveBeenCalledWith(
+        'tabs:prepare-close',
+        expect.anything(),
+      );
+      const child = mocks.views.at(-1);
+      if (!child) throw new Error('Missing destination view');
+      expect(child.webContents.loadURL).toHaveBeenCalledWith(
+        'http://localhost:3001/canvas/child?node=n1#focus',
+      );
+      tabs.ready(child.webContents as never);
+      expect(child.webContents.send).toHaveBeenCalledWith(
+        'tabs:navigate',
+        target,
+      );
+      tabs.activate(parentId);
+      expect(parent.webContents.loadURL).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it('saves before replacing a Space in the same Tab and retains navigation intent', async () => {
     const parent = open('parent');
     const id = tabs.snapshot.activeId;
@@ -187,6 +227,7 @@ describe('desktop Space Tab lifecycle', () => {
     tabs.activate(id);
     const target = {
       canvasId: 'child',
+      openIn: 'current-tab',
       search: '?node=n1',
       hash: '#focus',
       state: { selected: 'n1' },
@@ -224,22 +265,28 @@ describe('desktop Space Tab lifecycle', () => {
     );
   });
 
-  it('activates an already open destination without replacing or saving the source', async () => {
-    const parent = open('parent');
-    const parentId = tabs.snapshot.activeId;
-    const child = open('child');
-    const childId = tabs.snapshot.activeId;
-    tabs.activate(parentId);
-    await tabs.open({ canvasId: 'child' }, parent.webContents as never);
-    expect(tabs.snapshot.activeId).toBe(childId);
-    expect(tabs.snapshot.tabs).toHaveLength(3);
-    expect(parent.webContents.close).not.toHaveBeenCalled();
-    expect(parent.webContents.send).not.toHaveBeenCalledWith(
-      'tabs:prepare-close',
-      expect.anything(),
-    );
-    expect(child.webContents.focus).toHaveBeenCalled();
-  });
+  it.each([undefined, 'new-tab', 'current-tab'] as const)(
+    'activates an already open destination without replacing or saving the source: %s',
+    async (openIn) => {
+      const parent = open('parent');
+      const parentId = tabs.snapshot.activeId;
+      const child = open('child');
+      const childId = tabs.snapshot.activeId;
+      tabs.activate(parentId);
+      await tabs.open(
+        { canvasId: 'child', openIn },
+        parent.webContents as never,
+      );
+      expect(tabs.snapshot.activeId).toBe(childId);
+      expect(tabs.snapshot.tabs).toHaveLength(3);
+      expect(parent.webContents.close).not.toHaveBeenCalled();
+      expect(parent.webContents.send).not.toHaveBeenCalledWith(
+        'tabs:prepare-close',
+        expect.anything(),
+      );
+      expect(child.webContents.focus).toHaveBeenCalled();
+    },
+  );
 
   it('does not consume an unrelated blank Tab when a background Space opens an existing destination', async () => {
     const parent = open('parent');
@@ -259,7 +306,7 @@ describe('desktop Space Tab lifecycle', () => {
       if (failure === 'persist')
         mkdirSync(join(directory, 'desktop-tabs.json.tmp'));
       const navigation = tabs.open(
-        { canvasId: 'child' },
+        { canvasId: 'child', openIn: 'current-tab' },
         parent.webContents as never,
       );
       const rejected = expect(navigation).rejects.toThrow();
@@ -409,7 +456,7 @@ describe('desktop Space Tab lifecycle', () => {
     const parent = open('parent');
     const id = tabs.snapshot.activeId;
     const replacing = tabs.open(
-      { canvasId: 'child' },
+      { canvasId: 'child', openIn: 'current-tab' },
       parent.webContents as never,
     );
     expect(() =>
@@ -941,7 +988,7 @@ describe('desktop Space Tab lifecycle', () => {
     expect(mocks.options[0].webPreferences?.partition).toBeUndefined();
   });
 
-  it('replaces native cross-Space navigation only after saving the source page', async () => {
+  it('opens native cross-Space navigation in another Tab without saving the source page', async () => {
     const a = open('a');
     const id = tabs.snapshot.activeId;
     const navigate = a.webContents.callbacks.get('will-navigate');
@@ -953,11 +1000,18 @@ describe('desktop Space Tab lifecycle', () => {
     );
     expect(event.preventDefault).toHaveBeenCalled();
     expect(a.webContents.close).not.toHaveBeenCalled();
-    finish(a);
     await vi.waitFor(() => expect(tabs.snapshot.busy).toBe(false));
-    expect(tabs.snapshot.tabs.map((tab) => tab.canvasId)).toEqual([null, 'b']);
-    expect(tabs.snapshot.activeId).toBe(id);
-    expect(a.webContents.close).toHaveBeenCalledOnce();
+    expect(tabs.snapshot.tabs.map((tab) => tab.canvasId)).toEqual([
+      null,
+      'a',
+      'b',
+    ]);
+    expect(tabs.snapshot.activeId).not.toBe(id);
+    expect(a.webContents.close).not.toHaveBeenCalled();
+    expect(a.webContents.send).not.toHaveBeenCalledWith(
+      'tabs:prepare-close',
+      expect.anything(),
+    );
     expect(a.webContents.loadURL).toHaveBeenCalledTimes(1);
     expect(mocks.views[2].webContents.loadURL).toHaveBeenCalledWith(
       'http://localhost:3001/canvas/b?node=n#anchor',

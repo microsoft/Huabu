@@ -39,11 +39,6 @@ export function installDesktopInputGuard(): () => void {
   ] as const;
   const block = (event: Event) => {
     if (!frozen) return;
-    if (
-      event.target instanceof Element &&
-      event.target.closest('dialog[data-desktop-close-controls][open]')
-    )
-      return;
     event.preventDefault();
     event.stopImmediatePropagation();
   };

@@ -57,10 +57,20 @@ describe('desktop Tab session contract', () => {
     { canvasId: '../outside' },
     { canvasId: 'a', search: 'https://evil.example' },
     { canvasId: null, homePath: '/api/workspace' },
+    { canvasId: 'a', openIn: 'window' },
+    { canvasId: 'a', openIn: true },
+    { canvasId: 'a', openIn: null },
     { canvasId: 'a', state: 'x'.repeat(65_536) },
   ])('rejects invalid navigation %j', (target) => {
     expect(() => parseTabNavigation(target)).toThrow();
   });
+
+  it.each([undefined, 'new-tab', 'current-tab'] as const)(
+    'preserves the requested Tab opening mode: %s',
+    (openIn) => {
+      expect(parseTabNavigation({ canvasId: 'a', openIn }).openIn).toBe(openIn);
+    },
+  );
 
   it('constructs Home and Setup on the selected origin only', () => {
     expect(tabUrl('https://huabu.example', { canvasId: null })).toBe(

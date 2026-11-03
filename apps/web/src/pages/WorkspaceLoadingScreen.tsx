@@ -12,10 +12,11 @@ export function WorkspaceLoadingScreen() {
   return (
     <div className="bg-bg-default h-full">
       <Loading
+        defer
         variant="brand"
         layout="block"
         size="md"
-        message={t('app.loadingWorkspace')}
+        message={t('status.loadingProgress')}
       />
     </div>
   );

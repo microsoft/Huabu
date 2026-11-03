@@ -134,7 +134,8 @@ it.each(['success', 'failure'] as const)(
     expect(dialog?.getAttribute('role')).toBe('dialog');
     expect(dialog?.getAttribute('aria-label')).toBe('app.savingCanvas');
     expect(dialog?.classList.contains('fixed')).toBe(true);
-    expect(dialog?.querySelector('[data-loading-spinner]')).not.toBeNull();
+    expect(dialog?.querySelector('[data-loading-brand]')).not.toBeNull();
+    expect(dialog?.querySelector('button')).toBeNull();
     expect(HTMLDialogElement.prototype.showModal).toHaveBeenCalledOnce();
     const cancel = new Event('cancel', { cancelable: true });
     act(() => dialog?.dispatchEvent(cancel));

@@ -9,6 +9,7 @@ export interface DesktopTabContext {
 
 export interface DesktopTabNavigation {
   canvasId: string | null;
+  openIn?: 'new-tab' | 'current-tab';
   search?: string;
   hash?: string;
   state?: unknown;

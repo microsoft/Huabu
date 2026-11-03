@@ -11,11 +11,19 @@ import {
   RENAME_SPACE_SHORTCUT_EVENT,
 } from './spaceShortcutEvents';
 
+import type * as Electron from '@/hooks/useElectron';
 import type { SpaceAgentActivity } from '@huabu/shared';
+import type {
+  DesktopTabContext,
+  DesktopTabsApi,
+} from '@huabu/shared/desktop-tabs';
 import type { Node } from '@xyflow/react';
 
 const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
+  desktopRole: undefined as DesktopTabContext['role'] | undefined,
+  openTab: vi.fn<DesktopTabsApi['open']>(),
+  toast: vi.fn(),
   openConversation: vi.fn(),
   rename: vi.fn(),
   setSpaceTitle: vi.fn(),
@@ -47,6 +55,14 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key, i18n: { language: 'en' } }),
 }));
 vi.mock('react-router-dom', () => ({ useNavigate: () => mocks.navigate }));
+vi.mock('@/hooks/useElectron', async (importActual) => ({
+  ...(await importActual<typeof Electron>()),
+  getElectronBridge: () =>
+    mocks.desktopRole
+      ? { tabs: { context: { role: mocks.desktopRole }, open: mocks.openTab } }
+      : undefined,
+}));
+vi.mock('@/components/Common/Toast', () => ({ toast: mocks.toast }));
 vi.mock('@/store/previewWorkspace/actions', () => ({
   openSpaceConversation: mocks.openConversation,
 }));
@@ -135,6 +151,8 @@ let host: HTMLDivElement;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.desktopRole = undefined;
+  mocks.openTab.mockResolvedValue({ ok: true });
   mocks.spaceSummaries = {};
   mocks.state.canvasId = 'source';
   mocks.target.title = 'Research';
@@ -240,6 +258,133 @@ it('leaves canonical entry deletion to the shared More menu instead of adding a 
   ).not.toBeNull();
 });
 describe('Space Shortcut production node', () => {
+  it.each([undefined, 'home', 'shell'] as const)(
+    'does not offer same-Tab replacement outside a desktop Space: %s',
+    (role) => {
+      mocks.desktopRole = role;
+      render();
+      expect(
+        host.querySelector('[aria-label="spacePreview.openInCurrentTab"]'),
+      ).toBeNull();
+    },
+  );
+
+  it.each(['shortcut', 'child'] as const)(
+    'offers explicit same-Tab opening for a desktop %s without changing ordinary navigation',
+    async (kind) => {
+      mocks.desktopRole = 'space';
+      if (kind === 'child')
+        mocks.spaceSummaries = {
+          target: { parentSpaceId: 'source', parentEntryNodeId: 'shortcut' },
+        };
+      render();
+      open();
+      expect(mocks.navigate).toHaveBeenCalledTimes(3);
+      expect(mocks.openTab).not.toHaveBeenCalled();
+      const item = host.querySelector<HTMLButtonElement>(
+        '[data-overflow-actions] [aria-label="spacePreview.openInCurrentTab"]',
+      );
+      expect(item?.getAttribute('role')).toBe('menuitem');
+      await act(async () => item?.click());
+      expect(mocks.openTab).toHaveBeenCalledExactlyOnceWith({
+        canvasId: 'target',
+        openIn: 'current-tab',
+        state:
+          kind === 'child'
+            ? undefined
+            : { returnToSpace: 'source', workspaceId: 'workspace' },
+      });
+      expect(mocks.navigate).toHaveBeenCalledTimes(3);
+    },
+  );
+
+  it.each(['loading', 'missing', 'error'])(
+    'disables same-Tab opening when the target is %s',
+    async (status) => {
+      mocks.desktopRole = 'space';
+      mocks.target.status = status;
+      render();
+      const item = host.querySelector<HTMLButtonElement>(
+        '[aria-label="spacePreview.openInCurrentTab"]',
+      );
+      expect(item?.disabled).toBe(true);
+      await act(async () => item?.click());
+      expect(mocks.openTab).not.toHaveBeenCalled();
+    },
+  );
+
+  it('disables same-Tab opening while renaming', () => {
+    mocks.desktopRole = 'space';
+    render();
+    act(() =>
+      host
+        .querySelector<HTMLButtonElement>(
+          '[data-overflow-actions] [aria-label="spacePreview.rename"]',
+        )
+        ?.click(),
+    );
+    expect(
+      host.querySelector<HTMLButtonElement>(
+        '[aria-label="spacePreview.openInCurrentTab"]',
+      )?.disabled,
+    ).toBe(true);
+  });
+
+  it('keeps cancellation quiet and allows another same-Tab opening', async () => {
+    mocks.desktopRole = 'space';
+    mocks.openTab.mockResolvedValueOnce({
+      ok: false,
+      cancelled: true,
+      error: 'Closing was cancelled.',
+    });
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      render();
+      const item = host.querySelector<HTMLButtonElement>(
+        '[aria-label="spacePreview.openInCurrentTab"]',
+      );
+      await act(async () => item?.click());
+      expect(mocks.openTab).toHaveBeenCalledOnce();
+      expect(mocks.toast).not.toHaveBeenCalled();
+      expect(errorLog).not.toHaveBeenCalled();
+      expect(mocks.navigate).not.toHaveBeenCalled();
+      await act(async () => item?.click());
+      expect(mocks.openTab).toHaveBeenCalledTimes(2);
+      expect(mocks.toast).not.toHaveBeenCalled();
+      expect(errorLog).not.toHaveBeenCalled();
+    } finally {
+      errorLog.mockRestore();
+    }
+  });
+
+  it.each(['result', 'rejection'])(
+    'surfaces a failed same-Tab opening without router fallback: %s',
+    async (failure) => {
+      mocks.desktopRole = 'space';
+      if (failure === 'result')
+        mocks.openTab.mockResolvedValue({ ok: false, error: 'Save failed' });
+      else mocks.openTab.mockRejectedValue(new Error('Save failed'));
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        render();
+        await act(async () =>
+          host
+            .querySelector<HTMLButtonElement>(
+              '[aria-label="spacePreview.openInCurrentTab"]',
+            )
+            ?.click(),
+        );
+        expect(mocks.toast).toHaveBeenCalledWith('Save failed', {
+          tone: 'danger',
+        });
+        expect(errorLog).toHaveBeenCalled();
+        expect(mocks.navigate).not.toHaveBeenCalled();
+      } finally {
+        errorLog.mockRestore();
+      }
+    },
+  );
+
   it('places Rename and error Retry in More, leaving Open Space as the primary action', () => {
     mocks.target.error = 'Offline';
     render();

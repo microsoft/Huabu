@@ -1,7 +1,7 @@
 # Space Shortcut and World
 
 > Authoritative contract for Space Shortcut nodes, managed World entries, and the retained scene projection API.
-> Last updated: 2026-10-29
+> Last updated: 2026-11-02
 
 ## 1. Product model
 
@@ -12,6 +12,8 @@ Ordinary shortcuts show an `ArrowUpRight` marker immediately after the target na
 All Space cards show the canonical Space type icon before the title, centered in its first line: 22px, muted foreground, no background tile. The header reserves 36px (a shared 28px icon slot plus an 8px gap) so long titles and inline rename fields cannot overlap it; the activity/time footer retains its full width. Space and Question headers share an icon center line and title text start. Footer badges remain independent icon-and-text groups whose outer left edges align with the header row, without forcing their text onto the title column. Individual artwork sizes remain unchanged: Space header 22px, Question header 28px, Space footer 24px, and Question status 16px. Slot width and header icon sizes come from `CONVERSATION_CARD_SPACING` and scale with the card. The icon is decorative, adds no action, and stays in place during selection and renaming. There are no folder tabs, stacked layers, or repeated type labels in the footer.
 
 Space and Agent cards reuse `CardTitle` for automatic focus and selection, Enter/blur confirmation, Escape cancellation, and IME-safe keyboard handling. A single click only selects. Double-clicking opens an initially unselected card; only a card selected before that double-click began can rename on a double-click over its rendered title text. Per-line DOM text ranges exclude title-row whitespace, icons, and the footer from rename activation; those areas still open the card. Keyboard activation of a selected title also starts editing. Space naming retains its own target-title conflict checks, errors, and toolbar/F2 entry points. The shared component owns presentation and gestures, not persistence.
+
+On desktop, ordinary Space opening (including child entries, double-click, keyboard activation, and the primary Open Space action) adds or activates a Tab while keeping the source alive. A Space card's More menu additionally offers **Open in current tab**, using the existing acknowledged save-before-replacement boundary; an already-open target activates its existing Tab instead. The action is unavailable while renaming or when the target is not ready, and failures retain the source and show the existing error feedback. Browser navigation is unchanged and does not show the desktop-only choice. [Desktop Space Tabs](desktop-tabs.md) owns the navigation and lifetime contract.
 
 Title editing reuses Common `TextArea` but does not auto-grow vertically. The persisted display title remains as an invisible, accessibility-hidden height placeholder with its existing two-line clamp. During editing its container fills the title row's available width, reserving the shortcut marker and gap rather than limiting the field to the original text width. The editor soft-wraps and scrolls vertically when the draft exceeds the original height. Entering editing, changing the draft, and cancelling do not change the card height or footer position. Only the saved title participates in normal title layout; validation and save errors retain their separate inline feedback. Enter still saves rather than inserting a newline, and pasted line breaks are removed as with the former single-line input.
 

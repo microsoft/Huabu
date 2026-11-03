@@ -405,16 +405,17 @@ export default function CanvasPage() {
   // Treat any mismatch between the URL canvas and the store canvas as a
   // loading state — covers the gap between this page mounting and the
   // effect above calling `loadCanvas`/`switchCanvas` (which is what
-  // actually sets `isLoading: true`). Showing the spinner immediately
+  // actually sets `isLoading: true`). Showing the loading surface immediately
   // also avoids a half-rendered `MainLayout` of the previous canvas
   // flashing on click-through from the canvas list.
   if (isLoading || (canvasId && storeCanvasId !== canvasId)) {
     return (
       <Loading
+        defer
         variant="brand"
         layout="block"
         size="md"
-        message={t('canvasPage.loading')}
+        message={t('status.loadingProgress')}
       />
     );
   }

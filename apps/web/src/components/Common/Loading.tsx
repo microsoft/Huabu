@@ -2,6 +2,7 @@
 // Licensed under the MIT license.
 
 import Lottie from 'lottie-react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import loadingAnimation from '@/assets/loading.json';
@@ -22,6 +23,8 @@ interface LoadingProps {
   size?: LoadingSize;
   /** Optional helper text. */
   message?: string;
+  /** Wait 150ms before showing the indicator and text; keep the layout mounted. */
+  defer?: boolean;
   /** Number of skeleton lines to render. Defaults to 3. */
   lines?: number;
   className?: string;
@@ -46,6 +49,7 @@ function BrandLoadingIndicator({
 
   return (
     <span
+      data-loading-brand
       role="status"
       aria-label={t('status.loading')}
       className={cn('inline-flex shrink-0', className)}
@@ -82,11 +86,20 @@ export function Loading({
   layout = 'block',
   size = 'sm',
   message,
+  defer = false,
   lines = 3,
   className,
   indicatorClassName,
 }: LoadingProps) {
   const { t } = useTranslation();
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    if (!defer) return;
+    setReady(false);
+    const timer = window.setTimeout(() => setReady(true), 150);
+    return () => window.clearTimeout(timer);
+  }, [defer]);
+  const visible = !defer || ready;
   const isSkeleton = variant === 'skeleton';
   const Tag = layout === 'inline' ? 'span' : 'div';
 
@@ -117,7 +130,8 @@ export function Loading({
     />
   );
 
-  if (layout === 'bare' || (layout === 'inline' && !message)) return indicator;
+  if (layout === 'bare' || (layout === 'inline' && !message))
+    return visible ? indicator : null;
 
   return (
     <Tag
@@ -130,9 +144,9 @@ export function Loading({
         layout !== 'inline' && className,
       )}
     >
-      {indicator}
-      {message ? (
-        <span className="text-fg-subtle text-sm">{message}</span>
+      {visible ? indicator : null}
+      {visible && message ? (
+        <span className="text-fg-muted text-sm">{message}</span>
       ) : null}
     </Tag>
   );

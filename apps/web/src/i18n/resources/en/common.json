@@ -73,7 +73,6 @@
     "finishBinding": "Choose a resource or close the # picker before sending."
   },
   "app": {
-    "loadingWorkspace": "Loading your Home folder…",
     "savingCanvas": "Saving…",
     "unsavedChangesTitle": "Space could not be saved",
     "unsavedChangesDescription": "Stay to keep your edits and retry saving. Leaving discards changes that have not been saved; changes already saved are kept.",
@@ -765,7 +764,6 @@
     "spaceActions": "Actions for {{name}}",
     "title": "Spaces",
     "subtitle": "Select a Space to open, or create a new one.",
-    "loading": "Loading Spaces…",
     "empty": "No Spaces yet.",
     "createFirst": "Create your first Space",
     "untitled": "Untitled",
@@ -792,7 +790,6 @@
     "exportCanvas": "Export Space"
   },
   "canvasPage": {
-    "loading": "Loading Space…",
     "notFoundTitle": "Space not found",
     "notFoundDescription": "This Space doesn't exist or may have been deleted.",
     "backToList": "Back to Space list",
@@ -831,6 +828,7 @@
     "targetsUnavailable": "Spaces could not be loaded.",
     "noTargets": "No other Spaces are available.",
     "openSpace": "Open Space",
+    "openInCurrentTab": "Open in current tab",
     "retry": "Retry",
     "untitledSpace": "Untitled Space",
     "nodeCount_zero": "No nodes",

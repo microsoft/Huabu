@@ -1598,6 +1598,7 @@ const CanvasContent: React.FC<CanvasProps> = ({
 
       {isInitialViewportPending && (
         <Loading
+          defer
           variant="brand"
           layout="overlay"
           size="md"

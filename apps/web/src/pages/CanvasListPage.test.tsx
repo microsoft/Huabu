@@ -1182,7 +1182,7 @@ describe('CanvasListPage navigation', () => {
       { initialEntries: ['/spaces'] },
     );
     await act(async () => root.render(<RouterProvider router={router} />));
-    expect(container.textContent).toBe('app.loadingWorkspace');
+    expect(container.textContent).toBe('status.loadingProgress');
     expect(container.querySelector('a[href="/canvas/space-1"]')).toBeNull();
   });
 

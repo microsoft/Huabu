@@ -210,7 +210,7 @@ The always-mounted `SpaceNavigationGuard` in the router root blocks pathname cha
 
 On desktop, the same guard first diverts cross-Space/Home navigation through `DesktopTabs.open`, preserving the existing renderer and its edits without draining or discarding. Desktop close/reload/quit use the acknowledged [desktop lifecycle boundary](./desktop-tabs.md#3-saving-and-lifetime); browser reload/window close remain best-effort unload paths rather than this in-app confirmation flow.
 
-An in-app navigation drain lasting over 150ms displays Common `Loading` inside a full-viewport native modal dialog, outside the page's flex layout. The underlying Canvas and chat geometry stay unchanged; native modal inertness blocks pointer and keyboard interaction with the editor and its portals while saving. Escape does not dismiss the saving state. Settlement closes the dialog before proceeding or showing the existing unsaved-changes decision.
+An in-app navigation drain lasting over 150ms displays Common `Loading` with the brand animation and “Saving…” inside a full-viewport native modal dialog, outside the page's flex layout. It uses the same `md` indicator and centered text row as Space loading. The underlying Canvas and chat geometry stay unchanged; native modal inertness blocks pointer and keyboard interaction with the editor and its portals while saving. There is no cancel button, and Escape does not dismiss the saving state. Settlement closes the dialog before proceeding or showing the existing unsaved-changes decision.
 
 The saving dialog explicitly carries `role="dialog"` for the shared Canvas interaction guard. This excludes its keyboard events from window-capture shortcuts such as Delete and Undo, which run before the dialog's bubbling handler.
 
