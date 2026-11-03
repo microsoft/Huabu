@@ -163,7 +163,27 @@ export function SpaceDeletionDialog({
           preview.spaces.some((space) => space.canvasId === containerSpaceId))
       )
         throw new Error(t('spaceHierarchy.deleteFromContainer'));
-      await withSaveErrorsHandledByCaller(() => drainPendingSaves());
+      await withSaveErrorsHandledByCaller(async () => {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          await Promise.race([
+            drainPendingSaves(),
+            new Promise<never>((_resolve, reject) => {
+              timer = setTimeout(
+                () =>
+                  reject(
+                    new Error(
+                      t('spaceHierarchy.deletionErrors.prepareTimeout'),
+                    ),
+                  ),
+                15_000,
+              );
+            }),
+          ]);
+        } finally {
+          clearTimeout(timer);
+        }
+      });
       if (useWorkspaceStore.getState().workspaceId !== workspaceId)
         throw new Error(t('spaceHierarchy.workspaceChanged'));
       if (tabs) {
@@ -200,7 +220,10 @@ export function SpaceDeletionDialog({
         deletedCanvasIds = cause.details.deletedCanvasIds;
       }
     } finally {
-      if (useWorkspaceStore.getState().workspaceId === workspaceId) {
+      if (
+        deletionRequested &&
+        useWorkspaceStore.getState().workspaceId === workspaceId
+      ) {
         try {
           for (const id of deletedCanvasIds) deleteWorkspace(id);
           await useWorkspaceStore

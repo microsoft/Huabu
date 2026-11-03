@@ -17,6 +17,7 @@ import { drainPendingSaves } from '@/store/canvasStore';
 import { createNodeContentQueue } from '@/store/canvasStore/save/nodeContentQueue';
 import { deleteWorkspace } from '@/store/previewWorkspace/persistence';
 import { useWorkspaceStore } from '@/store/workspaceStore';
+import { saveErrorsHandledByCaller } from '@/utils/saveErrorFeedback';
 
 import { SpaceDeletionDialog } from './SpaceDeletionDialog';
 
@@ -95,6 +96,7 @@ afterEach(() => {
   host.remove();
   useWorkspaceStore.setState({ refreshSpaceTitles: originalRefresh });
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 async function remove() {
@@ -377,6 +379,41 @@ it('owns Note save failures from the initial local drain before desktop preparat
   expect(deleteSpaceTree).not.toHaveBeenCalled();
   expect(desktop.command).not.toHaveBeenCalled();
   expect(queue.hasUnsavedContent('parent')).toBe(true);
+  expect(toast).not.toHaveBeenCalled();
+});
+
+it('ends a stalled local drain after 15 seconds without waiting for refresh or deleting on late completion', async () => {
+  vi.useFakeTimers();
+  desktop.enabled = true;
+  let finishSave!: () => void;
+  vi.mocked(drainPendingSaves).mockImplementationOnce(
+    () =>
+      new Promise<void>((resolve) => {
+        finishSave = resolve;
+      }),
+  );
+  await remove();
+  expect(saveErrorsHandledByCaller()).toBe(true);
+  await act(async () => vi.advanceTimersByTimeAsync(14_999));
+  expect(document.querySelector('[role="status"]')).not.toBeNull();
+  await act(async () => vi.advanceTimersByTimeAsync(1));
+  expect(document.querySelector('[role="status"]')).toBeNull();
+  expect(document.querySelector('[role="alert"]')?.textContent).toContain(
+    'spaceHierarchy.deletionErrors.prepare',
+  );
+  expect(document.querySelector('details')?.textContent).toContain(
+    'spaceHierarchy.deletionErrors.prepareTimeout',
+  );
+  expect(
+    [...document.querySelectorAll('button')].every(
+      (button) => !button.disabled,
+    ),
+  ).toBe(true);
+  expect(refresh).not.toHaveBeenCalled();
+  expect(saveErrorsHandledByCaller()).toBe(false);
+  await act(async () => finishSave());
+  expect(deleteSpaceTree).not.toHaveBeenCalled();
+  expect(desktop.command).not.toHaveBeenCalled();
   expect(toast).not.toHaveBeenCalled();
 });
 

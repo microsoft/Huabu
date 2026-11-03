@@ -73,6 +73,51 @@ beforeEach(() => {
 });
 
 describe('nodeContentQueue — save-failure surfacing', () => {
+  it.each([false, true])(
+    'duplicate Refresh preserves a newer content conflict and its recovery (deferred: %s)',
+    async (deferred) => {
+      const node = noteNode('mine');
+      const { queue } = makeQueue(node);
+      const release = deferred ? holdSaveErrorRecovery() : undefined;
+      toastMock.mockReturnValue('conflict-toast');
+      try {
+        putMock.mockRejectedValueOnce(
+          new NodeDuplicateFilesError({ message: 'duplicate' }),
+        );
+        await expect(queue.flushNow('c1', node.id)).rejects.toThrow();
+        putMock.mockRejectedValueOnce(
+          new CanvasConflictError({
+            code: 'NODE_CONTENT_CONFLICT',
+            message: 'changed elsewhere',
+            currentRev: 'server',
+          }),
+        );
+        await queue.flushNow('c1', node.id);
+        vi.mocked(dismissToast).mockClear();
+        queue.clearDuplicateGuard(node.id);
+        expect(dismissToast).not.toHaveBeenCalled();
+        await queue.flushNow('c1', node.id);
+        expect(putMock).toHaveBeenCalledTimes(2);
+        await expect(queue.flushAllForSubmission('c1')).rejects.toThrow();
+        if (deferred) expect(toastMock).not.toHaveBeenCalled();
+      } finally {
+        release?.();
+      }
+      const recovery = toastMock.mock.calls.at(-1)?.[1];
+      expect(recovery.secondaryAction.onClick).toBeTypeOf('function');
+      expect(recovery.action.onClick).toBeTypeOf('function');
+      putMock.mockResolvedValue({
+        nodeId: node.id,
+        label: 'Note',
+        rev: 'saved',
+      });
+      recovery.secondaryAction.onClick();
+      await vi.waitFor(() => expect(queue.hasUnsavedContent('c1')).toBe(false));
+      expect(putMock.mock.calls.at(-1)?.[2].expectRev).toBe('server');
+      queue.discardCanvas('c1');
+    },
+  );
+
   it.each(['conflict', 'duplicate'] as const)(
     'cancels deferred %s recovery when its failure is retired',
     async (kind) => {

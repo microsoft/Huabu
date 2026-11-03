@@ -771,6 +771,7 @@
       "notFound": "This Space is no longer available. Close this dialog and refresh the Space list.",
       "preview": "The deletion scope could not be loaded. Check your connection and review again.",
       "prepare": "Changes could not be saved or deletion could not be prepared. No deletion request was sent. Review again after resolving the issue.",
+      "prepareTimeout": "Saving took too long. Nothing was deleted and your unsaved changes were kept. Close this dialog and try again after saving finishes.",
       "request": "The deletion result could not be confirmed. Check your connection and review the current Spaces before trying again.",
       "refresh": "The Space list could not be refreshed. Close this dialog and refresh the list to check the current state.",
       "release": "Tab cleanup could not be completed. Close this dialog and check the remaining open Spaces."

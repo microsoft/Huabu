@@ -671,6 +671,8 @@ export class DesktopTabs {
       await new Promise<void>((resolve, reject) => {
         const heartbeat = () => {
           if (settled) return;
+          // Deletion has no discard/cancel overlay in the affected child.
+          if (reason === 'space-deletion' && timer !== undefined) return;
           clearTimeout(timer);
           timer = setTimeout(
             () =>

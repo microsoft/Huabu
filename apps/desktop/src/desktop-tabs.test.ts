@@ -1825,6 +1825,55 @@ describe('desktop Space Tab lifecycle', () => {
     expect(tabs.snapshot.busy).toBe(false);
   });
 
+  it('bounds deletion preparation despite heartbeats and ignores late replies after timeout', async () => {
+    vi.useFakeTimers();
+    const a = open('a');
+    const b = open('b');
+    const home = mocks.views[0].webContents;
+    const preparing = tabs.command(
+      { type: 'begin-space-deletion', canvasId: 'a', canvasIds: ['a', 'b'] },
+      home as never,
+    );
+    const rejected = expect(preparing).rejects.toThrow('timed out');
+    const request = a.webContents.send.mock.calls.at(-1);
+    if (!request) throw new Error('Missing preparation request');
+    const requestId = request[1].requestId;
+    finish(b);
+    for (let elapsed = 0; elapsed < 10_000; elapsed += 5_000) {
+      await vi.advanceTimersByTimeAsync(5_000);
+      tabs.keepDrainAlive(a.webContents as never, requestId);
+    }
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(tabs.snapshot.busy).toBe(true);
+    await vi.advanceTimersByTimeAsync(1);
+    await rejected;
+    expect(tabs.snapshot.busy).toBe(false);
+    for (const view of [a, b]) {
+      expect(view.webContents.close).not.toHaveBeenCalled();
+      expect(view.webContents.send).toHaveBeenCalledWith('tabs:resume');
+    }
+    const retry = tabs.command(
+      { type: 'begin-space-deletion', canvasId: 'a' },
+      home as never,
+    );
+    tabs.keepDrainAlive(a.webContents as never, requestId);
+    tabs.finishDrain(a.webContents as never, requestId, { ok: true });
+    await Promise.resolve();
+    expect(() =>
+      tabs.command(
+        { type: 'end-space-deletion', deletedCanvasIds: [] },
+        home as never,
+      ),
+    ).toThrow('No Space deletion');
+    finish(a);
+    await retry;
+    tabs.command(
+      { type: 'end-space-deletion', deletedCanvasIds: [] },
+      home as never,
+    );
+    expect(tabs.snapshot.busy).toBe(false);
+  });
+
   it('removes lazy restored Tabs without loading them and persists their removal', async () => {
     open('child');
     tabs.activate('home');

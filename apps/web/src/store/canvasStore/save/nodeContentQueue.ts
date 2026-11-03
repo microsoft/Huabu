@@ -1183,7 +1183,8 @@ export function createNodeContentQueue(opts: {
 
     clearDuplicateGuard(nodeId) {
       duplicateToasted.delete(nodeId);
-      dismissFailureToast(nodeId);
+      if (failures.get(nodeId)?.error instanceof NodeDuplicateFilesError)
+        dismissFailureToast(nodeId);
     },
 
     forgetNode(nodeId) {
