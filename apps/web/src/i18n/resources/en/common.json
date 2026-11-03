@@ -43,8 +43,7 @@
     "label": "Open Spaces",
     "newTab": "New tab",
     "noMatchingSpaces": "No matching Spaces.",
-    "closeTab": "Close Tab",
-    "closeBeforeDeleting": "This Space is open. Close its Tab before deleting it."
+    "closeTab": "Close Tab"
   },
   "sigil": {
     "chooseResource": "Choose a resource",
@@ -727,6 +726,7 @@
     "activationInProgress": "Another Home folder is still opening. Please wait for it to finish."
   },
   "spaceHierarchy": {
+    "deleteFromContainer": "Delete this Space from Home or its parent Space.",
     "bring": "Move existing Space here",
     "alreadyChild": "Already in this Space",
     "collectAction": "Collect into child Space",
@@ -752,6 +752,29 @@
     "entryProtected": "This change would remove or retarget a child Space entry. Use Delete Space or Move into another Space instead.",
     "deleteNamedTitle": "Delete “{{name}}”?",
     "deleteWarning": "All contents will be permanently deleted. This cannot be undone.",
+    "deletingNamedTitle": "Deleting “{{name}}”",
+    "deleting": "Deleting…",
+    "deletionInProgress": "Please wait while changes are saved and deletion is processed.",
+    "deleteFailedTitle": "Deletion could not be completed",
+    "deleteFailedNamedTitle": "Could not finish deleting “{{name}}”",
+    "deletedNamedTitle": "“{{name}}” was deleted",
+    "recheckDeletion": "Review again",
+    "deletionDetails": "Technical details",
+    "deletionProgress_one": "{{count}} Space has already been deleted and cannot be restored.",
+    "deletionProgress_other": "{{count}} Spaces have already been deleted and cannot be restored.",
+    "deletionErrors": {
+      "deletedRefresh": "The Space was deleted, but the Space list could not be refreshed. Refresh the list to check its current state.",
+      "agentRunning": "An Agent in this Space or a nested Space is still busy. Stop it or wait for it to finish, then review again.",
+      "treeChanged": "The Space hierarchy changed. Review the current deletion scope before confirming again.",
+      "interrupted": "Deletion did not finish cleanly. Check the current Space list before continuing.",
+      "notFound": "This Space is no longer available. Close this dialog and refresh the Space list.",
+      "preview": "The deletion scope could not be loaded. Check your connection and review again.",
+      "prepare": "Changes could not be saved or deletion could not be prepared. No deletion request was sent. Review again after resolving the issue.",
+      "prepareTimeout": "Saving took too long. Nothing was deleted and your unsaved changes were kept. Close this dialog and try again after saving finishes.",
+      "request": "The deletion result could not be confirmed. Check your connection and review the current Spaces before trying again.",
+      "refresh": "The Space list could not be refreshed. Close this dialog and refresh the list to check the current state.",
+      "release": "Tab cleanup could not be completed. Close this dialog and check the remaining open Spaces."
+    },
     "deleteCount_one": "Delete Space",
     "deleteCount_other": "Delete {{count}} Spaces",
     "deleteDescendants_one": "Also deletes {{count}} nested Space",

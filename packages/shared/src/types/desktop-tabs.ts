@@ -52,7 +52,10 @@ export type DesktopTabCommand =
   | 'open-settings'
   | 'close-home-menu'
   | 'dismiss-home-menu'
-  | 'end-space-deletion'
+  | {
+      type: 'end-space-deletion';
+      deletedCanvasIds: string[];
+    }
   | { type: 'move-tab'; id: string; index: number }
   | { type: 'sync-workspace-capabilities'; canChangeWorkspace: boolean }
   | {
@@ -119,7 +122,17 @@ export interface DesktopTabsApi {
   beginWorkspaceChange: () => Promise<DesktopTabResult>;
   endWorkspaceChange: () => Promise<DesktopTabResult>;
   onNavigate: (callback: (target: DesktopTabNavigation) => void) => () => void;
-  onPrepareClose: (callback: (requestId: string) => void) => () => void;
+  onPrepareClose: (
+    callback: (
+      request: string | { requestId: string; reason: 'space-deletion' },
+    ) => void,
+  ) => () => void;
+  onSpacesDeleted: (
+    callback: (result: {
+      workspaceId: string;
+      deletedCanvasIds: string[];
+    }) => void,
+  ) => () => void;
   keepPrepareCloseAlive: (requestId: string) => void;
   onClosePrepared: (callback: () => void) => () => void;
   finishPrepareClose: (requestId: string, result: DesktopTabResult) => void;

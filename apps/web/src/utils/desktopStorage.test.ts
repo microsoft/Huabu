@@ -54,6 +54,7 @@ function setContext(context: DesktopTabContext) {
     endWorkspaceChange: vi.fn(),
     onNavigate: vi.fn(),
     onPrepareClose: vi.fn(),
+    onSpacesDeleted: vi.fn(),
     finishPrepareClose: vi.fn(),
     keepPrepareCloseAlive: vi.fn(),
     onClosePrepared: vi.fn(),

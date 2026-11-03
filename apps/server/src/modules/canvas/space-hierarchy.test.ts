@@ -867,6 +867,15 @@ describe('Space ownership', () => {
     });
     await expect(storage.deleteSpace('root')).rejects.toThrow('children');
     const preview = deletionPreview(await list(), 'root');
+    expect(preview.spaces).toEqual([
+      {
+        canvasId: grandchild.canvasId,
+        title: 'Grandchild',
+        parentSpaceId: child.canvasId,
+      },
+      { canvasId: child.canvasId, title: 'Child', parentSpaceId: 'root' },
+      { canvasId: 'root', title: 'Root', parentSpaceId: null },
+    ]);
     const publish = vi.spyOn(canvasSync, 'publishCanvasUpdate');
     expect(await deleteSpaceTree('root', preview.token)).toEqual([
       grandchild.canvasId,

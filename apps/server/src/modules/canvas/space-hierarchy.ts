@@ -126,7 +126,11 @@ export function deletionPreview(
     token: createHash('sha256')
       .update(JSON.stringify([getWorkspaceKey(), identity]))
       .digest('hex'),
-    spaces: subtree.map(({ canvasId, title }) => ({ canvasId, title })),
+    spaces: subtree.map(({ canvasId, title, parentSpaceId }) => ({
+      canvasId,
+      title,
+      parentSpaceId: parentSpaceId ?? null,
+    })),
   };
 }
 

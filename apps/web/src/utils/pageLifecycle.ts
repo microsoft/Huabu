@@ -23,14 +23,22 @@ type Preparation = {
   flush?: () => Promise<void>;
 };
 
-function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+function untilAborted<T>(
+  work: () => Promise<T>,
+  signal: AbortSignal,
+): Promise<T> {
   signal.throwIfAborted();
   return new Promise((resolve, reject) => {
-    const abort = () => reject(signal.reason);
-    signal.addEventListener('abort', abort, { once: true });
-    void work.then(resolve, reject).finally(() => {
+    const abort = () => {
       signal.removeEventListener('abort', abort);
-    });
+      reject(signal.reason);
+    };
+    signal.addEventListener('abort', abort, { once: true });
+    void (async () => work())()
+      .then(resolve, reject)
+      .finally(() => {
+        signal.removeEventListener('abort', abort);
+      });
   });
 }
 
@@ -79,6 +87,7 @@ export function createPageLifecycle() {
     async prepare(
       signal: AbortSignal,
       onStage?: (stage: PageCloseStage) => void,
+      retry?: () => Promise<void>,
     ): Promise<void> {
       if (closing && !closing.signal.aborted)
         throw new Error('Page close preparation is already in progress.');
@@ -87,7 +96,11 @@ export function createPageLifecycle() {
       try {
         signal.throwIfAborted();
         onStage?.('settling');
-        for (const preparation of preparations.values()) preparation.settle?.();
+        for (const preparation of preparations.values()) {
+          signal.throwIfAborted();
+          preparation.settle?.();
+        }
+        if (retry) await untilAborted(retry, signal);
         let previous: number;
         do {
           previous = generation;
@@ -95,7 +108,7 @@ export function createPageLifecycle() {
             const operations = [...pending.values()];
             onStage?.(operations[0].stage);
             await untilAborted(
-              Promise.all(operations.map((task) => task.settled)),
+              () => Promise.all(operations.map((task) => task.settled)),
               signal,
             );
           }
@@ -104,9 +117,10 @@ export function createPageLifecycle() {
           for (const preparation of preparations.values()) {
             signal.throwIfAborted();
             if (preparation.flush)
-              await untilAborted(preparation.flush(), signal);
+              await untilAborted(preparation.flush, signal);
           }
         } while (pending.size || previous !== generation);
+        signal.throwIfAborted();
         if (request.errors.length) throw request.errors[0];
       } finally {
         if (closing === request) closing = undefined;

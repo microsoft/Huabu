@@ -26,6 +26,7 @@ import {
   subscribeApplicationPreferences,
 } from '@/utils/desktopStorage';
 import { pageLifecycle } from '@/utils/pageLifecycle';
+import { prepareSpaceDeletion } from '@/utils/prepareSpaceDeletion';
 
 import { getElectronBridge, requireDesktopTabSuccess } from './useElectron';
 
@@ -113,7 +114,7 @@ export function useDesktopContent(): {
 
   useEffect(() => {
     if (!tabs || tabs.context.role === 'shell') return;
-    const reportSaveError = (error: unknown): string => {
+    const reportSaveError = (error: unknown, notify = true): string => {
       const message =
         error instanceof Error
           ? error.cause instanceof Error
@@ -121,25 +122,31 @@ export function useDesktopContent(): {
             : error.message
           : String(error);
       console.error('[desktop-tabs] Could not save Space:', error);
-      toast(message, {
-        tone: 'danger',
-        ...(error instanceof ConversationTitleSaveError
-          ? {
-              action: {
-                label: i18n.t('chat.retryTitleSave'),
-                onClick: () => {
-                  void error.retry().catch(reportSaveError);
+      if (notify)
+        toast(message, {
+          tone: 'danger',
+          ...(error instanceof ConversationTitleSaveError
+            ? {
+                action: {
+                  label: i18n.t('chat.retryTitleSave'),
+                  onClick: () => {
+                    void error.retry().catch(reportSaveError);
+                  },
                 },
-              },
-            }
-          : {}),
-      });
+              }
+            : {}),
+        });
       return message;
     };
     const unsubscribeNavigate = tabs.onNavigate((target) => {
       navigate(desktopNavigationPath(target), { state: target.state });
     });
-    const unsubscribePrepare = tabs.onPrepareClose((requestId) => {
+    const unsubscribePrepare = tabs.onPrepareClose((preparation) => {
+      const requestId =
+        typeof preparation === 'string' ? preparation : preparation.requestId;
+      const deleting =
+        typeof preparation !== 'string' &&
+        preparation.reason === 'space-deletion';
       closeRequest.current?.controller.abort();
       const request: NonNullable<typeof closeRequest.current> = {
         controller: new AbortController(),
@@ -158,7 +165,8 @@ export function useDesktopContent(): {
       }, 5_000);
       void (async () => {
         try {
-          await pageLifecycle.prepare(request.controller.signal);
+          if (deleting) await prepareSpaceDeletion(request.controller.signal);
+          else await pageLifecycle.prepare(request.controller.signal);
           if (closeRequest.current === request) {
             tabs.finishPrepareClose(requestId, { ok: true });
           }
@@ -168,7 +176,7 @@ export function useDesktopContent(): {
             request.controller.signal.aborted
           )
             return;
-          const message = reportSaveError(error);
+          const message = reportSaveError(error, !deleting);
           window.clearTimeout(request.overlayTimer);
           setSaving(false);
           tabs.finishPrepareClose(requestId, { ok: false, error: message });

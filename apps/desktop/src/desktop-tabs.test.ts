@@ -470,18 +470,24 @@ describe('desktop Space Tab lifecycle', () => {
     await replacing;
   });
 
-  it('blocks deleting a Space tree if a descendant has an open Tab', () => {
-    open('child');
-    expect(() =>
-      tabs.command(
-        {
-          type: 'begin-space-deletion',
-          canvasId: 'parent',
-          canvasIds: ['parent', 'child'],
-        },
-        mocks.views[0].webContents as never,
-      ),
-    ).toThrow('This Space is open');
+  it('prepares an open descendant before deleting a Space tree', async () => {
+    const child = open('child');
+    const preparing = tabs.command(
+      {
+        type: 'begin-space-deletion',
+        canvasId: 'parent',
+        canvasIds: ['parent', 'child'],
+      },
+      mocks.views[0].webContents as never,
+    );
+    expect(tabs.snapshot.busy).toBe(true);
+    finish(child);
+    await preparing;
+    tabs.command(
+      { type: 'end-space-deletion', deletedCanvasIds: ['child', 'parent'] },
+      mocks.views[0].webContents as never,
+    );
+    expect(child.webContents.close).toHaveBeenCalledOnce();
     expect(tabs.snapshot.busy).toBe(false);
   });
 
@@ -643,10 +649,10 @@ describe('desktop Space Tab lifecycle', () => {
     const message = view.webContents.send.mock.calls.findLast(
       ([channel]) => channel === 'tabs:prepare-close',
     );
-    expect(message).toBeDefined();
+    if (!message) throw new Error('Missing preparation request');
     tabs.finishDrain(
       view.webContents as never,
-      message![1],
+      typeof message[1] === 'string' ? message[1] : message[1].requestId,
       ok ? { ok: true } : { ok: false, error: 'Disk full' },
     );
   }
@@ -1679,21 +1685,28 @@ describe('desktop Space Tab lifecycle', () => {
     expect(tabs.snapshot.tabs.map((tab) => tab.canvasId)).toEqual([null]);
   });
 
-  it('requires an open Space to be closed before deletion', () => {
+  it('keeps prepared Space Tabs alive until Home confirms deletion', async () => {
     const a = open('a');
-    expect(() =>
-      tabs.command(
-        { type: 'begin-space-deletion', canvasId: 'a' },
-        mocks.views[0].webContents as never,
-      ),
-    ).toThrow('Close its Tab before deleting');
-    expect(tabs.snapshot.busy).toBe(false);
+    const preparing = tabs.command(
+      { type: 'begin-space-deletion', canvasId: 'a' },
+      mocks.views[0].webContents as never,
+    );
+    expect(tabs.snapshot.busy).toBe(true);
+    finish(a);
+    await preparing;
     expect(a.webContents.close).not.toHaveBeenCalled();
+    tabs.command(
+      { type: 'end-space-deletion', deletedCanvasIds: ['a'] },
+      mocks.views[0].webContents as never,
+    );
+    expect(a.webContents.close).toHaveBeenCalledOnce();
+    expect(tabs.snapshot.activeId).toBe('home');
+    expect(tabs.snapshot.busy).toBe(false);
   });
 
   it('blocks opening Tabs and changing Workspace until a closed-Space deletion finishes', async () => {
     const home = mocks.views[0].webContents;
-    tabs.command(
+    await tabs.command(
       { type: 'begin-space-deletion', canvasId: 'closed' },
       home as never,
     );
@@ -1704,33 +1717,36 @@ describe('desktop Space Tab lifecycle', () => {
     );
     await expect(tabs.prepareCloseAll(true)).rejects.toThrow('in progress');
     expect(tabs.snapshot.busy).toBe(true);
-    tabs.command('end-space-deletion', home as never);
+    tabs.command(
+      { type: 'end-space-deletion', deletedCanvasIds: ['closed'] },
+      home as never,
+    );
     expect(tabs.snapshot.busy).toBe(false);
     expect(() => tabs.open({ canvasId: 'another' })).not.toThrow();
   });
 
-  it('does not allow a Space renderer to acquire or release Home deletion guards', () => {
+  it('allows a Space requester but rejects release by another renderer', async () => {
     const a = open('a');
-    expect(() =>
-      tabs.command(
-        { type: 'begin-space-deletion', canvasId: 'closed' },
-        a.webContents as never,
-      ),
-    ).toThrow('Only Home');
-    tabs.command(
+    await tabs.command(
       { type: 'begin-space-deletion', canvasId: 'closed' },
-      mocks.views[0].webContents as never,
+      a.webContents as never,
     );
     expect(() =>
-      tabs.command('end-space-deletion', a.webContents as never),
-    ).toThrow('Only Home');
+      tabs.command(
+        { type: 'end-space-deletion', deletedCanvasIds: [] },
+        mocks.views[0].webContents as never,
+      ),
+    ).toThrow('belongs to this Tab');
     expect(tabs.snapshot.busy).toBe(true);
-    tabs.command('end-space-deletion', mocks.views[0].webContents as never);
+    tabs.command(
+      { type: 'end-space-deletion', deletedCanvasIds: [] },
+      a.webContents as never,
+    );
   });
 
-  it('releases an abandoned deletion guard when Home crashes without dropping healthy Space Tabs', () => {
+  it('releases an abandoned deletion guard when Home crashes without dropping healthy Space Tabs', async () => {
     open('a');
-    tabs.command(
+    await tabs.command(
       { type: 'begin-space-deletion', canvasId: 'closed' },
       mocks.views[0].webContents as never,
     );
@@ -1740,15 +1756,340 @@ describe('desktop Space Tab lifecycle', () => {
     expect(tabs.snapshot.tabs.map((tab) => tab.canvasId)).toEqual([null, 'a']);
   });
 
-  it('does not release a deletion guard when an unrelated Space crashes', () => {
+  it('does not release a deletion guard when an unrelated Space crashes', async () => {
     const a = open('a');
-    tabs.command(
+    await tabs.command(
       { type: 'begin-space-deletion', canvasId: 'closed' },
       mocks.views[0].webContents as never,
     );
     crash(a);
     expect(tabs.snapshot.busy).toBe(true);
-    tabs.command('end-space-deletion', mocks.views[0].webContents as never);
+    tabs.command(
+      { type: 'end-space-deletion', deletedCanvasIds: [] },
+      mocks.views[0].webContents as never,
+    );
+    expect(tabs.snapshot.busy).toBe(false);
+  });
+
+  it('retains all prepared Tabs if saving fails', async () => {
+    const a = open('a');
+    const b = open('b');
+    const preparing = tabs.command(
+      { type: 'begin-space-deletion', canvasId: 'a', canvasIds: ['a', 'b'] },
+      mocks.views[0].webContents as never,
+    );
+    finish(a);
+    finish(b, false);
+    await expect(preparing).rejects.toThrow('Disk full');
+    expect(a.webContents.close).not.toHaveBeenCalled();
+    expect(b.webContents.close).not.toHaveBeenCalled();
+    expect(a.webContents.send).toHaveBeenCalledWith('tabs:resume');
+    expect(tabs.snapshot.busy).toBe(false);
+  });
+
+  it('closes only confirmed deletions and resumes surviving Tabs after partial failure', async () => {
+    const parent = open('parent');
+    const child = open('child');
+    const container = open('container');
+    const preparing = tabs.command(
+      {
+        type: 'begin-space-deletion',
+        canvasId: 'parent',
+        canvasIds: ['parent', 'child'],
+      },
+      container.webContents as never,
+    );
+    finish(parent);
+    finish(child);
+    await preparing;
+    expect(() =>
+      tabs.command(
+        { type: 'end-space-deletion', deletedCanvasIds: ['unrelated'] },
+        container.webContents as never,
+      ),
+    ).toThrow('Invalid Space deletion result');
+    tabs.command(
+      { type: 'end-space-deletion', deletedCanvasIds: ['child'] },
+      container.webContents as never,
+    );
+    expect(child.webContents.close).toHaveBeenCalledOnce();
+    expect(parent.webContents.close).not.toHaveBeenCalled();
+    expect(parent.webContents.send).toHaveBeenCalledWith('tabs:resume');
+    expect(tabs.snapshot.busy).toBe(false);
+  });
+
+  it('releases a Space-owned deletion guard if its requester crashes', async () => {
+    const parent = open('parent');
+    await tabs.command(
+      { type: 'begin-space-deletion', canvasId: 'child' },
+      parent.webContents as never,
+    );
+    crash(parent);
+    expect(tabs.snapshot.busy).toBe(false);
+  });
+
+  it('retains the requesting Tab when deletion fails', async () => {
+    const a = open('a');
+    const preparing = tabs.command(
+      { type: 'begin-space-deletion', canvasId: 'child' },
+      a.webContents as never,
+    );
+    await preparing;
+    tabs.command(
+      { type: 'end-space-deletion', deletedCanvasIds: [] },
+      a.webContents as never,
+    );
+    expect(a.webContents.close).not.toHaveBeenCalled();
+    expect(a.webContents.send).toHaveBeenCalledWith('tabs:resume');
+    expect(
+      tabs.snapshot.tabs.find((tab) => tab.id === tabs.snapshot.activeId)
+        ?.canvasId,
+    ).toBe('a');
+    expect(tabs.snapshot.busy).toBe(false);
+  });
+
+  it('keeps the active parent unchanged when deleting its child', async () => {
+    const parent = open('parent');
+    const parentId = tabs.snapshot.activeId;
+    const child = open('child');
+    tabs.activate(parentId);
+    const preparing = tabs.command(
+      { type: 'begin-space-deletion', canvasId: 'child' },
+      parent.webContents as never,
+    );
+    finish(child);
+    await preparing;
+    tabs.command(
+      {
+        type: 'end-space-deletion',
+        deletedCanvasIds: ['child'],
+      },
+      parent.webContents as never,
+    );
+    expect(tabs.snapshot.activeId).toBe(parentId);
+    expect(parent.webContents.close).not.toHaveBeenCalled();
+    expect(child.webContents.close).toHaveBeenCalledOnce();
+    expect(mocks.views).toHaveLength(3);
+  });
+
+  it.each([['child'], ['parent', 'child']])(
+    'refuses deletion of the requester itself or an ancestor containing it: %j',
+    async (...canvasIds) => {
+      const child = open('child');
+      await expect(
+        tabs.command(
+          { type: 'begin-space-deletion', canvasId: canvasIds[0], canvasIds },
+          child.webContents as never,
+        ),
+      ).rejects.toThrow('Delete this Space from Home or its parent Space');
+      expect(tabs.snapshot.busy).toBe(false);
+      expect(child.webContents.close).not.toHaveBeenCalled();
+      expect(child.webContents.send).not.toHaveBeenCalledWith(
+        'tabs:prepare-close',
+        expect.anything(),
+      );
+    },
+  );
+
+  it('keeps an unrelated active Space when a background subtree is deleted', async () => {
+    const child = open('child');
+    const other = open('other');
+    const activeId = tabs.snapshot.activeId;
+    const preparing = tabs.command(
+      { type: 'begin-space-deletion', canvasId: 'child' },
+      other.webContents as never,
+    );
+    finish(child);
+    await preparing;
+    tabs.command(
+      {
+        type: 'end-space-deletion',
+        deletedCanvasIds: ['child'],
+      },
+      other.webContents as never,
+    );
+    expect(tabs.snapshot.activeId).toBe(activeId);
+    expect(tabs.snapshot.tabs.map((tab) => tab.canvasId)).toEqual([
+      null,
+      'other',
+    ]);
+    expect(mocks.views).toHaveLength(3);
+  });
+
+  it('preserves remaining Tab order and publishes confirmed deletions to Home', async () => {
+    const sibling = open('sibling');
+    const child = open('child');
+    open('a');
+    open('b');
+    tabs.activate('home');
+    const preparing = tabs.command(
+      {
+        type: 'begin-space-deletion',
+        canvasId: 'child',
+        canvasIds: ['sibling', 'child'],
+      },
+      mocks.views[0].webContents as never,
+    );
+    finish(sibling);
+    finish(child);
+    await preparing;
+    await tabs.command(
+      {
+        type: 'end-space-deletion',
+        deletedCanvasIds: ['sibling', 'child'],
+      },
+      mocks.views[0].webContents as never,
+    );
+    expect(tabs.snapshot.tabs.map((tab) => tab.canvasId)).toEqual([
+      null,
+      'a',
+      'b',
+    ]);
+    expect(tabs.snapshot.activeId).toBe('home');
+    expect(mocks.views[0].webContents.send).toHaveBeenCalledWith(
+      'tabs:spaces-deleted',
+      {
+        workspaceId: 'workspace',
+        deletedCanvasIds: ['sibling', 'child'],
+      },
+    );
+  });
+
+  it('does not publish deletions when none were confirmed', async () => {
+    const home = mocks.views[0].webContents;
+    await tabs.command(
+      { type: 'begin-space-deletion', canvasId: 'closed' },
+      home as never,
+    );
+    tabs.command(
+      {
+        type: 'end-space-deletion',
+        deletedCanvasIds: [],
+      },
+      home as never,
+    );
+    expect(home.send).not.toHaveBeenCalledWith(
+      'tabs:spaces-deleted',
+      expect.anything(),
+    );
+  });
+
+  it('cancels deletion preparation without closing any Tab', async () => {
+    const a = open('a');
+    const preparing = tabs.command(
+      { type: 'begin-space-deletion', canvasId: 'a' },
+      mocks.views[0].webContents as never,
+    );
+    const request = a.webContents.send.mock.calls.findLast(
+      ([channel]) => channel === 'tabs:prepare-close',
+    );
+    if (!request) throw new Error('Missing preparation request');
+    tabs.finishDrain(a.webContents as never, request[1].requestId, {
+      ok: false,
+      cancelled: true,
+      error: 'Cancelled',
+    });
+    await expect(preparing).rejects.toThrow('Closing was cancelled');
+    expect(a.webContents.close).not.toHaveBeenCalled();
+    expect(tabs.snapshot.busy).toBe(false);
+  });
+
+  it('bounds deletion preparation despite heartbeats and ignores late replies after timeout', async () => {
+    vi.useFakeTimers();
+    const a = open('a');
+    const b = open('b');
+    const home = mocks.views[0].webContents;
+    const preparing = tabs.command(
+      { type: 'begin-space-deletion', canvasId: 'a', canvasIds: ['a', 'b'] },
+      home as never,
+    );
+    const rejected = expect(preparing).rejects.toThrow('timed out');
+    const request = a.webContents.send.mock.calls.at(-1);
+    if (!request) throw new Error('Missing preparation request');
+    const requestId = request[1].requestId;
+    finish(b);
+    for (let elapsed = 0; elapsed < 10_000; elapsed += 5_000) {
+      await vi.advanceTimersByTimeAsync(5_000);
+      tabs.keepDrainAlive(a.webContents as never, requestId);
+    }
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(tabs.snapshot.busy).toBe(true);
+    await vi.advanceTimersByTimeAsync(1);
+    await rejected;
+    expect(tabs.snapshot.busy).toBe(false);
+    for (const view of [a, b]) {
+      expect(view.webContents.close).not.toHaveBeenCalled();
+      expect(view.webContents.send).toHaveBeenCalledWith('tabs:resume');
+    }
+    const retry = tabs.command(
+      { type: 'begin-space-deletion', canvasId: 'a' },
+      home as never,
+    );
+    tabs.keepDrainAlive(a.webContents as never, requestId);
+    tabs.finishDrain(a.webContents as never, requestId, { ok: true });
+    await Promise.resolve();
+    expect(() =>
+      tabs.command(
+        { type: 'end-space-deletion', deletedCanvasIds: [] },
+        home as never,
+      ),
+    ).toThrow('No Space deletion');
+    finish(a);
+    await retry;
+    tabs.command(
+      { type: 'end-space-deletion', deletedCanvasIds: [] },
+      home as never,
+    );
+    expect(tabs.snapshot.busy).toBe(false);
+  });
+
+  it('removes lazy restored Tabs without loading them and persists their removal', async () => {
+    open('child');
+    tabs.activate('home');
+    tabs.dispose();
+    mocks.views.length = 0;
+    tabs = makeTabs();
+    const home = mocks.views[0].webContents;
+    tabs.ready(home as never);
+    tabs.workspaceReady(home as never, 'workspace');
+    expect(mocks.views).toHaveLength(1);
+    await tabs.command(
+      {
+        type: 'begin-space-deletion',
+        canvasId: 'parent',
+        canvasIds: ['parent', 'child'],
+      },
+      home as never,
+    );
+    tabs.command(
+      { type: 'end-space-deletion', deletedCanvasIds: ['parent', 'child'] },
+      home as never,
+    );
+    expect(mocks.views).toHaveLength(1);
+    expect(tabs.snapshot.tabs.map((tab) => tab.canvasId)).toEqual([null]);
+    const saved = JSON.parse(
+      readFileSync(join(directory, 'desktop-tabs.json'), 'utf8'),
+    );
+    expect(saved[JSON.stringify(['local', 'workspace'])].canvasIds).toEqual([]);
+  });
+
+  it('closes deleted pages and releases the lock even if saving the Tab session fails', async () => {
+    const a = open('a');
+    const preparing = tabs.command(
+      { type: 'begin-space-deletion', canvasId: 'a' },
+      mocks.views[0].webContents as never,
+    );
+    finish(a);
+    await preparing;
+    mkdirSync(join(directory, 'desktop-tabs.json.tmp'));
+    expect(() =>
+      tabs.command(
+        { type: 'end-space-deletion', deletedCanvasIds: ['a'] },
+        mocks.views[0].webContents as never,
+      ),
+    ).toThrow();
+    expect(a.webContents.close).toHaveBeenCalledOnce();
+    expect(tabs.snapshot.tabs.map((tab) => tab.canvasId)).toEqual([null]);
     expect(tabs.snapshot.busy).toBe(false);
   });
 

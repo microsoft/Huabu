@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 
+import { toast } from '@/components/Common/Toast';
 import useCanvasStore from '@/store/canvasStore';
 import { useWorkspaceStore } from '@/store/workspaceStore';
 import {
@@ -70,7 +71,15 @@ export function SpaceActions() {
     };
     const remove = (event: Event) => {
       const detail: unknown = (event as CustomEvent).detail;
-      if (typeof detail === 'string') setDeleting(detail);
+      const currentId = useCanvasStore.getState().canvasId;
+      if (
+        typeof detail === 'string' &&
+        detail !== currentId &&
+        useWorkspaceStore.getState().spaceSummaries[detail]?.parentSpaceId ===
+          currentId
+      )
+        setDeleting(detail);
+      else toast(t('spaceHierarchy.deleteFromContainer'), { tone: 'warning' });
     };
     window.addEventListener(REQUEST_REPARENT_SPACE, move);
     window.addEventListener(REQUEST_DELETE_SPACE, remove);
@@ -78,7 +87,7 @@ export function SpaceActions() {
       window.removeEventListener(REQUEST_REPARENT_SPACE, move);
       window.removeEventListener(REQUEST_DELETE_SPACE, remove);
     };
-  }, []);
+  }, [t]);
   useEffect(() => {
     setAction(null);
     setDeleting(null);
@@ -97,11 +106,11 @@ export function SpaceActions() {
         <SpaceDeletionDialog
           key={deleting}
           canvasId={deleting}
+          containerSpaceId={canvasId}
           onClose={() => setDeleting(null)}
-          onDeleted={(ids, failure) => {
-            if (!failure) setDeleting(null);
-            if (ids.includes(useCanvasStore.getState().canvasId))
-              navigate('/spaces');
+          onDeleted={(_ids, failure, completed) => {
+            if (!failure || completed) setDeleting(null);
+            if (completed && failure) toast(failure, { tone: 'danger' });
           }}
         />
       )}

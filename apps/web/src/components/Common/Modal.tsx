@@ -1,11 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { FloatingFocusManager, useFloating } from '@floating-ui/react';
 import {
   useEffect,
   useId,
   useMemo,
-  useRef,
   type ReactNode,
   type RefObject,
 } from 'react';
@@ -60,8 +60,7 @@ export function Modal({
   const titleId = useId();
   const descriptionId = useId();
 
-  const dialogRef = useRef<HTMLDivElement>(null);
-  const previouslyFocused = useRef<HTMLElement | null>(null);
+  const { refs, context } = useFloating({ open: isOpen });
 
   const labelledBy = useMemo(
     () => (title ? titleId : undefined),
@@ -72,31 +71,16 @@ export function Modal({
     [description, descriptionId],
   );
 
-  // Lock scroll + focus management
   useEffect(() => {
     if (!isOpen) return;
-
-    previouslyFocused.current = document.activeElement as HTMLElement | null;
 
     const originalOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
 
-    const timer = window.setTimeout(() => {
-      const target = initialFocusRef?.current;
-      if (target) {
-        target.focus();
-      } else {
-        dialogRef.current?.focus();
-      }
-    }, 0);
-
     return () => {
-      window.clearTimeout(timer);
       document.body.style.overflow = originalOverflow;
-      previouslyFocused.current?.focus?.();
-      previouslyFocused.current = null;
     };
-  }, [isOpen, initialFocusRef]);
+  }, [isOpen]);
 
   // Close on Escape
   useEffect(() => {
@@ -124,43 +108,52 @@ export function Modal({
         onClick={closeOnBackdropClick ? onClose : undefined}
       />
 
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={labelledBy}
-        aria-describedby={describedBy}
-        tabIndex={-1}
-        className={cn(
-          'border-edge-default shadow-bottom animate-in zoom-in-95 bg-surface relative z-10 w-96 max-w-[calc(100vw-3rem)] rounded-lg border p-6 duration-200',
-          className,
-        )}
+      <FloatingFocusManager
+        context={context}
+        initialFocus={initialFocusRef ?? refs.floating}
+        restoreFocus
+        closeOnFocusOut={false}
       >
-        {(title || description) && (
-          <div className="mb-2">
-            {title && (
-              <h3
-                id={titleId}
-                className="text-fg-default text-md font-semibold"
-              >
-                {title}
-              </h3>
-            )}
-            {description && (
-              <div
-                id={descriptionId}
-                className={cn('text-fg-muted mt-1 text-sm', !title && 'mt-0')}
-              >
-                {description}
-              </div>
-            )}
-          </div>
-        )}
+        <div
+          ref={refs.setFloating}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={labelledBy}
+          aria-describedby={describedBy}
+          tabIndex={-1}
+          className={cn(
+            'border-edge-default shadow-bottom animate-in zoom-in-95 bg-surface relative z-10 max-h-[calc(100dvh-var(--window-chrome-height,0px)-3rem)] w-96 max-w-[calc(100vw-3rem)] overflow-y-auto rounded-lg border p-6 duration-200',
+            className,
+          )}
+        >
+          {(title || description) && (
+            <div className="mb-2">
+              {title && (
+                <h3
+                  id={titleId}
+                  className="text-fg-default text-md font-semibold"
+                >
+                  {title}
+                </h3>
+              )}
+              {description && (
+                <div
+                  id={descriptionId}
+                  className={cn('text-fg-muted mt-1 text-sm', !title && 'mt-0')}
+                >
+                  {description}
+                </div>
+              )}
+            </div>
+          )}
 
-        {children}
+          {children}
 
-        {footer && <div className="mt-5 flex justify-end gap-2">{footer}</div>}
-      </div>
+          {footer && (
+            <div className="mt-5 flex justify-end gap-2">{footer}</div>
+          )}
+        </div>
+      </FloatingFocusManager>
     </div>,
     container ?? document.body,
   );
