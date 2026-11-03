@@ -1250,7 +1250,8 @@ describe('desktop Space Tab lifecycle', () => {
       expect(mocks.showMessageBox).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
-          detail: expect.stringContaining('Unsaved changes may be lost'),
+          detail:
+            'Network offline\n\nUnsaved changes and unfinished uploads may be lost. Cancel to keep this page.',
           buttons: [
             'Cancel',
             action === 'close'
@@ -1354,7 +1355,9 @@ describe('desktop Space Tab lifecycle', () => {
         expect.objectContaining({
           defaultId: 0,
           cancelId: 0,
-          detail: expect.stringContaining('unfinished uploads'),
+          message: `Saving "${tabs.snapshot.tabs.find((tab) => tab.id === tabs.snapshot.activeId)!.title}" timed out`,
+          detail:
+            'Unsaved changes and unfinished uploads may be lost. Cancel to keep this page.',
         }),
       );
       expect(a.webContents.close).not.toHaveBeenCalled();

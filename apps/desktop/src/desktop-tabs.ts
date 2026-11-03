@@ -746,8 +746,11 @@ export class DesktopTabs {
       this.closePrepared();
       const { response } = await dialog.showMessageBox(this.win, {
         type: 'warning',
-        message: `Could not save "${tab.state.title}"`,
-        detail: `${error instanceof Error ? error.message : String(error)}\n\nUnsaved changes may be lost, including unfinished uploads, if you continue. Cancel to keep this page and retry later; pending uploads can continue.`,
+        message:
+          error instanceof DesktopSaveTimeoutError
+            ? `Saving "${tab.state.title}" timed out`
+            : `Could not save "${tab.state.title}"`,
+        detail: `${error instanceof DesktopSaveTimeoutError ? '' : `${error instanceof Error ? error.message : String(error)}\n\n`}Unsaved changes and unfinished uploads may be lost. Cancel to keep this page.`,
         buttons: [
           'Cancel',
           action === 'reload'
@@ -797,7 +800,7 @@ export class DesktopTabs {
         const { response } = await dialog.showMessageBox(this.win, {
           type: 'warning',
           message: 'Close without saving these pages?',
-          detail: `${failed.map(({ tab, error }) => `${tab.state.title}: ${error instanceof Error ? error.message : String(error)}`).join('\n')}\n\nThese pages did not finish saving. Unsaved changes and unfinished uploads may be lost. All other pages have been saved. Cancel to keep the pages and let pending uploads continue.`,
+          detail: `${failed.map(({ tab, error }) => `${tab.state.title}: ${error instanceof Error ? error.message : String(error)}`).join('\n')}\n\nUnsaved changes and unfinished uploads may be lost. Other pages are saved. Cancel to keep all pages open.`,
           buttons: ['Cancel', 'Close without saving'],
           defaultId: 0,
           cancelId: 0,
