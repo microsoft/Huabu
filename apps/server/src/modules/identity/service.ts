@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import type { WorkspaceScope } from '../workspace/context.js';
 import type { IdentityPrincipal, IdentityResponse } from '@huabu/shared';
 
 /** Supplied by a trusted transport, never copied from a request body. */
@@ -15,22 +16,44 @@ export interface ResolvedIdentity {
   principal: IdentityPrincipal;
   /** May use Huabu; every owner is a member. */
   member: boolean;
-  /** May also change settings, credentials and agent configuration. */
+  /**
+   * Administers the deployment (`huabu.admin`): settings, credentials, agent
+   * configuration and folder Workspaces. Every Workspace and Space, too.
+   */
   owner: boolean;
   /** What this caller may do with individual Workspaces and Spaces. */
   access: ResourceAccess;
 }
 
-/** A Huabu resource whose access the identity provider decides; `id` is Huabu's. */
+/**
+ * A Huabu resource whose access the identity provider decides; `id` is Huabu's.
+ * A Space id always names the Space in the call's Workspace scope.
+ */
 export interface HuabuResource {
   type: 'workspace' | 'space';
   id: string;
 }
 
+/** `manage`: rename, delete, change a Space's parent, or grant roles on it. */
+export type AccessLevel = 'read' | 'write' | 'manage';
+
 export interface ResourceAccess {
-  can(level: 'read' | 'write', resource: HuabuResource): Promise<boolean>;
+  can(level: AccessLevel, resource: HuabuResource): Promise<boolean>;
   /** Make the caller the owner of a resource it has just created. */
   claim(resource: HuabuResource): Promise<void>;
+  /**
+   * The Workspaces the caller may enter, or `'all'` for a caller who may
+   * enter any registered one.
+   */
+  workspaces(): Promise<readonly string[] | 'all'>;
+}
+
+/** Whether an answer from {@link ResourceAccess.workspaces} admits one. */
+export function mayEnterWorkspace(
+  allowed: readonly string[] | 'all',
+  workspaceId: string,
+): boolean {
+  return allowed === 'all' || allowed.includes(workspaceId);
 }
 
 /**
@@ -40,6 +63,7 @@ export interface ResourceAccess {
 export const UNRESTRICTED_ACCESS: ResourceAccess = {
   can: async () => true,
   claim: async () => {},
+  workspaces: async () => 'all',
 };
 
 /** Where Huabu's resources sit, as the provider needs to know to authorize them. */
@@ -47,9 +71,38 @@ export interface ResourceDirectory {
   workspaceExists(workspaceId: string): Promise<boolean>;
   /**
    * The Space's parent Space, or its Workspace when it is a root; `null` when
-   * there is no such Space.
+   * there is no such Space in that Workspace.
    */
-  spaceParent(canvasId: string): Promise<HuabuResource | null>;
+  spaceParent(
+    workspaceId: string,
+    canvasId: string,
+  ): Promise<HuabuResource | null>;
+  /**
+   * The Workspace holding a Space, for migrating grants that named none.
+   * Null means unresolved (a registration may be offline); read errors reject.
+   */
+  workspaceOfSpace(canvasId: string): Promise<string | null>;
+  /** A registered Workspace, opened for calls to run in; `null` if none. */
+  openWorkspace(workspaceId: string): Promise<WorkspaceScope | null>;
+  /**
+   * Where a caller who may enter any Workspace lands first: the Server's own
+   * Workspace, or `null` while it has none open.
+   */
+  defaultWorkspace(): Promise<WorkspaceScope | null>;
+  /**
+   * The one Workspace every request runs in when the deployment locks it
+   * (managed mode); `null` when each person chooses their own.
+   */
+  lockedWorkspace(): Promise<WorkspaceScope | null>;
+  /**
+   * A new Workspace, wherever this backend keeps one, opened. `adopt` runs
+   * before it is handed out, to give it an owner; if that fails the Workspace
+   * is discarded, so none is left behind without one.
+   */
+  createWorkspace(
+    name: string,
+    adopt: (workspaceId: string) => Promise<void>,
+  ): Promise<WorkspaceScope>;
 }
 
 /** Resolve afresh for each request so revocation is not hidden by a host cache. */
@@ -69,6 +122,18 @@ export interface IdentityService {
    * keeps its loopback rule for it; without this the machine is never an owner.
    */
   machineOwner?(loopback: boolean): boolean;
+  /**
+   * The Workspace an admitted member's request runs in: their current one.
+   * Present when each request runs in its caller's own Workspace (Bubble
+   * mode); absent when the process-active Workspace serves everyone (local
+   * mode).
+   */
+  selectWorkspace?(identity: ResolvedIdentity): Promise<WorkspaceScope | null>;
+  /** Make a Workspace the caller's current one; `null` when refused. */
+  chooseWorkspace?(
+    identity: ResolvedIdentity,
+    workspaceId: string,
+  ): Promise<WorkspaceScope | null>;
 }
 
 export class IdentityError extends Error {

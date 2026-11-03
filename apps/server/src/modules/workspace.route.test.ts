@@ -101,6 +101,7 @@ describe('workspace Space repository integration', () => {
         access: {
           can: async () => request.headers['x-world'] === 'yes',
           claim: async () => {},
+          workspaces: async () => 'all' as const,
         },
       });
     });

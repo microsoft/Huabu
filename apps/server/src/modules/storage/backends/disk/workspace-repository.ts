@@ -375,9 +375,14 @@ export class DiskWorkspaceRepository implements WorkspaceRepository {
     return entry ? this.#hydrate(entry) : null;
   }
 
-  async list(): Promise<readonly WorkspaceHandle[]> {
+  async list(
+    workspaceIds?: readonly string[],
+  ): Promise<readonly WorkspaceHandle[]> {
+    const allowed = workspaceIds && new Set(workspaceIds);
+    if (allowed?.size === 0) return [];
     const handles: WorkspaceHandle[] = [];
     for (const entry of this.#read().sort(compareMostRecentlyOpened)) {
+      if (allowed && !allowed.has(entry.workspaceId)) continue;
       const handle = this.#hydrate(entry);
       if (handle) handles.push(handle);
     }

@@ -11,16 +11,27 @@
  */
 
 import { fork, type ChildProcess } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
+import { mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { prepareWorkspaceOnDisk } from './workspace-prepare.js';
 import {
   beginWorkspaceActivation,
   isManagedMode,
   resolveWorkspacePath,
   WorkspaceActivationInProgressError,
 } from './workspace.js';
+import { getDataDir } from '../data-dir.js';
+import {
+  adoptWorkspaceDirectory,
+  createNamedWorkspace,
+  getWorkspaceRepository,
+  materializesWorkspaces,
+  type WorkspaceHandle,
+} from './storage/index.js';
 import { getLogger } from '../utils/logger.js';
 
 const DEFAULT_ACTIVATION_TIMEOUT_MS = 70_000;
@@ -104,6 +115,17 @@ export function runWorkspacePreparation(
       // try/catch runs) is captured for diagnosis instead of vanishing.
       child = fork(workerPath, [workspacePath], {
         stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+        // Source-mode callers (tests included) may run without tsx themselves.
+        // The worker still needs its loader to resolve .js imports to .ts.
+        ...(workerPath.endsWith('.ts')
+          ? {
+              execArgv: [
+                ...process.execArgv,
+                '--import',
+                import.meta.resolve('tsx'),
+              ],
+            }
+          : {}),
       });
     } catch (error) {
       reject(error);
@@ -208,4 +230,53 @@ export async function activateWorkspacePath(
   } finally {
     reservation.release();
   }
+}
+
+/**
+ * Create a Workspace by name, on any backend, without activating it.
+ *
+ * Where a Workspace is a row this is the repository's own create. On Disk it
+ * is a new folder under the data directory: the creator never chooses where
+ * it lives, which is what lets someone without access to the Server's
+ * filesystem have one. An empty folder the Server just made is not the
+ * unresponsive cloud or network drive the preparation worker isolates, so it
+ * is prepared in-process.
+ *
+ * `adopt` runs before the Workspace is handed out, to give it an owner. If it
+ * fails, the Workspace is forgotten again, and on Disk its new, still empty
+ * folder removed, so no failed attempt leaves one behind that nobody owns.
+ */
+export async function createWorkspace(
+  name: string,
+  adopt: (workspace: WorkspaceHandle) => Promise<void> = async () => {},
+): Promise<WorkspaceHandle> {
+  let workspacePath: string | null = null;
+  let workspace: WorkspaceHandle;
+  if (!materializesWorkspaces()) {
+    workspace = await createNamedWorkspace(name);
+  } else {
+    workspacePath = path.join(getDataDir(), 'workspaces', randomUUID());
+    await mkdir(workspacePath, { recursive: true });
+    prepareWorkspaceOnDisk(workspacePath);
+    const adopted = adoptWorkspaceDirectory(workspacePath);
+    workspace =
+      (await getWorkspaceRepository().rename(adopted.workspaceId, name)) ??
+      adopted;
+  }
+  try {
+    await adopt(workspace);
+  } catch (error) {
+    try {
+      await getWorkspaceRepository().remove(workspace.workspaceId);
+      if (workspacePath)
+        await rm(workspacePath, { recursive: true, force: true });
+    } catch (cleanup) {
+      log.warn(
+        { err: cleanup, workspaceId: workspace.workspaceId },
+        'Could not discard a Workspace whose owner was not recorded',
+      );
+    }
+    throw error;
+  }
+  return workspace;
 }

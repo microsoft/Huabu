@@ -4,6 +4,7 @@
 import { describe, it, expect, vi } from 'vitest';
 
 import { publishCanvasUpdate, subscribeCanvasUpdates } from './canvas-sync.js';
+import { currentWorkspaceScope, runInWorkspace } from '../workspace/context.js';
 
 import type { CanvasSyncEvent } from '@huabu/shared';
 
@@ -23,6 +24,25 @@ const update = (toVersion: number): CanvasSyncEvent => ({
 });
 
 describe('canvas-sync publisher', () => {
+  it("runs each listener in its subscriber's Workspace, not the writer's", () => {
+    const scope = (workspaceId: string) => ({
+      handle: { workspaceId, name: workspaceId },
+      path: null,
+    });
+    const seen: Array<string | undefined> = [];
+    const unsubscribe = runInWorkspace(scope('observer'), () =>
+      subscribeCanvasUpdates('canvas-1', () =>
+        seen.push(currentWorkspaceScope()?.handle.workspaceId),
+      ),
+    );
+    runInWorkspace(scope('writer'), () =>
+      publishCanvasUpdate('canvas-1', update(2)),
+    );
+    publishCanvasUpdate('canvas-1', update(3));
+    expect(seen).toEqual(['observer', 'observer']);
+    unsubscribe();
+  });
+
   it('delivers events to subscribers of the same canvas only', () => {
     const a = vi.fn();
     const b = vi.fn();

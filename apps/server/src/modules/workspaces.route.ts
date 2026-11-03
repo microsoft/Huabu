@@ -7,6 +7,10 @@ import { z } from 'zod';
 
 import { workspaceCreateSchema, workspaceRenameSchema } from '@huabu/shared';
 
+import {
+  getRequestIdentity,
+  getRequestWorkspaceChooser,
+} from './identity/request.js';
 import { migrateLegacyDesktopWorkspaceStore } from './legacy-desktop-workspace-store.js';
 import { resetPreprocessDispatcher } from './preprocessing/index.js';
 import { isOwnerRequest } from './security/owner.js';
@@ -24,20 +28,25 @@ import {
   workspaceDirectory,
   workspaceIdentityOnDisk,
 } from './storage/index.js';
+import { runInProcessWorkspace } from './workspace/context.js';
 import {
   activateWorkspacePath,
+  createWorkspace,
   prepareWorkspacePath,
   WorkspaceActivationInProgressError,
   WorkspaceActivationTimeoutError,
 } from './workspace-activation.js';
 import {
   commitWorkspacePath,
+  getProcessWorkspaceHandle,
   getWorkspaceDirectory,
   getWorkspaceHandle,
   getWorkspacePath,
   isManagedMode,
+  isWorkspaceLeased,
   resolveWorkspacePath,
   updateActiveWorkspaceHandle,
+  workspaceKeyOf,
 } from './workspace.js';
 
 import type { WorkspaceHandle } from './storage/index.js';
@@ -87,7 +96,10 @@ function rejectReadOnlyMutation(
   return null;
 }
 
-function descriptor(workspace: WorkspaceHandle): WorkspaceDescriptor {
+function descriptor(
+  workspace: WorkspaceHandle,
+  showPath = true,
+): WorkspaceDescriptor {
   const workspacePath = workspaceDirectory(workspace.workspaceId);
   const activeHandle = getWorkspaceHandle();
   const activeDirectory = getWorkspaceDirectory();
@@ -105,24 +117,30 @@ function descriptor(workspace: WorkspaceHandle): WorkspaceDescriptor {
     name: workspace.name,
     // A Workspace's directory is a materialization fact the handle does not
     // carry, so it is resolved separately — and never sent in managed mode.
-    path: isManagedMode() ? null : workspacePath,
+    path: isManagedMode() || !showPath ? null : workspacePath,
     active,
   };
 }
 
-/** Follow an externally moved active Disk Workspace before publishing it. */
+/**
+ * Follow an externally moved process-active Disk Workspace before publishing
+ * it. Process-active, not the request's: in Bubble mode an administrator's
+ * current Workspace is theirs alone, and adopting its folder moves nothing.
+ */
 function reconcileActiveWorkspaceLocation(
   workspace: WorkspaceHandle,
   workspacePath: string,
 ): WorkspaceHandle {
-  if (getWorkspaceHandle()?.workspaceId !== workspace.workspaceId) {
-    return workspace;
-  }
-  if (path.resolve(getWorkspacePath()) === path.resolve(workspacePath)) {
-    return workspace;
-  }
-  commitWorkspacePath(workspacePath);
-  return getWorkspaceHandle() ?? workspace;
+  return runInProcessWorkspace(() => {
+    if (getWorkspaceHandle()?.workspaceId !== workspace.workspaceId) {
+      return workspace;
+    }
+    if (path.resolve(getWorkspacePath()) === path.resolve(workspacePath)) {
+      return workspace;
+    }
+    commitWorkspacePath(workspacePath);
+    return getWorkspaceHandle() ?? workspace;
+  });
 }
 
 /**
@@ -188,17 +206,38 @@ interface WorkspaceParams {
   workspaceId: string;
 }
 
-const workspacesRoutes: FastifyPluginAsync = async (app) => {
-  // Listing, creating and switching Workspaces act for the whole Server, so
-  // a principal with per-Space access (a Bubble member) may not.
-  app.addHook('preHandler', async (request, reply) => {
-    if (!isOwnerRequest(request) && isRestrictedRequest(request)) {
-      return reply.status(403).send({
-        message: 'Forbidden: managing Workspaces requires an owner',
-      });
-    }
-  });
+/**
+ * In Bubble mode each person has Workspaces of their own and a current one,
+ * and these routes act for the caller alone: they list what the caller may
+ * enter, switch only the caller, and create, rename or unregister by the
+ * caller's grants. Folder Workspaces stay with administrators, because they
+ * name places on the Server's filesystem. Local mode acts for the Server, as
+ * it always has.
+ */
+function personal(request: FastifyRequest): boolean {
+  return isRestrictedRequest(request);
+}
 
+async function enterable(
+  request: FastifyRequest,
+): Promise<readonly WorkspaceHandle[]> {
+  // Managed mode keeps everyone in its one Workspace.
+  if (isManagedMode()) return visibleWorkspaces();
+  const allowed = await getRequestIdentity(request)!.access.workspaces();
+  return getWorkspaceRepository().list(allowed === 'all' ? undefined : allowed);
+}
+
+async function canManage(
+  request: FastifyRequest,
+  workspaceId: string,
+): Promise<boolean> {
+  return getRequestIdentity(request)!.access.can('manage', {
+    type: 'workspace',
+    id: workspaceId,
+  });
+}
+
+const workspacesRoutes: FastifyPluginAsync = async (app) => {
   let legacyDesktopStoreImported = false;
 
   /**
@@ -233,13 +272,40 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
     importLegacyDesktopStore();
   });
 
-  app.get('/', async () => (await visibleWorkspaces()).map(descriptor));
+  app.get('/', async (request) => {
+    if (!personal(request))
+      return (await visibleWorkspaces()).map((w) => descriptor(w));
+    const showPath = isOwnerRequest(request);
+    return (await enterable(request)).map((w) => descriptor(w, showPath));
+  });
 
   app.post<{ Body: WorkspaceCreateRequest }>('/', async (request, reply) => {
+    const parsed = workspaceCreateSchema.safeParse(request.body);
+    // A person's Workspace is made by name, wherever the backend keeps one,
+    // and is theirs. Choosing a folder is an administrator's, from localhost.
+    if (personal(request) && !(isOwnerRequest(request) && parsed.data?.path)) {
+      if (isManagedMode())
+        return sendError(reply, 403, 'Workspace collection is read-only');
+      if (!parsed.success || !parsed.data.name || parsed.data.path)
+        return sendError(reply, 400, 'Workspace name is required');
+      try {
+        const workspace = await createWorkspace(parsed.data.name, (created) =>
+          getRequestIdentity(request)!.access.claim({
+            type: 'workspace',
+            id: created.workspaceId,
+          }),
+        );
+        return reply
+          .status(201)
+          .send(descriptor(workspace, isOwnerRequest(request)));
+      } catch (error) {
+        return sendPreparationError(reply, error);
+      }
+    }
+
     const rejected = rejectReadOnlyMutation(request, reply);
     if (rejected) return rejected;
 
-    const parsed = workspaceCreateSchema.safeParse(request.body);
     if (!parsed.success) {
       return sendError(
         reply,
@@ -295,12 +361,13 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
         name: preparedManifest.name,
       };
       let workspace: WorkspaceHandle;
-      if (getWorkspaceHandle()?.workspaceId === preparedWorkspace.workspaceId) {
+      const processActive = getProcessWorkspaceHandle();
+      if (processActive?.workspaceId === preparedWorkspace.workspaceId) {
         // `existing` was null, so even a same-path active Workspace needs its
         // missing membership repaired. Committing adopts it and keeps active
         // identity and materialization on one location.
         commitWorkspacePath(workspacePath);
-        workspace = getWorkspaceHandle() ?? preparedWorkspace;
+        workspace = getProcessWorkspaceHandle() ?? preparedWorkspace;
       } else {
         workspace = adoptWorkspaceDirectory(workspacePath);
       }
@@ -321,6 +388,13 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
     async (request, reply) => {
       const parsedId = parseWorkspaceId(request.params.workspaceId, reply);
       if (typeof parsedId !== 'string') return parsedId;
+      if (personal(request)) {
+        const workspace = (await enterable(request)).find(
+          (w) => w.workspaceId === parsedId,
+        );
+        if (!workspace) return sendError(reply, 404, 'Workspace not found');
+        return reply.send(descriptor(workspace, isOwnerRequest(request)));
+      }
       const workspace = await findVisible(parsedId);
       if (!workspace) return sendError(reply, 404, 'Workspace not found');
       return reply.send(descriptor(workspace));
@@ -330,6 +404,21 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
   app.post<{ Params: WorkspaceParams }>(
     '/:workspaceId/activate',
     async (request, reply) => {
+      const choose = getRequestWorkspaceChooser(request);
+      if (personal(request)) {
+        if (isManagedMode())
+          return sendError(reply, 403, 'Workspace collection is read-only');
+        const parsedId = parseWorkspaceId(request.params.workspaceId, reply);
+        if (typeof parsedId !== 'string') return parsedId;
+        // Switching moves the caller alone; the request itself still runs in
+        // the Workspace it was admitted to, so it answers for the new one.
+        if (!choose || !(await choose(parsedId)))
+          return sendError(reply, 404, 'Workspace not found');
+        const workspace = await getWorkspaceRepository().get(parsedId);
+        if (!workspace) return sendError(reply, 404, 'Workspace not found');
+        const chosen = descriptor(workspace, isOwnerRequest(request));
+        return reply.send({ ...chosen, active: true });
+      }
       const rejected = rejectReadOnlyMutation(request, reply);
       if (rejected) return rejected;
       const parsedId = parseWorkspaceId(request.params.workspaceId, reply);
@@ -367,10 +456,17 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
   app.patch<{ Params: WorkspaceParams; Body: WorkspaceRenameRequest }>(
     '/:workspaceId',
     async (request, reply) => {
-      const rejected = rejectReadOnlyMutation(request, reply);
-      if (rejected) return rejected;
       const parsedId = parseWorkspaceId(request.params.workspaceId, reply);
       if (typeof parsedId !== 'string') return parsedId;
+      if (personal(request)) {
+        if (isManagedMode())
+          return sendError(reply, 403, 'Workspace collection is read-only');
+        if (!(await canManage(request, parsedId)))
+          return sendError(reply, 404, 'Workspace not found');
+      } else {
+        const rejected = rejectReadOnlyMutation(request, reply);
+        if (rejected) return rejected;
+      }
       const parsed = workspaceRenameSchema.safeParse(request.body);
       if (!parsed.success) {
         return sendError(
@@ -387,7 +483,9 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
         );
         if (!workspace) return sendError(reply, 404, 'Workspace not found');
         updateActiveWorkspaceHandle(workspace);
-        return reply.send(descriptor(workspace));
+        return reply.send(
+          descriptor(workspace, !personal(request) || isOwnerRequest(request)),
+        );
       } catch (error) {
         return sendError(reply, 400, (error as Error).message);
       }
@@ -397,10 +495,34 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
   app.delete<{ Params: WorkspaceParams }>(
     '/:workspaceId',
     async (request, reply) => {
-      const rejected = rejectReadOnlyMutation(request, reply);
-      if (rejected) return rejected;
       const parsedId = parseWorkspaceId(request.params.workspaceId, reply);
       if (typeof parsedId !== 'string') return parsedId;
+      if (personal(request)) {
+        if (isManagedMode())
+          return sendError(reply, 403, 'Workspace collection is read-only');
+        if (!(await canManage(request, parsedId)))
+          return sendError(reply, 404, 'Workspace not found');
+        // Someone else's current Workspace moves them on at their next
+        // request; work in flight there is not stranded.
+        const workspace = await getWorkspaceRepository().get(parsedId);
+        const key = workspaceKeyOf(workspace, workspaceDirectory(parsedId));
+        if (key && isWorkspaceLeased(key))
+          return sendError(
+            reply,
+            409,
+            'Cannot unregister a Workspace while an operation is using it',
+          );
+        // The process-active Workspace serves local callers and startup work.
+        if (getProcessWorkspaceHandle()?.workspaceId === parsedId)
+          return sendError(
+            reply,
+            409,
+            'Cannot unregister the active Workspace',
+          );
+      } else {
+        const rejected = rejectReadOnlyMutation(request, reply);
+        if (rejected) return rejected;
+      }
       if (getWorkspaceHandle()?.workspaceId === parsedId) {
         return sendError(reply, 409, 'Cannot unregister the active Workspace');
       }

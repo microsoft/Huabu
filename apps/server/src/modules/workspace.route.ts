@@ -8,9 +8,14 @@ import path from 'node:path';
 
 import { validatePathSchema, workspacePathSchema } from '@huabu/shared';
 
+import { getRequestWorkspaceChooser } from './identity/request.js';
 import { resetPreprocessDispatcher } from './preprocessing/index.js';
 import { isOwnerRequest } from './security/owner.js';
-import { canReadSpace, isRestrictedRequest } from './security/space-access.js';
+import {
+  canReadSpace,
+  canWriteWorkspace,
+  isRestrictedRequest,
+} from './security/space-access.js';
 import {
   getStructuredStore,
   materializesWorkspaces,
@@ -18,6 +23,7 @@ import {
   storageServes,
   unavailableCapabilityMessage,
 } from './storage/index.js';
+import { runInProcessWorkspace } from './workspace/context.js';
 import {
   activateWorkspacePath,
   WorkspaceActivationInProgressError,
@@ -38,7 +44,7 @@ import type {
   WorkspaceInfo,
   WorkspacePathRequest,
 } from '@huabu/shared';
-import type { FastifyPluginAsync, FastifyReply } from 'fastify';
+import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 
 /**
  * Run a command and return its stdout, or null on failure.
@@ -159,8 +165,23 @@ function sendError(
   return reply.status(status).send(body);
 }
 
+/**
+ * How a caller whose access is decided per Workspace sees the one this call
+ * runs in; `null` for a caller with unrestricted access.
+ */
+async function personalCaller(request: FastifyRequest) {
+  return isRestrictedRequest(request)
+    ? {
+        admin: isOwnerRequest(request),
+        canCreateSpaces: await canWriteWorkspace(request),
+      }
+    : null;
+}
+
 /** Build the canonical success payload describing the current workspace. */
-async function buildWorkspaceState(): Promise<WorkspaceInfo> {
+async function buildWorkspaceState(
+  personal: { admin: boolean; canCreateSpaces: boolean } | null = null,
+): Promise<WorkspaceInfo> {
   const managed = isManagedMode();
   const workspace = getWorkspaceHandle();
   const configured = workspace !== null;
@@ -171,26 +192,39 @@ async function buildWorkspaceState(): Promise<WorkspaceInfo> {
     // Free-mode active absolute path. Never exposed in managed mode.
     // Null in managed mode, and null wherever a Workspace has no folder at
     // all. The client already renders a Workspace with no path.
-    path: workspace && !managed ? getWorkspaceDirectory() : null,
+    path:
+      workspace && !managed && (!personal || personal.admin)
+        ? getWorkspaceDirectory()
+        : null,
     // Persisted display label. Safe to send in either mode.
     name: workspace?.name ?? null,
     worldCanvasId: configured
       ? await getStructuredStore().spaces().worldId()
       : null,
-    capabilities: {
-      // Switching Workspaces means picking a folder in this API. A backend
-      // that keeps Workspaces as rows has one already open and no folder to
-      // offer, so the client stops showing a picker it could not honour.
-      canChangeWorkspace: !managed && materializesWorkspaces(),
-      nativePicker:
-        !managed && materializesWorkspaces() && canShowNativePicker(),
-    },
+    capabilities: personal
+      ? // Each person switches among, and creates, Workspaces of their own
+        // by name; folders are not theirs to pick.
+        {
+          canChangeWorkspace: !managed,
+          nativePicker: false,
+          namedWorkspaces: true,
+          canCreateSpaces: configured && personal.canCreateSpaces,
+        }
+      : {
+          // Switching Workspaces means picking a folder in this API. A backend
+          // that keeps Workspaces as rows has one already open and no folder to
+          // offer, so the client stops showing a picker it could not honour.
+          canChangeWorkspace: !managed && materializesWorkspaces(),
+          nativePicker:
+            !managed && materializesWorkspaces() && canShowNativePicker(),
+        },
   };
 }
 
 const workspaceRoutes: FastifyPluginAsync = async (app) => {
-  // The active Workspace is the whole Server's, so a principal with
-  // per-Space access (a Bubble member) may not change it.
+  // These routes pick folders on the Server and move the process-active
+  // Workspace, so in Bubble mode only an administrator reaches them; a person
+  // switches their own Workspace through `/api/workspaces`.
   app.addHook('preHandler', async (request, reply) => {
     if (
       request.method !== 'GET' &&
@@ -208,7 +242,7 @@ const workspaceRoutes: FastifyPluginAsync = async (app) => {
   // Always available (clients need to know the mode).
   // ────────────────────────────────────────────────────────────────
   app.get<{ Reply: ApiResult<WorkspaceInfo> }>('/', async (request) => {
-    const state = await buildWorkspaceState();
+    const state = await buildWorkspaceState(await personalCaller(request));
     // World is an ordinary Space here, advertised only to who may read it.
     if (
       state.worldCanvasId &&
@@ -314,11 +348,20 @@ const workspaceRoutes: FastifyPluginAsync = async (app) => {
       );
     }
     try {
-      await activateWorkspacePath(parsed.data.path);
-      // Reset singletons that cache filesystem handles for the old workspace.
-      resetStorageCache();
-      resetPreprocessDispatcher();
-      return await buildWorkspaceState();
+      // This moves the process-active Workspace, and answers for it, whatever
+      // Workspace the request itself runs in.
+      const state = await runInProcessWorkspace(async () => {
+        await activateWorkspacePath(parsed.data.path);
+        // Reset singletons that cache filesystem handles for the old workspace.
+        resetStorageCache();
+        resetPreprocessDispatcher();
+        return buildWorkspaceState(await personalCaller(request));
+      });
+      // In Bubble mode the administrator who picked the folder works there
+      // too; everybody else stays where they are.
+      const choose = getRequestWorkspaceChooser(request);
+      if (choose && state.workspaceId) await choose(state.workspaceId);
+      return state;
     } catch (e) {
       if (e instanceof WorkspaceActivationTimeoutError) {
         return sendError(

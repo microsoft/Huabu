@@ -70,6 +70,7 @@ const carol = (owner: boolean): ResolvedIdentity => ({
   access: {
     can: async (_level, { id }) => id === 'mine',
     claim: async () => {},
+    workspaces: async () => 'all' as const,
   },
 });
 

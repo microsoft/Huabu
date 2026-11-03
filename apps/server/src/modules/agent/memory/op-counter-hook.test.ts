@@ -34,7 +34,11 @@ app.addHook('onRequest', async (request) => {
       principal: { principalId: 'carol', kind: 'user' },
       member: true,
       owner: false,
-      access: { can: async () => true, claim: async () => {} },
+      access: {
+        can: async () => true,
+        claim: async () => {},
+        workspaces: async () => 'all' as const,
+      },
     });
 });
 registerOpCounterHook(app);

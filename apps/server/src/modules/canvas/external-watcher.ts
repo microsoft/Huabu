@@ -21,6 +21,7 @@
  * rename or delete of that Space can release and re-acquire it.
  */
 
+import { AsyncResource } from 'node:async_hooks';
 import {
   statSync,
   watch as watchFs,
@@ -33,6 +34,7 @@ import path from 'node:path';
 import { getLogger } from '../../utils/logger.js';
 import { parseFrontmatter } from '../../utils/markdown-frontmatter.js';
 import { registerSpaceDirHandleOwner, space } from '../storage/index.js';
+import { currentWorkspaceScope } from '../workspace/context.js';
 import { isWorkspaceConfigured } from '../workspace.js';
 
 import type { CanvasFile } from '../storage/index.js';
@@ -58,6 +60,8 @@ export interface ExternalNoteSession {
 }
 
 interface ActiveSpaceWatch {
+  key: string;
+  scoped: boolean;
   canvasId: string;
   nodesPath: string;
   watcher: NativeFSWatcher | null;
@@ -89,8 +93,14 @@ interface ActiveSpaceWatch {
 }
 
 const sessions = new Map<string, ActiveSpaceWatch>();
-let workspaceGeneration = 0;
 let nextSessionGeneration = 1;
+
+function sessionKey(canvasId: string): string {
+  const scope = currentWorkspaceScope();
+  return scope === undefined
+    ? `process:${canvasId}`
+    : `workspace:${scope?.handle.workspaceId ?? 'none'}:${canvasId}`;
+}
 
 /**
  * Stamp identifying the workspace and session a piece of async work started
@@ -99,12 +109,12 @@ let nextSessionGeneration = 1;
  * repopulating unrelated state.
  */
 function stampOf(session: ActiveSpaceWatch): string {
-  return `${workspaceGeneration}:${session.sessionGeneration}`;
+  return `${session.sessionGeneration}`;
 }
 
 function isSessionCurrent(session: ActiveSpaceWatch, stamp?: string): boolean {
   if (session.closed) return false;
-  if (sessions.get(session.canvasId) !== session) return false;
+  if (sessions.get(session.key) !== session) return false;
   return stamp === undefined || stamp === stampOf(session);
 }
 
@@ -591,8 +601,8 @@ function destroySession(session: ActiveSpaceWatch): void {
   session.pendingItems.clear();
   session.scanOverrides = null;
   session.initialScan = null;
-  if (sessions.get(session.canvasId) === session) {
-    sessions.delete(session.canvasId);
+  if (sessions.get(session.key) === session) {
+    sessions.delete(session.key);
   }
 }
 
@@ -625,26 +635,10 @@ function resyncSession(session: ActiveSpaceWatch): void {
 }
 
 /**
- * Tear every active session down and tell its subscribers the Space is now
- * empty. Called on workspace switch and shutdown: the previous workspace's
- * canvasIds are meaningless afterwards, and the client reconnects its stream
- * when it navigates into the new workspace. Bumping the workspace generation
- * rejects any scan or event still in flight from the previous workspace.
- */
-function destroyAllSessions(): void {
-  for (const session of [...sessions.values()]) {
-    emit(session, { type: 'snapshot', data: { items: [] } });
-    destroySession(session);
-  }
-  sessions.clear();
-}
-
-/**
  * Drop every active external-note session and release its handles.
  *
- * Called on workspace switch (the previous workspace's canvasIds are
- * meaningless afterwards, and the client reconnects its stream when it
- * navigates into the new workspace) and on server shutdown, so live
+ * Process Workspace changes reset only process-bound sessions: a request's
+ * Workspace and its watchers remain valid. Shutdown resets all sessions, so live
  * `fs.watch` handles are released cleanly instead of being force-killed —
  * on virtual/network filesystems (Google Drive) a force-terminated process
  * can leave in-flight watch requests wedged.
@@ -652,9 +646,14 @@ function destroyAllSessions(): void {
  * Synchronous and idempotent: there is no workspace-level watcher to close,
  * so no lifecycle serialization is required.
  */
-export function resetExternalNoteSessions(): void {
-  workspaceGeneration += 1;
-  destroyAllSessions();
+export function resetExternalNoteSessions(
+  options: { processOnly?: boolean } = {},
+): void {
+  for (const session of [...sessions.values()]) {
+    if (options.processOnly && session.scoped) continue;
+    emit(session, { type: 'snapshot', data: { items: [] } });
+    destroySession(session);
+  }
 }
 
 // ── Lazy initial discovery ───────────────────────────────────────────────
@@ -747,9 +746,13 @@ export async function openExternalNoteSession(
   canvasId: string,
   listener: Listener,
 ): Promise<ExternalNoteSession> {
-  let session = sessions.get(canvasId);
+  const key = sessionKey(canvasId);
+  const boundListener = AsyncResource.bind(listener);
+  let session = sessions.get(key);
   if (!session) {
     const created: ActiveSpaceWatch = {
+      key,
+      scoped: currentWorkspaceScope() !== undefined,
       canvasId,
       nodesPath: nodesPathFor(canvasId) ?? '',
       watcher: null,
@@ -768,12 +771,12 @@ export async function openExternalNoteSession(
       closed: false,
     };
     session = created;
-    sessions.set(canvasId, created);
+    sessions.set(key, created);
     // Declare the handle so a server-owned rename/delete of this Space can
     // release it; `resyncSession` re-resolves the directory on re-acquire.
     created.unregisterHandleOwner = registerSpaceDirHandleOwner(canvasId, {
       release: () => disarmSessionWatcher(created),
-      reacquire: () => resyncSession(created),
+      reacquire: AsyncResource.bind(() => resyncSession(created)),
     });
     armSessionWatcher(created);
   }
@@ -784,7 +787,7 @@ export async function openExternalNoteSession(
   const close = (): void => {
     if (released) return;
     released = true;
-    active.listeners.delete(listener);
+    active.listeners.delete(boundListener);
     active.holders -= 1;
     if (active.holders <= 0) destroySession(active);
   };
@@ -804,7 +807,7 @@ export async function openExternalNoteSession(
   // Registering the listener and reading the snapshot must stay in one
   // synchronous block so no event can slip between them.
   if (released || !isSessionCurrent(active)) return { snapshot: [], close };
-  active.listeners.add(listener);
+  active.listeners.add(boundListener);
   return { snapshot: snapshotOf(active, known), close };
 }
 
@@ -813,7 +816,7 @@ export function takeExternalNote(
   canvasId: string,
   relativePath: string,
 ): ExternalNoteItem | null {
-  const session = sessions.get(canvasId);
+  const session = sessions.get(sessionKey(canvasId));
   if (!session) return null;
   const item = session.pendingItems.get(relativePath) ?? null;
   if (item) session.pendingItems.delete(relativePath);

@@ -65,7 +65,9 @@ vi.mock('../../../store/shortcutsUiStore', () => ({
   useShortcutsUiStore: (select: (state: { open: () => void }) => unknown) =>
     select({ open: vi.fn() }),
 }));
+const creation = vi.hoisted(() => ({ allowed: true }));
 vi.mock('../../../store/workspaceStore', () => ({
+  useCanCreateSpaces: () => creation.allowed,
   useWorkspaceStore: (
     select: (state: {
       capabilities: { canChangeWorkspace: boolean };
@@ -107,6 +109,7 @@ let root: Root | undefined;
 let container: HTMLDivElement | undefined;
 
 afterEach(() => {
+  creation.allowed = true;
   act(() => root?.unmount());
   container?.remove();
   root = undefined;
@@ -155,6 +158,26 @@ describe('AppMenu', () => {
       container.querySelector<HTMLInputElement>('input[type="file"]');
     expect(fileInput?.name).toBe('space-import-archive');
   });
+
+  it.each([true, false])(
+    'offers New Space and Import Space only when they are allowed (%s)',
+    (allowed) => {
+      creation.allowed = allowed;
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      act(() =>
+        root?.render(
+          <MemoryRouter initialEntries={['/canvas/c1']}>
+            <AppMenu />
+          </MemoryRouter>,
+        ),
+      );
+      const text = container.textContent ?? '';
+      expect(text.includes('actions.newCanvas')).toBe(allowed);
+      expect(text.includes('actions.importCanvas')).toBe(allowed);
+    },
+  );
 
   it('renders Back to Space list as a native router link', () => {
     container = document.createElement('div');

@@ -1,14 +1,28 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import type { HuabuResource, ResolvedIdentity } from './service.js';
+import { currentWorkspaceScope } from '../workspace/context.js';
+
+import type {
+  AccessLevel,
+  HuabuResource,
+  ResolvedIdentity,
+} from './service.js';
+import type { WorkspaceScope } from '../workspace/context.js';
 import type { FastifyRequest } from 'fastify';
 
+/**
+ * A resource access a request was granted. A Space id names the Space in the
+ * Workspace the check ran in, so the scope is kept to recheck it there.
+ */
+export interface RequestAuthorization {
+  level: AccessLevel;
+  resource: HuabuResource;
+  scope: WorkspaceScope | null | undefined;
+}
+
 const identities = new WeakMap<FastifyRequest, ResolvedIdentity>();
-const authorizations = new WeakMap<
-  FastifyRequest,
-  Array<{ level: 'read' | 'write'; resource: HuabuResource }>
->();
+const authorizations = new WeakMap<FastifyRequest, RequestAuthorization[]>();
 
 export function setRequestIdentity(
   request: FastifyRequest,
@@ -27,16 +41,39 @@ export function getRequestIdentity(
 /** Record a resource access the request was granted, to recheck while it lasts. */
 export function recordRequestAuthorization(
   request: FastifyRequest,
-  level: 'read' | 'write',
+  level: AccessLevel,
   resource: HuabuResource,
 ): void {
   const granted = authorizations.get(request) ?? [];
-  granted.push({ level, resource });
+  granted.push({ level, resource, scope: currentWorkspaceScope() });
   authorizations.set(request, granted);
 }
 
 export function getRequestAuthorizations(
   request: FastifyRequest,
-): ReadonlyArray<{ level: 'read' | 'write'; resource: HuabuResource }> {
+): readonly RequestAuthorization[] {
   return authorizations.get(request) ?? [];
+}
+
+const workspaceChoosers = new WeakMap<
+  FastifyRequest,
+  (workspaceId: string) => Promise<boolean>
+>();
+
+/** How this request's caller changes their own current Workspace. */
+export function setRequestWorkspaceChooser(
+  request: FastifyRequest,
+  choose: (workspaceId: string) => Promise<boolean>,
+): void {
+  workspaceChoosers.set(request, choose);
+}
+
+/**
+ * Present when the caller has a current Workspace of their own (Bubble mode);
+ * absent when switching moves the process-active Workspace (local mode).
+ */
+export function getRequestWorkspaceChooser(
+  request: FastifyRequest,
+): ((workspaceId: string) => Promise<boolean>) | undefined {
+  return workspaceChoosers.get(request);
 }

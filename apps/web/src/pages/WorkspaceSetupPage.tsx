@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { FolderOpen, X } from 'lucide-react';
+import { Check, FolderOpen, Layers, X } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Navigate, useNavigate } from 'react-router-dom';
@@ -9,6 +9,7 @@ import { Navigate, useNavigate } from 'react-router-dom';
 import { WorkspaceLoadingScreen } from './WorkspaceLoadingScreen';
 import { Button } from '../components/Common/Button';
 import { PathInput } from '../components/Common/PathInput';
+import { TextInput } from '../components/Common/TextInput';
 import { toast } from '../components/Common/Toast';
 import { APP_NAME } from '../config/app';
 import { useWorkspaceStore } from '../store/workspaceStore';
@@ -40,6 +41,10 @@ export default function WorkspaceSetupPage() {
     (s) => s.activateRecentWorkspace,
   );
   const selectWorkspace = useWorkspaceStore((s) => s.selectWorkspace);
+  const createWorkspace = useWorkspaceStore((s) => s.createWorkspace);
+  const named = useWorkspaceStore(
+    (s) => s.capabilities?.namedWorkspaces === true,
+  );
   const storeError = useWorkspaceStore((s) => s.error);
 
   // Managed mode: workspace is locked by the server, nothing to choose.
@@ -64,20 +69,134 @@ export default function WorkspaceSetupPage() {
           <h1 className="text-fg-default text-2xl font-bold">
             {t('workspace.welcome', { appName: APP_NAME })}
           </h1>
-          <p className="text-fg-subtle mt-2 text-sm">{t('workspace.intro')}</p>
+          <p className="text-fg-subtle mt-2 text-sm">
+            {t(named ? 'workspace.introNamed' : 'workspace.intro')}
+          </p>
         </div>
 
-        <FreeSetup
-          isSyncing={isSyncing}
-          storeError={storeError}
-          recentWorkspaces={recentWorkspaces}
-          activateRecentWorkspace={activateRecentWorkspace}
-          removeRecentWorkspace={removeRecentWorkspace}
-          selectWorkspace={selectWorkspace}
-          onActivated={() => navigate('/', { replace: true })}
-        />
+        {named ? (
+          <NamedSetup
+            isSyncing={isSyncing}
+            workspaces={recentWorkspaces}
+            activateWorkspace={activateRecentWorkspace}
+            createWorkspace={createWorkspace}
+            onActivated={() => navigate('/', { replace: true })}
+          />
+        ) : (
+          <FreeSetup
+            isSyncing={isSyncing}
+            storeError={storeError}
+            recentWorkspaces={recentWorkspaces}
+            activateRecentWorkspace={activateRecentWorkspace}
+            removeRecentWorkspace={removeRecentWorkspace}
+            selectWorkspace={selectWorkspace}
+            onActivated={() => navigate('/', { replace: true })}
+          />
+        )}
       </div>
     </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Named Workspaces: each signed-in person's own, chosen and created by name
+// ──────────────────────────────────────────────────────────────────────
+
+interface NamedSetupProps {
+  isSyncing: boolean;
+  workspaces: WorkspaceDescriptor[];
+  activateWorkspace: (workspaceId: string) => Promise<void>;
+  createWorkspace: (name: string) => Promise<void>;
+  onActivated: () => void;
+}
+
+function NamedSetup({
+  isSyncing,
+  workspaces,
+  activateWorkspace,
+  createWorkspace,
+  onActivated,
+}: NamedSetupProps) {
+  const { t } = useTranslation();
+  const [name, setName] = useState('');
+
+  const run = async (action: () => Promise<void>) => {
+    try {
+      await action();
+      onActivated();
+    } catch (error) {
+      console.error('[workspace-setup] Could not open Workspace:', error);
+      toast(useWorkspaceStore.getState().error ?? t('workspace.switchFailed'), {
+        tone: 'danger',
+      });
+    }
+  };
+
+  const create = () => {
+    const trimmed = name.trim();
+    if (trimmed) void run(() => createWorkspace(trimmed));
+  };
+
+  return (
+    <>
+      {workspaces.length > 0 && (
+        <div className="mb-6">
+          <div className="text-fg-subtle mb-2 text-xs font-medium">
+            {t('workspace.yourWorkspaces')}
+          </div>
+          <ul className="space-y-1">
+            {workspaces.map((workspace) => (
+              <li key={workspace.workspaceId}>
+                <Button
+                  variant="ghost"
+                  tone="neutral"
+                  size="sm"
+                  onClick={() =>
+                    void run(() => activateWorkspace(workspace.workspaceId))
+                  }
+                  disabled={isSyncing}
+                  className="w-full justify-start rounded-lg text-left"
+                >
+                  <Layers size={14} className="text-fg-subtle shrink-0" />
+                  <span className="text-fg-muted min-w-0 flex-1 truncate text-sm">
+                    {workspace.name}
+                  </span>
+                  {workspace.active && (
+                    <span className="text-fg-subtle flex shrink-0 items-center gap-1 text-xs">
+                      <Check size={12} />
+                      {t('workspace.current')}
+                    </span>
+                  )}
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <label
+        htmlFor="new-workspace-name"
+        className="text-fg-subtle mb-1.5 block text-xs font-medium"
+      >
+        {t('workspace.newWorkspace')}
+      </label>
+      <div className="flex gap-2">
+        <TextInput
+          id="new-workspace-name"
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') create();
+          }}
+          placeholder={t('workspace.namePlaceholder')}
+          disabled={isSyncing}
+          className="min-w-0 flex-1"
+        />
+        <Button onClick={create} disabled={isSyncing || !name.trim()}>
+          {t('workspace.create')}
+        </Button>
+      </div>
+    </>
   );
 }
 

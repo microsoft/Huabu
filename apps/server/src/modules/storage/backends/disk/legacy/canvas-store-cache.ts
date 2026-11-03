@@ -24,8 +24,12 @@ import path from 'node:path';
 
 import { CanvasStore } from './canvas-store.js';
 import { sanitizeId } from '../../../../../utils/fs.js';
+import { currentWorkspaceScope } from '../../../../workspace/context.js';
 import { getWorkspacePath } from '../../../../workspace.js';
-import { refreshCanvasDirIndex } from '../canvas-dirs.js';
+import {
+  refreshCanvasDirIndex,
+  resetCanvasDirIndexes,
+} from '../canvas-dirs.js';
 
 const MAX_CACHE = 16;
 const cache = new Map<string, CanvasStore>();
@@ -48,17 +52,20 @@ function rememberInstance(key: string, store: CanvasStore): CanvasStore {
 
 /**
  * `setWorkspacePath()` intentionally knows nothing about storage backends.
- * Detect its effect here so even a direct activation invalidates all cached
- * per-workspace indexes before the next handle is handed out.
+ * Detect its effect here so a direct activation drops every cached instance,
+ * whose node indexes may predate the switch, before the next handle is handed
+ * out.
+ *
+ * Only a call outside any request's Workspace sees the process-active one.
+ * Requests that work in several Workspaces at once (Bubble mode) share the
+ * cache, keyed by folder, and never clear it for each other.
  */
-function activateCacheWorkspace(workspacePath: string): void {
+function noticeProcessWorkspace(workspacePath: string): void {
+  if (currentWorkspaceScope() !== undefined) return;
   if (cacheWorkspacePath === workspacePath) return;
   cache.clear();
   cacheWorkspacePath = workspacePath;
-  // The directory index is process-global too. Refresh it before constructing
-  // a handle so an id from the previous workspace cannot resolve through a
-  // same-named directory in the newly-active one.
-  refreshCanvasDirIndex();
+  refreshCanvasDirIndex(workspacePath);
 }
 
 /**
@@ -68,7 +75,7 @@ function activateCacheWorkspace(workspacePath: string): void {
 export function getCanvasStore(canvasId: string): CanvasStore {
   const safeId = sanitizeId(canvasId, 'canvasId');
   const workspacePath = path.resolve(getWorkspacePath());
-  activateCacheWorkspace(workspacePath);
+  noticeProcessWorkspace(workspacePath);
   const key = cacheKey(workspacePath, safeId);
   const cached = cache.get(key);
   if (cached) {
@@ -85,19 +92,18 @@ export function forgetCanvasStore(canvasId: string): void {
   // Before first activation there cannot be an instance to forget, and
   // `getWorkspacePath()` deliberately throws. Keep cleanup harmless during
   // boot without weakening get/create operations.
-  if (cacheWorkspacePath === null) return;
-  const workspacePath = path.resolve(getWorkspacePath());
-  activateCacheWorkspace(workspacePath);
+  let workspacePath: string;
+  try {
+    workspacePath = path.resolve(getWorkspacePath());
+  } catch {
+    return;
+  }
+  noticeProcessWorkspace(workspacePath);
   cache.delete(cacheKey(workspacePath, safeId));
 }
 
-/** Clear the instance cache explicitly (workspace changes are auto-detected). */
+/** Clear the instance cache and every folder's index explicitly. */
 export function resetStorageCache(): void {
   cache.clear();
-  // Initial null is also the pre-Workspace state. `commitWorkspacePath()`
-  // refreshes the directory index when the first Workspace is activated, so
-  // there is nothing further to invalidate here.
-  if (cacheWorkspacePath === null) return;
-  cacheWorkspacePath = path.resolve(getWorkspacePath());
-  refreshCanvasDirIndex();
+  resetCanvasDirIndexes();
 }

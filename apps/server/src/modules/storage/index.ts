@@ -79,6 +79,7 @@ export type {
 
 export {
   activateWorkspace,
+  openWorkspace,
   adoptWorkspaceDirectory,
   closeStorage,
   composeStorage,

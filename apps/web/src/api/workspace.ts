@@ -60,6 +60,20 @@ export async function listWorkspaces(): Promise<WorkspaceDescriptor[]> {
   });
 }
 
+/**
+ * Create a Workspace by name, for a Server where each person keeps their own
+ * (`capabilities.namedWorkspaces`). The caller owns it; it is not activated.
+ */
+export async function createNamedWorkspace(
+  name: string,
+): Promise<WorkspaceDescriptor> {
+  return apiFetch<WorkspaceDescriptor>(routes.workspaces, {
+    method: 'POST',
+    json: { name },
+    fallbackMessage: 'Failed to create Workspace',
+  });
+}
+
 /** Activate a registered Workspace by stable identity. */
 export async function activateWorkspace(
   workspaceId: string,
