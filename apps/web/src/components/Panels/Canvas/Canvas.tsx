@@ -80,6 +80,7 @@ import { useCanvasMarquee } from '@/hooks/useCanvasMarquee';
 import { useCanvasPanReleaseGuard } from '@/hooks/useCanvasPanReleaseGuard';
 import { useCanvasPointerRouter } from '@/hooks/useCanvasPointerRouter';
 import { useFrameDragToCreate } from '@/hooks/useFrameDragToCreate';
+import { useFrameSelectionDrag } from '@/hooks/useFrameSelectionDrag';
 import {
   useEffectiveInputMode,
   useInputMode,
@@ -320,9 +321,14 @@ const CanvasGestures: React.FC<{
     rfInstanceRef,
     onActiveChange: onMarqueeActiveChange,
   });
+  const frameDrag = useFrameSelectionDrag({
+    enabled: mouseMarqueeEnabled,
+    scopeKey: canvasId,
+    wrapperRef,
+  });
   const recognizers = useMemo(
-    () => [...extraRecognizers, marquee.recognizer],
-    [extraRecognizers, marquee.recognizer],
+    () => [frameDrag, ...extraRecognizers, marquee.recognizer],
+    [frameDrag, extraRecognizers, marquee.recognizer],
   );
   useCanvasPointerRouter(
     wrapperRef,
@@ -1592,6 +1598,7 @@ const CanvasContent: React.FC<CanvasProps> = ({
 
       {isInitialViewportPending && (
         <Loading
+          defer
           variant="brand"
           layout="overlay"
           size="md"

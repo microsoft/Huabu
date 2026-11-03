@@ -2,6 +2,7 @@
 // Licensed under the MIT license.
 
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { Loading } from '@/components/Common/Loading';
 import { usePanelStore } from '@/store/panelStore';
@@ -34,6 +35,7 @@ export const MainLayout = ({
   rightPanel,
   children,
 }: MainLayoutProps) => {
+  const { t } = useTranslation();
   // Both side-panel collapse states live in `panelStore`. Left was
   // moved there earlier so the layer panel subtree could freeze its
   // `nodes` ref while collapsed (skipping the O(N) tree rebuild); right
@@ -432,7 +434,14 @@ export const MainLayout = ({
           tabIndex={-1}
         >
           {isPreviewFullscreen ? (
-            <Loading layout="block" className="bg-bg-default" />
+            <Loading
+              defer
+              variant="brand"
+              layout="block"
+              size="md"
+              message={t('status.loadingProgress')}
+              className="bg-bg-default"
+            />
           ) : React.isValidElement(children) ? (
             React.cloneElement(
               children as React.ReactElement<LayoutInjectedProps>,

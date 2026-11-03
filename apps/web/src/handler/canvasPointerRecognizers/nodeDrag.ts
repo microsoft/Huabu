@@ -1,12 +1,16 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { getAncestorIds, indexById } from '@huabu/shared/canvas-engine';
+
 import {
+  closestNodeElement,
   isNodeControlTarget,
   isPanelTarget,
 } from '@/components/Panels/Canvas/canvasInputPolicy';
 import { getDragActivationDistance } from '@/handler/canvasGestureSession';
 import { nodeIdAtScreenPoint } from '@/handler/canvasNodeAtPoint';
+import { getFrameDragRoots } from '@/handler/frameDragSelection';
 import useCanvasStore from '@/store/canvasStore';
 import { useInkSigilStore } from '@/store/inkSigilStore';
 
@@ -38,7 +42,7 @@ import type { Node, NodeChange } from '@xyflow/react';
  * recognizer only supplies the position deltas React Flow would normally
  * emit.
  *
- * It is gated to `inputMode === 'pen'`: in Finger mode the finger under
+ * By default it is gated to `inputMode === 'pen'`: in Finger mode the finger under
  * the Select tool already drags selected nodes through React Flow
  * natively, and under Sketch the finger draws; in Mouse mode the pointer
  * is never touch.
@@ -48,30 +52,41 @@ export function createNodeDragRecognizer(options?: {
     event: PointerEvent,
     ctx: CanvasPointerRouterContext,
   ) => boolean;
-  onTap: (nodeId: string) => void;
+  onTap?: (nodeId: string, event: PointerEvent) => void;
   canDrag?: (node: Node) => boolean;
+  onActiveChange?: (active: boolean, movementAllowed: boolean) => void;
 }): PointerRecognizer<PointerEvent, CanvasPointerRouterContext> {
   let pointerId: number | null = null;
+  let canvasId: string | null = null;
   let startClient = { x: 0, y: 0 };
+  let startFlow = { x: 0, y: 0 };
   let locked = false;
   let activationDistance = getDragActivationDistance('touch');
   let movementAllowed = true;
   let gestureIds: string[] = [];
   let primaryNode: Node | null = null;
+  let pressedNodeId: string | null = null;
   let draggedNodes: Node[] = [];
   let startPositions = new Map<string, { x: number; y: number }>();
 
   const reset = (): void => {
+    if (locked) options?.onActiveChange?.(false, movementAllowed);
     pointerId = null;
     locked = false;
     gestureIds = [];
     primaryNode = null;
+    pressedNodeId = null;
     draggedNodes = [];
     startPositions = new Map();
   };
 
   const cancelDrag = (): void => {
-    if (locked && movementAllowed && primaryNode) {
+    if (
+      locked &&
+      movementAllowed &&
+      primaryNode &&
+      useCanvasStore.getState().canvasId === canvasId
+    ) {
       useCanvasStore.getState().cancelActiveNodeDrag();
     }
     reset();
@@ -82,24 +97,40 @@ export function createNodeDragRecognizer(options?: {
     const sketchNodeIds = new Set(
       useCanvasStore
         .getState()
-        .nodes.filter((node) => node.type === 'sketch')
+        .nodes.filter(
+          (node) => event.pointerType === 'touch' && node.type === 'sketch',
+        )
         .map((node) => node.id),
     );
-    const id = nodeIdAtScreenPoint(event.clientX, event.clientY, {
-      excludeNodeIds: sketchNodeIds,
-    });
+    const directTarget =
+      event.pointerType !== 'touch' && event.target instanceof Element
+        ? closestNodeElement(event.target)?.dataset.id
+        : undefined;
+    const id =
+      directTarget ??
+      nodeIdAtScreenPoint(event.clientX, event.clientY, {
+        excludeNodeIds: sketchNodeIds,
+      });
+    if (
+      event.target instanceof Element &&
+      event.target.closest('.react-flow__nodesselection-rect')
+    ) {
+      return (
+        useCanvasStore
+          .getState()
+          .nodes.find(
+            (node) =>
+              node.selected &&
+              !node.data.locked &&
+              node.draggable !== false &&
+              !sketchNodeIds.has(node.id),
+          )?.id ?? null
+      );
+    }
     if (!id) return null;
     const node = useCanvasStore.getState().nodes.find((n) => n.id === id);
     return node?.selected ? id : null;
   };
-
-  // The store's drag callbacks are typed as DOM mouse/touch handlers;
-  // synthesize the only fields they read (`altKey` for snap Alt-bypass,
-  // `clientX`/`clientY` for the drop's reparent grid column).
-  const dragEvent = (extra?: {
-    clientX: number;
-    clientY: number;
-  }): MouseEvent => ({ altKey: false, ...extra }) as unknown as MouseEvent;
 
   const positionChanges = (
     dx: number,
@@ -121,7 +152,6 @@ export function createNodeDragRecognizer(options?: {
     clientX: number,
     clientY: number,
   ): { dx: number; dy: number } => {
-    const startFlow = ctx.instance.screenToFlowPosition(startClient);
     const curFlow = ctx.instance.screenToFlowPosition({
       x: clientX,
       y: clientY,
@@ -141,27 +171,47 @@ export function createNodeDragRecognizer(options?: {
       !isPanelTarget(event.target as Element | null) &&
       !isNodeControlTarget(event.target as Element | null) &&
       selectedNodeIdAt(event) !== null,
-    onDown: (event) => {
+    onDown: (event, ctx) => {
       const primaryId = selectedNodeIdAt(event);
       if (!primaryId) return 'pass';
       // Drag the whole current selection; the pressed node is guaranteed
       // to be one of the selected set by `canClaim`.
-      const selected = useCanvasStore
-        .getState()
-        .nodes.filter((n) => n.selected && n.type !== 'sketch') as Node[];
+      const nodes = useCanvasStore.getState().nodes;
+      canvasId = useCanvasStore.getState().canvasId;
+      const selected = getFrameDragRoots(
+        nodes,
+        nodes.filter(
+          (n) =>
+            n.selected &&
+            !n.data.locked &&
+            n.draggable !== false &&
+            (event.pointerType !== 'touch' || n.type !== 'sketch'),
+        ),
+      );
+      pressedNodeId = primaryId;
       gestureIds = selected.map((n) => n.id);
       draggedNodes = selected;
+      const primaryIds = new Set([
+        primaryId,
+        ...getAncestorIds(indexById(nodes), primaryId),
+      ]);
       primaryNode =
-        selected.find((n) => n.id === primaryId) ?? selected[0] ?? null;
-      movementAllowed = primaryNode
-        ? (options?.canDrag?.(primaryNode) ?? true)
-        : false;
+        selected.find((n) => primaryIds.has(n.id)) ?? selected[0] ?? null;
+      const pressedNode = nodes.find((node) => node.id === primaryId);
+      movementAllowed = Boolean(
+        primaryNode &&
+        pressedNode &&
+        !pressedNode.data.locked &&
+        pressedNode.draggable !== false &&
+        (options?.canDrag?.(primaryNode) ?? true),
+      );
       startPositions = new Map(
         selected.map((n) => [n.id, { x: n.position.x, y: n.position.y }]),
       );
       pointerId = event.pointerId;
       activationDistance = getDragActivationDistance(event.pointerType);
       startClient = { x: event.clientX, y: event.clientY };
+      startFlow = ctx.instance.screenToFlowPosition(startClient);
       locked = false;
       event.preventDefault();
       event.stopPropagation();
@@ -169,6 +219,7 @@ export function createNodeDragRecognizer(options?: {
     },
     onMove: (event, ctx) => {
       if (event.pointerId !== pointerId) return;
+      if (useCanvasStore.getState().canvasId !== canvasId) return reset();
       event.preventDefault();
       event.stopPropagation();
       if (!locked) {
@@ -178,12 +229,13 @@ export function createNodeDragRecognizer(options?: {
         );
         if (moved < activationDistance) return;
         locked = true;
+        options?.onActiveChange?.(true, movementAllowed);
         // Snapshots pre-drag positions + begins the snap session (same
         // as a mouse/pen drag start).
         if (movementAllowed && primaryNode) {
           useCanvasStore
             .getState()
-            .onNodeDragStart(dragEvent(), primaryNode, draggedNodes);
+            .onNodeDragStart(event, primaryNode, draggedNodes);
         }
       }
       if (!movementAllowed) return;
@@ -198,15 +250,12 @@ export function createNodeDragRecognizer(options?: {
         (node) => node.id === primaryNode?.id,
       );
       if (livePrimary) {
-        store.onNodeDrag(
-          dragEvent({ clientX: event.clientX, clientY: event.clientY }),
-          livePrimary,
-          liveDragged,
-        );
+        store.onNodeDrag(event, livePrimary, liveDragged);
       }
     },
     onUp: (event, ctx) => {
       if (event.pointerId !== pointerId) return;
+      if (useCanvasStore.getState().canvasId !== canvasId) return reset();
       event.preventDefault();
       event.stopPropagation();
       if (locked && movementAllowed && primaryNode) {
@@ -216,20 +265,16 @@ export function createNodeDragRecognizer(options?: {
         // stop handler resolves frame re-parenting, schedules the save,
         // and keeps or rolls back the single undo entry.
         store.onNodesChange(positionChanges(dx, dy, false));
-        store.onNodeDragStop(
-          dragEvent({ clientX: event.clientX, clientY: event.clientY }),
-          primaryNode,
-          draggedNodes,
-        );
+        store.onNodeDragStop(event, primaryNode, draggedNodes);
       } else if (
         !locked &&
-        primaryNode &&
+        pressedNodeId &&
         Math.hypot(
           event.clientX - startClient.x,
           event.clientY - startClient.y,
         ) < activationDistance
       ) {
-        options?.onTap(primaryNode.id);
+        options?.onTap?.(pressedNodeId, event);
       }
       reset();
     },

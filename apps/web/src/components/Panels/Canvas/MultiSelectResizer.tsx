@@ -199,7 +199,7 @@ export const MultiSelectResizer = () => {
     () => nodes.filter((n) => n.selected) as CanvasNode[],
     [nodes],
   );
-  const showHandles = !selectedNodes.some((node) => node.dragging);
+  const showHandles = !nodes.some((node) => node.dragging);
 
   // Drop nodes whose ancestor is also selected so a frame and its child
   // selected together are not double-scaled.

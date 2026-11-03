@@ -21,6 +21,7 @@ import {
   updateCanvasGesture,
   type CanvasPointerType,
 } from '@/handler/canvasGestureSession';
+import { getFrameDragRoots } from '@/handler/frameDragSelection';
 import useCanvasStore from '@/store/canvasStore';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 
@@ -287,22 +288,9 @@ export function useSketchStrokeMove({
       const allSelected = useCanvasStore
         .getState()
         .nodes.filter((n) => n.selected && n.type !== 'sketch') as Node[];
-      const selectedIds = new Set(allSelected.map((n) => n.id));
       const allNodes = useCanvasStore.getState().nodes;
       const nodeById = new Map(allNodes.map((n) => [n.id, n]));
-      const hasSelectedAncestor = (nodeId: string): boolean => {
-        let parentId = nodeById.get(nodeId)?.parentId;
-        const seen = new Set<string>();
-        while (parentId && !seen.has(parentId)) {
-          if (selectedIds.has(parentId)) return true;
-          seen.add(parentId);
-          parentId = nodeById.get(parentId)?.parentId;
-        }
-        return false;
-      };
-      const selectedNodes = allSelected.filter(
-        (node) => !hasSelectedAncestor(node.id),
-      );
+      const selectedNodes = getFrameDragRoots(allNodes, allSelected);
       // Sketch nodes whose strokes are selected but that sit inside a
       // dragged node (e.g. a framed sketch lassoed together with its
       // frame) are carried by that ancestor's drag: their whole SVG moves

@@ -4,16 +4,15 @@
 import { useId, useLayoutEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { Button } from '@/components/Common/Button';
 import { Loading } from '@/components/Common/Loading';
 
-export function DesktopCloseOverlay({ onCancel }: { onCancel: () => void }) {
+export function DesktopCloseOverlay() {
   const { t } = useTranslation();
   const titleId = useId();
   const dialog = useRef<HTMLDialogElement>(null);
   useLayoutEffect(() => {
     const element = dialog.current;
-    // A native modal stays interactive while the entire page, including portals, is inert.
+    // Keep progress above the inert page without changing its layout.
     element?.showModal();
     return () => element?.close();
   }, []);
@@ -25,36 +24,18 @@ export function DesktopCloseOverlay({ onCancel }: { onCancel: () => void }) {
       data-canvas-panel
       aria-labelledby={titleId}
       className="bg-surface text-fg-default fixed inset-0 m-0 h-full max-h-none w-full max-w-none border-0 p-6"
-      onCancel={(event) => {
-        event.preventDefault();
-        onCancel();
-      }}
+      onCancel={(event) => event.preventDefault()}
     >
-      <div className="flex h-full flex-col items-center justify-center gap-5 text-center">
+      <div className="flex h-full items-center justify-center">
         <div
           role="status"
           className="text-fg-muted flex items-center gap-2 text-sm"
         >
           <span aria-hidden="true">
-            <Loading
-              variant="spinner"
-              layout="bare"
-              size="md"
-              indicatorClassName="text-fg-subtle"
-            />
+            <Loading variant="brand" layout="bare" size="md" />
           </span>
           <span id={titleId}>{t('app.savingCanvas')}</span>
         </div>
-        <Button
-          variant="outline"
-          onClick={(event) => {
-            event.stopPropagation();
-            onCancel();
-          }}
-          onKeyDown={(event) => event.stopPropagation()}
-        >
-          {t('actions.cancel')}
-        </Button>
       </div>
     </dialog>
   );

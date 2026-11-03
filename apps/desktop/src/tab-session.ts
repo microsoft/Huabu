@@ -61,6 +61,9 @@ export function parseTabNavigation(raw: unknown): DesktopTabNavigation {
     throw new Error('Invalid Space identity');
   }
   if (
+    (value.openIn !== undefined &&
+      value.openIn !== 'new-tab' &&
+      value.openIn !== 'current-tab') ||
     (value.search !== undefined &&
       (typeof value.search !== 'string' ||
         (value.search !== '' && !value.search.startsWith('?')))) ||
@@ -78,6 +81,7 @@ export function parseTabNavigation(raw: unknown): DesktopTabNavigation {
   }
   return {
     canvasId: value.canvasId as string | null,
+    openIn: value.openIn as DesktopTabNavigation['openIn'],
     search: value.search as string | undefined,
     hash: value.hash as string | undefined,
     homePath: value.homePath as '/spaces' | '/setup' | undefined,

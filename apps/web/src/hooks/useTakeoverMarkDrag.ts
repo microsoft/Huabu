@@ -4,9 +4,12 @@
 import { useReactFlow, useStoreApi } from '@xyflow/react';
 import { useCallback, useEffect, useRef } from 'react';
 
+import { getAncestorIds, indexById } from '@huabu/shared/canvas-engine';
+
 import { canManipulateCanvasWithPointer } from '@/components/Panels/Canvas/canvasInputPolicy';
 import { getDragActivationDistance } from '@/handler/canvasGestureSession';
 import { canTouchClaimViewport } from '@/handler/canvasInteractionOwner';
+import { getFrameDragRoots } from '@/handler/frameDragSelection';
 import { readEffectiveInputMode } from '@/hooks/useInputMode';
 import useCanvasStore from '@/store/canvasStore';
 
@@ -217,15 +220,22 @@ export function useTakeoverMarkDrag(
         return;
       // Drag the whole current selection when this node is part of it,
       // otherwise move just this node (without altering selection).
-      const selected = node.selected
-        ? (store.nodes.filter(
-            (n) => n.selected && !n.data.locked && n.draggable !== false,
-          ) as Node[])
-        : [node as Node];
+      const selected = getFrameDragRoots(
+        store.nodes,
+        node.selected
+          ? store.nodes.filter(
+              (n) => n.selected && !n.data.locked && n.draggable !== false,
+            )
+          : [node],
+      );
       const s = stateRef.current;
       s.gestureIds = selected.map((n) => n.id);
       s.draggedNodes = selected;
-      s.primaryNode = selected.find((n) => n.id === nodeId) ?? (node as Node);
+      const primaryIds = new Set([
+        nodeId,
+        ...getAncestorIds(indexById(store.nodes), nodeId),
+      ]);
+      s.primaryNode = selected.find((n) => primaryIds.has(n.id)) ?? selected[0];
       s.startPositions = new Map(
         selected.map((n) => [n.id, { x: n.position.x, y: n.position.y }]),
       );

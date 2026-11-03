@@ -799,10 +799,12 @@ try {
     const { i18n } = await import('/src/i18n/index.ts');
     return {
       saving: i18n.t('app.savingCanvas'),
-      cancel: i18n.t('actions.cancel'),
     };
   });
-  const firstReload = shell.evaluate(
+  const previousDocument = await createdPage.evaluate(
+    () => performance.timeOrigin,
+  );
+  const reloading = shell.evaluate(
     (id) => window.electronBridge.tabs.reload(id),
     createdTab.id,
   );
@@ -815,26 +817,17 @@ try {
       .split(/\n+/)
       .map((line) => line.trim())
       .filter(Boolean),
-    [closeLabels.saving, closeLabels.cancel],
-    'Save progress must show only the saving message and cancel button',
+    [closeLabels.saving],
+    'Save progress must show only the saving message',
   );
-  await closeDialog
-    .getByRole('button', { name: closeLabels.cancel, exact: true })
-    .click();
+  assert.equal(await closeDialog.getByRole('button').count(), 0);
   assert.equal(
-    (await firstReload).cancelled,
-    true,
-    'Cancel must cancel reload, not the upload',
+    await closeDialog.locator('[data-loading-brand] svg').count(),
+    1,
   );
-  assert.equal(await createdPage.evaluate(() => document.body.inert), false);
-  await closeDialog.waitFor({ state: 'hidden' });
-  const previousDocument = await createdPage.evaluate(
-    () => performance.timeOrigin,
-  );
-  const secondReload = shell.evaluate(
-    (id) => window.electronBridge.tabs.reload(id),
-    createdTab.id,
-  );
+  await createdPage.keyboard.press('Escape');
+  assert.equal(await closeDialog.isVisible(), true);
+  assert.equal(await createdPage.evaluate(() => document.body.inert), true);
   try {
     await closeDialog.waitFor({ state: 'visible' });
     const wasDark = await createdPage.evaluate(() =>
@@ -915,7 +908,7 @@ try {
   } finally {
     releaseUpload();
   }
-  assert.equal((await secondReload).ok, true);
+  assert.equal((await reloading).ok, true);
   await waitFor(async () => {
     const snapshot = await shell.evaluate(() =>
       window.electronBridge.tabs.getState(),
@@ -942,7 +935,7 @@ try {
   );
   await createdPage.unroute('**/artifact/html');
   console.log(
-    'Pending upload survived cancellation, waited beyond 15s, and persisted before reload',
+    'Pending upload waited beyond 15s and persisted before reload without dismissing progress',
   );
   await createdPage.evaluate(async () => {
     const {
@@ -1175,28 +1168,92 @@ try {
   const navigationChild = await request('/canvas', 'POST', {
     title: 'Navigation child',
   });
+  await request(`/canvas/${navigationParent.canvasId}/execute`, 'POST', {
+    commands: [
+      {
+        type: 'CREATE_NODES',
+        nodes: [
+          {
+            id: 'tabs-smoke-space-shortcut',
+            nodeType: 'spacePreview',
+            data: { targetCanvasId: navigationChild.canvasId },
+            position: { x: 80, y: 140 },
+          },
+        ],
+      },
+    ],
+    originator: { source: 'ui', tabId: 'tabs-smoke' },
+  });
   const parentPage = await open(shell, navigationParent.canvasId);
   const parentSnapshot = await shell.evaluate(() =>
     window.electronBridge.tabs.getState(),
   );
-  await parentPage.evaluate((canvasId) => {
-    window.location.href = `/canvas/${canvasId}?node=missing#anchor`;
-  }, navigationChild.canvasId);
+  const navigationLabels = await parentPage.evaluate(async () => {
+    const { default: canvas } = await import('/src/store/canvasStore.ts');
+    const { i18n } = await import('/src/i18n/index.ts');
+    canvas.getState().selectNodes(['tabs-smoke-space-shortcut']);
+    return {
+      open: i18n.t('spacePreview.openSpace'),
+      more: i18n.t('toolbar.more'),
+      currentTab: i18n.t('spacePreview.openInCurrentTab'),
+    };
+  });
+  await parentPage
+    .getByRole('button', { name: navigationLabels.open, exact: true })
+    .click();
   const childPage = await content(navigationChild.canvasId);
+  const openedSnapshot = await shell.evaluate(() =>
+    window.electronBridge.tabs.getState(),
+  );
+  assert.notEqual(openedSnapshot.activeId, parentSnapshot.activeId);
+  assert.equal(openedSnapshot.tabs.length, parentSnapshot.tabs.length + 1);
+  assert.equal(
+    parentPage.isClosed(),
+    false,
+    'Ordinary navigation must retain the source',
+  );
+  assert.ok(childPage.url().endsWith(`/canvas/${navigationChild.canvasId}`));
+  assert.equal(
+    (
+      await shell.evaluate(
+        (id) => window.electronBridge.tabs.close(id),
+        openedSnapshot.activeId,
+      )
+    ).ok,
+    true,
+  );
+  await open(shell, navigationParent.canvasId);
+  await parentPage
+    .getByRole('button', { name: navigationLabels.more, exact: true })
+    .click();
+  const currentTabItem = parentPage.getByRole('menuitem', {
+    name: navigationLabels.currentTab,
+    exact: true,
+  });
+  await currentTabItem.waitFor({ state: 'visible' });
+  if (process.env.HUABU_TABS_SCREENSHOT) {
+    await parentPage.screenshot({
+      path: process.env.HUABU_TABS_SCREENSHOT.replace(
+        /\.png$/,
+        '-open-current-tab.png',
+      ),
+    });
+  }
+  await currentTabItem.click();
+  await content(navigationChild.canvasId);
+  await waitFor(
+    () => parentPage.isClosed(),
+    'disposing the explicitly replaced source renderer',
+  );
   const replacedSnapshot = await shell.evaluate(() =>
     window.electronBridge.tabs.getState(),
   );
   assert.equal(
     replacedSnapshot.activeId,
     parentSnapshot.activeId,
-    'Subspace navigation must keep the same Tab',
+    'Explicit current-Tab navigation must keep the same Tab',
   );
   assert.equal(replacedSnapshot.tabs.length, parentSnapshot.tabs.length);
-  assert.ok(childPage.url().endsWith('?node=missing#anchor'));
-  await waitFor(
-    () => parentPage.isClosed(),
-    'disposing the saved source renderer',
-  );
   const reopenedParent = await open(shell, navigationParent.canvasId);
   const withParent = await shell.evaluate(() =>
     window.electronBridge.tabs.getState(),

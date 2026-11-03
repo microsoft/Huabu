@@ -143,12 +143,8 @@ vi.mock('@/store/toolStore', () => ({
 ).IS_REACT_ACT_ENVIRONMENT = true;
 
 function Harness() {
-  const { saving, preparingClose, cancelClose } = useDesktopContent();
-  return (
-    <div data-saving={saving} data-frozen={preparingClose}>
-      <button onClick={cancelClose}>Cancel close</button>
-    </div>
-  );
+  const { saving, preparingClose } = useDesktopContent();
+  return <div data-saving={saving} data-frozen={preparingClose} />;
 }
 
 describe('desktop save presentation', () => {
@@ -610,7 +606,7 @@ describe('desktop save presentation', () => {
     }
   });
 
-  it('keeps cancellation available after its own save until all pages are prepared', async () => {
+  it('keeps progress visible after its own save until all pages are prepared', async () => {
     let completeSave: () => void;
     mocks.save.mockReturnValue(
       new Promise<void>((resolve) => {
@@ -643,7 +639,7 @@ describe('desktop save presentation', () => {
     expect(mocks.finish).toHaveBeenCalledWith('save-request', { ok: true });
   });
 
-  it('waits for Home imports, keeps the handshake alive, and cancels without cancelling the import', async () => {
+  it('waits for Home imports, keeps the handshake alive, and acknowledges only after completion', async () => {
     mocks.context.role = 'home';
     mocks.canvas.canvasId = null;
     let complete!: () => void;
@@ -660,26 +656,15 @@ describe('desktop save presentation', () => {
     expectPresentation(true, true);
     expect(mocks.heartbeat).toHaveBeenCalledTimes(4);
     expect(mocks.finish).not.toHaveBeenCalled();
-    // React's event handler remains testable while the real page is inert.
-    const button = container.querySelector('button');
-    if (!button?.parentElement) throw new Error('Missing cancel control');
-    const controls = document.createElement('dialog');
-    controls.setAttribute('data-desktop-close-controls', '');
-    controls.setAttribute('open', '');
-    button.parentElement.appendChild(controls);
-    controls.appendChild(button);
-    await act(async () => button.click());
-    expect(mocks.finish).toHaveBeenCalledExactlyOnceWith('save-request', {
-      ok: false,
-      error: 'Closing was cancelled.',
-      cancelled: true,
-    });
-    await resume();
     await act(async () => {
       complete();
       await importing;
     });
-    expect(mocks.finish).toHaveBeenCalledOnce();
+    expect(mocks.finish).toHaveBeenCalledExactlyOnceWith('save-request', {
+      ok: true,
+    });
+    expectPresentation(true, true);
+    await resume();
     expectPresentation(false, false);
   });
 

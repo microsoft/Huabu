@@ -154,6 +154,12 @@ describe('ThreadChatInput', () => {
         ?.getAttribute('data-stroke-count'),
     ).toBe('2');
     expect(container.textContent).not.toContain('chat.queueMemoryOnly');
+    const row = container.querySelector('li');
+    const status = container.querySelector('section > [role="status"]');
+    expect(status?.textContent).toBe('chat.queuePending');
+    expect(status?.nextElementSibling?.tagName).toBe('OL');
+    expect(row?.querySelector('[role="status"]')).toBeNull();
+    expect(container.textContent).not.toContain('chat.queueCount');
     const queue = container.querySelector('section');
     const changes = container.querySelector('[data-change-review]');
     const input = container.querySelector('form');
@@ -162,6 +168,41 @@ describe('ThreadChatInput', () => {
     expect(
       useChatStore.getState().threadsById[session.threadId].messages,
     ).toEqual([]);
+    const remove = container.querySelector<HTMLButtonElement>(
+      '[aria-label="chat.removeFromQueue"]',
+    );
+    for (const [turnStatus, label] of [
+      ['sending', 'chat.queueSending'],
+      ['uncertain', 'chat.queueUncertain'],
+      ['pending', 'chat.queuePending'],
+    ] as const) {
+      act(() =>
+        chat.setQueuedTurnStatus(session.threadId, 'queued-1', turnStatus),
+      );
+      const itemStatus = row?.querySelector('[role="status"]');
+      if (turnStatus === 'pending') {
+        expect(itemStatus).toBeNull();
+      } else {
+        expect(itemStatus?.textContent).toBe(label);
+        expect(itemStatus?.nextElementSibling?.contains(message ?? null)).toBe(
+          true,
+        );
+      }
+      expect(remove?.disabled).toBe(turnStatus !== 'pending');
+    }
+    act(() => chat.setQueuePaused(session.threadId, true));
+    expect(container.textContent).toContain('chat.queuePaused');
+    const resume = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === 'chat.resumeQueue',
+    );
+    expect(resume?.disabled).toBe(false);
+    act(() =>
+      chat.setQueuedTurnStatus(session.threadId, 'queued-1', 'uncertain'),
+    );
+    expect(resume?.disabled).toBe(true);
+    act(() =>
+      chat.setQueuedTurnStatus(session.threadId, 'queued-1', 'pending'),
+    );
     act(() =>
       container
         ?.querySelector<HTMLButtonElement>(

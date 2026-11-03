@@ -69,6 +69,8 @@ interface MessageListProps {
 
 const EMPTY_PAGES: ChatHistoryPage[] = [];
 const FIRST_INDEX = 1_000_000;
+const CONTENT_INSET =
+  'pl-3 pr-[max(0px,calc(0.75rem-var(--chat-scrollbar-width,0px)))]';
 
 function StaticPlaceholder() {
   return (
@@ -92,7 +94,7 @@ function ScrollPlaceholder({
       data-chat-seek-placeholder
       data-chat-message-id={context?.ids[index - context.first]}
       data-chat-row-loading
-      className="flex items-center overflow-hidden px-3"
+      className={`flex items-center overflow-hidden ${CONTENT_INSET}`}
       style={{ height }}
       aria-hidden="true"
     >
@@ -583,6 +585,12 @@ function VirtualMessageList({
 
   useLayoutEffect(() => {
     if (!scroller || !isActive) return;
+    const updateScrollbarWidth = () =>
+      scroller.style.setProperty(
+        '--chat-scrollbar-width',
+        `${scroller.offsetWidth - scroller.clientWidth}px`,
+      );
+    updateScrollbarWidth();
     updateVisibleLoading();
     const observer = new ResizeObserver((entries) => {
       updateVisibleLoading();
@@ -601,6 +609,7 @@ function VirtualMessageList({
             changed = true;
           if (height > 0) heights.current.set(id, height);
         } else if (target === scroller) {
+          updateScrollbarWidth();
           setViewportHeight(scroller.clientHeight);
           const size = `${scroller.clientWidth}:${scroller.clientHeight}`;
           if (
@@ -983,7 +992,7 @@ function VirtualMessageList({
         <div
           data-chat-message-id={id}
           data-chat-row-loading
-          className="flex items-center overflow-hidden px-3"
+          className={`flex items-center overflow-hidden ${CONTENT_INSET}`}
           style={{ height: heights.current.get(id) ?? 120 }}
           aria-busy="true"
         >
@@ -991,7 +1000,10 @@ function VirtualMessageList({
         </div>
       );
     return (
-      <div data-chat-message-id={id} className="flow-root px-3 pb-1">
+      <div
+        data-chat-message-id={id}
+        className={`flow-root pb-1 ${CONTENT_INSET}`}
+      >
         {message.role === 'user' ? (
           <UserMessage
             content={message.content}
@@ -1176,14 +1188,14 @@ function VirtualMessageList({
           />
         ) : null}
         {isLoading && !streamingAssistantId ? (
-          <div className="px-3">
+          <div className={CONTENT_INSET}>
             <div className="ml-1 px-4 py-2">
               <ThinkingIndicator />
             </div>
           </div>
         ) : null}
         {isHistoryLoading && !ids.length ? (
-          <div className="px-3 py-2">
+          <div className={`py-2 ${CONTENT_INSET}`}>
             <Loading variant="skeleton" layout="bare" />
           </div>
         ) : null}

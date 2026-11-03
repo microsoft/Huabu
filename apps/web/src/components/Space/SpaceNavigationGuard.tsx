@@ -127,11 +127,10 @@ export function SpaceNavigationGuard() {
           onKeyDown={(event) => event.stopPropagation()}
         >
           <Loading
-            variant="spinner"
+            variant="brand"
             layout="overlay"
             size="md"
             message={t('app.savingCanvas')}
-            indicatorClassName="text-fg-subtle"
           />
         </dialog>
       )}

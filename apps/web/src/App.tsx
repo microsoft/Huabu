@@ -162,11 +162,7 @@ const InitialisingContext = createContext(true);
  * future unmount means no leak window.
  */
 function RootLayout() {
-  const {
-    saving: desktopSaving,
-    preparingClose,
-    cancelClose,
-  } = useDesktopContent();
+  const { saving: desktopSaving, preparingClose } = useDesktopContent();
   const tabs = getElectronBridge()?.tabs;
   return (
     // `h-full` (not `h-screen`/`100vh`) so the app tracks the *visible*
@@ -192,7 +188,7 @@ function RootLayout() {
         <GlobalModals />
         <SpaceNavigationGuard />
       </div>
-      {desktopSaving && <DesktopCloseOverlay onCancel={cancelClose} />}
+      {desktopSaving && <DesktopCloseOverlay />}
     </div>
   );
 }

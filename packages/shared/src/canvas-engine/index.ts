@@ -203,6 +203,7 @@ export {
   indexById,
   getDescendantIds,
   getAncestorIds,
+  getTopLevelIds,
   canParentNode,
   isContainerNode,
   moveNodeIntoContainer,

@@ -72,7 +72,6 @@
     "finishBinding": "请先选择资源或关闭 # 选择器，再发送。"
   },
   "app": {
-    "loadingWorkspace": "正在加载你的 Home 文件夹…",
     "savingCanvas": "正在保存…",
     "unsavedChangesTitle": "Space 保存失败",
     "unsavedChangesDescription": "留在这里可保留修改并重试保存。离开将放弃尚未保存的修改，已保存的内容不会撤销。",
@@ -788,7 +787,6 @@
     "spaceActions": "「{{name}}」的操作",
     "title": "Space",
     "subtitle": "选择一个 Space 打开，或新建一个 Space。",
-    "loading": "正在加载 Space…",
     "empty": "还没有 Space。",
     "createFirst": "创建第一个 Space",
     "untitled": "未命名",
@@ -815,7 +813,6 @@
     "exportCanvas": "导出 Space"
   },
   "canvasPage": {
-    "loading": "正在加载 Space…",
     "notFoundTitle": "未找到 Space",
     "notFoundDescription": "该 Space 不存在，或已被删除。",
     "backToList": "返回 Space 列表",
@@ -854,6 +851,7 @@
     "targetsUnavailable": "无法加载 Space。",
     "noTargets": "没有其他可用的 Space。",
     "openSpace": "打开 Space",
+    "openInCurrentTab": "在当前标签页打开",
     "retry": "重试",
     "untitledSpace": "未命名 Space",
     "nodeCount_zero": "暂无节点",
@@ -1208,7 +1206,7 @@
     "addToQueue": "加入队列",
     "addToQueueHint": "加入队列（Enter）",
     "queuedMessages": "待发送消息",
-    "queueCount": "待发送（{{count}}）",
+    "queuePending": "待发送",
     "queuePaused": "队列已暂停（{{count}}）",
     "resumeQueue": "继续发送",
     "removeFromQueue": "从队列移除",

@@ -2,7 +2,7 @@
 // Licensed under the MIT license.
 
 import { useStore } from '@xyflow/react';
-import { ArrowUpRight, Pencil, RefreshCw } from 'lucide-react';
+import { ArrowRight, ArrowUpRight, Pencil, RefreshCw } from 'lucide-react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -13,12 +13,17 @@ import { ApiError } from '@/api/_client';
 import { renameSpace } from '@/api/spaceCard';
 import { Button } from '@/components/Common/Button';
 import { DropdownMenuItem } from '@/components/Common/DropdownMenu';
+import { toast } from '@/components/Common/Toast';
 import { Tooltip } from '@/components/Common/Tooltip';
 import { nodeLayoutBorderInset } from '@/components/Nodes/design/nodeBoundary';
 import { CONVERSATION_CARD_SPACING } from '@/components/Nodes/design/nodeSpacing';
 import { SPACE_CARD_TYPOGRAPHY } from '@/components/Nodes/design/nodeTypography';
 import { NodeWrapper } from '@/components/Nodes/NodeWrapper';
 import { getNodeIcon } from '@/config/nodeIcons';
+import {
+  getElectronBridge,
+  requireDesktopTabSuccess,
+} from '@/hooks/useElectron';
 import { useTextAutoSize } from '@/hooks/useTextAutoSize';
 import useCanvasStore from '@/store/canvasStore';
 import { openSpaceConversation } from '@/store/previewWorkspace/actions';
@@ -44,6 +49,7 @@ import { NodeActivityTime } from '../shared/NodeActivityTime';
 
 import type { SpacePreviewNodeData } from '@/components/Nodes/types';
 import type { SpaceCardAgent } from '@huabu/shared';
+import type { DesktopTabNavigation } from '@huabu/shared/desktop-tabs';
 import type { Node, NodeProps } from '@xyflow/react';
 
 export type SpacePreviewNodeType = Node<SpacePreviewNodeData, 'spacePreview'>;
@@ -55,6 +61,7 @@ export const SpacePreviewNode = memo(
   ({ id, data, selected }: NodeProps<SpacePreviewNodeType>) => {
     const { t } = useTranslation();
     const navigate = useNavigate();
+    const tabs = getElectronBridge()?.tabs;
     const target = useSpaceShortcutTarget(data.targetCanvasId);
     const snapshot = useSpaceCardActivity(
       data.targetCanvasId,
@@ -152,22 +159,42 @@ export const SpacePreviewNode = memo(
         setSaving(false);
       }
     };
-    const openTarget = useCallback(() => {
-      if (canOpen && !editing) {
+    const openTarget = useCallback(
+      (openIn?: DesktopTabNavigation['openIn']) => {
+        if (!canOpen || editing) return;
+        const state = isChildEntry
+          ? undefined
+          : { returnToSpace: canvasId, workspaceId };
+        if (openIn === 'current-tab' && tabs) {
+          void tabs
+            .open({ canvasId: data.targetCanvasId, openIn, state })
+            .then((result) => {
+              if (!result.ok && result.cancelled) return;
+              requireDesktopTabSuccess(result);
+            })
+            .catch((error: unknown) => {
+              console.error('[desktop-tabs] Could not open Space:', error);
+              toast(error instanceof Error ? error.message : String(error), {
+                tone: 'danger',
+              });
+            });
+          return;
+        }
         const path = `/canvas/${encodeURIComponent(data.targetCanvasId)}`;
         if (isChildEntry) navigate(path);
-        else
-          navigate(path, { state: { returnToSpace: canvasId, workspaceId } });
-      }
-    }, [
-      canOpen,
-      editing,
-      data.targetCanvasId,
-      navigate,
-      isChildEntry,
-      canvasId,
-      workspaceId,
-    ]);
+        else navigate(path, { state });
+      },
+      [
+        canOpen,
+        editing,
+        data.targetCanvasId,
+        navigate,
+        tabs,
+        isChildEntry,
+        canvasId,
+        workspaceId,
+      ],
+    );
     const openConversation = (agent: SpaceCardAgent) => {
       if (!canOpen || editing) return;
       openSpaceConversation(data.targetCanvasId, agent.nodeId, agent.threadId);
@@ -221,7 +248,7 @@ export const SpacePreviewNode = memo(
         onResize={sizing.handleResize}
         onResizeEnd={sizing.handleResizeEnd}
         resizeEndClearHeight
-        onDoubleClick={openTarget}
+        onDoubleClick={() => openTarget()}
         farLabel={{ title: target.title }}
         actions={
           <Button
@@ -229,13 +256,23 @@ export const SpacePreviewNode = memo(
             iconOnly
             title={t('spacePreview.openSpace')}
             disabled={!canOpen}
-            onClick={openTarget}
+            onClick={() => openTarget()}
           >
             <ArrowUpRight />
           </Button>
         }
         overflow={
           <>
+            {tabs?.context.role === 'space' && (
+              <DropdownMenuItem
+                icon={<ArrowRight />}
+                aria-label={t('spacePreview.openInCurrentTab')}
+                disabled={!canOpen || editing}
+                onClick={() => openTarget('current-tab')}
+              >
+                {t('spacePreview.openInCurrentTab')}
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem
               icon={<Pencil />}
               aria-label={t('spacePreview.rename')}

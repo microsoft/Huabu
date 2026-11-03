@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { getQuestionNodeStatus } from '@huabu/shared';
@@ -41,29 +41,15 @@ export { requireDesktopTabSuccess } from './useElectron';
 export function useDesktopContent(): {
   saving: boolean;
   preparingClose: boolean;
-  cancelClose: () => void;
 } {
   const tabs = getElectronBridge()?.tabs;
   const navigate = useNavigate();
   const [saving, setSaving] = useState(false);
   const [preparingClose, setPreparingClose] = useState(false);
   const closeRequest = useRef<{
-    id: string;
     controller: AbortController;
     overlayTimer?: number;
   } | null>(null);
-  const cancelClose = useCallback(() => {
-    const request = closeRequest.current;
-    if (!request) return;
-    window.clearTimeout(request.overlayTimer);
-    request.controller.abort();
-    closeRequest.current = null;
-    tabs?.finishPrepareClose(request.id, {
-      ok: false,
-      error: 'Closing was cancelled.',
-      cancelled: true,
-    });
-  }, [tabs]);
   const workspaceId = useWorkspaceStore((state) =>
     state.isReady ? state.workspaceId : null,
   );
@@ -163,7 +149,6 @@ export function useDesktopContent(): {
         preparation.reason === 'space-deletion';
       closeRequest.current?.controller.abort();
       const request: NonNullable<typeof closeRequest.current> = {
-        id: requestId,
         controller: new AbortController(),
       };
       closeRequest.current = request;
@@ -373,5 +358,5 @@ export function useDesktopContent(): {
     return unsubscribe;
   }, [tabs]);
 
-  return { saving, preparingClose, cancelClose };
+  return { saving, preparingClose };
 }

@@ -47,10 +47,12 @@ function Harness({
   inputMode,
   explicitToolActive = false,
   inkToolActive = false,
+  extraRecognizers = recognizers,
 }: {
   inputMode: EffectiveInputMode;
   explicitToolActive?: boolean;
   inkToolActive?: boolean;
+  extraRecognizers?: typeof recognizers;
 }) {
   useCanvasPointerRouter(
     { current: wrapper },
@@ -63,7 +65,7 @@ function Harness({
       onEmptyCanvasTap: vi.fn(),
       onNodeTap: vi.fn(),
     },
-    recognizers,
+    extraRecognizers,
   );
   return null;
 }
@@ -100,9 +102,141 @@ afterEach(() => {
   vi.unstubAllGlobals();
   inkSigil.resetInkSigilSession();
   vi.restoreAllMocks();
+  Reflect.deleteProperty(document, 'elementsFromPoint');
 });
 
 describe('useCanvasPointerRouter live input policy', () => {
+  it.each(['frame-selection-drag', 'note-content'] as const)(
+    'blocks legacy touch dragging for %s and preserves only Frame compatibility clicks',
+    (id) => {
+      useToolStore.setState({ inputModePreference: 'finger' });
+      const node = document.createElement('div');
+      node.className = 'react-flow__node selected';
+      wrapper.append(node);
+      const legacyTouch = vi.fn();
+      node.addEventListener('touchstart', legacyTouch);
+      node.addEventListener('touchend', legacyTouch);
+      act(() =>
+        root.render(
+          <Harness
+            inputMode="finger"
+            extraRecognizers={[
+              {
+                id,
+                canClaim: () => true,
+                onDown: () => 'claim',
+              },
+            ]}
+          />,
+        ),
+      );
+      act(() =>
+        node.dispatchEvent(
+          new PointerEvent('pointerdown', {
+            bubbles: true,
+            pointerType: 'touch',
+            pointerId: 1,
+            isPrimary: true,
+          }),
+        ),
+      );
+      for (const type of ['touchstart', 'touchend']) {
+        const touch = new Event(type, { bubbles: true, cancelable: true });
+        Object.defineProperty(touch, 'touches', {
+          value: type === 'touchstart' ? [{}] : [],
+        });
+        node.dispatchEvent(touch);
+        expect(touch.defaultPrevented).toBe(id !== 'frame-selection-drag');
+      }
+      expect(legacyTouch).not.toHaveBeenCalled();
+    },
+  );
+
+  it('offers retained-selection touches to the Frame driver before viewport navigation', () => {
+    useToolStore.setState({ inputModePreference: 'finger' });
+    const overlay = document.createElement('div');
+    overlay.className = 'react-flow__nodesselection-rect';
+    wrapper.append(overlay);
+    const down = vi.fn(() => 'claim' as const);
+    act(() =>
+      root.render(
+        <Harness
+          inputMode="finger"
+          extraRecognizers={[
+            {
+              id: 'frame-selection-drag',
+              canClaim: () => true,
+              onDown: down,
+            },
+          ]}
+        />,
+      ),
+    );
+    overlay.dispatchEvent(
+      new PointerEvent('pointerdown', {
+        bubbles: true,
+        pointerType: 'touch',
+        pointerId: 1,
+        isPrimary: true,
+      }),
+    );
+    expect(down).toHaveBeenCalledOnce();
+  });
+
+  it.each(['click', 'dblclick'])(
+    'forwards an overlay %s to the selected touch target, but not a suppressed or keyboard click',
+    (type) => {
+      useToolStore.setState({ inputModePreference: 'finger' });
+      const node = document.createElement('div');
+      node.className = 'react-flow__node selected';
+      const body = document.createElement('div');
+      node.append(body);
+      const overlay = document.createElement('div');
+      overlay.className = 'react-flow__nodesselection-rect';
+      wrapper.append(node, overlay);
+      const click = vi.fn();
+      body.addEventListener(type, click);
+      Object.defineProperty(document, 'elementsFromPoint', {
+        configurable: true,
+        value: vi.fn(() => [overlay, body, node]),
+      });
+      act(() => root.render(<Harness inputMode="finger" />));
+      body.dispatchEvent(
+        new PointerEvent('pointerdown', {
+          bubbles: true,
+          pointerType: 'touch',
+          pointerId: 1,
+          isPrimary: true,
+        }),
+      );
+      for (const [detail, prevented] of [
+        [0, false],
+        [1, true],
+        [2, false],
+      ] as const) {
+        const event = new MouseEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          detail,
+          clientX: 100,
+          clientY: 150,
+        });
+        if (prevented) event.preventDefault();
+        overlay.dispatchEvent(event);
+      }
+      expect(click).toHaveBeenCalledOnce();
+      expect(click.mock.calls[0][0]).toMatchObject({
+        type,
+        detail: 2,
+        clientX: 100,
+        clientY: 150,
+      });
+      node.classList.remove('selected');
+      overlay.dispatchEvent(new MouseEvent(type, { bubbles: true, detail: 2 }));
+      expect(click).toHaveBeenCalledOnce();
+    },
+  );
+
   it('preserves reading across Select and Ink tools in Pen mode but clears it for other placement tools', () => {
     useToolStore.setState({ inputModePreference: 'pen' });
     act(() => root.render(<Harness inputMode="pen" />));
