@@ -593,15 +593,11 @@ test('immediate Undo after child creation keeps its entry and leaves saves usabl
     .toBe(false);
 });
 
-test('leaves a deleted current Space and keeps the partial-cleanup error visible', async ({
+test('Home retains partial-cleanup feedback after deleting a Space', async ({
   page,
 }) => {
   const id = await create(page, 'Partial cleanup');
-  await page.goto(`/canvas/${id}`);
-  await expect(page.locator('[data-canvas-root]')).toHaveAttribute(
-    'aria-busy',
-    'false',
-  );
+  await page.goto('/spaces');
   await page.route(`**/api/canvas/${id}/delete-tree`, async (route) => {
     const response = await route.fetch();
     expect(response.ok()).toBe(true);
@@ -619,24 +615,81 @@ test('leaves a deleted current Space and keeps the partial-cleanup error visible
       }),
     });
   });
-  await page.getByRole('button', { name: 'Space menu', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Actions for Partial cleanup', exact: true })
+    .click();
   await page
     .getByRole('menuitem', { name: 'Delete Space', exact: true })
     .click();
-  const dialog = page.getByRole('dialog', {
-    name: 'Delete “Partial cleanup”?',
-    exact: true,
-  });
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toHaveAccessibleName('Delete “Partial cleanup”?');
   await dialog
     .getByRole('button', { name: 'Delete Space', exact: true })
     .click();
   await expect(page).toHaveURL(/\/spaces$/);
+  await expect(dialog).toHaveAccessibleName('“Partial cleanup” was deleted');
   await expect(
     page.getByText(
       'Deletion did not finish cleanly. Check the current Space list before continuing.',
       { exact: true },
     ),
   ).toBeVisible();
+});
+
+test('Space menus cannot delete themselves; a parent can delete its child entry', async ({
+  page,
+}) => {
+  const parent = await create(page, 'Container deletion parent');
+  const response = await page.request.post(`/api/canvas/${parent}/children`, {
+    data: { title: 'Container deletion child' },
+  });
+  expect(response.ok()).toBe(true);
+  const child = await response.json();
+  for (const id of [parent, child.canvasId]) {
+    await page.goto(`/canvas/${id}`);
+    await page.getByRole('button', { name: 'Space menu', exact: true }).click();
+    await expect(
+      page.getByRole('menuitem', { name: 'Delete Space', exact: true }),
+    ).toHaveCount(0);
+    await page.keyboard.press('Escape');
+  }
+  await page.goto(`/canvas/${parent}`);
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute(
+    'aria-busy',
+    'false',
+  );
+  await expect
+    .poll(() =>
+      page.evaluate(async (id) => {
+        const path = '/src/store/workspaceStore.ts';
+        const { useWorkspaceStore } = (await import(
+          path
+        )) as typeof WorkspaceStore;
+        return useWorkspaceStore.getState().spaceSummaries[id]
+          ?.parentEntryNodeId;
+      }, child.canvasId),
+    )
+    .toBe(child.parentEntryNodeId);
+  await page.evaluate(async (entryId) => {
+    const path = '/src/store/canvasStore.ts';
+    const { default: store } = (await import(path)) as typeof CanvasStore;
+    store
+      .getState()
+      .dispatchUiIntent({ type: 'DELETE_NODES', nodeIds: [entryId] });
+  }, child.parentEntryNodeId);
+  const dialog = page.getByRole('dialog', {
+    name: 'Delete “Container deletion child”?',
+    exact: true,
+  });
+  await dialog
+    .getByRole('button', { name: 'Delete Space', exact: true })
+    .click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page).toHaveURL(new RegExp(`/canvas/${parent}$`));
+  expect(
+    (await page.request.get(`/api/canvas/${child.canvasId}`)).status(),
+  ).toBe(404);
+  expect((await page.request.get(`/api/canvas/${parent}`)).ok()).toBe(true);
 });
 
 test('deletion recovery stays localized, traps focus and requires a fresh confirmation', async ({
@@ -648,11 +701,7 @@ test('deletion recovery stays localized, traps focus and requires a fresh confir
   });
   expect(childResponse.ok()).toBe(true);
   const child = (await childResponse.json()).canvasId as string;
-  await page.goto(`/canvas/${id}`);
-  await expect(page.locator('[data-canvas-root]')).toHaveAttribute(
-    'aria-busy',
-    'false',
-  );
+  await page.goto('/spaces');
   await page.evaluate(async () => {
     const path = '/src/i18n/index.ts';
     const { i18n } = await import(path);
@@ -687,7 +736,11 @@ test('deletion recovery stays localized, traps focus and requires a fresh confir
       ),
     });
   });
-  await page.getByRole('button', { name: 'Space 菜单', exact: true }).click();
+  await page
+    .locator(`a[href="/canvas/${id}"]`)
+    .locator('..')
+    .locator('button[aria-haspopup="menu"]')
+    .click();
   await page.getByRole('menuitem', { name: '删除 Space', exact: true }).click();
   const dialog = page.getByRole('dialog');
   const capture = async (name: string) => {

@@ -54,8 +54,6 @@ export type DesktopTabCommand =
   | {
       type: 'end-space-deletion';
       deletedCanvasIds: string[];
-      returnTo?: Record<string, string | null>;
-      failure?: string;
     }
   | { type: 'move-tab'; id: string; index: number }
   | { type: 'sync-workspace-capabilities'; canChangeWorkspace: boolean }
@@ -128,7 +126,12 @@ export interface DesktopTabsApi {
       request: string | { requestId: string; reason: 'space-deletion' },
     ) => void,
   ) => () => void;
-  onDeletionError: (callback: (message: string) => void) => () => void;
+  onSpacesDeleted: (
+    callback: (result: {
+      workspaceId: string;
+      deletedCanvasIds: string[];
+    }) => void,
+  ) => () => void;
   keepPrepareCloseAlive: (requestId: string) => void;
   onClosePrepared: (callback: () => void) => () => void;
   finishPrepareClose: (requestId: string, result: DesktopTabResult) => void;

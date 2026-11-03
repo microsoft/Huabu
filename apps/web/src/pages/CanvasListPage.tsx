@@ -151,6 +151,32 @@ export default function CanvasListPage() {
     [setCanvasCount],
   );
 
+  const reconcileDeletedSpaces = useCallback(
+    (ids: string[]) => {
+      listRequestRef.current.version++;
+      setCanvases((current) => {
+        const remaining = current.filter(
+          (canvas) => !ids.includes(canvas.canvasId),
+        );
+        setCanvasCount(remaining.length);
+        return remaining;
+      });
+      setIsLoading(false);
+    },
+    [setCanvasCount],
+  );
+
+  useEffect(() => {
+    const tabs = getElectronBridge()?.tabs;
+    if (!tabs || tabs.context.role !== 'home') return;
+    return tabs.onSpacesDeleted((result) => {
+      const workspace = useWorkspaceStore.getState();
+      if (workspace.isSyncing || workspace.workspaceId !== result.workspaceId)
+        return;
+      reconcileDeletedSpaces(result.deletedCanvasIds);
+    });
+  }, [reconcileDeletedSpaces]);
+
   useEffect(() => {
     const requests = listRequestRef.current;
     void fetchCanvases();
@@ -354,15 +380,8 @@ export default function CanvasListPage() {
             setPendingDelete(null);
             void fetchCanvases();
           }}
-          onDeleted={(ids, failure, _returnTo, completed) => {
-            listRequestRef.current.version++;
-            setCanvases((current) => {
-              const remaining = current.filter(
-                (canvas) => !ids.includes(canvas.canvasId),
-              );
-              setCanvasCount(remaining.length);
-              return remaining;
-            });
+          onDeleted={(ids, failure, completed) => {
+            reconcileDeletedSpaces(ids);
             if (!failure || completed) {
               deletionOpen.current = false;
               setPendingDelete(null);

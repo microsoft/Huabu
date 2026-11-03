@@ -727,6 +727,7 @@
     "activationInProgress": "另一个主目录仍在打开，请等待其完成。"
   },
   "spaceHierarchy": {
+    "deleteFromContainer": "请从 Home 或父 Space 中删除此 Space。",
     "bring": "移入已有空间",
     "alreadyChild": "已在当前空间中",
     "collectAction": "收纳为子 Space",

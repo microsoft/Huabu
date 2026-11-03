@@ -49,7 +49,7 @@ Common contains reusable UI primitives; canvas node references live in `componen
 
 Common Modal uses the existing Floating UI focus manager to contain keyboard and assistive-technology focus, honor `initialFocusRef`, and restore focus on close. It locks background scrolling and bounds the scrollable panel to the visible viewport below desktop window chrome, so long error details remain reachable.
 
-The Space deletion dialog marks its body-portalled overlay with `desktopDeletionDialog` so desktop deletion preparation freezes the background without making the pending dialog inert. Other modals keep ordinary close/reload freeze behavior.
+Space deletion runs from Home or a parent Space, so the requesting page and its Common Modal are not among the target pages frozen by desktop preparation. Modal has no deletion-specific freeze exemption.
 
 ---
 

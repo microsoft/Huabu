@@ -18,7 +18,6 @@ import { drainPendingSaves } from '@/store/canvasStore';
 import { deleteWorkspace } from '@/store/previewWorkspace/persistence';
 import { useWorkspaceStore } from '@/store/workspaceStore';
 import { withSaveErrorsHandledByCaller } from '@/utils/saveErrorFeedback';
-import { spaceAncestorIds } from '@/utils/spaceHierarchy';
 
 import type {
   DeleteSpaceTreeFailure,
@@ -61,17 +60,14 @@ function isDeletionFailure(value: unknown): value is DeleteSpaceTreeFailure {
 
 export function SpaceDeletionDialog({
   canvasId,
+  containerSpaceId,
   onClose,
   onDeleted,
 }: {
   canvasId: string;
+  containerSpaceId?: string;
   onClose: () => void;
-  onDeleted: (
-    ids: string[],
-    failure?: string,
-    returnTo?: Record<string, string | null>,
-    completed?: boolean,
-  ) => void;
+  onDeleted: (ids: string[], failure?: string, completed?: boolean) => void;
 }) {
   const { t } = useTranslation();
   const cancelRef = useRef<HTMLButtonElement>(null);
@@ -156,19 +152,13 @@ export function SpaceDeletionDialog({
       else if (!failure)
         reportFailure(cause, t('spaceHierarchy.deletionErrors.refresh'));
     };
-    const parents = Object.fromEntries(
-      preview.spaces.map((item) => [item.canvasId, item]),
-    );
-    const returnTargets = () =>
-      Object.fromEntries(
-        deletedCanvasIds.map((id) => [
-          id,
-          spaceAncestorIds(id, parents)
-            .reverse()
-            .find((ancestor) => !deletedCanvasIds.includes(ancestor)) ?? null,
-        ]),
-      );
     try {
+      if (
+        containerSpaceId &&
+        (root.parentSpaceId !== containerSpaceId ||
+          preview.spaces.some((space) => space.canvasId === containerSpaceId))
+      )
+        throw new Error(t('spaceHierarchy.deleteFromContainer'));
       await withSaveErrorsHandledByCaller(() => drainPendingSaves());
       if (useWorkspaceStore.getState().workspaceId !== workspaceId)
         throw new Error(t('spaceHierarchy.workspaceChanged'));
@@ -230,10 +220,6 @@ export function SpaceDeletionDialog({
             await tabs.command({
               type: 'end-space-deletion',
               deletedCanvasIds,
-              returnTo: returnTargets(),
-              ...(failure || refreshFailure
-                ? { failure: failure || refreshFailure }
-                : {}),
             }),
           );
         } catch (cause) {
@@ -250,8 +236,8 @@ export function SpaceDeletionDialog({
         }
         if (deletedCanvasIds.length > 0) {
           if (refreshFailure && !failure)
-            onDeleted(deletedCanvasIds, refreshFailure, returnTargets(), true);
-          else onDeleted(deletedCanvasIds, failure, returnTargets());
+            onDeleted(deletedCanvasIds, refreshFailure, true);
+          else onDeleted(deletedCanvasIds, failure);
         }
       }
     }
@@ -259,7 +245,6 @@ export function SpaceDeletionDialog({
   return (
     <Modal
       isOpen
-      desktopDeletionDialog
       title={
         root
           ? t(

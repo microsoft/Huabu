@@ -6,10 +6,7 @@ import { ChevronDown } from 'lucide-react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import {
-  REQUEST_DELETE_SPACE,
-  REQUEST_REPARENT_SPACE,
-} from '@/utils/spaceHierarchy';
+import { REQUEST_REPARENT_SPACE } from '@/utils/spaceHierarchy';
 
 import { ApiError } from '../../../api/_client';
 import { exportCanvas } from '../../../api/canvas.ts';
@@ -223,16 +220,6 @@ export const CanvasMenu: React.FC = () => {
                   {t('spaceHierarchy.moveToTopLevel')}
                 </DropdownMenuItem>
               )}
-              <DropdownMenuItem
-                onClick={() => {
-                  setIsOpen(false);
-                  window.dispatchEvent(
-                    new CustomEvent(REQUEST_DELETE_SPACE, { detail: canvasId }),
-                  );
-                }}
-              >
-                {t('canvasList.deleteCanvas')}
-              </DropdownMenuItem>
             </>
           )}
         </DropdownMenu>

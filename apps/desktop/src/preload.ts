@@ -121,8 +121,8 @@ const tabs: DesktopTabsApi | undefined =
         onNavigate: (callback: (target: DesktopTabNavigation) => void) =>
           subscribe('tabs:navigate', callback),
         onPrepareClose: (callback) => subscribe('tabs:prepare-close', callback),
-        onDeletionError: (callback) =>
-          subscribe('tabs:deletion-error', callback),
+        onSpacesDeleted: (callback) =>
+          subscribe('tabs:spaces-deleted', callback),
         keepPrepareCloseAlive: (id) =>
           ipcRenderer.send('tabs:preparing-close', id),
         onClosePrepared: (callback) =>

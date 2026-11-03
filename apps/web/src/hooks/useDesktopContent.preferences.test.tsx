@@ -101,7 +101,7 @@ beforeEach(async () => {
     endWorkspaceChange: vi.fn(),
     onNavigate: vi.fn(() => vi.fn()),
     onPrepareClose: vi.fn(() => vi.fn()),
-    onDeletionError: vi.fn(() => vi.fn()),
+    onSpacesDeleted: vi.fn(() => vi.fn()),
     finishPrepareClose: vi.fn(),
     keepPrepareCloseAlive: vi.fn(),
     onClosePrepared: vi.fn(() => vi.fn()),

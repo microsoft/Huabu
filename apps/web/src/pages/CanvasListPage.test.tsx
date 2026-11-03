@@ -63,6 +63,15 @@ const environment = vi.hoisted(() => ({
   getState: vi.fn<() => Promise<DesktopTabsSnapshot>>(),
   onState:
     vi.fn<(listener: (state: DesktopTabsSnapshot) => void) => () => void>(),
+  onSpacesDeleted:
+    vi.fn<
+      (
+        listener: (result: {
+          workspaceId: string;
+          deletedCanvasIds: string[];
+        }) => void,
+      ) => () => void
+    >(),
 }));
 
 vi.mock('react-i18next', () => ({
@@ -152,6 +161,7 @@ vi.mock('../hooks/useElectron', () => {
           ? environment.syncTitles(command)
           : environment.command(command),
       onState: environment.onState,
+      onSpacesDeleted: environment.onSpacesDeleted,
       getState: environment.getState,
     },
   };
@@ -246,6 +256,7 @@ beforeEach(() => {
     deletedCanvasIds: ['space-1'],
   });
   environment.onState.mockReturnValue(vi.fn());
+  environment.onSpacesDeleted.mockReturnValue(vi.fn());
   environment.getState.mockResolvedValue({
     tabs: [],
     activeId: 'home',
@@ -742,7 +753,6 @@ describe('CanvasListPage navigation', () => {
         {
           type: 'end-space-deletion',
           deletedCanvasIds: ['space-1'],
-          returnTo: { 'space-1': null },
         },
       ],
     ]);
@@ -834,8 +844,6 @@ describe('CanvasListPage navigation', () => {
       expect(environment.command).toHaveBeenLastCalledWith({
         type: 'end-space-deletion',
         deletedCanvasIds: [],
-        returnTo: {},
-        failure: 'spaceHierarchy.deletionErrors.request',
       });
       expect(
         container.querySelector('a[href="/canvas/space-1"]'),
@@ -961,6 +969,68 @@ describe('CanvasListPage navigation', () => {
       'spaceHierarchy.deletionErrors.deletedRefresh',
       { tone: 'danger' },
     );
+  });
+
+  it('prunes confirmed child deletions from another renderer before a failed Home refresh', async () => {
+    environment.desktopHome = true;
+    await renderPage();
+    let resolveOld!: (value: Awaited<ReturnType<typeof listCanvases>>) => void;
+    vi.mocked(listCanvases).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveOld = resolve;
+      }),
+    );
+    act(() => window.dispatchEvent(new Event('canvas-list-changed')));
+    const deleted = environment.onSpacesDeleted.mock.calls.at(-1)?.[0];
+    const update = environment.onState.mock.calls.at(-1)?.[0];
+    if (!deleted || !update) throw new Error('Missing Home subscriptions');
+    await act(async () =>
+      update({
+        activeId: 'parent',
+        workspaceId: 'workspace-1',
+        busy: true,
+        canChangeWorkspace: true,
+        tabs: [],
+      }),
+    );
+    await act(async () =>
+      deleted({ workspaceId: 'other', deletedCanvasIds: ['space-1'] }),
+    );
+    expect(container.querySelector('a[href="/canvas/space-1"]')).not.toBeNull();
+    await act(async () =>
+      deleted({ workspaceId: 'workspace-1', deletedCanvasIds: ['space-1'] }),
+    );
+    expect(container.querySelector('a[href="/canvas/space-1"]')).toBeNull();
+    expect(setCanvasCount).toHaveBeenLastCalledWith(0);
+    await act(async () =>
+      resolveOld({
+        canvases: [
+          {
+            canvasId: 'space-1',
+            title: 'Stale',
+            nodeCount: 0,
+            createdAt: 0,
+            updatedAt: 0,
+          },
+        ],
+      }),
+    );
+    expect(container.querySelector('a[href="/canvas/space-1"]')).toBeNull();
+    vi.mocked(listCanvases).mockRejectedValueOnce(new Error('List offline'));
+    await act(async () =>
+      update({
+        activeId: 'home',
+        workspaceId: 'workspace-1',
+        busy: false,
+        canChangeWorkspace: true,
+        tabs: [],
+      }),
+    );
+    expect(container.querySelector('a[href="/canvas/space-1"]')).toBeNull();
+    expect(setCanvasCount).toHaveBeenLastCalledWith(0);
+    expect(toast).toHaveBeenCalledExactlyOnceWith('List offline', {
+      tone: 'danger',
+    });
   });
 
   it('does not resurrect a deleted Space from an older background refresh', async () => {

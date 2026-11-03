@@ -1057,20 +1057,33 @@ try {
     createdTab.canvasId,
   );
   const deletingPage = await content(createdTab.canvasId);
-  await deletingPage.evaluate(async (canvasId) => {
-    const { REQUEST_DELETE_SPACE } =
-      await import('/src/utils/spaceHierarchy.ts');
-    window.dispatchEvent(
-      new CustomEvent(REQUEST_DELETE_SPACE, { detail: canvasId }),
-    );
+  const containerPage = await open(shell, deletionParent.canvasId);
+  await waitFor(
+    async () =>
+      containerPage.evaluate(async (canvasId) => {
+        const { useWorkspaceStore } =
+          await import('/src/store/workspaceStore.ts');
+        return useWorkspaceStore.getState().spaceSummaries[canvasId]
+          ?.parentEntryNodeId;
+      }, createdTab.canvasId),
+    'loading the child Space entry',
+  );
+  await containerPage.evaluate(async (canvasId) => {
+    const { default: store } = await import('/src/store/canvasStore.ts');
+    const { useWorkspaceStore } = await import('/src/store/workspaceStore.ts');
+    const entry =
+      useWorkspaceStore.getState().spaceSummaries[canvasId].parentEntryNodeId;
+    store
+      .getState()
+      .dispatchUiIntent({ type: 'DELETE_NODES', nodeIds: [entry] });
   }, createdTab.canvasId);
-  const deleteDialog = deletingPage.getByRole('dialog');
+  const deleteDialog = containerPage.getByRole('dialog');
   await deleteDialog.waitFor({ state: 'visible' });
   let releaseDelete;
   const deletionGate = new Promise((resolve) => {
     releaseDelete = resolve;
   });
-  await deletingPage.route('**/delete-tree', async (route) => {
+  await containerPage.route('**/delete-tree', async (route) => {
     await deletionGate;
     await route.continue();
   });
@@ -1078,24 +1091,14 @@ try {
     .getByRole('button', { name: deletionLabels.confirm, exact: true })
     .click();
   await waitFor(
-    async () =>
-      deletingPage.evaluate(() => {
-        const overlay = document.querySelector(
-          '[data-desktop-deletion-dialog]',
-        );
-        return (
-          !!overlay &&
-          document.querySelector('#root')?.inert &&
-          !document.body.inert &&
-          !overlay.closest('[inert]')
-        );
-      }),
-    'keeping the pending deletion dialog accessible while the page is frozen',
+    async () => deletingPage.evaluate(() => document.body.inert),
+    'freezing the child while its parent owns deletion',
   );
+  assert.equal(await containerPage.evaluate(() => document.body.inert), false);
   assert.equal(await deleteDialog.getByRole('status').count(), 1);
   assert.match(await deleteDialog.ariaSnapshot(), /status/);
   assert.equal(
-    await deletingPage
+    await containerPage
       .locator('dialog[data-desktop-close-controls][open]')
       .count(),
     0,
@@ -1112,11 +1115,11 @@ try {
           tab.id === state.activeId && tab.canvasId === deletionParent.canvasId,
       )
     );
-  }, 'returning from self-deletion to the surviving parent');
+  }, 'remaining in the parent after deleting its child');
   assert.equal(
     deletingPage.isClosed(),
     true,
-    'Deleting the current Space must close its Tab automatically',
+    'Deleting an open child must close its Tab automatically',
   );
   assert.equal(
     (await fetch(`${serverOrigin}/api/canvas/${createdTab.canvasId}`)).status,
@@ -1141,12 +1144,20 @@ try {
     ).ok,
     true,
   );
+  await home.route(/\/api\/canvas(?:\?.*)?$/, (route) =>
+    route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({ message: 'List unavailable' }),
+    }),
+  );
   await shell.evaluate(() =>
     window.electronBridge.tabs.open({ canvasId: null }),
   );
   await home
     .locator(`a[href="/canvas/${createdTab.canvasId}"]`)
     .waitFor({ state: 'detached' });
+  await home.unroute(/\/api\/canvas(?:\?.*)?$/);
   const parentDeletionPreview = await request(
     `/canvas/${deletionParent.canvasId}/deletion-preview`,
   );

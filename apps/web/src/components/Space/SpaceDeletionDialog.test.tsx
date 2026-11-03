@@ -163,9 +163,6 @@ it.each([['child'], ['child', 'parent']])(
     expect(onDeleted).toHaveBeenCalledWith(
       deleted,
       'spaceHierarchy.deletionErrors.interrupted',
-      deleted.includes('parent')
-        ? { child: 'grandparent', parent: 'grandparent' }
-        : { child: 'parent' },
     );
     for (const id of deleted) expect(deleteWorkspace).toHaveBeenCalledWith(id);
     expect(refresh).toHaveBeenCalled();
@@ -233,9 +230,7 @@ it('notifies the parent after refresh when the Workspace is unchanged', async ()
     deletedCanvasIds: ['parent'],
   });
   await remove();
-  expect(onDeleted).toHaveBeenCalledExactlyOnceWith(['parent'], undefined, {
-    parent: 'grandparent',
-  });
+  expect(onDeleted).toHaveBeenCalledExactlyOnceWith(['parent'], undefined);
 });
 
 it('waits for desktop preparation before deleting and reports confirmed IDs on completion', async () => {
@@ -276,7 +271,6 @@ it('waits for desktop preparation before deleting and reports confirmed IDs on c
   expect(desktop.command).toHaveBeenLastCalledWith({
     type: 'end-space-deletion',
     deletedCanvasIds: ['child', 'parent'],
-    returnTo: { child: 'grandparent', parent: 'grandparent' },
   });
   expect(dialog?.textContent).not.toContain(
     'spaceHierarchy.deletionInProgress',
@@ -304,8 +298,6 @@ it('reports partial deletion to desktop so only deleted Tabs close', async () =>
   expect(desktop.command).toHaveBeenLastCalledWith({
     type: 'end-space-deletion',
     deletedCanvasIds: ['child'],
-    returnTo: { child: 'parent' },
-    failure: 'spaceHierarchy.deletionErrors.interrupted',
   });
 });
 
@@ -319,13 +311,10 @@ it('still closes deleted Tabs when refreshing Space titles fails', async () => {
   expect(desktop.command).toHaveBeenLastCalledWith({
     type: 'end-space-deletion',
     deletedCanvasIds: ['parent', 'child'],
-    returnTo: { child: 'grandparent', parent: 'grandparent' },
-    failure: 'spaceHierarchy.deletionErrors.deletedRefresh',
   });
   expect(onDeleted).toHaveBeenCalledExactlyOnceWith(
     ['parent', 'child'],
     'spaceHierarchy.deletionErrors.deletedRefresh',
-    { child: 'grandparent', parent: 'grandparent' },
     true,
   );
   expect(document.querySelector('[role="alert"]')).toBeNull();
@@ -387,6 +376,28 @@ it('owns Note save failures from the initial local drain before desktop preparat
   expect(toast).not.toHaveBeenCalled();
 });
 
+it.each(['parent', 'unrelated'])(
+  'refuses deletion when the live preview is not a child of its container: %s',
+  async (containerSpaceId) => {
+    await act(async () =>
+      root.render(
+        <SpaceDeletionDialog
+          canvasId="parent"
+          containerSpaceId={containerSpaceId}
+          onClose={vi.fn()}
+          onDeleted={onDeleted}
+        />,
+      ),
+    );
+    await remove();
+    expect(deleteSpaceTree).not.toHaveBeenCalled();
+    expect(drainPendingSaves).not.toHaveBeenCalled();
+    expect(document.querySelector('details')?.textContent).toContain(
+      'spaceHierarchy.deleteFromContainer',
+    );
+  },
+);
+
 it('reports release errors inline and retains the dialog after deletion', async () => {
   desktop.enabled = true;
   desktop.command.mockResolvedValueOnce({ ok: true }).mockResolvedValueOnce({
@@ -405,10 +416,6 @@ it('reports release errors inline and retains the dialog after deletion', async 
     expect(onDeleted).toHaveBeenCalledWith(
       ['parent', 'child'],
       'spaceHierarchy.deletionErrors.release',
-      {
-        child: 'grandparent',
-        parent: 'grandparent',
-      },
     );
     expect(toast).not.toHaveBeenCalled();
   } finally {

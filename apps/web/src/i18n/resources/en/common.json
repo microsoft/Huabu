@@ -727,6 +727,7 @@
     "activationInProgress": "Another Home folder is still opening. Please wait for it to finish."
   },
   "spaceHierarchy": {
+    "deleteFromContainer": "Delete this Space from Home or its parent Space.",
     "bring": "Move existing Space here",
     "alreadyChild": "Already in this Space",
     "collectAction": "Collect into child Space",

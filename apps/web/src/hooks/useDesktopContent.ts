@@ -156,9 +156,6 @@ export function useDesktopContent(): {
     const unsubscribeNavigate = tabs.onNavigate((target) => {
       navigate(desktopNavigationPath(target), { state: target.state });
     });
-    const unsubscribeDeletionError = tabs.onDeletionError((message) => {
-      toast(message, { tone: 'danger' });
-    });
     const unsubscribePrepare = tabs.onPrepareClose((preparation) => {
       const requestId =
         typeof preparation === 'string' ? preparation : preparation.requestId;
@@ -171,16 +168,11 @@ export function useDesktopContent(): {
         controller: new AbortController(),
       };
       closeRequest.current = request;
-      setDesktopInputFrozen(true, deleting ? 'space-deletion' : undefined);
+      setDesktopInputFrozen(true);
       setPreparingClose(true);
       if (document.activeElement instanceof HTMLElement)
         document.activeElement.blur();
       request.overlayTimer = window.setTimeout(() => {
-        if (
-          deleting &&
-          document.querySelector('[data-desktop-deletion-dialog]')
-        )
-          return;
         if (closeRequest.current === request) setSaving(true);
       }, 150);
       const heartbeat = window.setInterval(() => {
@@ -242,7 +234,6 @@ export function useDesktopContent(): {
       unsubscribePrepare();
       unsubscribeResume();
       unsubscribePrepared();
-      unsubscribeDeletionError();
     };
   }, [tabs, navigate]);
 

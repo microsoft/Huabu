@@ -41,8 +41,6 @@ export type ModalProps = {
 
   /** CSS z-index for the overlay container. Defaults to `9999`. */
   zIndex?: number;
-  /** Keep only this overlay accessible during desktop Space deletion. */
-  desktopDeletionDialog?: boolean;
 };
 
 export function Modal({
@@ -58,7 +56,6 @@ export function Modal({
   className,
   container,
   zIndex = 9999,
-  desktopDeletionDialog = false,
 }: ModalProps) {
   const titleId = useId();
   const descriptionId = useId();
@@ -103,7 +100,6 @@ export function Modal({
     <div
       className="bg-bg-default/80 animate-in fade-in fixed inset-0 top-[var(--window-chrome-height,0px)] flex items-center justify-center backdrop-blur-sm duration-200"
       style={{ zIndex }}
-      data-desktop-deletion-dialog={desktopDeletionDialog || undefined}
     >
       {/* Decorative backdrop; Escape is the keyboard equivalent. */}
       <div

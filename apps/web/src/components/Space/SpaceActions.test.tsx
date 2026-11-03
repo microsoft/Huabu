@@ -10,21 +10,18 @@ import { REQUEST_DELETE_SPACE } from '@/utils/spaceHierarchy';
 import { SpaceActions } from './SpaceActions';
 
 const mocks = vi.hoisted(() => ({
-  canvas: { canvasId: 'child' },
-  workspace: { workspaceId: 'workspace' },
-  desktop: false,
+  canvas: { canvasId: 'parent' },
+  workspace: {
+    workspaceId: 'workspace',
+    spaceSummaries: { child: { parentSpaceId: 'parent' } },
+  },
   navigate: vi.fn(),
   toast: vi.fn(),
   move: vi.fn(),
   translate: (key: string) => key,
   dialog: vi.fn<
     (props: {
-      onDeleted: (
-        ids: string[],
-        failure?: string,
-        returnTo?: Record<string, string | null>,
-        completed?: boolean,
-      ) => void;
+      onDeleted: (ids: string[], failure?: string, completed?: boolean) => void;
     }) => null
   >(() => null),
 }));
@@ -32,9 +29,6 @@ vi.mock('react-router-dom', () => ({ useNavigate: () => mocks.navigate }));
 vi.mock('@/components/Common/Toast', () => ({ toast: mocks.toast }));
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: mocks.translate }),
-}));
-vi.mock('@/hooks/useElectron', () => ({
-  getElectronBridge: () => (mocks.desktop ? { tabs: {} } : undefined),
 }));
 vi.mock('@/store/canvasStore', () => ({
   default: Object.assign(
@@ -63,7 +57,6 @@ let host: HTMLDivElement;
 let root: Root;
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.desktop = false;
   host = document.createElement('div');
   document.body.append(host);
   root = createRoot(host);
@@ -79,73 +72,46 @@ afterEach(() => {
   host.remove();
 });
 
-function complete(
-  ids: string[],
-  returnTo: Record<string, string | null>,
-  failure?: string,
-  completed?: boolean,
-) {
+function complete(ids: string[], failure?: string, completed?: boolean) {
   const props = mocks.dialog.mock.lastCall?.[0];
   if (!props) throw new Error('Missing deletion dialog');
-  act(() => props.onDeleted(ids, failure, returnTo, completed));
+  act(() => props.onDeleted(ids, failure, completed));
 }
 
-it('replaces a deleted browser page with its surviving parent', () => {
-  complete(['child'], { child: 'parent' });
-  expect(mocks.navigate).toHaveBeenCalledExactlyOnceWith('/canvas/parent', {
-    replace: true,
-  });
-});
-
-it('returns a deleted top-level browser page to Home', () => {
-  complete(['child'], { child: null });
-  expect(mocks.navigate).toHaveBeenCalledExactlyOnceWith('/spaces', {
-    replace: true,
-  });
-});
-
-it('does not navigate when another Space is deleted', () => {
-  complete(['other'], { other: 'parent' });
-  expect(mocks.navigate).not.toHaveBeenCalled();
-});
-
-it('leaves desktop navigation to the Tab manager', () => {
-  mocks.desktop = true;
-  complete(['child'], { child: 'parent' });
-  expect(mocks.navigate).not.toHaveBeenCalled();
-});
-
-it('shows one toast only when a browser deletion error leaves the current page', () => {
-  complete(['child'], { child: 'parent' }, 'Partial deletion');
-  expect(mocks.navigate).toHaveBeenCalledExactlyOnceWith('/canvas/parent', {
-    replace: true,
-  });
-  expect(mocks.toast).toHaveBeenCalledExactlyOnceWith('Partial deletion', {
-    tone: 'danger',
-  });
-});
-
-it('leaves errors in the dialog while the current Space survives', () => {
-  complete(['other'], { other: 'parent' }, 'Partial deletion');
+it('stays in the parent after deleting its child', () => {
+  complete(['child']);
   expect(mocks.navigate).not.toHaveBeenCalled();
   expect(mocks.toast).not.toHaveBeenCalled();
 });
 
-it('does not duplicate the desktop destination notification', () => {
-  mocks.desktop = true;
-  complete(['child'], { child: 'parent' }, 'Partial deletion');
+it('leaves partial deletion errors in the parent dialog', () => {
+  complete(['child'], 'Partial deletion');
+  expect(mocks.navigate).not.toHaveBeenCalled();
   expect(mocks.toast).not.toHaveBeenCalled();
 });
 
-it.each([false, true])(
-  'reports refresh failure after successful deletion of another Space (desktop=%s)',
-  (desktop) => {
-    mocks.desktop = desktop;
-    complete(['other'], { other: 'parent' }, 'Deleted, refresh failed', true);
-    expect(mocks.toast).toHaveBeenCalledExactlyOnceWith(
-      'Deleted, refresh failed',
-      { tone: 'danger' },
+it.each(['parent', 'unrelated'])(
+  'refuses deletion outside the child entry: %s',
+  (id) => {
+    mocks.dialog.mockClear();
+    act(() =>
+      window.dispatchEvent(
+        new CustomEvent(REQUEST_DELETE_SPACE, { detail: id }),
+      ),
     );
-    expect(mocks.navigate).not.toHaveBeenCalled();
+    expect(mocks.dialog).not.toHaveBeenCalled();
+    expect(mocks.toast).toHaveBeenCalledWith(
+      'spaceHierarchy.deleteFromContainer',
+      { tone: 'warning' },
+    );
   },
 );
+
+it('reports refresh failure after successfully deleting a child', () => {
+  complete(['child'], 'Deleted, refresh failed', true);
+  expect(mocks.toast).toHaveBeenCalledExactlyOnceWith(
+    'Deleted, refresh failed',
+    { tone: 'danger' },
+  );
+  expect(mocks.navigate).not.toHaveBeenCalled();
+});

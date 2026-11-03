@@ -50,7 +50,6 @@ const mocks = vi.hoisted(() => ({
   preprocess: vi.fn(),
   flush: vi.fn(),
   prepare: vi.fn<DesktopTabsApi['onPrepareClose']>(),
-  deletionError: vi.fn<DesktopTabsApi['onDeletionError']>(),
   resume: vi.fn<(listener: () => void) => () => void>(),
   finish: vi.fn(),
   heartbeat: vi.fn(),
@@ -78,7 +77,6 @@ vi.mock('./useElectron', () => {
       context: mocks.context,
       onNavigate: () => () => {},
       onPrepareClose: mocks.prepare,
-      onDeletionError: mocks.deletionError,
       onResume: mocks.resume,
       finishPrepareClose: mocks.finish,
       keepPrepareCloseAlive: mocks.heartbeat,
@@ -175,7 +173,6 @@ describe('desktop save presentation', () => {
     mocks.save.mockResolvedValue(undefined);
     mocks.preprocess.mockResolvedValue(undefined);
     mocks.prepare.mockReturnValue(vi.fn());
-    mocks.deletionError.mockReturnValue(vi.fn());
     mocks.resume.mockReturnValue(vi.fn());
     mocks.prepared.mockReturnValue(vi.fn());
     removeCanvasPreparation = pageLifecycle.register('test-canvas', {
@@ -394,16 +391,6 @@ describe('desktop save presentation', () => {
     await resume();
     await prepare();
     expect(mocks.toast).toHaveBeenCalled();
-  });
-
-  it('shows the deletion error handed off to the destination once', async () => {
-    await render();
-    await act(async () =>
-      mocks.deletionError.mock.calls[0][0]('Partial deletion'),
-    );
-    expect(mocks.toast).toHaveBeenCalledExactlyOnceWith('Partial deletion', {
-      tone: 'danger',
-    });
   });
 
   it('retries title-save failures on the next deletion attempt without needing a toast action', async () => {
