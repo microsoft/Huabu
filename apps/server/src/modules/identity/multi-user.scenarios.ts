@@ -13,10 +13,13 @@ import { createMemoryWorkspacePreferences } from './preferences.js';
 import { storageResourceDirectory } from './resources.js';
 import canvasRoutes from '../canvas/canvas.route.js';
 import { registerSpaceAccess } from '../security/space-access.js';
+import { getWorkspaceRepository } from '../storage/index.js';
+import { workspaceScopedRoutes } from '../workspace/scoped-routes.js';
 import workspaceRoutes from '../workspace.route.js';
 import workspacesRoutes from '../workspaces.route.js';
 
-import type { FastifyInstance } from 'fastify';
+import type { BubbleStore } from '@octostaff/bubble';
+import type { FastifyInstance, FastifyPluginAsync } from 'fastify';
 
 /**
  * Several people on one Server, end to end: Bubble admission, the Space guard
@@ -35,8 +38,8 @@ afterEach(async () => {
   await Promise.all(servers.splice(0).map((app) => app.close()));
 });
 
-async function host() {
-  const store = new InMemoryBubbleStore();
+export async function host(options: { revalidationIntervalMs?: number } = {}) {
+  const store: BubbleStore = new InMemoryBubbleStore();
   const bubble = await openBubbleIdentity({
     authenticator: [
       {
@@ -64,11 +67,23 @@ async function host() {
   registerIdentity(app, {
     service: bubble.service,
     getConnectionToken: () => 'machine-secret',
+    revalidationIntervalMs: options.revalidationIntervalMs,
   });
   registerSpaceAccess(app);
   await app.register(canvasRoutes, { prefix: '/api/canvas' });
   await app.register(workspaceRoutes, { prefix: '/api/workspace' });
   await app.register(workspacesRoutes, { prefix: '/api/workspaces' });
+  // A long-lived Space stream that names its Workspace, as agent reachback does.
+  const streams: FastifyPluginAsync = async (scoped) => {
+    scoped.get('/:canvasId/events', async (_request, reply) => {
+      reply.hijack();
+      reply.raw.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      reply.raw.write('data: ready\n\n');
+    });
+  };
+  await app.register(workspaceScopedRoutes(streams), {
+    prefix: '/api/rfs/w/:workspaceId',
+  });
 
   const call = async (
     principalId: string,
@@ -415,6 +430,96 @@ export function describeSeveralPeople(
           (item: { title: string }) => item.title === 'Allowed child',
         ).parentSpaceId,
       ).toBe(id);
+
+      // Nor may a child the owner just made be detached into a new root.
+      const child = await call('dave', 'POST', `/api/canvas/${id}/children`, {
+        title: 'Detach me',
+      });
+      expect(child.status).toBe(200);
+      const childId = child.body.canvasId as string;
+      expect(
+        (
+          await call('dave', 'PATCH', `/api/canvas/${childId}/parent`, {
+            parentSpaceId: null,
+            expectedParentSpaceId: id,
+          })
+        ).status,
+      ).toBe(403);
+      expect(
+        (await call('carol', 'GET', '/api/canvas')).body.canvases.find(
+          (item: { canvasId: string }) => item.canvasId === childId,
+        ).parentSpaceId,
+      ).toBe(id);
+    });
+
+    it("keeps an administrator's stream open in the Workspace its URL names, not their current one", async () => {
+      const { app, call, workspaceOf } = await host({
+        revalidationIntervalMs: 20,
+      });
+      const home = await workspaceOf('admin');
+      const side = (
+        await call('admin', 'POST', '/api/workspaces', { name: 'Side' })
+      ).body.workspaceId as string;
+      await call('admin', 'POST', `/api/workspaces/${side}/activate`);
+      const space = (
+        await call('admin', 'POST', '/api/canvas', { title: 'There' })
+      ).body.canvasId as string;
+      await call('admin', 'POST', `/api/workspaces/${home}/activate`);
+      expect(await workspaceOf('admin')).toBe(home);
+
+      const origin = await app.listen({ port: 0, host: '127.0.0.1' });
+      const response = await fetch(
+        `${origin}/api/rfs/w/${side}/${space}/events`,
+        { headers: as('admin'), signal: AbortSignal.timeout(3_000) },
+      );
+      expect(response.status).toBe(200);
+      const reader = response.body!.getReader();
+      expect((await reader.read()).done).toBe(false);
+      // Several revalidations later, the stream is still open.
+      const next = reader.read();
+      const outcome = await Promise.race([
+        next.then(() => 'ended'),
+        new Promise((resolve) => setTimeout(resolve, 200, 'open')),
+      ]);
+      expect(outcome).toBe('open');
+      await reader.cancel();
+    });
+
+    it('leaves no ownerless Workspace behind when making a personal one fails', async () => {
+      const { call, store, workspaceOf } = await host();
+      const before = (await getWorkspaceRepository().list()).map(
+        (w) => w.workspaceId,
+      );
+      const add = store.grants.add.bind(store.grants);
+      let failures = 1;
+      store.grants.add = async (input) => {
+        if (input.target.type === 'huabu.workspace' && failures-- > 0)
+          throw new Error('Bubble store unavailable');
+        return add(input);
+      };
+      expect(
+        (await call('carol', 'GET', '/api/workspace')).status,
+      ).toBeGreaterThanOrEqual(500);
+      expect(
+        (await getWorkspaceRepository().list()).map((w) => w.workspaceId),
+      ).toEqual(before);
+
+      const carolWs = await workspaceOf('carol');
+      expect(
+        (await getWorkspaceRepository().list())
+          .map((w) => w.workspaceId)
+          .sort(),
+      ).toEqual([...before, carolWs].sort());
+
+      // The same holds for a Workspace made by name.
+      failures = 1;
+      expect(
+        (await call('carol', 'POST', '/api/workspaces', { name: 'Doomed' }))
+          .status,
+      ).toBeGreaterThanOrEqual(400);
+      expect(
+        (await getWorkspaceRepository().list()).map((w) => w.name),
+      ).not.toContain('Doomed');
     });
 
     it('requires management of every child reparented by a selection move before any mutations', async () => {

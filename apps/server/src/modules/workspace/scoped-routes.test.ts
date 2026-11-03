@@ -74,6 +74,44 @@ describe('Workspace-scoped routes', () => {
       await app.close();
     }
   });
+  it('answers a credential-free Skill bootstrap without looking up its Workspace', async () => {
+    const other = await createWorkspace('Other');
+    const app = Fastify();
+    registerIdentity(app, {
+      service: {
+        provider: 'bubble',
+        challenge: 'Bearer',
+        authenticate: async () => null,
+      },
+      getConnectionToken: () => 'machine-secret',
+    });
+    const routes: FastifyPluginAsync = async (scoped) => {
+      scoped.get('/:canvasId/skill', async () => ({
+        workspaceId: getWorkspaceHandle()?.workspaceId ?? null,
+      }));
+    };
+    await app.register(workspaceScopedRoutes(routes), {
+      prefix: '/api/rfs/w/:workspaceId',
+    });
+    try {
+      // Whether a Workspace exists is not something to tell a stranger.
+      const answers = await Promise.all(
+        [other.workspaceId, 'no-such-workspace'].map(async (workspaceId) => {
+          const response = await app.inject(
+            `/api/rfs/w/${workspaceId}/canvas-1/skill`,
+          );
+          return [response.statusCode, response.json()];
+        }),
+      );
+      expect(answers).toEqual([
+        [200, { workspaceId: null }],
+        [200, { workspaceId: null }],
+      ]);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('run each call in the Workspace their prefix names', async () => {
     const other = await createWorkspace('Other');
     const app = Fastify();

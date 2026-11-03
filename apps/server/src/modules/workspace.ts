@@ -195,10 +195,8 @@ export function getWorkspaceDirectory(): string | null {
  * is the Workspace identity.
  */
 export function getWorkspaceKey(): string {
-  const workspacePath = getWorkspaceDirectory();
-  if (workspacePath) return workspacePath;
-  const handle = getWorkspaceHandle();
-  if (handle) return `workspace:${handle.workspaceId}`;
+  const key = workspaceKeyOf(getWorkspaceHandle(), getWorkspaceDirectory());
+  if (key) return key;
   throw new Error(
     'Workspace has not been configured. Activate a workspace first ' +
       `(PUT /api/workspace) or set ${ENV_KEY} in the environment.`,
@@ -216,14 +214,29 @@ export function getWorkspaceHandle(): WorkspaceHandle | null {
   return _workspaceHandle;
 }
 
+/**
+ * The key {@link getWorkspaceKey} gives a Workspace: its folder on Disk, else
+ * its identity. `null` for no Workspace.
+ */
+export function workspaceKeyOf(
+  workspace: WorkspaceHandle,
+  directory: string | null,
+): string;
+export function workspaceKeyOf(
+  workspace: WorkspaceHandle | null,
+  directory: string | null,
+): string | null;
+export function workspaceKeyOf(
+  workspace: WorkspaceHandle | null,
+  directory: string | null,
+): string | null {
+  if (directory) return directory;
+  return workspace ? `workspace:${workspace.workspaceId}` : null;
+}
+
 /** The process-active Workspace, whatever Workspace this call runs in. */
 export function getProcessWorkspaceHandle(): WorkspaceHandle | null {
   return _workspaceHandle;
-}
-
-/** The process-active Workspace's directory, or `null`. */
-export function getProcessWorkspaceDirectory(): string | null {
-  return _workspacePath;
 }
 
 /**
@@ -272,9 +285,7 @@ export function isWorkspaceLeased(workspaceKey: string): boolean {
 }
 
 function processWorkspaceKey(): string | null {
-  if (_workspacePath) return _workspacePath;
-  if (_workspaceHandle) return `workspace:${_workspaceHandle.workspaceId}`;
-  return null;
+  return workspaceKeyOf(_workspaceHandle, _workspacePath);
 }
 
 /**
@@ -364,8 +375,9 @@ function commitResolvedWorkspacePath(resolvedPath: string): void {
   _workspaceHandle = adoptWorkspaceDirectory(resolvedPath);
   _workspacePath = resolvedPath;
   // Drop the cached canvas-dir index so subsequent lookups (used by
-  // migrations and route handlers) reflect the new workspace.
-  refreshCanvasDirIndex();
+  // migrations and route handlers) reflect the new workspace. Named, because
+  // a request committing it may itself run in another Workspace.
+  refreshCanvasDirIndex(resolvedPath);
   // Drop any user-skill cache built against the previous workspace so
   // the next `listSkills` / `read("skills/...")` call rescans the new
   // `<workspace>/setting/skills/` from scratch. The import-cycle with
@@ -389,7 +401,7 @@ function commitResolvedWorkspacePath(resolvedPath: string): void {
  */
 export function commitWorkspaceIdentity(workspace: WorkspaceHandle): void {
   assertNoWorkspaceActivationInProgress();
-  assertProcessWorkspaceChangeAllowed(`workspace:${workspace.workspaceId}`);
+  assertProcessWorkspaceChangeAllowed(workspaceKeyOf(workspace, null));
   _workspaceHandle = workspace;
   _workspacePath = null;
   refreshCanvasDirIndex();

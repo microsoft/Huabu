@@ -11,6 +11,7 @@ import {
   getRequestIdentity,
   getRequestWorkspaceChooser,
 } from './identity/request.js';
+import { mayEnterWorkspace } from './identity/service.js';
 import { migrateLegacyDesktopWorkspaceStore } from './legacy-desktop-workspace-store.js';
 import { resetPreprocessDispatcher } from './preprocessing/index.js';
 import { isOwnerRequest } from './security/owner.js';
@@ -28,6 +29,7 @@ import {
   workspaceDirectory,
   workspaceIdentityOnDisk,
 } from './storage/index.js';
+import { runInProcessWorkspace } from './workspace/context.js';
 import {
   activateWorkspacePath,
   createWorkspace,
@@ -45,6 +47,7 @@ import {
   isWorkspaceLeased,
   resolveWorkspacePath,
   updateActiveWorkspaceHandle,
+  workspaceKeyOf,
 } from './workspace.js';
 
 import type { WorkspaceHandle } from './storage/index.js';
@@ -120,19 +123,25 @@ function descriptor(
   };
 }
 
-/** Follow an externally moved active Disk Workspace before publishing it. */
+/**
+ * Follow an externally moved process-active Disk Workspace before publishing
+ * it. Process-active, not the request's: in Bubble mode an administrator's
+ * current Workspace is theirs alone, and adopting its folder moves nothing.
+ */
 function reconcileActiveWorkspaceLocation(
   workspace: WorkspaceHandle,
   workspacePath: string,
 ): WorkspaceHandle {
-  if (getWorkspaceHandle()?.workspaceId !== workspace.workspaceId) {
-    return workspace;
-  }
-  if (path.resolve(getWorkspacePath()) === path.resolve(workspacePath)) {
-    return workspace;
-  }
-  commitWorkspacePath(workspacePath);
-  return getWorkspaceHandle() ?? workspace;
+  return runInProcessWorkspace(() => {
+    if (getWorkspaceHandle()?.workspaceId !== workspace.workspaceId) {
+      return workspace;
+    }
+    if (path.resolve(getWorkspacePath()) === path.resolve(workspacePath)) {
+      return workspace;
+    }
+    commitWorkspacePath(workspacePath);
+    return getWorkspaceHandle() ?? workspace;
+  });
 }
 
 /**
@@ -213,11 +222,12 @@ function personal(request: FastifyRequest): boolean {
 async function enterable(
   request: FastifyRequest,
 ): Promise<readonly WorkspaceHandle[]> {
+  // Managed mode keeps everyone in its one Workspace.
+  if (isManagedMode()) return visibleWorkspaces();
   const allowed = await getRequestIdentity(request)!.access.workspaces();
-  const all = await getWorkspaceRepository().list();
-  return allowed === 'all'
-    ? all
-    : all.filter((workspace) => allowed.includes(workspace.workspaceId));
+  return (await getWorkspaceRepository().list()).filter((workspace) =>
+    mayEnterWorkspace(allowed, workspace.workspaceId),
+  );
 }
 
 async function canManage(
@@ -282,11 +292,12 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
       if (!parsed.success || !parsed.data.name || parsed.data.path)
         return sendError(reply, 400, 'Workspace name is required');
       try {
-        const workspace = await createWorkspace(parsed.data.name);
-        await getRequestIdentity(request)!.access.claim({
-          type: 'workspace',
-          id: workspace.workspaceId,
-        });
+        const workspace = await createWorkspace(parsed.data.name, (created) =>
+          getRequestIdentity(request)!.access.claim({
+            type: 'workspace',
+            id: created.workspaceId,
+          }),
+        );
         return reply
           .status(201)
           .send(descriptor(workspace, isOwnerRequest(request)));
@@ -353,12 +364,13 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
         name: preparedManifest.name,
       };
       let workspace: WorkspaceHandle;
-      if (getWorkspaceHandle()?.workspaceId === preparedWorkspace.workspaceId) {
+      const processActive = getProcessWorkspaceHandle();
+      if (processActive?.workspaceId === preparedWorkspace.workspaceId) {
         // `existing` was null, so even a same-path active Workspace needs its
         // missing membership repaired. Committing adopts it and keeps active
         // identity and materialization on one location.
         commitWorkspacePath(workspacePath);
-        workspace = getWorkspaceHandle() ?? preparedWorkspace;
+        workspace = getProcessWorkspaceHandle() ?? preparedWorkspace;
       } else {
         workspace = adoptWorkspaceDirectory(workspacePath);
       }
@@ -397,6 +409,8 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
     async (request, reply) => {
       const choose = getRequestWorkspaceChooser(request);
       if (personal(request)) {
+        if (isManagedMode())
+          return sendError(reply, 403, 'Workspace collection is read-only');
         const parsedId = parseWorkspaceId(request.params.workspaceId, reply);
         if (typeof parsedId !== 'string') return parsedId;
         // Switching moves the caller alone; the request itself still runs in
@@ -494,9 +508,7 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
         // Someone else's current Workspace moves them on at their next
         // request; work in flight there is not stranded.
         const workspace = await getWorkspaceRepository().get(parsedId);
-        const key = workspace
-          ? (workspaceDirectory(parsedId) ?? `workspace:${parsedId}`)
-          : null;
+        const key = workspaceKeyOf(workspace, workspaceDirectory(parsedId));
         if (key && isWorkspaceLeased(key))
           return sendError(
             reply,

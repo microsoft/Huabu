@@ -8,6 +8,7 @@ import path from 'node:path';
 
 import { validatePathSchema, workspacePathSchema } from '@huabu/shared';
 
+import { getRequestWorkspaceChooser } from './identity/request.js';
 import { resetPreprocessDispatcher } from './preprocessing/index.js';
 import { isOwnerRequest } from './security/owner.js';
 import { canReadSpace, isRestrictedRequest } from './security/space-access.js';
@@ -18,6 +19,7 @@ import {
   storageServes,
   unavailableCapabilityMessage,
 } from './storage/index.js';
+import { runInProcessWorkspace } from './workspace/context.js';
 import {
   activateWorkspacePath,
   WorkspaceActivationInProgressError,
@@ -330,11 +332,24 @@ const workspaceRoutes: FastifyPluginAsync = async (app) => {
       );
     }
     try {
-      await activateWorkspacePath(parsed.data.path);
-      // Reset singletons that cache filesystem handles for the old workspace.
-      resetStorageCache();
-      resetPreprocessDispatcher();
-      return await buildWorkspaceState();
+      // This moves the process-active Workspace, and answers for it, whatever
+      // Workspace the request itself runs in.
+      const state = await runInProcessWorkspace(async () => {
+        await activateWorkspacePath(parsed.data.path);
+        // Reset singletons that cache filesystem handles for the old workspace.
+        resetStorageCache();
+        resetPreprocessDispatcher();
+        return buildWorkspaceState(
+          isRestrictedRequest(request)
+            ? { admin: isOwnerRequest(request) }
+            : null,
+        );
+      });
+      // In Bubble mode the administrator who picked the folder works there
+      // too; everybody else stays where they are.
+      const choose = getRequestWorkspaceChooser(request);
+      if (choose && state.workspaceId) await choose(state.workspaceId);
+      return state;
     } catch (e) {
       if (e instanceof WorkspaceActivationTimeoutError) {
         return sendError(

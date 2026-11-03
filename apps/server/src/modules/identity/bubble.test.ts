@@ -89,12 +89,12 @@ function directory(): ResourceDirectory & { created: string[] } {
       Object.keys(PARENTS).find((w) => id in PARENTS[w]) ?? null,
     openWorkspace: async (id) => (exists(id) ? scopeOf(id) : null),
     defaultWorkspace: async () => scopeOf('w1'),
-    createWorkspace: async (name) => {
-      created.push(`made-${created.length + 1}`);
-      return {
-        ...scopeOf(created.at(-1)!),
-        handle: { workspaceId: created.at(-1)!, name },
-      };
+    lockedWorkspace: async () => null,
+    createWorkspace: async (name, adopt) => {
+      const workspaceId = `made-${created.length + 1}`;
+      created.push(workspaceId);
+      await adopt(workspaceId);
+      return { ...scopeOf(workspaceId), handle: { workspaceId, name } };
     },
   };
 }
@@ -666,6 +666,37 @@ describe('Bubble identity', () => {
     ]);
   });
 
+  it('starts when a legacy grant cannot be migrated, and still migrates the rest', async () => {
+    const store = new InMemoryBubbleStore();
+    for (const id of ['broken', 'a'])
+      await grant(store, 'carol', 'huabu.space.owner', {
+        type: 'huabu.space',
+        id,
+      });
+    await expect(
+      openBubbleIdentity({
+        authenticator: AUTHENTICATORS,
+        store,
+        preferences: createMemoryWorkspacePreferences(),
+        resources: {
+          ...RESOURCES,
+          workspaceOfSpace: async (id) => {
+            if (id === 'broken') throw new Error('malformed space.json');
+            return RESOURCES.workspaceOfSpace(id);
+          },
+        },
+      }),
+    ).resolves.toBeDefined();
+    expect(
+      (await store.grants.list({ principalId: 'carol' })).map(
+        (row) => row.target,
+      ),
+    ).toEqual([
+      { type: 'huabu.space', id: 'broken' },
+      { type: 'huabu.space', id: 'w1:a' },
+    ]);
+  });
+
   it('carries a validated Bearer credential in an HttpOnly session cookie', async () => {
     const { app } = await host();
     // Only a credential Bubble accepts becomes a session.
@@ -742,15 +773,26 @@ describe('Bubble identity', () => {
     });
   });
 
-  it('rejects an authenticator list Bubble does not accept', async () => {
+  it('rejects an authenticator list Bubble does not accept, releasing what it was given', async () => {
+    const store = new InMemoryBubbleStore();
+    const closed: string[] = [];
+    store.close = async () => {
+      closed.push('store');
+    };
     await expect(
       openBubbleIdentity({
         authenticator: [{ driver: 'no-such-driver' }] as never,
-        store: new InMemoryBubbleStore(),
-        preferences: createMemoryWorkspacePreferences(),
+        store,
+        preferences: {
+          ...createMemoryWorkspacePreferences(),
+          close: async () => {
+            closed.push('preferences');
+          },
+        },
         resources: RESOURCES,
       }),
     ).rejects.toThrow();
+    expect(closed.sort()).toEqual(['preferences', 'store']);
   });
 
   it('upgrades its own WebSocket without answering upgrades owned by another listener', async () => {

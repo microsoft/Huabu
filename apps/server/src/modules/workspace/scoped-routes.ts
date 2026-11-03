@@ -2,6 +2,7 @@
 // Licensed under the MIT license.
 
 import { fillWorkspaceScope, openWorkspaceScope } from './context.js';
+import { isPublicRfsSkillBootstrapRequest } from '../remote_fs/public-skill.js';
 import { getWorkspaceRepository, openWorkspace } from '../storage/index.js';
 
 import type { FastifyPluginAsync } from 'fastify';
@@ -24,6 +25,17 @@ export function workspaceScopedRoutes(
       openWorkspaceScope(done),
     );
     app.addHook('onRequest', async (request, reply) => {
+      // The credential-free Skill bootstrap is the same in every Workspace
+      // and reads none, so it opens none: a stranger learns nothing about
+      // which exist, and a SQL backend writes nothing for them.
+      if (
+        isPublicRfsSkillBootstrapRequest({
+          method: request.method,
+          url: request.url,
+          authorization: request.headers.authorization,
+        })
+      )
+        return;
       const { workspaceId } = request.params as { workspaceId?: string };
       const workspace = workspaceId
         ? await getWorkspaceRepository().get(workspaceId)

@@ -6,6 +6,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -14,7 +15,11 @@ import path from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { refreshCanvasDirIndex, registerCanvasDir } from './canvas-dirs.js';
+import {
+  canvasDirName,
+  refreshCanvasDirIndex,
+  registerCanvasDir,
+} from './canvas-dirs.js';
 import { canvasRoot, SPACE_JSON_FILENAME } from './layout.js';
 import {
   forgetCanvasStore,
@@ -24,6 +29,7 @@ import {
 import { NODE_TOMBSTONE_TTL_MS } from './legacy/node-tombstones.js';
 import { DiskStructuredStore } from './structured-store.js';
 import { toSafeFilename } from '../../../../utils/naming.js';
+import { runInWorkspace } from '../../../workspace/context.js';
 import { setWorkspacePath } from '../../../workspace.js';
 
 import type {
@@ -78,6 +84,33 @@ afterEach(() => {
 });
 
 describe('CanvasStore cache boundaries', () => {
+  it("keeps each live Workspace's instances and index while another is in use", () => {
+    const a = activateWorkspace('huabu-cache-a-');
+    createSpace('canvas-a', 'Alpha');
+    const b = mkdtempSync(path.join(tmpdir(), 'huabu-cache-b-'));
+    roots.push(b);
+    const inA = <T>(fn: () => T) =>
+      runInWorkspace({ handle: { workspaceId: 'a', name: 'A' }, path: a }, fn);
+    const inB = <T>(fn: () => T) =>
+      runInWorkspace({ handle: { workspaceId: 'b', name: 'B' }, path: b }, fn);
+
+    const first = inA(() => getCanvasStore('canvas-a'));
+    expect(inA(() => canvasDirName('canvas-a'))).toBe('Alpha');
+    renameSync(path.join(a, 'Alpha'), path.join(a, 'Renamed'));
+
+    // Work in B neither drops A's instances nor rescans A's folder.
+    inB(() => {
+      getCanvasStore('canvas-b');
+      refreshCanvasDirIndex();
+    });
+    expect(inA(() => getCanvasStore('canvas-a'))).toBe(first);
+    expect(inA(() => canvasDirName('canvas-a'))).toBe('Alpha');
+
+    // A refresh in A does.
+    inA(() => refreshCanvasDirIndex());
+    expect(inA(() => canvasDirName('canvas-a'))).toBe('Renamed');
+  });
+
   it('allows cache cleanup before a workspace has been activated', () => {
     expect(() => resetStorageCache()).not.toThrow();
     expect(() => forgetCanvasStore('canvas-a')).not.toThrow();

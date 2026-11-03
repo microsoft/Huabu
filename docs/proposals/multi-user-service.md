@@ -32,6 +32,7 @@ How the Workspace is chosen:
 
 - **Local mode:** the process-active Workspace, as today. Switching still changes it for every client, because local mode has one person.
 - **Bubble mode:** the principal's _current Workspace_, a per-principal row stored in Huabu (`huabu_identity.current_workspaces`, referencing Bubble's `principalId`, as #228 proposes). Switching changes only that row. It must be a Workspace the principal may enter, else admission falls back to the first one they may enter, or a new personal Workspace.
+- **Bubble mode, managed:** when `HUABU_WORKSPACE` locks the Server to one Workspace, everyone works in it. No personal Workspace is created, switching and creating are refused, and `GET /api/workspaces` lists only that Workspace. Which of its Spaces each person sees is still decided Space by Space.
 
 A per-principal preference rather than a Workspace header keeps images, frames, downloads and EventSource working without changes, since they cannot set headers. The cost is that one person's tabs share one current Workspace, which is also the behavior today. Per-tab Workspaces would need the Workspace in every URL and are not planned.
 

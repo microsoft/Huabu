@@ -6,11 +6,23 @@ import {
   openWorkspace,
   space,
 } from '../storage/index.js';
-import { runInWorkspace } from '../workspace/context.js';
+import { currentWorkspaceScope, runInWorkspace } from '../workspace/context.js';
 import { createWorkspace } from '../workspace-activation.js';
-import { getProcessWorkspaceHandle } from '../workspace.js';
+import { getProcessWorkspaceHandle, isManagedMode } from '../workspace.js';
 
 import type { ResourceDirectory } from './service.js';
+import type { WorkspaceScope } from '../workspace/context.js';
+
+/**
+ * A registered Workspace, opened. The one this call already runs in is reused,
+ * so authorizing many of its Spaces looks it up no more than once.
+ */
+async function scopeOf(workspaceId: string): Promise<WorkspaceScope | null> {
+  const current = currentWorkspaceScope();
+  if (current?.handle.workspaceId === workspaceId) return current;
+  const workspace = await getWorkspaceRepository().get(workspaceId);
+  return workspace ? openWorkspace(workspace) : null;
+}
 
 /**
  * Huabu storage as the identity provider sees it. A Space is found in the
@@ -23,9 +35,8 @@ export const storageResourceDirectory: ResourceDirectory = {
     return (await getWorkspaceRepository().get(workspaceId)) !== null;
   },
   async spaceParent(workspaceId, canvasId) {
-    const workspace = await getWorkspaceRepository().get(workspaceId);
-    if (!workspace) return null;
-    const scope = await openWorkspace(workspace);
+    const scope = await scopeOf(workspaceId);
+    if (!scope) return null;
     const record = await runInWorkspace(scope, () => space(canvasId).read());
     if (!record) return null;
     return record.parentSpaceId
@@ -49,7 +60,13 @@ export const storageResourceDirectory: ResourceDirectory = {
       getProcessWorkspaceHandle() ?? (await getWorkspaceRepository().list())[0];
     return workspace ? openWorkspace(workspace) : null;
   },
-  async createWorkspace(name) {
-    return openWorkspace(await createWorkspace(name));
+  async lockedWorkspace() {
+    const workspace = isManagedMode() ? getProcessWorkspaceHandle() : null;
+    return workspace ? openWorkspace(workspace) : null;
+  },
+  async createWorkspace(name, adopt) {
+    return openWorkspace(
+      await createWorkspace(name, (workspace) => adopt(workspace.workspaceId)),
+    );
   },
 };

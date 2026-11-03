@@ -18,6 +18,7 @@ import {
 
 import { identityPrincipalSchema } from '@huabu/shared';
 
+import { getLogger } from '../../utils/logger.js';
 import { getWorkspaceHandle } from '../workspace.js';
 import { IdentityError } from './service.js';
 import {
@@ -37,6 +38,8 @@ import type {
   CreateBubbleRuntimeOptions,
 } from '@octostaff/bubble';
 import type { FastifyPluginAsync } from 'fastify';
+
+const log = getLogger('bubble-identity');
 
 /**
  * Huabu's permission model, kept in Bubble's grant table and answered by
@@ -140,29 +143,47 @@ function huabuAuthz(resources: ResourceDirectory): BubbleAuthzOptions {
  * Workspace holding it. Unresolved grants remain for a later startup: the
  * registry may omit a temporarily unavailable Workspace. Unqualified targets
  * cannot authorize access under the new policy.
- * Idempotent: qualified grants are left alone.
+ * Idempotent: qualified grants are left alone. One grant that cannot be read
+ * keeps its legacy form without holding back the rest; the failures are
+ * raised together once every other grant has been migrated.
  */
 export async function migrateSpaceGrants(
   store: BubbleStore,
   resources: ResourceDirectory,
 ): Promise<void> {
+  // Each Space is looked for once, however many grants name it.
+  const located = new Map<string, Promise<string | null>>();
+  const failures: unknown[] = [];
   for (const grant of await store.grants.list()) {
     const { target } = grant;
     if (target.type !== TARGET.space || !('id' in target)) continue;
     if (parseSpaceTargetId(target.id)) continue;
-    const workspaceId = await resources.workspaceOfSpace(target.id);
-    if (!workspaceId) continue;
-    await store.grants.add({
-      target: {
-        type: TARGET.space,
-        id: spaceTargetId(workspaceId, target.id),
-      },
-      principalId: grant.principalId,
-      role: grant.role,
-      grantedByPrincipalId: grant.grantedByPrincipalId ?? null,
-    });
-    await store.grants.remove(grant.grantId);
+    try {
+      let locating = located.get(target.id);
+      if (!locating)
+        located.set(
+          target.id,
+          (locating = resources.workspaceOfSpace(target.id)),
+        );
+      const workspaceId = await locating;
+      if (!workspaceId) continue;
+      await store.grants.add({
+        target: {
+          type: TARGET.space,
+          id: spaceTargetId(workspaceId, target.id),
+        },
+        principalId: grant.principalId,
+        role: grant.role,
+        grantedByPrincipalId: grant.grantedByPrincipalId ?? null,
+      });
+      await store.grants.remove(grant.grantId);
+    } catch (error) {
+      failures.push(error);
+    }
   }
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1)
+    throw new AggregateError(failures, 'Some Space grants were not migrated');
 }
 
 /** Bubble's records live beside Huabu's, in a schema of their own. */
@@ -195,6 +216,11 @@ export async function openBubbleIdentity(options: {
   resources: ResourceDirectory;
 }): Promise<{ service: IdentityService; plugin: FastifyPluginAsync }> {
   const { store, owner, preferences } = options;
+  // Both are this identity's from here on: the plugin closes them, and so
+  // does a failure to open.
+  const release = async () => {
+    await Promise.allSettled([store.close?.(), preferences.close()]);
+  };
   const runtime = await createBubbleRuntime({
     store,
     authenticator: options.authenticator,
@@ -202,33 +228,40 @@ export async function openBubbleIdentity(options: {
     autoGrantFirstUserSystemOwner: false,
     authz: huabuAuthz(options.resources),
   }).catch(async (error: unknown) => {
-    await store.close?.();
+    await release();
     throw error;
   });
-  await migrateSpaceGrants(store, options.resources).catch(
-    async (error: unknown) => {
-      await store.close?.();
-      throw error;
-    },
+  // A grant left unmigrated authorizes nothing until a later startup manages
+  // it; one unreadable Workspace must not keep the whole Server from starting.
+  await migrateSpaceGrants(store, options.resources).catch((error: unknown) =>
+    log.warn(
+      { err: error },
+      'Some legacy Space grants could not be migrated; retrying at next startup',
+    ),
   );
   if (owner) {
-    // Created without an external identity, which suits master-key callers; a
-    // federated user is granted ownership through Bubble after first login.
-    if (!(await store.principals.get(owner))) {
-      await store.principals.upsert({ principalId: owner, kind: 'user' });
+    try {
+      // Created without an external identity, which suits master-key callers;
+      // a federated user is granted ownership through Bubble after first login.
+      if (!(await store.principals.get(owner))) {
+        await store.principals.upsert({ principalId: owner, kind: 'user' });
+        await store.grants.add({
+          target: { type: 'principal', principalId: owner },
+          principalId: owner,
+          role: 'owner',
+          grantedByPrincipalId: null,
+        });
+      }
       await store.grants.add({
-        target: { type: 'principal', principalId: owner },
+        target: { type: 'system' },
         principalId: owner,
         role: 'owner',
         grantedByPrincipalId: null,
       });
+    } catch (error) {
+      await release();
+      throw error;
     }
-    await store.grants.add({
-      target: { type: 'system' },
-      principalId: owner,
-      role: 'owner',
-      grantedByPrincipalId: null,
-    });
   }
   const { identity } = runtime.application;
 

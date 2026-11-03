@@ -48,6 +48,14 @@ export interface ResourceAccess {
   workspaces(): Promise<readonly string[] | 'all'>;
 }
 
+/** Whether an answer from {@link ResourceAccess.workspaces} admits one. */
+export function mayEnterWorkspace(
+  allowed: readonly string[] | 'all',
+  workspaceId: string,
+): boolean {
+  return allowed === 'all' || allowed.includes(workspaceId);
+}
+
 /**
  * For callers outside per-resource authorization: the local owner, and the
  * machine credential that already holds the whole RFS surface.
@@ -78,8 +86,20 @@ export interface ResourceDirectory {
   openWorkspace(workspaceId: string): Promise<WorkspaceScope | null>;
   /** Where a caller who may enter any Workspace lands first. */
   defaultWorkspace(): Promise<WorkspaceScope | null>;
-  /** A new Workspace, wherever this backend keeps one, opened. */
-  createWorkspace(name: string): Promise<WorkspaceScope>;
+  /**
+   * The one Workspace every request runs in when the deployment locks it
+   * (managed mode); `null` when each person chooses their own.
+   */
+  lockedWorkspace(): Promise<WorkspaceScope | null>;
+  /**
+   * A new Workspace, wherever this backend keeps one, opened. `adopt` runs
+   * before it is handed out, to give it an owner; if that fails the Workspace
+   * is discarded, so none is left behind without one.
+   */
+  createWorkspace(
+    name: string,
+    adopt: (workspaceId: string) => Promise<void>,
+  ): Promise<WorkspaceScope>;
 }
 
 /** Resolve afresh for each request so revocation is not hidden by a host cache. */

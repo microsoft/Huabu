@@ -65,6 +65,15 @@ export function runInWorkspace<T>(scope: WorkspaceScope, fn: () => T): T {
 }
 
 /**
+ * Run `fn` in the process-active Workspace, outside any request's scope: for
+ * the administrator's folder routes, which move the process-active Workspace
+ * and answer for it.
+ */
+export function runInProcessWorkspace<T>(fn: () => T): T {
+  return storage.exit(fn);
+}
+
+/**
  * The scope this call runs in.
  *
  * `undefined` when no slot is open (local mode, startup, process work), so the

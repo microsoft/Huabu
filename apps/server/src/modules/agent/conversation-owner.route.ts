@@ -17,7 +17,6 @@ import { hydrateCanvasNodes } from '../canvas/canvas-executor.js';
 import { subscribeCanvasUpdates } from '../canvas/canvas-sync.js';
 import { withCanvasMutex } from '../canvas/write-coordinator.js';
 import { space } from '../storage/index.js';
-import { currentWorkspaceScope, runInWorkspace } from '../workspace/context.js';
 import {
   acquireWorkspaceOperationLease,
   getWorkspaceKey,
@@ -240,7 +239,6 @@ const conversationOwnerRoutes: FastifyPluginAsync = async (fastify) => {
     const { canvasId } = query.data;
     const { threadId } = params.data;
     const workspaceKey = getWorkspaceKey();
-    const workspaceScope = currentWorkspaceScope();
     reply.hijack();
     reply.raw.writeHead(200, {
       'Content-Type': 'text/event-stream',
@@ -309,13 +307,12 @@ const conversationOwnerRoutes: FastifyPluginAsync = async (fastify) => {
               () => fail(new Error('Owner query timed out'), 408),
               10_000,
             );
-            // Publisher callbacks run in the writer's context. Restore the
-            // observing request's Workspace for every authoritative read.
-            const read = () =>
-              readOwner(canvasId, threadId, workspaceKey, controller.signal);
-            const value = await (workspaceScope
-              ? runInWorkspace(workspaceScope, read)
-              : read());
+            const value = await readOwner(
+              canvasId,
+              threadId,
+              workspaceKey,
+              controller.signal,
+            );
             clearTimeout(readTimer);
             if (closed) return;
             nodeId = value.state === 'ready' ? value.owner.nodeId : undefined;

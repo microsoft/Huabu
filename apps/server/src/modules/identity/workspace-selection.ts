@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { mayEnterWorkspace } from './service.js';
+
 import type { WorkspacePreferences } from './preferences.js';
 import type { ResolvedIdentity, ResourceDirectory } from './service.js';
 import type { WorkspaceScope } from '../workspace/context.js';
@@ -15,24 +17,24 @@ const provisioning = new WeakMap<
 >();
 
 /**
- * The Workspace a Bubble request runs in: its caller's current one, while they
- * may still enter it. Otherwise the first Workspace they may enter, which
- * becomes current. A member who may enter none gets a personal Workspace that
- * they own. `null` for a caller with no Workspace at all, such as an
- * administrator before any exists.
+ * The Workspace a Bubble request runs in: the locked one in managed mode, for
+ * everyone. Otherwise its caller's current one, while they may still enter it,
+ * else the first Workspace they may enter, which becomes current. A member who
+ * may enter none gets a personal Workspace that they own. `null` for a caller
+ * with no Workspace at all, such as an administrator before any exists.
  */
 export async function selectRequestWorkspace(
   identity: ResolvedIdentity,
   preferences: WorkspacePreferences,
   resources: ResourceDirectory,
 ): Promise<WorkspaceScope | null> {
+  const locked = await resources.lockedWorkspace();
+  if (locked) return locked;
   const { principalId } = identity.principal;
   const allowed = await identity.access.workspaces();
-  const may = (workspaceId: string) =>
-    allowed === 'all' || allowed.includes(workspaceId);
 
   const preferred = await preferences.current(principalId);
-  if (preferred && may(preferred)) {
+  if (preferred && mayEnterWorkspace(allowed, preferred)) {
     const scope = await resources.openWorkspace(preferred);
     if (scope) return scope;
   }
@@ -48,7 +50,8 @@ export async function selectRequestWorkspace(
 
 /**
  * Make one Workspace its caller's current one. Refused, with nothing changed,
- * for a Workspace the caller may not enter or that does not exist.
+ * for a Workspace the caller may not enter or that does not exist, and in
+ * managed mode, where nobody leaves the locked one.
  */
 export async function chooseRequestWorkspace(
   identity: ResolvedIdentity,
@@ -56,8 +59,10 @@ export async function chooseRequestWorkspace(
   resources: ResourceDirectory,
   workspaceId: string,
 ): Promise<WorkspaceScope | null> {
+  const locked = await resources.lockedWorkspace();
+  if (locked) return locked.handle.workspaceId === workspaceId ? locked : null;
   const allowed = await identity.access.workspaces();
-  if (allowed !== 'all' && !allowed.includes(workspaceId)) return null;
+  if (!mayEnterWorkspace(allowed, workspaceId)) return null;
   const scope = await resources.openWorkspace(workspaceId);
   if (scope)
     await preferences.select(identity.principal.principalId, workspaceId);
@@ -93,17 +98,14 @@ function provisionPersonalWorkspace(
     const already = await preferences.current(principalId);
     const allowed = await identity.access.workspaces();
     const existing =
-      already && (allowed === 'all' || allowed.includes(already))
+      already && mayEnterWorkspace(allowed, already)
         ? await resources.openWorkspace(already)
         : null;
     if (existing) return existing;
     const scope = await resources.createWorkspace(
       `${displayName?.trim() || principalId}'s Workspace`,
+      (id) => identity.access.claim({ type: 'workspace', id }),
     );
-    await identity.access.claim({
-      type: 'workspace',
-      id: scope.handle.workspaceId,
-    });
     await preferences.select(principalId, scope.handle.workspaceId);
     return scope;
   })().finally(() => pending.delete(principalId));

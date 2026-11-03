@@ -172,6 +172,7 @@ vi.mock('./workspace.js', () => ({
   },
   getWorkspaceDirectory: () => testState.activePath,
   getWorkspaceHandle: () => testState.active,
+  getProcessWorkspaceHandle: () => testState.active,
   getWorkspacePath: () => {
     if (!testState.activePath) throw new Error('No active Workspace path');
     return testState.activePath;

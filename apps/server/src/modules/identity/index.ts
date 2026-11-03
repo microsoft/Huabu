@@ -6,6 +6,7 @@ import { createLocalIdentityService } from './local.js';
 import { openPostgresWorkspacePreferences } from './preferences.js';
 import { storageResourceDirectory } from './resources.js';
 
+import type { WorkspacePreferences } from './preferences.js';
 import type { IdentityService, ResourceDirectory } from './service.js';
 import type { BubbleAuthConfig } from '@octostaff/bubble';
 import type { FastifyPluginAsync } from 'fastify';
@@ -36,11 +37,20 @@ export function createIdentity(
   let opening: ReturnType<typeof open> | undefined;
   async function open() {
     const bubble = await import('./bubble.js');
+    const store = await bubble.openBubblePostgresStore(postgresUrl);
+    let preferences: WorkspacePreferences;
+    try {
+      preferences = await openPostgresWorkspacePreferences(postgresUrl);
+    } catch (error) {
+      await store.close?.();
+      throw error;
+    }
+    // From here the identity owns, and on failure closes, both.
     return bubble.openBubbleIdentity({
       authenticator: authenticators as BubbleAuthConfig,
       owner,
-      store: await bubble.openBubblePostgresStore(postgresUrl),
-      preferences: await openPostgresWorkspacePreferences(postgresUrl),
+      store,
+      preferences,
       resources,
     });
   }

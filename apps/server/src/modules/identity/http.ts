@@ -16,6 +16,7 @@ import { openWorkspace } from '../storage/index.js';
 import {
   fillWorkspaceScope,
   openWorkspaceScope,
+  runInWorkspace,
 } from '../workspace/context.js';
 import { getProcessWorkspaceHandle } from '../workspace.js';
 
@@ -207,10 +208,17 @@ export function registerIdentity(
           clearInterval(timer);
           activeResponses.delete(close);
         };
-        // Every Space the request was let into must still be open to it.
+        // Every Space the request was let into must still be open to it, in
+        // the Workspace it was let in: a Workspace-scoped route's own, not
+        // the caller's current one this timer was started in.
         const stillAuthorized = async (current: typeof identity) => {
-          for (const { level, resource } of getRequestAuthorizations(request))
-            if (!(await current.access.can(level, resource))) return false;
+          for (const { level, resource, scope } of getRequestAuthorizations(
+            request,
+          )) {
+            const check = () => current.access.can(level, resource);
+            if (!(await (scope ? runInWorkspace(scope, check) : check())))
+              return false;
+          }
           return true;
         };
         const timer = setInterval(() => {

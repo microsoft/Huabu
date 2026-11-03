@@ -53,7 +53,7 @@ const states = new Map<string, DirIndexState>();
 
 /** The index of the Workspace this call runs in. */
 function dirState(): DirIndexState {
-  const workspacePath = getWorkspacePath();
+  const workspacePath = path.resolve(getWorkspacePath());
   let state = states.get(workspacePath);
   if (!state) {
     state = {
@@ -200,10 +200,28 @@ function ensureScanned(): void {
   if (!dirState().scanned) scanWorkspace();
 }
 
-/** Force a re-scan on next access (call after migrations / imports). */
-export function refreshCanvasDirIndex(): void {
-  // Every folder rescans, not only this call's: a refresh is rare, and a
-  // stale index is worse than a second scan.
+/**
+ * Force a re-scan on next access (call after migrations / imports): of the
+ * Workspace this call runs in, or of the named folder. Other Workspaces in use
+ * at the same time keep their index.
+ */
+export function refreshCanvasDirIndex(workspacePath?: string): void {
+  const folder = workspacePath ?? currentFolder();
+  if (folder === null) resetCanvasDirIndexes();
+  else states.delete(path.resolve(folder));
+}
+
+/** The folder of the Workspace this call runs in; `null` before there is one. */
+function currentFolder(): string | null {
+  try {
+    return getWorkspacePath();
+  } catch {
+    return null;
+  }
+}
+
+/** Force every Workspace folder to re-scan on next access. */
+export function resetCanvasDirIndexes(): void {
   states.clear();
 }
 

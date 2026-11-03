@@ -13,7 +13,7 @@
 import { fork, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -230,15 +230,42 @@ export async function activateWorkspacePath(
  * filesystem have one. An empty folder the Server just made is not the
  * unresponsive cloud or network drive the preparation worker isolates, so it
  * is prepared in-process.
+ *
+ * `adopt` runs before the Workspace is handed out, to give it an owner. If it
+ * fails, the Workspace is forgotten again, and on Disk its new, still empty
+ * folder removed, so no failed attempt leaves one behind that nobody owns.
  */
-export async function createWorkspace(name: string): Promise<WorkspaceHandle> {
-  if (!materializesWorkspaces()) return createNamedWorkspace(name);
-  const workspacePath = path.join(getDataDir(), 'workspaces', randomUUID());
-  await mkdir(workspacePath, { recursive: true });
-  prepareWorkspaceOnDisk(workspacePath);
-  const adopted = adoptWorkspaceDirectory(workspacePath);
-  return (
-    (await getWorkspaceRepository().rename(adopted.workspaceId, name)) ??
-    adopted
-  );
+export async function createWorkspace(
+  name: string,
+  adopt: (workspace: WorkspaceHandle) => Promise<void> = async () => {},
+): Promise<WorkspaceHandle> {
+  let workspacePath: string | null = null;
+  let workspace: WorkspaceHandle;
+  if (!materializesWorkspaces()) {
+    workspace = await createNamedWorkspace(name);
+  } else {
+    workspacePath = path.join(getDataDir(), 'workspaces', randomUUID());
+    await mkdir(workspacePath, { recursive: true });
+    prepareWorkspaceOnDisk(workspacePath);
+    const adopted = adoptWorkspaceDirectory(workspacePath);
+    workspace =
+      (await getWorkspaceRepository().rename(adopted.workspaceId, name)) ??
+      adopted;
+  }
+  try {
+    await adopt(workspace);
+  } catch (error) {
+    try {
+      await getWorkspaceRepository().remove(workspace.workspaceId);
+      if (workspacePath)
+        await rm(workspacePath, { recursive: true, force: true });
+    } catch (cleanup) {
+      log.warn(
+        { err: cleanup, workspaceId: workspace.workspaceId },
+        'Could not discard a Workspace whose owner was not recorded',
+      );
+    }
+    throw error;
+  }
+  return workspace;
 }

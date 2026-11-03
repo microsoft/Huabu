@@ -1,18 +1,28 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { currentWorkspaceScope } from '../workspace/context.js';
+
 import type {
   AccessLevel,
   HuabuResource,
   ResolvedIdentity,
 } from './service.js';
+import type { WorkspaceScope } from '../workspace/context.js';
 import type { FastifyRequest } from 'fastify';
 
+/**
+ * A resource access a request was granted. A Space id names the Space in the
+ * Workspace the check ran in, so the scope is kept to recheck it there.
+ */
+export interface RequestAuthorization {
+  level: AccessLevel;
+  resource: HuabuResource;
+  scope: WorkspaceScope | null | undefined;
+}
+
 const identities = new WeakMap<FastifyRequest, ResolvedIdentity>();
-const authorizations = new WeakMap<
-  FastifyRequest,
-  Array<{ level: AccessLevel; resource: HuabuResource }>
->();
+const authorizations = new WeakMap<FastifyRequest, RequestAuthorization[]>();
 
 export function setRequestIdentity(
   request: FastifyRequest,
@@ -35,13 +45,13 @@ export function recordRequestAuthorization(
   resource: HuabuResource,
 ): void {
   const granted = authorizations.get(request) ?? [];
-  granted.push({ level, resource });
+  granted.push({ level, resource, scope: currentWorkspaceScope() });
   authorizations.set(request, granted);
 }
 
 export function getRequestAuthorizations(
   request: FastifyRequest,
-): ReadonlyArray<{ level: AccessLevel; resource: HuabuResource }> {
+): readonly RequestAuthorization[] {
   return authorizations.get(request) ?? [];
 }
 

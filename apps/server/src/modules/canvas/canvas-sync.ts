@@ -19,6 +19,8 @@
  * only once user hand-edits also broadcast).
  */
 
+import { AsyncResource } from 'node:async_hooks';
+
 import type { CanvasSyncEvent } from '@huabu/shared';
 
 type Listener = (event: CanvasSyncEvent) => void;
@@ -41,21 +43,27 @@ export function publishCanvasUpdate(
   }
 }
 
-/** Subscribe to sync events for `canvasId`. Returns an unsubscribe fn. */
+/**
+ * Subscribe to sync events for `canvasId`. Returns an unsubscribe fn.
+ *
+ * The listener runs in its subscriber's async context, not the writer's: an
+ * observer in one Workspace reads that Workspace, whoever published.
+ */
 export function subscribeCanvasUpdates(
   canvasId: string,
   listener: Listener,
 ): () => void {
+  const bound: Listener = AsyncResource.bind(listener);
   let set = listenersByCanvas.get(canvasId);
   if (!set) {
     set = new Set();
     listenersByCanvas.set(canvasId, set);
   }
-  set.add(listener);
+  set.add(bound);
   return () => {
     const s = listenersByCanvas.get(canvasId);
     if (!s) return;
-    s.delete(listener);
+    s.delete(bound);
     if (s.size === 0) listenersByCanvas.delete(canvasId);
   };
 }

@@ -16,7 +16,7 @@ import {
   SpaceHierarchyError,
 } from './space-hierarchy.js';
 import { withSpaceHierarchyLock } from './write-coordinator.js';
-import { claimSpace } from '../security/space-access.js';
+import { claimSpace, requireWorkspaceWrite } from '../security/space-access.js';
 import { getStructuredStore } from '../storage/index.js';
 
 import type { FastifyInstance, FastifyReply } from 'fastify';
@@ -78,7 +78,9 @@ export function registerSpaceHierarchyRoutes(fastify: FastifyInstance): void {
     });
   });
   // Moving a Space changes its inherited authority, whether attaching or
-  // detaching it. Write access alone must never become manage access.
+  // detaching it. Write access alone must never become manage access, and a
+  // detached Space is a new root, which writes the Workspace as creating one
+  // does.
   fastify.patch(
     '/:canvasId/parent',
     { config: { spaceAccess: 'manage' } },
@@ -89,6 +91,10 @@ export function registerSpaceHierarchyRoutes(fastify: FastifyInstance): void {
         return reply
           .code(400)
           .send({ message: 'Invalid Space parent request' });
+      if (body.data.parentSpaceId === null) {
+        await requireWorkspaceWrite(request, reply);
+        if (reply.sent) return;
+      }
       return respond(reply, async () => {
         // Claim only a valid detachment, before removing inherited authority.
         return setSpaceParent(params.data.canvasId, body.data, () =>
