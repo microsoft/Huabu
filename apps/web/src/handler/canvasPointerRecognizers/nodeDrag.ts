@@ -51,7 +51,7 @@ export function createNodeDragRecognizer(options?: {
     event: PointerEvent,
     ctx: CanvasPointerRouterContext,
   ) => boolean;
-  onTap: (nodeId: string, event: PointerEvent) => void;
+  onTap?: (nodeId: string, event: PointerEvent) => void;
   canDrag?: (node: Node) => boolean;
   onActiveChange?: (active: boolean) => void;
 }): PointerRecognizer<PointerEvent, CanvasPointerRouterContext> {
@@ -267,7 +267,7 @@ export function createNodeDragRecognizer(options?: {
           event.clientY - startClient.y,
         ) < activationDistance
       ) {
-        options?.onTap(pressedNodeId, event);
+        options?.onTap?.(pressedNodeId, event);
       }
       reset();
     },

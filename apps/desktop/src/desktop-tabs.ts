@@ -51,6 +51,7 @@ interface DrainRequest {
 const HOME_ID = 'home';
 const NEW_DESKTOP_TAB_ID = 'new-tab';
 const CLOSE_TIMEOUT_MS = 15_000;
+const SAVE_DEADLINE_MS = 60_000;
 const PREFERENCE_KEYS = [
   'huabu.language',
   'huabu-sketch-tools',
@@ -75,6 +76,13 @@ export class DesktopCloseCancelledError extends Error {
   constructor() {
     super('Closing was cancelled. Tabs were kept open.');
     this.name = 'DesktopCloseCancelledError';
+  }
+}
+
+class DesktopSaveTimeoutError extends Error {
+  constructor(title: string) {
+    super(`Saving "${title}" timed out. The Tab was kept open.`);
+    this.name = 'DesktopSaveTimeoutError';
   }
 }
 
@@ -667,21 +675,17 @@ export class DesktopTabs {
       );
     const requestId = randomUUID();
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let deadline: ReturnType<typeof setTimeout> | undefined;
     let settled = false;
     try {
       await new Promise<void>((resolve, reject) => {
+        const timeout = () =>
+          reject(new DesktopSaveTimeoutError(tab.state.title));
+        deadline = setTimeout(timeout, SAVE_DEADLINE_MS);
         const heartbeat = () => {
           if (settled) return;
           clearTimeout(timer);
-          timer = setTimeout(
-            () =>
-              reject(
-                new Error(
-                  `Saving "${tab.state.title}" timed out. The Tab was kept open.`,
-                ),
-              ),
-            CLOSE_TIMEOUT_MS,
-          );
+          timer = setTimeout(timeout, CLOSE_TIMEOUT_MS);
         };
         this.drains.set(requestId, {
           contentsId: view.webContents.id,
@@ -695,6 +699,7 @@ export class DesktopTabs {
     } finally {
       settled = true;
       clearTimeout(timer);
+      clearTimeout(deadline);
     }
   }
 
@@ -742,7 +747,7 @@ export class DesktopTabs {
       const { response } = await dialog.showMessageBox(this.win, {
         type: 'warning',
         message: `Could not save "${tab.state.title}"`,
-        detail: `${error instanceof Error ? error.message : String(error)}\n\nUnsaved changes may be lost if you continue. Cancel to keep this page and retry after the server is available.`,
+        detail: `${error instanceof Error ? error.message : String(error)}\n\nUnsaved changes may be lost, including unfinished uploads, if you continue. Cancel to keep this page and retry later; pending uploads can continue.`,
         buttons: [
           'Cancel',
           action === 'reload'
@@ -766,7 +771,7 @@ export class DesktopTabs {
     this.publish();
   }
 
-  async prepareCloseAll(allowDiscardUnavailable = false): Promise<void> {
+  async prepareCloseAll(allowDiscardOnShutdown = false): Promise<void> {
     if (this.busy) throw new Error('Another Tab operation is in progress');
     this.setHomeMenu(null);
     this.busy = true;
@@ -782,24 +787,27 @@ export class DesktopTabs {
             : [],
       );
       const blocking = failed.find(
-        ({ tab }) => !allowDiscardUnavailable || tab.ready,
+        ({ tab, error }) =>
+          !allowDiscardOnShutdown ||
+          (tab.ready && !(error instanceof DesktopSaveTimeoutError)),
       );
       if (blocking) throw blocking.error;
       if (failed.length > 0) {
         this.closePrepared();
         const { response } = await dialog.showMessageBox(this.win, {
           type: 'warning',
-          message: 'Close without saving unavailable pages?',
-          detail: `${failed.map(({ tab }) => tab.state.title).join('\n')}\n\nThese pages cannot acknowledge saving. Unsaved changes may be lost. All other pages have been saved.`,
-          buttons: ['Cancel', 'Discard unavailable pages and close'],
+          message: 'Close without saving these pages?',
+          detail: `${failed.map(({ tab, error }) => `${tab.state.title}: ${error instanceof Error ? error.message : String(error)}`).join('\n')}\n\nThese pages did not finish saving. Unsaved changes and unfinished uploads may be lost. All other pages have been saved. Cancel to keep the pages and let pending uploads continue.`,
+          buttons: ['Cancel', 'Close without saving'],
           defaultId: 0,
           cancelId: 0,
           noLink: true,
         });
         if (response !== 1) throw new DesktopCloseCancelledError();
         // A page that recovered during the dialog must acknowledge its save.
-        for (const { tab } of failed) {
-          if (tab.ready) await this.drain(tab);
+        for (const { tab, error } of failed) {
+          if (tab.ready && !(error instanceof DesktopSaveTimeoutError))
+            await this.drain(tab);
         }
       }
       this.closePrepared();

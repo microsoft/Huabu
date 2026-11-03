@@ -3759,6 +3759,7 @@ const useCanvasStore = create<RFState>()(
         canUndo: canvasHistoryManager.canUndo,
         canRedo: canvasHistoryManager.canRedo,
       });
+      resumeHeightCommits('node-drag');
     },
 
     endActiveDragSession: () => {

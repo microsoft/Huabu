@@ -35,6 +35,7 @@ export function useFrameSelectionDrag({
     event: PointerEvent;
     ctx: CanvasPointerRouterContext;
     canvasId: string | null;
+    captureTarget: Element;
   } | null>(null);
   const [active, setActive] = useState(false);
   const suppressClick = useAreaSelectionClickGuard(wrapperRef, scopeKey);
@@ -68,13 +69,12 @@ export function useFrameSelectionDrag({
             (node) => !node.selected,
           );
         },
-        onTap: (id, event) =>
-          useCanvasStore
-            .getState()
-            .selectNodes([id], event.metaKey || event.ctrlKey),
-        onActiveChange: setActive,
+        onActiveChange: (active) => {
+          if (active) suppressClick();
+          setActive(active);
+        },
       }),
-    [],
+    [suppressClick],
   );
 
   const finish = useCallback(
@@ -82,15 +82,17 @@ export function useFrameSelectionDrag({
       const session = sessionRef.current;
       if (!session) return;
       sessionRef.current = null;
-      const { event, ctx } = session;
-      if (cancelled) driver.onCancel?.(event, ctx);
-      else driver.onUp?.(event, ctx);
+      const { event, ctx, captureTarget } = session;
+      if (cancelled) {
+        suppressClick();
+        driver.onCancel?.(event, ctx);
+      } else driver.onUp?.(event, ctx);
       if (session.canvasId === useCanvasStore.getState().canvasId)
         useCanvasStore.getState().setViewport(ctx.instance.getViewport());
-      if (ctx.wrapper.hasPointerCapture(event.pointerId))
-        ctx.wrapper.releasePointerCapture(event.pointerId);
+      if (captureTarget.hasPointerCapture(event.pointerId))
+        captureTarget.releasePointerCapture(event.pointerId);
     },
-    [driver],
+    [driver, suppressClick],
   );
   const cancel = useCallback(() => finish(true), [finish]);
   const recognizer = useMemo<
@@ -102,13 +104,16 @@ export function useFrameSelectionDrag({
       onDown: (event, ctx) => {
         const result = driver.onDown(event, ctx);
         if (result !== 'claim') return result;
+        const captureTarget =
+          event.target instanceof Element ? event.target : ctx.wrapper;
         sessionRef.current = {
           event,
           ctx,
           canvasId: useCanvasStore.getState().canvasId,
+          captureTarget,
         };
-        suppressClick();
-        ctx.wrapper.setPointerCapture(event.pointerId);
+        // Keep inactive presses' native click target; pointerdown already blocks XYFlow's mouse drag.
+        captureTarget.setPointerCapture(event.pointerId);
         ctx.wrapper.focus({ preventScroll: true });
         return 'claim';
       },
@@ -128,7 +133,7 @@ export function useFrameSelectionDrag({
       },
       onCancel: cancel,
     }),
-    [driver, cancel, finish, suppressClick],
+    [driver, cancel, finish],
   );
 
   const pointer = useCallback(() => {

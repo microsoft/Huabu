@@ -1314,7 +1314,7 @@ describe('desktop Space Tab lifecycle', () => {
     const a = open('a');
     const close = tabs.close(tabs.snapshot.activeId);
     const id = a.webContents.send.mock.calls.at(-1)![1];
-    for (let elapsed = 0; elapsed < 60_000; elapsed += 5_000) {
+    for (let elapsed = 0; elapsed < 55_000; elapsed += 5_000) {
       await vi.advanceTimersByTimeAsync(5_000);
       tabs.keepDrainAlive(a.webContents as never, id);
     }
@@ -1327,6 +1327,118 @@ describe('desktop Space Tab lifecycle', () => {
     await close;
     expect(a.webContents.close).toHaveBeenCalledOnce();
     tabs.keepDrainAlive(a.webContents as never, id);
+  });
+
+  it.each(['close', 'reload'] as const)(
+    'offers explicit discard for %s after 60s even with live heartbeats',
+    async (action) => {
+      vi.useFakeTimers();
+      let confirm!: (value: { response: number }) => void;
+      mocks.showMessageBox.mockReturnValueOnce(
+        new Promise((resolve) => {
+          confirm = resolve;
+        }),
+      );
+      const a = open('a');
+      const task = tabs[action](tabs.snapshot.activeId);
+      const requestId = a.webContents.send.mock.calls.at(-1)?.[1];
+      for (let elapsed = 0; elapsed < 55_000; elapsed += 5_000) {
+        await vi.advanceTimersByTimeAsync(5_000);
+        tabs.keepDrainAlive(a.webContents as never, requestId);
+      }
+      await vi.advanceTimersByTimeAsync(4_999);
+      expect(mocks.showMessageBox).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(mocks.showMessageBox).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          defaultId: 0,
+          cancelId: 0,
+          detail: expect.stringContaining('unfinished uploads'),
+        }),
+      );
+      expect(a.webContents.close).not.toHaveBeenCalled();
+      expect(a.webContents.reload).not.toHaveBeenCalled();
+      expect(tabs.snapshot.busy).toBe(true);
+      expect(a.webContents.send).toHaveBeenCalledWith('tabs:close-prepared');
+      confirm({ response: 1 });
+      await task;
+      expect(a.webContents[action]).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('resumes after declining a save deadline and ignores its late replies during retry', async () => {
+    vi.useFakeTimers();
+    mocks.showMessageBox.mockResolvedValueOnce({ response: 0 });
+    const a = open('a');
+    const tabId = tabs.snapshot.activeId;
+    const closing = tabs.close(tabId);
+    const rejected = expect(closing).rejects.toThrow('timed out');
+    const oldRequest = a.webContents.send.mock.calls.at(-1)?.[1];
+    for (let elapsed = 0; elapsed < 60_000; elapsed += 5_000) {
+      tabs.keepDrainAlive(a.webContents as never, oldRequest);
+      await vi.advanceTimersByTimeAsync(5_000);
+    }
+    await rejected;
+    expect(tabs.snapshot.busy).toBe(false);
+    expect(a.webContents.close).not.toHaveBeenCalled();
+    expect(a.webContents.send).toHaveBeenCalledWith('tabs:resume');
+    const retry = tabs.close(tabId);
+    tabs.finishDrain(a.webContents as never, oldRequest, { ok: true });
+    tabs.keepDrainAlive(a.webContents as never, oldRequest);
+    expect(a.webContents.close).not.toHaveBeenCalled();
+    finish(a);
+    await retry;
+    expect(a.webContents.close).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each([0, 1])(
+    'requires shutdown confirmation after a responsive save deadline (choice %s)',
+    async (response) => {
+      vi.useFakeTimers();
+      mocks.showMessageBox.mockResolvedValueOnce({ response });
+      const a = open('a');
+      const save = tabs.prepareCloseAll(true);
+      const completed =
+        response === 1
+          ? expect(save).resolves.toBeUndefined()
+          : expect(save).rejects.toThrow('cancelled');
+      finish(mocks.views[0]);
+      const requestId = a.webContents.send.mock.calls.at(-1)?.[1];
+      for (let elapsed = 0; elapsed < 60_000; elapsed += 5_000) {
+        tabs.keepDrainAlive(a.webContents as never, requestId);
+        await vi.advanceTimersByTimeAsync(5_000);
+      }
+      await completed;
+      expect(mocks.showMessageBox).toHaveBeenCalledOnce();
+      expect(tabs.snapshot.busy).toBe(response === 1);
+      expect(a.webContents.close).not.toHaveBeenCalled();
+      expect(
+        a.webContents.send.mock.calls.filter(
+          ([channel]) => channel === 'tabs:prepare-close',
+        ),
+      ).toHaveLength(1);
+    },
+  );
+
+  it('retains Workspace identity after a save deadline without offering discard', async () => {
+    vi.useFakeTimers();
+    const a = open('a');
+    const home = mocks.views[0];
+    const change = tabs.beginWorkspaceChange(home.webContents as never);
+    const rejected = expect(change).rejects.toThrow('timed out');
+    finish(home);
+    const requestId = a.webContents.send.mock.calls.at(-1)?.[1];
+    for (let elapsed = 0; elapsed < 60_000; elapsed += 5_000) {
+      tabs.keepDrainAlive(a.webContents as never, requestId);
+      await vi.advanceTimersByTimeAsync(5_000);
+    }
+    await rejected;
+    expect(mocks.showMessageBox).not.toHaveBeenCalled();
+    expect(tabs.snapshot.workspaceId).toBe('workspace');
+    expect(tabs.snapshot.busy).toBe(false);
+    expect(a.webContents.close).not.toHaveBeenCalled();
   });
 
   it('cancels a multi-page close immediately and retains every page', async () => {

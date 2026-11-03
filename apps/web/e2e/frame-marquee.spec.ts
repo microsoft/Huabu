@@ -303,6 +303,37 @@ test.afterEach(async ({ page }, testInfo) => {
   }
 });
 
+test('inactive inferred Frame press preserves child double-click routing', async ({
+  page,
+}) => {
+  const ids = await seed(page, 1);
+  const before = await rects(page, ids);
+  await press(page, blank(before, 1));
+  await move(page, center(before.second));
+  await page.mouse.up();
+  await selection(page, [ids.first, ids.second]);
+  await node(page, ids.first).evaluate((element) => {
+    let clicks = 0;
+    element.addEventListener('click', () => {
+      element.setAttribute('data-received-clicks', String(++clicks));
+    });
+    element.addEventListener('dblclick', () => {
+      element.setAttribute('data-received-double-click', 'true');
+    });
+  });
+  const at = center(before.first);
+  await page.mouse.dblclick(at.x, at.y);
+  await expect(node(page, ids.first)).toHaveAttribute(
+    'data-received-clicks',
+    '2',
+  );
+  await expect(node(page, ids.first)).toHaveAttribute(
+    'data-received-double-click',
+    'true',
+  );
+  expect((await rects(page, ids)).frame.x).toBeCloseTo(before.frame.x, 1);
+});
+
 test('inferred Frame advances on every equally spaced pointer tick', async ({
   page,
 }) => {

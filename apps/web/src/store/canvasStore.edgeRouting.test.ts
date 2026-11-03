@@ -22,7 +22,12 @@ vi.mock('../api/canvas', async (actual) => ({
   ...api,
 }));
 
-import { resumeHeightCommits } from '@/components/Nodes/shared/height/commitSuspension';
+import {
+  isHeightCommitSuspended,
+  onHeightCommitsSettled,
+  resumeHeightCommits,
+  suspendHeightCommits,
+} from '@/components/Nodes/shared/height/commitSuspension';
 import { resolveUiIntent } from '@/handler/canvasCommand/uiIntent';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
@@ -213,8 +218,10 @@ describe('edge routing after real node drags', () => {
     );
     start(['frame']);
     move('frame', { x: 130, y: 220 }, true);
+    expect(isHeightCommitSuspended()).toBe(true);
     expect(node('frame').position).toEqual({ x: 130, y: 220 });
     state().cancelActiveNodeDrag();
+    expect(isHeightCommitSuspended()).toBe(false);
     expect(node('frame').position).toEqual({ x: 100, y: 200 });
     expect(state().nodes.some((entry) => entry.dragging)).toBe(false);
     expect(canvasHistoryManager.canUndo).toBe(false);
@@ -223,6 +230,28 @@ describe('edge routing after real node drags', () => {
     expect(node('frame').position).toEqual({ x: 100, y: 200 });
     expect(node('a').position).toEqual({ x: 60, y: 100 });
     state().cancelActiveNodeDrag();
+  });
+
+  it('releases drag height work only after geometry restoration without clearing other holds', () => {
+    seed([note('a', 10, 20)], []);
+    suspendHeightCommits('viewport');
+    const settled = vi.fn(() =>
+      expect(node('a').position).toEqual({ x: 10, y: 20 }),
+    );
+    const unsubscribe = onHeightCommitsSettled(settled);
+    try {
+      start(['a']);
+      move('a', { x: 60, y: 80 }, true);
+      state().cancelActiveNodeDrag();
+      expect(isHeightCommitSuspended()).toBe(true);
+      expect(settled).not.toHaveBeenCalled();
+      resumeHeightCommits('viewport');
+      expect(settled).toHaveBeenCalledOnce();
+      expect(isHeightCommitSuspended()).toBe(false);
+    } finally {
+      unsubscribe();
+      resumeHeightCommits('viewport');
+    }
   });
 
   it.each(['column', 'row'] as const)(
