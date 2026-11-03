@@ -54,7 +54,7 @@ export function createNodeDragRecognizer(options?: {
   ) => boolean;
   onTap?: (nodeId: string, event: PointerEvent) => void;
   canDrag?: (node: Node) => boolean;
-  onActiveChange?: (active: boolean) => void;
+  onActiveChange?: (active: boolean, movementAllowed: boolean) => void;
 }): PointerRecognizer<PointerEvent, CanvasPointerRouterContext> {
   let pointerId: number | null = null;
   let canvasId: string | null = null;
@@ -70,7 +70,7 @@ export function createNodeDragRecognizer(options?: {
   let startPositions = new Map<string, { x: number; y: number }>();
 
   const reset = (): void => {
-    if (locked) options?.onActiveChange?.(false);
+    if (locked) options?.onActiveChange?.(false, movementAllowed);
     pointerId = null;
     locked = false;
     gestureIds = [];
@@ -229,7 +229,7 @@ export function createNodeDragRecognizer(options?: {
         );
         if (moved < activationDistance) return;
         locked = true;
-        options?.onActiveChange?.(true);
+        options?.onActiveChange?.(true, movementAllowed);
         // Snapshots pre-drag positions + begins the snap session (same
         // as a mouse/pen drag start).
         if (movementAllowed && primaryNode) {

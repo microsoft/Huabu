@@ -611,6 +611,88 @@ test('captured Frame drag cancels without losing selection or moving children', 
   }
 });
 
+test('a locked press in a mixed Frame selection cannot auto-pan or leak a click', async ({
+  page,
+}) => {
+  const ids = await seed(page, 1);
+  await execute(page, [
+    {
+      type: 'CREATE_NODES',
+      nodes: [
+        {
+          nodeType: 'note',
+          data: {
+            label: 'Locked probe',
+            content: 'Locked probe',
+            heightMode: 'fixed',
+          },
+          position: { x: 1100, y: 400 },
+          size: { width: 180, height: 120 },
+        },
+      ],
+    },
+  ]);
+  const locked = (await persisted(page)).nodes.find(
+    (entry) => entry.data.label === 'Locked probe',
+  );
+  if (!locked) throw new Error('Missing locked probe');
+  await execute(page, [
+    { type: 'SET_NODE_LOCKED', items: [{ nodeId: locked.id, locked: true }] },
+  ]);
+  await expect(node(page, locked.id)).toBeVisible();
+  await stableViewport(page);
+  const before = await rects(page, ids);
+  const lockedRect = await node(page, locked.id).boundingBox();
+  if (!lockedRect) throw new Error('Missing locked rectangle');
+  const at = center(lockedRect);
+  await press(page, blank(before, 1));
+  await move(page, {
+    x: lockedRect.x + lockedRect.width + 10,
+    y:
+      Math.max(
+        lockedRect.y + lockedRect.height,
+        before.second.y + before.second.height,
+      ) + 10,
+  });
+  await page.mouse.up();
+  await selection(page, [ids.first, ids.second, locked.id]);
+  const saved = geometry((await persisted(page)).nodes);
+  const initial = await readViewportTransform(page);
+  await node(page, locked.id).evaluate((element) => {
+    let clicks = 0;
+    element.addEventListener('click', () =>
+      element.setAttribute('data-probe-clicks', String(++clicks)),
+    );
+  });
+  await press(page, at, locked.id);
+  await move(page, { x: 1990, y: 500 });
+  const transforms = await page.evaluate(async () => {
+    const values: string[] = [];
+    const start = performance.now();
+    while (performance.now() - start < 500) {
+      await new Promise(requestAnimationFrame);
+      values.push(
+        (document.querySelector('.react-flow__viewport') as HTMLElement).style
+          .transform,
+      );
+    }
+    return values;
+  });
+  expect(transforms.length).toBeGreaterThan(1);
+  expect(new Set(transforms)).toEqual(new Set([initial]));
+  await move(page, at);
+  await page.mouse.up();
+  await selection(page, [ids.first, ids.second, locked.id]);
+  expect(
+    await node(page, locked.id).getAttribute('data-probe-clicks'),
+  ).toBeNull();
+  await sameRects(page, ids, before);
+  expect(geometry((await persisted(page)).nodes)).toEqual(saved);
+  await page.mouse.click(at.x, at.y);
+  await expect(node(page, locked.id)).toHaveAttribute('data-probe-clicks', '1');
+  expect(await readViewportTransform(page)).toBe(initial);
+});
+
 test('inferred Frame remains under the pointer during edge auto-pan', async ({
   page,
 }) => {

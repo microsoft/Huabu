@@ -69,9 +69,9 @@ export function useFrameSelectionDrag({
             (node) => !node.selected,
           );
         },
-        onActiveChange: (active) => {
+        onActiveChange: (active, movementAllowed) => {
           if (active) suppressClick();
-          setActive(active);
+          setActive(active && movementAllowed);
         },
       }),
     [suppressClick],

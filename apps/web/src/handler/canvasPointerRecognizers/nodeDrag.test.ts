@@ -88,6 +88,56 @@ beforeEach(() => {
 });
 
 describe('createNodeDragRecognizer', () => {
+  it.each(['locked', 'inherited', 'movable'] as const)(
+    'reports movement permission separately from the drag threshold for a %s press',
+    (restriction) => {
+      const frame: Node = {
+        id: 'frame',
+        type: 'frame',
+        position: { x: 100, y: 200 },
+        data: {},
+      };
+      getState.mockReturnValue({
+        ...getState(),
+        nodes: [
+          frame,
+          { ...selectedNode, id: 'first', parentId: frame.id },
+          { ...selectedNode, id: 'second', parentId: frame.id },
+          {
+            ...selectedNode,
+            data: { locked: restriction === 'locked' },
+            draggable: restriction !== 'inherited',
+          },
+        ],
+      });
+      const onActiveChange = vi.fn();
+      const onTap = vi.fn();
+      const recognizer = createNodeDragRecognizer({
+        acceptsPointer: () => true,
+        onActiveChange,
+        onTap,
+      });
+      recognizer.onDown(pointer(1, 0, 0), context);
+      recognizer.onUp?.(pointer(1, 0, 0), context);
+      expect(onTap).toHaveBeenCalledOnce();
+      onTap.mockClear();
+      recognizer.onDown(pointer(2, 0, 0), context);
+      recognizer.onMove?.(pointer(2, 20, 0), context);
+      recognizer.onUp?.(pointer(2, 0, 0), context);
+      expect(onActiveChange.mock.calls).toEqual([
+        [true, restriction === 'movable'],
+        [false, restriction === 'movable'],
+      ]);
+      expect(onTap).not.toHaveBeenCalled();
+      expect(onNodeDragStart).toHaveBeenCalledTimes(
+        restriction === 'movable' ? 1 : 0,
+      );
+      expect(onNodeDragStop).toHaveBeenCalledTimes(
+        restriction === 'movable' ? 1 : 0,
+      );
+    },
+  );
+
   it.each(['mouse', 'pen'])(
     'uses the actual %s target beneath transparent Sketch bounds to move a covered Frame',
     (pointerType) => {
