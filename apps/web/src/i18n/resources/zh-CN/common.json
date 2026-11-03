@@ -1183,7 +1183,7 @@
     "addToQueue": "加入队列",
     "addToQueueHint": "加入队列（Enter）",
     "queuedMessages": "待发送消息",
-    "queueCount": "待发送（{{count}}）",
+    "queuePending": "待发送",
     "queuePaused": "队列已暂停（{{count}}）",
     "resumeQueue": "继续发送",
     "removeFromQueue": "从队列移除",

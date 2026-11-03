@@ -1183,7 +1183,7 @@
     "addToQueue": "Add to queue",
     "addToQueueHint": "Add to queue (Enter)",
     "queuedMessages": "Queued messages",
-    "queueCount": "Queued ({{count}})",
+    "queuePending": "Queued",
     "queuePaused": "Queue paused ({{count}})",
     "resumeQueue": "Resume queue",
     "removeFromQueue": "Remove from queue",

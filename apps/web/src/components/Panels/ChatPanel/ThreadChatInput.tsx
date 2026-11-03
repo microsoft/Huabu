@@ -73,16 +73,14 @@ export function ThreadChatInput({
     <>
       {queuedTurns.length > 0 ? (
         <section
-          className="mb-2 min-w-0 px-3 text-xs"
+          className="mb-2 min-w-0 text-xs"
           aria-label={t('chat.queuedMessages')}
         >
-          <div className="mb-1 flex items-center justify-between gap-2">
-            <span className="text-fg-muted" role="status">
-              {t(paused ? 'chat.queuePaused' : 'chat.queueCount', {
-                count: queuedTurns.length,
-              })}
-            </span>
-            {paused ? (
+          {paused ? (
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <span className="text-fg-muted" role="status">
+                {t('chat.queuePaused', { count: queuedTurns.length })}
+              </span>
               <Button
                 variant="ghost"
                 size="sm"
@@ -97,42 +95,43 @@ export function ThreadChatInput({
               >
                 {t('chat.resumeQueue')}
               </Button>
-            ) : null}
-          </div>
-          <ol className="max-h-60 overflow-y-auto overscroll-contain px-2 pt-2">
+            </div>
+          ) : (
+            <p className="text-fg-muted text-right" role="status">
+              {t('chat.queuePending')}
+            </p>
+          )}
+          <ol className="-mx-2 max-h-60 overflow-y-auto overscroll-contain px-2 pt-2">
             {queuedMessages.map((turn) => (
-              <li
-                key={turn.id}
-                className="group/queued-message relative min-w-0"
-              >
-                <div className="min-w-0">
+              <li key={turn.id} className="min-w-0">
+                {turn.status !== 'pending' ? (
+                  <p className="text-fg-muted mb-2 text-right" role="status">
+                    {t(
+                      turn.status === 'uncertain'
+                        ? 'chat.queueUncertain'
+                        : 'chat.queueSending',
+                    )}
+                  </p>
+                ) : null}
+                <div className="group/queued-message relative min-w-0">
                   <UserMessage {...turn.message} isFirst />
-                  {turn.status !== 'pending' ? (
-                    <p className="text-fg-muted mb-2 text-right" role="status">
-                      {t(
-                        turn.status === 'uncertain'
-                          ? 'chat.queueUncertain'
-                          : 'chat.queueSending',
-                      )}
-                    </p>
-                  ) : null}
-                </div>
-                <div className="pointer-events-none absolute -top-2 -right-2 z-10 opacity-0 transition-opacity group-focus-within/queued-message:pointer-events-auto group-focus-within/queued-message:opacity-100 group-hover/queued-message:pointer-events-auto group-hover/queued-message:opacity-100 [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    iconOnly
-                    shape="pill"
-                    className="bg-hover focus-visible:ring-info enabled:hover:bg-edge-default focus-visible:ring-1"
-                    title={t('chat.removeFromQueue')}
-                    disabled={turn.status !== 'pending'}
-                    onClick={() => {
-                      removeQueuedTurn(threadId, turn.id);
-                      props.onCommit?.();
-                    }}
-                  >
-                    <X aria-hidden="true" />
-                  </Button>
+                  <div className="pointer-events-none absolute -top-2 -right-2 z-10 opacity-0 transition-opacity group-focus-within/queued-message:pointer-events-auto group-focus-within/queued-message:opacity-100 group-hover/queued-message:pointer-events-auto group-hover/queued-message:opacity-100 [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      iconOnly
+                      shape="pill"
+                      className="bg-hover focus-visible:ring-info enabled:hover:bg-edge-default focus-visible:ring-1"
+                      title={t('chat.removeFromQueue')}
+                      disabled={turn.status !== 'pending'}
+                      onClick={() => {
+                        removeQueuedTurn(threadId, turn.id);
+                        props.onCommit?.();
+                      }}
+                    >
+                      <X aria-hidden="true" />
+                    </Button>
+                  </div>
                 </div>
               </li>
             ))}

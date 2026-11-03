@@ -169,6 +169,25 @@ describe('automatic viewport fill', () => {
     act(() => vi.advanceTimersByTime(600));
   }
 
+  it('measures the internal scrollbar gutter and refreshes it on activation', () => {
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(400);
+    const clientWidth = vi
+      .spyOn(HTMLElement.prototype, 'clientWidth', 'get')
+      .mockReturnValue(392);
+    render();
+    const scroller = container.querySelector<HTMLElement>('[role="log"]');
+    expect(scroller?.style.getPropertyValue('--chat-scrollbar-width')).toBe(
+      '8px',
+    );
+
+    render({ isActive: false });
+    clientWidth.mockReturnValue(400);
+    render({ isActive: true });
+    expect(scroller?.style.getPropertyValue('--chat-scrollbar-width')).toBe(
+      '0px',
+    );
+  });
+
   it('fills a measured short viewport without enabling output following', () => {
     const load = vi.fn();
     render({ hasOlderHistory: true, onLoadOlderHistory: load });
@@ -628,7 +647,10 @@ describe('manual virtual chat', () => {
     const thinking = container.querySelector('[data-thinking]');
     expect(thinking).not.toBeNull();
     expect(thinking?.parentElement?.className).toBe('ml-1 px-4 py-2');
-    expect(thinking?.parentElement?.parentElement?.className).toBe('px-3');
+    expect(thinking?.parentElement?.parentElement?.className).toContain('pl-3');
+    expect(thinking?.parentElement?.parentElement?.className).toContain(
+      '--chat-scrollbar-width',
+    );
     render({ isLoading: true });
     expect(container.querySelector('[data-thinking]')).toBeNull();
   });

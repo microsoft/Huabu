@@ -4,6 +4,7 @@
 import { expect, test } from '@playwright/test';
 
 import type * as AgentApiModule from '../src/api/agent';
+import type * as MessagesModule from '../src/components/Messages/MessageList';
 import type * as ReviewModule from '../src/components/Panels/ChatPanel/ChangeReviewCard';
 import type * as ComposerModule from '../src/components/Panels/ChatPanel/ThreadChatInput';
 import type * as StreamModule from '../src/hooks/useAgentStream';
@@ -31,6 +32,7 @@ test('queues, removes, pauses and resumes through the real composer', async ({
     const reactPath = '/node_modules/.vite/deps/react.js';
     const domPath = '/node_modules/.vite/deps/react-dom_client.js';
     const composerPath = '/src/components/Panels/ChatPanel/ThreadChatInput.tsx';
+    const messagesPath = '/src/components/Messages/MessageList.tsx';
     const reviewPath = '/src/components/Panels/ChatPanel/ChangeReviewCard.tsx';
     const changesPath = '/src/store/acpThreadChangesStore.ts';
     const streamPath = '/src/hooks/useAgentStream.ts';
@@ -42,6 +44,7 @@ test('queues, removes, pauses and resumes through the real composer', async ({
       { default: React },
       { default: ReactDOM },
       { ThreadChatInput },
+      { MessageList },
       { ChangeReviewCard },
       { useAcpThreadChangesStore },
       { useAgentStream },
@@ -53,6 +56,7 @@ test('queues, removes, pauses and resumes through the real composer', async ({
       import(reactPath) as Promise<{ default: typeof ReactModule }>,
       import(domPath) as Promise<{ default: typeof DomModule }>,
       import(composerPath) as Promise<typeof ComposerModule>,
+      import(messagesPath) as Promise<typeof MessagesModule>,
       import(reviewPath) as Promise<typeof ReviewModule>,
       import(changesPath) as Promise<typeof ChangesModule>,
       import(streamPath) as Promise<typeof StreamModule>,
@@ -118,21 +122,46 @@ test('queues, removes, pauses and resumes through the real composer', async ({
         ChatSessionProvider,
         { value: session },
         React.createElement(
-          ThreadChatInput,
-          {
-            mode: 'operate',
-            connectedTop: true,
-            isStreaming: stream.isLoading,
-            onStop: stream.stopStream,
-            onSubmit: (event, mode, draft) => {
-              event.preventDefault();
-              void stream.startStream(draft, mode);
-            },
-          },
-          React.createElement(ChangeReviewCard, {
-            canvasId: session.canvasId,
-            threadId: session.threadId,
+          React.Fragment,
+          null,
+          React.createElement(MessageList, {
+            messages: [
+              {
+                id: 'alignment-answer',
+                role: 'assistant',
+                segments: [
+                  {
+                    kind: 'text',
+                    text: 'The existing implementation keeps queued messages separate from the conversation.',
+                  },
+                ],
+              },
+            ],
+            isLoading: false,
           }),
+          React.createElement(
+            'div',
+            {
+              className: 'px-3 pb-2',
+            },
+            React.createElement(
+              ThreadChatInput,
+              {
+                mode: 'operate',
+                connectedTop: true,
+                isStreaming: stream.isLoading,
+                onStop: stream.stopStream,
+                onSubmit: (event, mode, draft) => {
+                  event.preventDefault();
+                  void stream.startStream(draft, mode);
+                },
+              },
+              React.createElement(ChangeReviewCard, {
+                canvasId: session.canvasId,
+                threadId: session.threadId,
+              }),
+            ),
+          ),
         ),
       );
     }
@@ -141,7 +170,7 @@ test('queues, removes, pauses and resumes through the real composer', async ({
     fixture.style.display = 'none';
     const host = document.createElement('div');
     host.className =
-      'bg-bg-default fixed inset-0 mx-auto flex h-full w-full max-w-xl flex-col justify-end p-4';
+      'bg-surface fixed inset-0 mx-auto flex h-full w-full max-w-xl flex-col gap-2 pt-4';
     document.body.append(host);
     ReactDOM.createRoot(host).render(React.createElement(Composer));
   });
@@ -164,6 +193,7 @@ test('queues, removes, pauses and resumes through the real composer', async ({
   await page.getByRole('button', { name: 'Add to queue', exact: true }).click();
   await expect(queue.getByRole('listitem')).toHaveCount(2);
   await expect(queue.locator('[data-chat-user-message]')).toHaveCount(2);
+  await expect(queue.getByRole('status')).toHaveText(['Queued']);
   await expect(queue.locator('[data-chat-prompt-content]').first()).toHaveText(
     'Review the implementation and its failure paths before making further changes.',
   );
@@ -180,7 +210,7 @@ test('queues, removes, pauses and resumes through the real composer', async ({
   const messageBounds = await firstRow
     .locator('[data-chat-user-message]')
     .boundingBox();
-  await firstRow.hover();
+  await firstRow.locator('[data-chat-user-message]').hover();
   await expect(removeOverlay).toHaveCSS('opacity', '1');
   expect(
     await firstRow.locator('[data-chat-user-message]').boundingBox(),
@@ -190,39 +220,116 @@ test('queues, removes, pauses and resumes through the real composer', async ({
   await firstRemove.focus();
   await expect(removeOverlay).toHaveCSS('opacity', '1');
   await input.focus();
-  for (const width of [380, 900]) {
+  for (const [width, scrollbar] of [
+    [380, 8],
+    [900, 8],
+    [380, 0],
+    [900, 0],
+  ]) {
     await page.setViewportSize({ width, height: 800 });
+    const transcript = page.getByRole('log');
+    await transcript.evaluate((element, scrollbar) => {
+      element.style.scrollbarWidth = scrollbar === 0 ? 'none' : 'auto';
+    }, scrollbar);
+    await expect
+      .poll(() =>
+        transcript.evaluate((element) =>
+          element.style.getPropertyValue('--chat-scrollbar-width'),
+        ),
+      )
+      .toBe(`${scrollbar}px`);
     await expect(input).toBeInViewport();
     await expect(queue).toBeInViewport();
     const layout = await queue.evaluate((element) => {
       const review = element.nextElementSibling;
       const composer =
         review?.nextElementSibling?.querySelector('.group\\/composer');
-      if (!review || !composer) throw new Error('Missing connected composer');
+      const composerArea = element.parentElement;
+      if (!review || !composer || !composerArea)
+        throw new Error('Missing connected composer');
+      const message = document.querySelector(
+        '[data-chat-message-id="alignment-answer"]',
+      );
+      const row = element.querySelector('li');
+      const status = element.querySelector('[role="status"]');
+      const bubble = row
+        ?.querySelector('[data-chat-prompt-content]')
+        ?.closest('.rounded-md');
+      if (!message || !status || !bubble)
+        throw new Error('Missing message alignment targets');
+      const messageStyle = getComputedStyle(message);
       return {
         queueBottom: element.getBoundingClientRect().bottom,
         reviewTop: review.getBoundingClientRect().top,
         reviewBottom: review.getBoundingClientRect().bottom,
         composerTop: composer.getBoundingClientRect().top,
+        composerLeft: composer.getBoundingClientRect().left,
+        composerRight: composer.getBoundingClientRect().right,
+        leftInset:
+          composer.getBoundingClientRect().left -
+          composerArea.getBoundingClientRect().left,
+        rightInset:
+          composerArea.getBoundingClientRect().right -
+          composer.getBoundingClientRect().right,
+        queueLeft: element.getBoundingClientRect().left,
+        queueRight: element.getBoundingClientRect().right,
+        messageLeft:
+          message.getBoundingClientRect().left +
+          parseFloat(messageStyle.paddingLeft),
+        messageRight:
+          message.getBoundingClientRect().right -
+          parseFloat(messageStyle.paddingRight),
+        statusRight: status.getBoundingClientRect().right,
+        bubbleRight: bubble.getBoundingClientRect().right,
+        statusGap:
+          bubble.getBoundingClientRect().top -
+          status.getBoundingClientRect().bottom,
+        queueBackground: getComputedStyle(element).backgroundColor,
+        queueBorder: getComputedStyle(element).borderTopWidth,
+        composerOverflow: getComputedStyle(composerArea).overflow,
       };
     });
     expect(layout.queueBottom).toBeLessThanOrEqual(layout.reviewTop);
     expect(
       Math.abs(layout.reviewBottom - layout.composerTop),
     ).toBeLessThanOrEqual(1);
+    for (const edge of ['Left', 'Right'] as const) {
+      expect(
+        Math.abs(layout[`queue${edge}`] - layout[`composer${edge}`]),
+      ).toBeLessThanOrEqual(1);
+      expect(
+        Math.abs(layout[`message${edge}`] - layout[`composer${edge}`]),
+      ).toBeLessThanOrEqual(1);
+    }
+    expect(
+      Math.abs(layout.statusRight - layout.bubbleRight),
+    ).toBeLessThanOrEqual(1);
+    expect(
+      Math.abs(layout.bubbleRight - layout.composerRight),
+    ).toBeLessThanOrEqual(1);
+    expect(layout.statusGap).toBe(8);
+    expect(layout.queueBackground).toBe('rgba(0, 0, 0, 0)');
+    expect(layout.queueBorder).toBe('0px');
+    expect(layout.composerOverflow).toBe('visible');
+    expect(layout.leftInset).toBe(12);
+    expect(layout.rightInset).toBe(12);
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= window.innerWidth,
       ),
     ).toBe(true);
-    await firstRow.hover();
+    await firstRow.locator('[data-chat-user-message]').hover();
     await expect(removeOverlay).toHaveCSS('opacity', '1');
-    await page.screenshot({ path: testInfo.outputPath(`queue-${width}.png`) });
+    await page.screenshot({
+      path: testInfo.outputPath(
+        `queue-${width}${scrollbar === 0 ? '-overlay' : ''}.png`,
+      ),
+    });
   }
   await page.evaluate(() => document.documentElement.classList.add('dark'));
   await page.screenshot({ path: testInfo.outputPath('queue-dark.png') });
   await page.evaluate(() => document.documentElement.classList.remove('dark'));
-  await queue.getByRole('listitem').last().hover();
+  await queue.locator('[data-chat-user-message]').last().hover();
   await queue.getByRole('button', { name: 'Remove from queue' }).last().click();
   await expect(queue.getByRole('listitem')).toHaveCount(1);
   await page.getByRole('button', { name: 'Stop', exact: true }).click();
