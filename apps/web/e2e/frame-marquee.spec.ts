@@ -3,7 +3,12 @@
 
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
 
-import { openNewCanvas, readViewportTransform, translateOf } from './helpers';
+import {
+  oneFingerDrag,
+  openNewCanvas,
+  readViewportTransform,
+  translateOf,
+} from './helpers';
 
 import type {
   CanvasCommand,
@@ -332,6 +337,198 @@ test('inactive inferred Frame press preserves child double-click routing', async
     'true',
   );
   expect((await rects(page, ids)).frame.x).toBeCloseTo(before.frame.x, 1);
+});
+
+test('dragging through an unselected Sketch moves the covered Frame, not the Sketch', async ({
+  page,
+}) => {
+  const ids = await seed(page, 1);
+  const before = await rects(page, ids);
+  await press(page, blank(before, 1));
+  await move(page, center(before.second));
+  await page.mouse.up();
+  await selection(page, [ids.first, ids.second]);
+  const initial = (await persisted(page)).nodes;
+  const frame = initial.find((entry) => entry.id === ids.frame)!;
+  const child = initial.find((entry) => entry.id === ids.first)!;
+  await execute(page, [
+    {
+      type: 'CREATE_NODES',
+      nodes: [
+        {
+          nodeType: 'sketch',
+          position: {
+            x: frame.position.x + child.position.x - 30,
+            y: frame.position.y + child.position.y - 30,
+          },
+          size: { width: 240, height: 180 },
+          data: {
+            label: 'Overlapping Sketch',
+            initialSize: { width: 240, height: 180 },
+            strokes: [0, 180].map((y, index) => ({
+              id: `overlap-stroke-${index}`,
+              points: [
+                [0, y, 0.5],
+                [240, y, 0.5],
+              ],
+              color: 'black',
+              size: 4,
+              createdAt: index,
+            })),
+          },
+        },
+      ],
+    },
+  ]);
+  const sketch = page.locator('.react-flow__node-sketch');
+  await expect(sketch).toBeVisible();
+  await selection(page, [ids.first, ids.second]);
+  const saved = (await persisted(page)).nodes;
+  const sketchBefore = await sketch.boundingBox();
+  const at = center(before.first);
+  expect(sketchBefore).not.toBeNull();
+  expect(at.x).toBeGreaterThan(sketchBefore!.x);
+  expect(at.x).toBeLessThan(sketchBefore!.x + sketchBefore!.width);
+  expect(at.y).toBeGreaterThan(sketchBefore!.y);
+  expect(at.y).toBeLessThan(sketchBefore!.y + sketchBefore!.height);
+  expect(
+    await sketch.evaluate((element) =>
+      Number(getComputedStyle(element).zIndex),
+    ),
+  ).toBeGreaterThan(
+    await node(page, ids.first).evaluate((element) =>
+      Number(getComputedStyle(element).zIndex),
+    ),
+  );
+  await page.keyboard.down('Alt');
+  await press(page, at, ids.first);
+  await move(page, { x: at.x + 80, y: at.y + 40 });
+  await page.mouse.up();
+  await page.keyboard.up('Alt');
+  const after = await rects(page, ids);
+  for (const name of names) {
+    expect(after[name].x - before[name].x).toBeCloseTo(80, 1);
+    expect(after[name].y - before[name].y).toBeCloseTo(40, 1);
+  }
+  expect(await sketch.boundingBox()).toEqual(sketchBefore);
+  await selection(page, [ids.first, ids.second]);
+  await undo(page, ids, before, saved);
+});
+
+test.describe('Finger-mode inferred Frame presses', () => {
+  test.use({ hasTouch: true });
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem(
+        'huabu-sketch-tools',
+        JSON.stringify({
+          state: { inputModePreference: 'finger' },
+          version: 0,
+        }),
+      );
+    });
+  });
+
+  for (const startOnOverlay of [false, true]) {
+    test(`inactive touch preserves native child taps and double-tap preview (overlay: ${startOnOverlay})`, async ({
+      page,
+      context,
+    }) => {
+      const ids = await seed(page, 1);
+      const before = await rects(page, ids);
+      await press(page, blank(before, 1));
+      await move(page, center(before.second));
+      await page.mouse.up();
+      await selection(page, [ids.first, ids.second]);
+      const at = center(before.first);
+      if (startOnOverlay) {
+        const client = await context.newCDPSession(page);
+        await client.send('Input.dispatchTouchEvent', {
+          type: 'touchStart',
+          touchPoints: [at],
+        });
+        await client.send('Input.dispatchTouchEvent', {
+          type: 'touchCancel',
+          touchPoints: [],
+        });
+        await client.detach();
+        await selection(page, [ids.first, ids.second]);
+        await expect(page.locator('[data-canvas-root]')).toHaveAttribute(
+          'data-not-mouse',
+        );
+      }
+      await node(page, ids.first).evaluate((element) => {
+        let clicks = 0;
+        element.addEventListener('click', () => {
+          element.setAttribute('data-received-clicks', String(++clicks));
+        });
+      });
+      await page.touchscreen.tap(at.x, at.y);
+      await page.touchscreen.tap(at.x, at.y);
+      await expect(node(page, ids.first)).toHaveAttribute(
+        'data-received-clicks',
+        '2',
+      );
+      await expect(
+        page.getByRole('tab', { name: /^first child \(note\)/ }),
+      ).toBeVisible();
+      expect((await rects(page, ids)).frame.x).toBeCloseTo(before.frame.x, 1);
+    });
+  }
+
+  test('touch drag moves the Frame once without activating children and cancellation restores it', async ({
+    page,
+    context,
+  }) => {
+    const ids = await seed(page, 1);
+    const before = await rects(page, ids);
+    await press(page, blank(before, 1));
+    await move(page, center(before.second));
+    await page.mouse.up();
+    await selection(page, [ids.first, ids.second]);
+    const saved = (await persisted(page)).nodes;
+    const viewport = await readViewportTransform(page);
+    const client = await context.newCDPSession(page);
+    const start = center(before.first);
+    await page.keyboard.down('Alt');
+    await oneFingerDrag(client, start, 80, 40);
+    await page.keyboard.up('Alt');
+    const after = await rects(page, ids);
+    for (const name of names) {
+      expect(after[name].x - before[name].x).toBeCloseTo(80, 1);
+      expect(after[name].y - before[name].y).toBeCloseTo(40, 1);
+    }
+    await selection(page, [ids.first, ids.second]);
+    expect(await readViewportTransform(page)).toBe(viewport);
+    await expect(
+      page.getByRole('region', { name: 'Preview group' }),
+    ).toHaveCount(0);
+    await undo(page, ids, before, saved);
+
+    for (const active of [false, true]) {
+      await client.send('Input.dispatchTouchEvent', {
+        type: 'touchStart',
+        touchPoints: [start],
+      });
+      if (active) {
+        await client.send('Input.dispatchTouchEvent', {
+          type: 'touchMove',
+          touchPoints: [{ x: start.x + 80, y: start.y + 40 }],
+        });
+      }
+      await page.keyboard.press('Escape');
+      await client.send('Input.dispatchTouchEvent', {
+        type: 'touchEnd',
+        touchPoints: [],
+      });
+      await sameRects(page, ids, before);
+      await selection(page, [ids.first, ids.second]);
+      await expect(
+        page.getByRole('region', { name: 'Preview group' }),
+      ).toHaveCount(0);
+    }
+    await client.detach();
+  });
 });
 
 test('inferred Frame advances on every equally spaced pointer tick', async ({

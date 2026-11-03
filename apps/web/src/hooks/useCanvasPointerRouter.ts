@@ -78,8 +78,9 @@ export function useCanvasPointerRouter(
       // an already-selected node drags it instead of panning; everything
       // else falls through to viewport navigation / tap-select.
       createNodeDragRecognizer(),
+      ...extraRecognizers.filter(({ id }) => id === 'frame-selection-drag'),
       createViewportNavigationRecognizer(),
-      ...extraRecognizers,
+      ...extraRecognizers.filter(({ id }) => id !== 'frame-selection-drag'),
     ];
 
     const core = new PointerRouterCore<
@@ -114,7 +115,7 @@ export function useCanvasPointerRouter(
       event.stopImmediatePropagation();
     };
     let suppressOwnedClick = false;
-    let suppressOwnedTouch = false;
+    let ownedTouch: 'frame-selection-drag' | 'other' | null = null;
     let lastPointerType = '';
     const onDown = (event: PointerEvent) => {
       lastPointerType = event.pointerType;
@@ -129,7 +130,7 @@ export function useCanvasPointerRouter(
           owner === 'frame-selection-drag') &&
         event.pointerType === 'touch'
       )
-        suppressOwnedTouch = true;
+        ownedTouch = owner === 'frame-selection-drag' ? owner : 'other';
     };
     const onMove = (event: PointerEvent) => {
       if (shouldBlock(event)) return block(event);
@@ -157,6 +158,34 @@ export function useCanvasPointerRouter(
       }
     };
     const onClick = (event: MouseEvent) => {
+      if (
+        !event.defaultPrevented &&
+        event.detail > 0 &&
+        !suppressOwnedClick &&
+        lastPointerType === 'touch' &&
+        readEffectiveInputMode() === 'finger' &&
+        event.target instanceof Element &&
+        event.target.closest('.react-flow__nodesselection-rect')
+      ) {
+        // The retained selection overlay can replace the touch target before compatibility clicks arrive.
+        const target = document
+          .elementsFromPoint(event.clientX, event.clientY)
+          .find(
+            (element) =>
+              el.contains(element) &&
+              element.closest(
+                '.react-flow__node:not(.react-flow__node-sketch)',
+              ),
+          );
+        if (
+          target?.closest('.react-flow__node')?.classList.contains('selected')
+        ) {
+          event.preventDefault();
+          event.stopPropagation();
+          target.dispatchEvent(new MouseEvent(event.type, event));
+          return;
+        }
+      }
       const viewport =
         event.target instanceof Element
           ? event.target.closest<HTMLElement>('[data-note-content-viewport]')
@@ -178,10 +207,11 @@ export function useCanvasPointerRouter(
     // React Flow's d3 drag also listens to legacy Touch Events. Pointer
     // ownership alone cannot stop that independent stream from moving a node.
     const onTouch = (event: TouchEvent) => {
-      if (!suppressOwnedTouch) return;
-      event.preventDefault();
+      if (!ownedTouch) return;
+      // Stop XYFlow's touch drag without cancelling native taps; the Frame driver guards active/cancelled clicks.
+      if (ownedTouch !== 'frame-selection-drag') event.preventDefault();
       event.stopPropagation();
-      if (event.touches.length === 0) suppressOwnedTouch = false;
+      if (event.touches.length === 0) ownedTouch = null;
     };
 
     el.addEventListener('pointerdown', onDown, { capture: true });

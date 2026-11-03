@@ -88,6 +88,68 @@ beforeEach(() => {
 });
 
 describe('createNodeDragRecognizer', () => {
+  it.each(['mouse', 'pen'])(
+    'uses the actual %s target beneath transparent Sketch bounds to move a covered Frame',
+    (pointerType) => {
+      const frame: Node = {
+        id: 'frame',
+        type: 'frame',
+        position: { x: 100, y: 200 },
+        data: {},
+      };
+      const store = getState();
+      getState.mockReturnValue({
+        ...store,
+        nodes: [
+          frame,
+          { ...selectedNode, parentId: frame.id },
+          { ...selectedNode, id: 'other', parentId: frame.id },
+          { ...selectedSketch, selected: false },
+        ],
+      });
+      nodeIdAtScreenPoint.mockReturnValue(selectedSketch.id);
+      const target = document.createElement('div');
+      target.className = 'react-flow__node';
+      target.dataset.id = selectedNode.id;
+      const body = document.createElement('span');
+      target.append(body);
+      const event = { ...pointer(1, 100, 100, body), pointerType };
+      const recognizer = createNodeDragRecognizer({
+        acceptsPointer: () => true,
+      });
+      expect(recognizer.canClaim(event, context)).toBe(true);
+      recognizer.onDown(event, context);
+      recognizer.onMove?.({ ...event, clientX: 120 }, context);
+      expect(onNodeDragStart).toHaveBeenCalledWith(expect.anything(), frame, [
+        frame,
+      ]);
+      expect(nodeIdAtScreenPoint).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['mouse', 'pen'])(
+    'still directly drags a selected Sketch with %s',
+    (pointerType) => {
+      getState.mockReturnValue({ ...getState(), nodes: [selectedSketch] });
+      const target = document.createElement('div');
+      target.className = 'react-flow__node';
+      target.dataset.id = selectedSketch.id;
+      const event = { ...pointer(1, 100, 100, target), pointerType };
+      const recognizer = createNodeDragRecognizer({
+        acceptsPointer: () => true,
+      });
+      expect(recognizer.canClaim(event, context)).toBe(true);
+      recognizer.onDown(event, context);
+      recognizer.onMove?.({ ...event, clientX: 120 }, context);
+      expect(onNodeDragStart).toHaveBeenCalledWith(
+        expect.anything(),
+        selectedSketch,
+        [selectedSketch],
+      );
+      expect(nodeIdAtScreenPoint).not.toHaveBeenCalled();
+    },
+  );
+
   it('moves a fully covered Frame while taps still target the pressed child', () => {
     const frame: Node = {
       id: 'frame',

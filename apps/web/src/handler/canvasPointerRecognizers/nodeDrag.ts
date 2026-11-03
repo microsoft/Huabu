@@ -4,6 +4,7 @@
 import { getAncestorIds, indexById } from '@huabu/shared/canvas-engine';
 
 import {
+  closestNodeElement,
   isNodeControlTarget,
   isPanelTarget,
 } from '@/components/Panels/Canvas/canvasInputPolicy';
@@ -101,9 +102,15 @@ export function createNodeDragRecognizer(options?: {
         )
         .map((node) => node.id),
     );
-    const id = nodeIdAtScreenPoint(event.clientX, event.clientY, {
-      excludeNodeIds: sketchNodeIds,
-    });
+    const directTarget =
+      event.pointerType !== 'touch' && event.target instanceof Element
+        ? closestNodeElement(event.target)?.dataset.id
+        : undefined;
+    const id =
+      directTarget ??
+      nodeIdAtScreenPoint(event.clientX, event.clientY, {
+        excludeNodeIds: sketchNodeIds,
+      });
     if (
       event.target instanceof Element &&
       event.target.closest('.react-flow__nodesselection-rect')
