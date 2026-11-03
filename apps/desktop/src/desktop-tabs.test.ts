@@ -1766,6 +1766,40 @@ describe('desktop Space Tab lifecycle', () => {
     expect(mocks.views).toHaveLength(3);
   });
 
+  it('places the return Tab after surviving predecessors when multiple Tabs are deleted', async () => {
+    const sibling = open('sibling');
+    const child = open('child');
+    const childId = tabs.snapshot.activeId;
+    open('a');
+    open('b');
+    tabs.activate(childId);
+    const preparing = tabs.command(
+      {
+        type: 'begin-space-deletion',
+        canvasId: 'child',
+        canvasIds: ['sibling', 'child'],
+      },
+      child.webContents as never,
+    );
+    finish(sibling);
+    finish(child);
+    await preparing;
+    await tabs.command(
+      {
+        type: 'end-space-deletion',
+        deletedCanvasIds: ['sibling', 'child'],
+        returnTo: { sibling: 'parent', child: 'parent' },
+      },
+      child.webContents as never,
+    );
+    expect(tabs.snapshot.tabs.map((tab) => tab.canvasId)).toEqual([
+      null,
+      'parent',
+      'a',
+      'b',
+    ]);
+  });
+
   it('rejects a return destination that was deleted', async () => {
     const home = mocks.views[0].webContents;
     await tabs.command(

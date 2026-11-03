@@ -1066,9 +1066,41 @@ try {
   }, createdTab.canvasId);
   const deleteDialog = deletingPage.getByRole('dialog');
   await deleteDialog.waitFor({ state: 'visible' });
+  let releaseDelete;
+  const deletionGate = new Promise((resolve) => {
+    releaseDelete = resolve;
+  });
+  await deletingPage.route('**/delete-tree', async (route) => {
+    await deletionGate;
+    await route.continue();
+  });
   await deleteDialog
     .getByRole('button', { name: deletionLabels.confirm, exact: true })
     .click();
+  await waitFor(
+    async () =>
+      deletingPage.evaluate(() => {
+        const overlay = document.querySelector(
+          '[data-desktop-deletion-dialog]',
+        );
+        return (
+          !!overlay &&
+          document.querySelector('#root')?.inert &&
+          !document.body.inert &&
+          !overlay.closest('[inert]')
+        );
+      }),
+    'keeping the pending deletion dialog accessible while the page is frozen',
+  );
+  assert.equal(await deleteDialog.getByRole('status').count(), 1);
+  assert.match(await deleteDialog.ariaSnapshot(), /status/);
+  assert.equal(
+    await deletingPage
+      .locator('dialog[data-desktop-close-controls][open]')
+      .count(),
+    0,
+  );
+  releaseDelete();
   await waitFor(async () => {
     const state = await shell.evaluate(() =>
       window.electronBridge.tabs.getState(),

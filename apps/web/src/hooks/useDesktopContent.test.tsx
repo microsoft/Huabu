@@ -5,11 +5,13 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { putNodeContent } from '@/api/canvas';
 import {
   queryConversationTitles,
   setConversationTitle,
 } from '@/api/conversationTitles';
 import useCanvasStore from '@/store/canvasStore';
+import { createNodeContentQueue } from '@/store/canvasStore/save/nodeContentQueue';
 import {
   ConversationTitleSaveError,
   renameConversationTitle,
@@ -26,6 +28,7 @@ import { pageLifecycle } from '@/utils/pageLifecycle';
 import { useDesktopContent } from './useDesktopContent';
 import { getElectronBridge } from './useElectron';
 
+import type * as CanvasApi from '@/api/canvas';
 import type { toast } from '@/components/Common/Toast';
 import type {
   DesktopTabsApi,
@@ -64,6 +67,10 @@ vi.mock('@/api/conversationTitles', () => ({
   setConversationTitle: vi.fn(),
   queryConversationTitles: vi.fn(),
 }));
+vi.mock('@/api/canvas', async (importOriginal) => ({
+  ...(await importOriginal<typeof CanvasApi>()),
+  putNodeContent: vi.fn(),
+}));
 vi.mock('./useElectron', () => {
   const bridge = {
     platform: 'darwin',
@@ -88,7 +95,10 @@ vi.mock('./useElectron', () => {
     requireDesktopTabSuccess: vi.fn(),
   };
 });
-vi.mock('@/components/Common/Toast', () => ({ toast: mocks.toast }));
+vi.mock('@/components/Common/Toast', () => ({
+  toast: mocks.toast,
+  dismissToast: vi.fn(),
+}));
 vi.mock('@/store/canvasStore', () => ({
   default: {
     getState: () => mocks.canvas,
@@ -343,6 +353,47 @@ describe('desktop save presentation', () => {
     } finally {
       log.mockRestore();
     }
+  });
+
+  it('suppresses the real Note queue toast during deletion preparation only', async () => {
+    const node = {
+      id: 'note',
+      type: 'note',
+      position: { x: 0, y: 0 },
+      data: { content: 'Unsaved note' },
+    };
+    const queue = createNodeContentQueue({
+      delayMs: 500,
+      getState: () => ({
+        canvasId: 'space-a',
+        isLoading: false,
+        nodes: [node],
+        _setStateNoAutosave: vi.fn(),
+        patchNodeSilent: vi.fn(),
+      }),
+    });
+    vi.mocked(putNodeContent).mockRejectedValue(new Error('Note save offline'));
+    mocks.save.mockImplementation(async () => {
+      queue.scheduleChanges('space-a', [], [node]);
+      await queue.flushAll();
+      await queue.flushAllForSubmission('space-a');
+    });
+    await render();
+    await act(async () =>
+      mocks.prepare.mock.calls[0][0]({
+        requestId: 'delete-note',
+        reason: 'space-deletion',
+      }),
+    );
+    expect(mocks.finish).toHaveBeenCalledWith('delete-note', {
+      ok: false,
+      error: expect.stringContaining('Content saves failed'),
+    });
+    expect(queue.hasUnsavedContent('space-a')).toBe(true);
+    expect(mocks.toast).not.toHaveBeenCalled();
+    await resume();
+    await prepare();
+    expect(mocks.toast).toHaveBeenCalled();
   });
 
   it('shows the deletion error handed off to the destination once', async () => {

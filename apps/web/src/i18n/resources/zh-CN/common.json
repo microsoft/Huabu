@@ -763,6 +763,7 @@
     "deletionProgress_one": "已删除 {{count}} 个 Space，已删除的内容无法恢复。",
     "deletionProgress_other": "已删除 {{count}} 个 Space，已删除的内容无法恢复。",
     "deletionErrors": {
+      "deletedRefresh": "Space 已删除，但列表刷新失败。请刷新列表以查看当前状态。",
       "agentRunning": "此 Space 或子 Space 中仍有 Agent 正在处理任务。请先停止任务或等待完成，再重新检查。",
       "treeChanged": "Space 的层级已发生变化，请重新检查当前删除范围，再次确认。",
       "interrupted": "删除流程未能全部完成，请检查当前 Space 的状态。",

@@ -17,6 +17,7 @@ import {
 import { drainPendingSaves } from '@/store/canvasStore';
 import { deleteWorkspace } from '@/store/previewWorkspace/persistence';
 import { useWorkspaceStore } from '@/store/workspaceStore';
+import { withSaveErrorsHandledByCaller } from '@/utils/saveErrorFeedback';
 import { spaceAncestorIds } from '@/utils/spaceHierarchy';
 
 import type {
@@ -69,6 +70,7 @@ export function SpaceDeletionDialog({
     ids: string[],
     failure?: string,
     returnTo?: Record<string, string | null>,
+    completed?: boolean,
   ) => void;
 }) {
   const { t } = useTranslation();
@@ -127,6 +129,7 @@ export function SpaceDeletionDialog({
     let deletionPrepared = false;
     let deletedCanvasIds: string[] = [];
     let failure: string | undefined;
+    let refreshFailure: string | undefined;
     let details: string | undefined;
     let deletionRequested = false;
     const reportFailure = (cause: unknown, fallback: string) => {
@@ -143,6 +146,16 @@ export function SpaceDeletionDialog({
             ? `${details}\n${nextDetails}`
             : nextDetails;
     };
+    const reportRefreshFailure = (cause: unknown) => {
+      console.error(
+        '[space-deletion] Could not refresh Space metadata:',
+        cause,
+      );
+      if (!failure && deletedCanvasIds.includes(canvasId))
+        refreshFailure = t('spaceHierarchy.deletionErrors.deletedRefresh');
+      else if (!failure)
+        reportFailure(cause, t('spaceHierarchy.deletionErrors.refresh'));
+    };
     const parents = Object.fromEntries(
       preview.spaces.map((item) => [item.canvasId, item]),
     );
@@ -156,7 +169,7 @@ export function SpaceDeletionDialog({
         ]),
       );
     try {
-      await drainPendingSaves();
+      await withSaveErrorsHandledByCaller(() => drainPendingSaves());
       if (useWorkspaceStore.getState().workspaceId !== workspaceId)
         throw new Error(t('spaceHierarchy.workspaceChanged'));
       if (tabs) {
@@ -204,12 +217,11 @@ export function SpaceDeletionDialog({
             current.workspaceId === workspaceId &&
             current.spaceTitlesStatus === 'error'
           )
-            reportFailure(
+            reportRefreshFailure(
               new Error(current.spaceTitlesError || t('spaceHierarchy.failed')),
-              t('spaceHierarchy.deletionErrors.refresh'),
             );
         } catch (cause) {
-          reportFailure(cause, t('spaceHierarchy.deletionErrors.refresh'));
+          reportRefreshFailure(cause);
         }
       }
       if (tabs && deletionPrepared) {
@@ -219,7 +231,9 @@ export function SpaceDeletionDialog({
               type: 'end-space-deletion',
               deletedCanvasIds,
               returnTo: returnTargets(),
-              ...(failure ? { failure } : {}),
+              ...(failure || refreshFailure
+                ? { failure: failure || refreshFailure }
+                : {}),
             }),
           );
         } catch (cause) {
@@ -234,14 +248,18 @@ export function SpaceDeletionDialog({
           setError(failure);
           setErrorDetails(details ?? null);
         }
-        if (deletedCanvasIds.length > 0)
-          onDeleted(deletedCanvasIds, failure, returnTargets());
+        if (deletedCanvasIds.length > 0) {
+          if (refreshFailure && !failure)
+            onDeleted(deletedCanvasIds, refreshFailure, returnTargets(), true);
+          else onDeleted(deletedCanvasIds, failure, returnTargets());
+        }
       }
     }
   };
   return (
     <Modal
       isOpen
+      desktopDeletionDialog
       title={
         root
           ? t(

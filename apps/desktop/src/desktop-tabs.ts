@@ -1230,7 +1230,9 @@ export class DesktopTabs {
           if (!parent) {
             parent = this.newTab(target);
             remaining.splice(
-              Math.min(this.tabs.indexOf(active), remaining.length),
+              this.tabs
+                .slice(0, this.tabs.indexOf(active))
+                .filter((tab) => !removed.includes(tab)).length,
               0,
               parent,
             );

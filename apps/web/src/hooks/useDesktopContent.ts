@@ -26,6 +26,7 @@ import {
   subscribeApplicationPreferences,
 } from '@/utils/desktopStorage';
 import { pageLifecycle } from '@/utils/pageLifecycle';
+import { withSaveErrorsHandledByCaller } from '@/utils/saveErrorFeedback';
 
 import { getElectronBridge, requireDesktopTabSuccess } from './useElectron';
 
@@ -170,11 +171,16 @@ export function useDesktopContent(): {
         controller: new AbortController(),
       };
       closeRequest.current = request;
-      setDesktopInputFrozen(true);
+      setDesktopInputFrozen(true, deleting ? 'space-deletion' : undefined);
       setPreparingClose(true);
       if (document.activeElement instanceof HTMLElement)
         document.activeElement.blur();
       request.overlayTimer = window.setTimeout(() => {
+        if (
+          deleting &&
+          document.querySelector('[data-desktop-deletion-dialog]')
+        )
+          return;
         if (closeRequest.current === request) setSaving(true);
       }, 150);
       const heartbeat = window.setInterval(() => {
@@ -183,11 +189,15 @@ export function useDesktopContent(): {
       }, 5_000);
       void (async () => {
         try {
-          if (deleting && deletionSaveFailure) {
-            await deletionSaveFailure.retry();
-            deletionSaveFailure = undefined;
-          }
-          await pageLifecycle.prepare(request.controller.signal);
+          const save = async () => {
+            if (deleting && deletionSaveFailure) {
+              await deletionSaveFailure.retry();
+              deletionSaveFailure = undefined;
+            }
+            await pageLifecycle.prepare(request.controller.signal);
+          };
+          if (deleting) await withSaveErrorsHandledByCaller(save);
+          else await save();
           if (closeRequest.current === request) {
             tabs.finishPrepareClose(requestId, { ok: true });
           }

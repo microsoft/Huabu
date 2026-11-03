@@ -20,6 +20,7 @@ import {
   putNodeContent,
 } from '@/api/canvas';
 import { dismissToast, toast } from '@/components/Common/Toast';
+import { withSaveErrorsHandledByCaller } from '@/utils/saveErrorFeedback';
 
 import { createNodeContentQueue } from '../nodeContentQueue';
 
@@ -69,6 +70,30 @@ beforeEach(() => {
 });
 
 describe('nodeContentQueue — save-failure surfacing', () => {
+  it('returns preparation save failures to the caller without losing edits or suppressing future autosave errors', async () => {
+    const node = noteNode('unsaved content');
+    const { queue, state } = makeQueue(node);
+    putMock.mockRejectedValue(new Error('offline'));
+    await expect(
+      withSaveErrorsHandledByCaller(async () => {
+        queue.scheduleChanges('c1', [], [node]);
+        await queue.flushAll();
+        await queue.flushAllForSubmission('c1');
+      }),
+    ).rejects.toThrow('Content saves failed');
+    expect(toastMock).not.toHaveBeenCalled();
+    expect(state.nodes[0].data.content).toBe('unsaved content');
+    expect(queue.hasUnsavedContent('c1')).toBe(true);
+    queue.retryFailedSaves('c1');
+    await expect(queue.flushAllForSubmission('c1')).rejects.toThrow(
+      'Content saves failed',
+    );
+    expect(toastMock).toHaveBeenCalledOnce();
+    putMock.mockResolvedValue({ nodeId: node.id, label: 'Note', rev: 'saved' });
+    queue.retryFailedSaves('c1');
+    await queue.flushAllForSubmission('c1');
+    expect(queue.hasUnsavedContent('c1')).toBe(false);
+  });
   it('keeps failure records while suspended and permits retry after resuming', async () => {
     const node = noteNode('v1');
     const { queue } = makeQueue(node);

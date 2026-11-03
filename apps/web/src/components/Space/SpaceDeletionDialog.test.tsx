@@ -6,13 +6,17 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import { ApiError } from '@/api/_client';
+import { putNodeContent } from '@/api/canvas';
 import { deleteSpaceTree, getSpaceDeletionPreview } from '@/api/spaceHierarchy';
 import { toast } from '@/components/Common/Toast';
+import { drainPendingSaves } from '@/store/canvasStore';
+import { createNodeContentQueue } from '@/store/canvasStore/save/nodeContentQueue';
 import { deleteWorkspace } from '@/store/previewWorkspace/persistence';
 import { useWorkspaceStore } from '@/store/workspaceStore';
 
 import { SpaceDeletionDialog } from './SpaceDeletionDialog';
 
+import type * as CanvasApi from '@/api/canvas';
 import type * as Electron from '@/hooks/useElectron';
 
 const desktop = vi.hoisted(() => ({ enabled: false, command: vi.fn() }));
@@ -25,13 +29,20 @@ vi.mock('@/api/spaceHierarchy', () => ({
   deleteSpaceTree: vi.fn(),
   getSpaceDeletionPreview: vi.fn(),
 }));
+vi.mock('@/api/canvas', async (importOriginal) => ({
+  ...(await importOriginal<typeof CanvasApi>()),
+  putNodeContent: vi.fn(),
+}));
 vi.mock('@/store/canvasStore', () => ({
   drainPendingSaves: vi.fn(async () => undefined),
 }));
 vi.mock('@/store/previewWorkspace/persistence', () => ({
   deleteWorkspace: vi.fn(),
 }));
-vi.mock('@/components/Common/Toast', () => ({ toast: vi.fn() }));
+vi.mock('@/components/Common/Toast', () => ({
+  toast: vi.fn(),
+  dismissToast: vi.fn(),
+}));
 vi.mock('@/components/Common/Loading', () => ({ Loading: () => null }));
 vi.mock('react-i18next', () => ({
   initReactI18next: { type: '3rdParty', init: vi.fn() },
@@ -309,8 +320,15 @@ it('still closes deleted Tabs when refreshing Space titles fails', async () => {
     type: 'end-space-deletion',
     deletedCanvasIds: ['parent', 'child'],
     returnTo: { child: 'grandparent', parent: 'grandparent' },
-    failure: 'spaceHierarchy.deletionErrors.refresh',
+    failure: 'spaceHierarchy.deletionErrors.deletedRefresh',
   });
+  expect(onDeleted).toHaveBeenCalledExactlyOnceWith(
+    ['parent', 'child'],
+    'spaceHierarchy.deletionErrors.deletedRefresh',
+    { child: 'grandparent', parent: 'grandparent' },
+    true,
+  );
+  expect(document.querySelector('[role="alert"]')).toBeNull();
   expect(toast).not.toHaveBeenCalled();
 });
 
@@ -320,6 +338,7 @@ it('keeps preparation failures in the existing dialog without a toast', async ()
     ok: false,
     error: 'Could not save child',
   });
+  refresh.mockRejectedValueOnce(new Error('Refresh also failed'));
   await remove();
   expect(document.querySelector('[role="alert"]')?.textContent).toContain(
     'spaceHierarchy.deletionErrors.prepare',
@@ -327,7 +346,44 @@ it('keeps preparation failures in the existing dialog without a toast', async ()
   expect(document.querySelector('details')?.textContent).toContain(
     'Could not save child',
   );
+  expect(document.querySelector('details')?.textContent).not.toContain(
+    'Refresh also failed',
+  );
   expect(deleteSpaceTree).not.toHaveBeenCalled();
+  expect(toast).not.toHaveBeenCalled();
+});
+
+it('owns Note save failures from the initial local drain before desktop preparation', async () => {
+  desktop.enabled = true;
+  const node = {
+    id: 'note',
+    type: 'note',
+    position: { x: 0, y: 0 },
+    data: { content: 'Unsaved note' },
+  };
+  const queue = createNodeContentQueue({
+    delayMs: 500,
+    getState: () => ({
+      canvasId: 'parent',
+      isLoading: false,
+      nodes: [node],
+      _setStateNoAutosave: vi.fn(),
+      patchNodeSilent: vi.fn(),
+    }),
+  });
+  vi.mocked(putNodeContent).mockRejectedValue(new Error('Note save offline'));
+  vi.mocked(drainPendingSaves).mockImplementationOnce(async () => {
+    queue.scheduleChanges('parent', [], [node]);
+    await queue.flushAll();
+    await queue.flushAllForSubmission('parent');
+  });
+  await remove();
+  expect(document.querySelector('[role="alert"]')?.textContent).toContain(
+    'spaceHierarchy.deletionErrors.prepare',
+  );
+  expect(deleteSpaceTree).not.toHaveBeenCalled();
+  expect(desktop.command).not.toHaveBeenCalled();
+  expect(queue.hasUnsavedContent('parent')).toBe(true);
   expect(toast).not.toHaveBeenCalled();
 });
 

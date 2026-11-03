@@ -100,9 +100,11 @@ export function SpaceActions() {
           key={deleting}
           canvasId={deleting}
           onClose={() => setDeleting(null)}
-          onDeleted={(ids, failure, returnTo) => {
-            if (!failure) setDeleting(null);
+          onDeleted={(ids, failure, returnTo, completed) => {
+            if (!failure || completed) setDeleting(null);
             const currentId = useCanvasStore.getState().canvasId;
+            if (completed && failure && !ids.includes(currentId))
+              toast(failure, { tone: 'danger' });
             if (!getElectronBridge()?.tabs && ids.includes(currentId)) {
               setDeleting(null);
               navigate(

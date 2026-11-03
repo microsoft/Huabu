@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
         ids: string[],
         failure?: string,
         returnTo?: Record<string, string | null>,
+        completed?: boolean,
       ) => void;
     }) => null
   >(() => null),
@@ -82,10 +83,11 @@ function complete(
   ids: string[],
   returnTo: Record<string, string | null>,
   failure?: string,
+  completed?: boolean,
 ) {
   const props = mocks.dialog.mock.lastCall?.[0];
   if (!props) throw new Error('Missing deletion dialog');
-  act(() => props.onDeleted(ids, failure, returnTo));
+  act(() => props.onDeleted(ids, failure, returnTo, completed));
 }
 
 it('replaces a deleted browser page with its surviving parent', () => {
@@ -134,3 +136,16 @@ it('does not duplicate the desktop destination notification', () => {
   complete(['child'], { child: 'parent' }, 'Partial deletion');
   expect(mocks.toast).not.toHaveBeenCalled();
 });
+
+it.each([false, true])(
+  'reports refresh failure after successful deletion of another Space (desktop=%s)',
+  (desktop) => {
+    mocks.desktop = desktop;
+    complete(['other'], { other: 'parent' }, 'Deleted, refresh failed', true);
+    expect(mocks.toast).toHaveBeenCalledExactlyOnceWith(
+      'Deleted, refresh failed',
+      { tone: 'danger' },
+    );
+    expect(mocks.navigate).not.toHaveBeenCalled();
+  },
+);

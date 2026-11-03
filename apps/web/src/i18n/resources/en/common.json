@@ -763,6 +763,7 @@
     "deletionProgress_one": "{{count}} Space has already been deleted and cannot be restored.",
     "deletionProgress_other": "{{count}} Spaces have already been deleted and cannot be restored.",
     "deletionErrors": {
+      "deletedRefresh": "The Space was deleted, but the Space list could not be refreshed. Refresh the list to check its current state.",
       "agentRunning": "An Agent in this Space or a nested Space is still busy. Stop it or wait for it to finish, then review again.",
       "treeChanged": "The Space hierarchy changed. Review the current deletion scope before confirming again.",
       "interrupted": "Deletion did not finish cleanly. Check the current Space list before continuing.",

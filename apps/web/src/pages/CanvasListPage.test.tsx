@@ -894,6 +894,75 @@ describe('CanvasListPage navigation', () => {
     expect(toast).not.toHaveBeenCalled();
   });
 
+  it.each([false, true])(
+    'owns refresh feedback through desktop busy transitions (deletion succeeds=%s)',
+    async (succeeds) => {
+      environment.desktopHome = true;
+      await renderPage();
+      await requestDeletion();
+      const update = environment.onState.mock.calls.at(-1)?.[0];
+      if (!update) throw new Error('Missing Home state listener');
+      environment.command.mockImplementation(
+        async (command: DesktopTabCommand) => {
+          if (
+            typeof command === 'object' &&
+            (command.type === 'begin-space-deletion' ||
+              command.type === 'end-space-deletion')
+          ) {
+            update({
+              activeId: 'home',
+              workspaceId: 'workspace-1',
+              busy: command.type === 'begin-space-deletion',
+              canChangeWorkspace: true,
+              tabs: [],
+            });
+          }
+          return { ok: true };
+        },
+      );
+      vi.mocked(listCanvases).mockRejectedValueOnce(new Error('List offline'));
+      if (succeeds)
+        vi.mocked(listCanvases).mockRejectedValueOnce(
+          new Error('List offline'),
+        );
+      if (!succeeds)
+        vi.mocked(deleteSpaceTree).mockRejectedValueOnce(
+          new Error('Delete offline'),
+        );
+      await confirmDeletion();
+      expect(listCanvases).toHaveBeenCalled();
+      if (succeeds) {
+        expect(container.querySelector('[role="dialog"]')).toBeNull();
+        expect(toast).toHaveBeenCalledExactlyOnceWith(
+          'spaceHierarchy.deletionErrors.deletedRefresh',
+          { tone: 'danger' },
+        );
+        expect(container.querySelector('a[href="/canvas/space-1"]')).toBeNull();
+      } else {
+        expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+        expect(toast).not.toHaveBeenCalled();
+        expect(
+          container.querySelector('a[href="/canvas/space-1"]'),
+        ).not.toBeNull();
+      }
+    },
+  );
+
+  it('closes successful deletion and shows one notification when metadata refresh fails', async () => {
+    await renderPage();
+    await requestDeletion();
+    environment.refreshTitles.mockRejectedValueOnce(
+      new Error('Metadata offline'),
+    );
+    await confirmDeletion();
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    expect(container.querySelector('a[href="/canvas/space-1"]')).toBeNull();
+    expect(toast).toHaveBeenCalledExactlyOnceWith(
+      'spaceHierarchy.deletionErrors.deletedRefresh',
+      { tone: 'danger' },
+    );
+  });
+
   it('does not resurrect a deleted Space from an older background refresh', async () => {
     await renderPage();
     let resolveOld!: (value: Awaited<ReturnType<typeof listCanvases>>) => void;

@@ -34,6 +34,7 @@ import {
 import { dismissToast, toast } from '@/components/Common/Toast';
 import { i18n } from '@/i18n';
 import { copyToClipboard } from '@/utils/io/clipboard';
+import { saveErrorsHandledByCaller } from '@/utils/saveErrorFeedback';
 
 import {
   MD_BACKED_NODE_TYPES,
@@ -855,6 +856,7 @@ export function createNodeContentQueue(opts: {
     message: string,
     source: 'user' | 'auto',
   ): void {
+    if (saveErrorsHandledByCaller()) return;
     if (source === 'auto' && saveErrorToasted.has(nodeId)) return;
     saveErrorToasted.add(nodeId);
     const generation = generations.get(nodeId);

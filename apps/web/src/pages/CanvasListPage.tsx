@@ -73,6 +73,7 @@ export default function CanvasListPage() {
     canvasId: string;
     title: string | null;
   } | null>(null);
+  const deletionOpen = useRef(false);
   const [showAll, setShowAll] = useState(
     () => localStorage.getItem('huabu.spaces.showAll') === 'true',
   );
@@ -111,7 +112,7 @@ export default function CanvasListPage() {
   const isDesktopHome = getElectronBridge()?.tabs?.context.role === 'home';
 
   const fetchCanvases = useCallback(
-    async (showLoading = true) => {
+    async (showLoading = true, failureMessage?: string) => {
       const workspace = useWorkspaceStore.getState();
       if (workspace.isSyncing) return;
       const requestId = ++listRequestRef.current.version;
@@ -134,12 +135,14 @@ export default function CanvasListPage() {
       } catch (error) {
         if (isCurrent()) {
           console.error('Failed to list canvases:', error);
-          toast(
-            error instanceof Error
-              ? error.message
-              : translations.t('spaceHierarchy.failed'),
-            { tone: 'danger' },
-          );
+          if (!deletionOpen.current)
+            toast(
+              failureMessage ??
+                (error instanceof Error
+                  ? error.message
+                  : translations.t('spaceHierarchy.failed')),
+              { tone: 'danger' },
+            );
         }
       } finally {
         if (isCurrent()) setIsLoading(false);
@@ -266,6 +269,7 @@ export default function CanvasListPage() {
   };
 
   const requestDelete = (canvasId: string, title: string | null) => {
+    deletionOpen.current = true;
     setPendingDelete({ canvasId, title });
   };
 
@@ -346,10 +350,11 @@ export default function CanvasListPage() {
         <SpaceDeletionDialog
           canvasId={pendingDelete.canvasId}
           onClose={() => {
+            deletionOpen.current = false;
             setPendingDelete(null);
             void fetchCanvases();
           }}
-          onDeleted={(ids, failure) => {
+          onDeleted={(ids, failure, _returnTo, completed) => {
             listRequestRef.current.version++;
             setCanvases((current) => {
               const remaining = current.filter(
@@ -358,9 +363,17 @@ export default function CanvasListPage() {
               setCanvasCount(remaining.length);
               return remaining;
             });
-            if (!failure) {
+            if (!failure || completed) {
+              deletionOpen.current = false;
               setPendingDelete(null);
-              void fetchCanvases(false);
+              if (failure) toast(failure, { tone: 'danger' });
+              else
+                void fetchCanvases(
+                  false,
+                  translations.t(
+                    'spaceHierarchy.deletionErrors.deletedRefresh',
+                  ),
+                );
             }
           }}
         />
