@@ -69,6 +69,17 @@ it('applies public-network checks to member calls without a preprocessing scope'
   ).rejects.toThrow();
 });
 
+it('keeps the built-in Response and FormData for member multipart uploads', async () => {
+  // The OpenAI SDK's file-upload probe: an image edit is refused when the
+  // fetch's Response serializes FormData as "[object FormData]".
+  const response = await asMember(() => outboundFetch('data:,'));
+  expect(response).toBeInstanceOf(Response);
+  const ResponseOf = response.constructor as typeof Response;
+  expect(await new ResponseOf(new FormData()).text()).not.toBe(
+    '[object FormData]',
+  );
+});
+
 it('blocks member image inlining before connecting to the Server network', async () => {
   const url = `http://127.0.0.1:${port}/image.png`;
   expect(await resolveImageUrl(url, null)).toMatchObject({ kind: 'inline' });

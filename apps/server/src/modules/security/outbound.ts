@@ -5,7 +5,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { lookup as dnsLookup } from 'node:dns';
 import { BlockList, isIP } from 'node:net';
 
-import { Agent, buildConnector, fetch as undiciFetch } from 'undici';
+import { Agent, buildConnector } from 'undici';
 
 import { personalSettingsOwner } from '../identity/personal-settings.js';
 
@@ -105,11 +105,16 @@ export function isPublicNetworkOnly(): boolean {
   return scope.getStore() === true || personalSettingsOwner() !== null;
 }
 
-/** `fetch`, restricted for members and inside {@link withPublicNetworkOnly}. */
+/**
+ * `fetch`, restricted for members and inside {@link withPublicNetworkOnly}.
+ * The built-in `fetch` takes the guarded dispatcher, so callers keep its
+ * `Response` and `FormData`: SDKs that probe for multipart support (image
+ * edits) reject npm undici's, which cannot serialize Node's `FormData`.
+ */
 export const outboundFetch: typeof fetch = (input, init) =>
   isPublicNetworkOnly()
-    ? (undiciFetch(input as never, {
-        ...(init as object),
+    ? fetch(input, {
+        ...init,
         dispatcher: publicOnlyAgent,
-      }) as unknown as Promise<Response>)
+      } as RequestInit)
     : fetch(input, init);
